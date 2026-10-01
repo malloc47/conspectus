@@ -7,9 +7,11 @@ use std::time::SystemTime;
 
 use anyhow::{Context, Result, bail};
 
-use crate::discovery::memo::{StampedMap, modified};
+use crate::discovery::memo::modified;
 use crate::discovery::worktree::{WorktreeBackend, WorktreeRecord};
-use crate::discovery::{DiscoveryContext, DiscoveryProvider, GraphFragment, merge_fragments};
+use crate::discovery::{
+    DiscoveryCaches, DiscoveryContext, DiscoveryProvider, GraphFragment, merge_fragments,
+};
 use crate::model::{
     BranchId, BranchNode, CheckoutId, CheckoutNode, Confidence, Freshness, GraphLink, GraphNode,
     LinkEndpoint, LinkState, NodeId, Provenance, RelationKind, RepoId, RepoNode, SourceMetadata,
@@ -35,7 +37,7 @@ impl GitProbe {
     }
 
     pub fn probe(&self, root: impl AsRef<Path>) -> Result<Option<GitProbeResult>> {
-        let root = root.as_ref().to_path_buf();
+        let root = root.as_ref();
 
         // A probe root that is not a directory can never be a git work
         // tree, and spawning `git` with a non-directory `current_dir`
@@ -53,21 +55,39 @@ impl GitProbe {
         if !root.is_dir() {
             return Ok(None);
         }
+        self.probe_uncached(root)
+    }
 
-        // H-SERVE-PERF-004: consult the process-wide probe cache
-        // before spawning any git subprocesses. Each probe otherwise
-        // fires 8-15 `git rev-parse`/`symbolic-ref`/`remote`/
-        // `for-each-ref` invocations, and `observed_cwd_git_fragment`
-        // calls this once per unique session cwd on every discovery
-        // cycle. On operator boxes with a dozen active sessions
-        // that's the dominant serve idle cost (~150 git spawns per
-        // cycle, ~1MB of libc/pcre/git-shared-lib reads per spawn).
-        if let Some(cached) = probe_cache_lookup(&root) {
+    /// [`Self::probe`], reusing the result cached for `root` while the
+    /// repo's git state is unchanged.
+    ///
+    /// Each probe otherwise fires 8-15 `git rev-parse`/`symbolic-ref`/
+    /// `remote`/`for-each-ref` invocations, and
+    /// `observed_cwd_git_fragment` probes once per unique session cwd
+    /// on every discovery cycle. On operator boxes with a dozen
+    /// active sessions that was the dominant serve idle cost (~150
+    /// git spawns per cycle).
+    pub(crate) fn probe_cached(
+        &self,
+        root: impl AsRef<Path>,
+        caches: &DiscoveryCaches,
+    ) -> Result<Option<GitProbeResult>> {
+        let root = root.as_ref();
+        if !root.is_dir() {
+            return Ok(None);
+        }
+        let cache = &caches.git_probes;
+        if let Some(cached) = cache.get_if(root, |fingerprint, probe| {
+            *fingerprint == fingerprint_for(probe, root)
+        }) {
             return Ok(cached.into_result());
         }
 
-        let result = self.probe_uncached(&root)?;
-        probe_cache_store(&root, result.as_ref());
+        let result = self.probe_uncached(root)?;
+        let probe = result
+            .clone()
+            .map_or(CachedProbe::NotARepo, CachedProbe::Repo);
+        cache.insert(root.to_path_buf(), fingerprint_for(&probe, root), probe);
         Ok(result)
     }
 
@@ -163,8 +183,6 @@ impl GitProbe {
     }
 
     fn optional(&self, root: &Path, args: &[&str]) -> Result<Option<String>> {
-        #[cfg(test)]
-        GIT_SPAWN_COUNT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         let output = Command::new(&self.git_bin)
             .args(args)
             .current_dir(root)
@@ -226,7 +244,7 @@ impl DiscoveryProvider for GitDiscovery {
         let mut enumerated_repos: BTreeSet<PathBuf> = BTreeSet::new();
 
         for root in context.roots() {
-            if let Some(probe) = self.probe.probe(root)? {
+            if let Some(probe) = self.probe.probe_cached(root, context.caches())? {
                 if let Some(backend) = &self.worktree_backend
                     && enumerated_repos.insert(probe.common_dir.clone())
                 {
@@ -469,7 +487,7 @@ fn is_expected_absence(args: &[&str], code: Option<i32>) -> bool {
 }
 
 // ---------------------------------------------------------------------------
-// H-SERVE-PERF-004: cross-cycle cache for [`GitProbe::probe`].
+// H-SERVE-PERF-004: cross-cycle cache for [`GitProbe::probe_cached`].
 // ---------------------------------------------------------------------------
 //
 // `observed_cwd_git_fragment` (in `discovery/mod.rs`) probes one cwd per
@@ -482,7 +500,7 @@ fn is_expected_absence(args: &[&str], code: Option<i32>) -> bool {
 // tmpfs reads, ~10k syscr/s on the harness thread).
 //
 // The probe result is a pure function of the underlying repo state, so a
-// process-wide cache keyed on the mtimes of the .git files that back the
+// cache keyed on the mtimes of the .git files that back the
 // probe outputs kills the repeat spawns entirely. Cache entries are
 // invalidated when any of those files advance:
 //
@@ -491,15 +509,13 @@ fn is_expected_absence(args: &[&str], code: Option<i32>) -> bool {
 //   * `.git/refs/heads/`        — local branch create/delete (dir mtime)
 //   * `.git/packed-refs`        — post `git gc` / `git pack-refs`
 //
-// Fingerprint entries are `Option<i128>` because worktrees, sparse checkouts,
+// Fingerprint entries are `Option<SystemTime>` because worktrees, sparse checkouts,
 // and freshly-init'd repos may not have every file present.
 
-/// Probe results per checkout root, valid while the git state
-/// fingerprint for that root is unchanged.
-static PROBE_CACHE: StampedMap<GitStateFingerprint, CachedProbe> = StampedMap::new();
-
+/// A cached probe outcome: the probe result, or the knowledge that
+/// the root wasn't a git work tree.
 #[derive(Clone)]
-enum CachedProbe {
+pub(crate) enum CachedProbe {
     Repo(GitProbeResult),
     NotARepo,
 }
@@ -513,8 +529,9 @@ impl CachedProbe {
     }
 }
 
+/// Modification times of the files a probe result depends on.
 #[derive(Clone, Debug, Eq, PartialEq)]
-struct GitStateFingerprint {
+pub(crate) struct GitStateFingerprint {
     head: Option<SystemTime>,
     config: Option<SystemTime>,
     refs_heads: Option<SystemTime>,
@@ -544,46 +561,6 @@ fn fingerprint_for(probe: &CachedProbe, root: &Path) -> GitStateFingerprint {
         },
     }
 }
-
-fn probe_cache_lookup(root: &Path) -> Option<CachedProbe> {
-    PROBE_CACHE.get_if(root, |fingerprint, probe| {
-        *fingerprint == fingerprint_for(probe, root)
-    })
-}
-
-fn probe_cache_store(root: &Path, result: Option<&GitProbeResult>) {
-    let probe = result.map_or(CachedProbe::NotARepo, |result| {
-        CachedProbe::Repo(result.clone())
-    });
-    PROBE_CACHE.insert(root.to_path_buf(), fingerprint_for(&probe, root), probe);
-}
-
-/// Clear the process-wide [`PROBE_CACHE`]. Tests that assert
-/// against the cache short-circuit call this in setup so a prior
-/// test's entries don't leak into their assertions.
-#[cfg(test)]
-pub(crate) fn reset_probe_cache_for_tests() {
-    PROBE_CACHE.clear();
-}
-
-/// Count of `git` subprocess invocations issued via
-/// [`GitProbe::optional`]. Tests use
-/// [`take_git_spawn_count_for_tests`] to assert the cache
-/// short-circuit fires — a second `probe()` on an unchanged repo
-/// should record zero further spawns.
-#[cfg(test)]
-static GIT_SPAWN_COUNT: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
-
-#[cfg(test)]
-pub(crate) fn take_git_spawn_count_for_tests() -> usize {
-    GIT_SPAWN_COUNT.swap(0, std::sync::atomic::Ordering::Relaxed)
-}
-
-/// Serial gate for cache-observing tests — the module-level
-/// [`PROBE_CACHE`] and [`GIT_SPAWN_COUNT`] are process-global so
-/// parallel test runs would cross-talk without a serial lock.
-#[cfg(test)]
-pub(crate) static PROBE_TEST_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
 #[cfg(test)]
 #[path = "git_tests.rs"]

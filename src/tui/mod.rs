@@ -143,6 +143,9 @@ pub struct RunConfig {
     /// cache." The writer still runs unless `no_cache` is also set
     /// so the next invocation can warm-start off this run.
     pub refresh: bool,
+    /// Discovery results reused across this session's refreshes
+    /// (ADR 0098). Clones share the same caches.
+    pub discovery_caches: std::sync::Arc<crate::discovery::DiscoveryCaches>,
 }
 
 impl RunConfig {
@@ -172,6 +175,7 @@ impl RunConfig {
             intervals: crate::config::ServerIntervals::default(),
             no_cache: false,
             refresh: false,
+            discovery_caches: std::sync::Arc::default(),
         }
     }
 }

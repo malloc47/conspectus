@@ -396,6 +396,7 @@ impl TuiArgs {
             intervals: outcome.config.server.intervals,
             no_cache: self.no_cache,
             refresh: self.refresh,
+            discovery_caches: std::sync::Arc::default(),
         };
 
         #[cfg(feature = "snapshot")]

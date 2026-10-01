@@ -113,8 +113,6 @@ impl ForgeAdapter for StaticAdapter {
 
 #[test]
 fn forge_discovery_without_adapters_returns_empty_fragment() {
-    let _serial = FORGE_CACHE_TEST_LOCK.lock().unwrap();
-    reset_forge_cache_for_tests();
     let fragment = ForgeDiscovery::new()
         .discover(&DiscoveryContext::default())
         .expect("discovery succeeds");
@@ -125,12 +123,6 @@ fn forge_discovery_without_adapters_returns_empty_fragment() {
 #[test]
 fn forge_discovery_merges_adapter_fragments_deterministically() {
     use crate::model::{ForgePrId, ForgePrNode, GraphNode};
-
-    // H-SERVE-PERF-005: hold the serial test lock + reset cache
-    // so a parallel-test entry keyed on the same (empty) roots
-    // can't short-circuit this one to a cached fragment.
-    let _serial = FORGE_CACHE_TEST_LOCK.lock().unwrap();
-    reset_forge_cache_for_tests();
 
     let pr_alpha = GraphNode::ForgePr(ForgePrNode {
         id: ForgePrId::new("github", "github.com", "octo", "repo", 1),
@@ -241,8 +233,6 @@ fn forge_discovery_accepts_two_adapters_via_boxed_registration() {
     // of `Box<dyn ForgeAdapter>`s (which is how
     // `LocalDiscoveryConfig::forge_adapters` flows through
     // to the coordinator).
-    let _serial = FORGE_CACHE_TEST_LOCK.lock().unwrap();
-    reset_forge_cache_for_tests();
     let github: Box<dyn ForgeAdapter> = Box::new(HostedStaticAdapter {
         provider: "github-fake",
         host_match: "github.example",
@@ -289,25 +279,21 @@ impl ForgeAdapter for CountingAdapter {
 
 #[test]
 fn forge_ttl_cache_serves_second_call_without_re_dispatching_adapters() {
-    let _serial = FORGE_CACHE_TEST_LOCK.lock().unwrap();
-    reset_forge_cache_for_tests();
     let calls = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
     let coordinator = ForgeDiscovery::new().with_boxed_adapter(Box::new(CountingAdapter {
         calls: std::sync::Arc::clone(&calls),
     }));
 
+    let context = DiscoveryContext::default();
+
     // First call: cache miss, adapter runs.
-    let first = coordinator
-        .discover(&DiscoveryContext::default())
-        .expect("first");
+    let first = coordinator.discover(&context).expect("first");
     assert!(first.nodes.is_empty());
     assert_eq!(calls.load(std::sync::atomic::Ordering::Relaxed), 1);
 
     // Second call, same (empty) roots, well within TTL — must
     // serve from cache without dispatching the adapter.
-    let second = coordinator
-        .discover(&DiscoveryContext::default())
-        .expect("second");
+    let second = coordinator.discover(&context).expect("second");
     assert!(second.nodes.is_empty());
     assert_eq!(
         calls.load(std::sync::atomic::Ordering::Relaxed),
@@ -318,15 +304,14 @@ fn forge_ttl_cache_serves_second_call_without_re_dispatching_adapters() {
 
 #[test]
 fn forge_ttl_cache_invalidates_when_context_roots_change() {
-    let _serial = FORGE_CACHE_TEST_LOCK.lock().unwrap();
-    reset_forge_cache_for_tests();
     let calls = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
     let coordinator = ForgeDiscovery::new().with_boxed_adapter(Box::new(CountingAdapter {
         calls: std::sync::Arc::clone(&calls),
     }));
 
-    let ctx_a = DiscoveryContext::from_root("/tmp/a");
-    let ctx_b = DiscoveryContext::from_root("/tmp/b");
+    let caches = std::sync::Arc::new(crate::discovery::DiscoveryCaches::default());
+    let ctx_a = DiscoveryContext::from_root("/tmp/a").with_caches(std::sync::Arc::clone(&caches));
+    let ctx_b = DiscoveryContext::from_root("/tmp/b").with_caches(caches);
 
     coordinator.discover(&ctx_a).expect("call a");
     assert_eq!(calls.load(std::sync::atomic::Ordering::Relaxed), 1);

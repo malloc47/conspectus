@@ -143,6 +143,7 @@ fn emits_linked_to_mux_for_freshest_thread_per_pid() {
         &pids,
         now(),
         DEFAULT_WINDOW_SECONDS,
+        &DiscoveryCaches::default(),
     );
 
     let log_links = codex_log_mux_links(&snapshot);
@@ -198,6 +199,7 @@ fn synthesizes_sparse_session_when_state_has_not_seen_thread_yet() {
         &pids,
         now(),
         DEFAULT_WINDOW_SECONDS,
+        &DiscoveryCaches::default(),
     );
 
     let synth = snapshot.nodes.iter().find_map(|n| match n {
@@ -243,6 +245,7 @@ fn demotes_stale_active_pane_command_session_match_for_same_mux() {
         &pids,
         now(),
         DEFAULT_WINDOW_SECONDS,
+        &DiscoveryCaches::default(),
     );
 
     let stale = snapshot
@@ -285,6 +288,7 @@ fn corroborating_command_match_for_same_session_stays_active() {
         &pids,
         now(),
         DEFAULT_WINDOW_SECONDS,
+        &DiscoveryCaches::default(),
     );
 
     let corroborating = snapshot
@@ -320,6 +324,7 @@ fn log_rows_outside_freshness_window_are_ignored() {
         &pids,
         now(),
         DEFAULT_WINDOW_SECONDS,
+        &DiscoveryCaches::default(),
     );
 
     let count = codex_log_mux_links(&snapshot).len();
@@ -344,6 +349,7 @@ fn unrelated_pid_does_not_produce_a_link() {
         &pids,
         now(),
         DEFAULT_WINDOW_SECONDS,
+        &DiscoveryCaches::default(),
     );
 
     let count = codex_log_mux_links(&snapshot).len();
@@ -372,6 +378,7 @@ fn higher_log_db_suffix_wins_when_multiple_files_present() {
         &pids,
         now(),
         DEFAULT_WINDOW_SECONDS,
+        &DiscoveryCaches::default(),
     );
 
     let link = codex_log_mux_links(&snapshot)
@@ -399,6 +406,7 @@ fn missing_log_db_returns_silently() {
         &pids,
         now(),
         DEFAULT_WINDOW_SECONDS,
+        &DiscoveryCaches::default(),
     );
     assert_eq!(snapshot.candidate_links.len(), before);
 }
@@ -420,6 +428,7 @@ fn empty_log_db_returns_silently() {
         &pids,
         now(),
         DEFAULT_WINDOW_SECONDS,
+        &DiscoveryCaches::default(),
     );
     assert_eq!(snapshot.candidate_links.len(), before);
 }
@@ -445,6 +454,7 @@ fn non_codex_pids_in_map_are_ignored() {
         &pids,
         now(),
         DEFAULT_WINDOW_SECONDS,
+        &DiscoveryCaches::default(),
     );
 
     let count = codex_log_mux_links(&snapshot).len();
@@ -466,7 +476,14 @@ fn caller_supplied_window_overrides_default_bound() {
     let pids = codex_pid_map("main", 100);
 
     // Tight 5-minute window: row should be rejected as too old.
-    apply_codex_log_attribution(&mut snapshot, state_root, &pids, now(), 5 * 60);
+    apply_codex_log_attribution(
+        &mut snapshot,
+        state_root,
+        &pids,
+        now(),
+        5 * 60,
+        &DiscoveryCaches::default(),
+    );
     let tight = codex_log_mux_links(&snapshot).len();
     assert_eq!(tight, 0);
 
@@ -477,6 +494,7 @@ fn caller_supplied_window_overrides_default_bound() {
         &pids,
         now(),
         DEFAULT_WINDOW_SECONDS,
+        &DiscoveryCaches::default(),
     );
     let wide = codex_log_mux_links(&snapshot).len();
     assert_eq!(wide, 1);
@@ -487,12 +505,10 @@ fn cache_serves_second_call_without_re_querying_when_db_is_unchanged() {
     // H-SERVE-PERF-002: after the first call populates the cache,
     // a second call on the same DB with the same candidate pid set
     // and same ts_floor must serve entirely from the cache — no
-    // SQLite query fires. Attributed to QUERY_COUNT so a future
+    // SQLite query fires. Counted by the cache's query counter so a future
     // regression that silently bypasses the cache would show up
     // as a nonzero second-call query count.
-    let _serial = CACHE_TEST_LOCK.lock().unwrap();
-    reset_query_cache_for_tests();
-    let _ = take_query_count_for_tests();
+    let caches = DiscoveryCaches::default();
 
     let temp = TempDir::new().expect("temp");
     let state_root = temp.path();
@@ -503,8 +519,15 @@ fn cache_serves_second_call_without_re_querying_when_db_is_unchanged() {
 
     let pids = codex_pid_map("main", 100);
     let mut first = build_snapshot("main");
-    apply_codex_log_attribution(&mut first, state_root, &pids, now(), DEFAULT_WINDOW_SECONDS);
-    let first_queries = take_query_count_for_tests();
+    apply_codex_log_attribution(
+        &mut first,
+        state_root,
+        &pids,
+        now(),
+        DEFAULT_WINDOW_SECONDS,
+        &caches,
+    );
+    let first_queries = caches.codex_log.take_queries();
     assert!(
         first_queries >= 1,
         "first call must query at least once (was {first_queries})"
@@ -519,8 +542,9 @@ fn cache_serves_second_call_without_re_querying_when_db_is_unchanged() {
         &pids,
         now(),
         DEFAULT_WINDOW_SECONDS,
+        &caches,
     );
-    let second_queries = take_query_count_for_tests();
+    let second_queries = caches.codex_log.take_queries();
     assert_eq!(
         second_queries, 0,
         "cache hit must skip every SQLite query on the second call"
@@ -537,9 +561,7 @@ fn cache_invalidates_when_db_mtime_advances() {
     // picks up the new row rather than serving the stale cached
     // observation. Verified two ways: (1) the emitted link names
     // the new thread; (2) the query counter records a re-query.
-    let _serial = CACHE_TEST_LOCK.lock().unwrap();
-    reset_query_cache_for_tests();
-    let _ = take_query_count_for_tests();
+    let caches = DiscoveryCaches::default();
 
     let temp = TempDir::new().expect("temp");
     let state_root = temp.path();
@@ -548,9 +570,16 @@ fn cache_invalidates_when_db_mtime_advances() {
 
     let mut first = build_snapshot("main");
     let pids = codex_pid_map("main", 100);
-    apply_codex_log_attribution(&mut first, state_root, &pids, now(), DEFAULT_WINDOW_SECONDS);
+    apply_codex_log_attribution(
+        &mut first,
+        state_root,
+        &pids,
+        now(),
+        DEFAULT_WINDOW_SECONDS,
+        &caches,
+    );
     assert_eq!(codex_log_mux_links(&first).len(), 1);
-    let _ = take_query_count_for_tests();
+    let _ = caches.codex_log.take_queries();
 
     // Rewrite the DB. Filesystem mtime advances, size may change —
     // either alone flips the fingerprint.
@@ -564,8 +593,9 @@ fn cache_invalidates_when_db_mtime_advances() {
         &pids,
         now(),
         DEFAULT_WINDOW_SECONDS,
+        &caches,
     );
-    let second_queries = take_query_count_for_tests();
+    let second_queries = caches.codex_log.take_queries();
     assert!(
         second_queries >= 1,
         "advancing the DB must force a fresh query (was {second_queries})"
@@ -585,9 +615,7 @@ fn cache_invalidates_when_candidate_pid_set_changes() {
     // new pid's row (which was never queried on the first call) is
     // picked up. Without the pid-set check the second call would
     // silently miss the new attribution.
-    let _serial = CACHE_TEST_LOCK.lock().unwrap();
-    reset_query_cache_for_tests();
-    let _ = take_query_count_for_tests();
+    let caches = DiscoveryCaches::default();
 
     let temp = TempDir::new().expect("temp");
     let state_root = temp.path();
@@ -607,9 +635,10 @@ fn cache_invalidates_when_candidate_pid_set_changes() {
         &pids_single,
         now(),
         DEFAULT_WINDOW_SECONDS,
+        &caches,
     );
     assert_eq!(codex_log_mux_links(&first).len(), 1);
-    let _ = take_query_count_for_tests();
+    let _ = caches.codex_log.take_queries();
 
     // Second call with a superset pid list — DB unchanged but the
     // candidate list differs. Cache must miss and re-query.
@@ -626,8 +655,9 @@ fn cache_invalidates_when_candidate_pid_set_changes() {
         &pids_both,
         now(),
         DEFAULT_WINDOW_SECONDS,
+        &caches,
     );
-    let second_queries = take_query_count_for_tests();
+    let second_queries = caches.codex_log.take_queries();
     assert!(
         second_queries >= 2,
         "expanded pid set must trigger a fresh query per pid; got {second_queries}"

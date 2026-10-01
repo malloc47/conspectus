@@ -56,7 +56,7 @@ use serde_json::json;
 
 use crate::discovery::harness::HarnessAdapter;
 use crate::discovery::memo::{FileStamp, StampedMap};
-use crate::discovery::{DiscoveryContext, GraphFragment};
+use crate::discovery::{DiscoveryCaches, DiscoveryContext, GraphFragment};
 use crate::model::{
     AgentSessionId, AgentSessionNode, Confidence, Freshness, GraphLink, GraphNode, LinkEndpoint,
     LinkState, Metadata, NodeId, Provenance, RelationKind, SourceMetadata, UnresolvedEndpoint,
@@ -149,7 +149,9 @@ impl HarnessAdapter for ClaudeCodeAdapter {
 
     fn discover(&self, context: &DiscoveryContext) -> Result<GraphFragment> {
         // H-REF-007: delegate to the shared state-root envelope.
-        super::discover_with_state_root(context, HARNESS_KEY, discover_state)
+        super::discover_with_state_root(context, HARNESS_KEY, |root| {
+            discover_state(root, context.caches())
+        })
     }
 
     fn launch_argv(&self) -> Vec<std::ffi::OsString> {
@@ -171,7 +173,7 @@ impl HarnessAdapter for ClaudeCodeAdapter {
     }
 }
 
-fn discover_state(state_root: &Path) -> Result<GraphFragment> {
+fn discover_state(state_root: &Path, caches: &DiscoveryCaches) -> Result<GraphFragment> {
     let projects = state_root.join("projects");
 
     if !projects.exists() {
@@ -202,9 +204,12 @@ fn discover_state(state_root: &Path) -> Result<GraphFragment> {
                 continue;
             }
 
-            if let Some(discovered) =
-                scan_session_cached(&path, fallback_cwd.as_deref(), &state_scope)
-            {
+            if let Some(discovered) = scan_session_cached(
+                &path,
+                fallback_cwd.as_deref(),
+                &state_scope,
+                &caches.claude_sessions,
+            ) {
                 entries.push(discovered);
             }
         }
@@ -261,7 +266,7 @@ fn discover_state(state_root: &Path) -> Result<GraphFragment> {
 }
 
 #[derive(Clone)]
-struct DiscoveredSession {
+pub(crate) struct DiscoveredSession {
     node: AgentSessionNode,
     parent_uuid: Option<String>,
     cross_session_record_type: Option<String>,
@@ -741,8 +746,6 @@ fn coalesce_slashes(path: &str) -> String {
 // only — if fingerprint matches, no `open()` fires. Dormant files
 // become effectively free.
 
-static SESSION_SCAN_CACHE: StampedMap<FileStamp, DiscoveredSession> = StampedMap::new();
-
 /// Extract `DiscoveredSession` for `path`, reusing a cached scan when
 /// the file's `(mtime, size)` are unchanged since the last call.
 /// Returns `None` when the file lacks a parseable `session_meta`
@@ -751,10 +754,11 @@ fn scan_session_cached(
     path: &Path,
     fallback_cwd: Option<&str>,
     state_scope: &str,
+    cache: &StampedMap<FileStamp, DiscoveredSession>,
 ) -> Option<DiscoveredSession> {
     let stamp = FileStamp::of(path)?;
     // Same (path, mtime, size) → identical extract.
-    if let Some(discovered) = SESSION_SCAN_CACHE.get(path, &stamp) {
+    if let Some(discovered) = cache.get(path, &stamp) {
         return Some(discovered);
     }
 
@@ -781,7 +785,7 @@ fn scan_session_cached(
         leaf_uuid,
     };
 
-    SESSION_SCAN_CACHE.insert(path.to_path_buf(), stamp, discovered.clone());
+    cache.insert(path.to_path_buf(), stamp, discovered.clone());
 
     Some(discovered)
 }

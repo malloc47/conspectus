@@ -28,7 +28,7 @@ use serde_json::json;
 
 use crate::discovery::harness::HarnessAdapter;
 use crate::discovery::memo::{FileStamp, StampedMap};
-use crate::discovery::{DiscoveryContext, GraphFragment};
+use crate::discovery::{DiscoveryCaches, DiscoveryContext, GraphFragment};
 use crate::model::{
     AgentSessionId, AgentSessionNode, Confidence, Freshness, GraphLink, GraphNode, LinkEndpoint,
     LinkState, Metadata, NodeId, Provenance, RelationKind, SessionKind, SourceMetadata,
@@ -132,7 +132,9 @@ impl HarnessAdapter for OpenCodeAdapter {
 
     fn discover(&self, context: &DiscoveryContext) -> Result<GraphFragment> {
         // H-REF-007: delegate to the shared state-root envelope.
-        super::discover_with_state_root(context, HARNESS_KEY, discover_state)
+        super::discover_with_state_root(context, HARNESS_KEY, |root| {
+            discover_state(root, context.caches())
+        })
     }
 
     fn launch_argv(&self) -> Vec<std::ffi::OsString> {
@@ -157,11 +159,13 @@ impl HarnessAdapter for OpenCodeAdapter {
     }
 }
 
-fn discover_state(state_root: &Path) -> Result<GraphFragment> {
+fn discover_state(state_root: &Path, caches: &DiscoveryCaches) -> Result<GraphFragment> {
     let state_scope = state_root.to_string_lossy().to_string();
     let mut sessions = BTreeMap::new();
 
-    for info in read_sqlite_sessions_cached(&state_root.join("opencode.db")) {
+    for info in
+        read_sqlite_sessions_cached(&state_root.join("opencode.db"), &caches.opencode_sessions)
+    {
         sessions.insert(info.id.clone(), info);
     }
 
@@ -213,7 +217,7 @@ fn discover_state(state_root: &Path) -> Result<GraphFragment> {
 }
 
 #[derive(Clone, Deserialize)]
-struct SessionInfo {
+pub(crate) struct SessionInfo {
     id: String,
     #[serde(default)]
     directory: Option<String>,
@@ -605,17 +609,18 @@ fn read_info(path: &Path) -> Option<SessionInfo> {
 // with an idle opencode the cache hit rate is ~100%, saving the
 // ~5,000 pread64 pages per full-table scan every harness cycle.
 
-static SQLITE_SESSIONS_CACHE: StampedMap<FileStamp, Vec<SessionInfo>> = StampedMap::new();
-
-fn read_sqlite_sessions_cached(path: &Path) -> Vec<SessionInfo> {
+fn read_sqlite_sessions_cached(
+    path: &Path,
+    cache: &StampedMap<FileStamp, Vec<SessionInfo>>,
+) -> Vec<SessionInfo> {
     let Some(stamp) = FileStamp::of(path) else {
         return Vec::new();
     };
-    if let Some(sessions) = SQLITE_SESSIONS_CACHE.get(path, &stamp) {
+    if let Some(sessions) = cache.get(path, &stamp) {
         return sessions;
     }
     let sessions = read_sqlite_sessions(path);
-    SQLITE_SESSIONS_CACHE.insert(path.to_path_buf(), stamp, sessions.clone());
+    cache.insert(path.to_path_buf(), stamp, sessions.clone());
     sessions
 }
 

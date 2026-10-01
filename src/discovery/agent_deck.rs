@@ -91,7 +91,7 @@ fn default_profiles_root(multi_repo_worktrees_root: &Path) -> PathBuf {
 }
 
 impl DiscoveryProvider for AgentDeckDiscovery {
-    fn discover(&self, _context: &DiscoveryContext) -> Result<GraphFragment> {
+    fn discover(&self, context: &DiscoveryContext) -> Result<GraphFragment> {
         let epoch = crate::discovery::current_epoch();
         if !self.root.is_dir() {
             return Ok(GraphFragment::empty());
@@ -112,7 +112,7 @@ impl DiscoveryProvider for AgentDeckDiscovery {
                 continue;
             }
             let workspace_path = entry.path();
-            fragments.push(self.discover_workspace(&workspace_path, &title_map)?);
+            fragments.push(self.discover_workspace(&workspace_path, &title_map, context)?);
         }
         let mut fragment = GraphFragment::from(merge_fragments(fragments));
         crate::discovery::stamp_fragment(
@@ -202,6 +202,7 @@ impl AgentDeckDiscovery {
         &self,
         workspace_path: &Path,
         title_map: &BTreeMap<String, String>,
+        context: &DiscoveryContext,
     ) -> Result<GraphFragment> {
         let Some(folder_basename) = workspace_path
             .file_name()
@@ -235,7 +236,10 @@ impl AgentDeckDiscovery {
             if !logical_path.exists() {
                 continue;
             }
-            let Some(probe) = self.git_probe.probe(&logical_path)? else {
+            let Some(probe) = self
+                .git_probe
+                .probe_cached(&logical_path, context.caches())?
+            else {
                 continue;
             };
             let repo_id = RepoId::new(crate::discovery::path_to_string(&probe.common_dir));

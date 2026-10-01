@@ -23,7 +23,6 @@ use std::time::Duration;
 
 use anyhow::{Context, Result};
 
-use crate::discovery::memo::TtlCache;
 use crate::discovery::{DiscoveryContext, DiscoveryProvider, GraphFragment, merge_fragments};
 
 pub mod github;
@@ -103,11 +102,10 @@ impl DiscoveryProvider for ForgeDiscovery {
         // so `compute_freshness_gate` never marks `github` fresh
         // and every class cycle re-runs the forge coordinator →
         // one `gh pr list` spawn per cycle per root (0.5-0.8 Hz
-        // on this operator's box). See `CachedForgeFragment` docs
-        // for the fingerprint invariants and why this is the
-        // targeted patch rather than the gate-refactor.
+        // on this operator's box). The TTL matches the Forge class
+        // interval, so this skips only what the gate would have.
         let roots: Vec<PathBuf> = context.roots().to_vec();
-        if let Some(cached) = FORGE_CACHE.get(&roots) {
+        if let Some(cached) = context.caches().forge.get(&roots) {
             return Ok(cached);
         }
 
@@ -116,7 +114,7 @@ impl DiscoveryProvider for ForgeDiscovery {
             fragments.push(adapter.discover(context)?);
         }
         let merged = GraphFragment::from(merge_fragments(fragments));
-        FORGE_CACHE.set(roots, merged.clone());
+        context.caches().forge.set(roots, merged.clone());
         Ok(merged)
     }
 }
@@ -125,28 +123,7 @@ impl DiscoveryProvider for ForgeDiscovery {
 /// fresh. Matches the Forge class TTL default in
 /// `ServerIntervals` (5 minutes) — the gate that would have
 /// already skipped this provider if stamps were present.
-const FORGE_CACHE_TTL: Duration = Duration::from_secs(300);
-
-/// The last forge fragment, keyed by the sorted scan roots it was built
-/// for, so changing `--scan-root` misses and triggers a fresh `gh` run.
-static FORGE_CACHE: TtlCache<Vec<PathBuf>, GraphFragment> = TtlCache::new(FORGE_CACHE_TTL);
-
-/// Clear the process-wide [`FORGE_CACHE`]. Tests that observe
-/// the cache short-circuit call this in setup so a prior test's
-/// entry doesn't leak into their assertions.
-#[cfg(test)]
-pub(crate) fn reset_forge_cache_for_tests() {
-    FORGE_CACHE.clear();
-}
-
-/// Serial gate for cache-observing tests — [`FORGE_CACHE`] is
-/// process-global so parallel test runs would cross-talk (test A
-/// populates with roots R, test B reads its own R and gets A's
-/// cached fragment instead of dispatching adapters). Tests that
-/// call `ForgeDiscovery::discover` must take this lock at the
-/// top of their body.
-#[cfg(test)]
-pub(crate) static FORGE_CACHE_TEST_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+pub(crate) const FORGE_CACHE_TTL: Duration = Duration::from_secs(300);
 
 /// Pluggable interface for invoking `gh` (or a fake equivalent). Mirrors
 /// the [`MuxBackend`](crate::discovery::tmux::MuxBackend) seam so tests

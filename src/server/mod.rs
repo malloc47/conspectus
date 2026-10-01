@@ -61,7 +61,9 @@ pub mod watcher;
 
 use crate::config::ServerIntervals;
 use crate::discovery::cache::ProviderClass;
-use crate::discovery::{LocalDiscoveryConfig, discover_local_warm_with, hook_sidecar};
+use crate::discovery::{
+    DiscoveryCaches, LocalDiscoveryConfig, discover_local_warm_with, hook_sidecar,
+};
 use crate::hook::HookRecord;
 use crate::model::GraphSnapshot;
 use crate::resolve::resolve_snapshot;
@@ -301,10 +303,11 @@ pub type SnapshotBytes = Arc<Mutex<Option<Arc<Vec<u8>>>>>;
 /// it is not the daemon's working state.
 pub type SnapshotState = Arc<Mutex<Option<GraphSnapshot>>>;
 
-/// Shared context handed to every per-connection worker so
-/// command handlers that need to mutate the on-disk graph can
-/// reach the same writer lock + discovery config the scheduler
-/// threads use. Cheaply cloneable (every field is an `Arc`).
+/// Daemon state shared by the scheduler threads and every
+/// per-connection worker, so command handlers that rebuild the graph
+/// use the same writer lock, discovery caches, and published
+/// snapshot as the scheduler. Cheaply cloneable (every field is an
+/// `Arc`).
 #[derive(Clone)]
 struct DispatchCtx {
     scan_roots: Arc<Vec<PathBuf>>,
@@ -314,6 +317,8 @@ struct DispatchCtx {
     snapshot_bytes: SnapshotBytes,
     snapshot_state: SnapshotState,
     snapshot_path: Arc<PathBuf>,
+    /// Discovery results reused across cycles (ADR 0098).
+    discovery_caches: Arc<DiscoveryCaches>,
 }
 
 /// Outcome of a client-side socket call.
@@ -775,19 +780,8 @@ fn handle_refresh(request: &Request, ctx: &DispatchCtx) -> Response {
         .unwrap_or_else(PoisonError::into_inner);
     let started = crate::discovery::current_epoch() as u64;
     let outcome = match class {
-        None => run_full_rebuild(
-            &ctx.scan_roots,
-            &ctx.intervals,
-            &ctx.snapshot_bytes,
-            &ctx.snapshot_state,
-        ),
-        Some(c) => try_class_cycle(
-            c,
-            &ctx.scan_roots,
-            &ctx.intervals,
-            &ctx.snapshot_bytes,
-            &ctx.snapshot_state,
-        ),
+        None => run_full_rebuild(ctx),
+        Some(c) => try_class_cycle(c, ctx),
     };
     match outcome {
         Ok(()) => Response {
@@ -814,21 +808,17 @@ fn handle_refresh(request: &Request, ctx: &DispatchCtx) -> Response {
 /// Force a cold rebuild: empty prior so the freshness gate
 /// trips for every class, run discovery, write `graph.bin`.
 /// Counterpart to `--refresh` on the one-shot CLI.
-fn run_full_rebuild(
-    scan_roots: &[PathBuf],
-    intervals: &ServerIntervals,
-    snapshot_bytes: &SnapshotBytes,
-    snapshot_state: &SnapshotState,
-) -> Result<()> {
-    let discovery_config = LocalDiscoveryConfig::from_env();
+fn run_full_rebuild(ctx: &DispatchCtx) -> Result<()> {
+    let discovery_config =
+        LocalDiscoveryConfig::from_env().with_caches(Arc::clone(&ctx.discovery_caches));
     let snapshot = discover_local_warm_with(
-        scan_roots.to_vec(),
+        ctx.scan_roots.to_vec(),
         discovery_config,
         GraphSnapshot::empty(),
-        intervals,
+        &ctx.intervals,
     )?;
     let snapshot = resolve_snapshot(snapshot);
-    publish_snapshot(snapshot, snapshot_bytes, snapshot_state);
+    publish_snapshot(snapshot, &ctx.snapshot_bytes, &ctx.snapshot_state);
     Ok(())
 }
 
@@ -1066,9 +1056,6 @@ pub fn run(config: ServeConfig) -> Result<()> {
     // and continue; the files are harmless if left behind.
     cleanup_legacy_sqlite_artifacts();
 
-    let scan_roots = Arc::new(config.scan_roots);
-    let intervals = Arc::new(config.intervals);
-
     // Shutdown latch per ADR 0080. signal-hook flips this atomic
     // on SIGINT/SIGTERM; every scheduler thread polls it between
     // sleeps so a shutdown that arrives mid-tick still completes
@@ -1076,44 +1063,31 @@ pub fn run(config: ServeConfig) -> Result<()> {
     let shutdown = Arc::new(AtomicBool::new(false));
     register_shutdown_signals(&shutdown).context("install signal handlers for SIGINT/SIGTERM")?;
 
+    let ctx = DispatchCtx {
+        scan_roots: Arc::new(config.scan_roots),
+        intervals: Arc::new(config.intervals),
+        writer_lock,
+        state,
+        snapshot_bytes,
+        snapshot_state,
+        snapshot_path: Arc::new(snapshot::graph_bin_path()),
+        discovery_caches: Arc::default(),
+    };
+
     let mut handles: Vec<JoinHandle<()>> = Vec::new();
     for class in ProviderClass::all() {
-        let writer_lock = Arc::clone(&writer_lock);
-        let scan_roots = Arc::clone(&scan_roots);
-        let intervals = Arc::clone(&intervals);
+        let ctx = ctx.clone();
         let shutdown = Arc::clone(&shutdown);
-        let state = Arc::clone(&state);
-        let snapshot_bytes = Arc::clone(&snapshot_bytes);
-        let snapshot_state = Arc::clone(&snapshot_state);
         let class = *class;
         let watcher = build_watcher_for(class);
         handles.push(thread::spawn(move || {
-            class_loop(
-                class,
-                &scan_roots,
-                &intervals,
-                &writer_lock,
-                &state,
-                &snapshot_bytes,
-                &snapshot_state,
-                watcher,
-                &shutdown,
-            );
+            class_loop(class, &ctx, watcher, &shutdown);
         }));
     }
 
     let listener_shutdown = Arc::clone(&shutdown);
-    let listener_ctx = DispatchCtx {
-        scan_roots: Arc::clone(&scan_roots),
-        intervals: Arc::clone(&intervals),
-        writer_lock: Arc::clone(&writer_lock),
-        state: Arc::clone(&state),
-        snapshot_bytes: Arc::clone(&snapshot_bytes),
-        snapshot_state: Arc::clone(&snapshot_state),
-        snapshot_path: Arc::new(snapshot::graph_bin_path()),
-    };
     handles.push(thread::spawn(move || {
-        socket_listener_loop(listener, listener_ctx, &listener_shutdown);
+        socket_listener_loop(listener, ctx, &listener_shutdown);
     }));
 
     // Join every thread. With the shutdown latch in place, each
@@ -1203,19 +1177,13 @@ fn register_shutdown_signals(shutdown: &Arc<AtomicBool>) -> Result<()> {
 /// `wait → run_cycle → wait → run_cycle` at kilohertz cadence.
 /// The floor is [`min_cycle_gap`] of the class interval; the
 /// first `Changed` after a quiet stretch still fires immediately.
-#[allow(clippy::too_many_arguments)]
 fn class_loop(
     class: ProviderClass,
-    scan_roots: &[PathBuf],
-    intervals: &ServerIntervals,
-    writer_lock: &Mutex<()>,
-    state: &Mutex<SchedulerState>,
-    snapshot_bytes: &SnapshotBytes,
-    snapshot_state: &SnapshotState,
+    ctx: &DispatchCtx,
     mut watcher: Box<dyn Watcher>,
     shutdown: &AtomicBool,
 ) {
-    let interval = class.ttl_duration(intervals);
+    let interval = class.ttl_duration(&ctx.intervals);
     let min_gap = min_cycle_gap(interval);
     eprintln!(
         "conspectus serve: {} scheduler started; interval = {:?}, min cycle gap = {:?}",
@@ -1223,15 +1191,7 @@ fn class_loop(
         interval,
         min_gap,
     );
-    run_cycle(
-        class,
-        scan_roots,
-        intervals,
-        writer_lock,
-        state,
-        snapshot_bytes,
-        snapshot_state,
-    );
+    run_cycle(class, ctx);
     let mut last_cycle_end = Instant::now();
     while !shutdown.load(Ordering::Relaxed) {
         if throttle_since(last_cycle_end, min_gap, shutdown) {
@@ -1247,15 +1207,7 @@ fn class_loop(
                 if shutdown.load(Ordering::Relaxed) {
                     break;
                 }
-                run_cycle(
-                    class,
-                    scan_roots,
-                    intervals,
-                    writer_lock,
-                    state,
-                    snapshot_bytes,
-                    snapshot_state,
-                );
+                run_cycle(class, ctx);
                 last_cycle_end = Instant::now();
             }
         }
@@ -1338,16 +1290,8 @@ fn wait_for_class_signal(
 /// the cycle outcome (started_epoch, completed_epoch, success
 /// / error + message) into the shared [`SchedulerState`] for
 /// `conspectus status` to observe.
-#[allow(clippy::too_many_arguments)]
-fn run_cycle(
-    class: ProviderClass,
-    scan_roots: &[PathBuf],
-    intervals: &ServerIntervals,
-    writer_lock: &Mutex<()>,
-    state: &Mutex<SchedulerState>,
-    snapshot_bytes: &SnapshotBytes,
-    snapshot_state: &SnapshotState,
-) {
+fn run_cycle(class: ProviderClass, ctx: &DispatchCtx) {
+    let state = &ctx.state;
     let started = crate::discovery::current_epoch();
     record_state_started(state, class, started);
     // Poisoned-mutex recovery: a panic in a peer class while it
@@ -1355,8 +1299,11 @@ fn run_cycle(
     // is durable across the lock take-over and a stale entry
     // self-heals on the next successful cycle. Carry on rather
     // than aborting the daemon.
-    let _guard = writer_lock.lock().unwrap_or_else(PoisonError::into_inner);
-    let outcome = try_class_cycle(class, scan_roots, intervals, snapshot_bytes, snapshot_state);
+    let _guard = ctx
+        .writer_lock
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner);
+    let outcome = try_class_cycle(class, ctx);
     let completed = crate::discovery::current_epoch();
     match outcome {
         Ok(()) => record_state_completed(state, class, completed, Ok(())),
@@ -1411,22 +1358,21 @@ fn record_state_completed(
 /// restart with no warm-start path arrives at the first cycle
 /// with `None` — the cycle runs as a cold rebuild (since every
 /// provider's "prior slice" is empty) and seeds the cache.
-fn try_class_cycle(
-    class: ProviderClass,
-    scan_roots: &[PathBuf],
-    intervals: &ServerIntervals,
-    snapshot_bytes: &SnapshotBytes,
-    snapshot_state: &SnapshotState,
-) -> Result<()> {
-    let mut prior = load_snapshot_state(snapshot_state).unwrap_or_else(GraphSnapshot::empty);
+fn try_class_cycle(class: ProviderClass, ctx: &DispatchCtx) -> Result<()> {
+    let mut prior = load_snapshot_state(&ctx.snapshot_state).unwrap_or_else(GraphSnapshot::empty);
     for provider in class.providers() {
         prior.evict_provider(provider);
     }
-    let discovery_config = LocalDiscoveryConfig::from_env();
-    let snapshot =
-        discover_local_warm_with(scan_roots.to_vec(), discovery_config, prior, intervals)?;
+    let discovery_config =
+        LocalDiscoveryConfig::from_env().with_caches(Arc::clone(&ctx.discovery_caches));
+    let snapshot = discover_local_warm_with(
+        ctx.scan_roots.to_vec(),
+        discovery_config,
+        prior,
+        &ctx.intervals,
+    )?;
     let snapshot = resolve_snapshot(snapshot);
-    publish_snapshot(snapshot, snapshot_bytes, snapshot_state);
+    publish_snapshot(snapshot, &ctx.snapshot_bytes, &ctx.snapshot_state);
     Ok(())
 }
 

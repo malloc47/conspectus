@@ -173,6 +173,9 @@ pub struct AuxAttributionContext<'a> {
     /// `crate::discovery::codex_log::DEFAULT_WINDOW_SECONDS`
     /// for the codex-log rationale).
     pub now_epoch: i64,
+    /// Caches kept across discovery runs; the codex-log reader keeps
+    /// its last query here.
+    pub caches: &'a crate::discovery::DiscoveryCaches,
 }
 
 const CODEX_SKIP_PERMISSIONS_ARGV: &[&str] = &["--dangerously-bypass-approvals-and-sandbox"];

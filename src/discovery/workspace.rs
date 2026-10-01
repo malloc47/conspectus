@@ -31,7 +31,7 @@ impl DiscoveryProvider for GenericWorkspaceDiscovery {
         let mut fragments = Vec::new();
 
         for root in context.roots() {
-            fragments.push(self.discover_root(root)?);
+            fragments.push(self.discover_root(root, context)?);
         }
 
         let mut fragment = GraphFragment::from(merge_fragments(fragments));
@@ -45,8 +45,12 @@ impl DiscoveryProvider for GenericWorkspaceDiscovery {
 }
 
 impl GenericWorkspaceDiscovery {
-    fn discover_root(&self, root: &Path) -> Result<GraphFragment> {
-        if self.git_probe.probe(root)?.is_some() {
+    fn discover_root(&self, root: &Path, context: &DiscoveryContext) -> Result<GraphFragment> {
+        if self
+            .git_probe
+            .probe_cached(root, context.caches())?
+            .is_some()
+        {
             return Ok(GraphFragment::empty());
         }
         if provider_workspace_claims_root(root) {
@@ -70,7 +74,7 @@ impl GenericWorkspaceDiscovery {
             if file_type.is_symlink() && !path.exists() {
                 continue;
             }
-            let Some(probe) = self.git_probe.probe(&path)? else {
+            let Some(probe) = self.git_probe.probe_cached(&path, context.caches())? else {
                 continue;
             };
 

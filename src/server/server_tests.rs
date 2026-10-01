@@ -70,6 +70,7 @@ fn hook_ingest_updates_snapshot_state_and_published_bytes() {
         snapshot_bytes: Arc::clone(&snapshot_bytes),
         snapshot_state: Arc::clone(&snapshot_state),
         snapshot_path: Arc::new(temp.path().join("graph.bin")),
+        discovery_caches: Arc::default(),
     };
     let record = HookRecord {
         schema_version: SCHEMA_VERSION,

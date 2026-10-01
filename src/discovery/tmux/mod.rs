@@ -11,12 +11,10 @@ use std::ffi::OsString;
 use std::io;
 use std::path::{Path, PathBuf};
 use std::process::Command;
-use std::sync::Mutex;
 use std::time::Duration;
 
 use anyhow::{Context, Result};
 
-use crate::discovery::memo::TtlCache;
 use crate::discovery::{DiscoveryContext, DiscoveryProvider, GraphFragment};
 use crate::model::{GraphNode, MuxSessionId, MuxSessionNode};
 
@@ -1306,7 +1304,7 @@ pub enum TmuxStatus {
 }
 
 impl<R: MuxBackend + 'static> DiscoveryProvider for TmuxDiscovery<R> {
-    fn discover(&self, _context: &DiscoveryContext) -> Result<GraphFragment> {
+    fn discover(&self, context: &DiscoveryContext) -> Result<GraphFragment> {
         // H-SERVE-PERF-011: TTL-cache the mux backend output so a
         // busy class thread doesn't respawn `tmux list-sessions`
         // on every cycle. Each class thread's `discover_local_warm_with`
@@ -1316,7 +1314,7 @@ impl<R: MuxBackend + 'static> DiscoveryProvider for TmuxDiscovery<R> {
         // so the gate never marks it fresh, and every cycle
         // re-invokes the backend. See H-SERVE-PERF-005 for the
         // same-shape fix on the forge side. TTL matches Mux class.
-        if let Some(cached) = TMUX_CACHE.get(&()) {
+        if let Some(cached) = context.caches().tmux.get(&()) {
             return Ok(cached);
         }
 
@@ -1351,33 +1349,12 @@ impl<R: MuxBackend + 'static> DiscoveryProvider for TmuxDiscovery<R> {
             TMUX_BACKEND,
             crate::discovery::current_epoch(),
         );
-        TMUX_CACHE.set((), fragment.clone());
+        context.caches().tmux.set((), fragment.clone());
         Ok(fragment)
     }
 }
 
-const TMUX_CACHE_TTL: Duration = Duration::from_secs(5);
-
-static TMUX_CACHE: TtlCache<(), GraphFragment> = TtlCache::new(TMUX_CACHE_TTL);
-
-/// Clear the process-wide tmux fragment cache. Tests that
-/// observe the cache short-circuit call this in setup so a prior
-/// test's entry doesn't leak into their assertions.
-///
-/// Exposed as `pub` (rather than `pub(crate)`) so integration tests
-/// under `tests/` — which live in a separate crate — can call it
-/// too. `#[doc(hidden)]` to keep it out of the public API surface.
-#[doc(hidden)]
-pub fn reset_tmux_cache_for_tests() {
-    TMUX_CACHE.clear();
-}
-
-/// Serial gate for cache-observing tests. Same rationale as
-/// `FORGE_CACHE_TEST_LOCK` (H-SERVE-PERF-005): the process-global
-/// cache would cross-talk in parallel test runs. Exposed the same
-/// way as `reset_tmux_cache_for_tests` for integration-test access.
-#[doc(hidden)]
-pub static TMUX_CACHE_TEST_LOCK: Mutex<()> = Mutex::new(());
+pub(crate) const TMUX_CACHE_TTL: Duration = Duration::from_secs(5);
 
 #[cfg(test)]
 #[path = "tmux_tests.rs"]

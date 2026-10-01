@@ -241,6 +241,7 @@ impl ScenarioWorld {
             intervals: crate::config::ServerIntervals::default(),
             no_cache: true,
             refresh: true,
+            discovery_caches: std::sync::Arc::default(),
         }
     }
 

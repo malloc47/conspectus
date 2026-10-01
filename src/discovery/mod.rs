@@ -7,7 +7,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::env;
 use std::hash::{DefaultHasher, Hash, Hasher};
 use std::path::{Path, PathBuf};
-use std::sync::Mutex;
+use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use anyhow::{Context, Result, bail};
@@ -34,6 +34,8 @@ pub mod tmux;
 pub mod workspace;
 pub mod worktree;
 pub mod zellij;
+
+pub use memo::DiscoveryCaches;
 
 pub fn empty_graph() -> GraphSnapshot {
     GraphSnapshot::empty()
@@ -111,10 +113,11 @@ pub fn stamp_snapshot_mutations(snapshot: &mut GraphSnapshot, provider: &str, ep
     }
 }
 
-#[derive(Clone, Debug, Default, Eq, PartialEq)]
+#[derive(Clone, Debug, Default)]
 pub struct DiscoveryContext {
     roots: Vec<PathBuf>,
     harness_state_roots: BTreeMap<String, PathBuf>,
+    caches: Arc<DiscoveryCaches>,
 }
 
 impl DiscoveryContext {
@@ -125,7 +128,7 @@ impl DiscoveryContext {
     pub fn from_root(root: impl Into<PathBuf>) -> Self {
         Self {
             roots: vec![root.into()],
-            harness_state_roots: BTreeMap::new(),
+            ..Self::default()
         }
     }
 
@@ -144,7 +147,7 @@ impl DiscoveryContext {
 
         Ok(Self {
             roots: normalized,
-            harness_state_roots: BTreeMap::new(),
+            ..Self::default()
         })
     }
 
@@ -158,8 +161,18 @@ impl DiscoveryContext {
         self
     }
 
+    /// Reuse `caches` from earlier runs instead of starting empty.
+    pub fn with_caches(mut self, caches: Arc<DiscoveryCaches>) -> Self {
+        self.caches = caches;
+        self
+    }
+
     pub fn roots(&self) -> &[PathBuf] {
         &self.roots
+    }
+
+    pub fn caches(&self) -> &DiscoveryCaches {
+        &self.caches
     }
 
     pub fn harness_state_root(&self, harness_key: &str) -> Option<&Path> {
@@ -346,7 +359,7 @@ pub fn discover_local_warm_with(
     prior: GraphSnapshot,
     intervals: &crate::config::ServerIntervals,
 ) -> Result<GraphSnapshot> {
-    let mut context = DiscoveryContext::from_roots(roots)?;
+    let mut context = DiscoveryContext::from_roots(roots)?.with_caches(Arc::clone(&config.caches));
 
     for (key, root) in &config.harness_state_roots {
         context = context.with_harness_state_root(key.clone(), root.clone());
@@ -460,7 +473,7 @@ pub fn discover_local_warm_with(
     }
 
     let mut fresh = providers.discover_skipping(&context, &gate.fresh)?;
-    let cwd_git_fragment = observed_cwd_git_fragment(&fresh);
+    let cwd_git_fragment = observed_cwd_git_fragment(&fresh, context.caches());
     fresh = merge_fragments([GraphFragment::from(fresh), cwd_git_fragment]);
 
     // H-SERVE-PERF-001a: did the mux or harness heavy providers
@@ -479,14 +492,10 @@ pub fn discover_local_warm_with(
     // fingerprint is computed with `freshness_epoch` stamps
     // excluded so wall-clock churn doesn't defeat equality.
     let current_fingerprint = mux_or_harness_slice_fingerprint(&fresh);
-    let mut fingerprint_guard = LAST_MUX_HARNESS_FINGERPRINT
-        .lock()
-        .unwrap_or_else(std::sync::PoisonError::into_inner);
-    let run_process_tree = should_open_process_tree_gate(current_fingerprint, *fingerprint_guard);
-    if let Some(fp) = current_fingerprint {
-        *fingerprint_guard = Some(fp);
-    }
-    drop(fingerprint_guard);
+    let previous_fingerprint = context
+        .caches()
+        .swap_process_tree_fingerprint(current_fingerprint);
+    let run_process_tree = should_open_process_tree_gate(current_fingerprint, previous_fingerprint);
 
     // Phase-2 backstop merge with the evicted prior. The fresh
     // fragment wins on every collision; the prior fills in
@@ -508,15 +517,6 @@ pub fn discover_local_warm_with(
     apply_mutators(&mut snapshot, &config, &context, run_process_tree);
     Ok(snapshot)
 }
-
-/// Process-wide last-seen mux/harness slice fingerprint
-/// (H-SERVE-PERF-003). Consulted by
-/// [`should_open_process_tree_gate`] to skip the `/proc` walk when
-/// the mux/harness slice content is byte-identical to the prior
-/// cycle. Reset to `None` on daemon startup (first cycle after
-/// restart always opens the gate to seed the walk). Tests can
-/// reset via [`reset_process_tree_fingerprint_for_tests`].
-static LAST_MUX_HARNESS_FINGERPRINT: Mutex<Option<u64>> = Mutex::new(None);
 
 /// Decide whether the process-tree pass should fire this cycle
 /// (H-SERVE-PERF-003).
@@ -715,6 +715,7 @@ fn apply_mutators(
                 state_root,
                 harness_pids_per_mux: &harness_pids_per_mux,
                 now_epoch,
+                caches: context.caches(),
             };
             adapter.apply_aux_attribution(snapshot, &ctx);
         }
@@ -795,6 +796,10 @@ pub struct LocalDiscoveryConfig {
     /// disable env var, kept as-is for wire compatibility) and by
     /// callers via [`Self::without_aux_harness`].
     pub disabled_aux_harnesses: BTreeSet<String>,
+    /// Results reused across runs (ADR 0098). [`Self::from_env`] and
+    /// [`Self::empty`] start with empty caches; long-lived callers
+    /// pass their own through [`Self::with_caches`].
+    pub caches: Arc<DiscoveryCaches>,
 }
 
 impl LocalDiscoveryConfig {
@@ -884,6 +889,7 @@ impl LocalDiscoveryConfig {
                 Box::new(worktree::SystemGitWorktree::new()) as Box<dyn worktree::WorktreeBackend>
             }),
             disabled_aux_harnesses,
+            caches: Arc::default(),
         }
     }
 
@@ -899,7 +905,14 @@ impl LocalDiscoveryConfig {
             declared_config_loader: None,
             pin_store_registry: None,
             disabled_aux_harnesses: BTreeSet::new(),
+            caches: Arc::default(),
         }
+    }
+
+    /// Reuse `caches` from earlier runs instead of starting empty.
+    pub fn with_caches(mut self, caches: Arc<DiscoveryCaches>) -> Self {
+        self.caches = caches;
+        self
     }
 
     pub fn with_harness_state_root(
@@ -1148,7 +1161,7 @@ pub fn merge_with_prior(fresh: GraphSnapshot, prior: GraphSnapshot) -> GraphSnap
     merge_fragments([GraphFragment::from(fresh), GraphFragment::from(prior)])
 }
 
-fn observed_cwd_git_fragment(snapshot: &GraphSnapshot) -> GraphFragment {
+fn observed_cwd_git_fragment(snapshot: &GraphSnapshot, caches: &DiscoveryCaches) -> GraphFragment {
     let mut roots = BTreeSet::new();
 
     for node in &snapshot.nodes {
@@ -1179,7 +1192,7 @@ fn observed_cwd_git_fragment(snapshot: &GraphSnapshot) -> GraphFragment {
             continue;
         }
 
-        match probe.probe(&root) {
+        match probe.probe_cached(&root, caches) {
             Ok(Some(result)) => fragments.push(git::fragment_from_probe(&result)),
             Ok(None) => {}
             Err(error) => diagnostics.push(Diagnostic::Config {

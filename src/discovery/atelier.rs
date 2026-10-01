@@ -54,7 +54,7 @@ impl DiscoveryProvider for AtelierWorkspaceDiscovery {
 
         for root in context.roots() {
             if let Some(config_path) = find_atelier_config(root) {
-                fragments.push(self.discover_config(&config_path)?);
+                fragments.push(self.discover_config(&config_path, context)?);
             }
         }
 
@@ -69,7 +69,11 @@ impl DiscoveryProvider for AtelierWorkspaceDiscovery {
 }
 
 impl AtelierWorkspaceDiscovery {
-    fn discover_config(&self, config_path: &Path) -> Result<GraphFragment> {
+    fn discover_config(
+        &self,
+        config_path: &Path,
+        context: &DiscoveryContext,
+    ) -> Result<GraphFragment> {
         let workspace_root = config_path
             .parent()
             .context("atelier config path has no parent")?
@@ -97,7 +101,7 @@ impl AtelierWorkspaceDiscovery {
             let provider_source_path = absolutize(&workspace_root, &repo.path);
             let member_path_kind = workspace_member_path_kind(&repo_root);
 
-            if let Some(probe) = self.git_probe.probe(&repo_root)? {
+            if let Some(probe) = self.git_probe.probe_cached(&repo_root, context.caches())? {
                 let repo_id = NodeId::Repo(crate::model::RepoId::new(
                     crate::discovery::path_to_string(&probe.common_dir),
                 ));

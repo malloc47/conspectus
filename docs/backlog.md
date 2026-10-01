@@ -14247,7 +14247,15 @@ Landed during the review:
 
 Queued chunks:
 
-- [ ] `H-RUST-010` Replace the process-global discovery caches.
+- [x] `H-RUST-010` Replace the process-global discovery caches.
+  - Outcome: ADR 0098. `discovery::DiscoveryCaches` holds all nine
+    caches, built from the `TtlCache`/`StampedMap`/`FileStamp`
+    helpers in `discovery/memo.rs`. The daemon and TUI own one each and
+    pass it through `LocalDiscoveryConfig::with_caches`; one-shot
+    commands start empty. `GitProbe::probe` no longer caches
+    (`probe_cached` does). The four test locks, the reset functions,
+    and the global spawn/query counters are gone. The daemon scheduler
+    now takes its shared context struct instead of seven arguments.
   - Problem: nine `static` caches hold discovery state for the whole
     process (`PROBE_CACHE` in `discovery/git.rs`, `TMUX_CACHE`,
     `ZELLIJ_CACHE`, `FORGE_CACHE`, `QUERY_CACHE` in `codex_log.rs`,
@@ -14268,10 +14276,6 @@ Queued chunks:
     `DiscoveryCaches` value owned by the caller (daemon state, TUI
     loop, one-shot CLI) and passed through `LocalDiscoveryConfig`,
     then delete the test locks and reset functions.
-  - Progress: (a) landed. `discovery/memo.rs` holds `TtlCache`,
-    `StampedMap`, and `FileStamp`; the git probe cache stores a
-    `CachedProbe::{Repo, NotARepo}` enum; every cache lock recovers
-    from poisoning.
   - ADR: (b) changes `LocalDiscoveryConfig`, which is part of the
     library facade (ADR 0015); amend ADR 0091, which introduced most
     of these caches.

@@ -37,7 +37,7 @@ use serde_json::json;
 
 use crate::discovery::harness::HarnessAdapter;
 use crate::discovery::memo::{FileStamp, StampedMap};
-use crate::discovery::{DiscoveryContext, GraphFragment};
+use crate::discovery::{DiscoveryCaches, DiscoveryContext, GraphFragment};
 use crate::model::{
     AgentSessionId, AgentSessionNode, Confidence, Freshness, GraphLink, GraphNode, LinkEndpoint,
     LinkState, Metadata, NodeId, Provenance, RelationKind, SourceMetadata, UnresolvedEndpoint,
@@ -124,6 +124,7 @@ impl HarnessAdapter for CodexAdapter {
             ctx.harness_pids_per_mux,
             ctx.now_epoch,
             window_seconds,
+            ctx.caches,
         );
     }
 
@@ -135,7 +136,9 @@ impl HarnessAdapter for CodexAdapter {
         // H-REF-007: delegate the state-root lookup + fragment
         // stamping to the shared envelope so this adapter only
         // describes its layout.
-        super::discover_with_state_root(context, HARNESS_KEY, discover_state)
+        super::discover_with_state_root(context, HARNESS_KEY, |root| {
+            discover_state(root, context.caches())
+        })
     }
 
     fn launch_argv(&self) -> Vec<std::ffi::OsString> {
@@ -158,7 +161,7 @@ impl HarnessAdapter for CodexAdapter {
     }
 }
 
-fn discover_state(state_root: &Path) -> Result<GraphFragment> {
+fn discover_state(state_root: &Path, caches: &DiscoveryCaches) -> Result<GraphFragment> {
     let sessions_dir = state_root.join("sessions");
     let state_db = pick_active_state_db(state_root);
 
@@ -181,7 +184,7 @@ fn discover_state(state_root: &Path) -> Result<GraphFragment> {
 
     if sessions_dir.exists() {
         visit_rollouts(&sessions_dir, &mut |path| {
-            if let Some(scan) = scan_rollout_cached(path) {
+            if let Some(scan) = scan_rollout_cached(path, &caches.codex_rollouts) {
                 sessions
                     .entry(scan.meta.id.clone())
                     .or_default()
@@ -635,17 +638,18 @@ fn read_session_meta(path: &Path) -> Option<SessionMetaPayload> {
 // file, fingerprinted on `(mtime_ns, size)` — a warm call stats only.
 
 #[derive(Clone)]
-struct RolloutScan {
+pub(crate) struct RolloutScan {
     meta: SessionMetaPayload,
     preview: Option<String>,
     activity: Option<i64>,
 }
 
-static ROLLOUT_SCAN_CACHE: StampedMap<FileStamp, RolloutScan> = StampedMap::new();
-
-fn scan_rollout_cached(path: &Path) -> Option<RolloutScan> {
+fn scan_rollout_cached(
+    path: &Path,
+    cache: &StampedMap<FileStamp, RolloutScan>,
+) -> Option<RolloutScan> {
     let stamp = FileStamp::of(path)?;
-    if let Some(scan) = ROLLOUT_SCAN_CACHE.get(path, &stamp) {
+    if let Some(scan) = cache.get(path, &stamp) {
         return Some(scan);
     }
     let scan = RolloutScan {
@@ -653,7 +657,7 @@ fn scan_rollout_cached(path: &Path) -> Option<RolloutScan> {
         preview: read_rollout_last_message_preview(path),
         activity: stamp.modified_epoch(),
     };
-    ROLLOUT_SCAN_CACHE.insert(path.to_path_buf(), stamp, scan.clone());
+    cache.insert(path.to_path_buf(), stamp, scan.clone());
     Some(scan)
 }
 

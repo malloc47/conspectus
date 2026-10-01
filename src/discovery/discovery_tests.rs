@@ -460,14 +460,8 @@ fn local_discovery_accepts_existing_non_git_roots_as_sparse_graphs() {
 fn discover_local_with_runs_harness_and_tmux_providers_and_cross_links() {
     use crate::discovery::harness::codex::HARNESS_KEY as CODEX_KEY;
     use crate::discovery::harness::fixtures::{CodexSessionRecord, HarnessFixture};
-    use crate::discovery::tmux::{FakeTmux, TMUX_CACHE_TEST_LOCK, reset_tmux_cache_for_tests};
+    use crate::discovery::tmux::FakeTmux;
     use crate::model::{GraphNode, RelationKind};
-
-    // H-SERVE-PERF-011: tmux TTL cache is process-global. Hold the
-    // serial lock + reset so a parallel-test entry can't short-
-    // circuit this test to a wrong (or stale) fragment.
-    let _serial = TMUX_CACHE_TEST_LOCK.lock().unwrap();
-    reset_tmux_cache_for_tests();
 
     let temp = tempfile::TempDir::new().expect("temp dir");
     let scan_root = temp.path().join("scan");
@@ -997,4 +991,23 @@ fn gate_opens_when_fingerprint_changes() {
     // (session added/removed, activity epoch bumped) must fire the
     // walk.
     assert!(should_open_process_tree_gate(Some(1234), Some(5678)));
+}
+
+#[test]
+fn discover_local_with_reuses_the_callers_caches() {
+    use crate::discovery::tmux::FakeTmux;
+
+    let temp = tempfile::TempDir::new().expect("temp dir");
+    let caches = Arc::new(DiscoveryCaches::default());
+    let config = LocalDiscoveryConfig::empty()
+        .with_tmux_runner(FakeTmux::with_sessions("alpha\t/work/alpha\t1\t0\n"))
+        .with_caches(Arc::clone(&caches));
+
+    discover_local_with([temp.path()], config).expect("discover");
+
+    let cached = caches
+        .tmux
+        .get(&())
+        .expect("the tmux fragment lands in the caller's caches");
+    assert_eq!(cached.nodes.len(), 1);
 }

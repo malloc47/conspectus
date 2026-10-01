@@ -833,7 +833,8 @@ pub(super) fn discover_and_resolve(config: &RunConfig) -> Result<crate::model::G
     // is single-digit seconds at target scale (ADR 0082), and
     // the TUI's typical setup runs `conspectus serve` so the
     // daemon-snapshot short-circuit above is the common path.
-    let discovery_config = crate::discovery::LocalDiscoveryConfig::from_env();
+    let discovery_config = crate::discovery::LocalDiscoveryConfig::from_env()
+        .with_caches(std::sync::Arc::clone(&config.discovery_caches));
     let snapshot = crate::discovery::discover_local_warm_with(
         roots,
         discovery_config,

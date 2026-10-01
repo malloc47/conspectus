@@ -37,6 +37,7 @@ use std::sync::{Mutex, PoisonError};
 
 use rusqlite::{Connection, OpenFlags, params};
 
+use crate::discovery::DiscoveryCaches;
 use crate::discovery::harness::codex::HARNESS_KEY as CODEX_HARNESS_KEY;
 use crate::discovery::memo::FileStamp;
 use crate::model::{
@@ -100,6 +101,7 @@ pub fn apply_codex_log_attribution(
     codex_pids_per_mux: &BTreeMap<MuxSessionId, Vec<(String, i64)>>,
     now_epoch: i64,
     window_seconds: i64,
+    caches: &DiscoveryCaches,
 ) {
     let Some(db_path) = pick_active_log_db(state_root) else {
         return;
@@ -110,11 +112,12 @@ pub fn apply_codex_log_attribution(
         return;
     }
 
-    // H-SERVE-PERF-002: consult QUERY_CACHE before opening the DB.
+    // H-SERVE-PERF-002: consult the query cache before opening the DB.
     // On a cache hit no SQLite connection is opened; on a miss we
     // open, verify the schema, re-query, and refresh the cache.
-    // See `QueryCache` docs for the fingerprint invariants.
-    let observations = observations_for_candidates(&db_path, &candidates, ts_floor);
+    // See `CachedQuery` docs for the fingerprint invariants.
+    let observations =
+        observations_for_candidates(&db_path, &candidates, ts_floor, &caches.codex_log);
 
     let state_scope = state_root.to_string_lossy().to_string();
     let mut emitted: Vec<GraphLink> = Vec::new();
@@ -310,7 +313,7 @@ struct ThreadObservation {
 /// observation ages out under a later floor, all older rows have
 /// too — so filtering cached observations by the current floor
 /// yields the same result as re-querying against the same DB.
-struct QueryCache {
+struct CachedQuery {
     db_path: PathBuf,
     db_stamp: FileStamp,
     candidate_pids: Vec<i64>,
@@ -328,42 +331,25 @@ struct QueryCache {
     observations: HashMap<i64, ThreadObservation>,
 }
 
-static QUERY_CACHE: Mutex<Option<QueryCache>> = Mutex::new(None);
-
-/// Clear the module-level [`QueryCache`]. Tests that exercise the
-/// cross-cycle short-circuit call this in setup so a previous test's
-/// cached entries don't leak into their assertions.
-#[cfg(test)]
-pub(crate) fn reset_query_cache_for_tests() {
-    *QUERY_CACHE.lock().unwrap_or_else(PoisonError::into_inner) = None;
+/// The last [`CachedQuery`], kept in [`DiscoveryCaches`].
+#[derive(Default)]
+pub(crate) struct QueryCache {
+    last: Mutex<Option<CachedQuery>>,
+    /// SQLite queries issued, so tests can check that a hit skipped them.
+    #[cfg(test)]
+    queries: std::sync::atomic::AtomicUsize,
 }
 
-/// Count of `query_freshest_thread` invocations, incremented on
-/// every SQLite query. Tests use `take_query_count_for_tests` to
-/// verify the cache short-circuit fires (a second call on an
-/// unchanged fingerprint should record zero further queries).
-#[cfg(test)]
-static QUERY_COUNT: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
-
-/// Atomically read + reset [`QUERY_COUNT`]. Cache tests must run
-/// under [`CACHE_TEST_LOCK`] so the counter reflects only their
-/// own queries, not siblings running in parallel.
-#[cfg(test)]
-pub(crate) fn take_query_count_for_tests() -> usize {
-    QUERY_COUNT.swap(0, std::sync::atomic::Ordering::Relaxed)
+impl QueryCache {
+    /// Queries issued since the last call.
+    #[cfg(test)]
+    pub(crate) fn take_queries(&self) -> usize {
+        self.queries.swap(0, std::sync::atomic::Ordering::Relaxed)
+    }
 }
 
-/// Serial gate for cache-observing tests. The module-level
-/// `QUERY_CACHE` and `QUERY_COUNT` are process-global; a test that
-/// asserts on the counter would flake if a sibling cache-tickling
-/// test ran in parallel and bumped it. Non-cache tests don't need
-/// this lock — they don't inspect the counter and their tempdir
-/// paths already partition the cache map.
-#[cfg(test)]
-pub(crate) static CACHE_TEST_LOCK: Mutex<()> = Mutex::new(());
-
-/// Compute observations for `candidates`, reusing the module-level
-/// cache when the underlying DB and candidate pid set are unchanged
+/// Compute observations for `candidates`, reusing the last query's
+/// results when the underlying DB and candidate pid set are unchanged
 /// since the last call. On cache hit no SQLite connection is opened.
 /// On cache miss (or first call, or metadata unreadable) opens the
 /// DB read-only, verifies the schema, runs the per-pid query, and
@@ -376,13 +362,14 @@ fn observations_for_candidates(
     db_path: &Path,
     candidates: &[CodexPaneProcess],
     ts_floor: i64,
+    cache: &QueryCache,
 ) -> HashMap<i64, ThreadObservation> {
     let stamp = FileStamp::of(db_path);
     let mut candidate_pids: Vec<i64> = candidates.iter().map(|c| c.pid).collect();
     candidate_pids.sort_unstable();
     candidate_pids.dedup();
 
-    let mut cache_guard = QUERY_CACHE.lock().unwrap_or_else(PoisonError::into_inner);
+    let mut cache_guard = cache.last.lock().unwrap_or_else(PoisonError::into_inner);
     if let (Some(stamp), Some(cached)) = (stamp, cache_guard.as_ref())
         && cached.db_path == db_path
         && cached.db_stamp == stamp
@@ -390,7 +377,7 @@ fn observations_for_candidates(
         && ts_floor >= cached.cached_ts_floor
     {
         // Cache hit: replay observations, dropping any that have aged
-        // out under the new floor. See QueryCache docs for why this is
+        // out under the new floor. See CachedQuery docs for why this is
         // equivalent to re-querying the unchanged DB.
         return cached
             .observations
@@ -421,13 +408,17 @@ fn observations_for_candidates(
         if observations.contains_key(&candidate.pid) {
             continue;
         }
+        #[cfg(test)]
+        cache
+            .queries
+            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         if let Some(observation) = query_freshest_thread(&connection, candidate.pid, ts_floor) {
             observations.insert(candidate.pid, observation);
         }
     }
 
     if let Some(stamp) = stamp {
-        *cache_guard = Some(QueryCache {
+        *cache_guard = Some(CachedQuery {
             db_path: db_path.to_path_buf(),
             db_stamp: stamp,
             candidate_pids,
@@ -451,8 +442,6 @@ fn query_freshest_thread(
     pid: i64,
     ts_floor: i64,
 ) -> Option<ThreadObservation> {
-    #[cfg(test)]
-    QUERY_COUNT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
     let prefix = format!("{PROCESS_UUID_PREFIX}{pid}:");
     let like_pattern = format!("{prefix}%");
     let mut stmt = connection

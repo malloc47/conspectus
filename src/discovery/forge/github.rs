@@ -495,8 +495,12 @@ impl<R: GhRunner> GitHubForgeProvider<R> {
         }
     }
 
-    fn discover_repo(&self, root: &std::path::Path) -> Result<GraphFragment> {
-        let Some(probe) = self.git.probe(root)? else {
+    fn discover_repo(
+        &self,
+        root: &std::path::Path,
+        context: &DiscoveryContext,
+    ) -> Result<GraphFragment> {
+        let Some(probe) = self.git.probe_cached(root, context.caches())? else {
             return Ok(GraphFragment::empty());
         };
         let Some((host, owner, repo)) = probe
@@ -540,7 +544,7 @@ impl<R: GhRunner + 'static> DiscoveryProvider for GitHubForgeProvider<R> {
         let epoch = crate::discovery::current_epoch();
         let mut fragments = Vec::with_capacity(context.roots().len());
         for root in context.roots() {
-            fragments.push(self.discover_repo(root)?);
+            fragments.push(self.discover_repo(root, context)?);
         }
         let merged = merge_fragments(fragments);
         let mut fragment = GraphFragment {

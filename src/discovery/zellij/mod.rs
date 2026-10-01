@@ -33,7 +33,6 @@ use std::time::Duration;
 
 use anyhow::{Context, Result};
 
-use crate::discovery::memo::TtlCache;
 use crate::discovery::providers;
 use crate::discovery::tmux::{MuxBackend, TmuxAttachOutcome, TmuxOutcome, UnavailableReason};
 use crate::discovery::{DiscoveryContext, DiscoveryProvider, GraphFragment};
@@ -218,7 +217,7 @@ impl<R: MuxBackend> ZellijDiscovery<R> {
 }
 
 impl<R: MuxBackend + 'static> DiscoveryProvider for ZellijDiscovery<R> {
-    fn discover(&self, _context: &DiscoveryContext) -> Result<GraphFragment> {
+    fn discover(&self, context: &DiscoveryContext) -> Result<GraphFragment> {
         // H-SERVE-PERF-011: TTL-cache the zellij fragment. The
         // freshness gate doesn't stop this provider from re-running
         // on quiet cycles — when zellij has no live sessions the
@@ -226,7 +225,7 @@ impl<R: MuxBackend + 'static> DiscoveryProvider for ZellijDiscovery<R> {
         // stamps, so `gate.fresh` never contains it and every class
         // thread's cycle respawns the backend. Same shape as the
         // forge H-SERVE-PERF-005 and tmux fixes.
-        if let Some(cached) = ZELLIJ_CACHE.get(&()) {
+        if let Some(cached) = context.caches().zellij.get(&()) {
             return Ok(cached);
         }
 
@@ -278,14 +277,12 @@ impl<R: MuxBackend + 'static> DiscoveryProvider for ZellijDiscovery<R> {
             ZELLIJ_BACKEND,
             crate::discovery::current_epoch(),
         );
-        ZELLIJ_CACHE.set((), fragment.clone());
+        context.caches().zellij.set((), fragment.clone());
         Ok(fragment)
     }
 }
 
-const ZELLIJ_CACHE_TTL: Duration = Duration::from_secs(5);
-
-static ZELLIJ_CACHE: TtlCache<(), GraphFragment> = TtlCache::new(ZELLIJ_CACHE_TTL);
+pub(crate) const ZELLIJ_CACHE_TTL: Duration = Duration::from_secs(5);
 
 #[cfg(test)]
 mod tests {

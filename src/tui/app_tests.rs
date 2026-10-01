@@ -60,17 +60,6 @@ fn seeded_app(sessions: &[(&str, &str, &str)]) -> App {
 }
 
 fn scenario_app(name: &str) -> (App, GraphSnapshot) {
-    // H-SERVE-PERF-011: scenarios call discover_local_with which
-    // dispatches TmuxDiscovery through the process-global tmux
-    // cache. Serialize the scenario materializations via the
-    // tmux cache test lock and reset before each so a parallel
-    // scenario can't short-circuit us to its cached fragment.
-    // The lock only matters during materialize()/snapshot();
-    // once App owns the resulting GraphSnapshot the subsequent
-    // test asserts don't touch the cache.
-    let _serial = crate::discovery::tmux::TMUX_CACHE_TEST_LOCK.lock().unwrap();
-    crate::discovery::tmux::reset_tmux_cache_for_tests();
-
     let world = dev_scenarios::materialize(name).expect("materialize scenario");
     let snap = world.snapshot().expect("scenario snapshot");
     let tree = world.sessions_tree().expect("scenario sessions tree");
@@ -1525,12 +1514,6 @@ fn scenario_refresh_when_selected_row_disappears_snaps_to_visible_row() {
 
 #[test]
 fn scenario_attach_target_refuses_current_tmux_session() {
-    // H-SERVE-PERF-011: hold the tmux cache test lock + reset
-    // for the same reason `scenario_app` does — the scenario
-    // dispatches TmuxDiscovery through the process-global cache.
-    let _serial = crate::discovery::tmux::TMUX_CACHE_TEST_LOCK.lock().unwrap();
-    crate::discovery::tmux::reset_tmux_cache_for_tests();
-
     let world = dev_scenarios::materialize("exact-match").expect("materialize scenario");
     let snap = world.snapshot().expect("scenario snapshot");
     let tree = world.sessions_tree().expect("scenario sessions tree");
