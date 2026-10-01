@@ -347,11 +347,13 @@ pub fn open_mmap(path: &Path) -> Result<SnapshotMmap> {
 /// cache). Hostile or corrupted bytes are undefined behavior.
 pub fn open_mmap_unvalidated(path: &Path) -> Result<SnapshotMmap> {
     let mut file = File::open(path)?;
-    let file_len = file.metadata()?.len();
-    if file_len < HEADER_LEN as u64 {
+    // A length past usize::MAX can't be mapped anyway; saturating keeps
+    // the size checks below correct.
+    let file_len = usize::try_from(file.metadata()?.len()).unwrap_or(usize::MAX);
+    if file_len < HEADER_LEN {
         return Err(SnapshotError::Truncated {
             needed: HEADER_LEN,
-            actual: file_len as usize,
+            actual: file_len,
         });
     }
 
@@ -368,10 +370,10 @@ pub fn open_mmap_unvalidated(path: &Path) -> Result<SnapshotMmap> {
         });
     }
     let expected_total = HEADER_LEN + payload_len;
-    if (file_len as usize) < expected_total {
+    if file_len < expected_total {
         return Err(SnapshotError::Truncated {
             needed: expected_total,
-            actual: file_len as usize,
+            actual: file_len,
         });
     }
 
