@@ -723,7 +723,7 @@ fn has_id_agrees_with_owned_id_comparison() {
     let repo = RepoId::new("/r/.git");
     let nodes = [
         GraphNode::Repo(RepoNode::new(repo.clone())),
-        GraphNode::checkout(CheckoutId::new(repo.clone(), "/r"), "/r"),
+        GraphNode::checkout(CheckoutId::new(repo, "/r"), "/r"),
         GraphNode::AgentSession(AgentSessionNode::new(
             AgentSessionId::new("codex", "/state", "s1"),
             "codex".to_string(),

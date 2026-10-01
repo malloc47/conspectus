@@ -1077,10 +1077,6 @@ fn env_state_root(env_key: &str, home_relative: &str) -> Option<PathBuf> {
     env::var_os("HOME").map(|home| PathBuf::from(home).join(home_relative))
 }
 
-// `default_agent_deck_root` retired in H-EXT-014; the same
-// env-var contract now lives in
-// `orchestrator::REGISTRY[..].resolve_default_root()`.
-
 pub fn merge_fragments(fragments: impl IntoIterator<Item = GraphFragment>) -> GraphSnapshot {
     let mut nodes = BTreeMap::new();
     let mut candidate_links = BTreeMap::new();

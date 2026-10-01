@@ -363,12 +363,7 @@ fn header_freshness(app: &App) -> String {
 
 #[cfg(not(test))]
 fn current_unix_epoch_for_render() -> i64 {
-    use std::time::{SystemTime, UNIX_EPOCH};
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .ok()
-        .and_then(|d| i64::try_from(d.as_secs()).ok())
-        .unwrap_or(0)
+    crate::discovery::current_epoch()
 }
 
 /// Test override: a fixed clock so snapshot tests stay

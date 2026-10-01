@@ -683,11 +683,6 @@ fn collect_attached_agents(snapshot: &GraphSnapshot) -> HashMap<String, Vec<Atta
     out
 }
 
-// H-HYG-006 wave 5: local `collect_agent_mux_candidate_counts`
-// retired. Consumers consult
-// `crate::model::SnapshotIndex::agent_mux_candidate_counts()`
-// instead.
-
 fn agent_row(
     agent: &AttachedAgent,
     depth: u8,

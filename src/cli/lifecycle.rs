@@ -12,9 +12,7 @@ use clap::{Args, ValueEnum};
 
 use conspectus::config;
 
-use super::{
-    cache_resolved_snapshot, current_unix_epoch_for_table, warm_start_discover_and_resolve,
-};
+use super::{cache_resolved_snapshot, warm_start_discover_and_resolve};
 
 #[derive(Debug, Args)]
 pub(super) struct ServeArgs {
@@ -259,7 +257,7 @@ fn render_status_human(
         println!("no class state yet — daemon may have just started");
         return;
     }
-    let now = current_unix_epoch_for_table().unwrap_or(0);
+    let now = conspectus::discovery::current_epoch();
     for (class, state) in classes {
         let outcome = state.last_outcome.as_deref().unwrap_or("pending");
         let age = match state.last_completed_epoch {

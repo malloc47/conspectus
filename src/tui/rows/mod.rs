@@ -581,15 +581,6 @@ pub(crate) fn session_matches_filter(
     })
 }
 
-// H-HYG-006 wave 2: `collect_agent_mux_candidate_counts` retired.
-// Its consumers now consult
-// `crate::model::SnapshotIndex::new(snapshot).agent_mux_candidate_counts()`
-// so the count computation happens once per snapshot publish
-// instead of once per row-tree build. `rows/mux.rs` retains a
-// local copy because its consumer builds a different-shaped
-// row tree; that copy retires alongside H-HYG-006 wave 3+
-// when the mux row builder migrates to the index too.
-
 pub fn recency_bucket(now: Option<i64>, activity_epoch: Option<i64>) -> Option<RecencyBucket> {
     let now = now?;
     let then = activity_epoch?;
@@ -722,11 +713,7 @@ fn tree_home_dir() -> Option<std::path::PathBuf> {
 /// Wall-clock unix epoch that view-model derivations (row trees, the
 /// node explorer) use for relative ages.
 pub(crate) fn tree_current_unix_epoch() -> Option<i64> {
-    use std::time::{SystemTime, UNIX_EPOCH};
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .ok()
-        .and_then(|d| i64::try_from(d.as_secs()).ok())
+    Some(crate::discovery::current_epoch())
 }
 
 #[cfg(test)]

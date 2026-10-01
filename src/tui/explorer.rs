@@ -1797,13 +1797,9 @@ fn finalize_group(
     let any_slot_has_conflict = resolved_slots
         .iter()
         .any(|r| !r.competing_link_ids.is_empty());
-    // H-UI-006 retired the H-UI-007 candidate-fan-out fallback:
-    // the resolver now keeps the slot alive with
-    // `selected_link_id = None` for `suppress_ambiguous_cwd_mux_links`,
-    // so "has any slot in this group been ambiguously resolved"
-    // is the direct read. A no-winner slot signals ambiguity even
-    // if its `competing_link_ids` happens to be empty (the slot
-    // itself is the signal).
+    // The resolver keeps an ambiguous slot alive with
+    // `selected_link_id = None`, so a no-winner slot is itself the
+    // ambiguity signal, even when `competing_link_ids` is empty.
     let any_slot_unresolved = resolved_slots.iter().any(|r| r.selected_link_id.is_none());
     let ambiguous = any_slot_has_conflict || any_slot_unresolved;
 

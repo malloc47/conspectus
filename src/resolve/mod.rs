@@ -883,9 +883,6 @@ fn mux_evidence_rank(match_kind: Option<&str>) -> u8 {
     }
 }
 
-// H-REF-003: `mux_tier` retired — replaced by
-// `ProvenanceTier::from_provenance` shared with `pr_score`.
-
 /// Branch ↔ pull-request ordering: declared links win first, then
 /// open (non-draft) state, with closed/merged and draft demoted to
 /// tie-breakers and finally `updated_epoch` recency.
@@ -914,9 +911,6 @@ struct PrScore {
     updated_epoch: i64,
     confidence: Confidence,
 }
-
-// H-REF-003: `PrProvenanceTier` retired — replaced by the
-// shared `ProvenanceTier` above (identical variants + labels).
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq, Ord, PartialOrd)]
 enum PrStateRank {
@@ -975,9 +969,6 @@ fn pr_score_axes(link: &GraphLink) -> Vec<ScoreAxis> {
         score_axis("link_id", &link.id),
     ]
 }
-
-// H-REF-003: `pr_provenance_tier` retired — replaced by
-// `ProvenanceTier::from_provenance` shared with `mux_score`.
 
 fn pr_state_rank(raw: Option<&str>) -> PrStateRank {
     match raw.map(str::to_ascii_lowercase).as_deref() {

@@ -648,7 +648,11 @@ fn handle_hook_ingest(request: &Request, ctx: &DispatchCtx) -> Response {
             }),
         };
     };
-    hook_sidecar::apply_hook_records(&mut snapshot, vec![record], wall_clock_epoch());
+    hook_sidecar::apply_hook_records(
+        &mut snapshot,
+        vec![record],
+        crate::discovery::current_epoch(),
+    );
     let snapshot = resolve_snapshot(snapshot);
     publish_snapshot_to_path(
         snapshot,
@@ -774,7 +778,7 @@ fn handle_refresh(request: &Request, ctx: &DispatchCtx) -> Response {
         Ok(g) => g,
         Err(poisoned) => poisoned.into_inner(),
     };
-    let started = wall_clock_epoch() as u64;
+    let started = crate::discovery::current_epoch() as u64;
     let outcome = match class {
         None => run_full_rebuild(
             &ctx.scan_roots,
@@ -1359,7 +1363,7 @@ fn run_cycle(
     snapshot_bytes: &SnapshotBytes,
     snapshot_state: &SnapshotState,
 ) {
-    let started = wall_clock_epoch();
+    let started = crate::discovery::current_epoch();
     record_state_started(state, class, started);
     // Poisoned-mutex recovery: a panic in a peer class while it
     // held the lock taints it, but the in-memory snapshot cache
@@ -1371,7 +1375,7 @@ fn run_cycle(
         Err(poisoned) => poisoned.into_inner(),
     };
     let outcome = try_class_cycle(class, scan_roots, intervals, snapshot_bytes, snapshot_state);
-    let completed = wall_clock_epoch();
+    let completed = crate::discovery::current_epoch();
     match outcome {
         Ok(()) => record_state_completed(state, class, completed, Ok(())),
         Err(err) => {
@@ -1383,16 +1387,6 @@ fn run_cycle(
             record_state_completed(state, class, completed, Err(msg));
         }
     }
-}
-
-/// Wall-clock epoch (seconds since UNIX_EPOCH). Defaults to 0
-/// on clock-before-epoch which the rest of the codebase already
-/// treats as the "unknown" sentinel.
-fn wall_clock_epoch() -> i64 {
-    std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| i64::try_from(d.as_secs()).unwrap_or(0))
-        .unwrap_or(0)
 }
 
 /// Write a `started_epoch` to the shared state. Poisoned-mutex

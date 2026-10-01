@@ -15,8 +15,8 @@ use clap::{Args, Subcommand};
 use conspectus::config;
 
 use super::{
-    ColorFlag, FilterArgs, LayoutFlag, PagerOptions, current_unix_epoch_for_table, print_paged,
-    resolve_color_from_env, warm_start_discover_and_resolve,
+    ColorFlag, FilterArgs, LayoutFlag, PagerOptions, print_paged, resolve_color_from_env,
+    warm_start_discover_and_resolve,
 };
 
 #[derive(Debug, Args)]
@@ -136,7 +136,7 @@ impl TableRowsArgs {
         // flags are the only source so the static table narrows the
         // exact set the operator typed.
         let cli_filter = self.filter_args.to_row_filter()?;
-        let now_epoch = current_unix_epoch_for_table();
+        let now_epoch = Some(conspectus::discovery::current_epoch());
 
         let roots: Vec<PathBuf> = if self.scan_roots.is_empty() {
             vec![cwd]

@@ -204,7 +204,7 @@ impl LoopMode for LiveMode {
                     app.update(Msg::SetData {
                         snapshot: database,
                         tree,
-                        loaded_at_epoch: current_unix_epoch().unwrap_or(0),
+                        loaded_at_epoch: crate::discovery::current_epoch(),
                         initial_selection_hint,
                     });
                     let cfg_clone = app.config().clone();
@@ -781,7 +781,7 @@ fn set_static_data(
     app.update(Msg::SetData {
         snapshot: database,
         tree,
-        loaded_at_epoch: current_unix_epoch().unwrap_or(0),
+        loaded_at_epoch: crate::discovery::current_epoch(),
         initial_selection_hint,
     });
     populate_provider_status(app, config);
@@ -2395,7 +2395,7 @@ fn refresh_with_config(app: &mut App, config: &RunConfig) {
             app.update(Msg::SetData {
                 snapshot: database,
                 tree,
-                loaded_at_epoch: current_unix_epoch().unwrap_or(0),
+                loaded_at_epoch: crate::discovery::current_epoch(),
                 initial_selection_hint,
             });
         }
@@ -2457,39 +2457,12 @@ pub(super) fn refresh_from_snapshot(
     app.update(Msg::SetData {
         snapshot: database,
         tree,
-        loaded_at_epoch: current_unix_epoch().unwrap_or(0),
+        loaded_at_epoch: crate::discovery::current_epoch(),
         initial_selection_hint,
     });
     Ok(())
 }
 
-// Tree derivation moved to `tui::rows::mod.rs` in H-TUI-002 Phase F
-// so `App::update`'s projection-change reducer arms can call it
-// without depending on runtime.
-
-fn current_unix_epoch() -> Option<i64> {
-    use std::time::{SystemTime, UNIX_EPOCH};
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .ok()
-        .and_then(|d| i64::try_from(d.as_secs()).ok())
-}
-
-/// The runtime's outer action: either a [`Msg`] for the pure
-/// reducer or a side-effecting operation the reducer can't perform
-/// (running discovery, exec'ing into a mux client). `Msg` is
-/// boxed because `Msg::SetData` carries a `RowTree` that pushes
-/// the enum past clippy's `large_enum_variant` threshold, even
-/// though `Action::Msg` only ever carries the small navigation
-/// variants in practice.
-//
-// `EnterDefault` ends in `Action` semantically (it names the key's
-// behavior) and lives alongside `Attach`, `Resume`, `View`, etc.,
-// which all read as actions implicitly. Suppress the
-// `enum_variant_names` lint locally so the name doesn't have to be
-// twisted to satisfy the lint.
-// Action / SelectedDefault / selected_default_action /
-// pin_placeholder_row moved to `tui::keymap` in H-TUI-004 wave 3.
 pub(super) use crate::tui::keymap::{Action, SelectedDefault, selected_default_action};
 
 /// Dispatch a key into the open help overlay via the shared
@@ -2914,7 +2887,6 @@ fn write_pin_remove(
     crate::pins::remove_pin_entry(&request.store_path, &request.id).map_err(Into::into)
 }
 
-// cycle_view moved to `tui::keymap` in H-TUI-004 wave 3.
 pub(super) use crate::tui::keymap::cycle_view;
 
 /// Dispatch `Enter` on the left pane (T8-043) to the selected
@@ -3537,7 +3509,6 @@ fn run_viewer_launch(terminal: &mut DefaultTerminal, plan: &LaunchPlan) -> Viewe
     outcome
 }
 
-// translate and remap_for_focus moved to `tui::keymap` in H-TUI-004 wave 3.
 pub(super) use crate::tui::keymap::{remap_for_focus, translate};
 
 #[cfg(test)]

@@ -95,52 +95,39 @@ enum Command {
     Dev(DevArgs),
 }
 
-// H-REF-006 wave 1: `ColumnsArgs` moved to `cli/columns.rs`.
 mod columns;
 use columns::ColumnsArgs;
 
-// H-REF-006 wave 2: `RenameArgs` + subtree moved to `cli/rename.rs`.
 mod rename;
 use rename::RenameArgs;
 
-// H-REF-006 wave 3: `DevArgs` subtree moved to `cli/dev.rs`.
-// Gated at the module level via `#![cfg(debug_assertions)]`
-// inside `dev.rs`; release builds don't compile it.
+// Debug builds only: `dev.rs` is gated with `#![cfg(debug_assertions)]`.
 #[cfg(debug_assertions)]
 mod dev;
 #[cfg(debug_assertions)]
 use dev::DevArgs;
 
-// H-REF-006 wave 7: `ServeArgs`, `RefreshArgs`, `StatusArgs`
-// subtrees moved to `cli/lifecycle.rs`.
 mod lifecycle;
 use lifecycle::{RefreshArgs, ServeArgs, StatusArgs};
 
-// H-REF-006 wave 4: `HookArgs` subtree moved to `cli/hook.rs`.
 mod hook;
 use hook::HookArgs;
 
-// H-REF-006 wave 5: `NodeArgs` subtree moved to `cli/node.rs`.
 mod node;
 use node::NodeArgs;
 
-// H-REF-006 wave 6: `GraphArgs` moved to `cli/graph.rs`.
 mod graph;
 use graph::GraphArgs;
 
-// H-REF-006 wave 8: `TableArgs` subtree moved to `cli/table.rs`.
 mod table;
 use table::TableArgs;
 
-// H-REF-006 wave 9: `AliasArgs` subtree moved to `cli/alias.rs`.
 mod alias;
 use alias::AliasArgs;
 
-// H-REF-006 wave 11: declared subtree moved to `cli/declared.rs`.
 mod declared;
 use declared::DeclaredArgs;
 
-// H-REF-006 wave 12: TUI subtree moved to `cli/tui.rs`.
 mod tui;
 use tui::TuiArgs;
 
@@ -149,14 +136,6 @@ pub(super) enum LayoutFlag {
     #[default]
     Columnar,
     Card,
-}
-
-pub(super) fn current_unix_epoch_for_table() -> Option<i64> {
-    use std::time::{SystemTime, UNIX_EPOCH};
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .ok()
-        .and_then(|d| i64::try_from(d.as_secs()).ok())
 }
 
 /// P11-011a resolution chain for every one-shot CLI command
@@ -585,9 +564,6 @@ pub(super) fn apply_grouping_to_tui_config(
 /// surface; revisit if more formats are needed.
 #[cfg(test)]
 mod tests;
-// H-REF-006 wave 2 continued: rename subtree moved out;
-// `resolve_alias_store` promoted to `pub(super)` for the
-// rename module below.
 
 pub(super) fn resolve_alias_store(
     store: Option<DeclaredStoreFlag>,
@@ -617,7 +593,6 @@ pub(super) fn resolve_alias_store(
     }
 }
 
-// H-REF-006 wave 10: pin subtree moved to `cli/pin.rs`.
 mod pin;
 use pin::PinArgs;
 

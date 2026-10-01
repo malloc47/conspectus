@@ -444,15 +444,6 @@ fn state_label(state: DeclaredLinkState) -> &'static str {
 #[derive(Clone, Debug, Eq, PartialEq)]
 struct DeclaredEndpointArg(DeclaredEndpoint);
 
-// H-REF-002: `parse_relation_kind` + `relation_label` moved to
-// `RelationKind::from_snake_case` / `snake_case` methods in
-// `crate::model`. Callers use the methods directly.
-
-// H-REF-001: `parse_endpoint` + `endpoint_label` moved to
-// `DeclaredEndpoint::parse_compact` / `compact_label` in
-// `crate::declared`. Callers in this module use the methods
-// directly.
-
 /// Resolve which config file a write should target.
 ///
 /// `Some(Project)` / `Some(User)` short-circuit the nearest-store walk;

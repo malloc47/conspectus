@@ -1,15 +1,12 @@
 // Extracted from cli.rs H-HYG-011 rolling wave.
-use super::*;
-use std::time::Duration;
-// H-REF-006 wave 4: hook helpers moved to cli/hook.rs
 use super::hook::{
     ensure_claude_hook, harness_binaries, has_claude_hook, remove_claude_hook,
     resolve_harness_pid_with,
 };
-// H-REF-006 wave 10: pin helpers moved to cli/pin.rs
 use super::pin::{format_epoch_iso8601, resolve_resume_argv_with_cache};
-// H-REF-006 wave 12: TUI helpers moved to cli/tui.rs
 use super::tui::parse_tui_duration;
+use super::*;
+use std::time::Duration;
 
 fn program(cmd: &ProcCommand) -> String {
     cmd.get_program().to_string_lossy().into_owned()
