@@ -30,7 +30,7 @@ fn session(harness: &str) -> AgentSessionId {
 }
 
 /// Lay down a fake `<state>/projects/<proj>/<session_key>.jsonl`
-/// so `ClaudeHistoryViewer::plan` can resolve a file path.
+/// so `resolve_viewer_target` can resolve a file path.
 /// Returns the temp dir + the session id it created.
 fn claude_fixture(session_key: &str) -> (tempfile::TempDir, AgentSessionId) {
     let dir = tempfile::tempdir().expect("tempdir");

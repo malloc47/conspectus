@@ -13,16 +13,8 @@
 //! (`H-TRANSCRIPT-013`).
 //!
 //! Resolution takes a [`BinaryProbe`] seam so tests can simulate
-//! PATH state without touching the host. `plan()` may consult the
-//! filesystem (e.g. globbing for a Claude Code JSONL file) and
-//! returns `Err` with a one-line hint when no viable invocation
-//! can be assembled. v1 of the escape-hatch ships one backend:
-//!   - [`ClaudeHistoryViewer`] — resolves the session's on-disk
-//!     JSONL by globbing
-//!     `<state_scope>/projects/*/<session_key>.jsonl` and passes
-//!     the file path as a positional argument
-//!     (`claude-history --show-id` *prints* the id; the
-//!     interactive viewer takes a file path).
+//! PATH state without touching the host. The one supported external
+//! viewer is `claude-history`, for Claude Code sessions.
 
 use std::path::PathBuf;
 
@@ -96,62 +88,15 @@ impl BinaryProbe for PathBinaryProbe {
     }
 }
 
-/// Action-resolver trait per ADR 0019. Each backend knows the
-/// binary it would launch, which harness keys it supports, and how
-/// to assemble a [`LaunchPlan`] for a session.
-pub trait SessionViewerAction {
-    /// Stable backend key used in diagnostics.
-    fn key(&self) -> &str;
-    /// True if this backend can render the given harness.
-    fn supports(&self, harness_key: &str) -> bool;
-    /// Binary name probed against `$PATH`.
-    fn binary(&self) -> &str;
-    /// Construct the exec invocation for a session. May consult the
-    /// filesystem to resolve harness-specific paths (e.g.
-    /// `claude-history` needs the on-disk JSONL file). Returns
-    /// `Err` with a one-line hint when the session can't be
-    /// resolved into something this backend can launch.
-    fn plan(&self, session: &AgentSessionId) -> Result<LaunchPlan, String>;
-}
-
-/// `claude-history` (raine/claude-history): mature terminal viewer
-/// for Claude Code. The interactive viewer takes the conversation's
-/// JSONL file as a positional argument; there is no
-/// "open by session id" flag (the `--show-id` flag *prints* the id,
-/// not opens it). We resolve the file by globbing
-/// `<state_scope>/projects/*/<session_key>.jsonl`, which matches the
-/// Claude Code state layout the harness adapter scans.
-pub struct ClaudeHistoryViewer;
-
-impl SessionViewerAction for ClaudeHistoryViewer {
-    fn key(&self) -> &str {
-        "claude-history"
-    }
-
-    fn supports(&self, harness_key: &str) -> bool {
-        harness_key == "claude-code"
-    }
-
-    fn binary(&self) -> &str {
-        "claude-history"
-    }
-
-    fn plan(&self, session: &AgentSessionId) -> Result<LaunchPlan, String> {
-        let file = find_claude_session_file(&session.state_scope, &session.session_key)
-            .ok_or_else(|| {
-                format!(
-                    "no transcript under {}/projects/*/{}.jsonl",
-                    session.state_scope, session.session_key
-                )
-            })?;
-        let file_str = file.to_string_lossy().into_owned();
-        Ok(LaunchPlan {
-            program: self.binary().to_string(),
-            args: vec![file_str],
-            label: format!("{} {}", self.key(), session.session_key),
-        })
-    }
-}
+/// `claude-history` (raine/claude-history): the one external viewer
+/// Conspectus launches, for Claude Code sessions. Its interactive
+/// viewer takes the conversation's JSONL file as a positional
+/// argument (`--show-id` *prints* an id rather than opening one), so
+/// the file is resolved by globbing
+/// `<state_scope>/projects/*/<session_key>.jsonl`, the layout the
+/// harness adapter scans.
+const CLAUDE_HISTORY: &str = "claude-history";
+const CLAUDE_CODE_HARNESS: &str = "claude-code";
 
 /// Walk `<state_scope>/projects/*/` looking for `<session_key>.jsonl`.
 /// Claude Code stores one project subdir per cwd (with `/` chars
@@ -174,46 +119,32 @@ fn find_claude_session_file(state_scope: &str, session_key: &str) -> Option<Path
     None
 }
 
-/// Backend preference order. Centralized so the resolver and the
-/// test layout agree. Today this is a single-entry slice;
-/// `H-TRANSCRIPT-013` will extend it with config-defined viewers.
-fn default_backends() -> [&'static dyn SessionViewerAction; 1] {
-    [&ClaudeHistoryViewer]
-}
-
 /// Resolve a viewer launch for a session, given a PATH probe.
 pub fn resolve_viewer_target(session: &AgentSessionId, probe: &dyn BinaryProbe) -> ViewerTarget {
-    let backends = default_backends();
-    let supported: Vec<&dyn SessionViewerAction> = backends
-        .into_iter()
-        .filter(|backend| backend.supports(&session.harness_key))
-        .collect();
-    if supported.is_empty() {
+    if session.harness_key != CLAUDE_CODE_HARNESS {
         return ViewerTarget::Disabled(ViewerDisabled::UnsupportedHarness {
             harness_key: session.harness_key.clone(),
         });
     }
-    // Walk backends in preference order. We remember the *first*
-    // viable backend's plan error so we can surface
-    // `TranscriptNotFound` when no backend's plan() succeeds.
-    let mut last_plan_error: Option<(String, String)> = None;
-    for backend in &supported {
-        if !probe.on_path(backend.binary()) {
-            continue;
-        }
-        match backend.plan(session) {
-            Ok(plan) => return ViewerTarget::Launch(plan),
-            Err(hint) => {
-                last_plan_error = Some((backend.binary().to_string(), hint));
-            }
-        }
+    if !probe.on_path(CLAUDE_HISTORY) {
+        return ViewerTarget::Disabled(ViewerDisabled::BinaryNotInstalled {
+            binaries: vec![CLAUDE_HISTORY.to_string()],
+            harness_key: session.harness_key.clone(),
+        });
     }
-    if let Some((binary, hint)) = last_plan_error {
-        return ViewerTarget::Disabled(ViewerDisabled::TranscriptNotFound { binary, hint });
-    }
-    ViewerTarget::Disabled(ViewerDisabled::BinaryNotInstalled {
-        binaries: supported.iter().map(|b| b.binary().to_string()).collect(),
-        harness_key: session.harness_key.clone(),
+    let Some(file) = find_claude_session_file(&session.state_scope, &session.session_key) else {
+        return ViewerTarget::Disabled(ViewerDisabled::TranscriptNotFound {
+            binary: CLAUDE_HISTORY.to_string(),
+            hint: format!(
+                "no transcript under {}/projects/*/{}.jsonl",
+                session.state_scope, session.session_key
+            ),
+        });
+    };
+    ViewerTarget::Launch(LaunchPlan {
+        program: CLAUDE_HISTORY.to_string(),
+        args: vec![file.to_string_lossy().into_owned()],
+        label: format!("{CLAUDE_HISTORY} {}", session.session_key),
     })
 }
 

@@ -11,6 +11,10 @@ is the **default** target of the `T` keybind; external launches
 described below remain as an **opt-in escape hatch**, reached via
 `[viewers.<harness>]` config (`H-TRANSCRIPT-013`).
 
+Amended 2026-09-30 (`H-RUST-016`): the `SessionViewerAction` trait
+described under "Integration shape" is retired. See the amendment at
+the end of this ADR.
+
 ## Context
 
 Conspectus discovers sessions from multiple agent harnesses and records
@@ -288,3 +292,22 @@ for the full-transcript surface.
   do well, locks Conspectus into one viewer's conventions, and
   fights the immediate-mode posture from ADR 0024. Launching the
   viewer as a child process matches the `P8-010` precedent.
+
+## Amendment: Retire The `SessionViewerAction` Trait (2026-09-30)
+
+The trait had one implementation (`ClaudeHistoryViewer`), reached
+through a one-element array of trait objects, so every call went through
+a preference-order loop with nothing to choose between. Once ADR 0052
+made the native viewer the default, the external launch became a
+narrow escape hatch with no second backend in sight.
+
+`resolve_viewer_target` in `src/tui/viewer.rs` now checks the harness,
+probes `PATH` for `claude-history`, and resolves the transcript file
+directly. The `ViewerTarget` and `ViewerDisabled` outcomes, and the
+`BinaryProbe` test seam, are unchanged.
+
+When config-defined viewers land (`H-TRANSCRIPT-013`), they are data
+(a program plus an argument template per harness), not trait
+implementations. A configured list of those, checked before the
+built-in `claude-history` fallback, is the extension point rather than a
+trait.

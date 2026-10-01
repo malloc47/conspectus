@@ -14328,7 +14328,10 @@ Queued chunks:
     overlays, pins, worktrees, mux), the runtime into per-executor
     modules, `ui.rs` by pane, and `pins.rs` by form. Moves only, no
     behavior change; the existing snapshot tests are the safety net.
-- [ ] `H-RUST-016` Retire `SessionViewerAction`.
+- [x] `H-RUST-016` Retire `SessionViewerAction`.
+  - Outcome: `resolve_viewer_target` is a straight-line check with the
+    same outcomes; ADR 0019 amended with the rationale and the
+    data-driven extension point for `H-TRANSCRIPT-013`.
   - Problem: ADR 0019's external-viewer trait has one implementation
     (`ClaudeHistoryViewer`) behind a one-element
     `[&dyn SessionViewerAction; 1]`, and the native viewer (ADR 0052)
