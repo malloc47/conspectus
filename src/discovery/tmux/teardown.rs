@@ -33,17 +33,28 @@ pub trait ProcessSignaller {
     fn sleep(&self, dur: Duration);
 }
 
+/// `pid` as a single-process `kill(2)` target. `None` for values that
+/// aren't one: 0 and negative pids address process groups (`-1` is
+/// every process the user owns), and values outside `pid_t` would wrap
+/// into some other pid.
+fn signal_target(pid: i64) -> Option<libc::pid_t> {
+    libc::pid_t::try_from(pid).ok().filter(|pid| *pid > 0)
+}
+
 /// Production signaller backed by `libc::kill`.
 #[derive(Clone, Copy, Debug, Default)]
 pub struct SystemSignaller;
 
 impl ProcessSignaller for SystemSignaller {
     fn terminate(&self, pid: i64) -> Result<()> {
+        let Some(pid) = signal_target(pid) else {
+            return Ok(());
+        };
         // SAFETY: `kill(2)` with a plain pid + signal has no memory
         // safety concerns. ESRCH (no such process) means the agent
         // already exited — the goal state — so it isn't an error.
         unsafe {
-            libc::kill(pid as libc::pid_t, libc::SIGTERM);
+            libc::kill(pid, libc::SIGTERM);
         }
         Ok(())
     }
@@ -51,7 +62,10 @@ impl ProcessSignaller for SystemSignaller {
     fn is_alive(&self, pid: i64) -> bool {
         // `kill(pid, 0)` performs the permission/existence check
         // without delivering a signal: 0 => alive, ESRCH => gone.
-        let rc = unsafe { libc::kill(pid as libc::pid_t, 0) };
+        let Some(pid) = signal_target(pid) else {
+            return false;
+        };
+        let rc = unsafe { libc::kill(pid, 0) };
         if rc == 0 {
             return true;
         }

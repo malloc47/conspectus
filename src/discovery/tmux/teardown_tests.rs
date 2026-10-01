@@ -126,3 +126,11 @@ fn unsupported_backend_reports_unsupported_kill() {
         .expect("ok");
     assert_eq!(report.kill, TmuxKillOutcome::Unsupported);
 }
+
+#[test]
+fn signal_target_refuses_group_and_out_of_range_pids() {
+    assert_eq!(signal_target(1234), Some(1234));
+    assert_eq!(signal_target(0), None);
+    assert_eq!(signal_target(-1), None);
+    assert_eq!(signal_target(i64::from(i32::MAX) + 1), None);
+}
