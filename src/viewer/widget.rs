@@ -191,10 +191,12 @@ fn draw_body(state: &mut ViewerState, theme: &Theme, frame: &mut Frame<'_>, area
         state.scroll_offset.min(max_offset)
     };
 
-    // Clone the cached lines for Paragraph (it consumes by value).
-    // Each Span carries Cow::Owned content already, so this is just
-    // span-vec clone + Cow ref-bump (cheap).
-    let paragraph = Paragraph::new(cache.lines.clone()).scroll((scroll_offset as u16, 0));
+    // The cached lines are already wrapped to `content_width`, so the
+    // visible window is a plain slice. Slicing (rather than
+    // `Paragraph::scroll`, whose offset is a u16) keeps transcripts
+    // longer than 65,535 lines scrollable and clones only what is shown.
+    let visible_end = total.min(scroll_offset + viewport_height as usize);
+    let paragraph = Paragraph::new(cache.lines[scroll_offset..visible_end].to_vec());
     frame.render_widget(paragraph, area);
 
     state.viewport_height = viewport_height;
@@ -396,9 +398,11 @@ fn draw_help_overlay(theme: &Theme, frame: &mut Frame<'_>, area: Rect) {
         .map(|(_, d)| unicode_width::UnicodeWidthStr::width(*d))
         .max()
         .unwrap_or(0);
-    let inner_width = (key_col_width + 3 + desc_col_width) as u16;
+    let inner_width = u16::try_from(key_col_width + 3 + desc_col_width).unwrap_or(u16::MAX);
     // +4 for the two borders + two cells of inner padding.
-    let panel_width = (inner_width + 4).min(area.width.saturating_sub(2));
+    let panel_width = inner_width
+        .saturating_add(4)
+        .min(area.width.saturating_sub(2));
     // +2 for the top + bottom borders, +1 for a title line.
     let panel_height = (entries.len() as u16 + 3).min(area.height.saturating_sub(2));
 

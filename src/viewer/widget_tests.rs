@@ -659,3 +659,28 @@ fn summary_aggregation_separates_runs_around_messages() {
         "second run aggregate: {s}"
     );
 }
+
+#[test]
+fn transcripts_longer_than_u16_lines_scroll_to_the_end() {
+    let body = (0..70_000)
+        .map(|i| format!("line {i}"))
+        .collect::<Vec<_>>()
+        .join("\n\n");
+    let mut doc = sample_document();
+    doc.turns = vec![TranscriptTurn {
+        role: TurnRole::User,
+        kind: TurnKind::Message,
+        body,
+        timestamp: None,
+        aborted: false,
+    }];
+    let theme = Theme::default();
+    let mut state = ViewerState::new(doc);
+    let buf = render_to_buffer(&mut state, &theme, 60, 12);
+    let text = snapshot_string(&buf);
+    assert!(state.total_lines > usize::from(u16::MAX));
+    assert!(
+        text.contains("line 69999"),
+        "the end of the transcript should be visible:\n{text}"
+    );
+}
