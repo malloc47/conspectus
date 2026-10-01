@@ -124,8 +124,8 @@ mod tests {
     #[test]
     fn osc52_handles_empty_payload() {
         // Empty input still produces a well-formed sequence — terminals
-        // accept an empty c-buffer write as "clear the clipboard," which
-        // matches the no-misleading-toast contract in T8-040.
+        // accept an empty c-buffer write as "clear the clipboard," so
+        // the toast never claims a copy that didn't happen.
         let mut buf = Vec::new();
         write_osc52(&mut buf, "").unwrap();
         assert_eq!(buf, b"\x1b]52;c;\x07");

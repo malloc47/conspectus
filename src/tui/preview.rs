@@ -1,10 +1,10 @@
 //! Mux pane-capture cache + orchestration for the right-panel
 //! preview.
 //!
-//! v1 (P8-009 slice) keeps the cache in-process and refreshes on
-//! selection change only. Throttling on a refresh interval, async
-//! polling, and per-mux freshness markers come with `T8-007`'s
-//! background data adapter.
+//! The cache is in-process and refreshes on selection change only.
+//! Interval-driven refresh and freshness labels are open work
+//! (backlog `T8-009`); until then `RunConfig::mux_preview_interval`
+//! is parsed but unused.
 
 use std::collections::BTreeMap;
 use std::time::Instant;
@@ -77,9 +77,8 @@ impl PreviewStore {
 /// [`PreviewContent`]. Pure (modulo the runner call); callers
 /// supply the runner so tests inject [`crate::discovery::tmux::FakeTmux`].
 pub fn capture_via(runner: &dyn MuxBackend, native_id: &str) -> PreviewContent {
-    // Today's preview path always queries the default socket;
-    // non-default-socket previews are part of the deferred
-    // H-PIN-F-001 discovery story.
+    // The preview always queries the default socket, because
+    // discovery doesn't cover non-default sockets yet.
     match runner.capture_pane(None, native_id) {
         Ok(TmuxCaptureOutcome::Captured(text)) => PreviewContent::Text(text),
         Ok(TmuxCaptureOutcome::NoTarget) => PreviewContent::NoTarget,

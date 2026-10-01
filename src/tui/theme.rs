@@ -179,9 +179,7 @@ impl Default for Theme {
     /// that the styling overhaul plan's later phases will exercise;
     /// they are inert until those phases call them.
     fn default() -> Self {
-        // Per-harness colors keyed by adapter harness
-        // key. Values match the pre-H-EXT-003 flat-field defaults
-        // so existing snapshots stay stable.
+        // Per-harness colors keyed by adapter harness key.
         let mut harness_colors = BTreeMap::new();
         harness_colors.insert("claude-code".to_string(), Color::Magenta);
         harness_colors.insert("codex".to_string(), Color::Cyan);
@@ -248,10 +246,9 @@ impl Theme {
     /// [`Self::harness_unknown`] so the renderer always has a
     /// hue to use.
     pub fn harness_color(&self, label_or_key: &str) -> Color {
-        // Resolve label → key via the registry so the
-        // pre-H-EXT-003 badge callers (which pass display
-        // labels) hit the same map entry as new callers that
-        // pass harness keys.
+        // Resolve label → key via the registry so callers that
+        // pass display labels hit the same map entry as callers
+        // that pass harness keys.
         let canonical_key = crate::discovery::harness::registered_adapters()
             .find(|a| a.harness_key() == label_or_key || a.display_label() == label_or_key)
             .map(super::super::discovery::harness::HarnessAdapter::harness_key);
@@ -470,8 +467,8 @@ impl Theme {
     /// as a routing-error diagnostic.
     pub fn set_color(&mut self, name: &str, color: Color) -> bool {
         match name {
-            // Legacy flat harness aliases (pre-H-EXT-003). Kept
-            // for config back-compat per ADR 0031's precedent for
+            // Legacy flat harness aliases. Kept for config
+            // back-compat per ADR 0031's precedent for
             // grandfathered keys; they route to the same
             // `harness_colors` entry the new
             // `[tui.theme.harness].<key>` form would.

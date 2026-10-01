@@ -44,7 +44,7 @@ use crate::tui::{RunConfig, ui};
 type DiscoveryResult = Result<crate::model::GraphSnapshot>;
 
 /// Mode-specific behavior for the shared [`run_loop`] driver
-/// (ADR 0085 contract 5, H-TUI-004 wave 2). Each mode owns its
+/// (ADR 0085 contract 5). Each mode owns its
 /// own async event sources (discovery worker + refresh timer
 /// for live; nothing for scenario) and its own action-dispatch
 /// policy (real handlers vs "disabled" status hints). The
@@ -535,8 +535,8 @@ fn draw_frame(app: &mut App, terminal: &mut DefaultTerminal) -> Result<()> {
 /// owns the input, `None` when the caller should fall through to
 /// its per-mode action translation.
 ///
-/// Shared between the live and static event loops (H-TUI-004
-/// wave 1). Only KeyEventKind::Press events are forwarded — the
+/// Shared between the live and static event loops. Only
+/// KeyEventKind::Press events are forwarded — the
 /// modal stack ignores repeat/release + non-key events like the
 /// individual overlay handlers already did.
 fn overlay_key_from_event(app: &App, event: &Event) -> Option<Action> {
@@ -2046,8 +2046,8 @@ fn execute_commit_alias_rename(
     };
 
     if let Some(mux_rename) = &plan.mux_native_rename {
-        // Default-socket rename for now; pin-driven socket
-        // propagation lands with H-PIN-017's TUI lockstep work.
+        // Default-socket rename only; pin sockets are not
+        // propagated here.
         let config = app.config().clone();
         match tmux.rename_session(None, &mux_rename.mux.native_id, &mux_rename.new_name) {
             Ok(crate::discovery::tmux::TmuxRenameOutcome::Renamed) => {}
@@ -2082,9 +2082,8 @@ fn execute_commit_alias_rename(
 /// cascade: `plan_mux_rename` finds pins whose `mux.name` matches
 /// the mux's current bare native id (and socket), and this executor
 /// rewrites each of those pin store TOMLs before firing the tmux
-/// `rename-session` so pin bindings survive the rename. Default-
-/// socket only for v1; non-default-socket variants land with
-/// H-PIN-014.
+/// `rename-session` so pin bindings survive the rename. Default
+/// socket only.
 fn execute_commit_mux_rename(
     app: &mut App,
     tmux: &dyn MuxBackend,
@@ -2126,8 +2125,7 @@ fn execute_commit_mux_rename(
         }
     }
 
-    // Chain the tmux rename. Default-socket only per the v1 note
-    // above; the socket-aware variant lands with H-PIN-014.
+    // Chain the tmux rename (default socket only; see above).
     let bare_current = plan
         .mux_rename
         .mux

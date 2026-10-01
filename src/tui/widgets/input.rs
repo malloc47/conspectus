@@ -1,9 +1,9 @@
 //! Centered modal text-input overlay, per ADR 0030.
 //!
 //! Hosts a [`tui_input::Input`] inside a bordered Ratatui frame and
-//! locks the surrounding focus cycle while open. Three callers share
-//! this primitive: the rename overlay (`H-RENAME-011`), the `/`
-//! search overlay (`T8-017`), and the inline mux picker (`P8-014`).
+//! locks the surrounding focus cycle while open. The rename overlay,
+//! the `/` search overlay, and the inline mux picker share this
+//! primitive.
 //! Bug fixes for Unicode cursor math, word navigation, and paste
 //! handling land once instead of three times.
 

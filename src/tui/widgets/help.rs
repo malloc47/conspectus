@@ -221,8 +221,7 @@ struct HelpSection {
 /// (filter to a view-specific set, disable a binding, etc.) become
 /// operations on the data rather than on rendered lines. The
 /// renderer keeps the in-tree sectioned-vertical layout — cheese's
-/// short / multi-column modes don't fit our 200+ char descriptions
-/// (H-WIDG-005 path question).
+/// short / multi-column modes don't fit our 200+ char descriptions.
 fn keymap_sections() -> Vec<HelpSection> {
     vec![
         HelpSection {

@@ -93,8 +93,6 @@ fn unknown_harness_is_unsupported() {
 }
 
 /// Non-claude harnesses have no escape-hatch backend registered.
-/// Operators wanting Codex / OpenCode external viewers will
-/// configure them via `H-TRANSCRIPT-013`.
 #[test]
 fn codex_has_no_escape_hatch_backend() {
     let probe = FakeBinaryProbe::new(&["claude-history"]);

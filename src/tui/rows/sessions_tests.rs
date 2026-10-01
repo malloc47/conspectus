@@ -864,7 +864,7 @@ fn two_worktrees_in_same_repo_show_worktree_level() {
     // Expect a single repo row at depth 0, followed by two
     // worktree rows at depth 1 each owning their session rows
     // at depth 2. The dedup pass collapses what would otherwise
-    // be a per-bucket repo header repeat (was T8-001).
+    // be a per-bucket repo header repeat.
     let kinds: Vec<&RowKind> = tree.rows.iter().map(|r| &r.kind).collect();
     let repo_count = kinds
         .iter()
@@ -1457,9 +1457,9 @@ fn two_mux_links_with_distinct_provenance_resolve_to_one_attached_mux() {
     // pointing at different muxes, the resolver picks the
     // higher-provenance candidate; the tree should reflect that
     // single winner as `Attached` rather than presenting both
-    // candidates as an ambiguity. Pre-H-UI-008 the tree raised
-    // a false-positive `Ambiguous` here because it grouped by
-    // candidate target instead of consulting the resolver.
+    // candidates as an ambiguity. Grouping by candidate target
+    // instead of consulting the resolver would raise a
+    // false-positive `Ambiguous` here.
     let session_id = NodeId::AgentSession(AgentSessionId::new("codex", "/state", "abc"));
     let editor = NodeId::MuxSession(MuxSessionId::new("editor"));
     let scratch = NodeId::MuxSession(MuxSessionId::new("scratch"));
@@ -2295,7 +2295,7 @@ fn repo_grouping_keeps_regular_lineage_sessions_flat_by_location() {
     );
 }
 
-// ---- ADR 0057 / H-PIN-016 pin row integration ---------------
+// ---- ADR 0057 pin row integration ---------------
 
 fn pin_candidate(
     id: &str,

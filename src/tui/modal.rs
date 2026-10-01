@@ -8,8 +8,7 @@
 //! variant + one trait impl — the keymap, event loop, and draw
 //! pipeline acquire zero new branches.
 //!
-//! H-TUI-006 finished the migration: every one of the seven
-//! `Modal` variants now implements [`Overlay`]. The trait carries
+//! Every `Modal` variant implements [`Overlay`]. The trait carries
 //! an associated `Ctx<'a>` type so overlays that need live App
 //! state (Controls read view/grouping/filter/sort; Pins read a
 //! `PinsContext`; Search reads the current row items) can declare
@@ -17,8 +16,7 @@
 //! Context-free overlays (Help / ValueModal / Viewer / Rename) set
 //! `type Ctx<'a> = ()`. The runtime's stack dispatcher matches per
 //! `Modal` variant, builds the per-widget context, and calls
-//! `overlay.handle(ctx, key)`; every specialized `handle_*_overlay_key`
-//! runtime helper is gone.
+//! `overlay.handle(ctx, key)`.
 
 use crate::tui::Msg;
 
@@ -55,8 +53,7 @@ pub enum Modal {
     Search(crate::tui::widgets::search::SearchOverlayState),
     /// `o` full-value modal. Context-free.
     ValueModal(crate::tui::widgets::value_modal::ValueModalState),
-    /// Full-screen transcript viewer modal (H-VIEWER-NATIVE-008,
-    /// ADR 0052). Uses the nested-reducer composition described
+    /// Full-screen transcript viewer modal (ADR 0052). Uses the nested-reducer composition described
     /// in ADR 0085 contract 3: [`crate::tui::Msg::Viewer`]
     /// wraps a [`crate::viewer::input::ViewerMsg`] and the App
     /// reducer's arm delegates to

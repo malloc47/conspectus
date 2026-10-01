@@ -56,7 +56,7 @@ pub struct WorktreeMenuContext {
     /// The worktree's branch (short name), for remove.
     pub branch: Option<String>,
     /// Live sessions rooted in the worktree, surfaced in the remove
-    /// confirm (the H-WT-004a guard list).
+    /// confirm (the same guard `worktree rm` applies).
     pub guard_sessions: Vec<String>,
     pub can_mutate: bool,
     /// Row to jump to for the context's reveal action: the
@@ -224,8 +224,8 @@ fn checkout_containing(snapshot: &GraphSnapshot, path: &str) -> Option<(String, 
     })
 }
 
-/// Live agent/mux sessions rooted in `worktree_path` (the H-WT-004a
-/// guard, reused for the remove confirm).
+/// Live agent/mux sessions rooted in `worktree_path` (the
+/// `worktree rm` guard, reused for the remove confirm).
 fn live_sessions_in_worktree(snapshot: &GraphSnapshot, worktree_path: &str) -> Vec<String> {
     let root = Path::new(worktree_path);
     let mut out = Vec::new();

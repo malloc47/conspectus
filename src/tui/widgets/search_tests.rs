@@ -212,7 +212,7 @@ fn match_line_skips_snippet_when_label_equals_haystack() {
 
 #[test]
 fn search_glyph_span_uses_kind_color_for_graph_rows() {
-    // H-UI-002 slice: each result row carries a kind glyph in
+    // Each result row carries a kind glyph in
     // its NodeKind color (ADR 0073). An AgentSession row picks
     // up the AgentSession glyph + `theme.node_agent_session`
     // color; a MuxSession row picks up the mux glyph + color.

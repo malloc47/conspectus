@@ -12,12 +12,9 @@ fn key(code: KeyCode) -> KeyEvent {
 
 /// Every `KEYBINDINGS` entry's key label
 /// must appear somewhere in `keymap_sections`'s rendered
-/// output. Guards against the pre-H-HYG-007 dispatcher /
-/// help-overlay drift the audit called out — a new binding
-/// added to the table stays reachable at render time only
-/// if the help section names it too. Failing this test
-/// signals that a wave-1..4 migrated binding is missing
-/// from the operator-facing help.
+/// output, so the dispatcher and the help overlay can't drift:
+/// failing this test means a binding is missing from the
+/// operator-facing help.
 #[test]
 fn every_keybindings_entry_appears_in_help_sections() {
     use crate::tui::keybindings::{KEYBINDINGS, KeyMode, key_label};
@@ -74,7 +71,7 @@ fn every_keybindings_entry_appears_in_help_sections() {
 
 #[test]
 fn help_body_includes_node_kind_icon_legend() {
-    // H-UI-002 slice: pressing `?` should surface a built-in
+    // Pressing `?` should surface a built-in
     // legend for the ADR 0073 glyph slate so operators learn
     // the symbol vocabulary without cross-referencing the
     // docs. Every NodeKind in canonical display order must

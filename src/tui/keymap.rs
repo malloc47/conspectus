@@ -226,11 +226,8 @@ pub fn remap_for_focus(action: Action, focus: Focus) -> Option<Action> {
 /// `viewport_height` is the rendered height of the row tree in
 /// rows, used to size PageUp/PageDown jumps. Pass 1 if unknown.
 pub fn translate(event: Event, viewport_height: u16) -> Option<Action> {
-    // Consult the declarative KEYBINDINGS
-    // table first. Bindings the table owns (view switching +
-    // grouping cycle, per wave 1) return here; unmigrated
-    // bindings fall through to the pre-H-HYG-007 match arms
-    // below and land in the table as later waves migrate them.
+    // Consult the declarative KEYBINDINGS table first; keys it
+    // doesn't hold fall through to the match below.
     if let Event::Key(key) = &event
         && key.kind == KeyEventKind::Press
         && let Some(action) = crate::tui::keybindings::translate_via_table(key.modifiers, key.code)

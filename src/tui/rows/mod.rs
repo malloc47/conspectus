@@ -4,8 +4,7 @@
 //! now)` → [`RowTree`]. They contain no ratatui types and no I/O so
 //! they snapshot-test without a runtime. The TUI's renderer
 //! (`crate::tui::ui`) and the CLI's table surface
-//! ([`crate::output::table`]) can both consume them as the table-
-//! parity work in later stories lands.
+//! ([`crate::output::table`]) can both consume them.
 //!
 //! Per ADR 0024 and the locked decisions in
 //! `docs/tui-sessions-mockup.md`:
@@ -17,9 +16,6 @@
 //!   marked.
 //! - The per-row activity indicator is intentionally absent.
 //! - Path rendering uses `~` shortening for `$HOME`.
-//!
-//! v1 only implements the sessions view in this commit; mux, union,
-//! prs, and forks land in follow-on commits per `P8-004`.
 
 use std::path::Path;
 
@@ -35,7 +31,7 @@ pub mod union;
 pub use sessions::{SessionsBuildInputs, build_sessions_tree};
 
 /// Stable, hashable row identity. Used by the selection state
-/// machine in `P8-006` to retain selection across refreshes — two
+/// machine to retain selection across refreshes — two
 /// builds of the same view over the same node set produce identical
 /// `RowId`s.
 #[derive(Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Hash)]
@@ -160,8 +156,8 @@ pub struct GroupRow {
 #[derive(Clone, Debug, PartialEq)]
 pub struct AgentSessionRow {
     pub session: AgentSessionId,
-    /// Short content-addressed identifier. Floored at 6 chars per
-    /// H-TBL-002; the dispatcher grows the floor only to break
+    /// Short content-addressed identifier. Floored at 6 chars; the
+    /// dispatcher grows the floor only to break
     /// collisions inside the row tree.
     pub short_id: String,
     /// Harness label as rendered in the row (`claude`, `codex`,
@@ -404,7 +400,7 @@ pub fn shorten_home(path: &str, home: Option<&Path>) -> String {
 }
 
 /// Assemble the canonical workspace top-row display string used by
-/// the Workspaces view (`H-WS-002` polish, ADR 0062) and by the
+/// the Workspaces view (ADR 0062) and by the
 /// hybrid Sessions/Graph workspace headers (ADR 0064):
 /// `<name>  <repo-a+repo-b+...>  (<provider>)`. The member list and
 /// provider segment are each prefixed with two spaces so the eye
@@ -489,15 +485,12 @@ pub enum RecencyBucket {
     Cold,
 }
 
-// Shared row-assembly helpers. Pre-H-HYG-002 the
-// same `agent_row` / `mux_indicator` / `session_matches_filter`
-// / `collect_agent_mux_candidate_counts` bodies were duplicated
-// across `rows/{union,prs,forks}.rs` (plus a near-twin in
-// `rows/mux.rs`) and `output/{prs,forks}.rs`. They live here now
-// as `pub(crate)` helpers the per-view builders share.
+// Shared row-assembly helpers (`agent_row`, `mux_indicator`,
+// `session_matches_filter`, …) used by the per-view builders in
+// `rows/{union,prs,forks}.rs` and `output/{prs,forks}.rs`.
 //
-// `rows/mux.rs::agent_row` stays put because it uses a different
-// input struct (`AttachedAgent`) — near-twin, not identical.
+// `rows/mux.rs::agent_row` is separate because it takes a different
+// input struct (`AttachedAgent`).
 
 /// Snapshot of an `AgentSessionNode` prepared for the sessions
 /// / union / prs / forks row builders. The `node_id` field is

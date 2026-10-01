@@ -4,7 +4,7 @@
 //! grouping, per-view filter editing, and the global sort toggle.
 //! The controls overlay is the discoverable surface; single-key
 //! accelerators (`v`, `1`–`5`, `]`/`[`, `f`, `F`, `G`) reach the
-//! same outcomes for muscle-memory operators (wired in F8-005).
+//! same outcomes for muscle-memory operators.
 //!
 //! Pin CRUD lives in its own [`pins`](super::pins) overlay, opened
 //! with `p` or the direct shortcuts (`N`/`B`/`A`/`b`/`R`/`Delete`).
@@ -325,9 +325,7 @@ impl ControlsOverlayState {
                         }
                         Err(_) => {
                             // Reject the commit and keep the editor open
-                            // so the operator can fix the value. The
-                            // status-bar surface lands with F8-007 +
-                            // F8-005's wiring.
+                            // so the operator can fix the value.
                             ControlsOutcome::Continue
                         }
                     }

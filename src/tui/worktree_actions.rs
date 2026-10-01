@@ -26,10 +26,8 @@ pub enum WorktreeContext {
     None,
 }
 
-/// A worktree action the menu can offer. Only the H-WT-004b subset
-/// (create / remove / reveal) is modeled today; merge, close-down,
-/// new-stream, lock/unlock, and prune land with their own stories and
-/// extend this enum + [`worktree_actions`].
+/// A worktree action the menu can offer. New actions extend this enum
+/// and [`worktree_actions`].
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
 pub enum WorktreeAction {
     /// Create a new worktree + branch (mutation).
@@ -43,7 +41,7 @@ pub enum WorktreeAction {
     /// (compound mutation; ADR 0093).
     CloseDownWorktree,
     /// Prune worktrees already merged into the repo's default branch
-    /// (repo-level mutation; H-WT-008).
+    /// (repo-level mutation).
     PruneWorktrees,
     /// Select the checkout/worktree the selected agent or mux is in.
     RevealCheckout,

@@ -234,8 +234,7 @@ fn translate_capital_a_requests_open_pin_adopt() {
 
 #[test]
 fn translate_upper_t_no_longer_bound_to_view() {
-    // Post H-VIEWER-NATIVE-008 reshuffle: `v` owns View;
-    // `T` is unbound and falls through to None.
+    // `v` owns View; `T` is unbound and falls through to None.
     assert_eq!(
         translate(press(KeyCode::Char('T'), KeyModifiers::NONE), 24),
         None,
@@ -246,10 +245,8 @@ fn translate_upper_t_no_longer_bound_to_view() {
     );
 }
 
-// static_action_for_event removed in H-TUI-004 wave 2 — its
-// body was `overlay_key_from_event.or_else(translate + remap)`,
-// which the shared `run_loop` now inlines. Overlay routing
-// coverage lives in `tui::runtime::tests::overlay_routing`.
+// Overlay routing coverage lives in
+// `tui::runtime::tests::overlay_routing`.
 
 #[test]
 fn translate_shift_f_clears_filters() {
@@ -815,10 +812,10 @@ fn remap_for_focus_right_routes_enter_and_e_to_the_explorer() {
         Some(Action::Msg(Box::new(Msg::CycleFocus)))
     );
     // Locked decision 8: Enter is the universal "do the obvious
-    // thing" key on the explorer cursor. T8-040 made the
-    // dispatch App-aware (Node-zone fields copy; other rows
-    // drill/expand), so the remap produces the new
-    // [`Action::ExplorerEnter`] variant that the main loop
+    // thing" key on the explorer cursor. The dispatch is
+    // App-aware (Node-zone fields copy; other rows drill/expand),
+    // so the remap produces [`Action::ExplorerEnter`], which the
+    // main loop
     // resolves against [`App::explorer_copy_target`].
     assert_eq!(
         remap_for_focus(Action::DefaultAction, Focus::Right),
@@ -886,8 +883,8 @@ fn remap_for_focus_right_suppresses_left_tree_expand_collapse_keys() {
 
 #[test]
 fn remap_for_focus_right_routes_home_and_end_into_the_explorer() {
-    // H-OBS-007 (paired with the h/l/Left/Right suppression
-    // above): `g`/`Home` and `G`/`End` snap the explorer
+    // Paired with the h/l/Left/Right suppression above:
+    // `g`/`Home` and `G`/`End` snap the explorer
     // cursor to its first / last row on right-pane focus
     // instead of bleeding into the left tree's Home/End
     // jumps. `Tab`/`CycleFocus` is intentionally left alone —
@@ -1116,8 +1113,7 @@ mod selected_default_action_tests {
         // and lets the fallback message stay actionable.
         let mut snapshot = GraphSnapshot::empty();
         add_repo_and_worktree(&mut snapshot, "/p/proj");
-        // `aider` has no viewer registered in v1 (see
-        // `H-TRANSCRIPT-007` deferred), so this is the
+        // `aider` has no viewer registered, so this is the
         // unsupported-viewer surface for the dispatcher.
         snapshot
             .nodes
@@ -1184,7 +1180,7 @@ fn translate_ignores_release_kind_keys() {
     assert_eq!(translate(Event::Key(key), 24), None);
 }
 
-/// H-TUI-001 / ADR 0085 contract 4: view / grouping / filter /
+/// ADR 0085 contract 4: view / grouping / filter /
 /// sort changes must not trigger discovery. The signal we lean
 /// on is `SnapshotHandle` identity — `refresh` builds a fresh
 /// `SnapshotHandle::new(...)` (a distinct `Rc`), so if the projection
@@ -1310,7 +1306,7 @@ mod projection_zero_discovery {
     }
 }
 
-/// H-TUI-002 Phase C (ADR 0085 contract 2): mux ops flow through
+/// ADR 0085 contract 2: mux ops flow through
 /// the executor. The reducer emits `Effect::RunMux(...)` and the
 /// executor is the only code holding a `MuxBackend` reference.
 mod mux_effect_executor {
@@ -1543,7 +1539,7 @@ mod pin_launch_scan_root {
 
     #[test]
     fn mux_new_argv_carries_name_cwd_and_no_attach() {
-        // H-MUX-NEW-001 / ADR 0095: the TUI re-execs into
+        // ADR 0095: the TUI re-execs into
         // `conspectus mux new` with the operator-supplied fields;
         // `--no-attach` is always present so the TUI's own attach
         // path (not the subprocess) hands the terminal off.

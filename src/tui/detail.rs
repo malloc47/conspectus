@@ -12,16 +12,15 @@
 //!   placeholder.
 //! - Mux row carries the candidate count when ambiguous, so the
 //!   renderer can surface "— (2 candidates) ⚠" inline.
-//! - PR row is the immediate-stage label (state, draft); the async
-//!   enrichment from `P8-012a` overlays on top later.
+//! - PR row is the immediate-stage label (state, draft).
 //! - Paths render with `~` shortening when a home directory is
 //!   passed in.
 //!
-//! v1 implements agent-session and mux-session details fully; the
+//! Agent-session and mux-session details are complete; the
 //! remaining node kinds emit a minimal field list pulled directly
 //! from the node, so the right panel can render *something* for
-//! every selectable row. Richer fork/PR detail is layered in by the
-//! enrichment stories (`P8-012a`, `P8-012b`).
+//! every selectable row. Richer PR and fork detail is open work
+//! (backlog `P8-012a`, `P8-012b`).
 
 use std::path::Path;
 
@@ -82,7 +81,8 @@ pub struct NodeDetail {
     /// Compact identity label for callers that need a selected-node
     /// display name outside the field list.
     pub title_line: String,
-    /// FNV-1a 64-bit hex short id, floored at the H-TBL-002 length.
+    /// FNV-1a 64-bit hex short id, floored at the table's short-id
+    /// length.
     pub short_id: String,
     pub full_id: NodeId,
     /// Header field rows in display order. Renderer prints

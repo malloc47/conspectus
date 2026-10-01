@@ -507,11 +507,10 @@ fn agent_session_groups_link_to_mux_downstream() {
 
 #[test]
 fn linked_to_mux_suppressed_slot_surfaces_as_no_winner_ambiguous_group() {
-    // H-UI-006 (ADR 0077) retires the H-UI-007 candidate-fan-out
-    // fallback: the resolver now preserves the suppressed
+    // ADR 0077: the resolver preserves the suppressed
     // `LinkedToMux` slot with `selected_link_id = None` and the
     // candidate set rolled into `competing_link_ids`. The
-    // explorer reads ambiguity directly off the slot now —
+    // explorer reads ambiguity directly off the slot —
     // every candidate row drops into the Other zone, the group
     // is marked ambiguous, and no validated row exists.
     let mut snapshot = GraphSnapshot::empty();

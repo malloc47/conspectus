@@ -15,8 +15,6 @@
 //! so the [`NodeKindStyle::color`] field is the sentinel
 //! [`Color::Reset`] for `ForgePr`. Callers that render a PR row pick
 //! the color from the appropriate `theme.pr_*` field directly.
-//!
-//! H-VIS-002 of the per-node-type visual-identity workstream.
 
 use std::collections::BTreeMap;
 

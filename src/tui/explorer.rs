@@ -118,7 +118,7 @@ pub struct NodeView {
     /// before-drill focused node, and by the right-pane title to
     /// render the full drilldown chain.
     pub short_label: String,
-    /// FNV-1a 64-bit short id (H-TBL-002 length).
+    /// FNV-1a 64-bit short id.
     pub short_id: String,
     pub full_id: NodeId,
     /// Top-5 Core summary fields per the mockup's reference table.
@@ -128,12 +128,7 @@ pub struct NodeView {
     /// [`Self::core_fields`].
     pub all_fields: Vec<CoreField>,
     /// Combined relationship list (ADR 0074). Each group carries its
-    /// own direction; the legacy
-    /// `Self::upstream_groups` / `Self::downstream_groups`
-    /// helpers filter on it during the H-UI-003 pass 1 transition so
-    /// the reducer and renderer can compile against the new shape
-    /// before passes 2 and 3 land the flat-list cursor + render
-    /// rewrites.
+    /// own direction.
     pub relationships: RelationshipExplorer,
 }
 
@@ -407,7 +402,8 @@ pub struct RelationshipLink {
 }
 
 /// A piece of unresolved-endpoint evidence rendered as a placeholder
-/// row in its group. `Enter` is inert in v1; see T8-032.
+/// row in its group. `Enter` is inert on it (an evidence inspector
+/// is open work, backlog `T8-032`).
 #[derive(Clone, Debug, PartialEq)]
 pub struct UnresolvedRow {
     pub link_id: String,
@@ -725,8 +721,8 @@ pub struct BreadcrumbHop {
     /// Whether the Node zone had its Expanded Detail toggle on at
     /// the time of the drill, so Backspace can restore it.
     pub full_detail_expanded: bool,
-    /// Left-pane row selection at the time of the drill (T8-035 —
-    /// `[tui.detail].left_pane_sync = "mirror"`), so Backspace can
+    /// Left-pane row selection at the time of the drill
+    /// (`[tui.detail].left_pane_sync = "mirror"`), so Backspace can
     /// restore both panes together. `None` when no row was selected
     /// (the empty-tree case at boot).
     pub left_pane_selection: Option<crate::tui::rows::RowId>,

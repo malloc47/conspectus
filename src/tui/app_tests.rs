@@ -632,7 +632,7 @@ fn pins_context_seeds_pin_mutation_target_from_selected_pin_row() {
 
 #[test]
 fn pins_context_seeds_pin_mutation_target_from_selected_pinned_mux_row() {
-    // H-PIN-EDIT-MUX-001 regression: selecting a live mux row that
+    // Regression: selecting a live mux row that
     // backs a pin (mux view) must resolve the same pin target the
     // corresponding session-row selection resolves. Before the fix
     // `pin_mutation_target` only matched Pin + AgentSession rows, so
@@ -1591,7 +1591,7 @@ fn detail_is_recomputed_when_selection_lands_on_a_node_row() {
     assert!(app.detail().is_some());
 }
 
-// ---- ADR 0031 / F8-003: per-view state retention ----
+// ---- ADR 0031: per-view state retention ----
 
 #[test]
 fn switching_views_saves_active_state_and_loads_target_defaults() {
@@ -2654,7 +2654,7 @@ fn selected_session_id_is_none_on_non_session_selection() {
 
 #[test]
 fn post_toast_supersedes_prior_toast() {
-    // H-WIDG-003 contract: posting a new toast drains any prior
+    // Posting a new toast drains any prior
     // queued toast so the newer feedback is the one rendered.
     // Under the upstream engine the queue length stays at 1
     // after a second post even though the engine itself supports
@@ -3482,18 +3482,14 @@ mod reducer_effects {
         );
     }
 
-    // ADR 0085 contracts 1 + 4 (H-TUI-002 Phase F): projection
-    // changes now flow through the reducer as first-class Msgs
-    // instead of the runtime's `ControlsAction` bridge. The
-    // arms mutate App state and re-derive the row tree from the
-    // held snapshot in one shot; no effects are emitted (the
-    // tree swap happens inline).
-    // Phase E (ADR 0085 contract 2): view / grouping / filter /
-    // sort switches emit `Effect::Persist` so the F8-013 sidecar
-    // stays in sync mid-session. Pre-Phase-E these arms emitted
-    // no effects and relied on the runtime shutdown fallback for
-    // persistence — see `runtime.rs`'s shutdown persist for the
-    // pre-Phase-E path that Phase E retires from the happy path.
+    // ADR 0085 contracts 1 + 4: projection changes flow through
+    // the reducer as first-class Msgs. The arms mutate App state
+    // and re-derive the row tree from the held snapshot in one
+    // shot (the tree swap happens inline).
+    // ADR 0085 contract 2: view / grouping / filter / sort switches
+    // emit `Effect::Persist` so the TUI state sidecar stays in sync
+    // mid-session; `runtime.rs`'s shutdown persist is only a
+    // fallback.
 
     #[test]
     fn switch_view_msg_updates_active_view_and_emits_persist() {

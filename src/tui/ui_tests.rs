@@ -306,11 +306,9 @@ fn header_drops_brand_view_label_and_state_chips_by_default() {
 
 #[test]
 fn header_fits_at_narrow_width_post_audit() {
-    // After the H-UI-004 audit the bare header is short enough
-    // to fit comfortably at 80 cols (and even at 40 cols with
-    // truncation). The pre-audit baseline `Conspectus · sessions ·
-    // updated 0s ago · N of M agents · M mux` was ~65 cells, with
-    // chip sections then overflowing entirely.
+    // The bare header (ADR 0078) is short enough to fit
+    // comfortably at 80 cols (and even at 40 cols with
+    // truncation).
     let mut app = seeded_app();
     let area = Rect::new(0, 0, 80, 24);
     let buffer = render_to_buffer(&mut app, area);
@@ -331,7 +329,7 @@ fn header_fits_at_narrow_width_post_audit() {
 
 #[test]
 fn header_shows_harness_chips_when_opt_in_is_set() {
-    // H-UI-004 §"Harness chips": per-harness count chips render
+    // Per-harness count chips render
     // only when `[tui] show_harness_chips = true` is set in the
     // operator's config. Default-off seeded_app + a separately
     // seeded opt-in app exercise both paths.
@@ -398,8 +396,8 @@ fn seeded_app_with_harness_chips() -> App {
 #[test]
 fn left_panel_title_renders_a_view_tab_strip() {
     // The left pane title lists the surfaced views as a tab strip
-    // with the active one accented. After H-VIEW-001 only Sessions
-    // and Mux are surfaced (Union/PRs/Forks are hidden), so the
+    // with the active one accented. Only Sessions and Mux are
+    // surfaced (Union/PRs/Forks are hidden), so the
     // strip carries exactly those two.
     let mut app = seeded_app();
     let area = Rect::new(0, 0, 160, 24);
@@ -1082,7 +1080,7 @@ fn related_row_truncates_long_labels_instead_of_wrapping_them_away() {
 
 #[test]
 fn related_zone_header_renders_aggregate_left_of_label() {
-    // T8-041 (carried through ADR 0074 §5): the bold zone label
+    // ADR 0074 §5: the bold zone label
     // anchors flush right and the summary segment (`N validated
     // · M other …`) sits to the left of the chip on the same
     // divider line. Pin the relative ordering plus the new
@@ -1105,7 +1103,7 @@ fn related_zone_header_renders_aggregate_left_of_label() {
 
 #[test]
 fn detail_pane_shows_linked_to_mux_row_and_drills_into_mux() {
-    // T8-029 (locked decision 8): instead of expanding linked
+    // Locked decision 8: instead of expanding linked
     // entity details in place, the explorer drills. Pressing
     // Enter on the cursor while it sits on the `linked_to_mux`
     // row should refocus the right pane on the mux node and
@@ -1354,7 +1352,7 @@ fn mux_detail_session_section_shows_session_id_when_collapsed() {
     // section-content path, not from vertical clamping.
     let area = Rect::new(0, 0, 120, 40);
     let collapsed = buffer_to_string(&render_to_buffer(&mut app, area));
-    // T8-029 + ADR 0074: the linked session now surfaces in the
+    // ADR 0074: the linked session surfaces in the
     // mux's `Related` zone via the inbound `attached session`
     // verb (the session is the link's source, the mux its
     // target). The row carries the session id by `harness:key`.
@@ -2806,8 +2804,8 @@ fn render_captured_pane_falls_back_to_plain_text_on_malformed_input() {
 fn left_panel_scrolls_to_keep_selected_row_visible_past_viewport() {
     // Build a snapshot with one repo and twenty sessions so
     // the rendered tree spills well past a small viewport. The
-    // repo path is intentionally long: before the T8-019
-    // regression fix, the left tree wrapped that group row but
+    // repo path is intentionally long: a past regression
+    // wrapped that group row in the left tree but
     // computed scroll offsets as if every row occupied one
     // physical line. That put the selected row one line below
     // the viewport instead of on the bottom line.

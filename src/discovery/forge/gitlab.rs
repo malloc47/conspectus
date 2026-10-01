@@ -3,8 +3,8 @@
 //! Second forge adapter that proves the `ForgeAdapter` registry
 //! supports multiple entries with `claims_remote_url`-based
 //! routing. **Real GitLab PR discovery is deferred** until the
-//! multi-forge `ForgePr` identity model is settled (backlog
-//! `H-DESIGN-002` lists the open questions).
+//! multi-forge `ForgePr` identity model is settled; the open
+//! questions are in backlog `H-DESIGN-002`.
 //!
 //! What ships today:
 //!

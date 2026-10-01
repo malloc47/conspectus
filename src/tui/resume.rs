@@ -1,6 +1,6 @@
 //! Resume support: shell out to the harness binary to re-open an
-//! un-muxed agent session. Per the P8-011 spec, the command is
-//! harness-specific and best-effort — unsupported harnesses degrade
+//! un-muxed agent session. The command is harness-specific and
+//! best-effort — unsupported harnesses degrade
 //! to a disabled-action reason.
 //!
 //! The per-harness resume command is derived from

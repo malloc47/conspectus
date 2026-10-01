@@ -12,7 +12,7 @@
 //! "Launch harness in new mux — no pin" and the submit label reads
 //! "Launch" so the outcome is obvious before the operator commits.
 //!
-//! H-MUX-LAUNCH-002 / ADR 0097: the shared fields (harness, cwd,
+//! ADR 0097: the shared fields (harness, cwd,
 //! mux name / socket, launch argv, worktree toggle + branch, known-
 //! harness + known-live-mux collections, error) live on a
 //! [`LaunchSpecFormState`] container this widget owns by composition.

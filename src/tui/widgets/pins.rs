@@ -1,4 +1,4 @@
-//! Pins management overlay (ADR 0057 / H-PIN-022..024).
+//! Pins management overlay (ADR 0057).
 //!
 //! Dedicated modal — separate from the view/grouping/filter
 //! [`controls`](super::controls) overlay — that fronts every pin

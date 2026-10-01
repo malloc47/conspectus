@@ -85,7 +85,7 @@ pub fn build_union_tree(inputs: UnionBuildInputs<'_>) -> RowTree {
                 }
                 tree.rows.push(super::agent_row(
                     agent,
-                    0, // H-HYG-002: union rows always sit at depth 0.
+                    0, // Union rows always sit at depth 0.
                     &candidate_counts,
                     short_ids
                         .get(agent.node_id.as_str())

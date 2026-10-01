@@ -320,7 +320,7 @@ fn build_match_line(
     let prefix = if is_cursor { "> " } else { "  " };
     let mut spans: Vec<Span<'static>> = Vec::new();
     spans.push(span!(span_style(false, Style::default()); "{prefix}"));
-    // H-UI-002 slice: prepend a kind glyph so operators scan
+    // Prepend a kind glyph so operators scan
     // results by symbol (`● session`, `▣ mux`, `⇄ pr`, …) instead
     // of relying on the textual `kind:` prefix some labels carry.
     // RowIds without a NodeKind mapping (Pin, Synthetic) get two

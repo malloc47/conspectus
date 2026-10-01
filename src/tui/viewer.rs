@@ -1,16 +1,14 @@
 //! External transcript-viewer launch (ADR 0019).
 //!
 //! Resolve the operator's selected agent session into a child-process
-//! viewer hand-off. The runtime mirrors P8-010's `tmux attach`
-//! pattern: leave the alt screen, exec the viewer, wait for it to
-//! exit, then re-enter the alt screen.
+//! viewer hand-off. The runtime mirrors the `tmux attach` pattern:
+//! leave the alt screen, exec the viewer, wait for it to exit, then
+//! re-enter the alt screen.
 //!
-//! Per ADR 0052 this is now the **escape-hatch** path, not the
-//! default. The default `T` target is the native in-tree viewer
-//! (`H-VIEWER-NATIVE-*`). The external launch survives for
-//! operators who prefer `claude-history`'s ledger formatting or
-//! who configure another viewer via `[viewers.<harness>]`
-//! (`H-TRANSCRIPT-013`).
+//! Per ADR 0052 this is the **escape-hatch** path, not the
+//! default. The default `T` target is the native in-tree viewer.
+//! The external launch survives for operators who prefer
+//! `claude-history`'s ledger formatting.
 //!
 //! Resolution takes a [`BinaryProbe`] seam so tests can simulate
 //! PATH state without touching the host. The one supported external

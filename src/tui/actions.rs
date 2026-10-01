@@ -175,13 +175,10 @@ pub fn resolve_attach_target(app: &App) -> Result<AttachTarget, AttachDisabled> 
         backend: mux_node.backend.clone(),
         native_id: mux_node.native_id.clone(),
     };
-    // Check backend against the compile-time
-    // registered backend list instead of a hardcoded "tmux"
-    // match. The current-tmux-session self-attach check stays
-    // tmux-specific because `current_tmux_session` on
-    // `RunConfig` is the pre-H-EXT-009 tmux-native
-    // `$TMUX`-derived name; H-EXT-011 generalizes it to
-    // `current_mux_session` with a backend field.
+    // Check backend against the compile-time registered backend
+    // list. The self-attach check below stays tmux-specific because
+    // `RunConfig::current_tmux_session` is the `$TMUX`-derived
+    // name.
     if !crate::discovery::tmux::KNOWN_MUX_BACKENDS.contains(&target.backend.as_str()) {
         return Err(AttachDisabled::UnsupportedBackend(target.backend));
     }
@@ -379,7 +376,7 @@ fn session_label(id: &AgentSessionId) -> String {
 
 /// Inverse of [`preferred_mux_for_session`]: find the resolver-
 /// preferred agent session linked to `mux`. Used by the `v`
-/// accelerator and T8-043's default-action dispatcher so a mux row's
+/// accelerator and the default-action dispatcher so a mux row's
 /// "view" complements its "attach".
 fn preferred_session_for_mux(snapshot: &GraphSnapshot, mux: &NodeId) -> Option<AgentSessionId> {
     let mut candidates: Vec<&GraphLink> = snapshot

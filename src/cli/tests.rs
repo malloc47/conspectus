@@ -834,7 +834,7 @@ mod help_text {
         "fixture",
     ];
 
-    /// `P7-003`, `F8-013`, `T8-043`, `GV-002`, `H-WT-008`, …
+    /// Backlog IDs such as `P7-003`, `F8-013`, `T8-043`, `GV-002`, `H-WT-008`.
     fn backlog_ids(text: &str) -> Vec<String> {
         text.split(|c: char| !(c.is_ascii_alphanumeric() || c == '-'))
             .filter(|token| {

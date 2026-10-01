@@ -569,9 +569,8 @@ impl<'a> SessionsData<'a> {
     }
 
     fn mux_candidates_for_session(&self, session: &NodeId) -> Vec<&'a GraphLink> {
-        // H-UI-008 routed the sessions tree through resolver
-        // winners; H-UI-006 (ADR 0077) makes that route honest in
-        // the suppression case: the resolver now keeps the
+        // The sessions tree follows resolver winners. When the
+        // resolver suppresses a winner (ADR 0077) it keeps the
         // `LinkedToMux` slot alive with `selected_link_id = None`
         // and the candidate set rolled into `competing_link_ids`.
         // Walk each matching slot once:
@@ -581,8 +580,6 @@ impl<'a> SessionsData<'a> {
         //   every candidate the slot lists so the row reports
         //   `Ambiguous { candidate_count }` and the operator sees
         //   the fan-out.
-        // The candidate-fan-out fallback from H-UI-008 retires
-        // because the slot now carries the signal directly.
         let mut out: Vec<&'a GraphLink> = Vec::new();
         for rel in self
             .snapshot
@@ -666,7 +663,7 @@ impl<'a> SessionsData<'a> {
     /// Member display names for a workspace, derived from the
     /// resolver-selected `WorkspaceContainsRepo` candidate links'
     /// `logical_path` source field — same source the Workspaces view
-    /// (`H-WS-002`) uses, so the two view headers read identically.
+    /// uses, so the two view headers read identically.
     /// Sorted alphabetically and deduped.
     fn workspace_member_names(&self, workspace_root: &str) -> Vec<String> {
         let workspace_id = NodeId::Workspace(WorkspaceId {

@@ -2,19 +2,8 @@
 //!
 //! Public surface is intentionally tiny: build a [`RunConfig`] from
 //! parsed CLI flags and pass it to [`run`]. Terminal lifecycle,
-//! input handling, rendering, and (eventually) background discovery
-//! all live behind that boundary per ADR 0024.
-//!
-//! v1 milestones layer in incrementally:
-//!
-//! - `P8-003` (this story): CLI shell + terminal lifecycle. The TUI
-//!   opens, renders a placeholder frame, accepts `q` / Ctrl-C, and
-//!   restores the terminal cleanly.
-//! - `P8-004` through `P8-007`: row-tree view-models, detail
-//!   view-models, navigation state machine, and the real two-panel
-//!   render.
-//! - `P8-008` onward: background discovery, mux preview, attach,
-//!   resume, PR enrichment.
+//! input handling, rendering, and background discovery all live
+//! behind that boundary per ADR 0024.
 
 use std::path::PathBuf;
 use std::time::Duration;
@@ -77,9 +66,8 @@ pub struct RunConfig {
     pub sessions_grouping: SessionsGrouping,
     /// Top-level grouping in the mux tree.
     pub mux_grouping: MuxGrouping,
-    /// Initial row filter (ADR 0031). Applies to the sessions view
-    /// in v1; F8-003 generalizes to per-view state. Empty filter
-    /// admits every row.
+    /// Initial row filter (ADR 0031). Empty filter admits every
+    /// row.
     pub initial_filter: RowFilter,
     /// Whether the operator explicitly set a filter via CLI flags
     /// (`--harness`, `--max-age`, `--mux-state`). When `false`,
@@ -114,8 +102,8 @@ pub struct RunConfig {
     /// runtime per-session `E` accelerator flips this in memory; the
     /// config knob just sets the default.
     pub show_edge_meta: bool,
-    /// Opt-in display of per-harness count chips in the top header
-    /// (H-UI-004 audit). Default `false`: row badges already carry
+    /// Opt-in display of per-harness count chips in the top header.
+    /// Default `false`: row badges already carry
     /// per-session identity and group summaries carry per-group
     /// totals, so the aggregate is opt-in only. Sourced from
     /// `[tui].show_harness_chips` in the on-disk config.
@@ -264,10 +252,8 @@ pub enum SessionsGrouping {
     None,
 }
 
-/// Top-level grouping in the mux view. The row-tree builder lands
-/// with P8-004; the enum is defined here so the controls overlay
-/// and CLI surface can carry a consistent dispatch type from day
-/// one (ADR 0031).
+/// Top-level grouping in the mux view, shared by the controls
+/// overlay and the CLI (ADR 0031).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum MuxGrouping {

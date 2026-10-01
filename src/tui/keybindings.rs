@@ -1,20 +1,13 @@
 //! Declarative keybinding table.
 //!
-//! Introduces the `(mode/focus, key, action, help)` table shape
-//! the story mandates so the dispatcher, the focus remap, the
-//! help overlay, and the controls / pins hint footers all
-//! consume the same source-of-truth list. Pre-H-HYG-007 the
-//! three consumers hand-maintained parallel lists — nothing
-//! forced them to agree.
-//!
-//! **Wave 1 scope**: table shape + a small pilot subset (view
-//! switching / grouping cycle) as the reference example + a
-//! drift test asserting every entry's `help_text` appears in
-//! the currently-shipped `crate::tui::widgets::help::keymap_sections`
-//! output. Full migration of the 265 `KeyCode::` arms in
-//! `runtime.rs` (76) + `widgets/pins.rs` (137) + `keymap.rs`
-//! (52) is queued for waves 2–5 as per the H-HYG-007 backlog
-//! sizing note.
+//! A `(mode/focus, key, action, help)` table so the dispatcher,
+//! the focus remap, the help overlay, and the controls / pins hint
+//! footers all consume the same source-of-truth list. A drift test
+//! asserts every entry's `help_text` appears in
+//! `crate::tui::widgets::help::keymap_sections`. Keys the table
+//! doesn't hold stay as match arms in `keymap::translate`;
+//! `PageUp` / `PageDown` must, because they carry the viewport
+//! height.
 //!
 //! Actions with runtime parameters (`SwitchView(v)`,
 //! `CycleView(dir)`) are represented as closures returning the
@@ -56,9 +49,7 @@ pub struct KeyBinding {
 /// contexts).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum KeyMode {
-    /// Fires regardless of pane focus; the pre-H-HYG-007
-    /// dispatcher had no mode discrimination for these
-    /// entries either.
+    /// Fires regardless of pane focus.
     Global,
 }
 
@@ -74,21 +65,15 @@ pub enum KeyMatcher {
         modifiers: KeyModifiers,
         code: KeyCode,
     },
-    /// Char match ignoring SHIFT; the pre-H-HYG-007
-    /// dispatcher used this shape for uppercase-letter
-    /// actions that accepted both the shifted and the
-    /// unshifted forms.
+    /// Char match ignoring SHIFT, for uppercase-letter actions
+    /// that accept both the shifted and the unshifted forms.
     UpperChar(char),
-    /// Char match admitting any modifier except CONTROL.
-    /// Pre-H-HYG-007 the dispatcher wrote this as
-    /// `(m, KeyCode::Char('r')) if !m.contains(CONTROL)`
-    /// so `r` fires but `Ctrl-R` (which may be reserved
-    /// by the terminal) doesn't.
+    /// Char match admitting any modifier except CONTROL, so `r`
+    /// fires but `Ctrl-R` (which may be reserved by the terminal)
+    /// doesn't.
     AnyModExceptCtrl(char),
-    /// Non-char code match ignoring modifiers. Used for
-    /// arrow keys and nav keys where the pre-H-HYG-007
-    /// dispatcher wrote `(_, KeyCode::Down)` — any
-    /// modifier is fine.
+    /// Non-char code match ignoring modifiers. Used for arrow
+    /// keys and nav keys, where any modifier is fine.
     AnyMod(KeyCode),
 }
 
@@ -412,12 +397,9 @@ pub const KEYBINDINGS: &[KeyBinding] = &[
     },
 ];
 
-/// H-HYG-007 wave 2 entrypoint: `translate_via_table(modifiers,
-/// code) → Option<Action>`. Called first by
-/// [`crate::tui::keymap::translate`]; a hit here returns before
-/// the pre-H-HYG-007 hand-matched arms fire. Bindings unregistered
-/// in [`KEYBINDINGS`] fall through so wave-by-wave migration
-/// stays behavior-preserving.
+/// Look up `(modifiers, code)` in [`KEYBINDINGS`]. Called first by
+/// [`crate::tui::keymap::translate`]; keys the table doesn't hold
+/// fall through to its remaining match arms.
 pub fn translate_via_table(modifiers: KeyModifiers, code: KeyCode) -> Option<Action> {
     for binding in KEYBINDINGS {
         if binding.mode != KeyMode::Global {

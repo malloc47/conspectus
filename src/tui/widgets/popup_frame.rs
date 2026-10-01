@@ -37,13 +37,9 @@ use tui_popup::{KnownSize, Popup};
 
 use crate::tui::Theme;
 
-/// Shared centering math. Pre-H-HYG-003 six overlays
-/// (`help`, `controls`, `input`, `multi_select`, `pins`, `search`)
-/// each carried a hand-rolled `centered_modal_rect` that did the
-/// same 4-line centering arithmetic on `(area, width, height)`;
-/// they differed only in the per-widget width caps and height
-/// policies. Callers now compute their own `width` / `height`
-/// (which legitimately vary) and hand them to this one helper.
+/// Shared centering math for the overlays. Callers compute their
+/// own `width` / `height` (which legitimately vary per widget) and
+/// hand them to this one helper.
 pub fn centered_rect(area: Rect, width: u16, height: u16) -> Rect {
     let x = area.x + area.width.saturating_sub(width) / 2;
     let y = area.y + area.height.saturating_sub(height) / 2;

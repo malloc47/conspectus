@@ -21,8 +21,7 @@
 //!   `--no-live-preview` banner when live extras are suppressed,
 //!   while inline tree previews remain (locked decision).
 //! - Empty/loading frames render minimal copy when no row tree is
-//!   loaded yet; the rest of the error/empty matrix lands with
-//!   `T8-003`.
+//!   loaded yet.
 
 use ansi_to_tui::IntoText;
 use ratatui::Frame;
@@ -54,8 +53,8 @@ use crate::tui::rows::{
 ///
 /// Takes `&mut App` because the draw path dispatches
 /// [`Msg::LeftViewportChanged`] / [`Msg::ExplorerViewportChanged`]
-/// mid-frame so the reducer can reconcile scroll offsets (H-TUI-005
-/// waves 1 + 2). The reconciliation math itself lives in the
+/// mid-frame so the reducer can reconcile scroll offsets. The
+/// reconciliation math itself lives in the
 /// reducer; draw only measures viewport height + the post-wrap
 /// explorer cursor row span and dispatches those measurements as
 /// Msgs. A strict `&App → buffer` shape would require restructuring
@@ -194,7 +193,7 @@ fn draw_pins_overlay(app: &App, frame: &mut Frame<'_>, area: Rect) {
 // -----------------------------------------------------------------------------
 
 fn draw_header(app: &App, frame: &mut Frame<'_>, area: Rect) {
-    // H-UI-004 audit shape (ADR 0078):
+    // Header shape (ADR 0078):
     //   [updated Ns ago · ] N/M sessions · M mux
     //     [ · <opt-in harness chips>]
     //     [ · ⚠ N when ambiguous > 0]
@@ -272,7 +271,7 @@ impl HeaderCounts {
 const CHIP_SEPARATOR: &str = "  ";
 const SECTION_SEPARATOR: &str = "  ·  ";
 
-/// Render the opt-in per-harness chip block (H-UI-004 §"Harness chips").
+/// Render the opt-in per-harness chip block (ADR 0078).
 /// Drops out cleanly when the row tree is empty so a freshly-launched
 /// dashboard with no rows yet doesn't get a hanging trailing
 /// separator.
@@ -293,8 +292,8 @@ fn append_harness_chips(spans: &mut Vec<Span<'static>>, counts: &HeaderCounts, t
     }
 }
 
-/// Render the ambiguity triage chip (`⚠ N`) — only called when N > 0
-/// (H-UI-004 §"Mux-state chips"). Uses ADR 0072's `⚠` vocabulary so
+/// Render the ambiguity triage chip (`⚠ N`) — only called when N > 0.
+/// Uses ADR 0072's `⚠` vocabulary so
 /// the header signal aligns with the per-group glyph the row tree
 /// already shows.
 fn append_ambiguity_chip(spans: &mut Vec<Span<'static>>, ambiguous: usize, theme: &Theme) {
@@ -308,7 +307,7 @@ fn append_ambiguity_chip(spans: &mut Vec<Span<'static>>, ambiguous: usize, theme
 
 /// Render the header's session count. When a filter is active and
 /// the visible row count differs from the snapshot's total, format
-/// as `<filtered>/<total>` (H-UI-004 §"Count wording"); otherwise
+/// as `<filtered>/<total>`; otherwise
 /// keep the bare count so unfiltered runs render minimally.
 fn format_count_with_filtered(visible: usize, total: usize) -> String {
     if visible == total {
@@ -1225,10 +1224,8 @@ fn render_left_row(
         }
         RowKind::Pin(pin) => {
             // Pinned, but unbound — dim "📌" marker + display name.
-            // Final glyph + theme entry land alongside the rest of
-            // H-PIN-016's TUI polish; for the v1 slice we reuse the
-            // existing `placeholder` modifier to keep the row visibly
-            // distinct without inventing a new Theme key.
+            // Reuses the `placeholder` modifier to keep the row
+            // visibly distinct without a dedicated Theme key.
             spans.push(span!(theme.placeholder; "📌  "));
             spans.push(span!(Modifier::BOLD; "{}", pin.display_name.clone()));
             spans.push(span!(
@@ -1303,10 +1300,8 @@ fn render_session_spans(session: &AgentSessionRow, theme: &Theme, now: i64) -> V
         spans.push(mux_indicator_span(session.mux_state, theme));
     }
     if session.pin_id.is_some() {
-        // ADR 0057 bound-pin marker. Glyph + theme entry are
-        // finalized alongside the rest of the H-PIN-016 styling
-        // polish; for the v1 slice we reuse `placeholder` so the
-        // marker reads without depending on a new theme key.
+        // ADR 0057 bound-pin marker. Reuses `placeholder` rather
+        // than a dedicated theme key.
         spans.push(span!(theme.placeholder; "  📌"));
     }
     // The row's tree label surfaces the operator-chosen
@@ -3016,12 +3011,10 @@ fn draw_detail_preview(app: &App, _detail: &NodeDetail, frame: &mut Frame<'_>, a
 ///   `last_message_preview`. `--no-live-preview` does **not**
 ///   suppress this — only live extras (pane capture + transcript-
 ///   tail) are gated.
-/// - Muxed agent session: the renderer would normally show a tmux
-///   pane capture; until `P8-009` wires that in, we show an
-///   "incoming" placeholder. With `--no-live-preview`, the
-///   placeholder switches to the privacy banner instead.
-/// - Other rows: pane capture or fork-detail enrichment wires in
-///   per `P8-009` / `P8-012b`. Gated by `--no-live-preview`.
+/// - Muxed agent session, mux candidate, or mux row: the tmux pane
+///   capture, or the privacy banner with `--no-live-preview`.
+/// - Pin: the pin's diagnostics.
+/// - Other rows: a "no preview" placeholder.
 fn preview_text_for_selection(app: &App, height: usize) -> Text<'static> {
     let Some(selection) = app.selection() else {
         return Text::raw("");

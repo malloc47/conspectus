@@ -1,18 +1,11 @@
 //! Pure app state.
 //!
-//! Per ADR 0024, [`App::update`] is synchronous and free of I/O: the
-//! runtime translates terminal events (and, later, background-task
-//! results and timer ticks) into [`Msg`]s and feeds them in.
-//!
-//! v1 milestones layer in incrementally:
-//!
-//! - `P8-003`: shell scaffold + `Msg::Quit`.
-//! - `P8-005`: detail view-model wiring.
-//! - `P8-006` (this story): the selection / focus / navigation
-//!   state machine — row tree storage, expanded-set, selection
-//!   retention across refreshes, panel focus, preview scroll.
-//! - `P8-008` onward: background data loader dispatches
-//!   `Msg::SetData` results into the reducer.
+//! Per ADR 0024 and ADR 0085, [`App::update`] is synchronous and
+//! free of I/O: the runtime translates terminal events,
+//! background-task results, and timer ticks into [`Msg`]s and feeds
+//! them in. The reducer owns the row tree, expanded set, selection
+//! (retained across refreshes), panel focus, overlays, and scroll
+//! state.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
@@ -68,7 +61,7 @@ impl PartialEq for SnapshotHandle {
 }
 
 /// Per-provider availability status for the right-side status-bar
-/// chips (T8-003, Phase 8 error-state table).
+/// chips.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct ProviderStatus {
     pub tmux_disabled: bool,
@@ -161,11 +154,8 @@ pub struct App {
     /// Left-panel vertical scroll offset, in rendered lines. The
     /// renderer reconciles this each frame via
     /// [`App::adjust_left_scroll`] so the selected row stays
-    /// visible. H-TUI-005 wave 1 dropped the `Cell` interior
-    /// mutability: draw now takes `&mut App` and mutates the
-    /// field directly; wave 2 will move the reconciliation into
-    /// the reducer via a `Msg::LeftViewportChanged` per ADR 0085
-    /// contract 5.
+    /// visible: draw measures the viewport and dispatches
+    /// `Msg::LeftViewportChanged` (ADR 0085 contract 5).
     left_scroll: u16,
     /// Right-panel explorer scroll offset, in rendered lines. Used
     /// to keep the explorer cursor visible inside the header section
@@ -186,8 +176,7 @@ pub struct App {
     /// first one.
     last_visible_index: Option<usize>,
     /// Pin id waiting for a second `Delete` press. This gives pin
-    /// removal a confirmation step without introducing a full modal
-    /// before the H-PIN-023 edit/remove flow lands.
+    /// removal a confirmation step without a full modal.
     pending_pin_remove: Option<String>,
     /// Open overlays as a stack (ADR 0085 contract 3). Input routes
     /// to the top entry first, `draw` renders bottom-to-top, and
@@ -496,12 +485,11 @@ pub enum Msg {
     ExplorerNavUp,
     /// Right panel (graph explorer): snap the cursor to the first
     /// row in the flat list. Bound to `g` / `Home` on right-pane
-    /// focus per H-OBS-007 so the operator gets the right-pane-
-    /// equivalent behavior they get on the left tree.
+    /// focus, matching the left tree.
     ExplorerHome,
     /// Right panel (graph explorer): snap the cursor to the last
     /// row in the flat list. Bound to `G` / `End` on right-pane
-    /// focus per H-OBS-007.
+    /// focus.
     ExplorerEnd,
     /// Right panel (graph explorer): activate the highlighted row.
     /// On a group header this toggles the group's expansion; on a
@@ -570,7 +558,7 @@ pub enum Msg {
     /// op with that kind is currently in flight.
     InFlightFinish(InFlightKind),
     /// Nested-reducer entry point for the transcript viewer
-    /// (ADR 0085 contract 3, H-TUI-003 wave 7). The reducer arm
+    /// (ADR 0085 contract 3). The reducer arm
     /// pops the top viewer state, runs it through
     /// [`crate::viewer::input::reduce`], and pushes the new state
     /// back on `ViewerEffect::None` or leaves the stack popped
@@ -672,8 +660,7 @@ pub enum Msg {
     CommitWorktreePrune {
         repo_root: String,
     },
-    /// Commit the bare tmux `new-session` form (H-MUX-NEW-001 /
-    /// ADR 0095). Reducer emits `Effect::Exec(ExecSpec::MuxNew)` so
+    /// Commit the bare tmux `new-session` form (ADR 0095). Reducer emits `Effect::Exec(ExecSpec::MuxNew)` so
     /// the runtime re-execs into `conspectus mux new` with the same
     /// UX (alt-screen suspend → subprocess → refresh → attach) as
     /// pin launch.
@@ -839,8 +826,8 @@ impl App {
 
     /// Push a rename overlay onto the modal stack. Caller
     /// pre-populates the input with the current alias, harness
-    /// title, or empty string per ADR 0030. H-TUI-006 wraps the
-    /// raw text-input state in a `RenameOverlayState` so the
+    /// title, or empty string per ADR 0030. The raw text-input
+    /// state is wrapped in a `RenameOverlayState` so the
     /// overlay's Confirm(String) maps to Msg::CommitRename via
     /// the uniform Overlay trait.
     pub fn open_rename_overlay(&mut self, state: crate::tui::widgets::input::TextInputState) {
@@ -1251,8 +1238,8 @@ impl App {
     /// Resolve whatever copyable value the explorer cursor points at.
     /// Returns `(label, value)` for the toast caption + clipboard
     /// payload, or `None` if the row is not a Node-zone field or the
-    /// field has no value (empty or absent — see T8-040's
-    /// "no misleading copied toast" contract).
+    /// field has no value (empty or absent), so the toast never
+    /// claims a copy that didn't happen.
     pub fn explorer_copy_target(&self) -> Option<(String, String)> {
         let state = self.explorer.as_ref()?;
         let row = state.selected_row()?;
@@ -1507,7 +1494,7 @@ impl App {
                 let display = pin_create_default_name_candidate(&display);
                 let raw_id = pin_id_candidate(&display);
                 let series = self.next_pin_series_name(&raw_id);
-                // A numeric bump (`worker-1` → `worker-2`, H-PIN-TUI-011)
+                // A numeric bump (`worker-1` → `worker-2`)
                 // replaces the primary display name too so all three
                 // derived fields open aligned. Plain `-N` suffix
                 // collisions leave the operator-visible display name
@@ -1833,8 +1820,7 @@ impl App {
             .is_some_and(|row| matches!(row.kind, RowKind::MuxSession(_)))
     }
 
-    /// Active row filter for the visible view. F8-003 will
-    /// generalize this to per-view state.
+    /// Active row filter for the visible view.
     pub fn filter(&self) -> &crate::filter::RowFilter {
         &self.filter
     }
@@ -1876,7 +1862,7 @@ impl App {
         &mut self.config
     }
 
-    /// Enable F8-013 last-active-view persistence. The runtime calls
+    /// Enable last-active-view persistence. The runtime calls
     /// this at startup with a `TuiStateCache` resolver pointed at
     /// `$XDG_STATE_HOME/conspectus/tui-state.json`. Snapshot mode
     /// and the `--no-resume-view` flag both leave the cache unset
@@ -2134,7 +2120,7 @@ impl App {
 
     /// Pure getter for the current left-panel scroll offset. The
     /// reducer owns updates (via
-    /// [`Msg::LeftViewportChanged`] per H-TUI-005 wave 2); the
+    /// [`Msg::LeftViewportChanged`]); the
     /// renderer reads this to size `Paragraph::scroll`.
     pub fn left_scroll(&self) -> u16 {
         self.left_scroll
@@ -2185,7 +2171,7 @@ impl App {
 
     /// Pure getter for the current explorer scroll offset. The
     /// reducer owns updates (via
-    /// [`Msg::ExplorerViewportChanged`] per H-TUI-005 wave 2);
+    /// [`Msg::ExplorerViewportChanged`]);
     /// the renderer reads this to size `Paragraph::scroll`.
     pub fn explorer_scroll(&self) -> u16 {
         self.explorer_scroll
@@ -3234,7 +3220,7 @@ impl App {
     /// Move the left-pane selection to the row corresponding to
     /// `target`, expanding any ancestor group rows along the path.
     /// No-op when the focused node isn't represented in the current
-    /// view's row tree (T8-035 fallback per the design doc).
+    /// view's row tree.
     fn mirror_left_pane_to(&mut self, target: &NodeId) {
         let Some(row_index) = self
             .tree

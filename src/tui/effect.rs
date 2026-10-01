@@ -4,10 +4,8 @@
 //! runner, `std::process`, or the filesystem. `App::update` returns
 //! `Vec<Effect>`; the reducer never blocks on I/O.
 //!
-//! The catalog grows one wave at a time. Reserved variants stay
-//! out of the enum until the executor learns to run them so the
-//! reducer never emits an effect nobody can execute. See
-//! `docs/backlog.md` §H-TUI-002 for the phase roadmap.
+//! Variants exist only once the executor can run them, so the
+//! reducer never emits an effect nobody can execute.
 
 use crate::model::{AgentSessionId, MuxSessionId};
 use crate::tui::actions::{AttachTarget, PinLaunchTarget};
@@ -108,15 +106,13 @@ pub enum ExecSpec {
 
 /// A mux backend op the executor should run. The reducer emits this
 /// via `Effect::RunMux(...)`; the executor holds the sole
-/// `MuxBackend` reference and performs the call. Further variants
-/// (`RenameSession`, `NewSession`, `SendKeys`) migrate over as
-/// their current call sites (rename overlay commit, pin adopt/
-/// create) get carved out of the runtime and into reducer arms —
-/// tracked in `docs/backlog.md` §H-TUI-002.
+/// `MuxBackend` reference and performs the call. Other mux
+/// mutations (rename, new session, send-keys) run inside the
+/// executors for the store ops and launches that need them.
 #[derive(Debug, Clone, PartialEq)]
 pub enum MuxOp {
     /// Capture a tmux pane and stash the result in the App's
-    /// preview store (H-VIEWER-NATIVE + T8-014). Reducer-triggered
+    /// preview store. Reducer-triggered
     /// after selection changes to a new mux target; the executor
     /// runs `capture-pane`, wraps the payload, and dispatches
     /// `Msg::SetMuxPreview` back into the reducer.
@@ -130,10 +126,7 @@ pub enum MuxOp {
 /// carries the fully-resolved request the pure resolver already
 /// built; the executor writes the TOML, schedules a follow-up
 /// refresh so the row tree reflects the change, and posts the
-/// summary status. Further variants (`PinCreate`, `PinEdit`,
-/// `AliasUpsert`, `AliasRemove`) migrate over as their bundling
-/// with mux renames is resolved — see `docs/backlog.md`
-/// §H-TUI-002 Phase D.
+/// summary status.
 #[derive(Debug, Clone, PartialEq)]
 pub enum StoreOp {
     /// Write a new pin entry to its TOML store (ADR 0057). When
@@ -166,8 +159,7 @@ pub enum StoreOp {
     /// rewrites any pin whose `mux.name` matches the mux's
     /// current native id (graph-aware cascade), and chains a tmux
     /// `rename-session` so the live tmux name tracks the pin's
-    /// intent in lockstep. Default-socket only for v1;
-    /// non-default-socket renames land with H-PIN-014.
+    /// intent in lockstep. Default socket only.
     CommitMuxRename {
         mux_id: MuxSessionId,
         new_name: String,
