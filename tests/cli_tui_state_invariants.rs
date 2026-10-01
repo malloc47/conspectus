@@ -1,4 +1,4 @@
-//! Read-only invariant smoke for the F8-013 TUI state file
+//! Read-only invariant smoke for the TUI state file
 //! (`$XDG_STATE_HOME/conspectus/tui-state.json`).
 //!
 //! The state file persists the last-active TUI view across

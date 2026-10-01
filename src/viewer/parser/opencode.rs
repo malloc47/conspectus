@@ -2,9 +2,8 @@
 //!
 //! Reads from `opencode.db` per ADR 0013. OpenCode's session
 //! storage moved to SQLite; the `session_diff/` directory is
-//! diff-only metadata and is NOT the record of truth — this parser
-//! ignores it entirely, which is the gap that recall couldn't
-//! close (`H-TRANSCRIPT-014`).
+//! diff-only metadata and is NOT the record of truth, so this
+//! parser ignores it entirely.
 //!
 //! Schema (observed against live `opencode.db`):
 //!

@@ -31,10 +31,8 @@
 //! Shared rendering primitives — [`super::render::RenderOptions`],
 //! the column registry, [`super::render::render_rows`], the
 //! ADR 0022 color palette — live in [`super::render`] and are
-//! reached directly. Pre-H-HYG-010 this module re-exported them;
-//! callers now go through `output::render::*` for those items
-//! and through `output::table::*` only for the projection-
-//! dispatch entrypoints below.
+//! reached there directly; `output::table::*` holds only the
+//! projection-dispatch entrypoints below.
 
 use crate::model::{Confidence, GraphSnapshot, NodeId, Provenance};
 

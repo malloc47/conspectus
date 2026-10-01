@@ -1,5 +1,4 @@
-//! `conspectus worktree` subcommand (H-WT-002 / H-WT-003 / H-WT-004,
-//! ADR 0092).
+//! `conspectus worktree` subcommand (ADR 0092).
 //!
 //! `worktree list` renders the git worktrees discovery found
 //! (read-only). `worktree new` / `rm` delegate to the configured

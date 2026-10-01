@@ -193,7 +193,7 @@ fn collect_pr_rows(snapshot: &GraphSnapshot) -> Vec<PrRow<'_>> {
 /// branch (structural key). Pick is by `pick_preferred`'s
 /// ordering. Production discovery emits these with source=PR,
 /// target=Branch (despite the relation name suggesting the
-/// opposite); P10-004 already pinned that orientation.
+/// opposite); tests pin that orientation.
 fn collect_preferred_branch_per_pr(snapshot: &GraphSnapshot) -> HashMap<String, BranchKey> {
     let mut per_pr: HashMap<String, Vec<&GraphLink>> = HashMap::new();
     for link in &snapshot.candidate_links {

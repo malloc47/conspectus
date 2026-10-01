@@ -6,7 +6,7 @@ pub mod replay;
 /// Replace wall-clock `freshness_epoch` integer values in serialized
 /// JSON / table output with a stable `"<redacted>"` placeholder so
 /// snapshot diffs stay deterministic regardless of when the test
-/// runs. Targets the P7-002 fields on `NodeProvenance` and
+/// runs. Targets the freshness fields on `NodeProvenance` and
 /// `SourceMetadata`; the provider key itself (alongside the redacted
 /// epoch) still anchors the row in the diff.
 pub fn redact_freshness_epoch(text: &str) -> String {

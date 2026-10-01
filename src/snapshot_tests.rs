@@ -176,7 +176,7 @@ fn write_atomic_failure_mid_write_leaves_target_untouched() {
 
 #[test]
 fn from_bytes_round_trips_a_serialized_snapshot() {
-    // P11-007's daemon-socket consumer path receives the
+    // The daemon-socket consumer path receives the
     // serialized bytes verbatim from the daemon and decodes
     // them in-memory (no detour through a tmp file).
     // `from_bytes` is the helper that path uses; round-trip

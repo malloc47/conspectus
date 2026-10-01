@@ -1,10 +1,8 @@
 //! `conspectus columns <ROWS>` — lists the column registry
-//! for a projection (H-REF-006 wave 1 extraction).
+//! for a projection.
 //!
-//! Split from `cli/mod.rs` as a proof-of-shape for the
-//! per-command module boundary the story targets. Shared
-//! helpers (`ColorFlag`, `resolve_color_from_env`,
-//! `PagerOptions`, `print_paged`) remain in `super` at
+//! Shared helpers (`ColorFlag`, `resolve_color_from_env`,
+//! `PagerOptions`, `print_paged`) stay in `super` at
 //! `pub(super)` so this module reaches them without
 //! introducing a duplicate surface.
 

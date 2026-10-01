@@ -9,7 +9,7 @@
 //! class's* discovery providers on its own `[server.intervals]`
 //! cadence.
 //!
-//! State model (post-P11-011a):
+//! State model:
 //!
 //! * The daemon's working state lives in two in-memory caches:
 //!   [`SnapshotState`] (the live `GraphSnapshot` used as the
@@ -277,7 +277,7 @@ fn write_frame(stream: &mut UnixStream, payload: &[u8]) -> Result<()> {
 
 /// Shared cache of the most recently serialized snapshot bytes
 /// (header + rkyv archive) per ADR 0083. The daemon updates it
-/// after every successful cycle so the P11-006 socket
+/// after every successful cycle so the socket
 /// `snapshot` command can serve verbatim bytes without
 /// re-serializing per connection. `None` before the first cycle
 /// completes. The `Arc` around `Vec<u8>` lets the socket handler
@@ -293,12 +293,11 @@ pub type SnapshotBytes = Arc<Mutex<Option<Arc<Vec<u8>>>>>;
 /// Live in-memory snapshot the per-class scheduler treats as the
 /// prior for the next cycle. Refreshed alongside
 /// [`SnapshotBytes`] after every successful cycle. `None` before
-/// the first cycle completes or before a P11-009 warm-start
-/// reload populates it from `graph.bin` at daemon startup.
+/// the first cycle completes or before a warm-start reload
+/// populates it from `graph.bin` at daemon startup.
 ///
-/// Replaces the previous "read prior from `graph.sqlite`" pattern
-/// so the daemon never reads its own on-disk artifact during
-/// normal operation. The on-disk `graph.bin` exists for
+/// The daemon never reads its own on-disk artifact during normal
+/// operation. The on-disk `graph.bin` exists for
 /// daemonless consumers and for daemon warm-restart;
 /// it is not the daemon's working state.
 pub type SnapshotState = Arc<Mutex<Option<GraphSnapshot>>>;
@@ -556,9 +555,10 @@ fn try_handle_connection(stream: &mut UnixStream, ctx: &DispatchCtx) -> Result<(
 ///
 /// * `ping` — wire-shape sanity check; echoes `args` back under
 ///   `data.echo`. The CLI client uses this for liveness probes.
-/// * `refresh` — forces a full cold rebuild on the daemon side:
-///   loads no prior, runs every discovery provider, persists,
-///   and rotates a backup per ADR 0037. Useful when an operator
+/// * `refresh` — forces a full cold rebuild on the daemon side
+///   (or, with `args.class`, one class's cycle) and publishes the
+///   result to `graph.bin` and the in-memory caches. Useful when an
+///   operator
 ///   knows the on-disk world changed in a way the TTL gate would
 ///   not pick up for a while (e.g. they just `gh pr create`d
 ///   and want forge state refreshed now without waiting 5
@@ -566,8 +566,8 @@ fn try_handle_connection(stream: &mut UnixStream, ctx: &DispatchCtx) -> Result<(
 /// * `status` — returns the per-class `SchedulerState` map.
 /// * `snapshot` — returns the cached serialized snapshot bytes
 ///   (header + rkyv archive per ADR 0083) base64-encoded under
-///   `data.bytes`. P11-007 (TUI) and P11-008 (CLI mmap-or-
-///   rebuild) consume this command. Returns
+///   `data.bytes`. The TUI and the one-shot CLI consume this
+///   command. Returns
 ///   `snapshot_unavailable` when the daemon has not yet
 ///   completed its first cycle.
 /// * `hook_ingest` — applies one harness hook observation to the
@@ -832,9 +832,7 @@ fn run_full_rebuild(ctx: &DispatchCtx) -> Result<()> {
 ///   `snapshot` command serves verbatim bytes without
 ///   re-serializing per connection.
 /// * The in-memory [`SnapshotState`] cache so the next
-///   per-class cycle's prior comes from RAM rather than disk
-///   (replaces the previous "read prior from `graph.sqlite`"
-///   pattern; P11-011a).
+///   per-class cycle's prior comes from RAM rather than disk.
 ///
 /// **Best-effort on disk, durable in memory.** Serialize / write
 /// failures log a single warning and continue so a transient
@@ -928,7 +926,7 @@ fn warm_start_from_disk() -> Option<GraphSnapshot> {
 }
 
 /// One-shot cleanup of legacy `graph.sqlite*` artifacts left
-/// behind by pre-P11-011a daemon runs. The daemon no longer
+/// behind by daemons built before ADR 0082. The daemon no longer
 /// reads or writes them — `graph.bin` is the canonical
 /// persistence artifact. The cleanup is best-effort: filesystem
 /// errors log and continue; the files are harmless if left
@@ -1038,7 +1036,7 @@ pub fn run(config: ServeConfig) -> Result<()> {
     // to snapshot.
     let state = Arc::new(Mutex::new(SchedulerState::default()));
 
-    // Cached serialized snapshot bytes for the P11-006 socket
+    // Cached serialized snapshot bytes for the socket
     // `snapshot` command. The daemon updates this after every
     // successful cycle via [`publish_snapshot`]; `None` before
     // the first cycle.

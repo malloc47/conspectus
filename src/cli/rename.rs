@@ -270,8 +270,8 @@ fn run_mux_rename(rename: &MuxNativeRename, tmux: &dyn MuxBackend) -> Result<()>
     let outcome = tmux
         // Default-socket rename — `conspectus rename` is the alias
         // overlay surface (ADR 0029) that runs on whatever socket
-        // owned the discovered mux. Pin-driven non-default-socket
-        // renames will run from `pin rename` via H-PIN-014 instead.
+        // owned the discovered mux. Renaming a pin's mux on a
+        // non-default socket is out of scope here.
         .rename_session(None, &rename.mux.native_id, &rename.new_name)
         .map_err(|err| anyhow!("tmux rename-session failed: {err}"))?;
     match outcome {

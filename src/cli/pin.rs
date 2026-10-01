@@ -36,7 +36,7 @@ use super::{
 };
 
 // =====================================================================
-// Pin command tree (ADR 0057 / H-PIN-007/008/009).
+// Pin command tree (ADR 0057).
 // =====================================================================
 
 #[derive(Debug, Args)]
@@ -302,7 +302,7 @@ impl PinShowArgs {
             }
             _ => {}
         }
-        // ADR 0058 H-PIN-RESUME-005: when the pin is unbound and the
+        // ADR 0058: when the pin is unbound and the
         // sidecar has a recorded last-bound session, surface it so
         // the operator can see what `pin launch` would resume into.
         if let Some(last) = pin_last_session_for(&snapshot, &self.id) {
@@ -817,7 +817,7 @@ impl PinLaunchArgs {
                 // here — resolve or create it and launch there instead
                 // of the repo anchor.
                 let cwd = realize_worktree_cwd(pin)?;
-                // ADR 0058 / H-PIN-RESUME-004: consult the
+                // ADR 0058: consult the
                 // per-pin sidecar to splice in resume_argv when a
                 // prior session is known and still reachable.
                 // Falls back to the default argv on every honest

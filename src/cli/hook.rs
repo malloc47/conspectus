@@ -451,11 +451,9 @@ fn harness_pid_pair(harness: &str) -> (Option<i64>, Option<i64>) {
 fn tmux_context() -> Option<HookTmuxRecord> {
     // Iterate the registered mux backends and ask
     // each for its current-session context. The first backend
-    // to answer wins. The pre-H-EXT-011 direct `$TMUX` + `tmux
-    // display-message` probe moved onto the SystemTmux
-    // implementation of `MuxBackend::current_session_context`.
-    // Additional backends (zellij, screen, …) supply their own
-    // env-var contract via the same trait method.
+    // to answer wins. `SystemTmux` reads `$TMUX` and runs `tmux
+    // display-message`; other backends supply their own env-var
+    // contract via the same trait method.
     let backends: Vec<Box<dyn conspectus::discovery::tmux::MuxBackend>> = vec![
         Box::new(conspectus::discovery::tmux::SystemTmux::new()),
         Box::new(conspectus::discovery::zellij::SystemZellij::new()),

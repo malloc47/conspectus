@@ -1,5 +1,4 @@
-//! Full-screen Ratatui modal for the transcript viewer
-//! (`H-VIEWER-NATIVE-006`, restyled by `H-VIEWER-NATIVE-011`).
+//! Full-screen Ratatui modal for the transcript viewer.
 //!
 //! Layout (top → bottom):
 //!
@@ -566,8 +565,8 @@ fn passes_abort_filter(turn: &crate::viewer::model::TranscriptTurn, state: &View
     state.show_aborted || !turn.aborted
 }
 
-/// Pick a harness-identity color for the title chip. H-EXT-003:
-/// delegates to [`Theme::harness_color`] so the per-harness color
+/// Pick a harness-identity color for the title chip. Delegates to
+/// [`Theme::harness_color`] so the per-harness color
 /// lookup lives in one place (the theme + adapter registry) rather
 /// than a match table here.
 fn harness_chip_style(harness: &str, theme: &Theme) -> Style {

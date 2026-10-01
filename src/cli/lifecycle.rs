@@ -148,7 +148,7 @@ impl RefreshArgs {
 }
 
 /// In-process per-class refresh used by `conspectus refresh
-/// --class <name>` when no daemon is available. P11-011a: the
+/// --class <name>` when no daemon is available. The
 /// prior is mmap'd from `graph.bin` when the file exists (so a
 /// peer daemon's recent snapshot still seeds the per-class
 /// evict-and-rerun); otherwise empty. Resolved snapshot lands

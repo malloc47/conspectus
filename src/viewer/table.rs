@@ -1,5 +1,5 @@
 //! Markdown-table extraction + rendering for message bodies
-//! (`H-VIEWER-NATIVE-017`, ADR 0054).
+//! (ADR 0054).
 //!
 //! `tui-markdown` 0.3 doesn't enable pulldown-cmark's
 //! `ENABLE_TABLES`, so a GFM pipe-table in a message body would

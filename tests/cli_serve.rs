@@ -336,7 +336,7 @@ fn serve_cleans_up_legacy_graph_sqlite_on_startup() {
 
 #[test]
 fn serve_socket_snapshot_command_returns_graph_bin_bytes() {
-    // P11-006 happy path: spawn the daemon, wait for the
+    // Happy path: spawn the daemon, wait for the
     // first cycle's graph.bin to land, request the snapshot
     // over the socket via the typed client, and confirm the
     // returned bytes match the on-disk artifact byte-for-byte.
@@ -373,7 +373,7 @@ fn serve_socket_snapshot_command_returns_graph_bin_bytes() {
 
     // Hand-rolled snapshot request to verify the wire shape
     // independently of the client helper. The base64 payload
-    // lands under data.bytes per ADR 0083 / P11-006.
+    // lands under data.bytes per ADR 0083.
     let socket = socket_path_under(runtime.path());
     assert!(wait_for_socket(&socket, Duration::from_secs(5)));
     let mut stream = UnixStream::connect(&socket).expect("connect");
@@ -426,10 +426,10 @@ fn serve_socket_snapshot_command_returns_graph_bin_bytes() {
 
 #[test]
 fn serve_socket_snapshot_command_errors_before_first_cycle() {
-    // P11-006 negative path: a `snapshot` request that arrives
+    // Negative path: a `snapshot` request that arrives
     // before the first per-class cycle completes must return
     // `snapshot_unavailable` so the caller can fall through
-    // (P11-008's mmap-or-rebuild) rather than block forever.
+    // (to mmap-or-rebuild) rather than block forever.
     //
     // To race the first-cycle write, set HOME to a real
     // populated tree (forces non-trivial discovery work) and
@@ -801,7 +801,7 @@ fn cli_refresh_class_routes_through_daemon_when_present() {
 
 #[test]
 fn serve_harness_watcher_fires_on_state_dir_change() {
-    // P7-009 end-to-end: the daemon installs a filesystem
+    // End-to-end (ADR 0081): the daemon installs a filesystem
     // watcher on every configured harness state dir. When a
     // file appears in one of them, the harness scheduler
     // wakes immediately and runs a cycle — observable as the
@@ -985,7 +985,7 @@ fn serve_shuts_down_cleanly_on_sigterm() {
 
 #[test]
 fn serve_logs_startup_line_to_stderr() {
-    // Operators (and future P7-008 status checks) need to see
+    // Operators (and status checks) need to see
     // when the daemon actually started; this pins the startup
     // log so a refactor that loses it surfaces in CI.
     let home = tempfile::TempDir::new().expect("home temp");

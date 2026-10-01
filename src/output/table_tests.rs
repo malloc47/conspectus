@@ -510,8 +510,8 @@ fn render_columns_listing_marks_default_columns() {
         .expect("id line");
     assert!(id_line.ends_with("(default)"), "got: {id_line}");
 
-    // `checkout` was added as opt-in by H-TBL-010, so its line
-    // should not carry the (default) marker.
+    // `checkout` is opt-in, so its line should not carry the
+    // (default) marker.
     let checkout_line = listing
         .lines()
         .find(|line| line.starts_with("checkout "))
@@ -2047,7 +2047,7 @@ fn card_layout_truncates_values_when_width_is_set() {
 
 #[test]
 fn agent_label_uses_session_key_not_title() {
-    // Regression for H-TBL-015: the AGENT cell used to fall back
+    // Regression: the AGENT cell used to fall back
     // to `harness:title` when the adapter populated `title`. That
     // surfaced opencode's long chat topics in the leading cell.
     // The label now always renders `harness:session_key` (with
@@ -2419,7 +2419,7 @@ fn fit_to_width_settles_at_floors_when_target_is_impossible() {
     }
 }
 
-// ---- ADR 0031 / F8-010: filter parity ----
+// ---- ADR 0031: filter parity ----
 
 fn three_session_snapshot() -> GraphSnapshot {
     let mut snapshot = GraphSnapshot::empty();

@@ -132,12 +132,9 @@ pub fn default_root() -> Option<PathBuf> {
     })
 }
 
-// `hook::current_epoch` re-exports the canonical
-// helper from `crate::discovery::current_epoch`. Pre-H-HYG-001
-// there were 5 verbatim copies scattered across the codebase;
-// this preserves the public call path
-// (`conspectus::hook::current_epoch()`) while collapsing the
-// body to a single definition.
+// `hook::current_epoch` re-exports the canonical helper from
+// `crate::discovery::current_epoch` so `conspectus::hook` callers
+// have it at hand.
 pub use crate::discovery::current_epoch;
 
 /// Build a hook sidecar record from a harness's SessionStart
@@ -149,11 +146,6 @@ pub use crate::discovery::current_epoch;
 /// misconfigured harness hooks fail loudly instead of silently
 /// producing a record with a non-registered `harness_key`
 /// (which the discovery pipeline would then ignore).
-///
-/// This replaces the pre-H-EXT-005 per-harness
-/// `claude_code_record_from_payload` / `codex_record_from_payload`
-/// / `opencode_record_from_payload` writers; every caller now
-/// funnels through the registry.
 pub fn hook_record_from_payload(
     harness_key: &str,
     payload: &serde_json::Value,
@@ -191,12 +183,9 @@ impl HookTmuxRecord {
     }
 }
 
-/// Read a payload field as an owned non-empty string.
-/// H-EXT-005 promotes this from a module-private helper to
-/// `pub` so `HarnessAdapter::hook_record_from_payload` can call
-/// it from `crate::discovery::harness` — the same payload
-/// convention (skip empties, materialize the value) applies to
-/// every harness's hook payload.
+/// Read a payload field as an owned non-empty string. Public so
+/// `HarnessAdapter::hook_record_from_payload` implementations share
+/// the payload convention (skip empties, materialize the value).
 pub fn optional_payload_string(payload: &serde_json::Value, key: &str) -> Option<String> {
     payload
         .get(key)

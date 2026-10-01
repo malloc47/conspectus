@@ -276,7 +276,7 @@ impl TuiArgs {
             vec![cwd.clone()]
         };
 
-        // F8-013 view precedence:
+        // View precedence:
         //   1. explicit `--view` flag wins.
         //   2. otherwise read the persisted last-active view from
         //      `$XDG_STATE_HOME/conspectus/tui-state.json`.
@@ -347,7 +347,7 @@ impl TuiArgs {
             // SessionsGrouping for build_tree_for_view's sessions
             // branch; fall back to the default so a `--view mux
             // --grouping host` launch doesn't accidentally drag a
-            // sessions grouping along. F8-003 generalizes this.
+            // sessions grouping along.
             _ => conspectus::tui::SessionsGrouping::Graph,
         };
         let mux_grouping = match initial_grouping {

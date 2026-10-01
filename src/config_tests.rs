@@ -180,7 +180,7 @@ fn project_config_search_stops_at_home() {
 #[test]
 fn server_intervals_default_when_absent() {
     // No `[server]` block at all → every class keeps its ADR
-    // 0038 default. P7-003 phase 3's TTL gate falls back to
+    // 0038 default. The warm-start TTL gate falls back to
     // these numbers on a fresh install.
     let temp = TempDir::new().expect("temp dir");
     let loader = ConfigLoader::new()
@@ -864,7 +864,7 @@ fn tui_theme_harness_table_unknown_key_emits_diagnostic() {
 
 #[test]
 fn tui_theme_flat_harness_alias_still_works() {
-    // Pre-H-EXT-003 flat keys stay as aliases per ADR 0031.
+    // The older flat keys stay as aliases per ADR 0031.
     let temp = TempDir::new().expect("temp dir");
     let project = temp.path().join("project");
     fs::create_dir(&project).expect("create project dir");

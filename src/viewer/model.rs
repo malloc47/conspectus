@@ -32,10 +32,8 @@ use serde::{Deserialize, Serialize};
 /// [`TranscriptDocument`] — but the parser dispatcher needs to know
 /// which file/db to open.
 ///
-/// H-EXT-006 flattened the pre-existing closed
-/// `enum SessionLocator { ClaudeCode { .. }, Codex { .. },
-/// OpenCode { .. } }` into this open struct. Adapters build the
-/// locator via
+/// An open struct rather than a per-harness enum: adapters build
+/// the locator via
 /// [`crate::discovery::harness::HarnessAdapter::transcript_source`];
 /// each adapter's `state_root` interpretation is documented on
 /// that method. Adding a fifth harness with a native transcript
@@ -61,15 +59,12 @@ pub struct SessionLocator {
 }
 
 impl SessionLocator {
-    /// Adapter harness key for this locator. Kept as a method
-    /// for callers that came in through the pre-H-EXT-006
-    /// `enum SessionLocator::harness_key()` accessor.
+    /// Adapter harness key for this locator.
     pub fn harness_key(&self) -> &str {
         &self.harness_key
     }
 
-    /// The harness-native session identifier. Kept for
-    /// pre-H-EXT-006 callers.
+    /// The harness-native session identifier.
     pub fn session_key(&self) -> &str {
         &self.session_key
     }
@@ -133,9 +128,8 @@ pub enum TurnRole {
 
 impl TurnRole {
     /// Short label the viewer header uses (`you`, `assistant`,
-    /// `system`). Matches the inline-preview labels per the
-    /// H-TRANSCRIPT-009 sketch so the two surfaces stay
-    /// consistent.
+    /// `system`). Matches the inline-preview labels so the two
+    /// surfaces stay consistent.
     pub fn header_label(self) -> &'static str {
         match self {
             Self::User => "you",

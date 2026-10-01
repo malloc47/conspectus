@@ -52,10 +52,8 @@ fn locator_harness_key_round_trips() {
 fn locator_serde_round_trip_claude() {
     let original = sample_locator_claude();
     let json = serde_json::to_string(&original).expect("serialize");
-    // H-EXT-006 flat shape: `harness_key` field replaces the
-    // pre-H-EXT-006 `harness` tag; external bin / future
-    // config files write `{"harness_key": "claude-code",
-    // ...}`.
+    // Flat shape: external bins and config files write
+    // `{"harness_key": "claude-code", ...}`.
     assert!(
         json.contains("\"harness_key\":\"claude-code\""),
         "got {json}"

@@ -272,10 +272,8 @@ fn validate_entry(entry: &PinEntry) -> Result<(), PinParseError> {
             cwd: entry.cwd.clone(),
         });
     }
-    // Validate against the compile-time registered
-    // backend list instead of the historical "only tmux" match.
-    // A future backend (H-EXT-010 zellij) becomes a
-    // `KNOWN_MUX_BACKENDS` entry and lands here automatically.
+    // Validate against the compile-time registered backend list,
+    // so a new backend only needs a `KNOWN_MUX_BACKENDS` entry.
     if !crate::discovery::tmux::KNOWN_MUX_BACKENDS.contains(&entry.mux.backend.as_str()) {
         return Err(PinParseError::UnsupportedMuxBackend {
             entry_id: entry.id.clone(),

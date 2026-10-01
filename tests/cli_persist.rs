@@ -1,11 +1,8 @@
-//! CLI-level tests for the post-P11-011a graph.bin persistence
-//! path. The legacy graph.sqlite persistence layer is gone (ADR
-//! 0082); the assertions here pin the graph.bin writer plus the
+//! CLI-level tests for the graph.bin persistence path (ADR 0082,
+//! ADR 0083). The assertions pin the graph.bin writer plus the
 //! `--no-cache` / `--refresh` flag semantics so a regression
 //! that drops the writer (or accidentally moves it past the
-//! error-path) surfaces in CI. The corruption-recovery and
-//! backup-rotation assertions from the SQLite era are gone with
-//! the machinery they tested.
+//! error-path) surfaces in CI.
 
 use assert_cmd::Command;
 use std::path::Path;
@@ -130,8 +127,8 @@ fn table_sessions_with_refresh_still_persists_the_writer_output() {
 #[test]
 fn table_sessions_second_run_succeeds_without_warnings() {
     // Round-trip smoke: two successive runs should both
-    // succeed cleanly. P11-011a removed the on-disk warm-start
-    // prior; both runs are cold rebuilds. The regression net
+    // succeed cleanly. There is no on-disk warm-start prior, so
+    // both runs are cold rebuilds. The regression net
     // is "no stderr warnings from the cache layer" — a future
     // cache-related regression that surfaces as a warning
     // line lands in CI here.
@@ -169,7 +166,7 @@ fn table_sessions_second_run_succeeds_without_warnings() {
 
 #[test]
 fn legacy_graph_sqlite_artifacts_do_not_block_a_fresh_run() {
-    // Operators upgrading from a pre-P11-011a build will have a
+    // Operators upgrading from a build before ADR 0082 may have a
     // leftover graph.sqlite in their data dir. The CLI must
     // ignore it (it doesn't read it anymore) and still produce
     // a valid graph.bin on the next run. The daemon cleans up

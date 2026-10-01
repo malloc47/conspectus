@@ -1,10 +1,8 @@
 //! In-memory forks projection renderer (ADR 0082).
 //!
 //! Emits one row per `fork` node. Iterates `snapshot.nodes`
-//! and `snapshot.candidate_links` directly — no SQLite
-//! materialization. The cell-level output shape matches the
-//! deleted pre-P11-011b SQL renderer byte-for-byte so the
-//! existing `output::table` snapshot tests stay green.
+//! and `snapshot.candidate_links` directly; the `output::table`
+//! snapshot tests pin the cell-level output.
 
 use std::collections::HashMap;
 

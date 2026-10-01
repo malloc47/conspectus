@@ -2,8 +2,8 @@
 //!
 //! Debug-only scenario materialization + rendering used by
 //! `dev scenario list / graph / table / node / tui`. Gated
-//! at `#[cfg(debug_assertions)]` per pre-H-REF-006 shape;
-//! release builds compile without this module.
+//! at `#[cfg(debug_assertions)]`; release builds compile without
+//! this module.
 //!
 //! Shared surface reached back through `super`:
 //! `ColorFlag`, `LayoutFlag`, `OutputFormat`, `InclusionFlag`,

@@ -1,6 +1,6 @@
 //! Read-only invariant smoke for `[pins]`-bearing configs.
 //!
-//! Mirrors P5-004 for declared links: every `conspectus` subcommand
+//! Mirrors the declared-link invariants: every `conspectus` subcommand
 //! that the operator can run without expressing write intent
 //! (`graph`, `node show`, `table`, `pin list`, `pin show`)
 //! must NOT create, mtime-touch, or content-modify `.conspectus.toml`

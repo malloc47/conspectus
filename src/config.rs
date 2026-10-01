@@ -86,8 +86,7 @@ pub enum TeardownConfirm {
     /// session.
     Always,
     /// Confirm only when a live mux/agent would be terminated — the
-    /// dangerous case (default; the natural extension of the
-    /// H-WT-004a guard).
+    /// dangerous case (default).
     #[default]
     Live,
     /// No interstitial prompt (trust / scripted use). The operator
@@ -178,8 +177,8 @@ pub struct TuiConfig {
     /// Resolved color theme (ADR 0032). Built from `[tui.theme]` with
     /// unspecified entries falling back to [`Theme::default`].
     pub theme: Theme,
-    /// Opt-in display of per-harness count chips in the top header
-    /// (H-UI-004 audit). Default `false`: row badges already carry
+    /// Opt-in display of per-harness count chips in the top header.
+    /// Default `false`: row badges already carry
     /// per-session identity and group summaries carry per-group
     /// totals. Operators who want the aggregate set
     /// `[tui] show_harness_chips = true` in their config.
@@ -217,7 +216,7 @@ pub struct TuiDetailConfig {
     /// `provenance · confidence · state` trailing meta line by
     /// default. When `false` (the default), the meta line is
     /// suppressed and the operator can flip it on per-session with
-    /// the `E` accelerator. Per T8-042 the right pane is primarily a
+    /// the `E` accelerator. The right pane is primarily a
     /// graph-navigation surface; the edge-meta detail is opt-in for
     /// operators actively diagnosing resolver decisions.
     pub show_edge_meta: bool,
@@ -261,8 +260,8 @@ pub struct TuiViewConfig {
 }
 
 /// Per-row-type settings under `[table.<rows>]`. Each row-type gets
-/// its own [`TableRowConfig`] so H-TBL-007 column registries land in a
-/// single, predictable slot.
+/// its own [`TableRowConfig`] so per-row-type column registries land
+/// in a single, predictable slot.
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct TableConfig {
     pub sessions: TableRowConfig,
@@ -391,7 +390,7 @@ struct TuiFile {
     #[serde(default)]
     theme: Option<BTreeMap<String, toml::Value>>,
     /// `[tui] show_harness_chips` opt-in for the per-harness count
-    /// chips in the top header (H-UI-004 audit). Default `false`;
+    /// chips in the top header. Default `false`;
     /// see the field of the same name on [`TuiConfig`] for the
     /// motivation.
     #[serde(default)]

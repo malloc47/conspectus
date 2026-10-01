@@ -630,9 +630,8 @@ pub struct AgentSessionNode {
 }
 
 // Builder helpers on `AgentSessionNode` mirror
-// `RepoNode::new` / `with_*` so 83 pre-H-HYG-011 struct
-// literals migrate opportunistically without a big-bang
-// rewrite. Add per touched file, not en masse.
+// `RepoNode::new` / `with_*`. Struct literals elsewhere move to
+// them as files are touched.
 impl AgentSessionNode {
     /// Minimal ctor. All optional fields default to `None`.
     pub fn new(id: AgentSessionId, harness_key: impl Into<String>) -> Self {
@@ -692,8 +691,8 @@ pub struct MuxSessionNode {
     /// The post-backend portion of the mux's identifier. For
     /// default-socket tmux sessions this is just the bare session
     /// name (e.g. `editor`). For non-default-socket sessions
-    /// (when discovery for them lands per H-PIN-F-001) it would
-    /// be `<socket>:<name>` (e.g. `scratch:editor`). The fully-
+    /// (once discovery covers them) it would be `<socket>:<name>`
+    /// (e.g. `scratch:editor`). The fully-
     /// prefixed form `<backend>:<native_id>` lives on
     /// `MuxSessionId.native_id` — same field name on the id
     /// type, but the id holds the prefixed form while this field
@@ -731,8 +730,7 @@ pub struct MuxSessionNode {
 }
 
 // Builder helpers on `MuxSessionNode` mirror
-// `RepoNode::new` / `with_*`. Migrate 53 pre-H-HYG-011
-// struct literals opportunistically.
+// `RepoNode::new` / `with_*`.
 impl MuxSessionNode {
     /// Minimal ctor. All optional fields default to `None`.
     pub fn new(id: MuxSessionId, backend: impl Into<String>, native_id: impl Into<String>) -> Self {
@@ -1391,7 +1389,7 @@ pub struct SourceMetadata {
     pub fields: Metadata,
     /// Unix epoch (seconds) captured when the producing adapter ran
     /// against the live world. Feeds the per-provider TTL comparison
-    /// in `P7-003` / `P7-006`. `None` when the adapter did not record
+    /// in the warm-start gate. `None` when the adapter did not record
     /// a timestamp.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub freshness_epoch: Option<i64>,
@@ -1734,7 +1732,7 @@ pub struct ResolvedRelationship {
     /// When `selected_link_id` is `None`, this is *every*
     /// candidate that was considered — including what would have
     /// been the arbitrary tiebreak winner — so the Other-zone
-    /// renderer and the H-UI-007 ambiguity signal can both walk
+    /// renderer and the ambiguity signal can both walk
     /// the full candidate set without a parallel inference path.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub competing_link_ids: Vec<String>,
@@ -1995,22 +1993,14 @@ mod node_provenance_serde {
     }
 }
 
-/// Indexed view over a [`GraphSnapshot`] (H-HYG-006 wave 1;
-/// ADR 0035 Stage 1). Built once per snapshot publish so
-/// consumers don't linear-scan `snapshot.nodes` /
-/// `snapshot.candidate_links` per render.
+/// Indexed view over a [`GraphSnapshot`] (ADR 0035 Stage 1).
+/// Built once per snapshot publish so consumers don't linear-scan
+/// `snapshot.nodes` / `snapshot.candidate_links` per render. Holds
+/// the `id → &GraphNode` map, links by source and relation, by
+/// relation, and by id, and per-session mux candidate counts.
 ///
-/// **Wave 1 scope**: only the `id → &GraphNode` map is
-/// populated. Follow-up waves add:
-/// - source_node → links-by-relation (wave 3+).
-/// - session → mux candidate counts (wave 5 retires
-///   `tui::rows::collect_agent_mux_candidate_counts`).
-/// - preferred-mux per session.
-///
-/// Cheap to build: one BTreeMap walk over `snapshot.nodes`.
-/// Callers that don't need the index still work — every
-/// site migrates opportunistically per the wave sequencing
-/// in the story.
+/// Cheap to build: one pass over the nodes and two over the
+/// candidate links.
 #[derive(Debug)]
 pub struct SnapshotIndex<'a> {
     /// Borrow of the source snapshot so links + resolved_relationships
@@ -2018,11 +2008,9 @@ pub struct SnapshotIndex<'a> {
     pub snapshot: &'a GraphSnapshot,
     id_to_node: BTreeMap<NodeId, &'a GraphNode>,
     /// Per-agent count of distinct active
-    /// `LinkedToMux` mux targets. Retires the
-    /// `tui::rows::collect_agent_mux_candidate_counts` helper
-    /// (H-HYG-002's interim home) — consumers now read the
-    /// count from `index.mux_candidate_count(agent_node_id)`.
-    /// Deduped by target mux id.
+    /// `LinkedToMux` mux targets, read through
+    /// `index.mux_candidate_count(agent_node_id)`. Deduped by target
+    /// mux id.
     agent_mux_candidate_counts: std::collections::HashMap<String, usize>,
     /// `(source, relation) → Vec<&GraphLink>`
     /// map. Consumers that today linear-scan `candidate_links`

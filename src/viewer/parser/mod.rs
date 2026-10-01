@@ -6,11 +6,9 @@
 //! [`SessionLocator`] without harness-specific knowledge in the
 //! widget layer.
 //!
-//! Parser lookup now goes through the adapter
-//! registry via
+//! Parser lookup goes through the adapter registry via
 //! [`crate::discovery::harness::HarnessAdapter::transcript_parser`],
-//! so the pre-H-EXT-006 `supports(&locator) -> bool` fan-out is
-//! gone — the caller already knows which parser it wants.
+//! so the caller already knows which parser it wants.
 
 pub mod claude_code;
 pub mod codex;

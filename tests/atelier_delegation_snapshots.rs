@@ -163,7 +163,7 @@ impl AtelierDelegationFixture {
         if let Some(name) = self.root().file_name().and_then(|s| s.to_str()) {
             out = out.replace(name, "fixture");
         }
-        // Redact wall-clock-derived P7-002 freshness timestamps so the
+        // Redact wall-clock-derived freshness timestamps so the
         // snapshot stays stable across runs. The provider key itself
         // (alongside the redacted epoch) still anchors the diff.
         out = support::redact_freshness_epoch(&out);

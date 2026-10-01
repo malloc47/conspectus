@@ -1,4 +1,4 @@
-//! T8-044 spike: tui-pantry preview harness for Conspectus widgets.
+//! Spike: tui-pantry preview harness for Conspectus widgets.
 //!
 //! Boots [`tui_pantry`] with a hand-built ingredient list so the
 //! widget-iteration loop can be evaluated without going through

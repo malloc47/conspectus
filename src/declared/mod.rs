@@ -5,7 +5,7 @@
 //! or persistence; later phases convert validated entries into
 //! `GraphLink` evidence and write them back.
 //!
-//! Post-H-REF-005 concerns are split into three submodules:
+//! Concerns are split into three submodules:
 //! - **this file** — TOML types + `DeclaredEndpoint` compact
 //!   codec + `parse_declared_document` / `to_toml` +
 //!   `validate_document` + every `DeclaredParseError` /
@@ -20,9 +20,8 @@
 //!   `declared_endpoint_from_node_id`) that need a
 //!   `GraphSnapshot` to make their choice.
 //!
-//! Every pre-H-REF-005 public identifier is re-exported from
-//! this module so callers reach for `crate::declared::…` as
-//! before.
+//! The public items of the submodules are re-exported here, so
+//! callers use `crate::declared::…`.
 
 use std::collections::BTreeSet;
 use std::fmt;
@@ -36,8 +35,7 @@ use crate::model::RelationKind;
 pub mod snapshot;
 pub mod store;
 
-// Re-exports keeping the pre-H-REF-005 `crate::declared::*`
-// surface intact.
+// Flatten the submodules into `crate::declared::*`.
 pub use snapshot::{declared_endpoint_from_node_id, select_store_for_declaration};
 pub use store::{
     DeclaredStoreKind, DeclaredStoreSelection, DeclaredWriteOutcome, load_declared_link_by_id,
@@ -150,10 +148,9 @@ pub enum DeclaredEndpoint {
 impl DeclaredEndpoint {
     /// Shared codec entrypoint. Parses the compact
     /// `type:key=value,…` CLI form callers use for
-    /// `conspectus declared` operations. Pre-H-REF-001 the
-    /// parse + label sides lived only in `cli.rs`; centralizing
-    /// them here means adding a new endpoint variant is one
-    /// change instead of three.
+    /// `conspectus declared` operations. Keeping the parse and
+    /// label sides together means adding a new endpoint variant is
+    /// one change.
     ///
     /// Field names match the declared TOML field names so the
     /// CLI syntax and the TOML store cannot drift.

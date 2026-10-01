@@ -360,7 +360,7 @@ fn remove_claude_hook_preserves_unrelated_hooks_in_same_entry() {
     assert_eq!(hooks[0]["command"], "echo existing");
 }
 
-// ---- ADR 0031 / F8-009: FilterArgs ----
+// ---- ADR 0031: FilterArgs ----
 
 fn filter_args_with(
     harness: Vec<&str>,
@@ -633,7 +633,7 @@ mod resume_resolver {
         let pin = make_pin("codex");
 
         let argv = resume_with_default_argv(&snap, &pin, &cache).expect("resume argv produced");
-        // codex resume_argv per H-PIN-RESUME-002: ["codex",
+        // codex resume_argv: ["codex",
         // "exec", "--resume", "session-a"].
         assert_eq!(
             argv,

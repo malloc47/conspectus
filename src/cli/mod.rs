@@ -136,7 +136,7 @@ pub(super) enum LayoutFlag {
     Card,
 }
 
-/// P11-011a resolution chain for every one-shot CLI command
+/// Resolution chain for every one-shot CLI command
 /// that renders a resolved graph (`table`, `node show`,
 /// `graph`). The order is:
 ///
@@ -594,7 +594,7 @@ pub(super) fn resolve_alias_store(
 mod pin;
 use pin::PinArgs;
 
-// H-MUX-NEW-001 / ADR 0095: `conspectus mux new` subcommand.
+// ADR 0095, ADR 0096: `conspectus mux new` / `mux launch`.
 mod mux;
 use mux::MuxArgs;
 
@@ -697,10 +697,8 @@ pub(super) fn effective_scan_roots(scan_roots: &[PathBuf], cwd: &Path) -> Vec<Pa
 }
 
 /// Read-only variant of discovery used by the declared/pin
-/// store-selection helpers. Pre-P11-011a this loaded the
-/// previous graph.sqlite as the warm-start prior; with
-/// graph.sqlite retired it falls through to a cold rebuild.
-/// The helper deliberately skips the writer side regardless —
+/// store-selection helpers. Always a cold rebuild, and the
+/// helper deliberately skips the writer side —
 /// this is a transient pre-write probe, not the user's primary
 /// artifact, and rewriting the cache from a CRUD-adjacent code
 /// path would surprise operators who expected the cache to

@@ -84,7 +84,7 @@ pub struct RenderOptions {
 }
 
 impl RenderOptions {
-    /// Untruncated, columnar layout. Matches the pre-H-TBL-003 renderer.
+    /// Untruncated, columnar layout.
     pub fn wide() -> Self {
         Self {
             width: None,
@@ -1290,7 +1290,7 @@ mod tests {
     /// Module-boundary invariant: the rendering substrate must not
     /// import anything from `crate::model`. A violation here means a
     /// renderer-backend coupling has leaked into the shared layer.
-    /// Catches drift introduced after P10-003 lands. Checks only `use`
+    /// Checks only `use`
     /// statements so the assertion message can name the constraint
     /// without tripping itself.
     #[test]

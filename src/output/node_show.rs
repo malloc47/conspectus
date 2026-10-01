@@ -157,8 +157,7 @@ fn write_section_header(out: &mut String, text: &str, color: bool) {
 }
 
 /// External display label for a node referenced from a link or
-/// resolved relationship. Mirrors the pre-P11-011b
-/// `node_reference_label_from_display` behavior.
+/// resolved relationship.
 fn node_reference_label(snapshot: &GraphSnapshot, id: &NodeId) -> String {
     let display = id.to_string();
     let Some(node) = snapshot.find_node(id) else {

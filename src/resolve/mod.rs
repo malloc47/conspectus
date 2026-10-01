@@ -125,10 +125,8 @@ const STALE_SOURCE_GAP_SECONDS: i64 = 24 * 3600;
 /// The resolver buckets `LinkedToMux` candidates per source rather
 /// than per target, so without this pass two sessions both linking
 /// to the same mux each win their own bucket and surface as parallel
-/// attachments. In practice that produces the "stale `--resume <uuid>`
-/// keeps showing as attached" behavior described in `H-MUXPROC-015`,
-/// `H-MUXPROC-020`, and the live caveat-mux case that motivated
-/// `H-MUXPROC-021`.
+/// attachments. In practice that shows up as a stale `--resume <uuid>`
+/// session that keeps appearing attached to a mux.
 fn demote_stale_source_mux_candidates(snapshot: &mut GraphSnapshot) {
     let last_active_by_session: BTreeMap<NodeId, i64> = snapshot
         .nodes
@@ -596,8 +594,7 @@ fn suppress_ambiguous_cwd_mux_links(candidates: &[GraphLink], output: &mut Resol
 
     // ADR 0077: rather than removing the matched `ResolvedRelationship`
     // (which left downstream consumers inferring ambiguity from the
-    // raw candidate set, hence the H-UI-007 + H-UI-008 fallbacks),
-    // mutate the slot in place. `selected_link_id` becomes `None`
+    // raw candidate set), mutate the slot in place. `selected_link_id` becomes `None`
     // — the resolver's honest "I cannot pick" — and the original
     // winner id joins `competing_link_ids` so the candidate
     // accounting still totals every link that was considered.
@@ -778,11 +775,8 @@ struct MuxScore {
 }
 
 /// Shared `Provenance` → tier mapping used by every
-/// relation comparator's provenance axis. Pre-H-REF-003 the
-/// resolver had two parallel enums (`MuxTier` +
-/// `PrProvenanceTier`) with identical variants, identical
-/// ordering, and identical labels. A new `Provenance` variant
-/// meant three coordinated changes; now it means one.
+/// relation comparator's provenance axis, so a new `Provenance`
+/// variant is one change.
 ///
 /// Higher-tier discriminants win the comparator, which matches
 /// [`crate::model::Provenance::precedence`] but is spelled as a

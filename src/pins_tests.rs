@@ -386,7 +386,7 @@ fn effective_socket_and_native_id() {
     assert_eq!(entry.mux.native_id(), "tmux:scratch:ingest");
 }
 
-// ---- ADR 0057 / H-PIN-005 store selection ------------------
+// ---- ADR 0057 store selection ------------------
 
 use tempfile::TempDir;
 
@@ -469,7 +469,7 @@ fn user_pin_store_returns_user_config_path() {
     assert!(selection.path.starts_with(&xdg));
 }
 
-// ---- ADR 0057 / H-PIN-006 write helpers --------------------
+// ---- ADR 0057 write helpers --------------------
 
 fn write_entry(id: &str, mux_name: &str) -> PinEntry {
     PinEntry {

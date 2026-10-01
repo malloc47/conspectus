@@ -38,9 +38,9 @@
 //!   `ToolResult` (body = output, assistant role).
 //! - `compacted` → `CompactionSummary`.
 //! - `developer` and `system` role messages → skipped.
-//! - Per H-PREVIEW-006 the channel markers `<turn_aborted>` /
-//!   `<proposed_plan>` appear as synthetic message bodies; drop
-//!   those exact bodies as not-real-user-text.
+//! - The channel markers `<turn_aborted>` / `<proposed_plan>`
+//!   appear as synthetic message bodies; drop those exact bodies
+//!   as not-real-user-text.
 
 use std::fs::File;
 use std::io::{BufRead, BufReader};
@@ -317,8 +317,8 @@ fn emit_reasoning_turn(
     }
     // Empty-but-present reasoning record: emit a placeholder so the
     // operator's thinking toggle has visible effect. Matches the
-    // Claude Code parser's behaviour for opaque-content blocks
-    // (`H-VIEWER-NATIVE-011` operator feedback). The *presence* of a
+    // Claude Code parser's behaviour for opaque-content blocks.
+    // The *presence* of a
     // reasoning record is the signal even when the body is
     // `encrypted_content` only.
     let body = if body_parts.is_empty() {

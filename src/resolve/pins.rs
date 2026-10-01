@@ -185,13 +185,12 @@ pub fn apply_pin_bindings(snapshot: &mut GraphSnapshot) -> Vec<Diagnostic> {
 /// Key muxes by the prefixed encoding `pin.mux.native_id()` produces
 /// (`tmux:<name>` for default sockets, `tmux:<socket>:<name>` for
 /// non-default sockets per ADR 0057). `MuxSessionNode.native_id`
-/// itself holds the *bare* tmux session name (per production
-/// discovery at `discovery/tmux/mod.rs:1038`); we reconstruct the
-/// prefixed form here so the lookup matches what the pin entries
-/// declare. Non-default-socket muxes can't be reconstructed without
-/// a socket field on the node (deferred per H-PIN-F-001), so they
-/// never appear in the index and their pins resolve to
-/// `PinUnbound` until the socket-aware discovery story lands.
+/// itself holds the *bare* tmux session name (as tmux discovery
+/// emits it); we reconstruct the prefixed form here so the lookup
+/// matches what the pin entries declare. Non-default-socket muxes
+/// can't be reconstructed without a socket field on the node, so
+/// they never appear in the index and their pins resolve to
+/// `PinUnbound` until discovery covers non-default sockets.
 fn mux_index(nodes: &[GraphNode]) -> BTreeMap<String, &MuxSessionNode> {
     nodes
         .iter()

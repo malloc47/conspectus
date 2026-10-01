@@ -22,10 +22,9 @@
 //! typed error so the caller can fall through to a cold rebuild
 //! per ADR 0082's "version mismatch → cold rebuild" policy.
 //!
-//! This module is library-only: P11-005 wires the daemon to call
-//! [`write_atomic`], P11-007/008 wire the readers to call
-//! [`open_mmap`] (or [`open_mmap_unvalidated`] when the caller
-//! trusts the source — e.g. the socket-served bytes path).
+//! The daemon calls [`write_atomic`]; readers call [`open_mmap`]
+//! (or [`open_mmap_unvalidated`] when the caller trusts the
+//! source — e.g. the socket-served bytes path).
 
 use std::env;
 use std::fs::{File, OpenOptions};

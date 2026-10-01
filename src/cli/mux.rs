@@ -1,5 +1,4 @@
-//! `conspectus mux` subcommand tree (H-MUX-NEW-001 / ADR 0095,
-//! H-MUX-LAUNCH-001 / ADR 0096).
+//! `conspectus mux` subcommand tree (ADR 0095, ADR 0096).
 //!
 //! Two verbs:
 //! - `mux new` — bare tmux session, no pin, no agent, no worktree.

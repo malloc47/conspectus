@@ -15,7 +15,7 @@
 //!   `KNOWN_MUX_BACKENDS` entry maps to a registered
 //!   `ProviderDescriptor` in `providers::REGISTRY` with class
 //!   `Mux`.
-//! - **Forge adapters** — the pre-existing `GitHubForgeProvider`
+//! - **Forge adapters** — `GitHubForgeProvider`
 //!   and `GitLabForgeProvider` return distinct `provider()`
 //!   strings; each impl's `claims_remote_url` is non-total
 //!   (returns `false` for at least one URL).
@@ -28,9 +28,8 @@
 //!
 //! - Behavior tests per adapter (those live alongside each
 //!   adapter's own `mod tests`).
-//! - Fixture-corpus integration (H-EXT-016's Scope calls this
-//!   out as a follow-up; the fixture corpus is designed to
-//!   accept new adapter fixtures without editing the corpus
+//! - Fixture-corpus integration (a follow-up; the fixture corpus
+//!   accepts new adapter fixtures without editing the corpus
 //!   loader).
 //! - Runtime capability checks against a live server
 //!   (production tests use fake runners, not the real
