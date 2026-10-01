@@ -178,7 +178,7 @@ impl ScenarioWorld {
     }
 
     pub fn render_graph_json(&self) -> Result<String> {
-        crate::output::render_graph_json(&self.snapshot()?)
+        Ok(crate::output::render_graph_json(&self.snapshot()?)?)
     }
 
     pub fn render_table(

@@ -10,7 +10,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use anyhow::{Context, Result, bail};
+use anyhow::Result;
 
 use crate::config::ConfigLoader;
 use crate::model::{Diagnostic, GraphLink, GraphNode, GraphSnapshot, NodeId, NodeProvenance};
@@ -113,6 +113,40 @@ pub fn stamp_snapshot_mutations(snapshot: &mut GraphSnapshot, provider: &str, ep
     }
 }
 
+/// Why a discovery run failed.
+#[derive(Debug, thiserror::Error)]
+pub enum DiscoveryError {
+    #[error("scan root does not exist: {}", .0.display())]
+    MissingScanRoot(PathBuf),
+    #[error("scan root is not a directory: {}", .0.display())]
+    ScanRootNotADirectory(PathBuf),
+    #[error("failed to canonicalize scan root: {}", .path.display())]
+    CanonicalizeScanRoot {
+        path: PathBuf,
+        #[source]
+        source: std::io::Error,
+    },
+    #[error("failed to read current directory")]
+    CurrentDir(#[source] std::io::Error),
+    /// A provider's `discover` failed. `provider_keys` names the
+    /// provider keys it was registered under (empty for an unkeyed
+    /// provider).
+    #[error("discovery provider {} failed", provider_label(.provider_keys))]
+    Provider {
+        provider_keys: Vec<&'static str>,
+        #[source]
+        source: Box<dyn std::error::Error + Send + Sync>,
+    },
+}
+
+fn provider_label(keys: &[&'static str]) -> String {
+    if keys.is_empty() {
+        "(unkeyed)".to_string()
+    } else {
+        format!("`{}`", keys.join("+"))
+    }
+}
+
 #[derive(Clone, Debug, Default)]
 pub struct DiscoveryContext {
     roots: Vec<PathBuf>,
@@ -121,8 +155,8 @@ pub struct DiscoveryContext {
 }
 
 impl DiscoveryContext {
-    pub fn from_current_dir() -> Result<Self> {
-        Self::from_roots([env::current_dir().context("failed to read current directory")?])
+    pub fn from_current_dir() -> Result<Self, DiscoveryError> {
+        Self::from_roots([env::current_dir().map_err(DiscoveryError::CurrentDir)?])
     }
 
     pub fn from_root(root: impl Into<PathBuf>) -> Self {
@@ -132,7 +166,9 @@ impl DiscoveryContext {
         }
     }
 
-    pub fn from_roots(roots: impl IntoIterator<Item = impl Into<PathBuf>>) -> Result<Self> {
+    pub fn from_roots(
+        roots: impl IntoIterator<Item = impl Into<PathBuf>>,
+    ) -> Result<Self, DiscoveryError> {
         let mut seen = BTreeSet::new();
         let mut normalized = Vec::new();
 
@@ -285,7 +321,7 @@ impl LocalDiscovery {
         self
     }
 
-    pub fn discover(&self, context: &DiscoveryContext) -> Result<GraphSnapshot> {
+    pub fn discover(&self, context: &DiscoveryContext) -> Result<GraphSnapshot, DiscoveryError> {
         self.discover_skipping(context, &BTreeSet::new())
     }
 
@@ -298,32 +334,40 @@ impl LocalDiscovery {
         &self,
         context: &DiscoveryContext,
         skip: &BTreeSet<String>,
-    ) -> Result<GraphSnapshot> {
+    ) -> Result<GraphSnapshot, DiscoveryError> {
         let mut fragments = Vec::with_capacity(self.providers.len());
         for keyed in &self.providers {
             if !keyed.keys.is_empty() && keyed.keys.iter().all(|k| skip.contains(*k)) {
                 continue;
             }
-            fragments.push(keyed.inner.discover(context)?);
+            let fragment =
+                keyed
+                    .inner
+                    .discover(context)
+                    .map_err(|source| DiscoveryError::Provider {
+                        provider_keys: keyed.keys.clone(),
+                        source: source.into(),
+                    })?;
+            fragments.push(fragment);
         }
         Ok(merge_fragments(fragments))
     }
 }
 
-pub fn discover_empty_at(root: impl AsRef<Path>) -> Result<GraphSnapshot> {
+pub fn discover_empty_at(root: impl AsRef<Path>) -> Result<GraphSnapshot, DiscoveryError> {
     LocalDiscovery::new().discover(&DiscoveryContext::from_root(root.as_ref()))
 }
 
 pub fn discover_local_at_roots(
     roots: impl IntoIterator<Item = impl Into<PathBuf>>,
-) -> Result<GraphSnapshot> {
+) -> Result<GraphSnapshot, DiscoveryError> {
     discover_local_with(roots, LocalDiscoveryConfig::from_env())
 }
 
 pub fn discover_local_with(
     roots: impl IntoIterator<Item = impl Into<PathBuf>>,
     config: LocalDiscoveryConfig,
-) -> Result<GraphSnapshot> {
+) -> Result<GraphSnapshot, DiscoveryError> {
     discover_local_warm_with(roots, config, GraphSnapshot::empty(), &Default::default())
 }
 
@@ -358,7 +402,7 @@ pub fn discover_local_warm_with(
     config: LocalDiscoveryConfig,
     prior: GraphSnapshot,
     intervals: &crate::config::ServerIntervals,
-) -> Result<GraphSnapshot> {
+) -> Result<GraphSnapshot, DiscoveryError> {
     let mut context = DiscoveryContext::from_roots(roots)?.with_caches(Arc::clone(&config.caches));
 
     for (key, root) in &config.harness_state_roots {
@@ -1195,17 +1239,18 @@ fn observed_cwd_git_fragment(snapshot: &GraphSnapshot, caches: &DiscoveryCaches)
     fragment
 }
 
-fn normalize_scan_root(root: &Path) -> Result<PathBuf> {
+fn normalize_scan_root(root: &Path) -> Result<PathBuf, DiscoveryError> {
     if !root.exists() {
-        bail!("scan root does not exist: {}", root.display());
+        return Err(DiscoveryError::MissingScanRoot(root.to_path_buf()));
     }
-
     if !root.is_dir() {
-        bail!("scan root is not a directory: {}", root.display());
+        return Err(DiscoveryError::ScanRootNotADirectory(root.to_path_buf()));
     }
-
     root.canonicalize()
-        .with_context(|| format!("failed to canonicalize scan root: {}", root.display()))
+        .map_err(|source| DiscoveryError::CanonicalizeScanRoot {
+            path: root.to_path_buf(),
+            source,
+        })
 }
 
 #[cfg(test)]

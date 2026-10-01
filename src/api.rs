@@ -48,10 +48,13 @@
 // Tier 1: core API — graph model, discovery, resolution, render.
 // -----------------------------------------------------------------
 
-pub use crate::config::{Config, ConfigDiagnostic, ConfigLoader, LoadOutcome, Projection};
+pub use crate::config::{
+    Config, ConfigDiagnostic, ConfigLoader, LoadOutcome, Projection, UnknownProjection,
+};
 pub use crate::discovery::{
-    DiscoveryContext, DiscoveryProvider, GraphFragment, LocalDiscovery, LocalDiscoveryConfig,
-    discover_local_at_roots, discover_local_with, empty_graph, merge_fragments,
+    DiscoveryCaches, DiscoveryContext, DiscoveryError, DiscoveryProvider, GraphFragment,
+    LocalDiscovery, LocalDiscoveryConfig, discover_local_at_roots, discover_local_with,
+    empty_graph, merge_fragments,
 };
 pub use crate::model::{
     AgentSessionId, AgentSessionNode, BranchId, BranchNode, CandidateScore, CheckoutId,

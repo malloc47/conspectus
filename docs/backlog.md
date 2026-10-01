@@ -14279,7 +14279,14 @@ Queued chunks:
   - ADR: (b) changes `LocalDiscoveryConfig`, which is part of the
     library facade (ADR 0015); amend ADR 0091, which introduced most
     of these caches.
-- [ ] `H-RUST-011` Give the library typed errors.
+- [x] `H-RUST-011` Give the library typed errors.
+  - Outcome: ADR 0100, scoped to what `conspectus::api` exposes. The
+    discovery entry points return `DiscoveryError`. Its `Provider` variant
+    names the failing provider's keys and boxes the source error; the
+    `DiscoveryProvider` trait keeps `anyhow` for implementors.
+    `render_graph_json` returns `serde_json::Error`, `Projection::parse`
+    returns `UnknownProjection`, and `load_from_cwd` returns `io::Error`.
+    Modules outside the contract (ADR 0015 amendment) stay on `anyhow`.
   - Problem: 66 public functions in library modules (`snapshot`,
     `discovery`, `declared`, `pins`, `config`, and others) return
     `anyhow::Result`, so consumers can't match on failure kinds.

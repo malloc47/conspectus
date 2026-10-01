@@ -439,10 +439,48 @@ fn context_rejects_missing_scan_roots() {
     let temp = tempfile::TempDir::new().expect("temp dir");
     let missing = temp.path().join("missing");
 
-    let error =
-        DiscoveryContext::from_roots([missing]).expect_err("missing roots should be rejected");
+    let error = DiscoveryContext::from_roots([missing.clone()])
+        .expect_err("missing roots should be rejected");
 
+    assert!(matches!(&error, DiscoveryError::MissingScanRoot(path) if *path == missing));
     assert!(error.to_string().contains("scan root does not exist"));
+}
+
+#[test]
+fn context_rejects_file_scan_roots() {
+    let temp = tempfile::TempDir::new().expect("temp dir");
+    let file = temp.path().join("file");
+    std::fs::write(&file, "").expect("write file");
+
+    let error = DiscoveryContext::from_roots([file]).expect_err("files should be rejected");
+
+    assert!(matches!(error, DiscoveryError::ScanRootNotADirectory(_)));
+}
+
+#[test]
+fn provider_failure_names_the_provider() {
+    struct Failing;
+    impl DiscoveryProvider for Failing {
+        fn discover(&self, _context: &DiscoveryContext) -> Result<GraphFragment> {
+            anyhow::bail!("backend exploded")
+        }
+    }
+
+    let error = LocalDiscovery::new()
+        .with_keyed_provider(&["tmux"], Failing)
+        .discover(&DiscoveryContext::default())
+        .expect_err("provider failure propagates");
+
+    let DiscoveryError::Provider {
+        provider_keys,
+        source,
+    } = &error
+    else {
+        panic!("expected a provider error, got {error:?}");
+    };
+    assert_eq!(provider_keys, &["tmux"]);
+    assert_eq!(source.to_string(), "backend exploded");
+    assert_eq!(error.to_string(), "discovery provider `tmux` failed");
 }
 
 #[test]

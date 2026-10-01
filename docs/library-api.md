@@ -98,6 +98,14 @@ These modules are not part of the library contract (ADR 0015, amended
   `select_store_for_declaration`, `load_declared_link_by_id`,
   `upsert_declared_link`, and `remove_declared_link`.
 
+## Errors
+
+Facade functions return typed errors (ADR 0100). Discovery entry points
+return `DiscoveryError`, which tells scan-root problems apart from a
+failing provider (`DiscoveryError::Provider` names the provider's keys).
+`render_graph_json` returns `serde_json::Error`. Implementors of
+`DiscoveryProvider` return `anyhow::Result`.
+
 ## Environment Toggles
 
 `LocalDiscoveryConfig::from_env` recognizes:

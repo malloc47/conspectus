@@ -718,12 +718,13 @@ pub(super) fn discover_for_store_selection(scan_roots: &[PathBuf]) -> Result<Gra
     let loader = ConfigLoader::from_env();
     let outcome = loader.load_from(&cwd);
     let discovery_config = crate::discovery::LocalDiscoveryConfig::from_env();
-    crate::discovery::discover_local_warm_with(
+    let snapshot = crate::discovery::discover_local_warm_with(
         roots,
         discovery_config,
         GraphSnapshot::empty(),
         &outcome.config.server.intervals,
-    )
+    )?;
+    Ok(snapshot)
 }
 
 /// Candidate stores the read-modify-write helpers should look in when

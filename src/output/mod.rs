@@ -15,8 +15,8 @@ pub mod render;
 pub mod table;
 pub mod union;
 
-pub fn render_graph_json(snapshot: &GraphSnapshot) -> Result<String> {
-    Ok(serde_json::to_string_pretty(snapshot)?)
+pub fn render_graph_json(snapshot: &GraphSnapshot) -> Result<String, serde_json::Error> {
+    serde_json::to_string_pretty(snapshot)
 }
 
 pub use dot::{DotOptions, Inclusion, render_graph_dot};

@@ -13,7 +13,6 @@ use std::io;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
-use anyhow::{Context, Result, anyhow};
 use serde::Deserialize;
 
 use std::collections::BTreeMap;
@@ -304,19 +303,22 @@ impl Projection {
         }
     }
 
-    pub fn parse(raw: &str) -> Result<Self> {
+    pub fn parse(raw: &str) -> Result<Self, UnknownProjection> {
         match raw {
             "agent" | "sessions" => Ok(Self::Agent),
             "mux" => Ok(Self::Mux),
             "union" => Ok(Self::Union),
             "pr" | "prs" => Ok(Self::Pr),
             "fork" | "forks" => Ok(Self::Fork),
-            other => Err(anyhow!(
-                "invalid table row-type `{other}`; expected one of sessions, mux, union, prs, forks"
-            )),
+            other => Err(UnknownProjection(other.to_string())),
         }
     }
 }
+
+/// A table row-type name that isn't one of the projections.
+#[derive(Clone, Debug, Eq, PartialEq, thiserror::Error)]
+#[error("invalid table row-type `{0}`; expected one of sessions, mux, union, prs, forks")]
+pub struct UnknownProjection(pub String);
 
 /// Disk-shape of `.conspectus.toml` / user config. Kept private so
 /// the merged [`Config`] is the only thing the rest of the crate sees.
@@ -601,8 +603,8 @@ impl ConfigLoader {
 
 /// Convenience wrapper: build a loader from the environment and load
 /// from the current working directory.
-pub fn load_from_cwd() -> Result<LoadOutcome> {
-    let cwd = std::env::current_dir().context("failed to read current directory")?;
+pub fn load_from_cwd() -> std::io::Result<LoadOutcome> {
+    let cwd = std::env::current_dir()?;
     Ok(ConfigLoader::from_env().load_from(cwd))
 }
 
