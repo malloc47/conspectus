@@ -636,7 +636,10 @@ impl Widget for WorktreeMenuWidget<'_> {
             Mode::BranchInput(_) => unreachable!("handled above"),
         };
 
-        let height = (lines.len() as u16).saturating_add(2).clamp(5, area.height);
+        let height = u16::try_from(lines.len())
+            .unwrap_or(u16::MAX)
+            .saturating_add(2)
+            .clamp(5, area.height);
         let rect = popup_frame::centered_rect(area, 56.min(area.width), height);
         Clear.render(rect, buf);
         let block = Block::default()

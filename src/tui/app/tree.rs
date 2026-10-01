@@ -152,8 +152,7 @@ impl App {
             .selection
             .as_ref()
             .map_or(0, |id| self.current_visible_index(&visible, id));
-        let len = visible.len() as i32;
-        let target = (current as i32 + delta).clamp(0, len - 1) as usize;
+        let target = crate::tui::cursor::clamp_step(current, visible.len(), delta);
         self.selection = Some(visible[target].clone());
         self.last_visible_index = Some(target);
         self.recompute_detail();

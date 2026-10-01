@@ -203,13 +203,10 @@ impl LaunchSpecFormState {
             .iter()
             .position(|known| known == value)
         {
-            Some(idx) => {
-                let len = self.known_harness_keys.len() as i32;
-                ((idx as i32 + delta) % len + len) % len
-            }
-            None if delta < 0 => self.known_harness_keys.len().saturating_sub(1) as i32,
+            Some(idx) => crate::tui::cursor::wrap_step(idx, self.known_harness_keys.len(), delta),
+            None if delta < 0 => self.known_harness_keys.len().saturating_sub(1),
             None => 0,
-        } as usize;
+        };
         let next = self.known_harness_keys[idx].clone();
         self.harness = TextInputState::new(harness_label.to_string(), next.clone());
         Some(next)

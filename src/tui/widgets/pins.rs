@@ -674,12 +674,11 @@ impl Default for PinsOverlayState {
 
 fn move_cursor(cursor: PinsCursor, delta: i32) -> PinsCursor {
     let PinsCursor::Action(idx) = cursor;
-    let len = PIN_ACTION_OPTIONS.len() as i32;
-    if len == 0 {
-        return cursor;
-    }
-    let next = ((idx as i32 + delta) % len + len) % len;
-    PinsCursor::Action(next as usize)
+    PinsCursor::Action(crate::tui::cursor::wrap_step(
+        idx,
+        PIN_ACTION_OPTIONS.len(),
+        delta,
+    ))
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

@@ -44,9 +44,7 @@ impl PinBindState {
         if self.options.is_empty() {
             return;
         }
-        let len = self.options.len() as i32;
-        let next = ((self.cursor as i32 + delta) % len + len) % len;
-        self.cursor = next as usize;
+        self.cursor = crate::tui::cursor::wrap_step(self.cursor, self.options.len(), delta);
     }
 }
 
@@ -127,9 +125,7 @@ impl PinRebindState {
     }
 
     pub(super) fn move_cursor(&mut self, delta: i32) {
-        let len = Self::FIELD_COUNT as i32;
-        let next = ((self.cursor as i32 + delta) % len + len) % len;
-        self.cursor = next as usize;
+        self.cursor = crate::tui::cursor::wrap_step(self.cursor, Self::FIELD_COUNT, delta);
     }
 
     pub(super) fn active_input_mut(&mut self) -> Option<&mut TextInputState> {

@@ -137,7 +137,8 @@ impl Widget for MuxMenuWidget<'_> {
         lines.push(Line::from(""));
         lines.push(Line::from("↑/↓ move · Enter pick · Esc close"));
 
-        let height = (lines.len() as u16)
+        let height = u16::try_from(lines.len())
+            .unwrap_or(u16::MAX)
             .saturating_add(2)
             .clamp(10, area.height);
         let width = 62_u16.min(area.width);

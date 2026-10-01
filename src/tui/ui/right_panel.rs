@@ -107,7 +107,8 @@ pub(super) fn draw_right_panel(app: &mut App, frame: &mut Frame<'_>, area: Rect)
         // (typically a single-link composite or the trailing Down-
         // stream row) gets clipped when the Node zone carries a
         // very long value.
-        let header_height = (wrapped_rows as u16)
+        let header_height = u16::try_from(wrapped_rows)
+            .unwrap_or(u16::MAX)
             .saturating_add(1)
             .min(max_header_height)
             .max(3);

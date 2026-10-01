@@ -143,10 +143,7 @@ impl SearchOverlayState {
             self.cursor = 0;
             return;
         }
-        let len = self.matches.len() as i32;
-        let mut next = self.cursor as i32 + delta;
-        next = ((next % len) + len) % len;
-        self.cursor = next as usize;
+        self.cursor = crate::tui::cursor::wrap_step(self.cursor, self.matches.len(), delta);
     }
 }
 

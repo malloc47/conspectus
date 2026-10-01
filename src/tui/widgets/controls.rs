@@ -460,13 +460,11 @@ pub fn parse_max_age(raw: &str) -> Result<std::time::Duration, String> {
 /// off either edge.
 fn move_cursor(cursor: ControlsCursor, ctx: &ControlsContext<'_>, delta: i32) -> ControlsCursor {
     let list = flatten_rows(ctx);
-    let idx = list.iter().position(|c| *c == cursor).unwrap_or(0) as i32;
-    let len = list.len() as i32;
-    if len == 0 {
+    if list.is_empty() {
         return cursor;
     }
-    let next = ((idx + delta) % len + len) % len;
-    list[next as usize]
+    let idx = list.iter().position(|c| *c == cursor).unwrap_or(0);
+    list[crate::tui::cursor::wrap_step(idx, list.len(), delta)]
 }
 
 /// All actionable rows in display order. Section headers are
@@ -793,9 +791,10 @@ fn scroll_offset_for_cursor(
         return 0;
     }
     let max_scroll = content_height.saturating_sub(inner_height);
-    cursor_line
+    let offset = cursor_line
         .saturating_sub(inner_height.saturating_sub(1))
-        .min(max_scroll) as u16
+        .min(max_scroll);
+    u16::try_from(offset).unwrap_or(u16::MAX)
 }
 
 fn section_header(label: &str) -> Line<'static> {
@@ -891,7 +890,7 @@ pub fn centered_modal_rect(area: Rect) -> Rect {
 fn centered_modal_rect_for_content(area: Rect, content_lines: usize) -> Rect {
     let width = std::cmp::min(64, area.width.saturating_sub(4)).max(40);
     let max_height = area.height;
-    let desired = (content_lines.saturating_add(2)) as u16;
+    let desired = u16::try_from(content_lines.saturating_add(2)).unwrap_or(u16::MAX);
     let height = desired.clamp(8, max_height.max(8));
     super::popup_frame::centered_rect(area, width, height)
 }

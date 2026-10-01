@@ -127,9 +127,7 @@ impl App {
             state.cursor = 0;
             return;
         }
-        let len = rows.len() as i32;
-        let next = (state.cursor as i32 + delta).clamp(0, len - 1);
-        state.cursor = next as usize;
+        state.cursor = crate::tui::cursor::clamp_step(state.cursor, rows.len(), delta);
         self.status_message = None;
     }
 

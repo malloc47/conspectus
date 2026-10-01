@@ -155,10 +155,8 @@ impl MuxLaunchFormState {
 
     fn advance_focus(&mut self, delta: i32) {
         let fields = self.visible_fields();
-        let idx = fields.iter().position(|f| *f == self.focus).unwrap_or(0) as i32;
-        let len = fields.len() as i32;
-        let next = ((idx + delta) % len + len) % len;
-        self.focus = fields[next as usize];
+        let idx = fields.iter().position(|f| *f == self.focus).unwrap_or(0);
+        self.focus = fields[crate::tui::cursor::wrap_step(idx, fields.len(), delta)];
     }
 
     fn try_commit(&mut self) -> OverlayOutcome {
@@ -384,7 +382,8 @@ impl Widget for MuxLaunchFormWidget<'_> {
             "Tab/Shift-Tab move · ←/→ toggle · Enter launch · Esc cancel",
         ));
 
-        let height = (lines.len() as u16)
+        let height = u16::try_from(lines.len())
+            .unwrap_or(u16::MAX)
             .saturating_add(2)
             .clamp(10, area.height);
         let width = 72_u16.min(area.width);

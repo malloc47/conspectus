@@ -916,7 +916,7 @@ impl App {
         } else if selected_line >= offset + vh {
             offset = selected_line + 1 - vh;
         }
-        let clamped = offset.min(u16::MAX as usize) as u16;
+        let clamped = u16::try_from(offset).unwrap_or(u16::MAX);
         self.left_scroll = clamped;
         clamped
     }
@@ -967,7 +967,7 @@ impl App {
         if cursor_last_row >= offset + vh {
             offset = cursor_last_row + 1 - vh;
         }
-        let clamped = offset.min(u16::MAX as usize) as u16;
+        let clamped = u16::try_from(offset).unwrap_or(u16::MAX);
         self.explorer_scroll = clamped;
         clamped
     }

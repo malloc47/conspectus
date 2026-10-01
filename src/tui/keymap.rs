@@ -148,10 +148,8 @@ pub enum Action {
 /// wrapping. Used by the `]` / `[` accelerator pair.
 pub fn cycle_view(view: View, delta: i32) -> View {
     use crate::tui::widgets::controls::VIEW_OPTIONS;
-    let idx = VIEW_OPTIONS.iter().position(|v| *v == view).unwrap_or(0) as i32;
-    let len = VIEW_OPTIONS.len() as i32;
-    let next = ((idx + delta) % len + len) % len;
-    VIEW_OPTIONS[next as usize]
+    let idx = VIEW_OPTIONS.iter().position(|v| *v == view).unwrap_or(0);
+    VIEW_OPTIONS[crate::tui::cursor::wrap_step(idx, VIEW_OPTIONS.len(), delta)]
 }
 
 /// Re-map an action based on which pane currently has focus. Used

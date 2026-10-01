@@ -317,7 +317,9 @@ pub const STATUS_LEGEND: &str = "Space toggle · Enter confirm · Esc cancel";
 pub fn centered_modal_rect(area: Rect, item_count: usize) -> Rect {
     let width = std::cmp::min(60, area.width.saturating_sub(4)).max(20);
     let max_height = area.height.saturating_sub(4);
-    let desired_height = (item_count as u16).saturating_add(2);
+    let desired_height = u16::try_from(item_count)
+        .unwrap_or(u16::MAX)
+        .saturating_add(2);
     let height = desired_height.clamp(3, max_height.max(3));
     super::popup_frame::centered_rect(area, width, height)
 }

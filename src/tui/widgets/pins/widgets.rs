@@ -381,7 +381,7 @@ pub(super) fn modal_rect_for_content(
     min_height: u16,
 ) -> Rect {
     let max_height = area.height;
-    let desired = content_lines.saturating_add(2) as u16;
+    let desired = u16::try_from(content_lines.saturating_add(2)).unwrap_or(u16::MAX);
     let height = desired.clamp(min_height, max_height.max(min_height));
     crate::tui::widgets::popup_frame::centered_rect(area, width, height)
 }
@@ -432,7 +432,8 @@ pub(super) fn scroll_offset_for_cursor(
         return 0;
     }
     let max_scroll = content_height.saturating_sub(inner_height);
-    cursor_line
+    let offset = cursor_line
         .saturating_sub(inner_height.saturating_sub(1))
-        .min(max_scroll) as u16
+        .min(max_scroll);
+    u16::try_from(offset).unwrap_or(u16::MAX)
 }

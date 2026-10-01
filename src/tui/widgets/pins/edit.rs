@@ -140,9 +140,7 @@ impl PinEditState {
     }
 
     pub(super) fn move_cursor(&mut self, delta: i32) {
-        let len = self.field_count() as i32;
-        let next = ((self.cursor as i32 + delta) % len + len) % len;
-        self.cursor = next as usize;
+        self.cursor = crate::tui::cursor::wrap_step(self.cursor, self.field_count(), delta);
     }
 
     pub(super) fn field_count(&self) -> usize {
@@ -215,12 +213,11 @@ impl PinEditState {
             .first()
             .and_then(|selected| options.iter().position(|option| option.id == *selected))
             .unwrap_or(0);
-        let len = options.len() as i32;
         let idx = if matches!(delta, -1 | 1) && selected.len() == 1 {
-            ((current_idx as i32 + delta) % len + len) % len
+            crate::tui::cursor::wrap_step(current_idx, options.len(), delta)
         } else {
-            current_idx as i32
-        } as usize;
+            current_idx
+        };
         let option = options[idx];
         let Ok(argv) = self.effective_launch_argv_list() else {
             return;
@@ -288,13 +285,10 @@ impl PinEditState {
             .iter()
             .position(|known| known == value)
         {
-            Some(idx) => {
-                let len = self.known_harness_keys.len() as i32;
-                ((idx as i32 + delta) % len + len) % len
-            }
-            None if delta < 0 => self.known_harness_keys.len().saturating_sub(1) as i32,
+            Some(idx) => crate::tui::cursor::wrap_step(idx, self.known_harness_keys.len(), delta),
+            None if delta < 0 => self.known_harness_keys.len().saturating_sub(1),
             None => 0,
-        } as usize;
+        };
         self.harness = TextInputState::new(" harness ", self.known_harness_keys[idx].clone());
         if let Some(argv) = before {
             let stripped = strip_known_launch_option_fragments(argv);

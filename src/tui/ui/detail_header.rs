@@ -26,7 +26,8 @@ pub(super) fn header_zone_height(
         expand_linked,
         panel_width,
         0,
-    ) as u16;
+    );
+    let natural = u16::try_from(natural).unwrap_or(u16::MAX);
     let max = panel_height.saturating_sub(3);
     natural.min(max).max(3)
 }

@@ -175,7 +175,10 @@ impl Widget for NewMuxFormWidget<'_> {
             Line::from("Tab switch field · Enter next/commit · Esc cancel"),
         ];
 
-        let height = (lines.len() as u16).saturating_add(2).clamp(6, area.height);
+        let height = u16::try_from(lines.len())
+            .unwrap_or(u16::MAX)
+            .saturating_add(2)
+            .clamp(6, area.height);
         let width = 60_u16.min(area.width);
         let rect = popup_frame::centered_rect(area, width, height);
         Clear.render(rect, buf);
