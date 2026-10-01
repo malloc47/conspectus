@@ -97,6 +97,7 @@ The continuous server, the snapshot format, and the SQLite arc that was built an
 | [0082](0082-retire-sqlite-persistence-and-query-surface.md) | Retire SQLite Persistence And Query Surface | Accepted |
 | [0083](0083-zero-copy-snapshot-format.md) | Zero-Copy Snapshot Format Selection | Accepted |
 | [0091](0091-serve-idle-cost-and-class-gated-mutators.md) | Serve Idle Cost And Class-Gated Mutators | Accepted |
+| [0098](0098-caller-owned-discovery-caches.md) | Caller-Owned Discovery Caches | Accepted |
 
 ## CLI output and exports
 
