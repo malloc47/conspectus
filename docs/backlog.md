@@ -14190,6 +14190,172 @@ Sequencing (settled: **ADR first, then in order**):
   session row from a worktree) and commit `Msg::SelectRow`; offered
   only when a target resolves. Full suite green (2022).
 
+## Idiomatic Rust Cleanup (H-RUST-*)
+
+Source: a 2026-09-30 code review of the whole crate aimed at what an
+experienced Rust reviewer would flag. Inputs were clippy's `pedantic`
+and `nursery` groups (2,136 hits, most of them stylistic noise), greps
+for panics, globals, `#[allow]`s, and history comments, `cargo doc`,
+and hand reading of the model, discovery, resolver, server, and TUI
+modules.
+
+Goal: a vanilla codebase that is efficient, approachable, and not
+trying to be fancy. Behavior-preserving, low-risk fixes landed during
+the review (`H-RUST-001`..`009`). The rest are larger, need a decision,
+or touch the public library surface, so they are queued as chunks
+below (`H-RUST-010` onward), ordered by value and risk.
+
+Scope bounds: no behavior changes beyond what a chunk names; every
+chunk keeps `just check` green (which now includes `cargo doc` with
+warnings as errors). Chunks that change the public library surface or
+the serialized model note the ADR they need to touch.
+
+Landed during the review:
+
+- [x] `H-RUST-001` Apply idiomatic clippy fixes and enforce them
+  (`a4eaf2f`). `let ... else` and `if let` instead of single-arm
+  `match`, flattened or-patterns, method references instead of
+  forwarding closures, no `collect()` just to count, `find_map`,
+  `into_iter()` instead of `drain(..)` on owned Vecs,
+  `Path::extension` instead of `ends_with(".jsonl")`, and similar.
+  Twenty lints were added to `[lints.clippy]` as `deny`.
+- [x] `H-RUST-002` Use sets where maps held `()` or placeholder values
+  (`5c3e2f7`). This also fixed `workspace_member_roots`, which returned
+  a HashMap's keys in run-to-run varying order.
+- [x] `H-RUST-003` Look up nodes without cloning their ids (`30f1f7d`).
+  `GraphNode::has_id` and `GraphSnapshot::find_node` replace 14
+  `find(|n| n.id() == *target)` scans that allocated an owned `NodeId`
+  per node.
+- [x] `H-RUST-004` Remove tombstone comments ("X moved to Y in wave N")
+  and five copies of a current-epoch helper (`a381856`).
+- [x] `H-RUST-005` Stop deep-cloning `GraphSnapshot` to release a borrow
+  in TUI pin/rename executors; derive `Clone` for `GraphDb`
+  (`e15ea7d`).
+- [x] `H-RUST-006` Remove two speculative traits: `MultiSelectItem`
+  became `AsRef<str>` (`48ef2f4`), and the single-implementation
+  `SearchBackend` became a `search::rank` function (`dd9126a`).
+- [x] `H-RUST-007` Fix all 44 rustdoc warnings and add a
+  warnings-as-errors `cargo doc` step to `just check` and CI
+  (`aaf4a05`).
+- [x] `H-RUST-008` Remove dead code hidden by `#[allow(dead_code)]`: an
+  unused `UiEvent` enum, four uncalled test reset functions, a
+  write-only field, `_selection_display`, and the unused `proptest` /
+  `rstest` dev-dependencies (`b1d93eb`).
+- [x] `H-RUST-009` Recover poisoned locks in the daemon with
+  `lock().unwrap_or_else(PoisonError::into_inner)` instead of ten
+  hand-written matches (`27f33de`).
+
+Queued chunks:
+
+- [ ] `H-RUST-010` Replace the process-global discovery caches.
+  - Problem: nine `static` caches hold discovery state for the whole
+    process (`PROBE_CACHE` in `discovery/git.rs`, `TMUX_CACHE`,
+    `ZELLIJ_CACHE`, `FORGE_CACHE`, `QUERY_CACHE` in `codex_log.rs`,
+    `ROLLOUT_SCAN_CACHE`, `SESSION_SCAN_CACHE`,
+    `SQLITE_SESSIONS_CACHE`, and `LAST_MUX_HARNESS_FINGERPRINT`). Each
+    repeats the same get/store/reset functions and calls
+    `lock().unwrap()`, so a poisoned lock panics where the daemon
+    recovers. Tests need four serial `*_TEST_LOCK` mutexes, and two
+    `pub #[doc(hidden)] reset_*_for_tests` functions leak into the
+    public API. Five adapters also hand-compute an `i128` nanosecond
+    mtime plus a size as a fingerprint, where comparing the
+    `SystemTime` from `metadata.modified()` would do, and the git
+    probe cache returns `Option<Option<GitProbeResult>>` to separate a
+    miss from a cached negative.
+  - Plan, two commits: (a) behavior-preserving dedupe into a small
+    `TtlCache<T>` and a `FileStamp`-keyed cache, with an explicit enum
+    for hit, miss, and cached-negative; (b) move the caches into a
+    `DiscoveryCaches` value owned by the caller (daemon state, TUI
+    loop, one-shot CLI) and passed through `LocalDiscoveryConfig`,
+    then delete the test locks and reset functions.
+  - ADR: (b) changes `LocalDiscoveryConfig`, which is part of the
+    library facade (ADR 0015); amend ADR 0091, which introduced most
+    of these caches.
+- [ ] `H-RUST-011` Give the library typed errors.
+  - Problem: 66 public functions in library modules (`snapshot`,
+    `discovery`, `declared`, `pins`, `config`, and others) return
+    `anyhow::Result`, so consumers can't match on failure kinds.
+    `thiserror` is already a dependency but used in only three files;
+    `snapshot.rs` defines `SnapshotError` and then still returns
+    `anyhow`. About 27 functions return `Result<_, String>`.
+  - Plan: keep `anyhow` in the binary. Start with the
+    `conspectus::api` facade and `snapshot`, converting
+    `Result<_, String>` parsers to small error enums as touched.
+  - Decision needed: scope (facade only, or every `pub` function).
+    Pairs with `REL-022`.
+- [ ] `H-RUST-012` Narrow the public surface.
+  - Problem: every module in `lib.rs` is `pub`, including `tui`,
+    `server`, `viewer`, `tui_state`, and `pin_bindings`, because the
+    binary imports them through `conspectus::`. The curated
+    `conspectus::api` facade (ADR 0015) is therefore not the real
+    contract.
+  - Plan: move the CLI into the library (`conspectus::cli::run` called
+    from a three-line `main.rs`), then make internal modules
+    `pub(crate)`. That also removes the need for `pub
+    #[doc(hidden)]` test helpers.
+  - ADR: ADR 0015 amendment. Pairs with `REL-022`.
+- [ ] `H-RUST-013` Strip backlog IDs from code comments.
+  - Problem: 712 comments still open with a backlog or wave ID
+    (`// H-HYG-006 wave 7: consult SnapshotIndex ...`). The rationale
+    is useful; the history belongs in commits and this backlog. The
+    largest concentrations are `tui/app.rs` (73), `discovery/mod.rs`
+    (55), `tui/keymap.rs` (29), `model/mod.rs` (28),
+    `discovery/harness/mod.rs` (28), `tui/runtime.rs` (27), and
+    `tui/ui.rs` (26).
+  - Plan: one commit per module; keep the "why", drop the ID and
+    wave; check that the diff touches comment lines only. Consider an
+    `AGENTS.md` line ("comments explain why; IDs go in commit
+    messages") so new IDs stop accumulating.
+- [ ] `H-RUST-014` Use typed kinds instead of strings.
+  - Problem: the node explorer carries `neighbor_kind` as
+    `&'static str` or `String` (`"mux_session"`) and parses it back
+    with `NodeKind::from_snake_case` at render time, although
+    `NodeKind` exists. Mux-attribution evidence is an
+    `Option<String>` ranked by matching against the
+    `resolve::evidence` string constants, so a typo misranks silently
+    instead of failing to compile.
+  - Plan: thread `NodeKind` through the explorer view models; add an
+    `Evidence` enum with `#[serde(rename_all = "snake_case")]` so the
+    graph JSON and `graph.bin` wire format stay the same.
+  - ADR: evidence is part of the serialized model. Confirm the format
+    is unchanged with the graph snapshot tests, and bump the
+    `graph.bin` format version if the rkyv layout changes (ADR 0083).
+- [ ] `H-RUST-015` Split the 3,000-line TUI modules.
+  - Problem: `tui/app.rs` (3,581 lines, with a 420-line `App::update`
+    `match`), `tui/runtime.rs` (3,483), `tui/ui.rs` (3,384), and
+    `tui/widgets/pins.rs` (3,193) are hard to navigate.
+  - Plan: split the reducer into per-family handlers (navigation,
+    overlays, pins, worktrees, mux), the runtime into per-executor
+    modules, `ui.rs` by pane, and `pins.rs` by form. Moves only, no
+    behavior change; the existing snapshot tests are the safety net.
+- [ ] `H-RUST-016` Retire `SessionViewerAction`.
+  - Problem: ADR 0019's external-viewer trait has one implementation
+    (`ClaudeHistoryViewer`) behind a one-element
+    `[&dyn SessionViewerAction; 1]`, and the native viewer (ADR 0052)
+    is now the default.
+  - Plan: collapse it to a function; amend ADR 0019.
+- [ ] `H-RUST-017` Rename `GraphDb`.
+  - Problem: `GraphDb`, `graph_db()`, and the `database` field are
+    names left over from the SQLite era for what is now an
+    `Rc<GraphSnapshot>` handle.
+  - Plan: rename to `SnapshotHandle` / `snapshot_handle()`. Mechanical.
+- [ ] `H-RUST-018` Smaller follow-ups, as files are touched.
+  - `cast_possible_truncation` and `cast_possible_wrap` (109 hits,
+    mostly layout math): use `try_from` where a value can actually
+    overflow.
+  - `items_after_statements` (25): move nested `use` and `fn` items to
+    the top of the block.
+  - `&mut Option<Option<String>>` in the sessions row builder: use a
+    named enum.
+  - The search overlay clones every visible row on each keystroke to
+    escape a borrow.
+  - `push_str(&format!(..))` (21 sites): fine except on hot paths.
+- [ ] `H-RUST-019` Extend lint enforcement after the chunks land.
+  - Plan: once `H-RUST-013` and `H-RUST-018` are done, consider
+    enforcing `items_after_statements`, `needless_pass_by_value` for
+    non-message functions, and `rustdoc::private_intra_doc_links` in
+    `[lints]`, so the cleanup holds.
+
 ## Release Readiness: 0.1.0
 
 Catalog assembled 2026-09-30 while rewriting `README.md` for a public
@@ -14766,6 +14932,10 @@ finally `REL-002b`.
     or state Linux-only in the README; drop the duplicate test run.
   - Blockers: none.
 - [ ] `REL-013` Clean up dependency and tooling leftovers.
+  - Progress (2026-09-30, `H-RUST-004` / `H-RUST-008`): `proptest`,
+    `rstest`, `_selection_display`, and the "H-REF-006 wave N" comments
+    are gone. Remaining: confirm `tui-pantry`, and resolve `pre-commit`
+    without a config.
   - Scope: `proptest` and `rstest` are dev-dependencies with zero uses;
     `tui-pantry` serves only `examples/pantry.rs` (confirm the `T8-044`
     "go" still holds); the flake ships `pre-commit` but there is no
