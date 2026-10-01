@@ -2,7 +2,7 @@
 
 ## Status
 
-Accepted
+Accepted. Amended 2026-10-01: see the resolver-rank amendment at the end.
 
 ## Context
 
@@ -304,3 +304,16 @@ binding remains the responsibility of `H-MUXPROC-007` / `H-MUXPROC-014`.
 - Codex `remote_control_enrollments`, `jobs`, `agent_jobs`, and
   `thread_goals` are out of scope for this ADR. They remain available for
   later work behind the audits that own those surfaces.
+
+## Amendment: Resolver Rank For Log Evidence (2026-10-01)
+
+The resolver had not implemented the ranking decided above.
+`codex_log_current_thread_match` ranked 0 in the session ↔ mux
+comparator, below even `exact_cwd_match` (20). A Codex session in a
+directory shared by several panes could resolve to the wrong one,
+and so could a session whose state file another pane also held open.
+That kind now ranks 55, above `active_pane_fd_session_match` and the
+hook-sidecar kinds (50) and every cwd kind. It also counts as process
+evidence, so the resolver doesn't derive a duplicate runtime-process
+link for the same session and mux. Typing the match kinds in
+`H-RUST-014` surfaced the gap.
