@@ -62,11 +62,7 @@ pub struct ExplorerInputs<'a> {
 /// Build the explorer view model for the given node id. Returns
 /// `None` when the node isn't in the snapshot.
 pub fn build_node_view(inputs: ExplorerInputs<'_>) -> Option<NodeView> {
-    let node = inputs
-        .snapshot
-        .nodes
-        .iter()
-        .find(|n| n.id() == *inputs.target)?;
+    let node = inputs.snapshot.find_node(inputs.target)?;
     let id = node.id();
     let kind_label = kind_label(node);
     let title_line = title_line(inputs.snapshot, node);
@@ -1720,9 +1716,7 @@ fn build_explorer(
         };
         let neighbor_kind = match &endpoint {
             NeighborEndpoint::Node(id) => snapshot
-                .nodes
-                .iter()
-                .find(|n| n.id() == *id)
+                .find_node(id)
                 .map_or("unknown", kind_label)
                 .to_string(),
             NeighborEndpoint::Unresolved(e) => e.node_type.clone(),
@@ -1840,7 +1834,7 @@ fn finalize_group(
             } else {
                 EdgeStateLabel::AltOf(relation.clone())
             };
-            let neighbor_node = snapshot.nodes.iter().find(|n| n.id() == neighbor_id);
+            let neighbor_node = snapshot.find_node(&neighbor_id);
             let neighbor_kind_label = neighbor_node.map_or("unknown", kind_label);
             let neighbor_label = neighbor_node.map_or_else(
                 || format!("{neighbor_id}"),

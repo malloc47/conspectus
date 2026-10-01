@@ -393,6 +393,23 @@ impl GraphNode {
             Self::ForgePr(node) => NodeId::ForgePr(node.id.clone()),
         }
     }
+    /// Whether this node has `id`, without building an owned [`NodeId`]
+    /// the way [`Self::id`] does.
+    pub fn has_id(&self, id: &NodeId) -> bool {
+        match (self, id) {
+            (Self::Repo(node), NodeId::Repo(id)) => node.id == *id,
+            (Self::Checkout(node), NodeId::Checkout(id)) => node.id == *id,
+            (Self::Workspace(node), NodeId::Workspace(id)) => node.id == *id,
+            (Self::AgentSession(node), NodeId::AgentSession(id)) => node.id == *id,
+            (Self::MuxSession(node), NodeId::MuxSession(id)) => node.id == *id,
+            (Self::Pin(node), NodeId::Pin(id)) => node.id == *id,
+            (Self::RuntimeProcess(node), NodeId::RuntimeProcess(id)) => node.id == *id,
+            (Self::Branch(node), NodeId::Branch(id)) => node.id == *id,
+            (Self::Fork(node), NodeId::Fork(id)) => node.id == *id,
+            (Self::ForgePr(node), NodeId::ForgePr(id)) => node.id == *id,
+            _ => false,
+        }
+    }
 }
 
 #[derive(
@@ -1932,6 +1949,12 @@ impl<'a> SnapshotIndex<'a> {
 impl GraphSnapshot {
     pub fn empty() -> Self {
         Self::default()
+    }
+
+    /// Linear-scan lookup of a node by id. For repeated lookups over
+    /// one snapshot, build a [`SnapshotIndex`] instead.
+    pub fn find_node(&self, id: &NodeId) -> Option<&GraphNode> {
+        self.nodes.iter().find(|node| node.has_id(id))
     }
 
     pub fn canonicalize(&mut self) {

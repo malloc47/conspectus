@@ -369,11 +369,7 @@ fn emit_runtime_process_observation(
     );
     let process_id = RuntimeProcessId::new(&observation_key);
     let process_node_id = NodeId::RuntimeProcess(process_id.clone());
-    if !snapshot
-        .nodes
-        .iter()
-        .any(|node| node.id() == process_node_id)
-    {
+    if snapshot.find_node(&process_node_id).is_none() {
         snapshot
             .nodes
             .push(GraphNode::RuntimeProcess(RuntimeProcessNode {

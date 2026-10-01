@@ -48,11 +48,7 @@ pub struct DetailInputs<'a> {
 /// `None` when the node isn't in the snapshot (e.g. selection
 /// pointed at a row that was just removed by a refresh).
 pub fn build_node_detail(inputs: DetailInputs<'_>) -> Option<NodeDetail> {
-    let node = inputs
-        .snapshot
-        .nodes
-        .iter()
-        .find(|n| n.id() == *inputs.target)?;
+    let node = inputs.snapshot.find_node(inputs.target)?;
     let id = node.id();
 
     let kind_label = kind_label(node);
@@ -591,9 +587,7 @@ fn session_pr_field(
     // resolves session → worktree → branch → PR. v1 detail shows
     // the same: walk the resolved relationships once to find the
     // PR keyed off the session's checkout (cwd-matched).
-    let Some(GraphNode::AgentSession(session_node)) =
-        snapshot.nodes.iter().find(|n| n.id() == *session)
-    else {
+    let Some(GraphNode::AgentSession(session_node)) = snapshot.find_node(session) else {
         return placeholder("pr", "— (no PR)");
     };
     let Some(cwd) = session_node.cwd.as_deref() else {
@@ -612,7 +606,7 @@ fn session_pr_field(
     let Some(pr_id) = preferred_target(snapshot, &branch_id, RelationKind::BranchHasForgePr) else {
         return placeholder("pr", "— (no PR)");
     };
-    let Some(GraphNode::ForgePr(pr)) = snapshot.nodes.iter().find(|n| n.id() == pr_id) else {
+    let Some(GraphNode::ForgePr(pr)) = snapshot.find_node(&pr_id) else {
         return placeholder("pr", "— (no PR)");
     };
     let state = pr.state.as_deref().unwrap_or("?");
@@ -680,8 +674,7 @@ fn session_lineage_field(snapshot: &GraphSnapshot, session: &NodeId) -> HeaderFi
     let Some(parent_id) = preferred_target(snapshot, session, RelationKind::ParentSession) else {
         return placeholder("lineage", "— (no parent)");
     };
-    let Some(GraphNode::AgentSession(parent)) = snapshot.nodes.iter().find(|n| n.id() == parent_id)
-    else {
+    let Some(GraphNode::AgentSession(parent)) = snapshot.find_node(&parent_id) else {
         return placeholder("lineage", "— (no parent)");
     };
     plain("lineage", agent_session_display_id(parent))
@@ -1081,7 +1074,7 @@ fn attach_linked_details(
         let Some(target) = field.target.as_ref() else {
             continue;
         };
-        let Some(node) = snapshot.nodes.iter().find(|node| node.id() == *target) else {
+        let Some(node) = snapshot.find_node(target) else {
             continue;
         };
         let sub_kind_label = kind_label(node);
@@ -1247,7 +1240,7 @@ fn link_target_label(snapshot: &GraphSnapshot, link: &GraphLink) -> Option<Strin
 }
 
 fn link_target_label_by_id(snapshot: &GraphSnapshot, target: &NodeId) -> Option<String> {
-    let node = snapshot.nodes.iter().find(|n| n.id() == *target)?;
+    let node = snapshot.find_node(target)?;
     match node {
         GraphNode::MuxSession(mux) => Some(mux_display_label(mux)),
         GraphNode::Pin(pin) => Some(format!("pin:{}", pin.display_name)),
@@ -1371,8 +1364,7 @@ fn sessions_for_process(
 }
 
 fn agent_session_link_label(snapshot: &GraphSnapshot, session_id: &NodeId) -> Option<String> {
-    let GraphNode::AgentSession(session) = snapshot.nodes.iter().find(|n| n.id() == *session_id)?
-    else {
+    let GraphNode::AgentSession(session) = snapshot.find_node(session_id)? else {
         return None;
     };
     Some(agent_session_display_id(session))
@@ -1387,9 +1379,7 @@ fn mux_display_label(mux: &MuxSessionNode) -> String {
 }
 
 fn process_link_label(snapshot: &GraphSnapshot, process_id: &NodeId) -> Option<String> {
-    let GraphNode::RuntimeProcess(process) =
-        snapshot.nodes.iter().find(|n| n.id() == *process_id)?
-    else {
+    let GraphNode::RuntimeProcess(process) = snapshot.find_node(process_id)? else {
         return None;
     };
     Some(runtime_process_display_label(process))

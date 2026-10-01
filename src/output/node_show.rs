@@ -176,7 +176,7 @@ fn node_kind_label(id: &NodeId) -> &'static str {
 /// `node_reference_label_from_display` behavior.
 fn node_reference_label(snapshot: &GraphSnapshot, id: &NodeId) -> String {
     let display = id.to_string();
-    let Some(node) = snapshot.nodes.iter().find(|n| &n.id() == id) else {
+    let Some(node) = snapshot.find_node(id) else {
         return display;
     };
     match (id, node) {
@@ -217,7 +217,7 @@ fn node_reference_label(snapshot: &GraphSnapshot, id: &NodeId) -> String {
 }
 
 fn find_node<'a>(snapshot: &'a GraphSnapshot, id: &NodeId) -> Option<&'a GraphNode> {
-    snapshot.nodes.iter().find(|n| &n.id() == id)
+    snapshot.find_node(id)
 }
 
 /// Returns `false` when the node doesn't exist; callers emit

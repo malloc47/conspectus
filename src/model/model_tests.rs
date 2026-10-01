@@ -717,3 +717,31 @@ fn every_source_field_constant_matches_its_string_literal() {
     assert_eq!(LOGICAL_PATH, "logical_path");
     assert_eq!(SCOPE, "scope");
 }
+
+#[test]
+fn has_id_agrees_with_owned_id_comparison() {
+    let repo = RepoId::new("/r/.git");
+    let nodes = [
+        GraphNode::Repo(RepoNode::new(repo.clone())),
+        GraphNode::checkout(CheckoutId::new(repo.clone(), "/r"), "/r"),
+        GraphNode::AgentSession(AgentSessionNode::new(
+            AgentSessionId::new("codex", "/state", "s1"),
+            "codex".to_string(),
+        )),
+    ];
+    for node in &nodes {
+        for other in &nodes {
+            assert_eq!(node.has_id(&other.id()), node.id() == other.id());
+        }
+    }
+    let snapshot = GraphSnapshot {
+        nodes: nodes.to_vec(),
+        ..GraphSnapshot::empty()
+    };
+    assert!(snapshot.find_node(&nodes[2].id()).is_some());
+    assert!(
+        snapshot
+            .find_node(&NodeId::Repo(RepoId::new("/missing/.git")))
+            .is_none()
+    );
+}
