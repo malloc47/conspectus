@@ -60,26 +60,6 @@ fn cheese_styles_from_theme(theme: &Theme) -> CheeseMultiSelectStyles {
     }
 }
 
-/// Anything that can label itself in the multi-select list. Two
-/// implementations are provided out of the box — for `&'static str`
-/// and for `String`. Callers with enum-shaped item lists can
-/// implement this trait directly to control display formatting.
-pub trait MultiSelectItem {
-    fn label(&self) -> &str;
-}
-
-impl MultiSelectItem for &'static str {
-    fn label(&self) -> &str {
-        self
-    }
-}
-
-impl MultiSelectItem for String {
-    fn label(&self) -> &str {
-        self.as_str()
-    }
-}
-
 /// What the host should do after passing a key event through the
 /// overlay. `Continue` keeps the overlay open; `Confirm` carries
 /// back the indices of every selected item; `Cancel` closes the
@@ -205,13 +185,13 @@ impl MultiSelectState {
 /// Centered modal rendering of [`MultiSelectState`] over a slice of
 /// items. The items are passed at render time so the state stays
 /// generic-free.
-pub struct MultiSelectWidget<'a, T: MultiSelectItem> {
+pub struct MultiSelectWidget<'a, T: AsRef<str>> {
     state: &'a MultiSelectState,
     items: &'a [T],
     theme: Option<&'a Theme>,
 }
 
-impl<'a, T: MultiSelectItem> MultiSelectWidget<'a, T> {
+impl<'a, T: AsRef<str>> MultiSelectWidget<'a, T> {
     pub fn new(state: &'a MultiSelectState, items: &'a [T]) -> Self {
         Self {
             state,
@@ -228,7 +208,7 @@ impl<'a, T: MultiSelectItem> MultiSelectWidget<'a, T> {
     }
 }
 
-impl<T: MultiSelectItem> Widget for MultiSelectWidget<'_, T> {
+impl<T: AsRef<str>> Widget for MultiSelectWidget<'_, T> {
     fn render(self, area: Rect, buf: &mut Buffer) {
         // H-WIDG-004: framing through `tui_popup::Popup`. Theme glue
         // applies when set; falls back to upstream defaults when
@@ -255,7 +235,7 @@ impl<T: MultiSelectItem> Widget for MultiSelectWidget<'_, T> {
 /// Body wrapper that bridges the ratatui-cheese `MultiSelect`
 /// upstream widget into a popup body. Sizing follows the cap dims
 /// the in-tree `centered_modal_rect` computed.
-struct MultiSelectBody<'a, T: MultiSelectItem> {
+struct MultiSelectBody<'a, T: AsRef<str>> {
     state: &'a MultiSelectState,
     items: &'a [T],
     theme: Option<&'a Theme>,
@@ -263,7 +243,7 @@ struct MultiSelectBody<'a, T: MultiSelectItem> {
     inner_height: usize,
 }
 
-impl<T: MultiSelectItem> KnownSize for MultiSelectBody<'_, T> {
+impl<T: AsRef<str>> KnownSize for MultiSelectBody<'_, T> {
     fn width(&self) -> usize {
         self.inner_width
     }
@@ -273,12 +253,12 @@ impl<T: MultiSelectItem> KnownSize for MultiSelectBody<'_, T> {
     }
 }
 
-impl<T: MultiSelectItem> Widget for MultiSelectBody<'_, T> {
+impl<T: AsRef<str>> Widget for MultiSelectBody<'_, T> {
     fn render(self, area: Rect, buf: &mut Buffer) {
         let visible_rows = area.height as usize;
         let scroll = compute_scroll(self.state.cursor(), visible_rows, self.items.len());
 
-        // Bridge our `[T: MultiSelectItem]` slice into upstream
+        // Bridge our `[T: AsRef<str>]` slice into upstream
         // `MultiSelectOption`s. The Vec lives for the duration of
         // this call so the borrow into the widget is valid.
         let options: Vec<MultiSelectOption<'_>> = self
@@ -286,7 +266,7 @@ impl<T: MultiSelectItem> Widget for MultiSelectBody<'_, T> {
             .get(scroll..(scroll + visible_rows).min(self.items.len()))
             .unwrap_or(&[])
             .iter()
-            .map(|item| MultiSelectOption::new(item.label()))
+            .map(|item| MultiSelectOption::new(item.as_ref()))
             .collect();
 
         // The upstream widget renders via &mut state. We're behind a

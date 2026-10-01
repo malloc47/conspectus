@@ -109,14 +109,6 @@ fn unrecognized_keys_are_ignored() {
 }
 
 #[test]
-fn item_label_trait_works_for_static_str_and_string() {
-    let static_items: &[&'static str] = &["one", "two"];
-    assert_eq!(static_items[0].label(), "one");
-    let owned: Vec<String> = vec!["a".to_string(), "b".to_string()];
-    assert_eq!(owned[1].label(), "b");
-}
-
-#[test]
 fn selected_last_row_scrolls_into_short_multi_select_body() {
     let offset = compute_scroll(9, 4, 10);
     assert_eq!(offset, 6);
