@@ -1,4 +1,4 @@
-//! Transient toast widget (T8-040 / H-WIDG-003).
+//! Transient toast widget.
 //!
 //! Shim over [`ratatui_comfy_toaster::ToastEngine`]: the engine owns
 //! the per-toast lifetime + bordered rendering, and this module

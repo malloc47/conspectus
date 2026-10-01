@@ -1,6 +1,5 @@
-// Extracted from declared.rs H-HYG-011 rolling wave.
 use super::*;
-// H-REF-005: tests were flat when declared was one file; the
+// Tests were flat when declared was one file; the
 // split into store/snapshot submodules means the tests now
 // import types the trimmed `mod.rs` no longer transitively
 // exposes.
@@ -694,7 +693,7 @@ fn path_string(path: impl AsRef<Path>) -> String {
     path.as_ref().to_string_lossy().to_string()
 }
 
-/// H-REF-001: every `DeclaredEndpoint` variant must
+/// Every `DeclaredEndpoint` variant must
 /// round-trip through the compact-form codec exposed on the
 /// enum. Regressions here mean the CLI parse (`parse_compact`)
 /// and the CLI label (`compact_label`) have drifted.

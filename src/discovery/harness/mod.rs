@@ -13,7 +13,7 @@
 //! is a [`DiscoveryProvider`] that runs every registered adapter and merges
 //! fragments deterministically through [`merge_fragments`].
 //!
-//! H-EXT-004: adapters also carry a [`RuntimeSignature`] that
+//! Adapters also carry a [`RuntimeSignature`] that
 //! describes their process / fd / session-key surface. The
 //! `cross_link` module iterates registered adapters and consumes
 //! signatures generically instead of hard-coding
@@ -47,7 +47,7 @@ pub struct HarnessLaunchOption {
     pub argv: &'static [&'static str],
 }
 
-/// Runtime attribution surface for a single harness (H-EXT-004).
+/// Runtime attribution surface for a single harness.
 ///
 /// The `cross_link` module iterates registered adapters and
 /// consumes signatures generically instead of hard-coding
@@ -147,7 +147,7 @@ pub fn no_match(_command: &str) -> bool {
     false
 }
 
-/// Per-adapter aux-attribution surface (H-EXT-007). Passed to
+/// Per-adapter aux-attribution surface. Passed to
 /// [`HarnessAdapter::apply_aux_attribution`] so an adapter with
 /// a state / log DB (ADR 0048's codex-log shape today) can
 /// mutate the merged snapshot without special-casing at the
@@ -204,7 +204,7 @@ pub trait HarnessAdapter: Send + Sync {
     fn discover(&self, context: &DiscoveryContext) -> Result<GraphFragment>;
 
     /// Short display label rendered in the TUI's row label column
-    /// and filter chips (H-EXT-002). Defaults to the harness key;
+    /// and filter chips. Defaults to the harness key;
     /// adapters override when the key is longer than the display
     /// budget — `claude-code` collapses to `claude` per H-TBL-014.
     fn display_label(&self) -> &'static str {
@@ -222,8 +222,8 @@ pub trait HarnessAdapter: Send + Sync {
         Vec::new()
     }
 
-    /// Launch-time options surfaced in the pin-create form
-    /// (H-EXT-002). Each entry is a stable-id + label + argv
+    /// Launch-time options surfaced in the pin-create form.
+    /// Each entry is a stable-id + label + argv
     /// fragment; the pin editor lets the operator toggle each on
     /// or off, and the resulting argv appends every toggled
     /// option's fragment to [`Self::launch_argv`]. Defaults to
@@ -247,7 +247,7 @@ pub trait HarnessAdapter: Send + Sync {
         None
     }
 
-    /// Runtime attribution surface (H-EXT-004). Returned
+    /// Runtime attribution surface. Returned
     /// reference is `'static` so `cross_link` can carry it
     /// across per-adapter iteration without allocation.
     /// Adapters return a module-level `const` value that
@@ -263,7 +263,7 @@ pub trait HarnessAdapter: Send + Sync {
     }
 
     /// Build a viewer `SessionLocator` for the given
-    /// [`crate::model::AgentSessionId`] (H-EXT-006). Returning
+    /// [`crate::model::AgentSessionId`]. Returning
     /// `None` marks this harness as having no native transcript
     /// source — the viewer bridge falls through to its
     /// escape-hatch external launch (currently only `aider` does
@@ -282,7 +282,7 @@ pub trait HarnessAdapter: Send + Sync {
         None
     }
 
-    /// Native transcript parser for this harness (H-EXT-006).
+    /// Native transcript parser for this harness.
     /// Returning `None` marks the harness as unsupported by
     /// the native viewer; the bridge falls back to the
     /// escape-hatch external viewer.
@@ -291,7 +291,7 @@ pub trait HarnessAdapter: Send + Sync {
     }
 
     /// Apply this harness's optional aux-attribution mutator
-    /// pass (H-EXT-007). Called once per warm-start invocation
+    /// pass. Called once per warm-start invocation
     /// after the primary mutators run. Adapters with a state /
     /// log DB (ADR 0048's codex-log shape) implement this to
     /// stamp additional candidate links onto the merged
@@ -313,7 +313,7 @@ pub trait HarnessAdapter: Send + Sync {
     }
 
     /// Build a hook sidecar record from a harness's SessionStart
-    /// hook payload (H-EXT-005). The default implementation
+    /// hook payload. The default implementation
     /// reads the ADR 0028 canonical `session_id` string and
     /// stamps the record with `self.harness_key()`; adapters
     /// that use a different payload shape (a nested field, an
@@ -378,7 +378,7 @@ static STUB_RUNTIME_SIGNATURE: RuntimeSignature = RuntimeSignature {
     is_subagent_process: no_match,
 };
 
-/// Canonical set of registered harness adapters (H-EXT-002).
+/// Canonical set of registered harness adapters.
 /// The six parallel-table functions below iterate this list
 /// instead of a hand-rolled match. Registering a new harness is
 /// a two-step operation: add the adapter to
@@ -405,7 +405,7 @@ static REGISTERED_ADAPTERS: std::sync::LazyLock<Vec<Box<dyn HarnessAdapter>>> =
         ]
     });
 
-/// H-REF-007: shared state-root discovery envelope. Codex,
+/// Shared state-root discovery envelope. Codex,
 /// claude-code, and openCode all repeat the same three steps:
 /// (1) look up their state root through the discovery context;
 /// (2) if it's absent, return an empty fragment; (3) run the
@@ -435,7 +435,7 @@ where
     Ok(fragment)
 }
 
-/// Iterate every registered harness adapter (H-EXT-002). Used by
+/// Iterate every registered harness adapter. Used by
 /// TUI filter menus, launch / resume dispatch, row-label lookup,
 /// and the launch-options aggregator. Order is stable and
 /// matches [`HarnessDiscovery::with_default_adapters`] so
@@ -445,7 +445,7 @@ pub fn registered_adapters() -> impl Iterator<Item = &'static dyn HarnessAdapter
     REGISTERED_ADAPTERS.iter().map(|b| &**b)
 }
 
-/// Find a registered adapter by key (H-EXT-002). Returns `None`
+/// Find a registered adapter by key. Returns `None`
 /// when the key doesn't match any registered adapter.
 fn adapter_for(harness_key: &str) -> Option<&'static dyn HarnessAdapter> {
     registered_adapters().find(|a| a.harness_key() == harness_key)
@@ -471,7 +471,7 @@ pub fn launch_option_for(harness_key: &str, option_id: &str) -> Option<HarnessLa
         .find(|option| option.id == option_id)
 }
 
-/// Registered harness keys in declaration order (H-EXT-002).
+/// Registered harness keys in declaration order.
 /// Used by the TUI controls overlay's harness filter menu — the
 /// pre-H-EXT-002 caller was a hardcoded
 /// `HARNESS_OPTIONS: &[&str]` in `tui/widgets/controls.rs`.
@@ -490,7 +490,7 @@ pub fn harness_keys() -> &'static [&'static str] {
 }
 
 /// Short display label for a harness key. Used by the row-label
-/// column (H-TBL-014, H-EXT-002). Returns the key itself as an
+/// column. Returns the key itself as an
 /// owned string for unknown harnesses (previous behavior via the
 /// `harness_label` catch-all in `tui/rows/mod.rs`).
 pub fn display_label_for(harness_key: &str) -> String {
@@ -650,7 +650,7 @@ mod registry_tests {
 
     #[test]
     fn display_label_for_collapses_claude_code() {
-        // H-TBL-014 collapse lives on the adapter (H-EXT-002)
+        // H-TBL-014 collapse lives on the adapter
         // rather than a match table in `tui/rows`.
         assert_eq!(display_label_for("claude-code"), "claude");
     }

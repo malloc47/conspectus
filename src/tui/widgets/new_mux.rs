@@ -1,4 +1,4 @@
-//! Bare tmux new-session form overlay (H-MUX-NEW-001 / ADR 0095).
+//! Bare tmux new-session form overlay (ADR 0095).
 //!
 //! A minimal two-field modal — name + cwd — that commits a
 //! [`Msg::CommitMuxNew`] the runtime turns into a subprocess re-exec of

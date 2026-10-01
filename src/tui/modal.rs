@@ -32,9 +32,9 @@ use crate::tui::Msg;
 /// context and calls the trait method.
 #[derive(Debug, Clone)]
 pub enum Modal {
-    /// `?` help overlay (F8-011). Context-free.
+    /// `?` help overlay. Context-free.
     Help(crate::tui::widgets::help::HelpOverlayState),
-    /// Controls overlay (ADR 0031, F8-004). Reads a
+    /// Controls overlay (ADR 0031). Reads a
     /// [`crate::tui::widgets::controls::ControlsContext`] on every
     /// event so view / grouping / filter / sort surface fresh
     /// values as the operator toggles them.
@@ -49,11 +49,11 @@ pub enum Modal {
     /// the trait's uniform `Commit(Msg)` outcome carries the
     /// specific rename intent.
     Rename(RenameOverlayState),
-    /// `/` search overlay (T8-017). Reads the current visible-row
+    /// `/` search overlay. Reads the current visible-row
     /// items as its context and emits a
     /// [`Msg::SelectRow`] on Confirm.
     Search(crate::tui::widgets::search::SearchOverlayState),
-    /// `o` full-value modal (T8-030). Context-free.
+    /// `o` full-value modal. Context-free.
     ValueModal(crate::tui::widgets::value_modal::ValueModalState),
     /// Full-screen transcript viewer modal (H-VIEWER-NATIVE-008,
     /// ADR 0052). Uses the nested-reducer composition described
@@ -64,21 +64,21 @@ pub enum Modal {
     /// effect pops the modal; every other effect leaves it on
     /// the stack.
     Viewer(crate::viewer::state::ViewerState),
-    /// `w` worktree action menu (H-WT-004b). Context-free — it
+    /// `w` worktree action menu. Context-free — it
     /// captures the selected node's worktree facts + guard at open
     /// time and drives an internal list → branch-input / confirm
     /// state machine.
     WorktreeMenu(Box<crate::tui::widgets::worktree_menu::WorktreeMenuState>),
-    /// `n` bare tmux new-session form (H-MUX-NEW-001 / ADR 0095).
+    /// `n` bare tmux new-session form (ADR 0095).
     /// Context-free two-field form (name + cwd) that emits
     /// [`Msg::CommitMuxNew`].
     NewMux(crate::tui::widgets::new_mux::NewMuxFormState),
-    /// `m` mux action menu (H-MUX-LAUNCH-001 / ADR 0096). Fronts the
+    /// `m` mux action menu (ADR 0096). Fronts the
     /// mux-specific verbs; each entry commits a Msg that opens the
     /// corresponding target overlay.
     MuxMenu(crate::tui::widgets::mux_menu::MuxMenuState),
     /// Mux-launch form — ephemeral harness in a fresh mux, no pin
-    /// (H-MUX-LAUNCH-001 / ADR 0096). Commits
+    /// (ADR 0096). Commits
     /// [`Msg::CommitMuxLaunch`]. Boxed to keep the `Modal` enum
     /// discriminant small — the launch form carries eight
     /// `TextInputState` fields.

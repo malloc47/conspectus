@@ -1,4 +1,3 @@
-// Extracted from mod.rs H-HYG-011 rolling wave via #[path = "harness_tests.rs"] mod tests;
 use std::path::{Path, PathBuf};
 
 use super::*;
@@ -279,7 +278,7 @@ fn default_trait_impl_returns_none() {
     assert!(NoOpAdapter.resume_argv("abc", Path::new("/p")).is_none());
 }
 
-/// H-REF-007: when a state root is not present in the discovery
+/// When a state root is not present in the discovery
 /// context, `discover_with_state_root` short-circuits with an
 /// empty fragment instead of invoking `inner`.
 #[test]
@@ -297,7 +296,7 @@ fn discover_with_state_root_returns_empty_when_state_root_missing() {
     assert!(!invoked, "inner must not run when state root is absent");
 }
 
-/// H-REF-007: when a state root is present, the inner walker
+/// When a state root is present, the inner walker
 /// receives the resolved path and the resulting fragment is
 /// stamped with the harness key.
 #[test]

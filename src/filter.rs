@@ -3,7 +3,7 @@
 //!
 //! Per ADR 0031, filters are persistent typed predicates that narrow
 //! the visible row set along structured dimensions; they compose with
-//! the transient `/` fuzzy search (T8-017) but never replace it. v1
+//! the transient `/` fuzzy search but never replace it. v1
 //! covers `harness`, `max-age`, and `mux-state`; further dimensions
 //! land as additional fields without amending the ADR.
 //!

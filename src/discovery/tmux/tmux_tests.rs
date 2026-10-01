@@ -1,4 +1,3 @@
-// Extracted from mod.rs H-HYG-011 rolling wave via #[path = "tmux_tests.rs"] mod tests;
 use super::*;
 
 #[test]
@@ -104,7 +103,7 @@ fn parser_extracts_name_path_activity_and_created_epoch() {
 
 #[test]
 fn parser_extracts_last_attached_epoch() {
-    // H-MUX-SORT-001: `session_last_attached` is the 11th (trailing)
+    // `session_last_attached` is the 11th (trailing)
     // tab field. All ten preceding fields present, then the epoch.
     let rows =
         parse_list_sessions("alpha\t/work\t1700000500\t1700000000\t\t\t\t\t1\talpha\t1700000400\n");

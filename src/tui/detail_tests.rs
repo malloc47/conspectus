@@ -1,4 +1,3 @@
-// Extracted from detail.rs H-HYG-011 rolling wave via #[path = "detail_tests.rs"] mod tests;
 use super::*;
 use crate::model::{
     AgentSessionId, AgentSessionNode, CheckoutId, CheckoutNode, Confidence, Diagnostic, ForgePrId,

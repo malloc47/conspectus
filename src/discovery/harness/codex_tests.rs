@@ -1,4 +1,3 @@
-// Extracted from codex.rs H-HYG-011 rolling wave via #[path = "codex_tests.rs"] mod tests;
 use std::fs;
 
 use tempfile::TempDir;

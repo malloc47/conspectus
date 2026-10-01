@@ -191,7 +191,7 @@ fn try_daemon_snapshot() -> Option<conspectus::model::GraphSnapshot> {
     conspectus::snapshot::from_bytes(&bytes).ok()
 }
 
-/// P11-011a: write the resolved snapshot to `graph.bin` (the
+/// Write the resolved snapshot to `graph.bin` (the
 /// canonical persistence artifact post-ADR-0082). Best-effort:
 /// a write failure prints a `conspectus: warning:` line to
 /// stderr but never aborts the command — the rendered output
@@ -293,7 +293,7 @@ fn resolve_color(
     stdout_is_tty
 }
 
-/// Whether and how to page rendered output (H-TBL-013).
+/// Whether and how to page rendered output.
 #[derive(Debug, Clone, Copy)]
 pub(super) struct PagerOptions {
     /// `--pager` forces pager even when stdout is not a TTY (useful
@@ -410,7 +410,7 @@ pub(super) enum ViewFlag {
     #[default]
     Sessions,
     Mux,
-    // Hidden from the TUI's view switcher (H-VIEW-001); still accepted
+    // Hidden from the TUI's view switcher; still accepted
     // so existing scripts and configs keep working.
     #[value(hide = true)]
     Union,
@@ -428,7 +428,7 @@ pub(super) enum SortFlag {
 }
 
 /// Filter / grouping flag surface shared by `conspectus tui` and
-/// `conspectus table <ROWS>` (ADR 0031, F8-009). Mount with
+/// `conspectus table <ROWS>` (ADR 0031). Mount with
 /// `#[command(flatten)]` so the host struct picks up every flag
 /// without re-declaring them.
 ///
@@ -598,7 +598,7 @@ use pin::PinArgs;
 mod mux;
 use mux::MuxArgs;
 
-// H-WT-002: `conspectus worktree` subcommand.
+// `conspectus worktree` subcommand.
 mod worktree;
 use worktree::WorktreeArgs;
 

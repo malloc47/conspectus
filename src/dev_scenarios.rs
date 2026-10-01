@@ -255,7 +255,7 @@ impl ScenarioWorld {
             .with_harness_state_root(OPENCODE_HARNESS_KEY, self.harness.opencode_state_root())
             .with_harness_state_root(AIDER_HARNESS_KEY, self.root.clone())
             .with_hook_sidecar_root(&self.hook_root)
-            // H-EXT-007: codex's aux-attribution mutator pass
+            // Codex's aux-attribution mutator pass
             // pulls from live `~/.codex/logs_*.sqlite`; skip it
             // in the scenario TUI so dev_scenarios stays
             // hermetic.

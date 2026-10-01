@@ -1,4 +1,4 @@
-//! Mux action menu overlay (H-MUX-LAUNCH-001 / ADR 0096).
+//! Mux action menu overlay (ADR 0096).
 //!
 //! `m`-keyed menu that fronts the mux-specific verbs. Discharges the
 //! ADR 0095 follow-up ("when a second bare-mux-shape verb lands, ship

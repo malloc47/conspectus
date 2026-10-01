@@ -28,8 +28,8 @@ use crate::tui::icons::IconOverrides;
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Theme {
     // ---- harness identity ---------------------------------------------------
-    /// Per-harness identity colors, keyed by adapter harness key
-    /// (H-EXT-003). The default populates the four v1 harnesses;
+    /// Per-harness identity colors, keyed by adapter harness key.
+    /// The default populates the four v1 harnesses;
     /// operators add or override entries via `[tui.theme.harness]`
     /// in config. Lookup goes through [`Theme::harness_color`],
     /// which walks the adapter registry so callers can pass
@@ -179,7 +179,7 @@ impl Default for Theme {
     /// that the styling overhaul plan's later phases will exercise;
     /// they are inert until those phases call them.
     fn default() -> Self {
-        // H-EXT-003: per-harness colors keyed by adapter harness
+        // Per-harness colors keyed by adapter harness
         // key. Values match the pre-H-EXT-003 flat-field defaults
         // so existing snapshots stay stable.
         let mut harness_colors = BTreeMap::new();
@@ -243,8 +243,8 @@ impl Theme {
     /// Color associated with a harness. Accepts either the
     /// canonical harness key (`claude-code`) or the display label
     /// (`claude`) — both resolve to the same entry in
-    /// [`Self::harness_colors`] by walking the adapter registry
-    /// (H-EXT-003). Unknown harnesses fall back to
+    /// [`Self::harness_colors`] by walking the adapter registry.
+    /// Unknown harnesses fall back to
     /// [`Self::harness_unknown`] so the renderer always has a
     /// hue to use.
     pub fn harness_color(&self, label_or_key: &str) -> Color {

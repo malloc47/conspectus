@@ -1,4 +1,4 @@
-//! `conspectus serve` daemon (P7-006 + ADR 0082).
+//! `conspectus serve` daemon (ADR 0082).
 //!
 //! Long-running process that keeps a resolved `GraphSnapshot`
 //! warm in the background so concurrent one-shot CLI invocations
@@ -20,7 +20,7 @@
 //! * Persistence is the single `graph.bin` zero-copy artifact
 //!   per ADR 0083. Daemonless one-shot CLIs read it via
 //!   `snapshot::open_mmap`; the daemon's own warm-restart path
-//!   (P11-009) reads it once on startup to seed
+//!   reads it once on startup to seed
 //!   [`SnapshotState`] so the first cycle isn't a cold rebuild.
 //! * Per-thread cycles are atomic across the full load + evict +
 //!   run + publish sequence: every class thread takes a
@@ -70,7 +70,7 @@ use crate::resolve::resolve_snapshot;
 use crate::server::watcher::{NotifyWatcher, NullWatcher, Watcher, WatcherEvent};
 use crate::snapshot;
 
-/// Observable per-class scheduler state (P7-008). Each class
+/// Observable per-class scheduler state. Each class
 /// thread updates its entry on every cycle; the `status` socket
 /// command reads under a [`Mutex`]. Serialized verbatim into the
 /// status response so a future operator-facing diff or
@@ -291,7 +291,7 @@ fn write_frame(stream: &mut UnixStream, payload: &[u8]) -> Result<()> {
 pub type SnapshotBytes = Arc<Mutex<Option<Arc<Vec<u8>>>>>;
 
 /// Live in-memory snapshot the per-class scheduler treats as the
-/// prior for the next cycle (P11-011a). Refreshed alongside
+/// prior for the next cycle. Refreshed alongside
 /// [`SnapshotBytes`] after every successful cycle. `None` before
 /// the first cycle completes or before a P11-009 warm-start
 /// reload populates it from `graph.bin` at daemon startup.
@@ -299,7 +299,7 @@ pub type SnapshotBytes = Arc<Mutex<Option<Arc<Vec<u8>>>>>;
 /// Replaces the previous "read prior from `graph.sqlite`" pattern
 /// so the daemon never reads its own on-disk artifact during
 /// normal operation. The on-disk `graph.bin` exists for
-/// daemonless consumers (P11-008) and for daemon warm-restart;
+/// daemonless consumers and for daemon warm-restart;
 /// it is not the daemon's working state.
 pub type SnapshotState = Arc<Mutex<Option<GraphSnapshot>>>;
 
@@ -429,7 +429,7 @@ pub fn client_hook_ingest(record: &HookRecord) -> ClientOutcome<()> {
 /// Pre-first-cycle responses surface as
 /// `DaemonError { code: "snapshot_unavailable" }`; callers
 /// typically translate that into a cold-rebuild fallback path
-/// (P11-008) or a "waiting for first cycle" UI hint.
+/// or a "waiting for first cycle" UI hint.
 ///
 /// The returned bytes can be passed to
 /// `snapshot::open_mmap_unvalidated` after writing to a tmp
@@ -672,7 +672,7 @@ fn handle_hook_ingest(request: &Request, ctx: &DispatchCtx) -> Response {
     }
 }
 
-/// `snapshot` command handler (P11-006). Reads the cached
+/// `snapshot` command handler. Reads the cached
 /// serialized snapshot bytes the daemon populates after every
 /// successful cycle (`dual_write_artifact`), base64-encodes
 /// them into `data.bytes`, and returns. Pre-first-cycle calls
@@ -715,7 +715,7 @@ fn handle_snapshot(request: &Request, ctx: &DispatchCtx) -> Response {
     }
 }
 
-/// `status` command handler (P7-008). Snapshots the
+/// `status` command handler. Snapshots the
 /// [`SchedulerState`] under the Mutex (held only long enough to
 /// clone the map), serializes it as JSON, returns. The handler
 /// does no I/O beyond the response write so it stays responsive
@@ -827,7 +827,7 @@ fn run_full_rebuild(ctx: &DispatchCtx) -> Result<()> {
 ///
 /// * The on-disk `graph.bin` artifact (atomic rename) so
 ///   daemonless one-shot CLIs and a future daemon warm-restart
-///   (P11-009) can see it.
+///   can see it.
 /// * The in-memory [`SnapshotBytes`] cache so the socket
 ///   `snapshot` command serves verbatim bytes without
 ///   re-serializing per connection.
@@ -890,7 +890,7 @@ fn store_snapshot_state(snapshot_state: &SnapshotState, snapshot: GraphSnapshot)
         .unwrap_or_else(PoisonError::into_inner) = Some(snapshot);
 }
 
-/// Best-effort daemon warm-restart (P11-009): on startup, try
+/// Best-effort daemon warm-restart: on startup, try
 /// to load `graph.bin` so the first class cycle's prior is the
 /// snapshot the previous daemon process left behind. The first
 /// cycle then runs as a normal per-class refresh (evict its
@@ -1033,7 +1033,7 @@ pub fn run(config: ServeConfig) -> Result<()> {
     let writer_lock = Arc::new(Mutex::new(()));
 
     // Per-class scheduler state observed via the `status` socket
-    // command (P7-008). Threads briefly take the Mutex to write
+    // command. Threads briefly take the Mutex to write
     // their cycle outcome; the status handler briefly takes it
     // to snapshot.
     let state = Arc::new(Mutex::new(SchedulerState::default()));
@@ -1045,13 +1045,12 @@ pub fn run(config: ServeConfig) -> Result<()> {
     let snapshot_bytes: SnapshotBytes = Arc::new(Mutex::new(None));
 
     // Live in-memory snapshot the per-class scheduler reads as
-    // its prior (P11-011a). Optionally seeded from `graph.bin`
-    // on startup so a warm-restart skips the cold-rebuild cost
-    // (P11-009).
+    // its prior. Optionally seeded from `graph.bin`
+    // on startup so a warm-restart skips the cold-rebuild cost.
     let snapshot_state: SnapshotState = Arc::new(Mutex::new(warm_start_from_disk()));
 
-    // Best-effort cleanup of legacy `graph.sqlite*` artifacts
-    // (P11-011a). The daemon has no consumer for them anymore.
+    // Best-effort cleanup of legacy `graph.sqlite*` artifacts.
+    // The daemon has no consumer for them anymore.
     // Failures (read-only data dir, missing parent, etc.) log
     // and continue; the files are harmless if left behind.
     cleanup_legacy_sqlite_artifacts();
@@ -1111,7 +1110,7 @@ pub fn run(config: ServeConfig) -> Result<()> {
     Ok(())
 }
 
-/// Build the watcher appropriate for `class` (P7-009 / ADR 0081).
+/// Build the watcher appropriate for `class` (ADR 0081).
 ///
 /// `Harness` watches every configured harness state directory
 /// from `LocalDiscoveryConfig::from_env`. If `notify` installation
@@ -1351,7 +1350,7 @@ fn record_state_completed(
 /// ensures no peer thread reads-old + writes between our load
 /// and write.
 ///
-/// P11-011a: the prior used to come from
+/// The prior used to come from
 /// `query::load_cached_snapshot(None)` (a read of the on-disk
 /// `graph.sqlite`). It now comes from the in-memory
 /// [`SnapshotState`] the previous cycle populated. A daemon

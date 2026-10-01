@@ -451,7 +451,7 @@ struct SessionsData<'a> {
     lineage_parent: BTreeMap<NodeId, NodeId>,
     /// Bound session `NodeId` → pin id. Built once from
     /// `snapshot.pins` so the per-row emit can attach the pin
-    /// marker (ADR 0057 / H-PIN-016) without re-walking the pin
+    /// marker (ADR 0057) without re-walking the pin
     /// vector for every session.
     pin_id_by_bound_session: BTreeMap<NodeId, String>,
 }
@@ -636,7 +636,7 @@ impl<'a> SessionsData<'a> {
     }
 
     fn workspace_for_session(&self, session: &NodeId) -> Option<&WorkspaceId> {
-        // H-UI-008: read resolver winners only so the tree row's
+        // Read resolver winners only so the tree row's
         // workspace matches the detail pane's validated zone. The
         // resolver keys `AssociatedWith` by `(source, relation,
         // target)`, so a session could theoretically own multiple
@@ -936,7 +936,7 @@ fn emit_checkout_bucket(
     let checkout_should_render =
         matches!(ctx.grouping, SessionsGrouping::Checkout) || session_bearing_count >= 2;
     let session_depth = if checkout_should_render && let Some(wt_root) = &key.worktree {
-        // H-WT-002: flag linked / locked / prunable worktrees in the
+        // Flag linked / locked / prunable worktrees in the
         // checkout group header. A plain primary gets no marker so the
         // common case stays quiet.
         let marker = ctx
@@ -1055,7 +1055,7 @@ fn push_checkout_row(
     });
 }
 
-/// Marker for a checkout group header (H-WT-002). Returns `None` for a
+/// Marker for a checkout group header. Returns `None` for a
 /// plain primary worktree (the common, unremarkable case) so the
 /// sessions tree stays quiet; flags linked / locked / prunable
 /// worktrees, which are the ones worth calling out.
@@ -1092,7 +1092,7 @@ fn emit_ungrouped(ctx: &mut EmitCtx<'_, '_>, mut sessions: Vec<SessionEntry<'_>>
     }
 }
 
-/// P8-015: compute the set of session ids in `entries` whose row
+/// Compute the set of session ids in `entries` whose row
 /// label should incorporate the harness-recorded title. A session
 /// qualifies when (a) its `title` attribute is non-empty *and* (b)
 /// another session in the same group bucket shares the same rendered

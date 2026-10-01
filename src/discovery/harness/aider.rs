@@ -69,7 +69,7 @@ impl HarnessAdapter for AiderAdapter {
                 harness_key: HARNESS_KEY.to_string(),
                 cwd: Some(scope),
                 title: None,
-                // TODO(H-PREVIEW-005): aider's `.aider.chat.history.md`
+                // TODO: aider's `.aider.chat.history.md`
                 // is free-form markdown with no formally-specified
                 // delimiter, and `.aider.input.history` only carries
                 // user inputs (no assistant text). H-PREVIEW-005 was
@@ -105,7 +105,7 @@ fn aider_activity_epoch(root: &Path) -> Option<i64> {
         .max()
 }
 
-// H-HYG-004: single production impl. Pre-H-HYG-004 this
+// Single production impl. Pre-H-HYG-004 this
 // module carried a `#[cfg(not(test))]` variant that
 // sniffed argv for `/target/debug/deps/` and returned a
 // hardcoded `1_700_000_000` epoch for temp-dir paths —

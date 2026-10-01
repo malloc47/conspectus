@@ -1,4 +1,4 @@
-//! In-memory PRs-view row-tree builder (P11-011c / ADR 0082).
+//! In-memory PRs-view row-tree builder (ADR 0082).
 
 use std::collections::{HashMap, HashSet};
 use std::path::Path;
@@ -176,7 +176,7 @@ fn collect_agents(snapshot: &GraphSnapshot) -> Vec<super::AgentData<'_>> {
     agents
 }
 
-/// H-UI-008: the preferred branch per PR comes from the
+/// The preferred branch per PR comes from the
 /// resolver's `branch_has_forge_pr` winner. Production
 /// discovery emits these with source=ForgePr, target=Branch.
 fn collect_preferred_branch_per_pr(snapshot: &GraphSnapshot) -> HashMap<String, BranchLink> {

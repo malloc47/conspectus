@@ -1,4 +1,4 @@
-//! Worktree backend seam (H-WT-002, ADR 0092).
+//! Worktree backend seam (ADR 0092).
 //!
 //! Mirrors the mux-backend / forge-adapter registries: a
 //! [`WorktreeBackend`] trait with a required read-only [`list`] plus a
@@ -6,7 +6,7 @@
 //! ships the always-available, ADR-0087-clean **git** backend, which
 //! enumerates a repo's worktrees via `git worktree list --porcelain`
 //! and never mutates git state, plus the **worktrunk** mutation
-//! backend (H-WT-003), which shells out to the `wt` CLI for
+//! backend, which shells out to the `wt` CLI for
 //! `create` / `remove` — a category-4 subprocess launch (ADR 0087),
 //! so the git mutation happens inside worktrunk, not Conspectus.
 //!
@@ -29,11 +29,11 @@ pub mod close_down;
 /// mux backends. `worktrunk` joins as a second key in H-WT-003.
 pub const GIT_BACKEND: &str = "git";
 
-/// Backend identifier for the worktrunk mutation backend (H-WT-003).
+/// Backend identifier for the worktrunk mutation backend.
 pub const WORKTRUNK_BACKEND: &str = "worktrunk";
 
-/// Which backend performs worktree *mutation* for the CLI / TUI
-/// (H-WT-003). Discovery always lists via the git backend; this only
+/// Which backend performs worktree *mutation* for the CLI / TUI.
+/// Discovery always lists via the git backend; this only
 /// governs create / remove.
 #[derive(Copy, Clone, Debug, Eq, PartialEq, Default)]
 pub enum WorktreeBackendSelection {
@@ -80,7 +80,7 @@ fn binary_on_path(name: &str) -> bool {
 }
 
 /// Resolve the mutation backend for CLI / TUI use from the config
-/// selection and worktrunk availability (H-WT-003):
+/// selection and worktrunk availability:
 ///
 /// - [`WorktreeBackendSelection::Git`] → `Ok(None)` (read-only).
 /// - [`WorktreeBackendSelection::Auto`] → the worktrunk backend when
@@ -126,7 +126,7 @@ pub struct WorktreeCaps {
 }
 
 /// One worktree as reported by a backend's `list`. Maps onto a
-/// [`crate::model::CheckoutNode`] during discovery (H-WT-002 step 3).
+/// [`crate::model::CheckoutNode`] during discovery.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct WorktreeRecord {
     /// Absolute path to the worktree's working directory.
@@ -149,7 +149,7 @@ pub struct WorktreeRecord {
     pub detached: bool,
 }
 
-/// Operator request to create a worktree (H-WT-003).
+/// Operator request to create a worktree.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct WorktreeCreateRequest {
     /// A path inside the repo the worktree belongs to.
@@ -161,7 +161,7 @@ pub struct WorktreeCreateRequest {
     pub base: Option<String>,
 }
 
-/// Operator request to remove a worktree (H-WT-003).
+/// Operator request to remove a worktree.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct WorktreeRemoveRequest {
     /// A path inside the repo the worktree belongs to.
@@ -175,7 +175,7 @@ pub struct WorktreeRemoveRequest {
 }
 
 /// Operator request to merge a worktree's branch back and tear down
-/// its worktree (H-WT-005). `wt merge` squash+rebases, fast-forwards
+/// its worktree. `wt merge` squash+rebases, fast-forwards
 /// the target, and removes the worktree.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct WorktreeMergeRequest {
@@ -187,7 +187,7 @@ pub struct WorktreeMergeRequest {
     pub target: Option<String>,
 }
 
-/// Operator request to prune merged worktrees (H-WT-008). Maps to
+/// Operator request to prune merged worktrees. Maps to
 /// worktrunk `wt step prune`: remove every worktree whose branch is
 /// already merged into the repo's default branch. This is a
 /// **merged-cleanup**, distinct from `git worktree prune` (which clears
@@ -202,7 +202,7 @@ pub struct WorktreePruneRequest {
     pub dry_run: bool,
 }
 
-/// Outcome of a worktree mutation (H-WT-003).
+/// Outcome of a worktree mutation.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum WorktreeMutationOutcome {
     /// The mutation succeeded. `path` carries the affected worktree
@@ -218,7 +218,7 @@ pub enum WorktreeMutationOutcome {
 /// A pluggable worktree backend (ADR 0092). `list` is required and
 /// read-only; `create` / `remove` are mutation, default to
 /// `Unsupported` (the read-only git backend), and are implemented by
-/// the external `worktrunk` backend (H-WT-003) as a category-4
+/// the external `worktrunk` backend as a category-4
 /// subprocess launch (ADR 0087). [`WorktreeCaps`] advertises which a
 /// given backend supports.
 pub trait WorktreeBackend: Send + Sync {
@@ -249,14 +249,14 @@ pub trait WorktreeBackend: Send + Sync {
     }
 
     /// Merge a worktree's branch back to the target and tear down the
-    /// worktree (H-WT-005). Defaults to
+    /// worktree. Defaults to
     /// [`WorktreeMutationOutcome::Unsupported`].
     fn merge(&self, _req: &WorktreeMergeRequest) -> Result<WorktreeMutationOutcome> {
         Ok(WorktreeMutationOutcome::Unsupported)
     }
 
     /// Prune every worktree already merged into the repo's default
-    /// branch (H-WT-008). Defaults to
+    /// branch. Defaults to
     /// [`WorktreeMutationOutcome::Unsupported`].
     fn prune(&self, _req: &WorktreePruneRequest) -> Result<WorktreeMutationOutcome> {
         Ok(WorktreeMutationOutcome::Unsupported)
@@ -373,7 +373,7 @@ impl WtRunner for SystemWt {
     }
 }
 
-/// The worktrunk mutation backend (H-WT-003, ADR 0092). Shells out to
+/// The worktrunk mutation backend (ADR 0092). Shells out to
 /// the `wt` CLI for `create` / `remove` — a category-4
 /// Conspectus-constructed subprocess launch (ADR 0087); the git
 /// mutation happens inside worktrunk, the dedicated tool, so

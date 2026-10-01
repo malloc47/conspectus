@@ -465,7 +465,7 @@ pub struct CheckoutNode {
     pub git_dir: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub current_branch: Option<BranchId>,
-    /// Git-worktree facts for this checkout (H-WT-002). `None` means
+    /// Git-worktree facts for this checkout. `None` means
     /// the checkout was not produced by worktree enumeration (e.g. an
     /// Atelier-declared checkout, or a graph built before worktree
     /// discovery); `Some` carries the linked-vs-primary kind and any
@@ -485,7 +485,7 @@ impl CheckoutNode {
         }
     }
 
-    /// Attach git-worktree metadata (H-WT-002).
+    /// Attach git-worktree metadata.
     pub fn with_worktree(mut self, meta: WorktreeMeta) -> Self {
         self.worktree = Some(meta);
         self
@@ -493,7 +493,7 @@ impl CheckoutNode {
 }
 
 /// Whether a checkout is a repo's primary working tree or a linked
-/// worktree sharing its `.git` (H-WT-002). The primary worktree is the
+/// worktree sharing its `.git`. The primary worktree is the
 /// one whose `git_dir` equals the repo common dir; linked worktrees
 /// live under `.git/worktrees/<name>`.
 #[derive(
@@ -518,7 +518,7 @@ pub enum WorktreeKind {
     Linked,
 }
 
-/// Git-worktree facts for a [`CheckoutNode`] (H-WT-002), sourced from
+/// Git-worktree facts for a [`CheckoutNode`], sourced from
 /// `git worktree list --porcelain`. `locked` / `prunable` are `Some`
 /// when git reports that status; the inner string is git's reason,
 /// which may be empty when git gives none.
@@ -629,7 +629,7 @@ pub struct AgentSessionNode {
     pub session_kind: Option<SessionKind>,
 }
 
-// H-HYG-011: builder helpers on `AgentSessionNode` mirror
+// Builder helpers on `AgentSessionNode` mirror
 // `RepoNode::new` / `with_*` so 83 pre-H-HYG-011 struct
 // literals migrate opportunistically without a big-bang
 // rewrite. Add per touched file, not en masse.
@@ -725,12 +725,12 @@ pub struct MuxSessionNode {
     /// `activity_epoch` (any pane activity) and `created_epoch`
     /// (session birth): this tracks when the operator last *looked
     /// at* the session, which drives the "last attached" mux recency
-    /// sort basis (H-MUX-SORT-001).
+    /// sort basis.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub last_attached_epoch: Option<i64>,
 }
 
-// H-HYG-011: builder helpers on `MuxSessionNode` mirror
+// Builder helpers on `MuxSessionNode` mirror
 // `RepoNode::new` / `with_*`. Migrate 53 pre-H-HYG-011
 // struct literals opportunistically.
 impl MuxSessionNode {
@@ -1083,7 +1083,7 @@ impl RelationKind {
         }
     }
 
-    /// H-REF-002: inverse of [`Self::snake_case`]. Parses the
+    /// Inverse of [`Self::snake_case`]. Parses the
     /// stable snake_case label back to its `RelationKind`.
     /// Returns `Err` with an operator-friendly message for
     /// unknown labels. Callers (CLI, declared parser, table
@@ -1379,7 +1379,7 @@ pub struct SourceMetadata {
     pub adapter: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub evidence: Option<String>,
-    /// H-REF-008: keys populated in this map come from
+    /// Keys populated in this map come from
     /// [`source_field`] constants. Producers stamp
     /// `Metadata::insert(source_field::MATCH_KIND, …)`;
     /// consumers read via
@@ -1410,7 +1410,7 @@ impl SourceMetadata {
     }
 }
 
-/// H-REF-008: canonical field-name constants for
+/// Canonical field-name constants for
 /// [`SourceMetadata::fields`]. Every producer that stamps a
 /// value into the map and every consumer that reads one back
 /// should reference the constants here so a typo or rename
@@ -1662,7 +1662,7 @@ impl fmt::Display for MatchKind {
     }
 }
 
-/// Per-node producing-provider metadata (P7-002 / ADR 0037). The
+/// Per-node producing-provider metadata (ADR 0037). The
 /// sidecar lives on [`GraphSnapshot`] keyed by `NodeId` so node
 /// structs themselves remain provider-agnostic and the producers
 /// have a single place to record their origin alongside whatever
@@ -1918,14 +1918,14 @@ pub struct GraphSnapshot {
     pub aliases: crate::aliases::AliasOverlay,
     /// Session pin declarations per ADR 0057. Loaded from
     /// `[[pins.entries]]` TOML by `discovery::pins`; the resolver
-    /// (H-PIN-004) consumes this to synthesize bound-state
+    /// consumes this to synthesize bound-state
     /// `LinkedToMux` candidates with `LocalPin`/`GlobalPin`
     /// provenance. Pins remain in this sidecar even after binding so
     /// row builders can render unbound pins as first-class rows
     /// without walking `candidate_links`.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub pins: Vec<PinCandidate>,
-    /// Per-node producing-provider metadata (P7-002 / ADR 0037).
+    /// Per-node producing-provider metadata (ADR 0037).
     /// Empty for snapshots whose producers have not been
     /// instrumented yet; the loader falls back to the schema's
     /// `'unknown'` / `0` defaults for nodes without an entry. See
@@ -2005,7 +2005,7 @@ mod node_provenance_serde {
 /// - source_node → links-by-relation (wave 3+).
 /// - session → mux candidate counts (wave 5 retires
 ///   `tui::rows::collect_agent_mux_candidate_counts`).
-/// - preferred-mux per session (H-TUI-001 substrate).
+/// - preferred-mux per session.
 ///
 /// Cheap to build: one BTreeMap walk over `snapshot.nodes`.
 /// Callers that don't need the index still work — every
@@ -2017,27 +2017,27 @@ pub struct SnapshotIndex<'a> {
     /// stay accessible through the same handle during migration.
     pub snapshot: &'a GraphSnapshot,
     id_to_node: BTreeMap<NodeId, &'a GraphNode>,
-    /// H-HYG-006 wave 2: per-agent count of distinct active
+    /// Per-agent count of distinct active
     /// `LinkedToMux` mux targets. Retires the
     /// `tui::rows::collect_agent_mux_candidate_counts` helper
     /// (H-HYG-002's interim home) — consumers now read the
     /// count from `index.mux_candidate_count(agent_node_id)`.
     /// Deduped by target mux id.
     agent_mux_candidate_counts: std::collections::HashMap<String, usize>,
-    /// H-HYG-006 wave 3: `(source, relation) → Vec<&GraphLink>`
+    /// `(source, relation) → Vec<&GraphLink>`
     /// map. Consumers that today linear-scan `candidate_links`
     /// looking for a specific source-relation combination fold
     /// the filter through this map instead. Only holds
     /// `LinkState::Active` links because every existing hot
     /// consumer filters to active first.
     links_by_source_relation: BTreeMap<(NodeId, RelationKind), Vec<&'a GraphLink>>,
-    /// H-HYG-006 wave 6: `relation → Vec<&GraphLink>` map.
+    /// `relation → Vec<&GraphLink>` map.
     /// Consumers that scan every link with a specific relation
     /// kind (cross_link's parent-subagent override pass, the
     /// resolver's per-relation aggregation) fold their filter
     /// through this map. Only holds `LinkState::Active` links.
     links_by_relation: BTreeMap<RelationKind, Vec<&'a GraphLink>>,
-    /// H-HYG-006 wave 6: `link_id → &GraphLink` map. Consumers
+    /// `link_id → &GraphLink` map. Consumers
     /// that today `.find(|link| link.id == some_id)` collapse
     /// to O(log n) lookup. Includes links in every state so
     /// consumers can inspect superseded / dead links too.
@@ -2053,7 +2053,7 @@ impl<'a> SnapshotIndex<'a> {
             id_to_node.insert(node.id(), node);
         }
 
-        // H-HYG-006 wave 2: precompute per-agent mux candidate
+        // Precompute per-agent mux candidate
         // counts once so row builders don't re-scan per render.
         let mut per_agent: std::collections::HashMap<String, std::collections::HashSet<String>> =
             std::collections::HashMap::new();
@@ -2077,7 +2077,7 @@ impl<'a> SnapshotIndex<'a> {
         }
         let agent_mux_candidate_counts = per_agent.into_iter().map(|(k, v)| (k, v.len())).collect();
 
-        // H-HYG-006 wave 3+6: candidate_links indices. One pass
+        // candidate_links indices. One pass
         // populates both `links_by_source_relation` (wave 3),
         // `links_by_relation` (wave 6), and `links_by_id`
         // (wave 6).
@@ -2125,14 +2125,14 @@ impl<'a> SnapshotIndex<'a> {
         self.id_to_node.len()
     }
 
-    /// H-HYG-006 wave 2: per-agent `LinkedToMux` candidate count
+    /// Per-agent `LinkedToMux` candidate count
     /// keyed by `NodeId::AgentSession(...).to_string()`.
     /// Retires `tui::rows::collect_agent_mux_candidate_counts`.
     pub fn agent_mux_candidate_counts(&self) -> &std::collections::HashMap<String, usize> {
         &self.agent_mux_candidate_counts
     }
 
-    /// H-HYG-006 wave 3: active `(source, relation)` links.
+    /// Active `(source, relation)` links.
     /// Returns an empty slice for unknown `(source, relation)`
     /// combinations. Consumers that today do
     /// `snapshot.candidate_links.iter().filter(|link| link.source
@@ -2145,7 +2145,7 @@ impl<'a> SnapshotIndex<'a> {
             .map_or(EMPTY, Vec::as_slice)
     }
 
-    /// H-HYG-006 wave 6: active links matching `relation`.
+    /// Active links matching `relation`.
     /// Consumers that scan every link with a specific relation
     /// (`cross_link.rs` subagent override pass) collapse to
     /// `index.links_with_relation(RelationKind::LinkedToMux)`.
@@ -2157,7 +2157,7 @@ impl<'a> SnapshotIndex<'a> {
             .map_or(EMPTY, Vec::as_slice)
     }
 
-    /// H-HYG-006 wave 6: link by `link.id`. Includes every state
+    /// Link by `link.id`. Includes every state
     /// so consumers can inspect superseded / dead links too.
     /// Consumers that today do
     /// `snapshot.candidate_links.iter().find(|l| l.id == id)`
@@ -2215,10 +2215,10 @@ impl GraphSnapshot {
 
     /// Remove every node, candidate link, and provenance entry
     /// belonging to `provider`. Used by the warm-start path
-    /// (P7-003 phase 3) to evict a stale provider's slice before
+    /// to evict a stale provider's slice before
     /// re-running it, and by the eventual `conspectus serve` tick
     /// to swap a single provider's contribution without rebuilding
-    /// the rest of the graph (P7-005).
+    /// the rest of the graph.
     ///
     /// Semantics:
     ///

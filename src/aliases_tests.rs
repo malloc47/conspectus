@@ -1,4 +1,3 @@
-// Extracted from aliases.rs H-HYG-011 rolling wave via #[path = "aliases_tests.rs"] mod tests;
 use super::*;
 use crate::config::{ConfigLoader, PROJECT_CONFIG_FILENAME, USER_CONFIG_RELATIVE};
 use tempfile::TempDir;

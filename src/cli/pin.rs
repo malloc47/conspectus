@@ -1,4 +1,4 @@
-//! `conspectus pin` subcommand tree (H-REF-006 wave 10).
+//! `conspectus pin` subcommand tree.
 //!
 //! Pin CRUD, bind / rebind / adopt, launch / attach commands
 //! per ADR 0057. This is the largest single-command tree in
@@ -176,8 +176,8 @@ impl PinCreateArgs {
         let outcome = upsert_pin_entry(&selection.path, entry.clone())
             .map_err(|err| anyhow!(err.to_string()))?;
         // Record the project store so a pin created in a repo outside
-        // the scan root stays visible on later discovery cycles
-        // (H-PIN-ROOT-001). Best-effort: a failed cache write must not
+        // the scan root stays visible on later discovery cycles.
+        // Best-effort: a failed cache write must not
         // fail the pin create. `record` no-ops for the user-scope store.
         let _ =
             conspectus::pin_store_registry::PinStoreRegistry::from_env().record(&selection.path);
@@ -707,7 +707,7 @@ impl PinAdoptArgs {
         let selection = resolve_pin_write_store(self.store.map(Into::into), &cwd)?;
         let outcome = upsert_pin_entry(&selection.path, entry.clone())
             .map_err(|err| anyhow!(err.to_string()))?;
-        // Record the project store (H-PIN-ROOT-001) so an adopted pin
+        // Record the project store so an adopted pin
         // in a repo outside the scan root stays visible. Best-effort;
         // no-ops for the user-scope store.
         let _ =
@@ -1191,7 +1191,7 @@ fn decorate_unbound_pins_best_effort(snapshot: &mut GraphSnapshot) {
 }
 
 /// Record the resolver's pin bindings to per-pin sidecar files
-/// (ADR 0058 / H-PIN-RESUME-003). Best-effort — sidecar I/O failures
+/// (ADR 0058). Best-effort — sidecar I/O failures
 /// log to stderr and never propagate up through discovery, so a
 /// missing cache directory or read-only mount degrades pin launch's
 /// continuity story without breaking the cycle.

@@ -1,4 +1,4 @@
-//! Provider descriptor registry (H-EXT-001, ADR 0088).
+//! Provider descriptor registry (ADR 0088).
 //!
 //! Every discovery adapter stamps `node_provenance.provider`
 //! and `source_metadata.adapter` with one of the keys defined
@@ -67,8 +67,8 @@ pub const AGENT_DECK: &str = "agent_deck";
 /// Class: `mux` (ADR 0079).
 pub const TMUX: &str = "tmux";
 
-/// Zellij session enumeration via the configured backend
-/// (H-EXT-010). Class: `mux` (ADR 0079). Same TTL bucket as
+/// Zellij session enumeration via the configured backend.
+/// Class: `mux` (ADR 0079). Same TTL bucket as
 /// tmux — the two backends share the mux interval class.
 pub const ZELLIJ: &str = "zellij";
 

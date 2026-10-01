@@ -82,7 +82,7 @@ trait LoopMode {
     fn tmux(&self) -> &dyn MuxBackend;
 }
 
-/// Shared event loop driver (H-TUI-004 wave 2). Consumes any
+/// Shared event loop driver. Consumes any
 /// [`LoopMode`]; both live and scenario runs go through here.
 /// Per-mode differences (discovery channel, refresh timer,
 /// dispatch policy) live in the mode impl.
@@ -139,7 +139,7 @@ impl LoopMode for LiveMode {
         app: &mut App,
         config: &RunConfig,
     ) -> Result<()> {
-        // T8-007: initial discovery runs on the same background
+        // Initial discovery runs on the same background
         // worker path as timer refreshes and `r`, so the first
         // frame paints immediately with the `snapshot_handle.is_none()`
         // "Loading discovery…" placeholder while the scan runs.
@@ -510,7 +510,7 @@ impl LoopMode for StaticMode {
 }
 
 /// Prepare the toast area and render one frame. Shared between
-/// [`event_loop`] and [`static_event_loop`] (H-TUI-004 wave 1) —
+/// [`event_loop`] and [`static_event_loop`] —
 /// the toast prep + viewer-or-ui draw block was byte-identical
 /// in both loops.
 fn draw_frame(app: &mut App, terminal: &mut DefaultTerminal) -> Result<()> {
@@ -640,7 +640,7 @@ fn read_fixture(path: &std::path::Path) -> Result<crate::model::GraphSnapshot> {
 /// pure reducer until the app signals quit.
 fn event_loop(terminal: &mut DefaultTerminal, config: RunConfig) -> Result<()> {
     let mut app = App::new(config.clone());
-    // F8-013: enable last-active-view persistence. Snapshot mode and
+    // Enable last-active-view persistence. Snapshot mode and
     // `--no-resume-view` both go through a different entry point
     // (or skip this branch) so the file only ever moves under
     // genuine interactive runs.
@@ -667,7 +667,7 @@ fn static_event_loop(
     fixture_path: Option<std::path::PathBuf>,
 ) -> Result<()> {
     let mut app = App::new(config.clone());
-    // F8-013: enable last-active-view persistence for the static
+    // Enable last-active-view persistence for the static
     // fixture-replay TUI mode too. Snapshot mode (ADR 0067) uses a
     // distinct entry point in `src/tui/snapshot.rs` that
     // deliberately skips this so the on-disk file stays
@@ -782,7 +782,7 @@ fn spawn_discovery_worker(config: &RunConfig, tx: &mpsc::Sender<DiscoveryResult>
 
 /// Spawn a discovery worker + register the corresponding
 /// `InFlightKind::Discovery` marker so the status bar renders a
-/// spinner chip while the worker runs (H-WIDG-007). The marker is
+/// spinner chip while the worker runs. The marker is
 /// cleared when `drain` receives the worker's result.
 fn spawn_tracked_discovery(app: &mut App, tx: &mpsc::Sender<DiscoveryResult>) {
     spawn_discovery_worker(app.config(), tx);
@@ -795,7 +795,7 @@ fn spawn_tracked_discovery(app: &mut App, tx: &mpsc::Sender<DiscoveryResult>) {
 /// Run discovery and resolver on the calling thread, returning the
 /// resolved snapshot.
 ///
-/// P11-007 cutover: when `conspectus serve` is reachable on the
+/// When `conspectus serve` is reachable on the
 /// socket, this short-circuits and pulls the already-resolved
 /// snapshot from the daemon via `client_snapshot` — a single
 /// IPC round-trip instead of a full discovery + resolve cycle.
@@ -808,7 +808,7 @@ fn spawn_tracked_discovery(app: &mut App, tx: &mpsc::Sender<DiscoveryResult>) {
 /// 0038's "absence of a server is not an error" guarantee for
 /// the TUI surface.
 ///
-/// P7-003 phase 4: the local-discovery branch reads the
+/// The local-discovery branch reads the
 /// persisted cache and skips re-running heavy providers whose
 /// class TTL has not expired. The resolved snapshot is persisted
 /// back at the end of each cycle (unless `RunConfig::no_cache` is
@@ -826,7 +826,7 @@ pub(super) fn discover_and_resolve(config: &RunConfig) -> Result<crate::model::G
     } else {
         config.scan_roots.clone()
     };
-    // P11-011a: the on-disk warm-start prior was the previous
+    // The on-disk warm-start prior was the previous
     // graph.sqlite. With graph.sqlite retired, the daemonless
     // cold-rebuild path runs every provider from scratch each
     // tick — same as the daemon does on first cycle. Discovery
@@ -986,7 +986,7 @@ pub(super) fn open_worktree_menu_action(app: &mut App) {
 }
 
 /// The `X` hot key: open the worktree menu straight into the close-down
-/// merge/discard choice for the selected node (H-WT-006).
+/// merge/discard choice for the selected node.
 pub(super) fn open_worktree_close_down_action(app: &mut App) {
     use crate::tui::widgets::worktree_menu::{WorktreeMenuState, context_for_node};
     let Some(node) = app.selection().and_then(selection_node_id) else {
@@ -1103,7 +1103,7 @@ pub(super) fn open_new_mux_form_action(app: &mut App) {
 
 /// Public alias for [`derive_new_mux_cwd`] so the reducer's
 /// `Msg::OpenNewMuxForm` / `Msg::OpenMuxLaunchForm` arms can seed
-/// the cwd from the selected row (H-MUX-LAUNCH-001 / ADR 0096).
+/// the cwd from the selected row (ADR 0096).
 pub(crate) fn derive_mux_form_cwd(app: &App) -> Option<String> {
     derive_new_mux_cwd(app)
 }
@@ -1259,7 +1259,7 @@ pub(super) fn open_mux_menu_action(app: &mut App) {
     )));
 }
 
-/// Forward a key to the Mux action menu (H-MUX-LAUNCH-001 / ADR 0096).
+/// Forward a key to the Mux action menu (ADR 0096).
 /// Commit pops the menu and dispatches the emitted Msg through the
 /// reducer; the reducer's `Msg::OpenNewMuxForm` /
 /// `Msg::OpenMuxLaunchForm` arm pushes the target modal seeded from
@@ -1292,7 +1292,7 @@ fn handle_mux_menu_key(
     }
 }
 
-/// Forward a key to the mux-launch form (H-MUX-LAUNCH-001 / ADR 0096).
+/// Forward a key to the mux-launch form (ADR 0096).
 fn handle_mux_launch_form_key(
     terminal: &mut DefaultTerminal,
     app: &mut App,
@@ -2691,8 +2691,8 @@ fn write_pin_create(
     };
     let outcome = crate::pins::upsert_pin_entry(&selection.path, entry.clone())?;
     // Record the project store so a pin created in a repo outside the
-    // scan root stays visible on later discovery cycles
-    // (H-PIN-ROOT-001). Best-effort: a failed cache write must never
+    // scan root stays visible on later discovery cycles.
+    // Best-effort: a failed cache write must never
     // fail the pin create itself. `record` no-ops for the user-scope
     // store.
     let _ = registry.record(&selection.path);
@@ -2857,7 +2857,7 @@ fn write_pin_remove(
 
 pub(super) use crate::tui::keymap::cycle_view;
 
-/// Dispatch `Enter` on the left pane (T8-043) to the selected
+/// Dispatch `Enter` on the left pane to the selected
 /// row's default action. Group rows expand/collapse; mux rows and
 /// muxed agent sessions attach; un-muxed agent sessions open the
 /// transcript viewer. Right-pane focus is handled in
@@ -2878,7 +2878,7 @@ fn default_action(
     }
 }
 
-/// Handle `Enter` on a pin row (ADR 0057 / H-PIN-017). Suspends
+/// Handle `Enter` on a pin row (ADR 0057). Suspends
 /// the TUI, re-execs into `conspectus pin launch <id>` as a
 /// subprocess so the launch logic stays in `cli::PinLaunchArgs`
 /// without re-implementing it across the runtime, waits for the
@@ -3030,7 +3030,7 @@ fn summarize_pin_launch_output(pin_id: &str, output: std::io::Result<Output>) ->
 }
 
 /// Argv the TUI passes when re-execing into `conspectus mux new`
-/// (H-MUX-NEW-001 / ADR 0095). Split out so the shape is unit-testable
+/// (ADR 0095). Split out so the shape is unit-testable
 /// without running the actual subprocess. `--no-attach` is always
 /// present so the subprocess exits after spawning; the TUI's own
 /// attach path takes over once we're back in the alt screen.
@@ -3121,7 +3121,7 @@ fn summarize_mux_new_output(name: &str, output: std::io::Result<Output>) -> PinL
 }
 
 /// Argv the TUI passes when re-execing into
-/// `conspectus mux launch` (H-MUX-LAUNCH-001 / ADR 0096). Split out
+/// `conspectus mux launch` (ADR 0096). Split out
 /// so the shape is unit-testable without running the actual
 /// subprocess. `--no-attach` is always present so the subprocess
 /// exits after spawning; the TUI's own attach path takes over once
@@ -3278,7 +3278,7 @@ fn tmux_session_unavailable(target: &PinLaunchTarget) -> Option<String> {
     }
 }
 
-/// Right-pane Enter (T8-040 / T8-043). When the explorer cursor is on
+/// Right-pane Enter. When the explorer cursor is on
 /// a Node-zone field row with a copyable value, write it to the
 /// clipboard via OSC 52 (ADR 0056) and post a toast. Otherwise
 /// dispatch the normal `Msg::ExplorerActivate` so group expansion and
@@ -3291,7 +3291,7 @@ fn explorer_enter_action(app: &mut App) {
     app.update(Msg::ExplorerActivate);
 }
 
-/// `i` keybinding (T8-040). Copies the selected agent or mux session's
+/// `i` keybinding. Copies the selected agent or mux session's
 /// full id to the clipboard, posting a toast. Surfaces a status hint
 /// when the selection is something else (a group row, a PR, …).
 fn copy_session_id_action(app: &mut App) {

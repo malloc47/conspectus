@@ -1,4 +1,3 @@
-// Extracted from search.rs H-HYG-011 rolling wave via #[path = "search_tests.rs"] mod tests;
 use super::*;
 use crate::model::{AgentSessionId, NodeId};
 use crate::tui::rows::{AgentSessionRow, MuxIndicator, RowKind};

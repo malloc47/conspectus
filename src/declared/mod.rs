@@ -1,4 +1,4 @@
-//! Declared-link TOML file models (H-REF-005 split).
+//! Declared-link TOML file models.
 //!
 //! These types model the durable `[declared]` config section
 //! from ADR 0014. Loading them does not imply graph discovery
@@ -43,7 +43,7 @@ pub use store::{
     DeclaredStoreKind, DeclaredStoreSelection, DeclaredWriteOutcome, load_declared_link_by_id,
     remove_declared_link, upsert_declared_link,
 };
-// H-REF-005: `write_atomic` remains reachable at
+// `write_atomic` remains reachable at
 // `crate::declared::write_atomic` for the pin / alias / tui
 // state consumers that share the atomic-write primitive.
 pub(crate) use store::write_atomic;
@@ -148,7 +148,7 @@ pub enum DeclaredEndpoint {
 }
 
 impl DeclaredEndpoint {
-    /// H-REF-001: shared codec entrypoint. Parses the compact
+    /// Shared codec entrypoint. Parses the compact
     /// `type:key=value,…` CLI form callers use for
     /// `conspectus declared` operations. Pre-H-REF-001 the
     /// parse + label sides lived only in `cli.rs`; centralizing
@@ -205,7 +205,7 @@ impl DeclaredEndpoint {
         }
     }
 
-    /// H-REF-001: canonical compact-form label for this
+    /// Canonical compact-form label for this
     /// endpoint. Mirror of [`Self::parse_compact`] so
     /// `endpoint.compact_label().parse_compact()` round-trips
     /// for every variant.

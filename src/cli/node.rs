@@ -1,4 +1,4 @@
-//! `conspectus node` subcommand tree (H-REF-006 wave 5).
+//! `conspectus node` subcommand tree.
 //!
 //! Currently just `node show <id>` — resolves a node id
 //! against a discovered snapshot and prints its detail

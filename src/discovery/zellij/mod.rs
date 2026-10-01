@@ -1,4 +1,4 @@
-//! Zellij mux backend (H-EXT-010).
+//! Zellij mux backend.
 //!
 //! Zellij is the second mux backend Conspectus supports. This
 //! module is the acceptance test for the H-EXT-008 `MuxBackend`
@@ -218,7 +218,7 @@ impl<R: MuxBackend> ZellijDiscovery<R> {
 
 impl<R: MuxBackend + 'static> DiscoveryProvider for ZellijDiscovery<R> {
     fn discover(&self, context: &DiscoveryContext) -> Result<GraphFragment> {
-        // H-SERVE-PERF-011: TTL-cache the zellij fragment. The
+        // TTL-cache the zellij fragment. The
         // freshness gate doesn't stop this provider from re-running
         // on quiet cycles — when zellij has no live sessions the
         // fragment is empty and thus produces no `zellij` provenance

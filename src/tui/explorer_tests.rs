@@ -1,4 +1,3 @@
-// Extracted from explorer.rs H-HYG-011 rolling wave via #[path = "explorer_tests.rs"] mod tests;
 use super::*;
 use crate::model::{
     AgentSessionId, AgentSessionNode, CheckoutId, CheckoutNode, Confidence, ForgePrId, ForgePrNode,
@@ -1075,7 +1074,7 @@ fn forge_pr_core_renders_composite_label() {
 
 #[test]
 fn short_node_label_renders_kind_short_tag_per_node() {
-    // T8-038: every node kind should produce a `kind:short_tag`
+    // Every node kind should produce a `kind:short_tag`
     // label suitable for breadcrumb hops.
     assert_eq!(
         short_node_label(&agent(
@@ -1290,7 +1289,7 @@ fn breadcrumb_plain(line: &Line<'_>) -> String {
 
 #[test]
 fn cwd_owner_kind_resolves_to_checkout_workspace_then_repo() {
-    // T8-039: when the cwd of a session matches a Checkout in
+    // When the cwd of a session matches a Checkout in
     // the snapshot, surface `checkout`; otherwise Workspace,
     // then Repo (`common_dir` or any `source_paths` entry).
     let mut snapshot = GraphSnapshot::empty();
@@ -1337,7 +1336,7 @@ fn cwd_owner_kind_resolves_to_checkout_workspace_then_repo() {
 
 #[test]
 fn agent_session_cwd_field_carries_kind_chip_when_resolved() {
-    // T8-039: the session's `cwd` field should pick up the
+    // The session's `cwd` field should pick up the
     // owning-node kind chip when the path resolves in the graph.
     let mut snapshot = GraphSnapshot::empty();
     let repo_id = RepoId::new("/srv/git/conspectus.git");

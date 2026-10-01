@@ -1,4 +1,4 @@
-//! `conspectus rename` subcommand tree (H-REF-006 wave 2).
+//! `conspectus rename` subcommand tree.
 //!
 //! Two subcommands: `session` (agent-session alias write +
 //! lockstep tmux rename per ADR 0029) and `mux` (tmux native

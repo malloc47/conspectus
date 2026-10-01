@@ -1,4 +1,4 @@
-//! `?` help overlay (F8-011).
+//! `?` help overlay.
 //!
 //! Minimal reference card for the current keymap. Render-only — no
 //! mutation, no sub-editors — so the state struct is empty today and
@@ -115,7 +115,7 @@ impl<'a> HelpOverlayWidget<'a> {
 
 impl Widget for HelpOverlayWidget<'_> {
     fn render(self, area: Rect, buf: &mut Buffer) {
-        // H-WIDG-004: the centered-bordered-modal shell — clear,
+        // The centered-bordered-modal shell — clear,
         // border, title — is owned by `tui_popup::Popup` via
         // `crate::tui::widgets::popup_frame::themed_popup`. The body
         // wrapper reports the same cap dimensions

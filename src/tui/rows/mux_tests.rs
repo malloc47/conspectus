@@ -1,4 +1,3 @@
-// Extracted from mux.rs H-HYG-011 rolling wave via #[path = "mux_tests.rs"] mod tests;
 use super::*;
 use crate::filter::RowFilter;
 use crate::model::{
@@ -202,7 +201,7 @@ fn mux_view_nests_session_rows_when_multiple_agents_link_to_one_mux() {
 
 #[test]
 fn mux_view_drops_non_winner_linked_to_mux_candidate() {
-    // H-UI-008: the mux view's attached-agents list filters
+    // The mux view's attached-agents list filters
     // through `resolved_relationships`. A `LinkedToMux`
     // candidate that the resolver did not pick (e.g. a weaker
     // cwd evidence pointing at a different mux) must not

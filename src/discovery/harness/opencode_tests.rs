@@ -1,4 +1,3 @@
-// Extracted from opencode.rs H-HYG-011 rolling wave via #[path = "opencode_tests.rs"] mod tests;
 use std::fs;
 
 use rusqlite::Connection;

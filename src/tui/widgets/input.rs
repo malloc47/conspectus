@@ -115,7 +115,7 @@ impl<'a> TextInputWidget<'a> {
 
 impl Widget for TextInputWidget<'_> {
     fn render(self, area: Rect, buf: &mut Buffer) {
-        // H-WIDG-004: framing through `tui_popup::Popup`. When a
+        // Framing through `tui_popup::Popup`. When a
         // theme is set we route through `themed_popup`; otherwise
         // fall back to upstream defaults so call sites that don't
         // pass a theme still render legibly.

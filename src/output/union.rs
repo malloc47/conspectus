@@ -1,4 +1,4 @@
-//! In-memory union projection renderer (P11-011b / ADR 0082).
+//! In-memory union projection renderer (ADR 0082).
 //!
 //! Emits one row per `agent_session` followed by one row per
 //! `mux_session`, with per-row-kind cell rendering driven by a

@@ -1,4 +1,3 @@
-// Extracted from pins.rs H-HYG-011 rolling wave via #[path = "pins_tests.rs"] mod tests;
 use super::*;
 
 fn sample_entry(id: &str, mux_name: &str) -> PinEntry {
@@ -320,7 +319,7 @@ fn relative_cwd_is_rejected() {
 
 #[test]
 fn unsupported_mux_backend_is_rejected() {
-    // H-EXT-010: `zellij` is now a registered backend; test
+    // `zellij` is now a registered backend; test
     // with a synthetic key so the assertion still targets
     // the unregistered-backend rejection path.
     let mut entry = sample_entry("ingest", "ingest");

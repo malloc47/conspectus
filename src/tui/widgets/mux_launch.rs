@@ -1,4 +1,4 @@
-//! Ephemeral harness launch form (H-MUX-LAUNCH-001 / ADR 0096).
+//! Ephemeral harness launch form (ADR 0096).
 //!
 //! Multi-field modal that commits a [`Msg::CommitMuxLaunch`] the
 //! runtime turns into a subprocess re-exec of

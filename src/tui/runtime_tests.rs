@@ -1,4 +1,3 @@
-// Extracted from runtime.rs H-HYG-011 rolling wave via #[path = "runtime_tests.rs"] mod tests;
 use super::*;
 use crate::tui::widgets::pins::{
     PinBindRequest, PinCreateRequest, PinCreateStore, PinEditRequest, PinRemoveRequest,
@@ -144,7 +143,7 @@ fn translate_b_requests_pin_bind_hint() {
 
 #[test]
 fn translate_i_requests_copy_session_id() {
-    // T8-040: `i` resolves the selected agent or mux session's
+    // `i` resolves the selected agent or mux session's
     // full id and routes it through the OSC 52 clipboard
     // primitive (ADR 0056) at the main-loop boundary.
     assert_eq!(
@@ -294,7 +293,7 @@ fn write_pin_create_writes_project_store() {
     assert_eq!(entry.mux.native_id(), "tmux:scratch:ingest-mux");
     assert_eq!(outcome.path, project.path().join(".conspectus.toml"));
 
-    // H-PIN-ROOT-001: creating a project pin records its store in the
+    // Creating a project pin records its store in the
     // registry so it survives a later scan from an unrelated root.
     assert_eq!(
         registry.read(),
@@ -623,7 +622,7 @@ fn write_pin_remove_removes_from_explicit_store_path() {
 
 #[test]
 fn translate_shift_e_toggles_edge_meta() {
-    // T8-042: `E` toggles the explorer's edge-meta visibility.
+    // `E` toggles the explorer's edge-meta visibility.
     // Focus-agnostic — the binding is global so the operator
     // can flip it without first tabbing into the right pane.
     assert_eq!(
@@ -646,7 +645,7 @@ fn translate_ctrl_g_cycles_grouping() {
 
 #[test]
 fn translate_digits_switch_views_directly() {
-    // Only Sessions/Mux are surfaced in the UI (H-VIEW-001); the
+    // Only Sessions/Mux are surfaced in the UI; the
     // `3`/`4`/`5` accelerators for the hidden Union/PRs/Forks views
     // were removed and now translate to no action.
     let cases = [('1', View::Sessions), ('2', View::Mux)];
@@ -680,7 +679,7 @@ fn translate_brackets_cycle_views() {
 
 #[test]
 fn cycle_view_wraps_in_both_directions() {
-    // VIEW_OPTIONS is trimmed to [Sessions, Mux] (H-VIEW-001), so the
+    // VIEW_OPTIONS is trimmed to [Sessions, Mux], so the
     // cycle wraps between just those two.
     assert_eq!(cycle_view(View::Sessions, -1), View::Mux);
     assert_eq!(cycle_view(View::Mux, 1), View::Sessions);
@@ -718,7 +717,7 @@ fn translate_maps_navigation_keys() {
         msg(translate(press(KeyCode::Up, KeyModifiers::NONE), 24)),
         Some(Msg::NavUp)
     );
-    // T8-043: Enter no longer maps to a Msg directly. It is
+    // Enter no longer maps to a Msg directly. It is
     // resolved against the selected row's kind by the dispatcher
     // at the call site (and remapped to ExplorerActivate when
     // the right pane has focus).
@@ -786,7 +785,7 @@ fn remap_for_focus_left_is_identity() {
 #[test]
 fn remap_for_focus_right_routes_nav_keys_into_the_explorer() {
     use crate::tui::app::Focus;
-    // T8-028: with the right pane focused, j/k and PageUp/Down
+    // With the right pane focused, j/k and PageUp/Down
     // move the explorer cursor instead of scrolling the preview.
     // J/K (uppercase) keep their preview-scroll role via the
     // standalone bindings in `translate`.
@@ -847,7 +846,7 @@ fn remap_for_focus_right_routes_enter_and_e_to_the_explorer() {
         remap_for_focus(Action::Refresh, Focus::Right),
         Some(Action::Refresh)
     );
-    // T8-034: F clears filters on the left tree but toggles the
+    // F clears filters on the left tree but toggles the
     // Expanded Node Detail view on the right pane.
     assert_eq!(
         remap_for_focus(Action::ClearFilters, Focus::Left),
@@ -1106,7 +1105,7 @@ mod selected_default_action_tests {
 
     #[test]
     fn unmuxed_session_resolves_to_view_regardless_of_viewer_support() {
-        // T8-043: the dispatcher routes every un-muxed agent
+        // The dispatcher routes every un-muxed agent
         // session through `SelectedDefault::View`. Harnesses
         // without a registered viewer (or whose viewer binary is
         // missing from `$PATH`) still resolve to `View` here —
@@ -1383,7 +1382,7 @@ mod mux_effect_executor {
     }
 }
 
-/// H-TUI-004 wave 1: `overlay_key_from_event` centralizes the
+/// `overlay_key_from_event` centralizes the
 /// modal-stack-aware routing both event loops used to duplicate.
 /// These tests pin the routing: each open modal takes ownership
 /// of the next key press, and the fallback returns None when no

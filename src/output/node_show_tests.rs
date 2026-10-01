@@ -1,4 +1,3 @@
-// Extracted from node_show.rs H-HYG-011 rolling wave via #[path = "node_show_tests.rs"] mod tests;
 use super::*;
 use crate::model::{
     AgentSessionId, AgentSessionNode, Confidence, Freshness, GraphLink, GraphNode, LinkEndpoint,

@@ -1,4 +1,4 @@
-//! In-memory mux-view row-tree builder (P11-011d / ADR 0082).
+//! In-memory mux-view row-tree builder (ADR 0082).
 //!
 //! The mux view is mux-session oriented: one row per mux
 //! session, with compact metrics about known attached agent
@@ -29,8 +29,8 @@ pub struct MuxBuildInputs<'a> {
     pub filter: RowFilter,
     pub grouping: MuxGrouping,
     pub sort: Sort,
-    /// Which recency signal `Sort::Recency` orders mux rows by
-    /// (H-MUX-SORT-001). Ignored under `Sort::Hierarchy`.
+    /// Which recency signal `Sort::Recency` orders mux rows by.
+    /// Ignored under `Sort::Hierarchy`.
     pub mux_recency: crate::tui::MuxRecency,
 }
 
@@ -394,8 +394,8 @@ fn emit_repo_grouped(
     }
 }
 
-/// Recency ordering key for a mux row under the chosen basis
-/// (H-MUX-SORT-001). Activity blends in attached-agent activity (its
+/// Recency ordering key for a mux row under the chosen basis.
+/// Activity blends in attached-agent activity (its
 /// `activity_epoch` is already the blended value); created and
 /// last-attached read the raw session-lifecycle epochs. A missing
 /// signal sorts oldest (`None` < `Some`), so sessions lacking the
@@ -597,13 +597,13 @@ fn collect_muxes(snapshot: &GraphSnapshot) -> Vec<MuxData<'_>> {
     rows
 }
 
-/// H-UI-008: attached agents filter through the resolver. Only
+/// Attached agents filter through the resolver. Only
 /// `LinkedToMux` candidates whose `link_id` appears in
 /// `snapshot.resolved_relationships.selected_link_id` for the
 /// matching relation are surfaced — drops false-positive
 /// attachments under non-winning cwd evidence.
 fn collect_attached_agents(snapshot: &GraphSnapshot) -> HashMap<String, Vec<AttachedAgent>> {
-    // H-HYG-006 wave 5: consult the shared SnapshotIndex instead
+    // Consult the shared SnapshotIndex instead
     // of maintaining a local `collect_agent_mux_candidate_counts`
     // copy. The clone is cheap for typical graph sizes.
     let candidate_counts = crate::model::SnapshotIndex::new(snapshot)

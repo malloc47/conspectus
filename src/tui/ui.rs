@@ -16,7 +16,7 @@
 //! - Sessions use spare horizontal space after the mux indicator
 //!   for a dim one-line last-message preview.
 //! - Body switches from side-by-side to a vertical stack when the
-//!   terminal is narrower than ~100 columns (T8-004).
+//!   terminal is narrower than ~100 columns.
 //! - Muxed-session right-panel preview shows the
 //!   `--no-live-preview` banner when live extras are suppressed,
 //!   while inline tree previews remain (locked decision).
@@ -265,7 +265,7 @@ impl HeaderCounts {
     }
 }
 
-/// Separators between the chip sections (H-UI-004). `SECTION_SEPARATOR`
+/// Separators between the chip sections. `SECTION_SEPARATOR`
 /// joins the prefix to the optional opt-in / triage chips; the per-chip
 /// `CHIP_SEPARATOR` joins individual harness chips within the opt-in
 /// section.
@@ -442,7 +442,7 @@ fn spinner_glyph(started_at: std::time::Instant) -> &'static str {
     SPINNER_FRAMES[idx]
 }
 
-/// Append one spinner chip per in-flight async op (H-WIDG-007).
+/// Append one spinner chip per in-flight async op.
 /// Each chip shows a Braille spinner glyph advanced by wall-clock
 /// elapsed time plus the op's label. The runtime redraws at least
 /// every ~100ms via the poll timeout, so the spinner animates at a
@@ -692,7 +692,7 @@ fn draw_left_panel(app: &mut App, frame: &mut Frame<'_>, area: Rect) {
         lines.push(primary);
     }
 
-    // H-TUI-005 wave 2: the reducer owns scroll reconciliation.
+    // The reducer owns scroll reconciliation.
     // Dispatch the post-layout viewport height and read the
     // pre-computed offset as a pure getter. `selected_primary_line`
     // stays computed above as an assertion anchor — the reducer
@@ -838,7 +838,7 @@ fn right_panel_title(app: &App, width: usize) -> Line<'static> {
         spans.push(span!(Style::default().fg(color); "{} ", style.glyph));
     }
     spans.push(span!(Modifier::BOLD; "{label}"));
-    // T8-038: render the full drilldown chain in short `kind:tag`
+    // Render the full drilldown chain in short `kind:tag`
     // form so the operator can see depth at a glance, with elision
     // (`first … last`) when the chain exceeds the title's available
     // width. The breadcrumb glyph `◀` plus the trailing depth marker
@@ -919,7 +919,7 @@ fn empty_left_panel_text(app: &App) -> String {
         return "Loading discovery…".to_string();
     }
     if !app.filter().is_empty() {
-        // Filtered-zero case (F8-012): a snapshot is loaded but the
+        // Filtered-zero case: a snapshot is loaded but the
         // active filter dropped every session. Distinguish from
         // "no sessions discovered" so the operator knows their
         // filter — not the world — is the reason.
@@ -1309,7 +1309,7 @@ fn render_session_spans(session: &AgentSessionRow, theme: &Theme, now: i64) -> V
         // marker reads without depending on a new theme key.
         spans.push(span!(theme.placeholder; "  📌"));
     }
-    // P8-015: the row's tree label surfaces the operator-chosen
+    // The row's tree label surfaces the operator-chosen
     // alias unconditionally and the harness-recorded title only when
     // the builder flagged this row for disambiguation. Right pane,
     // search index, and status hints still read `display_label`.
@@ -1639,7 +1639,7 @@ fn row_kind_glyph_span(kind: &RowKind, theme: &Theme) -> Option<Span<'static>> {
         // practice without adding information. The pill stands alone
         // in row contexts. `NodeKind::AgentSession`'s glyph + color
         // remain defined for detail-pane and explorer surfaces
-        // (H-VIS-004) where no pill is rendered.
+        // where no pill is rendered.
         RowKind::AgentSession(_) => return None,
         RowKind::AgentSessionMuxCandidate(_) => NodeKind::MuxSession,
         RowKind::MuxSession(_) => NodeKind::MuxSession,
@@ -1911,13 +1911,13 @@ fn draw_right_panel(app: &mut App, frame: &mut Frame<'_>, area: Rect) {
         return;
     };
 
-    // T8-029: when the graph explorer state is available, render
+    // When the graph explorer state is available, render
     // the new mockup layout (Node + Upstream + Downstream sections
     // with cursor highlight) on top. Falls back to the legacy
     // section-grouped detail when the explorer state isn't ready
     // yet (race during the first SetData).
     if app.explorer().is_some() {
-        // H-TUI-005 wave 1: `app` is `&mut` here so scroll
+        // `app` is `&mut` here so scroll
         // reconciliation lives on the App fields directly rather
         // than in `Cell`s. We derive all state-dependent lines +
         // wrap counts through an immutable borrow of the explorer
@@ -2006,7 +2006,7 @@ fn draw_right_panel(app: &mut App, frame: &mut Frame<'_>, area: Rect) {
             .min(max_header_height)
             .max(3);
         let split = vertical![==header_height, ==1, >=0].split(inner);
-        // H-TUI-005 wave 2: the reducer owns scroll reconciliation.
+        // The reducer owns scroll reconciliation.
         // Draw measures the post-wrap cursor row span (that math
         // needs the widget-rendered lines) and dispatches the
         // measurement as a Msg; the reducer runs the same offset
@@ -2258,7 +2258,7 @@ fn render_node_field_line(
 }
 
 /// Per-kind glyph chip used to surface the graph node kind next to a
-/// value (T8-039) or beside a relationship-explorer neighbor. ADR
+/// value or beside a relationship-explorer neighbor. ADR
 /// 0073 §3 replaces the prior dim `[kind]` text with a 1-cell glyph
 /// in the node-kind color so the chip carries identity at a glance.
 /// A missing kind (the neighbor isn't in the snapshot) falls back to
@@ -2895,7 +2895,7 @@ fn section_divider_line(kind: SectionKind, width: usize, theme: &Theme) -> Line<
 /// start of the line with any aggregate summary trailing it (used by
 /// Node and Preview, which have no summary). `Right` flips the order
 /// so the aggregate renders left of the chip and the chip anchors
-/// flush right (T8-041) — keeps the bold zone label easy to scan
+/// flush right — keeps the bold zone label easy to scan
 /// vertically when Upstream / Downstream summaries grow.
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 enum ChipAnchor {
@@ -3177,8 +3177,8 @@ fn render_captured_pane(text: &str, color: bool) -> Text<'static> {
 fn contextual_status_text(app: &App) -> String {
     let focus_hint = match app.focus() {
         Focus::Left => "j/k move · h/l fold · Enter default",
-        // T8-029: with the right pane focused, j/k drive the graph
-        // explorer cursor (T8-028), Enter drills or expands a group
+        // With the right pane focused, j/k drive the graph
+        // explorer cursor, Enter drills or expands a group
         // depending on the cursor position, `e` toggles a group,
         // and Backspace pops the breadcrumb stack.
         Focus::Right => "j/k cursor · Enter drill/expand · e group · ⌫ back",
@@ -3188,7 +3188,7 @@ fn contextual_status_text(app: &App) -> String {
 }
 
 /// Status-bar action hint that advertises `Enter` as the primary
-/// default action on the selected row (T8-043), with the legacy
+/// default action on the selected row, with the legacy
 /// single-key accelerator (`a` / `v`) listed alongside. Falls back
 /// to the attach-disabled reason for rows that have neither a mux
 /// target nor a viewable transcript so the operator still sees a
@@ -3204,7 +3204,7 @@ fn default_action_status_hint(app: &App) -> String {
     if matches!(row.kind, RowKind::Group(_)) {
         return "Enter/l expand · h collapse".to_string();
     }
-    // Pin rows surface a per-binding-state hint (ADR 0057 / H-PIN-018).
+    // Pin rows surface a per-binding-state hint (ADR 0057).
     if let RowKind::Pin(pin) = &row.kind {
         let diagnostics = crate::tui::actions::selected_pin_diagnostics(app);
         let has_b = if let Some(hint) = crate::tui::actions::pin_status_hint(&diagnostics) {

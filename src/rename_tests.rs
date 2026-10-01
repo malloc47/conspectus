@@ -1,4 +1,3 @@
-// Extracted from rename.rs H-HYG-011 rolling wave via #[path = "rename_tests.rs"] mod tests;
 use super::*;
 use crate::model::{
     AgentSessionNode, Confidence, Freshness, GraphNode, MuxSessionNode, Provenance, SourceMetadata,

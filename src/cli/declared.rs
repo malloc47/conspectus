@@ -1,4 +1,4 @@
-//! `conspectus declared` subcommand tree (H-REF-006 wave 11).
+//! `conspectus declared` subcommand tree.
 //!
 //! Six subcommands per ADR 0014: `list`, `create`, `remove`,
 //! `confirm`, `ignore`, `override`. Plus the pre-declared

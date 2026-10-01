@@ -1,4 +1,3 @@
-// Extracted from mod.rs H-HYG-011 rolling wave via #[path = "rows_tests.rs"] mod tests;
 use super::*;
 use std::path::PathBuf;
 

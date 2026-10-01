@@ -48,7 +48,7 @@ pub trait ForgeAdapter: Send + Sync {
     fn discover(&self, context: &DiscoveryContext) -> Result<GraphFragment>;
 
     /// Should this adapter own PR discovery for the given remote
-    /// origin URL (H-EXT-012)? A repo whose `origin` URL points
+    /// origin URL? A repo whose `origin` URL points
     /// at `github.com` should be handled by the GitHub adapter;
     /// a repo whose origin points at `gitlab.com` should be
     /// handled by a GitLab adapter. Returning `false` means "not
@@ -82,7 +82,7 @@ impl ForgeDiscovery {
         self
     }
 
-    /// H-EXT-012: register an already-boxed adapter. Used by the
+    /// Register an already-boxed adapter. Used by the
     /// discovery driver, which takes ownership of adapters from
     /// `LocalDiscoveryConfig.forge_adapters` (already boxed) and
     /// hands them to the coordinator without re-boxing.
@@ -94,7 +94,7 @@ impl ForgeDiscovery {
 
 impl DiscoveryProvider for ForgeDiscovery {
     fn discover(&self, context: &DiscoveryContext) -> Result<GraphFragment> {
-        // H-SERVE-PERF-005: TTL-cache the merged fragment so a
+        // TTL-cache the merged fragment so a
         // busy class thread doesn't respawn `gh pr list` on every
         // cycle. `GitHubForgeProvider` returns an empty fragment
         // when a repo has no PRs (or `gh` is unavailable), and an

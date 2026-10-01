@@ -1,4 +1,3 @@
-// Extracted from render.rs H-HYG-011 rolling wave via #[path = "render_tests.rs"] mod tests;
 use super::*;
 use crate::viewer::model::{TranscriptTurn, TurnKind, TurnRole};
 use crate::viewer::state::ToolDetail;

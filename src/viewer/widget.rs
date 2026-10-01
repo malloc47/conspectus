@@ -416,7 +416,7 @@ fn draw_help_overlay(theme: &Theme, frame: &mut Frame<'_>, area: Rect) {
                 Span::styled(
                     format!("{}{} ", " ".repeat(key_pad), key),
                     Style::new()
-                        // H-EXT-003: use the codex color via the
+                        // Use the codex color via the
                         // registry-aware lookup. This is a
                         // semantic reuse — the viewer help sheet
                         // paints its key column in the same cyan

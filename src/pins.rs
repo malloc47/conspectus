@@ -8,11 +8,11 @@
 //! (node attributes).
 //!
 //! This module owns:
-//! - schema parsing, validation, and TOML round-trip (H-PIN-002),
+//! - schema parsing, validation, and TOML round-trip,
 //! - store selection — picking the right `.conspectus.toml` for a
-//!   given pin cwd (H-PIN-005),
+//!   given pin cwd,
 //! - atomic read-modify-write helpers for upsert / remove of pin
-//!   entries (H-PIN-006).
+//!   entries.
 //!
 //! Discovery, resolver binding, and the CLI / TUI surfaces live in
 //! their own modules per the H-PIN-* backlog. The atomic-write
@@ -272,7 +272,7 @@ fn validate_entry(entry: &PinEntry) -> Result<(), PinParseError> {
             cwd: entry.cwd.clone(),
         });
     }
-    // H-EXT-009: validate against the compile-time registered
+    // Validate against the compile-time registered
     // backend list instead of the historical "only tmux" match.
     // A future backend (H-EXT-010 zellij) becomes a
     // `KNOWN_MUX_BACKENDS` entry and lands here automatically.
@@ -341,7 +341,7 @@ impl fmt::Display for PinParseError {
                 write!(f, "pin `{entry_id}` cwd `{cwd}` must be an absolute path")
             }
             Self::UnsupportedMuxBackend { entry_id, backend } => {
-                // H-EXT-009: report the registered backend set
+                // Report the registered backend set
                 // instead of a hardcoded "only tmux."
                 let registered = crate::discovery::tmux::KNOWN_MUX_BACKENDS.join(", ");
                 write!(
@@ -371,7 +371,7 @@ impl fmt::Display for PinSerializeError {
 impl std::error::Error for PinSerializeError {}
 
 // ---------------------------------------------------------------------
-// Store selection (H-PIN-005)
+// Store selection
 // ---------------------------------------------------------------------
 
 /// Where an upsert / remove operation should land when the operator
@@ -482,7 +482,7 @@ pub fn user_pin_store(loader: &ConfigLoader) -> Result<PinStoreSelection, PinSto
 }
 
 // ---------------------------------------------------------------------
-// Atomic write helpers (H-PIN-006)
+// Atomic write helpers
 // ---------------------------------------------------------------------
 
 #[derive(Clone, Debug, Eq, PartialEq)]

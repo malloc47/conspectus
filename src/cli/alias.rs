@@ -1,4 +1,4 @@
-//! `conspectus alias` subcommand tree (H-REF-006 wave 9).
+//! `conspectus alias` subcommand tree.
 //!
 //! Currently just `alias list`, which walks the discovered
 //! project + user alias stores and prints one line per entry.
@@ -162,7 +162,7 @@ fn append_alias_records(
     }
 }
 
-/// H-REF-006 wave 9: shared with the declared subcommand
+/// Shared with the declared subcommand
 /// (still in cli/mod.rs). Retained as `pub(super)` so both
 /// consumers reach it through the same declaration.
 pub(super) fn format_alias_endpoint(endpoint: &DeclaredEndpoint) -> String {

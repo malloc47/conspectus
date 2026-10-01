@@ -109,7 +109,7 @@ pub struct RunConfig {
     /// renderer reads it via [`App::theme`].
     pub theme: Theme,
     /// Initial visibility of the explorer's `provenance · confidence
-    /// · state` link-row meta (T8-042). Sourced from
+    /// · state` link-row meta. Sourced from
     /// `[tui.detail].show_edge_meta` in the on-disk config. The
     /// runtime per-session `E` accelerator flips this in memory; the
     /// config knob just sets the default.
@@ -120,12 +120,12 @@ pub struct RunConfig {
     /// totals, so the aggregate is opt-in only. Sourced from
     /// `[tui].show_harness_chips` in the on-disk config.
     pub show_harness_chips: bool,
-    /// Initial mux-view recency basis (H-MUX-SORT-001). The runtime
+    /// Initial mux-view recency basis. The runtime
     /// per-session control changes it in memory; this sets the
     /// startup default.
     pub default_mux_recency: MuxRecency,
     /// Terminal width (columns) below which the body reflows from
-    /// side-by-side panes to a vertical stack (H-LAYOUT-001). Sourced
+    /// side-by-side panes to a vertical stack. Sourced
     /// from `[tui] narrow_layout_threshold`; the renderer reads this
     /// instead of a hard-coded constant.
     pub narrow_layout_threshold: u16,
@@ -134,11 +134,11 @@ pub struct RunConfig {
     /// skips re-running providers whose class TTL has not expired.
     /// Defaults to the ADR 0038 starting values.
     pub intervals: crate::config::ServerIntervals,
-    /// P7-003 phase 4: suppress the writer for this TUI invocation.
+    /// Suppress the writer for this TUI invocation.
     /// The discovery loop still reads from the cache; only the
     /// post-refresh write is skipped.
     pub no_cache: bool,
-    /// P7-003 phase 4: force a cold scan on every discovery cycle
+    /// Force a cold scan on every discovery cycle
     /// — useful for "I just changed something on disk, ignore the
     /// cache." The writer still runs unless `no_cache` is also set
     /// so the next invocation can warm-start off this run.
@@ -201,8 +201,8 @@ pub enum Sort {
     Recency,
 }
 
-/// Which recency signal the **mux** view's `Sort::Recency` orders by
-/// (H-MUX-SORT-001). Mux-scoped: other views keep a single recency
+/// Which recency signal the **mux** view's `Sort::Recency` orders by.
+/// Mux-scoped: other views keep a single recency
 /// signal, so this basis only affects the mux row tree. Each variant
 /// maps to a `MuxSessionNode` epoch; missing signals fall back so a
 /// session without the chosen epoch still sorts deterministically.

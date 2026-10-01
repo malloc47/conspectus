@@ -1,4 +1,3 @@
-// Extracted from claude_code.rs H-HYG-011 rolling wave via #[path = "claude_code_tests.rs"] mod tests;
 use tempfile::TempDir;
 
 use super::*;

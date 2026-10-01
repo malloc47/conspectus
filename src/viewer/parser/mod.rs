@@ -6,7 +6,7 @@
 //! [`SessionLocator`] without harness-specific knowledge in the
 //! widget layer.
 //!
-//! H-EXT-006: parser lookup now goes through the adapter
+//! Parser lookup now goes through the adapter
 //! registry via
 //! [`crate::discovery::harness::HarnessAdapter::transcript_parser`],
 //! so the pre-H-EXT-006 `supports(&locator) -> bool` fan-out is

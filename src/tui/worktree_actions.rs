@@ -1,4 +1,4 @@
-//! Worktree action model (H-WT-004b).
+//! Worktree action model.
 //!
 //! The `w` worktree action menu is context-sensitive: which actions it
 //! offers depends on what the operator has selected (a repo, a worktree

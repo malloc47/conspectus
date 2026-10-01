@@ -1,4 +1,3 @@
-// Extracted from actions.rs H-HYG-011 rolling wave via #[path = "actions_tests.rs"] mod tests;
 use super::*;
 use crate::filter::RowFilter;
 use crate::model::{

@@ -1,4 +1,4 @@
-//! Warm-start cache gate (P7-003 phase 3).
+//! Warm-start cache gate.
 //!
 //! Given a persisted [`GraphSnapshot`], the per-class refresh
 //! intervals from [`ServerIntervals`], and a wall-clock "now"
@@ -169,8 +169,8 @@ pub const MUTATOR_PROVIDERS: &[&str] = &[
 pub const PROCESS_TREE_MUTATORS: &[&str] = &[providers::CROSS_LINK, providers::CODEX_LOG];
 
 /// Whether `provider` belongs to the mux or harness interval class —
-/// the two classes whose re-run feeds the process-tree mutators
-/// (H-SERVE-PERF-001a). Used to decide, from the freshly-run
+/// the two classes whose re-run feeds the process-tree mutators.
+/// Used to decide, from the freshly-run
 /// providers' provenance, whether to refresh the process-tree pass.
 pub fn is_mux_or_harness_provider(provider: &str) -> bool {
     matches!(

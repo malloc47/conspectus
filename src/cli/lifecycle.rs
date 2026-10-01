@@ -1,5 +1,5 @@
 //! `conspectus serve`, `refresh`, `status` — daemon lifecycle
-//! commands (H-REF-006 wave 7).
+//! commands.
 //!
 //! All three consult the daemon socket first (via
 //! `conspectus::server::client_*`) and either return that

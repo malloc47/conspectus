@@ -2033,7 +2033,7 @@ impl<'a> PinsOverlayWidget<'a> {
 
 impl Widget for PinsOverlayWidget<'_> {
     fn render(self, area: Rect, buf: &mut Buffer) {
-        // H-WIDG-004: framing through `tui_popup::Popup`.
+        // Framing through `tui_popup::Popup`.
         let cursor = self.state.cursor();
         let mut lines: Vec<Line<'static>> = Vec::new();
         for (idx, label) in PIN_ACTION_OPTIONS.iter().enumerate() {
@@ -2090,7 +2090,7 @@ impl<'a> PinCreateWidget<'a> {
 
 impl Widget for PinCreateWidget<'_> {
     fn render(self, area: Rect, buf: &mut Buffer) {
-        // H-WIDG-004: framing through `tui_popup::Popup`.
+        // Framing through `tui_popup::Popup`.
         let cursor = self.state.render_cursor();
         let spec = self.state.spec();
         let content_lines = 16
@@ -2824,7 +2824,7 @@ impl<'a> PinEditWidget<'a> {
 
 impl Widget for PinEditWidget<'_> {
     fn render(self, area: Rect, buf: &mut Buffer) {
-        // H-WIDG-004: framing through `tui_popup::Popup`.
+        // Framing through `tui_popup::Popup`.
         let state = self.state;
         let cursor = state.logical_cursor();
         // Match PinCreateWidget's row count so both modals sit at a
@@ -2950,7 +2950,7 @@ impl<'a> PinRebindWidget<'a> {
 
 impl Widget for PinRebindWidget<'_> {
     fn render(self, area: Rect, buf: &mut Buffer) {
-        // H-WIDG-004: framing through `tui_popup::Popup`.
+        // Framing through `tui_popup::Popup`.
         let mut lines = vec![
             line![format!("  id          {}", self.state.target.id)],
             line![format!("  display     {}", self.state.target.display_name)],
@@ -3016,7 +3016,7 @@ impl<'a> PinBindWidget<'a> {
 
 impl Widget for PinBindWidget<'_> {
     fn render(self, area: Rect, buf: &mut Buffer) {
-        // H-WIDG-004: framing through `tui_popup::Popup`.
+        // Framing through `tui_popup::Popup`.
         let mut lines = Vec::new();
         if let Some(first) = self.state.options.first() {
             lines.push(line![format!("pin       {}", first.pin_id)]);
@@ -3070,7 +3070,7 @@ impl<'a> PinRemoveWidget<'a> {
 
 impl Widget for PinRemoveWidget<'_> {
     fn render(self, area: Rect, buf: &mut Buffer) {
-        // H-WIDG-004: framing through `tui_popup::Popup`.
+        // Framing through `tui_popup::Popup`.
         let lines = vec![
             line![
                 "id       ",

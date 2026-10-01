@@ -1,4 +1,4 @@
-//! In-memory PRs projection renderer (P11-011b / ADR 0082).
+//! In-memory PRs projection renderer (ADR 0082).
 //!
 //! Emits one row per `forge_pr` node. Iterates
 //! `snapshot.nodes` and `snapshot.candidate_links` directly.

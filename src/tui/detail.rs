@@ -396,7 +396,7 @@ fn agent_session_fields(
     }
     // ADR 0029: the alias hides the harness-native title in default
     // renders. Auditing both surfaces lives behind
-    // `conspectus alias list` (H-RENAME-008).
+    // `conspectus alias list`.
     if alias.is_none()
         && let Some(title) = session
             .title
@@ -866,7 +866,7 @@ fn repo_fields(snapshot: &GraphSnapshot, repo: &RepoNode, home: Option<&Path>) -
     fields
 }
 
-/// Compact worktree summary for the detail pane (H-WT-002): the
+/// Compact worktree summary for the detail pane: the
 /// primary/linked kind plus any lock / prune status with reasons.
 pub(super) fn worktree_meta_label(meta: &WorktreeMeta) -> String {
     let mut label = match meta.kind {
@@ -964,7 +964,7 @@ fn workspace_fields(
 /// `Repo` node so attach_linked_details can inline repo data and the
 /// left-tree navigation can focus the repo directly.
 fn workspace_member_fields(snapshot: &GraphSnapshot, workspace_id: &NodeId) -> Vec<HeaderField> {
-    // H-HYG-006 wave 7: use SnapshotIndex for the by-link-id
+    // Use SnapshotIndex for the by-link-id
     // lookup instead of a linear scan.
     let index = crate::model::SnapshotIndex::new(snapshot);
     let mut entries: Vec<(NodeId, String)> = snapshot
@@ -1464,7 +1464,7 @@ fn resolved_summaries(snapshot: &GraphSnapshot, id: &NodeId) -> Vec<ResolvedSumm
 }
 
 fn diagnostic_summaries(snapshot: &GraphSnapshot, id: &NodeId) -> Vec<DiagnosticSummary> {
-    // H-HYG-006 wave 7: SnapshotIndex handles the by-link-id
+    // SnapshotIndex handles the by-link-id
     // lookup below.
     let index = crate::model::SnapshotIndex::new(snapshot);
     snapshot

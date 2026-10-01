@@ -1,4 +1,3 @@
-// Extracted from fixtures.rs H-HYG-011 rolling wave via #[path = "fixtures_tests.rs"] mod tests;
 use super::*;
 use tempfile::TempDir;
 

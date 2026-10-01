@@ -77,7 +77,7 @@ const ADAPTER_NAME: &str = crate::discovery::providers::CODEX_LOG;
 pub const DEFAULT_WINDOW_SECONDS: i64 = 24 * 60 * 60;
 const PROCESS_UUID_PREFIX: &str = "pid:";
 
-// H-HYG-001: re-export the canonical `current_epoch`. Kept as
+// Re-export the canonical `current_epoch`. Kept as
 // a re-export at this module path because
 // `codex_log::current_epoch` is the identifier `apply_mutators`
 // invokes.
@@ -112,7 +112,7 @@ pub fn apply_codex_log_attribution(
         return;
     }
 
-    // H-SERVE-PERF-002: consult the query cache before opening the DB.
+    // Consult the query cache before opening the DB.
     // On a cache hit no SQLite connection is opened; on a miss we
     // open, verify the schema, re-query, and refresh the cache.
     // See `CachedQuery` docs for the fingerprint invariants.
@@ -288,7 +288,7 @@ struct ThreadObservation {
     ts: i64,
 }
 
-/// Cross-cycle cache for [`apply_codex_log_attribution`] (H-SERVE-PERF-002).
+/// Cross-cycle cache for [`apply_codex_log_attribution`].
 ///
 /// The Codex logs SQLite DB is on the harness-class hot path: every
 /// mux/harness re-run cycle re-opens `logs_<N>.sqlite` and runs one

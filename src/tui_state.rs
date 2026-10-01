@@ -1,4 +1,4 @@
-//! TUI state file (F8-013) — persists the last-active view, sort
+//! TUI state file — persists the last-active view, sort
 //! order, and per-view filter/grouping state across `conspectus tui`
 //! restarts.
 //!
@@ -69,7 +69,7 @@ struct RawState {
     last_view: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     sort: Option<String>,
-    /// Mux-view recency basis (H-MUX-SORT-001). Snake_case token from
+    /// Mux-view recency basis. Snake_case token from
     /// [`MuxRecency::as_str`]; absent/unknown on old files defaults to
     /// activity.
     #[serde(default, skip_serializing_if = "Option::is_none")]

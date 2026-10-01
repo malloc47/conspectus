@@ -10,7 +10,7 @@
 //! `SessionLocator` from clap arguments without ever touching
 //! conspectus graph types.
 //!
-//! H-EXT-006: harness dispatch goes through the adapter registry.
+//! Harness dispatch goes through the adapter registry.
 //! `locator_for_session` iterates registered adapters and asks each
 //! for a `transcript_source`; the first non-`None` answer wins.
 //! `build_viewer_state` grabs the same adapter's `transcript_parser`

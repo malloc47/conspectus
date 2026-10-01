@@ -1,4 +1,3 @@
-// Extracted from aliases.rs H-HYG-011 rolling wave via #[path = "aliases_tests.rs"] mod tests;
 use super::*;
 use crate::aliases::{AliasEntry, upsert_alias_entry};
 use crate::config::PROJECT_CONFIG_FILENAME;

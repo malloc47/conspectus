@@ -175,7 +175,7 @@ pub fn resolve_attach_target(app: &App) -> Result<AttachTarget, AttachDisabled> 
         backend: mux_node.backend.clone(),
         native_id: mux_node.native_id.clone(),
     };
-    // H-EXT-009: check backend against the compile-time
+    // Check backend against the compile-time
     // registered backend list instead of a hardcoded "tmux"
     // match. The current-tmux-session self-attach check stays
     // tmux-specific because `current_tmux_session` on
@@ -198,7 +198,7 @@ pub fn resolve_attach_target(app: &App) -> Result<AttachTarget, AttachDisabled> 
 }
 
 /// Resolve the viewer target for the current selection. Mirrors
-/// [`resolve_attach_target`] so `Enter` (T8-043) and the `v`
+/// [`resolve_attach_target`] so `Enter` and the `v`
 /// accelerator can pick the right session id whether the cursor
 /// sits on an agent session row or a mux row.
 ///
@@ -447,7 +447,7 @@ pub fn attach_disabled_reason(reason: &AttachDisabled) -> String {
             "attach: mux node missing from snapshot — try `r` to refresh".to_string()
         }
         AttachDisabled::UnsupportedBackend(name) => {
-            // H-EXT-009: report the registered backend set
+            // Report the registered backend set
             // instead of a hardcoded "only tmux."
             let registered = crate::discovery::tmux::KNOWN_MUX_BACKENDS.join(", ");
             format!("attach: mux backend `{name}` not registered (available: {registered})")

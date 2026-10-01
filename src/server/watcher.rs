@@ -1,4 +1,4 @@
-//! Filesystem watcher abstraction (P7-009 / ADR 0081).
+//! Filesystem watcher abstraction (ADR 0081).
 //!
 //! The daemon's per-class scheduler uses a [`Watcher`] to wait
 //! for filesystem changes with a timeout. When the OS reports

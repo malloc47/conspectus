@@ -1,4 +1,3 @@
-// Extracted from pin_bindings.rs H-HYG-011 rolling wave via #[path = "pin_bindings_tests.rs"] mod tests;
 use super::*;
 use std::path::Path;
 use tempfile::tempdir;

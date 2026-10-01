@@ -1,4 +1,3 @@
-// Extracted from cross_link.rs H-HYG-011 rolling wave via #[path = "cross_link_tests.rs"] mod tests;
 use super::*;
 use crate::model::{
     AgentSessionId, AgentSessionNode, CheckoutNode, ForkId, ForkNode, GraphSnapshot, MuxSessionId,
@@ -1416,7 +1415,7 @@ fn session_inside_workspace_member_emits_workspace_and_checkout_candidates() {
 
 #[test]
 fn symlinked_workspace_member_does_not_associate_session_at_canonical_path() {
-    // H-WS-001 follow-up: an atelier/agent-deck workspace whose
+    // An atelier/agent-deck workspace whose
     // member is a symlink should associate sessions running
     // *inside the workspace tree* (logical_path), not sessions
     // running at the symlink target's canonical location. The
@@ -1473,7 +1472,7 @@ fn symlinked_workspace_member_does_not_associate_session_at_canonical_path() {
 
 #[test]
 fn session_at_workspace_root_associates_with_workspace() {
-    // H-WS-001 follow-up: agent-deck launches the harness with
+    // Agent-deck launches the harness with
     // cwd = the multi-repo-worktrees `<id>` directory itself, not
     // inside a specific member subdir. Indexing only member
     // `logical_path` would miss this — the session sits above
@@ -1636,8 +1635,8 @@ fn unresolved_lineage_links_are_preserved() {
 
     infer(&mut snapshot);
 
-    // `infer` now stamps any link missing `source_metadata.freshness_epoch`
-    // (P7-002), so equality on the raw `lineage` fixture is no longer the
+    // `infer` now stamps any link missing `source_metadata.freshness_epoch`,
+    // so equality on the raw `lineage` fixture is no longer the
     // right invariant; check existence by id instead.
     assert!(
         snapshot

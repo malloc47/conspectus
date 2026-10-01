@@ -1,4 +1,4 @@
-//! Read-only invariant smoke for `[pins]`-bearing configs (H-PIN-019).
+//! Read-only invariant smoke for `[pins]`-bearing configs.
 //!
 //! Mirrors P5-004 for declared links: every `conspectus` subcommand
 //! that the operator can run without expressing write intent

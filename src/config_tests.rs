@@ -1,4 +1,3 @@
-// Extracted from config.rs H-HYG-011 rolling wave via #[path = "config_tests.rs"] mod tests;
 use super::*;
 use std::fs;
 use tempfile::TempDir;
@@ -27,7 +26,7 @@ fn defaults_apply_when_no_config_files_exist() {
 
 #[test]
 fn tui_detail_show_edge_meta_loads_from_config() {
-    // T8-042: `[tui.detail].show_edge_meta` flips the runtime
+    // `[tui.detail].show_edge_meta` flips the runtime
     // default for the explorer's link-row meta visibility.
     let temp = TempDir::new().expect("temp dir");
     let project = temp.path().join("project");
@@ -75,7 +74,7 @@ fn tui_narrow_layout_threshold_defaults_to_canonical_constant() {
 
 #[test]
 fn tui_narrow_layout_threshold_loads_from_config() {
-    // H-LAYOUT-001: `[tui] narrow_layout_threshold` overrides the
+    // `[tui] narrow_layout_threshold` overrides the
     // side-by-side → stacked reflow breakpoint.
     let temp = TempDir::new().expect("temp dir");
     let project = temp.path().join("project");
@@ -811,7 +810,7 @@ fn tui_theme_non_string_value_emits_diagnostic() {
 
 #[test]
 fn tui_theme_harness_table_overrides_per_key_colors() {
-    // H-EXT-003: `[tui.theme.harness].<key> = "color"` sets
+    // `[tui.theme.harness].<key> = "color"` sets
     // theme.harness_colors[<key>]. Adapter-registry-registered
     // keys are accepted; unknown keys emit a diagnostic
     // pointing at the registered set.

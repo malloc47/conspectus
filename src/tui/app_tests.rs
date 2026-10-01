@@ -1,4 +1,3 @@
-// Extracted from app.rs H-HYG-011 rolling wave via #[path = "app_tests.rs"] mod tests;
 use super::*;
 use crate::dev_scenarios;
 use crate::filter::RowFilter;
@@ -309,7 +308,7 @@ fn app_with_mux_selected(snap: GraphSnapshot, mux_name: &str) -> App {
 
 #[test]
 fn pin_create_defaults_bumps_trailing_number_from_pinned_mux_row() {
-    // H-PIN-TUI-011: selecting a pinned mux whose name ends in a
+    // Selecting a pinned mux whose name ends in a
     // number should suggest the next integer in the series across
     // id, display_name, and mux_name — not `worker-1-2`.
     let snap = snapshot_with_numbered_pin_and_mux("worker-1");
@@ -1768,7 +1767,7 @@ fn app_for_explorer() -> App {
 
 #[test]
 fn explorer_home_and_end_snap_cursor_to_first_and_last_row() {
-    // H-OBS-007: `g`/`Home` and `G`/`End` snap the explorer
+    // `g`/`Home` and `G`/`End` snap the explorer
     // cursor to its first / last row when the right pane has
     // focus. Reducer-level test: dispatching the messages
     // directly drives the cursor regardless of which pane has
@@ -1846,7 +1845,7 @@ fn explorer_enter_on_link_drills_into_neighbor_and_pushes_breadcrumb() {
 
 #[test]
 fn explorer_drill_mirror_sync_keeps_left_pane_when_neighbor_has_no_row() {
-    // T8-035: drilling from a session into its mux while the
+    // Drilling from a session into its mux while the
     // left pane is in the sessions view should preserve the
     // prior selection because the sessions view doesn't carry
     // a MuxSession row. The hop still records the prior
@@ -1898,7 +1897,7 @@ fn explorer_drill_mirror_sync_keeps_left_pane_when_neighbor_has_no_row() {
 
 #[test]
 fn explorer_drill_mirrors_left_pane_to_neighbor_when_present_in_tree() {
-    // T8-035: when the drilled neighbor *does* have a row in
+    // When the drilled neighbor *does* have a row in
     // the current view (here: drilling from one agent session
     // to a sibling agent session via `ParentSession`), the
     // left pane should move to it.
@@ -1995,7 +1994,7 @@ fn explorer_drill_mirrors_left_pane_to_neighbor_when_present_in_tree() {
 
 #[test]
 fn explorer_backspace_restores_left_pane_selection() {
-    // T8-035: Backspace should pop the hop, restore the prior
+    // Backspace should pop the hop, restore the prior
     // left-pane selection, and refocus the explorer on the
     // pre-drill node.
     let mut app = app_for_explorer();
@@ -2136,7 +2135,7 @@ fn explorer_back_armed_state_clears_on_intervening_message() {
 #[test]
 fn explorer_back_arm_survives_per_frame_viewport_reconciliation() {
     // Regression: the draw path dispatches `LeftViewportChanged` /
-    // `ExplorerViewportChanged` every frame (H-TUI-005 wave 2), and
+    // `ExplorerViewportChanged` every frame, and
     // `draw_frame` runs before each key poll. Those layout-plumbing
     // messages must not count as an "intervening action", otherwise the
     // empty-stack Backspace arm is cleared before the operator can land
@@ -2170,7 +2169,7 @@ fn explorer_back_arm_survives_per_frame_viewport_reconciliation() {
 
 #[test]
 fn explorer_back_unwinds_drill_then_arms_then_shifts_focus() {
-    // T8-031 follow-up: with one drilldown hop on the stack, three
+    // With one drilldown hop on the stack, three
     // Backspace taps now (1) pop the hop, (2) arm the focus shift
     // with a hint, and (3) shift focus to the left pane.
     let mut app = app_for_explorer();
@@ -2212,7 +2211,7 @@ fn explorer_back_unwinds_drill_then_arms_then_shifts_focus() {
 
 #[test]
 fn edge_meta_visibility_defaults_to_run_config_value_and_toggles() {
-    // T8-042: edge_meta_visible starts from `RunConfig.show_edge_meta`
+    // edge_meta_visible starts from `RunConfig.show_edge_meta`
     // and Msg::ToggleEdgeMeta flips it with a status hint.
     let app = App::new(RunConfig::defaults());
     assert!(
@@ -2244,7 +2243,7 @@ fn edge_meta_visibility_defaults_to_run_config_value_and_toggles() {
 
 #[test]
 fn explorer_toggle_full_detail_swaps_core_for_all_fields() {
-    // T8-034: toggling Expanded Node Detail should swap the
+    // Toggling Expanded Node Detail should swap the
     // Node-zone field rows for the per-kind `all_fields` set.
     // app_for_explorer focuses on an agent session, whose
     // all_fields is a superset of core_fields.
@@ -2284,7 +2283,7 @@ fn explorer_toggle_full_detail_swaps_core_for_all_fields() {
 
 #[test]
 fn explorer_full_detail_resets_on_drill_and_restores_on_backspace() {
-    // T8-034: the toggle is per-focused-node — drilling into a
+    // The toggle is per-focused-node — drilling into a
     // neighbor resets it, and Backspace restores the prior
     // node's toggle state.
     let mut app = app_for_explorer();
@@ -2410,7 +2409,7 @@ fn open_value_modal_when_cursor_has_a_long_value() {
     app.set_selection(row_id);
     // The session's `last_message_preview` lives only in
     // `all_fields`, not `core_fields`. Without the full-node
-    // toggle (T8-034) the cursor never lands on it through
+    // toggle the cursor never lands on it through
     // navigation. For now we exercise the no-value branch.
     app.open_value_modal_for_cursor();
     assert!(app.value_modal().is_none());
@@ -2434,7 +2433,7 @@ fn value_modal_close_clears_state() {
 
 #[test]
 fn scenario_process_cardinality_exposes_upstream_process_groups() {
-    // T8-031: the process-cardinality dev scenario is the
+    // The process-cardinality dev scenario is the
     // canonical "messy" setup with one preferred process and one
     // candidate runner-up. With the new explorer, those should
     // both surface as Upstream groups on the agent session.
@@ -2466,7 +2465,7 @@ fn scenario_process_cardinality_exposes_upstream_process_groups() {
 
 #[test]
 fn scenario_codex_fd_current_exposes_session_linked_groups() {
-    // T8-031: codex-fd-current is the canonical "fd evidence
+    // Codex-fd-current is the canonical "fd evidence
     // outranks stale launch command" setup. The detail explorer
     // should show the linked mux as a downstream group on the
     // agent session so an operator can drill into it manually.
@@ -2497,7 +2496,7 @@ fn scenario_codex_fd_current_exposes_session_linked_groups() {
 
 #[test]
 fn scenario_ambiguous_mux_exposes_two_candidate_muxes() {
-    // T8-031: ambiguous-mux carries two plausible tmux sessions
+    // Ambiguous-mux carries two plausible tmux sessions
     // for one agent. The explorer should surface both as
     // selectable rows in a single downstream group so operators
     // can drill into either candidate from the detail pane.
@@ -2590,7 +2589,7 @@ fn explorer_state_resets_when_left_tree_selection_changes() {
 }
 
 // ------------------------------------------------------------------
-// T8-040: Enter-to-copy on Node-zone field rows + `i` for full id.
+// Enter-to-copy on Node-zone field rows + `i` for full id.
 // ------------------------------------------------------------------
 
 #[test]
@@ -2607,7 +2606,7 @@ fn explorer_copy_target_returns_value_on_node_field_row() {
 
 #[test]
 fn explorer_copy_target_is_none_when_cursor_walks_onto_link_row() {
-    // T8-040: Enter on link rows still drills; the copy seam must
+    // Enter on link rows still drills; the copy seam must
     // refuse so the runtime falls through to ExplorerActivate.
     let mut app = app_for_explorer();
     let link_idx = app
@@ -2676,7 +2675,7 @@ fn post_toast_supersedes_prior_toast() {
 
 #[test]
 fn switch_view_msg_persists_through_enabled_cache() {
-    // F8-013: when persistence is enabled, every view switch must
+    // When persistence is enabled, every view switch must
     // funnel through `crate::tui_state::write_tui_state`. Phase E
     // moves the persist call out of `switch_to_view` and into the
     // `Msg::SwitchView` reducer arm (via `Effect::Persist`), so we
@@ -2806,7 +2805,7 @@ fn switch_view_msg_without_persistence_does_not_write() {
     );
 }
 
-// ADR 0085 contract 3 (H-TUI-003 phase 1): the modal stack is
+// ADR 0085 contract 3: the modal stack is
 // the sole open-overlay tracker for migrated overlays. These
 // tests pin the Help overlay's push/pop shape so a future
 // migration wave can trust the same pattern.
@@ -2860,7 +2859,7 @@ mod modal_stack {
         assert_eq!(state.handle((), key), OverlayOutcome::Consumed);
     }
 
-    // H-TUI-003 wave 3: controls overlay lives on the same
+    // Controls overlay lives on the same
     // modal stack. Doesn't implement the Overlay trait yet
     // (needs live ControlsContext), but push/pop invariants
     // match Help's.
@@ -2924,7 +2923,7 @@ mod modal_stack {
         assert!(app.help_overlay().is_some());
     }
 
-    // H-TUI-003 wave 4: pins overlay on the same stack.
+    // Pins overlay on the same stack.
     #[test]
     fn open_pins_pushes_modal_pins_onto_stack() {
         let mut app = App::new(RunConfig::defaults());
@@ -2981,7 +2980,7 @@ mod modal_stack {
         assert!(app.modal_stack().is_empty());
     }
 
-    // H-TUI-003 wave 5: rename, search, value_modal on the
+    // Rename, search, value_modal on the
     // same stack. ValueModal implements the Overlay trait
     // (its Continue/Close outcomes map cleanly to
     // Consumed/Close); rename and search stay with their
@@ -3077,7 +3076,7 @@ mod modal_stack {
         assert!(app.modal_stack().is_empty());
     }
 
-    // H-TUI-003 wave 7: viewer_modal migrates as a nested
+    // viewer_modal migrates as a nested
     // reducer entry. Msg::Viewer(ViewerMsg) is the App-level
     // wrapper; the reducer arm pops, delegates to
     // viewer::input::reduce, and pushes back or leaves
@@ -3546,7 +3545,7 @@ mod reducer_effects {
         assert_eq!(effects, vec![Effect::Persist]);
     }
 
-    // H-WIDG-007: in-flight-ops substrate. The reducer stores one
+    // In-flight-ops substrate. The reducer stores one
     // op per `InFlightKind`; start with the same kind twice replaces
     // the prior record; finish removes the matching kind.
 

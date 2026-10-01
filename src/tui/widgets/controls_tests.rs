@@ -1,4 +1,3 @@
-// Extracted from controls.rs H-HYG-011 rolling wave via #[path = "controls_tests.rs"] mod tests;
 use super::*;
 use ratatui::crossterm::event::{KeyEventKind, KeyEventState};
 

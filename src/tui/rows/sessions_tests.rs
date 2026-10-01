@@ -1,4 +1,3 @@
-// Extracted from sessions.rs H-HYG-011 rolling wave via #[path = "sessions_tests.rs"] mod tests;
 use super::*;
 use crate::model::{
     AgentSessionId, AgentSessionNode, CheckoutId, CheckoutNode, Confidence, GraphLink, GraphNode,
@@ -518,7 +517,7 @@ fn repo_grouping_excludes_workspace_context() {
 }
 
 // -----------------------------------------------------------------
-// H-WS-001: strict workspace grouping + weak-membership chip
+// Strict workspace grouping + weak-membership chip
 // -----------------------------------------------------------------
 //
 // Helper that pulls the session row out of a tree so the chip and
@@ -607,7 +606,7 @@ fn workspace_rooted_session_nests_directly_under_workspace() {
 #[test]
 fn repo_shared_session_stays_at_repo_level() {
     // Case B — session has no AssociatedWith but its repo is a
-    // workspace member. Strict grouping (H-WS-001) puts it under
+    // workspace member. Strict grouping puts it under
     // repo, not workspace. The fixture includes an (A)-class
     // session at the workspace root so both classes are present
     // in the tree; we assert each lands at the right depth.
@@ -1453,7 +1452,7 @@ fn single_mux_link_yields_attached_indicator() {
 
 #[test]
 fn two_mux_links_with_distinct_provenance_resolve_to_one_attached_mux() {
-    // H-UI-008: the sessions tree consumes resolver winners,
+    // The sessions tree consumes resolver winners,
     // not raw candidate links. With two `LinkedToMux` candidates
     // pointing at different muxes, the resolver picks the
     // higher-provenance candidate; the tree should reflect that

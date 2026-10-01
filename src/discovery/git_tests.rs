@@ -1,4 +1,3 @@
-// Extracted from git.rs H-HYG-011 rolling wave via #[path = "git_tests.rs"] mod tests;
 use std::fs;
 
 use tempfile::TempDir;
@@ -204,7 +203,7 @@ fn path_str(path: &Path) -> &str {
 }
 
 // ---------------------------------------------------------------------------
-// H-SERVE-PERF-004: probe cache short-circuits repeat probes on unchanged
+// Probe cache short-circuits repeat probes on unchanged
 // repos. observed_cwd_git_fragment calls probe() once per unique session
 // cwd on every discovery cycle; without the cache each of those spawns
 // 8-15 git subprocesses. The tests here pin that the second call on an

@@ -43,7 +43,7 @@ pub fn empty_graph() -> GraphSnapshot {
 
 /// Unix epoch (seconds) captured from the wall clock. Used by each
 /// discovery adapter to stamp the per-link `freshness_epoch` and
-/// per-node `NodeProvenance.freshness_epoch` it emits (P7-002). The
+/// per-node `NodeProvenance.freshness_epoch` it emits. The
 /// implementation defaults to `0` when the clock is somehow before
 /// the epoch — the schema treats that as the "unknown" sentinel.
 pub fn current_epoch() -> i64 {
@@ -187,7 +187,7 @@ pub struct GraphFragment {
     pub nodes: Vec<GraphNode>,
     pub candidate_links: Vec<GraphLink>,
     pub diagnostics: Vec<Diagnostic>,
-    /// Per-node producing-provider metadata (P7-002 / ADR 0037).
+    /// Per-node producing-provider metadata (ADR 0037).
     /// Adapters populate this alongside `nodes`; `merge_fragments`
     /// folds the per-fragment map into [`GraphSnapshot::node_provenance`]
     /// at snapshot-assembly time. See [`crate::model::NodeProvenance`].
@@ -204,7 +204,7 @@ impl GraphFragment {
     }
 }
 
-/// H-HYG-001: consolidate 7 verbatim `snapshot_fragment`
+/// Consolidate 7 verbatim `snapshot_fragment`
 /// helpers scattered across discovery adapter modules. Every
 /// copy peeled the four struct fields off a `GraphSnapshot`;
 /// this `From` impl makes the conversion callable via `.into()`
@@ -220,7 +220,7 @@ impl From<GraphSnapshot> for GraphFragment {
     }
 }
 
-/// H-HYG-001: consolidate 5 verbatim `path_string` helpers
+/// Consolidate 5 verbatim `path_string` helpers
 /// scattered across discovery adapters + dev_scenarios. Every
 /// copy did `path.to_string_lossy().to_string()`; this shared
 /// helper is the single canonical version.
@@ -327,7 +327,7 @@ pub fn discover_local_with(
     discover_local_warm_with(roots, config, GraphSnapshot::empty(), &Default::default())
 }
 
-/// Warm-start discovery driver (P7-003 phase 3). The thin
+/// Warm-start discovery driver. The thin
 /// wrapper [`discover_local_with`] passes an empty `prior` and
 /// default intervals, which collapses the freshness gate to "no
 /// providers are fresh" and runs every adapter cold.
@@ -368,7 +368,7 @@ pub fn discover_local_warm_with(
     let now = current_epoch();
     let gate = cache::compute_freshness_gate(&prior, intervals, now);
     let mut prior = prior;
-    // H-SERVE-PERF-001a (ADR 0091): defer eviction of the process-tree
+    // ADR 0091: defer eviction of the process-tree
     // mutator slices. Whether they re-run depends on whether the mux
     // or harness heavy providers actually ran this cycle, which we
     // only know after discovery below. On a git/forge-only cycle we
@@ -388,12 +388,12 @@ pub fn discover_local_warm_with(
     // config now so `apply_mutators` below can still borrow the
     // remaining fields without a partial-move issue.
     let mut config = config;
-    // H-EXT-008 / H-EXT-010: mux backends live in a registry
+    // Mux backends live in a registry
     // list; each is pulled by key and wrapped in its
     // per-backend `DiscoveryProvider`.
     let tmux_runner = config.take_mux_backend_by_key(tmux::TMUX_BACKEND);
     let zellij_runner = config.take_mux_backend_by_key(zellij::ZELLIJ_BACKEND);
-    // H-EXT-012: forge adapters live in a registry list; drain
+    // Forge adapters live in a registry list; drain
     // them here so they can be wrapped in a `ForgeDiscovery`
     // coordinator that fans a repo out to every registered
     // adapter. The adapter registry keeps the pre-H-EXT-012
@@ -403,7 +403,7 @@ pub fn discover_local_warm_with(
     let forge_adapters: Vec<Box<dyn forge::ForgeAdapter>> =
         std::mem::take(&mut config.forge_adapters);
 
-    // H-WT-002: hand the worktree read backend to git discovery so it
+    // Hand the worktree read backend to git discovery so it
     // enumerates each repo's worktrees alongside the single-checkout
     // probe. `None` leaves git discovery at its pre-worktree behavior.
     let git_discovery = match config.worktree_backend.take() {
@@ -431,7 +431,7 @@ pub fn discover_local_warm_with(
             harness::HarnessDiscovery::with_default_adapters(),
         );
 
-    // H-EXT-014: iterate the orchestrator registry and build a
+    // Iterate the orchestrator registry and build a
     // provider per configured root. The registry names each
     // descriptor's builder, so a new orchestrator (dmux /
     // herdr / pertmux / workmux, gated on `H-AGENTMUX-*`
@@ -458,7 +458,7 @@ pub fn discover_local_warm_with(
     }
 
     if !forge_adapters.is_empty() {
-        // H-EXT-012: fan every registered adapter through the
+        // Fan every registered adapter through the
         // ForgeDiscovery coordinator. The coordinator already
         // knew how to merge multiple adapters; the registry
         // list finally has more than one entry (or the room
@@ -476,7 +476,7 @@ pub fn discover_local_warm_with(
     let cwd_git_fragment = observed_cwd_git_fragment(&fresh, context.caches());
     fresh = merge_fragments([GraphFragment::from(fresh), cwd_git_fragment]);
 
-    // H-SERVE-PERF-001a: did the mux or harness heavy providers
+    // Did the mux or harness heavy providers
     // actually run this cycle? Their provenance in the freshly-run
     // result (which excludes fresh-skipped providers and the prior
     // backstop) is the robust signal — disabled providers stamp
@@ -518,8 +518,7 @@ pub fn discover_local_warm_with(
     Ok(snapshot)
 }
 
-/// Decide whether the process-tree pass should fire this cycle
-/// (H-SERVE-PERF-003).
+/// Decide whether the process-tree pass should fire this cycle.
 ///
 /// * `current == None` → no mux/harness content in the fresh
 ///   fragment; matches today's "no provenance stamped" path and
@@ -546,8 +545,7 @@ fn should_open_process_tree_gate(current: Option<u64>, previous: Option<u64>) ->
 /// Content fingerprint of the mux/harness slice of `fresh`. Used
 /// by [`should_open_process_tree_gate`] to detect quiet-cycle
 /// re-runs where the operator's mux/harness state is unchanged
-/// and the `/proc` walk would produce redundant work
-/// (H-SERVE-PERF-003).
+/// and the `/proc` walk would produce redundant work.
 ///
 /// The hash covers only nodes owned by a mux/harness provider
 /// (via `node_provenance[id].provider`) and only candidate_links
@@ -681,7 +679,7 @@ fn apply_mutators(
     context: &DiscoveryContext,
     run_process_tree: bool,
 ) {
-    // H-SERVE-PERF-001a (ADR 0091): the cross-link inference and the
+    // ADR 0091: the cross-link inference and the
     // pid-fed harness aux attribution are the expensive `/proc`-walking
     // passes. Run them only when the mux or harness slice re-ran this
     // cycle; on a git/forge-only cycle the caller preserved the prior
@@ -695,7 +693,7 @@ fn apply_mutators(
             cross_link::infer_without_process_tree(snapshot);
             std::collections::BTreeMap::new()
         };
-        // H-EXT-007: iterate registered adapters and let each one
+        // Iterate registered adapters and let each one
         // apply its aux-attribution pass (opt-in via trait override
         // + state root configured + not in disabled_aux_harnesses).
         // The pre-H-EXT-007 hardcoded codex-log branch now lives on
@@ -727,7 +725,7 @@ fn apply_mutators(
         declared::apply_declared_links(snapshot, context, loader);
         aliases::apply_aliases(snapshot, context, loader);
         // Fold in any project pin stores recorded by the registry
-        // sidecar (H-PIN-ROOT-001) so pins registered outside the scan
+        // sidecar so pins registered outside the scan
         // root stay visible. Read fresh each cycle so a pin created
         // during a live session appears on the next refresh.
         let registry_stores = config
@@ -742,7 +740,7 @@ fn apply_mutators(
 /// Configuration that controls which providers run during local discovery.
 pub struct LocalDiscoveryConfig {
     pub harness_state_roots: BTreeMap<String, PathBuf>,
-    /// Registered mux backends (H-EXT-008, ADR 0089). Adding a
+    /// Registered mux backends (ADR 0089). Adding a
     /// second backend (zellij per H-EXT-010, screen etc.) is a
     /// matter of pushing another entry. Each backend implements
     /// [`tmux::MuxBackend`] and returns its own `backend_key`.
@@ -750,7 +748,7 @@ pub struct LocalDiscoveryConfig {
     /// [`Self::from_env`]; multi-backend hosts push additional
     /// entries via [`Self::with_mux_backend`].
     pub mux_backends: Vec<Box<dyn tmux::MuxBackend>>,
-    /// Registered forge adapters (H-EXT-012). Adding a second
+    /// Registered forge adapters. Adding a second
     /// adapter (GitLab per H-EXT-013, Gitea, hosted GitHub
     /// Enterprise) is a matter of pushing another entry. Each
     /// adapter implements [`forge::ForgeAdapter`] and reports
@@ -762,7 +760,7 @@ pub struct LocalDiscoveryConfig {
     pub forge_adapters: Vec<Box<dyn forge::ForgeAdapter>>,
     pub process_tree_enabled: bool,
     pub hook_sidecar_root: Option<PathBuf>,
-    /// Registered orchestrator adapter roots (H-EXT-014).
+    /// Registered orchestrator adapter roots.
     /// Keyed by orchestrator descriptor key
     /// (`agent_deck` today; dmux / herdr / pertmux / workmux
     /// slot in via `orchestrator::REGISTRY` follow-ups).
@@ -782,14 +780,14 @@ pub struct LocalDiscoveryConfig {
     /// (tests and headless fixtures that don't want state-home I/O).
     pub pin_store_registry: Option<crate::pin_store_registry::PinStoreRegistry>,
     /// Read-only worktree backend used by git discovery to enumerate a
-    /// repo's worktrees (H-WT-002, ADR 0092). `None` disables worktree
+    /// repo's worktrees (ADR 0092). `None` disables worktree
     /// enumeration (tests / headless fixtures); `from_env` installs the
     /// thin git backend. The rich `worktrunk` mutation backend
-    /// (H-WT-003) is a CLI/TUI concern, not a discovery one — listing
+    /// is a CLI/TUI concern, not a discovery one — listing
     /// only needs the always-available git backend.
     pub worktree_backend: Option<Box<dyn worktree::WorktreeBackend>>,
     /// Harness keys whose optional aux-attribution mutator pass
-    /// (H-EXT-007) should be skipped, even when the harness has a
+    /// should be skipped, even when the harness has a
     /// state root configured. Populated by
     /// [`Self::from_env`] from `CONSPECTUS_DISABLE_<KEY>_LOG` /
     /// `CONSPECTUS_DISABLE_CODEX_LOG` (the pre-H-EXT-007 codex-log
@@ -824,7 +822,7 @@ impl LocalDiscoveryConfig {
         if env::var_os("CONSPECTUS_DISABLE_TMUX").is_none() {
             mux_backends.push(Box::new(tmux::SystemTmux::new()));
         }
-        // H-EXT-010: zellij backend, opt-out via
+        // Zellij backend, opt-out via
         // `CONSPECTUS_DISABLE_ZELLIJ`. Registered unconditionally
         // by default; missing `zellij` binary surfaces as
         // `TmuxOutcome::Unavailable(BinaryNotFound)` and the
@@ -833,7 +831,7 @@ impl LocalDiscoveryConfig {
             mux_backends.push(Box::new(zellij::SystemZellij::new()));
         }
 
-        // H-EXT-012: forge adapters live in a registry list.
+        // Forge adapters live in a registry list.
         // GitHub is the default entry; a second forge (GitLab
         // per H-EXT-013) is opt-in via `CONSPECTUS_ENABLE_GITLAB`
         // because the skeleton adapter doesn't yet emit real
@@ -850,7 +848,7 @@ impl LocalDiscoveryConfig {
             }
         }
 
-        // H-EXT-007: codex_log-specific `codex_log_window_seconds`
+        // codex_log-specific `codex_log_window_seconds`
         // env parsing moves into `CodexAdapter::apply_aux_attribution`.
         // The pre-H-EXT-007 disable flag (`CONSPECTUS_DISABLE_CODEX_LOG`)
         // stays as a general "disable this harness's aux
@@ -861,7 +859,7 @@ impl LocalDiscoveryConfig {
             disabled_aux_harnesses.insert(harness::codex::HARNESS_KEY.to_string());
         }
 
-        // H-EXT-014: walk the orchestrator registry and
+        // Walk the orchestrator registry and
         // materialize each descriptor's default root. The
         // agent_deck env-var contract
         // (`CONSPECTUS_AGENT_DECK_ROOT` /
@@ -883,7 +881,7 @@ impl LocalDiscoveryConfig {
             orchestrator_roots,
             declared_config_loader: Some(ConfigLoader::from_env()),
             pin_store_registry: Some(crate::pin_store_registry::PinStoreRegistry::from_env()),
-            // H-WT-002: enumerate worktrees via the thin git backend
+            // Enumerate worktrees via the thin git backend
             // unless explicitly disabled. Read-only; ADR 0087 clean.
             worktree_backend: (env::var_os("CONSPECTUS_DISABLE_WORKTREE").is_none()).then(|| {
                 Box::new(worktree::SystemGitWorktree::new()) as Box<dyn worktree::WorktreeBackend>
@@ -925,7 +923,7 @@ impl LocalDiscoveryConfig {
         self
     }
 
-    /// Push a mux backend onto the registry (H-EXT-008, ADR 0089).
+    /// Push a mux backend onto the registry (ADR 0089).
     /// Backends can be added in any order; discovery iterates them
     /// in registration order and picks the first one whose
     /// [`tmux::MuxBackend::backend_key`] matches a pin or session's
@@ -935,7 +933,7 @@ impl LocalDiscoveryConfig {
         self
     }
 
-    /// Deprecated alias for [`Self::with_mux_backend`] (H-EXT-008).
+    /// Deprecated alias for [`Self::with_mux_backend`].
     /// Kept so pre-H-EXT-008 test call sites and scenario builders
     /// keep compiling without a mass rename in this commit.
     pub fn with_tmux_runner(self, runner: impl tmux::MuxBackend + 'static) -> Self {
@@ -955,7 +953,7 @@ impl LocalDiscoveryConfig {
     }
 
     /// Find the first registered backend whose `backend_key()`
-    /// matches `key` (H-EXT-008). Used by CLI + TUI dispatch to
+    /// matches `key`. Used by CLI + TUI dispatch to
     /// resolve a pin's / mux session's `backend` field to a
     /// concrete runner.
     pub fn mux_backend_by_key(&self, key: &str) -> Option<&dyn tmux::MuxBackend> {
@@ -966,7 +964,7 @@ impl LocalDiscoveryConfig {
     }
 
     /// Consume and return the first registered backend whose
-    /// `backend_key()` matches `key` (H-EXT-008). Used by
+    /// `backend_key()` matches `key`. Used by
     /// `discover_local_warm_with` when routing a backend into a
     /// `TmuxDiscovery` wrapper that owns it.
     pub fn take_mux_backend_by_key(&mut self, key: &str) -> Option<Box<dyn tmux::MuxBackend>> {
@@ -977,7 +975,7 @@ impl LocalDiscoveryConfig {
         Some(self.mux_backends.remove(idx))
     }
 
-    /// Push a forge adapter onto the registry (H-EXT-012).
+    /// Push a forge adapter onto the registry.
     /// Adapters are iterated in registration order; each one
     /// receives every repo whose `origin` remote it claims via
     /// [`forge::ForgeAdapter::claims_remote_url`].
@@ -986,7 +984,7 @@ impl LocalDiscoveryConfig {
         self
     }
 
-    /// Deprecated alias for [`Self::with_forge_adapter`] (H-EXT-012).
+    /// Deprecated alias for [`Self::with_forge_adapter`].
     /// Kept so pre-H-EXT-012 test call sites (`.with_forge_runner(
     /// FakeGh::with_pull_requests(...))`) compile without a mass
     /// rename. The runner gets wrapped in a
@@ -1014,8 +1012,8 @@ impl LocalDiscoveryConfig {
         self
     }
 
-    /// Skip a registered harness's aux-attribution mutator pass
-    /// (H-EXT-007). Adds the key to
+    /// Skip a registered harness's aux-attribution mutator pass.
+    /// Adds the key to
     /// [`Self::disabled_aux_harnesses`]; the caller doesn't need
     /// to know whether the harness actually has an aux surface
     /// (a `None` `apply_aux_attribution` override + a disable
@@ -1040,7 +1038,7 @@ impl LocalDiscoveryConfig {
         self
     }
 
-    /// Register an orchestrator's on-disk root (H-EXT-014).
+    /// Register an orchestrator's on-disk root.
     /// `key` is the descriptor key
     /// (`orchestrator::OrchestratorDescriptor::key`); `root` is
     /// the resolved filesystem root the adapter's
@@ -1054,7 +1052,7 @@ impl LocalDiscoveryConfig {
         self
     }
 
-    /// Unregister an orchestrator by key (H-EXT-014). No-op
+    /// Unregister an orchestrator by key. No-op
     /// when the key isn't currently in the map.
     pub fn without_orchestrator(mut self, key: &str) -> Self {
         self.orchestrator_roots.remove(key);
@@ -1062,8 +1060,8 @@ impl LocalDiscoveryConfig {
     }
 
     /// Deprecated alias for
-    /// [`Self::with_orchestrator_root`]`("agent_deck", root)`
-    /// (H-EXT-014). Kept so pre-H-EXT-014 test call sites
+    /// [`Self::with_orchestrator_root`]`("agent_deck", root)`.
+    /// Kept so pre-H-EXT-014 test call sites
     /// (`.with_agent_deck_root(...)`) keep compiling.
     pub fn with_agent_deck_root(self, root: impl Into<PathBuf>) -> Self {
         self.with_orchestrator_root(providers::AGENT_DECK, root)
@@ -1134,7 +1132,7 @@ pub fn merge_fragments(fragments: impl IntoIterator<Item = GraphFragment>) -> Gr
     snapshot
 }
 
-/// Warm-start backstop merge (P7-003 phase 2). Folds `prior` into
+/// Warm-start backstop merge. Folds `prior` into
 /// `fresh` so live discovery results override the persisted cache
 /// wherever they collide, and the cache only contributes nodes,
 /// candidate-links, and per-node provenance the fresh run did not
@@ -1205,7 +1203,7 @@ fn observed_cwd_git_fragment(snapshot: &GraphSnapshot, caches: &DiscoveryCaches)
     let mut fragment = GraphFragment::from(merge_fragments(fragments));
     fragment.diagnostics.extend(diagnostics);
     // Tag observed-cwd-derived nodes/links as a distinct provider so
-    // partial eviction (P7-005) can refresh them without touching the
+    // partial eviction can refresh them without touching the
     // primary `git` slice. First-write-wins on the per-node sidecar
     // keeps the canonical `git` provenance for nodes that surfaced
     // through both paths.

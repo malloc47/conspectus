@@ -1,4 +1,3 @@
-// Extracted from table.rs H-HYG-011 rolling wave via #[path = "table_tests.rs"] mod tests;
 use super::*;
 
 #[test]

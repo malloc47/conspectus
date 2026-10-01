@@ -1,4 +1,4 @@
-//! Pin binding pass (ADR 0057 / H-PIN-004).
+//! Pin binding pass (ADR 0057).
 //!
 //! Reads `snapshot.pins` (populated by [`crate::discovery::pins`]) and
 //! per pin:
@@ -62,7 +62,7 @@ pub fn apply_pin_bindings(snapshot: &mut GraphSnapshot) -> Vec<Diagnostic> {
                 pin_id: pin.id.clone(),
                 expected_mux_native_id: target_native_id,
                 // Populated by the post-resolve sidecar consumer
-                // (ADR 0058 / H-PIN-RESUME-005); the bare resolver
+                // (ADR 0058); the bare resolver
                 // pass stays evidence-only and never reads from
                 // the cache directly.
                 last_session: None,

@@ -1,4 +1,4 @@
-//! Detail-pane graph explorer view model (T8-027).
+//! Detail-pane graph explorer view model.
 //!
 //! Replaces the recursive `HeaderField.expanded_fields` model that
 //! `detail.rs` exposes. The renderer wants three distinct surfaces
@@ -18,7 +18,7 @@
 //!   `edge` row that summarizes provenance, confidence, state, and
 //!   the resolver verdict.
 //!
-//! Drilldown and breadcrumbs are tracked by the reducer (T8-028); the
+//! Drilldown and breadcrumbs are tracked by the reducer; the
 //! view model exposes the data each frame needs, not the navigation
 //! state itself.
 //!
@@ -113,7 +113,7 @@ pub struct NodeView {
     pub kind: NodeKind,
     /// Compact identity line shown in the title.
     pub title_line: String,
-    /// Compact `kind:short_tag` label for this node (T8-038). Used
+    /// Compact `kind:short_tag` label for this node. Used
     /// by [`BreadcrumbHop::short_label`] when this view is the
     /// before-drill focused node, and by the right-pane title to
     /// render the full drilldown chain.
@@ -124,7 +124,7 @@ pub struct NodeView {
     /// Top-5 Core summary fields per the mockup's reference table.
     pub core_fields: Vec<CoreField>,
     /// Every available field, in Core-then-extra order. The "full
-    /// node" toggle (T8-034) renders this list in place of
+    /// node" toggle renders this list in place of
     /// [`Self::core_fields`].
     pub all_fields: Vec<CoreField>,
     /// Combined relationship list (ADR 0074). Each group carries its
@@ -149,9 +149,9 @@ pub struct CoreField {
     /// Optional trailing annotation glyph (`⚠`, `⟳`, …).
     pub annotation: Option<&'static str>,
     /// Full untruncated value when [`Self::value`] is a truncated
-    /// preview. `o` opens it in the full-value modal (T8-030).
+    /// preview. `o` opens it in the full-value modal.
     pub long_value: Option<String>,
-    /// Optional graph-kind chip rendered next to the value (T8-039).
+    /// Optional graph-kind chip rendered next to the value.
     /// Used by the renderer to surface that e.g. a `cwd` path
     /// resolves to a `repo` / `workspace` / `checkout` node, without
     /// stuffing that metadata into the value string.
@@ -505,7 +505,7 @@ pub enum ExplorerRow {
     },
     /// An unresolved-evidence placeholder inside the expanded
     /// `Other` zone. `Enter` is inert in v1; `o` opens the
-    /// evidence (see T8-032).
+    /// evidence.
     OtherUnresolved {
         group_index: usize,
         unresolved_index: usize,
@@ -588,7 +588,7 @@ impl NodeView {
     /// of `expanded`. Per locked decision 5 there is no header form for
     /// a count-of-one group.
     ///
-    /// `expanded_detail` (T8-034) swaps the Node zone's top-5 render
+    /// `expanded_detail` swaps the Node zone's top-5 render
     /// for the full per-kind field set when the operator has toggled
     /// the Expanded Node Detail view on. The relationship rows are
     /// unaffected.
@@ -678,7 +678,7 @@ impl NodeView {
     }
 
     /// Node-zone fields to render given the Expanded Node Detail
-    /// toggle (T8-034). For node kinds whose `all_fields` equals
+    /// toggle. For node kinds whose `all_fields` equals
     /// `core_fields` the two returns are identical, so the toggle is
     /// a visual no-op on those kinds.
     pub fn fields(&self, expanded_detail: bool) -> &[CoreField] {
@@ -709,7 +709,7 @@ pub struct BreadcrumbHop {
     /// The node the cursor was focused on *before* the drill that
     /// produced this hop.
     pub focused: NodeId,
-    /// Compact `kind:short_tag` identity label for the hop (T8-038),
+    /// Compact `kind:short_tag` identity label for the hop,
     /// rendered as one segment of the breadcrumb chain. Callers can
     /// disambiguate same-short-label collisions across the chain
     /// using [`render_breadcrumb_chain`], which suffixes the last-4
@@ -723,7 +723,7 @@ pub struct BreadcrumbHop {
     /// the prior per-group expansion set).
     pub other_expanded: bool,
     /// Whether the Node zone had its Expanded Detail toggle on at
-    /// the time of the drill (T8-034), so Backspace can restore it.
+    /// the time of the drill, so Backspace can restore it.
     pub full_detail_expanded: bool,
     /// Left-pane row selection at the time of the drill (T8-035 —
     /// `[tui.detail].left_pane_sync = "mirror"`), so Backspace can
@@ -806,7 +806,7 @@ impl NodeView {
     }
 }
 
-/// Format a breadcrumb chain for the right-pane title (T8-038).
+/// Format a breadcrumb chain for the right-pane title.
 /// Each hop renders as `<kind-glyph> <tag>` so the operator can
 /// scan the drill chain by symbol rather than reading the verbose
 /// `kind:tag` text form. The glyph is drawn in the kind color
@@ -1007,7 +1007,7 @@ impl EdgeStateLabel {
 // Builder internals
 // -----------------------------------------------------------------------------
 
-/// Reverse-lookup helper for the cwd field (T8-039): returns the
+/// Reverse-lookup helper for the cwd field: returns the
 /// owning node's kind label when `cwd` matches a Repo, Workspace,
 /// or Checkout in the snapshot. Match precedence is Checkout (most
 /// specific) → Workspace → Repo (matches by `common_dir` or any
@@ -1051,7 +1051,7 @@ fn cwd_owner_kind(snapshot: &GraphSnapshot, cwd: &str) -> Option<NodeKind> {
 }
 
 /// Compact `kind:short_tag` label for a node, used in breadcrumb
-/// hops (T8-038) so a deep drill chain stays visible at a glance.
+/// hops so a deep drill chain stays visible at a glance.
 /// Pure: no snapshot / alias context, no truncation against terminal
 /// width — callers handle elision over the rendered chain.
 pub fn short_node_label(node: &GraphNode) -> String {

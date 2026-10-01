@@ -1,4 +1,3 @@
-// Extracted from mod.rs H-HYG-011 rolling wave via #[path = "mod_tests.rs"] mod tests;
 use crate::model::{
     AgentSessionId, BranchId, CheckoutId, Confidence, ForgePrId, ForkId, GraphLink, GraphNode,
     LinkEndpoint, LinkState, MuxSessionId, NodeId, Provenance, RelationKind, RepoId,

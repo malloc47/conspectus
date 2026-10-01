@@ -1,4 +1,3 @@
-// Extracted from viewer.rs H-HYG-011 rolling wave via #[path = "viewer_tests.rs"] mod tests;
 use super::*;
 use std::cell::RefCell;
 

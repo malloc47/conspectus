@@ -1,4 +1,3 @@
-// Extracted from ui.rs H-HYG-009 wave 1 via #[path = "ui_tests.rs"] mod tests;
 use super::*;
 use crate::filter::RowFilter;
 use crate::model::{
@@ -244,7 +243,7 @@ fn render_at_default_size_shows_header_tree_and_detail() {
         text.contains("sessions"),
         "session count word missing: {text}"
     );
-    // H-UI-004: count wording switched from "N agents" to
+    // Count wording switched from "N agents" to
     // "N sessions" so the header vocabulary matches the rest
     // of the TUI.
     assert!(text.contains("1 sessions"), "session count missing: {text}");
@@ -269,7 +268,7 @@ fn render_at_default_size_shows_header_tree_and_detail() {
 
 #[test]
 fn header_drops_brand_view_label_and_state_chips_by_default() {
-    // H-UI-004: the audit deleted the `Conspectus` brand and
+    // The audit deleted the `Conspectus` brand and
     // `sessions` view-label words from the header prefix
     // (duplicated by the left-panel title strip), made the
     // harness chips opt-in (see the `show_harness_chips`
@@ -789,7 +788,7 @@ fn related_row_keeps_verb_and_neighbor_label_on_one_line() {
 
 #[test]
 fn link_rows_hide_edge_meta_by_default_and_surface_it_after_toggle() {
-    // T8-042: by default the explorer's single-link composite
+    // By default the explorer's single-link composite
     // collapses to just its header row (no `provenance ·
     // confidence · state` trailing line). After Msg::ToggleEdgeMeta
     // the trailing meta surfaces.
@@ -1147,7 +1146,7 @@ fn detail_pane_shows_linked_to_mux_row_and_drills_into_mux() {
         drilled.contains("◀"),
         "breadcrumb back-hint should surface in the right-pane title: {drilled}"
     );
-    // T8-038 / H-UI-002: the breadcrumb chain renders each
+    // The breadcrumb chain renders each
     // hop as `<kind glyph> <tag>`, replacing the prior
     // `kind:short_tag` text form. The previous session hop
     // should render with the `AgentSession` glyph (●) so the
@@ -1474,7 +1473,7 @@ fn expanded_session_under_mux_matches_standalone_session_detail() {
 
     let area = Rect::new(0, 0, 120, 40);
     let drilled = buffer_to_string(&render_to_buffer(&mut app, area));
-    // T8-029: post-drill the right pane is now focused on the
+    // Post-drill the right pane is now focused on the
     // session itself. Its Node zone exposes the standalone
     // session core fields (id, harness, alias, cwd, status).
     assert!(
@@ -1848,7 +1847,7 @@ fn session_display_label_is_truncated_in_left_row() {
         preview: None,
         title: Some(long_title.into()),
         alias: None,
-        // P8-015: the renderer only surfaces the title when the
+        // The renderer only surfaces the title when the
         // builder flagged the row for disambiguation; the
         // truncation assertion is exercising the renderer's
         // width cap, so flip this on so the title actually
@@ -2279,7 +2278,7 @@ fn right_focus_keeps_selected_row_highlighted_and_changes_status_scope() {
     let buffer = render_to_buffer(&mut app, area);
     let text = buffer_to_string(&buffer);
     assert!(
-        // T8-029: right-focus hint now describes the explorer
+        // Right-focus hint now describes the explorer
         // cursor instead of preview scroll.
         text.contains("j/k cursor"),
         "right focus status hint missing: {text}"
@@ -2317,7 +2316,7 @@ fn contextual_status_offers_enter_view_for_unmuxed_session() {
     let area = Rect::new(0, 0, 120, 24);
     let buffer = render_to_buffer(&mut app, area);
     let text = buffer_to_string(&buffer);
-    // T8-043: un-muxed agent sessions now advertise Enter
+    // Un-muxed agent sessions now advertise Enter
     // (and `v`) as the primary default action rather than the
     // attach-disabled reason. Sessions backed by a harness that
     // exposes a resume command additionally surface `S` resume.
@@ -2381,7 +2380,7 @@ fn status_bar_shows_group_filter_and_sort_settings() {
 
 #[test]
 fn contextual_status_offers_ambiguous_attach_hint_with_inspect_affordance() {
-    // T8-014: when the selected agent-session row resolves to an
+    // When the selected agent-session row resolves to an
     // ambiguous mux candidate set, the status bar advertises the
     // preferred-target attach and points at the right pane, which lists
     // the competing candidates. (`m` belongs to the Mux menu, ADR 0096.)
@@ -2521,7 +2520,7 @@ fn contextual_status_offers_ambiguous_attach_hint_with_inspect_affordance() {
 
 #[test]
 fn contextual_status_for_group_row_advertises_expand_collapse_folding() {
-    // T8-014: a group-row selection should surface the
+    // A group-row selection should surface the
     // expand/collapse fold bindings, not an attach hint.
     let mut app = seeded_app();
     // Auto-selection lands on the project group row, which is
@@ -2541,7 +2540,7 @@ fn contextual_status_for_group_row_advertises_expand_collapse_folding() {
 
 #[test]
 fn status_bar_renders_spinner_chip_for_in_flight_discovery() {
-    // H-WIDG-007: an in-flight discovery op surfaces an animated
+    // An in-flight discovery op surfaces an animated
     // Braille-spinner chip + "Discovering" label in the status bar.
     // The reducer stamps `started_at` so we can't assert on the
     // exact glyph frame (elapsed-derived), but every Braille
@@ -2596,7 +2595,7 @@ fn status_bar_hides_spinner_after_in_flight_finish() {
 
 #[test]
 fn status_bar_renders_stale_chip_when_refresh_failure_recorded() {
-    // T8-014: a recorded refresh failure surfaces a `stale` chip
+    // A recorded refresh failure surfaces a `stale` chip
     // ahead of any provider chips so the operator notices the
     // background data is older than expected. The test runs at
     // 220 columns to keep the contextual left-zone text from
@@ -2616,7 +2615,7 @@ fn status_bar_renders_stale_chip_when_refresh_failure_recorded() {
 
 #[test]
 fn status_bar_renders_provider_error_chip_for_unavailable_tmux() {
-    // T8-014: a tmux provider error renders a right-zone chip
+    // A tmux provider error renders a right-zone chip
     // labelled `tmux:<reason>` so the operator sees why the mux
     // surface is empty.
     let mut app = seeded_app();
@@ -2640,7 +2639,7 @@ fn status_bar_renders_provider_error_chip_for_unavailable_tmux() {
 
 #[test]
 fn contextual_status_surfaces_disabled_attach_reason_for_current_tmux_session() {
-    // T8-043: when the selected row is muxed but the preferred
+    // When the selected row is muxed but the preferred
     // mux happens to be the operator's *current* tmux session,
     // `resolve_attach_target` returns `CurrentTmuxSession`. The
     // status hint should fall through to `attach_disabled_reason`

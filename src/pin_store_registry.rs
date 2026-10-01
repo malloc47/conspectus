@@ -1,4 +1,4 @@
-//! Pin-store registry sidecar (H-PIN-ROOT-001, ADR 0090).
+//! Pin-store registry sidecar (ADR 0090).
 //!
 //! Records the on-disk locations of project `.conspectus.toml` files
 //! that hold `[[pins.entries]]`, so a pin created in a repo that is not

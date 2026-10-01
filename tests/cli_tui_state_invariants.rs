@@ -13,8 +13,8 @@
 //! content or mtime drift when present.
 //!
 //! Mirrors the read-only invariant pattern in
-//! `cli_pin_invariants.rs` (H-PIN-019) and
-//! `cli_pin_resume_invariants.rs` (H-PIN-RESUME-006).
+//! `cli_pin_invariants.rs` and
+//! `cli_pin_resume_invariants.rs`.
 
 use assert_cmd::Command;
 use std::fs;

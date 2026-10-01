@@ -1,6 +1,6 @@
-//! Multi-select list overlay primitive (ADR 0031, F8-006).
+//! Multi-select list overlay primitive (ADR 0031).
 //!
-//! Thin shim over [`ratatui_cheese::multi_select`] (H-WIDG-002). The
+//! Thin shim over [`ratatui_cheese::multi_select`]. The
 //! upstream crate owns the cursor + selection state machine and the
 //! per-row rendering; this module preserves the in-tree
 //! [`MultiSelectOutcome`] + [`MultiSelectState::handle_key`] contract
@@ -210,7 +210,7 @@ impl<'a, T: AsRef<str>> MultiSelectWidget<'a, T> {
 
 impl<T: AsRef<str>> Widget for MultiSelectWidget<'_, T> {
     fn render(self, area: Rect, buf: &mut Buffer) {
-        // H-WIDG-004: framing through `tui_popup::Popup`. Theme glue
+        // Framing through `tui_popup::Popup`. Theme glue
         // applies when set; falls back to upstream defaults when
         // unset so call sites that don't pass a theme still render.
         let modal = centered_modal_rect(area, self.items.len());

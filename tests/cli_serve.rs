@@ -1,4 +1,4 @@
-//! Integration tests for `conspectus serve` (P7-006).
+//! Integration tests for `conspectus serve`.
 //!
 //! The daemon is process-scoped: tests spawn the binary as a
 //! subprocess, observe its side effects on `graph.bin`, and
@@ -260,7 +260,7 @@ fn serve_socket_refresh_command_writes_a_fresh_snapshot() {
 
 #[test]
 fn serve_cleans_up_legacy_graph_sqlite_on_startup() {
-    // P11-011a: pre-rkyv daemon runs left a graph.sqlite (plus
+    // Pre-rkyv daemon runs left a graph.sqlite (plus
     // its -wal / -shm sidecars and the backups/ dir). The
     // new daemon has no consumer for any of them and unlinks
     // them on startup. The cleanup is best-effort but the

@@ -1,4 +1,4 @@
-//! Adapter conformance suite (H-EXT-016).
+//! Adapter conformance suite.
 //!
 //! Walks each entity-family registry and asserts the
 //! per-family invariants every adapter must satisfy. Pins the

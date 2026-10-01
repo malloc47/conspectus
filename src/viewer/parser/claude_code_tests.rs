@@ -1,4 +1,3 @@
-// Extracted from claude_code.rs H-HYG-011 rolling wave via #[path = "claude_code_tests.rs"] mod tests;
 use super::*;
 use std::fs;
 use std::io::Write;
@@ -22,7 +21,7 @@ fn fixture(session_key: &str, lines: &[&str]) -> (tempfile::TempDir, SessionLoca
     (dir, locator)
 }
 
-// H-EXT-006: pre-existing `supports_only_claude_code_locator`
+// Pre-existing `supports_only_claude_code_locator`
 // test removed; parser dispatch happens through the adapter
 // registry so per-parser filters are dead weight.
 

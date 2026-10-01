@@ -1,4 +1,4 @@
-//! Declared-link snapshot-aware helpers (H-REF-005).
+//! Declared-link snapshot-aware helpers.
 //!
 //! Everything here consults a live `GraphSnapshot` to make a
 //! declaration decision — picking which config file scope owns
@@ -190,7 +190,7 @@ fn node_cwd(id: &NodeId, snapshot: &GraphSnapshot) -> Option<String> {
 }
 
 fn fork_root(id: &NodeId, snapshot: &GraphSnapshot) -> Option<String> {
-    // H-HYG-006 wave 7: consult SnapshotIndex instead of a
+    // Consult SnapshotIndex instead of a
     // linear scan. The index is (re)built here per call; a
     // future shared-index passthrough optimization can remove
     // the rebuild if the helper becomes hot.
@@ -204,7 +204,7 @@ fn fork_root(id: &NodeId, snapshot: &GraphSnapshot) -> Option<String> {
 }
 
 fn branch_for_pr(id: &NodeId, snapshot: &GraphSnapshot) -> Option<String> {
-    // H-HYG-006 wave 7: same shape as fork_root.
+    // Same shape as fork_root.
     let index = crate::model::SnapshotIndex::new(snapshot);
     index
         .links_for(id, RelationKind::BranchHasForgePr)

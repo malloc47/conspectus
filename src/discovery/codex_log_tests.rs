@@ -1,4 +1,3 @@
-// Extracted from codex_log.rs H-HYG-011 rolling wave via #[path = "codex_log_tests.rs"] mod tests;
 use std::fs;
 
 use tempfile::TempDir;
@@ -502,7 +501,7 @@ fn caller_supplied_window_overrides_default_bound() {
 
 #[test]
 fn cache_serves_second_call_without_re_querying_when_db_is_unchanged() {
-    // H-SERVE-PERF-002: after the first call populates the cache,
+    // After the first call populates the cache,
     // a second call on the same DB with the same candidate pid set
     // and same ts_floor must serve entirely from the cache — no
     // SQLite query fires. Counted by the cache's query counter so a future

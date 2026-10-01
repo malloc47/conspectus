@@ -3,7 +3,7 @@
 //! harness-specific and best-effort — unsupported harnesses degrade
 //! to a disabled-action reason.
 //!
-//! H-EXT-002: the per-harness resume command is derived from
+//! The per-harness resume command is derived from
 //! [`crate::discovery::harness::resume_argv_for`] (which delegates
 //! to the registered [`crate::discovery::harness::HarnessAdapter::resume_argv`]).
 //! Supported harnesses today: claude-code, codex, opencode.
@@ -40,7 +40,7 @@ pub fn resume_disabled_reason(target: &ResumeTarget) -> String {
 
 /// Resolve the resume command for an agent session.
 ///
-/// H-EXT-002: delegates to
+/// Delegates to
 /// [`crate::discovery::harness::resume_argv_for`] so the per-
 /// harness "does this expose a resume command" answer lives on
 /// the adapter (not in a hand-rolled match here). The command

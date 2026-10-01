@@ -1,4 +1,4 @@
-//! Controls overlay (ADR 0031, F8-004).
+//! Controls overlay (ADR 0031).
 //!
 //! Single navigable modal that fronts view switching, per-view
 //! grouping, per-view filter editing, and the global sort toggle.
@@ -42,7 +42,7 @@ use crate::tui::widgets::multi_select::{MultiSelectOutcome, MultiSelectState};
 use crate::tui::{Grouping, Sort, View};
 
 /// Registered harness keys surfaced in the harness sub-editor.
-/// H-EXT-002: derives from the adapter registry
+/// Derives from the adapter registry
 /// ([`crate::discovery::harness::harness_keys`]) so registering a
 /// new adapter appears in the filter menu automatically.
 pub fn harness_options() -> &'static [&'static str] {
@@ -58,7 +58,7 @@ pub const MUX_STATE_OPTIONS: &[MuxStateKey] = &[
 
 /// All views displayed in the View section, in stable order.
 ///
-/// Union / PRs / Forks are intentionally omitted (H-VIEW-001): they
+/// Union / PRs / Forks are intentionally omitted: they
 /// were causing confusion and are hidden from the interactive UI until
 /// they mature. This constant is the single source of truth for the
 /// controls-overlay View section, the left-pane tab strip, and the
@@ -79,7 +79,7 @@ pub struct ControlsContext<'a> {
     pub grouping: Grouping,
     pub filter: &'a RowFilter,
     pub sort: Sort,
-    /// Mux-view recency basis (H-MUX-SORT-001). Read so the overlay
+    /// Mux-view recency basis. Read so the overlay
     /// can mark the active basis; only surfaced when the mux view is
     /// active.
     pub mux_recency: crate::tui::MuxRecency,
@@ -105,7 +105,7 @@ pub enum ControlsCursor {
     /// Sort option at index in [`SORT_OPTIONS`].
     Sort(usize),
     /// Mux-view-only recency basis at index in
-    /// [`crate::tui::MuxRecency::ALL`] (H-MUX-SORT-001).
+    /// [`crate::tui::MuxRecency::ALL`].
     MuxRecency(usize),
 }
 
@@ -160,7 +160,7 @@ impl ControlsOverlayState {
     }
 
     /// Open with the cursor positioned on the Filters > Harness row.
-    /// Used by the `f` accelerator (F8-005) so jumping straight into
+    /// Used by the `f` accelerator so jumping straight into
     /// filters skips the navigation step.
     pub fn new_at_filters(_ctx: &ControlsContext<'_>) -> Self {
         Self {
@@ -495,7 +495,7 @@ fn flatten_rows(ctx: &ControlsContext<'_>) -> Vec<ControlsCursor> {
     for idx in 0..SORT_OPTIONS.len() {
         rows.push(ControlsCursor::Sort(idx));
     }
-    // Mux-only recency basis (H-MUX-SORT-001): which signal
+    // Mux-only recency basis: which signal
     // `Sort::Recency` orders the mux tree by.
     if matches!(ctx.view, View::Mux) {
         for idx in 0..crate::tui::MuxRecency::ALL.len() {
@@ -530,7 +530,7 @@ impl<'a> ControlsOverlayWidget<'a> {
 
 impl Widget for ControlsOverlayWidget<'_> {
     fn render(self, area: Rect, buf: &mut Buffer) {
-        // H-WIDG-004: framing through `tui_popup::Popup`; the body
+        // Framing through `tui_popup::Popup`; the body
         // wrapper reports the same cap dims `centered_modal_rect`
         // produces so auto-sizing reproduces the legacy rect.
         let mut lines = self.body_lines();
@@ -664,7 +664,7 @@ impl ControlsOverlayWidget<'_> {
             ));
         }
 
-        // Mux-only recency basis (H-MUX-SORT-001): which signal the
+        // Mux-only recency basis: which signal the
         // Recency sort orders by. Only meaningful — and only shown —
         // for the mux view.
         if matches!(self.ctx.view, View::Mux) {
@@ -908,7 +908,7 @@ fn max_controls_content_lines() -> usize {
                 4
             };
             // Mux view appends a "Recency by" section: blank + header
-            // + one row per basis (H-MUX-SORT-001).
+            // + one row per basis.
             let mux_recency_rows = if matches!(*view, View::Mux) {
                 1 + 1 + crate::tui::MuxRecency::ALL.len()
             } else {

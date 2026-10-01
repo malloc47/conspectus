@@ -28,8 +28,8 @@ pub mod teardown;
 /// equivalence explicit and keeps the literal in one place.
 pub const TMUX_BACKEND: &str = crate::discovery::providers::TMUX;
 
-/// Compile-time list of mux backend keys this build supports
-/// (H-EXT-009). Pin parsing and attach-target resolution
+/// Compile-time list of mux backend keys this build supports.
+/// Pin parsing and attach-target resolution
 /// consult this instead of comparing to the literal `"tmux"`
 /// string so a new backend (zellij per H-EXT-010) is one array
 /// entry away. Runtime capability checks (does this backend
@@ -37,7 +37,7 @@ pub const TMUX_BACKEND: &str = crate::discovery::providers::TMUX;
 /// [`MuxBackend`] impl's outcome returns.
 pub const KNOWN_MUX_BACKENDS: &[&str] = &[
     TMUX_BACKEND,
-    // H-EXT-010: zellij backend. Added here so pin validation
+    // Zellij backend. Added here so pin validation
     // and attach dispatch accept `mux.backend = "zellij"`
     // without touching `pins.rs` / `tui/actions.rs`.
     crate::discovery::providers::ZELLIJ,
@@ -47,13 +47,13 @@ pub const KNOWN_MUX_BACKENDS: &[&str] = &[
 /// session roots can safely contain spaces.
 pub const TMUX_LIST_FORMAT: &str = "#{session_name}\t#{session_path}\t#{session_activity}\t#{session_created}\t#{pane_current_command}\t#{pane_pid}\t#{pane_current_path}\t#{pane_start_command}\t#{session_attached}\t#{session_attached_list}\t#{session_last_attached}";
 
-/// Backend-neutral mux abstraction (H-EXT-008, ADR 0089).
+/// Backend-neutral mux abstraction (ADR 0089).
 ///
 /// Every mux backend Conspectus supports (tmux today, zellij next
 /// per H-EXT-010) implements this trait. The trait's capability
 /// methods default to `Unsupported` outcomes so a new backend can
 /// implement only the operations it actually supports; callers
-/// gate on the outcome (H-EXT-009) instead of naming a specific
+/// gate on the outcome instead of naming a specific
 /// backend.
 ///
 /// `backend_key` is the string every consumer keys off. Pin
@@ -159,7 +159,7 @@ pub trait MuxBackend: Send + Sync {
     }
 
     /// Probe the current shell environment to see if the caller is
-    /// running *inside* a session of this backend (H-EXT-011). Used
+    /// running *inside* a session of this backend. Used
     /// by the hook writer (`conspectus hook write ...`) to
     /// enrich each hook record with the mux context the harness
     /// launched from, so the discovery layer can join `hook` to
@@ -177,7 +177,7 @@ pub trait MuxBackend: Send + Sync {
 }
 
 /// Backend-neutral session context the hook writer records
-/// alongside a harness's `SessionStart` payload (H-EXT-011). Grew
+/// alongside a harness's `SessionStart` payload. Grew
 /// out of the pre-H-EXT-011 tmux-specific
 /// `cli::tmux_context()`, which read `$TMUX` + shelled out to
 /// `tmux display-message`. The trait method
@@ -745,7 +745,7 @@ impl MuxBackend for SystemTmux {
     }
 
     fn current_session_context(&self) -> Option<MuxSessionContext> {
-        // H-EXT-011: probe `$TMUX` and `tmux display-message` for
+        // Probe `$TMUX` and `tmux display-message` for
         // the caller's mux context. Migrated from
         // `cli::tmux_context` so the tmux-specific env-var
         // reading lives on the backend that owns it; the CLI
@@ -1305,7 +1305,7 @@ pub enum TmuxStatus {
 
 impl<R: MuxBackend + 'static> DiscoveryProvider for TmuxDiscovery<R> {
     fn discover(&self, context: &DiscoveryContext) -> Result<GraphFragment> {
-        // H-SERVE-PERF-011: TTL-cache the mux backend output so a
+        // TTL-cache the mux backend output so a
         // busy class thread doesn't respawn `tmux list-sessions`
         // on every cycle. Each class thread's `discover_local_warm_with`
         // re-runs any provider not marked fresh in the freshness

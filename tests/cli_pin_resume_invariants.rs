@@ -14,7 +14,7 @@
 //!   would skip-on-unchanged, no read-only command should bump its
 //!   mtime.
 //!
-//! Mirrors `cli_pin_invariants.rs` (H-PIN-019) for the cache surface.
+//! Mirrors `cli_pin_invariants.rs` for the cache surface.
 
 use assert_cmd::Command;
 use std::fs;

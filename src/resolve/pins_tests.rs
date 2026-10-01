@@ -1,4 +1,3 @@
-// Extracted from pins.rs H-HYG-011 rolling wave via #[path = "pins_tests.rs"] mod tests;
 use super::*;
 use crate::model::{
     AgentSessionNode, GraphSnapshot, MuxSessionId, MuxSessionNode, PinMuxRef, Provenance,

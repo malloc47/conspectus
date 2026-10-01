@@ -1,4 +1,4 @@
-//! `conspectus dev` subcommand tree (H-REF-006 wave 3).
+//! `conspectus dev` subcommand tree.
 //!
 //! Debug-only scenario materialization + rendering used by
 //! `dev scenario list / graph / table / node / tui`. Gated

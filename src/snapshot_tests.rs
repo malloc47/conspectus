@@ -1,4 +1,3 @@
-// Extracted from snapshot.rs H-HYG-011 rolling wave via #[path = "snapshot_tests.rs"] mod tests;
 use super::*;
 use crate::model::{GraphNode, NodeId, NodeProvenance, RepoId, RepoNode};
 use std::sync::{Arc, Barrier};

@@ -1,4 +1,4 @@
-//! In-memory forks-view row-tree builder (P11-011c / ADR 0082).
+//! In-memory forks-view row-tree builder (ADR 0082).
 //!
 //! Lists forks as parents and nests resolved child agent sessions
 //! when they are present in the graph.
@@ -187,7 +187,7 @@ fn collect_child_counts(snapshot: &GraphSnapshot) -> HashMap<String, usize> {
     out
 }
 
-/// H-UI-008: surface only resolver-blessed children. Each
+/// Surface only resolver-blessed children. Each
 /// fork's `child_session` candidate must have a corresponding
 /// `ResolvedRelationship` with `selected_link_id`.
 fn collect_resolved_child_links(snapshot: &GraphSnapshot) -> BTreeMap<String, Vec<String>> {
@@ -227,7 +227,7 @@ fn collect_resolved_child_links(snapshot: &GraphSnapshot) -> BTreeMap<String, Ve
     out
 }
 
-/// H-UI-008: per-fork parent label. The atelier adapter emits
+/// Per-fork parent label. The atelier adapter emits
 /// at most one ParentSession candidate per fork; we surface
 /// resolved targets via `selected_link_id` lookup and
 /// unresolved targets directly so `?{native_id}` lineage gaps

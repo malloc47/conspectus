@@ -1,4 +1,4 @@
-//! OpenCode SQLite transcript reader (H-VIEWER-NATIVE-005).
+//! OpenCode SQLite transcript reader.
 //!
 //! Reads from `opencode.db` per ADR 0013. OpenCode's session
 //! storage moved to SQLite; the `session_diff/` directory is
@@ -55,7 +55,7 @@ pub struct OpenCodeParser;
 
 impl HarnessParser for OpenCodeParser {
     fn read(&self, locator: &SessionLocator) -> ParseResult {
-        // H-EXT-006: the opencode adapter's `transcript_source`
+        // The opencode adapter's `transcript_source`
         // resolves `state_root` to the SQLite database file path
         // (or, when the caller passed a directory, materializes
         // the `opencode.db` child). Either way, this parser

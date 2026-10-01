@@ -1,4 +1,3 @@
-// Extracted from cache.rs H-HYG-011 rolling wave via #[path = "cache_tests.rs"] mod tests;
 use super::*;
 use crate::model::{
     GraphLink, GraphNode, LinkEndpoint, NodeId, NodeProvenance, Provenance, RelationKind, RepoId,
@@ -192,7 +191,7 @@ fn empty_prior_produces_empty_gate() {
 
 #[test]
 fn is_mux_or_harness_provider_covers_mux_and_harness_keys_only() {
-    // H-SERVE-PERF-001a: the process-tree refresh decision keys off
+    // The process-tree refresh decision keys off
     // whether a mux/harness provider ran. Mux + harness keys are in;
     // git/forge and the mutator keys themselves are out.
     for key in [

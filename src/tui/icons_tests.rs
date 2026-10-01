@@ -1,4 +1,3 @@
-// Extracted from icons.rs H-HYG-011 rolling wave via #[path = "icons_tests.rs"] mod tests;
 use super::*;
 use crate::model::{
     AgentSessionId, BranchId, CheckoutId, ForgePrId, ForkId, MuxSessionId, NodeId, RepoId,

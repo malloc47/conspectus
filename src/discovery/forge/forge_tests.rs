@@ -1,4 +1,3 @@
-// Extracted from mod.rs H-HYG-011 rolling wave via #[path = "forge_tests.rs"] mod tests;
 use super::*;
 
 #[test]
@@ -253,7 +252,7 @@ fn forge_discovery_accepts_two_adapters_via_boxed_registration() {
 }
 
 // ---------------------------------------------------------------------------
-// H-SERVE-PERF-005: ForgeDiscovery TTL cache pins that a second discover()
+// ForgeDiscovery TTL cache pins that a second discover()
 // with the same roots short-circuits without dispatching adapters, so the
 // daemon's per-class cycle can't respawn `gh pr list` on every wake-up when
 // the initial forge call returned an empty fragment.

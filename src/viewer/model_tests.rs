@@ -1,4 +1,3 @@
-// Extracted from model.rs H-HYG-011 rolling wave via #[path = "model_tests.rs"] mod tests;
 use super::*;
 use chrono::TimeZone;
 

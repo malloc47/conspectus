@@ -1,4 +1,4 @@
-//! Shared centered-bordered-modal framing primitive (H-WIDG-004).
+//! Shared centered-bordered-modal framing primitive.
 //!
 //! Conspectus has nine overlays (rename, controls, pins menu + 5
 //! pin sub-editors, search, help, value, viewer, multi-select
@@ -37,7 +37,7 @@ use tui_popup::{KnownSize, Popup};
 
 use crate::tui::Theme;
 
-/// H-HYG-003: shared centering math. Pre-H-HYG-003 six overlays
+/// Shared centering math. Pre-H-HYG-003 six overlays
 /// (`help`, `controls`, `input`, `multi_select`, `pins`, `search`)
 /// each carried a hand-rolled `centered_modal_rect` that did the
 /// same 4-line centering arithmetic on `(area, width, height)`;

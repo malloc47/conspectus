@@ -1,4 +1,4 @@
-//! `conspectus table <ROWS>` (H-REF-006 wave 8).
+//! `conspectus table <ROWS>`.
 //!
 //! Five projection subcommands (sessions, mux, union, prs,
 //! forks) rendered through `output::table::render_with`, with
@@ -130,7 +130,7 @@ impl TableRowsArgs {
             }
         };
 
-        // Resolve the active filter from CLI flags (F8-010). Config
+        // Resolve the active filter from CLI flags. Config
         // parity (load from `[table.<rows>].filters` or merge with
         // `[tui.views.<name>]`) is a follow-up; for now the CLI
         // flags are the only source so the static table narrows the

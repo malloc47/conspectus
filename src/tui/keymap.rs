@@ -1,5 +1,5 @@
-//! Keymap layer: crossterm event → [`Action`] translation
-//! (H-TUI-004 wave 3). Pure with respect to terminal state — the
+//! Keymap layer: crossterm event → [`Action`] translation.
+//! Pure with respect to terminal state — the
 //! runtime holds no direct crossterm dependency beyond calling
 //! [`translate`] on incoming events.
 //!
@@ -38,20 +38,19 @@ pub enum Action {
     OpenRename,
     /// Forward a key event into the open rename overlay.
     RenameOverlayKey(ratatui::crossterm::event::KeyEvent),
-    /// `w` — open the worktree action menu for the selected node
-    /// (H-WT-004b).
+    /// `w` — open the worktree action menu for the selected node.
     OpenWorktreeMenu,
     /// `X` — open the worktree menu straight into close-down for the
-    /// selected node (H-WT-006).
+    /// selected node.
     OpenWorktreeCloseDown,
     /// Forward a key event into the open worktree menu.
     WorktreeMenuKey(ratatui::crossterm::event::KeyEvent),
     /// `n` — open the bare tmux new-session form seeded from the
-    /// current selection (H-MUX-NEW-001 / ADR 0095).
+    /// current selection (ADR 0095).
     OpenNewMuxForm,
     /// Forward a key event into the open bare mux form.
     NewMuxFormKey(ratatui::crossterm::event::KeyEvent),
-    /// `m` — open the Mux action menu (H-MUX-LAUNCH-001 / ADR 0096).
+    /// `m` — open the Mux action menu (ADR 0096).
     /// Discharges the ADR 0095 follow-up now that a second bare-mux-
     /// shape verb (mux launch) has landed.
     OpenMuxMenu,
@@ -79,7 +78,7 @@ pub enum Action {
     /// <id>`. Sibling of `Enter` on a `RowKind::Pin`; refuses with
     /// a status hint when no pin row is selected.
     LaunchPin,
-    /// Open the controls overlay (ADR 0031, F8-005) at its top
+    /// Open the controls overlay (ADR 0031) at its top
     /// section.
     OpenControls,
     /// Forward a key event into the open controls overlay.
@@ -100,15 +99,15 @@ pub enum Action {
     CycleGrouping(i32),
     /// Clear every active filter for the visible view (`F`).
     ClearFilters,
-    /// Open the `/` search overlay (T8-017).
+    /// Open the `/` search overlay.
     OpenSearch,
     /// Forward a key event into the open search overlay.
     SearchOverlayKey(ratatui::crossterm::event::KeyEvent),
-    /// Open the `?` help overlay (F8-011).
+    /// Open the `?` help overlay.
     OpenHelp,
     /// Forward a key event into the open help overlay.
     HelpOverlayKey(ratatui::crossterm::event::KeyEvent),
-    /// Open the `o` full-value modal (T8-030) on the active explorer
+    /// Open the `o` full-value modal on the active explorer
     /// cursor row, when the row has a truncated value.
     OpenValueModal,
     /// Forward a key event into the open full-value modal.
@@ -117,7 +116,7 @@ pub enum Action {
     /// (launches the harness binary in the background).
     Resume,
     /// Open the native full-screen transcript viewer modal for
-    /// the selected agent session (H-VIEWER-NATIVE-008, ADR 0052).
+    /// the selected agent session (ADR 0052).
     /// The widget renders inside the existing terminal — no alt-
     /// screen swap, no child process. Falls through to the
     /// escape-hatch external launch when the harness has no
@@ -125,20 +124,20 @@ pub enum Action {
     View,
     /// Forward a key event into the open viewer modal.
     ViewerOverlayKey(ratatui::crossterm::event::KeyEvent),
-    /// `Enter` on the left pane (T8-043). The dispatcher resolves
+    /// `Enter` on the left pane. The dispatcher resolves
     /// the selected row's default action: attach a mux row, view an
     /// un-muxed session, or expand/collapse a group row. Right-pane
     /// focus is remapped to [`Action::ExplorerEnter`] before this
     /// variant ever reaches the dispatcher.
     DefaultAction,
-    /// `Enter` on the right pane (T8-040 / T8-043). When the
+    /// `Enter` on the right pane. When the
     /// explorer cursor is on a Node-zone field row with a copyable
     /// value, the runtime writes the value to the clipboard via OSC
     /// 52 (ADR 0056) and posts a toast. Otherwise the dispatcher
     /// falls through to [`Msg::ExplorerActivate`] (group expand,
     /// link drill).
     ExplorerEnter,
-    /// `i` on any row (T8-040). When the selected row is an agent
+    /// `i` on any row. When the selected row is an agent
     /// session or mux session, copies the full id to the clipboard
     /// (ADR 0056) and posts a toast. No-op with a status hint
     /// otherwise.
@@ -158,9 +157,9 @@ pub fn cycle_view(view: View, delta: i32) -> View {
 /// Re-map an action based on which pane currently has focus. Used
 /// so that j/k drive whichever pane the operator is looking at —
 /// left pane focus keeps them on the row tree; right pane focus
-/// (T8-028) routes them into the explorer. Also handles the
-/// Enter → ExplorerEnter remap (T8-040 / T8-043) and F →
-/// ExplorerToggleFullDetail (T8-034). Only key-derived actions
+/// routes them into the explorer. Also handles the
+/// Enter → ExplorerEnter remap and F →
+/// ExplorerToggleFullDetail. Only key-derived actions
 /// touch this pass; overlay-owned keys never reach here — the
 /// modal stack routes them before the fallback keymap.
 ///
@@ -173,7 +172,7 @@ pub fn remap_for_focus(action: Action, focus: Focus) -> Option<Action> {
     }
     match action {
         Action::Msg(boxed) => match *boxed {
-            // T8-028: j/k drive the explorer cursor when the right
+            // J/k drive the explorer cursor when the right
             // pane has focus, replacing the prior raw preview-scroll
             // remap. Uppercase J/K still scroll the preview.
             Msg::NavDown => Some(Action::Msg(Box::new(Msg::ExplorerNavDown))),
@@ -190,7 +189,7 @@ pub fn remap_for_focus(action: Action, focus: Focus) -> Option<Action> {
             // analogous binding in v1; `Enter` drills, `Backspace`
             // pops a hop.
             Msg::ExpandRow | Msg::CollapseRow => None,
-            // H-OBS-007: `g`/`Home` and `G`/`End` should snap the
+            // `g`/`Home` and `G`/`End` should snap the
             // explorer cursor to its first / last row on right-
             // pane focus, the right-pane-equivalent of how those
             // keys jump the left-tree selection. `Tab` /
@@ -201,16 +200,16 @@ pub fn remap_for_focus(action: Action, focus: Focus) -> Option<Action> {
             Msg::End => Some(Action::Msg(Box::new(Msg::ExplorerEnd))),
             other => Some(Action::Msg(Box::new(other))),
         },
-        // T8-040 / T8-043: Enter on the explorer cursor either
-        // copies a Node-zone field value (T8-040) or expands a
-        // group header / drills into a link row (T8-043). The
+        // Enter on the explorer cursor either
+        // copies a Node-zone field value or expands a
+        // group header / drills into a link row. The
         // dispatcher inspects the cursor row at action time, so
         // remap to [`Action::ExplorerEnter`] and let the main
         // loop branch with App state in hand. Left-pane Enter
         // (DefaultAction) is dispatched against the selected
         // row's kind separately.
         Action::DefaultAction => Some(Action::ExplorerEnter),
-        // T8-034: `F` toggles the Expanded Node Detail view when the
+        // `F` toggles the Expanded Node Detail view when the
         // right pane is focused. The same key still clears filters
         // when the left tree has focus (ADR 0031).
         Action::ClearFilters => Some(Action::Msg(Box::new(Msg::ExplorerToggleFullDetail))),
@@ -227,7 +226,7 @@ pub fn remap_for_focus(action: Action, focus: Focus) -> Option<Action> {
 /// `viewport_height` is the rendered height of the row tree in
 /// rows, used to size PageUp/PageDown jumps. Pass 1 if unknown.
 pub fn translate(event: Event, viewport_height: u16) -> Option<Action> {
-    // H-HYG-007 wave 2: consult the declarative KEYBINDINGS
+    // Consult the declarative KEYBINDINGS
     // table first. Bindings the table owns (view switching +
     // grouping cycle, per wave 1) return here; unmigrated
     // bindings fall through to the pre-H-HYG-007 match arms
@@ -240,7 +239,7 @@ pub fn translate(event: Event, viewport_height: u16) -> Option<Action> {
     }
     match event {
         Event::Key(key) if key.kind == KeyEventKind::Press => match (key.modifiers, key.code) {
-            // H-HYG-007 wave 4: all single-char parametric guards
+            // All single-char parametric guards
             // (r/a/b/v/f/p/[/]//?/l/h/e) + arrow / nav keys
             // (j/k/Down/Up/Right/Left/Enter/Backspace/Home/End/g/G)
             // migrated to `keybindings::KEYBINDINGS` via
@@ -253,13 +252,13 @@ pub fn translate(event: Event, viewport_height: u16) -> Option<Action> {
             //   `fn() -> Action` signature doesn't carry.
             (_, KeyCode::PageDown) => Some(Action::Msg(Box::new(Msg::PageDown(viewport_height)))),
             (_, KeyCode::PageUp) => Some(Action::Msg(Box::new(Msg::PageUp(viewport_height)))),
-            // T8-030: `o` opens the full-value modal on the cursor
+            // `o` opens the full-value modal on the cursor
             // row. The reducer no-ops gracefully if the cursor isn't
             // on a row with a truncated value.
             (m, KeyCode::Char('o')) if !m.contains(KeyModifiers::CONTROL) => {
                 Some(Action::OpenValueModal)
             }
-            // T8-040: `i` copies the selected agent or mux session's
+            // `i` copies the selected agent or mux session's
             // full id to the clipboard via OSC 52 (ADR 0056) and
             // posts a toast. The runtime branches on selection kind;
             // a non-session row surfaces a status hint instead.
@@ -275,7 +274,7 @@ pub fn translate(event: Event, viewport_height: u16) -> Option<Action> {
     }
 }
 
-/// Resolved default action for the left-pane cursor (T8-043). Pure
+/// Resolved default action for the left-pane cursor. Pure
 /// over [`App`] state so it can be reused by the live and static
 /// event loops and snapshot-tested.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -317,7 +316,7 @@ pub fn selected_default_action(app: &App) -> SelectedDefault {
         // fall back to toggle so expandable parents still behave.
         RowKind::Pr(_) | RowKind::Fork(_) | RowKind::Repo(_) => SelectedDefault::ToggleExpand,
         // Unbound / stale-mux pin rows hand off to the launch
-        // primitive (H-PIN-012) via a subprocess so the launch
+        // primitive via a subprocess so the launch
         // logic stays in one place.
         RowKind::Pin(_) => SelectedDefault::LaunchPin,
     }

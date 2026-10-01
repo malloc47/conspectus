@@ -1,4 +1,3 @@
-// Extracted from filter.rs H-HYG-011 rolling wave via #[path = "filter_tests.rs"] mod tests;
 use super::*;
 
 fn inputs<'a>(

@@ -1,4 +1,4 @@
-//! Orchestrator registration surface (H-EXT-014).
+//! Orchestrator registration surface.
 //!
 //! Orchestrators are Conspectus's third registration pattern
 //! (harness adapters + mux backends + forge adapters are the
@@ -32,7 +32,7 @@ use std::path::PathBuf;
 
 use crate::discovery::{DiscoveryProvider, agent_deck};
 
-/// Metadata about one registered orchestrator (H-EXT-014).
+/// Metadata about one registered orchestrator.
 ///
 /// `default_root` resolves the orchestrator's on-disk root
 /// from the process environment (`$CONSPECTUS_<KEY>_ROOT` first,

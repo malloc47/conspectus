@@ -1,6 +1,5 @@
-// Extracted from table.rs H-HYG-011 rolling wave via #[path = "table_tests.rs"] mod tests;
 use super::*;
-// H-HYG-010: render substrate items formerly re-exported from super
+// Render substrate items formerly re-exported from super
 use crate::model::{
     AgentSessionId, AgentSessionNode, BranchId, Confidence, ForgePrId, ForgePrNode, ForkNode,
     Freshness, GraphLink, GraphNode, LinkEndpoint, LinkState, Metadata, MuxSessionId,
@@ -1865,7 +1864,7 @@ fn narrow_width_keeps_short_columns_at_natural_width() {
 fn node_short_id_is_deterministic_for_a_given_node_id() {
     // Lock in the FNV-1a-over-Display contract: this string must not
     // change without a deliberate decision, because users paste short
-    // ids into `node show` between runs (H-TBL-005).
+    // ids into `node show` between runs.
     let id = NodeId::AgentSession(AgentSessionId::new("codex", "global", "alpha"));
     let short = node_short_id(&id);
     assert_eq!(short.len(), 16);

@@ -134,7 +134,7 @@ pub enum RowKind {
     /// pin. Bound pins flow through the existing
     /// [`RowKind::AgentSession`] surface with `pin_id` set.
     Pin(PinRow),
-    /// Repo row emitted by the workspaces view (H-WS-002) for
+    /// Repo row emitted by the workspaces view for
     /// member rows under each workspace. Styled like the agent /
     /// mux rows so it scans as the same visual rhythm rather than
     /// as a bare group header.
@@ -196,7 +196,7 @@ pub struct AgentSessionRow {
     /// when set. Takes precedence over [`Self::title`] at every
     /// projection site via [`Self::display_label`].
     pub alias: Option<String>,
-    /// P8-015: the sessions row-tree builder flips this on when the
+    /// The sessions row-tree builder flips this on when the
     /// parent project group contains another same-harness session
     /// and this row carries a non-empty `title`. The left-tree
     /// renderer consults it via [`Self::tree_label`] so titles only
@@ -223,7 +223,7 @@ impl AgentSessionRow {
         self.alias.as_deref().or(self.title.as_deref())
     }
 
-    /// Display label for the left-tree row body (P8-015). Alias wins
+    /// Display label for the left-tree row body. Alias wins
     /// when set (operator-chosen names are always meaningful in the
     /// tree); otherwise the title is surfaced only when the builder
     /// flagged this row as needing disambiguation. The right pane,
@@ -280,10 +280,10 @@ pub struct MuxSessionRow {
     pub recency: Option<String>,
     pub activity_epoch: Option<i64>,
     /// `session_created` epoch, carried so the mux view can order by
-    /// the "created" recency basis (H-MUX-SORT-001).
+    /// the "created" recency basis.
     pub created_epoch: Option<i64>,
     /// `session_last_attached` epoch, carried so the mux view can
-    /// order by the "last attached" recency basis (H-MUX-SORT-001).
+    /// order by the "last attached" recency basis.
     pub last_attached_epoch: Option<i64>,
     /// Unique harness labels for visible agent sessions linked to
     /// this mux. Renderers use these as the primary mux-row labels so
@@ -351,7 +351,7 @@ pub struct PinRow {
     pub state_label: &'static str,
 }
 
-/// A workspace member row in the workspaces view (H-WS-002). Carries
+/// A workspace member row in the workspaces view. Carries
 /// the short id + display label + canonical path the renderer needs
 /// to render the row with the same visual rhythm as
 /// [`AgentSessionRow`] and [`MuxSessionRow`] rather than as a bare
@@ -431,8 +431,8 @@ pub fn format_workspace_display(
 }
 
 /// Translate a harness key to the short label rendered in the row.
-/// H-EXT-002: delegates to the adapter registry so
-/// `claude-code`'s `claude` collapse (H-TBL-014) lives on
+/// Delegates to the adapter registry so
+/// `claude-code`'s `claude` collapse lives on
 /// `crate::discovery::harness::ClaudeCodeAdapter::display_label`
 /// rather than in a match table here.
 pub fn harness_label(harness_key: &str) -> String {
@@ -489,7 +489,7 @@ pub enum RecencyBucket {
     Cold,
 }
 
-// H-HYG-002: shared row-assembly helpers. Pre-H-HYG-002 the
+// Shared row-assembly helpers. Pre-H-HYG-002 the
 // same `agent_row` / `mux_indicator` / `session_matches_filter`
 // / `collect_agent_mux_candidate_counts` bodies were duplicated
 // across `rows/{union,prs,forks}.rs` (plus a near-twin in

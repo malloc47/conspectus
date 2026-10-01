@@ -1,4 +1,3 @@
-// Extracted from snapshot.rs H-HYG-011 rolling wave via #[path = "snapshot_tests.rs"] mod tests;
 use super::*;
 
 /// Default reflow threshold used by the `pane_rect` layout tests.
@@ -125,7 +124,7 @@ fn pane_rect_splits_body_vertically_when_narrow() {
 
 #[test]
 fn pane_rect_split_direction_follows_configured_threshold() {
-    // H-LAYOUT-001: the reflow breakpoint is configurable. A 60-col
+    // The reflow breakpoint is configurable. A 60-col
     // body stacks vertically at the default threshold (100) but stays
     // side-by-side once the threshold is lowered below the width.
     let area = Rect::new(0, 0, 60, 40);

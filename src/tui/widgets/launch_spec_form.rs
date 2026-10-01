@@ -1,4 +1,4 @@
-//! Shared launch-spec form primitive (H-MUX-LAUNCH-002 / ADR 0097).
+//! Shared launch-spec form primitive (ADR 0097).
 //!
 //! Container for the fields that pin-create and mux-launch share:
 //! harness, cwd (with autocomplete), mux name + socket, launch argv

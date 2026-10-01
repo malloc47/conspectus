@@ -1,5 +1,5 @@
 //! Projection dispatch for plain-text table output over a
-//! [`GraphSnapshot`] (H-HYG-010, ADR 0006).
+//! [`GraphSnapshot`] (ADR 0006).
 //!
 //! This module owns the per-projection dispatch — the small
 //! surface that takes a `(snapshot, projection, options)`
@@ -43,7 +43,7 @@ use super::render::{
 };
 
 /// FNV-1a 64-bit hash of a [`NodeId`]'s `Display` form. Used to derive
-/// a stable short row identifier for table output (H-TBL-002).
+/// a stable short row identifier for table output.
 pub fn node_short_id(node_id: &NodeId) -> String {
     node_short_id_from_display(&node_id.to_string())
 }

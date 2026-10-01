@@ -1,4 +1,4 @@
-//! Backend-agnostic rendering substrate (P10-003 / ADR 0043).
+//! Backend-agnostic rendering substrate (ADR 0043).
 //!
 //! Pulled out of [`super::table`] so the in-memory renderers and the
 //! former SQL renderer could share the same column registries,
@@ -227,7 +227,7 @@ pub fn unique_prefix_len(full_ids: &[String]) -> usize {
 }
 
 // -----------------------------------------------------------------------------
-// Column registry (H-TBL-007)
+// Column registry
 // -----------------------------------------------------------------------------
 
 /// One column in a row-type's column registry.
@@ -237,7 +237,7 @@ pub struct ColumnSpec {
     pub key: &'static str,
     /// Header label rendered in the columnar table and as the key in card layout.
     pub header: &'static str,
-    /// One-line description for the column-discovery surface (H-TBL-012).
+    /// One-line description for the column-discovery surface.
     pub description: &'static str,
     /// `true` when the column is part of the row-type's default set.
     pub default: bool,
@@ -702,8 +702,7 @@ pub fn resolve_explicit_columns(
 /// Render a human-readable listing of the registered columns for
 /// `projection`. Each line is `<key>  <description>` with `(default)`
 /// appended for columns in the default set. The leading key column is
-/// padded so descriptions line up. Used by `conspectus columns <ROWS>`
-/// (H-TBL-012).
+/// padded so descriptions line up. Used by `conspectus columns <ROWS>`.
 pub fn render_columns_listing(projection: Projection, color: bool) -> String {
     let registry = columns_for(projection);
     let key_width = registry
@@ -1277,7 +1276,7 @@ pub fn confidence_code_from_tag(tag: &str) -> &'static str {
 
 // (kept below for context; format_relative_age moved earlier in the file)
 
-// H-HYG-001: re-export the canonical `current_epoch`.
+// Re-export the canonical `current_epoch`.
 pub use crate::discovery::current_epoch;
 
 // -----------------------------------------------------------------------------

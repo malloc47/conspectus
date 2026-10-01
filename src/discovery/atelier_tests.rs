@@ -1,4 +1,3 @@
-// Extracted from atelier.rs H-HYG-011 rolling wave via #[path = "atelier_tests.rs"] mod tests;
 use std::fs;
 use std::process::Command;
 

@@ -1,4 +1,4 @@
-//! `conspectus node show <id>` (H-OBS-002).
+//! `conspectus node show <id>`.
 //!
 //! Read-only single-node view: prints the node itself plus every
 //! candidate link, resolved relationship, source metadata, and
@@ -6,7 +6,7 @@
 //! `<id>` are:
 //!
 //! - The short content-addressed prefix from the session-table `ID`
-//!   column (H-TBL-002). Any prefix length ≥ 4 hex chars is
+//!   column. Any prefix length ≥ 4 hex chars is
 //!   accepted; ambiguity errors with the matching candidates
 //!   listed.
 //! - The full `NodeId` `Display` form, e.g.
@@ -19,7 +19,7 @@
 //! - A bare harness-native agent session key from the session
 //!   table's `ID` column, when it uniquely identifies one node.
 //!
-//! In-memory renderer (P11-011b / ADR 0082). Iterates the
+//! In-memory renderer (ADR 0082). Iterates the
 //! resolved [`GraphSnapshot`] directly — no SQLite materialization.
 
 use std::collections::{BTreeMap, BTreeSet};

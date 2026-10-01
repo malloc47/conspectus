@@ -1,4 +1,4 @@
-//! Worktree action menu overlay (H-WT-004b).
+//! Worktree action menu overlay.
 //!
 //! The `w` menu: a self-contained (`Ctx = ()`) modal that captures the
 //! selected node's worktree facts at open time and drives a small
@@ -59,7 +59,7 @@ pub struct WorktreeMenuContext {
     /// confirm (the H-WT-004a guard list).
     pub guard_sessions: Vec<String>,
     pub can_mutate: bool,
-    /// Row to jump to for the context's reveal action (H-WT-008): the
+    /// Row to jump to for the context's reveal action: the
     /// containing checkout (from an agent/mux) or the first session in
     /// the worktree. `None` disables the reveal action.
     pub reveal_target: Option<RowId>,
@@ -153,7 +153,7 @@ pub fn context_for_node(
 }
 
 /// The `Group` row of the worktree checkout containing `path` — the
-/// reveal-checkout jump target (H-WT-008).
+/// reveal-checkout jump target.
 fn checkout_row_containing(snapshot: &GraphSnapshot, path: &str) -> Option<RowId> {
     let p = Path::new(path);
     snapshot.nodes.iter().find_map(|n| match n {
@@ -259,7 +259,7 @@ fn short_branch(refname: &str) -> String {
         .to_string()
 }
 
-/// Whether `action` is a read-only reveal/navigate jump (H-WT-008),
+/// Whether `action` is a read-only reveal/navigate jump,
 /// which needs a resolved `reveal_target` to be offerable.
 fn is_reveal(action: WorktreeAction) -> bool {
     matches!(

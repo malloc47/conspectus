@@ -1,4 +1,3 @@
-// Extracted from agent_deck.rs H-HYG-011 rolling wave via #[path = "agent_deck_tests.rs"] mod tests;
 use std::process::Command;
 
 use tempfile::TempDir;

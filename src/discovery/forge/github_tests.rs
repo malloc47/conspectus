@@ -1,4 +1,3 @@
-// Extracted from github.rs H-HYG-011 rolling wave via #[path = "github_tests.rs"] mod tests;
 use super::*;
 
 #[test]

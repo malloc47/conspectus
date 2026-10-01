@@ -382,7 +382,7 @@ fn invariant_ambiguous_mux_session_renders_as_leaf_after_adr_0071() {
     // no `AgentSessionMuxCandidate` rows are emitted — the muxes
     // surface on the shared-ancestor group detail instead.
     //
-    // H-UI-008: the tree row builder now consumes resolver winners
+    // The tree row builder now consumes resolver winners
     // only, so the "two cwd-equal candidates for a single session"
     // case resolves to a single Attached row (the resolver
     // tie-breaks alphabetically). Genuine ambiguity in the tree

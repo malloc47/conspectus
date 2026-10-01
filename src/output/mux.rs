@@ -1,4 +1,4 @@
-//! In-memory mux projection renderer (P11-011b / ADR 0082).
+//! In-memory mux projection renderer (ADR 0082).
 
 use std::collections::{HashMap, HashSet};
 

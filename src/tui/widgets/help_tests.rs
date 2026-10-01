@@ -1,4 +1,3 @@
-// Extracted from help.rs H-HYG-011 rolling wave via #[path = "help_tests.rs"] mod tests;
 use super::*;
 use ratatui::crossterm::event::{KeyEventKind, KeyEventState};
 
@@ -11,7 +10,7 @@ fn key(code: KeyCode) -> KeyEvent {
     }
 }
 
-/// H-HYG-007 wave 5: every `KEYBINDINGS` entry's key label
+/// Every `KEYBINDINGS` entry's key label
 /// must appear somewhere in `keymap_sections`'s rendered
 /// output. Guards against the pre-H-HYG-007 dispatcher /
 /// help-overlay drift the audit called out — a new binding

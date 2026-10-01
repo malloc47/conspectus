@@ -65,7 +65,7 @@ impl CodexAdapter {
 /// are no daemon / subagent helper processes to distinguish.
 static CODEX_RUNTIME_SIGNATURE: super::RuntimeSignature = super::RuntimeSignature {
     harness_key: HARNESS_KEY,
-    // H-EXT-005: the CLI hook-writer pid-resolver
+    // The CLI hook-writer pid-resolver
     // (`cli::harness_binaries`) accepts `codex-rs` as an
     // alternate binary name (rust rewrite lineage). Keep both
     // here so the CLI's registry-driven lookup gets the same
@@ -102,7 +102,7 @@ impl HarnessAdapter for CodexAdapter {
         Some(&crate::viewer::parser::codex::CodexParser)
     }
 
-    /// H-EXT-007: run the codex-log ADR 0048 aux reader as the
+    /// Run the codex-log ADR 0048 aux reader as the
     /// codex adapter's aux attribution pass. Reads the
     /// `CONSPECTUS_CODEX_LOG_WINDOW_SECONDS` env var directly so
     /// the pre-H-EXT-007 `LocalDiscoveryConfig.codex_log_window_seconds`
@@ -133,7 +133,7 @@ impl HarnessAdapter for CodexAdapter {
     }
 
     fn discover(&self, context: &DiscoveryContext) -> Result<GraphFragment> {
-        // H-REF-007: delegate the state-root lookup + fragment
+        // Delegate the state-root lookup + fragment
         // stamping to the shared envelope so this adapter only
         // describes its layout.
         super::discover_with_state_root(context, HARNESS_KEY, |root| {
@@ -602,7 +602,7 @@ struct SessionMetaPayload {
 }
 
 fn read_session_meta(path: &Path) -> Option<SessionMetaPayload> {
-    // H-SERVE-PERF-006: only the first line matters (the
+    // Only the first line matters (the
     // `session_meta` envelope), so read a single line rather
     // than the whole file. The pre-fix path used
     // `fs::read_to_string` which loaded the entire rollout —
@@ -627,7 +627,7 @@ fn read_session_meta(path: &Path) -> Option<SessionMetaPayload> {
 }
 
 // ---------------------------------------------------------------------------
-// H-SERVE-PERF-007: per-rollout scan cache.
+// Per-rollout scan cache.
 // ---------------------------------------------------------------------------
 //
 // `discover_state`'s `visit_rollouts` loop opens every `rollout-*.jsonl`

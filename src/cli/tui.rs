@@ -1,4 +1,4 @@
-//! `conspectus tui` command (H-REF-006 wave 12).
+//! `conspectus tui` command.
 //!
 //! Interactive TUI entry point plus its associated
 //! `SnapshotPaneFlag` / `SessionsGroupingFlag` value enums,
@@ -388,7 +388,7 @@ impl TuiArgs {
             theme: outcome.config.tui.theme.clone(),
             show_edge_meta: outcome.config.tui.detail.show_edge_meta,
             show_harness_chips: outcome.config.tui.show_harness_chips,
-            // H-MUX-SORT-001: startup default; the operator's last
+            // Startup default; the operator's last
             // choice is restored from persisted TUI state on top of
             // this, mirroring how `sort` flows.
             default_mux_recency: conspectus::tui::MuxRecency::default(),
@@ -424,7 +424,7 @@ impl TuiArgs {
 }
 
 fn current_tmux_session_name() -> Option<String> {
-    // H-EXT-011: reuse the trait-based probe. Kept as a
+    // Reuse the trait-based probe. Kept as a
     // separate helper because the TUI runtime consumes the
     // `Option<String>` shape directly (for the self-attach
     // guard); constructing the full HookTmuxRecord here would

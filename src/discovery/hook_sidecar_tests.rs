@@ -1,4 +1,3 @@
-// Extracted from hook_sidecar.rs H-HYG-011 rolling wave via #[path = "hook_sidecar_tests.rs"] mod tests;
 use std::fs;
 
 use tempfile::tempdir;
@@ -253,7 +252,7 @@ fn hook_record_with_stale_pid_is_ignored_and_does_not_emit_process_links() {
 
 #[test]
 fn hook_record_with_unknown_pid_stays_active() {
-    // H-MUXPROC-020: when the hook writer can't resolve the
+    // When the hook writer can't resolve the
     // harness's pid (non-Linux, or no ancestor matches the
     // harness binary), `record.pid` is persisted as `None` so
     // the discovery liveness check is skipped rather than

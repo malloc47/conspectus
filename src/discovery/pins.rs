@@ -8,7 +8,7 @@
 //! stores (user config first, then per-root project configs), parse
 //! each via the [`crate::pins`] schema module, and emit one
 //! [`PinCandidate`] per valid entry plus diagnostics for malformed
-//! files. The resolver pass (H-PIN-004) consumes the resulting sidecar
+//! files. The resolver pass consumes the resulting sidecar
 //! to perform mux-anchored binding and to synthesize the matching
 //! `LinkedToMux` candidates with `LocalPin`/`GlobalPin` provenance per
 //! ADR 0057.
@@ -97,7 +97,7 @@ fn local_pin_store_paths(
             paths.push(path);
         }
     }
-    // H-PIN-ROOT-001: registry-recorded project stores are already full
+    // Registry-recorded project stores are already full
     // `.conspectus.toml` paths, so they're appended directly (not walked
     // up from a search root). Dedup shares the same set as the
     // root-derived paths, and the registry read already dropped stores

@@ -1,4 +1,3 @@
-// Extracted from mod.rs H-HYG-011 rolling wave via #[path = "discovery_tests.rs"] mod tests;
 use super::*;
 use crate::model::{
     AgentSessionId, AgentSessionNode, GraphLink, LinkEndpoint, MuxSessionId, MuxSessionNode,
@@ -357,7 +356,7 @@ fn discover_local_warm_with_evicts_stale_slice_and_re_runs_cold() {
 
 #[test]
 fn warm_start_preserves_process_tree_links_on_a_git_only_cycle() {
-    // H-SERVE-PERF-001a (ADR 0091): the process-tree pass is
+    // ADR 0091: the process-tree pass is
     // class-gated. When no mux/harness provider runs this cycle (the
     // empty config runs nothing, standing in for a git/forge-only
     // tick), the prior cross_link agent↔mux link must survive without
@@ -669,7 +668,7 @@ fn discover_local_with_loads_project_pins_from_observed_session_cwd() {
 }
 
 // ---------------------------------------------------------------------------
-// H-SERVE-PERF-003: mux/harness slice fingerprint + /proc walk gate.
+// Mux/harness slice fingerprint + /proc walk gate.
 // ---------------------------------------------------------------------------
 
 fn snapshot_with_mux_session(session_key: &str, native_id: &str, epoch: i64) -> GraphSnapshot {
@@ -778,7 +777,7 @@ fn slice_fingerprint_ignores_freshness_epoch_changes_only() {
 
 #[test]
 fn slice_fingerprint_ignores_mux_activity_epoch_advances() {
-    // H-SERVE-PERF-008: MuxSessionNode.activity_epoch bumps on
+    // MuxSessionNode.activity_epoch bumps on
     // every tmux pane keystroke; treating that as a real content
     // change defeats the /proc walk gate on any operator with a
     // live tmux (i.e. all of them). Two snapshots that differ
@@ -834,7 +833,7 @@ fn slice_fingerprint_ignores_agent_last_active_epoch_advances() {
 
 #[test]
 fn slice_fingerprint_ignores_agent_last_message_preview_and_title_churn() {
-    // H-SERVE-PERF-008 follow-up: even with last_active_epoch
+    // Even with last_active_epoch
     // zeroed, the fingerprint still churned on any active box
     // because `last_message_preview` and `title` refresh whenever
     // an active session appends. Both are display-only — the

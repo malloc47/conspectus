@@ -1,4 +1,4 @@
-//! Full-value inspection modal (T8-030).
+//! Full-value inspection modal.
 //!
 //! Surfaces the untruncated text of a long detail-pane value (`cwd`,
 //! `command`, `url`, `last_message_preview`, …) in a centered modal
@@ -123,7 +123,7 @@ impl<'a> ValueModalWidget<'a> {
 
 impl Widget for ValueModalWidget<'_> {
     fn render(self, area: Rect, buf: &mut Buffer) {
-        // H-WIDG-004: framing through `tui_popup::Popup`.
+        // Framing through `tui_popup::Popup`.
         let modal = centered_modal_rect(area);
         let label_style = Style::default()
             .fg(self.theme.panel_focus_accent)

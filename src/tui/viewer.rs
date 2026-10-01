@@ -1,4 +1,4 @@
-//! External transcript-viewer launch (H-TRANSCRIPT-012, ADR 0019).
+//! External transcript-viewer launch (ADR 0019).
 //!
 //! Resolve the operator's selected agent session into a child-process
 //! viewer hand-off. The runtime mirrors P8-010's `tmux attach`

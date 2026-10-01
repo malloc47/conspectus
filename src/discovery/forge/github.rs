@@ -558,7 +558,7 @@ impl<R: GhRunner + 'static> DiscoveryProvider for GitHubForgeProvider<R> {
     }
 }
 
-/// H-EXT-012: `GitHubForgeProvider` also satisfies the
+/// `GitHubForgeProvider` also satisfies the
 /// `ForgeAdapter` shape so the `LocalDiscoveryConfig.forge_adapters`
 /// registry can carry it. Every method here delegates to the
 /// existing `DiscoveryProvider` impl (for `discover`) or to

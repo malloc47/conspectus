@@ -1,4 +1,4 @@
-//! Codex JSONL transcript reader (H-VIEWER-NATIVE-004).
+//! Codex JSONL transcript reader.
 //!
 //! Reads `<state_root>/sessions/YYYY/MM/DD/rollout-*-<session_key>.jsonl`
 //! and produces a [`TranscriptDocument`] in the viewer's
@@ -58,7 +58,7 @@ pub struct CodexParser;
 
 impl HarnessParser for CodexParser {
     fn read(&self, locator: &SessionLocator) -> ParseResult {
-        // H-EXT-006: locator.state_root is the codex state root
+        // locator.state_root is the codex state root
         // the adapter's `transcript_source` produced.
         let state_root = locator.state_root.as_path();
         let session_key = locator.session_key.as_str();
@@ -377,7 +377,7 @@ fn emit_tool_output_turn(
     });
 }
 
-/// Codex channel markers (per H-PREVIEW-006). When a message body
+/// Codex channel markers. When a message body
 /// is *exactly* one of these markers it represents an engine
 /// signal, not user prose, so we drop it. Partial matches are
 /// rendered normally since real text often quotes the marker

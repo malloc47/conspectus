@@ -1,4 +1,3 @@
-// Extracted from cli.rs H-HYG-011 rolling wave.
 use super::hook::{
     ensure_claude_hook, harness_binaries, has_claude_hook, remove_claude_hook,
     resolve_harness_pid_with,

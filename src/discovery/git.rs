@@ -207,12 +207,12 @@ impl GitProbe {
 }
 
 /// Git discovery provider. No `Clone`/`Debug`/`Eq` derive: the
-/// optional worktree backend is a boxed trait object (H-WT-002), so
+/// optional worktree backend is a boxed trait object, so
 /// `Default` is hand-written and the incidental derives are dropped.
 #[derive(Default)]
 pub struct GitDiscovery {
     probe: GitProbe,
-    /// Read-only worktree backend (H-WT-002). When set, git discovery
+    /// Read-only worktree backend. When set, git discovery
     /// enumerates each probed repo's *other* worktrees (the current
     /// checkout comes from the probe) and folds them in as `Checkout`
     /// nodes with linked/primary + lock/prune metadata. `None` keeps
@@ -225,7 +225,7 @@ impl GitDiscovery {
         Self::default()
     }
 
-    /// Attach the worktree read backend (H-WT-002).
+    /// Attach the worktree read backend.
     pub fn with_worktree_backend(mut self, backend: Box<dyn WorktreeBackend>) -> Self {
         self.worktree_backend = Some(backend);
         self
@@ -407,7 +407,7 @@ fn checkout_node(checkout_id: CheckoutId, probe: &GitProbeResult) -> CheckoutNod
             )
         }),
         // The probe already knows whether this checkout is the repo's
-        // primary working tree or a linked worktree (H-WT-002); lock /
+        // primary working tree or a linked worktree; lock /
         // prune status for the current checkout is left to the
         // enumeration path and stays `None` here.
         worktree: Some(if probe.is_linked_worktree() {
@@ -487,7 +487,7 @@ fn is_expected_absence(args: &[&str], code: Option<i32>) -> bool {
 }
 
 // ---------------------------------------------------------------------------
-// H-SERVE-PERF-004: cross-cycle cache for [`GitProbe::probe_cached`].
+// Cross-cycle cache for [`GitProbe::probe_cached`].
 // ---------------------------------------------------------------------------
 //
 // `observed_cwd_git_fragment` (in `discovery/mod.rs`) probes one cwd per

@@ -1,4 +1,4 @@
-//! `conspectus hook` subcommand tree (H-REF-006 wave 4).
+//! `conspectus hook` subcommand tree.
 //!
 //! Four subcommands: `write` (records a session-start hook
 //! payload into the sidecar store), `init` / `remove` (wire
@@ -361,7 +361,7 @@ fn read_linux_comm_of(pid: u32) -> Option<String> {
 /// milliseconds. The hook-sidecar discovery layer's liveness check
 /// (`src/discovery/hook_sidecar.rs`) treats records with a dead pid
 /// as ignored evidence, which would silently disable hook evidence
-/// entirely (see H-MUXPROC-020).
+/// entirely.
 ///
 /// Returns `None` when running on a non-Linux host, when the walk
 /// exhausts its depth budget, or when no ancestor matches. Callers
@@ -413,7 +413,7 @@ where
 /// agent process. Mirrors the harness keys recognized elsewhere in
 /// the cross-link and process-tree code.
 ///
-/// H-EXT-005: reads from the adapter registry's
+/// Reads from the adapter registry's
 /// `RuntimeSignature::process_command_basenames` so a new
 /// harness gets pid-pair resolution for free — no cli.rs
 /// match-table edit required.
@@ -440,7 +440,7 @@ fn harness_version_env(harness: &str) -> Option<String> {
 /// for `harness`. Returns `(None, None)` when the harness pid cannot
 /// be identified — the discovery liveness check then skips the pid
 /// branch entirely so the record stays Active rather than being
-/// marked Ignored against a stillborn writer pid (H-MUXPROC-020).
+/// marked Ignored against a stillborn writer pid.
 fn harness_pid_pair(harness: &str) -> (Option<i64>, Option<i64>) {
     match resolve_harness_pid(&harness_binaries(harness)) {
         Some((pid, ppid)) => (Some(i64::from(pid)), Some(i64::from(ppid))),
@@ -449,7 +449,7 @@ fn harness_pid_pair(harness: &str) -> (Option<i64>, Option<i64>) {
 }
 
 fn tmux_context() -> Option<HookTmuxRecord> {
-    // H-EXT-011: iterate the registered mux backends and ask
+    // Iterate the registered mux backends and ask
     // each for its current-session context. The first backend
     // to answer wins. The pre-H-EXT-011 direct `$TMUX` + `tmux
     // display-message` probe moved onto the SystemTmux

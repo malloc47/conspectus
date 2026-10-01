@@ -1,4 +1,4 @@
-//! Declarative keybinding table (H-HYG-007 wave 1).
+//! Declarative keybinding table.
 //!
 //! Introduces the `(mode/focus, key, action, help)` table shape
 //! the story mandates so the dispatcher, the focus remap, the
@@ -143,7 +143,7 @@ pub const KEYBINDINGS: &[KeyBinding] = &[
         help_text: "Switch to Mux view",
     },
     // Union / PRs / Forks views are hidden from the interactive UI
-    // for now (H-VIEW-001); their `3`/`4`/`5` accelerators are removed
+    // for now; their `3`/`4`/`5` accelerators are removed
     // alongside the trimmed `VIEW_OPTIONS`. The `View` variants and CLI
     // `table` projections remain so this stays a UI-surface hide.
     KeyBinding {
@@ -254,7 +254,7 @@ pub const KEYBINDINGS: &[KeyBinding] = &[
         action: || Action::Msg(Box::new(crate::tui::Msg::ToggleEdgeMeta)),
         help_text: "Toggle explorer edge-meta visibility",
     },
-    // H-HYG-007 wave 4: parametric-guard shortcuts. Each
+    // Parametric-guard shortcuts. Each
     // matcher fires on any non-Ctrl modifier + the char, so
     // `Ctrl-R` etc. reserved by the terminal doesn't collide.
     KeyBinding {
@@ -430,7 +430,7 @@ pub fn translate_via_table(modifiers: KeyModifiers, code: KeyCode) -> Option<Act
     None
 }
 
-/// H-HYG-007 wave 5: render a KeyBinding's key as an operator-
+/// Render a KeyBinding's key as an operator-
 /// friendly label suitable for a help overlay row (e.g. `Ctrl-C`,
 /// `Enter`, `q`, `↓`). Used by the coherence drift test — every
 /// key label produced here must appear somewhere in

@@ -1,4 +1,3 @@
-// Extracted from widget.rs H-HYG-011 rolling wave via #[path = "widget_tests.rs"] mod tests;
 use super::*;
 use crate::viewer::model::{
     SessionLocator, TranscriptDocument, TranscriptMeta, TranscriptTurn, TurnKind, TurnRole,

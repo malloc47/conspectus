@@ -1,4 +1,4 @@
-//! `conspectus graph` command (H-REF-006 wave 6).
+//! `conspectus graph` command.
 //!
 //! Emits the resolved graph as JSON, DOT, or HTML.
 

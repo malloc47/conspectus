@@ -1,4 +1,4 @@
-//! Claude Code JSONL transcript reader (H-VIEWER-NATIVE-003).
+//! Claude Code JSONL transcript reader.
 //!
 //! Reads `<state_root>/projects/*/<session_key>.jsonl` and produces
 //! a [`TranscriptDocument`] in the viewer's normalized
@@ -55,7 +55,7 @@ pub struct ClaudeCodeParser;
 
 impl HarnessParser for ClaudeCodeParser {
     fn read(&self, locator: &SessionLocator) -> ParseResult {
-        // H-EXT-006: the locator is already dispatched to us via
+        // The locator is already dispatched to us via
         // the registry, so `state_root` here is the claude-code
         // state root the adapter's `transcript_source` produced.
         let state_root = locator.state_root.as_path();

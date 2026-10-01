@@ -1245,14 +1245,14 @@ impl ProcessPaneEvidence {
     }
 
     fn is_opencode_subagent_process(&self) -> bool {
-        // H-EXT-004: delegate to the registered adapter's
+        // Delegate to the registered adapter's
         // signature. Preserves the pre-H-EXT-004 opencode-only
         // rule.
         self.signature_role_check(|sig| (sig.is_subagent_process)(&self.command))
     }
 
     fn is_claude_background_process(&self) -> bool {
-        // H-EXT-004: delegate to the registered adapter's
+        // Delegate to the registered adapter's
         // signature. Preserves the pre-H-EXT-004 claude-code-only
         // rule; adapters that don't ship helper daemons point
         // their `is_background_process` at
@@ -1464,7 +1464,7 @@ fn active_pane_process_evidence(
 }
 
 fn process_command_harnesses(command: &str) -> BTreeSet<String> {
-    // H-EXT-004: iterate registered adapters and consult each
+    // Iterate registered adapters and consult each
     // signature's `process_command_basenames`. The pre-H-EXT-004
     // hand-rolled match table for the four v1 harnesses now
     // lives on the per-adapter signatures.
@@ -1598,7 +1598,7 @@ where
 
     for path in paths {
         let path = path.as_ref();
-        // H-EXT-004: match the path against every registered
+        // Match the path against every registered
         // adapter's `fd_path_patterns`. First match wins so
         // paths that contain multiple harness fragments
         // (rare) resolve to the first-registered adapter,
@@ -1680,7 +1680,7 @@ fn looks_like_command_flag(value: &str) -> bool {
 }
 
 fn session_keys_for_harness_text(harness: &str, value: &str) -> BTreeSet<String> {
-    // H-EXT-004: dispatch to the registered adapter's
+    // Dispatch to the registered adapter's
     // `extract_session_keys` callback. Unknown harnesses fall
     // back to the generic UUID grammar via
     // `crate::discovery::harness::generic_uuid_like_session_keys`
@@ -1705,7 +1705,7 @@ fn active_pane_harnesses(mux: &MuxSessionNode) -> BTreeSet<String> {
 }
 
 fn command_harnesses(command: &str) -> BTreeSet<String> {
-    // H-EXT-004: iterate registered adapters and consult each
+    // Iterate registered adapters and consult each
     // signature's `command_substrings` (loose case-insensitive
     // contains). The pre-H-EXT-004 hand-rolled if-chain for the
     // four v1 harnesses now lives on the per-adapter signatures.

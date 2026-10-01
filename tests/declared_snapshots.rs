@@ -233,7 +233,7 @@ impl DeclaredFixture {
     }
 
     /// Rewrite path-derived fields on the snapshot so the rendered short
-    /// row identifier (H-TBL-002) — which hashes the full `NodeId`,
+    /// row identifier — which hashes the full `NodeId`,
     /// including `AgentSessionId.state_scope` — is stable across runs.
     fn normalize_snapshot_paths(&self, snapshot: &mut GraphSnapshot) {
         for node in &mut snapshot.nodes {

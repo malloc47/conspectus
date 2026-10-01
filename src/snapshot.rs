@@ -198,7 +198,7 @@ impl Header {
 
 /// Serialize `snapshot` to the on-disk byte layout (header +
 /// rkyv archive). Returns the bytes ready to be `mmap`'d or
-/// written verbatim. The daemon dual-write path (P11-005) calls
+/// written verbatim. The daemon dual-write path calls
 /// this once per cycle so the same bytes can land in the
 /// on-disk file *and* the in-memory cache the socket
 /// `snapshot` command serves from.
@@ -405,7 +405,7 @@ pub fn deserialize_owned(handle: &SnapshotMmap) -> Result<GraphSnapshot> {
 
 /// Decode a complete on-disk byte sequence (header + rkyv
 /// archive) into an owned [`GraphSnapshot`]. Used by the
-/// daemon-socket consumer path (P11-007) where the bytes
+/// daemon-socket consumer path where the bytes
 /// already live in memory — writing them to a tmp file just to
 /// call [`open_mmap`] would be silly. Validation policy mirrors
 /// [`open_mmap`]: the payload is validated via `bytecheck` so

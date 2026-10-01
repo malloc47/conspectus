@@ -132,7 +132,7 @@ pub fn default_root() -> Option<PathBuf> {
     })
 }
 
-// H-HYG-001: `hook::current_epoch` re-exports the canonical
+// `hook::current_epoch` re-exports the canonical
 // helper from `crate::discovery::current_epoch`. Pre-H-HYG-001
 // there were 5 verbatim copies scattered across the codebase;
 // this preserves the public call path
@@ -141,7 +141,7 @@ pub fn default_root() -> Option<PathBuf> {
 pub use crate::discovery::current_epoch;
 
 /// Build a hook sidecar record from a harness's SessionStart
-/// hook payload (H-EXT-005). Looks up the harness key against
+/// hook payload. Looks up the harness key against
 /// the adapter registry and delegates to
 /// `HarnessAdapter::hook_record_from_payload`.
 ///

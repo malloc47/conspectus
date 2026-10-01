@@ -1,4 +1,4 @@
-//! Gutter-and-chip per-turn rendering (H-VIEWER-NATIVE-011).
+//! Gutter-and-chip per-turn rendering.
 //!
 //! Inspired by `claude-history`: a right-aligned colored "chip" in
 //! a left gutter identifies the turn (you / ai /
@@ -276,7 +276,7 @@ fn chip_color(turn: &TranscriptTurn, theme: &Theme) -> ratatui::style::Color {
         (_, TurnKind::Thinking) => theme.secondary_text,
         (_, TurnKind::ToolUse) => theme.warning,
         (_, TurnKind::ToolResult) => theme.warning,
-        // H-EXT-003: semantic reuse of the codex identity color
+        // Semantic reuse of the codex identity color
         // for user turns. Kept in one place via the theme's
         // registry-aware lookup so a theme override to
         // `[tui.theme.harness].codex` also recolors user turns.

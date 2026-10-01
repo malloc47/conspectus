@@ -135,9 +135,9 @@ impl HarnessAdapter for ClaudeCodeAdapter {
         Some(&crate::viewer::parser::claude_code::ClaudeCodeParser)
     }
 
-    /// H-TBL-014: the row-label column is tight, so `claude-code`
+    /// The row-label column is tight, so `claude-code`
     /// renders as `claude`. Kept here alongside the adapter
-    /// (H-EXT-002) instead of the rows-module match arm that
+    /// instead of the rows-module match arm that
     /// pre-registry callers used.
     fn display_label(&self) -> &'static str {
         "claude"
@@ -148,7 +148,7 @@ impl HarnessAdapter for ClaudeCodeAdapter {
     }
 
     fn discover(&self, context: &DiscoveryContext) -> Result<GraphFragment> {
-        // H-REF-007: delegate to the shared state-root envelope.
+        // Delegate to the shared state-root envelope.
         super::discover_with_state_root(context, HARNESS_KEY, |root| {
             discover_state(root, context.caches())
         })
@@ -730,7 +730,7 @@ fn coalesce_slashes(path: &str) -> String {
 }
 
 // ---------------------------------------------------------------------------
-// H-SERVE-PERF-007: per-session-file scan cache.
+// Per-session-file scan cache.
 // ---------------------------------------------------------------------------
 //
 // `discover_state` walks every `*.jsonl` under `~/.claude/projects/*/` on

@@ -1,4 +1,3 @@
-// Extracted from mod.rs H-HYG-011 rolling wave via #[path = "server_tests.rs"] mod tests;
 use super::*;
 use crate::hook::{HookRecord, HookTmuxRecord, SCHEMA_VERSION};
 use crate::model::{

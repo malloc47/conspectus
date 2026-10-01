@@ -1,4 +1,4 @@
-//! In-memory agent projection renderer (P11-011b / ADR 0082).
+//! In-memory agent projection renderer (ADR 0082).
 //!
 //! Cells from ADR 0006:
 //! `id` `agent` `cwd` `mux` `mux-conf` `pr` `pr-conf` `lineage`

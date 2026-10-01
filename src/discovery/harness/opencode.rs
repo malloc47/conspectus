@@ -104,7 +104,7 @@ impl HarnessAdapter for OpenCodeAdapter {
         &self,
         session: &crate::model::AgentSessionId,
     ) -> Option<crate::viewer::model::SessionLocator> {
-        // H-EXT-006: resolve the SQLite database path. The
+        // Resolve the SQLite database path. The
         // pre-H-EXT-006 shape in `viewer_bridge::locator_for_session`
         // treated the session's `state_scope` as either the
         // database file itself or its containing directory; both
@@ -131,7 +131,7 @@ impl HarnessAdapter for OpenCodeAdapter {
     }
 
     fn discover(&self, context: &DiscoveryContext) -> Result<GraphFragment> {
-        // H-REF-007: delegate to the shared state-root envelope.
+        // Delegate to the shared state-root envelope.
         super::discover_with_state_root(context, HARNESS_KEY, |root| {
             discover_state(root, context.caches())
         })
@@ -598,7 +598,7 @@ fn read_info(path: &Path) -> Option<SessionInfo> {
 }
 
 // ---------------------------------------------------------------------------
-// H-SERVE-PERF-010: opencode.db scan cache.
+// opencode.db scan cache.
 // ---------------------------------------------------------------------------
 //
 // `read_sqlite_sessions` opens `~/.local/share/opencode/opencode.db`

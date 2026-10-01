@@ -30,7 +30,7 @@ pub enum Effect {
     /// Post a transient status-bar toast. Non-blocking; input
     /// continues to flow to the underlying view.
     Toast(String),
-    /// Persist the current TUI state to disk (F8-013). Best-effort;
+    /// Persist the current TUI state to disk. Best-effort;
     /// failures are silently swallowed by the executor.
     Persist,
     /// Quit the event loop after the current frame.
@@ -102,7 +102,7 @@ pub enum ExecSpec {
     /// `conspectus mux launch <harness> --name <name> …
     /// --no-attach`, refresh so the row tree picks up the new mux
     /// and its attributed harness session, then attach
-    /// (H-MUX-LAUNCH-001 / ADR 0096). No pin is written.
+    /// (ADR 0096). No pin is written.
     MuxLaunch { request: MuxLaunchRequest },
 }
 
@@ -173,11 +173,11 @@ pub enum StoreOp {
         new_name: String,
     },
     /// Create a worktree via the configured mutation backend
-    /// (H-WT-004b, ADR 0092). The executor resolves the backend,
+    /// (ADR 0092). The executor resolves the backend,
     /// runs `create`, toasts the outcome, and refreshes.
     WorktreeCreate { repo_root: String, branch: String },
-    /// Remove a worktree via the configured mutation backend
-    /// (H-WT-004b). `force` is set when the operator confirmed
+    /// Remove a worktree via the configured mutation backend.
+    /// `force` is set when the operator confirmed
     /// removal past the live-session guard.
     WorktreeRemove {
         repo_root: String,
@@ -185,12 +185,12 @@ pub enum StoreOp {
         force: bool,
     },
     /// Merge a worktree's branch back and tear it down via the
-    /// configured mutation backend (H-WT-005).
+    /// configured mutation backend.
     WorktreeMerge {
         worktree_root: String,
         target: Option<String>,
     },
-    /// Close down a whole stream of work (H-WT-006, ADR 0093): the
+    /// Close down a whole stream of work (ADR 0093): the
     /// executor rebuilds the close-down plan from the held snapshot,
     /// terminates the worktree's mux sessions (graceful->hard),
     /// merges (`discard == false`) or removes (`discard == true`) the
@@ -201,6 +201,6 @@ pub enum StoreOp {
         discard: bool,
     },
     /// Prune worktrees merged into the default branch via the
-    /// configured mutation backend (H-WT-008).
+    /// configured mutation backend.
     WorktreePrune { repo_root: String },
 }

@@ -1,4 +1,4 @@
-//! Declared-link store: read-modify-write helpers (H-REF-005).
+//! Declared-link store: read-modify-write helpers.
 //!
 //! Encapsulates the file-I/O side of the declared TOML store:
 //! finding the target file, loading it for edit, upserting or

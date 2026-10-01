@@ -1,4 +1,3 @@
-// Extracted from pins.rs H-HYG-011 rolling wave via #[path = "pins_tests.rs"] mod tests;
 use super::*;
 use crate::config::{ConfigLoader, PROJECT_CONFIG_FILENAME, USER_CONFIG_RELATIVE};
 use crate::model::{AgentSessionId, AgentSessionNode};
@@ -71,7 +70,7 @@ fn empty_when_no_config_files_exist() {
 
 #[test]
 fn loads_registry_recorded_pin_store_outside_every_scan_root() {
-    // H-PIN-ROOT-001: a pin lives in a repo that is neither a scan root
+    // A pin lives in a repo that is neither a scan root
     // nor referenced by any discovered node cwd. Without the registry
     // it would be invisible; recording its store path keeps it loading.
     let tmp = TempDir::new().expect("tmp");

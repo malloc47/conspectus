@@ -1,4 +1,3 @@
-// Extracted from declared.rs H-HYG-011 rolling wave via #[path = "declared_tests.rs"] mod tests;
 use std::fs;
 
 use tempfile::TempDir;

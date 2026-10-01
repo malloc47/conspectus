@@ -1,4 +1,3 @@
-// Extracted from theme.rs H-HYG-011 rolling wave via #[path = "theme_tests.rs"] mod tests;
 use super::*;
 
 #[test]
@@ -33,7 +32,7 @@ fn default_node_kind_colors_match_adr_0073_slate() {
 #[test]
 fn default_preserves_inline_literals() {
     let theme = Theme::default();
-    // H-EXT-003: both the display label and the harness key
+    // Both the display label and the harness key
     // resolve to the same entry in `harness_colors`.
     assert_eq!(theme.harness_color("claude"), Color::Magenta);
     assert_eq!(theme.harness_color("claude-code"), Color::Magenta);

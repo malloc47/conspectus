@@ -1,4 +1,4 @@
-//! `/` in-view search overlay (T8-017).
+//! `/` in-view search overlay.
 //!
 //! Reuses the ADR 0030 text-input primitive for the query line and
 //! displays a list of matches ranked by [`crate::tui::search::rank`].
@@ -175,7 +175,7 @@ impl<'a> SearchOverlayWidget<'a> {
 
 impl Widget for SearchOverlayWidget<'_> {
     fn render(self, area: Rect, buf: &mut Buffer) {
-        // H-WIDG-004: framing through `tui_popup::Popup`; the body
+        // Framing through `tui_popup::Popup`; the body
         // wrapper reports the same cap dims `centered_modal_rect`
         // produces so auto-sizing reproduces the legacy rect.
         let modal = centered_modal_rect(area);
@@ -432,7 +432,7 @@ fn compute_scroll(cursor: usize, visible_rows: usize, total: usize) -> usize {
 }
 
 /// Per-event context the search overlay reads through the
-/// [`crate::tui::Overlay`] trait (H-TUI-006). Carries the current
+/// [`crate::tui::Overlay`] trait. Carries the current
 /// visible-row items so the widget can rerank matches on every
 /// keystroke.
 pub struct SearchContext<'a> {

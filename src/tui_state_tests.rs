@@ -1,4 +1,3 @@
-// Extracted from tui_state.rs H-HYG-011 rolling wave via #[path = "tui_state_tests.rs"] mod tests;
 use super::*;
 use tempfile::TempDir;
 
@@ -129,7 +128,7 @@ fn full_state_round_trips_sort_filter_and_view_slots() {
 
 #[test]
 fn mux_recency_basis_round_trips() {
-    // H-MUX-SORT-001: the mux recency basis survives a write/read
+    // The mux recency basis survives a write/read
     // cycle so the operator's choice persists across restarts.
     let dir = TempDir::new().expect("tempdir");
     let cache = cache_in(&dir);

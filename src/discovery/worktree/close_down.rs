@@ -1,4 +1,4 @@
-//! Close-down orchestration (H-WT-006, ADR 0093).
+//! Close-down orchestration (ADR 0093).
 //!
 //! "Close down a stream of work" is the compound gesture that lands or
 //! discards a worktree's branch, terminates the mux/agent sessions

@@ -112,7 +112,7 @@ pub struct App {
     /// Whether linked-entity summary rows in the right-panel detail
     /// are expanded in place.
     detail_links_expanded: bool,
-    /// Right-panel graph explorer state (T8-027 / T8-028). Carries
+    /// Right-panel graph explorer state. Carries
     /// the focused node view, the navigation cursor, group expansion,
     /// and the breadcrumb stack for drilldown. `None` until the
     /// reducer has resolved a selection into a node view.
@@ -120,7 +120,7 @@ pub struct App {
     /// Which panel currently consumes navigation keys.
     focus: Focus,
     /// Whether the explorer's link rows render the trailing
-    /// `provenance · confidence · state` meta line (T8-042).
+    /// `provenance · confidence · state` meta line.
     /// Initialized from `RunConfig::show_edge_meta`; flipped at
     /// runtime by `Msg::ToggleEdgeMeta`.
     edge_meta_visible: bool,
@@ -150,7 +150,7 @@ pub struct App {
     /// The status bar renders this as a stale/error marker.
     refresh_failure: Option<String>,
     /// In-flight async operations the status bar surfaces as
-    /// animated spinner chips (H-WIDG-007). Ordered `Vec` so the
+    /// animated spinner chips. Ordered `Vec` so the
     /// render order matches the emit order; entries are keyed by
     /// `InFlightKind` for idempotent start/finish semantics.
     in_flight_ops: Vec<InFlightOp>,
@@ -197,7 +197,7 @@ pub struct App {
     /// that haven't migrated yet; each wave deletes one field and
     /// moves the state to a `Modal` variant.
     modal_stack: Vec<crate::tui::Modal>,
-    /// Active transient toast (T8-040, H-WIDG-003). The
+    /// Active transient toast. The
     /// `ratatui_comfy_toaster::ToastEngine` owns the per-toast
     /// lifetime + bordered rendering; the runtime calls
     /// [`Self::prepare_toast_for_render`] before each draw so
@@ -219,27 +219,27 @@ pub struct App {
     /// recency-vs-hierarchy choice is view-independent in operator
     /// practice. Seeded from [`RunConfig::default_sort`].
     sort: super::Sort,
-    /// Mux-view recency basis (H-MUX-SORT-001). Selects which epoch
+    /// Mux-view recency basis. Selects which epoch
     /// `Sort::Recency` orders the mux tree by (activity / created /
     /// last-attached). Mux-scoped: no other view reads it. Seeded from
     /// [`RunConfig::default_mux_recency`].
     mux_recency: super::MuxRecency,
-    /// Active row filter (ADR 0031, F8-003). Mirrors the active
+    /// Active row filter (ADR 0031). Mirrors the active
     /// view's slot in `view_states` so callers don't pay a map
     /// lookup per read. Kept in sync via `switch_to_view` /
     /// `Msg::SetFilter`.
     filter: crate::filter::RowFilter,
-    /// Active grouping (ADR 0031, F8-003). Same caching pattern as
+    /// Active grouping (ADR 0031). Same caching pattern as
     /// `filter` — mirrors the active view's slot.
     grouping: super::Grouping,
     /// Saved UI state for views the operator is not currently
-    /// looking at (ADR 0031, F8-003). On view switch the active
+    /// looking at (ADR 0031). On view switch the active
     /// slot is saved here and the target slot loaded into the
     /// active fields. Sort stays global, so it lives on `App`
     /// rather than per-view.
     view_states: BTreeMap<View, ViewStateSlot>,
-    /// Optional persistence sink for the last-active view
-    /// (F8-013). When `Some`, every view switch best-effort writes
+    /// Optional persistence sink for the last-active view.
+    /// When `Some`, every view switch best-effort writes
     /// the new active view to
     /// `$XDG_STATE_HOME/conspectus/tui-state.json`. The runtime
     /// sets this at startup; `--no-resume-view` and `--snapshot`
@@ -283,7 +283,7 @@ pub enum Focus {
 }
 
 /// Discriminant for an async operation the TUI wants to signal to
-/// the operator (H-WIDG-007 substrate). Grows with each new async
+/// the operator. Grows with each new async
 /// surface — forge-metadata fetches, transcript loads, agent-deck
 /// queries. The reducer stores at most one `InFlightOp` per kind, so
 /// starting a new op with the same kind replaces any prior in-flight
@@ -331,7 +331,7 @@ pub struct ExplorerState {
     /// the left tree points at.
     pub breadcrumb: Vec<BreadcrumbHop>,
     /// Whether the Node zone is rendering its full per-kind field
-    /// set (T8-034) instead of the top-5 Core summary. Per-focused-
+    /// set instead of the top-5 Core summary. Per-focused-
     /// node: resets to `false` when drilling into a neighbor and is
     /// restored along with the prior focus by Backspace.
     pub full_detail_expanded: bool,
@@ -415,7 +415,7 @@ pub enum Msg {
     /// used by the header's `updated Ns ago` indicator.
     /// `initial_selection_hint` is consulted on the *first* SetData
     /// (when no prior selection exists) to pre-select the launch-
-    /// context row (T8-013) instead of the leading row in the tree;
+    /// context row instead of the leading row in the tree;
     /// later refreshes ignore the hint and prefer the retained
     /// selection.
     SetData {
@@ -432,8 +432,8 @@ pub enum Msg {
     /// and the `initial_selection_hint` path is skipped because
     /// `SetTree` never fires before the first `SetData`.
     SetTree(RowTree),
-    /// Set the left-panel selection to a specific row id
-    /// (H-TUI-006). Used by the search overlay's Confirm outcome so
+    /// Set the left-panel selection to a specific row id.
+    /// Used by the search overlay's Confirm outcome so
     /// its selection change flows through the reducer instead of a
     /// direct `App::set_selection` call inside a specialized runtime
     /// handler.
@@ -446,8 +446,8 @@ pub enum Msg {
     /// many rows constitute one page. Pass 1 if unknown.
     PageDown(u16),
     PageUp(u16),
-    /// Left panel: post-layout viewport dimensions
-    /// (H-TUI-005 wave 2). The draw path dispatches this before
+    /// Left panel: post-layout viewport dimensions.
+    /// The draw path dispatches this before
     /// building the left panel's line list so the reducer can
     /// reconcile `left_scroll` from the current selection and
     /// viewport height instead of the renderer poking a `Cell`
@@ -460,7 +460,7 @@ pub enum Msg {
         viewport_height: u16,
     },
     /// Explorer (right panel): post-layout cursor row span and
-    /// viewport dimensions (H-TUI-005 wave 2). The draw path
+    /// viewport dimensions. The draw path
     /// dispatches this after computing the post-wrap row span of
     /// the explorer cursor so the reducer can reconcile
     /// `explorer_scroll`. Unlike the left panel, cursor row
@@ -490,7 +490,7 @@ pub enum Msg {
     /// selected node's compact link rows.
     ToggleLinkedDetails,
     /// Right panel (graph explorer): move the cursor down one row
-    /// in the flat row list (T8-028).
+    /// in the flat row list.
     ExplorerNavDown,
     /// Right panel (graph explorer): move the cursor up one row.
     ExplorerNavUp,
@@ -514,12 +514,12 @@ pub enum Msg {
     ExplorerToggleGroup,
     /// Right panel (graph explorer): toggle the visibility of the
     /// link rows' trailing `provenance · confidence · state` meta
-    /// line (T8-042). The default is hidden; the `★` resolver-winner
+    /// line. The default is hidden; the `★` resolver-winner
     /// marker and `⚠` group-level conflict aggregate stay visible
     /// regardless.
     ToggleEdgeMeta,
     /// Right panel (graph explorer): toggle the Expanded Node Detail
-    /// view (T8-034). Swaps the Node zone's top-5 render for the
+    /// view. Swaps the Node zone's top-5 render for the
     /// full per-kind field set. Per-focused-node: resets when
     /// drilling into a neighbor and is restored along with the
     /// prior focus on Backspace. No-op for node kinds whose
@@ -550,13 +550,13 @@ pub enum Msg {
     },
     /// Update the provider availability status surfaced as chips
     /// in the status bar. The runtime populates this from
-    /// discovery diagnostics and env-var toggles (T8-003).
+    /// discovery diagnostics and env-var toggles.
     SetProviderStatus(ProviderStatus),
     /// Record that the most recent refresh failed. The previous
     /// good snapshot remains in place; this message surfaces a
-    /// stale indicator in the header or status bar (T8-003).
+    /// stale indicator in the header or status bar.
     SetRefreshFailure(String),
-    /// Start tracking a new in-flight async operation (H-WIDG-007).
+    /// Start tracking a new in-flight async operation.
     /// The reducer stamps `Instant::now()` and stores the op; the
     /// status bar renders one animated spinner chip per active op.
     /// Idempotent by `InFlightKind`: starting the same kind twice
@@ -565,7 +565,7 @@ pub enum Msg {
         kind: InFlightKind,
         label: String,
     },
-    /// Mark an in-flight async operation complete (H-WIDG-007).
+    /// Mark an in-flight async operation complete.
     /// Removes the matching kind from the tracker; a no-op if no
     /// op with that kind is currently in flight.
     InFlightFinish(InFlightKind),
@@ -635,30 +635,30 @@ pub enum Msg {
     /// toast. The alias-rename branch also chains an optional
     /// native mux rename inside the executor per lockstep.
     CommitRename(String),
-    /// Commit the worktree menu's "New worktree" branch input
-    /// (H-WT-004b). Reducer emits
+    /// Commit the worktree menu's "New worktree" branch input.
+    /// Reducer emits
     /// `Effect::WriteStore(StoreOp::WorktreeCreate)`.
     CommitWorktreeCreate {
         repo_root: String,
         branch: String,
     },
-    /// Commit the worktree menu's "Remove worktree" confirm
-    /// (H-WT-004b). Reducer emits
+    /// Commit the worktree menu's "Remove worktree" confirm.
+    /// Reducer emits
     /// `Effect::WriteStore(StoreOp::WorktreeRemove)`.
     CommitWorktreeRemove {
         repo_root: String,
         branch: String,
         force: bool,
     },
-    /// Commit the worktree menu's "Merge back & close" confirm
-    /// (H-WT-005). Reducer emits
+    /// Commit the worktree menu's "Merge back & close" confirm.
+    /// Reducer emits
     /// `Effect::WriteStore(StoreOp::WorktreeMerge)`.
     CommitWorktreeMerge {
         worktree_root: String,
         target: Option<String>,
     },
-    /// Commit the worktree menu's "Close down stream" choice
-    /// (H-WT-006). Reducer emits
+    /// Commit the worktree menu's "Close down stream" choice.
+    /// Reducer emits
     /// `Effect::WriteStore(StoreOp::WorktreeCloseDown)`. `discard`
     /// drops the branch; otherwise it is merged back first.
     CommitWorktreeCloseDown {
@@ -666,8 +666,8 @@ pub enum Msg {
         branch: String,
         discard: bool,
     },
-    /// Commit the worktree menu's "Prune merged worktrees" confirm
-    /// (H-WT-008). Reducer emits
+    /// Commit the worktree menu's "Prune merged worktrees" confirm.
+    /// Reducer emits
     /// `Effect::WriteStore(StoreOp::WorktreePrune)`.
     CommitWorktreePrune {
         repo_root: String,
@@ -683,13 +683,13 @@ pub enum Msg {
     },
     /// Mux action menu → open the bare-mux form. Reducer arm pushes
     /// the modal after seeding defaults from the current selection
-    /// (H-MUX-LAUNCH-001 / ADR 0096).
+    /// (ADR 0096).
     OpenNewMuxForm,
     /// Mux action menu → open the mux-launch form. Reducer arm pushes
     /// the modal after seeding defaults from the current selection
-    /// (H-MUX-LAUNCH-001 / ADR 0096).
+    /// (ADR 0096).
     OpenMuxLaunchForm,
-    /// Commit the mux-launch form (H-MUX-LAUNCH-001 / ADR 0096).
+    /// Commit the mux-launch form (ADR 0096).
     /// Reducer emits `Effect::Exec(ExecSpec::MuxLaunch)` so the
     /// runtime re-execs into `conspectus mux launch <harness> …`,
     /// refreshes discovery, then attaches. No pin write; no sidecar.
@@ -703,7 +703,7 @@ pub enum Msg {
     /// Update the active view's grouping (ADR 0031). Reducer
     /// mutates the projection state and re-derives the tree.
     SetGrouping(super::Grouping),
-    /// Update the active row filter (ADR 0031, F8-003). Reducer
+    /// Update the active row filter (ADR 0031). Reducer
     /// mutates the projection state and re-derives the tree.
     SetFilter(crate::filter::RowFilter),
     /// Update the global sort (ADR 0031). Reducer mutates the
@@ -711,7 +711,7 @@ pub enum Msg {
     /// sessions grouping forces recency regardless of the
     /// requested value.
     SetSort(super::Sort),
-    /// Update the mux-view recency basis (H-MUX-SORT-001). Reducer
+    /// Update the mux-view recency basis. Reducer
     /// stores the basis, forces `Sort::Recency` so the choice takes
     /// effect, and re-derives the tree.
     SetMuxRecency(super::MuxRecency),
@@ -856,7 +856,7 @@ impl App {
         }
     }
 
-    /// Active worktree action menu (H-WT-004b), if on top of the stack.
+    /// Active worktree action menu, if on top of the stack.
     pub fn worktree_menu(&self) -> Option<&crate::tui::widgets::worktree_menu::WorktreeMenuState> {
         match self.modal_stack.last()? {
             crate::tui::Modal::WorktreeMenu(state) => Some(state.as_ref()),
@@ -874,7 +874,7 @@ impl App {
         }
     }
 
-    /// Push a worktree action menu onto the modal stack (H-WT-004b).
+    /// Push a worktree action menu onto the modal stack.
     pub fn open_worktree_menu(
         &mut self,
         state: crate::tui::widgets::worktree_menu::WorktreeMenuState,
@@ -893,7 +893,7 @@ impl App {
         }
     }
 
-    /// Active bare mux form (H-MUX-NEW-001), if on top of the stack.
+    /// Active bare mux form, if on top of the stack.
     pub fn new_mux_form(&self) -> Option<&crate::tui::widgets::new_mux::NewMuxFormState> {
         match self.modal_stack.last()? {
             crate::tui::Modal::NewMux(state) => Some(state),
@@ -911,7 +911,7 @@ impl App {
         }
     }
 
-    /// Push the bare mux form onto the modal stack (H-MUX-NEW-001).
+    /// Push the bare mux form onto the modal stack.
     pub fn open_new_mux_form(&mut self, state: crate::tui::widgets::new_mux::NewMuxFormState) {
         self.modal_stack.push(crate::tui::Modal::NewMux(state));
     }
@@ -923,7 +923,7 @@ impl App {
         }
     }
 
-    /// Active mux action menu (H-MUX-LAUNCH-001), if on top of stack.
+    /// Active mux action menu, if on top of stack.
     pub fn mux_menu(&self) -> Option<&crate::tui::widgets::mux_menu::MuxMenuState> {
         match self.modal_stack.last()? {
             crate::tui::Modal::MuxMenu(state) => Some(state),
@@ -948,7 +948,7 @@ impl App {
         }
     }
 
-    /// Active mux-launch form (H-MUX-LAUNCH-001), if on top of stack.
+    /// Active mux-launch form, if on top of stack.
     pub fn mux_launch_form(&self) -> Option<&crate::tui::widgets::mux_launch::MuxLaunchFormState> {
         match self.modal_stack.last()? {
             crate::tui::Modal::MuxLaunch(state) => Some(state.as_ref()),
@@ -990,7 +990,7 @@ impl App {
         self.pending_pin_remove = pin_id;
     }
 
-    /// Active controls-overlay state (ADR 0031, F8-004), if any.
+    /// Active controls-overlay state (ADR 0031), if any.
     /// Lives on the modal stack (ADR 0085 contract 3); this
     /// accessor peeks the top entry.
     pub fn controls_overlay(&self) -> Option<&crate::tui::widgets::controls::ControlsOverlayState> {
@@ -1084,7 +1084,7 @@ impl App {
         }
     }
 
-    /// Active `/` search overlay (T8-017), if any. Lives on the
+    /// Active `/` search overlay, if any. Lives on the
     /// modal stack (ADR 0085 contract 3); this accessor peeks the
     /// top entry.
     pub fn search_overlay(&self) -> Option<&crate::tui::widgets::search::SearchOverlayState> {
@@ -1117,7 +1117,7 @@ impl App {
         }
     }
 
-    /// Active `?` help overlay (F8-011), if any. Lives on the modal
+    /// Active `?` help overlay, if any. Lives on the modal
     /// stack (ADR 0085 contract 3); this accessor peeks the top
     /// entry.
     pub fn help_overlay(&self) -> Option<&crate::tui::widgets::help::HelpOverlayState> {
@@ -1157,7 +1157,7 @@ impl App {
         &self.modal_stack
     }
 
-    /// Active `o` full-value modal (T8-030), if any. Lives on the
+    /// Active `o` full-value modal, if any. Lives on the
     /// modal stack (ADR 0085 contract 3); this accessor peeks the
     /// top entry.
     pub fn value_modal(&self) -> Option<&crate::tui::widgets::value_modal::ValueModalState> {
@@ -1186,8 +1186,8 @@ impl App {
         }
     }
 
-    /// Read-only access to the active transcript viewer modal
-    /// (H-VIEWER-NATIVE-008). Lives on the modal stack
+    /// Read-only access to the active transcript viewer modal.
+    /// Lives on the modal stack
     /// (ADR 0085 contract 3); this accessor peeks the top entry.
     pub fn viewer_modal(&self) -> Option<&crate::viewer::state::ViewerState> {
         match self.modal_stack.last()? {
@@ -1219,7 +1219,7 @@ impl App {
         }
     }
 
-    /// Read accessor for the toast engine (T8-040 / H-WIDG-003).
+    /// Read accessor for the toast engine.
     /// Returns the engine itself so the renderer can call
     /// `(&engine).render_ref(...)` directly; `has_toast()` reports
     /// whether anything is queued.
@@ -1559,7 +1559,7 @@ impl App {
             }
             RowKind::Pin(pin) => {
                 // Creating a fresh pin with an existing pin selected
-                // (H-PIN-TUI-011) seeds harness / cwd from the source
+                // seeds harness / cwd from the source
                 // and picks the next name in the series so `worker-1`
                 // → `worker-2` needs no manual retype. Bases that do
                 // not end in digits still fall back to `<name>-2`.
@@ -1849,7 +1849,7 @@ impl App {
         self.sort
     }
 
-    /// Mux-view recency basis (H-MUX-SORT-001).
+    /// Mux-view recency basis.
     pub fn mux_recency(&self) -> super::MuxRecency {
         self.mux_recency
     }
@@ -1905,7 +1905,7 @@ impl App {
             self.sort = sort;
         }
 
-        // Mux recency basis (H-MUX-SORT-001): restore the operator's
+        // Mux recency basis: restore the operator's
         // last choice. There's no CLI flag for it, so persistence
         // always wins when present.
         if let Some(basis) = persisted.mux_recency {
@@ -2045,7 +2045,7 @@ impl App {
     }
 
     /// Whether the explorer's link rows render the trailing
-    /// `provenance · confidence · state` meta line (T8-042).
+    /// `provenance · confidence · state` meta line.
     pub fn edge_meta_visible(&self) -> bool {
         self.edge_meta_visible
     }
@@ -2080,7 +2080,7 @@ impl App {
     }
 
     /// Current provider availability status used for right-side
-    /// status-bar chips (T8-003).
+    /// status-bar chips.
     pub fn provider_status(&self) -> &ProviderStatus {
         &self.provider_status
     }
@@ -2091,7 +2091,7 @@ impl App {
     }
 
     /// In-flight async operations tracked for status-bar spinner
-    /// chips (H-WIDG-007). Empty when nothing is in flight.
+    /// chips. Empty when nothing is in flight.
     pub fn in_flight_ops(&self) -> &[InFlightOp] {
         &self.in_flight_ops
     }
@@ -2226,7 +2226,7 @@ impl App {
         //
         // The draw path dispatches `LeftViewportChanged` /
         // `ExplorerViewportChanged` every frame for scroll
-        // reconciliation (H-TUI-005 wave 2). Those are layout plumbing,
+        // reconciliation. Those are layout plumbing,
         // not operator input — and because `draw_frame` runs at the top
         // of every event-loop iteration, before the next key is polled,
         // counting them as an "intervening action" would disarm the
@@ -2282,7 +2282,7 @@ impl App {
                 self.move_selection(-i32::from(viewport.max(1)));
             }
             Msg::LeftViewportChanged { viewport_height } => {
-                // H-TUI-005 wave 2: the draw path dispatches this
+                // The draw path dispatches this
                 // before building the left panel's line list so
                 // scroll reconciliation lives in the reducer, not
                 // in `draw`. Each visible row contributes exactly
@@ -2304,7 +2304,7 @@ impl App {
                 cursor_last_row,
                 viewport_height,
             } => {
-                // H-TUI-005 wave 2: draw computes the post-wrap
+                // Draw computes the post-wrap
                 // cursor row span (Paragraph::wrap output isn't
                 // pure over App state — it depends on pane width
                 // and font metrics), and this Msg carries the
@@ -3066,7 +3066,7 @@ impl App {
     /// row count. `usize::MAX` is the convention for "last row" so
     /// callers can ask for End without needing to recompute row
     /// counts themselves; this mirrors how `move_selection_to` on
-    /// the left-pane tree handles `Msg::End` (H-OBS-007).
+    /// the left-pane tree handles `Msg::End`.
     fn explorer_jump_cursor_to(&mut self, index: usize) {
         let Some(state) = self.explorer.as_mut() else {
             return;
@@ -3213,7 +3213,7 @@ impl App {
                 self.explorer = Some(new_state);
                 // Recompute the legacy detail too so the renderer
                 // surfaces consistent info during the renderer
-                // transition (T8-029).
+                // transition.
                 self.detail = build_node_detail(DetailInputs {
                     snapshot: handle.snapshot(),
                     target: &target,
@@ -3221,7 +3221,7 @@ impl App {
                 });
                 self.preview_scroll = 0;
                 self.status_message = None;
-                // T8-035: mirror sync — when the drilled neighbor
+                // Mirror sync — when the drilled neighbor
                 // has a row in the current view, scroll the left
                 // tree to it and expand any ancestor groups. When
                 // it doesn't, leave the left selection untouched so
@@ -3325,7 +3325,7 @@ impl App {
         self.explorer = Some(restored);
         self.preview_scroll = 0;
         self.status_message = None;
-        // T8-035: restore the left-pane selection that was active
+        // Restore the left-pane selection that was active
         // at the time of the drill, so Backspace unwinds both panes
         // together. Bypasses `set_selection` to avoid rebuilding
         // the explorer we just restored.
@@ -3434,7 +3434,7 @@ fn pin_create_default_name_candidate(raw: &str) -> String {
     }
 }
 
-/// Does `row` represent `target` in the left-pane tree (T8-035)?
+/// Does `row` represent `target` in the left-pane tree?
 /// Group rows match when their `primary_node` (when set) equals
 /// `target`; mux candidate rows match their parent mux's node id.
 fn row_matches(row: &crate::tui::rows::Row, target: &NodeId) -> bool {

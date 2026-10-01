@@ -1,4 +1,3 @@
-// Extracted from hook.rs H-HYG-011 rolling wave via #[path = "hook_tests.rs"] mod tests;
 use super::*;
 
 #[test]

@@ -1,4 +1,3 @@
-// Extracted from opencode.rs H-HYG-011 rolling wave via #[path = "opencode_tests.rs"] mod tests;
 use super::*;
 use rusqlite::{Connection, params};
 use std::path::PathBuf;
@@ -75,7 +74,7 @@ fn insert_part(
         .expect("insert part");
 }
 
-// H-EXT-006: pre-existing `supports_only_opencode_locator`
+// Pre-existing `supports_only_opencode_locator`
 // test removed. `HarnessParser` no longer carries a
 // `supports(&locator) -> bool` method — parser dispatch
 // goes through the adapter registry via `transcript_parser`,

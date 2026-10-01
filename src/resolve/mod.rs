@@ -17,7 +17,7 @@ pub fn resolve_snapshot(mut snapshot: GraphSnapshot) -> GraphSnapshot {
     // ranking. The pin pass emits its own diagnostics, which we
     // merge in after `resolve_links` reassigns `snapshot.diagnostics`.
     let pin_diagnostics = pins::apply_pin_bindings(&mut snapshot);
-    // H-MUXPROC-021: demote `LinkedToMux` candidates whose source
+    // Demote `LinkedToMux` candidates whose source
     // session is materially stale compared to a fresher candidate
     // for the same mux, before bucketing kicks in.
     demote_stale_source_mux_candidates(&mut snapshot);
@@ -777,7 +777,7 @@ struct MuxScore {
     activity_epoch: i64,
 }
 
-/// H-REF-003: shared `Provenance` → tier mapping used by every
+/// Shared `Provenance` → tier mapping used by every
 /// relation comparator's provenance axis. Pre-H-REF-003 the
 /// resolver had two parallel enums (`MuxTier` +
 /// `PrProvenanceTier`) with identical variants, identical

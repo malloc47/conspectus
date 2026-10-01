@@ -32,7 +32,7 @@ pub const USER_CONFIG_RELATIVE: &str = "conspectus/config.toml";
 
 /// Default terminal width (columns) at/above which the TUI keeps its
 /// side-by-side left/right panes, and below which it reflows them to a
-/// vertical stack (H-LAYOUT-001). Operators override this with
+/// vertical stack. Operators override this with
 /// `[tui] narrow_layout_threshold`. This is the canonical home for the
 /// value; the renderer reads the resolved [`TuiConfig`] field rather
 /// than a hard-coded constant.
@@ -47,7 +47,7 @@ pub struct Config {
     pub worktree: WorktreeConfig,
 }
 
-/// Settings under `[worktree]` (H-WT-003 / ADR 0093). Governs which
+/// Settings under `[worktree]` (ADR 0093). Governs which
 /// backend performs worktree mutation (create / remove / merge) in
 /// the CLI / TUI, plus the operator-initiated teardown policy;
 /// discovery always lists via the read-only git backend.
@@ -119,8 +119,8 @@ impl TeardownConfirm {
 }
 
 /// Settings under `[server]`. Configures both the `conspectus
-/// serve` daemon (P7-006) and the one-shot CLI's warm-start TTL
-/// gate (P7-003 phase 3) per ADR 0079. The shared shape is the
+/// serve` daemon and the one-shot CLI's warm-start TTL
+/// gate per ADR 0079. The shared shape is the
 /// whole point: a single per-class number controls both
 /// "refresh this often" and "stale after this long" — recording
 /// the same value twice would drift.
@@ -172,7 +172,7 @@ pub struct TuiConfig {
     /// under `[tui.views.<name>]` sub-tables. CLI flags override
     /// these when present.
     pub views: TuiViewsConfig,
-    /// Detail-pane (right pane) configuration (T8-042). Configured
+    /// Detail-pane (right pane) configuration. Configured
     /// under `[tui.detail]` in the on-disk config.
     pub detail: TuiDetailConfig,
     /// Resolved color theme (ADR 0032). Built from `[tui.theme]` with
@@ -185,7 +185,7 @@ pub struct TuiConfig {
     /// `[tui] show_harness_chips = true` in their config.
     pub show_harness_chips: bool,
     /// Terminal width (columns) below which the body reflows from
-    /// side-by-side panes to a vertical stack (H-LAYOUT-001). Sourced
+    /// side-by-side panes to a vertical stack. Sourced
     /// from `[tui] narrow_layout_threshold`; defaults to
     /// [`DEFAULT_NARROW_LAYOUT_THRESHOLD`].
     pub narrow_layout_threshold: u16,
@@ -208,8 +208,8 @@ impl Default for TuiConfig {
     }
 }
 
-/// Settings under `[tui.detail]` in `.conspectus.toml` / user config
-/// (T8-042). The detail pane is the right-panel graph explorer; this
+/// Settings under `[tui.detail]` in `.conspectus.toml` / user config.
+/// The detail pane is the right-panel graph explorer; this
 /// block controls its visual defaults.
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct TuiDetailConfig {
@@ -331,7 +331,7 @@ struct ConfigFile {
     /// keeps the [`ServerIntervals::default`] values.
     #[serde(default)]
     server: Option<ServerFile>,
-    /// `[worktree]` table (H-WT-003).
+    /// `[worktree]` table.
     #[serde(default)]
     worktree: Option<WorktreeFile>,
     /// Legacy `[session]` key from before ADR 0021. Its presence
@@ -380,7 +380,7 @@ struct TuiFile {
     sessions_grouping: Option<String>,
     #[serde(default)]
     views: Option<TuiViewsFile>,
-    /// `[tui.detail]` table (T8-042). Right-panel detail-explorer
+    /// `[tui.detail]` table. Right-panel detail-explorer
     /// visual defaults.
     #[serde(default)]
     detail: Option<TuiDetailFile>,
@@ -397,7 +397,7 @@ struct TuiFile {
     #[serde(default)]
     show_harness_chips: Option<bool>,
     /// `[tui] narrow_layout_threshold` — terminal columns below which
-    /// the body reflows to a vertical stack (H-LAYOUT-001). Read as a
+    /// the body reflows to a vertical stack. Read as a
     /// signed integer so an out-of-range value produces a targeted
     /// diagnostic instead of failing the whole file parse.
     #[serde(default)]
@@ -1035,8 +1035,8 @@ fn merge_tui_theme_icons(
     }
 }
 
-/// Apply `[tui.theme.harness]` overrides to `theme.harness_colors`
-/// (H-EXT-003). Table keys are harness keys registered via the
+/// Apply `[tui.theme.harness]` overrides to `theme.harness_colors`.
+/// Table keys are harness keys registered via the
 /// adapter registry; unknown keys emit a diagnostic listing the
 /// registered set and leave the target map entry alone. Non-table
 /// values and non-string entries produce diagnostics without

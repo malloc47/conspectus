@@ -1,4 +1,3 @@
-// Extracted from mod.rs H-HYG-011 rolling wave via #[path = "model_tests.rs"] mod tests;
 use super::*;
 
 #[test]
@@ -71,7 +70,7 @@ fn sparse_node_skips_empty_optional_fields() {
 
 #[test]
 fn checkout_without_worktree_meta_skips_the_field() {
-    // H-WT-002: a checkout not produced by worktree enumeration omits
+    // A checkout not produced by worktree enumeration omits
     // the `worktree` key entirely (sparse JSON).
     let checkout = GraphNode::Checkout(CheckoutNode::new(
         CheckoutId::new(RepoId::new("/r/.git"), "/r"),
@@ -83,7 +82,7 @@ fn checkout_without_worktree_meta_skips_the_field() {
 
 #[test]
 fn checkout_worktree_meta_round_trips_through_json() {
-    // H-WT-002: linked/primary + lock/prune status survive a JSON
+    // Linked/primary + lock/prune status survive a JSON
     // round-trip with a snake_case `kind` discriminant.
     let checkout = CheckoutNode::new(CheckoutId::new(RepoId::new("/r/.git"), "/r"), "/r")
         .with_worktree(WorktreeMeta {
@@ -350,7 +349,7 @@ fn evict_provider_clears_resolved_relationships_to_force_re_resolve() {
     );
 }
 
-// ---- ADR 0083 rkyv archive round-trip coverage (P11-003) ----
+// ---- ADR 0083 rkyv archive round-trip coverage ----
 
 /// Construct a `GraphSnapshot` populated with one of every
 /// `NodeKind` plus link, resolved-relationship, diagnostic,
@@ -598,7 +597,7 @@ fn metadata_with_every_value_variant_round_trips() {
 /// and `AliasOverlay::entries`. If a future variant adds a
 /// payload type whose archive impl is missing, this test catches
 /// it before any consumer hits the failure.
-/// H-HYG-006 wave 1: `SnapshotIndex::node(id)` agrees with a
+/// `SnapshotIndex::node(id)` agrees with a
 /// linear scan for every node in a dense fixture. Guards
 /// against index-drift once follow-up waves add more
 /// derived maps.
@@ -659,7 +658,7 @@ fn every_node_id_variant_archives_and_round_trips() {
     }
 }
 
-/// H-REF-002: every `RelationKind` variant must round-trip
+/// Every `RelationKind` variant must round-trip
 /// through the snake_case codec. Adding a new variant that
 /// misses one side surfaces here.
 #[test]
@@ -701,7 +700,7 @@ fn relation_kind_from_snake_case_rejects_unknown() {
     assert!(err.contains("invalid relation"), "got {err:?}");
 }
 
-/// H-REF-008: every `source_field::*` constant equals its own
+/// Every `source_field::*` constant equals its own
 /// canonical snake_case name. Guards against a rename that
 /// desyncs producers from consumers.
 #[test]

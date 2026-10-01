@@ -282,7 +282,7 @@ fn repo_prune_flow_commits_prune() {
     );
 }
 
-// ---- reveal / navigate (H-WT-008) ----
+// ---- reveal / navigate ----
 
 #[test]
 fn context_for_worktree_reveal_targets_first_session() {

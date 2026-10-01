@@ -1,4 +1,3 @@
-// Extracted from pins.rs H-HYG-009 wave 2 via #[path = "pins_tests.rs"] mod tests;
 use super::*;
 use ratatui::crossterm::event::{KeyEventKind, KeyEventState};
 

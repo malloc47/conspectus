@@ -1,4 +1,4 @@
-//! In-memory union-view row-tree builder (P11-011c / ADR 0082).
+//! In-memory union-view row-tree builder (ADR 0082).
 
 use std::collections::{HashMap, HashSet};
 use std::path::Path;
