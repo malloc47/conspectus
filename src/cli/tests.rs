@@ -597,7 +597,7 @@ mod resume_resolver {
         pin: &PinCandidate,
         cache: &PinBindingsCache,
     ) -> Option<Vec<std::ffi::OsString>> {
-        let base = conspectus::discovery::harness::launch_argv_for(&pin.harness);
+        let base = crate::discovery::harness::launch_argv_for(&pin.harness);
         super::resolve_resume_argv_with_cache(snap, pin, Path::new("/p"), &base, cache)
     }
 

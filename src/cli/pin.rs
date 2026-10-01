@@ -999,35 +999,29 @@ pub(super) fn resolve_resume_argv_with_cache(
         }
     };
 
-    match resume_argv_for(&pin.harness, &head.session_key, cwd) {
-        Some(resume) => match splice_resume_argv(base_argv, &resume) {
-            Some(argv) => {
-                println!(
-                    "pin `{}`: resuming recorded session `{}`",
-                    pin.id, head.session_key
-                );
-                Some(argv)
-            }
-            None => {
-                eprintln!(
-                    "conspectus: pin `{}`: launch argv does not invoke `{}`; \
-                     cannot splice resume of session `{}`, launching fresh",
-                    pin.id,
-                    resume[0].to_string_lossy(),
-                    head.session_key,
-                );
-                None
-            }
-        },
-        None => {
-            eprintln!(
-                "conspectus: pin `{}`: harness `{}` does not expose a resume command; \
-                 launching fresh",
-                pin.id, pin.harness
-            );
-            None
-        }
-    }
+    let Some(resume) = resume_argv_for(&pin.harness, &head.session_key, cwd) else {
+        eprintln!(
+            "conspectus: pin `{}`: harness `{}` does not expose a resume command; \
+             launching fresh",
+            pin.id, pin.harness
+        );
+        return None;
+    };
+    let Some(argv) = splice_resume_argv(base_argv, &resume) else {
+        eprintln!(
+            "conspectus: pin `{}`: launch argv does not invoke `{}`; \
+             cannot splice resume of session `{}`, launching fresh",
+            pin.id,
+            resume[0].to_string_lossy(),
+            head.session_key,
+        );
+        return None;
+    };
+    println!(
+        "pin `{}`: resuming recorded session `{}`",
+        pin.id, head.session_key
+    );
+    Some(argv)
 }
 
 pub(super) fn attach_and_report(
