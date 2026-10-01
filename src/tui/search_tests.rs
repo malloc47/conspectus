@@ -33,9 +33,8 @@ fn agent_row(harness: &str, key: &str, alias: Option<&str>, preview: &str) -> Ro
 fn substring_backend_returns_empty_for_blank_query() {
     let rows = vec![agent_row("claude-code", "abc", Some("puffin"), "hello")];
     let items = items_from_rows(&rows);
-    let backend = SubstringBackend;
-    assert!(backend.rank("", &items).is_empty());
-    assert!(backend.rank("   ", &items).is_empty());
+    assert!(rank("", &items).is_empty());
+    assert!(rank("   ", &items).is_empty());
 }
 
 #[test]
@@ -45,8 +44,7 @@ fn substring_backend_matches_case_insensitively() {
         agent_row("codex", "xyz", None, "nope"),
     ];
     let items = items_from_rows(&rows);
-    let backend = SubstringBackend;
-    let matches = backend.rank("PUFFIN", &items);
+    let matches = rank("PUFFIN", &items);
     assert_eq!(matches.len(), 1);
     assert_eq!(matches[0].id, rows[0].id);
 }
@@ -60,8 +58,7 @@ fn substring_backend_ranks_earlier_matches_higher() {
         agent_row("codex", "late", None, "nothing here except puffin"),
     ];
     let items = items_from_rows(&rows);
-    let backend = SubstringBackend;
-    let matches = backend.rank("puffin", &items);
+    let matches = rank("puffin", &items);
     assert_eq!(matches.len(), 2);
     assert_eq!(matches[0].id, rows[0].id);
     assert_eq!(matches[1].id, rows[1].id);
@@ -71,8 +68,7 @@ fn substring_backend_ranks_earlier_matches_higher() {
 fn substring_backend_marks_matched_range_inside_haystack() {
     let rows = vec![agent_row("claude-code", "a", Some("puffin"), "x")];
     let items = items_from_rows(&rows);
-    let backend = SubstringBackend;
-    let matches = backend.rank("ffi", &items);
+    let matches = rank("ffi", &items);
     assert_eq!(matches.len(), 1);
     let range = matches[0].matched_range.clone().unwrap();
     assert_eq!(&items[0].haystack[range], "ffi");
@@ -82,8 +78,7 @@ fn substring_backend_marks_matched_range_inside_haystack() {
 fn substring_backend_finds_match_in_preview_or_cwd() {
     let rows = vec![agent_row("claude-code", "a", None, "look at puffin here")];
     let items = items_from_rows(&rows);
-    let backend = SubstringBackend;
-    let matches = backend.rank("look at", &items);
+    let matches = rank("look at", &items);
     assert_eq!(matches.len(), 1);
 }
 

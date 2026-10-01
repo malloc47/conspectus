@@ -1,10 +1,7 @@
 //! `/` in-view search overlay (T8-017).
 //!
 //! Reuses the ADR 0030 text-input primitive for the query line and
-//! displays a ranked match list below. The backend is pluggable via
-//! [`crate::tui::search::SearchBackend`] so swapping in a fuzzy
-//! ranker later requires only a new implementation, not a
-//! renderer change.
+//! displays a list of matches ranked by [`crate::tui::search::rank`].
 //!
 //! Per ADR 0031 the overlay ranks within the active filter set —
 //! the host runtime hands the overlay only the visible row tree's
@@ -24,7 +21,7 @@ use crate::tui::Theme;
 
 use crate::tui::icons::{NodeKind, node_kind_style};
 use crate::tui::rows::RowId;
-use crate::tui::search::{SearchBackend, SearchItem, SearchMatch, snippet_around};
+use crate::tui::search::{SearchItem, SearchMatch, rank, snippet_around};
 use crate::tui::widgets::input::TextInputState;
 
 /// Pure state for the search overlay. Holds the query text input,
@@ -64,8 +61,8 @@ impl SearchOverlayState {
     /// sees the list shrink/grow as they type. Resets the cursor
     /// to 0 so a newly typed character doesn't strand it past the
     /// end of the new result list.
-    pub fn refresh_matches(&mut self, backend: &dyn SearchBackend, items: &[SearchItem<'_>]) {
-        self.matches = backend.rank(self.input.value(), items);
+    pub fn refresh_matches(&mut self, items: &[SearchItem<'_>]) {
+        self.matches = rank(self.input.value(), items);
         if self.cursor >= self.matches.len() {
             self.cursor = 0;
         }
@@ -437,11 +434,9 @@ fn compute_scroll(cursor: usize, visible_rows: usize, total: usize) -> usize {
 /// Per-event context the search overlay reads through the
 /// [`crate::tui::Overlay`] trait (H-TUI-006). Carries the current
 /// visible-row items so the widget can rerank matches on every
-/// keystroke, plus the ranking backend so a future fuzzy backend
-/// swap needs no runtime change.
+/// keystroke.
 pub struct SearchContext<'a> {
     pub items: &'a [SearchItem<'a>],
-    pub backend: &'a dyn SearchBackend,
 }
 
 impl crate::tui::Overlay for SearchOverlayState {
@@ -449,7 +444,7 @@ impl crate::tui::Overlay for SearchOverlayState {
 
     fn handle(&mut self, ctx: SearchContext<'_>, key: KeyEvent) -> crate::tui::OverlayOutcome {
         let outcome = self.handle_key(key);
-        self.refresh_matches(ctx.backend, ctx.items);
+        self.refresh_matches(ctx.items);
         match outcome {
             SearchOutcome::Continue => crate::tui::OverlayOutcome::Consumed,
             SearchOutcome::Cancel => crate::tui::OverlayOutcome::Close,

@@ -2,7 +2,7 @@
 use super::*;
 use crate::model::{AgentSessionId, NodeId};
 use crate::tui::rows::{AgentSessionRow, MuxIndicator, Row, RowKind};
-use crate::tui::search::{SubstringBackend, items_from_rows};
+use crate::tui::search::items_from_rows;
 use ratatui::crossterm::event::{KeyEventKind, KeyEventState};
 
 fn key(code: KeyCode) -> KeyEvent {
@@ -48,11 +48,10 @@ fn typing_query_filters_matches() {
     ];
     let items = items_from_rows(&rows);
     let mut state = SearchOverlayState::new();
-    let backend = SubstringBackend;
     // Type "puf".
     for c in "puf".chars() {
         state.handle_key(key(KeyCode::Char(c)));
-        state.refresh_matches(&backend, &items);
+        state.refresh_matches(&items);
     }
     assert_eq!(state.matches().len(), 1);
     assert_eq!(state.matches()[0].id, rows[0].id);
@@ -63,10 +62,9 @@ fn enter_confirms_with_cursor_match() {
     let rows = vec![agent_row("a", Some("puffin")), agent_row("b", Some("puff"))];
     let items = items_from_rows(&rows);
     let mut state = SearchOverlayState::new();
-    let backend = SubstringBackend;
     for c in "puf".chars() {
         state.handle_key(key(KeyCode::Char(c)));
-        state.refresh_matches(&backend, &items);
+        state.refresh_matches(&items);
     }
     // Cursor at 0; Enter confirms the first match.
     let outcome = state.handle_key(key(KeyCode::Enter));
@@ -81,10 +79,9 @@ fn arrow_down_moves_cursor_within_matches() {
     let rows = vec![agent_row("a", Some("puffin")), agent_row("b", Some("puff"))];
     let items = items_from_rows(&rows);
     let mut state = SearchOverlayState::new();
-    let backend = SubstringBackend;
     for c in "puf".chars() {
         state.handle_key(key(KeyCode::Char(c)));
-        state.refresh_matches(&backend, &items);
+        state.refresh_matches(&items);
     }
     state.handle_key(key(KeyCode::Down));
     assert_eq!(state.cursor(), 1);
@@ -98,10 +95,9 @@ fn enter_on_empty_match_list_cancels() {
     let rows = vec![agent_row("a", None)];
     let items = items_from_rows(&rows);
     let mut state = SearchOverlayState::new();
-    let backend = SubstringBackend;
     for c in "no-such-match".chars() {
         state.handle_key(key(KeyCode::Char(c)));
-        state.refresh_matches(&backend, &items);
+        state.refresh_matches(&items);
     }
     assert!(state.matches().is_empty());
     let outcome = state.handle_key(key(KeyCode::Enter));
@@ -120,10 +116,9 @@ fn ctrl_n_p_navigate_results() {
     let rows = vec![agent_row("a", Some("puff")), agent_row("b", Some("puffin"))];
     let items = items_from_rows(&rows);
     let mut state = SearchOverlayState::new();
-    let backend = SubstringBackend;
     for c in "puf".chars() {
         state.handle_key(key(KeyCode::Char(c)));
-        state.refresh_matches(&backend, &items);
+        state.refresh_matches(&items);
     }
     let ctrl_n = KeyEvent {
         code: KeyCode::Char('n'),
@@ -155,10 +150,9 @@ fn match_line_includes_snippet_with_matched_bytes_highlighted() {
     }
     let items = items_from_rows(std::slice::from_ref(&row_with_preview));
     let mut state = SearchOverlayState::new();
-    let backend = SubstringBackend;
     for c in "puffin".chars() {
         state.handle_key(key(KeyCode::Char(c)));
-        state.refresh_matches(&backend, &items);
+        state.refresh_matches(&items);
     }
     let m = &state.matches()[0];
     let theme = Theme::default();
@@ -196,10 +190,9 @@ fn match_line_skips_snippet_when_label_equals_haystack() {
     };
     let items = items_from_rows(std::slice::from_ref(&row));
     let mut state = SearchOverlayState::new();
-    let backend = SubstringBackend;
     for c in "puffin".chars() {
         state.handle_key(key(KeyCode::Char(c)));
-        state.refresh_matches(&backend, &items);
+        state.refresh_matches(&items);
     }
     let m = &state.matches()[0];
     let theme = Theme::default();
@@ -273,10 +266,9 @@ fn match_line_includes_kind_glyph_before_label() {
     let row = agent_row("abcdef", Some("puffin"));
     let items = items_from_rows(std::slice::from_ref(&row));
     let mut state = SearchOverlayState::new();
-    let backend = SubstringBackend;
     for c in "puf".chars() {
         state.handle_key(key(KeyCode::Char(c)));
-        state.refresh_matches(&backend, &items);
+        state.refresh_matches(&items);
     }
     let m = &state.matches()[0];
     let theme = Theme::default();
@@ -302,10 +294,9 @@ fn refresh_matches_resets_cursor_when_truncated() {
     let rows = vec![agent_row("a", Some("puff")), agent_row("b", Some("puffin"))];
     let items = items_from_rows(&rows);
     let mut state = SearchOverlayState::new();
-    let backend = SubstringBackend;
     for c in "puf".chars() {
         state.handle_key(key(KeyCode::Char(c)));
-        state.refresh_matches(&backend, &items);
+        state.refresh_matches(&items);
     }
     state.handle_key(key(KeyCode::Down));
     assert_eq!(state.cursor(), 1);
@@ -313,7 +304,7 @@ fn refresh_matches_resets_cursor_when_truncated() {
     // shouldn't dangle past the new end.
     for c in "fin".chars() {
         state.handle_key(key(KeyCode::Char(c)));
-        state.refresh_matches(&backend, &items);
+        state.refresh_matches(&items);
     }
     assert_eq!(state.matches().len(), 1);
     assert_eq!(state.cursor(), 0);

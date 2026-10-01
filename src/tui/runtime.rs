@@ -2510,21 +2510,12 @@ fn handle_value_modal_key(app: &mut App, key: ratatui::crossterm::event::KeyEven
 /// list from the visible row tree using the configured backend,
 /// and act on its outcome (Confirm picks a row, Cancel closes).
 pub(super) fn handle_search_overlay_key(app: &mut App, key: ratatui::crossterm::event::KeyEvent) {
-    use crate::tui::search::{SubstringBackend, items_from_rows};
+    use crate::tui::search::items_from_rows;
     use crate::tui::widgets::search::SearchContext;
     use crate::tui::{Overlay, OverlayOutcome};
-    // The backend choice lives behind the SearchBackend trait so a
-    // future swap (e.g. to a fuzzy matcher) needs only an
-    // implementation change, not a runtime change. The substring
-    // backend is the v1 default per ADR 0024's "prefer hand-rolled
-    // first" stance.
-    let backend = SubstringBackend;
     let visible: Vec<_> = app.visible_rows().into_iter().cloned().collect();
     let items = items_from_rows(&visible);
-    let ctx = SearchContext {
-        items: &items,
-        backend: &backend,
-    };
+    let ctx = SearchContext { items: &items };
     let outcome = match app.search_overlay_mut() {
         Some(state) => state.handle(ctx, key),
         None => return,

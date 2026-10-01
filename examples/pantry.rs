@@ -30,7 +30,7 @@ use conspectus::tui::widgets::controls::{
 use std::borrow::Cow;
 
 use conspectus::tui::rows::RowId;
-use conspectus::tui::search::{SearchItem, SubstringBackend};
+use conspectus::tui::search::SearchItem;
 use conspectus::tui::theme::StyleSpec;
 use conspectus::tui::widgets::help::{HelpOverlayState, HelpOverlayWidget};
 use conspectus::tui::widgets::input::{TextInputState, TextInputWidget};
@@ -362,8 +362,7 @@ impl Ingredient for SearchVariant {
             .collect();
         let mut state = SearchOverlayState::new();
         Self::send_chars(&mut state, self.query);
-        let backend = SubstringBackend;
-        state.refresh_matches(&backend, &items);
+        state.refresh_matches(&items);
         Self::advance_cursor(&mut state, self.cursor_advance);
         SearchOverlayWidget::new(&state, &items, &theme).render(area, buf);
     }
