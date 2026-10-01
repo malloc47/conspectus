@@ -24,9 +24,12 @@ case_sensitive_file_extension_comparisons = "deny"
 cloned_instead_of_copied = "deny"
 explicit_iter_loop = "deny"
 filter_map_next = "deny"
+if_not_else = "deny"
 ignored_unit_patterns = "deny"
+implicit_clone = "deny"
 items_after_statements = "deny"
 iter_with_drain = "deny"
+manual_assert = "deny"
 manual_let_else = "deny"
 manual_string_new = "deny"
 map_unwrap_or = "deny"
@@ -38,6 +41,7 @@ option_as_ref_cloned = "deny"
 or_fun_call = "deny"
 redundant_clone = "deny"
 redundant_closure_for_method_calls = "deny"
+redundant_else = "deny"
 semicolon_if_nothing_returned = "deny"
 single_match_else = "deny"
 stable_sort_primitive = "deny"
@@ -48,6 +52,10 @@ unnested_or_patterns = "deny"
 # pattern in the lookup tables (`tui/detail.rs`, `tui/explorer.rs`,
 # `discovery/pins.rs`), so this one stays allowed.
 match_same_arms = "allow"
+
+[lints.rustdoc]
+broken_intra_doc_links = "deny"
+private_intra_doc_links = "deny"
 
 [package]
 name = "conspectus"

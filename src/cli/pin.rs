@@ -420,15 +420,15 @@ impl PinRenameArgs {
         } else {
             "unchanged"
         };
-        if new_id_value != original_id {
+        if new_id_value == original_id {
+            println!("{verb} pin `{}` in {}", original_id, path.display());
+        } else {
             println!(
                 "{verb} pin `{}` → `{}` in {}",
                 original_id,
                 new_id_value,
                 path.display()
             );
-        } else {
-            println!("{verb} pin `{}` in {}", original_id, path.display());
         }
         Ok(())
     }

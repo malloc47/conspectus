@@ -14427,7 +14427,21 @@ Queued chunks:
   - The search overlay clones every visible row on each keystroke to
     escape a borrow.
   - `push_str(&format!(..))` (21 sites): fine except on hot paths.
-- [ ] `H-RUST-019` Extend lint enforcement after the chunks land.
+- [x] `H-RUST-019` Extend lint enforcement after the chunks land.
+  - Outcome: clippy now also denies `items_after_statements` (with
+    `H-RUST-018`), `if_not_else` (two sites fixed), and `implicit_clone`,
+    `manual_assert`, and `redundant_else` (no hits). `[lints.rustdoc]`
+    denies broken and private intra-doc links, so `cargo doc` enforces
+    them even without `RUSTDOCFLAGS`. Surveyed and left allowed:
+    `needless_pass_by_value` (72 hits, mostly handlers that take `Msg`
+    by design), `doc_markdown` (128), `similar_names` (15),
+    `too_many_lines` (28), `format_push_string` (21, see
+    `H-RUST-018`), `unnecessary_wraps` (signatures shared on purpose),
+    `needless_continue` (`=> continue` arms read clearly),
+    `trivially_copy_pass_by_ref` and `ref_option` (serde's `with` and
+    `skip_serializing_if` require the reference; the one real case,
+    `link_freshness_tag`, was fixed), and `unused_self` (test-scenario
+    helpers).
   - Plan: once `H-RUST-013` and `H-RUST-018` are done, consider
     enforcing `items_after_statements`, `needless_pass_by_value` for
     non-message functions, and `rustdoc::private_intra_doc_links` in

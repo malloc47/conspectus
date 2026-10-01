@@ -336,7 +336,7 @@ fn payload_edge(
         provenance: link.provenance.snake_case(),
         confidence: link.confidence.snake_case(),
         state: link_state_tag(&link.state),
-        freshness: link_freshness_tag(&link.freshness),
+        freshness: link_freshness_tag(link.freshness),
         is_resolved,
         is_unresolved_target,
         metadata: link_metadata(link),
@@ -369,7 +369,7 @@ fn link_state_detail(state: &LinkState) -> Option<EdgeStateDetail> {
     }
 }
 
-fn link_freshness_tag(freshness: &crate::model::Freshness) -> &'static str {
+fn link_freshness_tag(freshness: crate::model::Freshness) -> &'static str {
     use crate::model::Freshness;
     match freshness {
         Freshness::Fresh => "fresh",

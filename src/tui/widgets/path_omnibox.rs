@@ -109,11 +109,11 @@ impl PathOmniboxState {
         } else {
             let before = self.input.value().to_string();
             let _ = self.input.handle_key(event);
-            if self.input.value() != before {
+            if self.input.value() == before {
+                PathOmniboxOutcome::Continue
+            } else {
                 self.selected = 0;
                 PathOmniboxOutcome::Changed
-            } else {
-                PathOmniboxOutcome::Continue
             }
         }
     }
