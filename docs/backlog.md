@@ -14302,7 +14302,17 @@ Queued chunks:
     `pub(crate)`. That also removes the need for `pub
     #[doc(hidden)]` test helpers.
   - ADR: ADR 0015 amendment. Pairs with `REL-022`.
-- [ ] `H-RUST-013` Strip backlog IDs from code comments.
+- [x] `H-RUST-013` Strip backlog IDs from code comments.
+  - Outcome: ADR 0099. About 1,000 comment lines changed. A script
+    stripped leading `ID:` prefixes and ID-only parentheticals, keeping
+    any ADR references. The ~330 lines of history narration ("pre-H-EXT-004
+    if-chain", "wave 2 will…") were rewritten by hand to describe current
+    behavior, which corrected several stale claims. Five comments keep a
+    "backlog `ID`" pointer to open work (`H-DESIGN-002`, `P8-012a/b`,
+    `T8-009`, `T8-032`). `tests/comment_hygiene.rs` fails on new ID
+    citations, and `AGENTS.md` states the rule. Side finding:
+    `RunConfig::mux_preview_interval` is parsed but unused until
+    `T8-009` lands; the preview module doc now says so.
   - Problem: 712 comments still open with a backlog or wave ID
     (`// H-HYG-006 wave 7: consult SnapshotIndex ...`). The rationale
     is useful; the history belongs in commits and this backlog. The
