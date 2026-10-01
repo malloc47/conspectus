@@ -337,15 +337,6 @@ pub enum ClientOutcome<T> {
     Transport(anyhow::Error),
 }
 
-/// Send a `ping` request to the daemon. Returns the echoed
-/// `args` payload on success. Mostly useful as a liveness
-/// probe + a smoke test for the wire shape; the CLI uses it to
-/// detect whether to route a follow-up command through the
-/// socket or fall back to one-shot mode.
-pub fn client_ping() -> ClientOutcome<serde_json::Value> {
-    call_command("ping", serde_json::Value::Null, "ping")
-}
-
 /// Send a `status` request to the daemon. Returns the per-class
 /// state map on success. The map keys are the
 /// [`ProviderClass::name`] values (`"git"`, `"mux"`,

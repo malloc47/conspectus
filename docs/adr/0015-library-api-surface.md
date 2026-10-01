@@ -2,7 +2,8 @@
 
 ## Status
 
-Accepted
+Accepted. Amended 2026-10-01 (`H-RUST-012`): the boundary is now
+enforced with visibility; see the amendment at the end.
 
 ## Context
 
@@ -129,3 +130,33 @@ integrations on them.
 - CLI internals are outside the library contract.
 - Semver discipline applies to the named stable modules and serialized
   graph behavior.
+
+## Amendment: Enforce The Boundary With Visibility (2026-10-01)
+
+Implemented in `H-RUST-012`. The binary used to compile `src/cli/` as
+its own crate module, so it could reach the library only through
+public paths. Every module in `lib.rs` was therefore `pub`, and the
+named stable surface above existed only as documentation.
+
+The CLI now lives in the library as `conspectus::cli`, and `main.rs`
+calls `cli::run`. With that in place, `lib.rs` sorts modules into
+three groups:
+
+- **Contract**, `pub` and documented: `api`, `model`, `discovery`,
+  `resolve`, `output`, `config`, `declared`, `aliases`, and `rename`.
+- **Crate-internal**, `pub(crate)`: `server`, `viewer`, `tui_state`,
+  `pins`, `pin_bindings`, and `pin_store_registry`.
+- **Reachable but not contract**, `pub` with `#[doc(hidden)]`: `cli`
+  (for `main.rs`), `tui` (the widget preview example and the replay
+  tests), `snapshot` (graph.bin round-trip tests), `hook` and `filter`
+  (fixture and replay tests), and `dev_scenarios` (scenario snapshot
+  tests).
+
+Hiding a module from the docs is weaker than `pub(crate)`. The hidden
+modules can become `pub(crate)` once the tests that reach them move
+into the crate's unit tests, or once the example switches to a
+dedicated preview API. Narrowing exposed six items that only tests or
+nobody used. `client_ping` was deleted. `write_last_view` and the
+`PinBindingsCache` builders became `#[cfg(test)]`. The viewer's
+dependency allowlists moved into its tests. `PinLaunch::is_empty` was
+deleted.

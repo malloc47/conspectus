@@ -24,7 +24,7 @@ use crate::viewer::model::{SessionLocator, TranscriptDocument};
 use crate::viewer::state::ViewerState;
 
 /// Map a graph-flavored [`AgentSessionId`] to a viewer-flavored
-/// [`SessionLocator`], or `None` when the harness key has no
+/// `SessionLocator`, or `None` when the harness key has no
 /// registered native transcript source.
 pub fn locator_for_session(session: &AgentSessionId) -> Option<SessionLocator> {
     registered_adapters()
@@ -32,7 +32,7 @@ pub fn locator_for_session(session: &AgentSessionId) -> Option<SessionLocator> {
         .and_then(|a| a.transcript_source(session))
 }
 
-/// Resolve a session into a [`ViewerState`] ready for the modal.
+/// Resolve a session into a `ViewerState` ready for the modal.
 /// Parser failures degrade to a `TranscriptDocument::unavailable`
 /// document so the widget can always render a coherent banner
 /// instead of bubbling the error up.

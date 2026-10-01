@@ -14291,7 +14291,15 @@ Queued chunks:
     `Result<_, String>` parsers to small error enums as touched.
   - Decision needed: scope (facade only, or every `pub` function).
     Pairs with `REL-022`.
-- [ ] `H-RUST-012` Narrow the public surface.
+- [x] `H-RUST-012` Narrow the public surface.
+  - Outcome: ADR 0015 amended. The CLI moved into the library
+    (`conspectus::cli::run`, three-line `main.rs`). `server`, `viewer`,
+    `tui_state`, `pins`, `pin_bindings`, and `pin_store_registry` are
+    `pub(crate)`. `cli`, `tui`, `snapshot`, `hook`, `filter`, and
+    `dev_scenarios` stay `pub` but `#[doc(hidden)]`, because integration
+    tests and `examples/pantry.rs` use them. Making them `pub(crate)`
+    needs those tests moved into the crate first. Six dead or test-only
+    items surfaced and were removed or gated.
   - Problem: every module in `lib.rs` is `pub`, including `tui`,
     `server`, `viewer`, `tui_state`, and `pin_bindings`, because the
     binary imports them through `conspectus::`. The curated

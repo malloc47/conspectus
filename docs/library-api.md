@@ -56,13 +56,24 @@ where possible.
 
 | Module | Boundary | Stable entry points and injection points |
 | --- | --- | --- |
-| `cli` and `main` | current directory, stderr/stdout, argument parsing | application-only; not a stable library surface |
+| `cli` and `main` | current directory, stderr/stdout, argument parsing | application-only; `main.rs` calls `conspectus::cli::run` (doc-hidden), not a stable library surface |
 | `config` | `ConfigLoader::from_env` reads environment; `load_from_cwd` reads current directory; normal loading reads config files | prefer `ConfigLoader::new().with_home(...).with_xdg_config_home(...)` plus explicit `load_from(cwd)` in tests |
 | `declared` | mutation helpers write TOML files atomically; temp filenames include process id | use read/write helpers only for explicit declared-link commands |
 | `discovery` | `DiscoveryContext::from_current_dir` reads current directory; `LocalDiscoveryConfig::from_env` reads env and installs real runners | prefer `DiscoveryContext::from_roots` and `LocalDiscoveryConfig::empty` plus explicit runners in tests |
 | `discovery::git` | `GitProbe` shells out to `git`; `GitDiscovery` uses probes over explicit roots | call `fragment_from_probe` for pure tests, or run `GitDiscovery` only where `git` is allowed |
 | `discovery::tmux` | `SystemTmux` shells out to `tmux` | inject a `TmuxRunner`; parse rows with `parse_list_sessions` for pure tests |
 | `discovery::forge` | `SystemGh` shells out to `gh`; `ForgeDiscovery` asks adapters to inspect repos | inject a `GhRunner`; use `GhPullRequestParser` and `github::fragment_for_repo` for pure tests |
+
+## Internal Modules
+
+These modules are not part of the library contract (ADR 0015, amended
+2026-10-01):
+
+- `pub(crate)`, unreachable from outside the crate: `server`, `viewer`,
+  `tui_state`, `pins`, `pin_bindings`, `pin_store_registry`.
+- `pub` but `#[doc(hidden)]`, reachable only because the binary,
+  integration tests, or the widget preview example use them: `cli`,
+  `tui`, `snapshot`, `hook`, `filter`, `dev_scenarios`.
 
 ## Stable Entry Points
 

@@ -220,13 +220,9 @@ pub fn read_tui_state(cache: &TuiStateCache) -> Option<PersistedState> {
     })
 }
 
-/// Best-effort write of the last-active view. Kept for backward
-/// compatibility with the view-switch code path; delegates to
-/// [`write_tui_state`] when the caller only has a [`View`] and no
-/// other state to write.
-///
-/// Returns `Ok(())` on a successful write OR a successful skip.
-/// Returns `Err(io::Error)` only when the I/O genuinely failed.
+/// Write only the last-active view, merging with the existing file so
+/// other state fields are preserved. Tests use it to seed state.
+#[cfg(test)]
 pub fn write_last_view(cache: &TuiStateCache, view: View) -> io::Result<()> {
     // Merge with any existing payload so unknown fields round-trip
     // and in-memory-only sort/view_states are preserved.
@@ -240,10 +236,6 @@ pub fn write_last_view(cache: &TuiStateCache, view: View) -> io::Result<()> {
 /// Best-effort write of the full TUI state: last view, sort, and
 /// per-view filter/grouping. Skip-on-unchanged so quiet runs do not
 /// churn mtime; atomic via tempfile + rename.
-///
-/// Callers that only know the view can call [`write_last_view`]
-/// instead; that function merges with the existing file so the
-/// other state fields are preserved.
 pub fn write_tui_state(cache: &TuiStateCache, state: &PersistedState) -> io::Result<()> {
     let mut raw = load_raw_state(cache)?;
     raw.schema_version = SCHEMA_VERSION;

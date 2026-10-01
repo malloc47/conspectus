@@ -55,9 +55,9 @@ pub enum Modal {
     ValueModal(crate::tui::widgets::value_modal::ValueModalState),
     /// Full-screen transcript viewer modal (ADR 0052). Uses the nested-reducer composition described
     /// in ADR 0085 contract 3: [`crate::tui::Msg::Viewer`]
-    /// wraps a [`crate::viewer::input::ViewerMsg`] and the App
+    /// wraps a `crate::viewer::input::ViewerMsg` and the App
     /// reducer's arm delegates to
-    /// [`crate::viewer::input::reduce`]. The widget's `Close`
+    /// `crate::viewer::input::reduce`. The widget's `Close`
     /// effect pops the modal; every other effect leaves it on
     /// the stack.
     Viewer(crate::viewer::state::ViewerState),

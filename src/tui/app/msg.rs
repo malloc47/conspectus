@@ -173,7 +173,7 @@ pub enum Msg {
     /// Nested-reducer entry point for the transcript viewer
     /// (ADR 0085 contract 3). The reducer arm
     /// pops the top viewer state, runs it through
-    /// [`crate::viewer::input::reduce`], and pushes the new state
+    /// `crate::viewer::input::reduce`, and pushes the new state
     /// back on `ViewerEffect::None` or leaves the stack popped
     /// on `ViewerEffect::Close`. No-op when the top of the modal
     /// stack isn't the viewer.

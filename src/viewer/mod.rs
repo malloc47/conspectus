@@ -6,8 +6,8 @@
 //! (`crate::tui::theme` is the one tracked
 //! exception, see ADR 0052; until extraction it's wrapped here in
 //! [`theme`].) Adding a new external crate dep without updating
-//! [`ALLOWED_EXTERNAL_DEPS`] and `docs/transcript-viewer-deps.md`
-//! is a review blocker.
+//! `ALLOWED_EXTERNAL_DEPS` (in this module's tests) and
+//! `docs/transcript-viewer-deps.md` is a review blocker.
 //!
 //! Per ADR 0052 the viewer is the **default** target of the `T`
 //! keybind on `AgentSession` rows. The bridge that hooks the TUI
@@ -16,7 +16,7 @@
 //!
 //! # Dependency surface
 //!
-//! [`ALLOWED_EXTERNAL_DEPS`] is the machine-readable mirror of the
+//! The tests' `ALLOWED_EXTERNAL_DEPS` is the machine-readable mirror of the
 //! "Direct dependencies" table in `docs/transcript-viewer-deps.md`.
 //! The `tests::dep_surface_matches_doc_manifest` test asserts the
 //! two agree at compile time; diverging them is a review blocker.
@@ -30,37 +30,35 @@ pub mod table;
 pub mod theme;
 pub mod widget;
 
-/// Crates the viewer module is permitted to depend on (library
-/// surface). Mirrors `docs/transcript-viewer-deps.md`. Add to both
-/// when an entry changes.
-///
-/// Entries are crate names as they appear at the *use-statement*
-/// level (e.g. `ratatui`, not `ratatui-core`). Feature flags and
-/// versions are tracked in `Cargo.toml` and the manifest doc; this
-/// list is just the names.
-pub const ALLOWED_EXTERNAL_DEPS: &[&str] = &[
-    "ansi-to-tui",
-    "anyhow",
-    "chrono",
-    "comfy-table",
-    "crossterm",
-    "ratatui",
-    "rusqlite",
-    "serde",
-    "serde_json",
-    "syntect",
-    "thiserror",
-    "tui-markdown",
-    "unicode-width",
-];
-
-/// Binary-only deps used by the extracted-crate `[[bin]]` wrapper.
-/// Not imported by the library surface.
-pub const ALLOWED_BINARY_DEPS: &[&str] = &["clap"];
-
 #[cfg(test)]
 mod tests {
-    use super::*;
+    /// Crates the viewer module is permitted to depend on (library
+    /// surface). Mirrors `docs/transcript-viewer-deps.md`. Add to both
+    /// when an entry changes.
+    ///
+    /// Entries are crate names as they appear at the *use-statement*
+    /// level (e.g. `ratatui`, not `ratatui-core`). Feature flags and
+    /// versions are tracked in `Cargo.toml` and the manifest doc; this
+    /// list is just the names.
+    const ALLOWED_EXTERNAL_DEPS: &[&str] = &[
+        "ansi-to-tui",
+        "anyhow",
+        "chrono",
+        "comfy-table",
+        "crossterm",
+        "ratatui",
+        "rusqlite",
+        "serde",
+        "serde_json",
+        "syntect",
+        "thiserror",
+        "tui-markdown",
+        "unicode-width",
+    ];
+
+    /// Binary-only deps used by the extracted-crate `[[bin]]` wrapper.
+    /// Not imported by the library surface.
+    const ALLOWED_BINARY_DEPS: &[&str] = &["clap"];
 
     /// Read the `docs/transcript-viewer-deps.md` manifest at compile
     /// time and assert the crate names in the "Direct dependencies"

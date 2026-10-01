@@ -6,7 +6,7 @@
 //!
 //! Parallel structure to [`crate::discovery::declared`]: enumerate
 //! stores (user config first, then per-root project configs), parse
-//! each via the [`crate::pins`] schema module, and emit one
+//! each via the `crate::pins` schema module, and emit one
 //! [`PinCandidate`] per valid entry plus diagnostics for malformed
 //! files. The resolver pass consumes the resulting sidecar
 //! to perform mux-anchored binding and to synthesize the matching

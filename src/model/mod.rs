@@ -2322,7 +2322,7 @@ pub enum PinBinding {
 }
 
 /// Mux backend coordinates carried inside [`PinCandidate`]. Mirrors
-/// the schema in [`crate::pins::PinMux`] but lives in the model
+/// the schema in `crate::pins::PinMux` but lives in the model
 /// crate so consumers can read it without depending on the
 /// pin-schema module.
 #[derive(
@@ -2347,7 +2347,7 @@ pub struct PinMuxRef {
 
 impl PinMuxRef {
     /// Mux native id encoding per ADR 0057 (mirrors
-    /// [`crate::pins::PinMux::native_id`] without taking a
+    /// `crate::pins::PinMux::native_id` without taking a
     /// schema-module dependency).
     pub fn native_id(&self) -> String {
         match self.effective_socket() {

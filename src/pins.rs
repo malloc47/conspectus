@@ -154,12 +154,6 @@ pub struct PinLaunch {
     pub argv: Vec<String>,
 }
 
-impl PinLaunch {
-    pub fn is_empty(&self) -> bool {
-        self.argv.is_empty()
-    }
-}
-
 pub fn parse_pins_document(text: &str) -> Result<PinsDocument, PinParseError> {
     let mut document: PinsDocument =
         toml::from_str(text).map_err(|err| PinParseError::MalformedToml(err.to_string()))?;

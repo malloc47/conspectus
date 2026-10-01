@@ -175,6 +175,7 @@ pub struct PinBindingsCache {
 }
 
 impl PinBindingsCache {
+    #[cfg(test)]
     pub fn new() -> Self {
         Self::default()
     }
@@ -187,11 +188,13 @@ impl PinBindingsCache {
         }
     }
 
+    #[cfg(test)]
     pub fn with_home(mut self, home: impl Into<PathBuf>) -> Self {
         self.home = Some(home.into());
         self
     }
 
+    #[cfg(test)]
     pub fn with_xdg_cache_home(mut self, xdg: impl Into<PathBuf>) -> Self {
         self.xdg_cache_home = Some(xdg.into());
         self
