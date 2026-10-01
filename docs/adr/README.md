@@ -164,6 +164,7 @@ How the project is built, tested, tracked, and shipped, including the agent-orie
 | [0009](0009-lightweight-backlog-tracking.md) | Lightweight Backlog Tracking | Accepted |
 | [0010](0010-task-runner-selection.md) | Task Runner Selection | Accepted |
 | [0015](0015-library-api-surface.md) | Library API Surface | Accepted (amended) |
+| [0100](0100-typed-errors-on-the-library-facade.md) | Typed Errors On The Library Facade | Accepted |
 | [0016](0016-distribution-policy.md) | Distribution Policy | Accepted |
 | [0017](0017-repository-placement.md) | Repository Placement | Accepted |
 | [0067](0067-tui-snapshot-mode-for-agent-iteration.md) | Dev-Only TUI Snapshot Mode For Agentic Iteration | Accepted |
