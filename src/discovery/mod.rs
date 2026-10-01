@@ -258,7 +258,7 @@ impl LocalDiscovery {
     /// it stamps onto its outputs (see ADR 0079). The warm-start
     /// path uses these to decide whether the prior cache covers
     /// the entry's slice. Pass an empty slice (or use
-    /// [`with_provider`]) to opt out of TTL gating.
+    /// `with_provider`) to opt out of TTL gating.
     pub fn with_keyed_provider(
         mut self,
         keys: &[&'static str],

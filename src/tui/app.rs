@@ -612,7 +612,7 @@ pub enum Msg {
     /// `Effect::Exec(ExecSpec::LaunchPin { pin_id, attach_target })`.
     LaunchPinById(String),
     /// Remove a pin declaration from its TOML store (ADR 0057).
-    /// Carries the already-resolved [`PinRemoveRequest`]; the
+    /// Carries the already-resolved `PinRemoveRequest`; the
     /// reducer emits `Effect::WriteStore(StoreOp::PinRemove(...))`
     /// and the executor performs the write.
     PinRemove(crate::tui::widgets::pins::PinRemoveRequest),
@@ -841,7 +841,7 @@ impl App {
     /// Push a rename overlay onto the modal stack. Caller
     /// pre-populates the input with the current alias, harness
     /// title, or empty string per ADR 0030. H-TUI-006 wraps the
-    /// raw text-input state in a [`RenameOverlayState`] so the
+    /// raw text-input state in a `RenameOverlayState` so the
     /// overlay's Confirm(String) maps to Msg::CommitRename via
     /// the uniform Overlay trait.
     pub fn open_rename_overlay(&mut self, state: crate::tui::widgets::input::TextInputState) {
@@ -1952,7 +1952,7 @@ impl App {
         self.force_recency_for_flat_sessions();
     }
 
-    /// Build a [`PersistedState`] snapshot of the current app state
+    /// Build a `PersistedState` snapshot of the current app state
     /// for writing to the state file. Captures the last-active view,
     /// global sort, and per-view filter/grouping from `view_states`
     /// (plus the active view's current state, which may not yet be

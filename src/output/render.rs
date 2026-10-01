@@ -184,7 +184,7 @@ pub const SHORT_ID_FLOOR: usize = 6;
 
 /// FNV-1a 64-bit over a `NodeId`'s `Display` form, as a string.
 /// Shared with callers that already have a display-form id and do not
-/// need to construct a typed [`NodeId`].
+/// need to construct a typed `NodeId`.
 pub fn node_short_id_from_display(node_id_text: &str) -> String {
     const OFFSET: u64 = 0xcbf29ce484222325;
     const PRIME: u64 = 0x100000001b3;

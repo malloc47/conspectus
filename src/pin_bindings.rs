@@ -26,7 +26,7 @@
 //! ## Atomicity
 //!
 //! Writes use the same temp-file-and-rename pattern as
-//! [`crate::declared::write_atomic`] (which is shared via that
+//! `crate::declared::write_atomic` (which is shared via that
 //! module). A per-process suffix on the temp name lets concurrent
 //! conspectus runs coexist without colliding.
 
@@ -253,7 +253,7 @@ pub fn read(
 /// the read and a parse.
 ///
 /// Atomic via tempfile-and-rename (shared with
-/// [`crate::declared::write_atomic`]). Creates parent directories on
+/// `crate::declared::write_atomic`). Creates parent directories on
 /// demand.
 pub fn write(
     cache: &PinBindingsCache,
@@ -445,7 +445,7 @@ pub type RecordOutcome = (String, Result<WriteOutcome, PinBindingError>);
 /// `snapshot.pins`; for each pin whose binding settled to
 /// [`PinBinding::Bound`] (including bindings sourced from `pin bind`
 /// declared overrides per Q6), build a [`PinBindingRecord`] and write
-/// it via [`write`]. Pins with `Unbound`, `StaleMux`, or no binding
+/// it via `write`. Pins with `Unbound`, `StaleMux`, or no binding
 /// at all are skipped — the sidecar only records observed successful
 /// bindings, never failure modes.
 ///

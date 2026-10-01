@@ -16,7 +16,7 @@
 //!   per-class refresh prior) and [`SnapshotBytes`] (the
 //!   serialized form served verbatim over the socket
 //!   `snapshot` command). Both refresh in lockstep via
-//!   [`publish_snapshot`] after every successful cycle.
+//!   `publish_snapshot` after every successful cycle.
 //! * Persistence is the single `graph.bin` zero-copy artifact
 //!   per ADR 0083. Daemonless one-shot CLIs read it via
 //!   `snapshot::open_mmap`; the daemon's own warm-restart path

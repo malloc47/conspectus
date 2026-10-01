@@ -92,7 +92,7 @@ pub enum ControlsCursor {
     /// View option at index in [`VIEW_OPTIONS`].
     View(usize),
     /// Grouping option at index in
-    /// [`Grouping::values_for(ctx.view)`].
+    /// `Grouping::values_for(ctx.view)`.
     Grouping(usize),
     FilterHarness,
     FilterMaxAge,

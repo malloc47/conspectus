@@ -149,7 +149,7 @@ pub fn mutator_providers() -> Vec<&'static str> {
 /// The runtime value must stay in sync with
 /// [`crate::discovery::providers::REGISTRY`]; a change here
 /// without a matching descriptor registration is caught by
-/// [`tests::mutator_const_matches_registry`].
+/// `tests::mutator_const_matches_registry`.
 pub const MUTATOR_PROVIDERS: &[&str] = &[
     providers::CROSS_LINK,
     providers::CODEX_LOG,

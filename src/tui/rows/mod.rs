@@ -3,7 +3,7 @@
 //! Builders are deterministic functions of `(GraphSnapshot, RunConfig,
 //! now)` → [`RowTree`]. They contain no ratatui types and no I/O so
 //! they snapshot-test without a runtime. The TUI's renderer
-//! ([`crate::tui::ui`]) and the CLI's table surface
+//! (`crate::tui::ui`) and the CLI's table surface
 //! ([`crate::output::table`]) can both consume them as the table-
 //! parity work in later stories lands.
 //!
@@ -433,7 +433,7 @@ pub fn format_workspace_display(
 /// Translate a harness key to the short label rendered in the row.
 /// H-EXT-002: delegates to the adapter registry so
 /// `claude-code`'s `claude` collapse (H-TBL-014) lives on
-/// [`crate::discovery::harness::ClaudeCodeAdapter::display_label`]
+/// `crate::discovery::harness::ClaudeCodeAdapter::display_label`
 /// rather than in a match table here.
 pub fn harness_label(harness_key: &str) -> String {
     crate::discovery::harness::display_label_for(harness_key)
@@ -470,7 +470,7 @@ pub fn format_recency(now: Option<i64>, activity_epoch: Option<i64>) -> Option<S
 }
 
 /// Coarse activity buckets (Phase 3 of the styling overhaul). The
-/// renderer maps each bucket to a [`Theme`] style so the recency
+/// renderer maps each bucket to a `Theme` style so the recency
 /// column carries a freshness signal in color in addition to the
 /// numeric label. Bucket boundaries:
 ///
@@ -598,7 +598,7 @@ pub fn recency_bucket(now: Option<i64>, activity_epoch: Option<i64>) -> Option<R
 
 impl RecencyBucket {
     /// Build the [`ratatui::style::Style`] for this bucket from the
-    /// active [`Theme`]. The mapping pulls the per-bucket `StyleSpec`
+    /// active `Theme`. The mapping pulls the per-bucket `StyleSpec`
     /// directly so operators who override a single bucket through
     /// `[tui.theme]` see the change immediately.
     pub fn style(self, theme: &crate::tui::Theme) -> ratatui::style::Style {

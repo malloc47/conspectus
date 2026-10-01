@@ -128,8 +128,8 @@ pub struct Theme {
 
 /// Color + modifier pair. Used for theme fields where the operator
 /// might want to combine a hue with emphasis (e.g. `"green,bold"`
-/// for the fresh-recency bucket). When [`color`] is `None`, the
-/// renderer inherits the default fg; when [`modifier`] is empty, no
+/// for the fresh-recency bucket). When `color` is `None`, the
+/// renderer inherits the default fg; when `modifier` is empty, no
 /// modifier is added.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct StyleSpec {

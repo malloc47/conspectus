@@ -571,7 +571,7 @@ pub fn load_pin_entry_by_id(
 /// Upsert `entry` into the `[pins]` section of `path`.
 ///
 /// - Reads the existing file, parses it, mutates only the `[pins]`
-///   slice, and writes via [`crate::declared::write_atomic`] so the
+///   slice, and writes via `crate::declared::write_atomic` so the
 ///   on-disk file is replaced through a temp-file-and-rename. Any
 ///   sibling sections (`[session]`, `[declared]`, `[aliases]`, …) are
 ///   preserved byte-for-byte.

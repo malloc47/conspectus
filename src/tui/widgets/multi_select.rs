@@ -9,7 +9,7 @@
 //! centered modal + buffer-clear remain in this module because
 //! they're UI integration code, not widget rendering.
 //!
-//! Theme bridge: [`cheese_styles_from_theme`] maps the `[tui.theme]`
+//! Theme bridge: `cheese_styles_from_theme` maps the `[tui.theme]`
 //! keys (ADR 0032) onto the upstream
 //! [`ratatui_cheese::multi_select::MultiSelectStyles`] surface so the
 //! sub-editor honors operator overrides. Callers pass a `&Theme` to

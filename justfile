@@ -15,6 +15,10 @@ nextest:
 diff-check:
     git diff --check
 
+# Rustdoc with warnings as errors (broken or private intra-doc links)
+doc:
+    RUSTDOCFLAGS="-D warnings" cargo doc --no-deps
+
 # Regenerate the comprehensive showcase fixture (ADR 0070).
 #
 # Three post-processing steps:
@@ -57,4 +61,4 @@ regen-showcase-fixture:
 demo:
     cargo run --quiet --features snapshot -- tui --fixture tests/fixtures/showcase.json
 
-check: fmt clippy test nextest diff-check
+check: fmt clippy test nextest doc diff-check

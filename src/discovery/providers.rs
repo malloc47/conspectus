@@ -20,7 +20,7 @@
 //! constant so existing string-literal call sites keep compiling
 //! and grep-friendly identifiers stay in place; the constants
 //! are the same string as the descriptor's `key`, checked in
-//! [`tests::descriptor_constants_agree`].
+//! `tests::descriptor_constants_agree`.
 //!
 //! Adding a new provider:
 //!

@@ -42,7 +42,7 @@ pub enum PinDiagnosticView {
         expected_mux_native_id: String,
         /// Optional last-recorded session from the pin-bindings
         /// sidecar (ADR 0058). When present, the launch path can
-        /// advertise a "resume <id>" affordance instead of a plain
+        /// advertise a "resume `<id>`" affordance instead of a plain
         /// "launch" hint.
         last_session: Option<PinLastSession>,
     },

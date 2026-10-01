@@ -70,7 +70,7 @@ pub enum ViewerDisabled {
 }
 
 /// PATH-discovery seam. Production uses [`PathBinaryProbe`]; tests
-/// inject [`FakeBinaryProbe`].
+/// inject `FakeBinaryProbe`.
 pub trait BinaryProbe {
     fn on_path(&self, binary: &str) -> bool;
 }

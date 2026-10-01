@@ -130,7 +130,7 @@ pub struct NodeView {
     pub all_fields: Vec<CoreField>,
     /// Combined relationship list (ADR 0074). Each group carries its
     /// own direction; the legacy
-    /// [`Self::upstream_groups`] / [`Self::downstream_groups`]
+    /// `Self::upstream_groups` / `Self::downstream_groups`
     /// helpers filter on it during the H-UI-003 pass 1 transition so
     /// the reducer and renderer can compile against the new shape
     /// before passes 2 and 3 land the flat-list cursor + render
@@ -305,8 +305,8 @@ pub fn directional_verb(relation: &RelationKind, direction: Direction) -> &'stat
 /// Combined relationship explorer (ADR 0074). Groups carry direction
 /// internally so a single explorer surface can hold both inbound and
 /// outbound neighbors. The prior per-direction split lives on as a
-/// transitional convenience via [`NodeView::upstream_groups`] /
-/// [`NodeView::downstream_groups`] until passes 2 and 3 refactor the
+/// transitional convenience via `NodeView::upstream_groups` /
+/// `NodeView::downstream_groups` until passes 2 and 3 refactor the
 /// reducer + renderer onto the flat list.
 #[derive(Clone, Debug, PartialEq)]
 pub struct RelationshipExplorer {
@@ -354,7 +354,7 @@ pub struct RelationshipGroup {
     pub neighbor_kind: String,
     /// Resolver-preferred candidates sort first; the rest follow in
     /// `(provenance, confidence, link_id)` order matching
-    /// [`crate::tui::detail::preferred_link`].
+    /// `crate::tui::detail::preferred_link`.
     pub links: Vec<RelationshipLink>,
     /// Unresolved-evidence stubs not represented by a concrete
     /// neighbor.

@@ -695,7 +695,7 @@ pub struct MuxSessionNode {
     /// (when discovery for them lands per H-PIN-F-001) it would
     /// be `<socket>:<name>` (e.g. `scratch:editor`). The fully-
     /// prefixed form `<backend>:<native_id>` lives on
-    /// [`MuxSessionId.native_id`] — same field name on the id
+    /// `MuxSessionId.native_id` — same field name on the id
     /// type, but the id holds the prefixed form while this field
     /// drops the backend prefix.
     ///
@@ -1711,7 +1711,7 @@ pub struct GraphSnapshot {
     /// [`NodeProvenance`].
     ///
     /// Serializes as a JSON array of `{node_id, provider,
-    /// freshness_epoch}` entries (via [`node_provenance_serde`])
+    /// freshness_epoch}` entries (via `node_provenance_serde`)
     /// because JSON object keys must be strings and `NodeId` is a
     /// structured type. The in-memory shape stays a `BTreeMap` so
     /// loader lookups are O(log n) and the per-node iteration order

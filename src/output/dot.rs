@@ -2,7 +2,7 @@
 //! backlog item `GV-002`).
 //!
 //! The renderer is provider-neutral: shape and fill are keyed on
-//! [`NodeKind`], edge arrowhead on [`RelationKind`] category,
+//! `NodeKind`, edge arrowhead on [`RelationKind`] category,
 //! penwidth/color tint on [`Provenance`]. Candidate vs. resolved is
 //! a styling difference, not a structural one: every resolved
 //! relationship is also a candidate link (the

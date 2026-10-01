@@ -3,7 +3,7 @@
 //! Every mux-attribution candidate the discovery pipeline emits
 //! stamps its `SourceMetadata` with one of these strings. The
 //! resolver reads them back to rank candidates
-//! ([`crate::resolve::process_identity_evidence_rank`]) and the
+//! (`crate::resolve::process_identity_evidence_rank`) and the
 //! stale-launch demotion path in
 //! `discovery::codex_log` matches against them by literal
 //! comparison.
@@ -17,7 +17,7 @@
 /// FD-path evidence: the mux's active pane holds an open
 /// harness state file (session JSONL / rollout log / opencode DB
 /// path). Highest-weight identity evidence for
-/// [`crate::resolve::process_identity_evidence_rank`].
+/// `crate::resolve::process_identity_evidence_rank`.
 pub const ACTIVE_PANE_FD_SESSION_MATCH: &str = "active_pane_fd_session_match";
 
 /// FD-path evidence corroborated by a matching session key on

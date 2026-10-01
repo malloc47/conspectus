@@ -141,7 +141,7 @@ pub fn load_alias_entry_for_node(
     Ok(None)
 }
 
-/// Resolved alias overlay carried alongside a [`GraphSnapshot`].
+/// Resolved alias overlay carried alongside a `GraphSnapshot`.
 /// Maps a [`NodeId`] to the operator-chosen display name with local
 /// stores taking precedence over global stores per ADR 0029.
 #[derive(

@@ -10,7 +10,7 @@
 //! **Wave 1 scope**: table shape + a small pilot subset (view
 //! switching / grouping cycle) as the reference example + a
 //! drift test asserting every entry's `help_text` appears in
-//! the currently-shipped [`crate::tui::widgets::help::keymap_sections`]
+//! the currently-shipped `crate::tui::widgets::help::keymap_sections`
 //! output. Full migration of the 265 `KeyCode::` arms in
 //! `runtime.rs` (76) + `widgets/pins.rs` (137) + `keymap.rs`
 //! (52) is queued for waves 2–5 as per the H-HYG-007 backlog
@@ -434,7 +434,7 @@ pub fn translate_via_table(modifiers: KeyModifiers, code: KeyCode) -> Option<Act
 /// friendly label suitable for a help overlay row (e.g. `Ctrl-C`,
 /// `Enter`, `q`, `↓`). Used by the coherence drift test — every
 /// key label produced here must appear somewhere in
-/// [`crate::tui::widgets::help::keymap_sections`]'s output so
+/// `crate::tui::widgets::help::keymap_sections`'s output so
 /// the table and help stay in sync.
 pub fn key_label(key: &KeyMatcher) -> String {
     match key {

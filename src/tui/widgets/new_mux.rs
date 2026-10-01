@@ -5,7 +5,7 @@
 //! `conspectus mux new`. Modeled on the worktree menu's branch-input
 //! sub-mode but with two fields and `Tab` focus cycling.
 //!
-//! Menu-first tenet ([`feedback_tui_discoverability`]): attach
+//! Menu-first principle: attach
 //! (`a` / `Enter`) and rename (`R`) are already mux-relevant but
 //! polymorphic across node kinds, so today they wouldn't shape a
 //! useful mux-specific menu on their own. When a second bare-mux-

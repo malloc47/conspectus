@@ -47,7 +47,7 @@ pub enum Effect {
     /// the call; the reducer never talks to tmux directly. Pure
     /// contexts silently drop `RunMux` — snapshot mode has no live
     /// backend and tests use FakeTmux directly against
-    /// [`execute_effects_live`] when they want to assert against
+    /// `execute_effects_live` when they want to assert against
     /// mux ops.
     RunMux(MuxOp),
     /// Persist a user-authored declaration to disk (ADR 0085

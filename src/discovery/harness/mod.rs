@@ -92,13 +92,13 @@ pub struct RuntimeSignature {
     /// a custom grammar.
     pub extract_session_keys: fn(&str) -> BTreeSet<String>,
     /// Recognize this harness's helper / daemon processes so
-    /// `cross_link` can classify them as [`RuntimeProcessRole::Background`]
+    /// `cross_link` can classify them as `RuntimeProcessRole::Background`
     /// instead of treating them as human-driven agent panes.
     /// Defaults to always-false.
     pub is_background_process: fn(&str) -> bool,
     /// Recognize this harness's subagent processes (opencode's
     /// nested-agent spawns, currently) so `cross_link` can
-    /// classify them as [`RuntimeProcessRole::Subagent`] instead
+    /// classify them as `RuntimeProcessRole::Subagent` instead
     /// of duplicating them as human-driven rows. Defaults to
     /// always-false.
     pub is_subagent_process: fn(&str) -> bool,

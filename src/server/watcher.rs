@@ -18,7 +18,7 @@
 //!   back to interval polling. The watcher itself is best-
 //!   effort: if the OS drops events, polling still catches up
 //!   on the next interval.
-//! * [`FakeWatcher`] — a test-only deterministic implementation
+//! * `FakeWatcher` — a test-only deterministic implementation
 //!   driven by an internal queue of pre-canned events. Used by
 //!   the scheduler integration tests to exercise watcher-
 //!   available, watcher-fallback, and watcher-saturation

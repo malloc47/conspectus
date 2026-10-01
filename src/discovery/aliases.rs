@@ -2,7 +2,7 @@
 //!
 //! Reads ADR 0029 `[aliases]` config sections from the same stores
 //! used by declared-link discovery and populates the
-//! [`AliasOverlay`] sidecar on the resulting [`GraphSnapshot`]. The
+//! `AliasOverlay` sidecar on the resulting [`GraphSnapshot`]. The
 //! pass is intentionally read-only and parallel to
 //! [`crate::discovery::declared::apply_declared_links`].
 

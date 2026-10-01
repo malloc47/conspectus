@@ -23,7 +23,7 @@ use crate::tui::{Msg, View};
 /// Semantic action the runtime dispatches once a crossterm event
 /// is translated. Overlay-owned keys arrive as `*OverlayKey`
 /// variants; everything else flows through
-/// [`crate::tui::runtime::LoopMode::dispatch`].
+/// `crate::tui::runtime::LoopMode::dispatch`.
 #[allow(clippy::enum_variant_names)]
 #[derive(Debug, Clone, PartialEq)]
 #[cfg_attr(feature = "snapshot", allow(dead_code))]

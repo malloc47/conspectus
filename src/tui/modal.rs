@@ -143,7 +143,7 @@ pub trait Overlay {
 /// Wrapper that adapts the generic [`TextInputState`] widget into
 /// an [`Overlay`] impl for the rename modal. The widget-level
 /// `InputOutcome::Confirm(String)` maps to
-/// [`Msg::CommitRename(String)`] here so the trait's uniform
+/// `Msg::CommitRename(String)` here so the trait's uniform
 /// `Commit(Msg)` outcome carries the specific rename intent.
 /// Cancel maps to `Close`; incidental keystrokes stay `Consumed`.
 ///

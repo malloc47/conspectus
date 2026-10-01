@@ -18,7 +18,7 @@
 //!
 //! [`ALLOWED_EXTERNAL_DEPS`] is the machine-readable mirror of the
 //! "Direct dependencies" table in `docs/transcript-viewer-deps.md`.
-//! The [`tests::dep_surface_matches_doc_manifest`] test asserts the
+//! The `tests::dep_surface_matches_doc_manifest` test asserts the
 //! two agree at compile time; diverging them is a review blocker.
 
 pub mod input;

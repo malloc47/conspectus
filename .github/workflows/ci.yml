@@ -41,5 +41,10 @@ jobs:
       - name: Run nextest
         run: cargo nextest run --all-targets --all-features
 
+      - name: Check docs
+        run: cargo doc --no-deps
+        env:
+          RUSTDOCFLAGS: -D warnings
+
       - name: Check whitespace errors
         run: git diff --check
