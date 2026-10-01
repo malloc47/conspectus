@@ -17,11 +17,9 @@
 //! sessions carry `session_kind: Subagent` on their `AgentSessionNode` so
 //! downstream TUI and resolver code can nest, filter, or suppress them.
 
-use std::collections::{BTreeMap, HashMap};
+use std::collections::BTreeMap;
 use std::fs;
-use std::path::{Path, PathBuf};
-use std::sync::Mutex;
-use std::time::UNIX_EPOCH;
+use std::path::Path;
 
 use anyhow::Result;
 use rusqlite::{Connection, OpenFlags};
@@ -29,6 +27,7 @@ use serde::Deserialize;
 use serde_json::json;
 
 use crate::discovery::harness::HarnessAdapter;
+use crate::discovery::memo::{FileStamp, StampedMap};
 use crate::discovery::{DiscoveryContext, GraphFragment};
 use crate::model::{
     AgentSessionId, AgentSessionNode, Confidence, Freshness, GraphLink, GraphNode, LinkEndpoint,
@@ -606,53 +605,17 @@ fn read_info(path: &Path) -> Option<SessionInfo> {
 // with an idle opencode the cache hit rate is ~100%, saving the
 // ~5,000 pread64 pages per full-table scan every harness cycle.
 
-struct CachedSqliteSessions {
-    mtime_ns: i128,
-    size: u64,
-    sessions: Vec<SessionInfo>,
-}
-
-static SQLITE_SESSIONS_CACHE: Mutex<Option<HashMap<PathBuf, CachedSqliteSessions>>> =
-    Mutex::new(None);
+static SQLITE_SESSIONS_CACHE: StampedMap<FileStamp, Vec<SessionInfo>> = StampedMap::new();
 
 fn read_sqlite_sessions_cached(path: &Path) -> Vec<SessionInfo> {
-    let Ok(meta) = fs::metadata(path) else {
+    let Some(stamp) = FileStamp::of(path) else {
         return Vec::new();
     };
-    let Ok(mtime) = meta.modified() else {
-        return Vec::new();
-    };
-    let Ok(duration) = mtime.duration_since(UNIX_EPOCH) else {
-        return Vec::new();
-    };
-    let mtime_ns =
-        i128::from(duration.as_secs()) * 1_000_000_000 + i128::from(duration.subsec_nanos());
-    let size = meta.len();
-
-    {
-        let guard = SQLITE_SESSIONS_CACHE.lock().unwrap();
-        if let Some(map) = guard.as_ref()
-            && let Some(cached) = map.get(path)
-            && cached.mtime_ns == mtime_ns
-            && cached.size == size
-        {
-            return cached.sessions.clone();
-        }
+    if let Some(sessions) = SQLITE_SESSIONS_CACHE.get(path, &stamp) {
+        return sessions;
     }
-
     let sessions = read_sqlite_sessions(path);
-
-    let mut guard = SQLITE_SESSIONS_CACHE.lock().unwrap();
-    let map = guard.get_or_insert_with(HashMap::new);
-    map.insert(
-        path.to_path_buf(),
-        CachedSqliteSessions {
-            mtime_ns,
-            size,
-            sessions: sessions.clone(),
-        },
-    );
-
+    SQLITE_SESSIONS_CACHE.insert(path.to_path_buf(), stamp, sessions.clone());
     sessions
 }
 

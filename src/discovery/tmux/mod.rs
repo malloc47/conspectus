@@ -12,10 +12,11 @@ use std::io;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::Mutex;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use anyhow::{Context, Result};
 
+use crate::discovery::memo::TtlCache;
 use crate::discovery::{DiscoveryContext, DiscoveryProvider, GraphFragment};
 use crate::model::{GraphNode, MuxSessionId, MuxSessionNode};
 
@@ -1315,7 +1316,7 @@ impl<R: MuxBackend + 'static> DiscoveryProvider for TmuxDiscovery<R> {
         // so the gate never marks it fresh, and every cycle
         // re-invokes the backend. See H-SERVE-PERF-005 for the
         // same-shape fix on the forge side. TTL matches Mux class.
-        if let Some(cached) = cached_tmux_fragment() {
+        if let Some(cached) = TMUX_CACHE.get(&()) {
             return Ok(cached);
         }
 
@@ -1350,36 +1351,14 @@ impl<R: MuxBackend + 'static> DiscoveryProvider for TmuxDiscovery<R> {
             TMUX_BACKEND,
             crate::discovery::current_epoch(),
         );
-        store_tmux_fragment(&fragment);
+        TMUX_CACHE.set((), fragment.clone());
         Ok(fragment)
     }
 }
 
 const TMUX_CACHE_TTL: Duration = Duration::from_secs(5);
 
-struct CachedTmuxFragment {
-    cached_at: Instant,
-    fragment: GraphFragment,
-}
-
-static TMUX_CACHE: Mutex<Option<CachedTmuxFragment>> = Mutex::new(None);
-
-fn cached_tmux_fragment() -> Option<GraphFragment> {
-    let guard = TMUX_CACHE.lock().unwrap();
-    let cached = guard.as_ref()?;
-    if cached.cached_at.elapsed() >= TMUX_CACHE_TTL {
-        return None;
-    }
-    Some(cached.fragment.clone())
-}
-
-fn store_tmux_fragment(fragment: &GraphFragment) {
-    let mut guard = TMUX_CACHE.lock().unwrap();
-    *guard = Some(CachedTmuxFragment {
-        cached_at: Instant::now(),
-        fragment: fragment.clone(),
-    });
-}
+static TMUX_CACHE: TtlCache<(), GraphFragment> = TtlCache::new(TMUX_CACHE_TTL);
 
 /// Clear the process-wide tmux fragment cache. Tests that
 /// observe the cache short-circuit call this in setup so a prior
@@ -1390,8 +1369,7 @@ fn store_tmux_fragment(fragment: &GraphFragment) {
 /// too. `#[doc(hidden)]` to keep it out of the public API surface.
 #[doc(hidden)]
 pub fn reset_tmux_cache_for_tests() {
-    let mut guard = TMUX_CACHE.lock().unwrap();
-    *guard = None;
+    TMUX_CACHE.clear();
 }
 
 /// Serial gate for cache-observing tests. Same rationale as

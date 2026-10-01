@@ -29,11 +29,11 @@
 use std::io;
 use std::path::PathBuf;
 use std::process::Command;
-use std::sync::Mutex;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use anyhow::{Context, Result};
 
+use crate::discovery::memo::TtlCache;
 use crate::discovery::providers;
 use crate::discovery::tmux::{MuxBackend, TmuxAttachOutcome, TmuxOutcome, UnavailableReason};
 use crate::discovery::{DiscoveryContext, DiscoveryProvider, GraphFragment};
@@ -226,7 +226,7 @@ impl<R: MuxBackend + 'static> DiscoveryProvider for ZellijDiscovery<R> {
         // stamps, so `gate.fresh` never contains it and every class
         // thread's cycle respawns the backend. Same shape as the
         // forge H-SERVE-PERF-005 and tmux fixes.
-        if let Some(cached) = cached_zellij_fragment() {
+        if let Some(cached) = ZELLIJ_CACHE.get(&()) {
             return Ok(cached);
         }
 
@@ -278,36 +278,14 @@ impl<R: MuxBackend + 'static> DiscoveryProvider for ZellijDiscovery<R> {
             ZELLIJ_BACKEND,
             crate::discovery::current_epoch(),
         );
-        store_zellij_fragment(&fragment);
+        ZELLIJ_CACHE.set((), fragment.clone());
         Ok(fragment)
     }
 }
 
 const ZELLIJ_CACHE_TTL: Duration = Duration::from_secs(5);
 
-struct CachedZellijFragment {
-    cached_at: Instant,
-    fragment: GraphFragment,
-}
-
-static ZELLIJ_CACHE: Mutex<Option<CachedZellijFragment>> = Mutex::new(None);
-
-fn cached_zellij_fragment() -> Option<GraphFragment> {
-    let guard = ZELLIJ_CACHE.lock().unwrap();
-    let cached = guard.as_ref()?;
-    if cached.cached_at.elapsed() >= ZELLIJ_CACHE_TTL {
-        return None;
-    }
-    Some(cached.fragment.clone())
-}
-
-fn store_zellij_fragment(fragment: &GraphFragment) {
-    let mut guard = ZELLIJ_CACHE.lock().unwrap();
-    *guard = Some(CachedZellijFragment {
-        cached_at: Instant::now(),
-        fragment: fragment.clone(),
-    });
-}
+static ZELLIJ_CACHE: TtlCache<(), GraphFragment> = TtlCache::new(ZELLIJ_CACHE_TTL);
 
 #[cfg(test)]
 mod tests {

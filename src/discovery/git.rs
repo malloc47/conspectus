@@ -1,13 +1,13 @@
 //! Read-only git discovery probes.
 
-use std::collections::{BTreeMap, BTreeSet, HashMap};
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 use std::process::Command;
-use std::sync::Mutex;
-use std::time::UNIX_EPOCH;
+use std::time::SystemTime;
 
 use anyhow::{Context, Result, bail};
 
+use crate::discovery::memo::{StampedMap, modified};
 use crate::discovery::worktree::{WorktreeBackend, WorktreeRecord};
 use crate::discovery::{DiscoveryContext, DiscoveryProvider, GraphFragment, merge_fragments};
 use crate::model::{
@@ -63,11 +63,11 @@ impl GitProbe {
         // that's the dominant serve idle cost (~150 git spawns per
         // cycle, ~1MB of libc/pcre/git-shared-lib reads per spawn).
         if let Some(cached) = probe_cache_lookup(&root) {
-            return Ok(cached);
+            return Ok(cached.into_result());
         }
 
         let result = self.probe_uncached(&root)?;
-        probe_cache_store(&root, &result);
+        probe_cache_store(&root, result.as_ref());
         Ok(result)
     }
 
@@ -494,79 +494,68 @@ fn is_expected_absence(args: &[&str], code: Option<i32>) -> bool {
 // Fingerprint entries are `Option<i128>` because worktrees, sparse checkouts,
 // and freshly-init'd repos may not have every file present.
 
-static PROBE_CACHE: Mutex<Option<HashMap<PathBuf, CachedProbeEntry>>> = Mutex::new(None);
+/// Probe results per checkout root, valid while the git state
+/// fingerprint for that root is unchanged.
+static PROBE_CACHE: StampedMap<GitStateFingerprint, CachedProbe> = StampedMap::new();
+
+#[derive(Clone)]
+enum CachedProbe {
+    Repo(GitProbeResult),
+    NotARepo,
+}
+
+impl CachedProbe {
+    fn into_result(self) -> Option<GitProbeResult> {
+        match self {
+            Self::Repo(result) => Some(result),
+            Self::NotARepo => None,
+        }
+    }
+}
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 struct GitStateFingerprint {
-    head_mtime_ns: Option<i128>,
-    config_mtime_ns: Option<i128>,
-    refs_heads_mtime_ns: Option<i128>,
-    packed_refs_mtime_ns: Option<i128>,
-    /// mtime of the input `root` itself. Guards the "not a git dir"
-    /// cache entry: if the caller adds `.git` to `root` between calls
-    /// the parent dir's mtime advances, invalidating the cache.
-    root_mtime_ns: Option<i128>,
+    head: Option<SystemTime>,
+    config: Option<SystemTime>,
+    refs_heads: Option<SystemTime>,
+    packed_refs: Option<SystemTime>,
+    /// Modification time of the probed `root` itself. Guards the
+    /// "not a git dir" entry: adding `.git` to `root` advances it.
+    root: Option<SystemTime>,
 }
 
-struct CachedProbeEntry {
-    fingerprint: GitStateFingerprint,
-    result: Option<GitProbeResult>,
-}
-
-fn file_mtime_ns(path: &Path) -> Option<i128> {
-    let meta = std::fs::metadata(path).ok()?;
-    let mtime = meta.modified().ok()?;
-    let duration = mtime.duration_since(UNIX_EPOCH).ok()?;
-    Some(i128::from(duration.as_secs()) * 1_000_000_000 + i128::from(duration.subsec_nanos()))
-}
-
-fn fingerprint_for_repo(git_dir: &Path, common_dir: &Path, root: &Path) -> GitStateFingerprint {
-    GitStateFingerprint {
-        head_mtime_ns: file_mtime_ns(&git_dir.join("HEAD")),
-        // `.git/config` on a linked worktree lives in the common dir; the
-        // worktree's own git-dir carries only worktree-scoped state.
-        config_mtime_ns: file_mtime_ns(&common_dir.join("config")),
-        refs_heads_mtime_ns: file_mtime_ns(&common_dir.join("refs").join("heads")),
-        packed_refs_mtime_ns: file_mtime_ns(&common_dir.join("packed-refs")),
-        root_mtime_ns: file_mtime_ns(root),
-    }
-}
-
-fn fingerprint_for_non_repo(root: &Path) -> GitStateFingerprint {
-    GitStateFingerprint {
-        head_mtime_ns: None,
-        config_mtime_ns: None,
-        refs_heads_mtime_ns: None,
-        packed_refs_mtime_ns: None,
-        root_mtime_ns: file_mtime_ns(root),
-    }
-}
-
-fn probe_cache_lookup(root: &Path) -> Option<Option<GitProbeResult>> {
-    let guard = PROBE_CACHE.lock().unwrap();
-    let map = guard.as_ref()?;
-    let entry = map.get(root)?;
-    let current = match &entry.result {
-        Some(result) => fingerprint_for_repo(&result.git_dir, &result.common_dir, root),
-        None => fingerprint_for_non_repo(root),
-    };
-    (current == entry.fingerprint).then(|| entry.result.clone())
-}
-
-fn probe_cache_store(root: &Path, result: &Option<GitProbeResult>) {
-    let fingerprint = match result {
-        Some(r) => fingerprint_for_repo(&r.git_dir, &r.common_dir, root),
-        None => fingerprint_for_non_repo(root),
-    };
-    let mut guard = PROBE_CACHE.lock().unwrap();
-    let map = guard.get_or_insert_with(HashMap::new);
-    map.insert(
-        root.to_path_buf(),
-        CachedProbeEntry {
-            fingerprint,
-            result: result.clone(),
+fn fingerprint_for(probe: &CachedProbe, root: &Path) -> GitStateFingerprint {
+    match probe {
+        CachedProbe::Repo(result) => GitStateFingerprint {
+            head: modified(&result.git_dir.join("HEAD")),
+            // `.git/config` on a linked worktree lives in the common dir;
+            // the worktree's own git-dir carries only worktree-scoped state.
+            config: modified(&result.common_dir.join("config")),
+            refs_heads: modified(&result.common_dir.join("refs").join("heads")),
+            packed_refs: modified(&result.common_dir.join("packed-refs")),
+            root: modified(root),
         },
-    );
+        CachedProbe::NotARepo => GitStateFingerprint {
+            head: None,
+            config: None,
+            refs_heads: None,
+            packed_refs: None,
+            root: modified(root),
+        },
+    }
+}
+
+fn probe_cache_lookup(root: &Path) -> Option<CachedProbe> {
+    PROBE_CACHE.get_if(root, |fingerprint, probe| {
+        *fingerprint == fingerprint_for(probe, root)
+    })
+}
+
+fn probe_cache_store(root: &Path, result: Option<&GitProbeResult>) {
+    let probe = result.map_or(CachedProbe::NotARepo, |result| {
+        CachedProbe::Repo(result.clone())
+    });
+    PROBE_CACHE.insert(root.to_path_buf(), fingerprint_for(&probe, root), probe);
 }
 
 /// Clear the process-wide [`PROBE_CACHE`]. Tests that assert
@@ -574,8 +563,7 @@ fn probe_cache_store(root: &Path, result: &Option<GitProbeResult>) {
 /// test's entries don't leak into their assertions.
 #[cfg(test)]
 pub(crate) fn reset_probe_cache_for_tests() {
-    let mut guard = PROBE_CACHE.lock().unwrap();
-    *guard = None;
+    PROBE_CACHE.clear();
 }
 
 /// Count of `git` subprocess invocations issued via
@@ -595,7 +583,7 @@ pub(crate) fn take_git_spawn_count_for_tests() -> usize {
 /// [`PROBE_CACHE`] and [`GIT_SPAWN_COUNT`] are process-global so
 /// parallel test runs would cross-talk without a serial lock.
 #[cfg(test)]
-pub(crate) static PROBE_TEST_LOCK: Mutex<()> = Mutex::new(());
+pub(crate) static PROBE_TEST_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
 #[cfg(test)]
 #[path = "git_tests.rs"]

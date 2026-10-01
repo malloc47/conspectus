@@ -48,15 +48,14 @@ use std::collections::BTreeMap;
 use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::io::{BufRead, BufReader, Read, Seek, SeekFrom};
-use std::path::{Path, PathBuf};
-use std::sync::Mutex;
-use std::time::UNIX_EPOCH;
+use std::path::Path;
 
 use anyhow::Result;
 use serde::Deserialize;
 use serde_json::json;
 
 use crate::discovery::harness::HarnessAdapter;
+use crate::discovery::memo::{FileStamp, StampedMap};
 use crate::discovery::{DiscoveryContext, GraphFragment};
 use crate::model::{
     AgentSessionId, AgentSessionNode, Confidence, Freshness, GraphLink, GraphNode, LinkEndpoint,
@@ -742,13 +741,7 @@ fn coalesce_slashes(path: &str) -> String {
 // only — if fingerprint matches, no `open()` fires. Dormant files
 // become effectively free.
 
-struct CachedSessionScan {
-    mtime_ns: i128,
-    size: u64,
-    result: DiscoveredSession,
-}
-
-static SESSION_SCAN_CACHE: Mutex<Option<HashMap<PathBuf, CachedSessionScan>>> = Mutex::new(None);
+static SESSION_SCAN_CACHE: StampedMap<FileStamp, DiscoveredSession> = StampedMap::new();
 
 /// Extract `DiscoveredSession` for `path`, reusing a cached scan when
 /// the file's `(mtime, size)` are unchanged since the last call.
@@ -759,30 +752,17 @@ fn scan_session_cached(
     fallback_cwd: Option<&str>,
     state_scope: &str,
 ) -> Option<DiscoveredSession> {
-    let meta = fs::metadata(path).ok()?;
-    let mtime = meta.modified().ok()?;
-    let duration = mtime.duration_since(UNIX_EPOCH).ok()?;
-    let mtime_ns =
-        i128::from(duration.as_secs()) * 1_000_000_000 + i128::from(duration.subsec_nanos());
-    let size = meta.len();
-
-    // Cache lookup: same (path, mtime, size) → identical extract.
-    {
-        let guard = SESSION_SCAN_CACHE.lock().unwrap();
-        if let Some(map) = guard.as_ref()
-            && let Some(cached) = map.get(path)
-            && cached.mtime_ns == mtime_ns
-            && cached.size == size
-        {
-            return Some(cached.result.clone());
-        }
+    let stamp = FileStamp::of(path)?;
+    // Same (path, mtime, size) → identical extract.
+    if let Some(discovered) = SESSION_SCAN_CACHE.get(path, &stamp) {
+        return Some(discovered);
     }
 
     // Cache miss — run the full three-open scan.
     let header = read_session_header(path, fallback_cwd)?;
     let leaf_uuid = read_session_leaf_uuid(path);
     let last_message_preview = read_session_last_message_preview(path);
-    let last_active_epoch = i64::try_from(duration.as_secs()).ok();
+    let last_active_epoch = stamp.modified_epoch();
 
     let discovered = DiscoveredSession {
         node: AgentSessionNode {
@@ -801,16 +781,7 @@ fn scan_session_cached(
         leaf_uuid,
     };
 
-    let mut guard = SESSION_SCAN_CACHE.lock().unwrap();
-    let map = guard.get_or_insert_with(HashMap::new);
-    map.insert(
-        path.to_path_buf(),
-        CachedSessionScan {
-            mtime_ns,
-            size,
-            result: discovered.clone(),
-        },
-    );
+    SESSION_SCAN_CACHE.insert(path.to_path_buf(), stamp, discovered.clone());
 
     Some(discovered)
 }

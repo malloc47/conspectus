@@ -19,11 +19,11 @@ use std::ffi::OsString;
 use std::io;
 use std::path::{Path, PathBuf};
 use std::process::Command;
-use std::sync::Mutex;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use anyhow::{Context, Result};
 
+use crate::discovery::memo::TtlCache;
 use crate::discovery::{DiscoveryContext, DiscoveryProvider, GraphFragment, merge_fragments};
 
 pub mod github;
@@ -107,7 +107,7 @@ impl DiscoveryProvider for ForgeDiscovery {
         // for the fingerprint invariants and why this is the
         // targeted patch rather than the gate-refactor.
         let roots: Vec<PathBuf> = context.roots().to_vec();
-        if let Some(cached) = cached_forge_lookup(&roots) {
+        if let Some(cached) = FORGE_CACHE.get(&roots) {
             return Ok(cached);
         }
 
@@ -116,7 +116,7 @@ impl DiscoveryProvider for ForgeDiscovery {
             fragments.push(adapter.discover(context)?);
         }
         let merged = GraphFragment::from(merge_fragments(fragments));
-        cached_forge_store(roots, &merged);
+        FORGE_CACHE.set(roots, merged.clone());
         Ok(merged)
     }
 }
@@ -127,49 +127,16 @@ impl DiscoveryProvider for ForgeDiscovery {
 /// already skipped this provider if stamps were present.
 const FORGE_CACHE_TTL: Duration = Duration::from_secs(300);
 
-/// Process-lifetime cache of the [`ForgeDiscovery`] output.
-/// See the `discover` body for the H-SERVE-PERF-005 rationale.
-///
-/// Keyed on the sorted context roots — if scan roots change
-/// (e.g. the operator adds a `--scan-root`) the cache misses and
-/// a fresh forge cycle fires. Otherwise the same result is
-/// returned until [`FORGE_CACHE_TTL`] elapses.
-struct CachedForgeFragment {
-    context_roots: Vec<PathBuf>,
-    cached_at: Instant,
-    fragment: GraphFragment,
-}
-
-static FORGE_CACHE: Mutex<Option<CachedForgeFragment>> = Mutex::new(None);
-
-fn cached_forge_lookup(roots: &[PathBuf]) -> Option<GraphFragment> {
-    let guard = FORGE_CACHE.lock().unwrap();
-    let cached = guard.as_ref()?;
-    if cached.context_roots != roots {
-        return None;
-    }
-    if cached.cached_at.elapsed() >= FORGE_CACHE_TTL {
-        return None;
-    }
-    Some(cached.fragment.clone())
-}
-
-fn cached_forge_store(roots: Vec<PathBuf>, fragment: &GraphFragment) {
-    let mut guard = FORGE_CACHE.lock().unwrap();
-    *guard = Some(CachedForgeFragment {
-        context_roots: roots,
-        cached_at: Instant::now(),
-        fragment: fragment.clone(),
-    });
-}
+/// The last forge fragment, keyed by the sorted scan roots it was built
+/// for, so changing `--scan-root` misses and triggers a fresh `gh` run.
+static FORGE_CACHE: TtlCache<Vec<PathBuf>, GraphFragment> = TtlCache::new(FORGE_CACHE_TTL);
 
 /// Clear the process-wide [`FORGE_CACHE`]. Tests that observe
 /// the cache short-circuit call this in setup so a prior test's
 /// entry doesn't leak into their assertions.
 #[cfg(test)]
 pub(crate) fn reset_forge_cache_for_tests() {
-    let mut guard = FORGE_CACHE.lock().unwrap();
-    *guard = None;
+    FORGE_CACHE.clear();
 }
 
 /// Serial gate for cache-observing tests — [`FORGE_CACHE`] is
@@ -179,7 +146,7 @@ pub(crate) fn reset_forge_cache_for_tests() {
 /// call `ForgeDiscovery::discover` must take this lock at the
 /// top of their body.
 #[cfg(test)]
-pub(crate) static FORGE_CACHE_TEST_LOCK: Mutex<()> = Mutex::new(());
+pub(crate) static FORGE_CACHE_TEST_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
 /// Pluggable interface for invoking `gh` (or a fake equivalent). Mirrors
 /// the [`MuxBackend`](crate::discovery::tmux::MuxBackend) seam so tests

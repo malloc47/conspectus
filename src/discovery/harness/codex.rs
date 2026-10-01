@@ -25,12 +25,10 @@
 //! without a `session_meta` envelope are skipped silently so a single bad
 //! file cannot poison discovery.
 
-use std::collections::{BTreeMap, HashMap, HashSet};
+use std::collections::{BTreeMap, HashSet};
 use std::fs;
 use std::io::{BufRead, BufReader, Read, Seek, SeekFrom};
 use std::path::{Path, PathBuf};
-use std::sync::Mutex;
-use std::time::UNIX_EPOCH;
 
 use anyhow::Result;
 use rusqlite::{Connection, OpenFlags};
@@ -38,6 +36,7 @@ use serde::Deserialize;
 use serde_json::json;
 
 use crate::discovery::harness::HarnessAdapter;
+use crate::discovery::memo::{FileStamp, StampedMap};
 use crate::discovery::{DiscoveryContext, GraphFragment};
 use crate::model::{
     AgentSessionId, AgentSessionNode, Confidence, Freshness, GraphLink, GraphNode, LinkEndpoint,
@@ -642,54 +641,19 @@ struct RolloutScan {
     activity: Option<i64>,
 }
 
-struct CachedRolloutScan {
-    mtime_ns: i128,
-    size: u64,
-    result: RolloutScan,
-}
-
-static ROLLOUT_SCAN_CACHE: Mutex<Option<HashMap<PathBuf, CachedRolloutScan>>> = Mutex::new(None);
+static ROLLOUT_SCAN_CACHE: StampedMap<FileStamp, RolloutScan> = StampedMap::new();
 
 fn scan_rollout_cached(path: &Path) -> Option<RolloutScan> {
-    let meta = fs::metadata(path).ok()?;
-    let mtime = meta.modified().ok()?;
-    let duration = mtime.duration_since(UNIX_EPOCH).ok()?;
-    let mtime_ns =
-        i128::from(duration.as_secs()) * 1_000_000_000 + i128::from(duration.subsec_nanos());
-    let size = meta.len();
-
-    {
-        let guard = ROLLOUT_SCAN_CACHE.lock().unwrap();
-        if let Some(map) = guard.as_ref()
-            && let Some(cached) = map.get(path)
-            && cached.mtime_ns == mtime_ns
-            && cached.size == size
-        {
-            return Some(cached.result.clone());
-        }
+    let stamp = FileStamp::of(path)?;
+    if let Some(scan) = ROLLOUT_SCAN_CACHE.get(path, &stamp) {
+        return Some(scan);
     }
-
-    let payload = read_session_meta(path)?;
-    let preview = read_rollout_last_message_preview(path);
-    let activity = i64::try_from(duration.as_secs()).ok();
-
     let scan = RolloutScan {
-        meta: payload,
-        preview,
-        activity,
+        meta: read_session_meta(path)?,
+        preview: read_rollout_last_message_preview(path),
+        activity: stamp.modified_epoch(),
     };
-
-    let mut guard = ROLLOUT_SCAN_CACHE.lock().unwrap();
-    let map = guard.get_or_insert_with(HashMap::new);
-    map.insert(
-        path.to_path_buf(),
-        CachedRolloutScan {
-            mtime_ns,
-            size,
-            result: scan.clone(),
-        },
-    );
-
+    ROLLOUT_SCAN_CACHE.insert(path.to_path_buf(), stamp, scan.clone());
     Some(scan)
 }
 

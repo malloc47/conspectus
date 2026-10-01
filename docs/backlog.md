@@ -14268,6 +14268,10 @@ Queued chunks:
     `DiscoveryCaches` value owned by the caller (daemon state, TUI
     loop, one-shot CLI) and passed through `LocalDiscoveryConfig`,
     then delete the test locks and reset functions.
+  - Progress: (a) landed. `discovery/memo.rs` holds `TtlCache`,
+    `StampedMap`, and `FileStamp`; the git probe cache stores a
+    `CachedProbe::{Repo, NotARepo}` enum; every cache lock recovers
+    from poisoning.
   - ADR: (b) changes `LocalDiscoveryConfig`, which is part of the
     library facade (ADR 0015); amend ADR 0091, which introduced most
     of these caches.

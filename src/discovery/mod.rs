@@ -26,6 +26,7 @@ pub mod forge;
 pub mod git;
 pub mod harness;
 pub mod hook_sidecar;
+pub(crate) mod memo;
 pub mod orchestrator;
 pub mod pins;
 pub mod providers;
@@ -478,7 +479,9 @@ pub fn discover_local_warm_with(
     // fingerprint is computed with `freshness_epoch` stamps
     // excluded so wall-clock churn doesn't defeat equality.
     let current_fingerprint = mux_or_harness_slice_fingerprint(&fresh);
-    let mut fingerprint_guard = LAST_MUX_HARNESS_FINGERPRINT.lock().unwrap();
+    let mut fingerprint_guard = LAST_MUX_HARNESS_FINGERPRINT
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
     let run_process_tree = should_open_process_tree_gate(current_fingerprint, *fingerprint_guard);
     if let Some(fp) = current_fingerprint {
         *fingerprint_guard = Some(fp);

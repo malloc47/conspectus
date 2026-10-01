@@ -33,12 +33,12 @@
 
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::path::{Path, PathBuf};
-use std::sync::Mutex;
-use std::time::UNIX_EPOCH;
+use std::sync::{Mutex, PoisonError};
 
 use rusqlite::{Connection, OpenFlags, params};
 
 use crate::discovery::harness::codex::HARNESS_KEY as CODEX_HARNESS_KEY;
+use crate::discovery::memo::FileStamp;
 use crate::model::{
     AgentSessionId, AgentSessionNode, Confidence, Freshness, GraphLink, GraphNode, GraphSnapshot,
     LinkEndpoint, LinkState, Metadata, MuxSessionId, NodeId, Provenance, RelationKind,
@@ -312,8 +312,7 @@ struct ThreadObservation {
 /// yields the same result as re-querying against the same DB.
 struct QueryCache {
     db_path: PathBuf,
-    db_mtime_ns: i128,
-    db_size: u64,
+    db_stamp: FileStamp,
     candidate_pids: Vec<i64>,
     /// `ts_floor` that was in force when the cache was populated.
     /// A later call whose `ts_floor` is >= this value can safely
@@ -336,8 +335,7 @@ static QUERY_CACHE: Mutex<Option<QueryCache>> = Mutex::new(None);
 /// cached entries don't leak into their assertions.
 #[cfg(test)]
 pub(crate) fn reset_query_cache_for_tests() {
-    let mut guard = QUERY_CACHE.lock().unwrap();
-    *guard = None;
+    *QUERY_CACHE.lock().unwrap_or_else(PoisonError::into_inner) = None;
 }
 
 /// Count of `query_freshest_thread` invocations, incremented on
@@ -364,15 +362,6 @@ pub(crate) fn take_query_count_for_tests() -> usize {
 #[cfg(test)]
 pub(crate) static CACHE_TEST_LOCK: Mutex<()> = Mutex::new(());
 
-fn db_fingerprint(path: &Path) -> Option<(i128, u64)> {
-    let meta = std::fs::metadata(path).ok()?;
-    let mtime = meta.modified().ok()?;
-    let duration = mtime.duration_since(UNIX_EPOCH).ok()?;
-    let mtime_ns =
-        i128::from(duration.as_secs()) * 1_000_000_000 + i128::from(duration.subsec_nanos());
-    Some((mtime_ns, meta.len()))
-}
-
 /// Compute observations for `candidates`, reusing the module-level
 /// cache when the underlying DB and candidate pid set are unchanged
 /// since the last call. On cache hit no SQLite connection is opened.
@@ -388,16 +377,15 @@ fn observations_for_candidates(
     candidates: &[CodexPaneProcess],
     ts_floor: i64,
 ) -> HashMap<i64, ThreadObservation> {
-    let fingerprint = db_fingerprint(db_path);
+    let stamp = FileStamp::of(db_path);
     let mut candidate_pids: Vec<i64> = candidates.iter().map(|c| c.pid).collect();
     candidate_pids.sort_unstable();
     candidate_pids.dedup();
 
-    let mut cache_guard = QUERY_CACHE.lock().unwrap();
-    if let (Some((mtime_ns, size)), Some(cached)) = (fingerprint, cache_guard.as_ref())
+    let mut cache_guard = QUERY_CACHE.lock().unwrap_or_else(PoisonError::into_inner);
+    if let (Some(stamp), Some(cached)) = (stamp, cache_guard.as_ref())
         && cached.db_path == db_path
-        && cached.db_mtime_ns == mtime_ns
-        && cached.db_size == size
+        && cached.db_stamp == stamp
         && cached.candidate_pids == candidate_pids
         && ts_floor >= cached.cached_ts_floor
     {
@@ -438,11 +426,10 @@ fn observations_for_candidates(
         }
     }
 
-    if let Some((mtime_ns, size)) = fingerprint {
+    if let Some(stamp) = stamp {
         *cache_guard = Some(QueryCache {
             db_path: db_path.to_path_buf(),
-            db_mtime_ns: mtime_ns,
-            db_size: size,
+            db_stamp: stamp,
             candidate_pids,
             cached_ts_floor: ts_floor,
             observations: observations.clone(),
