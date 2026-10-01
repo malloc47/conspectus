@@ -1888,7 +1888,7 @@ fn execute_pin_remove(app: &mut App, request: crate::tui::widgets::pins::PinRemo
 }
 
 fn execute_pin_bind(app: &mut App, request: crate::tui::widgets::pins::PinBindRequest) {
-    let Some(database) = app.graph_db() else {
+    let Some(database) = app.graph_db().cloned() else {
         // Reducer already gated on this — the branch is a safety
         // net for direct executor callers.
         let _ = app.update(Msg::SetStatus(Some(
@@ -1896,12 +1896,8 @@ fn execute_pin_bind(app: &mut App, request: crate::tui::widgets::pins::PinBindRe
         )));
         return;
     };
-    let snapshot = database.snapshot().clone();
-    match write_pin_bind(
-        &request,
-        &snapshot,
-        &crate::config::ConfigLoader::from_env(),
-    ) {
+    let snapshot = database.snapshot();
+    match write_pin_bind(&request, snapshot, &crate::config::ConfigLoader::from_env()) {
         Ok(outcome) => {
             let verb = if outcome.changed {
                 "bound"
@@ -2007,16 +2003,16 @@ fn execute_commit_alias_rename(
     session_id: crate::model::AgentSessionId,
     new_display_name: Option<String>,
 ) {
-    let Some(database) = app.graph_db() else {
+    let Some(database) = app.graph_db().cloned() else {
         let _ = app.update(Msg::SetStatus(Some(
             "rename: no graph database available".to_string(),
         )));
         return;
     };
-    let snapshot = database.snapshot().clone();
+    let snapshot = database.snapshot();
 
     let plan =
-        match crate::rename::plan_session_rename(&snapshot, &session_id, new_display_name, false) {
+        match crate::rename::plan_session_rename(snapshot, &session_id, new_display_name, false) {
             Ok(plan) => plan,
             Err(err) => {
                 let _ = app.update(Msg::SetStatus(Some(format!("rename failed: {err}"))));
@@ -2029,7 +2025,7 @@ fn execute_commit_alias_rename(
     );
     let loader = crate::config::ConfigLoader::from_env();
     let store_path = match crate::declared::select_store_for_declaration(
-        &endpoint, &endpoint, &snapshot, &loader,
+        &endpoint, &endpoint, snapshot, &loader,
     ) {
         Some(selection) => selection.path,
         None => {
@@ -2114,15 +2110,15 @@ fn execute_commit_mux_rename(
     mux_id: crate::model::MuxSessionId,
     new_name: String,
 ) {
-    let Some(database) = app.graph_db() else {
+    let Some(database) = app.graph_db().cloned() else {
         let _ = app.update(Msg::SetStatus(Some(
             "mux rename: no graph database available".to_string(),
         )));
         return;
     };
-    let snapshot = database.snapshot().clone();
+    let snapshot = database.snapshot();
 
-    let plan = match crate::rename::plan_mux_rename(&snapshot, &mux_id, new_name) {
+    let plan = match crate::rename::plan_mux_rename(snapshot, &mux_id, new_name) {
         Ok(plan) => plan,
         Err(err) => {
             let _ = app.update(Msg::SetStatus(Some(format!("mux rename failed: {err}"))));

@@ -38,6 +38,7 @@ use crate::tui::{RunConfig, View};
 /// `Rc<rusqlite::Connection>` wrapper (P11-011d) — the App now
 /// holds the snapshot directly and every read consumer borrows
 /// it via [`Self::snapshot`].
+#[derive(Clone)]
 pub struct GraphDb(Rc<crate::model::GraphSnapshot>);
 
 impl GraphDb {
@@ -52,12 +53,6 @@ impl GraphDb {
 
     pub(crate) fn snapshot(&self) -> &crate::model::GraphSnapshot {
         &self.0
-    }
-}
-
-impl Clone for GraphDb {
-    fn clone(&self) -> Self {
-        Self(Rc::clone(&self.0))
     }
 }
 
