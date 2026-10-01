@@ -1,11 +1,10 @@
-//! GitLab forge adapter (H-EXT-013 skeleton).
+//! GitLab forge adapter (skeleton).
 //!
-//! Second forge adapter that proves the H-EXT-012
-//! `ForgeAdapter` registry supports multiple entries with
-//! `claims_remote_url`-based routing. **Real GitLab PR
-//! discovery is deferred** until `H-DESIGN-002` settles the
-//! multi-forge `ForgePr` identity model — see the story's
-//! Scope for the open questions.
+//! Second forge adapter that proves the `ForgeAdapter` registry
+//! supports multiple entries with `claims_remote_url`-based
+//! routing. **Real GitLab PR discovery is deferred** until the
+//! multi-forge `ForgePr` identity model is settled (backlog
+//! `H-DESIGN-002` lists the open questions).
 //!
 //! What ships today:
 //!
@@ -30,20 +29,16 @@ use anyhow::Result;
 use super::ForgeAdapter;
 use crate::discovery::{DiscoveryContext, DiscoveryProvider, GraphFragment};
 
-/// Provider stamp string for gitlab-derived nodes / links.
-/// Aliased through the descriptor registry once H-DESIGN-002
-/// settles; for now it lives here as a `pub const` so tests
-/// can compare against a single source-of-truth string.
+/// Provider stamp string for gitlab-derived nodes / links, so
+/// tests can compare against a single source-of-truth string.
 pub const GITLAB_PROVIDER: &str = crate::discovery::providers::GITLAB;
 
 /// GitLab CLI host used for `claims_remote_url` matching.
-/// Enterprise / self-hosted GitLab is a follow-up alongside
-/// H-DESIGN-002.
+/// Enterprise / self-hosted GitLab is not matched yet.
 pub const GITLAB_DEFAULT_HOST: &str = "gitlab.com";
 
-/// GitLab forge adapter (H-EXT-013 skeleton). Currently emits
-/// no PRs — `discover` returns an empty fragment. Real
-/// discovery lands alongside H-DESIGN-002.
+/// GitLab forge adapter (skeleton). Emits no PRs: `discover`
+/// returns an empty fragment until the identity model is settled.
 #[derive(Clone, Debug, Default)]
 pub struct GitLabForgeProvider;
 
@@ -55,10 +50,9 @@ impl GitLabForgeProvider {
 
 impl DiscoveryProvider for GitLabForgeProvider {
     fn discover(&self, _context: &DiscoveryContext) -> Result<GraphFragment> {
-        // Skeleton: no discovery until H-DESIGN-002 lands the
-        // ForgePr identity model. Present to prove the
-        // H-EXT-012 registry accepts a second adapter and
-        // routes by `claims_remote_url`.
+        // Skeleton: no discovery until the ForgePr identity model
+        // is settled. Present to prove the registry accepts a
+        // second adapter and routes by `claims_remote_url`.
         Ok(GraphFragment::empty())
     }
 }
@@ -81,8 +75,7 @@ fn remote_url_is_gitlab(remote_url: &str) -> bool {
     // Substring match against `gitlab.com`. Handles both HTTPS
     // (`https://gitlab.com/owner/repo.git`) and SSH
     // (`git@gitlab.com:owner/repo.git`) shapes. Enterprise
-    // GitLab hosts land alongside H-DESIGN-002's config-driven
-    // host list.
+    // GitLab hosts would need a config-driven host list.
     let lower = remote_url.to_ascii_lowercase();
     lower.contains("gitlab.com")
 }

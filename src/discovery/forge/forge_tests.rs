@@ -173,7 +173,7 @@ fn forge_discovery_merges_adapter_fragments_deterministically() {
     assert_eq!(fragment.nodes, vec![pr_alpha, pr_beta]);
 }
 
-// H-EXT-013 routing tests: prove that
+// Routing tests: prove that
 // `claims_remote_url` correctly partitions two adapters
 // that claim different hosts. Uses two `StaticAdapter`s
 // (test-only) whose `claims_remote_url` overrides target
@@ -227,7 +227,7 @@ fn claims_remote_url_partitions_two_adapters_by_host() {
 #[test]
 fn forge_discovery_accepts_two_adapters_via_boxed_registration() {
     // Register both adapters through the coordinator using
-    // the H-EXT-012 `with_boxed_adapter` builder. Confirms
+    // the `with_boxed_adapter` builder. Confirms
     // that `ForgeDiscovery` can carry a heterogeneous set
     // of `Box<dyn ForgeAdapter>`s (which is how
     // `LocalDiscoveryConfig::forge_adapters` flows through

@@ -143,7 +143,7 @@ fn harness_discovery_merges_fragments_deterministically() {
     assert_eq!(fragment.nodes, vec![session_alpha, session_beta]);
 }
 
-// ----- H-PIN-RESUME-002: per-adapter resume_argv -----
+// ----- Per-adapter resume_argv -----
 
 #[test]
 fn codex_resume_argv_matches_tui_resume_shape() {

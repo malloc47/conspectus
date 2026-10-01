@@ -424,7 +424,7 @@ fn fake_runner_returns_registered_capture_outcomes_by_target() {
     );
 }
 
-// ---- H-PIN-010 socket threading + new mutation methods ----
+// ---- Socket threading + new mutation methods ----
 
 #[test]
 fn fake_runner_default_new_session_records_call_and_returns_created() {

@@ -46,7 +46,7 @@ impl OpenCodeAdapter {
     }
 }
 
-/// H-EXT-004 runtime attribution surface for opencode.
+/// Runtime attribution surface for opencode.
 /// Opencode's session ids follow the `ses_<alphanumeric>`
 /// grammar with a UUID fallback for legacy sessions;
 /// the CLI spawns subagent processes distinguished by
@@ -85,8 +85,7 @@ fn opencode_session_key_values(value: &str) -> std::collections::BTreeSet<String
         .collect()
 }
 
-/// Preserves the pre-H-EXT-004 heuristic from
-/// `cross_link::RuntimeProcessRecord::is_opencode_subagent_process`.
+/// Recognize opencode subagent processes by command line.
 fn opencode_is_subagent_process(command: &str) -> bool {
     command.to_ascii_lowercase().contains(" subagent")
 }
@@ -104,12 +103,10 @@ impl HarnessAdapter for OpenCodeAdapter {
         &self,
         session: &crate::model::AgentSessionId,
     ) -> Option<crate::viewer::model::SessionLocator> {
-        // Resolve the SQLite database path. The
-        // pre-H-EXT-006 shape in `viewer_bridge::locator_for_session`
-        // treated the session's `state_scope` as either the
-        // database file itself or its containing directory; both
-        // shapes are accepted here so operator configs stay
-        // wire-compatible.
+        // Resolve the SQLite database path. A session's
+        // `state_scope` may be either the database file itself or
+        // its containing directory; both are accepted so existing
+        // operator configs keep working.
         let mut db_path = std::path::PathBuf::from(session.state_scope.clone());
         if db_path
             .extension()

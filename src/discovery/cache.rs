@@ -26,10 +26,8 @@ use crate::config::ServerIntervals;
 use crate::discovery::providers;
 use crate::model::GraphSnapshot;
 
-/// Re-export so existing `cache::ProviderClass` call sites keep
-/// compiling. The type moved to
-/// [`crate::discovery::providers`] in H-EXT-001 because the class
-/// is a provider attribute — every
+/// Re-exported from [`crate::discovery::providers`], where the type
+/// lives because the class is a provider attribute: every
 /// [`crate::discovery::providers::ProviderDescriptor`] with
 /// [`crate::discovery::providers::ProviderKind::Heavy`] carries
 /// one. The inherent methods below live in this module (not on
@@ -49,7 +47,7 @@ impl ProviderClass {
     /// [`std::time::Duration`] so `std::thread::sleep` / channel
     /// timeouts can consume it directly without round-tripping
     /// through seconds. The daemon's per-class scheduler is the
-    /// primary caller (P7-006 layer B).
+    /// primary caller.
     pub fn ttl_duration(self, intervals: &ServerIntervals) -> std::time::Duration {
         match self {
             Self::Git => intervals.git,
@@ -119,10 +117,9 @@ impl ProviderClass {
 /// class. `None` means "unmapped" — the caller treats unmapped
 /// keys as always-rerun (see [`mutator_providers`]).
 ///
-/// H-EXT-001 (ADR 0088) folded the classification table into the
-/// [`crate::discovery::providers::REGISTRY`]. This function is a
-/// thin delegate that re-exports the registry lookup at its
-/// long-standing call path.
+/// The classification lives in
+/// [`crate::discovery::providers::REGISTRY`] (ADR 0088); this is a
+/// thin delegate to the registry lookup.
 pub fn provider_class(provider: &str) -> Option<ProviderClass> {
     providers::provider_class(provider)
 }
@@ -132,7 +129,7 @@ pub fn provider_class(provider: &str) -> Option<ProviderClass> {
 /// after fresh discovery + warm-start merge land. See ADR 0079
 /// for the rationale.
 ///
-/// H-EXT-001 (ADR 0088) derives the list from the registry so a
+/// The list is derived from the registry (ADR 0088), so a
 /// new mutator provider added to
 /// [`crate::discovery::providers::REGISTRY`] joins the eviction
 /// bucket automatically.
@@ -140,8 +137,8 @@ pub fn mutator_providers() -> Vec<&'static str> {
     providers::mutator_keys()
 }
 
-/// Backwards-compatible const alias for the pre-H-EXT-001
-/// callers that read the mutator list as a `&'static [&'static str]`.
+/// The mutator list as a `&'static [&'static str]`, for callers that
+/// need a constant.
 /// Callers that only need iteration should prefer
 /// [`mutator_providers`]; this constant stays for callers that
 /// index into a slice (`for key in MUTATOR_PROVIDERS`).
@@ -158,8 +155,7 @@ pub const MUTATOR_PROVIDERS: &[&str] = &[
 ];
 
 /// Mutator passes whose expensive work is the process-tree `/proc`
-/// walk and the pid-fed harness aux attribution (H-SERVE-PERF-001a,
-/// ADR 0091). Unlike the other mutators these are **class-gated**:
+/// walk and the pid-fed harness aux attribution (ADR 0091). Unlike the other mutators these are **class-gated**:
 /// they only re-run when the mux or harness slice re-ran this cycle,
 /// and their prior contribution is preserved (not evicted) on
 /// git/forge-only cycles so agent↔pane links survive without a fresh

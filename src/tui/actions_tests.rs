@@ -426,7 +426,7 @@ fn view_on_unattached_mux_row_reports_unsupported() {
     );
 }
 
-// ----- H-PIN-RESUME-005: pin status hint branches on last_session -----
+// ----- Pin status hint branches on last_session -----
 
 #[test]
 fn pin_status_hint_unbound_without_last_session_advertises_launch() {

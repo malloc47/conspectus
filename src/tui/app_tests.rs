@@ -1686,7 +1686,7 @@ fn no_op_view_switch_is_idempotent() {
     assert_eq!(app.grouping(), grouping_before);
 }
 
-// ----- T8-028: explorer navigation / drilldown / breadcrumb -----
+// ----- Explorer navigation / drilldown / breadcrumb -----
 
 use crate::model::{
     Confidence, LinkEndpoint, LinkState, MuxSessionNode, RelationKind, SourceMetadata,

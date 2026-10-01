@@ -60,7 +60,7 @@ impl CodexAdapter {
     }
 }
 
-/// H-EXT-004 runtime attribution surface for codex. Codex ships
+/// Runtime attribution surface for codex. Codex ships
 /// as `codex` on `PATH`, session ids are UUID-shaped, and there
 /// are no daemon / subagent helper processes to distinguish.
 static CODEX_RUNTIME_SIGNATURE: super::RuntimeSignature = super::RuntimeSignature {
@@ -68,8 +68,7 @@ static CODEX_RUNTIME_SIGNATURE: super::RuntimeSignature = super::RuntimeSignatur
     // The CLI hook-writer pid-resolver
     // (`cli::harness_binaries`) accepts `codex-rs` as an
     // alternate binary name (rust rewrite lineage). Keep both
-    // here so the CLI's registry-driven lookup gets the same
-    // pair the pre-H-EXT-005 hardcoded match did.
+    // here so the CLI's registry-driven lookup matches both.
     process_command_basenames: &["codex", "codex-rs"],
     command_substrings: &["codex"],
     fd_path_patterns: &["/.codex/sessions/", "/.codex/tmp/"],
@@ -104,10 +103,9 @@ impl HarnessAdapter for CodexAdapter {
 
     /// Run the codex-log ADR 0048 aux reader as the
     /// codex adapter's aux attribution pass. Reads the
-    /// `CONSPECTUS_CODEX_LOG_WINDOW_SECONDS` env var directly so
-    /// the pre-H-EXT-007 `LocalDiscoveryConfig.codex_log_window_seconds`
-    /// field can retire — the knob is codex-specific and belongs
-    /// on the adapter, not on the top-level config.
+    /// `CONSPECTUS_CODEX_LOG_WINDOW_SECONDS` env var directly: the
+    /// knob is codex-specific and belongs on the adapter, not on
+    /// the top-level config.
     fn apply_aux_attribution(
         &self,
         snapshot: &mut crate::model::GraphSnapshot,

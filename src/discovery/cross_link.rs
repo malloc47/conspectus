@@ -283,8 +283,7 @@ fn checkout_roots(snapshot: &GraphSnapshot) -> Vec<(CheckoutId, String)> {
 /// work — it just happens to touch a repo that is also a
 /// workspace member. Indexing the canonical root would collapse
 /// the (A) workspace-rooted and (B) repo-shared classes that
-/// `H-WS-001` / `docs/plans/workspace-view-redesign.md` are
-/// explicitly trying to keep separate.
+/// `docs/plans/workspace-view-redesign.md` keeps separate.
 ///
 /// `canonical_checkout_root` remains on the membership link's
 /// `source_metadata.fields` for downstream consumers that need
@@ -1245,17 +1244,16 @@ impl ProcessPaneEvidence {
     }
 
     fn is_opencode_subagent_process(&self) -> bool {
-        // Delegate to the registered adapter's
-        // signature. Preserves the pre-H-EXT-004 opencode-only
-        // rule.
+        // Delegate to the registered adapter's signature; only
+        // opencode defines subagent processes today.
         self.signature_role_check(|sig| (sig.is_subagent_process)(&self.command))
     }
 
     fn is_claude_background_process(&self) -> bool {
-        // Delegate to the registered adapter's
-        // signature. Preserves the pre-H-EXT-004 claude-code-only
-        // rule; adapters that don't ship helper daemons point
-        // their `is_background_process` at
+        // Delegate to the registered adapter's signature; only
+        // claude-code defines background processes today. Adapters
+        // that don't ship helper daemons point their
+        // `is_background_process` at
         // [`crate::discovery::harness::no_match`].
         self.signature_role_check(|sig| (sig.is_background_process)(&self.command))
     }
@@ -1465,9 +1463,7 @@ fn active_pane_process_evidence(
 
 fn process_command_harnesses(command: &str) -> BTreeSet<String> {
     // Iterate registered adapters and consult each
-    // signature's `process_command_basenames`. The pre-H-EXT-004
-    // hand-rolled match table for the four v1 harnesses now
-    // lives on the per-adapter signatures.
+    // signature's `process_command_basenames`.
     let Some(first) = command.split_whitespace().next() else {
         return BTreeSet::new();
     };
@@ -1601,9 +1597,7 @@ where
         // Match the path against every registered
         // adapter's `fd_path_patterns`. First match wins so
         // paths that contain multiple harness fragments
-        // (rare) resolve to the first-registered adapter,
-        // matching the pre-H-EXT-004 if-chain's short-circuit
-        // behavior.
+        // (rare) resolve to the first-registered adapter.
         let mut matched: Option<&'static dyn crate::discovery::harness::HarnessAdapter> = None;
         for adapter in crate::discovery::harness::registered_adapters() {
             let sig = adapter.runtime_signature();
@@ -1683,8 +1677,7 @@ fn session_keys_for_harness_text(harness: &str, value: &str) -> BTreeSet<String>
     // Dispatch to the registered adapter's
     // `extract_session_keys` callback. Unknown harnesses fall
     // back to the generic UUID grammar via
-    // `crate::discovery::harness::generic_uuid_like_session_keys`
-    // (matches pre-H-EXT-004 catch-all behavior).
+    // `crate::discovery::harness::generic_uuid_like_session_keys`.
     for adapter in crate::discovery::harness::registered_adapters() {
         if adapter.harness_key() == harness {
             return (adapter.runtime_signature().extract_session_keys)(value);
@@ -1707,8 +1700,7 @@ fn active_pane_harnesses(mux: &MuxSessionNode) -> BTreeSet<String> {
 fn command_harnesses(command: &str) -> BTreeSet<String> {
     // Iterate registered adapters and consult each
     // signature's `command_substrings` (loose case-insensitive
-    // contains). The pre-H-EXT-004 hand-rolled if-chain for the
-    // four v1 harnesses now lives on the per-adapter signatures.
+    // contains).
     let command = command.to_ascii_lowercase();
     let mut harnesses = BTreeSet::new();
     for adapter in crate::discovery::harness::registered_adapters() {

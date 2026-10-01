@@ -168,8 +168,8 @@ pub fn live_mux_teardown_targets(
         {
             targets.push(MuxTeardownTarget {
                 native_id: mux.native_id.clone(),
-                // Default-socket only for v1, matching the rename mux
-                // mutation's scope (H-PIN-014 lifts this).
+                // Default socket only, matching the rename mux
+                // mutation's scope.
                 socket_name: None,
                 pane_pid: mux.active_pane_pid,
             });

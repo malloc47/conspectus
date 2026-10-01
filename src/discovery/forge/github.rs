@@ -579,8 +579,8 @@ impl<R: GhRunner + 'static> super::ForgeAdapter for GitHubForgeProvider<R> {
 
 /// True when `remote_url` names a GitHub host — either the
 /// canonical `github.com` or a Conspectus operator's declared
-/// enterprise host. H-EXT-012 keeps the initial impl focused on
-/// `github.com`; enterprise-host routing is a follow-up.
+/// enterprise host. Only `github.com` is matched today;
+/// enterprise-host routing is a follow-up.
 fn remote_url_is_github(remote_url: &str) -> bool {
     let lower = remote_url.to_ascii_lowercase();
     // Accept both HTTPS (`https://github.com/o/r`,

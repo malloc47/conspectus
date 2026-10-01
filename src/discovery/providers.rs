@@ -27,9 +27,8 @@
 //! 1. Add a `pub const` for its key alongside the existing ones.
 //! 2. Add a descriptor entry to [`REGISTRY`] with the constant
 //!    as `key` and the appropriate `kind`.
-//! 3. Wire it into `discover_local_warm_with` (H-EXT-001 keeps
-//!    the constructor path hand-wired; later H-EXT stories
-//!    generalize that surface).
+//! 3. Wire it into `discover_local_warm_with`, which builds each
+//!    provider by hand.
 //!
 //! The freshness gate reads through [`provider_class`] and the
 //! mutator list reads through [`mutator_keys`], both of which
@@ -75,8 +74,8 @@ pub const ZELLIJ: &str = "zellij";
 /// GitHub forge metadata via the `gh` runner. Class: `forge`.
 pub const GITHUB: &str = "github";
 
-/// GitLab forge metadata (H-EXT-013 skeleton; real discovery
-/// pending H-DESIGN-002). Class: `forge`.
+/// GitLab forge metadata (skeleton; emits no PRs yet). Class:
+/// `forge`.
 pub const GITLAB: &str = "gitlab";
 
 // ---------------------------------------------------------------
@@ -123,11 +122,9 @@ pub const DECLARED: &str = "declared";
 /// (`git`, `git::cwd`, `tmux`, `github`, `claude-code`, …)
 /// collapse to one of these classes via [`provider_class`].
 ///
-/// Owned by this module (moved from `discovery::cache` in
-/// H-EXT-001) because the class is a provider attribute — every
+/// Defined here because the class is a provider attribute: every
 /// [`ProviderDescriptor::kind`] with [`ProviderKind::Heavy`]
-/// carries a class. `discovery::cache` re-exports the type so
-/// existing `cache::ProviderClass` call sites keep compiling.
+/// carries a class. `discovery::cache` re-exports the type.
 ///
 /// The inherent methods on this type
 /// ([`ProviderClass::ttl_seconds`], [`ProviderClass::ttl_duration`])
@@ -157,17 +154,13 @@ pub enum ProviderKind {
     Mutator,
 }
 
-/// Metadata about one registered provider. H-EXT-001 keeps this
-/// intentionally lean: `key` names the provider in provenance,
-/// `kind` names its role in the warm-start pipeline. Later
-/// H-EXT stories extend the descriptor with a constructor
-/// callback (`H-EXT-004`), env-var opt-out plumbing
-/// (`H-EXT-007`), and per-entity-family adapter references
-/// (`H-EXT-002` for harness, `H-EXT-008` for mux, `H-EXT-012`
-/// for forge, `H-EXT-014` for orchestrator). The metadata-only
-/// shape below is sufficient for the freshness gate and mutator
-/// list to derive from the registry rather than hard-coded
-/// tables.
+/// Metadata about one registered provider, kept intentionally
+/// lean: `key` names the provider in provenance, `kind` names its
+/// role in the warm-start pipeline. That is enough for the
+/// freshness gate and mutator list to derive from the registry
+/// rather than hard-coded tables; per-family registries (harness
+/// adapters, mux backends, forge adapters, orchestrators) carry the
+/// constructors.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct ProviderDescriptor {
     pub key: &'static str,
@@ -298,9 +291,8 @@ pub fn mutator_keys() -> Vec<&'static str> {
 mod tests {
     use super::*;
 
-    /// Sanity: the string values must match what was stamped
-    /// pre-H-REF-009 so the cache can be read back from existing
-    /// installations without invalidating the on-disk snapshot.
+    /// The string values are stamped into persisted snapshots, so
+    /// changing one invalidates existing installations' caches.
     #[test]
     fn canonical_strings_are_stable() {
         assert_eq!(GIT, "git");
@@ -396,9 +388,8 @@ mod tests {
             .map(|d| d.key)
             .collect();
         assert_eq!(derived, expected);
-        // Sanity anchor against the pre-H-EXT-001 table so a
-        // rename that flips a heavy to a mutator (or vice
-        // versa) is caught here.
+        // Pin the expected list so a change that flips a heavy
+        // provider to a mutator (or vice versa) is caught here.
         assert_eq!(derived, vec![CROSS_LINK, CODEX_LOG, HOOK_SIDECAR, DECLARED]);
     }
 }

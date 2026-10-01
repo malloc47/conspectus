@@ -544,7 +544,7 @@ fn fork_variant_without_forked_from_emits_no_lineage() {
     // here", 926c6991-… on the 2026-05-17 validation) creates a child
     // jsonl with no `forkedFrom` envelope and no cross-session
     // `parentUuid` either. With no on-disk signal we emit no lineage
-    // candidate; side-channel inference is tracked in H-LINEAGE-006.
+    // candidate.
     let temp = TempDir::new().expect("temp");
     let (context, fixture) = context_with_state(&temp);
     let parent_body = "\

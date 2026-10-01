@@ -5,8 +5,7 @@
 //! others). An orchestrator is a piece of higher-level workflow
 //! software that manages agent sessions, mux sessions, or repo
 //! layouts — agent-deck today, dmux / herdr / pertmux / workmux
-//! are candidates for future adapters (see the
-//! `H-AGENTMUX-*` audit stream).
+//! are candidates for future adapters.
 //!
 //! Unlike harness adapters, orchestrator adapters have no
 //! shared discovery trait beyond
@@ -18,15 +17,13 @@
 //! discovery driver doesn't have to name each orchestrator
 //! individually.
 //!
-//! ADR 0060 originally punted on introducing a shared
-//! orchestrator trait. H-EXT-014 preserves that stance —
-//! the registry gives us the registration surface (config
-//! table, env-var walk, from-env defaults) without forcing
-//! a common trait that today's single adapter would
-//! prematurely constrain. If a mutation-capability trait
-//! is needed later (rename routing, ownership transfer),
-//! it lands via H-EXT-015 and adds an orthogonal facet to
-//! the descriptor.
+//! ADR 0060 declined a shared orchestrator trait, and the
+//! registry keeps that stance: it gives the registration surface
+//! (config table, env-var walk, from-env defaults) without forcing
+//! a common trait that today's single adapter would prematurely
+//! constrain. If a mutation-capability trait is needed later
+//! (rename routing, ownership transfer), it can be an orthogonal
+//! facet on the descriptor.
 
 use std::path::PathBuf;
 

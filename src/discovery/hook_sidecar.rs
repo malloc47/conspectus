@@ -533,9 +533,8 @@ pub fn default_sidecar_root() -> Option<PathBuf> {
     hook::default_root()
 }
 
-// Re-export the canonical `current_epoch`. Pre-
-// H-HYG-001 this delegated to `hook::current_epoch`; both now
-// re-export `crate::discovery::current_epoch`.
+// Re-export the canonical `current_epoch` so callers in this
+// module's namespace keep a short path.
 pub use crate::discovery::current_epoch;
 
 #[cfg(test)]

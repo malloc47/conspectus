@@ -68,8 +68,8 @@ fn every_known_provider_string_maps_to_a_class() {
     }
 }
 
-/// H-EXT-001 / ADR 0088: the pre-registry `MUTATOR_PROVIDERS`
-/// constant and the registry-derived
+/// ADR 0088: the `MUTATOR_PROVIDERS` constant and the
+/// registry-derived
 /// [`super::mutator_providers`] must agree. Guards against a
 /// mutator entry that lands in one place without the other.
 #[test]

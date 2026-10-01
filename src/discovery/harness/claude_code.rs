@@ -42,7 +42,6 @@
 //! * **Bare fork** (e.g. the "fresh session" affordance) writes a new
 //!   session jsonl with no `forkedFrom` envelope and no cross-session
 //!   `parentUuid`. With no on-disk signal we emit no lineage candidate.
-//!   See backlog `H-LINEAGE-006` for the closure notes.
 
 use std::collections::BTreeMap;
 use std::collections::{HashMap, HashSet};
@@ -86,11 +85,11 @@ impl ClaudeCodeAdapter {
     }
 }
 
-/// H-EXT-004 runtime attribution surface for claude-code.
+/// Runtime attribution surface for claude-code.
 /// The harness ships as either `claude` or `claude-code` on
 /// `PATH`; session ids are UUID-shaped; the CLI spawns a few
-/// helper daemons whose commands the pre-H-EXT-004
-/// `is_claude_background_process` heuristic already recognizes.
+/// helper daemons that [`claude_code_is_background_process`]
+/// recognizes.
 static CLAUDE_CODE_RUNTIME_SIGNATURE: super::RuntimeSignature = super::RuntimeSignature {
     harness_key: HARNESS_KEY,
     process_command_basenames: &["claude", "claude-code"],
@@ -101,9 +100,7 @@ static CLAUDE_CODE_RUNTIME_SIGNATURE: super::RuntimeSignature = super::RuntimeSi
     is_subagent_process: super::no_match,
 };
 
-/// Recognize claude-code's helper daemons. Preserves the
-/// pre-H-EXT-004 heuristics from
-/// `cross_link::RuntimeProcessRecord::is_claude_background_process`.
+/// Recognize claude-code's helper daemons by command line.
 fn claude_code_is_background_process(command: &str) -> bool {
     let command = command.to_ascii_lowercase();
     command.contains(" daemon run ")

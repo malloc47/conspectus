@@ -26,7 +26,7 @@ pub mod close_down;
 /// Backend identifier for the built-in thin git backend. Distinct from
 /// the `git` *provider* key (`providers::GIT`): this names which
 /// worktree backend produced a record, the way `tmux` / `zellij` name
-/// mux backends. `worktrunk` joins as a second key in H-WT-003.
+/// mux backends. `worktrunk` is the other key ([`WORKTRUNK_BACKEND`]).
 pub const GIT_BACKEND: &str = "git";
 
 /// Backend identifier for the worktrunk mutation backend.

@@ -31,8 +31,7 @@ pub const TMUX_BACKEND: &str = crate::discovery::providers::TMUX;
 /// Compile-time list of mux backend keys this build supports.
 /// Pin parsing and attach-target resolution
 /// consult this instead of comparing to the literal `"tmux"`
-/// string so a new backend (zellij per H-EXT-010) is one array
-/// entry away. Runtime capability checks (does this backend
+/// string so a new backend is one array entry away. Runtime capability checks (does this backend
 /// *actually* support attach / rename / etc.) come from the
 /// [`MuxBackend`] impl's outcome returns.
 pub const KNOWN_MUX_BACKENDS: &[&str] = &[
@@ -49,8 +48,8 @@ pub const TMUX_LIST_FORMAT: &str = "#{session_name}\t#{session_path}\t#{session_
 
 /// Backend-neutral mux abstraction (ADR 0089).
 ///
-/// Every mux backend Conspectus supports (tmux today, zellij next
-/// per H-EXT-010) implements this trait. The trait's capability
+/// Every mux backend Conspectus supports (tmux and zellij)
+/// implements this trait. The trait's capability
 /// methods default to `Unsupported` outcomes so a new backend can
 /// implement only the operations it actually supports; callers
 /// gate on the outcome instead of naming a specific
@@ -62,11 +61,9 @@ pub const TMUX_LIST_FORMAT: &str = "#{session_name}\t#{session_path}\t#{session_
 /// string. Two backends must never share a key.
 ///
 /// The outcome enums (`TmuxOutcome`, `TmuxCaptureOutcome`, …)
-/// keep their `Tmux`-prefixed names in this Phase-C step —
-/// their variant shapes (`Sessions`, `NoTarget`, `NameCollision`,
-/// `Unavailable`, `Failed`, `Unsupported`) are backend-neutral,
-/// so the rename is a mechanical follow-up and orthogonal to
-/// the trait-shape work here.
+/// keep their `Tmux`-prefixed names, but their variants
+/// (`Sessions`, `NoTarget`, `NameCollision`, `Unavailable`,
+/// `Failed`, `Unsupported`) are backend-neutral.
 pub trait MuxBackend: Send + Sync {
     /// Backend identity. Stamped on pin entries
     /// (`mux.backend`) and `MuxSessionNode.backend`. Every
@@ -93,8 +90,7 @@ pub trait MuxBackend: Send + Sync {
     /// Rename tmux session `target` to `new_name`. `socket_name`
     /// selects the tmux server when set. Default returns
     /// [`TmuxRenameOutcome::Unsupported`] so runners that only model
-    /// read paths keep compiling (e.g. zellij backends per
-    /// `H-FUTURE-001`).
+    /// read paths keep compiling (e.g. zellij).
     fn rename_session(
         &self,
         _socket_name: Option<&str>,
@@ -177,17 +173,13 @@ pub trait MuxBackend: Send + Sync {
 }
 
 /// Backend-neutral session context the hook writer records
-/// alongside a harness's `SessionStart` payload. Grew
-/// out of the pre-H-EXT-011 tmux-specific
-/// `cli::tmux_context()`, which read `$TMUX` + shelled out to
-/// `tmux display-message`. The trait method
+/// alongside a harness's `SessionStart` payload. The trait method
 /// [`MuxBackend::current_session_context`] returns this
 /// consistently across every backend.
 ///
 /// Fields are optional individually because different backends
 /// expose different amounts of context — tmux carries pane_id
-/// and socket_path; zellij (when it lands) will likely carry
-/// only session_name.
+/// and socket_path; zellij would expose only session_name.
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct MuxSessionContext {
     /// Backend key matching
@@ -1312,8 +1304,8 @@ impl<R: MuxBackend + 'static> DiscoveryProvider for TmuxDiscovery<R> {
         // gate; when tmux returns an empty fragment (no sessions,
         // or unavailable) it produces no `tmux` provenance stamps,
         // so the gate never marks it fresh, and every cycle
-        // re-invokes the backend. See H-SERVE-PERF-005 for the
-        // same-shape fix on the forge side. TTL matches Mux class.
+        // re-invokes the backend. `ForgeDiscovery` has the same
+        // fix. TTL matches Mux class.
         if let Some(cached) = context.caches().tmux.get(&()) {
             return Ok(cached);
         }

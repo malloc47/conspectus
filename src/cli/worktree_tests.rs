@@ -98,7 +98,7 @@ fn repo_display_name_strips_dot_git() {
     assert_eq!(repo_display_name(&RepoId::new("/src/plain")), "plain");
 }
 
-// ---- H-WT-004a: rm guard helpers ----
+// ---- Rm guard helpers ----
 
 use conspectus::model::{AgentSessionId, AgentSessionNode, MuxSessionId, MuxSessionNode};
 

@@ -469,7 +469,7 @@ fn filter_args_grouping_none_when_flag_omitted() {
     assert!(args.to_grouping(View::Sessions).expect("parse").is_none());
 }
 
-// ---- H-PIN-012 pin launch helpers --------------------------
+// ---- Pin launch helpers --------------------------
 
 #[test]
 fn format_attach_command_uses_bare_tmux_for_default_socket() {
@@ -512,7 +512,7 @@ fn format_argv_for_send_keys_leaves_bare_tokens_unquoted() {
     );
 }
 
-// ----- H-PIN-RESUME-005: ISO 8601 formatting for pin show -----
+// ----- ISO 8601 formatting for pin show -----
 
 #[test]
 fn format_epoch_iso8601_renders_known_unix_dates() {
@@ -533,7 +533,7 @@ fn format_epoch_iso8601_clamps_negative_epochs_to_zero() {
     assert_eq!(format_epoch_iso8601(-1), "1970-01-01T00:00:00Z");
 }
 
-// ----- H-PIN-RESUME-004: launch-time resume resolver -----
+// ----- Launch-time resume resolver -----
 
 mod resume_resolver {
     use conspectus::model::{

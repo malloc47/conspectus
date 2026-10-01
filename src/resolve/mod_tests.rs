@@ -1539,7 +1539,7 @@ fn suppresses_cwd_prefix_match_like_exact_cwd_match() {
     assert_eq!(output.diagnostics.len(), 2);
 }
 
-// ----- H-MUXPROC-021: source-freshness demotion -----
+// ----- Source-freshness demotion -----
 
 fn agent_session_with_epoch(id: &str, last_active_epoch: i64) -> GraphNode {
     GraphNode::AgentSession(

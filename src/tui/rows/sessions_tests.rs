@@ -2819,7 +2819,7 @@ fn resolver_drives_pin_rows_end_to_end() {
     );
 }
 
-// ----- P8-015: title-disambiguation in the row tree ----------------
+// ----- Title-disambiguation in the row tree ----------------
 
 fn session_keys_with_disambiguating_titles(tree: &RowTree) -> Vec<String> {
     tree.rows

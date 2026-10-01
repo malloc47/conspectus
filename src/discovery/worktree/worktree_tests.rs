@@ -197,7 +197,7 @@ fn git_backend_lists_real_worktrees_when_git_available() {
     ));
 }
 
-// ---- H-WT-003: worktrunk mutation backend ----
+// ---- Worktrunk mutation backend ----
 
 use std::sync::Mutex;
 
@@ -392,7 +392,7 @@ fn git_backend_create_and_remove_are_unsupported() {
     );
 }
 
-// ---- H-WT-003b: mutation backend resolver ----
+// ---- Mutation backend resolver ----
 
 #[test]
 fn resolver_git_selection_is_always_read_only() {
@@ -439,7 +439,7 @@ fn backend_selection_parse_round_trips() {
     );
 }
 
-// ---- H-WT-005: merge ----
+// ---- Merge ----
 
 #[test]
 fn worktrunk_reports_merge_capability() {

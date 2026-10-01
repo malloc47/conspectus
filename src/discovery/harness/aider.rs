@@ -27,7 +27,7 @@ impl AiderAdapter {
     }
 }
 
-/// H-EXT-004 runtime attribution surface for aider. Aider tracks
+/// Runtime attribution surface for aider. Aider tracks
 /// history per-cwd rather than per-session, so there are no
 /// fd-path patterns or session-key grammars to match on — the
 /// signature exists so registry iteration can carry it, but its
@@ -72,7 +72,7 @@ impl HarnessAdapter for AiderAdapter {
                 // TODO: aider's `.aider.chat.history.md`
                 // is free-form markdown with no formally-specified
                 // delimiter, and `.aider.input.history` only carries
-                // user inputs (no assistant text). H-PREVIEW-005 was
+                // user inputs (no assistant text). Previews are
                 // deferred per ADR 0023 until either a stable
                 // structural marker for assistant turns lands
                 // upstream or a fixture corpus is available to
@@ -105,15 +105,10 @@ fn aider_activity_epoch(root: &Path) -> Option<i64> {
         .max()
 }
 
-// Single production impl. Pre-H-HYG-004 this
-// module carried a `#[cfg(not(test))]` variant that
-// sniffed argv for `/target/debug/deps/` and returned a
-// hardcoded `1_700_000_000` epoch for temp-dir paths —
-// a test backdoor compiled into release binaries. Fixture
-// writers in `discovery::harness::fixtures` now stamp files
-// with `FIXTURE_MTIME_EPOCH` directly via
-// `File::set_modified`, so the production path can just read
-// real `fs::metadata`.
+// Reads real `fs::metadata`. Fixture writers in
+// `discovery::harness::fixtures` stamp files with
+// `FIXTURE_MTIME_EPOCH` via `File::set_modified`, so tests need no
+// special path here.
 fn file_modified_epoch(path: &Path) -> Option<i64> {
     let modified = std::fs::metadata(path).ok()?.modified().ok()?;
     let duration = modified.duration_since(std::time::UNIX_EPOCH).ok()?;

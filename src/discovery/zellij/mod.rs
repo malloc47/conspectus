@@ -1,8 +1,8 @@
 //! Zellij mux backend.
 //!
 //! Zellij is the second mux backend Conspectus supports. This
-//! module is the acceptance test for the H-EXT-008 `MuxBackend`
-//! trait: adding zellij required *zero* edits outside this
+//! module is the acceptance test for the `MuxBackend` trait
+//! (ADR 0089): adding zellij required *zero* edits outside this
 //! module + its registration in
 //! `discovery::providers::REGISTRY`,
 //! `discovery::tmux::KNOWN_MUX_BACKENDS`, and
@@ -224,7 +224,7 @@ impl<R: MuxBackend + 'static> DiscoveryProvider for ZellijDiscovery<R> {
         // fragment is empty and thus produces no `zellij` provenance
         // stamps, so `gate.fresh` never contains it and every class
         // thread's cycle respawns the backend. Same shape as the
-        // forge H-SERVE-PERF-005 and tmux fixes.
+        // forge and tmux caches.
         if let Some(cached) = context.caches().zellij.get(&()) {
             return Ok(cached);
         }

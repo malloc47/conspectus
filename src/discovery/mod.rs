@@ -396,10 +396,8 @@ pub fn discover_local_warm_with(
     // Forge adapters live in a registry list; drain
     // them here so they can be wrapped in a `ForgeDiscovery`
     // coordinator that fans a repo out to every registered
-    // adapter. The adapter registry keeps the pre-H-EXT-012
-    // "GitHub-only" single-slot behavior intact for consumers
-    // that ship one adapter; multi-forge hosts extend it via
-    // `LocalDiscoveryConfig::with_forge_adapter`.
+    // adapter. Most hosts register only GitHub; multi-forge hosts
+    // add adapters via `LocalDiscoveryConfig::with_forge_adapter`.
     let forge_adapters: Vec<Box<dyn forge::ForgeAdapter>> =
         std::mem::take(&mut config.forge_adapters);
 
@@ -467,8 +465,8 @@ pub fn discover_local_warm_with(
         for adapter in forge_adapters {
             coordinator = coordinator.with_boxed_adapter(adapter);
         }
-        // Provider key list matches the pre-H-EXT-012 single
-        // `"github"` string until a second forge lands.
+        // Every forge stamps the `github` provider key until a
+        // second forge emits real data.
         providers = providers.with_keyed_provider(&[providers::GITHUB], coordinator);
     }
 
@@ -483,7 +481,7 @@ pub fn discover_local_warm_with(
     // nothing, a git-only cycle stamps only git provenance, and a
     // mux/harness cycle stamps mux/harness provenance.
     //
-    // H-SERVE-PERF-003 refines this further: even when mux/harness
+    // The fingerprint refines this further: even when mux/harness
     // did run, the walk is only worth firing when their slice
     // *content* differs from last cycle. A busy-file watcher that
     // wakes the harness class at the throttle cap on every codex
@@ -504,10 +502,9 @@ pub fn discover_local_warm_with(
     let mut snapshot = merge_with_prior(fresh, prior);
 
     // When the process-tree pass refreshes, drop the deferred prior
-    // slices so the mutator re-stamps a clean, current contribution
-    // (matching the pre-H-SERVE-PERF-001a always-evict behavior for
-    // these keys). When it's skipped, the prior slices stay in the
-    // merged snapshot untouched.
+    // slices so the mutator re-stamps a clean, current contribution.
+    // When it's skipped, the prior slices stay in the merged snapshot
+    // untouched.
     if run_process_tree {
         for key in cache::PROCESS_TREE_MUTATORS {
             snapshot.evict_provider(key);
@@ -617,8 +614,8 @@ fn mux_or_harness_slice_fingerprint(fresh: &GraphSnapshot) -> Option<u64> {
 
 /// Return a clone of `node` with fields that don't drive the
 /// `/proc` walk output zeroed so the mux/harness slice
-/// fingerprint (H-SERVE-PERF-003 / 008) doesn't fire on
-/// legitimate-but-walk-irrelevant churn.
+/// fingerprint doesn't fire on legitimate-but-walk-irrelevant
+/// churn.
 ///
 /// The walk's job is to enumerate harness pids per mux via
 /// `cross_link::active_harness_pids_per_mux`. Its inputs are:
@@ -696,7 +693,7 @@ fn apply_mutators(
         // Iterate registered adapters and let each one
         // apply its aux-attribution pass (opt-in via trait override
         // + state root configured + not in disabled_aux_harnesses).
-        // The pre-H-EXT-007 hardcoded codex-log branch now lives on
+        // The codex-log reader runs from
         // `CodexAdapter::apply_aux_attribution`.
         let now_epoch = codex_log::current_epoch();
         for adapter in harness::registered_adapters() {
@@ -741,7 +738,7 @@ fn apply_mutators(
 pub struct LocalDiscoveryConfig {
     pub harness_state_roots: BTreeMap<String, PathBuf>,
     /// Registered mux backends (ADR 0089). Adding a
-    /// second backend (zellij per H-EXT-010, screen etc.) is a
+    /// second backend (zellij, screen, etc.) is a
     /// matter of pushing another entry. Each backend implements
     /// [`tmux::MuxBackend`] and returns its own `backend_key`.
     /// v1 ships with a single tmux entry populated by
@@ -749,7 +746,7 @@ pub struct LocalDiscoveryConfig {
     /// entries via [`Self::with_mux_backend`].
     pub mux_backends: Vec<Box<dyn tmux::MuxBackend>>,
     /// Registered forge adapters. Adding a second
-    /// adapter (GitLab per H-EXT-013, Gitea, hosted GitHub
+    /// adapter (GitLab, Gitea, hosted GitHub
     /// Enterprise) is a matter of pushing another entry. Each
     /// adapter implements [`forge::ForgeAdapter`] and reports
     /// which remote URLs it claims via
@@ -772,8 +769,7 @@ pub struct LocalDiscoveryConfig {
     /// [`Self::without_orchestrator`].
     pub orchestrator_roots: BTreeMap<String, PathBuf>,
     pub declared_config_loader: Option<ConfigLoader>,
-    /// Resolver for the pin-store registry sidecar (H-PIN-ROOT-001,
-    /// ADR 0090). When present, each discovery cycle reads the
+    /// Resolver for the pin-store registry sidecar (ADR 0090). When present, each discovery cycle reads the
     /// registered project `.conspectus.toml` store paths and folds them
     /// into the pin loader's search set so pins registered in repos
     /// outside the scan root stay visible. `None` disables the registry
@@ -790,8 +786,8 @@ pub struct LocalDiscoveryConfig {
     /// should be skipped, even when the harness has a
     /// state root configured. Populated by
     /// [`Self::from_env`] from `CONSPECTUS_DISABLE_<KEY>_LOG` /
-    /// `CONSPECTUS_DISABLE_CODEX_LOG` (the pre-H-EXT-007 codex-log
-    /// disable env var, kept as-is for wire compatibility) and by
+    /// `CONSPECTUS_DISABLE_CODEX_LOG` (the original codex-log disable
+    /// variable, kept for existing operator configs) and by
     /// callers via [`Self::without_aux_harness`].
     pub disabled_aux_harnesses: BTreeSet<String>,
     /// Results reused across runs (ADR 0098). [`Self::from_env`] and
@@ -832,12 +828,10 @@ impl LocalDiscoveryConfig {
         }
 
         // Forge adapters live in a registry list.
-        // GitHub is the default entry; a second forge (GitLab
-        // per H-EXT-013) is opt-in via `CONSPECTUS_ENABLE_GITLAB`
-        // because the skeleton adapter doesn't yet emit real
-        // PRs (H-DESIGN-002 blocks real gitlab discovery).
-        // `CONSPECTUS_DISABLE_FORGE` still zeroes the list for
-        // wire compatibility.
+        // GitHub is the default entry; GitLab is opt-in via
+        // `CONSPECTUS_ENABLE_GITLAB` because the skeleton adapter
+        // doesn't emit real PRs yet. `CONSPECTUS_DISABLE_FORGE`
+        // zeroes the list.
         let mut forge_adapters: Vec<Box<dyn forge::ForgeAdapter>> = Vec::new();
         if env::var_os("CONSPECTUS_DISABLE_FORGE").is_none() {
             forge_adapters.push(Box::new(forge::github::GitHubForgeProvider::with_runner(
@@ -848,12 +842,12 @@ impl LocalDiscoveryConfig {
             }
         }
 
-        // codex_log-specific `codex_log_window_seconds`
-        // env parsing moves into `CodexAdapter::apply_aux_attribution`.
-        // The pre-H-EXT-007 disable flag (`CONSPECTUS_DISABLE_CODEX_LOG`)
-        // stays as a general "disable this harness's aux
-        // attribution" knob via the `disabled_aux_harnesses` set,
-        // preserving wire compatibility with operator env configs.
+        // The codex-log window is parsed in
+        // `CodexAdapter::apply_aux_attribution`. The
+        // `CONSPECTUS_DISABLE_CODEX_LOG` flag is a general "disable
+        // this harness's aux attribution" knob via the
+        // `disabled_aux_harnesses` set, kept for existing operator
+        // configs.
         let mut disabled_aux_harnesses: BTreeSet<String> = BTreeSet::new();
         if env::var_os("CONSPECTUS_DISABLE_CODEX_LOG").is_some() {
             disabled_aux_harnesses.insert(harness::codex::HARNESS_KEY.to_string());
@@ -933,19 +927,15 @@ impl LocalDiscoveryConfig {
         self
     }
 
-    /// Deprecated alias for [`Self::with_mux_backend`].
-    /// Kept so pre-H-EXT-008 test call sites and scenario builders
-    /// keep compiling without a mass rename in this commit.
+    /// Shorthand for [`Self::with_mux_backend`], used by tests and
+    /// scenario builders.
     pub fn with_tmux_runner(self, runner: impl tmux::MuxBackend + 'static) -> Self {
         self.with_mux_backend(runner)
     }
 
     /// Clear every backend whose `backend_key()` matches the tmux
-    /// backend string. Retained under the historical name because
-    /// tests use it as `.without_tmux()` (H-EXT-008 rewired it
-    /// against the backend list; the disable env var
-    /// `CONSPECTUS_DISABLE_TMUX` still produces the same result
-    /// through `from_env`).
+    /// backend string. `CONSPECTUS_DISABLE_TMUX` has the same effect
+    /// through `from_env`.
     pub fn without_tmux(mut self) -> Self {
         self.mux_backends
             .retain(|b| b.backend_key() != tmux::TMUX_BACKEND);
@@ -984,10 +974,9 @@ impl LocalDiscoveryConfig {
         self
     }
 
-    /// Deprecated alias for [`Self::with_forge_adapter`].
-    /// Kept so pre-H-EXT-012 test call sites (`.with_forge_runner(
-    /// FakeGh::with_pull_requests(...))`) compile without a mass
-    /// rename. The runner gets wrapped in a
+    /// Shorthand for [`Self::with_forge_adapter`] with a GitHub
+    /// runner, used by tests (`.with_forge_runner(
+    /// FakeGh::with_pull_requests(...))`). The runner gets wrapped in a
     /// [`forge::github::GitHubForgeProvider`] before it's pushed
     /// so the adapter list stays uniform.
     pub fn with_forge_runner(mut self, runner: impl forge::GhRunner + 'static) -> Self {
@@ -998,10 +987,9 @@ impl LocalDiscoveryConfig {
         self
     }
 
-    /// Clear every registered forge adapter. Matches the historical
-    /// `.without_forge()` semantic (H-EXT-012 rewired it against
-    /// the adapter list; `CONSPECTUS_DISABLE_FORGE` still zeroes
-    /// the list through `from_env`).
+    /// Clear every registered forge adapter.
+    /// `CONSPECTUS_DISABLE_FORGE` has the same effect through
+    /// `from_env`.
     pub fn without_forge(mut self) -> Self {
         self.forge_adapters.clear();
         self
@@ -1059,10 +1047,8 @@ impl LocalDiscoveryConfig {
         self
     }
 
-    /// Deprecated alias for
+    /// Shorthand for
     /// [`Self::with_orchestrator_root`]`("agent_deck", root)`.
-    /// Kept so pre-H-EXT-014 test call sites
-    /// (`.with_agent_deck_root(...)`) keep compiling.
     pub fn with_agent_deck_root(self, root: impl Into<PathBuf>) -> Self {
         self.with_orchestrator_root(providers::AGENT_DECK, root)
     }
@@ -1145,11 +1131,9 @@ pub fn merge_fragments(fragments: impl IntoIterator<Item = GraphFragment>) -> Gr
 /// `pins`, and `aliases` from the prior snapshot are intentionally
 /// dropped: the resolver re-runs on the merged candidate set, and
 /// pins / aliases reload from their on-disk configs alongside the
-/// fresh discovery pass.
-///
-/// Phase 3 will graduate this from "always merge everything" to
-/// per-provider TTL comparison + selective re-run via the P7-005
-/// eviction primitive.
+/// fresh discovery pass. Per-provider freshness is handled before
+/// this merge: [`discover_local_warm_with`] evicts stale slices from
+/// `prior` first.
 pub fn merge_with_prior(fresh: GraphSnapshot, prior: GraphSnapshot) -> GraphSnapshot {
     // `merge_fragments` already drops `resolved_relationships`,
     // `pins`, and `aliases` on the returned snapshot; the CLI

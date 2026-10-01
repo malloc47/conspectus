@@ -161,8 +161,7 @@ pub struct AuxAttributionContext<'a> {
     /// concrete path from this root.
     pub state_root: &'a Path,
     /// Per-mux `(harness_key, pid)` set produced by
-    /// `cross_link::active_harness_pids_per_mux` — the same input
-    /// the pre-H-EXT-007 codex-log branch consumed. Adapters
+    /// `cross_link::active_harness_pids_per_mux`. Adapters
     /// that need to correlate their state DB to a live process
     /// walk this by `harness_key` and use the paired pids.
     pub harness_pids_per_mux:
@@ -206,7 +205,7 @@ pub trait HarnessAdapter: Send + Sync {
     /// Short display label rendered in the TUI's row label column
     /// and filter chips. Defaults to the harness key;
     /// adapters override when the key is longer than the display
-    /// budget — `claude-code` collapses to `claude` per H-TBL-014.
+    /// budget — `claude-code` collapses to `claude`.
     fn display_label(&self) -> &'static str {
         self.harness_key()
     }
@@ -296,11 +295,7 @@ pub trait HarnessAdapter: Send + Sync {
     /// log DB (ADR 0048's codex-log shape) implement this to
     /// stamp additional candidate links onto the merged
     /// snapshot; the default is a no-op, appropriate for
-    /// adapters without an aux surface.
-    ///
-    /// The pre-H-EXT-007 codex-log special case in
-    /// `discovery::mod::apply_mutators` moves into the codex
-    /// adapter's override, so a fifth harness with an aux
+    /// adapters without an aux surface. A new harness with an aux
     /// reader needs only its own trait impl — no new
     /// `LocalDiscoveryConfig` field, no named branch at the
     /// caller.
@@ -320,9 +315,7 @@ pub trait HarnessAdapter: Send + Sync {
     /// alternate key) override.
     ///
     /// This is the single dispatch surface behind
-    /// `conspectus hook write <harness-key>`, replacing the
-    /// pre-H-EXT-005 per-harness `*_record_from_payload`
-    /// writers in `src/hook.rs`.
+    /// `conspectus hook write <harness-key>`.
     fn hook_record_from_payload(
         &self,
         payload: &serde_json::Value,
@@ -390,9 +383,8 @@ static STUB_RUNTIME_SIGNATURE: RuntimeSignature = RuntimeSignature {
 /// `Send + Sync` zero-state and outlive the process.
 static REGISTERED_ADAPTERS: std::sync::LazyLock<Vec<Box<dyn HarnessAdapter>>> =
     std::sync::LazyLock::new(|| {
-        // Order matches the pre-H-EXT-002 hardcoded
-        // `HARNESS_OPTIONS` slice so the TUI filter menu order
-        // stays byte-identical. Discovery iteration order
+        // This order is the TUI filter menu order. Discovery
+        // iteration order
         // (via `HarnessDiscovery::with_default_adapters`)
         // uses a separate registration and can differ if a new
         // adapter is added mid-list; keep both in sync when
@@ -472,9 +464,7 @@ pub fn launch_option_for(harness_key: &str, option_id: &str) -> Option<HarnessLa
 }
 
 /// Registered harness keys in declaration order.
-/// Used by the TUI controls overlay's harness filter menu — the
-/// pre-H-EXT-002 caller was a hardcoded
-/// `HARNESS_OPTIONS: &[&str]` in `tui/widgets/controls.rs`.
+/// Used by the TUI controls overlay's harness filter menu.
 ///
 /// Wrapped in a `LazyLock<Vec<&'static str>>` so the &-of-slice
 /// return type is `'static` (the multi-select widget needs
@@ -553,7 +543,7 @@ pub fn strip_known_launch_option_fragments(argv: Vec<String>) -> Vec<String> {
 }
 
 /// Look up the per-harness resume argv. Sibling of [`launch_argv_for`]
-/// for the H-PIN-RESUME-004 launch path. Returns `None` when the
+/// for resuming a pinned session. Returns `None` when the
 /// harness key is unknown or the adapter does not expose a resume
 /// command (currently only `aider`, which tracks chat history
 /// per-cwd rather than per-session).
@@ -630,7 +620,7 @@ impl DiscoveryProvider for HarnessDiscovery {
 
 #[cfg(test)]
 mod registry_tests {
-    //! H-EXT-002 anchor tests. These pin the registry-derived
+    //! Anchor tests. These pin the registry-derived
     //! surfaces (label lookup, launch options, keys list, resume
     //! argv) so a rename or accidental removal of an adapter's
     //! override breaks a targeted test rather than a downstream
@@ -639,9 +629,7 @@ mod registry_tests {
 
     #[test]
     fn harness_keys_matches_registered_adapter_order() {
-        // Ordering matches the pre-H-EXT-002 hardcoded
-        // `HARNESS_OPTIONS` slice so the TUI filter menu stays
-        // byte-identical.
+        // This order is the TUI filter menu order.
         assert_eq!(
             harness_keys(),
             &["claude-code", "codex", "opencode", "aider"]
@@ -650,7 +638,7 @@ mod registry_tests {
 
     #[test]
     fn display_label_for_collapses_claude_code() {
-        // H-TBL-014 collapse lives on the adapter
+        // The label collapse lives on the adapter
         // rather than a match table in `tui/rows`.
         assert_eq!(display_label_for("claude-code"), "claude");
     }
@@ -664,8 +652,7 @@ mod registry_tests {
 
     #[test]
     fn display_label_for_unknown_echoes_key() {
-        // Preserves the pre-H-EXT-002 catch-all behavior in
-        // `harness_label`.
+        // Unknown keys display as themselves.
         assert_eq!(display_label_for("never-registered"), "never-registered");
     }
 
@@ -782,8 +769,7 @@ mod registry_tests {
     #[test]
     fn launch_argv_for_dispatches_via_registry() {
         // Registered adapters return non-empty argv; unknown
-        // harnesses return an empty vec (matches the pre-H-EXT-002
-        // catch-all).
+        // harnesses return an empty vec.
         for key in harness_keys() {
             assert!(
                 !launch_argv_for(key).is_empty(),

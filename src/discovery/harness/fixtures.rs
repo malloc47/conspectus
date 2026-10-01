@@ -15,12 +15,9 @@ use anyhow::{Context, Result};
 use rusqlite::Connection;
 use serde_json::json;
 
-/// Fixed epoch stamped onto every fixture file's mtime.
-/// Pre-H-HYG-004, harness adapters carried an
-/// argv-sniffing test backdoor that returned this constant
-/// when the process looked like `cargo test`. Fixture writers
-/// now stamp mtimes directly with `File::set_modified` so
-/// production code has no test cooperation.
+/// Fixed epoch stamped onto every fixture file's mtime with
+/// `File::set_modified`, so adapters read deterministic times
+/// through their normal production path.
 pub const FIXTURE_MTIME_EPOCH: i64 = 1_700_000_000;
 
 /// Stamp `path` with the fixed fixture mtime so

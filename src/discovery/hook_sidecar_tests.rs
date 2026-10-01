@@ -782,7 +782,7 @@ fn fresh_hook_record_demotes_cwd_links_for_same_mux() {
     }));
 }
 
-/// Proves the opencode end-to-end path for H-MUXPROC-014: a SQLite
+/// Proves the opencode end-to-end path: a SQLite
 /// hook record written by the `@conspectus/opencode-hook` plugin
 /// produces a fresh `LinkedToMux` candidate sourced from an opencode
 /// session, and demotes a stale `active_pane_command_session_match`
