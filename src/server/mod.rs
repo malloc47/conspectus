@@ -50,7 +50,7 @@ use std::os::unix::fs::PermissionsExt;
 use std::os::unix::net::{UnixListener, UnixStream};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, PoisonError};
 use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant};
 
@@ -632,11 +632,10 @@ fn handle_hook_ingest(request: &Request, ctx: &DispatchCtx) -> Response {
         }
     };
 
-    let guard_result = ctx.writer_lock.lock();
-    let _guard = match guard_result {
-        Ok(g) => g,
-        Err(poisoned) => poisoned.into_inner(),
-    };
+    let _guard = ctx
+        .writer_lock
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner);
     let Some(mut snapshot) = load_snapshot_state(&ctx.snapshot_state) else {
         return Response {
             id: request.id.clone(),
@@ -685,10 +684,10 @@ fn handle_snapshot(request: &Request, ctx: &DispatchCtx) -> Response {
     use base64::Engine;
 
     let bytes = {
-        let guard = match ctx.snapshot_bytes.lock() {
-            Ok(g) => g,
-            Err(poisoned) => poisoned.into_inner(),
-        };
+        let guard = ctx
+            .snapshot_bytes
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner);
         guard.clone()
     };
     let Some(bytes) = bytes else {
@@ -717,10 +716,7 @@ fn handle_snapshot(request: &Request, ctx: &DispatchCtx) -> Response {
 /// does no I/O beyond the response write so it stays responsive
 /// even while a class thread is mid-cycle.
 fn handle_status(request: &Request, ctx: &DispatchCtx) -> Response {
-    let guard = match ctx.state.lock() {
-        Ok(g) => g,
-        Err(poisoned) => poisoned.into_inner(),
-    };
+    let guard = ctx.state.lock().unwrap_or_else(PoisonError::into_inner);
     let snapshot = guard.snapshot();
     drop(guard);
     let data = match serde_json::to_value(&snapshot) {
@@ -773,11 +769,10 @@ fn handle_refresh(request: &Request, ctx: &DispatchCtx) -> Response {
         },
     };
 
-    let guard_result = ctx.writer_lock.lock();
-    let _guard = match guard_result {
-        Ok(g) => g,
-        Err(poisoned) => poisoned.into_inner(),
-    };
+    let _guard = ctx
+        .writer_lock
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner);
     let started = crate::discovery::current_epoch() as u64;
     let outcome = match class {
         None => run_full_rebuild(
@@ -893,26 +888,16 @@ fn publish_snapshot_to_path(
         // if the on-disk file write failed.
     }
     let arc = Arc::new(bytes);
-    match snapshot_bytes.lock() {
-        Ok(mut guard) => {
-            *guard = Some(arc);
-        }
-        Err(poisoned) => {
-            *poisoned.into_inner() = Some(arc);
-        }
-    }
+    *snapshot_bytes
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner) = Some(arc);
     store_snapshot_state(snapshot_state, snapshot);
 }
 
 fn store_snapshot_state(snapshot_state: &SnapshotState, snapshot: GraphSnapshot) {
-    match snapshot_state.lock() {
-        Ok(mut guard) => {
-            *guard = Some(snapshot);
-        }
-        Err(poisoned) => {
-            *poisoned.into_inner() = Some(snapshot);
-        }
-    }
+    *snapshot_state
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner) = Some(snapshot);
 }
 
 /// Best-effort daemon warm-restart (P11-009): on startup, try
@@ -1370,10 +1355,7 @@ fn run_cycle(
     // is durable across the lock take-over and a stale entry
     // self-heals on the next successful cycle. Carry on rather
     // than aborting the daemon.
-    let _guard = match writer_lock.lock() {
-        Ok(guard) => guard,
-        Err(poisoned) => poisoned.into_inner(),
-    };
+    let _guard = writer_lock.lock().unwrap_or_else(PoisonError::into_inner);
     let outcome = try_class_cycle(class, scan_roots, intervals, snapshot_bytes, snapshot_state);
     let completed = crate::discovery::current_epoch();
     match outcome {
@@ -1393,10 +1375,7 @@ fn run_cycle(
 /// recovery follows the same pattern as the writer lock; the
 /// in-memory observability is best-effort.
 fn record_state_started(state: &Mutex<SchedulerState>, class: ProviderClass, epoch: i64) {
-    let mut guard = match state.lock() {
-        Ok(g) => g,
-        Err(poisoned) => poisoned.into_inner(),
-    };
+    let mut guard = state.lock().unwrap_or_else(PoisonError::into_inner);
     guard.record_started(class, epoch);
 }
 
@@ -1406,10 +1385,7 @@ fn record_state_completed(
     epoch: i64,
     outcome: Result<(), String>,
 ) {
-    let mut guard = match state.lock() {
-        Ok(g) => g,
-        Err(poisoned) => poisoned.into_inner(),
-    };
+    let mut guard = state.lock().unwrap_or_else(PoisonError::into_inner);
     guard.record_completed(class, epoch, outcome);
 }
 
@@ -1460,10 +1436,9 @@ fn try_class_cycle(
 /// daemon warm-start path has not yet seeded the cache from
 /// `graph.bin`.
 fn load_snapshot_state(snapshot_state: &SnapshotState) -> Option<GraphSnapshot> {
-    let guard = match snapshot_state.lock() {
-        Ok(g) => g,
-        Err(poisoned) => poisoned.into_inner(),
-    };
+    let guard = snapshot_state
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner);
     guard.clone()
 }
 
