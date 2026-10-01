@@ -14402,7 +14402,21 @@ Queued chunks:
     names left over from the SQLite era for what is now an
     `Rc<GraphSnapshot>` handle.
   - Plan: rename to `SnapshotHandle` / `snapshot_handle()`. Mechanical.
-- [ ] `H-RUST-018` Smaller follow-ups, as files are touched.
+- [x] `H-RUST-018` Smaller follow-ups, as files are touched.
+  - Outcome: `items_after_statements` fixed (25 sites) and now denied.
+    The sessions builder's `Option<Option<String>>` became a
+    `PreviousHeader` enum. The search overlay no longer clones rows:
+    `items_from_rows` takes row references and returns owned items.
+    The casts were reviewed. Seventeen list-cursor steps moved to the
+    checked `tui::cursor::{wrap_step, clamp_step}` helpers, and
+    length-derived heights saturate with `u16::try_from`. The review found
+    two real bugs, both fixed with regression tests: the transcript viewer
+    wrapped its scroll offset past 65,535 lines (and cloned the whole
+    transcript every frame), and mux teardown would have passed a pid of
+    0 or -1 to `kill(2)`, signalling a process group. The remaining casts
+    are bounded (date math, wrap-width arithmetic, read-buffer sizes) and
+    stay. The ten `push_str(&format!(..))` sites in the TUI build short
+    labels once per render, so they stay as written.
   - `cast_possible_truncation` and `cast_possible_wrap` (109 hits,
     mostly layout math): use `try_from` where a value can actually
     overflow.
