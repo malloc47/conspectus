@@ -23,6 +23,7 @@ pub mod explorer;
 pub mod icons;
 pub mod keybindings;
 pub mod keymap;
+pub mod messages;
 pub mod modal;
 pub mod preview;
 pub mod resume;

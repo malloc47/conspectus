@@ -142,6 +142,10 @@ pub enum Msg {
     /// Set or clear the transient status-bar message. `None`
     /// clears any prior message.
     SetStatus(Option<String>),
+    /// Log an operation outcome (ADR 0105) and show its summary as
+    /// the status message, with a pointer to the Messages overlay
+    /// for warnings and errors.
+    Report(Box<crate::tui::messages::LogEntry>),
     /// Store a fresh mux preview capture in the per-mux cache.
     /// The runtime dispatches this after running
     /// `tmux capture-pane` against the selection's mux target.

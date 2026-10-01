@@ -105,6 +105,10 @@ pub enum Action {
     SearchOverlayKey(ratatui::crossterm::event::KeyEvent),
     /// Open the `?` help overlay.
     OpenHelp,
+    /// Open the `!` Messages overlay (ADR 0105).
+    OpenMessages,
+    /// Forward a key event into the open Messages overlay.
+    MessagesOverlayKey(ratatui::crossterm::event::KeyEvent),
     /// Forward a key event into the open help overlay.
     HelpOverlayKey(ratatui::crossterm::event::KeyEvent),
     /// Open the `o` full-value modal on the active explorer

@@ -7,7 +7,7 @@
 
 use crate::model::{
     AgentSessionId, Diagnostic, GraphLink, GraphSnapshot, MuxSessionId, MuxSessionNode, NodeId,
-    PinLastSession, RelationKind,
+    PinBinding, PinLastSession, PinSessionClaim, RelationKind,
 };
 use crate::tui::app::App;
 use crate::tui::rows::{RowId, RowKind};
@@ -49,6 +49,12 @@ pub enum PinDiagnosticView {
     StaleMux {
         pin_id: String,
         mux: MuxSessionId,
+        /// Sessions this mux had evidence for that other pins bound
+        /// first (ADR 0102).
+        claimed_elsewhere: Vec<PinSessionClaim>,
+        /// The pane already runs the pin's harness, so `Enter`
+        /// attaches rather than relaunching into it.
+        harness_running: bool,
     },
     Ambiguous {
         pin_id: String,
@@ -121,6 +127,14 @@ pub fn resolve_attach_target(app: &App) -> Result<AttachTarget, AttachDisabled> 
         .ok_or(AttachDisabled::NoSelection)?;
 
     let mux_id = match (&row.kind, selection) {
+        // A pin placeholder row stands in for a pin with no realized
+        // session. When its mux is live anyway (a stale mux, or a
+        // pin whose process isn't an agent harness), that mux is the
+        // row's target.
+        (_, RowId::Pin { pin_id }) => match pin_live_mux(snapshot, pin_id) {
+            Some(id) => id,
+            None => return Err(AttachDisabled::UnmuxedSession),
+        },
         (RowKind::AgentSessionMuxCandidate(candidate), _) => candidate.mux.clone(),
         (RowKind::AgentSession(session), _) => {
             let session_node = NodeId::AgentSession(session.session.clone());
@@ -232,6 +246,15 @@ pub fn resolve_view_session(app: &App) -> Result<AgentSessionId, ViewerDisabled>
 /// Diagnostics for the selected pin-bearing row. Unbound/stale pin
 /// rows carry the pin id directly; bound pin rows surface as regular
 /// agent-session rows with `pin_id` set.
+/// The live mux pin `pin_id` is bound to, if any.
+pub fn pin_live_mux(snapshot: &GraphSnapshot, pin_id: &str) -> Option<MuxSessionId> {
+    let pin = snapshot.pins.iter().find(|pin| pin.id == pin_id)?;
+    match pin.binding.as_ref()? {
+        PinBinding::StaleMux { mux } | PinBinding::Bound { mux, .. } => Some(mux.clone()),
+        PinBinding::Unbound => None,
+    }
+}
+
 pub fn selected_pin_diagnostics(app: &App) -> Vec<PinDiagnosticView> {
     let Some(selection) = app.selection() else {
         return Vec::new();
@@ -268,12 +291,18 @@ pub fn pin_diagnostics_for_id(snapshot: &GraphSnapshot, pin_id: &str) -> Vec<Pin
                 expected_mux_native_id: expected_mux_native_id.clone(),
                 last_session: last_session.clone(),
             }),
-            Diagnostic::PinStaleMux { pin_id: id, mux } if id == pin_id => {
-                Some(PinDiagnosticView::StaleMux {
-                    pin_id: id.clone(),
-                    mux: mux.clone(),
-                })
-            }
+            Diagnostic::PinStaleMux {
+                pin_id: id,
+                mux,
+                claimed_elsewhere,
+            } if id == pin_id => Some(PinDiagnosticView::StaleMux {
+                pin_id: id.clone(),
+                mux: mux.clone(),
+                claimed_elsewhere: claimed_elsewhere.clone(),
+                harness_running: snapshot.pins.iter().find(|pin| pin.id == *id).is_some_and(
+                    |pin| crate::resolve::pins::mux_hosts_harness(snapshot, mux, &pin.harness),
+                ),
+            }),
             Diagnostic::PinAmbiguous {
                 pin_id: id,
                 chosen,
@@ -295,6 +324,17 @@ pub fn pin_diagnostics_for_id(snapshot: &GraphSnapshot, pin_id: &str) -> Vec<Pin
             _ => None,
         })
         .collect()
+}
+
+/// What `Enter` does on a `StaleMux` pin: relaunch the harness into
+/// the idle pane, or just attach when the harness is already running
+/// there.
+pub fn stale_mux_enter_hint(harness_running: bool) -> &'static str {
+    if harness_running {
+        "Enter attach (harness running, session not identified)"
+    } else {
+        "Enter relaunch"
+    }
 }
 
 pub fn pin_status_hint(diagnostics: &[PinDiagnosticView]) -> Option<String> {
@@ -326,9 +366,15 @@ pub fn pin_status_hint(diagnostics: &[PinDiagnosticView]) -> Option<String> {
         })
         .or_else(|| {
             diagnostics.iter().find_map(|diagnostic| match diagnostic {
-                PinDiagnosticView::StaleMux { pin_id, mux } => Some(format!(
-                    "pin `{pin_id}` stale mux {}: Enter relaunch",
-                    mux.native_id
+                PinDiagnosticView::StaleMux {
+                    pin_id,
+                    mux,
+                    harness_running,
+                    ..
+                } => Some(format!(
+                    "pin `{pin_id}` stale mux {}: {}",
+                    mux.native_id,
+                    stale_mux_enter_hint(*harness_running)
                 )),
                 PinDiagnosticView::Unbound {
                     pin_id,

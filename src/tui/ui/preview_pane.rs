@@ -29,9 +29,70 @@ pub(super) fn draw_detail_preview(
 ///   tail) are gated.
 /// - Muxed agent session, mux candidate, or mux row: the tmux pane
 ///   capture, or the privacy banner with `--no-live-preview`.
-/// - Pin: the pin's diagnostics.
+/// - Pin placeholder: the pin's live pane when its mux exists, else
+///   the pin's diagnostics.
 /// - Other rows: a "no preview" placeholder.
 pub(super) fn preview_text_for_selection(app: &App, height: usize) -> Text<'static> {
+    let body = selection_preview_body(app, height);
+    match latest_failure_for_selection(app) {
+        Some(entry) => {
+            let mut text = failure_banner(entry, app.theme());
+            text.extend(body);
+            text
+        }
+        None => body,
+    }
+}
+
+/// Lines of output a failure banner shows before pointing at `!`.
+const FAILURE_BANNER_LINES: usize = 6;
+
+/// ADR 0105: the selected row's pin or mux, when its most recent
+/// logged outcome is a warning or error.
+fn latest_failure_for_selection(app: &App) -> Option<&crate::tui::messages::LogEntry> {
+    use crate::tui::messages::LogTarget;
+    let selection = app.selection()?;
+    let row = app.tree().rows.iter().find(|r| &r.id == selection)?;
+    let mut targets = Vec::new();
+    let pin_id = match (&row.kind, selection) {
+        (_, RowId::Pin { pin_id }) => Some(pin_id.clone()),
+        (RowKind::AgentSession(session), _) => session.pin_id.clone(),
+        (RowKind::MuxSession(mux), _) => mux.pin_id.clone(),
+        _ => None,
+    };
+    if let Some(pin_id) = pin_id {
+        targets.push(LogTarget::Pin(pin_id));
+    }
+    if let Ok(target) = resolve_attach_target(app) {
+        targets.push(LogTarget::Mux(target.mux));
+    }
+    app.messages().latest_failure_for(&targets)
+}
+
+fn failure_banner(entry: &crate::tui::messages::LogEntry, theme: &Theme) -> Text<'static> {
+    let style = crate::tui::widgets::messages::level_style(entry.level, theme);
+    let mut lines = vec![Line::from(Span::styled(
+        format!("{} {}", entry.level.glyph(), entry.summary),
+        style.add_modifier(Modifier::BOLD),
+    ))];
+    if let Some(code) = entry.command.as_ref().and_then(|c| c.exit_code) {
+        lines.push(Line::styled(format!("exit status {code}"), style));
+    }
+    for line in entry.output_tail(FAILURE_BANNER_LINES) {
+        lines.push(Line::raw(format!("  {line}")));
+    }
+    lines.push(Line::styled(
+        "! for the full output".to_string(),
+        Style::default().add_modifier(theme.placeholder),
+    ));
+    lines.push(Line::styled(
+        "─".repeat(40),
+        Style::default().add_modifier(theme.divider),
+    ));
+    Text::from(lines)
+}
+
+fn selection_preview_body(app: &App, height: usize) -> Text<'static> {
     let Some(selection) = app.selection() else {
         return Text::raw("");
     };
@@ -39,6 +100,9 @@ pub(super) fn preview_text_for_selection(app: &App, height: usize) -> Text<'stat
         return Text::raw("");
     };
     let live_preview = app.config().live_preview_enabled;
+    if let RowId::Pin { pin_id } = selection {
+        return pin_placeholder_preview(app, pin_id, live_preview, height);
+    }
     match &row.kind {
         RowKind::AgentSession(session) => match session.mux_state {
             MuxIndicator::Attached | MuxIndicator::Ambiguous { .. } => {
@@ -71,6 +135,30 @@ pub(super) fn preview_text_for_selection(app: &App, height: usize) -> Text<'stat
                 }
             }
         },
+    }
+}
+
+/// Preview for a pin placeholder row: the live pane when the pin's
+/// mux exists (a stale mux, or a pin running something other than an
+/// agent harness, like `conspectus serve`), else the pin's
+/// diagnostics, which say what `Enter` will do.
+fn pin_placeholder_preview(
+    app: &App,
+    pin_id: &str,
+    live_preview: bool,
+    height: usize,
+) -> Text<'static> {
+    let live_mux = app
+        .snapshot_handle()
+        .and_then(|handle| crate::tui::actions::pin_live_mux(handle.snapshot(), pin_id));
+    if live_mux.is_some() {
+        return mux_preview_text(app, live_preview, height);
+    }
+    let diagnostics = crate::tui::actions::selected_pin_diagnostics(app);
+    if diagnostics.is_empty() {
+        Text::raw("pin diagnostic unavailable — try `r` to refresh")
+    } else {
+        Text::raw(render_pin_diagnostics(&diagnostics))
     }
 }
 
@@ -135,10 +223,30 @@ pub(super) fn render_pin_diagnostics(
                      Enter launches the pin."
                 ),
             },
-            crate::tui::actions::PinDiagnosticView::StaleMux { pin_id, mux } => format!(
-                "Pin `{pin_id}` has a stale mux.\nMux: {}\nEnter relaunches the harness in the existing mux.",
-                mux.native_id
-            ),
+            crate::tui::actions::PinDiagnosticView::StaleMux {
+                pin_id,
+                mux,
+                claimed_elsewhere,
+                harness_running,
+            } => {
+                let action = if *harness_running {
+                    "The harness is running there but its session isn't identified; \
+                     Enter attaches."
+                } else {
+                    "Enter relaunches the harness in the existing mux."
+                };
+                let mut text = format!(
+                    "Pin `{pin_id}` has a stale mux.\nMux: {}\n{action}",
+                    mux.native_id
+                );
+                for claim in claimed_elsewhere {
+                    text.push_str(&format!(
+                        "\nSession {}:{} matched here but is bound to pin `{}`.",
+                        claim.session.harness_key, claim.session.session_key, claim.claimed_by_pin
+                    ));
+                }
+                text
+            }
             crate::tui::actions::PinDiagnosticView::Ambiguous {
                 pin_id,
                 chosen,

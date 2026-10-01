@@ -7963,6 +7963,83 @@ H-PIN-RESUME-002 (resume_argv) ──┴─→ H-PIN-RESUME-004 (launch consumer
     fork falls back).
   - Blockers: `H-PIN-RESUME-005`.
 
+#### Launch And Binding Reliability (H-PIN-FIX-*)
+
+Bugs found running the deck day to day: one session bound to two
+pins, a pin launch that failed with no visible reason, previews that
+ignored a pin's live mux, stale state after returning from tmux, and
+errors that only flashed on the status bar.
+
+- [x] `H-PIN-FIX-001` One-to-one pin bindings (ADR 0102).
+  - Scope: assign sessions to pins one-to-one, ranked by the
+    resolver's session ↔ mux comparator; replace the previous pass's
+    synthesized pin links with `Cached` fallback candidates;
+    `PinStaleMux.claimed_elsewhere`; attach instead of `send-keys`
+    when the stale pane already runs the pin's harness.
+  - Tests: `resolve::pins` assignment, fallback, heal-on-re-resolve,
+    prior-binding hysteresis and recreated-mux cases,
+    `mux_hosts_harness`.
+  - Outcome: `apply_pin_bindings` ranks per pin with
+    `compare_session_mux` and assigns greedily across pins.
+    Snapshot format version 3. The sessions view's Pins group no
+    longer shows one session twice; `pin show` names the pin that
+    holds a contested session.
+
+- [x] `H-PIN-FIX-002` Launches keep failed panes and confirm the start
+  (ADR 0103).
+  - Scope: `remain-on-exit failed` on Conspectus-created sessions;
+    `MuxBackend::pane_status`; watch the new pane after `pin launch` /
+    `mux launch`; resume falls back to fresh on a failed start and
+    clears the sidecar; replace a stale pin's dead pane instead of
+    `send-keys`; `capture-pane -S -100`.
+  - Tests: `cli::launch_watch` (started, unobservable, resume
+    fallback, failed fresh launch, vanished session, output tail);
+    manual end-to-end on a scratch socket with a harness that rejects
+    `--resume`.
+  - Outcome: `conspectus-worker1`, whose sidecar pointed at a
+    turnless transcript, now resumes, fails in about a second, and
+    launches fresh with the harness's message on stderr. Previously
+    the only symptom was "can't find session".
+
+- [x] `H-PIN-FIX-003` Pin placeholder rows preview their live mux.
+  - Scope: a sessions-view pin placeholder whose pin has a live mux
+    (`StaleMux`, e.g. a `conspectus serve` pin, which never realizes
+    an agent session) targets that mux for preview capture and `a`;
+    other placeholders preview the pin's diagnostics instead of
+    repeating the cwd.
+  - Tests: `tui::ui` stale-mux capture, unbound diagnostics,
+    contested-session text.
+  - Outcome: `resolve_attach_target` maps `RowId::Pin` through
+    `pin_live_mux`; `preview_text_for_selection` routes pin rows
+    through `pin_placeholder_preview`.
+
+- [x] `H-PIN-FIX-004` Refresh after tmux hand-offs shows current
+  state (ADR 0104).
+  - Scope: nudge the daemon's `mux` + `harness` classes before the
+    refresh that follows attach, pin launch, mux new/launch and
+    renames, and on `r`; fall back to a local rebuild and report when
+    the daemon refresh fails.
+  - Tests: existing suites; the nudge is an IPC call against a live
+    daemon, measured at about 0.2 s per class with `conspectus
+    refresh --class`.
+  - Outcome: `refresh_after_mux_handoff` and `DaemonNudge` in
+    `tui::runtime`.
+
+- [x] `H-PIN-FIX-005` TUI message log for operation outcomes
+  (ADR 0105).
+  - Scope: in-memory `MessageLog` fed by `Msg::Report` from launches,
+    attaches, viewer, renames, pin-store and worktree executors,
+    daemon nudges and refresh failures; `!` Messages overlay with full
+    command records; persistent unseen-failure chip; failure banner in
+    the affected row's Preview; dead-pane check after attach returns.
+  - Tests: `tui::messages` (capacity, unseen, latest failure,
+    repeats, full text), `tui::widgets::messages` (navigation,
+    render), `tui::ui` (preview banner, status chip, info report),
+    `tui::runtime` (`!` key, `launch_entry` levels).
+  - Outcome: launch subprocess output is kept in full instead of the
+    first 180 characters of stderr; failure toasts are replaced by
+    the status message plus chip.
+
 ### AI Session Naming
 
 Sibling workstream to `H-RENAME-*`. Layers AI-driven name suggestions on

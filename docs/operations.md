@@ -502,9 +502,21 @@ conspectus pin attach <id> [--no-attach]
   (or `tmux switch-client` inside an existing tmux client).
 - **Stale-mux** → injects the configured argv into the existing pane
   via `tmux send-keys ; Enter`, then attaches. Preserves the
-  operator's window/pane layout.
+  operator's window/pane layout. If the pane already runs the pin's
+  harness (its session just isn't identified), launch only attaches
+  (ADR 0102). If the pane is dead, launch replaces the session as
+  for an unbound pin (ADR 0103).
 - **Unbound** → spawns `tmux new-session -d -s <name> -c <cwd>
   <argv>` then attaches.
+
+Sessions Conspectus creates keep a pane whose process exits non-zero
+(`remain-on-exit failed`, ADR 0103). After spawning, launch watches the
+pane for up to 0.5 s (1.5 s when resuming). If the harness dies in that
+window, launch reports its output. A failed resume is retried as a
+fresh launch and the pin's resume sidecar is cleared; a failed fresh
+launch exits non-zero and removes the dead session. A harness that
+fails later stays visible as a dead pane until the next launch
+replaces it.
 
 The default argv comes from the harness adapter's `launch_argv`
 (per `HarnessAdapter::launch_argv`); pass `--launch-arg <arg>...`
@@ -711,6 +723,28 @@ Conspectus has three persistent cache surfaces:
 Future caches (PR fetches, transcript indices, etc.) land
 under the same `$XDG_*_HOME/conspectus/` roots rather than
 inside `.conspectus.toml` or the project config directory.
+
+## TUI messages
+
+Every operation the TUI runs (pin launch, mux new/launch, attach,
+renames, pin-store and worktree changes, refresh and daemon failures)
+is logged in memory for the life of the TUI process (ADR 0105). Press
+`!` to open the Messages overlay: newest entries first, with the
+selected entry's full record below, including argv, exit status,
+stderr and stdout for subprocesses, and the pane output when a
+harness died in its pane. `j`/`k` select, `J`/`K` or PgUp/PgDn scroll
+the record, `y` copies it, `Esc` closes.
+
+A warning or error also:
+
+- sets the status message to its summary plus `· ! details`;
+- keeps a `⚠ N · ! messages` chip at the start of the status bar until
+  you open the overlay;
+- leads the Preview of the row it concerns (its pin or mux) until a
+  later operation on that row succeeds.
+
+The log is never written to disk, because pane output and harness
+stderr can contain conversation content.
 
 ## TUI state
 

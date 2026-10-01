@@ -486,3 +486,373 @@ fn local_pin_synthesized_link_outranks_discovered_in_precedence() {
     assert!(Provenance::GlobalPin.precedence() > Provenance::StrongDiscovered.precedence());
     assert!(Provenance::GlobalPin.precedence() < Provenance::GlobalDeclared.precedence());
 }
+
+fn linked_to_mux_with_evidence(
+    link_id: &str,
+    session_key: &str,
+    mux_name: &str,
+    match_kind: &str,
+) -> GraphLink {
+    let mut link = linked_to_mux(
+        link_id,
+        "claude-code",
+        session_key,
+        mux_name,
+        Provenance::StrongDiscovered,
+    );
+    link.confidence = Confidence::High;
+    link.source_metadata.fields.insert(
+        "match_kind".to_string(),
+        Value::String(match_kind.to_string()),
+    );
+    link
+}
+
+fn two_pins_one_session_snapshot() -> GraphSnapshot {
+    let mut snap = GraphSnapshot::empty();
+    for name in ["agent", "agent3"] {
+        snap.pins.push(pin_candidate(
+            name,
+            "claude-code",
+            "/home/me/work/repo",
+            name,
+            Provenance::LocalPin,
+        ));
+        snap.nodes.push(mux_node(name));
+    }
+    snap.nodes.push(agent_session_node(
+        "claude-code",
+        "shared",
+        "/home/me/work/repo",
+    ));
+    // Listed weaker-first so the outcome can't come from link order.
+    snap.candidate_links.push(linked_to_mux_with_evidence(
+        "activity-agent3",
+        "shared",
+        "agent3",
+        "session_file_activity_match",
+    ));
+    snap.candidate_links.push(linked_to_mux_with_evidence(
+        "hook-agent",
+        "shared",
+        "agent",
+        "hook_session_path_match",
+    ));
+    snap
+}
+
+#[test]
+fn session_realizes_at_most_one_pin_and_stronger_evidence_keeps_it() {
+    let mut snap = two_pins_one_session_snapshot();
+
+    let diagnostics = apply_pin_bindings(&mut snap);
+
+    match &snap.pins[0].binding {
+        Some(PinBinding::Bound { session, .. }) => assert_eq!(session.session_key, "shared"),
+        other => panic!("expected agent Bound, got {other:?}"),
+    }
+    match &snap.pins[1].binding {
+        Some(PinBinding::StaleMux { mux }) => assert_eq!(mux.native_id, "tmux:agent3"),
+        other => panic!("expected agent3 StaleMux, got {other:?}"),
+    }
+    let stale = diagnostics
+        .iter()
+        .find_map(|d| match d {
+            Diagnostic::PinStaleMux {
+                pin_id,
+                claimed_elsewhere,
+                ..
+            } if pin_id == "agent3" => Some(claimed_elsewhere),
+            _ => None,
+        })
+        .expect("agent3 stale diagnostic");
+    assert_eq!(stale.len(), 1);
+    assert_eq!(stale[0].session.session_key, "shared");
+    assert_eq!(stale[0].claimed_by_pin, "agent");
+    // Only the winning pin synthesizes session links.
+    let realized: Vec<&str> = snap
+        .candidate_links
+        .iter()
+        .filter(|l| l.relation == RelationKind::PinRealizedBySession)
+        .map(|l| l.id.as_str())
+        .collect();
+    assert_eq!(realized, ["pin-node:local_pin:agent:realized-by-session"]);
+}
+
+#[test]
+fn pin_that_loses_a_shared_session_falls_back_to_its_next_candidate() {
+    let mut snap = two_pins_one_session_snapshot();
+    snap.nodes.push(agent_session_node(
+        "claude-code",
+        "own",
+        "/home/me/work/repo",
+    ));
+    snap.candidate_links.push(linked_to_mux_with_evidence(
+        "cwd-agent3",
+        "own",
+        "agent3",
+        "exact_cwd_match",
+    ));
+
+    let diagnostics = apply_pin_bindings(&mut snap);
+
+    match &snap.pins[1].binding {
+        Some(PinBinding::Bound { session, .. }) => assert_eq!(session.session_key, "own"),
+        other => panic!("expected agent3 bound to its own session, got {other:?}"),
+    }
+    // The session taken by `agent` is not reported as competition.
+    assert!(
+        !diagnostics
+            .iter()
+            .any(|d| matches!(d, Diagnostic::PinAmbiguous { .. })),
+        "got {diagnostics:?}"
+    );
+}
+
+#[test]
+fn re_resolve_drops_previous_pin_links_so_a_wrong_binding_heals() {
+    let mut snap = two_pins_one_session_snapshot();
+    // Left over from an earlier pass that bound `shared` to agent3.
+    // Its `LocalPin` provenance would outrank every discovered link.
+    let mut stale = linked_to_mux(
+        "pin:local_pin:agent3",
+        "claude-code",
+        "shared",
+        "agent3",
+        Provenance::LocalPin,
+    );
+    stale.source_metadata.adapter = "pin".to_string();
+    snap.candidate_links.push(stale);
+
+    apply_pin_bindings(&mut snap);
+    let first = snap.pins.clone();
+    apply_pin_bindings(&mut snap);
+
+    assert!(matches!(
+        &snap.pins[0].binding,
+        Some(PinBinding::Bound { session, .. }) if session.session_key == "shared"
+    ));
+    assert!(matches!(
+        &snap.pins[1].binding,
+        Some(PinBinding::StaleMux { .. })
+    ));
+    assert_eq!(snap.pins, first, "second pass is a fixed point");
+    assert_eq!(
+        snap.candidate_links
+            .iter()
+            .filter(|l| l.id == "pin:local_pin:agent")
+            .count(),
+        1,
+        "synthesized links are replaced, not duplicated"
+    );
+}
+
+#[test]
+fn duplicate_links_for_one_session_are_not_ambiguity() {
+    let mut snap = empty_snapshot_with_pin(pin_candidate(
+        "agent",
+        "claude-code",
+        "/home/me/work/repo",
+        "agent",
+        Provenance::LocalPin,
+    ));
+    snap.nodes.push(mux_node("agent"));
+    snap.nodes.push(agent_session_node(
+        "claude-code",
+        "only",
+        "/home/me/work/repo",
+    ));
+    snap.candidate_links.push(linked_to_mux_with_evidence(
+        "hook",
+        "only",
+        "agent",
+        "hook_session_path_match",
+    ));
+    snap.candidate_links.push(linked_to_mux_with_evidence(
+        "activity",
+        "only",
+        "agent",
+        "session_file_activity_match",
+    ));
+
+    let diagnostics = apply_pin_bindings(&mut snap);
+
+    assert!(diagnostics.is_empty(), "got {diagnostics:?}");
+}
+
+fn mux_with_process(harness_key: Option<&str>) -> GraphSnapshot {
+    use crate::model::{RuntimeProcessId, RuntimeProcessNode};
+    let mut snap = GraphSnapshot::empty();
+    snap.nodes.push(mux_node("agent"));
+    let key = "mux_session:tmux:agent:root:1:pid:1";
+    snap.nodes
+        .push(GraphNode::RuntimeProcess(RuntimeProcessNode {
+            id: RuntimeProcessId::new(key),
+            observation_key: key.to_string(),
+            pid: Some(1),
+            parent_pid: None,
+            root_pane_pid: Some(1),
+            command: Some("claude".to_string()),
+            cwd: None,
+            harness_key: harness_key.map(str::to_string),
+            role: None,
+            depth: Some(0),
+            observed_epoch: None,
+        }));
+    snap.candidate_links.push(GraphLink {
+        id: "contains".to_string(),
+        source: NodeId::MuxSession(MuxSessionId::new("tmux:agent")),
+        target: LinkEndpoint::Node {
+            id: NodeId::RuntimeProcess(RuntimeProcessId::new(key)),
+        },
+        relation: RelationKind::MuxContainsProcess,
+        provenance: Provenance::StrongDiscovered,
+        confidence: Confidence::High,
+        freshness: Freshness::Fresh,
+        source_metadata: SourceMetadata::default(),
+        state: LinkState::Active,
+    });
+    snap
+}
+
+#[test]
+fn mux_hosts_harness_reads_pane_process_evidence() {
+    let mux = MuxSessionId::new("tmux:agent");
+    let running = mux_with_process(Some("claude-code"));
+    assert!(mux_hosts_harness(&running, &mux, "claude-code"));
+    assert!(!mux_hosts_harness(&running, &mux, "codex"));
+    let shell = mux_with_process(None);
+    assert!(!mux_hosts_harness(&shell, &mux, "claude-code"));
+    let other_mux = MuxSessionId::new("tmux:elsewhere");
+    assert!(!mux_hosts_harness(&running, &other_mux, "claude-code"));
+}
+
+/// Snapshot after a previous pass bound `mine` to pin `main`, where
+/// the time-based evidence on `main`'s mux has since drifted to
+/// `theirs`, which pin `worker` holds on equal evidence.
+fn drifted_evidence_snapshot() -> GraphSnapshot {
+    let mut snap = GraphSnapshot::empty();
+    for name in ["main", "worker"] {
+        snap.pins.push(pin_candidate(
+            name,
+            "claude-code",
+            "/home/me/work/repo",
+            name,
+            Provenance::LocalPin,
+        ));
+        snap.nodes.push(mux_node(name));
+    }
+    for key in ["mine", "theirs"] {
+        snap.nodes
+            .push(agent_session_node("claude-code", key, "/home/me/work/repo"));
+    }
+    snap.candidate_links.push(linked_to_mux_with_evidence(
+        "hook-worker",
+        "theirs",
+        "worker",
+        "hook_session_path_match",
+    ));
+    snap.candidate_links.push(linked_to_mux_with_evidence(
+        "activity-main",
+        "theirs",
+        "main",
+        "session_file_activity_match",
+    ));
+    let mut prior = linked_to_mux(
+        "pin:local_pin:main",
+        "claude-code",
+        "mine",
+        "main",
+        Provenance::LocalPin,
+    );
+    prior.source_metadata.adapter = "pin".to_string();
+    snap.candidate_links.push(prior);
+    snap
+}
+
+fn bound_session_key(pin: &PinCandidate) -> Option<&str> {
+    match &pin.binding {
+        Some(PinBinding::Bound { session, .. }) => Some(session.session_key.as_str()),
+        _ => None,
+    }
+}
+
+#[test]
+fn previous_binding_holds_when_evidence_drifts_to_a_claimed_session() {
+    let mut snap = drifted_evidence_snapshot();
+
+    let diagnostics = apply_pin_bindings(&mut snap);
+
+    assert_eq!(bound_session_key(&snap.pins[0]), Some("mine"));
+    assert_eq!(bound_session_key(&snap.pins[1]), Some("theirs"));
+    assert!(
+        !diagnostics
+            .iter()
+            .any(|d| matches!(d, Diagnostic::PinAmbiguous { .. })),
+        "got {diagnostics:?}"
+    );
+}
+
+#[test]
+fn current_evidence_beats_the_previous_binding() {
+    let mut snap = drifted_evidence_snapshot();
+    snap.nodes.push(agent_session_node(
+        "claude-code",
+        "fresh",
+        "/home/me/work/repo",
+    ));
+    snap.candidate_links.push(linked_to_mux_with_evidence(
+        "hook-main",
+        "fresh",
+        "main",
+        "hook_session_path_match",
+    ));
+
+    let diagnostics = apply_pin_bindings(&mut snap);
+
+    assert_eq!(bound_session_key(&snap.pins[0]), Some("fresh"));
+    // The superseded binding is history, not a competing candidate.
+    assert!(
+        !diagnostics
+            .iter()
+            .any(|d| matches!(d, Diagnostic::PinAmbiguous { .. })),
+        "got {diagnostics:?}"
+    );
+}
+
+#[test]
+fn previous_binding_is_dropped_when_the_mux_was_recreated() {
+    let mut snap = drifted_evidence_snapshot();
+    for node in &mut snap.nodes {
+        match node {
+            GraphNode::MuxSession(mux) if mux.native_id == "main" => {
+                mux.created_epoch = Some(2_000);
+            }
+            GraphNode::AgentSession(session) if session.id.session_key == "mine" => {
+                session.last_active_epoch = Some(1_000);
+            }
+            _ => {}
+        }
+    }
+
+    apply_pin_bindings(&mut snap);
+
+    assert!(matches!(
+        &snap.pins[0].binding,
+        Some(PinBinding::StaleMux { .. })
+    ));
+}
+
+#[test]
+fn previous_binding_is_dropped_when_its_session_is_gone() {
+    let mut snap = drifted_evidence_snapshot();
+    snap.nodes
+        .retain(|node| !matches!(node, GraphNode::AgentSession(s) if s.id.session_key == "mine"));
+
+    apply_pin_bindings(&mut snap);
+
+    assert!(matches!(
+        &snap.pins[0].binding,
+        Some(PinBinding::StaleMux { .. })
+    ));
+}

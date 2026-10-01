@@ -51,7 +51,7 @@ pub const HEADER_LEN: usize = 32;
 /// add/remove, enum variant add, rename). Readers refuse to
 /// touch a file written with a mismatched version and fall
 /// through to cold rebuild per ADR 0082.
-pub const FORMAT_VERSION: u32 = 2;
+pub const FORMAT_VERSION: u32 = 3;
 
 /// Reserved-header byte count. Carved out so future additive
 /// header changes (e.g. a `crc32c`, a feature-flag bitmap) can

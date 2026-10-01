@@ -142,6 +142,9 @@ pub struct App {
     /// reason for a key that didn't apply to the current selection.
     /// Cleared on the next selection / focus change.
     status_message: Option<String>,
+    /// Outcomes of operations run from this TUI (ADR 0105). In memory
+    /// only.
+    messages: crate::tui::messages::MessageLog,
     /// Provider toggles and availability surfaced as status-bar
     /// chips per the Phase 8 error-state table. Populated by the
     /// runtime from discovery diagnostics and env-var toggles.
@@ -431,6 +434,7 @@ impl App {
             preview_scroll: 0,
             loaded_at_epoch: None,
             status_message: None,
+            messages: crate::tui::messages::MessageLog::default(),
             provider_status: ProviderStatus::default(),
             refresh_failure: None,
             in_flight_ops: Vec::new(),
@@ -868,6 +872,17 @@ impl App {
         self.status_message.as_deref()
     }
 
+    /// Operation outcomes logged this session (ADR 0105).
+    pub fn messages(&self) -> &crate::tui::messages::MessageLog {
+        &self.messages
+    }
+
+    /// Log an operation outcome and show its summary in the status
+    /// bar (ADR 0105).
+    pub fn report(&mut self, entry: crate::tui::messages::LogEntry) {
+        self.update(Msg::Report(Box::new(entry)));
+    }
+
     /// Current provider availability status used for right-side
     /// status-bar chips.
     pub fn provider_status(&self) -> &ProviderStatus {
@@ -1136,6 +1151,14 @@ impl App {
             }
             Msg::SetStatus(message) => {
                 self.status_message = message;
+            }
+            Msg::Report(entry) => {
+                self.status_message = Some(if entry.level.needs_attention() {
+                    format!("{} · ! details", entry.summary)
+                } else {
+                    entry.summary.clone()
+                });
+                self.messages.push(*entry);
             }
             Msg::SetMuxPreview { mux, content } => {
                 self.preview_store.insert(mux, content);

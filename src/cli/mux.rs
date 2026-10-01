@@ -198,10 +198,17 @@ impl MuxLaunchArgs {
         }
         let socket = self.socket.as_deref();
         let name = self.name.as_str();
-        let outcome = runner
-            .new_session(socket, name, &cwd, &argv)
-            .map_err(|err| anyhow!("tmux new-session failed: {err}"))?;
-        report_new_session(outcome, name)?;
+        // ADR 0103: a harness that dies at startup fails the launch
+        // with its own output instead of leaving nothing to attach.
+        super::launch_watch::spawn_watched(
+            runner,
+            socket,
+            name,
+            &cwd,
+            &argv,
+            None,
+            super::launch_watch::WatchWindows::default(),
+        )?;
         if self.no_attach {
             let attach_cmd = format_attach_command(socket, name);
             println!("launched `{name}` (detached); attach with: {attach_cmd}");

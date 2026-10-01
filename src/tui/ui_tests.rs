@@ -135,6 +135,13 @@ fn muxed_app(native_id: &str, capture: Option<&str>) -> App {
 }
 
 fn pinned_app(binding: crate::model::PinBinding) -> App {
+    pinned_app_with(binding, |_| {})
+}
+
+fn pinned_app_with(
+    binding: crate::model::PinBinding,
+    extend: impl FnOnce(&mut GraphSnapshot),
+) -> App {
     use crate::model::{PinCandidate, PinMuxRef, Provenance};
     let mut snapshot = GraphSnapshot::empty();
     snapshot.pins.push(PinCandidate {
@@ -153,6 +160,7 @@ fn pinned_app(binding: crate::model::PinBinding) -> App {
         store_path: "/tmp/.conspectus.toml".to_string(),
         binding: Some(binding),
     });
+    extend(&mut snapshot);
     // Skip `resolve_snapshot` here — it would overwrite the
     // explicit binding state with whatever the resolver derives
     // from the empty live evidence. Builder consumes the
@@ -205,6 +213,69 @@ fn status_hint_for_stale_mux_pin_advertises_relaunch_in_existing_mux() {
     assert!(
         hint.contains("relaunch") && hint.contains("existing mux"),
         "unexpected hint for stale-mux pin: {hint}"
+    );
+}
+
+#[test]
+fn stale_mux_pin_placeholder_previews_its_live_pane() {
+    let mux = crate::model::MuxSessionId::new("tmux:ingest");
+    let mut app = pinned_app_with(
+        crate::model::PinBinding::StaleMux { mux: mux.clone() },
+        |snapshot| {
+            snapshot
+                .nodes
+                .push(GraphNode::MuxSession(crate::model::MuxSessionNode::new(
+                    mux.clone(),
+                    "tmux",
+                    "ingest",
+                )));
+        },
+    );
+
+    let target = resolve_attach_target(&app).expect("pin row targets its live mux");
+    assert_eq!(target.native_id, "ingest");
+    app.update(Msg::SetMuxPreview {
+        mux,
+        content: PreviewContent::Text("serving on :8080".to_string()),
+    });
+    let preview = preview_text_for_selection(&app, 10).to_string();
+    assert!(preview.contains("serving on :8080"), "{preview}");
+}
+
+#[test]
+fn unbound_pin_placeholder_previews_its_diagnostics() {
+    let app = pinned_app_with(crate::model::PinBinding::Unbound, |snapshot| {
+        snapshot
+            .diagnostics
+            .push(crate::model::Diagnostic::PinUnbound {
+                pin_id: "ingest".to_string(),
+                expected_mux_native_id: "tmux:ingest".to_string(),
+                last_session: None,
+            });
+    });
+
+    assert!(resolve_attach_target(&app).is_err());
+    let preview = preview_text_for_selection(&app, 10).to_string();
+    assert!(preview.contains("Pin `ingest` is unbound."), "{preview}");
+    assert!(preview.contains("Enter launches the pin."), "{preview}");
+}
+
+#[test]
+fn stale_mux_preview_names_the_pin_holding_a_contested_session() {
+    let text = render_pin_diagnostics(&[crate::tui::actions::PinDiagnosticView::StaleMux {
+        pin_id: "agent3".to_string(),
+        mux: crate::model::MuxSessionId::new("tmux:agent3"),
+        claimed_elsewhere: vec![crate::model::PinSessionClaim {
+            session: AgentSessionId::new("claude-code", "/state", "e44d01cb"),
+            claimed_by_pin: "agent".to_string(),
+        }],
+        harness_running: true,
+    }]);
+
+    assert!(text.contains("Enter attaches."), "{text}");
+    assert!(
+        text.contains("claude-code:e44d01cb matched here but is bound to pin `agent`"),
+        "{text}"
     );
 }
 
@@ -3517,4 +3588,80 @@ fn mux_view_header_counts_sessions_in_visible_muxes() {
         filtered.contains("1/2 sessions"),
         "filtered: sessions in visible muxes: {filtered}"
     );
+}
+
+#[test]
+fn reported_failure_leads_the_rows_preview_until_a_later_success() {
+    use crate::tui::messages::{CommandRecord, LogEntry, LogTarget};
+    let mut app = pinned_app_with(crate::model::PinBinding::Unbound, |snapshot| {
+        snapshot
+            .diagnostics
+            .push(crate::model::Diagnostic::PinUnbound {
+                pin_id: "ingest".to_string(),
+                expected_mux_native_id: "tmux:ingest".to_string(),
+                last_session: None,
+            });
+    });
+    app.report(
+        LogEntry::error("pin `ingest` launch failed: exited with status 1")
+            .with_target(LogTarget::Pin("ingest".to_string()))
+            .with_command(CommandRecord {
+                argv: vec!["conspectus".into()],
+                exit_code: Some(1),
+                stdout: String::new(),
+                stderr: "No conversation found with session ID: abc".into(),
+            }),
+    );
+
+    let preview = preview_text_for_selection(&app, 20).to_string();
+    assert!(
+        preview.starts_with("✗ pin `ingest` launch failed"),
+        "{preview}"
+    );
+    assert!(preview.contains("exit status 1"), "{preview}");
+    assert!(
+        preview.contains("No conversation found with session ID: abc"),
+        "{preview}"
+    );
+    assert!(
+        preview.contains("Pin `ingest` is unbound."),
+        "the row's own preview follows the banner: {preview}"
+    );
+
+    app.report(
+        LogEntry::info("pin `ingest` launched").with_target(LogTarget::Pin("ingest".to_string())),
+    );
+    let preview = preview_text_for_selection(&app, 20).to_string();
+    assert!(!preview.contains("launch failed"), "{preview}");
+}
+
+#[test]
+fn unseen_failures_keep_a_status_bar_chip_until_the_log_is_opened() {
+    use crate::tui::messages::LogEntry;
+    let mut app = pinned_app(crate::model::PinBinding::Unbound);
+    app.report(LogEntry::error("mux `w1` attach failed"));
+    assert_eq!(
+        app.status_message(),
+        Some("mux `w1` attach failed · ! details")
+    );
+
+    // Navigation clears the status message; the chip stays.
+    app.update(Msg::SetStatus(None));
+    let text = buffer_to_string(&render_to_buffer(&mut app, Rect::new(0, 0, 120, 24)));
+    assert!(text.contains("⚠ 1 · ! messages"), "{text}");
+
+    app.open_messages_overlay();
+    assert_eq!(app.messages().unseen(), 0);
+    app.close_messages_overlay();
+    let text = buffer_to_string(&render_to_buffer(&mut app, Rect::new(0, 0, 120, 24)));
+    assert!(!text.contains("! messages"), "{text}");
+}
+
+#[test]
+fn info_report_sets_a_plain_status_message() {
+    let mut app = pinned_app(crate::model::PinBinding::Unbound);
+    app.report(crate::tui::messages::LogEntry::info("renamed: w1"));
+    assert_eq!(app.status_message(), Some("renamed: w1"));
+    assert_eq!(app.messages().unseen(), 0);
+    assert_eq!(app.messages().len(), 1);
 }

@@ -469,9 +469,14 @@ fn pin_fields_for_session(
             field.annotation = Some("advisory");
             field
         }
-        crate::tui::actions::PinDiagnosticView::StaleMux { pin_id, mux } => {
+        crate::tui::actions::PinDiagnosticView::StaleMux {
+            pin_id,
+            mux,
+            harness_running,
+            ..
+        } => {
             let mut field = plain("pin", format!("{pin_id} stale mux {}", mux.native_id));
-            field.annotation = Some("Enter relaunch");
+            field.annotation = Some(crate::tui::actions::stale_mux_enter_hint(harness_running));
             field
         }
         crate::tui::actions::PinDiagnosticView::Unbound {

@@ -15,7 +15,8 @@ use crate::config::ConfigLoader;
 use crate::declared::{DeclaredEndpoint, DeclaredLink, DeclaredLinkState, upsert_declared_link};
 use crate::discovery::harness::launch_argv_for;
 use crate::discovery::tmux::{
-    MuxBackend, SystemTmux, TmuxAttachOutcome, TmuxNewSessionOutcome, TmuxSendKeysOutcome,
+    MuxBackend, SystemTmux, TmuxAttachOutcome, TmuxKillOutcome, TmuxNewSessionOutcome,
+    TmuxPaneStatus, TmuxSendKeysOutcome, dead_pane_output,
 };
 use crate::discovery::worktree::{
     SystemGitWorktree, WorktreeBackend, WorktreeCreateRequest, WorktreeMutationOutcome,
@@ -28,6 +29,7 @@ use crate::pins::{
 };
 
 use super::declared::resolve_write_store;
+use super::launch_watch::{Spawned, WatchWindows, resume_fallback_note, spawn_watched};
 use super::{
     DeclaredStoreFlag, WriteStoreFlag, discover_for_store_selection, effective_scan_roots,
     provenance_label, store_label,
@@ -787,6 +789,49 @@ impl PinLaunchArgs {
                 }
                 Ok(())
             }
+            Some(PinBinding::StaleMux { mux })
+                if crate::resolve::pins::mux_hosts_harness(&snapshot, mux, &pin.harness) =>
+            {
+                // The harness is already running in the pane; typing
+                // the launch argv would land in its prompt (ADR 0028).
+                println!(
+                    "pin `{}` mux `{}` already runs `{}` (session not identified); \
+                     attaching without relaunch",
+                    pin.id, mux.native_id, pin.harness
+                );
+                if !self.no_attach {
+                    attach_and_report(runner, socket, mux_name)?;
+                }
+                Ok(())
+            }
+            Some(PinBinding::StaleMux { mux })
+                if matches!(
+                    runner.pane_status(socket, mux_name),
+                    Ok(TmuxPaneStatus::Dead { .. })
+                ) =>
+            {
+                // The harness exited non-zero and tmux kept the pane
+                // (ADR 0103). A dead pane takes no input, so replace
+                // the session instead of typing into it.
+                let output = dead_pane_output(runner, socket, mux_name);
+                eprintln!(
+                    "conspectus: pin `{}`: previous launch in `{}` had exited; replacing it",
+                    pin.id, mux.native_id
+                );
+                if !output.trim().is_empty() {
+                    eprintln!("--- previous pane output ---\n{output}");
+                }
+                match runner
+                    .kill_session(socket, mux_name)
+                    .map_err(|err| anyhow!("tmux kill-session failed: {err}"))?
+                {
+                    TmuxKillOutcome::Killed | TmuxKillOutcome::NoTarget => {}
+                    other => {
+                        bail!("could not remove the dead tmux session `{mux_name}`: {other:?}")
+                    }
+                }
+                self.launch_new(&snapshot, pin, runner, socket, &argv)
+            }
             Some(PinBinding::StaleMux { mux }) => {
                 println!(
                     "pin `{}` mux `{}` is live but has no `{}` session; relaunching via send-keys",
@@ -809,31 +854,67 @@ impl PinLaunchArgs {
                         pin.id
                     );
                 }
-                // ADR 0094: a worktree-backed pin realizes its worktree
-                // here — resolve or create it and launch there instead
-                // of the repo anchor.
-                let cwd = realize_worktree_cwd(pin)?;
-                // ADR 0058: consult the
-                // per-pin sidecar to splice in resume_argv when a
-                // prior session is known and still reachable.
-                // Falls back to the default argv on every honest
-                // failure path (no sidecar, session missing, fork,
-                // harness without resume CLI).
-                let effective_argv = resolve_resume_argv(&snapshot, pin, &cwd, &argv)
-                    .unwrap_or_else(|| argv.clone());
-                let outcome = runner
-                    .new_session(socket, mux_name, &cwd, &effective_argv)
-                    .map_err(|err| anyhow!("tmux new-session failed: {err}"))?;
-                report_new_session(outcome, mux_name)?;
-                if self.no_attach {
-                    let attach_cmd = format_attach_command(socket, mux_name);
-                    println!("spawned `{mux_name}` (detached); attach with: {attach_cmd}");
-                    return Ok(());
-                }
-                attach_and_report(runner, socket, mux_name)?;
-                Ok(())
+                self.launch_new(&snapshot, pin, runner, socket, &argv)
             }
         }
+    }
+
+    /// Create the pin's tmux session and attach (or print the attach
+    /// command under `--no-attach`).
+    fn launch_new(
+        &self,
+        snapshot: &GraphSnapshot,
+        pin: &crate::model::PinCandidate,
+        runner: &dyn MuxBackend,
+        socket: Option<&str>,
+        argv: &[std::ffi::OsString],
+    ) -> Result<()> {
+        let mux_name = pin.mux.name.as_str();
+        // ADR 0094: a worktree-backed pin realizes its worktree
+        // here — resolve or create it and launch there instead
+        // of the repo anchor.
+        let cwd = realize_worktree_cwd(pin)?;
+        // ADR 0058: consult the per-pin sidecar to splice in
+        // resume_argv when a prior session is known and still
+        // reachable. `None` on every honest failure path (no
+        // sidecar, session missing, fork, harness without resume
+        // CLI) launches fresh.
+        let resume = resolve_resume_argv(snapshot, pin, &cwd, argv);
+        // ADR 0103: a resume the harness rejects at startup dies in
+        // its pane; fall back to a fresh launch and drop the sidecar
+        // so the next launch doesn't retry it.
+        let spawned = spawn_watched(
+            runner,
+            socket,
+            mux_name,
+            &cwd,
+            argv,
+            resume.as_deref(),
+            WatchWindows::default(),
+        )?;
+        if let (Spawned::FreshAfterFailedResume(dead), Some(resume)) = (&spawned, &resume) {
+            eprintln!(
+                "conspectus: pin `{}`: {}",
+                pin.id,
+                resume_fallback_note(resume, dead)
+            );
+            if !dead.output.trim().is_empty() {
+                eprintln!("--- resume pane output ---\n{}", dead.output);
+            }
+            let cache = crate::pin_bindings::PinBindingsCache::from_env();
+            if let Err(err) = crate::pin_bindings::delete(&cache, &pin.id) {
+                eprintln!(
+                    "conspectus: pin `{}`: could not clear resume sidecar ({err})",
+                    pin.id
+                );
+            }
+        }
+        if self.no_attach {
+            let attach_cmd = format_attach_command(socket, mux_name);
+            println!("spawned `{mux_name}` (detached); attach with: {attach_cmd}");
+            return Ok(());
+        }
+        attach_and_report(runner, socket, mux_name)
     }
 }
 
@@ -1280,8 +1361,23 @@ fn format_pin_diagnostic(diagnostic: &crate::model::Diagnostic) -> String {
             expected_mux_native_id,
             ..
         } => format!("unbound (no live mux matching `{expected_mux_native_id}`)"),
-        Diagnostic::PinStaleMux { mux, .. } => {
-            format!("stale_mux (mux `{}` has no live harness)", mux.native_id)
+        Diagnostic::PinStaleMux {
+            mux,
+            claimed_elsewhere,
+            ..
+        } => {
+            let mut text = format!(
+                "stale_mux (mux `{}` has no attributed harness session",
+                mux.native_id
+            );
+            for claim in claimed_elsewhere {
+                text.push_str(&format!(
+                    "; session `{}` matched but is bound to pin `{}`",
+                    claim.session.session_key, claim.claimed_by_pin
+                ));
+            }
+            text.push(')');
+            text
         }
         Diagnostic::PinAmbiguous {
             chosen, competing, ..

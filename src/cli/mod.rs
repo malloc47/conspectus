@@ -603,6 +603,9 @@ pub(super) fn resolve_alias_store(
 mod pin;
 use pin::PinArgs;
 
+// ADR 0103: confirm a launched harness survived its first moments.
+mod launch_watch;
+
 // ADR 0095, ADR 0096: `conspectus mux new` / `mux launch`.
 mod mux;
 use mux::MuxArgs;

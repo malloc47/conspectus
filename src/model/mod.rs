@@ -1847,10 +1847,16 @@ pub enum Diagnostic {
         last_session: Option<PinLastSession>,
     },
     /// ADR 0057. Mux exists but no harness session matching
-    /// `pin.harness` is attributed to it.
+    /// `pin.harness` is attributed to it. Under ADR 0102 a session
+    /// realizes at most one pin, so evidence for a session that a
+    /// stronger-evidenced pin already claimed doesn't count here;
+    /// `claimed_elsewhere` lists those sessions and the pins that
+    /// took them, so the operator can see why the mux reads stale.
     PinStaleMux {
         pin_id: String,
         mux: MuxSessionId,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        claimed_elsewhere: Vec<PinSessionClaim>,
     },
     /// ADR 0057. Multiple harness sessions are attributed to the
     /// bound mux for this pin's harness. The resolver picks
@@ -1890,6 +1896,27 @@ pub enum Diagnostic {
 pub struct PinLastSession {
     pub session_id: String,
     pub observed_epoch: i64,
+}
+
+/// ADR 0102: a session a pin's mux had evidence for, but which a
+/// different pin bound first on stronger evidence. Carried on
+/// [`Diagnostic::PinStaleMux`].
+#[derive(
+    Clone,
+    Debug,
+    Eq,
+    PartialEq,
+    Ord,
+    PartialOrd,
+    Serialize,
+    Deserialize,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+)]
+pub struct PinSessionClaim {
+    pub session: AgentSessionId,
+    pub claimed_by_pin: String,
 }
 
 #[derive(

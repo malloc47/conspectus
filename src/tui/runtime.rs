@@ -54,10 +54,17 @@ use pin_store::*;
 use worktree_exec::*;
 
 pub(super) use overlay_keys::{
-    handle_controls_overlay_key, handle_help_overlay_key, handle_search_overlay_key,
+    handle_controls_overlay_key, handle_help_overlay_key, handle_messages_overlay_key,
+    handle_search_overlay_key,
 };
 
-type DiscoveryResult = Result<crate::model::GraphSnapshot>;
+/// What a background discovery worker sends back. `warning` carries a
+/// problem the worker worked around, such as a failed daemon nudge
+/// that it answered with a local rebuild.
+struct DiscoveryResult {
+    snapshot: Result<crate::model::GraphSnapshot>,
+    warning: Option<String>,
+}
 
 /// Mode-specific behavior for the shared [`run_loop`] driver
 /// (ADR 0085 contract 5). Each mode owns its
@@ -177,12 +184,15 @@ impl LoopMode for LiveMode {
     fn drain(&mut self, app: &mut App, config: &RunConfig) -> Result<()> {
         // Drain completed background discovery results without
         // blocking. Only the most recent result wins.
-        while let Ok(result) = self.result_rx.try_recv() {
+        while let Ok(DiscoveryResult { snapshot, warning }) = self.result_rx.try_recv() {
             self.pending_refresh = false;
             app.update(Msg::InFlightFinish(
                 crate::tui::app::InFlightKind::Discovery,
             ));
-            match result {
+            if let Some(warning) = warning {
+                app.report(crate::tui::messages::LogEntry::warning(warning));
+            }
+            match snapshot {
                 Ok(snapshot) => {
                     // Build the tree against `App`'s current
                     // projection state (ADR 0085 contract 4). If
@@ -207,9 +217,7 @@ impl LoopMode for LiveMode {
                     populate_provider_status(app, &cfg_clone);
                 }
                 Err(err) => {
-                    app.update(Msg::SetRefreshFailure(format!(
-                        "last refresh failed; {err}"
-                    )));
+                    report_refresh_failure(app, &err);
                 }
             }
         }
@@ -239,7 +247,9 @@ impl LoopMode for LiveMode {
                 if !self.pending_refresh {
                     self.pending_refresh = true;
                     self.last_refresh = Instant::now();
-                    spawn_tracked_discovery(app, &self.result_tx);
+                    // An explicit refresh asks for current state, not
+                    // the daemon's last tick.
+                    spawn_tracked_discovery_with(app, &self.result_tx, DaemonNudge::LiveClasses);
                 }
             }
             Some(Action::Attach) => {
@@ -322,6 +332,8 @@ impl LoopMode for LiveMode {
                 app.open_help_overlay();
             }
             Some(Action::HelpOverlayKey(key)) => handle_help_overlay_key(app, key),
+            Some(Action::OpenMessages) => app.open_messages_overlay(),
+            Some(Action::MessagesOverlayKey(key)) => handle_messages_overlay_key(app, key),
             Some(Action::OpenValueModal) => app.open_value_modal_for_cursor(),
             Some(Action::ValueModalKey(key)) => handle_value_modal_key(app, key),
             Some(Action::ViewerOverlayKey(key)) => handle_viewer_overlay_key(app, key),
@@ -377,6 +389,8 @@ impl LoopMode for StaticMode {
             Some(Action::Msg(msg)) => dispatch(app, *msg),
             Some(Action::OpenHelp) => app.open_help_overlay(),
             Some(Action::HelpOverlayKey(key)) => handle_help_overlay_key(app, key),
+            Some(Action::OpenMessages) => app.open_messages_overlay(),
+            Some(Action::MessagesOverlayKey(key)) => handle_messages_overlay_key(app, key),
             Some(Action::OpenValueModal) => app.open_value_modal_for_cursor(),
             Some(Action::ValueModalKey(key)) => handle_value_modal_key(app, key),
             Some(Action::ViewerOverlayKey(key)) => handle_viewer_overlay_key(app, key),
@@ -565,6 +579,9 @@ fn overlay_key_from_event(app: &App, event: &Event) -> Option<Action> {
     }
     if app.value_modal().is_some() {
         return Some(Action::ValueModalKey(key));
+    }
+    if app.messages_overlay().is_some() {
+        return Some(Action::MessagesOverlayKey(key));
     }
     if app.rename_overlay().is_some() {
         return Some(Action::RenameOverlayKey(key));
@@ -787,13 +804,83 @@ fn set_static_data(
 /// Spawn a background thread that runs discovery and sends the resolved
 /// snapshot through `tx`. Row-tree building stays on the main thread so
 /// it can use the app's current view state.
-fn spawn_discovery_worker(config: &RunConfig, tx: &mpsc::Sender<DiscoveryResult>) {
-    let config = config.clone();
+/// Whether a refresh first asks a running daemon to rescan.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum DaemonNudge {
+    /// Take the daemon's snapshot as it is (timer refreshes).
+    None,
+    /// Rescan the mux and harness classes first; see
+    /// [`nudge_daemon_live_classes`].
+    LiveClasses,
+}
+
+fn spawn_discovery_worker(
+    config: &RunConfig,
+    tx: &mpsc::Sender<DiscoveryResult>,
+    nudge: DaemonNudge,
+) {
+    let mut config = config.clone();
     let tx = tx.clone();
     std::thread::spawn(move || {
-        let result = discover_and_resolve(&config);
-        let _ = tx.send(result);
+        let mut warning = None;
+        if nudge == DaemonNudge::LiveClasses
+            && let Err(message) = nudge_daemon_live_classes()
+        {
+            // The daemon's snapshot may be stale; rebuild locally so
+            // the operator still sees current state.
+            config.refresh = true;
+            warning = Some(message);
+        }
+        let snapshot = discover_and_resolve(&config);
+        let _ = tx.send(DiscoveryResult { snapshot, warning });
     });
+}
+
+/// Provider classes whose state changes while the operator works in
+/// tmux: sessions appear, die, get renamed, and harnesses start new
+/// transcripts. Both rescan in well under a second.
+const LIVE_CLASSES: [&str; 2] = ["mux", "harness"];
+
+/// Ask a running `conspectus serve` daemon to rescan
+/// [`LIVE_CLASSES`] now. The daemon otherwise serves its last tick,
+/// which after a tmux hand-off still shows the world from before it.
+/// No daemon is not an error (the caller's refresh runs discovery
+/// itself); a daemon that fails the refresh is.
+pub(super) fn nudge_daemon_live_classes() -> Result<(), String> {
+    use crate::server::{ClientOutcome, client_refresh};
+    for class in LIVE_CLASSES {
+        match client_refresh(Some(class)) {
+            ClientOutcome::Ok(_) => {}
+            ClientOutcome::NoDaemon => return Ok(()),
+            ClientOutcome::DaemonError { code, message } => {
+                return Err(format!(
+                    "daemon {class} refresh failed ({code}): {message}; showing a local rebuild"
+                ));
+            }
+            ClientOutcome::Transport(err) => {
+                return Err(format!(
+                    "daemon {class} refresh failed: {err:#}; showing a local rebuild"
+                ));
+            }
+        }
+    }
+    Ok(())
+}
+
+/// Refresh after Conspectus handed the terminal to tmux or changed a
+/// tmux session (attach, launch, rename): nudge the daemon, then
+/// reload. Without the nudge the reload returns the daemon's
+/// pre-hand-off snapshot.
+pub(super) fn refresh_after_mux_handoff(app: &mut App, seed: &RunConfig) {
+    match nudge_daemon_live_classes() {
+        Ok(()) => refresh(app, seed),
+        Err(message) => {
+            let mut config = app.config().clone();
+            config.refresh = true;
+            refresh_with_config(app, &config);
+            app.report(crate::tui::messages::LogEntry::warning(message));
+        }
+    }
 }
 
 /// Spawn a discovery worker + register the corresponding
@@ -801,7 +888,15 @@ fn spawn_discovery_worker(config: &RunConfig, tx: &mpsc::Sender<DiscoveryResult>
 /// spinner chip while the worker runs. The marker is
 /// cleared when `drain` receives the worker's result.
 fn spawn_tracked_discovery(app: &mut App, tx: &mpsc::Sender<DiscoveryResult>) {
-    spawn_discovery_worker(app.config(), tx);
+    spawn_tracked_discovery_with(app, tx, DaemonNudge::None);
+}
+
+fn spawn_tracked_discovery_with(
+    app: &mut App,
+    tx: &mpsc::Sender<DiscoveryResult>,
+    nudge: DaemonNudge,
+) {
+    spawn_discovery_worker(app.config(), tx, nudge);
     app.update(Msg::InFlightStart {
         kind: crate::tui::app::InFlightKind::Discovery,
         label: "Discovering".to_string(),
@@ -1442,12 +1537,19 @@ fn refresh_with_config(app: &mut App, config: &RunConfig) {
                 initial_selection_hint,
             });
         }
-        Err(err) => {
-            app.update(Msg::SetRefreshFailure(format!(
-                "last refresh failed; {err}"
-            )));
-        }
+        Err(err) => report_refresh_failure(app, &err),
     }
+}
+
+/// Mark the snapshot stale and log why (ADR 0105). The previous good
+/// snapshot stays on screen.
+fn report_refresh_failure(app: &mut App, err: &anyhow::Error) {
+    app.update(Msg::SetRefreshFailure(format!(
+        "last refresh failed; {err}"
+    )));
+    app.report(crate::tui::messages::LogEntry::error(format!(
+        "refresh failed: {err:#}"
+    )));
 }
 
 /// Populate `App::provider_status` from the run config and (in a

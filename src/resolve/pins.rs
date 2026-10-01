@@ -9,10 +9,12 @@
 //! 2. Restricts the existing mux-to-agent-session attribution
 //!    pipeline (i.e. active `LinkedToMux` candidates landing at the
 //!    bound mux) to the pin's harness.
-//! 3. Binds when exactly one harness session matches; emits
-//!    `PinAmbiguous` for >1 (binding to the highest-ranked candidate),
-//!    `PinStaleMux` for 0, and `PinUnbound` when the mux itself is
-//!    missing.
+//! 3. Assigns sessions to pins one-to-one (ADR 0102): the strongest
+//!    remaining (pin, session) claim wins, so two pins whose muxes
+//!    both carry evidence for one session can't both bind it. Emits
+//!    `PinAmbiguous` when other free sessions also matched (binding
+//!    to the highest-ranked candidate), `PinStaleMux` when none is
+//!    left, and `PinUnbound` when the mux itself is missing.
 //! 4. On a successful bind, synthesizes a `LinkedToMux` `GraphLink`
 //!    carrying the pin's `LocalPin`/`GlobalPin` provenance so the
 //!    rest of the resolver pipeline ranks pin evidence correctly,
@@ -21,21 +23,44 @@
 //! 5. Emits `PinDrift` when the bound session's first-observed cwd
 //!    diverges from the pin's declared cwd.
 //!
-//! The function mutates `snapshot.pins[i].binding`, appends to
-//! `snapshot.candidate_links`, and registers alias overlay entries.
+//! The function mutates `snapshot.pins[i].binding`, replaces the
+//! previous pass's synthesized links in `snapshot.candidate_links`,
+//! and registers alias overlay entries.
 //! Diagnostics are *returned* rather than mutated in place because
 //! [`crate::resolve::resolve_snapshot`] reassigns
 //! `snapshot.diagnostics` after `resolve_links` runs — the caller is
 //! responsible for merging.
 
-use std::collections::BTreeMap;
+use std::cmp::Ordering;
+use std::collections::{BTreeMap, BTreeSet};
 
 use crate::model::{
     AgentSessionId, Confidence, Diagnostic, Freshness, GraphLink, GraphNode, GraphSnapshot,
     LinkEndpoint, LinkState, Metadata, MuxSessionId, MuxSessionNode, NodeId, PinBinding,
-    PinCandidate, PinId, RelationKind, SourceMetadata, UnresolvedEndpoint,
+    PinCandidate, PinId, PinSessionClaim, Provenance, RelationKind, SourceMetadata,
+    UnresolvedEndpoint,
 };
 use serde_json::Value;
+
+/// Adapter label on every link this pass synthesizes. Nothing else
+/// emits it, which lets each pass drop the previous pass's output.
+const PIN_ADAPTER: &str = "pin";
+
+/// Link-id prefix of a previous pass's binding re-issued as a
+/// fallback candidate (see [`prior_binding_candidates`]).
+const PRIOR_BINDING_PREFIX: &str = "pin-prior:";
+
+/// Where a pin's mux search landed, before sessions are assigned.
+enum PinTarget<'a> {
+    /// No live mux matches the pin's `mux.native_id()`.
+    MissingMux(String),
+    /// The mux is live. `ranked` holds one link per candidate
+    /// session of the pin's harness, best evidence first.
+    Mux {
+        mux: &'a MuxSessionNode,
+        ranked: Vec<&'a GraphLink>,
+    },
+}
 
 /// Run the pin binding pass over `snapshot`. Returns the diagnostics
 /// the caller must merge into `snapshot.diagnostics` after
@@ -45,49 +70,82 @@ pub fn apply_pin_bindings(snapshot: &mut GraphSnapshot) -> Vec<Diagnostic> {
         return Vec::new();
     }
 
+    // A re-resolve (daemon hook ingest, per-class refresh) runs over a
+    // snapshot that still carries the previous pass's synthesized
+    // links. Left in place they would compete as `LocalPin`
+    // candidates and re-confirm last cycle's binding even after the
+    // underlying evidence moved, so a wrong binding could never heal.
+    // The previous binding still counts, but only as the weakest
+    // candidate: it keeps a pin bound while time-based evidence
+    // (session-file activity) wanders to a neighbouring session, and
+    // loses to any current evidence.
+    let prior_bindings = prior_binding_candidates(snapshot);
+    snapshot
+        .candidate_links
+        .retain(|link| link.source_metadata.adapter != PIN_ADAPTER);
+
     let mux_by_native_id = mux_index(&snapshot.nodes);
     let agent_session_cwd_by_id = agent_session_cwd_index(&snapshot.nodes);
-    let linked_to_mux_by_mux = active_linked_to_mux_by_mux(&snapshot.candidate_links);
+    let mut linked_to_mux_by_mux = active_linked_to_mux_by_mux(&snapshot.candidate_links);
+    for link in &prior_bindings {
+        if let Some(target) = link.target_node_id() {
+            linked_to_mux_by_mux
+                .entry(target.clone())
+                .or_default()
+                .push(link);
+        }
+    }
+
+    let targets: Vec<PinTarget<'_>> = snapshot
+        .pins
+        .iter()
+        .map(|pin| pin_target(pin, &mux_by_native_id, &linked_to_mux_by_mux))
+        .collect();
+    let (assignments, claimed_by) = assign_sessions(&targets);
 
     let mut diagnostics: Vec<Diagnostic> = Vec::new();
     let mut synthesized_links: Vec<GraphLink> = Vec::new();
     let mut alias_inserts: Vec<(NodeId, String)> = Vec::new();
     let mut binding_updates: Vec<(usize, PinBinding)> = Vec::new();
 
-    for (idx, pin) in snapshot.pins.iter().enumerate() {
+    for (idx, (pin, target)) in snapshot.pins.iter().zip(&targets).enumerate() {
         synthesized_links.push(synthesize_pin_target_link(pin, &mux_by_native_id));
-        let target_native_id = pin.mux.native_id();
-        let Some(mux) = mux_by_native_id.get(target_native_id.as_str()) else {
-            diagnostics.push(Diagnostic::PinUnbound {
-                pin_id: pin.id.clone(),
-                expected_mux_native_id: target_native_id,
-                // Populated by the post-resolve sidecar consumer
-                // (ADR 0058); the bare resolver
-                // pass stays evidence-only and never reads from
-                // the cache directly.
-                last_session: None,
-            });
-            binding_updates.push((idx, PinBinding::Unbound));
-            continue;
+        let (mux, ranked) = match target {
+            PinTarget::MissingMux(expected_mux_native_id) => {
+                diagnostics.push(Diagnostic::PinUnbound {
+                    pin_id: pin.id.clone(),
+                    expected_mux_native_id: expected_mux_native_id.clone(),
+                    // Populated by the post-resolve sidecar consumer
+                    // (ADR 0058); the bare resolver pass stays
+                    // evidence-only and never reads from the cache
+                    // directly.
+                    last_session: None,
+                });
+                binding_updates.push((idx, PinBinding::Unbound));
+                continue;
+            }
+            PinTarget::Mux { mux, ranked } => (*mux, ranked),
         };
 
-        let mux_node_id = NodeId::MuxSession(mux.id.clone());
-        let candidates: &[&GraphLink] = linked_to_mux_by_mux
-            .get(&mux_node_id)
-            .map_or(&[][..], |v| v.as_slice());
-
-        let mut harness_filtered: Vec<&GraphLink> = candidates
+        // Sessions this pin's mux had evidence for that a different
+        // pin bound first.
+        let claimed_elsewhere: Vec<PinSessionClaim> = ranked
             .iter()
-            .copied()
-            .filter(|link| {
-                matches!(&link.source, NodeId::AgentSession(id) if id.harness_key == pin.harness)
+            .filter_map(|link| {
+                let session = link_session(link)?;
+                let owner = *claimed_by.get(session)?;
+                (owner != idx).then(|| PinSessionClaim {
+                    session: session.clone(),
+                    claimed_by_pin: snapshot.pins[owner].id.clone(),
+                })
             })
             .collect();
 
-        if harness_filtered.is_empty() {
+        let Some(&chosen_pos) = assignments.get(&idx) else {
             diagnostics.push(Diagnostic::PinStaleMux {
                 pin_id: pin.id.clone(),
                 mux: mux.id.clone(),
+                claimed_elsewhere,
             });
             binding_updates.push((
                 idx,
@@ -96,35 +154,25 @@ pub fn apply_pin_bindings(snapshot: &mut GraphSnapshot) -> Vec<Diagnostic> {
                 },
             ));
             continue;
-        }
-
-        // Deterministic ranking: provenance precedence (high first),
-        // then freshness (Fresh < Stale < Unknown by enum order — Fresh
-        // is most preferred), then source NodeId for a stable tiebreak.
-        harness_filtered.sort_by(|a, b| {
-            b.provenance
-                .precedence()
-                .cmp(&a.provenance.precedence())
-                .then_with(|| freshness_rank(a.freshness).cmp(&freshness_rank(b.freshness)))
-                .then_with(|| a.source.cmp(&b.source))
-        });
-
-        let chosen_link = harness_filtered[0];
-        let NodeId::AgentSession(chosen_session_id) = chosen_link.source.clone() else {
-            // Defensive: filter above guarantees this, but keep the
-            // resolver total.
+        };
+        let Some(chosen_session_id) = link_session(ranked[chosen_pos]).cloned() else {
+            // Defensive: `pin_target` only keeps agent-session
+            // sources, but keep the resolver total.
             binding_updates.push((idx, PinBinding::Unbound));
             continue;
         };
 
-        if harness_filtered.len() > 1 {
-            let competing: Vec<AgentSessionId> = harness_filtered[1..]
-                .iter()
-                .filter_map(|link| match &link.source {
-                    NodeId::AgentSession(id) => Some(id.clone()),
-                    _ => None,
-                })
-                .collect();
+        // Runners-up are the other sessions still free for this pin;
+        // sessions bound to other pins are not real competition.
+        let competing: Vec<AgentSessionId> = ranked
+            .iter()
+            .enumerate()
+            .filter(|(pos, link)| *pos != chosen_pos && !is_prior_binding(link))
+            .filter_map(|(_, link)| link_session(link))
+            .filter(|session| !claimed_by.contains_key(*session))
+            .cloned()
+            .collect();
+        if !competing.is_empty() {
             diagnostics.push(Diagnostic::PinAmbiguous {
                 pin_id: pin.id.clone(),
                 chosen: chosen_session_id.clone(),
@@ -161,17 +209,7 @@ pub fn apply_pin_bindings(snapshot: &mut GraphSnapshot) -> Vec<Diagnostic> {
         ));
     }
 
-    for link in synthesized_links {
-        // Idempotency: if the exact same synthesized link already
-        // exists (re-resolve of an already-resolved snapshot), skip.
-        if !snapshot
-            .candidate_links
-            .iter()
-            .any(|existing| existing.id == link.id)
-        {
-            snapshot.candidate_links.push(link);
-        }
-    }
+    snapshot.candidate_links.extend(synthesized_links);
     for (node_id, display_name) in alias_inserts {
         snapshot.aliases.insert_if_absent(node_id, display_name);
     }
@@ -180,6 +218,184 @@ pub fn apply_pin_bindings(snapshot: &mut GraphSnapshot) -> Vec<Diagnostic> {
     }
 
     diagnostics
+}
+
+/// The previous pass's pin → session bindings, re-issued as
+/// `Cached`-provenance candidates for this pass. A binding is dropped
+/// when its session is gone, or when the session shows no activity
+/// since the mux was (re)created: a mux recreated under the same name
+/// must not inherit the old incarnation's session.
+fn prior_binding_candidates(snapshot: &GraphSnapshot) -> Vec<GraphLink> {
+    let session_activity: BTreeMap<&AgentSessionId, Option<i64>> = snapshot
+        .nodes
+        .iter()
+        .filter_map(|node| match node {
+            GraphNode::AgentSession(session) => Some((&session.id, session.last_active_epoch)),
+            _ => None,
+        })
+        .collect();
+    let mux_created: BTreeMap<&MuxSessionId, Option<i64>> = snapshot
+        .nodes
+        .iter()
+        .filter_map(|node| match node {
+            GraphNode::MuxSession(mux) => Some((&mux.id, mux.created_epoch)),
+            _ => None,
+        })
+        .collect();
+    snapshot
+        .candidate_links
+        .iter()
+        .filter(|link| {
+            link.source_metadata.adapter == PIN_ADAPTER
+                && link.relation == RelationKind::LinkedToMux
+                && matches!(link.state, LinkState::Active)
+        })
+        .filter(|link| {
+            let (Some(session), Some(NodeId::MuxSession(mux))) =
+                (link_session(link), link.target_node_id())
+            else {
+                return false;
+            };
+            let Some(&last_active) = session_activity.get(session) else {
+                return false;
+            };
+            match (last_active, mux_created.get(mux).copied().flatten()) {
+                (Some(active), Some(created)) => active >= created,
+                _ => true,
+            }
+        })
+        .map(|link| {
+            let mut prior = link.clone();
+            prior.id = format!("{PRIOR_BINDING_PREFIX}{}", link.id);
+            prior.provenance = Provenance::Cached;
+            prior.freshness = Freshness::Stale;
+            prior.source_metadata.evidence = Some("previous pin binding".to_string());
+            prior
+        })
+        .collect()
+}
+
+/// Find the pin's live mux and rank the candidate sessions of the
+/// pin's harness attributed to it. Ranking is provenance first, then
+/// freshness, then the resolver's own session ↔ mux evidence order,
+/// so a hook-reported binding beats an activity-time heuristic the
+/// same way it does in `resolve_links`. Only the best link per
+/// session is kept.
+fn pin_target<'a>(
+    pin: &PinCandidate,
+    mux_by_native_id: &BTreeMap<String, &'a MuxSessionNode>,
+    linked_to_mux_by_mux: &BTreeMap<NodeId, Vec<&'a GraphLink>>,
+) -> PinTarget<'a> {
+    let target_native_id = pin.mux.native_id();
+    let Some(mux) = mux_by_native_id.get(target_native_id.as_str()).copied() else {
+        return PinTarget::MissingMux(target_native_id);
+    };
+    let mut ranked: Vec<&GraphLink> = linked_to_mux_by_mux
+        .get(&NodeId::MuxSession(mux.id.clone()))
+        .map_or(&[][..], Vec::as_slice)
+        .iter()
+        .copied()
+        .filter(|link| link_session(link).is_some_and(|id| id.harness_key == pin.harness))
+        .collect();
+    ranked.sort_by(|a, b| compare_pin_candidates(a, b));
+    let mut seen: BTreeSet<&AgentSessionId> = BTreeSet::new();
+    ranked.retain(|link| link_session(link).is_some_and(|session| seen.insert(session)));
+    PinTarget::Mux { mux, ranked }
+}
+
+fn compare_pin_candidates(a: &GraphLink, b: &GraphLink) -> Ordering {
+    b.provenance
+        .precedence()
+        .cmp(&a.provenance.precedence())
+        .then_with(|| freshness_rank(a.freshness).cmp(&freshness_rank(b.freshness)))
+        .then_with(|| super::compare_session_mux(a, b))
+}
+
+/// ADR 0102: a session realizes at most one pin. Assign greedily
+/// across all pins: repeatedly take the strongest remaining
+/// (pin, free session) claim, so when two pins' muxes both have
+/// evidence for one session, the pin with the better evidence keeps
+/// it and the other falls back to its next candidate, if any.
+///
+/// Returns each assigned pin's position in its `ranked` list, and the
+/// owning pin index for every claimed session.
+fn assign_sessions<'a>(
+    targets: &[PinTarget<'a>],
+) -> (BTreeMap<usize, usize>, BTreeMap<&'a AgentSessionId, usize>) {
+    let mut assignments: BTreeMap<usize, usize> = BTreeMap::new();
+    let mut claimed_by: BTreeMap<&'a AgentSessionId, usize> = BTreeMap::new();
+    loop {
+        let mut best: Option<(usize, usize, &'a GraphLink)> = None;
+        for (idx, target) in targets.iter().enumerate() {
+            if assignments.contains_key(&idx) {
+                continue;
+            }
+            let PinTarget::Mux { ranked, .. } = target else {
+                continue;
+            };
+            let free = ranked.iter().enumerate().find(|(_, link)| {
+                link_session(link).is_some_and(|session| !claimed_by.contains_key(session))
+            });
+            let Some((pos, link)) = free else {
+                continue;
+            };
+            // Strict `Less` keeps the earlier pin on a full tie.
+            let better = best.is_none_or(|(_, _, current)| {
+                compare_pin_candidates(link, current) == Ordering::Less
+            });
+            if better {
+                best = Some((idx, pos, link));
+            }
+        }
+        let Some((idx, pos, link)) = best else {
+            break;
+        };
+        if let Some(session) = link_session(link) {
+            claimed_by.insert(session, idx);
+        }
+        assignments.insert(idx, pos);
+    }
+    (assignments, claimed_by)
+}
+
+fn is_prior_binding(link: &GraphLink) -> bool {
+    link.id.starts_with(PRIOR_BINDING_PREFIX)
+}
+
+fn link_session(link: &GraphLink) -> Option<&AgentSessionId> {
+    match &link.source {
+        NodeId::AgentSession(id) => Some(id),
+        _ => None,
+    }
+}
+
+/// Whether `mux` hosts a live process of `harness` according to the
+/// pane-process evidence (`MuxContainsProcess` → `RuntimeProcess`).
+///
+/// A `StaleMux` pin can still have its harness running: the pane
+/// process is visible but no transcript could be tied to it, or the
+/// only matching session went to another pin (ADR 0102). Pin launch
+/// uses this to attach instead of typing the launch argv into a live
+/// agent pane (ADR 0028).
+pub fn mux_hosts_harness(snapshot: &GraphSnapshot, mux: &MuxSessionId, harness: &str) -> bool {
+    let mux_node = NodeId::MuxSession(mux.clone());
+    let processes: BTreeSet<&NodeId> = snapshot
+        .candidate_links
+        .iter()
+        .filter(|link| {
+            link.relation == RelationKind::MuxContainsProcess
+                && matches!(link.state, LinkState::Active)
+                && link.source == mux_node
+        })
+        .filter_map(GraphLink::target_node_id)
+        .collect();
+    snapshot.nodes.iter().any(|node| match node {
+        GraphNode::RuntimeProcess(process) => {
+            process.harness_key.as_deref() == Some(harness)
+                && processes.contains(&NodeId::RuntimeProcess(process.id.clone()))
+        }
+        _ => false,
+    })
 }
 
 /// Key muxes by the prefixed encoding `pin.mux.native_id()` produces
@@ -265,7 +481,7 @@ fn synthesize_pin_link(
         confidence: Confidence::High,
         freshness: Freshness::Fresh,
         source_metadata: SourceMetadata {
-            adapter: "pin".to_string(),
+            adapter: PIN_ADAPTER.to_string(),
             evidence: Some(format!("synthesized from pin `{}`", pin.id)),
             fields,
             freshness_epoch: None,
@@ -312,7 +528,7 @@ fn synthesize_pin_target_link(
         confidence: Confidence::High,
         freshness: Freshness::Fresh,
         source_metadata: SourceMetadata {
-            adapter: "pin".to_string(),
+            adapter: PIN_ADAPTER.to_string(),
             evidence: Some(format!("pin `{}` targets mux `{}`", pin.id, pin.mux.name)),
             fields,
             freshness_epoch: None,
@@ -337,7 +553,7 @@ fn synthesize_pin_realized_by_link(pin: &PinCandidate, session: &AgentSessionId)
         confidence: Confidence::High,
         freshness: Freshness::Fresh,
         source_metadata: SourceMetadata {
-            adapter: "pin".to_string(),
+            adapter: PIN_ADAPTER.to_string(),
             evidence: Some(format!("pin `{}` is realized by a live session", pin.id)),
             fields: pin_link_metadata(pin),
             freshness_epoch: None,

@@ -1,6 +1,7 @@
 //! Executors that write pin stores (ADR 0057).
 
 use super::*;
+use crate::tui::messages::LogEntry;
 
 pub(super) fn execute_pin_remove(
     app: &mut App,
@@ -23,10 +24,10 @@ pub(super) fn execute_pin_remove(
                     outcome.path.display()
                 )
             };
-            let _ = app.update(Msg::SetStatus(Some(message)));
+            app.report(LogEntry::info(message));
         }
         Err(err) => {
-            let _ = app.update(Msg::SetStatus(Some(format!("pin remove failed: {err}"))));
+            app.report(LogEntry::error(format!("pin remove failed: {err}")));
         }
     }
 }
@@ -56,10 +57,10 @@ pub(super) fn execute_pin_bind(app: &mut App, request: crate::tui::widgets::pins
                 request.session_key,
                 outcome.path.display()
             );
-            let _ = app.update(Msg::SetStatus(Some(message)));
+            app.report(LogEntry::info(message));
         }
         Err(err) => {
-            let _ = app.update(Msg::SetStatus(Some(format!("pin bind failed: {err}"))));
+            app.report(LogEntry::error(format!("pin bind failed: {err}")));
         }
     }
 }
@@ -104,10 +105,10 @@ pub(super) fn execute_pin_create(
             if !selected {
                 message.push_str("; no visible row matched the new pin");
             }
-            let _ = app.update(Msg::SetStatus(Some(message)));
+            app.report(LogEntry::info(message));
         }
         Err(err) => {
-            let _ = app.update(Msg::SetStatus(Some(format!("pin create failed: {err}"))));
+            app.report(LogEntry::error(format!("pin create failed: {err}")));
         }
     }
 }
@@ -122,14 +123,14 @@ pub(super) fn execute_pin_edit(app: &mut App, request: crate::tui::widgets::pins
             };
             let config = app.config().clone();
             refresh_after_pin_mutation(app, &config);
-            let _ = app.update(Msg::SetStatus(Some(format!(
+            app.report(LogEntry::info(format!(
                 "{verb} pin `{}` in {}",
                 request.id,
                 outcome.path.display()
-            ))));
+            )));
         }
         Err(err) => {
-            let _ = app.update(Msg::SetStatus(Some(format!("pin edit failed: {err}"))));
+            app.report(LogEntry::error(format!("pin edit failed: {err}")));
         }
     }
 }

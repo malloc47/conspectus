@@ -182,8 +182,10 @@ pub(super) fn header_freshness(app: &App) -> String {
 pub(super) fn draw_status_bar(app: &App, frame: &mut Frame<'_>, area: Rect) {
     let theme = app.theme();
     if let Some(message) = app.status_message() {
-        let widget = Paragraph::new(message.to_string()).style(Style::default().fg(theme.warning));
-        frame.render_widget(widget, area);
+        let mut spans = Vec::new();
+        push_unseen_messages_chip(app, theme, &mut spans);
+        spans.push(span!(Style::default().fg(theme.warning); "{message}"));
+        frame.render_widget(Paragraph::new(Line::from(spans)), area);
         return;
     }
 
@@ -196,11 +198,13 @@ pub(super) fn draw_status_bar(app: &App, frame: &mut Frame<'_>, area: Rect) {
     };
     let settings = render_view_state_chips(app);
 
-    let mut spans = vec![
+    let mut spans = Vec::new();
+    push_unseen_messages_chip(app, theme, &mut spans);
+    spans.extend([
         span!(theme.placeholder; "{scope} "),
         span!(Style::default().fg(theme.cwd_mark); "{settings}"),
         span!(theme.placeholder; " · {hints}"),
-    ];
+    ]);
 
     push_in_flight_chips(app, theme, &mut spans);
 
@@ -215,6 +219,20 @@ pub(super) fn draw_status_bar(app: &App, frame: &mut Frame<'_>, area: Rect) {
 
     let widget = Paragraph::new(Line::from(spans));
     frame.render_widget(widget, area);
+}
+
+/// ADR 0105: warnings and errors the operator hasn't opened the
+/// Messages overlay for stay flagged after their status message is
+/// cleared. Leads the bar so long hints can't push it off screen.
+pub(super) fn push_unseen_messages_chip(app: &App, theme: &Theme, spans: &mut Vec<Span<'static>>) {
+    let unseen = app.messages().unseen();
+    if unseen == 0 {
+        return;
+    }
+    spans.push(span!(
+        Style::default().fg(theme.error).add_modifier(Modifier::BOLD);
+        "⚠ {unseen} · ! messages  "
+    ));
 }
 
 /// Braille-dot spinner frames (~120ms per frame at cadence

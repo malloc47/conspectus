@@ -1,6 +1,7 @@
 //! Subprocess launches: pin launch, mux new / launch, tmux attach, and the external viewer.
 
 use super::*;
+use crate::tui::messages::{CommandRecord, LogEntry, LogTarget};
 
 /// Handle `Enter` on a pin row (ADR 0057). Suspends
 /// the TUI, re-execs into `conspectus pin launch <id>` as a
@@ -66,38 +67,34 @@ pub(super) fn execute_launch_pin(
     // either way; passing the extra scan-root is safe there too.
     let pin_scan_root = resolve_pin_scan_root(app, pin_id);
     let args = pin_launch_argv(pin_id, pin_scan_root.as_deref());
-    ratatui::restore();
-    let output = std::process::Command::new(
-        std::env::current_exe().unwrap_or_else(|_| std::path::PathBuf::from("conspectus")),
-    )
-    .args(&args)
-    .output();
-    *terminal = ratatui::init();
-    let _ = terminal.clear();
+    let (record, output) = run_conspectus_subprocess(terminal, &args);
 
-    refresh(app, config);
+    refresh_after_mux_handoff(app, config);
+    let log_target = LogTarget::Pin(pin_id.to_string());
     let launch = summarize_pin_launch_output(pin_id, output);
-    app.update(Msg::SetStatus(Some(launch.message.clone())));
+    app.report(launch_entry(&launch, record, log_target.clone()));
     if !launch.success {
-        app.post_toast(launch.message);
         return;
     }
 
     let Some(target) = target else {
-        app.update(Msg::SetStatus(Some(format!(
-            "{}; attach target unavailable after refresh",
-            launch.message
-        ))));
+        app.report(
+            LogEntry::warning(format!(
+                "pin `{pin_id}` launched; attach target unavailable after refresh"
+            ))
+            .with_target(log_target),
+        );
         return;
     };
 
     if let Some(reason) = tmux_session_unavailable(target) {
-        let message = format!(
-            "pin `{pin_id}` launched but tmux session `{}` is not attachable: {reason}",
-            target.mux_name
+        app.report(
+            LogEntry::error(format!(
+                "pin `{pin_id}` launched but tmux session `{}` is not attachable: {reason}",
+                target.mux_name
+            ))
+            .with_target(log_target),
         );
-        app.update(Msg::SetStatus(Some(message.clone())));
-        app.post_toast(message);
         return;
     }
 
@@ -108,12 +105,87 @@ pub(super) fn execute_launch_pin(
     };
     let outcome =
         run_tmux_attach_with_socket(terminal, &attach_target, target.mux_socket.as_deref());
-    refresh(app, config);
-    let message = match outcome {
-        AttachOutcome::Detached => format!("pin `{pin_id}` launch attached/detached"),
-        AttachOutcome::Failed(reason) => format!("pin `{pin_id}` launch attach failed: {reason}"),
+    refresh_after_mux_handoff(app, config);
+    app.report(attach_return_entry(
+        &format!("pin `{pin_id}`"),
+        outcome,
+        log_target,
+        &attach_target.native_id,
+        target.mux_socket.as_deref(),
+    ));
+}
+
+/// Run `conspectus <args>` with the TUI suspended and capture its
+/// full output, both for the caller's summary and as the command
+/// record of the message log entry (ADR 0105).
+fn run_conspectus_subprocess(
+    terminal: &mut DefaultTerminal,
+    args: &[String],
+) -> (CommandRecord, std::io::Result<Output>) {
+    let program =
+        std::env::current_exe().unwrap_or_else(|_| std::path::PathBuf::from("conspectus"));
+    ratatui::restore();
+    let output = std::process::Command::new(&program).args(args).output();
+    *terminal = ratatui::init();
+    let _ = terminal.clear();
+
+    let mut argv = vec![program.display().to_string()];
+    argv.extend(args.iter().cloned());
+    let record = match &output {
+        Ok(output) => CommandRecord::from_output(argv, output),
+        Err(err) => CommandRecord {
+            argv,
+            exit_code: None,
+            stdout: String::new(),
+            stderr: format!("failed to spawn: {err}"),
+        },
     };
-    app.update(Msg::SetStatus(Some(message)));
+    (record, output)
+}
+
+/// Log entry for a launch subprocess. A launch that succeeded but
+/// wrote to stderr (a resume that fell back to a fresh launch, a
+/// cleared sidecar) is a warning, so the note isn't lost.
+pub(super) fn launch_entry(
+    summary: &PinLaunchSummary,
+    record: CommandRecord,
+    target: LogTarget,
+) -> LogEntry {
+    let entry = if !summary.success {
+        LogEntry::error(&summary.message)
+    } else if record.stderr.trim().is_empty() {
+        LogEntry::info(&summary.message)
+    } else {
+        LogEntry::warning(&summary.message)
+    };
+    entry.with_target(target).with_command(record)
+}
+
+/// Log entry for an attach that returned. When the pane is now dead,
+/// the process inside exited non-zero while attached or after the
+/// launch watch (ADR 0103), and its output is the entry's detail.
+pub(super) fn attach_return_entry(
+    what: &str,
+    outcome: AttachOutcome,
+    target: LogTarget,
+    native_id: &str,
+    socket: Option<&str>,
+) -> LogEntry {
+    if let AttachOutcome::Failed(reason) = outcome {
+        return LogEntry::error(format!("{what} attach failed: {reason}")).with_target(target);
+    }
+    let tmux = crate::discovery::tmux::SystemTmux::new();
+    match tmux.pane_status(socket, native_id) {
+        Ok(crate::discovery::tmux::TmuxPaneStatus::Dead { status }) => {
+            let status = status.map_or_else(String::new, |code| format!(" with status {code}"));
+            LogEntry::error(format!("{what}: process in `{native_id}` exited{status}"))
+                .with_target(target)
+                .with_detail(crate::discovery::tmux::dead_pane_output(
+                    &tmux, socket, native_id,
+                ))
+        }
+        _ => LogEntry::info(format!("{what} attached/detached")).with_target(target),
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -185,35 +257,30 @@ pub(super) fn execute_mux_new(
     cwd: &str,
 ) {
     let args = mux_new_argv(name, cwd);
-    ratatui::restore();
-    let output = std::process::Command::new(
-        std::env::current_exe().unwrap_or_else(|_| std::path::PathBuf::from("conspectus")),
-    )
-    .args(&args)
-    .output();
-    *terminal = ratatui::init();
-    let _ = terminal.clear();
+    let (record, output) = run_conspectus_subprocess(terminal, &args);
 
-    refresh(app, config);
+    refresh_after_mux_handoff(app, config);
+    let mux = MuxSessionId::new(format!("tmux:{name}"));
     let launch = summarize_mux_new_output(name, output);
-    app.update(Msg::SetStatus(Some(launch.message.clone())));
+    app.report(launch_entry(&launch, record, LogTarget::Mux(mux.clone())));
     if !launch.success {
-        app.post_toast(launch.message);
         return;
     }
 
     let attach_target = AttachTarget {
-        mux: MuxSessionId::new(format!("tmux:{name}")),
+        mux: mux.clone(),
         backend: "tmux".to_string(),
         native_id: name.to_string(),
     };
     let outcome = run_tmux_attach(terminal, &attach_target);
-    refresh(app, config);
-    let message = match outcome {
-        AttachOutcome::Detached => format!("mux `{name}` attached/detached"),
-        AttachOutcome::Failed(reason) => format!("mux `{name}` attach failed: {reason}"),
-    };
-    app.update(Msg::SetStatus(Some(message)));
+    refresh_after_mux_handoff(app, config);
+    app.report(attach_return_entry(
+        &format!("mux `{name}`"),
+        outcome,
+        LogTarget::Mux(mux),
+        name,
+        None,
+    ));
 }
 
 pub(super) fn summarize_mux_new_output(
@@ -303,36 +370,31 @@ pub(super) fn execute_mux_launch(
 ) {
     let name = request.name.clone();
     let args = mux_launch_argv(&request);
-    ratatui::restore();
-    let output = std::process::Command::new(
-        std::env::current_exe().unwrap_or_else(|_| std::path::PathBuf::from("conspectus")),
-    )
-    .args(&args)
-    .output();
-    *terminal = ratatui::init();
-    let _ = terminal.clear();
+    let (record, output) = run_conspectus_subprocess(terminal, &args);
 
-    refresh(app, config);
+    refresh_after_mux_handoff(app, config);
+    let mux = MuxSessionId::new(format!("tmux:{name}"));
     let launch = summarize_mux_launch_output(&name, output);
-    app.update(Msg::SetStatus(Some(launch.message.clone())));
+    app.report(launch_entry(&launch, record, LogTarget::Mux(mux.clone())));
     if !launch.success {
-        app.post_toast(launch.message);
         return;
     }
 
     let attach_target = AttachTarget {
-        mux: MuxSessionId::new(format!("tmux:{name}")),
+        mux: mux.clone(),
         backend: "tmux".to_string(),
         native_id: name.clone(),
     };
     let outcome =
         run_tmux_attach_with_socket(terminal, &attach_target, request.mux_socket.as_deref());
-    refresh(app, config);
-    let message = match outcome {
-        AttachOutcome::Detached => format!("mux `{name}` launch attached/detached"),
-        AttachOutcome::Failed(reason) => format!("mux `{name}` launch attach failed: {reason}"),
-    };
-    app.update(Msg::SetStatus(Some(message)));
+    refresh_after_mux_handoff(app, config);
+    app.report(attach_return_entry(
+        &format!("mux `{name}` launch"),
+        outcome,
+        LogTarget::Mux(mux),
+        &name,
+        request.mux_socket.as_deref(),
+    ));
 }
 
 pub(super) fn summarize_mux_launch_output(

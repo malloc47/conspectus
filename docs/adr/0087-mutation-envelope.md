@@ -334,3 +334,6 @@ every new-feature ADR to cite five ADRs instead of one.
   index, category 2; extends this ADR by reference.
 - ADR 0093 (operator-initiated mux teardown) — adds `kill-session`
   (graceful-then-hard) to category 3; extends this ADR by reference.
+- ADR 0103 (launches keep failed panes) — adds `remain-on-exit failed`
+  on sessions Conspectus creates and `kill-session` of a pin's dead
+  session during launch to category 3; extends this ADR by reference.

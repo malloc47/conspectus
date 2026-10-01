@@ -76,6 +76,8 @@ Declared logical sessions, tmux session creation and teardown, and worktree stre
 | [0096](0096-ephemeral-harness-mux-launch.md) | Mux Launch — Harness in a New Mux Without a Pin | Accepted |
 | [0097](0097-launch-spec-form-primitive.md) | Shared Launch-Spec Form Primitive | Accepted |
 | [0098](0098-pin-resume-preserves-launch-argv.md) | Pin Resume Preserves the Pin's Launch Argv | Accepted |
+| [0102](0102-pin-bindings-are-one-to-one.md) | Pin Bindings Are One-To-One | Accepted |
+| [0103](0103-launches-keep-failed-panes.md) | Launches Keep Failed Panes And Confirm The Harness Started | Accepted |
 
 ## Persistence, daemon, and performance
 
@@ -99,6 +101,7 @@ The continuous server, the snapshot format, and the SQLite arc that was built an
 | [0083](0083-zero-copy-snapshot-format.md) | Zero-Copy Snapshot Format Selection | Accepted |
 | [0091](0091-serve-idle-cost-and-class-gated-mutators.md) | Serve Idle Cost And Class-Gated Mutators | Accepted |
 | [0099](0099-caller-owned-discovery-caches.md) | Caller-Owned Discovery Caches | Accepted |
+| [0104](0104-tui-rescans-live-classes-after-tmux-handoffs.md) | The TUI Rescans Live Classes After Tmux Hand-Offs | Accepted |
 
 ## CLI output and exports
 
@@ -141,6 +144,7 @@ Runtime architecture, controls, theming, detail pane, and visual language.
 | [0076](0076-scrollbar-widget-choice.md) | Scrollbar Widget Choice For Scrolled Panes | Accepted |
 | [0078](0078-tui-surface-division-of-labor.md) | TUI Surface Division Of Labor | Accepted |
 | [0085](0085-tui-mvu-architecture.md) | TUI Elm/MVU Architecture | Accepted |
+| [0105](0105-tui-message-log.md) | TUI Message Log For Operation Outcomes | Accepted |
 
 ## Transcript viewer
 

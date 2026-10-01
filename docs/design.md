@@ -543,13 +543,23 @@ declared `(harness, cwd, display_name, mux)` tuple that
   a launch parameter and a drift sanity check, not the
   discriminator — at realistic densities (the dev tree has 47+
   historical sessions at one cwd) cwd alone is too weak to
-  attribute uniquely.
+  attribute uniquely. Per ADR 0102 a session realizes at most one
+  pin: sessions are assigned across pins by the resolver's session ↔
+  mux evidence order, a pin's previous binding is kept only as the
+  weakest fallback candidate, and a pin that loses its only session
+  reads `PinStaleMux` naming the pin that holds it.
 - launches a fresh `tmux [-L <socket>] new-session -s <mux.name>
   -c <cwd> <argv>` via the `TmuxRunner` mutation surface, then hands
   the terminal off through the existing P8-010 exec-replace path.
   When the mux exists but the harness has exited (`PinStaleMux`),
   launch injects the command into the existing pane via
-  `tmux send-keys` rather than recreating the mux. Non-default tmux
+  `tmux send-keys` rather than recreating the mux. When pane-process
+  evidence shows the harness still running there, launch attaches
+  without typing anything (ADR 0102, ADR 0028). Sessions Conspectus
+  creates keep a pane that exits non-zero, and launch confirms the
+  harness survived its first moments: a resume the harness rejects
+  falls back to a fresh launch, and a fresh launch that dies reports
+  the harness's own output (ADR 0103). Non-default tmux
   sockets (`mux.socket_name = "<name>"`) launch and attach correctly in
   v1; discovery-side enumeration of non-default sockets is a
   deferred follow-up, so until that lands, non-default-socket pins
@@ -1115,6 +1125,13 @@ The one-shot CLI's resolution chain (P11-008 + P11-011a):
 
 `--refresh` bypasses (1) so the operator-typed "ignore the
 daemon, rebuild from disk" semantic is preserved.
+The TUI follows the same chain. After it hands the terminal to tmux or
+changes a tmux session (attach, pin launch, mux new/launch, rename),
+and on `r`, it first asks the daemon to rescan the `mux` and `harness`
+classes, so it never shows the daemon's pre-hand-off tick (ADR 0104).
+Operation outcomes the TUI produces go to an in-memory message log
+(`!`) with full subprocess output; unseen failures stay flagged in the
+status bar and lead the affected row's Preview (ADR 0105).
 `--no-cache` suppresses the `graph.bin` write at the end of
 (2).
 

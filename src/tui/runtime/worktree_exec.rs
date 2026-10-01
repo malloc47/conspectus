@@ -1,6 +1,7 @@
 //! Executors for worktree mutations (ADR 0092, ADR 0093).
 
 use super::*;
+use crate::tui::messages::LogEntry;
 
 /// Resolve the worktree mutation backend for a TUI-triggered create /
 /// remove, or a human-readable reason it's unavailable.
@@ -34,7 +35,7 @@ pub(super) fn execute_worktree_create(app: &mut App, repo_root: String, branch: 
     let backend = match resolve_worktree_mutation_backend() {
         Ok(backend) => backend,
         Err(reason) => {
-            app.update(Msg::SetStatus(Some(format!("worktree: {reason}"))));
+            app.report(LogEntry::warning(format!("worktree: {reason}")));
             return;
         }
     };
@@ -43,19 +44,21 @@ pub(super) fn execute_worktree_create(app: &mut App, repo_root: String, branch: 
         branch: branch.clone(),
         base: None,
     });
-    let message = match result {
+    let entry = match result {
         Ok(WorktreeMutationOutcome::Succeeded { .. }) => {
             let config = app.config().clone();
             refresh_after_pin_mutation(app, &config);
-            format!("created worktree for branch `{branch}`")
+            LogEntry::info(format!("created worktree for branch `{branch}`"))
         }
-        Ok(WorktreeMutationOutcome::Unsupported) => "worktree: backend cannot create".to_string(),
+        Ok(WorktreeMutationOutcome::Unsupported) => {
+            LogEntry::warning("worktree: backend cannot create")
+        }
         Ok(WorktreeMutationOutcome::Failed { message, .. }) => {
-            format!("worktree create failed: {message}")
+            LogEntry::error(format!("worktree create failed: {message}"))
         }
-        Err(err) => format!("worktree create failed: {err}"),
+        Err(err) => LogEntry::error(format!("worktree create failed: {err:#}")),
     };
-    app.update(Msg::SetStatus(Some(message)));
+    app.report(entry);
 }
 
 pub(super) fn execute_worktree_remove(
@@ -68,7 +71,7 @@ pub(super) fn execute_worktree_remove(
     let backend = match resolve_worktree_mutation_backend() {
         Ok(backend) => backend,
         Err(reason) => {
-            app.update(Msg::SetStatus(Some(format!("worktree: {reason}"))));
+            app.report(LogEntry::warning(format!("worktree: {reason}")));
             return;
         }
     };
@@ -77,19 +80,21 @@ pub(super) fn execute_worktree_remove(
         branch: branch.clone(),
         force,
     });
-    let message = match result {
+    let entry = match result {
         Ok(WorktreeMutationOutcome::Succeeded { .. }) => {
             let config = app.config().clone();
             refresh_after_pin_mutation(app, &config);
-            format!("removed worktree for branch `{branch}`")
+            LogEntry::info(format!("removed worktree for branch `{branch}`"))
         }
-        Ok(WorktreeMutationOutcome::Unsupported) => "worktree: backend cannot remove".to_string(),
+        Ok(WorktreeMutationOutcome::Unsupported) => {
+            LogEntry::warning("worktree: backend cannot remove")
+        }
         Ok(WorktreeMutationOutcome::Failed { message, .. }) => {
-            format!("worktree remove failed: {message}")
+            LogEntry::error(format!("worktree remove failed: {message}"))
         }
-        Err(err) => format!("worktree remove failed: {err}"),
+        Err(err) => LogEntry::error(format!("worktree remove failed: {err:#}")),
     };
-    app.update(Msg::SetStatus(Some(message)));
+    app.report(entry);
 }
 
 pub(super) fn execute_worktree_merge(app: &mut App, worktree_root: String, target: Option<String>) {
@@ -97,7 +102,7 @@ pub(super) fn execute_worktree_merge(app: &mut App, worktree_root: String, targe
     let backend = match resolve_worktree_mutation_backend() {
         Ok(backend) => backend,
         Err(reason) => {
-            app.update(Msg::SetStatus(Some(format!("worktree: {reason}"))));
+            app.report(LogEntry::warning(format!("worktree: {reason}")));
             return;
         }
     };
@@ -105,19 +110,21 @@ pub(super) fn execute_worktree_merge(app: &mut App, worktree_root: String, targe
         worktree_root: std::path::PathBuf::from(&worktree_root),
         target,
     });
-    let message = match result {
+    let entry = match result {
         Ok(WorktreeMutationOutcome::Succeeded { .. }) => {
             let config = app.config().clone();
             refresh_after_pin_mutation(app, &config);
-            "merged worktree back and removed it".to_string()
+            LogEntry::info("merged worktree back and removed it")
         }
-        Ok(WorktreeMutationOutcome::Unsupported) => "worktree: backend cannot merge".to_string(),
+        Ok(WorktreeMutationOutcome::Unsupported) => {
+            LogEntry::warning("worktree: backend cannot merge")
+        }
         Ok(WorktreeMutationOutcome::Failed { message, .. }) => {
-            format!("worktree merge failed: {message}")
+            LogEntry::error(format!("worktree merge failed: {message}"))
         }
-        Err(err) => format!("worktree merge failed: {err}"),
+        Err(err) => LogEntry::error(format!("worktree merge failed: {err:#}")),
     };
-    app.update(Msg::SetStatus(Some(message)));
+    app.report(entry);
 }
 
 pub(super) fn execute_worktree_prune(app: &mut App, repo_root: String) {
@@ -125,7 +132,7 @@ pub(super) fn execute_worktree_prune(app: &mut App, repo_root: String) {
     let backend = match resolve_worktree_mutation_backend() {
         Ok(backend) => backend,
         Err(reason) => {
-            app.update(Msg::SetStatus(Some(format!("worktree: {reason}"))));
+            app.report(LogEntry::warning(format!("worktree: {reason}")));
             return;
         }
     };
@@ -133,19 +140,21 @@ pub(super) fn execute_worktree_prune(app: &mut App, repo_root: String) {
         repo_root: std::path::PathBuf::from(&repo_root),
         dry_run: false,
     });
-    let message = match result {
+    let entry = match result {
         Ok(WorktreeMutationOutcome::Succeeded { .. }) => {
             let config = app.config().clone();
             refresh_after_pin_mutation(app, &config);
-            "pruned merged worktrees".to_string()
+            LogEntry::info("pruned merged worktrees")
         }
-        Ok(WorktreeMutationOutcome::Unsupported) => "worktree: backend cannot prune".to_string(),
+        Ok(WorktreeMutationOutcome::Unsupported) => {
+            LogEntry::warning("worktree: backend cannot prune")
+        }
         Ok(WorktreeMutationOutcome::Failed { message, .. }) => {
-            format!("worktree prune failed: {message}")
+            LogEntry::error(format!("worktree prune failed: {message}"))
         }
-        Err(err) => format!("worktree prune failed: {err}"),
+        Err(err) => LogEntry::error(format!("worktree prune failed: {err:#}")),
     };
-    app.update(Msg::SetStatus(Some(message)));
+    app.report(entry);
 }
 
 pub(super) fn execute_worktree_close_down(
@@ -179,7 +188,7 @@ pub(super) fn execute_worktree_close_down(
     let backend = match resolve_worktree_mutation_backend() {
         Ok(backend) => backend,
         Err(reason) => {
-            app.update(Msg::SetStatus(Some(format!("worktree: {reason}"))));
+            app.report(LogEntry::warning(format!("worktree: {reason}")));
             return;
         }
     };
@@ -205,7 +214,7 @@ pub(super) fn execute_worktree_close_down(
         grace,
     );
 
-    let message = match result {
+    let entry = match result {
         Ok(report) => match &report.worktree {
             WorktreeMutationOutcome::Succeeded { .. } => {
                 let config = app.config().clone();
@@ -215,21 +224,21 @@ pub(super) fn execute_worktree_close_down(
                 } else {
                     "closed"
                 };
-                format!(
+                LogEntry::info(format!(
                     "{verb} `{branch}` — ended {} session(s), dropped {} pin(s)",
                     report.teardowns.len(),
                     report.dropped_pins.len(),
-                )
+                ))
             }
-            WorktreeMutationOutcome::Unsupported => format!(
+            WorktreeMutationOutcome::Unsupported => LogEntry::warning(format!(
                 "worktree: backend cannot {}",
                 if report.landed { "merge" } else { "remove" }
-            ),
+            )),
             WorktreeMutationOutcome::Failed { message, .. } => {
-                format!("close-down failed: {message}")
+                LogEntry::error(format!("close-down failed: {message}"))
             }
         },
-        Err(err) => format!("close-down failed: {err}"),
+        Err(err) => LogEntry::error(format!("close-down failed: {err:#}")),
     };
-    app.update(Msg::SetStatus(Some(message)));
+    app.report(entry);
 }

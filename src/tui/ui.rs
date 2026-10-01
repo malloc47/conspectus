@@ -96,6 +96,7 @@ pub fn draw(app: &mut App, frame: &mut Frame<'_>) {
     draw_mux_menu(app, frame, area);
     draw_mux_launch_form(app, frame, area);
     draw_value_modal(app, frame, area);
+    draw_messages_overlay(app, frame, area);
     draw_toast(app, frame, area);
 }
 
@@ -153,6 +154,23 @@ fn draw_value_modal(app: &App, frame: &mut Frame<'_>, area: Rect) {
         return;
     };
     frame.render_widget(ValueModalWidget::new(state, app.theme()), area);
+}
+
+fn draw_messages_overlay(app: &App, frame: &mut Frame<'_>, area: Rect) {
+    use crate::tui::widgets::messages::MessagesWidget;
+
+    let Some(state) = app.messages_overlay() else {
+        return;
+    };
+    frame.render_widget(
+        MessagesWidget::new(
+            state,
+            app.messages(),
+            app.theme(),
+            crate::discovery::current_epoch(),
+        ),
+        area,
+    );
 }
 
 fn draw_help_overlay(app: &App, frame: &mut Frame<'_>, area: Rect) {

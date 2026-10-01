@@ -224,6 +224,45 @@ pub(super) fn handle_value_modal_key(app: &mut App, key: ratatui::crossterm::eve
 /// [`crate::tui::Overlay`] contract (ADR 0085 contract 3). Close /
 /// Commit outcomes pop the stack; Consumed leaves the overlay
 /// open.
+/// Dispatch a key into the open Messages overlay (ADR 0105). `y`
+/// copies the selected entry's full record here because the
+/// clipboard write is a side effect the widget doesn't own.
+pub(in crate::tui) fn handle_messages_overlay_key(
+    app: &mut App,
+    key: ratatui::crossterm::event::KeyEvent,
+) {
+    use crate::tui::{Overlay, OverlayOutcome};
+    use ratatui::crossterm::event::{KeyCode, KeyModifiers};
+    if key.code == KeyCode::Char('y') && !key.modifiers.contains(KeyModifiers::CONTROL) {
+        let text = app
+            .messages_overlay()
+            .and_then(|state| state.selected_entry(app.messages()))
+            .map(crate::tui::messages::LogEntry::full_text);
+        if let Some(text) = text {
+            match crate::tui::clipboard::copy_to_clipboard(&text) {
+                Ok(()) => app.post_toast("copied message"),
+                Err(err) => app.post_toast(format!("copy failed: {err}")),
+            }
+        }
+        return;
+    }
+    let outcome = match app.messages_overlay_mut() {
+        Some((state, log)) => state.handle(log, key),
+        None => return,
+    };
+    match outcome {
+        OverlayOutcome::Consumed => {}
+        OverlayOutcome::Close => app.close_messages_overlay(),
+        OverlayOutcome::Commit(msg) => {
+            app.close_messages_overlay();
+            dispatch(app, *msg);
+        }
+        OverlayOutcome::CommitAndStay(msg) => {
+            dispatch(app, *msg);
+        }
+    }
+}
+
 pub(in crate::tui) fn handle_help_overlay_key(
     app: &mut App,
     key: ratatui::crossterm::event::KeyEvent,

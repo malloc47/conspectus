@@ -44,7 +44,8 @@ use crate::tui::Msg;
 use crate::tui::app::App;
 use crate::tui::runtime::{
     self, Action, cycle_view, dispatch, handle_controls_overlay_key, handle_help_overlay_key,
-    handle_search_overlay_key, refresh, refresh_from_snapshot, translate,
+    handle_messages_overlay_key, handle_search_overlay_key, refresh, refresh_from_snapshot,
+    translate,
 };
 use crate::tui::{RunConfig, ui};
 
@@ -189,6 +190,9 @@ fn dispatch_event(app: &App, event: Event, viewport_height: u16) -> Option<Actio
     if app.value_modal().is_some() {
         overlay_key!(ValueModalKey);
     }
+    if app.messages_overlay().is_some() {
+        overlay_key!(MessagesOverlayKey);
+    }
     if app.help_overlay().is_some() {
         overlay_key!(HelpOverlayKey);
     }
@@ -235,6 +239,8 @@ fn apply_action(app: &mut App, config: &RunConfig, action: Action) {
         Action::OpenPins => app.open_pins_overlay(),
         Action::OpenSearch => app.open_search_overlay(),
         Action::OpenHelp => app.open_help_overlay(),
+        Action::OpenMessages => app.open_messages_overlay(),
+        Action::MessagesOverlayKey(key) => handle_messages_overlay_key(app, key),
         Action::OpenWorktreeMenu => runtime::open_worktree_menu_action(app),
         Action::OpenWorktreeCloseDown => runtime::open_worktree_close_down_action(app),
         Action::ControlsOverlayKey(key) => handle_controls_overlay_key(app, config, key),

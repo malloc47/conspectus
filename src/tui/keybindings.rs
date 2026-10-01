@@ -108,6 +108,11 @@ impl KeyMatcher {
 /// dispatcher's 76 arms; wave 4 the pins overlay's 137;
 /// wave 5 rewires `keymap_sections` to be derived from
 /// the table so the help overlay can't drift.
+/// Help text for `!`, shared with the help overlay's
+/// "Discoverable controls" section.
+pub const MESSAGES_HELP: &str =
+    "Open the messages log: launch, attach and rename outcomes with full output";
+
 pub const KEYBINDINGS: &[KeyBinding] = &[
     KeyBinding {
         mode: KeyMode::Global,
@@ -301,6 +306,12 @@ pub const KEYBINDINGS: &[KeyBinding] = &[
         key: KeyMatcher::AnyModExceptCtrl('?'),
         action: || Action::OpenHelp,
         help_text: "Show the help overlay",
+    },
+    KeyBinding {
+        mode: KeyMode::Global,
+        key: KeyMatcher::AnyModExceptCtrl('!'),
+        action: || Action::OpenMessages,
+        help_text: MESSAGES_HELP,
     },
     KeyBinding {
         mode: KeyMode::Global,

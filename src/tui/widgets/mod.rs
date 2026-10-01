@@ -5,6 +5,7 @@ pub mod controls;
 pub mod help;
 pub mod input;
 pub mod launch_spec_form;
+pub mod messages;
 pub mod multi_select;
 pub mod mux_launch;
 pub mod mux_menu;

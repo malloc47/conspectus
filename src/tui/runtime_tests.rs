@@ -1557,3 +1557,44 @@ mod pin_launch_scan_root {
         );
     }
 }
+
+#[test]
+fn translate_bang_opens_messages() {
+    assert_eq!(
+        translate(press(KeyCode::Char('!'), KeyModifiers::SHIFT), 24),
+        Some(Action::OpenMessages)
+    );
+}
+
+#[test]
+fn launch_entry_level_follows_outcome_and_stderr() {
+    use crate::tui::messages::{CommandRecord, LogLevel, LogTarget};
+    let summary = |success| PinLaunchSummary {
+        success,
+        message: "pin `w1` launched".to_string(),
+    };
+    let record = |stderr: &str| CommandRecord {
+        argv: vec!["conspectus".into()],
+        exit_code: Some(0),
+        stdout: String::new(),
+        stderr: stderr.to_string(),
+    };
+    let target = || LogTarget::Pin("w1".to_string());
+
+    assert_eq!(
+        launch_entry(&summary(true), record(""), target()).level,
+        LogLevel::Info
+    );
+    assert_eq!(
+        launch_entry(
+            &summary(true),
+            record("resume failed; launched fresh"),
+            target()
+        )
+        .level,
+        LogLevel::Warning
+    );
+    let failed = launch_entry(&summary(false), record("boom"), target());
+    assert_eq!(failed.level, LogLevel::Error);
+    assert_eq!(failed.command.map(|c| c.stderr), Some("boom".to_string()));
+}

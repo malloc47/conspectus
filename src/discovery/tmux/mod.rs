@@ -154,6 +154,16 @@ pub trait MuxBackend: Send + Sync {
         Ok(TmuxKillOutcome::Unsupported)
     }
 
+    /// Whether the active pane of session `target` is still running
+    /// or has exited and been kept as a dead pane. Sessions Conspectus
+    /// creates keep a pane whose process exits non-zero
+    /// (`remain-on-exit failed`, ADR 0103), so launch paths can read
+    /// a harness that failed at startup instead of losing it. Default
+    /// returns [`TmuxPaneStatus::Unsupported`].
+    fn pane_status(&self, _socket_name: Option<&str>, _target: &str) -> Result<TmuxPaneStatus> {
+        Ok(TmuxPaneStatus::Unsupported)
+    }
+
     /// Probe the current shell environment to see if the caller is
     /// running *inside* a session of this backend. Used
     /// by the hook writer (`conspectus hook write ...`) to
@@ -319,6 +329,25 @@ pub enum TmuxKillOutcome {
     Unsupported,
 }
 
+/// Outcome of [`MuxBackend::pane_status`].
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum TmuxPaneStatus {
+    /// The pane's process is running.
+    Alive,
+    /// The pane's process exited and tmux kept the pane.
+    /// `status` is the exit code when tmux reports one.
+    Dead { status: Option<i32> },
+    /// The session doesn't exist (never created, or it exited and
+    /// tmux tore it down).
+    NoTarget,
+    /// tmux isn't usable on this host.
+    Unavailable(UnavailableReason),
+    /// tmux returned non-zero for some other reason.
+    Failed { code: Option<i32>, message: String },
+    /// Runner doesn't implement pane status (test runners).
+    Unsupported,
+}
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum TmuxOutcome {
     /// `tmux list-sessions` returned successfully; payload is the raw, lossy
@@ -444,10 +473,13 @@ impl MuxBackend for SystemTmux {
         // naturally in a fixed-width preview pane; `-e` emits the
         // pane's ANSI escape sequences so the TUI preview can
         // render with the same colours the operator sees in the
-        // source pane (ADR 0025).
+        // source pane (ADR 0025). `-S -100` adds up to 100 lines of
+        // scrollback: a dead pane's banner scrolls the harness's
+        // first output line off screen (ADR 0103), and callers crop
+        // to the lines they show.
         let output = self
             .cmd(socket_name)
-            .args(["capture-pane", "-p", "-J", "-e", "-t", target])
+            .args(["capture-pane", "-p", "-J", "-e", "-S", "-100", "-t", target])
             .output();
 
         let output = match output {
@@ -554,6 +586,12 @@ impl MuxBackend for SystemTmux {
         for token in argv {
             command.arg(token);
         }
+        // ADR 0103: keep the pane if the launched process exits
+        // non-zero, so a harness that fails at startup leaves its
+        // error readable. Chained in the same tmux invocation so the
+        // option is in place before the server reaps a fast-exiting
+        // child. Clean exits still end the session.
+        command.args([";", "set-option", "-t", name, "remain-on-exit", "failed"]);
         let output = command.output();
 
         let output = match output {
@@ -587,6 +625,12 @@ impl MuxBackend for SystemTmux {
         }
         if looks_like_name_collision(&stderr) {
             return Ok(TmuxNewSessionOutcome::NameTaken);
+        }
+        if stderr.contains("remain-on-exit") {
+            // The session exists; only the option was rejected (a
+            // tmux older than 3.3 has no `failed` value). Launch
+            // proceeds without dead-pane retention.
+            return Ok(TmuxNewSessionOutcome::Created);
         }
 
         Ok(TmuxNewSessionOutcome::Failed {
@@ -736,6 +780,46 @@ impl MuxBackend for SystemTmux {
         })
     }
 
+    fn pane_status(&self, socket_name: Option<&str>, target: &str) -> Result<TmuxPaneStatus> {
+        let output = self
+            .cmd(socket_name)
+            .args([
+                "display-message",
+                "-p",
+                "-t",
+                target,
+                "#{pane_dead} #{pane_dead_status}",
+            ])
+            .output();
+
+        let output = match output {
+            Ok(output) => output,
+            Err(err) if err.kind() == io::ErrorKind::NotFound => {
+                return Ok(TmuxPaneStatus::Unavailable(
+                    UnavailableReason::BinaryNotFound,
+                ));
+            }
+            Err(err) => {
+                return Err(err).with_context(|| {
+                    format!("failed to spawn tmux binary at {}", self.binary.display())
+                });
+            }
+        };
+
+        if output.status.success() {
+            return Ok(parse_pane_status(&String::from_utf8_lossy(&output.stdout)));
+        }
+
+        let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+        if looks_like_no_server(&stderr) || looks_like_no_target(&stderr) {
+            return Ok(TmuxPaneStatus::NoTarget);
+        }
+        Ok(TmuxPaneStatus::Failed {
+            code: output.status.code(),
+            message: stderr,
+        })
+    }
+
     fn current_session_context(&self) -> Option<MuxSessionContext> {
         // Probe `$TMUX` and `tmux display-message` for
         // the caller's mux context. Migrated from
@@ -781,6 +865,77 @@ fn display_message_value(binary: &Path, format: &str) -> Option<String> {
 fn looks_like_no_server(stderr: &str) -> bool {
     let lower = stderr.to_ascii_lowercase();
     lower.contains("no server running") || lower.contains("no sessions")
+}
+
+/// Parse `#{pane_dead} #{pane_dead_status}` output.
+fn parse_pane_status(stdout: &str) -> TmuxPaneStatus {
+    let mut fields = stdout.split_whitespace();
+    match fields.next() {
+        Some("1") => TmuxPaneStatus::Dead {
+            status: fields.next().and_then(|code| code.parse().ok()),
+        },
+        _ => TmuxPaneStatus::Alive,
+    }
+}
+
+/// Lines of a dead pane's output [`dead_pane_output`] keeps.
+pub const DEAD_PANE_LINES: usize = 20;
+
+/// The dead pane's text: ANSI stripped, without tmux's own
+/// "Pane is dead" banner, trailing blank lines dropped, last
+/// [`DEAD_PANE_LINES`] lines kept.
+pub fn dead_pane_output(runner: &dyn MuxBackend, socket: Option<&str>, name: &str) -> String {
+    let Ok(TmuxCaptureOutcome::Captured(text)) = runner.capture_pane(socket, name) else {
+        return String::new();
+    };
+    let plain = strip_ansi(&text);
+    let mut lines: Vec<&str> = plain
+        .lines()
+        .map(str::trim_end)
+        .filter(|line| !line.starts_with("Pane is dead"))
+        .collect();
+    while lines.last().is_some_and(|line| line.is_empty()) {
+        lines.pop();
+    }
+    let start = lines.len().saturating_sub(DEAD_PANE_LINES);
+    let kept = &lines[start..];
+    let first = kept.iter().position(|line| !line.is_empty()).unwrap_or(0);
+    kept[first..].join("\n")
+}
+
+/// Drop ANSI escape sequences (CSI, OSC, and two-byte escapes) from
+/// captured pane text, for places that show it as plain text.
+pub fn strip_ansi(text: &str) -> String {
+    let mut out = String::with_capacity(text.len());
+    let mut chars = text.chars().peekable();
+    while let Some(ch) = chars.next() {
+        if ch != '\u{1b}' {
+            out.push(ch);
+            continue;
+        }
+        match chars.next() {
+            Some('[') => {
+                for c in chars.by_ref() {
+                    if ('@'..='~').contains(&c) {
+                        break;
+                    }
+                }
+            }
+            Some(']') => {
+                while let Some(c) = chars.next() {
+                    if c == '\u{7}' {
+                        break;
+                    }
+                    if c == '\u{1b}' && chars.peek() == Some(&'\\') {
+                        chars.next();
+                        break;
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+    out
 }
 
 fn looks_like_no_target(stderr: &str) -> bool {
@@ -853,7 +1008,17 @@ pub struct FakeTmux {
     kill_outcomes: std::collections::BTreeMap<String, TmuxKillOutcome>,
     /// Recorded pairs across every `kill_session` call.
     kill_calls: std::sync::Arc<std::sync::Mutex<Vec<FakeTmuxKillCall>>>,
+    /// Per-target scripted `pane_status` answers, consumed front to
+    /// back. An empty or missing script answers
+    /// [`TmuxPaneStatus::Unsupported`].
+    pane_statuses: FakeTmuxPaneScript,
 }
+
+type FakeTmuxPaneScript = std::sync::Arc<
+    std::sync::Mutex<
+        std::collections::BTreeMap<String, std::collections::VecDeque<TmuxPaneStatus>>,
+    >,
+>;
 
 impl PartialEq for FakeTmux {
     fn eq(&self, other: &Self) -> bool {
@@ -869,6 +1034,7 @@ impl PartialEq for FakeTmux {
             && *self.send_keys_calls.lock().unwrap() == *other.send_keys_calls.lock().unwrap()
             && self.kill_outcomes == other.kill_outcomes
             && *self.kill_calls.lock().unwrap() == *other.kill_calls.lock().unwrap()
+            && *self.pane_statuses.lock().unwrap() == *other.pane_statuses.lock().unwrap()
     }
 }
 
@@ -889,6 +1055,7 @@ impl FakeTmux {
             send_keys_calls: std::sync::Arc::new(std::sync::Mutex::new(Vec::new())),
             kill_outcomes: std::collections::BTreeMap::new(),
             kill_calls: std::sync::Arc::new(std::sync::Mutex::new(Vec::new())),
+            pane_statuses: std::sync::Arc::default(),
         }
     }
 
@@ -959,6 +1126,19 @@ impl FakeTmux {
     /// targets default to [`TmuxKillOutcome::Killed`].
     pub fn with_kill(mut self, target: impl Into<String>, outcome: TmuxKillOutcome) -> Self {
         self.kill_outcomes.insert(target.into(), outcome);
+        self
+    }
+
+    /// Script the answers `pane_status(target)` returns, in order.
+    pub fn with_pane_statuses(
+        self,
+        target: impl Into<String>,
+        statuses: impl IntoIterator<Item = TmuxPaneStatus>,
+    ) -> Self {
+        self.pane_statuses
+            .lock()
+            .unwrap()
+            .insert(target.into(), statuses.into_iter().collect());
         self
     }
 
@@ -1091,6 +1271,16 @@ impl MuxBackend for FakeTmux {
             .cloned()
             .unwrap_or(TmuxKillOutcome::Killed))
     }
+
+    fn pane_status(&self, _socket_name: Option<&str>, target: &str) -> Result<TmuxPaneStatus> {
+        Ok(self
+            .pane_statuses
+            .lock()
+            .unwrap()
+            .get_mut(target)
+            .and_then(std::collections::VecDeque::pop_front)
+            .unwrap_or(TmuxPaneStatus::Unsupported))
+    }
 }
 
 impl MuxBackend for Box<dyn MuxBackend> {
@@ -1141,6 +1331,10 @@ impl MuxBackend for Box<dyn MuxBackend> {
 
     fn kill_session(&self, socket_name: Option<&str>, target: &str) -> Result<TmuxKillOutcome> {
         (**self).kill_session(socket_name, target)
+    }
+
+    fn pane_status(&self, socket_name: Option<&str>, target: &str) -> Result<TmuxPaneStatus> {
+        (**self).pane_status(socket_name, target)
     }
 }
 

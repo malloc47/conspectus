@@ -53,6 +53,9 @@ pub enum Modal {
     Search(crate::tui::widgets::search::SearchOverlayState),
     /// `o` full-value modal. Context-free.
     ValueModal(crate::tui::widgets::value_modal::ValueModalState),
+    /// `!` Messages overlay (ADR 0105). Reads the App's
+    /// [`crate::tui::messages::MessageLog`] as its context.
+    Messages(crate::tui::widgets::messages::MessagesOverlayState),
     /// Full-screen transcript viewer modal (ADR 0052). Uses the nested-reducer composition described
     /// in ADR 0085 contract 3: [`crate::tui::Msg::Viewer`]
     /// wraps a `crate::viewer::input::ViewerMsg` and the App

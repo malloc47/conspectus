@@ -1,6 +1,7 @@
 //! Effect executor: runs the effects the reducer emits (ADR 0085 contract 2).
 
 use super::*;
+use crate::tui::messages::{LogEntry, LogTarget};
 
 /// Run one pure (no-terminal) effect. Shared between
 /// [`execute_effects`] and [`execute_effects_live`] so the two
@@ -120,7 +121,7 @@ pub(super) fn execute_commit_alias_rename(
         match crate::rename::plan_session_rename(snapshot, &session_id, new_display_name, false) {
             Ok(plan) => plan,
             Err(err) => {
-                let _ = app.update(Msg::SetStatus(Some(format!("rename failed: {err}"))));
+                app.report(LogEntry::error(format!("rename failed: {err}")));
                 return;
             }
         };
@@ -137,9 +138,7 @@ pub(super) fn execute_commit_alias_rename(
             if let Some(path) = loader.user_config_path() {
                 path
             } else {
-                let _ = app.update(Msg::SetStatus(Some(
-                    "rename failed: no alias store available".to_string(),
-                )));
+                app.report(LogEntry::error("rename failed: no alias store available"));
                 return;
             }
         }
@@ -164,7 +163,7 @@ pub(super) fn execute_commit_alias_rename(
     let alias_status = match alias_outcome {
         Ok(message) => message,
         Err(err) => {
-            let _ = app.update(Msg::SetStatus(Some(format!("rename failed: {err}"))));
+            app.report(LogEntry::error(format!("rename failed: {err}")));
             return;
         }
     };
@@ -176,17 +175,19 @@ pub(super) fn execute_commit_alias_rename(
         match tmux.rename_session(None, &mux_rename.mux.native_id, &mux_rename.new_name) {
             Ok(crate::discovery::tmux::TmuxRenameOutcome::Renamed) => {}
             Ok(other) => {
-                let _ = app.update(Msg::SetStatus(Some(format!(
-                    "alias updated, tmux rename failed: {other:?}"
-                ))));
-                refresh(app, &config);
+                refresh_after_mux_handoff(app, &config);
+                app.report(
+                    LogEntry::warning(format!("alias updated, tmux rename failed: {other:?}"))
+                        .with_target(LogTarget::Mux(mux_rename.mux.clone())),
+                );
                 return;
             }
             Err(err) => {
-                let _ = app.update(Msg::SetStatus(Some(format!(
-                    "alias updated, tmux rename errored: {err}"
-                ))));
-                refresh(app, &config);
+                refresh_after_mux_handoff(app, &config);
+                app.report(
+                    LogEntry::warning(format!("alias updated, tmux rename errored: {err:#}"))
+                        .with_target(LogTarget::Mux(mux_rename.mux.clone())),
+                );
                 return;
             }
         }
@@ -194,12 +195,12 @@ pub(super) fn execute_commit_alias_rename(
 
     let advisory = live_session_advisory(app, &session_id);
     let config = app.config().clone();
-    refresh(app, &config);
+    refresh_after_mux_handoff(app, &config);
     let final_status = match advisory {
         Some(suffix) => format!("{alias_status} · {suffix}"),
         None => alias_status,
     };
-    let _ = app.update(Msg::SetStatus(Some(final_status)));
+    app.report(LogEntry::info(final_status));
 }
 
 /// Executor branch for `StoreOp::CommitMuxRename`. Graph-aware
@@ -225,7 +226,10 @@ pub(super) fn execute_commit_mux_rename(
     let plan = match crate::rename::plan_mux_rename(snapshot, &mux_id, new_name) {
         Ok(plan) => plan,
         Err(err) => {
-            let _ = app.update(Msg::SetStatus(Some(format!("mux rename failed: {err}"))));
+            app.report(
+                LogEntry::error(format!("mux rename failed: {err}"))
+                    .with_target(LogTarget::Mux(mux_id.clone())),
+            );
             return;
         }
     };
@@ -256,13 +260,15 @@ pub(super) fn execute_commit_mux_rename(
         .native_id
         .rsplit_once(':')
         .map_or(plan.mux_rename.mux.native_id.as_str(), |(_, name)| name);
-    let mux_status = match tmux.rename_session(None, bare_current, &plan.mux_rename.new_name) {
-        Ok(crate::discovery::tmux::TmuxRenameOutcome::Renamed) => {
-            format!("renamed mux to `{}`", plan.mux_rename.new_name)
-        }
-        Ok(other) => format!("tmux rename returned {other:?}"),
-        Err(err) => format!("tmux rename errored: {err}"),
-    };
+    let (renamed, mux_status) =
+        match tmux.rename_session(None, bare_current, &plan.mux_rename.new_name) {
+            Ok(crate::discovery::tmux::TmuxRenameOutcome::Renamed) => (
+                true,
+                format!("renamed mux to `{}`", plan.mux_rename.new_name),
+            ),
+            Ok(other) => (false, format!("tmux rename returned {other:?}")),
+            Err(err) => (false, format!("tmux rename errored: {err:#}")),
+        };
 
     let mut parts = vec![mux_status];
     if pin_updates_written > 0 {
@@ -276,8 +282,16 @@ pub(super) fn execute_commit_mux_rename(
     }
 
     let config = app.config().clone();
-    refresh(app, &config);
-    let _ = app.update(Msg::SetStatus(Some(parts.join(" · "))));
+    refresh_after_mux_handoff(app, &config);
+    let summary = parts.join(" · ");
+    let entry = if !renamed {
+        LogEntry::error(summary)
+    } else if pin_update_failures.is_empty() {
+        LogEntry::info(summary)
+    } else {
+        LogEntry::warning(summary)
+    };
+    app.report(entry.with_target(LogTarget::Mux(mux_id)));
 }
 
 /// Load the pin entry by id, rewrite its `mux.name`, and write it
@@ -334,26 +348,28 @@ pub(super) fn execute_exec_spec(
     match spec {
         ExecSpec::AttachMux(target) => {
             let outcome = run_tmux_attach(terminal, &target);
-            refresh(app, config);
-            let message = match outcome {
-                AttachOutcome::Detached => format!("attached/detached: {}", target_short(&target)),
-                AttachOutcome::Failed(reason) => format!("attach failed: {reason}"),
-            };
-            let _ = app.update(Msg::SetStatus(Some(message)));
+            refresh_after_mux_handoff(app, config);
+            app.report(attach_return_entry(
+                &target_short(&target),
+                outcome,
+                LogTarget::Mux(target.mux.clone()),
+                &target.native_id,
+                None,
+            ));
         }
-        ExecSpec::Resume(target) => {
-            let message = match &target {
-                ResumeTarget::Launch { label, .. } => {
-                    if launch_resume(&target) {
-                        format!("resumed: {label}")
-                    } else {
-                        "resume: failed to launch".to_string()
-                    }
-                }
-                other => resume_disabled_reason(other),
-            };
-            let _ = app.update(Msg::SetStatus(Some(message)));
-        }
+        ExecSpec::Resume(target) => match &target {
+            ResumeTarget::Launch { label, .. } => {
+                let entry = if launch_resume(&target) {
+                    LogEntry::info(format!("resumed: {label}"))
+                } else {
+                    LogEntry::error(format!("resume of {label} failed to launch"))
+                };
+                app.report(entry);
+            }
+            other => {
+                let _ = app.update(Msg::SetStatus(Some(resume_disabled_reason(other))));
+            }
+        },
         ExecSpec::ViewSession(session_id) => {
             execute_view_session(terminal, app, config, session_id);
         }
@@ -390,16 +406,17 @@ pub(super) fn execute_view_session(
         return;
     }
     let target = resolve_viewer_target(&session_id, &PathBinaryProbe);
-    let message = match target {
+    match target {
         ViewerTarget::Launch(plan) => {
             let outcome = run_viewer_launch(terminal, &plan);
             refresh(app, config);
-            match outcome {
-                ViewerOutcome::Exited => format!("viewed: {}", plan.label),
-                ViewerOutcome::Failed(reason) => format!("view failed: {reason}"),
-            }
+            app.report(match outcome {
+                ViewerOutcome::Exited => LogEntry::info(format!("viewed: {}", plan.label)),
+                ViewerOutcome::Failed(reason) => LogEntry::error(format!("view failed: {reason}")),
+            });
         }
-        ViewerTarget::Disabled(reason) => viewer_disabled_reason(&reason),
-    };
-    let _ = app.update(Msg::SetStatus(Some(message)));
+        ViewerTarget::Disabled(reason) => {
+            let _ = app.update(Msg::SetStatus(Some(viewer_disabled_reason(&reason))));
+        }
+    }
 }

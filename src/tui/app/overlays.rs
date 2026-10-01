@@ -319,6 +319,44 @@ impl App {
     }
 
     /// Push a fresh help overlay onto the modal stack.
+    /// Open the Messages overlay and mark its warnings and errors
+    /// seen.
+    pub fn open_messages_overlay(&mut self) {
+        self.messages.mark_seen();
+        self.modal_stack.push(crate::tui::Modal::Messages(
+            crate::tui::widgets::messages::MessagesOverlayState::new(),
+        ));
+    }
+
+    pub fn messages_overlay(&self) -> Option<&crate::tui::widgets::messages::MessagesOverlayState> {
+        match self.modal_stack.last()? {
+            crate::tui::Modal::Messages(state) => Some(state),
+            _ => None,
+        }
+    }
+
+    /// The open Messages overlay together with the log it reads.
+    pub fn messages_overlay_mut(
+        &mut self,
+    ) -> Option<(
+        &mut crate::tui::widgets::messages::MessagesOverlayState,
+        &crate::tui::messages::MessageLog,
+    )> {
+        match self.modal_stack.last_mut()? {
+            crate::tui::Modal::Messages(state) => Some((state, &self.messages)),
+            _ => None,
+        }
+    }
+
+    pub fn close_messages_overlay(&mut self) {
+        if matches!(
+            self.modal_stack.last(),
+            Some(crate::tui::Modal::Messages(_))
+        ) {
+            self.modal_stack.pop();
+        }
+    }
+
     pub fn open_help_overlay(&mut self) {
         self.modal_stack.push(crate::tui::Modal::Help(
             crate::tui::widgets::help::HelpOverlayState::new(),

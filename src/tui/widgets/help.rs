@@ -235,6 +235,7 @@ fn keymap_sections() -> Vec<HelpSection> {
                     "p",
                     "Open the pins overlay (create / edit / remove / bind / rebind / adopt)",
                 ),
+                Binding::new("!", crate::tui::keybindings::MESSAGES_HELP),
                 Binding::new("?", "This help"),
             ],
         },
