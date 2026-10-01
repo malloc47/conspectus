@@ -14446,7 +14446,15 @@ Queued chunks:
     enforcing `items_after_statements`, `needless_pass_by_value` for
     non-message functions, and `rustdoc::private_intra_doc_links` in
     `[lints]`, so the cleanup holds.
-- [ ] `H-RUST-020` Decide how Codex-log evidence ranks in mux resolution.
+- [x] `H-RUST-020` Decide how Codex-log evidence ranks in mux resolution.
+  - Outcome (operator decision 2026-10-01: Codex-log evidence ranks
+    above cwd): `codex_log_current_thread_match` ranks 55, above the
+    cwd kinds (20/10) and, per ADR 0048, above open-file and hook
+    evidence (50). It also counts as process evidence in
+    `identifies_process`, so the resolver no longer derives a duplicate
+    runtime-process link next to it. ADR 0048 is amended and the
+    ranking table in `docs/mux-link-resolution.md` updated. Three
+    resolver tests cover cwd, open-file, and the duplicate case.
   - Problem: typing the match kinds (`H-RUST-014`) showed that the
     resolver's string matches had drifted from what adapters emit:
     - `mux_evidence_rank` gives `codex_log_current_thread_match`

@@ -149,6 +149,7 @@ ranks live in `mux_evidence_rank` in `src/resolve/mod.rs`.
 
 | Evidence Kind | Rank | Source | Decays? |
 |---|---|---|---|
+| `codex_log_current_thread_match` | 55 | Codex logs DB: the pane's Codex process writes the thread (ADR 0048) | No |
 | `hook_session_match` | 50 | Hook sidecar record | No |
 | `hook_session_path_match` | 50 | Hook sidecar path | No |
 | `active_pane_fd_session_match` | 50 | `/proc/{pid}/fd/` | No |
@@ -159,4 +160,3 @@ ranks live in `mux_evidence_rank` in `src/resolve/mod.rs`.
 | `active_pane_command_session_match` | 30 | Session key in process argv | Yes (overridden by hook sidecar) |
 | `exact_cwd_match` | 20 | session.cwd == mux.cwd | Yes (overridden by hook sidecar) |
 | `cwd_prefix_match` | 10 | One cwd is prefix of other | Yes (overridden by hook sidecar) |
-| `codex_log_current_thread_match` | 0 | Codex logs DB | No; see `H-RUST-020` |

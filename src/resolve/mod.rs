@@ -421,6 +421,7 @@ fn identifies_process(kind: MatchKind) -> bool {
         | MatchKind::ActivePaneFdCommandSessionMatch
         | MatchKind::HookSessionMatch
         | MatchKind::HookSessionPathMatch
+        | MatchKind::CodexLogCurrentThreadMatch
         | MatchKind::RuntimeProcessIdentifiesSession
         | MatchKind::RuntimeProcessCandidatesSession => true,
         MatchKind::ExactCwdMatch
@@ -429,7 +430,6 @@ fn identifies_process(kind: MatchKind) -> bool {
         | MatchKind::ActivePaneCommandSessionMatch
         | MatchKind::ActivePaneProcessObservation
         | MatchKind::HookProcessObservation
-        | MatchKind::CodexLogCurrentThreadMatch
         | MatchKind::CodexLogProcessThreadMatch
         | MatchKind::CodexLogProcessObservation => false,
     }
@@ -854,6 +854,10 @@ fn mux_score_axes(link: &GraphLink) -> Vec<ScoreAxis> {
 /// Rank of a session ↔ mux link's evidence; higher wins.
 fn mux_evidence_rank(kind: MatchKind) -> u8 {
     match kind {
+        // ADR 0048: the Codex logs DB ties a live pane process to the
+        // thread it is writing, which outranks open-file and cwd
+        // evidence for Codex sessions.
+        MatchKind::CodexLogCurrentThreadMatch => 55,
         MatchKind::HookSessionMatch
         | MatchKind::HookSessionPathMatch
         | MatchKind::ActivePaneFdSessionMatch => 50,
@@ -867,7 +871,6 @@ fn mux_evidence_rank(kind: MatchKind) -> u8 {
         MatchKind::CwdPrefixMatch => 10,
         MatchKind::ActivePaneProcessObservation
         | MatchKind::HookProcessObservation
-        | MatchKind::CodexLogCurrentThreadMatch
         | MatchKind::CodexLogProcessThreadMatch
         | MatchKind::CodexLogProcessObservation => 0,
     }

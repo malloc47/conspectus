@@ -1813,3 +1813,105 @@ fn demote_stale_source_no_action_when_mux_activity_unknown() {
         );
     }
 }
+
+#[test]
+fn session_mux_resolver_prefers_codex_log_over_exact_cwd() {
+    let cwd = linked_to_mux_link(
+        "cwd",
+        session("a"),
+        mux("tmux:shared-cwd"),
+        Provenance::StrongDiscovered,
+        Confidence::High,
+        Some(5_000),
+        Some("exact_cwd_match"),
+    );
+    let codex_log = linked_to_mux_link(
+        "codex-log",
+        session("a"),
+        mux("tmux:writer"),
+        Provenance::StrongDiscovered,
+        Confidence::High,
+        Some(1_000),
+        Some("codex_log_current_thread_match"),
+    );
+
+    let output = resolve_links(&[cwd, codex_log]);
+
+    assert_eq!(
+        output.resolved_relationships[0].selected_link_id.as_deref(),
+        Some("codex-log")
+    );
+}
+
+#[test]
+fn session_mux_resolver_prefers_codex_log_over_open_file_evidence() {
+    let fd = linked_to_mux_link(
+        "fd",
+        session("a"),
+        mux("tmux:reader"),
+        Provenance::StrongDiscovered,
+        Confidence::High,
+        Some(5_000),
+        Some("active_pane_fd_session_match"),
+    );
+    let codex_log = linked_to_mux_link(
+        "codex-log",
+        session("a"),
+        mux("tmux:writer"),
+        Provenance::StrongDiscovered,
+        Confidence::High,
+        Some(1_000),
+        Some("codex_log_current_thread_match"),
+    );
+
+    let output = resolve_links(&[fd, codex_log]);
+
+    assert_eq!(
+        output.resolved_relationships[0].selected_link_id.as_deref(),
+        Some("codex-log")
+    );
+}
+
+#[test]
+fn codex_log_mux_link_is_not_duplicated_by_a_derived_process_link() {
+    let session = session("a");
+    let mux = mux("tmux:writer");
+    let process = process("proc:codex");
+    let snapshot = GraphSnapshot {
+        nodes: vec![process_node("proc:codex", RuntimeProcessRole::HumanAgent)],
+        candidate_links: vec![
+            linked_to_mux_link(
+                "codex-log",
+                session.clone(),
+                mux.clone(),
+                Provenance::StrongDiscovered,
+                Confidence::High,
+                Some(1_000),
+                Some("codex_log_current_thread_match"),
+            ),
+            mux_contains_process_link("mux-process", mux, process.clone()),
+            process_session_link(
+                "process-session",
+                process,
+                session,
+                RelationKind::ProcessIdentifiesSession,
+            ),
+        ],
+        ..GraphSnapshot::empty()
+    };
+
+    let resolved = resolve_snapshot(snapshot);
+
+    assert!(
+        !resolved.candidate_links.iter().any(|link| {
+            link.source_metadata.match_kind() == Some(MatchKind::RuntimeProcessIdentifiesSession)
+        }),
+        "the Codex-log link already covers this process"
+    );
+    let relation = resolved
+        .resolved_relationships
+        .iter()
+        .find(|rel| rel.relation == RelationKind::LinkedToMux)
+        .expect("session mux relationship");
+    assert_eq!(relation.selected_link_id.as_deref(), Some("codex-log"));
+}
