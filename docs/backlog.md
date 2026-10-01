@@ -14352,7 +14352,17 @@ Queued chunks:
   - ADR: evidence is part of the serialized model. Confirm the format
     is unchanged with the graph snapshot tests, and bump the
     `graph.bin` format version if the rkyv layout changes (ADR 0083).
-- [ ] `H-RUST-015` Split the 3,000-line TUI modules.
+- [x] `H-RUST-015` Split the 3,000-line TUI modules.
+  - Outcome: moves only, guarded by the render snapshot tests.
+    `tui/app.rs` 3,566 → 1,522 lines (`app/{msg,overlays,pins,tree,
+    explorer_nav}.rs`); `tui/runtime.rs` 3,482 → 1,574
+    (`runtime/{executor,worktree_exec,pin_store,launch,overlay_keys}.rs`);
+    `tui/ui.rs` 3,374 → 314 (`ui/{header,left_panel,right_panel,
+    detail_header,preview_pane,text}.rs`); `tui/widgets/pins.rs` 3,193 →
+    745 (`pins/{create,edit,bind,create_widget,widgets}.rs`). The reducer
+    stays one flat `match` in `App::update`: its arms are short, so
+    splitting it per family would only add indirection. The one long arm,
+    `CommitRename`, became `App::rename_commit_effect`.
   - Problem: `tui/app.rs` (3,581 lines, with a 420-line `App::update`
     `match`), `tui/runtime.rs` (3,483), `tui/ui.rs` (3,384), and
     `tui/widgets/pins.rs` (3,193) are hard to navigate.
