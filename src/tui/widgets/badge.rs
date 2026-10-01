@@ -15,7 +15,7 @@
 //! keeps the recency / mux indicator columns aligned downstream.
 
 use ratatui::macros::span;
-use ratatui::style::Style;
+use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::Span;
 
 use crate::tui::Theme;
@@ -43,6 +43,25 @@ pub fn harness_badge(label: &str, theme: &Theme) -> Span<'static> {
     span!(style; " {label:<body_width$} ")
 }
 
+/// Render a pane's program name as a badge the same width as
+/// [`harness_badge`], for mux rows with no linked agent. Every program
+/// shares `theme.command_badge` as the background, under bold white
+/// text, so these chips stay visually quieter than the per-harness
+/// colors. Names longer than the badge are cut with `…`.
+pub fn command_badge(command: &str, theme: &Theme) -> Span<'static> {
+    let style = Style::default()
+        .fg(Color::White)
+        .bg(theme.command_badge)
+        .add_modifier(Modifier::BOLD);
+    let label = if command.chars().count() > MAX_HARNESS_LABEL_LEN {
+        let kept: String = command.chars().take(MAX_HARNESS_LABEL_LEN - 1).collect();
+        format!("{kept}…")
+    } else {
+        command.to_string()
+    };
+    span!(style; " {label:<MAX_HARNESS_LABEL_LEN$} ")
+}
+
 /// Visible cell width of [`harness_badge`]'s output for a given
 /// label. Today every known harness fits inside [`HARNESS_BADGE_WIDTH`];
 /// the helper still measures from the label so a future longer
@@ -68,6 +87,18 @@ mod tests {
         assert_eq!(span.style.fg, Some(theme.harness_color("codex")));
         assert!(span.style.add_modifier.contains(Modifier::REVERSED));
         assert!(span.style.add_modifier.contains(Modifier::BOLD));
+    }
+
+    #[test]
+    fn command_badge_matches_harness_badge_width_and_truncates() {
+        let theme = Theme::default();
+        let short = command_badge("npm", &theme);
+        assert_eq!(short.content, " npm      ");
+        let long = command_badge("conspectus", &theme);
+        assert_eq!(long.content, " conspec… ");
+        assert_eq!(long.content.chars().count(), HARNESS_BADGE_WIDTH);
+        assert_eq!(long.style.bg, Some(theme.command_badge));
+        assert_eq!(long.style.fg, Some(Color::White));
     }
 
     #[test]

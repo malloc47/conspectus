@@ -119,6 +119,7 @@ pub fn build_union_tree(inputs: UnionBuildInputs<'_>) -> RowTree {
                         created_epoch: mux.node.created_epoch,
                         last_attached_epoch: mux.node.last_attached_epoch,
                         agent_labels: Vec::new(),
+                        pane_command: super::pane_command(mux.node),
                         single_session_preview: None,
                         pin_id: pin_id_by_bound_mux.get(&mux.node.native_id).cloned(),
                         primary_node: node_id,

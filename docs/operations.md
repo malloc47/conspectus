@@ -193,6 +193,10 @@ mux_attached  = "green"
 mux_ambiguous = "yellow"
 mux_unmuxed   = "dim"
 
+# Background of the chip a mux row shows for its pane's program (`npm`,
+# `zsh`, …) when no agent session is linked; text is bold white.
+command_badge = "black"
+
 # Detail-pane and structural cues.
 cwd_mark           = "cyan"
 link_id            = "blue"

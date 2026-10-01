@@ -285,6 +285,10 @@ pub struct MuxSessionRow {
     /// this mux. Renderers use these as the primary mux-row labels so
     /// mux rows scan like session rows without repeating session IDs.
     pub agent_labels: Vec<String>,
+    /// Program running in the mux's active pane (`#{pane_current_command}`),
+    /// shown in place of agent labels when no agent is linked so shell,
+    /// build, and server panes still say what they run.
+    pub pane_command: Option<String>,
     /// Last-message preview of the sole attached agent session,
     /// populated only when exactly one visible agent is linked to this
     /// mux. Renderers flow it into the trailing space after the CWD so
@@ -431,6 +435,15 @@ pub fn format_workspace_display(
 /// `claude-code`'s `claude` collapse lives on
 /// `crate::discovery::harness::ClaudeCodeAdapter::display_label`
 /// rather than in a match table here.
+/// The program in a mux's active pane, by basename, for rows that
+/// have no linked agent to label them. `None` when the backend didn't
+/// report one.
+pub(crate) fn pane_command(mux: &crate::model::MuxSessionNode) -> Option<String> {
+    let command = mux.active_pane_command.as_deref()?.trim();
+    let name = command.rsplit('/').next().unwrap_or(command);
+    (!name.is_empty()).then(|| name.to_string())
+}
+
 pub fn harness_label(harness_key: &str) -> String {
     crate::discovery::harness::display_label_for(harness_key)
 }

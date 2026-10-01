@@ -65,6 +65,11 @@ pub struct Theme {
     /// distinct affordance against the solid `◉` / `◯` glyphs without
     /// being mistaken for the dim `mux_unmuxed` state.
     pub pin_placeholder: Color,
+    /// Background of the pane-command chip a mux row shows when no
+    /// agent is linked (`npm`, `zsh`, …). One color for every
+    /// program, drawn behind bold white text so it reads on dark and
+    /// light terminals alike.
+    pub command_badge: Color,
     /// Reliable foreground color for "secondary" text the operator
     /// shouldn't put the same visual weight on as primary columns —
     /// row short ids and the inline preview snippet. Modeled as a
@@ -207,6 +212,7 @@ impl Default for Theme {
             link_id: Color::Blue,
             placeholder: Modifier::DIM,
             pin_placeholder: Color::LightYellow,
+            command_badge: Color::Black,
             secondary_text: Color::DarkGray,
             disclosure: Color::Cyan,
             divider: Modifier::DIM,
@@ -376,6 +382,10 @@ impl Theme {
                 kind: Color,
             },
             ThemeKey {
+                name: "command_badge",
+                kind: Color,
+            },
+            ThemeKey {
                 name: "secondary_text",
                 kind: Color,
             },
@@ -491,6 +501,7 @@ impl Theme {
             "cwd_mark" => self.cwd_mark = color,
             "link_id" => self.link_id = color,
             "pin_placeholder" => self.pin_placeholder = color,
+            "command_badge" => self.command_badge = color,
             "secondary_text" => self.secondary_text = color,
             "disclosure" => self.disclosure = color,
             "warning" => self.warning = color,

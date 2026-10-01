@@ -113,3 +113,23 @@ fn recency_bucket_is_none_when_either_side_missing() {
     assert_eq!(recency_bucket(None, Some(100)), None);
     assert_eq!(recency_bucket(Some(100), None), None);
 }
+
+#[test]
+fn pane_command_uses_the_basename_and_skips_blanks() {
+    use crate::model::{MuxSessionId, MuxSessionNode};
+    let node = |command: Option<&str>| {
+        let node = MuxSessionNode::new(MuxSessionId::new("tmux:x"), "tmux", "x");
+        match command {
+            Some(command) => node.with_active_pane_command(command),
+            None => node,
+        }
+    };
+
+    assert_eq!(pane_command(&node(Some("npm"))).as_deref(), Some("npm"));
+    assert_eq!(
+        pane_command(&node(Some("/usr/bin/conspectus"))).as_deref(),
+        Some("conspectus")
+    );
+    assert_eq!(pane_command(&node(Some("  "))), None);
+    assert_eq!(pane_command(&node(None)), None);
+}

@@ -1777,6 +1777,7 @@ fn row_kind_glyph_span_dispatches_per_row_kind() {
         created_epoch: None,
         last_attached_epoch: None,
         agent_labels: Vec::new(),
+        pane_command: None,
         single_session_preview: None,
         pin_id: None,
         primary_node: NodeId::MuxSession(MuxSessionId::new("project")),
@@ -2010,6 +2011,7 @@ fn mux_session_row_mirrors_session_column_order() {
         created_epoch: None,
         last_attached_epoch: None,
         agent_labels: vec!["codex".into()],
+        pane_command: None,
         single_session_preview: Some("running cargo test".into()),
         pin_id: None,
         primary_node: NodeId::MuxSession(MuxSessionId::new("tmux:editor")),
@@ -2079,6 +2081,7 @@ fn placeholder_mux_row_renders_dotted_glyph_and_cwd_preview() {
         created_epoch: None,
         last_attached_epoch: None,
         agent_labels: vec!["codex".into()],
+        pane_command: None,
         single_session_preview: Some("~/repo".into()),
         pin_id: Some("ingest".into()),
         primary_node: NodeId::Pin(crate::model::PinId::new("ingest")),
@@ -3664,4 +3667,49 @@ fn info_report_sets_a_plain_status_message() {
     assert_eq!(app.status_message(), Some("renamed: w1"));
     assert_eq!(app.messages().unseen(), 0);
     assert_eq!(app.messages().len(), 1);
+}
+
+fn agentless_mux_row(pane_command: Option<&str>) -> MuxSessionRow {
+    MuxSessionRow {
+        mux: MuxSessionId::new("tmux:build"),
+        backend: "tmux".into(),
+        native_id: "build".into(),
+        client_attached: Some(false),
+        cwd_display: None,
+        attached_count: 0,
+        ambiguous_count: 0,
+        recency: Some("1m".into()),
+        activity_epoch: None,
+        created_epoch: None,
+        last_attached_epoch: None,
+        agent_labels: Vec::new(),
+        pane_command: pane_command.map(str::to_string),
+        single_session_preview: None,
+        pin_id: None,
+        primary_node: NodeId::MuxSession(MuxSessionId::new("tmux:build")),
+    }
+}
+
+#[test]
+fn agentless_mux_row_labels_itself_with_the_pane_command() {
+    let theme = Theme::default();
+    let spans = render_mux_session_spans(&agentless_mux_row(Some("npm")), &theme, 0, 100);
+    let rendered: String = spans.iter().map(|span| span.content.as_ref()).collect();
+
+    assert!(rendered.contains(" npm "), "pane command chip: {rendered}");
+    assert!(!rendered.contains("no agent"), "no placeholder: {rendered}");
+    let chip = spans
+        .iter()
+        .find(|span| span.content.contains("npm"))
+        .expect("chip span");
+    assert_eq!(chip.style.bg, Some(theme.command_badge));
+}
+
+#[test]
+fn agentless_mux_row_without_a_pane_command_says_no_agent() {
+    let theme = Theme::default();
+    let spans = render_mux_session_spans(&agentless_mux_row(None), &theme, 0, 100);
+    let rendered: String = spans.iter().map(|span| span.content.as_ref()).collect();
+
+    assert!(rendered.contains("no agent"), "placeholder: {rendered}");
 }

@@ -789,10 +789,13 @@ pub(super) fn append_mux_agent_labels(
     theme: &Theme,
     width: usize,
 ) {
-    use crate::tui::widgets::badge::harness_badge;
+    use crate::tui::widgets::badge::{command_badge, harness_badge};
 
     if mux.agent_labels.is_empty() {
-        spans.push(span!(theme.placeholder; " no agent "));
+        match &mux.pane_command {
+            Some(command) => spans.push(command_badge(command, theme)),
+            None => spans.push(span!(theme.placeholder; " no agent ")),
+        }
         return;
     }
 
