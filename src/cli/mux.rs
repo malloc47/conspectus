@@ -13,8 +13,8 @@ use std::path::PathBuf;
 use anyhow::{Result, anyhow, bail};
 use clap::{Args, Subcommand};
 
-use conspectus::discovery::harness::launch_argv_for;
-use conspectus::discovery::tmux::{MuxBackend, SystemTmux};
+use crate::discovery::harness::launch_argv_for;
+use crate::discovery::tmux::{MuxBackend, SystemTmux};
 
 use super::pin::{attach_and_report, format_attach_command, report_new_session};
 
@@ -216,7 +216,7 @@ impl MuxLaunchArgs {
 /// exists, its path is returned unchanged. Mirrors ADR 0094 pin-side
 /// realize-at-launch minus the pin-store read.
 fn realize_worktree(repo: &std::path::Path, branch: &str) -> Result<PathBuf> {
-    use conspectus::discovery::worktree::{
+    use crate::discovery::worktree::{
         WorktreeBackendSelection, WorktreeCreateRequest, WorktreeMutationOutcome,
         resolve_mutation_backend, worktrunk_available,
     };
@@ -255,7 +255,7 @@ fn realize_worktree(repo: &std::path::Path, branch: &str) -> Result<PathBuf> {
 }
 
 fn existing_worktree_for_branch(
-    backend: &dyn conspectus::discovery::worktree::WorktreeBackend,
+    backend: &dyn crate::discovery::worktree::WorktreeBackend,
     repo: &std::path::Path,
     branch: &str,
 ) -> Result<Option<PathBuf>> {
@@ -276,7 +276,7 @@ fn existing_worktree_for_branch(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use conspectus::discovery::tmux::{FakeTmux, TmuxNewSessionOutcome};
+    use crate::discovery::tmux::{FakeTmux, TmuxNewSessionOutcome};
 
     #[test]
     fn mux_new_spawns_bare_session_with_empty_argv() {

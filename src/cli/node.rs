@@ -10,7 +10,7 @@ use std::path::PathBuf;
 use anyhow::Result;
 use clap::{Args, Subcommand};
 
-use conspectus::config;
+use crate::config;
 
 use super::{
     ColorFlag, PagerOptions, print_paged, resolve_color_from_env, warm_start_discover_and_resolve,
@@ -88,8 +88,8 @@ impl NodeShowArgs {
             self.no_cache,
             &outcome.config.server.intervals,
         )?;
-        conspectus::resolve::explain_resolved_relationships(&mut snapshot);
-        let id = match conspectus::output::node_show::resolve_node_id(&self.id, &snapshot) {
+        crate::resolve::explain_resolved_relationships(&mut snapshot);
+        let id = match crate::output::node_show::resolve_node_id(&self.id, &snapshot) {
             Ok(id) => id,
             Err(err) => {
                 eprint!("conspectus: {err}");
@@ -97,7 +97,7 @@ impl NodeShowArgs {
             }
         };
         let color = resolve_color_from_env(self.color, io::stdout().is_terminal());
-        let rendered = conspectus::output::node_show::render_node_show(&snapshot, &id, color);
+        let rendered = crate::output::node_show::render_node_show(&snapshot, &id, color);
         print_paged(
             &rendered,
             PagerOptions::from_flags(self.pager, self.no_pager),

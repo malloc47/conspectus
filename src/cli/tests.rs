@@ -423,7 +423,7 @@ fn filter_args_mux_state_parses_each_value() {
         .as_ref()
         .map(|m| m.values().to_vec())
         .unwrap_or_default();
-    use conspectus::filter::MuxStateKey;
+    use crate::filter::MuxStateKey;
     assert!(states.contains(&MuxStateKey::Unmuxed));
     assert!(states.contains(&MuxStateKey::Ambiguous));
 }
@@ -438,7 +438,7 @@ fn filter_args_mux_state_invalid_value_errors_with_choices() {
 
 #[test]
 fn filter_args_grouping_parses_per_view() {
-    use conspectus::tui::{Grouping, SessionsGrouping, View};
+    use crate::tui::{Grouping, SessionsGrouping, View};
     let args = filter_args_with(vec![], None, vec![], Some("repo"));
     assert_eq!(
         args.to_grouping(View::Sessions).expect("parse"),
@@ -454,7 +454,7 @@ fn filter_args_grouping_parses_per_view() {
 
 #[test]
 fn filter_args_grouping_rejects_value_for_wrong_view() {
-    use conspectus::tui::View;
+    use crate::tui::View;
     // `host` is a mux grouping, not a sessions one.
     let args = filter_args_with(vec![], None, vec![], Some("host"));
     let err = args.to_grouping(View::Sessions).unwrap_err().to_string();
@@ -464,7 +464,7 @@ fn filter_args_grouping_rejects_value_for_wrong_view() {
 
 #[test]
 fn filter_args_grouping_none_when_flag_omitted() {
-    use conspectus::tui::View;
+    use crate::tui::View;
     let args = FilterArgs::default();
     assert!(args.to_grouping(View::Sessions).expect("parse").is_none());
 }
@@ -536,12 +536,12 @@ fn format_epoch_iso8601_clamps_negative_epochs_to_zero() {
 // ----- Launch-time resume resolver -----
 
 mod resume_resolver {
-    use conspectus::model::{
+    use crate::model::{
         AgentSessionId, AgentSessionNode, Confidence, Freshness, GraphLink, GraphNode,
         GraphSnapshot, LinkEndpoint, LinkState, NodeId, PinCandidate, PinMuxRef, Provenance,
         RelationKind, SourceMetadata,
     };
-    use conspectus::pin_bindings::{
+    use crate::pin_bindings::{
         PinBindingRecord, PinBindingsCache, read as read_sidecar, write as write_sidecar,
     };
     use std::path::Path;

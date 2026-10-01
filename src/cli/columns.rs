@@ -11,7 +11,7 @@ use std::io::{self, IsTerminal};
 use anyhow::Result;
 use clap::Args;
 
-use conspectus::config;
+use crate::config;
 
 use super::{ColorFlag, PagerOptions, print_paged, resolve_color_from_env};
 
@@ -45,7 +45,7 @@ impl ColumnsArgs {
             }
         };
         let color = resolve_color_from_env(self.color, io::stdout().is_terminal());
-        let listing = conspectus::output::render::render_columns_listing(projection, color);
+        let listing = crate::output::render::render_columns_listing(projection, color);
         print_paged(
             &listing,
             PagerOptions::from_flags(self.pager, self.no_pager),

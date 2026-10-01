@@ -17,7 +17,7 @@ use anyhow::{Context, Result, anyhow, bail};
 use clap::{Args, Subcommand, ValueEnum};
 use toml_edit::{Array, DocumentMut, Item, Table, Value};
 
-use conspectus::hook::{HookStore, HookTmuxRecord};
+use crate::hook::{HookStore, HookTmuxRecord};
 
 #[derive(Debug, Args)]
 pub(super) struct HookArgs {
@@ -70,14 +70,14 @@ impl HookWriteArgs {
             .with_context(|| format!("failed to parse {} hook JSON", self.harness))?;
         let (pid, ppid) = harness_pid_pair(&self.harness);
         let harness_version = harness_version_env(&self.harness);
-        let record = conspectus::hook::hook_record_from_payload(
+        let record = crate::hook::hook_record_from_payload(
             &self.harness,
             &payload,
             pid,
             ppid,
             tmux_context(),
             harness_version,
-            conspectus::hook::current_epoch(),
+            crate::hook::current_epoch(),
         )?;
         write_or_ingest_hook_record(&record, self.state_root)?;
         Ok(())
@@ -294,7 +294,7 @@ fn resolve_hook_state_root(override_root: Option<PathBuf>) -> Result<PathBuf> {
 }
 
 fn write_or_ingest_hook_record(
-    record: &conspectus::hook::HookRecord,
+    record: &crate::hook::HookRecord,
     override_root: Option<PathBuf>,
 ) -> Result<()> {
     if let Some(root) = override_root {
@@ -302,14 +302,14 @@ fn write_or_ingest_hook_record(
         return Ok(());
     }
 
-    match conspectus::server::client_hook_ingest(record) {
-        conspectus::server::ClientOutcome::Ok(()) => Ok(()),
-        conspectus::server::ClientOutcome::NoDaemon => {
+    match crate::server::client_hook_ingest(record) {
+        crate::server::ClientOutcome::Ok(()) => Ok(()),
+        crate::server::ClientOutcome::NoDaemon => {
             let root = resolve_hook_state_root(None)?;
             HookStore::new(root).write_record(record)?;
             Ok(())
         }
-        conspectus::server::ClientOutcome::DaemonError { code, message } => {
+        crate::server::ClientOutcome::DaemonError { code, message } => {
             if code != "snapshot_unavailable" {
                 eprintln!("conspectus: warning: daemon refused hook ingest ({code}): {message}");
             }
@@ -317,7 +317,7 @@ fn write_or_ingest_hook_record(
             HookStore::new(root).write_record(record)?;
             Ok(())
         }
-        conspectus::server::ClientOutcome::Transport(err) => {
+        crate::server::ClientOutcome::Transport(err) => {
             eprintln!(
                 "conspectus: warning: daemon hook ingest failed, writing local hook spool: {err:#}"
             );
@@ -418,7 +418,7 @@ where
 /// harness gets pid-pair resolution for free — no cli.rs
 /// match-table edit required.
 pub(super) fn harness_binaries(harness: &str) -> Vec<&'static str> {
-    conspectus::discovery::harness::registered_adapters()
+    crate::discovery::harness::registered_adapters()
         .find(|a| a.harness_key() == harness)
         .map(|a| a.runtime_signature().process_command_basenames.to_vec())
         .unwrap_or_default()
@@ -454,9 +454,9 @@ fn tmux_context() -> Option<HookTmuxRecord> {
     // to answer wins. `SystemTmux` reads `$TMUX` and runs `tmux
     // display-message`; other backends supply their own env-var
     // contract via the same trait method.
-    let backends: Vec<Box<dyn conspectus::discovery::tmux::MuxBackend>> = vec![
-        Box::new(conspectus::discovery::tmux::SystemTmux::new()),
-        Box::new(conspectus::discovery::zellij::SystemZellij::new()),
+    let backends: Vec<Box<dyn crate::discovery::tmux::MuxBackend>> = vec![
+        Box::new(crate::discovery::tmux::SystemTmux::new()),
+        Box::new(crate::discovery::zellij::SystemZellij::new()),
     ];
     for backend in backends {
         if let Some(ctx) = backend.current_session_context() {

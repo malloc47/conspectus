@@ -20,11 +20,11 @@ use std::path::PathBuf;
 use anyhow::{Result, anyhow, bail};
 use clap::{Args, Subcommand};
 
-use conspectus::aliases::{AliasEntry, remove_alias_entry, upsert_alias_entry};
-use conspectus::declared::declared_endpoint_from_node_id;
-use conspectus::discovery::tmux::{MuxBackend, SystemTmux, TmuxRenameOutcome};
-use conspectus::model::NodeId;
-use conspectus::rename::{
+use crate::aliases::{AliasEntry, remove_alias_entry, upsert_alias_entry};
+use crate::declared::declared_endpoint_from_node_id;
+use crate::discovery::tmux::{MuxBackend, SystemTmux, TmuxRenameOutcome};
+use crate::model::NodeId;
+use crate::rename::{
     MuxNativeRename, MuxRenamePlan, RenamePlan, plan_mux_rename, plan_session_rename,
 };
 
@@ -92,9 +92,9 @@ impl RenameSessionArgs {
         };
 
         let snapshot = discover_for_store_selection(&self.scan_roots)?;
-        let snapshot = conspectus::resolve::resolve_snapshot(snapshot);
+        let snapshot = crate::resolve::resolve_snapshot(snapshot);
 
-        let resolved = match conspectus::output::node_show::resolve_node_id(&self.id, &snapshot) {
+        let resolved = match crate::output::node_show::resolve_node_id(&self.id, &snapshot) {
             Ok(id) => id,
             Err(err) => {
                 eprint!("conspectus: {err}");
@@ -106,7 +106,7 @@ impl RenameSessionArgs {
             other => bail!(
                 "`{}` resolves to a {} node; rename session only operates on agent sessions",
                 self.id,
-                conspectus::model::NodeKind::from(&other).snake_case()
+                crate::model::NodeKind::from(&other).snake_case()
             ),
         };
 
@@ -155,9 +155,9 @@ impl RenameMuxArgs {
         }
 
         let snapshot = discover_for_store_selection(&self.scan_roots)?;
-        let snapshot = conspectus::resolve::resolve_snapshot(snapshot);
+        let snapshot = crate::resolve::resolve_snapshot(snapshot);
 
-        let resolved = match conspectus::output::node_show::resolve_node_id(&self.id, &snapshot) {
+        let resolved = match crate::output::node_show::resolve_node_id(&self.id, &snapshot) {
             Ok(id) => id,
             Err(err) => {
                 eprint!("conspectus: {err}");
@@ -169,7 +169,7 @@ impl RenameMuxArgs {
             other => bail!(
                 "`{}` resolves to a {} node; rename mux only operates on mux sessions",
                 self.id,
-                conspectus::model::NodeKind::from(&other).snake_case()
+                crate::model::NodeKind::from(&other).snake_case()
             ),
         };
 
@@ -190,7 +190,7 @@ impl RenameMuxArgs {
 fn execute_mux_rename_plan(plan: &MuxRenamePlan, tmux: &dyn MuxBackend) -> Result<()> {
     for update in &plan.pin_mux_name_updates {
         let store_paths = [PathBuf::from(&update.store_path)];
-        let loaded = conspectus::pins::load_pin_entry_by_id(&store_paths, &update.pin_id)
+        let loaded = crate::pins::load_pin_entry_by_id(&store_paths, &update.pin_id)
             .map_err(|err| anyhow!("read pin store `{}`: {err}", update.store_path))?
             .ok_or_else(|| {
                 anyhow!(
@@ -202,7 +202,7 @@ fn execute_mux_rename_plan(plan: &MuxRenamePlan, tmux: &dyn MuxBackend) -> Resul
         let (_path, mut entry) = loaded;
         if entry.mux.name != update.new_mux_name {
             entry.mux.name = update.new_mux_name.clone();
-            conspectus::pins::upsert_pin_entry(&update.store_path, entry)
+            crate::pins::upsert_pin_entry(&update.store_path, entry)
                 .map_err(|err| anyhow!("write pin store `{}`: {err}", update.store_path))?;
             println!(
                 "cascaded to pin `{}` (mux.name in `{}`)",

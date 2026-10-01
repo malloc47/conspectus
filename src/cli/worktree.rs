@@ -13,17 +13,17 @@ use std::path::{Path, PathBuf};
 use anyhow::{Result, bail};
 use clap::{Args, Subcommand};
 
-use conspectus::config::{ConfigLoader, parse_duration_short};
-use conspectus::discovery::tmux::SystemTmux;
-use conspectus::discovery::tmux::teardown::SystemSignaller;
-use conspectus::discovery::worktree::close_down::{
+use crate::config::{ConfigLoader, parse_duration_short};
+use crate::discovery::tmux::SystemTmux;
+use crate::discovery::tmux::teardown::SystemSignaller;
+use crate::discovery::worktree::close_down::{
     CloseDownPlan, CloseDownReport, execute_close_down, plan_close_down,
 };
-use conspectus::discovery::worktree::{
+use crate::discovery::worktree::{
     WorktreeCreateRequest, WorktreeMergeRequest, WorktreeMutationOutcome, WorktreePruneRequest,
     WorktreeRemoveRequest, resolve_mutation_backend, worktrunk_available,
 };
-use conspectus::model::{GraphNode, GraphSnapshot, RepoId, WorktreeKind, path_is_ancestor_of};
+use crate::model::{GraphNode, GraphSnapshot, RepoId, WorktreeKind, path_is_ancestor_of};
 
 use super::discover_for_store_selection;
 
@@ -71,7 +71,7 @@ impl WorktreeArgs {
 
 /// Resolve the mutation backend from `[worktree] backend` + `wt`
 /// availability, erroring clearly when none is available.
-fn mutation_backend() -> Result<Box<dyn conspectus::discovery::worktree::WorktreeBackend>> {
+fn mutation_backend() -> Result<Box<dyn crate::discovery::worktree::WorktreeBackend>> {
     let cwd = std::env::current_dir()?;
     let outcome = ConfigLoader::from_env().load_from(&cwd);
     match resolve_mutation_backend(outcome.config.worktree.backend, worktrunk_available())? {
@@ -432,7 +432,7 @@ impl WorktreePruneArgs {
 /// Emit the per-step CLI summary of a close-down, and surface a
 /// merge/remove failure as an error exit.
 fn render_close_down_report(plan: &CloseDownPlan, report: &CloseDownReport) -> Result<()> {
-    use conspectus::discovery::tmux::TmuxKillOutcome;
+    use crate::discovery::tmux::TmuxKillOutcome;
     for (target, teardown) in &report.teardowns {
         let phase = if teardown.graceful_exited {
             "exited gracefully"

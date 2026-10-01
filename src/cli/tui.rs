@@ -11,8 +11,8 @@ use std::time::Duration;
 use anyhow::{Result, anyhow};
 use clap::{Args, ValueEnum};
 
-use conspectus::config;
-use conspectus::discovery::tmux::MuxBackend;
+use crate::config;
+use crate::discovery::tmux::MuxBackend;
 
 use super::{ColorFlag, FilterArgs, SortFlag, ViewFlag, resolve_color_from_env, view_from_flag};
 
@@ -156,8 +156,8 @@ enum SnapshotPaneFlag {
 
 #[cfg(feature = "snapshot")]
 impl SnapshotPaneFlag {
-    fn to_pane(self) -> conspectus::tui::snapshot::SnapshotPane {
-        use conspectus::tui::snapshot::SnapshotPane;
+    fn to_pane(self) -> crate::tui::snapshot::SnapshotPane {
+        use crate::tui::snapshot::SnapshotPane;
         match self {
             SnapshotPaneFlag::All => SnapshotPane::All,
             SnapshotPaneFlag::Header => SnapshotPane::Header,
@@ -215,8 +215,8 @@ enum SessionsGroupingFlag {
 }
 
 impl SessionsGroupingFlag {
-    fn to_grouping(self) -> conspectus::tui::Grouping {
-        use conspectus::tui::{Grouping, SessionsGrouping};
+    fn to_grouping(self) -> crate::tui::Grouping {
+        use crate::tui::{Grouping, SessionsGrouping};
         match self {
             SessionsGroupingFlag::Graph => Grouping::Sessions(SessionsGrouping::Graph),
             SessionsGroupingFlag::Workspace => Grouping::Sessions(SessionsGrouping::Workspace),
@@ -228,13 +228,13 @@ impl SessionsGroupingFlag {
     }
 }
 
-pub(super) fn view_flag_label(view: conspectus::tui::View) -> &'static str {
+pub(super) fn view_flag_label(view: crate::tui::View) -> &'static str {
     match view {
-        conspectus::tui::View::Sessions => "sessions",
-        conspectus::tui::View::Mux => "mux",
-        conspectus::tui::View::Union => "union",
-        conspectus::tui::View::Prs => "prs",
-        conspectus::tui::View::Forks => "forks",
+        crate::tui::View::Sessions => "sessions",
+        crate::tui::View::Mux => "mux",
+        crate::tui::View::Union => "union",
+        crate::tui::View::Prs => "prs",
+        crate::tui::View::Forks => "forks",
     }
 }
 
@@ -293,12 +293,12 @@ impl TuiArgs {
             .config
             .tui
             .default_view
-            .unwrap_or(conspectus::tui::View::Sessions);
+            .unwrap_or(crate::tui::View::Sessions);
         let view = if let Some(flag) = self.view {
             view_from_flag(flag)
         } else if !suppress_resume {
-            let cache = conspectus::tui_state::TuiStateCache::from_env();
-            conspectus::tui_state::read_last_view(&cache).unwrap_or(configured_view)
+            let cache = crate::tui_state::TuiStateCache::from_env();
+            crate::tui_state::read_last_view(&cache).unwrap_or(configured_view)
         } else {
             configured_view
         };
@@ -322,7 +322,7 @@ impl TuiArgs {
                 "conspectus: warning: --sessions-grouping is deprecated; \
                  use --grouping instead (ADR 0031)"
             );
-            if view != conspectus::tui::View::Sessions {
+            if view != crate::tui::View::Sessions {
                 eprintln!(
                     "conspectus: warning: --sessions-grouping ignored because \
                      --view is not `sessions`"
@@ -339,34 +339,34 @@ impl TuiArgs {
                 .views
                 .for_view(view)
                 .grouping
-                .unwrap_or_else(|| conspectus::tui::Grouping::default_for(view)),
+                .unwrap_or_else(|| crate::tui::Grouping::default_for(view)),
         };
         let sessions_grouping = match initial_grouping {
-            conspectus::tui::Grouping::Sessions(g) => g,
+            crate::tui::Grouping::Sessions(g) => g,
             // For non-sessions views, the runtime still needs a
             // SessionsGrouping for build_tree_for_view's sessions
             // branch; fall back to the default so a `--view mux
             // --grouping host` launch doesn't accidentally drag a
             // sessions grouping along.
-            _ => conspectus::tui::SessionsGrouping::Graph,
+            _ => crate::tui::SessionsGrouping::Graph,
         };
         let mux_grouping = match initial_grouping {
-            conspectus::tui::Grouping::Mux(g) => g,
-            _ => conspectus::tui::MuxGrouping::Session,
+            crate::tui::Grouping::Mux(g) => g,
+            _ => crate::tui::MuxGrouping::Session,
         };
 
         let explicit_sort = self.sort.is_some();
         let default_sort = match self.sort.unwrap_or(SortFlag::Hierarchy) {
-            SortFlag::Hierarchy => conspectus::tui::Sort::Hierarchy,
-            SortFlag::Recency => conspectus::tui::Sort::Recency,
+            SortFlag::Hierarchy => crate::tui::Sort::Hierarchy,
+            SortFlag::Recency => crate::tui::Sort::Recency,
         };
-        let default_sort = if sessions_grouping == conspectus::tui::SessionsGrouping::None {
-            conspectus::tui::Sort::Recency
+        let default_sort = if sessions_grouping == crate::tui::SessionsGrouping::None {
+            crate::tui::Sort::Recency
         } else {
             default_sort
         };
 
-        let config = conspectus::tui::RunConfig {
+        let config = crate::tui::RunConfig {
             scan_roots,
             cwd: Some(cwd),
             default_view: view,
@@ -391,7 +391,7 @@ impl TuiArgs {
             // Startup default; the operator's last
             // choice is restored from persisted TUI state on top of
             // this, mirroring how `sort` flows.
-            default_mux_recency: conspectus::tui::MuxRecency::default(),
+            default_mux_recency: crate::tui::MuxRecency::default(),
             narrow_layout_threshold: outcome.config.tui.narrow_layout_threshold,
             intervals: outcome.config.server.intervals,
             no_cache: self.no_cache,
@@ -401,9 +401,9 @@ impl TuiArgs {
 
         #[cfg(feature = "snapshot")]
         if self.snapshot {
-            return conspectus::tui::snapshot::run(
+            return crate::tui::snapshot::run(
                 config,
-                conspectus::tui::snapshot::SnapshotConfig {
+                crate::tui::snapshot::SnapshotConfig {
                     width: self.snapshot_width,
                     height: self.snapshot_height,
                     keys: self.snapshot_keys,
@@ -416,10 +416,10 @@ impl TuiArgs {
 
         #[cfg(feature = "snapshot")]
         if let Some(path) = self.fixture {
-            return conspectus::tui::run_from_fixture(config, path);
+            return crate::tui::run_from_fixture(config, path);
         }
 
-        conspectus::tui::run(config)
+        crate::tui::run(config)
     }
 }
 
@@ -429,7 +429,7 @@ fn current_tmux_session_name() -> Option<String> {
     // `Option<String>` shape directly (for the self-attach
     // guard); constructing the full HookTmuxRecord here would
     // be wasted work.
-    let backend = conspectus::discovery::tmux::SystemTmux::new();
+    let backend = crate::discovery::tmux::SystemTmux::new();
     backend
         .current_session_context()
         .and_then(|ctx| ctx.session_name)

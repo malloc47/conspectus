@@ -1,11 +1,11 @@
 use super::*;
-use conspectus::model::{CheckoutId, CheckoutNode, WorktreeMeta};
+use crate::model::{CheckoutId, CheckoutNode, WorktreeMeta};
 
 fn checkout(repo: &str, path: &str, branch: Option<&str>, meta: WorktreeMeta) -> GraphNode {
     let repo_id = RepoId::new(repo);
     let mut node =
         CheckoutNode::new(CheckoutId::new(repo_id.clone(), path), path).with_worktree(meta);
-    node.current_branch = branch.map(|b| conspectus::model::BranchId::new(repo_id, b));
+    node.current_branch = branch.map(|b| crate::model::BranchId::new(repo_id, b));
     GraphNode::Checkout(node)
 }
 
@@ -100,7 +100,7 @@ fn repo_display_name_strips_dot_git() {
 
 // ---- Rm guard helpers ----
 
-use conspectus::model::{AgentSessionId, AgentSessionNode, MuxSessionId, MuxSessionNode};
+use crate::model::{AgentSessionId, AgentSessionNode, MuxSessionId, MuxSessionNode};
 
 fn snapshot_with_worktree_and_sessions() -> GraphSnapshot {
     let mut snap = GraphSnapshot::empty();

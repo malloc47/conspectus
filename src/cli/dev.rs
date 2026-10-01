@@ -18,7 +18,7 @@ use std::io::{self, IsTerminal};
 use anyhow::{Result, anyhow};
 use clap::{Args, Subcommand};
 
-use conspectus::config;
+use crate::config;
 
 use super::{
     ColorFlag, FilterArgs, InclusionFlag, LayoutFlag, OutputFormat, SortFlag, ViewFlag,
@@ -55,7 +55,7 @@ impl DevScenarioArgs {
     fn run(self) -> Result<()> {
         match self.command {
             DevScenarioCommand::List => {
-                for scenario in conspectus::dev_scenarios::SCENARIOS {
+                for scenario in crate::dev_scenarios::SCENARIOS {
                     println!("{}\t{}", scenario.name, scenario.description);
                 }
                 Ok(())
@@ -95,27 +95,27 @@ struct DevScenarioGraphArgs {
 
 impl DevScenarioGraphArgs {
     fn run(self) -> Result<()> {
-        let world = conspectus::dev_scenarios::materialize(&self.name)?;
+        let world = crate::dev_scenarios::materialize(&self.name)?;
         match self.format {
             OutputFormat::Json => println!("{}", world.render_graph_json()?),
             OutputFormat::Dot => {
-                let opts = conspectus::output::DotOptions {
+                let opts = crate::output::DotOptions {
                     candidates: self.candidates.into(),
                     diagnostic_nodes: self.diagnostic_nodes.into(),
                 };
                 println!(
                     "{}",
-                    conspectus::output::render_graph_dot(&world.snapshot()?, opts)?
+                    crate::output::render_graph_dot(&world.snapshot()?, opts)?
                 );
             }
             OutputFormat::Html => {
-                let opts = conspectus::output::HtmlOptions {
+                let opts = crate::output::HtmlOptions {
                     candidates: self.candidates.into(),
                     diagnostic_nodes: self.diagnostic_nodes.into(),
                 };
                 print!(
                     "{}",
-                    conspectus::output::render_graph_html(&world.snapshot()?, opts)?
+                    crate::output::render_graph_html(&world.snapshot()?, opts)?
                 );
             }
         }
@@ -142,16 +142,16 @@ struct DevScenarioTableArgs {
 impl DevScenarioTableArgs {
     fn run(self) -> Result<()> {
         let projection = config::Projection::parse(&self.rows).map_err(|err| anyhow!(err))?;
-        let world = conspectus::dev_scenarios::materialize(&self.name)?;
+        let world = crate::dev_scenarios::materialize(&self.name)?;
         let options = match (self.layout, self.width, self.wide) {
             (LayoutFlag::Columnar, Some(width), _) => {
-                conspectus::output::render::RenderOptions::columnar_width(width)
+                crate::output::render::RenderOptions::columnar_width(width)
             }
-            (LayoutFlag::Columnar, None, _) => conspectus::output::render::RenderOptions::wide(),
+            (LayoutFlag::Columnar, None, _) => crate::output::render::RenderOptions::wide(),
             (LayoutFlag::Card, Some(width), _) => {
-                conspectus::output::render::RenderOptions::card_width(width)
+                crate::output::render::RenderOptions::card_width(width)
             }
-            (LayoutFlag::Card, None, _) => conspectus::output::render::RenderOptions::card(),
+            (LayoutFlag::Card, None, _) => crate::output::render::RenderOptions::card(),
         };
         let table = world.render_table(projection, options)?;
         print!("{table}");
@@ -170,7 +170,7 @@ struct DevScenarioNodeArgs {
 
 impl DevScenarioNodeArgs {
     fn run(self) -> Result<()> {
-        let world = conspectus::dev_scenarios::materialize(&self.name)?;
+        let world = crate::dev_scenarios::materialize(&self.name)?;
         let color = resolve_color_from_env(self.color, io::stdout().is_terminal());
         print!("{}", world.render_node_show(&self.id, color)?);
         Ok(())
@@ -197,22 +197,22 @@ struct DevScenarioTuiArgs {
 
 impl DevScenarioTuiArgs {
     fn run(self) -> Result<()> {
-        let world = conspectus::dev_scenarios::materialize(&self.name)?;
+        let world = crate::dev_scenarios::materialize(&self.name)?;
         let view = view_from_flag(self.view);
         let filter = self.filter_args.to_row_filter()?;
         let grouping = self
             .filter_args
             .to_grouping(view)?
-            .unwrap_or_else(|| conspectus::tui::Grouping::default_for(view));
+            .unwrap_or_else(|| crate::tui::Grouping::default_for(view));
         let color = resolve_color_from_env(self.color, io::stdout().is_terminal());
         let snapshot = world.snapshot()?;
         let mut config = world.tui_config(view, color);
         config.default_sort = match self.sort {
-            SortFlag::Hierarchy => conspectus::tui::Sort::Hierarchy,
-            SortFlag::Recency => conspectus::tui::Sort::Recency,
+            SortFlag::Hierarchy => crate::tui::Sort::Hierarchy,
+            SortFlag::Recency => crate::tui::Sort::Recency,
         };
         config.initial_filter = filter;
         apply_grouping_to_tui_config(&mut config, grouping);
-        conspectus::tui::run_static(config, snapshot)
+        crate::tui::run_static(config, snapshot)
     }
 }

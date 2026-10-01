@@ -16,13 +16,13 @@ use std::str::FromStr;
 use anyhow::{Result, anyhow, bail};
 use clap::{Args, Subcommand};
 
-use conspectus::config::{self, ConfigLoader};
-use conspectus::declared::{
+use crate::config::{self, ConfigLoader};
+use crate::declared::{
     DeclaredEndpoint, DeclaredLink, DeclaredLinkState, declared_endpoint_from_node_id,
     load_declared_link_by_id, parse_declared_document, remove_declared_link,
     select_store_for_declaration, upsert_declared_link,
 };
-use conspectus::model::{GraphLink, GraphSnapshot, LinkEndpoint, Provenance, RelationKind};
+use crate::model::{GraphLink, GraphSnapshot, LinkEndpoint, Provenance, RelationKind};
 
 use super::{
     DeclaredStoreFlag, WriteStoreFlag, candidate_store_paths, discover_for_store_selection,

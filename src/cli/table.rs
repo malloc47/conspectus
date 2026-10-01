@@ -12,7 +12,7 @@ use std::path::PathBuf;
 use anyhow::Result;
 use clap::{Args, Subcommand};
 
-use conspectus::config;
+use crate::config;
 
 use super::{
     ColorFlag, FilterArgs, LayoutFlag, PagerOptions, print_paged, resolve_color_from_env,
@@ -136,7 +136,7 @@ impl TableRowsArgs {
         // flags are the only source so the static table narrows the
         // exact set the operator typed.
         let cli_filter = self.filter_args.to_row_filter()?;
-        let now_epoch = Some(conspectus::discovery::current_epoch());
+        let now_epoch = Some(crate::discovery::current_epoch());
 
         let roots: Vec<PathBuf> = if self.scan_roots.is_empty() {
             vec![cwd]
@@ -152,11 +152,11 @@ impl TableRowsArgs {
         let render_width = resolve_table_width(self.wide, self.width, &io::stdout());
         let mut options = match (self.layout, render_width) {
             (LayoutFlag::Columnar, Some(w)) => {
-                conspectus::output::render::RenderOptions::columnar_width(w)
+                crate::output::render::RenderOptions::columnar_width(w)
             }
-            (LayoutFlag::Columnar, None) => conspectus::output::render::RenderOptions::wide(),
-            (LayoutFlag::Card, Some(w)) => conspectus::output::render::RenderOptions::card_width(w),
-            (LayoutFlag::Card, None) => conspectus::output::render::RenderOptions::card(),
+            (LayoutFlag::Columnar, None) => crate::output::render::RenderOptions::wide(),
+            (LayoutFlag::Card, Some(w)) => crate::output::render::RenderOptions::card_width(w),
+            (LayoutFlag::Card, None) => crate::output::render::RenderOptions::card(),
         };
         if let Some(columns) = columns {
             options = options.with_columns(columns);
@@ -166,7 +166,7 @@ impl TableRowsArgs {
             .with_color(color)
             .with_filter(cli_filter)
             .with_now_epoch(now_epoch);
-        let table = conspectus::output::table::render_with(&snapshot, projection, &options);
+        let table = crate::output::table::render_with(&snapshot, projection, &options);
         print_paged(&table, PagerOptions::from_flags(self.pager, self.no_pager));
         Ok(())
     }
@@ -179,12 +179,12 @@ fn resolve_columns_selection(
     projection: config::Projection,
     cli_spec: Option<&str>,
     config_names: Option<&[String]>,
-) -> Result<Option<Vec<&'static str>>, conspectus::output::render::ColumnsError> {
+) -> Result<Option<Vec<&'static str>>, crate::output::render::ColumnsError> {
     if let Some(spec) = cli_spec {
-        return conspectus::output::render::parse_columns_spec(projection, spec).map(Some);
+        return crate::output::render::parse_columns_spec(projection, spec).map(Some);
     }
     if let Some(names) = config_names {
-        return conspectus::output::render::resolve_explicit_columns(projection, names).map(Some);
+        return crate::output::render::resolve_explicit_columns(projection, names).map(Some);
     }
     Ok(None)
 }

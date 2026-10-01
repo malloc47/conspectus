@@ -2,7 +2,7 @@
 //! commands.
 //!
 //! All three consult the daemon socket first (via
-//! `conspectus::server::client_*`) and either return that
+//! `crate::server::client_*`) and either return that
 //! response or fall through to an in-process path.
 
 use std::path::PathBuf;
@@ -10,7 +10,7 @@ use std::path::PathBuf;
 use anyhow::{Result, bail};
 use clap::{Args, ValueEnum};
 
-use conspectus::config;
+use crate::config;
 
 use super::{cache_resolved_snapshot, warm_start_discover_and_resolve};
 
@@ -40,7 +40,7 @@ impl ServeArgs {
         } else {
             self.scan_roots
         };
-        conspectus::server::run(conspectus::server::ServeConfig {
+        crate::server::run(crate::server::ServeConfig {
             scan_roots,
             intervals: outcome.config.server.intervals,
         })
@@ -70,7 +70,7 @@ impl RefreshArgs {
         // useful error regardless of whether we route through
         // the daemon or the fallback path.
         if let Some(name) = self.class.as_deref()
-            && conspectus::discovery::cache::ProviderClass::parse(name).is_none()
+            && crate::discovery::cache::ProviderClass::parse(name).is_none()
         {
             bail!("unknown --class `{name}`; expected one of git, mux, harness, forge");
         }
@@ -79,23 +79,23 @@ impl RefreshArgs {
         // process is running it owns the freshest writer
         // discipline and is also the canonical place to
         // coordinate a refresh.
-        match conspectus::server::client_refresh(self.class.as_deref()) {
-            conspectus::server::ClientOutcome::Ok(epoch) => {
+        match crate::server::client_refresh(self.class.as_deref()) {
+            crate::server::ClientOutcome::Ok(epoch) => {
                 match self.class.as_deref() {
                     Some(class) => println!("refreshed {class} via daemon (epoch={epoch})"),
                     None => println!("refreshed via daemon (epoch={epoch})"),
                 }
                 return Ok(());
             }
-            conspectus::server::ClientOutcome::DaemonError { code, message } => {
+            crate::server::ClientOutcome::DaemonError { code, message } => {
                 bail!("daemon refused refresh ({code}): {message}");
             }
-            conspectus::server::ClientOutcome::Transport(err) => {
+            crate::server::ClientOutcome::Transport(err) => {
                 eprintln!(
                     "conspectus: warning: daemon socket error, falling back to local refresh: {err:#}"
                 );
             }
-            conspectus::server::ClientOutcome::NoDaemon => {
+            crate::server::ClientOutcome::NoDaemon => {
                 // Expected when no daemon is running. Silent
                 // fall-through to the local path; an operator
                 // who started `conspectus serve` and didn't see
@@ -137,7 +137,7 @@ impl RefreshArgs {
             }
             Some(name) => {
                 // `parse` was validated above.
-                let class = conspectus::discovery::cache::ProviderClass::parse(name)
+                let class = crate::discovery::cache::ProviderClass::parse(name)
                     .expect("class validated above");
                 in_process_class_refresh(class, roots, &outcome.config.server.intervals)?;
                 println!("refreshed {name} via in-process per-class refresh");
@@ -155,18 +155,18 @@ impl RefreshArgs {
 /// in `graph.bin` via `cache_resolved_snapshot` so a subsequent
 /// invocation can warm-start the same way.
 fn in_process_class_refresh(
-    class: conspectus::discovery::cache::ProviderClass,
+    class: crate::discovery::cache::ProviderClass,
     roots: Vec<PathBuf>,
-    intervals: &conspectus::config::ServerIntervals,
+    intervals: &crate::config::ServerIntervals,
 ) -> Result<()> {
     let mut prior = load_prior_from_graph_bin();
     for provider in class.providers() {
         prior.evict_provider(provider);
     }
-    let discovery_config = conspectus::discovery::LocalDiscoveryConfig::from_env();
+    let discovery_config = crate::discovery::LocalDiscoveryConfig::from_env();
     let snapshot =
-        conspectus::discovery::discover_local_warm_with(roots, discovery_config, prior, intervals)?;
-    let snapshot = conspectus::resolve::resolve_snapshot(snapshot);
+        crate::discovery::discover_local_warm_with(roots, discovery_config, prior, intervals)?;
+    let snapshot = crate::resolve::resolve_snapshot(snapshot);
     cache_resolved_snapshot(&snapshot, false);
     Ok(())
 }
@@ -176,30 +176,30 @@ fn in_process_class_refresh(
 /// snapshot on missing-file, version-mismatch, validation
 /// failure, or any other unhappy path — the caller falls
 /// through to cold rebuild semantics.
-fn load_prior_from_graph_bin() -> conspectus::model::GraphSnapshot {
-    let path = conspectus::snapshot::graph_bin_path();
-    match conspectus::snapshot::open_mmap(&path) {
-        Ok(handle) => match conspectus::snapshot::deserialize_owned(&handle) {
+fn load_prior_from_graph_bin() -> crate::model::GraphSnapshot {
+    let path = crate::snapshot::graph_bin_path();
+    match crate::snapshot::open_mmap(&path) {
+        Ok(handle) => match crate::snapshot::deserialize_owned(&handle) {
             Ok(snapshot) => snapshot,
             Err(err) => {
                 eprintln!(
                     "conspectus: warning: failed to deserialize {}: {err:#}",
                     path.display()
                 );
-                conspectus::model::GraphSnapshot::empty()
+                crate::model::GraphSnapshot::empty()
             }
         },
-        Err(conspectus::snapshot::SnapshotError::Io(err))
+        Err(crate::snapshot::SnapshotError::Io(err))
             if err.kind() == std::io::ErrorKind::NotFound =>
         {
-            conspectus::model::GraphSnapshot::empty()
+            crate::model::GraphSnapshot::empty()
         }
         Err(err) => {
             eprintln!(
                 "conspectus: warning: failed to read {}: {err:#}",
                 path.display()
             );
-            conspectus::model::GraphSnapshot::empty()
+            crate::model::GraphSnapshot::empty()
         }
     }
 }
@@ -223,8 +223,8 @@ enum StatusFormatFlag {
 
 impl StatusArgs {
     pub(super) fn run(self) -> Result<()> {
-        match conspectus::server::client_status() {
-            conspectus::server::ClientOutcome::Ok(classes) => {
+        match crate::server::client_status() {
+            crate::server::ClientOutcome::Ok(classes) => {
                 match self.format {
                     StatusFormatFlag::Json => {
                         let value = serde_json::to_value(&classes)?;
@@ -234,11 +234,11 @@ impl StatusArgs {
                 }
                 Ok(())
             }
-            conspectus::server::ClientOutcome::DaemonError { code, message } => {
+            crate::server::ClientOutcome::DaemonError { code, message } => {
                 bail!("daemon refused status ({code}): {message}");
             }
-            conspectus::server::ClientOutcome::Transport(err) => Err(err),
-            conspectus::server::ClientOutcome::NoDaemon => {
+            crate::server::ClientOutcome::Transport(err) => Err(err),
+            crate::server::ClientOutcome::NoDaemon => {
                 println!("no daemon running");
                 Ok(())
             }
@@ -250,14 +250,12 @@ impl StatusArgs {
 /// human-readable block. Empty map prints "no class state yet —
 /// daemon may have just started." The "yet" framing avoids
 /// surprising the operator who started the daemon a beat ago.
-fn render_status_human(
-    classes: &std::collections::BTreeMap<String, conspectus::server::ClassState>,
-) {
+fn render_status_human(classes: &std::collections::BTreeMap<String, crate::server::ClassState>) {
     if classes.is_empty() {
         println!("no class state yet — daemon may have just started");
         return;
     }
-    let now = conspectus::discovery::current_epoch();
+    let now = crate::discovery::current_epoch();
     for (class, state) in classes {
         let outcome = state.last_outcome.as_deref().unwrap_or("pending");
         let age = match state.last_completed_epoch {

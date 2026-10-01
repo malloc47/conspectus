@@ -2,6 +2,8 @@
 
 pub mod aliases;
 pub mod api;
+#[doc(hidden)]
+pub mod cli;
 pub mod config;
 pub mod declared;
 #[cfg(any(test, debug_assertions))]

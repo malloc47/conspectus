@@ -11,9 +11,9 @@ use std::path::PathBuf;
 use anyhow::Result;
 use clap::{Args, Subcommand};
 
-use conspectus::aliases::{AliasEntry, AliasesDocument, parse_aliases_document};
-use conspectus::config::ConfigLoader;
-use conspectus::declared::DeclaredEndpoint;
+use crate::aliases::{AliasEntry, AliasesDocument, parse_aliases_document};
+use crate::config::ConfigLoader;
+use crate::declared::DeclaredEndpoint;
 
 use super::{DeclaredStoreFlag, store_label};
 

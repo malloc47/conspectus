@@ -1,3 +1,6 @@
+//! The `conspectus` command-line interface. `main.rs` calls [`run`];
+//! everything else here is internal to the binary (ADR 0015).
+
 use anyhow::{Result, anyhow, bail};
 use clap::{Args, Parser, Subcommand, ValueEnum};
 use std::collections::BTreeSet;
@@ -5,19 +8,25 @@ use std::io::{self, IsTerminal, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Command as ProcCommand, Stdio};
 
-use conspectus::config::{ConfigLoader, PROJECT_CONFIG_FILENAME};
-use conspectus::declared::{DeclaredEndpoint, select_store_for_declaration};
-use conspectus::model::{GraphSnapshot, Provenance};
+use crate::config::{ConfigLoader, PROJECT_CONFIG_FILENAME};
+use crate::declared::{DeclaredEndpoint, select_store_for_declaration};
+use crate::model::{GraphSnapshot, Provenance};
+
+/// Parse the process arguments and run the selected command. This is
+/// the binary's entry point, not part of the library contract (ADR 0015).
+pub fn run() -> Result<()> {
+    Cli::parse().run()
+}
 
 #[derive(Debug, Parser)]
 #[command(name = "conspectus", version, about = "AI work graph status tool")]
-pub struct Cli {
+pub(crate) struct Cli {
     #[command(subcommand)]
     command: Option<Command>,
 }
 
 impl Cli {
-    pub fn run(self) -> Result<()> {
+    pub(crate) fn run(self) -> Result<()> {
         match self.command.unwrap_or_else(default_command) {
             Command::Graph(args) => args.run(),
             Command::Table(args) => args.run(),
@@ -159,19 +168,19 @@ pub(super) fn warm_start_discover_and_resolve(
     roots: Vec<PathBuf>,
     refresh: bool,
     no_cache: bool,
-    intervals: &conspectus::config::ServerIntervals,
-) -> Result<conspectus::model::GraphSnapshot> {
+    intervals: &crate::config::ServerIntervals,
+) -> Result<crate::model::GraphSnapshot> {
     if !refresh && let Some(snapshot) = try_daemon_snapshot() {
         return Ok(snapshot);
     }
-    let discovery_config = conspectus::discovery::LocalDiscoveryConfig::from_env();
-    let snapshot = conspectus::discovery::discover_local_warm_with(
+    let discovery_config = crate::discovery::LocalDiscoveryConfig::from_env();
+    let snapshot = crate::discovery::discover_local_warm_with(
         roots,
         discovery_config,
-        conspectus::model::GraphSnapshot::empty(),
+        crate::model::GraphSnapshot::empty(),
         intervals,
     )?;
-    let snapshot = conspectus::resolve::resolve_snapshot(snapshot);
+    let snapshot = crate::resolve::resolve_snapshot(snapshot);
     cache_resolved_snapshot(&snapshot, no_cache);
     Ok(snapshot)
 }
@@ -183,12 +192,12 @@ pub(super) fn warm_start_discover_and_resolve(
 /// returns `None` so the caller falls through. Silent: a noisy
 /// stderr per CLI invocation would clobber whatever the
 /// operator was reading.
-fn try_daemon_snapshot() -> Option<conspectus::model::GraphSnapshot> {
-    use conspectus::server::{ClientOutcome, client_snapshot};
+fn try_daemon_snapshot() -> Option<crate::model::GraphSnapshot> {
+    use crate::server::{ClientOutcome, client_snapshot};
     let ClientOutcome::Ok(bytes) = client_snapshot() else {
         return None;
     };
-    conspectus::snapshot::from_bytes(&bytes).ok()
+    crate::snapshot::from_bytes(&bytes).ok()
 }
 
 /// Write the resolved snapshot to `graph.bin` (the
@@ -199,12 +208,12 @@ fn try_daemon_snapshot() -> Option<conspectus::model::GraphSnapshot> {
 /// lets the operator opt out for a single invocation (e.g.
 /// when running against a non-writable `$HOME` or wanting an
 /// in-memory-only render).
-pub(super) fn cache_resolved_snapshot(snapshot: &conspectus::model::GraphSnapshot, no_cache: bool) {
+pub(super) fn cache_resolved_snapshot(snapshot: &crate::model::GraphSnapshot, no_cache: bool) {
     if no_cache {
         return;
     }
-    let bin_path = conspectus::snapshot::graph_bin_path();
-    if let Err(err) = conspectus::snapshot::write_atomic(&bin_path, snapshot) {
+    let bin_path = crate::snapshot::graph_bin_path();
+    if let Err(err) = crate::snapshot::write_atomic(&bin_path, snapshot) {
         eprintln!(
             "conspectus: warning: failed to write {}: {err:#}",
             bin_path.display()
@@ -458,11 +467,11 @@ pub(super) struct FilterArgs {
 }
 
 impl FilterArgs {
-    /// Convert the raw flag values into a [`conspectus::filter::RowFilter`].
+    /// Convert the raw flag values into a [`crate::filter::RowFilter`].
     /// Returns an error when a value fails to parse (max-age
     /// duration, mux-state spelling).
-    pub(super) fn to_row_filter(&self) -> Result<conspectus::filter::RowFilter> {
-        use conspectus::filter::{HarnessFilter, MuxStateFilter, MuxStateKey, RowFilter};
+    pub(super) fn to_row_filter(&self) -> Result<crate::filter::RowFilter> {
+        use crate::filter::{HarnessFilter, MuxStateFilter, MuxStateKey, RowFilter};
         let harness = if self.harness.is_empty() {
             None
         } else {
@@ -498,21 +507,21 @@ impl FilterArgs {
     }
 
     /// Convert the `--grouping` flag value into a typed
-    /// [`conspectus::tui::Grouping`] for the active view. Returns
+    /// [`crate::tui::Grouping`] for the active view. Returns
     /// `Ok(None)` when the flag wasn't provided; returns an error
     /// when the value isn't valid for `view` so the caller can list
     /// the legal values in the message.
     pub(super) fn to_grouping(
         &self,
-        view: conspectus::tui::View,
-    ) -> Result<Option<conspectus::tui::Grouping>> {
+        view: crate::tui::View,
+    ) -> Result<Option<crate::tui::Grouping>> {
         let Some(raw) = self.grouping.as_deref() else {
             return Ok(None);
         };
-        conspectus::tui::Grouping::parse_for(view, raw)
+        crate::tui::Grouping::parse_for(view, raw)
             .map(Some)
             .ok_or_else(|| {
-                let choices = conspectus::tui::Grouping::values_for(view)
+                let choices = crate::tui::Grouping::values_for(view)
                     .iter()
                     .map(|g| g.as_str())
                     .collect::<Vec<_>>()
@@ -525,31 +534,31 @@ impl FilterArgs {
     }
 }
 
-pub(super) fn view_from_flag(flag: ViewFlag) -> conspectus::tui::View {
+pub(super) fn view_from_flag(flag: ViewFlag) -> crate::tui::View {
     match flag {
-        ViewFlag::Sessions => conspectus::tui::View::Sessions,
-        ViewFlag::Mux => conspectus::tui::View::Mux,
-        ViewFlag::Union => conspectus::tui::View::Union,
-        ViewFlag::Prs => conspectus::tui::View::Prs,
-        ViewFlag::Forks => conspectus::tui::View::Forks,
+        ViewFlag::Sessions => crate::tui::View::Sessions,
+        ViewFlag::Mux => crate::tui::View::Mux,
+        ViewFlag::Union => crate::tui::View::Union,
+        ViewFlag::Prs => crate::tui::View::Prs,
+        ViewFlag::Forks => crate::tui::View::Forks,
     }
 }
 
 #[cfg(debug_assertions)]
 pub(super) fn apply_grouping_to_tui_config(
-    config: &mut conspectus::tui::RunConfig,
-    grouping: conspectus::tui::Grouping,
+    config: &mut crate::tui::RunConfig,
+    grouping: crate::tui::Grouping,
 ) {
     match grouping {
-        conspectus::tui::Grouping::Sessions(grouping) => {
+        crate::tui::Grouping::Sessions(grouping) => {
             config.sessions_grouping = grouping;
         }
-        conspectus::tui::Grouping::Mux(grouping) => {
+        crate::tui::Grouping::Mux(grouping) => {
             config.mux_grouping = grouping;
         }
-        conspectus::tui::Grouping::Union(_)
-        | conspectus::tui::Grouping::Prs(_)
-        | conspectus::tui::Grouping::Forks(_) => {}
+        crate::tui::Grouping::Union(_)
+        | crate::tui::Grouping::Prs(_)
+        | crate::tui::Grouping::Forks(_) => {}
     }
 }
 
@@ -615,7 +624,7 @@ pub(super) enum InclusionFlag {
     Exclude,
 }
 
-impl From<InclusionFlag> for conspectus::output::Inclusion {
+impl From<InclusionFlag> for crate::output::Inclusion {
     fn from(flag: InclusionFlag) -> Self {
         match flag {
             InclusionFlag::Include => Self::Include,
@@ -708,8 +717,8 @@ pub(super) fn discover_for_store_selection(scan_roots: &[PathBuf]) -> Result<Gra
     let roots = effective_scan_roots(scan_roots, &cwd);
     let loader = ConfigLoader::from_env();
     let outcome = loader.load_from(&cwd);
-    let discovery_config = conspectus::discovery::LocalDiscoveryConfig::from_env();
-    conspectus::discovery::discover_local_warm_with(
+    let discovery_config = crate::discovery::LocalDiscoveryConfig::from_env();
+    crate::discovery::discover_local_warm_with(
         roots,
         discovery_config,
         GraphSnapshot::empty(),

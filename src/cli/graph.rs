@@ -7,7 +7,7 @@ use std::path::PathBuf;
 use anyhow::Result;
 use clap::Args;
 
-use conspectus::config;
+use crate::config;
 
 use super::{InclusionFlag, OutputFormat, warm_start_discover_and_resolve};
 
@@ -75,29 +75,26 @@ impl GraphArgs {
             &outcome.config.server.intervals,
         )?;
         if self.explain {
-            conspectus::resolve::explain_resolved_relationships(&mut snapshot);
+            crate::resolve::explain_resolved_relationships(&mut snapshot);
         }
 
         match self.format {
             OutputFormat::Json => {
-                println!("{}", conspectus::output::render_graph_json(&snapshot)?);
+                println!("{}", crate::output::render_graph_json(&snapshot)?);
             }
             OutputFormat::Dot => {
-                let opts = conspectus::output::DotOptions {
+                let opts = crate::output::DotOptions {
                     candidates: self.candidates.into(),
                     diagnostic_nodes: self.diagnostic_nodes.into(),
                 };
-                println!("{}", conspectus::output::render_graph_dot(&snapshot, opts)?);
+                println!("{}", crate::output::render_graph_dot(&snapshot, opts)?);
             }
             OutputFormat::Html => {
-                let opts = conspectus::output::HtmlOptions {
+                let opts = crate::output::HtmlOptions {
                     candidates: self.candidates.into(),
                     diagnostic_nodes: self.diagnostic_nodes.into(),
                 };
-                print!(
-                    "{}",
-                    conspectus::output::render_graph_html(&snapshot, opts)?
-                );
+                print!("{}", crate::output::render_graph_html(&snapshot, opts)?);
             }
         }
 

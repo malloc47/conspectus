@@ -11,20 +11,18 @@ use std::path::{Path, PathBuf};
 use anyhow::{Result, anyhow, bail};
 use clap::{Args, Subcommand, ValueEnum};
 
-use conspectus::config::ConfigLoader;
-use conspectus::declared::{
-    DeclaredEndpoint, DeclaredLink, DeclaredLinkState, upsert_declared_link,
-};
-use conspectus::discovery::harness::launch_argv_for;
-use conspectus::discovery::tmux::{
+use crate::config::ConfigLoader;
+use crate::declared::{DeclaredEndpoint, DeclaredLink, DeclaredLinkState, upsert_declared_link};
+use crate::discovery::harness::launch_argv_for;
+use crate::discovery::tmux::{
     MuxBackend, SystemTmux, TmuxAttachOutcome, TmuxNewSessionOutcome, TmuxSendKeysOutcome,
 };
-use conspectus::discovery::worktree::{
+use crate::discovery::worktree::{
     SystemGitWorktree, WorktreeBackend, WorktreeCreateRequest, WorktreeMutationOutcome,
     WorktreeRecord, resolve_mutation_backend, worktrunk_available,
 };
-use conspectus::model::{GraphSnapshot, NodeId, PinBinding, Provenance, RelationKind};
-use conspectus::pins::{
+use crate::model::{GraphSnapshot, NodeId, PinBinding, Provenance, RelationKind};
+use crate::pins::{
     PinEntry, PinLaunch, PinMux, PinStoreKind, PinStoreSelection, TMUX_MUX_BACKEND,
     load_pin_entry_by_id, remove_pin_entry, select_store_for_pin, upsert_pin_entry, user_pin_store,
 };
@@ -167,7 +165,7 @@ impl PinCreateArgs {
             },
             worktree: self
                 .worktree
-                .map(|branch| conspectus::pins::PinWorktree { branch }),
+                .map(|branch| crate::pins::PinWorktree { branch }),
             reason: self.reason,
         };
 
@@ -179,8 +177,7 @@ impl PinCreateArgs {
         // the scan root stays visible on later discovery cycles.
         // Best-effort: a failed cache write must not
         // fail the pin create. `record` no-ops for the user-scope store.
-        let _ =
-            conspectus::pin_store_registry::PinStoreRegistry::from_env().record(&selection.path);
+        let _ = crate::pin_store_registry::PinStoreRegistry::from_env().record(&selection.path);
         let verb = if outcome.changed {
             if outcome.entry_count == 1 {
                 "wrote"
@@ -329,8 +326,8 @@ impl PinShowArgs {
 fn pin_last_session_for<'a>(
     snapshot: &'a GraphSnapshot,
     pin_id: &str,
-) -> Option<&'a conspectus::model::PinLastSession> {
-    use conspectus::model::Diagnostic;
+) -> Option<&'a crate::model::PinLastSession> {
+    use crate::model::Diagnostic;
     snapshot.diagnostics.iter().find_map(|d| match d {
         Diagnostic::PinUnbound {
             pin_id: id,
@@ -495,7 +492,7 @@ impl PinBindArgs {
             .nodes
             .iter()
             .find_map(|node| match node {
-                conspectus::model::GraphNode::AgentSession(session)
+                crate::model::GraphNode::AgentSession(session)
                     if session.id.harness_key == pin.harness
                         && session.id.session_key == self.to =>
                 {
@@ -643,7 +640,7 @@ impl PinAdoptArgs {
             .nodes
             .iter()
             .find_map(|node| match node {
-                conspectus::model::GraphNode::MuxSession(mux) if mux.native_id == native_id => {
+                crate::model::GraphNode::MuxSession(mux) if mux.native_id == native_id => {
                     Some(mux)
                 }
                 _ => None,
@@ -661,7 +658,7 @@ impl PinAdoptArgs {
             .iter()
             .filter(|link| {
                 link.relation == RelationKind::LinkedToMux
-                    && matches!(link.state, conspectus::model::LinkState::Active)
+                    && matches!(link.state, crate::model::LinkState::Active)
                     && link.target_node_id() == Some(&NodeId::MuxSession(mux_node.id.clone()))
             })
             .find_map(|link| match &link.source {
@@ -710,8 +707,7 @@ impl PinAdoptArgs {
         // Record the project store so an adopted pin
         // in a repo outside the scan root stays visible. Best-effort;
         // no-ops for the user-scope store.
-        let _ =
-            conspectus::pin_store_registry::PinStoreRegistry::from_env().record(&selection.path);
+        let _ = crate::pin_store_registry::PinStoreRegistry::from_env().record(&selection.path);
         let verb = if outcome.changed {
             "adopted"
         } else {
@@ -847,7 +843,7 @@ impl PinLaunchArgs {
 /// (from the repo default) via the mutation backend when absent, and
 /// returns the worktree path. Idempotent: an existing worktree is
 /// reused.
-fn realize_worktree_cwd(pin: &conspectus::model::PinCandidate) -> Result<PathBuf> {
+fn realize_worktree_cwd(pin: &crate::model::PinCandidate) -> Result<PathBuf> {
     // The graph candidate doesn't carry the worktree block; read it
     // from the pin's own store file (cheap, and avoids threading the
     // field through the whole model/projection chain).
@@ -916,7 +912,7 @@ fn short_ref(refname: &str) -> String {
 /// file. Best-effort: a read/parse miss or a plain pin yields `None`.
 fn pin_worktree_branch(store_path: &str, id: &str) -> Option<String> {
     let text = std::fs::read_to_string(store_path).ok()?;
-    let document = conspectus::pins::parse_pins_document(&text).ok()?;
+    let document = crate::pins::parse_pins_document(&text).ok()?;
     document
         .entries()
         .iter()
@@ -938,24 +934,24 @@ fn pin_worktree_branch(store_path: &str, id: &str) -> Option<String> {
 /// falls back to a fresh launch.
 fn resolve_resume_argv(
     snapshot: &GraphSnapshot,
-    pin: &conspectus::model::PinCandidate,
+    pin: &crate::model::PinCandidate,
     cwd: &std::path::Path,
     base_argv: &[std::ffi::OsString],
 ) -> Option<Vec<std::ffi::OsString>> {
-    let cache = conspectus::pin_bindings::PinBindingsCache::from_env();
+    let cache = crate::pin_bindings::PinBindingsCache::from_env();
     cache.directory()?;
     resolve_resume_argv_with_cache(snapshot, pin, cwd, base_argv, &cache)
 }
 
 pub(super) fn resolve_resume_argv_with_cache(
     snapshot: &GraphSnapshot,
-    pin: &conspectus::model::PinCandidate,
+    pin: &crate::model::PinCandidate,
     cwd: &std::path::Path,
     base_argv: &[std::ffi::OsString],
-    cache: &conspectus::pin_bindings::PinBindingsCache,
+    cache: &crate::pin_bindings::PinBindingsCache,
 ) -> Option<Vec<std::ffi::OsString>> {
-    use conspectus::discovery::harness::{resume_argv_for, splice_resume_argv};
-    use conspectus::pin_bindings::{LineageOutcome, delete as delete_sidecar, lineage_head, read};
+    use crate::discovery::harness::{resume_argv_for, splice_resume_argv};
+    use crate::pin_bindings::{LineageOutcome, delete as delete_sidecar, lineage_head, read};
 
     let record = match read(cache, &pin.id) {
         Ok(Some(record)) => record,
@@ -1170,7 +1166,7 @@ fn candidate_pin_store_paths(scan_roots: &[PathBuf]) -> Result<Vec<PathBuf>> {
 
 fn discover_and_resolve(scan_roots: &[PathBuf]) -> Result<GraphSnapshot> {
     let snapshot = discover_for_store_selection(scan_roots)?;
-    let mut resolved = conspectus::resolve::resolve_snapshot(snapshot);
+    let mut resolved = crate::resolve::resolve_snapshot(snapshot);
     record_pin_bindings_best_effort(&resolved);
     decorate_unbound_pins_best_effort(&mut resolved);
     Ok(resolved)
@@ -1182,7 +1178,7 @@ fn discover_and_resolve(scan_roots: &[PathBuf]) -> Result<GraphSnapshot> {
 /// affordances. Mirrors `record_pin_bindings_best_effort`: silent
 /// no-op when the cache root is absent.
 fn decorate_unbound_pins_best_effort(snapshot: &mut GraphSnapshot) {
-    use conspectus::pin_bindings::{PinBindingsCache, decorate_unbound_diagnostics};
+    use crate::pin_bindings::{PinBindingsCache, decorate_unbound_diagnostics};
     let cache = PinBindingsCache::from_env();
     if cache.directory().is_none() {
         return;
@@ -1196,7 +1192,7 @@ fn decorate_unbound_pins_best_effort(snapshot: &mut GraphSnapshot) {
 /// missing cache directory or read-only mount degrades pin launch's
 /// continuity story without breaking the cycle.
 fn record_pin_bindings_best_effort(snapshot: &GraphSnapshot) {
-    use conspectus::pin_bindings::{PinBindingsCache, record_bindings};
+    use crate::pin_bindings::{PinBindingsCache, record_bindings};
     let cache = PinBindingsCache::from_env();
     if cache.directory().is_none() {
         // No $XDG_CACHE_HOME, no $HOME — silently skip rather than
@@ -1204,7 +1200,7 @@ fn record_pin_bindings_best_effort(snapshot: &GraphSnapshot) {
         // opt out of the continuity feature implicitly.
         return;
     }
-    let now = conspectus::hook::current_epoch();
+    let now = crate::hook::current_epoch();
     for (pin_id, result) in record_bindings(snapshot, &cache, now) {
         if let Err(err) = result {
             eprintln!("conspectus: pin-binding sidecar write failed for `{pin_id}`: {err}");
@@ -1272,8 +1268,8 @@ fn render_pin_row(
     .join("\t")
 }
 
-fn pin_diagnostic_matches(diagnostic: &conspectus::model::Diagnostic, pin_id: &str) -> bool {
-    use conspectus::model::Diagnostic;
+fn pin_diagnostic_matches(diagnostic: &crate::model::Diagnostic, pin_id: &str) -> bool {
+    use crate::model::Diagnostic;
     match diagnostic {
         Diagnostic::PinUnbound { pin_id: id, .. }
         | Diagnostic::PinStaleMux { pin_id: id, .. }
@@ -1283,8 +1279,8 @@ fn pin_diagnostic_matches(diagnostic: &conspectus::model::Diagnostic, pin_id: &s
     }
 }
 
-fn format_pin_diagnostic(diagnostic: &conspectus::model::Diagnostic) -> String {
-    use conspectus::model::Diagnostic;
+fn format_pin_diagnostic(diagnostic: &crate::model::Diagnostic) -> String {
+    use crate::model::Diagnostic;
     match diagnostic {
         Diagnostic::PinUnbound {
             expected_mux_native_id,
@@ -1317,7 +1313,7 @@ fn format_pin_diagnostic(diagnostic: &conspectus::model::Diagnostic) -> String {
 #[cfg(test)]
 mod worktree_realize_tests {
     use super::*;
-    use conspectus::discovery::worktree::parse_worktree_porcelain;
+    use crate::discovery::worktree::parse_worktree_porcelain;
 
     #[test]
     fn short_ref_strips_heads_prefix() {
@@ -1353,7 +1349,7 @@ mod worktree_realize_tests {
                 socket_name: None,
             },
             launch: None,
-            worktree: Some(conspectus::pins::PinWorktree {
+            worktree: Some(crate::pins::PinWorktree {
                 branch: "feature".to_string(),
             }),
             reason: None,
