@@ -1,3 +1,5 @@
+use super::pins::split_trailing_number;
+use super::tree::row_pin_id;
 use super::*;
 use crate::dev_scenarios;
 use crate::filter::RowFilter;
