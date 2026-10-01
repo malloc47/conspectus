@@ -256,8 +256,9 @@ pub(in crate::tui) fn handle_search_overlay_key(
     use crate::tui::search::items_from_rows;
     use crate::tui::widgets::search::SearchContext;
     use crate::tui::{Overlay, OverlayOutcome};
-    let visible: Vec<_> = app.visible_rows().into_iter().cloned().collect();
-    let items = items_from_rows(&visible);
+    // The items own their strings, so building them ends the borrow
+    // of `app` before the overlay state is borrowed mutably.
+    let items = items_from_rows(app.visible_rows());
     let ctx = SearchContext { items: &items };
     let outcome = match app.search_overlay_mut() {
         Some(state) => state.handle(ctx, key),

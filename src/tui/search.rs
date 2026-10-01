@@ -190,14 +190,14 @@ fn valid_byte_range(
     Some(range)
 }
 
-/// Build the per-row search inputs from a slice of [`Row`]s. The
+/// Build the per-row search inputs from [`Row`]s. The
 /// haystack concatenates every visible field for the row kind so a
 /// query like `"puffin"` matches an alias **or** a title **or** a
 /// preview. The label is the most operator-recognizable text —
 /// alias / title / display path — which is what the result list
 /// renders.
-pub fn items_from_rows<'a>(rows: &'a [Row]) -> Vec<SearchItem<'a>> {
-    rows.iter()
+pub fn items_from_rows<'r>(rows: impl IntoIterator<Item = &'r Row>) -> Vec<SearchItem<'static>> {
+    rows.into_iter()
         .map(|row| match &row.kind {
             RowKind::AgentSession(session) => SearchItem {
                 id: row.id.clone(),

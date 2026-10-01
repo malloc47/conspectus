@@ -173,11 +173,8 @@ fn draw_search_overlay(app: &App, frame: &mut Frame<'_>, area: Rect) {
     };
     // Recompute items from the live visible row tree each frame so
     // the search overlay's label lookup never lags behind a
-    // refresh. The trade is cheap (visible_rows is already
-    // materialized; items_from_rows just clones a few strings per
-    // row).
-    let visible: Vec<crate::tui::rows::Row> = app.visible_rows().into_iter().cloned().collect();
-    let items = items_from_rows(&visible);
+    // refresh. Building them copies a few strings per row.
+    let items = items_from_rows(app.visible_rows());
     let widget = SearchOverlayWidget::new(state, &items, app.theme());
     frame.render_widget(widget, area);
 }

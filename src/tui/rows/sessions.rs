@@ -249,18 +249,10 @@ pub fn build_sessions_tree(inputs: SessionsBuildInputs<'_>) -> RowTree {
     // worktree) come out adjacent for the same (workspace, repo)
     // pair, so we just track the most recent header keys and emit
     // each only on change.
-    let mut last_workspace: Option<Option<String>> = None;
-    let mut last_repo: Option<RepoId> = None;
+    let mut previous = PreviousHeader::Nothing;
     for (key, sessions) in buckets {
         let placeholders = placeholders_by_key.remove(&key).unwrap_or_default();
-        emit_checkout_bucket(
-            &mut ctx,
-            key,
-            sessions,
-            placeholders,
-            &mut last_workspace,
-            &mut last_repo,
-        );
+        emit_checkout_bucket(&mut ctx, key, sessions, placeholders, &mut previous);
     }
 
     if !ungrouped.is_empty() {
@@ -874,9 +866,18 @@ fn resolve_group_key(
     })
 }
 
-/// Emit one bucket while reusing prior workspace / repo group
-/// rows when those keys haven't changed. Mutates `last_workspace`
-/// and `last_repo` to track the most recent header emitted.
+/// The top-level header the previous bucket emitted, so adjacent
+/// buckets share it instead of repeating it.
+#[derive(PartialEq)]
+enum PreviousHeader {
+    Nothing,
+    Workspace(String),
+    Repo(RepoId),
+}
+
+/// Emit one bucket while reusing the previous bucket's workspace or
+/// repo group row when it is the same. Updates `previous` to the
+/// header this bucket sits under.
 ///
 /// Two bucket shapes per ADR 0064:
 /// - Workspace-only (`key.workspace = Some`, `key.repo = None`):
@@ -889,16 +890,13 @@ fn emit_checkout_bucket(
     key: GroupKey,
     mut sessions: Vec<SessionEntry<'_>>,
     placeholder_pins: Vec<&PinCandidate>,
-    last_workspace: &mut Option<Option<String>>,
-    last_repo: &mut Option<RepoId>,
+    previous: &mut PreviousHeader,
 ) {
     sessions.sort_by(|a, b| compare_sessions(a, b, ctx.float_muxed_top));
 
-    let workspace_changed = last_workspace.as_ref() != Some(&key.workspace);
-
-    if let Some(workspace_root) = &key.workspace {
-        if workspace_changed {
-            push_workspace_row(ctx.tree, 0, workspace_root, ctx.data, ctx.home);
+    if let Some(workspace_root) = key.workspace {
+        if *previous != PreviousHeader::Workspace(workspace_root.clone()) {
+            push_workspace_row(ctx.tree, 0, &workspace_root, ctx.data, ctx.home);
         }
         let disambiguating = title_disambiguating_sessions(&sessions);
         for entry in sessions {
@@ -908,8 +906,7 @@ fn emit_checkout_bucket(
         for pin in placeholder_pins {
             emit_pin_placeholder_session_row(ctx, pin, 1);
         }
-        *last_workspace = Some(key.workspace);
-        *last_repo = None;
+        *previous = PreviousHeader::Workspace(workspace_root);
         return;
     }
 
@@ -919,7 +916,7 @@ fn emit_checkout_bucket(
     let Some(repo_bucket) = key.repo else {
         return;
     };
-    let repo_changed = workspace_changed || last_repo.as_ref() != Some(&repo_bucket.repo_id);
+    let repo_changed = *previous != PreviousHeader::Repo(repo_bucket.repo_id.clone());
 
     let depth: u8 = 0;
     if repo_changed {
@@ -967,8 +964,7 @@ fn emit_checkout_bucket(
         emit_pin_placeholder_session_row(ctx, pin, session_depth);
     }
 
-    *last_workspace = Some(key.workspace);
-    *last_repo = Some(repo_bucket.repo_id);
+    *previous = PreviousHeader::Repo(repo_bucket.repo_id);
 }
 
 fn push_workspace_row(
