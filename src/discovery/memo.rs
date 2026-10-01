@@ -5,7 +5,7 @@
 //! ([`TtlCache`]), or a per-file result that stays valid while the
 //! file's modification time and length are unchanged ([`StampedMap`]
 //! with a [`FileStamp`]). All of it lives in one [`DiscoveryCaches`]
-//! value owned by whoever runs discovery repeatedly (ADR 0098). Locks
+//! value owned by whoever runs discovery repeatedly (ADR 0099). Locks
 //! recover from poisoning: the caches are best-effort, so a panic
 //! elsewhere shouldn't make discovery fail.
 

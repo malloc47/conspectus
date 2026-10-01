@@ -834,7 +834,7 @@ pub struct LocalDiscoveryConfig {
     /// variable, kept for existing operator configs) and by
     /// callers via [`Self::without_aux_harness`].
     pub disabled_aux_harnesses: BTreeSet<String>,
-    /// Results reused across runs (ADR 0098). [`Self::from_env`] and
+    /// Results reused across runs (ADR 0099). [`Self::from_env`] and
     /// [`Self::empty`] start with empty caches; long-lived callers
     /// pass their own through [`Self::with_caches`].
     pub caches: Arc<DiscoveryCaches>,

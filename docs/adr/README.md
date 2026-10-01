@@ -75,6 +75,7 @@ Declared logical sessions, tmux session creation and teardown, and worktree stre
 | [0095](0095-bare-mux-session-creation.md) | Bare Mux Session Creation (No Pin, No Agent) | Accepted |
 | [0096](0096-ephemeral-harness-mux-launch.md) | Mux Launch — Harness in a New Mux Without a Pin | Accepted |
 | [0097](0097-launch-spec-form-primitive.md) | Shared Launch-Spec Form Primitive | Accepted |
+| [0098](0098-pin-resume-preserves-launch-argv.md) | Pin Resume Preserves the Pin's Launch Argv | Accepted |
 
 ## Persistence, daemon, and performance
 
@@ -97,7 +98,7 @@ The continuous server, the snapshot format, and the SQLite arc that was built an
 | [0082](0082-retire-sqlite-persistence-and-query-surface.md) | Retire SQLite Persistence And Query Surface | Accepted |
 | [0083](0083-zero-copy-snapshot-format.md) | Zero-Copy Snapshot Format Selection | Accepted |
 | [0091](0091-serve-idle-cost-and-class-gated-mutators.md) | Serve Idle Cost And Class-Gated Mutators | Accepted |
-| [0098](0098-caller-owned-discovery-caches.md) | Caller-Owned Discovery Caches | Accepted |
+| [0099](0099-caller-owned-discovery-caches.md) | Caller-Owned Discovery Caches | Accepted |
 
 ## CLI output and exports
 
@@ -164,11 +165,11 @@ How the project is built, tested, tracked, and shipped, including the agent-orie
 | [0009](0009-lightweight-backlog-tracking.md) | Lightweight Backlog Tracking | Accepted |
 | [0010](0010-task-runner-selection.md) | Task Runner Selection | Accepted |
 | [0015](0015-library-api-surface.md) | Library API Surface | Accepted (amended) |
-| [0100](0100-typed-errors-on-the-library-facade.md) | Typed Errors On The Library Facade | Accepted |
+| [0101](0101-typed-errors-on-the-library-facade.md) | Typed Errors On The Library Facade | Accepted |
 | [0016](0016-distribution-policy.md) | Distribution Policy | Accepted |
 | [0017](0017-repository-placement.md) | Repository Placement | Accepted |
 | [0067](0067-tui-snapshot-mode-for-agent-iteration.md) | Dev-Only TUI Snapshot Mode For Agentic Iteration | Accepted |
 | [0068](0068-snapshot-fixture-mode.md) | Fixture Mode For The Snapshot Tool | Accepted |
 | [0069](0069-interactive-fixture-mode-for-tui.md) | Interactive Fixture Mode For The TUI | Accepted |
 | [0070](0070-showcase-scenario.md) | Showcase Scenario For Comprehensive Functionality Exercise | Accepted |
-| [0099](0099-comments-carry-rationale-not-backlog-ids.md) | Comments Carry Rationale, Not Backlog IDs | Accepted |
+| [0100](0100-comments-carry-rationale-not-backlog-ids.md) | Comments Carry Rationale, Not Backlog IDs | Accepted |

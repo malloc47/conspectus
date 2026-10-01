@@ -100,7 +100,7 @@ These modules are not part of the library contract (ADR 0015, amended
 
 ## Errors
 
-Facade functions return typed errors (ADR 0100). Discovery entry points
+Facade functions return typed errors (ADR 0101). Discovery entry points
 return `DiscoveryError`, which tells scan-root problems apart from a
 failing provider (`DiscoveryError::Provider` names the provider's keys).
 `render_graph_json` returns `serde_json::Error`. Implementors of

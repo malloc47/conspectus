@@ -9,7 +9,7 @@ implemented in `discover_local_warm_with` / `apply_mutators`
 evaluated and dropped as negligible (see Consequences).
 
 The process-global caches listed in the Retrospective now live in a
-caller-owned `DiscoveryCaches` value (ADR 0098).
+caller-owned `DiscoveryCaches` value (ADR 0099).
 
 ## Context
 

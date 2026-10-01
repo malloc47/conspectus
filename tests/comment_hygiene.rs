@@ -1,5 +1,5 @@
 //! Source comments explain behavior and rationale; backlog IDs belong
-//! in commit messages and `docs/backlog.md` (ADR 0099). A comment may
+//! in commit messages and `docs/backlog.md` (ADR 0100). A comment may
 //! still point at an open backlog item when it says so, e.g.
 //! "open work (backlog `T8-009`)".
 

@@ -1,4 +1,4 @@
-# ADR 0100: Typed Errors On The Library Facade
+# ADR 0101: Typed Errors On The Library Facade
 
 ## Status
 

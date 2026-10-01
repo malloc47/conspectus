@@ -58,7 +58,7 @@ The stable consumer entry points are:
 - `discovery::DiscoveryContext`
 - `discovery::DiscoveryCaches`, which callers that run discovery
   repeatedly keep and pass in through
-  `LocalDiscoveryConfig::with_caches` (ADR 0098)
+  `LocalDiscoveryConfig::with_caches` (ADR 0099)
 - `discovery::GraphFragment`
 - `discovery::merge_fragments`
 - injectable process seams such as `tmux::TmuxRunner` and

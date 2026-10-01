@@ -1,4 +1,4 @@
-# ADR 0099: Comments Carry Rationale, Not Backlog IDs
+# ADR 0100: Comments Carry Rationale, Not Backlog IDs
 
 ## Status
 

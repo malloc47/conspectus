@@ -133,7 +133,7 @@ pub struct RunConfig {
     /// so the next invocation can warm-start off this run.
     pub refresh: bool,
     /// Discovery results reused across this session's refreshes
-    /// (ADR 0098). Clones share the same caches.
+    /// (ADR 0099). Clones share the same caches.
     pub discovery_caches: std::sync::Arc<crate::discovery::DiscoveryCaches>,
 }
 

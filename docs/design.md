@@ -1086,7 +1086,7 @@ Below the snapshot, discovery adapters memoize expensive reads
 (git probes, per-file session scans, mux and forge fragments)
 in a `DiscoveryCaches` value owned by the caller. The daemon and
 the TUI keep one for their lifetime; one-shot commands start
-empty (ADR 0098).
+empty (ADR 0099).
 
 On startup the daemon attempts to seed `SnapshotState` from
 `graph.bin` (warm-restart per P11-009). Failure on any leg

@@ -1,4 +1,4 @@
-# ADR 0098: Caller-Owned Discovery Caches
+# ADR 0099: Caller-Owned Discovery Caches
 
 ## Status
 

@@ -14248,7 +14248,7 @@ Landed during the review:
 Queued chunks:
 
 - [x] `H-RUST-010` Replace the process-global discovery caches.
-  - Outcome: ADR 0098. `discovery::DiscoveryCaches` holds all nine
+  - Outcome: ADR 0099. `discovery::DiscoveryCaches` holds all nine
     caches, built from the `TtlCache`/`StampedMap`/`FileStamp`
     helpers in `discovery/memo.rs`. The daemon and TUI own one each and
     pass it through `LocalDiscoveryConfig::with_caches`; one-shot
@@ -14280,7 +14280,7 @@ Queued chunks:
     library facade (ADR 0015); amend ADR 0091, which introduced most
     of these caches.
 - [x] `H-RUST-011` Give the library typed errors.
-  - Outcome: ADR 0100, scoped to what `conspectus::api` exposes. The
+  - Outcome: ADR 0101, scoped to what `conspectus::api` exposes. The
     discovery entry points return `DiscoveryError`. Its `Provider` variant
     names the failing provider's keys and boxes the source error; the
     `DiscoveryProvider` trait keeps `anyhow` for implementors.
@@ -14318,7 +14318,7 @@ Queued chunks:
     #[doc(hidden)]` test helpers.
   - ADR: ADR 0015 amendment. Pairs with `REL-022`.
 - [x] `H-RUST-013` Strip backlog IDs from code comments.
-  - Outcome: ADR 0099. About 1,000 comment lines changed. A script
+  - Outcome: ADR 0100. About 1,000 comment lines changed. A script
     stripped leading `ID:` prefixes and ID-only parentheticals, keeping
     any ADR references. The ~330 lines of history narration ("pre-H-EXT-004
     if-chain", "wave 2 will…") were rewritten by hand to describe current

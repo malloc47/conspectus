@@ -68,7 +68,7 @@ standard checks.
 - Track implementation work in `docs/backlog.md` until a dedicated tracker is
   introduced.
 - Code comments explain behavior and rationale; they do not cite backlog IDs
-  or narrate history (ADR 0099). Put IDs in commit messages and backlog
+  or narrate history (ADR 0100). Put IDs in commit messages and backlog
   outcomes. A comment may point at open work as "backlog `ID`";
   `tests/comment_hygiene.rs` enforces this.
 - Preserve user changes and avoid rewriting unrelated files.

@@ -316,7 +316,7 @@ struct DispatchCtx {
     snapshot_bytes: SnapshotBytes,
     snapshot_state: SnapshotState,
     snapshot_path: Arc<PathBuf>,
-    /// Discovery results reused across cycles (ADR 0098).
+    /// Discovery results reused across cycles (ADR 0099).
     discovery_caches: Arc<DiscoveryCaches>,
 }
 
