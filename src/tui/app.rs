@@ -33,15 +33,12 @@ use crate::tui::widgets::pins::{
 };
 use crate::tui::{RunConfig, View};
 
-/// Reference-counted handle to the App's resolved
-/// [`GraphSnapshot`]. Replaces the previous
-/// `Rc<rusqlite::Connection>` wrapper (P11-011d) — the App now
-/// holds the snapshot directly and every read consumer borrows
-/// it via [`Self::snapshot`].
+/// Cheap-to-clone, reference-counted handle to the App's resolved
+/// [`GraphSnapshot`]. Read consumers borrow it via [`Self::snapshot`].
 #[derive(Clone)]
-pub struct GraphDb(Rc<crate::model::GraphSnapshot>);
+pub struct SnapshotHandle(Rc<crate::model::GraphSnapshot>);
 
-impl GraphDb {
+impl SnapshotHandle {
     pub(crate) fn new(snapshot: crate::model::GraphSnapshot) -> Self {
         Self(Rc::new(snapshot))
     }
@@ -56,13 +53,15 @@ impl GraphDb {
     }
 }
 
-impl fmt::Debug for GraphDb {
+impl fmt::Debug for SnapshotHandle {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_tuple("GraphDb").field(&"<snapshot>").finish()
+        f.debug_tuple("SnapshotHandle")
+            .field(&"<snapshot>")
+            .finish()
     }
 }
 
-impl PartialEq for GraphDb {
+impl PartialEq for SnapshotHandle {
     fn eq(&self, other: &Self) -> bool {
         Rc::ptr_eq(&self.0, &other.0)
     }
@@ -95,9 +94,9 @@ impl ProviderStatus {
 pub struct App {
     config: RunConfig,
     should_quit: bool,
-    /// Latest materialized graph database. `None` before the first
+    /// Latest resolved graph snapshot. `None` before the first
     /// `SetData`.
-    database: Option<GraphDb>,
+    handle: Option<SnapshotHandle>,
     /// Latest row tree built from `snapshot`. Empty until `SetData`
     /// arrives.
     tree: RowTree,
@@ -107,7 +106,7 @@ pub struct App {
     /// Selected row by id. `None` when the tree is empty.
     selection: Option<RowId>,
     /// Detail view-model for the current selection. Recomputed
-    /// whenever selection or database changes; the renderer reads
+    /// whenever selection or snapshot changes; the renderer reads
     /// it directly.
     detail: Option<NodeDetail>,
     /// Whether linked-entity summary rows in the right-panel detail
@@ -420,7 +419,7 @@ pub enum Msg {
     /// later refreshes ignore the hint and prefer the retained
     /// selection.
     SetData {
-        snapshot: GraphDb,
+        snapshot: SnapshotHandle,
         tree: RowTree,
         loaded_at_epoch: i64,
         initial_selection_hint: Option<RowId>,
@@ -739,7 +738,7 @@ impl App {
             config,
             active_view,
             should_quit: false,
-            database: None,
+            handle: None,
             tree: RowTree::default(),
             expanded: BTreeSet::new(),
             selection: None,
@@ -1461,7 +1460,7 @@ impl App {
             RowKind::MuxSession(mux) => mux.pin_id.clone()?,
             _ => return None,
         };
-        self.database.as_ref().and_then(|db| {
+        self.handle.as_ref().and_then(|db| {
             db.snapshot()
                 .pins
                 .iter()
@@ -1489,7 +1488,7 @@ impl App {
         match &row.kind {
             RowKind::AgentSession(session) => {
                 let cwd = self
-                    .database
+                    .handle
                     .as_ref()
                     .and_then(|db| {
                         db.snapshot().nodes.iter().find_map(|node| match node {
@@ -1611,11 +1610,11 @@ impl App {
         if let Some(adopt) = self.pin_adopt_defaults_if_available() {
             push(&adopt.cwd, "adopt", 900);
         }
-        if let Some(database) = self.database.as_ref() {
-            for pin in &database.snapshot().pins {
+        if let Some(handle) = self.handle.as_ref() {
+            for pin in &handle.snapshot().pins {
                 push(&pin.cwd, "pin", 500);
             }
-            for node in &database.snapshot().nodes {
+            for node in &handle.snapshot().nodes {
                 match node {
                     crate::model::GraphNode::AgentSession(node) => {
                         if let Some(cwd) = node.cwd.as_deref() {
@@ -1662,8 +1661,8 @@ impl App {
 
     fn used_pin_ids(&self) -> BTreeSet<String> {
         let mut ids = BTreeSet::new();
-        if let Some(database) = self.database.as_ref() {
-            for pin in &database.snapshot().pins {
+        if let Some(handle) = self.handle.as_ref() {
+            for pin in &handle.snapshot().pins {
                 ids.insert(pin.id.clone());
             }
         }
@@ -1730,13 +1729,13 @@ impl App {
 
     fn used_pin_mux_names(&self) -> BTreeSet<String> {
         let mut names = BTreeSet::new();
-        if let Some(database) = self.database.as_ref() {
-            for node in &database.snapshot().nodes {
+        if let Some(handle) = self.handle.as_ref() {
+            for node in &handle.snapshot().nodes {
                 if let crate::model::GraphNode::MuxSession(mux) = node {
                     names.insert(mux.native_id.clone());
                 }
             }
-            for pin in &database.snapshot().pins {
+            for pin in &handle.snapshot().pins {
                 names.insert(pin.mux.name.clone());
             }
         }
@@ -1745,8 +1744,8 @@ impl App {
 
     fn used_mux_names(&self) -> BTreeSet<String> {
         let mut names = BTreeSet::new();
-        if let Some(database) = self.database.as_ref() {
-            for node in &database.snapshot().nodes {
+        if let Some(handle) = self.handle.as_ref() {
+            for node in &handle.snapshot().nodes {
                 if let crate::model::GraphNode::MuxSession(mux) = node {
                     names.insert(mux.native_id.clone());
                 }
@@ -1766,15 +1765,15 @@ impl App {
             .iter()
             .map(std::string::ToString::to_string)
             .collect();
-        if let Some(database) = self.database.as_ref() {
-            for node in &database.snapshot().nodes {
+        if let Some(handle) = self.handle.as_ref() {
+            for node in &handle.snapshot().nodes {
                 if let crate::model::GraphNode::AgentSession(session) = node
                     && !session.harness_key.trim().is_empty()
                 {
                     keys.insert(session.harness_key.clone());
                 }
             }
-            for pin in &database.snapshot().pins {
+            for pin in &handle.snapshot().pins {
                 if !pin.harness.trim().is_empty() {
                     keys.insert(pin.harness.clone());
                 }
@@ -1790,7 +1789,7 @@ impl App {
     /// `pin adopt` would pick. Returns `None` when no active link
     /// attributes a harness to the mux.
     fn infer_harness_for_mux(&self, mux: &MuxSessionId) -> Option<String> {
-        let db = self.database.as_ref()?;
+        let db = self.handle.as_ref()?;
         let snapshot = db.snapshot();
         let target = NodeId::MuxSession(mux.clone());
         snapshot
@@ -1812,7 +1811,7 @@ impl App {
     /// holds an absolute path that survives the validator in
     /// `pins::validate_entry`.
     fn mux_cwd_for(&self, mux: &MuxSessionId) -> Option<String> {
-        let db = self.database.as_ref()?;
+        let db = self.handle.as_ref()?;
         db.snapshot().nodes.iter().find_map(|node| match node {
             crate::model::GraphNode::MuxSession(node) if &node.id == mux => node.cwd.clone(),
             _ => None,
@@ -2061,10 +2060,10 @@ impl App {
         self.preview_scroll
     }
 
-    /// Latest graph database, if loaded. Mostly useful to other modules
+    /// Latest graph snapshot, if loaded. Mostly useful to other modules
     /// that compute view-models against the same data.
-    pub(crate) fn graph_db(&self) -> Option<&GraphDb> {
-        self.database.as_ref()
+    pub(crate) fn snapshot_handle(&self) -> Option<&SnapshotHandle> {
+        self.handle.as_ref()
     }
 
     /// Unix-epoch seconds at which the latest snapshot was loaded.
@@ -2464,9 +2463,9 @@ impl App {
                 )));
             }
             Msg::PinBind(request) => {
-                if self.database.is_none() {
+                if self.handle.is_none() {
                     effects.push(Effect::Toast(
-                        "pin bind failed: no graph database available".to_string(),
+                        "pin bind failed: no graph loaded yet".to_string(),
                     ));
                 } else {
                     effects.push(Effect::WriteStore(crate::tui::effect::StoreOp::PinBind(
@@ -2677,7 +2676,7 @@ impl App {
 
     fn set_data(
         &mut self,
-        snapshot: GraphDb,
+        snapshot: SnapshotHandle,
         tree: RowTree,
         loaded_at_epoch: i64,
         initial_selection_hint: Option<RowId>,
@@ -2692,7 +2691,7 @@ impl App {
         if is_first_load {
             self.expanded = initial_expanded_rows(&tree);
         }
-        self.database = Some(snapshot);
+        self.handle = Some(snapshot);
         self.tree = tree;
 
         let visible = self.visible_rows_owned();
@@ -2742,7 +2741,7 @@ impl App {
     /// next Msg::SetData will build the tree against the up-to-date
     /// projection state.
     fn rebuild_tree_in_place(&mut self) {
-        let Some(db) = self.database.as_ref() else {
+        let Some(db) = self.handle.as_ref() else {
             return;
         };
         let tree = crate::tui::rows::build_tree_for_view(crate::tui::rows::TreeInputs::from_app(
@@ -2941,11 +2940,11 @@ impl App {
             self.explorer = None;
             return;
         };
-        let Some(database) = self.database.as_ref() else {
+        let Some(handle) = self.handle.as_ref() else {
             self.explorer = None;
             return;
         };
-        let snapshot = database.snapshot();
+        let snapshot = handle.snapshot();
         let raw_target = match selection {
             RowId::Group(node) => Some(node.clone()),
             RowId::AgentSession(node) => Some(node.clone()),
@@ -2998,13 +2997,13 @@ impl App {
         home: Option<&std::path::Path>,
         strip_relationships: bool,
     ) {
-        let database = self.database.as_ref();
-        let Some(database) = database else {
+        let handle = self.handle.as_ref();
+        let Some(handle) = handle else {
             self.explorer = None;
             return;
         };
         let view = build_node_view(ExplorerInputs {
-            snapshot: database.snapshot(),
+            snapshot: handle.snapshot(),
             target: &target,
             home,
             now: crate::tui::rows::tree_current_unix_epoch(),
@@ -3189,12 +3188,12 @@ impl App {
         // Build the new view. If we can't load it, leave state alone
         // and surface a status message.
         let home = home_for_config(&self.config);
-        let database = self.database.as_ref();
-        let Some(database) = database else {
+        let handle = self.handle.as_ref();
+        let Some(handle) = handle else {
             return;
         };
         let next = build_node_view(ExplorerInputs {
-            snapshot: database.snapshot(),
+            snapshot: handle.snapshot(),
             target: &target,
             home: home.as_deref(),
             now: crate::tui::rows::tree_current_unix_epoch(),
@@ -3216,7 +3215,7 @@ impl App {
                 // surfaces consistent info during the renderer
                 // transition (T8-029).
                 self.detail = build_node_detail(DetailInputs {
-                    snapshot: database.snapshot(),
+                    snapshot: handle.snapshot(),
                     target: &target,
                     home: home.as_deref(),
                 });
@@ -3296,12 +3295,12 @@ impl App {
             return;
         };
         let home = home_for_config(&self.config);
-        let database = self.database.as_ref();
-        let Some(database) = database else {
+        let handle = self.handle.as_ref();
+        let Some(handle) = handle else {
             return;
         };
         let view = build_node_view(ExplorerInputs {
-            snapshot: database.snapshot(),
+            snapshot: handle.snapshot(),
             target: &hop.focused,
             home: home.as_deref(),
             now: crate::tui::rows::tree_current_unix_epoch(),
@@ -3319,7 +3318,7 @@ impl App {
         restored.full_detail_expanded = hop.full_detail_expanded;
         restored.reseat_cursor(hop.cursor_key);
         self.detail = build_node_detail(DetailInputs {
-            snapshot: database.snapshot(),
+            snapshot: handle.snapshot(),
             target: &hop.focused,
             home: home.as_deref(),
         });

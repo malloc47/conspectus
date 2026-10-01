@@ -106,10 +106,10 @@ pub enum AttachDisabled {
 /// against [`App`] state, does not touch the terminal or the
 /// network.
 pub fn resolve_attach_target(app: &App) -> Result<AttachTarget, AttachDisabled> {
-    let Some(database) = app.graph_db().cloned() else {
+    let Some(handle) = app.snapshot_handle().cloned() else {
         return Err(AttachDisabled::NoSelection);
     };
-    let snapshot = database.snapshot();
+    let snapshot = handle.snapshot();
     let Some(selection) = app.selection() else {
         return Err(AttachDisabled::NoSelection);
     };
@@ -221,8 +221,10 @@ pub fn resolve_view_session(app: &App) -> Result<AgentSessionId, ViewerDisabled>
     match &row.kind {
         RowKind::AgentSession(session) => Ok(session.session.clone()),
         RowKind::MuxSession(mux_row) => {
-            let database = app.graph_db().ok_or(ViewerDisabled::UnsupportedRow)?;
-            let snapshot = database.snapshot();
+            let handle = app
+                .snapshot_handle()
+                .ok_or(ViewerDisabled::UnsupportedRow)?;
+            let snapshot = handle.snapshot();
             let mux_node_id = NodeId::MuxSession(mux_row.mux.clone());
             preferred_session_for_mux(snapshot, &mux_node_id).ok_or(ViewerDisabled::UnsupportedRow)
         }
@@ -249,10 +251,10 @@ pub fn selected_pin_diagnostics(app: &App) -> Vec<PinDiagnosticView> {
     let Some(pin_id) = pin_id else {
         return Vec::new();
     };
-    let Some(database) = app.graph_db() else {
+    let Some(handle) = app.snapshot_handle() else {
         return Vec::new();
     };
-    pin_diagnostics_for_id(database.snapshot(), pin_id)
+    pin_diagnostics_for_id(handle.snapshot(), pin_id)
 }
 
 pub fn pin_diagnostics_for_id(snapshot: &GraphSnapshot, pin_id: &str) -> Vec<PinDiagnosticView> {
@@ -513,7 +515,7 @@ pub fn pin_launch_disabled_reason(reason: &PinLaunchDisabled) -> String {
 /// overlay dispatch (which already has the `pin_id` in hand from
 /// the modal) can share the same lookup.
 pub fn pin_launch_target_from_snapshot(app: &App, pin_id: &str) -> Option<PinLaunchTarget> {
-    app.graph_db()?
+    app.snapshot_handle()?
         .snapshot()
         .pins
         .iter()

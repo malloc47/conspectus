@@ -933,7 +933,7 @@ mod selected_default_action_tests {
     };
     use crate::resolve::resolve_snapshot;
     use crate::tui::SessionsGrouping;
-    use crate::tui::app::{GraphDb, Msg};
+    use crate::tui::app::{Msg, SnapshotHandle};
     use crate::tui::rows::sessions::{SessionsBuildInputs, build_sessions_tree};
 
     fn session_node(harness: &str, scope: &str, key: &str, cwd: &str) -> GraphNode {
@@ -995,7 +995,7 @@ mod selected_default_action_tests {
         cfg.default_view = View::Sessions;
         let mut app = App::new(cfg);
         app.update(Msg::SetData {
-            snapshot: GraphDb::from_snapshot(&snapshot),
+            snapshot: SnapshotHandle::from_snapshot(&snapshot),
             tree,
             loaded_at_epoch: 1_700_000_000,
             initial_selection_hint: None,
@@ -1096,7 +1096,7 @@ mod selected_default_action_tests {
         cfg.default_view = View::Mux;
         let mut app = App::new(cfg);
         app.update(Msg::SetData {
-            snapshot: GraphDb::new(snapshot),
+            snapshot: SnapshotHandle::new(snapshot),
             tree,
             loaded_at_epoch: 1_700_000_000,
             initial_selection_hint: None,
@@ -1187,9 +1187,9 @@ fn translate_ignores_release_kind_keys() {
 
 /// H-TUI-001 / ADR 0085 contract 4: view / grouping / filter /
 /// sort changes must not trigger discovery. The signal we lean
-/// on is `GraphDb` identity — `refresh` builds a fresh
-/// `GraphDb::new(...)` (a distinct `Rc`), so if the projection
-/// path had run discovery the post-action `graph_db()` would
+/// on is `SnapshotHandle` identity — `refresh` builds a fresh
+/// `SnapshotHandle::new(...)` (a distinct `Rc`), so if the projection
+/// path had run discovery the post-action `snapshot_handle()` would
 /// point at a different allocation than the pre-action one.
 mod projection_zero_discovery {
     use super::*;
@@ -1199,7 +1199,7 @@ mod projection_zero_discovery {
         RepoId, RepoNode,
     };
     use crate::resolve::resolve_snapshot;
-    use crate::tui::app::GraphDb;
+    use crate::tui::app::SnapshotHandle;
     use crate::tui::{Grouping, MuxGrouping, SessionsGrouping, View};
 
     fn seeded_app() -> App {
@@ -1235,7 +1235,7 @@ mod projection_zero_discovery {
         cfg.default_view = View::Sessions;
         let mut app = App::new(cfg);
         app.update(Msg::SetData {
-            snapshot: GraphDb::from_snapshot(&snapshot),
+            snapshot: SnapshotHandle::from_snapshot(&snapshot),
             tree,
             loaded_at_epoch: 1_700_000_000,
             initial_selection_hint: None,
@@ -1245,7 +1245,7 @@ mod projection_zero_discovery {
 
     fn same_snapshot(a: &App, b_ptr: *const crate::model::GraphSnapshot) -> bool {
         std::ptr::eq(
-            a.graph_db().expect("snapshot loaded").snapshot() as *const _,
+            a.snapshot_handle().expect("snapshot loaded").snapshot() as *const _,
             b_ptr,
         )
     }
@@ -1253,7 +1253,7 @@ mod projection_zero_discovery {
     #[test]
     fn view_switch_does_not_run_discovery() {
         let mut app = seeded_app();
-        let before = app.graph_db().expect("snapshot loaded").snapshot() as *const _;
+        let before = app.snapshot_handle().expect("snapshot loaded").snapshot() as *const _;
         let _ = app.update(Msg::SwitchView(View::Mux));
         assert_eq!(app.active_view(), View::Mux);
         assert!(
@@ -1265,7 +1265,7 @@ mod projection_zero_discovery {
     #[test]
     fn grouping_change_does_not_run_discovery() {
         let mut app = seeded_app();
-        let before = app.graph_db().expect("snapshot loaded").snapshot() as *const _;
+        let before = app.snapshot_handle().expect("snapshot loaded").snapshot() as *const _;
         let _ = app.update(Msg::SetGrouping(Grouping::Sessions(
             SessionsGrouping::Workspace,
         )));
@@ -1282,7 +1282,7 @@ mod projection_zero_discovery {
     #[test]
     fn filter_change_does_not_run_discovery() {
         let mut app = seeded_app();
-        let before = app.graph_db().expect("snapshot loaded").snapshot() as *const _;
+        let before = app.snapshot_handle().expect("snapshot loaded").snapshot() as *const _;
         let filter = RowFilter {
             harness: Some(crate::filter::HarnessFilter::from_values(["codex"])),
             ..RowFilter::default()
@@ -1318,7 +1318,7 @@ mod mux_effect_executor {
     use super::*;
     use crate::discovery::tmux::{FakeTmux, TmuxCaptureOutcome};
     use crate::model::MuxSessionId;
-    use crate::tui::app::GraphDb;
+    use crate::tui::app::SnapshotHandle;
     use crate::tui::effect::{Effect, MuxOp};
     use crate::tui::preview::PreviewContent;
 
@@ -1328,7 +1328,7 @@ mod mux_effect_executor {
         // No snapshot needed — the executor branch just calls
         // capture_via on the runner and dispatches
         // Msg::SetMuxPreview, so App only needs to be alive.
-        let _ = GraphDb::from_snapshot(&crate::model::GraphSnapshot::empty());
+        let _ = SnapshotHandle::from_snapshot(&crate::model::GraphSnapshot::empty());
         let mux = MuxSessionId::new("tmux:editor");
         let tmux = FakeTmux::with_sessions("").with_capture(
             "editor",
@@ -1483,7 +1483,7 @@ mod pin_launch_scan_root {
             &resolved, &app,
         ));
         app.update(Msg::SetData {
-            snapshot: crate::tui::app::GraphDb::new(resolved),
+            snapshot: crate::tui::app::SnapshotHandle::new(resolved),
             tree,
             loaded_at_epoch: 0,
             initial_selection_hint: None,

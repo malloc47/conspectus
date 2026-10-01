@@ -27,7 +27,7 @@ use crate::resolve::resolve_snapshot;
 #[cfg(test)]
 use crate::tui::View;
 use crate::tui::actions::{AttachTarget, PinLaunchTarget, resolve_attach_target};
-use crate::tui::app::{App, GraphDb, Msg};
+use crate::tui::app::{App, Msg, SnapshotHandle};
 use crate::tui::effect::Effect;
 use crate::tui::preview::capture_via;
 use crate::tui::resume::{ResumeTarget, launch_resume, resume_disabled_reason};
@@ -141,7 +141,7 @@ impl LoopMode for LiveMode {
     ) -> Result<()> {
         // T8-007: initial discovery runs on the same background
         // worker path as timer refreshes and `r`, so the first
-        // frame paints immediately with the `graph_db.is_none()`
+        // frame paints immediately with the `snapshot_handle.is_none()`
         // "Loading discovery…" placeholder while the scan runs.
         // Provider status still populates synchronously so the
         // status-bar chips render on frame one.
@@ -151,7 +151,7 @@ impl LoopMode for LiveMode {
         spawn_tracked_discovery(app, &self.result_tx);
         // `refresh_mux_preview_if_needed` is a no-op until a
         // snapshot lands (its `resolve_attach_target` guard
-        // returns `NoSelection` when `graph_db` is None), so we
+        // returns `NoSelection` when `snapshot_handle` is None), so we
         // skip the call here — the first post-`drain` iteration
         // in the run loop will invoke it once the worker
         // delivers.
@@ -179,10 +179,10 @@ impl LoopMode for LiveMode {
                     let tree = crate::tui::rows::build_tree_for_view(
                         crate::tui::rows::TreeInputs::from_app(&snapshot, app),
                     );
-                    let database = GraphDb::new(snapshot);
+                    let handle = SnapshotHandle::new(snapshot);
                     let initial_selection_hint = launch_context_row_id(&tree);
                     app.update(Msg::SetData {
-                        snapshot: database,
+                        snapshot: handle,
                         tree,
                         loaded_at_epoch: crate::discovery::current_epoch(),
                         initial_selection_hint,
@@ -756,10 +756,10 @@ fn set_static_data(
     let tree = crate::tui::rows::build_tree_for_view(crate::tui::rows::TreeInputs::from_app(
         snapshot, app,
     ));
-    let database = GraphDb::new(snapshot.clone());
+    let handle = SnapshotHandle::new(snapshot.clone());
     let initial_selection_hint = launch_context_row_id(&tree);
     app.update(Msg::SetData {
-        snapshot: database,
+        snapshot: handle,
         tree,
         loaded_at_epoch: crate::discovery::current_epoch(),
         initial_selection_hint,
@@ -961,7 +961,7 @@ pub(super) fn open_worktree_menu_action(app: &mut App) {
         return;
     };
     let can_mutate = worktree_mutation_available();
-    let ctx = if let Some(db) = app.graph_db() {
+    let ctx = if let Some(db) = app.snapshot_handle() {
         context_for_node(db.snapshot(), &node, can_mutate)
     } else {
         app.update(Msg::SetStatus(Some(
@@ -995,7 +995,7 @@ pub(super) fn open_worktree_close_down_action(app: &mut App) {
         return;
     };
     let can_mutate = worktree_mutation_available();
-    let ctx = if let Some(db) = app.graph_db() {
+    let ctx = if let Some(db) = app.snapshot_handle() {
         context_for_node(db.snapshot(), &node, can_mutate)
     } else {
         app.update(Msg::SetStatus(Some(
@@ -1125,7 +1125,7 @@ pub(crate) fn known_harness_keys() -> Vec<String> {
 /// `tmux:<name>` on the default socket per ADR 0057).
 pub(crate) fn known_live_mux_names(app: &App) -> Vec<String> {
     use crate::model::GraphNode;
-    let Some(db) = app.graph_db() else {
+    let Some(db) = app.snapshot_handle() else {
         return Vec::new();
     };
     let mut names: Vec<String> = db
@@ -1170,7 +1170,7 @@ fn derive_new_mux_cwd(app: &App) -> Option<String> {
     let selection = app.selection()?.clone();
     let rows = app.visible_rows();
     let row = rows.iter().find(|row| row.id == selection)?;
-    let snapshot = app.graph_db()?.snapshot();
+    let snapshot = app.snapshot_handle()?.snapshot();
     match &row.kind {
         RowKind::Group(group) => group
             .primary_node
@@ -1768,7 +1768,7 @@ fn execute_worktree_close_down(
 
     // Rebuild the plan from the held snapshot so it reflects the graph
     // as of the operator's gesture.
-    let plan = if let Some(db) = app.graph_db() {
+    let plan = if let Some(db) = app.snapshot_handle() {
         plan_close_down(db.snapshot(), std::path::PathBuf::from(&repo_root), &branch)
     } else {
         app.update(Msg::SetStatus(Some(
@@ -1868,15 +1868,15 @@ fn execute_pin_remove(app: &mut App, request: crate::tui::widgets::pins::PinRemo
 }
 
 fn execute_pin_bind(app: &mut App, request: crate::tui::widgets::pins::PinBindRequest) {
-    let Some(database) = app.graph_db().cloned() else {
+    let Some(handle) = app.snapshot_handle().cloned() else {
         // Reducer already gated on this — the branch is a safety
         // net for direct executor callers.
         let _ = app.update(Msg::SetStatus(Some(
-            "pin bind failed: no graph database available".to_string(),
+            "pin bind failed: no graph loaded yet".to_string(),
         )));
         return;
     };
-    let snapshot = database.snapshot();
+    let snapshot = handle.snapshot();
     match write_pin_bind(&request, snapshot, &crate::config::ConfigLoader::from_env()) {
         Ok(outcome) => {
             let verb = if outcome.changed {
@@ -1983,13 +1983,13 @@ fn execute_commit_alias_rename(
     session_id: crate::model::AgentSessionId,
     new_display_name: Option<String>,
 ) {
-    let Some(database) = app.graph_db().cloned() else {
+    let Some(handle) = app.snapshot_handle().cloned() else {
         let _ = app.update(Msg::SetStatus(Some(
-            "rename: no graph database available".to_string(),
+            "rename: no graph loaded yet".to_string(),
         )));
         return;
     };
-    let snapshot = database.snapshot();
+    let snapshot = handle.snapshot();
 
     let plan =
         match crate::rename::plan_session_rename(snapshot, &session_id, new_display_name, false) {
@@ -2090,13 +2090,13 @@ fn execute_commit_mux_rename(
     mux_id: crate::model::MuxSessionId,
     new_name: String,
 ) {
-    let Some(database) = app.graph_db().cloned() else {
+    let Some(handle) = app.snapshot_handle().cloned() else {
         let _ = app.update(Msg::SetStatus(Some(
-            "mux rename: no graph database available".to_string(),
+            "mux rename: no graph loaded yet".to_string(),
         )));
         return;
     };
-    let snapshot = database.snapshot();
+    let snapshot = handle.snapshot();
 
     let plan = match crate::rename::plan_mux_rename(snapshot, &mux_id, new_name) {
         Ok(plan) => plan,
@@ -2366,10 +2366,10 @@ fn refresh_with_config(app: &mut App, config: &RunConfig) {
             let tree = crate::tui::rows::build_tree_for_view(
                 crate::tui::rows::TreeInputs::from_app(&snapshot, app),
             );
-            let database = GraphDb::new(snapshot);
+            let handle = SnapshotHandle::new(snapshot);
             let initial_selection_hint = launch_context_row_id(&tree);
             app.update(Msg::SetData {
-                snapshot: database,
+                snapshot: handle,
                 tree,
                 loaded_at_epoch: crate::discovery::current_epoch(),
                 initial_selection_hint,
@@ -2428,10 +2428,10 @@ pub(super) fn refresh_from_snapshot(
     let tree = crate::tui::rows::build_tree_for_view(crate::tui::rows::TreeInputs::from_app(
         &resolved, app,
     ));
-    let database = GraphDb::new(resolved);
+    let handle = SnapshotHandle::new(resolved);
     let initial_selection_hint = launch_context_row_id(&tree);
     app.update(Msg::SetData {
-        snapshot: database,
+        snapshot: handle,
         tree,
         loaded_at_epoch: crate::discovery::current_epoch(),
         initial_selection_hint,
@@ -2891,7 +2891,7 @@ fn default_action(
 /// falls back to its inherited-CWD discovery (matching pre-fix
 /// behavior on the honest miss).
 fn resolve_pin_scan_root(app: &App, pin_id: &str) -> Option<String> {
-    app.graph_db()
+    app.snapshot_handle()
         .and_then(|db| db.snapshot().pins.iter().find(|p| p.id == pin_id).cloned())
         .map(|p| p.cwd)
 }

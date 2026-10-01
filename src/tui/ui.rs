@@ -41,7 +41,7 @@ use crate::tui::SessionsGrouping;
 use crate::tui::Theme;
 use crate::tui::View;
 use crate::tui::actions::{attach_disabled_reason, resolve_attach_target, target_label};
-use crate::tui::app::{App, Focus, GraphDb};
+use crate::tui::app::{App, Focus, SnapshotHandle};
 use crate::tui::detail::{HeaderField, NodeDetail, SectionKind};
 use crate::tui::icons::{NodeKind, node_kind_style};
 use crate::tui::preview::PreviewContent;
@@ -208,7 +208,7 @@ fn draw_header(app: &App, frame: &mut Frame<'_>, area: Rect) {
     // chips became opt-in via `[tui] show_harness_chips`. Freshness
     // promoted to the lead position.
     let theme = app.theme();
-    let (agents_total, mux_total) = snapshot_counts(app.graph_db());
+    let (agents_total, mux_total) = snapshot_counts(app.snapshot_handle());
     let visible_sessions = visible_agent_session_count(app, agents_total);
     let freshness = header_freshness(app);
     let session_cell = format_count_with_filtered(visible_sessions, agents_total);
@@ -583,12 +583,12 @@ fn view_label(view: View) -> &'static str {
     }
 }
 
-fn snapshot_counts(database: Option<&GraphDb>) -> (usize, usize) {
+fn snapshot_counts(handle: Option<&SnapshotHandle>) -> (usize, usize) {
     use crate::model::GraphNode;
-    let Some(database) = database else {
+    let Some(handle) = handle else {
         return (0, 0);
     };
-    let snapshot = database.snapshot();
+    let snapshot = handle.snapshot();
     let agents = snapshot
         .nodes
         .iter()
@@ -919,7 +919,7 @@ fn focus_marker_span(app: &App, panel: Focus) -> Span<'static> {
 }
 
 fn empty_left_panel_text(app: &App) -> String {
-    if app.graph_db().is_none() {
+    if app.snapshot_handle().is_none() {
         return "Loading discovery…".to_string();
     }
     if !app.filter().is_empty() {
@@ -2632,7 +2632,7 @@ fn wrapped_line_count(lines: &[Line<'_>], width: u16) -> usize {
 }
 
 fn empty_right_panel_text(app: &App) -> &'static str {
-    if app.graph_db().is_none() {
+    if app.snapshot_handle().is_none() {
         "Loading…"
     } else {
         "Select a row to view its detail."
@@ -3251,7 +3251,7 @@ fn default_action_status_hint(app: &App) -> String {
         if pin_placeholder_row_kind(&row.kind) {
             let pin_id = selected_pin_id.unwrap_or("pin");
             let pin = app
-                .graph_db()
+                .snapshot_handle()
                 .and_then(|db| db.snapshot().pins.iter().find(|pin| pin.id == pin_id));
             let display = pin.map_or(pin_id, |pin| pin.display_name.as_str());
             let launch_hint = match pin.and_then(|p| p.binding.as_ref()) {

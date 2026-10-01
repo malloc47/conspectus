@@ -50,7 +50,7 @@ fn seeded_app() -> App {
     config.default_view = View::Sessions;
     let mut app = App::new(config);
     app.update(Msg::SetData {
-        snapshot: GraphDb::from_snapshot(&snapshot),
+        snapshot: SnapshotHandle::from_snapshot(&snapshot),
         tree,
         loaded_at_epoch: 1_700_000_000,
         initial_selection_hint: None,
@@ -120,7 +120,7 @@ fn muxed_app(native_id: &str, capture: Option<&str>) -> App {
     config.default_view = View::Sessions;
     let mut app = App::new(config);
     app.update(Msg::SetData {
-        snapshot: GraphDb::from_snapshot(&snapshot),
+        snapshot: SnapshotHandle::from_snapshot(&snapshot),
         tree,
         loaded_at_epoch: 1_700_000_000,
         initial_selection_hint: None,
@@ -170,7 +170,7 @@ fn pinned_app(binding: crate::model::PinBinding) -> App {
     config.default_view = View::Sessions;
     let mut app = App::new(config);
     app.update(Msg::SetData {
-        snapshot: crate::tui::app::GraphDb::from_snapshot(&snapshot),
+        snapshot: crate::tui::app::SnapshotHandle::from_snapshot(&snapshot),
         tree,
         loaded_at_epoch: 1_700_000_000,
         initial_selection_hint: None,
@@ -388,7 +388,7 @@ fn seeded_app_with_harness_chips() -> App {
     config.show_harness_chips = true;
     let mut app = App::new(config);
     app.update(Msg::SetData {
-        snapshot: GraphDb::from_snapshot(&snapshot),
+        snapshot: SnapshotHandle::from_snapshot(&snapshot),
         tree,
         loaded_at_epoch: 1_700_000_000,
         initial_selection_hint: None,
@@ -534,7 +534,7 @@ fn two_repo_app() -> App {
     config.default_view = View::Sessions;
     let mut app = App::new(config);
     app.update(Msg::SetData {
-        snapshot: GraphDb::from_snapshot(&snapshot),
+        snapshot: SnapshotHandle::from_snapshot(&snapshot),
         tree,
         loaded_at_epoch: 1_700_000_000,
         initial_selection_hint: None,
@@ -1345,7 +1345,7 @@ fn mux_detail_session_section_shows_session_id_when_collapsed() {
     config.default_view = View::Mux;
     let mut app = App::new(config);
     app.update(Msg::SetData {
-        snapshot: GraphDb::from_snapshot(&snapshot),
+        snapshot: SnapshotHandle::from_snapshot(&snapshot),
         tree,
         loaded_at_epoch: 1_700_000_000,
         initial_selection_hint: None,
@@ -1447,7 +1447,7 @@ fn expanded_session_under_mux_matches_standalone_session_detail() {
     config.default_view = View::Mux;
     let mut app = App::new(config);
     app.update(Msg::SetData {
-        snapshot: GraphDb::from_snapshot(&snapshot),
+        snapshot: SnapshotHandle::from_snapshot(&snapshot),
         tree,
         loaded_at_epoch: 1_700_000_000,
         initial_selection_hint: None,
@@ -2249,7 +2249,7 @@ fn no_live_preview_muxed_session_shows_privacy_banner() {
     config.live_preview_enabled = false;
     let mut app = App::new(config);
     app.update(Msg::SetData {
-        snapshot: GraphDb::from_snapshot(&snapshot),
+        snapshot: SnapshotHandle::from_snapshot(&snapshot),
         tree,
         loaded_at_epoch: 1_700_000_000,
         initial_selection_hint: None,
@@ -2496,7 +2496,7 @@ fn contextual_status_offers_ambiguous_attach_hint_with_inspect_affordance() {
     config.default_view = View::Sessions;
     let mut app = App::new(config);
     app.update(Msg::SetData {
-        snapshot: GraphDb::from_snapshot(&snapshot),
+        snapshot: SnapshotHandle::from_snapshot(&snapshot),
         tree,
         loaded_at_epoch: 1_700_000_000,
         initial_selection_hint: None,
@@ -2850,7 +2850,7 @@ fn left_panel_scrolls_to_keep_selected_row_visible_past_viewport() {
     config.default_view = View::Sessions;
     let mut app = App::new(config);
     app.update(Msg::SetData {
-        snapshot: GraphDb::from_snapshot(&snapshot),
+        snapshot: SnapshotHandle::from_snapshot(&snapshot),
         tree,
         loaded_at_epoch: 1_700_000_000,
         initial_selection_hint: None,
@@ -2949,7 +2949,7 @@ fn workspace_app_with_repos(repo_count: usize) -> App {
     config.sessions_grouping = SessionsGrouping::Workspace;
     let mut app = App::new(config);
     app.update(Msg::SetData {
-        snapshot: GraphDb::from_snapshot(&snapshot),
+        snapshot: SnapshotHandle::from_snapshot(&snapshot),
         tree,
         loaded_at_epoch: 1_700_000_000,
         initial_selection_hint: None,
@@ -3163,7 +3163,7 @@ fn left_pane_renders_scrollbar_when_content_exceeds_viewport() {
     config.default_view = View::Sessions;
     let mut app = App::new(config);
     app.update(Msg::SetData {
-        snapshot: GraphDb::from_snapshot(&snapshot),
+        snapshot: SnapshotHandle::from_snapshot(&snapshot),
         tree,
         loaded_at_epoch: 1_700_000_000,
         initial_selection_hint: None,
@@ -3281,7 +3281,7 @@ fn left_pane_scrollbar_thumb_reaches_bottom_at_max_scroll() {
     config.default_view = View::Sessions;
     let mut app = App::new(config);
     app.update(Msg::SetData {
-        snapshot: GraphDb::from_snapshot(&snapshot),
+        snapshot: SnapshotHandle::from_snapshot(&snapshot),
         tree,
         loaded_at_epoch: 1_700_000_000,
         initial_selection_hint: None,
@@ -3371,7 +3371,7 @@ fn left_pane_scrollbar_column_carries_only_scrollbar_glyphs() {
     config.default_view = View::Sessions;
     let mut app = App::new(config);
     app.update(Msg::SetData {
-        snapshot: GraphDb::from_snapshot(&snapshot),
+        snapshot: SnapshotHandle::from_snapshot(&snapshot),
         tree,
         loaded_at_epoch: 1_700_000_000,
         initial_selection_hint: None,
@@ -3489,7 +3489,7 @@ fn mux_view_header_counts_sessions_in_visible_muxes() {
     config.default_view = View::Mux;
     let mut app = App::new(config);
     app.update(Msg::SetData {
-        snapshot: GraphDb::from_snapshot(&snapshot),
+        snapshot: SnapshotHandle::from_snapshot(&snapshot),
         tree,
         loaded_at_epoch: 1_700_000_000,
         initial_selection_hint: None,

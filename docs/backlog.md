@@ -14334,7 +14334,10 @@ Queued chunks:
     `[&dyn SessionViewerAction; 1]`, and the native viewer (ADR 0052)
     is now the default.
   - Plan: collapse it to a function; amend ADR 0019.
-- [ ] `H-RUST-017` Rename `GraphDb`.
+- [x] `H-RUST-017` Rename `GraphDb`.
+  - Outcome: `SnapshotHandle` / `snapshot_handle()`; TUI locals named
+    `database` became `handle`, and the status messages now say "no graph
+    loaded yet".
   - Problem: `GraphDb`, `graph_db()`, and the `database` field are
     names left over from the SQLite era for what is now an
     `Rc<GraphSnapshot>` handle.

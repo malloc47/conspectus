@@ -7,7 +7,7 @@ use crate::model::{
     RepoNode,
 };
 use crate::resolve::resolve_snapshot;
-use crate::tui::app::{GraphDb, Msg};
+use crate::tui::app::{Msg, SnapshotHandle};
 use crate::tui::rows::sessions::{SessionsBuildInputs, build_sessions_tree};
 use crate::tui::{RunConfig, SessionsGrouping, View};
 
@@ -25,7 +25,7 @@ fn build_app(snapshot: GraphSnapshot) -> App {
     cfg.default_view = View::Sessions;
     let mut app = App::new(cfg);
     app.update(Msg::SetData {
-        snapshot: GraphDb::from_snapshot(&snapshot),
+        snapshot: SnapshotHandle::from_snapshot(&snapshot),
         tree,
         loaded_at_epoch: 1_700_000_000,
         initial_selection_hint: None,
@@ -195,7 +195,7 @@ fn current_tmux_session_is_not_attachable() {
     cfg.current_tmux_session = Some("editor".to_string());
     let mut app = App::new(cfg);
     app.update(Msg::SetData {
-        snapshot: GraphDb::from_snapshot(&snapshot),
+        snapshot: SnapshotHandle::from_snapshot(&snapshot),
         tree,
         loaded_at_epoch: 1_700_000_000,
         initial_selection_hint: None,
@@ -310,7 +310,7 @@ fn mux_view_mux_row_resolves_attach_target() {
     cfg.default_view = View::Mux;
     let mut app = App::new(cfg);
     app.update(Msg::SetData {
-        snapshot: GraphDb::new(snapshot),
+        snapshot: SnapshotHandle::new(snapshot),
         tree,
         loaded_at_epoch: 1_700_000_000,
         initial_selection_hint: None,
@@ -336,7 +336,7 @@ fn build_mux_view_app_with_attachments(snapshot: GraphSnapshot) -> App {
     cfg.default_view = View::Mux;
     let mut app = App::new(cfg);
     app.update(Msg::SetData {
-        snapshot: GraphDb::new(snapshot),
+        snapshot: SnapshotHandle::new(snapshot),
         tree,
         loaded_at_epoch: 1_700_000_000,
         initial_selection_hint: None,

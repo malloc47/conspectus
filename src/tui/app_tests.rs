@@ -51,7 +51,7 @@ fn seeded_app(sessions: &[(&str, &str, &str)]) -> App {
     let tree = build_tree(&snap);
     let mut app = App::new(RunConfig::defaults());
     app.update(Msg::SetData {
-        snapshot: GraphDb::from_snapshot(&snap),
+        snapshot: SnapshotHandle::from_snapshot(&snap),
         tree,
         loaded_at_epoch: 1_700_000_000,
         initial_selection_hint: None,
@@ -76,7 +76,7 @@ fn scenario_app(name: &str) -> (App, GraphSnapshot) {
     let tree = world.sessions_tree().expect("scenario sessions tree");
     let mut app = App::new(world.tui_config(View::Sessions, false));
     app.update(Msg::SetData {
-        snapshot: GraphDb::from_snapshot(&snap),
+        snapshot: SnapshotHandle::from_snapshot(&snap),
         tree,
         loaded_at_epoch: 1_700_000_600,
         initial_selection_hint: None,
@@ -172,7 +172,7 @@ fn pins_context_seeds_pin_create_cwd_from_selected_mux_absolute() {
     });
     let mut app = App::new(RunConfig::defaults());
     app.update(Msg::SetData {
-        snapshot: GraphDb::from_snapshot(&snap),
+        snapshot: SnapshotHandle::from_snapshot(&snap),
         tree,
         loaded_at_epoch: 1_700_000_000,
         initial_selection_hint: None,
@@ -301,7 +301,7 @@ fn app_with_mux_selected(snap: GraphSnapshot, mux_name: &str) -> App {
     });
     let mut app = App::new(RunConfig::defaults());
     app.update(Msg::SetData {
-        snapshot: GraphDb::from_snapshot(&snap),
+        snapshot: SnapshotHandle::from_snapshot(&snap),
         tree,
         loaded_at_epoch: 1_700_000_000,
         initial_selection_hint: None,
@@ -403,7 +403,7 @@ fn pin_create_defaults_bumps_trailing_number_from_agent_session_bound_to_pin() {
     let tree = build_tree(&snap);
     let mut app = App::new(RunConfig::defaults());
     app.update(Msg::SetData {
-        snapshot: GraphDb::from_snapshot(&snap),
+        snapshot: SnapshotHandle::from_snapshot(&snap),
         tree,
         loaded_at_epoch: 1_700_000_000,
         initial_selection_hint: None,
@@ -442,7 +442,7 @@ fn pin_adopt_defaults_preserve_selected_live_mux_name() {
     });
     let mut app = App::new(RunConfig::defaults());
     app.update(Msg::SetData {
-        snapshot: GraphDb::from_snapshot(&snap),
+        snapshot: SnapshotHandle::from_snapshot(&snap),
         tree,
         loaded_at_epoch: 1_700_000_000,
         initial_selection_hint: None,
@@ -470,7 +470,7 @@ fn pins_context_exposes_known_live_mux_names() {
     let tree = build_tree(&snap);
     let mut app = App::new(RunConfig::defaults());
     app.update(Msg::SetData {
-        snapshot: GraphDb::from_snapshot(&snap),
+        snapshot: SnapshotHandle::from_snapshot(&snap),
         tree,
         loaded_at_epoch: 1_700_000_000,
         initial_selection_hint: None,
@@ -516,7 +516,7 @@ fn pins_context_does_not_offer_adopt_for_already_pinned_mux() {
         ..RunConfig::defaults()
     });
     app.update(Msg::SetData {
-        snapshot: GraphDb::from_snapshot(&snap),
+        snapshot: SnapshotHandle::from_snapshot(&snap),
         tree,
         loaded_at_epoch: 1_700_000_000,
         initial_selection_hint: None,
@@ -544,7 +544,7 @@ fn pins_context_exposes_registered_and_discovered_harness_keys() {
     let tree = build_tree(&snap);
     let mut app = App::new(RunConfig::defaults());
     app.update(Msg::SetData {
-        snapshot: GraphDb::from_snapshot(&snap),
+        snapshot: SnapshotHandle::from_snapshot(&snap),
         tree,
         loaded_at_epoch: 1_700_000_000,
         initial_selection_hint: None,
@@ -569,7 +569,7 @@ fn infer_harness_for_mux_picks_first_active_linked_to_mux_source() {
     let tree = build_tree(&snap);
     let mut app = App::new(RunConfig::defaults());
     app.update(Msg::SetData {
-        snapshot: GraphDb::from_snapshot(&snap),
+        snapshot: SnapshotHandle::from_snapshot(&snap),
         tree,
         loaded_at_epoch: 1_700_000_000,
         initial_selection_hint: None,
@@ -614,7 +614,7 @@ fn pins_context_seeds_pin_mutation_target_from_selected_pin_row() {
     let tree = build_tree(&snap);
     let mut app = App::new(RunConfig::defaults());
     app.update(Msg::SetData {
-        snapshot: GraphDb::from_snapshot(&snap),
+        snapshot: SnapshotHandle::from_snapshot(&snap),
         tree,
         loaded_at_epoch: 1_700_000_000,
         initial_selection_hint: None,
@@ -684,7 +684,7 @@ fn pins_context_seeds_pin_mutation_target_from_selected_pinned_mux_row() {
         ..RunConfig::defaults()
     });
     app.update(Msg::SetData {
-        snapshot: GraphDb::from_snapshot(&snap),
+        snapshot: SnapshotHandle::from_snapshot(&snap),
         tree,
         loaded_at_epoch: 1_700_000_000,
         initial_selection_hint: None,
@@ -818,7 +818,7 @@ fn placeholder_pin_detail_strips_candidate_link_summaries() {
     let tree = build_tree(&snap);
     let mut app = App::new(RunConfig::defaults());
     app.update(Msg::SetData {
-        snapshot: GraphDb::from_snapshot(&snap),
+        snapshot: SnapshotHandle::from_snapshot(&snap),
         tree,
         loaded_at_epoch: 1_700_000_000,
         initial_selection_hint: None,
@@ -881,7 +881,7 @@ fn set_data_keeps_pins_group_expanded_by_default() {
     let tree = build_tree(&snap);
     let mut app = App::new(RunConfig::defaults());
     app.update(Msg::SetData {
-        snapshot: GraphDb::from_snapshot(&snap),
+        snapshot: SnapshotHandle::from_snapshot(&snap),
         tree,
         loaded_at_epoch: 1_700_000_000,
         initial_selection_hint: None,
@@ -923,7 +923,7 @@ fn selected_bound_pin_row_shows_realizing_session_detail() {
     let tree = build_tree(&snap);
     let mut app = App::new(RunConfig::defaults());
     app.update(Msg::SetData {
-        snapshot: GraphDb::from_snapshot(&snap),
+        snapshot: SnapshotHandle::from_snapshot(&snap),
         tree,
         loaded_at_epoch: 1_700_000_000,
         initial_selection_hint: None,
@@ -978,7 +978,7 @@ fn select_pin_after_mutation_expands_pins_and_selects_session_row() {
     let tree = build_tree(&snap);
     let mut app = App::new(RunConfig::defaults());
     app.update(Msg::SetData {
-        snapshot: GraphDb::from_snapshot(&snap),
+        snapshot: SnapshotHandle::from_snapshot(&snap),
         tree,
         loaded_at_epoch: 1_700_000_000,
         initial_selection_hint: None,
@@ -1033,7 +1033,7 @@ fn select_pin_after_mutation_selects_mux_row_in_mux_pins_group() {
         ..RunConfig::defaults()
     });
     app.update(Msg::SetData {
-        snapshot: GraphDb::from_snapshot(&snap),
+        snapshot: SnapshotHandle::from_snapshot(&snap),
         tree,
         loaded_at_epoch: 1_700_000_000,
         initial_selection_hint: None,
@@ -1058,7 +1058,7 @@ fn select_pin_after_mutation_selects_mux_row_in_mux_pins_group() {
 fn empty_tree_leaves_selection_none() {
     let mut app = App::new(RunConfig::defaults());
     app.update(Msg::SetData {
-        snapshot: GraphDb::from_snapshot(&GraphSnapshot::empty()),
+        snapshot: SnapshotHandle::from_snapshot(&GraphSnapshot::empty()),
         tree: RowTree::default(),
         loaded_at_epoch: 1_700_000_000,
         initial_selection_hint: None,
@@ -1104,7 +1104,7 @@ fn set_data_first_load_honors_initial_selection_hint() {
 
     let mut app = App::new(RunConfig::defaults());
     app.update(Msg::SetData {
-        snapshot: GraphDb::from_snapshot(&snap),
+        snapshot: SnapshotHandle::from_snapshot(&snap),
         tree,
         loaded_at_epoch: 1_700_000_000,
         initial_selection_hint: Some(hint.clone()),
@@ -1134,7 +1134,7 @@ fn set_data_first_load_expands_only_launch_context_tree() {
 
     let mut app = App::new(RunConfig::defaults());
     app.update(Msg::SetData {
-        snapshot: GraphDb::from_snapshot(&snap),
+        snapshot: SnapshotHandle::from_snapshot(&snap),
         tree,
         loaded_at_epoch: 1_700_000_000,
         initial_selection_hint: Some(hint),
@@ -1164,7 +1164,7 @@ fn set_data_later_refreshes_ignore_initial_selection_hint() {
     app.update(Msg::End); // move selection to the last row
     let kept = app.selection().cloned().expect("selection present");
 
-    let snap = app.graph_db().unwrap().snapshot().clone();
+    let snap = app.snapshot_handle().unwrap().snapshot().clone();
     let tree = build_tree(&snap);
     // Pick *some* other row id as the hint.
     let hint = tree
@@ -1174,7 +1174,7 @@ fn set_data_later_refreshes_ignore_initial_selection_hint() {
         .find(|id| id != &kept)
         .expect("at least one alternate row");
     app.update(Msg::SetData {
-        snapshot: GraphDb::from_snapshot(&snap),
+        snapshot: SnapshotHandle::from_snapshot(&snap),
         tree,
         loaded_at_epoch: 1_700_000_010,
         initial_selection_hint: Some(hint),
@@ -1244,7 +1244,7 @@ fn nav_down_past_duplicate_row_id_advances_to_the_following_row() {
 
     let mut app = App::new(RunConfig::defaults());
     app.update(Msg::SetData {
-        snapshot: GraphDb::from_snapshot(&GraphSnapshot::empty()),
+        snapshot: SnapshotHandle::from_snapshot(&GraphSnapshot::empty()),
         tree,
         loaded_at_epoch: 1_700_000_000,
         initial_selection_hint: None,
@@ -1506,7 +1506,7 @@ fn scenario_refresh_when_selected_row_disappears_snaps_to_visible_row() {
     let snap = replacement.snapshot().expect("replacement snapshot");
     let tree = replacement.sessions_tree().expect("replacement tree");
     app.update(Msg::SetData {
-        snapshot: GraphDb::from_snapshot(&snap),
+        snapshot: SnapshotHandle::from_snapshot(&snap),
         tree,
         loaded_at_epoch: 1_700_000_601,
         initial_selection_hint: None,
@@ -1538,7 +1538,7 @@ fn scenario_attach_target_refuses_current_tmux_session() {
     config.current_tmux_session = Some("editor".to_string());
     let mut app = App::new(config);
     app.update(Msg::SetData {
-        snapshot: GraphDb::from_snapshot(&snap),
+        snapshot: SnapshotHandle::from_snapshot(&snap),
         tree,
         loaded_at_epoch: 1_700_000_600,
         initial_selection_hint: None,
@@ -1563,10 +1563,10 @@ fn set_data_retains_selection_by_row_id_when_present() {
 
     // Rebuild from the same snapshot; the row tree is
     // deterministic, so RowId equality should retain selection.
-    let snap = app.graph_db().unwrap().snapshot().clone();
+    let snap = app.snapshot_handle().unwrap().snapshot().clone();
     let tree = build_tree(&snap);
     app.update(Msg::SetData {
-        snapshot: GraphDb::from_snapshot(&snap),
+        snapshot: SnapshotHandle::from_snapshot(&snap),
         tree,
         loaded_at_epoch: 1_700_000_000,
         initial_selection_hint: None,
@@ -1584,7 +1584,7 @@ fn set_data_falls_back_to_nearest_index_when_selection_disappears() {
     let snap = make_snapshot_with(&[("codex", "a", "/p/proja")]);
     let tree = build_tree(&snap);
     app.update(Msg::SetData {
-        snapshot: GraphDb::from_snapshot(&snap),
+        snapshot: SnapshotHandle::from_snapshot(&snap),
         tree,
         loaded_at_epoch: 1_700_000_000,
         initial_selection_hint: None,
@@ -1765,7 +1765,7 @@ fn app_for_explorer() -> App {
     let tree = build_tree(&snap);
     let mut app = App::new(RunConfig::defaults());
     app.update(Msg::SetData {
-        snapshot: GraphDb::from_snapshot(&snap),
+        snapshot: SnapshotHandle::from_snapshot(&snap),
         tree,
         loaded_at_epoch: 1_700_000_000,
         initial_selection_hint: None,
@@ -1949,7 +1949,7 @@ fn explorer_drill_mirrors_left_pane_to_neighbor_when_present_in_tree() {
     let tree = build_tree(&snap);
     let mut app = App::new(RunConfig::defaults());
     app.update(Msg::SetData {
-        snapshot: GraphDb::from_snapshot(&snap),
+        snapshot: SnapshotHandle::from_snapshot(&snap),
         tree,
         loaded_at_epoch: 1_700_000_000,
         initial_selection_hint: None,
@@ -2411,7 +2411,7 @@ fn open_value_modal_when_cursor_has_a_long_value() {
     let tree = build_tree(&snap);
     let mut app = App::new(RunConfig::defaults());
     app.update(Msg::SetData {
-        snapshot: GraphDb::from_snapshot(&snap),
+        snapshot: SnapshotHandle::from_snapshot(&snap),
         tree,
         loaded_at_epoch: 1_700_000_000,
         initial_selection_hint: None,
@@ -2583,7 +2583,7 @@ fn explorer_state_resets_when_left_tree_selection_changes() {
     let snap = resolve_snapshot(snap);
     let tree = build_tree(&snap);
     app.update(Msg::SetData {
-        snapshot: GraphDb::from_snapshot(&snap),
+        snapshot: SnapshotHandle::from_snapshot(&snap),
         tree,
         loaded_at_epoch: 1_700_000_100,
         initial_selection_hint: None,
@@ -3334,7 +3334,7 @@ mod reducer_effects {
         assert_eq!(
             effects,
             vec![Effect::Toast(
-                "pin bind failed: no graph database available".to_string()
+                "pin bind failed: no graph loaded yet".to_string()
             )]
         );
     }
@@ -3459,7 +3459,7 @@ mod reducer_effects {
             &resolved, &app,
         ));
         app.update(Msg::SetData {
-            snapshot: crate::tui::app::GraphDb::new(resolved),
+            snapshot: crate::tui::app::SnapshotHandle::new(resolved),
             tree,
             loaded_at_epoch: 0,
             initial_selection_hint: None,
