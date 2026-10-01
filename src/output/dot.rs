@@ -49,6 +49,15 @@ impl Default for DotOptions {
 }
 
 pub fn render_graph_dot(snapshot: &GraphSnapshot, opts: DotOptions) -> Result<String> {
+    /// One edge to emit, to a visible node or to an unresolved stub.
+    struct EdgeRow<'a> {
+        source: NodeId,
+        target_label: String,
+        link: &'a GraphLink,
+        is_resolved: bool,
+        unresolved: Option<&'a UnresolvedEndpoint>,
+    }
+
     let mut out = String::new();
     writeln!(out, "digraph conspectus {{")?;
     writeln!(out, "  graph [rankdir=LR, fontname=\"Helvetica\"];")?;
@@ -91,14 +100,6 @@ pub fn render_graph_dot(snapshot: &GraphSnapshot, opts: DotOptions) -> Result<St
     //      - edges to an unresolved-endpoint stub (synthesized node)
     //    Honor candidate/diagnostic filters.
     // ---------------------------------------------------------------
-    struct EdgeRow<'a> {
-        source: NodeId,
-        target_label: String,
-        link: &'a GraphLink,
-        is_resolved: bool,
-        unresolved: Option<&'a UnresolvedEndpoint>,
-    }
-
     let mut stub_nodes: BTreeMap<String, &UnresolvedEndpoint> = BTreeMap::new();
     let mut edges: Vec<EdgeRow<'_>> = Vec::new();
 

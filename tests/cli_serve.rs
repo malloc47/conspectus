@@ -336,6 +336,8 @@ fn serve_cleans_up_legacy_graph_sqlite_on_startup() {
 
 #[test]
 fn serve_socket_snapshot_command_returns_graph_bin_bytes() {
+    use base64::Engine as _;
+
     // Happy path: spawn the daemon, wait for the
     // first cycle's graph.bin to land, request the snapshot
     // over the socket via the typed client, and confirm the
@@ -387,7 +389,6 @@ fn serve_socket_snapshot_command_returns_graph_bin_bytes() {
     let encoded = response["data"]["bytes"]
         .as_str()
         .expect("data.bytes must be a base64 string");
-    use base64::Engine as _;
     let decoded = base64::engine::general_purpose::STANDARD
         .decode(encoded)
         .expect("base64 decode");

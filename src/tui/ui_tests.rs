@@ -1103,6 +1103,8 @@ fn related_zone_header_renders_aggregate_left_of_label() {
 
 #[test]
 fn detail_pane_shows_linked_to_mux_row_and_drills_into_mux() {
+    use crate::tui::explorer::ExplorerRow;
+
     // Locked decision 8: instead of expanding linked
     // entity details in place, the explorer drills. Pressing
     // Enter on the cursor while it sits on the `linked_to_mux`
@@ -1118,7 +1120,6 @@ fn detail_pane_shows_linked_to_mux_row_and_drills_into_mux() {
     );
     app.update(Msg::CycleFocus);
     // Walk the cursor onto the link row, then activate.
-    use crate::tui::explorer::ExplorerRow;
     let link_idx = app
         .explorer()
         .expect("state")
@@ -1372,6 +1373,8 @@ fn mux_detail_session_section_shows_session_id_when_collapsed() {
 
 #[test]
 fn expanded_session_under_mux_matches_standalone_session_detail() {
+    use crate::tui::explorer::ExplorerRow;
+
     // The expanded representation should reuse the same
     // section-divided, 10-char-bold-label rendering as a
     // standalone session detail — only indented. This pins the
@@ -1451,7 +1454,6 @@ fn expanded_session_under_mux_matches_standalone_session_detail() {
     app.update(Msg::CycleFocus);
     // Walk the cursor onto the upstream `linked_to_mux` row,
     // then activate to drill into the linked session.
-    use crate::tui::explorer::ExplorerRow;
     let link_idx = app
         .explorer()
         .expect("state")
@@ -2075,6 +2077,17 @@ fn session_project_column_renders_before_inline_preview() {
 
 #[test]
 fn session_recency_span_picks_bucket_style_from_theme() {
+    // Locate the recency span by its formatted content (4-cell
+    // right-aligned tag). Index varies with harness label length
+    // once the badge widget pads short labels — looking up by
+    // content keeps the test resilient to badge layout changes.
+    fn recency_span<'a>(spans: &'a [Span<'static>], rendered: &str) -> &'a Span<'static> {
+        spans
+            .iter()
+            .find(|s| s.content.trim() == rendered.trim())
+            .expect("recency span present")
+    }
+
     // Build a minimal AgentSessionRow directly so we can pin the
     // activity_epoch and assert the recency span's style without
     // staging a full snapshot. The render_session_spans helper is
@@ -2099,16 +2112,6 @@ fn session_recency_span_picks_bucket_style_from_theme() {
         primary_node: NodeId::AgentSession(AgentSessionId::new("codex", "/state", "abc")),
         pin_id: None,
     };
-    // Locate the recency span by its formatted content (4-cell
-    // right-aligned tag). Index varies with harness label length
-    // once the badge widget pads short labels — looking up by
-    // content keeps the test resilient to badge layout changes.
-    fn recency_span<'a>(spans: &'a [Span<'static>], rendered: &str) -> &'a Span<'static> {
-        spans
-            .iter()
-            .find(|s| s.content.trim() == rendered.trim())
-            .expect("recency span present")
-    }
 
     let fresh = make_row(Some("1m"), Some(now - 60));
     let spans = render_session_spans(&fresh, &theme, now);
@@ -2964,6 +2967,9 @@ fn workspace_app_with_repos(repo_count: usize) -> App {
 
 #[test]
 fn right_pane_scrolls_to_keep_explorer_cursor_visible() {
+    // Walk the cursor onto the last validated link row.
+    use crate::tui::explorer::ExplorerRow;
+
     // When the workspace detail pane has more Related rows than
     // the header zone can hold at a small terminal height, the
     // cursor must stay in the viewport as the operator navigates
@@ -2988,8 +2994,6 @@ fn right_pane_scrolls_to_keep_explorer_cursor_visible() {
         "early rows should be visible before scrolling: {initial}"
     );
 
-    // Walk the cursor onto the last validated link row.
-    use crate::tui::explorer::ExplorerRow;
     let last_link_idx = app
         .explorer()
         .expect("state")

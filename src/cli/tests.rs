@@ -416,6 +416,8 @@ fn filter_args_max_age_reports_actionable_error() {
 
 #[test]
 fn filter_args_mux_state_parses_each_value() {
+    use crate::filter::MuxStateKey;
+
     let args = filter_args_with(vec![], None, vec!["unmuxed", "Ambiguous"], None);
     let filter = args.to_row_filter().expect("parse");
     let states = filter
@@ -423,7 +425,6 @@ fn filter_args_mux_state_parses_each_value() {
         .as_ref()
         .map(|m| m.values().to_vec())
         .unwrap_or_default();
-    use crate::filter::MuxStateKey;
     assert!(states.contains(&MuxStateKey::Unmuxed));
     assert!(states.contains(&MuxStateKey::Ambiguous));
 }

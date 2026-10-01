@@ -1317,15 +1317,15 @@ mod tests {
 
     #[test]
     fn string_precedence_matches_pin_ordering() {
-        assert!(provenance_precedence("local_pin") > provenance_precedence("global_declared"));
-        assert!(provenance_precedence("global_pin") > provenance_precedence("strong_discovered"));
-
         #[derive(Debug)]
         struct Candidate {
             provenance: String,
             confidence: String,
             id: String,
         }
+
+        assert!(provenance_precedence("local_pin") > provenance_precedence("global_declared"));
+        assert!(provenance_precedence("global_pin") > provenance_precedence("strong_discovered"));
 
         let selected = pick_strongest(
             vec![

@@ -100,34 +100,38 @@ pub fn draw(app: &mut App, frame: &mut Frame<'_>) {
 }
 
 fn draw_mux_menu(app: &App, frame: &mut Frame<'_>, area: Rect) {
+    use crate::tui::widgets::mux_menu::MuxMenuWidget;
+
     let Some(state) = app.mux_menu() else {
         return;
     };
-    use crate::tui::widgets::mux_menu::MuxMenuWidget;
     frame.render_widget(MuxMenuWidget::new(state, app.theme()), area);
 }
 
 fn draw_mux_launch_form(app: &App, frame: &mut Frame<'_>, area: Rect) {
+    use crate::tui::widgets::mux_launch::MuxLaunchFormWidget;
+
     let Some(state) = app.mux_launch_form() else {
         return;
     };
-    use crate::tui::widgets::mux_launch::MuxLaunchFormWidget;
     frame.render_widget(MuxLaunchFormWidget::new(state, app.theme()), area);
 }
 
 fn draw_worktree_menu(app: &App, frame: &mut Frame<'_>, area: Rect) {
+    use crate::tui::widgets::worktree_menu::WorktreeMenuWidget;
+
     let Some(state) = app.worktree_menu() else {
         return;
     };
-    use crate::tui::widgets::worktree_menu::WorktreeMenuWidget;
     frame.render_widget(WorktreeMenuWidget::new(state, app.theme()), area);
 }
 
 fn draw_new_mux_form(app: &App, frame: &mut Frame<'_>, area: Rect) {
+    use crate::tui::widgets::new_mux::NewMuxFormWidget;
+
     let Some(state) = app.new_mux_form() else {
         return;
     };
-    use crate::tui::widgets::new_mux::NewMuxFormWidget;
     frame.render_widget(NewMuxFormWidget::new(state, app.theme()), area);
 }
 
@@ -143,27 +147,30 @@ fn draw_toast(app: &App, frame: &mut Frame<'_>, area: Rect) {
 }
 
 fn draw_value_modal(app: &App, frame: &mut Frame<'_>, area: Rect) {
+    use crate::tui::widgets::value_modal::ValueModalWidget;
+
     let Some(state) = app.value_modal() else {
         return;
     };
-    use crate::tui::widgets::value_modal::ValueModalWidget;
     frame.render_widget(ValueModalWidget::new(state, app.theme()), area);
 }
 
 fn draw_help_overlay(app: &App, frame: &mut Frame<'_>, area: Rect) {
+    use crate::tui::widgets::help::HelpOverlayWidget;
+
     let Some(state) = app.help_overlay() else {
         return;
     };
-    use crate::tui::widgets::help::HelpOverlayWidget;
     frame.render_widget(HelpOverlayWidget::new(state, app.theme()), area);
 }
 
 fn draw_search_overlay(app: &App, frame: &mut Frame<'_>, area: Rect) {
+    use crate::tui::search::items_from_rows;
+    use crate::tui::widgets::search::SearchOverlayWidget;
+
     let Some(state) = app.search_overlay() else {
         return;
     };
-    use crate::tui::search::items_from_rows;
-    use crate::tui::widgets::search::SearchOverlayWidget;
     // Recompute items from the live visible row tree each frame so
     // the search overlay's label lookup never lags behind a
     // refresh. The trade is cheap (visible_rows is already
@@ -176,28 +183,31 @@ fn draw_search_overlay(app: &App, frame: &mut Frame<'_>, area: Rect) {
 }
 
 fn draw_rename_overlay(app: &App, frame: &mut Frame<'_>, area: Rect) {
+    use crate::tui::widgets::input::TextInputWidget;
+
     let Some(state) = app.rename_overlay() else {
         return;
     };
-    use crate::tui::widgets::input::TextInputWidget;
     let widget = TextInputWidget::new(state).theme(app.theme());
     frame.render_widget(widget, area);
 }
 
 fn draw_controls_overlay(app: &App, frame: &mut Frame<'_>, area: Rect) {
+    use crate::tui::widgets::controls::ControlsOverlayWidget;
+
     let Some(state) = app.controls_overlay() else {
         return;
     };
-    use crate::tui::widgets::controls::ControlsOverlayWidget;
     let widget = ControlsOverlayWidget::new(state, app.controls_context(), app.theme());
     frame.render_widget(widget, area);
 }
 
 fn draw_pins_overlay(app: &App, frame: &mut Frame<'_>, area: Rect) {
+    use crate::tui::widgets::pins::PinsOverlayWidget;
+
     let Some(state) = app.pins_overlay() else {
         return;
     };
-    use crate::tui::widgets::pins::PinsOverlayWidget;
     let widget = PinsOverlayWidget::new(state, app.theme());
     frame.render_widget(widget, area);
 }

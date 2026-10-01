@@ -71,8 +71,6 @@ fn missing_state_directory_yields_empty_fragment_without_error() {
 
 #[test]
 fn adapter_receives_harness_state_root_from_context() {
-    let captured = std::sync::Arc::new(std::sync::Mutex::new(None));
-
     struct Echo {
         captured: std::sync::Arc<std::sync::Mutex<Option<PathBuf>>>,
     }
@@ -89,6 +87,8 @@ fn adapter_receives_harness_state_root_from_context() {
             Ok(GraphFragment::empty())
         }
     }
+
+    let captured = std::sync::Arc::new(std::sync::Mutex::new(None));
 
     let context = DiscoveryContext::default().with_harness_state_root("codex", "/state/codex");
 

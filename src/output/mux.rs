@@ -213,6 +213,9 @@ fn collect_mux_rows(snapshot: &GraphSnapshot) -> Vec<MuxRow<'_>> {
 /// agent session, grouped by mux `node_id`. Per source session we
 /// keep the `pick_preferred` winner.
 fn collect_attachment_lookup(snapshot: &GraphSnapshot) -> HashMap<String, Vec<AttachedAgent>> {
+    /// `(mux_id, source_session)`.
+    type Key = (String, NodeId);
+
     let agent_lookup: HashMap<NodeId, &AgentSessionNode> = snapshot
         .nodes
         .iter()
@@ -223,7 +226,6 @@ fn collect_attachment_lookup(snapshot: &GraphSnapshot) -> HashMap<String, Vec<At
         .collect();
 
     // Group all active linked_to_mux candidates by (mux_id, source_session).
-    type Key = (String, NodeId);
     let mut per_source: HashMap<Key, Vec<&GraphLink>> = HashMap::new();
     // Preserve first-seen ordering so the rendered `agents` cell
     // emits attached agents in BTreeMap-by-source-NodeId order.

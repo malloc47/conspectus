@@ -22,6 +22,13 @@ pub(super) fn draw_right_panel(app: &mut App, frame: &mut Frame<'_>, area: Rect)
     // section-grouped detail when the explorer state isn't ready
     // yet (race during the first SetData).
     if app.explorer().is_some() {
+        // Reserve a usable minimum for the preview zone so a full
+        // Related list cannot collapse the preview to 1–2 lines.
+        // Below this floor on very small terminals the layout
+        // falls back to the prior behavior (preview keeps at least
+        // two rows after the divider).
+        const MIN_PREVIEW_HEIGHT: u16 = 6;
+
         // `app` is `&mut` here so scroll
         // reconciliation lives on the App fields directly rather
         // than in `Cell`s. We derive all state-dependent lines +
@@ -87,12 +94,6 @@ pub(super) fn draw_right_panel(app: &mut App, frame: &mut Frame<'_>, area: Rect)
             let height = per_line_rows.get(idx).copied().unwrap_or(1).max(1);
             (first, first + height - 1)
         });
-        // Reserve a usable minimum for the preview zone so a full
-        // Related list cannot collapse the preview to 1–2 lines.
-        // Below this floor on very small terminals the layout
-        // falls back to the prior behavior (preview keeps at least
-        // two rows after the divider).
-        const MIN_PREVIEW_HEIGHT: u16 = 6;
         let preview_floor = MIN_PREVIEW_HEIGHT.min(inner.height.saturating_sub(4));
         let max_header_height = inner
             .height

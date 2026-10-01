@@ -17,16 +17,6 @@ fn key(code: KeyCode) -> KeyEvent {
 /// operator-facing help.
 #[test]
 fn every_keybindings_entry_appears_in_help_sections() {
-    use crate::tui::keybindings::{KEYBINDINGS, KeyMode, key_label};
-    // Concatenate every section's binding key strings.
-    let sections = keymap_sections();
-    let mut haystack = String::new();
-    for section in &sections {
-        for binding in &section.bindings {
-            haystack.push_str(binding.key());
-            haystack.push('\n');
-        }
-    }
     // Ratatui-cheese `Binding::key(&self)` returns the key
     // string; the haystack now holds every operator-facing
     // key label. Check each KEYBINDINGS entry.
@@ -45,6 +35,17 @@ fn every_keybindings_entry_appears_in_help_sections() {
             "Right" | "Left" => vec!["→".to_string(), "←".to_string()],
             "Home" | "End" => vec!["g".to_string(), "G".to_string()],
             other => vec![other.to_string()],
+        }
+    }
+
+    use crate::tui::keybindings::{KEYBINDINGS, KeyMode, key_label};
+    // Concatenate every section's binding key strings.
+    let sections = keymap_sections();
+    let mut haystack = String::new();
+    for section in &sections {
+        for binding in &section.bindings {
+            haystack.push_str(binding.key());
+            haystack.push('\n');
         }
     }
 

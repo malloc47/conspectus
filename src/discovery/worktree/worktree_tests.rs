@@ -230,11 +230,12 @@ impl FakeWt {
 
 impl WtRunner for FakeWt {
     fn run(&self, args: &[&str]) -> std::io::Result<std::process::Output> {
+        use std::os::unix::process::ExitStatusExt;
+
         self.calls
             .lock()
             .unwrap()
             .push(args.iter().map(std::string::ToString::to_string).collect());
-        use std::os::unix::process::ExitStatusExt;
         Ok(std::process::Output {
             status: std::process::ExitStatus::from_raw(self.exit_code << 8),
             stdout: Vec::new(),
