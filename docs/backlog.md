@@ -6632,7 +6632,7 @@ launched through CLI/TUI surfaces for manual inspection.
     smoke tests for the hidden TUI flag surface and validation, and
     updated `docs/dev-scenarios.md` with filter/group/sort examples.
 
-- [ ] `TEST-008` Make `tui --snapshot --snapshot-keys` honor pane focus so
+- [x] `TEST-008` Make `tui --snapshot --snapshot-keys` honor pane focus so
   scripts can drive the right pane.
   - Symptom (2026-10-02, while validating `H-UI-009`): `--snapshot-keys
     "j<Tab>jjjjj"` was meant to focus the right pane and walk the
@@ -6660,6 +6660,19 @@ launched through CLI/TUI surfaces for manual inspection.
     Update the CLAUDE.md snapshot guidance with a right-pane example
     once it works.
   - Blockers: none.
+  - Outcome (2026-10-02): `runtime::action_for_event` is now the one
+    key → action path (overlay routing, `translate`, `remap_for_focus`),
+    used by both the interactive loop and the snapshot driver. That also
+    retired the driver's own overlay list, which had drifted: it missed
+    the worktree menu, new-mux form, mux menu, and mux launch form, and
+    checked overlays in a different order. Right-pane `Enter` runs the
+    same branch as live (`runtime::explorer_enter`) with the OSC 52
+    clipboard write skipped so it can't leak into the frame; drill-down,
+    `Backspace`, the Other toggle, and full detail were already plain
+    `Msg`s. Driver tests cover `<Tab>j…` moving only the explorer cursor
+    and `<Enter>` / `<Backspace>` drilling and popping a hop; both fail
+    without the remap. AGENTS.md, README, and `docs/dev-scenarios.md`
+    gained right-pane examples.
 
 ### Session Naming
 
