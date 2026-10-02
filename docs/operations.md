@@ -126,6 +126,7 @@ default_view = "sessions"   # sessions | mux (union | prs | forks also accepted)
 scan_roots = ["~/work"]     # used when --scan-root is absent; `~` expands
 show_harness_chips = false  # per-harness count chips in the header
 narrow_layout_threshold = 100  # columns below which the panes stack
+preview_wrap = "smart"      # smart | plain | none — how the Preview fits a mux pane
 # sessions_grouping = "graph"  # deprecated alias for [tui.views.sessions] grouping
 
 [tui.views.sessions]        # also mux, union, prs, forks (ADR 0031)
@@ -160,6 +161,12 @@ teardown_grace = "3s"
 - **View precedence at startup:** `--view`, then the view you last used
   (unless `--no-resume-view`), then `[tui] default_view`, then
   `sessions`.
+- **Preview wrap (ADR 0106):** `smart` wraps content but truncates
+  rules, box borders, and padding that would spill onto extra rows;
+  `plain` wraps every line; `none` keeps tmux's layout at the pane's
+  width and clips what doesn't fit. The controls overlay (`f`) has a
+  "Preview wrap" section; the last pick is remembered across runs and
+  takes precedence over the config value.
 
 Unknown sections and unknown keys are ignored. Malformed TOML
 surfaces as a `ConfigDiagnostic` on stderr but does not abort the

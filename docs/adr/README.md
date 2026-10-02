@@ -145,6 +145,7 @@ Runtime architecture, controls, theming, detail pane, and visual language.
 | [0078](0078-tui-surface-division-of-labor.md) | TUI Surface Division Of Labor | Accepted |
 | [0085](0085-tui-mvu-architecture.md) | TUI Elm/MVU Architecture | Accepted |
 | [0105](0105-tui-message-log.md) | TUI Message Log For Operation Outcomes | Accepted |
+| [0106](0106-preview-pane-wrap-modes.md) | Preview Pane Wrap Modes | Accepted |
 
 ## Transcript viewer
 

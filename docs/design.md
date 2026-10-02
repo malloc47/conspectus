@@ -883,6 +883,13 @@ Each selected node detail has four conceptual regions:
   summarizing provenance, confidence, state, and the resolver verdict
   (`resolves` / `alt of <relation>` / `conflict`).
 
+For a muxed selection the Preview zone shows the pane's live capture
+instead (ADR 0025), bottom-anchored on its last non-blank output. A
+wrap mode fits it to the pane's width: `smart` (the default) wraps
+content but truncates rules, borders, and padding; `plain` wraps
+everything; `none` keeps tmux's layout and clips. It's set by
+`[tui] preview_wrap` and the controls overlay (ADR 0106).
+
 Traversal through N levels of the graph is explicit rather than
 inline. With the right pane focused:
 
