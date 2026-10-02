@@ -495,3 +495,42 @@ fn git_discovery_enumerates_sibling_worktrees_end_to_end() {
         "linked worktree enumerated and marked: {worktree_checkouts:?}",
     );
 }
+
+/// A directory with every permission removed for the life of the
+/// guard. `None` when the process can still enter it (e.g. running as
+/// root), in which case the caller can't exercise the denial.
+struct LockedDir(std::path::PathBuf);
+
+impl LockedDir {
+    fn new(path: std::path::PathBuf) -> Option<Self> {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::create_dir(&path).expect("create dir");
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o000)).expect("lock dir");
+        let locked = Self(path);
+        locked.0.join(".").metadata().is_err().then_some(locked)
+    }
+}
+
+impl Drop for LockedDir {
+    fn drop(&mut self) {
+        use std::os::unix::fs::PermissionsExt;
+        let _ = std::fs::set_permissions(&self.0, std::fs::Permissions::from_mode(0o755));
+    }
+}
+
+#[test]
+fn probe_returns_none_for_a_directory_it_cannot_enter() {
+    let temp = TempDir::new().expect("temp");
+    let Some(locked) = LockedDir::new(temp.path().join("private")) else {
+        return;
+    };
+    let caches = DiscoveryCaches::default();
+
+    assert!(GitProbe::new().probe(&locked.0).expect("probe").is_none());
+    assert!(
+        GitProbe::new()
+            .probe_cached(&locked.0, &caches)
+            .expect("cached probe")
+            .is_none()
+    );
+}

@@ -281,3 +281,45 @@ fn symlink_dir(target: &Path, link: &Path) {
 fn symlink_dir(target: &Path, link: &Path) {
     std::os::windows::fs::symlink_dir(target, link).expect("create symlink");
 }
+
+/// A directory with every permission removed for the life of the
+/// guard. `None` when the process can still enter it (e.g. running as
+/// root), in which case the caller can't exercise the denial.
+struct LockedDir(std::path::PathBuf);
+
+impl LockedDir {
+    fn new(path: std::path::PathBuf) -> Option<Self> {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::create_dir(&path).expect("create dir");
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o000)).expect("lock dir");
+        let locked = Self(path);
+        locked.0.join(".").metadata().is_err().then_some(locked)
+    }
+}
+
+impl Drop for LockedDir {
+    fn drop(&mut self) {
+        use std::os::unix::fs::PermissionsExt;
+        let _ = std::fs::set_permissions(&self.0, std::fs::Permissions::from_mode(0o755));
+    }
+}
+
+#[test]
+fn unenterable_child_does_not_abort_workspace_discovery() {
+    let temp = TempDir::new().expect("temp dir");
+    let _first = GitRepoFixture::init_at(temp.path(), "repo-a");
+    let _second = GitRepoFixture::init_at(temp.path(), "repo-b");
+    let Some(_locked) = LockedDir::new(temp.path().join("someone-elses")) else {
+        return;
+    };
+
+    let snapshot = discover_local_with([temp.path()], LocalDiscoveryConfig::empty())
+        .expect("an unenterable child is skipped, not fatal");
+
+    let workspace_nodes = snapshot
+        .nodes
+        .iter()
+        .filter(|node| matches!(node, GraphNode::Workspace(_)))
+        .count();
+    assert_eq!(workspace_nodes, 1);
+}

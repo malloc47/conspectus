@@ -14553,7 +14553,16 @@ Queued chunks:
     with competing cwd and log-derived candidates. This changes
     attribution results, so confirm the intent first.
 
-- [ ] `H-RUST-021` Don't abort discovery on one unreadable scan-root child.
+- [x] `H-RUST-021` Don't abort discovery on one unreadable scan-root child.
+  - Outcome: `GitProbe::probe` and `probe_cached` now skip directories
+    the process can't enter, as they already skipped non-directories
+    (`is_probeable_dir` checks search permission by resolving `root/.`).
+    Every caller benefits: generic workspace children, Atelier and
+    agent-deck members, and observed session cwds. No diagnostic is
+    emitted, since an unreadable sibling is ordinary in shared
+    directories like `/tmp` and would only add noise. `graph --refresh`
+    from `/tmp` now completes; regression tests cover the probe and
+    workspace discovery with a 0o000 child.
   - Problem: `conspectus graph --refresh` run from `/tmp` fails with
     "discovery provider `generic_workspace` failed: failed to run git
     rev-parse --is-inside-work-tree: Permission denied". The generic

@@ -31,6 +31,21 @@ impl Default for GitProbe {
     }
 }
 
+/// Whether `git` can be run with `root` as its working directory.
+///
+/// A path that isn't a directory, or a directory this process can't
+/// enter (no search permission, like other users' private dirs under
+/// `/tmp`), can't be a work tree we can inspect. Spawning `git` there
+/// fails before git runs (ENOTDIR or EACCES), which `GitProbe::optional`
+/// would surface as a hard error and fail the whole discovery cycle,
+/// so probes treat these as "not a repo". `GenericWorkspaceDiscovery`
+/// probes every child of a scan root and reaches both cases. Resolving
+/// `root/.` needs search permission on `root`, which is exactly what
+/// `chdir` needs. Symlinks to usable directories still probe normally.
+fn is_probeable_dir(root: &Path) -> bool {
+    root.is_dir() && root.join(".").metadata().is_ok()
+}
+
 impl GitProbe {
     pub fn new() -> Self {
         Self::default()
@@ -39,20 +54,7 @@ impl GitProbe {
     pub fn probe(&self, root: impl AsRef<Path>) -> Result<Option<GitProbeResult>> {
         let root = root.as_ref();
 
-        // A probe root that is not a directory can never be a git work
-        // tree, and spawning `git` with a non-directory `current_dir`
-        // fails with ENOTDIR (`Not a directory`, os error 20) rather
-        // than git's own "not a repository" exit — which
-        // `GitProbe::optional` would surface as a hard error and fail
-        // the whole discovery cycle. `GenericWorkspaceDiscovery` reaches
-        // here with symlink children that resolve to files, so this
-        // guard is load-bearing for `conspectus serve` started from a
-        // non-git directory. `is_dir()` follows symlinks, so a symlink
-        // to a real directory still probes normally; a missing path or
-        // a path whose parent is a file both fall through to `None`.
-        // Skipping the spawn is also a small perf win on non-repo
-        // children.
-        if !root.is_dir() {
+        if !is_probeable_dir(root) {
             return Ok(None);
         }
         self.probe_uncached(root)
@@ -73,7 +75,7 @@ impl GitProbe {
         caches: &DiscoveryCaches,
     ) -> Result<Option<GitProbeResult>> {
         let root = root.as_ref();
-        if !root.is_dir() {
+        if !is_probeable_dir(root) {
             return Ok(None);
         }
         let cache = &caches.git_probes;
