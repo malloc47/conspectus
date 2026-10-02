@@ -18,7 +18,7 @@ use crate::model::{
 use crate::output::render::{node_short_id_from_display, unique_prefix_len};
 use crate::tui::rows::{
     AgentSessionRow, GroupRow, MuxIndicator, MuxSessionRow, Row, RowId, RowKind, RowTree,
-    ViewLabel, format_recency, harness_label, pane_command, shorten_home,
+    ViewLabel, format_recency, harness_label, mux_program, shorten_home,
 };
 use crate::tui::{MuxGrouping, Sort};
 
@@ -71,11 +71,11 @@ pub fn build_mux_tree(inputs: MuxBuildInputs<'_>) -> RowTree {
     let attachments = collect_attached_agents(snapshot);
     let pins: Vec<&PinCandidate> = snapshot.pins.iter().collect();
 
-    let mut pin_id_by_mux: HashMap<NodeId, String> = HashMap::new();
+    let mut pin_by_mux: HashMap<NodeId, &PinCandidate> = HashMap::new();
     for pin in &pins {
         match &pin.binding {
             Some(PinBinding::Bound { mux, .. } | PinBinding::StaleMux { mux }) => {
-                pin_id_by_mux.insert(NodeId::MuxSession(mux.clone()), pin.id.clone());
+                pin_by_mux.insert(NodeId::MuxSession(mux.clone()), pin);
             }
             Some(PinBinding::Unbound) | None => {}
         }
@@ -152,9 +152,9 @@ pub fn build_mux_tree(inputs: MuxBuildInputs<'_>) -> RowTree {
             created_epoch: mux.node.created_epoch,
             last_attached_epoch: mux.node.last_attached_epoch,
             agent_labels: agent_labels(&visible_attached),
-            pane_command: pane_command(mux.node),
+            program: mux_program(mux.node, pin_by_mux.get(&node_id).copied()),
             single_session_preview,
-            pin_id: pin_id_by_mux.get(&node_id).cloned(),
+            pin_id: pin_by_mux.get(&node_id).map(|pin| pin.id.clone()),
             primary_node: node_id.clone(),
         };
 
@@ -265,7 +265,7 @@ fn placeholder_mux_group_for_pin(pin: &PinCandidate, home: Option<&Path>) -> Mux
             created_epoch: None,
             last_attached_epoch: None,
             agent_labels: vec![harness_label(&pin.harness)],
-            pane_command: None,
+            program: None,
             single_session_preview: Some(shorten_home(&pin.cwd, home)),
             pin_id: Some(pin.id.clone()),
             primary_node: pin_node.clone(),

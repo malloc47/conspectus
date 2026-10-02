@@ -114,22 +114,60 @@ fn recency_bucket_is_none_when_either_side_missing() {
     assert_eq!(recency_bucket(Some(100), None), None);
 }
 
-#[test]
-fn pane_command_uses_the_basename_and_skips_blanks() {
-    use crate::model::{MuxSessionId, MuxSessionNode};
-    let node = |command: Option<&str>| {
-        let node = MuxSessionNode::new(MuxSessionId::new("tmux:x"), "tmux", "x");
-        match command {
-            Some(command) => node.with_active_pane_command(command),
-            None => node,
-        }
-    };
+fn program_test_pin(harness: &str, launch_argv: Option<&[&str]>) -> crate::model::PinCandidate {
+    use crate::model::{PinCandidate, PinMuxRef, Provenance};
+    PinCandidate {
+        id: "p".to_string(),
+        display_name: "p".to_string(),
+        harness: harness.to_string(),
+        cwd: "/p".to_string(),
+        mux: PinMuxRef {
+            backend: "tmux".to_string(),
+            name: "x".to_string(),
+            socket_name: None,
+        },
+        launch_argv: launch_argv.map(|argv| argv.iter().map(ToString::to_string).collect()),
+        reason: None,
+        provenance: Provenance::LocalPin,
+        store_path: "/p/.conspectus.toml".to_string(),
+        binding: None,
+    }
+}
 
-    assert_eq!(pane_command(&node(Some("npm"))).as_deref(), Some("npm"));
+#[test]
+fn mux_program_prefers_the_current_command_then_start_command_then_pin() {
+    use crate::model::{MuxSessionId, MuxSessionNode};
+    let bare = MuxSessionNode::new(MuxSessionId::new("tmux:x"), "tmux", "x");
+    let serve_pin = program_test_pin("conspectus", Some(&["conspectus", "serve"]));
+
+    let current = bare.clone().with_active_pane_command("/usr/bin/npm");
     assert_eq!(
-        pane_command(&node(Some("/usr/bin/conspectus"))).as_deref(),
+        mux_program(&current, Some(&serve_pin)).as_deref(),
+        Some("npm")
+    );
+
+    let mut started = bare.clone().with_active_pane_command("  ");
+    started.active_pane_start_command = Some("/nix/store/x/bin/node server.js".to_string());
+    assert_eq!(
+        mux_program(&started, Some(&serve_pin)).as_deref(),
+        Some("node")
+    );
+
+    assert_eq!(
+        mux_program(&bare, Some(&serve_pin)).as_deref(),
         Some("conspectus")
     );
-    assert_eq!(pane_command(&node(Some("  "))), None);
-    assert_eq!(pane_command(&node(None)), None);
+    assert_eq!(mux_program(&bare, None), None);
+}
+
+#[test]
+fn pin_program_falls_back_to_the_harness_default_argv() {
+    assert_eq!(
+        pin_program(&program_test_pin("claude-code", None)).as_deref(),
+        Some("claude")
+    );
+    assert_eq!(
+        pin_program(&program_test_pin("custom-launcher", None)).as_deref(),
+        Some("custom-launcher")
+    );
 }

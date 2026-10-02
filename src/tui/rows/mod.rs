@@ -285,10 +285,10 @@ pub struct MuxSessionRow {
     /// this mux. Renderers use these as the primary mux-row labels so
     /// mux rows scan like session rows without repeating session IDs.
     pub agent_labels: Vec<String>,
-    /// Program running in the mux's active pane (`#{pane_current_command}`),
-    /// shown in place of agent labels when no agent is linked so shell,
-    /// build, and server panes still say what they run.
-    pub pane_command: Option<String>,
+    /// Program the mux runs, shown in place of agent labels when no
+    /// agent is linked so shell, build, and server panes still say what
+    /// they run. See `mux_program` for where it comes from.
+    pub program: Option<String>,
     /// Last-message preview of the sole attached agent session,
     /// populated only when exactly one visible agent is linked to this
     /// mux. Renderers flow it into the trailing space after the CWD so
@@ -435,11 +435,42 @@ pub fn format_workspace_display(
 /// `claude-code`'s `claude` collapse lives on
 /// `crate::discovery::harness::ClaudeCodeAdapter::display_label`
 /// rather than in a match table here.
-/// The program in a mux's active pane, by basename, for rows that
-/// have no linked agent to label them. `None` when the backend didn't
-/// report one.
-pub(crate) fn pane_command(mux: &crate::model::MuxSessionNode) -> Option<String> {
-    let command = mux.active_pane_command.as_deref()?.trim();
+/// The program a mux runs, by basename, for rows with no linked agent
+/// to label them. Prefers what the active pane runs now
+/// (`#{pane_current_command}`), then the program the pane was started
+/// with, then the launch program of the pin bound to the mux, so a
+/// freshly launched pin keeps its label even if the backend hasn't
+/// reported the pane yet. `None` when nothing names a program.
+pub(crate) fn mux_program(
+    mux: &crate::model::MuxSessionNode,
+    pin: Option<&crate::model::PinCandidate>,
+) -> Option<String> {
+    let start_program = mux
+        .active_pane_start_command
+        .as_deref()
+        .and_then(|command| command.split_whitespace().next());
+    mux.active_pane_command
+        .as_deref()
+        .and_then(program_name)
+        .or_else(|| start_program.and_then(program_name))
+        .or_else(|| pin.and_then(pin_program))
+}
+
+/// The program a pin launches: its `launch.argv` override, else the
+/// harness's default argv, else the harness key itself.
+pub(crate) fn pin_program(pin: &crate::model::PinCandidate) -> Option<String> {
+    if let Some(program) = pin.launch_argv.as_ref().and_then(|argv| argv.first()) {
+        return program_name(program);
+    }
+    let default_argv = crate::discovery::harness::launch_argv_for(&pin.harness);
+    match default_argv.first() {
+        Some(program) => program_name(&program.to_string_lossy()),
+        None => program_name(&pin.harness),
+    }
+}
+
+fn program_name(command: &str) -> Option<String> {
+    let command = command.trim();
     let name = command.rsplit('/').next().unwrap_or(command);
     (!name.is_empty()).then(|| name.to_string())
 }

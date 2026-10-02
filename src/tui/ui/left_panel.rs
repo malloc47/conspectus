@@ -792,8 +792,8 @@ pub(super) fn append_mux_agent_labels(
     use crate::tui::widgets::badge::{command_badge, harness_badge};
 
     if mux.agent_labels.is_empty() {
-        match &mux.pane_command {
-            Some(command) => spans.push(command_badge(command, theme)),
+        match &mux.program {
+            Some(program) => spans.push(command_badge(program, theme)),
             None => spans.push(span!(theme.placeholder; " no agent ")),
         }
         return;

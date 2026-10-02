@@ -1040,3 +1040,50 @@ fn mux_recency_missing_signal_sorts_to_the_bottom() {
     let order = mux_recency_order(&snapshot, crate::tui::MuxRecency::Created);
     assert_eq!(order.last().map(String::as_str), Some("b"));
 }
+
+#[test]
+fn stale_pin_mux_without_a_reported_command_shows_the_pin_program() {
+    use crate::model::{PinBinding, PinCandidate, PinMuxRef, Provenance};
+    let mut snapshot = GraphSnapshot::empty();
+    snapshot.nodes.push(mux_node("serve"));
+    snapshot.pins.push(PinCandidate {
+        id: "serve".to_string(),
+        display_name: "serve".to_string(),
+        harness: "conspectus".to_string(),
+        cwd: "/p/work".to_string(),
+        mux: PinMuxRef {
+            backend: "tmux".to_string(),
+            name: "serve".to_string(),
+            socket_name: None,
+        },
+        launch_argv: Some(vec!["conspectus".to_string(), "serve".to_string()]),
+        reason: None,
+        provenance: Provenance::LocalPin,
+        store_path: "/p/work/.conspectus.toml".to_string(),
+        binding: Some(PinBinding::StaleMux {
+            mux: MuxSessionId::new("tmux:serve"),
+        }),
+    });
+
+    let tree = build_mux_tree(MuxBuildInputs {
+        snapshot: &snapshot,
+        home: None,
+        now: Some(1_700_000_000),
+        filter: RowFilter::default(),
+        grouping: MuxGrouping::Session,
+        sort: Sort::Hierarchy,
+        mux_recency: crate::tui::MuxRecency::default(),
+    });
+
+    let row = tree
+        .rows
+        .iter()
+        .find_map(|row| match &row.kind {
+            RowKind::MuxSession(mux) if mux.native_id == "serve" => Some(mux),
+            _ => None,
+        })
+        .expect("live mux row");
+    assert!(row.agent_labels.is_empty());
+    assert_eq!(row.program.as_deref(), Some("conspectus"));
+    assert_eq!(row.pin_id.as_deref(), Some("serve"));
+}
