@@ -14107,6 +14107,28 @@ Fresh batch, added alongside the 2026-07-27 items.
     clips. The mode is set with `[tui] preview_wrap`, a "Preview wrap"
     section in the controls overlay, and is persisted in
     `tui-state.json`.
+- [x] `H-HANDOFF-LATENCY-001` Returning from tmux redraws the TUI
+  without waiting for the refresh (ADR 0108).
+  - Symptom: after the ADR 0104 nudge, a plain detach left the screen
+    blank while the TUI nudged the daemon's `mux` and `harness` classes,
+    fetched the snapshot, and rebuilt rows on the UI thread. That took
+    about half a second, longer when a git rebuild held the daemon's
+    writer lock, and seconds with no daemon.
+  - Outcome (2026-10-02): attach returns dispatch
+    `Msg::HandoffReturned`; `LiveMode` answers with a nudged background
+    worker. Until it lands, the mux row and linked session rows render
+    dimmed with a spinner in the attach-glyph cell, and the mux's
+    preview is recaptured right away. Worker results carry a generation
+    (`WorkerLedger`), so an older result can't overwrite a newer one.
+  - Tests: `tui::runtime` `worker_ledger`, `tui::app` hand-off reducer,
+    `tui::ui` pending-row rendering.
+- [ ] `H-HANDOFF-LATENCY-002` Cheaper post-hand-off rescans.
+  - Scope: one daemon `refresh` call that takes several classes (one
+    resolve and one round trip instead of two). Measure how long nudges
+    wait on the writer lock during git rebuilds. Decide whether the
+    blocking refreshes before a launch's attach (`pin launch`,
+    `mux new`, `mux launch`) are still needed, since the attach target
+    comes from the request, not the snapshot.
 - [x] `H-MUX-NEW-001` Create bare tmux sessions from within Conspectus
   (no pin, no agent).
   - Motivation: operators currently drop out of Conspectus to run a
