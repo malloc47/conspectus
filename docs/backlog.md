@@ -8542,7 +8542,7 @@ do not get lost inside their originating workstreams.
     resolver-side and renderer-side stories agree on what
     "candidate fan-out" means.
 
-- [ ] `H-UI-009` Related view at neighbor granularity; split
+- [x] `H-UI-009` Related view at neighbor granularity; split
   corroborating from competing candidates (ADR 0107).
   - Symptom (2026-10-02): a mux's `Related` section listed
     `attached session <S>` as validated and the same session again,
@@ -8575,6 +8575,20 @@ do not get lost inside their originating workstreams.
     row keys survive a representative-link change; TUI snapshot of the
     preview `evidence` list.
   - Blockers: none.
+  - Outcome (2026-10-02): resolver split landed with a
+    `FORMAT_VERSION` bump to 4; same-target pin/declared/hook
+    candidates in the pin, declared, and HTML snapshots moved from
+    competing to corroborating, and their conflict diagnostics went
+    away. The branch→PR resolver tests had modelled PR→branch with
+    identical endpoints; they now use the real branch→PR direction
+    with distinct PRs so they still exercise competition. Explorer
+    rows fold by neighbor with an `evidence` list, shown in the
+    Preview zone as `<evidence kind or adapter> · <provenance> ·
+    <confidence>`. On the live graph `tmux:conspectus-main` now reads
+    `3 validated` with one `attached session` row and no Other zone.
+    `tui --snapshot` can't move the explorer cursor (the explorer
+    state is built on draw, after the key script runs), so the preview
+    is covered by a UI test instead.
 
 ### TUI Widget Ecosystem Adoption (H-WIDG-*)
 

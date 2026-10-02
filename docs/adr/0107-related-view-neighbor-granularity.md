@@ -67,10 +67,10 @@ candidate the slot considered, corroborating ones included, moves into
 no answer for them to corroborate.
 
 `ResolutionExplanation` gains a matching `corroborating` score list so
-`conspectus node --explain` can still show why one producer outranked
-another. `decisive_axis` is computed against the first competing
-candidate, falling back to the first corroborating one, so the
-explainer keeps naming the axis that decided the ranking.
+`conspectus node show` and `graph --explain` can still show why one
+producer outranked another. `decisive_axis` is computed against the
+first competing candidate, falling back to the first corroborating
+one, so the explainer keeps naming the axis that decided the ranking.
 
 `snapshot::FORMAT_VERSION` bumps so `graph.bin` caches written with the
 old shape cold-rebuild (ADR 0082).
@@ -99,9 +99,11 @@ stubs. `⚠` counts mean real disagreement.
 
 The row itself stays `<verb> <glyph> <neighbor>`; no count chip is
 added. When the cursor is on a link row, the Preview zone lists every
-backing link under an `evidence` heading, one line per link
-(`local_pin · high`, `hook_sidecar · hook_session_path_match · high`,
-…). The existing `edge` line stays and describes the representative.
+backing link under an `evidence` heading, one line per link: the
+evidence kind (or the adapter when the producer stamped none), then
+provenance and confidence, e.g.
+`hook_session_path_match · strong_discovered · high`. The existing
+`edge` line stays and describes the representative.
 
 ### 4. Row keys identify neighbors, not links
 
