@@ -30,17 +30,15 @@ pub const HARNESS_BADGE_WIDTH: usize = MAX_HARNESS_LABEL_LEN + 2;
 
 /// Render `label` as a fixed-width filled badge. The badge uses
 /// `theme.badge` (default `REVERSED | BOLD`) over
-/// `theme.harness_color(label)` and is padded to
-/// [`HARNESS_BADGE_WIDTH`] cells so every chip has the same visual
-/// footprint. Labels longer than the configured max are rendered as-is
-/// (they'll widen the chip), which is harmless because the column
-/// math downstream measures the actual span width.
+/// `theme.harness_color(label)` and is exactly [`HARNESS_BADGE_WIDTH`]
+/// cells, so every chip has the same footprint and the columns after
+/// it stay aligned. Registered harness labels all fit; anything longer
+/// (a pin's custom launcher, say) is cut with `…`.
 pub fn harness_badge(label: &str, theme: &Theme) -> Span<'static> {
     let style = Style::default()
         .fg(theme.harness_color(label))
         .add_modifier(theme.badge);
-    let body_width = label.chars().count().max(MAX_HARNESS_LABEL_LEN);
-    span!(style; " {label:<body_width$} ")
+    badge_span(label, style)
 }
 
 /// Render a pane's program name as a badge the same width as
@@ -53,21 +51,19 @@ pub fn command_badge(command: &str, theme: &Theme) -> Span<'static> {
         .fg(Color::White)
         .bg(theme.command_badge)
         .add_modifier(Modifier::BOLD);
-    let label = if command.chars().count() > MAX_HARNESS_LABEL_LEN {
-        let kept: String = command.chars().take(MAX_HARNESS_LABEL_LEN - 1).collect();
-        format!("{kept}…")
-    } else {
-        command.to_string()
-    };
-    span!(style; " {label:<MAX_HARNESS_LABEL_LEN$} ")
+    badge_span(command, style)
 }
 
-/// Visible cell width of [`harness_badge`]'s output for a given
-/// label. Today every known harness fits inside [`HARNESS_BADGE_WIDTH`];
-/// the helper still measures from the label so a future longer
-/// harness key (e.g. `claude-code-2`) widens gracefully.
-pub fn harness_badge_width(label: &str) -> usize {
-    label.chars().count().max(MAX_HARNESS_LABEL_LEN) + 2
+/// `label` padded or cut (with `…`) to the badge body, inside one
+/// styled span so the padding carries the chip background too.
+fn badge_span(label: &str, style: Style) -> Span<'static> {
+    let label = if label.chars().count() > MAX_HARNESS_LABEL_LEN {
+        let kept: String = label.chars().take(MAX_HARNESS_LABEL_LEN - 1).collect();
+        format!("{kept}…")
+    } else {
+        label.to_string()
+    };
+    span!(style; " {label:<MAX_HARNESS_LABEL_LEN$} ")
 }
 
 #[cfg(test)]
@@ -117,14 +113,11 @@ mod tests {
     }
 
     #[test]
-    fn harness_badge_width_matches_actual_render() {
-        // All known-length harnesses render at HARNESS_BADGE_WIDTH;
-        // an over-long label widens the chip past the constant so
-        // downstream column math still measures correctly.
-        assert_eq!(harness_badge_width("claude"), HARNESS_BADGE_WIDTH);
-        assert_eq!(harness_badge_width("codex"), HARNESS_BADGE_WIDTH);
-        assert_eq!(harness_badge_width("opencode"), HARNESS_BADGE_WIDTH);
-        assert_eq!(harness_badge_width("custom-harness-x"), 16 + 2);
+    fn harness_badge_truncates_labels_longer_than_the_badge() {
+        let theme = Theme::default();
+        let span = harness_badge("conspectus", &theme);
+        assert_eq!(span.content, " conspec… ");
+        assert_eq!(span.content.chars().count(), HARNESS_BADGE_WIDTH);
     }
 
     #[test]
