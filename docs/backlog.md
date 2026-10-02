@@ -6632,6 +6632,35 @@ launched through CLI/TUI surfaces for manual inspection.
     smoke tests for the hidden TUI flag surface and validation, and
     updated `docs/dev-scenarios.md` with filter/group/sort examples.
 
+- [ ] `TEST-008` Make `tui --snapshot --snapshot-keys` honor pane focus so
+  scripts can drive the right pane.
+  - Symptom (2026-10-02, while validating `H-UI-009`): `--snapshot-keys
+    "j<Tab>jjjjj"` was meant to focus the right pane and walk the
+    explorer cursor onto a Related row, but every `j` after `<Tab>` still
+    moved the left tree selection. Snapshots can only show the right
+    pane's default cursor state, so the Preview zone for a Related row
+    (evidence list, edge line), Other-zone expansion, drill-down, and
+    breadcrumbs can't be checked with the snapshot tool.
+  - Cause: the interactive loop runs each key through
+    `translate(...).and_then(|a| remap_for_focus(a, app.focus()))`
+    (`src/tui/runtime.rs`). The snapshot driver's `dispatch_event`
+    (`src/tui/snapshot.rs`) returns `translate(event, viewport_height)`
+    and skips `remap_for_focus`. `<Tab>` does flip focus, but
+    `j`/`k`/`Enter`/`F`/`e`/`g`/`G` are never sent to their `Explorer*`
+    messages.
+  - Scope: apply `remap_for_focus` in the snapshot driver, and route the
+    snapshot and interactive paths through one shared helper for key →
+    action translation so the two can't drift again. Check whether the
+    explorer-only actions that come out of the remap (drill, back, Other
+    toggle, full-detail toggle) reach `apply_action`'s supported set and
+    aren't skipped as "unsupported action".
+  - Tests: a snapshot-driver test that runs `<Tab>j…` against a fixture
+    and asserts the explorer cursor moved while the left selection
+    didn't; one that drills with `<Enter>` and asserts the breadcrumb.
+    Update the CLAUDE.md snapshot guidance with a right-pane example
+    once it works.
+  - Blockers: none.
+
 ### Session Naming
 
 Conspectus today is read-only outside Phase 5 declared-link CRUD. Session
@@ -8586,9 +8615,9 @@ do not get lost inside their originating workstreams.
     Preview zone as `<evidence kind or adapter> · <provenance> ·
     <confidence>`. On the live graph `tmux:conspectus-main` now reads
     `3 validated` with one `attached session` row and no Other zone.
-    `tui --snapshot` can't move the explorer cursor (the explorer
-    state is built on draw, after the key script runs), so the preview
-    is covered by a UI test instead.
+    `tui --snapshot` couldn't move the explorer cursor because its key
+    driver skips the focus remap (`TEST-008`), so the preview is covered
+    by a UI test instead.
 
 ### TUI Widget Ecosystem Adoption (H-WIDG-*)
 
