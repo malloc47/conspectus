@@ -1462,28 +1462,9 @@ fn active_pane_process_evidence(
 }
 
 fn process_command_harnesses(command: &str) -> BTreeSet<String> {
-    // Iterate registered adapters and consult each
-    // signature's `process_command_basenames`.
-    let Some(first) = command.split_whitespace().next() else {
-        return BTreeSet::new();
-    };
-    let name = Path::new(first)
-        .file_name()
-        .and_then(|name| name.to_str())
-        .unwrap_or(first)
-        .to_ascii_lowercase();
-    let mut harnesses = BTreeSet::new();
-    for adapter in crate::discovery::harness::registered_adapters() {
-        let sig = adapter.runtime_signature();
-        if sig
-            .process_command_basenames
-            .iter()
-            .any(|b| b.eq_ignore_ascii_case(&name))
-        {
-            harnesses.insert(adapter.harness_key().to_string());
-        }
-    }
-    harnesses
+    crate::discovery::harness::adapters_for_program(command)
+        .map(|adapter| adapter.harness_key().to_string())
+        .collect()
 }
 
 #[derive(Debug, PartialEq, Eq)]

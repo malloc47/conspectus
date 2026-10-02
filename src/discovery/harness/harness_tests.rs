@@ -318,3 +318,35 @@ fn discover_with_state_root_stamps_provider_when_state_root_present() {
     // snapshot tests).
     assert!(fragment.nodes.is_empty());
 }
+
+#[test]
+fn adapters_for_program_matches_binary_basenames() {
+    let keys = |program: &str| -> Vec<&str> {
+        adapters_for_program(program)
+            .map(HarnessAdapter::harness_key)
+            .collect()
+    };
+    assert_eq!(keys("codex"), ["codex"]);
+    assert_eq!(keys("/nix/store/x-codex/bin/codex-rs --yolo"), ["codex"]);
+    assert_eq!(keys("Claude"), ["claude-code"]);
+    assert!(keys("npm").is_empty());
+    assert!(keys("").is_empty());
+}
+
+#[test]
+fn adapter_in_command_finds_the_harness_behind_a_launch_wrapper() {
+    let key = |command: &str| {
+        adapter_in_command(command.split_whitespace()).map(HarnessAdapter::harness_key)
+    };
+    assert_eq!(
+        key("atelier exec claude --dangerously-skip-permissions"),
+        Some("claude-code")
+    );
+    assert_eq!(
+        key("atelier exec -- mise exec -- nix develop -c -- codex --yolo"),
+        Some("codex")
+    );
+    assert_eq!(key("codex"), Some("codex"));
+    assert_eq!(key("atelier exec -- npm run dev"), None);
+    assert_eq!(key(""), None);
+}

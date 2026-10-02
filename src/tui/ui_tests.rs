@@ -1777,6 +1777,7 @@ fn row_kind_glyph_span_dispatches_per_row_kind() {
         last_attached_epoch: None,
         agent_labels: Vec::new(),
         program: None,
+        program_harness: None,
         single_session_preview: None,
         pin_id: None,
         primary_node: NodeId::MuxSession(MuxSessionId::new("project")),
@@ -2011,6 +2012,7 @@ fn mux_session_row_mirrors_session_column_order() {
         last_attached_epoch: None,
         agent_labels: vec!["codex".into()],
         program: None,
+        program_harness: None,
         single_session_preview: Some("running cargo test".into()),
         pin_id: None,
         primary_node: NodeId::MuxSession(MuxSessionId::new("tmux:editor")),
@@ -2081,6 +2083,7 @@ fn placeholder_mux_row_renders_dotted_glyph_and_cwd_preview() {
         last_attached_epoch: None,
         agent_labels: vec!["codex".into()],
         program: None,
+        program_harness: None,
         single_session_preview: Some("~/repo".into()),
         pin_id: Some("ingest".into()),
         primary_node: NodeId::Pin(crate::model::PinId::new("ingest")),
@@ -3683,6 +3686,7 @@ fn agentless_mux_row(pane_command: Option<&str>) -> MuxSessionRow {
         last_attached_epoch: None,
         agent_labels: Vec::new(),
         program: pane_command.map(str::to_string),
+        program_harness: None,
         single_session_preview: None,
         pin_id: None,
         primary_node: NodeId::MuxSession(MuxSessionId::new("tmux:build")),
@@ -3711,4 +3715,22 @@ fn agentless_mux_row_without_a_pane_command_says_no_agent() {
     let rendered: String = spans.iter().map(|span| span.content.as_ref()).collect();
 
     assert!(rendered.contains("no agent"), "placeholder: {rendered}");
+}
+
+#[test]
+fn agentless_mux_row_running_a_harness_uses_the_harness_badge() {
+    let theme = Theme::default();
+    for (program, label) in [("atelier", "codex"), ("claude", "claude")] {
+        let row = MuxSessionRow {
+            program_harness: Some(label.to_string()),
+            ..agentless_mux_row(Some(program))
+        };
+        let spans = render_mux_session_spans(&row, &theme, 0, 100);
+        let chip = spans
+            .iter()
+            .find(|span| span.content.trim() == label)
+            .unwrap_or_else(|| panic!("{label} chip for {program}: {spans:?}"));
+        assert_eq!(chip.style.fg, Some(theme.harness_color(label)), "{program}");
+        assert_ne!(chip.style.bg, Some(theme.command_badge), "{program}");
+    }
 }

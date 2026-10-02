@@ -443,6 +443,40 @@ fn adapter_for(harness_key: &str) -> Option<&'static dyn HarnessAdapter> {
     registered_adapters().find(|a| a.harness_key() == harness_key)
 }
 
+/// Registered adapters whose harness binary is named `program` (a
+/// command's first token or its basename, e.g. `codex` or
+/// `/nix/store/…/bin/claude`), matched case-insensitively against each
+/// signature's `process_command_basenames`.
+pub fn adapters_for_program(program: &str) -> impl Iterator<Item = &'static dyn HarnessAdapter> {
+    let first = program.split_whitespace().next().unwrap_or_default();
+    let name = first
+        .rsplit('/')
+        .next()
+        .unwrap_or(first)
+        .to_ascii_lowercase();
+    registered_adapters().filter(move |adapter| {
+        !name.is_empty()
+            && adapter
+                .runtime_signature()
+                .process_command_basenames
+                .iter()
+                .any(|basename| basename.eq_ignore_ascii_case(&name))
+    })
+}
+
+/// The first registered adapter whose harness binary appears among a
+/// command's tokens. Launch wrappers such as `atelier exec claude …` or
+/// `mise exec -- nix develop -c -- codex` name the harness after the
+/// wrapper's own arguments, so every token is a candidate; the first
+/// match wins.
+pub fn adapter_in_command<'a>(
+    tokens: impl IntoIterator<Item = &'a str>,
+) -> Option<&'static dyn HarnessAdapter> {
+    tokens
+        .into_iter()
+        .find_map(|token| adapters_for_program(token).next())
+}
+
 /// Look up the per-harness default launch argv. Convenience for the
 /// CLI launch path so it can resolve `pin.harness` → argv without
 /// re-instantiating an adapter or walking the discovery registry.

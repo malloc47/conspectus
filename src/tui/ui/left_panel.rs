@@ -792,9 +792,13 @@ pub(super) fn append_mux_agent_labels(
     use crate::tui::widgets::badge::{command_badge, harness_badge};
 
     if mux.agent_labels.is_empty() {
-        match &mux.program {
-            Some(program) => spans.push(command_badge(program, theme)),
-            None => spans.push(span!(theme.placeholder; " no agent ")),
+        // A pane running a harness whose session isn't attributed to this
+        // mux still gets that harness's badge and color; other programs
+        // get the neutral program chip.
+        match (&mux.program_harness, &mux.program) {
+            (Some(harness), _) => spans.push(harness_badge(harness, theme)),
+            (None, Some(program)) => spans.push(command_badge(program, theme)),
+            (None, None) => spans.push(span!(theme.placeholder; " no agent ")),
         }
         return;
     }

@@ -1087,3 +1087,75 @@ fn stale_pin_mux_without_a_reported_command_shows_the_pin_program() {
     assert_eq!(row.program.as_deref(), Some("conspectus"));
     assert_eq!(row.pin_id.as_deref(), Some("serve"));
 }
+
+#[test]
+fn agentless_mux_running_atelier_exec_carries_the_harness_from_its_process_tree() {
+    use crate::model::{RuntimeProcessId, RuntimeProcessNode, RuntimeProcessRole};
+    let process = |key: &str, harness: &str, depth: i64| RuntimeProcessNode {
+        id: RuntimeProcessId::new(key),
+        observation_key: key.to_string(),
+        pid: None,
+        parent_pid: None,
+        root_pane_pid: None,
+        command: None,
+        cwd: None,
+        harness_key: Some(harness.to_string()),
+        role: Some(RuntimeProcessRole::HumanAgent),
+        depth: Some(depth),
+        observed_epoch: None,
+    };
+    let contains = |key: &str| GraphLink {
+        id: format!("contains-{key}"),
+        source: NodeId::MuxSession(MuxSessionId::new("tmux:ingest")),
+        target: LinkEndpoint::Node {
+            id: NodeId::RuntimeProcess(RuntimeProcessId::new(key)),
+        },
+        relation: RelationKind::MuxContainsProcess,
+        provenance: Provenance::Discovered,
+        confidence: Confidence::High,
+        freshness: Freshness::Fresh,
+        source_metadata: SourceMetadata::default(),
+        state: LinkState::Active,
+    };
+
+    let mut snapshot = GraphSnapshot::empty();
+    let mut ingest = mux_node("ingest");
+    if let GraphNode::MuxSession(mux) = &mut ingest {
+        mux.active_pane_command = Some("atelier".to_string());
+        mux.active_pane_start_command = Some("zsh".to_string());
+    }
+    snapshot.nodes.push(ingest);
+    // `atelier exec` spawned codex, which spawned a claude subagent; the
+    // shallower codex process is the pane's harness.
+    snapshot
+        .nodes
+        .push(GraphNode::RuntimeProcess(process("sub", "claude-code", 3)));
+    snapshot
+        .nodes
+        .push(GraphNode::RuntimeProcess(process("main", "codex", 2)));
+    snapshot.candidate_links.push(contains("sub"));
+    snapshot.candidate_links.push(contains("main"));
+    let snapshot = resolve_snapshot(snapshot);
+
+    let tree = build_mux_tree(MuxBuildInputs {
+        snapshot: &snapshot,
+        home: None,
+        now: Some(1_700_000_000),
+        filter: RowFilter::default(),
+        grouping: MuxGrouping::Session,
+        sort: Sort::Hierarchy,
+        mux_recency: crate::tui::MuxRecency::default(),
+    });
+
+    let row = tree
+        .rows
+        .iter()
+        .find_map(|row| match &row.kind {
+            RowKind::MuxSession(mux) if mux.native_id == "ingest" => Some(mux),
+            _ => None,
+        })
+        .expect("ingest mux row");
+    assert!(row.agent_labels.is_empty());
+    assert_eq!(row.program.as_deref(), Some("atelier"));
+    assert_eq!(row.program_harness.as_deref(), Some("codex"));
+}

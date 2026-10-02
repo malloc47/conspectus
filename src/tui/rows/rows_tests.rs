@@ -171,3 +171,94 @@ fn pin_program_falls_back_to_the_harness_default_argv() {
         Some("custom-launcher")
     );
 }
+
+#[test]
+fn mux_program_harness_sees_through_an_atelier_exec_launch() {
+    use crate::model::{MuxSessionId, MuxSessionNode};
+    let bare = MuxSessionNode::new(MuxSessionId::new("tmux:x"), "tmux", "x");
+
+    // tmux reports the wrapper as the pane command; the harness is one
+    // of the wrapper's arguments.
+    let mut atelier = bare.clone().with_active_pane_command("atelier");
+    atelier.active_pane_start_command =
+        Some("atelier exec claude --dangerously-skip-permissions".to_string());
+    assert_eq!(
+        mux_program_harness(&atelier, None, None).as_deref(),
+        Some("claude")
+    );
+
+    let mut wrapped = bare.clone().with_active_pane_command("atelier");
+    wrapped.active_pane_start_command =
+        Some("/home/op/bin/atelier exec -- nix develop -c -- codex --yolo".to_string());
+    assert_eq!(
+        mux_program_harness(&wrapped, None, None).as_deref(),
+        Some("codex")
+    );
+
+    // A pane started as `atelier exec claude` that has since dropped to
+    // a different foreground program is that program, not claude.
+    let mut exited = atelier;
+    exited.active_pane_command = Some("zsh".to_string());
+    assert_eq!(mux_program_harness(&exited, None, None), None);
+
+    // A bare harness binary still maps without any launch wrapper.
+    let direct = bare
+        .clone()
+        .with_active_pane_command("/nix/store/x/bin/codex");
+    assert_eq!(
+        mux_program_harness(&direct, None, None).as_deref(),
+        Some("codex")
+    );
+
+    // Non-harness programs stay unmapped.
+    let npm = bare.with_active_pane_command("npm");
+    assert_eq!(mux_program_harness(&npm, None, None), None);
+}
+
+#[test]
+fn mux_program_harness_prefers_the_observed_process_harness() {
+    use crate::model::{MuxSessionId, MuxSessionNode};
+    // An interactive shell where the operator typed `atelier exec codex`:
+    // neither tmux field names the harness, but the process walk does.
+    let mut shell = MuxSessionNode::new(MuxSessionId::new("tmux:x"), "tmux", "x")
+        .with_active_pane_command("atelier");
+    shell.active_pane_start_command = Some("zsh".to_string());
+    assert_eq!(mux_program_harness(&shell, None, None), None);
+    assert_eq!(
+        mux_program_harness(&shell, None, Some("codex")).as_deref(),
+        Some("codex")
+    );
+    assert_eq!(
+        mux_program_harness(&shell, None, Some("claude-code")).as_deref(),
+        Some("claude")
+    );
+}
+
+#[test]
+fn mux_program_harness_falls_back_to_the_pin_launch_argv() {
+    use crate::model::{MuxSessionId, MuxSessionNode};
+    let bare = MuxSessionNode::new(MuxSessionId::new("tmux:x"), "tmux", "x");
+    let atelier_pin = program_test_pin(
+        "claude-code",
+        Some(&[
+            "atelier",
+            "exec",
+            "claude",
+            "--dangerously-skip-permissions",
+        ]),
+    );
+    assert_eq!(
+        mux_program_harness(&bare, Some(&atelier_pin), None).as_deref(),
+        Some("claude")
+    );
+    assert_eq!(
+        mux_program_harness(&bare, Some(&program_test_pin("codex", None)), None).as_deref(),
+        Some("codex")
+    );
+    let serve_pin = program_test_pin("conspectus", Some(&["conspectus", "serve"]));
+    assert_eq!(mux_program_harness(&bare, Some(&serve_pin), None), None);
+
+    // The pin only speaks for a pane that reports nothing itself.
+    let npm = bare.with_active_pane_command("npm");
+    assert_eq!(mux_program_harness(&npm, Some(&atelier_pin), None), None);
+}

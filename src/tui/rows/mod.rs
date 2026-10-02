@@ -289,6 +289,10 @@ pub struct MuxSessionRow {
     /// agent is linked so shell, build, and server panes still say what
     /// they run. See `mux_program` for where it comes from.
     pub program: Option<String>,
+    /// Display label of the harness the pane runs when no agent session
+    /// is attributed to the mux, so the row keeps the harness badge and
+    /// color instead of a plain program chip. See `mux_program_harness`.
+    pub program_harness: Option<String>,
     /// Last-message preview of the sole attached agent session,
     /// populated only when exactly one visible agent is linked to this
     /// mux. Renderers flow it into the trailing space after the CWD so
@@ -454,6 +458,89 @@ pub(crate) fn mux_program(
         .and_then(program_name)
         .or_else(|| start_program.and_then(program_name))
         .or_else(|| pin.and_then(pin_program))
+}
+
+/// Harness each mux's pane runs, from `mux_contains_process` evidence.
+/// The process walk sees through launch wrappers (`atelier exec`,
+/// `mise exec`, `nix develop -c`), which tmux reports as the pane
+/// command instead of the harness they spawn. The shallowest harness
+/// process wins so a subagent never outranks the agent that started it.
+pub(crate) fn mux_process_harnesses(
+    snapshot: &crate::model::GraphSnapshot,
+) -> std::collections::HashMap<NodeId, String> {
+    use crate::model::{GraphNode, LinkState, RelationKind};
+
+    let processes: std::collections::HashMap<NodeId, (i64, &str)> = snapshot
+        .nodes
+        .iter()
+        .filter_map(|node| match node {
+            GraphNode::RuntimeProcess(process) => Some((
+                NodeId::RuntimeProcess(process.id.clone()),
+                (
+                    process.depth.unwrap_or(i64::MAX),
+                    process.harness_key.as_deref()?,
+                ),
+            )),
+            _ => None,
+        })
+        .collect();
+    let mut best: std::collections::HashMap<NodeId, (i64, &str)> = std::collections::HashMap::new();
+    for link in &snapshot.candidate_links {
+        if link.relation != RelationKind::MuxContainsProcess
+            || !matches!(link.state, LinkState::Active)
+        {
+            continue;
+        }
+        let Some(&process) = link.target_node_id().and_then(|id| processes.get(id)) else {
+            continue;
+        };
+        best.entry(link.source.clone())
+            .and_modify(|current| *current = (*current).min(process))
+            .or_insert(process);
+    }
+    best.into_iter()
+        .map(|(mux, (_, harness))| (mux, harness.to_string()))
+        .collect()
+}
+
+/// Display label of the harness an agentless mux runs: the observed
+/// process-tree harness when there is one, else a harness binary named
+/// in what the pane or its pin launched. The launch command is scanned
+/// token by token because wrappers name the harness after their own
+/// arguments (`atelier exec claude …`); it only counts while the pane
+/// still runs that command's program, so a shell left behind after the
+/// harness exits reads as the shell.
+pub(crate) fn mux_program_harness(
+    mux: &crate::model::MuxSessionNode,
+    pin: Option<&crate::model::PinCandidate>,
+    observed_harness: Option<&str>,
+) -> Option<String> {
+    use crate::discovery::harness::adapter_in_command;
+
+    if let Some(harness) = observed_harness {
+        return Some(harness_label(harness));
+    }
+    let current = mux.active_pane_command.as_deref().and_then(program_name);
+    let start = mux
+        .active_pane_start_command
+        .as_deref()
+        .filter(|command| !command.trim().is_empty());
+    let start_program = start
+        .and_then(|command| command.split_whitespace().next())
+        .and_then(program_name);
+    let adapter = match (current.as_deref(), start) {
+        (Some(current), _) if start_program.as_deref() != Some(current) => {
+            adapter_in_command([current])
+        }
+        (_, Some(start)) => adapter_in_command(start.split_whitespace()),
+        (_, None) => pin.and_then(|pin| match &pin.launch_argv {
+            Some(argv) => adapter_in_command(argv.iter().map(String::as_str)),
+            None => pin_program(pin)
+                .as_deref()
+                .and_then(|program| adapter_in_command([program])),
+        }),
+    };
+    adapter.map(|adapter| adapter.display_label().to_string())
 }
 
 /// The program a pin launches: its `launch.argv` override, else the

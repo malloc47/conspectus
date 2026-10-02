@@ -18,7 +18,8 @@ use crate::model::{
 use crate::output::render::{node_short_id_from_display, unique_prefix_len};
 use crate::tui::rows::{
     AgentSessionRow, GroupRow, MuxIndicator, MuxSessionRow, Row, RowId, RowKind, RowTree,
-    ViewLabel, format_recency, harness_label, mux_program, shorten_home,
+    ViewLabel, format_recency, harness_label, mux_process_harnesses, mux_program,
+    mux_program_harness, shorten_home,
 };
 use crate::tui::{MuxGrouping, Sort};
 
@@ -70,6 +71,7 @@ pub fn build_mux_tree(inputs: MuxBuildInputs<'_>) -> RowTree {
     let muxes = collect_muxes(snapshot);
     let attachments = collect_attached_agents(snapshot);
     let pins: Vec<&PinCandidate> = snapshot.pins.iter().collect();
+    let process_harnesses = mux_process_harnesses(snapshot);
 
     let mut pin_by_mux: HashMap<NodeId, &PinCandidate> = HashMap::new();
     for pin in &pins {
@@ -153,6 +155,11 @@ pub fn build_mux_tree(inputs: MuxBuildInputs<'_>) -> RowTree {
             last_attached_epoch: mux.node.last_attached_epoch,
             agent_labels: agent_labels(&visible_attached),
             program: mux_program(mux.node, pin_by_mux.get(&node_id).copied()),
+            program_harness: mux_program_harness(
+                mux.node,
+                pin_by_mux.get(&node_id).copied(),
+                process_harnesses.get(&node_id).map(String::as_str),
+            ),
             single_session_preview,
             pin_id: pin_by_mux.get(&node_id).map(|pin| pin.id.clone()),
             primary_node: node_id.clone(),
@@ -266,6 +273,7 @@ fn placeholder_mux_group_for_pin(pin: &PinCandidate, home: Option<&Path>) -> Mux
             last_attached_epoch: None,
             agent_labels: vec![harness_label(&pin.harness)],
             program: None,
+            program_harness: None,
             single_session_preview: Some(shorten_home(&pin.cwd, home)),
             pin_id: Some(pin.id.clone()),
             primary_node: pin_node.clone(),

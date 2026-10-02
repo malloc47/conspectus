@@ -194,7 +194,9 @@ mux_ambiguous = "yellow"
 mux_unmuxed   = "dim"
 
 # Background of the chip a mux row shows for its pane's program (`npm`,
-# `zsh`, …) when no agent session is linked; text is bold white.
+# `zsh`, …) when no agent session is linked; text is bold white. A pane
+# running a harness, directly or through a launch wrapper such as
+# `atelier exec claude`, keeps that harness's badge and color instead.
 command_badge = "black"
 
 # Detail-pane and structural cues.

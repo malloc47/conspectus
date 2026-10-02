@@ -60,6 +60,7 @@ pub fn build_union_tree(inputs: UnionBuildInputs<'_>) -> RowTree {
         .agent_mux_candidate_counts()
         .clone();
     let pin_id_by_bound_mux = collect_pin_id_by_bound_mux(snapshot);
+    let process_harnesses = super::mux_process_harnesses(snapshot);
 
     let full_ids: Vec<String> = rows
         .iter()
@@ -120,6 +121,11 @@ pub fn build_union_tree(inputs: UnionBuildInputs<'_>) -> RowTree {
                         last_attached_epoch: mux.node.last_attached_epoch,
                         agent_labels: Vec::new(),
                         program: super::mux_program(mux.node, None),
+                        program_harness: super::mux_program_harness(
+                            mux.node,
+                            None,
+                            process_harnesses.get(&node_id).map(String::as_str),
+                        ),
                         single_session_preview: None,
                         pin_id: pin_id_by_bound_mux.get(&mux.node.native_id).cloned(),
                         primary_node: node_id,
