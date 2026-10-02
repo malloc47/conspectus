@@ -797,6 +797,9 @@ Declared relationships should be authoritative but not destructive:
 - declared links win over discovered links
 - fresh discovered links win over cached links
 - conflicts are displayed as status, not treated as fatal errors
+- candidates that agree with the winner's target corroborate it; only
+  candidates naming a different target compete, and only those raise a
+  conflict (ADR 0107)
 - detailed output should show all candidate links and their provenance
 
 Fork-aware views should:
@@ -869,19 +872,23 @@ renderer. The full layout, locked decisions, and per-kind field set
 live in [`docs/tui-detail-mockup.md`](tui-detail-mockup.md); this
 section captures the implemented contract.
 
-Each selected node detail has four conceptual regions:
+Each selected node detail has three conceptual regions:
 
 - **Node** zone: stable, short fields for the focused node only (`id`,
   label/name, cwd, status, important timestamps, and the high-signal
   attributes per the mockup's Core-Summary fields reference).
-- **Upstream** zone: incoming edges, grouped by `(relation,
-  neighbor_kind)` and rendered as compact rows. Direction is encoded
-  by section rather than per-row arrows.
-- **Downstream** zone: outgoing edges, same grouping. Empty Upstream
-  / Downstream sections are suppressed entirely.
-- **Preview** zone: the neighbor's core fields plus an `edge` row
-  summarizing provenance, confidence, state, and the resolver verdict
-  (`resolves` / `alt of <relation>` / `conflict`).
+- **Related** zone (ADR 0074, ADR 0107): one row per neighbor, read as
+  `<directional verb> <kind glyph> <neighbor>` and sorted by neighbor
+  kind, verb, then label. Neighbors the resolver picked sit in a flat
+  validated list. Neighbors it did not pick (different-target
+  competitors, alternates, no-winner slots) and unresolved-evidence
+  stubs sit under one collapsed `Other` header. A neighbor appears in
+  exactly one zone; several producers agreeing on the same neighbor is
+  one row, not a conflict.
+- **Preview** zone: the neighbor's core fields, an `edge` row
+  summarizing the representative link's provenance, confidence, state,
+  and resolver verdict (`resolves` / `alt of <relation>` /
+  `conflict`), and an `evidence` list of every link backing the row.
 
 For a muxed selection the Preview zone shows the pane's live capture
 instead (ADR 0025), bottom-anchored on its last non-blank output. A
@@ -893,13 +900,13 @@ everything; `none` keeps tmux's layout and clips. It's set by
 Traversal through N levels of the graph is explicit rather than
 inline. With the right pane focused:
 
-- `j` / `k` walk the cursor through Node fields, Upstream groups, then
-  Downstream groups in render order.
-- `Enter` is the universal "do the obvious thing" key: on a group
-  header it toggles expansion; on a link row it drills into the
+- `j` / `k` walk the cursor through Node fields, validated rows, the
+  `Other` header, then its children when expanded.
+- `Enter` is the universal "do the obvious thing" key: on the `Other`
+  header it toggles expansion; on a neighbor row it drills into the
   neighbor and pushes a breadcrumb hop.
-- `e` is the explicit expand/collapse accelerator for multi-link
-  group headers.
+- `e` is the explicit expand/collapse accelerator for the `Other`
+  header.
 - `Backspace` reads as a general "go back" gesture: it pops the
   breadcrumb stack and restores the prior focused node along with the
   cursor and expansion state saved with it. Once the stack is empty,
@@ -913,11 +920,8 @@ inline. With the right pane focused:
   modal — used for `cwd`, `command`, `url`, `last_message_preview`,
   and other rows that carry `(truncated · o)` hints.
 
-Single-link groups collapse to a two-line composite row (locked
-decision 5); multi-link groups use a `▶` / `▼` header with a child
-count. Resolver-preferred candidates sort first and carry a trailing
-`★`. Unresolved-evidence stubs render as placeholder rows whose
-`Enter` is inert in v1 (see follow-up `T8-032`).
+Unresolved-evidence stubs render as placeholder rows whose `Enter` is
+inert in v1 (see follow-up `T8-032`).
 
 This supersedes the recursive inline linked-detail expansion (`e` =
 expand-in-place) the pane used to carry. Inline expansion made

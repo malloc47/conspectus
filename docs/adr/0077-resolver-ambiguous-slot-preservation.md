@@ -2,7 +2,10 @@
 
 ## Status
 
-Accepted
+Accepted. Narrowed 2026-10-02 by [ADR 0107](0107-related-view-neighbor-granularity.md):
+when a winner exists, `competing_link_ids` lists only
+different-target candidates; same-target candidates move to
+`corroborating_link_ids`.
 
 ## Context
 

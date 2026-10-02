@@ -2,7 +2,10 @@
 
 ## Status
 
-Accepted
+Accepted. Narrowed 2026-10-02 by [ADR 0107](0107-related-view-neighbor-granularity.md):
+rows are one per neighbor rather than one per candidate link, the
+Other zone holds only neighbors the resolver did not pick, and row
+keys identify neighbors.
 
 ## Context
 

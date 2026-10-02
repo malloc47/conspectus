@@ -8542,6 +8542,40 @@ do not get lost inside their originating workstreams.
     resolver-side and renderer-side stories agree on what
     "candidate fan-out" means.
 
+- [ ] `H-UI-009` Related view at neighbor granularity; split
+  corroborating from competing candidates (ADR 0107).
+  - Symptom (2026-10-02): a mux's `Related` section listed
+    `attached session <S>` as validated and the same session again,
+    marked `⚠`, under `Other`. On the live graph both resolved
+    `LinkedToMux` slots had a pin winner plus a hook-sidecar or
+    `cross_link` candidate for the same mux, reported as competing.
+  - Cause: the explorer renders one row per candidate link, and
+    `resolve_links` puts every non-winner in `competing_link_ids` (and
+    emits `Diagnostic::Conflict`) even when it names the winner's
+    target.
+  - Scope:
+    - Resolver: add `ResolvedRelationship.corroborating_link_ids`
+      (same target as the winner) and keep `competing_link_ids` for
+      different targets. Emit `Diagnostic::Conflict` only for
+      different-target competitors. No-winner slots (ADR 0077) fold
+      corroborating ids into competing. Add
+      `ResolutionExplanation.corroborating`. Bump
+      `snapshot::FORMAT_VERSION`.
+    - Explorer: fold each group's links by neighbor into one row with
+      an `evidence` list; classify the row `Resolves` / `Conflict` /
+      `AltOf` from its links. Key `ValidatedLink` / `OtherLink` rows by
+      `(direction, relation, neighbor)`.
+    - Preview zone: list every backing link under `evidence`.
+    - `conspectus node` and the HTML inspector show corroborating ids
+      separately from competing ones.
+  - Tests: resolver same-target vs different-target slots, conflict
+    diagnostic only on disagreement, no-winner slot folding; explorer
+    pin + hook for one mux yields one validated row and no Other zone,
+    a different-target competitor still lands in Other as `Conflict`,
+    row keys survive a representative-link change; TUI snapshot of the
+    preview `evidence` list.
+  - Blockers: none.
+
 ### TUI Widget Ecosystem Adoption (H-WIDG-*)
 
 Posture shift: the TUI carries ~5.2k LOC of in-house widget code

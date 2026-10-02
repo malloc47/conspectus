@@ -2,7 +2,9 @@
 
 ## Status
 
-Accepted
+Accepted. Narrowed 2026-10-02 by [ADR 0107](0107-related-view-neighbor-granularity.md):
+`Conflict` now means a different-target competitor or a no-winner
+slot, never same-target corroborating evidence.
 
 ## Context
 
