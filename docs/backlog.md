@@ -13958,7 +13958,7 @@ Fresh batch, added alongside the 2026-07-27 items.
     the pin. Assert `pin_target` resolves to the same
     `PinMutationTarget` fields the session-row test asserts.
   - Blockers: none.
-- [ ] `H-HARNESS-ATELIER-001` Atelier `exec claude` panes render as "No
+- [x] `H-HARNESS-ATELIER-001` Atelier `exec claude` panes render as "No
   agent" in the TUI / CLI.
   - Progress (2026-10-02): the rendering half landed in `549acab`. An
     agentless mux row now carries `program_harness` from the pane's
@@ -13968,10 +13968,9 @@ Fresh batch, added alongside the 2026-07-27 items.
     stand-in wrapper (a parent named `atelier` spawning a child whose
     argv[0] is `claude`) confirmed the process walk attributes the
     harness at depth 1, so none of the fix directions below was needed
-    for the badge. Still open: confirm with a real `atelier exec claude`
-    pane that the `AgentSession` links to the mux. Atelier anchors the
-    harness at the workspace or fork root, so a mismatch would show up
-    in cwd-based session matching, not in the process walk.
+    for the badge.
+  - Outcome (2026-10-02): the operator confirmed with a live `atelier
+    exec claude` pane that the session links to its mux as well. Closed.
   - Symptom: launching claude via atelier's `atelier exec claude`
     convention produces a live claude process in the pane's tree, but
     Conspectus attributes no harness to the mux — the row renders as
