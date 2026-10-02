@@ -1140,6 +1140,9 @@ The TUI follows the same chain. After it hands the terminal to tmux or
 changes a tmux session (attach, pin launch, mux new/launch, rename),
 and on `r`, it first asks the daemon to rescan the `mux` and `harness`
 classes, so it never shows the daemon's pre-hand-off tick (ADR 0104).
+After an attach returns, that refresh runs in the background: the TUI
+redraws right away, with the returned mux's rows and its linked
+sessions' rows dimmed and spinning until the refresh lands (ADR 0108).
 Operation outcomes the TUI produces go to an in-memory message log
 (`!`) with full subprocess output; unseen failures stay flagged in the
 status bar and lead the affected row's Preview (ADR 0105).

@@ -3,6 +3,8 @@
 ## Status
 
 Accepted. Extends ADR 0082 (continuous server) for TUI clients.
+Amended by ADR 0108: after an attach returns, this refresh runs in the
+background, and the TUI dims the affected rows until it lands.
 
 ## Context
 

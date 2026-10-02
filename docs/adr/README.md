@@ -102,6 +102,7 @@ The continuous server, the snapshot format, and the SQLite arc that was built an
 | [0091](0091-serve-idle-cost-and-class-gated-mutators.md) | Serve Idle Cost And Class-Gated Mutators | Accepted |
 | [0099](0099-caller-owned-discovery-caches.md) | Caller-Owned Discovery Caches | Accepted |
 | [0104](0104-tui-rescans-live-classes-after-tmux-handoffs.md) | The TUI Rescans Live Classes After Tmux Hand-Offs | Accepted |
+| [0108](0108-handoff-refreshes-run-in-the-background.md) | Hand-Off Refreshes Run In The Background | Accepted |
 
 ## CLI output and exports
 
