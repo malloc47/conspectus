@@ -3632,3 +3632,81 @@ fn set_preview_wrap_updates_the_mode_and_persists() {
         Some(crate::tui::PreviewWrap::Plain)
     );
 }
+
+#[test]
+fn handoff_return_marks_mux_and_linked_sessions_until_settled() {
+    let snap = snapshot_session_with_mux();
+    let tree = build_tree(&snap);
+    let mut app = App::new(RunConfig::defaults());
+    app.update(Msg::SetData {
+        snapshot: SnapshotHandle::from_snapshot(&snap),
+        tree,
+        loaded_at_epoch: 1_700_000_000,
+        initial_selection_hint: None,
+    });
+    let mux = crate::model::MuxSessionId::new("work");
+    app.update(Msg::SetMuxPreview {
+        mux: mux.clone(),
+        content: PreviewContent::text("before the attach"),
+    });
+    let session_row = app
+        .visible_rows()
+        .iter()
+        .find(|row| matches!(row.kind, RowKind::AgentSession(_)))
+        .map(|row| row.kind.clone())
+        .expect("session row");
+    assert!(!app.row_awaits_handoff(&session_row));
+
+    app.update(Msg::HandoffReturned(mux.clone()));
+    let handoff = app.handoff().expect("pending hand-off");
+    assert!(handoff.muxes.contains(&mux));
+    assert!(
+        handoff
+            .sessions
+            .contains(&AgentSessionId::new("claude-code", "/state", "abc"))
+    );
+    assert!(app.row_awaits_handoff(&session_row));
+    assert!(
+        app.mux_preview(&mux).is_none(),
+        "the pre-attach capture is dropped so the pane is recaptured"
+    );
+    assert!(app.take_handoff_refresh_request());
+    assert!(
+        !app.take_handoff_refresh_request(),
+        "one refresh per hand-off"
+    );
+
+    app.update(Msg::HandoffSettled);
+    assert!(app.handoff().is_none());
+    assert!(!app.row_awaits_handoff(&session_row));
+}
+
+#[test]
+fn repeated_handoffs_accumulate_until_settled() {
+    let mut app = seeded_app(&[("claude-code", "abc", "/p/a")]);
+    let first = crate::model::MuxSessionId::new("one");
+    let second = crate::model::MuxSessionId::new("two");
+    app.update(Msg::HandoffReturned(first.clone()));
+    assert!(app.take_handoff_refresh_request());
+    let started_at = app.handoff().expect("pending").started_at;
+
+    app.update(Msg::HandoffReturned(second.clone()));
+    let handoff = app.handoff().expect("pending");
+    assert_eq!(
+        handoff.muxes,
+        BTreeSet::from([first, second]),
+        "a second return before the refresh lands keeps the first mux pending"
+    );
+    assert_eq!(
+        handoff.started_at, started_at,
+        "the spinner keeps its phase"
+    );
+    assert!(
+        handoff.sessions.is_empty(),
+        "muxes without linked sessions mark no session rows"
+    );
+    assert!(
+        app.take_handoff_refresh_request(),
+        "the second return asks again"
+    );
+}

@@ -62,6 +62,7 @@ pub(super) use overlay_keys::{
 /// problem the worker worked around, such as a failed daemon nudge
 /// that it answered with a local rebuild.
 struct DiscoveryResult {
+    generation: u64,
     snapshot: Result<crate::model::GraphSnapshot>,
     warning: Option<String>,
 }
@@ -148,9 +149,79 @@ struct LiveMode {
     tmux: Box<dyn MuxBackend>,
     result_tx: mpsc::Sender<DiscoveryResult>,
     result_rx: mpsc::Receiver<DiscoveryResult>,
-    pending_refresh: bool,
+    workers: WorkerLedger,
     last_refresh: Instant,
     refresh_interval: Duration,
+}
+
+/// Bookkeeping for background discovery workers. Each spawn takes the
+/// next generation. Results apply only when newer than the last one
+/// applied, so a slow worker spawned before a tmux hand-off can't
+/// overwrite the post-hand-off snapshot (ADR 0108).
+#[derive(Debug, Default)]
+struct WorkerLedger {
+    next: u64,
+    in_flight: usize,
+    applied: u64,
+    /// First generation spawned after the latest hand-off; its result
+    /// (or any newer one) settles the hand-off's pending rows.
+    settles_handoff_at: Option<u64>,
+}
+
+/// What [`WorkerLedger::finish`] decided about one worker's result.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct WorkerVerdict {
+    /// The result is newer than what's on screen.
+    apply: bool,
+    /// The result settles the pending hand-off.
+    settles_handoff: bool,
+}
+
+impl WorkerLedger {
+    fn start(&mut self) -> u64 {
+        self.next += 1;
+        self.in_flight += 1;
+        self.next
+    }
+
+    fn start_for_handoff(&mut self) -> u64 {
+        let generation = self.start();
+        self.settles_handoff_at = Some(generation);
+        generation
+    }
+
+    fn finish(&mut self, generation: u64) -> WorkerVerdict {
+        self.in_flight = self.in_flight.saturating_sub(1);
+        let apply = generation > self.applied;
+        if apply {
+            self.applied = generation;
+        }
+        let settles_handoff = apply && self.settles_handoff_at.is_some_and(|at| generation >= at);
+        if settles_handoff {
+            self.settles_handoff_at = None;
+        }
+        WorkerVerdict {
+            apply,
+            settles_handoff,
+        }
+    }
+
+    fn idle(&self) -> bool {
+        self.in_flight == 0
+    }
+}
+
+impl LiveMode {
+    /// Spawn a discovery worker and show the status-bar spinner while
+    /// any worker runs.
+    fn spawn_discovery(&mut self, app: &mut App, nudge: DaemonNudge, generation: u64) {
+        self.last_refresh = Instant::now();
+        spawn_discovery_worker(app.config(), &self.result_tx, nudge, generation);
+        app.update(Msg::InFlightStart {
+            kind: crate::tui::app::InFlightKind::Discovery,
+            label: "Discovering".to_string(),
+        });
+    }
 }
 
 impl LoopMode for LiveMode {
@@ -167,9 +238,8 @@ impl LoopMode for LiveMode {
         // Provider status still populates synchronously so the
         // status-bar chips render on frame one.
         populate_provider_status(app, config);
-        self.pending_refresh = true;
-        self.last_refresh = Instant::now();
-        spawn_tracked_discovery(app, &self.result_tx);
+        let generation = self.workers.start();
+        self.spawn_discovery(app, DaemonNudge::None, generation);
         // `refresh_mux_preview_if_needed` is a no-op until a
         // snapshot lands (its `resolve_attach_target` guard
         // returns `NoSelection` when `snapshot_handle` is None), so we
@@ -181,14 +251,24 @@ impl LoopMode for LiveMode {
 
     fn drain(&mut self, app: &mut App, config: &RunConfig) -> Result<()> {
         // Drain completed background discovery results without
-        // blocking. Only the most recent result wins.
-        while let Ok(DiscoveryResult { snapshot, warning }) = self.result_rx.try_recv() {
-            self.pending_refresh = false;
-            app.update(Msg::InFlightFinish(
-                crate::tui::app::InFlightKind::Discovery,
-            ));
+        // blocking. A result older than the one on screen is dropped.
+        while let Ok(DiscoveryResult {
+            generation,
+            snapshot,
+            warning,
+        }) = self.result_rx.try_recv()
+        {
+            let verdict = self.workers.finish(generation);
+            if self.workers.idle() {
+                app.update(Msg::InFlightFinish(
+                    crate::tui::app::InFlightKind::Discovery,
+                ));
+            }
             if let Some(warning) = warning {
                 app.report(crate::tui::messages::LogEntry::warning(warning));
+            }
+            if !verdict.apply {
+                continue;
             }
             match snapshot {
                 Ok(snapshot) => {
@@ -218,15 +298,17 @@ impl LoopMode for LiveMode {
                     report_refresh_failure(app, &err);
                 }
             }
+            if verdict.settles_handoff {
+                app.update(Msg::HandoffSettled);
+            }
         }
         let _ = config;
         // Timer-driven auto-refresh. Only fires when no request
         // is in-flight and at least `refresh_interval` has
         // elapsed.
-        if !self.pending_refresh && self.last_refresh.elapsed() >= self.refresh_interval {
-            self.pending_refresh = true;
-            self.last_refresh = Instant::now();
-            spawn_tracked_discovery(app, &self.result_tx);
+        if self.workers.idle() && self.last_refresh.elapsed() >= self.refresh_interval {
+            let generation = self.workers.start();
+            self.spawn_discovery(app, DaemonNudge::None, generation);
         }
         Ok(())
     }
@@ -242,12 +324,11 @@ impl LoopMode for LiveMode {
         match action {
             Some(Action::Msg(msg)) => dispatch(app, *msg),
             Some(Action::Refresh) => {
-                if !self.pending_refresh {
-                    self.pending_refresh = true;
-                    self.last_refresh = Instant::now();
+                if self.workers.idle() {
                     // An explicit refresh asks for current state, not
                     // the daemon's last tick.
-                    spawn_tracked_discovery_with(app, &self.result_tx, DaemonNudge::LiveClasses);
+                    let generation = self.workers.start();
+                    self.spawn_discovery(app, DaemonNudge::LiveClasses, generation);
                 }
             }
             Some(Action::Attach) => {
@@ -338,6 +419,14 @@ impl LoopMode for LiveMode {
             Some(Action::ExplorerEnter) => explorer_enter_action(app),
             Some(Action::CopySessionId) => copy_session_id_action(app),
             None => {}
+        }
+        // Returning from tmux paints the old snapshot right away; the
+        // live classes rescan in the background even if another
+        // worker is already running, since that one predates the
+        // hand-off (ADR 0108).
+        if app.take_handoff_refresh_request() {
+            let generation = self.workers.start_for_handoff();
+            self.spawn_discovery(app, DaemonNudge::LiveClasses, generation);
         }
         Ok(())
     }
@@ -694,7 +783,7 @@ fn event_loop(terminal: &mut DefaultTerminal, config: RunConfig) -> Result<()> {
         tmux: Box::new(SystemTmux::new()),
         result_tx,
         result_rx,
-        pending_refresh: false,
+        workers: WorkerLedger::default(),
         last_refresh: Instant::now(),
         refresh_interval,
     };
@@ -829,6 +918,7 @@ fn spawn_discovery_worker(
     config: &RunConfig,
     tx: &mpsc::Sender<DiscoveryResult>,
     nudge: DaemonNudge,
+    generation: u64,
 ) {
     let mut config = config.clone();
     let tx = tx.clone();
@@ -843,7 +933,11 @@ fn spawn_discovery_worker(
             warning = Some(message);
         }
         let snapshot = discover_and_resolve(&config);
-        let _ = tx.send(DiscoveryResult { snapshot, warning });
+        let _ = tx.send(DiscoveryResult {
+            generation,
+            snapshot,
+            warning,
+        });
     });
 }
 
@@ -878,10 +972,11 @@ pub(super) fn nudge_daemon_live_classes() -> Result<(), String> {
     Ok(())
 }
 
-/// Refresh after Conspectus handed the terminal to tmux or changed a
-/// tmux session (attach, launch, rename): nudge the daemon, then
-/// reload. Without the nudge the reload returns the daemon's
-/// pre-hand-off snapshot.
+/// Blocking refresh after Conspectus changed a tmux session (launch,
+/// rename): nudge the daemon, then reload. Without the nudge the
+/// reload returns the daemon's pre-hand-off snapshot. Returns from an
+/// attach refresh in the background instead (`Msg::HandoffReturned`,
+/// ADR 0108).
 pub(super) fn refresh_after_mux_handoff(app: &mut App, seed: &RunConfig) {
     match nudge_daemon_live_classes() {
         Ok(()) => refresh(app, seed),
@@ -892,26 +987,6 @@ pub(super) fn refresh_after_mux_handoff(app: &mut App, seed: &RunConfig) {
             app.report(crate::tui::messages::LogEntry::warning(message));
         }
     }
-}
-
-/// Spawn a discovery worker + register the corresponding
-/// `InFlightKind::Discovery` marker so the status bar renders a
-/// spinner chip while the worker runs. The marker is
-/// cleared when `drain` receives the worker's result.
-fn spawn_tracked_discovery(app: &mut App, tx: &mpsc::Sender<DiscoveryResult>) {
-    spawn_tracked_discovery_with(app, tx, DaemonNudge::None);
-}
-
-fn spawn_tracked_discovery_with(
-    app: &mut App,
-    tx: &mpsc::Sender<DiscoveryResult>,
-    nudge: DaemonNudge,
-) {
-    spawn_discovery_worker(app.config(), tx, nudge);
-    app.update(Msg::InFlightStart {
-        kind: crate::tui::app::InFlightKind::Discovery,
-        label: "Discovering".to_string(),
-    });
 }
 
 /// Run discovery and resolver on the calling thread, returning the

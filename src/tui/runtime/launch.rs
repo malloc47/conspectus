@@ -105,7 +105,7 @@ pub(super) fn execute_launch_pin(
     };
     let outcome =
         run_tmux_attach_with_socket(terminal, &attach_target, target.mux_socket.as_deref());
-    refresh_after_mux_handoff(app, config);
+    app.update(Msg::HandoffReturned(attach_target.mux.clone()));
     app.report(attach_return_entry(
         &format!("pin `{pin_id}`"),
         outcome,
@@ -273,7 +273,7 @@ pub(super) fn execute_mux_new(
         native_id: name.to_string(),
     };
     let outcome = run_tmux_attach(terminal, &attach_target);
-    refresh_after_mux_handoff(app, config);
+    app.update(Msg::HandoffReturned(mux.clone()));
     app.report(attach_return_entry(
         &format!("mux `{name}`"),
         outcome,
@@ -387,7 +387,7 @@ pub(super) fn execute_mux_launch(
     };
     let outcome =
         run_tmux_attach_with_socket(terminal, &attach_target, request.mux_socket.as_deref());
-    refresh_after_mux_handoff(app, config);
+    app.update(Msg::HandoffReturned(mux.clone()));
     app.report(attach_return_entry(
         &format!("mux `{name}` launch"),
         outcome,

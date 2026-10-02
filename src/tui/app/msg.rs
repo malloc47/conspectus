@@ -174,6 +174,15 @@ pub enum Msg {
     /// Removes the matching kind from the tracker; a no-op if no
     /// op with that kind is currently in flight.
     InFlightFinish(InFlightKind),
+    /// The operator returned from a tmux attach to `mux` (ADR 0108).
+    /// Marks the mux and its linked sessions as awaiting a refresh,
+    /// drops the mux's cached preview, and asks the runtime for a
+    /// background refresh. Repeats before that refresh lands add to
+    /// the same pending set.
+    HandoffReturned(MuxSessionId),
+    /// A refresh spawned after the last hand-off landed (or failed);
+    /// the pending rows show current values again.
+    HandoffSettled,
     /// Nested-reducer entry point for the transcript viewer
     /// (ADR 0085 contract 3). The reducer arm
     /// pops the top viewer state, runs it through

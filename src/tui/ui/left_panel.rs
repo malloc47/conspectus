@@ -409,6 +409,13 @@ pub(super) fn render_left_row(
     align: GroupAlign,
 ) -> Line<'static> {
     let theme = app.theme();
+    // Rows the operator just left in tmux keep their old values,
+    // dimmed, with a spinner where the attach glyph goes, until the
+    // background refresh lands (ADR 0108).
+    let handoff_spinner = app
+        .handoff()
+        .filter(|_| app.row_awaits_handoff(&row.kind))
+        .map(|handoff| spinner_glyph(handoff.started_at));
     let mut spans: Vec<Span<'static>> = Vec::new();
     let flat_sessions = matches!(
         app.grouping(),
@@ -465,7 +472,7 @@ pub(super) fn render_left_row(
             }
         }
         RowKind::AgentSession(session) => {
-            spans.extend(render_session_spans(session, theme, now));
+            spans.extend(render_session_spans(session, theme, now, handoff_spinner));
             append_session_preview(&mut spans, session, width, theme);
         }
         RowKind::AgentSessionMuxCandidate(candidate) => {
@@ -473,7 +480,13 @@ pub(super) fn render_left_row(
         }
         RowKind::MuxSession(mux) => {
             let remaining = width.saturating_sub(spans_width(&spans));
-            spans.extend(render_mux_session_spans(mux, theme, now, remaining));
+            spans.extend(render_mux_session_spans(
+                mux,
+                theme,
+                now,
+                remaining,
+                handoff_spinner,
+            ));
         }
         RowKind::Pr(pr) => {
             spans.push(span!(Modifier::BOLD; "{}", pr.repo_display.clone()));
@@ -529,6 +542,11 @@ pub(super) fn render_left_row(
         }
     }
 
+    if handoff_spinner.is_some() {
+        for span in &mut spans {
+            span.style = span.style.add_modifier(theme.placeholder);
+        }
+    }
     let mut line = Line::from(spans);
     if is_selected {
         let modifiers = if app.focus() == Focus::Left {
@@ -545,10 +563,13 @@ pub(super) fn render_left_row(
     line
 }
 
+/// `handoff_spinner` replaces the attach glyph while the row awaits
+/// the refresh that follows a tmux hand-off (ADR 0108).
 pub(super) fn render_session_spans(
     session: &AgentSessionRow,
     theme: &Theme,
     now: i64,
+    handoff_spinner: Option<&'static str>,
 ) -> Vec<Span<'static>> {
     use crate::tui::widgets::badge::harness_badge;
     const SESSION_ID_COLUMN_WIDTH: usize = 8;
@@ -582,7 +603,9 @@ pub(super) fn render_session_spans(
     );
     spans.push(span!(recency_style; "{recency:>4}"));
     spans.push(Span::raw("  "));
-    if placeholder {
+    if let Some(glyph) = handoff_spinner {
+        spans.push(span!(Style::default().fg(theme.secondary_text); "{glyph}"));
+    } else if placeholder {
         // Mirror the mux view: an unbound-pin session has no live mux
         // to attach to, so the attached-glyph column shows the same
         // dotted-circle marker as the mux-view placeholder row.
@@ -687,11 +710,14 @@ pub(super) fn render_repo_spans(
     spans
 }
 
+/// `handoff_spinner` replaces the attached glyph while the row awaits
+/// the refresh that follows a tmux hand-off (ADR 0108).
 pub(super) fn render_mux_session_spans(
     mux: &MuxSessionRow,
     theme: &Theme,
     now: i64,
     width: usize,
+    handoff_spinner: Option<&'static str>,
 ) -> Vec<Span<'static>> {
     let mut spans = Vec::new();
     if width == 0 {
@@ -744,7 +770,9 @@ pub(super) fn render_mux_session_spans(
     ));
 
     spans.push(Span::raw("  "));
-    if placeholder {
+    if let Some(glyph) = handoff_spinner {
+        spans.push(span!(Style::default().fg(theme.secondary_text); "{glyph}"));
+    } else if placeholder {
         // Single-char colored glyph keeps the attached-glyph column
         // in rhythm with ◉/◯/? on real rows. The dotted circle
         // (U+25CC) reads as "phantom / not currently live"; the

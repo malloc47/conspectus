@@ -1681,7 +1681,7 @@ fn session_harness_span_renders_as_filled_badge() {
         primary_node: NodeId::AgentSession(AgentSessionId::new("codex", "/state", "abc")),
         pin_id: None,
     };
-    let spans = render_session_spans(&row, &theme, now);
+    let spans = render_session_spans(&row, &theme, now, None);
     let badge = spans
         .iter()
         .find(|s| s.content.trim() == "codex")
@@ -1932,7 +1932,7 @@ fn session_alias_renders_after_mux_glyph_in_left_row() {
         pin_id: None,
     };
 
-    let spans = render_session_spans(&row, &theme, now);
+    let spans = render_session_spans(&row, &theme, now, None);
     let rendered: String = spans.iter().map(|span| span.content.as_ref()).collect();
     assert!(
         rendered.contains("◯  ingest-refactor"),
@@ -1972,7 +1972,7 @@ fn session_id_is_strictly_truncated_in_left_row() {
         pin_id: None,
     };
 
-    let spans = render_session_spans(&row, &theme, now);
+    let spans = render_session_spans(&row, &theme, now, None);
     let rendered: String = spans.iter().map(|span| span.content.as_ref()).collect();
     assert!(
         rendered.starts_with("ffffffff  "),
@@ -2009,7 +2009,7 @@ fn session_display_label_is_truncated_in_left_row() {
         pin_id: None,
     };
 
-    let spans = render_session_spans(&row, &theme, now);
+    let spans = render_session_spans(&row, &theme, now, None);
     let rendered: String = spans.iter().map(|span| span.content.as_ref()).collect();
     let label = spans
         .iter()
@@ -2047,7 +2047,7 @@ fn placeholder_session_row_renders_pin_marker_without_planned_vocab() {
         pin_id: Some("ingest".into()),
     };
 
-    let spans = render_session_spans(&row, &theme, 1_700_000_000);
+    let spans = render_session_spans(&row, &theme, 1_700_000_000, None);
     let rendered: String = spans.iter().map(|span| span.content.as_ref()).collect();
 
     assert!(rendered.contains("📌"), "{rendered}");
@@ -2098,7 +2098,7 @@ fn mux_session_row_mirrors_session_column_order() {
         primary_node: NodeId::MuxSession(MuxSessionId::new("tmux:editor")),
     };
 
-    let spans = render_mux_session_spans(&row, &theme, now, 100);
+    let spans = render_mux_session_spans(&row, &theme, now, 100, None);
     let rendered: String = spans.iter().map(|span| span.content.as_ref()).collect();
 
     assert!(
@@ -2169,7 +2169,7 @@ fn placeholder_mux_row_renders_dotted_glyph_and_cwd_preview() {
         primary_node: NodeId::Pin(crate::model::PinId::new("ingest")),
     };
 
-    let spans = render_mux_session_spans(&row, &theme, 1_700_000_000, 100);
+    let spans = render_mux_session_spans(&row, &theme, 1_700_000_000, 100, None);
     let rendered: String = spans.iter().map(|span| span.content.as_ref()).collect();
 
     assert!(
@@ -2218,7 +2218,7 @@ fn session_project_column_renders_before_inline_preview() {
         pin_id: None,
     };
 
-    let mut spans = render_session_spans(&row, &theme, now);
+    let mut spans = render_session_spans(&row, &theme, now, None);
     append_session_preview(&mut spans, &row, 120, &theme);
     let rendered: String = spans.iter().map(|span| span.content.as_ref()).collect();
     let project_idx = rendered.find("conspectus").expect("project rendered");
@@ -2270,7 +2270,7 @@ fn session_recency_span_picks_bucket_style_from_theme() {
     };
 
     let fresh = make_row(Some("1m"), Some(now - 60));
-    let spans = render_session_spans(&fresh, &theme, now);
+    let spans = render_session_spans(&fresh, &theme, now, None);
     assert_eq!(
         recency_span(&spans, "1m").style,
         theme.recency_fresh.into_style(),
@@ -2278,14 +2278,14 @@ fn session_recency_span_picks_bucket_style_from_theme() {
     );
 
     let cold = make_row(Some("3d"), Some(now - 3 * 24 * 60 * 60));
-    let spans = render_session_spans(&cold, &theme, now);
+    let spans = render_session_spans(&cold, &theme, now, None);
     assert_eq!(
         recency_span(&spans, "3d").style,
         theme.recency_cold.into_style(),
     );
 
     let unknown = make_row(None, None);
-    let spans = render_session_spans(&unknown, &theme, now);
+    let spans = render_session_spans(&unknown, &theme, now, None);
     assert_eq!(
         recency_span(&spans, "—").style,
         Style::default().add_modifier(theme.placeholder),
@@ -3819,7 +3819,7 @@ fn agentless_mux_row(pane_command: Option<&str>) -> MuxSessionRow {
 #[test]
 fn agentless_mux_row_labels_itself_with_the_pane_command() {
     let theme = Theme::default();
-    let spans = render_mux_session_spans(&agentless_mux_row(Some("npm")), &theme, 0, 100);
+    let spans = render_mux_session_spans(&agentless_mux_row(Some("npm")), &theme, 0, 100, None);
     let rendered: String = spans.iter().map(|span| span.content.as_ref()).collect();
 
     assert!(rendered.contains(" npm "), "pane command chip: {rendered}");
@@ -3834,7 +3834,7 @@ fn agentless_mux_row_labels_itself_with_the_pane_command() {
 #[test]
 fn agentless_mux_row_without_a_pane_command_says_no_agent() {
     let theme = Theme::default();
-    let spans = render_mux_session_spans(&agentless_mux_row(None), &theme, 0, 100);
+    let spans = render_mux_session_spans(&agentless_mux_row(None), &theme, 0, 100, None);
     let rendered: String = spans.iter().map(|span| span.content.as_ref()).collect();
 
     assert!(rendered.contains("no agent"), "placeholder: {rendered}");
@@ -3848,7 +3848,7 @@ fn agentless_mux_row_running_a_harness_uses_the_harness_badge() {
             program_harness: Some(label.to_string()),
             ..agentless_mux_row(Some(program))
         };
-        let spans = render_mux_session_spans(&row, &theme, 0, 100);
+        let spans = render_mux_session_spans(&row, &theme, 0, 100, None);
         let chip = spans
             .iter()
             .find(|span| span.content.trim() == label)
@@ -3856,4 +3856,95 @@ fn agentless_mux_row_running_a_harness_uses_the_harness_badge() {
         assert_eq!(chip.style.fg, Some(theme.harness_color(label)), "{program}");
         assert_ne!(chip.style.bg, Some(theme.command_badge), "{program}");
     }
+}
+
+#[test]
+fn row_awaiting_handoff_dims_and_spins_in_the_attach_cell() {
+    use crate::model::MuxSessionId;
+    let mut app = muxed_app("tmux:work", Some("before"));
+    let session_row = app
+        .visible_rows()
+        .iter()
+        .find(|row| matches!(row.kind, RowKind::AgentSession(_)))
+        .map(|row| (*row).clone())
+        .expect("session row");
+    let render = |app: &App| {
+        render_left_row(
+            &session_row,
+            app,
+            false,
+            100,
+            1_700_000_000,
+            None,
+            GroupAlign::default(),
+        )
+    };
+
+    let before = render(&app);
+    let text: String = before.spans.iter().map(|s| s.content.as_ref()).collect();
+    assert!(
+        text.contains('◉'),
+        "settled row shows the attach glyph: {text}"
+    );
+
+    app.update(Msg::HandoffReturned(MuxSessionId::new("tmux:work")));
+    let pending = render(&app);
+    let text: String = pending.spans.iter().map(|s| s.content.as_ref()).collect();
+    assert!(
+        !text.contains('◉'),
+        "spinner replaces the attach glyph: {text}"
+    );
+    assert!(
+        SPINNER_FRAMES.iter().any(|frame| text.contains(frame)),
+        "pending row shows a spinner frame: {text}"
+    );
+    let dim = app.theme().placeholder;
+    assert!(
+        pending
+            .spans
+            .iter()
+            .all(|s| s.style.add_modifier.contains(dim)),
+        "every span of a pending row is dimmed"
+    );
+
+    app.update(Msg::HandoffSettled);
+    let settled = render(&app);
+    let text: String = settled.spans.iter().map(|s| s.content.as_ref()).collect();
+    assert!(
+        text.contains('◉'),
+        "settled row shows the attach glyph again: {text}"
+    );
+}
+
+#[test]
+fn mux_row_spinner_takes_the_attached_glyph_column() {
+    let theme = Theme::default();
+    let row = MuxSessionRow {
+        mux: MuxSessionId::new("tmux:editor"),
+        backend: "tmux".into(),
+        native_id: "editor".into(),
+        client_attached: Some(true),
+        cwd_display: None,
+        attached_count: 0,
+        ambiguous_count: 0,
+        recency: Some("3s".into()),
+        activity_epoch: None,
+        created_epoch: None,
+        last_attached_epoch: None,
+        agent_labels: vec!["codex".into()],
+        program: None,
+        program_harness: None,
+        single_session_preview: None,
+        pin_id: None,
+        primary_node: NodeId::MuxSession(MuxSessionId::new("tmux:editor")),
+    };
+    let settled: String = render_mux_session_spans(&row, &theme, 0, 100, None)
+        .iter()
+        .map(|s| s.content.to_string())
+        .collect();
+    let pending: String = render_mux_session_spans(&row, &theme, 0, 100, Some("⠋"))
+        .iter()
+        .map(|s| s.content.to_string())
+        .collect();
+    assert_eq!(settled.replace('◉', "⠋"), pending);
 }

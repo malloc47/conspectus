@@ -12,7 +12,9 @@ use std::fmt;
 use std::rc::Rc;
 use std::time::Instant;
 
-use crate::model::{Diagnostic, GraphNode, GraphSnapshot, MuxSessionId, NodeId, PinBinding, PinId};
+use crate::model::{
+    AgentSessionId, Diagnostic, GraphNode, GraphSnapshot, MuxSessionId, NodeId, PinBinding, PinId,
+};
 use crate::tui::detail::{DetailInputs, NodeDetail, build_node_detail};
 use crate::tui::explorer::{
     BreadcrumbHop, ExplorerInputs, ExplorerRow, ExplorerRowKey, NodeView, build_node_view,
@@ -158,6 +160,10 @@ pub struct App {
     /// render order matches the emit order; entries are keyed by
     /// `InFlightKind` for idempotent start/finish semantics.
     in_flight_ops: Vec<InFlightOp>,
+    /// Rows whose values predate the operator's last tmux hand-off
+    /// (ADR 0108). Cleared when a refresh spawned after the hand-off
+    /// lands.
+    handoff: Option<PendingHandoff>,
     /// Cache of recent tmux pane captures, keyed by mux id. The
     /// renderer reads this for the right-panel preview when the
     /// selection points at a muxed agent session or a mux node.
@@ -291,8 +297,8 @@ pub enum Focus {
 /// queries. The reducer stores at most one `InFlightOp` per kind, so
 /// starting a new op with the same kind replaces any prior in-flight
 /// record (used e.g. when a periodic discovery worker spawns while a
-/// prior one is still in flight — the timer path already gates on
-/// `pending_refresh`, but the model here is intentionally
+/// prior one is still in flight — the timer path already waits for
+/// idle workers, but the model here is intentionally
 /// idempotent).
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum InFlightKind {
@@ -312,6 +318,21 @@ pub struct InFlightOp {
     pub kind: InFlightKind,
     pub label: String,
     pub started_at: Instant,
+}
+
+/// Mux sessions the operator just returned from, plus the agent
+/// sessions linked to them, whose rows still show the pre-hand-off
+/// snapshot (ADR 0108). The renderer dims these rows and puts a
+/// spinner in their attach-glyph cell until the follow-up refresh
+/// lands.
+#[derive(Debug, Clone)]
+pub struct PendingHandoff {
+    pub muxes: BTreeSet<MuxSessionId>,
+    pub sessions: BTreeSet<AgentSessionId>,
+    pub started_at: Instant,
+    /// Set by the reducer, taken by the runtime, which then spawns
+    /// the background refresh that settles the hand-off.
+    refresh_requested: bool,
 }
 
 /// Right-pane graph explorer state. Owns the focused node's view
@@ -442,6 +463,7 @@ impl App {
             provider_status: ProviderStatus::default(),
             refresh_failure: None,
             in_flight_ops: Vec::new(),
+            handoff: None,
             preview_store: PreviewStore::new(),
             left_scroll: 0,
             explorer_scroll: 0,
@@ -914,6 +936,32 @@ impl App {
         &self.in_flight_ops
     }
 
+    /// The pending hand-off, if a refresh hasn't settled it yet.
+    pub fn handoff(&self) -> Option<&PendingHandoff> {
+        self.handoff.as_ref()
+    }
+
+    /// Whether `row` shows values from before the pending hand-off.
+    pub fn row_awaits_handoff(&self, row: &RowKind) -> bool {
+        let Some(handoff) = &self.handoff else {
+            return false;
+        };
+        match row {
+            RowKind::MuxSession(mux) => handoff.muxes.contains(&mux.mux),
+            RowKind::AgentSession(session) => handoff.sessions.contains(&session.session),
+            _ => false,
+        }
+    }
+
+    /// Take the hand-off's refresh request. Returns `true` once per
+    /// [`Msg::HandoffReturned`] batch; the runtime answers it with a
+    /// background refresh that rescans the live classes.
+    pub fn take_handoff_refresh_request(&mut self) -> bool {
+        self.handoff
+            .as_mut()
+            .is_some_and(|handoff| std::mem::take(&mut handoff.refresh_requested))
+    }
+
     /// Look up a cached mux preview. Returns `None` if the mux
     /// hasn't been captured yet.
     pub fn mux_preview(&self, mux: &MuxSessionId) -> Option<&PreviewEntry> {
@@ -1197,6 +1245,27 @@ impl App {
             }
             Msg::InFlightFinish(kind) => {
                 self.in_flight_ops.retain(|o| o.kind != kind);
+            }
+            Msg::HandoffReturned(mux) => {
+                let sessions = self
+                    .handle
+                    .as_ref()
+                    .map(|handle| sessions_linked_to_mux(handle.snapshot(), &mux))
+                    .unwrap_or_default();
+                // The pane changed while the operator was in it.
+                self.preview_store.remove(&mux);
+                let handoff = self.handoff.get_or_insert_with(|| PendingHandoff {
+                    muxes: BTreeSet::new(),
+                    sessions: BTreeSet::new(),
+                    started_at: Instant::now(),
+                    refresh_requested: false,
+                });
+                handoff.muxes.insert(mux);
+                handoff.sessions.extend(sessions);
+                handoff.refresh_requested = true;
+            }
+            Msg::HandoffSettled => {
+                self.handoff = None;
             }
             Msg::Viewer(vmsg) => {
                 use crate::viewer::input::{ViewerEffect, reduce};
@@ -1557,6 +1626,25 @@ fn home_for_config(_config: &RunConfig) -> Option<std::path::PathBuf> {
     // a home. For now we read the environment lazily - pure-state
     // tests can patch this when home-sensitive behavior matters.
     std::env::var_os("HOME").map(std::path::PathBuf::from)
+}
+
+/// Agent sessions with an active `LinkedToMux` candidate pointing at
+/// `mux`. Any candidate counts, not just the preferred one: the
+/// hand-off may have changed which session the resolver prefers.
+fn sessions_linked_to_mux(snapshot: &GraphSnapshot, mux: &MuxSessionId) -> Vec<AgentSessionId> {
+    snapshot
+        .candidate_links
+        .iter()
+        .filter(|link| {
+            link.relation == crate::model::RelationKind::LinkedToMux
+                && matches!(link.state, crate::model::LinkState::Active)
+                && matches!(link.target_node_id(), Some(NodeId::MuxSession(id)) if id == mux)
+        })
+        .filter_map(|link| match &link.source {
+            NodeId::AgentSession(id) => Some(id.clone()),
+            _ => None,
+        })
+        .collect()
 }
 
 #[cfg(test)]

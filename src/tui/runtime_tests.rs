@@ -1598,3 +1598,59 @@ fn launch_entry_level_follows_outcome_and_stderr() {
     assert_eq!(failed.level, LogLevel::Error);
     assert_eq!(failed.command.map(|c| c.stderr), Some("boom".to_string()));
 }
+
+mod worker_ledger {
+    use super::*;
+
+    const APPLY: WorkerVerdict = WorkerVerdict {
+        apply: true,
+        settles_handoff: false,
+    };
+    const SETTLE: WorkerVerdict = WorkerVerdict {
+        apply: true,
+        settles_handoff: true,
+    };
+    const DROP: WorkerVerdict = WorkerVerdict {
+        apply: false,
+        settles_handoff: false,
+    };
+
+    #[test]
+    fn older_result_landing_after_a_newer_one_is_dropped() {
+        let mut ledger = WorkerLedger::default();
+        let timer = ledger.start();
+        let handoff = ledger.start_for_handoff();
+        assert_eq!(ledger.finish(handoff), SETTLE);
+        assert!(!ledger.idle());
+        assert_eq!(ledger.finish(timer), DROP);
+        assert!(ledger.idle());
+    }
+
+    #[test]
+    fn worker_spawned_before_the_handoff_does_not_settle_it() {
+        let mut ledger = WorkerLedger::default();
+        let timer = ledger.start();
+        let handoff = ledger.start_for_handoff();
+        assert_eq!(ledger.finish(timer), APPLY);
+        assert_eq!(ledger.finish(handoff), SETTLE);
+    }
+
+    #[test]
+    fn a_later_handoff_moves_the_settle_point() {
+        let mut ledger = WorkerLedger::default();
+        let first = ledger.start_for_handoff();
+        let second = ledger.start_for_handoff();
+        assert_eq!(ledger.finish(first), APPLY);
+        assert_eq!(ledger.finish(second), SETTLE);
+    }
+
+    #[test]
+    fn worker_spawned_after_the_handoff_settles_it() {
+        let mut ledger = WorkerLedger::default();
+        let handoff = ledger.start_for_handoff();
+        let refresh = ledger.start();
+        assert_eq!(ledger.finish(refresh), SETTLE);
+        assert_eq!(ledger.finish(handoff), DROP);
+        assert!(ledger.idle());
+    }
+}

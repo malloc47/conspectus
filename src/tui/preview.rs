@@ -70,6 +70,11 @@ impl PreviewStore {
         );
     }
 
+    /// Drop the cached capture so the next selection pass recaptures.
+    pub fn remove(&mut self, mux: &MuxSessionId) {
+        self.entries.remove(mux);
+    }
+
     /// Test seam: insert with an explicit timestamp so deterministic
     /// reads in unit tests don't need a real `Instant`.
     #[cfg(test)]

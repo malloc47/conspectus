@@ -348,7 +348,7 @@ pub(super) fn execute_exec_spec(
     match spec {
         ExecSpec::AttachMux(target) => {
             let outcome = run_tmux_attach(terminal, &target);
-            refresh_after_mux_handoff(app, config);
+            app.update(Msg::HandoffReturned(target.mux.clone()));
             app.report(attach_return_entry(
                 &target_short(&target),
                 outcome,
