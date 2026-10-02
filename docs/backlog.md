@@ -13960,6 +13960,18 @@ Fresh batch, added alongside the 2026-07-27 items.
   - Blockers: none.
 - [ ] `H-HARNESS-ATELIER-001` Atelier `exec claude` panes render as "No
   agent" in the TUI / CLI.
+  - Progress (2026-10-02): the rendering half landed in `549acab`. An
+    agentless mux row now carries `program_harness` from the pane's
+    `mux_contains_process` evidence, falling back to a harness token in
+    the start command or pin argv, so an `atelier exec claude` pane shows
+    the claude badge instead of "no agent" or a black `atelier` chip. A
+    stand-in wrapper (a parent named `atelier` spawning a child whose
+    argv[0] is `claude`) confirmed the process walk attributes the
+    harness at depth 1, so none of the fix directions below was needed
+    for the badge. Still open: confirm with a real `atelier exec claude`
+    pane that the `AgentSession` links to the mux. Atelier anchors the
+    harness at the workspace or fork root, so a mismatch would show up
+    in cwd-based session matching, not in the process walk.
   - Symptom: launching claude via atelier's `atelier exec claude`
     convention produces a live claude process in the pane's tree, but
     Conspectus attributes no harness to the mux — the row renders as
@@ -13989,6 +14001,23 @@ Fresh batch, added alongside the 2026-07-27 items.
     reproduces the process tree and asserts claude attribution.
   - Blockers: needs live process-tree data. Deferred until repro
     provided.
+- [x] `H-PREVIEW-WRAP-001` Preview pane hides quiet panes' output and
+  wraps agent UI decorations (ADR 0106).
+  - Symptom: a `conspectus serve` pane previewed as empty because the
+    preview kept the capture's last N lines, which were the blank rows
+    below the server's output. Agent panes' full-width rules and box
+    borders wrapped into extra rows of fragments in the narrower
+    preview.
+  - Outcome (2026-10-02): the preview lays the capture out into rows
+    that fit the preview width, drops trailing blank lines, then keeps
+    the bottom rows that fit (shrinking below a failure banner). Three
+    `PreviewWrap` modes: smart (the default) truncates
+    decoration-only overflow, squeezes padding, and word-wraps content
+    with a hanging indent; plain wraps everything; none re-wraps at the
+    pane width that `capture_pane` now reports via `#{pane_width}` and
+    clips. The mode is set with `[tui] preview_wrap`, a "Preview wrap"
+    section in the controls overlay, and is persisted in
+    `tui-state.json`.
 - [x] `H-MUX-NEW-001` Create bare tmux sessions from within Conspectus
   (no pin, no agent).
   - Motivation: operators currently drop out of Conspectus to run a
