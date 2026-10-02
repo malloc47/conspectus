@@ -14553,6 +14553,17 @@ Queued chunks:
     with competing cwd and log-derived candidates. This changes
     attribution results, so confirm the intent first.
 
+- [ ] `H-RUST-021` Don't abort discovery on one unreadable scan-root child.
+  - Problem: `conspectus graph --refresh` run from `/tmp` fails with
+    "discovery provider `generic_workspace` failed: failed to run git
+    rev-parse --is-inside-work-tree: Permission denied". The generic
+    workspace provider probes every child of the scan root, and a single
+    child git can't enter turns into an error that ends the whole
+    discovery run.
+  - Plan: treat a permission error on one child probe as "not a repo"
+    plus a diagnostic, the way missing paths are already handled, and
+    add a test with an unreadable child directory.
+
 ## Release Readiness: 0.1.0
 
 Catalog assembled 2026-09-30 while rewriting `README.md` for a public
