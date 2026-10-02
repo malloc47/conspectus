@@ -1144,6 +1144,37 @@ fn tui_default_view_unknown_value_diagnoses_and_stays_unset() {
     );
 }
 
+#[test]
+fn tui_preview_wrap_defaults_to_smart_and_loads_from_config() {
+    assert_eq!(
+        load_tui_config("[tui]\n").config.tui.preview_wrap,
+        crate::tui::PreviewWrap::Smart
+    );
+    let outcome = load_tui_config("[tui]\npreview_wrap = \"none\"\n");
+    assert!(outcome.diagnostics.is_empty(), "{:?}", outcome.diagnostics);
+    assert_eq!(
+        outcome.config.tui.preview_wrap,
+        crate::tui::PreviewWrap::None
+    );
+}
+
+#[test]
+fn tui_preview_wrap_unknown_value_diagnoses_and_keeps_the_default() {
+    let outcome = load_tui_config("[tui]\npreview_wrap = \"fancy\"\n");
+    assert_eq!(
+        outcome.config.tui.preview_wrap,
+        crate::tui::PreviewWrap::Smart
+    );
+    assert!(
+        outcome
+            .diagnostics
+            .iter()
+            .any(|d| d.message.contains("preview_wrap")),
+        "{:?}",
+        outcome.diagnostics
+    );
+}
+
 fn load_theme_badge_width(raw: &str) -> LoadOutcome {
     let temp = TempDir::new().expect("temp dir");
     let project = temp.path().join("project");

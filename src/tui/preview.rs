@@ -9,7 +9,7 @@
 use std::collections::BTreeMap;
 use std::time::Instant;
 
-use crate::discovery::tmux::{MuxBackend, TmuxCaptureOutcome};
+use crate::discovery::tmux::{MuxBackend, PaneCapture, TmuxCaptureOutcome};
 use crate::model::MuxSessionId;
 
 /// In-memory cache of recent capture-pane results keyed by mux id.
@@ -28,8 +28,9 @@ pub struct PreviewEntry {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum PreviewContent {
-    /// Plain text body (from `tmux capture-pane -p -J`).
-    Text(String),
+    /// The pane's captured text (from `tmux capture-pane -p -J -e`)
+    /// and the width tmux laid it out at.
+    Text(PaneCapture),
     /// The runner reported the target doesn't exist.
     NoTarget,
     /// The runner is unavailable (binary missing, no server).
@@ -38,6 +39,16 @@ pub enum PreviewContent {
     Failed(String),
     /// The runner doesn't support capture (e.g. test fakes).
     Unsupported,
+}
+
+impl PreviewContent {
+    /// Captured text with no reported pane width.
+    pub fn text(text: impl Into<String>) -> Self {
+        Self::Text(PaneCapture {
+            text: text.into(),
+            width: None,
+        })
+    }
 }
 
 impl PreviewStore {
@@ -80,7 +91,7 @@ pub fn capture_via(runner: &dyn MuxBackend, native_id: &str) -> PreviewContent {
     // The preview always queries the default socket, because
     // discovery doesn't cover non-default sockets yet.
     match runner.capture_pane(None, native_id) {
-        Ok(TmuxCaptureOutcome::Captured(text)) => PreviewContent::Text(text),
+        Ok(TmuxCaptureOutcome::Captured(capture)) => PreviewContent::Text(capture),
         Ok(TmuxCaptureOutcome::NoTarget) => PreviewContent::NoTarget,
         Ok(TmuxCaptureOutcome::Unavailable(reason)) => {
             PreviewContent::Unavailable(reason.as_str().to_string())
@@ -102,10 +113,10 @@ mod tests {
     #[test]
     fn capture_via_text_passes_content_through() {
         let runner = FakeTmux::with_sessions("")
-            .with_capture("editor", TmuxCaptureOutcome::Captured("hello".to_string()));
+            .with_capture("editor", TmuxCaptureOutcome::captured("hello".to_string()));
         assert_eq!(
             capture_via(&runner, "editor"),
-            PreviewContent::Text("hello".to_string())
+            PreviewContent::text("hello")
         );
     }
 
@@ -161,9 +172,9 @@ mod tests {
         let mut store = PreviewStore::new();
         let id = MuxSessionId::new("editor");
         assert!(store.get(&id).is_none());
-        store.insert(id.clone(), PreviewContent::Text("hi".to_string()));
+        store.insert(id.clone(), PreviewContent::text("hi"));
         let entry = store.get(&id).expect("present after insert");
-        assert_eq!(entry.content, PreviewContent::Text("hi".to_string()));
+        assert_eq!(entry.content, PreviewContent::text("hi"));
         assert!(entry.captured_at.is_some());
     }
 }

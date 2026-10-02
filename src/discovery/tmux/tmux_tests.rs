@@ -392,7 +392,7 @@ fn fake_runner_returns_registered_capture_outcomes_by_target() {
     let runner = FakeTmux::with_sessions("")
         .with_capture(
             "editor",
-            TmuxCaptureOutcome::Captured("pane content".to_string()),
+            TmuxCaptureOutcome::captured("pane content".to_string()),
         )
         .with_capture("missing", TmuxCaptureOutcome::NoTarget)
         .with_capture(
@@ -404,7 +404,7 @@ fn fake_runner_returns_registered_capture_outcomes_by_target() {
         );
     assert_eq!(
         runner.capture_pane(None, "editor").unwrap(),
-        TmuxCaptureOutcome::Captured("pane content".to_string())
+        TmuxCaptureOutcome::captured("pane content".to_string())
     );
     assert_eq!(
         runner.capture_pane(None, "missing").unwrap(),
@@ -599,4 +599,30 @@ fn missing_binary_new_session_reports_unavailable() {
         outcome,
         TmuxNewSessionOutcome::Unavailable(UnavailableReason::BinaryNotFound)
     ));
+}
+
+#[test]
+fn capture_output_splits_the_pane_width_from_the_text() {
+    assert_eq!(
+        parse_capture_output("120\nline one\nline two\n"),
+        PaneCapture {
+            text: "line one\nline two\n".to_string(),
+            width: Some(120),
+        }
+    );
+    // A first line that isn't a width stays part of the text.
+    assert_eq!(
+        parse_capture_output("hello\nworld"),
+        PaneCapture {
+            text: "hello\nworld".to_string(),
+            width: None,
+        }
+    );
+    assert_eq!(
+        parse_capture_output("80"),
+        PaneCapture {
+            text: "80".to_string(),
+            width: None,
+        }
+    );
 }

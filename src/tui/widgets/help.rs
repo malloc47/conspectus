@@ -229,7 +229,7 @@ fn keymap_sections() -> Vec<HelpSection> {
             bindings: vec![
                 Binding::new(
                     "f",
-                    "Open the controls overlay (view / grouping / filters / sort)",
+                    "Open the controls overlay (view / grouping / filters / sort / preview wrap)",
                 ),
                 Binding::new(
                     "p",

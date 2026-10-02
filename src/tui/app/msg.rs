@@ -319,4 +319,7 @@ pub enum Msg {
     /// stores the basis, forces `Sort::Recency` so the choice takes
     /// effect, and re-derives the tree.
     SetMuxRecency(crate::tui::MuxRecency),
+    /// Change how the preview pane fits a captured mux pane
+    /// (ADR 0106). Render-only: the tree is untouched.
+    SetPreviewWrap(crate::tui::PreviewWrap),
 }

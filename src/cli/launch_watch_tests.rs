@@ -67,7 +67,7 @@ fn failed_resume_is_replaced_by_a_fresh_launch() {
     let runner = FakeTmux::with_sessions("")
         .with_capture(
             "w1",
-            TmuxCaptureOutcome::Captured(CLAUDE_RESUME_FAILURE.to_string()),
+            TmuxCaptureOutcome::captured(CLAUDE_RESUME_FAILURE.to_string()),
         )
         .with_pane_statuses("w1", [dead(1), TmuxPaneStatus::Alive]);
     let fresh = argv(&["claude", "--dangerously-skip-permissions"]);
@@ -115,7 +115,7 @@ fn failed_fresh_launch_reports_pane_output_and_removes_the_dead_session() {
     let runner = FakeTmux::with_sessions("")
         .with_capture(
             "w1",
-            TmuxCaptureOutcome::Captured("bash: claude: command not found\n".to_string()),
+            TmuxCaptureOutcome::captured("bash: claude: command not found\n".to_string()),
         )
         .with_pane_statuses("w1", [dead(127)]);
 
@@ -164,7 +164,7 @@ fn session_gone_right_after_launch_counts_as_dead() {
 #[test]
 fn dead_pane_output_keeps_the_tail() {
     let text: String = (1..=30).map(|n| format!("line {n}\n")).collect();
-    let runner = FakeTmux::with_sessions("").with_capture("w1", TmuxCaptureOutcome::Captured(text));
+    let runner = FakeTmux::with_sessions("").with_capture("w1", TmuxCaptureOutcome::captured(text));
 
     let output = dead_pane_output(&runner, None, "w1");
 

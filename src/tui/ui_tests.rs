@@ -128,7 +128,7 @@ fn muxed_app(native_id: &str, capture: Option<&str>) -> App {
     if let Some(capture) = capture {
         app.update(Msg::SetMuxPreview {
             mux: mux_graph_id,
-            content: PreviewContent::Text(capture.to_string()),
+            content: PreviewContent::text(capture),
         });
     }
     app
@@ -236,9 +236,9 @@ fn stale_mux_pin_placeholder_previews_its_live_pane() {
     assert_eq!(target.native_id, "ingest");
     app.update(Msg::SetMuxPreview {
         mux,
-        content: PreviewContent::Text("serving on :8080".to_string()),
+        content: PreviewContent::text("serving on :8080"),
     });
-    let preview = preview_text_for_selection(&app, 10).to_string();
+    let preview = preview_text_for_selection(&app, 80, 10).to_string();
     assert!(preview.contains("serving on :8080"), "{preview}");
 }
 
@@ -255,7 +255,7 @@ fn unbound_pin_placeholder_previews_its_diagnostics() {
     });
 
     assert!(resolve_attach_target(&app).is_err());
-    let preview = preview_text_for_selection(&app, 10).to_string();
+    let preview = preview_text_for_selection(&app, 80, 10).to_string();
     assert!(preview.contains("Pin `ingest` is unbound."), "{preview}");
     assert!(preview.contains("Enter launches the pin."), "{preview}");
 }
@@ -2818,9 +2818,52 @@ fn compact_path_helpers_split_workspace_display_at_double_space() {
 }
 
 #[test]
-fn crop_bottom_lines_keeps_latest_lines() {
-    assert_eq!(crop_bottom_lines("a\nb\nc\nd", 2), "c\nd");
-    assert_eq!(crop_bottom_lines("a\nb", 3), "a\nb");
+fn mux_preview_skips_the_blank_rows_below_a_quiet_panes_output() {
+    // A server pane: a few lines of output, then the rest of the screen
+    // blank. The bottom rows are the output, not the empty screen.
+    let capture = format!(
+        "$ conspectus serve\nlistening on :7777\n{}",
+        "\n".repeat(40)
+    );
+    let app = muxed_app("serve", Some(&capture));
+    let preview = preview_text_for_selection(&app, 80, 5);
+    let rows: Vec<String> = preview.lines.iter().map(ToString::to_string).collect();
+    assert_eq!(rows, ["$ conspectus serve", "listening on :7777"]);
+}
+
+#[test]
+fn mux_preview_keeps_the_newest_rows_that_fit() {
+    let capture = (1..=30)
+        .map(|n| format!("line {n}"))
+        .collect::<Vec<_>>()
+        .join("\n");
+    let app = muxed_app("busy", Some(&capture));
+    let preview = preview_text_for_selection(&app, 80, 3);
+    let rows: Vec<String> = preview.lines.iter().map(ToString::to_string).collect();
+    assert_eq!(rows, ["line 28", "line 29", "line 30"]);
+}
+
+#[test]
+fn mux_preview_follows_the_wrap_mode() {
+    let capture = format!("{}\n> prompt", "─".repeat(60));
+    let mut app = muxed_app("agent", Some(&capture));
+    let rows = |app: &App| -> Vec<String> {
+        preview_text_for_selection(app, 20, 10)
+            .lines
+            .iter()
+            .map(ToString::to_string)
+            .collect()
+    };
+    assert_eq!(rows(&app), ["─".repeat(20), "> prompt".to_string()]);
+    app.update(Msg::SetPreviewWrap(crate::tui::PreviewWrap::Plain));
+    assert_eq!(rows(&app).len(), 4, "the rule wraps onto three rows");
+}
+
+#[test]
+fn mux_preview_of_an_all_blank_pane_says_empty() {
+    let app = muxed_app("idle", Some("\n\n   \n"));
+    let preview = preview_text_for_selection(&app, 80, 5).to_string();
+    assert_eq!(preview, "(empty pane)");
 }
 
 #[test]
@@ -3618,7 +3661,7 @@ fn reported_failure_leads_the_rows_preview_until_a_later_success() {
             }),
     );
 
-    let preview = preview_text_for_selection(&app, 20).to_string();
+    let preview = preview_text_for_selection(&app, 80, 20).to_string();
     assert!(
         preview.starts_with("✗ pin `ingest` launch failed"),
         "{preview}"
@@ -3636,7 +3679,7 @@ fn reported_failure_leads_the_rows_preview_until_a_later_success() {
     app.report(
         LogEntry::info("pin `ingest` launched").with_target(LogTarget::Pin("ingest".to_string())),
     );
-    let preview = preview_text_for_selection(&app, 20).to_string();
+    let preview = preview_text_for_selection(&app, 80, 20).to_string();
     assert!(!preview.contains("launch failed"), "{preview}");
 }
 

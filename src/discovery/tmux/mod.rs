@@ -213,13 +213,34 @@ pub struct MuxSessionContext {
     pub namespace: Option<String>,
 }
 
+/// A pane's captured content and the width tmux laid it out at.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct PaneCapture {
+    /// Captured text, ANSI escapes included, soft-wrapped lines joined.
+    pub text: String,
+    /// Pane width in columns at capture time (`#{pane_width}`): the
+    /// width of the client that last sized the window. `None` when the
+    /// backend didn't report one.
+    pub width: Option<u16>,
+}
+
+impl TmuxCaptureOutcome {
+    /// A successful capture with no reported pane width.
+    pub fn captured(text: impl Into<String>) -> Self {
+        Self::Captured(PaneCapture {
+            text: text.into(),
+            width: None,
+        })
+    }
+}
+
 /// Outcome of a `tmux capture-pane` call. Mirrors the shape of
 /// [`TmuxOutcome`] but for the per-pane capture path.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum TmuxCaptureOutcome {
     /// `tmux capture-pane -p -t <target>` succeeded; payload is
-    /// the visible pane content as captured.
-    Captured(String),
+    /// the visible pane content as captured, plus the pane width.
+    Captured(PaneCapture),
     /// tmux returned successfully but the target doesn't exist
     /// (a session/window/pane lookup miss).
     NoTarget,
@@ -476,9 +497,12 @@ impl MuxBackend for SystemTmux {
         // source pane (ADR 0025). `-S -100` adds up to 100 lines of
         // scrollback: a dead pane's banner scrolls the harness's
         // first output line off screen (ADR 0103), and callers crop
-        // to the lines they show.
+        // to the lines they show. The leading `display-message` prints
+        // the pane width on the first line in the same tmux call, so
+        // the preview can reproduce tmux's own wrapping (ADR 0106).
         let output = self
             .cmd(socket_name)
+            .args(["display-message", "-p", "-t", target, "#{pane_width}", ";"])
             .args(["capture-pane", "-p", "-J", "-e", "-S", "-100", "-t", target])
             .output();
 
@@ -497,9 +521,9 @@ impl MuxBackend for SystemTmux {
         };
 
         if output.status.success() {
-            return Ok(TmuxCaptureOutcome::Captured(
-                String::from_utf8_lossy(&output.stdout).into_owned(),
-            ));
+            return Ok(TmuxCaptureOutcome::Captured(parse_capture_output(
+                &String::from_utf8_lossy(&output.stdout),
+            )));
         }
 
         let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
@@ -878,6 +902,28 @@ fn parse_pane_status(stdout: &str) -> TmuxPaneStatus {
     }
 }
 
+/// Split the `display-message ; capture-pane` output into the pane
+/// width (first line) and the captured text (the rest). A first line
+/// that isn't a width is kept as text.
+fn parse_capture_output(stdout: &str) -> PaneCapture {
+    match stdout.split_once('\n') {
+        Some((first, rest)) => match first.trim().parse::<u16>() {
+            Ok(width) => PaneCapture {
+                text: rest.to_string(),
+                width: Some(width),
+            },
+            Err(_) => PaneCapture {
+                text: stdout.to_string(),
+                width: None,
+            },
+        },
+        None => PaneCapture {
+            text: stdout.to_string(),
+            width: None,
+        },
+    }
+}
+
 /// Lines of a dead pane's output [`dead_pane_output`] keeps.
 pub const DEAD_PANE_LINES: usize = 20;
 
@@ -885,10 +931,10 @@ pub const DEAD_PANE_LINES: usize = 20;
 /// "Pane is dead" banner, trailing blank lines dropped, last
 /// [`DEAD_PANE_LINES`] lines kept.
 pub fn dead_pane_output(runner: &dyn MuxBackend, socket: Option<&str>, name: &str) -> String {
-    let Ok(TmuxCaptureOutcome::Captured(text)) = runner.capture_pane(socket, name) else {
+    let Ok(TmuxCaptureOutcome::Captured(capture)) = runner.capture_pane(socket, name) else {
         return String::new();
     };
-    let plain = strip_ansi(&text);
+    let plain = strip_ansi(&capture.text);
     let mut lines: Vec<&str> = plain
         .lines()
         .map(str::trim_end)

@@ -17,6 +17,7 @@ fn ctx_with(view: View, grouping: Grouping, filter: &RowFilter, sort: Sort) -> C
         filter,
         sort,
         mux_recency: crate::tui::MuxRecency::default(),
+        preview_wrap: crate::tui::PreviewWrap::default(),
     }
 }
 
@@ -429,5 +430,88 @@ fn format_and_parse_round_trip_for_common_durations() {
     for (dur, expected) in cases {
         assert_eq!(format_duration_for_input(dur), expected);
         assert_eq!(parse_max_age(expected), Ok(dur));
+    }
+}
+
+#[test]
+fn preview_wrap_section_lists_every_mode_and_applies_the_pick() {
+    let filter = RowFilter::default();
+    for view in VIEW_OPTIONS {
+        let ctx = ctx_with(
+            *view,
+            Grouping::default_for(*view),
+            &filter,
+            Sort::Hierarchy,
+        );
+        let rows = flatten_rows(&ctx);
+        let wrap_rows = rows
+            .iter()
+            .filter(|row| matches!(row, ControlsCursor::PreviewWrap(_)))
+            .count();
+        assert_eq!(wrap_rows, crate::tui::PreviewWrap::ALL.len(), "{view:?}");
+        assert!(
+            matches!(rows.last(), Some(ControlsCursor::PreviewWrap(_))),
+            "the section closes the overlay: {view:?}"
+        );
+
+        let mut state = ControlsOverlayState {
+            cursor: ControlsCursor::PreviewWrap(2),
+            sub_editor: None,
+        };
+        assert_eq!(
+            state.handle_key(&ctx, key(KeyCode::Enter)),
+            ControlsOutcome::ApplyAndStay(crate::tui::Msg::SetPreviewWrap(
+                crate::tui::PreviewWrap::ALL[2]
+            ))
+        );
+    }
+}
+
+#[test]
+fn cursor_line_index_points_at_the_cursored_row_in_every_section() {
+    let filter = RowFilter::default();
+    let theme = Theme::default();
+    for view in VIEW_OPTIONS {
+        let ctx = ctx_with(
+            *view,
+            Grouping::default_for(*view),
+            &filter,
+            Sort::Hierarchy,
+        );
+        for row in flatten_rows(&ctx) {
+            let state = ControlsOverlayState {
+                cursor: row,
+                sub_editor: None,
+            };
+            let widget = ControlsOverlayWidget::new(&state, ctx.clone(), &theme);
+            let lines = widget.body_lines();
+            let index = widget.cursor_line_index().expect("cursor row is rendered");
+            assert!(
+                lines[index].to_string().starts_with("> "),
+                "{view:?} {row:?}: {}",
+                lines[index]
+            );
+        }
+    }
+}
+
+#[test]
+fn modal_height_budget_covers_the_tallest_body() {
+    let filter = RowFilter::default();
+    let theme = Theme::default();
+    for view in VIEW_OPTIONS {
+        let ctx = ctx_with(
+            *view,
+            Grouping::default_for(*view),
+            &filter,
+            Sort::Hierarchy,
+        );
+        let state = ControlsOverlayState::new(&ctx);
+        let widget = ControlsOverlayWidget::new(&state, ctx.clone(), &theme);
+        // Body plus the blank + key-hint footer.
+        assert!(
+            widget.body_lines().len() + 2 <= max_controls_content_lines(),
+            "{view:?}"
+        );
     }
 }

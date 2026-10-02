@@ -275,7 +275,7 @@ pub const KEYBINDINGS: &[KeyBinding] = &[
         mode: KeyMode::Global,
         key: KeyMatcher::AnyModExceptCtrl('f'),
         action: || Action::OpenControls,
-        help_text: "Open the controls overlay (view / grouping / filters / sort)",
+        help_text: "Open the controls overlay (view / grouping / filters / sort / preview wrap)",
     },
     KeyBinding {
         mode: KeyMode::Global,

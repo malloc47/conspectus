@@ -88,6 +88,7 @@ fn full_state_round_trips_sort_filter_and_view_slots() {
         last_view: Some(View::Mux),
         sort: Some(Sort::Recency),
         mux_recency: None,
+        preview_wrap: None,
         view_states: BTreeMap::new(),
     };
     state.view_states.insert(
@@ -136,6 +137,7 @@ fn mux_recency_basis_round_trips() {
         last_view: Some(View::Mux),
         sort: Some(Sort::Recency),
         mux_recency: Some(crate::tui::MuxRecency::LastAttached),
+        preview_wrap: None,
         view_states: BTreeMap::new(),
     };
 
@@ -143,6 +145,27 @@ fn mux_recency_basis_round_trips() {
     let read = read_tui_state(&cache).expect("read");
 
     assert_eq!(read.mux_recency, Some(crate::tui::MuxRecency::LastAttached));
+}
+
+#[test]
+fn preview_wrap_round_trips_and_ignores_unknown_tokens() {
+    let dir = TempDir::new().expect("tempdir");
+    let cache = cache_in(&dir);
+    let state = PersistedState {
+        last_view: None,
+        sort: None,
+        mux_recency: None,
+        preview_wrap: Some(crate::tui::PreviewWrap::None),
+        view_states: BTreeMap::new(),
+    };
+    write_tui_state(&cache, &state).expect("write");
+    let read = read_tui_state(&cache).expect("read");
+    assert_eq!(read.preview_wrap, Some(crate::tui::PreviewWrap::None));
+
+    let path = cache.path().expect("path");
+    fs::write(&path, r#"{"schema_version": 1, "preview_wrap": "fancy"}"#).expect("write");
+    let read = read_tui_state(&cache).expect("read");
+    assert_eq!(read.preview_wrap, None);
 }
 
 #[test]

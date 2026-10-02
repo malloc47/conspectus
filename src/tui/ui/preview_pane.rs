@@ -8,7 +8,7 @@ pub(super) fn draw_detail_preview(
     frame: &mut Frame<'_>,
     area: Rect,
 ) {
-    let preview = preview_text_for_selection(app, area.height as usize);
+    let preview = preview_text_for_selection(app, area.width, area.height as usize);
     let total_rows = wrapped_line_count(&preview.lines, area.width);
     let (content_area, scrollbar_area) = scrollbar_layout(area, total_rows);
     let widget = Paragraph::new(preview)
@@ -32,15 +32,18 @@ pub(super) fn draw_detail_preview(
 /// - Pin placeholder: the pin's live pane when its mux exists, else
 ///   the pin's diagnostics.
 /// - Other rows: a "no preview" placeholder.
-pub(super) fn preview_text_for_selection(app: &App, height: usize) -> Text<'static> {
-    let body = selection_preview_body(app, height);
+pub(super) fn preview_text_for_selection(app: &App, width: u16, height: usize) -> Text<'static> {
     match latest_failure_for_selection(app) {
         Some(entry) => {
+            // The pane body gets the rows the banner leaves, so its
+            // newest output stays on screen below the banner.
             let mut text = failure_banner(entry, app.theme());
-            text.extend(body);
+            let banner_rows = wrapped_line_count(&text.lines, width);
+            let body_height = height.saturating_sub(banner_rows).max(1);
+            text.extend(selection_preview_body(app, width, body_height));
             text
         }
-        None => body,
+        None => selection_preview_body(app, width, height),
     }
 }
 
@@ -92,7 +95,7 @@ fn failure_banner(entry: &crate::tui::messages::LogEntry, theme: &Theme) -> Text
     Text::from(lines)
 }
 
-fn selection_preview_body(app: &App, height: usize) -> Text<'static> {
+fn selection_preview_body(app: &App, width: u16, height: usize) -> Text<'static> {
     let Some(selection) = app.selection() else {
         return Text::raw("");
     };
@@ -101,12 +104,12 @@ fn selection_preview_body(app: &App, height: usize) -> Text<'static> {
     };
     let live_preview = app.config().live_preview_enabled;
     if let RowId::Pin { pin_id } = selection {
-        return pin_placeholder_preview(app, pin_id, live_preview, height);
+        return pin_placeholder_preview(app, pin_id, live_preview, width, height);
     }
     match &row.kind {
         RowKind::AgentSession(session) => match session.mux_state {
             MuxIndicator::Attached | MuxIndicator::Ambiguous { .. } => {
-                mux_preview_text(app, live_preview, height)
+                mux_preview_text(app, live_preview, width, height)
             }
             MuxIndicator::Unmuxed => Text::raw(
                 session
@@ -115,7 +118,7 @@ fn selection_preview_body(app: &App, height: usize) -> Text<'static> {
                     .unwrap_or_else(|| "no preview available".to_string()),
             ),
         },
-        RowKind::AgentSessionMuxCandidate(_) => mux_preview_text(app, live_preview, height),
+        RowKind::AgentSessionMuxCandidate(_) => mux_preview_text(app, live_preview, width, height),
         RowKind::Pin(_) => {
             let diagnostics = crate::tui::actions::selected_pin_diagnostics(app);
             if diagnostics.is_empty() {
@@ -125,8 +128,12 @@ fn selection_preview_body(app: &App, height: usize) -> Text<'static> {
             }
         }
         _ => match selection {
-            RowId::Group(NodeId::MuxSession(_)) => mux_preview_text(app, live_preview, height),
-            RowId::MuxSession(NodeId::MuxSession(_)) => mux_preview_text(app, live_preview, height),
+            RowId::Group(NodeId::MuxSession(_)) => {
+                mux_preview_text(app, live_preview, width, height)
+            }
+            RowId::MuxSession(NodeId::MuxSession(_)) => {
+                mux_preview_text(app, live_preview, width, height)
+            }
             _ => {
                 if live_preview {
                     Text::raw("no preview for this row")
@@ -146,13 +153,14 @@ fn pin_placeholder_preview(
     app: &App,
     pin_id: &str,
     live_preview: bool,
+    width: u16,
     height: usize,
 ) -> Text<'static> {
     let live_mux = app
         .snapshot_handle()
         .and_then(|handle| crate::tui::actions::pin_live_mux(handle.snapshot(), pin_id));
     if live_mux.is_some() {
-        return mux_preview_text(app, live_preview, height);
+        return mux_preview_text(app, live_preview, width, height);
     }
     let diagnostics = crate::tui::actions::selected_pin_diagnostics(app);
     if diagnostics.is_empty() {
@@ -167,28 +175,45 @@ fn pin_placeholder_preview(
 /// entry exists yet (the runtime hasn't refreshed for this
 /// selection), shows a "loading" placeholder. With
 /// `--no-live-preview`, swaps in the privacy banner instead.
-pub(super) fn mux_preview_text(app: &App, live_preview: bool, height: usize) -> Text<'static> {
+pub(super) fn mux_preview_text(
+    app: &App,
+    live_preview: bool,
+    width: u16,
+    height: usize,
+) -> Text<'static> {
     if !live_preview {
         return Text::raw("preview disabled (--no-live-preview)");
     }
     let Some(target) = resolve_attach_target(app).ok().map(|t| t.mux) else {
         return Text::raw("no mux target for this row");
     };
-    format_preview_for_mux(app, &target, height, app.config().color)
+    format_preview_for_mux(app, &target, width, height, app.config().color)
 }
 
+/// Lay the pane capture out per the active wrap mode (ADR 0106) and
+/// keep the bottom `height` rows: the pane's newest output.
 pub(super) fn format_preview_for_mux(
     app: &App,
     mux: &MuxSessionId,
+    width: u16,
     height: usize,
     color: bool,
 ) -> Text<'static> {
     match app.mux_preview(mux) {
         Some(entry) => match &entry.content {
-            PreviewContent::Text(text) if text.is_empty() => Text::raw("(empty pane)"),
-            PreviewContent::Text(text) => {
-                let cropped = crop_bottom_lines(text, height.max(1));
-                render_captured_pane(&cropped, color)
+            PreviewContent::Text(capture) => {
+                let parsed = render_captured_pane(&capture.text, color);
+                let rows = crate::tui::preview_wrap::layout_capture(
+                    &parsed.lines,
+                    app.preview_wrap(),
+                    capture.width,
+                    width,
+                );
+                if rows.is_empty() {
+                    return Text::raw("(empty pane)");
+                }
+                let start = rows.len().saturating_sub(height.max(1));
+                Text::from(rows[start..].to_vec())
             }
             PreviewContent::NoTarget => Text::raw("tmux target not found — try `r` to refresh"),
             PreviewContent::Unavailable(reason) => Text::raw(format!("tmux unavailable: {reason}")),
@@ -301,16 +326,4 @@ pub(super) fn render_captured_pane(text: &str, color: bool) -> Text<'static> {
 /// above, and a second copy here pushed the chip far to the left.
 pub(super) fn preview_divider_line(_app: &App, width: usize, theme: &Theme) -> Line<'static> {
     chip_divider_line("Preview", None, width, theme, ChipAnchor::Left)
-}
-
-pub(super) fn crop_bottom_lines(text: &str, max_lines: usize) -> String {
-    if max_lines == 0 {
-        return String::new();
-    }
-    let lines: Vec<&str> = text.lines().collect();
-    if lines.len() <= max_lines {
-        return text.to_string();
-    }
-    let start = lines.len().saturating_sub(max_lines);
-    lines[start..].join("\n")
 }

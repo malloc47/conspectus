@@ -190,6 +190,9 @@ pub struct TuiConfig {
     /// Starting view when neither `--view` nor a remembered last-used
     /// view applies. Sourced from `[tui] default_view`.
     pub default_view: Option<crate::tui::View>,
+    /// Starting preview-pane wrap mode (ADR 0106). Sourced from
+    /// `[tui] preview_wrap`; defaults to smart wrap.
+    pub preview_wrap: crate::tui::PreviewWrap,
 }
 
 impl Default for TuiConfig {
@@ -202,6 +205,7 @@ impl Default for TuiConfig {
             show_harness_chips: false,
             narrow_layout_threshold: DEFAULT_NARROW_LAYOUT_THRESHOLD,
             default_view: None,
+            preview_wrap: crate::tui::PreviewWrap::default(),
         }
     }
 }
@@ -406,6 +410,9 @@ struct TuiFile {
     /// `[tui] default_view` — starting view name.
     #[serde(default)]
     default_view: Option<String>,
+    /// `[tui] preview_wrap` — `smart`, `plain`, or `none`.
+    #[serde(default)]
+    preview_wrap: Option<String>,
 }
 
 #[derive(Clone, Debug, Default, Deserialize)]
@@ -908,6 +915,19 @@ fn merge_tui(
                 message: format!(
                     "invalid `[tui] default_view` value `{raw}`; \
                      expected one of sessions, mux, union, prs, forks"
+                ),
+            }),
+        }
+    }
+
+    if let Some(raw) = file.preview_wrap {
+        match crate::tui::PreviewWrap::parse(&raw) {
+            Some(wrap) => config.preview_wrap = wrap,
+            None => diagnostics.push(ConfigDiagnostic {
+                path: path.to_path_buf(),
+                message: format!(
+                    "invalid `[tui] preview_wrap` value `{raw}`; \
+                     expected one of smart, plain, none"
                 ),
             }),
         }

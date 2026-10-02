@@ -1327,7 +1327,7 @@ mod mux_effect_executor {
         let mux = MuxSessionId::new("tmux:editor");
         let tmux = FakeTmux::with_sessions("").with_capture(
             "editor",
-            TmuxCaptureOutcome::Captured("hello from pane".to_string()),
+            TmuxCaptureOutcome::captured("hello from pane".to_string()),
         );
 
         execute_mux_op(
@@ -1341,7 +1341,7 @@ mod mux_effect_executor {
 
         let entry = app.mux_preview(&mux).expect("preview cached");
         assert!(
-            matches!(entry.content, PreviewContent::Text(ref s) if s.contains("hello from pane"))
+            matches!(entry.content, PreviewContent::Text(ref capture) if capture.text.contains("hello from pane"))
         );
     }
 

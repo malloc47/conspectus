@@ -392,6 +392,9 @@ impl TuiArgs {
             // choice is restored from persisted TUI state on top of
             // this, mirroring how `sort` flows.
             default_mux_recency: crate::tui::MuxRecency::default(),
+            // `[tui] preview_wrap`; a remembered choice from the
+            // controls overlay restores on top of it.
+            default_preview_wrap: outcome.config.tui.preview_wrap,
             narrow_layout_threshold: outcome.config.tui.narrow_layout_threshold,
             intervals: outcome.config.server.intervals,
             no_cache: self.no_cache,

@@ -1,7 +1,8 @@
 //! Controls overlay (ADR 0031).
 //!
 //! Single navigable modal that fronts view switching, per-view
-//! grouping, per-view filter editing, and the global sort toggle.
+//! grouping, per-view filter editing, the global sort toggle, and the
+//! preview pane's wrap mode.
 //! The controls overlay is the discoverable surface; single-key
 //! accelerators (`v`, `1`–`5`, `]`/`[`, `f`, `F`, `G`) reach the
 //! same outcomes for muscle-memory operators.
@@ -83,6 +84,9 @@ pub struct ControlsContext<'a> {
     /// can mark the active basis; only surfaced when the mux view is
     /// active.
     pub mux_recency: crate::tui::MuxRecency,
+    /// Preview-pane wrap mode, marked active in the Preview wrap
+    /// section (ADR 0106).
+    pub preview_wrap: crate::tui::PreviewWrap,
 }
 
 /// One landable row in the controls overlay's flat list.
@@ -107,6 +111,8 @@ pub enum ControlsCursor {
     /// Mux-view-only recency basis at index in
     /// [`crate::tui::MuxRecency::ALL`].
     MuxRecency(usize),
+    /// Preview wrap mode at index in [`crate::tui::PreviewWrap::ALL`].
+    PreviewWrap(usize),
 }
 
 /// Sub-editor that owns key input while open. The host overlay
@@ -267,6 +273,13 @@ impl ControlsOverlayState {
                     .copied()
                     .unwrap_or(ctx.mux_recency);
                 ControlsOutcome::ApplyAndStay(crate::tui::Msg::SetMuxRecency(basis))
+            }
+            ControlsCursor::PreviewWrap(idx) => {
+                let wrap = crate::tui::PreviewWrap::ALL
+                    .get(idx)
+                    .copied()
+                    .unwrap_or(ctx.preview_wrap);
+                ControlsOutcome::ApplyAndStay(crate::tui::Msg::SetPreviewWrap(wrap))
             }
         }
     }
@@ -498,6 +511,9 @@ fn flatten_rows(ctx: &ControlsContext<'_>) -> Vec<ControlsCursor> {
             rows.push(ControlsCursor::MuxRecency(idx));
         }
     }
+    for idx in 0..crate::tui::PreviewWrap::ALL.len() {
+        rows.push(ControlsCursor::PreviewWrap(idx));
+    }
     rows
 }
 
@@ -585,19 +601,29 @@ fn render_sub_editor(editor: &SubEditor, area: Rect, buf: &mut Buffer, theme: &T
 
 impl ControlsOverlayWidget<'_> {
     fn body_lines(&self) -> Vec<Line<'static>> {
-        let cursor = self.state.cursor();
-        let mut lines: Vec<Line<'static>> = Vec::new();
+        self.body().0
+    }
 
-        lines.push(section_header("View"));
+    fn cursor_line_index(&self) -> Option<usize> {
+        self.body().1
+    }
+
+    /// The overlay body and the index of the line the cursor is on,
+    /// recorded as rows are pushed so the two can't drift apart.
+    fn body(&self) -> (Vec<Line<'static>>, Option<usize>) {
+        let cursor = self.state.cursor();
+        let mut body = Body::default();
+
+        body.push(section_header("View"));
         for (idx, view) in VIEW_OPTIONS.iter().enumerate() {
             let row = ControlsCursor::View(idx);
             let active = *view == self.ctx.view;
             let label = format!("{} [{}]", view_label(*view), idx + 1);
-            lines.push(row_line(label, active, cursor == row));
+            body.push_row(row_line(label, active, cursor == row), cursor == row);
         }
-        lines.push(line![""]);
+        body.push(line![""]);
 
-        lines.push(section_header(&format!(
+        body.push(section_header(&format!(
             "Grouping ({})",
             view_label(self.ctx.view)
         )));
@@ -605,152 +631,112 @@ impl ControlsOverlayWidget<'_> {
             let row = ControlsCursor::Grouping(idx);
             let active = *grouping == self.ctx.grouping;
             let label = grouping.as_str().to_string();
-            lines.push(row_line(label, active, cursor == row));
+            body.push_row(row_line(label, active, cursor == row), cursor == row);
         }
-        lines.push(line![""]);
+        body.push(line![""]);
 
-        lines.push(section_header(&format!(
+        body.push(section_header(&format!(
             "Filters ({})",
             view_label(self.ctx.view)
         )));
-        lines.push(filter_row(
-            "harness",
-            harness_value(self.ctx.filter),
-            cursor == ControlsCursor::FilterHarness,
-        ));
-        lines.push(filter_row(
-            "max age",
-            max_age_value(self.ctx.filter),
-            cursor == ControlsCursor::FilterMaxAge,
-        ));
-        lines.push(filter_row(
-            "mux state",
-            mux_state_value(self.ctx.filter),
-            cursor == ControlsCursor::FilterMuxState,
-        ));
+        let here = cursor == ControlsCursor::FilterHarness;
+        body.push_row(
+            filter_row("harness", harness_value(self.ctx.filter), here),
+            here,
+        );
+        let here = cursor == ControlsCursor::FilterMaxAge;
+        body.push_row(
+            filter_row("max age", max_age_value(self.ctx.filter), here),
+            here,
+        );
+        let here = cursor == ControlsCursor::FilterMuxState;
+        body.push_row(
+            filter_row("mux state", mux_state_value(self.ctx.filter), here),
+            here,
+        );
         if matches!(self.ctx.view, View::Sessions) {
-            lines.push(checkbox_row(
-                "Float muxed sessions to top",
-                self.ctx.filter.float_muxed_sessions_top,
-                cursor == ControlsCursor::FilterFloatMuxedSessions,
-            ));
+            let here = cursor == ControlsCursor::FilterFloatMuxedSessions;
+            body.push_row(
+                checkbox_row(
+                    "Float muxed sessions to top",
+                    self.ctx.filter.float_muxed_sessions_top,
+                    here,
+                ),
+                here,
+            );
         }
         if matches!(self.ctx.view, View::Mux) {
-            lines.push(checkbox_row(
-                "Float attached muxes to top",
-                self.ctx.filter.float_attached_muxes_top,
-                cursor == ControlsCursor::FilterFloatAttachedMuxes,
-            ));
+            let here = cursor == ControlsCursor::FilterFloatAttachedMuxes;
+            body.push_row(
+                checkbox_row(
+                    "Float attached muxes to top",
+                    self.ctx.filter.float_attached_muxes_top,
+                    here,
+                ),
+                here,
+            );
         }
-        lines.push(row_line(
-            "Clear all filters".to_string(),
-            false,
-            cursor == ControlsCursor::FilterClear,
-        ));
-        lines.push(line![""]);
+        let here = cursor == ControlsCursor::FilterClear;
+        body.push_row(row_line("Clear all filters".to_string(), false, here), here);
+        body.push(line![""]);
 
-        lines.push(section_header("Sort"));
+        body.push(section_header("Sort"));
         for (idx, sort) in SORT_OPTIONS.iter().enumerate() {
             let row = ControlsCursor::Sort(idx);
             let active = *sort == self.ctx.sort;
-            lines.push(row_line(
-                sort_label(*sort).to_string(),
-                active,
+            body.push_row(
+                row_line(sort_label(*sort).to_string(), active, cursor == row),
                 cursor == row,
-            ));
+            );
         }
 
         // Mux-only recency basis: which signal the
         // Recency sort orders by. Only meaningful — and only shown —
         // for the mux view.
         if matches!(self.ctx.view, View::Mux) {
-            lines.push(line![""]);
-            lines.push(section_header("Recency by (Mux)"));
+            body.push(line![""]);
+            body.push(section_header("Recency by (Mux)"));
             for (idx, basis) in crate::tui::MuxRecency::ALL.iter().enumerate() {
                 let row = ControlsCursor::MuxRecency(idx);
                 let active = *basis == self.ctx.mux_recency;
-                lines.push(row_line(basis.label().to_string(), active, cursor == row));
+                body.push_row(
+                    row_line(basis.label().to_string(), active, cursor == row),
+                    cursor == row,
+                );
             }
         }
-        lines
+
+        body.push(line![""]);
+        body.push(section_header("Preview wrap"));
+        for (idx, wrap) in crate::tui::PreviewWrap::ALL.iter().enumerate() {
+            let row = ControlsCursor::PreviewWrap(idx);
+            let active = *wrap == self.ctx.preview_wrap;
+            body.push_row(
+                row_line(wrap.label().to_string(), active, cursor == row),
+                cursor == row,
+            );
+        }
+        (body.lines, body.cursor_line)
+    }
+}
+
+/// Overlay lines under construction, plus where the cursor row landed.
+#[derive(Default)]
+struct Body {
+    lines: Vec<Line<'static>>,
+    cursor_line: Option<usize>,
+}
+
+impl Body {
+    fn push(&mut self, line: Line<'static>) {
+        self.lines.push(line);
     }
 
-    fn cursor_line_index(&self) -> Option<usize> {
-        let cursor = self.state.cursor();
-        match cursor {
-            ControlsCursor::View(idx) => Some(1 + idx),
-            ControlsCursor::Grouping(idx) => {
-                let grouping_header = 1 + VIEW_OPTIONS.len() + 1;
-                Some(grouping_header + 1 + idx)
-            }
-            ControlsCursor::FilterHarness
-            | ControlsCursor::FilterMaxAge
-            | ControlsCursor::FilterMuxState
-            | ControlsCursor::FilterFloatMuxedSessions
-            | ControlsCursor::FilterFloatAttachedMuxes
-            | ControlsCursor::FilterClear => {
-                let filter_header =
-                    1 + VIEW_OPTIONS.len() + 1 + 1 + Grouping::values_for(self.ctx.view).len() + 1;
-                let offset = match cursor {
-                    ControlsCursor::FilterHarness => 1,
-                    ControlsCursor::FilterMaxAge => 2,
-                    ControlsCursor::FilterMuxState => 3,
-                    ControlsCursor::FilterFloatMuxedSessions
-                    | ControlsCursor::FilterFloatAttachedMuxes => 4,
-                    ControlsCursor::FilterClear => {
-                        if matches!(self.ctx.view, View::Sessions | View::Mux) {
-                            5
-                        } else {
-                            4
-                        }
-                    }
-                    _ => unreachable!("filter cursor matched above"),
-                };
-                Some(filter_header + offset)
-            }
-            ControlsCursor::Sort(idx) => {
-                let filter_rows = if matches!(self.ctx.view, View::Sessions | View::Mux) {
-                    5
-                } else {
-                    4
-                };
-                let sort_header = 1
-                    + VIEW_OPTIONS.len()
-                    + 1
-                    + 1
-                    + Grouping::values_for(self.ctx.view).len()
-                    + 1
-                    + 1
-                    + filter_rows
-                    + 1;
-                Some(sort_header + 1 + idx)
-            }
-            ControlsCursor::MuxRecency(idx) => {
-                let filter_rows = if matches!(self.ctx.view, View::Sessions | View::Mux) {
-                    5
-                } else {
-                    4
-                };
-                // View header + view rows + blank
-                // + grouping header + grouping rows + blank
-                // + filter header + filter rows + blank
-                // + sort header + sort rows + blank
-                // + recency header, then the basis rows.
-                let recency_header = 1
-                    + VIEW_OPTIONS.len()
-                    + 1
-                    + 1
-                    + Grouping::values_for(self.ctx.view).len()
-                    + 1
-                    + 1
-                    + filter_rows
-                    + 1
-                    + 1
-                    + SORT_OPTIONS.len()
-                    + 1;
-                Some(recency_header + 1 + idx)
-            }
+    fn push_row(&mut self, line: Line<'static>, cursored: bool) {
+        if cursored {
+            self.cursor_line = Some(self.lines.len());
         }
+        self.lines.push(line);
     }
 }
 
@@ -911,6 +897,9 @@ fn max_controls_content_lines() -> usize {
             } else {
                 0
             };
+            // Every view ends with the Preview wrap section: blank +
+            // header + one row per mode.
+            let preview_wrap_rows = 1 + 1 + crate::tui::PreviewWrap::ALL.len();
             let body_lines = 1
                 + VIEW_OPTIONS.len()
                 + 1
@@ -922,7 +911,8 @@ fn max_controls_content_lines() -> usize {
                 + 1
                 + 1
                 + SORT_OPTIONS.len()
-                + mux_recency_rows;
+                + mux_recency_rows
+                + preview_wrap_rows;
             body_lines + 2
         })
         .max()

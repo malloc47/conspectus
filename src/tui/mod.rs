@@ -26,6 +26,7 @@ pub mod keymap;
 pub mod messages;
 pub mod modal;
 pub mod preview;
+pub mod preview_wrap;
 pub mod resume;
 pub mod rows;
 mod runtime;
@@ -114,6 +115,10 @@ pub struct RunConfig {
     /// per-session control changes it in memory; this sets the
     /// startup default.
     pub default_mux_recency: MuxRecency,
+    /// Initial preview-pane wrap mode (ADR 0106). Sourced from
+    /// `[tui] preview_wrap`; the controls overlay changes it in memory
+    /// and the last choice is restored from persisted TUI state.
+    pub default_preview_wrap: PreviewWrap,
     /// Terminal width (columns) below which the body reflows from
     /// side-by-side panes to a vertical stack. Sourced
     /// from `[tui] narrow_layout_threshold`; the renderer reads this
@@ -161,6 +166,7 @@ impl RunConfig {
             show_edge_meta: false,
             show_harness_chips: false,
             default_mux_recency: MuxRecency::default(),
+            default_preview_wrap: PreviewWrap::default(),
             narrow_layout_threshold: crate::config::DEFAULT_NARROW_LAYOUT_THRESHOLD,
             intervals: crate::config::ServerIntervals::default(),
             no_cache: false,
@@ -240,6 +246,55 @@ impl MuxRecency {
 
     /// All variants in stable display order.
     pub const ALL: [MuxRecency; 3] = [Self::Activity, Self::Created, Self::LastAttached];
+}
+
+/// How the preview pane fits a captured mux pane into its width
+/// (ADR 0106).
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PreviewWrap {
+    /// Wrap every line at the preview width, rules and borders
+    /// included.
+    Plain,
+    /// Wrap content but truncate formatting — rules, box borders, and
+    /// padding — so decorations don't spill onto extra rows.
+    #[default]
+    Smart,
+    /// Keep tmux's own layout at the pane's width and clip whatever
+    /// doesn't fit the preview.
+    None,
+}
+
+impl PreviewWrap {
+    /// Stable token used for config and persistence.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Plain => "plain",
+            Self::Smart => "smart",
+            Self::None => "none",
+        }
+    }
+
+    /// Human label for the controls overlay.
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Plain => "plain wrap",
+            Self::Smart => "smart wrap",
+            Self::None => "no wrap",
+        }
+    }
+
+    pub fn parse(raw: &str) -> Option<Self> {
+        match raw.trim() {
+            "plain" => Some(Self::Plain),
+            "smart" => Some(Self::Smart),
+            "none" => Some(Self::None),
+            _ => None,
+        }
+    }
+
+    /// All variants in stable display order.
+    pub const ALL: [PreviewWrap; 3] = [Self::Smart, Self::Plain, Self::None];
 }
 
 /// Top-level grouping in the sessions tree.

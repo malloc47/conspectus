@@ -224,6 +224,9 @@ pub struct App {
     /// last-attached). Mux-scoped: no other view reads it. Seeded from
     /// [`RunConfig::default_mux_recency`].
     mux_recency: super::MuxRecency,
+    /// How the preview pane fits a captured mux pane (ADR 0106).
+    /// Seeded from [`RunConfig::default_preview_wrap`].
+    preview_wrap: super::PreviewWrap,
     /// Active row filter (ADR 0031). Mirrors the active
     /// view's slot in `view_states` so callers don't pay a map
     /// lookup per read. Kept in sync via `switch_to_view` /
@@ -409,6 +412,7 @@ impl App {
         }
         let sort = config.default_sort;
         let mux_recency = config.default_mux_recency;
+        let preview_wrap = config.default_preview_wrap;
         let filter = config.initial_filter.clone();
         let active_view = config.default_view;
         let grouping = match active_view {
@@ -449,6 +453,7 @@ impl App {
             ),
             sort,
             mux_recency,
+            preview_wrap,
             filter,
             grouping,
             view_states: BTreeMap::new(),
@@ -647,6 +652,11 @@ impl App {
         self.mux_recency
     }
 
+    /// Preview-pane wrap mode.
+    pub fn preview_wrap(&self) -> super::PreviewWrap {
+        self.preview_wrap
+    }
+
     fn force_recency_for_flat_sessions(&mut self) {
         if matches!(
             self.grouping,
@@ -703,6 +713,9 @@ impl App {
         // always wins when present.
         if let Some(basis) = persisted.mux_recency {
             self.mux_recency = basis;
+        }
+        if let Some(wrap) = persisted.preview_wrap {
+            self.preview_wrap = wrap;
         }
 
         // Pre-populate view_states from persisted state.
@@ -775,6 +788,7 @@ impl App {
             last_view: Some(active_view),
             sort: Some(self.sort),
             mux_recency: Some(self.mux_recency),
+            preview_wrap: Some(self.preview_wrap),
             view_states,
         }
     }
@@ -1337,6 +1351,11 @@ impl App {
                 self.mux_recency = basis;
                 self.sort = super::Sort::Recency;
                 self.rebuild_tree_in_place();
+                effects.push(Effect::Persist);
+            }
+            Msg::SetPreviewWrap(wrap) => {
+                self.preview_wrap = wrap;
+                self.preview_scroll = 0;
                 effects.push(Effect::Persist);
             }
             Msg::CommitRename(value) => effects.push(self.rename_commit_effect(&value)),
