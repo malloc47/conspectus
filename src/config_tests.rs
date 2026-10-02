@@ -1143,3 +1143,42 @@ fn tui_default_view_unknown_value_diagnoses_and_stays_unset() {
         outcome.diagnostics
     );
 }
+
+fn load_theme_badge_width(raw: &str) -> LoadOutcome {
+    let temp = TempDir::new().expect("temp dir");
+    let project = temp.path().join("project");
+    fs::create_dir(&project).expect("create project dir");
+    write_file(
+        &project.join(PROJECT_CONFIG_FILENAME),
+        &format!("[tui.theme]\nbadge_width = {raw}\n"),
+    );
+    ConfigLoader::new()
+        .with_home(temp.path())
+        .load_from(&project)
+}
+
+#[test]
+fn tui_theme_badge_width_overrides_the_default() {
+    let outcome = load_theme_badge_width("12");
+
+    assert!(outcome.diagnostics.is_empty(), "{:?}", outcome.diagnostics);
+    assert_eq!(outcome.config.tui.theme.badge_width, 12);
+}
+
+#[test]
+fn tui_theme_badge_width_rejects_values_below_the_minimum_or_non_integers() {
+    for raw in ["1", "-3", "\"wide\""] {
+        let outcome = load_theme_badge_width(raw);
+
+        assert_eq!(outcome.diagnostics.len(), 1, "{raw}");
+        assert!(
+            outcome.diagnostics[0].message.contains("badge_width"),
+            "{raw}: {}",
+            outcome.diagnostics[0].message
+        );
+        assert_eq!(
+            outcome.config.tui.theme.badge_width,
+            crate::tui::theme::DEFAULT_BADGE_WIDTH
+        );
+    }
+}

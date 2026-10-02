@@ -19,6 +19,13 @@ use ratatui::style::{Color, Modifier, Style};
 
 use crate::tui::icons::IconOverrides;
 
+/// Default `badge_width`: the longest registered harness label
+/// (`opencode`), so harness names never truncate.
+pub const DEFAULT_BADGE_WIDTH: usize = 8;
+
+/// Narrowest `badge_width` the config accepts: one character plus `…`.
+pub const MIN_BADGE_WIDTH: usize = 2;
+
 /// Palette + modifier set for every styled surface in the TUI.
 ///
 /// Fields are grouped by purpose with a `Color` for foreground-only
@@ -98,6 +105,11 @@ pub struct Theme {
     /// Default is `REVERSED | BOLD` so the badge reads as a filled
     /// pill against any terminal theme.
     pub badge: Modifier,
+    /// Label characters in every agent / program badge, set by
+    /// `[tui.theme] badge_width`. Shorter labels are padded and longer
+    /// ones cut with `…`, so all badges share one width and the columns
+    /// after them stay aligned.
+    pub badge_width: usize,
 
     // ---- per-node-kind identity (ADR 0073) ----------------------------------
     /// Foreground color for the per-row node-kind glyph. One field
@@ -226,6 +238,8 @@ impl Default for Theme {
             pr_draft: Color::Yellow,
 
             badge: Modifier::REVERSED.union(Modifier::BOLD),
+
+            badge_width: DEFAULT_BADGE_WIDTH,
 
             node_workspace: Color::LightBlue,
             node_repo: Color::Blue,

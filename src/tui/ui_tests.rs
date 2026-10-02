@@ -1583,7 +1583,6 @@ fn session_harness_span_renders_as_filled_badge() {
     // is the same visible width regardless of label length so
     // the recency column lands at the same column on every row.
     use crate::tui::rows::{AgentSessionRow, MuxIndicator};
-    use crate::tui::widgets::badge::HARNESS_BADGE_WIDTH;
     let theme = Theme::default();
     let now: i64 = 1_700_000_000;
     let row = AgentSessionRow {
@@ -1607,7 +1606,7 @@ fn session_harness_span_renders_as_filled_badge() {
         .iter()
         .find(|s| s.content.trim() == "codex")
         .expect("harness badge span present");
-    assert_eq!(badge.content.chars().count(), HARNESS_BADGE_WIDTH);
+    assert_eq!(badge.content.chars().count(), theme.badge_width + 2);
     assert_eq!(badge.style.fg, Some(theme.harness_color("codex")));
     assert!(badge.style.add_modifier.contains(Modifier::REVERSED));
     assert!(badge.style.add_modifier.contains(Modifier::BOLD));

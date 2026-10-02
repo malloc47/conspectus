@@ -942,6 +942,21 @@ fn merge_tui_theme(
             merge_tui_theme_harness(theme, value, path, diagnostics);
             continue;
         }
+        if key == "badge_width" {
+            match value.as_integer().and_then(|width| usize::try_from(width).ok()) {
+                Some(width) if width >= crate::tui::theme::MIN_BADGE_WIDTH => {
+                    theme.badge_width = width;
+                }
+                _ => diagnostics.push(ConfigDiagnostic {
+                    path: path.to_path_buf(),
+                    message: format!(
+                        "`[tui.theme].badge_width` must be an integer of at least {} (got `{value}`)",
+                        crate::tui::theme::MIN_BADGE_WIDTH
+                    ),
+                }),
+            }
+            continue;
+        }
         let Some(&kind) = known.get(key.as_str()) else {
             diagnostics.push(ConfigDiagnostic {
                 path: path.to_path_buf(),

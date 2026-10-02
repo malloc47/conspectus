@@ -214,6 +214,9 @@ pr_draft  = "yellow"
 
 # Badge composition; default `REVERSED | BOLD` is the chip look.
 badge              = "reversed,bold"
+# Label characters in every agent / program badge (an integer, at
+# least 2). Shorter labels pad, longer ones are cut with `…`.
+badge_width        = 8
 selection_active   = "reversed,bold"
 selection_inactive = "bold"
 ```

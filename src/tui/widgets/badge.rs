@@ -6,10 +6,11 @@
 //! backs header chips (Phase 5), the detail-pane identity row
 //! (Phase 6), and group-row summaries (Phase 7).
 //!
-//! Layout contract: `harness_badge` always renders to
-//! [`HARNESS_BADGE_WIDTH`] visible cells. Short labels are
-//! right-padded *inside* the styled span so the entire badge — the
-//! padding cells included — carries the badge color and modifier.
+//! Layout contract: every badge renders to `theme.badge_width + 2`
+//! visible cells (`[tui.theme] badge_width`, default 8 label
+//! characters). Short labels are right-padded *inside* the styled span
+//! so the entire badge — the padding cells included — carries the
+//! badge color and modifier.
 //! This matches the chip look in modern AI-agent dashboards where
 //! every pill is the same width regardless of label length, and it
 //! keeps the recency / mux indicator columns aligned downstream.
@@ -20,25 +21,17 @@ use ratatui::text::Span;
 
 use crate::tui::Theme;
 
-/// Longest harness label conspectus emits today (`opencode`, 8
-/// chars). Drives the fixed badge width below.
-const MAX_HARNESS_LABEL_LEN: usize = 8;
-
-/// Total cell width of every harness badge (1 leading space + the
-/// max label width + 1 trailing space).
-pub const HARNESS_BADGE_WIDTH: usize = MAX_HARNESS_LABEL_LEN + 2;
-
 /// Render `label` as a fixed-width filled badge. The badge uses
 /// `theme.badge` (default `REVERSED | BOLD`) over
-/// `theme.harness_color(label)` and is exactly [`HARNESS_BADGE_WIDTH`]
-/// cells, so every chip has the same footprint and the columns after
-/// it stay aligned. Registered harness labels all fit; anything longer
-/// (a pin's custom launcher, say) is cut with `…`.
+/// `theme.harness_color(label)` and is `theme.badge_width + 2` cells,
+/// so every chip has the same footprint and the columns after it stay
+/// aligned. At the default width every registered harness label fits;
+/// anything longer (a pin's custom launcher, say) is cut with `…`.
 pub fn harness_badge(label: &str, theme: &Theme) -> Span<'static> {
     let style = Style::default()
         .fg(theme.harness_color(label))
         .add_modifier(theme.badge);
-    badge_span(label, style)
+    badge_span(label, style, theme.badge_width)
 }
 
 /// Render a pane's program name as a badge the same width as
@@ -51,19 +44,20 @@ pub fn command_badge(command: &str, theme: &Theme) -> Span<'static> {
         .fg(Color::White)
         .bg(theme.command_badge)
         .add_modifier(Modifier::BOLD);
-    badge_span(command, style)
+    badge_span(command, style, theme.badge_width)
 }
 
-/// `label` padded or cut (with `…`) to the badge body, inside one
+/// `label` padded or cut (with `…`) to `width` characters, inside one
 /// styled span so the padding carries the chip background too.
-fn badge_span(label: &str, style: Style) -> Span<'static> {
-    let label = if label.chars().count() > MAX_HARNESS_LABEL_LEN {
-        let kept: String = label.chars().take(MAX_HARNESS_LABEL_LEN - 1).collect();
+fn badge_span(label: &str, style: Style, width: usize) -> Span<'static> {
+    let width = width.max(crate::tui::theme::MIN_BADGE_WIDTH);
+    let label = if label.chars().count() > width {
+        let kept: String = label.chars().take(width - 1).collect();
         format!("{kept}…")
     } else {
         label.to_string()
     };
-    span!(style; " {label:<MAX_HARNESS_LABEL_LEN$} ")
+    span!(style; " {label:<width$} ")
 }
 
 #[cfg(test)]
@@ -73,13 +67,13 @@ mod tests {
 
     #[test]
     fn harness_badge_pads_short_labels_inside_styled_span() {
-        // codex is 5 chars; the badge pads to the max-label width
-        // (8 cells) inside the styled span so the entire badge —
+        // codex is 5 chars; the badge pads to the default width
+        // (8 characters) inside the styled span so the entire badge —
         // padding included — carries the chip background.
         let theme = Theme::default();
         let span = harness_badge("codex", &theme);
         assert_eq!(span.content, " codex    ");
-        assert_eq!(span.content.chars().count(), HARNESS_BADGE_WIDTH);
+        assert_eq!(span.content.chars().count(), theme.badge_width + 2);
         assert_eq!(span.style.fg, Some(theme.harness_color("codex")));
         assert!(span.style.add_modifier.contains(Modifier::REVERSED));
         assert!(span.style.add_modifier.contains(Modifier::BOLD));
@@ -92,9 +86,26 @@ mod tests {
         assert_eq!(short.content, " npm      ");
         let long = command_badge("conspectus", &theme);
         assert_eq!(long.content, " conspec… ");
-        assert_eq!(long.content.chars().count(), HARNESS_BADGE_WIDTH);
+        assert_eq!(long.content.chars().count(), theme.badge_width + 2);
         assert_eq!(long.style.bg, Some(theme.command_badge));
         assert_eq!(long.style.fg, Some(Color::White));
+    }
+
+    #[test]
+    fn badges_follow_the_theme_badge_width() {
+        let mut theme = Theme {
+            badge_width: 5,
+            ..Theme::default()
+        };
+        assert_eq!(harness_badge("codex", &theme).content, " codex ");
+        assert_eq!(harness_badge("opencode", &theme).content, " open… ");
+        assert_eq!(command_badge("npm", &theme).content, " npm   ");
+
+        theme.badge_width = 12;
+        assert_eq!(
+            command_badge("conspectus", &theme).content,
+            " conspectus   "
+        );
     }
 
     #[test]
@@ -102,7 +113,7 @@ mod tests {
         let theme = Theme::default();
         let span = harness_badge("opencode", &theme);
         assert_eq!(span.content, " opencode ");
-        assert_eq!(span.content.chars().count(), HARNESS_BADGE_WIDTH);
+        assert_eq!(span.content.chars().count(), theme.badge_width + 2);
     }
 
     #[test]
@@ -117,7 +128,7 @@ mod tests {
         let theme = Theme::default();
         let span = harness_badge("conspectus", &theme);
         assert_eq!(span.content, " conspec… ");
-        assert_eq!(span.content.chars().count(), HARNESS_BADGE_WIDTH);
+        assert_eq!(span.content.chars().count(), theme.badge_width + 2);
     }
 
     #[test]
