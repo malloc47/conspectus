@@ -49,22 +49,29 @@ pub fn explain_resolved_relationships(snapshot: &mut GraphSnapshot) {
             .and_then(|id| links_by_id.get(id).copied())
             .map(candidate_score);
 
-        let competing: Vec<CandidateScore> = relationship
-            .competing_link_ids
-            .iter()
-            .filter_map(|id| links_by_id.get(id.as_str()).copied())
-            .map(candidate_score)
-            .collect();
+        let scores = |ids: &[String]| -> Vec<CandidateScore> {
+            ids.iter()
+                .filter_map(|id| links_by_id.get(id.as_str()).copied())
+                .map(candidate_score)
+                .collect()
+        };
+        let competing = scores(&relationship.competing_link_ids);
+        let corroborating = scores(&relationship.corroborating_link_ids);
 
+        // A competitor is what the ranking actually decided against;
+        // with none, the runner-up corroborating candidate still shows
+        // which axis put the winner ahead of the other producers.
         let decisive_axis = selected.as_ref().and_then(|score| {
             competing
                 .first()
-                .and_then(|competitor| first_different_axis(score, competitor))
+                .or_else(|| corroborating.first())
+                .and_then(|runner_up| first_different_axis(score, runner_up))
         });
 
         relationship.explanation = Some(ResolutionExplanation {
             selected,
             competing,
+            corroborating,
             decisive_axis,
         });
     }
@@ -541,8 +548,16 @@ pub fn resolve_links(candidates: &[GraphLink]) -> ResolveOutput {
             .target_node_id()
             .expect("concrete link groups have node targets")
             .clone();
+        // Runners-up that name the winner's target agree with it;
+        // only a different target is a competing answer.
+        let (corroborating, competing): (Vec<&GraphLink>, Vec<&GraphLink>) = links
+            .iter()
+            .skip(1)
+            .partition(|link| link.target_node_id() == Some(&target));
         let competing_link_ids: Vec<String> =
-            links.iter().skip(1).map(|link| link.id.clone()).collect();
+            competing.iter().map(|link| link.id.clone()).collect();
+        let corroborating_link_ids: Vec<String> =
+            corroborating.iter().map(|link| link.id.clone()).collect();
 
         if !competing_link_ids.is_empty() {
             output.diagnostics.push(Diagnostic::Conflict {
@@ -559,6 +574,7 @@ pub fn resolve_links(candidates: &[GraphLink]) -> ResolveOutput {
             relation,
             selected_link_id: Some(selected.id.clone()),
             competing_link_ids,
+            corroborating_link_ids,
             explanation: None,
         });
     }
@@ -629,11 +645,13 @@ fn suppress_ambiguous_cwd_mux_links(candidates: &[GraphLink], output: &mut Resol
                 selected_link_id: prior_winner.clone(),
                 competing_link_ids: vec![],
             });
-            // Add the prior winner to the competing set so the
-            // candidate accounting stays complete: when consumers
-            // walk `competing_link_ids` for an ambiguous slot, the
-            // tiebreak winner is one of the competitors.
+            // Add the prior winner and everything that agreed with it
+            // to the competing set so the candidate accounting stays
+            // complete: when consumers walk `competing_link_ids` for
+            // an ambiguous slot, every considered candidate is there.
             rel.competing_link_ids.push(prior_winner);
+            rel.competing_link_ids
+                .append(&mut rel.corroborating_link_ids);
             rel.competing_link_ids.sort();
             rel.competing_link_ids.dedup();
         }

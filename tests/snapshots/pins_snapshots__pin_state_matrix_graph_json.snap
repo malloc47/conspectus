@@ -846,7 +846,7 @@ expression: rendered
       },
       "relation": "linked_to_mux",
       "selected_link_id": "pin:local_pin:ambig-local",
-      "competing_link_ids": [
+      "corroborating_link_ids": [
         "ambig-strong"
       ]
     },
@@ -877,7 +877,7 @@ expression: rendered
       },
       "relation": "linked_to_mux",
       "selected_link_id": "pin:local_pin:bound-local",
-      "competing_link_ids": [
+      "corroborating_link_ids": [
         "bound-discovered"
       ]
     },
@@ -894,7 +894,7 @@ expression: rendered
       },
       "relation": "linked_to_mux",
       "selected_link_id": "pin:local_pin:drift-local",
-      "competing_link_ids": [
+      "corroborating_link_ids": [
         "drift-discovered"
       ]
     },
@@ -911,7 +911,7 @@ expression: rendered
       },
       "relation": "linked_to_mux",
       "selected_link_id": "pin:local_pin:socket-local",
-      "competing_link_ids": [
+      "corroborating_link_ids": [
         "socket-discovered"
       ]
     },
@@ -1037,62 +1037,6 @@ expression: rendered
       "kind": "unresolved_endpoint",
       "link_id": "pin-node:local_pin:unbound-local:targets-mux",
       "relation": "pin_targets_mux"
-    },
-    {
-      "kind": "conflict",
-      "source": {
-        "type": "agent_session",
-        "harness_key": "codex",
-        "state_scope": "/state",
-        "session_key": "ambig-strong"
-      },
-      "relation": "linked_to_mux",
-      "selected_link_id": "pin:local_pin:ambig-local",
-      "competing_link_ids": [
-        "ambig-strong"
-      ]
-    },
-    {
-      "kind": "conflict",
-      "source": {
-        "type": "agent_session",
-        "harness_key": "codex",
-        "state_scope": "/state",
-        "session_key": "bound-alpha"
-      },
-      "relation": "linked_to_mux",
-      "selected_link_id": "pin:local_pin:bound-local",
-      "competing_link_ids": [
-        "bound-discovered"
-      ]
-    },
-    {
-      "kind": "conflict",
-      "source": {
-        "type": "agent_session",
-        "harness_key": "codex",
-        "state_scope": "/state",
-        "session_key": "drift-alpha"
-      },
-      "relation": "linked_to_mux",
-      "selected_link_id": "pin:local_pin:drift-local",
-      "competing_link_ids": [
-        "drift-discovered"
-      ]
-    },
-    {
-      "kind": "conflict",
-      "source": {
-        "type": "agent_session",
-        "harness_key": "codex",
-        "state_scope": "/state",
-        "session_key": "socket-alpha"
-      },
-      "relation": "linked_to_mux",
-      "selected_link_id": "pin:local_pin:socket-local",
-      "competing_link_ids": [
-        "socket-discovered"
-      ]
     },
     {
       "kind": "pin_unbound",

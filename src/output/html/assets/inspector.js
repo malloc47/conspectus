@@ -150,9 +150,28 @@
     // evidence / fields)
     this.host.appendChild(this._edgeMechanismSection(edge));
 
-    // Competing candidates (only for resolver winners)
+    // Competing and corroborating candidates (only for resolver winners)
     if (edge.is_resolved && edge.competing_link_ids && edge.competing_link_ids.length > 0) {
-      this.host.appendChild(this._edgeCompetingSection(edge));
+      this.host.appendChild(
+        this._edgeCandidateSection(
+          edge.competing_link_ids,
+          "Lost candidates",
+          "The resolver chose this edge over the candidates below, which name a different target. Compare provenance and adapter fields side by side."
+        )
+      );
+    }
+    if (
+      edge.is_resolved &&
+      edge.corroborating_link_ids &&
+      edge.corroborating_link_ids.length > 0
+    ) {
+      this.host.appendChild(
+        this._edgeCandidateSection(
+          edge.corroborating_link_ids,
+          "Corroborating candidates",
+          "These candidates name the same target as this edge. The resolver ranked this edge first; the others agree with it."
+        )
+      );
     }
   };
 
@@ -254,23 +273,15 @@
     return section;
   };
 
-  Inspector.prototype._edgeCompetingSection = function (edge) {
+  Inspector.prototype._edgeCandidateSection = function (ids, title, noteText) {
     var section = el("div", "ins-edges");
     section.appendChild(
-      elText(
-        "div",
-        "ins-section-title",
-        "Lost candidates (" + edge.competing_link_ids.length + ")"
-      )
+      elText("div", "ins-section-title", title + " (" + ids.length + ")")
     );
-    var note = el(
-      "div",
-      "ins-section-note",
-      "The resolver chose this edge over the candidates below. Compare provenance and adapter fields side by side."
-    );
+    var note = el("div", "ins-section-note", noteText);
     section.appendChild(note);
     var self = this;
-    edge.competing_link_ids.forEach(function (lostId) {
+    ids.forEach(function (lostId) {
       var lost = self.edgesById[lostId];
       var row = el("div", "ins-edge-row ins-edge-clickable");
       var col = el("div", "ins-edge-col");

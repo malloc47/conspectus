@@ -170,7 +170,7 @@ fn multi_target_relations_resolve_each_distinct_target() {
 }
 
 #[test]
-fn multi_target_relations_still_compete_for_same_target() {
+fn multi_target_relations_corroborate_for_same_target() {
     let session = session("a");
     let lower = GraphLink::new(
         "lower",
@@ -198,10 +198,16 @@ fn multi_target_relations_still_compete_for_same_target() {
         output.resolved_relationships[0].selected_link_id.as_deref(),
         Some("higher")
     );
+    assert!(
+        output.resolved_relationships[0]
+            .competing_link_ids
+            .is_empty()
+    );
     assert_eq!(
-        output.resolved_relationships[0].competing_link_ids,
+        output.resolved_relationships[0].corroborating_link_ids,
         vec!["lower".to_string()]
     );
+    assert!(output.diagnostics.is_empty());
 }
 
 fn linked_to_mux_link(
@@ -1102,35 +1108,29 @@ fn branch_pr_resolver_picks_open_non_draft_over_merged() {
 fn branch_pr_resolver_demotes_draft_among_open_candidates() {
     let draft = branch_pr_link(
         "draft",
-        forge_pr(1),
         branch_node("refs/heads/feature"),
+        forge_pr(1),
         Provenance::StrongDiscovered,
         "open",
         true,
         Some(9_999),
     );
-    let mut ready = branch_pr_link(
+    let ready = branch_pr_link(
         "ready",
-        forge_pr(1),
         branch_node("refs/heads/feature"),
+        forge_pr(2),
         Provenance::StrongDiscovered,
         "open",
         false,
         Some(1_000),
     );
-    // Force a different ID-stable target so both share the same source
-    // (a branch may technically only have one PR per number, but the
-    // resolver groups by source so we use the same source).
-    ready.target = LinkEndpoint::Node {
-        id: branch_node("refs/heads/feature"),
-    };
 
     let output = resolve_links(&[draft, ready]);
 
     let selected = output
         .resolved_relationships
         .iter()
-        .find(|r| r.source == forge_pr(1))
+        .find(|r| r.source == branch_node("refs/heads/feature"))
         .expect("relationship");
     assert_eq!(selected.selected_link_id.as_deref(), Some("ready"));
     assert_eq!(selected.competing_link_ids, vec!["draft".to_string()]);
@@ -1140,8 +1140,8 @@ fn branch_pr_resolver_demotes_draft_among_open_candidates() {
 fn branch_pr_resolver_prefers_most_recent_among_same_state() {
     let older = branch_pr_link(
         "older",
-        forge_pr(1),
         branch_node("refs/heads/feature"),
+        forge_pr(1),
         Provenance::StrongDiscovered,
         "open",
         false,
@@ -1149,8 +1149,8 @@ fn branch_pr_resolver_prefers_most_recent_among_same_state() {
     );
     let newer = branch_pr_link(
         "newer",
-        forge_pr(1),
         branch_node("refs/heads/feature"),
+        forge_pr(2),
         Provenance::StrongDiscovered,
         "open",
         false,
@@ -1168,8 +1168,8 @@ fn branch_pr_resolver_prefers_most_recent_among_same_state() {
 fn branch_pr_resolver_open_beats_merged_for_same_source() {
     let merged_recent = branch_pr_link(
         "merged-recent",
-        forge_pr(1),
         branch_node("refs/heads/feature"),
+        forge_pr(1),
         Provenance::StrongDiscovered,
         "merged",
         false,
@@ -1177,8 +1177,8 @@ fn branch_pr_resolver_open_beats_merged_for_same_source() {
     );
     let open_old = branch_pr_link(
         "open-old",
-        forge_pr(1),
         branch_node("refs/heads/feature"),
+        forge_pr(2),
         Provenance::StrongDiscovered,
         "open",
         false,
@@ -1259,8 +1259,8 @@ fn branch_pr_resolver_declared_overrides_state_and_recency() {
 fn branch_pr_resolver_emits_conflict_diagnostic_for_multiple_candidates() {
     let one = branch_pr_link(
         "one",
-        forge_pr(1),
         branch_node("refs/heads/feature"),
+        forge_pr(1),
         Provenance::StrongDiscovered,
         "open",
         false,
@@ -1268,8 +1268,8 @@ fn branch_pr_resolver_emits_conflict_diagnostic_for_multiple_candidates() {
     );
     let two = branch_pr_link(
         "two",
-        forge_pr(1),
         branch_node("refs/heads/feature"),
+        forge_pr(2),
         Provenance::StrongDiscovered,
         "open",
         false,
@@ -1414,6 +1414,161 @@ fn suppresses_cwd_link_when_multiple_sessions_resolve_to_same_mux() {
         );
     }
     assert_eq!(output.diagnostics.len(), 2);
+}
+
+#[test]
+fn same_target_runner_up_corroborates_without_conflict() {
+    let pin = linked_to_mux_link(
+        "pin",
+        session("a"),
+        mux("tmux:one"),
+        Provenance::LocalPin,
+        Confidence::High,
+        None,
+        None,
+    );
+    let hook = linked_to_mux_link(
+        "hook",
+        session("a"),
+        mux("tmux:one"),
+        Provenance::StrongDiscovered,
+        Confidence::High,
+        Some(1_000),
+        Some("hook_session_path_match"),
+    );
+
+    let output = resolve_links(&[hook, pin]);
+
+    assert_eq!(output.resolved_relationships.len(), 1);
+    let rel = &output.resolved_relationships[0];
+    assert_eq!(rel.selected_link_id.as_deref(), Some("pin"));
+    assert_eq!(rel.corroborating_link_ids, vec!["hook".to_string()]);
+    assert!(rel.competing_link_ids.is_empty());
+    assert!(output.diagnostics.is_empty());
+}
+
+#[test]
+fn mixed_runners_up_split_by_target_and_conflict_names_only_competitors() {
+    let pin = linked_to_mux_link(
+        "pin",
+        session("a"),
+        mux("tmux:one"),
+        Provenance::LocalPin,
+        Confidence::High,
+        None,
+        None,
+    );
+    let agreeing = linked_to_mux_link(
+        "agreeing",
+        session("a"),
+        mux("tmux:one"),
+        Provenance::StrongDiscovered,
+        Confidence::High,
+        Some(1_000),
+        Some("hook_session_path_match"),
+    );
+    let dissenting = linked_to_mux_link(
+        "dissenting",
+        session("a"),
+        mux("tmux:two"),
+        Provenance::StrongDiscovered,
+        Confidence::High,
+        Some(1_000),
+        Some("active_pane_command_session_match"),
+    );
+
+    let output = resolve_links(&[dissenting, agreeing, pin]);
+
+    let rel = &output.resolved_relationships[0];
+    assert_eq!(rel.selected_link_id.as_deref(), Some("pin"));
+    assert_eq!(rel.corroborating_link_ids, vec!["agreeing".to_string()]);
+    assert_eq!(rel.competing_link_ids, vec!["dissenting".to_string()]);
+    assert!(matches!(
+        output.diagnostics.as_slice(),
+        [Diagnostic::Conflict { competing_link_ids, .. }]
+            if competing_link_ids == &vec!["dissenting".to_string()]
+    ));
+}
+
+#[test]
+fn suppressed_slot_folds_corroborating_candidates_into_competing() {
+    let cwd_a = linked_to_mux_link(
+        "cwd-a",
+        session("a"),
+        mux("tmux:one"),
+        Provenance::StrongDiscovered,
+        Confidence::High,
+        Some(1_000),
+        Some("exact_cwd_match"),
+    );
+    let cwd_a_prefix = linked_to_mux_link(
+        "cwd-a-prefix",
+        session("a"),
+        mux("tmux:one"),
+        Provenance::StrongDiscovered,
+        Confidence::Medium,
+        Some(1_000),
+        Some("cwd_prefix_match"),
+    );
+    let cwd_b = linked_to_mux_link(
+        "cwd-b",
+        session("b"),
+        mux("tmux:one"),
+        Provenance::StrongDiscovered,
+        Confidence::High,
+        Some(2_000),
+        Some("exact_cwd_match"),
+    );
+
+    let output = resolve_links(&[cwd_a, cwd_a_prefix, cwd_b]);
+
+    let rel_a = output
+        .resolved_relationships
+        .iter()
+        .find(|rel| rel.source == session("a"))
+        .expect("session a slot");
+    assert!(rel_a.selected_link_id.is_none());
+    assert_eq!(
+        rel_a.competing_link_ids,
+        vec!["cwd-a".to_string(), "cwd-a-prefix".to_string()]
+    );
+    assert!(rel_a.corroborating_link_ids.is_empty());
+}
+
+#[test]
+fn explain_falls_back_to_corroborating_runner_up_for_decisive_axis() {
+    let pin = linked_to_mux_link(
+        "pin",
+        session("a"),
+        mux("tmux:one"),
+        Provenance::LocalPin,
+        Confidence::High,
+        None,
+        None,
+    );
+    let hook = linked_to_mux_link(
+        "hook",
+        session("a"),
+        mux("tmux:one"),
+        Provenance::StrongDiscovered,
+        Confidence::High,
+        Some(1_000),
+        Some("hook_session_path_match"),
+    );
+    let mut snapshot = GraphSnapshot {
+        candidate_links: vec![hook, pin],
+        ..GraphSnapshot::empty()
+    };
+    snapshot = resolve_snapshot(snapshot);
+    explain_resolved_relationships(&mut snapshot);
+
+    let explanation = snapshot.resolved_relationships[0]
+        .explanation
+        .as_ref()
+        .expect("explanation");
+    assert!(explanation.competing.is_empty());
+    assert_eq!(explanation.corroborating[0].link_id, "hook");
+    assert!(explanation.decisive_axis.is_some());
 }
 
 #[test]

@@ -294,6 +294,7 @@ pub struct ResolvedSummary {
     /// detail summary keeps the resolver's honest answer.
     pub selected_link_id: Option<String>,
     pub competing_link_ids: Vec<String>,
+    pub corroborating_link_ids: Vec<String>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -1464,6 +1465,7 @@ fn resolved_summaries(snapshot: &GraphSnapshot, id: &NodeId) -> Vec<ResolvedSumm
             target: rel.target,
             selected_link_id: rel.selected_link_id,
             competing_link_ids: rel.competing_link_ids,
+            corroborating_link_ids: rel.corroborating_link_ids,
         })
         .collect()
 }

@@ -17,7 +17,9 @@ use std::fmt::Write;
 use anyhow::Result;
 use serde::Serialize;
 
-use crate::model::{GraphLink, GraphNode, GraphSnapshot, LinkEndpoint, LinkState, NodeId};
+use crate::model::{
+    GraphLink, GraphNode, GraphSnapshot, LinkEndpoint, LinkState, NodeId, ResolvedRelationship,
+};
 use crate::output::dot::Inclusion;
 
 #[derive(Copy, Clone, Debug)]
@@ -175,12 +177,17 @@ struct PayloadEdge {
     /// active edges.
     #[serde(skip_serializing_if = "Option::is_none")]
     state_detail: Option<EdgeStateDetail>,
-    /// For resolver-preferred candidates only: the ids of every
-    /// other candidate the resolver evaluated for this resolution.
-    /// Sorted in candidate (deterministic) order. Empty when the
-    /// edge is unresolved or had no competitors.
+    /// For resolver-preferred candidates only: the ids of the
+    /// candidates the resolver ranked below this edge that name a
+    /// different target. Sorted in candidate (deterministic) order.
+    /// Empty when the edge is unresolved or had no competitors.
     #[serde(skip_serializing_if = "Vec::is_empty", default)]
     competing_link_ids: Vec<String>,
+    /// For resolver-preferred candidates only: the ids of the
+    /// candidates ranked below this edge that name the same target
+    /// (ADR 0107).
+    #[serde(skip_serializing_if = "Vec::is_empty", default)]
+    corroborating_link_ids: Vec<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -220,14 +227,14 @@ fn build_payload(snapshot: &GraphSnapshot, opts: HtmlOptions) -> Payload {
     // 2. Selected (resolver-preferred) link ids, with their
     //    competing-candidate context so the inspector can show
     //    winner vs. losers side by side.
-    let mut selected: std::collections::BTreeMap<&str, &[String]> =
+    let mut selected: std::collections::BTreeMap<&str, &ResolvedRelationship> =
         std::collections::BTreeMap::new();
     for r in &snapshot.resolved_relationships {
         // ADR 0077: skip no-winner slots — `selected_link_id` is
         // `None` when the resolver couldn't pick, and there's no
         // winner edge to anchor the competing list against.
         if let Some(id) = r.selected_link_id.as_deref() {
-            selected.insert(id, r.competing_link_ids.as_slice());
+            selected.insert(id, r);
         }
     }
 
@@ -291,13 +298,15 @@ fn build_payload(snapshot: &GraphSnapshot, opts: HtmlOptions) -> Payload {
             .then(a.id.cmp(&b.id))
     });
 
-    // 5. Annotate resolver-preferred edges with their competing
-    //    candidate ids so the inspector can show winner vs. losers.
+    // 5. Annotate resolver-preferred edges with their competing and
+    //    corroborating candidate ids so the inspector can show the
+    //    winner against losers and against agreeing evidence.
     for edge in &mut edges {
         if edge.is_resolved
-            && let Some(competing) = selected.get(edge.id.as_str())
+            && let Some(rel) = selected.get(edge.id.as_str())
         {
-            edge.competing_link_ids = competing.to_vec();
+            edge.competing_link_ids = rel.competing_link_ids.clone();
+            edge.corroborating_link_ids = rel.corroborating_link_ids.clone();
         }
     }
 
@@ -342,6 +351,7 @@ fn payload_edge(
         metadata: link_metadata(link),
         state_detail: link_state_detail(&link.state),
         competing_link_ids: Vec::new(), // filled later for resolver winners
+        corroborating_link_ids: Vec::new(),
     }
 }
 

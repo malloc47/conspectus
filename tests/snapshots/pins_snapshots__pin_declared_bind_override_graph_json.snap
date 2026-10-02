@@ -230,7 +230,7 @@ expression: rendered
       },
       "relation": "linked_to_mux",
       "selected_link_id": "pin-bind-override",
-      "competing_link_ids": [
+      "corroborating_link_ids": [
         "pin:local_pin:override-local"
       ]
     },
@@ -276,20 +276,6 @@ expression: rendered
     }
   ],
   "diagnostics": [
-    {
-      "kind": "conflict",
-      "source": {
-        "type": "agent_session",
-        "harness_key": "codex",
-        "state_scope": "/state",
-        "session_key": "chosen-by-declared"
-      },
-      "relation": "linked_to_mux",
-      "selected_link_id": "pin-bind-override",
-      "competing_link_ids": [
-        "pin:local_pin:override-local"
-      ]
-    },
     {
       "kind": "pin_ambiguous",
       "pin_id": "override-local",

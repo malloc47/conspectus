@@ -338,6 +338,7 @@ fn evict_provider_clears_resolved_relationships_to_force_re_resolve() {
         relation: RelationKind::CreatedCheckout,
         selected_link_id: Some("git-link".to_string()),
         competing_link_ids: Vec::new(),
+        corroborating_link_ids: Vec::new(),
         explanation: None,
     });
 
@@ -495,6 +496,7 @@ fn populated_snapshot_for_archive_tests() -> GraphSnapshot {
         relation: RelationKind::LinkedToMux,
         selected_link_id: Some("link-1".to_string()),
         competing_link_ids: vec!["link-2".to_string()],
+        corroborating_link_ids: Vec::new(),
         explanation: None,
     });
 

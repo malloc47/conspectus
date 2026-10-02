@@ -671,6 +671,13 @@ fn write_resolved(out: &mut String, snapshot: &GraphSnapshot, id: &NodeId, color
                 rel.competing_link_ids.join(", ")
             );
         }
+        if !rel.corroborating_link_ids.is_empty() {
+            let _ = writeln!(
+                out,
+                "      corroborating: {}",
+                rel.corroborating_link_ids.join(", ")
+            );
+        }
         if let Some(explanation) = &rel.explanation {
             if let Some(axis) = &explanation.decisive_axis {
                 let _ = writeln!(out, "      decisive axis: {axis}");
@@ -680,6 +687,9 @@ fn write_resolved(out: &mut String, snapshot: &GraphSnapshot, id: &NodeId, color
             }
             for candidate in &explanation.competing {
                 write_candidate_score(out, "competing score", candidate);
+            }
+            for candidate in &explanation.corroborating {
+                write_candidate_score(out, "corroborating score", candidate);
             }
         }
     }

@@ -371,6 +371,7 @@ fn render_node_show_includes_outgoing_link_and_resolved_relationship() {
             relation: RelationKind::LinkedToMux,
             selected_link_id: Some("link-1".to_string()),
             competing_link_ids: vec![],
+            corroborating_link_ids: Vec::new(),
             explanation: None,
         }],
         ..GraphSnapshot::empty()
@@ -389,4 +390,38 @@ fn render_node_show_includes_outgoing_link_and_resolved_relationship() {
         "resolved relationship should use external labels:\n{rendered}",
     );
     assert!(rendered.contains("selected=link-1"));
+}
+
+#[test]
+fn render_node_show_lists_corroborating_links_apart_from_competing() {
+    let agent = agent_node("codex", "/state", "alpha");
+    let mux = mux_node("tmux", "editor");
+    let agent_id = agent.id();
+    let mux_id = mux.id();
+    let snapshot = GraphSnapshot {
+        nodes: vec![agent, mux],
+        candidate_links: vec![
+            linked_to_mux("pin", agent_id.clone(), mux_id.clone()),
+            linked_to_mux("hook", agent_id.clone(), mux_id.clone()),
+        ],
+        resolved_relationships: vec![crate::model::ResolvedRelationship {
+            source: agent_id.clone(),
+            target: mux_id,
+            relation: RelationKind::LinkedToMux,
+            selected_link_id: Some("pin".to_string()),
+            competing_link_ids: Vec::new(),
+            corroborating_link_ids: vec!["hook".to_string()],
+            explanation: None,
+        }],
+        ..GraphSnapshot::empty()
+    };
+    let rendered = render_node_show(&snapshot, &agent_id, false);
+    assert!(
+        rendered.contains("      corroborating: hook"),
+        "corroborating ids should get their own line:\n{rendered}",
+    );
+    assert!(
+        !rendered.contains("competing:"),
+        "agreeing evidence is not competition:\n{rendered}",
+    );
 }

@@ -1,6 +1,5 @@
 ---
 source: tests/html_snapshots.rs
-assertion_line: 90
 expression: redacted
 ---
 <!doctype html>
@@ -65,7 +64,7 @@ expression: redacted
 [redacted 18394 bytes]
 </script>
 <script>
-[redacted 15573 bytes]
+[redacted 16058 bytes]
 </script>
 <script>
 [redacted 8119 bytes]

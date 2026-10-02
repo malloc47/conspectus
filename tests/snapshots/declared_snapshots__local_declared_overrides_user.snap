@@ -141,7 +141,7 @@ expression: snapshot
       },
       "relation": "linked_to_mux",
       "selected_link_id": "declared:local:/fixture/project/.conspectus.toml:local-link",
-      "competing_link_ids": [
+      "corroborating_link_ids": [
         "declared:global:/fixture/.config/conspectus/config.toml:global-link"
       ]
     },
@@ -160,22 +160,7 @@ expression: snapshot
       "selected_link_id": "cross_link:agent_session:codex:/fixture/.state/codex:session-x:linked_to_mux:mux_session:tmux:editor:exact_cwd_match"
     }
   ],
-  "diagnostics": [
-    {
-      "kind": "conflict",
-      "source": {
-        "type": "agent_session",
-        "harness_key": "codex",
-        "state_scope": "/state",
-        "session_key": "session-x"
-      },
-      "relation": "linked_to_mux",
-      "selected_link_id": "declared:local:/fixture/project/.conspectus.toml:local-link",
-      "competing_link_ids": [
-        "declared:global:/fixture/.config/conspectus/config.toml:global-link"
-      ]
-    }
-  ],
+  "diagnostics": [],
   "node_provenance": [
     {
       "node_id": {

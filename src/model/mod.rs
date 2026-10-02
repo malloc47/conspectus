@@ -1727,15 +1727,22 @@ pub struct ResolvedRelationship {
     /// as "the answer." See ADR 0077.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub selected_link_id: Option<String>,
-    /// Candidates that competed for this slot. When
-    /// `selected_link_id` is `Some`, this is the rejected losers.
-    /// When `selected_link_id` is `None`, this is *every*
-    /// candidate that was considered — including what would have
-    /// been the arbitrary tiebreak winner — so the Other-zone
-    /// renderer and the ambiguity signal can both walk
-    /// the full candidate set without a parallel inference path.
+    /// Candidates that offered a different answer for this slot.
+    /// When `selected_link_id` is `Some`, these are the losers whose
+    /// target differs from the winner's. When `selected_link_id` is
+    /// `None`, this is *every* candidate that was considered —
+    /// including what would have been the arbitrary tiebreak winner
+    /// — so the Other-zone renderer and the ambiguity signal can both
+    /// walk the full candidate set without a parallel inference path.
+    /// See ADR 0077 and ADR 0107.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub competing_link_ids: Vec<String>,
+    /// Non-winning candidates that name the winner's target: other
+    /// producers agreeing with the answer. Never a conflict. Empty
+    /// when `selected_link_id` is `None`, since there is no answer to
+    /// corroborate. See ADR 0107.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub corroborating_link_ids: Vec<String>,
     /// Optional resolver score breakdown. Populated by
     /// `resolve::explain_resolved_relationships` for explainer
     /// surfaces; omitted from default graph JSON so the baseline
@@ -1762,6 +1769,8 @@ pub struct ResolutionExplanation {
     pub selected: Option<CandidateScore>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub competing: Vec<CandidateScore>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub corroborating: Vec<CandidateScore>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub decisive_axis: Option<String>,
 }
