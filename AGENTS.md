@@ -80,8 +80,12 @@ standard checks.
   operator for a screenshot. The flag renders one frame to stdout with ANSI
   styling preserved; pair it with `--snapshot-pane left|right|header|status` to
   target a region and `--snapshot-keys "..."` (vim-style) to drive the UI into
-  a non-default state before the snapshot. Requires `--features snapshot`:
-  `just check` and CI enable it through `--all-features`; for manual runs use
+  a non-default state before the snapshot. Keys are routed by pane focus as
+  in the live TUI, so `<Tab>` moves `j`/`k`/`<Enter>`/`<Backspace>` to the
+  right-pane explorer (`--snapshot-pane right --snapshot-keys "j<Tab>jjjjj"`
+  walks the cursor past the Node fields onto a Related row and shows its
+  Preview). Requires `--features snapshot`: `just check` and CI enable it
+  through `--all-features`; for manual runs use
   `cargo run --features snapshot -- tui --snapshot ...`.
 
 ## Git And Review Conventions

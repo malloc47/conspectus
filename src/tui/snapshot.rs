@@ -35,7 +35,7 @@ use anyhow::{Context, Result, anyhow};
 use ratatui::Terminal;
 use ratatui::backend::TestBackend;
 use ratatui::buffer::Buffer;
-use ratatui::crossterm::event::{Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
+use ratatui::crossterm::event::{Event, KeyCode, KeyEvent, KeyModifiers};
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
 use ratatui::style::{Color, Modifier, Style};
 
@@ -45,7 +45,6 @@ use crate::tui::app::App;
 use crate::tui::runtime::{
     self, Action, cycle_view, dispatch, handle_controls_overlay_key, handle_help_overlay_key,
     handle_messages_overlay_key, handle_search_overlay_key, refresh, refresh_from_snapshot,
-    translate,
 };
 use crate::tui::{RunConfig, ui};
 
@@ -119,14 +118,7 @@ pub fn run(config: RunConfig, snap: SnapshotConfig) -> Result<()> {
     }
 
     let keys = parse_key_script(&snap.keys)?;
-    let viewport_height = snap.height.saturating_sub(2);
-    for key in keys {
-        let event = Event::Key(key);
-        let Some(action) = dispatch_event(&app, event, viewport_height) else {
-            continue;
-        };
-        apply_action(&mut app, &config, action);
-    }
+    drive_keys(&mut app, &config, keys, snap.height.saturating_sub(2));
 
     let backend = TestBackend::new(snap.width, snap.height);
     let mut terminal = Terminal::new(backend)?;
@@ -170,45 +162,14 @@ fn write_fixture(path: &std::path::Path, snapshot: &GraphSnapshot) -> Result<()>
     Ok(())
 }
 
-/// Translate a single synthesized `Event` exactly like the
-/// interactive event loop would — overlay-aware routing on the way
-/// in, then `runtime::translate` for the default case.
-fn dispatch_event(app: &App, event: Event, viewport_height: u16) -> Option<Action> {
-    macro_rules! overlay_key {
-        ($variant:ident) => {{
-            if let Event::Key(key) = event
-                && key.kind == KeyEventKind::Press
-            {
-                return Some(Action::$variant(key));
-            }
-            return None;
-        }};
+/// Dispatch the key prelude one key at a time, resolving each through
+/// the same overlay / keymap / focus pipeline as the interactive loop.
+fn drive_keys(app: &mut App, config: &RunConfig, keys: Vec<KeyEvent>, viewport_height: u16) {
+    for key in keys {
+        if let Some(action) = runtime::action_for_event(app, Event::Key(key), viewport_height) {
+            apply_action(app, config, action);
+        }
     }
-    if app.viewer_modal().is_some() {
-        overlay_key!(ViewerOverlayKey);
-    }
-    if app.value_modal().is_some() {
-        overlay_key!(ValueModalKey);
-    }
-    if app.messages_overlay().is_some() {
-        overlay_key!(MessagesOverlayKey);
-    }
-    if app.help_overlay().is_some() {
-        overlay_key!(HelpOverlayKey);
-    }
-    if app.search_overlay().is_some() {
-        overlay_key!(SearchOverlayKey);
-    }
-    if app.controls_overlay().is_some() {
-        overlay_key!(ControlsOverlayKey);
-    }
-    if app.pins_overlay().is_some() {
-        overlay_key!(PinsOverlayKey);
-    }
-    if app.rename_overlay().is_some() {
-        overlay_key!(RenameOverlayKey);
-    }
-    translate(event, viewport_height)
 }
 
 /// Apply an action against the snapshot-safe action subset. Actions
@@ -248,6 +209,9 @@ fn apply_action(app: &mut App, config: &RunConfig, action: Action) {
         Action::SearchOverlayKey(key) => handle_search_overlay_key(app, key),
         Action::HelpOverlayKey(key) => handle_help_overlay_key(app, key),
         Action::Refresh => runtime::refresh(app, config),
+        // The clipboard write is skipped: OSC 52 would land in the
+        // frame output. The toast still renders.
+        Action::ExplorerEnter => runtime::explorer_enter(app, |_| {}),
         other => {
             eprintln!(
                 "conspectus: snapshot mode skipped unsupported action: {}",

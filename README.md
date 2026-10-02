@@ -515,6 +515,7 @@ enable through `--all-features`:
 
 ```sh
 cargo run --features snapshot -- tui --snapshot --snapshot-pane left --snapshot-keys 'jj<Enter>'
+cargo run --features snapshot -- tui --snapshot --snapshot-pane right --snapshot-keys 'j<Tab>jjjjj'
 cargo run --features snapshot -- tui --snapshot --snapshot-fixture tests/fixtures/showcase.json
 cargo run --features snapshot -- tui --fixture tests/fixtures/showcase.json   # interactive; `r` reloads
 ```

@@ -136,3 +136,90 @@ fn pane_rect_split_direction_follows_configured_threshold() {
     assert_eq!(side_by_side.y, 1, "lowered threshold keeps side-by-side");
     assert!(side_by_side.x > 0, "right pane sits beside the left pane");
 }
+
+/// App loaded with one codex session attached to one tmux mux, on
+/// the default sessions view.
+fn session_mux_app() -> (App, RunConfig) {
+    use crate::model::{
+        AgentSessionId, AgentSessionNode, GraphLink, GraphNode, LinkEndpoint, MuxSessionId,
+        MuxSessionNode, NodeId, Provenance, RelationKind,
+    };
+    let session = AgentSessionId::new("codex", "/state", "abc");
+    let mux = MuxSessionId::new("editor");
+    let mut snapshot = GraphSnapshot::empty();
+    snapshot
+        .nodes
+        .push(GraphNode::AgentSession(AgentSessionNode::new(
+            session.clone(),
+            "codex".to_string(),
+        )));
+    snapshot
+        .nodes
+        .push(GraphNode::MuxSession(MuxSessionNode::new(
+            mux.clone(),
+            "tmux".to_string(),
+            "editor".to_string(),
+        )));
+    snapshot.candidate_links.push(GraphLink::new(
+        "session-mux",
+        NodeId::AgentSession(session),
+        LinkEndpoint::Node {
+            id: NodeId::MuxSession(mux),
+        },
+        RelationKind::LinkedToMux,
+        Provenance::StrongDiscovered,
+    ));
+    let config = RunConfig::defaults();
+    let mut app = App::new(config.clone());
+    refresh_from_snapshot(&mut app, &config, snapshot).expect("load snapshot");
+    (app, config)
+}
+
+fn drive(app: &mut App, config: &RunConfig, script: &str) {
+    drive_keys(app, config, parse_key_script(script).expect("parse"), 30);
+}
+
+#[test]
+fn key_prelude_routes_navigation_to_the_focused_right_pane() {
+    let (mut app, config) = session_mux_app();
+    drive(&mut app, &config, "j");
+    let selection = app.selection().cloned();
+    assert!(selection.is_some(), "left tree should have a selection");
+    let cursor_before = app.explorer().expect("explorer").cursor;
+
+    drive(&mut app, &config, "<Tab>jj");
+
+    assert_eq!(app.focus(), crate::tui::app::Focus::Right);
+    assert_eq!(
+        app.selection().cloned(),
+        selection,
+        "j after <Tab> must not move the left tree"
+    );
+    assert_eq!(app.explorer().expect("explorer").cursor, cursor_before + 2);
+}
+
+#[test]
+fn key_prelude_enter_on_a_related_row_drills_and_backspace_returns() {
+    use crate::tui::explorer::ExplorerRow;
+    let (mut app, config) = session_mux_app();
+    drive(&mut app, &config, "j<Tab>");
+    let link_row = app
+        .explorer()
+        .expect("explorer")
+        .rows()
+        .iter()
+        .position(|row| matches!(row, ExplorerRow::ValidatedLink { .. }))
+        .expect("related row");
+
+    drive(&mut app, &config, &"j".repeat(link_row));
+    drive(&mut app, &config, "<Enter>");
+    let explorer = app.explorer().expect("explorer");
+    assert_eq!(explorer.breadcrumb.len(), 1, "Enter should drill one hop");
+    assert!(matches!(
+        explorer.view.focused,
+        crate::model::NodeId::MuxSession(_)
+    ));
+
+    drive(&mut app, &config, "<Backspace>");
+    assert!(app.explorer().expect("explorer").breadcrumb.is_empty());
+}

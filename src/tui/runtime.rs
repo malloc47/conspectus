@@ -125,9 +125,7 @@ fn run_loop(
             let event = event::read()?;
             let viewport = terminal.size()?.height.saturating_sub(2);
             let prev_mux_target = current_mux_target(&app);
-            let action = overlay_key_from_event(&app, &event).or_else(|| {
-                translate(event, viewport).and_then(|a| remap_for_focus(a, app.focus()))
-            });
+            let action = action_for_event(&app, event, viewport);
             mode.dispatch(terminal, &mut app, &config, action)?;
             refresh_mux_preview_if_needed(&mut app, &config, mode.tmux(), prev_mux_target);
         }
@@ -569,6 +567,17 @@ fn draw_frame(app: &mut App, terminal: &mut DefaultTerminal) -> Result<()> {
 /// KeyEventKind::Press events are forwarded — the
 /// modal stack ignores repeat/release + non-key events like the
 /// individual overlay handlers already did.
+/// Resolve a terminal event to an action the way every key path
+/// must: an open overlay owns the key, otherwise the keymap
+/// translates it and the focus pass routes navigation keys to the
+/// focused pane. The interactive loop and the `--snapshot-keys`
+/// driver both go through here so they can't disagree about what a
+/// key does.
+pub(super) fn action_for_event(app: &App, event: Event, viewport_height: u16) -> Option<Action> {
+    overlay_key_from_event(app, &event)
+        .or_else(|| translate(event, viewport_height).and_then(|a| remap_for_focus(a, app.focus())))
+}
+
 fn overlay_key_from_event(app: &App, event: &Event) -> Option<Action> {
     let key = match event {
         Event::Key(k) if k.kind == KeyEventKind::Press => *k,
@@ -1641,8 +1650,18 @@ fn default_action(
 /// dispatch the normal `Msg::ExplorerActivate` so group expansion and
 /// link drill still work.
 fn explorer_enter_action(app: &mut App) {
+    explorer_enter(app, |value| {
+        let _ = crate::tui::clipboard::copy_to_clipboard(value);
+    });
+}
+
+/// [`explorer_enter_action`] with the clipboard write supplied by the
+/// caller, so the snapshot driver can run the same branch without
+/// emitting OSC 52 into its frame output.
+pub(super) fn explorer_enter(app: &mut App, write_clipboard: impl FnOnce(&str)) {
     if let Some((label, value)) = app.explorer_copy_target() {
-        copy_and_toast(app, format!("copied: {label}"), value);
+        write_clipboard(&value);
+        app.post_toast(format!("copied: {label}"));
         return;
     }
     app.update(Msg::ExplorerActivate);

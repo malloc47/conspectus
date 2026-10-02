@@ -160,6 +160,9 @@ conspectus tui --snapshot --snapshot-pane left --snapshot-width 160 --snapshot-h
 # literals + `<Name>` for non-printables, `<C-x>` / `<A-x>` modifiers).
 conspectus tui --snapshot --snapshot-keys '2'           # switch to mux view
 conspectus tui --snapshot --snapshot-keys 'jjj<Enter>'  # navigate, expand
+# Keys follow pane focus as in the live TUI: after `<Tab>`, `j`/`k`,
+# `<Enter>`, and `<Backspace>` drive the right-pane explorer.
+conspectus tui --snapshot --snapshot-pane right --snapshot-keys 'j<Tab>jjjjj<Enter>'
 
 # Capture the live world to a fixture JSON for later iteration
 conspectus tui --snapshot --snapshot-export-fixture world.json
