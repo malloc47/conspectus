@@ -348,7 +348,8 @@ pub struct RelationshipGroup {
     /// something that isn't a node kind (`path`), so it stays a
     /// string.
     pub neighbor_kind: String,
-    /// Resolver-preferred candidates sort first; the rest follow in
+    /// One row per neighbor (ADR 0107). Resolver-picked neighbors
+    /// sort first; the rest follow their strongest link's
     /// `(provenance, confidence, link_id)` order matching
     /// `crate::tui::detail::preferred_link`.
     pub links: Vec<RelationshipLink>,
@@ -378,7 +379,11 @@ impl RelationshipGroup {
     }
 }
 
-/// One concrete (non-unresolved) candidate link.
+/// One neighbor row, backed by every active candidate link that
+/// names that neighbor for this `(direction, relation)` (ADR 0107).
+/// The scalar link fields describe the representative link: the
+/// resolver winner when there is one, otherwise the strongest
+/// candidate.
 #[derive(Clone, Debug, PartialEq)]
 pub struct RelationshipLink {
     pub link_id: String,
@@ -393,12 +398,28 @@ pub struct RelationshipLink {
     pub provenance: Provenance,
     pub confidence: Confidence,
     pub state: LinkStateLabel,
-    /// `true` when this link is the resolver's chosen winner for the
-    /// corresponding `ResolvedRelationship`.
+    /// `true` when the representative link is the resolver's chosen
+    /// winner for the corresponding `ResolvedRelationship`.
     pub resolved_winner: bool,
     pub edge_state: EdgeStateLabel,
     /// Top-5 Core fields of the neighbor, used by the Preview zone.
     pub preview: Vec<CoreField>,
+    /// Every link backing this row, representative first. More than
+    /// one entry means independent producers agree on the neighbor.
+    pub evidence: Vec<LinkEvidence>,
+}
+
+/// One candidate link behind a [`RelationshipLink`] row, as listed
+/// in the Preview zone's `evidence` block.
+#[derive(Clone, Debug, PartialEq)]
+pub struct LinkEvidence {
+    pub link_id: String,
+    pub provenance: Provenance,
+    pub confidence: Confidence,
+    /// Producing adapter (`hook_sidecar`, `cross_link`, `pin`, …).
+    pub adapter: String,
+    /// Adapter-specific evidence kind, when the producer stamped one.
+    pub evidence: Option<String>,
 }
 
 /// A piece of unresolved-endpoint evidence rendered as a placeholder
@@ -449,9 +470,10 @@ impl LinkStateLabel {
 
 /// Stable identity for a flat selectable row in the explorer (ADR
 /// 0074 §6). Used by the reducer to preserve cursor position across
-/// rebuilds (snapshot refresh, drilldown). The two-zone layout
-/// (validated / Other) collapses direction out of the key — the
-/// row's verb carries it.
+/// rebuilds (snapshot refresh, drilldown). Link rows are keyed by
+/// neighbor rather than by link id (ADR 0107) so a change of
+/// representative link — a pin authored, a hook record going stale —
+/// keeps the cursor on the same row.
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub enum ExplorerRowKey {
     /// Title bar acts as the "go back to the inherent identity"
@@ -460,15 +482,24 @@ pub enum ExplorerRowKey {
     /// One of the [`NodeView::core_fields`] rows (by label, so the
     /// key stays stable across renames).
     NodeField { label: String },
-    /// A resolver-winner row in the validated zone.
-    ValidatedLink { link_id: String },
+    /// A resolver-picked neighbor row in the validated zone.
+    ValidatedLink(NeighborRowKey),
     /// The collapsible `Other` header row.
     OtherHeader,
-    /// A non-winner link row inside the `Other` zone
+    /// A neighbor row inside the `Other` zone
     /// (`EdgeStateLabel::AltOf` or `Conflict`).
-    OtherLink { link_id: String },
+    OtherLink(NeighborRowKey),
     /// An unresolved-evidence placeholder inside the `Other` zone.
     OtherUnresolved { link_id: String },
+}
+
+/// Identity of one neighbor row: which neighbor, reached by which
+/// relation in which direction.
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub struct NeighborRowKey {
+    pub direction: Direction,
+    pub relation: RelationKind,
+    pub neighbor: NodeId,
 }
 
 /// Flat selectable row in the explorer. The reducer builds this
@@ -518,30 +549,18 @@ impl ExplorerRow {
             Self::ValidatedLink {
                 group_index,
                 link_index,
-            } => {
-                let link_id = view
-                    .relationships
-                    .groups
-                    .get(*group_index)
-                    .and_then(|g| g.links.get(*link_index))
-                    .map(|l| l.link_id.clone())
-                    .unwrap_or_default();
-                ExplorerRowKey::ValidatedLink { link_id }
-            }
+            } => match view.neighbor_row_key(*group_index, *link_index) {
+                Some(key) => ExplorerRowKey::ValidatedLink(key),
+                None => ExplorerRowKey::Title,
+            },
             Self::OtherHeader { .. } => ExplorerRowKey::OtherHeader,
             Self::OtherLink {
                 group_index,
                 link_index,
-            } => {
-                let link_id = view
-                    .relationships
-                    .groups
-                    .get(*group_index)
-                    .and_then(|g| g.links.get(*link_index))
-                    .map(|l| l.link_id.clone())
-                    .unwrap_or_default();
-                ExplorerRowKey::OtherLink { link_id }
-            }
+            } => match view.neighbor_row_key(*group_index, *link_index) {
+                Some(key) => ExplorerRowKey::OtherLink(key),
+                None => ExplorerRowKey::Title,
+            },
             Self::OtherUnresolved {
                 group_index,
                 unresolved_index,
@@ -640,6 +659,18 @@ impl NodeView {
             }
         }
         rows
+    }
+
+    /// Neighbor identity for the link row at
+    /// `(group_index, link_index)`.
+    fn neighbor_row_key(&self, group_index: usize, link_index: usize) -> Option<NeighborRowKey> {
+        let group = self.relationships.groups.get(group_index)?;
+        let link = group.links.get(link_index)?;
+        Some(NeighborRowKey {
+            direction: group.direction,
+            relation: group.relation.clone(),
+            neighbor: link.neighbor_id.clone(),
+        })
     }
 
     /// Whether the focused node has any rows that belong in the
@@ -782,6 +813,7 @@ impl NodeView {
                     confidence: link.confidence,
                     state: link.state,
                     edge_state: &link.edge_state,
+                    evidence: &link.evidence,
                 })
             }
             ExplorerRow::OtherUnresolved {
@@ -963,6 +995,7 @@ pub enum RowPreview<'a> {
         confidence: Confidence,
         state: LinkStateLabel,
         edge_state: &'a EdgeStateLabel,
+        evidence: &'a [LinkEvidence],
     },
     Unresolved {
         node_type: &'a str,
@@ -1802,13 +1835,26 @@ fn finalize_group(
     });
     unresolved.sort_by(|(left, _), (right, _)| left.id.cmp(&right.id));
 
-    let link_rows = links
+    // Fold candidates into one row per neighbor (ADR 0107). `links`
+    // is already ranked, so the first link seen for a neighbor is its
+    // representative: the winner when the resolver picked that
+    // neighbor, otherwise its strongest candidate.
+    let mut by_neighbor: Vec<(NodeId, Vec<GraphLink>)> = Vec::new();
+    for (link, neighbor_id) in links {
+        match by_neighbor.iter_mut().find(|(id, _)| *id == neighbor_id) {
+            Some((_, backing)) => backing.push(link),
+            None => by_neighbor.push((neighbor_id, vec![link])),
+        }
+    }
+
+    let link_rows = by_neighbor
         .into_iter()
-        .map(|(link, neighbor_id)| {
+        .map(|(neighbor_id, backing)| {
+            let link = &backing[0];
             let resolved_winner = winner_ids.contains(&link.id);
             let edge_state = if resolved_winner {
                 EdgeStateLabel::Resolves
-            } else if competing_ids.contains(&link.id) {
+            } else if backing.iter().any(|l| competing_ids.contains(&l.id)) {
                 EdgeStateLabel::Conflict
             } else {
                 EdgeStateLabel::AltOf(relation.clone())
@@ -1821,6 +1867,16 @@ fn finalize_group(
             let preview = neighbor_node
                 .map(|n| core_fields(snapshot, n, home, now))
                 .unwrap_or_default();
+            let evidence = backing
+                .iter()
+                .map(|l| LinkEvidence {
+                    link_id: l.id.clone(),
+                    provenance: l.provenance,
+                    confidence: l.confidence,
+                    adapter: l.source_metadata.adapter.clone(),
+                    evidence: l.source_metadata.evidence.clone(),
+                })
+                .collect();
             RelationshipLink {
                 link_id: link.id.clone(),
                 neighbor_short_id: node_short_id(&neighbor_id),
@@ -1837,6 +1893,7 @@ fn finalize_group(
                 resolved_winner,
                 edge_state,
                 preview,
+                evidence,
             }
         })
         .collect::<Vec<_>>();

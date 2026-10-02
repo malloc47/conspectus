@@ -58,6 +58,15 @@ fn seeded_app() -> App {
 }
 
 fn muxed_app(native_id: &str, capture: Option<&str>) -> App {
+    muxed_app_with_links(native_id, capture, Vec::new())
+}
+
+/// `muxed_app` plus extra candidate links, added before resolution.
+fn muxed_app_with_links(
+    native_id: &str,
+    capture: Option<&str>,
+    extra_links: Vec<crate::model::GraphLink>,
+) -> App {
     use crate::model::{
         Confidence, GraphLink, LinkEndpoint, LinkState, MuxSessionId, MuxSessionNode, NodeId,
         Provenance, RelationKind,
@@ -105,6 +114,7 @@ fn muxed_app(native_id: &str, capture: Option<&str>) -> App {
         source_metadata: crate::model::SourceMetadata::default(),
         state: LinkState::Active,
     });
+    snapshot.candidate_links.extend(extra_links);
     let snapshot = resolve_snapshot(snapshot);
     let tree = build_sessions_tree(SessionsBuildInputs {
         snapshot: &snapshot,
@@ -990,6 +1000,7 @@ fn other_link_line_dispatches_per_edge_state() {
         resolved_winner: false,
         edge_state,
         preview: Vec::<CoreField>::new(),
+        evidence: Vec::new(),
     };
 
     // Conflict: prefix `⚠`, label color = edge_conflict, BOLD.
@@ -1081,6 +1092,7 @@ fn validated_link_line_drops_the_legacy_winner_star() {
         resolved_winner: true,
         edge_state: EdgeStateLabel::Resolves,
         preview: Vec::<CoreField>::new(),
+        evidence: Vec::new(),
     };
     let line = render_validated_link_line(&group, &link, false, &theme, true, 200);
     let text: String = line
@@ -1127,6 +1139,7 @@ fn related_row_truncates_long_labels_instead_of_wrapping_them_away() {
         resolved_winner: true,
         edge_state: EdgeStateLabel::Resolves,
         preview: Vec::<CoreField>::new(),
+        evidence: Vec::new(),
     };
     let width = 56;
     let line = render_validated_link_line(&group, &link, false, &theme, false, width);
@@ -1230,6 +1243,73 @@ fn detail_pane_shows_linked_to_mux_row_and_drills_into_mux() {
     assert!(
         drilled.contains("depth 1"),
         "breadcrumb title should carry the depth marker: {drilled}"
+    );
+}
+
+#[test]
+fn agreeing_mux_evidence_renders_as_one_row_with_preview_evidence_list() {
+    use crate::model::{
+        AgentSessionId, Confidence, GraphLink, LinkEndpoint, LinkState, MuxSessionId, NodeId,
+        Provenance, RelationKind, SourceMetadata,
+    };
+    use crate::tui::explorer::ExplorerRow;
+
+    // ADR 0107: a second producer agreeing on the same mux folds into
+    // the existing row and shows up in the Preview zone's evidence.
+    let hook = GraphLink {
+        id: "session-mux-hook".to_string(),
+        source: NodeId::AgentSession(AgentSessionId::new("codex", "/state", "abc")),
+        target: LinkEndpoint::Node {
+            id: NodeId::MuxSession(MuxSessionId::new("editor")),
+        },
+        relation: RelationKind::LinkedToMux,
+        provenance: Provenance::StrongDiscovered,
+        confidence: Confidence::High,
+        freshness: crate::model::Freshness::Fresh,
+        source_metadata: SourceMetadata {
+            adapter: "hook_sidecar".to_string(),
+            evidence: Some("hook_session_path_match".to_string()),
+            ..Default::default()
+        },
+        state: LinkState::Active,
+    };
+    let mut app = muxed_app_with_links("editor", None, vec![hook]);
+
+    let area = Rect::new(0, 0, 140, 40);
+    let initial = buffer_to_string(&render_to_buffer(&mut app, area));
+    assert_eq!(
+        initial.matches("attached to").count(),
+        1,
+        "two producers agreeing on one mux should render one row: {initial}"
+    );
+    assert!(
+        !initial.contains("Other"),
+        "agreeing evidence must not open an Other zone: {initial}"
+    );
+
+    app.update(Msg::CycleFocus);
+    let link_idx = app
+        .explorer()
+        .expect("state")
+        .rows()
+        .iter()
+        .position(|row| matches!(row, ExplorerRow::ValidatedLink { .. }))
+        .expect("validated row");
+    for _ in 0..link_idx {
+        app.update(Msg::ExplorerNavDown);
+    }
+    let focused = buffer_to_string(&render_to_buffer(&mut app, area));
+    assert!(
+        focused.contains("evidence"),
+        "preview should carry an evidence block: {focused}"
+    );
+    assert!(
+        focused.contains("hook_session_path_match · strong_discovered · high"),
+        "hook evidence line expected: {focused}"
+    );
+    assert!(
+        focused.contains("discovered · medium"),
+        "the other producer's evidence line expected: {focused}"
     );
 }
 

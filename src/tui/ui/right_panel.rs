@@ -733,6 +733,7 @@ pub(super) fn draw_explorer_preview(
             confidence,
             state: link_state,
             edge_state,
+            evidence,
         } => {
             lines.push(Line::from(span!(
                 Modifier::BOLD;
@@ -752,6 +753,26 @@ pub(super) fn draw_explorer_preview(
                 span!(Modifier::BOLD; "  {:<14}", "edge"),
                 span!(Style::default().fg(theme.warning); "{edge_value}"),
             ]));
+            // One line per backing link so agreeing producers are
+            // visible without each taking a row in the Related list.
+            // The evidence kind names the producer more precisely
+            // than its adapter, so it takes the slot when present.
+            for (idx, item) in evidence.iter().enumerate() {
+                let label = if idx == 0 { "evidence" } else { "" };
+                let source = item
+                    .evidence
+                    .as_deref()
+                    .or_else(|| Some(item.adapter.as_str()).filter(|a| !a.is_empty()));
+                let value = source
+                    .into_iter()
+                    .chain([item.provenance.snake_case(), item.confidence.snake_case()])
+                    .collect::<Vec<_>>()
+                    .join(" · ");
+                lines.push(Line::from(vec![
+                    span!(Modifier::BOLD; "  {label:<14}"),
+                    span!(theme.placeholder; "{value}"),
+                ]));
+            }
         }
         RowPreview::Unresolved {
             node_type,

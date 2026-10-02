@@ -1388,3 +1388,195 @@ fn agent_session_cwd_has_no_kind_chip_when_path_does_not_resolve() {
         "unresolved cwd should leave kind_chip empty: {cwd:?}",
     );
 }
+
+/// Session `abc` with one link per `(id, mux native id, provenance,
+/// adapter, evidence)` entry, run through the resolver.
+fn session_mux_snapshot(
+    links: &[(&str, &str, Provenance, &str, Option<&str>)],
+) -> (GraphSnapshot, NodeId) {
+    let mut snapshot = GraphSnapshot::empty();
+    let session_id = NodeId::AgentSession(AgentSessionId::new("claude", "/state", "abc"));
+    snapshot
+        .nodes
+        .push(agent("claude", "abc", Some("/x"), None));
+    let mut muxes: Vec<&str> = links.iter().map(|(_, m, ..)| *m).collect();
+    muxes.sort_unstable();
+    muxes.dedup();
+    for native in muxes {
+        snapshot.nodes.push(mux("tmux", native, Some("/x")));
+    }
+    for (id, native, provenance, adapter, evidence) in links {
+        let mut l = link(
+            id,
+            session_id.clone(),
+            NodeId::MuxSession(MuxSessionId::new(*native)),
+            RelationKind::LinkedToMux,
+        );
+        l.provenance = *provenance;
+        l.source_metadata.adapter = (*adapter).to_string();
+        l.source_metadata.evidence = evidence.map(str::to_string);
+        snapshot.candidate_links.push(l);
+    }
+    (resolve_snapshot(snapshot), session_id)
+}
+
+#[test]
+fn agreeing_producers_for_one_mux_render_one_validated_row_from_both_ends() {
+    let (snapshot, session_id) = session_mux_snapshot(&[
+        (
+            "declared",
+            "main",
+            Provenance::LocalDeclared,
+            "declared",
+            None,
+        ),
+        (
+            "hook",
+            "main",
+            Provenance::StrongDiscovered,
+            "hook_sidecar",
+            Some("hook_session_path_match"),
+        ),
+    ]);
+    let mux_id = NodeId::MuxSession(MuxSessionId::new("main"));
+
+    for focus in [&session_id, &mux_id] {
+        let view = build(&snapshot, focus, Some(home().as_path()));
+        let counts = view.relationship_counts();
+        assert_eq!(counts.validated, 1, "focus {focus}: {counts:?}");
+        assert_eq!(
+            counts.other, 0,
+            "agreeing evidence is not Other: {counts:?}"
+        );
+        assert!(
+            !view
+                .flat_rows(true, false)
+                .iter()
+                .any(ExplorerRow::is_other_header),
+            "no Other header when every neighbor was picked"
+        );
+        let group = view
+            .relationships
+            .groups
+            .iter()
+            .find(|g| g.relation == RelationKind::LinkedToMux)
+            .expect("linked_to_mux group");
+        assert_eq!(group.links.len(), 1);
+        let row = &group.links[0];
+        assert_eq!(row.link_id, "declared", "winner represents the row");
+        let backing: Vec<&str> = row.evidence.iter().map(|e| e.link_id.as_str()).collect();
+        assert_eq!(backing, vec!["declared", "hook"]);
+        assert_eq!(row.evidence[1].adapter, "hook_sidecar");
+        assert_eq!(
+            row.evidence[1].evidence.as_deref(),
+            Some("hook_session_path_match")
+        );
+        assert!(!group.ambiguous);
+    }
+}
+
+#[test]
+fn different_target_competitor_stays_in_other_as_conflict() {
+    let (snapshot, session_id) = session_mux_snapshot(&[
+        (
+            "declared",
+            "main",
+            Provenance::LocalDeclared,
+            "declared",
+            None,
+        ),
+        (
+            "hook",
+            "main",
+            Provenance::StrongDiscovered,
+            "hook_sidecar",
+            Some("hook_session_path_match"),
+        ),
+        (
+            "pane",
+            "other",
+            Provenance::StrongDiscovered,
+            "cross_link",
+            Some("active_pane_command_session_match"),
+        ),
+    ]);
+
+    let view = build(&snapshot, &session_id, Some(home().as_path()));
+    let counts = view.relationship_counts();
+    assert_eq!(counts.validated, 1, "{counts:?}");
+    assert_eq!(counts.other, 1, "{counts:?}");
+    assert_eq!(counts.ambiguous, 1, "{counts:?}");
+
+    let group = view
+        .relationships
+        .groups
+        .iter()
+        .find(|g| g.relation == RelationKind::LinkedToMux)
+        .expect("linked_to_mux group");
+    let other: Vec<&RelationshipLink> = group
+        .links
+        .iter()
+        .filter(|l| !matches!(l.edge_state, EdgeStateLabel::Resolves))
+        .collect();
+    assert_eq!(other.len(), 1);
+    assert_eq!(
+        other[0].neighbor_id,
+        NodeId::MuxSession(MuxSessionId::new("other"))
+    );
+    assert_eq!(other[0].edge_state, EdgeStateLabel::Conflict);
+    let validated = group
+        .links
+        .iter()
+        .find(|l| matches!(l.edge_state, EdgeStateLabel::Resolves))
+        .expect("validated row");
+    assert_eq!(validated.evidence.len(), 2);
+}
+
+#[test]
+fn neighbor_row_key_survives_a_change_of_representative_link() {
+    let hook = (
+        "hook",
+        "main",
+        Provenance::StrongDiscovered,
+        "hook_sidecar",
+        Some("hook_session_path_match"),
+    );
+    let declared = (
+        "declared",
+        "main",
+        Provenance::LocalDeclared,
+        "declared",
+        None,
+    );
+    let key_and_link = |links: &[(&str, &str, Provenance, &str, Option<&str>)]| {
+        let (snapshot, session_id) = session_mux_snapshot(links);
+        let view = build(&snapshot, &session_id, Some(home().as_path()));
+        let row = view
+            .flat_rows(false, false)
+            .into_iter()
+            .find(|r| matches!(r, ExplorerRow::ValidatedLink { .. }))
+            .expect("validated row");
+        let ExplorerRow::ValidatedLink {
+            group_index,
+            link_index,
+        } = row
+        else {
+            unreachable!()
+        };
+        let link_id = view.relationships.groups[group_index].links[link_index]
+            .link_id
+            .clone();
+        (row.key(&view), link_id)
+    };
+
+    let (before_key, before_link) = key_and_link(&[hook]);
+    let (after_key, after_link) = key_and_link(&[hook, declared]);
+    assert_eq!(before_link, "hook");
+    assert_eq!(after_link, "declared");
+    assert_eq!(before_key, after_key);
+    assert!(matches!(
+        after_key,
+        ExplorerRowKey::ValidatedLink(NeighborRowKey { ref neighbor, .. })
+            if *neighbor == NodeId::MuxSession(MuxSessionId::new("main"))
+    ));
+}
