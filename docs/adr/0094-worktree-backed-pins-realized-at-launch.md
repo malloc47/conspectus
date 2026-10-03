@@ -6,7 +6,7 @@ Accepted
 
 ## Context
 
-The worktree interaction epic (`docs/backlog.md` §H-WT-007, "new
+The worktree interaction epic (`docs/backlog.md` §CSP-523, "new
 stream") wants creating a pin — the natural "I'm starting a new stream
 of work" gesture — to be able to spin up a **fresh worktree** for that
 stream. The operator picks a branch, and the pin's session should run
@@ -17,7 +17,7 @@ A pin (ADR 0057) is a **declaration**, not a running thing. Writing a
 pin never starts a mux or an agent; those come into being later, when
 the pin is **launched** (`conspectus pin launch` / the TUI launch
 path), which constructs the mux session and the agent process. So the
-question H-WT-007 raises is: **when a pin declares a worktree, when is
+question CSP-523 raises is: **when a pin declares a worktree, when is
 that worktree actually created?**
 
 Creating it eagerly at pin-write time is tempting but wrong-shaped:
@@ -81,7 +81,7 @@ reused, so re-launching a pin (or launching after a manual
 created (read-only host, backend failure), launch fails with a clear
 message rather than silently running in the wrong directory.
 
-### Confirmed defaults (H-WT-007)
+### Confirmed defaults (CSP-523)
 
 - **Base ref**: the repo's default branch.
 - **Name derivation**: the create form's branch field defaults to the

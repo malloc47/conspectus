@@ -424,7 +424,7 @@ habits have grown out of that discipline:
 The [backlog](docs/backlog.md) is a single Markdown file used instead of an
 issue tracker. [ADR 0009](docs/adr/0009-lightweight-backlog-tracking.md)
 chose it over Beads, Backlog.md, and GitHub Issues. Every story has a stable
-ID (`P8-014`, `H-WT-006`, `H-PIN-TUI-011`), a scope, the tests it needs, its
+ID (`CSP-175`, `CSP-522`, `CSP-528`), a scope, the tests it needs, its
 blockers, and an outcome note once it lands. The IDs appear in commit
 subjects and code comments, so `git log --grep` and `grep` connect a
 decision, the work it caused, and the code it produced.

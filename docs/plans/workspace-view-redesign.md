@@ -106,7 +106,7 @@ for daily-driver setups where workspace members are popular repos.
 | **1b. Strict + chip** | (1a) plus a `[ws-name]` chip on (B) rows so the cross-reference is still visible without false nesting. | Preserves the signal without the conflation. | Adds chip semantics needing a legend; rows with N>1 workspace memberships need a degradation rule. |
 | **1c. Drop workspace level entirely** | Sessions/Graph nests repo → checkout → session only. Workspaces never appear here. | Cleanest separation. | Loses the affordance even for (A)-class sessions where workspace genuinely *is* the user-facing context. |
 
-**Initial recommendation: 1b.** H-WS-001 shipped 1b — strict
+**Initial recommendation: 1b.** CSP-405 shipped 1b — strict
 nesting plus a (B)-class chip with an activeness gate and a
 3-membership cardinality threshold.
 
@@ -119,7 +119,7 @@ The chip and its supporting helpers are removed; the strict
 nesting from 1a remains. The chip cardinality and on-(A)
 sub-decisions below are mooted by the same ADR.
 
-**Further reshape (ADR 0064 / `H-WS-004`): hybrid.** After 0063
+**Further reshape (ADR 0064 / `CSP-414`): hybrid.** After 0063
 landed, the operator surfaced two further problems with 1a's
 shape: the repo level beneath a workspace duplicated the
 project context, and agent-deck A-class sessions (cwd at
@@ -135,7 +135,7 @@ edge." Workspace headers use the shared
 `format_workspace_display` helper from `rows/mod.rs` so they
 read identically to the Workspaces view.
 
-~~Open knobs for `H-WS-001`:~~ resolved by ADR 0063 (chip
+~~Open knobs for `CSP-405`:~~ resolved by ADR 0063 (chip
 removed):
 - ~~**Chip cardinality.** A repo in N workspaces: render `[ws-a]`,
   `[ws-a +N]`, `[N ws]`, or omit when N > some threshold.~~
@@ -145,7 +145,7 @@ removed):
 
 ### Axis 2: A dedicated Workspaces view
 
-After the H-WS-002 MVP and the H-WS-002 polish (ADR 0062), the
+After the CSP-406 MVP and the CSP-406 polish (ADR 0062), the
 shape is:
 
 ```
@@ -167,7 +167,7 @@ anywhere in the UI after ADR 0063 — the Sessions / Graph chip
 that originally carried them has been removed; only the
 data-model edge remains for downstream tooling.
 
-The original H-WS-002 strawman had three labeled subgroups per
+The original CSP-406 strawman had three labeled subgroups per
 workspace (`members` / `in workspace` / `related`). Operator
 feedback flagged `members` as left-tree noise (already in the
 detail pane) and the `in workspace` / `related` vocabulary as
@@ -185,12 +185,12 @@ Filters (composable with the global filter set):
 - harness, mux-state, provider, has-running-sessions, has-active-prs,
   activity-window.
 
-Tracked as `H-WS-002`.
+Tracked as `CSP-406`.
 
-Open knobs for `H-WS-002`:
+Open knobs for `CSP-406`:
 - **Whether to include (B)-class sessions at all** in the workspaces
   view. ~~Recommendation: yes, collapsed by default.~~ Resolved by
-  the H-WS-002 polish: **only (A)** (ADR 0062). The downstream
+  the CSP-406 polish: **only (A)** (ADR 0062). The downstream
   ADR 0063 then removed (B) from the Sessions view chip too, so
   (B) has no UI representation in any view today.
 - **Workspaces with no activity.** Default to "show all"; offer an
@@ -205,7 +205,7 @@ Open knobs for `H-WS-002`:
 
 The original speculation was that each of these views had a
 `Workspace` grouping that probably suffered from the same (A)/(B)
-conflation. The `H-WS-003` audit found something different: the
+conflation. The `CSP-407` audit found something different: the
 variants are unimplemented, not buggy.
 
 | View | Audit finding |
@@ -222,24 +222,24 @@ branch→repo→workspace chain, which is structurally the (B)
 "weak membership" case at the session level. There is no analog
 of "this PR is workspace-rooted."
 
-`H-WS-003` closed by dropping the `Workspace` variant from
+`CSP-407` closed by dropping the `Workspace` variant from
 `MuxGrouping`, `UnionGrouping`, `PrsGrouping`, and `ForksGrouping`
-(ADR 0061). The Workspaces view from `H-WS-002` is the canonical
+(ADR 0061). The Workspaces view from `CSP-406` is the canonical
 workspace-first surface.
 
 ## Recommended sequence
 
-1. **`H-WS-001`** — strict-only + chip in Sessions/Graph. Shipped
+1. **`CSP-405`** — strict-only + chip in Sessions/Graph. Shipped
    1b (strict-nesting + chip); ADR 0063 later reverted the chip
    to land at 1a. Strict nesting and the cross-link inference
    fix are retained.
-2. **`H-WS-002`** — Workspaces view with provider/activity/repo/flat
+2. **`CSP-406`** — Workspaces view with provider/activity/repo/flat
    groupings, separate "in workspace" vs "related" subgroups.
    MVP shipped with three subgroups; the polish (ADR 0062)
    folded `members` inline on the workspace row and dropped the
    `related` (B)-class subgroup, leaving only (A)-class sessions
    under each workspace.
-3. **`H-WS-003`** — audit Mux/Prs/Forks/Union workspace groupings
+3. **`CSP-407`** — audit Mux/Prs/Forks/Union workspace groupings
    for the same conflation; fix or defer per finding. Closed by
    dropping the unimplemented `Workspace` variants (ADR 0061).
 
@@ -253,7 +253,7 @@ workspace-first surface.
    (A) (the 1a outcome) but no chip. The Workspaces view is the
    only place workspaces appear as primary organization.
 2. ~~Should (B)-class sessions appear in the Workspaces view at
-   all?~~ Answered by the H-WS-002 polish: **no** (ADR 0062).
+   all?~~ Answered by the CSP-406 polish: **no** (ADR 0062).
    ADR 0063 further removed (B) from the Sessions view chip, so
    (B) has no UI representation in any view.
 3. Should the default Workspaces view filter to "has activity"?
@@ -262,10 +262,10 @@ workspace-first surface.
    nomenclature in code/ADRs uses `Workspace`; keep for now.
 5. ~~Does the existing `MuxGrouping::Workspace` /
    `PrsGrouping::Workspace` need fixing before this lands, or are
-   those low-traffic enough to defer (`H-WS-003`)?~~ Answered by
-   the `H-WS-003` audit: neither needs fixing because both were
+   those low-traffic enough to defer (`CSP-407`)?~~ Answered by
+   the `CSP-407` audit: neither needs fixing because both were
    unimplemented. Variants dropped per ADR 0061.
 
 These questions become the dispositional checklist for the
 follow-up ADR (`docs/adr/00NN-workspace-view-redesign.md`) at the
-point `H-WS-002` enters scoping.
+point `CSP-406` enters scoping.

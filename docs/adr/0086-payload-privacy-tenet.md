@@ -43,7 +43,7 @@ scoring and the graph rather than the visible UI. Weakening
 the wording without preserving that distinction would license
 unsafe reads.
 
-The H-ADR-001 story records the drift and asks for a tenet
+The CSP-490 story records the drift and asks for a tenet
 that matches the code. This ADR is that tenet.
 
 ## Decision
@@ -177,8 +177,8 @@ its ADR entry.
 New harnesses follow the same tier assignment. Discovery,
 attribution, and state readers are Tier 1 / Tier 3 by default.
 A preview or viewer read is Tier 2 and needs an ADR-scoped
-justification. The H-EXT-006 transcript-locator work stays
-Tier 2 by construction; H-EXT-002's harness registry does
+justification. The CSP-478 transcript-locator work stays
+Tier 2 by construction; CSP-474's harness registry does
 not license new payload access on its own.
 
 **For the CLAUDE.md guardrail.**
@@ -248,7 +248,7 @@ purposes.
   No. Same reason as hook sidecars — Tier 3.
 - **Does this license any new writes?** No. This is an access
   tenet, not a mutation tenet. The mutation envelope (ADR
-  forthcoming per H-ADR-002) governs writes.
+  forthcoming per CSP-491) governs writes.
 
 ## Open Questions Deferred
 

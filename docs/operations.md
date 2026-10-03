@@ -333,7 +333,7 @@ exact column names or want to see which columns are opt-in.
 
 The `title` column (registered on `sessions` and `union`, opt-in)
 surfaces `AgentSessionNode.title` — opencode's chat topic, claude-code's
-compaction summary — separately from the `AGENT` cell. As of H-TBL-015
+compaction summary — separately from the `AGENT` cell. As of CSP-174
 the `AGENT` cell always renders `harness:<session_key>` (UUIDs
 collapse to `…<last-8>`; shorter human-readable session keys pass
 through verbatim) regardless of whether the adapter set `title`.
@@ -502,7 +502,7 @@ alias overlay (ADR 0029 precedence) and as the initial tmux session
 name at launch. `--mux-socket <name>` is the tmux `-L <socket>`
 equivalent — pins on non-default sockets launch and attach
 correctly in v1, though discovery-side enumeration of non-default
-sockets is a deferred follow-up (H-PIN-F-001) so they render as
+sockets is a deferred follow-up (CSP-382) so they render as
 `unbound` even when their tmux session is live.
 
 ### Launch / attach
@@ -691,7 +691,7 @@ never create, mtime-touch, or content-modify
 `.conspectus.toml` / user-config files bearing a `[pins]` section.
 Mutation is reserved to the explicit `pin create / rename / rm /
 bind / rebind / adopt` commands and the TUI write paths they back.
-H-PIN-019's `tests/cli_pin_invariants.rs` enforces this with
+CSP-379's `tests/cli_pin_invariants.rs` enforces this with
 content + mtime fingerprinting around each read-only command.
 
 The same commands also leave the pin-binding sidecar cache alone
@@ -702,7 +702,7 @@ sidecar for an unbound pin is preserved byte-for-byte (no mtime
 bump) across read-only commands. The positive case — a `Bound`
 resolution producing a sidecar write — is by design, since the
 sidecar is what powers the next `pin launch`'s continuity.
-H-PIN-RESUME-006's `tests/cli_pin_resume_invariants.rs` enforces
+CSP-400's `tests/cli_pin_resume_invariants.rs` enforces
 the cache-side rules.
 
 ## Caches

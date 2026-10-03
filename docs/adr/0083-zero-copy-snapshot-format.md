@@ -223,7 +223,7 @@ The two flagged friction points:
 1. `SourceMetadata::fields: serde_json::Value` and
    `UnresolvedEndpoint::metadata: Metadata` (both alias
    `BTreeMap<String, serde_json::Value>`). rkyv has no native
-   `Value` support. The pre-implementation survey of P11-003
+   `Value` support. The pre-implementation survey of CSP-440
    counted 130+ producer-side `Value::String/Number/Array/...`
    insertions across `discovery/` and `resolve/`, plus dozens
    of consumer-side `fields.get(...)?.as_str()` patterns in
@@ -258,7 +258,7 @@ The two flagged friction points:
    unchanged, and confines the rkyv friction to a single
    wrapper type. The earlier inclination toward (a) ("smallest
    change") rested on a "tiny per-access cost" assumption that
-   the P11-003 survey did not bear out. (a) and (b) remain
+   the CSP-440 survey did not bear out. (a) and (b) remain
    available if a future profile shows the adapter is the
    bottleneck for a specific hot path.
 
@@ -423,11 +423,11 @@ surface shrinks.
   break readers.
 
 - **Does the `Value` adapter introduce surprise behavior at
-  any existing site?** The P11-003 pre-implementation survey
+  any existing site?** The CSP-440 pre-implementation survey
   counted 130+ producer insertions and dozens of consumer
   accesses; option (c) was chosen precisely because no
   producer or consumer site needs to change. The remaining
   risk is whether rkyv's `#[rkyv(with = ...)]` derive handles
   `BTreeMap<String, Value>` cleanly through the wrapper; the
-  P11-003 round-trip test (`every_node_id_variant_archives_
+  CSP-440 round-trip test (`every_node_id_variant_archives_
   and_round_trips`) is the regression net.

@@ -40,7 +40,7 @@ Two operator-noted problems with the current shape:
 
 A separate observation that motivated revisiting the shape: the
 dedicated Workspaces view (`View::Workspaces` / keybinding `6`)
-introduced by `H-WS-002` is essentially `workspace → session`
+introduced by `CSP-406` is essentially `workspace → session`
 with no repo level. If the Sessions / Graph view adopts the same
 shape for its workspace buckets, the dedicated view becomes
 structurally redundant — the same workspace-first slice is now a
@@ -125,7 +125,7 @@ decision that this ADR explicitly does not make.
   view.** Same name + members + provider format, one
   formatter, identical reading.
 - **Repo-shared (B-class) sessions stay at top level under their
-  repo.** The H-WS-001 bug-fix property holds — sessions in
+  repo.** The CSP-405 bug-fix property holds — sessions in
   `~/src/conspectus` whose cwd is outside any workspace tree do
   not nest under a workspace, even when their repo is a workspace
   member. The Workspaces view's polish (ADR 0062) already
@@ -195,7 +195,7 @@ and Workspace shows the correct one.
   variants both flow through the same `Row.id` shape. Today the
   workspace bucket can't collide with a repo bucket because
   their `NodeId` variants differ. If a future grouping mode
-  wants to scope by workspace + repo (e.g., the H-WS-002a Repo
+  wants to scope by workspace + repo (e.g., the CSP-406.01 Repo
   grouping when it lands), the scoped `RowId::Repo { workspace,
   repo }` / `RowId::WorkspaceAgentSession` patterns from the
   Workspaces view are already in `rows/mod.rs` and can be

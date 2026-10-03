@@ -72,7 +72,7 @@ or provider-declared unresolved path.
 - Generic inference remains cheap and predictable because it only inspects
   immediate children of explicit roots.
 - Workspace membership can preserve both logical and canonical paths, which
-  unblocks H-CHECKOUT-004 without making symlink targets the display identity.
+  unblocks CSP-200 without making symlink targets the display identity.
 
 ## Alternatives Considered
 

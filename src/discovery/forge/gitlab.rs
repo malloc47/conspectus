@@ -4,7 +4,7 @@
 //! supports multiple entries with `claims_remote_url`-based
 //! routing. **Real GitLab PR discovery is deferred** until the
 //! multi-forge `ForgePr` identity model is settled; the open
-//! questions are in backlog `H-DESIGN-002`.
+//! questions are in backlog `CSP-108`.
 //!
 //! What ships today:
 //!

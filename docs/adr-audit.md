@@ -48,9 +48,9 @@ re-derive ad-hoc maps per view — the exact duplication Stage 1 was accepted
 to remove. The likely history: Stage 2/3 escalation went through the SQLite
 arc (0036/0043), which made the index moot, and the 0082 retirement restored
 direct snapshot iteration without restoring the index. The hygiene audit
-independently re-derived this need as `H-HYG-006`.
+independently re-derived this need as `CSP-467`.
 
-**Recommendation:** amend ADR 0035 — Stage 1 re-lands via `H-HYG-006`
+**Recommendation:** amend ADR 0035 — Stage 1 re-lands via `CSP-467`
 (cite it), Stage 2 (Ascent) and Stage 3 (`conspectus query`) gates are
 superseded by ADR 0082's decision that typed-snapshot consumption is the
 consumer surface. Without the amendment, 0035 reads as an unimplemented
@@ -127,7 +127,7 @@ area anyway.
 0015 (library API surface), 0016 (crates.io-first distribution), 0017 (stay
 in-repo) assume an external-consumer future. Reality: version 0.1.0, no tags
 cut, no crates.io publish, the curated `api.rs` facade is 59 lines, and
-`H-REF-010` already questions whether its re-exports are right. The tenets
+`CSP-092` already questions whether its re-exports are right. The tenets
 aren't wrong — Atelier migration is a stated goal — but they currently buy
 ceremony (facade curation, stable-surface discipline across `model`,
 `output`, `resolve`, `config`, `declared`) without a consumer exercising the
@@ -135,7 +135,7 @@ contract.
 
 **Recommendation:** keep 0015/0016/0017 but downgrade enforcement to "don't
 break gratuitously" until the first real external consumer lands; fold the
-facade question into `H-REF-010` rather than treating the current `api.rs`
+facade question into `CSP-092` rather than treating the current `api.rs`
 as contractual.
 
 ## Tenets That Are Aligned (Keep And Defend)
@@ -207,7 +207,7 @@ as contractual.
   and `cross_link.rs` (3.7k lines) to know what wins over what.
   **Recommendation:** one consolidating architecture note (no new
   decisions) that states the evidence hierarchy end-to-end and links the
-  ADRs; `H-EXT-004`'s runtime-signature work is the natural moment to
+  ADRs; `CSP-476`'s runtime-signature work is the natural moment to
   write it.
 - **0047 (runtime process nodes) is the costliest active model decision.**
   First-class graph nodes for rebuildable process facts ripple into every
@@ -229,26 +229,26 @@ as contractual.
 Small, mostly documentation-shaped; none block feature work. Disposition
 as of 2026-07-01: the pure bookkeeping items were applied directly; the
 items needing a real decision or real writing are filed in
-`docs/backlog.md` § ADR And Tenet Alignment as `H-ADR-001` … `H-ADR-005`.
+`docs/backlog.md` § ADR And Tenet Alignment as `CSP-490` … `CSP-494`.
 
-1. **ADR-A1 (done 2026-07-01):** amended ADR 0035 (Stage 1 → `H-HYG-006`;
+1. **ADR-A1 (done 2026-07-01):** amended ADR 0035 (Stage 1 → `CSP-467`;
    Stages 2/3 → superseded by 0082). Status-accuracy fix for C1.
 2. **ADR-A2 (done 2026-07-01):** marked 0062 superseded by 0065; annotated
    0063. Fix for C3.
-3. **ADR-A3 (filed as `H-ADR-001`):** privacy-tenet amendment stating the
+3. **ADR-A3 (filed as `CSP-490`):** privacy-tenet amendment stating the
    attribution-vs-content payload rule (C2).
-4. **ADR-A4 (filed as `H-ADR-002`):** mutation-envelope amendment replacing
+4. **ADR-A4 (filed as `CSP-491`):** mutation-envelope amendment replacing
    the outgrown "read-only first" phrasing in design.md/CLAUDE.md
    guardrails (C4).
-5. **ADR-A5 (filed as `H-ADR-003`):** retire (or permanently bless) the
+5. **ADR-A5 (filed as `CSP-492`):** retire (or permanently bless) the
    `[tui].sessions_grouping` legacy alias (C5).
 6. **ADR-A6 (done 2026-07-01):** lessons addendum on 0082 recording the two
    SQLite-arc lessons (consumers read the typed model; no capability before
    its first consumer).
-7. **DOC-A7 (filed as `H-ADR-004`):** consolidated mux-attribution
+7. **DOC-A7 (filed as `CSP-493`):** consolidated mux-attribution
    architecture note linking 0006/0028/0046/0047/0048/0071/0072/0077;
-   write alongside `H-EXT-004`.
-8. **CONV-A8 (filed as `H-ADR-005`):** two-tier decision-record convention
+   write alongside `CSP-476`.
+8. **CONV-A8 (filed as `CSP-494`):** two-tier decision-record convention
    (full ADR vs UI design note) so the load-bearing corpus stays legible.
 
 Alignment scorecard, one line each:

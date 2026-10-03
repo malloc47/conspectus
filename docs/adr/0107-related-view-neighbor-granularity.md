@@ -126,7 +126,7 @@ cursor and breadcrumb restores from ADR 0074 §6 stay put.
   shape. Consumers that treated `competing_link_ids` as "all
   non-winners" must union the two lists.
 - **The tree views are unaffected.** They already follow
-  `selected_link_id` (ADR 0077 / `H-UI-008`), and the no-winner
+  `selected_link_id` (ADR 0077 / `CSP-422`), and the no-winner
   fan-out still walks `competing_link_ids`.
 - **Evidence is one step further away in the TUI.** Seeing which
   producers agreed means moving the cursor to the row and reading the

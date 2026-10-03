@@ -1,13 +1,13 @@
-# Curated clippy lints (H-HYG-005). Adds a whole-workspace
+# Curated clippy lints (CSP-466). Adds a whole-workspace
 # `[lints.clippy]` table so drive-by fixes land in one place
 # instead of six copies of the same pattern. Levels:
 #
 # - `deny`: enforced by CI (`cargo clippy -D warnings`); no
 #   remaining warnings in the workspace.
 # - `allow`: known targeted lint; too many current-workspace
-#   warnings to fix in H-HYG-005's first landing. Follow-up
+#   warnings to fix in CSP-466's first landing. Follow-up
 #   commits will flip these to `deny` incrementally. See the
-#   H-HYG-005 backlog entry for the current counts.
+#   CSP-466 backlog entry for the current counts.
 #
 # Consciously skipped (per audit): the doc lints (missing_docs,
 # missing_errors_doc, etc.) — Conspectus has an explicit doc
@@ -109,7 +109,7 @@ rkyv = { version = "0.8", features = ["bytecheck", "alloc"] }
 # crate; tiny, mature, MIT-licensed.
 memmap2 = "0.9"
 # Base64 codec for the daemon socket's `snapshot` response
-# (P11-006). The wire framing stays length-prefixed JSON per
+# (CSP-443). The wire framing stays length-prefixed JSON per
 # ADR 0038; binary snapshot bytes ride in a `data.bytes`
 # base64 field so the protocol surface stays uniform. The
 # ~4/3 size expansion is fine at conspectus's snapshot scale
@@ -140,7 +140,7 @@ unicode-width = "0.2"
 [dev-dependencies]
 assert_cmd = "2.0"
 insta = "1.42"
-# T8-044 spike: evaluating tui-pantry as a Storybook-style widget
+# CSP-424 spike: evaluating tui-pantry as a Storybook-style widget
 # preview harness. Lives in dev-deps; promoted (or ripped) per the
 # spike's go/no-go outcome.
 tui-pantry = "0.4"

@@ -35,9 +35,9 @@ Requirements per the backlog and CLAUDE.md:
   existing `insta`-style snapshot tests stay stable.
 - First-class truncation with ellipsis (not just wrapping); wrapping multiplies
   the row count in a way that breaks the session-table mental model.
-- A clean path to a multi-line/card layout in `H-TBL-004` without reshaping
+- A clean path to a multi-line/card layout in `CSP-129` without reshaping
   the renderer module again.
-- Reusable from a future `graph --format text` projection (`H-OBS-001`) and
+- Reusable from a future `graph --format text` projection (`CSP-093`) and
   any other text surfaces, so the renderer must live in a shared `output`
   module rather than inside one command.
 - Unicode-aware column widths (the table includes CJK paths, emoji-laden PR
@@ -55,7 +55,7 @@ Requirements per the backlog and CLAUDE.md:
 - Behavior on overflow is to **wrap** rather than truncate. Truncation with
   ellipsis is not in the public API; achieving it requires pre-truncating
   cells before handing them to comfy-table.
-- No native rotated / extended-row layout for `H-TBL-004`.
+- No native rotated / extended-row layout for `CSP-129`.
 - Upstream is in feature freeze (the maintainer is searching for a successor),
   which is a concern for evolving features we are about to add.
 - Dependency footprint with the default `tty` feature: `crossterm` plus its
@@ -66,8 +66,8 @@ Requirements per the backlog and CLAUDE.md:
 ### `tabled` (v0.x, active)
 
 - Actively maintained, broad feature set. Native
-  `Width::truncate(N).suffix("…")` modifier is an exact fit for `H-TBL-003`.
-- Native `ExtendedTable` / `Rotate` covers `H-TBL-004` directly.
+  `Width::truncate(N).suffix("…")` modifier is an exact fit for `CSP-128`.
+- Native `ExtendedTable` / `Rotate` covers `CSP-129` directly.
 - Default features include `std` and `derive`. `derive` is unnecessary
   because we build rows at runtime; disabling it keeps the surface
   contained. `ansi` and `macros` are non-default.
@@ -94,16 +94,16 @@ Requirements per the backlog and CLAUDE.md:
 ### Roll our own minimal renderer
 
 The existing `format_rows` in `src/output/table.rs` is ~45 LOC. The additions
-needed to satisfy `H-TBL-002`..`H-TBL-005` are bounded:
+needed to satisfy `CSP-127`..`CSP-130` are bounded:
 
 - Width-aware truncation with ellipsis using `unicode-width` for column
   measurement: roughly 20-30 LOC.
 - Terminal width detection on a TTY using the `terminal_size` crate
   (`rustix`-only on Linux/macOS, `windows-sys` on Windows): roughly 10 LOC.
 - TTY-vs-pipe detection: existing `IsTerminal` from the standard library.
-- A vertical/card layout for `H-TBL-004`: roughly 30-50 LOC.
+- A vertical/card layout for `CSP-129`: roughly 30-50 LOC.
 - A renderer trait or a small set of public functions in `src/output/` so
-  `H-OBS-001` and other surfaces can reuse the same primitives.
+  `CSP-093` and other surfaces can reuse the same primitives.
 
 Dependency cost: two small crates.
 
@@ -140,12 +140,12 @@ Concretely:
 - `Layout::Columnar` (default) renders the existing two-space-padded table
   with width-aware truncation; cells that exceed the per-column budget are
   truncated with a `…` suffix.
-- `Layout::Card` (added in `H-TBL-004`) renders one column per line per row
+- `Layout::Card` (added in `CSP-129`) renders one column per line per row
   with a blank line between rows.
 - Width is taken from `RenderOptions.width` when set, otherwise from
   `terminal_size::terminal_size()` when stdout is a TTY, otherwise
   unbounded (so pipes stay wide). The CLI surfaces `--wide` and
-  `--width <N>` flags in `H-TBL-003`.
+  `--width <N>` flags in `CSP-128`.
 - Per-cell display widths use `unicode_width::UnicodeWidthStr::width`. The
   ASCII fast path stays inline; non-ASCII strings go through
   `unicode-width`.
@@ -161,13 +161,13 @@ addition per CLAUDE.md's dependency policy.
 ## Consequences
 
 - The renderer in `src/output/` becomes the shared text-output primitive for
-  `conspectus session`, `H-OBS-001` (`graph --format text`), and any future
+  `conspectus session`, `CSP-093` (`graph --format text`), and any future
   text surface, without locking the project into a third-party renderer's
   shape.
 - Snapshot tests stay byte-for-byte stable because the renderer is in-tree
   and only changes when this project changes it.
 - The default `conspectus session` output becomes usable in 80- and
-  120-column terminals once `H-TBL-003` lands on this renderer.
+  120-column terminals once `CSP-128` lands on this renderer.
 - Two small runtime dependencies are added; the crate's external surface
   grows by `unicode-width` and `terminal_size` plus their transitive
   platform-specific deps (`rustix` on Linux/macOS, `windows-sys` on
@@ -206,6 +206,6 @@ addition per CLAUDE.md's dependency policy.
   diagnostics) shares it.
 - TTY detection uses the standard library's `IsTerminal`; width detection
   uses `terminal_size`. `--wide` and `--width <N>` flags belong to
-  `H-TBL-003`, not this ADR.
+  `CSP-128`, not this ADR.
 - Color is out of scope. The renderer stays ANSI-free until a follow-up
   ADR decides otherwise.

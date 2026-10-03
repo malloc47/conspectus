@@ -228,7 +228,7 @@ impl App {
             }
             ExplorerRow::OtherUnresolved { .. } => {
                 self.status_message =
-                    Some("explorer: unresolved evidence — `o` opens detail (T8-032)".to_string());
+                    Some("explorer: unresolved evidence — `o` opens detail (CSP-318)".to_string());
             }
             ExplorerRow::NodeField { .. } => {
                 self.status_message = None;

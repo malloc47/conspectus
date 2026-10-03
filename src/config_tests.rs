@@ -53,7 +53,7 @@ fn tui_detail_show_edge_meta_defaults_to_false_when_absent() {
 
     assert!(
         !outcome.config.tui.detail.show_edge_meta,
-        "T8-042: edge meta should default to hidden",
+        "CSP-328: edge meta should default to hidden",
     );
 }
 

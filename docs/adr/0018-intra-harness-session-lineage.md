@@ -19,7 +19,7 @@ Harnesses themselves also produce session lineage that is *not* fork-shaped:
   earlier transcript in the same project.
 - `opencode` records `session.parent_id` in its SQLite store when a session
   was spawned from another.
-- `codex` may record a resume pointer (TBD per `H-LINEAGE-004`).
+- `codex` may record a resume pointer (TBD per `CSP-120`).
 
 These events have no provider-recorded fork metadata, no context effect, and
 no operation that the user would call "a fork." They are intra-harness
@@ -92,7 +92,7 @@ These values are operation types. Adapters that also need to record how
 trustworthy the lineage attribution is must use a separate `lineage_fidelity`
 field with vocabulary `native`, `approximate`, `unsupported`. Atelier's
 existing `lineage_kind` field currently carries those fidelity values; the
-H-LINEAGE-002 implementation phase will rename Atelier's emission to
+CSP-118 implementation phase will rename Atelier's emission to
 `lineage_fidelity` and set `lineage_kind = "fork"` (or `"fresh"`) so the two
 namespaces no longer collide. Snapshot fixtures will be regenerated as part
 of that change.

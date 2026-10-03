@@ -42,7 +42,7 @@ answers are not new (ADR 0028 forbids terminal injection into
 agents; every mutation surface enumerated above was ADR-scoped
 before it landed), but they aren't stated in one place.
 
-`H-ADR-002` records the drift and asks for a tenet ADR that
+`CSP-491` records the drift and asks for a tenet ADR that
 defines the envelope explicitly. This is that ADR.
 
 ## Decision
@@ -224,9 +224,9 @@ argv, not operator-typed input).
 
 **For H-EXT provider work.**
 
-New mux backends (H-EXT-008: zellij, ADR 0087 Related), new
-forge adapters (H-EXT-013), and new orchestrator surfaces
-(H-EXT-014) inherit the envelope. A zellij backend gets the
+New mux backends (CSP-480: zellij, ADR 0087 Related), new
+forge adapters (CSP-485), and new orchestrator surfaces
+(CSP-486) inherit the envelope. A zellij backend gets the
 same rename / new-session / send-keys / attach surface as
 tmux — no less, no more. A hypothetical GitLab forge adapter
 would still not write to `.gitlab-ci.yml` or push branches,

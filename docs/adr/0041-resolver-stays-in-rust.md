@@ -39,14 +39,14 @@ Concretely:
   per-relation precedence rules. Its inputs remain `GraphSnapshot`'s
   `candidate_links` and node set; its output remains
   `Vec<ResolvedRelationship>` plus the diagnostics it already emits.
-- The SQLite loader (P9-003) populates a `resolved_relationships`
+- The SQLite loader (CSP-273) populates a `resolved_relationships`
   table from the resolver's output, preserving the (source,
   relation, target) winner selection and carrying the diagnostics
   into a sibling `diagnostics` table.
 - SQL queries against the schema may read either layer:
   `resolved_relationships` for the resolver-chosen winners or
   `candidate_links` for the full evidence trail. The saved-view
-  library (P9-006) leans on the resolved layer by default; ad-hoc
+  library (CSP-276) leans on the resolved layer by default; ad-hoc
   exploration freely walks either.
 
 This is recorded as an ADR so the question is closed rather than
@@ -111,7 +111,7 @@ re-litigated each time a new view or query pattern is designed.
   reimplementations. They stay in Rust, and the resolver re-runs
   over the updated candidate set on the next snapshot build.
 - **Does this affect the SQL schema design?** Only by setting
-  expectation. The schema (P9-002) carries a
+  expectation. The schema (CSP-272) carries a
   `resolved_relationships` table populated by the resolver; it does
   not carry views that *reimplement* the resolver from
   `candidate_links` alone. Saved views may join or filter on the

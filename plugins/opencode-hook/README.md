@@ -85,4 +85,4 @@ the plugin's one-shot spawn warning and confirm that `conspectus` is on
 - The plugin does *not* subscribe to `chat.message` or `tool.execute.*`
   to keep sidecar churn low. The Conspectus discovery pass uses the
   freshest record per pane and does not enforce a TTL, so lifecycle
-  events alone are sufficient for the H-MUXPROC-015 drift fix.
+  events alone are sufficient for the CSP-227 drift fix.

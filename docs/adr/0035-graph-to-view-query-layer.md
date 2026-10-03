@@ -5,7 +5,7 @@
 Accepted (amended 2026-07-01 per the `docs/adr-audit.md` corpus audit).
 The Stage 1 `SnapshotIndex` was displaced by the ADR 0043 SQLite
 consumer surface before it landed and was not restored when ADR 0082
-retired that surface; it is re-tracked as `H-HYG-006` in
+retired that surface; it is re-tracked as `CSP-467` in
 `docs/backlog.md`. The Stage 2 (Ascent) and Stage 3 (`conspectus
 query`) escalation gates are superseded by ADR 0082, which settled
 typed-snapshot consumption as the consumer surface.

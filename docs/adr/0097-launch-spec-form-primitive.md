@@ -208,10 +208,10 @@ via `extra_top` / `extra_bottom` slices.
 
 The refactor is staged so each step keeps `cargo test --all-targets
 --all-features` green. Implementation shipped in two commits:
-`H-MUX-LAUNCH-001` introduced `LaunchSpecFormState` and wired
+`CSP-529` introduced `LaunchSpecFormState` and wired
 `MuxLaunchFormState` onto it as its first consumer, along with the
 Mux action menu, CLI verb, and runtime executor;
-`H-MUX-LAUNCH-002` then migrated `PinCreateState` onto the same
+`CSP-530` then migrated `PinCreateState` onto the same
 primitive with both consumers already in tree. Step 4 (rehoming
 accessors + validation onto the primitive) and step 5 (the
 `MuxLaunchFormState` → `MuxLaunchState` rename) were folded into

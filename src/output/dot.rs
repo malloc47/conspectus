@@ -1,5 +1,5 @@
 //! Graphviz DOT renderer for resolved [`GraphSnapshot`]s (ADR 0050,
-//! backlog item `GV-002`).
+//! backlog item `CSP-302`).
 //!
 //! The renderer is provider-neutral: shape and fill are keyed on
 //! `NodeKind`, edge arrowhead on [`RelationKind`] category,

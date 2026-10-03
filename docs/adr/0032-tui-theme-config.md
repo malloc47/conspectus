@@ -203,7 +203,7 @@ theme configuration. That is out of scope here.
 This ADR ships the schema only. It does **not**:
 
 - Ship preset theme variants (Tokyo Night, Dracula, Solarized). Those
-  are tracked in backlog item `T8-023` as config snippets the
+  are tracked in backlog item `CSP-269` as config snippets the
   operator can paste into their `[tui.theme]` block. Adding a preset
   system later is purely additive over this schema.
 - Support a `[tui.theme.<name>]` variant-keyed schema with a
@@ -231,7 +231,7 @@ This ADR ships the schema only. It does **not**:
 - Binary size is unchanged. No new dependencies — `ratatui` already
   provides `Color` and `Modifier`; the parser is ~100 LOC of
   hand-rolled string matching.
-- Future work has clear seams: theme presets (T8-023) become config
+- Future work has clear seams: theme presets (CSP-269) become config
   snippets, runtime theme switching (`:set theme dark`) becomes a
   reducer message that swaps the `Theme` in `App`, table↔TUI palette
   unification gets its own ADR.
@@ -258,7 +258,7 @@ This ADR ships the schema only. It does **not**:
 - **Ship preset variants in v1.** Rejected. Variants are
   configuration *content*, not configuration *schema*; shipping them
   in this ADR would couple two unrelated decisions. Backlog item
-  T8-023 carries them as follow-on work.
+  CSP-269 carries them as follow-on work.
 - **Detect terminal background and auto-select a palette.** Rejected.
   The detection (OSC 11 query, `COLORFGBG` env) is unreliable across
   multiplexers and SSH; the user-confirmed scope keeps selection on

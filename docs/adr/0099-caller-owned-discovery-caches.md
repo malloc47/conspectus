@@ -2,7 +2,7 @@
 
 ## Status
 
-Accepted. Implemented as `H-RUST-010`: the cache types are in
+Accepted. Implemented as `CSP-563`: the cache types are in
 `src/discovery/memo.rs`. The daemon (`src/server/mod.rs`) and the TUI
 (`RunConfig::discovery_caches`) each own one `DiscoveryCaches`.
 
@@ -73,14 +73,14 @@ whoever runs discovery:
 - `apply_codex_log_attribution` and `AuxAttributionContext` take the
   caches, which changes their public signatures. This is acceptable
   before the first library release (ADR 0015) and is folded into the
-  public-surface narrowing in `H-RUST-012`.
+  public-surface narrowing in `CSP-565`.
 - Test isolation no longer depends on process isolation, so plain
   `cargo test` and nextest behave the same.
 
 ## Alternatives Considered
 
 **Keep the globals and only deduplicate them.** This is step (a) of
-`H-RUST-010` and landed first. It removed the repeated get, store, and
+`CSP-563` and landed first. It removed the repeated get, store, and
 reset code but left the test locks and the hidden shared state.
 
 **Cache inside each provider instance.** `discover_local_warm_with`

@@ -6,7 +6,7 @@ Accepted
 
 ## Context
 
-The worktree interaction epic (H-WT-ENV, `docs/backlog.md`) settles on
+The worktree interaction epic (CSP-520, `docs/backlog.md`) settles on
 a **"close down a stream of work"** gesture: land or discard a
 worktree's branch, remove the worktree, delete the branch, drop the
 now-stale pin, and — critically — **end the running mux session and the
@@ -114,7 +114,7 @@ so explicitly ("ends the running session; transcript is preserved").
 ### Configuration
 
 Both the confirmation policy and the grace window live under
-`[worktree]` (H-WT-003's config block):
+`[worktree]` (CSP-508's config block):
 
 - `teardown_confirm = "always" | "live" | "never"` (default `"live"`).
   - `always` — confirm every worktree teardown / removal, even one
@@ -171,7 +171,7 @@ category and removes no prohibition:
   test seams.
 - Two `[worktree]` config keys (`teardown_confirm`, `teardown_grace`)
   join `backend`, with CLI-flag overrides.
-- H-WT-006 (`close-down`) and a direct "kill session" affordance can
+- CSP-522 (`close-down`) and a direct "kill session" affordance can
   now be built on a sanctioned primitive.
 
 ## Alternatives Considered

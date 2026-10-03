@@ -51,10 +51,10 @@ codebase is already converging on, and every pain point above is a
 place where the implementation deviates from that model rather than a
 sign that the model is wrong.
 
-The related audits filed the concrete cleanup as `H-TUI-001..005`
-(architecture convergence) and share substrate with `H-HYG-006`
-(`SnapshotIndex`), `H-HYG-007` (declarative keybinding table), and
-`H-HYG-009` (TUI monolith splits). What was missing was a written
+The related audits filed the concrete cleanup as `CSP-495..499`
+(architecture convergence) and share substrate with `CSP-467`
+(`SnapshotIndex`), `CSP-468` (declarative keybinding table), and
+`CSP-470` (TUI monolith splits). What was missing was a written
 guardrail so that (a) those stories land against a shared target
 picture and (b) future TUI feature work does not re-introduce the
 same drift by building each feature as another vertical slice with
@@ -126,7 +126,7 @@ recomputation happens when any input changes — a cache key tuple or
 dirty flag is sufficient — and never triggers discovery. Only `r`,
 the refresh timer, and store-mutation effects schedule refreshes.
 `RunConfig` reverts to initial-values-only; per-view state and the
-active view live on `App`. The `SnapshotIndex` from `H-HYG-006` is
+active view live on `App`. The `SnapshotIndex` from `CSP-467` is
 the shared substrate the derivations read.
 
 ### 5. One event loop, one draw contract
@@ -180,23 +180,23 @@ to refactor, not to accept.
 
 **For the filed stories:**
 
-- `H-TUI-001` (derived row trees) → contract 4.
-- `H-TUI-002` (effects as data) → contract 2. This is the enabling
+- `CSP-495` (derived row trees) → contract 4.
+- `CSP-496` (effects as data) → contract 2. This is the enabling
   investment; landing it makes the rest mechanical.
-- `H-TUI-003` (modal stack + `Overlay` trait) → contract 3.
-- `H-TUI-004` (event union + subscriptions, subsumes `H-HYG-008`) →
+- `CSP-497` (modal stack + `Overlay` trait) → contract 3.
+- `CSP-498` (event union + subscriptions, subsumes `CSP-469`) →
   contract 5.
-- `H-TUI-005` (scroll reconciliation into reducer) → the last
+- `CSP-499` (scroll reconciliation into reducer) → the last
   fragment of contract 1 (draw purity).
-- `H-HYG-006` (`SnapshotIndex`) is the substrate contract 4 reads.
-- `H-HYG-007` (declarative keybinding table) becomes trivial once
+- `CSP-467` (`SnapshotIndex`) is the substrate contract 4 reads.
+- `CSP-468` (declarative keybinding table) becomes trivial once
   contracts 2 + 3 exist: `(mode, key) → Msg` rows with the modal
   stack supplying the mode column.
-- `H-HYG-009` (TUI monolith splits) targets the `Overlay` contract
+- `CSP-470` (TUI monolith splits) targets the `Overlay` contract
   as its split boundary.
 
-Suggested sequencing: `H-TUI-001` → `H-TUI-002` → `H-TUI-003` →
-`H-TUI-004` → `H-TUI-005`/`H-HYG-007` opportunistically. `H-TUI-001`
+Suggested sequencing: `CSP-495` → `CSP-496` → `CSP-497` →
+`CSP-498` → `CSP-499`/`CSP-468` opportunistically. `CSP-495`
 stands alone and pays immediately (no discovery on view switches).
 
 **For the snapshot regression net:**
@@ -254,7 +254,7 @@ already belongs. The reducer must stay a plain function of
 value.
 
 **Leave the four update layers in place and only fix projection
-re-fetching.** Rejected as insufficient. Landing `H-TUI-001` alone
+re-fetching.** Rejected as insufficient. Landing `CSP-495` alone
 would improve responsiveness but would not remove the terminal-in-
 handler pattern that blocks reducer-level interaction tests, would
 not fix the modality bookkeeping cost, and would not stop each new
@@ -283,13 +283,13 @@ work is convergence, not replacement.
 
 ## Open Questions Deferred
 
-- **Concrete `Effect` catalog boundary.** `H-TUI-002` will land the
+- **Concrete `Effect` catalog boundary.** `CSP-496` will land the
   first `Effect` enum from the audit-listed variants
   (`SpawnRefresh`, `RunMux`, `Exec`, `WriteStore`, `CapturePreview`,
   `Toast`, `Persist`, `Quit`). Whether preview capture stays a
   reducer-emitted effect or moves fully into the discovery worker's
   responsibility (post-refresh side-band) is a design question that
-  reopens when `H-TUI-002` reaches that variant.
+  reopens when `CSP-496` reaches that variant.
 - **Persistence effect grain.** Per-view state persistence
   (`Effect::Persist`) may batch or debounce inside the executor;
   the shape of that batching is deferred until the store's write
@@ -305,7 +305,7 @@ work is convergence, not replacement.
   the reducer owns per contract 4; this ADR moves it off
   `RunConfig`.
 - ADR 0035 (SQLite-arc / index approaches) — Stage 1 status
-  amendment tracks the substrate that `H-HYG-006` (`SnapshotIndex`)
+  amendment tracks the substrate that `CSP-467` (`SnapshotIndex`)
   re-lands for contract 4.
 - ADR 0057 (pin launch and terminal handoff) — the largest current
   effectful `Action` set; contract 2 gives it a home in the effect

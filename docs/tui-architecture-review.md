@@ -164,7 +164,7 @@ Concretely, in landing order:
   `Msg`s that never touch discovery; only `r`, the timer, and pin/alias
   mutations schedule refreshes. Delete the config-mutation pattern;
   `RunConfig` becomes initial-values-only. This pairs with the planned
-  `SnapshotIndex` (`H-HYG-006`) as the shared substrate the builders
+  `SnapshotIndex` (`CSP-467`) as the shared substrate the builders
   read.
 - **R2 — Effects as data** (fixes F1). Collapse `Action`'s effectful
   variants and the per-overlay commit handling into the reducer, and
@@ -196,13 +196,13 @@ Concretely, in landing order:
   a single loop parameterized by its subscription set: live mode
   subscribes to the discovery channel and the refresh timer; fixture
   mode subscribes to file reload; snapshot mode runs the loop body once.
-  This subsumes the dual-loop unification already filed as `H-HYG-008`.
+  This subsumes the dual-loop unification already filed as `CSP-469`.
 - **R6 — Scroll reconciliation into update** (fixes F5). Emit viewport
   dimensions with input (`PageDown(u16)` already does this) or as a
   post-layout `Msg::ViewportChanged`, reconcile scroll in the reducer,
   and drop the `Cell` fields so `draw` is strictly `&App → pixels`.
 - **R7 — Declarative keymap on top.** Once R2/R3 exist, the binding
-  table already filed as `H-HYG-007` becomes trivial: `(mode, key) →
+  table already filed as `CSP-468` becomes trivial: `(mode, key) →
   Msg` rows, with the modal stack supplying the mode. Help text, hint
   footers, and dispatch all read the same table.
 
@@ -216,22 +216,22 @@ testable).
 ## Relationship To Filed Work
 
 Filed in `docs/backlog.md` § TUI Architecture Convergence: R1 →
-`H-TUI-001`, R2 → `H-TUI-002`, R3+R4 → `H-TUI-003`, R5 → `H-TUI-004`,
-R6 → `H-TUI-005`. R7 stays `H-HYG-007` (keybinding table), which the
-`H-TUI-003` modal stack later supplies with its mode column.
+`CSP-495`, R2 → `CSP-496`, R3+R4 → `CSP-497`, R5 → `CSP-498`,
+R6 → `CSP-499`. R7 stays `CSP-468` (keybinding table), which the
+`CSP-497` modal stack later supplies with its mode column.
 
 The review refines rather than replaces the previously filed stories:
-`H-TUI-001` builds on `H-HYG-006` (SnapshotIndex), extending "index the
-snapshot" to "make trees derived state"; `H-TUI-004` absorbs
-`H-HYG-008` (dual event loops — closed as folded); `H-TUI-003` gives
-`H-HYG-009`'s pins-widget split a contract to split *toward*. R2
-(effects as data, `H-TUI-002`) is the one genuinely new architectural
+`CSP-495` builds on `CSP-467` (SnapshotIndex), extending "index the
+snapshot" to "make trees derived state"; `CSP-498` absorbs
+`CSP-469` (dual event loops — closed as folded); `CSP-497` gives
+`CSP-470`'s pins-widget split a contract to split *toward*. R2
+(effects as data, `CSP-496`) is the one genuinely new architectural
 commitment — it is also the piece that makes the rest cheap, and owes
 an ADR when adopted since it changes how every future TUI feature is
 written.
 
-Suggested sequencing if adopted: `H-TUI-001` → `H-TUI-002` →
-`H-TUI-003` → `H-TUI-004` → `H-TUI-005`/`H-HYG-007` opportunistically.
-`H-TUI-001` stands alone and pays immediately (no discovery on view
-switches); `H-TUI-002` is the enabling investment; everything after is
+Suggested sequencing if adopted: `CSP-495` → `CSP-496` →
+`CSP-497` → `CSP-498` → `CSP-499`/`CSP-468` opportunistically.
+`CSP-495` stands alone and pays immediately (no discovery on view
+switches); `CSP-496` is the enabling investment; everything after is
 mechanical once it exists.

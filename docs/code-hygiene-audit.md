@@ -81,8 +81,8 @@ Each item below was confirmed by diff/hash, not just name collision.
   registry keyed by column id, with per-projection extras, would shrink
   these and make new columns single-site. Lower priority than A1/A2 since
   the drift risk is bounded by snapshot tests.
-- **A9. Already-tracked codec/tier duplication.** `H-REF-001` (declared
-  endpoint codec), `H-REF-002` (relation-kind codec), `H-REF-003` (resolver
+- **A9. Already-tracked codec/tier duplication.** `CSP-083` (declared
+  endpoint codec), `CSP-084` (relation-kind codec), `CSP-085` (resolver
   provenance tiers) remain valid and are not repeated here.
 
 ## B. Test Scaffolding Hygiene
@@ -114,8 +114,8 @@ Each item below was confirmed by diff/hash, not just name collision.
   each large `mod tests` to a sibling file (`#[cfg(test)] mod tests;` with
   `foo/tests.rs` or `#[path]`) — purely mechanical, zero behavior change,
   and it makes the production surface of a file visible at a glance.
-- **B4. Stale metrics in backlog stories.** `H-REF-006` says `cli.rs` is
-  961 lines (now 5,982); `H-REF-005` says `declared.rs` is 1,338 (now
+- **B4. Stale metrics in backlog stories.** `CSP-088` says `cli.rs` is
+  961 lines (now 5,982); `CSP-087` says `declared.rs` is 1,338 (now
   1,370). Refresh when filing new work so sizing is honest.
 
 ## C. Rust-Specific Hygiene
@@ -171,8 +171,8 @@ Each item below was confirmed by diff/hash, not just name collision.
   table the dispatcher uses, so they cannot drift.
 - **C4. Stringly-typed metadata** (`SourceMetadata.fields`, evidence
   strings like `codex_log_process_thread_match` scored at
-  `resolve/mod.rs:741`) — already tracked as `H-REF-008` and folded into
-  the `H-EXT-004` scope; not repeated here.
+  `resolve/mod.rs:741`) — already tracked as `CSP-090` and folded into
+  the `CSP-476` scope; not repeated here.
 
 ## D. Monoliths And One-Off Logic Worth Splitting
 
@@ -181,7 +181,7 @@ Production-line counts (tests excluded):
 | File | Prod lines | Note |
 | --- | --- | --- |
 | `src/tui/ui.rs` | ~3,245 | all views' render fns in one file; dispatch is centralized (3 `match view` sites) so per-view extraction is clean |
-| `src/cli.rs` | ~2,760 | `H-REF-006` already tracks the split; scope is stale (says 961 lines) |
+| `src/cli.rs` | ~2,760 | `CSP-088` already tracks the split; scope is stale (says 961 lines) |
 | `src/tui/widgets/pins.rs` | ~2,757 | one widget owning menu model + per-action forms + rect math |
 | `src/tui/app.rs` | ~2,676 | state + cursor reseating + per-view state maps |
 | `src/tui/runtime.rs` | ~2,640 | dual event loops (A7), key dispatch (C3), rename/pins action plumbing |
@@ -219,7 +219,7 @@ Explicitly defended, so cleanup enthusiasm doesn't erase good decisions:
 - The **provenance-first resolver** and evidence-preserving link model —
   verbose but load-bearing (ADRs 0002/0006).
 - The **runner seams** (`SystemX`/`FakeX`) — the offline-test story depends
-  on them; H-EXT-008 will unify, not remove.
+  on them; CSP-480 will unify, not remove.
 - The **id-type macro + node constructors** in `model/mod.rs` — right
   amount of abstraction already.
 - The **doc-comment culture** (module headers citing ADRs and story ids) —
@@ -232,7 +232,7 @@ Explicitly defended, so cleanup enthusiasm doesn't erase good decisions:
 ## Suggested Chunking
 
 Filed in `docs/backlog.md` § Code Hygiene And Simplification as
-`H-HYG-001` through `H-HYG-011`, matching HYG-1 … HYG-11 below in order.
+`CSP-462` through `CSP-472`, matching HYG-1 … HYG-11 below in order.
 The `H-HYG` entries are the tracking source of truth.
 
 Quick wins first (each independently landable, no behavior change):

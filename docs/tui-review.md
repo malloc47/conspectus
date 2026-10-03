@@ -203,18 +203,18 @@ the UI is functioning but not yet optimized.
 
 The concrete follow-up tasks are tracked in `docs/backlog.md` under Phase 8:
 
-- `T8-010`: render ANSI color in tmux previews
-- `T8-011`: strengthen selected/focused visual states **(resolved by the
+- `CSP-186`: render ANSI color in tmux previews
+- `CSP-187`: strengthen selected/focused visual states **(resolved by the
   styling overhaul — REVERSED selection, badge harness chips, section
   dividers, and the dense header all increase the recognition signal)**
-- `T8-012`: compress group and mux display labels **(partially resolved;
+- `CSP-188`: compress group and mux display labels **(partially resolved;
   group rows now carry summary chips so the operator gets density without
   reading the path)**
-- `T8-013`: make launch context a default expansion/selection hint
-- `T8-014`: make the status bar contextual to the selected row
-- `T8-015`: add a density mode for the sessions tree
-- `T8-016`: crop and annotate tmux previews for recognition
-- `T8-017`: add a visible search/filter workflow
+- `CSP-189`: make launch context a default expansion/selection hint
+- `CSP-190`: make the status bar contextual to the selected row
+- `CSP-191`: add a density mode for the sessions tree
+- `CSP-192`: crop and annotate tmux previews for recognition
+- `CSP-193`: add a visible search/filter workflow
 
 ADRs landed by the styling overhaul:
 

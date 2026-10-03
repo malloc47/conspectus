@@ -550,7 +550,7 @@ declared `(harness, cwd, display_name, mux)` tuple that
   reads `PinStaleMux` naming the pin that holds it.
 - launches a fresh `tmux [-L <socket>] new-session -s <mux.name>
   -c <cwd> <argv>` via the `TmuxRunner` mutation surface, then hands
-  the terminal off through the existing P8-010 exec-replace path.
+  the terminal off through the existing CSP-169 exec-replace path.
   When the mux exists but the harness has exited (`PinStaleMux`),
   launch injects the command into the existing pane via
   `tmux send-keys` rather than recreating the mux. When pane-process
@@ -867,7 +867,7 @@ until a follow-on ADR retires it.
 ### TUI Detail Navigation
 
 The right-panel detail view is a focused node inspector and graph
-relationship explorer (`T8-027` – `T8-031`), not a recursive report
+relationship explorer (`CSP-313` – `CSP-317`), not a recursive report
 renderer. The full layout, locked decisions, and per-kind field set
 live in [`docs/tui-detail-mockup.md`](tui-detail-mockup.md); this
 section captures the implemented contract.
@@ -921,7 +921,7 @@ inline. With the right pane focused:
   and other rows that carry `(truncated · o)` hints.
 
 Unresolved-evidence stubs render as placeholder rows whose `Enter` is
-inert in v1 (see follow-up `T8-032`).
+inert in v1 (see follow-up `CSP-318`).
 
 This supersedes the recursive inline linked-detail expansion (`e` =
 expand-in-place) the pane used to carry. Inline expansion made
@@ -946,7 +946,7 @@ and the TUI row builders (`src/tui/rows/*.rs`,
 `src/tui/{detail,explorer}.rs`) consume `&GraphSnapshot`
 directly and iterate the typed model. `src/query/` and the
 internal `materialize_snapshot` SQLite engine are gone
-(P11-011b/c/d, ADR 0082); `rusqlite` survives only for
+(CSP-448.02/CSP-448.03/CSP-448.04, ADR 0082); `rusqlite` survives only for
 provider-owned state such as OpenCode's on-disk read path.
 
 Filter, grouping, selection, and row-view-model assembly stay
@@ -972,7 +972,7 @@ resolved relationships are both available — the HTML view toggles
 between them; DOT renders both with distinct styling by default and
 collapses on `--candidates exclude`. `RuntimeProcess` nodes (ADR 0047)
 and unresolved-endpoint stubs (ADR 0005 / ADR 0018) render by default
-and are filterable. Emission is deterministic so the GV-002 / GV-003
+and are filterable. Emission is deterministic so the CSP-302 / CSP-303
 snapshot tests are stable. A live HTML view hosted by the continuous
 server (ADR 0038) is an explicit follow-on left to a later ADR.
 
@@ -1110,7 +1110,7 @@ the TUI keep one for their lifetime; one-shot commands start
 empty (ADR 0099).
 
 On startup the daemon attempts to seed `SnapshotState` from
-`graph.bin` (warm-restart per P11-009). Failure on any leg
+`graph.bin` (warm-restart per CSP-446). Failure on any leg
 (missing file, version mismatch, validation failure) falls
 through to first-cycle cold-rebuild semantics.
 
@@ -1124,7 +1124,7 @@ discovery providers, merges the result, re-resolves, and
 publishes the updated snapshot to both in-memory caches and the
 on-disk file via a single atomic-rename write.
 
-The one-shot CLI's resolution chain (P11-008 + P11-011a):
+The one-shot CLI's resolution chain (CSP-445 + CSP-448.01):
 
 1. If `conspectus serve` is reachable on the socket, request
    the resolved snapshot via the `snapshot` command and
@@ -1284,7 +1284,7 @@ questions that remain:
 
 - Is per-provider eviction granular enough, or should
   eviction also support per-repo / per-scan-root /
-  per-node-kind keys? P7-005 ships per-provider as the
+  per-node-kind keys? CSP-141 ships per-provider as the
   unit; finer granularity is deferred until a real pain
   point surfaces.
 - What is the right resolver re-run cadence on partial

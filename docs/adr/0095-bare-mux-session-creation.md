@@ -14,7 +14,7 @@ the operator's box:
   <cwd> <argv>` where `<argv>` is the harness's default launch argv
   (optionally spliced with `resume_argv`). The mux is owned by the
   pin; the operator's intent is "start the agent I declared."
-- **Worktree stream** (ADR 0094, H-WT-007). A worktree-backed pin
+- **Worktree stream** (ADR 0094, CSP-523). A worktree-backed pin
   realizes its worktree at launch and then runs the same
   pin-launch path inside the freshly-materialized worktree cwd.
   The mux is still owned by a pin.

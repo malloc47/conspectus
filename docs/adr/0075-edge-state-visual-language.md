@@ -28,7 +28,7 @@ highlight winners in mixed lists, is now functionally dead. The
 validated zone never needs it (every row is a winner); the Other
 zone never reaches it (Resolves rows don't land there).
 
-H-UI-005 in the backlog requested per-row glyph or chip plus color
+CSP-419 in the backlog requested per-row glyph or chip plus color
 hooks per `EdgeStateLabel` variant. With the validated / Other split
 already in place, the remaining work is the *per-row* distinction
 inside Other.
@@ -94,7 +94,7 @@ other field.
 
 ### 4. No group-level chip for candidate-only fan-outs
 
-The H-UI-007 backstop (and the still-open H-UI-006) ensures
+The CSP-421 backstop (and the still-open CSP-420) ensures
 candidate-only fan-outs surface as Other-zone rows in the
 `Conflict` state. The per-row `⚠ ` prefix plus the warning color
 make those rows scream "conflict" without a separate group chip.
@@ -136,7 +136,7 @@ Other row."
 - **The `★` marker exits the renderer.** One less glyph in the
   vocabulary, one less branch in `render_related_row`.
   `RelationshipLink.resolved_winner` stays available for non-
-  renderer consumers (diagnostics, JSON / DOT under H-VIS-005).
+  renderer consumers (diagnostics, JSON / DOT under CSP-412).
 - **Two new flat `[tui.theme]` keys.** Operators get
   independently-themable edge-state colors. The schema growth is
   small enough that ADR 0032's flat-map decision still holds.

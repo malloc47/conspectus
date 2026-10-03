@@ -26,7 +26,7 @@ A pin store is only re-read when one of those paths leads
 With neither a scan root nor a node cwd pointing into the repo, the
 store is never located, and the freshly-created pin vanishes on the
 next discovery cycle. This is a concrete, reported operator bug
-(H-PIN-ROOT-001): "creating a new pin outside of the cwd doesn't
+(CSP-503): "creating a new pin outside of the cwd doesn't
 appear when the repo it is registered in is not part of the search
 root."
 

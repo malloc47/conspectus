@@ -30,11 +30,11 @@ consumes those values is still tmux-only:
   is a single-slot `Option<Box<dyn TmuxRunner>>`. There's no
   place to hang a second backend's implementation.
 
-The H-EXT-010 story (zellij backend) and H-EXT-011 story
+The CSP-482 story (zellij backend) and CSP-483 story
 (hook mux-context probe) are the concrete downstream consumers
-that need this abstraction. H-EXT-008 is the shape story that
+that need this abstraction. CSP-480 is the shape story that
 lands the trait rename, a backend registry, and the
-`backend_key` dispatch seam. H-EXT-009 completes the surface by
+`backend_key` dispatch seam. CSP-481 completes the surface by
 migrating attach / pin validation to capability outcomes instead
 of the harmless-but-lying `"tmux"` string checks.
 
@@ -76,7 +76,7 @@ pub trait MuxBackend: Send + Sync {
 The capability methods keep their `Unsupported` defaults. A new
 backend implements only the methods it actually supports; every
 caller consults the returned outcome instead of assuming the
-backend can perform the op (H-EXT-009 completes the
+backend can perform the op (CSP-481 completes the
 capability-gate migration by removing the pre-existing
 `backend == "tmux"` string checks in `src/tui/actions.rs` and
 `src/pins.rs`).
@@ -123,7 +123,7 @@ MuxBackend>>`. `from_env` populates a single tmux entry
 behavior; a multi-backend host adds more entries via
 `with_mux_backend`.
 
-Backwards-compat builder aliases (H-EXT-008 preserves the
+Backwards-compat builder aliases (CSP-480 preserves the
 pre-existing names so the ~10 call sites across dev_scenarios /
 integration tests keep compiling without a mass rename):
 
@@ -147,11 +147,11 @@ Registry accessors:
 
 The pre-H-EXT-008 tmux methods accept `socket_name: Option<&str>`
 so a callers with a non-default tmux socket can address it
-directly. The H-EXT-010 zellij backend has no equivalent — it
+directly. The CSP-482 zellij backend has no equivalent — it
 addresses a global session set — so the parameter's tmux-specific
 meaning becomes stale in a multi-backend world.
 
-H-EXT-008 keeps the `socket_name` name unchanged. Generalizing
+CSP-480 keeps the `socket_name` name unchanged. Generalizing
 to a `namespace: Option<&str>` parameter across all six methods
 is a documented follow-up:
 
@@ -188,12 +188,12 @@ zellij backend keeps the review focused.
 behavior changes; snapshot cache, pin config wire format,
 provenance stamps are byte-identical.
 
-**For H-EXT-009.** Attach and pin validation branch on the
+**For CSP-481.** Attach and pin validation branch on the
 outcome returned by `attach_session` / `new_session` / etc.
 instead of on `backend == "tmux"`. The trait's `Unsupported`
 default is the mechanism.
 
-**For H-EXT-010.** Adding a zellij backend is:
+**For CSP-482.** Adding a zellij backend is:
 1. Author `discovery/zellij/mod.rs` with `struct SystemZellij;
    impl MuxBackend for SystemZellij { fn backend_key() { "zellij" }
    … }`. Implement `list_sessions` + `attach_session`; leave
@@ -204,10 +204,10 @@ default is the mechanism.
 3. Push the backend onto `mux_backends` in `from_env`.
 
 Zero edits to `TmuxDiscovery`, zero edits to the CLI rename
-path, zero edits to pin-launch dispatch beyond what H-EXT-009
+path, zero edits to pin-launch dispatch beyond what CSP-481
 already delivers.
 
-**For H-EXT-011.** The hook mux-context probe (which today
+**For CSP-483.** The hook mux-context probe (which today
 carries hardcoded tmux-shaped fields — `session_name`,
 `native_id`, `pane_id`, `socket_path` — into
 `HookTmuxRecord`) generalizes to
@@ -295,7 +295,7 @@ backend calls; today the wrapper is a clean seam.
 - **Whether `TmuxOutcome` etc. eventually become
   `MuxSessionListOutcome` etc.** The variants are already
   backend-neutral; the rename is cosmetic. Land alongside
-  H-EXT-010 or as its own mechanical commit.
+  CSP-482 or as its own mechanical commit.
 - **Whether the discovery `TmuxDiscovery` wrapper collapses
   into `MuxBackend::discover(&self, ctx) -> Result<GraphFragment>`.**
   Requires deciding how to share provenance stamping across
@@ -308,10 +308,10 @@ backend calls; today the wrapper is a clean seam.
 ## Related ADRs
 
 - ADR 0028 (hook sidecar records) — the hook-mux-context probe
-  target of H-EXT-011; ADR 0028's schema will grow a `backend`
+  target of CSP-483; ADR 0028's schema will grow a `backend`
   field once multiple backends can produce sidecars.
 - ADR 0029 (lockstep session aliases) — the rename surface
-  that becomes capability-gated in H-EXT-009.
+  that becomes capability-gated in CSP-481.
 - ADR 0057 (session pins) — carries the `mux.backend` field
   this ADR keys on; supersession of the tmux-specific launch
   prose is a follow-up prose commit.

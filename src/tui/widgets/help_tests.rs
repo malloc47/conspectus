@@ -65,7 +65,7 @@ fn every_keybindings_entry_appears_in_help_sections() {
     }
     assert!(
         missing.is_empty(),
-        "H-HYG-007 wave 5 drift: KEYBINDINGS entries missing from help sections:\n{}",
+        "CSP-468 wave 5 drift: KEYBINDINGS entries missing from help sections:\n{}",
         missing.join("\n")
     );
 }

@@ -7,8 +7,8 @@
 replacement on-disk format).
 
 The user-facing SQL query surface this ADR chose SQLite to power
-is gone (`conspectus query` removed in P11-010). The on-disk
-persistence layer the engine backed is gone (P11-011a). SQLite
+is gone (`conspectus query` removed in CSP-447). The on-disk
+persistence layer the engine backed is gone (CSP-448.01). SQLite
 survives only as an internal in-memory query engine consumed by
 the output renderers — `query::materialize_snapshot` materializes
 a transient `:memory:` database per render call. The
@@ -106,7 +106,7 @@ parameters.
 - **FTS5** (optional, kept available for future full-text search
   over preview text and PR bodies). Not required at v1.
 - **`sqlite-vec`** is explicitly **deferred** to its own future ADR.
-  P9-008 in `docs/backlog.md` stays blocked until that ADR exists.
+  CSP-278 in `docs/backlog.md` stays blocked until that ADR exists.
 
 ### Boundaries
 
@@ -122,9 +122,9 @@ parameters.
 - The bundled native lib's ~1MB binary delta is small enough that
   the existing distribution policy (ADR 0016) needs only a
   paragraph-sized amendment. ADR 0040 captures it.
-- Snapshot persistence under SQLite is settled in P7-001's ADR
+- Snapshot persistence under SQLite is settled in CSP-137's ADR
   deliverable, which absorbs the SQLite-specific format choices.
-- Continuous-server transport under SQLite is settled in P7-004's
+- Continuous-server transport under SQLite is settled in CSP-140's
   ADR deliverable, which collapses around WAL-mode read sharing
   plus a Unix-socket write path.
 
@@ -135,7 +135,7 @@ Query Engine") may land before this ADR and its dependent ADRs are
 accepted. The dependency chain is:
 
 ```
-0036 (this ADR) ─┬─→ 0037 (P7-001, persistence) ─→ 0038 (P7-004, transport)
+0036 (this ADR) ─┬─→ 0037 (CSP-137, persistence) ─→ 0038 (CSP-140, transport)
                  ├─→ 0039 (library API)
                  ├─→ 0040 (distribution)
                  └─→ 0041 (resolver stays in Rust)
@@ -156,19 +156,19 @@ parallel with this one.
   portability. Existing JSON-snapshot expectations in `docs/design.md`
   §"Graph Snapshot Persistence" need rewriting once ADR 0037 lands.
 - `conspectus query <sql>` becomes a real CLI surface. Saved views
-  (P9-006) name the joins that today's hand-rolled view builders
+  (CSP-276) name the joins that today's hand-rolled view builders
   encode in Rust; ad-hoc SQL becomes the natural exploration tool,
   with the existing structured CLI commands (`session`, `table`,
   `node show`, TUI) continuing to use the in-Rust pipeline.
-- The Phase 7 ADR dependency graph reshapes: P7-001 and P7-004 are
+- The Phase 7 ADR dependency graph reshapes: CSP-137 and CSP-140 are
   no longer parallel because the storage choice that 0036 makes
-  flows into the persistence ADR (P7-001) which in turn shapes the
-  transport ADR (P7-004).
+  flows into the persistence ADR (CSP-137) which in turn shapes the
+  transport ADR (CSP-140).
 - The `H-OBS-*` hardening cluster (text-tree projection, filter
   flags, `--explain`) softens — once ad-hoc SQL exists, the natural
   exploratory and filtering tool is `conspectus query`. Each
   H-OBS-* story stays in the backlog but reassesses its priority
-  after P9-004 ships.
+  after CSP-274 ships.
 - DuckDB-specific futures (Parquet ingest, columnar analytics over
   the snapshot, SQL/PGQ pattern syntax via DuckPGQ) are off the
   table at this engine choice. If any of them ever becomes a
@@ -210,13 +210,13 @@ parallel with this one.
 - **Status quo (no engine, defer stage 3 again).** Rejected because
   the user has activated the stage-3 gate per ADR 0035 and
   recorded the requirement. Continuing to defer accumulates a
-  hardening backlog (`H-OBS-001`, `H-OBS-003`, `H-OBS-004`) that
+  hardening backlog (`CSP-093`, `CSP-095`, `CSP-096`) that
   is partially redundant with a real query surface.
 
 ## Open Questions Answered
 
 - **Why now?** The Phase 7 persistence and server-transport ADRs
-  (P7-001, P7-004) are both unstarted. Settling them before the
+  (CSP-137, CSP-140) are both unstarted. Settling them before the
   engine choice would lock in a JSON-canonical format that fights
   a future SQL surface. Settling the engine now lets Phase 7's
   ADRs absorb the right concrete shape.
@@ -234,7 +234,7 @@ parallel with this one.
   the per-row cost difference is dominated by the I/O of
   rendering, not the recursive expansion.
 - **Does this constrain a future move to DuckDB or CozoDB?** No.
-  The schema designed in P9-002 mirrors the in-Rust model, which
+  The schema designed in CSP-272 mirrors the in-Rust model, which
   is the source of truth. Migrating the storage layer is a
   loader-rewrite, not a model rewrite. The `SnapshotIndex`
   selectors stay unchanged.

@@ -6,9 +6,9 @@ Accepted
 
 ## Context
 
-`H-WS-003` was filed to audit the four non-Sessions row builders
+`CSP-407` was filed to audit the four non-Sessions row builders
 (Mux, Prs, Forks, Union) for the same (A)/(B) workspace-grouping
-conflation that motivated `H-WS-001` in the Sessions view. The
+conflation that motivated `CSP-405` in the Sessions view. The
 backlog speculated that Mux (session→workspace→mux chain) and Prs
 (branch→repo→workspace) likely produced false-positive workspace
 grouping in daily-driver setups, with Forks (direct
@@ -41,13 +41,13 @@ session→workspace chain — both structurally the (B) "weak
 membership" case at the session level. There is no analog of "this
 PR is workspace-rooted." Implementing workspace grouping in these
 views would either rebrand the (B) relationship as primary
-(reintroducing the conflation `H-WS-001` removed) or invent a new
+(reintroducing the conflation `CSP-405` removed) or invent a new
 (A)-like definition per node kind.
 
-The Workspaces view introduced by `H-WS-002` is the canonical
+The Workspaces view introduced by `CSP-406` is the canonical
 place for workspace-first navigation. It already lists workspaces
 as top-level rows with `in workspace` (A-class sessions) and
-`related` (B-class sessions) subgroups, and `H-WS-002a` will extend
+`related` (B-class sessions) subgroups, and `CSP-406.01` will extend
 it with Provider / Activity / Repo groupings. Surfacing workspaces
 as a peer grouping inside Mux/Prs/Forks/Union duplicates this view
 without giving it a useful (A)/(B) shape.
@@ -58,13 +58,13 @@ Drop the `Workspace` variant from `MuxGrouping`, `UnionGrouping`,
 `PrsGrouping`, and `ForksGrouping` in `src/tui/mod.rs`. Update
 `Grouping::as_str`, `Grouping::values_for`, and the dead match arm
 at `src/tui/rows/mux.rs:191`. Existing comments in the four row
-builders that deferred chip semantics to `H-WS-003` are updated to
+builders that deferred chip semantics to `CSP-407` are updated to
 record that the chip has no analog in views that do not implement
 workspace grouping.
 
 The Sessions view retains its strict-only nesting plus the
-(B)-class chip (`H-WS-001`). The Workspaces view (`H-WS-002`,
-`H-WS-002a`) is the only view that organizes around workspaces.
+(B)-class chip (`CSP-405`). The Workspaces view (`CSP-406`,
+`CSP-406.01`) is the only view that organizes around workspaces.
 
 Configs that set `[tui.views.<mux|prs|forks|union>].grouping =
 "workspace"` will now produce a `ConfigDiagnostic` listing the
@@ -100,13 +100,13 @@ makes the breakage visible and points at the menu of valid values.
 ### A. Implement workspace grouping properly in each view
 
 Build workspace headers and (A)/(B) semantics in each of the four
-row builders, mirroring the `H-WS-001` strict-only + chip pattern.
+row builders, mirroring the `CSP-405` strict-only + chip pattern.
 Rejected because:
 
 - The (A)/(B) distinction is not analogous outside the Sessions
   view. PRs and forks have no cwd to anchor (A) on; using the
   branch→repo→workspace chain as (A) re-introduces the exact
-  conflation `H-WS-001` removed.
+  conflation `CSP-405` removed.
 - Four parallel row-tree rewrites are a substantial scope to land
   a feature whose user-facing surface is largely covered by the
   Workspaces view. The duplication invites drift: each view's
@@ -134,7 +134,7 @@ Forks, and Union. Rejected because:
 
 The status quo. Rejected because a menu entry that silently maps
 to flat behavior is precisely the kind of UX confusion that
-`H-WS-001` was filed to remove. Sustaining a dead menu entry
+`CSP-405` was filed to remove. Sustaining a dead menu entry
 behind a `// TODO` comment makes the surface harder to read for
 both operators and future contributors.
 
@@ -142,7 +142,7 @@ both operators and future contributors.
 
 - *Q: Does the existing `MuxGrouping::Workspace` /
   `PrsGrouping::Workspace` need fixing before
-  `H-WS-002` lands, or is it low-traffic enough to defer
-  (`H-WS-003`)?* (from `docs/plans/workspace-view-redesign.md`)
+  `CSP-406` lands, or is it low-traffic enough to defer
+  (`CSP-407`)?* (from `docs/plans/workspace-view-redesign.md`)
   **A: Neither — the audit found those variants are unimplemented,
   not buggy. They are dropped here.**

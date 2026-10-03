@@ -1,10 +1,10 @@
-# Sessions-pane header audit (H-UI-004)
+# Sessions-pane header audit (CSP-418)
 
 Status: draft, pending operator review before implementation.
 
 ## Why this audit exists
 
-H-UI-001 (per-row binary mux chip per ADR 0072) and H-UI-002 (kind-glyph
+CSP-415 (per-row binary mux chip per ADR 0072) and CSP-416 (kind-glyph
 identity per ADR 0073) reshuffled where ambiguity, harness identity,
 and row-kind signals live in the TUI. The header was designed before
 those shifts, and several of its elements were paying for signals that

@@ -77,7 +77,7 @@ Each entry has:
 
 - `node`: a typed endpoint that mirrors ADR 0014's `DeclaredEndpoint`
   encoding. Reusing the same encoding keeps the two write surfaces visually
-  consistent and lets a single endpoint codec serve both (per `H-REF-001`).
+  consistent and lets a single endpoint codec serve both (per `CSP-083`).
 - `display_name`: required non-empty string. An entry with empty
   `display_name` is invalid; alias removal deletes the entry rather than
   storing an empty value.
@@ -139,7 +139,7 @@ mux nodes would orphan on every rename. Therefore:
 - Aliases exist only for nodes whose ids are stable across the rename
   operation, which today means agent sessions.
 - Future mux backends with stable ids decoupled from display names (zellij,
-  per `H-FUTURE-001`) may make a mux-alias row meaningful; that decision is
+  per `CSP-111`) may make a mux-alias row meaningful; that decision is
   deferred to whichever ADR introduces the backend.
 
 ### Mux Lockstep Policy
@@ -181,7 +181,7 @@ decision keeps the door open without committing to it.
   applied at projection time.
 - Aliases hide harness-native titles in the default render. Operators who
   want to see the underlying title need a read-path command (`conspectus
-  alias list`, filed as `H-RENAME-008`).
+  alias list`, filed as `CSP-238`).
 - Mux node-id instability is handled by not storing mux aliases at all.
   Renames mutate native names directly. A future mux backend with stable
   ids would need a sibling ADR before adopting an alias row.

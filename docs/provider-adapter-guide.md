@@ -130,8 +130,8 @@ Tier 2 for any transcript-payload access).
   `discover_local_warm_with` using
   `config.take_mux_backend_by_key(YOUR_KEY)`.
 
-**Worked example:** `discovery/zellij/mod.rs` — the H-EXT-010
-acceptance test for the H-EXT-008 seam. `SystemZellij` implements
+**Worked example:** `discovery/zellij/mod.rs` — the CSP-482
+acceptance test for the CSP-480 seam. `SystemZellij` implements
 `list_sessions` + `attach_session`; the rest keep their
 `Unsupported` defaults. `ZellijDiscovery` parses zellij's
 human-formatted output. Zero edits outside the new module +
@@ -186,10 +186,10 @@ needed.
   `GhRunner` trait, `SystemGh` impl, `FakeGh` for tests,
   `GhPullRequestParser`, `GitHubForgeProvider` implementing
   both `DiscoveryProvider` and `ForgeAdapter`.
-- `discovery/forge/gitlab.rs` — H-EXT-013 skeleton adapter
+- `discovery/forge/gitlab.rs` — CSP-485 skeleton adapter
   showing the minimal `ForgeAdapter` shape when real
   discovery is blocked pending an identity model ADR
-  (H-DESIGN-002 for gitlab).
+  (CSP-108 for gitlab).
 
 **What the registry provides for free:** origin-URL routing
 (`ForgeDiscovery` fans repos to adapters by
@@ -201,7 +201,7 @@ under `tests/fixtures/<forge>/pr-list.json`.
 **What needs an ADR:** the forge's `ForgePr` identity
 model (owner/repo/number vs. host/project/iid) if it
 differs from GitHub's. Multi-forge identity is currently
-unsettled — see H-DESIGN-002.
+unsettled — see CSP-108.
 
 ## Orchestrator adapters
 
@@ -221,7 +221,7 @@ unsettled — see H-DESIGN-002.
 
 **No shared trait beyond `DiscoveryProvider`.** Orchestrators
 have divergent filesystem shapes and no common attribution
-rules. ADR 0060 kept this open; H-EXT-014 preserves the
+rules. ADR 0060 kept this open; CSP-486 preserves the
 stance.
 
 **Registration:**
@@ -249,8 +249,8 @@ under `tests/fixtures/<orchestrator>/` matching the
 discovery pass.
 
 **What needs an ADR:** an orchestrator with a mutation
-capability (e.g. rename routing per H-AGENTMUX-008 for
-agent-deck) needs H-EXT-015's optional
+capability (e.g. rename routing per CSP-451 for
+agent-deck) needs CSP-487's optional
 `OrchestratorMutation` trait shape, which is currently
 deferred pending its first consumer.
 
@@ -265,7 +265,7 @@ harness's own config (`.claude/settings.json`,
 ## Adapter conformance
 
 Every family has a shared invariant suite at
-`tests/adapter_conformance.rs` (H-EXT-016). A new adapter
+`tests/adapter_conformance.rs` (CSP-488). A new adapter
 should pass the family-specific invariant test set out of
 the box; failing one means the registration is incomplete
 (wrong key, missing provider descriptor, class mismatch).

@@ -2,16 +2,16 @@
 
 ## Status
 
-Accepted. Applied across the codebase in `H-RUST-013`; enforced by
+Accepted. Applied across the codebase in `CSP-566`; enforced by
 `tests/comment_hygiene.rs`.
 
 ## Context
 
 Conspectus is planned in `docs/backlog.md`, and each story has an ID
-(`H-SERVE-PERF-002`, `P11-011a`, `T8-040`). While stories were being
+(`CSP-510`, `CSP-448.01`, `CSP-326`). While stories were being
 built, those IDs went into code comments: as prefixes
-(`// H-EXT-004: dispatch to the registered adapter`), parentheticals
-(`(H-WT-003 / ADR 0093)`), and narration of history ("preserves the
+(`// CSP-476: dispatch to the registered adapter`), parentheticals
+(`(CSP-508 / ADR 0093)`), and narration of history ("preserves the
 pre-H-EXT-004 if-chain", "wave 2 will move this into the reducer").
 About 1,000 comment lines carried one before the 0.1.0 cleanup.
 
@@ -40,7 +40,7 @@ its shape.
 - ADR references are welcome.
 - A comment may point at an **open** backlog item when it describes a
   known gap. It says so explicitly, for example "open work (backlog
-  `T8-009`)". These pointers are removed when the item closes.
+  `CSP-185`)". These pointers are removed when the item closes.
 - `tests/comment_hygiene.rs` scans the Rust sources under `src/`,
   `tests/`, and `examples/`. It fails when a comment line contains a
   backlog ID without the word "backlog" on that line.

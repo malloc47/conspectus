@@ -16,12 +16,12 @@ in-memory database — that's an internal implementation choice
 that survives because inverting the Phase 10 migration to
 restore in-memory rendering is multi-day work that doesn't
 deliver any user-visible architectural improvement beyond what
-P11-011a already shipped. P11-011b/c/d would close that loop
+CSP-448.01 already shipped. CSP-448.02/CSP-448.03/CSP-448.04 would close that loop
 if pursued.
 
 The TUI's `read_snapshot(database.conn())` sites and the
 materialization in `App::database` are documented retirement
-targets in P11-011d.
+targets in CSP-448.04.
 
 Original status: Accepted.
 

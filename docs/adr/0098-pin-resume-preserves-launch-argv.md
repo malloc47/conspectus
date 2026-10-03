@@ -24,7 +24,7 @@ Pins routinely carry a configured `launch.argv` with:
 - **Launch options** — `--dangerously-skip-permissions` (the
   `skip permissions` toggle in the pin form), model flags, etc.
 
-Observed failure (H-PIN-RESUME-ARGV-001): a pin with
+Observed failure (CSP-531): a pin with
 `launch.argv = ["atelier", "exec", "claude",
 "--dangerously-skip-permissions"]` was stopped and relaunched; the
 sidecar had a recorded session, so tmux ran `claude --resume <id>`.

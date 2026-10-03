@@ -6,10 +6,10 @@ Accepted.
 
 ## Context
 
-H-TBL-001 through H-TBL-005 modernized the renderer behind
+CSP-126 through CSP-130 modernized the renderer behind
 `conspectus session`. The renderer now serves more than agent sessions —
 PR identifiers, fork lineage, mux session names, and checkout cwds all
-appear as cells. Once H-TBL-008 / H-TBL-009 add `prs` and `forks`
+appear as cells. Once CSP-148 / CSP-149 add `prs` and `forks`
 row-types, the `session` framing becomes actively misleading: a row in
 those tables is a PR or a fork, not a session.
 
@@ -28,7 +28,7 @@ Concrete pain points with the current shape:
   preferences (column lists, layout overrides), which fits poorly into
   a single `[session]` table.
 
-The H-TBL-007 column registry needs a stable namespace for per-row-type
+The CSP-147 column registry needs a stable namespace for per-row-type
 defaults. Without committing to a command shape and a config key shape,
 that work would later require renaming both surfaces in lockstep with
 broken backwards-compat for any user who picked up the column
@@ -44,11 +44,11 @@ Replace `conspectus session [--projection X]` with a `conspectus table
 
 ```sh
 conspectus table sessions [--wide | --width N] [--layout {columnar|card}]
-                          [--scan-root PATH]... [--columns LIST]   # H-TBL-007
+                          [--scan-root PATH]... [--columns LIST]   # CSP-147
 conspectus table mux      [...]
 conspectus table union    [...]
-conspectus table prs      [...]                                    # H-TBL-008
-conspectus table forks    [...]                                    # H-TBL-009
+conspectus table prs      [...]                                    # CSP-148
+conspectus table forks    [...]                                    # CSP-149
 ```
 
 - The row-type is a required positional. There is no default — the
@@ -71,14 +71,14 @@ conspectus table forks    [...]                                    # H-TBL-009
 ```toml
 # .conspectus.toml or $XDG_CONFIG_HOME/conspectus/config.toml
 [table.sessions]
-# (empty in H-TBL-006; gains `columns = [...]` in H-TBL-007)
+# (empty in CSP-146; gains `columns = [...]` in CSP-147)
 
 [table.mux]
 
 [table.union]
 
-[table.prs]    # registered when H-TBL-008 lands
-[table.forks]  # registered when H-TBL-009 lands
+[table.prs]    # registered when CSP-148 lands
+[table.forks]  # registered when CSP-149 lands
 ```
 
 - Top-level table is `[table]`. Every row-type has its own subsection
@@ -99,15 +99,15 @@ conspectus table forks    [...]                                    # H-TBL-009
   are unchanged.
 - The text-table renderer (`src/output/table.rs`), short row id
   (`node_short_id`), and width-aware truncation continue to back every
-  row-type. H-TBL-006 changes only the CLI shape and the config key
+  row-type. CSP-146 changes only the CLI shape and the config key
   layout; no renderer behavior changes.
-- The `node show` resolver (H-TBL-005) is unaffected.
+- The `node show` resolver (CSP-130) is unaffected.
 
 ## Consequences
 
 - Adding a row-type is now a structural change (a new subcommand)
   rather than a flag-enum expansion. Each row-type owns its own
-  `--help`, column registry (H-TBL-007), and any row-type-specific
+  `--help`, column registry (CSP-147), and any row-type-specific
   flags that emerge later.
 - Users with `[session]` in `.conspectus.toml` see a stderr diagnostic
   on the next run pointing at the renamed schema. Their command-line
@@ -152,7 +152,7 @@ conspectus table forks    [...]                                    # H-TBL-009
 - The internal `Projection` enum is not renamed in this ADR; it
   continues to back the renderer. A future ADR may rename it to
   `RowsKind` if the renderer's public API grows beyond table
-  rendering, but that is out of scope for H-TBL-006.
+  rendering, but that is out of scope for CSP-146.
 - `[table.<rows>]` subsections are pre-created for every registered
   row-type at the schema level; subsections for row-types Conspectus
   does not know about surface a diagnostic and are ignored.

@@ -11,13 +11,13 @@ projections. When the resolver makes a surprising choice, when a TUI row
 renders unexpectedly, or when a named replay scenario gains new
 candidate/resolved structure, there is no compact way to see the graph
 shape directly. The backlog tracks this as the **GV** workstream:
-`GV-001` (this ADR), `GV-002` (`conspectus graph --format dot`),
-`GV-003` (`conspectus graph --format html`), and `GV-004` (workflow
+`CSP-301` (this ADR), `CSP-302` (`conspectus graph --format dot`),
+`CSP-303` (`conspectus graph --format html`), and `CSP-304` (workflow
 docs).
 
-The blockers are now cleared. `H-MUXPROC-FU-006` shipped node-detail
+The blockers are now cleared. `CSP-312` shipped node-detail
 process diagnostics and the `process-cardinality` /
-`codex-fd-current` scenarios; `TEST-006` exposed named replay
+`codex-fd-current` scenarios; `CSP-306` exposed named replay
 scenarios to the CLI and TUI through `conspectus dev scenario …`. The
 graph model is stable enough to visualize: 8 node kinds (`Repo`,
 `Checkout`, `Branch`, `Workspace`, `AgentSession`, `MuxSession`,
@@ -30,7 +30,7 @@ The current `conspectus graph` command at `src/cli.rs:1105` accepts
 single-variant enum the new formats plug into.
 
 Several decisions interact and need to be settled together so
-`GV-002` and `GV-003` are not blocked relitigating them:
+`CSP-302` and `CSP-303` are not blocked relitigating them:
 
 1. **Output formats and what each is for.** DOT is for piping through
    Graphviz (`dot -Tsvg`, `dot -Tpng`) for static inspection, code
@@ -89,7 +89,7 @@ resolved `GraphSnapshot`; neither replaces JSON.
 
 Both formats accept `--scan-root` like the existing JSON branch, and
 both render named replay scenarios through
-`conspectus dev scenario graph --format {dot,html}` once `TEST-006`'s
+`conspectus dev scenario graph --format {dot,html}` once `CSP-306`'s
 scenario plumbing is extended (already present for JSON; the new
 formats follow the same path through `ScenarioWorld::snapshot`).
 
@@ -244,8 +244,8 @@ Both DOT and HTML emit nodes and edges in a stable order:
 - Floating-point confidence values are rendered with a fixed-width
   format so trivial precision drift does not destabilize snapshots.
 
-This is a non-negotiable contract that snapshot tests in `GV-002` /
-`GV-003` rely on.
+This is a non-negotiable contract that snapshot tests in `CSP-302` /
+`CSP-303` rely on.
 
 ### 9. Top-level `[theme]` with surface-specific overrides
 
@@ -378,7 +378,7 @@ needs the driver to be wired against a streaming payload source.
   CHANGELOG entry has to identify the version bump.
 - The shared `[theme]` table is new config surface and needs a
   parallel diagnostic policy (soft-fail to defaults, per ADR 0032).
-- Snapshot tests in `GV-002` / `GV-003` lock in the deterministic-
+- Snapshot tests in `CSP-302` / `CSP-303` lock in the deterministic-
   ordering contract from decision 8. Future renderer changes that
   perturb that order are breaking changes to the test fixtures and
   have to be intentional.
@@ -434,7 +434,7 @@ The static HTML export is the v1. A natural follow-on is a
 0038), where the page connects back to the server (most likely over
 the existing Unix socket via a small HTTP shim, or over a localhost
 loopback) and re-renders the graph as discovery refreshes land. This
-is deliberately out of scope for `GV-003`.
+is deliberately out of scope for `CSP-303`.
 
 A follow-up ADR should resolve, at minimum:
 

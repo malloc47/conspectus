@@ -6,7 +6,7 @@ Accepted
 
 ## Context
 
-`H-MUXPROC-015` found a concrete drift case: Claude Code was launched in tmux
+`CSP-227` found a concrete drift case: Claude Code was launched in tmux
 with `claude --resume <session A>`, then the operator used in-app `/resume` to
 switch to session B. The process argv still named A, so Conspectus treated
 start-command evidence as the active session and attached the mux indicator to

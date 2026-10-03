@@ -29,7 +29,7 @@ conspectus graph --format html [--scan-root PATH]...
     [--diagnostic-nodes {include,exclude}]
 ```
 
-Debug builds also expose the named replay scenarios from `TEST-006`:
+Debug builds also expose the named replay scenarios from `CSP-306`:
 
 ```sh
 conspectus dev scenario graph --format {json,dot,html} <scenario-name>

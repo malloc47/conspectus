@@ -31,7 +31,7 @@ The supporting machinery already exists:
   config, with `select_store_for_declaration` nearest-store selection.
 - ADR 0029: alias overlay with `display_name` precedence
   `alias > title > id-suffix`, and lockstep mux rename via
-  `TmuxRunner::rename_session` (H-RENAME-003).
+  `TmuxRunner::rename_session` (CSP-234).
 - ADR 0005: unresolved endpoint evidence — declarations that point at
   not-yet-discovered sessions are already a first-class graph concept.
 - ADR 0018: intra-harness `parent_session` lineage covers compaction
@@ -39,7 +39,7 @@ The supporting machinery already exists:
   `agent_session_id` change.
 - ADR 0027: workspace detection precedence settled the "deeper cwd
   wins" pattern that pin binding can reuse.
-- P8-010 / `src/tui/actions.rs`: exec-replace into `tmux attach-session`
+- CSP-169 / `src/tui/actions.rs`: exec-replace into `tmux attach-session`
   is the existing pattern for handing the terminal to tmux.
 
 What is missing is the surface that combines them: a persisted intent,
@@ -289,7 +289,7 @@ non-default sockets thread `-L <name>` through every tmux invocation:
 
 - `new_session(socket_name: Option<&str>, name: &str, cwd: &Path, argv: &[OsString]) -> Result<TmuxNewSessionOutcome>`
 - `attach_session(socket_name: Option<&str>, name: &str) -> Result<TmuxAttachOutcome>`
-  — wraps the exec-replace pattern from P8-010 / `src/tui/actions.rs`
+  — wraps the exec-replace pattern from CSP-169 / `src/tui/actions.rs`
   so callers can choose between `tmux [-L <socket>] attach-session -t <name>`
   (outside tmux) and `tmux [-L <socket>] switch-client -t <name>`
   (when `$TMUX` is set, to avoid nested client errors).
@@ -349,7 +349,7 @@ around editing `pin.mux.name` in the TOML store). The TUI exposes
 the same action as a one-key rebind on the unbound pin row.
 
 The CLI binary is Unix-only when invoking the exec-replace path,
-matching the existing P8-010 constraint. On Windows or in
+matching the existing CSP-169 constraint. On Windows or in
 non-attaching contexts (CI, scripts, `--no-attach`) launch returns
 after `new_session` succeeds and prints the attach command for the
 operator to run.
@@ -366,7 +366,7 @@ with v1 defaults:
 - `codex`: `["codex"]`
 - `claude-code`: `["claude"]`
 - `opencode`: `["opencode"]`
-- `aider`: `["aider"]` (subject to the H-AGENTMUX-001 audit; aider's
+- `aider`: `["aider"]` (subject to the CSP-131 audit; aider's
   per-repo state shape may need additional flags)
 
 Default argv intentionally carries no model, prompt, or feature flags.
@@ -407,7 +407,7 @@ Sessions row tree renders one row per pin:
 - **Bound pin row**: identical to today's agent-session row but
   carries a small `★` glyph (reserved here; final glyph picked during
   implementation against `Theme`) indicating pin provenance.
-  `Enter` / `a` attach via the existing P8-010 flow. `R` renames with
+  `Enter` / `a` attach via the existing CSP-169 flow. `R` renames with
   lockstep.
 
 Mux row tree renders the pin-derived mux as an ordinary mux row
@@ -466,7 +466,7 @@ conspectus pin adopt <id> <mux-name> [--harness <key>] [--display <name>]
 mtime-touch, or content-modify pin-bearing config files. Only the
 explicit mutation commands above (and the TUI write paths they back)
 may mutate `[pins]`. This mirrors the ADR 0014 / ADR 0029 contract
-and the existing test patterns from `P5-004`.
+and the existing test patterns from `CSP-063`.
 
 ## Consequences
 
@@ -474,7 +474,7 @@ and the existing test patterns from `P5-004`.
   discovery. The unresolved-endpoint evidence machinery from ADR 0005
   carries the rendering; no synthetic `AgentSession` nodes are
   invented.
-- The first process-spawning surface lands. P8-010's
+- The first process-spawning surface lands. CSP-169's
   exec-replace-into-tmux is the precedent; this extends it to
   `tmux new-session` and `tmux send-keys`. The `TmuxRunner` trait
   grows three new defaulted methods so existing implementations and
@@ -526,7 +526,7 @@ and the existing test patterns from `P5-004`.
   keeps row builders, the resolver, and the TUI from conflating
   "intent to create a session" with "evidence of a relationship that
   could not be resolved."
-- The H-AGENTMUX adapter workstream (especially `H-AGENTMUX-002`
+- The H-AGENTMUX adapter workstream (especially `CSP-122`
   agent-deck multi-repo workspace detection) remains useful and
   complementary: pins declare the *next* logical session, while
   the agent-mux adapters extract *existing* state from other tools.
@@ -789,7 +789,7 @@ These are added to Open Questions Deferred rather than v1 scope.
   lockstep contract.
 - Launch spawns a tmux session via `TmuxRunner::new_session` and
   hands the terminal off via `TmuxRunner::attach_session`
-  (exec-replace, mirror of P8-010). Inside an existing tmux client,
+  (exec-replace, mirror of CSP-169). Inside an existing tmux client,
   `attach_session` translates to `tmux switch-client`. Stale-mux
   relaunch uses `TmuxRunner::send_keys` to inject the harness command
   into the existing pane without recreating the mux.

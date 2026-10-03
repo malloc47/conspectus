@@ -9,9 +9,9 @@ scope for this ADR and is handled by ADR 0051 and the
 `H-TRANSCRIPT-*` workstream. The native in-tree viewer (ADR 0052)
 is the **default** target of the `T` keybind; external launches
 described below remain as an **opt-in escape hatch**, reached via
-`[viewers.<harness>]` config (`H-TRANSCRIPT-013`).
+`[viewers.<harness>]` config (`CSP-332`).
 
-Amended 2026-09-30 (`H-RUST-016`): the `SessionViewerAction` trait
+Amended 2026-09-30 (`CSP-569`): the `SessionViewerAction` trait
 described under "Integration shape" is retired. See the amendment at
 the end of this ADR.
 
@@ -26,10 +26,10 @@ history file formats.
 
 This ADR covers the *external full-transcript viewer launch* — the
 keybind that hands control to a child process, the same way
-`P8-010` hands control to `tmux attach-session`. The *inline preview*
+`CSP-169` hands control to `tmux attach-session`. The *inline preview*
 that fills the right panel for un-muxed `AgentSession` rows is a
 separate concern: it reads recent turns through the harness adapters
-(`H-TRANSCRIPT-003` … `H-TRANSCRIPT-007`), renders them with
+(`CSP-207` … `CSP-211`), renders them with
 `tui-markdown` per ADR 0051, and lives inside the same Ratatui
 process. The two surfaces complement each other and neither
 replaces the other.
@@ -149,7 +149,7 @@ needs to stay within process for snapshot-testability,
 
 This ADR owns the *external full-transcript launch*: a separate
 keybind (proposed `T`) that hands control to a child viewer the same
-way `P8-010` hands control to `tmux attach-session`. The two
+way `CSP-169` hands control to `tmux attach-session`. The two
 surfaces complement each other.
 
 ### Integration shape
@@ -176,7 +176,7 @@ Conspectus to re-render content the external tools already render
 themselves, which duplicates work and limits the user's choice of
 viewer. `plan` returning a `LaunchPlan` (binary path + argv) keeps
 Conspectus in the action-resolver role and lets the runtime hand off
-the TTY exactly as `P8-010` does for `tmux attach`.
+the TTY exactly as `CSP-169` does for `tmux attach`.
 
 ### Backends in v1 scope
 
@@ -223,7 +223,7 @@ for the full-transcript surface.
 ## Open Questions Answered
 
 - The inline preview is *not* part of this ADR. ADR 0051 covers the
-  rendering dependency; `H-TRANSCRIPT-003` … `H-TRANSCRIPT-010`
+  rendering dependency; `CSP-207` … `CSP-214`
   cover the data path and the widget.
 - The viewer trait lives inside Conspectus (`src/tui/actions.rs`),
   not in Atelier and not in a shared adapter layer. Atelier can
@@ -251,7 +251,7 @@ for the full-transcript surface.
 - `AgentSession` views can offer a single-keybind hand-off to a
   full transcript viewer. The keybind is disabled with a clear
   reason when no supported viewer is installed.
-- The action-resolver seam mirrors `P8-010`'s `tmux attach`
+- The action-resolver seam mirrors `CSP-169`'s `tmux attach`
   hand-off; no in-process viewer surface is added.
 - External viewer support remains optional and replaceable. New
   backends can be added by implementing `SessionViewerAction` and
@@ -291,7 +291,7 @@ for the full-transcript surface.
   Rejected: it duplicates rendering the external viewers already
   do well, locks Conspectus into one viewer's conventions, and
   fights the immediate-mode posture from ADR 0024. Launching the
-  viewer as a child process matches the `P8-010` precedent.
+  viewer as a child process matches the `CSP-169` precedent.
 
 ## Amendment: Retire The `SessionViewerAction` Trait (2026-09-30)
 
@@ -306,7 +306,7 @@ probes `PATH` for `claude-history`, and resolves the transcript file
 directly. The `ViewerTarget` and `ViewerDisabled` outcomes, and the
 `BinaryProbe` test seam, are unchanged.
 
-When config-defined viewers land (`H-TRANSCRIPT-013`), they are data
+When config-defined viewers land (`CSP-332`), they are data
 (a program plus an argument template per harness), not trait
 implementations. A configured list of those, checked before the
 built-in `claude-history` fallback, is the extension point rather than a

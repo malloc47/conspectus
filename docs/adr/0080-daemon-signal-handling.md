@@ -6,7 +6,7 @@ Accepted
 
 ## Context
 
-`P7-006` introduced `conspectus serve`, the long-running daemon
+`CSP-142` introduced `conspectus serve`, the long-running daemon
 that keeps `graph.sqlite` warm between one-shot CLI invocations.
 Layers A and B (the warm-start tick loop and the per-class
 scheduler) shipped without any signal handling: SIGINT and
@@ -122,5 +122,5 @@ inverts the dependency cost.
   reload is "kill + restart" and the systemd / launchd unit
   handles that.
 - Should SIGUSR1 dump scheduler status to stderr (or to a path
-  named by `--status-fd`)? P7-008 will own this question; this
+  named by `--status-fd`)? CSP-144 will own this question; this
   ADR's signal-hook adoption pre-positions for it.

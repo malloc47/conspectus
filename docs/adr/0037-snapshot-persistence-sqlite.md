@@ -15,13 +15,13 @@ forward-only migrations, `VACUUM INTO` rotation, the
 `backups/` directory, partial eviction as a SQL transaction —
 is gone. The daemon now cleans up any leftover
 `graph.sqlite{,-wal,-shm}` and `backups/` artifacts on startup
-(P11-011a).
+(CSP-448.01).
 
 Original status: Accepted.
 
 ## Context
 
-`docs/backlog.md` Phase 7 (`P7-001`) called for an ADR settling the
+`docs/backlog.md` Phase 7 (`CSP-137`) called for an ADR settling the
 on-disk snapshot format and lifecycle. The original scope assumed a
 versioned JSON document under
 `$XDG_DATA_HOME/conspectus/snapshots/`, atomically renamed, with
@@ -34,7 +34,7 @@ JSON-as-canonical creates a "two canonical stores" anti-pattern in
 which the SQL surface either pays a load cost per invocation or
 ends up out of sync with the JSON it derives from.
 
-This ADR settles `P7-001`'s deliverable in the SQLite-aware shape.
+This ADR settles `CSP-137`'s deliverable in the SQLite-aware shape.
 It is the persistence half of the Phase 7 ADR pair (the transport
 half is ADR 0038).
 
@@ -87,7 +87,7 @@ The schema version lives in `PRAGMA user_version` and is aligned
 with the `GraphSnapshot` schema version constant in `src/model/`.
 Migration applies forward-only. The v1 implementation uses
 `rusqlite_migration` or a hand-rolled `user_version`-driven
-applier; the choice is implementation detail recorded in P9-001's
+applier; the choice is implementation detail recorded in CSP-271's
 spike outcome, not in this ADR.
 
 Schema-mismatch policy:
@@ -105,7 +105,7 @@ Schema-mismatch policy:
 ### Per-provider freshness
 
 A dedicated `provider_state` table records the per-provider refresh
-timeline. Schema (subject to refinement in P9-002):
+timeline. Schema (subject to refinement in CSP-272):
 
 ```sql
 CREATE TABLE provider_state (
@@ -120,7 +120,7 @@ Each `node`, `candidate_link`, and `resolved_relationship` row also
 carries a `provider TEXT NOT NULL` column referencing the producing
 provider's stable identifier. This is the data foundation for
 partial eviction (below) and shared with the in-memory
-`GraphSnapshot` work in `P7-002` (the provider-provenance story).
+`GraphSnapshot` work in `CSP-138` (the provider-provenance story).
 
 ### Partial eviction
 
@@ -179,11 +179,11 @@ policy:
   surface area shrinks because there is no half-written rename
   state to reconcile.
 - Schema migrations become a first-class concern. Each
-  model-shape change (e.g. `P7-002`'s provider-provenance fields)
+  model-shape change (e.g. `CSP-138`'s provider-provenance fields)
   must ship a migration alongside the Rust model change. The
   migration chain is forward-only; older binaries cannot open
   databases written by newer ones, which is the safe default.
-- Partial eviction (`P7-005`) becomes a SQL transaction rather
+- Partial eviction (`CSP-141`) becomes a SQL transaction rather
   than a separate merge primitive. Its implementation simplifies
   significantly.
 - Server / one-shot CLI coexistence — settled in ADR 0038 — is
@@ -194,11 +194,11 @@ policy:
 - `docs/design.md` §"Graph Snapshot Persistence" (lines 649–692)
   needs rewriting. That rewrite is a follow-up landing-doc task,
   not part of this ADR.
-- The `H-PROD-002` hardening item (cache layer for forge metadata,
+- The `CSP-100` hardening item (cache layer for forge metadata,
   tmux, harness scans) folds naturally into this model: per-
   provider caches become rows in `provider_state` or sibling
-  tables in the same database file. Coordinated in the P7-002 +
-  P9-002 timeframe.
+  tables in the same database file. Coordinated in the CSP-138 +
+  CSP-272 timeframe.
 
 ## Alternatives Considered
 
@@ -259,5 +259,5 @@ policy:
 - **Does this require a migration for existing users?** Conspectus
   is pre-1.0 and the prior on-disk format was never specified
   beyond the JSON sketch in `docs/design.md`. The first release
-  that ships P9-003 (the loader) treats an absent database as a
+  that ships CSP-273 (the loader) treats an absent database as a
   cold start; there is no prior corpus to migrate from.

@@ -8,7 +8,7 @@ Accepted
 
 The Phase 8 TUI's right-panel preview renders the output of
 `tmux capture-pane` for the selected mux session
-(`P8-009`). With `capture-pane -p -J` (the v1 invocation), tmux
+(`CSP-168`). With `capture-pane -p -J` (the v1 invocation), tmux
 emits plain text without color, so agent activity that uses
 terminal colors (claude-code, codex, opencode, etc.) shows up
 in the preview as a monochrome wall of text. Operators
@@ -101,7 +101,7 @@ keeping the feature surface tiny minimises future surprise.
 ## Consequences
 
 - Muxed-agent preview regains the colours the operator sees in
-  the source pane, which is the visual signal P8-009 set out to
+  the source pane, which is the visual signal CSP-168 set out to
   surface in the first place.
 - Two new crates land in the dependency graph (`ansi-to-tui` +
   `nom`). The single-binary distribution story stays intact.

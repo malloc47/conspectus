@@ -2,7 +2,7 @@
 
 This document is a **review-and-refine artifact**, not a contract. It
 sketches what the v1 default sessions view looks like for the
-Returning Operator journey (Phase 8, P8-001), populated with real
+Returning Operator journey (Phase 8, CSP-160), populated with real
 session state from the author's machine.
 
 The plan-of-record stays in
@@ -22,7 +22,7 @@ Real state captured from this machine on 2026-05-19:
 - **3 opencode sessions** under `~/src/conspectus`.
 - **3 tmux sessions** managed by agent-deck.
 - **Preview text** sourced live from each adapter
-  (`H-PREVIEW-002..004`).
+  (`CSP-156..158`).
 
 The mockup below trims that down to a representative slice — the
 returning operator doesn't need every row visible, just the most
@@ -100,7 +100,7 @@ all (`◯`) don't get a disclosure triangle either.
 
 This adds no new graph concepts — every candidate already exists as
 a `GraphLink` of kind `LinkedToMux`. The tree just renders the
-existing evidence as navigable rows. The `m` modal (`P8-014`) remains
+existing evidence as navigable rows. The `m` modal (`CSP-175`) remains
 the explicit picker for operators who want a focused dialog; the
 tree expansion is the passive equivalent for scanning.
 
@@ -124,7 +124,7 @@ The exact refresh cadences live in `?` help, not in the header.
 
 ### Left panel: the row tree
 
-Hierarchy default per `P8-001a`: workspace (none here) → repo →
+Hierarchy default per `CSP-160.01`: workspace (none here) → repo →
 checkout → agent session. The checkout level renders only when a
 project has >= 2 checkouts; with one checkout, sessions hang directly
 off the project row.
@@ -154,9 +154,9 @@ f9f3cc claude:…6b6346f7   17m  ◉
 
 Four sub-cells per row, left to right:
 
-1. **Short id** (6 chars from `H-TBL-002`). Same id `node show`
+1. **Short id** (6 chars from `CSP-127`). Same id `node show`
    accepts.
-2. **Harness label** with the per-harness color from `H-TBL-014`
+2. **Harness label** with the per-harness color from `CSP-154`
    (`claude` shortened from `claude-code` to save width).
 3. **Recency** — relative age of `last_message_preview` or session
    write time. `2m`, `17m`, `1h`, `2d`. Right-aligned so the column
@@ -195,7 +195,7 @@ adjustments:
 
 - `~` shortening on paths.
 - The `pr` row shows the async-enrichment loading state with `⟳`
-  while the background `gh pr view` is in flight (`P8-012a`). Once
+  while the background `gh pr view` is in flight (`CSP-171.01`). Once
   it returns, the row gains `· checks 4/4 ✓ · reviews 1`.
 - The `title` row appears only when the session has a non-empty
   title (e.g. opencode chat topics). When absent, the row is
@@ -205,8 +205,8 @@ adjustments:
 Future work: when a project group contains multiple sessions of the
 same harness and `title` uniquely distinguishes them, the title
 should also appear in the *tree* row itself, not just the header.
-Tracked as `P8-015` in the backlog, dependent on `H-TBL-015`
-finishing the AGENT-cell cleanup and on `P8-004` having a stable
+Tracked as `CSP-176` in the backlog, dependent on `CSP-174`
+finishing the AGENT-cell cleanup and on `CSP-163` having a stable
 row-tree builder to extend.
 
 #### Preview
@@ -313,7 +313,7 @@ resolved. They fold into the phase-08 plan on the next pass.
    rather than render `—`.
 8. **`title` in the tree (deferred)** — when title uniquely
    distinguishes sessions within a group, it should appear in the
-   tree row itself, not only the header. Tracked as `P8-015`.
+   tree row itself, not only the header. Tracked as `CSP-176`.
 9. **Inline preview vs `--no-live-preview`** — `--no-live-preview`
    does **not** suppress same-line row previews or the graph-resident
    right-panel preview. It only suppresses the live extras:
@@ -386,7 +386,7 @@ What the overhaul kept locked:
 
 These came up in the original mockup and weren't explicitly
 addressed; they are not v1-blocking but should be noted before
-`P8-007` snapshot tests freeze the renderer.
+`CSP-166` snapshot tests freeze the renderer.
 
 - Are the recency suffixes (`2m`, `17m`, `1h`, `2d`) clear enough,
   or should rows older than some threshold switch to absolute

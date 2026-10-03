@@ -23,7 +23,7 @@ decision about:
 - How existing insta snapshots and CLI integration tests stay stable
   (they should not silently gain ANSI codes).
 
-The pager (H-TBL-013) already passes ANSI through (`less -R`).
+The pager (CSP-153) already passes ANSI through (`less -R`).
 
 ## Decision
 

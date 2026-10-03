@@ -6,7 +6,7 @@ Accepted
 
 ## Context
 
-P7-003 phase 3 graduates the one-shot CLI's warm-start path from a
+CSP-139 phase 3 graduates the one-shot CLI's warm-start path from a
 backstop merge (phase 2) into per-provider selective refresh: read
 the persisted `graph.sqlite`, compare each provider's freshness
 against a TTL, evict and re-run only the providers whose data has
@@ -44,8 +44,8 @@ mapping.
 ## Decision
 
 `[server.intervals]` is the single per-class refresh-cadence source.
-Both the daemon (`P7-006`) and the one-shot CLI's warm-start path
-(`P7-003` phase 3) read from it; the daemon treats each value as
+Both the daemon (`CSP-142`) and the one-shot CLI's warm-start path
+(`CSP-139` phase 3) read from it; the daemon treats each value as
 "refresh this often," the CLI treats it as "any slice older than
 this is stale."
 
@@ -64,7 +64,7 @@ Defaults match ADR 0038. An absent block falls back to defaults; an
 absent key inside the block falls back to its default; a
 malformed value produces a `ConfigDiagnostic` and that key falls
 back to its default. The one-shot CLI does not need `socket_path`
-and ignores it for warm-start purposes (P7-006 reads it).
+and ignores it for warm-start purposes (CSP-142 reads it).
 
 ### Provenance string → interval class mapping
 
@@ -113,7 +113,7 @@ For each one-shot CLI invocation (default: not `--refresh`):
    interval; otherwise *stale*. A provider with no entries at
    all is *untested* (treat as stale: run it).
 3. Evict the stale providers' slices from the prior snapshot via
-   the P7-005 `evict_provider` primitive. Also evict all
+   the CSP-141 `evict_provider` primitive. Also evict all
    always-rerun providers' slices.
 4. Run the stale + untested heavy providers (skip the fresh
    ones).
@@ -136,7 +136,7 @@ granularity (`git::cwd` distinct from `git`,
 `claude-code` distinct from `codex`). The class table is the
 only place granular strings collapse; the rest of the codebase
 keeps the per-emit identity for diagnostics, debugging, and the
-P7-006 daemon's per-provider failure isolation.
+CSP-142 daemon's per-provider failure isolation.
 
 ## Consequences
 

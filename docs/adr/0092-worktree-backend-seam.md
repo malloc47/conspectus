@@ -2,7 +2,7 @@
 
 ## Status
 
-Accepted (design); implementation tracked as `H-WT-001` follow-ups in
+Accepted (design); implementation tracked as `CSP-506` follow-ups in
 `docs/backlog.md`.
 
 ## Context
@@ -15,7 +15,7 @@ Model), but it offers no way to *manage* them — create a worktree for a
 new task, list the worktrees of a repo as a first-class surface, or
 remove a finished one.
 
-`H-WT-001` asks for first-class worktree management with a **pluggable
+`CSP-506` asks for first-class worktree management with a **pluggable
 backend** seam, targeting [`worktrunk`](https://github.com/max-sixty/worktrunk)
 as a rich backend and a thin built-in `git` wrapper as an
 always-available fallback.
@@ -122,7 +122,7 @@ A `[worktree] backend = "git" | "worktrunk"` config key (default
 `git`, i.e. read-only) plus autodetection: if `worktrunk` is on
 `PATH`, offer it for mutation; otherwise mutation actions are hidden /
 error. Selection mirrors the mux-backend and forge-adapter registries
-(ADR 0089, H-EXT-012) so a third backend (e.g. a jj worktree tool)
+(ADR 0089, CSP-484) so a third backend (e.g. a jj worktree tool)
 slots in by registration.
 
 ## Consequences

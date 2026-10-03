@@ -18,14 +18,17 @@ CLI queries, dependency operations, or agent/MCP integration.
 
 ## Pre-Implementation Planning
 
-- [x] `PLAN-001` Convert `docs/design.md` into implementation phases and
+- [x] `CSP-001` Convert `docs/design.md` into implementation phases and
   milestone-level stories.
+  - Legacy ID: `PLAN-001`
   - Blockers: none.
-- [x] `PLAN-002` Identify the first vertical slice for the Rust crate and CLI.
-  - Blockers: `PLAN-001`.
-- [x] `PLAN-003` Define the fixture strategy for sparse graph and resolver
+- [x] `CSP-002` Identify the first vertical slice for the Rust crate and CLI.
+  - Legacy ID: `PLAN-002`
+  - Blockers: `CSP-001`.
+- [x] `CSP-003` Define the fixture strategy for sparse graph and resolver
   tests.
-  - Blockers: `PLAN-001`.
+  - Legacy ID: `PLAN-003`
+  - Blockers: `CSP-001`.
   - Outcome: see `docs/implementation/`; first vertical slice is JSON graph
     output with sparse graph and resolver fixtures.
 
@@ -33,25 +36,29 @@ CLI queries, dependency operations, or agent/MCP integration.
 
 Source plan: `docs/implementation/phase-00-project-foundation.md`.
 
-- [x] `P0-001` Add the Rust package skeleton.
+- [x] `CSP-004` Add the Rust package skeleton.
+  - Legacy ID: `P0-001`
   - Scope: add `Cargo.toml`, `rust-toolchain.toml`, `src/lib.rs`, and
     `src/main.rs` for a Rust 2024 library-first CLI crate.
   - Tests: `cargo check` succeeds.
   - Manual checks: `cargo run -- --help`.
-  - Blockers: `PLAN-001`, `PLAN-002`.
-- [x] `P0-002` Add the thin CLI surface.
+  - Blockers: `CSP-001`, `CSP-002`.
+- [x] `CSP-005` Add the thin CLI surface.
+  - Legacy ID: `P0-002`
   - Scope: wire `clap` so `conspectus --help` and `conspectus --version`
     work without implementing graph discovery.
   - Tests: CLI smoke tests for `--help` and `--version`.
   - Manual checks: `cargo run -- --help`; `cargo run -- --version`.
-  - Blockers: `P0-001`.
-- [x] `P0-003` Add baseline module boundaries.
+  - Blockers: `CSP-004`.
+- [x] `CSP-006` Add baseline module boundaries.
+  - Legacy ID: `P0-003`
   - Scope: add minimal `model`, `resolve`, `discovery`, and `output` module
     boundaries aligned with ADR 0007, without committing a graph schema yet.
   - Tests: module-level compile coverage through `cargo check`.
   - Manual checks: inspect public module layout for ADR 0007 alignment.
-  - Blockers: `P0-001`.
-- [x] `P0-004` Add runtime and test dependencies.
+  - Blockers: `CSP-004`.
+- [x] `CSP-007` Add runtime and test dependencies.
+  - Legacy ID: `P0-004`
   - Scope: add runtime dependencies `clap`, `serde`, `serde_json`, `toml`,
     `toml_edit`, `indexmap`, `anyhow`, and `thiserror`; add test
     dependencies `assert_cmd`, `predicates`, `tempfile`, `insta`, `rstest`,
@@ -60,26 +67,29 @@ Source plan: `docs/implementation/phase-00-project-foundation.md`.
     --all-features` succeeds.
   - Manual checks: verify dependencies are grouped by runtime vs dev usage in
     `Cargo.toml`.
-  - Blockers: `P0-001`.
-- [x] `P0-005` Add local check automation.
+  - Blockers: `CSP-004`.
+- [x] `CSP-008` Add local check automation.
+  - Legacy ID: `P0-005`
   - Scope: add a `justfile` with targets for formatting, linting, tests,
     nextest, and whitespace diff checks.
   - Tests: `just check` runs the complete baseline check suite.
   - Manual checks: `just --list`.
-  - Blockers: `P0-001`, `P0-004`.
-- [x] `P0-006` Add project-foundation smoke tests.
+  - Blockers: `CSP-004`, `CSP-007`.
+- [x] `CSP-009` Add project-foundation smoke tests.
+  - Legacy ID: `P0-006`
   - Scope: add CLI integration tests covering `--help` and `--version`, and
     make them part of the baseline check flow.
   - Tests: `cargo test --all-targets --all-features`; `cargo nextest run
     --all-targets --all-features`.
   - Manual checks: run both CLI commands directly.
-  - Blockers: `P0-002`, `P0-004`, `P0-005`.
-- [x] `P0-007` Verify the foundation end state.
+  - Blockers: `CSP-005`, `CSP-007`, `CSP-008`.
+- [x] `CSP-010` Verify the foundation end state.
+  - Legacy ID: `P0-007`
   - Scope: run the full Phase 00 manual and automated check set and record any
     follow-up tasks instead of expanding Phase 00 scope.
   - Tests: `just check`; `git diff --check`.
   - Manual checks: `nix develop`; `cargo run -- --help`.
-  - Blockers: `P0-003`, `P0-005`, `P0-006`.
+  - Blockers: `CSP-006`, `CSP-008`, `CSP-009`.
   - Outcome: `nix develop --command just check`, `cargo run -- --help`,
     `cargo run -- --version`, and `just --list` passed.
 
@@ -87,7 +97,8 @@ Source plan: `docs/implementation/phase-00-project-foundation.md`.
 
 Source plan: `docs/implementation/phase-01-core-graph-json.md`.
 
-- [x] `P1-001` Define graph node identity types.
+- [x] `CSP-011` Define graph node identity types.
+  - Legacy ID: `P1-001`
   - Scope: implement structured node IDs from ADR 0001 for `Repo`,
     `Checkout`, `Workspace`, `AgentSession`, `MuxSession`, `Branch`, `Fork`,
     and `ForgePr`.
@@ -95,15 +106,17 @@ Source plan: `docs/implementation/phase-01-core-graph-json.md`.
     trips, and deterministic ordering.
   - Manual checks: inspect JSON snippets from unit fixtures for stable ID
     shape.
-  - Blockers: `P0-007`.
-- [x] `P1-002` Define typed node models.
+  - Blockers: `CSP-010`.
+- [x] `CSP-012` Define typed node models.
+  - Legacy ID: `P1-002`
   - Scope: add typed node structs/enums for the Phase 1 graph without
     provider-specific discovery behavior.
   - Tests: unit tests for serde round trips and sparse node serialization.
   - Manual checks: inspect representative serialized orphan session,
     mux-only, and repo-only nodes.
-  - Blockers: `P1-001`.
-- [x] `P1-003` Define GraphLink evidence types.
+  - Blockers: `CSP-011`.
+- [x] `CSP-013` Define GraphLink evidence types.
+  - Legacy ID: `P1-003`
   - Scope: implement `GraphLink`, relation kinds, provenance, confidence,
     freshness, source metadata, unresolved endpoint evidence, and ignored or
     overridden state.
@@ -111,30 +124,34 @@ Source plan: `docs/implementation/phase-01-core-graph-json.md`.
     endpoints, ignored links, and overridden links.
   - Manual checks: inspect serialized candidate links for readable relation and
     provenance names.
-  - Blockers: `P1-001`.
-- [x] `P1-004` Define graph snapshot JSON output.
+  - Blockers: `CSP-011`.
+- [x] `CSP-014` Define graph snapshot JSON output.
+  - Legacy ID: `P1-004`
   - Scope: add the deterministic top-level graph document with `nodes`,
     `candidate_links`, `resolved_relationships`, and `diagnostics`.
   - Tests: snapshot tests for empty graph JSON and sparse graph fixtures.
   - Manual checks: confirm key ordering and separation between candidate links
     and resolved relationships.
-  - Blockers: `P1-002`, `P1-003`.
-- [x] `P1-005` Add fixture builders for sparse graph scenarios.
+  - Blockers: `CSP-012`, `CSP-013`.
+- [x] `CSP-015` Add fixture builders for sparse graph scenarios.
+  - Legacy ID: `P1-005`
   - Scope: add internal test helpers for orphan sessions, mux-only rows,
     repo-only rows, unresolved lineage evidence, conflicts, and mux
     candidates.
   - Tests: fixture self-checks through JSON snapshot coverage.
   - Manual checks: verify fixtures are internal test helpers, not public API.
-  - Blockers: `P1-002`, `P1-003`.
-- [x] `P1-006` Implement the resolver skeleton.
+  - Blockers: `CSP-012`, `CSP-013`.
+- [x] `CSP-016` Implement the resolver skeleton.
+  - Legacy ID: `P1-006`
   - Scope: accept GraphLink candidates and emit typed resolved relationships
     without deleting or mutating lower-priority evidence.
   - Tests: table-driven resolver tests for sparse links, no-op empty graphs,
     unresolved lineage evidence, and conflict preservation.
   - Manual checks: inspect resolver output for a sparse fixture and confirm
     candidate evidence remains present.
-  - Blockers: `P1-003`, `P1-005`.
-- [x] `P1-007` Implement resolver precedence rules.
+  - Blockers: `CSP-013`, `CSP-015`.
+- [x] `CSP-017` Implement resolver precedence rules.
+  - Legacy ID: `P1-007`
   - Scope: apply default precedence: local declared, global declared, strong
     discovered evidence, convention, then cached evidence.
   - Tests: table-driven tests for declared-over-discovered precedence,
@@ -142,30 +159,33 @@ Source plan: `docs/implementation/phase-01-core-graph-json.md`.
     candidates, and mux candidate precedence.
   - Manual checks: inspect diagnostic output for conflicts and selected
     relationships.
-  - Blockers: `P1-006`.
-- [x] `P1-008` Add `conspectus graph --format json`.
+  - Blockers: `CSP-016`.
+- [x] `CSP-018` Add `conspectus graph --format json`.
+  - Legacy ID: `P1-008`
   - Scope: add the CLI command that emits the Phase 1 graph document; the
     command may produce an empty graph or fixture-backed graph, but not local
     discovery.
   - Tests: CLI integration tests for `graph --format json`, invalid formats,
     and deterministic output.
   - Manual checks: `cargo run -- graph --format json`.
-  - Blockers: `P1-004`, `P1-006`.
-- [x] `P1-009` Add representative graph JSON snapshots.
+  - Blockers: `CSP-014`, `CSP-016`.
+- [x] `CSP-019` Add representative graph JSON snapshots.
+  - Legacy ID: `P1-009`
   - Scope: snapshot empty graph JSON and sparse fixtures covering orphan
     session, mux-only, repo-only, unresolved lineage, conflicts, and mux
     candidates.
   - Tests: `cargo test --all-targets --all-features`; `cargo nextest run
     --all-targets --all-features`.
   - Manual checks: review snapshots for stable ordering and public shape.
-  - Blockers: `P1-004`, `P1-005`, `P1-007`, `P1-008`.
-- [x] `P1-010` Verify the Phase 1 end state.
+  - Blockers: `CSP-014`, `CSP-015`, `CSP-017`, `CSP-018`.
+- [x] `CSP-020` Verify the Phase 1 end state.
+  - Legacy ID: `P1-010`
   - Scope: run the full Phase 1 automated and manual check set and record any
     follow-up tasks instead of expanding Phase 1 scope.
   - Tests: `just check`.
   - Manual checks: `cargo run -- graph --format json` and inspect that output
     distinguishes candidate links from resolved relationships.
-  - Blockers: `P1-007`, `P1-008`, `P1-009`.
+  - Blockers: `CSP-017`, `CSP-018`, `CSP-019`.
   - Outcome: `nix develop --command cargo fmt --all -- --check`,
     `nix develop --command cargo clippy --all-targets --all-features -- -D warnings`,
     `nix develop --command cargo test --all-targets --all-features`,
@@ -177,7 +197,8 @@ Source plan: `docs/implementation/phase-01-core-graph-json.md`.
 
 Source plan: `docs/implementation/phase-02-local-discovery.md`.
 
-- [x] `P2-001` Define local discovery orchestration boundaries.
+- [x] `CSP-021` Define local discovery orchestration boundaries.
+  - Legacy ID: `P2-001`
   - Scope: add discovery traits and a local discovery coordinator that can
     collect provider graph fragments, merge them into a `GraphSnapshot`, and
     leave candidate-link resolution to the existing resolver.
@@ -185,45 +206,49 @@ Source plan: `docs/implementation/phase-02-local-discovery.md`.
     without dropping nodes or candidate links.
   - Manual checks: inspect module boundaries for ADR 0007 alignment and confirm
     discovery does not perform output rendering.
-  - Blockers: `P1-010`.
+  - Blockers: `CSP-020`.
   - Outcome: added provider, context, graph-fragment, and local coordinator
     boundaries; discovery merges fragments into an unresolved graph snapshot and
     leaves resolution/output to existing modules.
-- [x] `P2-002` Add read-only git command probes.
+- [x] `CSP-022` Add read-only git command probes.
+  - Legacy ID: `P2-002`
   - Scope: shell out to `git` for repo common dir, worktree root, current
     branch/refname, remotes, upstream, and per-worktree metadata when available.
   - Tests: integration tests using temporary git repos, detached HEADs, branch
     upstreams, and linked worktrees.
   - Manual checks: run probes from a plain repo and linked worktree and verify
     no files are modified.
-  - Blockers: `P2-001`.
+  - Blockers: `CSP-021`.
   - Outcome: added read-only git probes for common dir, worktree root, git dir,
     branch ref, upstream, and remotes with temp-repo coverage for plain,
     detached, upstream, and linked-worktree cases.
-- [x] `P2-003` Map git probes into graph nodes and candidate links.
+- [x] `CSP-023` Map git probes into graph nodes and candidate links.
+  - Legacy ID: `P2-003`
   - Scope: emit `Repo`, `Checkout`, and `Branch` nodes plus links for repo
     membership and checked-out branch evidence from git probe results.
   - Tests: JSON snapshot tests for a plain repo, a detached worktree, and a
     linked worktree fixture.
   - Manual checks: run `cargo run -- graph --format json` from a plain git repo
     and inspect repo/checkout/branch identity shape.
-  - Blockers: `P2-002`.
+  - Blockers: `CSP-022`.
   - Outcome: mapped git probe results into `Repo`, `Checkout`, and `Branch`
     nodes with strong-discovered candidate links for repo membership and checked
     out branches, plus fixed-path JSON snapshots for plain, detached, and linked
     worktree cases.
-- [x] `P2-004` Add cwd and configured scan-root discovery inputs.
+- [x] `CSP-024` Add cwd and configured scan-root discovery inputs.
+  - Legacy ID: `P2-004`
   - Scope: discover from the current working directory and from explicitly
     configured scan roots without recursively walking `$HOME` by default.
   - Tests: unit tests for scan-root normalization, duplicate-root handling, and
     missing/non-git roots.
   - Manual checks: verify running outside a git repo still returns a valid
     sparse graph document.
-  - Blockers: `P2-001`, `P2-003`.
+  - Blockers: `CSP-021`, `CSP-023`.
   - Outcome: added current-directory and explicit scan-root context builders,
     canonicalization and deduplication for existing roots, missing-root errors,
     and local discovery over non-git roots without recursive scanning.
-- [x] `P2-005` Add generic workspace inference.
+- [x] `CSP-025` Add generic workspace inference.
+  - Legacy ID: `P2-005`
   - Scope: infer generic workspace roots from configured roots or layout
     evidence and link participating repos/checkouts without fabricating
     workspaces for standalone repo-only cases.
@@ -231,11 +256,12 @@ Source plan: `docs/implementation/phase-02-local-discovery.md`.
     checkouts outside any workspace.
   - Manual checks: inspect JSON for generic workspace fixtures and confirm
     workspace nodes appear only when there is workspace evidence.
-  - Blockers: `P2-004`.
+  - Blockers: `CSP-024`.
   - Outcome: inferred generic workspaces only for explicit scan roots with
     multiple immediate git repo children, linked those repos with convention
     evidence, and kept standalone or single-repo roots repo-only.
-- [x] `P2-006` Read Atelier workspace metadata.
+- [x] `CSP-026` Read Atelier workspace metadata.
+  - Legacy ID: `P2-006`
   - Scope: parse `atelier.toml` enough to emit Atelier workspace context,
     workspace repo membership evidence, and related source metadata without
     depending on Atelier command modules.
@@ -243,12 +269,13 @@ Source plan: `docs/implementation/phase-02-local-discovery.md`.
     workspace metadata.
   - Manual checks: run from an Atelier workspace with no forks and inspect
     workspace, repo, checkout, and branch nodes.
-  - Blockers: `P2-003`, `P2-005`.
+  - Blockers: `CSP-023`, `CSP-025`.
   - Outcome: added a read-only `atelier.toml` subset parser and parent-walk
     workspace discovery that emits Atelier workspace nodes, discovered repo
     graph fragments, and strong-discovered workspace membership links without
     depending on Atelier command modules.
-- [x] `P2-007` Read Atelier fork index metadata.
+- [x] `CSP-027` Read Atelier fork index metadata.
+  - Legacy ID: `P2-007`
   - Scope: parse `.atelier/forks/index.toml` into provider-neutral fork records
     with source metadata for worktree, selected, research, and standalone
     fork-like contexts.
@@ -257,12 +284,13 @@ Source plan: `docs/implementation/phase-02-local-discovery.md`.
     fork entries.
   - Manual checks: confirm parsing remains read-only and does not write
     `.conspectus.toml` or provider metadata.
-  - Blockers: `P2-006`.
+  - Blockers: `CSP-026`.
   - Outcome: added read-only `.atelier/forks/index.toml` parsing with
     provider-neutral fork records for worktree, selected, research, standalone,
     parent, repo membership, and harness lineage metadata; missing indexes load
     as empty.
-- [x] `P2-008` Map Atelier forks into graph nodes and context-effect links.
+- [x] `CSP-028` Map Atelier forks into graph nodes and context-effect links.
+  - Legacy ID: `P2-008`
   - Scope: emit one polymorphic `Fork` node per provider fork and candidate
     links for `forks_workspace`, `forks_repo`, `created_checkout`,
     `referenced_checkout`, `created_branch`, `associated_branch`,
@@ -272,13 +300,14 @@ Source plan: `docs/implementation/phase-02-local-discovery.md`.
     associated branch links.
   - Manual checks: inspect graph JSON from Atelier fork fixtures and confirm no
     fake workspace nodes are fabricated for standalone repo contexts.
-  - Blockers: `P2-007`.
+  - Blockers: `CSP-027`.
   - Outcome: emitted one `Fork` node per Atelier fork plus candidate links for
     workspace scope, repo scope, created checkouts, referenced checkouts,
     created or associated branches, fork roots as unresolved path evidence, and
     parent forks, with snapshot coverage for worktree, selected, research, and
     standalone contexts.
-- [x] `P2-009` Wire local discovery into `graph --format json`.
+- [x] `CSP-029` Wire local discovery into `graph --format json`.
+  - Legacy ID: `P2-009`
   - Scope: replace empty graph discovery with local discovery orchestration for
     cwd/configured roots while preserving deterministic output and existing
     Phase 1 JSON shape.
@@ -287,12 +316,13 @@ Source plan: `docs/implementation/phase-02-local-discovery.md`.
   - Manual checks: run `cargo run -- graph --format json` from a plain repo, a
     linked worktree, an Atelier workspace with no forks, and an Atelier
     workspace with worktree, selected, and research forks.
-  - Blockers: `P2-004`, `P2-008`.
+  - Blockers: `CSP-024`, `CSP-028`.
   - Outcome: wired `graph --format json` to local discovery from the current
     directory or explicit `--scan-root` values, preserving deterministic JSON
     output and adding CLI coverage for non-repo, plain repo, missing-root, and
     invalid-format cases.
-- [x] `P2-010` Add representative local-discovery snapshots.
+- [x] `CSP-030` Add representative local-discovery snapshots.
+  - Legacy ID: `P2-010`
   - Scope: snapshot graph JSON for plain repo, linked worktree, generic
     workspace, Atelier workspace without forks, and Atelier workspace with
     worktree, selected, research, and standalone fork contexts.
@@ -300,17 +330,18 @@ Source plan: `docs/implementation/phase-02-local-discovery.md`.
     --all-targets --all-features`.
   - Manual checks: review snapshots for stable ordering, readable provenance,
     and separation of candidate links from resolved relationships.
-  - Blockers: `P2-003`, `P2-005`, `P2-008`, `P2-009`.
+  - Blockers: `CSP-023`, `CSP-025`, `CSP-028`, `CSP-029`.
   - Outcome: added normalized temp-fixture snapshots for plain repo, linked
     worktree, generic workspace, Atelier workspace without forks, and Atelier
     workspace with worktree, selected, and research fork metadata.
-- [x] `P2-011` Verify the Phase 2 end state.
+- [x] `CSP-031` Verify the Phase 2 end state.
+  - Legacy ID: `P2-011`
   - Scope: run the full Phase 2 automated and manual check set and record any
     follow-up tasks instead of expanding Phase 2 scope.
   - Tests: `just check`.
   - Manual checks: run `cargo run -- graph --format json` from the Phase 2
     manual-check contexts and confirm discovery remains read-only.
-  - Blockers: `P2-009`, `P2-010`.
+  - Blockers: `CSP-029`, `CSP-030`.
   - Outcome: `nix develop --command just check` passed with 56 tests, and
     `nix develop --command cargo run -- graph --format json` from the
     Conspectus repo emitted git repo, checkout, branch, candidate link, and
@@ -320,7 +351,8 @@ Source plan: `docs/implementation/phase-02-local-discovery.md`.
 
 Source plan: `docs/implementation/phase-03-agent-mux-discovery.md`.
 
-- [x] `P3-001` Define agent harness discovery boundaries.
+- [x] `CSP-032` Define agent harness discovery boundaries.
+  - Legacy ID: `P3-001`
   - Scope: add read-only harness discovery traits, source-state inputs, and
     graph-fragment outputs for `AgentSession` nodes without binding the public
     graph model to provider-private schemas.
@@ -328,12 +360,13 @@ Source plan: `docs/implementation/phase-03-agent-mux-discovery.md`.
     and deterministic fragment merging.
   - Manual checks: inspect module boundaries for ADR 0007 alignment and confirm
     harness discovery does not perform output rendering.
-  - Blockers: `P2-011`.
+  - Blockers: `CSP-031`.
   - Outcome: added a `discovery::harness` module with a `HarnessAdapter` trait
     and `HarnessDiscovery` provider; extended `DiscoveryContext` with per-harness
     state-root overrides; covered empty adapters, missing state roots, state-root
     passthrough, and deterministic fragment merging.
-- [x] `P3-002` Add synthetic harness fixture support.
+- [x] `CSP-033` Add synthetic harness fixture support.
+  - Legacy ID: `P3-002`
   - Scope: add test helpers for creating provider state directories and session
     records for `claude-code`, `opencode`, `codex`, and `aider` without reading
     the user's real harness state.
@@ -341,13 +374,14 @@ Source plan: `docs/implementation/phase-03-agent-mux-discovery.md`.
     fields, and malformed records.
   - Manual checks: verify fixtures live under temporary directories and do not
     depend on local home-directory state.
-  - Blockers: `P3-001`.
+  - Blockers: `CSP-032`.
   - Outcome: added a `discovery::harness::fixtures` module with a
     `HarnessFixture` builder and standalone writers for Codex, Claude Code,
     opencode, and aider state layouts plus a malformed-record helper, all rooted
     at a caller-supplied temp directory; covered paths, optional fields, cwd
     encoding, opencode time fields, aider marker files, and malformed records.
-- [x] `P3-003` Discover supported agent sessions.
+- [x] `CSP-034` Discover supported agent sessions.
+  - Legacy ID: `P3-003`
   - Scope: implement read-only adapters that emit Conspectus-native
     `AgentSession` nodes and source metadata for supported local state from
     `claude-code`, `opencode`, `codex`, and `aider`.
@@ -355,14 +389,15 @@ Source plan: `docs/implementation/phase-03-agent-mux-discovery.md`.
     sessions, malformed records, missing optional fields, and stable node IDs.
   - Manual checks: run against local synthetic state roots and inspect session
     nodes for readable provider metadata.
-  - Blockers: `P3-001`, `P3-002`.
+  - Blockers: `CSP-032`, `CSP-033`.
   - Outcome: added `CodexAdapter`, `ClaudeCodeAdapter`, `OpenCodeAdapter`, and
     `AiderAdapter`; widened the `HarnessAdapter` trait to receive the full
     `DiscoveryContext` so the per-repo aider adapter can walk scan roots while
     state-root harnesses pull their root via `harness_state_root`. Covered
     discovered sessions, missing state directories, malformed records, missing
     optional fields, and stable ID reproducibility for each adapter.
-- [x] `P3-004` Preserve fork session lineage evidence.
+- [x] `CSP-035` Preserve fork session lineage evidence.
+  - Legacy ID: `P3-004`
   - Scope: map native, approximate, unsupported, fresh, and not-yet-discovered
     lineage evidence from provider metadata into candidate links or unresolved
     endpoints without fabricating placeholder session nodes.
@@ -370,7 +405,7 @@ Source plan: `docs/implementation/phase-03-agent-mux-discovery.md`.
     session evidence per ADR 0005.
   - Manual checks: inspect JSON for unresolved lineage evidence and confirm the
     evidence is preserved without fake nodes.
-  - Blockers: `P2-008`, `P3-003`.
+  - Blockers: `CSP-028`, `CSP-034`.
   - Outcome: extended `fork_records_fragment` to emit `ParentSession` and
     `ChildSession` candidate links with unresolved-endpoint evidence carrying
     `harness_key`, `native_id`, fork root path, and a `lineage_kind` of
@@ -379,27 +414,29 @@ Source plan: `docs/implementation/phase-03-agent-mux-discovery.md`.
     Approximate=Medium, Unsupported/Fresh=Low); fresh sessions without a
     `source_session` omit the parent link rather than inventing one, and no
     placeholder `AgentSession` nodes are emitted.
-- [x] `P3-005` Add injectable tmux command execution.
+- [x] `CSP-036` Add injectable tmux command execution.
+  - Legacy ID: `P3-005`
   - Scope: introduce a small command-runner seam for tmux discovery so tests can
     use fake output and production discovery can call `tmux` read-only.
   - Tests: unit tests for unavailable tmux, command failures, invalid UTF-8 or
     malformed rows, and deterministic error diagnostics.
   - Manual checks: verify no tests require a real tmux server.
-  - Blockers: `P3-001`.
+  - Blockers: `CSP-032`.
   - Outcome: added `discovery::tmux` with a `TmuxRunner` trait, a `SystemTmux`
     implementation that invokes `tmux list-sessions -F`, and a `FakeTmux`
     test runner; outcomes are classified as `Sessions`, `Unavailable`
     (binary missing or no server), or `Failed` with a stable diagnostic
     string, and stdout is decoded lossily so invalid UTF-8 surfaces to the
     parser rather than failing the runner.
-- [x] `P3-006` Discover tmux sessions.
+- [x] `CSP-037` Discover tmux sessions.
+  - Legacy ID: `P3-006`
   - Scope: parse `tmux list-sessions` format output into `MuxSession` nodes,
     including session name, activity metadata when available, and root/cwd path
     evidence.
   - Tests: fake-command tests for zero sessions, one session, multiple
     sessions, paths with spaces, missing root/cwd fields, and unavailable tmux.
   - Manual checks: create a temporary tmux session and inspect mux-session JSON.
-  - Blockers: `P3-005`.
+  - Blockers: `CSP-036`.
   - Outcome: added a tab-separated `TMUX_LIST_FORMAT`
     (`#{session_name}\t#{session_path}\t#{session_activity}\t#{session_created}`),
     a `parse_list_sessions` parser that yields rich `TmuxSessionRow` values
@@ -407,7 +444,8 @@ Source plan: `docs/implementation/phase-03-agent-mux-discovery.md`.
     `TmuxDiscovery` provider that emits one `MuxSession` node per row while
     surfacing `Available`/`Unavailable`/`Failed` status to callers that need
     diagnostics. All tests use `FakeTmux` so no real tmux server is required.
-- [x] `P3-007` Generate session, workspace, fork, and mux candidate links.
+- [x] `CSP-038` Generate session, workspace, fork, and mux candidate links.
+  - Legacy ID: `P3-007`
   - Scope: emit candidate links for session cwd/root matches, fork
     associations, mux candidates, parent session evidence, child session
     evidence, and unresolved lineage endpoints while preserving all plausible
@@ -416,7 +454,7 @@ Source plan: `docs/implementation/phase-03-agent-mux-discovery.md`.
     one-to-many mux candidates, fork-linked sessions, and unresolved lineage.
   - Manual checks: inspect JSON to confirm ambiguous mux evidence remains in
     `candidate_links`.
-  - Blockers: `P3-004`, `P3-006`.
+  - Blockers: `CSP-035`, `CSP-037`.
   - Outcome: added a `discovery::cross_link::infer` post-merge pass that derives
     `AgentSession`→`MuxSession` `LinkedToMux` candidates (StrongDiscovered for
     exact cwd matches, Discovered for prefix matches) and
@@ -424,7 +462,8 @@ Source plan: `docs/implementation/phase-03-agent-mux-discovery.md`.
     sits at or below an atelier `RootedAtPath` fork root; every plausible mux
     match is preserved and atelier-emitted `ParentSession`/`ChildSession`
     unresolved lineage links pass through untouched.
-- [x] `P3-008` Implement session-to-mux resolver scoring.
+- [x] `CSP-039` Implement session-to-mux resolver scoring.
+  - Legacy ID: `P3-008`
   - Scope: apply ADR 0006 scoring for session-to-mux candidates: local
     declared, global declared, strong process or provider evidence, exact
     cwd/root match, naming convention, then recency or activity correlation.
@@ -432,7 +471,7 @@ Source plan: `docs/implementation/phase-03-agent-mux-discovery.md`.
     diagnostics, ignored candidates, and overridden candidates.
   - Manual checks: inspect resolved relationships for one-to-many mux scenarios
     and confirm lower-ranked candidates remain visible.
-  - Blockers: `P3-007`.
+  - Blockers: `CSP-038`.
   - Outcome: extended `MuxSessionNode` with optional `activity_epoch` and
     `created_epoch`, forwarded the activity through `cross_link::infer`
     onto `LinkedToMux` candidate metadata, and added a session-mux-specific
@@ -441,7 +480,8 @@ Source plan: `docs/implementation/phase-03-agent-mux-discovery.md`.
     recency. Ignored and overridden candidates continue to be skipped and
     every losing candidate is recorded as a competing link plus a
     `Conflict` diagnostic.
-- [x] `P3-009` Wire agent and tmux discovery into local graph discovery.
+- [x] `CSP-040` Wire agent and tmux discovery into local graph discovery.
+  - Legacy ID: `P3-009`
   - Scope: register the harness and tmux providers in local discovery so
     `conspectus graph --format json` emits repo, workspace, fork, session, and
     mux evidence from cwd/configured roots and supported local state.
@@ -449,7 +489,7 @@ Source plan: `docs/implementation/phase-03-agent-mux-discovery.md`.
     discovery, unavailable tmux, and orphan sessions.
   - Manual checks: run `cargo run -- graph --format json` with a tmux smoke
     session and confirm useful output when sessions remain unlinked.
-  - Blockers: `P3-003`, `P3-006`, `P3-008`.
+  - Blockers: `CSP-034`, `CSP-037`, `CSP-039`.
   - Outcome: added a `LocalDiscoveryConfig` (harness state roots + optional
     tmux runner) and a `discover_local_with` entry point. The default
     `discover_local_at_roots` builds the config from the environment
@@ -460,7 +500,8 @@ Source plan: `docs/implementation/phase-03-agent-mux-discovery.md`.
     session↔fork candidates appear automatically. CLI integration tests run
     with an isolated `$HOME` and `CONSPECTUS_DISABLE_TMUX=1`, and library
     tests exercise the full chain with `FakeTmux` plus fixture state.
-- [x] `P3-010` Add representative agent and mux JSON snapshots.
+- [x] `CSP-041` Add representative agent and mux JSON snapshots.
+  - Legacy ID: `P3-010`
   - Scope: snapshot graph JSON for orphan sessions, mux-only sessions,
     one-to-many mux candidates, fork-linked sessions, and unresolved session
     lineage evidence.
@@ -468,7 +509,7 @@ Source plan: `docs/implementation/phase-03-agent-mux-discovery.md`.
     --all-targets --all-features`.
   - Manual checks: review snapshots for stable ordering, readable provenance,
     preserved ambiguity, and no placeholder session nodes.
-  - Blockers: `P3-007`, `P3-008`, `P3-009`.
+  - Blockers: `CSP-038`, `CSP-039`, `CSP-040`.
   - Outcome: added `tests/harness_mux_snapshots.rs` with six end-to-end
     snapshots driven by `discover_local_with` + `FakeTmux` + codex fixture
     state covering orphan harness sessions, mux-only output, unavailable
@@ -478,13 +519,14 @@ Source plan: `docs/implementation/phase-03-agent-mux-discovery.md`.
     unresolved parent/child lineage. All temp paths are normalized to
     `/fixture` for stable ordering and no placeholder session nodes are
     emitted.
-- [x] `P3-011` Verify the Phase 3 end state.
+- [x] `CSP-042` Verify the Phase 3 end state.
+  - Legacy ID: `P3-011`
   - Scope: run the full Phase 3 automated and manual check set and record any
     follow-up tasks instead of expanding Phase 3 scope.
   - Tests: `just check`.
   - Manual checks: run the tmux smoke commands from the Phase 3 plan and run
     against real local harness state if available.
-  - Blockers: `P3-009`, `P3-010`.
+  - Blockers: `CSP-040`, `CSP-041`.
   - Outcome: `nix develop --command just check` passed with 124 tests. The
     tmux smoke test (`tmux new-session -d -s conspectus-smoke -c "$PWD"` +
     `cargo run -- graph --format json`) emitted one repo/checkout/branch,
@@ -502,7 +544,8 @@ Source plan: `docs/implementation/phase-03-agent-mux-discovery.md`.
 
 Source plan: `docs/implementation/phase-04-forge-and-table-views.md`.
 
-- [x] `P4-001` Define forge discovery boundaries and `gh` command runner.
+- [x] `CSP-045` Define forge discovery boundaries and `gh` command runner.
+  - Legacy ID: `P4-001`
   - Scope: add a `ForgeAdapter` trait and `ForgeDiscovery` provider under
     `src/discovery/forge/`, plus an injectable `gh` command runner that
     mirrors the existing `TmuxRunner` seam (real `SystemGh` that shells
@@ -517,7 +560,7 @@ Source plan: `docs/implementation/phase-04-forge-and-table-views.md`.
   - Manual checks: confirm no test requires a real `gh` install or
     network call; inspect the module layout for ADR 0007 alignment and
     verify forge discovery performs no rendering.
-  - Blockers: `P3-011`.
+  - Blockers: `CSP-042`.
   - Outcome: added `discovery::forge` with a `ForgeAdapter` trait, a
     `ForgeDiscovery` coordinator, and a `GhRunner` seam (`SystemGh`
     shells out to `gh pr list --json`, `FakeGh` returns pre-canned
@@ -528,7 +571,8 @@ Source plan: `docs/implementation/phase-04-forge-and-table-views.md`.
     adding an HTTP client. Nine new unit tests cover each path; no
     test requires a real `gh` install or network.
 
-- [x] `P4-002` Discover GitHub pull requests for known repos.
+- [x] `CSP-046` Discover GitHub pull requests for known repos.
+  - Legacy ID: `P4-002`
   - Scope: for each discovered repo, invoke
     `gh pr list --json number,state,url,headRefName,baseRefName,
     updatedAt,headRepositoryOwner,headRepository,isDraft` (or equivalent)
@@ -541,7 +585,7 @@ Source plan: `docs/implementation/phase-04-forge-and-table-views.md`.
     unavailable `gh`.
   - Manual checks: drive the adapter with a fixture-backed `gh` JSON
     blob and inspect record shape; do not exercise real `gh` in tests.
-  - Blockers: `P4-001`.
+  - Blockers: `CSP-045`.
   - Outcome: added `discovery::forge::github` with a
     `PullRequestRecord` / `PullRequestState` provider-neutral row
     shape and a `GhPullRequestParser` for `gh pr list --json` output.
@@ -553,7 +597,8 @@ Source plan: `docs/implementation/phase-04-forge-and-table-views.md`.
     malformed, single, multi-row, draft, missing-optional,
     unknown-state, and offset-vs-Z timestamp inputs.
 
-- [x] `P4-003` Map PR records into ForgePr nodes and branch candidate links.
+- [x] `CSP-047` Map PR records into ForgePr nodes and branch candidate links.
+  - Legacy ID: `P4-003`
   - Scope: emit one `ForgePr` node per record (extending `ForgePrNode`
     with an optional `updated_epoch` and `is_draft` so the resolver can
     rank candidates by recency and draft state) and a `BranchHasForgePr`
@@ -567,7 +612,7 @@ Source plan: `docs/implementation/phase-04-forge-and-table-views.md`.
     across repeated runs.
   - Manual checks: inspect JSON from a fixture-backed adapter run for
     readable provenance and identity shape.
-  - Blockers: `P4-002`.
+  - Blockers: `CSP-046`.
   - Outcome: extended `ForgePrNode` with `updated_epoch` and
     `is_draft` (skipped from JSON when false / absent for sparse
     output). Added `RepoContext` and `fragment_for_repo` in
@@ -580,7 +625,8 @@ Source plan: `docs/implementation/phase-04-forge-and-table-views.md`.
     state, stable IDs, updated-epoch propagation, and the
     empty-records case.
 
-- [x] `P4-004` Resolver scoring for branch ↔ pull request.
+- [x] `CSP-048` Resolver scoring for branch ↔ pull request.
+  - Legacy ID: `P4-004`
   - Scope: add a `BranchHasForgePr`-specific comparator in
     `src/resolve/mod.rs` so that, when a branch has multiple plausible
     PRs, the preferred candidate is the most-recently-updated open
@@ -593,7 +639,7 @@ Source plan: `docs/implementation/phase-04-forge-and-table-views.md`.
     ignored / overridden state handling.
   - Manual checks: inspect resolved relationships for a branch with two
     open PRs and confirm losers remain visible.
-  - Blockers: `P4-003`.
+  - Blockers: `CSP-047`.
   - Outcome: added `compare_branch_pr` in `src/resolve/mod.rs` with a
     `PrScore` (provenance tier > state rank > non-draft > recency >
     confidence > link id). State ranks open > merged > closed > other.
@@ -604,7 +650,8 @@ Source plan: `docs/implementation/phase-04-forge-and-table-views.md`.
     override, conflict diagnostic, ignored/overridden skip, and the
     zero-candidate case.
 
-- [x] `P4-005` Add config loading for session projection defaults.
+- [x] `CSP-049` Add config loading for session projection defaults.
+  - Legacy ID: `P4-005`
   - Scope: write an ADR for the Conspectus config file layout (project
     `.conspectus.toml` first, then `$XDG_CONFIG_HOME/conspectus/config.toml`
     or `$HOME/.config/conspectus/config.toml`, plus precedence and
@@ -629,7 +676,8 @@ Source plan: `docs/implementation/phase-04-forge-and-table-views.md`.
     TOML, unknown-keys-ignored, `Projection::parse`/`as_str` round
     trip, and `$XDG_CONFIG_HOME` overriding `$HOME/.config`.
 
-- [x] `P4-006` Define table output projection boundaries.
+- [x] `CSP-050` Define table output projection boundaries.
+  - Legacy ID: `P4-006`
   - Scope: extend `src/output/` with a `Projection` enum
     (`Agent`/`Mux`/`Union`) and a render trait that takes a resolved
     `GraphSnapshot` plus a projection and returns a deterministic
@@ -641,23 +689,24 @@ Source plan: `docs/implementation/phase-04-forge-and-table-views.md`.
     rendering for each projection.
   - Manual checks: inspect indicator output for representative candidate
     links.
-  - Blockers: `P3-011`.
+  - Blockers: `CSP-042`.
   - Outcome: added `output::table` with `Projection` (re-exported
     from `config`), a single `render` entry point, and an
     `indicator(provenance, confidence, ambiguous)` helper that emits
     cells like `LD/H` / `SD/M*` / `$/L`. Codes are LD / GD / SD /
     D / C / $ for provenance and H / M / L for confidence.
 
-- [x] `P4-007` Implement the agent projection table renderer.
+- [x] `CSP-051` Implement the agent projection table renderer.
+  - Legacy ID: `P4-007`
   - Scope: render one row per `AgentSession` with harness, cwd, preferred
     mux, preferred PR, and ambiguity flags using the indicator format
-    from `P4-006`. Orphan sessions stay visible with empty mux/PR cells.
+    from `CSP-050`. Orphan sessions stay visible with empty mux/PR cells.
   - Tests: snapshot tests for orphan sessions, sessions with a single
     mux match, sessions with multiple mux candidates, fork-linked
     sessions, and sessions whose branch has a forge PR.
   - Manual checks: review snapshots for column alignment and readable
     ambiguity indicators.
-  - Blockers: `P4-006`.
+  - Blockers: `CSP-050`.
   - Outcome: agent projection renders AGENT / CWD / MUX / MUX/CONF /
     PR / PR/CONF columns. Mux cell shows the preferred mux session
     label (or `—` for orphans). Ambiguity marker `*` appears when
@@ -665,20 +714,22 @@ Source plan: `docs/implementation/phase-04-forge-and-table-views.md`.
     first available BranchHasForgePr candidate. Unit tests cover
     orphan, single-match, ambiguous mux, and branch-with-PR cases.
 
-- [x] `P4-008` Implement the mux projection table renderer.
+- [x] `CSP-052` Implement the mux projection table renderer.
+  - Legacy ID: `P4-008`
   - Scope: render one row per `MuxSession` with backend, cwd, attached
     agent sessions (zero, one, or many), and ambiguity flags. Mux
     sessions with no attached agent remain visible.
   - Tests: snapshot tests for zero / one / many attached agents and
     unavailable-tmux scenarios (no mux rows).
   - Manual checks: review the snapshot output for alignment.
-  - Blockers: `P4-006`.
+  - Blockers: `CSP-050`.
   - Outcome: mux projection renders MUX / CWD / AGENTS columns;
     AGENTS lists `session-label [indicator]` for every attached
     session in stable order; mux sessions with no attached agent
     still appear with an `—` cell.
 
-- [x] `P4-009` Implement the union projection table renderer.
+- [x] `CSP-053` Implement the union projection table renderer.
+  - Legacy ID: `P4-009`
   - Scope: render a single table that preserves both agent and mux rows
     plus their relationship status, with stable ordering so identical
     snapshots reproduce byte-for-byte. Use one row per node with a
@@ -687,7 +738,7 @@ Source plan: `docs/implementation/phase-04-forge-and-table-views.md`.
     without sessions, and one-to-many mux candidates.
   - Manual checks: confirm the union table makes ambiguity visible
     without duplicating rows.
-  - Blockers: `P4-007`, `P4-008`.
+  - Blockers: `CSP-051`, `CSP-052`.
   - Outcome: union projection emits one row per node prefixed by
     `agent` / `mux`. Agent rows carry a relationship column
     formatted as `mux=<target> [indicator]` (`mux=—` when no
@@ -695,7 +746,8 @@ Source plan: `docs/implementation/phase-04-forge-and-table-views.md`.
     attached sessions appear as their own agent rows. Unit tests
     cover both kinds plus the empty-graph header-only case.
 
-- [x] `P4-010` Add the `conspectus session` CLI subcommand.
+- [x] `CSP-054` Add the `conspectus session` CLI subcommand.
+  - Legacy ID: `P4-010`
   - Scope: add `session` to the CLI with a
     `--projection {agent|mux|union}` flag that defaults to the value
     from the loaded config (or `agent` when no config is present). The
@@ -710,7 +762,7 @@ Source plan: `docs/implementation/phase-04-forge-and-table-views.md`.
     `cargo run -- session --projection agent`,
     `cargo run -- session --projection mux`,
     `cargo run -- session --projection union`.
-  - Blockers: `P4-005`, `P4-007`, `P4-008`, `P4-009`.
+  - Blockers: `CSP-049`, `CSP-051`, `CSP-052`, `CSP-053`.
   - Outcome: added the `session` subcommand with an optional
     `--projection {agent|mux|union}` flag and `--scan-root` re-using
     the graph command's options. Without `--projection`, the CLI
@@ -722,7 +774,8 @@ Source plan: `docs/implementation/phase-04-forge-and-table-views.md`.
     config defaulting to union, and deterministic output across
     repeated runs.
 
-- [x] `P4-011` Wire forge discovery into local graph discovery.
+- [x] `CSP-055` Wire forge discovery into local graph discovery.
+  - Legacy ID: `P4-011`
   - Scope: register the forge provider in `discover_local_with` behind
     `LocalDiscoveryConfig::forge_runner` (mirroring the tmux pattern).
     `from_env()` builds a real `SystemGh` runner unless
@@ -735,7 +788,7 @@ Source plan: `docs/implementation/phase-04-forge-and-table-views.md`.
     a fake `gh` output.
   - Manual checks: run `cargo run -- graph --format json` from a repo
     with an open PR and confirm the `ForgePr` node and link appear.
-  - Blockers: `P4-003`, `P4-004`.
+  - Blockers: `CSP-047`, `CSP-048`.
   - Outcome: added a `GitHubForgeProvider` that probes each scan
     root with `GitProbe`, extracts host/owner/repo from a
     GitHub-shaped git remote, runs `gh pr list --json` via the
@@ -751,7 +804,8 @@ Source plan: `docs/implementation/phase-04-forge-and-table-views.md`.
     tests cover the wired path with `FakeGh` and the "no runner"
     case.
 
-- [x] `P4-012` Add representative JSON and table snapshots.
+- [x] `CSP-056` Add representative JSON and table snapshots.
+  - Legacy ID: `P4-012`
   - Scope: snapshot graph JSON for a repo with zero / one / multiple
     open PRs and for one-to-many branch ↔ PR ambiguity. Add session-table
     snapshots in each projection for orphan sessions, single-mux match,
@@ -763,7 +817,7 @@ Source plan: `docs/implementation/phase-04-forge-and-table-views.md`.
   - Manual checks: review snapshots for stable ordering, readable
     provenance / confidence / ambiguity, and preserved competing-PR
     evidence.
-  - Blockers: `P4-009`, `P4-010`, `P4-011`.
+  - Blockers: `CSP-053`, `CSP-054`, `CSP-055`.
   - Outcome: added `tests/forge_snapshots.rs` with six end-to-end
     snapshots driven by `discover_local_with` + `FakeGh` against a
     temp git repo: zero-PR JSON, one-open-PR JSON (matched
@@ -772,7 +826,8 @@ Source plan: `docs/implementation/phase-04-forge-and-table-views.md`.
     (agent with PR, mux empty, union with PR). Path normalization
     rewrites the temp path to `/fixture` so reruns are byte-stable.
 
-- [x] `P4-013` Verify the Phase 4 end state.
+- [x] `CSP-057` Verify the Phase 4 end state.
+  - Legacy ID: `P4-013`
   - Scope: run the full Phase 4 automated and manual check set and
     record follow-up tasks instead of expanding Phase 4 scope.
   - Tests: `just check`.
@@ -781,7 +836,7 @@ Source plan: `docs/implementation/phase-04-forge-and-table-views.md`.
     `cargo run -- graph --format json` from a repo with a real open
     PR. Confirm the PR node and `BranchHasForgePr` link appear in JSON
     and surface in the session-table projection.
-  - Blockers: `P4-010`, `P4-011`, `P4-012`.
+  - Blockers: `CSP-054`, `CSP-055`, `CSP-056`.
   - Outcome: `nix develop --command just check` passed with 210 tests.
     `cargo run -- session`, `--projection agent`, `--projection mux`,
     and `--projection union` all rendered tables against live local
@@ -801,7 +856,8 @@ Source plan: `docs/implementation/phase-04-forge-and-table-views.md`.
 
 Source plan: `docs/implementation/phase-05-declared-links.md`.
 
-- [x] `P5-001` Record the declared-link storage schema.
+- [x] `CSP-060` Record the declared-link storage schema.
+  - Legacy ID: `P5-001`
   - Scope: add an ADR for durable declared relationship state in
     `.conspectus.toml` and user config, covering link identity, endpoint
     encoding, relation kinds, link state (`active`, `ignored`,
@@ -810,14 +866,15 @@ Source plan: `docs/implementation/phase-05-declared-links.md`.
   - Tests: docs-only; `git diff --check`.
   - Manual checks: review the schema against `docs/design.md`, ADR
     0002, ADR 0012, and the Phase 5 implementation plan.
-  - Blockers: `P4-013`.
+  - Blockers: `CSP-057`.
   - Outcome: ADR 0014 defines the `[declared]` TOML schema,
     `[[declared.links]]` entries, typed inline endpoint tables,
     active/ignored/overridden states, local-vs-global provenance from
     config location, nearest-store write ownership, and compatibility
     behavior for unknown fields and schema versions.
 
-- [x] `P5-002` Define declared-link file models and TOML round trips.
+- [x] `CSP-061` Define declared-link file models and TOML round trips.
+  - Legacy ID: `P5-002`
   - Scope: extend `src/config.rs` or add a focused declared-link module
     with serializable structs for project-local and user-level declared
     links, ignored links, overrides, reasons, optional labels, and schema
@@ -829,7 +886,7 @@ Source plan: `docs/implementation/phase-05-declared-links.md`.
     `[session]`.
   - Manual checks: inspect representative `.conspectus.toml` and
     user-config TOML snippets for readable shape.
-  - Blockers: `P5-001`, `P4-005`.
+  - Blockers: `CSP-060`, `CSP-049`.
   - Outcome: added `src/declared.rs` with ADR 0014 file models for
     `[declared]`, `[[declared.links]]`, typed endpoints, link state,
     optional reasons/labels, and schema validation. Added TOML
@@ -838,7 +895,8 @@ Source plan: `docs/implementation/phase-05-declared-links.md`.
     schema versions, duplicate IDs, and overridden links missing
     `overridden_by`.
 
-- [x] `P5-003` Load local and global declared links into graph evidence.
+- [x] `CSP-062` Load local and global declared links into graph evidence.
+  - Legacy ID: `P5-003`
   - Scope: teach local discovery to read project `.conspectus.toml`
     and user config declared-link sections without writing either file,
     convert entries into `GraphLink` candidates with
@@ -852,7 +910,7 @@ Source plan: `docs/implementation/phase-05-declared-links.md`.
   - Manual checks: run `cargo run -- graph --format json` in a repo
     with hand-written `.conspectus.toml` declarations and inspect
     provenance, link state, diagnostics, and resolved relationships.
-  - Blockers: `P5-002`.
+  - Blockers: `CSP-061`.
   - Outcome: added a read-only `discovery::declared` pass that loads
     user config and per-root project config, maps entries into
     `GraphLink` candidates with `LocalDeclared` / `GlobalDeclared`
@@ -863,7 +921,8 @@ Source plan: `docs/implementation/phase-05-declared-links.md`.
     loading by default while tests can inject or disable the config
     loader explicitly.
 
-- [x] `P5-004` Preserve read-only command invariants.
+- [x] `CSP-063` Preserve read-only command invariants.
+  - Legacy ID: `P5-004`
   - Scope: explicitly verify `conspectus graph` and `conspectus session`
     never create or mutate `.conspectus.toml`, user config files, or
     cache directories while loading declared evidence.
@@ -873,13 +932,14 @@ Source plan: `docs/implementation/phase-05-declared-links.md`.
     unchanged.
   - Manual checks: `cargo run -- graph --format json`; `test ! -e
     .conspectus.toml`; repeat with `cargo run -- session`.
-  - Blockers: `P5-003`.
+  - Blockers: `CSP-062`.
   - Outcome: added CLI smoke coverage proving `graph` and `session`
     do not create `.conspectus.toml` or user config in a clean repo,
     and do not mutate an existing project config with declared-link
     state when run from either cwd or explicit `--scan-root`.
 
-- [x] `P5-005` Implement nearest-store selection for writes.
+- [x] `CSP-064` Implement nearest-store selection for writes.
+  - Legacy ID: `P5-005`
   - Scope: add a pure store-selection helper that decides where a new
     user-authored declaration belongs: project-local for relationships
     rooted in a discovered repo/workspace/checkout, global for orphan or
@@ -890,14 +950,15 @@ Source plan: `docs/implementation/phase-05-declared-links.md`.
     multi-root, missing-root, and outside-home scenarios.
   - Manual checks: inspect selected paths for representative repos,
     linked worktrees, and non-repo directories.
-  - Blockers: `P5-002`, `P5-003`.
+  - Blockers: `CSP-061`, `CSP-062`.
   - Outcome: added a pure `select_store_for_declaration` helper that
     resolves declared-link writes to the nearest project config for
     repo, workspace, checkout, session cwd, mux cwd, branch/PR, and
     fork-rooted relationships, and falls back to the user config for
     orphan relationships without touching cache or index storage.
 
-- [x] `P5-006` Add atomic declared-link write helpers.
+- [x] `CSP-065` Add atomic declared-link write helpers.
+  - Legacy ID: `P5-006`
   - Scope: implement read-modify-write helpers for local
     `.conspectus.toml` and user config declared-link sections, creating
     parent directories only for explicit write commands, preserving
@@ -908,14 +969,15 @@ Source plan: `docs/implementation/phase-05-declared-links.md`.
     existing TOML behavior, and global config parent creation.
   - Manual checks: inspect generated TOML and verify read-only
     commands still do not call these helpers.
-  - Blockers: `P5-005`.
+  - Blockers: `CSP-064`.
   - Outcome: added explicit upsert/remove helpers that read and validate
     existing config, preserve unrelated TOML sections, replace duplicate
     declared IDs, sort links deterministically, create parent
     directories only on writes, and replace config files via
     temp-file-and-rename writes while leaving malformed files untouched.
 
-- [x] `P5-007` Define the declared-link CLI surface.
+- [x] `CSP-066` Define the declared-link CLI surface.
+  - Legacy ID: `P5-007`
   - Scope: add the CLI command structure and help text for listing,
     creating, removing, confirming, ignoring, and overriding declared
     links without implementing every mutation path. Choose stable flag
@@ -926,7 +988,7 @@ Source plan: `docs/implementation/phase-05-declared-links.md`.
     output against empty stores.
   - Manual checks: `cargo run -- --help` and declared-link subcommand
     help output.
-  - Blockers: `P5-001`, `P5-006`.
+  - Blockers: `CSP-060`, `CSP-065`.
   - Outcome: added the `conspectus declared` command group with
     `list`, `create`, `remove`, `confirm`, `ignore`, and `override`
     subcommands; relation validation uses the existing snake_case graph
@@ -934,7 +996,8 @@ Source plan: `docs/implementation/phase-05-declared-links.md`.
     values using declared TOML field names, and empty `declared list`
     succeeds without producing output.
 
-- [x] `P5-008` Implement list and inspect commands for declared state.
+- [x] `CSP-067` Implement list and inspect commands for declared state.
+  - Legacy ID: `P5-008`
   - Scope: add read-only commands that render declared links from local
     and global stores, including active, ignored, and overridden
     entries, their selected store, provenance, relation, endpoints, and
@@ -944,14 +1007,15 @@ Source plan: `docs/implementation/phase-05-declared-links.md`.
     malformed config diagnostics, and deterministic output.
   - Manual checks: create hand-written local/global declared entries
     and inspect list output.
-  - Blockers: `P5-003`, `P5-007`.
+  - Blockers: `CSP-062`, `CSP-066`.
   - Outcome: implemented read-only `declared list` output for user and
     discovered project stores, including store, provenance, state, id,
     relation, source/target endpoints, reason, override id, label, and
     config path; output is deterministic, empty stores print nothing,
     and malformed declared config emits a warning without mutating files.
 
-- [x] `P5-009` Implement link and unlink commands.
+- [x] `CSP-068` Implement link and unlink commands.
+  - Legacy ID: `P5-009`
   - Scope: add write commands that create and remove active declared
     relationships between supported endpoint types (`AgentSession`,
     `MuxSession`, `ForgePr`, `Workspace`, `Repo`, `Checkout`,
@@ -965,7 +1029,7 @@ Source plan: `docs/implementation/phase-05-declared-links.md`.
     confirm the declared link wins resolution and discovered candidates
     remain visible, then unlink and confirm resolution returns to
     discovered evidence.
-  - Blockers: `P5-006`, `P5-007`.
+  - Blockers: `CSP-065`, `CSP-066`.
   - Outcome: `conspectus declared create` builds a declared link with
     state=Active, picks the target store via
     `select_store_for_declaration` (auto), `--store {project|user}`
@@ -979,7 +1043,8 @@ Source plan: `docs/implementation/phase-05-declared-links.md`.
     "no declared link" error path, and graph JSON showing the
     newly created `local_declared` candidate.
 
-- [x] `P5-010` Implement confirm, ignore, and override flows.
+- [x] `CSP-069` Implement confirm, ignore, and override flows.
+  - Legacy ID: `P5-010`
   - Scope: add mutation flows that mark a discovered candidate as
     confirmed declared evidence, record ignored candidates with optional
     reasons, and record explicit overrides that point to the replacing
@@ -991,7 +1056,7 @@ Source plan: `docs/implementation/phase-05-declared-links.md`.
   - Manual checks: confirm one discovered session↔mux candidate, ignore
     a competing candidate, and inspect `candidate_links`,
     `resolved_relationships`, and diagnostics.
-  - Blockers: `P5-009`.
+  - Blockers: `CSP-068`.
   - Outcome: `conspectus declared confirm` and `declared ignore`
     share a `run_confirm_or_ignore` helper that runs discovery, looks
     up the candidate by id in `snapshot.candidate_links`, maps both
@@ -1007,7 +1072,8 @@ Source plan: `docs/implementation/phase-05-declared-links.md`.
     and a graph-JSON assertion that the discovered candidate stays
     visible alongside the new local-declared one.
 
-- [x] `P5-011` Add declared-link graph and table snapshots.
+- [x] `CSP-070` Add declared-link graph and table snapshots.
+  - Legacy ID: `P5-011`
   - Scope: add representative snapshots for local declared links,
     global declared links, local-over-global precedence, ignored
     discovered candidates, overridden candidates, unresolved declared
@@ -1017,7 +1083,7 @@ Source plan: `docs/implementation/phase-05-declared-links.md`.
     run --all-targets --all-features`.
   - Manual checks: review snapshots for stable ordering, readable TOML
     provenance, and preserved discovered evidence.
-  - Blockers: `P5-003`, `P5-010`.
+  - Blockers: `CSP-062`, `CSP-069`.
   - Outcome: added `tests/declared_snapshots.rs` with seven scenarios
     driven by `discover_local_with` plus an injected `ConfigLoader`
     and `FakeTmux`: local-declared with matched target, global
@@ -1028,7 +1094,8 @@ Source plan: `docs/implementation/phase-05-declared-links.md`.
     agent-projection table rendering the declared mux relationship.
     Temp paths normalize to `/fixture` so reruns stay byte-stable.
 
-- [x] `P5-012` Verify the Phase 5 end state.
+- [x] `CSP-071` Verify the Phase 5 end state.
+  - Legacy ID: `P5-012`
   - Scope: run the full Phase 5 automated and manual check set and
     record follow-up tasks instead of expanding Phase 5 scope.
   - Tests: `just check`.
@@ -1036,7 +1103,7 @@ Source plan: `docs/implementation/phase-05-declared-links.md`.
     create a manual mux/session link, rerun graph/session output,
     confirm declared precedence and evidence preservation, then unlink
     and confirm the generated TOML returns to the expected state.
-  - Blockers: `P5-004`, `P5-008`, `P5-009`, `P5-010`, `P5-011`.
+  - Blockers: `CSP-063`, `CSP-067`, `CSP-068`, `CSP-069`, `CSP-070`.
   - Outcome: `nix develop --command just check` passed with 276 tests.
     Manual smoke from a fresh temp git repo with isolated `$HOME`
     confirmed: (a) `graph --format json` runs read-only and creates
@@ -1070,7 +1137,8 @@ position Conspectus as the cross-workspace observability surface, and
 filing the cross-repo work in Atelier. No Atelier-side code lands in
 this repo.
 
-- [x] `P6-001` Record an ADR for the Conspectus library API surface.
+- [x] `CSP-073` Record an ADR for the Conspectus library API surface.
+  - Legacy ID: `P6-001`
   - Scope: write an ADR that names the publicly stable modules
     (`model`, `output`, `resolve`, `config`, `declared`,
     `discovery::{git,tmux,forge,harness,atelier,workspace,declared,
@@ -1082,13 +1150,14 @@ this repo.
   - Manual checks: cross-check the proposed stable list against
     `src/lib.rs`, the existing `pub` items in each module, and
     the migration plan in `docs/design.md`.
-  - Blockers: `P5-012`.
+  - Blockers: `CSP-071`.
   - Outcome: accepted ADR 0015, which names the stable public modules,
     commits to a semver discipline, keeps existing module paths
     supported, marks CLI internals outside the library contract, and
     requires a curated `conspectus::api` facade for common consumers.
 
-- [x] `P6-002` Record an ADR for Conspectus distribution.
+- [x] `CSP-074` Record an ADR for Conspectus distribution.
+  - Legacy ID: `P6-002`
   - Scope: decide whether external consumers (Atelier today, possibly
     other tools later) depend on Conspectus via crates.io, a pinned
     git revision, a path dependency, or all three. Capture the
@@ -1097,15 +1166,16 @@ this repo.
   - Tests: docs-only.
   - Manual checks: confirm any chosen distribution channel works
     against the Phase 6 dev-shell.
-  - Blockers: `P6-001`.
+  - Blockers: `CSP-073`.
   - Outcome: accepted ADR 0016, which makes crates.io the intended
     steady-state distribution channel, allows pinned git revisions for
     Atelier migration and release validation, limits path dependencies
     to local development, and ties the effective MSRV to the stable
     toolchain validated by the Nix dev shell.
 
-- [x] `P6-003` Audit pure vs impure modules and produce a library API
+- [x] `CSP-075` Audit pure vs impure modules and produce a library API
   inventory.
+  - Legacy ID: `P6-003`
   - Scope: walk every module under `src/` and tag it as either
     pure (no `std::env`, `std::process`, `current_dir`, no global
     state) or impure boundary code, and write the result up as
@@ -1118,7 +1188,7 @@ this repo.
   - Tests: docs-only; `git diff --check`.
   - Manual checks: re-grep for `std::env`, `std::process`, and
     `current_dir` after the audit and confirm the inventory matches.
-  - Blockers: `P6-001`.
+  - Blockers: `CSP-073`.
   - Outcome: added `docs/library-api.md` with the stable consumer
     workflow, pure-module inventory, impure boundary inventory,
     injection guidance, stable entry points, and environment toggles.
@@ -1127,10 +1197,11 @@ this repo.
     helpers, `DiscoveryContext::from_current_dir`,
     `LocalDiscoveryConfig::from_env`, and `ConfigLoader::from_env`.
 
-- [x] `P6-004` Add a curated public re-export facade.
+- [x] `CSP-076` Add a curated public re-export facade.
+  - Legacy ID: `P6-004`
   - Scope: add a small `conspectus::api` module (or top-level
     `pub use` block in `src/lib.rs`) that re-exports the entry
-    points named in `P6-003`. Apply `#[doc(hidden)]` (or move to
+    points named in `CSP-075`. Apply `#[doc(hidden)]` (or move to
     `pub(crate)`) on items the ADR marks internal. Keep the existing
     module paths working so current callers do not break.
   - Tests: `cargo test --all-targets --all-features`; add a small
@@ -1139,7 +1210,7 @@ this repo.
     + call `discover_local_with` on a temp dir).
   - Manual checks: `cargo doc --no-deps --open` and confirm the
     curated surface is the obvious entry point.
-  - Blockers: `P6-001`, `P6-003`.
+  - Blockers: `CSP-073`, `CSP-075`.
   - Outcome: added `conspectus::api` as the curated facade for
     discovery, resolution, graph JSON, table rendering, config,
     declared-link helpers, and graph model types. The facade includes a
@@ -1147,7 +1218,8 @@ this repo.
     `LocalDiscoveryConfig::empty()`. Test-only fixture/fake helpers now
     stay reachable but are hidden from generated docs.
 
-- [x] `P6-005` Write the Atelier migration guide.
+- [x] `CSP-077` Write the Atelier migration guide.
+  - Legacy ID: `P6-005`
   - Scope: add `docs/atelier-migration.md` mapping each overlapping
     Atelier command to its Conspectus replacement
     (`atelier session list` → `conspectus session`;
@@ -1156,7 +1228,7 @@ this repo.
     `conspectus session`; graph-heavy parts of `atelier status` →
     `conspectus graph --format json`). Note the env toggles already
     documented in `docs/operations.md` and any new ones introduced by
-    `P6-004`. Link the migration guide from `docs/index.md`.
+    `CSP-076`. Link the migration guide from `docs/index.md`.
   - Tests: docs-only; `git diff --check`.
   - Manual checks: run the listed Conspectus commands and confirm
     they cover the workflow described.
@@ -1167,7 +1239,8 @@ this repo.
     preservation, runtime knobs, and `conspectus::api` integration.
     Linked the guide from `docs/index.md`.
 
-- [x] `P6-006` Add a representative comparison fixture.
+- [x] `CSP-078` Add a representative comparison fixture.
+  - Legacy ID: `P6-006`
   - Scope: add an integration test that runs `discover_local_with`
     on a temp-dir fixture mimicking an Atelier workspace (atelier
     config + fork index + a fake harness session + a `FakeTmux`)
@@ -1178,7 +1251,7 @@ this repo.
   - Tests: `cargo nextest run --all-targets --all-features`.
   - Manual checks: review the new snapshots for stable ordering and
     preserved evidence/ambiguity.
-  - Blockers: `P5-012`.
+  - Blockers: `CSP-071`.
   - Outcome: added `tests/atelier_delegation_snapshots.rs`, which
     builds an Atelier-style workspace with two git repos, a checkout
     fork, unresolved codex lineage metadata, a fake codex session, and a
@@ -1186,19 +1259,20 @@ this repo.
     agent, mux, and union session table projections with temp paths
     normalized to `/fixture`.
 
-- [x] `P6-007` File the Atelier-side delegation work in the Atelier
+- [x] `CSP-079` File the Atelier-side delegation work in the Atelier
   repo.
+  - Legacy ID: `P6-007`
   - Scope: open the cross-repo tracker covering Atelier's deprecation
     or delegation of `atelier session list`, `atelier mux status`,
     forge status, and the graph-heavy parts of `atelier status`. The
     code lives in the Atelier repo; this item is purely outbound
-    coordination, including pointing Atelier at `P6-004`'s curated
-    API and `P6-005`'s migration guide. Cite the Atelier issue or PR
+    coordination, including pointing Atelier at `CSP-076`'s curated
+    API and `CSP-077`'s migration guide. Cite the Atelier issue or PR
     URL in the outcome note so future readers can follow up.
   - Tests: none (out-of-repo work).
   - Manual checks: confirm an Atelier maintainer (or self, if dual
     maintainer) has accepted the tracker.
-  - Blockers: `P6-004`, `P6-005`.
+  - Blockers: `CSP-076`, `CSP-077`.
   - Outcome: added the Atelier-side tracker in
     `/home/user/src/atelier/docs/conspectus-delegation.md` and
     linked it from Atelier docs in commit `b765c16` (`docs: track
@@ -1208,8 +1282,9 @@ this repo.
     and graph-heavy `atelier status` areas, and records acceptance
     criteria for preserving existing workflows.
 
-- [x] `P6-008` Refresh top-level docs to position Conspectus as the
+- [x] `CSP-080` Refresh top-level docs to position Conspectus as the
   cross-workspace observability surface.
+  - Legacy ID: `P6-008`
   - Scope: update `README.md` so it no longer reads "currently in
     design"; describe what the CLI does today and link the
     feature summary, ADR index, and migration guide. Update
@@ -1219,7 +1294,7 @@ this repo.
   - Tests: docs-only; `git diff --check`.
   - Manual checks: open the rendered Markdown and confirm the
     framing matches the post-Phase-5 reality.
-  - Blockers: `P6-004`, `P6-005`, `P6-007`.
+  - Blockers: `CSP-076`, `CSP-077`, `CSP-079`.
   - Outcome: refreshed `README.md` so it describes the implemented CLI
     and library instead of a design-only project, links the feature
     summary, ADRs, operations, library API, and Atelier migration guide,
@@ -1229,8 +1304,9 @@ this repo.
     ADRs 0015 and 0016 for the API/distribution decisions around items
     6-7.
 
-- [x] `P6-009` Decide whether to extract Conspectus into its own
+- [x] `CSP-081` Decide whether to extract Conspectus into its own
   repository.
+  - Legacy ID: `P6-009`
   - Scope: per migration-plan item 7, reassess whether Conspectus
     should remain in this repository alongside its design ancestor
     or move to a standalone repo now that the shared library surface
@@ -1240,13 +1316,14 @@ this repo.
   - Tests: docs-only.
   - Manual checks: review the ADR against `docs/design.md` and
     `docs/naming.md`.
-  - Blockers: `P6-001`, `P6-007`.
+  - Blockers: `CSP-073`, `CSP-079`.
   - Outcome: accepted ADR 0017, which keeps Conspectus in the current
     standalone repository, does not schedule a Phase 7 repository move,
     and directs Atelier integration to use ADR 0016 distribution
     channels rather than repository colocation.
 
-- [x] `P6-010` Verify the Phase 6 end state.
+- [x] `CSP-082` Verify the Phase 6 end state.
+  - Legacy ID: `P6-010`
   - Scope: run the full Phase 6 automated and manual check set and
     record follow-up tasks instead of expanding Phase 6 scope.
   - Tests: `just check`; `cargo doc --no-deps`.
@@ -1254,8 +1331,8 @@ this repo.
     plus `cargo run -- graph --format json` on a real workspace and
     confirm the output matches what Atelier users previously got from
     the deprecated commands.
-  - Blockers: `P6-004`, `P6-005`, `P6-006`, `P6-007`, `P6-008`,
-    `P6-009`.
+  - Blockers: `CSP-076`, `CSP-077`, `CSP-078`, `CSP-079`, `CSP-080`,
+    `CSP-081`.
   - Outcome: `nix develop --command just check` passed, including
     formatting, clippy, `cargo test --all-targets --all-features`,
     `cargo nextest run --all-targets --all-features` with 279 tests,
@@ -1270,8 +1347,9 @@ this repo.
 
 ## Phase 5 Follow-Ups
 
-- [x] `P5-FU-001` Prune empty `[declared]` sections after the last
+- [x] `CSP-072` Prune empty `[declared]` sections after the last
   declared link is removed.
+  - Legacy ID: `P5-FU-001`
   - Scope: when `remove_declared_link` brings the link list to zero,
     delete the `[declared]` table entirely (and the file when no
     other top-level sections remain) so a fresh `declared list` from
@@ -1288,21 +1366,23 @@ this repo.
 
 ## Phase 4 Follow-Ups
 
-- [x] `P4-FU-001` Document the `CONSPECTUS_DISABLE_FORGE`,
+- [x] `CSP-058` Document the `CONSPECTUS_DISABLE_FORGE`,
   `CONSPECTUS_DISABLE_TMUX`, and `CONSPECTUS_*_STATE` env vars
   in `docs/design.md` or a new `docs/operations.md` so users
   discover them without grepping source.
+  - Legacy ID: `P4-FU-001`
   - Outcome: added `docs/operations.md` and linked it from
     `docs/index.md`; the operations guide documents provider
     toggles, harness state-root overrides, config precedence, current
     CLI commands, and the no-cache-yet policy.
-- [x] `P4-FU-002` Match PRs whose head ref is a non-current local
+- [x] `CSP-059` Match PRs whose head ref is a non-current local
   branch by enumerating all local refs in the git probe. The
   Phase 4 adapter only matches the currently-checked-out branch,
   so PRs for sibling branches end up as unresolved-endpoint
   candidate links rather than node-target links. The evidence is
   still preserved; the resolved relationship just goes
   unresolved.
+  - Legacy ID: `P4-FU-002`
   - Outcome: `GitProbe` now enumerates local branch short refs via
     read-only `git for-each-ref`, `fragment_from_probe` emits
     non-current local branches as `Branch` nodes without adding
@@ -1313,7 +1393,8 @@ this repo.
 
 ## Phase 3 Follow-Ups
 
-- [x] `P3-FU-001` Align harness adapter parsers with real provider state.
+- [x] `CSP-043` Align harness adapter parsers with real provider state.
+  - Legacy ID: `P3-FU-001`
   - Scope: extend the Codex, Claude Code, and opencode adapters so the cwd
     and any activity/recency timestamps from real local state populate
     `AgentSessionNode.cwd` (and link metadata where applicable). The Phase 3
@@ -1333,7 +1414,8 @@ this repo.
     `linked_to_mux` candidates, and 13 resolved relationships including
     the live claude-code session attached to the `conspectus-smoke` tmux
     session.
-- [x] `P3-FU-002` Read opencode sessions from the SQLite store.
+- [x] `CSP-044` Read opencode sessions from the SQLite store.
+  - Legacy ID: `P3-FU-002`
   - Scope: modern opencode (≥ ~0.5) keeps sessions in
     `~/.local/share/opencode/opencode.db` (table `session` with
     `id`, `directory`, `title`, `time_created`, `time_updated`,
@@ -1369,21 +1451,24 @@ area is already being touched. Group prefixes:
 
 ### Refactors And Dedup
 
-- [x] `H-REF-001` Extract a shared `DeclaredEndpoint` codec.
+- [x] `CSP-083` Extract a shared `DeclaredEndpoint` codec.
+  - Legacy ID: `H-REF-001`
   - Landed 2026-07-05 (`91963c8`). `parse_endpoint` +
     `endpoint_label` retired from cli.rs; replaced by
     `DeclaredEndpoint::parse_compact` / `compact_label`
     methods. Round-trip tests for all 10 variants + syntax
     error + missing-field error tests in `declared_tests.rs`.
   - Blockers: none.
-- [x] `H-REF-002` Share the relation-kind string codec.
+- [x] `CSP-084` Share the relation-kind string codec.
+  - Legacy ID: `H-REF-002`
   - Landed 2026-07-05 (`3dd6a2c`). Added
     `RelationKind::from_snake_case` inverse method next to
     the existing `snake_case()`. `parse_relation_kind` /
     `relation_label` deleted from cli.rs. 22-variant
     round-trip test + unknown-label test in `model_tests.rs`.
   - Blockers: none.
-- [x] `H-REF-003` Generalize the resolver scoring tier helpers.
+- [x] `CSP-085` Generalize the resolver scoring tier helpers.
+  - Legacy ID: `H-REF-003`
   - Landed 2026-07-05 (`581f3c0`). `MuxTier` +
     `PrProvenanceTier` collapsed into shared
     `ProvenanceTier` enum with `from_provenance` +
@@ -1391,11 +1476,13 @@ area is already being touched. Group prefixes:
     type; discriminant values byte-identical to pre-H-REF-003
     so resolver behavior is preserved.
   - Blockers: none.
-- [x] `H-REF-004` Unify the external-tool runner seam.
-  - Outcome: folded into `H-EXT-008` (see `docs/extensibility-assessment.md`
+- [x] `CSP-086` Unify the external-tool runner seam.
+  - Legacy ID: `H-REF-004`
+  - Outcome: folded into `CSP-480` (see `docs/extensibility-assessment.md`
     Phase C) — the shared runner seam lands as part of extracting the
     `MuxBackend` trait rather than as a standalone refactor. Tracked there.
-- [x] `H-REF-005` Split `src/declared.rs` by concern.
+- [x] `CSP-087` Split `src/declared.rs` by concern.
+  - Legacy ID: `H-REF-005`
   - Landed 2026-07-05 (`f234df5`). Directory-based module
     with three submodules: `mod.rs` (TOML types + endpoint
     codec + parse/validate + error types, 413 lines),
@@ -1407,7 +1494,7 @@ area is already being touched. Group prefixes:
     kept as `pub(crate)` at the module path because pins,
     aliases, and tui_state share it. Test module moved
     into the new directory as `tests.rs`.
-  - Blockers: `H-REF-001` (landed).
+  - Blockers: `CSP-083` (landed).
   - Scope: separate (a) TOML models + parse/validate, (b) read-modify-write
     helpers and file I/O, and (c) snapshot-aware helpers
     (`endpoint_project_root`, `declared_endpoint_from_node_id`,
@@ -1416,8 +1503,9 @@ area is already being touched. Group prefixes:
     format.
   - Tests: existing declared and CLI tests must continue to pass without
     snapshot diffs.
-  - Blockers: `H-REF-001` is friendlier to do first.
-- [x] `H-REF-006` Slim `src/cli.rs` into per-command modules.
+  - Blockers: `CSP-083` is friendlier to do first.
+- [x] `CSP-088` Slim `src/cli.rs` into per-command modules.
+  - Legacy ID: `H-REF-006`
   - **Landed 2026-07-05 across 12 waves** (~85%
     reduction). `cli.rs` split into a `src/cli/` directory
     module with 12 per-command submodules; `cli/mod.rs`
@@ -1460,8 +1548,9 @@ area is already being touched. Group prefixes:
     --all-targets --all-features -- -D warnings`, and
     `cargo test --all-targets --all-features` clean, with
     the pre-H-REF-006 test suite passing byte-identically.
-  - Blockers: `H-REF-001` (landed), `H-REF-002` (landed).
-- [x] `H-REF-007` Factor harness adapter state-root scanning.
+  - Blockers: `CSP-083` (landed), `CSP-084` (landed).
+- [x] `CSP-089` Factor harness adapter state-root scanning.
+  - Legacy ID: `H-REF-007`
   - Landed 2026-07-05 (`ac7c1d3`). New
     `discovery::harness::discover_with_state_root(context,
     harness_key, inner)` shared envelope wraps the "look up
@@ -1472,7 +1561,8 @@ area is already being touched. Group prefixes:
     2 new tests in `harness_tests.rs` (short-circuit +
     stamping).
   - Blockers: none.
-- [x] `H-REF-008` Replace string field names in `SourceMetadata.fields`.
+- [x] `CSP-090` Replace string field names in `SourceMetadata.fields`.
+  - Legacy ID: `H-REF-008`
   - Landed 2026-07-05 (`4b3d816`). New `crate::model::source_field`
     module with constants MATCH_KIND, MUX_ACTIVITY_EPOCH,
     UPDATED_EPOCH, FORK_ROOT, LINEAGE_KIND, STATE, IS_DRAFT,
@@ -1481,11 +1571,12 @@ area is already being touched. Group prefixes:
     `.insert("<key>".to_string(), ...)` producers and
     `.get("<key>")` consumers. `every_source_field_constant_matches_its_string_literal`
     test guards against constant renames.
-  - Blockers: `H-REF-003` (landed).
-- [x] `H-REF-009` Centralize provider identifier constants.
+  - Blockers: `CSP-085` (landed).
+- [x] `CSP-091` Centralize provider identifier constants.
+  - Legacy ID: `H-REF-009`
   - Landed 2026-07-05 (`5b58aaf`). Migrated all major
     provider-key string literals to the `providers::*`
-    constants defined by H-EXT-001:
+    constants defined by CSP-473:
     * `discovery/mod.rs::discover_local_warm_with` uses
       `providers::GIT`, `ATELIER`, `GENERIC_WORKSPACE`,
       `CLAUDE_CODE`/`CODEX`/`OPENCODE`/`AIDER`, `TMUX`,
@@ -1497,7 +1588,8 @@ area is already being touched. Group prefixes:
     * Added `providers::GITLAB` const;
       `forge/gitlab.rs::GITLAB_PROVIDER` points at it.
   - Blockers: none.
-- [x] `H-REF-010` Audit and shrink the curated `conspectus::api` surface.
+- [x] `CSP-092` Audit and shrink the curated `conspectus::api` surface.
+  - Legacy ID: `H-REF-010`
   - Landed 2026-07-05 (`06c8423`). `api.rs` re-organized
     into 3 tiers with module docstring naming the tiering:
     (1) core API (graph model, discovery, resolution,
@@ -1521,7 +1613,8 @@ behavior-preserving; existing snapshot suites are the regression net. The
 audit's "What Not To Change" section bounds the scope — resolver semantics,
 runner seams, doc culture, and test volume are explicitly out of bounds.
 
-- [x] `H-HYG-001` Dedupe the copy-pasted micro-helpers.
+- [x] `CSP-462` Dedupe the copy-pasted micro-helpers.
+  - Legacy ID: `H-HYG-001`
   - Landed 2026-07-04 (commit `c82c9f6`). All three helper
     families collapsed: `snapshot_fragment` (7 copies →
     `impl From<GraphSnapshot> for GraphFragment`),
@@ -1531,7 +1624,8 @@ runner seams, doc culture, and test volume are explicitly out of bounds.
     → `crate::discovery::path_to_string`). Net −202 / +167
     across 12 files.
   - Blockers: none.
-- [x] `H-HYG-002` Extract shared TUI/output row-assembly helpers.
+- [x] `CSP-463` Extract shared TUI/output row-assembly helpers.
+  - Legacy ID: `H-HYG-002`
   - Landed 2026-07-04 (commit `efd16ed`). Migrated into
     `src/tui/rows/mod.rs`: `struct AgentData`, `agent_row(depth,
     …)`, `mux_indicator`, `session_matches_filter`,
@@ -1541,9 +1635,10 @@ runner seams, doc culture, and test volume are explicitly out of bounds.
     near-twin `agent_row` stays put per the story scope (it
     takes a different input struct). Net −361 / +159 across
     6 files. `collect_agent_mux_candidate_counts` retires
-    permanently in H-HYG-006 (interim home per story).
+    permanently in CSP-467 (interim home per story).
   - Blockers: none.
-- [x] `H-HYG-003` Parameterize the centered-modal rect math.
+- [x] `CSP-464` Parameterize the centered-modal rect math.
+  - Legacy ID: `H-HYG-003`
   - Landed 2026-07-04 (commit `9aee2bf`). New
     `popup_frame::centered_rect(area, width, height) -> Rect`
     absorbs the 4-line centering arithmetic all six overlays
@@ -1555,7 +1650,8 @@ runner seams, doc culture, and test volume are explicitly out of bounds.
     and would produce different observable widths at typical
     terminal sizes. Net −55 / +20 across 7 files.
   - Blockers: none.
-- [x] `H-HYG-004` Remove the argv-sniffing fake-mtime test backdoor.
+- [x] `CSP-465` Remove the argv-sniffing fake-mtime test backdoor.
+  - Legacy ID: `H-HYG-004`
   - Landed 2026-07-04 (commit `fd1bf39`). Deleted the
     `is_cargo_test_process` argv-sniff + the
     `#[cfg(not(test))]` / `#[cfg(test)]` `file_modified_epoch`
@@ -1570,7 +1666,8 @@ runner seams, doc culture, and test volume are explicitly out of bounds.
     across 4 files. `grep is_cargo_test_process src/`
     returns only the rationale comment.
   - Blockers: none.
-- [x] `H-HYG-005` Adopt a curated `[lints.clippy]` table and fix fallout.
+- [x] `CSP-466` Adopt a curated `[lints.clippy]` table and fix fallout.
+  - Legacy ID: `H-HYG-005`
   - **Full stream landed 2026-07-04** across 5 waves:
     * Wave 1 (`2c44d15`): `[lints.clippy]` table shape +
       `redundant_clone = "deny"` (63 warnings auto-fixed).
@@ -1595,8 +1692,9 @@ runner seams, doc culture, and test volume are explicitly out of bounds.
     not per-fn docs) and cast-truncation lints in TUI
     layout modules (allowed with per-module `#![allow]`
     where the truncation is intentional).
-  - Blockers: `H-HYG-001`/`H-HYG-002` landed.
-- [x] `H-HYG-006` Introduce a `SnapshotIndex` for graph lookups.
+  - Blockers: `CSP-462`/`CSP-463` landed.
+- [x] `CSP-467` Introduce a `SnapshotIndex` for graph lookups.
+  - Legacy ID: `H-HYG-006`
   - **Waves 1–3, 5, 6, 7 landed 2026-07-04..05**:
     * Wave 1 (`e952bc4`): `SnapshotIndex<'a>` struct +
       `new(&snapshot)` builder + `id_to_node` map + consistency
@@ -1605,16 +1703,16 @@ runner seams, doc culture, and test volume are explicitly out of bounds.
       + migrated 5 consumers (`tui/rows/{union,prs,forks}.rs`
       + `output/{prs,forks}.rs`). Retired
       `tui::rows::collect_agent_mux_candidate_counts` — the
-      H-HYG-002 interim home is gone. `rows/mux.rs` retains a
-      local copy per H-HYG-002's "near-twin stays put" scope
+      CSP-463 interim home is gone. `rows/mux.rs` retains a
+      local copy per CSP-463's "near-twin stays put" scope
       (wave 5 retires it too).
     * Wave 3 (`a840fc1`): `links_for(source, relation) →
       &[&GraphLink]` (source_node → links-by-relation index).
       Substrate only — no callers migrated yet.
     * Wave 5 (`7817c41`): retired the last local copy of
       `collect_agent_mux_candidate_counts` — the near-twin in
-      `tui/rows/mux.rs` that H-HYG-002 explicitly left in place.
-      The `H-HYG-006` interim `collect_agent_mux_candidate_counts`
+      `tui/rows/mux.rs` that CSP-463 explicitly left in place.
+      The `CSP-467` interim `collect_agent_mux_candidate_counts`
       helper family is fully gone.
     * Wave 6 (`267a1b1`): added `links_with_relation(relation)`
       + `link(link_id)` maps to `SnapshotIndex`. Every hot
@@ -1626,10 +1724,10 @@ runner seams, doc culture, and test volume are explicitly out of bounds.
       `tui/detail::diagnostic_summaries`) to consult
       `SnapshotIndex` instead of raw `candidate_links.iter()`.
   - **Wave 4 (preferred-mux per session lookup)** stays deferred
-    to `H-TUI-001`: depends on the resolver's per-session mux
+    to `CSP-495`: depends on the resolver's per-session mux
     picker which is currently scoped as "resolver semantics —
     out of scope for H-HYG" per the audit. Lands alongside
-    `H-TUI-001` when that story lifts the row trees off
+    `CSP-495` when that story lifts the row trees off
     `RunConfig` and into derived view-models.
     * Wave 6 (SnapshotIndex expansion): the 25 remaining
       `snapshot.candidate_links.iter()` scans use shapes the
@@ -1637,9 +1735,9 @@ runner seams, doc culture, and test volume are explicitly out of bounds.
       (by-link-id, by-target, resolver-selected). Each needs a
       focused per-shape index expansion; land as demand-driven
       commits when a hot consumer needs them.
-  - Blockers: `H-HYG-002` landed. `H-TUI-001` builds on this
+  - Blockers: `CSP-463` landed. `CSP-495` builds on this
     substrate to make row trees fully derived view-models.
-- [x] `H-HYG-007` Declarative keybinding table for dispatch, overlays, and
+- [x] `CSP-468` Declarative keybinding table for dispatch, overlays, and
   help. **Waves 1–5 landed 2026-07-04..05**:
   * Wave 1 (`83d6889`): new `src/tui/keybindings.rs` module.
     `KeyBinding { mode, key: KeyMatcher, action: fn() -> Action,
@@ -1675,12 +1773,13 @@ runner seams, doc culture, and test volume are explicitly out of bounds.
   types (`ViewerMsg`, `PinCreateOutcome`, etc.), not
   `Action`. Migrating these needs overlay-scoped mode +
   per-overlay message dispatch in KEYBINDINGS — a bigger
-  architectural change than what H-HYG-007's `Action`-
+  architectural change than what CSP-468's `Action`-
   centric table shape supports. That extension belongs
-  alongside `H-TUI-003`'s modal stack contract (which
+  alongside `CSP-497`'s modal stack contract (which
   supplies the mode column the table would need), so the
   remaining overlay migrations are deferred there.
   Global (non-overlay-owned) keymap coverage is complete.
+  - Legacy ID: `H-HYG-007`
   - Scope: key handling is hand-matched (`KeyCode::` ×128 in `runtime.rs`,
     ×137 in `widgets/pins.rs`), `remap_for_focus` re-maps actions across
     ~200 lines, and `widgets/help.rs::keymap_sections` hand-maintains a
@@ -1703,15 +1802,16 @@ runner seams, doc culture, and test volume are explicitly out of bounds.
     same table. Each wave is behavior-preserving; the drift test
     from wave (a) catches regressions across the intermediate
     landings.
-  - Blockers: none; works standalone, and the `H-TUI-003` modal stack
+  - Blockers: none; works standalone, and the `CSP-497` modal stack
     later supplies the table's mode column.
-- [x] `H-HYG-008` Unify the dual event loops, then split `runtime.rs`.
-  - Outcome: folded into `H-TUI-004` (see
+- [x] `CSP-469` Unify the dual event loops, then split `runtime.rs`.
+  - Legacy ID: `H-HYG-008`
+  - Outcome: folded into `CSP-498` (see
     `docs/tui-architecture-review.md` R5) — the loop unification lands
     as an event union + subscriptions rather than a parameterized
     refresh source, and the `runtime.rs` split follows it. Tracked
     there.
-- [x] `H-HYG-009` Split the TUI monolith files by concern. **Waves 1–2
+- [x] `CSP-470` Split the TUI monolith files by concern. **Waves 1–2
   landed 2026-07-05**:
   * Wave 1 (`2dd21d6`): extracted `tui/ui.rs`'s 3,378-line
     `mod tests` to sibling `tui/ui_tests.rs` via
@@ -1731,18 +1831,19 @@ runner seams, doc culture, and test volume are explicitly out of bounds.
     "reviewable smaller files" outcome without a synthetic
     view partition.
   **Wave 3 (widgets/pins.rs production split)** stays deferred
-  to `H-TUI-003`: the model/render split needs the modal
+  to `CSP-497`: the model/render split needs the modal
   stack contract to supply the split axis (a state-machine
   boundary between pin-menu selection logic and per-sub-editor
   form rendering). Wave-2's test extraction already
   addresses the "reviewable smaller files" outcome the story
   primarily wanted; the additional prod-side split is
-  H-TUI-003 territory and lands there.
+  CSP-497 territory and lands there.
+  - Legacy ID: `H-HYG-009`
   - Scope: `tui/ui.rs` (~3.2k production lines) splits by view/panel —
     dispatch is already centralized in 3 `match view` sites so extraction
     is clean; `widgets/pins.rs` (~2.8k) separates the pins menu model
     (actions, selection-aware defaults; unit-testable without ratatui)
-    from form rendering, targeting the `H-TUI-003` Overlay contract as
+    from form rendering, targeting the `CSP-497` Overlay contract as
     the split boundary.
   - Tests: `conspectus tui --snapshot` runs and TUI snapshot suites
     byte-identical.
@@ -1753,9 +1854,10 @@ runner seams, doc culture, and test volume are explicitly out of bounds.
     model / render split; (c) sibling-file `tests.rs` extraction for
     any large `mod tests` blocks that carry along. Snapshot suites are
     the regression net between waves.
-  - Blockers: none; independent of `H-TUI-004`.
-- [x] `H-HYG-010` Finish the `output::render` migration and settle
+  - Blockers: none; independent of `CSP-498`.
+- [x] `CSP-471` Finish the `output::render` migration and settle
   `dev_scenarios` gating.
+  - Legacy ID: `H-HYG-010`
   - **Landed 2026-07-05** (commit `b07c1c6`) at the corrected
     scope. The story's original framing ("delete the shim,
     move everything to render.rs") wasn't achievable —
@@ -1786,7 +1888,8 @@ runner seams, doc culture, and test volume are explicitly out of bounds.
     dead re-exports). Every downstream import now names its
     canonical source module.
   - Blockers: none.
-- [x] `H-HYG-011` Test builders and sibling-file test extraction (rolling).
+- [x] `CSP-472` Test builders and sibling-file test extraction (rolling).
+  - Legacy ID: `H-HYG-011`
   - **Wave 1 landed 2026-07-04**. Ships `AgentSessionNode::new(id,
     harness_key)` + `with_cwd` / `with_title` /
     `with_last_message_preview` / `with_last_active_epoch` /
@@ -1810,7 +1913,7 @@ runner seams, doc culture, and test volume are explicitly out of bounds.
     landed across every file with ≥100 test lines. Fully
     systematic pass. Files extracted (65 pairs, ~43,000 lines
     of tests moved):
-    * Big-3 (H-HYG-009): `tui/ui.rs` (−3,378),
+    * Big-3 (CSP-470): `tui/ui.rs` (−3,378),
       `widgets/pins.rs` (−1,496), `output/table.rs` (−2,675).
     * Mid-size: `tui/app.rs` (−3,159), `tui/rows/sessions.rs`
       (−3,002), `discovery/cross_link.rs` (−1,798),
@@ -1848,7 +1951,8 @@ framework, no retained-mode rewrite, no async reducer. These refine
 the overlapping `H-HYG` stories rather than duplicating them;
 cross-references below.
 
-- [x] `H-TUI-001` Make row trees derived view-models.
+- [x] `CSP-495` Make row trees derived view-models.
+  - Legacy ID: `H-TUI-001`
   - Landed 2026-07-01. `App` now owns `active_view`; `RowTree` is a
     pure derivation of `(snapshot, view, grouping, filter, sort,
     cwd)` via `build_tree_for_view(TreeInputs::from_app(...))`.
@@ -1861,9 +1965,10 @@ cross-references below.
     fixed the timer-refresh race: the discovery worker's result
     path now builds against App projection state. Regression net:
     four `projection_zero_discovery::*` tests plus the existing
-    TUI snapshot suite. `H-HYG-006` (`SnapshotIndex`) is a follow-on
-    optimization; H-TUI-001 does not depend on it.
-- [x] `H-TUI-002` Adopt effects-as-data in the reducer.
+    TUI snapshot suite. `CSP-467` (`SnapshotIndex`) is a follow-on
+    optimization; CSP-495 does not depend on it.
+- [x] `CSP-496` Adopt effects-as-data in the reducer.
+  - Legacy ID: `H-TUI-002`
   - Governed by ADR 0085 contract 2. Lands in phases so each wave
     ships with tests and no half-migrated state.
   - Phase A (landed 2026-07-01): scaffolding + first migrations.
@@ -1959,7 +2064,7 @@ cross-references below.
   - Phase E (landed 2026-07-05, persistence completion): the
     `Msg::SwitchView`, `Msg::SetGrouping`, `Msg::SetFilter`, and
     `Msg::SetSort` reducer arms now emit `Effect::Persist` after
-    mutating state and rebuilding the tree, closing the F8-013
+    mutating state and rebuilding the tree, closing the CSP-423
     sidecar synchronization gap. Direct `self.persist_state()`
     call moved out of `App::switch_to_view` — the runtime-loop
     shutdown persist stays as a belt-and-suspenders safety net
@@ -2003,13 +2108,14 @@ cross-references below.
     `static_apply_pins_action_and_refresh` becomes
     `static_apply_pins_msg`. Reducer test grows to 24. Scope
     note: the eight `Action::Open*` overlay-opens still live in
-    the Action enum — they fold naturally when `H-TUI-003`'s
+    the Action enum — they fold naturally when `CSP-497`'s
     modal stack lands with a shared Open contract.
-  - Blockers: `H-TUI-001` (landed). Phase B unblocks after
+  - Blockers: `CSP-495` (landed). Phase B unblocks after
     Phase A; C/D/E/F land opportunistically as their variants
     are needed.
-- [x] `H-TUI-003` Replace overlay Option slots with a modal stack and a
+- [x] `CSP-497` Replace overlay Option slots with a modal stack and a
   shared Overlay contract.
+  - Legacy ID: `H-TUI-003`
   - Scope: eight modal surfaces (seven `Option` fields on `App` plus the
     viewer island) become an explicit `Vec<Modal>`: input routes to the
     stack top, draw renders in stack order, Esc/commit pops. One
@@ -2019,7 +2125,7 @@ cross-references below.
     the viewer becomes a nested-reducer stack entry
     (`Msg::Viewer(ViewerMsg)`). Adding a modal becomes struct + trait
     impl + enum variant with zero new loop/keymap/draw branches. The
-    `H-HYG-009` pins-widget split should target this contract.
+    `CSP-470` pins-widget split should target this contract.
   - Wave 1 (landed 2026-07-02, scaffolding + Help): new `tui/modal.rs`
     with `Overlay` trait, `OverlayOutcome { Consumed, Commit(Box<Msg>),
     Close }`, and `Modal` enum. `App::modal_stack: Vec<Modal>` replaces
@@ -2093,10 +2199,11 @@ cross-references below.
     other H-TUI-* work.
   - Tests: overlay snapshot tests unchanged; one stacking test (e.g.
     help over controls) and a routing test per outcome variant.
-  - Blockers: `H-TUI-002` (`Commit(Msg)` needs the unified Msg/Effect
+  - Blockers: `CSP-496` (`Commit(Msg)` needs the unified Msg/Effect
     path) landed. Wave 1 landed. Subsequent waves are mechanical.
-- [x] `H-TUI-004` Unify the event loops behind an event union and
+- [x] `CSP-498` Unify the event loops behind an event union and
   subscriptions.
+  - Legacy ID: `H-TUI-004`
   - Landed across waves 1 + 2 + 3-keymap on 2026-07-02.
     `UiEvent` scaffolding + shared helpers (wave 1),
     `LoopMode` trait + `run_loop` shared driver + `LiveMode` /
@@ -2106,12 +2213,12 @@ cross-references below.
     deferred as optional cleanup — it requires ~30 helper
     visibility changes for a purely mechanical move with no
     architectural or behavioral benefit, and is best folded
-    into `H-HYG-009` if that story activates.
+    into `CSP-470` if that story activates.
   - Scope: `enum UiEvent { Input(Event), Tick, Discovery(..) }` consumed
     by one loop parameterized by its subscription set — live mode
     subscribes to the discovery channel and refresh timer, fixture mode
     to file reload, snapshot mode runs the body once. Absorbs
-    `H-HYG-008`'s dual-loop unification; then split `runtime.rs` into
+    `CSP-469`'s dual-loop unification; then split `runtime.rs` into
     loop driver / keymap / effect executor modules.
   - Wave 1 (landed 2026-07-02, shared helpers + UiEvent
     scaffolding): introduced `UiEvent { Input(Event), Tick,
@@ -2149,10 +2256,11 @@ cross-references below.
     changes across ~30 runtime helpers referenced by LoopMode
     impls and is deferred as an optional follow-up.
   - Tests: live, fixture, and ADR 0067 snapshot suites unchanged.
-  - Blockers: `H-TUI-002` (landed). Waves 1 + 2 landed. Wave 3
-    is optional cleanup and can happen alongside `H-HYG-009`
+  - Blockers: `CSP-496` (landed). Waves 1 + 2 landed. Wave 3
+    is optional cleanup and can happen alongside `CSP-470`
     (which also touches runtime.rs boundaries).
-- [x] `H-TUI-005` Move scroll reconciliation into the reducer.
+- [x] `CSP-499` Move scroll reconciliation into the reducer.
+  - Legacy ID: `H-TUI-005`
   - Landed across waves 1 + 2 on 2026-07-02..07-03.
     Wave 1 dropped `Cell` interior mutability (fields become
     plain `u16` / `Option<usize>`; `ui::draw` takes `&mut App`;
@@ -2170,7 +2278,8 @@ cross-references below.
     separate measure + render passes — recorded in the `draw`
     docstring as optional ADR 0085 contract-5 cleanup, not a
     correctness need.
-- [x] `H-TUI-006` Unify overlay dispatch under the `Overlay` trait.
+- [x] `CSP-500` Unify overlay dispatch under the `Overlay` trait.
+  - Legacy ID: `H-TUI-006`
   - Landed 2026-07-03. Chose the "grow the trait" direction:
     `Overlay` gains a GAT `type Ctx<'a>` so context-free
     widgets (Help / ValueModal / Viewer / Rename) declare
@@ -2193,19 +2302,21 @@ cross-references below.
 
 ### Observability And CLI UX
 
-- [ ] `H-OBS-001` Add a human-readable graph projection.
+- [ ] `CSP-093` Add a human-readable graph projection.
+  - Legacy ID: `H-OBS-001`
   - Scope: `conspectus graph --format json` is the only graph output today.
     Add `--format text` (or a separate `conspectus graph --tree`) that
     renders nodes grouped by repo/workspace with linked sessions, mux, PR,
     and fork lineage. This is the workflow `atelier status` used to cover.
   - Tests: snapshot tests for empty, sparse, and dense fixtures.
   - Blockers: none.
-- [x] `H-OBS-002` Add `conspectus node show <id>`.
+- [x] `CSP-094` Add `conspectus node show <id>`.
+  - Legacy ID: `H-OBS-002`
   - Outcome: new `src/output/node_show.rs` module exposes
     `resolve_node_id` (with `NodeResolveError::{NotFound, Ambiguous}`)
     and `render_node_show`. The `conspectus node show <id>` subcommand
     accepts the short content-addressed prefix from the session table
-    (H-TBL-005), the full `NodeId` `Display` form, or the harness/mux
+    (CSP-130), the full `NodeId` `Display` form, or the harness/mux
     label, and prints the node plus every outgoing/incoming candidate
     link (with source-metadata adapter, evidence, and fields), every
     resolved relationship touching the node, and every diagnostic
@@ -2215,22 +2326,24 @@ cross-references below.
     including the round-trip from `session --wide` to `node show`.
     `docs/operations.md` documents the new command and the accepted
     `<id>` forms.
-- [ ] `H-OBS-003` Add filter flags for the graph and session commands.
+- [ ] `CSP-095` Add filter flags for the graph and session commands.
+  - Legacy ID: `H-OBS-003`
   - Scope: `--only-ambiguous`, `--only-unresolved`, `--only-orphan`, and a
     `--kind {agent_session|mux|repo|fork|pr}` filter. The graph today
     forces consumers to do their own filtering on JSON.
   - Tests: CLI integration tests against existing snapshots.
   - Blockers: none.
-- [x] `H-OBS-004` Add a `--explain` mode for resolved relationships.
+- [x] `CSP-096` Add a `--explain` mode for resolved relationships.
+  - Legacy ID: `H-OBS-004`
   - Scope: surface why the resolver picked a given winning candidate
     (provenance tier, recency, state, conflict diagnostics). Both for the
     JSON output and `session` table cells with the `*` ambiguity marker.
   - Tests: snapshot tests for ambiguous mux and PR fixtures.
-  - Blockers: `H-REF-003` is friendlier to do first because the
+  - Blockers: `CSP-085` is friendlier to do first because the
     explanation depends on a stable scoring shape.
   - Related: ADR 0059 (Accepted) frames this as the immediate work and
     defers the rules-engine question behind it; review and accept/reject
-    via `H-ADR-0059-REVIEW` before scoping `--explain` implementation.
+    via `CSP-404` before scoping `--explain` implementation.
   - Outcome: added `resolve::explain_resolved_relationships`, which
     annotates each `ResolvedRelationship` with the selected candidate's
     score axes, competing candidates' score axes, and the first axis
@@ -2241,8 +2354,9 @@ cross-references below.
     surface covers generic precedence/confidence, `linked_to_mux`, and
     `branch_has_forge_pr`; future comparator-specific axes can extend
     the same carrier.
-- [x] `H-ADR-0059-REVIEW` Review and resolve ADR 0059 (resolver
+- [x] `CSP-404` Review and resolve ADR 0059 (resolver
   rules-engine evaluation).
+  - Legacy ID: `H-ADR-0059-REVIEW`
   - Scope: read `docs/adr/0059-resolver-rules-engine-evaluation.md`,
     decide accept / amend / reject. Key knobs to tune if accepting:
     (a) the deferred-Ascent posture in §Decision (3), (b) the
@@ -2254,10 +2368,11 @@ cross-references below.
   - Tests: none (ADR-only).
   - Blockers: none.
   - Outcome: ADR 0059 accepted as drafted. The resolver stays in Rust;
-    `H-OBS-004` implements typed score breakdowns rather than adopting a
+    `CSP-096` implements typed score breakdowns rather than adopting a
     rules engine. The Ascent re-trigger remains "three or more
-    derivation-pass bugs after `H-OBS-004` ships."
-- [ ] `H-OBS-005` Improve discovery diagnostics for missing providers.
+    derivation-pass bugs after `CSP-096` ships."
+- [ ] `CSP-097` Improve discovery diagnostics for missing providers.
+  - Legacy ID: `H-OBS-005`
   - Scope: when `gh` is unavailable, `tmux` is not installed, declared
     config is malformed, or a harness state root is missing, surface a
     `Diagnostic` row in the graph and a one-line stderr hint in CLI
@@ -2267,7 +2382,8 @@ cross-references below.
   - Tests: CLI integration tests that capture stderr and JSON
     diagnostics across each provider failure mode.
   - Blockers: none.
-- [ ] `H-OBS-006` Surface activity/recency in the session tables.
+- [ ] `CSP-098` Surface activity/recency in the session tables.
+  - Legacy ID: `H-OBS-006`
   - Scope: `AgentSessionNode` exposes some recency metadata (claude-code
     cwd discovery propagates timestamps; mux activity epochs flow through
     candidate metadata) but the table renders no recency column. Add a
@@ -2275,9 +2391,10 @@ cross-references below.
     using a relative formatting helper (`2h`, `3d`).
   - Tests: snapshot tests for representative fixtures with normalized
     timestamps.
-  - Blockers: `H-REF-008` (typed source-metadata fields makes recency
+  - Blockers: `CSP-090` (typed source-metadata fields makes recency
     extraction safer).
-- [x] `H-OBS-007` Gate left-pane tree navigation keys on left-pane focus.
+- [x] `CSP-360` Gate left-pane tree navigation keys on left-pane focus.
+  - Legacy ID: `H-OBS-007`
   - Outcome: `remap_for_focus()` in `src/tui/runtime.rs` now drops
     `Msg::ExpandRow` / `Msg::CollapseRow` (h/l/Left/Right) on
     right-pane focus so they no longer mutate the left tree the
@@ -2310,29 +2427,31 @@ width, making the default output unusable in narrow CLIs. JSON / graph
 output is not affected by this stream; the work is scoped to the text-table
 projection layer.
 
-H-TBL-001 through H-TBL-005 modernized the renderer itself (width-aware
+CSP-126 through CSP-130 modernized the renderer itself (width-aware
 truncation, short row ids, card layout, `node show` integration).
-H-TBL-006 onward shifts the surface from `conspectus session
+CSP-146 onward shifts the surface from `conspectus session
 [--projection ...]` to `conspectus table <ROWS>` so that growing row-types
 (PRs, forks, …) and per-row-type column customization stay first-class.
 The columns themselves stop being session-specific, since cells like PR,
 fork lineage, and checkout apply to any row whose node touches them.
 
-- [x] `H-TBL-001` ADR: width-aware table rendering library.
+- [x] `CSP-126` ADR: width-aware table rendering library.
+  - Legacy ID: `H-TBL-001`
   - Outcome: ADR 0020 records the decision to roll our own minimal
     width-aware renderer under `src/output/`, depending only on
     `unicode-width` and `terminal_size`. `comfy-table` (upstream feature
     freeze, wraps rather than truncates), `tabled` (heavier surface, API
     churn risk for snapshot tests), `cli-table`, and `prettytable-rs`
     were considered and rejected. Both dependencies are runtime deps
-    added in `H-TBL-003`.
+    added in `CSP-128`.
 
-- [x] `H-TBL-002` Surface short, stable row identifiers in session tables.
+- [x] `CSP-127` Surface short, stable row identifiers in session tables.
+  - Legacy ID: `H-TBL-002`
   - Outcome: every `conspectus session` projection now emits a leftmost
     `ID` column carrying a short, content-addressed prefix derived from
     the row's primary `NodeId`. The hash is FNV-1a 64-bit over the
     `Display` form of the NodeId (`pub fn node_short_id` in
-    `src/output/table.rs`), exposed so `node show` (H-TBL-005) can
+    `src/output/table.rs`), exposed so `node show` (CSP-130) can
     resolve a pasted id back to a node. Prefix length is the minimum
     needed for uniqueness within the rendered snapshot, floored at six
     hex chars. The union projection's existing `ID` header (which held
@@ -2344,7 +2463,8 @@ fork lineage, and checkout apply to any row whose node touches them.
     the rendered short id stays stable across runs.
   - Blockers: none.
 
-- [x] `H-TBL-003` Width-aware truncation default for session tables.
+- [x] `CSP-128` Width-aware truncation default for session tables.
+  - Legacy ID: `H-TBL-003`
   - Outcome: `src/output/table.rs` now exposes `RenderOptions { width,
     layout }` and `render_with(snapshot, projection, options)`. The
     existing `render(...)` is preserved as a thin wrapper around
@@ -2363,7 +2483,8 @@ fork lineage, and checkout apply to any row whose node touches them.
     Dependencies recorded by ADR 0020: `unicode-width = "0.2"` and
     `terminal_size = "0.4"`.
 
-- [x] `H-TBL-004` Opt-in card / multi-line row layout.
+- [x] `CSP-129` Opt-in card / multi-line row layout.
+  - Legacy ID: `H-TBL-004`
   - Outcome: `Layout::Card` joins `Layout::Columnar` in `RenderOptions`,
     with `RenderOptions::card()` and `RenderOptions::card_width(n)`
     convenience constructors. The new `render_card` path emits one
@@ -2376,8 +2497,9 @@ fork lineage, and checkout apply to any row whose node touches them.
     and width-aware truncation, plus a CLI integration test for
     `--layout card`.
 
-- [x] `H-TBL-005` Resolve table row identifiers in `conspectus node show`.
-  - Outcome: implemented together with H-OBS-002. The `node show <id>`
+- [x] `CSP-130` Resolve table row identifiers in `conspectus node show`.
+  - Legacy ID: `H-TBL-005`
+  - Outcome: implemented together with CSP-094. The `node show <id>`
     resolver accepts (a) the short content-addressed prefix from the
     session table's `ID` column, prefix-matched (floor 4 hex chars),
     (b) the full `NodeId` `Display` form, and (c) the harness/mux
@@ -2386,15 +2508,16 @@ fork lineage, and checkout apply to any row whose node touches them.
     documents the accepted forms; CLI integration tests round-trip a
     short id from `conspectus session --wide` through `node show`.
 
-- [x] `H-TBL-006` Rename `conspectus session` to `conspectus table <ROWS>`.
+- [x] `CSP-146` Rename `conspectus session` to `conspectus table <ROWS>`.
+  - Legacy ID: `H-TBL-006`
   - Outcome: ADR 0021 records the rename. The CLI grew a `table`
     subcommand tree with `Sessions`, `Mux`, and `Union` subcommands;
     each takes the existing `--wide`, `--width`, `--layout`, and
     `--scan-root` flags via shared `TableRowsArgs`. The old
     `session` subcommand and `--projection` flag are gone with no
     alias (per CLAUDE.md). Config migrated from `[session].projection`
-    to `[table.<rows>]` per-row-type subsections — empty for H-TBL-006
-    but reserved for the column registry in H-TBL-007. A legacy
+    to `[table.<rows>]` per-row-type subsections — empty for CSP-146
+    but reserved for the column registry in CSP-147. A legacy
     `[session]` section in user config now produces a stderr
     diagnostic pointing at the new schema; the run still proceeds.
     `Projection::parse` accepts both `agent` (legacy) and `sessions`
@@ -2404,7 +2527,8 @@ fork lineage, and checkout apply to any row whose node touches them.
     (`build_*_rows`, `RenderOptions`, `node_short_id`) are
     unchanged. `docs/operations.md` documents the new shape.
 
-- [x] `H-TBL-007` Per-row-type column registry and `--columns` flag.
+- [x] `CSP-147` Per-row-type column registry and `--columns` flag.
+  - Legacy ID: `H-TBL-007`
   - Outcome: `src/output/table.rs` grew a column registry keyed by
     row-type. `ColumnSpec` records each column's stable `key`,
     header label, one-line description, and `default` flag. The
@@ -2437,7 +2561,8 @@ fork lineage, and checkout apply to any row whose node touches them.
     the prior hard-coded headers and extractors. `docs/operations.md`
     documents the flag and config knob.
 
-- [x] `H-TBL-008` `conspectus table prs` row-type.
+- [x] `CSP-148` `conspectus table prs` row-type.
+  - Legacy ID: `H-TBL-008`
   - Outcome: `Projection::Pr` joins the row-type enum; the registry
     `PRS_COLUMNS` declares `id`, `pr`, `state`, `draft`, `branch`,
     `repo`, `updated`, and `attached`, with the default set
@@ -2458,7 +2583,8 @@ fork lineage, and checkout apply to any row whose node touches them.
     the optional-columns flag. All 365 tests pass; existing
     snapshots stay byte-for-byte stable.
 
-- [x] `H-TBL-009` `conspectus table forks` row-type.
+- [x] `CSP-149` `conspectus table forks` row-type.
+  - Legacy ID: `H-TBL-009`
   - Outcome: `Projection::Fork` joins the row-type enum; the registry
     `FORKS_COLUMNS` declares `id`, `fork`, `provider`, `scope`,
     `parent`, `children`, and `capabilities`, with the default set
@@ -2478,7 +2604,8 @@ fork lineage, and checkout apply to any row whose node touches them.
     rendering. One CLI integration test exercises the default
     header. All 370 tests pass.
 
-- [x] `H-TBL-010` Expand the `sessions` column pool.
+- [x] `CSP-150` Expand the `sessions` column pool.
+  - Legacy ID: `H-TBL-010`
   - Outcome: `SESSIONS_COLUMNS` gained five opt-in columns
     (`checkout`, `branch`, `repo`, `fork`, `declared`). Each
     extractor walks the candidate-link graph to resolve the cell:
@@ -2493,18 +2620,19 @@ fork lineage, and checkout apply to any row whose node touches them.
     through the otherwise active-only `by_source_relation` index).
     `SnapshotView` now retains a reference to the underlying
     `GraphSnapshot` for that purpose. The default column set is
-    unchanged. The `activity` column is deferred per the H-OBS-006
+    unchanged. The `activity` column is deferred per the CSP-098
     soft-blocker note. Three new unit tests cover checkout/branch/
     repo, the fork column, and the declared column's link-state
     mapping; one CLI integration test exercises the seven-column
     selection via `--columns`. All 374 tests pass.
 
-- [x] `H-TBL-011` Expand the `mux` column pool.
+- [x] `CSP-151` Expand the `mux` column pool.
+  - Legacy ID: `H-TBL-011`
   - Outcome: `MUX_COLUMNS` gained three opt-in columns:
     `attached-count` (number of attached agent sessions, rendered
     as `—` when zero), `activity` (relative recency from
     `MuxSessionNode::activity_epoch`, reusing `format_relative_age`
-    from H-TBL-008), and `created` (relative age from
+    from CSP-148), and `created` (relative age from
     `created_epoch`). `panes` stays deferred until the mux adapter
     records pane counts. Default set is unchanged. Three unit tests
     cover `attached-count` (one row with attached agents, one with
@@ -2515,7 +2643,8 @@ fork lineage, and checkout apply to any row whose node touches them.
     test was updated to reflect the larger `all` set. All 377 tests
     pass.
 
-- [x] `H-TBL-012` `conspectus columns <ROWS>` discovery subcommand.
+- [x] `CSP-152` `conspectus columns <ROWS>` discovery subcommand.
+  - Legacy ID: `H-TBL-012`
   - Outcome: new `render_columns_listing(projection)` helper in
     `src/output/table.rs` prints each registered column as
     `<key>  <description>  (default)?` with the key column padded
@@ -2531,7 +2660,8 @@ fork lineage, and checkout apply to any row whose node touches them.
     unknown-row-type error path. `docs/operations.md` documents
     the new command. All 381 tests pass.
 
-- [x] `H-TBL-013` Pager auto-fit for table-style outputs.
+- [x] `CSP-153` Pager auto-fit for table-style outputs.
+  - Legacy ID: `H-TBL-013`
   - Outcome: `conspectus table <ROWS>`, `conspectus columns <ROWS>`,
     and `conspectus node show <id>` now pipe their output through a
     pager when stdout is a TTY. Resolution order in
@@ -2555,7 +2685,8 @@ fork lineage, and checkout apply to any row whose node touches them.
     All 385 tests pass. `docs/operations.md` documents the new
     behavior.
 
-- [x] `H-TBL-014` Terminal color and styling for table output.
+- [x] `CSP-154` Terminal color and styling for table output.
+  - Legacy ID: `H-TBL-014`
   - Outcome: ADR 0022 records the decision to use `anstyle` (already
     transitive through clap) and the env-var precedence. The
     renderer gained `RenderOptions.color` plus
@@ -2597,13 +2728,14 @@ Deferred under this cluster (no story yet, file when needed):
 
 - `conspectus table repos` / `conspectus table checkouts`. Both node
   kinds already appear as related-context columns under
-  `H-TBL-010`. Promote to their own row-type only when a user
+  `CSP-150`. Promote to their own row-type only when a user
   workflow requires a repos-first or checkouts-first table.
 
 ### Product Surface Gaps
 
-- [ ] `H-PROD-001` Implement the bootstrap-roots flow described in the
+- [ ] `CSP-099` Implement the bootstrap-roots flow described in the
   design.
+  - Legacy ID: `H-PROD-001`
   - Scope: `docs/design.md` "Discovery Strategy" mentions a future
     bootstrap mode that prints suggested roots and links by default and
     requires an explicit write flag to persist. Add `conspectus bootstrap`
@@ -2612,8 +2744,9 @@ Deferred under this cluster (no story yet, file when needed):
     persistence.
   - Tests: CLI integration tests for suggested output, `--write` behavior,
     and read-only defaults.
-  - Blockers: `H-DESIGN-001` for the persistence target.
-- [ ] `H-PROD-002` Cache layer for forge metadata, tmux, and harness scans.
+  - Blockers: `CSP-107` for the persistence target.
+- [ ] `CSP-100` Cache layer for forge metadata, tmux, and harness scans.
+  - Legacy ID: `H-PROD-002`
   - Scope: design.md commits to caches living under `$XDG_DATA_HOME` (and
     keeping them outside project trees), but no cache code exists. Define
     a cache schema, TTL policy, and `--no-cache` / `--refresh` flags.
@@ -2622,7 +2755,8 @@ Deferred under this cluster (no story yet, file when needed):
   - Tests: cache hit/miss, TTL expiry, schema-version mismatch, and
     `--no-cache` flag behavior.
   - Blockers: a new ADR for the cache layout and freshness rules.
-- [ ] `H-PROD-003` Batch `gh pr list` across repos sharing a host.
+- [ ] `CSP-101` Batch `gh pr list` across repos sharing a host.
+  - Legacy ID: `H-PROD-003`
   - Scope: `GitHubForgeProvider` runs `gh pr list --json` once per
     discovered repo (`src/discovery/forge/mod.rs:67`). For workspaces
     with several repos on the same host/owner this multiplies the spawn
@@ -2631,19 +2765,21 @@ Deferred under this cluster (no story yet, file when needed):
     fallback.
   - Tests: parser tests for the batched JSON; integration test with a
     `FakeGh` that records spawn counts.
-  - Blockers: `H-PROD-002` (caching narrows the urgency).
-- [ ] `H-PROD-004` Add a graph-diff command.
+  - Blockers: `CSP-100` (caching narrows the urgency).
+- [ ] `CSP-102` Add a graph-diff command.
+  - Legacy ID: `H-PROD-004`
   - Scope: `conspectus graph diff <a.json> <b.json>` (or save snapshots
     under `$XDG_DATA_HOME` and diff against the previous run). Useful for
     explaining "what changed since the last fork" and for Atelier
     delegation acceptance criteria.
   - Tests: snapshot tests for added/removed nodes and links and changed
     resolution.
-  - Blockers: `H-PROD-002` if diffs reuse the cache layer.
+  - Blockers: `CSP-100` if diffs reuse the cache layer.
 
 ### Distribution And CI
 
-- [x] `H-DIST-001` Add a GitHub Actions CI workflow.
+- [x] `CSP-103` Add a GitHub Actions CI workflow.
+  - Legacy ID: `H-DIST-001`
   - Scope: ADR 0016 commits to crates.io distribution but there is no
     `.github/workflows/` directory and the only check automation is local
     (`justfile`, `flake.nix`). Add a CI job that runs
@@ -2657,21 +2793,24 @@ Deferred under this cluster (no story yet, file when needed):
     caches Cargo artifacts, installs `cargo-nextest`, and runs the same
     baseline checks as the local `justfile`: formatting, clippy with warnings
     denied, cargo test, nextest, and `git diff --check`.
-- [ ] `H-DIST-002` Complete `Cargo.toml` metadata for crates.io.
+- [ ] `CSP-104` Complete `Cargo.toml` metadata for crates.io.
+  - Legacy ID: `H-DIST-002`
   - Scope: `Cargo.toml` is missing `authors`, `repository`, `homepage`,
     `documentation`, `keywords`, `categories`, `readme`, and an
     `exclude`/`include` pattern. Fill in for the first publish and verify
     `cargo publish --dry-run` succeeds.
   - Tests: `cargo publish --dry-run` in CI on tagged releases.
-  - Blockers: `H-DIST-001`.
-- [ ] `H-DIST-003` Pin and verify MSRV.
+  - Blockers: `CSP-103`.
+- [ ] `CSP-105` Pin and verify MSRV.
+  - Legacy ID: `H-DIST-003`
   - Scope: ADR 0016 says the effective MSRV is the toolchain pinned by
     the Nix dev shell. Make this explicit in `Cargo.toml`
     (`rust-version = "1.85"` or similar) and add a CI job that builds
     against the pinned stable to catch accidental MSRV bumps.
   - Tests: dedicated CI job pinning the toolchain.
-  - Blockers: `H-DIST-001`.
-- [ ] `H-DIST-004` Define the release process.
+  - Blockers: `CSP-103`.
+- [ ] `CSP-106` Define the release process.
+  - Legacy ID: `H-DIST-004`
   - Scope: ADR 0016 names the validation steps but the repo has no
     `CHANGELOG.md`, no release script, and no tagged-build workflow.
     Decide whether to adopt `cargo release` or a hand-rolled checklist
@@ -2679,12 +2818,13 @@ Deferred under this cluster (no story yet, file when needed):
     `docs/releasing.md`).
   - Tests: dry-run the release procedure end-to-end before tagging
     `v0.1.0`.
-  - Blockers: `H-DIST-001`, `H-DIST-002`.
+  - Blockers: `CSP-103`, `CSP-104`.
 
 ### Design Closure
 
-- [x] `H-DESIGN-001` Settle the workspace-detection threshold and provider
+- [x] `CSP-107` Settle the workspace-detection threshold and provider
   precedence.
+  - Legacy ID: `H-DESIGN-001`
   - Scope: `docs/design.md` "Remaining Design Questions" calls out (a)
     evidence threshold for inferring a generic `Workspace`, (b) handling
     of nested workspaces / nested repos / symlinked repos, (c)
@@ -2701,17 +2841,19 @@ Deferred under this cluster (no story yet, file when needed):
     inference at the same canonical root. Generic inference now stands
     down when `atelier.toml` claims the scan root.
   - Blockers: none.
-- [ ] `H-DESIGN-002` Settle `ForgePr` identity and branch-association keys.
+- [ ] `CSP-108` Settle `ForgePr` identity and branch-association keys.
+  - Legacy ID: `H-DESIGN-002`
   - Scope: `docs/design.md` "Remaining Design Questions" lists open
     questions about provider-neutral ForgePr fields, branch-to-PR keying
     (name vs upstream vs head ref), and multi-PR-per-branch
     representation. Record decisions in an ADR; the GitHub adapter today
     matches by short head ref against the full local branch set
-    (`P4-FU-002`) but the rule is undocumented.
+    (`CSP-059`) but the rule is undocumented.
   - Tests: regression tests for fork-head PRs (different head repo) and
     closed/historical PR handling.
   - Blockers: none.
-- [ ] `H-DESIGN-003` Settle declared-link conflict and override semantics.
+- [ ] `CSP-109` Settle declared-link conflict and override semantics.
+  - Legacy ID: `H-DESIGN-003`
   - Scope: `docs/design.md` "Remaining Design Questions" asks (a) whether
     an override suppresses a single candidate, all candidates of a
     relation kind, or all links between two nodes; (b) whether "ignored"
@@ -2722,8 +2864,9 @@ Deferred under this cluster (no story yet, file when needed):
     resolver tests.
   - Tests: resolver tests for each conflict scenario.
   - Blockers: none.
-- [ ] `H-DESIGN-004` Document the graph invariants and snapshot
+- [ ] `CSP-110` Document the graph invariants and snapshot
   canonicalization contract.
+  - Legacy ID: `H-DESIGN-004`
   - Scope: callers (and the api facade) need to know when a
     `GraphSnapshot` is canonical, when cross-link inference has run, and
     what invariants hold after `discover_local_with` vs after
@@ -2740,7 +2883,8 @@ ADR 0026 replaces "worktree" as the product-level concept with
 an ordinary clone checkout, a linked git worktree, a bare-repo-derived
 linked worktree, or a workspace member reached through a symlink.
 
-- [x] `H-CHECKOUT-001` Memorialize the checkout context model.
+- [x] `CSP-197` Memorialize the checkout context model.
+  - Legacy ID: `H-CHECKOUT-001`
   - Scope: record the decision in ADR 0026, update `docs/design.md` to
     use checkout terminology for the north-star model, and create this
     backlog workstream.
@@ -2749,19 +2893,21 @@ linked worktree, or a workspace member reached through a symlink.
     staged terminology migration from legacy `Worktree` names.
   - Tests: docs-only; `git diff --check`.
   - Blockers: none.
-- [x] `H-CHECKOUT-002` Introduce checkout-facing model helpers ahead of
+- [x] `CSP-198` Introduce checkout-facing model helpers ahead of
   the graph wire rename.
+  - Legacy ID: `H-CHECKOUT-002`
   - Scope: add `Checkout` model/helpers as the canonical code-level
     vocabulary while keeping the current `Worktree` graph representation
     until the hard wire/model rename lands.
   - Outcome: initial checkout-facing helpers were introduced as a staging
     step, then replaced by canonical checkout graph/model names in
-    `H-CHECKOUT-008`.
+    `CSP-204`.
   - Tests: graph JSON snapshot/round-trip tests proving checkout-facing
     helpers produce the same node identities.
-  - Blockers: `H-CHECKOUT-001`.
-- [x] `H-CHECKOUT-003` Probe observed session and mux cwd paths for
+  - Blockers: `CSP-197`.
+- [x] `CSP-199` Probe observed session and mux cwd paths for
   checkout context.
+  - Legacy ID: `H-CHECKOUT-003`
   - Scope: collect distinct cwd paths from discovered agent sessions and
     mux sessions, run read-only git probes for each path, and backfill
     `Repo`, `Checkout`, and `Branch` nodes plus candidate links even
@@ -2781,9 +2927,10 @@ linked worktree, or a workspace member reached through a symlink.
   - Tests: `cargo test observed_session_cwd_backfills_git_context_outside_scan_roots`;
     `cargo test checkout`; `cargo test sessions_projection_optional_branch_repo_worktree_columns`;
     `cargo test prs_projection_attached_shows_agent_with_matching_cwd`.
-  - Blockers: `H-CHECKOUT-001`.
-- [x] `H-CHECKOUT-004` Preserve logical and canonical paths for workspace
+  - Blockers: `CSP-197`.
+- [x] `CSP-200` Preserve logical and canonical paths for workspace
   members.
+  - Legacy ID: `H-CHECKOUT-004`
   - Scope: when a workspace member is reached through a symlink or
     provider-local member path, store both the workspace-visible logical
     path and the canonical checkout root. Use canonical checkout root for
@@ -2799,7 +2946,8 @@ linked worktree, or a workspace member reached through a symlink.
     paths, broken symlinks, and duplicate logical paths resolving to the
     same checkout.
   - Blockers: none.
-- [x] `H-CHECKOUT-005` Resolve multi-context session membership.
+- [x] `CSP-201` Resolve multi-context session membership.
+  - Legacy ID: `H-CHECKOUT-005`
   - Scope: extend cross-link resolution so a session can associate with
     both a workspace and the underlying checkout/repo/branch. Preserve
     candidate evidence for each context and expose enough resolved data
@@ -2820,9 +2968,10 @@ linked worktree, or a workspace member reached through a symlink.
     independently while duplicate evidence for the same target still
     competes normally.
   - Tests: `cargo test checkout`.
-  - Blockers: `H-CHECKOUT-003`, `H-CHECKOUT-004`.
-- [x] `H-CHECKOUT-006` Update table and TUI projections for checkout
+  - Blockers: `CSP-199`, `CSP-200`.
+- [x] `CSP-202` Update table and TUI projections for checkout
   grouping.
+  - Legacy ID: `H-CHECKOUT-006`
   - Scope: replace single-parent checkout grouping assumptions with
     checkout/workspace-aware projection rules. Default to including
     workspace overlay groups while also allowing checkout-centric output;
@@ -2840,8 +2989,9 @@ linked worktree, or a workspace member reached through a symlink.
     `workspace` column exposing resolved workspace context alongside
     existing checkout/repo/branch columns.
   - Tests: `cargo test repo_group`.
-  - Blockers: `H-CHECKOUT-005`.
-- [x] `H-CHECKOUT-007` Retire legacy user-facing worktree terminology.
+  - Blockers: `CSP-201`.
+- [x] `CSP-203` Retire legacy user-facing worktree terminology.
+  - Legacy ID: `H-CHECKOUT-007`
   - Scope: rename CLI columns, docs, help text, and TUI labels from
     worktree to checkout where the
     user-facing meaning is the broader ADR 0026 concept. Keep git-linked
@@ -2853,8 +3003,9 @@ linked worktree, or a workspace member reached through a symlink.
     labels use checkout terminology, and `--sessions-grouping checkout` is
     accepted. Legacy `worktree` table columns, TUI grouping values, and
     checkout JSON deserialization aliases are intentionally not preserved.
-  - Blockers: `H-CHECKOUT-006`.
-- [x] `H-CHECKOUT-008` Hard-rename checkout graph wire/model names.
+  - Blockers: `CSP-202`.
+- [x] `CSP-204` Hard-rename checkout graph wire/model names.
+  - Legacy ID: `H-CHECKOUT-008`
   - Scope: replace legacy `WorktreeId`/`WorktreeNode`/`GraphNode::Worktree`
     naming, node id display prefixes, JSON `type: "worktree"`, snapshot
     expectations, declared endpoint syntax, and user-visible relation docs
@@ -2871,7 +3022,7 @@ linked worktree, or a workspace member reached through a symlink.
     names are `created_checkout` / `referenced_checkout`. Git commands,
     fixture names, and provider-native Atelier fields still say worktree when
     they describe actual git or source-format worktree concepts.
-  - Blockers: `H-CHECKOUT-007`.
+  - Blockers: `CSP-203`.
 
 ### Deferred Provider And Workflow Expansions
 
@@ -2879,15 +3030,18 @@ These items match the design guidance to *design for* additional providers
 without *implementing* them until needed. File them so the next consumer
 need does not surprise the project.
 
-- [x] `H-FUTURE-001` Add a mux backend for zellij (and stub screen).
-  - Outcome: re-scoped as `H-EXT-010` on top of the `H-EXT-008` `MuxBackend`
+- [x] `CSP-111` Add a mux backend for zellij (and stub screen).
+  - Legacy ID: `H-FUTURE-001`
+  - Outcome: re-scoped as `CSP-482` on top of the `CSP-480` `MuxBackend`
     seam (see `docs/extensibility-assessment.md` Phase C). Tracked there.
-- [x] `H-FUTURE-002` Add a forge adapter for GitLab or Gitea.
-  - Outcome: re-scoped as `H-EXT-013` on top of the `H-EXT-012` forge
+- [x] `CSP-112` Add a forge adapter for GitLab or Gitea.
+  - Legacy ID: `H-FUTURE-002`
+  - Outcome: re-scoped as `CSP-485` on top of the `CSP-484` forge
     adapter list (see `docs/extensibility-assessment.md` Phase D). Tracked
     there.
-- [ ] `H-FUTURE-003` Add harness adapters for jujutsu and sapling sessions
+- [ ] `CSP-113` Add harness adapters for jujutsu and sapling sessions
   if and when a user uses them with a supported harness.
+  - Legacy ID: `H-FUTURE-003`
   - Scope: not on the roadmap until requested; track here so the request
     has a home.
   - Tests: TBD.
@@ -2906,7 +3060,8 @@ dependency graph.
 
 Phase A — registry backbone (no behavior change):
 
-- [x] `H-EXT-001` Add a provider descriptor registry.
+- [x] `CSP-473` Add a provider descriptor registry.
+  - Legacy ID: `H-EXT-001`
   - Landed 2026-07-03 (metadata-only scope; ADR 0088).
     `discovery/providers.rs` now owns a
     `ProviderDescriptor { key, kind }` table with 15 entries
@@ -2923,12 +3078,13 @@ Phase A — registry backbone (no behavior change):
     unchanged.
     Constructor callback + env-var opt-out plumbing stay on
     `LocalDiscoveryConfig` — deferred to the per-entity
-    H-EXT-002/004/008/012/014 stories, which extend the
+    CSP-474/CSP-476/CSP-480/CSP-484/CSP-486 stories, which extend the
     descriptor with a family-specific adapter reference once
     the trait shape is decided. ADR 0088 records the
     registration convention and what's deferred.
-- [x] `H-EXT-002` Route harness pure-data lookups through the adapter
+- [x] `CSP-474` Route harness pure-data lookups through the adapter
   registry.
+  - Legacy ID: `H-EXT-002`
   - Landed 2026-07-03. `HarnessAdapter` grows two methods
     (`display_label()` defaulting to the harness key,
     `launch_options()` defaulting to empty); `harness_key`
@@ -2937,7 +3093,7 @@ Phase A — registry backbone (no behavior change):
     Box<dyn HarnessAdapter>>>` holds the canonical 4-adapter set
     in the pre-H-EXT-002 UI order (claude-code first) so the
     TUI filter menu stays byte-identical. `ClaudeCodeAdapter`
-    gets `display_label = "claude"` (H-TBL-014 collapse);
+    gets `display_label = "claude"` (CSP-154 collapse);
     `CodexAdapter` + `ClaudeCodeAdapter` override
     `launch_options` to expose their skip-permissions
     fragments.
@@ -2954,8 +3110,9 @@ Phase A — registry backbone (no behavior change):
     ordering, label collapse, launch-option overrides,
     resume-argv dispatch, and the strip-fragments walk.
     All 25 suites (1514 lib tests) pass; fmt / clippy clean.
-  - Blockers: `H-EXT-001` (landed).
-- [x] `H-EXT-003` Key TUI harness colors by harness key.
+  - Blockers: `CSP-473` (landed).
+- [x] `CSP-475` Key TUI harness colors by harness key.
+  - Legacy ID: `H-EXT-003`
   - Landed 2026-07-03. Theme replaces the four flat
     `harness_claude` / `harness_codex` / `harness_opencode`
     / `harness_aider` `Color` fields with
@@ -2991,11 +3148,12 @@ Phase A — registry backbone (no behavior change):
     updated to preview the new
     `[tui.theme.harness].<key>` shape.
     All 25 suites (1517 lib tests) pass; fmt / clippy clean.
-  - Blockers: `H-EXT-002` (landed).
+  - Blockers: `CSP-474` (landed).
 
 Phase B — harness experience parity:
 
-- [x] `H-EXT-004` Move per-harness runtime signatures onto `HarnessAdapter`.
+- [x] `CSP-476` Move per-harness runtime signatures onto `HarnessAdapter`.
+  - Legacy ID: `H-EXT-004`
   - Landed 2026-07-03. New
     `crate::discovery::harness::RuntimeSignature` struct
     packages a harness's process / fd / session-key
@@ -3041,8 +3199,9 @@ Phase B — harness experience parity:
     `RuntimeSignature` gains attribution automatically. All
     25 suites (1517 lib tests) pass byte-identically; fmt /
     clippy clean.
-  - Blockers: `H-EXT-001` (landed).
-- [x] `H-EXT-005` Normalize hook payloads through the adapter.
+  - Blockers: `CSP-473` (landed).
+- [x] `CSP-477` Normalize hook payloads through the adapter.
+  - Legacy ID: `H-EXT-005`
   - Landed 2026-07-03. `HarnessAdapter` gains
     `hook_record_from_payload(payload, pid, ppid, tmux,
     version, epoch) -> Result<HookRecord>` with a default
@@ -3084,8 +3243,9 @@ Phase B — harness experience parity:
     Fixture-corpus and hook unit tests migrated to the single
     dispatch entry point. All 25 suites pass byte-identically;
     fmt / clippy clean.
-  - Blockers: `H-EXT-002` (landed).
-- [x] `H-EXT-006` Provide transcript locator and parser via the adapter.
+  - Blockers: `CSP-474` (landed).
+- [x] `CSP-478` Provide transcript locator and parser via the adapter.
+  - Legacy ID: `H-EXT-006`
   - Landed 2026-07-03. `SessionLocator` flattened from a
     closed `enum { ClaudeCode { .. }, Codex { .. }, OpenCode { .. } }`
     to an open `struct { harness_key, session_key, state_root }`.
@@ -3120,8 +3280,9 @@ Phase B — harness experience parity:
     Existing parser + bridge tests migrated to the flat shape;
     three `supports_only_*` tests deleted as redundant. All
     25 suites (1516 lib tests) pass; fmt / clippy clean.
-  - Blockers: `H-EXT-002` (landed).
-- [x] `H-EXT-007` Generalize the codex_log-style aux-reader wiring.
+  - Blockers: `CSP-474` (landed).
+- [x] `CSP-479` Generalize the codex_log-style aux-reader wiring.
+  - Legacy ID: `H-EXT-007`
   - Landed 2026-07-03. `HarnessAdapter` gains
     `apply_aux_attribution(snapshot, ctx: &AuxAttributionContext)`
     with a `{ }` no-op default. The context packages the harness
@@ -3154,11 +3315,12 @@ Phase B — harness experience parity:
     retired in favor of the env-var-only override.
     All 25 suites (1516 lib tests) pass byte-identically; fmt /
     clippy clean.
-  - Blockers: `H-EXT-001` (landed), `H-EXT-004` (landed).
+  - Blockers: `CSP-473` (landed), `CSP-476` (landed).
 
 Phase C — mux backend abstraction:
 
-- [x] `H-EXT-008` Extract a `MuxBackend` trait from `TmuxRunner`.
+- [x] `CSP-480` Extract a `MuxBackend` trait from `TmuxRunner`.
+  - Legacy ID: `H-EXT-008`
   - Landed 2026-07-03 (ADR 0089). `TmuxRunner` trait renamed
     to `MuxBackend`. New required method
     `backend_key(&self) -> &'static str` returns the stable
@@ -3169,7 +3331,7 @@ Phase C — mux backend abstraction:
     (`capture_pane`, `rename_session`, `new_session`,
     `attach_session`, `send_keys`) keep their `Unsupported`
     defaults so a new backend implements only what it
-    supports; H-EXT-009 completes the capability-gate
+    supports; CSP-481 completes the capability-gate
     migration by replacing the pre-existing
     `backend == "tmux"` string checks in
     `src/tui/actions.rs` and `src/pins.rs` with
@@ -3199,13 +3361,14 @@ Phase C — mux backend abstraction:
     rename is a mechanical follow-up orthogonal to the
     trait-shape work here. `socket_name → namespace`
     generalization and the `TmuxDiscovery`-wrapper collapse
-    are also deferred to land alongside H-EXT-010.
+    are also deferred to land alongside CSP-482.
     ADR 0089 records the shape, alternatives, and
     consequences. Added to the Decisions catalog.
     All 25 suites (1516 lib tests) pass byte-identically;
     fmt / clippy clean.
-  - Blockers: `H-EXT-001` (landed).
-- [x] `H-EXT-009` Capability-gate mux actions instead of naming tmux.
+  - Blockers: `CSP-473` (landed).
+- [x] `CSP-481` Capability-gate mux actions instead of naming tmux.
+  - Legacy ID: `H-EXT-009`
   - Landed 2026-07-03. New static
     `pub const KNOWN_MUX_BACKENDS: &[&str] = &[TMUX_BACKEND]`
     in `discovery::tmux` holds the compile-time list of
@@ -3221,15 +3384,16 @@ Phase C — mux backend abstraction:
     the `MuxBackend` impl's `Unsupported` outcome variant.
     `resolve_attach_target`'s self-attach check remains tied
     to the tmux backend today because `RunConfig.current_tmux_session`
-    is derived from `$TMUX`; H-EXT-011 generalizes it to
+    is derived from `$TMUX`; CSP-483 generalizes it to
     `current_mux_session` with a backend field.
-    A new backend added to `KNOWN_MUX_BACKENDS` (H-EXT-010's
+    A new backend added to `KNOWN_MUX_BACKENDS` (CSP-482's
     zellij per the docstring) picks up pin validation +
     attach dispatch automatically. Existing pin + attach
     tests pass byte-identical. All 25 suites green;
     fmt / clippy clean.
-  - Blockers: `H-EXT-008` (landed).
-- [x] `H-EXT-010` Add a zellij mux backend (discovery + attach).
+  - Blockers: `CSP-480` (landed).
+- [x] `CSP-482` Add a zellij mux backend (discovery + attach).
+  - Legacy ID: `H-EXT-010`
   - Landed 2026-07-03. New `discovery::zellij` module carries
     `SystemZellij` (implements `MuxBackend` with
     `backend_key = "zellij"`; shells out to
@@ -3265,11 +3429,12 @@ Phase C — mux backend abstraction:
     (which is now false) to using a synthetic `"screen-notreal"`
     key so the rejection-path assertion still fires.
     Zero edits outside the new module + the three registry
-    entries. Acceptance test for H-EXT-008 satisfied. All 25
+    entries. Acceptance test for CSP-480 satisfied. All 25
     suites (1521 lib tests: +5 from the new zellij tests)
     pass; fmt / clippy clean.
-  - Blockers: `H-EXT-008` (landed), `H-EXT-009` (landed).
-- [x] `H-EXT-011` Capture hook mux context through the backend probe.
+  - Blockers: `CSP-480` (landed), `CSP-481` (landed).
+- [x] `CSP-483` Capture hook mux context through the backend probe.
+  - Legacy ID: `H-EXT-011`
   - Landed 2026-07-03 (partial). New
     `discovery::tmux::MuxSessionContext { backend, session_name,
     pane_id, namespace }` struct + trait method
@@ -3296,11 +3461,12 @@ Phase C — mux backend abstraction:
     atomically with the trait-shape change.
     All 25 suites (1521 lib tests) pass byte-identically;
     fmt / clippy clean.
-  - Blockers: `H-EXT-008` (landed).
+  - Blockers: `CSP-480` (landed).
 
 Phase D — forge and orchestrator registries:
 
-- [x] `H-EXT-012` Wire forges as an adapter list.
+- [x] `CSP-484` Wire forges as an adapter list.
+  - Legacy ID: `H-EXT-012`
   - Landed 2026-07-03 (partial). `LocalDiscoveryConfig.forge_runner:
     Option<Box<dyn GhRunner>>` migrates to
     `forge_adapters: Vec<Box<dyn ForgeAdapter>>`. Builders:
@@ -3326,20 +3492,21 @@ Phase D — forge and orchestrator registries:
     `forge/github.rs` — those files stay put in this pass
     because ~10 callers import them via `forge::GhRunner` and
     the mechanical rename is orthogonal to the trait-shape work
-    here. Land alongside H-EXT-013's GitLab adapter which will
+    here. Land alongside CSP-485's GitLab adapter which will
     force the same type-move-with-re-export shape for `GlabRunner`.
     All 25 suites (1521 lib tests) pass; fmt / clippy clean.
-  - Blockers: `H-EXT-001` (landed).
-- [x] `H-EXT-013` Add a second forge adapter (GitLab or Gitea).
+  - Blockers: `CSP-473` (landed).
+- [x] `CSP-485` Add a second forge adapter (GitLab or Gitea).
+  - Legacy ID: `H-EXT-013`
   - Landed 2026-07-03 as a **skeleton**. New
     `discovery/forge/gitlab.rs` module carries
     `GitLabForgeProvider` implementing both `ForgeAdapter`
     and `DiscoveryProvider`; `claims_remote_url` matches
     `gitlab.com` substrings on HTTPS and SSH URL shapes.
     `discover` returns an empty `GraphFragment` because
-    **`H-DESIGN-002` blocks real gitlab discovery** — the
+    **`CSP-108` blocks real gitlab discovery** — the
     multi-forge `ForgePr` identity model must land first, and
-    the ADR for that is out of scope for H-EXT-013 alone.
+    the ADR for that is out of scope for CSP-485 alone.
     Wiring: gitlab adapter is opt-in via
     `CONSPECTUS_ENABLE_GITLAB` in `from_env` (default off so
     the stub doesn't cluster warm-start caches with a spurious
@@ -3352,21 +3519,22 @@ Phase D — forge and orchestrator registries:
       HTTPS / SSH URL claims, provider-string uniqueness,
       empty-fragment discovery.
     * `discovery/forge/mod.rs::tests` — 2 new tests
-      exercising the H-EXT-012 seam with two fake adapters:
+      exercising the CSP-484 seam with two fake adapters:
       `claims_remote_url_partitions_two_adapters_by_host`
       pins the routing shape; `forge_discovery_accepts_two_adapters_via_boxed_registration`
       confirms the `with_boxed_adapter` builder handles
       heterogeneous `Box<dyn ForgeAdapter>` entries the way
       `LocalDiscoveryConfig::forge_adapters` flows through.
-    Acceptance test for H-EXT-012 satisfied: zero edits
+    Acceptance test for CSP-484 satisfied: zero edits
     outside the new module + the env-var registration + one
     line in `LocalDiscoveryConfig::from_env`.
     All 25 suites (1525 lib tests: +4 gitlab + +2 routing)
     pass; fmt / clippy clean.
-  - Blockers: `H-EXT-012` (landed), `H-DESIGN-002`
+  - Blockers: `CSP-484` (landed), `CSP-108`
     (still open; blocks the real discovery implementation
     but not the skeleton that proves the routing shape).
-- [x] `H-EXT-014` Add a generic orchestrator registration surface.
+- [x] `CSP-486` Add a generic orchestrator registration surface.
+  - Legacy ID: `H-EXT-014`
   - Landed 2026-07-03. New `discovery/orchestrator.rs` module
     carries `OrchestratorDescriptor { key, env_root_var,
     env_disable_var, home_relative_default, build:
@@ -3409,13 +3577,14 @@ Phase D — forge and orchestrator registries:
     ADR 0060 amendment (recording the revisit + what would
     trigger a capability trait) also deferred; the shape here
     matches ADR 0060's original stance so an amendment isn't
-    load-bearing until H-EXT-015 lands its first mutation
+    load-bearing until CSP-487 lands its first mutation
     capability. All 25 suites (1527 lib tests: +2 registry
     tests) pass; fmt / clippy clean.
-  - Blockers: `H-EXT-001` (landed).
-- [ ] `H-EXT-015` Add an orchestrator mutation-capability seam (deferred).
-  - **Officially deferred pending H-AGENTMUX-008 demand.**
-    H-EXT-014's `OrchestratorDescriptor` is the shape this
+  - Blockers: `CSP-473` (landed).
+- [ ] `CSP-487` Add an orchestrator mutation-capability seam (deferred).
+  - Legacy ID: `H-EXT-015`
+  - **Officially deferred pending CSP-451 demand.**
+    CSP-486's `OrchestratorDescriptor` is the shape this
     story would extend (with an optional `mutation:
     Option<&'static dyn OrchestratorMutation>` field or
     equivalent). Because no shipping mutation feature needs
@@ -3425,11 +3594,12 @@ Phase D — forge and orchestrator registries:
     stays open in the backlog and lands alongside the first
     concrete consumer.
   - Tests: TBD with the first consumer.
-  - Blockers: `H-EXT-014` (landed), `H-AGENTMUX-008` demand.
+  - Blockers: `CSP-486` (landed), `CSP-451` demand.
 
 Phase E — conformance and docs:
 
-- [x] `H-EXT-016` Add adapter conformance suites per entity family.
+- [x] `CSP-488` Add adapter conformance suites per entity family.
+  - Legacy ID: `H-EXT-016`
   - Landed 2026-07-03. New `tests/adapter_conformance.rs`
     integration test with 12 per-family invariant tests:
     * **Harness family (3):** unique `harness_key`s across
@@ -3458,7 +3628,8 @@ Phase E — conformance and docs:
     coverage without a loader edit.
   - Blockers: first landed chunk of each of Phases B, C, D
     (all landed).
-- [x] `H-EXT-017` Write the provider-adapter contributor guide.
+- [x] `CSP-489` Write the provider-adapter contributor guide.
+  - Legacy ID: `H-EXT-017`
   - Landed 2026-07-03. New `docs/provider-adapter-guide.md`
     (250 lines) with per-family checklists for harness / mux
     / forge / orchestrator adapters: required trait
@@ -3472,12 +3643,13 @@ Phase E — conformance and docs:
     order for a new adapter" section lists the reading
     order: this guide → family ADR → worked example →
     conformance suite → registration point.
-  - Blockers: `H-EXT-002` (landed), `H-EXT-008` (landed),
-    `H-EXT-012` (landed), `H-EXT-014` (landed).
+  - Blockers: `CSP-474` (landed), `CSP-480` (landed),
+    `CSP-484` (landed), `CSP-486` (landed).
 
 ### Documentation
 
-- [ ] `H-DOC-001` Add a first-run walkthrough.
+- [ ] `CSP-114` Add a first-run walkthrough.
+  - Legacy ID: `H-DOC-001`
   - Scope: `README.md` and `docs/index.md` jump straight into design and
     operations. Add a short tutorial that walks through running
     `conspectus graph` and `conspectus session` from a plain repo,
@@ -3485,11 +3657,13 @@ Phase E — conformance and docs:
     README.
   - Tests: docs-only; `git diff --check`.
   - Blockers: none.
-- [x] `H-DOC-002` Add a provider-adapter contributor guide.
-  - Outcome: re-scoped as `H-EXT-017` so the guide documents the
+- [x] `CSP-115` Add a provider-adapter contributor guide.
+  - Legacy ID: `H-DOC-002`
+  - Outcome: re-scoped as `CSP-489` so the guide documents the
     post-registry seams instead of today's boundaries (see
     `docs/extensibility-assessment.md` Phase E). Tracked there.
-- [ ] `H-DOC-003` Add library-integration examples beyond the api doctest.
+- [ ] `CSP-116` Add library-integration examples beyond the api doctest.
+  - Legacy ID: `H-DOC-003`
   - Scope: `docs/library-api.md` names the entry points but provides no
     worked example for embedding Conspectus in a TUI or test. Add at
     least one end-to-end snippet (probably in `docs/library-api.md` and a
@@ -3503,10 +3677,11 @@ Source plan: `docs/adr-audit.md` (2026-07-01 corpus audit). The audit's
 bookkeeping amendments (ADR 0035 status, ADR 0062/0063 supersession notes,
 ADR 0082 lessons addendum) were applied directly on 2026-07-01; the items
 below need a real decision or real writing and are tracked here. All are
-documentation/tenet work — none block feature stories, but `H-ADR-001` and
-`H-ADR-002` should land before external contributors read the guardrails.
+documentation/tenet work — none block feature stories, but `CSP-490` and
+`CSP-491` should land before external contributors read the guardrails.
 
-- [x] `H-ADR-001` Restate the payload-privacy tenet precisely.
+- [x] `CSP-490` Restate the payload-privacy tenet precisely.
+  - Legacy ID: `H-ADR-001`
   - Landed 2026-07-03. New standalone tenet ADR 0086 grades
     payload access into three tiers by reader purpose:
     Tier 1 (attribution / identity readers, never read
@@ -3522,8 +3697,9 @@ documentation/tenet work — none block feature stories, but `H-ADR-001` and
     sweeping "never selects privacy-sensitive payload
     columns" wording with a citation of ADR 0086. ADR 0086
     added to the Decisions catalog.
-- [x] `H-ADR-002` Replace "read-only first" with a defined mutation
+- [x] `CSP-491` Replace "read-only first" with a defined mutation
   envelope.
+  - Legacy ID: `H-ADR-002`
   - Landed 2026-07-03. New tenet ADR 0087 defines the mutation
     envelope: four sanctioned write categories (user-intent
     TOML stores, rebuildable observation sidecars under
@@ -3540,8 +3716,9 @@ documentation/tenet work — none block feature stories, but `H-ADR-001` and
     inline pointer, and ADR 0087 added to the Decisions
     catalog alongside ADR 0086. No code change — the envelope
     describes decisions already in the codebase.
-- [ ] `H-ADR-003` Retire or permanently bless the `[tui].sessions_grouping`
+- [ ] `CSP-492` Retire or permanently bless the `[tui].sessions_grouping`
   legacy alias.
+  - Legacy ID: `H-ADR-003`
   - Scope: ADR 0031 promised the alias survives "until a follow-on ADR
     retires it"; that ADR never happened and the alias path is live at
     `src/config.rs:624`. Decide retire-with-deprecation-warning vs bless
@@ -3552,17 +3729,19 @@ documentation/tenet work — none block feature stories, but `H-ADR-001` and
   - Tests: config parse tests for whichever outcome (warning emitted, or
     alias documented as permanent).
   - Blockers: none.
-- [ ] `H-ADR-004` Write the consolidated mux-attribution architecture note.
+- [ ] `CSP-493` Write the consolidated mux-attribution architecture note.
+  - Legacy ID: `H-ADR-004`
   - Scope: the attribution rules span ADRs 0006, 0028, 0046, 0047, 0048,
     0071, 0072, and 0077 plus resolver evidence-string weights; no single
     document states the evidence hierarchy end-to-end. Write one
     architecture note (no new decisions) describing what evidence exists,
     what outranks what, and how ambiguity is preserved and surfaced, with
-    links back to the ADRs. Natural moment: alongside `H-EXT-004`, which
+    links back to the ADRs. Natural moment: alongside `CSP-476`, which
     moves the per-harness halves of this logic onto the adapter.
   - Tests: docs-only; `git diff --check`.
-  - Blockers: none hard; pairs with `H-EXT-004`.
-- [ ] `H-ADR-005` Adopt a two-tier decision-record convention.
+  - Blockers: none hard; pairs with `CSP-476`.
+- [ ] `CSP-494` Adopt a two-tier decision-record convention.
+  - Legacy ID: `H-ADR-005`
   - Scope: ~25 of the 84 ADRs are pixel-level UI decisions
     (0034, 0061–0063, 0071/0072, 0074/0075, …) whose supersession upkeep
     demonstrably lags, diluting the ~30 load-bearing records. Record a
@@ -3590,22 +3769,24 @@ active session is silently dropped.
 ADR 0005 currently frames `ParentSession` / `ChildSession` as edges
 anchored at a `Fork` node. Intra-harness compaction/resume is *not* a
 fork (no context effect, no provider-recorded fork metadata). Decide
-during `H-LINEAGE-001` whether to (a) extend ADR 0005 to allow
+during `CSP-117` whether to (a) extend ADR 0005 to allow
 session→session edges without a Fork middle node, or (b) require a
 synthetic `Fork` node with provider `<harness>` and an explicit
 `lineage_kind` such as `compaction` or `resume`. The former is simpler
 for queries; the latter keeps lineage uniform with the fork-anchored
 shape.
 
-- [x] `H-LINEAGE-001` Settle the data-model shape for intra-harness
+- [x] `CSP-117` Settle the data-model shape for intra-harness
   lineage.
+  - Legacy ID: `H-LINEAGE-001`
   - Resolution: ADR 0018 extends ADR 0005 to allow intra-harness
     `parent_session` / `child_session` candidates to attach directly
     between two `AgentSession` endpoints. `lineage_kind` is standardized
     as the operation vocabulary (`compaction`, `resume`, `fork`,
     `fresh`, `unknown`); attribution fidelity moves to a separate
-    `lineage_fidelity` field, which Atelier will adopt in H-LINEAGE-002.
-- [x] `H-LINEAGE-002` Extract claude-code session lineage.
+    `lineage_fidelity` field, which Atelier will adopt in CSP-118.
+- [x] `CSP-118` Extract claude-code session lineage.
+  - Legacy ID: `H-LINEAGE-002`
   - Resolution: `src/discovery/harness/claude_code.rs` now reads the
     first record's `parentUuid` plus a bounded transcript tail to
     extract the leaf uuid, then matches within each project directory.
@@ -3619,8 +3800,9 @@ shape.
     `harness_mux_snapshots__fork_associated_session_and_unresolved_lineage`
     and the atelier-delegation graph snapshot are updated. Manual
     `~/.claude` validation pending.
-- [x] `H-LINEAGE-003` Extract opencode session lineage from
+- [x] `CSP-119` Extract opencode session lineage from
   `session.parent_id`.
+  - Legacy ID: `H-LINEAGE-003`
   - Resolution: `src/discovery/harness/opencode.rs` now selects
     `parent_id` from the SQLite store and emits a `parent_session`
     candidate per row carrying a non-empty parent. Parent rows present
@@ -3631,7 +3813,8 @@ shape.
     lineage-less SELECT rather than dropping every session.
     `lineage_kind` is `"unknown"` until opencode publishes operation
     semantics. Manual real-state validation pending.
-- [x] `H-LINEAGE-004` Extract codex resume lineage.
+- [x] `CSP-120` Extract codex resume lineage.
+  - Legacy ID: `H-LINEAGE-004`
   - Resolution: real codex rollouts (cli 0.128) expose
     `session_meta.payload.forked_from_id`, a true fork pointer (multiple
     children can share one parent). The codex adapter now extracts that
@@ -3643,7 +3826,8 @@ shape.
     writing into the same rollout file), so resume lineage is parked
     until codex publishes a distinguishable field — no upstream issue
     filed yet; reopen this item if codex changes the rollout format.
-- [x] `H-LINEAGE-005` Surface session lineage in the session table.
+- [x] `CSP-121` Surface session lineage in the session table.
+  - Legacy ID: `H-LINEAGE-005`
   - Resolution: `src/output/table.rs` now adds a `LINEAGE` column to
     the agent projection. The cell shows the preferred
     `parent_session`'s short id (full when ≤12 chars, else `…<last-8>`
@@ -3656,9 +3840,10 @@ shape.
     disappear from every default render, which is more surprising than
     showing all rows. JSON output is already exhaustive. If a future
     consumer needs a compressed view, add `--hide-superseded` then.
-- [x] `H-LINEAGE-006` Retarget claude-code lineage extraction — fork
+- [x] `CSP-125` Retarget claude-code lineage extraction — fork
   uses a `forkedFrom` envelope object, not `parentUuid`; `/compact`
   is in-place.
+  - Legacy ID: `H-LINEAGE-006`
   - Resolution (1, 5): the claude-code adapter now reads `forkedFrom`
     from the first uuid-bearing record. When `forkedFrom.sessionId`
     matches another discovered session in the same project directory
@@ -3695,7 +3880,7 @@ shape.
     the strongest tier available. If a future atelier fork record
     advertises claude-code as Native for fork lineage, no Conspectus
     code change is needed.
-  - Context: H-LINEAGE-002 assumed compaction (or a similar successor
+  - Context: CSP-118 assumed compaction (or a similar successor
     operation) produces a new session jsonl whose first uuid-bearing
     record's `parentUuid` points at the predecessor's leaf uuid.
     Manual validation against `~/.claude/projects/` on 2026-05-17
@@ -3763,7 +3948,8 @@ populated best-effort by each harness adapter; the table renderer
 sources it like any other cell rather than re-reading transcripts at
 render time.
 
-- [x] `H-PREVIEW-001` Model field + opt-in preview column registration.
+- [x] `CSP-155` Model field + opt-in preview column registration.
+  - Legacy ID: `H-PREVIEW-001`
   - Outcome: ADR 0023 records the design (single-line, 200-char
     cap, adapter-populated, default-off column). `AgentSessionNode`
     grew `last_message_preview: Option<String>`; the field is
@@ -3778,7 +3964,7 @@ render time.
     for mux rows; mux looks up the first attached agent's preview
     via `attached_to_mux` (BTreeMap order) and renders `—` when
     none is set. All harness adapters still emit `None`; follow-up
-    stories H-PREVIEW-002..005 populate per harness.
+    stories CSP-156..159 populate per harness.
     `docs/operations.md` documents the column and its privacy
     posture. Five renderer unit tests cover Some/None for sessions,
     first-attached lookup for mux, empty mux fall-through, the
@@ -3788,7 +3974,8 @@ render time.
     and grapheme-boundary safety on multibyte content. All 421
     tests pass; no insta snapshot moved.
 
-- [x] `H-PREVIEW-002` Claude Code last-message extraction.
+- [x] `CSP-156` Claude Code last-message extraction.
+  - Legacy ID: `H-PREVIEW-002`
   - Outcome: `read_session_last_message_preview` walks the trailing
     `TAIL_SCAN_BYTES` (32 KiB) of each Claude Code JSONL transcript
     backward, dropping the partial first line when the seek lands
@@ -3811,7 +3998,8 @@ render time.
     `~/.claude/projects/` surfaces meaningful one-line previews
     for every session that has any text in its tail window.
 
-- [x] `H-PREVIEW-003` Codex last-message extraction.
+- [x] `CSP-157` Codex last-message extraction.
+  - Legacy ID: `H-PREVIEW-003`
   - Outcome: `read_rollout_last_message_preview` does the same
     32 KiB tail-walk for codex rollouts and feeds the result
     through `normalize_last_message_preview`. The codex grammar
@@ -3834,7 +4022,8 @@ render time.
     `~/.codex/sessions/**` rollouts produce meaningful previews
     in `conspectus table sessions`.
 
-- [x] `H-PREVIEW-004` Opencode last-message extraction.
+- [x] `CSP-158` Opencode last-message extraction.
+  - Legacy ID: `H-PREVIEW-004`
   - Outcome: `src/discovery/harness/opencode.rs` populates
     `last_message_preview` by reading the modern `part` table
     alongside the existing `session` query. A
@@ -3852,9 +4041,10 @@ render time.
     missing-text rows are skipped, (c) per-session attribution,
     (d) absent-`part`-table degrades to `None`, (e) long text is
     capped via the shared helper. All 440 tests pass.
-  - Blockers: `H-PREVIEW-001`.
+  - Blockers: `CSP-155`.
 
-- [x] `H-PREVIEW-005` Aider last-message extraction.
+- [x] `CSP-159` Aider last-message extraction.
+  - Legacy ID: `H-PREVIEW-005`
   - Outcome: deferred per the story's escape clause. Two reasons:
     (1) aider's `.aider.chat.history.md` is free-form markdown
     with no formally-specified turn-delimiter, and the format
@@ -3862,7 +4052,7 @@ render time.
     silently emit nonsense previews on any future-version
     transcript; (2) `.aider.input.history` only carries user
     inputs and would leave the preview misleading (no assistant
-    text). A `TODO(H-PREVIEW-005)` comment in
+    text). A `TODO(CSP-159)` comment in
     `src/discovery/harness/aider.rs` pins the adapter on
     `last_message_preview: None` and points at this entry.
     Reopen this story when either (a) aider publishes a stable
@@ -3870,9 +4060,10 @@ render time.
     corpus is available to validate a heuristic parser against.
     Aider sessions continue to discover with all other metadata;
     the preview cell simply renders `—`.
-  - Blockers: `H-PREVIEW-001`.
+  - Blockers: `CSP-155`.
 
-- [x] `H-PREVIEW-006` Filter codex channel markers from preview.
+- [x] `CSP-173` Filter codex channel markers from preview.
+  - Legacy ID: `H-PREVIEW-006`
   - Outcome: `src/discovery/harness/codex.rs` gained
     `apply_codex_channel_marker_filter`, a conservative stripper
     that recognizes leading `<turn_aborted>` and `<proposed_plan>`
@@ -3891,7 +4082,8 @@ render time.
     Four new unit tests cover bare-marker skip, marker+body strip
     for both known tags, and unknown-tag verbatim preservation.
 
-- [x] `H-TBL-015` Move title out of AGENT label into its own column.
+- [x] `CSP-174` Move title out of AGENT label into its own column.
+  - Legacy ID: `H-TBL-015`
   - Outcome: `agent_session_label` no longer consults
     `AgentSessionNode.title`. Every row renders
     `harness:<session_key>`, with `agent_session_key_for_label`
@@ -3949,12 +4141,13 @@ ADR 0019):
   inline preview is not a replacement for them, and they are not a
   replacement for the inline preview.
 
-This workstream supersedes the single-bullet `P8-012c` story; that
+This workstream supersedes the single-bullet `CSP-171.03` story; that
 entry stays in Phase 8 as the v1 release-boundary marker that is
 satisfied when this workstream's TUI integration stories land.
 
-- [x] `H-TRANSCRIPT-001` ADR: terminal markdown rendering for the
+- [x] `CSP-205` ADR: terminal markdown rendering for the
   inline transcript preview.
+  - Legacy ID: `H-TRANSCRIPT-001`
   - Outcome: ADR 0051 selects `tui-markdown 0.3.7` with
     `default-features = false` (no `syntect`, no second
     `ansi-to-tui` path) for the inline transcript preview.
@@ -3962,9 +4155,10 @@ satisfied when this workstream's TUI integration stories land.
     bridging) and a roll-your-own renderer over
     `pulldown-cmark` (same long-tail surface ADR 0025 rejected
     for SGR). Integration target is a new
-    `src/tui/transcript_preview.rs` per `H-TRANSCRIPT-009`.
+    `src/tui/transcript_preview.rs` per `CSP-213`.
 
-- [x] `H-TRANSCRIPT-002` Resolve ADR 0019 with the May 2026 survey.
+- [x] `CSP-206` Resolve ADR 0019 with the May 2026 survey.
+  - Legacy ID: `H-TRANSCRIPT-002`
   - Outcome: ADR 0019 amended in place to Accepted. Survey
     refreshed: `ccview` is alive (v1.0.1, April 2026) — the
     earlier "disappeared" note was incorrect; `claude-history`
@@ -3980,11 +4174,12 @@ satisfied when this workstream's TUI integration stories land.
     review. The trait was narrowed from
     `SessionViewer::{view, export_text}` to a
     `SessionViewerAction::plan -> LaunchPlan` action-resolver
-    seam mirroring `P8-010`'s `tmux attach` hand-off. The ADR
+    seam mirroring `CSP-169`'s `tmux attach` hand-off. The ADR
     explicitly calls out that the inline preview is handled by
     ADR 0051 and the rest of the `H-TRANSCRIPT-*` workstream.
 
-- [ ] `H-TRANSCRIPT-003` Recent-history adapter API.
+- [ ] `CSP-207` Recent-history adapter API.
+  - Legacy ID: `H-TRANSCRIPT-003`
   - Scope: define an on-demand adapter entry point on each
     harness that returns the last N user/assistant turns for a
     given `AgentSessionId` (parallel to the H-PREVIEW
@@ -3998,7 +4193,8 @@ satisfied when this workstream's TUI integration stories land.
   - Tests: trait/contract tests; one fake harness adapter.
   - Blockers: none.
 
-- [ ] `H-TRANSCRIPT-004` Claude Code recent-turns extractor.
+- [ ] `CSP-208` Claude Code recent-turns extractor.
+  - Legacy ID: `H-TRANSCRIPT-004`
   - Scope: extend the existing tail-scan reader to return the
     last N user/assistant turns. Continue to skip tool-use,
     tool-result, thinking, and `system` records. Handle
@@ -4011,21 +4207,23 @@ satisfied when this workstream's TUI integration stories land.
   - Tests: fixture tests for the plain exchange, the
     compaction-summary case, a tool-only tail, and the window
     expansion path.
-  - Blockers: `H-TRANSCRIPT-003`.
+  - Blockers: `CSP-207`.
 
-- [ ] `H-TRANSCRIPT-005` Codex recent-turns extractor.
+- [ ] `CSP-209` Codex recent-turns extractor.
+  - Legacy ID: `H-TRANSCRIPT-005`
   - Scope: extend `read_rollout_last_message_preview` style
     extraction to return the last N `response_item` /
     `payload.type == "message"` turns with `user` / `assistant`
     roles, skipping reasoning / function_call /
     function_call_output / event_msg records. Apply the same
     channel-marker filter (`<turn_aborted>`,
-    `<proposed_plan>`) used by `H-PREVIEW-006` per-turn.
+    `<proposed_plan>`) used by `CSP-173` per-turn.
   - Tests: fixture tests including the channel-marker filter
     applied across multiple turns.
-  - Blockers: `H-TRANSCRIPT-003`.
+  - Blockers: `CSP-207`.
 
-- [ ] `H-TRANSCRIPT-006` OpenCode recent-turns extractor.
+- [ ] `CSP-210` OpenCode recent-turns extractor.
+  - Legacy ID: `H-TRANSCRIPT-006`
   - Scope: extend the modern `part` table reader to return the
     most recent N `type: "text"` rows per session via a single
     SQL query (analogous to `read_last_message_previews`).
@@ -4034,28 +4232,31 @@ satisfied when this workstream's TUI integration stories land.
   - Tests: SQLite-backed fixture tests covering most-recent
     ordering, per-session attribution, and the absent-table
     fallback.
-  - Blockers: `H-TRANSCRIPT-003`.
+  - Blockers: `CSP-207`.
 
-- [ ] `H-TRANSCRIPT-007` Aider recent-turns extractor (deferred).
-  - Scope: deferred for the same reasons as `H-PREVIEW-005`
+- [ ] `CSP-211` Aider recent-turns extractor (deferred).
+  - Legacy ID: `H-TRANSCRIPT-007`
+  - Scope: deferred for the same reasons as `CSP-159`
     (free-form markdown without a stable assistant-turn
     delimiter; input-history is user-only and would mislead).
     Aider rows render "(transcript preview unavailable)" in
     the panel. Reopen when aider gains a structural marker or
     a stable fixture corpus is available.
-  - Blockers: same as `H-PREVIEW-005`.
+  - Blockers: same as `CSP-159`.
 
-- [x] `H-TRANSCRIPT-008` Add `tui-markdown` dependency.
+- [x] `CSP-212` Add `tui-markdown` dependency.
+  - Legacy ID: `H-TRANSCRIPT-008`
   - Outcome: `tui-markdown = { version = "0.3",
     default-features = false }` added to `Cargo.toml` per ADR
     0051. The `highlight-code` feature stays off so `syntect`
     and the secondary `ansi-to-tui` path don't land in the dep
     graph. Pre-listed in `ALLOWED_EXTERNAL_DEPS` from the
-    H-VIEWER-NATIVE-001 scaffold, so the
+    CSP-333 scaffold, so the
     `dep_surface_matches_doc_manifest` test passes unchanged.
-    First use lands with H-VIEWER-NATIVE-006's `render_turn`.
+    First use lands with CSP-338's `render_turn`.
 
-- [ ] `H-TRANSCRIPT-009` Inline transcript-preview widget.
+- [ ] `CSP-213` Inline transcript-preview widget.
+  - Legacy ID: `H-TRANSCRIPT-009`
   - Scope: new `src/tui/transcript_preview.rs` (or similar)
     that takes a `Vec<TranscriptTurn>` and produces a styled
     `ratatui::text::Text` filling the available right-panel
@@ -4071,28 +4272,30 @@ satisfied when this workstream's TUI integration stories land.
     multi-turn preview, (b) a Claude Code compaction-summary
     turn, (c) an "unavailable" case, (d) `--no-live-preview`
     falling back to the single-line preview.
-  - Blockers: `H-TRANSCRIPT-003`, `H-TRANSCRIPT-008`.
+  - Blockers: `CSP-207`, `CSP-212`.
 
-- [ ] `H-TRANSCRIPT-010` Wire the widget into the right panel for
+- [ ] `CSP-214` Wire the widget into the right panel for
   un-muxed agent rows.
+  - Legacy ID: `H-TRANSCRIPT-010`
   - Scope: route un-muxed `AgentSession` selections through the
     new widget instead of the single-line preview. Trigger the
     on-demand recent-turns read on selection change, similar to
-    `P8-009`'s mux capture and `P8-012a`'s `gh` enrichment:
+    `CSP-168`'s mux capture and `CSP-171.01`'s `gh` enrichment:
     immediate placeholder while loading, then content. Cache
     by `AgentSessionId` for the lifetime of the TUI; invalidate
     on session-state mtime changes if cheap to detect. Muxed
     rows continue to render the mux capture preview from
-    `P8-009`. Mux candidate child rows continue to use the
+    `CSP-168`. Mux candidate child rows continue to use the
     existing detail rendering.
   - Tests: TUI integration tests for the un-muxed selection
     path, the muxed selection path (regression — mux capture
     still wins), the loading→content transition, and the
     cache-hit path on re-selection.
-  - Blockers: `H-TRANSCRIPT-004`, `H-TRANSCRIPT-005`,
-    `H-TRANSCRIPT-006`, `H-TRANSCRIPT-009`.
+  - Blockers: `CSP-208`, `CSP-209`,
+    `CSP-210`, `CSP-213`.
 
-- [ ] `H-TRANSCRIPT-011` Document the inline transcript preview.
+- [ ] `CSP-215` Document the inline transcript preview.
+  - Legacy ID: `H-TRANSCRIPT-011`
   - Scope: update `docs/operations.md` and the Phase 8
     implementation doc with the new preview behavior,
     `--no-live-preview` semantics for transcript reads, the
@@ -4100,12 +4303,13 @@ satisfied when this workstream's TUI integration stories land.
     process), and the supported harnesses. Note aider's
     deferred status.
   - Tests: `git diff --check`.
-  - Blockers: `H-TRANSCRIPT-010`.
+  - Blockers: `CSP-214`.
 
-- [x] `H-TRANSCRIPT-012` External full-transcript viewer launch
+- [x] `CSP-216` External full-transcript viewer launch
   (moved ahead of the inline-widget track per the amended ADR 0019,
   which treats inline preview and external launch as parallel
   surfaces).
+  - Legacy ID: `H-TRANSCRIPT-012`
   - Outcome: `src/tui/viewer.rs` defines `SessionViewerAction`,
     `LaunchPlan`, and `ViewerDisabled` per the amended ADR 0019.
     Two backends ship: `ClaudeHistoryViewer` (resolves the on-disk
@@ -4136,8 +4340,8 @@ satisfied when this workstream's TUI integration stories land.
     "no binary on PATH" path, the preference order, the
     capability-probe gating for unpatched recall, and the
     transcript-not-found + recall-fallback paths.
-  - Known limitations (filed as `H-TRANSCRIPT-014` and
-    `H-TRANSCRIPT-015`): recall doesn't scan opencode at the
+  - Known limitations (filed as `CSP-330` and
+    `CSP-331`): recall doesn't scan opencode at the
     storage layout the user's machine actually uses (it hard-codes
     `~/.local/share/opencode/storage/session` while the real path
     is `session_diff/` + SQLite); and recall has no modal focus,
@@ -4149,20 +4353,21 @@ satisfied when this workstream's TUI integration stories land.
     (`H-VIEWER-NATIVE-*`) takes over the default. The code
     shipped under this story stays as the *escape-hatch* path
     operators reach via `[viewers.<harness>]` config
-    (`H-TRANSCRIPT-013`). The recall-specific surface
+    (`CSP-332`). The recall-specific surface
     (`RecallViewer`, `supports_flag` capability probe,
     `required_flags` trait method) was ripped out alongside
-    `H-VIEWER-NATIVE-009`; only `ClaudeHistoryViewer` remains
+    `CSP-341`; only `ClaudeHistoryViewer` remains
     as the hardcoded escape-hatch backend. Operators who want
-    recall back configure it via `H-TRANSCRIPT-013` once that
+    recall back configure it via `CSP-332` once that
     lands.
 
-- [~] `H-TRANSCRIPT-014` Surface recall's harness coverage gap (or
+- [~] `CSP-330` Surface recall's harness coverage gap (or
   broaden it). **Won't fix on the conspectus side** as of ADR 0052
   — the native viewer (H-VIEWER-NATIVE-*) reads opencode directly
   via SQLite (ADR 0013), so the gap is closed by replacing the
   backend rather than patching recall. Operators who still want
   recall as the opencode viewer maintain the patches themselves.
+  - Legacy ID: `H-TRANSCRIPT-014`
   - Scope: on at least one observed machine, recall hard-codes
     `~/.local/share/opencode/storage/session` but the real
     OpenCode storage on the same machine lives at
@@ -4171,7 +4376,7 @@ satisfied when this workstream's TUI integration stories land.
     The result: `recall list --source opencode` returns empty
     even though conspectus discovers many opencode sessions
     locally, and `recall --session <opencode-id>` exits 1 with
-    "Session not found". H-TRANSCRIPT-012's stderr-hold makes
+    "Session not found". CSP-216's stderr-hold makes
     the failure visible, but the underlying gap stays.
   - Resolution options (pick one in the story):
     (a) **Document** and leave: opencode-via-recall is an
@@ -4189,14 +4394,15 @@ satisfied when this workstream's TUI integration stories land.
     `recall list --source <harness>` against the actual machine
     layout when one is available, so coverage gaps regress
     visibly.
-  - Blockers: none. Independent of `H-TRANSCRIPT-013`'s config
+  - Blockers: none. Independent of `CSP-332`'s config
     override (which would also let users sidestep the gap by
     swapping recall for an opencode-native viewer per-harness).
 
-- [~] `H-TRANSCRIPT-015` Recall focus on deep-link entry. **Won't
+- [~] `CSP-331` Recall focus on deep-link entry. **Won't
   fix on the conspectus side** as of ADR 0052 — the native viewer
   owns its own focus model. Kept in the backlog for operators who
-  configure recall as their viewer via `H-TRANSCRIPT-013`.
+  configure recall as their viewer via `CSP-332`.
+  - Legacy ID: `H-TRANSCRIPT-015`
   - Scope: when patched-recall is launched with `--session <id>`,
     the operator has already chosen the session in conspectus
     and lands inside recall expecting to scroll. But recall has
@@ -4219,11 +4425,12 @@ satisfied when this workstream's TUI integration stories land.
         Up/Down convention — cheapest, no patch revision.
   - Tests: hard to unit-test the patched binary directly; rely
     on the existing recall installCheck plus a one-line manual
-    smoke step in the H-TRANSCRIPT-012 outcome notes.
-  - Blockers: none. Pairs naturally with `H-TRANSCRIPT-014` —
+    smoke step in the CSP-216 outcome notes.
+  - Blockers: none. Pairs naturally with `CSP-330` —
     both are recall-patch revisions.
 
-- [ ] `H-TRANSCRIPT-013` Config-driven viewer override.
+- [ ] `CSP-332` Config-driven viewer override.
+  - Legacy ID: `H-TRANSCRIPT-013`
   - Scope: extend the hard-coded `ClaudeHistoryViewer` /
     `RecallViewer` resolver with a `[viewers.<harness>]` (and
     `[viewers.default]`) config section so users can bring their
@@ -4268,7 +4475,7 @@ satisfied when this workstream's TUI integration stories land.
     that a configured entry wins over the built-in backends; a
     refused-launch test for `{session-file}` against opencode.
   - Blockers: none (independent of the inline-widget track).
-    Should land before `H-TRANSCRIPT-012` ships outside the
+    Should land before `CSP-216` ships outside the
     author's machines so the patched-recall workaround is
     optional rather than the only path.
 
@@ -4276,21 +4483,22 @@ satisfied when this workstream's TUI integration stories land.
 
 Per ADR 0052. Builds a Ratatui full-screen modal that renders a
 single session's transcript inside the conspectus process.
-Replaces the external-launch path (`H-TRANSCRIPT-012`) as the
+Replaces the external-launch path (`CSP-216`) as the
 default `T` action. Designed for later extraction to a standalone
 crate per `docs/transcript-viewer-deps.md`.
 
-Stories below depend on `H-TRANSCRIPT-003` (recent-history adapter
+Stories below depend on `CSP-207` (recent-history adapter
 API) but extend its return shape from "last N turns" to "full
 transcript with a cursor at the last turn".
 
-- [x] `H-VIEWER-NATIVE-001` Module scaffold + dep-surface
+- [x] `CSP-333` Module scaffold + dep-surface
   enforcement.
+  - Legacy ID: `H-VIEWER-NATIVE-001`
   - Outcome: `src/viewer/` laid down with `mod.rs`, `model.rs`,
     `parser/{mod, claude_code, codex, opencode}.rs`, `widget.rs`,
     `state.rs`, `input.rs`, `render.rs`, `theme.rs`. All bodies
     are stubs returning `ParseError::Malformed` (parsers) or empty
-    placeholders pending `H-VIEWER-NATIVE-002 .. 006`. `mod.rs`
+    placeholders pending `CSP-334 .. 006`. `mod.rs`
     carries `ALLOWED_EXTERNAL_DEPS` and `ALLOWED_BINARY_DEPS`
     consts that mirror `docs/transcript-viewer-deps.md`. The
     `dep_surface_matches_doc_manifest` test parses the doc's
@@ -4301,11 +4509,12 @@ transcript with a cursor at the last turn".
     `src/viewer/theme.rs` per ADR 0052's tracked carve-out.
     The conspectus TUI does not yet route `T` into the new
     module — the existing escape-hatch `ClaudeHistoryViewer`
-    still owns the keybind until `H-VIEWER-NATIVE-008`. Eight
+    still owns the keybind until `CSP-340`. Eight
     viewer-module tests pass; full nextest suite (1141) green.
 
-- [x] `H-VIEWER-NATIVE-002` `TranscriptDocument` + `TranscriptTurn`
+- [x] `CSP-334` `TranscriptDocument` + `TranscriptTurn`
   model + `SessionLocator` types.
+  - Legacy ID: `H-VIEWER-NATIVE-002`
   - Outcome: `src/viewer/model.rs` fleshed out with full types,
     serde derives, Display impl, and round-trip tests. Public
     surface: `SessionLocator` (`ClaudeCode`/`Codex`/`OpenCode`
@@ -4329,7 +4538,8 @@ transcript with a cursor at the last turn".
     helpers, timestamped + omitted-timestamp turn serde,
     `unavailable()` shape, and a full document round-trip.
 
-- [x] `H-VIEWER-NATIVE-003` Claude Code parser.
+- [x] `CSP-335` Claude Code parser.
+  - Legacy ID: `H-VIEWER-NATIVE-003`
   - Outcome: `src/viewer/parser/claude_code.rs` reads
     `<state_root>/projects/*/<session_key>.jsonl` (std-only
     `read_dir` glob, no `glob` dep) and emits a
@@ -4365,7 +4575,8 @@ transcript with a cursor at the last turn".
     first-cwd-wins, tool_use without input. 1165 nextest
     green.
 
-- [x] `H-VIEWER-NATIVE-004` Codex parser.
+- [x] `CSP-336` Codex parser.
+  - Legacy ID: `H-VIEWER-NATIVE-004`
   - Outcome: `src/viewer/parser/codex.rs` walks
     `<state_root>/sessions/<year>/<month>/<day>/` with std
     `read_dir` (no `walkdir` dep) and locates the rollout file
@@ -4390,7 +4601,7 @@ transcript with a cursor at the last turn".
       `payload.message`.
     - Outer `type` = `event_msg` → skipped (engine telemetry:
       token_count, task_started, exec_command_end echoes, etc.).
-    - Channel-marker filter per H-PREVIEW-006: message bodies
+    - Channel-marker filter per CSP-173: message bodies
       whose trimmed content is exactly `<turn_aborted>` or
       `<proposed_plan>` are dropped as not-real-user-text.
     - RFC3339 timestamps → `DateTime<Utc>`; malformed and blank
@@ -4404,7 +4615,8 @@ transcript with a cursor at the last turn".
     CompactionSummary, web_search_call → ToolUse, malformed
     skip, nested-path file lookup. 1181 nextest green.
 
-- [x] `H-VIEWER-NATIVE-005` OpenCode parser (SQLite-of-record).
+- [x] `CSP-337` OpenCode parser (SQLite-of-record).
+  - Legacy ID: `H-VIEWER-NATIVE-005`
   - Outcome: `src/viewer/parser/opencode.rs` reads `opencode.db`
     via `rusqlite` (`OpenFlags::SQLITE_OPEN_READ_ONLY |
     SQLITE_OPEN_NO_MUTEX`). One LEFT JOIN between `message` and
@@ -4441,10 +4653,11 @@ transcript with a cursor at the last turn".
     ToolResult: 388, ToolUse: 391 — confirms the parser
     matches the live schema.
   - 1193 nextest green. **Closes the OpenCode coverage gap**
-    that `H-TRANSCRIPT-014` could not.
+    that `CSP-330` could not.
 
-- [x] `H-VIEWER-NATIVE-006` Viewer widget: full-screen modal,
+- [x] `CSP-338` Viewer widget: full-screen modal,
   scroll, jump-to-end-on-open.
+  - Legacy ID: `H-VIEWER-NATIVE-006`
   - Outcome: `src/viewer/{widget,state,input,render}.rs` ship the
     full Ratatui modal. Layout: 1-line header
     (`<harness>:<session-key>` left, `cwd: <cwd>` right-justified),
@@ -4479,21 +4692,23 @@ transcript with a cursor at the last turn".
     confirm `draw` writes viewport/total back to state, footer
     advertises current toggle state, and `ToggleTools` makes
     tool turns visible.
-  - Bridge wiring (`H-VIEWER-NATIVE-008`) still pending — `T`
+  - Bridge wiring (`CSP-340`) still pending — `T`
     keybind continues to route through the escape-hatch
     `ClaudeHistoryViewer`. 1219 nextest green.
 
-- [ ] `H-VIEWER-NATIVE-007` Substring search inside the viewer.
+- [ ] `CSP-339` Substring search inside the viewer.
+  - Legacy ID: `H-VIEWER-NATIVE-007`
   - Scope: `/` opens a search prompt at the footer. `n` / `N`
     cycle matches. Matches highlight in the body. Search is
     case-insensitive substring over rendered turn bodies (no
     fuzzy index in v1, matching ADR 0024).
   - Tests: snapshot tests for search-open, match-highlight,
     no-match cases.
-  - Blockers: `H-VIEWER-NATIVE-006`.
+  - Blockers: `CSP-338`.
 
-- [x] `H-VIEWER-NATIVE-008` Viewer-bridge integration: wire the
+- [x] `CSP-340` Viewer-bridge integration: wire the
   `T` keybind into the native viewer.
+  - Legacy ID: `H-VIEWER-NATIVE-008`
   - Outcome: `src/tui/viewer_bridge.rs` translates an
     `AgentSessionId` into the matching `SessionLocator` variant
     (with OpenCode `state_scope` treated as either the parent dir
@@ -4520,7 +4735,7 @@ transcript with a cursor at the last turn".
     native parser (currently: `aider`). The minimal
     "external is opt-in" sketch from the story — full
     `[viewers.<harness>]` config lands with
-    `H-TRANSCRIPT-013`; until then native is unconditional for
+    `CSP-332`; until then native is unconditional for
     every supported harness.
   - `handle_viewer_overlay_key` translates crossterm keys into
     `ViewerMsg` and runs the pure reducer (`take`-reduce-`put`
@@ -4544,8 +4759,9 @@ transcript with a cursor at the last turn".
     None, `build_viewer_state` None for unsupported / fallback
     to unavailable doc when file missing). 1226 nextest green.
 
-- [x] `H-VIEWER-NATIVE-011` Styling + spacing pass.
-  - Scope: H-VIEWER-NATIVE-006/008 ship a functional but
+- [x] `CSP-343` Styling + spacing pass.
+  - Legacy ID: `H-VIEWER-NATIVE-011`
+  - Scope: CSP-338/CSP-340 ship a functional but
     visually-minimal modal. Operator feedback from kicking the
     tires: spacing is off (tool-output line numbers bump
     directly into content), turn separation is too subtle,
@@ -4595,12 +4811,12 @@ transcript with a cursor at the last turn".
     visibly. The existing 4 widget snapshots stay as the
     baseline coverage; this story replaces them.
   - Out of scope: search highlighting (covered by
-    `H-VIEWER-NATIVE-007`), per-message expand/collapse
+    `CSP-339`), per-message expand/collapse
     (likely a separate story once tool-block framing is in),
-    mouse bindings (`H-VIEWER-NATIVE-012`), in-viewer fork /
-    child navigation (`H-VIEWER-NATIVE-013`).
-  - Blockers: `H-VIEWER-NATIVE-008`. Pairs naturally with
-    `H-VIEWER-NATIVE-007` since both touch the renderer.
+    mouse bindings (`CSP-344`), in-viewer fork /
+    child navigation (`CSP-345`).
+  - Blockers: `CSP-340`. Pairs naturally with
+    `CSP-339` since both touch the renderer.
   - Outcome: rewrote `src/viewer/render.rs` around a
     `claude-history`-inspired gutter-and-chip layout:
     right-aligned colored chips (`you`, `assistant`, `Thinking`,
@@ -4627,9 +4843,10 @@ transcript with a cursor at the last turn".
     pair, narrow-terminal 40-col wrap). 13 render-side tests
     + 9 widget-side tests; 1231 nextest green.
 
-- [x] `H-VIEWER-NATIVE-009` Retire patched recall from
+- [x] `CSP-341` Retire patched recall from
   `pkgs/recall/`.
-  - Outcome: option (b) chosen ahead of `H-VIEWER-NATIVE-008`
+  - Legacy ID: `H-VIEWER-NATIVE-009`
+  - Outcome: option (b) chosen ahead of `CSP-340`
     when the recall debt became clear. `pkgs/recall/` (default.nix
     + Cargo.lock + session-flag.patch + .gitignore) removed in
     nix-config commit `f6a7b46 chore(pkgs): retire patched
@@ -4642,7 +4859,8 @@ transcript with a cursor at the last turn".
     `ClaudeHistoryViewer` escape-hatch backend for harnesses
     without a native parser (currently: aider).
 
-- [ ] `H-VIEWER-NATIVE-012` Mouse bindings inside the viewer.
+- [ ] `CSP-344` Mouse bindings inside the viewer.
+  - Legacy ID: `H-VIEWER-NATIVE-012`
   - Scope: scroll-wheel events translate to ScrollUp /
     ScrollDown; click positions the cursor / selects a turn
     boundary. crossterm mouse events are already enabled
@@ -4650,11 +4868,12 @@ transcript with a cursor at the last turn".
     branch in `handle_viewer_overlay_key` (or a new
     `handle_viewer_overlay_mouse`).
   - Tests: mouse-event smoke through the reducer.
-  - Blockers: `H-VIEWER-NATIVE-011` (styling) so click
+  - Blockers: `CSP-343` (styling) so click
     targets land on visually-meaningful elements.
 
-- [ ] `H-VIEWER-NATIVE-013` In-viewer navigation into forks /
+- [ ] `CSP-345` In-viewer navigation into forks /
   child sessions.
+  - Legacy ID: `H-VIEWER-NATIVE-013`
   - Scope: when the displayed transcript references a fork or
     a child session, expose a way to jump into that session's
     transcript without leaving the modal (e.g. `→` over a
@@ -4671,10 +4890,11 @@ transcript with a cursor at the last turn".
   - Tests: bridge mapping for `parent_session` references in
     each harness; modal stack push/pop; lineage-not-found
     fallback.
-  - Blockers: `H-VIEWER-NATIVE-008`. Pairs naturally with
-    `H-VIEWER-NATIVE-011` for chip-as-click-target affordance.
+  - Blockers: `CSP-340`. Pairs naturally with
+    `CSP-343` for chip-as-click-target affordance.
 
-- [ ] `H-VIEWER-NATIVE-015` Per-message selection + clipboard copy.
+- [ ] `CSP-354` Per-message selection + clipboard copy.
+  - Legacy ID: `H-VIEWER-NATIVE-015`
   - Scope: introduce per-message selection inside the viewer
     modal. `J`/`K` (capital) move the selection forward/back
     one turn. The selected turn shows a highlighted bar in
@@ -4698,12 +4918,13 @@ transcript with a cursor at the last turn".
     snapshot test for the highlight bar; clipboard call
     behind a `BinaryProbe`-style seam so unit tests don't
     actually touch the host clipboard.
-  - Blockers: `H-VIEWER-NATIVE-008`. Pairs naturally with
-    `H-VIEWER-NATIVE-012` (mouse selection) and the
+  - Blockers: `CSP-340`. Pairs naturally with
+    `CSP-344` (mouse selection) and the
     chunk-loading story so chunked transcripts have stable
     turn indices.
 
-- [ ] `H-VIEWER-NATIVE-016` Per-tool expand on click.
+- [ ] `CSP-355` Per-tool expand on click.
+  - Legacy ID: `H-VIEWER-NATIVE-016`
   - Scope: in tool-detail Summary or Truncated mode, clicking
     the chip pill of an individual tool turn temporarily
     expands *that* turn to full detail while leaving the
@@ -4716,18 +4937,19 @@ transcript with a cursor at the last turn".
   - Renderer: per-turn render consults the override set; an
     expanded turn renders at `ToolDetail::Full` regardless of
     the global level.
-  - Folds into `H-VIEWER-NATIVE-012` (mouse) for the click
+  - Folds into `CSP-344` (mouse) for the click
     target. Without mouse, a `Tab`/`o`-style "expand cursor"
     keybind can drive it from the keyboard (overlap with the
     selection story).
   - Tests: reducer for set toggling; widget assertions that
     an expanded turn renders more lines than its peers at
     the same global level.
-  - Blockers: `H-VIEWER-NATIVE-012` (mouse) and
-    `H-VIEWER-NATIVE-015` (selection cursor for keyboard
+  - Blockers: `CSP-344` (mouse) and
+    `CSP-354` (selection cursor for keyboard
     expand).
 
-- [x] `H-VIEWER-NATIVE-017` Markdown table rendering.
+- [x] `CSP-356` Markdown table rendering.
+  - Legacy ID: `H-VIEWER-NATIVE-017`
   - Outcome: implemented as a **pre-processor** (option b in the
     original scope, but staged *before* tui-markdown rather than
     after). Root cause confirmed by reading the
@@ -4767,8 +4989,9 @@ transcript with a cursor at the last turn".
     fallback (Codex's `table_key_value.rs` is the documented
     follow-on), alignment override for narrative columns.
 
-- [ ] `H-VIEWER-NATIVE-014` Lazy / chunk-by-chunk transcript
+- [ ] `CSP-346` Lazy / chunk-by-chunk transcript
   loading around compaction boundaries.
+  - Legacy ID: `H-VIEWER-NATIVE-014`
   - Scope: NATIVE-011's render cache makes scroll-only frames
     O(1), but the *first* draw still composes every visible
     turn through `tui_markdown::from_str`. Very large Claude
@@ -4789,16 +5012,17 @@ transcript with a cursor at the last turn".
     rule with a "load previous" affordance vs. eager fetch
     on approach); whether to also chunk on time-of-day
     boundaries for sessions without explicit compaction;
-    interaction with search (`H-VIEWER-NATIVE-007`), which
+    interaction with search (`CSP-339`), which
     needs to span chunks.
   - Tests: parser-side fixture covering multi-chunk
     boundaries; widget chunk-load reducer test; performance
     smoke against a real session.
-  - Blockers: `H-VIEWER-NATIVE-011` (the render cache and
+  - Blockers: `CSP-343` (the render cache and
     the gutter layout are prerequisites).
 
-- [ ] `H-VIEWER-NATIVE-010` (later) Extraction prep: lift
+- [ ] `CSP-342` (later) Extraction prep: lift
   `src/viewer/` into a workspace member crate.
+  - Legacy ID: `H-VIEWER-NATIVE-010`
   - Scope: when the viewer module's import surface has been
     stable for ≥ N stories, create a `crates/` workspace,
     move `src/viewer/` to `crates/conspectus-transcript-viewer/`,
@@ -4827,8 +5051,9 @@ or TUI affordances. Scheduling is separate, explicit user intent. It
 must not silently send prompts or create scheduler state from ordinary
 `graph`, `table`, or `tui` discovery.
 
-- [ ] `H-CONTINUE-001` ADR: usage-limit detection and scheduled
+- [ ] `CSP-347` ADR: usage-limit detection and scheduled
   continuation policy.
+  - Legacy ID: `H-CONTINUE-001`
   - Scope: record the provider-neutral model for a "blocked until"
     session signal, the allowed scheduler backend(s), where scheduled
     jobs live, how missed/cancelled jobs behave, and why sending a
@@ -4841,7 +5066,8 @@ must not silently send prompts or create scheduler state from ordinary
     read-only discovery requirements in `docs/design.md`.
   - Blockers: none.
 
-- [ ] `H-CONTINUE-002` Model blocked-session metadata.
+- [ ] `CSP-348` Model blocked-session metadata.
+  - Legacy ID: `H-CONTINUE-002`
   - Scope: add optional metadata to `AgentSessionNode` or a typed
     sidecar record that captures `blocked_reason`, parsed
     `resume_after_epoch`, the source message snippet, parser
@@ -4850,10 +5076,11 @@ must not silently send prompts or create scheduler state from ordinary
   - Tests: serde round trips, sparse-session JSON snapshots, and
     no-field output for sessions without a recognized usage-limit
     tail.
-  - Blockers: `H-CONTINUE-001`.
+  - Blockers: `CSP-347`.
 
-- [ ] `H-CONTINUE-003` Detect usage-limit tails in supported
+- [ ] `CSP-349` Detect usage-limit tails in supported
   transcript parsers.
+  - Legacy ID: `H-CONTINUE-003`
   - Scope: for Claude Code, Codex, and OpenCode, inspect the final
     meaningful assistant/system message after applying the same
     tool/thinking/channel-marker filters used by preview and viewer
@@ -4866,9 +5093,10 @@ must not silently send prompts or create scheduler state from ordinary
     durations, timezone-bearing text, malformed/no-time messages,
     usage-limit messages followed by later user/assistant text, and
     ordinary transcript tails.
-  - Blockers: `H-CONTINUE-002`.
+  - Blockers: `CSP-348`.
 
-- [ ] `H-CONTINUE-004` Surface blocked-until state in CLI and TUI.
+- [ ] `CSP-350` Surface blocked-until state in CLI and TUI.
+  - Legacy ID: `H-CONTINUE-004`
   - Scope: add opt-in table columns such as `blocked` /
     `resume-after`, a TUI row badge or detail-pane field, and
     `node show` output that displays the parsed resume time and source
@@ -4877,9 +5105,10 @@ must not silently send prompts or create scheduler state from ordinary
     0023.
   - Tests: table renderer snapshots, TUI buffer snapshots for blocked
     and non-blocked sessions, and `node show` output coverage.
-  - Blockers: `H-CONTINUE-003`.
+  - Blockers: `CSP-349`.
 
-- [ ] `H-CONTINUE-005` Implement explicit continue scheduling.
+- [ ] `CSP-351` Implement explicit continue scheduling.
+  - Legacy ID: `H-CONTINUE-005`
   - Scope: add a command and matching TUI action that schedule a
     `Continue` message for the selected blocked session at its parsed
     resume time, with flags to override the time and message text.
@@ -4892,16 +5121,17 @@ must not silently send prompts or create scheduler state from ordinary
   - Manual checks: schedule against a disposable session using a
     near-future time, confirm the prompt is sent once, and confirm
     cancelling prevents delivery.
-  - Blockers: `H-CONTINUE-001`, `H-CONTINUE-003`, `H-CONTINUE-004`.
+  - Blockers: `CSP-347`, `CSP-349`, `CSP-350`.
 
-- [ ] `H-CONTINUE-006` Document blocked-session and continue workflows.
+- [ ] `CSP-352` Document blocked-session and continue workflows.
+  - Legacy ID: `H-CONTINUE-006`
   - Scope: update `docs/operations.md` and any TUI help/docs with how
     usage-limit detection works, how to inspect the parsed resume
     time, how to schedule/list/cancel a pending continuation, and the
     safety limits around stale sessions or unrecognized message
     formats.
   - Tests: docs-only `git diff --check`.
-  - Blockers: `H-CONTINUE-005`.
+  - Blockers: `CSP-351`.
 
 ### Agent-Mux Orchestrator Integrations
 
@@ -4918,7 +5148,7 @@ when they expose evidence MUXPROC cannot — concretely: workspace
 composition, container-isolated agents, exited / paused sessions, or
 orchestrator-specific labels and lineage.
 
-In-scope candidates (gated on the audit in `H-AGENTMUX-001`):
+In-scope candidates (gated on the audit in `CSP-131`):
 agent-deck (~/.agent-deck/, SQLite), dmux (`standardagents/dmux`,
 ~1.6k stars), workmux (`raine/workmux`, ~1.5k stars, per-worktree
 `.workmux/` plus `~/.local/state/workmux/`), agent-of-empires
@@ -4926,20 +5156,22 @@ agent-deck (~/.agent-deck/, SQLite), dmux (`standardagents/dmux`,
 `cdknorow/coral` (~21 stars), `honeymux/honeymux` (~71 stars, runtime
 overlay rather than persistent state).
 
-- [x] `H-AGENTMUX-001` Audit each candidate orchestrator's evidence
+- [x] `CSP-131` Audit each candidate orchestrator's evidence
   against MUXPROC and decide which adapters to build.
+  - Legacy ID: `H-AGENTMUX-001`
   - Outcome: audit collapsed during implementation work into ADR 0060
     rather than a standalone paper. Findings: agent-deck's unique
     evidence is workspace composition (built), dmux is a MUXPROC
-    subset (deferred per `H-AGENTMUX-005`), workmux's resurrect-state
-    is the only plausible non-overlap (deferred per `H-AGENTMUX-006`),
+    subset (deferred per `CSP-132`), workmux's resurrect-state
+    is the only plausible non-overlap (deferred per `CSP-133`),
     agent-of-empires container isolation is unverified
-    (deferred per `H-AGENTMUX-007`). The `AgentMuxAdapter` trait was
+    (deferred per `CSP-134`). The `AgentMuxAdapter` trait was
     not introduced — `DiscoveryProvider` is sufficient for the one
     surviving adapter and a trait would be speculative.
 
-- [x] `H-AGENTMUX-002` Detect agent-deck multi-repo checkouts as a
+- [x] `CSP-122` Detect agent-deck multi-repo checkouts as a
   workspace provider.
+  - Legacy ID: `H-AGENTMUX-002`
   - Outcome: `src/discovery/agent_deck.rs` ships the
     `AgentDeckDiscovery` provider, wired into `discover_local_with`
     via `LocalDiscoveryConfig::agent_deck_root` (defaults to
@@ -4954,8 +5186,9 @@ overlay rather than persistent state).
     broken-symlink, non-symlink-child, and multi-workspace fixtures.
     See ADR 0060 for the full decision record.
 
-- [x] `H-AGENTMUX-003` Surface multi-repo participants in the session
+- [x] `CSP-123` Surface multi-repo participants in the session
   table.
+  - Legacy ID: `H-AGENTMUX-003`
   - Outcome: `output::agent::fetch_workspace_lookup` joins the
     resolver's chosen `workspace_contains_repo` selections and
     renders the workspace column as `atelier+conspectus`-style
@@ -4966,10 +5199,11 @@ overlay rather than persistent state).
     deferred per ADR 0060 §Alternatives. Atelier multi-repo
     workspaces exercise the same surface from day one.
 
-- [ ] `H-AGENTMUX-004` Read agent-deck profile state from `state.db`.
+- [ ] `CSP-124` Read agent-deck profile state from `state.db`.
+  - Legacy ID: `H-AGENTMUX-004`
   - Scope: agent-deck stores richer per-session metadata
     (`~/.agent-deck/profiles/<profile>/state.db`, SQLite). **This
-    item is gated on the audit in `H-AGENTMUX-001` confirming the
+    item is gated on the audit in `CSP-131` confirming the
     SQLite content includes evidence MUXPROC cannot supply** —
     plausible candidates are profile labels / tags, agent lifecycle
     state for exited or paused sessions, and session-to-multi-repo
@@ -4983,12 +5217,13 @@ overlay rather than persistent state).
     schema degradation.
   - Manual checks: confirm read-only access; confirm the adapter
     does not lock the database while agent-deck is running.
-  - Blockers: `H-AGENTMUX-001` (audit must justify the work),
-    `H-AGENTMUX-002`. Requires recording the agent-deck schema and
+  - Blockers: `CSP-131` (audit must justify the work),
+    `CSP-122`. Requires recording the agent-deck schema and
     the surviving evidence set in an ADR (or an extension of ADR
     0013) before introducing the read code.
 
-- [ ] `H-AGENTMUX-008` Route agent-deck mux renames through agent-deck.
+- [ ] `CSP-451` Route agent-deck mux renames through agent-deck.
+  - Legacy ID: `H-AGENTMUX-008`
   - Scope: when a mux session is managed by agent-deck (detected via
     agent-deck's `state.db` profile state), the `rename` TUI shortcut
     (`R`) and `conspectus rename mux` should use agent-deck's native
@@ -5007,16 +5242,17 @@ overlay rather than persistent state).
     apply: agent-session alias writes happen concurrently with the
     mux-native rename. If the agent-deck rename fails, the alias is
     already written and the operator sees a status message.
-  - Blockers: `H-AGENTMUX-004` (must read agent-deck profile state
+  - Blockers: `CSP-124` (must read agent-deck profile state
     first to identify which mux sessions agent-deck manages).
-  - Related: `H-RENAME-003` (tmux rename seam), `H-RENAME-006`
+  - Related: `CSP-234` (tmux rename seam), `CSP-236`
     (lockstep contract), ADR 0029 (alias + rename), ADR 0060
     (agent-deck workspace composition).
 
-- [ ] `H-AGENTMUX-005` Add a dmux orchestrator adapter (audit-gated).
+- [ ] `CSP-132` Add a dmux orchestrator adapter (audit-gated).
+  - Legacy ID: `H-AGENTMUX-005`
   - Scope: **placeholder — may be closed as won't-do.** dmux's
     on-disk state layout is not surfaced in its README, so the audit
-    in `H-AGENTMUX-001` is responsible for source-inspecting dmux
+    in `CSP-131` is responsible for source-inspecting dmux
     and determining whether it tracks anything beyond a MUXPROC
     subset (task / feature metadata, agent lifecycle state, lineage
     between dmux-spawned sessions, container isolation). If the
@@ -5026,14 +5262,15 @@ overlay rather than persistent state).
   - Tests: deferred until the audit determines scope.
   - Manual checks: run against a real dmux install if available;
     otherwise rely on fixtures captured from upstream.
-  - Blockers: `H-AGENTMUX-001` (audit must justify the work and
+  - Blockers: `CSP-131` (audit must justify the work and
     define the evidence set).
 
-- [ ] `H-AGENTMUX-006` Add a workmux orchestrator adapter
+- [ ] `CSP-133` Add a workmux orchestrator adapter
   (audit-gated, narrowed scope).
+  - Legacy ID: `H-AGENTMUX-006`
   - Scope: workmux's runtime mapping (tmux window names + active
     agent state) is largely a MUXPROC subset. The audit in
-    `H-AGENTMUX-001` should focus on workmux's two artifacts that
+    `CSP-131` should focus on workmux's two artifacts that
     are plausibly non-overlapping: (a) per-worktree
     `<worktree>/.workmux/` files — project-rooted intent / labels /
     history that survive process exit and fit Conspectus's
@@ -5049,16 +5286,17 @@ overlay rather than persistent state).
     directories plus a fake `~/.local/state/workmux/agents/`
     layout; resurrect-state covering an exited session.
   - Manual checks: run against a real workmux install if available.
-  - Blockers: `H-AGENTMUX-001`.
+  - Blockers: `CSP-131`.
 
-- [ ] `H-AGENTMUX-007` Add an agent-of-empires orchestrator adapter
+- [ ] `CSP-134` Add an agent-of-empires orchestrator adapter
   (audit-gated).
+  - Legacy ID: `H-AGENTMUX-007`
   - Scope: **placeholder — may be closed as won't-do.** The
     strongest theoretical edge over MUXPROC is container isolation:
     when agent-of-empires runs the agent inside a container, the
     host process tree shows only the runtime
     (`docker`/`podman`/`bwrap`) and MUXPROC cannot identify the
-    harness. The audit in `H-AGENTMUX-001` should determine (a)
+    harness. The audit in `CSP-131` should determine (a)
     whether agent-of-empires actually tracks the in-container agent
     identity in host-visible state, and (b) whether container
     isolation is in Conspectus's near-term scope at all. If both
@@ -5070,7 +5308,7 @@ overlay rather than persistent state).
   - Tests: deferred until the audit determines scope.
   - Manual checks: run against a real agent-of-empires install if
     available.
-  - Blockers: `H-AGENTMUX-001`.
+  - Blockers: `CSP-131`.
 
 ### Workspace UX Redesign (H-WS-*)
 
@@ -5090,7 +5328,8 @@ member with no session-level workspace edge. Today's grouping
 promotes (B) to look like (A); the fix surfaces them as different
 concepts everywhere they appear.
 
-- [x] `H-WS-001` Strict-only + chip in Sessions/Graph workspace nesting.
+- [x] `CSP-405` Strict-only + chip in Sessions/Graph workspace nesting.
+  - Legacy ID: `H-WS-001`
   - Outcome (strict-nesting half — retained): `resolve_group_key`
     sets the workspace level only when the session carries a
     direct `AssociatedWith Workspace` edge; the previous
@@ -5121,7 +5360,7 @@ concepts everywhere they appear.
     the rendering block in `render_session_spans`, and the four
     chip-specific tests are removed. The (B)-rendering test
     keeps only the strict-nesting depth assertions.
-  - Net result: the H-WS-001 contribution is the strict-nesting
+  - Net result: the CSP-405 contribution is the strict-nesting
     + cross-link inference fix; the cross-reference chip is gone
     from the UI in all five views (Mux/Prs/Forks/Union were
     already chipless per ADR 0061; Workspaces dropped the
@@ -5130,7 +5369,8 @@ concepts everywhere they appear.
     (the AssociatedWith inference still emits it) but is no
     longer surfaced anywhere in the TUI.
 
-- [x] `H-WS-002` Dedicated Workspaces view (MVP).
+- [x] `CSP-406` Dedicated Workspaces view (MVP).
+  - Legacy ID: `H-WS-002`
   - Outcome: new `View::Workspaces` with `WorkspacesGrouping::Flat`
     as the only grouping shipped in v1. Initial row tree
     (`src/tui/rows/workspaces.rs`) listed each workspace with up to
@@ -5138,7 +5378,7 @@ concepts everywhere they appear.
     `related`). Keybinding `6` switches to the view; `[`/`]` cycle
     includes Workspaces; `--view workspaces` works from the CLI.
     Default-collapse for the `related` subgroup and the Provider /
-    Activity / Repo groupings were deferred to `H-WS-002a`.
+    Activity / Repo groupings were deferred to `CSP-406.01`.
   - Polish (ADR 0062): operator feedback after running the MVP
     flagged the `members` subgroup as left-tree noise (the detail
     pane already exposes members as navigable HeaderFields) and
@@ -5150,7 +5390,7 @@ concepts everywhere they appear.
     only (A)-class sessions, sitting at depth 1 directly under the
     workspace row with no labeled wrapper. The (B) cross-reference
     signal continues to live as the `[ws-name]` chip in Sessions /
-    Graph from `H-WS-001`. `fetch_b_class_sessions` and the
+    Graph from `CSP-405`. `fetch_b_class_sessions` and the
     multi-hop join it powered are removed; `MemberSqlRow` slims
     to a single `display_name` field. Six unit tests cover empty
     snapshot, inline member-list rendering with and without
@@ -5160,20 +5400,22 @@ concepts everywhere they appear.
     open question 2 from
     `docs/plans/workspace-view-redesign.md` (the (B)-in-view
     question). The four-grouping menu decision is still
-    `H-WS-002a`'s.
+    `CSP-406.01`'s.
 
-- [-] `H-WS-002a` Workspaces view polish: Provider/Activity/Repo
+- [-] `CSP-406.01` Workspaces view polish: Provider/Activity/Repo
   groupings.
+  - Legacy ID: `H-WS-002a`
   - Obsolete (ADR 0065): the dedicated `View::Workspaces` was
     removed in favor of `SessionsGrouping::Workspace`, so there
     is no longer a `WorkspacesGrouping` enum to extend. The
     Provider / Activity / Repo grouping axes from the original
-    `H-WS-002` ticket would now ship as Sessions-view variants
+    `CSP-406` ticket would now ship as Sessions-view variants
     (or a separate cross-cut) if they're revisited; tracked as a
     new story when needed.
 
-- [x] `H-WS-003` Audit Mux/Prs/Forks/Union workspace grouping for the
+- [x] `CSP-407` Audit Mux/Prs/Forks/Union workspace grouping for the
   same (A)/(B) conflation.
+  - Legacy ID: `H-WS-003`
   - Outcome: the audit found the four views' `Workspace` grouping
     variants are unimplemented, not buggy. `src/tui/rows/mux.rs:191`
     matched `Session | Workspace | Host` together and called
@@ -5186,7 +5428,7 @@ concepts everywhere they appear.
     was no workspace nesting to fix. Decision (ADR 0061): drop the
     `Workspace` variant from `MuxGrouping`, `UnionGrouping`,
     `PrsGrouping`, and `ForksGrouping`; the Workspaces view
-    (`H-WS-002`) is the canonical workspace-first surface, and the
+    (`CSP-406`) is the canonical workspace-first surface, and the
     (A)/(B) distinction does not translate cleanly to Prs/Forks
     (no cwd → no analog of "workspace-rooted"). `Grouping::as_str`,
     `Grouping::values_for`, and the dead match arm in `mux.rs` are
@@ -5200,7 +5442,8 @@ concepts everywhere they appear.
     iterates `values_for(view)` and continues to pass over the
     shrunken menus.
 
-- [x] `H-WS-004` Hybrid workspace+repo grouping in Sessions / Graph.
+- [x] `CSP-414` Hybrid workspace+repo grouping in Sessions / Graph.
+  - Legacy ID: `H-WS-004`
   - Outcome (ADR 0064): Sessions / Graph view reshaped to put
     workspaces and repos at the same top level as peer parents,
     each with sessions directly underneath at depth 1 (no repo
@@ -5254,58 +5497,59 @@ session ↔ pane evidence source that works even when no orchestrator
 is installed — and a useful cross-check against agent-mux adapter
 output when one is.
 
-Drift-reduction sequence after the `H-MUXPROC-015` Claude Code
+Drift-reduction sequence after the `CSP-227` Claude Code
 failure:
 
-1. Finish the `H-MUXPROC-002` process-linking slice by making the
+1. Finish the `CSP-136` process-linking slice by making the
    evidence taxonomy explicit in tests and resolver ranking. In
    particular, treat start-command / argv session ids as launch
    evidence, below active open-fd, hook, control-plane, and fresh
    state evidence. This immediately reduces the chance that stale
    `--resume` arguments become preferred links.
-2. Take `H-MUXPROC-015` as the first regression story, even before a
+2. Take `CSP-227` as the first regression story, even before a
    definitive Claude-current-session source exists. Add fixtures for
    launch session A plus stronger current-session evidence B, and for
    the fallback case where launch evidence remains the best available
    signal. This locks in the intended resolver behavior while later
    sources are still being researched.
-3. Do `H-MUXPROC-005` and `H-MUXPROC-009` as short audits in parallel
+3. Do `CSP-219` and `CSP-223` as short audits in parallel
    if possible. They have no blockers and decide whether Claude Code,
    Codex, or opencode can expose current session identity through a
    non-mutating control plane or hook/plugin path. The Claude Code
    `/resume` drift should be the primary audit scenario.
-4. If hooks are viable, do `H-MUXPROC-010`, `H-MUXPROC-011`, then
-   `H-MUXPROC-012`. This is the highest-confidence durable path for
+4. If hooks are viable, do `CSP-224`, `CSP-225`, then
+   `CSP-226`. This is the highest-confidence durable path for
    Claude Code drift if hook payloads include the post-`/resume`
-   session id or transcript path. Keep `H-MUXPROC-013` and
-   `H-MUXPROC-014` behind the same schema, but do not let them delay
+   session id or transcript path. Keep `CSP-228` and
+   `CSP-229` behind the same schema, but do not let them delay
    the Claude fix.
 5. If a non-mutating Claude control plane exists, add the corresponding
    control-plane adapter before or instead of the hook emitter. If only
-   Codex or opencode surfaces survive the audit, keep `H-MUXPROC-006`
-   and `H-MUXPROC-007` scoped to those harnesses and continue the
+   Codex or opencode surfaces survive the audit, keep `CSP-220`
+   and `CSP-221` scoped to those harnesses and continue the
    Claude path through hooks or read-only file/state evidence.
-6. Do `H-MUXPROC-003` next for one-shot and future continuous-mode
+6. Do `CSP-217` next for one-shot and future continuous-mode
    activity correlation. This improves fresh-session and post-switch
    attribution without requiring opt-in hooks, and gives the resolver a
    middle-strength signal above cwd-only matching.
-7. Do `H-MUXPROC-004` per ADR 0048. The May 2026 audit closed the
+7. Do `CSP-218` per ADR 0048. The May 2026 audit closed the
    opencode portion as a no-op and scoped the work to a Codex
    state-reader slice plus a Codex log-derived live-attribution
    linker. The log linker is also the Codex-side fix for the same
-   stale-`--resume` drift class as `H-MUXPROC-015`.
-8. Land `H-MUXPROC-008` as soon as the ADR path is open, or fold it
-   into `H-MUXPROC-001` if that ADR is still being written. This keeps
+   stale-`--resume` drift class as `CSP-227`.
+8. Land `CSP-222` as soon as the ADR path is open, or fold it
+   into `CSP-135` if that ADR is still being written. This keeps
    terminal injection and slash-command probing out of the attribution
    design while the tempting `/usage` workaround is fresh.
-9. Leave `H-MUXPROC-006`, `H-MUXPROC-007`, `H-MUXPROC-013`, and
-   `H-MUXPROC-014` behind their audits and schema decisions. They
+9. Leave `CSP-220`, `CSP-221`, `CSP-228`, and
+   `CSP-229` behind their audits and schema decisions. They
    improve cross-harness correctness, but they are not the shortest
    path to fixing the Claude Code mapping drift seen in
-   `H-MUXPROC-015`.
+   `CSP-227`.
 
-- [x] `H-MUXPROC-001` ADR: process-tree linker design and dependency
+- [x] `CSP-135` ADR: process-tree linker design and dependency
   choice.
+  - Legacy ID: `H-MUXPROC-001`
   - Scope: decide (1) whether to depend on the `sysinfo` crate or
     read `/proc` directly on Linux and an equivalent on macOS (and
     whether macOS is in scope at all for the first pass), (2) the
@@ -5326,9 +5570,10 @@ failure:
     binary match set, `active_pane_process_match` evidence, and
     `CONSPECTUS_DISABLE_PROCTREE` as the runtime kill switch.
 
-- [x] `H-MUXPROC-002` Implement the process-tree linker as a
+- [x] `CSP-136` Implement the process-tree linker as a
   discovery source.
-  - Scope: build the linker per the `H-MUXPROC-001` ADR. Walk every
+  - Legacy ID: `H-MUXPROC-002`
+  - Scope: build the linker per the `CSP-135` ADR. Walk every
     discovered pane's process tree, match descendant commands
     against the harness binary set, and emit candidate links between
     the matching `AgentSession` (when a corresponding session is
@@ -5350,7 +5595,7 @@ failure:
   - Manual checks: `cargo run -- graph --format json` inside a
     tmux session running an agent; confirm the new evidence on the
     `LinkedToMux` candidate links.
-  - Blockers: `H-MUXPROC-001`.
+  - Blockers: `CSP-135`.
   - **slice landed**: tmux discovery now records active-pane
     process hints available directly from tmux format variables
     (`pane_current_command`, `pane_pid`, `pane_current_path`, and
@@ -5392,7 +5637,8 @@ failure:
     attribution, unknown binaries, missing process data, unresolved
     evidence, and resolver ranking above launch argv.
 
-- [x] `H-MUXPROC-003` Add read-only session-file activity correlation.
+- [x] `CSP-217` Add read-only session-file activity correlation.
+  - Legacy ID: `H-MUXPROC-003`
   - Scope: improve fresh-session attribution without sending input to
     running agents. Add a read-only observation layer that correlates
     tmux pane PIDs with harness session files by recent creation /
@@ -5413,7 +5659,7 @@ failure:
   - Manual checks: start a fresh harness session in tmux with no
     explicit resume id; confirm `graph --format json` gains a
     non-cwd `LinkedToMux` candidate after the session file appears.
-  - Blockers: `H-MUXPROC-002`; friendlier after the continuous-mode
+  - Blockers: `CSP-136`; friendlier after the continuous-mode
     snapshot workstream starts.
   - Outcome: one-shot discovery now correlates active-pane harness
     identity, mux cwd, and read-only harness session activity
@@ -5428,8 +5674,9 @@ failure:
     are observed. Inotify / fanotify continuous-mode event ingestion
     remains deferred to the continuous server workstream.
 
-- [x] `H-MUXPROC-016` Treat harness session keys as opaque strings in
+- [x] `CSP-358` Treat harness session keys as opaque strings in
   runtime attribution.
+  - Legacy ID: `H-MUXPROC-016` (the 2026-06-04 story; the ID was used twice)
   - Scope: document and enforce the rule that `AgentSessionId.session_key`
     is an opaque harness-native string. UUID-shaped extraction remains a
     conservative generic fallback for arbitrary blobs, but any path,
@@ -5443,14 +5690,15 @@ failure:
   - Manual checks: inspect `graph --format json` for a live opencode mux
     session and confirm `process_identifies_session` evidence names the
     `ses_…` session key instead of falling back to same-cwd candidates.
-  - Blockers: `H-MUXPROC-002`.
+  - Blockers: `CSP-136`.
   - Outcome: active-pane process command extraction now uses
     harness-aware session-key parsing. OpenCode `ses_…` ids are
     first-class session keys in process command and fd/path evidence,
     while UUID-shaped extraction remains a generic fallback for Codex,
     Claude Code, and unknown harness contexts.
 
-- [x] `H-MUXPROC-017` Sweep remaining UUID-only extractor call sites.
+- [x] `CSP-359` Sweep remaining UUID-only extractor call sites.
+  - Legacy ID: `H-MUXPROC-017` (the 2026-06-04 story; the ID was used twice)
   - Scope: audit discovery, viewer bridge, resolver metadata, and output
     helpers for UUID-shaped session-key assumptions. Replace them with
     either typed `AgentSessionId` comparisons or harness-aware opaque
@@ -5464,7 +5712,7 @@ failure:
   - Manual checks: run a mixed Codex/opencode/Claude tmux graph smoke and
     verify resolved links and right-pane IDs preserve full external session
     keys.
-  - Blockers: `H-MUXPROC-016`.
+  - Blockers: `CSP-358`.
   - Outcome: the process-link extractor now exposes explicit
     harness-aware helpers and renamed the UUID-only helper to
     `generic_uuid_like_session_keys`, making generic UUID matching
@@ -5473,7 +5721,8 @@ failure:
     command forms such as `resume <id>` / `-s <id>` and harness-specific
     tokens such as opencode `ses_…`.
 
-- [x] `H-MUXPROC-FU-001` Evaluate first-class runtime process nodes.
+- [x] `CSP-305` Evaluate first-class runtime process nodes.
+  - Legacy ID: `H-MUXPROC-FU-001`
   - Scope: turn ADR 0047's proposed model into a concrete workstream
     proposal if process evidence continues to accumulate resolver,
     mux-cardinality, opencode subagent, server/proxy, or diagnostic
@@ -5487,7 +5736,7 @@ failure:
   - Tests: design-only until accepted. Any implementation should add
     fixtures for single-agent, multi-agent, subagent, stale argv, and
     unreadable process cases.
-  - Related: ADR 0047, ADR 0046, `H-MUXPROC-005`, `H-SUBAGENT-004`.
+  - Related: ADR 0047, ADR 0046, `CSP-219`, `CSP-298`.
   - Blockers: none.
   - Outcome: ADR 0047 is accepted. Runtime process nodes should land
     before graph visualization exports so DOT/HTML designs are not
@@ -5496,8 +5745,9 @@ failure:
     stays the main user-facing resolved relationship. Implementation
     is split into the follow-up slices below.
 
-- [x] `H-MUXPROC-FU-002` Add runtime process graph model and relation
+- [x] `CSP-308` Add runtime process graph model and relation
   kinds.
+  - Legacy ID: `H-MUXPROC-FU-002`
   - Scope: add a provider-neutral `RuntimeProcess` node with ephemeral
     observation identity and sparse attributes for PID, parent PID,
     root pane PID, command, cwd, harness key, process role, depth, and
@@ -5507,7 +5757,7 @@ failure:
     user-facing relationship.
   - Tests: serde round trips, deterministic identity/order tests, sparse
     node serialization, and relation-kind serialization.
-  - Blockers: `H-MUXPROC-FU-001`.
+  - Blockers: `CSP-305`.
   - Outcome: added `RuntimeProcessId`, `RuntimeProcessNode`,
     `RuntimeProcessRole`, a `GraphNode::RuntimeProcess` variant, a
     `NodeId::RuntimeProcess` variant, and process relation kinds for
@@ -5515,25 +5765,27 @@ failure:
     candidate evidence. Model tests cover stable display and relation
     serialization.
 
-- [x] `H-MUXPROC-FU-003` Persist runtime process nodes in SQLite and
+- [x] `CSP-309` Persist runtime process nodes in SQLite and
   graph JSON.
+  - Legacy ID: `H-MUXPROC-FU-003`
   - Scope: extend the query schema/loader/reader for runtime process
     nodes and their relation evidence. Keep process observations
     rebuildable and outside user-authored declared-link intent.
   - Tests: schema constant tests, load/read parity snapshots, and graph
     JSON snapshots covering single-agent, multi-agent, subagent, stale
     argv, and unreadable-process cases.
-  - Blockers: `H-MUXPROC-FU-002`.
+  - Blockers: `CSP-308`.
   - Outcome: bumped the query schema version and added
     `node_runtime_processes`, `v_nodes` coverage, loader insertion,
     readback, `NodeId` JSON round-trip coverage, and full-snapshot
     SQLite round-trip coverage. Minimal `node show` and TUI detail
     summaries can render runtime process nodes once discovery emits
     them. Scenario-specific process fixtures remain in
-    `H-MUXPROC-FU-006`.
+    `CSP-312`.
 
-- [x] `H-MUXPROC-FU-004` Emit runtime process nodes from MUXPROC
+- [x] `CSP-310` Emit runtime process nodes from MUXPROC
   discovery.
+  - Legacy ID: `H-MUXPROC-FU-004`
   - Scope: update process-tree, fd, hook/plugin, and Codex log-derived
     attribution paths to emit process observations and explicit
     process/session evidence instead of hiding all process facts inside
@@ -5543,7 +5795,7 @@ failure:
     no matching session, ambiguous same-cwd sessions, subagent roles,
     stale argv suppressed by stronger current-session evidence, and
     unreadable `/proc` degradation.
-  - Blockers: `H-MUXPROC-FU-003`.
+  - Blockers: `CSP-309`.
   - **slice landed**: process-tree evidence now emits
     `RuntimeProcess` nodes, `mux_contains_process` links, and
     `process_identifies_session` / `process_candidates_session`
@@ -5556,8 +5808,9 @@ failure:
     preserving the runtime process graph shape for deterministic
     scenarios and constrained platforms.
 
-- [x] `H-MUXPROC-FU-005` Move mux-cardinality and attribution resolver
+- [x] `CSP-311` Move mux-cardinality and attribution resolver
   logic onto runtime process evidence.
+  - Legacy ID: `H-MUXPROC-FU-005`
   - Scope: teach resolver/cross-link inference to derive
     `AgentSession -> MuxSession` from explicit process observations and
     process/session candidates. Cardinality rules should count
@@ -5566,7 +5819,7 @@ failure:
   - Tests: resolver tests for zero/one/multiple non-subagent processes,
     subagent exclusion, current-session evidence beating stale launch
     argv, and unresolved process diagnostics.
-  - Blockers: `H-MUXPROC-FU-004`.
+  - Blockers: `CSP-310`.
   - Outcome: `resolve_snapshot` now derives compatibility
     `AgentSession -> MuxSession` candidates from
     `mux_contains_process` plus concrete process/session evidence,
@@ -5575,15 +5828,16 @@ failure:
     non-subagent runtime process roles so subagent observations do not
     inflate mux cardinality.
 
-- [x] `H-MUXPROC-FU-006` Surface runtime process diagnostics in node
+- [x] `CSP-312` Surface runtime process diagnostics in node
   detail and scenario fixtures.
+  - Legacy ID: `H-MUXPROC-FU-006`
   - Scope: add node-detail sections for runtime process nodes and for
     agent/mux nodes linked through process evidence. Extend named dev
     scenarios so process-cardinality and stale-argv cases can be
     inspected through `dev scenario graph/table/node/tui`.
   - Tests: node-show/detail snapshots and dev-scenario coverage for
     process-backed attribution cases.
-  - Blockers: `H-MUXPROC-FU-005`, `TEST-006`.
+  - Blockers: `CSP-311`, `CSP-306`.
   - Outcome: TUI/node detail now has a `Process` section for runtime
     process fields and linked process context from agent and mux
     details. Runtime process details link back to containing muxes and
@@ -5592,8 +5846,9 @@ failure:
     process observations for one mux; `codex-fd-current` continues to
     cover stale argv vs fd-backed process attribution.
 
-- [x] `H-MUXPROC-004` Read Codex state and log databases for live
+- [x] `CSP-218` Read Codex state and log databases for live
   session attribution.
+  - Legacy ID: `H-MUXPROC-004`
   - Scope: per ADR 0048, add two read-only Codex slices under the
     existing harness state-root discovery. The state-reader slice
     globs `state_*.sqlite`, selects the highest numeric suffix, and
@@ -5642,9 +5897,9 @@ failure:
     log churn from Conspectus reads.
   - Related: ADR 0048; ADR 0028 (sidecar TTL and demotion rule
     reused); ADR 0046 (process-tree provides the live Codex pid set);
-    ADR 0018 (parent_session shape); `H-MUXPROC-015` (Claude analogue
-    of the drift case this closes for Codex); `H-MUXPROC-005` /
-    `H-MUXPROC-006` (Codex `remote_control_enrollments` belongs to
+    ADR 0018 (parent_session shape); `CSP-227` (Claude analogue
+    of the drift case this closes for Codex); `CSP-219` /
+    `CSP-220` (Codex `remote_control_enrollments` belongs to
     the control-plane audit, not here).
   - Blockers: none. ADR 0048 supplies the persistent schema-dependency
     decision the original blocker required.
@@ -5653,13 +5908,14 @@ failure:
     `logs_2.sqlite`. opencode's slice of 004 closes as a no-op
     because the schema carries no live process/server binding beyond
     what the existing reader already extracts; live opencode↔mux
-    attribution remains the responsibility of `H-MUXPROC-007` /
-    `H-MUXPROC-014`. Codex `jobs`, `agent_jobs`, `thread_goals`, and
+    attribution remains the responsibility of `CSP-221` /
+    `CSP-229`. Codex `jobs`, `agent_jobs`, `thread_goals`, and
     `stage1_outputs` were empty on the audit machine and are deferred
     until in-the-wild usage justifies coverage.
 
-- [x] `H-MUXPROC-005` Audit harness control planes for non-mutating
+- [x] `CSP-219` Audit harness control planes for non-mutating
   current-session queries.
+  - Legacy ID: `H-MUXPROC-005`
   - Scope: determine whether any supported harness exposes a
     documented side-channel that can ask an already-running
     interactive process for its current session id without entering
@@ -5677,28 +5933,29 @@ failure:
   - Manual checks: launch each harness in the required server/control
     mode and prove the query does not append user, assistant, or
     system records to the session transcript.
-  - Related: `H-MUXPROC-015` captures a live Claude Code case where
+  - Related: `CSP-227` captures a live Claude Code case where
     command-line `--resume` evidence became stale after an in-process
     session switch; the audit should explicitly look for a safer
     current-session source for that scenario.
   - Blockers: none.
   - **audit slice landed**: local Codex CLI exposes experimental
     app-server thread APIs, but no local hook surface in `--help`;
-    keep `H-MUXPROC-006` gated. OpenCode exposes HTTP server, ACP,
-    and plugin surfaces; keep `H-MUXPROC-007` gated. Claude Code's
+    keep `CSP-220` gated. OpenCode exposes HTTP server, ACP,
+    and plugin surfaces; keep `CSP-221` gated. Claude Code's
     strongest non-mutating path is hooks, tracked under
-    `H-MUXPROC-009` / `H-MUXPROC-012`.
+    `CSP-223` / `CSP-226`.
   - **closed 2026-05-31**: audit work is the scope; the recorded
     findings have routed each harness to its chosen non-mutating
     path (Codex → ADR 0048 log linker; opencode → plugin sidecar
-    via `H-MUXPROC-014`; Claude Code → hook sidecar via
-    `H-MUXPROC-012`). `H-MUXPROC-006` and `H-MUXPROC-007` are
+    via `CSP-229`; Claude Code → hook sidecar via
+    `CSP-226`). `CSP-220` and `CSP-221` are
     closed as won't-do; see their entries for rationale.
 
-- [x] `H-MUXPROC-006` Add Codex app-server attribution adapter if
+- [x] `CSP-220` Add Codex app-server attribution adapter if
   the audit proves a stable non-mutating query. **Closed as
   won't-do 2026-05-31.**
-  - Scope: if `H-MUXPROC-005` confirms Codex's app-server or control
+  - Legacy ID: `H-MUXPROC-006`
+  - Scope: if `CSP-219` confirms Codex's app-server or control
     socket can report the active session/rollout for an interactive
     TUI, implement an optional adapter that discovers the control
     endpoint, authenticates using the documented local mechanism, and
@@ -5712,22 +5969,23 @@ failure:
   - Manual checks: launch Codex with the required app-server mode;
     confirm Conspectus links the live rollout without relying on
     command-line resume args or open JSONL fd paths.
-  - Blockers: `H-MUXPROC-005`.
-  - **closure rationale**: `H-MUXPROC-005` audit found Codex's
+  - Blockers: `CSP-219`.
+  - **closure rationale**: `CSP-219` audit found Codex's
     app-server surface is gated behind experimental flags with no
     stable contract and no local hook surface (`codex --help`). The
     Codex drift class that motivated this work is already covered by
-    the log linker landed under `H-MUXPROC-004` / ADR 0048, which
+    the log linker landed under `CSP-218` / ADR 0048, which
     derives current session attribution from the on-disk rollout log
     without depending on the experimental control socket. Reopen
     only if Codex ships a stable, documented current-session query
     that the log linker cannot match (e.g. cross-pid session
     handoff without log rotation).
 
-- [x] `H-MUXPROC-007` Add opencode server/ACP attribution adapter if
+- [x] `CSP-221` Add opencode server/ACP attribution adapter if
   the audit proves a stable non-mutating query. **Closed as
   won't-do 2026-05-31.**
-  - Scope: if `H-MUXPROC-005` confirms opencode `serve`, `attach`,
+  - Legacy ID: `H-MUXPROC-007`
+  - Scope: if `CSP-219` confirms opencode `serve`, `attach`,
     or ACP can report active session identity for a running TUI or
     headless server, implement an optional adapter that maps the
     server session id back to a `MuxSession`. Prefer documented
@@ -5740,9 +5998,9 @@ failure:
   - Manual checks: launch opencode in the supported server mode and
     confirm the query does not create transcript records or alter
     session recency.
-  - Blockers: `H-MUXPROC-005`.
+  - Blockers: `CSP-219`.
   - **closure rationale**: supplanted by the plugin sidecar path in
-    `H-MUXPROC-014` (live-verified 2026-05-31). The opencode plugin
+    `CSP-229` (live-verified 2026-05-31). The opencode plugin
     runs in-process inside every TUI/server/ACP launch mode, writes
     `session.created`/`updated`/`idle`/`status`/`compacted`
     observations to the hook sidecar without HTTP/socket discovery
@@ -5753,34 +6011,36 @@ failure:
     only if the plugin distribution becomes untenable (e.g.
     opencode removes the plugin surface).
 
-- [x] `H-MUXPROC-008` Document terminal-injection attribution as a
+- [x] `CSP-222` Document terminal-injection attribution as a
   rejected strategy unless a harness guarantees non-mutating status
   commands.
+  - Legacy ID: `H-MUXPROC-008`
   - Scope: record the policy that Conspectus must not use
     `tmux send-keys`, slash commands, prompts such as `/status`, or
     terminal scraping to ask an agent for its current session id
     because these are user inputs and may mutate JSONL/transcript
     logs. The only exception is a harness-documented command channel
     that explicitly guarantees no transcript/session mutation; such
-    an exception must be captured by `H-MUXPROC-005` and implemented
+    an exception must be captured by `CSP-219` and implemented
     as a control-plane adapter rather than generic terminal input.
     Put the rationale in the process-linking ADR or a short follow-up
     ADR so future work does not rediscover the same tempting but
     unsafe approach.
   - Tests: none.
-  - Related: `H-MUXPROC-015` records why scraping or injecting
+  - Related: `CSP-227` records why scraping or injecting
     Claude Code `/usage` is tempting but should not be treated as
     the preferred architecture unless no non-mutating control or hook
     source exists.
-  - Blockers: `H-MUXPROC-001` ADR can absorb this if it has not
+  - Blockers: `CSP-135` ADR can absorb this if it has not
     landed; otherwise write a follow-up ADR.
   - Outcome: ADR 0028 rejects terminal injection, slash-command
     probing, and generic terminal scraping for current-session
     attribution. Harness-documented non-mutating command channels
     remain possible only as explicit control-plane adapters.
 
-- [x] `H-MUXPROC-009` Audit harness hooks/plugins as definitive
+- [x] `CSP-223` Audit harness hooks/plugins as definitive
   session-state sidecar emitters.
+  - Legacy ID: `H-MUXPROC-009`
   - Scope: determine whether supported harnesses can expose current
     session state through lifecycle hooks, tool hooks, plugins, or
     status-line callbacks without sending text into the agent
@@ -5830,7 +6090,7 @@ failure:
     forwarding events to `conspectus hook write` does not append
     to the opencode session DB, transcript, or HTTP API. Opt-out
     exists at the CLI level via `opencode --pure`. Implementation
-    plan for `H-MUXPROC-014` is therefore well-scoped: ship a
+    plan for `CSP-229` is therefore well-scoped: ship a
     `@conspectus/opencode-hook` npm plugin that calls a new
     `conspectus hook write opencode` writer (sibling of the
     existing `claude-code` and `codex` writers), and reuse the
@@ -5843,15 +6103,16 @@ failure:
     extractable from `codex --help` or from a strings dump of the
     wrapped binary on this machine and would need upstream docs
     or source reading. Lower priority than opencode because
-    `H-MUXPROC-004` / ADR 0048 already closes the codex side of
-    the H-MUXPROC-015 drift class via log-derived attribution; the
+    `CSP-218` / ADR 0048 already closes the codex side of
+    the CSP-227 drift class via log-derived attribution; the
     `conspectus hook write codex` writer subcommand exists as a
     stub for future use if/when codex hook payload semantics are
     documented or reverse-engineered.
 
-- [x] `H-MUXPROC-010` Define Conspectus hook sidecar schema and
+- [x] `CSP-224` Define Conspectus hook sidecar schema and
   trust/ranking rules.
-  - Scope: if `H-MUXPROC-009` finds viable hook/plugin emitters,
+  - Legacy ID: `H-MUXPROC-010`
+  - Scope: if `CSP-223` finds viable hook/plugin emitters,
     define a provider-neutral sidecar record written outside project
     trees, likely under the user's XDG state directory. Minimum
     candidate fields: harness key, session key, cwd, pid, ppid,
@@ -5867,15 +6128,16 @@ failure:
   - Tests: schema parse/round-trip tests, stale-record filtering,
     duplicate event coalescing, malformed record degradation, and
     resolver ordering tests against fd, command, and cwd evidence.
-  - Blockers: `H-MUXPROC-009`; ADR required for the durable sidecar
+  - Blockers: `CSP-223`; ADR required for the durable sidecar
     convention.
   - Outcome: ADR 0028 defines schema version 1 under the user's
     Conspectus state directory, a 15-minute active-record TTL,
     matching by explicit session id plus tmux native id / pid / cwd,
     and ranking above launch argv evidence.
 
-- [x] `H-MUXPROC-011` Implement hook-sidecar discovery provider.
-  - Scope: read the sidecar records defined by `H-MUXPROC-010` and
+- [x] `CSP-225` Implement hook-sidecar discovery provider.
+  - Legacy ID: `H-MUXPROC-011`
+  - Scope: read the sidecar records defined by `CSP-224` and
     convert them into `LinkedToMux` candidate links. Match hook
     records to mux sessions by tmux pane id when present, then pane
     pid, then tmux session metadata, and only then cwd as a weak
@@ -5890,7 +6152,7 @@ failure:
   - Manual checks: run with a live hook-enabled session and confirm
     `graph --format json` shows the hook evidence without requiring
     transcript scraping or terminal input.
-  - Blockers: `H-MUXPROC-010`.
+  - Blockers: `CSP-224`.
   - Outcome: `discovery::hook_sidecar` reads fresh JSON records after
     harness and tmux discovery, emits high-confidence `LinkedToMux`
     candidates, and marks stale `active_pane_command_session_match`
@@ -5899,8 +6161,9 @@ failure:
     has fired `SessionStart` but has not yet persisted the transcript
     file because the new session has no messages.
 
-- [x] `H-MUXPROC-012` Add Claude Code hook sidecar emitter if audit
+- [x] `CSP-226` Add Claude Code hook sidecar emitter if audit
   proves non-mutating session identity.
+  - Legacy ID: `H-MUXPROC-012`
   - Scope: if Claude Code hook payloads include a current session id,
     transcript path, or enough context to derive one, provide a
     minimal documented hook command/script that writes Conspectus
@@ -5914,10 +6177,10 @@ failure:
   - Manual checks: enable the hook for a live Claude Code session and
     verify the sidecar identifies the active session without adding
     Conspectus probe messages to JSONL logs.
-  - Related: `H-MUXPROC-015` provides the concrete failure mode this
+  - Related: `CSP-227` provides the concrete failure mode this
     emitter should fix if Claude Code hook payloads expose the
     post-`/resume` current session id.
-  - Blockers: `H-MUXPROC-009`, `H-MUXPROC-010`.
+  - Blockers: `CSP-223`, `CSP-224`.
   - Outcome: added `scripts/conspectus-claude-hook-sidecar.py` and
     documented a `SessionStart` hook configuration in
     `docs/operations.md`. The emitter writes schema-v1 sidecar
@@ -5925,7 +6188,8 @@ failure:
     process ids, and tmux context when available. The script is now a
     compatibility shim for `conspectus hook write claude-code`.
 
-- [x] `H-MUXPROC-016` Add `conspectus hook write` sidecar writer.
+- [x] `CSP-230` Add `conspectus hook write` sidecar writer.
+  - Legacy ID: `H-MUXPROC-016` (the 2026-05-23 story; the ID was used twice)
   - Scope: move the sidecar write path into the Conspectus binary so
     schema validation, root selection, atomic writes, permissions, and
     future migrations live in Rust beside the reader. Treat the
@@ -5955,13 +6219,14 @@ failure:
     directly, then confirm `graph --format json` shows
     `hook_session_match` / `hook_session_path_match` evidence without
     relying on the Python emitter.
-  - Blockers: `H-MUXPROC-010`, `H-MUXPROC-011`, `H-MUXPROC-012`.
+  - Blockers: `CSP-224`, `CSP-225`, `CSP-226`.
   - Outcome: added `conspectus hook write claude-code`, which reads
     Claude Code hook JSON from stdin and writes schema-v1 observations
     to `hooks.sqlite3` under the hook state root. Discovery reads the
     SQLite store plus legacy per-event JSON records.
 
-- [x] `H-MUXPROC-017` Add `conspectus hook init` installer UX.
+- [x] `CSP-231` Add `conspectus hook init` installer UX.
+  - Legacy ID: `H-MUXPROC-017` (the 2026-05-23 story; the ID was used twice)
   - Scope: add an idempotent hook installer for supported harnesses,
     starting with Claude Code. It should merge with existing harness
     settings, preserve unrelated user hooks, install a hook command
@@ -5978,15 +6243,16 @@ failure:
   - Manual checks: install into a temporary Claude Code settings file,
     run a hook-enabled session, verify sidecar emission, then remove
     and confirm the settings file returns to the expected state.
-  - Blockers: `H-MUXPROC-016`; ADR/design update if the command mutates
+  - Blockers: `CSP-230`; ADR/design update if the command mutates
     any persistent convention not already covered by ADR 0028.
   - Outcome: added `conspectus hook init/status/remove claude-code`
     with user/project scope support. The installer merges with existing
     Claude settings, preserves unrelated hooks, and installs a command
     that invokes `conspectus hook write claude-code`.
 
-- [x] `H-MUXPROC-018` Dedupe hook records by pane and drop the
+- [x] `CSP-249` Dedupe hook records by pane and drop the
   15-minute emission gate.
+  - Legacy ID: `H-MUXPROC-018`
   - Problem: in-app `/resume` between two Claude Code sessions in the
     same tmux pane leaves both sessions linked to the mux. Each
     session's `SessionStart` / `Resume` hook writes its own record;
@@ -6008,7 +6274,7 @@ failure:
     dedupes cwd-only and pid-only matches. Drop the
     `ACTIVE_TTL_SECONDS` filter from the emission gate; the constant
     stays in `src/hook.rs` for higher-layer freshness signals (e.g.
-    the live-session advisory planned for `H-RENAME-013`). Update
+    the live-session advisory planned for `CSP-243`). Update
     ADR 0028 to record the new emission semantics.
   - Tests: replace the existing
     `stale_hook_record_does_not_link_active_mux` test with one
@@ -6023,7 +6289,7 @@ failure:
     `conspectus graph --format json` and `conspectus tui` show
     exactly one Active `LinkedToMux` per pane (the freshest), with
     the older link visible as Overridden in diagnostic output.
-  - Related: `H-MUXPROC-015` (the original in-process `/resume`
+  - Related: `CSP-227` (the original in-process `/resume`
     drift fix scope), ADR 0028 (hook sidecar attribution).
   - Blockers: none.
   - Outcome: `apply_hook_sidecars` now sorts hook records newest
@@ -6037,8 +6303,9 @@ failure:
     dedupe semantics. Unit tests cover old-record retention,
     fresher-same-pane override, and different-pane independence.
 
-- [ ] `H-MUXPROC-019` Investigate Claude Code Workflows process and
+- [ ] `CSP-357` Investigate Claude Code Workflows process and
   session topology.
+  - Legacy ID: `H-MUXPROC-019`
   - Scope: audit Claude Code Dynamic Workflows
     (`https://code.claude.com/docs/en/workflows`) against Conspectus's
     mux/process/session attribution model. The docs say workflow runs
@@ -6066,11 +6333,12 @@ failure:
     `~/.claude/projects/`, and Conspectus graph output before, during,
     after pause/resume, and after completion.
   - Blockers: access to Claude Code v2.1.154+ with workflows enabled.
-  - Related: `H-MUXPROC-018`, `H-MUXPROC-015`, ADR 0028.
+  - Related: `CSP-249`, `CSP-227`, ADR 0028.
 
-- [x] `H-MUXPROC-020` Record the harness pid, not the hook writer's
+- [x] `CSP-402` Record the harness pid, not the hook writer's
   pid, in hook sidecar records.
-  - Outcome (2026-09-30, `REL-007`): landed in `4c63044`.
+  - Legacy ID: `H-MUXPROC-020`
+  - Outcome (2026-09-30, `CSP-538`): landed in `4c63044`.
   - Problem: `conspectus hook write claude-code` (and the codex /
     opencode variants) persist `record.pid = std::process::id()` in
     `src/cli.rs:417`, but `std::process::id()` is the pid of the
@@ -6088,7 +6356,7 @@ failure:
     resolver, and the mux fell back to the stale launch-argv
     candidate, attributing the mux to a 14-day-stale resume parent
     instead of the live session. The earlier "hook records solve
-    `H-MUXPROC-015`" claim in that story is contradicted in practice
+    `CSP-227`" claim in that story is contradicted in practice
     by this writer-pid bug — every hook record is born stillborn.
   - Scope: in the `conspectus hook write <harness>` writers (claude,
     codex, opencode in `src/cli.rs`), resolve the harness pid before
@@ -6121,13 +6389,14 @@ failure:
     `conspectus` pid. Run `conspectus graph --format json` and
     confirm at least one `hook_sidecar` candidate for the live
     session has `state: active`.
-  - Related: `H-MUXPROC-012`, `H-MUXPROC-015`, `H-MUXPROC-018`,
-    `H-MUXPROC-021`, ADR 0028.
+  - Related: `CSP-226`, `CSP-227`, `CSP-249`,
+    `CSP-403`, ADR 0028.
   - Blockers: none.
 
-- [x] `H-MUXPROC-021` Demote `LinkedToMux` candidates whose source
+- [x] `CSP-403` Demote `LinkedToMux` candidates whose source
   `AgentSession` is materially stale compared to a fresher candidate
   for the same mux.
+  - Legacy ID: `H-MUXPROC-021`
   - Problem: `resolve_links` (`src/resolve/mod.rs:303`) buckets
     `LinkedToMux` candidates by `(source, relation, target)` and
     picks one winner *per source*. When two sessions each produce a
@@ -6170,9 +6439,9 @@ failure:
   - Manual checks: replay the `agentdeck_-local-command-caveat-…`
     snapshot through `conspectus graph --format json` and confirm
     `7f01dbdf-…` is attributed to the mux instead of `c1901a9e-…`.
-  - Related: `H-MUXPROC-015`, `H-MUXPROC-020`, ADR 0006
+  - Related: `CSP-227`, `CSP-402`, ADR 0006
     (resolver ordering), ADR 0028.
-  - Blockers: none. Land alongside or after `H-MUXPROC-020` so the
+  - Blockers: none. Land alongside or after `CSP-402` so the
     fresh hook-sidecar candidates are reaching `snapshot.candidate_
     links` Active before the freshness pass has to differentiate.
   - Outcome: `demote_stale_source_mux_candidates` in
@@ -6187,11 +6456,12 @@ failure:
     Pin / Declared provenance entirely (user intent always wins),
     skips when the mux's `activity_epoch` is missing, and skips
     when no candidate is itself fresh against the mux. Unit tests
-    cover all five paths. Live caveat-mux fix once H-MUXPROC-020
+    cover all five paths. Live caveat-mux fix once CSP-402
     starts producing Active hook records.
 
-- [x] `H-MUXPROC-015` Fix Claude Code mux attribution after
+- [x] `CSP-227` Fix Claude Code mux attribution after
   in-process `/resume` switches.
+  - Legacy ID: `H-MUXPROC-015`
   - Problem: live testing showed a Claude Code process running in
     tmux with argv
     `claude --resume 926c6991-9494-48ee-9d63-a98f4b4959d0`, while
@@ -6207,10 +6477,10 @@ failure:
     command-line `--resume <session>` is treated as launch evidence,
     not definitive current-session evidence, when a stronger
     current-session source exists. Investigate, in order:
-    non-mutating Claude control/state sources from `H-MUXPROC-005`;
-    hook/sidecar payloads from `H-MUXPROC-009` / `H-MUXPROC-012`;
-    read-only state/database/file evidence from `H-MUXPROC-003` /
-    `H-MUXPROC-004`; and only then carefully-scoped pane scraping of
+    non-mutating Claude control/state sources from `CSP-219`;
+    hook/sidecar payloads from `CSP-223` / `CSP-226`;
+    read-only state/database/file evidence from `CSP-217` /
+    `CSP-218`; and only then carefully-scoped pane scraping of
     already-visible status surfaces such as `/usage`. Do not inject
     `/usage`, `/status`, or any slash command into the pane as part
     of discovery.
@@ -6231,17 +6501,17 @@ failure:
     `/resume`, verify the pane reports B as current, then confirm
     `conspectus graph --format json` and `conspectus tui` link the
     mux to B.
-  - Related: `H-MUXPROC-002` (current argv/fd/process evidence),
-    `H-MUXPROC-003` (session-file activity correlation),
-    `H-MUXPROC-004` (read-only harness state), `H-MUXPROC-005`
-    (control-plane audit), `H-MUXPROC-008` (terminal-injection
-    policy), `H-MUXPROC-009` / `H-MUXPROC-010` /
-    `H-MUXPROC-012` (Claude hook sidecar path), `P8-014`
+  - Related: `CSP-136` (current argv/fd/process evidence),
+    `CSP-217` (session-file activity correlation),
+    `CSP-218` (read-only harness state), `CSP-219`
+    (control-plane audit), `CSP-222` (terminal-injection
+    policy), `CSP-223` / `CSP-224` /
+    `CSP-226` (Claude hook sidecar path), `CSP-175`
     (ambiguous mux picker if evidence remains unresolved).
   - Blockers: no hard blocker for documenting/demoting argv
     semantics; a definitive fix likely depends on one of
-    `H-MUXPROC-003`, `H-MUXPROC-004`, `H-MUXPROC-005`, or
-    `H-MUXPROC-012`.
+    `CSP-217`, `CSP-218`, `CSP-219`, or
+    `CSP-226`.
   - **regression slice landed**: resolver tests cover stronger
     current-session evidence beating launch argv and launch argv
     remaining usable without a current-session source. Hook-sidecar
@@ -6249,13 +6519,13 @@ failure:
     stale `active_pane_command_session_match` for the same mux, plus
     live-validation fallout where a fresh Claude session exists in
     hook state before its transcript file exists on disk.
-  - **codex-side fix landed via `H-MUXPROC-004` / ADR 0048**: the
+  - **codex-side fix landed via `CSP-218` / ADR 0048**: the
     codex log linker resolves the active thread for each live codex
     pid by parsing `logs.process_uuid` (`pid:<os_pid>:<uuid>`) and
     demotes stale `active_pane_command_session_match` candidates for
     the same mux, closing the codex equivalent of this drift class
     without requiring hooks.
-  - **Claude-side fix landed via `H-MUXPROC-012` + ADR 0028 hook
+  - **Claude-side fix landed via `CSP-226` + ADR 0028 hook
     sidecar stack** and confirmed in-the-wild on 2026-05-30. Live
     `conspectus graph --format json` against the development host
     showed two concurrent Claude panes with `claude --resume A` argv
@@ -6272,8 +6542,9 @@ failure:
     was needed for closure; the resolver tests and ADR 0028 hook
     sidecar machinery already shipped the fix.
 
-- [x] `H-MUXPROC-013` Add Codex hook sidecar emitter if audit proves
+- [x] `CSP-228` Add Codex hook sidecar emitter if audit proves
   non-mutating session identity.
+  - Legacy ID: `H-MUXPROC-013`
   - Scope: if Codex `codex_hooks` events include the active
     thread/rollout/session id, or if a hook can reliably identify the
     current rollout path from its process context, provide an opt-in
@@ -6287,7 +6558,7 @@ failure:
   - Manual checks: enable the hook for a live Codex session and
     confirm Conspectus links the active rollout even when the launch
     command names only a resumed parent.
-  - Blockers: `H-MUXPROC-009`, `H-MUXPROC-010`.
+  - Blockers: `CSP-223`, `CSP-224`.
   - Audit notes:
     - Local Codex 0.128.0 already gives strong non-mutating live
       evidence through tmux active pane pid -> `/proc/<pid>/fd` ->
@@ -6334,7 +6605,8 @@ failure:
     no-opt-in current-session source for already-running Codex TUI
     processes.
 
-- [x] `H-MUXPROC-014` Add opencode plugin sidecar emitter.
+- [x] `CSP-229` Add opencode plugin sidecar emitter.
+  - Legacy ID: `H-MUXPROC-014`
   - Scope: ship an opt-in npm-distributed opencode plugin (working
     name `@conspectus/opencode-hook`, distributed alongside the
     Conspectus release; can also be tried locally via the
@@ -6367,7 +6639,7 @@ failure:
     fields, and a follow-up `opencode session list` shows the
     session transcript is byte-identical to a control run without
     the plugin installed.
-  - Related: `H-MUXPROC-009` audit slice landed 2026-05-30
+  - Related: `CSP-223` audit slice landed 2026-05-30
     establishing the plugin shape; ADR 0028 hook sidecar schema;
     ADR 0049 plugin distribution; `discovery::hook_sidecar`
     reader; ADR 0048 (parallel codex drift fix uses log-derived
@@ -6402,8 +6674,8 @@ failure:
     correctly marked it `ignored` because the pane is currently
     running `claude-code`, not opencode (the `opencode run`
     process exited after the prompt).
-  - Blockers: none. Audit complete via `H-MUXPROC-009`; sidecar
-    schema fixed via `H-MUXPROC-010`.
+  - Blockers: none. Audit complete via `CSP-223`; sidecar
+    schema fixed via `CSP-224`.
 
 ### Testing Improvements And Regression Replay (TEST-*)
 
@@ -6418,21 +6690,22 @@ snapshot tests.
 Dependency shape inside the workstream:
 
 ```
-TEST-001 ─→ TEST-002 ─→ TEST-003 ─→ TEST-005
+CSP-262 ──→ CSP-263 ──→ CSP-264 ──→ CSP-266
               │             │
-              └────────────→ TEST-004
+              └────────────→ CSP-265
 ```
 
-`TEST-001` establishes the harness. `TEST-002` adds sanitized
+`CSP-262` establishes the harness. `CSP-263` adds sanitized
 real-world fixture material so regressions can be captured quickly.
-`TEST-003` turns recent MUXPROC escapes into replayed scenarios.
-`TEST-004` adds broad invariants that should hold across any graph
-fixture. `TEST-005` covers TUI interaction regressions that only show
-up after row expansion, scrolling, or attach resolution. `TEST-006`
+`CSP-264` turns recent MUXPROC escapes into replayed scenarios.
+`CSP-265` adds broad invariants that should hold across any graph
+fixture. `CSP-266` covers TUI interaction regressions that only show
+up after row expansion, scrolling, or attach resolution. `CSP-306`
 turns the same replay worlds into named operator scenarios that can be
 launched through CLI/TUI surfaces for manual inspection.
 
-- [x] `TEST-001` Add a MUXPROC scenario replay harness.
+- [x] `CSP-262` Add a MUXPROC scenario replay harness.
+  - Legacy ID: `TEST-001`
   - Scope: introduce a test support layer that can build a complete
     synthetic local world from small scenario inputs: harness state
     roots, hook SQLite records, fake tmux rows with active-pane
@@ -6460,7 +6733,8 @@ launched through CLI/TUI surfaces for manual inspection.
     session plus one mux, hook SQLite record insertion, fake fd
     evidence injection, and temp-path normalization.
 
-- [x] `TEST-002` Add a sanitized real-state fixture corpus.
+- [x] `CSP-263` Add a sanitized real-state fixture corpus.
+  - Legacy ID: `TEST-002`
   - Scope: create checked-in fixture directories for representative
     real provider shapes that synthetic builders have historically
     missed: Codex rollout JSONL files, Claude Code transcript
@@ -6475,7 +6749,7 @@ launched through CLI/TUI surfaces for manual inspection.
   - Manual checks: run the sanitizer against a known live failure and
     confirm the resulting fixture is reviewable, deterministic, and
     free of private transcript text.
-  - Blockers: `TEST-001` for replay integration; the corpus can start
+  - Blockers: `CSP-262` for replay integration; the corpus can start
     with parser-only tests before the replay harness is complete.
   - Outcome: added `tests/fixtures/` with sanitized corpus files for
     Codex (full, minimal, forked rollouts), Claude Code (basic,
@@ -6489,7 +6763,8 @@ launched through CLI/TUI surfaces for manual inspection.
     shapes and edge-case field handling. A 7-step sanitization
     workflow is documented in the test file header.
 
-- [x] `TEST-003` Replay recent MUXPROC drift and stale-evidence bugs.
+- [x] `CSP-264` Replay recent MUXPROC drift and stale-evidence bugs.
+  - Legacy ID: `TEST-003`
   - Scope: encode the recent bugfix history as replay scenarios:
     launch argv names session A while stronger hook/fd evidence names
     B; multiple same-pane hook records where the freshest wins; stale
@@ -6506,7 +6781,7 @@ launched through CLI/TUI surfaces for manual inspection.
   - Manual checks: none required once scenarios are replayable; live
     checks remain useful only when adding a new real-world failure to
     the corpus.
-  - Blockers: `TEST-001`; benefits from `TEST-002`.
+  - Blockers: `CSP-262`; benefits from `CSP-263`.
   - Outcome: added two replay scenarios in `tests/testing_replay.rs`.
     `same_pane_hook_supersession_freshest_wins_and_tui_shows_active`
     replays a Claude Code pane where hook record A is superseded by
@@ -6517,12 +6792,13 @@ launched through CLI/TUI surfaces for manual inspection.
     `start_command` references a stale session but injected fd evidence
     names the current rollout; asserts `active_pane_fd_session_match`
     exists, the resolver prefers it, and the row projection attaches
-    the current session. Also added a TEST-004-style invariant helper
+    the current session. Also added a CSP-265-style invariant helper
     `assert_at_most_one_active_hook_link_per_mux_pane` that verifies
     at most one Active hook-sidecar `LinkedToMux` per `(mux, pane_id)`,
     called from the hook supersession test.
 
-- [x] `TEST-004` Add graph and row-projection invariant tests.
+- [x] `CSP-265` Add graph and row-projection invariant tests.
+  - Legacy ID: `TEST-004`
   - Scope: add table-driven and, where practical, property-style
     tests for invariants that cut across specific scenarios: ignored
     candidates never resolve as active relationships; stronger
@@ -6536,7 +6812,7 @@ launched through CLI/TUI surfaces for manual inspection.
     bounded generator demonstrates value; otherwise keep the first
     slice deterministic and table-driven.
   - Manual checks: none.
-  - Blockers: none for table-driven invariants; `TEST-001` before
+  - Blockers: none for table-driven invariants; `CSP-262` before
     running invariants against replay fixtures.
   - Outcome: added four deterministic invariant tests to
     `tests/testing_replay.rs`: ignored mux candidates remain visible
@@ -6545,8 +6821,9 @@ launched through CLI/TUI surfaces for manual inspection.
     active hook-sidecar link per `(mux, pane_id)`, and stronger
     current-session fd evidence wins over stale launch history.
 
-- [x] `TEST-005` Add TUI interaction regression tests for row
+- [x] `CSP-266` Add TUI interaction regression tests for row
   expansion, scrolling, and attach resolution.
+  - Legacy ID: `TEST-005`
   - Scope: build a thin test driver around `App` that applies fixed
     key/action sequences at deterministic terminal sizes. Cover the
     cases that escaped pure row snapshots: expanded ambiguous mux
@@ -6561,16 +6838,17 @@ launched through CLI/TUI surfaces for manual inspection.
     regressions are the risk.
   - Manual checks: run `conspectus tui` against a replayed or live
     ambiguous-mux fixture only when adding a new interaction failure.
-  - Blockers: `TEST-001`; coordinates with `T8-006` so buffer
+  - Blockers: `CSP-262`; coordinates with `CSP-183` so buffer
     snapshot coverage is not duplicated.
   - Outcome: added scenario-backed `App` reducer/action tests using
-    the named `TEST-006` worlds. Coverage now asserts ambiguous mux
+    the named `CSP-306` worlds. Coverage now asserts ambiguous mux
     candidate rows remain navigable after expansion, selection snaps
     to a visible row when a refresh removes the selected row, and
     attach target resolution refuses the tmux session hosting the
     current TUI.
 
-- [x] `TEST-006` Expose named replay scenarios to CLI and TUI runs.
+- [x] `CSP-306` Expose named replay scenarios to CLI and TUI runs.
+  - Legacy ID: `TEST-006`
   - Scope: promote the replay harness's useful worlds into a small
     named scenario registry shared by tests and developer commands.
     Each scenario should materialize an isolated temp world and return
@@ -6590,7 +6868,7 @@ launched through CLI/TUI surfaces for manual inspection.
     decided during implementation) and verify it opens the real TUI on
     the generated scenario. Also verify graph/table output from the
     same scenario matches the automated snapshots.
-  - Blockers: `TEST-001`; useful before `TEST-005` and `GV-002`/`GV-003`
+  - Blockers: `CSP-262`; useful before `CSP-266` and `CSP-302`/`CSP-303`
     so interaction tests and visualization exports share scenario
     names instead of rebuilding fixtures independently.
   - Outcome: added a debug/test-only `dev_scenarios` module with
@@ -6603,8 +6881,9 @@ launched through CLI/TUI surfaces for manual inspection.
     and builds a TUI sessions row tree without reading real home,
     tmux, `/proc`, or network state.
 
-- [x] `TEST-007` Add filter, grouping, and sort controls to dev
+- [x] `CSP-307` Add filter, grouping, and sort controls to dev
   scenario exploration.
+  - Legacy ID: `TEST-007`
   - Scope: make `conspectus dev scenario tui <name>` accept the same
     pure exploration flags as normal `conspectus tui`: `--view`,
     `--grouping`, `--harness`, `--mux-state`, `--max-age`, and
@@ -6632,9 +6911,10 @@ launched through CLI/TUI surfaces for manual inspection.
     smoke tests for the hidden TUI flag surface and validation, and
     updated `docs/dev-scenarios.md` with filter/group/sort examples.
 
-- [x] `TEST-008` Make `tui --snapshot --snapshot-keys` honor pane focus so
+- [x] `CSP-582` Make `tui --snapshot --snapshot-keys` honor pane focus so
   scripts can drive the right pane.
-  - Symptom (2026-10-02, while validating `H-UI-009`): `--snapshot-keys
+  - Legacy ID: `TEST-008`
+  - Symptom (2026-10-02, while validating `CSP-581`): `--snapshot-keys
     "j<Tab>jjjjj"` was meant to focus the right pane and walk the
     explorer cursor onto a Related row, but every `j` after `<Tab>` still
     moved the left tree selection. Snapshots can only show the right
@@ -6693,29 +6973,30 @@ deliberately scoped conservatively:
   `H-AI-NAMING-*` workstream so this one stays free of new dependencies,
   network IO, and an async runtime.
 - Incidentally builds the first reusable TUI text-input primitive
-  (ADR 0030), which unblocks `T8-017` (`/` search overlay) and `P8-014`
+  (ADR 0030), which unblocks `CSP-193` (`/` search overlay) and `CSP-175`
   (inline mux-picker).
 
 Dependency shape inside the workstream:
 
 ```
-H-RENAME-001 ──┬─→ H-RENAME-004 ──┐
-H-RENAME-002 ──┤                  ├─→ H-RENAME-006 ──┬─→ H-RENAME-007 ─→ H-RENAME-008
-               └─→ H-RENAME-010   │                  │
-                                  │                  ├─→ H-RENAME-009 ─→ H-RENAME-011
-H-RENAME-003 ─────────────────────┤                  │                       │
-                                  │                  │                       ├─→ H-RENAME-012
-                                  │                  │                       ├─→ H-RENAME-013
-                                  │                  │                       └─→ H-RENAME-014
+CSP-232 ───────┬─→ CSP-235 ───────┐
+CSP-233 ───────┤                  ├─→ CSP-236 ───────┬─→ CSP-237 ──────→ CSP-238
+               └─→ CSP-240        │                  │
+                                  │                  ├─→ CSP-239 ──────→ CSP-241
+CSP-234 ──────────────────────────┤                  │                       │
+                                  │                  │                       ├─→ CSP-242
+                                  │                  │                       ├─→ CSP-243
+                                  │                  │                       └─→ CSP-244
 ```
 
-The two ADRs (`001`, `002`) and the `TmuxRunner::rename_session` seam
-(`003`) are unblocked from day one and can land in parallel. `004` is the
-spine; once it lands, projection (`006`), CLI (`007`/`008`), and lockstep
-(`009`) follow. Input widget (`010`) is parallel to the CLI track but
-blocks TUI wire-up (`011`).
+The two ADRs (`CSP-232`, `CSP-233`) and the `TmuxRunner::rename_session` seam
+(`CSP-234`) are unblocked from day one and can land in parallel. `CSP-235` is the
+spine; once it lands, projection (`CSP-236`), CLI (`CSP-237`/`CSP-238`), and lockstep
+(`CSP-239`) follow. Input widget (`CSP-240`) is parallel to the CLI track but
+blocks TUI wire-up (`CSP-241`).
 
-- [x] `H-RENAME-001` ADR: alias overlay schema and storage.
+- [x] `CSP-232` ADR: alias overlay schema and storage.
+  - Legacy ID: `H-RENAME-001`
   - Scope: settle the storage schema (`[[aliases]]` table sibling to
     `[declared]`, not nested inside it), store-selection rules, conflict
     resolution between local and global, render precedence
@@ -6725,27 +7006,30 @@ blocks TUI wire-up (`011`).
     alias-equals-title round-trip rule. Record as ADR 0029.
   - Tests: docs-only; `git diff --check`.
   - Blockers: none.
-- [x] `H-RENAME-002` ADR: TUI text-input primitive.
+- [x] `CSP-233` ADR: TUI text-input primitive.
+  - Legacy ID: `H-RENAME-002`
   - Scope: resolve ADR 0024's deferred `tui-input` decision now that three
-    callers exist (rename, `T8-017` search overlay, `P8-014` mux-picker).
+    callers exist (rename, `CSP-193` search overlay, `CSP-175` mux-picker).
     Settle hand-rolled vs crate, locked key semantics (`Enter` confirm,
     `Esc` cancel, `Tab` suspended while overlay is open), overlay
     placement (centered modal, 60-col width cap), and module boundary
     (`src/tui/widgets/input.rs`). Record as ADR 0030.
   - Tests: docs-only; `git diff --check`.
   - Blockers: none.
-- [x] `H-RENAME-003` Extend `TmuxRunner` with `rename_session` mutation seam.
+- [x] `CSP-234` Extend `TmuxRunner` with `rename_session` mutation seam.
+  - Legacy ID: `H-RENAME-003`
   - Scope: first non-read-only tmux call. Add `rename_session(target,
     new_name) -> TmuxOutcome` to the trait in `src/discovery/tmux/mod.rs`
     with a default impl returning `Unsupported` so future backends (zellij
-    per `H-FUTURE-001`) don't break. `SystemTmux` runs
+    per `CSP-111`) don't break. `SystemTmux` runs
     `tmux rename-session -t <native_id> <new_name>`. `FakeTmux` records
     calls for assertion.
   - Tests: per-impl tests for success, target-missing, binary-missing, and
     name-collision (tmux rejects duplicates). `FakeTmux` recording
     assertions.
   - Blockers: none (parallel to ADRs).
-- [x] `H-RENAME-004` Alias storage layer.
+- [x] `CSP-235` Alias storage layer.
+  - Legacy ID: `H-RENAME-004`
   - Scope: per ADR 0029. Define the TOML model (round-trip), load aliases
     from local + global stores at discovery time into a sidecar
     `HashMap<NodeId, String>` carried alongside the graph snapshot. Add
@@ -6758,8 +7042,9 @@ blocks TUI wire-up (`011`).
   - Tests: round-trip TOML tests for the new schema, store-selection
     tests across project-rooted vs orphan agent sessions, malformed-entry
     diagnostics, schema-version skip behavior, atomic-write retry path.
-  - Blockers: `H-RENAME-001`.
-- [x] `H-RENAME-006` Projection precedence.
+  - Blockers: `CSP-232`.
+- [x] `CSP-236` Projection precedence.
+  - Legacy ID: `H-RENAME-006`
   - Scope: apply `alias > title > id-suffix` at the four projection sites
     — `src/output/table.rs` `title` column rendering, `src/output/node_show.rs`
     header field, `src/tui/rows/mod.rs` `AgentSessionRow` label,
@@ -6768,21 +7053,23 @@ blocks TUI wire-up (`011`).
     expect non-trivial diff churn.
   - Tests: projection unit tests across present-alias / present-title /
     absent-both cases at each of the four sites. Insta snapshot updates.
-  - Blockers: `H-RENAME-004`.
-- [x] `H-RENAME-007` CLI: `conspectus rename` command tree.
+  - Blockers: `CSP-235`.
+- [x] `CSP-237` CLI: `conspectus rename` command tree.
+  - Legacy ID: `H-RENAME-007`
   - Scope: add `conspectus rename session <id> [<name>] [--no-mux]
     [--clear]` and `conspectus rename mux <id> [<name>] [--clear]`.
     `<name>` and `--clear` are mutually exclusive; missing both is an
     error. Imperative pattern from Phase 5 — no `--dry-run`, no `--yes`.
-    Use the short row-id resolution from `H-TBL-005`. Mux rename never
+    Use the short row-id resolution from `CSP-130`. Mux rename never
     writes an alias row (per ADR 0029 stability rule); only the native
     tmux name changes. Session rename invokes the lockstep helper from
-    `H-RENAME-009` for the default-lockstep behavior.
+    `CSP-239` for the default-lockstep behavior.
   - Tests: CLI smoke tests for each command shape, error handling for
     mutually-exclusive flags, fake-runner-backed assertion that lockstep
     invokes both alias write and tmux rename.
-  - Blockers: `H-RENAME-006`, `H-RENAME-009`, `H-RENAME-003`.
-- [x] `H-RENAME-008` CLI: `conspectus alias list` (and `show`).
+  - Blockers: `CSP-236`, `CSP-239`, `CSP-234`.
+- [x] `CSP-238` CLI: `conspectus alias list` (and `show`).
+  - Legacy ID: `H-RENAME-008`
   - Scope: read-path counterpart to the rename write commands. Operators
     will want to audit overlays that hide harness-native titles. Mirrors
     `conspectus declared list` shape (`src/cli.rs:1180+`). Add `alias show
@@ -6790,8 +7077,9 @@ blocks TUI wire-up (`011`).
     `conspectus alias list [--store local|global|all]`.
   - Tests: CLI snapshot tests for empty, single-store, both-stores, and
     mixed-with-declared cases.
-  - Blockers: `H-RENAME-007`.
-- [x] `H-RENAME-009` Mux lockstep helper.
+  - Blockers: `CSP-237`.
+- [x] `CSP-239` Mux lockstep helper.
+  - Legacy ID: `H-RENAME-009`
   - Scope: pure function consumed by the CLI rename command and the TUI
     rename action. Given a target node, the current snapshot, and a
     `--no-mux` flag, returns a `RenamePlan { agent_alias_write,
@@ -6801,23 +7089,25 @@ blocks TUI wire-up (`011`).
     `--no-mux`.
   - Tests: unit tests across resolved-single-mux, ambiguous-mux,
     no-mux-link, and `--no-mux`-flag cases.
-  - Blockers: `H-RENAME-001`.
-- [x] `H-RENAME-010` TUI text-input widget implementation.
+  - Blockers: `CSP-232`.
+- [x] `CSP-240` TUI text-input widget implementation.
+  - Legacy ID: `H-RENAME-010`
   - Scope: per ADR 0030. Lives in new `src/tui/widgets/input.rs`. Exports
     `TextInputState`, `TextInputWidget`, and `handle_key` returning
     `InputOutcome::{Continue, Confirm(String), Cancel}`. Centered modal
     overlay, 60-col width cap, 3-row height for the rename variant.
     Status-bar shows `Enter confirm · Esc cancel` while open. Designed
-    so `T8-017` and `P8-014` adopt without changes.
+    so `CSP-193` and `CSP-175` adopt without changes.
   - Tests: insta snapshot tests for empty / typed / wide-terminal /
     narrow-terminal layouts. Reducer-level tests for the
     confirm/cancel/passthrough outcomes.
-  - Blockers: `H-RENAME-002`.
-- [x] `H-RENAME-011` TUI `R` keybinding wires rename flow.
+  - Blockers: `CSP-233`.
+- [x] `CSP-241` TUI `R` keybinding wires rename flow.
+  - Legacy ID: `H-RENAME-011`
   - Scope: bind `R` (capital) — verify it's unused today
     (`src/tui/runtime.rs:324-325`). On press, opens the input widget
     pre-populated with the current alias (or harness title, or empty
-    when neither). Enter triggers `H-RENAME-009` plan → alias write +
+    when neither). Enter triggers `CSP-239` plan → alias write +
     optional `TmuxRunner::rename_session` → `Msg::SetStatus` feedback
     (`renamed: <new>` or `rename failed: <reason>`) → refresh. Esc
     cancels. Lower-case `r` continues to mean refresh per Phase 8.
@@ -6825,16 +7115,18 @@ blocks TUI wire-up (`011`).
     snapshot for the active rename overlay over the sessions tree.
     Manual: rename a session in a real TUI, confirm both alias and
     tmux update.
-  - Blockers: `H-RENAME-007`, `H-RENAME-010`.
-- [x] `H-RENAME-012` Read-only invariant audit.
-  - Scope: mirror of `P5-004`. Smoke tests verifying that `conspectus
+  - Blockers: `CSP-237`, `CSP-240`.
+- [x] `CSP-242` Read-only invariant audit.
+  - Legacy ID: `H-RENAME-012`
+  - Scope: mirror of `CSP-063`. Smoke tests verifying that `conspectus
     graph`, `conspectus node show`, `conspectus table`, and TUI
     navigation (no rename action) do not mtime-touch or content-modify
     alias-bearing config files. Add to the existing read-only test
     harness used by Phase 5.
   - Tests: as scoped above.
-  - Blockers: `H-RENAME-011`.
-- [x] `H-RENAME-013` Live-session UX advisory.
+  - Blockers: `CSP-241`.
+- [x] `CSP-243` Live-session UX advisory.
+  - Legacy ID: `H-RENAME-013`
   - Scope: status-bar advisory when the operator renames a session whose
     mux indicator is `Attached` or `Ambiguous` (per `MuxIndicator` in
     `src/tui/rows/mod.rs:159-172`) and hook-sidecar evidence is fresh
@@ -6844,15 +7136,16 @@ blocks TUI wire-up (`011`).
     live-detection plumbing the future write-back ADR will need.
   - Tests: status-bar message tests across live / ambiguous / dormant /
     no-mux cases.
-  - Blockers: `H-RENAME-011`.
-- [x] `H-RENAME-014` Docs and snapshot coverage.
+  - Blockers: `CSP-241`.
+- [x] `CSP-244` Docs and snapshot coverage.
+  - Legacy ID: `H-RENAME-014`
   - Scope: update `docs/operations.md` with the new commands; update the
     Phase 8 TUI doc keybindings table
     (`docs/implementation/phase-08-interactive-tui.md`); add insta
     snapshot tests for renamed-row rendering in tree, table, and detail
     surfaces.
   - Tests: doctest where applicable; `git diff --check`; insta review.
-  - Blockers: `H-RENAME-011`, `H-RENAME-013`.
+  - Blockers: `CSP-241`, `CSP-243`.
 
 ### Session Pins
 
@@ -6863,7 +7156,7 @@ first-class dashboard row whether or not a live session realizes it,
 binds 1:1 on the mux native name through the existing mux-to-agent-
 session attribution pipeline (ADR 0006 / ADR 0028 / ADR 0046 / ADR
 0047 / ADR 0048), and launches via new `TmuxRunner` mutation methods
-plus the existing P8-010 exec-replace attach.
+plus the existing CSP-169 exec-replace attach.
 
 Pins replace the agent-deck "new card" workflow without inheriting the
 broader orchestrator scope. They compose with — rather than replace —
@@ -6875,28 +7168,29 @@ sibling TOML tables share store-selection rules.
 Dependency shape inside the workstream:
 
 ```
-H-PIN-001 (ADR) ──┬─→ H-PIN-002 ──┬─→ H-PIN-003 ──→ H-PIN-004 ──┬─→ H-PIN-016 ──→ H-PIN-017
+CSP-361 (ADR) ────┬─→ CSP-362 ────┬─→ CSP-363 ────→ CSP-364 ────┬─→ CSP-376 ────→ CSP-377
                   │               │                              │
-                  │               └─→ H-PIN-005 ──→ H-PIN-006 ──→│
-                  │                                              ├─→ H-PIN-009 ──→ H-PIN-013
-                  └─→ H-PIN-010 ──→ H-PIN-011 ──→ H-PIN-012 ─────┤              ──→ H-PIN-014
-                                                                 │              ──→ H-PIN-015
-                                                                 └─→ H-PIN-018
-                                          H-PIN-022  H-PIN-023  H-PIN-024 (TUI CRUD parity)
-                                          H-PIN-007 ──→ H-PIN-008 (CLI read path)
-                                          H-PIN-019  H-PIN-020  H-PIN-021 (closeout)
+                  │               └─→ CSP-365 ────→ CSP-366 ────→│
+                  │                                              ├─→ CSP-369 ────→ CSP-373
+                  └─→ CSP-370 ────→ CSP-371 ────→ CSP-372 ───────┤              ──→ CSP-374
+                                                                 │              ──→ CSP-375
+                                                                 └─→ CSP-378
+                                          CSP-387  CSP-388  CSP-389 (TUI CRUD parity)
+                                          CSP-367 ────→ CSP-368 (CLI read path)
+                                          CSP-379  CSP-380  CSP-381 (closeout)
 ```
 
-`H-PIN-001` (the ADR) is unblocked; `H-PIN-002` (schema + TOML) and
-`H-PIN-010` (TmuxRunner extensions) can land in parallel after it.
-`H-PIN-004` (resolver binding) is the integration spine that the TUI
-and launch stories converge on. `H-PIN-017` provides the immediate
-row-level actions; `H-PIN-022..024` bring the Controls overlay to
+`CSP-361` (the ADR) is unblocked; `CSP-362` (schema + TOML) and
+`CSP-370` (TmuxRunner extensions) can land in parallel after it.
+`CSP-364` (resolver binding) is the integration spine that the TUI
+and launch stories converge on. `CSP-377` provides the immediate
+row-level actions; `CSP-387..389` bring the Controls overlay to
 CLI-parity for create / edit / remove / bind / rebind / adopt. The
-closeout stories (`H-PIN-019..021`) document and lock in the surface
+closeout stories (`CSP-379..381`) document and lock in the surface
 once everything else has landed.
 
-- [x] `H-PIN-001` ADR: session pin schema, binding, and launch contract.
+- [x] `CSP-361` ADR: session pin schema, binding, and launch contract.
+  - Legacy ID: `H-PIN-001`
   - Scope: record the schema (`[[pins.entries]]` TOML sibling to
     `[declared]` and `[aliases]`), the mux-anchored binding rules,
     cwd as launch-parameter-not-discriminator, the four pin-specific
@@ -6914,7 +7208,8 @@ once everything else has landed.
     closeout slices are in place.
   - Blockers: none.
 
-- [x] `H-PIN-002` Pin schema + TOML round-trip.
+- [x] `CSP-362` Pin schema + TOML round-trip.
+  - Legacy ID: `H-PIN-002`
   - Scope: add `src/pins.rs` with `PinEntry`, `PinMux`, `PinLaunch`
     serde models matching ADR 0057. `schema_version`, unknown-field
     tolerance, malformed-entry diagnostics, validation
@@ -6931,9 +7226,10 @@ once everything else has landed.
     / `[declared]` / `[aliases]` siblings.
   - Outcome: `src/pins.rs` defines the v1 pin schema, validation,
     parse, round-trip, upsert, and remove helpers with unit coverage.
-  - Blockers: `H-PIN-001`.
+  - Blockers: `CSP-361`.
 
-- [x] `H-PIN-003` Load pins into discovery as GraphLink candidates.
+- [x] `CSP-363` Load pins into discovery as GraphLink candidates.
+  - Legacy ID: `H-PIN-003`
   - Scope: add a read-only `discovery::pins` pass analogous to
     `discovery::declared`. Map each entry into a new `Pin` candidate
     kind carrying `(id, harness, cwd, display_name, mux.backend,
@@ -6950,9 +7246,10 @@ once everything else has landed.
     behavior, reports duplicate/local-over-global diagnostics, and
     aggregates project-local pin stores from scan roots plus observed
     graph roots so pins stay stable across launch CWDs.
-  - Blockers: `H-PIN-002`.
+  - Blockers: `CSP-362`.
 
-- [x] `H-PIN-004` Resolver binding pass.
+- [x] `CSP-364` Resolver binding pass.
+  - Legacy ID: `H-PIN-004`
   - Scope: extend the resolver to bind each pin to a live
     `(MuxSession, AgentSession)` pair per ADR 0057. Mux lookup is
     exact-match on `native_id` (default-socket: `tmux:<name>`,
@@ -6971,9 +7268,10 @@ once everything else has landed.
     attribution, synthesizes pin-derived links/aliases, and emits
     `PinUnbound`, `PinStaleMux`, `PinAmbiguous`, and `PinDrift`
     diagnostics covered by resolver and snapshot tests.
-  - Blockers: `H-PIN-003`.
+  - Blockers: `CSP-363`.
 
-- [x] `H-PIN-005` Extend store selection for pin writes.
+- [x] `CSP-365` Extend store selection for pin writes.
+  - Legacy ID: `H-PIN-005`
   - Scope: reuse `select_store_for_declaration` for pin writes. Verify
     behavior for repo-rooted, checkout-rooted, workspace-rooted, and
     orphan-cwd pins. Reject pins whose `cwd` does not exist on the
@@ -6984,9 +7282,10 @@ once everything else has landed.
   - Outcome: pin writes use the existing nearest-store selection
     shape, with explicit project/user overrides and cwd existence
     validation before mutation.
-  - Blockers: `H-PIN-002`.
+  - Blockers: `CSP-362`.
 
-- [x] `H-PIN-006` Atomic write helpers for `[pins]`.
+- [x] `CSP-366` Atomic write helpers for `[pins]`.
+  - Legacy ID: `H-PIN-006`
   - Scope: read-modify-write upsert/remove for project and user
     config `[pins]` sections. Preserve unrelated TOML sections, sort
     entries deterministically (by `id`), replace duplicates by id,
@@ -6997,23 +7296,25 @@ once everything else has landed.
   - Outcome: pin upsert/remove helpers preserve sibling TOML
     sections, sort deterministically, reject malformed inputs, and
     write through the shared atomic config path.
-  - Blockers: `H-PIN-005`.
+  - Blockers: `CSP-365`.
 
-- [x] `H-PIN-007` Pin CLI command tree skeleton.
+- [x] `CSP-367` Pin CLI command tree skeleton.
+  - Legacy ID: `H-PIN-007`
   - Scope: add `conspectus pin {create,list,show,rename,rm,launch,
     attach,bind,rebind,adopt}` subcommand structure with flag
     surface from ADR 0057. Validation only — write commands stub
     `bail!("not yet implemented")`. Read commands wire up in
-    H-PIN-008. `--help` text matches ADR. `--mux-socket` flag
+    CSP-368. `--help` text matches ADR. `--mux-socket` flag
     accepts a tmux socket name (the equivalent of `tmux -L`); the
     TOML key it writes is `mux.socket_name`.
   - Tests: CLI smoke tests for `--help`, invalid flag combinations,
     and missing required arguments per subcommand.
   - Outcome: `conspectus pin` exposes the v1 create/list/show/rename/
     rm/launch/attach/bind/rebind/adopt command tree.
-  - Blockers: `H-PIN-001`.
+  - Blockers: `CSP-361`.
 
-- [x] `H-PIN-008` CLI `pin list` and `pin show`.
+- [x] `CSP-368` CLI `pin list` and `pin show`.
+  - Legacy ID: `H-PIN-008`
   - Scope: render pins from local + global stores with their
     provenance, binding state (`bound` / `unbound` / `stale` /
     `ambiguous`), store path, and bound agent-session id when bound.
@@ -7023,14 +7324,15 @@ once everything else has landed.
     each binding state via fixture graphs, deterministic ordering.
   - Outcome: `pin list` and `pin show` render pin store provenance,
     binding state, bound sessions, launch argv, and diagnostics.
-  - Blockers: `H-PIN-004`, `H-PIN-007`.
+  - Blockers: `CSP-364`, `CSP-367`.
 
-- [x] `H-PIN-009` CLI `pin create` / `rename` / `rm`.
-  - Scope: write commands that persist user intent via the H-PIN-006
+- [x] `CSP-369` CLI `pin create` / `rename` / `rm`.
+  - Legacy ID: `H-PIN-009`
+  - Scope: write commands that persist user intent via the CSP-366
     helpers. `create` uses nearest-store selection by default;
     `--store` overrides. `rename` changes `id` and/or `display_name`;
     `--display` change applies the ADR 0029 lockstep mux rename when
-    the pin is currently bound (delegate to the H-RENAME-009 lockstep
+    the pin is currently bound (delegate to the CSP-239 lockstep
     helper). `rm` removes from the first matching store. All commands
     refuse to mutate a malformed config file and surface a clear
     diagnostic instead.
@@ -7042,9 +7344,10 @@ once everything else has landed.
   - Outcome: CLI create/rename/rm persist pins through the shared
     TOML helpers, preflight malformed/duplicate inputs, and preserve
     unrelated config sections.
-  - Blockers: `H-PIN-006`, `H-PIN-007`.
+  - Blockers: `CSP-366`, `CSP-367`.
 
-- [x] `H-PIN-010` Extend `TmuxRunner` with launch mutation seams.
+- [x] `CSP-370` Extend `TmuxRunner` with launch mutation seams.
+  - Legacy ID: `H-PIN-010`
   - Scope: add three new defaulted `TmuxRunner` methods —
     `new_session(socket_name, name, cwd, argv)`,
     `attach_session(socket_name, name)`,
@@ -7060,22 +7363,24 @@ once everything else has landed.
   - Outcome: `TmuxRunner` supports socket-aware new-session,
     attach-session, send-keys, rename, and capture operations with
     `FakeTmux` call recording for tests.
-  - Blockers: `H-RENAME-003` (the `rename_session` seam this extends),
-    `H-PIN-001`.
+  - Blockers: `CSP-234` (the `rename_session` seam this extends),
+    `CSP-361`.
 
-- [x] `H-PIN-011` `HarnessAdapter::launch_argv` defaults.
+- [x] `CSP-371` `HarnessAdapter::launch_argv` defaults.
+  - Legacy ID: `H-PIN-011`
   - Scope: add a `launch_argv(&self) -> Vec<OsString>` method to
     `HarnessAdapter`. Default implementations: codex `["codex"]`,
     claude-code `["claude"]`, opencode `["opencode"]`, aider
     `["aider"]`. Override via `pin.launch.argv` flows through the
-    launch primitive (H-PIN-012).
+    launch primitive (CSP-372).
   - Tests: per-adapter unit tests for the default; integration test
     that the launch primitive prefers `pin.launch.argv` when set.
   - Outcome: harness adapters expose default launch argv, and launch
     flows prefer per-pin argv overrides when configured.
-  - Blockers: none beyond `H-PIN-001`.
+  - Blockers: none beyond `CSP-361`.
 
-- [x] `H-PIN-012` CLI `pin launch` and `pin attach`.
+- [x] `CSP-372` CLI `pin launch` and `pin attach`.
+  - Legacy ID: `H-PIN-012`
   - Scope: orchestrate the launch flow per ADR 0057 §Launch
     Semantics: load pin → run discovery + resolver → branch on
     binding state. Bound → exec-replace `attach_session`. Stale-mux
@@ -7092,9 +7397,10 @@ once everything else has landed.
     stale-mux, and unbound states using socket-aware tmux attach,
     send-keys, and new-session operations, with `--no-attach`
     coverage.
-  - Blockers: `H-PIN-004`, `H-PIN-009`, `H-PIN-010`, `H-PIN-011`.
+  - Blockers: `CSP-364`, `CSP-369`, `CSP-370`, `CSP-371`.
 
-- [x] `H-PIN-013` CLI `pin bind` (PinAmbiguous override).
+- [x] `CSP-373` CLI `pin bind` (PinAmbiguous override).
+  - Legacy ID: `H-PIN-013`
   - Scope: write a `LocalDeclared linked_to_mux` link (per ADR 0014)
     between the named agent session and the pin's mux. Tag the
     declared link with the pin id in `label` or a new
@@ -7109,9 +7415,10 @@ once everything else has landed.
   - Outcome: `pin bind` writes a `pin:<id>` declared
     `linked_to_mux` override that resolver precedence treats as the
     authoritative ambiguous-binding choice.
-  - Blockers: `H-PIN-004`, `H-PIN-009`.
+  - Blockers: `CSP-364`, `CSP-369`.
 
-- [x] `H-PIN-014` CLI `pin rebind` (external-rename recovery).
+- [x] `CSP-374` CLI `pin rebind` (external-rename recovery).
+  - Legacy ID: `H-PIN-014`
   - Scope: update `pin.mux.name` (and optionally `pin.mux.socket_name`)
     in the pin's owning TOML store. Validates that no other pin
     already targets the new mux triple. Does not touch tmux.
@@ -7120,9 +7427,10 @@ once everything else has landed.
     moves the entry instead).
   - Outcome: `pin rebind` updates the owning pin store's mux target,
     rejects duplicate mux triples, and leaves tmux state untouched.
-  - Blockers: `H-PIN-006`, `H-PIN-009`.
+  - Blockers: `CSP-366`, `CSP-369`.
 
-- [x] `H-PIN-015` CLI `pin adopt`.
+- [x] `CSP-375` CLI `pin adopt`.
+  - Legacy ID: `H-PIN-015`
   - Scope: convert an existing live tmux session into a pin without
     creating a new mux. Required positional `<pin-id>` and
     `<mux-name>`; optional `--harness` (default: infer from the
@@ -7136,9 +7444,10 @@ once everything else has landed.
   - Outcome: `pin adopt` converts a live mux into a pin using
     inferred or explicit harness/cwd fields, and rejects missing or
     already-pinned mux targets.
-  - Blockers: `H-PIN-004`, `H-PIN-009`.
+  - Blockers: `CSP-364`, `CSP-369`.
 
-- [x] `H-PIN-016` TUI row tree integration.
+- [x] `CSP-376` TUI row tree integration.
+  - Legacy ID: `H-PIN-016`
   - Scope: extend `build_sessions_tree` and the mux row builder to
     render a row per pin. Unbound pins render with a dim glyph and
     secondary `(pin · <harness> · ~/...)` text. Bound pins render
@@ -7149,7 +7458,7 @@ once everything else has landed.
   - Tests: row-tree builder unit tests for empty/bound/unbound/stale/
     ambiguous/multi-pin fixtures; insta snapshots over a 80×24 TUI
     render.
-  - Blockers: `H-PIN-004`; friendlier after `P8-004` parts 2-5 land
+  - Blockers: `CSP-364`; friendlier after `CSP-163` parts 2-5 land
     the per-view row builders.
   - Outcome: sessions row tree emits unbound/stale pins under a
     synthetic Pins group, marks bound agent-session rows with
@@ -7157,17 +7466,18 @@ once everything else has landed.
     unbound/stale/bound/mixed/end-to-end resolver cases with unit
     tests.
 
-- [x] `H-PIN-017` TUI keybindings for pin actions.
+- [x] `CSP-377` TUI keybindings for pin actions.
+  - Legacy ID: `H-PIN-017`
   - Scope: bind `Enter` on a pin row to launch (unbound) or attach
-    (bound) via H-PIN-012; `R` to rename (lockstep via ADR 0029);
+    (bound) via CSP-372; `R` to rename (lockstep via ADR 0029);
     `Delete` to remove with confirmation. Add a Pins action group
     placeholder to the ADR 0031 Controls overlay that opens the
-    richer CRUD flows tracked in `H-PIN-022..024`. Decide the
+    richer CRUD flows tracked in `CSP-387..389`. Decide the
     bound-pin glyph in coordination with ADR 0032's theme
     vocabulary.
   - Tests: reducer tests for the new keys; snapshot tests for the
     Controls overlay open state with the Pins group.
-  - Blockers: `H-PIN-016`.
+  - Blockers: `CSP-376`.
   - Outcome: `Enter` on a pin row shells out to `conspectus pin
     launch <id>` and refreshes on return; `R` opens the existing
     text-input overlay for pin display-name edits and commits via
@@ -7175,9 +7485,10 @@ once everything else has landed.
     confirmation before `conspectus pin rm`; static scenario TUIs
     keep these mutating actions disabled. Controls overlay includes
     a discoverable Pins action group whose structured CRUD editors
-    remain in `H-PIN-022..024`.
+    remain in `CSP-387..389`.
 
-- [x] `H-PIN-018` Pin diagnostic surfaces in the TUI.
+- [x] `CSP-378` Pin diagnostic surfaces in the TUI.
+  - Legacy ID: `H-PIN-018`
   - Scope: each pin diagnostic gets a specific affordance — status
     bar text for unbound (`Enter to launch`), stale-mux (`Enter to
     relaunch in existing mux`), ambiguous (`b to bind`), drift
@@ -7185,7 +7496,7 @@ once everything else has landed.
     ambiguous, the list of competing `agent_session_id`s.
   - Tests: snapshot tests for each diagnostic state; reducer test
     for the `b` accelerator routing to the bind picker.
-  - Blockers: `H-PIN-016`, `H-PIN-004`.
+  - Blockers: `CSP-376`, `CSP-364`.
   - Outcome: selected pin rows and bound pinned sessions now derive
     status-bar hints from resolver diagnostics: unbound pins advertise
     launch, stale mux pins advertise relaunch, ambiguous bindings
@@ -7193,11 +7504,12 @@ once everything else has landed.
     advisory. Pin rows render a right-pane diagnostic preview, bound
     agent-session details add pin diagnostic fields with competing
     session ids for ambiguous bindings, and the `b` accelerator routes
-    to a bind command hint until the full picker lands in `H-PIN-024`.
+    to a bind command hint until the full picker lands in `CSP-389`.
 
-- [x] `H-PIN-022` TUI pin create flow.
+- [x] `CSP-387` TUI pin create flow.
+  - Legacy ID: `H-PIN-022`
   - Scope: make the Controls overlay Pins group capable of creating
-    pins without dropping to the CLI. Reuse the H-PIN-009 mutation
+    pins without dropping to the CLI. Reuse the CSP-369 mutation
     helper and ADR 0030 text input primitive. Fields: `id`,
     `display_name`, `harness`, `cwd`, `mux.name`, optional
     `mux.socket_name`, optional launch argv override, and store
@@ -7210,7 +7522,7 @@ once everything else has landed.
     and checkout selections, validation failures, cancel-no-write,
     and successful create through the shared write helper. Snapshot
     tests for the create overlay and validation messages.
-  - Blockers: `H-PIN-009`, `H-PIN-017`, `F8-004`.
+  - Blockers: `CSP-369`, `CSP-377`, `CSP-253`.
   - Delivered: Controls overlay `Pins > create` opens a
     multi-field create modal, seeds fields from the selected session
     or graph group where possible, validates required fields before
@@ -7219,10 +7531,11 @@ once everything else has landed.
     Static scenario TUIs keep mutation disabled and surface a status
     message instead of writing.
 
-- [x] `H-PIN-023` TUI pin edit and remove flow.
+- [x] `CSP-388` TUI pin edit and remove flow.
+  - Legacy ID: `H-PIN-023`
   - Scope: bring existing pins to CRUD parity with CLI
     `pin rename` / `pin rm` from the Controls overlay, while keeping
-    the row-level `R` and `Delete` accelerators from H-PIN-017.
+    the row-level `R` and `Delete` accelerators from CSP-377.
     Edit supports id changes, display-name changes, mux-name changes
     when the operator explicitly chooses rebind semantics, optional
     socket-name changes, launch argv edits, and store/path display so
@@ -7232,7 +7545,7 @@ once everything else has landed.
   - Tests: reducer tests for edit confirmation, cancel, duplicate-id
     rejection, duplicate-mux rejection, lockstep rename handoff, and
     remove confirmation. Snapshot tests for edit and delete states.
-  - Blockers: `H-PIN-009`, `H-PIN-014`, `H-PIN-017`, `F8-004`.
+  - Blockers: `CSP-369`, `CSP-374`, `CSP-377`, `CSP-253`.
   - Delivered: Controls overlay `Pins > rename` opens an edit modal
     for selected unbound/stale pin rows with id, display name,
     mux-name, optional socket, launch argv, and store-path fields;
@@ -7242,43 +7555,45 @@ once everything else has landed.
     instead of shelling out. Edit preflights duplicate id and
     duplicate mux conflicts before mutating the TOML store.
 
-- [x] `H-PIN-024` TUI pin bind / rebind / adopt flows.
+- [x] `CSP-389` TUI pin bind / rebind / adopt flows.
+  - Legacy ID: `H-PIN-024`
   - Scope: expose the CLI escape hatches from the Controls overlay
     and contextual accelerators so `PinAmbiguous`, external tmux
     renames, and agent-deck migration are solvable in the TUI.
     Bind presents competing agent-session ids from the selected
     `PinAmbiguous` diagnostic, with a manual id entry fallback, then
-    calls the H-PIN-013 helper. Rebind edits the pin's mux target via
-    H-PIN-014 and shows live mux-name candidates when available.
+    calls the CSP-373 helper. Rebind edits the pin's mux target via
+    CSP-374 and shows live mux-name candidates when available.
     Adopt starts from a selected live mux or an entered mux name,
-    infers harness/cwd when the resolver can, and calls H-PIN-015.
+    infers harness/cwd when the resolver can, and calls CSP-375.
     Each flow must surface the exact config store that will be
     mutated and leave read-only navigation paths untouched.
   - Tests: reducer tests for bind-from-ambiguous, manual bind, rebind
     duplicate rejection, adopt with inferred fields, adopt refusal
     when cwd cannot be determined, and cancel-no-write. Snapshot tests
     for each picker / confirmation state.
-  - Blockers: `H-PIN-013`, `H-PIN-014`, `H-PIN-015`, `H-PIN-018`,
-    `F8-004`.
+  - Blockers: `CSP-373`, `CSP-374`, `CSP-375`, `CSP-378`,
+    `CSP-253`.
   - Delivered: Controls overlay `Pins > bind` opens a picker from
     the selected row's `PinAmbiguous` diagnostic and writes the same
     `pin:<id>:bound` declared override as the CLI. `Pins > rebind`
     routes through the edit modal's mux-name/socket fields with the
-    duplicate-mux preflight from `H-PIN-023`. The initial
-    implementation exposed `Pins > adopt`; `H-PIN-TUI-002` later
+    duplicate-mux preflight from `CSP-388`. The initial
+    implementation exposed `Pins > adopt`; `CSP-453` later
     folded this into one create form with an adopt toggle while
     preserving the same selection-derived defaults and validated
     create/write path.
 
-- [x] `H-PIN-019` Read-only invariant audit.
+- [x] `CSP-379` Read-only invariant audit.
+  - Legacy ID: `H-PIN-019`
   - Scope: explicit CLI integration tests proving `graph`,
     `node show`, `table`, `tui`, `query` never create, mtime-touch,
     or content-modify `.conspectus.toml` / user-config files
-    bearing a `[pins]` section. Mirrors `P5-004` for declared links
+    bearing a `[pins]` section. Mirrors `CSP-063` for declared links
     and the equivalent rename audit.
   - Tests: invariant tests for each command in a clean repo and a
     repo with a hand-written `[pins]` section.
-  - Blockers: `H-PIN-003`.
+  - Blockers: `CSP-363`.
   - Outcome: `tests/cli_pin_invariants.rs` asserts that read-only
     commands do not create pin config files in a clean repo and do
     not content- or mtime-touch existing project/user configs bearing
@@ -7288,7 +7603,8 @@ once everything else has landed.
     navigation/read-only surfaces remain covered by reducer and UI
     tests.
 
-- [x] `H-PIN-020` Snapshot and JSON coverage.
+- [x] `CSP-380` Snapshot and JSON coverage.
+  - Legacy ID: `H-PIN-020`
   - Scope: extend `tests/declared_snapshots.rs` (or sibling file
     `tests/pins_snapshots.rs`) with scenarios covering bound,
     unbound, stale-mux, ambiguous, drift, duplicate, local-over-
@@ -7296,7 +7612,7 @@ once everything else has landed.
     pin. Graph JSON snapshots and table-projection snapshots both
     covered.
   - Tests: `cargo nextest run --all-targets --all-features`.
-  - Blockers: `H-PIN-009`, `H-PIN-013`, `H-PIN-014`, `H-PIN-015`.
+  - Blockers: `CSP-369`, `CSP-373`, `CSP-374`, `CSP-375`.
   - Outcome: `tests/pins_snapshots.rs` snapshots a combined pin
     state matrix covering bound, unbound, stale-mux, ambiguous,
     drift, and non-default-socket pins in graph JSON, plus the
@@ -7306,14 +7622,15 @@ once everything else has landed.
     declared-override-via-bind choosing the `LocalDeclared`
     `linked_to_mux` candidate over strong discovery.
 
-- [x] `H-PIN-021` Docs and operations guide.
+- [x] `CSP-381` Docs and operations guide.
+  - Legacy ID: `H-PIN-021`
   - Scope: update `docs/operations.md` and `README.md` with the
     `conspectus pin` command surface, the agent-deck migration path
     via `pin adopt`, and the read-only invariant. Update the Phase 8
     TUI doc with pin keybindings. Cross-link from `docs/design.md`
     Session Pins section to operations doc once it exists. This can
     run in parallel with implementation; final closeout should add
-    the Controls overlay CRUD details from `H-PIN-022..024` before
+    the Controls overlay CRUD details from `CSP-387..389` before
     promoting ADR 0057 from Proposed to Accepted.
   - Tests: doctest where applicable; `git diff --check`; insta
     review.
@@ -7324,8 +7641,8 @@ once everything else has landed.
     links the Session Pins section to the operations guide, and ADR
     0057 is promoted to Accepted.
   - Blockers: none for the initial docs slice. Final closeout waits
-    on `H-PIN-012`, `H-PIN-017`, `H-PIN-018`, `H-PIN-022`,
-    `H-PIN-023`, `H-PIN-024`.
+    on `CSP-372`, `CSP-377`, `CSP-378`, `CSP-387`,
+    `CSP-388`, `CSP-389`.
 
 #### Pinning TUI improvements (H-PIN-TUI-*)
 
@@ -7351,13 +7668,14 @@ operator adoption yet, so this workstream should optimize for the
 right TUI workflow rather than preserving the old schema-shaped form
 layout or awkward key semantics.
 
-- [x] `H-PIN-TUI-001` Pin create usability map and terminology pass.
+- [x] `CSP-452` Pin create usability map and terminology pass.
+  - Legacy ID: `H-PIN-TUI-001`
   - Scope: review the current TUI pin create form as an operator
     workflow, not a schema editor. Decide the user-facing labels and
     field order for the create modal: replace or visually subordinate
     implementation-facing `id` with a primary `name` field; group
     derived identity fields (`display_name`, `mux.name`, persisted
-    id) behind the name-sync behavior in `H-PIN-TUI-002`; make the
+    id) behind the name-sync behavior in `CSP-453`; make the
     launch command and target store visible before confirmation.
     Record any copy/keybinding changes in `docs/operations.md` and
     the TUI help text.
@@ -7373,13 +7691,14 @@ layout or awkward key semantics.
     mux name/socket), store, then confirm. `id` remains a persisted
     schema field but should no
     longer be the first user-facing concept. Runtime copy/help changes
-    are intentionally left to `H-PIN-TUI-002` and
-    `H-PIN-TUI-003`, where the form state and key behavior actually
+    are intentionally left to `CSP-453` and
+    `CSP-454`, where the form state and key behavior actually
     change.
   - Blockers: none.
 
-- [x] `H-PIN-TUI-002` Name-driven defaults and override tracking for
+- [x] `CSP-453` Name-driven defaults and override tracking for
   pin create.
+  - Legacy ID: `H-PIN-TUI-002`
   - Scope: in the create form, seed a single primary name from the
     selected row and derive the persisted pin id, display name, and
     mux name from it until the operator edits one of those fields
@@ -7417,10 +7736,11 @@ layout or awkward key semantics.
     mux name is already live or pinned.
     `A` remains a direct accelerator into the same create form with
     adopt selected, not a separate menu-level command.
-  - Blockers: `H-PIN-TUI-001`.
+  - Blockers: `CSP-452`.
 
-- [x] `H-PIN-TUI-003` Make pin form fields editable at real-world
+- [x] `CSP-454` Make pin form fields editable at real-world
   lengths.
+  - Legacy ID: `H-PIN-TUI-003`
   - Scope: fix the current text-entry ergonomics for long cwd,
     display, mux, and launch-argv values. Fields must horizontally
     scroll to keep the cursor visible, expose the hidden left/right
@@ -7447,16 +7767,17 @@ layout or awkward key semantics.
     and changed with `Space` / arrow keys. The visible fresh-create
     mode label is `new`; the explicit row/edit focus model that would
     preserve `j`/`k` navigation is recorded separately in
-    `H-PIN-TUI-004a`.
-  - Blockers: `H-PIN-TUI-001`.
+    `CSP-455.01`.
+  - Blockers: `CSP-452`.
 
-- [ ] `H-PIN-TUI-004` Hybrid cwd omnibox for pin create/adopt.
+- [ ] `CSP-455` Hybrid cwd omnibox for pin create/adopt.
+  - Legacy ID: `H-PIN-TUI-004`
   - Scope: replace bare cwd text entry with a composable path
     omnibox. It should accept free-form typing, rank known graph
     paths from the selected row and recent/current workspace before
     filesystem matches, show live existence feedback, and let `Tab`
     complete the highlighted candidate. The widget may incorporate
-    `H-WIDG-010`'s `ratatui-explorer` directory picker as an
+    `CSP-434`'s `ratatui-explorer` directory picker as an
     alternate browse mode, but the primary flow should work as an
     inline omnibox so create remains keyboard-fast.
   - Tests: unit tests for graph-path ranking, filesystem candidate
@@ -7464,7 +7785,7 @@ layout or awkward key semantics.
     row seeding, and browse-mode handoff if `ratatui-explorer` lands.
     Snapshot tests for empty, matching, no-match, and invalid-path
     states.
-  - Blockers: `H-PIN-TUI-003`, `H-WIDG-010` if the implementation
+  - Blockers: `CSP-454`, `CSP-434` if the implementation
     chooses the browse-mode dependency for this slice.
   - Outcome: added a reusable inline `PathOmniboxState` widget module
     with ranked known-path candidates, filesystem prefix matches,
@@ -7472,14 +7793,15 @@ layout or awkward key semantics.
     cwd row to graph-derived candidates from selected/default cwd,
     pins, agent sessions, mux sessions, runtime processes, checkouts,
     repos, and workspaces. Deferred the `ratatui-explorer` import to
-    `H-WIDG-010` as an optional browse submode rather than making it a
+    `CSP-434` as an optional browse submode rather than making it a
     dependency of the fast inline path.
   - Follow-up: keep this story open to show multiple ranked
     completions inline or in a stable sidecar area; the first slice
     only shows the best completion remainder next to the cwd field.
 
-- [ ] `H-PIN-TUI-004a` Explicit row/edit focus for pin create
+- [ ] `CSP-455.01` Explicit row/edit focus for pin create
   navigation.
+  - Legacy ID: `H-PIN-TUI-004a`
   - Scope: evaluate whether the create form should preserve the
     TUI-wide `j`/`k` navigation convention by separating row focus
     from field edit focus. In that model, `j`/`k` would move between
@@ -7487,17 +7809,18 @@ layout or awkward key semantics.
     for editable fields, and submit would likely move to an explicit
     `Create` button row instead of letting `Enter` submit from any
     selection. Compare this against the Controls modal interaction
-    model and record any decisions from `H-PIN-TUI-003` through
-    `H-PIN-TUI-006` that make this direction easier, harder, or
+    model and record any decisions from `CSP-454` through
+    `CSP-457` that make this direction easier, harder, or
     unnecessary.
   - Tests: widget/reducer tests for focus/edit state transitions,
     `j`/`k` row navigation, editing text that contains `j`/`k`,
     `Enter` behavior on editable rows versus the `Create` button,
     cancellation, and narrow-modal rendering. Snapshot tests for
     focused-row, editing-row, and explicit-submit states.
-  - Blockers: `H-PIN-TUI-003`.
+  - Blockers: `CSP-454`.
 
-- [x] `H-PIN-TUI-005` Harness picker with free-form escape hatch.
+- [x] `CSP-456` Harness picker with free-form escape hatch.
+  - Legacy ID: `H-PIN-TUI-005`
   - Scope: make the harness field choose from known harness keys
     discovered in the snapshot plus registered adapter defaults, while
     still allowing an explicit free-form value for future/custom
@@ -7507,7 +7830,7 @@ layout or awkward key semantics.
   - Tests: reducer/widget tests for selected-session prefill,
     suggestion navigation, free-form input, unknown-harness warning,
     and confirmation behavior.
-  - Blockers: `H-PIN-TUI-003`.
+  - Blockers: `CSP-454`.
   - Outcome: researched the Ratatui picker ecosystem before
     implementation. No focused single-select/free-form picker was
     mature enough to justify a new dependency under the project
@@ -7518,20 +7841,21 @@ layout or awkward key semantics.
     the editable field, `Space` cycles known choices, and custom typed
     values remain valid with an explicit warning.
 
-- [x] `H-PIN-TUI-006` Launch argv editor with resolved command
+- [x] `CSP-457` Launch argv editor with resolved command
   preview.
+  - Legacy ID: `H-PIN-TUI-006`
   - Scope: make launch customization usable for sandbox/wrapper
     workflows. The create form should let the operator edit argv as a
     structured command, show the effective command that will run
     after harness defaults or per-pin overrides are applied, and make
     it obvious when the default adapter command is being used versus
     a pin-specific override. Do not add lifecycle hooks here; richer
-    before/after hooks remain `H-PIN-F-002`.
+    before/after hooks remain `CSP-383`.
   - Tests: reducer/widget tests for default command preview,
     override editing, shell-like display escaping without shell-based
     execution, clearing back to default, and validation errors for an
     empty argv override.
-  - Blockers: `H-PIN-TUI-003`.
+  - Blockers: `CSP-454`.
   - Outcome: the create form now previews the effective command below
     the `launch argv` editor. A blank editor means "use the selected
     harness adapter default" and renders as `default: <command>`;
@@ -7542,7 +7866,8 @@ layout or awkward key semantics.
     later fail with no command. Preview display quotes whitespace
     arguments without shell execution.
 
-- [x] `H-PIN-TUI-006a` Harness launch option mappings for pin create.
+- [x] `CSP-457.01` Harness launch option mappings for pin create.
+  - Legacy ID: `H-PIN-TUI-006a`
   - Scope: define a data model for harness-specific launch options
     that the TUI can render as controls such as `skip permissions`
     checkboxes while applying the correct argv fragments for the
@@ -7573,9 +7898,10 @@ layout or awkward key semantics.
     option fragments so stale flags do not leak into the new harness.
     Unknown harnesses continue to fall back to the free-form launch
     argv editor.
-  - Blockers: `H-PIN-TUI-005`, `H-PIN-TUI-006`.
+  - Blockers: `CSP-456`, `CSP-457`.
 
-- [x] `H-PIN-TUI-007` Post-create/adopt focus and toast behavior.
+- [x] `CSP-458` Post-create/adopt focus and toast behavior.
+  - Legacy ID: `H-PIN-TUI-007`
   - Scope: after a successful create or adopt, refresh the graph,
     expand the synthetic Pins group in the current view when present,
     select the new pin row, and show a toast/status message that
@@ -7595,16 +7921,17 @@ layout or awkward key semantics.
     `pin adopted; mux already running`, while the status line keeps
     the existing store/write detail and reports when filters prevent a
     visible row match.
-  - Blockers: `H-PIN-TUI-002`.
+  - Blockers: `CSP-453`.
 
-- [x] `H-PIN-TUI-008` Float pinned entities and keep Pins groups open.
+- [x] `CSP-459` Float pinned entities and keep Pins groups open.
+  - Legacy ID: `H-PIN-TUI-008`
   - Scope: in grouped session/mux views, keep the synthetic Pins
     group at the top and expand it by default even when the launch
     context is elsewhere. In flat session/mux views, float entities
     with resolved pin bindings directly to the top without adding a
     synthetic group header. Bound pins float their agent-session row;
     bound and stale pins float their mux row. Unbound pins remain
-    represented by the synthetic pin row until `H-PIN-TUI-009`
+    represented by the synthetic pin row until `CSP-460`
     introduces first-class pin graph nodes.
   - Tests: sessions and mux row-builder tests for grouped ordering,
     default expansion, flat pinned-row sort priority, stale-mux sort
@@ -7617,11 +7944,12 @@ layout or awkward key semantics.
     detail panes now include a `pin` field for healthy bound/stale
     pin associations, and selecting a bound/stale synthetic pin row
     resolves the right pane to the realizing session or mux detail.
-    Fully unbound pins still require `H-PIN-TUI-009` because they do
+    Fully unbound pins still require `CSP-460` because they do
     not have graph node identity yet.
-  - Blockers: `H-PIN-TUI-002`.
+  - Blockers: `CSP-453`.
 
-- [x] `H-PIN-TUI-009` Promote pins to first-class graph entities.
+- [x] `CSP-460` Promote pins to first-class graph entities.
+  - Legacy ID: `H-PIN-TUI-009`
   - Scope: replace the sidecar-only `GraphSnapshot::pins` projection
     with a first-class graph entity for each declared pin while
     preserving the TOML schema as the persistence source. Pin nodes
@@ -7653,9 +7981,10 @@ layout or awkward key semantics.
   - Blockers: ADR/model decision for pin node identity and relation
     kinds.
 
-- [x] `H-PIN-TUI-010` Project pins as placeholder session and mux
+- [x] `CSP-461` Project pins as placeholder session and mux
   entities.
-  - Outcome (2026-09-30, `REL-007`): done per operator review: WIP
+  - Legacy ID: `H-PIN-TUI-010`
+  - Outcome (2026-09-30, `CSP-538`): done per operator review: WIP
     `719d77a`, then `8870e82`, `fc55193`, `88450d8`, and `0524fdd` finished
     the polish.
   - Motivation: creating a new, unlaunched pin from the mux view can
@@ -7726,12 +8055,13 @@ layout or awkward key semantics.
     now reads `pin` (the missing arm in `right_panel_kind_label` was
     added in the same pass).
   - Remaining work: bound-pin `📌` glyph polish stays deferred to
-    `H-PIN-016`; search / model / JSON placeholder identity is still
+    `CSP-376`; search / model / JSON placeholder identity is still
     open under this story.
 
-- [x] `H-PIN-TUI-011` Numeric-suffix auto-increment for derived pin
+- [x] `CSP-528` Numeric-suffix auto-increment for derived pin
   names.
-  - Outcome (2026-09-30, `REL-007`): landed in `c6905bb`.
+  - Legacy ID: `H-PIN-TUI-011`
+  - Outcome (2026-09-30, `CSP-538`): landed in `c6905bb`.
   - Motivation: a common workflow is spinning up `worker-2` from an
     already-pinned `worker-1` selection. The current derived-name
     helper (`unique_pin_mux_name`) treats the whole base as opaque
@@ -7767,31 +8097,36 @@ These are explicitly out of v1 scope but recorded so the design
 surface stays coherent. Each is documented in ADR 0057's Open
 Questions Deferred section.
 
-- [ ] `H-PIN-F-001` Tmux non-default socket discovery enumeration.
+- [ ] `CSP-382` Tmux non-default socket discovery enumeration.
+  - Legacy ID: `H-PIN-F-001`
   - Extend the tmux runner to scan
     `{default} ∪ {pin.mux.socket_name | active pin}` so non-default-
     socket pins become bindable. Decide whether to expose a
     `[tmux] sockets = [...]` config knob for sockets without an
     owning pin.
 
-- [ ] `H-PIN-F-002` Lifecycle hooks beyond `launch.argv`.
+- [ ] `CSP-383` Lifecycle hooks beyond `launch.argv`.
+  - Legacy ID: `H-PIN-F-002`
   - When a concrete pattern emerges that prefix tooling
     (`nix develop --command`, `direnv exec`, `op run`) cannot
     express cleanly, grow a `launch.before` / `launch.after`
     surface (or `[[pins.hooks]]`). v1 schema is forward-compatible
     with such an addition.
 
-- [ ] `H-PIN-F-003` Importers from tmuxinator / tmuxp / smug configs.
+- [ ] `CSP-384` Importers from tmuxinator / tmuxp / smug configs.
+  - Legacy ID: `H-PIN-F-003`
   - One-shot converters for operators with existing setups.
     Granularity collapse rule (one pin per declared session,
     dropping per-window/per-pane detail) documented during impl.
 
-- [ ] `H-PIN-F-004` Glob/wildcard pin patterns.
+- [ ] `CSP-385` Glob/wildcard pin patterns.
+  - Legacy ID: `H-PIN-F-004`
   - `[[pins.patterns]]` surface synthesizing ephemeral pins from
     path globs (`~/work/*` → one codex pin per matched checkout),
     modeled on sesh's `[[wildcard]]` table.
 
-- [ ] `H-PIN-F-005` Absolute tmux socket paths (`tmux -S <path>`).
+- [ ] `CSP-386` Absolute tmux socket paths (`tmux -S <path>`).
+  - Legacy ID: `H-PIN-F-005`
   - Adds a separate `mux.socket_path` field (distinct from
     `mux.socket_name`) plus the identity-encoding extension for
     absolute-path sockets.
@@ -7814,16 +8149,17 @@ recorded session can no longer be found.
 Dependency shape:
 
 ```
-H-PIN-RESUME-001 (sidecar I/O) ──┬─→ H-PIN-RESUME-003 (write pass)
+CSP-395 (sidecar I/O) ───────────┬─→ CSP-397 (write pass)
                                  │
-H-PIN-RESUME-002 (resume_argv) ──┴─→ H-PIN-RESUME-004 (launch consumer + lineage walk)
+CSP-396 (resume_argv) ───────────┴─→ CSP-398 (launch consumer + lineage walk)
                                               │
-                                              ├─→ H-PIN-RESUME-005 (PinUnbound extension + TUI/CLI surfaces)
+                                              ├─→ CSP-399 (PinUnbound extension + TUI/CLI surfaces)
                                               │
-                                              └─→ H-PIN-RESUME-006 (invariants + snapshots + closeout)
+                                              └─→ CSP-400 (invariants + snapshots + closeout)
 ```
 
-- [x] `H-PIN-RESUME-001` Sidecar schema + atomic I/O helpers.
+- [x] `CSP-395` Sidecar schema + atomic I/O helpers.
+  - Legacy ID: `H-PIN-RESUME-001`
   - Scope: add `src/pin_bindings.rs` (or a sibling module under
     `src/pins/`) with the per-pin JSON record per ADR 0058 §Sidecar
     shape: `schema_version: u32`, `pin_id`, `mux_name`,
@@ -7845,7 +8181,8 @@ H-PIN-RESUME-002 (resume_argv) ──┴─→ H-PIN-RESUME-004 (launch consumer
     on the shared `declared::write_atomic` primitive. 21 unit tests.
   - Blockers: ADR 0058 (Accepted).
 
-- [x] `H-PIN-RESUME-002` `HarnessAdapter::resume_argv` method + defaults.
+- [x] `CSP-396` `HarnessAdapter::resume_argv` method + defaults.
+  - Legacy ID: `H-PIN-RESUME-002`
   - Scope: add `fn resume_argv(&self, session_id: &str, cwd: &Path)
     -> Option<Vec<OsString>>` to `HarnessAdapter`. Per-adapter
     defaults: `codex` returns `Some(vec!["codex", "resume",
@@ -7873,12 +8210,13 @@ H-PIN-RESUME-002 (resume_argv) ──┴─→ H-PIN-RESUME-004 (launch consumer
     the trait default).
   - Blockers: none.
 
-- [x] `H-PIN-RESUME-003` Sidecar write pass post-resolve.
+- [x] `CSP-397` Sidecar write pass post-resolve.
+  - Legacy ID: `H-PIN-RESUME-003`
   - Scope: after the resolver completes a discovery cycle, for
     each pin resolution where the binding is `Bound` (including
     bindings sourced from a `LocalDeclared` `linked_to_mux`
     override written by `pin bind`, per ADR 0058 Q6), update the
-    sidecar via the H-PIN-RESUME-001 helpers. Skip writes where
+    sidecar via the CSP-395 helpers. Skip writes where
     the payload is unchanged. Never write on `PinUnbound`,
     `PinStaleMux`, or `PinAmbiguous` outcomes. Wire into the
     main `discover_and_resolve` pipeline behind a config gate so
@@ -7889,20 +8227,21 @@ H-PIN-RESUME-002 (resume_argv) ──┴─→ H-PIN-RESUME-004 (launch consumer
     skipping, and read-only invariant non-write on the `tui`,
     `graph`, `table`, `query`, `pin list`, and `pin show`
     commands (verify via mtime fingerprinting like
-    `H-PIN-019`).
+    `CSP-379`).
   - Outcome: `pin_bindings::record_bindings(snapshot, cache,
     epoch)` iterates `Bound` resolutions and writes via the
     -001 helpers. Wired into `cli::discover_and_resolve` as
     `record_pin_bindings_best_effort` — silent skip when no
     cache root is available; write failures log to stderr and
     never propagate. 7 unit tests.
-  - Blockers: `H-PIN-RESUME-001`.
+  - Blockers: `CSP-395`.
 
-- [x] `H-PIN-RESUME-004` Launch decision tree: sidecar consumer + lineage walk.
+- [x] `CSP-398` Launch decision tree: sidecar consumer + lineage walk.
+  - Legacy ID: `H-PIN-RESUME-004`
   - Scope: extend the `pin launch` decision tree (`src/cli.rs`
     `PinLaunchArgs::run`, hook into the existing branch on
     `PinUnbound`) per ADR 0058 §Read path:
-    1. Load the sidecar via H-PIN-RESUME-001 helpers; absent →
+    1. Load the sidecar via CSP-395 helpers; absent →
        default argv with status hint.
     2. Look up the recorded `session_id` in the snapshot, then
        fall back to the harness state root per Q3 if missing
@@ -7939,10 +8278,11 @@ H-PIN-RESUME-002 (resume_argv) ──┴─→ H-PIN-RESUME-004 (launch consumer
     State-root fallback per Q3 is deferred — the resolver pass
     runs immediately before the launch decision, so any
     discoverable session is in the snapshot already.
-  - Blockers: `H-PIN-RESUME-001`, `H-PIN-RESUME-002`,
-    `H-PIN-RESUME-003`.
+  - Blockers: `CSP-395`, `CSP-396`,
+    `CSP-397`.
 
-- [x] `H-PIN-RESUME-005` `PinUnbound` diagnostic extension + UX surfaces.
+- [x] `CSP-399` `PinUnbound` diagnostic extension + UX surfaces.
+  - Legacy ID: `H-PIN-RESUME-005`
   - Scope: extend the `PinUnbound` resolver diagnostic with an
     optional `last_session: Option<{session_id,
     observed_epoch}>` field per ADR 0058 Q5. Populate from the
@@ -7970,9 +8310,10 @@ H-PIN-RESUME-002 (resume_argv) ──┴─→ H-PIN-RESUME-004 (launch consumer
     formatting uses an in-tree Hinnant date formatter (no
     chrono/humantime dependency). 8 tests across pin_bindings
     (4), cli (2), and tui::actions (2).
-  - Blockers: `H-PIN-RESUME-003`, `H-PIN-RESUME-004`.
+  - Blockers: `CSP-397`, `CSP-398`.
 
-- [x] `H-PIN-RESUME-006` Invariants, snapshots, and closeout.
+- [x] `CSP-400` Invariants, snapshots, and closeout.
+  - Legacy ID: `H-PIN-RESUME-006`
   - Scope: add `tests/cli_pin_resume_invariants.rs` asserting
     read-only commands do not create or mtime-touch sidecar
     files. Extend `tests/pins_snapshots.rs` with continuity
@@ -8003,7 +8344,7 @@ H-PIN-RESUME-002 (resume_argv) ──┴─→ H-PIN-RESUME-004 (launch consumer
     case the snapshot scope listed (bound writes, unbound +
     sidecar populates last_session, missing session deletes,
     fork falls back).
-  - Blockers: `H-PIN-RESUME-005`.
+  - Blockers: `CSP-399`.
 
 #### Launch And Binding Reliability (H-PIN-FIX-*)
 
@@ -8012,7 +8353,8 @@ pins, a pin launch that failed with no visible reason, previews that
 ignored a pin's live mux, stale state after returning from tmux, and
 errors that only flashed on the status bar.
 
-- [x] `H-PIN-FIX-001` One-to-one pin bindings (ADR 0102).
+- [x] `CSP-574` One-to-one pin bindings (ADR 0102).
+  - Legacy ID: `H-PIN-FIX-001`
   - Scope: assign sessions to pins one-to-one, ranked by the
     resolver's session ↔ mux comparator; replace the previous pass's
     synthesized pin links with `Cached` fallback candidates;
@@ -8027,8 +8369,9 @@ errors that only flashed on the status bar.
     longer shows one session twice; `pin show` names the pin that
     holds a contested session.
 
-- [x] `H-PIN-FIX-002` Launches keep failed panes and confirm the start
+- [x] `CSP-575` Launches keep failed panes and confirm the start
   (ADR 0103).
+  - Legacy ID: `H-PIN-FIX-002`
   - Scope: `remain-on-exit failed` on Conspectus-created sessions;
     `MuxBackend::pane_status`; watch the new pane after `pin launch` /
     `mux launch`; resume falls back to fresh on a failed start and
@@ -8043,7 +8386,8 @@ errors that only flashed on the status bar.
     launches fresh with the harness's message on stderr. Previously
     the only symptom was "can't find session".
 
-- [x] `H-PIN-FIX-003` Pin placeholder rows preview their live mux.
+- [x] `CSP-576` Pin placeholder rows preview their live mux.
+  - Legacy ID: `H-PIN-FIX-003`
   - Scope: a sessions-view pin placeholder whose pin has a live mux
     (`StaleMux`, e.g. a `conspectus serve` pin, which never realizes
     an agent session) targets that mux for preview capture and `a`;
@@ -8055,8 +8399,9 @@ errors that only flashed on the status bar.
     `pin_live_mux`; `preview_text_for_selection` routes pin rows
     through `pin_placeholder_preview`.
 
-- [x] `H-PIN-FIX-004` Refresh after tmux hand-offs shows current
+- [x] `CSP-577` Refresh after tmux hand-offs shows current
   state (ADR 0104).
+  - Legacy ID: `H-PIN-FIX-004`
   - Scope: nudge the daemon's `mux` + `harness` classes before the
     refresh that follows attach, pin launch, mux new/launch and
     renames, and on `r`; fall back to a local rebuild and report when
@@ -8067,8 +8412,9 @@ errors that only flashed on the status bar.
   - Outcome: `refresh_after_mux_handoff` and `DaemonNudge` in
     `tui::runtime`.
 
-- [x] `H-PIN-FIX-005` TUI message log for operation outcomes
+- [x] `CSP-578` TUI message log for operation outcomes
   (ADR 0105).
+  - Legacy ID: `H-PIN-FIX-005`
   - Scope: in-memory `MessageLog` fed by `Msg::Report` from launches,
     attaches, viewer, renames, pin-store and worktree executors,
     daemon nudges and refresh failures; `!` Messages overlay with full
@@ -8090,7 +8436,8 @@ without diluting the rename workstream — the AI track touches dependencies,
 network IO, privacy posture, and possibly an async runtime, all of which
 deserve their own ADR before any story lands.
 
-- [ ] `H-AI-NAMING-001` ADR: provider, dependency, privacy, dispatch.
+- [ ] `CSP-245` ADR: provider, dependency, privacy, dispatch.
+  - Legacy ID: `H-AI-NAMING-001`
   - Scope: settle LLM provider choice (Anthropic vs pluggable), Cargo
     feature gating (e.g. `ai` feature so default builds stay HTTP-free),
     privacy / transcript-redaction posture, config schema and env-var
@@ -8100,32 +8447,35 @@ deserve their own ADR before any story lands.
     "control-plane adapter" under ADR 0028's framing.
   - Tests: docs-only.
   - Blockers: none.
-- [ ] `H-AI-NAMING-002` Transcript context extractor.
+- [ ] `CSP-246` Transcript context extractor.
+  - Legacy ID: `H-AI-NAMING-002`
   - Scope: reuse extractors from the `H-TRANSCRIPT-*` workstream
     (currently 0/12). Coordination dependency: this story either waits
-    on `H-TRANSCRIPT-003` (recent-history adapter API) and the per-
+    on `CSP-207` (recent-history adapter API) and the per-
     harness extractors, or pulls them forward.
   - Tests: per-harness fixture tests showing extracted context is bounded
     and transcript-stable.
-  - Blockers: `H-AI-NAMING-001`, `H-TRANSCRIPT-003`.
-- [ ] `H-AI-NAMING-003` CLI + TUI suggest surface.
+  - Blockers: `CSP-245`, `CSP-207`.
+- [ ] `CSP-247` CLI + TUI suggest surface.
+  - Legacy ID: `H-AI-NAMING-003`
   - Scope: `conspectus rename session <id> --suggest [--accept N]` returns
     N candidate names; operator picks one or accepts the first.
     TUI `s` key opens a candidate-list overlay backed by the alias write
-    path from `H-RENAME-004`. Picker reuses the input-widget overlay
-    pattern from `H-RENAME-010`.
+    path from `CSP-235`. Picker reuses the input-widget overlay
+    pattern from `CSP-240`.
   - Tests: fake-LLM-runner CLI tests; TUI reducer tests for the suggest
     overlay open/pick/cancel paths.
-  - Blockers: `H-AI-NAMING-001`, `H-AI-NAMING-002`, `H-RENAME-004`,
-    `H-RENAME-010`.
-- [ ] `H-AI-NAMING-004` Optional auto-suggest hook.
+  - Blockers: `CSP-245`, `CSP-246`, `CSP-235`,
+    `CSP-240`.
+- [ ] `CSP-248` Optional auto-suggest hook.
+  - Legacy ID: `H-AI-NAMING-004`
   - Scope: config-gated, off by default. Triggered on detection of a new
     session whose alias is unset and whose harness allows transcript
     context extraction. Surfaces a candidate name in the row tree until
     the operator accepts, edits, or dismisses.
   - Tests: detection trigger tests; config-gate tests; dismissal
     persistence tests.
-   - Blockers: `H-AI-NAMING-003`.
+   - Blockers: `CSP-247`.
 
 ### Subagent Session Filtering
 
@@ -8147,12 +8497,13 @@ session that invoked it, not pollute mux resolution for that pane).
 Dependency shape inside the workstream:
 
 ```
-H-SUBAGENT-001 ──→ H-SUBAGENT-002 ──→ H-SUBAGENT-003
-                                       └──→ H-SUBAGENT-004
+CSP-295 ─────────→ CSP-296 ─────────→ CSP-297
+                                       └──→ CSP-298
 ```
 
-- [ ] `H-SUBAGENT-001` Determine how to detect subagent sessions from
+- [ ] `CSP-295` Determine how to detect subagent sessions from
   opencode state.
+  - Legacy ID: `H-SUBAGENT-001`
   - Scope: inspect opencode's `session` table schema for a dedicated
     `kind`/`type`/`is_subagent` column. If one exists, prefer it. If
     not, design a fallback heuristic based on `parent_id` presence plus
@@ -8164,7 +8515,8 @@ H-SUBAGENT-001 ──→ H-SUBAGENT-002 ──→ H-SUBAGENT-003
     shapes and non-detection of human `/new` forks with the same
     `parent_id` but no subagent title markers.
   - Blockers: none.
-- [ ] `H-SUBAGENT-002` Thread subagent metadata into the graph model.
+- [ ] `CSP-296` Thread subagent metadata into the graph model.
+  - Legacy ID: `H-SUBAGENT-002`
   - Scope: add an optional boolean or enum field on `AgentSessionNode`
     (e.g. `session_kind: Option<SessionKind>` with variants `Human` /
     `Subagent`) so the classification survives into table rendering,
@@ -8172,8 +8524,9 @@ H-SUBAGENT-001 ──→ H-SUBAGENT-002 ──→ H-SUBAGENT-003
     whether to make this harness-agnostic or opencode-specific.
   - Tests: model round-trip tests; sparse-serialization tests (absent
     field stays absent for non-opencode sessions).
-  - Blockers: `H-SUBAGENT-001`.
-- [ ] `H-SUBAGENT-003` Filter and nest subagent sessions in the TUI.
+  - Blockers: `CSP-295`.
+- [ ] `CSP-297` Filter and nest subagent sessions in the TUI.
+  - Legacy ID: `H-SUBAGENT-003`
   - Scope: teach the session row tree to either nest subagent sessions
     as expandable children under their parent session row, or collapse
     them behind a toggle that defaults to hidden. The behavior must
@@ -8184,9 +8537,10 @@ H-SUBAGENT-001 ──→ H-SUBAGENT-002 ──→ H-SUBAGENT-003
   - Tests: TUI row-tree tests for subagent nesting/collapsing under
     parent, orphan subagent (parent not discovered) behavior, and
     toggle persistence across views.
-  - Blockers: `H-SUBAGENT-002`, `H-LINEAGE-003`.
-- [ ] `H-SUBAGENT-004` Suppress subagent sessions from mux attachment
+  - Blockers: `CSP-296`, `CSP-119`.
+- [ ] `CSP-298` Suppress subagent sessions from mux attachment
   resolution.
+  - Legacy ID: `H-SUBAGENT-004`
   - Scope: when a subagent session's cwd matches a mux session, the
     resolver should prefer the human parent session for mux attachment
     rather than the subagent itself. This prevents a subagent session
@@ -8196,7 +8550,7 @@ H-SUBAGENT-001 ──→ H-SUBAGENT-002 ──→ H-SUBAGENT-003
   - Tests: resolver tests for subagent-with-parent (parent preferred),
     orphan subagent (resolves normally), and subagent-with-parent where
     the parent has a stronger non-CWD link (parent still preferred).
-  - Blockers: `H-SUBAGENT-002`, existing `LinkedToMux` resolver tests.
+  - Blockers: `CSP-296`, existing `LinkedToMux` resolver tests.
 
 ### TUI Pass-2 Revisions (H-UI-*)
 
@@ -8204,8 +8558,9 @@ A fresh pass over the rendered showcase (ADR 0070) surfaced three
 revisions to existing TUI work. Tracking them here so the followups
 do not get lost inside their originating workstreams.
 
-- [x] `H-UI-001` Collapse per-session mux chip to an
+- [x] `CSP-415` Collapse per-session mux chip to an
   attachable-binary; let group rows own the ambiguity signal.
+  - Legacy ID: `H-UI-001`
   - Outcome: landed under ADR 0072
     (`docs/adr/0072-mux-indicator-attachable-binary.md`). The
     row chip now reads `◉` only when a single definitive
@@ -8218,21 +8573,22 @@ do not get lost inside their originating workstreams.
     stays on the model so status-bar hints, header counts, and
     the ADR 0071 group-detail catalog continue to work.
 
-- [x] `H-UI-002` Weave per-node-kind glyph identity through every
+- [x] `CSP-416` Weave per-node-kind glyph identity through every
   TUI surface (tree, detail, filter, help).
+  - Legacy ID: `H-UI-002`
   - Scope: re-affirm and finish the existing
     `Per-Node-Type Visual Identity` workstream
-    (`H-VIS-001..006`) — there are enough unique graph entity
+    (`CSP-408..413`) — there are enough unique graph entity
     types (Workspace, Repo, Checkout, AgentSession, MuxSession,
     Branch, Fork, ForgePr, RuntimeProcess) that operators need a
     shorthand glyph per kind, not just a textual label. Beyond
     the row-tree + detail-panel scope already captured in
-    `H-VIS-003..004`, extend the glyph usage to the help modal
+    `CSP-410..411`, extend the glyph usage to the help modal
     keybinding tables (where the modal references a node kind),
     the filter modal (kind-bucket headers and chip pills), the
     search results overlay, the breadcrumb chain in the detail
     explorer, and any non-TUI surface that names node kinds
-    (CLI table rows, JSON `node_kind` tag per `H-VIS-005`).
+    (CLI table rows, JSON `node_kind` tag per `CSP-412`).
     Acceptance under the existing `H-VIS-*` IDs; this story
     promotes the workstream from "candidate" to "scheduled."
   - Slice landed (breadcrumb chain): `render_breadcrumb_chain`
@@ -8284,12 +8640,13 @@ do not get lost inside their originating workstreams.
     NodeKinds — so the "filter modal kind-bucket headers and chip
     pills" item in the original scope had no real target. Non-TUI
     output surfaces (CLI table rows, JSON `node_kind` tag, DOT /
-    HTML payloads) stay under `H-VIS-005`, which already owns them.
-  - Blockers: see `H-VIS-001`.
+    HTML payloads) stay under `CSP-412`, which already owns them.
+  - Blockers: see `CSP-408`.
 
-- [x] `H-UI-003` Roll back the detail-pane upstream/downstream
+- [x] `CSP-417` Roll back the detail-pane upstream/downstream
   split; render a single related-entities list with descriptive
   edge labels.
+  - Legacy ID: `H-UI-003`
   - Outcome: ADR 0074 records the design and pass 2 lands the
     implementation. `NodeView` exposes one `relationships`
     surface; `Direction` lives on `RelationshipGroup`; the
@@ -8319,8 +8676,9 @@ do not get lost inside their originating workstreams.
     verb (`associated with`) stays open until a real operator
     confusion materializes.
 
-- [x] `H-UI-004` Audit the sessions-pane header content
+- [x] `CSP-418` Audit the sessions-pane header content
   holistically.
+  - Legacy ID: `H-UI-004`
   - Scope: review every span the left-pane header
     (`src/tui/ui.rs:left_panel_title` + `append_header_chips`)
     renders today — the freshness chip, view-tab strip,
@@ -8354,9 +8712,9 @@ do not get lost inside their originating workstreams.
     headers re-use the same composition) or scope strictly to
     sessions; whether the per-harness chips become an opt-in
     `--show-harness-chips` flag instead of always-on.
-  - Blockers: `H-UI-001` landed (the binary chip is the trigger
+  - Blockers: `CSP-415` landed (the binary chip is the trigger
     for re-evaluating the header chips); coordinate with
-    `H-UI-002` so any new glyph language doesn't get rewritten
+    `CSP-416` so any new glyph language doesn't get rewritten
     twice.
   - Outcome (2026-06-20): audit landed in three commits +
     ADR 0078. Per-element verdict + width snapshots captured
@@ -8383,13 +8741,14 @@ do not get lost inside their originating workstreams.
     (default-drop, narrow-fit, opt-in shows chips).
     Deferred: per-view count language (mux view still says
     `sessions`), mobile-narrow layout (< 40 cols), status-bar
-    evolution under F8-013 — all recorded in ADR 0078's
+    evolution under CSP-423 — all recorded in ADR 0078's
     "Open Questions Deferred" section.
 
-- [x] `H-UI-005` Resolved-vs-candidate visual separation in the
+- [x] `CSP-419` Resolved-vs-candidate visual separation in the
   detail-pane explorer.
+  - Legacy ID: `H-UI-005`
   - Outcome: ADR 0075 records the edge-state visual language and
-    the renderer ships it. H-UI-003's validated / Other zone
+    the renderer ships it. CSP-417's validated / Other zone
     split already separated Resolves from the rest; this story
     closes the per-row distinction inside Other. `AltOf(_)` rows
     render in `theme.edge_alt_of` (default DarkGray, quiet —
@@ -8407,12 +8766,13 @@ do not get lost inside their originating workstreams.
     do not get a dedicated chip — the per-row treatment + the
     Other header's `K ⚠` summary cover the use case. Unit tests
     pin the per-edge-state row dispatch (`⚠` prefix on Conflict,
-    color match on AltOf, no `★` on validated). H-UI-006 stays
+    color match on AltOf, no `★` on validated). CSP-420 stays
     open as the resolver-side preservation work; this story is
     purely renderer.
 
-- [x] `H-UI-006` Resolver-side preservation for suppressed
+- [x] `CSP-420` Resolver-side preservation for suppressed
   ambiguous `LinkedToMux` resolutions.
+  - Legacy ID: `H-UI-006`
   - Outcome: ADR 0077 records the shape decision —
     `ResolvedRelationship.selected_link_id` becomes
     `Option<String>`; `None` marks the resolver-can't-pick case.
@@ -8424,10 +8784,10 @@ do not get lost inside their originating workstreams.
     serde derive picks up `skip_serializing_if = "Option::is_none"`
     so existing winners serialize unchanged.
     Both ad-hoc fallbacks retire: `build_relationship_group` in
-    `src/tui/explorer.rs` drops the H-UI-007 candidate-fan-out
+    `src/tui/explorer.rs` drops the CSP-421 candidate-fan-out
     inference and reads `selected_link_id.is_none()` directly to
     mark a slot ambiguous; `mux_candidates_for_session` in
-    `src/tui/rows/sessions.rs` drops the H-UI-008 candidate
+    `src/tui/rows/sessions.rs` drops the CSP-422 candidate
     fallback and walks the slot — `Some` returns the winner,
     `None` returns every link in `competing_link_ids` so
     `MuxStateKey::Ambiguous` still fires. The
@@ -8438,7 +8798,7 @@ do not get lost inside their originating workstreams.
     and the candidate set rolls into `competing_link_ids`. The
     explorer regression
     `linked_to_mux_suppressed_slot_surfaces_as_no_winner_ambiguous_group`
-    replaces the prior H-UI-007 fallback test, asserting the
+    replaces the prior CSP-421 fallback test, asserting the
     group is marked ambiguous, every row drops into the Other
     zone, and no `Resolves` row exists. `testing_replay.rs`
     asserts compare `selected_link_id.as_deref()` against
@@ -8448,9 +8808,10 @@ do not get lost inside their originating workstreams.
     `vec![]` for suppression diagnostics — see the ADR's open
     question; out of scope here.
 
-- [x] `H-UI-007` Renderer-side fallback so candidate fan-out
+- [x] `CSP-421` Renderer-side fallback so candidate fan-out
   flags the explorer group as ambiguous even when no
   `ResolvedRelationship` exists.
+  - Legacy ID: `H-UI-007`
   - Outcome: `build_relationship_group`
     (`src/tui/explorer.rs`) now derives `ambiguous` from the
     candidate set's distinct target count when
@@ -8459,10 +8820,11 @@ do not get lost inside their originating workstreams.
     the group header instead of looking like a clean fan-out.
     Lets the showcase reproduce the same explorer ambiguity
     signal the live TUI shows. Tracked properly at the resolver
-    layer by `H-UI-006`.
+    layer by `CSP-420`.
 
-- [x] `H-UI-008` Left-pane tree views consume resolved
+- [x] `CSP-422` Left-pane tree views consume resolved
   relationships only.
+  - Legacy ID: `H-UI-008`
   - Outcome: `mux_candidates_for_session` and `workspace_for_session`
     in `src/tui/rows/sessions.rs` now read winners from
     `snapshot.resolved_relationships` instead of grouping raw
@@ -8474,12 +8836,12 @@ do not get lost inside their originating workstreams.
     `BranchHasForgePr` and in `src/tui/rows/forks.rs` for
     `ChildSession` (INNER JOIN) and `ParentSession` (LEFT JOIN +
     `OR target_kind = 'unresolved'` so unresolved-endpoint labels
-    survive — the explicit candidate-aware surface H-UI-008 calls
+    survive — the explicit candidate-aware surface CSP-422 calls
     out for resolver-can't-pick cases). The
-    `mux_candidates_for_session` body retains an H-UI-007-style
+    `mux_candidates_for_session` body retains an CSP-421-style
     candidate fan-out fallback (no resolver entries + ≥2 distinct
     candidate targets) so `suppress_ambiguous_cwd_mux_links` keeps
-    surfacing genuine ambiguity until H-UI-006 lands the resolver-
+    surfacing genuine ambiguity until CSP-420 lands the resolver-
     side preservation. Tests: per-call-site regression that a
     non-winner candidate no longer surfaces in the tree
     (`mux_view_drops_non_winner_linked_to_mux_candidate`); the
@@ -8509,7 +8871,7 @@ do not get lost inside their originating workstreams.
         to nothing." The `AgentSessionMuxCandidate` row type
         loses its fan-out semantics on resolver-blessed slots
         and only fires when the resolver explicitly couldn't
-        pick (`suppress_ambiguous_cwd_mux_links`, H-UI-006).
+        pick (`suppress_ambiguous_cwd_mux_links`, CSP-420).
       - `src/tui/rows/sessions.rs:604` `workspace_for_session` —
         first-wins over candidate links today; switch to the
         resolver's `AssociatedWith` winner.
@@ -8525,7 +8887,7 @@ do not get lost inside their originating workstreams.
     `suppress_ambiguous_cwd_mux_links` fires) so operators
     investigating ambiguity still have a path.
   - Impact assessment (scanned `~/src` 2026-06-17 against the
-    H-UI-005 commit): 305 active candidate links total, only 8
+    CSP-419 commit): 305 active candidate links total, only 8
     are non-winners (2.6%). Breakdown:
       - `linked_to_mux`: 3 non-winners (2 real competitors +
         1 unresolved-endpoint variant) — these are the most
@@ -8573,19 +8935,20 @@ do not get lost inside their originating workstreams.
     `AgentSessionMuxCandidate` fan-out was previously emitted
     from non-conflict candidates. Resolver-side coverage that
     `suppress_ambiguous_cwd_mux_links` still produces the
-    candidate fan-out in the tree (preserves H-UI-007's signal).
+    candidate fan-out in the tree (preserves CSP-421's signal).
   - Open questions: whether the mux view's "attached agents"
     column should fall back to candidate links when the resolver
     didn't pick (preserves the historical UI signal) or simply
     hide attachments (matches the detail-pane invariant exactly).
     Recommend the latter for consistency.
-  - Blockers: H-UI-005 (so the detail-pane half of the invariant
-    is in place); ideally lands alongside H-UI-006 so the
+  - Blockers: CSP-419 (so the detail-pane half of the invariant
+    is in place); ideally lands alongside CSP-420 so the
     resolver-side and renderer-side stories agree on what
     "candidate fan-out" means.
 
-- [x] `H-UI-009` Related view at neighbor granularity; split
+- [x] `CSP-581` Related view at neighbor granularity; split
   corroborating from competing candidates (ADR 0107).
+  - Legacy ID: `H-UI-009`
   - Symptom (2026-10-02): a mux's `Related` section listed
     `attached session <S>` as validated and the same session again,
     marked `⚠`, under `Other`. On the live graph both resolved
@@ -8629,7 +8992,7 @@ do not get lost inside their originating workstreams.
     <confidence>`. On the live graph `tmux:conspectus-main` now reads
     `3 validated` with one `attached session` row and no Other zone.
     `tui --snapshot` couldn't move the explorer cursor because its key
-    driver skips the focus remap (`TEST-008`), so the preview is covered
+    driver skips the focus remap (`CSP-582`), so the preview is covered
     by a UI test instead.
 
 ### TUI Widget Ecosystem Adoption (H-WIDG-*)
@@ -8637,7 +9000,7 @@ do not get lost inside their originating workstreams.
 Posture shift: the TUI carries ~5.2k LOC of in-house widget code
 across `src/tui/widgets/` (badge, controls, help, input,
 multi_select, pins, search, toast, value_modal). Recent hardening
-cycles (H-UI-001..008, fix(tui) commits on narrow-pane truncation,
+cycles (CSP-415..422, fix(tui) commits on narrow-pane truncation,
 wrap-attached chips, scrollbar columns) have repeatedly traced
 defects back to bespoke primitives. This workstream commits to a
 more dep-friendly posture: prefer well-maintained ratatui-ecosystem
@@ -8662,17 +9025,17 @@ Adoption tiers (cribbed from the dep landscape audit):
 Dependency shape:
 
 ```
-H-WIDG-001 (macros cleanup) ──┬─→ H-WIDG-002 (multi_select → ratatui-cheese)
-                              ├─→ H-WIDG-003 (toast → ratatui-toaster)
-                              ├─→ H-WIDG-004 (overlay framing → tui-popup)
-                              ├─→ H-WIDG-005 (help → ratatui-cheese.help)
-                              ├─→ H-WIDG-006 (tui-textarea, gated)
-                              ├─→ H-WIDG-007 (tui-skeleton, gated on T8-007)
-                              ├─→ H-WIDG-008 (throbber-widgets-tui, gated)
-                              └─→ H-WIDG-009 (rat-widget kit spike)
+CSP-425 (macros cleanup) ─────┬─→ CSP-426 (multi_select → ratatui-cheese)
+                              ├─→ CSP-427 (toast → ratatui-toaster)
+                              ├─→ CSP-428 (overlay framing → tui-popup)
+                              ├─→ CSP-429 (help → ratatui-cheese.help)
+                              ├─→ CSP-430 (tui-textarea, gated)
+                              ├─→ CSP-431 (tui-skeleton, gated on CSP-184)
+                              ├─→ CSP-432 (throbber-widgets-tui, gated)
+                              └─→ CSP-433 (rat-widget kit spike)
                                           │
-                                          ├─→ H-WIDG-010 (ratatui-explorer cwd picker, gated)
-                                          └─→ H-WIDG-011 (tui-tree-widget explorer extract, deferred)
+                                          ├─→ CSP-434 (ratatui-explorer cwd picker, gated)
+                                          └─→ CSP-435 (tui-tree-widget explorer extract, deferred)
 ```
 
 Cross-cutting expectations across every Tier A swap:
@@ -8683,7 +9046,7 @@ Cross-cutting expectations across every Tier A swap:
   a follow-up.** Estimate 50–100 LOC of bridge code per swap
   (typically a `*_styles_from_theme(&Theme)` helper plus a
   `.theme(&Theme)` builder on the widget surface, threaded to the
-  call site). H-WIDG-002's two-commit sequence (functional swap →
+  call site). CSP-426's two-commit sequence (functional swap →
   theme glue) was the calibration; subsequent swaps land both in
   one PR with the visual-verification snapshot in the commit.
 - License posture preserved (MIT or MIT/Apache-2.0 only — no
@@ -8691,8 +9054,9 @@ Cross-cutting expectations across every Tier A swap:
 - Snapshot-replayable reducer (ADR 0067) stays the source of truth;
   no widget that owns the event loop is adopted into the runtime.
 
-- [x] `H-WIDG-001` Adopt `ratatui-macros` for `Span` / `Line` /
+- [x] `CSP-425` Adopt `ratatui-macros` for `Span` / `Line` /
   `Text` / layout boilerplate.
+  - Legacy ID: `H-WIDG-001`
   - Motivation: `ratatui-macros` 0.7 ships `span!` / `line!` /
     `text!` / `constraints!` / `vertical!` / `horizontal!` / `row!`
     macros that retire the `Span::raw / Span::styled / Line::from(
@@ -8775,9 +9139,10 @@ Cross-cutting expectations across every Tier A swap:
   - Blockers: none. Land before the other tiers so the new code
     written for swaps lands in the macro idiom from day one.
 
-- [x] `H-WIDG-002` Swap `widgets/multi_select.rs` for
+- [x] `CSP-426` Swap `widgets/multi_select.rs` for
   `ratatui-cheese.multi_select`.
-  - Motivation: F8-006 shipped the in-tree multi-select as a pure
+  - Legacy ID: `H-WIDG-002`
+  - Motivation: CSP-255 shipped the in-tree multi-select as a pure
     state machine — 406 LOC of generic list-with-checkbox logic.
     `ratatui-cheese` 0.7 ships a Bubbletea-inspired
     `multi_select` widget that is conceptually 1:1 with the
@@ -8818,10 +9183,11 @@ Cross-cutting expectations across every Tier A swap:
     because the upstream state's `Box<dyn Fn>` validator blocks
     derive; the shim does not use validators so cloning rebuilds
     cursor + selections + focus.
-  - Blockers: `H-WIDG-001` (so the new bridge code lands in the
+  - Blockers: `CSP-425` (so the new bridge code lands in the
     macro idiom). [met]
 
-- [x] `H-WIDG-003` Swap `widgets/toast.rs` for `ratatui-toaster`.
+- [x] `CSP-427` Swap `widgets/toast.rs` for `ratatui-toaster`.
+  - Legacy ID: `H-WIDG-003`
   - Motivation: in-tree toast surface is 235 LOC carrying
     info/success/warning/error variants, positioning, and a small
     engine. `ratatui-toaster` 0.1.3 (Unlicense OR MIT, ratatui
@@ -8872,10 +9238,11 @@ Cross-cutting expectations across every Tier A swap:
     1 App-level replacement test rewritten for the queue model
     (`queue_len()` + `current_message()` instead of `posted_at`
     ordering). Net test count delta across the swap: −3.
-  - Blockers: `H-WIDG-001`. [met]
+  - Blockers: `CSP-425`. [met]
 
-- [x] `H-WIDG-004` Replace bordered-frame overlay code with
+- [x] `CSP-428` Replace bordered-frame overlay code with
   `tui-popup`.
+  - Legacy ID: `H-WIDG-004`
   - Motivation: seven overlays (rename, controls, pins, search,
     help, value, viewer) each carry their own centered-bordered-
     box framing math. The framing layer alone is ~400–600 LOC of
@@ -8929,10 +9296,11 @@ Cross-cutting expectations across every Tier A swap:
   - Tests: 1666 tests pass byte-identical across all 9 conversions
     (no snapshot regeneration was triggered since the popup
     auto-sizing reproduces the legacy rect bit-for-bit).
-  - Blockers: `H-WIDG-001`. [met]
+  - Blockers: `CSP-425`. [met]
 
-- [x] `H-WIDG-005` Adopt `ratatui-cheese.help` for the `?` help
+- [x] `CSP-429` Adopt `ratatui-cheese.help` for the `?` help
   overlay.
+  - Legacy ID: `H-WIDG-005`
   - Motivation: 598 LOC of mostly static keybinding rendering.
     `ratatui-cheese` ships a Bubbletea-style `help` widget that
     handles the keymap → display layout. Domain-specific content
@@ -8965,15 +9333,16 @@ Cross-cutting expectations across every Tier A swap:
     (filter to a view-specific set, disable a binding under
     feature flag, sort by section, expose a search-bindings
     primitive later) are now operations on `Vec<Binding>` rather
-    than on rendered lines. Theme glue unchanged from H-WIDG-004
+    than on rendered lines. Theme glue unchanged from CSP-428
     (border via `themed_popup`).
   - Tests: 1666 pass byte-identical; existing key-dispatch tests
     (Esc / q / `?` close, scroll) keep shape.
-  - Blockers: `H-WIDG-001`, `H-WIDG-004` (so the framing layer is
+  - Blockers: `CSP-425`, `CSP-428` (so the framing layer is
     already on `tui-popup`). [both met]
 
-- [ ] `H-WIDG-006` Adopt `tui-textarea` when a multi-line input
+- [ ] `CSP-430` Adopt `tui-textarea` when a multi-line input
   field lands on the backlog.
+  - Legacy ID: `H-WIDG-006`
   - Motivation: `widgets/input.rs` shells over `tui-input` for
     single-line entry. Multi-line input is unbuilt today; future
     candidates: pin `reason` notes, richer alias editing,
@@ -8984,8 +9353,9 @@ Cross-cutting expectations across every Tier A swap:
     multi-line. Adopt the moment one does; do not preempt.
   - Blockers: a downstream story that demands multi-line input.
 
-- [x] `H-WIDG-007` Adopt `tui-skeleton` for background-load
+- [x] `CSP-431` Adopt `tui-skeleton` for background-load
   placeholders.
+  - Legacy ID: `H-WIDG-007`
   - **Landed 2026-07-06 (`0d1bc63`) as an in-tree substrate**,
     deviating from the literal `tui-skeleton` scope. See commit
     message for the full rationale; short version:
@@ -9014,10 +9384,11 @@ Cross-cutting expectations across every Tier A swap:
     with variants like `ForgeFetch(NodeId)` /
     `TranscriptLoad(NodeId)` and dispatch a start/finish pair
     around each spawn.
-  - Blockers: `T8-007` (retroactively landed).
+  - Blockers: `CSP-184` (retroactively landed).
 
-- [ ] `H-WIDG-008` Adopt `throbber-widgets-tui` for in-flight
+- [ ] `CSP-432` Adopt `throbber-widgets-tui` for in-flight
   spinners.
+  - Legacy ID: `H-WIDG-008`
   - Motivation: pin launch, attach round-trip, refresh, and
     mux-capture refresh are operations where a momentary spinner
     would communicate "working" without inventing visible state.
@@ -9028,10 +9399,11 @@ Cross-cutting expectations across every Tier A swap:
   - Open questions: license is Zlib (permissive but unusual).
     Verify it doesn't conflict with the MIT-only posture.
     Recommend an ADR-tier ack if Zlib is the only blocker.
-  - Blockers: `H-WIDG-001`.
+  - Blockers: `CSP-425`.
 
-- [x] `H-WIDG-009` Spike: evaluate `rat-widget` as a cohesive
+- [x] `CSP-433` Spike: evaluate `rat-widget` as a cohesive
   widget kit.
+  - Legacy ID: `H-WIDG-009`
   - Motivation: `rat-widget` 3.2.1 (MIT/Apache, ratatui 0.30) is
     the widget half of `rat-salsa`, usable standalone as pure
     `StatefulWidget`s. It covers input / date / calendar / table /
@@ -9102,10 +9474,11 @@ Cross-cutting expectations across every Tier A swap:
     catalog) genuinely needs a kit-shaped primitive, re-evaluate
     a single rat-widget primitive (not the form widget) under a
     fresh spike with the structural findings as the rubric.
-  - Blockers: `H-WIDG-001`. [met]
+  - Blockers: `CSP-425`. [met]
 
-- [ ] `H-WIDG-010` `ratatui-explorer` cwd picker for pin
+- [ ] `CSP-434` `ratatui-explorer` cwd picker for pin
   `create` / `adopt`.
+  - Legacy ID: `H-WIDG-010`
   - Motivation: pin `create` and `adopt` forms currently take
     typed paths. A real file/directory picker would be a UX
     upgrade with no domain risk. `ratatui-explorer` 0.3 (MIT,
@@ -9113,54 +9486,56 @@ Cross-cutting expectations across every Tier A swap:
   - Scope: deferred until the pin-form UX is on the agenda.
     Verify event-loop ownership (this crate's `handle()` API may
     couple more tightly than the others); flag during impl.
-  - Blockers: `H-PIN-TUI-004` if that story chooses a browse-mode
+  - Blockers: `CSP-455` if that story chooses a browse-mode
     picker instead of an inline-only omnibox.
 
-- [ ] `H-WIDG-011` `tui-tree-widget` extraction for the explorer.
+- [ ] `CSP-435` `tui-tree-widget` extraction for the explorer.
+  - Legacy ID: `H-WIDG-011`
   - Motivation: `src/tui/explorer.rs` (3272 LOC) carries an
     in-tree tree state machine alongside domain-aware rendering.
     `tui-tree-widget` 0.24 (MIT, ratatui 0.30) would let the
     expand / collapse / selection state move upstream; only
     domain rendering stays in-tree.
   - Scope: deferred. Re-evaluate when the explorer is next on
-    the audit list (post H-UI-004) or when a defect traces back to
+    the audit list (post CSP-418) or when a defect traces back to
     the tree state machine specifically.
   - Blockers: explorer re-think on the agenda.
 
-- [x] `H-WIDG-012` Opportunistic `ratatui-macros` sweep across
+- [x] `CSP-436` Opportunistic `ratatui-macros` sweep across
   the remaining small widgets and the layout helpers.
-  - **Absorbed 2026-07-05 into the H-WIDG-001 closure** (`f022014`
-    + `93308b9`). Scope was byte-identical to H-WIDG-001's parked
+  - Legacy ID: `H-WIDG-012`
+  - **Absorbed 2026-07-05 into the CSP-425 closure** (`f022014`
+    + `93308b9`). Scope was byte-identical to CSP-425's parked
     remainders:
       - Small widget sweep — `badge.rs` and `value_modal.rs`
         swept; `input.rs` skipped per the no-gain convention;
-        `toast.rs` retired entirely by H-WIDG-003; `multi_select.rs`
-        retired by H-WIDG-002 (both landed pre-2026-07-05).
+        `toast.rs` retired entirely by CSP-427; `multi_select.rs`
+        retired by CSP-426 (both landed pre-2026-07-05).
       - Layout-macro sweep — `ui.rs`'s four `Layout::default()`
         chains migrated to `vertical!` / `horizontal!`;
         `detail.rs` audit confirmed no `Layout::default()`
         construction (uses Frame area directly).
     Retained here as `[x]` rather than deleted so the story ID
-    stays discoverable; canonical writeup lives on H-WIDG-001.
-  - Motivation: `H-WIDG-001` closed the five files in the critical
+    stays discoverable; canonical writeup lives on CSP-425.
+  - Motivation: `CSP-425` closed the five files in the critical
     path (help / controls / search / pins / ui — `−204 LOC` net),
     but left two opportunistic remainders parked: the five small
     widgets that carry a handful of `Span`/`Line`/`Style` sites
     each, and the layout helpers that build `Layout::default()
     .constraints(...)` arrays imperatively. Filing them as a
     bundled follow-on so the workstream does not lose track of
-    them while H-WIDG-002..009 progress.
+    them while CSP-426..433 progress.
   - Scope:
       - Small widget sweep (target: 1 commit, ~15 LOC delta):
         - `src/tui/widgets/badge.rs` (2 sites)
         - `src/tui/widgets/toast.rs` (2 sites — but this file
-          retires entirely if `H-WIDG-003`'s `ratatui-toaster`
+          retires entirely if `CSP-427`'s `ratatui-toaster`
           swap lands first; skip if so)
         - `src/tui/widgets/multi_select.rs` (the shim from
-          `H-WIDG-002` already uses the macros in its bordered
+          `CSP-426` already uses the macros in its bordered
           modal frame — no remaining sites)
         - `src/tui/widgets/value_modal.rs` (5 sites — same
-          retirement caveat under `H-WIDG-004`'s `tui-popup`
+          retirement caveat under `CSP-428`'s `tui-popup`
           swap)
         - `src/tui/widgets/input.rs` (3 sites)
       - Layout-macro sweep (target: 1 commit):
@@ -9177,22 +9552,23 @@ Cross-cutting expectations across every Tier A swap:
     regeneration as needed.
   - Open questions:
       - Should the workstream wait for the Tier A swap stories
-        (`H-WIDG-002` / `003` / `004`) to land before sweeping the
+        (`CSP-426` / `CSP-427` / `CSP-428`) to land before sweeping the
         small widgets whose file might retire? Recommend yes for
         `toast.rs`, `multi_select.rs`, `value_modal.rs` — the
         retirement absorbs the macro work. `badge.rs` and
         `input.rs` are safe to sweep anytime.
       - Whether the layout macros warrant a separate prelude
         re-export alongside `span!` / `line!`. Decide alongside
-        the prelude question still open on `H-WIDG-001`.
+        the prelude question still open on `CSP-425`.
   - Blockers: ideally lands *after* Tier A swap decisions on
-    `H-WIDG-002` / `003` / `004` so the file-retirement caveats
+    `CSP-426` / `CSP-427` / `CSP-428` so the file-retirement caveats
     resolve cleanly. `badge.rs` and `input.rs` slices unblocked
     today.
 
-- [x] `H-WIDG-013` Port high-variant widgets into the
-  `examples/pantry.rs` ingredient list (T8-044 follow-up).
-  - Motivation: T8-044 spike landed "go" with the smoke test
+- [x] `CSP-437` Port high-variant widgets into the
+  `examples/pantry.rs` ingredient list (CSP-424 follow-up).
+  - Legacy ID: `H-WIDG-013`
+  - Motivation: CSP-424 spike landed "go" with the smoke test
     (`widgets/multi_select.rs` × 3 variants). The follow-up tax
     is per-widget ingredient code so visual iteration for the
     rest of the widget surface gets the same fast loop. This is
@@ -9246,7 +9622,7 @@ Cross-cutting expectations across every Tier A swap:
     embed `!Send` state need the same "build state per render"
     shim. None of our other widget states use
     `Box<dyn Fn>`-style callbacks today, but verify per port.
-  - Blockers: `T8-044` [met]. Each per-widget slice is
+  - Blockers: `CSP-424` [met]. Each per-widget slice is
     independent.
   - Outcome (2026-06-20): all seven targets landed across six
     per-widget commits + a theme-harness commit:
@@ -9259,7 +9635,7 @@ Cross-cutting expectations across every Tier A swap:
       - `8138065` Theme harness (1 variant covering every
         `[tui.theme]` key)
     Plus the smoke-test multi_select (3 variants) from
-    `4f918aa` (T8-044). Total **28 ingredients across 8
+    `4f918aa` (CSP-424). Total **28 ingredients across 8
     groups** in a single `examples/pantry.rs` file (~890 LOC).
     Per-widget glue matched the budget (~70–180 LOC each); the
     aggregate is on the high side of the prediction because the
@@ -9288,7 +9664,7 @@ Recorded so future audits do not re-relitigate.
 - `rat-salsa` (framework, distinct from `rat-widget` above) —
   event queue + tasks + timers; owns the loop. Same conflict.
   Pass.
-- `rat-widget` — closed in `H-WIDG-009` after structural
+- `rat-widget` — closed in `CSP-433` after structural
   analysis. The kit-shaped posture forces the
   rat-event / rat-focus / rat-scrolled trifecta into widget
   state types as mandatory fields; partial adoption is
@@ -9316,25 +9692,26 @@ long-running server.
 Dependency shape inside the phase:
 
 ```
-Phase 9 ADR-A (engine selection) ──→ P7-001 (snapshot ADR) ──┐
-                                                             ├──→ P7-003 (warm-start save/load) ─┐
-P7-002 (provenance/freshness model) ─────────────────────────┤──→ P7-005 (partial eviction) ─────┤
-                                                             │                                   │
-P7-001 ──→ P7-004 (server ADR) ──────────────────────────────┴───────────────────────────────────┴──→ P7-006 (serve) ──→ P7-007 (CLI ↔ server)
-                                                                                                                    ├──→ P7-008 (status/inspection)
-                                                                                                                    └──→ P7-009 (event-driven, stretch)
+Phase 9 ADR-A (engine selection) ────→ CSP-137 (snapshot ADR) ──┐
+                                                                ├──→ CSP-139 (warm-start save/load) ─┐
+CSP-138 (provenance/freshness model) ───────────────────────────┤──→ CSP-141 (partial eviction) ─────┤
+                                                                │                                    │
+CSP-137 ──→ CSP-140 (server ADR) ───────────────────────────────┴────────────────────────────────────┴──→ CSP-142 (serve) ──→ CSP-143 (CLI ↔ server)
+                                                                                                                         ├──→ CSP-144 (status/inspection)
+                                                                                                                         └──→ CSP-145 (event-driven, stretch)
 ```
 
-Under the Stage 3 SQLite pivot (Phase 9), `P7-001` (persistence
-ADR) and `P7-004` (server transport ADR) are no longer parallel:
+Under the Stage 3 SQLite pivot (Phase 9), `CSP-137` (persistence
+ADR) and `CSP-140` (server transport ADR) are no longer parallel:
 the engine selection ADR (Phase 9 ADR-A) settles the storage
-choice; `P7-001` then absorbs the SQLite persistence model; and
-`P7-004` builds on the persistence shape to settle the WAL-based
-read path plus Unix-socket write path. `P7-002` is still
+choice; `CSP-137` then absorbs the SQLite persistence model; and
+`CSP-140` builds on the persistence shape to settle the WAL-based
+read path plus Unix-socket write path. `CSP-138` is still
 foundational and should land before any persistence or eviction
 code.
 
-- [x] `P7-001` ADR: graph snapshot persistence format and lifecycle.
+- [x] `CSP-137` ADR: graph snapshot persistence format and lifecycle.
+  - Legacy ID: `P7-001`
   - Outcome: accepted as ADR 0037 (snapshot-persistence-sqlite).
     The ADR settles the canonical store at
     `$XDG_DATA_HOME/conspectus/graph.sqlite`, schema versioning via
@@ -9342,15 +9719,16 @@ code.
     writes via SQLite transactions (no temp+rename), forward-only
     migrations, the `--no-cache` / `--refresh` flag semantics, the
     `provider_state` table + per-row `discovery_provider` /
-    `discovery_freshness_epoch` columns that feed P7-002 / P7-005,
+    `discovery_freshness_epoch` columns that feed CSP-138 / CSP-141,
     and `VACUUM INTO` for rotation. The schema-apply scaffold
-    landed alongside P9-001/P9-002 (`src/query/schema.sql`,
+    landed alongside CSP-271/CSP-272 (`src/query/schema.sql`,
     `src/query/schema.rs`) and the canonical path resolver lives
     at `src/query/runner.rs::graph_db_path`. Implementation of the
-    save/load lifecycle is `P7-003`.
+    save/load lifecycle is `CSP-139`.
 
-- [x] `P7-002` Add provider provenance and freshness metadata to graph
+- [x] `CSP-138` Add provider provenance and freshness metadata to graph
   nodes and candidate links.
+  - Legacy ID: `P7-002`
   - Outcome: shipped in two commits.
 
     The skeleton (commit 1) added `model::NodeProvenance`,
@@ -9395,16 +9773,17 @@ code.
     and `atelier_delegation_snapshots` regenerated with a shared
     `support::redact_freshness_epoch` helper that normalizes the
     wall-clock-derived epochs to a stable placeholder.
-  - Follow-ups: `H-REF-009` (centralizing provider key constants
+  - Follow-ups: `CSP-091` (centralizing provider key constants
     into a `discovery::providers` module) is the next cleanup;
     the strings in this commit match the existing
-    `source_metadata.adapter` literals exactly so the H-REF-009
+    `source_metadata.adapter` literals exactly so the CSP-091
     rename is a mechanical pass. ADR 0037's optional
-    `provider_state` write is still deferred — `P7-003` is the
+    `provider_state` write is still deferred — `CSP-139` is the
     natural home for that since it owns the save/load lifecycle
     that knows whether a provider ran successfully.
 
-- [x] `P7-003` Implement snapshot save/load for the one-shot CLI.
+- [x] `CSP-139` Implement snapshot save/load for the one-shot CLI.
+  - Legacy ID: `P7-003`
   - Outcome: landed in three phases.
     - Phase 1 wrote the resolved snapshot to
       `$XDG_DATA_HOME/conspectus/graph.sqlite` after each
@@ -9425,7 +9804,7 @@ code.
       TTL has not expired, re-runs every mutator pass against
       the merged snapshot, and persists back. The CLI's
       `table` command went through this path first. Selective
-      eviction relies on the P7-005 primitive landed alongside.
+      eviction relies on the CSP-141 primitive landed alongside.
     - Phase 4 generalized the wire-up to every command that
       runs discovery. `node show`, `graph`, and the `tui`
       command now all go through `warm_start_discover_and_resolve`
@@ -9463,7 +9842,7 @@ code.
     remains the eventual answer when schema drift actually
     surfaces user pain; until then "rebuild and overwrite"
     is the safer default.
-  - Follow-ups: `H-REF-009` landed alongside the hardening
+  - Follow-ups: `CSP-091` landed alongside the hardening
     work — every per-emit provider key now lives in
     `src/discovery/providers.rs`, and the per-module
     `HARNESS_KEY` / `ADAPTER_NAME` / `FORGE_ADAPTER` /
@@ -9475,7 +9854,8 @@ code.
     bucket. The on-disk cache stays binary-compatible since
     the const string values are unchanged.
 
-- [x] `P7-004` ADR: continuous server mode architecture and transport.
+- [x] `CSP-140` ADR: continuous server mode architecture and transport.
+  - Legacy ID: `P7-004`
   - Outcome: accepted as ADR 0038 (cli-server-transport-wal). The
     ADR settles the WAL-backed read path (every process opens
     `graph.sqlite` read-only, no IPC for queries), the writer
@@ -9490,9 +9870,10 @@ code.
     isolation expectations, and the no-auto-spawn lifecycle. The
     "absence of a server is not an error" guarantee falls out of
     the WAL read path. Implementation of `conspectus serve` is
-    `P7-006`; the CLI client integration is `P7-007`.
+    `CSP-142`; the CLI client integration is `CSP-143`.
 
-- [x] `P7-005` Implement partial graph eviction at provider granularity.
+- [x] `CSP-141` Implement partial graph eviction at provider granularity.
+  - Legacy ID: `P7-005`
   - Outcome: landed as `GraphSnapshot::evict_provider(&str)` in
     `src/model/mod.rs`. The primitive drops every node whose
     `node_provenance` entry matches the provider, every
@@ -9501,9 +9882,9 @@ code.
     `resolved_relationships` so the resolver re-derives against
     the trimmed candidate set. Conservative on data without a
     provenance entry (pre-instrumentation snapshots survive).
-    Used by `P7-003` phase 3 inside `discover_local_warm_with`
+    Used by `CSP-139` phase 3 inside `discover_local_warm_with`
     to evict stale + always-evict slices before the warm-start
-    merge; ready for `P7-006` to call on every provider tick.
+    merge; ready for `CSP-142` to call on every provider tick.
   - Tests: five unit tests in `src/model/mod.rs::tests::
     evict_provider_*` cover multi-provider eviction,
     no-op on missing keys, link-only eviction (mutator shape),
@@ -9514,7 +9895,8 @@ code.
     empty prior reduces the new path to the prior cold-only
     behavior.
 
-- [x] `P7-006` Implement `conspectus serve`.
+- [x] `CSP-142` Implement `conspectus serve`.
+  - Legacy ID: `P7-006`
   - Outcome: landed in three layers across the same workstream.
     - Layer A: minimal daemon with a single warm-start tick
       loop on the shortest `[server.intervals]` cadence,
@@ -9564,10 +9946,11 @@ code.
     shot CLIs already use. Routing those commands through the
     socket is a clean refactor when the writer connection
     becomes dedicated (and would unblock the per-mutation
-    audit trail P7-008 will want).
+    audit trail CSP-144 will want).
 
-- [x] `P7-007` Implement CLI ↔ server snapshot read path.
-  - Outcome (2026-09-30, `REL-007`): landed through the Phase 11 socket
+- [x] `CSP-143` Implement CLI ↔ server snapshot read path.
+  - Legacy ID: `P7-007`
+  - Outcome (2026-09-30, `CSP-538`): landed through the Phase 11 socket
     `snapshot` command; one-shot commands take the daemon snapshot via
     `try_daemon_snapshot` (`src/cli/mod.rs`). The text above predates the
     `table` rename of `session`.
@@ -9575,7 +9958,7 @@ code.
     transport endpoint), `conspectus session` / `conspectus graph`
     / `conspectus node show` read the server's current snapshot
     rather than performing in-process discovery. Without a server,
-    the CLI behaves as today (with the warm-start from `P7-003`).
+    the CLI behaves as today (with the warm-start from `CSP-139`).
     The transition must be transparent to users; a stale-server or
     schema-mismatch condition falls back to one-shot mode with a
     one-line stderr hint.
@@ -9586,10 +9969,11 @@ code.
     the equivalent one-shot run for the same graph state.
   - Manual checks: confirm `conspectus session` latency drops
     when a server is running.
-  - Blockers: `P7-006`.
+  - Blockers: `CSP-142`.
 
-- [x] `P7-008` Add server status and inspection subcommands.
-  - Outcome: landed alongside the P7-006 daemon work.
+- [x] `CSP-144` Add server status and inspection subcommands.
+  - Legacy ID: `P7-008`
+  - Outcome: landed alongside the CSP-142 daemon work.
     - The daemon now tracks a per-class `SchedulerState`
       (`last_started_epoch`, `last_completed_epoch`,
       `last_outcome` of `"ok"`/`"error"`, `last_error`
@@ -9621,7 +10005,8 @@ code.
     change mid-run. Landing it stand-alone is cleaner than
     bundling here.
 
-- [x] `P7-009` Event-driven refresh via filesystem watchers (stretch).
+- [x] `CSP-145` Event-driven refresh via filesystem watchers (stretch).
+  - Legacy ID: `P7-009`
   - Outcome: harness state directories now drive event-driven
     refresh via the `notify` crate per ADR 0081.
     - `src/server/watcher.rs` owns the Watcher trait
@@ -9664,31 +10049,32 @@ already exposed by `conspectus table <ROWS>` and `conspectus node show`.
 Dependency shape inside the phase:
 
 ```
-P8-001 ──→ P8-001a ──→ P8-002 ──→ P8-003 ──→ P8-004 ─┬─→ P8-006 ─┐
-                                            ├─→ P8-005 ┤         │
-                                            └─→ P8-007 ┤         │
-                                                       └─→ P8-008 ┼─→ P8-013
-                                                                  │
-                                            P8-009 ─→ P8-010 ─→ P8-011 ───┤
-                                                              └─→ P8-014 ─┤
-                                                                  │
-                                            P8-012a ──────────────┤
-                                            P8-012b ──────────────┤
-                                            P8-012c ──────────────┘
+CSP-160 ──→ CSP-160.01 ──→ CSP-161 ──→ CSP-162 ──→ CSP-163 ───┬─→ CSP-165 ─┐
+                                                  ├─→ CSP-164   ┤          │
+                                                  └─→ CSP-166   ┤          │
+                                                                └─→ CSP-167 ┼─→ CSP-172
+                                                                            │
+                                            CSP-168 ─────────→ CSP-169 ─→ CSP-170 ───┤
+                                                                        └─→ CSP-175 ─┤
+                                                                            │
+                                            CSP-171.01 ─────────────────────┤
+                                            CSP-171.02 ─────────────────────┤
+                                            CSP-171.03 ─────────────────────┘
 ```
 
-`P8-001`, `P8-001a`, `P8-002`, and `P8-003` are closed (v1 product
+`CSP-160`, `CSP-160.01`, `CSP-161`, and `CSP-162` are closed (v1 product
 vision, v1-blocking decisions, the runtime/architecture ADR, and
 the `conspectus tui` shell with terminal lifecycle are all in
-place). `P8-004` through `P8-007` can be
-implemented in parallel once the app shell exists. `P8-009` through
-`P8-011`, `P8-014`, and the `P8-012*` enrichments depend on the same
+place). `CSP-163` through `CSP-166` can be
+implemented in parallel once the app shell exists. `CSP-168` through
+`CSP-170`, `CSP-175`, and the `CSP-171*` enrichments depend on the same
 UI shell but should remain isolated from pure browsing/rendering
-work. `P8-014` is post-v1 polish that does not block the release.
-`P8-015` is a post-v1 sessions-tree refinement layered onto
-`P8-004` and `H-TBL-015`; it does not block the v1 release either.
+work. `CSP-175` is post-v1 polish that does not block the release.
+`CSP-176` is a post-v1 sessions-tree refinement layered onto
+`CSP-163` and `CSP-174`; it does not block the v1 release either.
 
-- [x] `P8-001` Lock v1 TUI product decisions (operator-journey core).
+- [x] `CSP-160` Lock v1 TUI product decisions (operator-journey core).
+  - Legacy ID: `P8-001`
   - Outcome: the implementation doc records the primary persona
     (Returning Operator), the v1 default view (`sessions`),
     configuration knobs for default view and sort, hierarchy-first
@@ -9698,13 +10084,14 @@ work. `P8-014` is post-v1 polish that does not block the release.
     polling for v1 with Phase 7 server mode reserved, and the
     `Enter` / `a` / `R` semantics. The remaining v1-blocking
     decisions (project grouping, mux target granularity, ambiguous
-    mux-link behavior, PR detail depth) move to P8-001a; the
+    mux-link behavior, PR detail depth) move to CSP-160.01; the
     v1-deferrable questions move to a "Locked v1 Decisions" /
     "Open Product Questions (v1-deferrable)" section.
 
-- [x] `P8-001a` Settle remaining v1-blocking product questions.
+- [x] `CSP-160.01` Settle remaining v1-blocking product questions.
+  - Legacy ID: `P8-001a`
   - Outcome: every v1-blocking question is now answered in the
-    "Locked v1 Decisions → From the P8-001a walkthrough" section of
+    "Locked v1 Decisions → From the CSP-160.01 walkthrough" section of
     `docs/implementation/phase-08-interactive-tui.md`. Headlines:
     (1) sessions-tree grouping is configurable from day one via
     `--sessions-grouping` / `[tui].sessions_grouping`, defaulting
@@ -9717,17 +10104,18 @@ work. `P8-014` is post-v1 polish that does not block the release.
     the resolver's preferred target on `a`/`Enter`; the `*` marker
     stays visible, the status bar surfaces "N candidates", and the
     `m` key is reserved (unbound in v1) for a future inline
-    mux-picker — see `P8-014`. (4) PR right-panel depth is
+    mux-picker — see `CSP-175`. (4) PR right-panel depth is
     enriched with `gh pr view` checks/reviews data, but rendered
     in two stages so navigation never blocks: the first frame uses
     graph-only fields, an async background fetch fills the
     enrichment slice, and the result is cached per PR id for the
-    TUI session. `P8-012a` carries that async-cache implementation
+    TUI session. `CSP-171.01` carries that async-cache implementation
     scope. The phase-08 doc also gained a "Sources of mux
     ambiguity" subsection explaining where the `*` marker comes
     from today and what future evidence sources will add to it.
 
-- [x] `P8-002` ADR: TUI runtime, app architecture, and dependency policy.
+- [x] `CSP-161` ADR: TUI runtime, app architecture, and dependency policy.
+  - Legacy ID: `P8-002`
   - Outcome: recorded as ADR 0024. Ratatui + crossterm with an
     in-tree Elm-style app loop; pure reducer and view-models;
     `std::thread::spawn` + `mpsc` for background work (no async
@@ -9735,7 +10123,8 @@ work. `P8-014` is post-v1 polish that does not block the release.
     policy narrows what later TUI work can pull in without a
     follow-on ADR.
 
-- [x] `P8-003` Add `conspectus tui` CLI shell and terminal lifecycle.
+- [x] `CSP-162` Add `conspectus tui` CLI shell and terminal lifecycle.
+  - Legacy ID: `P8-003`
   - Outcome: `conspectus tui` subcommand registered with the full
     locked flag surface (`--scan-root`, `--view`,
     `--sessions-grouping`, `--sort`, `--refresh-interval`,
@@ -9748,14 +10137,15 @@ work. `P8-014` is post-v1 polish that does not block the release.
     translation are unit-tested without a terminal. Integration
     smoke tests cover `tui --help` and flag validation.
 
-- [x] `P8-004` Build TUI row tree view-models for every table row-type.
-  - Outcome (2026-09-30, `REL-007`): row builders for all five row types
+- [x] `CSP-163` Build TUI row tree view-models for every table row-type.
+  - Legacy ID: `P8-004`
+  - Outcome (2026-09-30, `CSP-538`): row builders for all five row types
     live in `src/tui/rows/` (first slice `50f206c`).
   - Scope: add pure row-tree builders for `sessions`, `mux`, `union`,
     `prs`, and `forks`. The builders consume a resolved `GraphSnapshot`
     and produce stable row ids, labels, depth, row kind, primary node id,
     sort keys, and compact status fields. Sessions view groups by the
-    v1 "project" answer from P8-001 and nests known lineage/fork history.
+    v1 "project" answer from CSP-160 and nests known lineage/fork history.
     Mux view groups by mux session and nests attached agent sessions.
     PR/fork/union views preserve parity with the existing table row-types
     without scraping rendered table text.
@@ -9763,9 +10153,10 @@ work. `P8-014` is post-v1 polish that does not block the release.
     orphan session, mux-only, attached session, fork lineage, PR-linked
     branch, and ambiguous links. Snapshot the pure row-tree structures
     rather than terminal output.
-  - Blockers: `P8-003`.
+  - Blockers: `CSP-162`.
 
-- [x] `P8-005` Build selected-node detail view-models.
+- [x] `CSP-164` Build selected-node detail view-models.
+  - Legacy ID: `P8-005`
   - Outcome: `src/tui/detail.rs` exposes `NodeDetail` with
     per-kind `header_fields`, candidate-link summaries (outgoing +
     incoming), resolved relationships, and diagnostics — same
@@ -9777,7 +10168,8 @@ work. `P8-014` is post-v1 polish that does not block the release.
     the immediate-stage label. Mux/PR/fork detail will gain richer
     fields as the enrichment stories land.
 
-- [x] `P8-006` Implement selection, focus, navigation, and filtering state.
+- [x] `CSP-165` Implement selection, focus, navigation, and filtering state.
+  - Legacy ID: `P8-006`
   - Outcome (v1 slice): `App` carries the row tree, snapshot,
     expanded-set, selection by `RowId`, panel focus, and preview
     scroll. Reducer handles `j/k/arrows`, `PageDown/PageUp`,
@@ -9791,13 +10183,14 @@ work. `P8-014` is post-v1 polish that does not block the release.
     row is known, it opens the first tree as a fallback.
   - Deferred to follow-on stories (not v1 through-line blockers):
     view switching `1`–`5` (waits on the other row-tree builders
-    from P8-004 parts 2-5), `/` in-view search overlay,
-    `r` refresh-intent dispatch (waits on P8-008 to have
+    from CSP-163 parts 2-5), `/` in-view search overlay,
+    `r` refresh-intent dispatch (waits on CSP-167 to have
     something to refresh), `?` help overlay.
 
-- [x] `P8-007` Render the two-panel Ratatui UI.
-  - Outcome (2026-09-30, `REL-007`): v1 landed in `bc7a1b0`; the
-    empty/loading/error frame matrix continues as `T8-003`.
+- [x] `CSP-166` Render the two-panel Ratatui UI.
+  - Legacy ID: `P8-007`
+  - Outcome (2026-09-30, `CSP-538`): v1 landed in `bc7a1b0`; the
+    empty/loading/error frame matrix continues as `CSP-180`.
   - Scope: implement the visible layout per the wireframe and panel
     composition in `docs/implementation/phase-08-interactive-tui.md`:
     50/50 left/right split at wide widths, stacked layout below
@@ -9823,27 +10216,28 @@ work. `P8-014` is post-v1 polish that does not block the release.
   - Manual checks: `cargo run -- tui --view sessions`,
     `cargo run -- tui --view mux`, `cargo run -- tui --no-live-preview`,
     and terminal resize while running.
-  - Blockers: `P8-003`; friendlier after `P8-004` and `P8-005`.
+  - Blockers: `CSP-162`; friendlier after `CSP-163` and `CSP-164`.
   - **v1 slice landed**: two-panel render with header bar, left
     row tree (depth-indented disclosure glyphs, mux indicator
     glyph with color, same-line session previews when width
     allows), right detail (title line + header fields + preview
     block), status bar. Empty-/loading-frame placeholders cover
-    the no-data case. Remaining work for full P8-007 (filed as
+    the no-data case. Remaining work for full CSP-166 (filed as
     follow-ons):
-    - `T8-003`: full empty/loading/error frame matrix per the
+    - `CSP-180`: full empty/loading/error frame matrix per the
       phase-08 "Empty, Loading, And Error States" table —
       `--no-live-preview` zone message, tmux-unavailable banner,
       provider-error chips, refresh-failed stale marker.
-    - `T8-004`: responsive layout — narrow-terminal stacked
+    - `CSP-181`: responsive layout — narrow-terminal stacked
       panels (< 100 cols) plus same-line row preview behavior.
-    - `T8-005`: `updated Ns ago` header indicator (requires
+    - `CSP-182`: `updated Ns ago` header indicator (requires
       `loaded_at_epoch` on `Msg::SetData` and `App`).
-    - `T8-006`: snapshot test coverage matrix beyond the v1
+    - `CSP-183`: snapshot test coverage matrix beyond the v1
       sessions-render smoke test (mux/PR/narrow/overlays/empty/
       error/selection-retention).
 
-- [ ] `P8-008` Add non-blocking graph refresh data adapter.
+- [ ] `CSP-167` Add non-blocking graph refresh data adapter.
+  - Legacy ID: `P8-008`
   - Scope: implement a data adapter that runs initial discovery, feeds the
     resolved graph into the app state, and refreshes on `r` or the
     configured interval without blocking input. Preserve provider
@@ -9855,20 +10249,21 @@ work. `P8-014` is post-v1 polish that does not block the release.
     long refresh intervals.
   - Manual checks: run `cargo run -- tui`, change local graph inputs, press
     `r`, and verify rows update without losing usable terminal state.
-  - Blockers: `P8-006`, `P8-007`.
+  - Blockers: `CSP-165`, `CSP-166`.
   - **v1 slice landed**: synchronous initial discovery + `r`
     refresh wired in the runtime. Discovery runs on the main
     thread, briefly blocking input during the call. Selection
     retention across refresh comes from the existing reducer
-    (`P8-006`). Remaining work (filed as follow-on):
-    - `T8-007`: move discovery onto a background thread with
+    (`CSP-165`). Remaining work (filed as follow-on):
+    - `CSP-184`: move discovery onto a background thread with
       mpsc back-channel so input never blocks; add timer-driven
       auto-refresh on the configured `refresh_interval`;
       preserve provider diagnostics for the status-bar chips;
       shape so a Phase 7 server snapshot transport can swap in
       without UI changes.
 
-- [x] `P8-009` Add mux live-preview capture adapter.
+- [x] `CSP-168` Add mux live-preview capture adapter.
+  - Legacy ID: `P8-009`
   - Outcome: `TmuxRunner` gained a `capture_pane(target)` method
     with a default `TmuxCaptureOutcome::Unsupported` impl so
     existing runners didn't have to change. `SystemTmux`
@@ -9890,9 +10285,10 @@ work. `P8-014` is post-v1 polish that does not block the release.
     cover the adapter + cache.
     Throttling on the configured `mux_preview_interval`, async
     background capture, freshness markers, and snapshot tests
-    over the preview render move to `T8-009` (filed alongside).
+    over the preview render move to `CSP-185` (filed alongside).
 
-- [x] `P8-010` Implement attach-to-existing-mux action.
+- [x] `CSP-169` Implement attach-to-existing-mux action.
+  - Legacy ID: `P8-010`
   - Outcome: `a` key bound. `src/tui/actions.rs` resolves the
     attach target from the current selection — preferred mux for
     an agent session, the candidate's mux for an
@@ -9907,15 +10303,16 @@ work. `P8-014` is post-v1 polish that does not block the release.
     ambiguous / un-muxed / candidate-row / unsupported-row /
     no-selection paths. Remaining work tracked as `T8-008`:
     surface attach-disabled status messages with the
-    yellow-chip styling intended for `T8-003` and verify
+    yellow-chip styling intended for `CSP-180` and verify
     real-tmux attach via a manual script.
 
-- [ ] `P8-011` Implement resume un-muxed agent session into mux.
-  - Outcome (2026-09-30, `REL-007`): still open. `S` resumes an un-muxed
+- [ ] `CSP-170` Implement resume un-muxed agent session into mux.
+  - Legacy ID: `P8-011`
+  - Outcome (2026-09-30, `CSP-538`): still open. `S` resumes an un-muxed
     session in a new terminal; resuming it into a mux remains to do.
   - Scope: model harness-specific resume command support for the
     discovered harnesses Conspectus can safely resume. Add a confirmation
-    flow that creates or selects the mux target per the P8-001 answer,
+    flow that creates or selects the mux target per the CSP-160 answer,
     launches the resume command, and refreshes the graph afterward.
     Unsupported harnesses must show a disabled action with the reason.
   - Tests: fake harness-action tests for supported/unsupported harnesses,
@@ -9925,10 +10322,14 @@ work. `P8-014` is post-v1 polish that does not block the release.
     the graph evidence is ambiguous.
   - Manual checks: select an un-muxed test session for each supported
     harness and verify it resumes in the expected mux target.
-  - Blockers: `P8-010`; may require follow-up ADR if resume semantics
+  - Blockers: `CSP-169`; may require follow-up ADR if resume semantics
     differ materially by harness.
 
-- [ ] `P8-012a` PR right-panel enrichment with async `gh` fetch + cache.
+- [ ] `CSP-171` Add PR, fork, and transcript/history detail enrichments.
+  - Legacy ID: `P8-012` (restored: the story was split into `P8-012a`..`c` and removed)
+
+- [ ] `CSP-171.01` PR right-panel enrichment with async `gh` fetch + cache.
+  - Legacy ID: `P8-012a`
   - Scope: render the right panel for a selected PR row in two
     stages so navigation never blocks on a `gh` call.
     1. **Immediate stage** (synchronous, graph-only): owner/repo,
@@ -9966,9 +10367,10 @@ work. `P8-014` is post-v1 polish that does not block the release.
     snapshots for an open PR (immediate + enriched), a closed PR,
     a merged PR, a draft PR, and a PR whose enrichment fetch
     failed.
-  - Blockers: `P8-005`, `P8-008`, `P8-001a`.
+  - Blockers: `CSP-164`, `CSP-167`, `CSP-160.01`.
 
-- [ ] `P8-012b` Fork right-panel enrichment (lineage, context, children).
+- [ ] `CSP-171.02` Fork right-panel enrichment (lineage, context, children).
+  - Legacy ID: `P8-012b`
   - Scope: enrich the right panel for a selected fork row beyond
     `node show` parity: parent-fork lineage, fork context effects
     (recorded via the atelier discovery provider), related checkouts,
@@ -9977,21 +10379,23 @@ work. `P8-014` is post-v1 polish that does not block the release.
     scroll independently.
   - Tests: snapshot tests against the existing atelier fork fixtures;
     a regression for the truncation marker on a deep fork lineage.
-  - Blockers: `P8-005`, `P8-008`.
+  - Blockers: `CSP-164`, `CSP-167`.
 
-- [ ] `P8-012c` Un-muxed agent transcript preview.
+- [ ] `CSP-171.03` Un-muxed agent transcript preview.
+  - Legacy ID: `P8-012c`
   - Scope: v1 release-boundary marker for the un-muxed-agent
     right-panel transcript preview. Implementation tracks under
     the `Agent Session Transcript Preview And Viewer` workstream
     in the Hardening Backlog (`H-TRANSCRIPT-*`). This story is
-    satisfied when `H-TRANSCRIPT-010` (TUI wire-up) and the
-    extractors it depends on (`H-TRANSCRIPT-004` /
-    `H-TRANSCRIPT-005` / `H-TRANSCRIPT-006`) land. Aider stays
-    deferred per `H-TRANSCRIPT-007`.
-  - Blockers: `H-TRANSCRIPT-010`. Parallel to `P8-012a` and
-    `P8-012b`.
+    satisfied when `CSP-214` (TUI wire-up) and the
+    extractors it depends on (`CSP-208` /
+    `CSP-209` / `CSP-210`) land. Aider stays
+    deferred per `CSP-211`.
+  - Blockers: `CSP-214`. Parallel to `CSP-171.01` and
+    `CSP-171.02`.
 
-- [ ] `P8-013` Document and verify the v1 TUI workflow.
+- [ ] `CSP-172` Document and verify the v1 TUI workflow.
+  - Legacy ID: `P8-013`
   - Scope: update `docs/operations.md` and README-level command listings
     with `conspectus tui`, keybindings, privacy/performance notes for live
     preview, supported actions, unsupported actions, and troubleshooting
@@ -10000,11 +10404,12 @@ work. `P8-014` is post-v1 polish that does not block the release.
   - Tests: `just check`; targeted TUI snapshot tests; CLI smoke tests.
   - Manual checks: all commands listed in
     `docs/implementation/phase-08-interactive-tui.md`.
-  - Blockers: `P8-008`, `P8-010`; `P8-011`, `P8-012a`, `P8-012b`, and
-    `P8-012c` if included in the v1 release boundary.
+  - Blockers: `CSP-167`, `CSP-169`; `CSP-170`, `CSP-171.01`, `CSP-171.02`, and
+    `CSP-171.03` if included in the v1 release boundary.
 
-- [ ] `P8-014` Inline mux-picker for ambiguous `LinkedToMux` candidates.
-  - Note (2026-09-30, `REL-003b`): `m` is no longer free; ADR 0096 bound
+- [ ] `CSP-175` Inline mux-picker for ambiguous `LinkedToMux` candidates.
+  - Legacy ID: `P8-014`
+  - Note (2026-09-30, `CSP-534.02`): `m` is no longer free; ADR 0096 bound
     it globally to the Mux action menu. The menu-first home for this
     picker is a context entry in the `m` menu, offered when the selected
     session has ambiguous mux candidates. The status line now advertises
@@ -10027,11 +10432,12 @@ work. `P8-014` is post-v1 polish that does not block the release.
     ambiguous-mux picker over an agent row; a regression test
     confirming `a` continues to attach to the resolver's
     preferred candidate when `m` is never pressed.
-  - Blockers: `P8-010` (attach action) and the v1 keybinding
-    surface from `P8-006`.
+  - Blockers: `CSP-169` (attach action) and the v1 keybinding
+    surface from `CSP-165`.
 
-- [x] `P8-015` Surface session `title` in the sessions row tree when it
+- [x] `CSP-176` Surface session `title` in the sessions row tree when it
     uniquely distinguishes siblings.
+  - Legacy ID: `P8-015`
   - Outcome: shipped. `AgentSessionRow` gained a
     `title_disambiguates: bool` field plus a new `tree_label()`
     helper that returns `alias > (title if title_disambiguates) >
@@ -10068,8 +10474,9 @@ work. `P8-014` is post-v1 polish that does not block the release.
     right-pane header, and the alias-overlay precedence in
     `display_label` is preserved.
 
-- [x] `H-AGENT-EPOCH` Populate `AgentSessionNode.last_active_epoch`
+- [x] `CSP-177` Populate `AgentSessionNode.last_active_epoch`
     across harness adapters.
+  - Legacy ID: `H-AGENT-EPOCH`
   - Scope: extend `AgentSessionNode` with an optional
     `last_active_epoch: Option<i64>` field (Unix seconds) and
     populate it from each supported harness adapter
@@ -10086,7 +10493,7 @@ work. `P8-014` is post-v1 polish that does not block the release.
     fixture; an integration test that the resolver and JSON
     output round-trip the new field.
   - Blockers: none; can land independently of further P8 stories,
-    but P8-008's discovery refresh path benefits when this lands
+    but CSP-167's discovery refresh path benefits when this lands
     before snapshot tests on the rendered v1 TUI freeze.
   - Outcome: `AgentSessionNode` now carries optional
     `last_active_epoch`. Claude Code and Codex populate it from
@@ -10099,9 +10506,10 @@ work. `P8-014` is post-v1 polish that does not block the release.
   - Tests: adapter unit coverage for Claude, Codex, and opencode
     activity; row-tree test for `activity_epoch` / `recency`.
 
-- [x] `T8-001` Collapse duplicate repo group rows when a project
+- [x] `CSP-178` Collapse duplicate repo group rows when a project
     appears across multiple checkout buckets in the TUI sessions
     row tree.
+  - Legacy ID: `T8-001`
   - Outcome: `emit_checkout_bucket` now tracks the most recent
     workspace + repo keys and skips re-emitting headers when
     they're unchanged across adjacent checkout buckets (buckets
@@ -10110,7 +10518,8 @@ work. `P8-014` is post-v1 polish that does not block the release.
     `two_checkouts_in_same_repo_show_checkout_level` test now
     asserts exactly one repo row.
 
-- [ ] `T8-003` Fill out the TUI empty/loading/error frame matrix.
+- [ ] `CSP-180` Fill out the TUI empty/loading/error frame matrix.
+  - Legacy ID: `T8-003`
   - Scope: render the full set of empty/loading/error frames
     documented in
     `docs/implementation/phase-08-interactive-tui.md` —
@@ -10120,10 +10529,11 @@ work. `P8-014` is post-v1 polish that does not block the release.
   - Tests: Ratatui buffer snapshots for each state. Reuse the
     `render_to_buffer` / `buffer_to_string` helpers already in
     `src/tui/ui.rs`.
-  - Blockers: `P8-007` v1 slice (the render shell is there); a
+  - Blockers: `CSP-166` v1 slice (the render shell is there); a
     `Msg::SetError` reducer addition may be needed.
 
-- [x] `T8-004` Same-line session preview switch.
+- [x] `CSP-181` Same-line session preview switch.
+  - Legacy ID: `T8-004`
   - Scope: narrow-mode stacking (terminal width < 100 cols)
     landed in the polish pass — the body switches from a
     horizontal split to a vertical stack at the threshold. The
@@ -10138,9 +10548,10 @@ work. `P8-014` is post-v1 polish that does not block the release.
     Left-tree auto-scroll now tracks one physical row per visible
     row again.
   - Tests: `cargo test tui --all-targets`.
-  - Blockers: `P8-007` v1 slice.
+  - Blockers: `CSP-166` v1 slice.
 
-- [x] `T8-005` Header `updated Ns ago` freshness indicator.
+- [x] `CSP-182` Header `updated Ns ago` freshness indicator.
+  - Legacy ID: `T8-005`
   - Outcome: `Msg::SetData` now carries `loaded_at_epoch`,
     `App::loaded_at_epoch()` exposes it, and the header renders
     `updated Ns ago · counts` via the shared
@@ -10148,18 +10559,19 @@ work. `P8-014` is post-v1 polish that does not block the release.
     `#[cfg(test)]`-controllable shim so snapshot tests stay
     deterministic.
 
-- [ ] `T8-006` Expand TUI buffer-snapshot test coverage.
+- [ ] `CSP-183` Expand TUI buffer-snapshot test coverage.
+  - Legacy ID: `T8-006`
   - Scope: add `insta`-backed snapshot tests covering the
     sessions-view default render at 80×24, the
     ambiguous-mux-expanded variant, the mux view (once
-    `P8-004` mux builder lands), the PR view (once `P8-004`
+    `CSP-163` mux builder lands), the PR view (once `CSP-163`
     prs builder lands), a narrow 60-col terminal (depends on
-    `T8-004`), the search overlay (depends on `/`-key wiring),
+    `CSP-181`), the search overlay (depends on `/`-key wiring),
     the help overlay, the empty-graph frame, the
     `--no-live-preview` frame, and the
     selection-retention-after-refresh frame. Keep snapshots
     deterministic with fixed fixtures.
-  - Blockers: `P8-007` v1 slice; individual snapshot variants
+  - Blockers: `CSP-166` v1 slice; individual snapshot variants
     depend on the corresponding feature stories.
   - **slice landed**: expanded `src/tui/ui.rs` coverage around
     right-pane focus, selected-row styling when focus moves,
@@ -10167,8 +10579,9 @@ work. `P8-014` is post-v1 polish that does not block the release.
     preview headers, and bottom-cropped mux captures. The broader
     snapshot matrix remains open.
 
-- [ ] `T8-009` Throttle and freshen mux pane-capture previews.
-  - Scope: the v1 P8-009 cut runs `tmux capture-pane`
+- [ ] `CSP-185` Throttle and freshen mux pane-capture previews.
+  - Legacy ID: `T8-009`
+  - Scope: the v1 CSP-168 cut runs `tmux capture-pane`
     synchronously on every selection change and never re-runs
     until the next change. Add (1) a `mux_preview_interval`-
     driven refresh so a stable selection still gets fresher
@@ -10177,11 +10590,12 @@ work. `P8-014` is post-v1 polish that does not block the release.
     preview render with a fake runner so the layout stays
     locked, and (4) background-thread execution per ADR 0024
     so capture never blocks input. The background piece
-    overlaps `T8-007`; consider folding the two into a single
+    overlaps `CSP-184`; consider folding the two into a single
     background-work pass.
-  - Blockers: `P8-009` v1 slice. Best done alongside `T8-007`.
+  - Blockers: `CSP-168` v1 slice. Best done alongside `CSP-184`.
 
-- [x] `T8-010` Render ANSI color in tmux previews.
+- [x] `CSP-186` Render ANSI color in tmux previews.
+  - Legacy ID: `T8-010`
   - Outcome: `SystemTmux::capture_pane` now passes `-e` so tmux
     emits the pane's escape sequences alongside the visible text.
     The right-panel preview consumes those via `ansi-to-tui`
@@ -10193,7 +10607,8 @@ work. `P8-014` is post-v1 polish that does not block the release.
     content. Three unit tests cover the colour, no-colour, and
     malformed-input paths.
 
-- [x] `T8-011` Strengthen selected-row and focused-pane visual states.
+- [x] `CSP-187` Strengthen selected-row and focused-pane visual states.
+  - Legacy ID: `T8-011`
   - Visual slice landed in the earlier polish commit. Behavioral
     half landed now: `Msg::ScrollPreviewBy(i32)` replaces the
     old `ScrollPreviewDown` / `ScrollPreviewUp` variants. The
@@ -10216,9 +10631,10 @@ work. `P8-014` is post-v1 polish that does not block the release.
     snapshots for left-focus, right-focus, selected agent row,
     selected mux-candidate row, and scrollable vs non-scrollable
     preview states.
-  - Blockers: `P8-006`, `P8-007` v1 slices.
+  - Blockers: `CSP-165`, `CSP-166` v1 slices.
 
-- [ ] `T8-012` Compress project, path, and mux display labels.
+- [ ] `CSP-188` Compress project, path, and mux display labels.
+  - Legacy ID: `T8-012`
   - Scope: introduce display-label helpers for TUI rows and detail
     fields so raw paths and tmux native ids do not dominate prime
     screen space. Group rows should use a short project/checkout
@@ -10230,7 +10646,7 @@ work. `P8-014` is post-v1 polish that does not block the release.
     duplicate basename disambiguation, long tmux id compression,
     and stable labels across refresh; Ratatui snapshots for narrow
     and 120-col sessions views.
-  - Blockers: `P8-004`, `P8-005`, `P8-007` v1 slices.
+  - Blockers: `CSP-163`, `CSP-164`, `CSP-166` v1 slices.
   - **slice landed**: the sessions tree renders compact group
     primary labels with dim shortened-path secondary text, long mux
     labels are shortened in candidate rows and detail fields, and
@@ -10244,7 +10660,8 @@ work. `P8-014` is post-v1 polish that does not block the release.
     disambiguation and shared view-model helpers across CLI and
     TUI surfaces.
 
-- [x] `T8-025` Show full session and mux IDs in the TUI.
+- [x] `CSP-299` Show full session and mux IDs in the TUI.
+  - Legacy ID: `T8-025`
   - Scope: replace the TUI's agent-session id-suffix display with
     the full harness-native session id and the full mux-native session
     name anywhere the operator needs an identifier they can copy and
@@ -10267,7 +10684,7 @@ work. `P8-014` is post-v1 polish that does not block the release.
     Codex or Claude session with a long native id, and confirm the
     right pane exposes the whole id in display order from the beginning
     of the id.
-  - Blockers: `P8-005`, `P8-007` v1 slices.
+  - Blockers: `CSP-164`, `CSP-166` v1 slices.
   - Outcome: the TUI detail pane now renders full `session_key`
     values in the explicit `id` row for selected agent sessions, full
     mux session names in the explicit `name` row, and typed full
@@ -10275,7 +10692,8 @@ work. `P8-014` is post-v1 polish that does not block the release.
     rows, and parent-session lineage fields. The detail renderer no
     longer uses the bold compact title line as the copyable identifier.
 
-- [x] `T8-026` Expand linked entities from the TUI detail pane.
+- [x] `CSP-300` Expand linked entities from the TUI detail pane.
+  - Legacy ID: `T8-026`
   - Scope: add a right-pane keybinding that expands linked entities in
     place. For a selected agent session, the Mux section's linked
     `tmux:<name>` row should expand into the mux's full detail fields.
@@ -10305,7 +10723,8 @@ as compact relationship rows; the selected relationship gets a compact
 preview; graph depth is reached by drilldown with breadcrumbs rather
 than recursive inline detail panes.
 
-- [x] `T8-027` Model detail-pane relationship groups and previews.
+- [x] `CSP-313` Model detail-pane relationship groups and previews.
+  - Legacy ID: `T8-027`
   - Scope: replace the recursive `HeaderField.expanded_fields` detail
     payload with a view model that separates core node facts,
     relationship groups, selected relationship row, neighbor preview,
@@ -10316,23 +10735,25 @@ than recursive inline detail panes.
   - Tests: pure view-model tests for mux, agent session, runtime
     process, repo/checkout, fork, and PR nodes; coverage for empty
     groups, unresolved endpoints, conflicts, and long labels.
-  - Blockers: `H-MUXPROC-FU-006`, `P10-010`.
+  - Blockers: `CSP-312`, `CSP-288`.
 
-- [x] `T8-028` Replace inline expansion with relationship-group
+- [x] `CSP-314` Replace inline expansion with relationship-group
   navigation.
+  - Legacy ID: `T8-028`
   - Scope: change `e` to expand/collapse relationship groups only.
     Add right-pane cursor state for relationship rows. `Enter` drills
     into the selected neighbor node, `Backspace` returns through a
     breadcrumb stack, and selection survives refreshes by node id plus
     selected relationship id where possible. Remove or retire the
-    existing "expanded linked details" state from `T8-026`.
+    existing "expanded linked details" state from `CSP-300`.
   - Tests: reducer/keymap tests for group expand/collapse, drilldown,
     back navigation, breadcrumb reset on missing nodes, and refresh
     stability.
-  - Blockers: `T8-027`.
+  - Blockers: `CSP-313`.
 
-- [x] `T8-029` Render the focused inspector, relationship explorer,
+- [x] `CSP-315` Render the focused inspector, relationship explorer,
   and preview layout.
+  - Legacy ID: `T8-029`
   - Scope: update the right-panel renderer so core node facts, grouped
     relationships, and selected-edge/neighbor preview have distinct
     visual treatment. Avoid nested section dividers in previews.
@@ -10342,9 +10763,10 @@ than recursive inline detail panes.
   - Tests: Ratatui buffer snapshots for the cluttered mux/process
     case, narrow terminals, long labels, expanded groups, and
     breadcrumb drilldown.
-  - Blockers: `T8-028`.
+  - Blockers: `CSP-314`.
 
-- [x] `T8-030` Add full-value inspection for long detail fields.
+- [x] `CSP-316` Add full-value inspection for long detail fields.
+  - Legacy ID: `T8-030`
   - Scope: provide a focused way to inspect long values from the core
     summary, relationship rows, and previews without forcing them into
     the main detail layout. Candidate UX: `o` opens a centered
@@ -10354,10 +10776,11 @@ than recursive inline detail panes.
   - Tests: widget/reducer tests for opening, scrolling, and closing the
     full-value view; buffer snapshots for long command and observation
     key values.
-  - Blockers: `T8-029`.
+  - Blockers: `CSP-315`.
 
-- [x] `T8-031` Update docs and scenario coverage for detail graph
+- [x] `CSP-317` Update docs and scenario coverage for detail graph
   navigation.
+  - Legacy ID: `T8-031`
   - Scope: update TUI help/keybinding docs and dev scenario docs to
     describe relationship-group expansion, drilldown, breadcrumbs, and
     full-value inspection. Ensure `process-cardinality`,
@@ -10365,10 +10788,11 @@ than recursive inline detail panes.
     detail explorer manually.
   - Tests: help-overlay snapshot/keybinding tests and scenario smoke
     coverage for launching the TUI on the relevant named scenarios.
-  - Blockers: `T8-030`, `TEST-006`.
+  - Blockers: `CSP-316`, `CSP-306`.
 
-- [ ] `T8-032` First-class evidence inspector and link-promotion
+- [ ] `CSP-318` First-class evidence inspector and link-promotion
   flow.
+  - Legacy ID: `T8-032`
   - Scope: replace the v1 `o opens evidence` placeholder on
     unresolved-evidence rows (per
     `docs/tui-detail-mockup.md`) with a focused inspector that
@@ -10388,12 +10812,13 @@ than recursive inline detail panes.
     appropriate local-or-global store per `docs/design.md`'s
     persistence rules; snapshot coverage for the inspector with
     sparse vs richly-populated unresolved endpoints.
-  - Blockers: `T8-030`, declared-link CRUD landing in the TUI
+  - Blockers: `CSP-316`, declared-link CRUD landing in the TUI
     surface (currently CLI-only).
 
-- [ ] `T8-032a` Surface resolver explanations in the TUI detail
+- [ ] `CSP-318.01` Surface resolver explanations in the TUI detail
   explorer.
-  - Scope: expose the `H-OBS-004` explanation model from the right-pane
+  - Legacy ID: `T8-032a`
+  - Scope: expose the `CSP-096` explanation model from the right-pane
     graph explorer so an operator can inspect why a selected resolved
     relationship won. The focused relationship preview and/or `o`
     full-value modal should show the selected candidate score axes,
@@ -10404,15 +10829,16 @@ than recursive inline detail panes.
     reimplementing score calculation in the renderer. Relationships
     without explanation data should render normally with a clear
     no-explanation fallback. Link writes and promotion remain owned by
-    `T8-032`.
+    `CSP-318`.
   - Tests: reducer/keymap coverage for opening and closing explanation
     inspection from a selected relationship; Ratatui buffer snapshots
     for explained, ambiguous, and no-explanation relationship rows;
     scenario coverage using an ambiguity fixture such as `ambiguous-mux`
     or an equivalent resolver fixture.
-  - Blockers: `H-OBS-004`, `T8-030`.
+  - Blockers: `CSP-096`, `CSP-316`.
 
-- [ ] `T8-033` TUI responsive-layout design and breakpoints.
+- [ ] `CSP-319` TUI responsive-layout design and breakpoints.
+  - Legacy ID: `T8-033`
   - Scope: codify the layout breakpoints the TUI uses across all
     views so the detail-pane explorer (and the rest of the TUI)
     renders predictably across terminal sizes. Decide and
@@ -10432,12 +10858,13 @@ than recursive inline detail panes.
     stack-vs-split, expand-on-focus, and hide-and-tab behaviors;
     keymap coverage for the tab affordance when the right pane is
     hidden.
-  - Blockers: `T8-014` (contextual status bar — the breakpoint
+  - Blockers: `CSP-190` (contextual status bar — the breakpoint
     rules need to play nicely with the contextual status zone),
-    `T8-027` v1 slice (so the detail-pane explorer's needs are
+    `CSP-313` v1 slice (so the detail-pane explorer's needs are
     concrete before thresholds are picked).
 
-- [x] `T8-034` Expanded Node Detail toggle.
+- [x] `CSP-320` Expanded Node Detail toggle.
+  - Legacy ID: `T8-034`
   - Scope: add a "full node" toggle that swaps the Node zone's
     top-5 render for every field the focused node carries
     (per `docs/tui-detail-mockup.md`'s Expanded Node Detail View
@@ -10455,9 +10882,10 @@ than recursive inline detail panes.
     field set; snapshot coverage for at least one expanded
     `agent_session`, `mux_session`, `runtime_process`, and
     `forge_pr` case.
-  - Blockers: `T8-027` modeling.
+  - Blockers: `CSP-313` modeling.
 
-- [x] `T8-035` Left-pane mirror sync (default).
+- [x] `CSP-321` Left-pane mirror sync (default).
+  - Legacy ID: `T8-035`
   - Scope: implement `[tui.detail].left_pane_sync = "mirror"` as
     the default behavior per `docs/tui-detail-mockup.md`'s
     Left / Right Pane Synchronization section. When the right pane
@@ -10478,9 +10906,10 @@ than recursive inline detail panes.
     tree navigation collapsing the drill, and the "focused node
     has no row" fallback. Buffer snapshots for at least the
     sessions and mux views across one round of drilldown.
-  - Blockers: `T8-028`.
+  - Blockers: `CSP-314`.
 
-- [ ] `T8-036` Left-pane follow sync (opt-in view switching).
+- [ ] `CSP-322` Left-pane follow sync (opt-in view switching).
+  - Legacy ID: `T8-036`
   - Scope: implement `[tui.detail].left_pane_sync = "follow"`
     per `docs/tui-detail-mockup.md`. In `follow` mode, when
     `mirror` would keep the left pane's previous selection
@@ -10499,10 +10928,11 @@ than recursive inline detail panes.
     fallback-to-mirror behavior on view-less node kinds; tests
     for Backspace restoring view + selection; Controls overlay
     mode-flip tests.
-  - Blockers: `T8-035`.
+  - Blockers: `CSP-321`.
 
-- [ ] `T8-037` Distinguish symmetric relations in the detail
+- [ ] `CSP-323` Distinguish symmetric relations in the detail
   explorer.
+  - Legacy ID: `T8-037`
   - Scope: today the explorer buckets edges into Upstream /
     Downstream from the underlying `GraphLink`'s `source → target`
     direction, which reads correctly for directional relations
@@ -10522,9 +10952,10 @@ than recursive inline detail panes.
     relation; coverage for a node with *only* symmetric edges
     (Upstream and Downstream should suppress, Related should
     render alone).
-  - Blockers: T8-027 modeling.
+  - Blockers: CSP-313 modeling.
 
-- [x] `T8-038` Shorten breadcrumb hop labels and elide deep chains.
+- [x] `CSP-324` Shorten breadcrumb hop labels and elide deep chains.
+  - Legacy ID: `T8-038`
   - Scope: today each breadcrumb hop renders the focused node's
     full display label, which eats the breadcrumb line after two
     hops. Render hops as `kind:short_tag` (e.g. `mux:editor`,
@@ -10538,10 +10969,11 @@ than recursive inline detail panes.
     short label; rendering tests at narrow widths confirming
     elision (`first … last-N`) without dropping the current hop;
     snapshot coverage for a 4+ hop chain.
-  - Blockers: `T8-028`.
+  - Blockers: `CSP-314`.
 
-- [x] `T8-039` Surface node kind as a first-class field in the
+- [x] `CSP-325` Surface node kind as a first-class field in the
   detail pane.
+  - Legacy ID: `T8-039`
   - Scope: today the node kind is buried in the harness-prefixed
     id (e.g. `opencode:ses_…`) and the operator has to parse it
     out. Render the kind as a dim leading chip (e.g.
@@ -10552,17 +10984,18 @@ than recursive inline detail panes.
     (`Repo`, `Workspace`, `Checkout`) when the lookup succeeds; on
     no match leave the path bare rather than guessing. Apply the
     same convention to the breadcrumb hop short-form from
-    `T8-038`.
+    `CSP-324`.
   - Tests: renderer tests for kind chips on each node kind across
     the Node zone, link rows, and group headers; reverse-lookup
     tests for `cwd` resolving to Repo / Workspace / Checkout / no
     match; snapshot coverage for a sparse-graph case where the
     `cwd` doesn't resolve.
-  - Blockers: `T8-027`, `T8-038` (so the breadcrumb short-form can
+  - Blockers: `CSP-313`, `CSP-324` (so the breadcrumb short-form can
     pick up the chip too).
 
-- [x] `T8-040` Enter-to-copy on Node-zone fields with a toast
+- [x] `CSP-326` Enter-to-copy on Node-zone fields with a toast
   widget.
+  - Legacy ID: `T8-040`
   - Scope: `Enter` on a Node-zone field row is a no-op today.
     Wire it to copy the field's full value to the system
     clipboard and surface a transient toast ("copied: cwd") via a
@@ -10584,7 +11017,7 @@ than recursive inline detail panes.
     older); regression test that Enter on link rows still drills
     and Enter on group headers still toggles; coverage that empty
     or absent values don't surface a misleading "copied" toast.
-  - Blockers: `T8-027` (cleared). Clipboard backend ADR landed as
+  - Blockers: `CSP-313` (cleared). Clipboard backend ADR landed as
     ADR 0056.
   - **slice landed**: OSC 52 clipboard primitive at
     `src/tui/clipboard.rs` (in-tree base64 encoder, no new deps per
@@ -10600,8 +11033,9 @@ than recursive inline detail panes.
     and surfaces a status hint when the selection isn't a session
     row. Help overlay advertises both bindings.
 
-- [x] `T8-041` Flip the Upstream / Downstream header layout so
+- [x] `CSP-327` Flip the Upstream / Downstream header layout so
   zone labels anchor to the right.
+  - Legacy ID: `T8-041`
   - Scope: today the explorer's zone headers render the bold
     `Upstream` / `Downstream` label on the left and the aggregate
     summary on the right (`Downstream  2 groups · 3 links · 1 ⚠`),
@@ -10610,17 +11044,18 @@ than recursive inline detail panes.
     narrow. Flip the order so the aggregate counts render on the
     left and the bold label anchors flush right
     (`2 groups · 3 links · 1 ⚠  Downstream`). Apply the same flip
-    to the third **Related** zone introduced by `T8-037` if it
+    to the third **Related** zone introduced by `CSP-323` if it
     lands first.
   - Tests: renderer snapshot for a wide pane (aggregate left,
     label flush right); snapshot for a narrow pane (label still
     visible, aggregate elided rather than the label); coverage
     for Upstream, Downstream, and Related zones; regression that
     empty zones still suppress entirely.
-  - Blockers: `T8-029` renderer.
+  - Blockers: `CSP-315` renderer.
 
-- [x] `T8-042` Hide edge meta (`provenance · confidence · state`)
+- [x] `CSP-328` Hide edge meta (`provenance · confidence · state`)
   from link rows by default with an opt-in toggle.
+  - Legacy ID: `T8-042`
   - Scope: today every link row in the explorer carries a trailing
     `discovered · high · active` line that exposes the resolver's
     provenance / confidence / state triple plus the `alt of …` edge
@@ -10649,12 +11084,13 @@ than recursive inline detail panes.
     for the new `show_edge_meta` knob; coverage that `★` and `⚠`
     remain visible in the default (compact) mode; reducer test
     for the toggle preserving cursor row identity.
-  - Blockers: `T8-029` renderer; Controls overlay entry slot
+  - Blockers: `CSP-315` renderer; Controls overlay entry slot
     (ADR 0031).
 
-- [ ] `T8-020` Auto-broaden TUI scan roots to the cwd's "code dir"
+- [ ] `CSP-196` Auto-broaden TUI scan roots to the cwd's "code dir"
     ancestor when neither CLI nor config specifies one. Low
     priority.
+  - Legacy ID: `T8-020`
   - Scope: when `--scan-root` and `[tui].scan_roots` are both
     empty, walk up from the process cwd to the first ancestor
     that contains ≥ N (default 2 or 3) immediate-child entries
@@ -10671,14 +11107,15 @@ than recursive inline detail panes.
     directories with varied repo counts and depths; the
     runtime side wires through the same scan-root resolution
     path as `[tui].scan_roots`.
-  - Blockers: `T8-013` v1 slice. Filed at low priority per
+  - Blockers: `CSP-189` v1 slice. Filed at low priority per
     operator direction — config-driven `[tui].scan_roots` is
     the preferred default; this auto-broaden mode is a
     "no-config still does the right thing most of the time"
     affordance.
 
-- [ ] `T8-021` Descend into scan roots when looking for atelier
-    workspaces (companion to `T8-020`).
+- [ ] `CSP-267` Descend into scan roots when looking for atelier
+    workspaces (companion to `CSP-196`).
+  - Legacy ID: `T8-021`
   - Scope: `src/discovery/atelier.rs::find_atelier_config`
     currently walks only **upward** from each scan root looking
     for `atelier.toml`, so a scan root one directory above a
@@ -10713,14 +11150,15 @@ than recursive inline detail panes.
     (no regression on the `--scan-root ~/src/sysadmin/config`
     pattern), (e) the noise-directory exclusion list is
     honored.
-  - Blockers: none directly. Pairs naturally with `T8-020`:
+  - Blockers: none directly. Pairs naturally with `CSP-196`:
     once auto-broaden picks the right starting directory, this
     story makes the workspaces beneath it discoverable. Either
     can ship without the other; together they remove the
     "give me a multi-project view" friction.
 
-- [x] `T8-013` Default-expand and mark the launch-context project
+- [x] `CSP-189` Default-expand and mark the launch-context project
     without filtering the world.
+  - Legacy ID: `T8-013`
   - Outcome: scan roots now resolve CLI → `[tui].scan_roots`
     config → cwd-default (operator picked option (b)).
     `src/config.rs` gained a `TuiConfig` struct with
@@ -10738,7 +11176,7 @@ than recursive inline detail panes.
     load over the leading row (later refreshes ignore the
     hint so manual selection isn't clobbered). The renderer
     adds a dim cyan `(cwd)` suffix to the marked row. Auto-
-    broaden option (c) filed as low-priority `T8-020`.
+    broaden option (c) filed as low-priority `CSP-196`.
   - **slice landed**: initial expansion now opens only the
     launch-context tree (ancestors, the marked group, and its
     descendant groups) while leaving unrelated groups collapsed
@@ -10747,7 +11185,8 @@ than recursive inline detail panes.
     non-cwd-oriented data still present a usable starting point.
   - Tests: `cargo test tui --all-targets`.
 
-- [x] `T8-014` Make the status bar contextual to the selected row.
+- [x] `CSP-190` Make the status bar contextual to the selected row.
+  - Legacy ID: `T8-014`
   - Outcome: closed. The status bar's left zone is fully contextual
     via `contextual_status_text` / `default_action_status_hint` in
     `src/tui/ui.rs`: attachable rows show
@@ -10770,10 +11209,11 @@ than recursive inline detail panes.
     `contextual_status_surfaces_disabled_attach_reason_for_current_tmux_session`.
   - Follow-ups: provider/freshness chip *content* (richer wording,
     chip ordering polish, "tmux:off" vs "tmux:unavailable" nuance)
-    stays with `T8-003`; this story closes on the contextual-left-zone
+    stays with `CSP-180`; this story closes on the contextual-left-zone
     deliverable and the right-zone wire-up.
 
-- [x] `T8-043` Make Enter trigger the selected row's default action.
+- [x] `CSP-353` Make Enter trigger the selected row's default action.
+  - Legacy ID: `T8-043`
   - Outcome: closed. `Enter` on the left pane dispatches via
     `selected_default_action` (`src/tui/runtime.rs`): mux rows and
     muxed/ambiguous agent sessions attach (reusing `attach_action`);
@@ -10802,11 +11242,12 @@ than recursive inline detail panes.
     disabled-attach fallback
     (`contextual_status_surfaces_disabled_attach_reason_for_current_tmux_session`).
   - Manual checks: validated with the existing fixture suite and the
-    `--snapshot` harness; round-trip attach (`T8-018`) and viewer
-    launch (`H-VIEWER-NATIVE-008`) remain the operator-facing
+    `--snapshot` harness; round-trip attach (`CSP-194`) and viewer
+    launch (`CSP-340`) remain the operator-facing
     verification paths.
 
-- [ ] `T8-015` Add sessions-tree density modes.
+- [ ] `CSP-191` Add sessions-tree density modes.
+  - Legacy ID: `T8-015`
   - Scope: add a user-facing density setting for the sessions view
     so operators can trade context for row count. Suggested modes:
     `compact` (one line per session, no same-line previews),
@@ -10817,10 +11258,11 @@ than recursive inline detail panes.
   - Tests: row-tree/render snapshots for all density modes at
     80x24 and a wide terminal; config parsing tests once the
     setting is added.
-  - Blockers: `P8-007` v1 slice; should follow `T8-004` so wide
+  - Blockers: `CSP-166` v1 slice; should follow `CSP-181` so wide
     inline behavior is not duplicated.
 
-- [ ] `T8-016` Crop and annotate tmux previews for recognition.
+- [ ] `CSP-192` Crop and annotate tmux previews for recognition.
+  - Legacy ID: `T8-016`
   - Scope: make the mux preview behave like a recognition surface,
     not a raw dump. Prefer the bottom N visible lines from
     `capture-pane`, preserve wrapping enough to resemble the
@@ -10830,16 +11272,17 @@ than recursive inline detail panes.
   - Tests: preview adapter tests for bottom-line cropping,
     configurable line budget, stale/fresh labels, and failed
     capture labels; Ratatui snapshots for long and short captures.
-  - Blockers: `P8-009` v1 slice; overlaps `T8-009` freshness
+  - Blockers: `CSP-168` v1 slice; overlaps `CSP-185` freshness
     work and should be planned with it.
   - **slice landed**: mux previews now use a compact separator
     carrying the display target and capture freshness when cached,
     and captured pane text is cropped to the bottom lines available
     in the preview zone. Configurable budgets and stale/failure
-    header variants remain open with `T8-009`.
+    header variants remain open with `CSP-185`.
 
-- [x] `T8-018` Round-trip attach: return to the TUI after the operator
+- [x] `CSP-194` Round-trip attach: return to the TUI after the operator
     detaches from the mux client.
+  - Legacy ID: `T8-018`
   - Outcome: `attach_action` no longer `exec`s into tmux.
     Instead, it calls `ratatui::restore()`, spawns
     `tmux attach-session -t <native_id>` with
@@ -10871,10 +11314,11 @@ than recursive inline detail panes.
     the next refresh is scheduled, and that a fake "command
     failed" surfaces as a status message. Manual: attach,
     detach, repeat from a different row.
-  - Blockers: `P8-010` v1 slice.
+  - Blockers: `CSP-169` v1 slice.
 
-- [x] `T8-019` Auto-scroll the left tree to keep the selected row
+- [x] `CSP-195` Auto-scroll the left tree to keep the selected row
     visible.
+  - Legacy ID: `T8-019`
   - Outcome: `App` gained a `Cell<u16>` left-panel scroll offset
     and an `adjust_left_scroll(selected_line, viewport_height)`
     method that nudges the offset only when the selected row
@@ -10891,7 +11335,7 @@ than recursive inline detail panes.
     the existing reducer; this story just keeps the rendered
     view in sync. Open: pixel-precise centering on first focus
     and a manual-scroll keymap remain follow-ons under
-    `T8-006`'s broader snapshot matrix.
+    `CSP-183`'s broader snapshot matrix.
   - Scope: today the left panel renders all visible rows into a
     single `Paragraph` with no viewport awareness, so once the
     selection moves past the rendered area the user can keep
@@ -10906,11 +11350,12 @@ than recursive inline detail panes.
     the visible top/bottom in a small viewport, PageDown jumping
     by viewport height. Ratatui snapshots for a
     short and a long tree at the same viewport size.
-  - Blockers: `P8-007` v1 slice. Friendlier after `T8-006`
+  - Blockers: `CSP-166` v1 slice. Friendlier after `CSP-183`
     expands the snapshot harness.
 
-- [ ] `T8-017` Add visible search/filter workflow for large session
+- [ ] `CSP-193` Add visible search/filter workflow for large session
     worlds.
+  - Legacy ID: `T8-017`
   - Scope: finish the `/` in-view search overlay for the TUI and
     make active filtering visible in the header or status bar.
     Matching should cover project label, path, harness, short id,
@@ -10921,11 +11366,12 @@ than recursive inline detail panes.
   - Tests: matcher tests for each searchable field; reducer tests
     for open/type/clear/accept/cancel; Ratatui snapshots for an
     active query, zero results, and grouped result context.
-  - Blockers: `P8-004`, `P8-006`; adding a heavyweight matcher
+  - Blockers: `CSP-163`, `CSP-165`; adding a heavyweight matcher
     still requires following ADR 0024's dependency policy.
 
-- [x] `T8-007` Move TUI discovery onto a background thread with
+- [x] `CSP-184` Move TUI discovery onto a background thread with
     timer-driven refresh.
+  - Legacy ID: `T8-007`
   - **Landed across four incremental waves**, closed by
     `d513994` on 2026-07-05:
       - Background worker + mpsc plumbing (`spawn_discovery_worker`
@@ -10937,7 +11383,7 @@ than recursive inline detail panes.
       - `Msg::SetRefreshFailure` posts a status message and
         preserves the last-good snapshot on error.
       - Selection retention across refresh via the reducer's
-        `Msg::SetData` handling (per P8-006).
+        `Msg::SetData` handling (per CSP-165).
       - Provider diagnostics populate through
         `populate_provider_status` on both init and each drain.
       - Wave closer (`d513994`): `LiveMode::init` now spawns
@@ -10951,8 +11397,9 @@ than recursive inline detail panes.
     peer `DiscoveryResult` producer without touching `app.rs`.
   - Blockers: none (retroactively cleared).
 
-- [ ] `T8-002` Align `conspectus table sessions` columns with the
+- [ ] `CSP-179` Align `conspectus table sessions` columns with the
     TUI sessions row tree once view-models converge.
+  - Legacy ID: `T8-002`
   - Scope: today `output::table` builds its own per-projection
     extractors; the TUI sessions row tree introduces a stable
     pure view-model. Wire the table renderer to consume the same
@@ -10964,8 +11411,8 @@ than recursive inline detail panes.
   - Tests: snapshot parity tests showing TUI row tree and
     `table sessions` produce consistent labels for the same
     snapshot.
-  - Blockers: `P8-004` (all five view-models present) and
-    `P8-005` (detail view-models) so the shared API surface is
+  - Blockers: `CSP-163` (all five view-models present) and
+    `CSP-164` (detail view-models) so the shared API surface is
     settled.
 
 ### Filter, View Switching, And Per-View State (F8-*)
@@ -10980,27 +11427,28 @@ on top. Stories below carve that ADR into implementable slices.
 Dependency shape inside the workstream:
 
 ```
-ADR 0031 ─→ F8-001 ─→ F8-009 ─→ F8-010
+ADR 0031 ─→ CSP-250 ─→ CSP-258 ─→ CSP-259
             │
-            ├─→ F8-002 ─→ F8-003 ─┐
-            │                     │
-            ├─→ F8-006 ─┐         │
-            │           ↓         ↓
-            ├─→ F8-004 ─→ F8-005 ─→ F8-011
-            │           ↓
-            └─→ F8-007 ─→ F8-012
-                F8-008 (independent loader work)
+            ├─→ CSP-251 ─→ CSP-252 ─┐
+            │                       │
+            ├─→ CSP-255 ─┐          │
+            │            ↓          ↓
+            ├─→ CSP-253 ─→ CSP-254 ─→ CSP-260
+            │            ↓
+            └─→ CSP-256 ─→ CSP-261
+                CSP-257 (independent loader work)
 ```
 
-`F8-001`/`F8-002`/`F8-006`/`F8-008` can land in parallel after the
-ADR. `F8-009` and `F8-010` extend the CLI surface and table
-projections respectively. `F8-004` (controls overlay) and the
-status-bar / empty-frame stories converge on `F8-005` for the
-keybinding surface; `F8-011` documents the final keymap once it
+`CSP-250`/`CSP-251`/`CSP-255`/`CSP-257` can land in parallel after the
+ADR. `CSP-258` and `CSP-259` extend the CLI surface and table
+projections respectively. `CSP-253` (controls overlay) and the
+status-bar / empty-frame stories converge on `CSP-254` for the
+keybinding surface; `CSP-260` documents the final keymap once it
 settles.
 
-- [x] `F8-001` Define `RowFilter` predicate + dimension types in a
+- [x] `CSP-250` Define `RowFilter` predicate + dimension types in a
     crate-public module.
+  - Legacy ID: `F8-001`
   - Outcome: shipped in `src/filter.rs` with `RowFilter`,
     `HarnessFilter::Any`, `MuxStateFilter::Any`, and
     `MuxStateKey { Attached, Ambiguous, Unmuxed }` per ADR 0031.
@@ -11021,21 +11469,23 @@ settles.
     intersection of all three v1 dimensions.
   - Blockers: ADR 0031.
 
-- [x] `F8-002` Per-view grouping enums for the four pending views.
+- [x] `CSP-251` Per-view grouping enums for the four pending views.
+  - Legacy ID: `F8-002`
   - Outcome: shipped in `src/tui/mod.rs` — `SessionsGrouping`,
     `MuxGrouping`, `UnionGrouping`, `PrsGrouping`, `ForksGrouping`,
     and a `Grouping` dispatch enum. Each landed alongside the
-    matching P8-004 row-tree builder with cycle-wrap unit tests.
+    matching CSP-163 row-tree builder with cycle-wrap unit tests.
   - Scope: introduce `MuxGrouping`, `UnionGrouping`, `PrsGrouping`,
-    and `ForksGrouping` alongside their P8-004 row-tree builders.
+    and `ForksGrouping` alongside their CSP-163 row-tree builders.
     Wire a `Grouping` dispatch enum so `App` state and config can
     carry a single field that narrows to the active view's enum.
     Sessions enum unchanged but joins the dispatch.
   - Tests: row-tree builder unit tests for each view's grouping
     values; dispatch-enum cycle-to-next tests covering wrap-around.
-  - Blockers: ADR 0031; lands alongside `P8-004` for each view.
+  - Blockers: ADR 0031; lands alongside `CSP-163` for each view.
 
-- [x] `F8-003` Per-view state retention.
+- [x] `CSP-252` Per-view state retention.
+  - Legacy ID: `F8-003`
   - Outcome: shipped — `App::view_states: BTreeMap<View,
     ViewStateSlot>` with `switch_to_view` saving the active slot
     and loading the target slot. Fresh entries seed from
@@ -11050,9 +11500,10 @@ settles.
   - Tests: reducer tests for switch-and-return state retention
     (filters survive `1 → 2 → 1`), per-view selection retention
     across refreshes, fresh-view default seeding from config.
-  - Blockers: `F8-001`, `F8-002`, `F8-005`.
+  - Blockers: `CSP-250`, `CSP-251`, `CSP-254`.
 
-- [x] `F8-004` Controls overlay (modal).
+- [x] `CSP-253` Controls overlay (modal).
+  - Legacy ID: `F8-004`
   - Outcome: shipped in `src/tui/widgets/controls.rs` —
     `ControlsOverlayState` renders the View/Grouping/Filters/Sort
     sections with arrow-key + Enter navigation, Esc back-out, and
@@ -11066,18 +11517,19 @@ settles.
     Inline accelerator hints (`[1]`, `[2]`, …) per row. Drill-in
     sub-editors: harness multi-select, max-age text input (reuses
     ADR 0030 primitive), mux-state multi-select. Filter chips
-    render in the status bar via `F8-007`.
+    render in the status bar via `CSP-256`.
   - Tests: snapshot tests for overlay open, each sub-editor open,
     chip applied state, cleared state. Reducer tests for arrow-key
     navigation skipping section headers and for sub-editor
     Confirm/Cancel outcomes.
-  - Blockers: `F8-001`, `F8-002`, `F8-006`.
+  - Blockers: `CSP-250`, `CSP-251`, `CSP-255`.
 
-- [x] `F8-005` Accelerator keybindings + view-switching plumbing.
+- [x] `CSP-254` Accelerator keybindings + view-switching plumbing.
+  - Legacy ID: `F8-005`
   - Outcome: shipped in `src/tui/runtime.rs` — `1`–`5` (direct
     view), `]`/`[` (cycle), `f` (controls overlay), `F` (clear
     filters), `Ctrl-G` (cycle grouping). `v` was reassigned to
-    the session viewer in H-VIEWER-NATIVE-008 and `f` took over
+    the session viewer in CSP-340 and `f` took over
     the controls overlay role originally planned for `v`. Reducer
     tests pin each binding.
   - Scope: bind `v` (controls overlay), `1`–`5` (direct view
@@ -11086,18 +11538,19 @@ settles.
     Resolve the `G` collision with End — either move "last row" to
     `End` only and reuse `G`, or bind grouping-cycle to `Ctrl-G`.
     Repurposes `f` from the previously-reserved fork action per
-    ADR 0031; impl doc updated. Closes the `P8-006` deferred view-
+    ADR 0031; impl doc updated. Closes the `CSP-165` deferred view-
     switching slice.
   - Tests: reducer tests for each new keybinding; Ratatui snapshots
     for the overlay open vs accelerator-only paths producing the
     same end state.
-  - Blockers: `F8-002`, `F8-004`.
+  - Blockers: `CSP-251`, `CSP-253`.
 
-- [x] `F8-006` Multi-select list widget.
+- [x] `CSP-255` Multi-select list widget.
+  - Legacy ID: `F8-006`
   - Outcome: shipped in `src/tui/widgets/multi_select.rs`. Pure
     state machine with cursor up/down, Space toggle, Enter
     confirm, Esc cancel. Reused by both the harness and
-    mux-state sub-editors. Subsequently ported (H-WIDG-013) to
+    mux-state sub-editors. Subsequently ported (CSP-437) to
     sit on the upstream multi-select primitive while keeping the
     same surface.
   - Scope: shared list-with-checkbox primitive in
@@ -11108,14 +11561,15 @@ settles.
   - Tests: unit tests for cursor wrap, toggle semantics, empty-
     commit (clears the predicate), and large-list scrolling.
   - Blockers: none beyond ADR 0031; can land in parallel with
-    `F8-004`.
+    `CSP-253`.
 
-- [x] `F8-007` Status-bar filter chips + counts-with-totals.
+- [x] `CSP-256` Status-bar filter chips + counts-with-totals.
+  - Legacy ID: `F8-007`
   - Outcome: shipped — `render_filter_chips` renders the active
     filter set with stable ordering (harness → max-age →
     mux-state) and `format_count_with_filtered` shifts header
     counts to `<filtered>/<total>` form when a filter narrows the
-    set. The chip zone landed alongside the H-UI-004 header
+    set. The chip zone landed alongside the CSP-418 header
     rewrite rather than as the originally-scoped status-bar zone.
   - Scope: new status-bar zone left of provider chips, rendering
     active filter chips with ADR 0022 colors and stable ordering
@@ -11125,9 +11579,10 @@ settles.
   - Tests: status-view unit tests for each chip layout; Ratatui
     snapshots for one-chip / many-chips / truncated / cleared
     states.
-  - Blockers: `F8-001`, `T8-003` (provider chip zone).
+  - Blockers: `CSP-250`, `CSP-180` (provider chip zone).
 
-- [x] `F8-008` `[tui.views.<name>]` config schema + legacy alias.
+- [x] `CSP-257` `[tui.views.<name>]` config schema + legacy alias.
+  - Legacy ID: `F8-008`
   - Outcome: shipped in `src/config.rs` — `TuiViewsConfig` parses
     `[tui.views.<name>] grouping = "…"` and
     `[[tui.views.<name>.filters]]` sub-tables. The legacy
@@ -11148,8 +11603,9 @@ settles.
     array-of-tables filter unions.
   - Blockers: ADR 0031; independent of TUI work.
 
-- [x] `F8-009` CLI flag parity: shared `FilterArgs` + per-view
+- [x] `CSP-258` CLI flag parity: shared `FilterArgs` + per-view
     grouping.
+  - Legacy ID: `F8-009`
   - Outcome: shipped in `src/cli.rs` — `FilterArgs` mounted on
     both `TuiArgs` and `TableArgs` exposes `--harness`,
     `--max-age <DURATION>`, `--mux-state`, and `--grouping
@@ -11157,7 +11613,7 @@ settles.
     as a deprecated alias with a stderr warning. CLI smoke tests
     cover each flag, duration parse errors, and view-scoped
     grouping rejection messages. (Table-side consumption for the
-    non-sessions projections is the remaining F8-010 work.)
+    non-sessions projections is the remaining CSP-259 work.)
   - Scope: introduce a shared `FilterArgs` struct mounted on both
     `TuiArgs` and `TableArgs`, exposing `--harness` (repeatable),
     `--max-age <DURATION>`, `--mux-state` (comma-or-repeat), and
@@ -11168,9 +11624,10 @@ settles.
     messages, deprecation-warning emission, `--grouping` rejected
     with a useful message when given an invalid value for the
     chosen view.
-  - Blockers: `F8-001`.
+  - Blockers: `CSP-250`.
 
-- [x] `F8-010` `conspectus table <ROWS>` consumes `RowFilter`.
+- [x] `CSP-259` `conspectus table <ROWS>` consumes `RowFilter`.
+  - Legacy ID: `F8-010`
   - Outcome: shipped. The `RowFilter` produced by `FilterArgs::to_row_filter`
     in `src/cli.rs` is now applied by every `output::*` projection
     builder, not just `output::agent`:
@@ -11197,7 +11654,7 @@ settles.
         the filter has narrowing predicates so the empty-filter
         path stays cheap.
     Renderer wiring in `cli.rs::TableRowsArgs::run` was already in
-    place from F8-009; the stale "F8-010 will start applying"
+    place from CSP-258; the stale "CSP-259 will start applying"
     comment on the `FilterArgs` flatten point is now corrected.
   - Tests: existing `filter_*_agent_table` / `filter_parity_with_tui_sessions_row_tree`
     in `src/output/table.rs` stay; added `filter_harness_narrows_mux_table_via_attached_agents`,
@@ -11212,12 +11669,13 @@ settles.
     (`output::prs`, `output::forks`) collapse into a shared one
     when a third caller arrives.
 
-- [x] `F8-011` Help-overlay docs.
+- [x] `CSP-260` Help-overlay docs.
+  - Legacy ID: `F8-011`
   - Outcome: shipped in `src/tui/widgets/help.rs` — the help
     overlay documents the controls overlay (`f`), clear-filters
     (`F`), direct view switches (`1`–`5`), view cycling, the
     grouping-cycle binding, and the v1 filter dimensions. The
-    H-UI-002 icon legend layered in alongside as the
+    CSP-416 icon legend layered in alongside as the
     discoverability surface for kind glyphs.
   - Scope: extend the `?` help overlay with the new keymap
     (`v`, `1`–`5`, `]`/`[`, `f`, `F`, grouping-cycle), a one-line
@@ -11225,9 +11683,10 @@ settles.
     and an example CLI invocation. Document the menu-first
     discovery rule.
   - Tests: snapshot test for the help overlay's new layout.
-  - Blockers: `F8-004`, `F8-005`.
+  - Blockers: `CSP-253`, `CSP-254`.
 
-- [x] `F8-012` Filtered-zero empty frame.
+- [x] `CSP-261` Filtered-zero empty frame.
+  - Legacy ID: `F8-012`
   - Outcome: shipped — `empty_left_panel_text` in `src/tui/ui.rs`
     renders `No rows match <chips>.\nPress \`F\` to clear
     filters, \`f\` to edit.` when the active filter drops every
@@ -11236,7 +11695,8 @@ settles.
     hint pointed to a stale `v` binding until a follow-up commit
     realigned it with the controls overlay accelerator (`f`).
 
-- [x] `F8-013` Persist last-active view across TUI restarts.
+- [x] `CSP-423` Persist last-active view across TUI restarts.
+  - Legacy ID: `F8-013`
   - Outcome: shipped. State file at
     `$XDG_STATE_HOME/conspectus/tui-state.json` with schema v1
     (`schema_version` + `last_view`). Persistence module
@@ -11248,12 +11708,12 @@ settles.
     deliberately skips enabling the cache so snapshots stay
     deterministic. Startup precedence in `src/cli.rs`: explicit
     `--view` → persisted → built-in `Sessions` (config
-    `default_view` integration is the F8-003 follow-up).
+    `default_view` integration is the CSP-252 follow-up).
     `--no-resume-view` opt-out shipped; `--snapshot` implies it.
     Read-only invariant covered by
     `tests/cli_tui_state_invariants.rs`. Operations docs updated
     under §"TUI state". Open question on `ViewStates` schema
-    extension stays scoped to F8-003 as recommended.
+    extension stays scoped to CSP-252 as recommended.
   - Motivation: `App::config().default_view` is in-memory only,
     seeded from `[tui].default_view` config. After view switching
     (`v` / `1`..`5` / `]`/`[`), the next `conspectus tui` invocation
@@ -11272,7 +11732,7 @@ settles.
         "union" | "prs" | "forks" }`. Atomic write helpers (tempfile
         + rename) and a `skip-on-unchanged` comparison so quiet
         sessions produce no mtime churn, mirroring
-        `H-PIN-RESUME-001` / `H-PIN-RESUME-003`.
+        `CSP-395` / `CSP-397`.
       - Write on view switch (the `App::switch_view` seam at
         `src/tui/app.rs:551` is the natural single funnel — every
         accelerator and overlay-driven switch goes through it).
@@ -11292,7 +11752,7 @@ settles.
       - Read-only invariant: nothing other than `conspectus tui`
         reads or writes the state file. `graph` / `table` / `query`
         / `node show` / `pin *` paths never touch it. Mirror the
-        H-PIN-019 / H-PIN-RESUME-006 fingerprinting test pattern so
+        CSP-379 / CSP-400 fingerprinting test pattern so
         regressions get caught.
   - Tests:
       - Unit tests on the state-file helpers covering atomic
@@ -11319,12 +11779,12 @@ settles.
         unchanged pattern verbatim) vs TOML (matches every other
         Conspectus config surface). Recommend JSON to share the
         cache helpers; flag during impl.
-      - Scope creep: F8-003 covers in-session per-view state
+      - Scope creep: CSP-252 covers in-session per-view state
         (filters / grouping / selection / expansion / scroll).
         Should this story persist *only* `last_view`, or extend
-        the schema to carry the F8-003 `ViewStates` map? Recommend
+        the schema to carry the CSP-252 `ViewStates` map? Recommend
         scope-tight v1 (just the view enum) and a follow-up after
-        F8-003 lands; document the schema bump path so the
+        CSP-252 lands; document the schema bump path so the
         forward-compat fixture stays honest.
       - ADR threshold: a single persisted enum probably does not
         clear the ADR bar, but the XDG location + read-only
@@ -11333,20 +11793,21 @@ settles.
         §"TUI state") regardless. Decide during impl whether the
         cross-surface impact warrants a short ADR.
   - Blockers: none structurally — `App::switch_view` and
-    `default_view` already exist. Coordinate with `F8-003` so the
+    `default_view` already exist. Coordinate with `CSP-252` so the
     schema can grow without a breaking migration; coordinate with
-    `F8-005` so the new view-switch accelerators all funnel through
+    `CSP-254` so the new view-switch accelerators all funnel through
     the same persistence seam.
 
-- [x] `T8-044` Spike: evaluate `tui-pantry` as a widget-iteration
+- [x] `CSP-424` Spike: evaluate `tui-pantry` as a widget-iteration
   harness.
+  - Legacy ID: `T8-044`
   - Motivation: the TUI carries ~5.2k LOC of in-house widgets across
     `src/tui/widgets/` and visual judgement calls (column widths,
     chip placement, glyph spacing, narrow-pane truncation) currently
     iterate through `conspectus tui --snapshot` (ADR 0067) plus
     fixture diffs. That loop is excellent for regression coverage
     but slow for the "does this look right at 80 cols?" question
-    the recent H-UI-001..008 series kept asking. `tui-pantry` is a
+    the recent CSP-415..422 series kept asking. `tui-pantry` is a
     Storybook-style preview harness for ratatui widgets — boot one
     widget with chosen prop variants, no reducer, no fixture. The
     spike tests whether it shortens the visual-iteration loop
@@ -11405,7 +11866,7 @@ settles.
         before — the next H-UI-* and T8-* widget passes are the
         immediate beneficiaries.
   - Blockers: none. Adopt during a quiet sprint before the next
-    widget-heavy story (H-UI-004 audit is the natural next
+    widget-heavy story (CSP-418 audit is the natural next
     customer if the spike lands go).
   - Outcome (2026-06-20): **go**, scoped. Landed as `4f918aa`
     (scaffolding) and recorded here. The smoke test
@@ -11462,20 +11923,21 @@ settles.
         states), **value modal** (small / large content),
         **search** (empty / no-matches / with-matches),
         **help** (the keymap legend already lives as data after
-        H-WIDG-005). Weak candidates: **badge**, **toast** (the
-        latter retired its in-tree renderer under H-WIDG-003).
-        Filing a follow-up `H-WIDG-013` to track per-widget
+        CSP-429). Weak candidates: **badge**, **toast** (the
+        latter retired its in-tree renderer under CSP-427).
+        Filing a follow-up `CSP-437` to track per-widget
         ports as opportunistic work and a theme-harness
         ingredient that exercises every `[tui.theme]` key
         against the dark / light presets.
 
-- [ ] `T8-022` Detect session live status (running / waiting / idle /
+- [ ] `CSP-268` Detect session live status (running / waiting / idle /
   error) and surface it as a row glyph and per-status header chip.
+  - Legacy ID: `T8-022`
   - Scope: this is the agent-deck signal the styling overhaul
     deliberately did not invent (color buckets stand in for v1).
     Real status detection wants a data-layer feature: observe mux
     pane changes (delta against last capture; tied into the throttle
-    work in `T8-009`), join hook-sidecar evidence (ADR 0028) when
+    work in `CSP-185`), join hook-sidecar evidence (ADR 0028) when
     the harness exposes a "waiting on permission" or "tool error"
     state, and expose a new `SessionStatus` enum on the row
     view-model. The renderer reads it through the existing `Theme`
@@ -11491,10 +11953,11 @@ settles.
   - Blockers: needs its own ADR (decision: where status lives in the
     graph; whether it's a candidate-link relation or a property on
     `AgentSessionNode`; cadence + cost of pane-delta polling). Lives
-    downstream of `T8-009` so the throttle/freshen work pays for the
+    downstream of `CSP-185` so the throttle/freshen work pays for the
     extra capture cadence.
 
-- [ ] `T8-023` Ship preset theme variants on top of ADR 0032.
+- [ ] `CSP-269` Ship preset theme variants on top of ADR 0032.
+  - Legacy ID: `T8-023`
   - Scope: layer named palette presets (`tokyo-night`, `dracula`,
     `solarized-light`, `default-dark`) on top of the flat
     `[tui.theme]` schema. Implementation can stay purely additive
@@ -11508,8 +11971,9 @@ settles.
     (only after preset selector wiring lands).
   - Blockers: ADR 0032 (landed).
 
-- [ ] `T8-024` Add sessions-tree density modes — folds `T8-015` into
+- [ ] `CSP-270` Add sessions-tree density modes — folds `CSP-191` into
   the theme-aware renderer landed by the styling overhaul.
+  - Legacy ID: `T8-024`
   - Scope: now that the renderer reads its palette and structural
     cues from `Theme`, density modes can live in the same shape:
     a `[tui].density` setting plus a runtime toggle that picks one
@@ -11517,11 +11981,11 @@ settles.
     per-session same-line preview and tightens the badge column;
     `expanded` enables multi-line previews and the future
     section-pane treatment for inline detail (depends on
-    `H-TRANSCRIPT-008`).
+    `CSP-212`).
   - Tests: row-tree/render snapshots per density at 80×24 and
     160×40; reducer tests for the runtime toggle key.
-  - Blockers: supersedes `T8-015`'s open scope. Coordinate with
-    `T8-009` (preview throttle) so the expanded mode's extra
+  - Blockers: supersedes `CSP-191`'s open scope. Coordinate with
+    `CSP-185` (preview throttle) so the expanded mode's extra
     capture work plays nicely with the cadence story.
 
 ## Phase 9: Embedded Query Engine
@@ -11541,20 +12005,20 @@ model, server transport, library API gating, distribution amendment,
 resolver-stays-in-Rust, and vector search). The engine, query feature,
 distribution amendment, resolver-boundary, vector-search, and
 consumer-surface ADRs have landed. The persistence and transport
-pieces remain the SQLite-aware re-scopes of `P7-001` and `P7-004`.
+pieces remain the SQLite-aware re-scopes of `CSP-137` and `CSP-140`.
 
 Dependency shape inside the phase:
 
 ```
-ADR cluster (engine/persistence/transport/lib-api/dist/resolver) ─┐
-                                                                  │
-P9-001 (spike) ──→ P9-002 (schema) ──┬──→ P9-003 (loader) ──→ P9-004 (query MVP) ──┬──→ P9-006 (saved views)
-                                     │                                             ├──→ P9-005 (result fmts)
-                                     │                                             └──→ P9-007 (fixture corpus)
-                                     │
-                                     └──→ P9-007 in parallel after P9-002
+ADR cluster (engine/persistence/transport/lib-api/dist/resolver) ────┐
+                                                                     │
+CSP-271 (spike) ──→ CSP-272 (schema) ──┬──→ CSP-273 (loader) ──→ CSP-274 (query MVP) ──┬──→ CSP-276 (saved views)
+                                       │                                               ├──→ CSP-275 (result fmts)
+                                       │                                               └──→ CSP-277 (fixture corpus)
+                                       │
+                                       └──→ CSP-277 in parallel after CSP-272
 
-P9-008 (vector search via sqlite-vec) ──→ P9-FU-001 (embedding import)
+CSP-278 (vector search via sqlite-vec) ───→ CSP-293 (embedding import)
 ```
 
 The TUI workstream (Phase 8 open stories) began independently, but
@@ -11562,7 +12026,8 @@ Phase 10 later made SQLite the sole consumer-side read surface. The
 remaining producer-side `GraphSnapshot` shape stays scoped to
 discovery, resolution, JSON dump, and fixture setup.
 
-- [x] `P9-001` SQLite integration spike (bundled build, WAL, lifecycle).
+- [x] `CSP-271` SQLite integration spike (bundled build, WAL, lifecycle).
+  - Legacy ID: `P9-001`
   - Scope: integrate the `rusqlite` crate behind a `query` Cargo feature
     (per ADR-D) with the `bundled` sub-feature on. Confirm SQLite
     3.51.3+ ships and add a CI assertion that fails the build below
@@ -11590,7 +12055,8 @@ discovery, resolution, JSON dump, and fixture setup.
     (`MIN_SQLITE_VERSION = 3.51.3`), an in-memory `SELECT 1` smoke
     test, and a WAL reader/writer concurrency smoke test.
 
-- [x] `P9-002` Define the SQL schema for the resolved graph.
+- [x] `CSP-272` Define the SQL schema for the resolved graph.
+  - Legacy ID: `P9-002`
   - Scope: produce a DDL for tables `nodes`, `node_repos`,
     `node_checkouts`, `node_workspaces`, `node_agent_sessions`,
     `node_mux_sessions`, `node_branches`, `node_forks`,
@@ -11613,7 +12079,7 @@ discovery, resolution, JSON dump, and fixture setup.
     enum entry in the DDL so adding a new variant fails compilation.
   - Manual checks: `sqlite3 :memory: < schema.sql` lists the expected
     tables / indexes.
-  - Blockers: `P9-001`.
+  - Blockers: `CSP-271`.
   - Outcome: added `src/query/schema.sql` and `src/query/schema.rs`
     with typed node tables, candidate/resolved/diagnostic/alias
     tables, curated saved views, schema versioning, generated
@@ -11621,15 +12087,16 @@ discovery, resolution, JSON dump, and fixture setup.
     schema-drift tests that compare the DDL against Rust constants.
     ADR 0044 records the JSON endpoint decision.
 
-- [x] `P9-003` Implement the GraphSnapshot → SQLite loader.
+- [x] `CSP-273` Implement the GraphSnapshot → SQLite loader.
+  - Legacy ID: `P9-003`
   - Scope: take a `&GraphSnapshot` and a `&mut Connection`,
-    populate every table per `P9-002`, in one transaction. The
+    populate every table per `CSP-272`, in one transaction. The
     original plan expected to drive from `SnapshotIndex`; P10 later
     removed that selector layer, so the loader now walks the producer
     snapshot directly.
     Idempotency: re-running the loader replaces all rows
     (`DELETE FROM ...` followed by `INSERT`) inside the transaction.
-    For partial eviction (`P7-005`), the loader takes an optional
+    For partial eviction (`CSP-141`), the loader takes an optional
     `provider` filter and only touches rows owned by that provider.
     Use prepared statements + bind parameters; no string-built SQL.
     Performance target: a 1k-node / 5k-link graph loads in under
@@ -11642,15 +12109,16 @@ discovery, resolution, JSON dump, and fixture setup.
     rows change.
   - Manual checks: load a real snapshot and run a few `SELECT`s
     against it; confirm row counts match Rust-side counts.
-  - Blockers: `P9-002`.
+  - Blockers: `CSP-272`.
   - Outcome: added `src/query/loader.rs`, `query::load`, and
     `query::materialize_snapshot`. The loader writes graph nodes,
     candidate links, resolved relationships, diagnostics, and aliases
     with prepared statements and is covered by fixture round-trip tests
-    through the reader. `P10-013` later removed the `SnapshotIndex`
+    through the reader. `CSP-291` later removed the `SnapshotIndex`
     dependency; the loader now iterates producer snapshots directly.
 
-- [x] `P9-004` Implement `conspectus query <sql>` MVP.
+- [x] `CSP-274` Implement `conspectus query <sql>` MVP.
+  - Legacy ID: `P9-004`
   - Scope: a new CLI subcommand that (a) opens
     `$XDG_DATA_HOME/conspectus/graph.sqlite` in read-only mode (via
     `SQLITE_OPEN_READONLY`), falling back to building an in-memory
@@ -11661,7 +12129,7 @@ discovery, resolution, JSON dump, and fixture setup.
     enforcement: the read-only open mode rejects mutations at the
     SQLite layer (no DML, no DDL, no `ATTACH ... AS rw`). Render to a
     plain text table by default. `--format json` for machine output.
-    `--format` flag value list expands in `P9-005`.
+    `--format` flag value list expands in `CSP-275`.
   - Tests: CLI integration tests for `conspectus query 'SELECT count(*)
     FROM nodes'`, a join across `candidate_links` and
     `node_agent_sessions`, a recursive CTE for fork ancestry, and
@@ -11670,8 +12138,8 @@ discovery, resolution, JSON dump, and fixture setup.
   - Manual checks: ad-hoc `conspectus query` invocations against a
     populated graph; confirm output readability and that mutation
     statements fail with a clean error.
-  - Blockers: `P9-003`; persisted warm-start remains tracked by
-    `P7-003`.
+  - Blockers: `CSP-273`; persisted warm-start remains tracked by
+    `CSP-139`.
   - Outcome: added the `conspectus query` subcommand and
     `src/query/runner.rs`. The runner opens a read-only
     `graph.sqlite` when present, otherwise performs cold discovery
@@ -11680,7 +12148,8 @@ discovery, resolution, JSON dump, and fixture setup.
     attempts. CLI smoke tests cover table and JSON output plus
     rejected `INSERT` / `CREATE` statements.
 
-- [x] `P9-005` Result formatters for query output.
+- [x] `CSP-275` Result formatters for query output.
+  - Legacy ID: `P9-005`
   - Scope: support `--format table` (default, columnar, width-aware
     via the existing renderer's truncation helpers), `--format json`
     (one object per row), `--format csv`, `--format tsv`. Width-aware
@@ -11689,13 +12158,14 @@ discovery, resolution, JSON dump, and fixture setup.
   - Tests: format snapshots over fixture queries; width-aware
     truncation snapshots at 80 and 160 columns.
   - Manual checks: pipe each format to a file and inspect.
-  - Blockers: `P9-004`.
+  - Blockers: `CSP-274`.
   - Outcome: query output supports `--format table|json|csv|tsv`.
     Table output reuses the shared width-aware rendering substrate and
     honors `--width`, `--wide`, and `--color`; CLI and runner tests
     cover each format and truncation behavior.
 
-- [x] `P9-006` Saved views: a library of common queries.
+- [x] `CSP-276` Saved views: a library of common queries.
+  - Legacy ID: `P9-006`
   - Scope: ship a small set of named views (CREATE VIEW under the
     DDL) that name the joins users would write by hand:
     `v_sessions_with_repo`, `v_mux_attachments`, `v_pr_by_branch`,
@@ -11707,14 +12177,15 @@ discovery, resolution, JSON dump, and fixture setup.
     expected fixture rows; `--list-views` snapshot test.
   - Manual checks: `conspectus query 'SELECT * FROM v_fork_ancestry'`
     on a populated graph.
-  - Blockers: `P9-002`.
+  - Blockers: `CSP-272`.
   - Outcome: schema and registry now ship `v_sessions_with_repo`,
     `v_mux_attachments`, `v_pr_by_branch`, `v_fork_ancestry`, and
     `v_workspace_member_repos`; `conspectus query --list-views`
     renders the curated registry. `docs/query-guide.md` documents the
     views, and query regression snapshots exercise each saved view.
 
-- [x] `P9-007` Fixture corpus and query regression suite.
+- [x] `CSP-277` Fixture corpus and query regression suite.
+  - Legacy ID: `P9-007`
   - Scope: a small library of representative graph fixtures
     (sparse-orphan-session, multi-checkout-repo, fork-ancestry-chain,
     workspace-with-prs, ambiguous-mux-candidates) and a fixture-driven
@@ -11722,14 +12193,15 @@ discovery, resolution, JSON dump, and fixture setup.
     stable result shapes. Lives alongside the existing snapshot
     fixtures.
   - Tests: itself — this is the regression net.
-  - Blockers: `P9-002`, `P9-003`.
+  - Blockers: `CSP-272`, `CSP-273`.
   - Outcome: added `tests/query_regression.rs` plus snapshots for
     sparse orphan sessions, multi-checkout repos, fork ancestry,
     workspace PRs, ambiguous mux candidates, and saved-view row counts.
     The suite runs canned SQL against fixture snapshots materialized
     through the query loader.
 
-- [x] `P9-008` Vector search via `sqlite-vec` (deferred).
+- [x] `CSP-278` Vector search via `sqlite-vec` (deferred).
+  - Legacy ID: `P9-008`
   - Scope: settle embedding sources, dim budget, ingestion lifecycle,
     and `sqlite-vec` integration. Add an embedding overlay table,
     expose `conspectus query --similar-to <node-id>`, and keep actual
@@ -11743,7 +12215,8 @@ discovery, resolution, JSON dump, and fixture setup.
     distribution of `sqlite-vec` and embedding ingestion remain
     follow-ups rather than normal discovery behavior.
 
-- [ ] `P9-FU-001` Add an embedding import command.
+- [ ] `CSP-293` Add an embedding import command.
+  - Legacy ID: `P9-FU-001`
   - Scope: implement the ADR 0042 import path for external embedding
     pipelines: read JSON Lines from stdin with `node_id`,
     `source_field`, `model`, and `vector` fields, validate dimensions,
@@ -11774,21 +12247,22 @@ stories formalize it.
 Dependency shape inside the phase:
 
 ```
-ADR 0043 ──→ P10-001 (round-trip + read exhaustiveness) ──┬──→ P10-002 (structured-id columns)
+ADR 0043 ──→ CSP-279 (round-trip + read exhaustiveness) ──┬──→ CSP-280 (structured-id columns)
                                                           │
-                                                          └──→ P10-003 (shared render substrate)
+                                                          └──→ CSP-281 (shared render substrate)
 
-P10-002 + P10-003 ──→ P10-004 (agent) ──┬──→ P10-005..009 (per-renderer migration, parallel after agent)
+CSP-280 + CSP-281 ──→ CSP-282 (agent) ──┬──→ CSP-283..287 (per-renderer migration, parallel after agent)
                                         │
-                                        └──→ P10-010..011 (TUI migration, parallel after agent)
+                                        └──→ CSP-288..289 (TUI migration, parallel after agent)
 
-(all migrations) ──→ P10-013 (retire indexes) ──→ P10-014 (demote GraphSnapshot)
+(all migrations) ──→ CSP-291 (retire indexes) ──→ CSP-292 (demote GraphSnapshot)
 ```
 
 The Phase 8 ADR 0031 TUI views (Mux/Union/Prs/Forks) are independent;
 this phase migrates whichever ones exist when each story lands.
 
-- [x] `P10-001` Promote reader + add compile-time read exhaustiveness.
+- [x] `CSP-279` Promote reader + add compile-time read exhaustiveness.
+  - Legacy ID: `P10-001`
   - Scope: take the spike's `src/query/reader.rs` to production
     quality. Keep the round-trip equality test (`canonicalize()` on
     both sides) as the regression net. Add a per-table read helper
@@ -11797,7 +12271,7 @@ this phase migrates whichever ones exist when each story lands.
     reader fails compilation — symmetric to the loader's exhaustive
     `let RepoNode { … } = repo;` destructuring. Move the spike's
     `parse_node_id` to the reader module unchanged; it survives only
-    until `P10-002` lands.
+    until `CSP-280` lands.
   - Tests: round-trip equality over the existing loader fixture
     corpus (empty, full, link state variants, diagnostic variants,
     aliases). One synthetic test per node table that asserts adding
@@ -11818,9 +12292,10 @@ this phase migrates whichever ones exist when each story lands.
     or renaming a column / table / view in `schema.sql` without
     updating the constants (or vice versa) fails the suite.
     `parse_node_id` stays with a comment noting it disappears in
-    P10-002.
+    CSP-280.
 
-- [x] `P10-002` JSON-encoded NodeId foreign references (ADR 0044).
+- [x] `CSP-280` JSON-encoded NodeId foreign references (ADR 0044).
+  - Legacy ID: `P10-002`
   - Scope: replace the `*_node_id TEXT` foreign-reference columns in
     `candidate_links`, `resolved_relationships`, `diagnostics`, and
     `aliases` with a JSON column holding the serde-serialized typed
@@ -11836,9 +12311,9 @@ this phase migrates whichever ones exist when each story lands.
     `v_nodes` are unaffected. Add expression indexes for each
     rewritten view's access pattern. Bump `SCHEMA_VERSION` from 2
     to 3. Update `TABLE_COLUMNS` for the new shape; the
-    `schema_columns_match_constants` test from P10-001 catches the
+    `schema_columns_match_constants` test from CSP-279 catches the
     schema-side drift.
-  - Tests: round-trip equality test from P10-001 stays green
+  - Tests: round-trip equality test from CSP-279 stays green
     byte-for-byte. Add `every_node_id_variant_round_trips_through_json`
     covering all 8 `NodeId` variants (catches serde shape drift
     that the schema-side test cannot see). Add a test covering a
@@ -11852,7 +12327,7 @@ this phase migrates whichever ones exist when each story lands.
     and confirm endpoint columns inspect cleanly via `sqlite3`;
     confirm `--similar-to` and the existing saved-view queries
     behave identically.
-  - Blockers: `P10-001`. ADR: 0044.
+  - Blockers: `CSP-279`. ADR: 0044.
   - Outcome: `candidate_links`, `resolved_relationships`,
     `diagnostics`, and `aliases` now store endpoints as JSON via
     `serde_json::to_string(&node_id)`. STORED GENERATED `*_kind`
@@ -11877,7 +12352,8 @@ this phase migrates whichever ones exist when each story lands.
     set and the recursive-CTE example. 733 lib tests pass; all
     integration test binaries green.
 
-- [x] `P10-003` Extract the shared rendering substrate.
+- [x] `CSP-281` Extract the shared rendering substrate.
+  - Legacy ID: `P10-003`
   - Scope: lift `RenderOptions`, `Layout`, the `ColumnSpec`
     registries, `render_rows`, `format_relative_age`,
     `node_short_id_from_display`, `unique_prefix_len`, `header_label`
@@ -11905,7 +12381,8 @@ this phase migrates whichever ones exist when each story lands.
     sneaks in. All 732 lib tests pass byte-for-byte; full suite
     green.
 
-- [x] `P10-004` Migrate the CLI agent projection to SQLite.
+- [x] `CSP-282` Migrate the CLI agent projection to SQLite.
+  - Legacy ID: `P10-004`
   - Scope: replace `render_with(snapshot, Projection::Agent, opts)`'s
     code path with a `Connection`-driven implementation modeled on
     `src/output/agent_sqlite.rs` from the spike. All 17 cells
@@ -11921,7 +12398,7 @@ this phase migrates whichever ones exist when each story lands.
     snapshots unchanged. Filter behavior preserved.
   - Manual checks: `conspectus table --rows sessions` against a
     real `graph.sqlite`; visually compare to the prior output.
-  - Blockers: `P10-002`, `P10-003`.
+  - Blockers: `CSP-280`, `CSP-281`.
   - Outcome: production renderer at `src/output/agent.rs` covers
     all 17 cells. `render_with(snapshot, Projection::Agent, opts)`
     routes through `agent::build_agent_rows_from_snapshot` via the
@@ -11937,7 +12414,7 @@ this phase migrates whichever ones exist when each story lands.
     `RowFilter` runs on top of the result set; mux candidate count
     feeds the filter's MuxStateKey input. The spike's
     `src/output/agent_sqlite.rs` is removed.
-    Two latent P10-002 bugs surfaced and were fixed here:
+    Two latent CSP-280 bugs surfaced and were fixed here:
     `branch_has_forge_pr` saved view (`v_pr_by_branch`) had the
     direction wrong — production discovery and the in-memory
     `preferred_pr_for_session` both build the link source=ForgePr,
@@ -11953,12 +12430,13 @@ this phase migrates whichever ones exist when each story lands.
     `output::table` snapshot tests are the parity assertion; all
     731 lib tests pass byte-for-byte, full integration suite green.
 
-- [x] `P10-005` Migrate the CLI mux projection to SQLite.
-  - Scope: same pattern as `P10-004` for `Projection::Mux`. Use
+- [x] `CSP-283` Migrate the CLI mux projection to SQLite.
+  - Legacy ID: `P10-005`
+  - Scope: same pattern as `CSP-282` for `Projection::Mux`. Use
     `v_mux_attachments` (extended if needed) for the agents-attached-
     to-this-mux cell.
   - Tests: parity with the existing mux-projection snapshots.
-  - Blockers: `P10-004` (substrate validated by the agent migration).
+  - Blockers: `CSP-282` (substrate validated by the agent migration).
   - Outcome: production renderer at `src/output/mux.rs` covers all
     8 cells (`id`, `mux`, `cwd`, `agents`, `preview`,
     `attached-count`, `activity`, `created`). One primary query
@@ -11977,11 +12455,12 @@ this phase migrates whichever ones exist when each story lands.
     `output::table` snapshot tests are the parity check; all 731
     lib tests pass byte-for-byte, full integration suite green.
 
-- [x] `P10-006` Migrate the CLI union projection to SQLite.
+- [x] `CSP-284` Migrate the CLI union projection to SQLite.
+  - Legacy ID: `P10-006`
   - Scope: same pattern for `Projection::Union`. Composes the
     agent/mux query paths over a `UNION ALL` shape.
   - Tests: parity with existing union snapshots.
-  - Blockers: `P10-004`, `P10-005`.
+  - Blockers: `CSP-282`, `CSP-283`.
   - Outcome: production renderer at `src/output/union.rs` covers
     all 7 cells. The agent/mux merge happens in SQL via the
     pre-existing `v_nodes` view (a `UNION ALL` over every typed
@@ -12002,10 +12481,11 @@ this phase migrates whichever ones exist when each story lands.
     snapshot tests are the parity check; all 731 lib tests pass
     byte-for-byte and the full integration suite is green.
 
-- [x] `P10-007` Migrate the CLI PRs projection to SQLite.
+- [x] `CSP-285` Migrate the CLI PRs projection to SQLite.
+  - Legacy ID: `P10-007`
   - Scope: same pattern for `Projection::Pr`. Use `v_pr_by_branch`.
   - Tests: parity with existing PR snapshots.
-  - Blockers: `P10-004`.
+  - Blockers: `CSP-282`.
   - Outcome: production renderer at `src/output/prs.rs` covers all
     8 cells. The `attached` cell composes three small lookups —
     preferred branch per PR (pick_strongest over
@@ -12022,11 +12502,12 @@ this phase migrates whichever ones exist when each story lands.
     are all deleted. Existing `output::table` snapshot tests are
     the parity check.
 
-- [x] `P10-008` Migrate the CLI forks projection to SQLite.
+- [x] `CSP-286` Migrate the CLI forks projection to SQLite.
+  - Legacy ID: `P10-008`
   - Scope: same pattern for `Projection::Fork`. Use
     `v_fork_ancestry`.
   - Tests: parity with existing fork snapshots.
-  - Blockers: `P10-004`.
+  - Blockers: `CSP-282`.
   - Outcome: production renderer at `src/output/forks.rs` covers
     all 7 cells. Primary query against `node_forks`, plus
     side-lookups for `parent` (pick_strongest over
@@ -12046,14 +12527,15 @@ this phase migrates whichever ones exist when each story lands.
     the parity check; all 731 lib tests pass byte-for-byte, full
     integration suite green.
 
-- [x] `P10-009` Migrate `node show` to SQLite.
+- [x] `CSP-287` Migrate `node show` to SQLite.
+  - Legacy ID: `P10-009`
   - Scope: replace the snapshot walks in `src/output/node_show.rs`
     with `Connection`-driven queries per node kind. Short-id
-    resolution (`H-TBL-005`) keeps its current shape; the lookup
+    resolution (`CSP-130`) keeps its current shape; the lookup
     moves to `SELECT … WHERE node_id LIKE ?`.
   - Tests: parity with the existing `node show` snapshot corpus
     across every node kind.
-  - Blockers: `P10-002`.
+  - Blockers: `CSP-280`.
   - Outcome: rewritten as
     `resolve_node_id_from_conn(conn, input) -> Result<NodeId, NodeResolveError>`
     + `render_node_show_from_conn(conn, id, color) -> String`. The
@@ -12081,14 +12563,15 @@ this phase migrates whichever ones exist when each story lands.
     cells. All nine node_show unit tests pass byte-for-byte; full
     integration suite green.
 
-- [x] `P10-010` Migrate the TUI detail pane to SQLite.
+- [x] `CSP-288` Migrate the TUI detail pane to SQLite.
+  - Legacy ID: `P10-010`
   - Scope: replace the snapshot walks in `src/tui/detail.rs` with
     `Connection`-driven queries. The detail pane sections from
     ADR 0033 stay; only the data source changes.
   - Tests: parity with the existing detail-pane snapshots; runtime
     smoke test confirms the pane still re-renders on selection
     changes.
-  - Blockers: `P10-003`, `P10-009` (so the typed-row patterns are
+  - Blockers: `CSP-281`, `CSP-287` (so the typed-row patterns are
     settled before the TUI consumes them).
   - Outcome: new
     `build_node_detail_from_conn(conn, target, home) -> Result<Option<NodeDetail>>`
@@ -12097,7 +12580,7 @@ this phase migrates whichever ones exist when each story lands.
     view-model assembly. `build_node_detail` survives for
     fixture-heavy tests and producer-side callers that still start
     from a typed snapshot.
-    Trade-off vs. per-section SQL (which P10-009 used): the detail
+    Trade-off vs. per-section SQL (which CSP-287 used): the detail
     builder's view-model assembly (kind-dispatched header fields,
     mux/pr/lineage subqueries with ambiguity counts, link summaries
     with shortened paths) is complex enough that rewriting each
@@ -12113,7 +12596,8 @@ this phase migrates whichever ones exist when each story lands.
     (projections, node show); `read_snapshot` bridge when typed
     assembly is complex (TUI detail pane).
 
-- [x] `P10-011` Migrate the TUI sessions row builder to SQLite.
+- [x] `CSP-289` Migrate the TUI sessions row builder to SQLite.
+  - Legacy ID: `P10-011`
   - Scope: replace `build_sessions_tree` (`src/tui/rows/sessions.rs`)
     and its `SessionsBuildInputs` with a `Connection`-driven
     builder. Grouping/bucketing logic (ADR 0024) stays in Rust on
@@ -12124,12 +12608,12 @@ this phase migrates whichever ones exist when each story lands.
   - Tests: parity with the existing sessions-tree snapshots over the
     fixture corpus; refresh-loop latency measurement on the largest
     fixture.
-  - Blockers: `P10-004`.
+  - Blockers: `CSP-282`.
   - Outcome: new
     `build_sessions_tree_from_conn(SessionsBuildInputsFromConn)`
     bridges via `query::read_snapshot` and delegates to the
     existing `build_sessions_tree`. Follows the
-    `build_node_detail_from_conn` pattern from P10-010 — the
+    `build_node_detail_from_conn` pattern from CSP-288 — the
     grouping/bucketing/launch-context/candidate-mux expansion
     logic is preserved end-to-end; per-section SQL would have
     doubled ~2000 lines of typed assembly for no observable
@@ -12143,12 +12627,13 @@ this phase migrates whichever ones exist when each story lands.
     graph size; if it ever becomes load-bearing, the per-section
     SQL refactor is the optimization story.
 
-- [x] `P10-012` Decide whether TUI Mux/Union/Prs/Forks builders need
+- [x] `CSP-290` Decide whether TUI Mux/Union/Prs/Forks builders need
   SQLite-specific migration work.
+  - Legacy ID: `P10-012`
   - Scope: intentionally skip this during Phase 10 closeout. The
     corresponding ADR 0031 TUI row builders have not landed yet, so
     there is no active in-memory consumer to migrate. Revisit after
-    `P10-013` / `P10-014` settle the consumer-side contract and decide
+    `CSP-291` / `CSP-292` settle the consumer-side contract and decide
     whether the future Mux/Union/Prs/Forks interfaces need any
     P10-specific context or can be built directly on the post-P10
     `Connection` surface.
@@ -12158,8 +12643,9 @@ this phase migrates whichever ones exist when each story lands.
     directly against the post-P10 `Connection` surface instead of
     adding snapshot-first builders and migrating them later.
 
-- [x] `P10-013` Retire `SnapshotIndex`, `SnapshotView`,
+- [x] `CSP-291` Retire `SnapshotIndex`, `SnapshotView`,
   `SessionsIndex`.
+  - Legacy ID: `P10-013`
   - Scope: delete the in-memory selector layer once no consumer
     depends on it. Producer-side discovery and the resolver may
     keep an internal selector if useful (the loader doesn't need
@@ -12169,7 +12655,7 @@ this phase migrates whichever ones exist when each story lands.
   - Tests: `cargo build` succeeds; the existing test suite stays
     green; `cargo +nightly udeps`-style dead-code sweep finds
     nothing residual.
-  - Blockers: `P10-005`..`P10-011` complete; `P10-012` is deferred
+  - Blockers: `CSP-283`..`CSP-289` complete; `CSP-290` is deferred
     until the non-session TUI builders exist.
   - Outcome: deleted `src/model/index.rs` and removed the
     `SnapshotIndex` re-export. The SQLite loader now iterates
@@ -12178,7 +12664,8 @@ this phase migrates whichever ones exist when each story lands.
     shared selector layer. `SnapshotView` / `SessionsIndex` already had
     no production symbols left.
 
-- [x] `P10-014` Demote `GraphSnapshot` to producer-only.
+- [x] `CSP-292` Demote `GraphSnapshot` to producer-only.
+  - Legacy ID: `P10-014`
   - Scope: gate the public re-export so library callers who only
     want to render get a `Connection`-flavored API, not a snapshot.
     `GraphSnapshot` remains the resolver's input/output type and
@@ -12192,7 +12679,7 @@ this phase migrates whichever ones exist when each story lands.
   - Manual checks: review the updated library-API doc; confirm an
     external Rust caller building a TUI substitute can succeed
     against the new surface.
-  - Blockers: `P10-013`.
+  - Blockers: `CSP-291`.
   - Outcome: TUI app state now stores a SQLite `GraphDb` wrapper and
     recomputes detail from `build_node_detail_from_conn`; refresh
     materializes the resolved producer snapshot into SQLite before
@@ -12204,7 +12691,8 @@ this phase migrates whichever ones exist when each story lands.
     canonical renderer surface while preserving snapshot bridges for
     fixture-heavy producer-side tests.
 
-- [ ] `P10-FU-001` Retire snapshot bridge APIs from consumer modules.
+- [ ] `CSP-294` Retire snapshot bridge APIs from consumer modules.
+  - Legacy ID: `P10-FU-001`
   - Scope: remove compatibility entry points that accept
     `GraphSnapshot` only to materialize an in-memory SQLite database
     before rendering or building view-models. Candidate APIs include
@@ -12223,8 +12711,9 @@ this phase migrates whichever ones exist when each story lands.
   - Blockers: P10 has landed and downstream tests/users have had a
     chance to move to `render_conn` / `render_with_conn`.
 
-- [x] `P10-FU-002` Audit GraphSnapshot round-trip and force coverage
+- [x] `CSP-401` Audit GraphSnapshot round-trip and force coverage
   on future fields.
+  - Legacy ID: `P10-FU-002`
   - Context: two silently-latent round-trip gaps shipped before any
     test caught them. `Diagnostic::PinUnbound` (and the three sibling
     pin diagnostic kinds) was emitted by the resolver and written by
@@ -12233,7 +12722,7 @@ this phase migrates whichever ones exist when each story lands.
     was never inserted into SQLite at all, so the TUI's
     `build_sessions_tree_from_conn` (which reads via `read_snapshot`)
     saw zero pins and the synthetic "Pins" group never rendered.
-    Both bugs slipped past `P10-001`'s `schema_columns_match_constants`
+    Both bugs slipped past `CSP-279`'s `schema_columns_match_constants`
     and `table_columns_covers_every_relation_in_schema` drift catches
     — those check schema-vs-constants, not model-vs-tables.
   - Scope: walk every top-level `GraphSnapshot` field (`nodes`,
@@ -12282,7 +12771,7 @@ this phase migrates whichever ones exist when each story lands.
     columns (the columnar fields I added to `pins`) are kept where
     they already exist; this story doesn't add or remove them.
   - Blockers: none. Independent hardening pass on the layer
-    `P10-001` audited but didn't fully nail down.
+    `CSP-279` audited but didn't fully nail down.
   - Outcome: `full_snapshot_round_trips` extended to cover all 4
     pin-* diagnostic variants (including PinUnbound with and
     without last_session) and all 3 PinBinding states plus the
@@ -12308,7 +12797,8 @@ this phase migrates whichever ones exist when each story lands.
 
 ## Graph Visualization Workstream
 
-- [x] `GV-001` Record graph visualization export decisions.
+- [x] `CSP-301` Record graph visualization export decisions.
+  - Legacy ID: `GV-001`
   - Scope: write an ADR covering graph visualization outputs: Graphviz
     DOT for static inspection and an HTML output for interactive,
     navigable graph inspection. Decide how the HTML renderer loads its
@@ -12319,7 +12809,7 @@ this phase migrates whichever ones exist when each story lands.
   - Manual checks: review the ADR against `docs/design.md` and update
     the design doc if the exported graph shape or CLI surface becomes
     part of the product contract.
-  - Blockers: `H-MUXPROC-FU-006`.
+  - Blockers: `CSP-312`.
   - Outcome: ADR 0050 settles both formats, picks inlined Cytoscape.js
     as the HTML library, locks provider-neutral `NodeKind` /
     `RelationKind` / `Provenance` visual encoding, treats candidate
@@ -12333,13 +12823,14 @@ this phase migrates whichever ones exist when each story lands.
     flagged as a follow-up. `docs/design.md` gains a Graph
     Visualization Exports subsection and a Decisions entry.
 
-- [x] `GV-002` Add `conspectus graph --format dot`.
+- [x] `CSP-302` Add `conspectus graph --format dot`.
+  - Legacy ID: `GV-002`
   - Scope: add a Graphviz DOT renderer for the resolved internal graph.
     Include node kind, stable id/label, and enough styling to distinguish
     repos, checkouts, workspaces, agent sessions, mux sessions, branches,
     forks, and forge PRs. Render candidate links and resolved
     relationships distinctly so ambiguity and resolver decisions are easy
-    to inspect. Once `TEST-006` exists, support rendering the named
+    to inspect. Once `CSP-306` exists, support rendering the named
     replay scenarios so graph visualization can be used for fixture and
     regression review without recreating local state by hand.
   - Tests: deterministic DOT snapshot tests for sparse graph, mux
@@ -12348,7 +12839,7 @@ this phase migrates whichever ones exist when each story lands.
     scenario registry is available.
   - Manual checks: run `dot -Tsvg` on at least one generated fixture and
     inspect that labels and edge kinds remain readable.
-  - Blockers: `H-MUXPROC-FU-006`, `GV-001`.
+  - Blockers: `CSP-312`, `CSP-301`.
   - Outcome: `conspectus graph --format dot` ships alongside the
     existing `--format json`, with `--candidates {include,exclude}`
     and `--diagnostic-nodes {include,exclude}` flags per ADR 0050.
@@ -12370,17 +12861,19 @@ this phase migrates whichever ones exist when each story lands.
     filter. Manually verified with `dot -Tsvg` on the `exact-match`,
     `ambiguous-mux`, and `fork-lineage` scenarios.
 
-- [x] `GV-003` Add `conspectus graph --format html`. Split into
-  `GV-003a` / `GV-003b` / `GV-003c` so the foundational payload and
+- [x] `CSP-303` Add `conspectus graph --format html`. Split into
+  `CSP-303.01` / `CSP-303.02` / `CSP-303.03` so the foundational payload and
   vendoring story are settled before the chrome is built on top.
   Aggregate scope is unchanged from the original ticket: a single-file
   self-contained HTML explorer backed by the same resolved graph as
   DOT, supporting pan/zoom, selection, neighbor highlighting,
   search/filter, an inspector, and the navigation primitives from ADR
-  0050 decision 10. Closed when GV-003a/b/c all landed; GV-003d
+  0050 decision 10. Closed when CSP-303.01/CSP-303.02/CSP-303.03 all landed; CSP-303.04
   (layout selector + dagre) shipped in parallel as a follow-up.
+  - Legacy ID: `GV-003`
 
-- [x] `GV-003a` HTML renderer scaffolding + minimal viewer.
+- [x] `CSP-303.01` HTML renderer scaffolding + minimal viewer.
+  - Legacy ID: `GV-003a`
   - Scope: add `conspectus graph --format html` and the matching
     `conspectus dev scenario graph --format html`. Vendor Cytoscape.js
     (UMD build) plus the `fcose` layout extension under
@@ -12404,7 +12897,7 @@ this phase migrates whichever ones exist when each story lands.
     `ambiguous-mux`, and `fork-lineage` scenarios in a browser;
     confirm pan/zoom, node selection, and the visual encoding match
     the DOT output.
-  - Blockers: `H-MUXPROC-FU-006`, `GV-001`, `GV-002`.
+  - Blockers: `CSP-312`, `CSP-301`, `CSP-302`.
   - Outcome: `conspectus graph --format html` and
     `conspectus dev scenario graph --format html` ship single-file
     self-contained pages (~775 KB) that inline cytoscape@3.33.4,
@@ -12415,13 +12908,13 @@ this phase migrates whichever ones exist when each story lands.
     format — and the JS `GraphDriver` translates it at load time per
     the ADR 0050 Coupling Boundary. `app.js` is a minimal bootstrap
     (click to surface node info in the status bar); the rich chrome
-    (filter panel, inspector, search) lives in GV-003b. Visual
+    (filter panel, inspector, search) lives in CSP-303.02. Visual
     encoding mirrors the DOT output: `NodeKind` shape/fill,
     `RelationKind` arrowhead, `Provenance` width/color, resolved
     candidates marked solid + `★`, losing candidates dashed,
     ignored/overridden red dashed, unresolved endpoints rendered as
     dashed-bordered stub nodes. `--candidates` and
-    `--diagnostic-nodes` flags reuse the GV-002 plumbing. Payload
+    `--diagnostic-nodes` flags reuse the CSP-302 plumbing. Payload
     emission is deterministic (sorted by kind/id; edges by source/
     relation/target/provenance/id). Test coverage in
     `tests/html_snapshots.rs` is six payload snapshots (empty,
@@ -12445,8 +12938,9 @@ this phase migrates whichever ones exist when each story lands.
     overlay sourced from the driver's palette so the encoding is
     self-documenting.
 
-- [x] `GV-003b` HTML inspector, filter panel, and search.
-  - Scope: add the bespoke chrome that wraps the GV-003a `GraphDriver`.
+- [x] `CSP-303.02` HTML inspector, filter panel, and search.
+  - Legacy ID: `GV-003b`
+  - Scope: add the bespoke chrome that wraps the CSP-303.01 `GraphDriver`.
     Filter panel with NodeKind checklist, RelationKind checklist,
     candidate/resolved toggle (default resolved per ADR 0050
     decision 4), RuntimeProcess toggle, unresolved-endpoint stub
@@ -12457,7 +12951,7 @@ this phase migrates whichever ones exist when each story lands.
     Free-text search box that filters nodes by label/id and dims the
     rest. All chrome modules call into the `GraphDriver` interface;
     none reach into the underlying Cytoscape instance directly.
-  - Tests: extend the GV-003a payload tests with cases that exercise
+  - Tests: extend the CSP-303.01 payload tests with cases that exercise
     each filter dimension's data (ignored links, RuntimeProcess
     nodes, unresolved endpoints). HTML scaffold snapshot continues
     to redact the Cytoscape bundle hash.
@@ -12465,7 +12959,7 @@ this phase migrates whichever ones exist when each story lands.
     confirm the "collapsed view" preset matches what `conspectus
     table sessions` would show, and verify the inspector renders the
     same fields as `conspectus node show`.
-  - Blockers: `GV-003a`.
+  - Blockers: `CSP-303.01`.
   - Outcome: shipped a three-column page layout (filters left,
     Cytoscape canvas center, inspector/legend right) with a
     header search input. New `GraphDriver` methods (setHidden,
@@ -12490,7 +12984,8 @@ this phase migrates whichever ones exist when each story lands.
     node selection (inspector populated), Collapsed view preset,
     and free-text search all behave correctly.
 
-- [x] `GV-003c` HTML navigation primitives.
+- [x] `CSP-303.03` HTML navigation primitives.
+  - Legacy ID: `GV-003c`
   - Scope: implement the navigation operations from ADR 0050
     decision 10 against the neutral payload (not Cytoscape's
     collection API): focus on a selected node, restrict the visible
@@ -12505,7 +13000,7 @@ this phase migrates whichever ones exist when each story lands.
   - Manual checks: focus from any node, walk through depths 1/2/3,
     flip upstream-only and downstream-only, and verify the
     breadcrumb returns to the prior view on pop.
-  - Blockers: `GV-003b`.
+  - Blockers: `CSP-303.02`.
   - Outcome: navigation chrome shipped as a top-of-canvas toolbar
     that appears only when a node is focused. Toolbar carries a
     breadcrumb trail (historic crumbs grey, current crumb blue,
@@ -12531,8 +13026,9 @@ this phase migrates whichever ones exist when each story lands.
     neighborhood), focus a second node through to push a
     breadcrumb (atelier-demo › alpha, Back enabled).
 
-- [x] `GV-003d` HTML layout improvements and selection.
-  - Scope: the GV-003a default is fcose with hand-tuned options
+- [x] `CSP-303.04` HTML layout improvements and selection.
+  - Legacy ID: `GV-003d`
+  - Scope: the CSP-303.01 default is fcose with hand-tuned options
     that look reasonable on the named scenarios but degrade on
     denser graphs (edge-label collisions, suboptimal compound
     grouping, no manual override). Improve the default tuning and
@@ -12544,15 +13040,15 @@ this phase migrates whichever ones exist when each story lands.
     minima. Vendor any additional layout extensions (`cytoscape-
     dagre` etc.) under the same `assets/` pattern with VERSIONS /
     NOTICE updates.
-  - Tests: GV-003a snapshot tests stay valid (layout is JS-side and
+  - Tests: CSP-303.01 snapshot tests stay valid (layout is JS-side and
     not part of the payload contract). Add a manual-check checklist
     in the docs.
   - Manual checks: render the named replay scenarios under each
     available layout and confirm the result is readable; render a
     real local graph (50-100 nodes) and confirm performance and
     legibility hold.
-  - Blockers: `GV-003a`. Not on the GV-003 umbrella critical path;
-    can land in parallel with GV-003b / GV-003c.
+  - Blockers: `CSP-303.01`. Not on the CSP-303 umbrella critical path;
+    can land in parallel with CSP-303.02 / CSP-303.03.
   - Outcome: vendored `cytoscape-dagre@3.0.0` (MIT, ~57 KB,
     dagre bundled internally). Driver exposes `availableLayouts()`,
     `currentLayout()`, `setLayout(name)`, `rerunLayout()`. Filter
@@ -12562,13 +13058,14 @@ this phase migrates whichever ones exist when each story lands.
     and a "Re-run layout" button. Concentric uses a per-`NodeKind`
     ring (workspaces innermost, runtime processes outermost) so it
     reads as a hub-and-spoke when the graph has clear roots. The
-    fcose tuning from the GV-003c follow-up stays the default.
+    fcose tuning from the CSP-303.03 follow-up stays the default.
     VERSIONS / NOTICE / .gitattributes updated. 1133 tests pass;
     fmt and clippy clean. Manually verified the dagre layout in
     headless chromium on the `fork-lineage` scenario (clean
     left-to-right hierarchy).
 
-- [x] `GV-004` Document graph visualization workflows.
+- [x] `CSP-304` Document graph visualization workflows.
+  - Legacy ID: `GV-004`
   - Scope: update `README.md`, `docs/operations.md`, or a focused
     visualization guide with examples for generating DOT and HTML
     outputs, rendering DOT through Graphviz, and using the HTML explorer
@@ -12576,7 +13073,7 @@ this phase migrates whichever ones exist when each story lands.
   - Tests: docs-only `git diff --check`.
   - Manual checks: run each documented command against a fixture or local
     repo before marking complete.
-  - Blockers: `GV-002`, `GV-003`.
+  - Blockers: `CSP-302`, `CSP-303`.
   - Outcome: new `docs/graph-visualization.md` covers `--format dot`
     (pipe through Graphviz, recipes for SVG/PDF/PNG, fallback layout
     flags for dense graphs), `--format html` (single self-contained
@@ -12589,7 +13086,8 @@ this phase migrates whichever ones exist when each story lands.
     `README.md` CLI block updated and `docs/index.md` registers the
     new guide. Cross-references all point at ADR 0050 for rationale.
 
-- [ ] `GV-EDGEREASON` Emit explicit resolver decision rationale.
+- [ ] `CSP-329` Emit explicit resolver decision rationale.
+  - Legacy ID: `GV-EDGEREASON`
   - Scope: today the resolver picks a winner per candidate group by
     running `compare_session_mux` / `compare_branch_pr` /
     `compare_generic` and dropping the result into
@@ -12644,26 +13142,27 @@ Driving observations from Phase 7 + 9 + 10 in production:
 Dependency shape inside the phase:
 
 ```
-P11-001 (ADR 0082) ──┐
-P11-002 (ADR 0083) ──┤
-                     ├──→ P11-003 (model derives) ──→ P11-004 (format module) ──→ P11-005 (daemon dual-write)
-                     │                                                              ├──→ P11-006 (socket snapshot cmd) ──→ P11-007 (TUI socket cutover)
-                     │                                                              └──→ P11-008 (CLI mmap-or-rebuild) ──→ P11-009 (daemon warm-start, optional)
+CSP-438 (ADR 0082) ──┐
+CSP-439 (ADR 0083) ──┤
+                     ├──→ CSP-440 (model derives) ──→ CSP-441 (format module) ──→ CSP-442 (daemon dual-write)
+                     │                                                              ├──→ CSP-443 (socket snapshot cmd) ──→ CSP-444 (TUI socket cutover)
+                     │                                                              └──→ CSP-445 (CLI mmap-or-rebuild) ──→ CSP-446 (daemon warm-start, optional)
                      │
                      │  (after every reader is off SQLite)
                      │
-                     └──→ P11-010 (drop `conspectus query`) ──→ P11-011 (delete src/query/, drop rusqlite) ──→ P11-012 (ADR supersession + design.md) ──→ P11-013 (operator migration notes)
+                     └──→ CSP-447 (drop `conspectus query`) ──→ CSP-448 (delete src/query/, drop rusqlite) ──→ CSP-449 (ADR supersession + design.md) ──→ CSP-450 (operator migration notes)
 ```
 
-`P11-003`, `P11-004`, `P11-005` form the additive landing
+`CSP-440`, `CSP-441`, `CSP-442` form the additive landing
 sequence; the daemon writes both formats during the dual-write
-window so reader cutovers (`P11-006` → `P11-009`) can land
+window so reader cutovers (`CSP-443` → `CSP-446`) can land
 incrementally without breaking either side. Only after every
-reader is off SQLite does the deletion sequence (`P11-010` →
-`P11-013`) start; that ordering keeps `main` releasable at every
+reader is off SQLite does the deletion sequence (`CSP-447` →
+`CSP-450`) start; that ordering keeps `main` releasable at every
 intermediate commit.
 
-- [x] `P11-001` ADR: retire SQLite persistence and query surface.
+- [x] `CSP-438` ADR: retire SQLite persistence and query surface.
+  - Legacy ID: `P11-001`
   - Outcome: accepted as ADR 0082. The ADR settles the
     architectural pivot — daemon-as-source-of-truth, single
     on-disk artifact for daemonless reads, no SQL surface, no
@@ -12674,7 +13173,8 @@ intermediate commit.
     `snapshot` read command). Implementation lands across the
     remaining P11 stories.
 
-- [x] `P11-002` ADR: zero-copy snapshot format selection.
+- [x] `CSP-439` ADR: zero-copy snapshot format selection.
+  - Legacy ID: `P11-002`
   - Outcome: accepted as ADR 0083. The ADR settles **rkyv** as
     the on-disk format with a 32-byte fixed header (magic,
     `format_version`, `payload_len`, reserved), POSIX
@@ -12686,7 +13186,8 @@ intermediate commit.
     Records the rejected alternatives (FlatBuffers, Cap'n
     Proto, postcard+mmap, JSON+mmap).
 
-- [x] `P11-003` Add rkyv archive derives to the graph model.
+- [x] `CSP-440` Add rkyv archive derives to the graph model.
+  - Legacy ID: `P11-003`
   - Outcome: every model type reachable from `GraphSnapshot`
     now carries `#[derive(rkyv::Archive, rkyv::Serialize,
     rkyv::Deserialize)]`, including the 9 ID types, the 9
@@ -12716,7 +13217,7 @@ intermediate commit.
     no producer or consumer call site changed.
     `Cargo.toml` gains `rkyv = { version = "0.8", features =
     ["bytecheck", "alloc"] }`. `memmap2` and the snapshot
-    format module land in P11-004.
+    format module land in CSP-441.
   - Tests: `graph_snapshot_rkyv_round_trip_preserves_every_field`
     builds a populated snapshot with one of every `NodeKind`,
     one resolved link, one unresolved endpoint, a diagnostic,
@@ -12737,10 +13238,11 @@ intermediate commit.
     -D warnings` both clean.
   - Notes: rkyv 0.8.16 + bytecheck 0.8.2 added to the
     dependency tree (~13 new transitive crates, all Rust, no
-    C bindings). `memmap2` lands in P11-004 alongside the
+    C bindings). `memmap2` lands in CSP-441 alongside the
     format module.
 
-- [x] `P11-004` Implement the snapshot format module.
+- [x] `CSP-441` Implement the snapshot format module.
+  - Legacy ID: `P11-004`
   - Outcome: `src/snapshot.rs` (single-file module rather than
     a directory; the surface is small enough to not warrant
     one) exposes the format primitives:
@@ -12771,7 +13273,7 @@ intermediate commit.
       (the bytecheck pass).
     - `pub fn open_mmap_unvalidated(path)` — same minus the
       validation pass, for callers that trust the source
-      (e.g. the P11-006 socket-served bytes path).
+      (e.g. the CSP-443 socket-served bytes path).
     - `pub fn deserialize_owned(&SnapshotMmap) ->
       Result<GraphSnapshot>` — escape hatch for tests /
       JSON-dump call sites; rkyv-deserializes the archive
@@ -12784,8 +13286,8 @@ intermediate commit.
     `Cargo.toml` gains `memmap2 = "0.9"` (~2k Rust lines, no
     transitives). `src/lib.rs` registers `pub mod snapshot;`.
     The module has zero callers in this story — it is the
-    library piece P11-005 (daemon writes), P11-006 (socket
-    `snapshot` command), P11-007 (TUI cutover), and P11-008
+    library piece CSP-442 (daemon writes), CSP-443 (socket
+    `snapshot` command), CSP-444 (TUI cutover), and CSP-445
     (CLI mmap-or-rebuild) all consume.
   - Tests: nine unit tests in `src/snapshot::tests` —
     `header_round_trips_through_bytes` (byte layout pin),
@@ -12823,9 +13325,10 @@ intermediate commit.
     net we actually want — it exercises the
     pointers-and-lengths bytecheck cares about. Daemon-side
     stale-tmp-file cleanup (per ADR 0083 §"Atomicity") is a
-    P11-005 concern.
+    CSP-442 concern.
 
-- [x] `P11-005` Daemon dual-writes SQLite and the new artifact.
+- [x] `CSP-442` Daemon dual-writes SQLite and the new artifact.
+  - Legacy ID: `P11-005`
   - Outcome: every successful per-class cycle and every
     full-rebuild path in `src/server/mod.rs` now calls the new
     `dual_write_artifact(&snapshot, &snapshot_bytes)` helper
@@ -12840,7 +13343,7 @@ intermediate commit.
     path, so the legacy `graph.sqlite` artifact stays durable
     during the dual-write window. The cache update happens
     even when the disk write fails, so socket-connected
-    readers (P11-006) still see the latest snapshot.
+    readers (CSP-443) still see the latest snapshot.
     `SnapshotBytes = Arc<Mutex<Option<Arc<Vec<u8>>>>>` is the
     shared cache shape; the inner `Arc<Vec<u8>>` lets the
     upcoming socket handler clone-and-return without copying
@@ -12879,18 +13382,19 @@ intermediate commit.
     mockable from inside a separate process is more
     scaffolding than the property warrants. Daemon-side
     stale-tmp-file cleanup (per ADR 0083 §"Atomicity") is
-    deferred to a follow-up alongside the eventual P11-011
+    deferred to a follow-up alongside the eventual CSP-448
     legacy-cache cleanup migration.
 
-- [x] `P11-006` Add the `snapshot` socket command.
+- [x] `CSP-443` Add the `snapshot` socket command.
+  - Legacy ID: `P11-006`
   - Outcome: the daemon's `dispatch` table picks up a
     `snapshot` arm (`handle_snapshot`) that reads the cached
-    bytes from P11-005's `SnapshotBytes`, base64-encodes
+    bytes from CSP-442's `SnapshotBytes`, base64-encodes
     them, and returns under `data.bytes`. Pre-first-cycle
     callers get a `result: "error"` envelope with code
     `snapshot_unavailable` and a "daemon has not completed
     its first cycle" message so the caller can fall through
-    rather than block (P11-008's mmap-or-rebuild path is the
+    rather than block (CSP-445's mmap-or-rebuild path is the
     natural consumer). The handler clones the `Arc<Vec<u8>>`
     out of the cache under the Mutex (held only long enough
     to copy the Arc handle), drops the guard, then encodes —
@@ -12938,10 +13442,11 @@ intermediate commit.
   - Notes: the typed `client_snapshot` helper isn't directly
     unit-tested — its surface is thin (frame → base64 →
     bytes) and the integration test exercises the same wire
-    path. P11-007 (TUI cutover) will be the first real
+    path. CSP-444 (TUI cutover) will be the first real
     consumer.
 
-- [x] `P11-007` Cut the TUI refresh over to socket-served snapshots.
+- [x] `CSP-444` Cut the TUI refresh over to socket-served snapshots.
+  - Legacy ID: `P11-007`
   - Outcome: focused cutover at the TUI's refresh entry
     point. `src/tui/runtime.rs::discover_and_resolve` now
     short-circuits via a new `try_daemon_snapshot()` helper:
@@ -12967,8 +13472,8 @@ intermediate commit.
     the TUI shell as before, and those sites read from it.
     Rewriting them to consume the daemon's snapshot directly
     is a wholesale read-path refactor — proper scope for
-    P11-011 (delete `src/query/`) where the SQLite read
-    surface goes away entirely. P11-007's win is the *outer
+    CSP-448 (delete `src/query/`) where the SQLite read
+    surface goes away entirely. CSP-444's win is the *outer
     refresh*: skipping discovery when the daemon already
     holds the answer.
     `src/snapshot.rs` picks up `from_bytes(&[u8]) ->
@@ -13003,9 +13508,10 @@ intermediate commit.
     current contract is "one request per connection"), which
     is bigger scope than the per-tick latency justifies. The
     wholesale `read_snapshot` site cleanup is folded into
-    P11-011 alongside the broader SQLite teardown.
+    CSP-448 alongside the broader SQLite teardown.
 
-- [x] `P11-008` One-shot CLI daemon-or-rebuild path (mmap-fresh deferred).
+- [x] `CSP-445` One-shot CLI daemon-or-rebuild path (mmap-fresh deferred).
+  - Legacy ID: `P11-008`
   - Outcome: `warm_start_discover_and_resolve` now opens
     with a `try_daemon_snapshot()` call: when
     `conspectus serve` is reachable on the socket, the CLI
@@ -13013,8 +13519,8 @@ intermediate commit.
     decodes via `snapshot::from_bytes()`, and returns —
     skipping discovery + resolve + persist for every CLI
     command that uses this helper (`table`, `node show`,
-    `graph`, `query` until P11-010). The helper falls
-    through to the existing P7-003 phase 4 cold-rebuild
+    `graph`, `query` until CSP-447). The helper falls
+    through to the existing CSP-139 phase 4 cold-rebuild
     path when the daemon is absent, the snapshot is
     unavailable (pre-first-cycle), or the bytes fail to
     decode. `--refresh` forces the local path so the
@@ -13028,7 +13534,7 @@ intermediate commit.
     write is best-effort; failures log a one-line warning
     matching the SQLite half. `--no-cache` suppresses both
     writes.
-    **Mmap-fresh branch deferred.** P11-008's original
+    **Mmap-fresh branch deferred.** CSP-445's original
     scope named (a) daemon, (b) mmap fresh, (c) cold
     rebuild. The (b) branch is removed from this iteration:
     TOML-rooted mutator providers (`declared`, `aliases`,
@@ -13071,20 +13577,22 @@ intermediate commit.
     mmap, or daemon-only `graph.bin` writes with an
     invalidation contract.
 
-- [x] `P11-009` Daemon warm-start from the on-disk artifact.
-  - Outcome: delivered as part of P11-011a. On startup, the
+- [x] `CSP-446` Daemon warm-start from the on-disk artifact.
+  - Legacy ID: `P11-009`
+  - Outcome: delivered as part of CSP-448.01. On startup, the
     daemon attempts `snapshot::open_mmap` against `graph.bin`
     and seeds `SnapshotState` before the first per-class cycle.
     Missing files, malformed artifacts, and version mismatches
     log and fall through to first-cycle cold-rebuild semantics.
     Once a cycle succeeds, `publish_snapshot` refreshes both
     the in-memory graph state and socket-served snapshot bytes.
-  - Tests: covered by the P11-011a daemon/cache validation
+  - Tests: covered by the CSP-448.01 daemon/cache validation
     suite and subsequent server coverage. The socket path
     continues to return `snapshot_unavailable` only when no
     warm artifact and no published in-memory snapshot exist.
 
-- [x] `P11-010` Remove the `conspectus query` subcommand.
+- [x] `CSP-447` Remove the `conspectus query` subcommand.
+  - Legacy ID: `P11-010`
   - Outcome: clean removal — the `Query(QueryArgs)` enum
     variant on `cli::Command`, the dispatch arm, the
     `QueryArgs` struct, `QueryFormatFlag`, the
@@ -13107,10 +13615,10 @@ intermediate commit.
     `src/query/` stays intact in this story — the TUI's
     `GraphDb::from_snapshot` materialization and the 14
     `query::read_snapshot(...)` call sites still consume
-    it. Those get ripped out in P11-011 alongside the
+    it. Those get ripped out in CSP-448 alongside the
     `rusqlite` drop.
     `design.md`'s "Conspectus Query Surface" section keeps
-    its live reference for now; P11-012's rewrite covers
+    its live reference for now; CSP-449's rewrite covers
     that and the broader ADR supersession.
   - Tests: 25 fewer tests overall (the cli_query + query
     regression binaries) and 2 pin-invariant tests pruned
@@ -13119,9 +13627,13 @@ intermediate commit.
     `cargo fmt -- --check` and `cargo clippy --all-targets
     --all-features -- -D warnings` clean.
 
-- [x] `P11-011a` Retire SQLite persistence layer; daemon + CLI
+- [x] `CSP-448` Delete `src/query/`, drop the `query` Cargo feature, retire the SQLite read surface.
+  - Legacy ID: `P11-011` (restored: the story was split into `P11-011a`..`e` and removed)
+
+- [x] `CSP-448.01` Retire SQLite persistence layer; daemon + CLI
   use in-memory snapshot caches and `graph.bin` only.
-  - Outcome: replaces P11-011's original "delete src/query/
+  - Legacy ID: `P11-011a`
+  - Outcome: replaces CSP-448's original "delete src/query/
     entirely" scope with a pragmatic decomposition (see notes
     on the remaining sub-stories below). The architectural
     win the user originally asked for — "what is the value of
@@ -13139,7 +13651,7 @@ intermediate commit.
       in-memory caches plus the on-disk `graph.bin` after
       every successful cycle. The daemon no longer calls
       `persist_snapshot`.
-    - `warm_start_from_disk()` (delivers P11-009 as a bonus):
+    - `warm_start_from_disk()` (delivers CSP-446 as a bonus):
       on startup, mmap `graph.bin` and seed `SnapshotState`
       so the first cycle's per-class refresh has a prior to
       evict from. Missing file / version mismatch / validate
@@ -13175,7 +13687,7 @@ intermediate commit.
       the `load_cached_snapshot` read and writes `graph.bin`
       instead of `graph.sqlite`. Daemon-present path is
       unchanged (still uses `try_daemon_snapshot()` from
-      P11-007).
+      CSP-444).
     Tests:
     - `tests/cli_persist.rs` rewritten end-to-end (8 SQLite-
       specific tests → 5 graph.bin tests): persists,
@@ -13190,21 +13702,22 @@ intermediate commit.
     - `query::{load_cached_snapshot, persist_snapshot,
       rotate_backup}` become dead-code-warned public API
       consumed only by the surviving query module — they
-      delete in a P11-011d future cleanup along with the
+      delete in a CSP-448.04 future cleanup along with the
       rest of src/query/.
     Full suite via `cargo nextest run --all-targets
     --all-features`: 1755 pass, 1 fail. The single failure
     is `pin_state_matrix_agent_table_snapshot` in
     `tests/pins_snapshots.rs` — a pre-existing snapshot
     regression introduced by commit 84198ea ("fix(tui):
-    honor recency sort in mux view") before P11-011a work
+    honor recency sort in mux view") before CSP-448.01 work
     began. Confirmed by re-running against `git stash`-clean
     HEAD: same failure. Investigation handed to the
     appropriate author. `cargo fmt -- --check` and
     `cargo clippy --all-targets --all-features --
-    -D warnings` clean on the P11-011a diff.
+    -D warnings` clean on the CSP-448.01 diff.
 
-- [x] `P11-011b` Restore in-memory rendering for the output crate.
+- [x] `CSP-448.02` Restore in-memory rendering for the output crate.
+  - Legacy ID: `P11-011b`
   - Outcome: every output renderer
     (`src/output/{agent,mux,union,prs,forks,node_show,table}.rs`)
     now consumes `&GraphSnapshot` directly via typed iteration.
@@ -13226,7 +13739,7 @@ intermediate commit.
     `materialize_snapshot` + `_from_conn` chains and call the
     snapshot-based APIs directly.
     `src/query/` survives this story because the TUI row
-    builders (P11-011c) and the App's `GraphDb` (P11-011d) are
+    builders (CSP-448.03) and the App's `GraphDb` (CSP-448.04) are
     still consumers. `dev_scenarios::sessions_tree()` keeps its
     `_from_conn` path for the same reason.
   - Tests: full output unit-test suite green (122 tests). One
@@ -13244,27 +13757,28 @@ intermediate commit.
     and `cargo clippy --all-targets --all-features --
     -D warnings` clean.
 
-- [x] `P11-011c` Rewrite TUI row builders for forks / prs / union
+- [x] `CSP-448.03` Rewrite TUI row builders for forks / prs / union
   in-memory.
+  - Legacy ID: `P11-011c`
   - Outcome: `src/tui/rows/{forks,prs,union}.rs` no longer call
     `materialize_snapshot` from their `build_X_tree(snapshot, …)`
     entry points. Each builder iterates `snapshot.nodes` /
     `candidate_links` / `resolved_relationships` directly and
     uses `model::pick_preferred`-equivalent ranking inline. The
-    H-UI-008 "filter through resolver" pattern is preserved by
+    CSP-422 "filter through resolver" pattern is preserved by
     pre-collecting selected `link_id`s from
     `snapshot.resolved_relationships` and filtering candidate
     iteration against that set.
     `build_X_tree_from_conn` and `XBuildInputsFromConn` survive
     as thin wrappers (read_snapshot via `src/query`, delegate
-    to the new in-memory builders). They retire in P11-011d
+    to the new in-memory builders). They retire in CSP-448.04
     alongside the App's `GraphDb` refactor that removes all
     Connection-based call sites.
     `sessions.rs` already had the snapshot-based real impl
     pre-P11-011c; only the wrapper retires later.
     `mux.rs` is the holdout — at 1645 LoC with extensive SQL
     + a deep grouping/sort/pin-binding pipeline, it stays
-    SQL-backed for now. P11-011d covers the full rewrite when
+    SQL-backed for now. CSP-448.04 covers the full rewrite when
     the App refactor lands and the read_snapshot wrapper
     pattern goes away.
   - Tests: union view's `union_view_paints_pin_id_on_bound_mux_rows`
@@ -13276,8 +13790,9 @@ intermediate commit.
     `cargo fmt -- --check` and `cargo clippy --all-targets
     --all-features -- -D warnings` clean.
 
-- [x] `P11-011d` Delete `src/query/`, drop the `query` Cargo
+- [x] `CSP-448.04` Delete `src/query/`, drop the `query` Cargo
   feature, finish in-memory TUI rendering.
+  - Legacy ID: `P11-011d`
   - Outcome: `src/query/` deleted in full (loader, schema, persist,
     reader, runner, mod, schema.sql). The `query` Cargo feature is
     gone; `default = ["query"]` and the `#[cfg(feature = "query")]`
@@ -13289,7 +13804,7 @@ intermediate commit.
     `tui/ui.rs` consume the held snapshot directly.
     `build_tree_for_view` now takes `&GraphSnapshot` and dispatches
     to the in-memory builders directly. The thin
-    `*_from_conn` wrappers added during P11-011b/c
+    `*_from_conn` wrappers added during CSP-448.02/CSP-448.03
     (`build_mux_tree_from_conn`, `build_sessions_tree_from_conn`,
     `build_forks_tree_from_conn`, `build_prs_tree_from_conn`,
     `build_union_tree_from_conn`, `build_node_detail_from_conn`,
@@ -13306,7 +13821,8 @@ intermediate commit.
     `cargo clippy --all-targets --all-features -- -D warnings` and
     `cargo fmt --all -- --check` are clean.
 
-- [x] `P11-011e` Revisit hook sidecar SQLite storage.
+- [x] `CSP-448.05` Revisit hook sidecar SQLite storage.
+  - Legacy ID: `P11-011e`
   - Outcome: `conspectus hook write` now prefers the daemon's
     `hook_ingest` socket command. The daemon applies the hook
     record to `SnapshotState`, re-resolves, and republishes through
@@ -13325,8 +13841,9 @@ intermediate commit.
     `hooks-latest.json`; server unit coverage proves daemon ingest
     updates in-memory graph state and serialized snapshot bytes.
 
-- [x] `P11-012` Supersede the SQLite ADR cluster and rewrite
+- [x] `CSP-449` Supersede the SQLite ADR cluster and rewrite
   design.md.
+  - Legacy ID: `P11-012`
   - Outcome: ADRs 0036, 0037, 0039, 0040, 0042, 0044 marked
     **Superseded** by ADR 0082 with per-ADR notes explaining
     exactly which commitments retired (the SQL query surface,
@@ -13354,7 +13871,7 @@ intermediate commit.
       WAL, no more migrations, no more rotation.
     - §"Query Surface" section deleted (~50 lines).
     - §"Graph-to-View Slicing" rewritten to describe the
-      daemon-snapshot consumption path. Later P11-011b/c/d
+      daemon-snapshot consumption path. Later CSP-448.02/CSP-448.03/CSP-448.04
       work removed the internal `materialize_snapshot` path
       entirely.
     - §"Remaining Design Questions → Continuous Operation
@@ -13371,7 +13888,8 @@ intermediate commit.
     pin_state_matrix_agent_table_snapshot failure from
     commit 84198ea).
 
-- [x] `P11-013` Operator migration notes.
+- [x] `CSP-450` Operator migration notes.
+  - Legacy ID: `P11-013`
   - Outcome: new top-level `CHANGELOG.md` (Keep a Changelog
     1.1.0 format) with an `[Unreleased]` section that lists
     Phase 11's breaking changes (Removed: `conspectus query`,
@@ -13428,11 +13946,12 @@ The H-TBL workstream already established a column registry and
 `conspectus columns <ROWS>` discovery surface; the TUI command palette
 can reuse the same registry-plus-description pattern at the action
 level. The text-input primitive (`src/tui/widgets/input.rs`) from
-ADR 0030 (H-RENAME-010) provides the base widget. The fuzzy filter can
+ADR 0030 (CSP-240) provides the base widget. The fuzzy filter can
 reuse the structural matching approach from the existing
 `node_short_id` prefix resolver or adopt a lightweight substring scorer.
 
-- [ ] `H-CMD-001` ADR: command palette surface and minibuffer scope.
+- [ ] `CSP-390` ADR: command palette surface and minibuffer scope.
+  - Legacy ID: `H-CMD-001`
   - Scope: settle the two-phase delivery (command palette first as the
     lower-risk, higher-discoverability surface; minibuffer second as
     the general-purpose prompt once the action registry is mature).
@@ -13441,7 +13960,7 @@ reuse the structural matching approach from the existing
     vs trait + `describe()`), whether commands are statically
     registered or discovered at runtime, how user-defined keybindings
     and aliases plug into the registry, and the overlay placement
-    (H-RENAME-010's centered modal pattern vs a bottom-anchored
+    (CSP-240's centered modal pattern vs a bottom-anchored
     palette vs a full-screen overlay for the command-search variant).
     Record the relationship with ADR 0030 (text-input widget), ADR
     0033 (extensible keybinding config), and the existing `Controls`
@@ -13452,7 +13971,8 @@ reuse the structural matching approach from the existing
     the Controls overlay help text, and the column-registry pattern
     from H-TBL.
   - Blockers: none.
-- [ ] `H-CMD-002` Action registry: enumerate the command surface.
+- [ ] `CSP-391` Action registry: enumerate the command surface.
+  - Legacy ID: `H-CMD-002`
   - Scope: walk every `Action` variant, TUI keybinding, runtime helper
     (`src/tui/runtime.rs`), and modal surface (viewer, rename, graph
     export, pinned-row launcher) and produce a structured action
@@ -13464,8 +13984,8 @@ reuse the structural matching approach from the existing
     new `src/tui/actions.rs` or similar, separate from the existing
     key-dispatch map, so the command palette can enumerate it without
     importing the runtime. This is the foundation the ADR describes;
-    the palette overlay (`H-CMD-003`) and the minibuffer
-    (`H-CMD-004+`) both consume it.
+    the palette overlay (`CSP-392`) and the minibuffer
+    (`CSP-393+`) both consume it.
   - Tests: unit tests for the registry shape, uniqueness of command
     ids, applicability-guard coverage for at least four categories,
     and a snapshot of the full command list for discovery parity with
@@ -13473,8 +13993,9 @@ reuse the structural matching approach from the existing
   - Manual checks: confirm the registry matches the Controls overlay
     help text byte-for-byte (same descriptions, same keybindings);
     spot-check `conspectus tui --help` for consistency.
-  - Blockers: `H-CMD-001`.
-- [ ] `H-CMD-003` Command palette overlay (first deliverable).
+  - Blockers: `CSP-390`.
+- [ ] `CSP-392` Command palette overlay (first deliverable).
+  - Legacy ID: `H-CMD-003`
   - Scope: on a single key chord (`Ctrl+P` or `M-x`-style `Alt+X`,
     decided by the ADR), open a centered or top-anchored overlay
     listing every registered action. The input line at the top accepts
@@ -13495,8 +14016,9 @@ reuse the structural matching approach from the existing
   - Manual checks: open the palette in a live TUI, type a partial
     command name, confirm the filter works, execute a command, verify
     the TUI state changes correctly.
-  - Blockers: `H-CMD-002`.
-- [ ] `H-CMD-004` Minibuffer prompt (second deliverable, deferred).
+  - Blockers: `CSP-391`.
+- [ ] `CSP-393` Minibuffer prompt (second deliverable, deferred).
+  - Legacy ID: `H-CMD-004`
   - Scope: add a bottom-anchored single-line prompt bar that can host
     any text-command interaction — rename, search, filter, command
     palette entry — without spawning a new modal overlay. The
@@ -13505,9 +14027,9 @@ reuse the structural matching approach from the existing
     `M-x` opens the minibuffer in command-palette mode,
     `C-g`/`Esc` cancels. Tab completion cycles candidates. History
     persists per-command-type for the session lifetime. The existing
-    rename input (`H-RENAME-011`) should route through the minibuffer
+    rename input (`CSP-241`) should route through the minibuffer
     rather than its own modal once this lands; the search overlay
-    (`T8-017` / `/`) should use it too. Do not replace the viewer
+    (`CSP-193` / `/`) should use it too. Do not replace the viewer
     modal or graph-export dialogs — they need more screen real estate.
   - Tests: snapshot tests for empty prompt, text entry with completion
     candidates, history navigation (`M-p`/`M-n`), cancellation, and
@@ -13516,13 +14038,14 @@ reuse the structural matching approach from the existing
   - Manual checks: open minibuffer, type a partial command, tab-
     complete, execute; then open rename via minibuffer and confirm the
     alias update flow works identically to the current modal path.
-  - Blockers: `H-CMD-003`, `H-RENAME-011` (rename flow is the first
+  - Blockers: `CSP-392`, `CSP-241` (rename flow is the first
     non-palette consumer).
-- [ ] `H-CMD-005` Migrate rename, search, and view-switch prompts into
+- [ ] `CSP-394` Migrate rename, search, and view-switch prompts into
   the minibuffer.
+  - Legacy ID: `H-CMD-005`
   - Scope: once the minibuffer exists, route the existing inline
     prompts through it: `R` (rename) opens the minibuffer pre-
-    populated; `/` (search, `T8-017`) opens the minibuffer; `v`
+    populated; `/` (search, `CSP-193`) opens the minibuffer; `v`
     (view-switch) opens the minibuffer with completion over the
     registered views. Keep the existing modal fallback for terminals
     where the minibuffer layout is impractical. Remove the standalone
@@ -13533,7 +14056,7 @@ reuse the structural matching approach from the existing
   - Manual checks: run through the full rename → search → view-switch
     flow using only the minibuffer; confirm history and completion
     work across each prompt type.
-  - Blockers: `H-CMD-004`, `T8-017`.
+  - Blockers: `CSP-393`, `CSP-193`.
 
 ### Per-Node-Type Visual Identity
 
@@ -13564,7 +14087,8 @@ live in `src/tui/icons.rs` (or a similar single-source-of-truth module)
 so the row renderer, detail panel, graph explorer, and any future
 surfaces all read from one definition.
 
-- [x] `H-VIS-001` ADR: node-type visual identity system.
+- [x] `CSP-408` ADR: node-type visual identity system.
+  - Legacy ID: `H-VIS-001`
   - Outcome: ADR 0073 records the strategy (geometric default,
     Nerd-Font opt-in via `[tui.theme.icons]`), the per-kind slate
     (`▦ ◆ ◇ ● ▣ ⚙ ⎇ ⑂ ⇄`), the placement rule (one-cell prefix
@@ -13573,8 +14097,9 @@ surfaces all read from one definition.
     the accessibility stance (1-cell-only override validation,
     glyph-only legibility under `NO_COLOR`). `AgentSession` keeps
     an independent kind-color layered with the harness pill.
-    Subsequent stories (`H-VIS-002..006`) implement the slate.
-- [x] `H-VIS-002` Define the per-node-type glyph and color assignments.
+    Subsequent stories (`CSP-409..413`) implement the slate.
+- [x] `CSP-409` Define the per-node-type glyph and color assignments.
+  - Legacy ID: `H-VIS-002`
   - Outcome: `src/tui/icons.rs` ships the `NodeKind` enum with
     `From<&GraphNode>` / `From<&NodeId>` conversions, the
     `NodeKindStyle { glyph, color, width }` struct, and the
@@ -13587,10 +14112,11 @@ surfaces all read from one definition.
     the slate catalog, default-glyph widths, `NodeId` conversion,
     operator overrides, and the config-loader path
     (`[tui.theme.icons]` parsing + diagnostics for unknown keys,
-    non-string values, wide glyphs). `H-VIS-003` consumes these
+    non-string values, wide glyphs). `CSP-410` consumes these
     primitives to apply the glyph prefix to row rendering.
-- [x] `H-VIS-003` Apply node-kind glyphs and colors to the TUI row
+- [x] `CSP-410` Apply node-kind glyphs and colors to the TUI row
   tree.
+  - Legacy ID: `H-VIS-003`
   - Outcome: `render_left_row` (`src/tui/ui.rs`) prepends the ADR
     0073 node-kind glyph after the disclosure column for every
     `RowKind` that carries a graph node identity: Workspace (`▦`)
@@ -13611,9 +14137,10 @@ surfaces all read from one definition.
     (`node_kind_glyph_span`, `forge_pr_glyph_span`, the
     `row_kind_glyph_span` dispatch) including the PR
     state→color mapping and the Pin / synthetic-group skip cases.
-    Detail-pane glyph application lands under H-VIS-004.
-- [x] `H-VIS-004` Apply node-kind glyphs and colors to the detail
+    Detail-pane glyph application lands under CSP-411.
+- [x] `CSP-411` Apply node-kind glyphs and colors to the detail
   panel and graph explorer.
+  - Legacy ID: `H-VIS-004`
   - Outcome: `kind_chip_span` (`src/tui/ui.rs`) now emits the per-
     kind slate glyph in the node-kind color rather than dim
     `[kind]` text; `ForgePr` reuses `theme.pr_open` at chip
@@ -13632,9 +14159,10 @@ surfaces all read from one definition.
     `◇`/`▦`/`▣` on relationship-explorer rows. Unit tests cover
     the chip glyph + color per kind, the unknown-tag fallback,
     the right-panel title prefix, and the explorer link-row
-    glyph ordering. Non-TUI surfaces stay under H-VIS-005.
-- [ ] `H-VIS-005` Surface node-kind identity in non-TUI outputs
+    glyph ordering. Non-TUI surfaces stay under CSP-412.
+- [ ] `CSP-412` Surface node-kind identity in non-TUI outputs
   (cross-surface consistency).
+  - Legacy ID: `H-VIS-005`
   - Scope: extend `NodeId` / `GraphNode` with a `node_kind()` method
     returning the stable string tag (`"repo"`, `"agent_session"`,
     etc.) so non-TUI consumers — `conspectus graph --format json`,
@@ -13652,8 +14180,9 @@ surfaces all read from one definition.
     break existing consumers; DOT snapshot updates confirming node-
     kind colors appear; HTML payload snapshot updates confirming
     glyph/color propagation.
-  - Blockers: `H-VIS-002`, `H-VIS-004`.
-- [ ] `H-VIS-006` Docs and snapshot coverage.
+  - Blockers: `CSP-409`, `CSP-411`.
+- [ ] `CSP-413` Docs and snapshot coverage.
+  - Legacy ID: `H-VIS-006`
   - Scope: update `docs/operations.md` with the icon key — a table
     listing every `NodeKind`, its glyph, its default color, and its
     meaning. Update `Theme` docs in `src/tui/theme.rs` with the new
@@ -13665,7 +14194,7 @@ surfaces all read from one definition.
     run --all-targets --all-features`; `git diff --check`. Insta
     review of every changed snapshot for stable ordering and
     consistent glyph placement.
-  - Blockers: `H-VIS-003`, `H-VIS-004`, `H-VIS-005`.
+  - Blockers: `CSP-410`, `CSP-411`, `CSP-412`.
 
 ## Operator Requests 2026-07-27
 
@@ -13673,9 +14202,10 @@ A batch of operator-requested items, listed easiest → hardest where
 "harder" means more product direction is needed to scope and set the
 approach (not raw implementation size). Worked top-to-bottom.
 
-- [x] `H-VIEW-001` Drop the Union view and hide the PRs and Forks views
+- [x] `CSP-501` Drop the Union view and hide the PRs and Forks views
   from the TUI.
-  - Outcome (2026-09-30, `REL-007`): landed in `b84aa05`.
+  - Legacy ID: `H-VIEW-001`
+  - Outcome (2026-09-30, `CSP-538`): landed in `b84aa05`.
   - Scope: `VIEW_OPTIONS` (`src/tui/widgets/controls.rs`) is the single
     source of truth for both the controls-overlay View section and the
     `[` / `]` view-cycle accelerator. Reduce it to `[Sessions, Mux]` so
@@ -13688,9 +14218,10 @@ approach (not raw implementation size). Worked top-to-bottom.
     view-cycle tests to the shortened option set; confirm no default
     view/grouping resolves to a now-hidden view.
   - Blockers: none.
-- [x] `H-LAYOUT-001` Make the column-reflow (narrow → stacked) threshold
+- [x] `CSP-502` Make the column-reflow (narrow → stacked) threshold
   configurable.
-  - Outcome (2026-09-30, `REL-007`): landed in `93406b5` as `[tui]
+  - Legacy ID: `H-LAYOUT-001`
+  - Outcome (2026-09-30, `CSP-538`): landed in `93406b5` as `[tui]
     narrow_layout_threshold`.
   - Scope: `NARROW_LAYOUT_THRESHOLD` (`src/tui/ui.rs:56`, hard-coded
     `100`) governs when `draw_body` switches the side-by-side left/right
@@ -13703,8 +14234,9 @@ approach (not raw implementation size). Worked top-to-bottom.
     malformed → diagnostic); a `draw_body`/snapshot test proving the
     split direction flips at the configured width.
   - Blockers: none.
-- [x] `H-PIN-ROOT-001` Surface pins registered in repos outside the
+- [x] `CSP-503` Surface pins registered in repos outside the
   active search root.
+  - Legacy ID: `H-PIN-ROOT-001`
   - Scope: `local_pin_store_paths` (`src/discovery/pins.rs:80`) only
     locates `.conspectus.toml` pin stores by walking up from
     `context.roots()` and from cwds of already-discovered nodes. A pin
@@ -13728,7 +14260,8 @@ approach (not raw implementation size). Worked top-to-bottom.
     on write, and each discovery cycle folds the recorded (still-extant)
     stores into the pin loader's search set. Best-effort, self-pruning,
     read-only for `graph`/`table`.
-- [x] `H-MUX-SORT-001` Add better recency sort options for the mux view.
+- [x] `CSP-504` Add better recency sort options for the mux view.
+  - Legacy ID: `H-MUX-SORT-001`
   - Scope: the mux view currently sorts by the shared `Sort::Recency`
     signal. Enumerate the recency signals tmux exposes per session
     (`session_created`, `session_activity`, `session_last_attached`,
@@ -13752,7 +14285,8 @@ approach (not raw implementation size). Worked top-to-bottom.
     (menu-first), persisted in `tui-state.json`, and defaulting to
     Activity (the prior behavior). Pane-process start time was surveyed
     and dropped (Linux-only, extra syscalls, ~duplicates activity).
-- [x] `H-SERVE-PERF-001` Debug `conspectus serve` resource usage.
+- [x] `CSP-505` Debug `conspectus serve` resource usage.
+  - Legacy ID: `H-SERVE-PERF-001`
   - Scope: the `serve` daemon (ADR 0038 / ADR 0079,
     `src/server/mod.rs`) consumes a nontrivial amount of CPU/memory at
     idle. Profile a running instance to attribute cost across the
@@ -13775,7 +14309,7 @@ approach (not raw implementation size). Worked top-to-bottom.
     200ms shutdown-poll floor (negligible).
   - Decision: chose the deep fix (class-gated mutators, ADR 0091).
     Implementation (landed):
-    - [x] `H-SERVE-PERF-001a` Class-gate the process-tree mutator:
+    - [x] `CSP-505.01` Class-gate the process-tree mutator:
       `discover_local_warm_with` defers eviction of the
       `PROCESS_TREE_MUTATORS` slice (`cross_link`, `codex_log`),
       derives `run_process_tree` from whether any mux/harness provider
@@ -13786,11 +14320,13 @@ approach (not raw implementation size). Worked top-to-bottom.
       `warm_start_preserves_process_tree_links_on_a_git_only_cycle`
       plus `cache::` unit tests; the existing full-discovery tests
       cover the recompute path.
-    - [~] `H-SERVE-PERF-001b` Dropped: `LocalDiscoveryConfig` is
+      - Legacy ID: `H-SERVE-PERF-001a`
+    - [~] `CSP-505.02` Dropped: `LocalDiscoveryConfig` is
       consumed per call (drains boxed backends) and `from_env()` is
       env-reads only — caching a consumed value is awkward for
       negligible gain. See ADR 0091 Consequences.
-    - [ ] `H-SERVE-PERF-001c` Cut the per-cycle resolve/publish cost
+      - Legacy ID: `H-SERVE-PERF-001b`
+    - [ ] `CSP-505.03` Cut the per-cycle resolve/publish cost
       (deferred; revisit only on the triggers below). Every class tick
       still runs a full `resolve_snapshot` + full rkyv
       `serialize_to_bytes` + `write_atomic_bytes` (fsync+rename of
@@ -13801,6 +14337,7 @@ approach (not raw implementation size). Worked top-to-bottom.
       serialized bytes always differ. Any real fix needs a *semantic*
       fingerprint that excludes the freshness epochs, which collides
       with load-bearing invariants:
+      - Legacy ID: `H-SERVE-PERF-001c`
       - The freshness gate (ADR 0079, `cache::compute_freshness_gate`)
         reads `freshness_epoch` for TTL decisions — epochs must keep
         advancing or a skipped publish provokes a full stale re-run
@@ -13839,7 +14376,8 @@ approach (not raw implementation size). Worked top-to-bottom.
       Until a trigger fires this stays deferred: the dominant CPU cost
       (the `/proc` walk) is already gone via 001a, and the residual is
       a second-order, high-blast-radius win.
-- [x] `H-SERVE-PERF-002` Cache `codex_log` DB scan across cycles.
+- [x] `CSP-510` Cache `codex_log` DB scan across cycles.
+  - Legacy ID: `H-SERVE-PERF-002`
   - Scope: after 001a a min-cycle-gap floor for watcher-driven class
     ticks landed (`server::min_cycle_gap` clamped to `[250ms, 2s]`),
     but the harness class still fired at ~0.8 Hz and each cycle
@@ -13859,57 +14397,67 @@ approach (not raw implementation size). Worked top-to-bottom.
     `CACHE_TEST_LOCK` (cache-hit skips SQLite entirely, mtime advance
     forces re-query, expanded pid set forces re-query) plus the 11
     pre-existing codex_log tests including the widening case.
-- [x] `H-SERVE-PERF-003` Fingerprint-gated `/proc` walk (001a
+- [x] `CSP-511` Fingerprint-gated `/proc` walk (001a
   follow-up). In-memory fingerprint over the mux/harness slice
   gates the walk to real content changes rather than "class re-ran"
   (`aac498c` + `a80a7fc`). Iteratively refined by 008/009 to
   normalize churn fields. See ADR 0091 Retrospective.
-- [x] `H-SERVE-PERF-004` Cache `GitProbe::probe` results across
+  - Legacy ID: `H-SERVE-PERF-003`
+- [x] `CSP-512` Cache `GitProbe::probe` results across
   cycles keyed on `.git/HEAD` / `config` / `refs/heads/` /
   `packed-refs` mtimes (`d27a987`). `observed_cwd_git_fragment`
   otherwise spawned ~150 git subprocesses per harness cycle
   (~10 spawns × 15 unique cwds).
-- [x] `H-SERVE-PERF-005` TTL-cache `ForgeDiscovery` output
+  - Legacy ID: `H-SERVE-PERF-004`
+- [x] `CSP-513` TTL-cache `ForgeDiscovery` output
   (`9a691a3`). Empty PR results produced no `github` provenance
   stamps → freshness gate never marked forge fresh → every class
   cycle respawned `gh pr list`. Same failure mode later addressed
   for tmux/zellij in 011. A `provider_last_run` gate refactor
   would replace both TTL caches with one correct fix; deferred.
-- [x] `H-SERVE-PERF-006` Fix `codex::read_session_meta` full-file
+  - Legacy ID: `H-SERVE-PERF-005`
+- [x] `CSP-514` Fix `codex::read_session_meta` full-file
   slurp (`3495367`). Was `fs::read_to_string` on JSONL rollouts up
   to 24 MB to look at the first line; replaced with
   `BufReader::read_line`. **167 MB/s → 37 MB/s** — the single
   biggest win in the chain, found in ~30 seconds of `sudo strace`.
-- [x] `H-SERVE-PERF-007` Per-file `(mtime, size)` cache for claude +
+  - Legacy ID: `H-SERVE-PERF-006`
+- [x] `CSP-515` Per-file `(mtime, size)` cache for claude +
   codex session header/tail scans (`9b9eec3`). On this operator's
   box 93 of 96 session files were dormant; caching drops
   cold-file opens to zero on dormant paths.
-- [x] `H-SERVE-PERF-008` Refine H-SERVE-PERF-003's fingerprint to
+  - Legacy ID: `H-SERVE-PERF-007`
+- [x] `CSP-516` Refine CSP-511's fingerprint to
   zero mux `activity_epoch`, `last_attached_epoch`, and agent
   `last_active_epoch` (`70becc5`). Without this the gate never
   closed on any operator box with a live tmux session.
-- [x] `H-SERVE-PERF-009` Extend 008 to also zero
+  - Legacy ID: `H-SERVE-PERF-008`
+- [x] `CSP-517` Extend 008 to also zero
   `last_message_preview`, `title`, `created_epoch` (`aac498c`).
   008 alone still churned on any active claude session appending
   messages.
-- [x] `H-SERVE-PERF-010` mtime-cache the opencode.db SQL scan
+  - Legacy ID: `H-SERVE-PERF-009`
+- [x] `CSP-518` mtime-cache the opencode.db SQL scan
   (`148763d`). `read_sqlite_sessions` full-table-scanned the 25 MB
   DB on every harness cycle; WAL mode keeps the main-file mtime
   stable so the cache hits ~100%. **37 MB/s → 549 KB/s** — the
   second biggest single win.
-- [x] `H-SERVE-PERF-011` TTL-cache `TmuxDiscovery` +
+  - Legacy ID: `H-SERVE-PERF-010`
+- [x] `CSP-519` TTL-cache `TmuxDiscovery` +
   `ZellijDiscovery` output (`03ad86b`). Same empty-fragment
   freshness-gate hole as forge — zellij with no live sessions
   respawned `zellij list-sessions` ~1 Hz per harness cycle.
+  - Legacy ID: `H-SERVE-PERF-011`
 - Full retrospective for the H-SERVE-PERF chain (001a through 011),
   including per-commit attribution table and remaining deferred
   work (001c resolve/publish deferral, `try_class_cycle` gate
   bypass, empty-fragment gate hole), lives at the bottom of
   `docs/adr/0091-serve-idle-cost-and-class-gated-mutators.md`.
-- [x] `H-WT-001` Integrate first-class worktree management with pluggable
+- [x] `CSP-506` Integrate first-class worktree management with pluggable
   backends.
-  - Outcome (2026-09-30, `REL-007`): epic complete; `H-WT-002` through
-    `H-WT-008` landed.
+  - Legacy ID: `H-WT-001`
+  - Outcome (2026-09-30, `CSP-538`): epic complete; `CSP-507` through
+    `CSP-524` landed.
   - Scope: product design for creating / listing / removing git
     worktrees from Conspectus with a pluggable backend seam targeting
     `worktrunk` (https://github.com/max-sixty/worktrunk) as the rich
@@ -13936,7 +14484,7 @@ approach (not raw implementation size). Worked top-to-bottom.
     ADR 0087 prohibition 6 (never mutate git state) stays unchanged —
     Conspectus never runs `git worktree add/remove` itself.
     Implementation stories (follow-ups):
-    - [x] `H-WT-002` `WorktreeBackend` trait + registry + thin `git`
+    - [x] `CSP-507` `WorktreeBackend` trait + registry + thin `git`
       read/list backend; fold worktree records into `Checkout`
       discovery with linked-vs-primary + branch metadata. Landed in
       five by-concern commits: CheckoutNode `WorktreeMeta`
@@ -13949,6 +14497,7 @@ approach (not raw implementation size). Worked top-to-bottom.
       with the `git` provider key (produced by the git provider, on the
       git cadence) rather than a separate `worktree` key — simpler and
       avoids a second freshness-gate slice.
+      - Legacy ID: `H-WT-002`
       - Scope (settled 2026-08-03): the read/list foundation only.
         Today git discovery probes worktree state for the single
         checkout it's pointed at (`GitProbeResult::is_linked_worktree`)
@@ -13977,12 +14526,13 @@ approach (not raw implementation size). Worked top-to-bottom.
            nodes, stamp `worktree` provenance.
         4. CLI: `conspectus worktree list`.
         5. TUI: linked/primary + lock/prune marker.
-    - [x] `H-WT-003` `worktrunk` backend (create/remove) behind `PATH`
+    - [x] `CSP-508` `worktrunk` backend (create/remove) behind `PATH`
       autodetection + `[worktree] backend` config. Landed: trait
       create/remove (default Unsupported) + `WorktrunkBackend` over a
       `WtRunner` seam (003a); `[worktree] backend = auto|git|worktrunk`
       + `resolve_mutation_backend` (003b). Argv verified end-to-end
       against real `wt`.
+      - Legacy ID: `H-WT-003`
       - Scope (settled 2026-08): worktrunk `wt` v0.43 CLI (binary `wt`).
         Argv (category-4 subprocess, ADR 0087 / ADR 0092):
         - create: `wt -C <repo> switch --create --no-cd [--base <ref>]
@@ -13999,9 +14549,10 @@ approach (not raw implementation size). Worked top-to-bottom.
         worktrunk when `wt` on PATH, else read-only; `git` forces
         read-only; `worktrunk` requires `wt`). A resolver picks the
         CLI/TUI mutation backend from config + PATH.
-    - [x] `H-WT-004` `conspectus worktree new/rm` CLI + menu-first TUI
+    - [x] `CSP-509` `conspectus worktree new/rm` CLI + menu-first TUI
       actions gated on a mutation-capable backend.
-      - Outcome (2026-09-30, `REL-007`): CLI (`004a`) and TUI (`004b`) both
+      - Legacy ID: `H-WT-004`
+      - Outcome (2026-09-30, `CSP-538`): CLI (`H-WT-004a`) and TUI (`CSP-509.02`) both
         landed.
       - Scope (settled 2026-08): create-only semantics — `worktree new`
         creates the worktree+branch but does NOT launch an agent
@@ -14021,9 +14572,10 @@ approach (not raw implementation size). Worked top-to-bottom.
 
 Fresh batch, added alongside the 2026-07-27 items.
 
-- [x] `H-PIN-EDIT-MUX-001` Pin edit / delete does not resolve a pin when a
+- [x] `CSP-525` Pin edit / delete does not resolve a pin when a
   pinned mux row is selected in the mux view.
-  - Outcome (2026-09-30, `REL-007`): landed in `084967f`.
+  - Legacy ID: `H-PIN-EDIT-MUX-001`
+  - Outcome (2026-09-30, `CSP-538`): landed in `084967f`.
   - Symptom: on a pinned mux row selected from the Mux view, pressing `R`
     (rename) or `Delete` (via the pins menu / `p`) reports "no editable
     pin `<pin_id>` in current selection" even though the row carries the
@@ -14048,8 +14600,9 @@ Fresh batch, added alongside the 2026-07-27 items.
     the pin. Assert `pin_target` resolves to the same
     `PinMutationTarget` fields the session-row test asserts.
   - Blockers: none.
-- [x] `H-HARNESS-ATELIER-001` Atelier `exec claude` panes render as "No
+- [x] `CSP-526` Atelier `exec claude` panes render as "No
   agent" in the TUI / CLI.
+  - Legacy ID: `H-HARNESS-ATELIER-001`
   - Progress (2026-10-02): the rendering half landed in `549acab`. An
     agentless mux row now carries `program_harness` from the pane's
     `mux_contains_process` evidence, falling back to a harness token in
@@ -14090,8 +14643,9 @@ Fresh batch, added alongside the 2026-07-27 items.
     reproduces the process tree and asserts claude attribution.
   - Blockers: needs live process-tree data. Deferred until repro
     provided.
-- [x] `H-PREVIEW-WRAP-001` Preview pane hides quiet panes' output and
+- [x] `CSP-580` Preview pane hides quiet panes' output and
   wraps agent UI decorations (ADR 0106).
+  - Legacy ID: `H-PREVIEW-WRAP-001`
   - Symptom: a `conspectus serve` pane previewed as empty because the
     preview kept the capture's last N lines, which were the blank rows
     below the server's output. Agent panes' full-width rules and box
@@ -14107,8 +14661,9 @@ Fresh batch, added alongside the 2026-07-27 items.
     clips. The mode is set with `[tui] preview_wrap`, a "Preview wrap"
     section in the controls overlay, and is persisted in
     `tui-state.json`.
-- [x] `H-HANDOFF-LATENCY-001` Returning from tmux redraws the TUI
+- [x] `CSP-583` Returning from tmux redraws the TUI
   without waiting for the refresh (ADR 0108).
+  - Legacy ID: `H-HANDOFF-LATENCY-001`
   - Symptom: after the ADR 0104 nudge, a plain detach left the screen
     blank while the TUI nudged the daemon's `mux` and `harness` classes,
     fetched the snapshot, and rebuilt rows on the UI thread. That took
@@ -14122,15 +14677,17 @@ Fresh batch, added alongside the 2026-07-27 items.
     (`WorkerLedger`), so an older result can't overwrite a newer one.
   - Tests: `tui::runtime` `worker_ledger`, `tui::app` hand-off reducer,
     `tui::ui` pending-row rendering.
-- [ ] `H-HANDOFF-LATENCY-002` Cheaper post-hand-off rescans.
+- [ ] `CSP-584` Cheaper post-hand-off rescans.
+  - Legacy ID: `H-HANDOFF-LATENCY-002`
   - Scope: one daemon `refresh` call that takes several classes (one
     resolve and one round trip instead of two). Measure how long nudges
     wait on the writer lock during git rebuilds. Decide whether the
     blocking refreshes before a launch's attach (`pin launch`,
     `mux new`, `mux launch`) are still needed, since the attach target
     comes from the request, not the snapshot.
-- [x] `H-MUX-NEW-001` Create bare tmux sessions from within Conspectus
+- [x] `CSP-527` Create bare tmux sessions from within Conspectus
   (no pin, no agent).
+  - Legacy ID: `H-MUX-NEW-001`
   - Motivation: operators currently drop out of Conspectus to run a
     plain `tmux new-session -s <name> -c <cwd>` when they want a bare
     console session rooted in a repo/checkout. The mux view should
@@ -14185,8 +14742,9 @@ Fresh batch, added alongside the 2026-07-27 items.
     is deferred until a second bare-mux-shape verb lands; today attach
     and rename are polymorphic-across-node-kinds global bindings rather
     than mux-specific menu entries. See ADR 0095 follow-ups.
-- [x] `H-MUX-LAUNCH-001` Launch a harness in a fresh mux without
+- [x] `CSP-529` Launch a harness in a fresh mux without
   persisting a pin (ADR 0096).
+  - Legacy ID: `H-MUX-LAUNCH-001`
   - Motivation: operators today have to persist a pin to spawn a
     harness through Conspectus's launch pipeline, or drop out to a
     shell for a one-off. Neither the pin nor the bare-mux path fits
@@ -14198,7 +14756,7 @@ Fresh batch, added alongside the 2026-07-27 items.
     sidecar write. Worktree toggle reuses ADR 0092 / ADR 0094
     realize-at-launch, idempotent.
   - Scope (ships the feature end-to-end; form-primitive extraction is
-    the follow-up in H-MUX-LAUNCH-002):
+    the follow-up in CSP-530):
     1. New standalone `MuxLaunchFormState` widget in
        `src/tui/widgets/mux_launch.rs` — harness / cwd / mux name /
        socket / argv / worktree toggle + branch, with cursor +
@@ -14220,7 +14778,7 @@ Fresh batch, added alongside the 2026-07-27 items.
        menu.
   - Non-goals: no pin write, no binding persistence, no resume
     splicing (pin-scoped), no `send-keys` seeding, no shared form
-    primitive with pin-create (deferred to H-MUX-LAUNCH-002), no
+    primitive with pin-create (deferred to CSP-530), no
     visual redesign of any existing form.
   - Tests: `FakeTmux` new-session call assertion for mux launch
     with harness argv; CLI parse test for `mux launch` including
@@ -14246,10 +14804,11 @@ Fresh batch, added alongside the 2026-07-27 items.
     overlay gains the "Mux (ADRs 0095, 0096)" section covering
     `n` and `m`. ADR 0095's `m`-keyed Mux action menu follow-up
     discharged.
-- [x] `H-MUX-LAUNCH-002` Extract the shared launch-spec form
+- [x] `CSP-530` Extract the shared launch-spec form
   primitive (ADR 0097).
+  - Legacy ID: `H-MUX-LAUNCH-002`
   - Motivation: `PinCreateState` and the freshly-shipped
-    `MuxLaunchFormState` (H-MUX-LAUNCH-001) share every launch-
+    `MuxLaunchFormState` (CSP-529) share every launch-
     spec field (harness, cwd, mux name, socket, argv, worktree).
     ADR 0097 extracts them into `LaunchSpecFormState` so that
     future field additions (e.g. `launch.env`) edit one place
@@ -14273,9 +14832,9 @@ Fresh batch, added alongside the 2026-07-27 items.
   - Non-goals: no behavior change; no visual redesign; no new
     CLI or executor surface.
   - Tests: preserve every existing pin-create test; preserve
-    every H-MUX-LAUNCH-001 mux-launch test; add wrapper-agnostic
+    every CSP-529 mux-launch test; add wrapper-agnostic
     tests directly on `LaunchSpecFormState`.
-  - Blockers: `H-MUX-LAUNCH-001`.
+  - Blockers: `CSP-529`.
   - Outcome: **landed as ADR 0097.** `LaunchSpecFormState` in
     `src/tui/widgets/launch_spec_form.rs` owns the ten shared
     fields (harness, cwd as `PathOmniboxState`, mux name, mux
@@ -14294,8 +14853,9 @@ Fresh batch, added alongside the 2026-07-27 items.
     accessors) and 5 (`MuxLaunchState` rename) folded into the
     extraction; wrapper diet is thin enough that the rename
     would only rewrite spelling.
-- [x] `H-PIN-RESUME-ARGV-001` Pin resume drops the pin's launch argv
+- [x] `CSP-531` Pin resume drops the pin's launch argv
   (ADR 0098).
+  - Legacy ID: `H-PIN-RESUME-ARGV-001`
   - Symptom: a pin with `launch.argv = ["atelier", "exec", "claude",
     "--dangerously-skip-permissions"]` relaunched as bare `claude
     --resume <id>` when its continuity sidecar had a session — no
@@ -14306,7 +14866,7 @@ Fresh batch, added alongside the 2026-07-27 items.
     keeps the sidecar. Unit tests cover default, wrapper + option,
     codex subcommand, path-qualified binary, and no-binary cases.
 
-### Worktree Interaction Epic (H-WT-ENV / H-WT-004b..008)
+### Worktree Interaction Epic (CSP-520 / CSP-509.02, CSP-521, CSP-522, CSP-523, CSP-524)
 
 Brainstormed 2026-08 across contexts (agent/mux/repo/checkout). Mental
 model: a worktree is a *stream of work* — checkout-on-a-branch +
@@ -14335,7 +14895,7 @@ catalog and decisions:
 
 Sequencing (settled: **ADR first, then in order**):
 
-- [x] `H-WT-ENV` ADR: sanction `tmux kill-session` as an
+- [x] `CSP-520` ADR: sanction `tmux kill-session` as an
   operator-initiated teardown mutation (ADR 0087 category-3 extension)
   + `MuxBackend::kill_session`. **ADR 0093 Accepted.** Teardown is
   two-phase (graceful `SIGTERM` → configurable grace → hard
@@ -14343,8 +14903,9 @@ Sequencing (settled: **ADR first, then in order**):
   `[worktree] teardown_confirm = always|live|never` (default `live`)
   and `teardown_grace` (default `3s`), with CLI-flag overrides. The
   `kill_session` backend method + the graceful orchestration land with
-  H-WT-006 (close-down).
-- [x] `H-WT-004b` TUI worktree **action menu** (`w`) wired to the
+  CSP-522 (close-down).
+  - Legacy ID: `H-WT-ENV`
+- [x] `CSP-509.02` TUI worktree **action menu** (`w`) wired to the
   already-built safe actions (create, remove); `StoreOp::WorktreeCreate`/
   `WorktreeRemove` executor branches (mirror the pin mutation flow);
   backend-availability gating. Landed: `WorktreeMenuState` overlay
@@ -14355,14 +14916,16 @@ Sequencing (settled: **ADR first, then in order**):
   action model, filtered out of the offered set until wired. Full suite
   green (1988). Deferred to their stories: reveal/navigate (needs
   selection-jump semantics).
-- [x] `H-WT-005` `merge` — `WorktrunkBackend::merge` (`wt -C <wt> merge
+  - Legacy ID: `H-WT-004b`
+- [x] `CSP-521` `merge` — `WorktrunkBackend::merge` (`wt -C <wt> merge
   [target]`) + `WorktreeCaps.can_merge`; TUI `MergeWorktree` action
   ("Merge back & close") with `ConfirmMerge` mode →
   `StoreOp::WorktreeMerge` / `Msg::CommitWorktreeMerge` /
   `execute_worktree_merge`; CLI `worktree merge <branch> [--target]
   [--force]`, guarded like `rm`. Merge sits in the Worktree + Mux menu
   contexts. Full suite green (1991).
-- [x] `H-WT-006` `close-down` compound orchestrator (ADR 0093). Landed
+  - Legacy ID: `H-WT-005`
+- [x] `CSP-522` `close-down` compound orchestrator (ADR 0093). Landed
   in layers: (1) `MuxBackend::kill_session` primitive + `tmux::teardown`
   two-phase graceful(`SIGTERM`)→grace→hard mechanism behind a
   `ProcessSignaller` seam + `[worktree] teardown_confirm`/`teardown_grace`
@@ -14376,7 +14939,8 @@ Sequencing (settled: **ADR first, then in order**):
   `Msg::CommitWorktreeCloseDown` → `StoreOp::WorktreeCloseDown` →
   `execute_worktree_close_down`. Confirmation honors the policy
   (`should_confirm`). Full suite green (2010).
-- [x] `H-WT-007` new-stream: worktree-backed pins realized at launch
+  - Legacy ID: `H-WT-006`
+- [x] `CSP-523` new-stream: worktree-backed pins realized at launch
   (ADR 0094). A pin gains an optional `[worktree] branch` block; `cwd`
   is the repo anchor and the branch's worktree is resolved-or-created
   (from the repo default) and entered **at launch** — not at pin-write
@@ -14390,7 +14954,8 @@ Sequencing (settled: **ADR first, then in order**):
   form with the toggle pre-enabled (plain create stays on the `p` menu);
   and CLI parity via `pin new --worktree <branch>`. Full suite green
   (2015).
-- [x] `H-WT-008` prune + reveal/navigate. **Lock/unlock dropped**:
+  - Legacy ID: `H-WT-007`
+- [x] `CSP-524` prune + reveal/navigate. **Lock/unlock dropped**:
   worktrunk exposes neither, and ADR 0092 deliberately routes worktree
   mutation through worktrunk (not raw git), so lock/unlock have no
   sanctioned backend — revisit if a backend gains them or an ADR
@@ -14406,6 +14971,7 @@ Sequencing (settled: **ADR first, then in order**):
   at menu-open (containing checkout row from an agent/mux; first live
   session row from a worktree) and commit `Msg::SelectRow`; offered
   only when a target resolves. Full suite green (2022).
+  - Legacy ID: `H-WT-008`
 
 ## Idiomatic Rust Cleanup (H-RUST-*)
 
@@ -14418,9 +14984,9 @@ modules.
 
 Goal: a vanilla codebase that is efficient, approachable, and not
 trying to be fancy. Behavior-preserving, low-risk fixes landed during
-the review (`H-RUST-001`..`009`). The rest are larger, need a decision,
+the review (`CSP-554..562`). The rest are larger, need a decision,
 or touch the public library surface, so they are queued as chunks
-below (`H-RUST-010` onward), ordered by value and risk.
+below (`CSP-563` onward), ordered by value and risk.
 
 Scope bounds: no behavior changes beyond what a chunk names; every
 chunk keeps `just check` green (which now includes `cargo doc` with
@@ -14429,42 +14995,52 @@ the serialized model note the ADR they need to touch.
 
 Landed during the review:
 
-- [x] `H-RUST-001` Apply idiomatic clippy fixes and enforce them
+- [x] `CSP-554` Apply idiomatic clippy fixes and enforce them
   (`a4eaf2f`). `let ... else` and `if let` instead of single-arm
   `match`, flattened or-patterns, method references instead of
   forwarding closures, no `collect()` just to count, `find_map`,
   `into_iter()` instead of `drain(..)` on owned Vecs,
   `Path::extension` instead of `ends_with(".jsonl")`, and similar.
   Twenty lints were added to `[lints.clippy]` as `deny`.
-- [x] `H-RUST-002` Use sets where maps held `()` or placeholder values
+  - Legacy ID: `H-RUST-001`
+- [x] `CSP-555` Use sets where maps held `()` or placeholder values
   (`5c3e2f7`). This also fixed `workspace_member_roots`, which returned
   a HashMap's keys in run-to-run varying order.
-- [x] `H-RUST-003` Look up nodes without cloning their ids (`30f1f7d`).
+  - Legacy ID: `H-RUST-002`
+- [x] `CSP-556` Look up nodes without cloning their ids (`30f1f7d`).
   `GraphNode::has_id` and `GraphSnapshot::find_node` replace 14
   `find(|n| n.id() == *target)` scans that allocated an owned `NodeId`
   per node.
-- [x] `H-RUST-004` Remove tombstone comments ("X moved to Y in wave N")
+  - Legacy ID: `H-RUST-003`
+- [x] `CSP-557` Remove tombstone comments ("X moved to Y in wave N")
   and five copies of a current-epoch helper (`a381856`).
-- [x] `H-RUST-005` Stop deep-cloning `GraphSnapshot` to release a borrow
+  - Legacy ID: `H-RUST-004`
+- [x] `CSP-558` Stop deep-cloning `GraphSnapshot` to release a borrow
   in TUI pin/rename executors; derive `Clone` for `GraphDb`
   (`e15ea7d`).
-- [x] `H-RUST-006` Remove two speculative traits: `MultiSelectItem`
+  - Legacy ID: `H-RUST-005`
+- [x] `CSP-559` Remove two speculative traits: `MultiSelectItem`
   became `AsRef<str>` (`48ef2f4`), and the single-implementation
   `SearchBackend` became a `search::rank` function (`dd9126a`).
-- [x] `H-RUST-007` Fix all 44 rustdoc warnings and add a
+  - Legacy ID: `H-RUST-006`
+- [x] `CSP-560` Fix all 44 rustdoc warnings and add a
   warnings-as-errors `cargo doc` step to `just check` and CI
   (`aaf4a05`).
-- [x] `H-RUST-008` Remove dead code hidden by `#[allow(dead_code)]`: an
+  - Legacy ID: `H-RUST-007`
+- [x] `CSP-561` Remove dead code hidden by `#[allow(dead_code)]`: an
   unused `UiEvent` enum, four uncalled test reset functions, a
   write-only field, `_selection_display`, and the unused `proptest` /
   `rstest` dev-dependencies (`b1d93eb`).
-- [x] `H-RUST-009` Recover poisoned locks in the daemon with
+  - Legacy ID: `H-RUST-008`
+- [x] `CSP-562` Recover poisoned locks in the daemon with
   `lock().unwrap_or_else(PoisonError::into_inner)` instead of ten
   hand-written matches (`27f33de`).
+  - Legacy ID: `H-RUST-009`
 
 Queued chunks:
 
-- [x] `H-RUST-010` Replace the process-global discovery caches.
+- [x] `CSP-563` Replace the process-global discovery caches.
+  - Legacy ID: `H-RUST-010`
   - Outcome: ADR 0099. `discovery::DiscoveryCaches` holds all nine
     caches, built from the `TtlCache`/`StampedMap`/`FileStamp`
     helpers in `discovery/memo.rs`. The daemon and TUI own one each and
@@ -14496,7 +15072,8 @@ Queued chunks:
   - ADR: (b) changes `LocalDiscoveryConfig`, which is part of the
     library facade (ADR 0015); amend ADR 0091, which introduced most
     of these caches.
-- [x] `H-RUST-011` Give the library typed errors.
+- [x] `CSP-564` Give the library typed errors.
+  - Legacy ID: `H-RUST-011`
   - Outcome: ADR 0101, scoped to what `conspectus::api` exposes. The
     discovery entry points return `DiscoveryError`. Its `Provider` variant
     names the failing provider's keys and boxes the source error; the
@@ -14514,8 +15091,9 @@ Queued chunks:
     `conspectus::api` facade and `snapshot`, converting
     `Result<_, String>` parsers to small error enums as touched.
   - Decision needed: scope (facade only, or every `pub` function).
-    Pairs with `REL-022`.
-- [x] `H-RUST-012` Narrow the public surface.
+    Pairs with `CSP-553`.
+- [x] `CSP-565` Narrow the public surface.
+  - Legacy ID: `H-RUST-012`
   - Outcome: ADR 0015 amended. The CLI moved into the library
     (`conspectus::cli::run`, three-line `main.rs`). `server`, `viewer`,
     `tui_state`, `pins`, `pin_bindings`, and `pin_store_registry` are
@@ -14533,20 +15111,21 @@ Queued chunks:
     from a three-line `main.rs`), then make internal modules
     `pub(crate)`. That also removes the need for `pub
     #[doc(hidden)]` test helpers.
-  - ADR: ADR 0015 amendment. Pairs with `REL-022`.
-- [x] `H-RUST-013` Strip backlog IDs from code comments.
+  - ADR: ADR 0015 amendment. Pairs with `CSP-553`.
+- [x] `CSP-566` Strip backlog IDs from code comments.
+  - Legacy ID: `H-RUST-013`
   - Outcome: ADR 0100. About 1,000 comment lines changed. A script
     stripped leading `ID:` prefixes and ID-only parentheticals, keeping
     any ADR references. The ~330 lines of history narration ("pre-H-EXT-004
     if-chain", "wave 2 will…") were rewritten by hand to describe current
     behavior, which corrected several stale claims. Five comments keep a
-    "backlog `ID`" pointer to open work (`H-DESIGN-002`, `P8-012a/b`,
-    `T8-009`, `T8-032`). `tests/comment_hygiene.rs` fails on new ID
+    "backlog `ID`" pointer to open work (`CSP-108`, `CSP-171.01/CSP-171.02`,
+    `CSP-185`, `CSP-318`). `tests/comment_hygiene.rs` fails on new ID
     citations, and `AGENTS.md` states the rule. Side finding:
     `RunConfig::mux_preview_interval` is parsed but unused until
-    `T8-009` lands; the preview module doc now says so.
+    `CSP-185` lands; the preview module doc now says so.
   - Problem: 712 comments still open with a backlog or wave ID
-    (`// H-HYG-006 wave 7: consult SnapshotIndex ...`). The rationale
+    (`// CSP-467 wave 7: consult SnapshotIndex ...`). The rationale
     is useful; the history belongs in commits and this backlog. The
     largest concentrations are `tui/app.rs` (73), `discovery/mod.rs`
     (55), `tui/keymap.rs` (29), `model/mod.rs` (28),
@@ -14556,7 +15135,8 @@ Queued chunks:
     wave; check that the diff touches comment lines only. Consider an
     `AGENTS.md` line ("comments explain why; IDs go in commit
     messages") so new IDs stop accumulating.
-- [x] `H-RUST-014` Use typed kinds instead of strings.
+- [x] `CSP-567` Use typed kinds instead of strings.
+  - Legacy ID: `H-RUST-014`
   - Outcome: `model::MatchKind` names the 16 mux-attribution match
     kinds that adapters actually emit, and `SourceMetadata::match_kind()`
     reads one back. Producers in `cross_link`, `codex_log`, and
@@ -14570,7 +15150,7 @@ Queued chunks:
     `&'static str` labels, and the four duplicated `kind_label`
     helpers are gone. The explorer's relationship-group key stays a
     string, because unresolved endpoints can name non-node types
-    (`path`). Typing the match kinds surfaced `H-RUST-020`.
+    (`path`). Typing the match kinds surfaced `CSP-573`.
   - Problem: the node explorer carries `neighbor_kind` as
     `&'static str` or `String` (`"mux_session"`) and parses it back
     with `NodeKind::from_snake_case` at render time, although
@@ -14584,7 +15164,8 @@ Queued chunks:
   - ADR: evidence is part of the serialized model. Confirm the format
     is unchanged with the graph snapshot tests, and bump the
     `graph.bin` format version if the rkyv layout changes (ADR 0083).
-- [x] `H-RUST-015` Split the 3,000-line TUI modules.
+- [x] `CSP-568` Split the 3,000-line TUI modules.
+  - Legacy ID: `H-RUST-015`
   - Outcome: moves only, guarded by the render snapshot tests.
     `tui/app.rs` 3,566 → 1,522 lines (`app/{msg,overlays,pins,tree,
     explorer_nav}.rs`); `tui/runtime.rs` 3,482 → 1,574
@@ -14602,16 +15183,18 @@ Queued chunks:
     overlays, pins, worktrees, mux), the runtime into per-executor
     modules, `ui.rs` by pane, and `pins.rs` by form. Moves only, no
     behavior change; the existing snapshot tests are the safety net.
-- [x] `H-RUST-016` Retire `SessionViewerAction`.
+- [x] `CSP-569` Retire `SessionViewerAction`.
+  - Legacy ID: `H-RUST-016`
   - Outcome: `resolve_viewer_target` is a straight-line check with the
     same outcomes; ADR 0019 amended with the rationale and the
-    data-driven extension point for `H-TRANSCRIPT-013`.
+    data-driven extension point for `CSP-332`.
   - Problem: ADR 0019's external-viewer trait has one implementation
     (`ClaudeHistoryViewer`) behind a one-element
     `[&dyn SessionViewerAction; 1]`, and the native viewer (ADR 0052)
     is now the default.
   - Plan: collapse it to a function; amend ADR 0019.
-- [x] `H-RUST-017` Rename `GraphDb`.
+- [x] `CSP-570` Rename `GraphDb`.
+  - Legacy ID: `H-RUST-017`
   - Outcome: `SnapshotHandle` / `snapshot_handle()`; TUI locals named
     `database` became `handle`, and the status messages now say "no graph
     loaded yet".
@@ -14619,7 +15202,8 @@ Queued chunks:
     names left over from the SQLite era for what is now an
     `Rc<GraphSnapshot>` handle.
   - Plan: rename to `SnapshotHandle` / `snapshot_handle()`. Mechanical.
-- [x] `H-RUST-018` Smaller follow-ups, as files are touched.
+- [x] `CSP-571` Smaller follow-ups, as files are touched.
+  - Legacy ID: `H-RUST-018`
   - Outcome: `items_after_statements` fixed (25 sites) and now denied.
     The sessions builder's `Option<Option<String>>` became a
     `PreviousHeader` enum. The search overlay no longer clones rows:
@@ -14644,26 +15228,28 @@ Queued chunks:
   - The search overlay clones every visible row on each keystroke to
     escape a borrow.
   - `push_str(&format!(..))` (21 sites): fine except on hot paths.
-- [x] `H-RUST-019` Extend lint enforcement after the chunks land.
+- [x] `CSP-572` Extend lint enforcement after the chunks land.
+  - Legacy ID: `H-RUST-019`
   - Outcome: clippy now also denies `items_after_statements` (with
-    `H-RUST-018`), `if_not_else` (two sites fixed), and `implicit_clone`,
+    `CSP-571`), `if_not_else` (two sites fixed), and `implicit_clone`,
     `manual_assert`, and `redundant_else` (no hits). `[lints.rustdoc]`
     denies broken and private intra-doc links, so `cargo doc` enforces
     them even without `RUSTDOCFLAGS`. Surveyed and left allowed:
     `needless_pass_by_value` (72 hits, mostly handlers that take `Msg`
     by design), `doc_markdown` (128), `similar_names` (15),
     `too_many_lines` (28), `format_push_string` (21, see
-    `H-RUST-018`), `unnecessary_wraps` (signatures shared on purpose),
+    `CSP-571`), `unnecessary_wraps` (signatures shared on purpose),
     `needless_continue` (`=> continue` arms read clearly),
     `trivially_copy_pass_by_ref` and `ref_option` (serde's `with` and
     `skip_serializing_if` require the reference; the one real case,
     `link_freshness_tag`, was fixed), and `unused_self` (test-scenario
     helpers).
-  - Plan: once `H-RUST-013` and `H-RUST-018` are done, consider
+  - Plan: once `CSP-566` and `CSP-571` are done, consider
     enforcing `items_after_statements`, `needless_pass_by_value` for
     non-message functions, and `rustdoc::private_intra_doc_links` in
     `[lints]`, so the cleanup holds.
-- [x] `H-RUST-020` Decide how Codex-log evidence ranks in mux resolution.
+- [x] `CSP-573` Decide how Codex-log evidence ranks in mux resolution.
+  - Legacy ID: `H-RUST-020`
   - Outcome (operator decision 2026-10-01: Codex-log evidence ranks
     above cwd): `codex_log_current_thread_match` ranks 55, above the
     cwd kinds (20/10) and, per ADR 0048, above open-file and hook
@@ -14672,7 +15258,7 @@ Queued chunks:
     runtime-process link next to it. ADR 0048 is amended and the
     ranking table in `docs/mux-link-resolution.md` updated. Three
     resolver tests cover cwd, open-file, and the duplicate case.
-  - Problem: typing the match kinds (`H-RUST-014`) showed that the
+  - Problem: typing the match kinds (`CSP-567`) showed that the
     resolver's string matches had drifted from what adapters emit:
     - `mux_evidence_rank` gives `codex_log_current_thread_match`
       rank 0, below `exact_cwd_match` (20). ADR 0048 says log-derived
@@ -14685,7 +15271,7 @@ Queued chunks:
       `harness_state_current_session_match`, and
       `hook_process_session_match` matched nothing, because nothing
       emits them.
-  - `H-RUST-014` kept the existing behavior: those three kinds were
+  - `CSP-567` kept the existing behavior: those three kinds were
     dropped from the vocabulary, and Codex-log links still rank 0.
   - Plan: give `CodexLogCurrentThreadMatch` a rank consistent with
     ADR 0048, decide whether it counts as process evidence in
@@ -14693,7 +15279,8 @@ Queued chunks:
     with competing cwd and log-derived candidates. This changes
     attribution results, so confirm the intent first.
 
-- [x] `H-RUST-021` Don't abort discovery on one unreadable scan-root child.
+- [x] `CSP-579` Don't abort discovery on one unreadable scan-root child.
+  - Legacy ID: `H-RUST-021`
   - Outcome: `GitProbe::probe` and `probe_cached` now skip directories
     the process can't enter, as they already skipped non-directories
     (`is_probeable_dir` checks search permission by resolving `root/.`).
@@ -14723,7 +15310,7 @@ a live demo; **P1** should land with the 0.1.0 release; **P2** can follow
 it. P0 is organized as a workstream with its own decisions, dependency
 shape, and sub-stories. Work P1 and P2 top-to-bottom.
 
-### P0 Workstream: Public Release And Talk Readiness (REL-001..REL-009)
+### P0 Workstream: Public Release And Talk Readiness (CSP-532..CSP-540)
 
 Goal: make Conspectus safe to publish and ready to demo. The repository
 flips from private to public with a license, accurate docs, and truthful
@@ -14736,8 +15323,8 @@ against `tests/fixtures/showcase.json`), git history, and this backlog.
 Scope bounds:
 
 - Fix what is wrong or misleading; add no features. The ambiguous-mux
-  picker (`P8-014`), resume-into-mux (`P8-011`), and release, packaging,
-  and platform work (`REL-010`..`REL-013`) stay out.
+  picker (`CSP-175`), resume-into-mux (`CSP-170`), and release, packaging,
+  and platform work (`CSP-541`..`CSP-544`) stay out.
 - No new dependencies and no new checked-in workflow tools. A
   demo-recording tool enters the repo only through an ADR (`AGENTS.md`).
 - Behavior changes are limited to the defects named below. Validate every
@@ -14759,57 +15346,59 @@ Definition of done:
 - Backlog checkboxes match landed work, and `CHANGELOG.md` carries the
   0.1.0 content.
 - Talk captures exist; the README hero frame and numbers are refreshed.
-- `REL-002b` (flip to public) lands last on the publication track.
+- `CSP-533.02` (flip to public) lands last on the publication track.
 
 Decisions to collect in one sitting (recommendation in parentheses):
 
-1. `REL-001a`: the copyright line (`Copyright (c) 2026 Jarrell Waggoner`).
-2. `REL-002a`: personal home paths in five tracked files (accept them in
+1. `CSP-532.01`: the copyright line (`Copyright (c) 2026 Jarrell Waggoner`).
+2. `CSP-533.01`: personal home paths in five tracked files (accept them in
    ADR and backlog prose; normalize `examples/pantry.rs` and the test
    string to `/home/user`), and `Claude-Session:` URLs in four commit
    trailers (accept; don't rewrite `main`).
-3. `REL-004b`: ADR numbers in `--help` (drop them from command summaries
+3. `CSP-535.02`: ADR numbers in `--help` (drop them from command summaries
    and point at docs; the dev-only snapshot/fixture flags may keep them).
-4. `REL-004b`: `tui --view union|prs|forks` (hide the values from help to
-   match `H-VIEW-001`, but keep accepting them so scripts don't break).
-5. `REL-006`: `docs/feature-summary.md` (delete; the README supersedes it).
-6. `REL-008`: the Phase 11 notes in `CHANGELOG.md` (fold them into a short
+4. `CSP-535.02`: `tui --view union|prs|forks` (hide the values from help to
+   match `CSP-501`, but keep accepting them so scripts don't break).
+5. `CSP-537`: `docs/feature-summary.md` (delete; the README supersedes it).
+6. `CSP-539`: the Phase 11 notes in `CHANGELOG.md` (fold them into a short
    "Upgrading from development builds" subsection).
-7. `REL-009b`: capture tooling (keep it operator-local; putting it in the
+7. `CSP-540.02`: capture tooling (keep it operator-local; putting it in the
    repo needs an ADR).
 
 Dependency shape inside the workstream:
 
 ```
-REL-001a ──┐
-REL-001b ──┤
-REL-002a ──┤
-REL-004a ──┤
-REL-004b ──┤
-REL-005a ──┼──→ REL-002b  (flip the repo public)
-REL-005b ──┤
-REL-005c ──┤
-REL-005d ──┤
-REL-006  ──┤
-REL-008  ──┘
+CSP-532.01 ───┐
+CSP-532.02 ───┤
+CSP-533.01 ───┤
+CSP-535.01 ───┤
+CSP-535.02 ───┤
+CSP-536.01 ───┼──→ CSP-533.02  (flip the repo public)
+CSP-536.02 ───┤
+CSP-536.03 ───┤
+CSP-536.04 ───┤
+CSP-537  ─────┤
+CSP-539  ─────┘
 
-REL-003a..e ───────┐
-REL-009a ──┬───────┴──→ REL-009b  (captures) ──┐
-           │                                   ├──→ REL-009d  (README refresh)
-           └──→ REL-009c  (just demo)          │
-REL-007 ───────────────────────────────────────┘
+CSP-534.01..05 ───────┐
+CSP-540.01 ───┬───────┴──→ CSP-540.02  (captures) ────┐
+              │                                       ├──→ CSP-540.04  (README refresh)
+              └──→ CSP-540.03  (just demo)            │
+CSP-538 ──────────────────────────────────────────────┘
 ```
 
 Every story without an incoming arrow can start now and land in any order.
-The publication track ends at `REL-002b`; the demo track ends at
-`REL-009d`. `REL-003` and `REL-007` don't block going public, but landing
+The publication track ends at `CSP-533.02`; the demo track ends at
+`CSP-540.04`. `CSP-534` and `CSP-538` don't block going public, but landing
 them first means the public repo opens with a clean demo and an accurate
-backlog. Suggested order: collect the decisions, then `REL-003`,
-`REL-004`, `REL-005` and `REL-006`, `REL-007`, `REL-008`, `REL-009`, and
-finally `REL-002b`.
+backlog. Suggested order: collect the decisions, then `CSP-534`,
+`CSP-535`, `CSP-536` and `CSP-537`, `CSP-538`, `CSP-539`, `CSP-540`, and
+finally `CSP-533.02`.
 
-- [x] `REL-001` License and third-party notices.
-  - [x] `REL-001a` Add `LICENSE`.
+- [x] `CSP-532` License and third-party notices.
+  - Legacy ID: `REL-001`
+  - [x] `CSP-532.01` Add `LICENSE`.
+    - Legacy ID: `REL-001a`
     - Outcome: MIT, `Copyright (c) 2026 Jarrell Waggoner`; the README
       License section links `LICENSE` and the vendored-asset `NOTICE`.
     - Scope: `Cargo.toml` declares `license = "MIT"`, but the repo has no
@@ -14819,21 +15408,24 @@ finally `REL-002b`.
       MIT and needs its own file only if the plugin is published to npm.
     - Tests: docs-only; `git diff --check`.
     - Blockers: decision 1.
-  - [x] `REL-001b` Correct the vendored-asset notice.
+  - [x] `CSP-532.02` Correct the vendored-asset notice.
+    - Legacy ID: `REL-001b`
     - Outcome: `NOTICE` and `VERSIONS` now name the five bundles plus the
-      embedded dagre copy. The HTML-export question stays with `REL-010`.
+      embedded dagre copy. The HTML-export question stays with `CSP-541`.
     - Scope: `src/output/html/assets/NOTICE` opens with "All four packages
       are MIT-licensed" but reproduces six license texts (cytoscape,
       cytoscape-fcose, cose-base, cytoscape-dagre, the dagre copy embedded
       in cytoscape-dagre, and layout-base), while `VERSIONS` says "all five
       packages". Fix the wording. Whether `graph --format html` output
       should also carry the notices is a binary-distribution question for
-      `REL-010`: after inlining (`src/output/html/mod.rs:120`), only
+      `CSP-541`: after inlining (`src/output/html/mod.rs:120`), only
       `cytoscape.min.js` keeps its license header.
     - Tests: docs-only; `git diff --check`.
     - Blockers: none.
-- [ ] `REL-002` Pre-publication review, then flip the repository public.
-  - [x] `REL-002a` Pre-publication review.
+- [ ] `CSP-533` Pre-publication review, then flip the repository public.
+  - Legacy ID: `REL-002`
+  - [x] `CSP-533.01` Pre-publication review.
+    - Legacy ID: `REL-002a`
     - Outcome: per the operator's call, home paths are normalized to
       `/home/user` in all five files (the Claude Code decoder test uses the
       encoded `-home-user--agent-deck`); GitHub `malloc47/conspectus`
@@ -14854,21 +15446,24 @@ finally `REL-002b`.
     - Tests: `git status --short` shows only intended changes; rerun the
       history scan if later commits add fixtures.
     - Blockers: decision 2.
-  - [ ] `REL-002b` Flip the repository public.
+  - [ ] `CSP-533.02` Flip the repository public.
+    - Legacy ID: `REL-002b`
     - Scope: set the GitHub description and topics, decide whether Issues
-      and Discussions open now (see `REL-020`), confirm CI runs on a pull
-      request, then change visibility. `REL-017` (how docs refer to
+      and Discussions open now (see `CSP-551`), confirm CI runs on a pull
+      request, then change visibility. `CSP-548` (how docs refer to
       Atelier) can follow: no tracked file links to Atelier, and the README
       already calls it unreleased.
     - Tests: after the flip, browse the README and `docs/index.md` signed
       out and follow the links; CI is green on `main`.
-    - Blockers: `REL-001a`, `REL-001b`, `REL-002a`, `REL-004a`,
-      `REL-004b`, `REL-005a`..`REL-005d`, `REL-006`, `REL-008`.
-- [x] `REL-003` Fix demo-visible TUI defects.
+    - Blockers: `CSP-532.01`, `CSP-532.02`, `CSP-533.01`, `CSP-535.01`,
+      `CSP-535.02`, `CSP-536.01`..`CSP-536.04`, `CSP-537`, `CSP-539`.
+- [x] `CSP-534` Fix demo-visible TUI defects.
+  - Legacy ID: `REL-003`
   - Each sub-story was found on, and should be validated against,
     `tests/fixtures/showcase.json` with `conspectus tui --snapshot`. Land
-    `REL-009a` alongside so the fixture reflects current discovery.
-  - [x] `REL-003a` Render relative ages in the detail pane.
+    `CSP-540.01` alongside so the fixture reflects current discovery.
+  - [x] `CSP-534.01` Render relative ages in the detail pane.
+    - Legacy ID: `REL-003a`
     - Outcome: `ExplorerInputs` gained `now`, threaded through the field
       builders and `build_explorer`; `relative_epoch` now wraps
       `format_recency` and renders `4m ago`. New test
@@ -14890,28 +15485,30 @@ finally `REL-002b`.
     - Tests: explorer unit tests with a fixed `now` for each of the five
       fields; showcase snapshots of a session and a mux detail pane.
     - Blockers: none.
-  - [x] `REL-003b` Stop advertising `m choose` on ambiguous-mux rows.
+  - [x] `CSP-534.02` Stop advertising `m choose` on ambiguous-mux rows.
+    - Legacy ID: `REL-003b`
     - Outcome: the hint reads `Tab inspect candidates`; the test is now
       `contextual_status_offers_ambiguous_attach_hint_with_inspect_affordance`
-      and asserts `m choose` is gone. `P8-014` carries the `m` note.
+      and asserts `m choose` is gone. `CSP-175` carries the `m` note.
     - Symptom: the status line for a session with ambiguous tmux
       candidates reads `Enter/a attach preferred tmux:… · m choose`, but
       `m` opens the Mux action menu.
     - Root cause: the hint (`src/tui/ui.rs:3227`) was written for the
-      inline picker `P8-014`, which reserved `m` but never landed. ADR 0096
+      inline picker `CSP-175`, which reserved `m` but never landed. ADR 0096
       then bound `m` globally to the Mux menu
       (`src/tui/keybindings.rs:223`).
     - Fix: replace the affordance with one that exists today (for example
       `Tab inspect candidates`, since the right pane lists the competing
       candidates under Other). Rename and update
       `contextual_status_offers_ambiguous_attach_hint_with_choose_affordance`
-      (`src/tui/ui_tests.rs:2329`). Annotate `P8-014`: `m` is taken, and
+      (`src/tui/ui_tests.rs:2329`). Annotate `CSP-175`: `m` is taken, and
       the menu-first home for the picker is a context entry in the `m` Mux
       menu when the selection has ambiguous candidates.
     - Tests: the renamed status-line test; a showcase snapshot of an
       ambiguous row.
     - Blockers: none.
-  - [x] `REL-003c` Make the help overlay readable.
+  - [x] `CSP-534.03` Make the help overlay readable.
+    - Legacy ID: `REL-003c`
     - Outcome: the overlay gets its own `help_modal_rect` (terminal height
       less a margin, up to 100 columns; `centered_modal_rect` stays for
       the value modal), wraps descriptions under a hanging indent via the
@@ -14927,7 +15524,7 @@ finally `REL-002b`.
       unwrapped `Paragraph` (`:159`). Scrolling exists (`j` / `k`,
       `PgUp` / `PgDn`, `g` / `G`; `:39`) but nothing on screen says so.
       Titles and one binding carry IDs: "Discoverable controls (ADR 0031)"
-      (`:185`), "(T8-043)" (`:203`), "Mux (ADRs 0095, 0096)" (`:235`),
+      (`:185`), "(CSP-353)" (`:203`), "Mux (ADRs 0095, 0096)" (`:235`),
       "Pins (ADR 0057)" (`:248`), and "Node kind icons (ADR 0073)"
       (`:370`).
     - Fix: size the modal to the terminal (height up to the frame less a
@@ -14938,7 +15535,8 @@ finally `REL-002b`.
       drift test (`src/tui/keybindings.rs`) requires every binding's
       `help_text` to appear in `keymap_sections`, so edit both together.
     - Blockers: none.
-  - [x] `REL-003d` Keep related-row labels on their row.
+  - [x] `CSP-534.04` Keep related-row labels on their row.
+    - Legacy ID: `REL-003d`
     - Outcome: `render_related_row` takes the content width and
       middle-truncates the label to what fits (the edge-meta suffix gives
       up its room below 8 cells). The showcase repro now reads
@@ -14958,7 +15556,8 @@ finally `REL-002b`.
     - Tests: a snapshot at 120 columns asserting the label renders on the
       same line as its verb.
     - Blockers: none.
-  - [x] `REL-003e` Fix the Mux view's session count.
+  - [x] `CSP-534.05` Fix the Mux view's session count.
+    - Legacy ID: `REL-003e`
     - Outcome: the Mux view shows the plain total when no narrowing
       filter is active and otherwise sums `attached_count` over the
       visible mux rows (resolved attachments give each session at most
@@ -14976,9 +15575,11 @@ finally `REL-002b`.
       active.
     - Tests: header snapshots in both views, with and without a filter.
     - Blockers: none.
-- [x] `REL-004` True up CLI `--help`.
-  - [x] `REL-004a` Describe `--refresh` and `--no-cache` as they behave
+- [x] `CSP-535` True up CLI `--help`.
+  - Legacy ID: `REL-004`
+  - [x] `CSP-535.01` Describe `--refresh` and `--no-cache` as they behave
     today.
+    - Legacy ID: `REL-004a`
     - Outcome: all four commands now say `--refresh` ignores a running
       daemon and rebuilds in-process, and `--no-cache` skips the
       `graph.bin` write. The TUI was confirmed to apply the same
@@ -14987,7 +15588,7 @@ finally `REL-002b`.
     - Scope: the help on `graph` (`src/cli/graph.rs:32`, `:35`),
       `node show` (`src/cli/node.rs:59`, `:64`), `table`
       (`src/cli/table.rs:97`, `:103`), and `tui` (`src/cli/tui.rs:66`,
-      `:71`) cites "P7-003 phase 4" and describes a warm-start read from
+      `:71`) cites "CSP-139 phase 4" and describes a warm-start read from
       the cache; `table` adds "Phase 3 will graduate the warm-start path…".
       Phase 11 removed that read. One-shot commands now take the daemon's
       snapshot when `conspectus serve` answers, and otherwise rebuild
@@ -14996,23 +15597,24 @@ finally `REL-002b`.
       and rebuilds from live providers; `--no-cache` skips writing
       `graph.bin`. Confirm the TUI's refresh loop honors the same meanings
       before rewording the `tui` flags.
-    - Tests: covered by the `REL-004b` sweep.
+    - Tests: covered by the `CSP-535.02` sweep.
     - Blockers: none.
-  - [x] `REL-004b` Remove internal IDs and stale text from help, and add a
+  - [x] `CSP-535.02` Remove internal IDs and stale text from help, and add a
     regression test.
+    - Legacy ID: `REL-004b`
     - Outcome: decisions 3 and 4 applied (ADR numbers dropped outside the
       dev-only snapshot/fixture flags; `tui --view union|prs|forks`
       hidden but still accepted). `mux launch --scan-root` is hidden. A new
       `WriteStoreFlag` limits `--store` to `project|user` on every write
       command (`pin create`/`adopt`/`bind`, `declared create`,
       `rename session`), not just `pin create`. The sweep also caught
-      `H-EXT-005` in `hook write --harness`. Tests in `src/cli/tests.rs`
+      `CSP-477` in `hook write --harness`. Tests in `src/cli/tests.rs`
       (`help_text` module) walk clap's command tree and fail on backlog
       IDs, rustdoc links, stray ADR numbers, or `all` on write stores.
     - Scope:
-      - Backlog IDs: `P7-006` in the `serve` summary
-        (`src/cli/mod.rs:80`), `F8-013` in `tui --view` and
-        `--no-resume-view` (`src/cli/tui.rs:25`, `:30`), and `H-WT-008` in
+      - Backlog IDs: `CSP-142` in the `serve` summary
+        (`src/cli/mod.rs:80`), `CSP-423` in `tui --view` and
+        `--no-resume-view` (`src/cli/tui.rs:25`, `:30`), and `CSP-524` in
         `worktree prune` (`src/cli/worktree.rs:55`).
       - `--color` value help renders "See [`resolve_color`] for the full
         precedence table" (`src/cli/mod.rs:248`) on every command that
@@ -15033,8 +15635,10 @@ finally `REL-002b`.
       rustdoc link syntax (`` [` ``); existing `cli_smoke` help tests stay
       green.
     - Blockers: decisions 3 and 4.
-- [x] `REL-005` True up the docs.
-  - [x] `REL-005a` Remove references to retired commands.
+- [x] `CSP-536` True up the docs.
+  - Legacy ID: `REL-005`
+  - [x] `CSP-536.01` Remove references to retired commands.
+    - Legacy ID: `REL-005a`
     - Outcome: `docs/atelier-migration.md` maps to `table sessions|mux|prs`
       and describes the ADR 0087 write envelope instead of "only
       `declared` writes"; `docs/design.md` Status Views and Decisions
@@ -15049,26 +15653,27 @@ finally `REL-002b`.
       `docs/operations.md` now documents as diagnostic-only) and in
       Decisions (`:1346`–`:1350`). `docs/operations.md:603` lists the
       retired `query` command in the pins read-only invariant. Skip
-      `docs/feature-summary.md` if `REL-006` deletes it.
+      `docs/feature-summary.md` if `CSP-537` deletes it.
     - Tests: afterwards,
       `git grep -nE 'conspectus (session|query)\b' -- README.md 'docs/*.md' ':!docs/adr/' ':!docs/implementation/' ':!docs/backlog.md' ':!docs/adr-audit.md'`
       matches only the "Migration from earlier 0.x" notes in
       `docs/operations.md` (`:693`–`:725`). The bare `query` at `:603` needs
       a manual check.
     - Blockers: none.
-  - [x] `REL-005b` Bring `docs/design.md` in line with the accepted ADRs.
+  - [x] `CSP-536.02` Bring `docs/design.md` in line with the accepted ADRs.
+    - Legacy ID: `REL-005b`
     - Outcome: Decisions now name `graph.bin`; Migration Plan step 7 cites
       ADR 0017 and step 6 reads "Conspectus side complete; Atelier side
       pending"; `[theme]` / `[html.theme]` are marked planned. Per the
       operator's call, the 168-line ADR digest became a pointer to a new
-      themed index, `docs/adr/README.md` (pulled forward from `REL-016`).
+      themed index, `docs/adr/README.md` (pulled forward from `CSP-547`).
     - Scope:
       - Decisions says snapshots persist as versioned JSON under
         `$XDG_DATA_HOME/conspectus/snapshots/` (`:1356`); that was
         superseded by `graph.bin` (ADR 0083).
       - The "Accepted ADRs" digest (`:1157`–`:1324`) stops at 0089 and
         skips most ADRs. Replace it with a pointer to the ADR index
-        (`REL-016`), or complete it.
+        (`CSP-547`), or complete it.
       - Migration Plan step 7 (`:1149`) still calls repository placement
         pending although ADR 0017 settled it, and step 6 (`:1141`) needs a
         current status.
@@ -15077,7 +15682,8 @@ finally `REL-002b`.
         planned.
     - Tests: docs-only; `git diff --check`.
     - Blockers: none.
-  - [x] `REL-005c` Complete the `docs/operations.md` reference.
+  - [x] `CSP-536.03` Complete the `docs/operations.md` reference.
+    - Legacy ID: `REL-005c`
     - Outcome: CLI Surface lists every command; Configuration File has a
       commented reference for `[table.*]`, `[tui]`, `[tui.views.*]`,
       `[tui.detail]`, `[server.intervals]`, and `[worktree]`, with
@@ -15104,7 +15710,8 @@ finally `REL-002b`.
     - Tests: docs-only; `git diff --check`; check each documented key
       against `src/config.rs`.
     - Blockers: none.
-  - [x] `REL-005d` Fix developer-facing claims.
+  - [x] `CSP-536.04` Fix developer-facing claims.
+    - Legacy ID: `REL-005d`
     - Outcome: per the operator's call, the text now says `just check` and
       CI enable `snapshot` via `--all-features` and shows the manual
       `cargo run --features snapshot` form (`AGENTS.md`, `Cargo.toml`).
@@ -15118,7 +15725,8 @@ finally `REL-002b`.
       pending and stops at Phase 08.
     - Tests: docs-only; `git diff --check`.
     - Blockers: none.
-- [x] `REL-006` Retire `docs/feature-summary.md`.
+- [x] `CSP-537` Retire `docs/feature-summary.md`.
+  - Legacy ID: `REL-006`
   - Outcome: deleted per decision 5, along with its `docs/index.md`
     entry. `README.md` is the feature inventory.
   - Scope: the Phase 6 snapshot says there is "no MCP server, daemon, or
@@ -15129,30 +15737,32 @@ finally `REL-002b`.
     in this backlog.
   - Tests: docs-only; link check over `README.md` and `docs/*.md`.
   - Blockers: decision 5.
-- [x] `REL-007` True up backlog checkboxes.
+- [x] `CSP-538` True up backlog checkboxes.
+  - Legacy ID: `REL-007`
   - Outcome: ticked the eleven landed items with outcome notes (including
-    `H-PIN-TUI-010`, confirmed by the operator) and annotated `P8-011`.
+    `CSP-461`, confirmed by the operator) and annotated `CSP-170`.
   - Scope:
-    - Tick, with an outcome line: `H-VIEW-001` (`b84aa05`),
-      `H-LAYOUT-001` (`93406b5`), `H-PIN-EDIT-MUX-001` (`084967f`),
-      `H-PIN-TUI-011` (`c6905bb`), `H-MUXPROC-020` (`4c63044`), `H-WT-004`
-      (CLI `004a` plus TUI `004b`), and the `H-WT-001` epic (002–008
-      landed). Also tick `P7-007`: the daemon snapshot read path landed as
+    - Tick, with an outcome line: `CSP-501` (`b84aa05`),
+      `CSP-502` (`93406b5`), `CSP-525` (`084967f`),
+      `CSP-528` (`c6905bb`), `CSP-402` (`4c63044`), `CSP-509`
+      (CLI `H-WT-004a` plus TUI `CSP-509.02`), and the `CSP-506` epic (`CSP-507`, `CSP-508`, `CSP-509`, `CSP-521`, `CSP-522`, `CSP-523`, `CSP-524`
+      landed). Also tick `CSP-143`: the daemon snapshot read path landed as
       `try_daemon_snapshot` (`src/cli/mod.rs:209`), though the story text
-      still says `conspectus session`. Tick `P8-004` too: row builders for
+      still says `conspectus session`. Tick `CSP-163` too: row builders for
       all five row types live in `src/tui/rows/`.
-    - Tick and move the remainder: `P8-007` (v1 landed in `bc7a1b0`; the
-      empty/loading/error frame matrix continues as `T8-003`).
-    - Verify with the operator: `H-PIN-TUI-010` (WIP `719d77a`, then
+    - Tick and move the remainder: `CSP-166` (v1 landed in `bc7a1b0`; the
+      empty/loading/error frame matrix continues as `CSP-180`).
+    - Verify with the operator: `CSP-461` (WIP `719d77a`, then
       `8870e82`, `fc55193`, `88450d8`, `0524fdd`).
-    - Annotate and leave open: `P8-011` (`S` resumes in a new terminal;
-      resuming into a mux is still open) and `P8-014` (see `REL-003b`).
+    - Annotate and leave open: `CSP-170` (`S` resumes in a new terminal;
+      resuming into a mux is still open) and `CSP-175` (see `CSP-534.02`).
   - Tests: docs-only; `git diff --check`.
   - Blockers: none.
-- [x] `REL-008` Write the 0.1.0 CHANGELOG entry.
+- [x] `CSP-539` Write the 0.1.0 CHANGELOG entry.
+  - Legacy ID: `REL-008`
   - Outcome: `[Unreleased]` now describes the 0.1.0 feature set; per the
     operator's call the Phase 11 development-build notes were dropped
-    (the upgrade notes remain in `docs/operations.md`). `REL-010` stamps
+    (the upgrade notes remain in `docs/operations.md`). `CSP-541` stamps
     the version and date.
   - Scope: `CHANGELOG.md` covers only Phase 11 (2026-06-23). Under
     `[Unreleased]`, write the first-release summary:
@@ -15169,12 +15779,14 @@ finally `REL-002b`.
     - the serve idle-cost work.
 
     Per decision 6, fold the Phase 11 removals into an "Upgrading from
-    development builds" subsection. `REL-010` stamps the version and date
+    development builds" subsection. `CSP-541` stamps the version and date
     at tag time, so this story doesn't wait on the release decision.
   - Tests: docs-only; `git diff --check`.
   - Blockers: decision 6.
-- [x] `REL-009` Talk and demo assets.
-  - [x] `REL-009a` Refresh the showcase fixture.
+- [x] `CSP-540` Talk and demo assets.
+  - Legacy ID: `REL-009`
+  - [x] `CSP-540.01` Refresh the showcase fixture.
+    - Legacy ID: `REL-009a`
     - Outcome: `TmuxReplayRow` gained attached-client and last-attached
       fields (other scenarios leave them empty); the showcase marks
       `project` attached and the rest detached. The regen recipe's `sed`
@@ -15203,7 +15815,8 @@ finally `REL-002b`.
       `/tmp/` paths; snapshot suites that read the fixture stay green
       (re-bless intentional diffs).
     - Blockers: none.
-  - [x] `REL-009b` Capture screenshots and graph exports.
+  - [x] `CSP-540.02` Capture screenshots and graph exports.
+    - Legacy ID: `REL-009b`
     - Outcome (assets kept outside the repo per decision 7): PNG and SVG
       frames of the sessions view, an ambiguous session's detail, the mux
       view, help, and the pins menu, plus the showcase graph as HTML and
@@ -15234,11 +15847,12 @@ finally `REL-002b`.
         clock override (for example `--snapshot-now`) would replace
         faketime, but it needs an ADR 0067 amendment.
       - Avoid the Atelier fork checkout in demos: its root is
-        workspace-relative (`REL-018`).
+        workspace-relative (`CSP-549`).
     - Tests: none; assets live outside the repo unless the operator
       decides otherwise.
-    - Blockers: `REL-003a`..`REL-003e`, `REL-009a`.
-  - [x] `REL-009c` Add an optional `just demo` recipe.
+    - Blockers: `CSP-534.01`..`CSP-534.05`, `CSP-540.01`.
+  - [x] `CSP-540.03` Add an optional `just demo` recipe.
+    - Legacy ID: `REL-009c`
     - Outcome: `just demo` runs the TUI in fixture mode on the showcase
       (with `--features snapshot`, so it works in any build profile);
       the README's Development section mentions it.
@@ -15248,59 +15862,65 @@ finally `REL-002b`.
       build, and the recipe should encode both. It uses the existing task
       runner (ADR 0010), so it adds no new tool.
     - Tests: run the recipe once from a clean checkout.
-    - Blockers: `REL-009a`.
-  - [x] `REL-009d` Refresh the README for the talk.
+    - Blockers: `CSP-540.01`.
+  - [x] `CSP-540.04` Refresh the README for the talk.
+    - Legacy ID: `REL-009d`
     - Outcome: the hero frame now shows an ambiguous session's detail
       (relative age, `Tab inspect candidates`, `Other (2 · 2 ⚠)`) from the
       refreshed fixture, and "By the numbers" reflects 850 commits, about
       590 backlog items, and 2,081 tests. Re-run right before the talk.
-    - Scope: re-render the hero frame after `REL-003`, using the same
+    - Scope: re-render the hero frame after `CSP-534`, using the same
       command and pinned clock as the current frame. Right before the
       talk, update the dated "By the numbers" table (commits, tests, and
-      backlog completion after `REL-007`).
+      backlog completion after `CSP-538`).
     - Tests: README link check; `git diff --check`.
-    - Blockers: `REL-007`, `REL-009b`.
+    - Blockers: `CSP-538`, `CSP-540.02`.
 
 ### P1: With The 0.1.0 Release
 
-- [ ] `REL-010` Define the release process and cut `v0.1.0`.
-  - Scope: advances `H-DIST-002` / `H-DIST-003` / `H-DIST-004`. Decide
+- [ ] `CSP-541` Define the release process and cut `v0.1.0`.
+  - Legacy ID: `REL-010`
+  - Scope: advances `CSP-104` / `CSP-105` / `CSP-106`. Decide
     tag + GitHub release now and crates.io now or later (ADR 0016 prefers
     crates.io; the ADR audit's C6 suggests "don't break gratuitously"
     until a consumer exists). Fill `Cargo.toml` metadata (`repository`,
     `homepage`, `readme`, `keywords`, `categories`, `rust-version`).
-    Stamp the `[Unreleased]` 0.1.0 entry from `REL-008` with the version
+    Stamp the `[Unreleased]` 0.1.0 entry from `CSP-539` with the version
     and date. Decide whether binary and HTML-export distributions carry
-    third-party notices (see `REL-001b`). Record the outcome as an ADR
+    third-party notices (see `CSP-532.02`). Record the outcome as an ADR
     0016 amendment.
-  - Blockers: `REL-001a`, `REL-002b`, `REL-008`.
-- [ ] `REL-011` Add installation paths beyond `--path`.
+  - Blockers: `CSP-532.01`, `CSP-533.02`, `CSP-539`.
+- [ ] `CSP-542` Add installation paths beyond `--path`.
+  - Legacy ID: `REL-011`
   - Scope: once public, document `cargo install --locked --git
     https://github.com/malloc47/conspectus`. The flake exposes only
     `devShells.default`; add `packages.default` / `apps.default` so
     `nix run github:malloc47/conspectus` works (a distribution surface,
     so record it in an ADR). Verify a release build without
     `--features snapshot` on a clean machine.
-  - Blockers: `REL-002b`.
-- [ ] `REL-012` Settle platform posture and CI shape.
+  - Blockers: `CSP-533.02`.
+- [ ] `CSP-543` Settle platform posture and CI shape.
+  - Legacy ID: `REL-012`
   - Scope: CI is ubuntu-only and runs the suite twice (`cargo test`, then
     `cargo nextest`). Process-tree attribution reads `/proc`; signal
     handling and watchers are Unix-only. Either add a macOS build/test job
     or state Linux-only in the README; drop the duplicate test run.
   - Blockers: none.
-- [ ] `REL-013` Clean up dependency and tooling leftovers.
-  - Progress (2026-09-30, `H-RUST-004` / `H-RUST-008`): `proptest`,
-    `rstest`, `_selection_display`, and the "H-REF-006 wave N" comments
+- [ ] `CSP-544` Clean up dependency and tooling leftovers.
+  - Legacy ID: `REL-013`
+  - Progress (2026-09-30, `CSP-557` / `CSP-561`): `proptest`,
+    `rstest`, `_selection_display`, and the "CSP-088 wave N" comments
     are gone. Remaining: confirm `tui-pantry`, and resolve `pre-commit`
     without a config.
   - Scope: `proptest` and `rstest` are dev-dependencies with zero uses;
-    `tui-pantry` serves only `examples/pantry.rs` (confirm the `T8-044`
+    `tui-pantry` serves only `examples/pantry.rs` (confirm the `CSP-424`
     "go" still holds); the flake ships `pre-commit` but there is no
     `.pre-commit-config.yaml` (ADR 0007 promised hooks); dead helper
     `_selection_display` (`src/cli/mod.rs:769`); historical
-    "H-REF-006 wave N" comments in `src/cli/mod.rs`.
+    "CSP-088 wave N" comments in `src/cli/mod.rs`.
   - Blockers: none.
-- [ ] `REL-014` Make the on-disk footprint consistent with ADR 0087.
+- [ ] `CSP-545` Make the on-disk footprint consistent with ADR 0087.
+  - Legacy ID: `REL-014`
   - Scope: ADR 0087 and `AGENTS.md` say rebuildable sidecars live under
     `$XDG_STATE_HOME/conspectus/`, but pin-binding sidecars live under
     `$XDG_CACHE_HOME/conspectus/pin-bindings/` and `graph.bin` under
@@ -15311,15 +15931,17 @@ finally `REL-002b`.
     move files), fix the fallback, and add one "Files Conspectus writes"
     table to `docs/operations.md`.
   - Blockers: none.
-- [ ] `REL-015` Consolidate harness-hook docs.
+- [ ] `CSP-546` Consolidate harness-hook docs.
+  - Legacy ID: `REL-015`
   - Scope: `docs/operations.md` documents only the Claude Code hook;
     `conspectus hook init` also supports codex; the opencode plugin
     (`plugins/opencode-hook`, ADR 0049) and the older
     `scripts/conspectus-claude-hook-sidecar.py` need one "Harness hooks"
     section, or the script retires in favor of `conspectus hook write`.
   - Blockers: none.
-- [ ] `REL-016` Complete the documentation index and add an ADR index.
-  - Progress: the ADR index (`docs/adr/README.md`) landed with `REL-005b`;
+- [ ] `CSP-547` Complete the documentation index and add an ADR index.
+  - Legacy ID: `REL-016`
+  - Progress: the ADR index (`docs/adr/README.md`) landed with `CSP-536.02`;
     the `docs/index.md` gaps remain.
   - Scope: `docs/index.md` omits `mux-link-resolution.md`,
     `provider-adapter-guide.md`, `comparison.md`, the three audits,
@@ -15329,23 +15951,25 @@ finally `REL-002b`.
     daemon, TUI, pins and mux lifecycle, worktrees, process and tooling,
     superseded); it doubles as a talk slide.
   - Blockers: none.
-- [ ] `REL-017` Decide how public docs refer to Atelier.
+- [ ] `CSP-548` Decide how public docs refer to Atelier.
+  - Legacy ID: `REL-017`
   - Scope: Atelier is private. `docs/atelier-migration.md`,
     `docs/design.md` ("Relationship To Atelier"), and backlog path
     references assume it. Publish Atelier alongside, or reframe it as a
     companion workspace tool and move the migration guide into Atelier's
     repo. `README.md` currently notes that Atelier is unreleased. No
     tracked file links to Atelier, so this can land shortly after
-    `REL-002b` rather than block it.
+    `CSP-533.02` rather than block it.
   - Blockers: operator decision.
 
 ### P2: After 0.1.0
 
-- [ ] `REL-018` Fix or document known functional gaps.
-  - Scope: `H-HARNESS-ATELIER-001` (`atelier exec claude` panes show
-    "No agent"), `H-PIN-F-001` (non-default tmux socket discovery),
-    `P8-014` (inline picker for ambiguous mux candidates; `m` now belongs
-    to the Mux menu, see `REL-003b`), `H-SERVE-PERF-001c` (per-cycle
+- [ ] `CSP-549` Fix or document known functional gaps.
+  - Legacy ID: `REL-018`
+  - Scope: `CSP-526` (`atelier exec claude` panes show
+    "No agent"), `CSP-382` (non-default tmux socket discovery),
+    `CSP-175` (inline picker for ambiguous mux candidates; `m` now belongs
+    to the Mux menu, see `CSP-534.02`), `CSP-505.03` (per-cycle
     resolve/publish cost), zellij mutation capabilities. Also: Atelier
     fork-index paths are used verbatim (`src/discovery/atelier.rs:377`),
     so a fork's checkouts get workspace-relative roots and repo ids
@@ -15353,33 +15977,37 @@ finally `REL-002b`.
     canonical nodes git discovery produces. Existing Atelier snapshot
     tests pin this shape, so fixing it means re-blessing them.
   - Blockers: per item.
-- [ ] `REL-019` Close the ADR-alignment items that shape the public story.
-  - Scope: `H-ADR-003` (retire the deprecated `[tui].sessions_grouping`
+- [ ] `CSP-550` Close the ADR-alignment items that shape the public story.
+  - Legacy ID: `REL-019`
+  - Scope: `CSP-492` (retire the deprecated `[tui].sessions_grouping`
     and `--sessions-grouping` alias before users depend on it);
-    `H-ADR-004` (`docs/mux-link-resolution.md` exists but was last updated
-    2026-06-23, before `H-EXT-004` and `H-MUXPROC-020`; refresh it and
-    close); `H-ADR-005` (two-tier decision records; decide before outside
+    `CSP-493` (`docs/mux-link-resolution.md` exists but was last updated
+    2026-06-23, before `CSP-476` and `CSP-402`; refresh it and
+    close); `CSP-494` (two-tier decision records; decide before outside
     contributors write ADRs).
   - Blockers: none.
-- [ ] `REL-020` Add contributor onboarding.
+- [ ] `CSP-551` Add contributor onboarding.
+  - Legacy ID: `REL-020`
   - Scope: `CONTRIBUTING.md` explaining the ADR + backlog workflow for
     outside contributors (stable IDs, when an ADR is required,
     `just check`, snapshot mode), plus issue/PR templates if the repo
     accepts outside contributions.
-  - Blockers: `REL-002b`.
-- [ ] `REL-021` Decide the backlog's long-term shape.
-  - Scope: this file is ~14k lines and `REL-007` shows checkbox drift, so
+  - Blockers: `CSP-533.02`.
+- [ ] `CSP-552` Decide the backlog's long-term shape.
+  - Legacy ID: `REL-021`
+  - Scope: this file is ~14k lines and `CSP-538` shows checkbox drift, so
     ADR 0009's trigger ("evaluate Backlog.md when the manual backlog
     becomes difficult to maintain") may have fired. Options: archive
     completed phases to a separate file, or migrate to Backlog.md. Decide
     via ADR.
   - Blockers: none.
-- [ ] `REL-022` Decide the library API posture.
+- [ ] `CSP-553` Decide the library API posture.
+  - Legacy ID: `REL-022`
   - Scope: `README.md` marks `conspectus::api` unstable (ADR audit C6).
     Decide whether 0.1.0 advertises it; if so, reconcile
-    `docs/library-api.md` with the current facade and add the `H-DOC-003`
+    `docs/library-api.md` with the current facade and add the `CSP-116`
     examples.
-  - Blockers: `REL-010`.
+  - Blockers: `CSP-541`.
 
 ## Later
 

@@ -9,10 +9,10 @@ CLI, TUI, and graph surfaces," and proposes a chunked plan to close the gap.
 Entity families assessed, with the forthcoming extensions that motivated the
 audit:
 
-- **Mux backends** — tmux today; zellij next (`H-FUTURE-001`).
+- **Mux backends** — tmux today; zellij next (`CSP-111`).
 - **Orchestrators** — agent-deck today; dmux, herdr, pertmux, workmux next.
 - **Agent harnesses** — claude-code, codex, opencode, aider today.
-- **Forges** — GitHub today; GitLab/Gitea next (`H-FUTURE-002`).
+- **Forges** — GitHub today; GitLab/Gitea next (`CSP-112`).
 
 ## Executive Summary
 
@@ -62,7 +62,7 @@ keep them true:
   key gets a class mapping.
 - **The runner seam pattern** (`SystemX` + `FakeX` behind a trait) exists for
   tmux and gh, so offline testing of new external-tool backends has a
-  template (`H-REF-004` wants it deduplicated).
+  template (`CSP-086` wants it deduplicated).
 - **Server watch paths derive from config** (`config.harness_state_roots`,
   `src/server/mod.rs:1152`), not from hardcoded harness paths.
 
@@ -139,7 +139,7 @@ signatures, hooks, viewer parser, theme) rather than mechanical registration.**
 trait is tmux by name and by shape: `list_sessions(format)` takes a tmux
 format string, `socket_name` models tmux `-L` server isolation, targets are
 `session:window.pane` selectors, and outcomes are `Tmux*Outcome` enums. The
-doc comments already anticipate zellij ("per `H-FUTURE-001`") via
+doc comments already anticipate zellij ("per `CSP-111`") via
 `Unsupported` defaults, but a zellij impl of *this* trait would be an
 impersonation, not a backend.
 
@@ -209,14 +209,14 @@ per the ADR 0011 design; output/`tui` PR surfaces consume node fields.
   like the forge seam.
 
 **Verdict:** smallest gap. Mostly config-shape + wiring work, already
-captured as `H-FUTURE-002` (blocked on `H-REF-004`).
+captured as `CSP-112` (blocked on `CSP-086`).
 
 ### 4. Orchestrators (agent-deck, dmux, herdr, pertmux, …)
 
 **Current state:** `AgentDeckDiscovery` is a bespoke `DiscoveryProvider`
 (`src/discovery/agent_deck.rs`) with its own `LocalDiscoveryConfig` field
 (`agent_deck_root`), two dedicated env vars, and inline wiring
-(`discovery/mod.rs:346, 598`). ADR 0060 / `H-AGENTMUX-001` *explicitly
+(`discovery/mod.rs:346, 598`). ADR 0060 / `CSP-131` *explicitly
 declined* an `AgentMuxAdapter` trait: with one surviving adapter, a trait
 was speculative, and MUXPROC (process-tree evidence) was judged the primary
 tool-agnostic source of agent↔mux links.
@@ -237,7 +237,7 @@ changes the calculus that ADR 0060 was decided on, but only partially:
   orchestrators means four more copies of that pattern, plus four more
   `provider_class` arms.
 - What has no home at all is **orchestrator capability beyond discovery**:
-  `H-AGENTMUX-008` (route mux renames through agent-deck so its state.db
+  `CSP-451` (route mux renames through agent-deck so its state.db
   stays consistent) is the first example of an orchestrator needing a
   *mutation* hook. Today the rename lockstep path knows only tmux; there is
   no seam for "the mux you are renaming is owned by an orchestrator."
@@ -259,11 +259,11 @@ amending ADR should record the revisit.
   emit exactly these strings to get their scores. Worth a constants module,
   not worth a framework.
 - **`SourceMetadata.fields` stringly-typed keys** — already tracked as
-  `H-REF-008`; new providers multiply the risk.
+  `CSP-090`; new providers multiply the risk.
 - **Fixture/test infrastructure is provider-hardcoded in the same way:**
   `HarnessFixture` supports the four harnesses; `FakeTmux` / `FakeGh` are
   per-tool. Fine per adapter, but a documented conformance checklist ("what
-  a new adapter's test suite must cover") does not exist yet — `H-DOC-002`
+  a new adapter's test suite must cover") does not exist yet — `CSP-115`
   (provider-adapter contributor guide) is the natural home.
 - **Snapshot format:** adding node fields for new backends bumps the rkyv
   `format_version` → cold rebuild (ADR 0083). Cheap, by design; not a
@@ -313,10 +313,10 @@ S ≈ ≤1 day, M ≈ 2–3 days, L ≈ ~1 week. Existing backlog ids referenced
 they overlap; each chunk that changes a convention owes an ADR per the
 project guardrails.
 
-Filed in `docs/backlog.md` § Provider Extensibility as `H-EXT-001` through
-`H-EXT-017`, in the order listed here (A1 → `H-EXT-001`, …, E2 →
-`H-EXT-017`). `H-REF-004`, `H-FUTURE-001`, `H-FUTURE-002`, and `H-DOC-002`
-are closed as folded into `H-EXT-008` / `-010` / `-013` / `-017`
+Filed in `docs/backlog.md` § Provider Extensibility as `CSP-473` through
+`CSP-489`, in the order listed here (A1 → `CSP-473`, …, E2 →
+`CSP-489`). `CSP-086`, `CSP-111`, `CSP-112`, and `CSP-115`
+are closed as folded into `CSP-480` / `-010` / `-013` / `-017`
 respectively; the `H-EXT` entries are the tracking source of truth.
 
 **Phase A — registry backbone (no behavior change)**
@@ -354,7 +354,7 @@ respectively; the `H-EXT` entries are the tracking source of truth.
   `conspectus hook write <harness-key>` resolving through the registry +
   `HarnessAdapter::hook_record_from_payload`. Per-harness hook *plugins*
   (e.g. `plugins/opencode-hook`) stay per-harness by nature; document the
-  contract in the H-DOC-002 guide.
+  contract in the CSP-115 guide.
 - **B3 (M): Viewer locator/parser via the adapter.** Replace the closed
   `SessionLocator` enum + `viewer_bridge` match + fixed parser trio with
   `HarnessAdapter::transcript_source(&AgentSessionNode) -> Option<…>`
@@ -367,12 +367,12 @@ respectively; the `H-EXT` entries are the tracking source of truth.
   pass so the next harness with a state/log DB (ADR 0048-style) doesn't add
   top-level config fields. Small now; painful later if skipped.
 
-**Phase C — mux backend abstraction (supersedes/absorbs `H-REF-004` +
-`H-FUTURE-001`)**
+**Phase C — mux backend abstraction (supersedes/absorbs `CSP-086` +
+`CSP-111`)**
 
 - **C1 (M): Extract `MuxBackend` trait from `TmuxRunner`.** Backend-neutral
   method names, `backend_key()`, namespace generalization of `socket_name`,
-  neutral outcome enums (the shared external-runner seam from `H-REF-004`
+  neutral outcome enums (the shared external-runner seam from `CSP-086`
   lands here). `SystemTmux` becomes the first impl; all `&dyn TmuxRunner`
   call sites (runtime, cli rename, pins launch, preview) move to
   `&dyn MuxBackend` resolved *by the node's/pin's `backend` field* through a
@@ -386,7 +386,7 @@ respectively; the `H-EXT` entries are the tracking source of truth.
   already reserved it).
 - **C3 (M): Zellij backend, discovery + attach.** `zellij list-sessions`
   parsing, attach argv, no-namespace semantics; rename/send-keys/capture as
-  `Unsupported` initially. Fixture-driven tests per `H-FUTURE-001`. This is
+  `Unsupported` initially. Fixture-driven tests per `CSP-111`. This is
   the acceptance test for C1: it must require *zero* edits outside the new
   module + registry entry.
 - **C4 (S): Hook mux context via backend probe.** Generalize
@@ -400,7 +400,7 @@ respectively; the `H-EXT` entries are the tracking source of truth.
   forge adapter list wired through the existing `ForgeDiscovery`
   coordinator; move `GhRunner` types into `forge/github.rs`; add
   `claims_remote_url` routing to `ForgeAdapter`. Per-forge disable toggles.
-- **D2 (M): Second forge adapter (GitLab or Gitea)** per `H-FUTURE-002`,
+- **D2 (M): Second forge adapter (GitLab or Gitea)** per `CSP-112`,
   as the D1 acceptance test. Answers the deferred ForgePr identity questions
   (design.md "Forge PR Identity") for the multi-forge case — needs its ADR.
 - **D3 (M): Orchestrator registration surface.** Generic
@@ -411,7 +411,7 @@ respectively; the `H-EXT` entries are the tracking source of truth.
   land as independent S/M chunks each (subject to the per-orchestrator
   evidence audits the `H-AGENTMUX-*` stories already gate on).
 - **D4 (S, deferred until first need): Orchestrator mutation capability.**
-  `owns_mux` / rename routing seam for `H-AGENTMUX-008`.
+  `owns_mux` / rename routing seam for `CSP-451`.
 
 **Phase E — conformance and docs**
 
@@ -421,7 +421,7 @@ respectively; the `H-EXT` entries are the tracking source of truth.
   capability-outcome behavior), plus fixture-corpus integration so a new
   adapter shows up in `fixture_corpus` / snapshot tests by adding fixtures
   only.
-- **E2 (S): Provider-adapter contributor guide** (`H-DOC-002`): the
+- **E2 (S): Provider-adapter contributor guide** (`CSP-115`): the
   end-to-end checklist for each entity family — what to implement, what the
   registry gives you for free, what needs fixtures, what needs an ADR.
 

@@ -424,7 +424,7 @@ pub struct LinkEvidence {
 
 /// A piece of unresolved-endpoint evidence rendered as a placeholder
 /// row in its group. `Enter` is inert on it (an evidence inspector
-/// is open work, backlog `T8-032`).
+/// is open work, backlog `CSP-318`).
 #[derive(Clone, Debug, PartialEq)]
 pub struct UnresolvedRow {
     pub link_id: String,

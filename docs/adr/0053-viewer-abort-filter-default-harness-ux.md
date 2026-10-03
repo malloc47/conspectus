@@ -6,7 +6,7 @@ Accepted. Extends ADR 0052 (native session viewer).
 
 ## Context
 
-After operating the H-VIEWER-NATIVE-011 styling pass on real agent
+After operating the CSP-343 styling pass on real agent
 transcripts the operator surfaced a coherence gap: the viewer
 shows messages they typed and then immediately interrupted with
 Esc before sending a different prompt. In Claude Code's own chat
@@ -25,12 +25,12 @@ UI those interrupted messages are hidden. Operator quote:
 This is a specific instance of a broader cross-cutting principle
 that has now come up multiple times during the viewer build-out:
 
-- H-VIEWER-NATIVE-011 added a `"(reasoning hidden by the model)"`
+- CSP-343 added a `"(reasoning hidden by the model)"`
   placeholder when a Claude / Codex thinking record carries only
   opaque encrypted content. Reason: the harness's UI shows
   *something* (a thinking indicator) where the operator expects
   one; an empty toggle is worse than a placeholder.
-- H-PREVIEW-006 dropped Codex's `<turn_aborted>` and
+- CSP-173 dropped Codex's `<turn_aborted>` and
   `<proposed_plan>` channel-marker injections from the rendered
   body. Reason: those are system-side annotations the harness UI
   hides from the operator at chat time; they're noise for someone

@@ -6,7 +6,7 @@ Accepted
 
 ## Context
 
-H-UI-004 audited the sessions-pane top header element-by-element and
+CSP-418 audited the sessions-pane top header element-by-element and
 found that several pieces were paying for signals that already lived
 in stronger places elsewhere on the screen: the `Conspectus` brand
 was self-evident inside the running TUI, the `sessions` view label
@@ -92,7 +92,7 @@ Carries:
 - **Contextual key hints** that change with focus + selection. The
   status bar is the only chrome surface that varies with operator
   position; that's its load-bearing role.
-- **Transient toasts** (T8-040 / H-WIDG-003). The toast surface
+- **Transient toasts** (CSP-326 / CSP-427). The toast surface
   overlays the bottom edge while a feedback message is live, then
   retires.
 
@@ -145,7 +145,7 @@ Specific implications:
 **For status-bar evolution:**
 
 The bottom-row contract leaves room for future additions (e.g., the
-F8-013 last-active-view indicator would naturally fit in the
+CSP-423 last-active-view indicator would naturally fit in the
 view-state chip section). Adding chip-style status entries that
 change with focus is on-charter; adding always-on primary signals
 that don't change with focus violates the contract and belongs in
@@ -206,7 +206,7 @@ canonical reference:
   (e.g., embedded systems, side-by-side splits) might still
   overflow. Defer until the use case surfaces; the truncation
   behavior is acceptable in the meantime.
-- **Status-bar evolution under F8-013** (persist last-active view).
+- **Status-bar evolution under CSP-423** (persist last-active view).
   The view-state chip section is the natural home for a last-active
   marker; ADR 0078 anticipates this as on-charter for the status bar.
 

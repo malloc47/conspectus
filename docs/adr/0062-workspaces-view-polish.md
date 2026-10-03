@@ -10,7 +10,7 @@ workspace group headers.
 
 ## Context
 
-`H-WS-002` shipped a Workspaces view MVP with each workspace
+`CSP-406` shipped a Workspaces view MVP with each workspace
 expanding to up to three labeled subgroups:
 
 1. `members (N)` — every `WorkspaceContainsRepo` member, each
@@ -36,7 +36,7 @@ Operator feedback after running the MVP:
   useful UI vocabulary inside the Workspaces view itself.
 
 The `related` subgroup also re-surfaces a signal the Sessions
-view already carries: the `[ws-name]` chip from `H-WS-001`
+view already carries: the `[ws-name]` chip from `CSP-405`
 (ADR-less; documented in `docs/plans/workspace-view-redesign.md`
 §Axis 1). The operator already sees the cross-reference there
 when looking at a session row; reproducing it under the workspace
@@ -45,7 +45,7 @@ inverts the same pair without adding information.
 ## Decision
 
 Two changes to the Workspaces view, landed together as the
-H-WS-002 polish pass.
+CSP-406 polish pass.
 
 ### Move members from a subgroup to an inline span
 
@@ -82,7 +82,7 @@ sessions with a direct `AgentSession -- AssociatedWith →
 Workspace` edge. Sessions whose cwd lives in a member repo's
 checkout but which have no direct workspace edge are not shown
 under the workspace at all. They continue to show up in the
-Sessions / Graph view with the `[ws-name]` chip from `H-WS-001`.
+Sessions / Graph view with the `[ws-name]` chip from `CSP-405`.
 
 With (B) gone, the remaining (A) sessions no longer need a
 labeled wrapper. They sit at depth 1 directly under the
@@ -94,7 +94,7 @@ atelier-ws  conspectus+config  (atelier)
 └── claude:demo-fork
 ```
 
-This narrows the (A)/(B) decision from `H-WS-002`. Previously
+This narrows the (A)/(B) decision from `CSP-406`. Previously
 (A) and (B) were each load-bearing in two places — cross-link
 emitted `AssociatedWith` for (A), Sessions/Graph nested only for
 (A), and the Workspaces view distinguished both. After this
@@ -113,15 +113,15 @@ the Sessions chip.
   `resolved_relationships`-join query are deleted. The
   (A)-class fetch is unchanged.
 - The `RowId::Subgroup`, `RowKind::Repo`, and `RepoRow`
-  scaffolding from `H-WS-002` remain defined — they are still
+  scaffolding from `CSP-406` remain defined — they are still
   wired into renderer, search, and selection paths and may be
-  reused by `H-WS-002a`'s Repo grouping (which flips the tree
+  reused by `CSP-406.01`'s Repo grouping (which flips the tree
   to repos-as-top-level).
 - The Workspaces view's row count per workspace drops from
   `1 + members + (A) + (B) + 2 or 3 subgroup wrappers` to
   `1 + (A)`. A dense daily-driver snapshot reads substantially
   shorter at the cost of losing the cross-reference inversion.
-- The H-WS-002a scope shrinks: the originally planned
+- The CSP-406.01 scope shrinks: the originally planned
   "default-collapse the `related` subgroup at row-tree emit time"
   is no longer applicable — `related` is gone, not collapsed.
   The Provider / Activity / Repo grouping work continues as
@@ -131,7 +131,7 @@ the Sessions chip.
 
 ### A. Keep `related` but rename and default-collapse
 
-The original H-WS-002a plan. Rejected because the operator could
+The original CSP-406.01 plan. Rejected because the operator could
 not name what the bucket would contain without consulting the
 plan, suggesting no rename gets all the way there. Surfacing the
 same (A)/(B) pair on two surfaces (chip in Sessions, subgroup in
@@ -158,4 +158,4 @@ adds depth without adding distinction.
   question 2)
   **A: No. The Sessions/Graph chip covers the cross-reference;
   reproducing it as a subgroup re-introduces the (A)/(B)
-  conflation H-WS-001 fixed in a different surface.**
+  conflation CSP-405 fixed in a different surface.**

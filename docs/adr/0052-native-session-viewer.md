@@ -8,7 +8,7 @@ sessions. External launches remain available as an escape hatch.
 
 ## Context
 
-ADR 0019 (amended May 2026) and `H-TRANSCRIPT-012` shipped an
+ADR 0019 (amended May 2026) and `CSP-216` shipped an
 external-viewer launch path: press `T` on an `AgentSession` row,
 suspend the TUI, hand control to `claude-history` (Claude Code) or
 patched `recall` (multi-harness). Operating that path against real
@@ -32,8 +32,8 @@ operator data exposed three real gaps:
    the `--session <ID>` patch, a `BinaryProbe::supports_flag`
    capability gate, and a `recall 0.5.0-conspectus-session`
    version bump. Each upstream release adds re-vendor + re-hash
-   + re-patch work. Open recall-side stories (`H-TRANSCRIPT-014`
-   opencode coverage, `H-TRANSCRIPT-015` j/k focus,
+   + re-patch work. Open recall-side stories (`CSP-330`
+   opencode coverage, `CSP-331` j/k focus,
    "initial-scroll-to-bottom") would each add another patch hunk
    on top, with no guarantee any land upstream.
 
@@ -45,7 +45,7 @@ records, the Ratatui runtime and theme (ADRs 0024, 0032), the
 `tui-markdown` rendering path (ADR 0051), and the `ansi-to-tui`
 fallback (ADR 0025) for tool-output styling.
 
-`H-TRANSCRIPT-003 .. H-TRANSCRIPT-010` were already going to land
+`CSP-207 .. CSP-214` were already going to land
 a recent-history adapter + an inline preview widget for the right
 panel. Growing the same widget into a full-screen scrollable
 modal — with the same data layer underneath — is roughly 50% more
@@ -64,10 +64,10 @@ two-panel layout; data comes from per-harness parsers that read
 each harness's state-of-record directly (JSONL for Claude Code and
 Codex, SQLite for OpenCode per ADR 0013).
 
-The external viewer launch (`H-TRANSCRIPT-012`) is retained as an
+The external viewer launch (`CSP-216`) is retained as an
 **opt-in escape hatch** for operators who prefer `claude-history`'s
 ledger formatting, search affordances, or future external viewers.
-ADR 0019 is amended accordingly. The `H-TRANSCRIPT-013` config-
+ADR 0019 is amended accordingly. The `CSP-332` config-
 override story (deferred) becomes the seam users would use to
 swap the default if they want.
 
@@ -100,7 +100,7 @@ similar). That intent shapes three rules:
      the renderer.
    - Harness-specific records that don't map cleanly are dropped
      or flattened, with the rationale recorded in the per-harness
-     parser story (e.g. `H-VIEWER-NATIVE-003 .. 005`).
+     parser story (e.g. `CSP-335 .. 005`).
    - Future viewers can be written against the model without
      touching the parsers; future parsers can be written against
      the model without touching the renderer.
@@ -190,8 +190,8 @@ maintained source of truth. The list grows by ADR; never silently.
   responsible for that; the viewer takes the resolved session
   as input.
 - Resume / fork actions. Those continue to flow through
-  `P8-011` resume and the harness-specific binaries.
-- Aider transcripts (per ADR 0019 and `H-PREVIEW-005`
+  `CSP-170` resume and the harness-specific binaries.
+- Aider transcripts (per ADR 0019 and `CSP-159`
   deferral) — the viewer surfaces "transcript not supported"
   for aider rows and points operators at `claude-history`'s
   positional file path or the external launch if installed.
@@ -223,7 +223,7 @@ adapter via `CONSPECTUS_*_STATE` envs.
 - The `T` keybind's resolver gains a "native viewer" backend that
   always wins over external backends, unless the user has
   opted into external via `[viewers.<harness>]` config
-  (`H-TRANSCRIPT-013`).
+  (`CSP-332`).
 - Conspectus owns more rendered UI surface than the original
   product surface contemplated. The data-model-first guardrail
   still holds: the viewer is a *presentation* of an existing data
@@ -236,14 +236,14 @@ adapter via `CONSPECTUS_*_STATE` envs.
   a `main.rs` that consumes `SessionLocator` from clap. No
   refactor inside conspectus.
 - Recall debt rolls off over time as the recall backend becomes
-  escape-hatch only. `H-TRANSCRIPT-014` and `H-TRANSCRIPT-015`
+  escape-hatch only. `CSP-330` and `CSP-331`
   are reclassified as "won't fix on the conspectus side" —
   operators who want recall coverage upstream submit patches
   there directly.
 - Code volume grows by roughly 1.0-1.5k LOC for the viewer
   module (parser, widget, state, render). The marginal cost
   over the already-planned inline preview
-  (`H-TRANSCRIPT-009`/`H-TRANSCRIPT-010`) is roughly 50% —
+  (`CSP-213`/`CSP-214`) is roughly 50% —
   full-screen layout, scroll, search, jump-to-end, and the
   conversion of the recent-history adapter into a
   full-transcript adapter.
@@ -265,7 +265,7 @@ adapter via `CONSPECTUS_*_STATE` envs.
   proportion to the boundary value. The dep-surface manifest +
   import-rule discipline cover the boundary at lower cost, and
   extraction remains mechanical when it becomes worth it.
-- **Reuse the H-TRANSCRIPT-009 inline preview widget as-is for
+- **Reuse the CSP-213 inline preview widget as-is for
   full-screen.** Considered. The inline widget is sized for a
   right-pane height and renders without an active focus
   cursor; growing it into a full-screen modal needs the

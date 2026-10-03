@@ -28,9 +28,9 @@ other. Operators scanning a dense sessions tree or the right-pane
 explorer have no fast way to tell *what kind of thing* a row
 represents before reading its label.
 
-The `H-VIS-001..006` workstream (`docs/backlog.md:9351`) scoped a
+The `CSP-408..413` workstream (`docs/backlog.md:9351`) scoped a
 per-node-kind glyph + color system but parked it behind this ADR.
-H-UI-002 promoted the workstream to scheduled; the ADR is the gate.
+CSP-416 promoted the workstream to scheduled; the ADR is the gate.
 
 Three coupled decisions need to settle together because they share
 one `[tui.theme]` schema, one icon-lookup module, and one set of
@@ -231,7 +231,7 @@ table. No call site reaches into the override map directly.
 
 The machine-readable surface (JSON `--format json`, DOT, HTML) is
 out of scope for this ADR's *rendering* decisions and stays under
-the H-VIS-005 story. The shared lift this ADR delivers is the
+the CSP-412 story. The shared lift this ADR delivers is the
 stable `NodeKind::display_label()` tag that JSON and DOT consumers
 already need; the glyph and color *are* a TUI rendering concern.
 The DOT renderer may opt into the node-kind color as a fill or
@@ -246,7 +246,7 @@ construction:
 - **Glyph-only legibility.** Every kind has a distinct *shape*,
   not merely a distinct hue. `NO_COLOR` / `--color never` strips
   the color but leaves the glyph; a snapshot variant covering
-  this case lands under H-VIS-006.
+  this case lands under CSP-413.
 - **Color-blind safety.** The default palette deliberately mixes
   shape families (filled vs hollow, geometric vs technical) so
   the worst-case "all glyphs render in the same hue" reading is
@@ -276,7 +276,7 @@ construction:
 - **AgentSession rows lean on the harness pill alone in row
   contexts** (§3 amendment). The colored pill is a strong enough
   identity signal that a stacked `●` only repeated information;
-  H-VIS-003 verified the redundancy against the showcase fixture
+  CSP-410 verified the redundancy against the showcase fixture
   before the prefix was removed. `NodeKind::AgentSession`'s glyph
   + color are still defined for surfaces without a pill (detail
   pane, explorer, JSON / DOT) so the kind keeps a uniform identity
@@ -298,11 +298,11 @@ construction:
   hue can override the `ForgePr` glyph in `[tui.theme.icons]` but
   not the color; if a real use case appears, a follow-up ADR can
   add `node_forge_pr` without breaking this one.
-- **`H-UI-005` (resolved-vs-candidate)** can use the new
+- **`CSP-419` (resolved-vs-candidate)** can use the new
   per-kind color fields as a starting point for its own
   `EdgeStateLabel` chip palette, keeping a single source of
   truth for "node-related color" in the theme.
-- **`H-UI-003` (detail-pane flatten)** lands after this so the
+- **`CSP-417` (detail-pane flatten)** lands after this so the
   related-entities rows already have the per-kind glyph; the
   flatten can lean on glyph identity instead of column position
   for direction cues.
@@ -401,8 +401,8 @@ matrix. `Y` remains the documented ASCII override in
   display width is not exactly 1 cell produce a warning and fall
   back to the default.
 - JSON / DOT / HTML surfaces are out of scope for this ADR;
-  H-VIS-005 will pick up the stable `NodeKind::display_label()`
+  CSP-412 will pick up the stable `NodeKind::display_label()`
   tag and any color propagation.
 - `NO_COLOR` legibility is required and proven by a dedicated
-  snapshot variant under H-VIS-006; the default slate is
+  snapshot variant under CSP-413; the default slate is
   glyph-distinguishable without color.

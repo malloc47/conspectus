@@ -52,7 +52,7 @@ registered provider's key + role in the warm-start pipeline.
 The freshness gate and the mutator list both derive from this
 table.
 
-### Descriptor shape (H-EXT-001)
+### Descriptor shape (CSP-473)
 
 ```rust
 pub struct ProviderDescriptor {
@@ -87,8 +87,8 @@ Adding a new provider requires:
 2. A [`ProviderDescriptor`] entry in [`REGISTRY`] with the
    constant as `key` and the appropriate `ProviderKind`.
 3. Wiring the constructor into `discover_local_warm_with`.
-   H-EXT-001 leaves the constructor path hand-wired; H-EXT-004
-   / H-EXT-008 / H-EXT-012 / H-EXT-014 generalize the
+   CSP-473 leaves the constructor path hand-wired; CSP-476
+   / CSP-480 / CSP-484 / CSP-486 generalize the
    constructor surface per entity family (harness / mux / forge
    / orchestrator).
 
@@ -113,18 +113,18 @@ extra edits.
   (`CONSPECTUS_DISABLE_TMUX`, `_FORGE`, `_PROCTREE`,
   `_AGENT_DECK`, `_CODEX_LOG`) plus per-harness state-root vars
   (`CONSPECTUS_<HARNESS>_STATE`) stay on `LocalDiscoveryConfig`
-  for H-EXT-001. `LocalDiscoveryConfig::from_env` still walks
-  them explicitly. H-EXT-007 folds the codex-log wiring into a
+  for CSP-473. `LocalDiscoveryConfig::from_env` still walks
+  them explicitly. CSP-479 folds the codex-log wiring into a
   general aux-reader hook via the adapter registry; the
   per-entity opt-outs consolidate as their host adapter traits
   land.
 - **Display metadata for UI surfaces.** The TUI controls
   overlay's harness filter (`HARNESS_OPTIONS` in
   `widgets/controls.rs`) and the row-label match in `rows/mod.rs`
-  stay separate for H-EXT-001. H-EXT-002 folds them into
+  stay separate for CSP-473. CSP-474 folds them into
   `HarnessAdapter::display_label()` / `launch_options()`.
 
-The metadata-only descriptor is sufficient for H-EXT-001's
+The metadata-only descriptor is sufficient for CSP-473's
 scope: freshness gate + mutator list both derive from the
 registry.
 
@@ -168,21 +168,21 @@ derived) accompanies `cache::MUTATOR_PROVIDERS` (kept as a
 indexable slice). The test `mutator_const_matches_registry`
 guards against the const drifting from the registry.
 
-**For the H-EXT sequence.** H-EXT-002 through H-EXT-014 extend
+**For the H-EXT sequence.** CSP-474 through CSP-486 extend
 the descriptor incrementally — adding a
 `construct: fn(&LocalDiscoveryConfig) -> Option<Box<dyn Provider>>`
 field, or a `display_label: &'static str`, or a
 `env_disable_var: Option<&'static str>` — without disrupting
 the registry's shape.
 
-**For contributor onboarding.** The H-EXT-017 contributor guide
+**For contributor onboarding.** The CSP-489 contributor guide
 will cite this ADR when explaining "how do I register a new
 provider" for phase-A callers. The answer today: const + entry
 in `REGISTRY` + hand-wire into `discover_local_warm_with`.
 
 **For snapshot compatibility.** The provider key strings are
 unchanged. Existing on-disk `graph.bin` snapshots read back
-byte-identically; the H-REF-009-pinned
+byte-identically; the CSP-091-pinned
 `canonical_strings_are_stable` test enforces this.
 
 ## Alternatives Considered
@@ -202,7 +202,7 @@ TTL class` — keeps consumers linear.
 
 **Split into per-family registries
 (`HARNESS_REGISTRY`, `MUX_REGISTRY`, ...).** Rejected for
-H-EXT-001. The freshness gate and mutator eviction need a
+CSP-473. The freshness gate and mutator eviction need a
 single unified table anyway (they don't care whether a heavy
 provider is a harness or a mux). Per-family lists arrive
 implicitly in later H-EXT stories once the descriptor grows a
@@ -239,12 +239,12 @@ actually consumes the table.
 ## Open Questions Deferred
 
 - **Constructor uniform signature.** Deferred to per-entity
-  H-EXT stories (H-EXT-004 harness, H-EXT-008 mux, H-EXT-012
-  forge, H-EXT-014 orchestrator). Each family may end up with a
+  H-EXT stories (CSP-476 harness, CSP-480 mux, CSP-484
+  forge, CSP-486 orchestrator). Each family may end up with a
   different constructor shape; the registry descriptor grows
   a family-specific reference (e.g. `harness_adapter: &'static
   dyn HarnessAdapter`) once the trait shape is decided.
-- **Env-var opt-out consolidation.** Deferred to H-EXT-007 and
+- **Env-var opt-out consolidation.** Deferred to CSP-479 and
   the per-family H-EXT stories. The current pattern
   (`CONSPECTUS_DISABLE_<X>`) is uniform enough that a
   descriptor-level `env_disable_var: Option<&'static str>`
@@ -267,4 +267,4 @@ actually consumes the table.
   each provider stays within envelope category 2 (rebuildable
   observations) or category 1 (declared) as before; the
   registry doesn't license any new writes.
-- H-EXT-001 backlog entry — the story this ADR closes out.
+- CSP-473 backlog entry — the story this ADR closes out.

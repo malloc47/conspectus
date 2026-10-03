@@ -9,7 +9,7 @@ is the successor surface).
 
 ## Context
 
-`H-WS-001` paired two changes to the Sessions / Graph view: a
+`CSP-405` paired two changes to the Sessions / Graph view: a
 **strict-nesting** fix (only nest a session under a workspace
 header when the session has a direct `AgentSession --
 AssociatedWith → Workspace` edge — the (A) case) and a
@@ -29,9 +29,9 @@ follow-ups added two refinements:
   1 weak membership → `[ws-name]`, 2..=3 → `[N ws]`, 4+ →
   suppressed.
 
-The chip rendered only in Sessions / Graph; H-WS-003 confirmed the
+The chip rendered only in Sessions / Graph; CSP-407 confirmed the
 other four views (Mux/Prs/Forks/Union) had no analog to surface
-and that the Workspaces view's H-WS-002 polish (ADR 0062) had
+and that the Workspaces view's CSP-406 polish (ADR 0062) had
 already narrowed the (A)/(B) decision to "Workspaces shows only
 (A); (B) lives only as the Sessions chip."
 
@@ -46,8 +46,8 @@ fyi-only and added a column of dim noise to every (B)-class row
 in the daily-driver setup.
 
 This is the third place the (A)/(B) distinction has been narrowed
-in the UI. The first was H-WS-002 → ADR 0062 (drop `related`
-from the Workspaces view). The second was H-WS-003 → ADR 0061
+in the UI. The first was CSP-406 → ADR 0062 (drop `related`
+from the Workspaces view). The second was CSP-407 → ADR 0061
 (drop unimplemented `Workspace` grouping from the four
 non-Workspaces views). This ADR is the third: drop the chip from
 the one view it still rendered in. (A)/(B) remains load-bearing
@@ -83,7 +83,7 @@ Graph view.
   becomes `repo_shared_session_stays_at_repo_level` and keeps
   only the strict-nesting assertions).
 
-Keep the strict-nesting fix from H-WS-001 in place — the
+Keep the strict-nesting fix from CSP-405 in place — the
 `workspace_for_session` and `workspace_for_repo` helpers it
 depends on, the `cross_link::workspace_member_roots` fix to
 require cwd inside the workspace's visible tree, and the
@@ -105,9 +105,9 @@ regression test all stay.
   builder that constructed one loses a line; the six `ui.rs`
   test sites lose a line each.
 - The `[ws-name]` / `[N ws]` vocabulary is gone from the UI
-  entirely. Tests covering H-WS-001's strict-nesting outcome
+  entirely. Tests covering CSP-405's strict-nesting outcome
   remain; tests covering the chip are deleted.
-- H-WS-001's net contribution becomes: strict workspace nesting
+- CSP-405's net contribution becomes: strict workspace nesting
   in Sessions / Graph, plus the cross-link inference fix
   (`workspace_member_roots` no longer indexes
   `canonical_checkout_root`, fixing the symlinked-member leak).
@@ -139,14 +139,14 @@ relationship would solve the wrong problem.
 ### C. Keep the chip but drop the activeness gate
 
 Surface every workspace membership, regardless of whether the
-workspace is live. Rejected unambiguously by the H-WS-001
+workspace is live. Rejected unambiguously by the CSP-405
 follow-up findings; ungated chips were the wall-of-chips
 behavior the activeness gate was added to suppress.
 
 ## Open Questions Answered
 
 - *Q: Is the (B)-class chip carrying its weight in the daily-driver
-  view?* (open since the H-WS-001 follow-ups)
+  view?* (open since the CSP-405 follow-ups)
   **A: No. The cross-reference signal is not actionable; the
   strict-nesting fix carries the useful (A) relationship without
   the chip's help.**

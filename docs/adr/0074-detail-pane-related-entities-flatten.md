@@ -9,8 +9,8 @@ keys identify neighbors.
 
 ## Context
 
-The detail-pane relationship explorer landed under the `T8-027` /
-`T8-028` / `T8-029` mockup-driven workstream. That design split the
+The detail-pane relationship explorer landed under the `CSP-313` /
+`CSP-314` / `CSP-315` mockup-driven workstream. That design split the
 focused node's neighbors into two stacked sections —
 `Upstream` (incoming edges, `link.target == focused`) and
 `Downstream` (outgoing edges, `link.source == focused`) — each its
@@ -18,7 +18,7 @@ own [`RelationshipExplorer`](`src/tui/explorer.rs:208`) keyed by
 `Direction`. Within each section, rows were grouped by
 `(relation, neighbor_kind)` headers and the resolver-winner /
 alt-of / conflict distinction surfaced as inline edge-state text
-(`T8-042`).
+(`CSP-328`).
 
 Operating against the showcase scenario revealed three friction
 points:
@@ -230,7 +230,7 @@ on the explorer state.
   source/target semantics. Only the right-pane render flattens; the
   rest of the project still asks "is this edge inbound or
   outbound?" through the existing data fields.
-- **H-UI-005 (resolved-vs-candidate visual separation)** lands
+- **CSP-419 (resolved-vs-candidate visual separation)** lands
   cleanly on top: the validated zone *is* the resolver-winner row
   treatment, and the Other zone's per-row glyph + color treatment
   can carry the `EdgeStateLabel::AltOf` / `Conflict` distinction

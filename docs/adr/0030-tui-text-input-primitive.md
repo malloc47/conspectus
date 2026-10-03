@@ -13,16 +13,16 @@ section deferred a concrete decision on text input:
 > manual `String` + cursor index. Prefer hand-rolled text input first; add
 > only if hand-rolled becomes fragile.
 
-At the time only one caller (`/` search overlay, `T8-017`) was on the
+At the time only one caller (`/` search overlay, `CSP-193`) was on the
 horizon, and that caller was not yet implemented. The deferral was correct
 then.
 
 Two further callers have since accumulated:
 
-- **Rename** (`H-RENAME-011`) opens an input prompt pre-populated with the
+- **Rename** (`CSP-241`) opens an input prompt pre-populated with the
   current alias (or harness title, or empty) so the operator can edit and
   submit a new display name.
-- **Inline mux-picker** (`P8-014`) opens an overlay listing active mux
+- **Inline mux-picker** (`CSP-175`) opens an overlay listing active mux
   candidates for ambiguous `LinkedToMux` rows. The picker is selection-only
   today, but the same overlay primitive that hosts a text input will also
   host the picker.
@@ -74,7 +74,7 @@ the overlay is open:
   state change.
 - All other keys pass through to `tui-input` for line-edit handling.
 - `Tab` does **not** cycle focus while an overlay is open; the existing
-  Tab focus cycle from `P8-006` is suspended for the overlay's lifetime
+  Tab focus cycle from `CSP-165` is suspended for the overlay's lifetime
   and resumes when the overlay closes.
 - The status bar shows `Enter confirm · Esc cancel` while the overlay is
   open so the operator always sees the active keymap.
@@ -102,7 +102,7 @@ The primitive lives at `src/tui/widgets/input.rs` (new module). It exports:
   `InputOutcome::Continue`, `InputOutcome::Confirm(String)`,
   `InputOutcome::Cancel`.
 
-Callers (`rename_action`, `/` search, `P8-014` picker) own their overlay
+Callers (`rename_action`, `/` search, `CSP-175` picker) own their overlay
 state in `App` and call into the primitive for key handling and render.
 The primitive does not own any global state.
 
@@ -118,8 +118,8 @@ their own follow-on ADRs.
 
 ## Consequences
 
-- Rename (`H-RENAME-011`), `/` search (`T8-017`), and inline mux-picker
-  (`P8-014`) share a single line-edit implementation. Bug fixes in
+- Rename (`CSP-241`), `/` search (`CSP-193`), and inline mux-picker
+  (`CSP-175`) share a single line-edit implementation. Bug fixes in
   Unicode cursor math, word-jump behavior, or paste handling land once.
 - Operators get consistent line-edit muscle memory across all TUI input
   surfaces.
@@ -127,7 +127,7 @@ their own follow-on ADRs.
   impact is expected to be negligible; verify on adoption.
 - Future multi-line or multi-field input cases require a separate ADR
   addendum, not an organic extension of this primitive.
-- `T8-017` may now land without re-litigating the input-widget question.
+- `CSP-193` may now land without re-litigating the input-widget question.
   That unblocks a story that has been waiting on the rename workstream
   to settle the dependency policy.
 

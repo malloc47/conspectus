@@ -24,7 +24,7 @@ shape was driven by three reinforcing assumptions:
 
 Phase 7 then introduced `conspectus serve` (ADRs 0038, 0080) with
 a per-class scheduler, signal-driven shutdown, and event-driven
-refresh via `notify` (ADR 0081). Layer A/B/C of P7-006 plus P7-009
+refresh via `notify` (ADR 0081). Layer A/B/C of CSP-142 plus CSP-145
 shipped, and the daemon proved out three things that invalidate
 the original assumptions in conspectus's actual usage envelope:
 
@@ -160,7 +160,7 @@ engine. Replace it with:
 - ADR 0037's rotation / backup / `VACUUM INTO` / schema-version
   migration story. Replaced by "current snapshot or rebuild."
 - ADR 0042's vector-search surface and the embedding ingestion
-  follow-up (P9-FU-001). Reopen as a separate workstream if the
+  follow-up (CSP-293). Reopen as a separate workstream if the
   feature comes back.
 - The mutation-socket writer-fallback contract from ADR 0038's
   §"Write path". TOML mutations are local file edits; refresh

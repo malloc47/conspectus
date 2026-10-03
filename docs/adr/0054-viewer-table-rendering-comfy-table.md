@@ -8,7 +8,7 @@ surface.
 
 ## Context
 
-`H-VIEWER-NATIVE-017` (Markdown table rendering) needs to fix a
+`CSP-356` (Markdown table rendering) needs to fix a
 real readability gap: tables in agent transcripts arrive as raw
 GFM pipe-tables, and tui-markdown 0.3.7 doesn't enable
 `pulldown_cmark::Options::ENABLE_TABLES` in its parser. Pipes flow

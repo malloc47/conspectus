@@ -210,7 +210,7 @@ public API surface is affected.
 - The `node show` CLI command can adopt the same section structure
   later as plain-text output, giving operators a consistent mental
   model across CLI and TUI surfaces (filed as a follow-on backlog
-  item under T8-024's umbrella, not in scope here).
+  item under CSP-270's umbrella, not in scope here).
 - Where this ADR overlaps with ADR 0032: section dividers and field
   colorization all read from `Theme`. The two ADRs ship together as
   part of the styling overhaul; either can be reverted independently

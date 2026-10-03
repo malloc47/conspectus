@@ -8,7 +8,7 @@ and [ADR 0083](0083-zero-copy-snapshot-format.md).
 The schema decision this ADR settled (JSON-encoded `NodeId`
 foreign references in `candidate_links`, `resolved_relationships`,
 `diagnostics`, `aliases`) applied to the on-disk
-`graph.sqlite` that P11-011a retired. The replacement on-disk
+`graph.sqlite` that CSP-448.01 retired. The replacement on-disk
 format is rkyv (ADR 0083) — `NodeId` is archived directly as
 a tagged enum with structural payloads, so JSON-text encoding
 no longer enters the picture for persistence. The
@@ -169,7 +169,7 @@ rebuildable cache).
   recovery routes through serde, which already passes a
   round-trip test (`model::node_id_round_trips_through_json`)
   for one variant; a new test extends coverage to every variant.
-- The round-trip equality test landed by P10-001 continues to
+- The round-trip equality test landed by CSP-279 continues to
   pass byte-for-byte. The shape of the persisted endpoint
   changes but the semantic round trip does not.
 - Schema width stays narrow. `candidate_links` gains 3 columns
@@ -187,7 +187,7 @@ rebuildable cache).
   Less crisp for casual inspection but unambiguous, and the
   `*_kind` generated column carries the type tag inline as a
   scannable hint.
-- Adding a new structural field to a `NodeId` variant (e.g. P7-002's
+- Adding a new structural field to a `NodeId` variant (e.g. CSP-138's
   provider-provenance fields) no longer requires a schema change
   for the endpoint columns. Serde absorbs it. The typed `node_<kind>`
   tables still need column additions for the new field if it's
@@ -210,7 +210,7 @@ rebuildable cache).
   (`every_node_id_variant_round_trips_through_json`) catches
   serde-contract drift at test time; it is the symmetric guard
   for what the destructure used to enforce on the endpoint side.
-- The schema-drift detection from P10-001
+- The schema-drift detection from CSP-279
   (`schema_columns_match_constants`) catches column shape changes
   but not JSON content drift. A serde rename or field removal
   would slip past the schema test. The variant-coverage
@@ -247,7 +247,7 @@ rebuildable cache).
   typically); the JSON1 (text) representation is fine at this scale.
   Migration to JSONB is a future optimization, not blocking.
 - **Sit on `parse_node_id`'s current limitations**: rejected.
-  The renderer migration in P10-004..012 reads endpoint structural
+  The renderer migration in CSP-282..290 reads endpoint structural
   fields enough that a fragile parser would either need hardening
   (real work) or be papered over with renderer-side workarounds
   (worse). Solving it once at the storage layer is cleaner.
@@ -267,7 +267,7 @@ rebuildable cache).
   blob and writes it to the database is out of scope — the
   writer connection lives in the server (ADR 0038), and
   read-only client connections cannot mutate.
-- **How does this interact with P10-001's
+- **How does this interact with CSP-279's
   `schema_columns_match_constants`?** The column list constants
   in `query::schema::TABLE_COLUMNS` need updating for the new
   shape (`source`, `source_kind`, `target_node`, `target_node_kind`
@@ -284,6 +284,6 @@ rebuildable cache).
   `NodeId`?** The generated `*_kind` columns plus expression
   indexes on `json_extract` paths give the planner the same
   access shape as direct typed columns. Concrete renderer
-  patterns added in P10-004..012 will decide which expression
+  patterns added in CSP-282..290 will decide which expression
   indexes pay for themselves; the ADR commits to the encoding,
   not a fixed index set.

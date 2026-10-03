@@ -341,7 +341,7 @@ selected row doesn't support a key, the status bar shows a one-line
 | `d`   | Delete (mux session, checkout, declared link, …)                    |
 | `m`   | Inline mux-picker when the selected agent has ambiguous LinkedToMux |
 | `M`   | Merge (branch, checkout, fork)                                      |
-| `s`   | AI session-name suggestion overlay (`H-AI-NAMING-003`)              |
+| `s`   | AI session-name suggestion overlay (`CSP-247`)              |
 
 These keys are deliberately unbound in v1 so muscle memory can map to
 their final actions in later phases without rebinding. v1 is
@@ -381,7 +381,7 @@ deferred because it requires harness-specific resume-command modeling
 (claude-code's `claude --resume`, codex's rollout-id reattach,
 opencode's session-id reopen) plus a confirmation/launch flow. Doing it
 correctly across the supported harnesses is its own story (see
-`P8-011` in the backlog).
+`CSP-170` in the backlog).
 
 ### Semi-Live Data
 
@@ -511,10 +511,10 @@ contract.
   mode replaces it later without UI changes.
 - **`Enter` on a row**: expand / collapse parent rows. Attach is `a`
   (or `Enter` on a leaf row that has a single resolved mux target).
-- **Resume an un-muxed agent**: deferred to its own story (`P8-011`).
+- **Resume an un-muxed agent**: deferred to its own story (`CSP-170`).
   The `R` key is already assigned to rename.
 
-### From the P8-001a walkthrough
+### From the CSP-160.01 walkthrough
 
 - **"Project" grouping** in the sessions tree: configurable from
   day one. Default `graph` derives the tree from `WorkspaceContainsRepo` /
@@ -565,7 +565,7 @@ These pin the visible behavior of the v1 default sessions view
   on a candidate child attaches to that specific candidate,
   overriding the resolver's pick. This is a passive tree view of
   the same `LinkedToMux` evidence; the reserved `m` modal
-  (`P8-014`) remains the explicit picker for the same scenario.
+  (`CSP-175`) remains the explicit picker for the same scenario.
 - **Activity indicator dropped**: the recency column carries the
   "which one was I in" signal already; no per-row `●`/`○` prefix
   in v1.
@@ -616,7 +616,7 @@ keys (`v`, `1`–`5`, `]`/`[`, `f`, `F`, the grouping-cycle key) reach
 the same outcomes for muscle-memory operators, but no capability in
 this surface depends on memorizing a key.
 
-The overlay opens with `v` (final key choice settled in `F8-005`) and
+The overlay opens with `v` (final key choice settled in `CSP-254`) and
 shows sections for View, Grouping (scoped to the active view), Filters
 (scoped to the active view), and Sort (global). Arrow keys move the
 cursor between actionable rows; Enter picks or drills into a sub-
@@ -656,7 +656,7 @@ conspectus tui --view sessions --harness claude --max-age 7d \
 conspectus table sessions --harness claude --max-age 7d
 ```
 
-`/` fuzzy search (T8-017) remains a separate, transient overlay that
+`/` fuzzy search (CSP-193) remains a separate, transient overlay that
 ranks within the active filter set rather than the full snapshot.
 
 ### Sources of mux ambiguity
@@ -680,7 +680,7 @@ what produces the ambiguity marker:
   points at mux Y. The resolver gives declared links higher
   provenance, so it picks X — but Y survives as an active
   candidate that surfaces the `*` marker.
-- **Future**: cached vs fresh (once `H-PROD-002` caching lands)
+- **Future**: cached vs fresh (once `CSP-100` caching lands)
   and the process-tree linker (`H-MUXPROC-*`) will each add new
   evidence sources that can disagree with cwd inference.
 

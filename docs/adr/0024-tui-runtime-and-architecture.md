@@ -85,14 +85,14 @@ Module layout (extends `docs/implementation/phase-08-interactive-tui.md`):
   Shaped so a Phase 7 server snapshot transport can replace it
   without changing `app.rs`.
 - `src/tui/rows.rs` — pure row-tree view-model builders for every
-  table row-type (`P8-004`). No Ratatui types here; outputs are
+  table row-type (`CSP-163`). No Ratatui types here; outputs are
   plain Rust structs the renderer walks.
 - `src/tui/detail.rs` — selected-node detail view-model
-  (`P8-005`).
+  (`CSP-164`).
 - `src/tui/preview.rs` — preview adapters: mux pane capture
-  (`P8-009`) and un-muxed agent transcript-tail read (`P8-012c`).
-- `src/tui/actions.rs` — attach (`P8-010`) and resume
-  (`P8-011`) command construction. Pure planning, with exec
+  (`CSP-168`) and un-muxed agent transcript-tail read (`CSP-171.03`).
+- `src/tui/actions.rs` — attach (`CSP-169`) and resume
+  (`CSP-170`) command construction. Pure planning, with exec
   handled by the command dispatcher.
 - `src/tui/ui.rs` — Ratatui widgets and rendering. Consumes the
   pure view-models from `rows.rs` / `detail.rs` / `preview.rs`
@@ -198,11 +198,11 @@ single binary (ADR 0016); each new TUI dep needs justification.
 
 ## Consequences
 
-- Phase 8 has a concrete runtime baseline. `P8-003` can add the two
+- Phase 8 has a concrete runtime baseline. `CSP-162` can add the two
   dependencies and the terminal lifecycle without further design.
 - The Elm-style boundary makes the reducer and view-models pure
   and snapshot-testable. The phase-08 snapshot test plan
-  (`P8-004`/`P8-005`/`P8-007`) lands without a runtime in the test
+  (`CSP-163`/`CSP-164`/`CSP-166`) lands without a runtime in the test
   harness.
 - The dependency policy keeps the binary small. Two new crates
   (`ratatui` + `crossterm`) total roughly hundreds of KB of
@@ -261,7 +261,7 @@ single binary (ADR 0016); each new TUI dep needs justification.
 - v1 has no async runtime; background work runs on
   `std::thread::spawn` with `mpsc` channels.
 - The new dependencies in this ADR are the only ones that land
-  with `P8-003`; any further TUI dep listed in the policy section
+  with `CSP-162`; any further TUI dep listed in the policy section
   requires its own ADR before adoption.
 - View-models are pure and shared between TUI and CLI surfaces;
   the table command can adopt them as the row-tree builders land.

@@ -14,7 +14,7 @@ caller-owned `DiscoveryCaches` value (ADR 0099).
 ## Context
 
 `conspectus serve` (ADR 0038 / ADR 0079) consumes a nontrivial amount
-of CPU (and some disk I/O) even at idle. `H-SERVE-PERF-001` asked for a
+of CPU (and some disk I/O) even at idle. `CSP-505` asked for a
 diagnosis of what contributes. This ADR records the findings and the
 decision on how to reduce the dominant cost.
 

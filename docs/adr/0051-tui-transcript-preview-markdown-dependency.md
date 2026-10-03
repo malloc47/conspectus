@@ -2,7 +2,7 @@
 
 ## Status
 
-Accepted. Amended under `H-VIEWER-NATIVE-011` (styling pass) to
+Accepted. Amended under `CSP-343` (styling pass) to
 turn the `highlight-code` feature **on** after operator feedback
 that monochrome fenced code blocks hurt scannability. The
 original v1 decision to keep `highlight-code` off is preserved
@@ -31,8 +31,8 @@ as a monochrome wall. The transcript preview is the un-muxed analogue
 and needs an analogous rendering path.
 
 ADR 0024 reserved the right to pull in new TUI crates only after a
-follow-on ADR. `H-TRANSCRIPT-001` asks for this ADR before
-`H-TRANSCRIPT-008` adds the dependency.
+follow-on ADR. `CSP-205` asks for this ADR before
+`CSP-212` adds the dependency.
 
 Three candidate rendering paths surveyed:
 
@@ -75,7 +75,7 @@ direct dependency of the `conspectus` crate, scoped to the
 `src/tui/` module. The `highlight-code` feature stays off in v1.
 
 Use it from the inline transcript-preview widget added by
-`H-TRANSCRIPT-009`. Each `TranscriptTurn` body is passed through
+`CSP-213`. Each `TranscriptTurn` body is passed through
 `tui_markdown::from_str` to produce a `ratatui::text::Text`; the
 widget composes per-turn role headers (dimmed `you` / `assistant`
 labels), the rendered body, and compaction-summary markers, then
@@ -131,10 +131,10 @@ behavior.
 ### Integration shape
 
 A new module `src/tui/transcript_preview.rs` (per
-`H-TRANSCRIPT-009`) owns the widget. It depends on `tui-markdown`
+`CSP-213`) owns the widget. It depends on `tui-markdown`
 only at the body-rendering call site; the rest of the widget
 operates on `Vec<TranscriptTurn>` from the recent-history adapter
-defined by `H-TRANSCRIPT-003`. The transcript-preview path is
+defined by `CSP-207`. The transcript-preview path is
 distinct from the muxed-preview path:
 
 - Muxed selections: `tmux capture-pane -e` →
@@ -223,12 +223,12 @@ remain the gating checks.
 - `--color=never` continues to bypass the markdown renderer
   (consistent with ADR 0025's muxed-preview color contract).
 - Integration lives in `src/tui/transcript_preview.rs`
-  (`H-TRANSCRIPT-009`). `H-TRANSCRIPT-008` adds the dep to
+  (`CSP-213`). `CSP-212` adds the dep to
   `Cargo.toml` in isolation.
 
 ## Amendment: re-enable `highlight-code` for the native viewer
 
-Operator feedback after `H-VIEWER-NATIVE-008` shipped the
+Operator feedback after `CSP-340` shipped the
 native full-screen viewer: monochrome code blocks bury syntax
 cues that operators read past prose to find — function names,
 type annotations, keyword vs string vs comment colouring. The

@@ -17,7 +17,7 @@ outside the graph:
 - search and explorer surfaces had to special-case pins as non-nodes,
 - store lineage lived only on the sidecar record.
 
-H-PIN-TUI-009 requires pins to behave like graph entities while keeping
+CSP-460 requires pins to behave like graph entities while keeping
 the TOML schema from ADR 0057 as the persistence source.
 
 ## Decision
@@ -63,7 +63,7 @@ discarded on version mismatch.
 ## Alternatives Considered
 
 - **Keep synthetic rows only.** This avoids a model change but preserves
-  the detail/search/export gaps that H-PIN-TUI-009 exists to close.
+  the detail/search/export gaps that CSP-460 exists to close.
 - **Represent pins only as unresolved endpoints.** This makes unbound
   state visible but still gives bound pins no durable node identity.
 - **Reuse `linked_to_mux` for pin-to-mux links.** Rejected because it

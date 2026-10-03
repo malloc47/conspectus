@@ -2,7 +2,7 @@
 
 ## Status
 
-Accepted. Implemented in `H-RUST-011`.
+Accepted. Implemented in `CSP-564`.
 
 ## Context
 

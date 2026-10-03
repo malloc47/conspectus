@@ -6,7 +6,7 @@ Accepted
 
 ## Context
 
-`P7-009` graduates the daemon from "everything polls on its
+`CSP-145` graduates the daemon from "everything polls on its
 class interval" into "cheap local signals wake the scheduler
 when the OS-level event fires." The targets are:
 
@@ -18,7 +18,7 @@ when the OS-level event fires." The targets are:
   relationships.
 - `.conspectus.toml` and the user-level config file. Edits
   should propagate without a daemon restart (this dovetails
-  with the deferred `--reload-config` work from `P7-008`).
+  with the deferred `--reload-config` work from `CSP-144`).
 
 Polling at the existing class intervals (harness 5s, git 30s,
 forge 5m) is correct but introduces noticeable latency between
@@ -96,7 +96,7 @@ CI.
   widely used elsewhere in the Rust ecosystem.
 - The daemon's first-write story is unchanged: the watcher
   abstraction wakes the scheduler thread, which calls the same
-  `try_class_cycle` from P7-006 layer B. Per-class state, the
+  `try_class_cycle` from CSP-142 layer B. Per-class state, the
   writer Mutex, the post-cycle persist, and the rotate-on-
   cold-rebuild logic all carry through verbatim.
 - The watcher is a *latency optimization*, not a correctness
@@ -132,7 +132,7 @@ sequences, kqueue watch limits, FSEvents coalescing) are
 exactly what `notify` already handles correctly.
 
 **Skip watchers, accept polling forever.** Tempting and what
-P7-006 ships. Rejected because the operator-visible latency
+CSP-142 ships. Rejected because the operator-visible latency
 between "I just opened a Claude Code session" and "Conspectus
 sees it" is exactly the kind of friction the daemon is
 supposed to remove. The 5-second harness polling cadence makes

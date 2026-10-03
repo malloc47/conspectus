@@ -9,13 +9,13 @@ Accepted
 The TUI accumulates a small number of copy-to-clipboard surfaces that
 need a single, shared write path:
 
-- `T8-040` adds `Enter`-to-copy on Node-zone field rows and introduces
+- `CSP-326` adds `Enter`-to-copy on Node-zone field rows and introduces
   a reusable toast widget that surfaces `copied: <label>` feedback.
 - The unbound-keys catalogue and `docs/implementation/phase-08-interactive-tui.md`
   reserve `i` for "copy the selected agent/mux session's id to the
   clipboard." That key has no current implementation; it lands on the
   same backend.
-- `H-VIEWER-NATIVE-015` (per-message selection + clipboard copy inside
+- `CSP-354` (per-message selection + clipboard copy inside
   the native transcript viewer) is a future caller that explicitly
   defers the backend choice to "ADR check on the dep before adding to
   the viewer's allow-list."
@@ -138,9 +138,9 @@ OSC 52 has terminal-specific payload caps. tmux's
 `buffer-limit` (default 50) bounds how many buffers it retains, not
 individual payload size, but most terminals impose a per-sequence
 limit in the low MiB range. The Node-zone field values
-T8-040 targets are paths, ids, URLs, and command lines — well under
+CSP-326 targets are paths, ids, URLs, and command lines — well under
 any plausible terminal cap. The viewer-message copy
-(`H-VIEWER-NATIVE-015`) could conceivably exceed it on a very long
+(`CSP-354`) could conceivably exceed it on a very long
 assistant turn; the ADR does not pre-emptively truncate. If a future
 caller hits the cap, that caller adds a truncation policy at its own
 boundary rather than burying one in the shared primitive.
@@ -174,9 +174,9 @@ No new direct or transitive dependencies are added by this ADR.
 
 ## Consequences
 
-- `T8-040` can land the toast widget and the `Enter` / `i` copy paths
+- `CSP-326` can land the toast widget and the `Enter` / `i` copy paths
   without further design.
-- `H-VIEWER-NATIVE-015` inherits the same write path when it's
+- `CSP-354` inherits the same write path when it's
   picked up; no second decision required.
 - The TUI dep graph stays at the ADR 0024 / ADR 0051 baseline. No new
   Cargo features, no platform-specific build requirements, no SSH

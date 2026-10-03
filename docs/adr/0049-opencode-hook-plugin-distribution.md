@@ -6,9 +6,9 @@ Accepted
 
 ## Context
 
-`H-MUXPROC-014` ships an opencode plugin that subscribes to lifecycle
+`CSP-229` ships an opencode plugin that subscribes to lifecycle
 events and forwards them to `conspectus hook write opencode`. The audit
-under `H-MUXPROC-009` established that opencode's plugin surface is
+under `CSP-223` established that opencode's plugin surface is
 exclusively the `@opencode-ai/plugin` npm package: plugins are TypeScript
 modules with `default export (PluginInput) => Promise<Hooks>`, installed
 via `opencode plugin <module>` into `$XDG_CONFIG_HOME/opencode/
@@ -69,7 +69,7 @@ authoritative artifact. Boundaries:
    sufficient because the existing
    `discovery::hook_sidecar::apply_hook_sidecars` post-merge pass uses
    the freshest record per pane regardless of absolute age, so periodic
-   heartbeat records are not required for the H-MUXPROC-015-style
+   heartbeat records are not required for the CSP-227-style
    drift fix to work.
 6. **Payload shape contract.** The plugin normalizes the SDK `Event`
    union into the flat payload `{session_id, cwd?, hook_event_name?}`

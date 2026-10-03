@@ -5,10 +5,10 @@
 **Superseded** by [ADR 0082](0082-retire-sqlite-persistence-and-query-surface.md).
 
 The `query` Cargo feature this ADR defined is being phased out.
-P11-010 removed `conspectus query` from the binary; P11-011a
+CSP-447 removed `conspectus query` from the binary; CSP-448.01
 retired the SQLite persistence layer the feature gated.
 `src/query/` continues to exist as an internal renderer-support
-helper (P11-011b/c/d cover the final deletion), but it is no
+helper (CSP-448.02/CSP-448.03/CSP-448.04 cover the final deletion), but it is no
 longer the user-facing surface this ADR's feature gate was
 designed to expose. Library consumers who set
 `default-features = false` get nothing more than they got
@@ -46,7 +46,7 @@ Concretely:
 
 - The `conspectus` crate's `Cargo.toml` declares a `query` feature
   that pulls in `rusqlite` with the `bundled` sub-feature and any
-  query-only modules (`src/query/` introduced in P9-002 onwards).
+  query-only modules (`src/query/` introduced in CSP-272 onwards).
 - Library consumers (Atelier, future crates) build by default
   without the engine. Their dependency line stays
   `conspectus = "..."`; nothing changes for them at v1.
@@ -111,9 +111,9 @@ release-binary size delta from the feature is captured in ADR 0040.
   current feature gate is the natural seam from which D3 becomes a
   later refactor rather than an upfront cost.
 
-## P9-001 Spike Amendment
+## CSP-271 Spike Amendment
 
-The P9-001 implementation spike surfaced one factual correction to
+The CSP-271 implementation spike surfaced one factual correction to
 this ADR's wording: `rusqlite` is **already** an unconditional
 dependency of `conspectus`, used by `src/hook.rs` (the hook sidecar,
 ADR 0028) and `src/discovery/harness/opencode.rs` (the OpenCode
@@ -126,7 +126,7 @@ forthcoming `conspectus query` subcommand registration.
 The practical implications:
 
 - The release-binary delta from enabling the feature is ~5.7 KB
-  (measured on `x86_64-linux-gnu` in P9-001), not the
+  (measured on `x86_64-linux-gnu` in CSP-271), not the
   ~1 MB the original ADR text implied. The 1 MB native library
   cost is paid regardless of the feature.
 - The ADR-D recommendation (`D2` — feature gate) is still correct
@@ -152,7 +152,7 @@ wording on what the feature gate technically does.
 - **How does CI verify both configurations?** A matrix entry that
   builds and tests with `--no-default-features` (or whatever
   combination represents "no query feature") alongside the default
-  configuration. P9-001 includes this CI work as part of the spike.
+  configuration. CSP-271 includes this CI work as part of the spike.
 - **Does the `conspectus query <sql>` CLI command vanish in builds
   without the feature?** Yes. The subcommand registration is itself
   gated, so `--features query` is required to surface it. The

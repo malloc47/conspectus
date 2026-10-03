@@ -3,7 +3,7 @@
 //!
 //! The cache is in-process and refreshes on selection change only.
 //! Interval-driven refresh and freshness labels are open work
-//! (backlog `T8-009`); until then `RunConfig::mux_preview_interval`
+//! (backlog `CSP-185`); until then `RunConfig::mux_preview_interval`
 //! is parsed but unused.
 
 use std::collections::BTreeMap;

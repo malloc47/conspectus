@@ -2,7 +2,7 @@
 
 ## Status
 
-Accepted. Amended 2026-10-01 (`H-RUST-012`): the boundary is now
+Accepted. Amended 2026-10-01 (`CSP-565`): the boundary is now
 enforced with visibility; see the amendment at the end.
 
 ## Context
@@ -133,7 +133,7 @@ integrations on them.
 
 ## Amendment: Enforce The Boundary With Visibility (2026-10-01)
 
-Implemented in `H-RUST-012`. The binary used to compile `src/cli/` as
+Implemented in `CSP-565`. The binary used to compile `src/cli/` as
 its own crate module, so it could reach the library only through
 public paths. Every module in `lib.rs` was therefore `pub`, and the
 named stable surface above existed only as documentation.

@@ -6,7 +6,7 @@ Accepted. Amended 2026-10-01: see the resolver-rank amendment at the end.
 
 ## Context
 
-`H-MUXPROC-004` calls for read-only queries against harness state databases to
+`CSP-218` calls for read-only queries against harness state databases to
 strengthen `AgentSession` discovery and `AgentSession -> MuxSession`
 attribution. The May 2026 audit covered the three on-disk SQLite stores
 Conspectus sees today: `opencode.db`, Codex `state_<N>.sqlite`, and Codex
@@ -16,9 +16,9 @@ Conspectus sees today: `opencode.db`, Codex `state_<N>.sqlite`, and Codex
 timestamps. Those fields are already consumed by
 `src/discovery/harness/opencode.rs` per ADR 0018. The schema does not record
 process id, terminal, or server-binding evidence. Live opencode↔mux binding
-therefore belongs to a plugin/server adapter (`H-MUXPROC-007` /
-`H-MUXPROC-014`), not a state reader. The audit closes opencode's slice of
-`H-MUXPROC-004`.
+therefore belongs to a plugin/server adapter (`CSP-221` /
+`CSP-229`), not a state reader. The audit closes opencode's slice of
+`CSP-218`.
 
 Codex's stores have not been read yet and contain the strongest live
 attribution evidence found anywhere in the audit:
@@ -39,7 +39,7 @@ attribution evidence found anywhere in the audit:
   this names the thread a live Codex process is currently writing — including
   cases where launch argv `codex --resume <session A>` is stale because the
   operator switched sessions in-process. This is the Codex equivalent of the
-  Claude Code drift case that motivated `H-MUXPROC-015` and ADR 0028, and the
+  Claude Code drift case that motivated `CSP-227` and ADR 0028, and the
   audit reproduced it on the maintainer's machine: pid 1770237's launch argv
   named one session while its latest `logs.thread_id` row named another.
 
@@ -112,7 +112,7 @@ LIMIT 1
 `:ts_floor` is `now() - 24 hours` by default, overridable via the
 `CONSPECTUS_CODEX_LOG_WINDOW_SECONDS` env var. (Pre-H-EXT-007 this
 was also settable through the
-`LocalDiscoveryConfig::with_codex_log_window` builder; H-EXT-007
+`LocalDiscoveryConfig::with_codex_log_window` builder; CSP-479
 folded the codex-log knob into
 `CodexAdapter::apply_aux_attribution` and dropped the builder as
 unused.) Unlike ADR 0028
@@ -202,15 +202,15 @@ current readers explicitly; this ADR's readers are placed above.
 
 ### opencode
 
-`H-MUXPROC-004` for opencode is closed out by this ADR with no code change:
+`CSP-218` for opencode is closed out by this ADR with no code change:
 the audit found nothing in `opencode.db` beyond what the existing reader
 extracts that would strengthen live mux attribution. Live opencode↔mux
-binding remains the responsibility of `H-MUXPROC-007` / `H-MUXPROC-014`.
+binding remains the responsibility of `CSP-221` / `CSP-229`.
 
 ### Explicitly deferred
 
 - Codex `remote_control_enrollments` (control-plane attribution) belongs to
-  `H-MUXPROC-005` / `H-MUXPROC-006`, not 004.
+  `CSP-219` / `CSP-220`, not 004.
 - Codex `jobs`, `agent_jobs`, `agent_job_items`, `thread_goals`, and
   `stage1_outputs` are background-agent surfaces. They were empty on the
   audit machine; defer until in-the-wild usage justifies a separate slice.
@@ -218,7 +218,7 @@ binding remains the responsibility of `H-MUXPROC-007` / `H-MUXPROC-014`.
 
 ## Consequences
 
-- The Codex equivalent of the H-MUXPROC-015 stale-`--resume` drift is fixed
+- The Codex equivalent of the CSP-227 stale-`--resume` drift is fixed
   without requiring a hook, control plane, or terminal interaction.
 - Codex `AgentSession` discovery becomes the indexed `threads` table rather
   than enumerating rollout JSONL files. The existing rollout-file reader can
@@ -275,7 +275,7 @@ binding remains the responsibility of `H-MUXPROC-007` / `H-MUXPROC-014`.
 
 ## Open Questions Answered
 
-- `H-MUXPROC-004` for opencode resolves as a no-op: the schema offers no
+- `CSP-218` for opencode resolves as a no-op: the schema offers no
   live-binding signal beyond what the existing reader already consumes.
 - The default query bound on log-derived current-session evidence is 24
   hours, intentionally wider than the ADR 0028 hook-sidecar TTL because
@@ -316,4 +316,4 @@ That kind now ranks 55, above `active_pane_fd_session_match` and the
 hook-sidecar kinds (50) and every cwd kind. It also counts as process
 evidence, so the resolver doesn't derive a duplicate runtime-process
 link for the same session and mux. Typing the match kinds in
-`H-RUST-014` surfaced the gap.
+`CSP-567` surfaced the gap.

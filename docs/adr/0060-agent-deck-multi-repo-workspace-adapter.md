@@ -6,7 +6,7 @@ Accepted
 
 ## Context
 
-`H-AGENTMUX-001` framed a paper audit of agent-mux orchestrators
+`CSP-131` framed a paper audit of agent-mux orchestrators
 (agent-deck, dmux, workmux, agent-of-empires) against the MUXPROC
 process-tree linker to determine where each tool produces evidence
 the linker cannot reproduce. While starting work on agent-deck
@@ -25,7 +25,7 @@ Adjacent work that landed concurrently:
 
 - The agent-table workspace column now renders `repo-a+repo-b+...`
   when the resolver picks ≥2 distinct `WorkspaceContainsRepo`
-  members for the underlying workspace (`H-AGENTMUX-003`). This
+  members for the underlying workspace (`CSP-123`). This
   surface is shared by atelier (already a multi-repo provider) and
   by the agent-deck adapter introduced here. The default
   `SESSIONS_COLUMNS` set is unchanged; the column is opt-in via
@@ -117,22 +117,22 @@ new cross-link logic was needed.
 
 ### Deferred orchestrators
 
-The other tools in the original `H-AGENTMUX-001` scope are
+The other tools in the original `CSP-131` scope are
 deferred without adapters in this ADR:
 
-- **dmux** (`H-AGENTMUX-005`): runtime mapping is largely a
+- **dmux** (`CSP-132`): runtime mapping is largely a
   MUXPROC subset. No persistent multi-repo composition observed.
   Keep as placeholder; revisit if dmux gains workspace-shaped
   state.
-- **workmux** (`H-AGENTMUX-006`): per-worktree `.workmux/` and
+- **workmux** (`CSP-133`): per-worktree `.workmux/` and
   `~/.local/state/workmux/agents/` *might* carry resurrect-state
   for exited sessions — the only non-MUXPROC angle. Audit
   remains open behind that specific question; a future ADR
   reopens this if the resurrect-state evidence is genuine.
-- **agent-of-empires** (`H-AGENTMUX-007`): container isolation
+- **agent-of-empires** (`CSP-134`): container isolation
   is the only theoretical edge; no evidence yet that host-visible
   state captures the in-container agent identity. Deferred.
-- **agent-deck `state.db`** (`H-AGENTMUX-004`): the SQLite
+- **agent-deck `state.db`** (`CSP-124`): the SQLite
   state.db plausibly carries lifecycle metadata for exited /
   paused sessions, but that's read-only enrichment, not
   composition evidence. Deferred behind a follow-up ADR if the
@@ -149,8 +149,8 @@ deferred without adapters in this ADR:
   `atelier+conspectus`-style joined member names for agent-deck
   workspaces *and* for atelier multi-repo workspaces, exercising
   the shared `output::agent::fetch_workspace_member_displays`
-  formatter from `H-AGENTMUX-003`.
-- The `AgentMuxAdapter` trait floated in `H-AGENTMUX-001` is
+  formatter from `CSP-123`.
+- The `AgentMuxAdapter` trait floated in `CSP-131` is
   **not** introduced. With agent-deck collapsing to "emit a
   Workspace + WorkspaceContainsRepo links" — which already maps
   onto `DiscoveryProvider` cleanly — a separate trait would be
@@ -158,9 +158,9 @@ deferred without adapters in this ADR:
   resurrect-state, agent-of-empires container probe) needs
   surface area `DiscoveryProvider` cannot express, that's the
   trigger to introduce the trait.
-- `H-AGENTMUX-002` and `H-AGENTMUX-003` close as the
+- `CSP-122` and `CSP-123` close as the
   implementation of this ADR.
-- `H-AGENTMUX-001` closes by being subsumed into this ADR
+- `CSP-131` closes by being subsumed into this ADR
   (the audit's conclusion is recorded here rather than as a
   separate document).
 
@@ -189,7 +189,7 @@ deferred without adapters in this ADR:
 - **Promote `workspace` into the default `SESSIONS_COLUMNS`
   set so agent-deck users see the surface without flags.**
   Deferred as a separate UX call. The column is width-heavy and
-  the default set was tuned in ADR 0020 / H-TBL-001+. Worth
+  the default set was tuned in ADR 0020 / CSP-126+. Worth
   revisiting once the joined-name rendering is in use, but not
   bundled with this ADR.
 
@@ -203,14 +203,14 @@ deferred without adapters in this ADR:
   consistent with how every other workspace name is treated.
 - **Should non-default tmux sockets matter here?** No — agent-deck
   workspace composition is independent of tmux backing. Pin /
-  tmux socket handling stays in `H-PIN-F-001` / `-005`.
+  tmux socket handling stays in `CSP-382` / `-005`.
 - **Should the adapter recurse?** No. Membership is one level
   deep by agent-deck's convention; recursing would invent
   composition the operator did not author.
 - **Should agent-deck workspaces emit pane ↔ harness evidence?**
   No — MUXPROC owns that. The adapter is composition-only per
-  the `H-AGENTMUX-001` audit rule.
+  the `CSP-131` audit rule.
 - **How does the agent table show multi-repo participants
   without explicit columns?** Via the joined-name rendering in
-  the workspace column (`H-AGENTMUX-003`), opt-in for v1. The
+  the workspace column (`CSP-123`), opt-in for v1. The
   default-column promotion question is intentionally separate.

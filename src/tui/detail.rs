@@ -20,7 +20,7 @@
 //! remaining node kinds emit a minimal field list pulled directly
 //! from the node, so the right panel can render *something* for
 //! every selectable row. Richer PR and fork detail is open work
-//! (backlog `P8-012a`, `P8-012b`).
+//! (backlog `CSP-171.01`, `CSP-171.02`).
 
 use std::path::Path;
 

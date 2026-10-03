@@ -5,10 +5,10 @@
 **Superseded** by [ADR 0082](0082-retire-sqlite-persistence-and-query-surface.md).
 
 The vector-search surface this ADR defined attached to
-`conspectus query --similar-to`, which is gone (P11-010
+`conspectus query --similar-to`, which is gone (CSP-447
 removed the `query` subcommand). The `embeddings` overlay
 table, the `--load-extension` flag, the import follow-up
-(P9-FU-001), and `docs/vector-search.md` all retire alongside
+(CSP-293), and `docs/vector-search.md` all retire alongside
 the query feature. Reopening vector search would be a separate
 ADR landing against a different surface (e.g. against the
 JSON-dump export rather than an embedded SQL engine), if and
@@ -21,7 +21,7 @@ Original status: Accepted.
 ADR 0036 chose SQLite as the embedded query engine for
 `conspectus query <sql>` and explicitly **deferred** vector search to
 its own ADR. The Stage 3 plan in `plans/stage-3-sqlite-query-engine.md`
-named this as `ADR-G`, and the backlog story `P9-008` was opened
+named this as `ADR-G`, and the backlog story `CSP-278` was opened
 gated on this ADR.
 
 The motivation for vector search inside Conspectus is bounded but
@@ -109,7 +109,7 @@ import path; the actual embedding computation happens upstream.
 Two ingestion paths are sanctioned:
 
 1. **External tool, JSON Lines via stdin** — a separate command
-   (`conspectus query --import-embeddings`, P9-008-followup) reads
+   (`conspectus query --import-embeddings`, CSP-278-followup) reads
    `{"node_id": "...", "source_field": "...", "model": "...", "vector": [...]}`
    lines and inserts them. This is the documented path for users
    who run their own embedding pipeline.
@@ -197,7 +197,7 @@ from instant" either way.
   manually pruned; a `DELETE FROM embeddings WHERE node_id NOT IN
   (SELECT node_id FROM v_nodes)` is the documented garbage-
   collection idiom.
-- The `H-PROD-002` cache layer item now has a sibling concern:
+- The `CSP-100` cache layer item now has a sibling concern:
   embedding refresh. The two cache-layer hardening stories should
   be designed together once they reach the top of the backlog.
 
@@ -259,7 +259,7 @@ from instant" either way.
   the linear scan. The fallback only triggers when the user
   *omits* `--load-extension` (intentional opt-out).
 - **Does this require the `loadable_extension` rusqlite feature?**
-  Yes. We add it to `Cargo.toml` in P9-008. The feature has no
+  Yes. We add it to `Cargo.toml` in CSP-278. The feature has no
   runtime cost when no extension is loaded; it just exposes the
   `load_extension` method on `Connection`.
 - **What about ADR 0038's write-path routing?** Embeddings inserts

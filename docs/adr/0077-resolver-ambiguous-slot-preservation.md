@@ -33,12 +33,12 @@ explorer, the SQLite tree-view joins, the dot / html projections)
 do not consult diagnostics, so they each grew their own ad-hoc
 fallback to re-derive ambiguity from the candidate set:
 
-- **H-UI-007** (`src/tui/explorer.rs`): `build_relationship_group`
+- **CSP-421** (`src/tui/explorer.rs`): `build_relationship_group`
   flags a group as ambiguous when there is no
   `ResolvedRelationship` *and* there are ≥2 distinct candidate
   targets among the active candidates. Keeps the `⚠` glyph alive
   in the explorer.
-- **H-UI-008** (`src/tui/rows/sessions.rs`):
+- **CSP-422** (`src/tui/rows/sessions.rs`):
   `mux_candidates_for_session` walks the candidates when there is
   no resolver winner *and* ≥2 distinct candidate targets are
   present, returning the full fan-out so the sessions tree still
@@ -48,7 +48,7 @@ Both fallbacks reach over the model boundary and reconstruct what
 the resolver already knows. They drift over time: a future change
 to the candidate set, or a new suppression rule for some other
 relation, would force a parallel fallback in each consumer.
-`H-UI-006` was filed to retire the inference path by promoting the
+`CSP-420` was filed to retire the inference path by promoting the
 ambiguity into the resolved-relationships layer itself.
 
 ## Decision
@@ -99,7 +99,7 @@ Two alternatives were considered:
 
 `Option<String>` is honest: when the resolver cannot pick, the field
 literally has no value. SQL `JOIN ... ON rr.selected_link_id =
-cl.link_id` naturally excludes NULL rows (the H-UI-008 tree-view
+cl.link_id` naturally excludes NULL rows (the CSP-422 tree-view
 joins want exactly that behavior — no row for an ambiguous slot —
 so the join semantics survive without per-consumer awareness).
 Rust pattern-match callers express the case directly with `if let
@@ -124,7 +124,7 @@ is whether a `Resolves` row exists.
 
 The diagnostic stays. It is still useful for observers that want
 the full ambiguity audit (the JSON `--explain` mode planned under
-`H-OBS-004`, the test invariants in `tests/testing_replay.rs`), and
+`CSP-096`, the test invariants in `tests/testing_replay.rs`), and
 removing it would break wire-level snapshots. The resolved-side
 signal becomes the primary read path for renderers; the diagnostic
 becomes the secondary read path for observability.
@@ -137,17 +137,17 @@ becomes the secondary read path for observability.
 | `src/model/mod.rs` | `selected_link_id: Option<String>`; derive `Ord` updated so JSON sort stays stable. |
 | `src/query/schema.sql` | `selected_link_id TEXT` (nullable, not `NOT NULL`). |
 | `src/query/loader.rs` / `reader.rs` | Bind / read `Option<String>` via `rusqlite`'s `Option` impls. |
-| `src/tui/rows/mux.rs` SQL | No change. The `JOIN ... ON rr.selected_link_id = cl.link_id` already excludes NULL rows; the H-UI-008 invariant survives. |
+| `src/tui/rows/mux.rs` SQL | No change. The `JOIN ... ON rr.selected_link_id = cl.link_id` already excludes NULL rows; the CSP-422 invariant survives. |
 | `src/tui/rows/sessions.rs` `mux_candidates_for_session` | Retire the candidate-fan-out fallback. Read `selected_link_id` directly; when `None`, return the links named in `competing_link_ids` so `MuxStateKey::Ambiguous` still fires. |
 | `src/tui/rows/prs.rs` / `forks.rs` SQL | No change (same NULL-exclusion argument). |
-| `src/tui/explorer.rs` `build_relationship_group` | Retire the H-UI-007 fallback that infers ambiguity from candidate fan-out. Detect `selected_link_id.is_none()` to mark the group ambiguous and route every candidate to Conflict in the Other zone. |
+| `src/tui/explorer.rs` `build_relationship_group` | Retire the CSP-421 fallback that infers ambiguity from candidate fan-out. Detect `selected_link_id.is_none()` to mark the group ambiguous and route every candidate to Conflict in the Other zone. |
 | `src/output/dot.rs` / `html/mod.rs` / `node_show.rs` / `agent.rs` | Filter / pattern-match on `Option`. Selected-link sets skip `None`; node-show's "selected link" cell renders an em dash when no winner. |
 | Tests + snapshots | Regenerate JSON / SQLite / showcase snapshots so the new `Option<String>` shape lands as data, not as a wire break in CI. |
 
 ## Consequences
 
-- Two ad-hoc fallbacks retire (H-UI-007 in `build_relationship_group`,
-  H-UI-008 in `mux_candidates_for_session`); the resolver becomes
+- Two ad-hoc fallbacks retire (CSP-421 in `build_relationship_group`,
+  CSP-422 in `mux_candidates_for_session`); the resolver becomes
   the single source of truth for ambiguity.
 - The model break is contained: SQL joins survive without
   per-consumer awareness, JSON snapshots round-trip via `Option`,
@@ -166,7 +166,7 @@ becomes the secondary read path for observability.
 ## Alternatives Considered
 
 - **Additive flag** — see "Why `Option<String>`" above.
-- **Drop the suppression pass; rely on the H-UI-007 fallback
+- **Drop the suppression pass; rely on the CSP-421 fallback
   alone.** Rejected: two independent consumers (explorer renderer,
   tree-view SQL) already needed their own inference paths; a third
   would land the next time the model grew.

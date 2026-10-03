@@ -12,7 +12,7 @@ What stays in force:
   `$TMPDIR/conspectus-$UID/` fallback), mode 0600.
 - The length-prefixed JSON framing, one request/response per
   connection.
-- The `ping`, `refresh`, `status` command shapes (P7-006/008).
+- The `ping`, `refresh`, `status` command shapes (CSP-142/CSP-144).
 - The "absence of a server is not an error" guarantee (now
   structural via the on-disk `graph.bin` artifact rather than
   via WAL).
@@ -24,7 +24,7 @@ What retires:
   `graph.sqlite` directly — daemonless consumers read
   `graph.bin` via `snapshot::open_mmap` (ADR 0083), and
   daemon-connected consumers use the new `snapshot` socket
-  command (P11-006). The pragma triplet, WAL checkpoint
+  command (CSP-443). The pragma triplet, WAL checkpoint
   policy, and `busy_timeout` are all gone with the SQLite
   layer.
 - The writer-fallback fork. One-shot CLI mutations no longer
@@ -34,7 +34,7 @@ What retires:
   daemon cycle or cold rebuild picks the change up.
 - The schema-mismatch + busy-timeout coordination story.
 
-The `snapshot` socket command added in P11-006 is documented in
+The `snapshot` socket command added in CSP-443 is documented in
 ADRs 0082/0083; the JSON envelope follows the same shape as
 existing commands with a base64-encoded `data.bytes` payload.
 
@@ -42,7 +42,7 @@ Original status: Accepted.
 
 ## Context
 
-`docs/backlog.md` Phase 7 (`P7-004`) called for an ADR settling the
+`docs/backlog.md` Phase 7 (`CSP-140`) called for an ADR settling the
 continuous server architecture and the CLI ↔ server transport.
 The original scope listed an open choice between Unix domain
 sockets, file-based snapshot polling, or both — written under the
@@ -68,7 +68,7 @@ surface** needs IPC. Reads — which are the overwhelming majority
 of CLI invocations (`session`, `table`, `node show`, `query`, the
 TUI) — never need to talk to the server.
 
-This ADR settles `P7-004`'s deliverable. It is the transport half
+This ADR settles `CSP-140`'s deliverable. It is the transport half
 of the Phase 7 ADR pair; the persistence half is ADR 0037.
 
 ## Decision
@@ -171,7 +171,7 @@ path. The fallback is automatic and transparent to the user.
   directory must not halt unrelated providers. Each provider
   carries success/failure state, last-refresh timestamp, and
   back-off. These surface through the server's status response
-  (handled in `P7-008`) and through the `diagnostics` table in
+  (handled in `CSP-144`) and through the `diagnostics` table in
   the shared database.
 
 ### Failure modes
@@ -195,7 +195,7 @@ path. The fallback is automatic and transparent to the user.
 
 ### Out of scope
 
-- Event-driven refresh via filesystem watchers — `P7-009`
+- Event-driven refresh via filesystem watchers — `CSP-145`
   remains a stretch goal independent of this ADR.
 - A multi-host or NFS-mounted database. Conspectus stays
   single-user, single-machine (`docs/design.md` line 643,
@@ -208,12 +208,12 @@ path. The fallback is automatic and transparent to the user.
 - The transport surface area is small: one Unix socket, one
   protocol, mutation commands only. Reads bypass the server
   entirely.
-- The `conspectus serve` implementation (`P7-006`) becomes
-  simpler than the original P7-004 scope assumed. The server's
+- The `conspectus serve` implementation (`CSP-142`) becomes
+  simpler than the original CSP-140 scope assumed. The server's
   main loops are: (a) the per-provider refresh scheduler, (b)
   the socket-accept loop for mutation requests. No read-path
   fan-out, no snapshot-pollution rate-limiting.
-- The CLI ↔ server snapshot read path (`P7-007`) becomes nearly
+- The CLI ↔ server snapshot read path (`CSP-143`) becomes nearly
   trivial: opening `graph.sqlite` read-only is the same code
   whether the server runs or not. The story collapses to "is
   the file present? open it. is the server present? talk to
@@ -222,7 +222,7 @@ path. The fallback is automatic and transparent to the user.
   structural rather than incidental. A reader cannot tell
   whether a server is running by looking at the file or its
   WAL sidecar.
-- `H-PROD-002` (cache layer for forge metadata, tmux, harness
+- `CSP-100` (cache layer for forge metadata, tmux, harness
   scans) folds naturally: each provider's cache row lives in
   the same SQLite file. Writes go through the server when
   running, the writer lock when not. No per-cache file-locking
@@ -241,7 +241,7 @@ path. The fallback is automatic and transparent to the user.
   duplicates the in-process query engine. Worse, it would
   break the "absence is not an error" guarantee for reads.
 - **File-based snapshot polling for reads (the prior
-  P7-004-named alternative).** Rejected. With SQLite as the
+  CSP-140-named alternative).** Rejected. With SQLite as the
   canonical store, the snapshot *is* the file; there is
   nothing to poll. The polling pattern was useful under a
   JSON-canonical model where the server might publish

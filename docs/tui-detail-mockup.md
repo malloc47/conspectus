@@ -4,12 +4,12 @@ This document is a **review-and-refine artifact**, not a contract. It
 sketches what the v1 right-panel detail looks like once it becomes the
 focused node inspector plus relationship explorer described in the
 TUI Detail Navigation section of [`docs/design.md`](design.md) and
-in stories `T8-027` through `T8-031` in
+in stories `CSP-313` through `CSP-317` in
 [`docs/backlog.md`](backlog.md).
 
 The plan-of-record stays in the backlog stories; this mockup feeds
 the locked layout and behavior decisions back into them when the
-modeling story (`T8-027`) starts.
+modeling story (`CSP-313`) starts.
 
 Companion to [`docs/tui-sessions-mockup.md`](tui-sessions-mockup.md),
 which covers the left-pane row tree. The interaction between the two
@@ -19,7 +19,7 @@ moving the tree selection — is called out where it matters.
 
 ## The Scenario
 
-The cluttered case the `T8-027` preamble flags: an agent session
+The cluttered case the `CSP-313` preamble flags: an agent session
 with one preferred mux, two runtime-process observations (one
 `process_identifies` winner, one `process_candidates` runner-up),
 two known child sessions, one unresolved parent session, and a
@@ -27,7 +27,7 @@ checkout root. Resolved relationships and competing candidates are
 both visible in the snapshot.
 
 All paths render with `~`-shortening for `$HOME`. Short ids use the
-existing H-TBL-002 FNV-1a hex.
+existing CSP-127 FNV-1a hex.
 
 ## The Mockup
 
@@ -36,7 +36,7 @@ this drop content per the rules in
 [Narrow-terminal Behavior](#narrow-terminal-behavior) below; the
 80×24 frame at this split is too cramped for the relationship
 explorer to be useful, which is the trigger for the follow-up
-responsive-layout story (`T8-033`).
+responsive-layout story (`CSP-319`).
 
 ```
   agent_session · claude-code:7f3c…ad04                          7f3c
@@ -90,7 +90,7 @@ responsive-layout story (`T8-033`).
 Two lines at the top of the pane.
 
 - **Title line**: the focused node's kind label and display label. The
-  right-side short id is the H-TBL-002 short id. Both stay
+  right-side short id is the CSP-127 short id. Both stay
   identical to what `conspectus node show` already prints.
 - **Breadcrumb line**: drill path from the original selection to the
   focused node, separated by `›`. The leading `◀` is a hint that
@@ -260,7 +260,7 @@ the operator something to read.
 
 Long values such as commands, mux names, observation keys, and
 transcript paths truncate with a `(truncated · o)` hint. Pressing
-`o` opens the full value in the focused-value modal (`T8-030`).
+`o` opens the full value in the focused-value modal (`CSP-316`).
 
 ### Hint footer
 
@@ -355,7 +355,7 @@ Behavioral notes:
   action rather than a sticky pane mode.
 - Long values (`command`, `url`, deep `cwd` paths,
   `last_message_preview`) truncate with the existing
-  `(truncated · o)` hint; the `o` open-value modal (`T8-030`) picks
+  `(truncated · o)` hint; the `o` open-value modal (`CSP-316`) picks
   them up identically to the top-5 render.
 - The Relationships and Preview sections render unchanged below the
   expanded Node zone. The right pane scrolls when the expanded Node
@@ -528,7 +528,7 @@ status string.
 
 | Field | Source | Core | Notes |
 |-------|--------|------|-------|
-| `id` (short) | `id` | ✓ | H-TBL-002 short id |
+| `id` (short) | `id` | ✓ | CSP-127 short id |
 | `common_dir` | `common_dir` | ✓ | `~`-shortened path |
 | `remotes` | `remotes[]` | ✓ | First entry; count suffix when > 1 |
 | `source_paths` | `source_paths[]` | ✓ | First entry; count suffix when > 1 |
@@ -644,7 +644,7 @@ top 5.
 The mockup above assumes ~70 cols of right-pane content. At the
 existing 80×24 sessions-view split the right pane has roughly 36
 cols, which is too narrow for the relationship explorer as drawn. v1
-narrow-pane rules (subject to operator review during `T8-029`):
+narrow-pane rules (subject to operator review during `CSP-315`):
 
 - The breadcrumb line drops first; the title's short id stays as the
   only "where am I" cue.
@@ -656,8 +656,8 @@ narrow-pane rules (subject to operator review during `T8-029`):
   `g` accelerator is dimmed in the hint footer.
 
 A future layout pass should let the operator widen the right pane
-when the detail explorer is in focus (cf. `T8-014` on the contextual
-status bar); that work is out of scope for `T8-027`-`T8-031`.
+when the detail explorer is in focus (cf. `CSP-190` on the contextual
+status bar); that work is out of scope for `CSP-313`-`CSP-317`.
 
 ## Glossary
 
@@ -714,7 +714,7 @@ least one link whose Preview `edge` row would say `conflict`".
 **unresolved (N evidence)** — link evidence exists in the graph but
 no concrete neighbor node has been discovered yet. Renders as a
 single-link composite with `— unresolved (N evidence)` in the
-neighbor label slot. Drilldown is inert in v1; see `T8-032` for the
+neighbor label slot. Drilldown is inert in v1; see `CSP-318` for the
 follow-up.
 
 ## Locked Decisions From This Review
@@ -786,30 +786,30 @@ re-deriving the reasoning.
 
 ### Filed As Follow-up Stories
 
-- **`T8-032`** — first-class evidence inspector and link-promotion
+- **`CSP-318`** — first-class evidence inspector and link-promotion
   flow for unresolved-evidence rows. v1 composite-row + `o`
   evidence open is the entry point; the long-term target is an
   inspector that supports promoting evidence to a declared link
   from inside the TUI, alongside the manual-link commands in
   `docs/design.md`.
-- **`T8-033`** — TUI responsive-layout design. Covers the
+- **`CSP-319`** — TUI responsive-layout design. Covers the
   thresholds where the right pane auto-expands on focus, where
   panes stack vertically, and where the right pane is hidden and
-  swapped in via a tab; pairs with `T8-014` and with this
+  swapped in via a tab; pairs with `CSP-190` and with this
   document's [Narrow-terminal Behavior](#narrow-terminal-behavior)
   rules.
-- **`T8-034`** — Expanded Node Detail toggle. Implements the
+- **`CSP-320`** — Expanded Node Detail toggle. Implements the
   `F`-toggle that swaps the Node zone between top-5 and full
   field set; reuses the existing `HeaderField` infrastructure
   and the per-kind fields-reference tables in this document.
-- **`T8-035`** — Left-pane mirror sync (default). Implements
+- **`CSP-321`** — Left-pane mirror sync (default). Implements
   selection mirroring across drilldown, including breadcrumb-
   stacked left-pane selection state, and the manual-tree-
   navigation "checkout" behavior.
-- **`T8-036`** — Left-pane follow sync (opt-in). Implements the
+- **`CSP-322`** — Left-pane follow sync (opt-in). Implements the
   `follow` view-switching mode plus the Controls overlay entry
   for flipping between `mirror`, `follow`, and `none` mid-
-  session. Stacked behind `T8-035` so the mirror baseline ships
+  session. Stacked behind `CSP-321` so the mirror baseline ships
   first.
 
 ## Things The Mockup Doesn't Show
@@ -835,7 +835,7 @@ glyph-and-text positioning is intentionally absent:
 - **Provider-status / freshness chips** — the right-zone chips that
   already render in the status bar.
 - **Per-harness color coding** — claude / codex / opencode / aider
-  per the H-TBL-014 palette.
+  per the CSP-154 palette.
 
 All visual differentiation in the layout above relies on glyphs and
 spacing alone, so a black-and-white render of this mockup would still
@@ -852,5 +852,5 @@ Other things still out of scope for this mockup:
 - Per-kind rendered variations of the Node zone for non-agent-
   session kinds. The fields table above is the v1 spec; rendered
   mockups for mux / process / repo / checkout / fork / pr nodes are
-  good candidates for a follow-up review pass once T8-027 modeling
+  good candidates for a follow-up review pass once CSP-313 modeling
   is stable.

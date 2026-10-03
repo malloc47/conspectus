@@ -31,10 +31,10 @@ move, not a refactor.
 |---|---|---|---|
 | `ratatui` | `0.30` | `crossterm` (`default-features = false`) | Buffer, widget primitives, immediate-mode rendering of the full-screen modal and the inline preview. ADR 0024. |
 | `crossterm` | (implicit via ratatui) | terminal events | Terminal lifecycle when the extracted binary owns its own runtime. Becomes explicit on extraction. ADR 0024. |
-| `tui-markdown` | `0.3` (per ADR 0051, amended for ADR 0051's `highlight-code` re-decision under H-VIEWER-NATIVE-011) | `default-features = false, features = ["highlight-code"]` | Per-turn message-body Markdown → `ratatui::text::Text`, with fenced code blocks syntax-highlighted via `syntect`. ADR 0051 (amended). |
-| `syntect` | transitive via `tui-markdown[highlight-code]` | (default) | Syntax highlighter for fenced code blocks. Pulls in bundled grammar/theme data (single-digit MB compiled). Adopted under H-VIEWER-NATIVE-011 after operator feedback that the un-highlighted code was hard to scan. ADR 0051 amended. |
+| `tui-markdown` | `0.3` (per ADR 0051, amended for ADR 0051's `highlight-code` re-decision under CSP-343) | `default-features = false, features = ["highlight-code"]` | Per-turn message-body Markdown → `ratatui::text::Text`, with fenced code blocks syntax-highlighted via `syntect`. ADR 0051 (amended). |
+| `syntect` | transitive via `tui-markdown[highlight-code]` | (default) | Syntax highlighter for fenced code blocks. Pulls in bundled grammar/theme data (single-digit MB compiled). Adopted under CSP-343 after operator feedback that the un-highlighted code was hard to scan. ADR 0051 amended. |
 | `ansi-to-tui` | `8.0.1` | `default-features = false` | Render tool-output ANSI styling when the operator opts in (tool blocks are hidden by default). ADR 0025. |
-| `comfy-table` | `7` | `default-features = false` | Markdown table rendering inside message bodies. `ContentArrangement::Dynamic` + `set_width(content_width)` gives column-aware wrap-to-fit. Adopted under H-VIEWER-NATIVE-017. ADR 0054. |
+| `comfy-table` | `7` | `default-features = false` | Markdown table rendering inside message bodies. `ContentArrangement::Dynamic` + `set_width(content_width)` gives column-aware wrap-to-fit. Adopted under CSP-356. ADR 0054. |
 | `rusqlite` | `0.39` | `bundled` | OpenCode session reader; SQLite is OpenCode's record store. ADR 0013. `bundled` keeps the extracted binary single-file. |
 | `serde` | `1.0` | `derive` | JSONL record types for Claude Code + Codex parsers. |
 | `serde_json` | `1.0` | — | JSONL line parsing. |

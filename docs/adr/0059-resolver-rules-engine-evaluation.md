@@ -9,11 +9,11 @@ Accepted
 ADR 0041 (Resolver Stays in Rust) closed the question of porting the
 resolver to SQL. A separate but related question keeps surfacing as
 the resolver bug list grows
-(`H-MUXPROC-009/-012/-015/-020/-021`, the pin-binding pass,
+(`CSP-223/CSP-226/CSP-227/CSP-402/CSP-403`, the pin-binding pass,
 `suppress_ambiguous_cwd_mux_links`, `demote_stale_source_mux_candidates`):
 **is the hand-written resolver effectively recreating a rules
 engine, and should it be reimplemented on top of one?** The nagging
-shape is `H-OBS-004`'s `--explain` story — building a
+shape is `CSP-096`'s `--explain` story — building a
 proof-tree / justification surface from scratch sounds wasteful if
 an off-the-shelf engine already provides it.
 
@@ -44,9 +44,9 @@ PR analogues).
 
 Stages A, C, and E are unambiguously rules-engine-shaped: forward
 chaining, windowed aggregation, and negated existence respectively.
-Stage A's bug surface (`H-MUXPROC-009/-015/-020`) cluster on
+Stage A's bug surface (`CSP-223/CSP-227/CSP-402`) cluster on
 join-key plumbing the engine would express directly. Stage C's
-freshness tuning (`H-MUXPROC-021`) is a one-line change in a
+freshness tuning (`CSP-403`) is a one-line change in a
 declarative form.
 
 Stage D — the core ranking — is **not** rules-engine-shaped. RETE
@@ -76,7 +76,7 @@ an explainer?" question are independent.
   `PrScore` / `ProcessIdentityScore` to first-class data carried
   alongside `ResolvedRelationship`.
 
-The bulk of `--explain`'s value (`H-OBS-004`) is comparator-level
+The bulk of `--explain`'s value (`CSP-096`) is comparator-level
 on stage D, which is exactly the part no engine helps with.
 
 ### Library landscape
@@ -114,7 +114,7 @@ System.
   score computed in a `then` block (puts the comparator right
   back in imperative code).
 - The proof tree explains derivation, not comparison. The
-  comparator-level questions H-OBS-004 actually needs to answer
+  comparator-level questions CSP-096 actually needs to answer
   still require typed score breakdowns alongside, same as today.
 - **Authoring is GRL strings only.** The API surface is
   `load_rules_from_file`, `load_rules_from_string`, and
@@ -157,12 +157,12 @@ without a concrete forcing function.
 ### Bug-class evidence
 
 Of the ten most recent resolver-adjacent stories
-(`H-MUXPROC-016/-017/-018/-019/-020/-021`, `H-PIN-004`,
-`H-PIN-RESUME-005`, `H-OBS-004`):
+(`CSP-358/CSP-359/CSP-249/CSP-357/CSP-402/CSP-403`, `CSP-364`,
+`CSP-399`, `CSP-096`):
 
-- Stage A/C/E derivation-class: `H-MUXPROC-018/-020/-021`,
-  `H-PIN-004`. Four of nine closed/active.
-- Stage D comparator-class: zero closed bugs but `H-OBS-004` is
+- Stage A/C/E derivation-class: `CSP-249/CSP-402/CSP-403`,
+  `CSP-364`. Four of nine closed/active.
+- Stage D comparator-class: zero closed bugs but `CSP-096` is
   driven entirely by stage-D opacity.
 - Discovery / sidecar / schema: the remaining five, unaffected
   by resolver shape.
@@ -178,7 +178,7 @@ that overcomes the impedance-mismatch costs evaluated above.
    values and carry them on `ResolvedRelationship` as a
    `score_breakdown` field. Have each per-relation comparator
    return both the `Ordering` and the breaking axis as data.
-   This is `H-OBS-004`'s scope and closes the comparator-level
+   This is `CSP-096`'s scope and closes the comparator-level
    explanation gap no rules engine resolves anyway.
 
 2. **Do not adopt rust-rule-engine.** The typing erosion paid on
@@ -192,21 +192,21 @@ that overcomes the impedance-mismatch costs evaluated above.
 
 3. **Do not adopt Ascent yet, but keep it as the named
    contender** if derivation-pass bugs continue to accumulate
-   after `H-OBS-004` lands. Ascent's compile-time codegen,
+   after `CSP-096` lands. Ascent's compile-time codegen,
    typed-tuple facts, and preservation of enum exhaustiveness
    align with the project's data-model-first posture; its lack of
    built-in proof trees is not a regression relative to what we'd
    build for `--explain` anyway.
 
 4. **Set an explicit re-trigger** rather than leaving this open:
-   if three or more derivation-pass bugs land after `H-OBS-004`
+   if three or more derivation-pass bugs land after `CSP-096`
    ships, reopen this ADR and evaluate Ascent for stages
    A / C / E specifically (keeping stage D in Rust). Aesthetic
    preference is not a trigger; a counted bug class is.
 
 ## Consequences
 
-- `H-OBS-004` proceeds as scoped: typed score-breakdown carrier,
+- `CSP-096` proceeds as scoped: typed score-breakdown carrier,
   comparator returns axis-as-data, `--explain` renders the
   breakdown for both JSON and TUI detail. No engine dependency.
 - The resolver code stays single-language and single-paradigm.
@@ -268,7 +268,7 @@ that overcomes the impedance-mismatch costs evaluated above.
   former cleanly while fighting the latter.
 - **Does any Rust engine give a proof tree for free?**
   rust-rule-engine does, but only for the derivation axis. The
-  comparator axis (the part `H-OBS-004` cares about) is hand-built
+  comparator axis (the part `CSP-096` cares about) is hand-built
   regardless of engine choice.
 - **Is this decision reversible?** Yes. The re-trigger in
   §Decision (4) names a concrete condition for reopening.

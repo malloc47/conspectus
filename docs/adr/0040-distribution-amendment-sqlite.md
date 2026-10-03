@@ -5,7 +5,7 @@
 **Superseded** by [ADR 0082](0082-retire-sqlite-persistence-and-query-surface.md).
 
 The distribution carveouts this ADR negotiated for bundled
-libsqlite3 are no longer load-bearing. P11-011a retired SQLite
+libsqlite3 are no longer load-bearing. CSP-448.01 retired SQLite
 as the persistence layer; the remaining internal usage
 (`query::materialize_snapshot` for output rendering) does not
 need a bundled C compile to be the user-facing default.
@@ -13,7 +13,7 @@ need a bundled C compile to be the user-facing default.
 adapter and the hook sidecar (which depend on it independently
 of `src/query/`); the `bundled` feature and binary-size
 carveouts this ADR set up are due to be re-evaluated as part of
-P11-011d's final SQLite cleanup. ADR 0016's original "single
+CSP-448.04's final SQLite cleanup. ADR 0016's original "single
 static binary, no runtime deps" property is reinforced.
 
 Original status: Accepted.
@@ -78,7 +78,7 @@ ADR 0016's distribution policy is amended as follows.
   platforms (x86_64-linux-gnu, aarch64-apple-darwin, x86_64-pc-
   windows-msvc). The disclosure makes the cost explicit for
   consumers comparing dependency footprints.
-- A CI assertion (introduced in P9-001) fails the build if the
+- A CI assertion (introduced in CSP-271) fails the build if the
   bundled libsqlite3 version regresses below 3.51.3. This
   protects against silent downgrades that would expose the WAL-
   reset corruption bug class.
@@ -98,7 +98,7 @@ ADR 0016's distribution policy is amended as follows.
   baseline checks (ADR 0016 §"Compatibility With Nix"). The dev
   shell already has the C compiler needed to compile bundled
   libsqlite3; no nix-side changes are needed beyond verifying
-  this in the P9-001 spike.
+  this in the CSP-271 spike.
 
 ## Consequences
 
@@ -151,7 +151,7 @@ ADR 0016's distribution policy is amended as follows.
   per the existing ADR 0016 process; no new policy is needed.
 - **Does the size delta justify shipping prebuilt binaries?**
   Possibly, but that is a separate distribution-channel decision
-  (`H-DIST-004` in `docs/backlog.md`). This ADR captures the
+  (`CSP-106` in `docs/backlog.md`). This ADR captures the
   amendment in scope; prebuilt-binary publication is tracked
   elsewhere.
 - **Could a future `conspectus-core` crate split provide a

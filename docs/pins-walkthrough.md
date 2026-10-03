@@ -210,13 +210,13 @@ continuity is available; `Enter launch` means fresh start.
 ## What pins do *not* do
 
 - They don't track windows, panes, or layouts (that's tmuxinator /
-  tmuxp territory; see `H-PIN-F-003` for an importer follow-up).
+  tmuxp territory; see `CSP-384` for an importer follow-up).
 - They don't run lifecycle hooks beyond `launch.argv` (use
   `nix develop --command`, `direnv exec`, `op run` as prefix
   tooling; a `launch.before/after` surface is parked as
-  `H-PIN-F-002`).
+  `CSP-383`).
 - They don't synthesize ephemeral entries from path globs
-  (`H-PIN-F-004`).
+  (`CSP-385`).
 
 ## A two-minute dry run
 

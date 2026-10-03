@@ -10,7 +10,7 @@ The Phase 8 TUI ships today with a single sessions view, a single
 `--sessions-grouping` knob, no filtering, and no way to move between
 the other four locked views (`mux`, `union`, `prs`, `forks`) at
 runtime. Phase 8 already locks `1`–`5` view-switch keys, a deferred
-`/` search overlay (`T8-017`), and reserves a number of accelerator
+`/` search overlay (`CSP-193`), and reserves a number of accelerator
 keys (`m`, `c`, `f`, `n`, `d`, …) for later phases.
 
 Three intertwined capabilities now need to land together rather than
@@ -57,12 +57,12 @@ the other.
   `mux-state=unmuxed`). They persist across navigation, render as
   status-bar chips, and survive view-state save/restore. They are
   the answer to "what world am I looking at."
-- **`/` fuzzy search** (`T8-017`, unchanged scope) is a transient
+- **`/` fuzzy search** (`CSP-193`, unchanged scope) is a transient
   ranking overlay. It does not narrow the set persistently; it
   ranks the rows currently visible after filters apply.
 
 The two layers compose in a fixed order: snapshot → filters →
-fuzzy-search ranking → render. `T8-017` is updated only to note
+fuzzy-search ranking → render. `CSP-193` is updated only to note
 that it ranks within the filtered set, not the full snapshot.
 
 ### 2. v1 filter dimensions
@@ -72,7 +72,7 @@ The v1 structured-filter set is locked at three dimensions:
 - `harness` — set membership over the known harness keys
   (`claude`, `codex`, `opencode`, `aider`).
 - `max-age` — duration window applied against
-  `AgentSessionNode.last_active_epoch` (`H-AGENT-EPOCH`).
+  `AgentSessionNode.last_active_epoch` (`CSP-177`).
 - `mux-state` — set membership over `attached` / `ambiguous` /
   `unmuxed`, derived from the row's `MuxIndicator`.
 
@@ -108,7 +108,7 @@ state introduces friction for the common case.
 ### 4. Per-view grouping enums
 
 Each view has its own grouping enum. Sessions keeps the existing
-`SessionsGrouping`; new enums land alongside the P8-004 builders:
+`SessionsGrouping`; new enums land alongside the CSP-163 builders:
 
 ```rust
 pub enum SessionsGrouping { Graph, Repo, Checkout, ScanRoot }
@@ -146,7 +146,7 @@ view selection, per-view grouping, per-view filter editing, and
 the global sort.
 
 Single-key accelerators (`1`–`5`, `]`/`[`, `f`, `F`, `v`, and the
-grouping-cycle key chosen in `F8-005`) exist for muscle-memory
+grouping-cycle key chosen in `CSP-254`) exist for muscle-memory
 operators but are never the only entry point. Accelerator keys are
 surfaced inline in the controls overlay and in the `?` help
 overlay so they remain discoverable.
@@ -218,7 +218,7 @@ common case.
   .sessions_grouping` key carry a deprecation cycle. Both keep
   working through at least one release; removal requires its own
   ADR addendum or a coordinated note.
-- `T8-017` is no longer blocked on the filter design question. It
+- `CSP-193` is no longer blocked on the filter design question. It
   remains its own story, scoped to ranking within the active
   filter set.
 
@@ -229,7 +229,7 @@ common case.
   operators to discover. The layered model gives both audiences
   what they need at the cost of two overlays.
 - **Structured filters only, drop `/` search.** Rejected.
-  Defers `T8-017` indefinitely and removes ranking semantics that
+  Defers `CSP-193` indefinitely and removes ranking semantics that
   filters cannot replace. The two layers answer genuinely different
   questions.
 - **Global filter / grouping state across all views.** Rejected.
@@ -250,7 +250,7 @@ common case.
   would re-open that. A navigable section list achieves the
   discoverability win without the palette.
 - **Defer grouping enums for non-session views.** Rejected.
-  Locking the enums now alongside the P8-004 builders avoids
+  Locking the enums now alongside the CSP-163 builders avoids
   retrofitting and lets the controls overlay render every view's
   grouping uniformly from day one.
 
@@ -272,9 +272,9 @@ common case.
 
 - The exact primary key for the controls overlay (`v` proposed,
   with `Space` or a function-key alternative) is settled in
-  `F8-005`.
+  `CSP-254`.
 - The grouping-cycle accelerator key (`G` collides with the
-  existing End binding) is settled in `F8-005`.
+  existing End binding) is settled in `CSP-254`.
 - Mouse support for the underlying row tree (outside the controls
   overlay) is deferred to a separate story; this ADR commits only
   to mouse support inside the controls overlay.
