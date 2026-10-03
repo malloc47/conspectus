@@ -835,13 +835,20 @@ mod help_text {
         "fixture",
     ];
 
-    /// Backlog IDs such as `P7-003`, `F8-013`, `T8-043`, `GV-002`, `H-WT-008`.
+    /// Backlog IDs such as `CSP-123` and `CSP-123.01`, plus legacy
+    /// backlog IDs such as `P7-003`, `F8-013`, `T8-043`, `GV-002`, `H-WT-008`.
     fn backlog_ids(text: &str) -> Vec<String> {
-        text.split(|c: char| !(c.is_ascii_alphanumeric() || c == '-'))
+        text.split(|c: char| !(c.is_ascii_alphanumeric() || c == '-' || c == '.'))
+            .map(|token| token.trim_end_matches('.'))
             .filter(|token| {
                 let Some((prefix, number)) = token.rsplit_once('-') else {
                     return false;
                 };
+                if prefix == "CSP" {
+                    let (id, subtask) = number.split_once('.').unwrap_or((number, "0"));
+                    let digits = |s: &str| !s.is_empty() && s.chars().all(|c| c.is_ascii_digit());
+                    return digits(id) && digits(subtask);
+                }
                 let numeric = !number.is_empty() && number.chars().all(|c| c.is_ascii_digit());
                 let phase = prefix.len() > 1
                     && prefix.starts_with('P')
@@ -912,10 +919,17 @@ mod help_text {
     #[test]
     fn backlog_id_detector_matches_real_ids_only() {
         assert_eq!(
-            backlog_ids("see P7-003, F8-013, H-WT-008 and T8-043"),
-            vec!["P7-003", "F8-013", "H-WT-008", "T8-043"]
+            backlog_ids("see CSP-003, CSP-212.01, P7-003, F8-013, H-WT-008 and T8-043."),
+            vec![
+                "CSP-003",
+                "CSP-212.01",
+                "P7-003",
+                "F8-013",
+                "H-WT-008",
+                "T8-043"
+            ]
         );
-        assert!(backlog_ids("claude-code on utf-8, x86-64, ADR 0057").is_empty());
+        assert!(backlog_ids("claude-code on utf-8, x86-64, v0.1.0, ADR 0057, CSP-").is_empty());
     }
 
     #[test]

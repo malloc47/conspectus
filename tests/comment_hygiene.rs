@@ -1,39 +1,54 @@
 //! Source comments explain behavior and rationale; backlog IDs belong
-//! in commit messages and `docs/backlog.md` (ADR 0100). A comment may
+//! in commit messages and the backlog itself (ADR 0100). A comment may
 //! still point at an open backlog item when it says so, e.g.
-//! "open work (backlog `T8-009`)".
+//! "open work (backlog `CSP-123`)".
 
 use std::fs;
 use std::path::{Path, PathBuf};
 
-/// Backlog IDs such as `P7-003`, `T8-043a`, `H-SERVE-PERF-001a`.
+/// Backlog IDs such as `CSP-123` and subtasks such as `CSP-123.01`.
+/// Legacy backlog IDs (`P7-003`, `T8-043a`, `H-SERVE-PERF-001a`) count too.
 fn backlog_ids(text: &str) -> Vec<&str> {
-    text.split(|c: char| !(c.is_ascii_alphanumeric() || c == '-'))
-        .filter(|token| {
-            let token = token
-                .strip_suffix(|c: char| c.is_ascii_lowercase())
-                .unwrap_or(token);
-            let Some((prefix, number)) = token.rsplit_once('-') else {
-                return false;
-            };
-            if number.is_empty() || !number.chars().all(|c| c.is_ascii_digit()) {
-                return false;
-            }
-            let phase = prefix.len() > 1
-                && matches!(prefix.as_bytes()[0], b'P' | b'F' | b'T')
-                && prefix[1..].chars().all(|c| c.is_ascii_digit());
-            let workstream = prefix.strip_prefix("H-").is_some_and(|rest| {
-                !rest.is_empty()
-                    && rest.split('-').all(|part| {
-                        !part.is_empty()
-                            && part
-                                .chars()
-                                .all(|c| c.is_ascii_uppercase() || c.is_ascii_digit())
-                    })
-            });
-            phase || workstream
-        })
+    text.split(|c: char| !(c.is_ascii_alphanumeric() || c == '-' || c == '.'))
+        .map(|token| token.trim_end_matches('.'))
+        .filter(|token| is_task_id(token) || is_legacy_id(token))
         .collect()
+}
+
+fn digits(s: &str) -> bool {
+    !s.is_empty() && s.chars().all(|c| c.is_ascii_digit())
+}
+
+fn is_task_id(token: &str) -> bool {
+    token.strip_prefix("CSP-").is_some_and(|number| {
+        let (id, subtask) = number.split_once('.').unwrap_or((number, "0"));
+        digits(id) && digits(subtask)
+    })
+}
+
+fn is_legacy_id(token: &str) -> bool {
+    let token = token
+        .strip_suffix(|c: char| c.is_ascii_lowercase())
+        .unwrap_or(token);
+    let Some((prefix, number)) = token.rsplit_once('-') else {
+        return false;
+    };
+    if !digits(number) {
+        return false;
+    }
+    let phase = prefix.len() > 1
+        && matches!(prefix.as_bytes()[0], b'P' | b'F' | b'T')
+        && prefix[1..].chars().all(|c| c.is_ascii_digit());
+    let workstream = prefix.strip_prefix("H-").is_some_and(|rest| {
+        !rest.is_empty()
+            && rest.split('-').all(|part| {
+                !part.is_empty()
+                    && part
+                        .chars()
+                        .all(|c| c.is_ascii_uppercase() || c.is_ascii_digit())
+            })
+    });
+    phase || workstream
 }
 
 fn comment(line: &str) -> Option<&str> {
@@ -96,14 +111,14 @@ fn comments_do_not_cite_backlog_ids_as_history() {
 #[test]
 fn backlog_id_matcher_recognizes_the_id_shapes() {
     assert_eq!(
-        backlog_ids("see P7-003, F8-013, T8-043a, H-WT-008 and H-SERVE-PERF-001a"),
+        backlog_ids("see CSP-003, CSP-212.01. Also P7-003, T8-043a and H-SERVE-PERF-001a."),
         [
+            "CSP-003",
+            "CSP-212.01",
             "P7-003",
-            "F8-013",
             "T8-043a",
-            "H-WT-008",
             "H-SERVE-PERF-001a"
         ]
     );
-    assert!(backlog_ids("ADR 0083, utf-8, x86-64, P-1, H-2").is_empty());
+    assert!(backlog_ids("ADR 0083, utf-8, x86-64, v0.1.0, P-1, H-2, CSP-, CSP-1.x").is_empty());
 }
