@@ -2,9 +2,8 @@
 
 ## Status
 
-Proposed. Accepting it supersedes ADR 0009. Drafted on the
-`backlog-md-migration` evaluation branch; the operator accepts or rejects it
-after evaluating the migrated backlog, before the branch merges.
+Accepted. Supersedes ADR 0009. The operator evaluated the migrated
+backlog on the `backlog-md-migration` branch before it merged.
 
 ## Context
 
@@ -85,7 +84,9 @@ is evaluated on the real backlog rather than a sample.
    generates the renumbering and the split deterministically and checks
    that the split accounts for every line of the renumbered file. The
    true-up before merge re-runs it on a fresh `main` instead of rebasing
-   its output.
+   its output. The branch merges by fast-forward rather than the usual
+   squash, so the generated commits stay in history as the record of how
+   each file was produced.
 
 ## Consequences
 

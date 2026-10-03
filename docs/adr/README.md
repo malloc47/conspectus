@@ -169,8 +169,8 @@ How the project is built, tested, tracked, and shipped, including the agent-orie
 | --- | --- | --- |
 | [0007](0007-rust-development-approach.md) | Rust Development Approach | Accepted |
 | [0008](0008-beads-work-tracking.md) | Beads Work Tracking | Superseded by 0009 |
-| [0009](0009-lightweight-backlog-tracking.md) | Lightweight Backlog Tracking | Accepted |
-| [0109](0109-backlog-md-work-tracking.md) | Backlog.md Work Tracking | Proposed |
+| [0009](0009-lightweight-backlog-tracking.md) | Lightweight Backlog Tracking | Superseded by 0109 |
+| [0109](0109-backlog-md-work-tracking.md) | Backlog.md Work Tracking | Accepted |
 | [0010](0010-task-runner-selection.md) | Task Runner Selection | Accepted |
 | [0015](0015-library-api-surface.md) | Library API Surface | Accepted (amended) |
 | [0101](0101-typed-errors-on-the-library-facade.md) | Typed Errors On The Library Facade | Accepted |
