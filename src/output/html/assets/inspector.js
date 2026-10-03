@@ -1,4 +1,4 @@
-// inspector.js — right-side detail panel (GV-003b).
+// inspector.js — right-side detail panel.
 //
 // When a node is selected, replaces the legend with that node's
 // attributes plus grouped incoming/outgoing edges. Clicking an
@@ -23,7 +23,7 @@
   };
 
   /// `onFocusRequest` is an optional callback fired when the user
-  /// clicks the inspector "Focus" button (GV-003c). When supplied,
+  /// clicks the inspector "Focus" button. When supplied,
   /// the header gains the button; otherwise it's omitted so the
   /// inspector can still run without navigation chrome.
   function Inspector(host, driver, legendRenderer, onFocusRequest) {

@@ -1,4 +1,4 @@
-//! Tests for `conspectus graph --format html` (GV-003a).
+//! Tests for `conspectus graph --format html`.
 //!
 //! Two kinds of coverage:
 //!   1. Payload determinism — render the page, extract the embedded
@@ -119,17 +119,17 @@ fn rendered_html_contains_chrome_containers() {
     // rendered scaffold. Catches accidental template breakage
     // without tying the snapshot to chrome HTML layout details.
     let html = render_graph_html(&fixtures::empty_graph(), HtmlOptions::default()).expect("render");
-    // GV-003a: payload + driver.
+    // Payload and driver.
     assert!(html.contains("id=\"conspectus-cy\""));
     assert!(html.contains("id=\"conspectus-graph-payload\""));
     assert!(html.contains("ConspectusGraphDriver"));
-    // GV-003b: chrome + search.
+    // Chrome and search.
     assert!(html.contains("id=\"conspectus-left\""));
     assert!(html.contains("id=\"conspectus-right\""));
     assert!(html.contains("id=\"conspectus-search\""));
     assert!(html.contains("ConspectusFilterPanel"));
     assert!(html.contains("ConspectusInspector"));
-    // GV-003c: navigation chrome.
+    // Navigation chrome.
     assert!(html.contains("id=\"conspectus-navbar\""));
     assert!(html.contains("ConspectusViewState"));
     assert!(html.contains("ConspectusNavHelpers"));

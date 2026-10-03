@@ -1,4 +1,4 @@
-/* GV-003a/b chrome layout. Three-column body:
+/* Chrome layout. Three-column body:
  *   left = filter panel
  *   center = cytoscape canvas
  *   right = inspector / legend
@@ -111,7 +111,7 @@ body {
   background: #fafafa;
 }
 
-/* Navigation bar (GV-003c). Hidden when no focus is active; the
+/* Navigation bar. Hidden when no focus is active; the
  * .nav-active class is added by ConspectusNavigation when the user
  * focuses a node. */
 #conspectus-navbar {

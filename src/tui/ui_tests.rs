@@ -1109,7 +1109,7 @@ fn validated_link_line_drops_the_legacy_winner_star() {
 
 #[test]
 fn related_row_truncates_long_labels_instead_of_wrapping_them_away() {
-    // REL-003d: the explorer paragraph word-wraps, so an unbreakable
+    // The explorer paragraph word-wraps, so an unbreakable
     // path wider than the pane used to drop onto the next line and
     // leave `checked out at ◇` with no visible label.
     use crate::model::{CheckoutId, Confidence, NodeId, Provenance, RelationKind, RepoId};
@@ -3637,7 +3637,7 @@ fn right_pane_explorer_hides_scrollbar_when_related_list_fits() {
 
 #[test]
 fn mux_view_header_counts_sessions_in_visible_muxes() {
-    // REL-003e: the Mux view renders single agents inline in their mux
+    // The Mux view renders single agents inline in their mux
     // row, so counting agent-session rows read `0/M sessions`.
     use crate::model::{
         Confidence, GraphLink, LinkEndpoint, LinkState, MuxSessionNode, Provenance, RelationKind,

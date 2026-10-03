@@ -1,5 +1,5 @@
-// navigation.js — focus / depth / direction / breadcrumb chrome
-// (GV-003c). Wraps the pure helpers from navigation-helpers.js
+// navigation.js — focus / depth / direction / breadcrumb chrome.
+// Wraps the pure helpers from navigation-helpers.js
 // and pushes hidden-id sets through ConspectusViewState so the
 // filter panel and navigation compose cleanly.
 //

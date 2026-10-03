@@ -1,4 +1,4 @@
-// filter-panel.js — left-side controls (GV-003b).
+// filter-panel.js — left-side controls.
 //
 // Computes a hidden-ids set from the neutral payload and pushes it
 // to the driver. All hide logic runs over `payload`, not over the
@@ -46,7 +46,7 @@
 
   /// `viewState` is optional. When supplied, the panel pushes its
   /// hidden-id set through the coordinator so it composes with the
-  /// navigation layer (GV-003c). When omitted, the panel drives the
+  /// navigation layer. When omitted, the panel drives the
   /// `setHidden` call directly for backwards compatibility.
   function FilterPanel(host, driver, viewState) {
     this.host = host;
@@ -77,7 +77,7 @@
       showRuntimeProcess: true,
       showUnresolvedStubs: true,
       showIgnoredOverridden: true,
-      // GV-003e additions: recency / activity / orphan filters.
+      // Recency, activity, and orphan filters.
       maxAgeSeconds: null, // null = no max age
       hideStaleSessions: false,
       hideOrphans: false,

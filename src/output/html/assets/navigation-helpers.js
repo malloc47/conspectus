@@ -1,5 +1,5 @@
 // navigation-helpers.js — pure graph-traversal helpers for the
-// GV-003c navigation chrome.
+// navigation chrome.
 //
 // All traversal runs over the library-neutral payload (per ADR
 // 0050 decision 10 Coupling Boundary), never over Cytoscape's

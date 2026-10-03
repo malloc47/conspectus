@@ -137,7 +137,7 @@
     var rightPane = document.getElementById("conspectus-right");
     var navbar = document.getElementById("conspectus-navbar");
 
-    // Layered hidden-id coordinator (GV-003c): filter panel pushes
+    // Layered hidden-id coordinator: filter panel pushes
     // its set into `filter`; navigation pushes its set into `nav`.
     // The driver sees the union.
     var viewState = global.ConspectusViewState

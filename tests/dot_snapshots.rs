@@ -79,7 +79,7 @@ fn mux_candidates_exclude_candidates_dot_snapshot() {
 
 #[test]
 fn process_cardinality_scenario_renders_with_diagnostic_filter() {
-    // Named TEST-006 replay scenario. process-cardinality has two
+    // Named replay scenario. process-cardinality has two
     // RuntimeProcess observations on one mux. Asserted structurally
     // rather than as an insta snapshot because the scenario embeds a
     // unique temp-path (pid+nanos) in node ids per run.

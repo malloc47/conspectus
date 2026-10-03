@@ -191,7 +191,7 @@ fn find_session_row<'a>(
     })
 }
 
-// --- TEST-003 scenarios --------------------------------------------------
+// --- Drift and stale-evidence replays ------------------------------------
 
 #[test]
 fn same_pane_hook_supersession_freshest_wins_and_tui_shows_active() {
@@ -326,7 +326,7 @@ fn codex_fd_evidence_beats_stale_argv_and_tui_follows_current_rollout() {
     );
 }
 
-// --- TEST-004 invariants -------------------------------------------------
+// --- Graph and row-projection invariants ---------------------------------
 
 #[test]
 fn invariant_ignored_mux_candidates_remain_evidence_but_never_resolve() {

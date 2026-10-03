@@ -311,7 +311,7 @@
     };
   };
 
-  // -- Public layout controls (GV-003d) --------------------------
+  // -- Public layout controls ------------------------------------
 
   /// Available layout names in preference order. The driver picks
   /// the first one Cytoscape has registered when none is requested.

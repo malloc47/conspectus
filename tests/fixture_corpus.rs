@@ -1,4 +1,4 @@
-//! Fixture corpus loader tests (TEST-002).
+//! Fixture corpus loader tests.
 //!
 //! These tests parse the checked-in fixtures under `tests/fixtures/` through
 //! the same adapter, hook, and parser paths that discovery uses. The goal is

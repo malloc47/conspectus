@@ -1,5 +1,4 @@
-//! Self-contained HTML graph explorer (ADR 0050, backlog item
-//! `GV-003a`).
+//! Self-contained HTML graph explorer (ADR 0050).
 //!
 //! Produces a single-file HTML page that inlines the vendored
 //! Cytoscape.js bundle (plus `fcose` layout and its peer deps),
