@@ -31,7 +31,7 @@ pub fn apply_hook_records(
     now_epoch: i64,
 ) {
     // Freshest first so the dedupe map keeps the winner per pane.
-    records.sort_by(|a, b| b.observed_epoch.cmp(&a.observed_epoch));
+    records.sort_by_key(|record| std::cmp::Reverse(record.observed_epoch));
 
     let mut winners: HashMap<(MuxSessionId, Option<String>), String> = HashMap::new();
     let node_count_before = snapshot.nodes.len();

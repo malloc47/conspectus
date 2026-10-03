@@ -1060,10 +1060,10 @@ fn cwd_owner_kind(snapshot: &GraphSnapshot, cwd: &str) -> Option<NodeKind> {
             GraphNode::Workspace(w) if matches(&w.root) => {
                 found_workspace = true;
             }
-            GraphNode::Repo(r) => {
-                if matches(&r.common_dir) || r.source_paths.iter().any(|p| matches(p)) {
-                    found_repo = true;
-                }
+            GraphNode::Repo(r)
+                if matches(&r.common_dir) || r.source_paths.iter().any(|p| matches(p)) =>
+            {
+                found_repo = true;
             }
             _ => {}
         }

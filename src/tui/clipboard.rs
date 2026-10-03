@@ -38,17 +38,13 @@ fn write_osc52<W: Write>(w: &mut W, text: &str) -> io::Result<()> {
 fn base64_encode(input: &[u8]) -> String {
     const ALPHABET: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
     let mut out = String::with_capacity(input.len().div_ceil(3) * 4);
-    let mut chunks = input.chunks_exact(3);
-    for chunk in chunks.by_ref() {
-        let b0 = chunk[0];
-        let b1 = chunk[1];
-        let b2 = chunk[2];
+    let (chunks, rem) = input.as_chunks::<3>();
+    for &[b0, b1, b2] in chunks {
         out.push(ALPHABET[(b0 >> 2) as usize] as char);
         out.push(ALPHABET[(((b0 & 0b11) << 4) | (b1 >> 4)) as usize] as char);
         out.push(ALPHABET[(((b1 & 0b1111) << 2) | (b2 >> 6)) as usize] as char);
         out.push(ALPHABET[(b2 & 0b111111) as usize] as char);
     }
-    let rem = chunks.remainder();
     match rem.len() {
         1 => {
             let b0 = rem[0];

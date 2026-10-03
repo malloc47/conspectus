@@ -406,10 +406,7 @@ fn read_session_leaf_uuid(path: &Path) -> Option<String> {
 
     // If we started mid-file, the first partial line is unreliable — drop it.
     let scan_start = if start > 0 {
-        match buf.iter().position(|&b| b == b'\n') {
-            Some(idx) => idx + 1,
-            None => return None,
-        }
+        buf.iter().position(|&b| b == b'\n')? + 1
     } else {
         0
     };
@@ -454,10 +451,7 @@ fn read_session_last_message_preview(path: &Path) -> Option<String> {
 
     // Drop the first partial line if we started mid-file.
     let scan_start = if start > 0 {
-        match buf.iter().position(|&b| b == b'\n') {
-            Some(idx) => idx + 1,
-            None => return None,
-        }
+        buf.iter().position(|&b| b == b'\n')? + 1
     } else {
         0
     };

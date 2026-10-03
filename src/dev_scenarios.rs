@@ -1141,8 +1141,7 @@ fn add_hook_supersession_to_showcase(world: &mut ScenarioWorld, project: &Path) 
 fn unique_root(name: &str) -> PathBuf {
     let nanos = SystemTime::now()
         .duration_since(UNIX_EPOCH)
-        .map(|duration| duration.as_nanos())
-        .unwrap_or(0);
+        .map_or(0, |duration| duration.as_nanos());
     std::env::temp_dir().join(format!(
         "conspectus-scenario-{name}-{}-{nanos}",
         std::process::id()

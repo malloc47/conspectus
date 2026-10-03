@@ -459,8 +459,7 @@ fn git_discovery_enumerates_sibling_worktrees_end_to_end() {
         .args(["worktree", "add", "-b", "feature", wt.to_str().unwrap()])
         .current_dir(fixture.root())
         .status()
-        .map(|s| s.success())
-        .unwrap_or(false);
+        .is_ok_and(|s| s.success());
     if !added {
         return;
     }

@@ -445,11 +445,10 @@ pub fn parse_github_remote(url: &str) -> Option<(String, String, String)> {
     } else if let Some(rest) = trimmed.strip_prefix("ssh://") {
         let after_user = rest.split_once('@').map_or(rest, |(_, after)| after);
         split_host_and_path(after_user)?
-    } else if let Some(rest) = trimmed.strip_prefix("git@") {
+    } else {
+        let rest = trimmed.strip_prefix("git@")?;
         let (host, path) = rest.split_once(':')?;
         (host.to_string(), path.to_string())
-    } else {
-        return None;
     };
 
     if !looks_like_github_host(&host) {

@@ -110,10 +110,8 @@ pub fn resolve_node_id(input: &str, snapshot: &GraphSnapshot) -> Result<NodeId, 
                     matches.insert(NodeId::MuxSession(mux.id.clone()));
                 }
             }
-            GraphNode::Pin(pin) => {
-                if pin.id.id == trimmed || pin.display_name == trimmed {
-                    matches.insert(NodeId::Pin(pin.id.clone()));
-                }
+            GraphNode::Pin(pin) if pin.id.id == trimmed || pin.display_name == trimmed => {
+                matches.insert(NodeId::Pin(pin.id.clone()));
             }
             _ => {}
         }
@@ -333,7 +331,7 @@ fn workspace_member_displays(
             entries.push((resolved.target.clone(), *link));
         }
     }
-    entries.sort_by(|a, b| a.0.to_string().cmp(&b.0.to_string()));
+    entries.sort_by_key(|entry| entry.0.to_string());
 
     let mut out: Vec<String> = Vec::new();
     for (target, link) in entries {
@@ -723,10 +721,8 @@ fn write_diagnostics(out: &mut String, snapshot: &GraphSnapshot, id: &NodeId, co
                 relation,
                 selected_link_id,
                 competing_link_ids,
-            } => {
-                if source == id {
-                    conflicts.push((relation, selected_link_id, competing_link_ids));
-                }
+            } if source == id => {
+                conflicts.push((relation, selected_link_id, competing_link_ids));
             }
             _ => {}
         }

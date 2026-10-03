@@ -280,7 +280,7 @@ fn write_entries_if_changed(
     mut entries: Vec<AliasEntry>,
     changed: bool,
 ) -> Result<AliasWriteOutcome, AliasWriteError> {
-    entries.sort_by(|left, right| endpoint_key(&left.node).cmp(&endpoint_key(&right.node)));
+    entries.sort_by_key(|entry| endpoint_key(&entry.node));
     let entry_count = entries.len();
 
     if changed {

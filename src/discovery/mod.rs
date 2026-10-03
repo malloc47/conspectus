@@ -49,8 +49,7 @@ pub fn empty_graph() -> GraphSnapshot {
 pub fn current_epoch() -> i64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
-        .map(|delta| i64::try_from(delta.as_secs()).unwrap_or(0))
-        .unwrap_or(0)
+        .map_or(0, |delta| i64::try_from(delta.as_secs()).unwrap_or(0))
 }
 
 /// Fill in the `(provider, freshness_epoch)` defaults on a freshly
