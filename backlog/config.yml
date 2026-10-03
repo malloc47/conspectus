@@ -2,6 +2,7 @@ project_name: "Conspectus"
 default_status: "To Do"
 statuses: ["To Do", "In Progress", "Done"]
 labels: []
+definition_of_done: ["`just check` passes, or `git diff --check` for docs-only changes", "Docs and ADRs are updated when behavior, architecture, or workflow change"]
 date_format: yyyy-mm-dd
 max_column_width: 20
 auto_open_browser: false

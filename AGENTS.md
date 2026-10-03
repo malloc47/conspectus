@@ -65,11 +65,11 @@ standard checks.
   its sanctioned categories.
 - Avoid making Conspectus depend on Atelier command modules directly. Shared
   code should be pure discovery/parsing/model code with a clean boundary.
-- Track implementation work in `docs/backlog.md` until a dedicated tracker is
-  introduced.
+- Track implementation work as Backlog.md tasks under `backlog/` (ADR 0109);
+  see Work Tracking below.
 - Code comments explain behavior and rationale; they do not cite backlog IDs
-  or narrate history (ADR 0100). Put IDs in commit messages and backlog
-  outcomes. A comment may point at open work as "backlog `ID`";
+  or narrate history (ADR 0100). Put IDs in commit messages and task final
+  summaries. A comment may point at open work as "backlog `ID`";
   `tests/comment_hygiene.rs` enforces this.
 - Preserve user changes and avoid rewriting unrelated files.
 - For docs-only changes, run `git diff --check`. For code changes, add or run
@@ -131,6 +131,36 @@ Before a feature branch, squash merge, or direct commit lands on `main`:
 - Machine-readable output changes include snapshot or fixture coverage once
   output tests exist.
 - The working tree is clean before pushing.
+
+## Work Tracking
+
+Stories are Backlog.md tasks (ADR 0109) in `backlog/tasks/`, done ones
+included, with one milestone per phase or workstream in `backlog/milestones/`
+whose description keeps that section's planning prose. The `backlog` CLI
+comes from `nix develop`. These conventions add to the Backlog.md workflow
+below:
+
+- Cite task IDs (`CSP-123`) in commit messages, as before.
+- Older commits, PRs, and transcripts cite pre-migration IDs (`P8-014`,
+  `H-PIN-TUI-011`). Map them with `docs/backlog-legacy-ids.md` or
+  `git grep -w P8-014 -- backlog/`. Keep every task's `Legacy ID:` line.
+- Describe a new story as before: scope, tests, manual checks, and
+  blockers. Record blockers that are tasks with `--dep` too, and run
+  `backlog doctor` after changing dependencies.
+- When a story lands, record what landed and how it was verified with
+  `--final-summary`, check its Definition of Done items, and set it `Done`.
+  Leave it on the board: `backlog task complete` and the browser's cleanup
+  move tasks to `backlog/completed/`, which search and milestone progress
+  skip.
+- Pass text with backticks or apostrophes through a quoted heredoc so the
+  shell leaves it alone:
+
+  ```sh
+  backlog task edit CSP-123 --final-summary "$(cat <<'EOF'
+  Landed `conspectus hook write`; the operator's flow is unchanged.
+  EOF
+  )"
+  ```
 
 <!-- BACKLOG.MD GUIDELINES START -->
 <!-- backlog.md-instructions-version: 1.53.0 -->

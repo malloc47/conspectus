@@ -419,19 +419,28 @@ habits have grown out of that discipline:
   two lessons: consumers read the typed model, and no capability lands
   before something needs it.
 
-### `docs/backlog.md`: the work tracker
+### Backlog.md: the work tracker
 
-The [backlog](docs/backlog.md) is a single Markdown file used instead of an
-issue tracker. [ADR 0009](docs/adr/0009-lightweight-backlog-tracking.md)
-chose it over Beads, Backlog.md, and GitHub Issues. Every story has a stable
-ID (`CSP-175`, `CSP-522`, `CSP-528`), a scope, the tests it needs, its
-blockers, and an outcome note once it lands. The IDs appear in commit
-subjects and code comments, so `git log --grep` and `grep` connect a
-decision, the work it caused, and the code it produced.
+Work is tracked as [Backlog.md](https://backlog.md) task files under
+[`backlog/`](backlog/): one Markdown file per story, plus a milestone for
+each phase or workstream. The backlog began as a single file,
+`docs/backlog.md`, which [ADR 0009](docs/adr/0009-lightweight-backlog-tracking.md)
+chose over Beads, Backlog.md, and GitHub Issues while the project was young.
+At 622 stories and over 15,000 lines it moved to Backlog.md
+([ADR 0109](docs/adr/0109-backlog-md-work-tracking.md)), with every story
+converted and renumbered in the order it was filed.
+
+Every story has a stable ID (`CSP-175`), a scope, the tests it needs, its
+blockers, and a final summary once it lands. The IDs appear in commit
+subjects, so `git log --grep` connects a decision, the work it caused, and
+the code it produced, and `backlog task list --ready` shows what can start
+now. Commits from before the migration cite the old per-workstream IDs
+(`P8-014`, `H-PIN-TUI-011`); [a map](docs/backlog-legacy-ids.md) translates
+them.
 
 Numbered phases (P0 through P11) cover the planned arc. Hardening workstreams
-(`H-*`) and dated batches of operator requests cover what came up in daily
-use.
+(labeled `h-*`) and dated batches of operator requests cover what came up in
+daily use.
 
 ### Making the loop work with agents
 
@@ -499,7 +508,7 @@ use.
 | Understand how sessions get attributed to tmux panes | [docs/mux-link-resolution.md](docs/mux-link-resolution.md) |
 | Add a harness, mux, forge, or orchestrator adapter | [docs/provider-adapter-guide.md](docs/provider-adapter-guide.md) |
 | Use Conspectus as a library | [docs/library-api.md](docs/library-api.md) |
-| See what's being worked on | [docs/backlog.md](docs/backlog.md) |
+| See what's being worked on | [backlog/](backlog/) (`backlog board`) |
 | Find every document | [docs/index.md](docs/index.md) |
 
 ## Development

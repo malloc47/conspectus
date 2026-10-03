@@ -15,8 +15,14 @@ names, collision notes, and the rationale for choosing `conspectus`.
 
 ## `docs/backlog.md`
 
-Purpose: interim work tracker for turning the design and ADRs into phases,
-stories, blockers, and follow-up implementation tasks.
+Purpose: pointer to the work tracker, which moved to Backlog.md task files
+under `backlog/` at the repository root (ADR 0109). Keeps the file's
+pre-migration preamble.
+
+## `docs/backlog-legacy-ids.md`
+
+Purpose: maps pre-migration story IDs (`P8-014`, `H-PIN-TUI-011`) to their
+Backlog.md task IDs, with each story's first landing time and commit.
 
 ## `docs/operations.md`
 
@@ -88,5 +94,5 @@ assumptions for each phase.
 
 Purpose: tentative redesign plans captured during operator review or design
 brainstorming, before they are promoted to ADRs or phase work. Each file
-anchors one or more `H-*` backlog entries and records the tradeoffs the
+anchors one or more backlog tasks and records the tradeoffs the
 later ADR will need to settle.

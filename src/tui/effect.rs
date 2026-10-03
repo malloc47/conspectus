@@ -133,8 +133,8 @@ pub enum StoreOp {
     /// `request.adopt_source_mux_name` is `Some`, the executor
     /// chains a tmux rename after the write so the just-adopted
     /// mux session takes the pin's declared name — see
-    /// [`crate::tui::effect::MuxOp`]'s roadmap in
-    /// `docs/backlog.md`.
+    /// [`crate::tui::effect::MuxOp`]'s roadmap in the
+    /// backlog.
     PinCreate(PinCreateRequest),
     /// Update an existing pin entry (id / display name / harness /
     /// cwd / mux / launch argv).
