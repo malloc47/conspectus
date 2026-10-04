@@ -316,17 +316,72 @@ fn pin_launch_fails_on_unknown_id() {
         .stderr(predicate::str::contains("no pin `missing`"));
 }
 
+/// A tmux server private to one test. `TMUX` is cleared so tmux cannot
+/// reach the operator's server through an inherited client, and
+/// `TMUX_TMPDIR` puts the socket in a fresh directory. Dropping the guard
+/// kills the server and anything still running in it.
+#[cfg(unix)]
+struct PrivateTmux {
+    dir: tempfile::TempDir,
+}
+
+#[cfg(unix)]
+impl PrivateTmux {
+    fn new() -> Self {
+        // Unix socket paths are capped near 100 bytes, so keep the socket
+        // directory short rather than under a possibly long `$TMPDIR`.
+        let dir = tempfile::Builder::new()
+            .prefix("tmux")
+            .tempdir_in("/tmp")
+            .expect("private tmux dir");
+        Self { dir }
+    }
+
+    fn apply(&self, cmd: &mut Command) {
+        cmd.env_remove("TMUX")
+            .env_remove("TMUX_PANE")
+            .env("TMUX_TMPDIR", self.dir.path());
+    }
+
+    fn available() -> bool {
+        std::process::Command::new("tmux")
+            .arg("-V")
+            .output()
+            .is_ok_and(|output| output.status.success())
+    }
+}
+
+#[cfg(unix)]
+impl Drop for PrivateTmux {
+    fn drop(&mut self) {
+        let _ = std::process::Command::new("tmux")
+            .env_remove("TMUX")
+            .env("TMUX_TMPDIR", self.dir.path())
+            .arg("kill-server")
+            .output();
+    }
+}
+
+#[cfg(unix)]
 #[test]
 fn pin_launch_no_attach_prints_attach_command_when_unbound() {
-    // When a real tmux isn't available on the host (CONSPECTUS_DISABLE_TMUX
-    // turns discovery off but does not gate the launch path), the
-    // `--no-attach` branch still exercises the new_session call. On a
-    // host without tmux we expect the launch to fail with the
-    // "unavailable" message; on a host with tmux it succeeds. Either
-    // outcome confirms the unbound branch is being exercised — the
-    // test asserts the message is one of those, not a "no pin" error.
+    use std::os::unix::fs::PermissionsExt;
+
+    // The launch goes to a private tmux server and runs a stub `codex`
+    // that stays alive, so the outcome does not depend on which harnesses
+    // the host has installed or on sessions already running there.
+    // `CONSPECTUS_DISABLE_TMUX` turns off discovery but not the launch path.
     let home = tempfile::TempDir::new().expect("home");
     let project = tempfile::TempDir::new().expect("project");
+    let bin = tempfile::TempDir::new().expect("stub bin");
+    let stub = bin.path().join("codex");
+    fs::write(&stub, "#!/bin/sh\nexec sleep 600\n").expect("write stub codex");
+    fs::set_permissions(&stub, fs::Permissions::from_mode(0o755)).expect("chmod stub codex");
+    let path = std::env::join_paths(std::iter::once(bin.path().to_path_buf()).chain(
+        std::env::split_paths(&std::env::var_os("PATH").unwrap_or_default()),
+    ))
+    .expect("PATH");
+    let tmux = PrivateTmux::new();
 
     isolated_cmd(home.path())
         .current_dir(project.path())
@@ -335,24 +390,25 @@ fn pin_launch_no_attach_prints_attach_command_when_unbound() {
         .assert()
         .success();
 
-    let assert = isolated_cmd(home.path())
+    let mut launch = isolated_cmd(home.path());
+    tmux.apply(&mut launch);
+    // The pane runs the harness through `$SHELL -c`; plain `sh` keeps
+    // shell startup files from rewriting `PATH` before the stub is found.
+    let launch = launch
         .current_dir(project.path())
+        .env("PATH", &path)
+        .env("SHELL", "/bin/sh")
         .args(["pin", "launch", "ingest", "--no-attach"])
         .assert();
-    // Either tmux is present (spawned + printed attach hint) or
-    // missing (graceful "unavailable" failure). What we don't want is
-    // a "no pin" failure or an unrelated argv error.
-    let output = assert.get_output();
-    let stdout = String::from_utf8_lossy(&output.stdout).to_string();
-    let stderr = String::from_utf8_lossy(&output.stderr).to_string();
-    let combined = format!("{stdout}{stderr}");
-    assert!(
-        combined.contains("spawned `ingest`")
-            || combined.contains("tmux is unavailable")
-            || combined.contains("a tmux session named")
-            || combined.contains("tmux new-session failed"),
-        "unexpected launch output: stdout={stdout} stderr={stderr}",
-    );
+    if PrivateTmux::available() {
+        launch
+            .success()
+            .stdout(predicate::str::contains("spawned `ingest` (detached)"));
+    } else {
+        launch
+            .failure()
+            .stderr(predicate::str::contains("tmux is unavailable"));
+    }
 }
 
 #[test]
