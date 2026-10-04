@@ -84,6 +84,13 @@ fn replay_links_harness_session_to_fake_tmux_and_projects_rows() {
     );
 }
 
+/// A PID that exists on any host. Hook sidecar links stay active only
+/// while the recorded process is live in `/proc`, so a fixed PID makes
+/// the outcome depend on what else the machine is running.
+fn live_pid() -> i64 {
+    i64::from(std::process::id())
+}
+
 #[test]
 fn replay_writes_hook_spool_records_into_discovery_pipeline() {
     let mut world = ReplayWorld::new();
@@ -99,7 +106,7 @@ fn replay_writes_hook_spool_records_into_discovery_pipeline() {
         harness_key: "claude-code".to_string(),
         session_key: "current".to_string(),
         cwd: Some(work.to_string_lossy().to_string()),
-        pid: Some(123),
+        pid: Some(live_pid()),
         ppid: Some(456),
         tmux: Some(HookTmuxRecord {
             session_name: Some("editor".to_string()),
@@ -213,7 +220,7 @@ fn same_pane_hook_supersession_freshest_wins_and_tui_shows_active() {
         harness_key: "claude-code".to_string(),
         session_key: session_key.to_string(),
         cwd: Some(work.to_string_lossy().to_string()),
-        pid: Some(123),
+        pid: Some(live_pid()),
         ppid: Some(456),
         tmux: Some(HookTmuxRecord {
             session_name: Some("editor".to_string()),
@@ -542,7 +549,7 @@ fn hook_supersession_world() -> ReplayWorld {
                 harness_key: "claude-code".to_string(),
                 session_key: session_key.to_string(),
                 cwd: Some(work.to_string_lossy().to_string()),
-                pid: Some(123),
+                pid: Some(live_pid()),
                 ppid: Some(456),
                 tmux: Some(HookTmuxRecord {
                     session_name: Some("editor".to_string()),
