@@ -29,9 +29,14 @@ fn isolated_cmd(home: &Path) -> Command {
     // the tests silently pull the operator daemon's snapshot instead
     // of exercising the local discovery + render path.
     cmd.env("XDG_RUNTIME_DIR", home.join("no-daemon-runtime-dir"));
+    // Pin every XDG base directory under the temp home: CI runners set
+    // XDG_CONFIG_HOME, and any XDG variable inherited from the host would
+    // send the CLI's writes to the developer's real config, state, data,
+    // or cache.
     cmd.env("XDG_CONFIG_HOME", home.join(".config"));
-    cmd.env("XDG_CACHE_HOME", home.join(".cache"));
     cmd.env("XDG_STATE_HOME", home.join(".local").join("state"));
+    cmd.env("XDG_DATA_HOME", home.join(".local").join("share"));
+    cmd.env("XDG_CACHE_HOME", home.join(".cache"));
     cmd.env("CONSPECTUS_DISABLE_TMUX", "1");
     cmd.env("CONSPECTUS_DISABLE_FORGE", "1");
     cmd.env_remove("CONSPECTUS_CODEX_STATE");
