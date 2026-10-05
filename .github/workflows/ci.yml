@@ -18,9 +18,15 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      # rust-toolchain.toml pins the release (ADR 0110); install exactly it.
+      - name: Read pinned Rust toolchain
+        id: toolchain
+        run: echo "channel=$(sed -n 's/^channel *= *"\(.*\)"/\1/p' rust-toolchain.toml)" >> "$GITHUB_OUTPUT"
+
       - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@master
         with:
+          toolchain: ${{ steps.toolchain.outputs.channel }}
           components: clippy,rustfmt
 
       - name: Cache Cargo registry and build output

@@ -12,23 +12,32 @@
       url = "github:MrLesk/Backlog.md/c310b7087c3d8d618520bfe4b9918e1c8bc468c4";
       inputs.flake-utils.follows = "flake-utils";
     };
+    # Supplies the Rust toolchain pinned in rust-toolchain.toml (ADR 0110).
+    rust-overlay = {
+      url = "github:oxalica/rust-overlay";
+      inputs.nixpkgs.follows = "nixpkgs";
+    };
   };
 
-  outputs = { self, nixpkgs, flake-utils, backlog-md }:
+  outputs = { self, nixpkgs, flake-utils, backlog-md, rust-overlay }:
     flake-utils.lib.eachDefaultSystem (system:
       let
         pkgs = import nixpkgs {
           inherit system;
           config.allowUnfree = true;
+          overlays = [ (import rust-overlay) ];
         };
 
-        rustTools = with pkgs; [
-          cargo
-          rustc
-          rust-analyzer
-          clippy
-          rustfmt
-          cargo-nextest
+        # rust-toolchain.toml is the single source of the Rust version
+        # (ADR 0110); editors also get the standard library source and
+        # rust-analyzer.
+        rustToolchain = (pkgs.rust-bin.fromRustupToolchainFile ./rust-toolchain.toml).override {
+          extensions = [ "rust-src" "rust-analyzer" ];
+        };
+
+        rustTools = [
+          rustToolchain
+          pkgs.cargo-nextest
         ];
 
         devTools = with pkgs; [

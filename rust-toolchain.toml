@@ -1,3 +1,7 @@
 [toolchain]
-channel = "stable"
+# An exact release, so the dev shell, CI, and rustup all run the same
+# compiler and clippy (ADR 0110). To bump: change this line, update the
+# rust-overlay flake input if it predates the release, and fix whatever the
+# new clippy reports in the same change.
+channel = "1.99.0"
 components = ["clippy", "rustfmt"]
