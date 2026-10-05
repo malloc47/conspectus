@@ -2,7 +2,8 @@
 
 ## Status
 
-Accepted
+Accepted. Amended by ADR 0110: `rust-toolchain.toml` pins an exact Rust
+release rather than the stable channel, and the dev shell and CI read it.
 
 ## Context
 

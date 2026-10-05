@@ -2,7 +2,8 @@
 
 ## Status
 
-Accepted
+Accepted. Amended by ADR 0110: the toolchain file pins an exact release,
+so the MSRV is that pinned version.
 
 ## Context
 
