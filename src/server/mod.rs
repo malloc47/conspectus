@@ -830,6 +830,10 @@ fn run_full_rebuild(ctx: &DispatchCtx) -> Result<()> {
 /// disk problem does not stall the daemon's in-memory state —
 /// socket readers still see the latest snapshot, and the next
 /// cycle's prior is still warm.
+///
+/// The in-memory caches update before the file is written, so a client
+/// that sees `graph.bin` can always fetch the same snapshot over the
+/// socket rather than finding the daemon not yet ready.
 fn publish_snapshot(
     snapshot: GraphSnapshot,
     snapshot_bytes: &SnapshotBytes,
@@ -857,20 +861,19 @@ fn publish_snapshot_to_path(
             return;
         }
     };
-    if let Err(err) = snapshot::write_atomic_bytes(path, &bytes) {
+    let arc = Arc::new(bytes);
+    *snapshot_bytes
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner) = Some(Arc::clone(&arc));
+    store_snapshot_state(snapshot_state, snapshot);
+    if let Err(err) = snapshot::write_atomic_bytes(path, &arc) {
+        // The caches above already hold the snapshot, so socket readers
+        // see it even though the file write failed.
         eprintln!(
             "conspectus serve: snapshot write to {} failed (cache still updated): {err:#}",
             path.display()
         );
-        // Fall through to the cache update — readers connected
-        // over the socket should still see the new snapshot even
-        // if the on-disk file write failed.
     }
-    let arc = Arc::new(bytes);
-    *snapshot_bytes
-        .lock()
-        .unwrap_or_else(PoisonError::into_inner) = Some(arc);
-    store_snapshot_state(snapshot_state, snapshot);
 }
 
 fn store_snapshot_state(snapshot_state: &SnapshotState, snapshot: GraphSnapshot) {
