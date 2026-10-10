@@ -682,27 +682,29 @@ pub(super) fn provenance_label(provenance: Provenance) -> &'static str {
 }
 
 pub(super) fn project_store_path(scan_roots: &[PathBuf]) -> Result<PathBuf> {
-    let cwd = std::env::current_dir()?;
     let loader = ConfigLoader::from_env();
-    let roots = effective_scan_roots(scan_roots, &cwd);
+    let roots = if scan_roots.is_empty() {
+        vec![crate::cwd::for_default_target("--scan-root <project dir>")?]
+    } else {
+        scan_roots.to_vec()
+    };
 
     for root in &roots {
         if let Some(path) = loader.locate_project_config(root) {
             return Ok(path);
         }
     }
-    // No existing project config along any scan root: fall back to the
-    // first scan root (or cwd) and create one there.
-    let fallback = roots.first().cloned().unwrap_or(cwd);
-    Ok(fallback.join(PROJECT_CONFIG_FILENAME))
+    // No existing project config along any scan root: create one in
+    // the first scan root (the cwd when none was given).
+    Ok(roots[0].join(PROJECT_CONFIG_FILENAME))
 }
 
-/// Effective list of roots used for nearest-store probing. If the caller
-/// did not pass any `--scan-root`, we default to the current working
-/// directory.
-pub(super) fn effective_scan_roots(scan_roots: &[PathBuf], cwd: &Path) -> Vec<PathBuf> {
+/// Effective list of roots used for nearest-store probing: the
+/// `--scan-root` flags, else the current working directory when it
+/// still exists, else none (ADR 0111).
+pub(super) fn effective_scan_roots(scan_roots: &[PathBuf], cwd: Option<&Path>) -> Vec<PathBuf> {
     if scan_roots.is_empty() {
-        vec![cwd.to_path_buf()]
+        cwd.map(Path::to_path_buf).into_iter().collect()
     } else {
         scan_roots.to_vec()
     }
@@ -716,10 +718,10 @@ pub(super) fn effective_scan_roots(scan_roots: &[PathBuf], cwd: &Path) -> Vec<Pa
 /// path would surprise operators who expected the cache to
 /// track their last render.
 pub(super) fn discover_for_store_selection(scan_roots: &[PathBuf]) -> Result<GraphSnapshot> {
-    let cwd = std::env::current_dir()?;
-    let roots = effective_scan_roots(scan_roots, &cwd);
+    let cwd = crate::cwd::current();
+    let roots = effective_scan_roots(scan_roots, cwd.as_deref());
     let loader = ConfigLoader::from_env();
-    let outcome = loader.load_from(&cwd);
+    let outcome = loader.load(cwd.as_deref());
     let discovery_config = crate::discovery::LocalDiscoveryConfig::from_env();
     let snapshot = crate::discovery::discover_local_warm_with(
         roots,
@@ -750,8 +752,8 @@ pub(super) fn candidate_store_paths(
     );
 
     if include_project {
-        let cwd = std::env::current_dir()?;
-        let roots = effective_scan_roots(scan_roots, &cwd);
+        let cwd = crate::cwd::current();
+        let roots = effective_scan_roots(scan_roots, cwd.as_deref());
         let mut seen = BTreeSet::new();
         for root in roots {
             if let Some(path) = loader.locate_project_config(root)

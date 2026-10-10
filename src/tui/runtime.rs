@@ -10,7 +10,6 @@
 //! refreshes (manual `r` or timer-driven) dispatch through the
 //! background channel and never block input.
 
-use std::path::PathBuf;
 use std::process::Output;
 use std::sync::mpsc;
 use std::time::{Duration, Instant};
@@ -1018,11 +1017,7 @@ pub(super) fn discover_and_resolve(config: &RunConfig) -> Result<crate::model::G
     {
         return Ok(snapshot);
     }
-    let roots: Vec<PathBuf> = if config.scan_roots.is_empty() {
-        vec![std::env::current_dir()?]
-    } else {
-        config.scan_roots.clone()
-    };
+    let roots = config.scan_roots.effective();
     // The on-disk warm-start prior was the previous
     // graph.sqlite. With graph.sqlite retired, the daemonless
     // cold-rebuild path runs every provider from scratch each
@@ -1158,16 +1153,7 @@ fn selection_node_id(row: &crate::tui::rows::RowId) -> Option<crate::model::Node
 /// Whether a worktree mutation backend is available (config selection +
 /// `wt` on PATH). Governs whether the menu offers mutating actions.
 fn worktree_mutation_available() -> bool {
-    let selection = std::env::current_dir()
-        .ok()
-        .map(|cwd| {
-            crate::config::ConfigLoader::from_env()
-                .load_from(&cwd)
-                .config
-                .worktree
-                .backend
-        })
-        .unwrap_or_default();
+    let selection = crate::config::load_from_cwd().config.worktree.backend;
     crate::discovery::worktree::resolve_mutation_backend(
         selection,
         crate::discovery::worktree::worktrunk_available(),

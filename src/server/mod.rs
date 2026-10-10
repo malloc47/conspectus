@@ -142,9 +142,9 @@ impl SchedulerState {
 /// `[server.intervals]` + `--scan-root` + the discovered cwd.
 #[derive(Debug, Clone)]
 pub struct ServeConfig {
-    /// Discovery scan roots. Empty means "use the process cwd"
-    /// just like the one-shot CLI's default.
-    pub scan_roots: Vec<PathBuf>,
+    /// Discovery scan roots: explicit roots, or the launch directory
+    /// while it still exists (ADR 0111).
+    pub scan_roots: crate::cwd::ScanRoots,
     /// Per-class warm-start TTL intervals. Each class gets its
     /// own scheduler thread that ticks on its interval.
     pub intervals: ServerIntervals,
@@ -309,7 +309,7 @@ pub type SnapshotState = Arc<Mutex<Option<GraphSnapshot>>>;
 /// `Arc`).
 #[derive(Clone)]
 struct DispatchCtx {
-    scan_roots: Arc<Vec<PathBuf>>,
+    scan_roots: Arc<crate::cwd::ScanRoots>,
     intervals: Arc<ServerIntervals>,
     writer_lock: Arc<Mutex<()>>,
     state: Arc<Mutex<SchedulerState>>,
@@ -803,7 +803,7 @@ fn run_full_rebuild(ctx: &DispatchCtx) -> Result<()> {
     let discovery_config =
         LocalDiscoveryConfig::from_env().with_caches(Arc::clone(&ctx.discovery_caches));
     let snapshot = discover_local_warm_with(
-        ctx.scan_roots.to_vec(),
+        ctx.scan_roots.effective(),
         discovery_config,
         GraphSnapshot::empty(),
         &ctx.intervals,
@@ -1004,9 +1004,14 @@ fn socket_listener_loop(listener: UnixListener, ctx: DispatchCtx, shutdown: &Ato
 /// thread has observed the shutdown flag, finished its in-flight
 /// cycle, and exited.
 pub fn run(config: ServeConfig) -> Result<()> {
+    let launch_note = if config.scan_roots.launch_dir_root().is_some() {
+        " (launch directory; skipped while it doesn't exist)"
+    } else {
+        ""
+    };
     eprintln!(
-        "conspectus serve: starting; per-class scheduler; scan roots = {:?}",
-        config.scan_roots
+        "conspectus serve: starting; per-class scheduler; scan roots = {:?}{launch_note}",
+        config.scan_roots.effective()
     );
 
     let socket_path = socket_path();
@@ -1357,7 +1362,7 @@ fn try_class_cycle(class: ProviderClass, ctx: &DispatchCtx) -> Result<()> {
     let discovery_config =
         LocalDiscoveryConfig::from_env().with_caches(Arc::clone(&ctx.discovery_caches));
     let snapshot = discover_local_warm_with(
-        ctx.scan_roots.to_vec(),
+        ctx.scan_roots.effective(),
         discovery_config,
         prior,
         &ctx.intervals,

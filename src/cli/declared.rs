@@ -77,9 +77,9 @@ struct DeclaredListArgs {
 impl DeclaredListArgs {
     fn run(self) -> Result<()> {
         let loader = config::ConfigLoader::from_env();
-        let cwd = std::env::current_dir()?;
+        let cwd = crate::cwd::current();
         let scan_roots = if self.scan_roots.is_empty() {
-            vec![cwd]
+            cwd.into_iter().collect()
         } else {
             self.scan_roots
         };

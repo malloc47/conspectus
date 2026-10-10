@@ -483,7 +483,7 @@ fn claude_settings_path(scope: HookScopeFlag) -> Result<PathBuf> {
             Ok(home.join(".claude").join("settings.json"))
         }
         HookScopeFlag::Project => {
-            let cwd = std::env::current_dir()?;
+            let cwd = crate::cwd::for_default_target("--scope user")?;
             Ok(cwd.join(".claude").join("settings.json"))
         }
     }
@@ -503,7 +503,7 @@ fn codex_config_path(scope: HookScopeFlag) -> Result<PathBuf> {
             Ok(home.join("config.toml"))
         }
         HookScopeFlag::Project => {
-            let cwd = std::env::current_dir()?;
+            let cwd = crate::cwd::for_default_target("--scope user")?;
             Ok(cwd.join(".codex").join("config.toml"))
         }
     }

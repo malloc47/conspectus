@@ -3222,9 +3222,15 @@ mod reducer_effects {
         match &effects[0] {
             Effect::Exec(ExecSpec::Resume(crate::tui::resume::ResumeTarget::Launch {
                 label,
+                cwd,
                 ..
             })) => {
                 assert_eq!(label, "Session One");
+                assert_eq!(
+                    cwd,
+                    std::path::Path::new("/p/project"),
+                    "resume runs in the session's cwd, not the TUI's"
+                );
             }
             other => panic!("expected Exec(Resume(Launch)), got {other:?}"),
         }

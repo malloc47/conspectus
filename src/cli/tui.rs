@@ -255,12 +255,12 @@ impl TuiArgs {
             })?;
         let color = resolve_color_from_env(self.color, io::stdout().is_terminal());
 
-        // Resolve scan roots: CLI flags win, then config, then a
-        // single-element fallback to the current working directory
-        // (the original cwd-scoped v1 behavior).
-        let cwd = std::env::current_dir()?;
+        // Resolve scan roots: CLI flags win, then config, then the
+        // launch directory, which each refresh re-checks so deleting
+        // it after launch can't break discovery (ADR 0111).
+        let cwd = crate::cwd::current();
         let loader = config::ConfigLoader::from_env();
-        let outcome = loader.load_from(&cwd);
+        let outcome = loader.load(cwd.as_deref());
         for diagnostic in &outcome.diagnostics {
             eprintln!(
                 "conspectus: warning: {}: {}",
@@ -268,13 +268,11 @@ impl TuiArgs {
                 diagnostic.message
             );
         }
-        let scan_roots = if !self.scan_roots.is_empty() {
-            self.scan_roots
-        } else if !outcome.config.tui.scan_roots.is_empty() {
-            outcome.config.tui.scan_roots.clone()
-        } else {
-            vec![cwd.clone()]
-        };
+        let scan_roots = crate::cwd::ScanRoots::resolve(
+            self.scan_roots,
+            &outcome.config.tui.scan_roots,
+            cwd.clone(),
+        );
 
         // View precedence:
         //   1. explicit `--view` flag wins.
@@ -368,7 +366,7 @@ impl TuiArgs {
 
         let config = crate::tui::RunConfig {
             scan_roots,
-            cwd: Some(cwd),
+            cwd,
             default_view: view,
             default_sort,
             sessions_grouping,

@@ -67,9 +67,9 @@ struct NodeShowArgs {
 
 impl NodeShowArgs {
     fn run(self) -> Result<()> {
-        let cwd = std::env::current_dir()?;
+        let cwd = crate::cwd::current();
         let loader = config::ConfigLoader::from_env();
-        let outcome = loader.load_from(&cwd);
+        let outcome = loader.load(cwd.as_deref());
         for diagnostic in &outcome.diagnostics {
             eprintln!(
                 "conspectus: warning: {}: {}",
@@ -78,7 +78,7 @@ impl NodeShowArgs {
             );
         }
         let roots: Vec<PathBuf> = if self.scan_roots.is_empty() {
-            vec![cwd]
+            cwd.into_iter().collect()
         } else {
             self.scan_roots.clone()
         };

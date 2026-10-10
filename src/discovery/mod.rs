@@ -125,6 +125,9 @@ pub enum DiscoveryError {
         #[source]
         source: std::io::Error,
     },
+    /// No longer produced: a missing current directory means no
+    /// implicit root (ADR 0111). Kept so matches on the public enum
+    /// keep compiling.
     #[error("failed to read current directory")]
     CurrentDir(#[source] std::io::Error),
     /// A provider's `discover` failed. `provider_keys` names the
@@ -154,8 +157,10 @@ pub struct DiscoveryContext {
 }
 
 impl DiscoveryContext {
+    /// Roots from the current working directory, or none when it is
+    /// gone (ADR 0111).
     pub fn from_current_dir() -> Result<Self, DiscoveryError> {
-        Self::from_roots([env::current_dir().map_err(DiscoveryError::CurrentDir)?])
+        Self::from_roots(crate::cwd::current())
     }
 
     pub fn from_root(root: impl Into<PathBuf>) -> Self {

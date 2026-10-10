@@ -80,7 +80,7 @@ impl MuxNewArgs {
         }
         let cwd = match self.cwd {
             Some(cwd) => cwd,
-            None => std::env::current_dir()?,
+            None => crate::cwd::for_default_target("--cwd <path>")?,
         };
         if !cwd.is_dir() {
             bail!(
@@ -172,7 +172,7 @@ impl MuxLaunchArgs {
             }
             (None, None) => match self.cwd {
                 Some(cwd) => cwd,
-                None => std::env::current_dir()?,
+                None => crate::cwd::for_default_target("--cwd <path>")?,
             },
         };
         if !cwd.is_dir() {

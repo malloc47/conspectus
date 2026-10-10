@@ -7,16 +7,7 @@ use crate::tui::messages::LogEntry;
 /// remove, or a human-readable reason it's unavailable.
 pub(super) fn resolve_worktree_mutation_backend()
 -> Result<Box<dyn crate::discovery::worktree::WorktreeBackend>, String> {
-    let selection = std::env::current_dir()
-        .ok()
-        .map(|cwd| {
-            crate::config::ConfigLoader::from_env()
-                .load_from(&cwd)
-                .config
-                .worktree
-                .backend
-        })
-        .unwrap_or_default();
+    let selection = crate::config::load_from_cwd().config.worktree.backend;
     match crate::discovery::worktree::resolve_mutation_backend(
         selection,
         crate::discovery::worktree::worktrunk_available(),
@@ -193,16 +184,10 @@ pub(super) fn execute_worktree_close_down(
         }
     };
 
-    let grace = std::env::current_dir().ok().map_or_else(
-        || std::time::Duration::from_secs(3),
-        |cwd| {
-            crate::config::ConfigLoader::from_env()
-                .load_from(&cwd)
-                .config
-                .worktree
-                .teardown_grace
-        },
-    );
+    let grace = crate::config::load_from_cwd()
+        .config
+        .worktree
+        .teardown_grace;
 
     let result = execute_close_down(
         &plan,

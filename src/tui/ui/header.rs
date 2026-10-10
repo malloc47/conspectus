@@ -516,8 +516,16 @@ pub(super) fn default_action_status_hint(app: &App) -> String {
             if let RowKind::AgentSession(session) = &row.kind
                 && matches!(session.mux_state, MuxIndicator::Unmuxed)
             {
-                let resume = crate::tui::resume::resolve_resume_target(&session.session);
-                if matches!(resume, crate::tui::resume::ResumeTarget::Launch { .. }) {
+                let resume = app.snapshot_handle().map(|handle| {
+                    crate::tui::resume::resolve_resume_target_in(
+                        handle.snapshot(),
+                        &session.session,
+                    )
+                });
+                if matches!(
+                    resume,
+                    Some(crate::tui::resume::ResumeTarget::Launch { .. })
+                ) {
                     return format!("Enter/v view {} · S resume", compact_session_label(session));
                 }
                 return format!("Enter/v view {}", compact_session_label(session));

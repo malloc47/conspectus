@@ -72,8 +72,7 @@ impl WorktreeArgs {
 /// Resolve the mutation backend from `[worktree] backend` + `wt`
 /// availability, erroring clearly when none is available.
 fn mutation_backend() -> Result<Box<dyn crate::discovery::worktree::WorktreeBackend>> {
-    let cwd = std::env::current_dir()?;
-    let outcome = ConfigLoader::from_env().load_from(&cwd);
+    let outcome = ConfigLoader::from_env().load(crate::cwd::current().as_deref());
     match resolve_mutation_backend(outcome.config.worktree.backend, worktrunk_available())? {
         Some(backend) => Ok(backend),
         None => bail!(
@@ -100,7 +99,7 @@ impl WorktreeNewArgs {
     fn run(self) -> Result<()> {
         let repo_root = match self.repo {
             Some(path) => path,
-            None => std::env::current_dir()?,
+            None => crate::cwd::for_default_target("--repo <path>")?,
         };
         let backend = mutation_backend()?;
         let outcome = backend.create(&WorktreeCreateRequest {
@@ -141,7 +140,7 @@ impl WorktreeRmArgs {
     fn run(self) -> Result<()> {
         let repo_root = match &self.repo {
             Some(path) => path.clone(),
-            None => std::env::current_dir()?,
+            None => crate::cwd::for_default_target("--repo <path>")?,
         };
 
         // Live-session guard: discover, find the worktree's path, and
@@ -206,7 +205,7 @@ impl WorktreeMergeArgs {
     fn run(self) -> Result<()> {
         let repo_root = match &self.repo {
             Some(path) => path.clone(),
-            None => std::env::current_dir()?,
+            None => crate::cwd::for_default_target("--repo <path>")?,
         };
         let snapshot = discover_for_store_selection(std::slice::from_ref(&repo_root))?;
         let Some(worktree_root) = worktree_path_for_branch(&snapshot, &self.branch) else {
@@ -305,7 +304,7 @@ impl WorktreeCloseArgs {
 
         let repo_root = match &self.repo {
             Some(path) => path.clone(),
-            None => std::env::current_dir()?,
+            None => crate::cwd::for_default_target("--repo <path>")?,
         };
         let config = ConfigLoader::from_env().load_from(&repo_root).config;
 
@@ -388,7 +387,7 @@ impl WorktreePruneArgs {
     fn run(self) -> Result<()> {
         let repo_root = match &self.repo {
             Some(path) => path.clone(),
-            None => std::env::current_dir()?,
+            None => crate::cwd::for_default_target("--repo <path>")?,
         };
 
         // Removing merged worktrees is bulk + destructive, so confirm

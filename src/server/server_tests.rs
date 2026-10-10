@@ -62,7 +62,7 @@ fn hook_ingest_updates_snapshot_state_and_published_bytes() {
         ..GraphSnapshot::empty()
     })));
     let ctx = DispatchCtx {
-        scan_roots: Arc::new(Vec::new()),
+        scan_roots: Arc::new(crate::cwd::ScanRoots::default()),
         intervals: Arc::new(ServerIntervals::default()),
         writer_lock: Arc::new(Mutex::new(())),
         state: Arc::new(Mutex::new(SchedulerState::default())),

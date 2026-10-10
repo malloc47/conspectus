@@ -1213,3 +1213,33 @@ fn tui_theme_badge_width_rejects_values_below_the_minimum_or_non_integers() {
         );
     }
 }
+
+#[test]
+fn load_without_anchor_skips_the_project_walk_and_keeps_user_config() {
+    // ADR 0111: a deleted launch directory leaves no anchor; user
+    // config still applies and nothing errors.
+    let temp = TempDir::new().expect("temp dir");
+    let xdg = temp.path().join("xdg");
+    fs::create_dir_all(xdg.join("conspectus")).expect("create xdg dir");
+    write_file(
+        &xdg.join("conspectus").join("config.toml"),
+        "[tui]\nnarrow_layout_threshold = 90\n",
+    );
+    let project = temp.path().join("project");
+    fs::create_dir(&project).expect("create project dir");
+    write_file(
+        &project.join(PROJECT_CONFIG_FILENAME),
+        "[tui]\nnarrow_layout_threshold = 80\n",
+    );
+    let loader = ConfigLoader::new()
+        .with_home(temp.path())
+        .with_xdg_config_home(&xdg);
+
+    let anchored = loader.load(Some(&project));
+    assert_eq!(anchored.config.tui.narrow_layout_threshold, 80);
+
+    let unanchored = loader.load(None);
+    assert!(unanchored.diagnostics.is_empty());
+    assert!(unanchored.project_path.is_none());
+    assert_eq!(unanchored.config.tui.narrow_layout_threshold, 90);
+}

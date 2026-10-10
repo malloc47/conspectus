@@ -941,8 +941,9 @@ fn realize_worktree_cwd(pin: &crate::model::PinCandidate) -> Result<PathBuf> {
     }
 
     // 2. Create it via the configured mutation backend.
-    let cwd = std::env::current_dir()?;
-    let config = ConfigLoader::from_env().load_from(&cwd).config;
+    let config = ConfigLoader::from_env()
+        .load(crate::cwd::current().as_deref())
+        .config;
     let Some(backend) = resolve_mutation_backend(config.worktree.backend, worktrunk_available())?
     else {
         bail!(
@@ -1220,8 +1221,8 @@ fn resolve_pin_write_store(
 /// same-id user pin, matching the resolver's local-over-global rule.
 fn candidate_pin_store_paths(scan_roots: &[PathBuf]) -> Result<Vec<PathBuf>> {
     let loader = ConfigLoader::from_env();
-    let cwd = std::env::current_dir()?;
-    let roots = effective_scan_roots(scan_roots, &cwd);
+    let cwd = crate::cwd::current();
+    let roots = effective_scan_roots(scan_roots, cwd.as_deref());
     let mut paths = Vec::new();
     let mut seen = BTreeSet::new();
     for root in roots {

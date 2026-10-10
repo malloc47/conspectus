@@ -12,6 +12,8 @@ pub mod api;
 #[doc(hidden)]
 pub mod cli;
 pub mod config;
+#[doc(hidden)]
+pub mod cwd;
 pub mod declared;
 #[cfg(any(test, debug_assertions))]
 #[doc(hidden)]

@@ -1308,7 +1308,12 @@ impl App {
                         effects.push(Effect::Toast("resume: select an agent session".to_string()));
                         return effects;
                     };
-                let target = crate::tui::resume::resolve_resume_target(&session_id);
+                let Some(handle) = self.snapshot_handle() else {
+                    effects.push(Effect::Toast("resume: no snapshot loaded".to_string()));
+                    return effects;
+                };
+                let target =
+                    crate::tui::resume::resolve_resume_target_in(handle.snapshot(), &session_id);
                 match &target {
                     crate::tui::resume::ResumeTarget::Launch { .. } => {
                         effects.push(Effect::Exec(ExecSpec::Resume(target)));

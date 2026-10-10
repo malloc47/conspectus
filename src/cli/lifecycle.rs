@@ -25,9 +25,9 @@ pub(super) struct ServeArgs {
 
 impl ServeArgs {
     pub(super) fn run(self) -> Result<()> {
-        let cwd = std::env::current_dir()?;
+        let cwd = crate::cwd::current();
         let loader = config::ConfigLoader::from_env();
-        let outcome = loader.load_from(&cwd);
+        let outcome = loader.load(cwd.as_deref());
         for diagnostic in &outcome.diagnostics {
             eprintln!(
                 "conspectus: warning: {}: {}",
@@ -35,11 +35,9 @@ impl ServeArgs {
                 diagnostic.message
             );
         }
-        let scan_roots: Vec<PathBuf> = if self.scan_roots.is_empty() {
-            vec![cwd]
-        } else {
-            self.scan_roots
-        };
+        // The launch directory is re-checked each tick, so deleting it
+        // drops the root instead of failing discovery (ADR 0111).
+        let scan_roots = crate::cwd::ScanRoots::resolve(self.scan_roots, &[], cwd);
         crate::server::run(crate::server::ServeConfig {
             scan_roots,
             intervals: outcome.config.server.intervals,
@@ -110,9 +108,9 @@ impl RefreshArgs {
         // we load the prior, evict the class, re-run discovery,
         // resolve, and persist, mirroring the daemon's
         // try_class_cycle.
-        let cwd = std::env::current_dir()?;
+        let cwd = crate::cwd::current();
         let loader = config::ConfigLoader::from_env();
-        let outcome = loader.load_from(&cwd);
+        let outcome = loader.load(cwd.as_deref());
         for diagnostic in &outcome.diagnostics {
             eprintln!(
                 "conspectus: warning: {}: {}",
@@ -121,7 +119,7 @@ impl RefreshArgs {
             );
         }
         let roots: Vec<PathBuf> = if self.scan_roots.is_empty() {
-            vec![cwd]
+            cwd.into_iter().collect()
         } else {
             self.scan_roots
         };

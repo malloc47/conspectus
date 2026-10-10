@@ -218,7 +218,7 @@ impl ScenarioWorld {
 
     pub fn tui_config(&self, view: View, color: bool) -> RunConfig {
         RunConfig {
-            scan_roots: self.scan_roots.clone(),
+            scan_roots: crate::cwd::ScanRoots::explicit(self.scan_roots.clone()),
             cwd: Some(self.root.clone()),
             default_view: view,
             default_sort: Sort::Hierarchy,

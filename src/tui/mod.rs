@@ -53,9 +53,9 @@ pub use theme::Theme;
 /// any other CLI state — every input arrives here.
 #[derive(Debug, Clone)]
 pub struct RunConfig {
-    /// Discovery scan roots. Empty means "discover from the current
-    /// working directory" at runtime.
-    pub scan_roots: Vec<PathBuf>,
+    /// Discovery scan roots: explicit roots, or the launch directory
+    /// while it still exists (ADR 0111).
+    pub scan_roots: crate::cwd::ScanRoots,
     /// Process working directory at launch. Treated as an
     /// orientation hint only: the row tree highlights the matching
     /// group row and pre-selects it at startup. None disables the
@@ -147,7 +147,7 @@ impl RunConfig {
     /// Builds a config with v1 defaults. Useful for tests.
     pub fn defaults() -> Self {
         Self {
-            scan_roots: Vec::new(),
+            scan_roots: crate::cwd::ScanRoots::default(),
             cwd: None,
             default_view: View::Sessions,
             default_sort: Sort::Hierarchy,

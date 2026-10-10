@@ -4,7 +4,8 @@
 //! `[table.<rows>]` schema introduced alongside `conspectus table
 //! <ROWS>`. The CLI typically calls [`load_from_cwd`], which walks the
 //! current directory upward looking for `.conspectus.toml` and merges
-//! that on top of the user-level config. Tests usually construct a
+//! that on top of the user-level config. When the current directory is
+//! gone, only the user-level config applies (ADR 0111). Tests usually construct a
 //! [`ConfigLoader`] directly so they can inject paths and a fake
 //! `$HOME` boundary.
 
@@ -578,6 +579,13 @@ impl ConfigLoader {
 
     /// Load and merge config from `cwd`. See ADR 0012 for precedence.
     pub fn load_from(&self, cwd: impl AsRef<Path>) -> LoadOutcome {
+        self.load(Some(cwd.as_ref()))
+    }
+
+    /// Load user config, then the project config found walking up from
+    /// `anchor`. With no anchor (the launch directory is gone, ADR
+    /// 0111) only the user config applies.
+    pub fn load(&self, anchor: Option<&Path>) -> LoadOutcome {
         let mut outcome = LoadOutcome::default();
         let mut config = Config::default();
 
@@ -593,7 +601,7 @@ impl ConfigLoader {
             );
         }
 
-        if let Some(path) = self.locate_project_config(cwd) {
+        if let Some(path) = anchor.and_then(|anchor| self.locate_project_config(anchor)) {
             outcome.project_path = Some(path.clone());
             merge_from_file(
                 &mut config,
@@ -609,10 +617,10 @@ impl ConfigLoader {
 }
 
 /// Convenience wrapper: build a loader from the environment and load
-/// from the current working directory.
-pub fn load_from_cwd() -> std::io::Result<LoadOutcome> {
-    let cwd = std::env::current_dir()?;
-    Ok(ConfigLoader::from_env().load_from(cwd))
+/// from the current working directory, or user config alone when the
+/// directory is gone.
+pub fn load_from_cwd() -> LoadOutcome {
+    ConfigLoader::from_env().load(crate::cwd::current().as_deref())
 }
 
 fn merge_from_file(
