@@ -47,6 +47,7 @@ How providers read local state, and how agent sessions get attributed to tmux pa
 | [0066](0066-agent-deck-instance-titles-as-workspace-names.md) | Agent-Deck Instance Titles As Workspace Display Names | Accepted |
 | [0088](0088-provider-descriptor-registry.md) | Provider Descriptor Registry | Accepted |
 | [0089](0089-mux-backend-trait.md) | Mux Backend Trait | Accepted |
+| [0111](0111-launch-directory-is-optional.md) | The Launch Directory Is An Optional Input | Accepted |
 
 ## User intent and the write envelope
 

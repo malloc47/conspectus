@@ -105,7 +105,8 @@ See ADR 0012 for the layout and precedence rules. Briefly:
 
 1. **Project-local**: Conspectus walks upward from the current
    directory looking for `.conspectus.toml`, stopping at `$HOME` or
-   the filesystem root.
+   the filesystem root. The walk is skipped when the current directory
+   no longer exists (ADR 0111).
 2. **User-level**: `$XDG_CONFIG_HOME/conspectus/config.toml`, falling
    back to `$HOME/.config/conspectus/config.toml`.
 
@@ -445,7 +446,13 @@ generic resolver ordering plus the specialized `linked_to_mux` and
 
 All commands run from the current working directory by default;
 passing one or more `--scan-root` flags overrides that with explicit
-roots.
+roots. The working directory is optional (ADR 0111): if it's been
+deleted, discovery runs without it and config comes from the user file
+alone. The TUI and `serve` re-check it on every refresh, so deleting
+the directory they were started in drops it rather than breaking them.
+Commands that default a target to "here" (`mux new`, `mux launch`, the
+`worktree` mutations, `hook --scope project`) say which flag to pass
+instead.
 
 ## Renaming sessions
 

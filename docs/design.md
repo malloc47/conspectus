@@ -374,7 +374,10 @@ The sane default is:
   reader plus a `logs_*.sqlite` linker that resolves the active thread for
   each live Codex pid by parsing `process_uuid = pid:<os_pid>:<uuid>`
   within a 15-minute freshness window (ADR 0048)
-- inspect cwd and explicitly configured scan roots
+- inspect cwd and explicitly configured scan roots; the launch
+  directory is optional, so a deleted one is skipped rather than
+  failing discovery, and long-running processes re-check it on every
+  run (ADR 0111)
 - read known workspace metadata from supported providers when a workspace is
   discovered
 - inspect git metadata for discovered repos/checkouts
