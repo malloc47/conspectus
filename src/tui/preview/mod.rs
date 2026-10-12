@@ -9,12 +9,18 @@
 //! refresh is open work (backlog `CSP-185`); until then
 //! `RunConfig::mux_preview_interval` is parsed but unused.
 
+mod path;
+
 use std::collections::{BTreeMap, BTreeSet};
+use std::path::PathBuf;
 use std::time::Instant;
+
+use ratatui::text::Line;
 
 use crate::discovery::tmux::{MuxBackend, PaneCapture, TmuxCaptureOutcome};
 use crate::model::{AgentSessionId, GraphNode, MuxSessionId, NodeId};
 use crate::tui::app::App;
+use crate::tui::explorer::FieldValue;
 use crate::tui::rows::{MuxIndicator, RowId, RowKind};
 use crate::tui::viewer_bridge::{TranscriptMissing, load_transcript};
 use crate::viewer::state::ViewerState;
@@ -26,12 +32,38 @@ pub enum PreviewSource {
     Pane(MuxSessionId),
     /// An agent session's transcript, read by the native viewer.
     Transcript(AgentSessionId),
+    /// A path on disk: a directory's listing or a file's contents.
+    Path(PathBuf),
 }
 
-/// Transcripts kept in the cache at once. Parsed transcripts can be
-/// large, and only the few most recently previewed are likely to be
-/// selected again soon.
+impl PreviewSource {
+    /// Whether the source is conversation or terminal content, which
+    /// `--no-live-preview` hides (ADR 0112 §6).
+    pub fn is_live(&self) -> bool {
+        matches!(self, Self::Pane(_) | Self::Transcript(_))
+    }
+
+    /// How many entries of this source's kind the cache keeps.
+    /// Parsed transcripts can be large, and only the few most recently
+    /// previewed are likely to be selected again soon; other loaded
+    /// content is capped where it's read.
+    fn cache_cap(&self) -> Option<usize> {
+        match self {
+            Self::Pane(_) => None,
+            Self::Transcript(_) => Some(MAX_CACHED_TRANSCRIPTS),
+            Self::Path(_) => Some(MAX_CACHED_OTHER),
+        }
+    }
+
+    fn same_kind(&self, other: &Self) -> bool {
+        std::mem::discriminant(self) == std::mem::discriminant(other)
+    }
+}
+
+/// Transcripts kept in the cache at once.
 const MAX_CACHED_TRANSCRIPTS: usize = 8;
+/// Entries of each other loaded kind kept in the cache at once.
+const MAX_CACHED_OTHER: usize = 64;
 
 /// In-memory cache of loaded previews, keyed by source. Plain data —
 /// no I/O, no locks — so the reducer can carry it directly on
@@ -61,6 +93,8 @@ pub enum PreviewContent {
     /// A parsed transcript, in the viewer state the preview renders it
     /// with, so its composed lines are cached alongside it.
     Transcript(Box<ViewerState>),
+    /// Lines a loader composed: a listing, a file's contents.
+    Lines(Vec<Line<'static>>),
     /// The runner reported the target doesn't exist.
     NoTarget,
     /// Nothing to load, with the reason: tmux is missing, or the
@@ -79,6 +113,7 @@ impl PartialEq for PreviewContent {
         match (self, other) {
             (Self::Text(a), Self::Text(b)) => a == b,
             (Self::Transcript(a), Self::Transcript(b)) => a.document == b.document,
+            (Self::Lines(a), Self::Lines(b)) => a == b,
             (Self::NoTarget, Self::NoTarget) | (Self::Unsupported, Self::Unsupported) => true,
             (Self::Unavailable(a), Self::Unavailable(b)) | (Self::Failed(a), Self::Failed(b)) => {
                 a == b
@@ -114,8 +149,7 @@ impl PreviewStore {
     }
 
     /// Store a loaded preview, ending its load and clearing any stale
-    /// mark. Evicts the oldest transcripts past
-    /// [`MAX_CACHED_TRANSCRIPTS`].
+    /// mark. Evicts the oldest entries of its kind past the kind's cap.
     pub fn insert(&mut self, source: PreviewSource, content: PreviewContent) {
         self.insert_at(source, content, Instant::now());
     }
@@ -124,7 +158,7 @@ impl PreviewStore {
     /// entries without sleeping.
     pub fn insert_at(&mut self, source: PreviewSource, content: PreviewContent, at: Instant) {
         self.loading.remove(&source);
-        let is_transcript = matches!(source, PreviewSource::Transcript(_));
+        let kind = source.clone();
         self.entries.insert(
             source,
             PreviewEntry {
@@ -133,24 +167,25 @@ impl PreviewStore {
                 stale: false,
             },
         );
-        if is_transcript {
-            self.evict_old_transcripts();
-        }
+        self.evict_oldest_of(&kind);
     }
 
-    fn evict_old_transcripts(&mut self) {
-        let mut transcripts: Vec<(Option<Instant>, PreviewSource)> = self
+    fn evict_oldest_of(&mut self, kind: &PreviewSource) {
+        let Some(cap) = kind.cache_cap() else {
+            return;
+        };
+        let mut same: Vec<(Option<Instant>, PreviewSource)> = self
             .entries
             .iter()
-            .filter(|(source, _)| matches!(source, PreviewSource::Transcript(_)))
+            .filter(|(source, _)| source.same_kind(kind))
             .map(|(source, entry)| (entry.captured_at, source.clone()))
             .collect();
-        if transcripts.len() <= MAX_CACHED_TRANSCRIPTS {
+        if same.len() <= cap {
             return;
         }
-        transcripts.sort();
-        let excess = transcripts.len() - MAX_CACHED_TRANSCRIPTS;
-        for (_, source) in transcripts.into_iter().take(excess) {
+        same.sort();
+        let excess = same.len() - cap;
+        for (_, source) in same.into_iter().take(excess) {
             self.entries.remove(&source);
         }
     }
@@ -182,13 +217,16 @@ pub enum PreviewSubject {
     /// A node the explorer reaches: the neighbor on a Related row, or
     /// the node the explorer drilled into.
     Node(NodeId),
+    /// A field row whose value previews by its type (ADR 0112 §2).
+    Field(FieldValue),
     /// An unresolved-evidence row, which names no node.
     Unresolved,
 }
 
 /// Decide what the Preview is about from the explorer cursor. A Related
-/// row is about its neighbor; any other row is about the focused node,
-/// which is the left selection until the explorer drills.
+/// row is about its neighbor, a field row with a typed value about that
+/// value, and any other row about the focused node, which is the left
+/// selection until the explorer drills.
 pub fn preview_subject(app: &App) -> PreviewSubject {
     use crate::tui::explorer::RowPreview;
     let Some(state) = app.explorer() else {
@@ -201,7 +239,15 @@ pub fn preview_subject(app: &App) -> PreviewSubject {
                 Some(PreviewSubject::Node(neighbor_id.clone()))
             }
             Some(RowPreview::Unresolved { .. }) => Some(PreviewSubject::Unresolved),
-            None => None,
+            None => match row {
+                crate::tui::explorer::ExplorerRow::NodeField { index, .. } => state
+                    .view
+                    .fields(state.full_detail_expanded)
+                    .get(index)
+                    .and_then(|field| field.preview.clone())
+                    .map(PreviewSubject::Field),
+                _ => None,
+            },
         });
     row_preview.unwrap_or_else(|| {
         if state.breadcrumb.is_empty() {
@@ -219,7 +265,15 @@ pub fn preview_source(app: &App) -> Option<PreviewSource> {
     match preview_subject(app) {
         PreviewSubject::Selection => selection_source(app),
         PreviewSubject::Node(node) => node_source(app, &node),
+        PreviewSubject::Field(value) => Some(value_source(&value)),
         PreviewSubject::Unresolved => None,
+    }
+}
+
+/// The source a field's typed value previews.
+pub fn value_source(value: &FieldValue) -> PreviewSource {
+    match value {
+        FieldValue::Path(path) => PreviewSource::Path(PathBuf::from(path)),
     }
 }
 
@@ -228,6 +282,7 @@ pub fn preview_source(app: &App) -> Option<PreviewSource> {
 /// - an agent session shows its transcript, or its pane when the
 ///   operator chose `session_preview = pane` and the session is in tmux;
 /// - a mux session shows its pane, unless it hosts this TUI;
+/// - a workspace lists its root;
 /// - every other kind has no source yet, and the renderer shows its
 ///   fields.
 pub fn node_source(app: &App, node: &NodeId) -> Option<PreviewSource> {
@@ -248,6 +303,12 @@ pub fn node_source(app: &App, node: &NodeId) -> Option<PreviewSource> {
         NodeId::MuxSession(mux) => {
             (!hosts_this_tui(app, mux)).then(|| PreviewSource::Pane(mux.clone()))
         }
+        NodeId::Workspace(_) => match graph_node(app, node)? {
+            GraphNode::Workspace(workspace) => {
+                Some(PreviewSource::Path(PathBuf::from(&workspace.root)))
+            }
+            _ => None,
+        },
         _ => None,
     }
 }
@@ -295,6 +356,15 @@ fn selection_source(app: &App) -> Option<PreviewSource> {
     }
 }
 
+/// The snapshot's node for `id`.
+fn graph_node<'a>(app: &'a App, id: &NodeId) -> Option<&'a GraphNode> {
+    app.snapshot_handle()?
+        .snapshot()
+        .nodes
+        .iter()
+        .find(|node| &node.id() == id)
+}
+
 /// The name tmux knows a mux session by (`editor`, not the graph id
 /// `tmux:editor`), from the snapshot's mux node.
 pub fn pane_native_id(app: &App, mux: &MuxSessionId) -> Option<String> {
@@ -306,6 +376,17 @@ pub fn pane_native_id(app: &App, mux: &MuxSessionId) -> Option<String> {
             GraphNode::MuxSession(node) if &node.id == mux => Some(node.native_id.clone()),
             _ => None,
         })
+}
+
+/// Load a source that needs no mux backend. Blocking: the live runtime
+/// calls it on a worker thread. `None` for a pane, which captures
+/// through the executor's mux op.
+pub fn load_offline_preview(source: &PreviewSource) -> Option<PreviewContent> {
+    match source {
+        PreviewSource::Pane(_) => None,
+        PreviewSource::Transcript(session) => Some(load_transcript_preview(session)),
+        PreviewSource::Path(path) => Some(path::load_path_preview(path)),
+    }
 }
 
 /// Load a session's transcript into a [`PreviewContent`]. Blocking:

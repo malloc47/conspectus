@@ -151,6 +151,17 @@ pub struct CoreField {
     /// resolves to a `repo` / `workspace` / `checkout` node, without
     /// stuffing that metadata into the value string.
     pub kind_chip: Option<NodeKind>,
+    /// The raw value, typed for its Preview (ADR 0112 §2). `None`
+    /// previews the node the field belongs to.
+    pub preview: Option<FieldValue>,
+}
+
+/// A field's value, by the type that decides its Preview (ADR 0112 §2).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum FieldValue {
+    /// A path on disk: a directory previews a listing, a file its
+    /// contents.
+    Path(String),
 }
 
 impl CoreField {
@@ -162,6 +173,7 @@ impl CoreField {
             annotation: None,
             long_value: None,
             kind_chip: None,
+            preview: None,
         }
     }
 
@@ -173,6 +185,7 @@ impl CoreField {
             annotation: None,
             long_value: None,
             kind_chip: None,
+            preview: None,
         }
     }
 
@@ -184,6 +197,16 @@ impl CoreField {
     fn with_kind_chip(mut self, kind: NodeKind) -> Self {
         self.kind_chip = Some(kind);
         self
+    }
+
+    fn previewing(mut self, value: FieldValue) -> Self {
+        self.preview = Some(value);
+        self
+    }
+
+    /// A field whose value is the path `raw`, shown `~`-shortened.
+    fn path(label: &'static str, raw: &str, home: Option<&Path>) -> Self {
+        Self::plain(label, shorten_home(raw, home)).previewing(FieldValue::Path(raw.to_string()))
     }
 }
 
@@ -1224,7 +1247,7 @@ fn extra_fields(
 fn repo_core(r: &RepoNode, home: Option<&Path>) -> Vec<CoreField> {
     let mut fields = vec![
         CoreField::plain("id", node_short_id(&NodeId::Repo(r.id.clone()))),
-        CoreField::plain("common_dir", shorten_home(&r.common_dir, home)),
+        CoreField::path("common_dir", &r.common_dir, home),
     ];
     if let Some(remote) = r.remotes.first() {
         let value = if r.remotes.len() > 1 {
@@ -1246,7 +1269,9 @@ fn repo_core(r: &RepoNode, home: Option<&Path>) -> Vec<CoreField> {
         } else {
             shorten_home(path, home)
         };
-        fields.push(CoreField::plain("source_paths", value));
+        fields.push(
+            CoreField::plain("source_paths", value).previewing(FieldValue::Path(path.clone())),
+        );
     } else {
         fields.push(CoreField::placeholder("source_paths", "—"));
     }
@@ -1260,7 +1285,7 @@ fn repo_core(r: &RepoNode, home: Option<&Path>) -> Vec<CoreField> {
 fn checkout_core(c: &CheckoutNode, home: Option<&Path>) -> Vec<CoreField> {
     let mut fields = vec![
         CoreField::plain("id", node_short_id(&NodeId::Checkout(c.id.clone()))),
-        CoreField::plain("root", shorten_home(&c.root, home)),
+        CoreField::path("root", &c.root, home),
     ];
     if let Some(branch) = &c.current_branch {
         fields.push(CoreField::plain("current_branch", branch.refname.clone()));
@@ -1269,7 +1294,7 @@ fn checkout_core(c: &CheckoutNode, home: Option<&Path>) -> Vec<CoreField> {
     }
     fields.push(CoreField::plain("repo", format!("{}", c.id.repo)));
     if let Some(git_dir) = &c.git_dir {
-        fields.push(CoreField::plain("git_dir", shorten_home(git_dir, home)));
+        fields.push(CoreField::path("git_dir", git_dir, home));
     } else {
         fields.push(CoreField::placeholder("git_dir", "—"));
     }
@@ -1286,7 +1311,7 @@ fn workspace_core(w: &WorkspaceNode, home: Option<&Path>) -> Vec<CoreField> {
     } else {
         fields.push(CoreField::placeholder("name", "—"));
     }
-    fields.push(CoreField::plain("root", shorten_home(&w.root, home)));
+    fields.push(CoreField::path("root", &w.root, home));
     if let Some(provider) = &w.provider {
         fields.push(CoreField::plain("provider", provider.clone()));
     } else {
@@ -1330,7 +1355,7 @@ fn agent_session_core(
     }
     fields.push(match &s.cwd {
         Some(cwd) => {
-            let field = CoreField::plain("cwd", shorten_home(cwd, home));
+            let field = CoreField::path("cwd", cwd, home);
             match cwd_owner_kind(snapshot, cwd) {
                 Some(kind) => field.with_kind_chip(kind),
                 None => field,
@@ -1352,7 +1377,7 @@ fn agent_session_extras(
         "full_id",
         format!("{}", NodeId::AgentSession(s.id.clone())),
     ));
-    fields.push(CoreField::plain("state_scope", s.id.state_scope.clone()));
+    fields.push(CoreField::path("state_scope", &s.id.state_scope, None));
     fields.push(CoreField::plain("session_key", s.id.session_key.clone()));
     if let Some(title) = s.title.as_deref().map(str::trim).filter(|t| !t.is_empty()) {
         fields.push(CoreField::plain("title", title.to_string()));
@@ -1398,7 +1423,7 @@ fn mux_session_core(
     ];
     fields.push(match &m.cwd {
         Some(cwd) => {
-            let field = CoreField::plain("cwd", shorten_home(cwd, home));
+            let field = CoreField::path("cwd", cwd, home);
             match cwd_owner_kind(snapshot, cwd) {
                 Some(kind) => field.with_kind_chip(kind),
                 None => field,
@@ -1440,7 +1465,7 @@ fn mux_session_extras(m: &MuxSessionNode, now: Option<i64>) -> Vec<CoreField> {
         fields.push(CoreField::plain("active_pane_pid", pid.to_string()));
     }
     if let Some(path) = &m.active_pane_current_path {
-        fields.push(CoreField::plain("active_pane_current_path", path.clone()));
+        fields.push(CoreField::path("active_pane_current_path", path, None));
     }
     if let Some(cmd) = &m.active_pane_start_command {
         let truncated = truncate(cmd, 48);
@@ -1458,14 +1483,14 @@ fn pin_core(p: &PinNode, home: Option<&Path>) -> Vec<CoreField> {
         CoreField::plain("id", p.id.id.clone()),
         CoreField::plain("name", p.display_name.clone()),
         CoreField::plain("harness", p.harness.clone()),
-        CoreField::plain("cwd", shorten_home(&p.cwd, home)),
+        CoreField::path("cwd", &p.cwd, home),
         CoreField::plain("mux", p.mux.native_id()),
     ]
 }
 
 fn pin_extras(p: &PinNode, home: Option<&Path>) -> Vec<CoreField> {
     let mut fields = vec![
-        CoreField::plain("store", shorten_home(&p.store_path, home)),
+        CoreField::path("store", &p.store_path, home),
         CoreField::plain("source", p.provenance.snake_case().to_string()),
     ];
     if let Some(argv) = &p.launch_argv
@@ -1514,6 +1539,7 @@ fn runtime_process_core(
         annotation: None,
         long_value: None,
         kind_chip: None,
+        preview: None,
     });
     let command_field = match &p.command {
         Some(cmd) => {
@@ -1553,7 +1579,7 @@ fn runtime_process_extras(
 ) -> Vec<CoreField> {
     let mut fields = Vec::new();
     if let Some(cwd) = &p.cwd {
-        let field = CoreField::plain("cwd", shorten_home(cwd, home));
+        let field = CoreField::path("cwd", cwd, home);
         let field = match cwd_owner_kind(snapshot, cwd) {
             Some(kind) => field.with_kind_chip(kind),
             None => field,

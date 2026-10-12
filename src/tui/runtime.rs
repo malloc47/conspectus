@@ -29,7 +29,7 @@ use crate::tui::actions::{AttachTarget, PinLaunchTarget};
 use crate::tui::app::{App, Msg, SnapshotHandle};
 use crate::tui::effect::Effect;
 use crate::tui::preview::{
-    PreviewContent, PreviewSource, capture_via, load_transcript_preview, pane_native_id,
+    PreviewContent, PreviewSource, capture_via, load_offline_preview, pane_native_id,
     preview_source,
 };
 use crate::tui::resume::{ResumeTarget, launch_resume, resume_disabled_reason};
@@ -449,24 +449,26 @@ impl LoopMode for LiveMode {
         self.tmux.as_ref()
     }
 
-    /// Transcripts can be large, so they parse on a worker thread
-    /// and land through [`LoopMode::drain`]. Pane captures stay
-    /// synchronous.
+    /// Transcripts, listings, and files read from disk, which can be
+    /// slow, so they load on a worker thread and land through
+    /// [`LoopMode::drain`]. Pane captures stay synchronous.
     fn load_preview(&mut self, app: &mut App, source: PreviewSource) {
-        let PreviewSource::Transcript(session) = source else {
+        if matches!(source, PreviewSource::Pane(_)) {
             load_preview_now(app, self.tmux(), source);
             return;
-        };
+        }
         let tx = self.preview_tx.clone();
         std::thread::spawn(move || {
-            // A parser panic still has to end the load, or the preview
+            // A loader panic still has to end the load, or the preview
             // would wait on it forever and `r` couldn't retry.
-            let content = std::panic::catch_unwind(|| load_transcript_preview(&session))
-                .unwrap_or_else(|_| {
-                    PreviewContent::Failed("the transcript reader crashed".to_string())
+            let content = std::panic::catch_unwind(|| load_offline_preview(&source))
+                .ok()
+                .flatten()
+                .unwrap_or_else(|| {
+                    PreviewContent::Failed("the preview reader crashed".to_string())
                 });
             // The receiver is gone only when the TUI is exiting.
-            let _ = tx.send((PreviewSource::Transcript(session), content));
+            let _ = tx.send((source, content));
         });
     }
 }
@@ -1491,19 +1493,19 @@ fn live_session_advisory(
 /// Decide whether the selection's preview needs loading (ADR 0112 §5):
 /// it does when nothing is cached for its source, when the selection
 /// just moved onto it, when its content went stale, or on `r`. Returns
-/// `None` with `--no-live-preview`, which hides every source loaded
-/// here, or while a load for the source is in flight. Pure: reads only
-/// [`App`] and [`RunConfig`] state.
+/// `None` for a transcript or pane under `--no-live-preview`, which
+/// hides them, or while a load for the source is in flight. Pure: reads
+/// only [`App`] and [`RunConfig`] state.
 fn plan_preview_load(
     app: &App,
     config: &RunConfig,
     shown: Option<&PreviewSource>,
     force: bool,
 ) -> Option<PreviewSource> {
-    if !config.live_preview_enabled {
+    let source = preview_source(app)?;
+    if source.is_live() && !config.live_preview_enabled {
         return None;
     }
-    let source = preview_source(app)?;
     if app.previews().is_loading(&source) {
         return None;
     }
@@ -1551,27 +1553,23 @@ fn load_preview_now(app: &mut App, tmux: &dyn MuxBackend, source: PreviewSource)
                 });
             }
         },
-        PreviewSource::Transcript(session) => {
-            let content = load_transcript_preview(&session);
-            app.update(Msg::SetPreview {
-                source: PreviewSource::Transcript(session),
-                content,
-            });
+        source => {
+            if let Some(content) = load_offline_preview(&source) {
+                app.update(Msg::SetPreview { source, content });
+            }
         }
     }
 }
 
-/// Load the selection's transcript on the calling thread, for snapshot
+/// Load the selection's preview on the calling thread, for snapshot
 /// mode, which renders one frame with no event loop to wait on. Pane
 /// captures stay unloaded there, as before.
 #[cfg(feature = "snapshot")]
-pub(super) fn load_transcript_preview_now(app: &mut App, config: &RunConfig) {
-    if let Some(PreviewSource::Transcript(session)) = plan_preview_load(app, config, None, true) {
-        let content = load_transcript_preview(&session);
-        app.update(Msg::SetPreview {
-            source: PreviewSource::Transcript(session),
-            content,
-        });
+pub(super) fn load_offline_preview_now(app: &mut App, config: &RunConfig) {
+    if let Some(source) = plan_preview_load(app, config, None, true)
+        && let Some(content) = load_offline_preview(&source)
+    {
+        app.update(Msg::SetPreview { source, content });
     }
 }
 

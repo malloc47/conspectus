@@ -755,6 +755,7 @@ fn render_node_field_line_places_kind_chip_before_value() {
         annotation: None,
         long_value: None,
         kind_chip: Some(crate::model::NodeKind::Workspace),
+        preview: None,
     };
     let line = render_node_field_line(&field, false, &theme);
     let rendered: String = line.spans.iter().map(|s| s.content.as_ref()).collect();
@@ -4322,4 +4323,79 @@ fn a_mux_hosting_this_tui_previews_no_pane() {
         hosted
     };
     assert_eq!(crate::tui::preview::node_source(&app, &mux), None);
+}
+
+/// Walk the explorer cursor down until the Preview is about a field
+/// value, and return that value.
+fn walk_to_field_value(app: &mut App) -> crate::tui::explorer::FieldValue {
+    for _ in 0..12 {
+        app.update(Msg::ExplorerNavDown);
+        if let crate::tui::preview::PreviewSubject::Field(value) =
+            crate::tui::preview::preview_subject(app)
+        {
+            return value;
+        }
+    }
+    panic!("no typed field under the cursor");
+}
+
+#[test]
+fn a_path_field_row_previews_that_path() {
+    let mut app = unmuxed_session_app(|config| config.live_preview_enabled = false);
+    let cwd = crate::tui::explorer::FieldValue::Path("/home/op/src/proj".to_string());
+    assert_eq!(walk_to_field_value(&mut app), cwd);
+    let source = PreviewSource::Path("/home/op/src/proj".into());
+    assert_eq!(
+        crate::tui::preview::preview_source(&app),
+        Some(source.clone())
+    );
+    assert_eq!(
+        preview_text_for_selection(&app, 80, 10).to_string(),
+        "loading…"
+    );
+
+    // Listings aren't conversation content, so `--no-live-preview`
+    // leaves them on.
+    app.update(Msg::SetPreview {
+        source: source.clone(),
+        content: PreviewContent::Lines(vec![Line::raw("src/"), Line::raw("Cargo.toml")]),
+    });
+    assert_eq!(
+        preview_text_for_selection(&app, 80, 10).to_string(),
+        "src/\nCargo.toml"
+    );
+
+    app.update(Msg::SetPreview {
+        source,
+        content: PreviewContent::Unavailable("no longer exists".to_string()),
+    });
+    assert_eq!(
+        preview_text_for_selection(&app, 80, 10).to_string(),
+        "no longer exists"
+    );
+}
+
+#[test]
+fn a_workspace_previews_a_listing_of_its_root() {
+    let mut snapshot = GraphSnapshot::empty();
+    let id = crate::model::WorkspaceId::new("/home/op/scratch");
+    snapshot
+        .nodes
+        .push(GraphNode::Workspace(crate::model::WorkspaceNode {
+            id: id.clone(),
+            root: "/home/op/scratch".to_string(),
+            provider: None,
+            name: None,
+        }));
+    let mut app = App::new(RunConfig::defaults());
+    app.update(Msg::SetData {
+        snapshot: SnapshotHandle::from_snapshot(&snapshot),
+        tree: crate::tui::rows::RowTree::default(),
+        loaded_at_epoch: 1_700_000_000,
+        initial_selection_hint: None,
+    });
+    assert_eq!(
+        crate::tui::preview::node_source(&app, &NodeId::Workspace(id)),
+        Some(PreviewSource::Path("/home/op/scratch".into()))
+    );
 }

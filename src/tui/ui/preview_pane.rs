@@ -174,6 +174,12 @@ fn selection_preview_body(app: &App, width: u16, height: usize) -> PreviewView {
             Some(source) => source_view(app, &source, width, height),
             None => PreviewView::text("no preview for this node"),
         },
+        PreviewSubject::Field(value) => source_view(
+            app,
+            &crate::tui::preview::value_source(&value),
+            width,
+            height,
+        ),
         PreviewSubject::Unresolved => PreviewView::text(""),
     }
 }
@@ -185,12 +191,13 @@ pub(super) fn source_view(
     width: u16,
     height: usize,
 ) -> PreviewView {
-    if !app.config().live_preview_enabled {
+    if source.is_live() && !app.config().live_preview_enabled {
         // `--no-live-preview` hides conversation and terminal content
         // (ADR 0112 §6).
         return PreviewView::text("preview disabled (--no-live-preview)");
     }
     match source {
+        PreviewSource::Path(_) => loaded_view(app, source),
         PreviewSource::Transcript(_) => transcript_view(app, source, width, height),
         PreviewSource::Pane(mux) => PreviewView::text(format_preview_for_mux(
             app,
@@ -244,6 +251,20 @@ fn sourceless_preview(
             disabled_or("no mux target for this row")
         }
         _ => disabled_or("no preview for this row"),
+    }
+}
+
+/// A loaded source composed as lines, scrolled from the top, or what
+/// stands in for it.
+fn loaded_view(app: &App, source: &PreviewSource) -> PreviewView {
+    let Some(entry) = app.previews().get(source) else {
+        return PreviewView::text("loading…");
+    };
+    match &entry.content {
+        PreviewContent::Lines(lines) => PreviewView::text(lines.clone()),
+        PreviewContent::Unavailable(reason) => PreviewView::text(reason.clone()),
+        PreviewContent::Failed(message) => PreviewView::text(message.clone()),
+        _ => PreviewView::text(""),
     }
 }
 
@@ -323,7 +344,7 @@ pub(super) fn format_preview_for_mux(
                 Text::raw("preview unavailable (runner does not implement capture)")
             }
             // A pane source only ever holds a capture.
-            PreviewContent::Transcript(_) => Text::raw(""),
+            PreviewContent::Transcript(_) | PreviewContent::Lines(_) => Text::raw(""),
         },
         None => Text::raw("loading mux preview…"),
     }

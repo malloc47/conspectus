@@ -119,9 +119,9 @@ pub fn run(config: RunConfig, snap: SnapshotConfig) -> Result<()> {
 
     let keys = parse_key_script(&snap.keys)?;
     drive_keys(&mut app, &config, keys, snap.height.saturating_sub(2));
-    // One frame, no event loop: read the selection's transcript now
+    // One frame, no event loop: read the selection's preview now
     // rather than showing it loading.
-    runtime::load_transcript_preview_now(&mut app, &config);
+    runtime::load_offline_preview_now(&mut app, &config);
 
     let backend = TestBackend::new(snap.width, snap.height);
     let mut terminal = Terminal::new(backend)?;
