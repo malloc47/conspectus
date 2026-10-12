@@ -9,6 +9,7 @@
 //! refresh is open work (backlog `CSP-185`); until then
 //! `RunConfig::mux_preview_interval` is parsed but unused.
 
+mod git;
 mod path;
 
 use std::collections::{BTreeMap, BTreeSet};
@@ -16,6 +17,8 @@ use std::path::PathBuf;
 use std::time::Instant;
 
 use ratatui::text::Line;
+
+pub use git::GitQuery;
 
 use crate::discovery::tmux::{MuxBackend, PaneCapture, TmuxCaptureOutcome};
 use crate::model::{AgentSessionId, GraphNode, MuxSessionId, NodeId};
@@ -34,6 +37,8 @@ pub enum PreviewSource {
     Transcript(AgentSessionId),
     /// A path on disk: a directory's listing or a file's contents.
     Path(PathBuf),
+    /// A read-only git query: status, history, or a commit.
+    Git(GitQuery),
 }
 
 impl PreviewSource {
@@ -51,7 +56,7 @@ impl PreviewSource {
         match self {
             Self::Pane(_) => None,
             Self::Transcript(_) => Some(MAX_CACHED_TRANSCRIPTS),
-            Self::Path(_) => Some(MAX_CACHED_OTHER),
+            Self::Path(_) | Self::Git(_) => Some(MAX_CACHED_OTHER),
         }
     }
 
@@ -274,6 +279,19 @@ pub fn preview_source(app: &App) -> Option<PreviewSource> {
 pub fn value_source(value: &FieldValue) -> PreviewSource {
     match value {
         FieldValue::Path(path) => PreviewSource::Path(PathBuf::from(path)),
+        FieldValue::Ref {
+            dir,
+            rev,
+            ahead_behind,
+        } => PreviewSource::Git(GitQuery::Log {
+            dir: PathBuf::from(dir),
+            rev: rev.clone(),
+            ahead_behind: ahead_behind.clone(),
+        }),
+        FieldValue::Commit { dir, commit } => PreviewSource::Git(GitQuery::Show {
+            dir: PathBuf::from(dir),
+            commit: commit.clone(),
+        }),
     }
 }
 
@@ -283,6 +301,10 @@ pub fn value_source(value: &FieldValue) -> PreviewSource {
 ///   operator chose `session_preview = pane` and the session is in tmux;
 /// - a mux session shows its pane, unless it hosts this TUI;
 /// - a workspace lists its root;
+/// - a checkout shows `git status` above a listing of its root;
+/// - a repo shows recent commits on its default branch and its remotes;
+/// - a branch shows recent commits at its ref and, with an upstream,
+///   how far it is ahead and behind;
 /// - every other kind has no source yet, and the renderer shows its
 ///   fields.
 pub fn node_source(app: &App, node: &NodeId) -> Option<PreviewSource> {
@@ -303,12 +325,28 @@ pub fn node_source(app: &App, node: &NodeId) -> Option<PreviewSource> {
         NodeId::MuxSession(mux) => {
             (!hosts_this_tui(app, mux)).then(|| PreviewSource::Pane(mux.clone()))
         }
-        NodeId::Workspace(_) => match graph_node(app, node)? {
-            GraphNode::Workspace(workspace) => {
-                Some(PreviewSource::Path(PathBuf::from(&workspace.root)))
+        NodeId::Workspace(_) | NodeId::Checkout(_) | NodeId::Repo(_) | NodeId::Branch(_) => {
+            match graph_node(app, node)? {
+                GraphNode::Workspace(workspace) => {
+                    Some(PreviewSource::Path(PathBuf::from(&workspace.root)))
+                }
+                GraphNode::Checkout(checkout) => Some(PreviewSource::Git(GitQuery::Status {
+                    root: PathBuf::from(&checkout.root),
+                })),
+                GraphNode::Repo(repo) => Some(PreviewSource::Git(GitQuery::Repo {
+                    dir: PathBuf::from(&repo.common_dir),
+                })),
+                GraphNode::Branch(branch) => Some(PreviewSource::Git(GitQuery::Log {
+                    dir: PathBuf::from(&branch.id.repo.common_dir),
+                    rev: branch.refname.clone(),
+                    ahead_behind: branch
+                        .upstream
+                        .clone()
+                        .map(|upstream| (branch.refname.clone(), upstream)),
+                })),
+                _ => None,
             }
-            _ => None,
-        },
+        }
         _ => None,
     }
 }
@@ -328,8 +366,8 @@ fn hosts_this_tui(app: &App, mux: &MuxSessionId) -> bool {
 ///   keeping its row's tmux state;
 /// - a mux row, a mux candidate, and a pin placeholder whose mux is
 ///   live show the pane;
-/// - everything else has no source yet, and the renderer decides what
-///   to say.
+/// - any other row resolves as the node the right pane shows for it;
+///   without a source, the renderer decides what to say.
 fn selection_source(app: &App) -> Option<PreviewSource> {
     let selection = app.selection()?;
     let row = app.tree().rows.iter().find(|r| &r.id == selection)?;
@@ -352,7 +390,10 @@ fn selection_source(app: &App) -> Option<PreviewSource> {
         | (_, RowId::Group(NodeId::MuxSession(_)) | RowId::MuxSession(NodeId::MuxSession(_))) => {
             pane()
         }
-        _ => None,
+        // Any other row previews the node the right pane shows for it.
+        _ => app
+            .explorer()
+            .and_then(|state| node_source(app, &state.view.focused)),
     }
 }
 
@@ -386,6 +427,7 @@ pub fn load_offline_preview(source: &PreviewSource) -> Option<PreviewContent> {
         PreviewSource::Pane(_) => None,
         PreviewSource::Transcript(session) => Some(load_transcript_preview(session)),
         PreviewSource::Path(path) => Some(path::load_path_preview(path)),
+        PreviewSource::Git(query) => Some(git::load_git_preview(query)),
     }
 }
 

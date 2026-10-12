@@ -4399,3 +4399,104 @@ fn a_workspace_previews_a_listing_of_its_root() {
         Some(PreviewSource::Path("/home/op/scratch".into()))
     );
 }
+
+/// A repo at `/r/.git` with a checkout at `/r` on branch `main`, which
+/// tracks `origin/main`.
+fn git_app() -> (App, crate::model::BranchId) {
+    let repo = RepoId::new("/r/.git");
+    let branch = crate::model::BranchId::new(repo.clone(), "refs/heads/main");
+    let mut snapshot = GraphSnapshot::empty();
+    let mut repo_node = RepoNode::new(repo.clone());
+    repo_node.common_dir = "/r/.git".to_string();
+    snapshot.nodes.push(GraphNode::Repo(repo_node));
+    snapshot.nodes.push(GraphNode::Checkout(CheckoutNode {
+        id: CheckoutId::new(repo, "/r"),
+        root: "/r".to_string(),
+        git_dir: None,
+        current_branch: Some(branch.clone()),
+        worktree: None,
+    }));
+    snapshot
+        .nodes
+        .push(GraphNode::Branch(crate::model::BranchNode {
+            id: branch.clone(),
+            refname: "refs/heads/main".to_string(),
+            current_commit: Some("0123456789abcdef0123".to_string()),
+            upstream: Some("origin/main".to_string()),
+        }));
+    let mut app = App::new(RunConfig::defaults());
+    app.update(Msg::SetData {
+        snapshot: SnapshotHandle::from_snapshot(&snapshot),
+        tree: crate::tui::rows::RowTree::default(),
+        loaded_at_epoch: 1_700_000_000,
+        initial_selection_hint: None,
+    });
+    (app, branch)
+}
+
+#[test]
+fn checkouts_repos_and_branches_preview_their_git_state() {
+    use crate::tui::preview::{GitQuery, node_source};
+    let (app, branch) = git_app();
+    let repo = RepoId::new("/r/.git");
+    assert_eq!(
+        node_source(&app, &NodeId::Checkout(CheckoutId::new(repo.clone(), "/r"))),
+        Some(PreviewSource::Git(GitQuery::Status { root: "/r".into() }))
+    );
+    assert_eq!(
+        node_source(&app, &NodeId::Repo(repo)),
+        Some(PreviewSource::Git(GitQuery::Repo {
+            dir: "/r/.git".into()
+        }))
+    );
+    assert_eq!(
+        node_source(&app, &NodeId::Branch(branch)),
+        Some(PreviewSource::Git(GitQuery::Log {
+            dir: "/r/.git".into(),
+            rev: "refs/heads/main".to_string(),
+            ahead_behind: Some(("refs/heads/main".to_string(), "origin/main".to_string())),
+        }))
+    );
+}
+
+#[test]
+fn branch_ref_and_commit_fields_preview_git_history() {
+    use crate::tui::explorer::FieldValue;
+    let (app, branch) = git_app();
+    let view = crate::tui::explorer::build_node_view(crate::tui::explorer::ExplorerInputs {
+        snapshot: app.snapshot_handle().expect("data").snapshot(),
+        target: &NodeId::Branch(branch),
+        home: None,
+        now: None,
+    })
+    .expect("branch view");
+    let preview = |label: &str| {
+        view.fields(true)
+            .iter()
+            .find(|field| field.label == label)
+            .and_then(|field| field.preview.clone())
+    };
+    assert_eq!(
+        preview("refname"),
+        Some(FieldValue::Ref {
+            dir: "/r/.git".to_string(),
+            rev: "refs/heads/main".to_string(),
+            ahead_behind: None,
+        })
+    );
+    assert_eq!(
+        preview("upstream"),
+        Some(FieldValue::Ref {
+            dir: "/r/.git".to_string(),
+            rev: "origin/main".to_string(),
+            ahead_behind: Some(("refs/heads/main".to_string(), "origin/main".to_string())),
+        })
+    );
+    assert_eq!(
+        preview("current_commit"),
+        Some(FieldValue::Commit {
+            dir: "/r/.git".to_string(),
+            commit: "0123456789abcdef0123".to_string(),
+        })
+    );
+}

@@ -197,7 +197,7 @@ pub(super) fn source_view(
         return PreviewView::text("preview disabled (--no-live-preview)");
     }
     match source {
-        PreviewSource::Path(_) => loaded_view(app, source),
+        PreviewSource::Path(_) | PreviewSource::Git(_) => loaded_view(app, source),
         PreviewSource::Transcript(_) => transcript_view(app, source, width, height),
         PreviewSource::Pane(mux) => PreviewView::text(format_preview_for_mux(
             app,

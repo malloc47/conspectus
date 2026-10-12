@@ -162,6 +162,16 @@ pub enum FieldValue {
     /// A path on disk: a directory previews a listing, a file its
     /// contents.
     Path(String),
+    /// A git ref in the repo at `dir`, previewing its recent commits.
+    /// With `ahead_behind`, also how far the first ref is ahead of and
+    /// behind the second.
+    Ref {
+        dir: String,
+        rev: String,
+        ahead_behind: Option<(String, String)>,
+    },
+    /// A commit in the repo at `dir`, previewing `git show --stat`.
+    Commit { dir: String, commit: String },
 }
 
 impl CoreField {
@@ -1608,17 +1618,30 @@ fn runtime_process_extras(
 fn branch_core(b: &BranchNode) -> Vec<CoreField> {
     let mut fields = vec![
         CoreField::plain("id", node_short_id(&NodeId::Branch(b.id.clone()))),
-        CoreField::plain("refname", b.refname.clone()),
+        CoreField::plain("refname", b.refname.clone()).previewing(FieldValue::Ref {
+            dir: b.id.repo.common_dir.clone(),
+            rev: b.refname.clone(),
+            ahead_behind: None,
+        }),
     ];
     fields.push(match &b.current_commit {
         Some(commit) => {
             let short = commit.chars().take(12).collect::<String>();
-            CoreField::plain("current_commit", short)
+            CoreField::plain("current_commit", short).previewing(FieldValue::Commit {
+                dir: b.id.repo.common_dir.clone(),
+                commit: commit.clone(),
+            })
         }
         None => CoreField::placeholder("current_commit", "—"),
     });
     fields.push(match &b.upstream {
-        Some(upstream) => CoreField::plain("upstream", upstream.clone()),
+        Some(upstream) => {
+            CoreField::plain("upstream", upstream.clone()).previewing(FieldValue::Ref {
+                dir: b.id.repo.common_dir.clone(),
+                rev: upstream.clone(),
+                ahead_behind: Some((b.refname.clone(), upstream.clone())),
+            })
+        }
         None => CoreField::placeholder("upstream", "—"),
     });
     fields.push(CoreField::plain("repo", format!("{}", b.id.repo)));
