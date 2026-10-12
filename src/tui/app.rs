@@ -1008,19 +1008,12 @@ impl App {
     }
 
     /// Whether the Preview zone shows a transcript, which sits
-    /// bottom-anchored with its newest turns in view. A Related row's
-    /// own preview replaces the selection's (ADR 0107).
+    /// bottom-anchored with its newest turns in view.
     fn preview_is_bottom_anchored(&self) -> bool {
-        let related_row_preview = self.explorer.as_ref().is_some_and(|state| {
-            state
-                .selected_row()
-                .is_some_and(|row| state.view.row_preview(&row).is_some())
-        });
-        !related_row_preview
-            && matches!(
-                crate::tui::preview::preview_source(self),
-                Some(PreviewSource::Transcript(_))
-            )
+        matches!(
+            crate::tui::preview::preview_source(self),
+            Some(PreviewSource::Transcript(_))
+        )
     }
 
     /// What the Preview zone is pointed at: the left selection and the

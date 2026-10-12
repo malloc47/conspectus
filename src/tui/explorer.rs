@@ -807,6 +807,7 @@ impl NodeView {
                 let group = self.relationships.groups.get(*group_index)?;
                 let link = group.links.get(*link_index)?;
                 Some(RowPreview::Link {
+                    neighbor_id: &link.neighbor_id,
                     neighbor_label: &link.neighbor_label,
                     fields: &link.preview,
                     provenance: link.provenance,
@@ -989,6 +990,7 @@ fn styled_glyph(hop: &RenderedBreadcrumbHop, _secondary: Style) -> Span<'static>
 #[derive(Clone, Debug, PartialEq)]
 pub enum RowPreview<'a> {
     Link {
+        neighbor_id: &'a NodeId,
         neighbor_label: &'a str,
         fields: &'a [CoreField],
         provenance: Provenance,

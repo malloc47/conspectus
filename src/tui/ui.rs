@@ -43,7 +43,7 @@ use crate::tui::actions::{attach_disabled_reason, resolve_attach_target, target_
 use crate::tui::app::{App, Focus, SnapshotHandle};
 use crate::tui::detail::{HeaderField, NodeDetail, SectionKind};
 use crate::tui::icons::{NodeKind, node_kind_style};
-use crate::tui::preview::{PreviewContent, PreviewSource};
+use crate::tui::preview::PreviewContent;
 use crate::tui::rows::{
     AgentSessionRow, GroupRow, MuxCandidateRow, MuxIndicator, MuxSessionRow, PrRow, RowId, RowKind,
     format_recency, recency_bucket,

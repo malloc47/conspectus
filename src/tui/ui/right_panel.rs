@@ -704,8 +704,10 @@ pub(super) fn unresolved_evidence_summary(row: &crate::tui::explorer::Unresolved
 }
 
 /// Render the Preview zone body for the currently-selected explorer
-/// row. Mirrors `draw_detail_preview` but draws the neighbor's core
-/// summary plus an `edge` row instead of the live mux capture.
+/// row. A Related row leads with its neighbor, `edge`, and `evidence`
+/// lines (ADR 0107), then the neighbor's own preview (ADR 0112 §3), or
+/// its core fields when it has none. Other rows show the focused
+/// node's preview through `draw_detail_preview`.
 pub(super) fn draw_explorer_preview(
     app: &App,
     state: &crate::tui::app::ExplorerState,
@@ -731,8 +733,10 @@ pub(super) fn draw_explorer_preview(
     };
     let theme = app.theme();
     let mut lines: Vec<Line<'static>> = Vec::new();
+    let mut neighbor_source = None;
     match preview {
         RowPreview::Link {
+            neighbor_id,
             neighbor_label,
             fields,
             provenance,
@@ -745,8 +749,11 @@ pub(super) fn draw_explorer_preview(
                 Modifier::BOLD;
                 "  neighbor    {neighbor_label}"
             )));
-            for field in fields {
-                lines.push(render_node_field_line(field, false, theme));
+            neighbor_source = crate::tui::preview::node_source(app, neighbor_id);
+            if neighbor_source.is_none() {
+                for field in fields {
+                    lines.push(render_node_field_line(field, false, theme));
+                }
             }
             let edge_value = format!(
                 "{} · {} · {}   ·   {}",
@@ -816,15 +823,16 @@ pub(super) fn draw_explorer_preview(
             ]));
         }
     }
-    let total_rows = wrapped_line_count(&lines, area.width);
-    let (content_area, scrollbar_area) = scrollbar_layout(area, total_rows);
-    let widget = Paragraph::new(lines)
-        .wrap(Wrap { trim: false })
-        .scroll((app.preview_scroll(), 0));
-    frame.render_widget(widget, content_area);
-    if let Some(sb_area) = scrollbar_area {
-        render_vertical_scrollbar(frame, sb_area, total_rows, app.preview_scroll() as usize);
-    }
+    let view = match neighbor_source {
+        Some(source) => {
+            lines.push(Line::raw(""));
+            let header_rows = wrapped_line_count(&lines, area.width);
+            let body_height = (area.height as usize).saturating_sub(header_rows).max(1);
+            source_view(app, &source, area.width, body_height).below(Text::from(lines))
+        }
+        None => PreviewView::text(lines),
+    };
+    draw_preview_view(app, view, frame, area);
 }
 
 pub(super) fn empty_right_panel_text(app: &App) -> &'static str {

@@ -7,6 +7,7 @@ use crate::model::{
 use crate::resolve::resolve_snapshot;
 use crate::tui::SessionsGrouping;
 use crate::tui::app::Msg;
+use crate::tui::preview::PreviewSource;
 use crate::tui::rows::sessions::{SessionsBuildInputs, build_sessions_tree};
 use crate::tui::{RunConfig, View};
 use ratatui::layout::{Constraint, Direction, Layout};
@@ -4232,4 +4233,93 @@ fn the_right_panel_draws_a_transcript_inside_its_gutter() {
     let buffer = render_to_buffer(&mut app, Rect::new(0, 0, 120, 30));
     let text = buffer_to_string(&buffer);
     assert!(text.contains("turn 30"), "{text}");
+}
+
+/// Walk the explorer cursor down until the Preview is about a node
+/// other than the selection, and return that node.
+fn walk_to_related_row(app: &mut App) -> NodeId {
+    for _ in 0..12 {
+        app.update(Msg::ExplorerNavDown);
+        if let crate::tui::preview::PreviewSubject::Node(node) =
+            crate::tui::preview::preview_subject(app)
+        {
+            return node;
+        }
+    }
+    panic!("no Related row under the cursor");
+}
+
+#[test]
+fn a_related_row_leads_its_neighbors_preview_with_the_evidence() {
+    let mut app = muxed_app_previewing(
+        "editor",
+        Some("pane output"),
+        Vec::new(),
+        crate::tui::SessionPreview::Transcript,
+    );
+    let mux = MuxSessionId::new("editor");
+    assert_eq!(
+        walk_to_related_row(&mut app),
+        NodeId::MuxSession(mux.clone())
+    );
+    assert_eq!(
+        crate::tui::preview::preview_source(&app),
+        Some(PreviewSource::Pane(mux))
+    );
+    let text = buffer_to_string(&render_to_buffer(&mut app, Rect::new(0, 0, 140, 40)));
+    let preview = text.split("Preview").nth(1).expect("a Preview zone");
+    assert!(preview.contains("neighbor    tmux:editor"), "{text}");
+    assert!(preview.contains("edge"), "{text}");
+    assert!(preview.contains("pane output"), "{text}");
+    assert!(
+        !preview.contains("backend"),
+        "the pane replaces the neighbor's fields: {text}"
+    );
+}
+
+#[test]
+fn drilling_into_a_neighbor_previews_that_node() {
+    let mut app = muxed_app_previewing(
+        "editor",
+        Some("pane output"),
+        Vec::new(),
+        crate::tui::SessionPreview::Transcript,
+    );
+    walk_to_related_row(&mut app);
+    app.update(Msg::ExplorerActivate);
+    let mux = NodeId::MuxSession(MuxSessionId::new("editor"));
+    assert_eq!(
+        crate::tui::preview::preview_subject(&app),
+        crate::tui::preview::PreviewSubject::Node(mux)
+    );
+    assert!(
+        preview_text_for_selection(&app, 80, 10)
+            .to_string()
+            .contains("pane output")
+    );
+}
+
+#[test]
+fn a_mux_hosting_this_tui_previews_no_pane() {
+    let mut app = muxed_app_previewing(
+        "editor",
+        None,
+        Vec::new(),
+        crate::tui::SessionPreview::Transcript,
+    );
+    let mux = NodeId::MuxSession(MuxSessionId::new("editor"));
+    assert!(crate::tui::preview::node_source(&app, &mux).is_some());
+    app = {
+        let mut config = app.config().clone();
+        config.current_tmux_session = Some("editor".to_string());
+        let mut hosted = App::new(config);
+        hosted.update(Msg::SetData {
+            snapshot: app.snapshot_handle().expect("data").clone(),
+            tree: app.tree().clone(),
+            loaded_at_epoch: 1_700_000_000,
+            initial_selection_hint: None,
+        });
+        hosted
+    };
+    assert_eq!(crate::tui::preview::node_source(&app, &mux), None);
 }

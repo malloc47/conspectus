@@ -1,7 +1,7 @@
 #![cfg(feature = "snapshot")]
 //! `conspectus tui --snapshot` previews an agent session as its
-//! transcript (ADR 0112): a session in tmux, one outside tmux, and one
-//! whose transcript is gone.
+//! transcript (ADR 0112): a session in tmux, one outside tmux, one whose
+//! transcript is gone, and a Related row's neighbor below its evidence.
 
 mod support;
 
@@ -79,11 +79,23 @@ fn exchange(session: &str, question: &str, answer: &str) -> String {
 /// The right pane with `session` selected, ANSI styling stripped. The
 /// three sessions sit in one group, ordered by key.
 fn right_pane(world: &World, session: &str) -> String {
+    let pane = right_pane_after(world, &select(session));
+    assert!(pane.contains(session), "{session} is selected:\n{pane}");
+    pane
+}
+
+/// Keys that select `session` in the sessions view.
+fn select(session: &str) -> String {
     let downs = [GONE, MUXED, SOLO]
         .iter()
         .position(|key| *key == session)
         .expect("a world session")
         + 1;
+    "j".repeat(downs)
+}
+
+/// The right pane after `keys`, ANSI styling stripped.
+fn right_pane_after(world: &World, keys: &str) -> String {
     let home = world.home.path();
     let output = isolated_cmd(home)
         .current_dir(home)
@@ -97,7 +109,7 @@ fn right_pane(world: &World, session: &str) -> String {
             "--snapshot-height",
             "40",
             "--snapshot-keys",
-            &"j".repeat(downs),
+            keys,
         ])
         .output()
         .expect("run conspectus");
@@ -106,9 +118,7 @@ fn right_pane(world: &World, session: &str) -> String {
         "{}",
         String::from_utf8_lossy(&output.stderr)
     );
-    let pane = strip_ansi(&String::from_utf8_lossy(&output.stdout));
-    assert!(pane.contains(session), "{session} is selected:\n{pane}");
-    pane
+    strip_ansi(&String::from_utf8_lossy(&output.stdout))
 }
 
 /// A `conspectus` command whose config, state, and daemon lookups stay
@@ -170,4 +180,38 @@ fn a_session_whose_transcript_is_gone_says_so() {
         pane.contains("transcript unavailable: transcript file not found"),
         "{pane}"
     );
+}
+
+/// Keys that walk the explorer cursor past a node's five core fields
+/// onto its first Related row.
+const FIRST_RELATED_ROW: &str = "<Tab>jjjjj";
+
+#[test]
+fn a_related_row_to_a_mux_session_leads_its_pane_with_the_evidence() {
+    let world = world();
+    let pane = right_pane_after(&world, &format!("{}{FIRST_RELATED_ROW}", select(MUXED)));
+    let preview = pane.split("Preview").nth(1).expect("a Preview zone");
+    assert!(preview.contains("neighbor    tmux:editor"), "{pane}");
+    assert!(preview.contains("evidence      exact_cwd_match"), "{pane}");
+    // Snapshot mode doesn't capture panes; the pane's place is held.
+    assert!(preview.contains("loading mux preview…"), "{pane}");
+    assert!(
+        !preview.contains("backend"),
+        "the pane replaces the neighbor's fields:\n{pane}"
+    );
+}
+
+#[test]
+fn a_related_row_to_a_session_leads_its_transcript_with_the_evidence() {
+    let world = world();
+    // `2` is the mux view; its one row is `tmux:editor`.
+    let pane = right_pane_after(&world, &format!("2j{FIRST_RELATED_ROW}"));
+    let preview = pane.split("Preview").nth(1).expect("a Preview zone");
+    assert!(
+        preview.contains(&format!("neighbor    claude-code:{MUXED}")),
+        "{pane}"
+    );
+    assert!(preview.contains("evidence"), "{pane}");
+    assert!(preview.contains("Where is the pane?"), "{pane}");
+    assert!(preview.contains("In tmux."), "{pane}");
 }

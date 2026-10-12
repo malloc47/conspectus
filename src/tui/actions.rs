@@ -452,7 +452,10 @@ fn preferred_session_for_mux(snapshot: &GraphSnapshot, mux: &NodeId) -> Option<A
 /// Walk active `LinkedToMux` candidates for `session`, returning the
 /// resolver-preferred mux id. Mirrors the row-tree's "preferred"
 /// choice so the row glyph and the attach target agree.
-fn preferred_mux_for_session(snapshot: &GraphSnapshot, session: &NodeId) -> Option<MuxSessionId> {
+pub(crate) fn preferred_mux_for_session(
+    snapshot: &GraphSnapshot,
+    session: &NodeId,
+) -> Option<MuxSessionId> {
     let mut candidates: Vec<&GraphLink> = snapshot
         .candidate_links
         .iter()

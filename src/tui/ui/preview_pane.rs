@@ -1,7 +1,7 @@
 //! Preview pane: transcripts, pane captures, and pin diagnostics.
 
 use super::*;
-use crate::tui::preview::preview_source;
+use crate::tui::preview::{PreviewSource, PreviewSubject, node_source, preview_subject};
 
 /// A Preview body, and where its window sits when it scrolls itself.
 pub(super) struct PreviewView {
@@ -20,10 +20,21 @@ pub(super) struct PreviewWindow {
 }
 
 impl PreviewView {
-    fn text(text: impl Into<Text<'static>>) -> Self {
+    pub(super) fn text(text: impl Into<Text<'static>>) -> Self {
         Self {
             text: text.into(),
             window: None,
+        }
+    }
+
+    /// Put `header` above this view, as a failure banner or a Related
+    /// row's evidence leads the zone.
+    pub(super) fn below(self, header: Text<'static>) -> Self {
+        let mut text = header;
+        text.extend(self.text);
+        Self {
+            text,
+            window: self.window,
         }
     }
 }
@@ -35,6 +46,12 @@ pub(super) fn draw_detail_preview(
     area: Rect,
 ) {
     let view = preview_view_for_selection(app, area.width, area.height as usize);
+    draw_preview_view(app, view, frame, area);
+}
+
+/// Draw a Preview body: scrolled from the top by the Preview's offset,
+/// or, for a view that cut its own window, as is with a scrollbar.
+pub(super) fn draw_preview_view(app: &App, view: PreviewView, frame: &mut Frame<'_>, area: Rect) {
     match view.window {
         None => {
             let total_rows = wrapped_line_count(&view.text.lines, area.width);
@@ -83,15 +100,10 @@ pub(super) fn preview_view_for_selection(app: &App, width: u16, height: usize) -
         Some(entry) => {
             // The body gets the rows the banner leaves, so its newest
             // output stays on screen below the banner.
-            let mut text = failure_banner(entry, app.theme());
-            let banner_rows = wrapped_line_count(&text.lines, width);
+            let banner = failure_banner(entry, app.theme());
+            let banner_rows = wrapped_line_count(&banner.lines, width);
             let body_height = height.saturating_sub(banner_rows).max(1);
-            let body = selection_preview_body(app, width, body_height);
-            text.extend(body.text);
-            PreviewView {
-                text,
-                window: body.window,
-            }
+            selection_preview_body(app, width, body_height).below(banner)
         }
         None => selection_preview_body(app, width, height),
     }
@@ -153,19 +165,40 @@ fn selection_preview_body(app: &App, width: u16, height: usize) -> PreviewView {
         return PreviewView::text("");
     };
     let live_preview = app.config().live_preview_enabled;
-    match preview_source(app) {
+    match preview_subject(app) {
+        PreviewSubject::Selection => match crate::tui::preview::preview_source(app) {
+            Some(source) => source_view(app, &source, width, height),
+            None => PreviewView::text(sourceless_preview(app, row, selection, live_preview)),
+        },
+        PreviewSubject::Node(node) => match node_source(app, &node) {
+            Some(source) => source_view(app, &source, width, height),
+            None => PreviewView::text("no preview for this node"),
+        },
+        PreviewSubject::Unresolved => PreviewView::text(""),
+    }
+}
+
+/// The Preview of a loaded source, or why it can't show one.
+pub(super) fn source_view(
+    app: &App,
+    source: &PreviewSource,
+    width: u16,
+    height: usize,
+) -> PreviewView {
+    if !app.config().live_preview_enabled {
         // `--no-live-preview` hides conversation and terminal content
         // (ADR 0112 §6).
-        Some(_) if !live_preview => PreviewView::text("preview disabled (--no-live-preview)"),
-        Some(source @ PreviewSource::Transcript(_)) => transcript_view(app, &source, width, height),
-        Some(PreviewSource::Pane(mux)) => PreviewView::text(format_preview_for_mux(
+        return PreviewView::text("preview disabled (--no-live-preview)");
+    }
+    match source {
+        PreviewSource::Transcript(_) => transcript_view(app, source, width, height),
+        PreviewSource::Pane(mux) => PreviewView::text(format_preview_for_mux(
             app,
-            &mux,
+            mux,
             width,
             height,
             app.config().color,
         )),
-        None => PreviewView::text(sourceless_preview(app, row, selection, live_preview)),
     }
 }
 

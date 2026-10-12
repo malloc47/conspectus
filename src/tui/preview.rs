@@ -174,18 +174,102 @@ impl PreviewStore {
     }
 }
 
-/// Resolve the selection to the source its preview shows (ADR 0112):
+/// What the Preview zone is about (ADR 0112 §2–3).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum PreviewSubject {
+    /// The left selection's row.
+    Selection,
+    /// A node the explorer reaches: the neighbor on a Related row, or
+    /// the node the explorer drilled into.
+    Node(NodeId),
+    /// An unresolved-evidence row, which names no node.
+    Unresolved,
+}
+
+/// Decide what the Preview is about from the explorer cursor. A Related
+/// row is about its neighbor; any other row is about the focused node,
+/// which is the left selection until the explorer drills.
+pub fn preview_subject(app: &App) -> PreviewSubject {
+    use crate::tui::explorer::RowPreview;
+    let Some(state) = app.explorer() else {
+        return PreviewSubject::Selection;
+    };
+    let row_preview = state
+        .selected_row()
+        .and_then(|row| match state.view.row_preview(&row) {
+            Some(RowPreview::Link { neighbor_id, .. }) => {
+                Some(PreviewSubject::Node(neighbor_id.clone()))
+            }
+            Some(RowPreview::Unresolved { .. }) => Some(PreviewSubject::Unresolved),
+            None => None,
+        });
+    row_preview.unwrap_or_else(|| {
+        if state.breadcrumb.is_empty() {
+            PreviewSubject::Selection
+        } else {
+            PreviewSubject::Node(state.view.focused.clone())
+        }
+    })
+}
+
+/// Resolve the Preview to the source it shows (ADR 0112). Pure over
+/// [`App`], so the runtime's loader and the renderer resolve the same
+/// source.
+pub fn preview_source(app: &App) -> Option<PreviewSource> {
+    match preview_subject(app) {
+        PreviewSubject::Selection => selection_source(app),
+        PreviewSubject::Node(node) => node_source(app, &node),
+        PreviewSubject::Unresolved => None,
+    }
+}
+
+/// The source a node previews (ADR 0112 §1):
 ///
 /// - an agent session shows its transcript, or its pane when the
 ///   operator chose `session_preview = pane` and the session is in tmux;
+/// - a mux session shows its pane, unless it hosts this TUI;
+/// - every other kind has no source yet, and the renderer shows its
+///   fields.
+pub fn node_source(app: &App, node: &NodeId) -> Option<PreviewSource> {
+    match node {
+        NodeId::AgentSession(session) => {
+            let pane = (app.session_preview() == crate::tui::SessionPreview::Pane)
+                .then(|| app.snapshot_handle())
+                .flatten()
+                .and_then(|handle| {
+                    crate::tui::actions::preferred_mux_for_session(handle.snapshot(), node)
+                })
+                .filter(|mux| !hosts_this_tui(app, mux));
+            Some(pane.map_or_else(
+                || PreviewSource::Transcript(session.clone()),
+                PreviewSource::Pane,
+            ))
+        }
+        NodeId::MuxSession(mux) => {
+            (!hosts_this_tui(app, mux)).then(|| PreviewSource::Pane(mux.clone()))
+        }
+        _ => None,
+    }
+}
+
+/// Whether `mux` is the tmux session this TUI runs in. Its pane would
+/// show the TUI itself.
+fn hosts_this_tui(app: &App, mux: &MuxSessionId) -> bool {
+    app.config()
+        .current_tmux_session
+        .as_deref()
+        .is_some_and(|current| pane_native_id(app, mux).as_deref() == Some(current))
+}
+
+/// The left selection's source:
+///
+/// - an agent session row resolves as its node does ([`node_source`]),
+///   keeping its row's tmux state;
 /// - a mux row, a mux candidate, and a pin placeholder whose mux is
 ///   live show the pane;
 /// - everything else has no source yet, and the renderer decides what
 ///   to say.
-///
-/// Pure over [`App`], so the runtime's loader and the renderer resolve
-/// the same source.
-pub fn preview_source(app: &App) -> Option<PreviewSource> {
+fn selection_source(app: &App) -> Option<PreviewSource> {
     let selection = app.selection()?;
     let row = app.tree().rows.iter().find(|r| &r.id == selection)?;
     let pane = || {
