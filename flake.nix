@@ -45,6 +45,8 @@
           gh
           just
           pre-commit
+          # Renders the README screenshots (ADR 0113, `just screenshots`).
+          termshot
           tmux
           which
         ];

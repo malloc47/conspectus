@@ -36,9 +36,14 @@ anchor time with every render.
 3. **A pinned clock.** `--snapshot-now <epoch>` fixes the time snapshot
    mode renders ages against. The recipe passes the showcase's anchor
    time (ADR 0070), so ages read as authored.
-4. **The showcase carries conversations.** The sessions the README
-   frames select get a short, realistic transcript in the showcase
-   builder, so the session preview shows a conversation.
+4. **The showcase carries what the screenshots show.** Everything a
+   frame displays is built by the showcase scenario itself, not by the
+   screenshot recipe: a short conversation on the selected session, a
+   repo history with fixed commit dates (so hashes are stable), a
+   checked-out feature branch with uncommitted edits, and a recorded
+   pane for its tmux session under `panes/`. Scenario muxes are replayed
+   rows, not live tmux, so both `dev scenario tui` and
+   `--snapshot-fixture-root` answer pane captures from those recordings.
 
 ## Consequences
 

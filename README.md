@@ -17,33 +17,16 @@ open or close down a worktree.
 It is a Rust CLI and library. It is developed on Linux and is pre-release
 (`0.1.0`, no tagged release yet); see [Status and limits](#status-and-limits).
 
-```text
-updated 0s ago · 10 sessions · 4 mux  ·  ⚠ 4
-┌ ▸ sessions · mux ──────────────────────────────────────┐┌   ● session ───────────────────────────────────────────┐
-│▼ ▦ showcase-deck  atelier-repo-a…  (agent-deck)  (1)   ││  id            showcase-claude-ambig-a                 │
-│    showcase   claude       4m  ◉  Showcase: agent-deck ││  harness       claude-code                             │
-│▶ ◆ repo-a         /fixture/atelier-demo/repo-a   (2)   ││  title         ambiguous mux candidate A               │
-│▶ ◆ repo-b         /fixture/atelier-demo/repo-b   (1)   ││  cwd           ◇ /fixture/repos/project                │
-│▶ ◆ bare-project   /fixture/check…s/bare-project  (1)   ││  status        active · last 4m ago                    │
-│▼ ◆ project        /fixture/repos/project         (4)  ⚠││─────────────── 1 validated · 2 other · 2 ⚠  Related ── │
-│    showcase   claude       4m  ◯  ambiguous mux candida││  associated with        ◇ /fixture/repos/project       │
-│    showcase   claude       4m  ◯  ambiguous mux candida││  ▶ Other  (2 · 2 ⚠)                                    │
-│    showcase   claude       4m  ◯  hook-supersession cur││                                                        │
-│    showcase   claude       1h  ◯  claude-code in projec││───────────────────────────────────────────── Preview ──│
-│▶ Ungrouped                                       (1)   ││loading mux preview…                                    │
-│                                                        ││                                                        │
-└────────────────────────────────────────────────────────┘└────────────────────────────────────────────────────────┘
-[left] group:graph · filter:all · sort:hierarchy · Enter/a attach preferred tmux:ambiguous · Tab inspect candidates
-```
+![The Conspectus TUI: sessions grouped by workspace and repo on the left; the selected Claude Code session's fields, relationships, and transcript on the right](docs/images/session-transcript.png)
 
-<sub>The sessions view rendered from the checked-in showcase fixture
-(`tui --snapshot --snapshot-fixture tests/fixtures/showcase.json` in a
-`--features snapshot` build).
-Sessions are grouped under the workspace and repo they belong to. `◉` means
-the session is running in a tmux session you can attach to, and `◯` means it
-isn't in one. The selected session sits in a group marked `⚠`: its tmux
-attribution is ambiguous, so the right pane lists the competing candidates
-under "Other" instead of guessing.</sub>
+<sub>The sessions view on the built-in showcase world (`just screenshots`
+renders these images). Sessions are grouped under the workspace and repo they
+belong to; `◉` marks a session running in a tmux session you can attach to,
+and `◯` one that isn't. The right pane shows the selected session's fields,
+its relationships, and its conversation in the Preview. The `project` group is
+flagged (`⚠`, drawn as a box by the screenshot font) because two sessions
+could own one tmux session, so Conspectus lists both under "Other" instead of
+guessing.</sub>
 
 ## Why Conspectus exists
 
@@ -290,6 +273,13 @@ conspectus serve                   # keep the graph warm in the background
   its upstream and downstream relationships, how each link was established
   (its provenance), and which candidate the resolver picked. `Enter` drills
   into a neighbor and `Backspace` walks back.
+- **Previews.** Below the relationships, the Preview shows what the selected
+  thing is: a session's transcript, a tmux session's live pane, a checkout's
+  `git status` and files, a repo's recent commits, a branch's position
+  against its upstream, a PR's checks and reviews, a process tree. Moving
+  the cursor onto a field previews its value (a directory lists its files, a
+  commit shows its stat), and onto a relationship shows the evidence for the
+  link above the neighbor's own preview.
 - **Actions.** `Enter` does the obvious thing for the selected row: attach
   to the tmux session, launch the pin, or open the transcript. `v` opens a
   built-in transcript viewer for Claude Code, Codex, and opencode.
@@ -300,6 +290,10 @@ conspectus serve                   # keep the graph warm in the background
   have to memorize anything to get started.
 - **Theming** through `[tui.theme]`
   ([operations guide](docs/operations.md#tuitheme--palette-overrides-adr-0032)).
+
+| A relationship and its evidence | A repo's history | A tmux session's pane |
+|---|---|---|
+| ![The explorer cursor on a session's checkout: the link's evidence above the checkout's git status and files](docs/images/related-preview.png) | ![A repo row: its recent commits and remotes](docs/images/repo-history.png) | ![The mux view: tmux sessions on the left, the selected one's live pane on the right](docs/images/mux-pane.png) |
 
 ### Scriptable CLI
 
@@ -530,7 +524,8 @@ cargo run --features snapshot -- tui --fixture tests/fixtures/showcase.json   # 
 ```
 
 `just demo` runs that last command, which is the easiest way to show the TUI
-without exposing your own sessions.
+without exposing your own sessions. `just screenshots` re-renders the images in
+this README from the same showcase world.
 
 [docs/dev-scenarios.md](docs/dev-scenarios.md) covers the fixture workflow,
 the three test-world surfaces (`ReplayWorld`, the captured-fixture corpus,

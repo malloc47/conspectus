@@ -244,7 +244,29 @@ conspectus tui --snapshot \
 
 # Regenerate the checked-in fixture after a showcase change
 just regen-showcase-fixture
+
+# Write the showcase world (repos, transcripts, recorded panes) into a
+# new directory and keep it; debug builds only
+conspectus dev scenario materialize showcase /tmp/showcase-world
+
+# Snapshot the fixture with real previews read from that world, `~` for
+# `/fixture`, and ages pinned to the showcase's anchor time (ADR 0113)
+HOME=/fixture conspectus tui --snapshot \
+  --snapshot-fixture tests/fixtures/showcase.json \
+  --snapshot-fixture-root /tmp/showcase-world --snapshot-now 1790769600
+
+# Re-render the README screenshots (needs `termshot` from the dev shell)
+just screenshots
 ```
+
+The showcase builder carries everything the screenshots show, so the
+interactive scenario TUI shows it too: a two-exchange conversation on
+`showcase-claude`, a dated history with a checked-out feature branch and
+uncommitted edits in `repos/project`, and a recorded pane for the `project`
+tmux session under `panes/`. Scenario muxes are replayed rows rather than live
+tmux, so `dev scenario tui` and `--snapshot-fixture-root` answer pane captures
+from those recordings. Commits use fixed dates, so the history and its hashes
+are the same every build.
 
 Coverage at a glance:
 

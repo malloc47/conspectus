@@ -1,5 +1,9 @@
 default: check
 
+# Reference "now" the showcase is anchored to: `SHOWCASE_NOW_EPOCH` in
+# `src/dev_scenarios.rs` (ADR 0070). Keep the three in step.
+showcase_now := "1790769600"
+
 fmt:
     cargo fmt --all -- --check
 
@@ -39,7 +43,7 @@ doc:
 regen-showcase-fixture:
     cargo run --quiet -- dev scenario graph showcase --format json | \
         sed -E 's#(/[^/"[:space:]:]+)*/conspectus-scenario-showcase-[0-9]+-[0-9]+#/fixture#g' | \
-        jq --arg now 1790769600 ' \
+        jq --arg now {{showcase_now}} ' \
             (.nodes[] | select(.type == "agent_session")) |= ( \
                 .last_active_epoch = ( \
                     if .id.session_key | test("ambig|hook|deck-launcher") then ($now|tonumber) - 60 \
@@ -52,6 +56,32 @@ regen-showcase-fixture:
                     else .last_active_epoch end \
                 ) \
             )' > tests/fixtures/showcase.json
+
+# Render the README screenshots into docs/images/ (ADR 0113): one
+# `tui --snapshot` frame per screen of the showcase fixture, with
+# previews read from a freshly materialized showcase world, `~` standing
+# for `/fixture`, and ages pinned to the showcase's anchor time.
+screenshots:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    cargo build --quiet --features snapshot
+    bin="${CARGO_TARGET_DIR:-target}/debug/conspectus"
+    scratch="$(mktemp -d)"
+    trap 'rm -rf "$scratch"' EXIT
+    "$bin" dev scenario materialize showcase "$scratch/world" >/dev/null
+    mkdir -p docs/images
+    shot() {
+        env -i PATH="$PATH" HOME=/fixture             XDG_CONFIG_HOME="$scratch/config" XDG_STATE_HOME="$scratch/state"             XDG_DATA_HOME="$scratch/data" XDG_CACHE_HOME="$scratch/cache"             XDG_RUNTIME_DIR="$scratch/runtime"             CONSPECTUS_DISABLE_TMUX=1 CONSPECTUS_DISABLE_FORGE=1             "$bin" tui --snapshot --snapshot-fixture tests/fixtures/showcase.json             --snapshot-fixture-root "$scratch/world" --snapshot-now {{showcase_now}}             --snapshot-width 150 --snapshot-height 34 --snapshot-keys "$2"             > "$scratch/$1.ansi"
+        termshot --raw-read "$scratch/$1.ansi" --columns 150 --filename "docs/images/$1.png"
+    }
+    # A session and its transcript.
+    shot session-transcript "jjjjjljjjj"
+    # The same session's Related row: the evidence, then the checkout's git status.
+    shot related-preview "jjjjjljjjj<Tab>jjjjj"
+    # A repo row: its recent commits and remotes.
+    shot repo-history "jjjjj"
+    # The mux view: a tmux session and its pane.
+    shot mux-pane "2jj"
 
 # Needs the dev-only `snapshot` feature (fixture mode). There is no live
 # discovery, so nothing on the demo machine leaks into the view; press `r`
