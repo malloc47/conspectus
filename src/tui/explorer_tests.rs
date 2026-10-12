@@ -1001,6 +1001,7 @@ fn detail_timestamps_render_as_relative_ages() {
         url: None,
         updated_epoch: Some(TEST_NOW - 2 * 86_400),
         is_draft: false,
+        head_ref: None,
     };
     let mut snapshot = GraphSnapshot::empty();
     snapshot
@@ -1053,6 +1054,7 @@ fn forge_pr_core_renders_composite_label() {
         url: Some("https://github.com/malloc47/conspectus/pull/42".to_string()),
         updated_epoch: Some(1_700_000_100),
         is_draft: false,
+        head_ref: None,
     };
     let mut snapshot = GraphSnapshot::empty();
     snapshot.nodes.push(GraphNode::ForgePr(pr.clone()));
@@ -1100,6 +1102,7 @@ fn short_node_label_renders_kind_short_tag_per_node() {
         url: None,
         updated_epoch: None,
         is_draft: false,
+        head_ref: None,
     });
     assert_eq!(short_node_label(&pr), "pr:octo/repo#7");
     let repo = RepoNode {

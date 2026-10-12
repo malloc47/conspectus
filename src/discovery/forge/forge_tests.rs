@@ -134,6 +134,7 @@ fn forge_discovery_merges_adapter_fragments_deterministically() {
         url: None,
         updated_epoch: None,
         is_draft: false,
+        head_ref: None,
     });
     let pr_beta = GraphNode::ForgePr(ForgePrNode {
         id: ForgePrId::new("github", "github.com", "octo", "repo", 2),
@@ -146,6 +147,7 @@ fn forge_discovery_merges_adapter_fragments_deterministically() {
         url: None,
         updated_epoch: None,
         is_draft: false,
+        head_ref: None,
     });
 
     let fragment = ForgeDiscovery::new()

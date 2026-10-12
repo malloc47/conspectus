@@ -168,6 +168,7 @@ fn forge_pr_node(id: &ForgePrId, context: &RepoContext, record: &PullRequestReco
         url: record.url.clone(),
         updated_epoch: record.updated_epoch,
         is_draft: record.is_draft,
+        head_ref: Some(record.head_ref.clone()).filter(|head| !head.is_empty()),
     }
 }
 

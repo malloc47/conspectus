@@ -448,6 +448,7 @@ fn populated_snapshot_for_archive_tests() -> GraphSnapshot {
         url: Some("https://example".to_string()),
         updated_epoch: Some(5),
         is_draft: false,
+        head_ref: None,
     }));
 
     let mut fields = Metadata::new();

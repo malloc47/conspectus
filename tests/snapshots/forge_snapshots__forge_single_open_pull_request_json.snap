@@ -63,7 +63,8 @@ expression: rendered
       "number": 7,
       "state": "open",
       "url": "https://github.com/octo/repo/pull/7",
-      "updated_epoch": 1772714096
+      "updated_epoch": 1772714096,
+      "head_ref": "main"
     }
   ],
   "candidate_links": [

@@ -486,6 +486,7 @@ fn agent_projection_shows_preferred_pr_when_branch_has_one() {
                 url: None,
                 updated_epoch: None,
                 is_draft: false,
+                head_ref: None,
             }),
         ],
         candidate_links: vec![pr_link],
@@ -965,6 +966,7 @@ fn render_color_enabled_colors_pr_state_cell() {
             url: None,
             updated_epoch: None,
             is_draft: false,
+            head_ref: None,
         })],
         ..GraphSnapshot::empty()
     };
@@ -1472,6 +1474,7 @@ fn forge_pr(owner: &str, repo: &str, number: u64, state: &str, draft: bool) -> G
         url: None,
         updated_epoch: None,
         is_draft: draft,
+        head_ref: None,
     })
 }
 

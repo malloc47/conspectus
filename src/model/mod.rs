@@ -907,6 +907,10 @@ pub struct ForgePrNode {
     pub updated_epoch: Option<i64>,
     #[serde(default, skip_serializing_if = "core::ops::Not::not")]
     pub is_draft: bool,
+    /// The branch the PR merges from, as the forge names it
+    /// (`feature/extra`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub head_ref: Option<String>,
 }
 
 /// First-class graph representation of a session pin declaration.

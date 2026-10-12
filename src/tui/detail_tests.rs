@@ -503,6 +503,7 @@ fn agent_session_pr_field_walks_worktree_branch_pr_chain() {
         url: None,
         updated_epoch: None,
         is_draft: false,
+        head_ref: None,
     }));
     snapshot.nodes.push(agent("codex", "abc", Some(cwd), None));
 

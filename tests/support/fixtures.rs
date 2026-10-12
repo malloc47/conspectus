@@ -261,6 +261,7 @@ pub fn branch_pr_graph() -> GraphSnapshot {
             url: Some(format!("https://github.com/owner/repo/pull/{pr_number}")),
             updated_epoch: Some(1_700_000_000 + (pr_number as i64) * 60),
             is_draft: false,
+            head_ref: None,
         };
         snap.nodes.push(GraphNode::ForgePr(pr.clone()));
 

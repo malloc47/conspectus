@@ -62,7 +62,8 @@ expression: rendered
       "repo": "repo",
       "number": 1,
       "state": "open",
-      "updated_epoch": 1772712000
+      "updated_epoch": 1772712000,
+      "head_ref": "main"
     },
     {
       "type": "forge_pr",
@@ -79,7 +80,8 @@ expression: rendered
       "repo": "repo",
       "number": 2,
       "state": "merged",
-      "updated_epoch": 1772625600
+      "updated_epoch": 1772625600,
+      "head_ref": "feature"
     },
     {
       "type": "forge_pr",
@@ -96,7 +98,8 @@ expression: rendered
       "repo": "repo",
       "number": 3,
       "state": "closed",
-      "updated_epoch": 1772539200
+      "updated_epoch": 1772539200,
+      "head_ref": "stale"
     }
   ],
   "candidate_links": [

@@ -1791,6 +1791,10 @@ fn forge_pr_core(pr: &ForgePrNode, now: Option<i64>) -> Vec<CoreField> {
         draft.placeholder = true;
         fields.push(draft);
     }
+    fields.push(match &pr.head_ref {
+        Some(head) => CoreField::text("head", head.clone()),
+        None => CoreField::placeholder("head", "—"),
+    });
     fields.push(match pr.updated_epoch {
         Some(epoch) => CoreField::timestamp("updated", epoch, now),
         None => CoreField::placeholder("updated", "—"),
