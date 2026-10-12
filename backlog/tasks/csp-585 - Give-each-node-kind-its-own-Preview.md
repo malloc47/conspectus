@@ -1,11 +1,11 @@
 ---
 id: CSP-585
 title: Give each node kind its own Preview
-status: In Progress
+status: Done
 assignee:
   - '@claude'
 created_date: '2026-10-05 04:22'
-updated_date: '2026-10-12 04:38'
+updated_date: '2026-10-12 16:21'
 labels:
   - h-preview
 milestone: m-11
@@ -24,11 +24,17 @@ ordinal: 625000
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 Every node kind previews what the design subtask's ADR assigns it, or shows nothing where the ADR says so
+- [x] #1 Every node kind previews what the design subtask's ADR assigns it, or shows nothing where the ADR says so
 <!-- AC:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
-- [ ] #1 `just check` passes, or `git diff --check` for docs-only changes
-- [ ] #2 Docs and ADRs are updated when behavior, architecture, or workflow change
+- [x] #1 `just check` passes, or `git diff --check` for docs-only changes
+- [x] #2 Docs and ADRs are updated when behavior, architecture, or workflow change
 <!-- DOD:END -->
+
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+Every node kind now previews what ADR 0112 assigns it: sessions their transcript through the native viewer (pane one remembered choice away), mux sessions their pane, pins through their binding, checkouts `git status` over a listing, repos their history and remotes, workspaces a listing, branches their commits with ahead/behind, PRs their title, checks, reviews, and body via `gh`, processes their `/proc` tree, and forks only their fields. Every field row previews by value type, and Related rows show the neighbor's preview below their evidence. All of it runs through one read-only, memory-only preview mechanism (`CSP-585.02`–`.09`), verified with `just check` and live `tui --snapshot` checks. Follow-ups: `CSP-587` (showcase transcripts for the README frame), `CSP-588` (search by displayed session id), and closing `CSP-171.01`.
+<!-- SECTION:FINAL_SUMMARY:END -->
