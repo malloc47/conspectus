@@ -40,10 +40,12 @@ anchor time with every render.
    frame displays is built by the showcase scenario itself, not by the
    screenshot recipe: a short conversation on the selected session, a
    repo history with fixed commit dates (so hashes are stable), a
-   checked-out feature branch with uncommitted edits, and a recorded
-   pane for its tmux session under `panes/`. Scenario muxes are replayed
-   rows, not live tmux, so both `dev scenario tui` and
-   `--snapshot-fixture-root` answer pane captures from those recordings.
+   checked-out feature branch with uncommitted edits, a recorded pane
+   for its tmux session under `panes/`, and recorded `gh pr view` output
+   for its PRs under `forge/`. Scenario muxes are replayed rows and
+   scenario PRs come from canned `gh` output, so both `dev scenario tui`
+   and `--snapshot-fixture-root` answer pane captures and PR previews
+   from those recordings.
 
 ## Consequences
 

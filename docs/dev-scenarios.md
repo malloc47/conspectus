@@ -262,10 +262,11 @@ just screenshots
 The showcase builder carries everything the screenshots show, so the
 interactive scenario TUI shows it too: a two-exchange conversation on
 `showcase-claude`, a dated history with a checked-out feature branch and
-uncommitted edits in `repos/project`, and a recorded pane for the `project`
-tmux session under `panes/`. Scenario muxes are replayed rows rather than live
-tmux, so `dev scenario tui` and `--snapshot-fixture-root` answer pane captures
-from those recordings. Commits use fixed dates, so the history and its hashes
+uncommitted edits in `repos/project`, a recorded pane for the `project` tmux
+session under `panes/`, and recorded `gh pr view` output for its PRs under
+`forge/`. Scenario muxes are replayed rows and scenario PRs come from canned
+`gh` output, so `dev scenario tui` and `--snapshot-fixture-root` answer pane
+captures and PR previews from those recordings. Commits use fixed dates, so the history and its hashes
 are the same every build.
 
 Coverage at a glance:

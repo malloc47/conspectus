@@ -481,6 +481,9 @@ struct StaticMode {
     tmux: Box<dyn MuxBackend>,
     snapshot: crate::model::GraphSnapshot,
     fixture_path: Option<std::path::PathBuf>,
+    /// A scenario world's root, whose recorded `gh pr view` output
+    /// answers PR previews.
+    recordings: Option<std::path::PathBuf>,
 }
 
 #[cfg(any(test, debug_assertions, feature = "snapshot"))]
@@ -660,6 +663,18 @@ impl LoopMode for StaticMode {
     fn tmux(&self) -> &dyn MuxBackend {
         self.tmux.as_ref()
     }
+
+    /// A scenario's recorded `gh pr view` output answers its PRs;
+    /// everything else loads as usual.
+    fn load_preview(&mut self, app: &mut App, source: PreviewSource) {
+        if let Some(root) = &self.recordings
+            && let Some(content) = recorded_preview(&source, root)
+        {
+            app.update(Msg::SetPreview { source, content });
+            return;
+        }
+        load_preview_now(app, self.tmux(), source);
+    }
 }
 
 /// Prepare the toast area and render one frame. Shared between
@@ -770,16 +785,19 @@ pub fn run(config: RunConfig) -> Result<()> {
 /// debug-only replay scenarios: it lets developers inspect edge-case
 /// worlds through the real renderer and reducer without teaching
 /// production discovery about fixtures.
-/// `tmux` answers pane captures; a scenario passes its recorded panes.
+/// `tmux` answers pane captures; a scenario passes its recorded panes,
+/// and `recordings`, its world's root, answers PR previews from the
+/// `gh pr view` output it recorded.
 #[cfg(any(test, debug_assertions, feature = "snapshot"))]
 pub fn run_static(
     config: RunConfig,
     snapshot: crate::model::GraphSnapshot,
     tmux: Box<dyn MuxBackend>,
+    recordings: Option<std::path::PathBuf>,
 ) -> Result<()> {
     let mut terminal = ratatui::init();
     let _ = terminal.clear();
-    let result = static_event_loop(&mut terminal, config, snapshot, None, tmux);
+    let result = static_event_loop(&mut terminal, config, snapshot, None, tmux, recordings);
     ratatui::restore();
     result
 }
@@ -802,6 +820,7 @@ pub fn run_from_fixture(config: RunConfig, fixture_path: std::path::PathBuf) -> 
         snapshot,
         Some(fixture_path),
         Box::new(SystemTmux::new()),
+        None,
     );
     ratatui::restore();
     result
@@ -847,6 +866,7 @@ fn static_event_loop(
     initial_snapshot: crate::model::GraphSnapshot,
     fixture_path: Option<std::path::PathBuf>,
     tmux: Box<dyn MuxBackend>,
+    recordings: Option<std::path::PathBuf>,
 ) -> Result<()> {
     let mut app = App::new(config.clone());
     // Enable last-active-view persistence for the static
@@ -860,6 +880,7 @@ fn static_event_loop(
         tmux,
         snapshot: initial_snapshot,
         fixture_path,
+        recordings,
     };
     run_loop(terminal, app, config, mode)
 }
@@ -1548,6 +1569,17 @@ fn refresh_preview_if_needed(
     preview_source(app)
 }
 
+/// A preview a materialized scenario recorded in place of a live
+/// source: a PR's `gh pr view` output. `None` for anything else.
+#[cfg(any(test, debug_assertions, feature = "snapshot"))]
+fn recorded_preview(source: &PreviewSource, root: &std::path::Path) -> Option<PreviewContent> {
+    let PreviewSource::PullRequest(pr) = source else {
+        return None;
+    };
+    crate::dev_scenarios::recorded_pr_view(root, &pr.owner, &pr.repo, pr.number)
+        .map(|json| crate::tui::preview::forge::pr_preview_from_json(&json))
+}
+
 /// Load one preview on the calling thread. A pane capture goes through
 /// the executor's mux op so the reducer stays the only writer.
 fn load_preview_now(app: &mut App, tmux: &dyn MuxBackend, source: PreviewSource) {
@@ -1587,6 +1619,12 @@ pub(super) fn load_offline_preview_now(
     let Some(source) = plan_preview_load(app, config, None, true) else {
         return;
     };
+    if let Some((_, root)) = rebase
+        && let Some(content) = recorded_preview(&source, root)
+    {
+        app.update(Msg::SetPreview { source, content });
+        return;
+    }
     if let (PreviewSource::Pane(mux), Some((_, root))) = (&source, rebase) {
         // A materialized scenario records its panes instead of running
         // tmux.

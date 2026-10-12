@@ -42,17 +42,21 @@ pub fn load_pr_preview_with(runner: &dyn GhRunner, query: &PrQuery) -> PreviewCo
     }
     let repo = format!("{}/{}/{}", query.host, query.owner, query.repo);
     match runner.view_pull_request(&repo, query.number, PR_FIELDS) {
-        Ok(GhOutcome::PullRequests(json)) => {
-            match render_pr(&json, crate::tui::rows::tree_current_unix_epoch()) {
-                Ok(lines) => PreviewContent::Lines(lines),
-                Err(err) => PreviewContent::Failed(format!("gh returned unreadable JSON: {err}")),
-            }
-        }
+        Ok(GhOutcome::PullRequests(json)) => pr_preview_from_json(&json),
         Ok(GhOutcome::Unavailable(reason)) => {
             PreviewContent::Unavailable(reason.as_str().to_string())
         }
         Ok(GhOutcome::Failed { message, .. }) => PreviewContent::Failed(format!("gh: {message}")),
         Err(err) => PreviewContent::Failed(format!("gh: {err:#}")),
+    }
+}
+
+/// The preview for a `gh pr view --json` object, ages rendered against
+/// the TUI's clock.
+pub fn pr_preview_from_json(json: &str) -> PreviewContent {
+    match render_pr(json, crate::tui::rows::tree_current_unix_epoch()) {
+        Ok(lines) => PreviewContent::Lines(lines),
+        Err(err) => PreviewContent::Failed(format!("gh returned unreadable JSON: {err}")),
     }
 }
 

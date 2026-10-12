@@ -454,7 +454,8 @@
       "number": 7,
       "state": "open",
       "url": "https://github.com/conspectus/project/pull/7",
-      "updated_epoch": 1781362800,
+      "updated_epoch": 1790762400,
+      "is_draft": true,
       "head_ref": "feature/extra"
     },
     {
@@ -473,7 +474,7 @@
       "number": 8,
       "state": "open",
       "url": "https://github.com/conspectus/project/pull/8",
-      "updated_epoch": 1781436600,
+      "updated_epoch": 1790683200,
       "is_draft": true,
       "head_ref": "main"
     }
@@ -504,7 +505,7 @@
           "logical_path": "/fixture/.agent-deck/multi-repo-worktrees/showcase-deck-c0debeef/atelier-repo-a",
           "member_path_kind": "symlink"
         },
-        "freshness_epoch": 1791838136
+        "freshness_epoch": 1791847044
       },
       "state": {
         "state": "active"
@@ -535,7 +536,7 @@
           "logical_path": "/fixture/.agent-deck/multi-repo-worktrees/showcase-deck-c0debeef/project",
           "member_path_kind": "symlink"
         },
-        "freshness_epoch": 1791838136
+        "freshness_epoch": 1791847044
       },
       "state": {
         "state": "active"
@@ -579,7 +580,7 @@
           "lineage_fidelity": "native",
           "lineage_kind": "fork"
         },
-        "freshness_epoch": 1791838136
+        "freshness_epoch": 1791847044
       },
       "state": {
         "state": "active"
@@ -616,7 +617,7 @@
           "link": false,
           "repo_name": "repo-a"
         },
-        "freshness_epoch": 1791838136
+        "freshness_epoch": 1791847044
       },
       "state": {
         "state": "active"
@@ -653,7 +654,7 @@
           "link": false,
           "repo_name": "repo-a"
         },
-        "freshness_epoch": 1791838136
+        "freshness_epoch": 1791847044
       },
       "state": {
         "state": "active"
@@ -687,7 +688,7 @@
           "link": false,
           "repo_name": "repo-a"
         },
-        "freshness_epoch": 1791838136
+        "freshness_epoch": 1791847044
       },
       "state": {
         "state": "active"
@@ -718,7 +719,7 @@
           "fork_mode": "worktree",
           "fork_name": "alpha"
         },
-        "freshness_epoch": 1791838136
+        "freshness_epoch": 1791847044
       },
       "state": {
         "state": "active"
@@ -762,7 +763,7 @@
           "lineage_fidelity": "native",
           "lineage_kind": "fork"
         },
-        "freshness_epoch": 1791838136
+        "freshness_epoch": 1791847044
       },
       "state": {
         "state": "active"
@@ -798,7 +799,7 @@
           "fork_mode": "worktree",
           "fork_name": "alpha"
         },
-        "freshness_epoch": 1791838136
+        "freshness_epoch": 1791847044
       },
       "state": {
         "state": "active"
@@ -831,7 +832,7 @@
           "provider_source_path": "/fixture/atelier-demo/repo-a",
           "repo_name": "repo-a"
         },
-        "freshness_epoch": 1791838136
+        "freshness_epoch": 1791847044
       },
       "state": {
         "state": "active"
@@ -864,7 +865,7 @@
           "provider_source_path": "/fixture/atelier-demo/repo-b",
           "repo_name": "repo-b"
         },
-        "freshness_epoch": 1791838136
+        "freshness_epoch": 1791847044
       },
       "state": {
         "state": "active"
@@ -899,7 +900,7 @@
           "lineage_kind": "fork",
           "parent_native_id": "showcase-codex-parent"
         },
-        "freshness_epoch": 1791838136
+        "freshness_epoch": 1791847044
       },
       "state": {
         "state": "active"
@@ -933,7 +934,7 @@
         "fields": {
           "checkout_root": "/fixture/repos/project"
         },
-        "freshness_epoch": 1791838136
+        "freshness_epoch": 1791847044
       },
       "state": {
         "state": "active"
@@ -965,7 +966,7 @@
           "match_kind": "exact_cwd_match",
           "mux_activity_epoch": 1790768700
         },
-        "freshness_epoch": 1791838136
+        "freshness_epoch": 1791847044
       },
       "state": {
         "state": "active"
@@ -997,7 +998,7 @@
           "match_kind": "exact_cwd_match",
           "mux_activity_epoch": 1790769300
         },
-        "freshness_epoch": 1791838136
+        "freshness_epoch": 1791847044
       },
       "state": {
         "state": "active"
@@ -1031,7 +1032,7 @@
         "fields": {
           "checkout_root": "/fixture/repos/project"
         },
-        "freshness_epoch": 1791838136
+        "freshness_epoch": 1791847044
       },
       "state": {
         "state": "active"
@@ -1063,7 +1064,7 @@
           "match_kind": "exact_cwd_match",
           "mux_activity_epoch": 1790768700
         },
-        "freshness_epoch": 1791838136
+        "freshness_epoch": 1791847044
       },
       "state": {
         "state": "active"
@@ -1095,7 +1096,7 @@
           "match_kind": "exact_cwd_match",
           "mux_activity_epoch": 1790769300
         },
-        "freshness_epoch": 1791838136
+        "freshness_epoch": 1791847044
       },
       "state": {
         "state": "active"
@@ -1129,7 +1130,7 @@
         "fields": {
           "checkout_root": "/fixture/repos/project"
         },
-        "freshness_epoch": 1791838136
+        "freshness_epoch": 1791847044
       },
       "state": {
         "state": "active"
@@ -1161,7 +1162,7 @@
           "match_kind": "exact_cwd_match",
           "mux_activity_epoch": 1790768700
         },
-        "freshness_epoch": 1791838136
+        "freshness_epoch": 1791847044
       },
       "state": {
         "state": "active"
@@ -1193,7 +1194,7 @@
           "match_kind": "exact_cwd_match",
           "mux_activity_epoch": 1790769300
         },
-        "freshness_epoch": 1791838136
+        "freshness_epoch": 1791847044
       },
       "state": {
         "state": "active"
@@ -1224,7 +1225,7 @@
         "fields": {
           "workspace_member_root": "/fixture/.agent-deck/multi-repo-worktrees/showcase-deck-c0debeef"
         },
-        "freshness_epoch": 1791838136
+        "freshness_epoch": 1791847044
       },
       "state": {
         "state": "active"
@@ -1256,7 +1257,7 @@
           "match_kind": "exact_cwd_match",
           "mux_activity_epoch": 1790767800
         },
-        "freshness_epoch": 1791838136
+        "freshness_epoch": 1791847044
       },
       "state": {
         "state": "active"
@@ -1290,7 +1291,7 @@
         "fields": {
           "checkout_root": "/fixture/repos/project"
         },
-        "freshness_epoch": 1791838136
+        "freshness_epoch": 1791847044
       },
       "state": {
         "state": "active"
@@ -1322,7 +1323,7 @@
           "match_kind": "exact_cwd_match",
           "mux_activity_epoch": 1790768700
         },
-        "freshness_epoch": 1791838136
+        "freshness_epoch": 1791847044
       },
       "state": {
         "state": "active"
@@ -1354,7 +1355,7 @@
           "match_kind": "exact_cwd_match",
           "mux_activity_epoch": 1790769300
         },
-        "freshness_epoch": 1791838136
+        "freshness_epoch": 1791847044
       },
       "state": {
         "state": "active"
@@ -1388,7 +1389,7 @@
         "fields": {
           "checkout_root": "/fixture/checkouts/bare-project"
         },
-        "freshness_epoch": 1791838136
+        "freshness_epoch": 1791847044
       },
       "state": {
         "state": "active"
@@ -1420,7 +1421,7 @@
           "match_kind": "exact_cwd_match",
           "mux_activity_epoch": 1790762400
         },
-        "freshness_epoch": 1791838136
+        "freshness_epoch": 1791847044
       },
       "state": {
         "state": "active"
@@ -1451,7 +1452,7 @@
         "fields": {
           "fork_root": "/fixture/atelier-demo/.atelier/forks/alpha"
         },
-        "freshness_epoch": 1791838136
+        "freshness_epoch": 1791847044
       },
       "state": {
         "state": "active"
@@ -1482,7 +1483,7 @@
         "fields": {
           "workspace_member_root": "/fixture/atelier-demo"
         },
-        "freshness_epoch": 1791838136
+        "freshness_epoch": 1791847044
       },
       "state": {
         "state": "active"
@@ -1516,7 +1517,7 @@
         "fields": {
           "checkout_root": "/fixture/atelier-demo/repo-a"
         },
-        "freshness_epoch": 1791838136
+        "freshness_epoch": 1791847044
       },
       "state": {
         "state": "active"
@@ -1547,7 +1548,7 @@
         "fields": {
           "workspace_member_root": "/fixture/atelier-demo/repo-a"
         },
-        "freshness_epoch": 1791838136
+        "freshness_epoch": 1791847044
       },
       "state": {
         "state": "active"
@@ -1581,7 +1582,7 @@
         "fields": {
           "checkout_root": "/fixture/atelier-demo/repo-b"
         },
-        "freshness_epoch": 1791838136
+        "freshness_epoch": 1791847044
       },
       "state": {
         "state": "active"
@@ -1612,7 +1613,7 @@
         "fields": {
           "workspace_member_root": "/fixture/atelier-demo/repo-b"
         },
-        "freshness_epoch": 1791838136
+        "freshness_epoch": 1791847044
       },
       "state": {
         "state": "active"
@@ -1641,7 +1642,7 @@
       "source_metadata": {
         "adapter": "git",
         "evidence": "git common dir",
-        "freshness_epoch": 1791838136
+        "freshness_epoch": 1791847044
       },
       "state": {
         "state": "active"
@@ -1673,7 +1674,7 @@
       "source_metadata": {
         "adapter": "git",
         "evidence": "symbolic HEAD",
-        "freshness_epoch": 1791838136
+        "freshness_epoch": 1791847044
       },
       "state": {
         "state": "active"
@@ -1702,7 +1703,7 @@
       "source_metadata": {
         "adapter": "git",
         "evidence": "git common dir",
-        "freshness_epoch": 1791838136
+        "freshness_epoch": 1791847044
       },
       "state": {
         "state": "active"
@@ -1734,7 +1735,7 @@
       "source_metadata": {
         "adapter": "git",
         "evidence": "symbolic HEAD",
-        "freshness_epoch": 1791838136
+        "freshness_epoch": 1791847044
       },
       "state": {
         "state": "active"
@@ -1763,7 +1764,7 @@
       "source_metadata": {
         "adapter": "git",
         "evidence": "git common dir",
-        "freshness_epoch": 1791838136
+        "freshness_epoch": 1791847044
       },
       "state": {
         "state": "active"
@@ -1795,7 +1796,7 @@
       "source_metadata": {
         "adapter": "git",
         "evidence": "symbolic HEAD",
-        "freshness_epoch": 1791838136
+        "freshness_epoch": 1791847044
       },
       "state": {
         "state": "active"
@@ -1824,7 +1825,7 @@
       "source_metadata": {
         "adapter": "git",
         "evidence": "git common dir",
-        "freshness_epoch": 1791838136
+        "freshness_epoch": 1791847044
       },
       "state": {
         "state": "active"
@@ -1856,7 +1857,7 @@
       "source_metadata": {
         "adapter": "git",
         "evidence": "symbolic HEAD",
-        "freshness_epoch": 1791838136
+        "freshness_epoch": 1791847044
       },
       "state": {
         "state": "active"
@@ -1891,11 +1892,11 @@
         "evidence": "gh pr list head ref",
         "fields": {
           "head_ref": "feature/extra",
-          "is_draft": false,
+          "is_draft": true,
           "state": "open",
-          "updated_epoch": 1781362800
+          "updated_epoch": 1790762400
         },
-        "freshness_epoch": 1791838136
+        "freshness_epoch": 1791847044
       },
       "state": {
         "state": "active"
@@ -1932,9 +1933,9 @@
           "head_ref": "main",
           "is_draft": true,
           "state": "open",
-          "updated_epoch": 1781436600
+          "updated_epoch": 1790683200
         },
-        "freshness_epoch": 1791838136
+        "freshness_epoch": 1791847044
       },
       "state": {
         "state": "active"
@@ -1972,7 +1973,7 @@
             "session_name": "project"
           }
         },
-        "freshness_epoch": 1791838136
+        "freshness_epoch": 1791847044
       },
       "state": {
         "state": "ignored",
@@ -2683,7 +2684,7 @@
         "common_dir": "/fixture/atelier-demo/repo-a/.git"
       },
       "provider": "atelier",
-      "freshness_epoch": 1791838136
+      "freshness_epoch": 1791847044
     },
     {
       "node_id": {
@@ -2691,7 +2692,7 @@
         "common_dir": "/fixture/atelier-demo/repo-b/.git"
       },
       "provider": "atelier",
-      "freshness_epoch": 1791838136
+      "freshness_epoch": 1791847044
     },
     {
       "node_id": {
@@ -2699,7 +2700,7 @@
         "common_dir": "/fixture/repos/bare-project.git"
       },
       "provider": "git::cwd",
-      "freshness_epoch": 1791838136
+      "freshness_epoch": 1791847044
     },
     {
       "node_id": {
@@ -2707,7 +2708,7 @@
         "common_dir": "/fixture/repos/project/.git"
       },
       "provider": "git",
-      "freshness_epoch": 1791838136
+      "freshness_epoch": 1791847044
     },
     {
       "node_id": {
@@ -2715,7 +2716,7 @@
         "common_dir": "repo-a"
       },
       "provider": "atelier",
-      "freshness_epoch": 1791838136
+      "freshness_epoch": 1791847044
     },
     {
       "node_id": {
@@ -2726,7 +2727,7 @@
         "root": "/fixture/atelier-demo/repo-a"
       },
       "provider": "atelier",
-      "freshness_epoch": 1791838136
+      "freshness_epoch": 1791847044
     },
     {
       "node_id": {
@@ -2737,7 +2738,7 @@
         "root": "/fixture/atelier-demo/repo-b"
       },
       "provider": "atelier",
-      "freshness_epoch": 1791838136
+      "freshness_epoch": 1791847044
     },
     {
       "node_id": {
@@ -2748,7 +2749,7 @@
         "root": "/fixture/checkouts/bare-project"
       },
       "provider": "git::cwd",
-      "freshness_epoch": 1791838136
+      "freshness_epoch": 1791847044
     },
     {
       "node_id": {
@@ -2759,7 +2760,7 @@
         "root": "/fixture/repos/project"
       },
       "provider": "git",
-      "freshness_epoch": 1791838136
+      "freshness_epoch": 1791847044
     },
     {
       "node_id": {
@@ -2770,7 +2771,7 @@
         "root": ".atelier/forks/alpha/repo-a"
       },
       "provider": "atelier",
-      "freshness_epoch": 1791838136
+      "freshness_epoch": 1791847044
     },
     {
       "node_id": {
@@ -2778,7 +2779,7 @@
         "root": "/fixture/.agent-deck/multi-repo-worktrees/showcase-deck-c0debeef"
       },
       "provider": "agent_deck",
-      "freshness_epoch": 1791838136
+      "freshness_epoch": 1791847044
     },
     {
       "node_id": {
@@ -2786,7 +2787,7 @@
         "root": "/fixture/atelier-demo"
       },
       "provider": "atelier",
-      "freshness_epoch": 1791838136
+      "freshness_epoch": 1791847044
     },
     {
       "node_id": {
@@ -2796,7 +2797,7 @@
         "session_key": "showcase-claude"
       },
       "provider": "claude-code",
-      "freshness_epoch": 1791838136
+      "freshness_epoch": 1791847044
     },
     {
       "node_id": {
@@ -2806,7 +2807,7 @@
         "session_key": "showcase-claude-ambig-a"
       },
       "provider": "claude-code",
-      "freshness_epoch": 1791838136
+      "freshness_epoch": 1791847044
     },
     {
       "node_id": {
@@ -2816,7 +2817,7 @@
         "session_key": "showcase-claude-ambig-b"
       },
       "provider": "claude-code",
-      "freshness_epoch": 1791838136
+      "freshness_epoch": 1791847044
     },
     {
       "node_id": {
@@ -2826,7 +2827,7 @@
         "session_key": "showcase-deck-launcher"
       },
       "provider": "claude-code",
-      "freshness_epoch": 1791838136
+      "freshness_epoch": 1791847044
     },
     {
       "node_id": {
@@ -2836,7 +2837,7 @@
         "session_key": "showcase-hook-current"
       },
       "provider": "claude-code",
-      "freshness_epoch": 1791838136
+      "freshness_epoch": 1791847044
     },
     {
       "node_id": {
@@ -2846,7 +2847,7 @@
         "session_key": "showcase-bare-codex"
       },
       "provider": "codex",
-      "freshness_epoch": 1791838136
+      "freshness_epoch": 1791847044
     },
     {
       "node_id": {
@@ -2856,7 +2857,7 @@
         "session_key": "showcase-codex-child"
       },
       "provider": "codex",
-      "freshness_epoch": 1791838136
+      "freshness_epoch": 1791847044
     },
     {
       "node_id": {
@@ -2866,7 +2867,7 @@
         "session_key": "showcase-codex-parent"
       },
       "provider": "codex",
-      "freshness_epoch": 1791838136
+      "freshness_epoch": 1791847044
     },
     {
       "node_id": {
@@ -2876,7 +2877,7 @@
         "session_key": "showcase-orphan"
       },
       "provider": "codex",
-      "freshness_epoch": 1791838136
+      "freshness_epoch": 1791847044
     },
     {
       "node_id": {
@@ -2886,7 +2887,7 @@
         "session_key": "showcase-opencode"
       },
       "provider": "opencode",
-      "freshness_epoch": 1791838136
+      "freshness_epoch": 1791847044
     },
     {
       "node_id": {
@@ -2894,7 +2895,7 @@
         "native_id": "tmux:ambiguous"
       },
       "provider": "tmux",
-      "freshness_epoch": 1791838136
+      "freshness_epoch": 1791847044
     },
     {
       "node_id": {
@@ -2902,7 +2903,7 @@
         "native_id": "tmux:bare-work"
       },
       "provider": "tmux",
-      "freshness_epoch": 1791838136
+      "freshness_epoch": 1791847044
     },
     {
       "node_id": {
@@ -2910,7 +2911,7 @@
         "native_id": "tmux:project"
       },
       "provider": "tmux",
-      "freshness_epoch": 1791838136
+      "freshness_epoch": 1791847044
     },
     {
       "node_id": {
@@ -2918,7 +2919,7 @@
         "native_id": "tmux:showcase-deck"
       },
       "provider": "tmux",
-      "freshness_epoch": 1791838136
+      "freshness_epoch": 1791847044
     },
     {
       "node_id": {
@@ -2929,7 +2930,7 @@
         "refname": "refs/heads/main"
       },
       "provider": "atelier",
-      "freshness_epoch": 1791838136
+      "freshness_epoch": 1791847044
     },
     {
       "node_id": {
@@ -2940,7 +2941,7 @@
         "refname": "refs/heads/main"
       },
       "provider": "atelier",
-      "freshness_epoch": 1791838136
+      "freshness_epoch": 1791847044
     },
     {
       "node_id": {
@@ -2951,7 +2952,7 @@
         "refname": "refs/heads/feature/bare"
       },
       "provider": "git::cwd",
-      "freshness_epoch": 1791838136
+      "freshness_epoch": 1791847044
     },
     {
       "node_id": {
@@ -2962,7 +2963,7 @@
         "refname": "refs/heads/main"
       },
       "provider": "git::cwd",
-      "freshness_epoch": 1791838136
+      "freshness_epoch": 1791847044
     },
     {
       "node_id": {
@@ -2973,7 +2974,7 @@
         "refname": "refs/heads/feature/extra"
       },
       "provider": "git",
-      "freshness_epoch": 1791838136
+      "freshness_epoch": 1791847044
     },
     {
       "node_id": {
@@ -2984,7 +2985,7 @@
         "refname": "refs/heads/main"
       },
       "provider": "git",
-      "freshness_epoch": 1791838136
+      "freshness_epoch": 1791847044
     },
     {
       "node_id": {
@@ -2995,7 +2996,7 @@
         "refname": "fork/alpha/repo-a"
       },
       "provider": "atelier",
-      "freshness_epoch": 1791838136
+      "freshness_epoch": 1791847044
     },
     {
       "node_id": {
@@ -3003,7 +3004,7 @@
         "provider_source_key": "atelier:alpha"
       },
       "provider": "atelier",
-      "freshness_epoch": 1791838136
+      "freshness_epoch": 1791847044
     },
     {
       "node_id": {
@@ -3015,7 +3016,7 @@
         "number": 7
       },
       "provider": "github",
-      "freshness_epoch": 1791838136
+      "freshness_epoch": 1791847044
     },
     {
       "node_id": {
@@ -3027,7 +3028,7 @@
         "number": 8
       },
       "provider": "github",
-      "freshness_epoch": 1791838136
+      "freshness_epoch": 1791847044
     }
   ]
 }

@@ -230,6 +230,11 @@ impl DevScenarioTuiArgs {
         };
         config.initial_filter = filter;
         apply_grouping_to_tui_config(&mut config, grouping);
-        crate::tui::run_static(config, snapshot, Box::new(world.pane_backend()))
+        crate::tui::run_static(
+            config,
+            snapshot,
+            Box::new(world.pane_backend()),
+            Some(world.root().to_path_buf()),
+        )
     }
 }

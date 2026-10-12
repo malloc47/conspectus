@@ -82,6 +82,8 @@ screenshots:
     shot repo-history "jjjjj"
     # The mux view: a tmux session and its pane.
     shot mux-pane "2jj"
+    # The PRs view: a PR under its checkout, with its sessions and preview.
+    shot prs-view "3jl"
 
 # Needs the dev-only `snapshot` feature (fixture mode). There is no live
 # discovery, so nothing on the demo machine leaks into the view; press `r`

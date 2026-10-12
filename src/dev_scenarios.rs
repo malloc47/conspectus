@@ -355,6 +355,16 @@ impl ScenarioWorld {
             .with_context(|| format!("write pane capture for {native_id}"))
     }
 
+    /// Record what `gh pr view` returns for `owner/repo#number`, at
+    /// `forge/<owner>/<repo>/<number>.json`. Like the recorded panes,
+    /// this stands in for the network when the scenario TUI or snapshot
+    /// mode previews the PR (ADR 0113).
+    fn write_pr_view(&self, owner: &str, repo: &str, number: u64, json: &str) -> Result<()> {
+        let dir = self.mkdir(&format!("{PR_VIEWS_DIR}/{owner}/{repo}"))?;
+        fs::write(dir.join(format!("{number}.json")), json)
+            .with_context(|| format!("write pr view for {owner}/{repo}#{number}"))
+    }
+
     fn init_repo(&self, relative: &str, remote: Option<&str>) -> Result<PathBuf> {
         let root = self.mkdir(relative)?;
         git(&root, &["init", "--initial-branch", "main"])?;
@@ -858,6 +868,21 @@ root = ".atelier/forks/beta"
 /// Directory under a scenario root holding recorded pane captures.
 pub const PANE_CAPTURES_DIR: &str = "panes";
 
+/// Directory under a scenario root holding recorded `gh pr view` output.
+pub const PR_VIEWS_DIR: &str = "forge";
+
+/// The `gh pr view` JSON a scenario world rooted at `root` recorded for
+/// `owner/repo#number`, if any.
+pub fn recorded_pr_view(root: &Path, owner: &str, repo: &str, number: u64) -> Option<String> {
+    fs::read_to_string(
+        root.join(PR_VIEWS_DIR)
+            .join(owner)
+            .join(repo)
+            .join(format!("{number}.json")),
+    )
+    .ok()
+}
+
 /// The pane capture a scenario world rooted at `root` recorded for the
 /// mux session `native_id`, if any.
 pub fn recorded_pane(root: &Path, native_id: &str) -> Option<String> {
@@ -1164,7 +1189,7 @@ fn add_mux_layout_to_showcase(
          \u{25cf} Update(notes.md)\n  \
          \u{2514} Added 6 lines\n\
          \u{25cf} Bash(gh pr create --draft --base main)\n  \
-         \u{2514} https://github.com/conspectus/project/pull/12\n\n\
+         \u{2514} https://github.com/conspectus/project/pull/7\n\n\
          \u{25cf} I expanded notes.md into a release summary and opened a draft PR\n  \
          from feature/extra into main. Checks are running; I'll mark it\n  \
          ready once they pass.\n\n\
@@ -1230,15 +1255,44 @@ fn add_mux_layout_to_showcase(
 }
 
 fn add_forge_prs_to_showcase(world: &mut ScenarioWorld, _project: &Path) -> Result<()> {
-    // Two PRs anchored a few days before SHOWCASE_NOW_EPOCH so they
-    // read as recent activity in the rendered TUI.
+    // Two PRs updated shortly before SHOWCASE_NOW_EPOCH so they read as
+    // recent activity in the rendered TUI. #7 is the draft the
+    // `showcase-claude` session opened from `feature/extra`.
     world.gh_pull_requests = Some(
         r#"[
-{"number":7,"state":"OPEN","url":"https://github.com/conspectus/project/pull/7","headRefName":"feature/extra","baseRefName":"main","updatedAt":"2026-06-13T15:00:00Z","headRepositoryOwner":{"login":"conspectus"},"headRepository":{"name":"project"},"isDraft":false},
-{"number":8,"state":"OPEN","url":"https://github.com/conspectus/project/pull/8","headRefName":"main","baseRefName":"main","updatedAt":"2026-06-14T11:30:00Z","headRepositoryOwner":{"login":"conspectus"},"headRepository":{"name":"project"},"isDraft":true}
+{"number":7,"state":"OPEN","url":"https://github.com/conspectus/project/pull/7","headRefName":"feature/extra","baseRefName":"main","updatedAt":"2026-09-30T10:00:00Z","headRepositoryOwner":{"login":"conspectus"},"headRepository":{"name":"project"},"isDraft":true},
+{"number":8,"state":"OPEN","url":"https://github.com/conspectus/project/pull/8","headRefName":"main","baseRefName":"main","updatedAt":"2026-09-29T12:00:00Z","headRepositoryOwner":{"login":"conspectus"},"headRepository":{"name":"project"},"isDraft":true}
 ]"#
         .to_string(),
     );
+    // What `gh pr view` returns for each, so their previews (ADR 0112)
+    // show a PR in the scenario TUI and the README screenshots
+    // (ADR 0113) without a network.
+    world.write_pr_view(
+        "conspectus",
+        "project",
+        7,
+        r#"{"title":"Release notes for 0.3","state":"OPEN","isDraft":true,
+"reviewDecision":"REVIEW_REQUIRED","headRefName":"feature/extra","baseRefName":"main",
+"updatedAt":"2026-09-30T10:00:00Z","url":"https://github.com/conspectus/project/pull/7",
+"statusCheckRollup":[
+ {"__typename":"CheckRun","name":"fmt","status":"COMPLETED","conclusion":"SUCCESS"},
+ {"__typename":"CheckRun","name":"clippy","status":"COMPLETED","conclusion":"SUCCESS"},
+ {"__typename":"CheckRun","name":"test","status":"COMPLETED","conclusion":"FAILURE"},
+ {"__typename":"CheckRun","name":"docs","status":"IN_PROGRESS","conclusion":""}],
+"latestReviews":[{"author":{"login":"maintainer"},"state":"COMMENTED"}],
+"body":"Expands `notes.md` into the 0.3 release summary.\n\n## What changed\n\n- Config is read from `project.toml`\n- An empty config file no longer panics\n\n## Upgrading\n\nRename `config.json` to `project.toml`."}"#,
+    )?;
+    world.write_pr_view(
+        "conspectus",
+        "project",
+        8,
+        r#"{"title":"Bump the minimum Rust version to 1.99","state":"OPEN","isDraft":true,
+"reviewDecision":"","headRefName":"main","baseRefName":"main",
+"updatedAt":"2026-09-29T12:00:00Z","url":"https://github.com/conspectus/project/pull/8",
+"statusCheckRollup":[],"latestReviews":[],
+"body":"Waiting on the toolchain pin to land."}"#,
+    )?;
     Ok(())
 }
 
