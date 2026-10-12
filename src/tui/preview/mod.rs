@@ -12,6 +12,7 @@
 mod git;
 mod path;
 mod process;
+mod value;
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::PathBuf;
@@ -20,6 +21,7 @@ use std::time::Instant;
 use ratatui::text::Line;
 
 pub use git::GitQuery;
+pub use value::{glossary_entry, split_command_line, value_lines};
 
 use crate::discovery::tmux::{MuxBackend, PaneCapture, TmuxCaptureOutcome};
 use crate::model::{AgentSessionId, GraphNode, MuxSessionId, NodeId};
@@ -273,14 +275,17 @@ pub fn preview_source(app: &App) -> Option<PreviewSource> {
     match preview_subject(app) {
         PreviewSubject::Selection => selection_source(app),
         PreviewSubject::Node(node) => node_source(app, &node),
-        PreviewSubject::Field(value) => Some(value_source(&value)),
+        PreviewSubject::Field(value) => value_source(app, &value),
         PreviewSubject::Unresolved => None,
     }
 }
 
-/// The source a field's typed value previews.
-pub fn value_source(value: &FieldValue) -> PreviewSource {
-    match value {
+/// The source a field's typed value previews: what its path, ref,
+/// commit, or process holds, or the node it names. Text, lists,
+/// commands, timestamps, and glossary values preview from the value
+/// alone ([`value_lines`]) and have no source.
+pub fn value_source(app: &App, value: &FieldValue) -> Option<PreviewSource> {
+    Some(match value {
         FieldValue::Path(path) => PreviewSource::Path(PathBuf::from(path)),
         FieldValue::Ref {
             dir,
@@ -296,7 +301,13 @@ pub fn value_source(value: &FieldValue) -> PreviewSource {
             commit: commit.clone(),
         }),
         FieldValue::Process(pid) => PreviewSource::Process(*pid),
-    }
+        FieldValue::Node(node) => return node_source(app, node),
+        FieldValue::Text(_)
+        | FieldValue::List(_)
+        | FieldValue::Command(_)
+        | FieldValue::Timestamp(_)
+        | FieldValue::Glossary { .. } => return None,
+    })
 }
 
 /// The source a node previews (ADR 0112 §1):

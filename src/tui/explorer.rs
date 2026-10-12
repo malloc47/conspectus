@@ -174,6 +174,22 @@ pub enum FieldValue {
     Commit { dir: String, commit: String },
     /// A process ID, previewing the process tree rooted there.
     Process(i64),
+    /// Free text, previewing in full.
+    Text(String),
+    /// A list, previewing every item.
+    List(Vec<String>),
+    /// A command line as its arguments, previewing one per line.
+    Command(Vec<String>),
+    /// A unix-epoch timestamp, previewing local time, UTC, and age.
+    Timestamp(i64),
+    /// Values from the fixed set `field` draws from, previewing what
+    /// each means.
+    Glossary {
+        field: &'static str,
+        values: Vec<String>,
+    },
+    /// Another node, previewing that node.
+    Node(NodeId),
 }
 
 impl CoreField {
@@ -214,6 +230,26 @@ impl CoreField {
     fn previewing(mut self, value: FieldValue) -> Self {
         self.preview = Some(value);
         self
+    }
+
+    /// A field whose value is one from the fixed set `label` draws from.
+    fn glossary(label: &'static str, value: impl Into<String>) -> Self {
+        let value = value.into();
+        Self::plain(label, value.clone()).previewing(FieldValue::Glossary {
+            field: label,
+            values: vec![value],
+        })
+    }
+
+    /// A field holding free text, previewing it in full.
+    fn text(label: &'static str, value: impl Into<String>) -> Self {
+        let value = value.into();
+        Self::plain(label, value.clone()).previewing(FieldValue::Text(value))
+    }
+
+    /// A field holding a timestamp, shown as its age.
+    fn timestamp(label: &'static str, epoch: i64, now: Option<i64>) -> Self {
+        Self::plain(label, relative_epoch(epoch, now)).previewing(FieldValue::Timestamp(epoch))
     }
 
     /// A field whose value is the path `raw`, shown `~`-shortened.
@@ -1267,7 +1303,9 @@ fn repo_core(r: &RepoNode, home: Option<&Path>) -> Vec<CoreField> {
         } else {
             remote.clone()
         };
-        fields.push(CoreField::plain("remotes", value));
+        fields.push(
+            CoreField::plain("remotes", value).previewing(FieldValue::List(r.remotes.clone())),
+        );
     } else {
         fields.push(CoreField::placeholder("remotes", "—"));
     }
@@ -1300,11 +1338,17 @@ fn checkout_core(c: &CheckoutNode, home: Option<&Path>) -> Vec<CoreField> {
         CoreField::path("root", &c.root, home),
     ];
     if let Some(branch) = &c.current_branch {
-        fields.push(CoreField::plain("current_branch", branch.refname.clone()));
+        fields.push(
+            CoreField::plain("current_branch", branch.refname.clone())
+                .previewing(FieldValue::Node(NodeId::Branch(branch.clone()))),
+        );
     } else {
         fields.push(CoreField::placeholder("current_branch", "— (detached)"));
     }
-    fields.push(CoreField::plain("repo", format!("{}", c.id.repo)));
+    fields.push(
+        CoreField::plain("repo", format!("{}", c.id.repo))
+            .previewing(FieldValue::Node(NodeId::Repo(c.id.repo.clone()))),
+    );
     if let Some(git_dir) = &c.git_dir {
         fields.push(CoreField::path("git_dir", git_dir, home));
     } else {
@@ -1319,13 +1363,13 @@ fn workspace_core(w: &WorkspaceNode, home: Option<&Path>) -> Vec<CoreField> {
         node_short_id(&NodeId::Workspace(w.id.clone())),
     )];
     if let Some(name) = &w.name {
-        fields.push(CoreField::plain("name", name.clone()));
+        fields.push(CoreField::text("name", name.clone()));
     } else {
         fields.push(CoreField::placeholder("name", "—"));
     }
     fields.push(CoreField::path("root", &w.root, home));
     if let Some(provider) = &w.provider {
-        fields.push(CoreField::plain("provider", provider.clone()));
+        fields.push(CoreField::glossary("provider", provider.clone()));
     } else {
         fields.push(CoreField::placeholder("provider", "—"));
     }
@@ -1345,7 +1389,7 @@ fn agent_session_core(
     let id_node = NodeId::AgentSession(s.id.clone());
     let mut fields = vec![
         CoreField::plain("id", s.id.session_key.clone()),
-        CoreField::plain("harness", s.harness_key.clone()),
+        CoreField::glossary("harness", s.harness_key.clone()),
     ];
     let alias = snapshot
         .aliases
@@ -1354,10 +1398,11 @@ fn agent_session_core(
         .filter(|a| !a.is_empty())
         .map(str::to_string);
     if let Some(alias) = &alias {
-        fields.push(CoreField::plain("alias", alias.clone()));
+        fields.push(CoreField::text("alias", alias.clone()));
     } else if let Some(title) = s.title.as_deref().map(str::trim).filter(|t| !t.is_empty()) {
         let truncated = truncate(title, 48);
-        let mut field = CoreField::plain("title", truncated.clone());
+        let mut field = CoreField::plain("title", truncated.clone())
+            .previewing(FieldValue::Text(title.to_string()));
         if truncated.len() < title.len() {
             field = field.with_long(title.to_string());
         }
@@ -1375,7 +1420,14 @@ fn agent_session_core(
         }
         None => CoreField::placeholder("cwd", "— (unknown)"),
     });
-    fields.push(CoreField::plain("status", session_status(s, now)));
+    let mut status = CoreField::plain("status", session_status(s, now));
+    if s.last_active_epoch.is_some() {
+        status = status.previewing(FieldValue::Glossary {
+            field: "status",
+            values: vec!["active".to_string()],
+        });
+    }
+    fields.push(status);
     fields
 }
 
@@ -1392,27 +1444,30 @@ fn agent_session_extras(
     fields.push(CoreField::path("state_scope", &s.id.state_scope, None));
     fields.push(CoreField::plain("session_key", s.id.session_key.clone()));
     if let Some(title) = s.title.as_deref().map(str::trim).filter(|t| !t.is_empty()) {
-        fields.push(CoreField::plain("title", title.to_string()));
+        fields.push(CoreField::text("title", title.to_string()));
     }
     if let Some(epoch) = s.last_active_epoch {
-        fields.push(CoreField::plain("last_active_epoch", epoch.to_string()));
+        fields.push(
+            CoreField::plain("last_active_epoch", epoch.to_string())
+                .previewing(FieldValue::Timestamp(epoch)),
+        );
     }
     if let Some(preview) = &s.last_message_preview {
         let truncated = truncate(preview, 48);
-        let mut field = CoreField::plain("last_message_preview", truncated.clone());
+        let mut field = CoreField::plain("last_message_preview", truncated.clone())
+            .previewing(FieldValue::Text(preview.clone()));
         if truncated.len() < preview.len() {
             field = field.with_long(preview.clone());
         }
         fields.push(field);
     }
     if let Some(kind) = s.session_kind {
-        fields.push(CoreField::plain(
+        fields.push(CoreField::glossary(
             "session_kind",
             match kind {
                 crate::model::SessionKind::Human => "human",
                 crate::model::SessionKind::Subagent => "subagent",
-            }
-            .to_string(),
+            },
         ));
     }
     fields
@@ -1431,7 +1486,7 @@ fn mux_session_core(
     // would duplicate `backend` + `id`.
     let mut fields = vec![
         CoreField::plain("id", m.native_id.clone()),
-        CoreField::plain("backend", m.backend.clone()),
+        CoreField::glossary("backend", m.backend.clone()),
     ];
     fields.push(match &m.cwd {
         Some(cwd) => {
@@ -1448,13 +1503,18 @@ fn mux_session_core(
         Some(false) => "no".to_string(),
         None => "—".to_string(),
     };
-    let mut attached_field = CoreField::plain("attached", attached);
+    let mut attached_field = CoreField::plain("attached", attached.clone());
     if m.client_attached.is_none() {
         attached_field.placeholder = true;
+    } else {
+        attached_field = attached_field.previewing(FieldValue::Glossary {
+            field: "attached",
+            values: vec![attached],
+        });
     }
     fields.push(attached_field);
     fields.push(match m.activity_epoch {
-        Some(epoch) => CoreField::plain("last_active", relative_epoch(epoch, now)),
+        Some(epoch) => CoreField::timestamp("last_active", epoch, now),
         None => CoreField::placeholder("last_active", "—"),
     });
     fields
@@ -1463,11 +1523,12 @@ fn mux_session_core(
 fn mux_session_extras(m: &MuxSessionNode, now: Option<i64>) -> Vec<CoreField> {
     let mut fields = Vec::new();
     if let Some(epoch) = m.created_epoch {
-        fields.push(CoreField::plain("created", relative_epoch(epoch, now)));
+        fields.push(CoreField::timestamp("created", epoch, now));
     }
     if let Some(cmd) = &m.active_pane_command {
         let truncated = truncate(cmd, 48);
-        let mut field = CoreField::plain("active_pane_command", truncated.clone());
+        let mut field = CoreField::plain("active_pane_command", truncated.clone())
+            .previewing(FieldValue::Command(split_command_line(cmd)));
         if truncated.len() < cmd.len() {
             field = field.with_long(cmd.clone());
         }
@@ -1484,7 +1545,8 @@ fn mux_session_extras(m: &MuxSessionNode, now: Option<i64>) -> Vec<CoreField> {
     }
     if let Some(cmd) = &m.active_pane_start_command {
         let truncated = truncate(cmd, 48);
-        let mut field = CoreField::plain("active_pane_start_command", truncated.clone());
+        let mut field = CoreField::plain("active_pane_start_command", truncated.clone())
+            .previewing(FieldValue::Command(split_command_line(cmd)));
         if truncated.len() < cmd.len() {
             field = field.with_long(cmd.clone());
         }
@@ -1496,25 +1558,37 @@ fn mux_session_extras(m: &MuxSessionNode, now: Option<i64>) -> Vec<CoreField> {
 fn pin_core(p: &PinNode, home: Option<&Path>) -> Vec<CoreField> {
     vec![
         CoreField::plain("id", p.id.id.clone()),
-        CoreField::plain("name", p.display_name.clone()),
-        CoreField::plain("harness", p.harness.clone()),
+        CoreField::text("name", p.display_name.clone()),
+        CoreField::glossary("harness", p.harness.clone()),
         CoreField::path("cwd", &p.cwd, home),
-        CoreField::plain("mux", p.mux.native_id()),
+        {
+            let field = CoreField::plain("mux", p.mux.native_id());
+            match &p.binding {
+                Some(
+                    crate::model::PinBinding::Bound { mux, .. }
+                    | crate::model::PinBinding::StaleMux { mux },
+                ) => field.previewing(FieldValue::Node(NodeId::MuxSession(mux.clone()))),
+                _ => field,
+            }
+        },
     ]
 }
 
 fn pin_extras(p: &PinNode, home: Option<&Path>) -> Vec<CoreField> {
     let mut fields = vec![
         CoreField::path("store", &p.store_path, home),
-        CoreField::plain("source", p.provenance.snake_case().to_string()),
+        CoreField::glossary("source", p.provenance.snake_case()),
     ];
     if let Some(argv) = &p.launch_argv
         && !argv.is_empty()
     {
-        fields.push(CoreField::plain("launch", argv.join(" ")));
+        fields.push(
+            CoreField::plain("launch", argv.join(" "))
+                .previewing(FieldValue::Command(argv.clone())),
+        );
     }
     if let Some(reason) = &p.reason {
-        fields.push(CoreField::plain("reason", reason.clone()));
+        fields.push(CoreField::text("reason", reason.clone()));
     }
     fields.push(CoreField::plain(
         "full_id",
@@ -1559,7 +1633,8 @@ fn runtime_process_core(
     let command_field = match &p.command {
         Some(cmd) => {
             let truncated = truncate(cmd, 48);
-            let mut field = CoreField::plain("command", truncated.clone());
+            let mut field = CoreField::plain("command", truncated.clone())
+                .previewing(FieldValue::Command(split_command_line(cmd)));
             if truncated.len() < cmd.len() {
                 field = field.with_long(cmd.clone());
             }
@@ -1568,20 +1643,21 @@ fn runtime_process_core(
         None => CoreField::placeholder("command", "—"),
     };
     fields.push(command_field);
-    fields.push(CoreField::plain(
-        "role",
-        match p.role {
-            Some(RuntimeProcessRole::HumanAgent) => "human_agent",
-            Some(RuntimeProcessRole::Subagent) => "subagent",
-            Some(RuntimeProcessRole::Background) => "background",
-            Some(RuntimeProcessRole::Shell) => "shell",
-            Some(RuntimeProcessRole::Unknown) => "unknown",
-            None => "—",
-        }
-        .to_string(),
-    ));
+    fields.push(match p.role {
+        Some(role) => CoreField::glossary(
+            "role",
+            match role {
+                RuntimeProcessRole::HumanAgent => "human_agent",
+                RuntimeProcessRole::Subagent => "subagent",
+                RuntimeProcessRole::Background => "background",
+                RuntimeProcessRole::Shell => "shell",
+                RuntimeProcessRole::Unknown => "unknown",
+            },
+        ),
+        None => CoreField::plain("role", "—"),
+    });
     fields.push(match p.observed_epoch {
-        Some(epoch) => CoreField::plain("observed", relative_epoch(epoch, now)),
+        Some(epoch) => CoreField::timestamp("observed", epoch, now),
         None => CoreField::placeholder("observed", "—"),
     });
     fields
@@ -1602,10 +1678,10 @@ fn runtime_process_extras(
         fields.push(field);
     }
     if let Some(harness) = &p.harness_key {
-        fields.push(CoreField::plain("harness_key", harness.clone()));
+        fields.push(CoreField::glossary("harness_key", harness.clone()));
     }
     if let Some(depth) = p.depth {
-        fields.push(CoreField::plain("depth", depth.to_string()));
+        fields.push(CoreField::glossary("depth", depth.to_string()));
     }
     if let Some(parent) = p.parent_pid {
         fields.push(
@@ -1655,7 +1731,10 @@ fn branch_core(b: &BranchNode) -> Vec<CoreField> {
         }
         None => CoreField::placeholder("upstream", "—"),
     });
-    fields.push(CoreField::plain("repo", format!("{}", b.id.repo)));
+    fields.push(
+        CoreField::plain("repo", format!("{}", b.id.repo))
+            .previewing(FieldValue::Node(NodeId::Repo(b.id.repo.clone()))),
+    );
     fields
 }
 
@@ -1665,12 +1744,12 @@ fn fork_core(f: &ForkNode) -> Vec<CoreField> {
         node_short_id(&NodeId::Fork(f.id.clone())),
     )];
     fields.push(match &f.name {
-        Some(name) => CoreField::plain("name", name.clone()),
+        Some(name) => CoreField::text("name", name.clone()),
         None => CoreField::placeholder("name", "—"),
     });
-    fields.push(CoreField::plain("provider", f.provider.clone()));
+    fields.push(CoreField::glossary("provider", f.provider.clone()));
     fields.push(match &f.scope {
-        Some(scope) => CoreField::plain("scope", scope.clone()),
+        Some(scope) => CoreField::glossary("scope", scope.clone()),
         None => CoreField::placeholder("scope", "—"),
     });
     fields.push(match f.capabilities.first() {
@@ -1680,7 +1759,10 @@ fn fork_core(f: &ForkNode) -> Vec<CoreField> {
             } else {
                 first.clone()
             };
-            CoreField::plain("capabilities", value)
+            CoreField::plain("capabilities", value).previewing(FieldValue::Glossary {
+                field: "capabilities",
+                values: f.capabilities.clone(),
+            })
         }
         None => CoreField::placeholder("capabilities", "—"),
     });
@@ -1703,12 +1785,14 @@ fn forge_pr_core(pr: &ForgePrNode, now: Option<i64>) -> Vec<CoreField> {
         CoreField::plain("pr", composite),
     ];
     if pr.is_draft {
-        fields.push(CoreField::plain("draft", "true".to_string()));
+        fields.push(CoreField::glossary("draft", "true"));
     } else {
-        fields.push(CoreField::placeholder("draft", "false"));
+        let mut draft = CoreField::glossary("draft", "false");
+        draft.placeholder = true;
+        fields.push(draft);
     }
     fields.push(match pr.updated_epoch {
-        Some(epoch) => CoreField::plain("updated", relative_epoch(epoch, now)),
+        Some(epoch) => CoreField::timestamp("updated", epoch, now),
         None => CoreField::placeholder("updated", "—"),
     });
     fields.push(match &pr.url {
@@ -1727,9 +1811,12 @@ fn forge_pr_core(pr: &ForgePrNode, now: Option<i64>) -> Vec<CoreField> {
 
 fn forge_pr_extras(pr: &ForgePrNode) -> Vec<CoreField> {
     vec![
-        CoreField::plain("provider", pr.provider.clone()),
+        CoreField::glossary("provider", pr.provider.clone()),
         CoreField::plain("host", pr.host.clone()),
-        CoreField::plain("state", pr.state.clone().unwrap_or_else(|| "?".to_string())),
+        match &pr.state {
+            Some(state) => CoreField::glossary("state", state.clone()),
+            None => CoreField::plain("state", "?"),
+        },
         CoreField::plain("owner", pr.owner.clone()),
         CoreField::plain("repo", pr.repo.clone()),
         CoreField::plain("number", pr.number.to_string()),
@@ -1749,6 +1836,8 @@ fn relative_epoch(epoch: i64, now: Option<i64>) -> String {
     crate::tui::rows::format_recency(now, Some(epoch))
         .map_or_else(|| "—".to_string(), |age| format!("{age} ago"))
 }
+
+use crate::tui::preview::split_command_line;
 
 fn truncate(value: &str, max: usize) -> String {
     if value.chars().count() <= max {

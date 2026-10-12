@@ -4326,24 +4326,34 @@ fn a_mux_hosting_this_tui_previews_no_pane() {
 }
 
 /// Walk the explorer cursor down until the Preview is about a field
-/// value, and return that value.
-fn walk_to_field_value(app: &mut App) -> crate::tui::explorer::FieldValue {
+/// value `wanted` accepts, and return that value.
+fn walk_to_field_value(
+    app: &mut App,
+    wanted: impl Fn(&crate::tui::explorer::FieldValue) -> bool,
+) -> crate::tui::explorer::FieldValue {
     for _ in 0..12 {
         app.update(Msg::ExplorerNavDown);
         if let crate::tui::preview::PreviewSubject::Field(value) =
             crate::tui::preview::preview_subject(app)
+            && wanted(&value)
         {
             return value;
         }
     }
-    panic!("no typed field under the cursor");
+    panic!("no wanted field under the cursor");
 }
 
 #[test]
 fn a_path_field_row_previews_that_path() {
     let mut app = unmuxed_session_app(|config| config.live_preview_enabled = false);
     let cwd = crate::tui::explorer::FieldValue::Path("/home/op/src/proj".to_string());
-    assert_eq!(walk_to_field_value(&mut app), cwd);
+    assert_eq!(
+        walk_to_field_value(&mut app, |value| matches!(
+            value,
+            crate::tui::explorer::FieldValue::Path(_)
+        )),
+        cwd
+    );
     let source = PreviewSource::Path("/home/op/src/proj".into());
     assert_eq!(
         crate::tui::preview::preview_source(&app),
@@ -4648,4 +4658,57 @@ fn any_other_pin_previews_its_diagnostics() {
         .expect("diagnostics")
         .to_string();
     assert!(text.contains("Pin `ingest` is unbound."), "{text}");
+}
+
+#[test]
+fn a_glossary_field_row_previews_what_its_value_means() {
+    let mut app = unmuxed_session_app(|_| {});
+    let harness = walk_to_field_value(&mut app, |value| {
+        matches!(value, crate::tui::explorer::FieldValue::Glossary { .. })
+    });
+    assert_eq!(
+        harness,
+        crate::tui::explorer::FieldValue::Glossary {
+            field: "harness",
+            values: vec!["codex".to_string()],
+        }
+    );
+    assert_eq!(crate::tui::preview::preview_source(&app), None);
+    assert_eq!(
+        preview_text_for_selection(&app, 80, 10).to_string(),
+        "codex\nOpenAI's Codex CLI."
+    );
+}
+
+#[test]
+fn a_field_naming_another_node_previews_that_node() {
+    use crate::tui::explorer::FieldValue;
+    let (app, branch) = git_app();
+    let view = crate::tui::explorer::build_node_view(crate::tui::explorer::ExplorerInputs {
+        snapshot: app.snapshot_handle().expect("data").snapshot(),
+        target: &NodeId::Checkout(CheckoutId::new(RepoId::new("/r/.git"), "/r")),
+        home: None,
+        now: None,
+    })
+    .expect("checkout view");
+    let preview = |label: &str| {
+        view.fields(true)
+            .iter()
+            .find(|field| field.label == label)
+            .and_then(|field| field.preview.clone())
+            .expect("typed field")
+    };
+    let current_branch = preview("current_branch");
+    assert_eq!(
+        current_branch,
+        FieldValue::Node(NodeId::Branch(branch.clone()))
+    );
+    assert_eq!(
+        crate::tui::preview::value_source(&app, &current_branch),
+        crate::tui::preview::node_source(&app, &NodeId::Branch(branch))
+    );
+    assert_eq!(
+        preview("repo"),
+        FieldValue::Node(NodeId::Repo(RepoId::new("/r/.git")))
+    );
 }

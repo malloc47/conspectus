@@ -177,13 +177,33 @@ fn selection_preview_body(app: &App, width: u16, height: usize) -> PreviewView {
                     .unwrap_or_else(|| Text::raw("no preview for this node")),
             ),
         },
-        PreviewSubject::Field(value) => source_view(
-            app,
-            &crate::tui::preview::value_source(&value),
-            width,
-            height,
-        ),
+        PreviewSubject::Field(value) => field_view(app, &value, width, height),
         PreviewSubject::Unresolved => PreviewView::text(""),
+    }
+}
+
+/// A field row's preview by the type of its value (ADR 0112 §2).
+fn field_view(
+    app: &App,
+    value: &crate::tui::explorer::FieldValue,
+    width: u16,
+    height: usize,
+) -> PreviewView {
+    use crate::tui::explorer::FieldValue;
+    if let Some(lines) =
+        crate::tui::preview::value_lines(value, crate::tui::rows::tree_current_unix_epoch())
+    {
+        return PreviewView::text(lines);
+    }
+    match crate::tui::preview::value_source(app, value) {
+        Some(source) => source_view(app, &source, width, height),
+        None => match value {
+            FieldValue::Node(node) => PreviewView::text(
+                sourceless_node_text(app, node)
+                    .unwrap_or_else(|| Text::raw("no preview for this node")),
+            ),
+            _ => PreviewView::text(""),
+        },
     }
 }
 
