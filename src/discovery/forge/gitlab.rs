@@ -62,7 +62,11 @@ impl ForgeAdapter for GitLabForgeProvider {
         GITLAB_PROVIDER
     }
 
-    fn discover(&self, context: &DiscoveryContext) -> Result<GraphFragment> {
+    fn discover(
+        &self,
+        _repos: &[super::ForgeRepo],
+        context: &DiscoveryContext,
+    ) -> Result<GraphFragment> {
         <Self as DiscoveryProvider>::discover(self, context)
     }
 
@@ -113,7 +117,7 @@ mod tests {
     fn discover_returns_empty_fragment_until_h_design_002_lands() {
         let adapter = GitLabForgeProvider::new();
         let ctx = DiscoveryContext::from_root("/tmp");
-        let fragment = ForgeAdapter::discover(&adapter, &ctx).expect("discover");
+        let fragment = ForgeAdapter::discover(&adapter, &[], &ctx).expect("discover");
         assert!(fragment.nodes.is_empty());
         assert!(fragment.candidate_links.is_empty());
         assert!(fragment.diagnostics.is_empty());

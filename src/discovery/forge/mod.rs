@@ -2,9 +2,9 @@
 //!
 //! Forge discovery associates remote pull requests with already-discovered
 //! repos and branches. Each supported forge ships an adapter implementing
-//! [`ForgeAdapter`]; the [`ForgeDiscovery`] coordinator is the
-//! [`DiscoveryProvider`] that runs every registered adapter and merges
-//! their [`GraphFragment`]s.
+//! [`ForgeAdapter`]; the [`ForgeDiscovery`] coordinator runs every
+//! registered adapter over the repos the graph found, after the other
+//! discovery passes (ADR 0115), and merges their [`GraphFragment`]s.
 //!
 //! GitHub discovery delegates to the `gh` CLI through an injectable
 //! [`GhRunner`] seam, mirroring how tmux discovery uses
@@ -13,9 +13,7 @@
 //! implementation so they never need a real `gh` install or network call.
 //! See ADR 0011 for the rationale.
 
-#[cfg(test)]
-use std::collections::BTreeMap;
-use std::ffi::OsString;
+use std::collections::{BTreeMap, BTreeSet};
 use std::io;
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -23,7 +21,8 @@ use std::time::Duration;
 
 use anyhow::{Context, Result};
 
-use crate::discovery::{DiscoveryContext, DiscoveryProvider, GraphFragment, merge_fragments};
+use crate::discovery::{DiscoveryContext, GraphFragment, merge_fragments};
+use crate::model::{GraphNode, GraphSnapshot, RepoId};
 
 pub mod github;
 pub mod gitlab;
@@ -39,13 +38,80 @@ pub const GITHUB_DEFAULT_HOST: &str = "github.com";
 pub const GH_PR_LIST_FIELDS: &str = "number,state,url,headRefName,baseRefName,\
 updatedAt,headRepositoryOwner,headRepository,isDraft";
 
+/// Gh queries run at once across every discovered repo (ADR 0115).
+pub const MAX_CONCURRENT_GH: usize = 4;
+
+/// Open PRs fetched per remote. Well above `gh`'s default of 30 so a
+/// busy repo doesn't drop open PRs.
+pub const OPEN_PR_LIMIT: u32 = 100;
+
+/// PRs of any state fetched per remote from the recent window.
+pub const RECENT_PR_LIMIT: u32 = 100;
+
+/// Days back the recent-PR query reaches, so recently merged and closed
+/// PRs enter the graph alongside open ones (ADR 0115).
+pub const RECENT_PR_DAYS: i64 = 30;
+
+/// A repo forge discovery asks about: what its local checkout knows
+/// about remotes and branches, read through the cached git probe
+/// (ADR 0115).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ForgeRepo {
+    pub repo_id: RepoId,
+    pub remotes: Vec<crate::discovery::git::GitRemote>,
+    /// Short local branch names (`feature/login`).
+    pub local_branches: BTreeSet<String>,
+}
+
+/// Every repo in `snapshot` that forge discovery can ask about: one per
+/// repo node, probed (cached) through a checkout root or source path
+/// it has on disk. Repos without a path on disk are skipped.
+pub fn forge_repos(snapshot: &GraphSnapshot, context: &DiscoveryContext) -> Vec<ForgeRepo> {
+    let mut paths: BTreeMap<RepoId, Vec<PathBuf>> = BTreeMap::new();
+    for node in &snapshot.nodes {
+        match node {
+            GraphNode::Checkout(checkout) => paths
+                .entry(checkout.id.repo.clone())
+                .or_default()
+                .push(PathBuf::from(&checkout.root)),
+            GraphNode::Repo(repo) => paths
+                .entry(repo.id.clone())
+                .or_default()
+                .extend(repo.source_paths.iter().map(PathBuf::from)),
+            _ => {}
+        }
+    }
+    let probe = crate::discovery::git::GitProbe::new();
+    let mut seen: BTreeSet<PathBuf> = BTreeSet::new();
+    let mut repos = Vec::new();
+    for candidates in paths.into_values() {
+        let found = candidates
+            .iter()
+            .filter(|path| path.is_dir())
+            .find_map(|path| probe.probe_cached(path, context.caches()).ok().flatten());
+        let Some(found) = found else {
+            continue;
+        };
+        if !seen.insert(found.common_dir.clone()) {
+            continue;
+        }
+        repos.push(ForgeRepo {
+            repo_id: RepoId::new(found.common_dir.to_string_lossy().to_string()),
+            remotes: found.remotes,
+            local_branches: found.local_branches.into_iter().collect(),
+        });
+    }
+    repos
+}
+
 /// Adapters implement provider-specific PR discovery and emit
 /// provider-neutral [`GraphFragment`]s. Adapters must not perform
 /// rendering, resolver scoring, or graph-wide cross-linking.
 pub trait ForgeAdapter: Send + Sync {
     fn provider(&self) -> &str;
 
-    fn discover(&self, context: &DiscoveryContext) -> Result<GraphFragment>;
+    /// Discover PRs for `repos`, the repos the graph found (ADR 0115).
+    fn discover(&self, repos: &[ForgeRepo], context: &DiscoveryContext) -> Result<GraphFragment>;
 
     /// Should this adapter own PR discovery for the given remote
     /// origin URL? A repo whose `origin` URL points
@@ -92,29 +158,35 @@ impl ForgeDiscovery {
     }
 }
 
-impl DiscoveryProvider for ForgeDiscovery {
-    fn discover(&self, context: &DiscoveryContext) -> Result<GraphFragment> {
-        // TTL-cache the merged fragment so a
-        // busy class thread doesn't respawn `gh pr list` on every
-        // cycle. `GitHubForgeProvider` returns an empty fragment
-        // when a repo has no PRs (or `gh` is unavailable), and an
-        // empty fragment produces no `github` provenance stamps,
-        // so `compute_freshness_gate` never marks `github` fresh
-        // and every class cycle re-runs the forge coordinator →
-        // one `gh pr list` spawn per cycle per root (0.5-0.8 Hz
-        // on this operator's box). The TTL matches the Forge class
-        // interval, so this skips only what the gate would have.
-        let roots: Vec<PathBuf> = context.roots().to_vec();
-        if let Some(cached) = context.caches().forge.get(&roots) {
+impl ForgeDiscovery {
+    /// Discover PRs for every repo in `snapshot` (ADR 0115). Runs after
+    /// the working-directory git pass, so repos found only through a
+    /// session's or mux's working directory are included.
+    pub fn discover_graph(
+        &self,
+        snapshot: &GraphSnapshot,
+        context: &DiscoveryContext,
+    ) -> Result<GraphFragment> {
+        let repos = forge_repos(snapshot, context);
+        // TTL-cache the merged fragment by repo set so a busy class
+        // thread doesn't respawn `gh pr list` on every cycle. An empty
+        // fragment produces no `github` provenance stamps, so the
+        // freshness gate never marks `github` fresh and every cycle
+        // would re-run forge; the TTL matches the Forge class interval,
+        // so this skips only what the gate would have.
+        let key: Vec<PathBuf> = repos
+            .iter()
+            .map(|repo| PathBuf::from(&repo.repo_id.common_dir))
+            .collect();
+        if let Some(cached) = context.caches().forge.get(&key) {
             return Ok(cached);
         }
-
         let mut fragments = Vec::with_capacity(self.adapters.len());
         for adapter in &self.adapters {
-            fragments.push(adapter.discover(context)?);
+            fragments.push(adapter.discover(&repos, context)?);
         }
         let merged = GraphFragment::from(merge_fragments(fragments));
-        context.caches().forge.set(roots, merged.clone());
+        context.caches().forge.set(key, merged.clone());
         Ok(merged)
     }
 }
@@ -125,15 +197,50 @@ impl DiscoveryProvider for ForgeDiscovery {
 /// already skipped this provider if stamps were present.
 pub(crate) const FORGE_CACHE_TTL: Duration = Duration::from_secs(300);
 
+/// Which pull requests a `gh pr list` call asks for (ADR 0115).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum PrListFilter {
+    /// Open PRs, up to `limit`.
+    Open { limit: u32 },
+    /// PRs of any state updated on or after `since` (`YYYY-MM-DD`), up
+    /// to `limit`.
+    UpdatedSince { since: String, limit: u32 },
+}
+
+impl PrListFilter {
+    /// The `gh pr list` arguments for this filter.
+    pub fn args(&self) -> Vec<String> {
+        match self {
+            Self::Open { limit } => vec![
+                "--state".to_string(),
+                "open".to_string(),
+                "--limit".to_string(),
+                limit.to_string(),
+            ],
+            Self::UpdatedSince { since, limit } => vec![
+                "--state".to_string(),
+                "all".to_string(),
+                "--limit".to_string(),
+                limit.to_string(),
+                "--search".to_string(),
+                format!("updated:>={since}"),
+            ],
+        }
+    }
+}
+
 /// Pluggable interface for invoking `gh` (or a fake equivalent). Mirrors
 /// the [`MuxBackend`](crate::discovery::tmux::MuxBackend) seam so tests
 /// stay offline.
 pub trait GhRunner: Send + Sync {
-    /// Run `gh pr list --json <fields>` for the given working directory.
-    /// `cwd` is the repo working directory; runners that need a repo
-    /// context use it as the spawn cwd. `fields` is the comma-separated
-    /// list passed to `--json`.
-    fn list_pull_requests(&self, cwd: &Path, fields: &str) -> Result<GhOutcome>;
+    /// Run `gh pr list --repo <repo> --json <fields>` narrowed by
+    /// `filter`, where `repo` is `[HOST/]OWNER/REPO` (ADR 0115).
+    fn list_pull_requests(
+        &self,
+        repo: &str,
+        filter: &PrListFilter,
+        fields: &str,
+    ) -> Result<GhOutcome>;
 
     /// Run `gh pr view <number> --repo <repo> --json <fields>`, where
     /// `repo` is `[HOST/]OWNER/REPO`. Success carries the JSON object
@@ -205,8 +312,19 @@ impl SystemGh {
 }
 
 impl GhRunner for SystemGh {
-    fn list_pull_requests(&self, cwd: &Path, fields: &str) -> Result<GhOutcome> {
-        self.run(&["pr", "list", "--json", fields], Some(cwd))
+    fn list_pull_requests(
+        &self,
+        repo: &str,
+        filter: &PrListFilter,
+        fields: &str,
+    ) -> Result<GhOutcome> {
+        let mut args: Vec<String> = ["pr", "list", "--repo", repo, "--json", fields]
+            .iter()
+            .map(ToString::to_string)
+            .collect();
+        args.extend(filter.args());
+        let args: Vec<&str> = args.iter().map(String::as_str).collect();
+        self.run(&args, None)
     }
 
     fn view_pull_request(&self, repo: &str, number: u64, fields: &str) -> Result<GhOutcome> {
@@ -302,21 +420,21 @@ fn looks_like_not_a_repo(stderr: &str) -> bool {
 #[derive(Clone, Debug)]
 pub struct FakeGh {
     outcome: GhOutcome,
-    last_cwd: std::sync::Arc<std::sync::Mutex<Option<OsString>>>,
+    last_repo: std::sync::Arc<std::sync::Mutex<Option<String>>>,
 }
 
 impl FakeGh {
     pub fn with_pull_requests(stdout: impl Into<String>) -> Self {
         Self {
             outcome: GhOutcome::PullRequests(stdout.into()),
-            last_cwd: Default::default(),
+            last_repo: Default::default(),
         }
     }
 
     pub fn unavailable(reason: GhUnavailableReason) -> Self {
         Self {
             outcome: GhOutcome::Unavailable(reason),
-            last_cwd: Default::default(),
+            last_repo: Default::default(),
         }
     }
 
@@ -326,24 +444,25 @@ impl FakeGh {
                 code,
                 message: message.into(),
             },
-            last_cwd: Default::default(),
+            last_repo: Default::default(),
         }
     }
 
-    /// Most-recent `cwd` passed to [`list_pull_requests`]. Useful in
-    /// tests to confirm the adapter spawned `gh` from the right repo.
-    pub fn last_cwd(&self) -> Option<PathBuf> {
-        self.last_cwd
-            .lock()
-            .expect("lock")
-            .clone()
-            .map(PathBuf::from)
+    /// Most-recent repo passed to [`GhRunner::list_pull_requests`].
+    /// Useful in tests to confirm the adapter named the right repo.
+    pub fn last_repo(&self) -> Option<String> {
+        self.last_repo.lock().expect("lock").clone()
     }
 }
 
 impl GhRunner for FakeGh {
-    fn list_pull_requests(&self, cwd: &Path, _fields: &str) -> Result<GhOutcome> {
-        *self.last_cwd.lock().expect("lock") = Some(cwd.as_os_str().to_owned());
+    fn list_pull_requests(
+        &self,
+        repo: &str,
+        _filter: &PrListFilter,
+        _fields: &str,
+    ) -> Result<GhOutcome> {
+        *self.last_repo.lock().expect("lock") = Some(repo.to_string());
         Ok(self.outcome.clone())
     }
 
@@ -353,8 +472,13 @@ impl GhRunner for FakeGh {
 }
 
 impl GhRunner for Box<dyn GhRunner> {
-    fn list_pull_requests(&self, cwd: &Path, fields: &str) -> Result<GhOutcome> {
-        (**self).list_pull_requests(cwd, fields)
+    fn list_pull_requests(
+        &self,
+        repo: &str,
+        filter: &PrListFilter,
+        fields: &str,
+    ) -> Result<GhOutcome> {
+        (**self).list_pull_requests(repo, filter, fields)
     }
 
     fn view_pull_request(&self, repo: &str, number: u64, fields: &str) -> Result<GhOutcome> {

@@ -503,20 +503,16 @@ pub fn discover_local_warm_with(
         );
     }
 
-    if !forge_adapters.is_empty() {
-        // Fan every registered adapter through the
-        // ForgeDiscovery coordinator. The coordinator already
-        // knew how to merge multiple adapters; the registry
-        // list finally has more than one entry (or the room
-        // for one).
+    // Forge discovery runs after the providers and the
+    // working-directory git pass, over every repo they found
+    // (ADR 0115), so it isn't one of the keyed providers above.
+    let forge = (!forge_adapters.is_empty()).then(|| {
         let mut coordinator = forge::ForgeDiscovery::new();
         for adapter in forge_adapters {
             coordinator = coordinator.with_boxed_adapter(adapter);
         }
-        // Every forge stamps the `github` provider key until a
-        // second forge emits real data.
-        providers = providers.with_keyed_provider(&[providers::GITHUB], coordinator);
-    }
+        coordinator
+    });
 
     let mut fresh = providers.discover_skipping(&context, &gate.fresh)?;
     let cwd_git_fragment = observed_cwd_git_fragment(&fresh, context.caches());
@@ -548,6 +544,21 @@ pub fn discover_local_warm_with(
     // slices the live run did not emit (the providers we
     // skipped because they were fresh).
     let mut snapshot = merge_with_prior(fresh, prior);
+
+    // Every forge stamps the `github` provider key until a second
+    // forge emits real data. A fresh `github` slice came through the
+    // prior merge above.
+    if let Some(forge) = &forge
+        && !gate.fresh.contains(providers::GITHUB)
+    {
+        let fragment = forge
+            .discover_graph(&snapshot, &context)
+            .map_err(|source| DiscoveryError::Provider {
+                provider_keys: vec![providers::GITHUB],
+                source: source.into(),
+            })?;
+        snapshot = merge_fragments([GraphFragment::from(snapshot), fragment]);
+    }
 
     // When the process-tree pass refreshes, drop the deferred prior
     // slices so the mutator re-stamps a clean, current contribution.

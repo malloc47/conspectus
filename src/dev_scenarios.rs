@@ -978,11 +978,6 @@ fn add_normal_repo_to_showcase(world: &mut ScenarioWorld) -> Result<PathBuf> {
         "# Release notes\n\n## What changed\n\n## Upgrading\n\n## Known issues\n",
     )?;
     fs::write(repo.join("CHANGELOG.md"), "# Changelog\n")?;
-    // The forge adapter scans each `DiscoveryContext` root for a git
-    // repo with a remote, so add the project repo directly as a
-    // scan-root sibling so PRs resolve while the scenario root still
-    // catches the other workspaces.
-    world.scan_roots.push(repo.clone());
     Ok(repo)
 }
 

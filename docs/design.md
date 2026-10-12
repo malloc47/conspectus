@@ -384,7 +384,11 @@ The sane default is:
 - probe distinct agent-session and mux-session cwd paths read-only to backfill
   repo, checkout, branch, and workspace context even when those paths are
   outside the launch cwd or configured scan roots
-- query GitHub for PRs associated with discovered repo/branch pairs
+- query GitHub for PRs associated with discovered repo/branch pairs: after
+  the working-directory pass, every discovered repo's GitHub remotes are asked
+  for open PRs and the last 30 days of history, and a PR links to a local branch
+  only when its head is one of the repo's remotes; failures surface as
+  diagnostics (ADR 0115)
 
 Discovery should prefer direct on-disk evidence first, then provider metadata,
 then common conventions, then user-declared overrides. Conventions such as

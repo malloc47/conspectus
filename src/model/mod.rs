@@ -1835,6 +1835,13 @@ pub enum Diagnostic {
         link_id: String,
         relation: RelationKind,
     },
+    /// A provider couldn't read its source this cycle: `gh` missing,
+    /// logged out, offline, or a query failed (ADR 0115). Whatever the
+    /// provider did read still loads.
+    ProviderUnavailable {
+        provider: String,
+        reason: String,
+    },
     Config {
         path: String,
         message: String,
@@ -1888,6 +1895,15 @@ pub enum Diagnostic {
         declared_cwd: String,
         observed_cwd: String,
     },
+}
+
+impl Diagnostic {
+    /// Whether discovery, rather than resolution, produced this
+    /// diagnostic. Resolution regenerates its own each run and keeps
+    /// these.
+    pub fn is_from_discovery(&self) -> bool {
+        matches!(self, Self::Config { .. } | Self::ProviderUnavailable { .. })
+    }
 }
 
 /// ADR 0058 §Q5: the recorded last-bound session a `PinUnbound`

@@ -5,7 +5,11 @@ fn missing_binary_reports_unavailable_binary_not_found() {
     let runner = SystemGh::with_binary("/definitely/not/here/gh");
 
     let outcome = runner
-        .list_pull_requests(Path::new("/tmp"), "number,state")
+        .list_pull_requests(
+            "github.com/octo/repo",
+            &PrListFilter::Open { limit: 1 },
+            "number,state",
+        )
         .expect("non-fatal");
 
     assert_eq!(
@@ -19,11 +23,15 @@ fn fake_gh_returns_pre_canned_pull_requests() {
     let runner = FakeGh::with_pull_requests("[]");
 
     let outcome = runner
-        .list_pull_requests(Path::new("/repo"), "number,state")
+        .list_pull_requests(
+            "github.com/octo/repo",
+            &PrListFilter::Open { limit: 1 },
+            "number,state",
+        )
         .expect("ok");
 
     assert_eq!(outcome, GhOutcome::PullRequests("[]".to_string()));
-    assert_eq!(runner.last_cwd().as_deref(), Some(Path::new("/repo")));
+    assert_eq!(runner.last_repo().as_deref(), Some("github.com/octo/repo"));
 }
 
 #[test]
@@ -31,7 +39,11 @@ fn fake_gh_can_report_unauthenticated() {
     let runner = FakeGh::unavailable(GhUnavailableReason::NotAuthenticated);
 
     let outcome = runner
-        .list_pull_requests(Path::new("/repo"), "number")
+        .list_pull_requests(
+            "github.com/octo/repo",
+            &PrListFilter::Open { limit: 1 },
+            "number",
+        )
         .expect("ok");
 
     assert_eq!(
@@ -45,7 +57,11 @@ fn fake_gh_can_surface_failed_runs() {
     let runner = FakeGh::failed(Some(2), "rate limited");
 
     let outcome = runner
-        .list_pull_requests(Path::new("/repo"), "number")
+        .list_pull_requests(
+            "github.com/octo/repo",
+            &PrListFilter::Open { limit: 1 },
+            "number",
+        )
         .expect("ok");
 
     assert_eq!(
@@ -105,7 +121,7 @@ impl ForgeAdapter for StaticAdapter {
         self.provider
     }
 
-    fn discover(&self, _context: &DiscoveryContext) -> Result<GraphFragment> {
+    fn discover(&self, _repos: &[ForgeRepo], _context: &DiscoveryContext) -> Result<GraphFragment> {
         Ok(self.fragment.clone())
     }
 }
@@ -113,7 +129,7 @@ impl ForgeAdapter for StaticAdapter {
 #[test]
 fn forge_discovery_without_adapters_returns_empty_fragment() {
     let fragment = ForgeDiscovery::new()
-        .discover(&DiscoveryContext::default())
+        .discover_graph(&GraphSnapshot::empty(), &DiscoveryContext::default())
         .expect("discovery succeeds");
 
     assert_eq!(fragment, GraphFragment::empty());
@@ -169,7 +185,7 @@ fn forge_discovery_merges_adapter_fragments_deterministically() {
                 node_provenance: BTreeMap::new(),
             },
         })
-        .discover(&DiscoveryContext::default())
+        .discover_graph(&GraphSnapshot::empty(), &DiscoveryContext::default())
         .expect("discovery succeeds");
 
     assert_eq!(fragment.nodes, vec![pr_alpha, pr_beta]);
@@ -191,7 +207,7 @@ impl ForgeAdapter for HostedStaticAdapter {
         self.provider
     }
 
-    fn discover(&self, _context: &DiscoveryContext) -> Result<GraphFragment> {
+    fn discover(&self, _repos: &[ForgeRepo], _context: &DiscoveryContext) -> Result<GraphFragment> {
         Ok(GraphFragment::empty())
     }
 
@@ -248,7 +264,7 @@ fn forge_discovery_accepts_two_adapters_via_boxed_registration() {
     // Empty fragments merge cleanly; no panic proves the
     // coordinator dispatches both adapters.
     let fragment = coordinator
-        .discover(&DiscoveryContext::default())
+        .discover_graph(&GraphSnapshot::empty(), &DiscoveryContext::default())
         .expect("discover");
     assert!(fragment.nodes.is_empty());
 }
@@ -271,7 +287,7 @@ impl ForgeAdapter for CountingAdapter {
     fn provider(&self) -> &str {
         "counting-fake"
     }
-    fn discover(&self, _context: &DiscoveryContext) -> Result<GraphFragment> {
+    fn discover(&self, _repos: &[ForgeRepo], _context: &DiscoveryContext) -> Result<GraphFragment> {
         self.calls
             .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         Ok(GraphFragment::empty())
@@ -288,13 +304,17 @@ fn forge_ttl_cache_serves_second_call_without_re_dispatching_adapters() {
     let context = DiscoveryContext::default();
 
     // First call: cache miss, adapter runs.
-    let first = coordinator.discover(&context).expect("first");
+    let first = coordinator
+        .discover_graph(&GraphSnapshot::empty(), &context)
+        .expect("first");
     assert!(first.nodes.is_empty());
     assert_eq!(calls.load(std::sync::atomic::Ordering::Relaxed), 1);
 
     // Second call, same (empty) roots, well within TTL — must
     // serve from cache without dispatching the adapter.
-    let second = coordinator.discover(&context).expect("second");
+    let second = coordinator
+        .discover_graph(&GraphSnapshot::empty(), &context)
+        .expect("second");
     assert!(second.nodes.is_empty());
     assert_eq!(
         calls.load(std::sync::atomic::Ordering::Relaxed),
@@ -303,26 +323,65 @@ fn forge_ttl_cache_serves_second_call_without_re_dispatching_adapters() {
     );
 }
 
+/// A snapshot whose one checkout is a fresh git repo under `parent`,
+/// named `name`.
+fn snapshot_with_repo(parent: &Path, name: &str) -> GraphSnapshot {
+    use crate::model::{CheckoutId, CheckoutNode, RepoId};
+    let root = parent.join(name);
+    std::fs::create_dir_all(&root).expect("repo dir");
+    let status = std::process::Command::new("git")
+        .args(["init", "--quiet", "--initial-branch", "main"])
+        .current_dir(&root)
+        .status()
+        .expect("git init");
+    assert!(status.success());
+    let mut snapshot = GraphSnapshot::empty();
+    snapshot.nodes.push(GraphNode::Checkout(CheckoutNode {
+        id: CheckoutId::new(
+            RepoId::new(root.join(".git").display().to_string()),
+            root.display().to_string(),
+        ),
+        root: root.display().to_string(),
+        git_dir: None,
+        current_branch: None,
+        worktree: None,
+    }));
+    snapshot
+}
+
 #[test]
-fn forge_ttl_cache_invalidates_when_context_roots_change() {
+fn forge_repos_come_from_the_graphs_checkouts() {
+    // A checkout the working-directory pass found, outside any root.
+    let temp = tempfile::tempdir().expect("temp dir");
+    let snapshot = snapshot_with_repo(temp.path(), "elsewhere");
+    let repos = forge_repos(&snapshot, &DiscoveryContext::default());
+    assert_eq!(repos.len(), 1);
+    assert!(
+        repos[0].repo_id.common_dir.ends_with("elsewhere/.git"),
+        "{repos:?}"
+    );
+}
+
+#[test]
+fn forge_ttl_cache_invalidates_when_the_repo_set_changes() {
     let calls = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
     let coordinator = ForgeDiscovery::new().with_boxed_adapter(Box::new(CountingAdapter {
         calls: std::sync::Arc::clone(&calls),
     }));
+    let temp = tempfile::tempdir().expect("temp dir");
+    let a = snapshot_with_repo(temp.path(), "a");
+    let b = snapshot_with_repo(temp.path(), "b");
+    let context = DiscoveryContext::default();
 
-    let caches = std::sync::Arc::new(crate::discovery::DiscoveryCaches::default());
-    let ctx_a = DiscoveryContext::from_root("/tmp/a").with_caches(std::sync::Arc::clone(&caches));
-    let ctx_b = DiscoveryContext::from_root("/tmp/b").with_caches(caches);
-
-    coordinator.discover(&ctx_a).expect("call a");
+    coordinator.discover_graph(&a, &context).expect("call a");
     assert_eq!(calls.load(std::sync::atomic::Ordering::Relaxed), 1);
-    coordinator.discover(&ctx_a).expect("cached a");
+    coordinator.discover_graph(&a, &context).expect("cached a");
     assert_eq!(calls.load(std::sync::atomic::Ordering::Relaxed), 1);
-    // Different roots -> cache miss -> adapter re-dispatches.
-    coordinator.discover(&ctx_b).expect("call b");
+    // A different repo set misses the cache and re-dispatches.
+    coordinator.discover_graph(&b, &context).expect("call b");
     assert_eq!(
         calls.load(std::sync::atomic::Ordering::Relaxed),
         2,
-        "changing context roots must invalidate the cache"
+        "changing the repo set must invalidate the cache"
     );
 }

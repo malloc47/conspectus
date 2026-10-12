@@ -20,11 +20,10 @@ use std::collections::BTreeSet;
 use anyhow::Result;
 use serde_json::Value;
 
-use crate::discovery::git::GitProbe;
-use crate::discovery::{DiscoveryContext, DiscoveryProvider, GraphFragment, merge_fragments};
+use crate::discovery::{DiscoveryContext, GraphFragment, merge_fragments};
 use crate::model::{
-    BranchId, Confidence, ForgePrId, ForgePrNode, Freshness, GraphLink, GraphNode, LinkEndpoint,
-    LinkState, Metadata, NodeId, Provenance, RelationKind, RepoId, SourceMetadata,
+    BranchId, Confidence, Diagnostic, ForgePrId, ForgePrNode, Freshness, GraphLink, GraphNode,
+    LinkEndpoint, LinkState, Metadata, NodeId, Provenance, RelationKind, RepoId, SourceMetadata,
     UnresolvedEndpoint,
 };
 
@@ -123,9 +122,13 @@ impl RepoContext {
 /// `discovered_branch_short_refs` should hold the short ref names
 /// (e.g. `"feature/login"`) of branches already in the graph. The
 /// short form is what `gh pr list` returns in `headRefName`.
+/// `repo_remotes` holds the local repo's GitHub remotes as lower-cased
+/// `(owner, repo)`: a PR links to a local branch only when its head
+/// lives in one of them (ADR 0115).
 pub fn fragment_for_repo(
     context: &RepoContext,
     discovered_branch_short_refs: &BTreeSet<String>,
+    repo_remotes: &BTreeSet<(String, String)>,
     records: &[PullRequestRecord],
 ) -> GraphFragment {
     let mut nodes = Vec::with_capacity(records.len());
@@ -145,6 +148,7 @@ pub fn fragment_for_repo(
             context,
             record,
             discovered_branch_short_refs,
+            repo_remotes,
         ));
     }
 
@@ -177,8 +181,24 @@ fn branch_pr_link(
     context: &RepoContext,
     record: &PullRequestRecord,
     discovered_branch_short_refs: &BTreeSet<String>,
+    repo_remotes: &BTreeSet<(String, String)>,
 ) -> GraphLink {
-    let target = if discovered_branch_short_refs.contains(&record.head_ref) {
+    // `gh` omits the head repo only when it no longer exists; treat
+    // that as the repo queried.
+    let head = (
+        record
+            .head_owner
+            .as_deref()
+            .unwrap_or(&context.owner)
+            .to_ascii_lowercase(),
+        record
+            .head_repo
+            .as_deref()
+            .unwrap_or(&context.repo)
+            .to_ascii_lowercase(),
+    );
+    let local = repo_remotes.contains(&head);
+    let target = if local && discovered_branch_short_refs.contains(&record.head_ref) {
         let branch_id = BranchId::new(
             context.repo_id.clone(),
             format!("refs/heads/{}", record.head_ref),
@@ -477,104 +497,184 @@ fn looks_like_github_host(host: &str) -> bool {
     lower == "github.com" || lower.ends_with(".github.com") || lower.starts_with("github.")
 }
 
-/// Discovery provider that probes each scan root for a git repo with
-/// a GitHub remote, then asks `GhRunner` for that repo's pull
-/// requests. Missing `gh`, unauthenticated runs, and per-repo
-/// failures degrade silently to no rows for that repo so the rest of
-/// the graph still loads.
+/// GitHub PR discovery over the repos the graph found (ADR 0115). For
+/// each distinct GitHub remote of each repo it asks `gh` for open PRs
+/// and for PRs updated recently, a few calls at a time. Failures become
+/// diagnostics and leave other repos' PRs intact.
 pub struct GitHubForgeProvider<R: GhRunner> {
     runner: R,
-    git: GitProbe,
 }
 
 impl<R: GhRunner> GitHubForgeProvider<R> {
     pub fn with_runner(runner: R) -> Self {
-        Self {
-            runner,
-            git: GitProbe::new(),
-        }
-    }
-
-    fn discover_repo(
-        &self,
-        root: &std::path::Path,
-        context: &DiscoveryContext,
-    ) -> Result<GraphFragment> {
-        let Some(probe) = self.git.probe_cached(root, context.caches())? else {
-            return Ok(GraphFragment::empty());
-        };
-        let Some((host, owner, repo)) = probe
-            .remotes
-            .iter()
-            .find_map(|remote| parse_github_remote(&remote.url))
-        else {
-            return Ok(GraphFragment::empty());
-        };
-
-        let outcome = self
-            .runner
-            .list_pull_requests(&probe.worktree_root, GH_PR_LIST_FIELDS)?;
-        let body = match outcome {
-            GhOutcome::PullRequests(body) => body,
-            GhOutcome::Unavailable(_) | GhOutcome::Failed { .. } => {
-                return Ok(GraphFragment::empty());
-            }
-        };
-
-        let records = GhPullRequestParser::new().parse(&body);
-        if records.is_empty() {
-            return Ok(GraphFragment::empty());
-        }
-
-        let context = RepoContext::new(
-            RepoId::new(probe.common_dir.to_string_lossy().to_string()),
-            host,
-            owner,
-            repo,
-        );
-
-        let short_refs = probe.local_branches.iter().cloned().collect();
-
-        Ok(fragment_for_repo(&context, &short_refs, &records))
+        Self { runner }
     }
 }
 
-impl<R: GhRunner + 'static> DiscoveryProvider for GitHubForgeProvider<R> {
-    fn discover(&self, context: &DiscoveryContext) -> Result<GraphFragment> {
-        let epoch = crate::discovery::current_epoch();
-        let mut fragments = Vec::with_capacity(context.roots().len());
-        for root in context.roots() {
-            fragments.push(self.discover_repo(root, context)?);
-        }
-        let merged = merge_fragments(fragments);
-        let mut fragment = GraphFragment {
-            nodes: merged.nodes,
-            candidate_links: merged.candidate_links,
-            diagnostics: merged.diagnostics,
-            node_provenance: merged.node_provenance,
-        };
-        crate::discovery::stamp_fragment(&mut fragment, FORGE_ADAPTER, epoch);
-        Ok(fragment)
-    }
+/// A remote as `(host, owner, repo)`.
+type RemoteSlug = (String, String, String);
+
+/// One `gh pr list` call: a remote of a repo, and which PRs to ask for.
+struct PrQueryJob<'a> {
+    repo: &'a super::ForgeRepo,
+    remote: RemoteSlug,
+    filter: super::PrListFilter,
 }
 
-/// `GitHubForgeProvider` also satisfies the
-/// `ForgeAdapter` shape so the `LocalDiscoveryConfig.forge_adapters`
-/// registry can carry it. Every method here delegates to the
-/// existing `DiscoveryProvider` impl (for `discover`) or to
-/// a URL-host matcher (for `claims_remote_url`).
 impl<R: GhRunner + 'static> super::ForgeAdapter for GitHubForgeProvider<R> {
     fn provider(&self) -> &str {
         FORGE_ADAPTER
     }
 
-    fn discover(&self, context: &DiscoveryContext) -> Result<GraphFragment> {
-        <Self as DiscoveryProvider>::discover(self, context)
+    fn discover(
+        &self,
+        repos: &[super::ForgeRepo],
+        _context: &DiscoveryContext,
+    ) -> Result<GraphFragment> {
+        let epoch = crate::discovery::current_epoch();
+        let since = chrono::DateTime::from_timestamp(epoch - super::RECENT_PR_DAYS * 86_400, 0)
+            .map(|at| at.format("%Y-%m-%d").to_string())
+            .unwrap_or_default();
+
+        let mut jobs = Vec::new();
+        for repo in repos {
+            for remote in github_remotes(repo) {
+                jobs.push(PrQueryJob {
+                    repo,
+                    remote: remote.clone(),
+                    filter: super::PrListFilter::Open {
+                        limit: super::OPEN_PR_LIMIT,
+                    },
+                });
+                jobs.push(PrQueryJob {
+                    repo,
+                    remote,
+                    filter: super::PrListFilter::UpdatedSince {
+                        since: since.clone(),
+                        limit: super::RECENT_PR_LIMIT,
+                    },
+                });
+            }
+        }
+
+        let outcomes = run_bounded(&jobs, super::MAX_CONCURRENT_GH, |job| {
+            let (host, owner, name) = &job.remote;
+            self.runner.list_pull_requests(
+                &format!("{host}/{owner}/{name}"),
+                &job.filter,
+                GH_PR_LIST_FIELDS,
+            )
+        });
+
+        // Records per (repo, remote), merged across the two queries by
+        // PR number.
+        let mut found: BTreeMap<(RepoId, RemoteSlug), BTreeMap<u64, PullRequestRecord>> =
+            BTreeMap::new();
+        let mut diagnostics: BTreeSet<Diagnostic> = BTreeSet::new();
+        for (job, outcome) in jobs.iter().zip(outcomes) {
+            let (host, owner, name) = &job.remote;
+            let body = match outcome {
+                Ok(GhOutcome::PullRequests(body)) => body,
+                Ok(GhOutcome::Unavailable(reason)) => {
+                    diagnostics.insert(unavailable(reason.as_str().to_string()));
+                    continue;
+                }
+                Ok(GhOutcome::Failed { message, .. }) => {
+                    diagnostics.insert(unavailable(format!(
+                        "gh pr list --repo {host}/{owner}/{name} failed: {message}"
+                    )));
+                    continue;
+                }
+                Err(err) => {
+                    diagnostics.insert(unavailable(format!(
+                        "gh pr list --repo {host}/{owner}/{name} failed: {err:#}"
+                    )));
+                    continue;
+                }
+            };
+            let records = found
+                .entry((job.repo.repo_id.clone(), job.remote.clone()))
+                .or_default();
+            for record in GhPullRequestParser::new().parse(&body) {
+                records.entry(record.number).or_insert(record);
+            }
+        }
+
+        let mut fragments = Vec::new();
+        for repo in repos {
+            let remotes: BTreeSet<(String, String)> = github_remotes(repo)
+                .into_iter()
+                .map(|(_, owner, name)| (owner.to_ascii_lowercase(), name.to_ascii_lowercase()))
+                .collect();
+            for remote in github_remotes(repo) {
+                let Some(records) = found.get(&(repo.repo_id.clone(), remote.clone())) else {
+                    continue;
+                };
+                let (host, owner, name) = remote;
+                let context = RepoContext::new(repo.repo_id.clone(), host, owner, name);
+                let records: Vec<PullRequestRecord> = records.values().cloned().collect();
+                fragments.push(fragment_for_repo(
+                    &context,
+                    &repo.local_branches,
+                    &remotes,
+                    &records,
+                ));
+            }
+        }
+        let merged = merge_fragments(fragments);
+        let mut fragment = GraphFragment {
+            nodes: merged.nodes,
+            candidate_links: merged.candidate_links,
+            diagnostics: merged.diagnostics.into_iter().chain(diagnostics).collect(),
+            node_provenance: merged.node_provenance,
+        };
+        crate::discovery::stamp_fragment(&mut fragment, FORGE_ADAPTER, epoch);
+        Ok(fragment)
     }
 
     fn claims_remote_url(&self, remote_url: &str) -> bool {
         remote_url_is_github(remote_url)
     }
+}
+
+/// A forge-discovery failure, as a diagnostic the TUI's forge chip
+/// reads (ADR 0115).
+fn unavailable(reason: String) -> Diagnostic {
+    Diagnostic::ProviderUnavailable {
+        provider: FORGE_ADAPTER.to_string(),
+        reason,
+    }
+}
+
+/// A repo's distinct GitHub remotes.
+fn github_remotes(repo: &super::ForgeRepo) -> Vec<RemoteSlug> {
+    let mut remotes: Vec<RemoteSlug> = repo
+        .remotes
+        .iter()
+        .filter_map(|remote| parse_github_remote(&remote.url))
+        .collect();
+    remotes.sort();
+    remotes.dedup();
+    remotes
+}
+
+/// Run `call` over `jobs`, at most `limit` at a time on scoped threads,
+/// returning results in job order.
+fn run_bounded<J: Sync, T: Send>(
+    jobs: &[J],
+    limit: usize,
+    call: impl Fn(&J) -> T + Sync,
+) -> Vec<T> {
+    let mut results = Vec::with_capacity(jobs.len());
+    for chunk in jobs.chunks(limit.max(1)) {
+        std::thread::scope(|scope| {
+            let handles: Vec<_> = chunk.iter().map(|job| scope.spawn(|| call(job))).collect();
+            for handle in handles {
+                results.push(handle.join().expect("gh query thread"));
+            }
+        });
+    }
+    results
 }
 
 /// True when `remote_url` names a GitHub host — either the

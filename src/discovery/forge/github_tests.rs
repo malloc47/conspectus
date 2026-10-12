@@ -154,6 +154,11 @@ fn context() -> RepoContext {
     RepoContext::github(RepoId::new("/workspace/repo/.git"), "octo", "repo")
 }
 
+/// The local repo's GitHub remotes, matching [`context`].
+fn remotes() -> BTreeSet<(String, String)> {
+    [("octo".to_string(), "repo".to_string())].into()
+}
+
 fn record(number: u64, head_ref: &str, state: PullRequestState) -> PullRequestRecord {
     PullRequestRecord {
         number,
@@ -178,7 +183,7 @@ fn fragment_emits_forge_pr_node_per_record() {
         record(2, "feature/b", PullRequestState::Merged),
     ];
 
-    let fragment = fragment_for_repo(&context, &branches, &records);
+    let fragment = fragment_for_repo(&context, &branches, &remotes(), &records);
 
     let pr_nodes: Vec<_> = fragment
         .nodes
@@ -203,7 +208,7 @@ fn matched_head_ref_emits_branch_node_endpoint() {
     branches.insert("feature/login".to_string());
     let records = vec![record(7, "feature/login", PullRequestState::Open)];
 
-    let fragment = fragment_for_repo(&context, &branches, &records);
+    let fragment = fragment_for_repo(&context, &branches, &remotes(), &records);
 
     assert_eq!(fragment.candidate_links.len(), 1);
     let link = &fragment.candidate_links[0];
@@ -225,7 +230,7 @@ fn unknown_head_ref_emits_unresolved_endpoint() {
     let branches = BTreeSet::new();
     let records = vec![record(9, "feature/missing", PullRequestState::Open)];
 
-    let fragment = fragment_for_repo(&context, &branches, &records);
+    let fragment = fragment_for_repo(&context, &branches, &remotes(), &records);
 
     let link = &fragment.candidate_links[0];
     match &link.target {
@@ -250,7 +255,7 @@ fn draft_flag_is_carried_onto_node_and_link_metadata() {
     let mut draft = record(3, "wip", PullRequestState::Open);
     draft.is_draft = true;
 
-    let fragment = fragment_for_repo(&context, &branches, &[draft]);
+    let fragment = fragment_for_repo(&context, &branches, &remotes(), &[draft]);
 
     let pr = match &fragment.nodes[0] {
         GraphNode::ForgePr(pr) => pr,
@@ -274,7 +279,7 @@ fn state_is_preserved_for_open_closed_merged() {
         record(3, "merged-branch", PullRequestState::Merged),
     ];
 
-    let fragment = fragment_for_repo(&context, &branches, &records);
+    let fragment = fragment_for_repo(&context, &branches, &remotes(), &records);
 
     let states: Vec<_> = fragment
         .nodes
@@ -294,8 +299,8 @@ fn node_and_link_ids_are_stable_across_repeated_runs() {
     branches.insert("feature/login".to_string());
     let records = vec![record(11, "feature/login", PullRequestState::Open)];
 
-    let first = fragment_for_repo(&context, &branches, &records);
-    let second = fragment_for_repo(&context, &branches, &records);
+    let first = fragment_for_repo(&context, &branches, &remotes(), &records);
+    let second = fragment_for_repo(&context, &branches, &remotes(), &records);
 
     let extract_ids = |fragment: &GraphFragment| -> (Vec<NodeId>, Vec<String>) {
         (
@@ -317,7 +322,7 @@ fn updated_epoch_is_preserved_on_the_node() {
     let mut rec = record(5, "head", PullRequestState::Open);
     rec.updated_epoch = Some(1_772_714_096);
 
-    let fragment = fragment_for_repo(&context, &branches, &[rec]);
+    let fragment = fragment_for_repo(&context, &branches, &remotes(), &[rec]);
 
     let pr = match &fragment.nodes[0] {
         GraphNode::ForgePr(pr) => pr,
@@ -328,7 +333,7 @@ fn updated_epoch_is_preserved_on_the_node() {
 
 #[test]
 fn empty_records_yield_empty_fragment() {
-    let fragment = fragment_for_repo(&context(), &BTreeSet::new(), &[]);
+    let fragment = fragment_for_repo(&context(), &BTreeSet::new(), &remotes(), &[]);
 
     assert!(fragment.nodes.is_empty());
     assert!(fragment.candidate_links.is_empty());
@@ -409,125 +414,243 @@ fn rejects_malformed_remote_paths() {
     assert!(parse_github_remote("https://github.com/octo/repo/extra").is_none());
 }
 
-use crate::discovery::forge::{FakeGh, GhUnavailableReason};
-use std::process::Command as ProcessCommand;
-use tempfile::TempDir;
+use crate::discovery::forge::{FakeGh, ForgeAdapter, ForgeRepo, GhUnavailableReason};
+use crate::discovery::git::GitRemote;
 
-fn make_git_repo(temp: &TempDir, remote: &str) -> std::path::PathBuf {
-    let root = temp.path().join("repo");
-    std::fs::create_dir(&root).expect("create repo dir");
-    run_git(&root, &["init", "--initial-branch", "main"]);
-    run_git(&root, &["config", "user.name", "Conspectus Test"]);
-    run_git(&root, &["config", "user.email", "test@example.invalid"]);
-    run_git(&root, &["remote", "add", "origin", remote]);
-    std::fs::write(root.join("README.md"), "fixture\n").expect("write fixture");
-    run_git(&root, &["add", "README.md"]);
-    run_git(&root, &["commit", "-m", "initial"]);
-    root
+/// A local repo with `remotes` (`name`, `url`) and local `branches`.
+fn forge_repo(remotes: &[(&str, &str)], branches: &[&str]) -> ForgeRepo {
+    ForgeRepo {
+        repo_id: RepoId::new("/workspace/repo/.git"),
+        remotes: remotes
+            .iter()
+            .map(|(name, url)| GitRemote {
+                name: (*name).to_string(),
+                url: (*url).to_string(),
+            })
+            .collect(),
+        local_branches: branches.iter().map(|b| (*b).to_string()).collect(),
+    }
 }
 
-fn run_git(root: &std::path::Path, args: &[&str]) {
-    let output = ProcessCommand::new("git")
-        .args(args)
-        .current_dir(root)
-        .output()
-        .expect("run git");
-    assert!(
-        output.status.success(),
-        "git {} failed: {}",
-        args.join(" "),
-        String::from_utf8_lossy(&output.stderr)
+fn discover(runner: FakeGh, repos: &[ForgeRepo]) -> GraphFragment {
+    GitHubForgeProvider::with_runner(runner)
+        .discover(repos, &DiscoveryContext::default())
+        .expect("discover")
+}
+
+fn pr_ids(fragment: &GraphFragment) -> Vec<String> {
+    fragment
+        .nodes
+        .iter()
+        .filter_map(|node| match node {
+            GraphNode::ForgePr(pr) => Some(format!("{}/{}#{}", pr.owner, pr.repo, pr.number)),
+            _ => None,
+        })
+        .collect()
+}
+
+#[test]
+fn provider_skips_repos_without_a_github_remote() {
+    let runner = FakeGh::with_pull_requests(r#"[{"number": 1, "headRefName": "main"}]"#);
+    let fragment = discover(
+        runner.clone(),
+        &[forge_repo(
+            &[("origin", "git@gitlab.com:octo/repo.git")],
+            &["main"],
+        )],
     );
-}
-
-#[test]
-fn provider_emits_no_rows_when_repo_has_no_github_remote() {
-    let temp = TempDir::new().expect("temp dir");
-    let root = make_git_repo(&temp, "git@gitlab.com:octo/repo.git");
-    let provider = GitHubForgeProvider::with_runner(FakeGh::with_pull_requests("[]"));
-
-    let context = DiscoveryContext::from_roots([root]).expect("context");
-    let fragment = provider.discover(&context).expect("discover");
-
     assert!(fragment.nodes.is_empty());
+    assert_eq!(runner.last_repo(), None, "gh is never asked");
 }
 
 #[test]
-fn provider_emits_no_rows_when_gh_unavailable() {
-    let temp = TempDir::new().expect("temp dir");
-    let root = make_git_repo(&temp, "git@github.com:octo/repo.git");
-    let provider = GitHubForgeProvider::with_runner(FakeGh::unavailable(
-        GhUnavailableReason::NotAuthenticated,
-    ));
-
-    let context = DiscoveryContext::from_roots([root]).expect("context");
-    let fragment = provider.discover(&context).expect("discover");
-
-    assert!(fragment.nodes.is_empty());
+fn provider_names_the_repo_it_queries() {
+    let runner = FakeGh::with_pull_requests("[]");
+    discover(
+        runner.clone(),
+        &[forge_repo(
+            &[("origin", "git@github.com:octo/repo.git")],
+            &[],
+        )],
+    );
+    assert_eq!(runner.last_repo().as_deref(), Some("github.com/octo/repo"));
 }
 
 #[test]
-fn provider_emits_forge_pr_nodes_for_github_repo() {
-    let temp = TempDir::new().expect("temp dir");
-    let root = make_git_repo(&temp, "git@github.com:octo/repo.git");
+fn provider_merges_the_open_and_recent_queries_by_number() {
+    // The fake answers both queries with the same body.
     let body = r#"[
             {"number": 1, "state": "OPEN", "headRefName": "main", "isDraft": false},
             {"number": 2, "state": "MERGED", "headRefName": "feature", "isDraft": false}
         ]"#;
-    let provider = GitHubForgeProvider::with_runner(FakeGh::with_pull_requests(body));
-
-    let context = DiscoveryContext::from_roots([root]).expect("context");
-    let fragment = provider.discover(&context).expect("discover");
-
-    assert_eq!(
-        fragment
-            .nodes
-            .iter()
-            .filter_map(|node| match node {
-                GraphNode::ForgePr(pr) => Some(pr),
-                _ => None,
-            })
-            .count(),
-        2
+    let fragment = discover(
+        FakeGh::with_pull_requests(body),
+        &[forge_repo(
+            &[("origin", "git@github.com:octo/repo.git")],
+            &[],
+        )],
     );
+    assert_eq!(pr_ids(&fragment), ["octo/repo#1", "octo/repo#2"]);
     assert_eq!(fragment.candidate_links.len(), 2);
 }
 
 #[test]
-fn provider_emits_branch_node_endpoint_when_head_ref_matches_current_branch() {
-    let temp = TempDir::new().expect("temp dir");
-    let root = make_git_repo(&temp, "git@github.com:octo/repo.git");
-    let body = r#"[{"number": 1, "state": "OPEN", "headRefName": "main"}]"#;
-    let provider = GitHubForgeProvider::with_runner(FakeGh::with_pull_requests(body));
+fn provider_queries_every_github_remote() {
+    let body = r#"[{"number": 4, "state": "OPEN", "headRefName": "main"}]"#;
+    let fragment = discover(
+        FakeGh::with_pull_requests(body),
+        &[forge_repo(
+            &[
+                ("origin", "git@github.com:me/repo.git"),
+                ("upstream", "https://github.com/octo/repo.git"),
+            ],
+            &[],
+        )],
+    );
+    let mut ids = pr_ids(&fragment);
+    ids.sort();
+    assert_eq!(ids, ["me/repo#4", "octo/repo#4"]);
+}
 
-    let context = DiscoveryContext::from_roots([root]).expect("context");
-    let fragment = provider.discover(&context).expect("discover");
+fn branch_target(fragment: &GraphFragment) -> &LinkEndpoint {
+    &fragment.candidate_links[0].target
+}
 
-    let link = &fragment.candidate_links[0];
-    match &link.target {
+#[test]
+fn a_pr_from_this_repo_links_to_its_local_branch() {
+    let body = r#"[{"number": 1, "state": "OPEN", "headRefName": "feature",
+        "headRepositoryOwner": {"login": "octo"}, "headRepository": {"name": "repo"}}]"#;
+    let fragment = discover(
+        FakeGh::with_pull_requests(body),
+        &[forge_repo(
+            &[("origin", "git@github.com:octo/repo.git")],
+            &["feature"],
+        )],
+    );
+    match branch_target(&fragment) {
         LinkEndpoint::Node {
-            id: NodeId::Branch(_),
-        } => {}
-        other => panic!("expected branch node endpoint, got {other:?}"),
+            id: NodeId::Branch(branch),
+        } => assert_eq!(branch.refname, "refs/heads/feature"),
+        other => panic!("expected the local branch, got {other:?}"),
     }
 }
 
 #[test]
-fn provider_emits_branch_node_endpoint_when_head_ref_matches_sibling_local_branch() {
-    let temp = TempDir::new().expect("temp dir");
-    let root = make_git_repo(&temp, "git@github.com:octo/repo.git");
-    run_git(&root, &["branch", "feature/sibling"]);
-    let body = r#"[{"number": 2, "state": "OPEN", "headRefName": "feature/sibling"}]"#;
-    let provider = GitHubForgeProvider::with_runner(FakeGh::with_pull_requests(body));
+fn a_pr_from_my_fork_into_upstream_links_to_my_local_branch() {
+    // The PR lives in `upstream`; its head is my fork, `origin`.
+    let body = r#"[{"number": 9, "state": "OPEN", "headRefName": "fix",
+        "headRepositoryOwner": {"login": "me"}, "headRepository": {"name": "repo"}}]"#;
+    let fragment = discover(
+        FakeGh::with_pull_requests(body),
+        &[forge_repo(
+            &[
+                ("origin", "git@github.com:me/repo.git"),
+                ("upstream", "git@github.com:octo/repo.git"),
+            ],
+            &["fix"],
+        )],
+    );
+    assert!(
+        fragment.candidate_links.iter().all(|link| matches!(
+            link.target,
+            LinkEndpoint::Node {
+                id: NodeId::Branch(_)
+            }
+        )),
+        "{:#?}",
+        fragment.candidate_links
+    );
+}
 
-    let context = DiscoveryContext::from_roots([root]).expect("context");
-    let fragment = provider.discover(&context).expect("discover");
-
-    let link = &fragment.candidate_links[0];
-    match &link.target {
-        LinkEndpoint::Node {
-            id: NodeId::Branch(branch),
-        } => assert_eq!(branch.refname, "refs/heads/feature/sibling"),
-        other => panic!("expected sibling branch node endpoint, got {other:?}"),
+#[test]
+fn a_pr_from_a_strangers_fork_stays_unresolved_despite_a_same_named_branch() {
+    let body = r#"[{"number": 3, "state": "OPEN", "headRefName": "main",
+        "headRepositoryOwner": {"login": "stranger"}, "headRepository": {"name": "repo"}}]"#;
+    let fragment = discover(
+        FakeGh::with_pull_requests(body),
+        &[forge_repo(
+            &[("origin", "git@github.com:octo/repo.git")],
+            &["main"],
+        )],
+    );
+    match branch_target(&fragment) {
+        LinkEndpoint::Unresolved { evidence } => {
+            assert_eq!(evidence.native_id.as_deref(), Some("main"));
+        }
+        other @ LinkEndpoint::Node { .. } => panic!("expected an unresolved link, got {other:?}"),
     }
+}
+
+#[test]
+fn an_unavailable_gh_is_reported_as_a_diagnostic() {
+    let fragment = discover(
+        FakeGh::unavailable(GhUnavailableReason::NotAuthenticated),
+        &[forge_repo(
+            &[("origin", "git@github.com:octo/repo.git")],
+            &[],
+        )],
+    );
+    assert!(fragment.nodes.is_empty());
+    assert_eq!(
+        fragment.diagnostics,
+        [Diagnostic::ProviderUnavailable {
+            provider: "github".to_string(),
+            reason: "gh is not authenticated".to_string(),
+        }]
+    );
+}
+
+/// A runner that fails for one repo and answers for the rest.
+struct OneRepoFails;
+
+impl crate::discovery::forge::GhRunner for OneRepoFails {
+    fn list_pull_requests(
+        &self,
+        repo: &str,
+        _filter: &crate::discovery::forge::PrListFilter,
+        _fields: &str,
+    ) -> anyhow::Result<GhOutcome> {
+        Ok(if repo.ends_with("/broken") {
+            GhOutcome::Failed {
+                code: Some(1),
+                message: "HTTP 502".to_string(),
+            }
+        } else {
+            GhOutcome::PullRequests(r#"[{"number": 5, "headRefName": "main"}]"#.to_string())
+        })
+    }
+
+    fn view_pull_request(
+        &self,
+        _repo: &str,
+        _number: u64,
+        _fields: &str,
+    ) -> anyhow::Result<GhOutcome> {
+        Ok(GhOutcome::PullRequests("{}".to_string()))
+    }
+}
+
+#[test]
+fn a_failure_for_one_repo_keeps_the_others_prs() {
+    let mut broken = forge_repo(&[("origin", "git@github.com:octo/broken.git")], &[]);
+    broken.repo_id = RepoId::new("/workspace/broken/.git");
+    let fragment = GitHubForgeProvider::with_runner(OneRepoFails)
+        .discover(
+            &[
+                forge_repo(&[("origin", "git@github.com:octo/repo.git")], &[]),
+                broken,
+            ],
+            &DiscoveryContext::default(),
+        )
+        .expect("discover");
+    assert_eq!(pr_ids(&fragment), ["octo/repo#5"]);
+    assert!(
+        fragment.diagnostics.iter().any(|diagnostic| matches!(
+            diagnostic,
+            Diagnostic::ProviderUnavailable { reason, .. }
+                if reason.contains("github.com/octo/broken") && reason.contains("HTTP 502")
+        )),
+        "{:?}",
+        fragment.diagnostics
+    );
 }
