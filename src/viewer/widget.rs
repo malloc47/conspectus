@@ -149,25 +149,51 @@ fn draw_body(state: &mut ViewerState, theme: &Theme, frame: &mut Frame<'_>, area
         return;
     }
 
-    let gutter_inner_width = compute_gutter_inner_width(state);
-    let content_width = area.width.saturating_sub(leader_width(gutter_inner_width));
-
-    // Cache hit: reuse the previously composed body. Cache key is
-    // (content_width, show_tools, show_thinking); the reducer
-    // invalidates whenever a toggle flips. This is the difference
-    // between scrolling-by-keystroke being O(turns × markdown_render)
-    // and being O(1) on a large session with tools shown.
-    let need_rebuild = match &state.rendered {
-        Some(cache) => {
-            cache.content_width != content_width
-                || cache.tool_detail != state.tool_detail
-                || cache.show_thinking != state.show_thinking
-                || cache.show_aborted != state.show_aborted
-        }
-        None => true,
+    let stick_to_end = state.stick_to_end;
+    let requested_offset = state.scroll_offset;
+    let lines = body_lines(state, theme, area.width);
+    let total = lines.len();
+    let viewport_height = area.height;
+    let max_offset = total.saturating_sub(viewport_height as usize);
+    let scroll_offset = if stick_to_end {
+        max_offset
+    } else {
+        requested_offset.min(max_offset)
     };
-    if need_rebuild {
-        let owned: Vec<ratatui::text::Line<'static>> =
+
+    // The cached lines are already wrapped to `content_width`, so the
+    // visible window is a plain slice. Slicing (rather than
+    // `Paragraph::scroll`, whose offset is a u16) keeps transcripts
+    // longer than 65,535 lines scrollable and clones only what is shown.
+    let visible_end = total.min(scroll_offset + viewport_height as usize);
+    let paragraph = Paragraph::new(lines[scroll_offset..visible_end].to_vec());
+    frame.render_widget(paragraph, area);
+
+    state.viewport_height = viewport_height;
+    state.total_lines = total;
+    state.scroll_offset = scroll_offset;
+}
+
+/// Compose the transcript body at `width` columns, gutter included, and
+/// return its lines. The composition is cached on `state` and reused
+/// while the width and the display toggles are unchanged, so callers
+/// scroll by slicing rather than re-rendering. The full-screen modal
+/// and the inline preview (ADR 0112) both draw from it. An empty
+/// document composes no lines; callers show their own "unavailable"
+/// state.
+pub fn body_lines<'s>(
+    state: &'s mut ViewerState,
+    theme: &Theme,
+    width: u16,
+) -> &'s [Line<'static>] {
+    if state.document.is_empty() {
+        return &[];
+    }
+    let gutter_inner_width = compute_gutter_inner_width(state);
+    let content_width = width.saturating_sub(leader_width(gutter_inner_width));
+
+    if !cache_is_current(state, content_width) {
+        let owned: Vec<Line<'static>> =
             build_body_lines(state, theme, content_width, gutter_inner_width)
                 .into_iter()
                 .map(into_owned_line)
@@ -180,28 +206,31 @@ fn draw_body(state: &mut ViewerState, theme: &Theme, frame: &mut Frame<'_>, area
             lines: owned,
         });
     }
+    &state.rendered.as_ref().expect("just populated").lines
+}
 
-    let cache = state.rendered.as_ref().expect("just populated");
-    let total = cache.lines.len();
-    let viewport_height = area.height;
-    let max_offset = total.saturating_sub(viewport_height as usize);
-    let scroll_offset = if state.stick_to_end {
-        max_offset
-    } else {
-        state.scroll_offset.min(max_offset)
-    };
+/// The body lines [`body_lines`] last composed, when they were composed
+/// at `width` with the current display toggles. Lets a caller that only
+/// holds `&ViewerState` reuse the cache it warmed earlier in the frame.
+pub fn cached_body_lines(state: &ViewerState, width: u16) -> Option<&[Line<'static>]> {
+    let content_width = width.saturating_sub(leader_width(compute_gutter_inner_width(state)));
+    if !cache_is_current(state, content_width) {
+        return None;
+    }
+    state.rendered.as_ref().map(|cache| cache.lines.as_slice())
+}
 
-    // The cached lines are already wrapped to `content_width`, so the
-    // visible window is a plain slice. Slicing (rather than
-    // `Paragraph::scroll`, whose offset is a u16) keeps transcripts
-    // longer than 65,535 lines scrollable and clones only what is shown.
-    let visible_end = total.min(scroll_offset + viewport_height as usize);
-    let paragraph = Paragraph::new(cache.lines[scroll_offset..visible_end].to_vec());
-    frame.render_widget(paragraph, area);
-
-    state.viewport_height = viewport_height;
-    state.total_lines = total;
-    state.scroll_offset = scroll_offset;
+/// Whether the cached composition matches `content_width` and the
+/// current display toggles. This is the difference between scrolling
+/// by keystroke being O(turns × markdown render) and being O(1) on a
+/// large session with tools shown.
+fn cache_is_current(state: &ViewerState, content_width: u16) -> bool {
+    state.rendered.as_ref().is_some_and(|cache| {
+        cache.content_width == content_width
+            && cache.tool_detail == state.tool_detail
+            && cache.show_thinking == state.show_thinking
+            && cache.show_aborted == state.show_aborted
+    })
 }
 
 fn draw_footer(state: &ViewerState, theme: &Theme, frame: &mut Frame<'_>, area: Rect) {
