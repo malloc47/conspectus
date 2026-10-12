@@ -4500,3 +4500,57 @@ fn branch_ref_and_commit_fields_preview_git_history() {
         })
     );
 }
+
+#[test]
+fn processes_and_pid_fields_preview_process_trees() {
+    let mut snapshot = GraphSnapshot::empty();
+    let id = crate::model::RuntimeProcessId::new("proc:1");
+    snapshot.nodes.push(GraphNode::RuntimeProcess(
+        crate::model::RuntimeProcessNode {
+            id: id.clone(),
+            observation_key: "proc:1".to_string(),
+            pid: Some(4242),
+            parent_pid: Some(1),
+            root_pane_pid: None,
+            command: None,
+            cwd: None,
+            harness_key: None,
+            role: None,
+            depth: None,
+            observed_epoch: None,
+        },
+    ));
+    let mut app = App::new(RunConfig::defaults());
+    app.update(Msg::SetData {
+        snapshot: SnapshotHandle::from_snapshot(&snapshot),
+        tree: crate::tui::rows::RowTree::default(),
+        loaded_at_epoch: 1_700_000_000,
+        initial_selection_hint: None,
+    });
+    let node_id = NodeId::RuntimeProcess(id);
+    assert_eq!(
+        crate::tui::preview::node_source(&app, &node_id),
+        Some(PreviewSource::Process(4242))
+    );
+    let view = crate::tui::explorer::build_node_view(crate::tui::explorer::ExplorerInputs {
+        snapshot: app.snapshot_handle().expect("data").snapshot(),
+        target: &node_id,
+        home: None,
+        now: None,
+    })
+    .expect("process view");
+    let preview = |label: &str| {
+        view.fields(true)
+            .iter()
+            .find(|field| field.label == label)
+            .and_then(|field| field.preview.clone())
+    };
+    assert_eq!(
+        preview("pid"),
+        Some(crate::tui::explorer::FieldValue::Process(4242))
+    );
+    assert_eq!(
+        preview("parent_pid"),
+        Some(crate::tui::explorer::FieldValue::Process(1))
+    );
+}

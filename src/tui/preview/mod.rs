@@ -11,6 +11,7 @@
 
 mod git;
 mod path;
+mod process;
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::PathBuf;
@@ -39,6 +40,8 @@ pub enum PreviewSource {
     Path(PathBuf),
     /// A read-only git query: status, history, or a commit.
     Git(GitQuery),
+    /// The process tree rooted at a pid.
+    Process(i64),
 }
 
 impl PreviewSource {
@@ -56,7 +59,7 @@ impl PreviewSource {
         match self {
             Self::Pane(_) => None,
             Self::Transcript(_) => Some(MAX_CACHED_TRANSCRIPTS),
-            Self::Path(_) | Self::Git(_) => Some(MAX_CACHED_OTHER),
+            Self::Path(_) | Self::Git(_) | Self::Process(_) => Some(MAX_CACHED_OTHER),
         }
     }
 
@@ -292,6 +295,7 @@ pub fn value_source(value: &FieldValue) -> PreviewSource {
             dir: PathBuf::from(dir),
             commit: commit.clone(),
         }),
+        FieldValue::Process(pid) => PreviewSource::Process(*pid),
     }
 }
 
@@ -305,6 +309,7 @@ pub fn value_source(value: &FieldValue) -> PreviewSource {
 /// - a repo shows recent commits on its default branch and its remotes;
 /// - a branch shows recent commits at its ref and, with an upstream,
 ///   how far it is ahead and behind;
+/// - a runtime process shows its process tree;
 /// - every other kind has no source yet, and the renderer shows its
 ///   fields.
 pub fn node_source(app: &App, node: &NodeId) -> Option<PreviewSource> {
@@ -325,28 +330,31 @@ pub fn node_source(app: &App, node: &NodeId) -> Option<PreviewSource> {
         NodeId::MuxSession(mux) => {
             (!hosts_this_tui(app, mux)).then(|| PreviewSource::Pane(mux.clone()))
         }
-        NodeId::Workspace(_) | NodeId::Checkout(_) | NodeId::Repo(_) | NodeId::Branch(_) => {
-            match graph_node(app, node)? {
-                GraphNode::Workspace(workspace) => {
-                    Some(PreviewSource::Path(PathBuf::from(&workspace.root)))
-                }
-                GraphNode::Checkout(checkout) => Some(PreviewSource::Git(GitQuery::Status {
-                    root: PathBuf::from(&checkout.root),
-                })),
-                GraphNode::Repo(repo) => Some(PreviewSource::Git(GitQuery::Repo {
-                    dir: PathBuf::from(&repo.common_dir),
-                })),
-                GraphNode::Branch(branch) => Some(PreviewSource::Git(GitQuery::Log {
-                    dir: PathBuf::from(&branch.id.repo.common_dir),
-                    rev: branch.refname.clone(),
-                    ahead_behind: branch
-                        .upstream
-                        .clone()
-                        .map(|upstream| (branch.refname.clone(), upstream)),
-                })),
-                _ => None,
+        NodeId::Workspace(_)
+        | NodeId::Checkout(_)
+        | NodeId::Repo(_)
+        | NodeId::Branch(_)
+        | NodeId::RuntimeProcess(_) => match graph_node(app, node)? {
+            GraphNode::Workspace(workspace) => {
+                Some(PreviewSource::Path(PathBuf::from(&workspace.root)))
             }
-        }
+            GraphNode::Checkout(checkout) => Some(PreviewSource::Git(GitQuery::Status {
+                root: PathBuf::from(&checkout.root),
+            })),
+            GraphNode::Repo(repo) => Some(PreviewSource::Git(GitQuery::Repo {
+                dir: PathBuf::from(&repo.common_dir),
+            })),
+            GraphNode::RuntimeProcess(process) => process.pid.map(PreviewSource::Process),
+            GraphNode::Branch(branch) => Some(PreviewSource::Git(GitQuery::Log {
+                dir: PathBuf::from(&branch.id.repo.common_dir),
+                rev: branch.refname.clone(),
+                ahead_behind: branch
+                    .upstream
+                    .clone()
+                    .map(|upstream| (branch.refname.clone(), upstream)),
+            })),
+            _ => None,
+        },
         _ => None,
     }
 }
@@ -428,6 +436,10 @@ pub fn load_offline_preview(source: &PreviewSource) -> Option<PreviewContent> {
         PreviewSource::Transcript(session) => Some(load_transcript_preview(session)),
         PreviewSource::Path(path) => Some(path::load_path_preview(path)),
         PreviewSource::Git(query) => Some(git::load_git_preview(query)),
+        PreviewSource::Process(pid) => Some(process::load_process_tree(
+            std::path::Path::new("/proc"),
+            *pid,
+        )),
     }
 }
 

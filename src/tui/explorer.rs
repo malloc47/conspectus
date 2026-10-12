@@ -172,6 +172,8 @@ pub enum FieldValue {
     },
     /// A commit in the repo at `dir`, previewing `git show --stat`.
     Commit { dir: String, commit: String },
+    /// A process ID, previewing the process tree rooted there.
+    Process(i64),
 }
 
 impl CoreField {
@@ -1472,7 +1474,10 @@ fn mux_session_extras(m: &MuxSessionNode, now: Option<i64>) -> Vec<CoreField> {
         fields.push(field);
     }
     if let Some(pid) = m.active_pane_pid {
-        fields.push(CoreField::plain("active_pane_pid", pid.to_string()));
+        fields.push(
+            CoreField::plain("active_pane_pid", pid.to_string())
+                .previewing(FieldValue::Process(pid)),
+        );
     }
     if let Some(path) = &m.active_pane_current_path {
         fields.push(CoreField::path("active_pane_current_path", path, None));
@@ -1549,7 +1554,7 @@ fn runtime_process_core(
         annotation: None,
         long_value: None,
         kind_chip: None,
-        preview: None,
+        preview: p.pid.map(FieldValue::Process),
     });
     let command_field = match &p.command {
         Some(cmd) => {
@@ -1603,10 +1608,16 @@ fn runtime_process_extras(
         fields.push(CoreField::plain("depth", depth.to_string()));
     }
     if let Some(parent) = p.parent_pid {
-        fields.push(CoreField::plain("parent_pid", parent.to_string()));
+        fields.push(
+            CoreField::plain("parent_pid", parent.to_string())
+                .previewing(FieldValue::Process(parent)),
+        );
     }
     if let Some(pane) = p.root_pane_pid {
-        fields.push(CoreField::plain("root_pane_pid", pane.to_string()));
+        fields.push(
+            CoreField::plain("root_pane_pid", pane.to_string())
+                .previewing(FieldValue::Process(pane)),
+        );
     }
     fields.push(CoreField::plain(
         "observation_key",
