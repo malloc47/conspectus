@@ -140,3 +140,20 @@ fn snippet_around_falls_back_when_range_is_out_of_bounds() {
     assert!(snippet.highlight.is_none());
     assert!(!snippet.text.is_empty());
 }
+
+#[test]
+fn a_session_is_found_by_the_id_its_row_shows() {
+    // The row's id column shows the session key; the content-addressed
+    // short id the status bar uses is different.
+    let mut row = agent_row("claude-code", "11536dfb-3769-4d5a", None, "hello");
+    if let RowKind::AgentSession(session) = &mut row.kind {
+        session.short_id = "661c9a".to_string();
+    }
+    let rows = vec![row, agent_row("codex", "22222222-aaaa", None, "other")];
+    let items = items_from_rows(&rows);
+    for query in ["11536dfb", "11536DFB-3769-4d5a", "661c9a"] {
+        let matches = rank(query, &items);
+        assert_eq!(matches.len(), 1, "{query}");
+        assert_eq!(matches[0].id, rows[0].id, "{query}");
+    }
+}

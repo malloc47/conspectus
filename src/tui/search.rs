@@ -264,6 +264,9 @@ fn agent_haystack(session: &crate::tui::rows::AgentSessionRow) -> String {
     }
     parts.push(&session.harness_label);
     parts.push(&session.short_id);
+    // The session key is what the row's id column shows, so a typed
+    // or pasted id finds its row.
+    parts.push(&session.session.session_key);
     if let Some(cwd) = session.cwd_display.as_deref() {
         parts.push(cwd);
     }
