@@ -151,6 +151,7 @@ Runtime architecture, controls, theming, detail pane, and visual language.
 | [0107](0107-related-view-neighbor-granularity.md) | Related View At Neighbor Granularity | Accepted (amended) |
 | [0112](0112-node-specific-previews.md) | Node-Specific Previews | Accepted |
 | [0113](0113-readme-screenshots.md) | README Screenshots From The Showcase Fixture | Accepted |
+| [0114](0114-prs-view-grouped-by-checkout.md) | A PRs View Grouped By Checkout | Accepted |
 
 ## Transcript viewer
 

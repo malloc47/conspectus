@@ -114,7 +114,7 @@ Each view has its own grouping enum. Sessions keeps the existing
 pub enum SessionsGrouping { Graph, Repo, Checkout, ScanRoot }
 pub enum MuxGrouping       { Session, Workspace, Host }
 pub enum UnionGrouping     { Kind, Workspace, Repo }
-pub enum PrsGrouping       { Repo, State, Workspace }
+pub enum PrsGrouping       { Repo, State, Workspace }   // ADR 0114: { Checkout, Repo, State }, Checkout default
 pub enum ForksGrouping     { Provider, Workspace, Parent }
 ```
 
