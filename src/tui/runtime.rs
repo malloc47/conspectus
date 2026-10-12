@@ -770,11 +770,16 @@ pub fn run(config: RunConfig) -> Result<()> {
 /// debug-only replay scenarios: it lets developers inspect edge-case
 /// worlds through the real renderer and reducer without teaching
 /// production discovery about fixtures.
+/// `tmux` answers pane captures; a scenario passes its recorded panes.
 #[cfg(any(test, debug_assertions, feature = "snapshot"))]
-pub fn run_static(config: RunConfig, snapshot: crate::model::GraphSnapshot) -> Result<()> {
+pub fn run_static(
+    config: RunConfig,
+    snapshot: crate::model::GraphSnapshot,
+    tmux: Box<dyn MuxBackend>,
+) -> Result<()> {
     let mut terminal = ratatui::init();
     let _ = terminal.clear();
-    let result = static_event_loop(&mut terminal, config, snapshot, None);
+    let result = static_event_loop(&mut terminal, config, snapshot, None, tmux);
     ratatui::restore();
     result
 }
@@ -791,7 +796,13 @@ pub fn run_from_fixture(config: RunConfig, fixture_path: std::path::PathBuf) -> 
         .with_context(|| format!("load fixture `{}`", fixture_path.display()))?;
     let mut terminal = ratatui::init();
     let _ = terminal.clear();
-    let result = static_event_loop(&mut terminal, config, snapshot, Some(fixture_path));
+    let result = static_event_loop(
+        &mut terminal,
+        config,
+        snapshot,
+        Some(fixture_path),
+        Box::new(SystemTmux::new()),
+    );
     ratatui::restore();
     result
 }
@@ -835,6 +846,7 @@ fn static_event_loop(
     config: RunConfig,
     initial_snapshot: crate::model::GraphSnapshot,
     fixture_path: Option<std::path::PathBuf>,
+    tmux: Box<dyn MuxBackend>,
 ) -> Result<()> {
     let mut app = App::new(config.clone());
     // Enable last-active-view persistence for the static
@@ -845,7 +857,7 @@ fn static_event_loop(
     app.enable_view_persistence(crate::tui_state::TuiStateCache::from_env());
     app.restore_persisted_state();
     let mode = StaticMode {
-        tmux: Box::new(SystemTmux::new()),
+        tmux,
         snapshot: initial_snapshot,
         fixture_path,
     };
@@ -1563,12 +1575,36 @@ fn load_preview_now(app: &mut App, tmux: &dyn MuxBackend, source: PreviewSource)
 
 /// Load the selection's preview on the calling thread, for snapshot
 /// mode, which renders one frame with no event loop to wait on. Pane
-/// captures stay unloaded there, as before.
+/// captures stay unloaded there, as before. With `rebase`, paths under
+/// its first directory are read from its second (ADR 0113); the
+/// preview is still stored under the source the renderer resolves.
 #[cfg(feature = "snapshot")]
-pub(super) fn load_offline_preview_now(app: &mut App, config: &RunConfig) {
-    if let Some(source) = plan_preview_load(app, config, None, true)
-        && let Some(content) = load_offline_preview(&source)
-    {
+pub(super) fn load_offline_preview_now(
+    app: &mut App,
+    config: &RunConfig,
+    rebase: Option<(&std::path::Path, &std::path::Path)>,
+) {
+    let Some(source) = plan_preview_load(app, config, None, true) else {
+        return;
+    };
+    if let (PreviewSource::Pane(mux), Some((_, root))) = (&source, rebase) {
+        // A materialized scenario records its panes instead of running
+        // tmux.
+        let capture = pane_native_id(app, mux)
+            .and_then(|native_id| crate::dev_scenarios::recorded_pane(root, &native_id));
+        if let Some(text) = capture {
+            app.update(Msg::SetPreview {
+                source,
+                content: PreviewContent::text(text),
+            });
+        }
+        return;
+    }
+    let read = match rebase {
+        Some((from, to)) => source.rebased(from, to),
+        None => source.clone(),
+    };
+    if let Some(content) = load_offline_preview(&read) {
         app.update(Msg::SetPreview { source, content });
     }
 }

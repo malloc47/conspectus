@@ -836,8 +836,23 @@ fn tree_home_dir() -> Option<std::path::PathBuf> {
 
 /// Wall-clock unix epoch that view-model derivations (row trees, the
 /// node explorer) use for relative ages.
+/// A fixed time snapshot mode renders against (ADR 0113). Unset, the
+/// TUI reads the clock.
+static PINNED_NOW: std::sync::OnceLock<i64> = std::sync::OnceLock::new();
+
+/// Render ages against `epoch` for the rest of the process.
+#[cfg(feature = "snapshot")]
+pub(crate) fn pin_clock(epoch: i64) {
+    let _ = PINNED_NOW.set(epoch);
+}
+
 pub(crate) fn tree_current_unix_epoch() -> Option<i64> {
-    Some(crate::discovery::current_epoch())
+    Some(
+        PINNED_NOW
+            .get()
+            .copied()
+            .unwrap_or_else(crate::discovery::current_epoch),
+    )
 }
 
 #[cfg(test)]

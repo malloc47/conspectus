@@ -64,6 +64,11 @@ impl DevScenarioArgs {
             DevScenarioCommand::Table(args) => args.run(),
             DevScenarioCommand::Node(args) => args.run(),
             DevScenarioCommand::Tui(args) => args.run(),
+            DevScenarioCommand::Materialize(args) => {
+                let world = crate::dev_scenarios::materialize_at(&args.name, &args.dir)?;
+                println!("{}", world.root().display());
+                Ok(())
+            }
         }
     }
 }
@@ -80,6 +85,18 @@ enum DevScenarioCommand {
     Node(DevScenarioNodeArgs),
     /// Open the interactive TUI on a static scenario graph.
     Tui(DevScenarioTuiArgs),
+    /// Write a scenario's world (repos, transcripts, workspaces) into a
+    /// new directory and keep it, so `tui --snapshot
+    /// --snapshot-fixture-root` can read previews from it.
+    // README screenshots (ADR 0113).
+    Materialize(DevScenarioMaterializeArgs),
+}
+
+#[derive(Debug, Args)]
+struct DevScenarioMaterializeArgs {
+    name: String,
+    /// Directory to create the world in; must not exist yet.
+    dir: std::path::PathBuf,
 }
 
 #[derive(Debug, Args)]
@@ -213,6 +230,6 @@ impl DevScenarioTuiArgs {
         };
         config.initial_filter = filter;
         apply_grouping_to_tui_config(&mut config, grouping);
-        crate::tui::run_static(config, snapshot)
+        crate::tui::run_static(config, snapshot, Box::new(world.pane_backend()))
     }
 }

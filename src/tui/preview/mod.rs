@@ -51,6 +51,49 @@ pub enum PreviewSource {
 }
 
 impl PreviewSource {
+    /// The same source with paths under `from` moved under `to`, for
+    /// reading a fixture's previews from a materialized world
+    /// (ADR 0113).
+    #[cfg(feature = "snapshot")]
+    pub fn rebased(&self, from: &std::path::Path, to: &std::path::Path) -> Self {
+        let move_path = |path: &std::path::Path| match path.strip_prefix(from) {
+            Ok(rest) => to.join(rest),
+            Err(_) => path.to_path_buf(),
+        };
+        match self {
+            Self::Transcript(session) => {
+                let mut session = session.clone();
+                session.state_scope = move_path(std::path::Path::new(&session.state_scope))
+                    .display()
+                    .to_string();
+                Self::Transcript(session)
+            }
+            Self::Path(path) => Self::Path(move_path(path)),
+            Self::Git(query) => Self::Git(match query {
+                GitQuery::Status { root } => GitQuery::Status {
+                    root: move_path(root),
+                },
+                GitQuery::Repo { dir } => GitQuery::Repo {
+                    dir: move_path(dir),
+                },
+                GitQuery::Log {
+                    dir,
+                    rev,
+                    ahead_behind,
+                } => GitQuery::Log {
+                    dir: move_path(dir),
+                    rev: rev.clone(),
+                    ahead_behind: ahead_behind.clone(),
+                },
+                GitQuery::Show { dir, commit } => GitQuery::Show {
+                    dir: move_path(dir),
+                    commit: commit.clone(),
+                },
+            }),
+            Self::Pane(_) | Self::Process(_) | Self::PullRequest(_) => self.clone(),
+        }
+    }
+
     /// Whether the source is conversation or terminal content, which
     /// `--no-live-preview` hides (ADR 0112 §6).
     pub fn is_live(&self) -> bool {

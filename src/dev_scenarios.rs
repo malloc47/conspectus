@@ -106,11 +106,25 @@ pub fn scenario_def(name: &str) -> Option<ScenarioDef> {
 }
 
 pub fn materialize(name: &str) -> Result<ScenarioWorld> {
+    build(name, unique_root(name), false)
+}
+
+/// Build a scenario's world in `root`, which must not exist yet, and
+/// keep it when the returned world drops. `--snapshot-fixture-root`
+/// reads a fixture's previews from such a world (ADR 0113).
+pub fn materialize_at(name: &str, root: &Path) -> Result<ScenarioWorld> {
+    if root.exists() {
+        bail!("{} already exists; pick a new directory", root.display());
+    }
+    build(name, root.to_path_buf(), true)
+}
+
+fn build(name: &str, root: PathBuf, keep: bool) -> Result<ScenarioWorld> {
     let Some(def) = scenario_def(name) else {
         let names = scenario_names().collect::<Vec<_>>().join(", ");
         bail!("unknown scenario `{name}`; expected one of {names}");
     };
-    let mut world = ScenarioWorld::new(name)?;
+    let mut world = ScenarioWorld::new(name, root, keep)?;
     (def.build)(&mut world)?;
     Ok(world)
 }
@@ -128,11 +142,12 @@ pub struct ScenarioWorld {
     /// agent-deck adapter (`multi-repo-worktrees/` subdir +
     /// `profiles/<name>/state.db` for titles, ADR 0066).
     agent_deck_root: Option<PathBuf>,
+    /// Leave the world on disk when it drops.
+    keep: bool,
 }
 
 impl ScenarioWorld {
-    fn new(name: &str) -> Result<Self> {
-        let root = unique_root(name);
+    fn new(name: &str, root: PathBuf, keep: bool) -> Result<Self> {
         fs::create_dir_all(&root).with_context(|| format!("create {}", root.display()))?;
         let harness = HarnessFixture::at(root.join("harness"));
         let hook_root = root.join("hooks");
@@ -146,7 +161,24 @@ impl ScenarioWorld {
             fd_paths_by_pid: BTreeMap::new(),
             gh_pull_requests: None,
             agent_deck_root: None,
+            keep,
         })
+    }
+
+    /// A mux backend that answers `capture-pane` with the panes this
+    /// world recorded, so the scenario TUI previews them as it would a
+    /// live tmux session.
+    pub fn pane_backend(&self) -> crate::discovery::tmux::FakeTmux {
+        let mut backend = crate::discovery::tmux::FakeTmux::with_sessions("");
+        for row in &self.tmux_rows {
+            if let Some(text) = recorded_pane(&self.root, &row.name) {
+                backend = backend.with_capture(
+                    row.name.clone(),
+                    crate::discovery::tmux::TmuxCaptureOutcome::captured(text),
+                );
+            }
+        }
+        backend
     }
 
     pub fn name(&self) -> &str {
@@ -313,6 +345,16 @@ impl ScenarioWorld {
         self.fd_paths_by_pid.entry(pid).or_default().extend(paths);
     }
 
+    /// Record what a mux session's pane shows, at
+    /// `panes/<native-id>.txt`. Scenario muxes are replayed rows, not
+    /// live tmux, so this stands in for `capture-pane` when snapshot
+    /// mode reads previews from a materialized world (ADR 0113).
+    fn write_pane_capture(&self, native_id: &str, text: &str) -> Result<()> {
+        let dir = self.mkdir(PANE_CAPTURES_DIR)?;
+        fs::write(dir.join(format!("{native_id}.txt")), text)
+            .with_context(|| format!("write pane capture for {native_id}"))
+    }
+
     fn init_repo(&self, relative: &str, remote: Option<&str>) -> Result<PathBuf> {
         let root = self.mkdir(relative)?;
         git(&root, &["init", "--initial-branch", "main"])?;
@@ -326,7 +368,7 @@ impl ScenarioWorld {
         }
         fs::write(root.join("README.md"), "scenario\n")?;
         git(&root, &["add", "README.md"])?;
-        git(&root, &["commit", "-m", "initial"])?;
+        commit_at(&root, "initial", SHOWCASE_NOW_EPOCH - 21 * 86_400)?;
         Ok(root)
     }
 
@@ -355,7 +397,7 @@ impl ScenarioWorld {
         )?;
         fs::write(seed.join("README.md"), "showcase bare\n")?;
         git(&seed, &["add", "README.md"])?;
-        git(&seed, &["commit", "-m", "initial"])?;
+        commit_at(&seed, "initial", SHOWCASE_NOW_EPOCH - 21 * 86_400)?;
         git(&seed, &["remote", "add", "bare", &path_to_string(&bare)])?;
         git(&seed, &["push", "bare", "main"])?;
         fs::remove_dir_all(&seed)?;
@@ -483,7 +525,9 @@ impl ScenarioWorld {
 
 impl Drop for ScenarioWorld {
     fn drop(&mut self) {
-        let _ = fs::remove_dir_all(&self.root);
+        if !self.keep {
+            let _ = fs::remove_dir_all(&self.root);
+        }
     }
 }
 
@@ -811,12 +855,26 @@ root = ".atelier/forks/beta"
     Ok(())
 }
 
+/// Directory under a scenario root holding recorded pane captures.
+pub const PANE_CAPTURES_DIR: &str = "panes";
+
+/// The pane capture a scenario world rooted at `root` recorded for the
+/// mux session `native_id`, if any.
+pub fn recorded_pane(root: &Path, native_id: &str) -> Option<String> {
+    fs::read_to_string(
+        root.join(PANE_CAPTURES_DIR)
+            .join(format!("{native_id}.txt")),
+    )
+    .ok()
+}
+
 /// Reference "now" the showcase's session/mux/PR timestamps are
 /// anchored against (ADR 0070). Picked close to the showcase's
 /// authoring date so sessions look recent when the checked-in
 /// fixture is opened. When the showcase starts feeling stale (e.g.
-/// every PR is "6 months ago"), bump this constant and re-run
-/// `just regen-showcase-fixture` so the fresh JSON lands in one
+/// every PR is "6 months ago"), bump this constant and the justfile's
+/// `showcase_now`, then re-run `just regen-showcase-fixture` and
+/// `just screenshots` so the fresh JSON and README images land in one
 /// commit.
 const SHOWCASE_NOW_EPOCH: i64 = 1_790_769_600; // 2026-09-30T12:00:00Z
 
@@ -846,11 +904,55 @@ fn add_normal_repo_to_showcase(world: &mut ScenarioWorld) -> Result<PathBuf> {
         "repos/project",
         Some("git@github.com:conspectus/project.git"),
     )?;
+    // A short history, a feature branch, and work in progress, so the
+    // repo's and checkout's git previews (ADR 0112) have something to
+    // show in the README screenshots (ADR 0113).
+    let day = 86_400;
+    let history: [(&str, &str, &str, i64); 4] = [
+        (
+            "Cargo.toml",
+            "[package]\nname = \"project\"\nversion = \"0.3.0\"\nedition = \"2024\"\n",
+            "Add the CLI skeleton",
+            14,
+        ),
+        (
+            "src/main.rs",
+            "fn main() {\n    let config = project::Config::load();\n    project::run(config);\n}\n",
+            "Parse config from TOML",
+            9,
+        ),
+        (
+            "src/config.rs",
+            "pub struct Config {\n    pub name: String,\n}\n",
+            "Fix the panic on an empty config file",
+            4,
+        ),
+        (
+            "docs/config.md",
+            "# Configuration\n\nSet `name` in `project.toml`.\n",
+            "Document the config format",
+            2,
+        ),
+    ];
+    for (path, contents, message, days_ago) in history {
+        let file = repo.join(path);
+        if let Some(parent) = file.parent() {
+            fs::create_dir_all(parent)?;
+        }
+        fs::write(&file, contents)?;
+        git(&repo, &["add", path])?;
+        commit_at(&repo, message, SHOWCASE_NOW_EPOCH - days_ago * day)?;
+    }
     git(&repo, &["checkout", "-b", "feature/extra"])?;
     fs::write(repo.join("notes.md"), "feature work\n")?;
     git(&repo, &["add", "notes.md"])?;
-    git(&repo, &["commit", "-m", "feature notes"])?;
-    git(&repo, &["checkout", "main"])?;
+    commit_at(&repo, "feature notes", SHOWCASE_NOW_EPOCH - day)?;
+    // The session working here has edits in flight.
+    fs::write(
+        repo.join("notes.md"),
+        "# Release notes\n\n## What changed\n\n## Upgrading\n\n## Known issues\n",
+    )?;
+    fs::write(repo.join("CHANGELOG.md"), "# Changelog\n")?;
     // The forge adapter scans each `DiscoveryContext` root for a git
     // repo with a remote, so add the project repo directly as a
     // scan-root sibling so PRs resolve while the scenario root still
@@ -962,8 +1064,24 @@ fn add_agent_sessions_to_showcase(
     world.harness.write_claude_code_session(
         &ClaudeCodeSessionRecord::new("showcase-claude", path_to_string(project))
             .with_summary("claude-code in project repo")
-            .with_assistant_message("Showcase: claude-code in project repo")
-            .with_timestamp("2026-06-14T15:00:00Z"),
+            .with_timestamp("2026-06-14T15:00:00Z")
+            // A short conversation so the session's transcript preview
+            // (ADR 0112) and the README screenshots (ADR 0113) show one.
+            .with_exchange(
+                "What's on feature/extra that isn't on main yet?",
+                "One commit, `feature notes`, which adds `notes.md`. Nothing else \
+                 differs from `main`, so it merges cleanly.",
+            )
+            .with_exchange(
+                "Expand the notes into a release summary and open a PR from \
+                 feature/extra.",
+                "I expanded `notes.md` into a release summary:\n\n\
+                 - what changed since the last release\n\
+                 - the upgrade steps\n\
+                 - known issues\n\n\
+                 Then I opened a draft PR from `feature/extra` into `main`. \
+                 Checks are running; I'll mark it ready once they pass.",
+            ),
     )?;
     // claude-code session whose cwd is the agent-deck composite
     // directory itself — same shape as agent-deck's
@@ -1035,6 +1153,23 @@ fn add_mux_layout_to_showcase(
             .with_attached(true, SHOWCASE_NOW_EPOCH - 5 * 60)
             .with_active_pane("claude", 1101, project, "claude --resume showcase-claude"),
     );
+    world.write_pane_capture(
+        "project",
+        "> What's on feature/extra that isn't on main yet?\n\n\
+         \u{25cf} One commit, `feature notes`, which adds notes.md. Nothing else\n  \
+         differs from main, so it merges cleanly.\n\n\
+         > Expand the notes into a release summary and open a PR from\n  \
+         feature/extra.\n\n\
+         \u{25cf} Read notes.md\n\
+         \u{25cf} Update(notes.md)\n  \
+         \u{2514} Added 6 lines\n\
+         \u{25cf} Bash(gh pr create --draft --base main)\n  \
+         \u{2514} https://github.com/conspectus/project/pull/12\n\n\
+         \u{25cf} I expanded notes.md into a release summary and opened a draft PR\n  \
+         from feature/extra into main. Checks are running; I'll mark it\n  \
+         ready once they pass.\n\n\
+         > \n",
+    )?;
     // Mux that two harness sessions could plausibly attach to —
     // ambiguous candidate set (15 min ago).
     world.add_tmux_row(
@@ -1139,6 +1274,27 @@ fn add_hook_supersession_to_showcase(world: &mut ScenarioWorld, project: &Path) 
     Ok(())
 }
 
+/// Commit what's staged with author and committer dates fixed at
+/// `epoch`, so a scenario's history (and its hashes) is the same every
+/// time it's built.
+fn commit_at(root: &Path, message: &str, epoch: i64) -> Result<()> {
+    let date = format!("{epoch} +0000");
+    let output = Command::new("git")
+        .args(["commit", "--quiet", "--no-gpg-sign", "-m", message])
+        .env("GIT_AUTHOR_DATE", &date)
+        .env("GIT_COMMITTER_DATE", &date)
+        .current_dir(root)
+        .output()
+        .with_context(|| format!("run git commit -m {message}"))?;
+    if !output.status.success() {
+        bail!(
+            "git commit -m {message} failed: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+    Ok(())
+}
+
 fn unique_root(name: &str) -> PathBuf {
     let nanos = SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -1168,6 +1324,45 @@ fn git(root: &Path, args: &[&str]) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::discovery::tmux::MuxBackend;
+    use crate::model::GraphNode;
+
+    #[test]
+    fn materialize_at_keeps_the_world_and_refuses_an_existing_directory() {
+        let parent = tempfile::tempdir().expect("temp dir");
+        let root = parent.path().join("world");
+        drop(materialize_at("exact-match", &root).expect("materialize"));
+        assert!(root.is_dir(), "the world outlives its handle");
+        assert!(materialize_at("exact-match", &root).is_err());
+    }
+
+    #[test]
+    fn the_showcase_records_its_project_pane_and_conversation() {
+        let world = materialize("showcase").expect("materialize showcase");
+        let pane = recorded_pane(world.root(), "project").expect("recorded pane");
+        assert!(pane.contains("Expand the notes"), "{pane}");
+        let backend = world.pane_backend();
+        assert!(matches!(
+            backend.capture_pane(None, "project"),
+            Ok(crate::discovery::tmux::TmuxCaptureOutcome::Captured(capture))
+                if capture.text == pane
+        ));
+
+        let snapshot = world.snapshot().expect("snapshot");
+        let session = snapshot
+            .nodes
+            .iter()
+            .find_map(|node| match node {
+                GraphNode::AgentSession(session) if session.id.session_key == "showcase-claude" => {
+                    Some(session.id.clone())
+                }
+                _ => None,
+            })
+            .expect("showcase-claude");
+        let transcript =
+            crate::tui::viewer_bridge::load_transcript(&session).expect("transcript reads");
+        assert_eq!(transcript.turns.len(), 4, "two exchanges");
+    }
 
     #[test]
     fn every_named_scenario_materializes_and_renders() {

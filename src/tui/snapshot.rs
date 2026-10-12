@@ -69,7 +69,17 @@ pub struct SnapshotConfig {
     /// fixture load) and resolved, serialize it to this JSON file
     /// (ADR 0068). Renders proceed normally afterward.
     pub export_fixture: Option<PathBuf>,
+    /// Directory holding the files a fixture's [`FIXTURE_PATH_ROOT`]
+    /// paths name, so previews read real transcripts, listings, and
+    /// git state (ADR 0113).
+    pub fixture_root: Option<PathBuf>,
+    /// Unix time to render ages against instead of the clock.
+    pub now: Option<i64>,
 }
+
+/// The prefix fixtures write in place of the temp directory a world
+/// was built in (`just regen-showcase-fixture`, `ReplayWorld`).
+pub const FIXTURE_PATH_ROOT: &str = "/fixture";
 
 /// Targets the `--snapshot-pane` flag can select. `All` returns the
 /// full buffer; the other variants slice using the same layout the
@@ -96,6 +106,9 @@ pub fn run(config: RunConfig, snap: SnapshotConfig) -> Result<()> {
         ));
     }
 
+    if let Some(now) = snap.now {
+        crate::tui::rows::pin_clock(now);
+    }
     let mut app = App::new(config.clone());
 
     // Resolve the input snapshot. Fixture path bypasses live
@@ -121,7 +134,11 @@ pub fn run(config: RunConfig, snap: SnapshotConfig) -> Result<()> {
     drive_keys(&mut app, &config, keys, snap.height.saturating_sub(2));
     // One frame, no event loop: read the selection's preview now
     // rather than showing it loading.
-    runtime::load_offline_preview_now(&mut app, &config);
+    let fixture_root = snap
+        .fixture_root
+        .as_deref()
+        .map(|root| (std::path::Path::new(FIXTURE_PATH_ROOT), root));
+    runtime::load_offline_preview_now(&mut app, &config, fixture_root);
 
     let backend = TestBackend::new(snap.width, snap.height);
     let mut terminal = Terminal::new(backend)?;

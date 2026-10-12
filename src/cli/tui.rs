@@ -132,6 +132,23 @@ pub(super) struct TuiArgs {
     #[cfg(feature = "snapshot")]
     #[arg(long = "snapshot-export-fixture", value_name = "PATH")]
     snapshot_export_fixture: Option<PathBuf>,
+    // README screenshots (ADR 0113).
+    /// Read the fixture's `/fixture/...` preview paths (transcripts,
+    /// listings, git) from this directory, a world written by `dev
+    /// scenario materialize`. The frame keeps showing the fixture's
+    /// paths.
+    #[cfg(feature = "snapshot")]
+    #[arg(
+        long = "snapshot-fixture-root",
+        value_name = "DIR",
+        requires = "snapshot_fixture"
+    )]
+    snapshot_fixture_root: Option<PathBuf>,
+    /// Render ages against this Unix time instead of the clock, so a
+    /// frame reads the same whenever it is rendered.
+    #[cfg(feature = "snapshot")]
+    #[arg(long = "snapshot-now", value_name = "EPOCH")]
+    snapshot_now: Option<i64>,
 
     /// Launch the interactive TUI against a fixture JSON instead
     /// of running live discovery (ADR 0069). Bypasses scan-root
@@ -198,6 +215,10 @@ impl Default for TuiArgs {
             snapshot_fixture: None,
             #[cfg(feature = "snapshot")]
             snapshot_export_fixture: None,
+            #[cfg(feature = "snapshot")]
+            snapshot_fixture_root: None,
+            #[cfg(feature = "snapshot")]
+            snapshot_now: None,
             #[cfg(feature = "snapshot")]
             fixture: None,
         }
@@ -414,6 +435,8 @@ impl TuiArgs {
                     pane: self.snapshot_pane.to_pane(),
                     fixture: self.snapshot_fixture,
                     export_fixture: self.snapshot_export_fixture,
+                    fixture_root: self.snapshot_fixture_root,
+                    now: self.snapshot_now,
                 },
             );
         }

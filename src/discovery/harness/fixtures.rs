@@ -186,6 +186,10 @@ pub struct ClaudeCodeSessionRecord {
     /// content to return. Fixtures that omit it produce sessions with no
     /// preview text.
     pub assistant_message: Option<String>,
+    /// Question-and-answer exchanges written before
+    /// [`Self::assistant_message`], each user turn chained to its reply
+    /// so the transcript viewer treats none as aborted.
+    pub conversation: Vec<(String, String)>,
 }
 
 impl ClaudeCodeSessionRecord {
@@ -209,6 +213,12 @@ impl ClaudeCodeSessionRecord {
 
     pub fn with_assistant_message(mut self, text: impl Into<String>) -> Self {
         self.assistant_message = Some(text.into());
+        self
+    }
+
+    /// Append one user question and the assistant's answer.
+    pub fn with_exchange(mut self, question: impl Into<String>, answer: impl Into<String>) -> Self {
+        self.conversation.push((question.into(), answer.into()));
         self
     }
 }
@@ -239,6 +249,31 @@ pub fn write_claude_code_session(
     }
 
     let mut body = format!("{}\n", serde_json::Value::Object(entry));
+
+    let text_content = |text: &str| json!([{ "type": "text", "text": text }]);
+    let mut parent: Option<String> = None;
+    for (n, (question, answer)) in record.conversation.iter().enumerate() {
+        let user_uuid = format!("{}-user-{n}", record.session_id);
+        let assistant_uuid = format!("{}-assistant-{n}", record.session_id);
+        let user = json!({
+            "type": "user",
+            "sessionId": record.session_id,
+            "uuid": user_uuid,
+            "parentUuid": parent,
+            "timestamp": record.timestamp_rfc3339,
+            "message": { "role": "user", "content": text_content(question) },
+        });
+        let assistant = json!({
+            "type": "assistant",
+            "sessionId": record.session_id,
+            "uuid": assistant_uuid,
+            "parentUuid": user_uuid,
+            "timestamp": record.timestamp_rfc3339,
+            "message": { "role": "assistant", "content": text_content(answer) },
+        });
+        body.push_str(&format!("{user}\n{assistant}\n"));
+        parent = Some(assistant_uuid);
+    }
 
     if let Some(text) = &record.assistant_message {
         let message = json!({
