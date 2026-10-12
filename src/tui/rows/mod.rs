@@ -822,6 +822,13 @@ pub(crate) fn build_tree_for_view(inputs: TreeInputs<'_>) -> RowTree {
         View::Prs => prs::build_prs_tree(prs::PrsBuildInputs {
             snapshot,
             home: home.as_deref(),
+            grouping: match grouping {
+                crate::tui::Grouping::Prs(g) => g,
+                _ => crate::tui::PrsGrouping::Checkout,
+            },
+            filter,
+            now,
+            cwd,
         }),
         View::Forks => forks::build_forks_tree(forks::ForksBuildInputs {
             snapshot,

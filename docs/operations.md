@@ -123,7 +123,7 @@ configuration keys.
 columns = ["default", "+preview"]   # same tokens as `--columns`
 
 [tui]
-default_view = "sessions"   # sessions | mux (union | prs | forks also accepted)
+default_view = "sessions"   # sessions | mux | prs (union | forks also accepted)
 scan_roots = ["~/work"]     # used when --scan-root is absent; `~` expands
 show_harness_chips = false  # per-harness count chips in the header
 narrow_layout_threshold = 100  # columns below which the panes stack
@@ -152,7 +152,8 @@ teardown_grace = "3s"
 
 - **Grouping values per view:** sessions `graph` (default), `workspace`,
   `repo`, `checkout`, `scan-root`, `none`; mux `session`, `host`,
-  `repo`; union `kind`, `repo`; prs `repo`, `state`; forks `provider`,
+  `repo`; union `kind`, `repo`; prs `checkout` (default), `repo`, `state`
+  (ADR 0114); forks `provider`,
   `parent`.
 - **Filters:** `filters` takes one inline table or an array of tables
   (`[[tui.views.<name>.filters]]`); entries OR together per dimension.
@@ -268,7 +269,7 @@ conspectus node show <id> [--scan-root PATH]...
 conspectus columns {sessions|mux|union|prs|forks}
                    [--pager | --no-pager]
                    [--color {auto|always|never}]
-conspectus tui [--view {sessions|mux}] [--grouping VALUE] [--sort {hierarchy|recency}]
+conspectus tui [--view {sessions|mux|prs}] [--grouping VALUE] [--sort {hierarchy|recency}]
                [--harness H]... [--max-age D] [--mux-state S]...
                [--scan-root PATH]... [--refresh-interval D] [--no-live-preview]
 conspectus declared {list|create|remove|confirm|ignore|override} ...

@@ -9,7 +9,7 @@
 //! refresh is open work (backlog `CSP-185`); until then
 //! `RunConfig::mux_preview_interval` is parsed but unused.
 
-mod forge;
+pub(crate) mod forge;
 mod git;
 mod path;
 mod process;

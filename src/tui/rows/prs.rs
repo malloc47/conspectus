@@ -1,19 +1,29 @@
-//! In-memory PRs-view row-tree builder (ADR 0082).
+//! In-memory PRs-view row-tree builder (ADR 0082), grouped by
+//! checkout, repo, or state (ADR 0114).
 
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::path::Path;
 
 use crate::filter::RowFilter;
 use crate::model::{
-    ForgePrId, ForgePrNode, GraphNode, GraphSnapshot, LinkEndpoint, LinkState, NodeId,
-    RelationKind, path_is_ancestor_of,
+    CheckoutId, ForgePrId, ForgePrNode, GraphNode, GraphSnapshot, LinkEndpoint, LinkState, NodeId,
+    RelationKind, RepoId, path_is_ancestor_of,
 };
 use crate::output::render::{node_short_id_from_display, strip_branch_prefix, unique_prefix_len};
-use crate::tui::rows::{PrRow, Row, RowId, RowKind, RowTree, ViewLabel, format_recency};
+use crate::tui::PrsGrouping;
+use crate::tui::rows::{
+    GroupRow, PrRow, Row, RowId, RowKind, RowTree, ViewLabel, format_recency, shorten_home,
+};
 
 pub struct PrsBuildInputs<'a> {
     pub snapshot: &'a GraphSnapshot,
     pub home: Option<&'a Path>,
+    pub grouping: PrsGrouping,
+    pub filter: RowFilter,
+    pub now: Option<i64>,
+    /// Launch directory; the checkout containing it is the launch
+    /// context, so its group opens expanded.
+    pub cwd: Option<&'a Path>,
 }
 
 #[derive(Clone, Debug)]
@@ -26,13 +36,57 @@ struct PrData<'a> {
 #[derive(Clone, Debug)]
 struct BranchLink {
     branch_node_id: String,
+    repo: RepoId,
     refname: String,
+}
+
+/// The group a PR sits under (ADR 0114). Ordered so groups sort by
+/// display order: real nodes by path, then the catch-all bucket.
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
+enum Bucket {
+    Checkout { root: String, id: CheckoutId },
+    NoCheckout,
+    Repo { path: String, id: RepoId },
+    NoRepo,
+    State(StateBucket),
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+enum StateBucket {
+    Open,
+    Draft,
+    Merged,
+    Closed,
+    Other,
+}
+
+impl StateBucket {
+    fn of(pr: &ForgePrNode) -> Self {
+        let state = pr.state.as_deref().unwrap_or_default().to_ascii_lowercase();
+        match state.as_str() {
+            "open" if pr.is_draft => Self::Draft,
+            "open" => Self::Open,
+            "merged" => Self::Merged,
+            "closed" => Self::Closed,
+            _ => Self::Other,
+        }
+    }
+
+    fn row(self) -> (&'static str, &'static str) {
+        match self {
+            Self::Open => ("prs-open", "Open"),
+            Self::Draft => ("prs-draft", "Draft"),
+            Self::Merged => ("prs-merged", "Merged"),
+            Self::Closed => ("prs-closed", "Closed"),
+            Self::Other => ("prs-other", "Other"),
+        }
+    }
 }
 
 pub fn build_prs_tree(inputs: PrsBuildInputs<'_>) -> RowTree {
     let snapshot = inputs.snapshot;
-    let filter = RowFilter::default();
-    let now: Option<i64> = None;
+    let filter = &inputs.filter;
+    let now = inputs.now;
 
     let prs = collect_prs(snapshot);
     let agents = collect_agents(snapshot);
@@ -40,7 +94,8 @@ pub fn build_prs_tree(inputs: PrsBuildInputs<'_>) -> RowTree {
         .agent_mux_candidate_counts()
         .clone();
     let branches = collect_preferred_branch_per_pr(snapshot);
-    let checkout_roots = collect_checkout_roots_per_branch(snapshot);
+    let checkouts = collect_checkouts_per_branch(snapshot);
+    let repo_paths = collect_repo_paths(snapshot);
 
     let mut node_ids: Vec<String> = prs.iter().map(|pr| pr.node_id.clone()).collect();
     node_ids.extend(agents.iter().map(|agent| agent.node_id.clone()));
@@ -55,30 +110,48 @@ pub fn build_prs_tree(inputs: PrsBuildInputs<'_>) -> RowTree {
         .map(|(node_id, full)| (node_id.as_str(), full[..id_len].to_string()))
         .collect();
 
-    let mut tree = RowTree {
-        view: ViewLabel::Prs,
-        ..RowTree::default()
-    };
-
+    // Each PR's rows (the PR, then the sessions working in its
+    // checkouts), filed under its bucket.
+    let mut buckets: BTreeMap<Bucket, Vec<Row>> = BTreeMap::new();
     for pr in &prs {
         let branch = branches.get(&pr.node_id);
-        let roots = branch
-            .and_then(|branch| checkout_roots.get(&branch.branch_node_id))
-            .cloned()
-            .unwrap_or_default();
+        let pr_checkouts: &[(String, CheckoutId)] = branch
+            .and_then(|branch| checkouts.get(&branch.branch_node_id))
+            .map_or(&[], Vec::as_slice);
+        let roots: Vec<String> = pr_checkouts.iter().map(|(root, _)| root.clone()).collect();
         let visible_agents: Vec<&super::AgentData<'_>> = agents
             .iter()
             .filter(|agent| agent_attached_to_roots(agent, &roots))
-            .filter(|agent| super::session_matches_filter(agent, &candidate_counts, now, &filter))
+            .filter(|agent| super::session_matches_filter(agent, &candidate_counts, now, filter))
             .collect();
         if filter.has_narrowing_predicates() && visible_agents.is_empty() {
             continue;
         }
 
+        let bucket = match inputs.grouping {
+            PrsGrouping::Checkout => {
+                pr_checkouts
+                    .first()
+                    .map_or(Bucket::NoCheckout, |(root, id)| Bucket::Checkout {
+                        root: root.clone(),
+                        id: id.clone(),
+                    })
+            }
+            PrsGrouping::Repo => branch.map_or(Bucket::NoRepo, |branch| Bucket::Repo {
+                path: repo_paths
+                    .get(&branch.repo)
+                    .cloned()
+                    .unwrap_or_else(|| branch.repo.common_dir.clone()),
+                id: branch.repo.clone(),
+            }),
+            PrsGrouping::State => Bucket::State(StateBucket::of(pr.node)),
+        };
+
+        let rows = buckets.entry(bucket).or_default();
         let node_id = NodeId::ForgePr(pr.id.clone());
-        tree.rows.push(Row {
+        rows.push(Row {
             id: RowId::Pr(node_id.clone()),
-            depth: 0,
+            depth: 1,
             expandable: !visible_agents.is_empty(),
             kind: RowKind::Pr(PrRow {
                 pr_number: pr.node.number,
@@ -95,11 +168,10 @@ pub fn build_prs_tree(inputs: PrsBuildInputs<'_>) -> RowTree {
                 primary_node: node_id,
             }),
         });
-
         for agent in visible_agents {
-            tree.rows.push(super::agent_row(
+            rows.push(super::agent_row(
                 agent,
-                1,
+                2,
                 &candidate_counts,
                 short_ids
                     .get(agent.node_id.as_str())
@@ -111,7 +183,83 @@ pub fn build_prs_tree(inputs: PrsBuildInputs<'_>) -> RowTree {
         }
     }
 
+    let launch_root = launch_checkout_root(buckets.keys(), inputs.cwd);
+    let mut tree = RowTree {
+        view: ViewLabel::Prs,
+        ..RowTree::default()
+    };
+    for (bucket, rows) in buckets {
+        tree.rows
+            .push(group_row(&bucket, launch_root.as_deref(), inputs.home));
+        tree.rows.extend(rows);
+    }
     tree
+}
+
+/// The root of the checkout group the launch directory sits in, the
+/// deepest when checkouts nest.
+fn launch_checkout_root<'b>(
+    buckets: impl Iterator<Item = &'b Bucket>,
+    cwd: Option<&Path>,
+) -> Option<String> {
+    let cwd = cwd?;
+    buckets
+        .filter_map(|bucket| match bucket {
+            Bucket::Checkout { root, .. } if path_is_ancestor_of(Path::new(root), cwd) => {
+                Some(root.clone())
+            }
+            _ => None,
+        })
+        .max_by_key(String::len)
+}
+
+fn group_row(bucket: &Bucket, launch_root: Option<&str>, home: Option<&Path>) -> Row {
+    let (id, display_path, primary_node, is_launch_context) = match bucket {
+        Bucket::Checkout { root, id } => {
+            let node = NodeId::Checkout(id.clone());
+            (
+                RowId::Group(node.clone()),
+                shorten_home(root, home),
+                Some(node),
+                launch_root == Some(root.as_str()),
+            )
+        }
+        Bucket::Repo { path, id } => {
+            let node = NodeId::Repo(id.clone());
+            (
+                RowId::Group(node.clone()),
+                shorten_home(path, home),
+                Some(node),
+                false,
+            )
+        }
+        Bucket::NoCheckout => (
+            RowId::Synthetic("prs-no-checkout"),
+            "No checkout".to_string(),
+            None,
+            false,
+        ),
+        Bucket::NoRepo => (
+            RowId::Synthetic("prs-no-repo"),
+            "No local repo".to_string(),
+            None,
+            false,
+        ),
+        Bucket::State(state) => {
+            let (id, label) = state.row();
+            (RowId::Synthetic(id), label.to_string(), None, false)
+        }
+    };
+    Row {
+        id,
+        depth: 0,
+        expandable: true,
+        kind: RowKind::Group(GroupRow {
+            display_path,
+            primary_node,
+            is_launch_context,
+        }),
+    }
 }
 
 fn agent_attached_to_roots(agent: &super::AgentData<'_>, roots: &[String]) -> bool {
@@ -210,13 +358,17 @@ fn collect_preferred_branch_per_pr(snapshot: &GraphSnapshot) -> HashMap<String, 
         out.entry(link.source.to_string())
             .or_insert_with(|| BranchLink {
                 branch_node_id,
+                repo: branch_id.repo.clone(),
                 refname: branch_id.refname.clone(),
             });
     }
     out
 }
 
-fn collect_checkout_roots_per_branch(snapshot: &GraphSnapshot) -> HashMap<String, Vec<String>> {
+/// Each branch's checkouts, `(root, id)` sorted by root.
+fn collect_checkouts_per_branch(
+    snapshot: &GraphSnapshot,
+) -> HashMap<String, Vec<(String, CheckoutId)>> {
     let checkout_roots: HashMap<NodeId, String> = snapshot
         .nodes
         .iter()
@@ -227,7 +379,7 @@ fn collect_checkout_roots_per_branch(snapshot: &GraphSnapshot) -> HashMap<String
             _ => None,
         })
         .collect();
-    let mut sorted: Vec<(String, String)> = Vec::new();
+    let mut sorted: Vec<(String, String, CheckoutId)> = Vec::new();
     for link in &snapshot.candidate_links {
         if !matches!(link.state, LinkState::Active) {
             continue;
@@ -235,7 +387,7 @@ fn collect_checkout_roots_per_branch(snapshot: &GraphSnapshot) -> HashMap<String
         if !matches!(link.relation, RelationKind::CheckedOutBranch) {
             continue;
         }
-        let NodeId::Checkout(_) = &link.source else {
+        let NodeId::Checkout(checkout_id) = &link.source else {
             continue;
         };
         let LinkEndpoint::Node {
@@ -248,12 +400,36 @@ fn collect_checkout_roots_per_branch(snapshot: &GraphSnapshot) -> HashMap<String
             continue;
         };
         let branch_node_id = NodeId::Branch(branch_id.clone()).to_string();
-        sorted.push((branch_node_id, root.clone()));
+        sorted.push((branch_node_id, root.clone(), checkout_id.clone()));
     }
     sorted.sort();
-    let mut out: HashMap<String, Vec<String>> = HashMap::new();
-    for (branch_node_id, root) in sorted {
-        out.entry(branch_node_id).or_default().push(root);
+    sorted.dedup();
+    let mut out: HashMap<String, Vec<(String, CheckoutId)>> = HashMap::new();
+    for (branch_node_id, root, id) in sorted {
+        out.entry(branch_node_id).or_default().push((root, id));
     }
     out
 }
+
+/// Each repo's display path: its working tree, so `~/src/project`
+/// rather than `~/src/project/.git`.
+fn collect_repo_paths(snapshot: &GraphSnapshot) -> HashMap<RepoId, String> {
+    snapshot
+        .nodes
+        .iter()
+        .filter_map(|node| match node {
+            GraphNode::Repo(repo) => Some((
+                repo.id.clone(),
+                repo.common_dir
+                    .strip_suffix("/.git")
+                    .unwrap_or(&repo.common_dir)
+                    .to_string(),
+            )),
+            _ => None,
+        })
+        .collect()
+}
+
+#[cfg(test)]
+#[path = "prs_tests.rs"]
+mod tests;

@@ -4712,3 +4712,151 @@ fn a_field_naming_another_node_previews_that_node() {
         FieldValue::Node(NodeId::Repo(RepoId::new("/r/.git")))
     );
 }
+
+/// The PRs view on a world with one PR of each state, `#1`–`#4`, all
+/// on `conspectus/project`. No PR has an update time, so frames don't
+/// depend on the clock.
+fn prs_app() -> App {
+    prs_app_in(View::Prs)
+}
+
+/// [`prs_app`], starting in `view`.
+fn prs_app_in(view: View) -> App {
+    let pr = |number: u64, state: &str, is_draft: bool| {
+        GraphNode::ForgePr(crate::model::ForgePrNode {
+            id: crate::model::ForgePrId::new(
+                "github",
+                "github.com",
+                "conspectus",
+                "project",
+                number,
+            ),
+            provider: "github".to_string(),
+            host: "github.com".to_string(),
+            owner: "conspectus".to_string(),
+            repo: "project".to_string(),
+            number,
+            state: Some(state.to_string()),
+            url: Some(format!(
+                "https://github.com/conspectus/project/pull/{number}"
+            )),
+            updated_epoch: None,
+            is_draft,
+            head_ref: Some(format!("feature/{number}")),
+        })
+    };
+    let mut snapshot = GraphSnapshot::empty();
+    snapshot.nodes.push(pr(1, "OPEN", false));
+    snapshot.nodes.push(pr(2, "CLOSED", false));
+    snapshot.nodes.push(pr(3, "MERGED", false));
+    snapshot.nodes.push(pr(4, "OPEN", true));
+    let snapshot = resolve_snapshot(snapshot);
+    let mut config = RunConfig::defaults();
+    config.default_view = view;
+    let mut app = App::new(config);
+    let tree = crate::tui::rows::build_tree_for_view(crate::tui::rows::TreeInputs::from_app(
+        &snapshot, &app,
+    ));
+    app.update(Msg::SetData {
+        snapshot: SnapshotHandle::from_snapshot(&snapshot),
+        tree,
+        loaded_at_epoch: 1_700_000_000,
+        initial_selection_hint: None,
+    });
+    app
+}
+
+fn pr_source(number: u64) -> PreviewSource {
+    PreviewSource::PullRequest(crate::tui::preview::PrQuery {
+        provider: "github".to_string(),
+        host: "github.com".to_string(),
+        owner: "conspectus".to_string(),
+        repo: "project".to_string(),
+        number,
+    })
+}
+
+/// Select PR `#number` and render the frame.
+fn pr_frame(app: &mut App, number: u64, content: Option<PreviewContent>) -> String {
+    let row = app
+        .tree()
+        .rows
+        .iter()
+        .find(|row| matches!(&row.kind, RowKind::Pr(pr) if pr.pr_number == number))
+        .map(|row| row.id.clone())
+        .expect("PR row");
+    app.set_selection(row);
+    assert_eq!(
+        crate::tui::preview::preview_source(app),
+        Some(pr_source(number))
+    );
+    if let Some(content) = content {
+        app.update(Msg::SetPreview {
+            source: pr_source(number),
+            content,
+        });
+    }
+    buffer_to_string(&render_to_buffer(app, Rect::new(0, 0, 130, 30)))
+}
+
+/// What `gh pr view` returns for a PR in `state`.
+fn fetched_pr(state: &str, draft: bool, checks: &str, review: &str) -> PreviewContent {
+    let json = format!(
+        r#"{{"title":"Release notes for 0.3","body":"Adds the release summary.","state":"{state}",
+            "isDraft":{draft},"reviewDecision":"{review}","statusCheckRollup":{checks},
+            "latestReviews":[],"headRefName":"feature/notes","baseRefName":"main"}}"#
+    );
+    PreviewContent::Lines(crate::tui::preview::forge::render_pr(&json, None).expect("renders"))
+}
+
+const PASSING_CHECKS: &str = r#"[{"name":"test","status":"COMPLETED","conclusion":"SUCCESS"}]"#;
+
+#[test]
+fn prs_view_frames_by_pr_state() {
+    let mut app = prs_app();
+    insta::assert_snapshot!("pr_open_before_fetch", pr_frame(&mut app, 1, None));
+    insta::assert_snapshot!(
+        "pr_open_fetched",
+        pr_frame(
+            &mut app,
+            1,
+            Some(fetched_pr("OPEN", false, PASSING_CHECKS, "REVIEW_REQUIRED"))
+        )
+    );
+    insta::assert_snapshot!(
+        "pr_closed",
+        pr_frame(&mut app, 2, Some(fetched_pr("CLOSED", false, "[]", "")))
+    );
+    insta::assert_snapshot!(
+        "pr_merged",
+        pr_frame(
+            &mut app,
+            3,
+            Some(fetched_pr("MERGED", false, PASSING_CHECKS, "APPROVED"))
+        )
+    );
+    insta::assert_snapshot!(
+        "pr_draft",
+        pr_frame(&mut app, 4, Some(fetched_pr("OPEN", true, "[]", "")))
+    );
+    insta::assert_snapshot!(
+        "pr_fetch_failed",
+        pr_frame(
+            &mut app,
+            1,
+            Some(PreviewContent::Unavailable(
+                "gh is not authenticated".to_string()
+            ))
+        )
+    );
+}
+
+#[test]
+fn a_first_visit_to_the_prs_view_opens_its_first_group() {
+    let mut app = prs_app_in(View::Sessions);
+    app.update(Msg::SwitchView(View::Prs));
+    let group = RowId::Synthetic("prs-no-checkout");
+    assert_eq!(app.selection(), Some(&group));
+    let visible: Vec<&RowId> = app.visible_rows().iter().map(|row| &row.id).collect();
+    assert_eq!(visible.len(), 5, "the group and its four PRs: {visible:?}");
+}

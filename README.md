@@ -268,7 +268,9 @@ conspectus serve                   # keep the graph warm in the background
   workspace, then repo, then checkout, with resumed and forked sessions
   nested under their parents. It can also group by workspace, repo,
   checkout, or scan root, or show a flat list. The Mux view shows one row
-  per terminal-multiplexer session.
+  per terminal-multiplexer session. The PRs view (`3`) lists pull requests
+  under the checkout that has their branch checked out, with the sessions
+  working there beneath each one; it can also group by repo or state.
 - **Relationship explorer.** The right-hand pane shows a node's own fields,
   its upstream and downstream relationships, how each link was established
   (its provenance), and which candidate the resolver picked. `Enter` drills

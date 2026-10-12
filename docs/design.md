@@ -843,6 +843,10 @@ grouping enum (`SessionsGrouping`, `MuxGrouping`, `UnionGrouping`,
 `PrsGrouping`, `ForksGrouping`) and the same `Grouping` dispatch type
 backs config, CLI flags, and TUI controls.
 
+The TUI's view switcher offers sessions, mux, and PRs (`1`–`3`); union and
+forks remain CLI table projections. The PRs view groups by checkout by
+default, so each PR sits with the work checked out for it (ADR 0114).
+
 The sessions view defaults to `grouping = "graph"` so the primary switcher
 shows the richer topology: it includes workspace containment when known and
 nests resolved `parent_session` lineage under parent sessions across harnesses.

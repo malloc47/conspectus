@@ -374,11 +374,15 @@ pub enum UnionGrouping {
     Repo,
 }
 
-/// Top-level grouping in the PRs view (per ADR 0031).
+/// Top-level grouping in the PRs view (ADR 0031, ADR 0114).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum PrsGrouping {
+    /// Under the checkout that has the PR's head branch checked out.
+    Checkout,
+    /// Under the local repo the PR's head branch belongs to.
     Repo,
+    /// By state: open, draft, merged, closed.
     State,
 }
 
@@ -430,7 +434,7 @@ impl Grouping {
             View::Sessions => Self::Sessions(SessionsGrouping::Graph),
             View::Mux => Self::Mux(MuxGrouping::Session),
             View::Union => Self::Union(UnionGrouping::Kind),
-            View::Prs => Self::Prs(PrsGrouping::Repo),
+            View::Prs => Self::Prs(PrsGrouping::Checkout),
             View::Forks => Self::Forks(ForksGrouping::Provider),
         }
     }
@@ -450,6 +454,7 @@ impl Grouping {
             Self::Mux(MuxGrouping::Session) => "session",
             Self::Mux(MuxGrouping::Host) => "host",
             Self::Union(UnionGrouping::Kind) => "kind",
+            Self::Prs(PrsGrouping::Checkout) => "checkout",
             Self::Prs(PrsGrouping::Repo) => "repo",
             Self::Prs(PrsGrouping::State) => "state",
             Self::Forks(ForksGrouping::Provider) => "provider",
@@ -492,7 +497,11 @@ impl Grouping {
                 Self::Union(UnionGrouping::Kind),
                 Self::Union(UnionGrouping::Repo),
             ],
-            View::Prs => &[Self::Prs(PrsGrouping::Repo), Self::Prs(PrsGrouping::State)],
+            View::Prs => &[
+                Self::Prs(PrsGrouping::Checkout),
+                Self::Prs(PrsGrouping::Repo),
+                Self::Prs(PrsGrouping::State),
+            ],
             View::Forks => &[
                 Self::Forks(ForksGrouping::Provider),
                 Self::Forks(ForksGrouping::Parent),
@@ -545,7 +554,7 @@ mod tests {
         );
         assert_eq!(
             Grouping::default_for(View::Prs),
-            Grouping::Prs(PrsGrouping::Repo)
+            Grouping::Prs(PrsGrouping::Checkout)
         );
         assert_eq!(
             Grouping::default_for(View::Forks),

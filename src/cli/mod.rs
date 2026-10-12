@@ -419,12 +419,11 @@ pub(super) enum ViewFlag {
     #[default]
     Sessions,
     Mux,
+    Prs,
     // Hidden from the TUI's view switcher; still accepted
     // so existing scripts and configs keep working.
     #[value(hide = true)]
     Union,
-    #[value(hide = true)]
-    Prs,
     #[value(hide = true)]
     Forks,
 }

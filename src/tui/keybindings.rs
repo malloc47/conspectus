@@ -132,10 +132,19 @@ pub const KEYBINDINGS: &[KeyBinding] = &[
         action: || Action::SwitchView(View::Mux),
         help_text: "Switch to Mux view",
     },
-    // Union / PRs / Forks views are hidden from the interactive UI
-    // for now; their `3`/`4`/`5` accelerators are removed
-    // alongside the trimmed `VIEW_OPTIONS`. The `View` variants and CLI
-    // `table` projections remain so this stays a UI-surface hide.
+    KeyBinding {
+        mode: KeyMode::Global,
+        key: KeyMatcher::Exact {
+            modifiers: KeyModifiers::NONE,
+            code: KeyCode::Char('3'),
+        },
+        action: || Action::SwitchView(View::Prs),
+        help_text: "Switch to PRs view",
+    },
+    // Union and Forks are hidden from the interactive UI for now, so
+    // they have no digit keys (`VIEW_OPTIONS` excludes them). The
+    // `View` variants and CLI `table` projections remain so this stays
+    // a UI-surface hide.
     KeyBinding {
         mode: KeyMode::Global,
         key: KeyMatcher::Exact {

@@ -518,21 +518,43 @@ impl App {
     /// Persistence is the caller's concern — the [`Msg::SwitchView`]
     /// reducer arm emits [`Effect::Persist`] after invoking this,
     /// per ADR 0085 contract 2 Phase E.
-    pub(crate) fn switch_to_view(&mut self, target: View) {
+    ///
+    /// Returns `true` on the first visit to `target`, whose state
+    /// starts from defaults.
+    pub(crate) fn switch_to_view(&mut self, target: View) -> bool {
         let from = self.active_view;
         if from == target {
-            return;
+            return false;
         }
         let saved = self.snapshot_active_state();
         self.view_states.insert(from, saved);
-        let loaded = self
-            .view_states
-            .remove(&target)
-            .unwrap_or_else(|| ViewStateSlot::defaults_for(target));
+        let restored = self.view_states.remove(&target);
+        let first_visit = restored.is_none();
+        let loaded = restored.unwrap_or_else(|| ViewStateSlot::defaults_for(target));
         self.restore_active_state(loaded);
         self.active_view = target;
         self.force_recency_for_flat_sessions();
         self.status_message = None;
+        first_visit
+    }
+
+    /// Open a view's tree the way a first load does: the launch
+    /// context's group expanded and selected, or else the first group
+    /// expanded.
+    fn seed_first_visit(&mut self) {
+        self.expanded = tree::initial_expanded_rows(&self.tree);
+        let launch = self.tree.rows.iter().find_map(|row| match &row.kind {
+            RowKind::Group(group) if group.is_launch_context => Some(row.id.clone()),
+            _ => None,
+        });
+        match launch {
+            Some(id) => self.set_selection(id),
+            None => {
+                if let Some(first) = self.visible_rows().first().map(|row| row.id.clone()) {
+                    self.set_selection(first);
+                }
+            }
+        }
     }
 
     /// Resolve whatever copyable value the explorer cursor points at.
@@ -1472,8 +1494,11 @@ impl App {
             }
             Msg::SwitchView(view) => {
                 let before = self.active_view;
-                self.switch_to_view(view);
+                let first_visit = self.switch_to_view(view);
                 self.rebuild_tree_in_place();
+                if first_visit {
+                    self.seed_first_visit();
+                }
                 if self.active_view != before {
                     effects.push(Effect::Persist);
                 }

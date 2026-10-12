@@ -319,7 +319,10 @@ fn keymap_sections() -> Vec<HelpSection> {
         HelpSection {
             title: "View switching",
             bindings: vec![
-                Binding::new("1 / 2", "Switch directly to the sessions / mux view"),
+                Binding::new(
+                    "1 / 2 / 3",
+                    "Switch directly to the sessions / mux / PRs view",
+                ),
                 Binding::new("] / [", "Cycle to next / previous view"),
             ],
         },

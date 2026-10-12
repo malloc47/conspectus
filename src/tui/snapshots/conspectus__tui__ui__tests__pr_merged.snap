@@ -1,0 +1,34 @@
+---
+source: src/tui/ui_tests.rs
+expression: "pr_frame(&mut app, 3,\nSome(fetched_pr(\"MERGED\", false, PASSING_CHECKS, \"APPROVED\")))"
+---
+updated 0s ago · 0 sessions · 0 mux                                                                                               
+┌ ▸ sessions · mux · prs ───────────────────────────────────────┐┌   ⇄ pr ───────────────────────────────────────────────────────┐
+│▼ No checkout                                                  ││  id            c87276dd104b07fa                               │
+│    ⇄ conspectus/project#4  OPEN  draft  (0)                   ││  pr            conspectus/project#3 (MERGED)                  │
+│    ⇄ conspectus/project#3  MERGED  (0)                        ││  draft         false                                          │
+│    ⇄ conspectus/project#2  CLOSED  (0)                        ││  head          feature/3                                      │
+│    ⇄ conspectus/project#1  OPEN  (0)                          ││  updated       —                                              │
+│                                                               ││  url           https://github.com/conspectus/project/pull/3   │
+│                                                               ││                                                               │
+│                                                               ││──────────────────────────────────────────────────── Preview ──│
+│                                                               ││Release notes for 0.3                                          │
+│                                                               ││merged · approved                                              │
+│                                                               ││feature/notes → main                                           │
+│                                                               ││                                                               │
+│                                                               ││checks  1 passed · 0 failed · 0 pending                        │
+│                                                               ││reviews  none                                                  │
+│                                                               ││                                                               │
+│                                                               ││Adds the release summary.                                      │
+│                                                               ││                                                               │
+│                                                               ││                                                               │
+│                                                               ││                                                               │
+│                                                               ││                                                               │
+│                                                               ││                                                               │
+│                                                               ││                                                               │
+│                                                               ││                                                               │
+│                                                               ││                                                               │
+│                                                               ││                                                               │
+│                                                               ││                                                               │
+└───────────────────────────────────────────────────────────────┘└───────────────────────────────────────────────────────────────┘
+[left] group:checkout · filter:all · sort:hierarchy · attach: selected row has no mux to attach to · j/k move · h/l fold · Enter d

@@ -10,8 +10,8 @@ use super::PreviewContent;
 use crate::discovery::forge::{GhOutcome, GhRunner, SystemGh};
 
 /// The fields `gh pr view --json` returns for a preview.
-const PR_FIELDS: &str =
-    "title,body,state,isDraft,reviewDecision,statusCheckRollup,latestReviews,url";
+const PR_FIELDS: &str = "title,body,state,isDraft,reviewDecision,statusCheckRollup,\
+                         latestReviews,url,headRefName,baseRefName,updatedAt";
 
 /// Which pull request to read.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -42,10 +42,12 @@ pub fn load_pr_preview_with(runner: &dyn GhRunner, query: &PrQuery) -> PreviewCo
     }
     let repo = format!("{}/{}/{}", query.host, query.owner, query.repo);
     match runner.view_pull_request(&repo, query.number, PR_FIELDS) {
-        Ok(GhOutcome::PullRequests(json)) => match render_pr(&json) {
-            Ok(lines) => PreviewContent::Lines(lines),
-            Err(err) => PreviewContent::Failed(format!("gh returned unreadable JSON: {err}")),
-        },
+        Ok(GhOutcome::PullRequests(json)) => {
+            match render_pr(&json, crate::tui::rows::tree_current_unix_epoch()) {
+                Ok(lines) => PreviewContent::Lines(lines),
+                Err(err) => PreviewContent::Failed(format!("gh returned unreadable JSON: {err}")),
+            }
+        }
         Ok(GhOutcome::Unavailable(reason)) => {
             PreviewContent::Unavailable(reason.as_str().to_string())
         }
@@ -66,9 +68,10 @@ fn str_field<'a>(value: &'a Value, key: &str) -> &'a str {
     value.get(key).and_then(Value::as_str).unwrap_or_default()
 }
 
-/// Compose a `gh pr view --json` object: title, a state line, checks,
-/// reviews, then the body.
-pub fn render_pr(json: &str) -> Result<Vec<Line<'static>>, serde_json::Error> {
+/// Compose a `gh pr view --json` object: title, a state line, the
+/// branches and update time, checks, reviews, then the body. `now`
+/// renders the update time as an age.
+pub fn render_pr(json: &str, now: Option<i64>) -> Result<Vec<Line<'static>>, serde_json::Error> {
     let pr: Value = serde_json::from_str(json)?;
     let mut lines = vec![Line::from(bold(str_field(&pr, "title").to_string()))];
 
@@ -86,6 +89,22 @@ pub fn render_pr(json: &str) -> Result<Vec<Line<'static>>, serde_json::Error> {
         state.push(decision.to_string());
     }
     lines.push(Line::from(dim(state.join(" · "))));
+
+    let mut branches = Vec::new();
+    match (str_field(&pr, "headRefName"), str_field(&pr, "baseRefName")) {
+        ("", _) => {}
+        (head, "") => branches.push(head.to_string()),
+        (head, base) => branches.push(format!("{head} → {base}")),
+    }
+    let updated = chrono::DateTime::parse_from_rfc3339(str_field(&pr, "updatedAt"))
+        .ok()
+        .and_then(|at| crate::tui::rows::format_recency(now, Some(at.timestamp())));
+    if let Some(age) = updated {
+        branches.push(format!("updated {age} ago"));
+    }
+    if !branches.is_empty() {
+        lines.push(Line::from(dim(branches.join(" · "))));
+    }
 
     let checks = pr
         .get("statusCheckRollup")
@@ -209,27 +228,25 @@ mod tests {
             {"__typename": "StatusContext", "context": "ci/legacy", "state": "SUCCESS"}
         ],
         "latestReviews": [{"author": {"login": "alice"}, "state": "CHANGES_REQUESTED"}],
-        "url": "https://github.com/o/r/pull/7"
+        "url": "https://github.com/o/r/pull/7",
+        "headRefName": "feature/preview",
+        "baseRefName": "main",
+        "updatedAt": "2023-11-14T22:13:20Z"
     }"#;
-
-    fn rows(content: PreviewContent) -> Vec<String> {
-        match content {
-            PreviewContent::Lines(lines) => lines.iter().map(ToString::to_string).collect(),
-            other => panic!("expected lines, got {other:?}"),
-        }
-    }
 
     #[test]
     fn a_pr_shows_its_title_state_checks_reviews_and_body() {
-        let lines = rows(load_pr_preview_with(
-            &FakeGh::with_pull_requests(PR_JSON),
-            &query(),
-        ));
+        let lines: Vec<String> = render_pr(PR_JSON, Some(1_700_003_600))
+            .expect("renders")
+            .iter()
+            .map(ToString::to_string)
+            .collect();
         assert_eq!(
             lines,
             [
                 "Preview pull requests",
                 "open · draft · changes requested",
+                "feature/preview → main · updated 1h ago",
                 "",
                 "checks  2 passed · 1 failed · 1 pending",
                 "  ✗ clippy",
