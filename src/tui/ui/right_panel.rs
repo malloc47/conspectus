@@ -734,6 +734,7 @@ pub(super) fn draw_explorer_preview(
     let theme = app.theme();
     let mut lines: Vec<Line<'static>> = Vec::new();
     let mut neighbor_source = None;
+    let mut neighbor_text = None;
     match preview {
         RowPreview::Link {
             neighbor_id,
@@ -751,8 +752,13 @@ pub(super) fn draw_explorer_preview(
             )));
             neighbor_source = crate::tui::preview::node_source(app, neighbor_id);
             if neighbor_source.is_none() {
-                for field in fields {
-                    lines.push(render_node_field_line(field, false, theme));
+                match sourceless_node_text(app, neighbor_id) {
+                    Some(text) => neighbor_text = Some(text),
+                    None => {
+                        for field in fields {
+                            lines.push(render_node_field_line(field, false, theme));
+                        }
+                    }
                 }
             }
             let edge_value = format!(
@@ -823,14 +829,18 @@ pub(super) fn draw_explorer_preview(
             ]));
         }
     }
-    let view = match neighbor_source {
-        Some(source) => {
-            lines.push(Line::raw(""));
-            let header_rows = wrapped_line_count(&lines, area.width);
-            let body_height = (area.height as usize).saturating_sub(header_rows).max(1);
-            source_view(app, &source, area.width, body_height).below(Text::from(lines))
+    let view = if let Some(source) = neighbor_source {
+        lines.push(Line::raw(""));
+        let header_rows = wrapped_line_count(&lines, area.width);
+        let body_height = (area.height as usize).saturating_sub(header_rows).max(1);
+        source_view(app, &source, area.width, body_height).below(Text::from(lines))
+    } else {
+        let mut text = Text::from(lines);
+        if let Some(neighbor_text) = neighbor_text {
+            text.lines.push(Line::raw(""));
+            text.extend(neighbor_text);
         }
-        None => PreviewView::text(lines),
+        PreviewView::text(text)
     };
     draw_preview_view(app, view, frame, area);
 }

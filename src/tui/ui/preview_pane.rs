@@ -172,7 +172,10 @@ fn selection_preview_body(app: &App, width: u16, height: usize) -> PreviewView {
         },
         PreviewSubject::Node(node) => match node_source(app, &node) {
             Some(source) => source_view(app, &source, width, height),
-            None => PreviewView::text("no preview for this node"),
+            None => PreviewView::text(
+                sourceless_node_text(app, &node)
+                    .unwrap_or_else(|| Text::raw("no preview for this node")),
+            ),
         },
         PreviewSubject::Field(value) => source_view(
             app,
@@ -182,6 +185,17 @@ fn selection_preview_body(app: &App, width: u16, height: usize) -> PreviewView {
         ),
         PreviewSubject::Unresolved => PreviewView::text(""),
     }
+}
+
+/// What a node with no source previews instead: a pin's diagnostics,
+/// which say why it has no session or pane to show (ADR 0112 §1).
+pub(super) fn sourceless_node_text(app: &App, node: &NodeId) -> Option<Text<'static>> {
+    let NodeId::Pin(pin) = node else {
+        return None;
+    };
+    let snapshot = app.snapshot_handle()?.snapshot();
+    let diagnostics = crate::tui::actions::pin_diagnostics_for_id(snapshot, &pin.id);
+    (!diagnostics.is_empty()).then(|| Text::raw(render_pin_diagnostics(&diagnostics)))
 }
 
 /// The Preview of a loaded source, or why it can't show one.

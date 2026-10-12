@@ -310,6 +310,8 @@ pub fn value_source(value: &FieldValue) -> PreviewSource {
 /// - a branch shows recent commits at its ref and, with an upstream,
 ///   how far it is ahead and behind;
 /// - a runtime process shows its process tree;
+/// - a pin shows its bound session's preview, or, with no session but
+///   a live mux, that mux's pane;
 /// - every other kind has no source yet, and the renderer shows its
 ///   fields.
 pub fn node_source(app: &App, node: &NodeId) -> Option<PreviewSource> {
@@ -329,6 +331,21 @@ pub fn node_source(app: &App, node: &NodeId) -> Option<PreviewSource> {
         }
         NodeId::MuxSession(mux) => {
             (!hosts_this_tui(app, mux)).then(|| PreviewSource::Pane(mux.clone()))
+        }
+        NodeId::Pin(pin) => {
+            // The pin sidecar is the source of truth for bindings; pin
+            // nodes are projected from it.
+            let snapshot = app.snapshot_handle()?.snapshot();
+            let candidate = snapshot.pins.iter().find(|p| p.id == pin.id)?;
+            match candidate.binding.as_ref()? {
+                crate::model::PinBinding::Bound { session, .. } => {
+                    node_source(app, &NodeId::AgentSession(session.clone()))
+                }
+                crate::model::PinBinding::StaleMux { mux } => {
+                    node_source(app, &NodeId::MuxSession(mux.clone()))
+                }
+                crate::model::PinBinding::Unbound => None,
+            }
         }
         NodeId::Workspace(_)
         | NodeId::Checkout(_)
@@ -385,7 +402,9 @@ fn selection_source(app: &App) -> Option<PreviewSource> {
             .map(|target| PreviewSource::Pane(target.mux))
     };
     match (&row.kind, selection) {
-        (_, RowId::Pin { .. }) => pane(),
+        (_, RowId::Pin { pin_id }) => {
+            node_source(app, &NodeId::Pin(crate::model::PinId::new(pin_id.clone())))
+        }
         (RowKind::AgentSession(session), _) => {
             let in_tmux = !matches!(session.mux_state, MuxIndicator::Unmuxed);
             if in_tmux && app.session_preview() == crate::tui::SessionPreview::Pane {
