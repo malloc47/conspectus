@@ -4,12 +4,12 @@ title: Transcript context extractor
 status: To Do
 assignee: []
 created_date: '2026-05-23 02:59'
+updated_date: '2026-10-12 13:12'
 labels:
   - h-ai-naming
 milestone: m-11
 dependencies:
   - CSP-245
-  - CSP-207
 ordinal: 348000
 ---
 
@@ -26,3 +26,9 @@ ordinal: 348000
 <!-- SECTION:DESCRIPTION:END -->
 
 Legacy ID: `H-AI-NAMING-002`
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+2026-10-12: `CSP-207` (recent-history adapter API) is archived by ADR 0112. Take transcript context from the native viewer's parser in `src/viewer/parser/` (Claude Code, Codex, opencode) instead.
+<!-- SECTION:NOTES:END -->

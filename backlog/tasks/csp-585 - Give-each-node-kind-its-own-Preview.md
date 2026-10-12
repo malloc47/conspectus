@@ -1,9 +1,11 @@
 ---
 id: CSP-585
 title: Give each node kind its own Preview
-status: To Do
-assignee: []
+status: In Progress
+assignee:
+  - '@claude'
 created_date: '2026-10-05 04:22'
+updated_date: '2026-10-12 04:38'
 labels:
   - h-preview
 milestone: m-11
