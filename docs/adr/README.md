@@ -150,6 +150,7 @@ Runtime architecture, controls, theming, detail pane, and visual language.
 | [0106](0106-preview-pane-wrap-modes.md) | Preview Pane Wrap Modes | Accepted |
 | [0107](0107-related-view-neighbor-granularity.md) | Related View At Neighbor Granularity | Accepted (amended) |
 | [0112](0112-node-specific-previews.md) | Node-Specific Previews | Accepted |
+| [0113](0113-readme-screenshots.md) | README Screenshots From The Showcase Fixture | Accepted |
 
 ## Transcript viewer
 
