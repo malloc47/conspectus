@@ -888,15 +888,30 @@ Each selected node detail has three conceptual regions:
   stubs sit under one collapsed `Other` header. A neighbor appears in
   exactly one zone; several producers agreeing on the same neighbor is
   one row, not a conflict.
-- **Preview** zone: the neighbor's core fields, an `edge` row
-  summarizing the representative link's provenance, confidence, state,
-  and resolver verdict (`resolves` / `alt of <relation>` /
-  `conflict`), and an `evidence` list of every link backing the row.
+- **Preview** zone (ADR 0112): a preview of whatever the explorer
+  cursor is on. On a Related row, an `edge` row (the representative
+  link's provenance, confidence, state, and resolver verdict:
+  `resolves` / `alt of <relation>` / `conflict`) and an `evidence` list
+  of every backing link (ADR 0107) head the neighbor's own preview. On
+  a field row, the value's preview by type: a path lists the directory,
+  a git ref shows recent commits, a process ID its process tree, a
+  fixed-set value its glossary entry. Otherwise, the focused node's
+  preview.
 
-For a muxed selection the Preview zone shows the pane's live capture
-instead (ADR 0025), bottom-anchored on its last non-blank output. A
-wrap mode fits it to the pane's width: `smart` (the default) wraps
-content but truncates rules, borders, and padding; `plain` wraps
+Each node kind defines its preview (ADR 0112): a session shows its
+transcript through the native viewer (ADR 0052), a mux session its live
+pane capture, a checkout `git status` above a listing, a repo recent
+commits and remotes, a branch recent commits and ahead/behind, a PR its
+body and checks, a process its process tree, and a pin its session's
+transcript or its diagnostics. Sessions in tmux show the transcript by
+default; the controls overlay switches them to the live pane, and
+`[tui] session_preview` sets the starting choice. Previews read only,
+load off the UI thread, and are cached in memory; `--no-live-preview`
+hides transcripts and pane captures.
+
+The pane capture (ADR 0025) is bottom-anchored on its last non-blank
+output. A wrap mode fits it to the pane's width: `smart` (the default)
+wraps content but truncates rules, borders, and padding; `plain` wraps
 everything; `none` keeps tmux's layout and clips. It's set by
 `[tui] preview_wrap` and the controls overlay (ADR 0106).
 

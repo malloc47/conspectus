@@ -148,7 +148,8 @@ Runtime architecture, controls, theming, detail pane, and visual language.
 | [0085](0085-tui-mvu-architecture.md) | TUI Elm/MVU Architecture | Accepted |
 | [0105](0105-tui-message-log.md) | TUI Message Log For Operation Outcomes | Accepted |
 | [0106](0106-preview-pane-wrap-modes.md) | Preview Pane Wrap Modes | Accepted |
-| [0107](0107-related-view-neighbor-granularity.md) | Related View At Neighbor Granularity | Accepted |
+| [0107](0107-related-view-neighbor-granularity.md) | Related View At Neighbor Granularity | Accepted (amended) |
+| [0112](0112-node-specific-previews.md) | Node-Specific Previews | Accepted |
 
 ## Transcript viewer
 

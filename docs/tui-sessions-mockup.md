@@ -211,6 +211,11 @@ row-tree builder to extend.
 
 #### Preview
 
+> Superseded by ADR 0112: each node kind and each field row now defines
+> its own preview, and a session shows its transcript through the native
+> viewer, with the live pane one choice away in the controls overlay.
+> The rules below record the original v1 design.
+
 ```
 ─ preview ──────────────────────
 Could you give me a bit more

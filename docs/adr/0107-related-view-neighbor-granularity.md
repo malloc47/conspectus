@@ -3,7 +3,9 @@
 ## Status
 
 Accepted. Narrows ADR 0074 §3 and §6, ADR 0075 §1, and the
-`competing_link_ids` semantics from ADR 0077.
+`competing_link_ids` semantics from ADR 0077. Amended by ADR 0112: a
+Related row's `edge` and `evidence` lines are a header above the
+neighbor's own preview.
 
 ## Context
 
