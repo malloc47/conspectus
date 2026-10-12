@@ -1,9 +1,10 @@
 ---
 id: CSP-167
 title: Add non-blocking graph refresh data adapter
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-05-19 03:51'
+updated_date: '2026-10-12 20:53'
 labels:
   - p8
 milestone: m-13
@@ -42,3 +43,15 @@ ordinal: 394000
 <!-- SECTION:DESCRIPTION:END -->
 
 Legacy ID: `P8-008`
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+2026-10-12: superseded. The v1 slice landed earlier, and the remaining work (background discovery, timer refresh, diagnostics) moved to `CSP-184`, which is done: discovery runs on a worker thread with a generation ledger and timer-driven refresh. Closed so `CSP-171.01` no longer waits on it.
+<!-- SECTION:NOTES:END -->
+
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+Superseded by `CSP-184`: the TUI discovers in the background on a worker thread, refreshes on `r` and a timer without blocking input, and keeps provider diagnostics. The synchronous v1 slice this task first landed is gone.
+<!-- SECTION:FINAL_SUMMARY:END -->
