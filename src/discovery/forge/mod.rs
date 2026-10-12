@@ -134,12 +134,17 @@ pub trait GhRunner: Send + Sync {
     /// context use it as the spawn cwd. `fields` is the comma-separated
     /// list passed to `--json`.
     fn list_pull_requests(&self, cwd: &Path, fields: &str) -> Result<GhOutcome>;
+
+    /// Run `gh pr view <number> --repo <repo> --json <fields>`, where
+    /// `repo` is `[HOST/]OWNER/REPO`. Success carries the JSON object
+    /// in [`GhOutcome::PullRequests`].
+    fn view_pull_request(&self, repo: &str, number: u64, fields: &str) -> Result<GhOutcome>;
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum GhOutcome {
     /// `gh` returned successfully; payload is the raw, lossy UTF-8
-    /// stdout. The body is expected to be a JSON array.
+    /// stdout: a JSON array from `pr list`, an object from `pr view`.
     PullRequests(String),
     /// `gh` is not usable on this host (binary missing or
     /// unauthenticated).
@@ -155,6 +160,8 @@ pub enum GhUnavailableReason {
     BinaryNotFound,
     NotAuthenticated,
     NotARepository,
+    /// `gh` couldn't reach the forge: no network, or the host is down.
+    Offline,
 }
 
 impl GhUnavailableReason {
@@ -163,6 +170,7 @@ impl GhUnavailableReason {
             Self::BinaryNotFound => "gh binary not found",
             Self::NotAuthenticated => "gh is not authenticated",
             Self::NotARepository => "cwd is not a GitHub repository",
+            Self::Offline => "gh can't reach the forge",
         }
     }
 }
@@ -198,10 +206,31 @@ impl SystemGh {
 
 impl GhRunner for SystemGh {
     fn list_pull_requests(&self, cwd: &Path, fields: &str) -> Result<GhOutcome> {
-        let output = Command::new(&self.binary)
-            .args(["pr", "list", "--json", fields])
-            .current_dir(cwd)
-            .output();
+        self.run(&["pr", "list", "--json", fields], Some(cwd))
+    }
+
+    fn view_pull_request(&self, repo: &str, number: u64, fields: &str) -> Result<GhOutcome> {
+        let number = number.to_string();
+        self.run(
+            &["pr", "view", &number, "--repo", repo, "--json", fields],
+            None,
+        )
+    }
+}
+
+impl SystemGh {
+    /// Run `gh` read-only, from `cwd` when given, and classify the
+    /// failures callers degrade on.
+    fn run(&self, args: &[&str], cwd: Option<&Path>) -> Result<GhOutcome> {
+        let mut command = Command::new(&self.binary);
+        command
+            .args(args)
+            .env("GH_PROMPT_DISABLED", "1")
+            .stdin(std::process::Stdio::null());
+        if let Some(cwd) = cwd {
+            command.current_dir(cwd);
+        }
+        let output = command.output();
 
         let output = match output {
             Ok(output) => output,
@@ -231,6 +260,9 @@ impl GhRunner for SystemGh {
         if looks_like_not_a_repo(&stderr) {
             return Ok(GhOutcome::Unavailable(GhUnavailableReason::NotARepository));
         }
+        if looks_like_offline(&stderr) {
+            return Ok(GhOutcome::Unavailable(GhUnavailableReason::Offline));
+        }
 
         Ok(GhOutcome::Failed {
             code: output.status.code(),
@@ -242,6 +274,20 @@ impl GhRunner for SystemGh {
 fn looks_like_unauthenticated(stderr: &str) -> bool {
     let lower = stderr.to_ascii_lowercase();
     lower.contains("not logged into") || lower.contains("authentication required")
+}
+
+fn looks_like_offline(stderr: &str) -> bool {
+    let lower = stderr.to_ascii_lowercase();
+    [
+        "error connecting to",
+        "could not resolve host",
+        "no such host",
+        "network is unreachable",
+        "connection refused",
+        "i/o timeout",
+    ]
+    .iter()
+    .any(|needle| lower.contains(needle))
 }
 
 fn looks_like_not_a_repo(stderr: &str) -> bool {
@@ -300,11 +346,19 @@ impl GhRunner for FakeGh {
         *self.last_cwd.lock().expect("lock") = Some(cwd.as_os_str().to_owned());
         Ok(self.outcome.clone())
     }
+
+    fn view_pull_request(&self, _repo: &str, _number: u64, _fields: &str) -> Result<GhOutcome> {
+        Ok(self.outcome.clone())
+    }
 }
 
 impl GhRunner for Box<dyn GhRunner> {
     fn list_pull_requests(&self, cwd: &Path, fields: &str) -> Result<GhOutcome> {
         (**self).list_pull_requests(cwd, fields)
+    }
+
+    fn view_pull_request(&self, repo: &str, number: u64, fields: &str) -> Result<GhOutcome> {
+        (**self).view_pull_request(repo, number, fields)
     }
 }
 

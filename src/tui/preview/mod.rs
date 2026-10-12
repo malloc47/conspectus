@@ -9,6 +9,7 @@
 //! refresh is open work (backlog `CSP-185`); until then
 //! `RunConfig::mux_preview_interval` is parsed but unused.
 
+mod forge;
 mod git;
 mod path;
 mod process;
@@ -20,6 +21,7 @@ use std::time::Instant;
 
 use ratatui::text::Line;
 
+pub use forge::PrQuery;
 pub use git::GitQuery;
 pub use value::{glossary_entry, split_command_line, value_lines};
 
@@ -44,6 +46,8 @@ pub enum PreviewSource {
     Git(GitQuery),
     /// The process tree rooted at a pid.
     Process(i64),
+    /// A pull request, read with `gh`.
+    PullRequest(PrQuery),
 }
 
 impl PreviewSource {
@@ -61,7 +65,9 @@ impl PreviewSource {
         match self {
             Self::Pane(_) => None,
             Self::Transcript(_) => Some(MAX_CACHED_TRANSCRIPTS),
-            Self::Path(_) | Self::Git(_) | Self::Process(_) => Some(MAX_CACHED_OTHER),
+            Self::Path(_) | Self::Git(_) | Self::Process(_) | Self::PullRequest(_) => {
+                Some(MAX_CACHED_OTHER)
+            }
         }
     }
 
@@ -321,10 +327,10 @@ pub fn value_source(app: &App, value: &FieldValue) -> Option<PreviewSource> {
 /// - a branch shows recent commits at its ref and, with an upstream,
 ///   how far it is ahead and behind;
 /// - a runtime process shows its process tree;
+/// - a pull request shows its title, state, checks, reviews, and body;
 /// - a pin shows its bound session's preview, or, with no session but
 ///   a live mux, that mux's pane;
-/// - every other kind has no source yet, and the renderer shows its
-///   fields.
+/// - a fork has none, and the renderer shows its fields.
 pub fn node_source(app: &App, node: &NodeId) -> Option<PreviewSource> {
     match node {
         NodeId::AgentSession(session) => {
@@ -362,7 +368,8 @@ pub fn node_source(app: &App, node: &NodeId) -> Option<PreviewSource> {
         | NodeId::Checkout(_)
         | NodeId::Repo(_)
         | NodeId::Branch(_)
-        | NodeId::RuntimeProcess(_) => match graph_node(app, node)? {
+        | NodeId::RuntimeProcess(_)
+        | NodeId::ForgePr(_) => match graph_node(app, node)? {
             GraphNode::Workspace(workspace) => {
                 Some(PreviewSource::Path(PathBuf::from(&workspace.root)))
             }
@@ -373,6 +380,13 @@ pub fn node_source(app: &App, node: &NodeId) -> Option<PreviewSource> {
                 dir: PathBuf::from(&repo.common_dir),
             })),
             GraphNode::RuntimeProcess(process) => process.pid.map(PreviewSource::Process),
+            GraphNode::ForgePr(pr) => Some(PreviewSource::PullRequest(PrQuery {
+                provider: pr.provider.clone(),
+                host: pr.host.clone(),
+                owner: pr.owner.clone(),
+                repo: pr.repo.clone(),
+                number: pr.number,
+            })),
             GraphNode::Branch(branch) => Some(PreviewSource::Git(GitQuery::Log {
                 dir: PathBuf::from(&branch.id.repo.common_dir),
                 rev: branch.refname.clone(),
@@ -383,7 +397,8 @@ pub fn node_source(app: &App, node: &NodeId) -> Option<PreviewSource> {
             })),
             _ => None,
         },
-        _ => None,
+        // A fork has no preview beyond its fields (ADR 0112 §1).
+        NodeId::Fork(_) => None,
     }
 }
 
@@ -466,6 +481,7 @@ pub fn load_offline_preview(source: &PreviewSource) -> Option<PreviewContent> {
         PreviewSource::Transcript(session) => Some(load_transcript_preview(session)),
         PreviewSource::Path(path) => Some(path::load_path_preview(path)),
         PreviewSource::Git(query) => Some(git::load_git_preview(query)),
+        PreviewSource::PullRequest(query) => Some(forge::load_pr_preview(query)),
         PreviewSource::Process(pid) => Some(process::load_process_tree(
             std::path::Path::new("/proc"),
             *pid,
