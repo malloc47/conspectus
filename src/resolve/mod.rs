@@ -23,8 +23,18 @@ pub fn resolve_snapshot(mut snapshot: GraphSnapshot) -> GraphSnapshot {
     demote_stale_source_mux_candidates(&mut snapshot);
     let output = resolve_links(&snapshot.candidate_links);
     snapshot.resolved_relationships = output.resolved_relationships;
+    // Discovery's diagnostics (config problems, unavailable providers)
+    // survive; the resolver's own are regenerated, so resolving twice
+    // doesn't duplicate them.
+    let discovered: Vec<Diagnostic> = snapshot
+        .diagnostics
+        .iter()
+        .filter(|diagnostic| diagnostic.is_from_discovery())
+        .cloned()
+        .collect();
     snapshot.diagnostics = output.diagnostics;
     snapshot.diagnostics.extend(pin_diagnostics);
+    snapshot.diagnostics.extend(discovered);
     snapshot.sync_pin_nodes();
     snapshot.canonicalize();
     snapshot

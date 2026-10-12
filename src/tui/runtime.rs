@@ -1736,7 +1736,6 @@ fn pin_mutation_refresh_config(app: &App) -> RunConfig {
 }
 
 fn refresh_with_config(app: &mut App, config: &RunConfig) {
-    populate_provider_status(app, config);
     match discover_and_resolve(config) {
         Ok(snapshot) => {
             // Build against `App`'s projection state (ADR 0085
@@ -1758,6 +1757,7 @@ fn refresh_with_config(app: &mut App, config: &RunConfig) {
         }
         Err(err) => report_refresh_failure(app, &err),
     }
+    populate_provider_status(app, config);
 }
 
 /// Mark the snapshot stale and log why (ADR 0105). The previous good
@@ -1784,7 +1784,30 @@ fn populate_provider_status(app: &mut App, _config: &RunConfig) {
     if env::var("CONSPECTUS_DISABLE_FORGE").is_ok_and(|v| !v.is_empty()) {
         status.forge_disabled = true;
     }
+    // Forge discovery reports why it read nothing (ADR 0115); the
+    // header's forge chip shows the reason.
+    if let Some(handle) = app.snapshot_handle() {
+        let reason = forge_unavailable_reason(handle.snapshot());
+        status.forge_available = Some(reason.is_none());
+        status.forge_reason = reason;
+    }
     app.update(Msg::SetProviderStatus(status));
+}
+
+/// Why forge discovery read nothing, from the snapshot's diagnostics:
+/// the first `github` provider-unavailable reason.
+fn forge_unavailable_reason(snapshot: &crate::model::GraphSnapshot) -> Option<String> {
+    snapshot
+        .diagnostics
+        .iter()
+        .find_map(|diagnostic| match diagnostic {
+            crate::model::Diagnostic::ProviderUnavailable { provider, reason }
+                if provider == crate::discovery::providers::GITHUB =>
+            {
+                Some(reason.clone())
+            }
+            _ => None,
+        })
 }
 
 /// Find the `RowId` of the group row marked as the launch-context
@@ -1811,7 +1834,6 @@ pub(super) fn refresh_from_snapshot(
     config: &RunConfig,
     snapshot: crate::model::GraphSnapshot,
 ) -> Result<()> {
-    populate_provider_status(app, config);
     let resolved = resolve_snapshot(snapshot);
     let tree = crate::tui::rows::build_tree_for_view(crate::tui::rows::TreeInputs::from_app(
         &resolved, app,
@@ -1824,6 +1846,7 @@ pub(super) fn refresh_from_snapshot(
         loaded_at_epoch: crate::discovery::current_epoch(),
         initial_selection_hint,
     });
+    populate_provider_status(app, config);
     Ok(())
 }
 

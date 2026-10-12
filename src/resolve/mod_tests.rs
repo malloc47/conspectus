@@ -2070,3 +2070,17 @@ fn codex_log_mux_link_is_not_duplicated_by_a_derived_process_link() {
         .expect("session mux relationship");
     assert_eq!(relation.selected_link_id.as_deref(), Some("codex-log"));
 }
+
+#[test]
+fn discovery_diagnostics_survive_resolution_without_duplicating() {
+    let unavailable = Diagnostic::ProviderUnavailable {
+        provider: "github".to_string(),
+        reason: "gh is not authenticated".to_string(),
+    };
+    let mut snapshot = GraphSnapshot::empty();
+    snapshot.diagnostics.push(unavailable.clone());
+    let once = resolve_snapshot(snapshot);
+    assert_eq!(once.diagnostics, std::slice::from_ref(&unavailable));
+    let twice = resolve_snapshot(once);
+    assert_eq!(twice.diagnostics, [unavailable]);
+}

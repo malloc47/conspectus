@@ -301,6 +301,9 @@ pub(super) fn push_provider_chips(app: &App, theme: &Theme, spans: &mut Vec<Span
         );
     } else if let Some(false) = status.forge_available {
         let reason = status.forge_reason.as_deref().unwrap_or("error");
+        // Reasons name `gh` themselves ("gh is not authenticated");
+        // the chip's prefix already does.
+        let reason = reason.strip_prefix("gh ").unwrap_or(reason);
         push_chip(&format!("gh:{reason}"), Style::default().fg(theme.warning));
     }
 }

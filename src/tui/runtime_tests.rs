@@ -1764,3 +1764,48 @@ mod preview_loading {
         );
     }
 }
+
+/// ADR 0115: forge discovery's failures reach the header's forge chip.
+mod forge_status {
+    use super::*;
+    use crate::tui::app::SnapshotHandle;
+
+    #[test]
+    fn a_forge_failure_diagnostic_sets_the_forge_chip_reason() {
+        let mut snapshot = crate::model::GraphSnapshot::empty();
+        snapshot
+            .diagnostics
+            .push(crate::model::Diagnostic::ProviderUnavailable {
+                provider: "github".to_string(),
+                reason: "gh is not authenticated".to_string(),
+            });
+        let mut app = App::new(RunConfig::defaults());
+        app.update(Msg::SetData {
+            snapshot: SnapshotHandle::from_snapshot(&snapshot),
+            tree: crate::tui::rows::RowTree::default(),
+            loaded_at_epoch: 1_700_000_000,
+            initial_selection_hint: None,
+        });
+        let config = app.config().clone();
+        populate_provider_status(&mut app, &config);
+        assert_eq!(app.provider_status().forge_available, Some(false));
+        assert_eq!(
+            app.provider_status().forge_reason.as_deref(),
+            Some("gh is not authenticated")
+        );
+    }
+
+    #[test]
+    fn a_clean_forge_run_leaves_the_forge_chip_off() {
+        let mut app = App::new(RunConfig::defaults());
+        app.update(Msg::SetData {
+            snapshot: SnapshotHandle::from_snapshot(&crate::model::GraphSnapshot::empty()),
+            tree: crate::tui::rows::RowTree::default(),
+            loaded_at_epoch: 1_700_000_000,
+            initial_selection_hint: None,
+        });
+        let config = app.config().clone();
+        populate_provider_status(&mut app, &config);
+        assert_eq!(app.provider_status().forge_available, Some(true));
+    }
+}
