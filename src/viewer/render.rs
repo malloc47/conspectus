@@ -541,6 +541,11 @@ fn word_wrap_with_budgets(input: &str, first_budget: u16, rest: u16) -> Vec<Stri
             if !current.is_empty() {
                 out.push(std::mem::take(&mut current));
                 current_width = 0;
+            } else if out.is_empty() && first < rest {
+                // Nothing fits in the cells left on the caller's line.
+                // An empty first piece tells the caller to start the
+                // word on a fresh line instead of overflowing this one.
+                out.push(String::new());
             }
             // Whether or not we flushed, we're past the first piece
             // now — switch to the full `rest` budget before deciding

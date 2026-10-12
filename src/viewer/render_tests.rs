@@ -148,6 +148,29 @@ fn hard_break_handles_oversized_tokens() {
 }
 
 #[test]
+fn styled_span_that_misses_the_remaining_cells_starts_a_new_line() {
+    // Regression: a span whose first word didn't fit the cells left on
+    // the line was still appended there, overflowing the content width.
+    // Inline code near a line's end did this.
+    let line = Line::from(vec![
+        Span::raw("the structural ones ("),
+        Span::styled("SnapshotIndex", Style::new().add_modifier(Modifier::BOLD)),
+        Span::raw(", keybinding table"),
+    ]);
+    let mut out = Vec::new();
+    wrap_styled_line(line, 24, &mut out);
+    let texts = flat_text(&out);
+    assert!(
+        out.iter().all(|line| line.width() <= 24),
+        "a line overflows: {texts:?}"
+    );
+    assert!(
+        texts.iter().any(|l| l.starts_with("SnapshotIndex")),
+        "{texts:?}"
+    );
+}
+
+#[test]
 fn wide_word_with_tiny_first_budget_does_not_hard_break_per_char() {
     // Regression: a styled inline span ("ccview") arriving at
     // wrap_styled_line with only 1 cell remaining on the
