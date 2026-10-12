@@ -115,7 +115,7 @@ pub enum MuxOp {
     /// preview store. Reducer-triggered
     /// after selection changes to a new mux target; the executor
     /// runs `capture-pane`, wraps the payload, and dispatches
-    /// `Msg::SetMuxPreview` back into the reducer.
+    /// `Msg::SetPreview` back into the reducer.
     CapturePreview {
         mux: MuxSessionId,
         native_id: String,

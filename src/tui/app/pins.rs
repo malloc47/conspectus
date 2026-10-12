@@ -62,6 +62,7 @@ impl App {
             sort: self.sort,
             mux_recency: self.mux_recency,
             preview_wrap: self.preview_wrap,
+            session_preview: self.session_preview,
         }
     }
 

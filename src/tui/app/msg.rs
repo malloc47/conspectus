@@ -136,8 +136,9 @@ pub enum Msg {
     /// Move keyboard focus to the next panel.
     CycleFocus,
     /// Right panel: scroll preview by `delta` rows. Positive
-    /// scrolls down (deeper into the buffer), negative scrolls
-    /// up. The reducer clamps the offset at zero.
+    /// scrolls down (toward the end of the content), negative
+    /// scrolls up. The reducer clamps the offset at zero; a
+    /// transcript counts its offset up from its newest line.
     ScrollPreviewBy(i32),
     /// Set or clear the transient status-bar message. `None`
     /// clears any prior message.
@@ -146,13 +147,16 @@ pub enum Msg {
     /// the status message, with a pointer to the Messages overlay
     /// for warnings and errors.
     Report(Box<crate::tui::messages::LogEntry>),
-    /// Store a fresh mux preview capture in the per-mux cache.
-    /// The runtime dispatches this after running
-    /// `tmux capture-pane` against the selection's mux target.
-    SetMuxPreview {
-        mux: MuxSessionId,
+    /// Store a loaded preview in the cache (ADR 0112 §5). The
+    /// runtime dispatches this when a pane capture or a transcript
+    /// read for the selection finishes.
+    SetPreview {
+        source: PreviewSource,
         content: PreviewContent,
     },
+    /// The runtime started loading a preview, so the next selection
+    /// pass doesn't start another.
+    PreviewLoadStarted(PreviewSource),
     /// Update the provider availability status surfaced as chips
     /// in the status bar. The runtime populates this from
     /// discovery diagnostics and env-var toggles.
@@ -176,8 +180,8 @@ pub enum Msg {
     InFlightFinish(InFlightKind),
     /// The operator returned from a tmux attach to `mux` (ADR 0108).
     /// Marks the mux and its linked sessions as awaiting a refresh,
-    /// drops the mux's cached preview, and asks the runtime for a
-    /// background refresh. Repeats before that refresh lands add to
+    /// marks their cached previews for reload, and asks the runtime
+    /// for a background refresh. Repeats before that refresh lands add to
     /// the same pending set.
     HandoffReturned(MuxSessionId),
     /// A refresh spawned after the last hand-off landed (or failed);
@@ -331,4 +335,7 @@ pub enum Msg {
     /// Change how the preview pane fits a captured mux pane
     /// (ADR 0106). Render-only: the tree is untouched.
     SetPreviewWrap(crate::tui::PreviewWrap),
+    /// Choose what the Preview shows for agent sessions in tmux
+    /// (ADR 0112). Render-only: the tree is untouched.
+    SetSessionPreview(crate::tui::SessionPreview),
 }

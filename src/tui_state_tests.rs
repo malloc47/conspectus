@@ -89,6 +89,7 @@ fn full_state_round_trips_sort_filter_and_view_slots() {
         sort: Some(Sort::Recency),
         mux_recency: None,
         preview_wrap: None,
+        session_preview: None,
         view_states: BTreeMap::new(),
     };
     state.view_states.insert(
@@ -138,6 +139,7 @@ fn mux_recency_basis_round_trips() {
         sort: Some(Sort::Recency),
         mux_recency: Some(crate::tui::MuxRecency::LastAttached),
         preview_wrap: None,
+        session_preview: None,
         view_states: BTreeMap::new(),
     };
 
@@ -156,6 +158,7 @@ fn preview_wrap_round_trips_and_ignores_unknown_tokens() {
         sort: None,
         mux_recency: None,
         preview_wrap: Some(crate::tui::PreviewWrap::None),
+        session_preview: None,
         view_states: BTreeMap::new(),
     };
     write_tui_state(&cache, &state).expect("write");
@@ -238,4 +241,22 @@ fn mtime(cache: &TuiStateCache) -> std::time::SystemTime {
         .expect("metadata")
         .modified()
         .expect("mtime")
+}
+
+#[test]
+fn session_preview_round_trips_and_ignores_unknown_tokens() {
+    let dir = TempDir::new().expect("tempdir");
+    let cache = cache_in(&dir);
+    let state = PersistedState {
+        session_preview: Some(crate::tui::SessionPreview::Pane),
+        ..PersistedState::default()
+    };
+    write_tui_state(&cache, &state).expect("write");
+    let read = read_tui_state(&cache).expect("read");
+    assert_eq!(read.session_preview, Some(crate::tui::SessionPreview::Pane));
+
+    let path = cache.path().expect("path");
+    fs::write(&path, r#"{"schema_version": 1, "session_preview": "both"}"#).expect("write");
+    let read = read_tui_state(&cache).expect("read");
+    assert_eq!(read.session_preview, None);
 }

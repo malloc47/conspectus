@@ -18,6 +18,7 @@ fn ctx_with(view: View, grouping: Grouping, filter: &RowFilter, sort: Sort) -> C
         sort,
         mux_recency: crate::tui::MuxRecency::default(),
         preview_wrap: crate::tui::PreviewWrap::default(),
+        session_preview: crate::tui::SessionPreview::default(),
     }
 }
 
@@ -449,10 +450,6 @@ fn preview_wrap_section_lists_every_mode_and_applies_the_pick() {
             .filter(|row| matches!(row, ControlsCursor::PreviewWrap(_)))
             .count();
         assert_eq!(wrap_rows, crate::tui::PreviewWrap::ALL.len(), "{view:?}");
-        assert!(
-            matches!(rows.last(), Some(ControlsCursor::PreviewWrap(_))),
-            "the section closes the overlay: {view:?}"
-        );
 
         let mut state = ControlsOverlayState {
             cursor: ControlsCursor::PreviewWrap(2),
@@ -462,6 +459,44 @@ fn preview_wrap_section_lists_every_mode_and_applies_the_pick() {
             state.handle_key(&ctx, key(KeyCode::Enter)),
             ControlsOutcome::ApplyAndStay(crate::tui::Msg::SetPreviewWrap(
                 crate::tui::PreviewWrap::ALL[2]
+            ))
+        );
+    }
+}
+
+#[test]
+fn session_preview_section_closes_the_overlay_and_applies_the_pick() {
+    let filter = RowFilter::default();
+    for view in VIEW_OPTIONS {
+        let ctx = ctx_with(
+            *view,
+            Grouping::default_for(*view),
+            &filter,
+            Sort::Hierarchy,
+        );
+        let rows = flatten_rows(&ctx);
+        let choice_rows = rows
+            .iter()
+            .filter(|row| matches!(row, ControlsCursor::SessionPreview(_)))
+            .count();
+        assert_eq!(
+            choice_rows,
+            crate::tui::SessionPreview::ALL.len(),
+            "{view:?}"
+        );
+        assert!(
+            matches!(rows.last(), Some(ControlsCursor::SessionPreview(_))),
+            "the section closes the overlay: {view:?}"
+        );
+
+        let mut state = ControlsOverlayState {
+            cursor: ControlsCursor::SessionPreview(1),
+            sub_editor: None,
+        };
+        assert_eq!(
+            state.handle_key(&ctx, key(KeyCode::Enter)),
+            ControlsOutcome::ApplyAndStay(crate::tui::Msg::SetSessionPreview(
+                crate::tui::SessionPreview::Pane
             ))
         );
     }

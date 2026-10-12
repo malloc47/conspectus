@@ -1175,6 +1175,37 @@ fn tui_preview_wrap_unknown_value_diagnoses_and_keeps_the_default() {
     );
 }
 
+#[test]
+fn tui_session_preview_defaults_to_transcript_and_loads_from_config() {
+    assert_eq!(
+        load_tui_config("[tui]\n").config.tui.session_preview,
+        crate::tui::SessionPreview::Transcript
+    );
+    let outcome = load_tui_config("[tui]\nsession_preview = \"pane\"\n");
+    assert!(outcome.diagnostics.is_empty(), "{:?}", outcome.diagnostics);
+    assert_eq!(
+        outcome.config.tui.session_preview,
+        crate::tui::SessionPreview::Pane
+    );
+}
+
+#[test]
+fn tui_session_preview_unknown_value_diagnoses_and_keeps_the_default() {
+    let outcome = load_tui_config("[tui]\nsession_preview = \"both\"\n");
+    assert_eq!(
+        outcome.config.tui.session_preview,
+        crate::tui::SessionPreview::Transcript
+    );
+    assert!(
+        outcome
+            .diagnostics
+            .iter()
+            .any(|d| d.message.contains("session_preview")),
+        "{:?}",
+        outcome.diagnostics
+    );
+}
+
 fn load_theme_badge_width(raw: &str) -> LoadOutcome {
     let temp = TempDir::new().expect("temp dir");
     let project = temp.path().join("project");

@@ -25,10 +25,13 @@ use crate::pins::{PinEntry, PinLaunch, PinMux, PinStoreKind, PinWriteOutcome, TM
 use crate::resolve::resolve_snapshot;
 #[cfg(test)]
 use crate::tui::View;
-use crate::tui::actions::{AttachTarget, PinLaunchTarget, resolve_attach_target};
+use crate::tui::actions::{AttachTarget, PinLaunchTarget};
 use crate::tui::app::{App, Msg, SnapshotHandle};
 use crate::tui::effect::Effect;
-use crate::tui::preview::capture_via;
+use crate::tui::preview::{
+    PreviewContent, PreviewSource, capture_via, load_transcript_preview, pane_native_id,
+    preview_source,
+};
 use crate::tui::resume::{ResumeTarget, launch_resume, resume_disabled_reason};
 use crate::tui::rows::RowId;
 use crate::tui::rows::RowTree;
@@ -99,10 +102,16 @@ trait LoopMode {
         action: Option<Action>,
     ) -> Result<()>;
 
-    /// Reference to the mode's mux runner. Used by
-    /// [`refresh_mux_preview_if_needed`] at the end of each
-    /// iteration.
+    /// Reference to the mode's mux runner. Used to capture pane
+    /// previews.
     fn tmux(&self) -> &dyn MuxBackend;
+
+    /// Load a preview the selection needs (ADR 0112 §5). The default
+    /// loads on the calling thread; live mode moves transcript reads
+    /// to a worker.
+    fn load_preview(&mut self, app: &mut App, source: PreviewSource) {
+        load_preview_now(app, self.tmux(), source);
+    }
 }
 
 /// Shared event loop driver. Consumes any
@@ -118,16 +127,21 @@ fn run_loop(
     let poll_timeout = Duration::from_millis(100);
     mode.init(terminal, &mut app, &config)?;
 
+    // The preview source the last pass resolved, and whether the last
+    // key asked for a refresh.
+    let mut shown: Option<PreviewSource> = None;
+    let mut force_preview = false;
     while !app.should_quit() {
-        draw_frame(&mut app, terminal)?;
         mode.drain(&mut app, &config)?;
+        shown = refresh_preview_if_needed(&mut app, &config, &mut mode, shown, force_preview);
+        draw_frame(&mut app, terminal)?;
+        force_preview = false;
         if event::poll(poll_timeout)? {
             let event = event::read()?;
             let viewport = terminal.size()?.height.saturating_sub(2);
-            let prev_mux_target = current_mux_target(&app);
             let action = action_for_event(&app, event, viewport);
+            force_preview = matches!(action, Some(Action::Refresh));
             mode.dispatch(terminal, &mut app, &config, action)?;
-            refresh_mux_preview_if_needed(&mut app, &config, mode.tmux(), prev_mux_target);
         }
     }
 
@@ -148,6 +162,8 @@ struct LiveMode {
     tmux: Box<dyn MuxBackend>,
     result_tx: mpsc::Sender<DiscoveryResult>,
     result_rx: mpsc::Receiver<DiscoveryResult>,
+    preview_tx: mpsc::Sender<(PreviewSource, PreviewContent)>,
+    preview_rx: mpsc::Receiver<(PreviewSource, PreviewContent)>,
     workers: WorkerLedger,
     last_refresh: Instant,
     refresh_interval: Duration,
@@ -239,16 +255,15 @@ impl LoopMode for LiveMode {
         populate_provider_status(app, config);
         let generation = self.workers.start();
         self.spawn_discovery(app, DaemonNudge::None, generation);
-        // `refresh_mux_preview_if_needed` is a no-op until a
-        // snapshot lands (its `resolve_attach_target` guard
-        // returns `NoSelection` when `snapshot_handle` is None), so we
-        // skip the call here — the first post-`drain` iteration
-        // in the run loop will invoke it once the worker
-        // delivers.
+        // No preview loads yet: nothing is selected until the worker
+        // delivers, and the run loop resolves the preview each pass.
         Ok(())
     }
 
     fn drain(&mut self, app: &mut App, config: &RunConfig) -> Result<()> {
+        while let Ok((source, content)) = self.preview_rx.try_recv() {
+            app.update(Msg::SetPreview { source, content });
+        }
         // Drain completed background discovery results without
         // blocking. A result older than the one on screen is dropped.
         while let Ok(DiscoveryResult {
@@ -433,6 +448,27 @@ impl LoopMode for LiveMode {
     fn tmux(&self) -> &dyn MuxBackend {
         self.tmux.as_ref()
     }
+
+    /// Transcripts can be large, so they parse on a worker thread
+    /// and land through [`LoopMode::drain`]. Pane captures stay
+    /// synchronous.
+    fn load_preview(&mut self, app: &mut App, source: PreviewSource) {
+        let PreviewSource::Transcript(session) = source else {
+            load_preview_now(app, self.tmux(), source);
+            return;
+        };
+        let tx = self.preview_tx.clone();
+        std::thread::spawn(move || {
+            // A parser panic still has to end the load, or the preview
+            // would wait on it forever and `r` couldn't retry.
+            let content = std::panic::catch_unwind(|| load_transcript_preview(&session))
+                .unwrap_or_else(|_| {
+                    PreviewContent::Failed("the transcript reader crashed".to_string())
+                });
+            // The receiver is gone only when the TUI is exiting.
+            let _ = tx.send((PreviewSource::Transcript(session), content));
+        });
+    }
 }
 
 /// Static-mode loop state: fixture-replay + scenario TUI. Its
@@ -454,7 +490,6 @@ impl LoopMode for StaticMode {
         config: &RunConfig,
     ) -> Result<()> {
         set_static_data(app, config, &self.snapshot)?;
-        refresh_mux_preview_if_needed(app, config, self.tmux.as_ref(), None);
         Ok(())
     }
 
@@ -777,11 +812,14 @@ fn event_loop(terminal: &mut DefaultTerminal, config: RunConfig) -> Result<()> {
     app.enable_view_persistence(crate::tui_state::TuiStateCache::from_env());
     app.restore_persisted_state();
     let (result_tx, result_rx) = mpsc::channel::<DiscoveryResult>();
+    let (preview_tx, preview_rx) = mpsc::channel();
     let refresh_interval = config.refresh_interval;
     let mode = LiveMode {
         tmux: Box::new(SystemTmux::new()),
         result_tx,
         result_rx,
+        preview_tx,
+        preview_rx,
         workers: WorkerLedger::default(),
         last_refresh: Instant::now(),
         refresh_interval,
@@ -827,6 +865,7 @@ fn static_handle_controls_overlay_key(
     let sort = app.sort();
     let mux_recency = app.mux_recency();
     let preview_wrap = app.preview_wrap();
+    let session_preview = app.session_preview();
     let ctx = ControlsContext {
         view,
         grouping,
@@ -834,6 +873,7 @@ fn static_handle_controls_overlay_key(
         sort,
         mux_recency,
         preview_wrap,
+        session_preview,
     };
     let outcome = match app.controls_overlay_mut() {
         Some(state) => state.handle(&ctx, key),
@@ -1448,56 +1488,91 @@ fn live_session_advisory(
     }
 }
 
-/// Plan a preview-capture effect for the current selection.
-/// Returns `None` when live preview is disabled, when the target is
-/// unchanged and already cached, or when the selection has no mux
-/// target. Pure: reads only [`App`] and [`RunConfig`] state.
-fn plan_mux_preview_capture(
+/// Decide whether the selection's preview needs loading (ADR 0112 §5):
+/// it does when nothing is cached for its source, when the selection
+/// just moved onto it, when its content went stale, or on `r`. Returns
+/// `None` with `--no-live-preview`, which hides every source loaded
+/// here, or while a load for the source is in flight. Pure: reads only
+/// [`App`] and [`RunConfig`] state.
+fn plan_preview_load(
     app: &App,
     config: &RunConfig,
-    prev: Option<MuxSessionId>,
-) -> Option<Effect> {
+    shown: Option<&PreviewSource>,
+    force: bool,
+) -> Option<PreviewSource> {
     if !config.live_preview_enabled {
         return None;
     }
-    let target = resolve_attach_target(app).ok()?;
-    if prev.as_ref() == Some(&target.mux) && app.mux_preview(&target.mux).is_some() {
+    let source = preview_source(app)?;
+    if app.previews().is_loading(&source) {
         return None;
     }
-    Some(Effect::RunMux(crate::tui::effect::MuxOp::CapturePreview {
-        mux: target.mux,
-        native_id: target.native_id,
-    }))
+    let fresh = app
+        .previews()
+        .get(&source)
+        .is_some_and(|entry| !entry.stale);
+    if fresh && !force && shown == Some(&source) {
+        return None;
+    }
+    Some(source)
 }
 
-/// Refresh the mux preview if the selection has moved to a new
-/// target. Reducer-adjacent orchestration: pure [`plan_mux_preview_capture`]
-/// decides whether a capture is needed; the executor performs it.
-fn refresh_mux_preview_if_needed(
+/// Load the selection's preview when [`plan_preview_load`] says it
+/// needs one. Returns the source the selection now shows, for the next
+/// pass to compare against.
+fn refresh_preview_if_needed(
     app: &mut App,
     config: &RunConfig,
-    tmux: &dyn MuxBackend,
-    prev: Option<MuxSessionId>,
-) {
-    let Some(effect) = plan_mux_preview_capture(app, config, prev) else {
-        return;
-    };
-    execute_mux_op(
-        app,
-        tmux,
-        match effect {
-            Effect::RunMux(op) => op,
-            _ => unreachable!("plan_mux_preview_capture only emits RunMux"),
-        },
-    );
+    mode: &mut impl LoopMode,
+    shown: Option<PreviewSource>,
+    force: bool,
+) -> Option<PreviewSource> {
+    if let Some(source) = plan_preview_load(app, config, shown.as_ref(), force) {
+        app.update(Msg::PreviewLoadStarted(source.clone()));
+        mode.load_preview(app, source);
+    }
+    preview_source(app)
 }
 
-/// Resolve the selection's preferred mux target's graph id, if
-/// any. Used as the "did the selection change" comparison key for
-/// preview-capture orchestration. Pure: works against [`App`]
-/// state, no I/O.
-fn current_mux_target(app: &App) -> Option<MuxSessionId> {
-    resolve_attach_target(app).ok().map(|t| t.mux)
+/// Load one preview on the calling thread. A pane capture goes through
+/// the executor's mux op so the reducer stays the only writer.
+fn load_preview_now(app: &mut App, tmux: &dyn MuxBackend, source: PreviewSource) {
+    match source {
+        PreviewSource::Pane(mux) => match pane_native_id(app, &mux) {
+            Some(native_id) => execute_mux_op(
+                app,
+                tmux,
+                crate::tui::effect::MuxOp::CapturePreview { mux, native_id },
+            ),
+            None => {
+                app.update(Msg::SetPreview {
+                    source: PreviewSource::Pane(mux),
+                    content: PreviewContent::NoTarget,
+                });
+            }
+        },
+        PreviewSource::Transcript(session) => {
+            let content = load_transcript_preview(&session);
+            app.update(Msg::SetPreview {
+                source: PreviewSource::Transcript(session),
+                content,
+            });
+        }
+    }
+}
+
+/// Load the selection's transcript on the calling thread, for snapshot
+/// mode, which renders one frame with no event loop to wait on. Pane
+/// captures stay unloaded there, as before.
+#[cfg(feature = "snapshot")]
+pub(super) fn load_transcript_preview_now(app: &mut App, config: &RunConfig) {
+    if let Some(PreviewSource::Transcript(session)) = plan_preview_load(app, config, None, true) {
+        let content = load_transcript_preview(&session);
+        app.update(Msg::SetPreview {
+            source: PreviewSource::Transcript(session),
+            content,
+        });
+    }
 }
 
 /// Run discovery, build the row tree, and dispatch [`Msg::SetData`].

@@ -67,6 +67,23 @@ fn muxed_app_with_links(
     capture: Option<&str>,
     extra_links: Vec<crate::model::GraphLink>,
 ) -> App {
+    // These rows preview their pane; sessions default to transcripts.
+    muxed_app_previewing(
+        native_id,
+        capture,
+        extra_links,
+        crate::tui::SessionPreview::Pane,
+    )
+}
+
+/// A codex session (`codex:/state:abc`) in the tmux session
+/// `native_id`, selected, with `session_preview` chosen.
+fn muxed_app_previewing(
+    native_id: &str,
+    capture: Option<&str>,
+    extra_links: Vec<crate::model::GraphLink>,
+    session_preview: crate::tui::SessionPreview,
+) -> App {
     use crate::model::{
         Confidence, GraphLink, LinkEndpoint, LinkState, MuxSessionId, MuxSessionNode, NodeId,
         Provenance, RelationKind,
@@ -127,6 +144,7 @@ fn muxed_app_with_links(
 
     let mut config = RunConfig::defaults();
     config.default_view = View::Sessions;
+    config.default_session_preview = session_preview;
     let mut app = App::new(config);
     app.update(Msg::SetData {
         snapshot: SnapshotHandle::from_snapshot(&snapshot),
@@ -136,8 +154,8 @@ fn muxed_app_with_links(
     });
     app.update(Msg::NavDown);
     if let Some(capture) = capture {
-        app.update(Msg::SetMuxPreview {
-            mux: mux_graph_id,
+        app.update(Msg::SetPreview {
+            source: PreviewSource::Pane(mux_graph_id),
             content: PreviewContent::text(capture),
         });
     }
@@ -244,8 +262,8 @@ fn stale_mux_pin_placeholder_previews_its_live_pane() {
 
     let target = resolve_attach_target(&app).expect("pin row targets its live mux");
     assert_eq!(target.native_id, "ingest");
-    app.update(Msg::SetMuxPreview {
-        mux,
+    app.update(Msg::SetPreview {
+        source: PreviewSource::Pane(mux),
         content: PreviewContent::text("serving on :8080"),
     });
     let preview = preview_text_for_selection(&app, 80, 10).to_string();
@@ -3947,4 +3965,271 @@ fn mux_row_spinner_takes_the_attached_glyph_column() {
         .map(|s| s.content.to_string())
         .collect();
     assert_eq!(settled.replace('◉', "⠋"), pending);
+}
+
+/// A transcript of `turns` alternating user and assistant messages,
+/// `turn 1` through `turn N`.
+fn transcript_document(turns: usize) -> crate::viewer::model::TranscriptDocument {
+    use crate::viewer::model::{
+        TranscriptDocument, TranscriptMeta, TranscriptTurn, TurnKind, TurnRole,
+    };
+    TranscriptDocument {
+        meta: TranscriptMeta {
+            harness: "codex".to_string(),
+            session_key: "abc".to_string(),
+            cwd: None,
+        },
+        turns: (1..=turns)
+            .map(|n| TranscriptTurn {
+                role: if n % 2 == 1 {
+                    TurnRole::User
+                } else {
+                    TurnRole::Assistant
+                },
+                kind: TurnKind::Message,
+                body: format!("turn {n}"),
+                timestamp: None,
+                aborted: false,
+            })
+            .collect(),
+    }
+}
+
+fn codex_transcript() -> PreviewSource {
+    PreviewSource::Transcript(AgentSessionId::new("codex", "/state", "abc"))
+}
+
+fn transcript_content(turns: usize) -> PreviewContent {
+    PreviewContent::Transcript(Box::new(crate::viewer::state::ViewerState::new(
+        transcript_document(turns),
+    )))
+}
+
+/// An un-muxed codex session (`codex:/state:abc`), selected.
+fn unmuxed_session_app(configure: impl FnOnce(&mut RunConfig)) -> App {
+    let mut snapshot = GraphSnapshot::empty();
+    snapshot.nodes.push(GraphNode::AgentSession(
+        AgentSessionNode::new(
+            AgentSessionId::new("codex", "/state", "abc"),
+            "codex".to_string(),
+        )
+        .with_cwd("/home/op/src/proj".to_string())
+        .with_last_message_preview("last words".to_string()),
+    ));
+    let snapshot = resolve_snapshot(snapshot);
+    let tree = build_sessions_tree(SessionsBuildInputs {
+        snapshot: &snapshot,
+        grouping: SessionsGrouping::Graph,
+        home: Some(std::path::Path::new("/home/op")),
+        now: None,
+        cwd: None,
+        filter: RowFilter::default(),
+    });
+    let mut config = RunConfig::defaults();
+    config.default_view = View::Sessions;
+    configure(&mut config);
+    let mut app = App::new(config);
+    app.update(Msg::SetData {
+        snapshot: SnapshotHandle::from_snapshot(&snapshot),
+        tree,
+        loaded_at_epoch: 1_700_000_000,
+        initial_selection_hint: None,
+    });
+    let session = app
+        .tree()
+        .rows
+        .iter()
+        .find(|row| matches!(row.kind, RowKind::AgentSession(_)))
+        .map(|row| row.id.clone())
+        .expect("session row");
+    app.set_selection(session);
+    app
+}
+
+fn preview_rows(app: &App, width: u16, height: usize) -> Vec<String> {
+    preview_text_for_selection(app, width, height)
+        .lines
+        .iter()
+        .map(ToString::to_string)
+        .collect()
+}
+
+#[test]
+fn a_session_in_tmux_previews_its_transcript_by_default() {
+    let app = muxed_app_previewing(
+        "editor",
+        Some("pane output"),
+        Vec::new(),
+        crate::tui::SessionPreview::Transcript,
+    );
+    assert_eq!(
+        crate::tui::preview::preview_source(&app),
+        Some(codex_transcript())
+    );
+    let preview = preview_text_for_selection(&app, 80, 10).to_string();
+    assert_eq!(preview, "loading transcript…");
+}
+
+#[test]
+fn the_pane_choice_previews_a_session_in_tmux_as_its_pane() {
+    let mut app = muxed_app_previewing(
+        "editor",
+        Some("pane output"),
+        Vec::new(),
+        crate::tui::SessionPreview::Pane,
+    );
+    assert_eq!(
+        crate::tui::preview::preview_source(&app),
+        Some(PreviewSource::Pane(MuxSessionId::new("editor")))
+    );
+    assert!(
+        preview_text_for_selection(&app, 80, 10)
+            .to_string()
+            .contains("pane output")
+    );
+
+    let effects = app.update(Msg::SetSessionPreview(
+        crate::tui::SessionPreview::Transcript,
+    ));
+    assert!(
+        effects.contains(&crate::tui::Effect::Persist),
+        "{effects:?}"
+    );
+    assert_eq!(
+        crate::tui::preview::preview_source(&app),
+        Some(codex_transcript())
+    );
+}
+
+#[test]
+fn a_session_outside_tmux_previews_its_transcript_whatever_the_choice() {
+    let app = unmuxed_session_app(|config| {
+        config.default_session_preview = crate::tui::SessionPreview::Pane;
+    });
+    assert_eq!(
+        crate::tui::preview::preview_source(&app),
+        Some(codex_transcript())
+    );
+}
+
+#[test]
+fn a_transcript_preview_keeps_its_newest_turns_in_view() {
+    let mut app = unmuxed_session_app(|_| {});
+    app.update(Msg::SetPreview {
+        source: codex_transcript(),
+        content: transcript_content(30),
+    });
+    let rows = preview_rows(&app, 60, 6);
+    assert_eq!(rows.len(), 6, "{rows:?}");
+    assert!(
+        rows.iter().any(|row| row.contains("turn 30")),
+        "the newest turn is in view: {rows:?}"
+    );
+    assert!(
+        !rows
+            .iter()
+            .any(|row| row.contains("turn 1 ") || row.ends_with("turn 1")),
+        "the oldest turn is not: {rows:?}"
+    );
+}
+
+#[test]
+fn scrolling_a_transcript_preview_moves_back_through_history() {
+    let mut app = unmuxed_session_app(|_| {});
+    app.update(Msg::SetPreview {
+        source: codex_transcript(),
+        content: transcript_content(30),
+    });
+    let bottom = preview_rows(&app, 60, 6);
+
+    // `K` scrolls up, toward older turns.
+    for _ in 0..12 {
+        app.update(Msg::ScrollPreviewBy(-1));
+    }
+    let scrolled = preview_rows(&app, 60, 6);
+    assert!(
+        !scrolled.iter().any(|row| row.contains("turn 30")),
+        "{scrolled:?}"
+    );
+    assert!(
+        scrolled.iter().any(|row| row.contains("turn 2")),
+        "older turns come into view: {scrolled:?}"
+    );
+
+    // `J` scrolls back down, and stops at the newest turn.
+    for _ in 0..40 {
+        app.update(Msg::ScrollPreviewBy(1));
+    }
+    assert_eq!(app.preview_scroll(), 0);
+    assert_eq!(preview_rows(&app, 60, 6), bottom);
+}
+
+#[test]
+fn moving_the_selection_resets_the_preview_scroll() {
+    // The repo group row's preview scrolls from the top.
+    let mut app = seeded_app();
+    app.update(Msg::ScrollPreviewBy(3));
+    assert_eq!(app.preview_scroll(), 3);
+    app.update(Msg::NavDown);
+    assert_eq!(app.preview_scroll(), 0);
+}
+
+#[test]
+fn an_unreadable_transcript_says_why() {
+    let mut app = unmuxed_session_app(|_| {});
+    app.update(Msg::SetPreview {
+        source: codex_transcript(),
+        content: PreviewContent::Unavailable("transcript file not found".to_string()),
+    });
+    assert_eq!(
+        preview_text_for_selection(&app, 80, 10).to_string(),
+        "transcript unavailable: transcript file not found"
+    );
+
+    app.update(Msg::SetPreview {
+        source: codex_transcript(),
+        content: PreviewContent::Failed("transcript parse failed: bad json".to_string()),
+    });
+    assert_eq!(
+        preview_text_for_selection(&app, 80, 10).to_string(),
+        "transcript unreadable: transcript parse failed: bad json"
+    );
+}
+
+#[test]
+fn a_transcript_with_no_turns_says_so() {
+    let mut app = unmuxed_session_app(|_| {});
+    app.update(Msg::SetPreview {
+        source: codex_transcript(),
+        content: transcript_content(0),
+    });
+    assert_eq!(
+        preview_text_for_selection(&app, 80, 10).to_string(),
+        "no turns yet"
+    );
+}
+
+#[test]
+fn no_live_preview_hides_a_transcript() {
+    let mut app = unmuxed_session_app(|config| config.live_preview_enabled = false);
+    app.update(Msg::SetPreview {
+        source: codex_transcript(),
+        content: transcript_content(3),
+    });
+    assert_eq!(
+        preview_text_for_selection(&app, 80, 10).to_string(),
+        "preview disabled (--no-live-preview)"
+    );
+}
+
+#[test]
+fn the_right_panel_draws_a_transcript_inside_its_gutter() {
+    let mut app = unmuxed_session_app(|_| {});
+    app.update(Msg::SetPreview {
+        source: codex_transcript(),
+        content: transcript_content(30),
+    });
+    let buffer = render_to_buffer(&mut app, Rect::new(0, 0, 120, 30));
+    let text = buffer_to_string(&buffer);
+    assert!(text.contains("turn 30"), "{text}");
 }

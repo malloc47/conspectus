@@ -909,8 +909,9 @@ default; the controls overlay switches them to the live pane, and
 load off the UI thread, and are cached in memory; `--no-live-preview`
 hides transcripts and pane captures.
 
-The pane capture (ADR 0025) is bottom-anchored on its last non-blank
-output. A wrap mode fits it to the pane's width: `smart` (the default)
+A transcript is bottom-anchored on its newest turns, and `J` / `K`
+scroll back through it. The pane capture (ADR 0025) is bottom-anchored
+on its last non-blank output. A wrap mode fits it to the pane's width: `smart` (the default)
 wraps content but truncates rules, borders, and padding; `plain` wraps
 everything; `none` keeps tmux's layout and clips. It's set by
 `[tui] preview_wrap` and the controls overlay (ADR 0106).

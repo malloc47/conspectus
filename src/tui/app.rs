@@ -19,7 +19,7 @@ use crate::tui::detail::{DetailInputs, NodeDetail, build_node_detail};
 use crate::tui::explorer::{
     BreadcrumbHop, ExplorerInputs, ExplorerRow, ExplorerRowKey, NodeView, build_node_view,
 };
-use crate::tui::preview::{PreviewContent, PreviewEntry, PreviewStore};
+use crate::tui::preview::{PreviewContent, PreviewEntry, PreviewSource, PreviewStore};
 use crate::tui::rows::{Row, RowId, RowKind, RowTree};
 use crate::tui::widgets::controls::harness_options;
 use crate::tui::widgets::path_omnibox::PathCandidate;
@@ -164,9 +164,9 @@ pub struct App {
     /// (ADR 0108). Cleared when a refresh spawned after the hand-off
     /// lands.
     handoff: Option<PendingHandoff>,
-    /// Cache of recent tmux pane captures, keyed by mux id. The
-    /// renderer reads this for the right-panel preview when the
-    /// selection points at a muxed agent session or a mux node.
+    /// Loaded previews keyed by source: pane captures and
+    /// transcripts (ADR 0112 §5). The renderer reads this for the
+    /// right-panel Preview zone.
     preview_store: PreviewStore,
     /// Left-panel vertical scroll offset, in rendered lines. The
     /// renderer reconciles this each frame via
@@ -233,6 +233,9 @@ pub struct App {
     /// How the preview pane fits a captured mux pane (ADR 0106).
     /// Seeded from [`RunConfig::default_preview_wrap`].
     preview_wrap: super::PreviewWrap,
+    /// What the Preview shows for agent sessions in tmux (ADR 0112).
+    /// Seeded from [`RunConfig::default_session_preview`].
+    session_preview: super::SessionPreview,
     /// Active row filter (ADR 0031). Mirrors the active
     /// view's slot in `view_states` so callers don't pay a map
     /// lookup per read. Kept in sync via `switch_to_view` /
@@ -434,6 +437,7 @@ impl App {
         let sort = config.default_sort;
         let mux_recency = config.default_mux_recency;
         let preview_wrap = config.default_preview_wrap;
+        let session_preview = config.default_session_preview;
         let filter = config.initial_filter.clone();
         let active_view = config.default_view;
         let grouping = match active_view {
@@ -476,6 +480,7 @@ impl App {
             sort,
             mux_recency,
             preview_wrap,
+            session_preview,
             filter,
             grouping,
             view_states: BTreeMap::new(),
@@ -679,6 +684,11 @@ impl App {
         self.preview_wrap
     }
 
+    /// What the Preview shows for agent sessions in tmux.
+    pub fn session_preview(&self) -> super::SessionPreview {
+        self.session_preview
+    }
+
     fn force_recency_for_flat_sessions(&mut self) {
         if matches!(
             self.grouping,
@@ -738,6 +748,9 @@ impl App {
         }
         if let Some(wrap) = persisted.preview_wrap {
             self.preview_wrap = wrap;
+        }
+        if let Some(choice) = persisted.session_preview {
+            self.session_preview = choice;
         }
 
         // Pre-populate view_states from persisted state.
@@ -811,6 +824,7 @@ impl App {
             sort: Some(self.sort),
             mux_recency: Some(self.mux_recency),
             preview_wrap: Some(self.preview_wrap),
+            session_preview: Some(self.session_preview),
             view_states,
         }
     }
@@ -965,7 +979,60 @@ impl App {
     /// Look up a cached mux preview. Returns `None` if the mux
     /// hasn't been captured yet.
     pub fn mux_preview(&self, mux: &MuxSessionId) -> Option<&PreviewEntry> {
-        self.preview_store.get(mux)
+        self.preview_store.get(&PreviewSource::Pane(mux.clone()))
+    }
+
+    /// Loaded previews, keyed by source.
+    pub fn previews(&self) -> &PreviewStore {
+        &self.preview_store
+    }
+
+    /// Compose the selection's transcript at `width` columns so the
+    /// Preview zone, which draws from `&App`, finds its lines cached.
+    /// Draw calls this once per frame, before the zone renders; the
+    /// composition is reused until the width or the transcript
+    /// changes.
+    pub(crate) fn prepare_preview(&mut self, width: u16) {
+        let Some(source @ PreviewSource::Transcript(_)) = crate::tui::preview::preview_source(self)
+        else {
+            return;
+        };
+        let theme = self.theme().clone();
+        if let Some(PreviewEntry {
+            content: PreviewContent::Transcript(state),
+            ..
+        }) = self.preview_store.get_mut(&source)
+        {
+            crate::viewer::widget::body_lines(state, &theme, width);
+        }
+    }
+
+    /// Whether the Preview zone shows a transcript, which sits
+    /// bottom-anchored with its newest turns in view. A Related row's
+    /// own preview replaces the selection's (ADR 0107).
+    fn preview_is_bottom_anchored(&self) -> bool {
+        let related_row_preview = self.explorer.as_ref().is_some_and(|state| {
+            state
+                .selected_row()
+                .is_some_and(|row| state.view.row_preview(&row).is_some())
+        });
+        !related_row_preview
+            && matches!(
+                crate::tui::preview::preview_source(self),
+                Some(PreviewSource::Transcript(_))
+            )
+    }
+
+    /// What the Preview zone is pointed at: the left selection and the
+    /// explorer's focused node and cursor. A change resets the
+    /// Preview's scroll.
+    fn preview_focus(&self) -> (Option<RowId>, Option<(NodeId, usize)>) {
+        (
+            self.selection.clone(),
+            self.explorer
+                .as_ref()
+                .map(|state| (state.view.focused.clone(), state.cursor)),
+        )
     }
 
     /// Adjust the left-panel scroll so `selected_line` is visible
@@ -1082,6 +1149,17 @@ impl App {
     /// Apply a single [`Msg`] to the state. Pure: no I/O, no panics,
     /// no clock reads.
     pub fn update(&mut self, msg: Msg) -> Vec<super::Effect> {
+        let focus = self.preview_focus();
+        let effects = self.reduce(msg);
+        if self.preview_focus() != focus {
+            // A different row's preview starts at its anchor: the top,
+            // or a transcript's newest turns.
+            self.preview_scroll = 0;
+        }
+        effects
+    }
+
+    fn reduce(&mut self, msg: Msg) -> Vec<super::Effect> {
         use super::Effect;
         // The empty-stack Backspace arming persists across consecutive
         // Backspace presses so the two-press "leave the right pane"
@@ -1206,6 +1284,13 @@ impl App {
                 };
             }
             Msg::ScrollPreviewBy(delta) => {
+                // A transcript's offset counts up from its newest
+                // line, so scrolling down moves the offset toward zero.
+                let delta = if self.preview_is_bottom_anchored() {
+                    -delta
+                } else {
+                    delta
+                };
                 let current = i32::from(self.preview_scroll);
                 let next = current.saturating_add(delta).max(0);
                 self.preview_scroll =
@@ -1222,8 +1307,11 @@ impl App {
                 });
                 self.messages.push(*entry);
             }
-            Msg::SetMuxPreview { mux, content } => {
-                self.preview_store.insert(mux, content);
+            Msg::SetPreview { source, content } => {
+                self.preview_store.insert(source, content);
+            }
+            Msg::PreviewLoadStarted(source) => {
+                self.preview_store.start_loading(source);
             }
             Msg::SetProviderStatus(status) => {
                 self.provider_status = status;
@@ -1252,8 +1340,14 @@ impl App {
                     .as_ref()
                     .map(|handle| sessions_linked_to_mux(handle.snapshot(), &mux))
                     .unwrap_or_default();
-                // The pane changed while the operator was in it.
-                self.preview_store.remove(&mux);
+                // The pane and the transcripts of the sessions in it
+                // changed while the operator was there.
+                self.preview_store
+                    .mark_stale(&PreviewSource::Pane(mux.clone()));
+                for session in &sessions {
+                    self.preview_store
+                        .mark_stale(&PreviewSource::Transcript(session.clone()));
+                }
                 let handoff = self.handoff.get_or_insert_with(|| PendingHandoff {
                     muxes: BTreeSet::new(),
                     sessions: BTreeSet::new(),
@@ -1429,6 +1523,11 @@ impl App {
             }
             Msg::SetPreviewWrap(wrap) => {
                 self.preview_wrap = wrap;
+                self.preview_scroll = 0;
+                effects.push(Effect::Persist);
+            }
+            Msg::SetSessionPreview(choice) => {
+                self.session_preview = choice;
                 self.preview_scroll = 0;
                 effects.push(Effect::Persist);
             }

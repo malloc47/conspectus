@@ -1,6 +1,32 @@
-//! Preview pane: pane captures, session previews, and pin diagnostics.
+//! Preview pane: transcripts, pane captures, and pin diagnostics.
 
 use super::*;
+use crate::tui::preview::preview_source;
+
+/// A Preview body, and where its window sits when it scrolls itself.
+pub(super) struct PreviewView {
+    pub text: Text<'static>,
+    /// Set when the body is already cut to the zone, as a transcript
+    /// is: the rows it has in all and the first one shown, for the
+    /// scrollbar. `None` scrolls the text by the Preview's offset from
+    /// the top.
+    pub window: Option<PreviewWindow>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) struct PreviewWindow {
+    pub total: usize,
+    pub top: usize,
+}
+
+impl PreviewView {
+    fn text(text: impl Into<Text<'static>>) -> Self {
+        Self {
+            text: text.into(),
+            window: None,
+        }
+    }
+}
 
 pub(super) fn draw_detail_preview(
     app: &App,
@@ -8,40 +34,64 @@ pub(super) fn draw_detail_preview(
     frame: &mut Frame<'_>,
     area: Rect,
 ) {
-    let preview = preview_text_for_selection(app, area.width, area.height as usize);
-    let total_rows = wrapped_line_count(&preview.lines, area.width);
-    let (content_area, scrollbar_area) = scrollbar_layout(area, total_rows);
-    let widget = Paragraph::new(preview)
-        .wrap(Wrap { trim: false })
-        .scroll((app.preview_scroll(), 0));
-    frame.render_widget(widget, content_area);
-    if let Some(sb_area) = scrollbar_area {
-        render_vertical_scrollbar(frame, sb_area, total_rows, app.preview_scroll() as usize);
+    let view = preview_view_for_selection(app, area.width, area.height as usize);
+    match view.window {
+        None => {
+            let total_rows = wrapped_line_count(&view.text.lines, area.width);
+            let (content_area, scrollbar_area) = scrollbar_layout(area, total_rows);
+            let widget = Paragraph::new(view.text)
+                .wrap(Wrap { trim: false })
+                .scroll((app.preview_scroll(), 0));
+            frame.render_widget(widget, content_area);
+            if let Some(sb_area) = scrollbar_area {
+                render_vertical_scrollbar(
+                    frame,
+                    sb_area,
+                    total_rows,
+                    app.preview_scroll() as usize,
+                );
+            }
+        }
+        Some(window) => {
+            // The thumb tracks the transcript; a failure banner above
+            // it stays put.
+            let (content_area, scrollbar_area) =
+                scrollbar_layout(area, window.total.max(view.text.lines.len()));
+            frame.render_widget(
+                Paragraph::new(view.text).wrap(Wrap { trim: false }),
+                content_area,
+            );
+            if let Some(sb_area) = scrollbar_area {
+                render_vertical_scrollbar(frame, sb_area, window.total, window.top);
+            }
+        }
     }
 }
 
-/// Source the preview body from whatever the selection points at.
-/// Mirrors the locked decision in `docs/tui-sessions-mockup.md`:
-///
-/// - Un-muxed agent session: render the graph-resident
-///   `last_message_preview`. `--no-live-preview` does **not**
-///   suppress this — only live extras (pane capture + transcript-
-///   tail) are gated.
-/// - Muxed agent session, mux candidate, or mux row: the tmux pane
-///   capture, or the privacy banner with `--no-live-preview`.
-/// - Pin placeholder: the pin's live pane when its mux exists, else
-///   the pin's diagnostics.
-/// - Other rows: a "no preview" placeholder.
+/// The Preview body as text. Tests read the zone through this.
+#[cfg(test)]
 pub(super) fn preview_text_for_selection(app: &App, width: u16, height: usize) -> Text<'static> {
+    preview_view_for_selection(app, width, height).text
+}
+
+/// Source the preview body from whatever the selection points at
+/// (ADR 0112), led by the failure banner when the row's last operation
+/// failed (ADR 0105). See [`preview_source`] for which source each row
+/// shows; rows without one show pin diagnostics or a placeholder.
+pub(super) fn preview_view_for_selection(app: &App, width: u16, height: usize) -> PreviewView {
     match latest_failure_for_selection(app) {
         Some(entry) => {
-            // The pane body gets the rows the banner leaves, so its
-            // newest output stays on screen below the banner.
+            // The body gets the rows the banner leaves, so its newest
+            // output stays on screen below the banner.
             let mut text = failure_banner(entry, app.theme());
             let banner_rows = wrapped_line_count(&text.lines, width);
             let body_height = height.saturating_sub(banner_rows).max(1);
-            text.extend(selection_preview_body(app, width, body_height));
-            text
+            let body = selection_preview_body(app, width, body_height);
+            text.extend(body.text);
+            PreviewView {
+                text,
+                window: body.window,
+            }
         }
         None => selection_preview_body(app, width, height),
     }
@@ -95,99 +145,117 @@ fn failure_banner(entry: &crate::tui::messages::LogEntry, theme: &Theme) -> Text
     Text::from(lines)
 }
 
-fn selection_preview_body(app: &App, width: u16, height: usize) -> Text<'static> {
+fn selection_preview_body(app: &App, width: u16, height: usize) -> PreviewView {
     let Some(selection) = app.selection() else {
-        return Text::raw("");
+        return PreviewView::text("");
     };
     let Some(row) = app.tree().rows.iter().find(|r| &r.id == selection) else {
-        return Text::raw("");
+        return PreviewView::text("");
     };
     let live_preview = app.config().live_preview_enabled;
-    if let RowId::Pin { pin_id } = selection {
-        return pin_placeholder_preview(app, pin_id, live_preview, width, height);
+    match preview_source(app) {
+        // `--no-live-preview` hides conversation and terminal content
+        // (ADR 0112 §6).
+        Some(_) if !live_preview => PreviewView::text("preview disabled (--no-live-preview)"),
+        Some(source @ PreviewSource::Transcript(_)) => transcript_view(app, &source, width, height),
+        Some(PreviewSource::Pane(mux)) => PreviewView::text(format_preview_for_mux(
+            app,
+            &mux,
+            width,
+            height,
+            app.config().color,
+        )),
+        None => PreviewView::text(sourceless_preview(app, row, selection, live_preview)),
     }
-    match &row.kind {
-        RowKind::AgentSession(session) => match session.mux_state {
-            MuxIndicator::Attached | MuxIndicator::Ambiguous { .. } => {
-                mux_preview_text(app, live_preview, width, height)
-            }
-            MuxIndicator::Unmuxed => Text::raw(
-                session
-                    .preview
-                    .clone()
-                    .unwrap_or_else(|| "no preview available".to_string()),
-            ),
-        },
-        RowKind::AgentSessionMuxCandidate(_) => mux_preview_text(app, live_preview, width, height),
-        RowKind::Pin(_) => {
-            let diagnostics = crate::tui::actions::selected_pin_diagnostics(app);
-            if diagnostics.is_empty() {
-                Text::raw("pin diagnostic unavailable — try `r` to refresh")
+}
+
+/// Preview for a row with no source: a pin's diagnostics, which say
+/// what `Enter` will do, or a placeholder.
+fn sourceless_preview(
+    app: &App,
+    row: &crate::tui::rows::Row,
+    selection: &RowId,
+    live_preview: bool,
+) -> Text<'static> {
+    let pin_diagnostics = || {
+        let diagnostics = crate::tui::actions::selected_pin_diagnostics(app);
+        if diagnostics.is_empty() {
+            Text::raw("pin diagnostic unavailable — try `r` to refresh")
+        } else {
+            Text::raw(render_pin_diagnostics(&diagnostics))
+        }
+    };
+    let disabled_or = |text: &'static str| {
+        Text::raw(if live_preview {
+            text
+        } else {
+            "preview disabled (--no-live-preview)"
+        })
+    };
+    match (&row.kind, selection) {
+        (_, RowId::Pin { pin_id }) => {
+            // A pin whose mux is live but can't be attached (it hosts
+            // this TUI) has a pane but no target to capture.
+            let live_mux = app
+                .snapshot_handle()
+                .and_then(|handle| crate::tui::actions::pin_live_mux(handle.snapshot(), pin_id));
+            if live_mux.is_some() {
+                disabled_or("no mux target for this row")
             } else {
-                Text::raw(render_pin_diagnostics(&diagnostics))
+                pin_diagnostics()
             }
         }
-        _ => match selection {
-            RowId::Group(NodeId::MuxSession(_)) => {
-                mux_preview_text(app, live_preview, width, height)
-            }
-            RowId::MuxSession(NodeId::MuxSession(_)) => {
-                mux_preview_text(app, live_preview, width, height)
-            }
-            _ => {
-                if live_preview {
-                    Text::raw("no preview for this row")
-                } else {
-                    Text::raw("preview disabled (--no-live-preview)")
-                }
-            }
-        },
+        (RowKind::Pin(_), _) => pin_diagnostics(),
+        (RowKind::AgentSession(_) | RowKind::AgentSessionMuxCandidate(_), _)
+        | (_, RowId::Group(NodeId::MuxSession(_)) | RowId::MuxSession(NodeId::MuxSession(_))) => {
+            disabled_or("no mux target for this row")
+        }
+        _ => disabled_or("no preview for this row"),
     }
 }
 
-/// Preview for a pin placeholder row: the live pane when the pin's
-/// mux exists (a stale mux, or a pin running something other than an
-/// agent harness, like `conspectus serve`), else the pin's
-/// diagnostics, which say what `Enter` will do.
-fn pin_placeholder_preview(
-    app: &App,
-    pin_id: &str,
-    live_preview: bool,
-    width: u16,
-    height: usize,
-) -> Text<'static> {
-    let live_mux = app
-        .snapshot_handle()
-        .and_then(|handle| crate::tui::actions::pin_live_mux(handle.snapshot(), pin_id));
-    if live_mux.is_some() {
-        return mux_preview_text(app, live_preview, width, height);
-    }
-    let diagnostics = crate::tui::actions::selected_pin_diagnostics(app);
-    if diagnostics.is_empty() {
-        Text::raw("pin diagnostic unavailable — try `r` to refresh")
-    } else {
-        Text::raw(render_pin_diagnostics(&diagnostics))
-    }
-}
-
-/// Compose the preview body for a row whose preview source is a
-/// tmux pane capture. Pulls from the per-mux cache; if no cache
-/// entry exists yet (the runtime hasn't refreshed for this
-/// selection), shows a "loading" placeholder. With
-/// `--no-live-preview`, swaps in the privacy banner instead.
-pub(super) fn mux_preview_text(
-    app: &App,
-    live_preview: bool,
-    width: u16,
-    height: usize,
-) -> Text<'static> {
-    if !live_preview {
-        return Text::raw("preview disabled (--no-live-preview)");
-    }
-    let Some(target) = resolve_attach_target(app).ok().map(|t| t.mux) else {
-        return Text::raw("no mux target for this row");
+/// A transcript, rendered by the native viewer (ADR 0052) and
+/// bottom-anchored with its newest turns in view. The Preview's scroll
+/// offset counts rows up from there. One column stays free for the
+/// scrollbar.
+fn transcript_view(app: &App, source: &PreviewSource, width: u16, height: usize) -> PreviewView {
+    let Some(entry) = app.previews().get(source) else {
+        return PreviewView::text("loading transcript…");
     };
-    format_preview_for_mux(app, &target, width, height, app.config().color)
+    let state = match &entry.content {
+        PreviewContent::Transcript(state) => state,
+        PreviewContent::Unavailable(reason) => {
+            return PreviewView::text(format!("transcript unavailable: {reason}"));
+        }
+        PreviewContent::Failed(message) => {
+            return PreviewView::text(format!("transcript unreadable: {message}"));
+        }
+        _ => return PreviewView::text("transcript unavailable"),
+    };
+    let content_width = width.saturating_sub(1).max(1);
+    // Draw warms the cache first (`App::prepare_preview`); callers
+    // that skip it, like tests, compose a copy.
+    let lines: std::borrow::Cow<'_, [Line<'static>]> =
+        if let Some(lines) = crate::viewer::widget::cached_body_lines(state, content_width) {
+            std::borrow::Cow::Borrowed(lines)
+        } else {
+            let mut state = state.as_ref().clone();
+            std::borrow::Cow::Owned(
+                crate::viewer::widget::body_lines(&mut state, app.theme(), content_width).to_vec(),
+            )
+        };
+    if lines.is_empty() {
+        return PreviewView::text("no turns yet");
+    }
+    let total = lines.len();
+    let height = height.max(1);
+    let bottom_top = total.saturating_sub(height);
+    let top = bottom_top.saturating_sub(app.preview_scroll() as usize);
+    let end = (top + height).min(total);
+    PreviewView {
+        text: Text::from(lines[top..end].to_vec()),
+        window: Some(PreviewWindow { total, top }),
+    }
 }
 
 /// Lay the pane capture out per the active wrap mode (ADR 0106) and
@@ -221,6 +289,8 @@ pub(super) fn format_preview_for_mux(
             PreviewContent::Unsupported => {
                 Text::raw("preview unavailable (runner does not implement capture)")
             }
+            // A pane source only ever holds a capture.
+            PreviewContent::Transcript(_) => Text::raw(""),
         },
         None => Text::raw("loading mux preview…"),
     }

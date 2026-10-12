@@ -128,6 +128,7 @@ scan_roots = ["~/work"]     # used when --scan-root is absent; `~` expands
 show_harness_chips = false  # per-harness count chips in the header
 narrow_layout_threshold = 100  # columns below which the panes stack
 preview_wrap = "smart"      # smart | plain | none — how the Preview fits a mux pane
+session_preview = "transcript"  # transcript | pane — the Preview for a session in tmux
 # sessions_grouping = "graph"  # deprecated alias for [tui.views.sessions] grouping
 
 [tui.views.sessions]        # also mux, union, prs, forks (ADR 0031)

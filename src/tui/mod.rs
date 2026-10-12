@@ -119,6 +119,10 @@ pub struct RunConfig {
     /// `[tui] preview_wrap`; the controls overlay changes it in memory
     /// and the last choice is restored from persisted TUI state.
     pub default_preview_wrap: PreviewWrap,
+    /// Initial preview for agent sessions in tmux (ADR 0112). Sourced
+    /// from `[tui] session_preview`; the controls overlay changes it in
+    /// memory and the last choice is restored from persisted TUI state.
+    pub default_session_preview: SessionPreview,
     /// Terminal width (columns) below which the body reflows from
     /// side-by-side panes to a vertical stack. Sourced
     /// from `[tui] narrow_layout_threshold`; the renderer reads this
@@ -167,6 +171,7 @@ impl RunConfig {
             show_harness_chips: false,
             default_mux_recency: MuxRecency::default(),
             default_preview_wrap: PreviewWrap::default(),
+            default_session_preview: SessionPreview::default(),
             narrow_layout_threshold: crate::config::DEFAULT_NARROW_LAYOUT_THRESHOLD,
             intervals: crate::config::ServerIntervals::default(),
             no_cache: false,
@@ -295,6 +300,48 @@ impl PreviewWrap {
 
     /// All variants in stable display order.
     pub const ALL: [PreviewWrap; 3] = [Self::Smart, Self::Plain, Self::None];
+}
+
+/// What the Preview shows for an agent session in tmux (ADR 0112).
+/// Sessions outside tmux always show their transcript.
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SessionPreview {
+    /// The session's transcript, rendered by the native viewer.
+    #[default]
+    Transcript,
+    /// The live tmux pane, which shows prompts and running tools the
+    /// transcript may lag.
+    Pane,
+}
+
+impl SessionPreview {
+    /// Stable token used for config and persistence.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Transcript => "transcript",
+            Self::Pane => "pane",
+        }
+    }
+
+    /// Human label for the controls overlay.
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Transcript => "transcript",
+            Self::Pane => "tmux pane",
+        }
+    }
+
+    pub fn parse(raw: &str) -> Option<Self> {
+        match raw.trim() {
+            "transcript" => Some(Self::Transcript),
+            "pane" => Some(Self::Pane),
+            _ => None,
+        }
+    }
+
+    /// All variants in stable display order.
+    pub const ALL: [SessionPreview; 2] = [Self::Transcript, Self::Pane];
 }
 
 /// Top-level grouping in the sessions tree.

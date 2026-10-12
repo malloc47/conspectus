@@ -336,6 +336,7 @@ pub(in crate::tui) fn handle_controls_overlay_key(
     let sort = app.sort();
     let mux_recency = app.mux_recency();
     let preview_wrap = app.preview_wrap();
+    let session_preview = app.session_preview();
     let ctx = ControlsContext {
         view,
         grouping,
@@ -343,6 +344,7 @@ pub(in crate::tui) fn handle_controls_overlay_key(
         sort,
         mux_recency,
         preview_wrap,
+        session_preview,
     };
     let outcome = match app.controls_overlay_mut() {
         Some(state) => state.handle(&ctx, key),

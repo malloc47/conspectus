@@ -58,8 +58,9 @@ pub(super) struct TuiArgs {
         default_value = "2s"
     )]
     pub(super) mux_preview_interval: String,
-    /// Suppress live extras: mux pane capture and transcript-tail
-    /// reads. Graph-resident previews continue to render.
+    /// Hide conversation and terminal content in the Preview: session
+    /// transcripts and mux pane captures. Graph-resident fields
+    /// continue to render.
     #[arg(long = "no-live-preview")]
     no_live_preview: bool,
     /// Don't write each refreshed graph to the `graph.bin` cache.
@@ -393,6 +394,8 @@ impl TuiArgs {
             // `[tui] preview_wrap`; a remembered choice from the
             // controls overlay restores on top of it.
             default_preview_wrap: outcome.config.tui.preview_wrap,
+            // `[tui] session_preview`; restored the same way.
+            default_session_preview: outcome.config.tui.session_preview,
             narrow_layout_threshold: outcome.config.tui.narrow_layout_threshold,
             intervals: outcome.config.server.intervals,
             no_cache: self.no_cache,

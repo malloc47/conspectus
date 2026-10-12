@@ -145,6 +145,8 @@ pub(super) fn draw_right_panel(app: &mut App, frame: &mut Frame<'_>, area: Rect)
             )),
             split[1],
         );
+        // A transcript preview leaves a column for its scrollbar.
+        app.prepare_preview(split[2].width.saturating_sub(1).max(1));
         // Re-fetch the explorer state for the preview render — the
         // adjust_explorer_scroll call above needed a mutable
         // borrow of `app`, which required dropping the earlier
@@ -166,6 +168,10 @@ pub(super) fn draw_right_panel(app: &mut App, frame: &mut Frame<'_>, area: Rect)
         inner.width,
     );
     let split = vertical![==header_h, ==1, >=0].split(inner);
+    app.prepare_preview(split[2].width.saturating_sub(1).max(1));
+    let Some(detail) = app.detail() else {
+        return;
+    };
 
     draw_detail_header(
         detail,

@@ -1314,7 +1314,7 @@ mod mux_effect_executor {
     use crate::discovery::tmux::{FakeTmux, TmuxCaptureOutcome};
     use crate::model::MuxSessionId;
     use crate::tui::app::SnapshotHandle;
-    use crate::tui::effect::{Effect, MuxOp};
+    use crate::tui::effect::MuxOp;
     use crate::tui::preview::PreviewContent;
 
     #[test]
@@ -1346,35 +1346,11 @@ mod mux_effect_executor {
     }
 
     #[test]
-    fn plan_mux_preview_capture_returns_none_when_live_preview_disabled() {
-        let mut config = RunConfig::defaults();
-        config.live_preview_enabled = false;
+    fn plan_preview_load_returns_none_with_no_selection() {
         let app = App::new(RunConfig::defaults());
-        assert!(plan_mux_preview_capture(&app, &config, None).is_none());
-    }
-
-    #[test]
-    fn plan_mux_preview_capture_returns_none_when_no_mux_target_selected() {
-        let app = App::new(RunConfig::defaults());
-        // Empty app: no selection, no mux target — nothing to
-        // capture regardless of the previous target.
-        assert!(plan_mux_preview_capture(&app, app.config(), None).is_none());
-    }
-
-    #[test]
-    fn plan_mux_preview_capture_emits_run_mux_effect_shape() {
-        // Smoke test the returned effect variant when a plan is
-        // constructed manually via `Effect::RunMux(...)` —
-        // proves the enum wiring, without needing a full seeded
-        // App that resolves to an attachable mux row.
-        let planned = Effect::RunMux(MuxOp::CapturePreview {
-            mux: MuxSessionId::new("tmux:pane"),
-            native_id: "pane".to_string(),
-        });
-        assert!(matches!(
-            planned,
-            Effect::RunMux(MuxOp::CapturePreview { .. })
-        ));
+        // Empty app: no selection, so no source to load regardless of
+        // what was shown or whether a refresh was asked for.
+        assert!(plan_preview_load(&app, app.config(), None, true).is_none());
     }
 }
 
@@ -1652,5 +1628,139 @@ mod worker_ledger {
         assert_eq!(ledger.finish(refresh), SETTLE);
         assert_eq!(ledger.finish(handoff), DROP);
         assert!(ledger.idle());
+    }
+}
+
+/// ADR 0112 §5: when the selection's preview loads.
+mod preview_loading {
+    use super::*;
+    use crate::discovery::tmux::FakeTmux;
+    use crate::model::{AgentSessionId, AgentSessionNode, GraphNode, GraphSnapshot};
+    use crate::resolve::resolve_snapshot;
+    use crate::tui::app::SnapshotHandle;
+    use crate::tui::preview::{PreviewContent, PreviewSource};
+    use crate::tui::rows::RowKind;
+
+    /// An un-muxed codex session whose state root doesn't exist,
+    /// selected.
+    fn session_app(config: RunConfig) -> App {
+        let mut snapshot = GraphSnapshot::empty();
+        snapshot.nodes.push(GraphNode::AgentSession(
+            AgentSessionNode::new(
+                AgentSessionId::new("codex", "/nonexistent/.codex", "abc"),
+                "codex".to_string(),
+            )
+            .with_cwd("/p/proj".to_string()),
+        ));
+        let snapshot = resolve_snapshot(snapshot);
+        let tree = crate::tui::rows::build_tree_for_view(crate::tui::rows::TreeInputs {
+            snapshot: &snapshot,
+            view: View::Sessions,
+            grouping: crate::tui::Grouping::Sessions(crate::tui::SessionsGrouping::Graph),
+            filter: crate::filter::RowFilter::default(),
+            sort: crate::tui::Sort::Hierarchy,
+            mux_recency: crate::tui::MuxRecency::default(),
+            cwd: None,
+        });
+        let mut app = App::new(config);
+        app.update(Msg::SetData {
+            snapshot: SnapshotHandle::from_snapshot(&snapshot),
+            tree,
+            loaded_at_epoch: 1_700_000_000,
+            initial_selection_hint: None,
+        });
+        let session = app
+            .tree()
+            .rows
+            .iter()
+            .find(|row| matches!(row.kind, RowKind::AgentSession(_)))
+            .map(|row| row.id.clone())
+            .expect("session row");
+        app.set_selection(session);
+        app
+    }
+
+    fn transcript() -> PreviewSource {
+        PreviewSource::Transcript(AgentSessionId::new("codex", "/nonexistent/.codex", "abc"))
+    }
+
+    fn loaded(app: &mut App) {
+        app.update(Msg::SetPreview {
+            source: transcript(),
+            content: PreviewContent::Unavailable("gone".to_string()),
+        });
+    }
+
+    #[test]
+    fn a_transcript_not_yet_loaded_loads() {
+        let app = session_app(RunConfig::defaults());
+        let config = app.config().clone();
+        assert_eq!(
+            plan_preview_load(&app, &config, None, false),
+            Some(transcript())
+        );
+    }
+
+    #[test]
+    fn a_loaded_transcript_still_on_screen_does_not_reload() {
+        let mut app = session_app(RunConfig::defaults());
+        loaded(&mut app);
+        let config = app.config().clone();
+        assert_eq!(
+            plan_preview_load(&app, &config, Some(&transcript()), false),
+            None
+        );
+    }
+
+    #[test]
+    fn reselecting_a_session_rereads_its_transcript() {
+        let mut app = session_app(RunConfig::defaults());
+        loaded(&mut app);
+        let config = app.config().clone();
+        let elsewhere = PreviewSource::Transcript(AgentSessionId::new("codex", "/s", "other"));
+        assert_eq!(
+            plan_preview_load(&app, &config, Some(&elsewhere), false),
+            Some(transcript())
+        );
+    }
+
+    #[test]
+    fn refresh_rereads_the_transcript_on_screen() {
+        let mut app = session_app(RunConfig::defaults());
+        loaded(&mut app);
+        let config = app.config().clone();
+        assert_eq!(
+            plan_preview_load(&app, &config, Some(&transcript()), true),
+            Some(transcript())
+        );
+    }
+
+    #[test]
+    fn a_load_in_flight_is_not_started_again() {
+        let mut app = session_app(RunConfig::defaults());
+        app.update(Msg::PreviewLoadStarted(transcript()));
+        let config = app.config().clone();
+        assert_eq!(plan_preview_load(&app, &config, None, true), None);
+    }
+
+    #[test]
+    fn no_live_preview_loads_nothing() {
+        let mut config = RunConfig::defaults();
+        config.live_preview_enabled = false;
+        let app = session_app(config.clone());
+        assert_eq!(plan_preview_load(&app, &config, None, true), None);
+    }
+
+    #[test]
+    fn loading_a_missing_transcript_stores_why() {
+        let mut app = session_app(RunConfig::defaults());
+        app.update(Msg::PreviewLoadStarted(transcript()));
+        load_preview_now(&mut app, &FakeTmux::with_sessions(""), transcript());
+        assert!(!app.previews().is_loading(&transcript()));
+        let entry = app.previews().get(&transcript()).expect("stored");
+        assert_eq!(
+            entry.content,
+            PreviewContent::Unavailable("transcript file not found".to_string())
+        );
     }
 }

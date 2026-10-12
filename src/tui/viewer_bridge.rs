@@ -21,6 +21,7 @@
 use crate::discovery::harness::registered_adapters;
 use crate::model::AgentSessionId;
 use crate::viewer::model::{SessionLocator, TranscriptDocument};
+use crate::viewer::parser::ParseError;
 use crate::viewer::state::ViewerState;
 
 /// Map a graph-flavored [`AgentSessionId`] to a viewer-flavored
@@ -44,6 +45,38 @@ pub fn build_viewer_state(session: &AgentSessionId) -> Option<ViewerState> {
         .and_then(|parser| parser.read(&locator).ok())
         .unwrap_or_else(|| TranscriptDocument::unavailable(&locator));
     Some(ViewerState::new(document))
+}
+
+/// Why a session's transcript has nothing to show.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum TranscriptMissing {
+    /// There is nothing to read: the viewer has no parser for the
+    /// harness, or the transcript file is gone.
+    Unavailable(String),
+    /// The transcript is there, but reading or parsing it failed.
+    Failed(String),
+}
+
+/// Read a session's transcript for the inline preview (ADR 0112).
+/// Unlike [`build_viewer_state`], which degrades every failure to an
+/// empty document for the modal's banner, this keeps the reason so the
+/// preview can say why there is nothing to show.
+pub fn load_transcript(session: &AgentSessionId) -> Result<TranscriptDocument, TranscriptMissing> {
+    let unsupported = || {
+        TranscriptMissing::Unavailable(format!(
+            "the viewer can't read {} sessions",
+            session.harness_key
+        ))
+    };
+    let adapter = registered_adapters()
+        .find(|a| a.harness_key() == session.harness_key)
+        .ok_or_else(unsupported)?;
+    let locator = adapter.transcript_source(session).ok_or_else(unsupported)?;
+    let parser = adapter.transcript_parser().ok_or_else(unsupported)?;
+    parser.read(&locator).map_err(|err| match err {
+        ParseError::NotFound => TranscriptMissing::Unavailable(err.to_string()),
+        ParseError::Io(_) | ParseError::Malformed(_) => TranscriptMissing::Failed(err.to_string()),
+    })
 }
 
 #[cfg(test)]
@@ -114,5 +147,45 @@ mod tests {
         assert!(state.document.is_empty(), "fallback doc has no turns");
         assert_eq!(state.document.meta.harness, "claude-code");
         assert_eq!(state.document.meta.session_key, "abc");
+    }
+
+    #[test]
+    fn load_transcript_says_the_viewer_cannot_read_an_unsupported_harness() {
+        let id = session("aider", "/u", "k");
+        assert_eq!(
+            load_transcript(&id),
+            Err(TranscriptMissing::Unavailable(
+                "the viewer can't read aider sessions".to_string()
+            ))
+        );
+    }
+
+    #[test]
+    fn load_transcript_reports_a_missing_file_as_unavailable() {
+        let id = session("claude-code", "/nonexistent/.claude", "abc");
+        assert_eq!(
+            load_transcript(&id),
+            Err(TranscriptMissing::Unavailable(
+                "transcript file not found".to_string()
+            ))
+        );
+    }
+
+    #[test]
+    fn load_transcript_parses_a_transcript_on_disk() {
+        let root = tempfile::tempdir().expect("temp dir");
+        let project = root.path().join("projects").join("-work");
+        std::fs::create_dir_all(&project).expect("project dir");
+        std::fs::copy(
+            concat!(
+                env!("CARGO_MANIFEST_DIR"),
+                "/tests/fixtures/claude/transcript-basic.jsonl"
+            ),
+            project.join("abc.jsonl"),
+        )
+        .expect("copy fixture transcript");
+        let id = session("claude-code", &root.path().display().to_string(), "abc");
+        let document = load_transcript(&id).expect("transcript parses");
+        assert!(!document.is_empty());
     }
 }

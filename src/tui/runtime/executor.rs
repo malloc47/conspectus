@@ -329,7 +329,10 @@ pub(super) fn execute_mux_op(app: &mut App, tmux: &dyn MuxBackend, op: crate::tu
             // id (`tmux:editor`) — tmux itself doesn't understand
             // the latter.
             let content = capture_via(tmux, &native_id);
-            let _ = app.update(Msg::SetMuxPreview { mux, content });
+            let _ = app.update(Msg::SetPreview {
+                source: crate::tui::preview::PreviewSource::Pane(mux),
+                content,
+            });
         }
     }
 }

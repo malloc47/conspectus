@@ -2708,6 +2708,7 @@ fn restore_persisted_state_applies_state_and_mirrors_config() {
         sort: Some(crate::tui::Sort::Recency),
         mux_recency: None,
         preview_wrap: Some(crate::tui::PreviewWrap::None),
+        session_preview: None,
         view_states: BTreeMap::new(),
     };
     let filter = crate::filter::RowFilter {
@@ -2751,6 +2752,7 @@ fn restore_persisted_state_preserves_explicit_cli_overrides() {
         sort: Some(crate::tui::Sort::Recency),
         mux_recency: None,
         preview_wrap: None,
+        session_preview: None,
         view_states: BTreeMap::new(),
     };
     persisted.view_states.insert(
@@ -3651,9 +3653,15 @@ fn handoff_return_marks_mux_and_linked_sessions_until_settled() {
         initial_selection_hint: None,
     });
     let mux = crate::model::MuxSessionId::new("work");
-    app.update(Msg::SetMuxPreview {
-        mux: mux.clone(),
+    let pane = PreviewSource::Pane(mux.clone());
+    let transcript = PreviewSource::Transcript(AgentSessionId::new("claude-code", "/state", "abc"));
+    app.update(Msg::SetPreview {
+        source: pane.clone(),
         content: PreviewContent::text("before the attach"),
+    });
+    app.update(Msg::SetPreview {
+        source: transcript.clone(),
+        content: PreviewContent::Unavailable("not yet".to_string()),
     });
     let session_row = app
         .visible_rows()
@@ -3672,10 +3680,10 @@ fn handoff_return_marks_mux_and_linked_sessions_until_settled() {
             .contains(&AgentSessionId::new("claude-code", "/state", "abc"))
     );
     assert!(app.row_awaits_handoff(&session_row));
-    assert!(
-        app.mux_preview(&mux).is_none(),
-        "the pre-attach capture is dropped so the pane is recaptured"
-    );
+    for source in [&pane, &transcript] {
+        let entry = app.previews().get(source).expect("content stays on screen");
+        assert!(entry.stale, "{source:?} reloads after the hand-off");
+    }
     assert!(app.take_handoff_refresh_request());
     assert!(
         !app.take_handoff_refresh_request(),

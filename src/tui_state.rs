@@ -79,6 +79,11 @@ struct RawState {
     /// back to the configured default.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     preview_wrap: Option<String>,
+    /// Preview for agent sessions in tmux (ADR 0112). Token from
+    /// [`crate::tui::SessionPreview::as_str`]; absent or unknown falls
+    /// back to the configured default.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    session_preview: Option<String>,
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     view_states: BTreeMap<String, ViewStateRaw>,
     #[serde(flatten)]
@@ -104,6 +109,7 @@ pub struct PersistedState {
     pub sort: Option<Sort>,
     pub mux_recency: Option<crate::tui::MuxRecency>,
     pub preview_wrap: Option<crate::tui::PreviewWrap>,
+    pub session_preview: Option<crate::tui::SessionPreview>,
     pub view_states: BTreeMap<View, PersistedViewSlot>,
 }
 
@@ -207,6 +213,10 @@ pub fn read_tui_state(cache: &TuiStateCache) -> Option<PersistedState> {
         .preview_wrap
         .as_deref()
         .and_then(crate::tui::PreviewWrap::parse);
+    let session_preview = raw
+        .session_preview
+        .as_deref()
+        .and_then(crate::tui::SessionPreview::parse);
     let mut view_states = BTreeMap::new();
     for (view_name, vs_raw) in raw.view_states {
         if let Some(view) = view_from_snake_case(&view_name) {
@@ -227,6 +237,7 @@ pub fn read_tui_state(cache: &TuiStateCache) -> Option<PersistedState> {
         sort,
         mux_recency,
         preview_wrap,
+        session_preview,
         view_states,
     })
 }
@@ -254,6 +265,7 @@ pub fn write_tui_state(cache: &TuiStateCache, state: &PersistedState) -> io::Res
     raw.sort = state.sort.map(|s| sort_to_str(s).to_string());
     raw.mux_recency = state.mux_recency.map(|b| b.as_str().to_string());
     raw.preview_wrap = state.preview_wrap.map(|w| w.as_str().to_string());
+    raw.session_preview = state.session_preview.map(|p| p.as_str().to_string());
     raw.view_states.clear();
     for (view, slot) in &state.view_states {
         raw.view_states.insert(
@@ -310,6 +322,7 @@ impl Default for RawState {
             sort: None,
             mux_recency: None,
             preview_wrap: None,
+            session_preview: None,
             view_states: BTreeMap::new(),
             extra: BTreeMap::new(),
         }

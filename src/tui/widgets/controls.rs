@@ -87,6 +87,9 @@ pub struct ControlsContext<'a> {
     /// Preview-pane wrap mode, marked active in the Preview wrap
     /// section (ADR 0106).
     pub preview_wrap: crate::tui::PreviewWrap,
+    /// What the Preview shows for agent sessions in tmux, marked
+    /// active in the Session preview section (ADR 0112).
+    pub session_preview: crate::tui::SessionPreview,
 }
 
 /// One landable row in the controls overlay's flat list.
@@ -113,6 +116,8 @@ pub enum ControlsCursor {
     MuxRecency(usize),
     /// Preview wrap mode at index in [`crate::tui::PreviewWrap::ALL`].
     PreviewWrap(usize),
+    /// Session preview at index in [`crate::tui::SessionPreview::ALL`].
+    SessionPreview(usize),
 }
 
 /// Sub-editor that owns key input while open. The host overlay
@@ -280,6 +285,13 @@ impl ControlsOverlayState {
                     .copied()
                     .unwrap_or(ctx.preview_wrap);
                 ControlsOutcome::ApplyAndStay(crate::tui::Msg::SetPreviewWrap(wrap))
+            }
+            ControlsCursor::SessionPreview(idx) => {
+                let choice = crate::tui::SessionPreview::ALL
+                    .get(idx)
+                    .copied()
+                    .unwrap_or(ctx.session_preview);
+                ControlsOutcome::ApplyAndStay(crate::tui::Msg::SetSessionPreview(choice))
             }
         }
     }
@@ -514,6 +526,9 @@ fn flatten_rows(ctx: &ControlsContext<'_>) -> Vec<ControlsCursor> {
     for idx in 0..crate::tui::PreviewWrap::ALL.len() {
         rows.push(ControlsCursor::PreviewWrap(idx));
     }
+    for idx in 0..crate::tui::SessionPreview::ALL.len() {
+        rows.push(ControlsCursor::SessionPreview(idx));
+    }
     rows
 }
 
@@ -716,6 +731,17 @@ impl ControlsOverlayWidget<'_> {
                 cursor == row,
             );
         }
+
+        body.push(line![""]);
+        body.push(section_header("Session preview"));
+        for (idx, choice) in crate::tui::SessionPreview::ALL.iter().enumerate() {
+            let row = ControlsCursor::SessionPreview(idx);
+            let active = *choice == self.ctx.session_preview;
+            body.push_row(
+                row_line(choice.label().to_string(), active, cursor == row),
+                cursor == row,
+            );
+        }
         (body.lines, body.cursor_line)
     }
 }
@@ -897,9 +923,10 @@ fn max_controls_content_lines() -> usize {
             } else {
                 0
             };
-            // Every view ends with the Preview wrap section: blank +
-            // header + one row per mode.
+            // Every view ends with the Preview wrap and Session
+            // preview sections: blank + header + one row per choice.
             let preview_wrap_rows = 1 + 1 + crate::tui::PreviewWrap::ALL.len();
+            let session_preview_rows = 1 + 1 + crate::tui::SessionPreview::ALL.len();
             let body_lines = 1
                 + VIEW_OPTIONS.len()
                 + 1
@@ -912,7 +939,8 @@ fn max_controls_content_lines() -> usize {
                 + 1
                 + SORT_OPTIONS.len()
                 + mux_recency_rows
-                + preview_wrap_rows;
+                + preview_wrap_rows
+                + session_preview_rows;
             body_lines + 2
         })
         .max()

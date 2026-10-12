@@ -194,6 +194,9 @@ pub struct TuiConfig {
     /// Starting preview-pane wrap mode (ADR 0106). Sourced from
     /// `[tui] preview_wrap`; defaults to smart wrap.
     pub preview_wrap: crate::tui::PreviewWrap,
+    /// Starting preview for agent sessions in tmux (ADR 0112). Sourced
+    /// from `[tui] session_preview`; defaults to the transcript.
+    pub session_preview: crate::tui::SessionPreview,
 }
 
 impl Default for TuiConfig {
@@ -207,6 +210,7 @@ impl Default for TuiConfig {
             narrow_layout_threshold: DEFAULT_NARROW_LAYOUT_THRESHOLD,
             default_view: None,
             preview_wrap: crate::tui::PreviewWrap::default(),
+            session_preview: crate::tui::SessionPreview::default(),
         }
     }
 }
@@ -414,6 +418,9 @@ struct TuiFile {
     /// `[tui] preview_wrap` — `smart`, `plain`, or `none`.
     #[serde(default)]
     preview_wrap: Option<String>,
+    /// `[tui] session_preview` — `transcript` or `pane`.
+    #[serde(default)]
+    session_preview: Option<String>,
 }
 
 #[derive(Clone, Debug, Default, Deserialize)]
@@ -936,6 +943,19 @@ fn merge_tui(
                 message: format!(
                     "invalid `[tui] preview_wrap` value `{raw}`; \
                      expected one of smart, plain, none"
+                ),
+            }),
+        }
+    }
+
+    if let Some(raw) = file.session_preview {
+        match crate::tui::SessionPreview::parse(&raw) {
+            Some(choice) => config.session_preview = choice,
+            None => diagnostics.push(ConfigDiagnostic {
+                path: path.to_path_buf(),
+                message: format!(
+                    "invalid `[tui] session_preview` value `{raw}`; \
+                     expected one of transcript, pane"
                 ),
             }),
         }
