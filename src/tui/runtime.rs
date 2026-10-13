@@ -140,7 +140,7 @@ fn run_loop(
             let event = event::read()?;
             let viewport = terminal.size()?.height.saturating_sub(2);
             let action = action_for_event(&app, event, viewport);
-            force_preview = matches!(action, Some(Action::Refresh));
+            force_preview = matches!(action, Some(Action::Refresh | Action::HardRefresh));
             mode.dispatch(terminal, &mut app, &config, action)?;
         }
     }
@@ -232,9 +232,13 @@ impl LiveMode {
     fn spawn_discovery(&mut self, app: &mut App, nudge: DaemonNudge, generation: u64) {
         self.last_refresh = Instant::now();
         spawn_discovery_worker(app.config(), &self.result_tx, nudge, generation);
+        let label = match nudge {
+            DaemonNudge::LiveAndForge => "Refreshing forges",
+            DaemonNudge::None | DaemonNudge::LiveClasses => "Discovering",
+        };
         app.update(Msg::InFlightStart {
             kind: crate::tui::app::InFlightKind::Discovery,
-            label: "Discovering".to_string(),
+            label: label.to_string(),
         });
     }
 }
@@ -344,6 +348,15 @@ impl LoopMode for LiveMode {
                     let generation = self.workers.start();
                     self.spawn_discovery(app, DaemonNudge::LiveClasses, generation);
                 }
+            }
+            Some(Action::HardRefresh) => {
+                // Spawned even while another worker runs: the operator
+                // asked for the forges now, and the newer generation
+                // wins when results land.
+                app.update(Msg::ForgeRefreshRequested);
+                app.config().discovery_caches.clear_forge();
+                let generation = self.workers.start();
+                self.spawn_discovery(app, DaemonNudge::LiveAndForge, generation);
             }
             Some(Action::Attach) => {
                 dispatch_live(terminal, app, config, tmux, Msg::AttachSelected);
@@ -550,7 +563,11 @@ impl LoopMode for StaticMode {
                 let next = cycle_view(app.active_view(), delta);
                 dispatch(app, Msg::SwitchView(next));
             }
-            Some(Action::Refresh) => {
+            Some(action @ (Action::Refresh | Action::HardRefresh)) => {
+                if action == Action::HardRefresh {
+                    // Recorded PR previews reload; nothing asks a forge.
+                    app.update(Msg::ForgeRefreshRequested);
+                }
                 if let Some(path) = self.fixture_path.as_deref() {
                     // ADR 0069: in fixture mode, `r` re-reads the
                     // file on disk so the operator can edit the
@@ -975,9 +992,6 @@ fn set_static_data(
     Ok(())
 }
 
-/// Spawn a background thread that runs discovery and sends the resolved
-/// snapshot through `tx`. Row-tree building stays on the main thread so
-/// it can use the app's current view state.
 /// Whether a refresh first asks a running daemon to rescan.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum DaemonNudge {
@@ -986,8 +1000,25 @@ enum DaemonNudge {
     /// Rescan the mux and harness classes first; see
     /// [`nudge_daemon_live_classes`].
     LiveClasses,
+    /// Rescan the live classes and ask the forges again (Ctrl-R,
+    /// ADR 0116).
+    LiveAndForge,
 }
 
+impl DaemonNudge {
+    /// The daemon classes to rescan before taking its snapshot.
+    fn classes(self) -> &'static [&'static str] {
+        match self {
+            Self::None => &[],
+            Self::LiveClasses => &LIVE_CLASSES,
+            Self::LiveAndForge => &HARD_REFRESH_CLASSES,
+        }
+    }
+}
+
+/// Spawn a background thread that runs discovery and sends the resolved
+/// snapshot through `tx`. Row-tree building stays on the main thread so
+/// it can use the app's current view state.
 fn spawn_discovery_worker(
     config: &RunConfig,
     tx: &mpsc::Sender<DiscoveryResult>,
@@ -998,9 +1029,7 @@ fn spawn_discovery_worker(
     let tx = tx.clone();
     std::thread::spawn(move || {
         let mut warning = None;
-        if nudge == DaemonNudge::LiveClasses
-            && let Err(message) = nudge_daemon_live_classes()
-        {
+        if let Err(message) = nudge_daemon(nudge.classes()) {
             // The daemon's snapshot may be stale; rebuild locally so
             // the operator still sees current state.
             config.refresh = true;
@@ -1020,14 +1049,24 @@ fn spawn_discovery_worker(
 /// transcripts. Both rescan in well under a second.
 const LIVE_CLASSES: [&str; 2] = ["mux", "harness"];
 
+/// What a hard refresh rescans: the live classes, and the forges,
+/// whose listings are otherwise reused for the forge interval.
+const HARD_REFRESH_CLASSES: [&str; 3] = ["mux", "harness", "forge"];
+
 /// Ask a running `conspectus serve` daemon to rescan
 /// [`LIVE_CLASSES`] now. The daemon otherwise serves its last tick,
 /// which after a tmux hand-off still shows the world from before it.
 /// No daemon is not an error (the caller's refresh runs discovery
 /// itself); a daemon that fails the refresh is.
 pub(super) fn nudge_daemon_live_classes() -> Result<(), String> {
+    nudge_daemon(&LIVE_CLASSES)
+}
+
+/// Ask a running daemon to rescan `classes` now, as
+/// [`nudge_daemon_live_classes`] does for the live ones.
+fn nudge_daemon(classes: &[&str]) -> Result<(), String> {
     use crate::server::{ClientOutcome, client_refresh};
-    for class in LIVE_CLASSES {
+    for &class in classes {
         match client_refresh(Some(class)) {
             ClientOutcome::Ok(_) => {}
             ClientOutcome::NoDaemon => return Ok(()),
@@ -1542,10 +1581,23 @@ fn plan_preview_load(
     if app.previews().is_loading(&source) {
         return None;
     }
-    let fresh = app
-        .previews()
-        .get(&source)
-        .is_some_and(|entry| !entry.stale);
+    let entry = app.previews().get(&source);
+    let fresh = entry.is_some_and(|entry| !entry.stale);
+    if source.is_forge() {
+        // A forge read is a network call: reuse a loaded PR across
+        // selections and `r` until it ages past the forge interval or
+        // a hard refresh marks it stale (ADR 0116). A failed read
+        // retries the next time the PR is selected.
+        let reusable = fresh
+            && entry.is_some_and(|entry| {
+                matches!(entry.content, PreviewContent::Lines(_))
+                    && entry
+                        .captured_at
+                        .is_some_and(|at| at.elapsed() < config.intervals.forge)
+            });
+        let reload = !reusable && (!fresh || force || shown != Some(&source));
+        return reload.then_some(source);
+    }
     if fresh && !force && shown == Some(&source) {
         return None;
     }

@@ -100,6 +100,12 @@ impl PreviewSource {
         matches!(self, Self::Pane(_) | Self::Transcript(_))
     }
 
+    /// Whether the source is read from a forge, which previews read
+    /// at the forge cadence rather than on every selection (ADR 0116).
+    pub fn is_forge(&self) -> bool {
+        matches!(self, Self::PullRequest(_))
+    }
+
     /// How many entries of this source's kind the cache keeps.
     /// Parsed transcripts can be large, and only the few most recently
     /// previewed are likely to be selected again soon; other loaded
@@ -264,6 +270,15 @@ impl PreviewStore {
     pub fn mark_stale(&mut self, source: &PreviewSource) {
         if let Some(entry) = self.entries.get_mut(source) {
             entry.stale = true;
+        }
+    }
+
+    /// Mark every pull-request preview for reload, for a hard refresh.
+    pub fn mark_forge_stale(&mut self) {
+        for (source, entry) in &mut self.entries {
+            if source.is_forge() {
+                entry.stale = true;
+            }
         }
     }
 }

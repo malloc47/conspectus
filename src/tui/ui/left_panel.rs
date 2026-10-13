@@ -212,6 +212,12 @@ pub(super) fn empty_left_panel_text(app: &App) -> String {
         let chips = render_filter_chips(app.filter());
         return format!("No rows match `{chips}`.\nPress `F` to clear filters, `f` to edit.");
     }
+    if app.active_view() == crate::tui::View::Prs {
+        // Forge listings are reused for the forge interval, so `r`
+        // alone won't show a PR opened a minute ago.
+        return "No pull requests discovered.\nPress `Ctrl-R` to ask the forges again or `q` to quit."
+            .to_string();
+    }
     "No sessions discovered.\nPress `r` to refresh or `q` to quit.".to_string()
 }
 

@@ -685,14 +685,22 @@ fn cycle_view_wraps_in_both_directions() {
 }
 
 #[test]
-fn translate_ignores_control_a_and_control_r() {
+fn translate_ignores_control_a() {
     assert_eq!(
         translate(press(KeyCode::Char('a'), KeyModifiers::CONTROL), 24),
         None
     );
+}
+
+#[test]
+fn control_r_is_a_hard_refresh_and_r_a_plain_one() {
     assert_eq!(
         translate(press(KeyCode::Char('r'), KeyModifiers::CONTROL), 24),
-        None
+        Some(Action::HardRefresh)
+    );
+    assert_eq!(
+        translate(press(KeyCode::Char('r'), KeyModifiers::NONE), 24),
+        Some(Action::Refresh)
     );
 }
 
@@ -1689,6 +1697,115 @@ mod preview_loading {
             source: transcript(),
             content: PreviewContent::Unavailable("gone".to_string()),
         });
+    }
+
+    /// The PRs view with PR `#7` selected.
+    fn pr_app(config: RunConfig) -> App {
+        let mut snapshot = GraphSnapshot::empty();
+        snapshot
+            .nodes
+            .push(GraphNode::ForgePr(crate::model::ForgePrNode {
+                id: crate::model::ForgePrId::new("github", "github.com", "o", "r", 7),
+                provider: "github".to_string(),
+                host: "github.com".to_string(),
+                owner: "o".to_string(),
+                repo: "r".to_string(),
+                number: 7,
+                state: Some("OPEN".to_string()),
+                url: None,
+                updated_epoch: None,
+                is_draft: false,
+                head_ref: Some("feature".to_string()),
+            }));
+        let snapshot = resolve_snapshot(snapshot);
+        let mut config = config;
+        config.default_view = View::Prs;
+        let mut app = App::new(config);
+        let tree = crate::tui::rows::build_tree_for_view(crate::tui::rows::TreeInputs::from_app(
+            &snapshot, &app,
+        ));
+        app.update(Msg::SetData {
+            snapshot: SnapshotHandle::from_snapshot(&snapshot),
+            tree,
+            loaded_at_epoch: 1_700_000_000,
+            initial_selection_hint: None,
+        });
+        let row = app
+            .tree()
+            .rows
+            .iter()
+            .find(|row| matches!(row.kind, RowKind::Pr(_)))
+            .map(|row| row.id.clone())
+            .expect("PR row");
+        app.set_selection(row);
+        app
+    }
+
+    fn pr() -> PreviewSource {
+        PreviewSource::PullRequest(crate::tui::preview::PrQuery {
+            provider: "github".to_string(),
+            host: "github.com".to_string(),
+            owner: "o".to_string(),
+            repo: "r".to_string(),
+            number: 7,
+        })
+    }
+
+    fn fetched(app: &mut App) {
+        app.update(Msg::SetPreview {
+            source: pr(),
+            content: PreviewContent::Lines(vec!["Title".into()]),
+        });
+    }
+
+    #[test]
+    fn a_fetched_pr_is_reused_across_reselection_and_refresh() {
+        let mut app = pr_app(RunConfig::defaults());
+        let config = app.config().clone();
+        assert_eq!(plan_preview_load(&app, &config, None, false), Some(pr()));
+        fetched(&mut app);
+        let elsewhere = transcript();
+        assert_eq!(
+            plan_preview_load(&app, &config, Some(&elsewhere), false),
+            None
+        );
+        assert_eq!(plan_preview_load(&app, &config, Some(&pr()), true), None);
+    }
+
+    #[test]
+    fn a_hard_refresh_or_the_forge_interval_reloads_a_pr() {
+        let mut app = pr_app(RunConfig::defaults());
+        fetched(&mut app);
+        app.update(Msg::ForgeRefreshRequested);
+        let config = app.config().clone();
+        assert_eq!(
+            plan_preview_load(&app, &config, Some(&pr()), false),
+            Some(pr())
+        );
+
+        let mut config = RunConfig::defaults();
+        config.intervals.forge = Duration::ZERO;
+        let mut app = pr_app(config.clone());
+        fetched(&mut app);
+        assert_eq!(
+            plan_preview_load(&app, &config, Some(&transcript()), false),
+            Some(pr())
+        );
+    }
+
+    #[test]
+    fn a_pr_that_failed_to_load_retries_when_selected_again() {
+        let mut app = pr_app(RunConfig::defaults());
+        app.update(Msg::SetPreview {
+            source: pr(),
+            content: PreviewContent::Unavailable("offline".to_string()),
+        });
+        let config = app.config().clone();
+        assert_eq!(plan_preview_load(&app, &config, Some(&pr()), false), None);
+        assert_eq!(
+            plan_preview_load(&app, &config, Some(&transcript()), false),
+            Some(pr())
+        );
     }
 
     #[test]

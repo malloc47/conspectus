@@ -1349,6 +1349,7 @@ impl App {
             Msg::InFlightFinish(kind) => {
                 self.in_flight_ops.retain(|o| o.kind != kind);
             }
+            Msg::ForgeRefreshRequested => self.preview_store.mark_forge_stale(),
             Msg::HandoffReturned(mux) => {
                 let sessions = self
                     .handle

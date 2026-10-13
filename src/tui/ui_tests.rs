@@ -4776,6 +4776,30 @@ fn pr_source(number: u64) -> PreviewSource {
     })
 }
 
+#[test]
+fn an_empty_prs_view_points_at_the_hard_refresh() {
+    let mut config = RunConfig::defaults();
+    config.default_view = View::Prs;
+    let mut app = App::new(config);
+    let snapshot = resolve_snapshot(GraphSnapshot::empty());
+    let tree = crate::tui::rows::build_tree_for_view(crate::tui::rows::TreeInputs::from_app(
+        &snapshot, &app,
+    ));
+    app.update(Msg::SetData {
+        snapshot: SnapshotHandle::from_snapshot(&snapshot),
+        tree,
+        loaded_at_epoch: 1_700_000_000,
+        initial_selection_hint: None,
+    });
+    let frame = buffer_to_string(&render_to_buffer(&mut app, Rect::new(0, 0, 200, 30)));
+    assert!(frame.contains("No pull requests discovered."), "{frame}");
+    assert!(
+        frame.contains("Press `Ctrl-R` to ask the forges again"),
+        "{frame}"
+    );
+    assert!(frame.contains("^R forges"), "{frame}");
+}
+
 /// Select PR `#number` and render the frame.
 fn pr_frame(app: &mut App, number: u64, content: Option<PreviewContent>) -> String {
     let row = app

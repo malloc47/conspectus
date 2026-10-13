@@ -174,6 +174,9 @@ pub enum Msg {
         kind: InFlightKind,
         label: String,
     },
+    /// The operator asked for a hard refresh: cached pull-request
+    /// previews reload the next time they show (ADR 0116).
+    ForgeRefreshRequested,
     /// Mark an in-flight async operation complete.
     /// Removes the matching kind from the tracker; a no-op if no
     /// op with that kind is currently in flight.

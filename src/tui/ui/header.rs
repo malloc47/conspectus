@@ -424,7 +424,12 @@ pub(super) fn contextual_status_text(app: &App) -> String {
         Focus::Right => "j/k cursor · Enter drill/expand · e group · ⌫ back",
     };
     let action_hint = default_action_status_hint(app);
-    format!("{action_hint} · {focus_hint} · Tab focus · r refresh · q quit")
+    let refresh_hint = if app.active_view() == crate::tui::View::Prs {
+        "r refresh · ^R forges"
+    } else {
+        "r refresh"
+    };
+    format!("{action_hint} · {focus_hint} · Tab focus · {refresh_hint} · q quit")
 }
 
 /// Status-bar action hint that advertises `Enter` as the primary

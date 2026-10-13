@@ -268,6 +268,7 @@ fn keymap_sections() -> Vec<HelpSection> {
                     "Open the selected session's transcript (or the mux row's linked session); q/Esc close, j/k or PgDn/PgUp scroll, g/G start/end, t cycle tool detail, T thinking",
                 ),
                 Binding::new("r", "Refresh discovery now"),
+                Binding::new("Ctrl-R", crate::tui::keybindings::HARD_REFRESH_HELP),
                 Binding::new(
                     "S",
                     "Resume the selected un-muxed agent session in a new terminal",

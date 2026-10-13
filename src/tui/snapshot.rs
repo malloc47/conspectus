@@ -229,6 +229,11 @@ fn apply_action(app: &mut App, config: &RunConfig, action: Action) {
         Action::SearchOverlayKey(key) => handle_search_overlay_key(app, key),
         Action::HelpOverlayKey(key) => handle_help_overlay_key(app, key),
         Action::Refresh => runtime::refresh(app, config),
+        Action::HardRefresh => {
+            app.update(crate::tui::Msg::ForgeRefreshRequested);
+            app.config().discovery_caches.clear_forge();
+            runtime::refresh(app, config);
+        }
         // The clipboard write is skipped: OSC 52 would land in the
         // frame output. The toast still renders.
         Action::ExplorerEnter => runtime::explorer_enter(app, |_| {}),

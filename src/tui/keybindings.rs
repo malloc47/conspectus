@@ -69,8 +69,7 @@ pub enum KeyMatcher {
     /// that accept both the shifted and the unshifted forms.
     UpperChar(char),
     /// Char match admitting any modifier except CONTROL, so `r`
-    /// fires but `Ctrl-R` (which may be reserved by the terminal)
-    /// doesn't.
+    /// fires but `Ctrl-R`, bound separately, doesn't.
     AnyModExceptCtrl(char),
     /// Non-char code match ignoring modifiers. Used for arrow
     /// keys and nav keys, where any modifier is fine.
@@ -112,6 +111,10 @@ impl KeyMatcher {
 /// "Discoverable controls" section.
 pub const MESSAGES_HELP: &str =
     "Open the messages log: launch, attach and rename outcomes with full output";
+
+/// Help text for Ctrl-R, shared with the help overlay.
+pub const HARD_REFRESH_HELP: &str =
+    "Hard refresh: rescan and re-query forges (gh) for pull requests";
 
 pub const KEYBINDINGS: &[KeyBinding] = &[
     KeyBinding {
@@ -254,13 +257,22 @@ pub const KEYBINDINGS: &[KeyBinding] = &[
         help_text: "Toggle explorer edge-meta visibility",
     },
     // Parametric-guard shortcuts. Each
-    // matcher fires on any non-Ctrl modifier + the char, so
-    // `Ctrl-R` etc. reserved by the terminal doesn't collide.
+    // matcher fires on any non-Ctrl modifier + the char, so Ctrl
+    // chords (`Ctrl-R`, the hard refresh) stay distinct.
     KeyBinding {
         mode: KeyMode::Global,
         key: KeyMatcher::AnyModExceptCtrl('r'),
         action: || Action::Refresh,
         help_text: "Refresh discovery now",
+    },
+    KeyBinding {
+        mode: KeyMode::Global,
+        key: KeyMatcher::Exact {
+            modifiers: KeyModifiers::CONTROL,
+            code: KeyCode::Char('r'),
+        },
+        action: || Action::HardRefresh,
+        help_text: HARD_REFRESH_HELP,
     },
     KeyBinding {
         mode: KeyMode::Global,

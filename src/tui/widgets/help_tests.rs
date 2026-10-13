@@ -31,6 +31,7 @@ fn every_keybindings_entry_appears_in_help_sections() {
             "1" | "2" | "3" | "4" | "5" => vec![label.to_string(), "1 – 5".to_string()],
             "Ctrl-c" => vec!["Ctrl-C".to_string()],
             "Ctrl-g" => vec!["Ctrl-G".to_string()],
+            "Ctrl-r" => vec!["Ctrl-R".to_string()],
             "Down" | "Up" => vec!["↓".to_string(), "↑".to_string()],
             "Right" | "Left" => vec!["→".to_string(), "←".to_string()],
             "Home" | "End" => vec!["g".to_string(), "G".to_string()],

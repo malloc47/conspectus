@@ -30,6 +30,9 @@ use crate::tui::{Msg, View};
 pub enum Action {
     Msg(Box<Msg>),
     Refresh,
+    /// Refresh and ask the forges again instead of reusing their
+    /// listings (ADR 0116).
+    HardRefresh,
     Attach,
     /// Open the rename overlay for the current selection. The
     /// runtime resolves the AgentSession id and seeds the input
