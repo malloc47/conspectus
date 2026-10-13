@@ -191,7 +191,7 @@ fn server_intervals_default_when_absent() {
     assert_eq!(intervals.harness, Duration::from_secs(5));
     assert_eq!(intervals.mux, Duration::from_secs(5));
     assert_eq!(intervals.git, Duration::from_secs(30));
-    assert_eq!(intervals.forge, Duration::from_secs(300));
+    assert_eq!(intervals.forge, Duration::from_secs(3600));
 }
 
 #[test]

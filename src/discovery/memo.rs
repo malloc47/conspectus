@@ -27,9 +27,8 @@ pub struct DiscoveryCaches {
     pub(crate) git_probes: StampedMap<git::GitStateFingerprint, git::CachedProbe>,
     pub(crate) tmux: TtlCache<(), GraphFragment>,
     pub(crate) zellij: TtlCache<(), GraphFragment>,
-    /// The last forge fragment, keyed by the scan roots it was built
-    /// for, so changing `--scan-root` misses and triggers a fresh `gh` run.
-    pub(crate) forge: TtlCache<Vec<PathBuf>, GraphFragment>,
+    /// Forge listings per remote, reused for the forge interval.
+    pub(crate) forge: forge::ForgeListings,
     pub(crate) codex_rollouts: StampedMap<FileStamp, codex::RolloutScan>,
     pub(crate) claude_sessions: StampedMap<FileStamp, claude_code::DiscoveredSession>,
     pub(crate) opencode_sessions: StampedMap<FileStamp, Vec<opencode::SessionInfo>>,
@@ -45,7 +44,7 @@ impl Default for DiscoveryCaches {
             git_probes: StampedMap::new(),
             tmux: TtlCache::new(tmux::TMUX_CACHE_TTL),
             zellij: TtlCache::new(zellij::ZELLIJ_CACHE_TTL),
-            forge: TtlCache::new(forge::FORGE_CACHE_TTL),
+            forge: forge::ForgeListings::default(),
             codex_rollouts: StampedMap::new(),
             claude_sessions: StampedMap::new(),
             opencode_sessions: StampedMap::new(),
@@ -62,6 +61,12 @@ impl fmt::Debug for DiscoveryCaches {
 }
 
 impl DiscoveryCaches {
+    /// Drop every cached forge listing, so the next discovery asks the
+    /// forges again (ADR 0116).
+    pub fn clear_forge(&self) {
+        self.forge.clear();
+    }
+
     /// The last mux/harness slice fingerprint, replaced by `current`
     /// when one was observed.
     pub(crate) fn swap_process_tree_fingerprint(&self, current: Option<u64>) -> Option<u64> {

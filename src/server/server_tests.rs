@@ -49,7 +49,7 @@ fn class_intervals_use_server_interval_durations() {
     );
     assert_eq!(
         ProviderClass::Forge.ttl_duration(&intervals),
-        Duration::from_secs(300)
+        Duration::from_secs(3600)
     );
 }
 

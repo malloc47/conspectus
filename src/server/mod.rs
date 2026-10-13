@@ -770,6 +770,12 @@ fn handle_refresh(request: &Request, ctx: &DispatchCtx) -> Response {
         .lock()
         .unwrap_or_else(PoisonError::into_inner);
     let started = crate::discovery::current_epoch() as u64;
+    // An operator's forge or full refresh asks the forges again;
+    // scheduled cycles reuse listings until the forge interval
+    // passes (ADR 0116).
+    if matches!(class, None | Some(ProviderClass::Forge)) {
+        ctx.discovery_caches.clear_forge();
+    }
     let outcome = match class {
         None => run_full_rebuild(ctx),
         Some(c) => try_class_cycle(c, ctx),

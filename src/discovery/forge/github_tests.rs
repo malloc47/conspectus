@@ -654,3 +654,150 @@ fn a_failure_for_one_repo_keeps_the_others_prs() {
         fragment.diagnostics
     );
 }
+
+/// A runner that records each `gh pr list` repo and, while `offline`
+/// is set, reports the forge unreachable.
+#[derive(Clone, Default)]
+struct CountingGh {
+    calls: std::sync::Arc<std::sync::Mutex<Vec<String>>>,
+    offline: std::sync::Arc<std::sync::atomic::AtomicBool>,
+}
+
+impl CountingGh {
+    fn calls(&self) -> Vec<String> {
+        self.calls.lock().expect("calls").clone()
+    }
+
+    fn go_offline(&self) {
+        self.offline
+            .store(true, std::sync::atomic::Ordering::Relaxed);
+    }
+}
+
+impl crate::discovery::forge::GhRunner for CountingGh {
+    fn list_pull_requests(
+        &self,
+        repo: &str,
+        _filter: &crate::discovery::forge::PrListFilter,
+        _fields: &str,
+    ) -> anyhow::Result<GhOutcome> {
+        self.calls.lock().expect("calls").push(repo.to_string());
+        Ok(if self.offline.load(std::sync::atomic::Ordering::Relaxed) {
+            GhOutcome::Unavailable(GhUnavailableReason::Offline)
+        } else {
+            GhOutcome::PullRequests(r#"[{"number": 5, "headRefName": "main"}]"#.to_string())
+        })
+    }
+
+    fn view_pull_request(
+        &self,
+        _repo: &str,
+        _number: u64,
+        _fields: &str,
+    ) -> anyhow::Result<GhOutcome> {
+        Ok(GhOutcome::PullRequests("{}".to_string()))
+    }
+}
+
+fn octo(name: &str) -> ForgeRepo {
+    let mut repo = forge_repo(
+        &[("origin", &format!("git@github.com:octo/{name}.git"))],
+        &[],
+    );
+    repo.repo_id = RepoId::new(format!("/workspace/{name}/.git"));
+    repo
+}
+
+#[test]
+fn listings_are_reused_within_the_forge_interval() {
+    let runner = CountingGh::default();
+    let provider = GitHubForgeProvider::with_runner(runner.clone());
+    let context = DiscoveryContext::default();
+    for _ in 0..2 {
+        let fragment = provider.discover(&[octo("a")], &context).expect("discover");
+        assert_eq!(pr_ids(&fragment), ["octo/a#5"]);
+    }
+    // The open and the recent query, once.
+    assert_eq!(runner.calls().len(), 2, "{:?}", runner.calls());
+}
+
+#[test]
+fn a_new_remote_costs_only_its_own_queries() {
+    let runner = CountingGh::default();
+    let provider = GitHubForgeProvider::with_runner(runner.clone());
+    let context = DiscoveryContext::default();
+    provider.discover(&[octo("a")], &context).expect("a");
+    let fragment = provider
+        .discover(&[octo("a"), octo("b")], &context)
+        .expect("a and b");
+    assert_eq!(pr_ids(&fragment), ["octo/a#5", "octo/b#5"]);
+    assert_eq!(
+        runner.calls(),
+        [
+            "github.com/octo/a",
+            "github.com/octo/a",
+            "github.com/octo/b",
+            "github.com/octo/b"
+        ]
+    );
+}
+
+#[test]
+fn listings_past_the_forge_interval_or_cleared_are_fetched_again() {
+    let runner = CountingGh::default();
+    let provider = GitHubForgeProvider::with_runner(runner.clone());
+    let expired = DiscoveryContext::default().with_forge_max_age(std::time::Duration::ZERO);
+    provider.discover(&[octo("a")], &expired).expect("first");
+    provider.discover(&[octo("a")], &expired).expect("expired");
+    assert_eq!(runner.calls().len(), 4);
+
+    let context = DiscoveryContext::default();
+    provider.discover(&[octo("a")], &context).expect("cached");
+    assert_eq!(runner.calls().len(), 6);
+    context.caches().clear_forge();
+    provider.discover(&[octo("a")], &context).expect("cleared");
+    assert_eq!(runner.calls().len(), 8);
+}
+
+#[test]
+fn a_failed_refetch_keeps_the_last_prs_and_reports_the_failure() {
+    let runner = CountingGh::default();
+    let provider = GitHubForgeProvider::with_runner(runner.clone());
+    let context = DiscoveryContext::default().with_forge_max_age(std::time::Duration::ZERO);
+    provider.discover(&[octo("a")], &context).expect("online");
+    runner.go_offline();
+    let fragment = provider.discover(&[octo("a")], &context).expect("offline");
+    assert_eq!(pr_ids(&fragment), ["octo/a#5"]);
+    assert_eq!(
+        fragment.diagnostics,
+        [Diagnostic::ProviderUnavailable {
+            provider: "github".to_string(),
+            reason: GhUnavailableReason::Offline.as_str().to_string(),
+        }]
+    );
+}
+
+#[test]
+fn reused_prs_carry_the_time_the_forge_answered() {
+    let runner = CountingGh::default();
+    let context = DiscoveryContext::default();
+    context.caches().forge.set(
+        "github.com/octo/a".to_string(),
+        crate::discovery::forge::RemoteListing {
+            fetched: std::time::Instant::now(),
+            epoch: 42,
+            bodies: vec![r#"[{"number": 5, "headRefName": "main"}]"#.to_string()],
+            failures: Vec::new(),
+        },
+    );
+    let fragment = GitHubForgeProvider::with_runner(runner.clone())
+        .discover(&[octo("a")], &context)
+        .expect("discover");
+    assert!(runner.calls().is_empty());
+    let epochs: Vec<Option<i64>> = fragment
+        .node_provenance
+        .values()
+        .map(|provenance| provenance.freshness_epoch)
+        .collect();
+    assert_eq!(epochs, [Some(42)]);
+}

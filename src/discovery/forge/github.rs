@@ -16,6 +16,7 @@
 
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
+use std::time::Instant;
 
 use anyhow::Result;
 use serde_json::Value;
@@ -27,7 +28,9 @@ use crate::model::{
     UnresolvedEndpoint,
 };
 
-use super::{GH_PR_LIST_FIELDS, GITHUB_DEFAULT_HOST, GITHUB_PROVIDER, GhOutcome, GhRunner};
+use super::{
+    GH_PR_LIST_FIELDS, GITHUB_DEFAULT_HOST, GITHUB_PROVIDER, GhOutcome, GhRunner, RemoteListing,
+};
 
 const FORGE_ADAPTER: &str = crate::discovery::providers::GITHUB;
 
@@ -499,7 +502,8 @@ fn looks_like_github_host(host: &str) -> bool {
 
 /// GitHub PR discovery over the repos the graph found (ADR 0115). For
 /// each distinct GitHub remote of each repo it asks `gh` for open PRs
-/// and for PRs updated recently, a few calls at a time. Failures become
+/// and for PRs updated recently, a few calls at a time. Each remote's
+/// answer is reused for the forge interval (ADR 0116). Failures become
 /// diagnostics and leave other repos' PRs intact.
 pub struct GitHubForgeProvider<R: GhRunner> {
     runner: R,
@@ -509,17 +513,100 @@ impl<R: GhRunner> GitHubForgeProvider<R> {
     pub fn with_runner(runner: R) -> Self {
         Self { runner }
     }
+
+    /// The listing for every distinct GitHub remote of `repos`: cached
+    /// ones while they are fresh (ADR 0116), and the rest fetched now,
+    /// a few remotes at a time.
+    fn listings(
+        &self,
+        repos: &[super::ForgeRepo],
+        context: &DiscoveryContext,
+    ) -> BTreeMap<RemoteSlug, RemoteListing> {
+        let cache = &context.caches().forge;
+        let max_age = context.forge_max_age();
+        let remotes: BTreeSet<RemoteSlug> = repos.iter().flat_map(github_remotes).collect();
+        let mut listings = BTreeMap::new();
+        let mut stale = Vec::new();
+        for remote in remotes {
+            match cache.fresh(&remote_key(&remote), max_age) {
+                Some(listing) => {
+                    listings.insert(remote, listing);
+                }
+                None => stale.push(remote),
+            }
+        }
+        if stale.is_empty() {
+            return listings;
+        }
+
+        let epoch = crate::discovery::current_epoch();
+        let since = chrono::DateTime::from_timestamp(epoch - super::RECENT_PR_DAYS * 86_400, 0)
+            .map(|at| at.format("%Y-%m-%d").to_string())
+            .unwrap_or_default();
+        let filters = [
+            super::PrListFilter::Open {
+                limit: super::OPEN_PR_LIMIT,
+            },
+            super::PrListFilter::UpdatedSince {
+                since,
+                limit: super::RECENT_PR_LIMIT,
+            },
+        ];
+        let jobs: Vec<(&RemoteSlug, &super::PrListFilter)> = stale
+            .iter()
+            .flat_map(|remote| filters.iter().map(move |filter| (remote, filter)))
+            .collect();
+        let outcomes = run_bounded(&jobs, super::MAX_CONCURRENT_GH, |(remote, filter)| {
+            self.runner
+                .list_pull_requests(&remote_key(remote), filter, GH_PR_LIST_FIELDS)
+        });
+
+        let fetched = Instant::now();
+        let mut answered: BTreeMap<&RemoteSlug, RemoteListing> = BTreeMap::new();
+        for ((remote, _), outcome) in jobs.iter().zip(outcomes) {
+            let listing = answered.entry(remote).or_insert_with(|| RemoteListing {
+                fetched,
+                epoch,
+                bodies: Vec::new(),
+                failures: Vec::new(),
+            });
+            let failed = |message: String| {
+                format!("gh pr list --repo {} failed: {message}", remote_key(remote))
+            };
+            match outcome {
+                Ok(GhOutcome::PullRequests(body)) => listing.bodies.push(body),
+                Ok(GhOutcome::Unavailable(reason)) => {
+                    listing.failures.push(reason.as_str().to_string());
+                }
+                Ok(GhOutcome::Failed { message, .. }) => listing.failures.push(failed(message)),
+                Err(err) => listing.failures.push(failed(format!("{err:#}"))),
+            }
+        }
+        for (remote, mut listing) in answered {
+            let key = remote_key(remote);
+            // A failed refetch keeps the PRs the remote last returned,
+            // with their age, so going offline doesn't empty the view.
+            if !listing.failures.is_empty()
+                && let Some(previous) = cache.get(&key)
+                && !previous.bodies.is_empty()
+            {
+                listing.bodies = previous.bodies;
+                listing.epoch = previous.epoch;
+            }
+            cache.set(key, listing.clone());
+            listings.insert(remote.clone(), listing);
+        }
+        listings
+    }
+}
+
+/// A remote as `gh --repo` takes it, and as forge listings are keyed.
+fn remote_key((host, owner, name): &RemoteSlug) -> String {
+    format!("{host}/{owner}/{name}")
 }
 
 /// A remote as `(host, owner, repo)`.
 type RemoteSlug = (String, String, String);
-
-/// One `gh pr list` call: a remote of a repo, and which PRs to ask for.
-struct PrQueryJob<'a> {
-    repo: &'a super::ForgeRepo,
-    remote: RemoteSlug,
-    filter: super::PrListFilter,
-}
 
 impl<R: GhRunner + 'static> super::ForgeAdapter for GitHubForgeProvider<R> {
     fn provider(&self) -> &str {
@@ -529,107 +616,50 @@ impl<R: GhRunner + 'static> super::ForgeAdapter for GitHubForgeProvider<R> {
     fn discover(
         &self,
         repos: &[super::ForgeRepo],
-        _context: &DiscoveryContext,
+        context: &DiscoveryContext,
     ) -> Result<GraphFragment> {
-        let epoch = crate::discovery::current_epoch();
-        let since = chrono::DateTime::from_timestamp(epoch - super::RECENT_PR_DAYS * 86_400, 0)
-            .map(|at| at.format("%Y-%m-%d").to_string())
-            .unwrap_or_default();
-
-        let mut jobs = Vec::new();
-        for repo in repos {
-            for remote in github_remotes(repo) {
-                jobs.push(PrQueryJob {
-                    repo,
-                    remote: remote.clone(),
-                    filter: super::PrListFilter::Open {
-                        limit: super::OPEN_PR_LIMIT,
-                    },
-                });
-                jobs.push(PrQueryJob {
-                    repo,
-                    remote,
-                    filter: super::PrListFilter::UpdatedSince {
-                        since: since.clone(),
-                        limit: super::RECENT_PR_LIMIT,
-                    },
-                });
-            }
-        }
-
-        let outcomes = run_bounded(&jobs, super::MAX_CONCURRENT_GH, |job| {
-            let (host, owner, name) = &job.remote;
-            self.runner.list_pull_requests(
-                &format!("{host}/{owner}/{name}"),
-                &job.filter,
-                GH_PR_LIST_FIELDS,
-            )
-        });
-
-        // Records per (repo, remote), merged across the two queries by
-        // PR number.
-        let mut found: BTreeMap<(RepoId, RemoteSlug), BTreeMap<u64, PullRequestRecord>> =
-            BTreeMap::new();
-        let mut diagnostics: BTreeSet<Diagnostic> = BTreeSet::new();
-        for (job, outcome) in jobs.iter().zip(outcomes) {
-            let (host, owner, name) = &job.remote;
-            let body = match outcome {
-                Ok(GhOutcome::PullRequests(body)) => body,
-                Ok(GhOutcome::Unavailable(reason)) => {
-                    diagnostics.insert(unavailable(reason.as_str().to_string()));
-                    continue;
-                }
-                Ok(GhOutcome::Failed { message, .. }) => {
-                    diagnostics.insert(unavailable(format!(
-                        "gh pr list --repo {host}/{owner}/{name} failed: {message}"
-                    )));
-                    continue;
-                }
-                Err(err) => {
-                    diagnostics.insert(unavailable(format!(
-                        "gh pr list --repo {host}/{owner}/{name} failed: {err:#}"
-                    )));
-                    continue;
-                }
-            };
-            let records = found
-                .entry((job.repo.repo_id.clone(), job.remote.clone()))
-                .or_default();
-            for record in GhPullRequestParser::new().parse(&body) {
-                records.entry(record.number).or_insert(record);
-            }
-        }
+        let listings = self.listings(repos, context);
 
         let mut fragments = Vec::new();
+        let mut diagnostics: BTreeSet<Diagnostic> = BTreeSet::new();
         for repo in repos {
             let remotes: BTreeSet<(String, String)> = github_remotes(repo)
                 .into_iter()
                 .map(|(_, owner, name)| (owner.to_ascii_lowercase(), name.to_ascii_lowercase()))
                 .collect();
             for remote in github_remotes(repo) {
-                let Some(records) = found.get(&(repo.repo_id.clone(), remote.clone())) else {
+                let Some(listing) = listings.get(&remote) else {
                     continue;
                 };
+                diagnostics.extend(listing.failures.iter().cloned().map(unavailable));
+                // Merge the open and recent queries by PR number.
+                let mut records: BTreeMap<u64, PullRequestRecord> = BTreeMap::new();
+                for body in &listing.bodies {
+                    for record in GhPullRequestParser::new().parse(body) {
+                        records.entry(record.number).or_insert(record);
+                    }
+                }
+                if records.is_empty() {
+                    continue;
+                }
                 let (host, owner, name) = remote;
                 let context = RepoContext::new(repo.repo_id.clone(), host, owner, name);
-                let records: Vec<PullRequestRecord> = records.values().cloned().collect();
-                fragments.push(fragment_for_repo(
-                    &context,
-                    &repo.local_branches,
-                    &remotes,
-                    &records,
-                ));
+                let records: Vec<PullRequestRecord> = records.into_values().collect();
+                let mut fragment =
+                    fragment_for_repo(&context, &repo.local_branches, &remotes, &records);
+                // Stamp when the forge answered, not when the listing
+                // was reused, so the freshness gate sees its real age.
+                crate::discovery::stamp_fragment(&mut fragment, FORGE_ADAPTER, listing.epoch);
+                fragments.push(fragment);
             }
         }
         let merged = merge_fragments(fragments);
-        let mut fragment = GraphFragment {
+        Ok(GraphFragment {
             nodes: merged.nodes,
             candidate_links: merged.candidate_links,
             diagnostics: merged.diagnostics.into_iter().chain(diagnostics).collect(),
             node_provenance: merged.node_provenance,
-        };
-        crate::discovery::stamp_fragment(&mut fragment, FORGE_ADAPTER, epoch);
-        Ok(fragment)
+        })
     }
 
     fn claims_remote_url(&self, remote_url: &str) -> bool {

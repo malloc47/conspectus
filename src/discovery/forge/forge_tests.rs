@@ -269,60 +269,6 @@ fn forge_discovery_accepts_two_adapters_via_boxed_registration() {
     assert!(fragment.nodes.is_empty());
 }
 
-// ---------------------------------------------------------------------------
-// ForgeDiscovery TTL cache pins that a second discover()
-// with the same roots short-circuits without dispatching adapters, so the
-// daemon's per-class cycle can't respawn `gh pr list` on every wake-up when
-// the initial forge call returned an empty fragment.
-// ---------------------------------------------------------------------------
-
-/// Adapter that increments a shared counter every time its
-/// `discover` runs. Empty fragment so it doesn't leave stamps
-/// (the exact "no PRs" case that triggers the pre-cache bug).
-struct CountingAdapter {
-    calls: std::sync::Arc<std::sync::atomic::AtomicUsize>,
-}
-
-impl ForgeAdapter for CountingAdapter {
-    fn provider(&self) -> &str {
-        "counting-fake"
-    }
-    fn discover(&self, _repos: &[ForgeRepo], _context: &DiscoveryContext) -> Result<GraphFragment> {
-        self.calls
-            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-        Ok(GraphFragment::empty())
-    }
-}
-
-#[test]
-fn forge_ttl_cache_serves_second_call_without_re_dispatching_adapters() {
-    let calls = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
-    let coordinator = ForgeDiscovery::new().with_boxed_adapter(Box::new(CountingAdapter {
-        calls: std::sync::Arc::clone(&calls),
-    }));
-
-    let context = DiscoveryContext::default();
-
-    // First call: cache miss, adapter runs.
-    let first = coordinator
-        .discover_graph(&GraphSnapshot::empty(), &context)
-        .expect("first");
-    assert!(first.nodes.is_empty());
-    assert_eq!(calls.load(std::sync::atomic::Ordering::Relaxed), 1);
-
-    // Second call, same (empty) roots, well within TTL — must
-    // serve from cache without dispatching the adapter.
-    let second = coordinator
-        .discover_graph(&GraphSnapshot::empty(), &context)
-        .expect("second");
-    assert!(second.nodes.is_empty());
-    assert_eq!(
-        calls.load(std::sync::atomic::Ordering::Relaxed),
-        1,
-        "second discover() must be served from cache"
-    );
-}
-
 /// A snapshot whose one checkout is a fresh git repo under `parent`,
 /// named `name`.
 fn snapshot_with_repo(parent: &Path, name: &str) -> GraphSnapshot {
@@ -362,26 +308,52 @@ fn forge_repos_come_from_the_graphs_checkouts() {
     );
 }
 
-#[test]
-fn forge_ttl_cache_invalidates_when_the_repo_set_changes() {
-    let calls = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
-    let coordinator = ForgeDiscovery::new().with_boxed_adapter(Box::new(CountingAdapter {
-        calls: std::sync::Arc::clone(&calls),
-    }));
-    let temp = tempfile::tempdir().expect("temp dir");
-    let a = snapshot_with_repo(temp.path(), "a");
-    let b = snapshot_with_repo(temp.path(), "b");
-    let context = DiscoveryContext::default();
+fn listing(age: Duration, failures: &[&str]) -> RemoteListing {
+    RemoteListing {
+        fetched: Instant::now().checked_sub(age).expect("instant in range"),
+        epoch: 0,
+        bodies: Vec::new(),
+        failures: failures.iter().map(ToString::to_string).collect(),
+    }
+}
 
-    coordinator.discover_graph(&a, &context).expect("call a");
-    assert_eq!(calls.load(std::sync::atomic::Ordering::Relaxed), 1);
-    coordinator.discover_graph(&a, &context).expect("cached a");
-    assert_eq!(calls.load(std::sync::atomic::Ordering::Relaxed), 1);
-    // A different repo set misses the cache and re-dispatches.
-    coordinator.discover_graph(&b, &context).expect("call b");
-    assert_eq!(
-        calls.load(std::sync::atomic::Ordering::Relaxed),
-        2,
-        "changing the repo set must invalidate the cache"
+#[test]
+fn a_listing_is_reused_until_the_forge_interval_passes() {
+    let listings = ForgeListings::default();
+    let hour = Duration::from_secs(3600);
+    listings.set(
+        "github.com/o/r".to_string(),
+        listing(Duration::from_secs(600), &[]),
     );
+    assert!(listings.fresh("github.com/o/r", hour).is_some());
+    assert!(
+        listings
+            .fresh("github.com/o/r", Duration::from_secs(300))
+            .is_none()
+    );
+    assert!(listings.fresh("github.com/o/other", hour).is_none());
+}
+
+#[test]
+fn a_failed_listing_is_retried_sooner_than_the_forge_interval() {
+    let listings = ForgeListings::default();
+    let hour = Duration::from_secs(3600);
+    listings.set(
+        "github.com/o/r".to_string(),
+        listing(FORGE_RETRY_AFTER + Duration::from_secs(1), &["offline"]),
+    );
+    assert!(listings.fresh("github.com/o/r", hour).is_none());
+    listings.set(
+        "github.com/o/r".to_string(),
+        listing(Duration::ZERO, &["offline"]),
+    );
+    assert!(listings.fresh("github.com/o/r", hour).is_some());
+}
+
+#[test]
+fn clearing_forgets_every_listing() {
+    let listings = ForgeListings::default();
+    listings.set("github.com/o/r".to_string(), listing(Duration::ZERO, &[]));
+    listings.clear();
+    assert!(listings.get("github.com/o/r").is_none());
 }

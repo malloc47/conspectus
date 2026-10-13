@@ -13,11 +13,12 @@
 //! implementation so they never need a real `gh` install or network call.
 //! See ADR 0011 for the rationale.
 
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::io;
 use std::path::{Path, PathBuf};
 use std::process::Command;
-use std::time::Duration;
+use std::sync::{Mutex, MutexGuard, PoisonError};
+use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result};
 
@@ -161,41 +162,83 @@ impl ForgeDiscovery {
 impl ForgeDiscovery {
     /// Discover PRs for every repo in `snapshot` (ADR 0115). Runs after
     /// the working-directory git pass, so repos found only through a
-    /// session's or mux's working directory are included.
+    /// session's or mux's working directory are included. Adapters
+    /// reuse their cached listings while they're younger than the
+    /// forge interval (ADR 0116), so this is cheap to call every cycle.
     pub fn discover_graph(
         &self,
         snapshot: &GraphSnapshot,
         context: &DiscoveryContext,
     ) -> Result<GraphFragment> {
         let repos = forge_repos(snapshot, context);
-        // TTL-cache the merged fragment by repo set so a busy class
-        // thread doesn't respawn `gh pr list` on every cycle. An empty
-        // fragment produces no `github` provenance stamps, so the
-        // freshness gate never marks `github` fresh and every cycle
-        // would re-run forge; the TTL matches the Forge class interval,
-        // so this skips only what the gate would have.
-        let key: Vec<PathBuf> = repos
-            .iter()
-            .map(|repo| PathBuf::from(&repo.repo_id.common_dir))
-            .collect();
-        if let Some(cached) = context.caches().forge.get(&key) {
-            return Ok(cached);
-        }
         let mut fragments = Vec::with_capacity(self.adapters.len());
         for adapter in &self.adapters {
             fragments.push(adapter.discover(&repos, context)?);
         }
-        let merged = GraphFragment::from(merge_fragments(fragments));
-        context.caches().forge.set(key, merged.clone());
-        Ok(merged)
+        Ok(GraphFragment::from(merge_fragments(fragments)))
     }
 }
 
-/// Time a cached [`ForgeDiscovery`] fragment is considered
-/// fresh. Matches the Forge class TTL default in
-/// `ServerIntervals` (5 minutes) — the gate that would have
-/// already skipped this provider if stamps were present.
-pub(crate) const FORGE_CACHE_TTL: Duration = Duration::from_secs(300);
+/// How soon a forge query that failed is retried, when the forge
+/// interval is longer: a laptop back online shouldn't wait an hour for
+/// its PRs (ADR 0116).
+pub const FORGE_RETRY_AFTER: Duration = Duration::from_secs(300);
+
+/// What one forge remote answered: the raw listing bodies, in query
+/// order, and the reason for each query that failed.
+#[derive(Clone, Debug)]
+pub(crate) struct RemoteListing {
+    /// When the listing was fetched, for its age.
+    pub(crate) fetched: Instant,
+    /// The same moment as a Unix epoch, stamped on what it produced.
+    pub(crate) epoch: i64,
+    pub(crate) bodies: Vec<String>,
+    pub(crate) failures: Vec<String>,
+}
+
+/// Forge listings per remote (`HOST/OWNER/REPO`), kept for the life of
+/// the process that runs discovery (ADR 0116). A listing is reused
+/// while it is younger than the forge interval, or than
+/// [`FORGE_RETRY_AFTER`] if a query failed. Remotes are cached
+/// separately, so a newly discovered repo costs only its own queries.
+#[derive(Debug, Default)]
+pub(crate) struct ForgeListings {
+    slots: Mutex<HashMap<String, RemoteListing>>,
+}
+
+impl ForgeListings {
+    /// The cached listing for `remote`, whether or not it is still
+    /// fresh.
+    pub(crate) fn get(&self, remote: &str) -> Option<RemoteListing> {
+        self.lock().get(remote).cloned()
+    }
+
+    /// The cached listing for `remote` if it may be reused under
+    /// `max_age`.
+    pub(crate) fn fresh(&self, remote: &str, max_age: Duration) -> Option<RemoteListing> {
+        let listing = self.get(remote)?;
+        let max_age = if listing.failures.is_empty() {
+            max_age
+        } else {
+            max_age.min(FORGE_RETRY_AFTER)
+        };
+        (listing.fetched.elapsed() < max_age).then_some(listing)
+    }
+
+    pub(crate) fn set(&self, remote: String, listing: RemoteListing) {
+        self.lock().insert(remote, listing);
+    }
+
+    /// Forget every listing, so the next discovery asks every remote
+    /// again: the TUI's hard refresh and the daemon's forge cycle.
+    pub(crate) fn clear(&self) {
+        self.lock().clear();
+    }
+
+    fn lock(&self) -> MutexGuard<'_, HashMap<String, RemoteListing>> {
+        self.slots.lock().unwrap_or_else(PoisonError::into_inner)
+    }
+}
 
 /// Which pull requests a `gh pr list` call asks for (ADR 0115).
 #[derive(Clone, Debug, PartialEq, Eq)]

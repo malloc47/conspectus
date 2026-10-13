@@ -8,7 +8,7 @@ use std::env;
 use std::hash::{DefaultHasher, Hash, Hasher};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use anyhow::Result;
 
@@ -154,6 +154,7 @@ pub struct DiscoveryContext {
     roots: Vec<PathBuf>,
     harness_state_roots: BTreeMap<String, PathBuf>,
     caches: Arc<DiscoveryCaches>,
+    forge_max_age: Option<Duration>,
 }
 
 impl DiscoveryContext {
@@ -207,8 +208,22 @@ impl DiscoveryContext {
         self
     }
 
+    /// Reuse forge listings younger than `max_age` instead of asking
+    /// the forge again (ADR 0116).
+    pub fn with_forge_max_age(mut self, max_age: Duration) -> Self {
+        self.forge_max_age = Some(max_age);
+        self
+    }
+
     pub fn roots(&self) -> &[PathBuf] {
         &self.roots
+    }
+
+    /// How old a forge listing may be before discovery asks the forge
+    /// again: the configured forge interval, or its default.
+    pub fn forge_max_age(&self) -> Duration {
+        self.forge_max_age
+            .unwrap_or_else(|| crate::config::ServerIntervals::default().forge)
     }
 
     pub fn caches(&self) -> &DiscoveryCaches {
@@ -407,7 +422,9 @@ pub fn discover_local_warm_with(
     prior: GraphSnapshot,
     intervals: &crate::config::ServerIntervals,
 ) -> Result<GraphSnapshot, DiscoveryError> {
-    let mut context = DiscoveryContext::from_roots(roots)?.with_caches(Arc::clone(&config.caches));
+    let mut context = DiscoveryContext::from_roots(roots)?
+        .with_caches(Arc::clone(&config.caches))
+        .with_forge_max_age(intervals.forge);
 
     for (key, root) in &config.harness_state_roots {
         context = context.with_harness_state_root(key.clone(), root.clone());

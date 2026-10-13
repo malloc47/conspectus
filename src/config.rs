@@ -130,8 +130,8 @@ pub struct ServerConfig {
 
 /// Per-provider-class refresh / TTL durations.
 ///
-/// Defaults match ADR 0038 (`harness=5s`, `mux=5s`, `git=30s`,
-/// `forge=5m`). The four classes collapse the granular per-emit
+/// Defaults match ADR 0038 (`harness=5s`, `mux=5s`, `git=30s`), with
+/// `forge=1h` per ADR 0116. The four classes collapse the granular per-emit
 /// provider strings (`git`, `git::cwd`, `tmux`, `github`,
 /// `claude-code`, …) per the mapping in ADR 0079.
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -148,7 +148,7 @@ impl Default for ServerIntervals {
             harness: Duration::from_secs(5),
             mux: Duration::from_secs(5),
             git: Duration::from_secs(30),
-            forge: Duration::from_secs(300),
+            forge: Duration::from_secs(3600),
         }
     }
 }
