@@ -5,7 +5,7 @@ status: Done
 assignee:
   - '@claude'
 created_date: '2026-10-13 01:23'
-updated_date: '2026-10-13 01:24'
+updated_date: '2026-10-13 01:29'
 labels:
   - rel
 milestone: m-20
@@ -35,6 +35,12 @@ Tests: README link check; `git diff --check`; spot-check commands and flags agai
 - [x] #1 `just check` passes, or `git diff --check` for docs-only changes
 - [x] #2 Docs and ADRs are updated when behavior, architecture, or workflow change
 <!-- DOD:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+CHANGELOG.md's unreleased entry brought in line with the README in 173f9ba.
+<!-- SECTION:NOTES:END -->
 
 ## Final Summary
 
