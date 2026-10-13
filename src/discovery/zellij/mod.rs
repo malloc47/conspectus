@@ -28,7 +28,6 @@
 
 use std::io;
 use std::path::PathBuf;
-use std::process::Command;
 use std::time::Duration;
 
 use anyhow::{Context, Result};
@@ -86,7 +85,7 @@ impl MuxBackend for SystemZellij {
     /// ([`parse_zellij_sessions`]) is fixed against zellij's
     /// human-formatted default.
     fn list_sessions(&self, _format: &str) -> Result<TmuxOutcome> {
-        let output = Command::new(&self.binary)
+        let output = crate::exec::command(crate::exec::Program::Zellij, &self.binary)
             .args(["list-sessions", "--no-formatting"])
             .output();
 
@@ -126,7 +125,9 @@ impl MuxBackend for SystemZellij {
     }
 
     fn attach_session(&self, _namespace: Option<&str>, name: &str) -> Result<TmuxAttachOutcome> {
-        let status = Command::new(&self.binary).args(["attach", name]).status();
+        let status = crate::exec::command(crate::exec::Program::Zellij, &self.binary)
+            .args(["attach", name])
+            .status();
 
         let status = match status {
             Ok(status) => status,

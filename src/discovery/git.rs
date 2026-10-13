@@ -2,7 +2,6 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
-use std::process::Command;
 use std::time::SystemTime;
 
 use anyhow::{Context, Result, bail};
@@ -185,7 +184,7 @@ impl GitProbe {
     }
 
     fn optional(&self, root: &Path, args: &[&str]) -> Result<Option<String>> {
-        let output = Command::new(&self.git_bin)
+        let output = crate::exec::command(crate::exec::Program::Git, &self.git_bin)
             .args(args)
             .current_dir(root)
             .output()

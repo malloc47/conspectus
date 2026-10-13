@@ -19,6 +19,7 @@ pub mod declared;
 #[doc(hidden)]
 pub mod dev_scenarios;
 pub mod discovery;
+pub mod exec;
 #[doc(hidden)]
 pub mod filter;
 #[doc(hidden)]

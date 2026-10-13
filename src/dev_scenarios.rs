@@ -7,7 +7,6 @@
 use std::collections::BTreeMap;
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::process::Command;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use anyhow::{Context, Result, bail};
@@ -1328,7 +1327,7 @@ fn add_hook_supersession_to_showcase(world: &mut ScenarioWorld, project: &Path) 
 /// time it's built.
 fn commit_at(root: &Path, message: &str, epoch: i64) -> Result<()> {
     let date = format!("{epoch} +0000");
-    let output = Command::new("git")
+    let output = crate::exec::command(crate::exec::Program::Git, "git")
         .args(["commit", "--quiet", "--no-gpg-sign", "-m", message])
         .env("GIT_AUTHOR_DATE", &date)
         .env("GIT_COMMITTER_DATE", &date)
@@ -1355,7 +1354,7 @@ fn unique_root(name: &str) -> PathBuf {
 }
 
 fn git(root: &Path, args: &[&str]) -> Result<()> {
-    let output = Command::new("git")
+    let output = crate::exec::command(crate::exec::Program::Git, "git")
         .args(args)
         .current_dir(root)
         .output()

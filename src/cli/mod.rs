@@ -385,7 +385,7 @@ fn pager_candidates_with_env(pager_env: Option<String>) -> Vec<ProcCommand> {
         // can set $PAGER to a wrapper script.
         let parts: Vec<&str> = pager.split_whitespace().collect();
         if let Some((prog, args)) = parts.split_first() {
-            let mut cmd = ProcCommand::new(prog);
+            let mut cmd = crate::exec::command(crate::exec::Program::Pager, prog);
             if *prog == "less" && args.is_empty() {
                 cmd.args(LESS_DEFAULT_ARGS);
             } else {
@@ -395,11 +395,11 @@ fn pager_candidates_with_env(pager_env: Option<String>) -> Vec<ProcCommand> {
         }
     }
 
-    let mut less = ProcCommand::new("less");
+    let mut less = crate::exec::command(crate::exec::Program::Pager, "less");
     less.args(LESS_DEFAULT_ARGS);
     candidates.push(less);
 
-    candidates.push(ProcCommand::new("more"));
+    candidates.push(crate::exec::command(crate::exec::Program::Pager, "more"));
 
     candidates
 }
