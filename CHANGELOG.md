@@ -19,21 +19,38 @@ scriptable tables, and exports on top of it. See the
   lineage); tmux sessions, plus zellij for discovery and attach; git
   repos, checkouts, linked worktrees, and branches; Atelier,
   agent-deck, and generic multi-repo workspaces; and GitHub pull
-  requests through `gh`.
+  requests through `gh`: open PRs and the last 30 days of history for
+  every GitHub remote of every discovered repo, including a fork's
+  upstream, linked to a local branch when the PR's head is one of the
+  repo's remotes. Forge failures surface as diagnostics.
 - **Evidence-preserving resolution.** Every relationship is a
   `GraphLink` candidate with provenance, confidence, and freshness; the
   resolver picks preferred links and keeps the rest, so ambiguity and
   conflicts stay visible (`graph --explain` shows score breakdowns).
+  Candidates that agree with the winner are kept as corroborating
+  evidence rather than reported as conflicts.
 - **Session-to-pane attribution** from layered evidence: opt-in harness
   hooks (`conspectus hook init|status|remove` for Claude Code and Codex,
   plus an opencode plugin), open transcript file descriptors, Codex
   state and log databases, process-tree walks, launch commands, and
   working directories.
-- **Interactive TUI** (`conspectus` or `conspectus tui`): sessions and
-  mux views, graph/workspace/repo/checkout/flat grouping, filters and
-  search, a relationship explorer with drill-down and breadcrumbs, a
-  native transcript viewer for Claude Code, Codex, and opencode,
-  menu-first controls, and `[tui.theme]` theming.
+- **Interactive TUI** (`conspectus` or `conspectus tui`): Sessions,
+  Mux, and PRs views (`1`/`2`/`3`), with graph/workspace/repo/checkout/flat
+  grouping for sessions and checkout/repo/state grouping for PRs;
+  filters and search; a relationship explorer with one row per
+  neighbor, drill-down, and breadcrumbs; a native transcript viewer for
+  Claude Code, Codex, and opencode; menu-first controls; and
+  `[tui.theme]` theming.
+- **Node-specific previews** in the TUI: a session's transcript, a tmux
+  session's live pane (with smart, plain, or no wrapping), a checkout's
+  `git status` and files, a repo's recent commits, a branch against its
+  upstream, a PR's checks and reviews, and a process tree. Moving onto a
+  field previews its value, and moving onto a relationship shows the
+  link's evidence above the neighbor's preview.
+- **Refresh controls**: the TUI refreshes in the background, `r`
+  rescans now, and `Ctrl-R` is a hard refresh that also asks GitHub
+  again. Forge data is otherwise fetched at startup and hourly, set by
+  `[server.intervals] forge`.
 - **CLI views**: `conspectus table sessions|mux|union|prs|forks` with
   column selection, card layout, paging, and color; `conspectus columns`;
   `conspectus node show`.
@@ -57,7 +74,8 @@ scriptable tables, and exports on top of it. See the
   forced), merges or discards the branch, removes the worktree, and drops
   its pins.
 - **Continuous mode**: `conspectus serve` keeps the graph warm with
-  per-source refresh intervals and filesystem watchers, serves it over
+  per-source refresh intervals (harness and mux 5s, git 30s, forge 1h)
+  and filesystem watchers, serves it over
   a Unix socket, and saves a zero-copy `graph.bin` for warm restarts;
   `conspectus status` and `conspectus refresh` inspect and drive it.
   Every command still works without the daemon.
