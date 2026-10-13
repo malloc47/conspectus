@@ -16,6 +16,10 @@ open or close down a worktree.
 
 It is a Rust CLI and library. It is developed on Linux and is pre-release
 (`0.1.0`, no tagged release yet); see [Status and limits](#status-and-limits).
+One developer built it over five months by directing AI coding agents, with
+the design, every significant decision, and every story kept in the
+repository; [How Conspectus is built](#how-conspectus-is-built) describes
+that process.
 
 ![The Conspectus TUI: sessions grouped by workspace and repo on the left; the selected Claude Code session's fields, relationships, and transcript on the right](docs/images/session-transcript.png)
 
@@ -226,7 +230,7 @@ about what is linked to what. See the
 | Terminal multiplexers | tmux; zellij (discovery and attach only) | Sessions, working directories, activity, attached clients, and pane process trees. |
 | Version control | git | Repos, checkouts, linked worktrees (including worktrees of bare repos), branches, remotes, and upstreams. |
 | Workspaces | Atelier, [agent-deck](https://github.com/asheshgoplani/agent-deck), and generic multi-repo roots | Workspace membership, plus fork provenance from Atelier. |
-| Forges | GitHub, via the `gh` CLI | Pull requests, matched to local branches. A GitLab adapter exists only as a stub. |
+| Forges | GitHub, via the `gh` CLI | Open pull requests and the last 30 days of PR history for every GitHub remote of every discovered repo, including a fork's upstream. A PR links to a local branch when its head is one of the repo's remotes. A GitLab adapter exists only as a stub. |
 | Harness hooks (optional) | Claude Code and Codex (`conspectus hook init`), plus an [opencode plugin](plugins/opencode-hook/) | The harness's current session id, which sharpens tmux attribution. |
 
 Discovery starts from the current directory (or the `--scan-root` paths you
@@ -234,6 +238,13 @@ pass), plus each harness's home-level state directory. It then checks the
 working directory of every session it finds for git context. When a provider
 is missing (no tmux server, no `gh`, no harness state), that part of the
 graph is simply empty rather than an error.
+
+Forge queries are the only network calls, so they run less often than the
+rest: when discovery starts, then once an hour (`[server.intervals] forge`),
+or on demand with `Ctrl-R` in the TUI. A failed query surfaces as a
+diagnostic on the forge status chip
+([ADR 0115](docs/adr/0115-forge-discovery-over-discovered-repos.md),
+[0116](docs/adr/0116-lazy-forge-cadence-and-hard-refresh.md)).
 
 ## Quick start
 
@@ -264,11 +275,12 @@ conspectus serve                   # keep the graph warm in the background
 
 ### Interactive TUI
 
-- **Views.** The Sessions view groups sessions by graph topology by default:
+- **Views.** `1`, `2`, and `3` switch between the Sessions, Mux, and PRs
+  views. The Sessions view groups sessions by graph topology by default:
   workspace, then repo, then checkout, with resumed and forked sessions
   nested under their parents. It can also group by workspace, repo,
   checkout, or scan root, or show a flat list. The Mux view shows one row
-  per terminal-multiplexer session. The PRs view (`3`) lists pull requests
+  per terminal-multiplexer session. The PRs view lists pull requests
   under the checkout that has their branch checked out, with the sessions
   working there beneath each one; it can also group by repo or state.
 - **Relationship explorer.** The right-hand pane shows a node's own fields,
@@ -285,6 +297,9 @@ conspectus serve                   # keep the graph warm in the background
 - **Actions.** `Enter` does the obvious thing for the selected row: attach
   to the tmux session, launch the pin, or open the transcript. `v` opens a
   built-in transcript viewer for Claude Code, Codex, and opencode.
+- **Refresh.** The graph refreshes in the background, and `r` rescans now.
+  `Ctrl-R` is a hard refresh that also asks GitHub again instead of waiting
+  for the hourly forge refresh.
 - **Menus first, shortcuts second.** `?` lists every key. `f` opens view,
   grouping, filter, and sort controls, and `/` searches. `p`, `m`, and `w`
   open the pin, mux, and worktree menus. Every action can be reached from a
@@ -370,10 +385,46 @@ conspectus refresh [--class git|mux|harness|forge]
 
 ## How Conspectus is built
 
-Conspectus is written by one developer working with AI coding agents. The
-repository is set up so that agents can do most of the implementation
-without drifting from the design. The project's memory lives in three files
-checked into the repo, not in chat history.
+Conspectus is written by one developer working with AI coding agents, mostly
+Claude Code. The developer acts as product owner and first user: they run
+Conspectus every day, report what gets in the way, choose between the
+alternatives an agent lays out, and review what lands. The agents do most of
+the investigation, planning, implementation, testing, and documentation.
+
+The repository is set up so that this works without the design drifting. The
+project's memory lives in three places checked into the repo, not in chat
+history: the design document, the decision records, and the backlog.
+
+### A change, end to end
+
+One recent change shows the loop. After reviewing how forge discovery
+worked, the developer asked for fewer `gh` calls: fetch pull requests at
+startup and then hourly, make the interval configurable, and add a key to
+fetch on demand.
+
+1. **Investigate.** The agent traced the discovery code and found why `gh`
+   ran every five minutes whatever the configured interval: repos with no
+   PRs left no freshness stamps, so only a short in-memory cache held the
+   calls back.
+2. **File the story.** `CSP-594` records the scope, acceptance criteria,
+   tests, and manual checks.
+3. **Record the decision.**
+   [ADR 0116](docs/adr/0116-lazy-forge-cadence-and-hard-refresh.md) sets the
+   cadence, the cache, and the failure rules. It also lists the alternatives
+   it rejected: persisting the cache to disk, clearing it on every scheduled
+   tick, and binding the hard refresh to `R`, which is already rename.
+   `docs/design.md` and the operations guide gained a line each.
+4. **Implement and test.** The change adds per-remote PR listings with an
+   hourly default and a `Ctrl-R` hard refresh in the TUI. Unit tests cover
+   reuse, expiry, failure retry, and the new key.
+5. **Verify against reality.** A wrapper around `gh` logged every call while
+   a daemon, a TUI on that daemon, and a TUI without a daemon ran. Whatever
+   ran discovery made one round of calls at startup, routine refreshes made
+   none, and `Ctrl-R` made one more round.
+6. **Land it.** `just check` passed, and the change went in as three
+   Conventional Commits split by concern (decision, discovery, TUI), each
+   citing `CSP-594`. The story's final summary records what landed and how it
+   was verified.
 
 ### `docs/design.md`: the north star
 
@@ -385,7 +436,7 @@ adapters and metadata rather than in the shape of the graph. The design
 document stays short enough to plan from, and the detailed reasoning lives in
 ADRs.
 
-### `docs/adr/`: 97 architecture decision records
+### `docs/adr/`: 116 architecture decision records
 
 Every significant decision gets an ADR, whether it's a model change, a new
 dependency, a new write path, a workflow tool, or a UI convention. Each ADR
@@ -456,22 +507,60 @@ daily use.
   programmatic replay worlds; sanitized captures of real provider data; named
   developer scenarios; and `insta` snapshot tests. The whole suite runs in a
   few seconds.
+- **Drift caught by tests.** One table of key bindings feeds both the key
+  dispatcher and the `?` help, and a test fails when a key is missing from
+  help. Another keeps internal IDs and ADR numbers out of `--help`, and
+  `tests/comment_hygiene.rs` keeps backlog IDs out of code comments
+  ([ADR 0100](docs/adr/0100-comments-carry-rationale-not-backlog-ids.md)):
+  comments explain why, and the commit history records when.
+- **Generated assets.** The screenshots in this README are rendered from the
+  showcase scenario with a pinned clock, recorded tmux panes, and recorded
+  `gh` output ([ADR 0113](docs/adr/0113-readme-screenshots.md)). `just
+  screenshots` regenerates them after a UI change, and a demo never shows
+  anyone's real sessions.
 - **Periodic audits.** An [ADR corpus audit](docs/adr-audit.md), a
   [code-hygiene audit](docs/code-hygiene-audit.md), and an
   [extensibility assessment](docs/extensibility-assessment.md) each turned
   accumulated drift into backlog items.
 
-### By the numbers (as of 2026-09-30)
+### The arc so far
+
+- **The first week (May 12–16):** the planned foundation phases (P0 to P6):
+  the core graph and its JSON, local, agent, and mux discovery, forge and
+  table views, declared links, and Atelier delegation.
+- **Late May to June:** continuous operation with `conspectus serve`, the
+  interactive TUI, and an embedded query engine. The engine was built and
+  then retired for a zero-copy snapshot between May 25 and June 22 (P7 to
+  P11).
+- **Late June to September:** daily use drove the work. Pins became
+  first-class nodes
+  ([ADR 0084](docs/adr/0084-first-class-pin-nodes.md)), the mutation
+  envelope bounded every write
+  ([ADR 0087](docs/adr/0087-mutation-envelope.md)), and worktree streams
+  followed ([ADR 0092](docs/adr/0092-worktree-backend-seam.md)). A
+  hardening workstream of nearly 300 stories absorbed what came up.
+- **Late September to October:** release readiness for 0.1.0. The docs and
+  `--help` were checked against the binary, the screenshots added, and the
+  backlog moved to Backlog.md
+  ([ADR 0109](docs/adr/0109-backlog-md-work-tracking.md)). Node-specific
+  previews ([ADR 0112](docs/adr/0112-node-specific-previews.md)), the PRs
+  view ([ADR 0114](docs/adr/0114-prs-view-grouped-by-checkout.md)), and
+  forge discovery across every repo (ADRs 0115 and 0116) also landed.
+
+Commit volume peaked at about 300 a month in May and June, then tapered as
+the work moved from building to hardening.
+
+### By the numbers (as of 2026-10-12)
 
 | Measure | Value |
 | --- | --- |
-| Development window | 2026-05-12 to 2026-09-30 |
-| Commits | 850, of which 650 (76%) have an AI co-author trailer |
-| Architecture decision records | 97, of which 10 are superseded or partially superseded |
-| Backlog items | about 590, of which nearly 80% are checked off |
-| Commits that touch `docs/backlog.md` | 413 (49%) |
-| Rust | about 130k lines, over 40% of it tests |
-| Tests | 2,081, all passing, in about 5 seconds with `cargo nextest` |
+| Development window | 2026-05-12 to 2026-10-12 |
+| Commits | 983, of which 783 (80%) have an AI co-author trailer |
+| Architecture decision records | 116, of which 11 are superseded or partially superseded |
+| Backlog stories | 636, of which 526 (83%) are done |
+| Commits that touch the backlog | 463 (47%) |
+| Rust | about 145k lines, over 40% of it tests |
+| Tests | 2,309, all passing, in about 6 seconds with `cargo nextest` |
 
 ## Status and limits
 
@@ -512,8 +601,8 @@ daily use.
 ## Development
 
 ```sh
-nix develop    # Rust toolchain, cargo-nextest, just, tmux, gh
-just check     # fmt, clippy -D warnings, test, nextest, git diff --check
+nix develop    # Rust toolchain, cargo-nextest, just, tmux, gh, termshot, backlog
+just check     # fmt, clippy -D warnings, test, nextest, rustdoc, git diff --check
 ```
 
 To iterate on the TUI, use snapshot mode instead of screenshots. It lives
