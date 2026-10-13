@@ -264,6 +264,10 @@ of this repository:
 cargo install --locked --path .
 ```
 
+This installs `conspectus` and `csp`, its official short name, which is the
+same program ([ADR 0118](docs/adr/0118-csp-short-name.md)). The docs spell
+it out, but every example works with `csp` in its place.
+
 Run it from inside a repo you work in:
 
 ```sh
@@ -445,7 +449,7 @@ adapters and metadata rather than in the shape of the graph. The design
 document stays short enough to plan from, and the detailed reasoning lives in
 ADRs.
 
-### `docs/adr/`: 117 architecture decision records
+### `docs/adr/`: 118 architecture decision records
 
 Every significant decision gets an ADR, whether it's a model change, a new
 dependency, a new write path, a workflow tool, or a UI convention. Each ADR
@@ -570,7 +574,7 @@ the work moved from building to hardening.
 | --- | --- |
 | Development window | 2026-05-12 to 2026-10-12 |
 | Commits | 983, of which 783 (80%) have an AI co-author trailer |
-| Architecture decision records | 117, of which 11 are superseded or partially superseded |
+| Architecture decision records | 118, of which 11 are superseded or partially superseded |
 | Backlog stories | 636, of which 526 (83%) are done |
 | Commits that touch the backlog | 463 (47%) |
 | Rust | about 145k lines, over 40% of it tests |

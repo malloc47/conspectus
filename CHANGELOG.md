@@ -79,4 +79,7 @@ scriptable tables, and exports on top of it. See the
   a Unix socket, and saves a zero-copy `graph.bin` for warm restarts;
   `conspectus status` and `conspectus refresh` inspect and drive it.
   Every command still works without the daemon.
+- **`csp`**, the official short name, installed alongside `conspectus`.
+  It is the same program; help and suggested commands use the name you
+  ran.
 - **Library API** at `conspectus::api` (not yet a stable contract).

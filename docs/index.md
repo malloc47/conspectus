@@ -18,7 +18,8 @@ against it.
 ## `docs/naming.md`
 
 Purpose: historical naming artifact documenting accepted and rejected project
-names, collision notes, and the rationale for choosing `conspectus`.
+names, collision notes, the rationale for choosing `conspectus`, and its
+short name, `csp`.
 
 ## `docs/backlog.md`
 

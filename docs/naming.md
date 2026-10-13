@@ -94,6 +94,13 @@ management and registry namespace.
 - `synapse`: rejected because Synapse is heavily occupied in AI orchestration
   and agent communication tooling.
 
+## Short Name
+
+`csp` is the official short name, installed alongside `conspectus` (ADR
+0118). `cs` was the first habit, but Coursier's Scala launcher and
+csound's `/usr/bin/cs` already use it. `csp` has no known collision and
+matches the project's backlog prefix.
+
 ## Naming Direction
 
 Prefer names that imply:

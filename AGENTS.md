@@ -68,6 +68,10 @@ standard checks.
   program, subcommand, socket, signal, or write path needs an entry in
   `docs/capabilities.toml`, citing its ADR, or `tests/capabilities_static.rs`
   and the traced `tests/capabilities.rs` fail (ADR 0117).
+- `csp` is the sanctioned short name for `conspectus` (ADR 0118). Docs,
+  ADRs, and help prose spell out `conspectus`. A runtime message that
+  suggests a command gets the name from `invocation::invoked_name()`. Don't
+  introduce other short names or aliases.
 - Avoid making Conspectus depend on Atelier command modules directly. Shared
   code should be pure discovery/parsing/model code with a clean boundary.
 - Track implementation work as Backlog.md tasks under `backlog/` (ADR 0109);

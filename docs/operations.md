@@ -258,6 +258,11 @@ errors. The `[table]` palette (ADR 0022) is **not** affected by
 
 ## CLI Surface
 
+`csp` is the official short name for `conspectus` and is installed with it
+(ADR 0118). Every command below works under either name. Help and suggested
+follow-up commands use the name you ran, while log prefixes and the version
+string always say `conspectus`.
+
 ```sh
 conspectus graph --format {json|dot|html} [--scan-root PATH]...
                                           [--candidates {include|exclude}]
