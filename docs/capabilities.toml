@@ -164,7 +164,8 @@ act = [
     "$PROJECT/.conspectus.toml",
     "$PROJECT/..conspectus.toml.tmp-*",
 ]
-# Hook installation into harness configuration (ADR 0028).
+# Hook installation into harness configuration: ADR 0087 category 5,
+# from ADR 0028.
 # `--scope project` writes the same files under the project, and
 # `CODEX_HOME` moves the Codex one.
 hook = [

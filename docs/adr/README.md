@@ -59,7 +59,7 @@ Where user-authored intent lives, what Conspectus may write, and what it must ne
 | [0014](0014-declared-link-storage-schema.md) | Declared Link Storage Schema | Accepted |
 | [0029](0029-session-alias-overlay.md) | Session Alias Overlay | Accepted |
 | [0086](0086-payload-privacy-tenet.md) | Payload Privacy Tenet | Accepted |
-| [0087](0087-mutation-envelope.md) | Mutation Envelope | Accepted |
+| [0087](0087-mutation-envelope.md) | Mutation Envelope | Accepted (amended) |
 | [0090](0090-pin-store-registry-sidecar.md) | Pin-Store Registry Sidecar | Accepted |
 
 ## Pins, mux lifecycle, and worktrees

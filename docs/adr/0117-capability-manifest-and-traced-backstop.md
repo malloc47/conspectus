@@ -97,9 +97,10 @@ on behavior changes.
 - Writing the manifest surfaced two cases the envelope's prose had not
   settled:
   - `hook init` writes `~/.claude/settings.json` and `~/.codex/config.toml`
-    under ADR 0028, while ADR 0087's first prohibition names `~/.claude/`.
-    The manifest records hook installation as its own context. Reconciling
-    the ADR wording is open work.
+    under ADR 0028, while ADR 0087's first prohibition named `~/.claude/`.
+    ADR 0087 is amended to make hook installation the operator starts its
+    category 5, which prohibition 1 excludes. The manifest records it as the
+    `hook` context.
   - The dev scenario builder commits with `--no-gpg-sign`, but only in repos
     it creates, in debug builds.
 - `strace` becomes a CI and dev-shell dependency, and the test takes a few

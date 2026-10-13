@@ -103,7 +103,8 @@ process can claim at most one session. When the evidence still ties,
 Conspectus shows the ambiguity rather than guessing.
 
 Conspectus never types into a live agent pane to ask for its session id,
-never writes harness-owned state, and never walks your whole home directory.
+never writes harness-owned state to work it out, and never walks your whole
+home directory.
 ([ADR 0027](docs/adr/0027-workspace-detection-precedence.md),
 [0028](docs/adr/0028-hook-sidecar-mux-attribution.md),
 [0046](docs/adr/0046-process-tree-pane-linker.md),
@@ -146,17 +147,19 @@ records what you intend and reconciles it with what is actually running.
 ### 6. A bounded mutation envelope
 
 Conspectus is read-only by default. Every write it can make falls into one
-of four enumerated categories:
+of five enumerated categories:
 
 - its own TOML stores;
 - rebuildable sidecar files;
 - tmux session lifecycle actions (create, rename, attach, tear down) that you
   start yourself;
-- subprocesses that Conspectus launches itself.
+- subprocesses that Conspectus launches itself;
+- the hook entry `conspectus hook init` adds to a harness's settings file,
+  which `hook remove` takes out again.
 
 These prohibitions are absolute:
 
-- no writes to harness-owned state;
+- no other writes to harness-owned state;
 - no terminal input into a live agent pane;
 - no persisted transcript content;
 - no writes to shared or system locations;

@@ -127,9 +127,10 @@ Start read-only, but design the data model and storage layout for quick follow-u
 commands that let users add or remove links manually. Read-only is still the
 default for discovery and orchestration; the sanctioned write surface today is
 bounded by the mutation envelope in ADR 0087 (user-intent TOML stores,
-rebuildable observation sidecars, operator-initiated mux lifecycle, and
-Conspectus-owned subprocess launches) with an explicit prohibition list
-covering harness-native state, terminal input into live agent panes,
+rebuildable observation sidecars, operator-initiated mux lifecycle,
+Conspectus-owned subprocess launches, and operator-initiated harness hook
+installation) with an explicit prohibition list covering harness-native
+state beyond that hook entry, terminal input into live agent panes,
 payload persistence, shared/system locations, background mutation, git
 mutation, and hook bypass. `docs/capabilities.toml` lists every program,
 subcommand, socket, signal, and write path the envelope allows, and tests

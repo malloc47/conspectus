@@ -2,7 +2,9 @@
 
 ## Status
 
-Accepted
+Accepted (amended). Amended 2026-10-12: hook installation the operator
+starts is sanctioned category 5, which prohibition 1 excludes, and ADR
+0117 enforces the envelope through a capability manifest.
 
 ## Context
 
@@ -107,6 +109,17 @@ ADR entry describing the schema and semantics.
    ADR-scoped inputs; they never adopt operator-typed argv
    verbatim.
 
+5. **Harness hook installation when operator-initiated.**
+   `conspectus hook init <harness>` adds, and `hook remove`
+   removes, Conspectus's own hook entry in the harness's
+   settings file: `~/.claude/settings.json`, or
+   `$CODEX_HOME/config.toml` (default `~/.codex/config.toml`),
+   or their project-scope equivalents under `--scope project`
+   (ADR 0028). The write is idempotent, preserves every other
+   setting, goes through a sibling temporary file renamed into
+   place, and `--dry-run` prints it instead. Conspectus never
+   installs or removes a hook on its own initiative.
+
 ### Prohibitions
 
 Conspectus **never**:
@@ -114,7 +127,11 @@ Conspectus **never**:
 1. **Mutates harness-native state.** No writes to
    `~/.config/opencode/opencode.db`, `~/.codex/state_*.sqlite`,
    `~/.codex/logs_*.sqlite`, `~/.claude/`, `~/.aider/`, or
-   any harness-owned file or database. Readers are read-only
+   any harness-owned file or database. The one exception is
+   category 5: the hook entry the operator installs into a
+   harness's settings file and removes again. Sessions,
+   transcripts, databases, and every other setting stay
+   off-limits. Readers are read-only
    with `PRAGMA query_only = ON` where SQLite is involved
    (ADR 0048). Even where the harness ships a documented
    mutation API, Conspectus does not call it — the harness's
@@ -235,9 +252,11 @@ because forge mutation is not in the envelope.
 **For code review.**
 
 Reviewers gate new write paths on the "cite this ADR, place
-in a category" contract. `grep -rn "std::fs::write\|
-File::create\|OpenOptions" src/` is a reasonable review
-sanity check: every hit should trace back to a category above.
+in a category" contract. Since ADR 0117, `docs/capabilities.toml`
+lists every program, socket, signal, and write path the categories
+allow, and tests fail when the source or a traced run of the built
+binary steps outside it, so a new write path shows up as a manifest
+change in review.
 
 ## Alternatives Considered
 
@@ -276,7 +295,7 @@ every new-feature ADR to cite five ADRs instead of one.
 ## Open Questions Answered
 
 - **Is Conspectus read-only?** Not entirely. It has an
-  envelope of sanctioned writes (categories 1–4 above); every
+  envelope of sanctioned writes (categories 1–5 above); every
   other write is off-charter.
 - **Does the daemon write?** No. Category 5 of the
   prohibitions makes background mutation off-charter. The
@@ -289,9 +308,35 @@ every new-feature ADR to cite five ADRs instead of one.
   category 3 is scoped to Conspectus-constructed harness
   launch argv, not operator-typed input.
 - **Does the mutation envelope license writing to
-  harness-native state?** No. Prohibition 1 is absolute.
+  harness-native state?** No, apart from category 5: the hook
+  entry the operator installs and removes with `conspectus
+  hook`. Nothing else in a harness's files is written.
 - **What about payload writes?** Prohibition 3, referencing
   ADR 0086. No write path Conspectus takes carries payload.
+
+## Amendment: Hook Installation And Enforcement (2026-10-12)
+
+Writing the capability manifest (ADR 0117) showed that this ADR
+contradicted itself. Prohibition 1 listed `~/.claude/` as
+off-limits, yet `conspectus hook init`, which ADR 0028
+sanctioned before this ADR existed, writes
+`~/.claude/settings.json` and the Codex `config.toml`. The
+sanctioned list never mentioned it.
+
+This amendment records the existing behavior rather than
+opening a new write path, so it extends the ADR instead of
+superseding it. Hook installation becomes category 5, and
+prohibition 1 excludes exactly that entry. The alternative,
+making `hook init` print the entry for the operator to paste,
+was rejected: it trades a narrow, idempotent edit that keeps
+every other setting and that `hook remove` can undo for
+hand-editing a harness's settings file, which is more
+error-prone and no safer.
+
+The same review showed that the envelope's enforcement was a
+`grep` habit. ADR 0117 replaces it with `docs/capabilities.toml`,
+checked against the source and against a traced run of the built
+binary.
 
 ## Open Questions Deferred
 
@@ -313,8 +358,9 @@ every new-feature ADR to cite five ADRs instead of one.
 
 - ADR 0014 (declared links) — user-intent TOML store, category 1.
 - ADR 0028 (hook sidecar records) — Tier 3 rebuildable
-  observations; carries the terminal-injection prohibition
-  this ADR restates.
+  observations, category 2; `hook init` / `hook remove`,
+  category 5; carries the terminal-injection prohibition this
+  ADR restates.
 - ADR 0029 (lockstep session aliases) — mux rename surface,
   category 3.
 - ADR 0030 (tui-input primitive) — the rename overlay's shared
@@ -334,6 +380,9 @@ every new-feature ADR to cite five ADRs instead of one.
   index, category 2; extends this ADR by reference.
 - ADR 0093 (operator-initiated mux teardown) — adds `kill-session`
   (graceful-then-hard) to category 3; extends this ADR by reference.
+- ADR 0117 (capability manifest) — enforces this envelope with
+  `docs/capabilities.toml`, a source check, and a traced run of the
+  built binary.
 - ADR 0103 (launches keep failed panes) — adds `remain-on-exit failed`
   on sessions Conspectus creates and `kill-session` of a pin's dead
   session during launch to category 3; extends this ADR by reference.

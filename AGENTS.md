@@ -56,9 +56,10 @@ standard checks.
   bounded by the mutation envelope in ADR 0087: user-intent TOML stores,
   rebuildable observation sidecars under `$XDG_STATE_HOME/conspectus/`,
   operator-initiated mux lifecycle (rename / new-session / attach and the
-  narrow pin-launch `send-keys` on Conspectus-constructed argv), and
-  Conspectus-owned subprocess launches. Conspectus never mutates
-  harness-native state, injects terminal input into live agent panes
+  narrow pin-launch `send-keys` on Conspectus-constructed argv),
+  Conspectus-owned subprocess launches, and operator-initiated harness
+  hook installation (`hook init` / `hook remove`). Conspectus never
+  mutates harness-native state beyond that hook entry, injects terminal input into live agent panes
   (ADR 0028 absolute), persists payload (ADR 0086), writes shared/system
   locations, performs background mutation, mutates git state, or bypasses
   hooks. Any new write path must cite ADR 0087 and land inside one of
