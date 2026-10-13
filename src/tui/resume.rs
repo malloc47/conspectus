@@ -11,7 +11,6 @@
 //! rather than per-session.
 
 use std::path::{Path, PathBuf};
-use std::process::Command;
 
 use crate::discovery::harness::resume_argv_for;
 use crate::model::{AgentSessionId, GraphNode, GraphSnapshot, NodeId};
@@ -108,7 +107,7 @@ pub fn launch_resume(target: &ResumeTarget) -> bool {
     }
     let program = parts[0];
     let args = &parts[1..];
-    Command::new(program)
+    crate::exec::command(crate::exec::Program::Harness, program)
         .args(args)
         .current_dir(cwd)
         .stdin(std::process::Stdio::null())

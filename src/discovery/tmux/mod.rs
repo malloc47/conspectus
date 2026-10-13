@@ -430,7 +430,7 @@ impl SystemTmux {
     /// `tmux <subcommand>` invocation so the default-socket path is
     /// byte-for-byte identical to today.
     fn cmd(&self, socket_name: Option<&str>) -> Command {
-        let mut cmd = Command::new(&self.binary);
+        let mut cmd = crate::exec::command(crate::exec::Program::Tmux, &self.binary);
         if let Some(socket) = effective_socket(socket_name) {
             cmd.args(["-L", socket]);
         }
@@ -454,7 +454,7 @@ impl MuxBackend for SystemTmux {
     }
 
     fn list_sessions(&self, format: &str) -> Result<TmuxOutcome> {
-        let output = Command::new(&self.binary)
+        let output = crate::exec::command(crate::exec::Program::Tmux, &self.binary)
             .args(["list-sessions", "-F", format])
             .output();
 
@@ -871,7 +871,7 @@ impl MuxBackend for SystemTmux {
 }
 
 fn display_message_value(binary: &Path, format: &str) -> Option<String> {
-    let output = Command::new(binary)
+    let output = crate::exec::command(crate::exec::Program::Tmux, binary)
         .args(["display-message", "-p", format])
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::null())

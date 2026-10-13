@@ -8,6 +8,9 @@ on:
 
 env:
   CARGO_TERM_COLOR: always
+  # Fail, rather than skip, the capability trace when strace is missing
+  # (ADR 0117).
+  CONSPECTUS_REQUIRE_STRACE: "1"
 
 jobs:
   rust:
@@ -34,6 +37,9 @@ jobs:
 
       - name: Install cargo-nextest
         uses: taiki-e/install-action@nextest
+
+      - name: Install strace
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends strace
 
       - name: Check formatting
         run: cargo fmt --all -- --check

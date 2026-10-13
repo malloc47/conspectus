@@ -55,6 +55,11 @@
           pkgs.libiconv
         ];
 
+        # Traces the built binary for the capability test (ADR 0117).
+        linuxInputs = pkgs.lib.optionals pkgs.stdenv.isLinux [
+          pkgs.strace
+        ];
+
         # Backlog.md ships no x86_64-darwin build.
         backlogTools = pkgs.lib.optionals (backlog-md.packages ? ${system}) [
           backlog-md.packages.${system}.backlog-md
@@ -62,7 +67,7 @@
       in
       {
         devShells.default = pkgs.mkShell {
-          packages = rustTools ++ devTools ++ backlogTools ++ darwinInputs;
+          packages = rustTools ++ devTools ++ backlogTools ++ darwinInputs ++ linuxInputs;
 
           shellHook = ''
             echo "conspectus dev shell (system: ${system})"

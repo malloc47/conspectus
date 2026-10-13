@@ -1,0 +1,212 @@
+# What Conspectus may run, connect to, signal, and write (ADR 0117).
+#
+# This file is the enforced form of the mutation envelope (ADR 0087).
+# Two tests check the code against it:
+#
+# - `tests/capabilities_static.rs` reads the source and `Cargo.lock`:
+#   every subprocess is built by `src/exec.rs` with a `Program` listed
+#   here, no code opens a network socket or sends a signal outside the
+#   places allowed below, and no networking crate is a dependency.
+# - `tests/capabilities.rs` runs the built binary under `strace` on a
+#   materialized test world and fails on any program, argument,
+#   socket, signal, or write this file doesn't allow.
+#
+# A new capability is a deliberate change: add it here, citing the ADR
+# that allows it, in the same commit as the code that needs it.
+#
+# Every allowance belongs to a context:
+#
+# - `read`: any command, including discovery, tables, exports, the TUI,
+#   and the daemon. Read-only, apart from rebuildable caches.
+# - `act`: commands the operator runs to change something (pin, mux,
+#   rename, declared, worktree, launch and attach from the TUI).
+# - `hook`: `conspectus hook init` and `hook remove`.
+# - `dev`: the dev scenario builder, compiled into debug builds only.
+
+# Programs Conspectus starts. Argument patterns are matched against the
+# arguments after the program name and its leading global options.
+# Words match literally, `*` matches any one word, and a trailing `...`
+# matches any remaining arguments; without it the arguments must end
+# there. `chain` names the argument that separates chained subcommands
+# (`tmux a ; b`); each subcommand must match on its own.
+
+[programs.git]
+adr = ["0011", "0092", "0112"]
+names = ["git"]
+globals = { "-C" = 1, "-c" = 1, "--no-optional-locks" = 0 }
+read = [
+    "rev-parse ...",
+    "symbolic-ref ...",
+    "for-each-ref ...",
+    "remote",
+    "remote -v",
+    "remote get-url *",
+    "worktree list ...",
+    "status ...",
+    "log ...",
+    "rev-list ...",
+    "show ...",
+]
+# The scenario builder creates repos of its own under a scratch
+# directory; it never touches a repo it didn't create.
+dev = [
+    "init ...",
+    "config ...",
+    "add ...",
+    "commit ...",
+    "checkout -b ...",
+    "remote add ...",
+    "push ...",
+    "worktree add ...",
+    "branch ...",
+]
+
+[programs.gh]
+adr = ["0011", "0112", "0115", "0116"]
+names = ["gh"]
+# The only program that reaches the network.
+network = true
+read = ["pr list ...", "pr view ..."]
+
+[programs.tmux]
+adr = ["0006", "0057", "0087", "0093", "0108"]
+names = ["tmux"]
+globals = { "-L" = 1 }
+chain = ";"
+read = [
+    "list-sessions ...",
+    "display-message ...",
+    "capture-pane ...",
+    "has-session ...",
+]
+act = [
+    "new-session ...",
+    "set-option ...",
+    "rename-session ...",
+    "send-keys ...",
+    "kill-session ...",
+    "attach-session ...",
+    "switch-client ...",
+]
+
+[programs.zellij]
+adr = ["0089"]
+names = ["zellij"]
+read = ["list-sessions ..."]
+act = ["attach *"]
+
+[programs.wt]
+adr = ["0092", "0093"]
+names = ["wt"]
+globals = { "-C" = 1 }
+act = ["switch ...", "remove ...", "merge ...", "step prune ..."]
+
+[programs.harness]
+adr = ["0058", "0087"]
+names = ["claude", "codex", "opencode"]
+act = ["--resume *", "exec --resume *", "--session *"]
+
+[programs.claude-history]
+adr = ["0052", "0087"]
+names = ["claude-history"]
+act = ["*"]
+
+[programs.pager]
+adr = ["0022"]
+names = ["less", "more"]
+# Or whatever program `$PAGER` names.
+env = "PAGER"
+read = ["..."]
+
+[programs.conspectus]
+adr = ["0057", "0087", "0105"]
+# The running binary, whatever its file name.
+self = true
+act = ["pin launch ...", "mux new ...", "mux launch ..."]
+
+# Sockets. Conspectus opens no network sockets of its own; `gh` is the
+# only program that reaches the network. Paths use the same variables
+# as `[writes]`.
+[sockets]
+adr = ["0038"]
+families = ["AF_UNIX"]
+bind = ["$RUNTIME/conspectus/server.sock"]
+connect = ["$RUNTIME/conspectus/server.sock"]
+
+# Signals Conspectus sends to other processes. Signal 0 only probes
+# whether a process is alive.
+[signals]
+adr = ["0093"]
+act = ["SIGTERM", "0"]
+
+# Files and directories Conspectus creates, writes, renames, or
+# removes. `**` matches any path below; `*` matches within one path
+# component. `$HOME`, `$CONFIG`, `$STATE`, `$CACHE`, `$DATA`, and
+# `$RUNTIME` are the home directory and the XDG base directories;
+# `$PROJECT` is any directory Conspectus treats as a project root;
+# `$SCRATCH` is the directory the dev scenario builder was given.
+# Creating the missing parents of an allowed path is allowed too.
+[writes]
+adr = ["0012", "0014", "0028", "0057", "0058", "0083", "0087"]
+# Terminals and the null device, in every context.
+always = ["/dev/null", "/dev/tty", "/dev/pts/*"]
+# Rebuildable caches and observations.
+read = [
+    "$STATE/conspectus/**",
+    "$CACHE/conspectus/**",
+    "$DATA/conspectus/**",
+    "$RUNTIME/conspectus/**",
+]
+# User-intent TOML stores, each written through a sibling temporary
+# file (`.<name>.tmp-<pid>-<attempt>`) renamed into place.
+act = [
+    "$CONFIG/conspectus/**",
+    "$PROJECT/.conspectus.toml",
+    "$PROJECT/..conspectus.toml.tmp-*",
+]
+# Hook installation into harness configuration (ADR 0028).
+# `--scope project` writes the same files under the project, and
+# `CODEX_HOME` moves the Codex one.
+hook = [
+    "$HOME/.claude/settings.json",
+    "$HOME/.claude/settings.json.tmp",
+    "$HOME/.codex/config.toml",
+    "$HOME/.codex/config.toml.tmp",
+    "$PROJECT/.claude/settings.json",
+    "$PROJECT/.claude/settings.json.tmp",
+    "$PROJECT/.codex/config.toml",
+    "$PROJECT/.codex/config.toml.tmp",
+]
+dev = ["$SCRATCH/**"]
+
+# Crates that would give Conspectus a network stack of its own. None
+# may appear in `Cargo.lock`, even as a dev or platform-specific
+# dependency.
+[dependencies]
+adr = ["0117"]
+deny = [
+    "async-std",
+    "attohttpc",
+    "curl",
+    "curl-sys",
+    "git2",
+    "h2",
+    "h3",
+    "hickory-resolver",
+    "hyper",
+    "isahc",
+    "libssh2-sys",
+    "native-tls",
+    "openssl",
+    "openssl-sys",
+    "quinn",
+    "reqwest",
+    "rustls",
+    "socket2",
+    "ssh2",
+    "surf",
+    "tokio",
+    "trust-dns-resolver",
+    "tungstenite",
+    "ureq",
+]

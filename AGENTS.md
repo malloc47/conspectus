@@ -63,6 +63,10 @@ standard checks.
   locations, performs background mutation, mutates git state, or bypasses
   hooks. Any new write path must cite ADR 0087 and land inside one of
   its sanctioned categories.
+- Start processes only through `exec::command` (`src/exec.rs`). A new
+  program, subcommand, socket, signal, or write path needs an entry in
+  `docs/capabilities.toml`, citing its ADR, or `tests/capabilities_static.rs`
+  and the traced `tests/capabilities.rs` fail (ADR 0117).
 - Avoid making Conspectus depend on Atelier command modules directly. Shared
   code should be pure discovery/parsing/model code with a clean boundary.
 - Track implementation work as Backlog.md tasks under `backlog/` (ADR 0109);

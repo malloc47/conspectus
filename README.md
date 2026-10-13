@@ -166,10 +166,16 @@ These prohibitions are absolute:
 - no skipping hooks or signing: there is no `--no-verify` equivalent, and if
   a hook fails, the write fails.
 
+The envelope is enforced, not just documented.
+[`docs/capabilities.toml`](docs/capabilities.toml) lists every program and
+subcommand, socket, signal, and write path Conspectus may use. One test reads
+the source against it, and another runs the built binary under `strace` and
+fails on anything the manifest doesn't allow.
 ([ADR 0086](docs/adr/0086-payload-privacy-tenet.md),
 [0087](docs/adr/0087-mutation-envelope.md),
 [0092](docs/adr/0092-worktree-backend-seam.md),
-[0093](docs/adr/0093-operator-initiated-mux-teardown.md))
+[0093](docs/adr/0093-operator-initiated-mux-teardown.md),
+[0117](docs/adr/0117-capability-manifest-and-traced-backstop.md))
 
 ### 7. The daemon is optional, and JSON is the contract
 
@@ -436,7 +442,7 @@ adapters and metadata rather than in the shape of the graph. The design
 document stays short enough to plan from, and the detailed reasoning lives in
 ADRs.
 
-### `docs/adr/`: 116 architecture decision records
+### `docs/adr/`: 117 architecture decision records
 
 Every significant decision gets an ADR, whether it's a model change, a new
 dependency, a new write path, a workflow tool, or a UI convention. Each ADR
@@ -507,6 +513,11 @@ daily use.
   programmatic replay worlds; sanitized captures of real provider data; named
   developer scenarios; and `insta` snapshot tests. The whole suite runs in a
   few seconds.
+- **Capabilities caught by tests.** A manifest of what the binary may run,
+  connect to, signal, and write is checked against the source on every
+  `cargo test`, and against a `strace` of the built binary in CI. An agent
+  can't add a subprocess or a write path without the manifest diff showing
+  it in review ([ADR 0117](docs/adr/0117-capability-manifest-and-traced-backstop.md)).
 - **Drift caught by tests.** One table of key bindings feeds both the key
   dispatcher and the `?` help, and a test fails when a key is missing from
   help. Another keeps internal IDs and ADR numbers out of `--help`, and
@@ -556,7 +567,7 @@ the work moved from building to hardening.
 | --- | --- |
 | Development window | 2026-05-12 to 2026-10-12 |
 | Commits | 983, of which 783 (80%) have an AI co-author trailer |
-| Architecture decision records | 116, of which 11 are superseded or partially superseded |
+| Architecture decision records | 117, of which 11 are superseded or partially superseded |
 | Backlog stories | 636, of which 526 (83%) are done |
 | Commits that touch the backlog | 463 (47%) |
 | Rust | about 145k lines, over 40% of it tests |
@@ -601,7 +612,7 @@ the work moved from building to hardening.
 ## Development
 
 ```sh
-nix develop    # Rust toolchain, cargo-nextest, just, tmux, gh, termshot, backlog
+nix develop    # Rust toolchain, cargo-nextest, just, tmux, gh, termshot, backlog, strace
 just check     # fmt, clippy -D warnings, test, nextest, rustdoc, git diff --check
 ```
 

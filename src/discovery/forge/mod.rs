@@ -16,7 +16,6 @@
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::io;
 use std::path::{Path, PathBuf};
-use std::process::Command;
 use std::sync::{Mutex, MutexGuard, PoisonError};
 use std::time::{Duration, Instant};
 
@@ -383,7 +382,7 @@ impl SystemGh {
     /// Run `gh` read-only, from `cwd` when given, and classify the
     /// failures callers degrade on.
     fn run(&self, args: &[&str], cwd: Option<&Path>) -> Result<GhOutcome> {
-        let mut command = Command::new(&self.binary);
+        let mut command = crate::exec::command(crate::exec::Program::Gh, &self.binary);
         command
             .args(args)
             .env("GH_PROMPT_DISABLED", "1")

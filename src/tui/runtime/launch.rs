@@ -125,7 +125,9 @@ fn run_conspectus_subprocess(
     let program =
         std::env::current_exe().unwrap_or_else(|_| std::path::PathBuf::from("conspectus"));
     ratatui::restore();
-    let output = std::process::Command::new(&program).args(args).output();
+    let output = crate::exec::command(crate::exec::Program::Conspectus, &program)
+        .args(args)
+        .output();
     *terminal = ratatui::init();
     let _ = terminal.clear();
 
@@ -448,7 +450,7 @@ pub(super) fn command_output_excerpt(output: &Output) -> String {
 }
 
 pub(super) fn tmux_session_unavailable(target: &PinLaunchTarget) -> Option<String> {
-    let mut command = std::process::Command::new("tmux");
+    let mut command = crate::exec::command(crate::exec::Program::Tmux, "tmux");
     if let Some(socket) = target
         .mux_socket
         .as_deref()
@@ -512,7 +514,7 @@ pub(super) fn run_tmux_attach_with_socket(
     } else {
         "attach-session"
     };
-    let mut command = std::process::Command::new("tmux");
+    let mut command = crate::exec::command(crate::exec::Program::Tmux, "tmux");
     if let Some(socket) = socket_name.filter(|socket| *socket != "default") {
         command.args(["-L", socket]);
     }
@@ -578,7 +580,7 @@ pub(super) fn run_viewer_launch(
     ratatui::restore();
     let _ = execute!(std::io::stdout(), Clear(ClearType::All), MoveTo(0, 0));
 
-    let status = std::process::Command::new(&plan.program)
+    let status = crate::exec::command(crate::exec::Program::ClaudeHistory, &plan.program)
         .args(&plan.args)
         .status();
 

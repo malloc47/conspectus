@@ -15,7 +15,6 @@
 
 use std::io;
 use std::path::{Path, PathBuf};
-use std::process::Command;
 
 use anyhow::{Context, Result};
 
@@ -302,7 +301,7 @@ impl WorktreeBackend for SystemGitWorktree {
     }
 
     fn list(&self, repo_root: &Path) -> Result<Vec<WorktreeRecord>> {
-        let output = Command::new(&self.binary)
+        let output = crate::exec::command(crate::exec::Program::Git, &self.binary)
             .arg("-C")
             .arg(repo_root)
             .args(["worktree", "list", "--porcelain"])
@@ -369,7 +368,9 @@ impl SystemWt {
 
 impl WtRunner for SystemWt {
     fn run(&self, args: &[&str]) -> io::Result<std::process::Output> {
-        Command::new(&self.binary).args(args).output()
+        crate::exec::command(crate::exec::Program::Worktrunk, &self.binary)
+            .args(args)
+            .output()
     }
 }
 

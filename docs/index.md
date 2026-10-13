@@ -8,6 +8,13 @@ Purpose: working design plan for the standalone Conspectus CLI, including
 product goals, the entity relationship draft, discovery, persistence, views,
 and migration from atelier-adjacent concepts.
 
+## `docs/capabilities.toml`
+
+Purpose: the capability manifest (ADR 0117). Lists every program and
+subcommand, socket, signal, and write path Conspectus may use, by context,
+with the ADRs that allow each. The source and trace tests check the code
+against it.
+
 ## `docs/naming.md`
 
 Purpose: historical naming artifact documenting accepted and rejected project

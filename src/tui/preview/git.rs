@@ -4,7 +4,7 @@
 //! never rewrites the index (ADR 0087).
 
 use std::path::{Path, PathBuf};
-use std::process::{Command, Stdio};
+use std::process::Stdio;
 
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
@@ -63,7 +63,7 @@ fn git(dir: &Path, args: &[&str]) -> Result<String, GitError> {
     if !dir.exists() {
         return Err(GitError::Unavailable("no longer exists".to_string()));
     }
-    let output = Command::new("git")
+    let output = crate::exec::command(crate::exec::Program::Git, "git")
         .args(["--no-optional-locks", "-c", "color.ui=never", "-C"])
         .arg(dir)
         .args(args)
@@ -276,6 +276,8 @@ fn show(dir: &Path, commit: &str) -> Result<Vec<Line<'static>>, GitError> {
 
 #[cfg(test)]
 mod tests {
+    use std::process::Command;
+
     use super::*;
 
     /// A repo with two commits on `main` and a branch `topic` one
