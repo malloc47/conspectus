@@ -363,7 +363,7 @@ is delegated to [worktrunk](https://github.com/max-sixty/worktrunk)
 ### Continuous mode
 
 ```sh
-conspectus serve                        # default refresh: harness 5s, mux 5s, git 30s, forge 5m
+conspectus serve                        # default refresh: harness 5s, mux 5s, git 30s, forge 1h
 conspectus status                       # when each kind of source last refreshed, and any errors
 conspectus refresh [--class git|mux|harness|forge]
 ```

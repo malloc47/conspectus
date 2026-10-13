@@ -389,6 +389,9 @@ The sane default is:
   for open PRs and the last 30 days of history, and a PR links to a local branch
   only when its head is one of the repo's remotes; failures surface as
   diagnostics (ADR 0115)
+- keep forge reads rare: each remote's listing is fetched at startup and then
+  reused for the forge interval (default one hour), and the TUI's `Ctrl-R`
+  hard refresh asks the forges again on demand (ADR 0116)
 
 Discovery should prefer direct on-disk evidence first, then provider metadata,
 then common conventions, then user-declared overrides. Conventions such as

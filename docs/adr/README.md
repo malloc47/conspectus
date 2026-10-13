@@ -153,6 +153,7 @@ Runtime architecture, controls, theming, detail pane, and visual language.
 | [0113](0113-readme-screenshots.md) | README Screenshots From The Showcase Fixture | Accepted |
 | [0114](0114-prs-view-grouped-by-checkout.md) | A PRs View Grouped By Checkout | Accepted |
 | [0115](0115-forge-discovery-over-discovered-repos.md) | Forge Discovery Over Every Discovered Repo | Accepted |
+| [0116](0116-lazy-forge-cadence-and-hard-refresh.md) | Lazy Forge Cadence And A Hard Refresh | Accepted |
 
 ## Transcript viewer
 

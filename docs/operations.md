@@ -142,7 +142,7 @@ show_edge_meta = false      # provenance · confidence · state on link rows
 harness = "5s"
 mux = "5s"
 git = "30s"
-forge = "5m"
+forge = "1h"                # gh pr list per remote; Ctrl-R in the TUI asks now (ADR 0116)
 
 [worktree]                  # see docs/worktrees.md
 backend = "auto"            # auto | git | worktrunk
@@ -161,6 +161,12 @@ teardown_grace = "3s"
   `attached`, `ambiguous`, and `unmuxed`.
 - **Durations** in `[server.intervals]` and `teardown_grace` use
   `<integer><ms|s|m|h>`.
+- **Forge cadence (ADR 0116):** each GitHub remote's PR listing is fetched
+  when discovery starts and reused until it is older than `forge`. A failed
+  fetch retries after at most five minutes. `r` in the TUI keeps the
+  listings; `Ctrl-R` drops them, refreshes a running daemon's forge class,
+  and reloads PR previews. `conspectus refresh --class forge` does the same
+  from a shell.
 - **View precedence at startup:** `--view`, then the view you last used
   (unless `--no-resume-view`), then `[tui] default_view`, then
   `sessions`.
