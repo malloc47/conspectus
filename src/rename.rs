@@ -55,8 +55,9 @@ impl std::fmt::Display for RenamePlanError {
             Self::AmbiguousMux { candidate_count } => write!(
                 f,
                 "session has {candidate_count} active mux candidates; \
-                 resolve the ambiguity (e.g. `conspectus declared confirm`) \
-                 or pass --no-mux to rename only the alias"
+                 resolve the ambiguity (e.g. `{} declared confirm`) \
+                 or pass --no-mux to rename only the alias",
+                crate::invocation::invoked_name()
             ),
             Self::EmptyDisplayName => {
                 write!(

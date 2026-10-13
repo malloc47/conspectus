@@ -2624,3 +2624,21 @@ fn dev_scenario_tui_validates_filter_flags_before_launch() {
         .failure()
         .stderr(predicate::str::contains("invalid --max-age `abc`"));
 }
+
+#[test]
+fn csp_is_the_same_program_under_its_short_name() {
+    // ADR 0118: `csp` is installed alongside `conspectus`; help follows
+    // the name it was run as, and the version names the product.
+    Command::cargo_bin("csp")
+        .expect("csp binary exists")
+        .arg("--help")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Usage: csp [COMMAND]"));
+    Command::cargo_bin("csp")
+        .expect("csp binary exists")
+        .arg("--version")
+        .assert()
+        .success()
+        .stdout(predicate::str::starts_with("conspectus "));
+}

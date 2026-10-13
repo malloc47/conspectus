@@ -192,7 +192,8 @@ pub enum PinsOutcome {
 /// to match the wording.
 pub fn pin_placeholder_status(label: &str) -> String {
     format!(
-        "pins: `{label}` needs a pin selection; press `p` for the picker or use `conspectus pin {label}`"
+        "pins: `{label}` needs a pin selection; press `p` for the picker or use `{} pin {label}`",
+        crate::invocation::invoked_name()
     )
 }
 

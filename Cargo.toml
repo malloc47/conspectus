@@ -61,6 +61,9 @@ private_intra_doc_links = "deny"
 name = "conspectus"
 version = "0.1.0"
 edition = "2024"
+# `src/bin/csp.rs` installs `csp`, the sanctioned short name (ADR 0118),
+# so `cargo run` needs to know which binary is the default.
+default-run = "conspectus"
 license = "MIT"
 description = "AI work graph status tool"
 

@@ -24,6 +24,8 @@ pub mod exec;
 pub mod filter;
 #[doc(hidden)]
 pub mod hook;
+#[doc(hidden)]
+pub mod invocation;
 pub mod model;
 pub mod output;
 pub(crate) mod pin_bindings;

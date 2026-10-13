@@ -1071,8 +1071,7 @@ pub(super) fn resolve_resume_argv_with_cache(
         LineageOutcome::Fork { at, successors } => {
             eprintln!(
                 "conspectus: pin `{}`: session `{}` has {} compacted successors; \
-                 launching fresh — pick one with `conspectus session continue <id>` or \
-                 resume manually",
+                 launching fresh — resume the one you want with `S` in the TUI or by hand",
                 pin.id,
                 at.session_key,
                 successors.len(),

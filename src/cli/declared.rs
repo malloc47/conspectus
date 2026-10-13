@@ -528,7 +528,8 @@ pub(super) fn run_confirm_or_ignore(
         LinkEndpoint::Node { id } => id.clone(),
         LinkEndpoint::Unresolved { .. } => bail!(
             "candidate `{candidate_id}` targets an unresolved endpoint; declare it directly with \
-             `conspectus declared create`"
+             `{} declared create`",
+            crate::invocation::invoked_name()
         ),
     };
 

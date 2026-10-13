@@ -411,7 +411,8 @@ pub fn pin_bind_hint(diagnostics: &[PinDiagnosticView]) -> Option<String> {
             .collect::<Vec<_>>()
             .join(", ");
         Some(format!(
-            "pin bind `{pin_id}`: choose one of [{candidates}] with `conspectus pin bind {pin_id} --to <session-id>`"
+            "pin bind `{pin_id}`: choose one of [{candidates}] with `{} pin bind {pin_id} --to <session-id>`",
+            crate::invocation::invoked_name()
         ))
     })
 }
