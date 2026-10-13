@@ -131,7 +131,9 @@ rebuildable observation sidecars, operator-initiated mux lifecycle, and
 Conspectus-owned subprocess launches) with an explicit prohibition list
 covering harness-native state, terminal input into live agent panes,
 payload persistence, shared/system locations, background mutation, git
-mutation, and hook bypass.
+mutation, and hook bypass. `docs/capabilities.toml` lists every program,
+subcommand, socket, signal, and write path the envelope allows, and tests
+check the source and a traced run of the built binary against it (ADR 0117).
 
 Concrete v1 sources:
 
