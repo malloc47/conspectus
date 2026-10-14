@@ -5,7 +5,7 @@ status: Done
 assignee:
   - '@claude'
 created_date: '2026-10-14 00:43'
-updated_date: '2026-10-14 00:44'
+updated_date: '2026-10-14 01:13'
 labels:
   - rel
 milestone: m-20
@@ -37,6 +37,12 @@ Tests: `git diff --check`; README link check.
 - [x] #1 `just check` passes, or `git diff --check` for docs-only changes
 - [x] #2 Docs and ADRs are updated when behavior, architecture, or workflow change
 <!-- DOD:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+The bake-off record (docs/images/logo/bakeoff.png) and a link to the working canvas were added to ADR 0119 in e58fd74.
+<!-- SECTION:NOTES:END -->
 
 ## Final Summary
 
