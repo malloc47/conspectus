@@ -26,6 +26,15 @@ operator chose the survey reticle, but its crosshair read as a gun sight.
 Three compass treatments were drawn, and the compass rose read clearly as
 a compass at every size.
 
+The bake-off, every candidate in light, in dark, and at 32 and 16 px:
+
+![The logo bake-off: six candidates, three compass treatments of the survey reticle, and the chosen compass rose with bent links](../images/logo/bakeoff.png)
+
+The working canvas, with a close-up board for each candidate and tweakable
+colors, is [Conspectus Logo Bake-off](https://claude.ai/artifact/S1TzbHYjwwoovwGpGJeC8d).
+It is private to the operator, and the image above is the record anyone can
+see.
+
 ## Decision
 
 1. **The mark is a compass rose around a small evidence graph.** A ring
@@ -44,8 +53,9 @@ a compass at every size.
      markers.
    - The dark variant swaps navy for `#E6ECF4`.
 3. **The assets live in `docs/images/logo/`**: `conspectus-mark.svg` and
-   `conspectus-mark-dark.svg` on a 64-unit grid, and 512 px PNG renders of
-   each for slides. The README header shows the mark through a `<picture>`
+   `conspectus-mark-dark.svg` on a 64-unit grid, 512 px PNG renders of
+   each for slides, and `bakeoff.png`, the record of how the mark was
+   chosen. The README header shows the mark through a `<picture>`
    that follows the reader's color scheme.
 4. **No wordmark file.** Text set in an SVG falls back to whatever font
    the viewer has. Lockups set the name in type beside the mark; the
