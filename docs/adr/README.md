@@ -156,6 +156,7 @@ Runtime architecture, controls, theming, detail pane, and visual language.
 | [0116](0116-lazy-forge-cadence-and-hard-refresh.md) | Lazy Forge Cadence And A Hard Refresh | Accepted |
 | [0117](0117-capability-manifest-and-traced-backstop.md) | A Capability Manifest With A Traced Backstop | Accepted |
 | [0118](0118-csp-short-name.md) | `csp` Is The Short Name | Accepted |
+| [0119](0119-compass-rose-logo.md) | The Compass-Rose Logo | Accepted |
 
 ## Transcript viewer
 

@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="Conspectus">
+<title>Conspectus</title>
+<circle cx="32" cy="32" r="18" fill="none" stroke="#14213D" stroke-width="3"/>
+<path d="M32 2 L36.5 14.5 L27.5 14.5 Z" fill="#1FA2B8" stroke="#1FA2B8" stroke-width="1.2" stroke-linejoin="round"/>
+<path d="M60 32 L49.5 28.2 L49.5 35.8 Z M32 60 L28.2 49.5 L35.8 49.5 Z M4 32 L14.5 28.2 L14.5 35.8 Z" fill="#14213D" stroke="#14213D" stroke-width="1.2" stroke-linejoin="round"/>
+<path d="M32 32 Q39.71 30.66 41.05 22.95" fill="none" stroke="#14213D" stroke-width="2.4" stroke-linecap="round"/>
+<path d="M32 32 Q26.22 33.01 24.02 37.59" fill="none" stroke="#E3A33B" stroke-width="2.4" stroke-linecap="round" stroke-dasharray="2.2 2.6"/>
+<circle cx="32" cy="32" r="4.2" fill="#1FA2B8"/>
+<circle cx="41.05" cy="22.95" r="3.2" fill="#14213D"/>
+<circle cx="22.95" cy="41.05" r="2.6" fill="none" stroke="#E3A33B" stroke-width="2"/>
+</svg>
