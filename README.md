@@ -412,8 +412,9 @@ alternatives an agent lays out, and review what lands. The agents do most of
 the investigation, planning, implementation, testing, and documentation.
 
 The repository is set up so that this works without the design drifting. The
-project's memory lives in three places checked into the repo, not in chat
-history: the design document, the decision records, and the backlog.
+project's memory lives in files checked into the repo, not in chat history:
+the design document, the decision records, the backlog, and a capability
+manifest that the tests enforce.
 
 ### A change, end to end
 
@@ -511,6 +512,44 @@ Numbered phases (P0 through P11) cover the planned arc. Hardening workstreams
 (labeled `h-*`) and dated batches of operator requests cover what came up in
 daily use.
 
+### `docs/capabilities.toml`: what the binary may do
+
+When agents write most of the code, a change can add a subprocess, a socket,
+or a write path that nobody decided to allow. The mutation envelope
+([ADR 0087](docs/adr/0087-mutation-envelope.md)) always listed what
+Conspectus may write and what it must never do, but for most of the project
+only review enforced it.
+[`docs/capabilities.toml`](docs/capabilities.toml) turns it into an
+allowlist that the tests enforce
+([ADR 0117](docs/adr/0117-capability-manifest-and-traced-backstop.md)):
+
+- **What it lists.**
+  - Every program Conspectus may start, with the subcommands it may pass, by
+    context: read-only, operator actions, hook installation, and dev
+    scenarios.
+  - The one socket it uses, the daemon's, and the one place it sends a
+    signal, operator-initiated teardown.
+  - Every location it may write.
+  - The networking crates that may never become a dependency.
+
+  `gh` is the only program that reaches the network. Each entry cites the
+  ADR that allows it.
+- **A source check, on every `cargo test`.** Every subprocess starts through
+  one function that names its manifest entry. A test fails on a process,
+  network, or signal API anywhere else, and on a networking crate in
+  `Cargo.lock`.
+- **A traced backstop, in CI.** A test runs the built binary under `strace`
+  across five scenarios on a generated test world, with stand-ins for `gh`,
+  `tmux`, and worktrunk. It fails on any program, argument, socket, signal,
+  or write the manifest doesn't allow, so `git checkout` fails even though
+  `git` is allowed.
+
+When the tests were written, a planted `git fetch` and a planted TCP connect
+were both caught. Writing the manifest also exposed a contradiction the prose
+had hidden: ADR 0087 forbade writes under `~/.claude/`, yet `conspectus hook
+init` made one. The fix amended ADR 0087 to make hook installation a
+category of its own.
+
 ### Making the loop work with agents
 
 - **Guardrails in the repo.** [`AGENTS.md`](AGENTS.md) (also available as
@@ -527,11 +566,6 @@ daily use.
   programmatic replay worlds; sanitized captures of real provider data; named
   developer scenarios; and `insta` snapshot tests. The whole suite runs in a
   few seconds.
-- **Capabilities caught by tests.** A manifest of what the binary may run,
-  connect to, signal, and write is checked against the source on every
-  `cargo test`, and against a `strace` of the built binary in CI. An agent
-  can't add a subprocess or a write path without the manifest diff showing
-  it in review ([ADR 0117](docs/adr/0117-capability-manifest-and-traced-backstop.md)).
 - **Drift caught by tests.** One table of key bindings feeds both the key
   dispatcher and the `?` help, and a test fails when a key is missing from
   help. Another keeps internal IDs and ADR numbers out of `--help`, and
@@ -570,7 +604,10 @@ daily use.
   ([ADR 0109](docs/adr/0109-backlog-md-work-tracking.md)). Node-specific
   previews ([ADR 0112](docs/adr/0112-node-specific-previews.md)), the PRs
   view ([ADR 0114](docs/adr/0114-prs-view-grouped-by-checkout.md)), and
-  forge discovery across every repo (ADRs 0115 and 0116) also landed.
+  forge discovery across every repo (ADRs 0115 and 0116) also landed, as did
+  the enforced capability manifest
+  ([ADR 0117](docs/adr/0117-capability-manifest-and-traced-backstop.md)),
+  the `csp` short name, and a logo.
 
 Commit volume peaked at about 300 a month in May and June, then tapered as
 the work moved from building to hardening.
