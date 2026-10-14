@@ -612,17 +612,17 @@ category of its own.
 Commit volume peaked at about 300 a month in May and June, then tapered as
 the work moved from building to hardening.
 
-### By the numbers (as of 2026-10-12)
+### By the numbers (as of 2026-10-13)
 
 | Measure | Value |
 | --- | --- |
-| Development window | 2026-05-12 to 2026-10-12 |
-| Commits | 983, of which 783 (80%) have an AI co-author trailer |
+| Development window | 2026-05-12 to 2026-10-13 |
+| Commits | 998, of which 798 (80%) have an AI co-author trailer |
 | Architecture decision records | 119, of which 11 are superseded or partially superseded |
-| Backlog stories | 636, of which 526 (83%) are done |
-| Commits that touch the backlog | 463 (47%) |
-| Rust | about 145k lines, over 40% of it tests |
-| Tests | 2,309, all passing, in about 6 seconds with `cargo nextest` |
+| Backlog stories | 643, of which 533 (83%) are done |
+| Commits that touch the backlog | 470 (47%) |
+| Rust | about 147k lines, over 40% of it tests |
+| Tests | 2,317, all passing, in about 5 seconds with `cargo nextest` |
 
 ## Status and limits
 
