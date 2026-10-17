@@ -270,3 +270,36 @@ immediately (new views/providers would otherwise copy the copies); HYG-5's
 exhaustive-match adoption is directly synergistic with `H-EXT-*` since new
 enum variants then fail loudly at compile time; HYG-6 and HYG-7 are the two
 chunks that remove whole classes of future duplication rather than instances.
+
+## Re-Verification (2026-10-16)
+
+All eleven chunks (`CSP-462`–`CSP-472`) are Done. Each finding was
+re-measured against `main` at `123c3f7`; what remains is filed as
+`CSP-617`–`CSP-626`.
+
+| Finding | Status | Follow-up |
+| --- | --- | --- |
+| A1 candidate-count copies | Resolved (`SnapshotIndex`) | — |
+| A2 row helpers | One identical `mux_indicator` copy left in `rows/mux.rs` | `CSP-623` |
+| A3 `snapshot_fragment`, A5 `path_string` | Resolved | — |
+| A4 `current_epoch` | Four compatibility re-exports left, one with no callers | `CSP-623` |
+| A6 centered rect | Resolved (shared `centered_rect`; per-overlay sizing policies are intentional) | — |
+| A7 dual event loops | Loop shared via `LoopMode`; Controls and Pins still have fixture-mode handler copies because they sit outside the `Overlay` trait | `CSP-619` |
+| A8 projection `cell` dispatchers | Column keys barely overlap; the repetition is the inline `backend:native_id` mux label (12 sites) | `CSP-621` |
+| B1 argv-sniffing mtime backdoor | Resolved | — |
+| B2 struct-literal fixtures | Resolved (builders; ~50 complex literals left by rolling policy) | — |
+| B3 inline tests | Extracted, but eight newer files regrew past the threshold, which nothing enforces | `CSP-625` |
+| B4 stale backlog metrics | Moot (`CSP-087` / `CSP-088` Done) | — |
+| C1 lint table | Adopted (31 denied lints); `needless_pass_by_value` and `unnecessary_wraps` never decided | `CSP-624` |
+| C2 linear scans | Mostly resolved; new worktree menu bypasses the index | `CSP-622` |
+| C3 keybinding table | Global keys resolved; overlay keys and footers still hand-written | `CSP-620` |
+| D1–D3 TUI monoliths | Resolved by splits | — |
+| D4 `table.rs` shim, D5 `dev_scenarios` | Resolved | — |
+| D6 naming nits | Dropped: `viewer_bridge.rs` placement is deliberate (ADR 0052) | — |
+| New: `src/model/mod.rs` | Largest production file (~2,470 lines) | `CSP-626` |
+
+The recheck also found two correctness bugs from the mux-backend migration:
+`pin adopt` compares the prefixed id against the bare `native_id` field and
+fails for every live tmux session (reproduced; `CSP-617`), and zellij pins
+pass validation but both launch paths still launch and attach through tmux
+(from code reading; `CSP-618`).
