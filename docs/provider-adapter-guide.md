@@ -260,9 +260,13 @@ deferred pending its first consumer.
 
 **Not a Rust adapter surface.** Hook plugins live in the
 harness's own config (`.claude/settings.json`,
-`.codex/config.toml`, `opencode.jsonc`) and shell out to
+`.codex/config.toml`, `opencode.jsonc`) or extension directory
+(Pi's `extensions/conspectus-hook.ts`) and shell out to
 `conspectus hook write <harness-key>`. See
-`plugins/opencode-hook/README.md` for the plugin contract.
+`plugins/opencode-hook/README.md` and `plugins/pi-hook/README.md`
+for the plugin contracts. Pi's extension is a single TypeScript
+file that `conspectus hook init pi` installs from a copy embedded
+in the binary (ADR 0121).
 
 ## Adapter conformance
 

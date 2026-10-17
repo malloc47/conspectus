@@ -10,7 +10,7 @@
 > *conspectus* (Latin): a comprehensive view; a survey.
 
 Conspectus builds one map of the AI-agent work on your machine. It finds your
-agent sessions (Claude Code, Codex, opencode, aider), terminal multiplexer
+agent sessions (Claude Code, Codex, opencode, aider, Pi), terminal multiplexer
 sessions (tmux, zellij), git repos, checkouts and worktrees, branches,
 multi-repo workspaces, forks, and GitHub pull requests. It records every
 plausible relationship between them as evidence, then resolves that evidence
@@ -161,8 +161,8 @@ of five enumerated categories:
 - tmux session lifecycle actions (create, rename, attach, tear down) that you
   start yourself;
 - subprocesses that Conspectus launches itself;
-- the hook entry `conspectus hook init` adds to a harness's settings file,
-  which `hook remove` takes out again.
+- the hook entry `conspectus hook init` adds to a harness's settings file
+  (for Pi, its one extension file), which `hook remove` takes out again.
 
 These prohibitions are absolute:
 
@@ -211,7 +211,7 @@ and diagnostics.
 ```mermaid
 flowchart LR
   subgraph S["Local state, read-only"]
-    H["Agent harnesses<br/>claude-code · codex · opencode · aider"]
+    H["Agent harnesses<br/>claude-code · codex · opencode · aider · pi"]
     M["Terminal multiplexers<br/>tmux · zellij"]
     G["git<br/>repos · checkouts · worktrees · branches"]
     W["Workspaces<br/>Atelier · agent-deck · multi-repo roots"]
@@ -242,12 +242,12 @@ about what is linked to what. See the
 
 | Family | Supported today | What Conspectus reads |
 | --- | --- | --- |
-| Agent harnesses | Claude Code, Codex, opencode, aider | Sessions, titles, last-message previews, and session lineage (compaction, resume, forks). Harness SQLite databases are opened read-only. |
+| Agent harnesses | Claude Code, Codex, opencode, aider, [Pi](https://pi.dev) | Sessions, titles, last-message previews, and session lineage (compaction, resume, forks). Harness SQLite databases are opened read-only. |
 | Terminal multiplexers | tmux; zellij (discovery and attach only) | Sessions, working directories, activity, attached clients, and pane process trees. |
 | Version control | git | Repos, checkouts, linked worktrees (including worktrees of bare repos), branches, remotes, and upstreams. |
 | Workspaces | Atelier, [agent-deck](https://github.com/asheshgoplani/agent-deck), and generic multi-repo roots | Workspace membership, plus fork provenance from Atelier. |
 | Forges | GitHub, via the `gh` CLI | Open pull requests and the last 30 days of PR history for every GitHub remote of every discovered repo, including a fork's upstream. A PR links to a local branch when its head is one of the repo's remotes. A GitLab adapter exists only as a stub. |
-| Harness hooks (optional) | Claude Code and Codex (`conspectus hook init`), plus an [opencode plugin](plugins/opencode-hook/) | The harness's current session id, which sharpens tmux attribution. |
+| Harness hooks (optional) | Claude Code, Codex, and Pi (`conspectus hook init`), plus an [opencode plugin](plugins/opencode-hook/) | The harness's current session id, which sharpens tmux attribution. |
 
 Discovery starts from the current directory (or the `--scan-root` paths you
 pass), plus each harness's home-level state directory. It then checks the
@@ -316,7 +316,7 @@ conspectus serve                   # keep the graph warm in the background
   link above the neighbor's own preview.
 - **Actions.** `Enter` does the obvious thing for the selected row: attach
   to the tmux session, launch the pin, or open the transcript. `v` opens a
-  built-in transcript viewer for Claude Code, Codex, and opencode.
+  built-in transcript viewer for Claude Code, Codex, opencode, and Pi.
 - **Refresh.** The graph refreshes in the background, and `r` rescans now.
   `Ctrl-R` is a hard refresh that also asks GitHub again instead of waiting
   for the hourly forge refresh.

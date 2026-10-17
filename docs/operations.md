@@ -40,10 +40,39 @@ location.
 | `CONSPECTUS_CODEX_STATE`       | `$HOME/.codex`                | codex        |
 | `CONSPECTUS_CLAUDE_CODE_STATE` | `$HOME/.claude`               | claude-code  |
 | `CONSPECTUS_OPENCODE_STATE`    | `$HOME/.local/share/opencode` | opencode     |
+| `CONSPECTUS_PI_STATE`          | `$HOME/.pi/agent/sessions`    | pi           |
 
 The aider adapter is per-repo rather than per-state-root, so it
 walks scan roots looking for `.aider*` markers and is not gated by an
 environment variable.
+
+#### Pi
+
+Pi's session directory follows Pi's own settings when
+`CONSPECTUS_PI_STATE` is unset (ADR 0121). Conspectus uses the first of:
+
+1. `CONSPECTUS_PI_STATE`.
+2. `PI_CODING_AGENT_SESSION_DIR`.
+3. `sessionDir` in `<agent-dir>/settings.json`, when it is an absolute
+   path.
+4. `<agent-dir>/sessions`.
+
+`<agent-dir>` is `PI_CODING_AGENT_DIR`, or `~/.pi/agent`. Sessions are
+found in both Pi layouts: grouped by working directory (the default) and
+flat (a custom session directory). The working directory always comes
+from the session file, not the directory name.
+
+Known limits:
+
+- Sessions started with `--no-session` write no file, so Conspectus
+  never sees them.
+- A project-level or relative `sessionDir`, and a per-run
+  `--session-dir`, aren't followed. Point `CONSPECTUS_PI_STATE` at that
+  directory instead.
+- Pane attribution reads session ids from commands such as
+  `pi --session <id>` only when the id is a UUID, which is Pi's default.
+  A custom `--session-id` value isn't recognized in a command line; the
+  hook extension below still reports it.
 
 ### Hook sidecar state
 
@@ -98,6 +127,24 @@ Place that in `~/.claude/settings.json` or a local Claude Code
 settings file. The subcommand reads Claude's hook JSON from stdin,
 records `session_id`, `transcript_path`, `cwd`, and tmux context when
 available, then exits without writing to the transcript.
+
+Pi has no hook settings; its hook is a TypeScript extension that
+Conspectus installs as a single file (ADR 0121):
+
+```sh
+conspectus hook init pi                   # <agent-dir>/extensions/conspectus-hook.ts
+conspectus hook init pi --scope project   # ./.pi/extensions/conspectus-hook.ts
+```
+
+Restart Pi or run `/reload` to load it. Pi asks you to trust a project
+before it loads project extensions. The extension reports each
+interactive session start, including `/new`, `/resume`, `/fork`, and
+`/clone`, through `conspectus hook write pi`. It skips `--no-session`
+runs and Pi's print, JSON, and RPC modes. `conspectus hook status pi`
+reports `installed`, `outdated`, `not-installed`, or `foreign` (a file
+at that path Conspectus didn't write). `conspectus hook remove pi`
+deletes only Conspectus's file. See
+[`plugins/pi-hook/README.md`](../plugins/pi-hook/README.md).
 
 ## Configuration File
 
@@ -292,7 +339,7 @@ conspectus mux new <NAME> [--cwd PATH] [--socket NAME] [--no-attach]
 conspectus mux launch <HARNESS> --name <NAME> [--cwd PATH] [--argv ARG...]
                                               [--worktree-branch B --worktree-repo PATH]
 conspectus worktree {list|new|rm|merge|close|prune} ...
-conspectus hook {init|status|remove} <claude-code|codex> [--scope {user|project}]
+conspectus hook {init|status|remove} <claude-code|codex|pi> [--scope {user|project}]
 conspectus hook write <HARNESS>          # invoked by the harness hook itself
 conspectus serve [--scan-root PATH]...
 conspectus refresh [--class {git|mux|harness|forge}]
