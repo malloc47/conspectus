@@ -13,6 +13,12 @@
 //! lines that can't carry a name are skipped before parsing. The
 //! last-message preview is the Tier 2 read, capped and normalized by
 //! [`normalize_last_message_preview`] (ADR 0023).
+//!
+//! `/fork`, `/clone`, and `pi --fork` record the parent's file path as the
+//! header's `parentSession`. Each one becomes an ADR 0018
+//! `parent_session` candidate from the child, with `lineage_kind = fork`
+//! (the header doesn't say which command ran). In-file `/tree` branches
+//! are one session and produce no lineage.
 
 use std::collections::BTreeMap;
 use std::ffi::OsString;
@@ -26,7 +32,11 @@ use serde::Deserialize;
 use crate::discovery::harness::HarnessAdapter;
 use crate::discovery::memo::{FileStamp, StampedMap};
 use crate::discovery::{DiscoveryCaches, DiscoveryContext, GraphFragment};
-use crate::model::{AgentSessionId, AgentSessionNode, GraphNode, normalize_last_message_preview};
+use crate::model::{
+    AgentSessionId, AgentSessionNode, Confidence, Freshness, GraphLink, GraphNode, LinkEndpoint,
+    LinkState, Metadata, NodeId, Provenance, RelationKind, SourceMetadata, UnresolvedEndpoint,
+    normalize_last_message_preview, source_field,
+};
 
 pub const HARNESS_KEY: &str = crate::discovery::providers::PI;
 
@@ -129,27 +139,38 @@ fn discover_state(state_root: &Path, caches: &DiscoveryCaches) -> Result<GraphFr
     }
 
     let state_scope = state_root.to_string_lossy().to_string();
-    let mut sessions: BTreeMap<String, AgentSessionNode> = BTreeMap::new();
+    let mut sessions: BTreeMap<String, PiSession> = BTreeMap::new();
 
     for path in session_files(state_root) {
-        if let Some(node) = scan_session_cached(&path, &state_scope, &caches.pi_sessions) {
+        if let Some(session) = scan_session_cached(&path, &state_scope, &caches.pi_sessions) {
             // One node per session key. Two files claiming the same id
             // (a copied file, say) keep the most recently active one.
             let keep = sessions
-                .get(&node.id.session_key)
-                .is_none_or(|existing| existing.last_active_epoch < node.last_active_epoch);
+                .get(&session.node.id.session_key)
+                .is_none_or(|existing| {
+                    existing.node.last_active_epoch < session.node.last_active_epoch
+                });
             if keep {
-                sessions.insert(node.id.session_key.clone(), node);
+                sessions.insert(session.node.id.session_key.clone(), session);
             }
         }
     }
 
+    let candidate_links = sessions
+        .values()
+        .filter_map(|session| {
+            let parent = session.parent.as_ref()?;
+            let resolved = sessions.contains_key(&parent.session_key);
+            Some(lineage_link(&session.node, parent, &state_scope, resolved))
+        })
+        .collect();
+
     Ok(GraphFragment {
         nodes: sessions
             .into_values()
-            .map(GraphNode::AgentSession)
+            .map(|session| GraphNode::AgentSession(session.node))
             .collect(),
-        candidate_links: Vec::new(),
+        candidate_links,
         diagnostics: Vec::new(),
         node_provenance: BTreeMap::new(),
     })
@@ -212,6 +233,43 @@ struct Header {
     cwd: Option<String>,
     #[serde(default)]
     timestamp: Option<String>,
+    #[serde(rename = "parentSession", default)]
+    parent_session: Option<String>,
+}
+
+/// The `session` header on the first line of `lines`, or `None` when that
+/// line is missing, malformed, or another entry type.
+fn parse_header(lines: &mut impl Iterator<Item = std::io::Result<String>>) -> Option<Header> {
+    let header: Header = serde_json::from_str(&lines.next()?.ok()?).ok()?;
+    (header.entry_type == "session").then_some(header)
+}
+
+/// A session's parent, recovered from the header's `parentSession` path.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct ParentRef {
+    session_key: String,
+    path: String,
+}
+
+/// Recover the parent's session key from its path. The path must name a
+/// Pi session file; the parent's own header id wins when the file is
+/// readable, and the file name's id stands in when it isn't (deleted, or
+/// outside this machine's scan).
+fn parent_ref(parent_path: &str) -> Option<ParentRef> {
+    let path = Path::new(parent_path);
+    if path.extension().is_none_or(|ext| ext != "jsonl") {
+        return None;
+    }
+    let from_name = session_key_from_file_name(path)?;
+    let from_header = fs::File::open(path).ok().and_then(|file| {
+        parse_header(&mut BufReader::new(file).lines())?
+            .id
+            .filter(|id| !id.is_empty())
+    });
+    Some(ParentRef {
+        session_key: from_header.unwrap_or(from_name),
+        path: parent_path.to_string(),
+    })
 }
 
 #[derive(Deserialize)]
@@ -230,16 +288,14 @@ struct Scanned {
     cwd: Option<String>,
     title: Option<String>,
     header_epoch: Option<i64>,
+    parent_session: Option<String>,
 }
 
 fn read_header_and_name(path: &Path) -> Option<Scanned> {
     let file = fs::File::open(path).ok()?;
     let mut lines = BufReader::new(file).lines();
 
-    let header: Header = serde_json::from_str(&lines.next()?.ok()?).ok()?;
-    if header.entry_type != "session" {
-        return None;
-    }
+    let header = parse_header(&mut lines)?;
     let session_key = header
         .id
         .filter(|id| !id.is_empty())
@@ -266,6 +322,7 @@ fn read_header_and_name(path: &Path) -> Option<Scanned> {
         cwd: header.cwd.filter(|cwd| !cwd.is_empty()),
         title,
         header_epoch: header.timestamp.as_deref().and_then(parse_epoch),
+        parent_session: header.parent_session.filter(|path| !path.is_empty()),
     })
 }
 
@@ -373,19 +430,32 @@ fn preview_text(entry: &TailEntry) -> Option<String> {
     }
 }
 
-/// Scan `path` into a session node, reusing the cached result while the
-/// file's `(mtime, size)` is unchanged.
+/// One scanned session file: its node and, for a fork or clone, the
+/// parent it points at.
+#[derive(Clone, Debug)]
+pub(crate) struct PiSession {
+    node: AgentSessionNode,
+    parent: Option<ParentRef>,
+}
+
+/// Scan `path` into a session, reusing the cached result while the file's
+/// `(mtime, size)` is unchanged.
 fn scan_session_cached(
     path: &Path,
     state_scope: &str,
-    cache: &StampedMap<FileStamp, AgentSessionNode>,
-) -> Option<AgentSessionNode> {
+    cache: &StampedMap<FileStamp, PiSession>,
+) -> Option<PiSession> {
     let stamp = FileStamp::of(path)?;
-    if let Some(node) = cache.get(path, &stamp) {
-        return Some(node);
+    if let Some(session) = cache.get(path, &stamp) {
+        return Some(session);
     }
 
     let scanned = read_header_and_name(path)?;
+    let parent = scanned
+        .parent_session
+        .as_deref()
+        .and_then(parent_ref)
+        .filter(|parent| parent.session_key != scanned.session_key);
     let (newest_epoch, last_message_preview) = read_tail(path);
     let node = AgentSessionNode {
         id: AgentSessionId::new(HARNESS_KEY, state_scope, &scanned.session_key),
@@ -399,8 +469,74 @@ fn scan_session_cached(
         session_kind: None,
     };
 
-    cache.insert(path.to_path_buf(), stamp, node.clone());
-    Some(node)
+    let session = PiSession { node, parent };
+    cache.insert(path.to_path_buf(), stamp, session.clone());
+    Some(session)
+}
+
+/// The ADR 0018 `parent_session` candidate from `child` to `parent`: a
+/// node endpoint when the parent was discovered in this root, otherwise
+/// unresolved evidence carrying the recovered key and the parent's path.
+fn lineage_link(
+    child: &AgentSessionNode,
+    parent: &ParentRef,
+    state_scope: &str,
+    resolved: bool,
+) -> GraphLink {
+    let mut fields = Metadata::new();
+    fields.insert("harness_key".to_string(), HARNESS_KEY.into());
+    fields.insert(source_field::LINEAGE_KIND.to_string(), "fork".into());
+    fields.insert("lineage_fidelity".to_string(), "native".into());
+    fields.insert(
+        "parent_session_id".to_string(),
+        parent.session_key.as_str().into(),
+    );
+    fields.insert(
+        "parent_session_path".to_string(),
+        parent.path.as_str().into(),
+    );
+
+    let child_key = &child.id.session_key;
+    let parent_key = &parent.session_key;
+    let (target, id) = if resolved {
+        (
+            LinkEndpoint::Node {
+                id: NodeId::AgentSession(AgentSessionId::new(HARNESS_KEY, state_scope, parent_key)),
+            },
+            format!("pi:lineage:{child_key}:parent_session:{parent_key}"),
+        )
+    } else {
+        (
+            LinkEndpoint::Unresolved {
+                evidence: UnresolvedEndpoint {
+                    node_type: "agent_session".to_string(),
+                    harness_key: Some(HARNESS_KEY.to_string()),
+                    native_id: Some(parent_key.clone()),
+                    state_scope: Some(state_scope.to_string()),
+                    path: Some(parent.path.clone()),
+                    metadata: fields.clone(),
+                },
+            },
+            format!("pi:lineage:{child_key}:parent_session:unresolved:{parent_key}"),
+        )
+    };
+
+    GraphLink {
+        id,
+        source: NodeId::AgentSession(child.id.clone()),
+        target,
+        relation: RelationKind::ParentSession,
+        provenance: Provenance::StrongDiscovered,
+        confidence: Confidence::High,
+        freshness: Freshness::Fresh,
+        source_metadata: SourceMetadata {
+            adapter: HARNESS_KEY.to_string(),
+            evidence: Some("pi session header parentSession".to_string()),
+            fields,
+            freshness_epoch: None,
+        },
+        state: LinkState::Active,
+    }
 }
 
 #[cfg(test)]

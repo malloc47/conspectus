@@ -600,3 +600,19 @@ fn pi_grouped_layout_sessions_snapshot() {
 fn pi_flat_layout_sessions_snapshot() {
     insta::assert_snapshot!(pi_fixture_sessions("flat"));
 }
+
+#[test]
+fn pi_lineage_candidates_snapshot() {
+    let root = fixture_path("pi").join("lineage");
+    let context =
+        DiscoveryContext::default().with_harness_state_root(PiAdapter::new().harness_key(), &root);
+    let fragment = PiAdapter::new()
+        .discover(&context)
+        .expect("discover pi sessions");
+    let rendered = serde_json::to_string_pretty(&fragment.candidate_links).expect("render");
+    let rendered = rendered.replace(
+        fixture_path("pi").to_str().expect("utf8 fixture path"),
+        "<fixtures>/pi",
+    );
+    insta::assert_snapshot!(support::redact_freshness_epoch(&rendered));
+}

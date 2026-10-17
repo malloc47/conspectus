@@ -308,3 +308,140 @@ fn unreadable_session_file_is_skipped() {
         .collect();
     assert_eq!(keys, vec!["ok"]);
 }
+
+fn lineage_links(root: &Path) -> Vec<GraphLink> {
+    let context = DiscoveryContext::default().with_harness_state_root(HARNESS_KEY, root);
+    PiAdapter::new()
+        .discover(&context)
+        .expect("discover")
+        .candidate_links
+}
+
+fn link_from<'a>(links: &'a [GraphLink], child: &str) -> Option<&'a GraphLink> {
+    links
+        .iter()
+        .find(|link| matches!(&link.source, NodeId::AgentSession(id) if id.session_key == child))
+}
+
+#[test]
+fn fork_into_another_cwd_resolves_to_the_parent_node() {
+    let root = fixture_root("lineage");
+    let links = lineage_links(&root);
+    let link = link_from(&links, "0199bbbb-0000-7000-8000-00000000000b").expect("child link");
+
+    assert_eq!(link.relation, RelationKind::ParentSession);
+    assert_eq!(
+        link.target,
+        LinkEndpoint::Node {
+            id: NodeId::AgentSession(AgentSessionId::new(
+                HARNESS_KEY,
+                root.to_string_lossy(),
+                "0199aaaa-0000-7000-8000-00000000000a",
+            )),
+        },
+    );
+    let fields = &link.source_metadata.fields;
+    assert_eq!(fields.get("harness_key"), Some(&"pi".into()));
+    assert_eq!(fields.get(source_field::LINEAGE_KIND), Some(&"fork".into()));
+    assert_eq!(fields.get("lineage_fidelity"), Some(&"native".into()));
+}
+
+#[test]
+fn missing_parent_is_unresolved_with_the_file_name_key_and_path() {
+    let links = lineage_links(&fixture_root("lineage"));
+    let link = link_from(&links, "0199cccc-0000-7000-8000-00000000000c").expect("child link");
+
+    let LinkEndpoint::Unresolved { evidence } = &link.target else {
+        panic!("expected an unresolved parent: {link:#?}");
+    };
+    assert_eq!(evidence.harness_key.as_deref(), Some("pi"));
+    assert_eq!(
+        evidence.native_id.as_deref(),
+        Some("0199dead-0000-7000-8000-00000000dead")
+    );
+    assert!(
+        evidence.path.as_deref().is_some_and(|path| path.ends_with(
+            "--work-gone--/2026-10-01T00-00-00-000Z_0199dead-0000-7000-8000-00000000dead.jsonl"
+        )),
+        "{evidence:#?}",
+    );
+}
+
+#[test]
+fn self_empty_and_non_session_parent_paths_emit_no_lineage() {
+    let links = lineage_links(&fixture_root("lineage"));
+    for child in [
+        // Points at itself.
+        "0199dddd-0000-7000-8000-00000000000d",
+        // Empty `parentSession`.
+        "0199eeee-0000-7000-8000-00000000000e",
+        // Not a `.jsonl` file.
+        "0199ffff-0000-7000-8000-00000000000f",
+        // A `.jsonl` whose name lacks `<timestamp>_<id>`.
+        "01991111-0000-7000-8000-000000000001",
+    ] {
+        assert!(link_from(&links, child).is_none(), "{child}: {links:#?}");
+    }
+    assert_eq!(links.len(), 2, "{links:#?}");
+}
+
+#[test]
+fn resolver_links_the_parent_and_reports_the_missing_one() {
+    let links = lineage_links(&fixture_root("lineage"));
+    let output = crate::resolve::resolve_links(&links);
+
+    assert_eq!(output.resolved_relationships.len(), 1);
+    let relationship = &output.resolved_relationships[0];
+    assert_eq!(relationship.relation, RelationKind::ParentSession);
+    assert!(matches!(
+        &relationship.target,
+        NodeId::AgentSession(id) if id.session_key == "0199aaaa-0000-7000-8000-00000000000a"
+    ));
+    assert!(matches!(
+        output.diagnostics.as_slice(),
+        [crate::model::Diagnostic::UnresolvedEndpoint { link_id, relation: RelationKind::ParentSession }]
+            if link_id.ends_with("unresolved:0199dead-0000-7000-8000-00000000dead")
+    ));
+}
+
+#[test]
+fn readable_parent_outside_the_scan_keys_by_its_header_id() {
+    let temp = TempDir::new().expect("temp");
+    let elsewhere = temp.path().join("elsewhere");
+    let root = temp.path().join("root");
+    fs::create_dir_all(&elsewhere).expect("elsewhere");
+    fs::create_dir_all(&root).expect("root");
+
+    // The parent's file name and header disagree; the header wins.
+    let parent = elsewhere.join("2026-10-16T09-00-00-000Z_renamed-file.jsonl");
+    fs::write(
+        &parent,
+        "{\"type\":\"session\",\"version\":3,\"id\":\"header-id\",\"cwd\":\"/work/x\"}\n",
+    )
+    .expect("parent");
+    let child = serde_json::json!({
+        "type": "session",
+        "version": 3,
+        "id": "child",
+        "cwd": "/work/x",
+        "parentSession": parent,
+    });
+    fs::write(
+        root.join("2026-10-16T09-10-00-000Z_child.jsonl"),
+        format!("{child}\n"),
+    )
+    .expect("child");
+
+    let links = lineage_links(&root);
+    let link = link_from(&links, "child").expect("child link");
+    let LinkEndpoint::Unresolved { evidence } = &link.target else {
+        panic!("parent is outside the scan: {link:#?}");
+    };
+    assert_eq!(evidence.native_id.as_deref(), Some("header-id"));
+}
+
+#[test]
+fn sessions_without_parents_emit_no_lineage() {
+    assert!(lineage_links(&fixture_root("grouped")).is_empty());
+    assert!(lineage_links(&fixture_root("flat")).is_empty());
+}

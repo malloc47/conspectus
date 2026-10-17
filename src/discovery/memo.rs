@@ -15,7 +15,7 @@ use std::path::{Path, PathBuf};
 use std::sync::{Mutex, MutexGuard, PoisonError};
 use std::time::{Duration, Instant, SystemTime};
 
-use super::harness::{claude_code, codex, opencode};
+use super::harness::{claude_code, codex, opencode, pi};
 use super::{GraphFragment, codex_log, forge, git, tmux, zellij};
 
 /// Results that discovery reuses across runs while their inputs are
@@ -32,7 +32,7 @@ pub struct DiscoveryCaches {
     pub(crate) codex_rollouts: StampedMap<FileStamp, codex::RolloutScan>,
     pub(crate) claude_sessions: StampedMap<FileStamp, claude_code::DiscoveredSession>,
     pub(crate) opencode_sessions: StampedMap<FileStamp, Vec<opencode::SessionInfo>>,
-    pub(crate) pi_sessions: StampedMap<FileStamp, crate::model::AgentSessionNode>,
+    pub(crate) pi_sessions: StampedMap<FileStamp, pi::PiSession>,
     pub(crate) codex_log: codex_log::QueryCache,
     /// Fingerprint of the last mux/harness slice, used to skip the
     /// process-tree walk when that slice hasn't changed.
