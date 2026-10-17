@@ -94,6 +94,7 @@ static CLAUDE_CODE_RUNTIME_SIGNATURE: super::RuntimeSignature = super::RuntimeSi
     harness_key: HARNESS_KEY,
     process_command_basenames: &["claude", "claude-code"],
     command_substrings: &["claude"],
+    command_token_basenames: &[],
     fd_path_patterns: &["/.claude/tasks/", "/.claude/projects/"],
     extract_session_keys: super::generic_uuid_like_session_keys,
     is_background_process: claude_code_is_background_process,

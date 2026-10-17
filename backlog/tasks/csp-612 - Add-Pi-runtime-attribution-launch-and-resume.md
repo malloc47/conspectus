@@ -1,10 +1,11 @@
 ---
 id: CSP-612
 title: 'Add Pi runtime attribution, launch, and resume'
-status: To Do
-assignee: []
+status: Done
+assignee:
+  - '@claude'
 created_date: '2026-10-17 03:02'
-updated_date: '2026-10-17 03:05'
+updated_date: '2026-10-17 13:52'
 labels:
   - h-pi
 milestone: m-22
@@ -38,16 +39,52 @@ Blockers: the discovery adapter story.
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 The Pi `RuntimeSignature` matches the exact basenames `pi` and `pi-rpc` and classifies `pi-rpc` as the Pi ADR decided; tests show `pip`, `pipx`, `api-server`, and `spin` panes are not attributed to Pi
-- [ ] #2 Session-key extraction finds Pi UUIDv7 ids in commands such as `pi --session <id>` and `pi --fork <id>`
-- [ ] #3 `launch_argv` returns `pi`, and `resume_argv` returns `pi --session <id>` run from the session cwd
-- [ ] #4 `docs/capabilities.toml` lists `pi` with its ADR, and `tests/capabilities_static.rs` and `tests/capabilities.rs` pass
-- [ ] #5 The TUI theme has a `harness_pi` identity color that can be overridden like the other harness colors, and the filter menu lists Pi
-- [ ] #6 `conspectus tui --snapshot` output shows a Pi row with its badge and color
+- [x] #1 The Pi `RuntimeSignature` matches the exact basenames `pi` and `pi-rpc` and classifies `pi-rpc` as the Pi ADR decided; tests show `pip`, `pipx`, `api-server`, and `spin` panes are not attributed to Pi
+- [x] #2 Session-key extraction finds Pi UUIDv7 ids in commands such as `pi --session <id>` and `pi --fork <id>`
+- [x] #3 `launch_argv` returns `pi`, and `resume_argv` returns `pi --session <id>` run from the session cwd
+- [x] #4 `docs/capabilities.toml` lists `pi` with its ADR, and `tests/capabilities_static.rs` and `tests/capabilities.rs` pass
+- [x] #5 The TUI theme has a `harness_pi` identity color that can be overridden like the other harness colors, and the filter menu lists Pi
+- [x] #6 `conspectus tui --snapshot` output shows a Pi row with its badge and color
 <!-- AC:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
-- [ ] #1 `just check` passes, or `git diff --check` for docs-only changes
-- [ ] #2 Docs and ADRs are updated when behavior, architecture, or workflow change
+- [x] #1 `just check` passes, or `git diff --check` for docs-only changes
+- [x] #2 Docs and ADRs are updated when behavior, architecture, or workflow change
 <!-- DOD:END -->
+
+## Implementation Plan
+
+<!-- SECTION:PLAN:BEGIN -->
+1. Add `RuntimeSignature::command_token_basenames` (exact match on each token's basename in pane-command scans) and teach `cross_link::command_harnesses` to use it. Every other adapter sets it empty.
+2. Pi signature: basenames `pi` and `pi-rpc` for process trees and pane tokens, no substrings, no fd patterns, generic UUID key extraction, and `pi-rpc` classified as Background.
+3. `resume_argv` is `pi --session <id>`; `tui/resume.rs` already runs it from the session cwd.
+4. Theme: a default `pi` color (bright blue), the flat `harness_pi` key, and `[tui.theme.harness].pi` through the registry. Document it in operations.md.
+5. Add `pi` to `programs.harness` in `docs/capabilities.toml` with ADR 0121.
+6. Tests: pane-token and process-tree matching including the look-alikes, an end-to-end link, `pi-rpc` Background (mutation-checked), key extraction, argv, theme config, and filter options. Snapshot check for the badge color.
+<!-- SECTION:PLAN:END -->
+
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+Pi now takes part in runtime attribution, launch, and resume.
+- `RuntimeSignature` gains `command_token_basenames`, an exact basename match per command token in pane-command scans (ADR 0121). Pi uses it in place of substrings.
+- The Pi signature matches `pi` and `pi-rpc` exactly, classifies `pi-rpc` as a Background process, has no fd patterns, and extracts UUIDv7 keys.
+- `resume_argv` is `pi --session <id>`, run from the session cwd by the existing resume path.
+- The theme has a bright-blue `pi` badge, overridable with `harness_pi` or `[tui.theme.harness].pi`.
+- `docs/capabilities.toml` lists `pi` under `programs.harness` with ADR 0121.
+- The operations and adapter-guide docs are updated.
+
+Verification:
+- `just check`: 2358 tests, including `capabilities_static` and the traced `capabilities` test.
+- New cross_link tests:
+  - Pane tokens match `pi`, `atelier exec pi`, `/…/bin/pi`, and `pi-rpc`, but not `pip install`, `pipx`, `api-server`, `spin up`, `python3 -m pip`, `vim api.py`, or `pinentry`.
+  - Process trees match by exact basename.
+  - A `pi --session <id>` pane links its session, and look-alike panes link nothing.
+  - A `pi-rpc` child doesn't register as a human agent or claim the pane. I confirmed this test fails with the Background check removed.
+- pi_tests cover key extraction (`--session`, `--fork`, a session-file path, and the custom-id limitation), `pi_is_background_process`, and the launch/resume argv.
+- Config tests cover both theme override forms, and a controls test covers the harness filter list.
+- Manual: `tui --snapshot` against the fixtures shows Pi rows with a bold, reversed bright-blue badge (ESC[94m).
+
+Pi is not installed on this machine, so the live tmux attribution, resume, and pin-launch checks were not done.
+<!-- SECTION:FINAL_SUMMARY:END -->

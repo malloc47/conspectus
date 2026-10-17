@@ -102,8 +102,8 @@ globals = { "-C" = 1 }
 act = ["switch ...", "remove ...", "merge ...", "step prune ..."]
 
 [programs.harness]
-adr = ["0058", "0087"]
-names = ["claude", "codex", "opencode"]
+adr = ["0058", "0087", "0121"]
+names = ["claude", "codex", "opencode", "pi"]
 act = ["--resume *", "exec --resume *", "--session *"]
 
 [programs.claude-history]

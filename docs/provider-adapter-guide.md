@@ -36,9 +36,11 @@ up your adapter without further edits.
   — read the harness's state root and emit
   `AgentSessionNode`s.
 - `runtime_signature(&self) -> &'static RuntimeSignature` —
-  process command basenames, fd-path patterns, session-key
-  extraction fn, subagent/background heuristics. Point
-  `harness_key` on the signature at the same key.
+  process command basenames, pane-command substrings (or exact
+  token basenames for names too short to match as substrings,
+  such as `pi`), fd-path patterns, session-key extraction fn,
+  subagent/background heuristics. Point `harness_key` on the
+  signature at the same key.
 
 **Optional methods with defaults:**
 - `display_label() -> &'static str` — short row label

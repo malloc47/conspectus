@@ -1787,3 +1787,152 @@ fn orphan_subagent_mux_link_stays_active() {
         "orphan subagent mux link should stay active"
     );
 }
+
+fn pi_session(id: &str, cwd: Option<&str>) -> GraphNode {
+    GraphNode::AgentSession(AgentSessionNode {
+        id: AgentSessionId::new("pi", "/state", id),
+        harness_key: "pi".to_string(),
+        cwd: cwd.map(str::to_string),
+        title: None,
+        last_message_preview: None,
+        last_active_epoch: None,
+        session_kind: None,
+    })
+}
+
+#[test]
+fn pane_commands_match_pi_only_as_a_whole_token() {
+    for command in [
+        "pi",
+        "pi --session 0199f0a2-7c1e-7d3a-9b2e-5f1c2a3b4c5d",
+        "/home/user/.local/bin/pi",
+        "atelier exec pi",
+        "pi-rpc",
+    ] {
+        assert!(
+            command_harnesses(command).contains("pi"),
+            "`{command}` should be a Pi pane",
+        );
+    }
+    for command in [
+        "pip install requests",
+        "pipx run black",
+        "api-server --port 8080",
+        "spin up",
+        "python3 -m pip list",
+        "vim api.py",
+        "pinentry",
+    ] {
+        assert!(
+            !command_harnesses(command).contains("pi"),
+            "`{command}` must not be a Pi pane",
+        );
+    }
+}
+
+#[test]
+fn process_tree_matches_pi_by_exact_basename() {
+    for command in ["pi", "/usr/local/bin/pi --continue", "pi-rpc"] {
+        assert!(
+            process_command_harnesses(command).contains("pi"),
+            "`{command}`"
+        );
+    }
+    for command in ["pip", "pipx", "api-server", "spin", "pinentry-curses"] {
+        assert!(process_command_harnesses(command).is_empty(), "`{command}`");
+    }
+}
+
+#[test]
+fn pi_pane_process_links_its_session() {
+    let session_id = "0199f0a2-7c1e-7d3a-9b2e-5f1c2a3b4c5d";
+    let command = format!("pi --session {session_id}");
+    let mut snapshot = GraphSnapshot {
+        nodes: vec![
+            pi_session(session_id, Some("/work/repo")),
+            mux_with_active_process("editor", Some("/work/repo"), &command, 100),
+        ],
+        ..GraphSnapshot::empty()
+    };
+    let processes = FakeProcessSnapshot::new([process(100, None, &command, Some("/work/repo"))]);
+
+    infer_with_process_snapshot(&mut snapshot, &processes);
+
+    assert!(
+        snapshot.candidate_links.iter().any(|link| {
+            link.relation == RelationKind::LinkedToMux
+                && matches!(&link.source, NodeId::AgentSession(id) if id.session_key == session_id)
+        }),
+        "{:#?}",
+        snapshot.candidate_links,
+    );
+}
+
+#[test]
+fn lookalike_pane_processes_do_not_link_a_pi_session() {
+    let mut snapshot = GraphSnapshot {
+        nodes: vec![
+            pi_session("0199f0a2-7c1e-7d3a-9b2e-5f1c2a3b4c5d", Some("/work/repo")),
+            mux_with_active_process("pip", Some("/work/repo"), "pip install requests", 100),
+            mux_with_active_process("api", Some("/work/repo"), "api-server", 200),
+            mux_with_active_process("spin", Some("/work/repo"), "spin up", 300),
+        ],
+        ..GraphSnapshot::empty()
+    };
+    let processes = FakeProcessSnapshot::new([
+        process(100, None, "pip install requests", Some("/work/repo")),
+        process(200, None, "api-server", Some("/work/repo")),
+        process(300, None, "spin up", Some("/work/repo")),
+    ]);
+
+    infer_with_process_snapshot(&mut snapshot, &processes);
+
+    assert!(
+        snapshot.candidate_links.iter().all(|link| {
+            !matches!(&link.source, NodeId::AgentSession(id) if id.harness_key == "pi")
+        }),
+        "{:#?}",
+        snapshot.candidate_links,
+    );
+}
+
+#[test]
+fn pi_rpc_process_is_background() {
+    let session_id = "0199f0a2-7c1e-7d3a-9b2e-5f1c2a3b4c5d";
+    let mut snapshot = GraphSnapshot {
+        nodes: vec![
+            pi_session(session_id, Some("/work/repo")),
+            mux_with_active_process("editor", Some("/work/repo"), "nvim", 100),
+        ],
+        ..GraphSnapshot::empty()
+    };
+    let processes = FakeProcessSnapshot::new([
+        process(100, None, "nvim", Some("/work/repo")),
+        process(101, Some(100), "pi-rpc", Some("/work/repo")),
+    ]);
+
+    infer_with_process_snapshot(&mut snapshot, &processes);
+
+    let roles: Vec<_> = snapshot
+        .nodes
+        .iter()
+        .filter_map(|node| match node {
+            GraphNode::RuntimeProcess(process) => Some((process.pid, process.role)),
+            _ => None,
+        })
+        .collect();
+    assert!(
+        roles
+            .iter()
+            .all(|(_, role)| *role != Some(RuntimeProcessRole::HumanAgent)),
+        "pi-rpc must not register as a human agent: {roles:?}",
+    );
+    assert!(
+        snapshot.candidate_links.iter().all(|link| {
+            !(link.relation == RelationKind::LinkedToMux
+                && matches!(&link.source, NodeId::AgentSession(id) if id.session_key == session_id))
+        }),
+        "an RPC child must not attribute the pane to the session: {:#?}",
+        snapshot.candidate_links,
+    );
+}

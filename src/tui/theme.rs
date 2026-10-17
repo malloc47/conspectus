@@ -201,6 +201,7 @@ impl Default for Theme {
         harness_colors.insert("codex".to_string(), Color::Cyan);
         harness_colors.insert("opencode".to_string(), Color::Green);
         harness_colors.insert("aider".to_string(), Color::Red);
+        harness_colors.insert("pi".to_string(), Color::LightBlue);
 
         Self {
             harness_colors,
@@ -331,6 +332,10 @@ impl Theme {
             },
             ThemeKey {
                 name: "harness_aider",
+                kind: Color,
+            },
+            ThemeKey {
+                name: "harness_pi",
                 kind: Color,
             },
             ThemeKey {
@@ -501,6 +506,9 @@ impl Theme {
             }
             "harness_aider" => {
                 self.harness_colors.insert("aider".to_string(), color);
+            }
+            "harness_pi" => {
+                self.harness_colors.insert("pi".to_string(), color);
             }
             "harness_unknown" => self.harness_unknown = color,
             "mux_attached" => self.mux_attached = color,

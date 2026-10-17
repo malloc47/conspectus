@@ -54,19 +54,35 @@ impl PiAdapter {
     }
 }
 
-/// Runtime attribution surface for Pi. Discovery ships first with no
-/// process, pane-command, or fd patterns, so Pi sessions take no part
-/// in pane attribution until the exact-basename matching ADR 0121
-/// specifies lands (backlog `CSP-612`).
+/// Executable names Pi runs under: its process title is `pi`, or
+/// `pi-rpc` in RPC mode.
+const PI_BASENAMES: &[&str] = &["pi", "pi-rpc"];
+
+/// Runtime attribution surface for Pi (ADR 0121). `pi` is too short to
+/// match as a substring, so pane commands match it as a whole token
+/// instead. Pi holds its session file open only while appending, so fd
+/// evidence would flicker and no fd patterns are listed. Session ids are
+/// UUIDv7.
 static PI_RUNTIME_SIGNATURE: super::RuntimeSignature = super::RuntimeSignature {
     harness_key: HARNESS_KEY,
-    process_command_basenames: &[],
+    process_command_basenames: PI_BASENAMES,
     command_substrings: &[],
+    command_token_basenames: PI_BASENAMES,
     fd_path_patterns: &[],
     extract_session_keys: super::generic_uuid_like_session_keys,
-    is_background_process: super::no_match,
+    is_background_process: pi_is_background_process,
     is_subagent_process: super::no_match,
 };
+
+/// RPC mode is driven over stdio by another program, not by someone
+/// typing in a pane, so it must not claim pane attribution.
+fn pi_is_background_process(command: &str) -> bool {
+    command
+        .split_whitespace()
+        .next()
+        .and_then(|program| program.rsplit('/').next())
+        .is_some_and(|name| name.eq_ignore_ascii_case("pi-rpc"))
+}
 
 impl HarnessAdapter for PiAdapter {
     fn harness_key(&self) -> &'static str {
@@ -85,6 +101,16 @@ impl HarnessAdapter for PiAdapter {
 
     fn launch_argv(&self) -> Vec<OsString> {
         vec![OsString::from("pi")]
+    }
+
+    /// `pi --session <id>` looks the id up in the current project first,
+    /// so the caller runs it from the session's cwd.
+    fn resume_argv(&self, session_id: &str, _cwd: &Path) -> Option<Vec<OsString>> {
+        Some(vec![
+            OsString::from("pi"),
+            OsString::from("--session"),
+            OsString::from(session_id),
+        ])
     }
 }
 

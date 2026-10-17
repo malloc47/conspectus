@@ -1274,3 +1274,33 @@ fn load_without_anchor_skips_the_project_walk_and_keeps_user_config() {
     assert!(unanchored.project_path.is_none());
     assert_eq!(unanchored.config.tui.narrow_layout_threshold, 90);
 }
+
+#[test]
+fn tui_theme_overrides_the_pi_harness_color_both_ways() {
+    let temp = TempDir::new().expect("temp dir");
+    let project = temp.path().join("project");
+    fs::create_dir(&project).expect("create project dir");
+    let loader = ConfigLoader::new().with_home(temp.path());
+
+    write_file(
+        &project.join(PROJECT_CONFIG_FILENAME),
+        "[tui.theme]\nharness_pi = \"red\"\n",
+    );
+    let outcome = loader.load_from(&project);
+    assert!(outcome.diagnostics.is_empty(), "{:?}", outcome.diagnostics);
+    assert_eq!(
+        outcome.config.tui.theme.harness_color("pi"),
+        ratatui::style::Color::Red
+    );
+
+    write_file(
+        &project.join(PROJECT_CONFIG_FILENAME),
+        "[tui.theme.harness]\npi = \"magenta\"\n",
+    );
+    let outcome = loader.load_from(&project);
+    assert!(outcome.diagnostics.is_empty(), "{:?}", outcome.diagnostics);
+    assert_eq!(
+        outcome.config.tui.theme.harness_color("pi"),
+        ratatui::style::Color::Magenta
+    );
+}

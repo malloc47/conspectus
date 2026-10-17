@@ -81,6 +81,13 @@ pub struct RuntimeSignature {
     /// via `contains(...)`, so keep the entries short and
     /// unambiguous.
     pub command_substrings: &'static [&'static str],
+    /// Exact executable names matched against every
+    /// whitespace-separated token's basename in the same loose
+    /// command scans, case-insensitively. For harnesses whose name is
+    /// too short to match as a substring (`pi` is inside `pip` and
+    /// `api`), so a wrapper such as `atelier exec pi` still matches
+    /// while `pipx` doesn't.
+    pub command_token_basenames: &'static [&'static str],
     /// Path prefixes that identify this harness in an fd path
     /// (e.g. `"/.codex/sessions/"` for codex). Matched via
     /// `contains(...)` so paths with leading directories
@@ -367,6 +374,7 @@ static STUB_RUNTIME_SIGNATURE: RuntimeSignature = RuntimeSignature {
     harness_key: "unknown",
     process_command_basenames: &[],
     command_substrings: &[],
+    command_token_basenames: &[],
     fd_path_patterns: &[],
     extract_session_keys: generic_uuid_like_session_keys,
     is_background_process: no_match,

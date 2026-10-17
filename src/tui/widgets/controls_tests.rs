@@ -550,3 +550,11 @@ fn modal_height_budget_covers_the_tallest_body() {
         );
     }
 }
+
+#[test]
+fn harness_filter_lists_every_registered_harness_including_pi() {
+    assert_eq!(
+        harness_options(),
+        &["claude-code", "codex", "opencode", "aider", "pi"]
+    );
+}

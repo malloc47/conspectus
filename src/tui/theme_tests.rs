@@ -39,6 +39,7 @@ fn default_preserves_inline_literals() {
     assert_eq!(theme.harness_color("codex"), Color::Cyan);
     assert_eq!(theme.harness_color("opencode"), Color::Green);
     assert_eq!(theme.harness_color("aider"), Color::Red);
+    assert_eq!(theme.harness_color("pi"), Color::LightBlue);
     assert_eq!(theme.harness_color("unknown-harness"), Color::White);
     assert_eq!(theme.mux_attached, Color::Green);
     assert_eq!(theme.mux_unmuxed, Modifier::DIM);

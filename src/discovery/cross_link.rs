@@ -1679,18 +1679,27 @@ fn active_pane_harnesses(mux: &MuxSessionNode) -> BTreeSet<String> {
 }
 
 fn command_harnesses(command: &str) -> BTreeSet<String> {
-    // Iterate registered adapters and consult each
-    // signature's `command_substrings` (loose case-insensitive
-    // contains).
+    // Iterate registered adapters and consult each signature's
+    // `command_substrings` (loose case-insensitive contains) and
+    // `command_token_basenames` (exact match on a token's basename).
     let command = command.to_ascii_lowercase();
+    let token_names: Vec<&str> = command
+        .split_whitespace()
+        .filter_map(|token| token.rsplit('/').next())
+        .collect();
     let mut harnesses = BTreeSet::new();
     for adapter in crate::discovery::harness::registered_adapters() {
         let sig = adapter.runtime_signature();
-        if sig
+        let substring_match = sig
             .command_substrings
             .iter()
-            .any(|s| command.contains(&s.to_ascii_lowercase()))
-        {
+            .any(|s| command.contains(&s.to_ascii_lowercase()));
+        let token_match = sig.command_token_basenames.iter().any(|name| {
+            token_names
+                .iter()
+                .any(|token| name.eq_ignore_ascii_case(token))
+        });
+        if substring_match || token_match {
             harnesses.insert(adapter.harness_key().to_string());
         }
     }

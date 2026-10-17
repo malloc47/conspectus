@@ -55,6 +55,7 @@ static OPENCODE_RUNTIME_SIGNATURE: super::RuntimeSignature = super::RuntimeSigna
     harness_key: HARNESS_KEY,
     process_command_basenames: &["opencode"],
     command_substrings: &["opencode"],
+    command_token_basenames: &[],
     fd_path_patterns: &[
         "/.local/share/opencode/",
         "/.config/opencode/",

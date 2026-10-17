@@ -196,6 +196,7 @@ harness_claude   = "magenta"
 harness_codex    = "cyan"
 harness_opencode = "green"
 harness_aider    = "red"
+harness_pi       = "bright_blue"
 
 # Activity buckets coloring the session recency column.
 # Accepts `color`, `color,mod`, or `mod` alone.

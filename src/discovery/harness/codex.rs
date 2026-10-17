@@ -71,6 +71,7 @@ static CODEX_RUNTIME_SIGNATURE: super::RuntimeSignature = super::RuntimeSignatur
     // here so the CLI's registry-driven lookup matches both.
     process_command_basenames: &["codex", "codex-rs"],
     command_substrings: &["codex"],
+    command_token_basenames: &[],
     fd_path_patterns: &["/.codex/sessions/", "/.codex/tmp/"],
     extract_session_keys: super::generic_uuid_like_session_keys,
     is_background_process: super::no_match,

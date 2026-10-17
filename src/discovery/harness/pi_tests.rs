@@ -445,3 +445,48 @@ fn sessions_without_parents_emit_no_lineage() {
     assert!(lineage_links(&fixture_root("grouped")).is_empty());
     assert!(lineage_links(&fixture_root("flat")).is_empty());
 }
+
+#[test]
+fn session_keys_are_extracted_from_pi_commands() {
+    let extract = PI_RUNTIME_SIGNATURE.extract_session_keys;
+    let id = "0199f0a2-7c1e-7d3a-9b2e-5f1c2a3b4c5d";
+    for command in [
+        format!("pi --session {id}"),
+        format!("pi --fork {id}"),
+        format!(
+            "pi --session /home/user/.pi/agent/sessions/--work--/2026-10-16T10-00-00-000Z_{id}.jsonl"
+        ),
+    ] {
+        assert_eq!(
+            extract(&command).into_iter().collect::<Vec<_>>(),
+            vec![id.to_string()],
+            "{command}",
+        );
+    }
+    // Custom `--session-id` values outside the UUID grammar are a
+    // documented limitation.
+    assert!(extract("pi --session my-custom.id").is_empty());
+}
+
+#[test]
+fn pi_rpc_is_a_background_process() {
+    assert!(pi_is_background_process("pi-rpc"));
+    assert!(pi_is_background_process("/usr/local/bin/pi-rpc --mode rpc"));
+    assert!(!pi_is_background_process("pi"));
+    assert!(!pi_is_background_process("pi --session abc"));
+    assert!(!pi_is_background_process("nvim pi-rpc.md"));
+}
+
+#[test]
+fn launch_and_resume_argv() {
+    let adapter = PiAdapter::new();
+    assert_eq!(adapter.launch_argv(), vec![OsString::from("pi")]);
+    assert_eq!(
+        adapter.resume_argv("0199f0a2", Path::new("/work/repo")),
+        Some(vec![
+            OsString::from("pi"),
+            OsString::from("--session"),
+            OsString::from("0199f0a2"),
+        ]),
+    );
+}

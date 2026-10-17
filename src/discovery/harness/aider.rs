@@ -37,6 +37,7 @@ static AIDER_RUNTIME_SIGNATURE: super::RuntimeSignature = super::RuntimeSignatur
     harness_key: HARNESS_KEY,
     process_command_basenames: &["aider"],
     command_substrings: &["aider"],
+    command_token_basenames: &[],
     fd_path_patterns: &[],
     extract_session_keys: super::generic_uuid_like_session_keys,
     is_background_process: super::no_match,
