@@ -475,6 +475,28 @@ fn production_style_mux_node_binds_default_socket_pin() {
 }
 
 #[test]
+fn live_mux_for_pin_key_finds_the_mux_a_pin_binds_to() {
+    let nodes = vec![mux_node("editor")];
+    let default_socket = PinMuxRef {
+        backend: "tmux".to_string(),
+        name: "editor".to_string(),
+        socket_name: None,
+    };
+    let found = live_mux_for_pin_key(&nodes, &default_socket.native_id())
+        .expect("a default-socket pin finds its discovered mux");
+    assert_eq!(found.native_id, "editor");
+
+    let named_socket = PinMuxRef {
+        socket_name: Some("scratch".to_string()),
+        ..default_socket
+    };
+    assert!(
+        live_mux_for_pin_key(&nodes, &named_socket.native_id()).is_none(),
+        "discovery lists only the default socket, so a socketed pin finds nothing"
+    );
+}
+
+#[test]
 fn local_pin_synthesized_link_outranks_discovered_in_precedence() {
     // The synthesized LocalPin link's `provenance.precedence()`
     // should sit above StrongDiscovered/Discovered/Cached and below

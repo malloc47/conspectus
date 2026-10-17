@@ -528,6 +528,52 @@ fn pin_adopt_fails_when_mux_not_live() {
         .stderr(predicate::str::contains("no live mux"));
 }
 
+#[cfg(unix)]
+#[test]
+fn pin_adopt_writes_a_pin_for_a_live_tmux_session_from_discovery() {
+    if !PrivateTmux::available() {
+        return;
+    }
+    let home = tempfile::TempDir::new().expect("home");
+    let project = tempfile::TempDir::new().expect("project");
+    let tmux = PrivateTmux::new();
+
+    let started = std::process::Command::new("tmux")
+        .env_remove("TMUX")
+        .env_remove("TMUX_PANE")
+        .env("TMUX_TMPDIR", tmux.dir.path())
+        .args(["new-session", "-d", "-s", "adoptme", "-c"])
+        .arg(project.path())
+        .args(["sleep", "600"])
+        .status()
+        .expect("run tmux new-session");
+    assert!(started.success(), "tmux new-session failed");
+
+    // Discovery stays on so the CLI sees the mux exactly as tmux
+    // discovery emits it: bare `native_id`, prefixed `id`.
+    let mut adopt = isolated_cmd(home.path());
+    tmux.apply(&mut adopt);
+    adopt
+        .env_remove("CONSPECTUS_DISABLE_TMUX")
+        .current_dir(project.path())
+        .args(["pin", "adopt", "ingest", "adoptme", "--harness", "codex"])
+        .arg("--scan-root")
+        .arg(project.path())
+        .assert()
+        .success()
+        .stdout(predicate::str::contains(
+            "adopted pin `ingest` from mux `tmux:adoptme`",
+        ));
+
+    let contents =
+        fs::read_to_string(project.path().join(".conspectus.toml")).expect("config exists");
+    assert!(contents.contains(r#"name = "adoptme""#), "{contents}");
+    assert!(
+        contents.contains(project.path().to_str().expect("utf-8 path")),
+        "adopt should take the mux's observed cwd: {contents}"
+    );
+}
+
 #[test]
 fn pin_list_filters_by_state() {
     let home = tempfile::TempDir::new().expect("home");

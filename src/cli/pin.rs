@@ -632,25 +632,21 @@ impl PinAdoptArgs {
     fn run(self) -> Result<()> {
         let snapshot = discover_and_resolve(&self.scan_roots)?;
 
-        let backend = TMUX_MUX_BACKEND.to_string();
-        let native_id = match self.mux_socket.as_deref() {
-            None | Some("default") => format!("{}:{}", backend, self.mux_name),
-            Some(socket) => format!("{}:{}:{}", backend, socket, self.mux_name),
+        let pin_mux = PinMux {
+            backend: TMUX_MUX_BACKEND.to_string(),
+            name: self.mux_name.clone(),
+            socket_name: self.mux_socket.clone(),
         };
+        let native_id = pin_mux.native_id();
 
-        let mux_node = snapshot
-            .nodes
-            .iter()
-            .find_map(|node| match node {
-                crate::model::GraphNode::MuxSession(mux) if mux.native_id == native_id => {
-                    Some(mux)
-                }
-                _ => None,
-            })
-            .ok_or_else(|| {
-                anyhow!(
-                    "no live mux with native_id `{native_id}` — start the tmux session first or rebind to an existing pin"
-                )
+        let mux_node = crate::resolve::pins::live_mux_for_pin_key(&snapshot.nodes, &native_id)
+            .ok_or_else(|| match pin_mux.effective_socket() {
+                Some(socket) => anyhow!(
+                    "no live mux `{native_id}` — discovery only lists the default tmux socket, so a session on socket `{socket}` cannot be adopted yet"
+                ),
+                None => anyhow!(
+                    "no live mux `{native_id}` — start the tmux session first or rebind to an existing pin"
+                ),
             })?;
 
         // Harness inference: walk active LinkedToMux candidates with
@@ -691,11 +687,7 @@ impl PinAdoptArgs {
             display_name: display,
             harness,
             cwd: cwd.display().to_string(),
-            mux: PinMux {
-                backend,
-                name: self.mux_name.clone(),
-                socket_name: self.mux_socket.clone(),
-            },
+            mux: pin_mux,
             launch: None,
             // Adopt binds to a live mux that already has a cwd; worktree
             // realization is a launch-time concern, so it's a no-op here.

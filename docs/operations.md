@@ -617,7 +617,9 @@ conspectus pin adopt <new-id> <existing-mux-name>
   an existing live tmux session and writes a pin whose `mux.name`
   matches, inferring `harness` from current attribution and `cwd`
   from the mux's observed working directory. Pass `--harness` and
-  `--cwd` to override either inference.
+  `--cwd` to override either inference. Discovery lists only the
+  default tmux socket, so a session on a `--mux-socket` server
+  cannot be adopted yet.
 
 ### Diagnostics
 

@@ -411,13 +411,27 @@ fn mux_index(nodes: &[GraphNode]) -> BTreeMap<String, &MuxSessionNode> {
     nodes
         .iter()
         .filter_map(|node| match node {
-            GraphNode::MuxSession(mux) => {
-                let key = format!("{}:{}", mux.backend, mux.native_id);
-                Some((key, mux))
-            }
+            GraphNode::MuxSession(mux) => Some((pin_key_for_mux(mux), mux)),
             _ => None,
         })
         .collect()
+}
+
+fn pin_key_for_mux(mux: &MuxSessionNode) -> String {
+    format!("{}:{}", mux.backend, mux.native_id)
+}
+
+/// The live mux a pin whose `mux.native_id()` is `pin_mux_key` binds to,
+/// found with the same key pin binding uses, so a caller that writes a
+/// pin against this mux gets a pin that binds to it.
+pub fn live_mux_for_pin_key<'a>(
+    nodes: &'a [GraphNode],
+    pin_mux_key: &str,
+) -> Option<&'a MuxSessionNode> {
+    nodes.iter().find_map(|node| match node {
+        GraphNode::MuxSession(mux) if pin_key_for_mux(mux) == pin_mux_key => Some(mux),
+        _ => None,
+    })
 }
 
 fn agent_session_cwd_index(nodes: &[GraphNode]) -> BTreeMap<NodeId, Option<String>> {

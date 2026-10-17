@@ -1,9 +1,11 @@
 ---
 id: CSP-617
 title: Fix `pin adopt` so it finds live tmux sessions
-status: To Do
-assignee: []
+status: Done
+assignee:
+  - '@claude'
 created_date: '2026-10-17 03:09'
+updated_date: '2026-10-17 23:46'
 labels:
   - h-ext
 milestone: m-11
@@ -28,13 +30,38 @@ ordinal: 675000
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 Running `conspectus pin adopt` against a live tmux session on the default socket writes the pin
-- [ ] #2 A test covers a successful adopt against mux nodes shaped the way discovery emits them
-- [ ] #3 The CLI and TUI adopt paths apply the same mux matching rule
+- [x] #1 Running `conspectus pin adopt` against a live tmux session on the default socket writes the pin
+- [x] #2 A test covers a successful adopt against mux nodes shaped the way discovery emits them
+- [x] #3 The CLI and TUI adopt paths apply the same mux matching rule
 <!-- AC:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
-- [ ] #1 `just check` passes, or `git diff --check` for docs-only changes
-- [ ] #2 Docs and ADRs are updated when behavior, architecture, or workflow change
+- [x] #1 `just check` passes, or `git diff --check` for docs-only changes
+- [x] #2 Docs and ADRs are updated when behavior, architecture, or workflow change
 <!-- DOD:END -->
+
+## Implementation Plan
+
+<!-- SECTION:PLAN:BEGIN -->
+1. Expose the resolver's pin-to-mux lookup (`resolve::pins`) as a shared function: given the snapshot nodes and a `PinMux`, return the live `MuxSessionNode` keyed exactly as `mux_index` keys it.
+2. In `PinAdoptArgs::run`, build the `PinMux` (tmux backend, name, socket) first and find the mux through that function instead of comparing the prefixed id against `MuxSessionNode.native_id`. Reuse the same `PinMux` for the written entry.
+3. Make the not-found error say when a non-default socket is the reason (discovery only enumerates the default socket).
+4. Add a CLI test in `tests/cli_pin.rs` using `PrivateTmux`: create a real detached session, run `pin adopt` with tmux discovery enabled, assert success and the written pin entry; keep the not-live failure test.
+5. TUI adopt takes the selected mux row and writes its bare `native_id` as the pin's mux name, which is the same rule the resolver binds on; confirm with the resolver lookup in a unit test.
+<!-- SECTION:PLAN:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+- `resolve::pins` now exposes `live_mux_for_pin_key`, built on the same `pin_key_for_mux` key `mux_index` uses for binding, so adopt and binding cannot disagree. CLI adopt builds its `PinMux` first and looks the mux up by `PinMux::native_id()`.
+- TUI adopt takes the selected mux row and writes its bare `native_id` as `mux.name`, which produces the same key; `tui::app::tests::pin_adopt_defaults_preserve_selected_live_mux_name` and the new `live_mux_for_pin_key_finds_the_mux_a_pin_binds_to` cover the two halves.
+- Found while working: the TUI pin create/adopt paths (`tui/runtime/pin_store.rs:188,294`) always write `backend = tmux`, so adopting a zellij row from the TUI writes a tmux pin. Outside this task; flagged for the operator.
+- Validation: the new `tests/cli_pin.rs::pin_adopt_writes_a_pin_for_a_live_tmux_session_from_discovery` fails on the old code with the original error and passes with the fix; `just check` green (2391 tests).
+<!-- SECTION:NOTES:END -->
+
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+`conspectus pin adopt` now finds live tmux sessions. It looked the mux up by comparing the prefixed id (`tmux:<name>`) with `MuxSessionNode.native_id`, which discovery stores bare, so it could never match. It now uses `resolve::pins::live_mux_for_pin_key`, the same key pin binding uses, and the not-found error explains when a non-default socket is the reason. Verified with a new CLI test on a private tmux server (fails before, passes after), a resolver unit test, and `just check` (2391 tests).
+<!-- SECTION:FINAL_SUMMARY:END -->
