@@ -184,6 +184,7 @@ pub fn glossary_entry(field: &str, value: &str) -> Option<String> {
         ("harness" | "harness_key", "claude-code") => "Anthropic's Claude Code CLI.",
         ("harness" | "harness_key", "codex") => "OpenAI's Codex CLI.",
         ("harness" | "harness_key", "opencode") => "The opencode CLI.",
+        ("harness" | "harness_key", "pi") => "The Pi coding agent CLI.",
         ("harness" | "harness_key", "aider") => {
             "The aider CLI. The viewer can't read its transcripts."
         }

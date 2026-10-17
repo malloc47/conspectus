@@ -6,8 +6,8 @@
 //! The per-harness resume command is derived from
 //! [`crate::discovery::harness::resume_argv_for`] (which delegates
 //! to the registered [`crate::discovery::harness::HarnessAdapter::resume_argv`]).
-//! Supported harnesses today: claude-code, codex, opencode.
-//! Aider is unsupported because it tracks chat history per-cwd
+//! Every registered harness with a single-command resume is
+//! supported. Aider isn't, because it tracks chat history per-cwd
 //! rather than per-session.
 
 use std::path::{Path, PathBuf};

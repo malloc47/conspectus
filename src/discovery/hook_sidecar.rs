@@ -209,56 +209,19 @@ fn ensure_session(snapshot: &mut GraphSnapshot, record: &HookRecord) -> Option<A
 }
 
 fn inferred_state_scope(record: &HookRecord) -> String {
-    if record.harness_key == "codex"
-        && let Some(path) = record.transcript_path.as_deref()
-        && let Some(scope) = path_ancestor_named(path, ".codex")
-    {
-        return scope;
-    }
-    if record.harness_key == crate::discovery::harness::pi::HARNESS_KEY
-        && let Some(path) = record.transcript_path.as_deref()
-    {
-        return pi_state_scope(Path::new(path));
-    }
-
-    record
-        .transcript_path
-        .as_deref()
-        .and_then(|path| {
-            Path::new(path)
-                .parent()
-                .and_then(Path::parent)
-                .and_then(Path::parent)
-        })
-        .map_or_else(
-            || "hook_sidecar".to_string(),
-            |path| path.to_string_lossy().to_string(),
-        )
-}
-
-/// Pi's session root for a session file: the directory above a grouped
-/// `--<cwd>--` directory, or the file's own directory in the flat layout.
-fn pi_state_scope(session_file: &Path) -> String {
-    let Some(dir) = session_file.parent() else {
+    let Some(path) = record.transcript_path.as_deref().map(Path::new) else {
         return "hook_sidecar".to_string();
     };
-    let grouped = dir
-        .file_name()
-        .and_then(|name| name.to_str())
-        .is_some_and(|name| name.len() > 4 && name.starts_with("--") && name.ends_with("--"));
-    let root = if grouped {
-        dir.parent().unwrap_or(dir)
-    } else {
-        dir
-    };
-    root.to_string_lossy().to_string()
-}
-
-fn path_ancestor_named(path: &str, name: &str) -> Option<String> {
-    Path::new(path).ancestors().find_map(|ancestor| {
-        (ancestor.file_name().and_then(|value| value.to_str()) == Some(name))
-            .then(|| ancestor.to_string_lossy().to_string())
-    })
+    crate::discovery::harness::registered_adapters()
+        .find(|adapter| adapter.harness_key() == record.harness_key)
+        .and_then(|adapter| adapter.state_scope_for_transcript(path))
+        .or_else(|| {
+            path.parent()
+                .and_then(Path::parent)
+                .and_then(Path::parent)
+                .map(|root| root.to_string_lossy().to_string())
+        })
+        .unwrap_or_else(|| "hook_sidecar".to_string())
 }
 
 fn find_mux(snapshot: &GraphSnapshot, record: &HookRecord) -> Option<MuxSessionNode> {

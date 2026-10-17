@@ -19,8 +19,10 @@ use crate::discovery::harness::claude_code::HARNESS_KEY as CLAUDE_CODE_HARNESS_K
 use crate::discovery::harness::codex::HARNESS_KEY as CODEX_HARNESS_KEY;
 use crate::discovery::harness::fixtures::{
     ClaudeCodeSessionRecord, CodexSessionRecord, HarnessFixture, OpenCodeSessionRecord,
+    PiSessionRecord,
 };
 use crate::discovery::harness::opencode::HARNESS_KEY as OPENCODE_HARNESS_KEY;
+use crate::discovery::harness::pi::HARNESS_KEY as PI_HARNESS_KEY;
 use crate::discovery::tmux::FakeTmux;
 use crate::discovery::{LocalDiscoveryConfig, discover_local_with, path_to_string};
 use crate::filter::RowFilter;
@@ -287,6 +289,7 @@ impl ScenarioWorld {
             )
             .with_harness_state_root(OPENCODE_HARNESS_KEY, self.harness.opencode_state_root())
             .with_harness_state_root(AIDER_HARNESS_KEY, self.root.clone())
+            .with_harness_state_root(PI_HARNESS_KEY, self.harness.pi_state_root())
             .with_hook_sidecar_root(&self.hook_root)
             // Codex's aux-attribution mutator pass
             // pulls from live `~/.codex/logs_*.sqlite`; skip it
@@ -1074,9 +1077,10 @@ fn add_agent_sessions_to_showcase(
     deck_dir: &Path,
 ) -> Result<()> {
     // Each session below sets a title (claude-code `summary`,
-    // opencode `title`) and a last-message preview (transcript
-    // assistant text for claude-code/codex, sqlite `part` row for
-    // opencode) so the rendered showcase rows aren't blank — the
+    // opencode `title`, pi `/name`) and a last-message preview
+    // (transcript assistant text for claude-code/codex/pi, sqlite
+    // `part` row for opencode) so the rendered showcase rows aren't
+    // blank — the
     // placeholder text names the example each session is meant to
     // illustrate (ADR 0070).
     // claude-code session in the normal project repo (1 hour ago).
@@ -1147,6 +1151,18 @@ fn add_agent_sessions_to_showcase(
     )?;
     // aider state in the same member repo.
     world.write_aider_state(&atelier.member_repo_b)?;
+    // pi session in the first atelier member repo (2 hours ago).
+    world.harness.write_pi_session(
+        &PiSessionRecord::new("showcase-pi", path_to_string(&atelier.member_repo_a))
+            .with_name("pi in atelier member repo")
+            .with_timestamp("2026-06-14T14:00:00.000Z")
+            .with_exchange(
+                "Which tests cover the fork index parser?",
+                "`fork_index_tests.rs` covers it: parsing, the empty index, and \
+                 a malformed entry. None of them exercise a fork without a parent.",
+            )
+            .with_assistant_message("Showcase: pi in atelier member repo"),
+    )?;
     // Orphan session: cwd resolves to no checkout (a week ago).
     let orphan_dir = world.mkdir("orphan")?;
     world.harness.write_codex_session(

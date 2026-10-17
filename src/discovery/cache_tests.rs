@@ -58,6 +58,7 @@ fn every_known_provider_string_maps_to_a_class() {
         "codex",
         "opencode",
         "aider",
+        "pi",
         "github",
     ];
     for key in known {

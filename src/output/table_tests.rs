@@ -799,6 +799,7 @@ fn render_color_enabled_uses_distinct_color_per_harness() {
             agent_session("codex", "b", Some("/w/b")),
             agent_session("opencode", "c", Some("/w/c")),
             agent_session("aider", "d", Some("/w/d")),
+            agent_session("pi", "e", Some("/w/e")),
         ],
         ..GraphSnapshot::empty()
     };
@@ -815,6 +816,7 @@ fn render_color_enabled_uses_distinct_color_per_harness() {
     assert!(colored.contains("\u{1b}[94m"), "codex = bright blue");
     assert!(colored.contains("\u{1b}[92m"), "opencode = bright green");
     assert!(colored.contains("\u{1b}[91m"), "aider = bright red");
+    assert!(colored.contains("\u{1b}[96m"), "pi = bright cyan");
 }
 
 #[test]

@@ -278,15 +278,25 @@ pub trait HarnessAdapter: Send + Sync {
     /// this).
     ///
     /// Adapters that emit a locator populate its `state_root`
-    /// according to their parser's expectations: claude-code +
-    /// codex point at the harness state root; opencode resolves
-    /// the SQLite database path (or its containing directory)
-    /// so the parser can open it directly.
+    /// according to their parser's expectations: claude-code,
+    /// codex, and pi point at the harness state root; opencode
+    /// resolves the SQLite database path (or its containing
+    /// directory) so the parser can open it directly.
     fn transcript_source(
         &self,
         session: &crate::model::AgentSessionId,
     ) -> Option<crate::viewer::model::SessionLocator> {
         let _ = session;
+        None
+    }
+
+    /// The state root a transcript at `path` belongs to, so a session
+    /// that only a hook record has seen gets the same
+    /// [`crate::model::AgentSessionId::state_scope`] discovery would
+    /// give it. `None` leaves the caller's default: the directory three
+    /// levels above the file.
+    fn state_scope_for_transcript(&self, path: &Path) -> Option<String> {
+        let _ = path;
         None
     }
 
@@ -408,8 +418,8 @@ static REGISTERED_ADAPTERS: std::sync::LazyLock<Vec<Box<dyn HarnessAdapter>>> =
         ]
     });
 
-/// Shared state-root discovery envelope. Codex,
-/// claude-code, and openCode all repeat the same three steps:
+/// Shared state-root discovery envelope. Every adapter that reads
+/// a single state root repeats the same three steps:
 /// (1) look up their state root through the discovery context;
 /// (2) if it's absent, return an empty fragment; (3) run the
 /// harness-specific fs walk and stamp the resulting fragment
@@ -713,6 +723,7 @@ mod registry_tests {
         assert_eq!(launch_options_for("claude-code")[0].id, "skip-permissions");
         assert!(launch_options_for("opencode").is_empty());
         assert!(launch_options_for("aider").is_empty());
+        assert!(launch_options_for("pi").is_empty());
         assert!(launch_options_for("never-registered").is_empty());
     }
 

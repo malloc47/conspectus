@@ -304,8 +304,8 @@ struct KeyedProvider {
     /// path's [`discover_skipping`](LocalDiscovery::discover_skipping)
     /// drops the entry iff *every* key is in the skip set, so a
     /// bundled provider (e.g. [`harness::HarnessDiscovery`] emitting
-    /// `claude-code`/`codex`/`opencode`/`aider`) survives unless
-    /// every one of its harnesses is fresh in the prior snapshot.
+    /// one key per registered harness) survives unless every one of
+    /// its harnesses is fresh in the prior snapshot.
     keys: Vec<&'static str>,
     inner: Box<dyn DiscoveryProvider>,
 }

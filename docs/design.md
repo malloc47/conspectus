@@ -138,8 +138,7 @@ check the source and a traced run of the built binary against it (ADR 0117).
 
 Concrete v1 sources:
 
-- harnesses: atelier's support set (`claude-code`, `opencode`, `codex`,
-  `aider`) plus `pi` (ADR 0121)
+- harnesses: `claude-code`, `opencode`, `codex`, `aider`, and `pi`
 - mux: tmux as the first implementation
 - forge: GitHub as the first implementation
 - workspaces: loose workspace groupings and individual git repos/checkouts

@@ -107,7 +107,7 @@ enum PinStateFilter {
 struct PinCreateArgs {
     /// Stable pin id (unique within the chosen store).
     id: String,
-    /// Harness key (`codex`, `claude-code`, `opencode`, `aider`).
+    /// Harness key (`claude-code`, `codex`, `opencode`, `aider`, `pi`).
     #[arg(long)]
     harness: String,
     /// Absolute path the pin anchors on (also passed as `tmux -c` at

@@ -51,6 +51,7 @@ and are useful during Atelier migration tests:
 | `CONSPECTUS_CODEX_STATE` | Override the codex state root. |
 | `CONSPECTUS_CLAUDE_CODE_STATE` | Override the Claude Code state root. |
 | `CONSPECTUS_OPENCODE_STATE` | Override the opencode state root. |
+| `CONSPECTUS_PI_STATE` | Override the Pi session root. |
 
 Library consumers should prefer explicit roots and injected runners via
 `conspectus::api::LocalDiscoveryConfig` rather than depending on process

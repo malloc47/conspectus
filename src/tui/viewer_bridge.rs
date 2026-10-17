@@ -126,6 +126,18 @@ mod tests {
     }
 
     #[test]
+    fn pi_session_maps_to_pi_locator() {
+        let id = session("pi", "/u/.pi/agent/sessions", "abc");
+        let locator = locator_for_session(&id).expect("pi has a locator");
+        assert_eq!(locator.harness_key, "pi");
+        assert_eq!(locator.session_key, "abc");
+        assert_eq!(
+            locator.state_root,
+            std::path::PathBuf::from("/u/.pi/agent/sessions")
+        );
+    }
+
+    #[test]
     fn unknown_harness_has_no_locator() {
         let id = session("aider", "/u", "k");
         assert!(locator_for_session(&id).is_none());

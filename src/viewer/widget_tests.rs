@@ -757,39 +757,3 @@ fn hidden_turns_are_filtered_until_toggled() {
     );
     assert!(s.contains("hidden·show (H)"), "footer chip: {s}");
 }
-
-fn pi_fixture_document() -> TranscriptDocument {
-    use crate::viewer::parser::HarnessParser;
-    crate::viewer::parser::pi::PiParser
-        .read(&crate::viewer::model::SessionLocator {
-            harness_key: "pi".to_string(),
-            session_key: "0199c0de-0000-7000-8000-0000000000a1".to_string(),
-            state_root: std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-                .join("tests/fixtures/pi/viewer"),
-        })
-        .expect("parse Pi fixture")
-}
-
-#[test]
-fn pi_session_renders_the_active_branch() {
-    let theme = Theme::default();
-    let mut state = ViewerState::new(pi_fixture_document());
-    let _ = render_to_buffer(&mut state, &theme, 90, 40);
-    let (mut state, _) =
-        crate::viewer::input::reduce(state, crate::viewer::input::ViewerMsg::JumpToStart);
-    let buf = render_to_buffer(&mut state, &theme, 90, 40);
-    insta::assert_snapshot!(snapshot_string(&buf));
-}
-
-#[test]
-fn pi_session_with_hidden_records_shown() {
-    let theme = Theme::default();
-    let state = ViewerState::new(pi_fixture_document());
-    let (state, _) =
-        crate::viewer::input::reduce(state, crate::viewer::input::ViewerMsg::ToggleHidden);
-    let (mut state, _) =
-        crate::viewer::input::reduce(state, crate::viewer::input::ViewerMsg::JumpToStart);
-    let _ = render_to_buffer(&mut state, &theme, 90, 60);
-    let buf = render_to_buffer(&mut state, &theme, 90, 60);
-    insta::assert_snapshot!(snapshot_string(&buf));
-}

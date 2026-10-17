@@ -113,6 +113,9 @@ failing provider (`DiscoveryError::Provider` names the provider's keys).
 - `CONSPECTUS_CODEX_STATE`
 - `CONSPECTUS_CLAUDE_CODE_STATE`
 - `CONSPECTUS_OPENCODE_STATE`
+- `CONSPECTUS_PI_STATE`, then Pi's own `PI_CODING_AGENT_SESSION_DIR`,
+  `PI_CODING_AGENT_DIR`, and the `sessionDir` in its global settings
+  (see `docs/operations.md`)
 - `CONSPECTUS_DISABLE_TMUX`
 - `CONSPECTUS_DISABLE_FORGE`
 - `HOME`

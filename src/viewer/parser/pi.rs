@@ -17,6 +17,9 @@
 //! - `message` / `toolResult` → [`TurnKind::ToolResult`].
 //! - `compaction` and `branch_summary` → [`TurnKind::CompactionSummary`].
 //! - `custom_message` → a system message, hidden unless `display` is true.
+//! - An assistant message with `stopReason: "aborted"` (the operator
+//!   pressed Esc) and the user prompt before it are tagged `aborted`
+//!   (ADR 0053).
 //! - Records Pi's UI never shows become `hidden` turns (ADR 0122): the
 //!   `system` message, `custom` extension state, `model_change`,
 //!   `thinking_level_change`, `label`, `usage`, `context_edit`, and
@@ -58,20 +61,22 @@ fn find_session_file(state_root: &Path, session_key: &str) -> Option<PathBuf> {
         return Some(state_root.to_path_buf());
     }
     let files = session_files(state_root);
-    let suffix = format!("_{session_key}.jsonl");
     files
         .iter()
-        .find(|path| {
-            path.file_name()
-                .and_then(|name| name.to_str())
-                .is_some_and(|name| name.ends_with(&suffix))
-        })
+        .find(|path| file_name_session_key(path) == Some(session_key))
         .cloned()
         .or_else(|| {
             files
                 .into_iter()
                 .find(|path| header_id(path).as_deref() == Some(session_key))
         })
+}
+
+/// The id in a `<timestamp>_<session-id>.jsonl` file name. Timestamps
+/// contain no `_` and custom ids may, so the split is at the first one.
+fn file_name_session_key(path: &Path) -> Option<&str> {
+    let (timestamp, id) = path.file_stem()?.to_str()?.split_once('_')?;
+    (!timestamp.is_empty() && !id.is_empty()).then_some(id)
 }
 
 fn session_files(state_root: &Path) -> Vec<PathBuf> {
@@ -95,7 +100,7 @@ fn session_files(state_root: &Path) -> Vec<PathBuf> {
             files.push(path);
         }
     }
-    files.retain(|path| path.extension().is_some_and(|ext| ext == "jsonl"));
+    files.retain(|path| path.extension().is_some_and(|ext| ext == "jsonl") && path.is_file());
     files.sort();
     files
 }
@@ -132,9 +137,20 @@ fn parse_file(path: &Path, locator: &SessionLocator) -> ParseResult {
         entries.push(entry);
     }
 
-    let turns = active_branch(&entries)
-        .into_iter()
-        .flat_map(turns_for_entry)
+    let branch = active_branch(&entries);
+    let aborted = aborted_entries(&branch);
+    let turns = branch
+        .iter()
+        .enumerate()
+        .flat_map(|(index, entry)| {
+            let mut turns = turns_for_entry(entry);
+            if aborted.contains(&index) {
+                for turn in &mut turns {
+                    turn.aborted = true;
+                }
+            }
+            turns
+        })
         .collect();
 
     Ok(TranscriptDocument {
@@ -174,6 +190,30 @@ fn active_branch(entries: &[Entry]) -> Vec<&Entry> {
     }
     path.reverse();
     path
+}
+
+/// Positions in `branch` of every assistant message that stopped with
+/// `stopReason: "aborted"`, plus the user prompt it was answering. Pi's
+/// UI drops the interrupted exchange, so the viewer hides it by default.
+fn aborted_entries(branch: &[&Entry]) -> HashSet<usize> {
+    let mut aborted = HashSet::new();
+    let mut last_user = None;
+    for (index, entry) in branch.iter().enumerate() {
+        let Some(message) = entry.message.as_ref() else {
+            continue;
+        };
+        match message.role.as_deref() {
+            Some("user") => last_user = Some(index),
+            Some("assistant") if message.stop_reason.as_deref() == Some("aborted") => {
+                aborted.insert(index);
+                if let Some(user) = last_user.take() {
+                    aborted.insert(user);
+                }
+            }
+            _ => {}
+        }
+    }
+    aborted
 }
 
 fn turns_for_entry(entry: &Entry) -> Vec<TranscriptTurn> {
@@ -448,6 +488,8 @@ struct Message {
     content: Option<Value>,
     #[serde(default)]
     sections: Option<serde_json::Map<String, Value>>,
+    #[serde(rename = "stopReason", default)]
+    stop_reason: Option<String>,
 }
 
 #[derive(Default, Deserialize)]

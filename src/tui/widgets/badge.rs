@@ -144,5 +144,6 @@ mod tests {
             Some(Color::Green)
         );
         assert_eq!(harness_badge("aider", &theme).style.fg, Some(Color::Red));
+        assert_eq!(harness_badge("pi", &theme).style.fg, Some(Color::LightBlue));
     }
 }

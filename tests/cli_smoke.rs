@@ -555,6 +555,41 @@ fn read_only_hook_record(root: &std::path::Path) -> serde_json::Value {
 }
 
 #[test]
+fn hook_write_pi_writes_latest_observation() {
+    let home = tempfile::TempDir::new().expect("home temp");
+    let state = tempfile::TempDir::new().expect("state temp");
+
+    isolated_cmd(home.path())
+        .arg("hook")
+        .arg("write")
+        .arg("pi")
+        .arg("--state-root")
+        .arg(state.path())
+        .env("CONSPECTUS_PI_HOOK_VERSION", "1")
+        .write_stdin(
+            r#"{
+              "session_id": "0199f0a2-7c1e-7d3a-9b2e-5f1c2a3b4c5d",
+              "cwd": "/home/me/src/proj",
+              "transcript_path": "/home/me/.pi/agent/sessions/--home-me-src-proj--/2026-10-16T10-00-00-000Z_0199f0a2-7c1e-7d3a-9b2e-5f1c2a3b4c5d.jsonl",
+              "hook_event_name": "session_start:resume"
+            }"#,
+        )
+        .assert()
+        .success()
+        .stdout(predicate::str::is_empty());
+
+    let record = read_only_hook_record(state.path());
+    assert_eq!(record["harness_key"], "pi");
+    assert_eq!(
+        record["session_key"],
+        "0199f0a2-7c1e-7d3a-9b2e-5f1c2a3b4c5d"
+    );
+    assert_eq!(record["cwd"], "/home/me/src/proj");
+    assert_eq!(record["hook_event_name"], "session_start:resume");
+    assert_eq!(record["harness_version"], "1");
+}
+
+#[test]
 fn hook_write_opencode_rejects_empty_payload() {
     let home = tempfile::TempDir::new().expect("home temp");
     let state = tempfile::TempDir::new().expect("state temp");
@@ -689,6 +724,106 @@ SessionStart = [
     let removed = fs::read_to_string(&config).expect("read");
     assert!(removed.contains("echo existing"));
     assert!(!removed.contains("hook write codex"));
+}
+
+#[test]
+fn hook_init_status_remove_pi_manages_only_its_own_extension_file() {
+    let home = tempfile::TempDir::new().expect("home temp");
+    let extensions = home.path().join(".pi/agent/extensions");
+    let installed = extensions.join("conspectus-hook.ts");
+    let neighbor = extensions.join("my-extension.ts");
+    fs::create_dir_all(&extensions).expect("extensions dir");
+    fs::write(&neighbor, "export default function () {}\n").expect("neighbor");
+    let hook = |args: &[&str]| {
+        isolated_cmd(home.path())
+            .arg("hook")
+            .args(args)
+            .assert()
+            .success()
+    };
+
+    hook(&["status", "pi"]).stdout(predicate::str::contains("not-installed\tpi"));
+    hook(&["init", "pi", "--dry-run"]).stdout(predicate::str::contains("would install"));
+    assert!(!installed.exists(), "dry run must not write");
+
+    hook(&["init", "pi"]).stdout(predicate::str::contains("installed Pi hook extension"));
+    let body = fs::read_to_string(&installed).expect("installed extension");
+    assert!(body.starts_with("// conspectus-hook:"));
+    assert!(body.contains(r#"["hook", "write", "pi"]"#));
+    hook(&["status", "pi"]).stdout(predicate::str::contains("installed\tpi"));
+    hook(&["init", "pi"]).stdout(predicate::str::contains("already installed"));
+
+    // An older copy is reported and replaced.
+    fs::write(&installed, "// conspectus-hook: an older version\n").expect("downgrade");
+    hook(&["status", "pi"]).stdout(predicate::str::contains("outdated\tpi"));
+    hook(&["init", "pi"]).stdout(predicate::str::contains("installed Pi hook extension"));
+    assert_eq!(fs::read_to_string(&installed).expect("reinstalled"), body);
+
+    hook(&["remove", "pi"]).stdout(predicate::str::contains("removed Pi hook extension"));
+    assert!(!installed.exists());
+    hook(&["remove", "pi"]).stdout(predicate::str::contains("not installed"));
+    assert_eq!(
+        fs::read_to_string(&neighbor).expect("neighbor survives"),
+        "export default function () {}\n"
+    );
+}
+
+#[test]
+fn hook_init_and_remove_pi_leave_a_foreign_file_alone() {
+    let home = tempfile::TempDir::new().expect("home temp");
+    let project = tempfile::TempDir::new().expect("project temp");
+    let path = project.path().join(".pi/extensions/conspectus-hook.ts");
+    fs::create_dir_all(path.parent().expect("parent")).expect("project extensions");
+    fs::write(&path, "// someone else's extension\n").expect("foreign");
+
+    isolated_cmd(home.path())
+        .current_dir(project.path())
+        .args(["hook", "status", "pi", "--scope", "project"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("foreign\tpi"));
+    isolated_cmd(home.path())
+        .current_dir(project.path())
+        .args(["hook", "init", "pi", "--scope", "project"])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("wasn't written by Conspectus"));
+    isolated_cmd(home.path())
+        .current_dir(project.path())
+        .args(["hook", "remove", "pi", "--scope", "project"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("leaving it in place"));
+    assert_eq!(
+        fs::read_to_string(&path).expect("foreign survives"),
+        "// someone else's extension\n"
+    );
+}
+
+#[test]
+fn hook_init_pi_project_scope_and_agent_dir_override() {
+    let home = tempfile::TempDir::new().expect("home temp");
+    let project = tempfile::TempDir::new().expect("project temp");
+    isolated_cmd(home.path())
+        .current_dir(project.path())
+        .args(["hook", "init", "pi", "--scope", "project"])
+        .assert()
+        .success();
+    assert!(
+        project
+            .path()
+            .join(".pi/extensions/conspectus-hook.ts")
+            .is_file()
+    );
+
+    let agent = tempfile::TempDir::new().expect("agent temp");
+    isolated_cmd(home.path())
+        .env("PI_CODING_AGENT_DIR", agent.path())
+        .args(["hook", "init", "pi"])
+        .assert()
+        .success();
+    assert!(agent.path().join("extensions/conspectus-hook.ts").is_file());
+    assert!(!home.path().join(".pi").exists());
 }
 
 #[test]
@@ -2644,182 +2779,4 @@ fn csp_is_the_same_program_under_its_short_name() {
         .assert()
         .success()
         .stdout(predicate::str::starts_with("conspectus "));
-}
-
-#[test]
-fn hook_write_pi_writes_latest_observation() {
-    let home = tempfile::TempDir::new().expect("home temp");
-    let state = tempfile::TempDir::new().expect("state temp");
-
-    isolated_cmd(home.path())
-        .arg("hook")
-        .arg("write")
-        .arg("pi")
-        .arg("--state-root")
-        .arg(state.path())
-        .env("CONSPECTUS_PI_HOOK_VERSION", "1")
-        .write_stdin(
-            r#"{
-              "session_id": "0199f0a2-7c1e-7d3a-9b2e-5f1c2a3b4c5d",
-              "cwd": "/home/me/src/proj",
-              "transcript_path": "/home/me/.pi/agent/sessions/--home-me-src-proj--/2026-10-16T10-00-00-000Z_0199f0a2-7c1e-7d3a-9b2e-5f1c2a3b4c5d.jsonl",
-              "hook_event_name": "session_start:resume"
-            }"#,
-        )
-        .assert()
-        .success()
-        .stdout(predicate::str::is_empty());
-
-    let record = read_only_hook_record(state.path());
-    assert_eq!(record["harness_key"], "pi");
-    assert_eq!(
-        record["session_key"],
-        "0199f0a2-7c1e-7d3a-9b2e-5f1c2a3b4c5d"
-    );
-    assert_eq!(record["cwd"], "/home/me/src/proj");
-    assert_eq!(record["hook_event_name"], "session_start:resume");
-    assert_eq!(record["harness_version"], "1");
-}
-
-#[test]
-fn hook_write_pi_accepts_a_payload_without_transcript_path() {
-    let home = tempfile::TempDir::new().expect("home temp");
-    let state = tempfile::TempDir::new().expect("state temp");
-
-    isolated_cmd(home.path())
-        .args(["hook", "write", "pi", "--state-root"])
-        .arg(state.path())
-        .write_stdin(r#"{"session_id": "s1", "cwd": "/work"}"#)
-        .assert()
-        .success();
-
-    let record = read_only_hook_record(state.path());
-    assert_eq!(record["session_key"], "s1");
-    assert!(
-        record
-            .get("transcript_path")
-            .is_none_or(serde_json::Value::is_null)
-    );
-}
-
-#[test]
-fn hook_write_pi_rejects_missing_or_empty_session_id() {
-    let home = tempfile::TempDir::new().expect("home temp");
-    let state = tempfile::TempDir::new().expect("state temp");
-
-    for (payload, message) in [
-        (r#"{"cwd": "/work"}"#, "missing string `session_id`"),
-        (
-            r#"{"session_id": "", "cwd": "/work"}"#,
-            "empty `session_id`",
-        ),
-    ] {
-        isolated_cmd(home.path())
-            .args(["hook", "write", "pi", "--state-root"])
-            .arg(state.path())
-            .write_stdin(payload)
-            .assert()
-            .failure()
-            .stderr(predicate::str::contains(message));
-    }
-}
-
-#[test]
-fn hook_init_status_remove_pi_manages_only_its_own_extension_file() {
-    let home = tempfile::TempDir::new().expect("home temp");
-    let extensions = home.path().join(".pi/agent/extensions");
-    let installed = extensions.join("conspectus-hook.ts");
-    let neighbor = extensions.join("my-extension.ts");
-    fs::create_dir_all(&extensions).expect("extensions dir");
-    fs::write(&neighbor, "export default function () {}\n").expect("neighbor");
-    let hook = |args: &[&str]| {
-        isolated_cmd(home.path())
-            .arg("hook")
-            .args(args)
-            .assert()
-            .success()
-    };
-
-    hook(&["status", "pi"]).stdout(predicate::str::contains("not-installed\tpi"));
-    hook(&["init", "pi", "--dry-run"]).stdout(predicate::str::contains("would install"));
-    assert!(!installed.exists(), "dry run must not write");
-
-    hook(&["init", "pi"]).stdout(predicate::str::contains("installed Pi hook extension"));
-    let body = fs::read_to_string(&installed).expect("installed extension");
-    assert!(body.starts_with("// conspectus-hook:"));
-    assert!(body.contains(r#"["hook", "write", "pi"]"#));
-    hook(&["status", "pi"]).stdout(predicate::str::contains("installed\tpi"));
-    hook(&["init", "pi"]).stdout(predicate::str::contains("already installed"));
-
-    // An older copy is reported and replaced.
-    fs::write(&installed, "// conspectus-hook: an older version\n").expect("downgrade");
-    hook(&["status", "pi"]).stdout(predicate::str::contains("outdated\tpi"));
-    hook(&["init", "pi"]).stdout(predicate::str::contains("installed Pi hook extension"));
-    assert_eq!(fs::read_to_string(&installed).expect("reinstalled"), body);
-
-    hook(&["remove", "pi"]).stdout(predicate::str::contains("removed Pi hook extension"));
-    assert!(!installed.exists());
-    hook(&["remove", "pi"]).stdout(predicate::str::contains("not installed"));
-    assert_eq!(
-        fs::read_to_string(&neighbor).expect("neighbor survives"),
-        "export default function () {}\n"
-    );
-}
-
-#[test]
-fn hook_init_and_remove_pi_leave_a_foreign_file_alone() {
-    let home = tempfile::TempDir::new().expect("home temp");
-    let project = tempfile::TempDir::new().expect("project temp");
-    let path = project.path().join(".pi/extensions/conspectus-hook.ts");
-    fs::create_dir_all(path.parent().expect("parent")).expect("project extensions");
-    fs::write(&path, "// someone else's extension\n").expect("foreign");
-
-    isolated_cmd(home.path())
-        .current_dir(project.path())
-        .args(["hook", "status", "pi", "--scope", "project"])
-        .assert()
-        .success()
-        .stdout(predicate::str::contains("foreign\tpi"));
-    isolated_cmd(home.path())
-        .current_dir(project.path())
-        .args(["hook", "init", "pi", "--scope", "project"])
-        .assert()
-        .failure()
-        .stderr(predicate::str::contains("wasn't written by Conspectus"));
-    isolated_cmd(home.path())
-        .current_dir(project.path())
-        .args(["hook", "remove", "pi", "--scope", "project"])
-        .assert()
-        .success()
-        .stdout(predicate::str::contains("leaving it in place"));
-    assert_eq!(
-        fs::read_to_string(&path).expect("foreign survives"),
-        "// someone else's extension\n"
-    );
-}
-
-#[test]
-fn hook_init_pi_project_scope_and_agent_dir_override() {
-    let home = tempfile::TempDir::new().expect("home temp");
-    let project = tempfile::TempDir::new().expect("project temp");
-    isolated_cmd(home.path())
-        .current_dir(project.path())
-        .args(["hook", "init", "pi", "--scope", "project"])
-        .assert()
-        .success();
-    assert!(
-        project
-            .path()
-            .join(".pi/extensions/conspectus-hook.ts")
-            .is_file()
-    );
-
-    let agent = tempfile::TempDir::new().expect("agent temp");
-    isolated_cmd(home.path())
-        .env("PI_CODING_AGENT_DIR", agent.path())
-        .args(["hook", "init", "pi"])
-        .assert()
-        .success();
-    assert!(agent.path().join("extensions/conspectus-hook.ts").is_file());
-    assert!(!home.path().join(".pi").exists());
 }

@@ -433,6 +433,65 @@ fn codex_hook_record_synthesizes_session_with_codex_state_scope() {
 }
 
 #[test]
+fn pi_hook_record_synthesizes_session_with_pi_state_scope() {
+    let temp = tempdir().expect("tempdir");
+    let sessions_root = temp.path().join("home/.pi/agent/sessions");
+    let grouped_dir = sessions_root.join("--work--");
+    fs::create_dir_all(&grouped_dir).expect("create grouped dir");
+    let grouped = grouped_dir.join("2026-05-23T00-36-47-000Z_grouped-session.jsonl");
+    let flat_root = temp.path().join("custom-sessions");
+    fs::create_dir_all(&flat_root).expect("create flat dir");
+    let flat = flat_root.join("2026-05-23T00-36-47-000Z_flat-session.jsonl");
+
+    for (n, (session_key, transcript_path, pane)) in [
+        ("grouped-session", &grouped, "%1"),
+        ("flat-session", &flat, "%2"),
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        fs::write(transcript_path, "").expect("touch transcript");
+        let record_payload = format!(
+            r#"{{
+                  "schema_version": 1,
+                  "harness_key": "pi",
+                  "session_key": "{session_key}",
+                  "cwd": "/work",
+                  "tmux": {{ "session_name": "editor", "pane_id": "{pane}" }},
+                  "transcript_path": "{}",
+                  "observed_epoch": 1700000000
+                }}"#,
+            transcript_path.display()
+        );
+        fs::write(temp.path().join(format!("record-{n}.json")), record_payload)
+            .expect("write record");
+    }
+    let mut snapshot = GraphSnapshot {
+        nodes: vec![mux_with_command("editor", Some("pi"))],
+        ..GraphSnapshot::empty()
+    };
+
+    apply_hook_sidecars(&mut snapshot, temp.path(), 1_700_000_100);
+
+    // The grouped layout's root is above the `--<cwd>--` directory; the
+    // flat layout's root is the file's own directory.
+    for (session_key, root) in [
+        ("grouped-session", &sessions_root),
+        ("flat-session", &flat_root),
+    ] {
+        let session_id = AgentSessionId::new("pi", root.to_string_lossy(), session_key);
+        assert!(
+            snapshot.nodes.iter().any(|node| matches!(
+                node,
+                GraphNode::AgentSession(session) if session.id == session_id
+            )),
+            "{session_key}: {:#?}",
+            snapshot.nodes
+        );
+    }
+}
+
+#[test]
 fn old_hook_record_still_links_when_no_fresher_record_supersedes() {
     let temp = tempdir().expect("tempdir");
     fs::write(
@@ -574,6 +633,22 @@ fn hook_record_is_ignored_when_pane_runs_a_different_harness() {
         }
         other => panic!("expected Ignored, got {other:?}"),
     }
+}
+
+#[test]
+fn pane_running_harness_recognizes_exact_harness_names_only() {
+    let running = |command: &str| {
+        let GraphNode::MuxSession(mux) = mux_with_command("m", Some(command)) else {
+            unreachable!()
+        };
+        pane_running_harness(&mux)
+    };
+    assert_eq!(running("pi"), Some("pi"));
+    assert_eq!(running("pi-rpc"), Some("pi"));
+    assert_eq!(running("claude"), Some("claude-code"));
+    assert_eq!(running("codex-rs"), Some("codex"));
+    assert_eq!(running("pip"), None);
+    assert_eq!(running("node"), None);
 }
 
 #[test]
@@ -917,184 +992,5 @@ fn opencode_hook_record_demotes_stale_launch_argv_for_same_mux() {
     assert_eq!(
         fresh.source_metadata.evidence.as_deref(),
         Some("hook_session_match")
-    );
-}
-
-fn pi_session(key: &str) -> GraphNode {
-    GraphNode::AgentSession(
-        AgentSessionNode::new(
-            AgentSessionId::new("pi", "/pi-sessions", key),
-            "pi".to_string(),
-        )
-        .with_cwd("/work".to_string()),
-    )
-}
-
-fn pi_record(session_key: &str, observed_epoch: i64) -> hook::HookRecord {
-    hook::HookRecord {
-        schema_version: hook::SCHEMA_VERSION,
-        harness_key: "pi".to_string(),
-        session_key: session_key.to_string(),
-        cwd: Some("/work".to_string()),
-        pid: Some(i64::from(std::process::id())),
-        ppid: None,
-        tmux: Some(hook::HookTmuxRecord {
-            session_name: Some("editor".to_string()),
-            native_id: None,
-            pane_id: Some("%1".to_string()),
-            socket_path: None,
-        }),
-        transcript_path: None,
-        hook_event_name: Some("session_start:resume".to_string()),
-        observed_epoch,
-        harness_version: Some("1".to_string()),
-    }
-}
-
-fn pi_link_state<'a>(snapshot: &'a GraphSnapshot, session_key: &str) -> &'a LinkState {
-    &snapshot
-        .candidate_links
-        .iter()
-        .find(|link| {
-            link.source_metadata.adapter == "hook_sidecar"
-                && link.source
-                    == NodeId::AgentSession(AgentSessionId::new("pi", "/pi-sessions", session_key))
-        })
-        .unwrap_or_else(|| {
-            panic!(
-                "hook link for {session_key}: {:#?}",
-                snapshot.candidate_links
-            )
-        })
-        .state
-}
-
-#[test]
-fn pi_hook_record_demotes_stale_launch_argv_for_same_mux() {
-    let temp = tempdir().expect("tempdir");
-    hook::HookStore::new(temp.path())
-        .write_record(&pi_record("after-resume", 1_700_000_050))
-        .expect("write hook record");
-
-    let mut stale = launch_link("launch-argv", "editor");
-    stale.source = NodeId::AgentSession(AgentSessionId::new("pi", "/pi-sessions", "launch-argv"));
-    let mut snapshot = GraphSnapshot {
-        nodes: vec![
-            pi_session("launch-argv"),
-            pi_session("after-resume"),
-            mux_with_command("editor", Some("pi")),
-        ],
-        candidate_links: vec![stale],
-        ..GraphSnapshot::empty()
-    };
-
-    apply_hook_sidecars(&mut snapshot, temp.path(), 1_700_000_100);
-
-    let stale = snapshot
-        .candidate_links
-        .iter()
-        .find(|link| link.id == "launch:launch-argv:editor")
-        .expect("stale argv link");
-    assert!(
-        matches!(&stale.state, LinkState::Overridden { reason: Some(reason), .. } if reason.contains("hook sidecar")),
-        "{:?}",
-        stale.state
-    );
-    assert!(matches!(
-        pi_link_state(&snapshot, "after-resume"),
-        LinkState::Active
-    ));
-}
-
-#[test]
-fn pi_resume_inside_one_process_moves_the_pane_to_the_newer_session() {
-    let temp = tempdir().expect("tempdir");
-    let store = hook::HookStore::new(temp.path());
-    store
-        .write_record(&pi_record("first", 1_700_000_010))
-        .expect("first record");
-    store
-        .write_record(&pi_record("second", 1_700_000_020))
-        .expect("second record");
-
-    let mut snapshot = GraphSnapshot {
-        nodes: vec![
-            pi_session("first"),
-            pi_session("second"),
-            mux_with_command("editor", Some("pi")),
-        ],
-        ..GraphSnapshot::empty()
-    };
-
-    apply_hook_sidecars(&mut snapshot, temp.path(), 1_700_000_100);
-
-    // The store keeps the latest record per pane, so the earlier
-    // session leaves no hook link behind.
-    assert!(matches!(
-        pi_link_state(&snapshot, "second"),
-        LinkState::Active
-    ));
-    let first = NodeId::AgentSession(AgentSessionId::new("pi", "/pi-sessions", "first"));
-    assert!(
-        snapshot
-            .candidate_links
-            .iter()
-            .all(|link| link.source != first),
-        "{:#?}",
-        snapshot.candidate_links
-    );
-}
-
-#[test]
-fn pi_hook_record_is_ignored_once_the_pane_runs_another_harness() {
-    let temp = tempdir().expect("tempdir");
-    hook::HookStore::new(temp.path())
-        .write_record(&pi_record("pi-session", 1_700_000_050))
-        .expect("write hook record");
-    let mut snapshot = GraphSnapshot {
-        nodes: vec![
-            pi_session("pi-session"),
-            mux_with_command("editor", Some("claude")),
-        ],
-        ..GraphSnapshot::empty()
-    };
-
-    apply_hook_sidecars(&mut snapshot, temp.path(), 1_700_000_100);
-
-    assert!(matches!(
-        pi_link_state(&snapshot, "pi-session"),
-        LinkState::Ignored { reason: Some(reason) } if reason.contains("now running `claude-code`")
-    ));
-}
-
-#[test]
-fn pane_running_harness_recognizes_exact_harness_names_only() {
-    let running = |command: &str| {
-        let GraphNode::MuxSession(mux) = mux_with_command("m", Some(command)) else {
-            unreachable!()
-        };
-        pane_running_harness(&mux)
-    };
-    assert_eq!(running("pi"), Some("pi"));
-    assert_eq!(running("pi-rpc"), Some("pi"));
-    assert_eq!(running("claude"), Some("claude-code"));
-    assert_eq!(running("codex-rs"), Some("codex"));
-    assert_eq!(running("pip"), None);
-    assert_eq!(running("node"), None);
-}
-
-#[test]
-fn pi_state_scope_is_the_session_root_in_either_layout() {
-    assert_eq!(
-        pi_state_scope(Path::new(
-            "/home/u/.pi/agent/sessions/--work-a--/2026-10-16T10-00-00-000Z_s1.jsonl"
-        )),
-        "/home/u/.pi/agent/sessions"
-    );
-    assert_eq!(
-        pi_state_scope(Path::new(
-            "/custom/sessions/2026-10-16T10-00-00-000Z_s1.jsonl"
-        )),
-        "/custom/sessions"
     );
 }

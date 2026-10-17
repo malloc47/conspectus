@@ -781,6 +781,7 @@ impl World {
                 "CONSPECTUS_OPENCODE_STATE",
                 world.join("harness/opencode").into(),
             ),
+            ("CONSPECTUS_PI_STATE", world.join("harness/pi").into()),
             (
                 "CONSPECTUS_AGENT_DECK_ROOT",
                 world.join(".agent-deck").into(),

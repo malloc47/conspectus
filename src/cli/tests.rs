@@ -71,6 +71,7 @@ fn harness_binaries_recognizes_supported_harnesses() {
     assert_eq!(harness_binaries("claude-code"), &["claude", "claude-code"]);
     assert_eq!(harness_binaries("codex"), &["codex", "codex-rs"]);
     assert_eq!(harness_binaries("opencode"), &["opencode"]);
+    assert_eq!(harness_binaries("pi"), &["pi", "pi-rpc"]);
     assert_eq!(harness_binaries("unknown"), &[] as &[&str]);
 }
 

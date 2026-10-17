@@ -198,6 +198,21 @@ fn opencode_resume_argv_matches_session_flag_shape() {
 }
 
 #[test]
+fn pi_resume_argv_matches_session_flag_shape() {
+    // `pi --session <id>` resolves the id within the current project,
+    // which is why resume runs from the session's cwd.
+    let argv = resume_argv_for("pi", "abc123", Path::new("/p")).expect("pi supports resume");
+    assert_eq!(
+        argv,
+        vec![
+            std::ffi::OsString::from("pi"),
+            std::ffi::OsString::from("--session"),
+            std::ffi::OsString::from("abc123"),
+        ]
+    );
+}
+
+#[test]
 fn unknown_harness_resume_argv_returns_none() {
     assert!(resume_argv_for("nonesuch", "abc123", Path::new("/p")).is_none());
 }
@@ -218,6 +233,7 @@ fn launch_options_include_skip_permissions_for_codex_and_claude() {
     assert_eq!(claude[0].argv, ["--dangerously-skip-permissions"]);
 
     assert!(launch_options_for("aider").is_empty());
+    assert!(launch_options_for("pi").is_empty());
 }
 
 #[test]

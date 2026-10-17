@@ -802,6 +802,7 @@ fn harness_style(harness: &str) -> Style {
         "codex" => AnsiColor::BrightBlue,
         "opencode" => AnsiColor::BrightGreen,
         "aider" => AnsiColor::BrightRed,
+        "pi" => AnsiColor::BrightCyan,
         _ => return Style::new(),
     };
     Style::new().fg_color(Some(color.into()))

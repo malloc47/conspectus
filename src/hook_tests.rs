@@ -177,3 +177,65 @@ fn opencode_payload_rejects_empty_session_id() {
     .expect_err("empty id");
     assert!(err.to_string().contains("empty"));
 }
+
+#[test]
+fn pi_payload_builds_hook_record() {
+    let record = hook_record_from_payload(
+        "pi",
+        &serde_json::json!({
+            "session_id": "0199f0a2-7c1e-7d3a-9b2e-5f1c2a3b4c5d",
+            "cwd": "/home/me/src/proj",
+            "transcript_path": "/home/me/.pi/agent/sessions/--home-me-src-proj--/2026-10-16T10-00-00-000Z_0199f0a2-7c1e-7d3a-9b2e-5f1c2a3b4c5d.jsonl",
+            "hook_event_name": "session_start:resume"
+        }),
+        Some(42),
+        Some(41),
+        None,
+        Some("1".to_string()),
+        1_700_000_500,
+    )
+    .expect("record");
+
+    assert_eq!(record.harness_key, "pi");
+    assert_eq!(record.session_key, "0199f0a2-7c1e-7d3a-9b2e-5f1c2a3b4c5d");
+    assert_eq!(record.cwd.as_deref(), Some("/home/me/src/proj"));
+    assert_eq!(
+        record.transcript_path.as_deref(),
+        Some(
+            "/home/me/.pi/agent/sessions/--home-me-src-proj--/2026-10-16T10-00-00-000Z_0199f0a2-7c1e-7d3a-9b2e-5f1c2a3b4c5d.jsonl"
+        )
+    );
+    assert_eq!(
+        record.hook_event_name.as_deref(),
+        Some("session_start:resume")
+    );
+    assert_eq!(record.harness_version.as_deref(), Some("1"));
+}
+
+#[test]
+fn pi_payload_without_transcript_path_builds_hook_record() {
+    let record = hook_record_from_payload(
+        "pi",
+        &serde_json::json!({"session_id": "s1", "cwd": "/work"}),
+        None,
+        None,
+        None,
+        None,
+        100,
+    )
+    .expect("record");
+    assert_eq!(record.session_key, "s1");
+    assert!(record.transcript_path.is_none());
+}
+
+#[test]
+fn pi_payload_requires_a_nonempty_session_id() {
+    for payload in [
+        serde_json::json!({"cwd": "/work"}),
+        serde_json::json!({"session_id": ""}),
+    ] {
+        let err = hook_record_from_payload("pi", &payload, None, None, None, None, 100)
+            .expect_err("no usable id");
+        assert!(err.to_string().contains("session_id"), "{err}");
+    }
+}

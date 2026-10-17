@@ -575,44 +575,130 @@ fn opencode_sqlite_sessions_discovered_from_fixture() {
 
 // ── Pi fixtures ─────────────────────────────────────────────────────────
 
-/// Discover the Pi fixture at `layout` and render its sessions as JSON with
-/// the checkout-specific fixture path replaced.
-fn pi_fixture_sessions(layout: &str) -> String {
-    let root = fixture_path("pi").join(layout);
-    let context =
-        DiscoveryContext::default().with_harness_state_root(PiAdapter::new().harness_key(), &root);
-    let fragment = PiAdapter::new()
-        .discover(&context)
-        .expect("discover pi sessions");
-    let rendered = serde_json::to_string_pretty(&fragment.nodes).expect("render");
-    rendered.replace(
-        fixture_path("pi").to_str().expect("utf8 fixture path"),
-        "<fixtures>/pi",
+const PI_BASIC_SESSION: &str = "0199f0a2-7c1e-7d3a-9b2e-5f1c2a3b4c5d";
+
+/// Copy Pi fixtures into a grouped session root, each as
+/// `<root>/--<encoded-cwd>--/<file name>`, and discover it.
+fn pi_fixture_scenario(files: &[(&str, &str, &str)]) -> (TempDir, GraphFragment) {
+    let temp = TempDir::new().expect("temp");
+    let state_root = temp.path().join("pi");
+    for (fixture, cwd_dir, file_name) in files {
+        let dir = state_root.join(cwd_dir);
+        fs::create_dir_all(&dir).expect("create cwd dir");
+        fs::copy(fixture_path(fixture), dir.join(file_name)).expect("copy fixture");
+    }
+    let context = DiscoveryContext::default()
+        .with_harness_state_root(PiAdapter::new().harness_key(), &state_root);
+    let fragment = PiAdapter::new().discover(&context).expect("discover");
+    (temp, fragment)
+}
+
+fn pi_basic_file() -> (&'static str, &'static str, String) {
+    (
+        "pi/session-basic.jsonl",
+        "--home-user-projects-my-project--",
+        format!("2026-10-16T10-00-00-000Z_{PI_BASIC_SESSION}.jsonl"),
     )
 }
 
 #[test]
-fn pi_grouped_layout_sessions_snapshot() {
-    insta::assert_snapshot!(pi_fixture_sessions("grouped"));
-}
+fn pi_basic_session_discovers_session_with_name_and_preview() {
+    let (fixture, dir, name) = pi_basic_file();
+    let (_temp, fragment) = pi_fixture_scenario(&[(fixture, dir, &name)]);
 
-#[test]
-fn pi_flat_layout_sessions_snapshot() {
-    insta::assert_snapshot!(pi_fixture_sessions("flat"));
-}
-
-#[test]
-fn pi_lineage_candidates_snapshot() {
-    let root = fixture_path("pi").join("lineage");
-    let context =
-        DiscoveryContext::default().with_harness_state_root(PiAdapter::new().harness_key(), &root);
-    let fragment = PiAdapter::new()
-        .discover(&context)
-        .expect("discover pi sessions");
-    let rendered = serde_json::to_string_pretty(&fragment.candidate_links).expect("render");
-    let rendered = rendered.replace(
-        fixture_path("pi").to_str().expect("utf8 fixture path"),
-        "<fixtures>/pi",
+    let sessions: Vec<_> = fragment
+        .nodes
+        .iter()
+        .filter_map(|n| match n {
+            GraphNode::AgentSession(s) => Some(s),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(sessions.len(), 1);
+    assert_eq!(sessions[0].id.session_key, PI_BASIC_SESSION);
+    assert_eq!(
+        sessions[0].cwd.as_deref(),
+        Some("/home/user/projects/my-project")
     );
-    insta::assert_snapshot!(support::redact_freshness_epoch(&rendered));
+    assert_eq!(
+        sessions[0].title.as_deref(),
+        Some("Keep latest session name")
+    );
+    assert_eq!(
+        sessions[0].last_message_preview.as_deref(),
+        Some("Done. The parser now keeps the latest name.")
+    );
+}
+
+#[test]
+fn pi_legacy_session_without_version_discovers_session() {
+    let (_temp, fragment) = pi_fixture_scenario(&[(
+        "pi/session-legacy.jsonl",
+        "--home-user-projects-my-project--",
+        "2026-04-01T09-00-00-000Z_0196f0b1-1111-7222-8333-944455566677.jsonl",
+    )]);
+
+    let session = fragment
+        .nodes
+        .iter()
+        .find_map(|n| match n {
+            GraphNode::AgentSession(s) => Some(s),
+            _ => None,
+        })
+        .expect("legacy session");
+    // The directory name is shared with `my-project`; the header decides.
+    assert_eq!(
+        session.cwd.as_deref(),
+        Some("/home/user/projects/my/project")
+    );
+}
+
+#[test]
+fn pi_fork_session_emits_parent_session_link() {
+    let (fixture, dir, name) = pi_basic_file();
+    let (_temp, fragment) = pi_fixture_scenario(&[
+        (fixture, dir, &name),
+        (
+            "pi/session-fork.jsonl",
+            "--home-user-projects-other--",
+            "2026-10-16T11-00-00-000Z_0199f0b5-0000-7000-8000-0000000000f1.jsonl",
+        ),
+    ]);
+
+    let fork_link = fragment.candidate_links.iter().find(|link| {
+        link.source_metadata
+            .fields
+            .get("parent_session_id")
+            .is_some_and(|v: &serde_json::Value| v.as_str() == Some(PI_BASIC_SESSION))
+    });
+    assert!(
+        fork_link.is_some_and(|link| matches!(
+            link.target,
+            conspectus::model::LinkEndpoint::Node { .. }
+        )),
+        "fork session with parentSession should link to the discovered parent"
+    );
+}
+
+#[test]
+fn pi_branched_session_with_every_entry_type_discovers_session() {
+    let (_temp, fragment) = pi_fixture_scenario(&[(
+        "pi/session-branched.jsonl",
+        "--home-user-projects-my-project--",
+        "2026-10-16T09-00-00-000Z_0199c0de-0000-7000-8000-0000000000a1.jsonl",
+    )]);
+
+    let session = fragment
+        .nodes
+        .iter()
+        .find_map(|n| match n {
+            GraphNode::AgentSession(s) => Some(s),
+            _ => None,
+        })
+        .expect("branched session");
+    assert_eq!(session.title.as_deref(), Some("Refactor"));
+    assert_eq!(
+        session.last_message_preview.as_deref(),
+        Some("Approach B is done.")
+    );
 }

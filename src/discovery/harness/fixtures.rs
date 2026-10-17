@@ -2,8 +2,8 @@
 //!
 //! Test helpers that build the on-disk layouts each harness adapter reads.
 //! Fixtures always live under a caller-supplied root – no helper here touches
-//! the user's real `~/.codex`, `~/.claude`, `~/.local/share/opencode`, or
-//! per-repo aider state. The shapes mirror each harness closely enough that the
+//! the user's real `~/.codex`, `~/.claude`, `~/.local/share/opencode`,
+//! `~/.pi`, or per-repo aider state. The shapes mirror each harness closely enough that the
 //! same builders are used by both crate-internal adapter tests and the
 //! end-to-end snapshot tests.
 
@@ -34,6 +34,7 @@ pub fn stamp_fixture_mtime(path: &Path) -> Result<()> {
 pub const CODEX_STATE_DIR: &str = "codex";
 pub const CLAUDE_CODE_STATE_DIR: &str = "claude";
 pub const OPENCODE_STATE_DIR: &str = "opencode";
+pub const PI_STATE_DIR: &str = "pi";
 
 /// Common builder rooted at a single temp directory.
 pub struct HarnessFixture {
@@ -61,6 +62,10 @@ impl HarnessFixture {
         self.root.join(OPENCODE_STATE_DIR)
     }
 
+    pub fn pi_state_root(&self) -> PathBuf {
+        self.root.join(PI_STATE_DIR)
+    }
+
     pub fn write_codex_session(&self, record: &CodexSessionRecord) -> Result<PathBuf> {
         write_codex_session(&self.codex_state_root(), record)
     }
@@ -71,6 +76,10 @@ impl HarnessFixture {
 
     pub fn write_opencode_session(&self, record: &OpenCodeSessionRecord) -> Result<PathBuf> {
         write_opencode_session(&self.opencode_state_root(), record)
+    }
+
+    pub fn write_pi_session(&self, record: &PiSessionRecord) -> Result<PathBuf> {
+        write_pi_session(&self.pi_state_root(), record)
     }
 
     pub fn write_aider_state(&self, repo: impl AsRef<Path>) -> Result<PathBuf> {
@@ -466,6 +475,146 @@ fn append_opencode_db_entry(state_root: &Path, record: &OpenCodeSessionRecord) -
     }
 
     Ok(())
+}
+
+/// Minimal Pi session record. The state root mirrors
+/// `~/.pi/agent/sessions/--<encoded-cwd>--/<timestamp>_<session-id>.jsonl`
+/// (or the flat `<timestamp>_<session-id>.jsonl` layout); the first JSONL
+/// line is the `session` header carrying `id`, `cwd`, and `parentSession`.
+#[derive(Clone, Debug, Default)]
+pub struct PiSessionRecord {
+    pub session_id: String,
+    pub cwd: String,
+    pub timestamp_rfc3339: Option<String>,
+    /// `/name` display name, written as a trailing `session_info` entry.
+    pub name: Option<String>,
+    /// Parent session file path, for `/fork` and `/clone` children.
+    pub parent_session: Option<String>,
+    /// Question-and-answer exchanges, each entry chained to the previous
+    /// one through `parentId`.
+    pub conversation: Vec<(String, String)>,
+    /// Trailing assistant text message for the `last_message_preview`
+    /// reader (ADR 0023).
+    pub assistant_message: Option<String>,
+    /// Write directly under the state root instead of a `--<cwd>--`
+    /// directory, as Pi does for a custom session directory.
+    pub flat: bool,
+}
+
+impl PiSessionRecord {
+    pub fn new(session_id: impl Into<String>, cwd: impl Into<String>) -> Self {
+        Self {
+            session_id: session_id.into(),
+            cwd: cwd.into(),
+            ..Self::default()
+        }
+    }
+
+    pub fn with_timestamp(mut self, timestamp: impl Into<String>) -> Self {
+        self.timestamp_rfc3339 = Some(timestamp.into());
+        self
+    }
+
+    pub fn with_name(mut self, name: impl Into<String>) -> Self {
+        self.name = Some(name.into());
+        self
+    }
+
+    pub fn with_parent_session(mut self, path: impl AsRef<Path>) -> Self {
+        self.parent_session = Some(path.as_ref().to_string_lossy().into_owned());
+        self
+    }
+
+    /// Append one user question and the assistant's answer.
+    pub fn with_exchange(mut self, question: impl Into<String>, answer: impl Into<String>) -> Self {
+        self.conversation.push((question.into(), answer.into()));
+        self
+    }
+
+    pub fn with_assistant_message(mut self, text: impl Into<String>) -> Self {
+        self.assistant_message = Some(text.into());
+        self
+    }
+
+    pub fn flat(mut self) -> Self {
+        self.flat = true;
+        self
+    }
+}
+
+pub fn write_pi_session(state_root: &Path, record: &PiSessionRecord) -> Result<PathBuf> {
+    let dir = if record.flat {
+        state_root.to_path_buf()
+    } else {
+        state_root.join(format!("--{}--", encode_pi_cwd(&record.cwd)))
+    };
+    fs::create_dir_all(&dir)
+        .with_context(|| format!("creating pi session dir at {}", dir.display()))?;
+    let timestamp = record
+        .timestamp_rfc3339
+        .as_deref()
+        .unwrap_or("2026-01-02T03:04:05.000Z");
+    let file_stamp = timestamp.replace([':', '.'], "-");
+    let path = dir.join(format!("{file_stamp}_{}.jsonl", record.session_id));
+
+    let mut header = serde_json::Map::new();
+    header.insert("type".into(), json!("session"));
+    header.insert("version".into(), json!(3));
+    header.insert("id".into(), json!(record.session_id));
+    header.insert("timestamp".into(), json!(timestamp));
+    header.insert("cwd".into(), json!(record.cwd));
+    if let Some(parent) = &record.parent_session {
+        header.insert("parentSession".into(), json!(parent));
+    }
+    let mut body = format!("{}\n", serde_json::Value::Object(header));
+
+    let mut parent: Option<String> = None;
+    let mut push = |body: &mut String, entry: serde_json::Value| {
+        let id = format!("{}-{}", record.session_id, body.lines().count());
+        let mut entry = entry;
+        entry["id"] = json!(id);
+        entry["parentId"] = json!(parent);
+        entry["timestamp"] = json!(timestamp);
+        body.push_str(&format!("{entry}\n"));
+        parent = Some(id);
+    };
+    let text = |text: &str| json!([{ "type": "text", "text": text }]);
+    for (question, answer) in &record.conversation {
+        push(
+            &mut body,
+            json!({ "type": "message", "message": { "role": "user", "content": text(question) } }),
+        );
+        push(
+            &mut body,
+            json!({
+                "type": "message",
+                "message": { "role": "assistant", "content": text(answer), "stopReason": "stop" },
+            }),
+        );
+    }
+    if let Some(answer) = &record.assistant_message {
+        push(
+            &mut body,
+            json!({
+                "type": "message",
+                "message": { "role": "assistant", "content": text(answer), "stopReason": "stop" },
+            }),
+        );
+    }
+    if let Some(name) = &record.name {
+        push(&mut body, json!({ "type": "session_info", "name": name }));
+    }
+
+    fs::write(&path, body).with_context(|| format!("writing pi session at {}", path.display()))?;
+    stamp_fixture_mtime(&path).ok();
+    Ok(path)
+}
+
+/// Encodes a cwd the way Pi does for its session directories: the leading
+/// separator is dropped and `/`, `\\`, and `:` become `-`.
+pub fn encode_pi_cwd(cwd: &str) -> String {
+    cwd.trim_start_matches(['/', '\\'])
+        .replace(['/', '\\', ':'], "-")
 }
 
 /// Drops the marker files aider leaves inside a repo worktree. Aider does not

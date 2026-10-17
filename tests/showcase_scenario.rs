@@ -108,7 +108,7 @@ fn assert_layer_coverage(snapshot: &GraphSnapshot) {
         );
     }
 
-    for expected in ["codex", "claude-code", "opencode"] {
+    for expected in ["codex", "claude-code", "opencode", "pi"] {
         assert!(
             harnesses.contains(expected),
             "showcase missing harness `{expected}`; have: {harnesses:?}",

@@ -83,6 +83,15 @@ impl HarnessAdapter for CodexAdapter {
         HARNESS_KEY
     }
 
+    /// Rollouts nest under dated directories, so the root is the
+    /// enclosing `.codex` directory rather than a fixed depth.
+    fn state_scope_for_transcript(&self, path: &std::path::Path) -> Option<String> {
+        path.ancestors().find_map(|ancestor| {
+            (ancestor.file_name().and_then(|name| name.to_str()) == Some(".codex"))
+                .then(|| ancestor.to_string_lossy().to_string())
+        })
+    }
+
     fn runtime_signature(&self) -> &'static super::RuntimeSignature {
         &CODEX_RUNTIME_SIGNATURE
     }

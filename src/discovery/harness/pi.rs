@@ -28,6 +28,7 @@ use std::path::{Path, PathBuf};
 
 use anyhow::Result;
 use serde::Deserialize;
+use serde_json::json;
 
 use crate::discovery::harness::HarnessAdapter;
 use crate::discovery::memo::{FileStamp, StampedMap};
@@ -116,6 +117,14 @@ impl HarnessAdapter for PiAdapter {
         Some(&crate::viewer::parser::pi::PiParser)
     }
 
+    /// The session root sits above a grouped `--<cwd>--` directory, or is
+    /// the file's own directory in the flat layout.
+    fn state_scope_for_transcript(&self, path: &Path) -> Option<String> {
+        let dir = path.parent()?;
+        let root = if is_cwd_dir(dir) { dir.parent()? } else { dir };
+        Some(root.to_string_lossy().to_string())
+    }
+
     fn launch_argv(&self) -> Vec<OsString> {
         vec![OsString::from("pi")]
     }
@@ -150,14 +159,25 @@ pub(crate) fn resolve_state_root(env: impl Fn(&str) -> Option<OsString>) -> Opti
     if let Some(root) = non_empty("PI_CODING_AGENT_SESSION_DIR") {
         return Some(PathBuf::from(root));
     }
-    let agent_dir = match non_empty("PI_CODING_AGENT_DIR") {
-        Some(dir) => PathBuf::from(dir),
-        None => PathBuf::from(non_empty("HOME")?).join(".pi/agent"),
-    };
+    let agent_dir = resolve_agent_dir(&env)?;
     if let Some(session_dir) = settings_session_dir(&agent_dir.join("settings.json")) {
         return Some(session_dir);
     }
     Some(agent_dir.join("sessions"))
+}
+
+/// Pi's agent directory: `PI_CODING_AGENT_DIR`, or `~/.pi/agent`. Holds
+/// the global settings, the default session root, and user extensions.
+pub fn agent_dir_from_env() -> Option<PathBuf> {
+    resolve_agent_dir(&|key| std::env::var_os(key))
+}
+
+fn resolve_agent_dir(env: &impl Fn(&str) -> Option<OsString>) -> Option<PathBuf> {
+    let non_empty = |key: &str| env(key).filter(|value| !value.is_empty());
+    match non_empty("PI_CODING_AGENT_DIR") {
+        Some(dir) => Some(PathBuf::from(dir)),
+        None => Some(PathBuf::from(non_empty("HOME")?).join(".pi").join("agent")),
+    }
 }
 
 /// The global settings' `sessionDir`, when it is an absolute path. Pi
@@ -182,7 +202,7 @@ fn discover_state(state_root: &Path, caches: &DiscoveryCaches) -> Result<GraphFr
     }
 
     let state_scope = state_root.to_string_lossy().to_string();
-    let mut sessions: BTreeMap<String, PiSession> = BTreeMap::new();
+    let mut sessions: BTreeMap<String, ScannedSession> = BTreeMap::new();
 
     for path in session_files(state_root) {
         if let Some(session) = scan_session_cached(&path, &state_scope, &caches.pi_sessions) {
@@ -204,7 +224,12 @@ fn discover_state(state_root: &Path, caches: &DiscoveryCaches) -> Result<GraphFr
         .filter_map(|session| {
             let parent = session.parent.as_ref()?;
             let resolved = sessions.contains_key(&parent.session_key);
-            Some(lineage_link(&session.node, parent, &state_scope, resolved))
+            Some(build_lineage_link(
+                &session.node,
+                parent,
+                &state_scope,
+                resolved,
+            ))
         })
         .collect();
 
@@ -280,10 +305,10 @@ struct Header {
     parent_session: Option<String>,
 }
 
-/// The `session` header on the first line of `lines`, or `None` when that
-/// line is missing, malformed, or another entry type.
-fn parse_header(lines: &mut impl Iterator<Item = std::io::Result<String>>) -> Option<Header> {
-    let header: Header = serde_json::from_str(&lines.next()?.ok()?).ok()?;
+/// The `session` header in `line`, or `None` when the line is malformed
+/// or another entry type.
+fn parse_header(line: &str) -> Option<Header> {
+    let header: Header = serde_json::from_str(line).ok()?;
     (header.entry_type == "session").then_some(header)
 }
 
@@ -305,9 +330,8 @@ fn parent_ref(parent_path: &str) -> Option<ParentRef> {
     }
     let from_name = session_key_from_file_name(path)?;
     let from_header = fs::File::open(path).ok().and_then(|file| {
-        parse_header(&mut BufReader::new(file).lines())?
-            .id
-            .filter(|id| !id.is_empty())
+        let line = BufReader::new(file).lines().next()?.ok()?;
+        parse_header(&line)?.id.filter(|id| !id.is_empty())
     });
     Some(ParentRef {
         session_key: from_header.unwrap_or(from_name),
@@ -324,29 +348,65 @@ struct NameEntry {
 }
 
 /// Session identity and cwd from the header line, plus the latest
-/// `session_info` name. `None` when the first line is not a `session`
-/// header or no session key can be found.
-struct Scanned {
+/// `session_info` name and how far into the file the name scan got.
+#[derive(Clone, Debug)]
+pub(crate) struct Scanned {
     session_key: String,
     cwd: Option<String>,
     title: Option<String>,
     header_epoch: Option<i64>,
     parent_session: Option<String>,
+    /// Bytes of complete lines already scanned for names.
+    names_scanned_to: u64,
 }
 
+/// Read the header and scan the whole file for names. `None` when the
+/// first line is not a `session` header or no session key can be found.
 fn read_header_and_name(path: &Path) -> Option<Scanned> {
-    let file = fs::File::open(path).ok()?;
-    let mut lines = BufReader::new(file).lines();
-
-    let header = parse_header(&mut lines)?;
+    let mut reader = BufReader::new(fs::File::open(path).ok()?);
+    let mut first = String::new();
+    let header_len = reader.read_line(&mut first).ok()?;
+    let header = parse_header(first.trim_end())?;
     let session_key = header
         .id
         .filter(|id| !id.is_empty())
         .or_else(|| session_key_from_file_name(path))?;
 
-    let mut title = None;
-    for line in lines {
-        let Ok(line) = line else { break };
+    let mut scanned = Scanned {
+        session_key,
+        cwd: header.cwd.filter(|cwd| !cwd.is_empty()),
+        title: None,
+        header_epoch: header.timestamp.as_deref().and_then(parse_epoch),
+        parent_session: header.parent_session.filter(|path| !path.is_empty()),
+        names_scanned_to: header_len as u64,
+    };
+    scan_names(&mut reader, &mut scanned);
+    Some(scanned)
+}
+
+/// Pi only appends to a session file, so a file that grew is scanned
+/// for names from where the previous scan stopped.
+fn continue_name_scan(path: &Path, mut previous: Scanned) -> Option<Scanned> {
+    let mut file = fs::File::open(path).ok()?;
+    file.seek(SeekFrom::Start(previous.names_scanned_to)).ok()?;
+    scan_names(&mut BufReader::new(file), &mut previous);
+    Some(previous)
+}
+
+/// Fold every complete `session_info` line from `reader` into
+/// `scanned.title`. A last line without its newline is still being
+/// written; it is left for the next scan.
+fn scan_names(reader: &mut impl BufRead, scanned: &mut Scanned) {
+    let mut line = String::new();
+    loop {
+        line.clear();
+        let Ok(read) = reader.read_line(&mut line) else {
+            break;
+        };
+        if read == 0 || !line.ends_with('\n') {
+            break;
+        }
+        scanned.names_scanned_to += read as u64;
         // Only `session_info` entries carry a name; skip every other line
         // before parsing so message bodies are never deserialized.
         if !line.contains("\"session_info\"") {
@@ -356,17 +416,9 @@ fn read_header_and_name(path: &Path) -> Option<Scanned> {
             && entry.entry_type.as_deref() == Some("session_info")
         {
             // Latest wins; an empty name clears an earlier one.
-            title = entry.name.filter(|name| !name.trim().is_empty());
+            scanned.title = entry.name.filter(|name| !name.trim().is_empty());
         }
     }
-
-    Some(Scanned {
-        session_key,
-        cwd: header.cwd.filter(|cwd| !cwd.is_empty()),
-        title,
-        header_epoch: header.timestamp.as_deref().and_then(parse_epoch),
-        parent_session: header.parent_session.filter(|path| !path.is_empty()),
-    })
 }
 
 fn parse_epoch(timestamp: &str) -> Option<i64> {
@@ -476,9 +528,10 @@ fn preview_text(entry: &TailEntry) -> Option<String> {
 /// One scanned session file: its node and, for a fork or clone, the
 /// parent it points at.
 #[derive(Clone, Debug)]
-pub(crate) struct PiSession {
+pub(crate) struct ScannedSession {
     node: AgentSessionNode,
     parent: Option<ParentRef>,
+    scan: Scanned,
 }
 
 /// Scan `path` into a session, reusing the cached result while the file's
@@ -486,14 +539,19 @@ pub(crate) struct PiSession {
 fn scan_session_cached(
     path: &Path,
     state_scope: &str,
-    cache: &StampedMap<FileStamp, PiSession>,
-) -> Option<PiSession> {
+    cache: &StampedMap<FileStamp, ScannedSession>,
+) -> Option<ScannedSession> {
     let stamp = FileStamp::of(path)?;
     if let Some(session) = cache.get(path, &stamp) {
         return Some(session);
     }
 
-    let scanned = read_header_and_name(path)?;
+    let scanned = match cache.get_if(path, |_, _| true) {
+        Some(previous) if previous.scan.names_scanned_to <= stamp.len => {
+            continue_name_scan(path, previous.scan)?
+        }
+        _ => read_header_and_name(path)?,
+    };
     let parent = scanned
         .parent_session
         .as_deref()
@@ -503,8 +561,8 @@ fn scan_session_cached(
     let node = AgentSessionNode {
         id: AgentSessionId::new(HARNESS_KEY, state_scope, &scanned.session_key),
         harness_key: HARNESS_KEY.to_string(),
-        cwd: scanned.cwd,
-        title: scanned.title,
+        cwd: scanned.cwd.clone(),
+        title: scanned.title.clone(),
         last_message_preview,
         last_active_epoch: newest_epoch
             .or(scanned.header_epoch)
@@ -512,7 +570,11 @@ fn scan_session_cached(
         session_kind: None,
     };
 
-    let session = PiSession { node, parent };
+    let session = ScannedSession {
+        node,
+        parent,
+        scan: scanned,
+    };
     cache.insert(path.to_path_buf(), stamp, session.clone());
     Some(session)
 }
@@ -520,24 +582,17 @@ fn scan_session_cached(
 /// The ADR 0018 `parent_session` candidate from `child` to `parent`: a
 /// node endpoint when the parent was discovered in this root, otherwise
 /// unresolved evidence carrying the recovered key and the parent's path.
-fn lineage_link(
+fn build_lineage_link(
     child: &AgentSessionNode,
     parent: &ParentRef,
     state_scope: &str,
     resolved: bool,
 ) -> GraphLink {
     let mut fields = Metadata::new();
-    fields.insert("harness_key".to_string(), HARNESS_KEY.into());
-    fields.insert(source_field::LINEAGE_KIND.to_string(), "fork".into());
-    fields.insert("lineage_fidelity".to_string(), "native".into());
-    fields.insert(
-        "parent_session_id".to_string(),
-        parent.session_key.as_str().into(),
-    );
-    fields.insert(
-        "parent_session_path".to_string(),
-        parent.path.as_str().into(),
-    );
+    fields.insert("harness_key".to_string(), json!(HARNESS_KEY));
+    fields.insert(source_field::LINEAGE_KIND.to_string(), json!("fork"));
+    fields.insert("parent_session_id".to_string(), json!(parent.session_key));
+    fields.insert("parent_session_path".to_string(), json!(parent.path));
 
     let child_key = &child.id.session_key;
     let parent_key = &parent.session_key;

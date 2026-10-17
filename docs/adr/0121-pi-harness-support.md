@@ -103,8 +103,8 @@ the adapter falls back to the `<session-id>` part of a
 ### 4. Lineage
 
 A non-empty `parentSession` emits one ADR 0018 `parent_session`
-candidate from the child to the parent, with `harness_key = "pi"`,
-`lineage_kind = "fork"`, and `lineage_fidelity = "native"`. `/fork`,
+candidate from the child to the parent, with `harness_key = "pi"` and
+`lineage_kind = "fork"`, like the other harnesses' lineage. `/fork`,
 `/clone`, and `--fork` all use `fork`: the header doesn't say which one
 ran, and all three copy a parent's history into a new session, which is
 what ADR 0018 means by `fork`. The candidate links two `AgentSession`
@@ -211,10 +211,11 @@ no Conspectus-side knob, as in ADR 0049.
   effect, which is correct, since there's no session to show.
 - Hook pid resolution walks the parent chain comparing
   `/proc/<pid>/comm` with `pi`. That assumes Node's process title also
-  sets the thread name on Linux. The hook story verifies this against a
-  live Pi before shipping. If it fails, the extension passes its pid
-  explicitly, which is a writer change and not a reversal of this
-  decision.
+  sets the thread name on Linux. It has not been checked against a live
+  Pi (backlog `CSP-630`). Until it is, a Pi hook record may carry no
+  pid, and the sidecar reader then skips its liveness check. If the
+  assumption fails, the extension passes its pid explicitly, which is a
+  writer change and not a reversal of this decision.
 - Documented limitations: custom non-UUID `--session-id` values aren't
   matched in pane commands, `--no-session` runs are invisible, and
   relative, project-level, or per-run session directories need
@@ -262,8 +263,8 @@ would come and go between refreshes.
 - State root: `CONSPECTUS_PI_STATE`, then `PI_CODING_AGENT_SESSION_DIR`,
   then an absolute global `sessionDir`, then `<agent-dir>/sessions`. Both
   layouts are scanned and cwd always comes from the header.
-- Lineage: `parent_session` with `lineage_kind = "fork"` and
-  `lineage_fidelity = "native"`. `/tree` branches emit none.
+- Lineage: `parent_session` with `lineage_kind = "fork"`. `/tree`
+  branches emit none.
 - Payload tiers: header, name, and timestamp reads are Tier 1. The
   preview and transcript parser are Tier 2 with the ADR 0023 cap.
 - Runtime: exact basenames `pi` and `pi-rpc`, no substrings, `pi-rpc` as

@@ -48,6 +48,7 @@ regen-showcase-fixture:
                 .last_active_epoch = ( \
                     if .id.session_key | test("ambig|hook|deck-launcher") then ($now|tonumber) - 60 \
                     elif .id.session_key == "showcase-claude" then ($now|tonumber) - 3600 \
+                    elif .id.session_key == "showcase-pi" then ($now|tonumber) - 2*3600 \
                     elif .id.session_key | test("opencode") then ($now|tonumber) - 3*3600 \
                     elif .id.session_key | test("bare-codex") then ($now|tonumber) - 12*3600 \
                     elif .id.session_key | test("codex-child") then ($now|tonumber) - 2*86400 \

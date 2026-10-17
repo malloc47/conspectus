@@ -9,6 +9,7 @@ fn fixture_paths_live_under_supplied_root() {
     assert!(fixture.codex_state_root().starts_with(temp.path()));
     assert!(fixture.claude_code_state_root().starts_with(temp.path()));
     assert!(fixture.opencode_state_root().starts_with(temp.path()));
+    assert!(fixture.pi_state_root().starts_with(temp.path()));
 }
 
 #[test]
@@ -86,6 +87,47 @@ fn opencode_session_records_time_fields() {
     assert_eq!(info["directory"], "/work/repo");
     assert_eq!(info["time"]["created"], 1_700_000_000_000_i64);
     assert_eq!(info["time"]["updated"], 1_700_000_500_000_i64);
+}
+
+#[test]
+fn pi_session_writes_header_in_encoded_cwd_dir() {
+    let temp = TempDir::new().expect("temp dir");
+    let fixture = HarnessFixture::at(temp.path());
+
+    let path = fixture
+        .write_pi_session(
+            &PiSessionRecord::new("abc", "/work/repo")
+                .with_timestamp("2026-01-02T03:04:05.000Z")
+                .with_parent_session("/parent.jsonl"),
+        )
+        .expect("write pi session");
+
+    assert_eq!(
+        path,
+        fixture
+            .pi_state_root()
+            .join("--work-repo--")
+            .join("2026-01-02T03-04-05-000Z_abc.jsonl")
+    );
+    let body = fs::read_to_string(&path).expect("read pi session");
+    let header: serde_json::Value =
+        serde_json::from_str(body.lines().next().expect("first line")).expect("parse jsonl");
+    assert_eq!(header["type"], "session");
+    assert_eq!(header["id"], "abc");
+    assert_eq!(header["cwd"], "/work/repo");
+    assert_eq!(header["parentSession"], "/parent.jsonl");
+}
+
+#[test]
+fn pi_session_flat_layout_writes_under_the_root() {
+    let temp = TempDir::new().expect("temp dir");
+    let fixture = HarnessFixture::at(temp.path());
+
+    let path = fixture
+        .write_pi_session(&PiSessionRecord::new("abc", "/work").flat())
+        .expect("write pi session");
+
+    assert_eq!(path.parent(), Some(fixture.pi_state_root().as_path()));
 }
 
 #[test]

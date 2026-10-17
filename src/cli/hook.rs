@@ -1,10 +1,10 @@
 //! `conspectus hook` subcommand tree.
 //!
 //! Four subcommands: `write` (records a session-start hook
-//! payload into the sidecar store), `init` / `remove` (wire
-//! the hook binding into claude / codex config files, or install
-//! the Pi extension file), and `status` (reports which config
-//! files carry the hook).
+//! payload into the sidecar store), `init` / `remove` (install or
+//! remove each harness's hook: a settings entry for Claude Code and
+//! Codex, an owned extension file for Pi), and `status` (reports
+//! whether the hook is installed).
 //!
 //! Every helper this module needs is either hook-specific
 //! (moved here alongside the args) or comes from external
@@ -51,8 +51,8 @@ enum HookCommand {
 
 #[derive(Debug, Args)]
 struct HookWriteArgs {
-    /// Registered harness key (e.g. `claude-code`, `codex`,
-    /// `opencode`), as in `conspectus hook write claude-code`.
+    /// Registered harness key, as in
+    /// `conspectus hook write claude-code`.
     harness: String,
     /// Override hook state root. Primarily useful for tests
     /// and experiments.
@@ -146,38 +146,6 @@ impl HookInitArgs {
         }
     }
 
-    fn run_pi_install(self) -> Result<()> {
-        if self.command.is_some() {
-            bail!("--command doesn't apply to pi: the extension runs `conspectus hook write pi`");
-        }
-        let path = pi_extension_path(self.scope)?;
-        let state = pi_extension_state(&path)?;
-        if state == PiExtensionState::Foreign {
-            bail!(
-                "{} exists and wasn't written by Conspectus; move it aside to install the hook",
-                path.display()
-            );
-        }
-        let changed = state != PiExtensionState::Installed;
-
-        if self.dry_run {
-            let verb = if changed {
-                "would install"
-            } else {
-                "already installed"
-            };
-            println!("{verb} Pi hook extension at {}", path.display());
-            return Ok(());
-        }
-        if changed {
-            write_pi_extension(&path)?;
-            println!("installed Pi hook extension at {}", path.display());
-        } else {
-            println!("Pi hook extension already installed at {}", path.display());
-        }
-        Ok(())
-    }
-
     fn run_claude_install(self) -> Result<()> {
         let path = claude_settings_path(self.scope)?;
         let command = self
@@ -229,6 +197,38 @@ impl HookInitArgs {
         }
         Ok(())
     }
+
+    fn run_pi_install(self) -> Result<()> {
+        if self.command.is_some() {
+            bail!("--command doesn't apply to pi: the extension runs `conspectus hook write pi`");
+        }
+        let path = pi_extension_path(self.scope)?;
+        let state = pi_extension_state(&path)?;
+        if state == PiExtensionState::Foreign {
+            bail!(
+                "{} exists and wasn't written by Conspectus; move it aside to install the hook",
+                path.display()
+            );
+        }
+        let changed = state != PiExtensionState::Installed;
+
+        if self.dry_run {
+            let verb = if changed {
+                "would install"
+            } else {
+                "already installed"
+            };
+            println!("{verb} Pi hook extension at {}", path.display());
+            return Ok(());
+        }
+        if changed {
+            write_pi_extension(&path)?;
+            println!("installed Pi hook extension at {}", path.display());
+        } else {
+            println!("Pi hook extension already installed at {}", path.display());
+        }
+        Ok(())
+    }
 }
 
 impl HookStatusArgs {
@@ -238,18 +238,6 @@ impl HookStatusArgs {
             HookHarnessFlag::Codex => self.run_codex_status(),
             HookHarnessFlag::Pi => self.run_pi_status(),
         }
-    }
-
-    fn run_pi_status(self) -> Result<()> {
-        let path = pi_extension_path(self.scope)?;
-        let label = match pi_extension_state(&path)? {
-            PiExtensionState::Installed => "installed",
-            PiExtensionState::Outdated => "outdated",
-            PiExtensionState::Absent => "not-installed",
-            PiExtensionState::Foreign => "foreign",
-        };
-        println!("{label}\tpi\t{}", path.display());
-        Ok(())
     }
 
     fn run_claude_status(self) -> Result<()> {
@@ -273,6 +261,18 @@ impl HookStatusArgs {
         }
         Ok(())
     }
+
+    fn run_pi_status(self) -> Result<()> {
+        let path = pi_extension_path(self.scope)?;
+        let label = match pi_extension_state(&path)? {
+            PiExtensionState::Installed => "installed",
+            PiExtensionState::Outdated => "outdated",
+            PiExtensionState::Absent => "not-installed",
+            PiExtensionState::Foreign => "foreign",
+        };
+        println!("{label}\tpi\t{}", path.display());
+        Ok(())
+    }
 }
 
 impl HookRemoveArgs {
@@ -282,37 +282,6 @@ impl HookRemoveArgs {
             HookHarnessFlag::Codex => self.run_codex_remove(),
             HookHarnessFlag::Pi => self.run_pi_remove(),
         }
-    }
-
-    fn run_pi_remove(self) -> Result<()> {
-        let path = pi_extension_path(self.scope)?;
-        let state = pi_extension_state(&path)?;
-        if state == PiExtensionState::Foreign {
-            println!(
-                "{} wasn't written by Conspectus; leaving it in place",
-                path.display()
-            );
-            return Ok(());
-        }
-        let installed = state != PiExtensionState::Absent;
-
-        if self.dry_run {
-            let verb = if installed {
-                "would remove"
-            } else {
-                "not installed"
-            };
-            println!("{verb} Pi hook extension at {}", path.display());
-            return Ok(());
-        }
-        if installed {
-            fs::remove_file(&path)
-                .with_context(|| format!("failed to remove {}", path.display()))?;
-            println!("removed Pi hook extension from {}", path.display());
-        } else {
-            println!("Pi hook extension not installed at {}", path.display());
-        }
-        Ok(())
     }
 
     fn run_claude_remove(self) -> Result<()> {
@@ -357,6 +326,37 @@ impl HookRemoveArgs {
             println!("removed Codex hook from {}", path.display());
         } else {
             println!("Codex hook not installed in {}", path.display());
+        }
+        Ok(())
+    }
+
+    fn run_pi_remove(self) -> Result<()> {
+        let path = pi_extension_path(self.scope)?;
+        let state = pi_extension_state(&path)?;
+        if state == PiExtensionState::Foreign {
+            println!(
+                "{} wasn't written by Conspectus; leaving it in place",
+                path.display()
+            );
+            return Ok(());
+        }
+        let installed = state != PiExtensionState::Absent;
+
+        if self.dry_run {
+            let verb = if installed {
+                "would remove"
+            } else {
+                "not installed"
+            };
+            println!("{verb} Pi hook extension at {}", path.display());
+            return Ok(());
+        }
+        if installed {
+            fs::remove_file(&path)
+                .with_context(|| format!("failed to remove {}", path.display()))?;
+            println!("removed Pi hook extension from {}", path.display());
+        } else {
+            println!("Pi hook extension not installed at {}", path.display());
         }
         Ok(())
     }
@@ -621,17 +621,10 @@ pub(super) enum PiExtensionState {
 fn pi_extension_path(scope: HookScopeFlag) -> Result<PathBuf> {
     match scope {
         HookScopeFlag::User => {
-            let agent_dir = match std::env::var_os("PI_CODING_AGENT_DIR").filter(|v| !v.is_empty())
-            {
-                Some(dir) => PathBuf::from(dir),
-                None => std::env::var_os("HOME")
-                    .map(PathBuf::from)
-                    .ok_or_else(|| {
-                        anyhow!("HOME or PI_CODING_AGENT_DIR is required for --scope user")
-                    })?
-                    .join(".pi")
-                    .join("agent"),
-            };
+            let agent_dir =
+                crate::discovery::harness::pi::agent_dir_from_env().ok_or_else(|| {
+                    anyhow!("HOME or PI_CODING_AGENT_DIR is required for --scope user")
+                })?;
             Ok(agent_dir.join("extensions").join(PI_EXTENSION_FILE))
         }
         HookScopeFlag::Project => {

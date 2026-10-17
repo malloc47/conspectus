@@ -242,7 +242,7 @@ about what is linked to what. See the
 
 | Family | Supported today | What Conspectus reads |
 | --- | --- | --- |
-| Agent harnesses | Claude Code, Codex, opencode, aider, [Pi](https://pi.dev) | Sessions, titles, last-message previews, and session lineage (compaction, resume, forks). Harness SQLite databases are opened read-only. |
+| Agent harnesses | Claude Code, Codex, opencode, aider, Pi | Sessions, titles, last-message previews, and session lineage (compaction, resume, forks). Harness SQLite databases are opened read-only. |
 | Terminal multiplexers | tmux; zellij (discovery and attach only) | Sessions, working directories, activity, attached clients, and pane process trees. |
 | Version control | git | Repos, checkouts, linked worktrees (including worktrees of bare repos), branches, remotes, and upstreams. |
 | Workspaces | Atelier, [agent-deck](https://github.com/asheshgoplani/agent-deck), and generic multi-repo roots | Workspace membership, plus fork provenance from Atelier. |

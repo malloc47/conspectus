@@ -1,0 +1,2 @@
+{"type":"session","version":3,"id":"0199f0b5-0000-7000-8000-0000000000f1","timestamp":"2026-10-16T11:00:00.000Z","cwd":"/home/user/projects/other","parentSession":"/home/user/.pi/agent/sessions/--home-user-projects-my-project--/2026-10-16T10-00-00-000Z_0199f0a2-7c1e-7d3a-9b2e-5f1c2a3b4c5d.jsonl"}
+{"type":"message","id":"f1","parentId":null,"timestamp":"2026-10-16T11:00:05.000Z","message":{"role":"user","content":[{"type":"text","text":"Continue in the other project"}],"timestamp":1792148405000}}

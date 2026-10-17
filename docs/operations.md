@@ -46,33 +46,20 @@ The aider adapter is per-repo rather than per-state-root, so it
 walks scan roots looking for `.aider*` markers and is not gated by an
 environment variable.
 
-#### Pi
+When `CONSPECTUS_PI_STATE` is unset, the pi provider follows Pi's own
+settings (ADR 0121): `PI_CODING_AGENT_SESSION_DIR`, then an absolute
+`sessionDir` in `<agent-dir>/settings.json`, then `<agent-dir>/sessions`,
+where `<agent-dir>` is `PI_CODING_AGENT_DIR` or `~/.pi/agent`. Both of
+Pi's layouts are read: grouped by working directory, and flat. The
+working directory always comes from the session file, not the directory
+name. Pi sessions Conspectus can't see or match:
 
-Pi's session directory follows Pi's own settings when
-`CONSPECTUS_PI_STATE` is unset (ADR 0121). Conspectus uses the first of:
-
-1. `CONSPECTUS_PI_STATE`.
-2. `PI_CODING_AGENT_SESSION_DIR`.
-3. `sessionDir` in `<agent-dir>/settings.json`, when it is an absolute
-   path.
-4. `<agent-dir>/sessions`.
-
-`<agent-dir>` is `PI_CODING_AGENT_DIR`, or `~/.pi/agent`. Sessions are
-found in both Pi layouts: grouped by working directory (the default) and
-flat (a custom session directory). The working directory always comes
-from the session file, not the directory name.
-
-Known limits:
-
-- Sessions started with `--no-session` write no file, so Conspectus
-  never sees them.
-- A project-level or relative `sessionDir`, and a per-run
-  `--session-dir`, aren't followed. Point `CONSPECTUS_PI_STATE` at that
-  directory instead.
-- Pane attribution reads session ids from commands such as
-  `pi --session <id>` only when the id is a UUID, which is Pi's default.
-  A custom `--session-id` value isn't recognized in a command line; the
-  hook extension below still reports it.
+- `--no-session` runs, which write no file.
+- Sessions under a project-level or relative `sessionDir`, or a per-run
+  `--session-dir`. Point `CONSPECTUS_PI_STATE` at that directory.
+- A custom `--session-id` in a pane's command line, which pane
+  attribution can't recognize (UUID ids can be). The Pi hook still
+  reports it.
 
 ### Hook sidecar state
 
@@ -93,15 +80,20 @@ The records are not project intent and should not be committed. Stale
 records are ignored for active mux attribution. Older per-event JSON
 records in the same directory remain readable as a compatibility path.
 
-Install the Claude Code hook automatically:
+Install a harness hook automatically:
 
 ```sh
-conspectus hook init claude-code --scope user
+conspectus hook init claude-code   # a SessionStart entry in ~/.claude/settings.json
+conspectus hook init codex         # a hook entry in ~/.codex/config.toml
+conspectus hook init pi            # <agent-dir>/extensions/conspectus-hook.ts
 ```
 
-The command is idempotent. `conspectus hook status claude-code` reports
-whether the hook is present, and `conspectus hook remove claude-code`
-removes only the Conspectus hook entry.
+`--scope project` installs into the current project instead
+(`.claude/`, `.codex/`, `.pi/extensions/`). The commands are idempotent.
+`conspectus hook status <harness>` reports whether the hook is present,
+and `conspectus hook remove <harness>` removes only what Conspectus
+installed. The opencode hook is a plugin; see
+[`plugins/opencode-hook/README.md`](../plugins/opencode-hook/README.md).
 
 Manual Claude Code hook setup:
 
@@ -128,23 +120,16 @@ settings file. The subcommand reads Claude's hook JSON from stdin,
 records `session_id`, `transcript_path`, `cwd`, and tmux context when
 available, then exits without writing to the transcript.
 
-Pi has no hook settings; its hook is a TypeScript extension that
-Conspectus installs as a single file (ADR 0121):
-
-```sh
-conspectus hook init pi                   # <agent-dir>/extensions/conspectus-hook.ts
-conspectus hook init pi --scope project   # ./.pi/extensions/conspectus-hook.ts
-```
-
-Restart Pi or run `/reload` to load it. Pi asks you to trust a project
-before it loads project extensions. The extension reports each
-interactive session start, including `/new`, `/resume`, `/fork`, and
-`/clone`, through `conspectus hook write pi`. It skips `--no-session`
-runs and Pi's print, JSON, and RPC modes. `conspectus hook status pi`
-reports `installed`, `outdated`, `not-installed`, or `foreign` (a file
-at that path Conspectus didn't write). `conspectus hook remove pi`
-deletes only Conspectus's file. See
-[`plugins/pi-hook/README.md`](../plugins/pi-hook/README.md).
+Pi has no hook settings, so its hook is a TypeScript extension that
+`hook init pi` writes as one file (ADR 0121). Restart Pi or run
+`/reload` to load it; Pi asks you to trust a project before it loads
+project extensions. The extension reports each interactive session
+start, including `/new`, `/resume`, `/fork`, and `/clone`, through
+`conspectus hook write pi`, and skips `--no-session` runs and Pi's
+print, JSON, and RPC modes. Besides `installed` and `not-installed`,
+`hook status pi` reports `outdated` (an older copy) and `foreign` (a
+file at that path Conspectus didn't write, which `init` and `remove`
+leave alone). See [`plugins/pi-hook/README.md`](../plugins/pi-hook/README.md).
 
 ## Configuration File
 
