@@ -110,10 +110,10 @@ pub struct TranscriptTurn {
     /// goal is to match what the harness's own UI showed the user.
     #[serde(default, skip_serializing_if = "is_false")]
     pub aborted: bool,
-    /// `true` when the harness's own UI never showed this turn: Pi's
-    /// system prompt, extension state, `custom_message` entries with
-    /// `display: false`, and model/usage metadata, for example. Hidden
-    /// by default; revealed via the viewer's `H` toggle (ADR 0122).
+    /// `true` when the harness's own UI never showed this turn: injected
+    /// system and developer instructions, extension state, and
+    /// model/usage metadata, for example. Hidden by default; revealed
+    /// via the viewer's `H` toggle (ADR 0122).
     #[serde(default, skip_serializing_if = "is_false")]
     pub hidden: bool,
 }

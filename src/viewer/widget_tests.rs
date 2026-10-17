@@ -730,25 +730,31 @@ fn hidden_turns_are_filtered_until_toggled() {
     };
     let doc = TranscriptDocument {
         meta: TranscriptMeta {
-            harness: "pi".to_string(),
+            harness: "codex".to_string(),
             session_key: "hidden".to_string(),
             cwd: None,
         },
         turns: vec![
-            turn("system prompt text", true),
+            turn("developer instructions", true),
             turn("visible prompt", false),
         ],
     };
     let mut state = ViewerState::new(doc);
     let s = buffer_to_string(&render_to_buffer(&mut state, &theme, 100, 14));
     assert!(s.contains("visible prompt"), "{s}");
-    assert!(!s.contains("system prompt text"), "hidden by default: {s}");
+    assert!(
+        !s.contains("developer instructions"),
+        "hidden by default: {s}"
+    );
     assert!(s.contains("hidden·hide (H)"), "footer chip: {s}");
 
     let (mut state, _) =
         crate::viewer::input::reduce(state, crate::viewer::input::ViewerMsg::ToggleHidden);
     let s = buffer_to_string(&render_to_buffer(&mut state, &theme, 100, 14));
-    assert!(s.contains("system prompt text"), "revealed after H: {s}");
+    assert!(
+        s.contains("developer instructions"),
+        "revealed after H: {s}"
+    );
     assert!(s.contains("hidden·show (H)"), "footer chip: {s}");
 }
 

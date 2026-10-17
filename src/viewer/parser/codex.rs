@@ -16,9 +16,9 @@
 //!   `custom_tool_call` / `custom_tool_call_output` /
 //!   `web_search_call`.
 //! - `message.role` is `user` / `assistant` / `developer` /
-//!   `system`. The `developer` and `system` roles are
-//!   conspectus / codex injected instructions and produce no
-//!   operator-facing turns.
+//!   `system`. The `developer` and `system` roles carry the
+//!   instructions Codex and its launcher inject; Codex's UI never
+//!   shows them.
 //! - Message content blocks are `input_text` (user/dev/sys) and
 //!   `output_text` (assistant), each with `text`.
 //! - `reasoning` records carry `summary` (array of text blocks) and
@@ -37,7 +37,9 @@
 //! - `function_call_output` / `custom_tool_call_output` →
 //!   `ToolResult` (body = output, assistant role).
 //! - `compacted` → `CompactionSummary`.
-//! - `developer` and `system` role messages → skipped.
+//! - `developer` and `system` role messages → hidden `System`
+//!   `Message` turns, revealed by the viewer's `H` toggle
+//!   (ADR 0122).
 //! - The channel markers `<turn_aborted>` / `<proposed_plan>`
 //!   appear as synthetic message bodies; drop those exact bodies
 //!   as not-real-user-text.
@@ -253,11 +255,13 @@ fn emit_message_turns(
     timestamp: Option<DateTime<Utc>>,
     out: &mut Vec<TranscriptTurn>,
 ) {
-    let role = match payload.role.as_deref() {
-        Some("user") => TurnRole::User,
-        Some("assistant") => TurnRole::Assistant,
-        // developer and system messages are codex / conspectus
-        // injected instructions — no operator turn.
+    // Developer and system messages are injected instructions the
+    // Codex UI never shows, so they render only behind the hidden
+    // toggle.
+    let (role, hidden) = match payload.role.as_deref() {
+        Some("user") => (TurnRole::User, false),
+        Some("assistant") => (TurnRole::Assistant, false),
+        Some("developer" | "system") => (TurnRole::System, true),
         _ => return,
     };
     let Some(blocks) = &payload.content else {
@@ -283,7 +287,7 @@ fn emit_message_turns(
             body: text.to_string(),
             timestamp,
             aborted: false,
-            hidden: false,
+            hidden,
         });
     }
 }

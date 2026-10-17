@@ -43,10 +43,10 @@ interrupted," and a system prompt isn't that.
    kind-based toggles, so a hidden tool call still needs `t` as well.
    The inline transcript preview uses the same filter.
 3. **Parsers use the flag for content the harness hid but that is worth
-   reading.** Pure noise, such as empty records or opaque blobs, can
-   still be dropped. The Pi parser is the first user. Moving the Codex
-   `system` and `developer` messages onto the flag is a follow-up, not
-   part of this decision.
+   reading.** Pure noise, such as empty records, opaque blobs, or Codex's
+   `<turn_aborted>` channel markers, can still be dropped. The Pi parser
+   marks the records listed above. The Codex parser marks its `system`
+   and `developer` messages, which it used to drop.
 
 ## Consequences
 

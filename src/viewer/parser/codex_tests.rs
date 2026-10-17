@@ -81,7 +81,7 @@ fn user_and_assistant_messages_become_message_turns() {
 }
 
 #[test]
-fn developer_and_system_messages_are_skipped() {
+fn developer_and_system_messages_are_hidden_system_turns() {
     let (_tmp, locator) = fixture(
         "sess",
         &[
@@ -91,8 +91,33 @@ fn developer_and_system_messages_are_skipped() {
         ],
     );
     let doc = CodexParser.read(&locator).expect("parse");
-    assert_eq!(doc.turns.len(), 1);
-    assert_eq!(doc.turns[0].body, "actual user text");
+    let shape: Vec<(TurnRole, bool, &str)> = doc
+        .turns
+        .iter()
+        .map(|turn| (turn.role, turn.hidden, turn.body.as_str()))
+        .collect();
+    assert_eq!(
+        shape,
+        [
+            (TurnRole::System, true, "<permissions instructions> ..."),
+            (TurnRole::System, true, "system prompt"),
+            (TurnRole::User, false, "actual user text"),
+        ]
+    );
+    assert!(doc.turns.iter().all(|turn| turn.kind == TurnKind::Message));
+}
+
+#[test]
+fn channel_markers_are_dropped_in_every_role() {
+    let (_tmp, locator) = fixture(
+        "sess",
+        &[
+            r#"{"type":"response_item","payload":{"type":"message","role":"developer","content":[{"type":"input_text","text":"<proposed_plan>"}]}}"#,
+            r#"{"type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"<turn_aborted>"}]}}"#,
+        ],
+    );
+    let doc = CodexParser.read(&locator).expect("parse");
+    assert!(doc.turns.is_empty(), "{:#?}", doc.turns);
 }
 
 #[test]
