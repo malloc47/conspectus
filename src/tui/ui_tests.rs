@@ -3987,6 +3987,7 @@ fn transcript_document(turns: usize) -> crate::viewer::model::TranscriptDocument
                 body: format!("turn {n}"),
                 timestamp: None,
                 aborted: false,
+                hidden: false,
             })
             .collect(),
     }

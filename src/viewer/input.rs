@@ -30,6 +30,9 @@ pub enum ViewerMsg {
     /// the viewer matches what the user saw in the agent's UI at
     /// chat time.
     ToggleAborted,
+    /// Show / hide turns the parser tagged as hidden by the harness's
+    /// own UI. Bound to capital-`H`; off by default (ADR 0122).
+    ToggleHidden,
     ToggleHelp,
     Close,
 }
@@ -106,6 +109,11 @@ pub fn reduce(mut state: ViewerState, msg: ViewerMsg) -> (ViewerState, ViewerEff
         }
         ViewerMsg::ToggleAborted => {
             state.show_aborted = !state.show_aborted;
+            state.scroll_offset = state.scroll_offset.min(state.max_scroll());
+            state.invalidate_render_cache();
+        }
+        ViewerMsg::ToggleHidden => {
+            state.show_hidden = !state.show_hidden;
             state.scroll_offset = state.scroll_offset.min(state.max_scroll());
             state.invalidate_render_cache();
         }

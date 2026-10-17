@@ -457,6 +457,9 @@ pub(super) fn handle_viewer_overlay_key(app: &mut App, key: ratatui::crossterm::
         (KeyModifiers::SHIFT | KeyModifiers::NONE, KeyCode::Char('I')) => {
             Some(ViewerMsg::ToggleAborted)
         }
+        (KeyModifiers::SHIFT | KeyModifiers::NONE, KeyCode::Char('H')) => {
+            Some(ViewerMsg::ToggleHidden)
+        }
         (_, KeyCode::Char('?')) => Some(ViewerMsg::ToggleHelp),
         _ => None,
     };

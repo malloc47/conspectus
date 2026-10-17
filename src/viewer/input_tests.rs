@@ -119,6 +119,20 @@ fn toggle_aborted_flips_flag_and_invalidates_cache() {
 }
 
 #[test]
+fn toggle_hidden_flips_flag_and_invalidates_cache() {
+    let s = state_with(100, 24, 50);
+    assert!(!s.show_hidden, "off by default — matches harness UX");
+    let (s, _) = reduce(s, ViewerMsg::ToggleHidden);
+    assert!(s.show_hidden);
+    assert!(
+        s.rendered.is_none(),
+        "render cache invalidated so the hidden filter takes effect on next draw"
+    );
+    let (s, _) = reduce(s, ViewerMsg::ToggleHidden);
+    assert!(!s.show_hidden);
+}
+
+#[test]
 fn close_emits_close_effect() {
     let s = state_with(100, 24, 0);
     let (_s, eff) = reduce(s, ViewerMsg::Close);

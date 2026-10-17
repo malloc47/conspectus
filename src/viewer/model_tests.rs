@@ -107,6 +107,7 @@ fn transcript_turn_serde_round_trip_with_timestamp() {
                 .expect("valid timestamp"),
         ),
         aborted: false,
+        hidden: false,
     };
     let json = serde_json::to_string(&original).expect("serialize");
     let decoded: TranscriptTurn = serde_json::from_str(&json).expect("deserialize");
@@ -121,6 +122,7 @@ fn transcript_turn_serde_omits_absent_timestamp() {
         body: "hi".to_string(),
         timestamp: None,
         aborted: false,
+        hidden: false,
     };
     let json = serde_json::to_string(&turn).expect("serialize");
     assert!(!json.contains("timestamp"), "got {json}");
@@ -152,6 +154,7 @@ fn transcript_document_serde_round_trip() {
                 body: "what's up?".to_string(),
                 timestamp: None,
                 aborted: false,
+                hidden: false,
             },
             TranscriptTurn {
                 role: TurnRole::Assistant,
@@ -163,6 +166,7 @@ fn transcript_document_serde_round_trip() {
                         .expect("valid timestamp"),
                 ),
                 aborted: false,
+                hidden: false,
             },
         ],
     };

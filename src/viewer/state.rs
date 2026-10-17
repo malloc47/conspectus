@@ -69,6 +69,7 @@ pub struct RenderCache {
     pub tool_detail: ToolDetail,
     pub show_thinking: bool,
     pub show_aborted: bool,
+    pub show_hidden: bool,
     pub lines: Vec<Line<'static>>,
 }
 
@@ -96,6 +97,10 @@ pub struct ViewerState {
     /// [`crate::viewer::model::TranscriptTurn::aborted`] for how
     /// detection works per harness. Toggled by capital-`I`.
     pub show_aborted: bool,
+    /// When `true`, turns tagged `hidden: true` by the parser (content
+    /// the harness's UI never showed) are rendered. Off by default;
+    /// toggled by capital-`H` (ADR 0122).
+    pub show_hidden: bool,
     /// When `true`, the modal renders a centered help-overlay panel
     /// over the body listing every viewer keybinding. Toggled by
     /// `?`; closed by `?` or `Esc`.
@@ -124,6 +129,7 @@ impl ViewerState {
             tool_detail: ToolDetail::Hidden,
             show_thinking: false,
             show_aborted: false,
+            show_hidden: false,
             show_help: false,
             viewport_height: 0,
             total_lines: 0,

@@ -170,6 +170,7 @@ Opening and rendering harness transcripts.
 | [0051](0051-tui-transcript-preview-markdown-dependency.md) | TUI Transcript Preview Markdown Rendering Dependency | Accepted (amended) |
 | [0052](0052-native-session-viewer.md) | Native In-Tree Multi-Harness Session Transcript Viewer | Accepted |
 | [0053](0053-viewer-abort-filter-default-harness-ux.md) | Aborted-Message Filtering In The Native Viewer | Accepted |
+| [0122](0122-viewer-harness-hidden-records-toggle.md) | Harness-Hidden Records Behind A Viewer Toggle | Accepted |
 | [0054](0054-viewer-table-rendering-comfy-table.md) | Markdown Table Rendering Via comfy-table | Accepted |
 
 ## Process, tooling, and distribution

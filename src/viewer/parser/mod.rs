@@ -13,6 +13,7 @@
 pub mod claude_code;
 pub mod codex;
 pub mod opencode;
+pub mod pi;
 
 use crate::viewer::model::{SessionLocator, TranscriptDocument};
 

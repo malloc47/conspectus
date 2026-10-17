@@ -207,6 +207,7 @@ fn parse_file(path: &Path, locator: &SessionLocator) -> ParseResult {
                         body: body.to_string(),
                         timestamp,
                         aborted: false,
+                        hidden: false,
                     });
                 }
             }
@@ -282,6 +283,7 @@ fn emit_message_turns(
             body: text.to_string(),
             timestamp,
             aborted: false,
+            hidden: false,
         });
     }
 }
@@ -332,6 +334,7 @@ fn emit_reasoning_turn(
         body,
         timestamp,
         aborted: false,
+        hidden: false,
     });
 }
 
@@ -353,6 +356,7 @@ fn emit_tool_call_turn(
         body,
         timestamp,
         aborted: false,
+        hidden: false,
     });
 }
 
@@ -374,6 +378,7 @@ fn emit_tool_output_turn(
         body: trimmed.to_string(),
         timestamp,
         aborted: false,
+        hidden: false,
     });
 }
 

@@ -203,6 +203,7 @@ pub fn body_lines<'s>(
             tool_detail: state.tool_detail,
             show_thinking: state.show_thinking,
             show_aborted: state.show_aborted,
+            show_hidden: state.show_hidden,
             lines: owned,
         });
     }
@@ -230,6 +231,7 @@ fn cache_is_current(state: &ViewerState, content_width: u16) -> bool {
             && cache.tool_detail == state.tool_detail
             && cache.show_thinking == state.show_thinking
             && cache.show_aborted == state.show_aborted
+            && cache.show_hidden == state.show_hidden
     })
 }
 
@@ -262,6 +264,7 @@ fn draw_footer(state: &ViewerState, theme: &Theme, frame: &mut Frame<'_>, area: 
     let tools_text = tool_chip_label(state.tool_detail);
     let thinking_text = toggle_chip("think", state.show_thinking, 'T');
     let aborted_text = abort_chip_label(state.show_aborted);
+    let hidden_text = hidden_chip_label(state.show_hidden);
 
     // Long hint trails. `?` for help is its own chip so it stands
     // out; `q close` is the last item per the operator-preferred
@@ -271,8 +274,12 @@ fn draw_footer(state: &ViewerState, theme: &Theme, frame: &mut Frame<'_>, area: 
     let close_chip = "(q) close";
     let scroll_hint = "j/k scroll · g/G top/end · PgUp/PgDn";
 
+    // The hidden chip only appears for transcripts whose parser marked
+    // turns hidden; for the rest it would toggle nothing.
+    let has_hidden = state.document.turns.iter().any(|turn| turn.hidden);
+
     let tools_on = state.tool_detail.is_visible();
-    let spans: Vec<Span<'_>> = vec![
+    let mut spans: Vec<Span<'_>> = vec![
         Span::styled(position, chip_style),
         pipe.clone(),
         Span::styled(tools_text, if tools_on { on_style } else { off_style }),
@@ -295,20 +302,35 @@ fn draw_footer(state: &ViewerState, theme: &Theme, frame: &mut Frame<'_>, area: 
             },
         ),
         pipe.clone(),
+    ];
+    if has_hidden {
+        spans.push(Span::styled(
+            hidden_text,
+            if state.show_hidden {
+                on_style
+            } else {
+                off_style
+            },
+        ));
+        spans.push(pipe.clone());
+    }
+    spans.extend([
         Span::styled(help_chip, off_style),
         pipe.clone(),
         Span::styled(scroll_hint, off_style),
         pipe,
         Span::styled(close_chip, off_style),
-    ];
+    ]);
 
-    // Width-aware truncate. Three tiers, picked by what fits:
+    // Width-aware truncate. Tiers, picked by what fits:
     //   1. Full assembly above.
     //   2. Drop scroll hint + help chip, keep position · tools · think
-    //      · aborted · close.
-    //   3. Drop the aborted chip too. Aborted-turn filtering is rare,
-    //      and the tools / think chips reflect ongoing state — those
-    //      stay until close itself is at risk.
+    //      · aborted · hidden · close.
+    //   3. Keep one filter chip: hidden when the transcript has hidden
+    //      turns and no aborted ones, aborted otherwise.
+    //   4. Drop that chip too. Those filters are rarely flipped, and the
+    //      tools / think chips reflect ongoing state — those stay until
+    //      close itself is at risk.
     let total: usize = spans
         .iter()
         .map(|s| unicode_width::UnicodeWidthStr::width(s.content.as_ref()))
@@ -348,24 +370,54 @@ fn draw_footer(state: &ViewerState, theme: &Theme, frame: &mut Frame<'_>, area: 
                 off_style
             },
         );
+        let hidden_span = Span::styled(
+            format!(" · {}", hidden_chip_label(state.show_hidden)),
+            if state.show_hidden {
+                on_style
+            } else {
+                off_style
+            },
+        );
         let close_span = Span::styled(format!(" · {close_chip}"), off_style);
-        let with_aborted = vec![
-            position_span.clone(),
-            tools_span.clone(),
-            think_span.clone(),
-            aborted_span,
-            close_span.clone(),
-        ];
-        let width_with_aborted: usize = with_aborted
-            .iter()
-            .map(|s| unicode_width::UnicodeWidthStr::width(s.content.as_ref()))
-            .sum();
-        let minimal = if width_with_aborted <= cap {
-            with_aborted
+        let base = [position_span, tools_span, think_span];
+        let mut tiers: Vec<Vec<Span<'_>>> = Vec::new();
+        if has_hidden {
+            tiers.push(
+                base.iter()
+                    .cloned()
+                    .chain([
+                        aborted_span.clone(),
+                        hidden_span.clone(),
+                        close_span.clone(),
+                    ])
+                    .collect(),
+            );
+        }
+        // With room for one filter chip, keep the one that filters
+        // something in this transcript.
+        let has_aborted = state.document.turns.iter().any(|turn| turn.aborted);
+        let single = if has_hidden && !has_aborted {
+            hidden_span
         } else {
-            vec![position_span, tools_span, think_span, close_span]
+            aborted_span
         };
-        Line::from(minimal)
+        tiers.push(
+            base.iter()
+                .cloned()
+                .chain([single, close_span.clone()])
+                .collect(),
+        );
+        let width = |spans: &[Span<'_>]| -> usize {
+            spans
+                .iter()
+                .map(|s| unicode_width::UnicodeWidthStr::width(s.content.as_ref()))
+                .sum()
+        };
+        let chosen = tiers
+            .into_iter()
+            .find(|tier| width(tier) <= cap)
+            .unwrap_or_else(|| base.into_iter().chain([close_span]).collect());
+        Line::from(chosen)
     };
     frame.render_widget(Paragraph::new(line), area);
 }
@@ -397,6 +449,14 @@ fn abort_chip_label(showing: bool) -> String {
     format!("aborted·{state_label} (I)")
 }
 
+/// `hidden·hide (H)` / `hidden·show (H)` chip for records the
+/// harness's UI never showed (ADR 0122). Same `hide`/`show` wording as
+/// the aborted chip.
+fn hidden_chip_label(showing: bool) -> String {
+    let state_label = if showing { "show" } else { "hide" };
+    format!("hidden·{state_label} (H)")
+}
+
 fn draw_help_overlay(theme: &Theme, frame: &mut Frame<'_>, area: Rect) {
     use ratatui::widgets::{Block, Borders, Clear};
     // Build the body content first so we can size the panel
@@ -413,6 +473,7 @@ fn draw_help_overlay(theme: &Theme, frame: &mut Frame<'_>, area: Rect) {
         ("t", "Cycle tool detail (off → sum → trunc → all)"),
         ("T", "Toggle thinking turns"),
         ("I", "Toggle aborted/interrupted turns"),
+        ("H", "Toggle records the harness UI hid"),
         ("?", "Toggle this help panel"),
     ];
 
@@ -485,7 +546,7 @@ fn draw_help_overlay(theme: &Theme, frame: &mut Frame<'_>, area: Rect) {
 fn compute_gutter_inner_width(state: &ViewerState) -> usize {
     let mut max_width = 0usize;
     for turn in &state.document.turns {
-        if !passes_abort_filter(turn, state) || !is_visible(turn.kind, state) {
+        if !passes_turn_filters(turn, state) || !is_visible(turn.kind, state) {
             continue;
         }
         let label = chip_label(turn);
@@ -512,7 +573,7 @@ fn build_body_lines<'a>(
     let mut i = 0;
     while i < turns.len() {
         let turn = &turns[i];
-        if !passes_abort_filter(turn, state) || !is_visible(turn.kind, state) {
+        if !passes_turn_filters(turn, state) || !is_visible(turn.kind, state) {
             i += 1;
             continue;
         }
@@ -568,7 +629,7 @@ fn collect_tool_run(
         // Skip aborted tool turns when the filter is on so the
         // aggregate phrase reflects what the user saw, not the
         // on-disk count.
-        if !passes_abort_filter(turn, state) {
+        if !passes_turn_filters(turn, state) {
             end += 1;
             continue;
         }
@@ -590,12 +651,12 @@ fn is_visible(kind: TurnKind, state: &ViewerState) -> bool {
 }
 
 /// Per-turn filter applied before any kind-based visibility check.
-/// When `show_aborted` is off (the default), any turn tagged
-/// `aborted: true` by the parser drops out — matching what the
-/// agent's UI showed the user. The toggle restores the full
-/// on-disk transcript.
-fn passes_abort_filter(turn: &crate::viewer::model::TranscriptTurn, state: &ViewerState) -> bool {
-    state.show_aborted || !turn.aborted
+/// With `show_aborted` and `show_hidden` off (the default), turns the
+/// parser tagged `aborted` or `hidden` drop out — matching what the
+/// agent's UI showed the user. The toggles restore the full on-disk
+/// transcript.
+fn passes_turn_filters(turn: &crate::viewer::model::TranscriptTurn, state: &ViewerState) -> bool {
+    (state.show_aborted || !turn.aborted) && (state.show_hidden || !turn.hidden)
 }
 
 /// Pick a harness-identity color for the title chip. Delegates to

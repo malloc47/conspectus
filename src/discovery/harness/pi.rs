@@ -99,6 +99,23 @@ impl HarnessAdapter for PiAdapter {
         })
     }
 
+    /// The parser finds the session file under the session root that
+    /// discovery recorded as the session's state scope.
+    fn transcript_source(
+        &self,
+        session: &AgentSessionId,
+    ) -> Option<crate::viewer::model::SessionLocator> {
+        Some(crate::viewer::model::SessionLocator {
+            harness_key: HARNESS_KEY.to_string(),
+            session_key: session.session_key.clone(),
+            state_root: session.state_scope.clone().into(),
+        })
+    }
+
+    fn transcript_parser(&self) -> Option<&'static dyn crate::viewer::parser::HarnessParser> {
+        Some(&crate::viewer::parser::pi::PiParser)
+    }
+
     fn launch_argv(&self) -> Vec<OsString> {
         vec![OsString::from("pi")]
     }

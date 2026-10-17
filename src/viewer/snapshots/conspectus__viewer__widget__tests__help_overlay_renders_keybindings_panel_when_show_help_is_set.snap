@@ -1,5 +1,5 @@
 ---
-source: src/viewer/widget.rs
+source: src/viewer/widget_tests.rs
 expression: snapshot_string(&buf)
 ---
  claude-code:0b34e59c · /p/proj · 2 turns
@@ -15,8 +15,8 @@ expression: snapshot_string(&buf)
   │                t   Cycle tool detail (off → sum → trunc → all) │
   │                T   Toggle thinking turns                       │
   │                I   Toggle aborted/interrupted turns            │
+  │                H   Toggle records the harness UI hid           │
   │                ?   Toggle this help panel                      │
   │                                                                │
-  └────────────────────────────────────────────────────────────────┘
-──────────────────────────────────────────────────────────────────────
+──└────────────────────────────────────────────────────────────────┘──
 [ 1/4 ] · tools·off   (t) · think·off (T) · (q) close

@@ -9,6 +9,7 @@ fn turn(role: TurnRole, kind: TurnKind, body: &str) -> TranscriptTurn {
         body: body.to_string(),
         timestamp: None,
         aborted: false,
+        hidden: false,
     }
 }
 

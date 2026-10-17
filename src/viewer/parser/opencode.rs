@@ -220,6 +220,7 @@ fn emit_turns_for_part(
                 body,
                 timestamp,
                 aborted,
+                hidden: false,
             });
         }
         "reasoning" => {
@@ -232,6 +233,7 @@ fn emit_turns_for_part(
                 body,
                 timestamp,
                 aborted,
+                hidden: false,
             });
         }
         "tool" => {
@@ -252,6 +254,7 @@ fn emit_turns_for_part(
                 body: call_body,
                 timestamp,
                 aborted,
+                hidden: false,
             });
             if let Some(output) = state.and_then(|s| s.output.as_deref()).and_then(nonempty) {
                 out.push(TranscriptTurn {
@@ -260,6 +263,7 @@ fn emit_turns_for_part(
                     body: output,
                     timestamp,
                     aborted,
+                    hidden: false,
                 });
             }
         }

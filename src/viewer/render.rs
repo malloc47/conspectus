@@ -205,6 +205,7 @@ pub fn render_aggregated_tool_summary(
         body: phrase.to_string(),
         timestamp: None,
         aborted: false,
+        hidden: false,
     };
     render_turn(
         &synthetic,

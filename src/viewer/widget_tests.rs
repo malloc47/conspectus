@@ -18,6 +18,7 @@ fn sample_document() -> TranscriptDocument {
                 body: "what's up?".to_string(),
                 timestamp: None,
                 aborted: false,
+                hidden: false,
             },
             TranscriptTurn {
                 role: TurnRole::Assistant,
@@ -25,6 +26,7 @@ fn sample_document() -> TranscriptDocument {
                 body: "not much".to_string(),
                 timestamp: None,
                 aborted: false,
+                hidden: false,
             },
         ],
     }
@@ -54,6 +56,7 @@ fn long_document() -> TranscriptDocument {
             body: format!("turn {i}"),
             timestamp: None,
             aborted: false,
+            hidden: false,
         });
     }
     doc
@@ -73,6 +76,7 @@ fn document_with_compaction() -> TranscriptDocument {
                 body: "before".to_string(),
                 timestamp: None,
                 aborted: false,
+                hidden: false,
             },
             TranscriptTurn {
                 role: TurnRole::User,
@@ -80,6 +84,7 @@ fn document_with_compaction() -> TranscriptDocument {
                 body: "summary of prior turns".to_string(),
                 timestamp: None,
                 aborted: false,
+                hidden: false,
             },
             TranscriptTurn {
                 role: TurnRole::Assistant,
@@ -87,6 +92,7 @@ fn document_with_compaction() -> TranscriptDocument {
                 body: "after".to_string(),
                 timestamp: None,
                 aborted: false,
+                hidden: false,
             },
         ],
     }
@@ -106,6 +112,7 @@ fn document_with_tools() -> TranscriptDocument {
                 body: "what files are here?".to_string(),
                 timestamp: None,
                 aborted: false,
+                hidden: false,
             },
             TranscriptTurn {
                 role: TurnRole::Assistant,
@@ -113,6 +120,7 @@ fn document_with_tools() -> TranscriptDocument {
                 body: "Glob: **/*.rs".to_string(),
                 timestamp: None,
                 aborted: false,
+                hidden: false,
             },
             TranscriptTurn {
                 role: TurnRole::Assistant,
@@ -120,6 +128,7 @@ fn document_with_tools() -> TranscriptDocument {
                 body: "src/lib.rs\nsrc/main.rs".to_string(),
                 timestamp: None,
                 aborted: false,
+                hidden: false,
             },
             TranscriptTurn {
                 role: TurnRole::Assistant,
@@ -127,6 +136,7 @@ fn document_with_tools() -> TranscriptDocument {
                 body: "two Rust files in src/.".to_string(),
                 timestamp: None,
                 aborted: false,
+                hidden: false,
             },
         ],
     }
@@ -198,6 +208,7 @@ fn document_with_table() -> TranscriptDocument {
             body: body.to_string(),
             timestamp: None,
             aborted: false,
+            hidden: false,
         }],
     }
 }
@@ -234,6 +245,7 @@ fn table_snapshot_at_40_cols_forces_dynamic_wrap() {
             body: body.to_string(),
             timestamp: None,
             aborted: false,
+            hidden: false,
         }],
     };
     let theme = Theme::default();
@@ -277,6 +289,7 @@ fn narrow_terminal_wraps_body_but_keeps_chip_alignment() {
                 .to_string(),
             timestamp: None,
             aborted: false,
+            hidden: false,
         }],
     });
     let buf = render_to_buffer(&mut state, &theme, 40, 12);
@@ -442,6 +455,7 @@ fn markdown_table_in_message_body_renders_as_aligned_table() {
             body: body.to_string(),
             timestamp: None,
             aborted: false,
+            hidden: false,
         }],
     };
     let theme = Theme::default();
@@ -487,6 +501,7 @@ fn aborted_turns_hidden_by_default_visible_after_toggle() {
                 body: "first prompt".to_string(),
                 timestamp: None,
                 aborted: false,
+                hidden: false,
             },
             TranscriptTurn {
                 role: TurnRole::Assistant,
@@ -494,6 +509,7 @@ fn aborted_turns_hidden_by_default_visible_after_toggle() {
                 body: "first reply".to_string(),
                 timestamp: None,
                 aborted: false,
+                hidden: false,
             },
             TranscriptTurn {
                 role: TurnRole::User,
@@ -501,6 +517,7 @@ fn aborted_turns_hidden_by_default_visible_after_toggle() {
                 body: "interrupted thought".to_string(),
                 timestamp: None,
                 aborted: true,
+                hidden: false,
             },
             TranscriptTurn {
                 role: TurnRole::User,
@@ -508,6 +525,7 @@ fn aborted_turns_hidden_by_default_visible_after_toggle() {
                 body: "replacement prompt".to_string(),
                 timestamp: None,
                 aborted: false,
+                hidden: false,
             },
         ],
     };
@@ -547,6 +565,7 @@ fn summary_tool_detail_aggregates_consecutive_tool_runs() {
             body: "do the thing".to_string(),
             timestamp: None,
             aborted: false,
+            hidden: false,
         }],
     };
     // Run: Read x2, Bash x4, Edit x2 (each ToolUse + ToolResult).
@@ -559,6 +578,7 @@ fn summary_tool_detail_aggregates_consecutive_tool_runs() {
                 body: format!("{name}: arg{i}"),
                 timestamp: None,
                 aborted: false,
+                hidden: false,
             });
             doc.turns.push(TranscriptTurn {
                 role: TurnRole::Assistant,
@@ -566,6 +586,7 @@ fn summary_tool_detail_aggregates_consecutive_tool_runs() {
                 body: format!("result {i}"),
                 timestamp: None,
                 aborted: false,
+                hidden: false,
             });
         }
     }
@@ -575,6 +596,7 @@ fn summary_tool_detail_aggregates_consecutive_tool_runs() {
         body: "done".to_string(),
         timestamp: None,
         aborted: false,
+        hidden: false,
     });
     let state = ViewerState::new(doc);
     // Cycle once: Hidden → Summary.
@@ -617,6 +639,7 @@ fn summary_aggregation_separates_runs_around_messages() {
         body: "Read: file.rs".to_string(),
         timestamp: None,
         aborted: false,
+        hidden: false,
     });
     doc.turns.push(TranscriptTurn {
         role: TurnRole::Assistant,
@@ -624,6 +647,7 @@ fn summary_aggregation_separates_runs_around_messages() {
         body: "contents".to_string(),
         timestamp: None,
         aborted: false,
+        hidden: false,
     });
     // Message between the runs.
     doc.turns.push(TranscriptTurn {
@@ -632,6 +656,7 @@ fn summary_aggregation_separates_runs_around_messages() {
         body: "inspecting".to_string(),
         timestamp: None,
         aborted: false,
+        hidden: false,
     });
     // Run 2: Bash x1.
     doc.turns.push(TranscriptTurn {
@@ -640,6 +665,7 @@ fn summary_aggregation_separates_runs_around_messages() {
         body: "Bash: ls".to_string(),
         timestamp: None,
         aborted: false,
+        hidden: false,
     });
     doc.turns.push(TranscriptTurn {
         role: TurnRole::Assistant,
@@ -647,6 +673,7 @@ fn summary_aggregation_separates_runs_around_messages() {
         body: "out".to_string(),
         timestamp: None,
         aborted: false,
+        hidden: false,
     });
     let state = ViewerState::new(doc);
     let (mut state, _) =
@@ -673,6 +700,7 @@ fn transcripts_longer_than_u16_lines_scroll_to_the_end() {
         body,
         timestamp: None,
         aborted: false,
+        hidden: false,
     }];
     let theme = Theme::default();
     let mut state = ViewerState::new(doc);
@@ -683,4 +711,79 @@ fn transcripts_longer_than_u16_lines_scroll_to_the_end() {
         text.contains("line 69999"),
         "the end of the transcript should be visible:\n{text}"
     );
+}
+
+#[test]
+fn hidden_turns_are_filtered_until_toggled() {
+    let theme = Theme::default();
+    let turn = |body: &str, hidden| TranscriptTurn {
+        role: if hidden {
+            TurnRole::System
+        } else {
+            TurnRole::User
+        },
+        kind: TurnKind::Message,
+        body: body.to_string(),
+        timestamp: None,
+        aborted: false,
+        hidden,
+    };
+    let doc = TranscriptDocument {
+        meta: TranscriptMeta {
+            harness: "pi".to_string(),
+            session_key: "hidden".to_string(),
+            cwd: None,
+        },
+        turns: vec![
+            turn("system prompt text", true),
+            turn("visible prompt", false),
+        ],
+    };
+    let mut state = ViewerState::new(doc);
+    let s = buffer_to_string(&render_to_buffer(&mut state, &theme, 100, 14));
+    assert!(s.contains("visible prompt"), "{s}");
+    assert!(!s.contains("system prompt text"), "hidden by default: {s}");
+    assert!(s.contains("hidden·hide (H)"), "footer chip: {s}");
+
+    let (mut state, _) =
+        crate::viewer::input::reduce(state, crate::viewer::input::ViewerMsg::ToggleHidden);
+    let s = buffer_to_string(&render_to_buffer(&mut state, &theme, 100, 14));
+    assert!(s.contains("system prompt text"), "revealed after H: {s}");
+    assert!(s.contains("hidden·show (H)"), "footer chip: {s}");
+}
+
+fn pi_fixture_document() -> TranscriptDocument {
+    use crate::viewer::parser::HarnessParser;
+    crate::viewer::parser::pi::PiParser
+        .read(&crate::viewer::model::SessionLocator {
+            harness_key: "pi".to_string(),
+            session_key: "0199c0de-0000-7000-8000-0000000000a1".to_string(),
+            state_root: std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+                .join("tests/fixtures/pi/viewer"),
+        })
+        .expect("parse Pi fixture")
+}
+
+#[test]
+fn pi_session_renders_the_active_branch() {
+    let theme = Theme::default();
+    let mut state = ViewerState::new(pi_fixture_document());
+    let _ = render_to_buffer(&mut state, &theme, 90, 40);
+    let (mut state, _) =
+        crate::viewer::input::reduce(state, crate::viewer::input::ViewerMsg::JumpToStart);
+    let buf = render_to_buffer(&mut state, &theme, 90, 40);
+    insta::assert_snapshot!(snapshot_string(&buf));
+}
+
+#[test]
+fn pi_session_with_hidden_records_shown() {
+    let theme = Theme::default();
+    let state = ViewerState::new(pi_fixture_document());
+    let (state, _) =
+        crate::viewer::input::reduce(state, crate::viewer::input::ViewerMsg::ToggleHidden);
+    let (mut state, _) =
+        crate::viewer::input::reduce(state, crate::viewer::input::ViewerMsg::JumpToStart);
+    let _ = render_to_buffer(&mut state, &theme, 90, 60);
+    let buf = render_to_buffer(&mut state, &theme, 90, 60);
+    insta::assert_snapshot!(snapshot_string(&buf));
 }

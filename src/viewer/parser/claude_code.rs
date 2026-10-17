@@ -178,6 +178,7 @@ fn emit_turns_for_record(record: &Record, aborted: bool, out: &mut Vec<Transcrip
                 body,
                 timestamp: parse_timestamp(record.timestamp.as_deref()),
                 aborted: false,
+                hidden: false,
             });
         }
         return;
@@ -202,6 +203,7 @@ fn emit_turns_for_record(record: &Record, aborted: bool, out: &mut Vec<Transcrip
                     body,
                     timestamp,
                     aborted,
+                    hidden: false,
                 });
             }
         }
@@ -256,6 +258,7 @@ fn turn_from_block(
                 body,
                 timestamp,
                 aborted: false,
+                hidden: false,
             })
         }
         "thinking" => {
@@ -279,6 +282,7 @@ fn turn_from_block(
                 body,
                 timestamp,
                 aborted: false,
+                hidden: false,
             })
         }
         "tool_use" => {
@@ -299,6 +303,7 @@ fn turn_from_block(
                 body,
                 timestamp,
                 aborted: false,
+                hidden: false,
             })
         }
         "tool_result" => {
@@ -309,6 +314,7 @@ fn turn_from_block(
                 body,
                 timestamp,
                 aborted: false,
+                hidden: false,
             })
         }
         // Unknown block types (future schema additions, OAuth
