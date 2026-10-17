@@ -43,6 +43,7 @@ How providers read local state, and how agent sessions get attributed to tmux pa
 | [0046](0046-process-tree-pane-linker.md) | Process-Tree Pane Linker | Accepted |
 | [0048](0048-codex-state-and-log-readers.md) | Codex State and Log Readers for Mux Attribution | Accepted (amended) |
 | [0049](0049-opencode-hook-plugin-distribution.md) | OpenCode Hook Plugin Distribution | Accepted |
+| [0121](0121-pi-harness-support.md) | Pi Harness Support | Accepted |
 | [0060](0060-agent-deck-multi-repo-workspace-adapter.md) | Agent-Deck Multi-Repo Workspace Adapter | Accepted |
 | [0066](0066-agent-deck-instance-titles-as-workspace-names.md) | Agent-Deck Instance Titles As Workspace Display Names | Accepted |
 | [0088](0088-provider-descriptor-registry.md) | Provider Descriptor Registry | Accepted |
