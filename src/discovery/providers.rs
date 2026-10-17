@@ -94,6 +94,9 @@ pub const OPENCODE: &str = "opencode";
 /// Aider harness state directory scan.
 pub const AIDER: &str = "aider";
 
+/// Pi harness session directory scan.
+pub const PI: &str = "pi";
+
 // ---------------------------------------------------------------
 // Mutator passes (always-rerun, no class assigned)
 // ---------------------------------------------------------------
@@ -243,6 +246,10 @@ pub const REGISTRY: &[ProviderDescriptor] = &[
         kind: ProviderKind::Heavy(ProviderClass::Harness),
     },
     ProviderDescriptor {
+        key: PI,
+        kind: ProviderKind::Heavy(ProviderClass::Harness),
+    },
+    ProviderDescriptor {
         key: CROSS_LINK,
         kind: ProviderKind::Mutator,
     },
@@ -307,6 +314,7 @@ mod tests {
         assert_eq!(CODEX, "codex");
         assert_eq!(OPENCODE, "opencode");
         assert_eq!(AIDER, "aider");
+        assert_eq!(PI, "pi");
         assert_eq!(CROSS_LINK, "cross_link");
         assert_eq!(CODEX_LOG, "codex_log");
         assert_eq!(HOOK_SIDECAR, "hook_sidecar");
@@ -332,6 +340,7 @@ mod tests {
             CODEX,
             OPENCODE,
             AIDER,
+            PI,
             CROSS_LINK,
             CODEX_LOG,
             HOOK_SIDECAR,

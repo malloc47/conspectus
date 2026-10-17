@@ -29,7 +29,7 @@
 use std::fs;
 
 use conspectus::discovery::harness::{
-    ClaudeCodeAdapter, CodexAdapter, HarnessAdapter, OpenCodeAdapter,
+    ClaudeCodeAdapter, CodexAdapter, HarnessAdapter, OpenCodeAdapter, PiAdapter,
 };
 use conspectus::discovery::tmux::parse_list_sessions;
 use conspectus::discovery::{DiscoveryContext, GraphFragment};
@@ -571,4 +571,32 @@ fn opencode_sqlite_sessions_discovered_from_fixture() {
             })
     });
     assert!(has_parent, "forked session should emit parent session link");
+}
+
+// ── Pi fixtures ─────────────────────────────────────────────────────────
+
+/// Discover the Pi fixture at `layout` and render its sessions as JSON with
+/// the checkout-specific fixture path replaced.
+fn pi_fixture_sessions(layout: &str) -> String {
+    let root = fixture_path("pi").join(layout);
+    let context =
+        DiscoveryContext::default().with_harness_state_root(PiAdapter::new().harness_key(), &root);
+    let fragment = PiAdapter::new()
+        .discover(&context)
+        .expect("discover pi sessions");
+    let rendered = serde_json::to_string_pretty(&fragment.nodes).expect("render");
+    rendered.replace(
+        fixture_path("pi").to_str().expect("utf8 fixture path"),
+        "<fixtures>/pi",
+    )
+}
+
+#[test]
+fn pi_grouped_layout_sessions_snapshot() {
+    insta::assert_snapshot!(pi_fixture_sessions("grouped"));
+}
+
+#[test]
+fn pi_flat_layout_sessions_snapshot() {
+    insta::assert_snapshot!(pi_fixture_sessions("flat"));
 }

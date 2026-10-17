@@ -11,7 +11,7 @@ use conspectus::discovery::harness::codex::HARNESS_KEY as CODEX_HARNESS_KEY;
 use conspectus::discovery::harness::fixtures::{CodexSessionRecord, HarnessFixture};
 use conspectus::discovery::tmux::{FakeTmux, UnavailableReason};
 use conspectus::discovery::{LocalDiscoveryConfig, discover_local_with};
-use conspectus::model::GraphNode;
+use conspectus::model::{GraphNode, NodeId};
 use conspectus::output::render_graph_json;
 use conspectus::resolve::resolve_snapshot;
 
@@ -101,6 +101,61 @@ fn observed_session_cwd_backfills_git_context_outside_scan_roots() {
         "observed cwd should backfill the branch node: {:#?}",
         snapshot.nodes
     );
+}
+
+#[test]
+fn pi_sessions_sharing_an_encoded_cwd_directory_land_in_their_own_repos() {
+    // `<tmp>/my-repo` and `<tmp>/my/repo` encode to the same Pi session
+    // directory; the header cwd keeps each session with its own checkout.
+    let fixture = ScenarioFixture::new();
+    fixture.init_repo("my-repo");
+    fixture.init_repo("my/repo");
+    let dashed = fixture.path().join("my-repo");
+    let nested = fixture.path().join("my/repo");
+    let state_root = fixture.path().join("pi-sessions");
+    let encoded = format!(
+        "--{}--",
+        dashed
+            .to_str()
+            .expect("utf8")
+            .trim_start_matches('/')
+            .replace('/', "-")
+    );
+    let dir = state_root.join(encoded);
+    fs::create_dir_all(&dir).expect("pi session dir");
+    for (id, cwd) in [("pi-dashed", &dashed), ("pi-nested", &nested)] {
+        let header = serde_json::json!({
+            "type": "session",
+            "version": 3,
+            "id": id,
+            "timestamp": "2026-10-16T10:00:00.000Z",
+            "cwd": cwd,
+        });
+        fs::write(
+            dir.join(format!("2026-10-16T10-00-00-000Z_{id}.jsonl")),
+            format!("{header}\n"),
+        )
+        .expect("write pi session");
+    }
+
+    let config = LocalDiscoveryConfig::empty()
+        .with_harness_state_root(conspectus::discovery::harness::pi::HARNESS_KEY, &state_root);
+    let snapshot =
+        resolve_snapshot(discover_local_with([fixture.path()], config).expect("discover"));
+
+    for (id, root) in [("pi-dashed", &dashed), ("pi-nested", &nested)] {
+        let checkouts: Vec<String> = snapshot
+            .resolved_relationships
+            .iter()
+            .filter(|rel| matches!(&rel.source, NodeId::AgentSession(s) if s.session_key == id))
+            .map(|rel| rel.target.to_string())
+            .collect();
+        let expected = path_str(root);
+        assert!(
+            checkouts.iter().any(|target| target.ends_with(expected)),
+            "{id} should resolve to {expected}: {checkouts:#?}",
+        );
+    }
 }
 
 #[test]

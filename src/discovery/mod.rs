@@ -889,6 +889,9 @@ impl LocalDiscoveryConfig {
         if let Some(path) = env_state_root("CONSPECTUS_OPENCODE_STATE", ".local/share/opencode") {
             harness_state_roots.insert(harness::opencode::HARNESS_KEY.to_string(), path);
         }
+        if let Some(path) = harness::pi::state_root_from_env() {
+            harness_state_roots.insert(harness::pi::HARNESS_KEY.to_string(), path);
+        }
 
         let mut mux_backends: Vec<Box<dyn tmux::MuxBackend>> = Vec::new();
         if env::var_os("CONSPECTUS_DISABLE_TMUX").is_none() {

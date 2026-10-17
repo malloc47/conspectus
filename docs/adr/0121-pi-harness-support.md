@@ -93,8 +93,8 @@ the adapter falls back to the `<session-id>` part of a
   header fields from each line. It skips `message` bodies and retains no
   content. A `/name` title is operator-authored identity, like other
   harnesses' titles.
-- **Tier 2:** the last-message preview (ADR 0023: the last user message,
-  whitespace collapsed, capped at 200 characters) and the native
+- **Tier 2:** the last-message preview (ADR 0023: the most recent user or
+  assistant text, whitespace collapsed, capped at 200 characters) and the native
   transcript parser (ADR 0052). Both are sanctioned Tier 2 readers on the
   same terms as the opencode and codex previews and the existing parsers.
 - The hook extension's payload (decision 6) carries ids, paths, and the

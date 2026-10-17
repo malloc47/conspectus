@@ -1,0 +1,7 @@
+{"type":"session","version":3,"id":"0199f0a2-7c1e-7d3a-9b2e-5f1c2a3b4c5d","timestamp":"2026-10-16T10:00:00.000Z","cwd":"/work/my-repo"}
+{"type":"model_change","id":"a1","parentId":null,"timestamp":"2026-10-16T10:00:00.100Z","provider":"anthropic","modelId":"claude-sonnet-5"}
+{"type":"message","id":"a2","parentId":"a1","timestamp":"2026-10-16T10:00:05.000Z","message":{"role":"user","content":[{"type":"text","text":"Make the session_info parser keep the latest name"}],"timestamp":1792144805000}}
+{"type":"session_info","id":"a3","parentId":"a2","timestamp":"2026-10-16T10:00:06.000Z","name":"first name"}
+{"type":"message","id":"a4","parentId":"a3","timestamp":"2026-10-16T10:01:00.000Z","message":{"role":"assistant","content":[{"type":"thinking","thinking":"Check the parser first."},{"type":"text","text":"Done. The parser now keeps   the latest\nname."},{"type":"toolCall","id":"t1","name":"bash","arguments":{"command":"cargo test"}}],"timestamp":1792144860000}}
+{"type":"message","id":"a5","parentId":"a4","timestamp":"2026-10-16T10:01:30.000Z","message":{"role":"toolResult","toolCallId":"t1","toolName":"bash","content":[{"type":"text","text":"test result: ok"}],"isError":false,"timestamp":1792144890000}}
+{"type":"session_info","id":"a6","parentId":"a5","timestamp":"2026-10-16T10:02:00.000Z","name":"Keep latest session name"}

@@ -1,0 +1,3 @@
+{"type":"session","id":"0196f0b1-1111-7222-8333-944455566677","timestamp":"2026-04-01T09:00:00.000Z","cwd":"/work/my/repo"}
+{"type":"message","timestamp":"2026-04-01T09:00:10.000Z","message":{"role":"user","content":"Legacy linear session in a directory whose name collides","timestamp":1775034010000}}
+{"type":"message","timestamp":"2026-04-01T09:00:20.000Z","message":{"role":"assistant","content":[{"type":"text","text":"Legacy reply"}],"timestamp":1775034020000}}

@@ -1,0 +1,4 @@
+{"type":"session","version":3,"id":"my-custom.id","timestamp":"2026-10-16T13:00:00.000Z","cwd":"/work/flat"}
+{"type":"message","id":"d1","parentId":null,"timestamp":"2026-10-16T13:00:05.000Z","message":{"role":"system","content":"You are Pi."}}
+{"type":"message","id":"d2","parentId":"d1","timestamp":"2026-10-16T13:00:10.000Z","message":{"role":"user","content":[{"type":"text","text":"Flat layout with a custom session id"}],"timestamp":1792155610000}}
+{"type":"custom","id":"d3","parentId":"d2","timestamp":"2026-10-16T13:00:11.000Z","customType":"todo","data":{"items":[]}}

@@ -34,11 +34,13 @@ pub mod codex;
 #[doc(hidden)]
 pub mod fixtures;
 pub mod opencode;
+pub mod pi;
 
 pub use aider::AiderAdapter;
 pub use claude_code::ClaudeCodeAdapter;
 pub use codex::CodexAdapter;
 pub use opencode::OpenCodeAdapter;
+pub use pi::PiAdapter;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct HarnessLaunchOption {
@@ -394,6 +396,7 @@ static REGISTERED_ADAPTERS: std::sync::LazyLock<Vec<Box<dyn HarnessAdapter>>> =
             Box::new(CodexAdapter::new()),
             Box::new(OpenCodeAdapter::new()),
             Box::new(AiderAdapter::new()),
+            Box::new(PiAdapter::new()),
         ]
     });
 
@@ -637,6 +640,7 @@ impl HarnessDiscovery {
             .with_adapter(ClaudeCodeAdapter::new())
             .with_adapter(OpenCodeAdapter::new())
             .with_adapter(AiderAdapter::new())
+            .with_adapter(PiAdapter::new())
     }
 }
 
@@ -666,7 +670,7 @@ mod registry_tests {
         // This order is the TUI filter menu order.
         assert_eq!(
             harness_keys(),
-            &["claude-code", "codex", "opencode", "aider"]
+            &["claude-code", "codex", "opencode", "aider", "pi"]
         );
     }
 
@@ -682,6 +686,7 @@ mod registry_tests {
         assert_eq!(display_label_for("codex"), "codex");
         assert_eq!(display_label_for("opencode"), "opencode");
         assert_eq!(display_label_for("aider"), "aider");
+        assert_eq!(display_label_for("pi"), "pi");
     }
 
     #[test]
