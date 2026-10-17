@@ -177,7 +177,7 @@ starts with a marker line naming Conspectus as its owner, and:
   carries the marker. It refuses to overwrite a file at that path
   without the marker.
 - `hook status` reports `installed`, `outdated` (marked but different from
-  the embedded copy), `absent`, or `foreign` (unmarked).
+  the embedded copy), `not-installed`, or `foreign` (unmarked).
 - `hook remove` deletes the file only when it carries the marker. It
   never touches other files in the extensions directory.
 

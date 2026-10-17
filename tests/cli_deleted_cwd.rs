@@ -28,6 +28,9 @@ fn from_deleted_dir(home: &Path) -> Command {
         .env_remove("CONSPECTUS_CODEX_STATE")
         .env_remove("CONSPECTUS_CLAUDE_CODE_STATE")
         .env_remove("CONSPECTUS_OPENCODE_STATE")
+        .env_remove("CONSPECTUS_PI_STATE")
+        .env_remove("PI_CODING_AGENT_DIR")
+        .env_remove("PI_CODING_AGENT_SESSION_DIR")
         .env_remove("TMUX")
         .env_remove("TMUX_PANE");
     cmd

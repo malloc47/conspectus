@@ -123,17 +123,14 @@ pub fn apply_hook_records(
 }
 
 /// Maps the mux's active pane command back to the harness key when the
-/// command unambiguously identifies one. Conservative: ambiguous commands
-/// (e.g. `node`, `shell`) return `None` so hook records aren't filtered on
-/// weak evidence.
+/// command is exactly one of a registered harness's executable names.
+/// Conservative: anything else (e.g. `node`, `shell`) returns `None` so
+/// hook records aren't filtered on weak evidence.
 fn pane_running_harness(mux: &MuxSessionNode) -> Option<&'static str> {
-    match mux.active_pane_command.as_deref()? {
-        "claude" => Some("claude-code"),
-        "codex" | "codex-rs" => Some("codex"),
-        "opencode" => Some("opencode"),
-        "aider" => Some("aider"),
-        _ => None,
-    }
+    use crate::discovery::harness::{HarnessAdapter, adapters_for_program};
+    adapters_for_program(mux.active_pane_command.as_deref()?)
+        .next()
+        .map(HarnessAdapter::harness_key)
 }
 
 fn demote_weaker_mux_links(snapshot: &mut GraphSnapshot, current_link: &GraphLink) {
@@ -218,6 +215,11 @@ fn inferred_state_scope(record: &HookRecord) -> String {
     {
         return scope;
     }
+    if record.harness_key == crate::discovery::harness::pi::HARNESS_KEY
+        && let Some(path) = record.transcript_path.as_deref()
+    {
+        return pi_state_scope(Path::new(path));
+    }
 
     record
         .transcript_path
@@ -232,6 +234,24 @@ fn inferred_state_scope(record: &HookRecord) -> String {
             || "hook_sidecar".to_string(),
             |path| path.to_string_lossy().to_string(),
         )
+}
+
+/// Pi's session root for a session file: the directory above a grouped
+/// `--<cwd>--` directory, or the file's own directory in the flat layout.
+fn pi_state_scope(session_file: &Path) -> String {
+    let Some(dir) = session_file.parent() else {
+        return "hook_sidecar".to_string();
+    };
+    let grouped = dir
+        .file_name()
+        .and_then(|name| name.to_str())
+        .is_some_and(|name| name.len() > 4 && name.starts_with("--") && name.ends_with("--"));
+    let root = if grouped {
+        dir.parent().unwrap_or(dir)
+    } else {
+        dir
+    };
+    root.to_string_lossy().to_string()
 }
 
 fn path_ancestor_named(path: &str, name: &str) -> Option<String> {

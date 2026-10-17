@@ -147,7 +147,7 @@ act = ["SIGTERM", "0"]
 # `$SCRATCH` is the directory the dev scenario builder was given.
 # Creating the missing parents of an allowed path is allowed too.
 [writes]
-adr = ["0012", "0014", "0028", "0057", "0058", "0083", "0087"]
+adr = ["0012", "0014", "0028", "0057", "0058", "0083", "0087", "0121"]
 # Terminals and the null device, in every context.
 always = ["/dev/null", "/dev/tty", "/dev/pts/*"]
 # Rebuildable caches and observations.
@@ -165,18 +165,24 @@ act = [
     "$PROJECT/..conspectus.toml.tmp-*",
 ]
 # Hook installation into harness configuration: ADR 0087 category 5,
-# from ADR 0028.
-# `--scope project` writes the same files under the project, and
-# `CODEX_HOME` moves the Codex one.
+# from ADR 0028. Pi's hook is one Conspectus-owned extension file that
+# `hook remove pi` deletes (ADR 0121).
+# `--scope project` writes the same files under the project,
+# `CODEX_HOME` moves the Codex one, and `PI_CODING_AGENT_DIR` moves the
+# Pi one.
 hook = [
     "$HOME/.claude/settings.json",
     "$HOME/.claude/settings.json.tmp",
     "$HOME/.codex/config.toml",
     "$HOME/.codex/config.toml.tmp",
+    "$HOME/.pi/agent/extensions/conspectus-hook.ts",
+    "$HOME/.pi/agent/extensions/conspectus-hook.ts.tmp",
     "$PROJECT/.claude/settings.json",
     "$PROJECT/.claude/settings.json.tmp",
     "$PROJECT/.codex/config.toml",
     "$PROJECT/.codex/config.toml.tmp",
+    "$PROJECT/.pi/extensions/conspectus-hook.ts",
+    "$PROJECT/.pi/extensions/conspectus-hook.ts.tmp",
 ]
 dev = ["$SCRATCH/**"]
 

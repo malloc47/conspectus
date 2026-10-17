@@ -20,6 +20,9 @@ fn isolated_env_args(cmd: &mut Command, home: &Path, data_home: &Path) {
     cmd.env_remove("CONSPECTUS_CODEX_STATE");
     cmd.env_remove("CONSPECTUS_CLAUDE_CODE_STATE");
     cmd.env_remove("CONSPECTUS_OPENCODE_STATE");
+    cmd.env_remove("CONSPECTUS_PI_STATE");
+    cmd.env_remove("PI_CODING_AGENT_DIR");
+    cmd.env_remove("PI_CODING_AGENT_SESSION_DIR");
 }
 
 /// Apply env-var isolation including a fresh `XDG_RUNTIME_DIR`

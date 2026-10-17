@@ -1085,6 +1085,25 @@ fn the_built_binary_stays_inside_the_capability_manifest() {
             &["hook", "remove", "codex"],
             project,
         ),
+        world.run(&strace, "hook-init-pi", &["hook", "init", "pi"], project),
+        world.run(
+            &strace,
+            "hook-init-pi-project",
+            &["hook", "init", "pi", "--scope", "project"],
+            project,
+        ),
+        world.run(
+            &strace,
+            "hook-remove-pi",
+            &["hook", "remove", "pi"],
+            project,
+        ),
+        world.run(
+            &strace,
+            "hook-remove-pi-project",
+            &["hook", "remove", "pi", "--scope", "project"],
+            project,
+        ),
     ];
     record(
         &Scenario {
