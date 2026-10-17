@@ -8,8 +8,9 @@
 //!
 //! - `~`-shortened paths are produced upstream in the row tree and
 //!   detail view-models; the renderer just lays them out.
-//! - Mux glyphs `◉` / `◐` / `◯` with color carrying the primary
-//!   signal (green attached / yellow ambiguous / dim un-muxed).
+//! - Mux glyphs `◉` / `◯` with color carrying the primary signal
+//!   (green attached / dim not attached); mux ambiguity surfaces as
+//!   `⚠` on group rows and the header.
 //! - Header reports `updated Ns ago · N agents · M mux`; the
 //!   freshness slot uses [`format_recency`] over
 //!   `App::loaded_at_epoch`.

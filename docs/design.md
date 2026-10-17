@@ -309,8 +309,8 @@ Expected cardinality and sparsity:
   zero, one, or many linked agent sessions per mux.
 - Mux runtime state is distinct from agent-session linkage. For tmux, mux
   discovery records whether the session currently has an attached tmux client;
-  TUI mux-row glyphs use that client state, while linked agent sessions render
-  as row text or child rows.
+  TUI mux-row glyphs show only that client state (ADR 0120), while linked agent
+  sessions render as row text or child rows.
 - A branch can have zero, one, or many PR records. The table view should prefer
   open PRs and report ambiguity rather than collapsing it silently.
 

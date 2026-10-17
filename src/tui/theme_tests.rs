@@ -41,7 +41,6 @@ fn default_preserves_inline_literals() {
     assert_eq!(theme.harness_color("aider"), Color::Red);
     assert_eq!(theme.harness_color("unknown-harness"), Color::White);
     assert_eq!(theme.mux_attached, Color::Green);
-    assert_eq!(theme.mux_ambiguous, Color::Yellow);
     assert_eq!(theme.mux_unmuxed, Modifier::DIM);
     assert_eq!(
         theme.selection_active,

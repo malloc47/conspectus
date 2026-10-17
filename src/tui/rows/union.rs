@@ -114,7 +114,6 @@ pub fn build_union_tree(inputs: UnionBuildInputs<'_>) -> RowTree {
                             .effective_cwd()
                             .map(|cwd| shorten_home(cwd, inputs.home)),
                         attached_count: mux.attached_count,
-                        ambiguous_count: 0,
                         recency: format_recency(now, mux.node.activity_epoch),
                         activity_epoch: mux.node.activity_epoch,
                         created_epoch: mux.node.created_epoch,

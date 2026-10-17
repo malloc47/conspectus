@@ -108,6 +108,36 @@ fn help_body_includes_node_kind_icon_legend() {
 }
 
 #[test]
+fn help_body_includes_mux_state_legend() {
+    let theme = Theme::default();
+    let texts: Vec<String> = body_lines(&theme).iter().map(line_text).collect();
+    let header = texts
+        .iter()
+        .position(|t| t == "Mux state")
+        .expect("mux state section header");
+    let legend = &texts[header + 1..];
+    for (glyph, name) in [
+        ("◉", "Attached"),
+        ("◯", "Not attached"),
+        ("◌", "Pin placeholder"),
+        ("?", "Unknown"),
+        ("⚠", "Ambiguous mux"),
+    ] {
+        assert!(
+            legend
+                .iter()
+                .any(|line| line.starts_with(&format!("  {glyph} {name}"))),
+            "expected mux legend row for {glyph} {name} in:\n{}",
+            legend.join("\n"),
+        );
+    }
+    assert!(
+        texts.iter().all(|t| !t.contains('◐')),
+        "the retired ambiguity glyph must not reappear in help",
+    );
+}
+
+#[test]
 fn esc_closes_help_overlay() {
     let mut state = HelpOverlayState::new();
     assert_eq!(state.handle_key(key(KeyCode::Esc)), HelpOutcome::Close);

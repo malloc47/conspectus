@@ -54,7 +54,6 @@ pub struct Theme {
 
     // ---- mux state ----------------------------------------------------------
     pub mux_attached: Color,
-    pub mux_ambiguous: Color,
     pub mux_unmuxed: Modifier,
 
     // ---- selection / focus --------------------------------------------------
@@ -213,7 +212,6 @@ impl Default for Theme {
             recency_cold: StyleSpec::modifier(Modifier::DIM),
 
             mux_attached: Color::Green,
-            mux_ambiguous: Color::Yellow,
             mux_unmuxed: Modifier::DIM,
 
             selection_active: Modifier::REVERSED.union(Modifier::BOLD),
@@ -357,10 +355,6 @@ impl Theme {
             },
             ThemeKey {
                 name: "mux_attached",
-                kind: Color,
-            },
-            ThemeKey {
-                name: "mux_ambiguous",
                 kind: Color,
             },
             ThemeKey {
@@ -510,7 +504,6 @@ impl Theme {
             }
             "harness_unknown" => self.harness_unknown = color,
             "mux_attached" => self.mux_attached = color,
-            "mux_ambiguous" => self.mux_ambiguous = color,
             "panel_focus_accent" => self.panel_focus_accent = color,
             "cwd_mark" => self.cwd_mark = color,
             "link_id" => self.link_id = color,

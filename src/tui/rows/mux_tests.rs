@@ -314,11 +314,17 @@ fn mux_view_counts_same_target_evidence_as_one_attachment() {
         panic!("expected mux row");
     };
     assert_eq!(row.attached_count, 1);
+    assert_eq!(tree.rows.len(), 1);
+    let candidate_counts: Vec<usize> = collect_attached_agents(&snapshot)
+        .values()
+        .flatten()
+        .map(|agent| agent.candidate_count)
+        .collect();
     assert_eq!(
-        row.ambiguous_count, 0,
+        candidate_counts,
+        vec![1],
         "multiple evidence links to the same mux target are corroboration, not ambiguity",
     );
-    assert_eq!(tree.rows.len(), 1);
 }
 
 #[test]

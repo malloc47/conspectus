@@ -2,7 +2,7 @@
 
 ## Status
 
-Accepted
+Accepted. Extended by ADR 0120, which drops `◐` from mux rows too.
 
 ## Context
 

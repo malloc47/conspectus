@@ -237,13 +237,14 @@ impl AgentSessionRow {
     }
 }
 
-/// Which mux indicator glyph the renderer should draw for an agent
-/// session row.
+/// An agent session's mux attachment state. The row chip renders only
+/// `◉` (attached) or `◯` (everything else); filters, header counts,
+/// and the detail pane read the full three-way distinction.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum MuxIndicator {
     /// `◉`. One resolver-preferred mux candidate, no competitors.
     Attached,
-    /// `◐`. ≥ 2 active `LinkedToMux` candidates; the resolver picked
+    /// ≥ 2 active `LinkedToMux` candidates; the resolver picked
     /// one but alternatives exist. Carries the total candidate count
     /// (preferred + competing) so the status bar and right panel can
     /// surface "N candidates" without re-walking the graph.
@@ -272,7 +273,6 @@ pub struct MuxSessionRow {
     pub client_attached: Option<bool>,
     pub cwd_display: Option<String>,
     pub attached_count: usize,
-    pub ambiguous_count: usize,
     pub recency: Option<String>,
     pub activity_epoch: Option<i64>,
     /// `session_created` epoch, carried so the mux view can order by

@@ -429,6 +429,10 @@ fn body_lines_for_width(theme: &Theme, width: Option<usize>) -> Vec<Line<'static
     push_icon_legend(&mut lines, theme);
     blank(&mut lines);
 
+    self::section(&mut lines, "Mux state");
+    push_mux_state_legend(&mut lines, theme);
+    blank(&mut lines);
+
     lines.push(line![
         span!(theme.placeholder; "j/k or PgDn/PgUp to scroll · Esc, q, or ? to close.")
     ]);
@@ -487,6 +491,56 @@ fn push_icon_legend(lines: &mut Vec<Line<'static>>, theme: &Theme) {
             span!(Style::default().fg(color); "{} ", style.glyph),
             span!(Modifier::BOLD; "{:<16}", node_kind_display_name(kind)),
             node_kind_help_blurb(kind).to_string(),
+        ]);
+    }
+}
+
+/// Legend for the glyphs in the row tree's attach-state column plus the
+/// ambiguity warning on group rows and the header. The same glyph can
+/// answer a different question on a session row than on a mux row, so
+/// the blurb names both where they differ.
+fn push_mux_state_legend(lines: &mut Vec<Line<'static>>, theme: &Theme) {
+    let bold_warning = Style::default()
+        .fg(theme.warning)
+        .add_modifier(Modifier::BOLD);
+    let entries: [(&str, Style, &str, &str); 5] = [
+        (
+            "◉",
+            Style::default().fg(theme.mux_attached),
+            "Attached",
+            "session: one mux, Enter/a attaches · mux: client attached",
+        ),
+        (
+            "◯",
+            Style::default().add_modifier(theme.mux_unmuxed),
+            "Not attached",
+            "session: no mux, or several candidates · mux: no client",
+        ),
+        (
+            "◌",
+            Style::default().fg(theme.pin_placeholder),
+            "Pin placeholder",
+            "pinned mux session that isn't running",
+        ),
+        (
+            "?",
+            Style::default().add_modifier(theme.placeholder),
+            "Unknown",
+            "mux backend didn't report whether a client is attached",
+        ),
+        (
+            "⚠",
+            bold_warning,
+            "Ambiguous mux",
+            "sessions with several candidate muxes; the detail pane lists them",
+        ),
+    ];
+    for (glyph, style, name, blurb) in entries {
+        lines.push(line![
+            "  ",
+            span!(style; "{glyph} "),
+            span!(Modifier::BOLD; "{name:<16}"),
+            blurb.to_string(),
         ]);
     }
 }

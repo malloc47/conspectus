@@ -918,11 +918,6 @@ fn theme_sections(theme: &Theme) -> Vec<ThemeSection> {
                     "◉ glyph + attached counts",
                 ),
                 (
-                    "mux_ambiguous",
-                    ThemeSample::Color(theme.mux_ambiguous),
-                    "◐ glyph + ambiguous counts",
-                ),
-                (
                     "mux_unmuxed",
                     ThemeSample::Modifier(theme.mux_unmuxed),
                     "◯ glyph (modifier-only by default for terminal compat)",

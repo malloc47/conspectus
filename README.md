@@ -82,7 +82,7 @@ Discovery never decides anything. Every plausible relationship becomes a
 discovered, discovered, convention, or cached), a confidence level, and how
 fresh it is. A resolver then picks the preferred relationship for each slot
 and keeps the losing candidates. Ambiguity and conflicts stay visible as data
-(the `◐` and `⚠` glyphs, and `conspectus graph --explain` score breakdowns)
+(the `⚠` glyph and `conspectus graph --explain` score breakdowns)
 instead of being silently collapsed.
 ([ADR 0002](docs/adr/0002-graphlink-and-typed-relationships.md),
 [0006](docs/adr/0006-session-mux-link-candidates.md),

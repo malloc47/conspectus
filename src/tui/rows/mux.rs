@@ -125,10 +125,6 @@ pub fn build_mux_tree(inputs: MuxBuildInputs<'_>) -> RowTree {
             .filter_map(|agent| agent.last_active_epoch)
             .max();
         let activity_epoch = latest_epoch(mux.node.activity_epoch, latest_agent_epoch);
-        let ambiguous_count = visible_attached
-            .iter()
-            .filter(|agent| agent.candidate_count > 1)
-            .count();
         let node_id = NodeId::MuxSession(mux.id.clone());
         let single_session_preview = if visible_attached.len() == 1 {
             visible_attached[0]
@@ -148,7 +144,6 @@ pub fn build_mux_tree(inputs: MuxBuildInputs<'_>) -> RowTree {
             client_attached: mux.node.client_attached,
             cwd_display: cwd.as_deref().map(|cwd| shorten_home(cwd, inputs.home)),
             attached_count,
-            ambiguous_count,
             recency: format_recency(now, activity_epoch),
             activity_epoch,
             created_epoch: mux.node.created_epoch,
@@ -266,7 +261,6 @@ fn placeholder_mux_group_for_pin(pin: &PinCandidate, home: Option<&Path>) -> Mux
             client_attached: None,
             cwd_display: Some(shorten_home(&pin.cwd, home)),
             attached_count: 0,
-            ambiguous_count: 0,
             recency: None,
             activity_epoch: None,
             created_epoch: None,

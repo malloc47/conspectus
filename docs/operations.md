@@ -204,9 +204,8 @@ recency_active = "green"
 recency_recent = "yellow"
 recency_cold   = "dim"
 
-# Mux-state glyphs (◉ attached, ◐ ambiguous, ◯ un-muxed).
+# Mux-state glyphs (◉ attached, ◯ not attached or no definitive mux).
 mux_attached  = "green"
-mux_ambiguous = "yellow"
 mux_unmuxed   = "dim"
 
 # Background of the chip a mux row shows for its pane's program (`npm`,

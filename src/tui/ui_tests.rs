@@ -1870,7 +1870,6 @@ fn row_kind_glyph_span_dispatches_per_row_kind() {
         client_attached: Some(true),
         cwd_display: None,
         attached_count: 1,
-        ambiguous_count: 0,
         recency: None,
         activity_epoch: None,
         created_epoch: None,
@@ -2105,7 +2104,6 @@ fn mux_session_row_mirrors_session_column_order() {
         client_attached: Some(true),
         cwd_display: Some("~/src/conspectus".into()),
         attached_count: 1,
-        ambiguous_count: 0,
         recency: Some("3s".into()),
         activity_epoch: Some(now - 3),
         created_epoch: None,
@@ -2176,7 +2174,6 @@ fn placeholder_mux_row_renders_dotted_glyph_and_cwd_preview() {
         client_attached: None,
         cwd_display: Some("~/repo".into()),
         attached_count: 0,
-        ambiguous_count: 0,
         recency: None,
         activity_epoch: None,
         created_epoch: None,
@@ -3822,7 +3819,6 @@ fn agentless_mux_row(pane_command: Option<&str>) -> MuxSessionRow {
         client_attached: Some(false),
         cwd_display: None,
         attached_count: 0,
-        ambiguous_count: 0,
         recency: Some("1m".into()),
         activity_epoch: None,
         created_epoch: None,
@@ -3946,7 +3942,6 @@ fn mux_row_spinner_takes_the_attached_glyph_column() {
         client_attached: Some(true),
         cwd_display: None,
         attached_count: 0,
-        ambiguous_count: 0,
         recency: Some("3s".into()),
         activity_epoch: None,
         created_epoch: None,
@@ -4883,4 +4878,44 @@ fn a_first_visit_to_the_prs_view_opens_its_first_group() {
     assert_eq!(app.selection(), Some(&group));
     let visible: Vec<&RowId> = app.visible_rows().iter().map(|row| &row.id).collect();
     assert_eq!(visible.len(), 5, "the group and its four PRs: {visible:?}");
+}
+
+#[test]
+fn mux_rows_keep_pin_and_preview_columns_aligned_across_attach_states() {
+    // The attach-state column is exactly one glyph wide whatever the
+    // state, so the pin marker and preview line up down the mux list.
+    let theme = Theme::default();
+    let render = |client_attached: Option<bool>| -> String {
+        let row = MuxSessionRow {
+            client_attached,
+            pin_id: Some("build".into()),
+            agent_labels: vec!["claude".into()],
+            single_session_preview: Some("pushed to main".into()),
+            ..agentless_mux_row(None)
+        };
+        render_mux_session_spans(&row, &theme, 0, 100, None)
+            .iter()
+            .map(|s| s.content.to_string())
+            .collect()
+    };
+    let column_of = |text: &str, needle: &str| {
+        let byte = text.find(needle).expect("needle in row");
+        unicode_width::UnicodeWidthStr::width(&text[..byte])
+    };
+    let rows: Vec<String> = [Some(true), Some(false), None]
+        .into_iter()
+        .map(render)
+        .collect();
+    for row in &rows {
+        assert!(
+            !row.contains('◐'),
+            "mux rows carry no ambiguity glyph: {row}"
+        );
+        assert_eq!(column_of(row, "📌"), column_of(&rows[0], "📌"), "{row}");
+        assert_eq!(
+            column_of(row, "pushed to main"),
+            column_of(&rows[0], "pushed to main"),
+            "{row}",
+        );
+    }
 }

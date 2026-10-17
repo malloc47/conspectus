@@ -798,10 +798,6 @@ pub(super) fn render_mux_session_spans(
             }
         }
     }
-    if mux.ambiguous_count > 0 {
-        spans.push(Span::raw(" "));
-        spans.push(span!(Style::default().fg(theme.mux_ambiguous); "◐"));
-    }
     if mux.pin_id.is_some() {
         // Bound-pin marker on the mux row. Same glyph the agent-
         // session row uses (ui.rs:1027) so pin-bound muxes scan
