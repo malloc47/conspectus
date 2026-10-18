@@ -129,6 +129,7 @@ impl PinCreateState {
         spec.set_worktree_enabled(options.worktree_enabled);
         Self {
             mode: defaults.mode,
+            mux_backend: defaults.mux_backend.clone(),
             cursor: 0,
             adopt_defaults: options.adopt_defaults,
             name: TextInputState::new(" name ", name),
@@ -576,6 +577,7 @@ impl PinCreateState {
             harness,
             cwd,
             mux_name,
+            mux_backend: self.mux_backend.clone(),
             mux_socket,
             adopt_source_mux_name: self.adopt_source_mux_name(),
             launch_argv,

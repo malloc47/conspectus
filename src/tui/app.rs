@@ -1671,6 +1671,7 @@ impl App {
                         harness: target.harness,
                         cwd: target.cwd,
                         mux_name: target.mux_name,
+                        mux_backend: target.mux_backend,
                         mux_socket: target.mux_socket,
                         launch_argv: target.launch_argv,
                         store_path: target.store_path,

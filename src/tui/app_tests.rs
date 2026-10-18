@@ -3356,6 +3356,7 @@ mod reducer_effects {
             harness: "codex".to_string(),
             cwd: "/p/project".to_string(),
             mux_name: "work".to_string(),
+            mux_backend: "tmux".to_string(),
             mux_socket: None,
             adopt_source_mux_name: None,
             launch_argv: Vec::new(),
@@ -3380,6 +3381,7 @@ mod reducer_effects {
             harness: "codex".to_string(),
             cwd: "/p/project".to_string(),
             mux_name: "work-2".to_string(),
+            mux_backend: "tmux".to_string(),
             mux_socket: None,
             launch_argv: Vec::new(),
             store_path: "/tmp/.conspectus.toml".to_string(),
@@ -3723,4 +3725,42 @@ fn repeated_handoffs_accumulate_until_settled() {
         app.take_handoff_refresh_request(),
         "the second return asks again"
     );
+}
+
+#[test]
+fn pin_adopt_defaults_take_the_selected_muxs_backend() {
+    let mut snap = snapshot_session_with_mux();
+    for node in &mut snap.nodes {
+        if let crate::model::GraphNode::MuxSession(mux) = node {
+            mux.backend = "zellij".to_string();
+        }
+    }
+    let tree = crate::tui::rows::mux::build_mux_tree(crate::tui::rows::mux::MuxBuildInputs {
+        snapshot: &snap,
+        home: None,
+        now: None,
+        filter: crate::tui::RowFilter::default(),
+        grouping: crate::tui::MuxGrouping::Session,
+        sort: crate::tui::Sort::Hierarchy,
+        mux_recency: crate::tui::MuxRecency::default(),
+    });
+    let mut app = App::new(RunConfig::defaults());
+    app.update(Msg::SetData {
+        snapshot: SnapshotHandle::from_snapshot(&snap),
+        tree,
+        loaded_at_epoch: 1_700_000_000,
+        initial_selection_hint: None,
+    });
+    let mux_row_id = app
+        .visible_rows()
+        .iter()
+        .find_map(|row| match &row.kind {
+            RowKind::MuxSession(_) => Some(row.id.clone()),
+            _ => None,
+        })
+        .expect("mux row in tree");
+    app.set_selection(mux_row_id);
+
+    assert_eq!(app.pin_adopt_defaults().mux_backend, "zellij");
+    assert_eq!(app.pin_create_defaults().mux_backend, "tmux");
 }

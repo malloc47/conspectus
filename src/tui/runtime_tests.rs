@@ -1,4 +1,5 @@
 use super::*;
+use crate::pins::TMUX_MUX_BACKEND;
 use crate::tui::widgets::pins::{
     PinBindRequest, PinCreateRequest, PinCreateStore, PinEditRequest, PinRemoveRequest,
 };
@@ -274,6 +275,7 @@ fn write_pin_create_writes_project_store() {
         harness: "codex".to_string(),
         cwd: project.path().display().to_string(),
         mux_name: "ingest-mux".to_string(),
+        mux_backend: "tmux".to_string(),
         mux_socket: Some("scratch".to_string()),
         adopt_source_mux_name: None,
         launch_argv: vec!["codex".to_string(), "--resume".to_string()],
@@ -324,6 +326,7 @@ fn write_pin_create_user_store_uses_user_config_path() {
         harness: "codex".to_string(),
         cwd: project.path().display().to_string(),
         mux_name: "scratch".to_string(),
+        mux_backend: "tmux".to_string(),
         mux_socket: None,
         adopt_source_mux_name: None,
         launch_argv: Vec::new(),
@@ -355,6 +358,7 @@ fn pin_adopt_mux_rename_renames_source_mux_to_requested_mux_name() {
         harness: "codex".to_string(),
         cwd: "/workspace/project".to_string(),
         mux_name: "agentdeck-conspectus-2".to_string(),
+        mux_backend: "tmux".to_string(),
         mux_socket: Some("scratch".to_string()),
         adopt_source_mux_name: Some("agentdeck_conspectus".to_string()),
         launch_argv: Vec::new(),
@@ -387,6 +391,7 @@ fn pin_adopt_mux_rename_skips_when_source_already_matches_target() {
         harness: "codex".to_string(),
         cwd: "/workspace/project".to_string(),
         mux_name: "work".to_string(),
+        mux_backend: "tmux".to_string(),
         mux_socket: None,
         adopt_source_mux_name: Some("work".to_string()),
         launch_argv: Vec::new(),
@@ -439,6 +444,7 @@ fn write_pin_edit_updates_id_display_mux_and_launch() {
         harness: "codex".to_string(),
         cwd: project.path().display().to_string(),
         mux_name: "daily".to_string(),
+        mux_backend: "tmux".to_string(),
         mux_socket: Some("scratch".to_string()),
         launch_argv: vec!["codex".to_string(), "--resume".to_string()],
         store_path: path.display().to_string(),
@@ -488,6 +494,7 @@ fn write_pin_edit_rejects_duplicate_id_without_mutating() {
         harness: "codex".to_string(),
         cwd: project.path().display().to_string(),
         mux_name: "ingest".to_string(),
+        mux_backend: "tmux".to_string(),
         mux_socket: None,
         launch_argv: Vec::new(),
         store_path: path.display().to_string(),
@@ -530,6 +537,7 @@ fn write_pin_edit_rejects_duplicate_mux_without_mutating() {
         harness: "codex".to_string(),
         cwd: project.path().display().to_string(),
         mux_name: "scratch".to_string(),
+        mux_backend: "tmux".to_string(),
         mux_socket: None,
         launch_argv: Vec::new(),
         store_path: path.display().to_string(),
@@ -2005,4 +2013,95 @@ fn pins_overlay_commits_reach_the_sink_each_loop_mode_supplies() {
         fixture.status_message(),
         Some(pin_placeholder_status("edit").as_str())
     );
+}
+
+fn seeded_pin(path: &std::path::Path, id: &str, backend: &str, mux: &str) {
+    crate::pins::upsert_pin_entry(
+        path,
+        PinEntry {
+            id: id.to_string(),
+            display_name: id.to_string(),
+            harness: "codex".to_string(),
+            cwd: path.parent().expect("dir").display().to_string(),
+            mux: PinMux {
+                backend: backend.to_string(),
+                name: mux.to_string(),
+                socket_name: None,
+            },
+            launch: None,
+            worktree: None,
+            reason: None,
+        },
+    )
+    .expect("seed pin");
+}
+
+fn edit_request(path: &std::path::Path, id: &str, backend: &str, mux: &str) -> PinEditRequest {
+    PinEditRequest {
+        original_id: id.to_string(),
+        id: id.to_string(),
+        display_name: id.to_string(),
+        harness: "codex".to_string(),
+        cwd: path.parent().expect("dir").display().to_string(),
+        mux_name: mux.to_string(),
+        mux_backend: backend.to_string(),
+        mux_socket: None,
+        launch_argv: Vec::new(),
+        store_path: path.display().to_string(),
+    }
+}
+
+#[test]
+fn write_pin_edit_keeps_a_zellij_pin_on_zellij() {
+    let project = tempfile::TempDir::new().expect("project");
+    let path = project.path().join(".conspectus.toml");
+    seeded_pin(&path, "notes", "zellij", "notes");
+
+    write_pin_edit(&edit_request(&path, "notes", "zellij", "notes-2")).expect("edit pin");
+
+    let written = fs::read_to_string(&path).expect("config");
+    assert!(written.contains(r#"backend = "zellij""#), "{written}");
+    assert!(!written.contains(r#"backend = "tmux""#), "{written}");
+}
+
+#[test]
+fn write_pin_edit_checks_mux_collisions_within_the_same_backend() {
+    let project = tempfile::TempDir::new().expect("project");
+    let path = project.path().join(".conspectus.toml");
+    seeded_pin(&path, "a", "zellij", "za");
+    seeded_pin(&path, "b", "zellij", "shared");
+    seeded_pin(&path, "c", "tmux", "other");
+
+    let err = write_pin_edit(&edit_request(&path, "a", "zellij", "shared"))
+        .expect_err("same backend, same mux name collides");
+    assert!(err.to_string().contains("already used by pin `b`"), "{err}");
+
+    write_pin_edit(&edit_request(&path, "c", "tmux", "shared"))
+        .expect("a tmux pin may share a name with a zellij pin");
+}
+
+#[test]
+fn pin_adopt_mux_rename_never_renames_a_zellij_mux_through_tmux() {
+    let tmux = crate::discovery::tmux::FakeTmux::with_sessions("");
+    let request = PinCreateRequest {
+        id: "notes-pin".to_string(),
+        display_name: "notes-pin".to_string(),
+        harness: "codex".to_string(),
+        cwd: "/workspace/project".to_string(),
+        mux_name: "notes-pin".to_string(),
+        mux_backend: "zellij".to_string(),
+        mux_socket: None,
+        adopt_source_mux_name: Some("notes".to_string()),
+        launch_argv: Vec::new(),
+        worktree_branch: None,
+        store: PinCreateStore::Project,
+    };
+
+    let status = apply_pin_adopt_mux_rename(&tmux, &request).expect("rename status");
+
+    assert!(
+        tmux.rename_calls().is_empty(),
+        "tmux must not see a zellij rename"
+    );
+    assert!(status.contains("failed"), "{status}");
 }

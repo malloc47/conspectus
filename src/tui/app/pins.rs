@@ -108,6 +108,7 @@ impl App {
                     harness: pin.harness.clone(),
                     cwd: pin.cwd.clone(),
                     mux_name: pin.mux.name.clone(),
+                    mux_backend: pin.mux.backend.clone(),
                     mux_socket: pin.mux.socket_name.clone(),
                     launch_argv: pin.launch_argv.clone().unwrap_or_default(),
                     store_path: pin.store_path.clone(),
@@ -161,6 +162,7 @@ impl App {
                     cwd,
                     mux_name: series.name,
                     mode: PinCreateMode::NewVariation,
+                    ..PinCreateDefaults::default()
                 }
             }
             RowKind::Group(group) => group
@@ -192,6 +194,7 @@ impl App {
                     cwd: self.mux_cwd_for(&mux.mux).unwrap_or_default(),
                     mux_name,
                     mode: PinCreateMode::NewVariation,
+                    ..PinCreateDefaults::default()
                 }
             }
             _ => PinCreateDefaults::default(),
@@ -208,6 +211,7 @@ impl App {
             defaults.id = pin_id_candidate(&mux.native_id);
             defaults.display_name = mux.native_id.clone();
             defaults.mux_name = mux.native_id.clone();
+            defaults.mux_backend = mux.backend.clone();
         }
         defaults
     }

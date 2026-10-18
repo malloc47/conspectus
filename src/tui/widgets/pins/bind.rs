@@ -129,6 +129,7 @@ impl PinRebindState {
             harness: self.target.harness.clone(),
             cwd: self.target.cwd.clone(),
             mux_name,
+            mux_backend: self.target.mux_backend.clone(),
             mux_socket,
             launch_argv: self.target.launch_argv.clone(),
             store_path: self.target.store_path.clone(),

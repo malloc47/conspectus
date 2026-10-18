@@ -36,6 +36,7 @@ fn pin_target() -> PinMutationTarget {
         harness: "codex".to_string(),
         cwd: "/workspace/project".to_string(),
         mux_name: "ingest-mux".to_string(),
+        mux_backend: "tmux".to_string(),
         mux_socket: Some("scratch".to_string()),
         launch_argv: vec!["codex".to_string(), "--resume".to_string()],
         store_path: "/workspace/project/.conspectus.toml".to_string(),
@@ -106,6 +107,7 @@ fn enter_on_create_opens_create_editor() {
             harness: "codex".to_string(),
             cwd: "/workspace/project".to_string(),
             mux_name: "ingest".to_string(),
+            mux_backend: "tmux".to_string(),
             ..PinCreateDefaults::default()
         },
         ..PinsContext::default()
@@ -125,6 +127,7 @@ fn create_form_starts_adopt_checked_then_auto_unchecks_on_first_name_edit() {
             harness: "codex".to_string(),
             cwd: "/workspace/project".to_string(),
             mux_name: "agentdeck-conspectus-2".to_string(),
+            mux_backend: "tmux".to_string(),
             mode: PinCreateMode::NewVariation,
         },
         pin_adopt_defaults: Some(PinCreateDefaults {
@@ -133,6 +136,7 @@ fn create_form_starts_adopt_checked_then_auto_unchecks_on_first_name_edit() {
             harness: "codex".to_string(),
             cwd: "/workspace/project".to_string(),
             mux_name: "agentdeck_conspectus".to_string(),
+            mux_backend: "tmux".to_string(),
             mode: PinCreateMode::AdoptSelected,
         }),
         known_mux_names: vec!["agentdeck_conspectus".to_string()],
@@ -223,6 +227,7 @@ fn direct_adopt_opens_create_form_with_adopt_selected_and_toggleable() {
         harness: "codex".to_string(),
         cwd: "/workspace/project".to_string(),
         mux_name: "work-2".to_string(),
+        mux_backend: "tmux".to_string(),
         mode: PinCreateMode::NewVariation,
     };
     let adopt = PinCreateDefaults {
@@ -231,6 +236,7 @@ fn direct_adopt_opens_create_form_with_adopt_selected_and_toggleable() {
         harness: "codex".to_string(),
         cwd: "/workspace/project".to_string(),
         mux_name: "work".to_string(),
+        mux_backend: "tmux".to_string(),
         mode: PinCreateMode::AdoptSelected,
     };
     let mut state = PinsOverlayState::open_with_adopt_options(
@@ -277,6 +283,7 @@ fn create_form_backtab_moves_to_previous_field() {
             harness: "codex".to_string(),
             cwd: "/workspace/project".to_string(),
             mux_name: "scratch".to_string(),
+            mux_backend: "tmux".to_string(),
             mode: PinCreateMode::NewVariation,
         },
         None,
@@ -303,6 +310,7 @@ fn create_form_worktree_toggle_produces_worktree_branch() {
             harness: "codex".to_string(),
             cwd: "/workspace/project".to_string(),
             mux_name: "feature".to_string(),
+            mux_backend: "tmux".to_string(),
             mode: PinCreateMode::NewVariation,
         },
         None,
@@ -341,6 +349,7 @@ fn create_form_forwards_home_and_end_to_active_text_field() {
             harness: "codex".to_string(),
             cwd: "/workspace/project".to_string(),
             mux_name: "scratch".to_string(),
+            mux_backend: "tmux".to_string(),
             mode: PinCreateMode::NewVariation,
         },
         None,
@@ -383,6 +392,7 @@ fn create_form_cycles_known_harness_choices_from_harness_field() {
             harness: "codex".to_string(),
             cwd: "/workspace/project".to_string(),
             mux_name: "scratch".to_string(),
+            mux_backend: "tmux".to_string(),
             mode: PinCreateMode::NewVariation,
         },
         None,
@@ -409,6 +419,7 @@ fn create_form_harness_choices_keep_stable_column_when_focused() {
             harness: "codex".to_string(),
             cwd: "/workspace/project".to_string(),
             mux_name: "scratch".to_string(),
+            mux_backend: "tmux".to_string(),
             mode: PinCreateMode::NewVariation,
         },
         None,
@@ -431,6 +442,7 @@ fn create_form_launch_preview_uses_default_when_override_is_blank() {
             harness: "codex".to_string(),
             cwd: "/workspace/project".to_string(),
             mux_name: "scratch".to_string(),
+            mux_backend: "tmux".to_string(),
             mode: PinCreateMode::NewVariation,
         },
         None,
@@ -453,6 +465,7 @@ fn create_form_launch_preview_uses_shell_parsed_override() {
             harness: "codex".to_string(),
             cwd: "/workspace/project".to_string(),
             mux_name: "scratch".to_string(),
+            mux_backend: "tmux".to_string(),
             mode: PinCreateMode::NewVariation,
         },
         None,
@@ -493,6 +506,7 @@ fn create_form_launch_option_toggles_codex_skip_permissions_into_argv() {
             harness: "codex".to_string(),
             cwd: "/workspace/project".to_string(),
             mux_name: "scratch".to_string(),
+            mux_backend: "tmux".to_string(),
             mode: PinCreateMode::NewVariation,
         },
         None,
@@ -531,6 +545,7 @@ fn create_form_launch_option_toggles_claude_skip_permissions_into_argv() {
             harness: "claude-code".to_string(),
             cwd: "/workspace/project".to_string(),
             mux_name: "scratch".to_string(),
+            mux_backend: "tmux".to_string(),
             mode: PinCreateMode::NewVariation,
         },
         None,
@@ -556,6 +571,7 @@ fn create_form_launch_option_preserves_manual_argv_tokens() {
             harness: "codex".to_string(),
             cwd: "/workspace/project".to_string(),
             mux_name: "scratch".to_string(),
+            mux_backend: "tmux".to_string(),
             mode: PinCreateMode::NewVariation,
         },
         None,
@@ -585,6 +601,7 @@ fn create_form_switching_harness_removes_incompatible_option_flags() {
             harness: "codex".to_string(),
             cwd: "/workspace/project".to_string(),
             mux_name: "scratch".to_string(),
+            mux_backend: "tmux".to_string(),
             mode: PinCreateMode::NewVariation,
         },
         None,
@@ -613,6 +630,7 @@ fn create_form_clearing_launch_override_returns_to_default() {
             harness: "codex".to_string(),
             cwd: "/workspace/project".to_string(),
             mux_name: "scratch".to_string(),
+            mux_backend: "tmux".to_string(),
             mode: PinCreateMode::NewVariation,
         },
         None,
@@ -648,6 +666,7 @@ fn create_form_requires_launch_override_for_unknown_harness() {
             harness: "custom-harness".to_string(),
             cwd: "/workspace/project".to_string(),
             mux_name: "scratch".to_string(),
+            mux_backend: "tmux".to_string(),
             mode: PinCreateMode::NewVariation,
         },
         None,
@@ -677,6 +696,7 @@ fn create_form_cwd_tab_completes_ranked_path_candidate() {
             harness: "codex".to_string(),
             cwd: String::new(),
             mux_name: "scratch".to_string(),
+            mux_backend: "tmux".to_string(),
             mode: PinCreateMode::NewVariation,
         },
         PinCreateOptions {
@@ -729,6 +749,7 @@ fn create_form_cwd_tab_without_completion_stays_on_cwd_field() {
             harness: "codex".to_string(),
             cwd: "/no/completion".to_string(),
             mux_name: "scratch".to_string(),
+            mux_backend: "tmux".to_string(),
             mode: PinCreateMode::NewVariation,
         },
         PinCreateOptions::default(),
@@ -753,6 +774,7 @@ fn create_form_expands_tilde_cwd_in_request() {
             harness: "codex".to_string(),
             cwd: "~/src/conspectus".to_string(),
             mux_name: "scratch".to_string(),
+            mux_backend: "tmux".to_string(),
             mode: PinCreateMode::NewVariation,
         },
         PinCreateOptions::default(),
@@ -773,6 +795,7 @@ fn create_form_rejects_existing_pin_id() {
             harness: "codex".to_string(),
             cwd: "/workspace/project".to_string(),
             mux_name: "ingest-new".to_string(),
+            mux_backend: "tmux".to_string(),
             mode: PinCreateMode::NewVariation,
         },
         None,
@@ -798,6 +821,7 @@ fn create_form_rejects_non_adopt_mux_name_collisions() {
             harness: "codex".to_string(),
             cwd: "/workspace/project".to_string(),
             mux_name: "ingest".to_string(),
+            mux_backend: "tmux".to_string(),
             mode: PinCreateMode::NewVariation,
         },
         None,
@@ -825,6 +849,7 @@ fn create_form_rejects_adopt_when_selected_row_is_already_pinned() {
             harness: "codex".to_string(),
             cwd: "/workspace/project".to_string(),
             mux_name: "ingest".to_string(),
+            mux_backend: "tmux".to_string(),
             mode: PinCreateMode::AdoptSelected,
         },
         Some(PinCreateDefaults {
@@ -833,6 +858,7 @@ fn create_form_rejects_adopt_when_selected_row_is_already_pinned() {
             harness: "codex".to_string(),
             cwd: "/workspace/project".to_string(),
             mux_name: "ingest".to_string(),
+            mux_backend: "tmux".to_string(),
             mode: PinCreateMode::AdoptSelected,
         }),
         vec![],
@@ -859,6 +885,7 @@ fn create_form_reports_invalid_launch_argv_quotes() {
             harness: "codex".to_string(),
             cwd: "/workspace/project".to_string(),
             mux_name: "scratch".to_string(),
+            mux_backend: "tmux".to_string(),
             mode: PinCreateMode::NewVariation,
         },
         None,
@@ -888,6 +915,7 @@ fn create_form_allows_freeform_harness_with_warning() {
             harness: "codex".to_string(),
             cwd: "/workspace/project".to_string(),
             mux_name: "scratch".to_string(),
+            mux_backend: "tmux".to_string(),
             mode: PinCreateMode::NewVariation,
         },
         None,
@@ -932,6 +960,7 @@ fn create_form_auto_checks_adopt_for_known_mux_name_collisions() {
             harness: "codex".to_string(),
             cwd: "/workspace/project".to_string(),
             mux_name: "scratch".to_string(),
+            mux_backend: "tmux".to_string(),
             mode: PinCreateMode::NewVariation,
         },
         pin_adopt_defaults: Some(PinCreateDefaults {
@@ -940,6 +969,7 @@ fn create_form_auto_checks_adopt_for_known_mux_name_collisions() {
             harness: "codex".to_string(),
             cwd: "/workspace/project".to_string(),
             mux_name: "selected".to_string(),
+            mux_backend: "tmux".to_string(),
             mode: PinCreateMode::AdoptSelected,
         }),
         known_mux_names: vec!["selected".to_string(), "busy-mux".to_string()],
@@ -1016,6 +1046,7 @@ fn create_form_collision_tracking_uses_mux_name_not_primary_name() {
             harness: "codex".to_string(),
             cwd: "/workspace/project".to_string(),
             mux_name: "scratch".to_string(),
+            mux_backend: "tmux".to_string(),
             mode: PinCreateMode::NewVariation,
         },
         pin_adopt_defaults: Some(PinCreateDefaults {
@@ -1024,6 +1055,7 @@ fn create_form_collision_tracking_uses_mux_name_not_primary_name() {
             harness: "codex".to_string(),
             cwd: "/workspace/project".to_string(),
             mux_name: "selected".to_string(),
+            mux_backend: "tmux".to_string(),
             mode: PinCreateMode::AdoptSelected,
         }),
         known_mux_names: vec!["live-mux".to_string()],
@@ -1125,6 +1157,7 @@ fn edit_form_confirms_target_fields() {
             harness: "codex".to_string(),
             cwd: "/workspace/project".to_string(),
             mux_name: "ingest-mux".to_string(),
+            mux_backend: "tmux".to_string(),
             mux_socket: Some("scratch".to_string()),
             launch_argv: vec!["codex".to_string(), "--resume".to_string()],
             store_path: "/workspace/project/.conspectus.toml".to_string(),
@@ -1250,6 +1283,7 @@ fn edit_form_toggles_launch_options_via_arrow() {
             harness: "codex".to_string(),
             cwd: "/workspace/project".to_string(),
             mux_name: "ingest-mux".to_string(),
+            mux_backend: "tmux".to_string(),
             mux_socket: None,
             launch_argv: vec!["codex".to_string()],
             store_path: "/workspace/project/.conspectus.toml".to_string(),
@@ -1398,6 +1432,7 @@ fn create_form_confirms_defaults() {
             harness: "codex".to_string(),
             cwd: "/workspace/project".to_string(),
             mux_name: "ingest-mux".to_string(),
+            mux_backend: "tmux".to_string(),
             ..PinCreateDefaults::default()
         },
         ..PinsContext::default()
@@ -1414,6 +1449,7 @@ fn create_form_confirms_defaults() {
             harness: "codex".to_string(),
             cwd: "/workspace/project".to_string(),
             mux_name: "ingest-mux".to_string(),
+            mux_backend: "tmux".to_string(),
             mux_socket: None,
             adopt_source_mux_name: None,
             launch_argv: Vec::new(),
@@ -1533,6 +1569,7 @@ fn create_form_keeps_validation_errors_open() {
             id: "ingest".to_string(),
             display_name: "Ingest".to_string(),
             mux_name: "ingest".to_string(),
+            mux_backend: "tmux".to_string(),
             ..PinCreateDefaults::default()
         },
         ..PinsContext::default()
@@ -1561,6 +1598,7 @@ fn open_with_create_skips_menu() {
         harness: "codex".to_string(),
         cwd: "/workspace/project".to_string(),
         mux_name: "ingest-mux".to_string(),
+        mux_backend: "tmux".to_string(),
         ..PinCreateDefaults::default()
     };
     let state = PinsOverlayState::open_with_create(defaults);
@@ -1679,4 +1717,24 @@ fn bind_picker_selected_last_option_scrolls_into_short_body() {
     assert!(offset > 0, "short bind picker should scroll");
     assert!(cursor_line >= offset as usize);
     assert!(cursor_line < offset as usize + inner_height);
+}
+
+#[test]
+fn edit_and_rebind_forms_keep_the_pins_mux_backend() {
+    let mut target = pin_target();
+    target.mux_backend = "zellij".to_string();
+
+    let edit = PinEditState::new(target.clone());
+    assert_eq!(edit.request().expect("valid edit").mux_backend, "zellij");
+
+    let rebind = PinRebindState::new(target);
+    assert_eq!(
+        rebind.request().expect("valid rebind").mux_backend,
+        "zellij"
+    );
+}
+
+#[test]
+fn new_pins_default_to_tmux() {
+    assert_eq!(PinCreateDefaults::default().mux_backend, "tmux");
 }

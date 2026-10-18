@@ -82,7 +82,7 @@ pub struct PinsContext {
     pub pin_bind_options: Vec<PinBindOption>,
 }
 
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PinCreateDefaults {
     pub mode: PinCreateMode,
     pub id: String,
@@ -90,6 +90,23 @@ pub struct PinCreateDefaults {
     pub harness: String,
     pub cwd: String,
     pub mux_name: String,
+    /// The pin's `mux.backend`. Pins the TUI creates default to tmux;
+    /// adopt and edit carry the backend of the mux or pin they start from.
+    pub mux_backend: String,
+}
+
+impl Default for PinCreateDefaults {
+    fn default() -> Self {
+        Self {
+            mode: PinCreateMode::default(),
+            id: String::new(),
+            display_name: String::new(),
+            harness: String::new(),
+            cwd: String::new(),
+            mux_name: String::new(),
+            mux_backend: crate::pins::TMUX_MUX_BACKEND.to_string(),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -115,6 +132,7 @@ pub struct PinMutationTarget {
     pub harness: String,
     pub cwd: String,
     pub mux_name: String,
+    pub mux_backend: String,
     pub mux_socket: Option<String>,
     pub launch_argv: Vec<String>,
     pub store_path: String,
@@ -204,6 +222,7 @@ pub struct PinCreateRequest {
     pub harness: String,
     pub cwd: String,
     pub mux_name: String,
+    pub mux_backend: String,
     pub mux_socket: Option<String>,
     pub adopt_source_mux_name: Option<String>,
     pub launch_argv: Vec<String>,
@@ -228,6 +247,7 @@ pub struct PinEditRequest {
     pub harness: String,
     pub cwd: String,
     pub mux_name: String,
+    pub mux_backend: String,
     pub mux_socket: Option<String>,
     pub launch_argv: Vec<String>,
     pub store_path: String,
@@ -259,6 +279,7 @@ impl PinCreateStore {
 #[derive(Debug, Clone)]
 pub struct PinCreateState {
     mode: PinCreateMode,
+    mux_backend: String,
     cursor: usize,
     adopt_defaults: Option<PinCreateDefaults>,
     name: TextInputState,

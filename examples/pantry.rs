@@ -1095,6 +1095,7 @@ fn pins_mock_target() -> PinMutationTarget {
         harness: "codex".to_string(),
         cwd: "/home/user/work/ingest".to_string(),
         mux_name: "ingest-refactor".to_string(),
+        mux_backend: "tmux".to_string(),
         mux_socket: None,
         launch_argv: vec!["codex".to_string()],
         store_path: "/home/user/work/ingest/.conspectus.toml".to_string(),

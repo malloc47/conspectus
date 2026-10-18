@@ -21,7 +21,7 @@ use ratatui::layout::Rect;
 
 use crate::discovery::tmux::{MuxBackend, SystemTmux};
 use crate::model::MuxSessionId;
-use crate::pins::{PinEntry, PinLaunch, PinMux, PinStoreKind, PinWriteOutcome, TMUX_MUX_BACKEND};
+use crate::pins::{PinEntry, PinLaunch, PinMux, PinStoreKind, PinWriteOutcome};
 use crate::resolve::resolve_snapshot;
 #[cfg(test)]
 use crate::tui::View;

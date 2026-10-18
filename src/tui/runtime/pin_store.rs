@@ -143,6 +143,9 @@ pub(super) fn pin_create_success_toast(is_adopt: bool, pin_id: &str) -> String {
     }
 }
 
+/// Rename the adopted mux to the pin's mux name, through the mux's own
+/// backend. `tmux` is the loop's tmux runner, used when the adopted mux
+/// is a tmux session; any other backend gets its system runner.
 pub(super) fn apply_pin_adopt_mux_rename(
     tmux: &dyn MuxBackend,
     request: &crate::tui::widgets::pins::PinCreateRequest,
@@ -151,7 +154,19 @@ pub(super) fn apply_pin_adopt_mux_rename(
     if source == request.mux_name {
         return Some(format!("adopted existing mux `{source}`"));
     }
-    match tmux.rename_session(request.mux_socket.as_deref(), source, &request.mux_name) {
+    let other_backend;
+    let runner: &dyn MuxBackend = if request.mux_backend == tmux.backend_key() {
+        tmux
+    } else if let Some(runner) = crate::discovery::system_mux_backend(&request.mux_backend) {
+        other_backend = runner;
+        other_backend.as_ref()
+    } else {
+        return Some(format!(
+            "pin written, but mux backend `{}` has no runner to rename `{source}`",
+            request.mux_backend
+        ));
+    };
+    match runner.rename_session(request.mux_socket.as_deref(), source, &request.mux_name) {
         Ok(crate::discovery::tmux::TmuxRenameOutcome::Renamed) => Some(format!(
             "renamed adopted mux `{source}` to `{}`",
             request.mux_name
@@ -186,7 +201,7 @@ pub(super) fn write_pin_create(
         harness: request.harness.clone(),
         cwd: request.cwd.clone(),
         mux: PinMux {
-            backend: TMUX_MUX_BACKEND.to_string(),
+            backend: request.mux_backend.clone(),
             name: request.mux_name.clone(),
             socket_name: request.mux_socket.clone(),
         },
@@ -292,7 +307,7 @@ pub(super) fn write_pin_edit(
         harness: request.harness.clone(),
         cwd: request.cwd.clone(),
         mux: PinMux {
-            backend: TMUX_MUX_BACKEND.to_string(),
+            backend: request.mux_backend.clone(),
             name: request.mux_name.clone(),
             socket_name: request.mux_socket.clone(),
         },
@@ -346,7 +361,7 @@ pub(super) fn preflight_pin_edit(
             );
         }
         let entry_socket = entry.mux.socket_name.as_deref().unwrap_or("default");
-        if entry.mux.backend == TMUX_MUX_BACKEND
+        if entry.mux.backend == request.mux_backend
             && entry.mux.name == request.mux_name
             && entry_socket == requested_socket
         {
