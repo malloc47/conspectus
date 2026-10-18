@@ -4,7 +4,7 @@ title: Port the Conspectus opencode hook plugin to the 2.0 plugin API
 status: To Do
 assignee: []
 created_date: '2026-10-17 02:59'
-updated_date: '2026-10-17 03:03'
+updated_date: '2026-10-18 05:58'
 labels:
   - opencode-v2
 milestone: m-21
@@ -42,3 +42,11 @@ What the records may carry once ported depends on CSP-605 (no inherited pane con
 - [ ] #1 `just check` passes, or `git diff --check` for docs-only changes
 - [ ] #2 Docs and ADRs are updated when behavior, architecture, or workflow change
 <!-- DOD:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+Scope update from the CSP-602 spike (ADR 0125):
+- 2.x plugins are `{id, setup(ctx)}` from npm `@opencode/plugin`, with separate `server` and `tui` entrypoints. Only the `tui` entrypoint sees the pane, so the port is a TUI plugin that forwards the routed session's lifecycle and route changes; a `server` entrypoint would only produce pane-less records.
+- Local install is `"plugins": [{"package": "<dir>"}]` in opencode.jsonc (`opencode plugin add` takes only npm/Git specifiers). The host resolves `<dir>/server`, then `<dir>/index`, and `<dir>/tui`, so the 2.x build must live in a directory without the 1.x entrypoint.
+<!-- SECTION:NOTES:END -->

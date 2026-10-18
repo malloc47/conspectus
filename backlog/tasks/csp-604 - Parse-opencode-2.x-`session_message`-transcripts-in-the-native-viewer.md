@@ -4,7 +4,7 @@ title: Parse opencode 2.x `session_message` transcripts in the native viewer
 status: To Do
 assignee: []
 created_date: '2026-10-17 02:58'
-updated_date: '2026-10-17 03:03'
+updated_date: '2026-10-18 05:57'
 labels:
   - opencode-v2
 milestone: m-21
@@ -42,3 +42,13 @@ Per the operator's viewer preference, the default rendering should match what op
 - [ ] #1 `just check` passes, or `git diff --check` for docs-only changes
 - [ ] #2 Docs and ADRs are updated when behavior, architecture, or workflow change
 <!-- DOD:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+Scope update from the CSP-602 spike (ADR 0125):
+- Verified shapes: `user` (`text`), `assistant` (`content` items `text` / `reasoning` / `tool`), `idle` (`outcome` succeeded / failed / interrupted), `system` (`text`, injected by migration). Tool items: `id`, `name`, `state.status` completed (`input`, `content[]` of `{type: text, text}`) or error (`input`, `error.message`).
+- Schema-only shapes (from `@opencode/schema` 2.0.32, not reproduced): `synthetic`, `skill`, `shell`, `compaction` (running/completed/failed with `summary`), `model-switched`, `agent-switched`, `location-switched`.
+- The 2.x abort signal is an `idle` row with outcome `interrupted`, not an assistant `MessageAbortedError`.
+- Session cwd comes from `session_v2.directory`.
+<!-- SECTION:NOTES:END -->

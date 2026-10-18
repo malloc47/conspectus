@@ -196,3 +196,4 @@ How the project is built, tested, tracked, and shipped, including the agent-orie
 | [0070](0070-showcase-scenario.md) | Showcase Scenario For Comprehensive Functionality Exercise | Accepted |
 | [0100](0100-comments-carry-rationale-not-backlog-ids.md) | Comments Carry Rationale, Not Backlog IDs | Accepted |
 | [0124](0124-sibling-test-files.md) | Large Unit-Test Modules Live In Sibling Files | Accepted |
+| [0125](0125-opencode-2-reference-findings.md) | OpenCode 2.x Reference Findings | Accepted |

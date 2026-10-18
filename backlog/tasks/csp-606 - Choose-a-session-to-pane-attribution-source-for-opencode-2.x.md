@@ -4,7 +4,7 @@ title: Choose a session-to-pane attribution source for opencode 2.x
 status: To Do
 assignee: []
 created_date: '2026-10-17 02:59'
-updated_date: '2026-10-17 03:03'
+updated_date: '2026-10-18 05:58'
 labels:
   - opencode-v2
 milestone: m-21
@@ -43,3 +43,11 @@ The V2 server API is new (`@opencode/client`, with `Service.ensure()` autodiscov
 - [ ] #1 `just check` passes, or `git diff --check` for docs-only changes
 - [ ] #2 Docs and ADRs are updated when behavior, architecture, or workflow change
 <!-- DOD:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+Scope update from the CSP-602 spike (ADR 0125):
+- The V2 server API has no read-only client-to-session mapping. `GET /api/session/active` lists only sessions with a running turn; `/api/event` carries no client identity; `POST /api/session/{id}/view` is a write. `latest/tui/tabs.json` is shared by every client. TUI clients hold no opencode.db fds, and their argv never follows in-app session switches.
+- A 2.x TUI plugin runs inside each client process with that pane's `TMUX`/`TMUX_PANE`, and `ctx.ui.router.current()` gives the client's current session. That is the replacement attribution source: hook records written from the TUI entrypoint keep the existing hook rank. CSP-221's server adapter stays closed.
+<!-- SECTION:NOTES:END -->

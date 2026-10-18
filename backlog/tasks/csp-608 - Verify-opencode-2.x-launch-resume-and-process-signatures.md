@@ -4,7 +4,7 @@ title: 'Verify opencode 2.x launch, resume, and process signatures'
 status: To Do
 assignee: []
 created_date: '2026-10-17 02:59'
-updated_date: '2026-10-17 03:03'
+updated_date: '2026-10-18 05:58'
 labels:
   - opencode-v2
 milestone: m-21
@@ -41,3 +41,13 @@ Several opencode assumptions sit outside the storage layer, and 2.0's single bac
 - [ ] #1 `just check` passes, or `git diff --check` for docs-only changes
 - [ ] #2 Docs and ADRs are updated when behavior, architecture, or workflow change
 <!-- DOD:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+Scope update from the CSP-602 spike (ADR 0125):
+- Launch (`opencode`) and resume (`opencode --session <id>`) argv are unchanged in 2.x; capabilities.toml needs no change.
+- `--session <unknown id>` opens an empty TUI whose first prompt creates the session under that exact id, so ADR 0103's failed-start fallback no longer fires for opencode 2.x.
+- The service starts as a child of the first TUI (so it sits in that pane's process tree until the TUI exits) with argv `opencode serve --service`; classify `serve` (and stdio-driven `acp`) as background.
+- 2.x subagents and shell tools run in the service, so there is no 2.x subagent process to classify. A 2.x TUI client is a plain `opencode` process in its pane, so `mux_hosts_harness` sees it.
+<!-- SECTION:NOTES:END -->

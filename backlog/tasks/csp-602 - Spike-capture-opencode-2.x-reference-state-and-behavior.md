@@ -1,10 +1,11 @@
 ---
 id: CSP-602
 title: 'Spike: capture opencode 2.x reference state and behavior'
-status: To Do
-assignee: []
+status: Done
+assignee:
+  - '@claude'
 created_date: '2026-10-17 02:58'
-updated_date: '2026-10-17 03:03'
+updated_date: '2026-10-18 05:58'
 labels:
   - opencode-v2
 milestone: m-21
@@ -37,14 +38,28 @@ The machine this was scoped on runs opencode 1.18.32. Do not upgrade the operato
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 Findings are written down in an ADR under `docs/adr/` (or a dated doc it cites), covering storage, migration, CLI, process model, plugin context, and server API, each item marked verified or unverified
-- [ ] #2 Sanitized fixture databases exist for a fresh 2.x install and for a 1.x database migrated to 2.x, small enough to commit as test fixtures
-- [ ] #3 The opencode version(s) inspected are recorded
-- [ ] #4 Dependent opencode-v2 tasks are updated wherever a finding changes their scope
+- [x] #1 Findings are written down in an ADR under `docs/adr/` (or a dated doc it cites), covering storage, migration, CLI, process model, plugin context, and server API, each item marked verified or unverified
+- [x] #2 Sanitized fixture databases exist for a fresh 2.x install and for a 1.x database migrated to 2.x, small enough to commit as test fixtures
+- [x] #3 The opencode version(s) inspected are recorded
+- [x] #4 Dependent opencode-v2 tasks are updated wherever a finding changes their scope
 <!-- AC:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
-- [ ] #1 `just check` passes, or `git diff --check` for docs-only changes
-- [ ] #2 Docs and ADRs are updated when behavior, architecture, or workflow change
+- [x] #1 `just check` passes, or `git diff --check` for docs-only changes
+- [x] #2 Docs and ADRs are updated when behavior, architecture, or workflow change
 <!-- DOD:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+Sandbox: opencode 2.0.32 from the npm `@opencode/cli-linux-x64` tarball (integrity checked, interpreter patched for NixOS) and the operator's 1.18.32 nix build, each run under scratch HOME/XDG_* dirs against a local mock OpenAI-compatible model. tmux probes used a private tmux server. A probe plugin with server and tui entrypoints logged pid, TMUX_PANE, router state, and events from both sides.
+Operator state check: the real opencode.db still has no session_v2 table or 2.x migrations, and ~/.config/opencode has no service.json.
+Unverified (recorded in the ADR): model-switch and /compact runs hung in the sandbox, so those message shapes come from @opencode/schema only; the 1.x `task` subagent run hung as well.
+<!-- SECTION:NOTES:END -->
+
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+Captured opencode 2.x reference behavior in a sandbox and recorded it in ADR 0125, with each finding marked verified or unverified: storage (session_v2, session_message shapes), migration (same-id copy, 1.x tables left stale), CLI (`--session` unchanged, creates unknown ids), process model (shared `opencode serve --service` inherits the first client's TMUX; TUIs hold no DB fds), plugins (tui entrypoint runs in the pane with the client's current session), and server API (no client-to-session mapping). Added sanitized SQL fixtures for a fresh 2.x and a migrated 1.x database, and appended scope updates to CSP-603..608.
+<!-- SECTION:FINAL_SUMMARY:END -->
