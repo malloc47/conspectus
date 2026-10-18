@@ -400,7 +400,7 @@ impl LoopMode for LiveMode {
                     "controls: ↑/↓ move · Enter pick · Esc close".to_string(),
                 )));
             }
-            Some(Action::ControlsOverlayKey(key)) => handle_controls_overlay_key(app, config, key),
+            Some(Action::ControlsOverlayKey(key)) => handle_controls_overlay_key(app, key),
             Some(Action::OpenPins) => {
                 app.open_pins_overlay();
                 app.update(Msg::SetStatus(Some(
@@ -408,7 +408,9 @@ impl LoopMode for LiveMode {
                 )));
             }
             Some(Action::PinsOverlayKey(key)) => {
-                handle_pins_overlay_key(terminal, app, config, tmux, key);
+                route_pins_overlay_key(app, key, |app, msg| {
+                    dispatch_live(terminal, app, config, tmux, msg);
+                });
             }
             Some(Action::SwitchView(view)) => dispatch(app, Msg::SwitchView(view)),
             Some(Action::CycleView(delta)) => {
@@ -546,9 +548,7 @@ impl LoopMode for StaticMode {
                     "controls: ↑/↓ move · Enter pick · Esc close".to_string(),
                 )));
             }
-            Some(Action::ControlsOverlayKey(key)) => {
-                static_handle_controls_overlay_key(app, config, &self.snapshot, key)?;
-            }
+            Some(Action::ControlsOverlayKey(key)) => handle_controls_overlay_key(app, key),
             Some(Action::OpenPins) => {
                 app.open_pins_overlay();
                 app.update(Msg::SetStatus(Some(
@@ -556,7 +556,7 @@ impl LoopMode for StaticMode {
                 )));
             }
             Some(Action::PinsOverlayKey(key)) => {
-                static_handle_pins_overlay_key(app, config, &self.snapshot, key)?;
+                route_pins_overlay_key(app, key, static_apply_pins_msg);
             }
             Some(Action::SwitchView(view)) => dispatch(app, Msg::SwitchView(view)),
             Some(Action::CycleView(delta)) => {
@@ -903,53 +903,7 @@ fn static_event_loop(
 }
 
 #[cfg(any(test, debug_assertions, feature = "snapshot"))]
-fn static_handle_controls_overlay_key(
-    app: &mut App,
-    config: &RunConfig,
-    snapshot: &crate::model::GraphSnapshot,
-    key: ratatui::crossterm::event::KeyEvent,
-) -> Result<()> {
-    use crate::tui::widgets::controls::ControlsContext;
-    use crate::tui::{Overlay, OverlayOutcome};
-    let view = app.active_view();
-    let grouping = app.grouping();
-    let filter_snapshot = app.filter().clone();
-    let sort = app.sort();
-    let mux_recency = app.mux_recency();
-    let preview_wrap = app.preview_wrap();
-    let session_preview = app.session_preview();
-    let ctx = ControlsContext {
-        view,
-        grouping,
-        filter: &filter_snapshot,
-        sort,
-        mux_recency,
-        preview_wrap,
-        session_preview,
-    };
-    let outcome = match app.controls_overlay_mut() {
-        Some(state) => state.handle(&ctx, key),
-        None => return Ok(()),
-    };
-    let _ = (config, snapshot);
-    match outcome {
-        OverlayOutcome::Consumed => {}
-        OverlayOutcome::Close => {
-            app.close_controls_overlay();
-        }
-        OverlayOutcome::CommitAndStay(msg) => {
-            dispatch(app, *msg);
-        }
-        OverlayOutcome::Commit(msg) => {
-            app.close_controls_overlay();
-            dispatch(app, *msg);
-        }
-    }
-    Ok(())
-}
-
-#[cfg(any(test, debug_assertions, feature = "snapshot"))]
-fn static_apply_pins_msg(app: &mut App, msg: Msg) -> Result<()> {
+fn static_apply_pins_msg(app: &mut App, msg: Msg) {
     // Scenario TUI keeps every mutating pin action off. Anything
     // that would write TOML or spawn a subprocess gets replaced
     // with a status hint; harmless status/placeholder Msgs pass
@@ -968,7 +922,6 @@ fn static_apply_pins_msg(app: &mut App, msg: Msg) -> Result<()> {
             app.update(other);
         }
     }
-    Ok(())
 }
 
 #[cfg(any(test, debug_assertions, feature = "snapshot"))]

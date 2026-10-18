@@ -1970,3 +1970,38 @@ fn attach_return_entry_checks_pane_status_through_the_targets_backend() {
         entry.summary
     );
 }
+
+#[test]
+fn pins_overlay_commits_reach_the_sink_each_loop_mode_supplies() {
+    use crate::tui::widgets::pins::pin_placeholder_status;
+    use ratatui::crossterm::event::KeyEvent;
+
+    let keys = [KeyCode::Down, KeyCode::Down, KeyCode::Enter].map(KeyEvent::from);
+    let expected = Msg::SetStatus(Some(pin_placeholder_status("edit")));
+
+    // Live mode hands commits to `dispatch_live`; a recording sink
+    // stands in for it.
+    let mut live = App::new(RunConfig::defaults());
+    live.open_pins_overlay();
+    let mut delivered = Vec::new();
+    for key in keys {
+        route_pins_overlay_key(&mut live, key, |_, msg| delivered.push(msg));
+    }
+    assert_eq!(delivered, vec![expected]);
+    assert!(
+        live.pins_overlay().is_some(),
+        "CommitAndStay keeps the overlay open"
+    );
+
+    // Fixture mode routes the same keys through the same function and
+    // lets this harmless status message through to the reducer.
+    let mut fixture = App::new(RunConfig::defaults());
+    fixture.open_pins_overlay();
+    for key in keys {
+        route_pins_overlay_key(&mut fixture, key, static_apply_pins_msg);
+    }
+    assert_eq!(
+        fixture.status_message(),
+        Some(pin_placeholder_status("edit").as_str())
+    );
+}

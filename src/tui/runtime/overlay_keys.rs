@@ -322,7 +322,6 @@ pub(in crate::tui) fn handle_search_overlay_key(
 /// action to the app, re-deriving the row tree when needed.
 pub(in crate::tui) fn handle_controls_overlay_key(
     app: &mut App,
-    _config: &RunConfig,
     key: ratatui::crossterm::event::KeyEvent,
 ) {
     use crate::tui::widgets::controls::ControlsContext;
@@ -365,15 +364,14 @@ pub(in crate::tui) fn handle_controls_overlay_key(
     }
 }
 
-/// Handle the pins overlay's key event and apply the resulting
-/// action to the app. Mirrors [`handle_controls_overlay_key`] but
-/// dispatches `PinsAction` through the pin-specific write path.
-pub(super) fn handle_pins_overlay_key(
-    terminal: &mut DefaultTerminal,
+/// Handle the pins overlay's key event. A committed `Msg` goes to
+/// `deliver`, which is where the loop modes differ: the live loop
+/// reduces and executes it against the terminal, fixture mode keeps
+/// mutating pin actions off.
+pub(super) fn route_pins_overlay_key(
     app: &mut App,
-    config: &RunConfig,
-    tmux: &dyn MuxBackend,
     key: ratatui::crossterm::event::KeyEvent,
+    mut deliver: impl FnMut(&mut App, Msg),
 ) {
     use crate::tui::{Overlay, OverlayOutcome};
     let ctx = app.pins_context();
@@ -386,45 +384,12 @@ pub(super) fn handle_pins_overlay_key(
         OverlayOutcome::Close => {
             app.close_pins_overlay();
         }
-        OverlayOutcome::CommitAndStay(msg) => {
-            dispatch_live(terminal, app, config, tmux, *msg);
-        }
+        OverlayOutcome::CommitAndStay(msg) => deliver(app, *msg),
         OverlayOutcome::Commit(msg) => {
             app.close_pins_overlay();
-            dispatch_live(terminal, app, config, tmux, *msg);
+            deliver(app, *msg);
         }
     }
-}
-
-/// Scenario-mode counterpart to [`handle_pins_overlay_key`].
-#[cfg(any(test, debug_assertions, feature = "snapshot"))]
-pub(super) fn static_handle_pins_overlay_key(
-    app: &mut App,
-    config: &RunConfig,
-    snapshot: &crate::model::GraphSnapshot,
-    key: ratatui::crossterm::event::KeyEvent,
-) -> Result<()> {
-    use crate::tui::{Overlay, OverlayOutcome};
-    let ctx = app.pins_context();
-    let outcome = match app.pins_overlay_mut() {
-        Some(state) => state.handle(&ctx, key),
-        None => return Ok(()),
-    };
-    let _ = (config, snapshot);
-    match outcome {
-        OverlayOutcome::Consumed => {}
-        OverlayOutcome::Close => {
-            app.close_pins_overlay();
-        }
-        OverlayOutcome::CommitAndStay(msg) => {
-            static_apply_pins_msg(app, *msg)?;
-        }
-        OverlayOutcome::Commit(msg) => {
-            app.close_pins_overlay();
-            static_apply_pins_msg(app, *msg)?;
-        }
-    }
-    Ok(())
 }
 
 /// Translate a key event into a [`crate::viewer::input::ViewerMsg`],

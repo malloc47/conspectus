@@ -224,7 +224,7 @@ fn apply_action(app: &mut App, config: &RunConfig, action: Action) {
         Action::MessagesOverlayKey(key) => handle_messages_overlay_key(app, key),
         Action::OpenWorktreeMenu => runtime::open_worktree_menu_action(app),
         Action::OpenWorktreeCloseDown => runtime::open_worktree_close_down_action(app),
-        Action::ControlsOverlayKey(key) => handle_controls_overlay_key(app, config, key),
+        Action::ControlsOverlayKey(key) => handle_controls_overlay_key(app, key),
         Action::PinsOverlayKey(key) => handle_pins_overlay_key(app, key),
         Action::SearchOverlayKey(key) => handle_search_overlay_key(app, key),
         Action::HelpOverlayKey(key) => handle_help_overlay_key(app, key),
