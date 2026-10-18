@@ -1165,3 +1165,108 @@ fn shared_service_records_do_not_force_two_panes_sessions_onto_one_mux() {
         "beta's session must not resolve to alpha's pane"
     );
 }
+
+/// The opencode 2.x plugin's TUI entrypoint writes from each client's
+/// own pane (ADR 0126), so two clients on one repo bind separately.
+#[test]
+fn two_opencode_tui_clients_bind_their_own_sessions() {
+    let mut snapshot = two_opencode_panes();
+
+    apply_hook_records(
+        &mut snapshot,
+        vec![
+            opencode_record(
+                "ses_alpha00001",
+                Some(("alpha", "%0")),
+                1_700_000_000,
+                false,
+            ),
+            opencode_record("ses_beta000001", Some(("beta", "%1")), 1_700_000_005, false),
+        ],
+        1_700_000_010,
+    );
+    let snapshot = crate::resolve::resolve_snapshot(snapshot);
+
+    for (session, mux) in [
+        ("ses_alpha00001", "tmux:alpha"),
+        ("ses_beta000001", "tmux:beta"),
+    ] {
+        let source = NodeId::AgentSession(AgentSessionId::new("opencode", "/oc-state", session));
+        let resolved = snapshot
+            .resolved_relationships
+            .iter()
+            .find(|relationship| {
+                relationship.relation == RelationKind::LinkedToMux
+                    && relationship.source == source
+                    && relationship.selected_link_id.is_some()
+            })
+            .unwrap_or_else(|| panic!("{session} resolves to a mux"));
+        assert_eq!(
+            resolved.target,
+            NodeId::MuxSession(MuxSessionId::new(mux)),
+            "{session}"
+        );
+    }
+}
+
+/// A client outside tmux writes no tmux context; its pid is still its
+/// own, so the record only binds a pane whose process it is.
+#[test]
+fn opencode_tui_record_without_tmux_binds_only_through_its_own_pid() {
+    let mut snapshot = two_opencode_panes();
+    let mut record = opencode_record("ses_beta000001", None, 1_700_000_000, false);
+    record.pid = Some(200);
+
+    apply_hook_records(&mut snapshot, vec![record], 1_700_000_010);
+
+    let links = hook_mux_links(&snapshot);
+    assert_eq!(links.len(), 1);
+    assert_eq!(
+        links[0].target_node_id(),
+        Some(&NodeId::MuxSession(MuxSessionId::new("tmux:beta")))
+    );
+}
+
+/// The same session open in two clients yields an active candidate for
+/// each pane; the resolver, not the sidecar, decides what that means.
+#[test]
+fn one_session_open_in_two_opencode_clients_links_both_panes() {
+    let mut snapshot = two_opencode_panes();
+
+    apply_hook_records(
+        &mut snapshot,
+        vec![
+            opencode_record(
+                "ses_beta000001",
+                Some(("alpha", "%0")),
+                1_700_000_000,
+                false,
+            ),
+            opencode_record("ses_beta000001", Some(("beta", "%1")), 1_700_000_005, false),
+        ],
+        1_700_000_010,
+    );
+
+    let mut targets: Vec<_> = hook_mux_links(&snapshot)
+        .into_iter()
+        .filter(|link| link.state == LinkState::Active)
+        .filter_map(|link| link.target_node_id().map(ToString::to_string))
+        .collect();
+    targets.sort();
+    assert_eq!(
+        targets,
+        vec!["mux_session:tmux:alpha", "mux_session:tmux:beta"]
+    );
+    let _ = crate::resolve::resolve_snapshot(snapshot);
+}
+
+#[test]
+fn no_opencode_hook_records_leaves_attribution_to_other_evidence() {
+    let mut snapshot = two_opencode_panes();
+    let before = snapshot.candidate_links.len();
+
+    apply_hook_records(&mut snapshot, Vec::new(), 1_700_000_010);
+
+    assert_eq!(snapshot.candidate_links.len(), before);
+    assert!(hook_mux_links(&snapshot).is_empty());
+}

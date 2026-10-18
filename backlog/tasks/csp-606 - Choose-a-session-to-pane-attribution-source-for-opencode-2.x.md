@@ -1,10 +1,11 @@
 ---
 id: CSP-606
 title: Choose a session-to-pane attribution source for opencode 2.x
-status: To Do
-assignee: []
+status: Done
+assignee:
+  - '@claude'
 created_date: '2026-10-17 02:59'
-updated_date: '2026-10-18 05:58'
+updated_date: '2026-10-18 06:40'
 labels:
   - opencode-v2
 milestone: m-21
@@ -32,16 +33,16 @@ The V2 server API is new (`@opencode/client`, with `Service.ensure()` autodiscov
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 An ADR records the chosen 2.x attribution source, the alternatives, and its resolver rank
-- [ ] #2 Two opencode 2.x TUIs in different panes on the same repo resolve to their own sessions
-- [ ] #3 The attribution path performs no writes and does not alter opencode session state or recency
-- [ ] #4 With the service unreachable, discovery degrades to the remaining evidence without errors in the graph
+- [x] #1 An ADR records the chosen 2.x attribution source, the alternatives, and its resolver rank
+- [x] #2 Two opencode 2.x TUIs in different panes on the same repo resolve to their own sessions
+- [x] #3 The attribution path performs no writes and does not alter opencode session state or recency
+- [x] #4 With the service unreachable, discovery degrades to the remaining evidence without errors in the graph
 <!-- AC:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
-- [ ] #1 `just check` passes, or `git diff --check` for docs-only changes
-- [ ] #2 Docs and ADRs are updated when behavior, architecture, or workflow change
+- [x] #1 `just check` passes, or `git diff --check` for docs-only changes
+- [x] #2 Docs and ADRs are updated when behavior, architecture, or workflow change
 <!-- DOD:END -->
 
 ## Implementation Notes
@@ -50,4 +51,14 @@ The V2 server API is new (`@opencode/client`, with `Service.ensure()` autodiscov
 Scope update from the CSP-602 spike (ADR 0125):
 - The V2 server API has no read-only client-to-session mapping. `GET /api/session/active` lists only sessions with a running turn; `/api/event` carries no client identity; `POST /api/session/{id}/view` is a write. `latest/tui/tabs.json` is shared by every client. TUI clients hold no opencode.db fds, and their argv never follows in-app session switches.
 - A 2.x TUI plugin runs inside each client process with that pane's `TMUX`/`TMUX_PANE`, and `ctx.ui.router.current()` gives the client's current session. That is the replacement attribution source: hook records written from the TUI entrypoint keep the existing hook rank. CSP-221's server adapter stays closed.
+
+Decision (ADR 0126): the 2.x attribution source is the plugin's TUI entrypoint (CSP-607), not a server API query. CSP-602 found no read-only client-to-session mapping in the V2 API (`session.active` covers only running turns, the event stream has no client identity, `view` is a write), `tabs.json` is shared by all clients, TUIs hold no DB fds, and argv goes stale after in-app switches. The TUI entrypoint runs in the client's pane, so its records keep the existing hook rank (`hook_session_match`, above activity/cwd/launch-argv evidence per ADR 0048), and no new reader or resolver rank was needed. CSP-221 stays closed.
+Tests adapt the task's list to that source: two TUI clients in different panes resolve to their own sessions; a client with no tmux context binds only through its own pid; one session open in two clients yields an active candidate per pane for the resolver; no records (plugin absent or service unreachable) leaves the graph to other evidence; service-context records never bind (CSP-605).
+Manual check (see CSP-607 notes): two sandboxed 2.x TUIs on the same repo, one switching sessions in-app, each resolved to its own session via hook_sidecar. The entrypoint reads only client router state and never calls the server API, so querying alters no session state or recency.
 <!-- SECTION:NOTES:END -->
+
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+Chose the Conspectus plugin's opencode 2.x TUI entrypoint as the session-to-pane attribution source (ADR 0126): it runs in each client's pane, so its hook records keep hook rank and follow in-app switches without any server API query, writes, or recency changes. Sidecar and resolver tests cover two clients in different panes, a client without tmux, one session in two clients, and no records; a sandboxed two-pane check resolved each 2.x session to its own pane.
+<!-- SECTION:FINAL_SUMMARY:END -->
