@@ -1,10 +1,11 @@
 ---
 id: CSP-604
 title: Parse opencode 2.x `session_message` transcripts in the native viewer
-status: To Do
-assignee: []
+status: Done
+assignee:
+  - '@claude'
 created_date: '2026-10-17 02:58'
-updated_date: '2026-10-18 05:57'
+updated_date: '2026-10-18 06:27'
 labels:
   - opencode-v2
 milestone: m-21
@@ -30,17 +31,17 @@ Per the operator's viewer preference, the default rendering should match what op
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 `v` on a 2.x opencode session shows its user, assistant, reasoning, and tool turns in `seq` order
-- [ ] #2 Tool turns show input and output from the 2.x `state` shape, including errored tools
-- [ ] #3 Compaction and model, agent, or location switches render as compact markers or stay hidden by default, as decided in the task
-- [ ] #4 Unknown message types are skipped without failing the transcript
-- [ ] #5 1.x transcripts render as before
+- [x] #1 `v` on a 2.x opencode session shows its user, assistant, reasoning, and tool turns in `seq` order
+- [x] #2 Tool turns show input and output from the 2.x `state` shape, including errored tools
+- [x] #3 Compaction and model, agent, or location switches render as compact markers or stay hidden by default, as decided in the task
+- [x] #4 Unknown message types are skipped without failing the transcript
+- [x] #5 1.x transcripts render as before
 <!-- AC:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
-- [ ] #1 `just check` passes, or `git diff --check` for docs-only changes
-- [ ] #2 Docs and ADRs are updated when behavior, architecture, or workflow change
+- [x] #1 `just check` passes, or `git diff --check` for docs-only changes
+- [x] #2 Docs and ADRs are updated when behavior, architecture, or workflow change
 <!-- DOD:END -->
 
 ## Implementation Notes
@@ -51,4 +52,14 @@ Scope update from the CSP-602 spike (ADR 0125):
 - Schema-only shapes (from `@opencode/schema` 2.0.32, not reproduced): `synthetic`, `skill`, `shell`, `compaction` (running/completed/failed with `summary`), `model-switched`, `agent-switched`, `location-switched`.
 - The 2.x abort signal is an `idle` row with outcome `interrupted`, not an assistant `MessageAbortedError`.
 - Session cwd comes from `session_v2.directory`.
+
+Layout choice: a session with a `session_v2` row is read from `session_message` by the new `viewer::parser::opencode::v2`; otherwise the 1.x `message`/`part` reader runs unchanged. A migrated database therefore renders from `session_message`.
+Rendering decisions (module docs): user/assistant text → messages, reasoning → thinking, tools → tool use (`name: input`) + result (content text items, else `Error: <state.error.message>`); operator `shell` rows → tool use/result; completed `compaction` → compaction summary (shown, like Claude and Pi); failed compaction, `system`, `synthetic`, `skill`, and model/agent/location switches → hidden system notes behind the viewer's H toggle (ADR 0122); `idle` with outcome `interrupted` tags its exchange as aborted; unknown types and non-JSON rows are skipped.
+Manual check: the TUI snapshot against the sandboxed 2.x install lists the 2.x sessions and its preview pane renders their turns through this parser. Snapshot mode cannot open the full viewer (`skipped unsupported action: View`), so the full viewer was not compared against opencode's TUI interactively.
 <!-- SECTION:NOTES:END -->
+
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+The native viewer reads opencode 2.x transcripts from `session_message` in `seq` order: prompts, replies, reasoning, and tool calls with results from the 2.x `state` shape (including errored tools), operator shell commands, and compaction summaries; failed compactions, injected system/synthetic/skill rows, and model/agent/location switches render as hidden system notes; an interrupted idle marks its exchange aborted; unknown or malformed rows are skipped. 1.x transcripts render as before.
+<!-- SECTION:FINAL_SUMMARY:END -->

@@ -458,3 +458,383 @@ fn epoch_ms_timestamps_round_trip_to_datetime_utc() {
     // Sanity: same epoch ms reconstruct.
     assert_eq!(ts.timestamp_millis(), 1780277409324);
 }
+
+const V2_PLAIN: &str = "ses_eb28a8f36ffeMN3kZxz5Jlmcyh";
+const V2_READ: &str = "ses_eb2894c9cffe89j2s5Jid8vrD9";
+const V2_FAILED_READ: &str = "ses_eb28a64d7ffequM4bYumVFGVft";
+const V2_SUBAGENT_PARENT: &str = "ses_eb2894b15ffejUNOeroIROljGy";
+const MIGRATED_TOOL: &str = "ses_eb27ccda4ffeKjSodHyeONASJp";
+
+/// Materialize one of the sanitized opencode database dumps (ADR 0125),
+/// let `seed` add rows, and point a locator at `session_id`.
+fn db_fixture(
+    name: &str,
+    session_id: &str,
+    seed: impl Fn(&Connection),
+) -> (tempfile::TempDir, SessionLocator) {
+    let sql = std::fs::read_to_string(
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("tests/fixtures/opencode")
+            .join(name),
+    )
+    .expect("read fixture");
+    let dir = tempfile::tempdir().expect("tempdir");
+    let db_path = dir.path().join("opencode.db");
+    let conn = Connection::open(&db_path).expect("open db");
+    conn.execute_batch(&sql).expect("load fixture");
+    seed(&conn);
+    drop(conn);
+    let locator = SessionLocator {
+        harness_key: "opencode".to_string(),
+        session_key: session_id.to_string(),
+        state_root: db_path,
+    };
+    (dir, locator)
+}
+
+fn insert_v2_message(conn: &Connection, session: &str, seq: i64, kind: &str, data: &str) {
+    conn.execute(
+        "INSERT INTO session_message (id, session_id, type, seq, time_created, time_updated, data) \
+         VALUES (?1, ?2, ?3, ?4, ?5, ?5, ?6)",
+        params![
+            format!("msg_test_{seq}"),
+            session,
+            kind,
+            seq,
+            1_792_300_000_000_i64 + seq,
+            data
+        ],
+    )
+    .expect("insert session_message");
+}
+
+/// `(role, kind, hidden, aborted, body)` for every turn.
+fn v2_turns(doc: &TranscriptDocument) -> Vec<(TurnRole, TurnKind, bool, bool, &str)> {
+    doc.turns
+        .iter()
+        .map(|t| (t.role, t.kind, t.hidden, t.aborted, t.body.as_str()))
+        .collect()
+}
+
+#[test]
+fn v2_session_renders_prompts_reasoning_and_replies_in_seq_order() {
+    let (_tmp, locator) = db_fixture("v2-fresh.sql", V2_PLAIN, |_| {});
+    let doc = OpenCodeParser.read(&locator).expect("parse");
+
+    assert_eq!(doc.meta.cwd.as_deref(), Some("/home/user/proj"));
+    assert_eq!(
+        v2_turns(&doc),
+        vec![
+            (TurnRole::User, TurnKind::Message, false, false, "Say hello"),
+            (
+                TurnRole::Assistant,
+                TurnKind::Thinking,
+                false,
+                false,
+                "The user wants a short greeting."
+            ),
+            (
+                TurnRole::Assistant,
+                TurnKind::Message,
+                false,
+                false,
+                "Hello from the mock model."
+            ),
+            (
+                TurnRole::User,
+                TurnKind::Message,
+                false,
+                false,
+                "Say hello again"
+            ),
+            (
+                TurnRole::Assistant,
+                TurnKind::Thinking,
+                false,
+                false,
+                "The user wants a short greeting."
+            ),
+            (
+                TurnRole::Assistant,
+                TurnKind::Message,
+                false,
+                false,
+                "Hello from the mock model."
+            ),
+        ]
+    );
+    assert!(doc.turns[0].timestamp.is_some());
+}
+
+#[test]
+fn v2_completed_tool_shows_input_and_output() {
+    let (_tmp, locator) = db_fixture("v2-fresh.sql", V2_READ, |_| {});
+    let doc = OpenCodeParser.read(&locator).expect("parse");
+
+    let tool: Vec<_> = doc
+        .turns
+        .iter()
+        .filter(|t| matches!(t.kind, TurnKind::ToolUse | TurnKind::ToolResult))
+        .map(|t| (t.kind, t.body.as_str()))
+        .collect();
+    assert_eq!(
+        tool,
+        vec![
+            (
+                TurnKind::ToolUse,
+                r#"read: {"path":"/home/user/proj/README.md"}"#
+            ),
+            (
+                TurnKind::ToolResult,
+                "Read file /home/user/proj/README.md, lines 1-1\n1: hello from the fixture"
+            ),
+        ]
+    );
+    assert_eq!(
+        doc.turns.last().map(|t| t.body.as_str()),
+        Some("I read the file; it says hello from the fixture.")
+    );
+}
+
+#[test]
+fn v2_errored_tool_shows_the_error_as_its_result() {
+    let (_tmp, locator) = db_fixture("v2-fresh.sql", V2_FAILED_READ, |_| {});
+    let doc = OpenCodeParser.read(&locator).expect("parse");
+
+    let result = doc
+        .turns
+        .iter()
+        .find(|t| t.kind == TurnKind::ToolResult)
+        .expect("tool result");
+    assert!(
+        result
+            .body
+            .starts_with("Error: Invalid arguments for tool \"read\""),
+        "{}",
+        result.body
+    );
+}
+
+#[test]
+fn v2_subagent_tool_result_names_the_child_session() {
+    let (_tmp, locator) = db_fixture("v2-fresh.sql", V2_SUBAGENT_PARENT, |_| {});
+    let doc = OpenCodeParser.read(&locator).expect("parse");
+
+    let call = doc
+        .turns
+        .iter()
+        .find(|t| t.kind == TurnKind::ToolUse)
+        .expect("tool call");
+    assert!(call.body.starts_with("subagent: "), "{}", call.body);
+    let result = doc
+        .turns
+        .iter()
+        .find(|t| t.kind == TurnKind::ToolResult)
+        .expect("tool result");
+    assert!(
+        result
+            .body
+            .contains("<subagent sessionID=\"ses_eb2894ad9ffebJ4LlOK9UvscBN\""),
+        "{}",
+        result.body
+    );
+}
+
+#[test]
+fn v2_bookkeeping_rows_are_hidden_and_unknown_rows_skipped() {
+    let (_tmp, locator) = db_fixture("v2-fresh.sql", V2_PLAIN, |conn| {
+        let rows = [
+            (
+                "model-switched",
+                r#"{"model":{"id":"other","providerID":"mock"},"time":{"created":1}}"#,
+            ),
+            ("agent-switched", r#"{"agent":"plan","time":{"created":1}}"#),
+            (
+                "location-switched",
+                r#"{"location":{"directory":"/home/user/other"},"time":{"created":1}}"#,
+            ),
+            (
+                "system",
+                r#"{"text":"Tools changed.","time":{"created":1}}"#,
+            ),
+            (
+                "synthetic",
+                r#"{"text":"Injected context","time":{"created":1}}"#,
+            ),
+            (
+                "skill",
+                r#"{"skill":"s","name":"lint","text":"Lint rules","time":{"created":1}}"#,
+            ),
+            (
+                "compaction",
+                r#"{"status":"completed","reason":"manual","summary":"Summary so far","recent":"","time":{"created":1}}"#,
+            ),
+            (
+                "compaction",
+                r#"{"status":"failed","reason":"auto","error":{"type":"x","message":"too big"},"time":{"created":1}}"#,
+            ),
+            (
+                "compaction",
+                r#"{"status":"running","reason":"auto","summary":"","recent":"","time":{"created":1}}"#,
+            ),
+            (
+                "shell",
+                r#"{"shellID":"sh_1","command":"ls","status":"exited","exit":0,"output":"README.md\n","time":{"created":1}}"#,
+            ),
+            (
+                "future-kind",
+                r#"{"text":"nobody knows","time":{"created":1}}"#,
+            ),
+            ("assistant", "not json"),
+        ];
+        for (offset, (kind, data)) in rows.iter().enumerate() {
+            insert_v2_message(conn, V2_PLAIN, 100 + offset as i64, kind, data);
+        }
+    });
+    let doc = OpenCodeParser.read(&locator).expect("parse");
+
+    assert_eq!(
+        v2_turns(&doc)[6..],
+        [
+            (
+                TurnRole::System,
+                TurnKind::Message,
+                true,
+                false,
+                "Model switched to mock/other"
+            ),
+            (
+                TurnRole::System,
+                TurnKind::Message,
+                true,
+                false,
+                "Agent switched to plan"
+            ),
+            (
+                TurnRole::System,
+                TurnKind::Message,
+                true,
+                false,
+                "Location switched to /home/user/other"
+            ),
+            (
+                TurnRole::System,
+                TurnKind::Message,
+                true,
+                false,
+                "Tools changed."
+            ),
+            (
+                TurnRole::System,
+                TurnKind::Message,
+                true,
+                false,
+                "Injected context"
+            ),
+            (
+                TurnRole::System,
+                TurnKind::Message,
+                true,
+                false,
+                "Lint rules"
+            ),
+            (
+                TurnRole::System,
+                TurnKind::CompactionSummary,
+                false,
+                false,
+                "Summary so far"
+            ),
+            (
+                TurnRole::System,
+                TurnKind::Message,
+                true,
+                false,
+                "Compaction failed: too big"
+            ),
+            (TurnRole::User, TurnKind::ToolUse, false, false, "shell: ls"),
+            (
+                TurnRole::User,
+                TurnKind::ToolResult,
+                false,
+                false,
+                "README.md\n"
+            ),
+        ]
+    );
+}
+
+#[test]
+fn v2_interrupted_idle_marks_its_exchange_aborted() {
+    let (_tmp, locator) = db_fixture("v2-fresh.sql", V2_PLAIN, |conn| {
+        insert_v2_message(
+            conn,
+            V2_PLAIN,
+            100,
+            "user",
+            r#"{"text":"Start a long task"}"#,
+        );
+        insert_v2_message(
+            conn,
+            V2_PLAIN,
+            101,
+            "assistant",
+            r#"{"agent":"build","content":[{"type":"text","text":"Working on"}]}"#,
+        );
+        insert_v2_message(conn, V2_PLAIN, 102, "idle", r#"{"outcome":"interrupted"}"#);
+    });
+    let doc = OpenCodeParser.read(&locator).expect("parse");
+
+    let aborted: Vec<_> = doc
+        .turns
+        .iter()
+        .map(|t| (t.body.as_str(), t.aborted))
+        .collect();
+    assert_eq!(
+        aborted[4..],
+        [
+            ("The user wants a short greeting.", false),
+            ("Hello from the mock model.", false),
+            ("Start a long task", true),
+            ("Working on", true),
+        ]
+    );
+}
+
+#[test]
+fn migrated_session_reads_session_message_and_hides_the_migration_note() {
+    let (_tmp, locator) = db_fixture("v2-migrated.sql", MIGRATED_TOOL, |_| {});
+    let doc = OpenCodeParser.read(&locator).expect("parse");
+
+    let last = doc.turns.last().expect("turns");
+    assert_eq!(last.role, TurnRole::System);
+    assert!(last.hidden);
+    assert!(last.body.starts_with("The available tools have changed."));
+    assert!(
+        doc.turns
+            .iter()
+            .any(|t| t.kind == TurnKind::ToolUse && t.body.starts_with("read: "))
+    );
+}
+
+#[test]
+fn migrated_session_without_a_session_v2_row_reads_the_1x_tables() {
+    let (_tmp, locator) = db_fixture("v2-migrated.sql", MIGRATED_TOOL, |conn| {
+        conn.execute(
+            "DELETE FROM session_message WHERE session_id = ?1",
+            [MIGRATED_TOOL],
+        )
+        .expect("drop v2 messages");
+        conn.execute("DELETE FROM session_v2 WHERE id = ?1", [MIGRATED_TOOL])
+            .expect("drop v2 row");
+    });
+    let doc = OpenCodeParser.read(&locator).expect("parse");
+
+    assert_eq!(doc.meta.cwd.as_deref(), Some("/home/user/proj"));
+    assert!(doc.turns.iter().all(|t| !t.hidden));
+    assert!(
+        doc.turns
+            .iter()
+            .any(|t| t.kind == TurnKind::ToolUse && t.body.contains("filePath"))
+    );
+}

@@ -1,5 +1,9 @@
 //! OpenCode SQLite transcript reader.
 //!
+//! A session stored in opencode 2.x's `session_v2` table is read from
+//! `session_message` by [`v2`]; everything below describes the 1.x
+//! layout, used for sessions that only have a 1.x `session` row.
+//!
 //! Reads from `opencode.db` per ADR 0013. OpenCode's session
 //! storage moved to SQLite; the `session_diff/` directory is
 //! diff-only metadata and is NOT the record of truth, so this
@@ -50,6 +54,8 @@ use crate::viewer::model::{
     SessionLocator, TranscriptDocument, TranscriptMeta, TranscriptTurn, TurnKind, TurnRole,
 };
 
+mod v2;
+
 pub struct OpenCodeParser;
 
 impl HarnessParser for OpenCodeParser {
@@ -76,10 +82,17 @@ fn parse_db(db_path: &Path, session_id: &str, locator: &SessionLocator) -> Parse
     )
     .map_err(|err| ParseError::Io(err.to_string()))?;
 
-    let cwd = read_session_cwd(&conn, session_id).map_err(|err| ParseError::Io(err.to_string()))?;
-
-    let turns =
-        read_turns(&conn, session_id).map_err(|err| ParseError::Malformed(err.to_string()))?;
+    let (cwd, turns) = if let Some(cwd) = v2::session_cwd(&conn, session_id) {
+        let turns = v2::read_turns(&conn, session_id)
+            .map_err(|err| ParseError::Malformed(err.to_string()))?;
+        (cwd, turns)
+    } else {
+        let cwd =
+            read_session_cwd(&conn, session_id).map_err(|err| ParseError::Io(err.to_string()))?;
+        let turns =
+            read_turns(&conn, session_id).map_err(|err| ParseError::Malformed(err.to_string()))?;
+        (cwd, turns)
+    };
 
     Ok(TranscriptDocument {
         meta: TranscriptMeta {
