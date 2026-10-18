@@ -5,7 +5,7 @@ status: In Progress
 assignee:
   - '@claude'
 created_date: '2026-10-17 03:09'
-updated_date: '2026-10-18 00:41'
+updated_date: '2026-10-18 00:47'
 labels:
   - h-hyg
 milestone: m-11
@@ -63,4 +63,6 @@ Steps:
 
 <!-- SECTION:NOTES:BEGIN -->
 Wave A landed: overlay keymap infra (`tui::keybindings::overlay`) plus tables for menus (Controls, pins menu, mux menu), multi-select, text input, new-mux form, search, help, value modal, and messages. Footers, the rename/controls/pins status hints, and the messages copy path are generated from or resolved through those tables. Renders of the snapshot-mode overlays are byte-identical to the baseline; just check green (2408 tests).
+
+Wave B landed: worktree menu (list via the shared menu table, one confirm table for remove/merge/prune, a close-down table), mux-launch form, and path omnibox. Ctrl-C now backs out of the worktree list and its confirms like Esc does; before, those modes ignored it. Renders byte-identical to baseline; just check green (2408 tests).
 <!-- SECTION:NOTES:END -->

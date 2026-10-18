@@ -145,6 +145,10 @@ fn every_overlay_table_labels_its_keys_truthfully() {
         ("help", mislabeled(HELP_KEYS)),
         ("value modal", mislabeled(VALUE_MODAL_KEYS)),
         ("messages", mislabeled(MESSAGES_KEYS)),
+        ("confirm", mislabeled(CONFIRM_KEYS)),
+        ("close-down", mislabeled(CLOSE_DOWN_KEYS)),
+        ("mux launch", mislabeled(MUX_LAUNCH_KEYS)),
+        ("omnibox", mislabeled(OMNIBOX_KEYS)),
     ];
     for (name, wrong) in tables {
         assert!(
@@ -173,5 +177,14 @@ fn generated_footers_keep_the_established_wording() {
     assert_eq!(
         footer(HELP_KEYS),
         "j/k/PgDn/PgUp to scroll · Esc/q/? to close"
+    );
+    assert_eq!(footer(CONFIRM_KEYS), "Enter/y to confirm · Esc/n to cancel");
+    assert_eq!(
+        footer(CLOSE_DOWN_KEYS),
+        "m = merge & close · d = discard & close · Esc cancel"
+    );
+    assert_eq!(
+        footer(MUX_LAUNCH_KEYS),
+        "Tab/Shift-Tab move · ←/→ toggle · Enter launch · Esc cancel"
     );
 }

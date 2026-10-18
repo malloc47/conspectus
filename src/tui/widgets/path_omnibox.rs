@@ -7,7 +7,7 @@
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 
-use ratatui::crossterm::event::{KeyCode, KeyEvent};
+use ratatui::crossterm::event::KeyEvent;
 
 use crate::tui::widgets::input::TextInputState;
 
@@ -98,7 +98,8 @@ impl PathOmniboxState {
     }
 
     pub fn handle_key(&mut self, event: KeyEvent) -> PathOmniboxOutcome {
-        if event.code == KeyCode::Tab {
+        use crate::tui::keybindings::overlay::{OMNIBOX_KEYS, OmniboxKey, resolve};
+        if let Some(OmniboxKey::Complete) = resolve(OMNIBOX_KEYS, event) {
             if let Some(path) = self.selected_suggestion_path() {
                 self.input = TextInputState::new(self.title.clone(), path);
                 self.selected = 0;
@@ -324,6 +325,7 @@ fn collapse_home_prefix_with(value: &str, home: Option<&Path>) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use ratatui::crossterm::event::KeyCode;
     use ratatui::crossterm::event::{KeyEventKind, KeyEventState, KeyModifiers};
 
     fn key(code: KeyCode) -> KeyEvent {

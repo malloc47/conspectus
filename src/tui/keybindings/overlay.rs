@@ -417,6 +417,88 @@ pub const MESSAGES_KEYS: &[KeyRow<MessagesKey>] = &[
     alias(ch('!'), MessagesKey::Close),
 ];
 
+// ---------------------------------------------------------------------
+// Yes/no confirmations (worktree remove, merge, prune).
+// ---------------------------------------------------------------------
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ConfirmKey {
+    Abort,
+    Yes,
+    No,
+}
+
+pub const CONFIRM_KEYS: &[KeyRow<ConfirmKey>] = &[
+    alias(ctrl('c'), ConfirmKey::Abort),
+    shown(key(KeyCode::Enter), ConfirmKey::Yes, "Enter", "to confirm"),
+    shown(ch('y'), ConfirmKey::Yes, "y", "to confirm"),
+    shown(key(KeyCode::Esc), ConfirmKey::No, "Esc", "to cancel"),
+    shown(ch('n'), ConfirmKey::No, "n", "to cancel"),
+];
+
+// ---------------------------------------------------------------------
+// Worktree close-down choice: merge or discard, then tear down.
+// ---------------------------------------------------------------------
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CloseDownKey {
+    Abort,
+    Merge,
+    Discard,
+    Back,
+}
+
+pub const CLOSE_DOWN_KEYS: &[KeyRow<CloseDownKey>] = &[
+    alias(ctrl('c'), CloseDownKey::Abort),
+    shown(ch('m'), CloseDownKey::Merge, "m", "= merge & close"),
+    shown(ch('d'), CloseDownKey::Discard, "d", "= discard & close"),
+    shown(key(KeyCode::Esc), CloseDownKey::Back, "Esc", "cancel"),
+    alias(ch('q'), CloseDownKey::Back),
+];
+
+// ---------------------------------------------------------------------
+// Mux-launch form. Option keys act on the harness and worktree rows;
+// on a text field they edit the text.
+// ---------------------------------------------------------------------
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FormKey {
+    Abort,
+    Cancel,
+    NextField,
+    PrevField,
+    Submit,
+    OptionPrev,
+    OptionNext,
+}
+
+pub const MUX_LAUNCH_KEYS: &[KeyRow<FormKey>] = &[
+    alias(ctrl('c'), FormKey::Abort),
+    shown(key(KeyCode::Tab), FormKey::NextField, "Tab", "move"),
+    shown(
+        key(KeyCode::BackTab),
+        FormKey::PrevField,
+        "Shift-Tab",
+        "move",
+    ),
+    shown(key(KeyCode::Left), FormKey::OptionPrev, "←", "toggle"),
+    shown(key(KeyCode::Right), FormKey::OptionNext, "→", "toggle"),
+    alias(ch(' '), FormKey::OptionNext),
+    shown(key(KeyCode::Enter), FormKey::Submit, "Enter", "launch"),
+    shown(key(KeyCode::Esc), FormKey::Cancel, "Esc", "cancel"),
+];
+
+// ---------------------------------------------------------------------
+// Path omnibox field. Unbound keys edit the path.
+// ---------------------------------------------------------------------
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum OmniboxKey {
+    Complete,
+}
+
+pub const OMNIBOX_KEYS: &[KeyRow<OmniboxKey>] = &[alias(key(KeyCode::Tab), OmniboxKey::Complete)];
+
 #[cfg(test)]
 #[path = "overlay_tests.rs"]
 mod tests;

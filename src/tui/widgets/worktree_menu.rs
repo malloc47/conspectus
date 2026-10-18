@@ -15,7 +15,7 @@
 //! choice that commits a compound teardown (ADR 0093).
 
 use ratatui::buffer::Buffer;
-use ratatui::crossterm::event::{KeyCode, KeyEvent};
+use ratatui::crossterm::event::KeyEvent;
 use ratatui::layout::Rect;
 use ratatui::style::{Modifier, Style};
 use ratatui::text::Line;
@@ -374,18 +374,19 @@ impl WorktreeMenuState {
     }
 
     fn handle_list(&mut self, key: KeyEvent) -> OverlayOutcome {
-        match key.code {
-            KeyCode::Esc => OverlayOutcome::Close,
-            KeyCode::Up | KeyCode::Char('k') => {
+        use crate::tui::keybindings::overlay::{MENU_KEYS, MenuKey, resolve};
+        match resolve(MENU_KEYS, key) {
+            Some(MenuKey::Abort | MenuKey::Close) => OverlayOutcome::Close,
+            Some(MenuKey::Up) => {
                 self.cursor = self.cursor.saturating_sub(1);
                 OverlayOutcome::Consumed
             }
-            KeyCode::Down | KeyCode::Char('j') => {
+            Some(MenuKey::Down) => {
                 self.cursor = (self.cursor + 1).min(self.actions.len().saturating_sub(1));
                 OverlayOutcome::Consumed
             }
-            KeyCode::Enter => self.activate(),
-            _ => OverlayOutcome::Consumed,
+            Some(MenuKey::Pick) => self.activate(),
+            None => OverlayOutcome::Consumed,
         }
     }
 
@@ -414,8 +415,9 @@ impl WorktreeMenuState {
     }
 
     fn handle_confirm_remove(&mut self, key: KeyEvent) -> OverlayOutcome {
-        match key.code {
-            KeyCode::Enter | KeyCode::Char('y') => {
+        use crate::tui::keybindings::overlay::{CONFIRM_KEYS, ConfirmKey, resolve};
+        match resolve(CONFIRM_KEYS, key) {
+            Some(ConfirmKey::Yes) => {
                 let (Some(repo_root), Some(branch)) =
                     (self.ctx.repo_root.clone(), self.ctx.branch.clone())
                 else {
@@ -428,17 +430,18 @@ impl WorktreeMenuState {
                     force: !self.ctx.guard_sessions.is_empty(),
                 }))
             }
-            KeyCode::Esc | KeyCode::Char('n') => {
+            Some(ConfirmKey::Abort | ConfirmKey::No) => {
                 self.mode = Mode::List;
                 OverlayOutcome::Consumed
             }
-            _ => OverlayOutcome::Consumed,
+            None => OverlayOutcome::Consumed,
         }
     }
 
     fn handle_confirm_merge(&mut self, key: KeyEvent) -> OverlayOutcome {
-        match key.code {
-            KeyCode::Enter | KeyCode::Char('y') => {
+        use crate::tui::keybindings::overlay::{CONFIRM_KEYS, ConfirmKey, resolve};
+        match resolve(CONFIRM_KEYS, key) {
+            Some(ConfirmKey::Yes) => {
                 let Some(worktree_root) = self.ctx.repo_root.clone() else {
                     return OverlayOutcome::Close;
                 };
@@ -449,41 +452,43 @@ impl WorktreeMenuState {
                     target: None,
                 }))
             }
-            KeyCode::Esc | KeyCode::Char('n') => {
+            Some(ConfirmKey::Abort | ConfirmKey::No) => {
                 self.mode = Mode::List;
                 OverlayOutcome::Consumed
             }
-            _ => OverlayOutcome::Consumed,
+            None => OverlayOutcome::Consumed,
         }
     }
 
     fn handle_confirm_prune(&mut self, key: KeyEvent) -> OverlayOutcome {
-        match key.code {
-            KeyCode::Enter | KeyCode::Char('y') => {
+        use crate::tui::keybindings::overlay::{CONFIRM_KEYS, ConfirmKey, resolve};
+        match resolve(CONFIRM_KEYS, key) {
+            Some(ConfirmKey::Yes) => {
                 let Some(repo_root) = self.ctx.repo_root.clone() else {
                     return OverlayOutcome::Close;
                 };
                 OverlayOutcome::Commit(Box::new(Msg::CommitWorktreePrune { repo_root }))
             }
-            KeyCode::Esc | KeyCode::Char('n') => {
+            Some(ConfirmKey::Abort | ConfirmKey::No) => {
                 self.mode = Mode::List;
                 OverlayOutcome::Consumed
             }
-            _ => OverlayOutcome::Consumed,
+            None => OverlayOutcome::Consumed,
         }
     }
 
     fn handle_close_down(&mut self, key: KeyEvent) -> OverlayOutcome {
         // `m` lands the branch, `d` discards it; both then tear the
         // stream down (ADR 0093). Esc/q backs out.
-        let discard = match key.code {
-            KeyCode::Char('m') => false,
-            KeyCode::Char('d') => true,
-            KeyCode::Esc | KeyCode::Char('q') => {
+        use crate::tui::keybindings::overlay::{CLOSE_DOWN_KEYS, CloseDownKey, resolve};
+        let discard = match resolve(CLOSE_DOWN_KEYS, key) {
+            Some(CloseDownKey::Merge) => false,
+            Some(CloseDownKey::Discard) => true,
+            Some(CloseDownKey::Abort | CloseDownKey::Back) => {
                 self.mode = Mode::List;
                 return OverlayOutcome::Consumed;
             }
-            _ => return OverlayOutcome::Consumed,
+            None => return OverlayOutcome::Consumed,
         };
         let (Some(repo_root), Some(branch)) = (self.ctx.repo_root.clone(), self.ctx.branch.clone())
         else {
@@ -570,7 +575,9 @@ impl Widget for WorktreeMenuWidget<'_> {
                     }
                     lines.push(Line::from(""));
                 }
-                lines.push(Line::from("Enter/y to confirm · Esc/n to cancel"));
+                lines.push(Line::from(crate::tui::keybindings::overlay::footer(
+                    crate::tui::keybindings::overlay::CONFIRM_KEYS,
+                )));
                 lines
             }
             Mode::ConfirmMerge => {
@@ -593,7 +600,9 @@ impl Widget for WorktreeMenuWidget<'_> {
                     }
                     lines.push(Line::from(""));
                 }
-                lines.push(Line::from("Enter/y to confirm · Esc/n to cancel"));
+                lines.push(Line::from(crate::tui::keybindings::overlay::footer(
+                    crate::tui::keybindings::overlay::CONFIRM_KEYS,
+                )));
                 lines
             }
             Mode::CloseDownChoice => {
@@ -619,9 +628,9 @@ impl Widget for WorktreeMenuWidget<'_> {
                     }
                     lines.push(Line::from(""));
                 }
-                lines.push(Line::from(
-                    "m = merge & close · d = discard & close · Esc cancel",
-                ));
+                lines.push(Line::from(crate::tui::keybindings::overlay::footer(
+                    crate::tui::keybindings::overlay::CLOSE_DOWN_KEYS,
+                )));
                 lines
             }
             Mode::ConfirmPrune => {
@@ -633,7 +642,9 @@ impl Widget for WorktreeMenuWidget<'_> {
                     Line::from("Removes every worktree already merged into the default"),
                     Line::from("branch (worktrunk skips ones younger than its min-age)."),
                     Line::from(""),
-                    Line::from("Enter/y to confirm · Esc/n to cancel"),
+                    Line::from(crate::tui::keybindings::overlay::footer(
+                        crate::tui::keybindings::overlay::CONFIRM_KEYS,
+                    )),
                 ]
             }
             Mode::BranchInput(_) => unreachable!("handled above"),

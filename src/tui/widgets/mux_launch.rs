@@ -20,7 +20,7 @@
 //! renderer stay on this wrapper.
 
 use ratatui::buffer::Buffer;
-use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+use ratatui::crossterm::event::KeyEvent;
 use ratatui::layout::Rect;
 use ratatui::style::{Modifier, Style};
 use ratatui::text::Line;
@@ -218,44 +218,34 @@ impl Overlay for MuxLaunchFormState {
     type Ctx<'a> = ();
 
     fn handle(&mut self, _ctx: (), key: KeyEvent) -> OverlayOutcome {
-        match key.code {
-            KeyCode::Esc => return OverlayOutcome::Close,
-            KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => {
-                return OverlayOutcome::Close;
-            }
-            KeyCode::Tab => {
+        use crate::tui::keybindings::overlay::{FormKey, MUX_LAUNCH_KEYS, resolve};
+        let option_delta = match resolve(MUX_LAUNCH_KEYS, key) {
+            Some(FormKey::Abort | FormKey::Cancel) => return OverlayOutcome::Close,
+            Some(FormKey::NextField) => {
                 self.advance_focus(1);
                 return OverlayOutcome::Consumed;
             }
-            KeyCode::BackTab => {
+            Some(FormKey::PrevField) => {
                 self.advance_focus(-1);
                 return OverlayOutcome::Consumed;
             }
-            KeyCode::Enter => return self.try_commit(),
-            _ => {}
-        }
-        // Per-field handling for the two non-text-input rows.
+            Some(FormKey::Submit) => return self.try_commit(),
+            Some(FormKey::OptionPrev) => Some(-1),
+            Some(FormKey::OptionNext) => Some(1),
+            None => None,
+        };
+        // Option keys act on the two non-text-input rows; on a text
+        // field they fall through and edit the text.
         match self.focus {
             MuxLaunchField::Harness => {
-                if matches!(
-                    key.code,
-                    KeyCode::Left | KeyCode::Right | KeyCode::Char(' ')
-                ) {
-                    let delta = if matches!(key.code, KeyCode::Left) {
-                        -1
-                    } else {
-                        1
-                    };
+                if let Some(delta) = option_delta {
                     self.spec.cycle_harness(delta, HARNESS_LABEL);
                     self.spec.clear_error();
                     return OverlayOutcome::Consumed;
                 }
             }
             MuxLaunchField::WorktreeToggle => {
-                if matches!(
-                    key.code,
-                    KeyCode::Left | KeyCode::Right | KeyCode::Char(' ')
-                ) {
+                if option_delta.is_some() {
                     self.spec.toggle_worktree();
                     self.spec.clear_error();
                     return OverlayOutcome::Consumed;
@@ -378,9 +368,9 @@ impl Widget for MuxLaunchFormWidget<'_> {
             ));
         }
         lines.push(Line::from(""));
-        lines.push(Line::from(
-            "Tab/Shift-Tab move · ←/→ toggle · Enter launch · Esc cancel",
-        ));
+        lines.push(Line::from(crate::tui::keybindings::overlay::footer(
+            crate::tui::keybindings::overlay::MUX_LAUNCH_KEYS,
+        )));
 
         let height = u16::try_from(lines.len())
             .unwrap_or(u16::MAX)
@@ -412,6 +402,7 @@ fn format_field_line(label: &str, value: &str, focused: bool) -> Line<'static> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use ratatui::crossterm::event::{KeyCode, KeyModifiers};
 
     fn key(code: KeyCode) -> KeyEvent {
         KeyEvent::new(code, KeyModifiers::NONE)
