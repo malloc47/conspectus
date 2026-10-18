@@ -528,21 +528,6 @@ pub(super) fn render_left_row(
             }
             spans.push(span!(theme.placeholder; "  ({})", fork.child_count));
         }
-        RowKind::Pin(pin) => {
-            // Pinned, but unbound — dim "📌" marker + display name.
-            // Reuses the `placeholder` modifier to keep the row
-            // visibly distinct without a dedicated Theme key.
-            spans.push(span!(theme.placeholder; "📌  "));
-            spans.push(span!(Modifier::BOLD; "{}", pin.display_name.clone()));
-            spans.push(span!(
-                theme.placeholder;
-                "  ({} · {} · {} · {})",
-                pin.state_label,
-                pin.harness_label,
-                pin.cwd_display,
-                pin.mux_label
-            ));
-        }
         RowKind::Repo(repo) => {
             spans.extend(render_repo_spans(repo, theme));
         }
@@ -974,7 +959,6 @@ pub(super) fn row_kind_glyph_span(kind: &RowKind, theme: &Theme) -> Option<Span<
         RowKind::MuxSession(_) => NodeKind::MuxSession,
         RowKind::Pr(pr) => return Some(forge_pr_glyph_span(pr, theme)),
         RowKind::Fork(_) => NodeKind::Fork,
-        RowKind::Pin(_) => NodeKind::Pin,
         RowKind::Repo(_) => NodeKind::Repo,
     };
     Some(node_kind_glyph_span(node_kind, theme))

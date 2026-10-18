@@ -93,18 +93,6 @@ impl App {
         let selection = self.selection.as_ref()?;
         let row = self.tree.rows.iter().find(|row| &row.id == selection)?;
         let id = match &row.kind {
-            RowKind::Pin(pin) => {
-                return Some(PinMutationTarget {
-                    id: pin.pin_id.clone(),
-                    display_name: pin.display_name.clone(),
-                    harness: pin.harness.clone(),
-                    cwd: pin.cwd.clone(),
-                    mux_name: pin.mux_name.clone(),
-                    mux_socket: pin.mux_socket.clone(),
-                    launch_argv: pin.launch_argv.clone(),
-                    store_path: pin.store_path.clone(),
-                });
-            }
             RowKind::AgentSession(session) => session.pin_id.clone()?,
             RowKind::MuxSession(mux) => mux.pin_id.clone()?,
             _ => return None,
@@ -203,23 +191,6 @@ impl App {
                     // validator's `is_absolute` check on commit.
                     cwd: self.mux_cwd_for(&mux.mux).unwrap_or_default(),
                     mux_name,
-                    mode: PinCreateMode::NewVariation,
-                }
-            }
-            RowKind::Pin(pin) => {
-                // Creating a fresh pin with an existing pin selected
-                // seeds harness / cwd from the source
-                // and picks the next name in the series so `worker-1`
-                // → `worker-2` needs no manual retype. Bases that do
-                // not end in digits still fall back to `<name>-2`.
-                let base_name = pin_create_default_name_candidate(&pin.pin_id);
-                let series = self.next_pin_series_name(&base_name);
-                PinCreateDefaults {
-                    id: series.name.clone(),
-                    display_name: series.name.clone(),
-                    harness: pin.harness.clone(),
-                    cwd: pin.cwd.clone(),
-                    mux_name: series.name,
                     mode: PinCreateMode::NewVariation,
                 }
             }

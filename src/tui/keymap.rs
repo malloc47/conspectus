@@ -78,8 +78,8 @@ pub enum Action {
     /// row. Refuses with a status hint on any other row kind.
     OpenPinAdopt,
     /// `L` launches the selected pin via `conspectus pin launch
-    /// <id>`. Sibling of `Enter` on a `RowKind::Pin`; refuses with
-    /// a status hint when no pin row is selected.
+    /// <id>`. Sibling of `Enter` on a pin placeholder row; refuses
+    /// with a status hint when no pin row is selected.
     LaunchPin,
     /// Open the controls overlay (ADR 0031) at its top
     /// section.
@@ -317,10 +317,6 @@ pub fn selected_default_action(app: &App) -> SelectedDefault {
         // PR / Fork / Repo rows: no muxable target and no viewer;
         // fall back to toggle so expandable parents still behave.
         RowKind::Pr(_) | RowKind::Fork(_) | RowKind::Repo(_) => SelectedDefault::ToggleExpand,
-        // Unbound / stale-mux pin rows hand off to the launch
-        // primitive via a subprocess so the launch
-        // logic stays in one place.
-        RowKind::Pin(_) => SelectedDefault::LaunchPin,
     }
 }
 

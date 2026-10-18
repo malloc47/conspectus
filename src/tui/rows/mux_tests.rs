@@ -814,7 +814,6 @@ fn mux_view_emits_pins_group_at_top_under_repo_grouping() {
             let label = match &row.kind {
                 RowKind::MuxSession(mux) => format!("mux:{}", mux.native_id),
                 RowKind::Group(g) => g.display_path.clone(),
-                RowKind::Pin(p) => format!("pin:{}", p.pin_id),
                 other => format!("{other:?}"),
             };
             (row.depth, label)

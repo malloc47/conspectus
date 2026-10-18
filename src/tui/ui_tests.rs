@@ -1787,7 +1787,7 @@ fn forge_pr_glyph_span_picks_color_from_pr_state() {
 
 #[test]
 fn row_kind_glyph_span_dispatches_per_row_kind() {
-    use crate::tui::rows::{ForkRow, GroupRow, MuxCandidateRow, PinRow, RepoRow};
+    use crate::tui::rows::{ForkRow, GroupRow, MuxCandidateRow, RepoRow};
     let theme = Theme::default();
 
     // Group rows derive their kind from `primary_node`; synthetic
@@ -1812,28 +1812,6 @@ fn row_kind_glyph_span_dispatches_per_row_kind() {
     assert!(
         row_kind_glyph_span(&synthetic_group, &theme).is_none(),
         "synthetic group buckets have no NodeKind",
-    );
-
-    // Pin rows are graph-backed and carry the pin node glyph.
-    let pin = RowKind::Pin(PinRow {
-        pin_id: "p".into(),
-        display_name: "Pinned".into(),
-        harness: "claude".into(),
-        cwd: "/x".into(),
-        mux_name: "m".into(),
-        mux_socket: None,
-        launch_argv: Vec::new(),
-        store_path: "/store".into(),
-        harness_label: "claude".into(),
-        cwd_display: "/x".into(),
-        mux_label: "m".into(),
-        state_label: "unbound",
-    });
-    assert_eq!(
-        row_kind_glyph_span(&pin, &theme)
-            .map(|s| s.content.to_string())
-            .as_deref(),
-        Some("◉ "),
     );
 
     // AgentSession rows skip the kind glyph in row contexts —

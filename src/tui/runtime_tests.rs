@@ -1155,8 +1155,8 @@ mod selected_default_action_tests {
         });
         // Auto-selection lands on the first row of the synthetic
         // "Pins" group (the group header). Walk the tree to find
-        // the actual pin row id and select it so the dispatch
-        // exercises `RowKind::Pin` instead of the group header.
+        // the pin placeholder row and select it so the dispatch
+        // exercises the pin row instead of the group header.
         let mut app = build_sessions_app(snapshot);
         let pin_row_id = app
             .tree()

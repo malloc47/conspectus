@@ -273,9 +273,6 @@ pub(super) fn row_matches(row: &crate::tui::rows::Row, target: &NodeId) -> bool 
         RowKind::MuxSession(m) => &m.primary_node == target,
         RowKind::Pr(p) => &p.primary_node == target,
         RowKind::Fork(f) => &f.primary_node == target,
-        // Unbound pin rows have no underlying graph node — they
-        // never match a follow-sync `target`.
-        RowKind::Pin(_) => false,
         RowKind::Repo(r) => &r.primary_node == target,
     }
 }
@@ -284,7 +281,6 @@ pub(super) fn row_pin_id(row: &crate::tui::rows::Row) -> Option<&str> {
     match &row.kind {
         RowKind::AgentSession(session) => session.pin_id.as_deref(),
         RowKind::MuxSession(mux) => mux.pin_id.as_deref(),
-        RowKind::Pin(pin) => Some(pin.pin_id.as_str()),
         _ => None,
     }
 }

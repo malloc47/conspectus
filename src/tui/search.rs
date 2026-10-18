@@ -232,14 +232,6 @@ pub fn items_from_rows<'r>(rows: impl IntoIterator<Item = &'r Row>) -> Vec<Searc
                 label: Cow::Owned(fork.fork_label.clone()),
                 haystack: Cow::Owned(fork.fork_label.clone()),
             },
-            RowKind::Pin(pin) => SearchItem {
-                id: row.id.clone(),
-                label: Cow::Owned(format!("pin:{}", pin.display_name)),
-                haystack: Cow::Owned(format!(
-                    "pin {} {} {} {}",
-                    pin.display_name, pin.harness_label, pin.cwd_display, pin.mux_label
-                )),
-            },
             RowKind::Repo(repo) => SearchItem {
                 id: row.id.clone(),
                 label: Cow::Owned(format!("repo:{}", repo.display_name)),

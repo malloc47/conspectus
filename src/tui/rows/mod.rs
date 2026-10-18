@@ -55,7 +55,7 @@ pub enum RowId {
     /// An unbound session pin row (ADR 0057). Keyed on the pin id
     /// so the row is stable across refreshes even as the pin's
     /// binding state changes — once a pin binds, the same logical
-    /// entry switches from a [`RowKind::Pin`] row to a
+    /// entry switches from a placeholder row to a
     /// [`RowKind::AgentSession`] row whose `pin_id` field carries
     /// the pin marker.
     Pin {
@@ -124,12 +124,6 @@ pub enum RowKind {
     MuxSession(MuxSessionRow),
     Pr(PrRow),
     Fork(ForkRow),
-    /// Unbound pin row (ADR 0057). Emitted by the sessions builder
-    /// for `PinCandidate`s whose `binding` is `Unbound` or
-    /// `StaleMux` — i.e. no live agent session is realizing the
-    /// pin. Bound pins flow through the existing
-    /// [`RowKind::AgentSession`] surface with `pin_id` set.
-    Pin(PinRow),
     /// Repo row emitted by the workspaces view for
     /// member rows under each workspace. Styled like the agent /
     /// mux rows so it scans as the same visual rhythm rather than
@@ -331,28 +325,6 @@ pub struct ForkRow {
     pub parent_label: Option<String>,
     pub child_count: usize,
     pub primary_node: NodeId,
-}
-
-/// An unbound session pin row (ADR 0057). Rendered when the pin has
-/// no live mux (`PinBinding::Unbound`) or has a live mux but no
-/// harness session attributed to it (`PinBinding::StaleMux`).
-#[derive(Clone, Debug, PartialEq)]
-pub struct PinRow {
-    pub pin_id: String,
-    pub display_name: String,
-    pub harness: String,
-    pub cwd: String,
-    pub mux_name: String,
-    pub mux_socket: Option<String>,
-    pub launch_argv: Vec<String>,
-    pub store_path: String,
-    pub harness_label: String,
-    pub cwd_display: String,
-    pub mux_label: String,
-    /// Human-readable binding state ("unbound" or "stale-mux"). The
-    /// renderer surfaces this so the operator can pick the right next
-    /// action (launch vs relaunch in existing mux).
-    pub state_label: &'static str,
 }
 
 /// A workspace member row in the workspaces view. Carries

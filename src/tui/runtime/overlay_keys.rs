@@ -20,7 +20,6 @@ pub(super) fn open_rename_overlay(app: &mut App) {
             " rename session ",
             session_row.display_label().unwrap_or("").to_string(),
         ),
-        (RowId::Pin { .. }, Some(RowKind::Pin(pin))) => (" rename pin ", pin.display_name.clone()),
         (RowId::MuxSession(_), Some(RowKind::MuxSession(mux))) => {
             // Seed with the bare tmux name (post-`<socket>:` prefix
             // when a non-default socket is in play) so the operator

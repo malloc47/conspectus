@@ -449,34 +449,6 @@ pub(super) fn default_action_status_hint(app: &App) -> String {
     if matches!(row.kind, RowKind::Group(_)) {
         return "Enter/l expand · h collapse".to_string();
     }
-    // Pin rows surface a per-binding-state hint (ADR 0057).
-    if let RowKind::Pin(pin) = &row.kind {
-        let diagnostics = crate::tui::actions::selected_pin_diagnostics(app);
-        let has_b = if let Some(hint) = crate::tui::actions::pin_status_hint(&diagnostics) {
-            let has_binding = hint.contains(" b bind");
-            if has_binding {
-                return format!("{hint} · Del remove");
-            }
-            return format!("{hint} · b bind · Del remove");
-        } else {
-            false
-        };
-        let launch_hint = match pin.state_label {
-            "stale-mux" => format!(
-                "Enter to relaunch `{}` in existing mux `{}`",
-                pin.display_name, pin.mux_label
-            ),
-            "bound" => format!(
-                "Enter to attach `{}` via mux `{}`",
-                pin.display_name, pin.mux_label
-            ),
-            _ => format!("Enter to launch `{}`", pin.display_name),
-        };
-        if has_b {
-            return format!("{launch_hint} · b bind · Del remove");
-        }
-        return format!("{launch_hint} · b bind · Del remove");
-    }
     let selected_pin_id = match &row.kind {
         RowKind::AgentSession(session) => session.pin_id.as_deref(),
         RowKind::MuxSession(mux) => mux.pin_id.as_deref(),

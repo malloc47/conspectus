@@ -271,7 +271,6 @@ pub fn selected_pin_diagnostics(app: &App) -> Vec<PinDiagnosticView> {
         return Vec::new();
     };
     let pin_id = match &row.kind {
-        RowKind::Pin(pin) => Some(pin.pin_id.as_str()),
         RowKind::AgentSession(session) => session.pin_id.as_deref(),
         RowKind::MuxSession(mux) => mux.pin_id.as_deref(),
         _ => None,
@@ -587,7 +586,6 @@ pub fn resolve_launch_pin(
         .find(|row| &row.id == selection)
         .ok_or(PinLaunchDisabled::NoSelection)?;
     let pin_id = match &row.kind {
-        RowKind::Pin(pin) => Some(pin.pin_id.as_str()),
         RowKind::AgentSession(session) => session.pin_id.as_deref(),
         RowKind::MuxSession(mux) => mux.pin_id.as_deref(),
         _ => None,
