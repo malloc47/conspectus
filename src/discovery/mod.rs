@@ -785,7 +785,7 @@ fn apply_mutators(
         // + state root configured + not in disabled_aux_harnesses).
         // The codex-log reader runs from
         // `CodexAdapter::apply_aux_attribution`.
-        let now_epoch = codex_log::current_epoch();
+        let now_epoch = current_epoch();
         for adapter in harness::registered_adapters() {
             if config
                 .disabled_aux_harnesses
@@ -806,7 +806,7 @@ fn apply_mutators(
         }
     }
     if let Some(root) = &config.hook_sidecar_root {
-        hook_sidecar::apply_hook_sidecars(snapshot, root, hook_sidecar::current_epoch());
+        hook_sidecar::apply_hook_sidecars(snapshot, root, current_epoch());
     }
     if let Some(loader) = &config.declared_config_loader {
         declared::apply_declared_links(snapshot, context, loader);

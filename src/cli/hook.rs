@@ -78,7 +78,7 @@ impl HookWriteArgs {
             ppid,
             tmux_context(),
             harness_version,
-            crate::hook::current_epoch(),
+            crate::discovery::current_epoch(),
         )?;
         write_or_ingest_hook_record(&record, self.state_root)?;
         Ok(())

@@ -1294,7 +1294,7 @@ fn record_pin_bindings_best_effort(snapshot: &GraphSnapshot) {
         // opt out of the continuity feature implicitly.
         return;
     }
-    let now = crate::hook::current_epoch();
+    let now = crate::discovery::current_epoch();
     for (pin_id, result) in record_bindings(snapshot, &cache, now) {
         if let Err(err) = result {
             eprintln!("conspectus: pin-binding sidecar write failed for `{pin_id}`: {err}");

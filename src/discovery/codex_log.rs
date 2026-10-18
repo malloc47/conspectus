@@ -77,12 +77,6 @@ const ADAPTER_NAME: &str = crate::discovery::providers::CODEX_LOG;
 pub const DEFAULT_WINDOW_SECONDS: i64 = 24 * 60 * 60;
 const PROCESS_UUID_PREFIX: &str = "pid:";
 
-// Re-export the canonical `current_epoch`. Kept as
-// a re-export at this module path because
-// `codex_log::current_epoch` is the identifier `apply_mutators`
-// invokes.
-pub use crate::discovery::current_epoch;
-
 /// Apply Codex log-derived current-session attribution to a snapshot.
 ///
 /// `state_root` is the harness state root for codex (where `logs_*.sqlite`

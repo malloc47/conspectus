@@ -9,10 +9,10 @@ use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::path::Path;
 
 use super::render::{
-    self, RenderOptions, SESSIONS_COLUMNS, current_epoch, format_relative_age, header_label,
-    strip_branch_prefix,
+    self, RenderOptions, SESSIONS_COLUMNS, format_relative_age, header_label, strip_branch_prefix,
 };
 use super::table::{agent_session_key_for_label, short_session_id};
+use crate::discovery::current_epoch;
 use crate::filter::{MuxStateKey, SessionMatchInputs};
 use crate::model::{
     AgentSessionId, AgentSessionNode, CheckoutNode, ForgePrNode, ForkNode, GraphLink, GraphNode,

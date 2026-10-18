@@ -132,11 +132,6 @@ pub fn default_root() -> Option<PathBuf> {
     })
 }
 
-// `hook::current_epoch` re-exports the canonical helper from
-// `crate::discovery::current_epoch` so `conspectus::hook` callers
-// have it at hand.
-pub use crate::discovery::current_epoch;
-
 /// Build a hook sidecar record from a harness's SessionStart
 /// hook payload. Looks up the harness key against
 /// the adapter registry and delegates to

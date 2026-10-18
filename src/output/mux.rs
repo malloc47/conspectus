@@ -3,10 +3,11 @@
 use std::collections::{HashMap, HashSet};
 
 use super::render::{
-    self, MUX_COLUMNS, RenderOptions, current_epoch, format_relative_age, header_label,
+    self, MUX_COLUMNS, RenderOptions, format_relative_age, header_label,
     node_short_id_from_display, unique_prefix_len,
 };
 use super::table::agent_session_key_for_label;
+use crate::discovery::current_epoch;
 use crate::filter::{MuxStateKey, RowFilter, SessionMatchInputs};
 use crate::model::{
     AgentSessionNode, GraphLink, GraphNode, GraphSnapshot, LinkEndpoint, LinkState, MuxSessionNode,

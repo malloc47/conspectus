@@ -7,10 +7,11 @@ use std::collections::HashMap;
 use std::path::Path;
 
 use super::render::{
-    PRS_COLUMNS, RenderOptions, current_epoch, format_relative_age, header_label,
-    node_short_id_from_display, strip_branch_prefix, unique_prefix_len,
+    PRS_COLUMNS, RenderOptions, format_relative_age, header_label, node_short_id_from_display,
+    strip_branch_prefix, unique_prefix_len,
 };
 use super::table::agent_session_key_for_label;
+use crate::discovery::current_epoch;
 use crate::filter::{MuxStateKey, SessionMatchInputs};
 use crate::model::{
     AgentSessionNode, BranchId, ForgePrNode, GraphLink, GraphNode, GraphSnapshot, LinkEndpoint,

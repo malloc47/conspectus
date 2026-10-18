@@ -516,10 +516,6 @@ pub fn default_sidecar_root() -> Option<PathBuf> {
     hook::default_root()
 }
 
-// Re-export the canonical `current_epoch` so callers in this
-// module's namespace keep a short path.
-pub use crate::discovery::current_epoch;
-
 #[cfg(test)]
 #[path = "hook_sidecar_tests.rs"]
 mod tests;

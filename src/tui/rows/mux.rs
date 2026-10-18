@@ -17,9 +17,9 @@ use crate::model::{
 };
 use crate::output::render::{node_short_id_from_display, unique_prefix_len};
 use crate::tui::rows::{
-    AgentSessionRow, GroupRow, MuxIndicator, MuxSessionRow, Row, RowId, RowKind, RowTree,
-    ViewLabel, format_recency, harness_label, mux_process_harnesses, mux_program,
-    mux_program_harness, shorten_home,
+    AgentSessionRow, GroupRow, MuxSessionRow, Row, RowId, RowKind, RowTree, ViewLabel,
+    format_recency, harness_label, mux_process_harnesses, mux_program, mux_program_harness,
+    shorten_home,
 };
 use crate::tui::{MuxGrouping, Sort};
 
@@ -708,21 +708,13 @@ fn agent_row(
             project_display: None,
             recency: format_recency(now, agent.last_active_epoch),
             activity_epoch: agent.last_active_epoch,
-            mux_state: mux_indicator(agent.candidate_count),
+            mux_state: super::mux_indicator(agent.candidate_count),
             preview: agent.preview.clone(),
             title: agent.title.clone(),
             alias: agent.alias.clone(),
             title_disambiguates: false,
             primary_node: node_id,
         }),
-    }
-}
-
-fn mux_indicator(candidate_count: usize) -> MuxIndicator {
-    match candidate_count {
-        0 => MuxIndicator::Unmuxed,
-        1 => MuxIndicator::Attached,
-        n => MuxIndicator::Ambiguous { candidate_count: n },
     }
 }
 

@@ -25,8 +25,7 @@
 //!   [`display_width`], [`truncate_to_width`])
 //! - The ADR 0022 color palette helpers ([`header_style`],
 //!   [`push_styled`], …)
-//! - The recency formatter ([`format_relative_age`],
-//!   [`current_epoch`])
+//! - The recency formatter ([`format_relative_age`])
 //! - The short-id hash ([`node_short_id_from_display`],
 //!   [`unique_prefix_len`])
 //!
@@ -1270,15 +1269,6 @@ pub fn confidence_code_from_tag(tag: &str) -> &'static str {
         _ => "?",
     }
 }
-
-// -----------------------------------------------------------------------------
-// Recency formatter
-// -----------------------------------------------------------------------------
-
-// (kept below for context; format_relative_age moved earlier in the file)
-
-// Re-export the canonical `current_epoch`.
-pub use crate::discovery::current_epoch;
 
 // -----------------------------------------------------------------------------
 // Tests
