@@ -1,10 +1,11 @@
 ---
 id: CSP-605
 title: Stop opencode 2.x hook records from attributing sessions to the wrong pane
-status: To Do
-assignee: []
+status: Done
+assignee:
+  - '@claude'
 created_date: '2026-10-17 02:58'
-updated_date: '2026-10-18 05:58'
+updated_date: '2026-10-18 06:21'
 labels:
   - opencode-v2
 milestone: m-21
@@ -29,15 +30,15 @@ This task only makes 2.x hook evidence safe. Restoring good attribution is the s
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 Hook records written from an opencode 2.x shared service never yield `linked_to_mux` candidates from inherited tmux context
-- [ ] #2 Opencode 1.x hook records keep attributing exactly as before
-- [ ] #3 The way 2.x service records are detected is documented, with the evidence CSP-602 found for it
+- [x] #1 Hook records written from an opencode 2.x shared service never yield `linked_to_mux` candidates from inherited tmux context
+- [x] #2 Opencode 1.x hook records keep attributing exactly as before
+- [x] #3 The way 2.x service records are detected is documented, with the evidence CSP-602 found for it
 <!-- AC:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
-- [ ] #1 `just check` passes, or `git diff --check` for docs-only changes
-- [ ] #2 Docs and ADRs are updated when behavior, architecture, or workflow change
+- [x] #1 `just check` passes, or `git diff --check` for docs-only changes
+- [x] #2 Docs and ADRs are updated when behavior, architecture, or workflow change
 <!-- DOD:END -->
 
 ## Implementation Notes
@@ -47,4 +48,14 @@ Scope update from the CSP-602 spike (ADR 0125):
 - Verified: the service (`opencode serve --service`) inherits `TMUX`/`TMUX_PANE` from the client that started it, and server plugins run inside it, so every record it writes names that first pane.
 - Detection: the hook writer's harness ancestor (first `opencode` comm walking up) is the service; its argv has `serve` as the subcommand. A TUI plugin's child has the TUI client as that ancestor instead.
 - Stripping the tmux context is not enough: `discovery::hook_sidecar::find_mux` falls back to pid and then cwd, so a pane-less service record would still bind at hook rank to any pane sharing the cwd. Service-context records must produce no mux link at all.
+
+Detection (ADR 0126): `conspectus hook write` reads the command line of the harness ancestor its pid walk already finds and asks that harness's `RuntimeSignature::is_background_process` (from CSP-608: opencode `serve`/`acp`). When it matches, the record gets the new provider-neutral `HookRecord.background_harness` flag and no tmux context. Evidence from CSP-602 (ADR 0125): the 2.x service is `opencode serve --service`, inherits the first client's TMUX/TMUX_PANE, and hosts server plugins.
+Sidecar: `apply_hook_records` skips background-harness records before `find_mux`, because stripping tmux alone would still let the pid and cwd fallbacks bind them at hook rank. The records stay in the store.
+Manual check: with a sandboxed 2.x service started from pane A and a TUI in pane B, a server-side probe plugin ran the real `conspectus hook write opencode` for pane B's new session. The record carried `background_harness: true`, pid = service, ppid = pane A's TUI, and no tmux. `conspectus graph` showed no hook_sidecar link for the session; it resolved to pane B through activity evidence.
 <!-- SECTION:NOTES:END -->
+
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+Hook records written from a harness's background process are now marked `background_harness` by the writer (detected from the harness ancestor's command line through the adapter's runtime signature; for opencode 2.x, the shared `opencode serve --service`), carry no tmux context, and never produce mux links in the hook sidecar, including through the pid and cwd fallbacks. 1.x in-pane records attribute as before. ADR 0126 records the detection and the 2.x attribution plan; design.md notes it.
+<!-- SECTION:FINAL_SUMMARY:END -->

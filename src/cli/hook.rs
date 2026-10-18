@@ -69,17 +69,22 @@ impl HookWriteArgs {
         }
         let payload: serde_json::Value = serde_json::from_str(&input)
             .with_context(|| format!("failed to parse {} hook JSON", self.harness))?;
-        let (pid, ppid) = harness_pid_pair(&self.harness);
+        let harness = harness_process(&self.harness);
+        let background = harness.as_ref().is_some_and(|process| process.background);
+        // A background harness's environment came from whichever client
+        // started it, so its tmux context names someone else's pane.
+        let tmux = if background { None } else { tmux_context() };
         let harness_version = harness_version_env(&self.harness);
-        let record = crate::hook::hook_record_from_payload(
+        let mut record = crate::hook::hook_record_from_payload(
             &self.harness,
             &payload,
-            pid,
-            ppid,
-            tmux_context(),
+            harness.as_ref().map(|process| process.pid),
+            harness.as_ref().map(|process| process.ppid),
+            tmux,
             harness_version,
             crate::discovery::current_epoch(),
         )?;
+        record.background_harness = background;
         write_or_ingest_hook_record(&record, self.state_root)?;
         Ok(())
     }
@@ -423,6 +428,17 @@ fn read_linux_ppid_of(pid: u32) -> Option<u32> {
 }
 
 #[cfg(target_os = "linux")]
+fn read_linux_cmdline_of(pid: u32) -> Option<String> {
+    let raw = fs::read(format!("/proc/{pid}/cmdline")).ok()?;
+    let args: Vec<_> = raw
+        .split(|byte| *byte == 0)
+        .filter(|arg| !arg.is_empty())
+        .map(String::from_utf8_lossy)
+        .collect();
+    (!args.is_empty()).then(|| args.join(" "))
+}
+
+#[cfg(target_os = "linux")]
 fn read_linux_comm_of(pid: u32) -> Option<String> {
     fs::read_to_string(format!("/proc/{pid}/comm"))
         .ok()
@@ -517,16 +533,49 @@ fn harness_version_env(harness: &str) -> Option<String> {
     }
 }
 
-/// Resolve the `(pid, ppid)` pair to record on a hook sidecar entry
-/// for `harness`. Returns `(None, None)` when the harness pid cannot
-/// be identified — the discovery liveness check then skips the pid
-/// branch entirely so the record stays Active rather than being
-/// marked Ignored against a stillborn writer pid.
-fn harness_pid_pair(harness: &str) -> (Option<i64>, Option<i64>) {
-    match resolve_harness_pid(&harness_binaries(harness)) {
-        Some((pid, ppid)) => (Some(i64::from(pid)), Some(i64::from(ppid))),
-        None => (None, None),
+/// The harness process that triggered a hook invocation.
+struct HarnessProcess {
+    pid: i64,
+    ppid: i64,
+    /// The harness's runtime signature classifies this process's
+    /// command line as a background process, such as opencode 2.x's
+    /// shared `opencode serve --service`.
+    background: bool,
+}
+
+/// Find the harness process behind this hook invocation. `None` when it
+/// cannot be identified; the record then carries no pid, so the
+/// discovery liveness check skips the pid branch entirely and the
+/// record stays Active rather than being marked Ignored against a
+/// stillborn writer pid.
+fn harness_process(harness: &str) -> Option<HarnessProcess> {
+    let (pid, ppid) = resolve_harness_pid(&harness_binaries(harness))?;
+    Some(HarnessProcess {
+        pid: i64::from(pid),
+        ppid: i64::from(ppid),
+        background: harness_command_line(pid)
+            .is_some_and(|command| is_background_harness_command(harness, &command)),
+    })
+}
+
+fn harness_command_line(pid: u32) -> Option<String> {
+    #[cfg(target_os = "linux")]
+    {
+        read_linux_cmdline_of(pid)
     }
+    #[cfg(not(target_os = "linux"))]
+    {
+        let _ = pid;
+        None
+    }
+}
+
+/// Whether `harness`'s registered runtime signature classifies
+/// `command` as a background process.
+pub(super) fn is_background_harness_command(harness: &str, command: &str) -> bool {
+    crate::discovery::harness::registered_adapters()
+        .find(|a| a.harness_key() == harness)
+        .is_some_and(|a| (a.runtime_signature().is_background_process)(command))
 }
 
 fn tmux_context() -> Option<HookTmuxRecord> {

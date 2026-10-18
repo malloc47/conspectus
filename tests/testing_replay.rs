@@ -118,6 +118,7 @@ fn replay_writes_hook_spool_records_into_discovery_pipeline() {
         hook_event_name: Some("SessionStart".to_string()),
         observed_epoch: 1_700_000_550,
         harness_version: Some("1.0.0".to_string()),
+        background_harness: false,
     });
 
     let result = world.run();
@@ -232,6 +233,7 @@ fn same_pane_hook_supersession_freshest_wins_and_tui_shows_active() {
         hook_event_name: Some("SessionStart".to_string()),
         observed_epoch,
         harness_version: Some("1.0.0".to_string()),
+        background_harness: false,
     };
 
     world.write_legacy_hook_record("older", &make_hook(session_a, 1_700_000_500));
@@ -561,6 +563,7 @@ fn hook_supersession_world() -> ReplayWorld {
                 hook_event_name: Some("SessionStart".to_string()),
                 observed_epoch,
                 harness_version: Some("1.0.0".to_string()),
+                background_harness: false,
             },
         );
     }

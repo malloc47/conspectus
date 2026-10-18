@@ -21,6 +21,7 @@ fn latest_store_round_trips_hook_record() {
         hook_event_name: Some("SessionStart".to_string()),
         observed_epoch: 1_700_000_000,
         harness_version: Some("1.0.0".to_string()),
+        background_harness: false,
     };
 
     let outcome = store.write_record(&record).expect("write record");
@@ -51,6 +52,7 @@ fn latest_store_keeps_only_newest_record_for_mux() {
         hook_event_name: Some("SessionStart".to_string()),
         observed_epoch: 100,
         harness_version: None,
+        background_harness: false,
     };
     let mut newer = older.clone();
     newer.session_key = "new".to_string();

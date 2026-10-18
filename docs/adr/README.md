@@ -197,3 +197,4 @@ How the project is built, tested, tracked, and shipped, including the agent-orie
 | [0100](0100-comments-carry-rationale-not-backlog-ids.md) | Comments Carry Rationale, Not Backlog IDs | Accepted |
 | [0124](0124-sibling-test-files.md) | Large Unit-Test Modules Live In Sibling Files | Accepted |
 | [0125](0125-opencode-2-reference-findings.md) | OpenCode 2.x Reference Findings | Accepted |
+| [0126](0126-opencode-2-pane-attribution.md) | OpenCode 2.x Session-To-Pane Attribution | Accepted |

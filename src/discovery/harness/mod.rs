@@ -372,6 +372,7 @@ pub trait HarnessAdapter: Send + Sync {
             hook_event_name: crate::hook::optional_payload_string(payload, "hook_event_name"),
             observed_epoch,
             harness_version,
+            background_harness: false,
         })
     }
 }

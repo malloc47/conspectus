@@ -88,6 +88,7 @@ fn hook_ingest_updates_snapshot_state_and_published_bytes() {
         hook_event_name: Some("SessionStart".to_string()),
         observed_epoch: 1_700_000_000,
         harness_version: None,
+        background_harness: false,
     };
     let request = Request {
         command: "hook_ingest".to_string(),

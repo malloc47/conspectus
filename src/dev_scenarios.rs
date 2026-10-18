@@ -692,6 +692,7 @@ fn build_hook_supersession(world: &mut ScenarioWorld) -> Result<()> {
             hook_event_name: Some("SessionStart".to_string()),
             observed_epoch,
             harness_version: Some("1.0.0".to_string()),
+            background_harness: false,
         })?;
     }
     Ok(())
@@ -773,6 +774,7 @@ fn build_process_cardinality(world: &mut ScenarioWorld) -> Result<()> {
             hook_event_name: Some("SessionStart".to_string()),
             observed_epoch,
             harness_version: Some("1.0.0".to_string()),
+            background_harness: false,
         })?;
     }
     Ok(())
@@ -1334,6 +1336,7 @@ fn add_hook_supersession_to_showcase(world: &mut ScenarioWorld, project: &Path) 
         hook_event_name: Some("SessionStart".to_string()),
         observed_epoch: SHOWCASE_NOW_EPOCH - 2 * 60,
         harness_version: Some("1.0.0".to_string()),
+        background_harness: false,
     })?;
     Ok(())
 }

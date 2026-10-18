@@ -38,6 +38,12 @@ pub fn apply_hook_records(
     let link_count_before = snapshot.candidate_links.len();
 
     for record in records {
+        // A background harness serves every pane, so neither its tmux
+        // context nor the pid and cwd fallbacks in `find_mux` say which
+        // pane shows this session.
+        if record.background_harness {
+            continue;
+        }
         let Some(mux) = find_mux(snapshot, &record) else {
             continue;
         };

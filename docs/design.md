@@ -405,8 +405,11 @@ facts.
 Hook sidecar records are local, rebuildable observations written by opt-in
 harness hooks outside project trees. They may refine mux/session attribution
 when fresh, but stale records should not override active process evidence.
-Conspectus must not inject terminal input or slash commands to ask an agent for
-its current session id.
+A record written from a harness's background process, such as opencode 2.x's
+shared service, carries no pane context and never produces mux links; opencode
+2.x pane attribution comes from the plugin's TUI entrypoint, which runs in the
+pane (ADR 0126). Conspectus must not inject terminal input or slash commands to
+ask an agent for its current session id.
 
 Runtime process observations are likewise rebuildable discovery output. Per ADR
 0047, Conspectus should model them as first-class graph nodes when process

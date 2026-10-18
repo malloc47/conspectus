@@ -34,6 +34,14 @@ pub struct HookRecord {
     pub observed_epoch: i64,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub harness_version: Option<String>,
+    /// The harness process that ran the hook is a background process
+    /// (a shared service or helper daemon) rather than an interactive
+    /// pane's agent. Its environment, and so the writer's tmux context,
+    /// belongs to whichever client started it, so such a record never
+    /// produces mux links. The opencode 2.x shared service is one: its
+    /// server plugins run inside it with the first client's `TMUX_PANE`.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub background_harness: bool,
 }
 
 #[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]

@@ -159,6 +159,7 @@ fn fresh_spooled_hook_record_links_session_to_mux() {
             hook_event_name: Some("SessionStart".to_string()),
             observed_epoch: 1_700_000_000,
             harness_version: None,
+            background_harness: false,
         })
         .expect("write hook record");
     let mut snapshot = GraphSnapshot {
@@ -217,6 +218,7 @@ fn hook_record_with_stale_pid_is_ignored_and_does_not_emit_process_links() {
             hook_event_name: Some("SessionStart".to_string()),
             observed_epoch: 1_700_000_000,
             harness_version: None,
+            background_harness: false,
         })
         .expect("write hook record");
     let mut snapshot = GraphSnapshot {
@@ -277,6 +279,7 @@ fn hook_record_with_unknown_pid_stays_active() {
             hook_event_name: Some("SessionStart".to_string()),
             observed_epoch: 1_700_000_000,
             harness_version: None,
+            background_harness: false,
         })
         .expect("write hook record");
     let mut snapshot = GraphSnapshot {
@@ -945,6 +948,7 @@ fn opencode_hook_record_demotes_stale_launch_argv_for_same_mux() {
             hook_event_name: Some("session.updated".to_string()),
             observed_epoch: 1_700_000_050,
             harness_version: Some("0.1.0".to_string()),
+            background_harness: false,
         })
         .expect("write hook record");
 
@@ -992,5 +996,172 @@ fn opencode_hook_record_demotes_stale_launch_argv_for_same_mux() {
     assert_eq!(
         fresh.source_metadata.evidence.as_deref(),
         Some("hook_session_match")
+    );
+}
+
+fn opencode_pane(native_id: &str, pane_pid: i64) -> GraphNode {
+    GraphNode::MuxSession(MuxSessionNode {
+        id: MuxSessionId::new(format!("tmux:{native_id}")),
+        backend: "tmux".to_string(),
+        native_id: native_id.to_string(),
+        cwd: Some("/work/proj".to_string()),
+        active_pane_command: Some("opencode".to_string()),
+        active_pane_pid: Some(pane_pid),
+        active_pane_current_path: Some("/work/proj".to_string()),
+        active_pane_start_command: Some("opencode".to_string()),
+        client_attached: None,
+        activity_epoch: None,
+        created_epoch: None,
+        last_attached_epoch: None,
+    })
+}
+
+fn opencode_session(key: &str) -> GraphNode {
+    GraphNode::AgentSession(
+        AgentSessionNode::new(
+            AgentSessionId::new("opencode", "/oc-state", key),
+            "opencode".to_string(),
+        )
+        .with_cwd("/work/proj".to_string()),
+    )
+}
+
+/// A record as the hook writer produces it: `tmux_pane` is the writer's
+/// pane context, and `background_harness` marks a record from opencode
+/// 2.x's shared service, whose context came from the first client.
+fn opencode_record(
+    session_key: &str,
+    tmux_pane: Option<(&str, &str)>,
+    observed_epoch: i64,
+    background_harness: bool,
+) -> hook::HookRecord {
+    hook::HookRecord {
+        schema_version: hook::SCHEMA_VERSION,
+        harness_key: "opencode".to_string(),
+        session_key: session_key.to_string(),
+        cwd: Some("/work/proj".to_string()),
+        pid: Some(i64::from(std::process::id())),
+        ppid: None,
+        tmux: tmux_pane.map(|(session_name, pane_id)| hook::HookTmuxRecord {
+            session_name: Some(session_name.to_string()),
+            native_id: None,
+            pane_id: Some(pane_id.to_string()),
+            socket_path: None,
+        }),
+        transcript_path: None,
+        hook_event_name: Some("session.created".to_string()),
+        observed_epoch,
+        harness_version: Some("0.2.0".to_string()),
+        background_harness,
+    }
+}
+
+fn two_opencode_panes() -> GraphSnapshot {
+    GraphSnapshot {
+        nodes: vec![
+            opencode_pane("alpha", 100),
+            opencode_pane("beta", 200),
+            opencode_session("ses_alpha00001"),
+            opencode_session("ses_beta000001"),
+        ],
+        ..GraphSnapshot::empty()
+    }
+}
+
+fn hook_mux_links(snapshot: &GraphSnapshot) -> Vec<&GraphLink> {
+    snapshot
+        .candidate_links
+        .iter()
+        .filter(|link| {
+            link.relation == RelationKind::LinkedToMux
+                && link.source_metadata.adapter == ADAPTER_NAME
+        })
+        .collect()
+}
+
+#[test]
+fn in_pane_opencode_record_still_links_its_pane() {
+    let mut snapshot = two_opencode_panes();
+
+    apply_hook_records(
+        &mut snapshot,
+        vec![opencode_record(
+            "ses_beta000001",
+            Some(("beta", "%1")),
+            1_700_000_000,
+            false,
+        )],
+        1_700_000_010,
+    );
+
+    let links = hook_mux_links(&snapshot);
+    assert_eq!(links.len(), 1);
+    assert_eq!(links[0].state, LinkState::Active);
+    assert_eq!(
+        links[0].target_node_id(),
+        Some(&NodeId::MuxSession(MuxSessionId::new("tmux:beta")))
+    );
+}
+
+#[test]
+fn background_harness_record_with_inherited_tmux_links_no_mux() {
+    let mut snapshot = two_opencode_panes();
+
+    apply_hook_records(
+        &mut snapshot,
+        vec![opencode_record(
+            "ses_beta000001",
+            Some(("alpha", "%0")),
+            1_700_000_000,
+            true,
+        )],
+        1_700_000_010,
+    );
+
+    assert!(hook_mux_links(&snapshot).is_empty());
+}
+
+#[test]
+fn background_harness_record_does_not_fall_back_to_pid_or_cwd() {
+    let mut snapshot = two_opencode_panes();
+    let mut record = opencode_record("ses_beta000001", None, 1_700_000_000, true);
+    record.pid = Some(100);
+
+    apply_hook_records(&mut snapshot, vec![record], 1_700_000_010);
+
+    assert!(hook_mux_links(&snapshot).is_empty());
+}
+
+/// Before background records were set aside, the shared service's records
+/// for both sessions named the first client's pane, and the freshest one
+/// won that pane at hook rank.
+#[test]
+fn shared_service_records_do_not_force_two_panes_sessions_onto_one_mux() {
+    let mut snapshot = two_opencode_panes();
+
+    apply_hook_records(
+        &mut snapshot,
+        vec![
+            opencode_record("ses_alpha00001", Some(("alpha", "%0")), 1_700_000_000, true),
+            opencode_record("ses_beta000001", Some(("alpha", "%0")), 1_700_000_005, true),
+        ],
+        1_700_000_010,
+    );
+    let snapshot = crate::resolve::resolve_snapshot(snapshot);
+
+    let beta_session = NodeId::AgentSession(AgentSessionId::new(
+        "opencode",
+        "/oc-state",
+        "ses_beta000001",
+    ));
+    let alpha_mux = NodeId::MuxSession(MuxSessionId::new("tmux:alpha"));
+    assert!(
+        !snapshot.resolved_relationships.iter().any(|relationship| {
+            relationship.relation == RelationKind::LinkedToMux
+                && relationship.source == beta_session
+                && relationship.target == alpha_mux
+                && relationship.selected_link_id.is_some()
+        }),
+        "beta's session must not resolve to alpha's pane"
     );
 }
