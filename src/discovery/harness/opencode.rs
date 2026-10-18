@@ -58,8 +58,9 @@ impl OpenCodeAdapter {
 /// Runtime attribution surface for opencode.
 /// Opencode's session ids follow the `ses_<alphanumeric>`
 /// grammar with a UUID fallback for legacy sessions;
-/// the CLI spawns subagent processes distinguished by
-/// ` subagent` in their argv.
+/// the 1.x CLI spawns subagent processes distinguished by
+/// ` subagent` in their argv, and the 2.x shared service
+/// runs as `opencode serve --service`.
 static OPENCODE_RUNTIME_SIGNATURE: super::RuntimeSignature = super::RuntimeSignature {
     harness_key: HARNESS_KEY,
     process_command_basenames: &["opencode"],
@@ -71,7 +72,7 @@ static OPENCODE_RUNTIME_SIGNATURE: super::RuntimeSignature = super::RuntimeSigna
         "/.opencode/",
     ],
     extract_session_keys: opencode_extract_session_keys,
-    is_background_process: super::no_match,
+    is_background_process: opencode_is_background_process,
     is_subagent_process: opencode_is_subagent_process,
 };
 
@@ -93,6 +94,19 @@ fn opencode_session_key_values(value: &str) -> std::collections::BTreeSet<String
         })
         .map(str::to_string)
         .collect()
+}
+
+/// Headless opencode servers are no one's interactive pane: the 2.x
+/// shared service (`opencode serve --service`), which starts as a child
+/// of the first TUI and so sits in that TUI's pane, a plain `opencode
+/// serve`, and `opencode acp`, which another program drives over stdio.
+/// The subcommand is the first argument that isn't a flag.
+fn opencode_is_background_process(command: &str) -> bool {
+    command
+        .split_whitespace()
+        .skip(1)
+        .find(|arg| !arg.starts_with('-'))
+        .is_some_and(|subcommand| matches!(subcommand, "serve" | "acp"))
 }
 
 /// Recognize opencode subagent processes by command line.

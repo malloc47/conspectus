@@ -1056,3 +1056,25 @@ fn a_session_committed_to_the_wal_invalidates_the_scan_cache() {
         Some("Only in the WAL")
     );
 }
+
+#[test]
+fn headless_opencode_servers_are_background_processes() {
+    for command in [
+        "opencode serve --service",
+        "/home/user/.opencode/bin/opencode serve --service",
+        "opencode serve",
+        "opencode --print-logs serve --port 4096",
+        "opencode acp",
+    ] {
+        assert!(opencode_is_background_process(command), "{command}");
+    }
+    for command in [
+        "opencode",
+        "opencode --session ses_16d204c1dffeIkBjxxbpD9uujI",
+        "opencode -s ses_16d204c1dffeIkBjxxbpD9uujI /work/repo",
+        "opencode run hello",
+        "opencode /work/serve",
+    ] {
+        assert!(!opencode_is_background_process(command), "{command}");
+    }
+}

@@ -1936,3 +1936,85 @@ fn orphan_subagent_mux_link_stays_active() {
         "orphan subagent mux link should stay active"
     );
 }
+
+/// An opencode 2.x TUI starts the shared service as its own child, so
+/// the service sits in the TUI's pane until the TUI exits.
+#[test]
+fn opencode_shared_service_child_is_not_a_pane_agent() {
+    let target = "ses_16d204c1dffeIkBjxxbpD9uujI";
+    let mut snapshot = GraphSnapshot {
+        nodes: vec![
+            opencode_session(target, Some("/work/repo")),
+            mux_with_active_process("editor", Some("/work/repo"), "opencode", 100),
+        ],
+        ..GraphSnapshot::empty()
+    };
+    let processes = FakeProcessSnapshot::new([
+        process(
+            100,
+            None,
+            &format!("opencode --session {target}"),
+            Some("/work/repo"),
+        ),
+        process(
+            101,
+            Some(100),
+            "/home/user/.opencode/bin/opencode serve --service",
+            Some("/work/repo"),
+        ),
+    ]);
+
+    infer_with_process_snapshot(&mut snapshot, &processes);
+
+    let process_nodes: Vec<_> = snapshot
+        .nodes
+        .iter()
+        .filter_map(|node| match node {
+            GraphNode::RuntimeProcess(process) => Some(process),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(process_nodes.len(), 1);
+    assert_eq!(process_nodes[0].pid, Some(100));
+    assert_eq!(process_nodes[0].role, Some(RuntimeProcessRole::HumanAgent));
+    assert!(
+        snapshot
+            .candidate_links
+            .iter()
+            .all(|link| !link.source.to_string().contains("pid:101")
+                && !link
+                    .target_node_id()
+                    .is_some_and(|target| target.to_string().contains("pid:101"))),
+        "the shared service must not emit process links"
+    );
+    assert!(crate::resolve::pins::mux_hosts_harness(
+        &snapshot,
+        &MuxSessionId::new("tmux:editor"),
+        "opencode"
+    ));
+}
+
+/// A pane whose only opencode process is a headless server does not
+/// count as running the opencode harness.
+#[test]
+fn pane_running_only_an_opencode_server_does_not_host_the_harness() {
+    let mut snapshot = GraphSnapshot {
+        nodes: vec![mux_with_active_process(
+            "server",
+            Some("/work/repo"),
+            "opencode serve",
+            100,
+        )],
+        ..GraphSnapshot::empty()
+    };
+    let processes =
+        FakeProcessSnapshot::new([process(100, None, "opencode serve", Some("/work/repo"))]);
+
+    infer_with_process_snapshot(&mut snapshot, &processes);
+
+    assert!(!crate::resolve::pins::mux_hosts_harness(
+        &snapshot,
+        &MuxSessionId::new("tmux:server"),
+        "opencode"
+    ));
+}

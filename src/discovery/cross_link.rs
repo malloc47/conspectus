@@ -1243,17 +1243,13 @@ impl ProcessPaneEvidence {
         normalize_path(process_cwd) == normalize_path(session_cwd)
     }
 
-    fn is_opencode_subagent_process(&self) -> bool {
-        // Delegate to the registered adapter's signature; only
-        // opencode defines subagent processes today.
+    fn is_subagent_process(&self) -> bool {
         self.signature_role_check(|sig| (sig.is_subagent_process)(&self.command))
     }
 
-    fn is_claude_background_process(&self) -> bool {
-        // Delegate to the registered adapter's signature; only
-        // claude-code defines background processes today. Adapters
-        // that don't ship helper daemons point their
-        // `is_background_process` at
+    fn is_background_process(&self) -> bool {
+        // Adapters without helper daemons or headless servers point
+        // their `is_background_process` at
         // [`crate::discovery::harness::no_match`].
         self.signature_role_check(|sig| (sig.is_background_process)(&self.command))
     }
@@ -1268,9 +1264,9 @@ impl ProcessPaneEvidence {
     }
 
     fn role(&self) -> RuntimeProcessRole {
-        if self.is_claude_background_process() {
+        if self.is_background_process() {
             RuntimeProcessRole::Background
-        } else if self.is_opencode_subagent_process() {
+        } else if self.is_subagent_process() {
             RuntimeProcessRole::Subagent
         } else {
             RuntimeProcessRole::HumanAgent
