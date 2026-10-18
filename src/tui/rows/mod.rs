@@ -774,7 +774,7 @@ impl<'a> TreeInputs<'a> {
 /// projection changes pull it from `App` state.
 pub(crate) fn build_tree_for_view(inputs: TreeInputs<'_>) -> RowTree {
     let home = tree_home_dir();
-    let now = tree_current_unix_epoch();
+    let now = Some(tree_current_unix_epoch());
     let TreeInputs {
         snapshot,
         view,
@@ -853,13 +853,11 @@ pub(crate) fn pin_clock(epoch: i64) {
     let _ = PINNED_NOW.set(epoch);
 }
 
-pub(crate) fn tree_current_unix_epoch() -> Option<i64> {
-    Some(
-        PINNED_NOW
-            .get()
-            .copied()
-            .unwrap_or_else(crate::discovery::current_epoch),
-    )
+pub(crate) fn tree_current_unix_epoch() -> i64 {
+    PINNED_NOW
+        .get()
+        .copied()
+        .unwrap_or_else(crate::discovery::current_epoch)
 }
 
 #[cfg(test)]

@@ -96,7 +96,7 @@ impl HarnessAdapter for PiAdapter {
 
     fn discover(&self, context: &DiscoveryContext) -> Result<GraphFragment> {
         super::discover_with_state_root(context, HARNESS_KEY, |root| {
-            discover_state(root, context.caches())
+            Ok(discover_state(root, context.caches()))
         })
     }
 
@@ -196,9 +196,9 @@ fn settings_session_dir(settings: &Path) -> Option<PathBuf> {
     dir.is_absolute().then_some(dir)
 }
 
-fn discover_state(state_root: &Path, caches: &DiscoveryCaches) -> Result<GraphFragment> {
+fn discover_state(state_root: &Path, caches: &DiscoveryCaches) -> GraphFragment {
     if !state_root.is_dir() {
-        return Ok(GraphFragment::empty());
+        return GraphFragment::empty();
     }
 
     let state_scope = state_root.to_string_lossy().to_string();
@@ -233,7 +233,7 @@ fn discover_state(state_root: &Path, caches: &DiscoveryCaches) -> Result<GraphFr
         })
         .collect();
 
-    Ok(GraphFragment {
+    GraphFragment {
         nodes: sessions
             .into_values()
             .map(|session| GraphNode::AgentSession(session.node))
@@ -241,7 +241,7 @@ fn discover_state(state_root: &Path, caches: &DiscoveryCaches) -> Result<GraphFr
         candidate_links,
         diagnostics: Vec::new(),
         node_provenance: BTreeMap::new(),
-    })
+    }
 }
 
 /// Every `*.jsonl` directly under the root (flat layout) and one level

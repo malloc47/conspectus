@@ -512,7 +512,7 @@ impl LoopMode for StaticMode {
         app: &mut App,
         config: &RunConfig,
     ) -> Result<()> {
-        set_static_data(app, config, &self.snapshot)?;
+        set_static_data(app, config, &self.snapshot);
         Ok(())
     }
 
@@ -583,7 +583,7 @@ impl LoopMode for StaticMode {
                     match read_fixture(path) {
                         Ok(fresh) => {
                             self.snapshot = fresh;
-                            set_static_data(app, config, &self.snapshot)?;
+                            set_static_data(app, config, &self.snapshot);
                             app.update(Msg::SetStatus(Some(format!(
                                 "fixture reloaded from {}",
                                 path.display()
@@ -597,7 +597,7 @@ impl LoopMode for StaticMode {
                         }
                     }
                 } else {
-                    set_static_data(app, config, &self.snapshot)?;
+                    set_static_data(app, config, &self.snapshot);
                     app.update(Msg::SetStatus(Some(
                         "scenario snapshot reloaded".to_string(),
                     )));
@@ -930,11 +930,7 @@ fn static_apply_pins_msg(app: &mut App, msg: Msg) {
 }
 
 #[cfg(any(test, debug_assertions, feature = "snapshot"))]
-fn set_static_data(
-    app: &mut App,
-    config: &RunConfig,
-    snapshot: &crate::model::GraphSnapshot,
-) -> Result<()> {
+fn set_static_data(app: &mut App, config: &RunConfig, snapshot: &crate::model::GraphSnapshot) {
     let tree = crate::tui::rows::build_tree_for_view(crate::tui::rows::TreeInputs::from_app(
         snapshot, app,
     ));
@@ -947,7 +943,6 @@ fn set_static_data(
         initial_selection_hint,
     });
     populate_provider_status(app, config);
-    Ok(())
 }
 
 /// Whether a refresh first asks a running daemon to rescan.
@@ -1843,7 +1838,7 @@ pub(super) fn refresh_from_snapshot(
     app: &mut App,
     config: &RunConfig,
     snapshot: crate::model::GraphSnapshot,
-) -> Result<()> {
+) {
     let resolved = resolve_snapshot(snapshot);
     let tree = crate::tui::rows::build_tree_for_view(crate::tui::rows::TreeInputs::from_app(
         &resolved, app,
@@ -1857,7 +1852,6 @@ pub(super) fn refresh_from_snapshot(
         initial_selection_hint,
     });
     populate_provider_status(app, config);
-    Ok(())
 }
 
 pub(super) use crate::tui::keymap::{Action, SelectedDefault, selected_default_action};

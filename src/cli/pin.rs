@@ -395,7 +395,7 @@ impl PinRenameArgs {
         if self.new_id.is_none() && self.display.is_none() {
             bail!("`pin rename` requires either a new id, `--display <name>`, or both");
         }
-        let paths = candidate_pin_store_paths(&self.scan_roots)?;
+        let paths = candidate_pin_store_paths(&self.scan_roots);
         let Some((path, mut entry)) =
             load_pin_entry_by_id(&paths, &self.id).map_err(|err| anyhow!(err.to_string()))?
         else {
@@ -447,7 +447,7 @@ struct PinRmArgs {
 
 impl PinRmArgs {
     fn run(self) -> Result<()> {
-        let paths = candidate_pin_store_paths(&self.scan_roots)?;
+        let paths = candidate_pin_store_paths(&self.scan_roots);
         for path in &paths {
             let outcome =
                 remove_pin_entry(path, &self.id).map_err(|err| anyhow!(err.to_string()))?;
@@ -571,7 +571,7 @@ pub struct PinRebindArgs {
 
 impl PinRebindArgs {
     fn run(self) -> Result<()> {
-        let paths = candidate_pin_store_paths(&self.scan_roots)?;
+        let paths = candidate_pin_store_paths(&self.scan_roots);
         let Some((path, mut entry)) =
             load_pin_entry_by_id(&paths, &self.id).map_err(|err| anyhow!(err.to_string()))?
         else {
@@ -1237,7 +1237,7 @@ fn resolve_pin_write_store(
 /// Candidate stores `pin rename` / `pin rm` should look in. Order
 /// matters: project before user so a project-local pin shadows a
 /// same-id user pin, matching the resolver's local-over-global rule.
-fn candidate_pin_store_paths(scan_roots: &[PathBuf]) -> Result<Vec<PathBuf>> {
+fn candidate_pin_store_paths(scan_roots: &[PathBuf]) -> Vec<PathBuf> {
     let loader = ConfigLoader::from_env();
     let cwd = crate::cwd::current();
     let roots = effective_scan_roots(scan_roots, cwd.as_deref());
@@ -1255,7 +1255,7 @@ fn candidate_pin_store_paths(scan_roots: &[PathBuf]) -> Result<Vec<PathBuf>> {
     {
         paths.push(path);
     }
-    Ok(paths)
+    paths
 }
 
 fn discover_and_resolve(scan_roots: &[PathBuf]) -> Result<GraphSnapshot> {

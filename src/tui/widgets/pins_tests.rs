@@ -82,8 +82,8 @@ fn pins_menu_has_single_create_entry_without_adopt_peer() {
 fn selected_last_pin_action_scrolls_into_short_menu_body() {
     let cursor_line = pins_menu_cursor_line(PinsCursor::Action(PIN_ACTION_OPTIONS.len() - 1));
     let inner_height = 4;
-    let offset = scroll_offset_for_cursor(cursor_line, inner_height, pins_menu_content_lines());
-    let cursor_line = cursor_line.unwrap();
+    let offset =
+        scroll_offset_for_cursor(Some(cursor_line), inner_height, pins_menu_content_lines());
     assert!(offset > 0, "short pins menu should scroll");
     assert!(cursor_line >= offset as usize);
     assert!(cursor_line < offset as usize + inner_height);

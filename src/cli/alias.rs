@@ -48,6 +48,10 @@ struct AliasListArgs {
 }
 
 impl AliasListArgs {
+    #[allow(
+        clippy::unnecessary_wraps,
+        reason = "subcommands share the `run(self) -> Result<()>` shape the dispatcher calls"
+    )]
     fn run(self) -> Result<()> {
         let loader = ConfigLoader::from_env();
         let cwd = crate::cwd::current();

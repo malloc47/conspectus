@@ -241,7 +241,7 @@ fn execute_rename_plan(
         };
         println!("{verb} alias `{}` in {}", display_name, path.display());
     } else {
-        let stores = candidate_store_paths(store, scan_roots)?;
+        let stores = candidate_store_paths(store, scan_roots);
         let mut removed_from = None;
         for path in &stores {
             if !path.is_file() {

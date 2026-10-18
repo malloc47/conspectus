@@ -121,11 +121,11 @@ pub fn run(config: RunConfig, snap: SnapshotConfig) -> Result<()> {
         if let Some(export_path) = snap.export_fixture.as_deref() {
             write_fixture(export_path, &snapshot)?;
         }
-        refresh_from_snapshot(&mut app, &config, snapshot)?;
+        refresh_from_snapshot(&mut app, &config, snapshot);
     } else if let Some(export_path) = snap.export_fixture.as_deref() {
         let snapshot = runtime::discover_and_resolve(&config)?;
         write_fixture(export_path, &snapshot)?;
-        refresh_from_snapshot(&mut app, &config, snapshot)?;
+        refresh_from_snapshot(&mut app, &config, snapshot);
     } else {
         refresh(&mut app, &config);
     }

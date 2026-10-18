@@ -171,7 +171,7 @@ fn session_mux_app() -> (App, RunConfig) {
     ));
     let config = RunConfig::defaults();
     let mut app = App::new(config.clone());
-    refresh_from_snapshot(&mut app, &config, snapshot).expect("load snapshot");
+    refresh_from_snapshot(&mut app, &config, snapshot);
     (app, config)
 }
 

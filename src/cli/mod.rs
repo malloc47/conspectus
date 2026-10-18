@@ -737,7 +737,7 @@ pub(super) fn discover_for_store_selection(scan_roots: &[PathBuf]) -> Result<Gra
 pub(super) fn candidate_store_paths(
     store: Option<DeclaredStoreFlag>,
     scan_roots: &[PathBuf],
-) -> Result<Vec<PathBuf>> {
+) -> Vec<PathBuf> {
     let loader = ConfigLoader::from_env();
     let mut paths = Vec::new();
 
@@ -767,5 +767,5 @@ pub(super) fn candidate_store_paths(
         paths.push(path);
     }
 
-    Ok(paths)
+    paths
 }

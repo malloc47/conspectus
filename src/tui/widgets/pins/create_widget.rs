@@ -119,7 +119,7 @@ impl Widget for PinCreateWidget<'_> {
 
         let body = ScrollLinesBody {
             scroll_offset: scroll_offset_for_cursor(
-                pin_create_cursor_line(self.state),
+                Some(pin_create_cursor_line(self.state)),
                 modal.height.saturating_sub(2) as usize,
                 lines.len(),
             ),
@@ -739,14 +739,14 @@ pub(super) fn pin_create_modal_rect(area: Rect, content_lines: usize) -> Rect {
     modal_rect_for_content(area, width, content_lines, 10)
 }
 
-pub(super) fn pin_create_cursor_line(state: &PinCreateState) -> Option<usize> {
+pub(super) fn pin_create_cursor_line(state: &PinCreateState) -> usize {
     let cursor = state.logical_cursor();
     let mut line_idx = 0;
     for field in state.visible_fields() {
         if field == cursor {
-            return Some(line_idx);
+            return line_idx;
         }
         line_idx += 1;
     }
-    Some(line_idx)
+    line_idx
 }

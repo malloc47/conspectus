@@ -34,7 +34,7 @@ impl Widget for PinsOverlayWidget<'_> {
         let theme = self.theme;
         let body = ScrollLinesBody {
             scroll_offset: scroll_offset_for_cursor(
-                pins_menu_cursor_line(cursor),
+                Some(pins_menu_cursor_line(cursor)),
                 modal.height.saturating_sub(2) as usize,
                 lines.len(),
             ),
@@ -164,7 +164,7 @@ impl Widget for PinEditWidget<'_> {
 
         let body = ScrollLinesBody {
             scroll_offset: scroll_offset_for_cursor(
-                pin_edit_cursor_line(state),
+                Some(pin_edit_cursor_line(state)),
                 modal.height.saturating_sub(2) as usize,
                 lines.len(),
             ),
@@ -176,14 +176,14 @@ impl Widget for PinEditWidget<'_> {
     }
 }
 
-pub(super) fn pin_edit_cursor_line(state: &PinEditState) -> Option<usize> {
+pub(super) fn pin_edit_cursor_line(state: &PinEditState) -> usize {
     let cursor = state.logical_cursor();
     for (idx, field) in state.visible_fields().into_iter().enumerate() {
         if field == cursor {
-            return Some(idx);
+            return idx;
         }
     }
-    Some(0)
+    0
 }
 
 pub(super) fn pin_edit_static_line(
@@ -392,9 +392,9 @@ pub(super) fn pins_menu_content_lines() -> usize {
     PIN_ACTION_OPTIONS.len() + 2
 }
 
-pub(super) fn pins_menu_cursor_line(cursor: PinsCursor) -> Option<usize> {
+pub(super) fn pins_menu_cursor_line(cursor: PinsCursor) -> usize {
     let PinsCursor::Action(idx) = cursor;
-    Some(idx)
+    idx
 }
 
 pub(super) struct ScrollLinesBody {

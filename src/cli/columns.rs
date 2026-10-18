@@ -36,6 +36,10 @@ pub(super) struct ColumnsArgs {
 }
 
 impl ColumnsArgs {
+    #[allow(
+        clippy::unnecessary_wraps,
+        reason = "subcommands share the `run(self) -> Result<()>` shape the dispatcher calls"
+    )]
     pub(super) fn run(self) -> Result<()> {
         let projection = match config::Projection::parse(&self.row_type) {
             Ok(value) => value,

@@ -75,6 +75,10 @@ struct DeclaredListArgs {
 }
 
 impl DeclaredListArgs {
+    #[allow(
+        clippy::unnecessary_wraps,
+        reason = "subcommands share the `run(self) -> Result<()>` shape the dispatcher calls"
+    )]
     fn run(self) -> Result<()> {
         let loader = config::ConfigLoader::from_env();
         let cwd = crate::cwd::current();
@@ -224,7 +228,7 @@ struct DeclaredIdArgs {
 
 impl DeclaredIdArgs {
     fn run_remove(self) -> Result<()> {
-        let stores = candidate_store_paths(self.store, &self.scan_roots)?;
+        let stores = candidate_store_paths(self.store, &self.scan_roots);
         let mut removed_from = None;
         for path in &stores {
             if !path.is_file() {
@@ -317,7 +321,7 @@ struct DeclaredOverrideArgs {
 
 impl DeclaredOverrideArgs {
     fn run(self) -> Result<()> {
-        let stores = candidate_store_paths(self.store, &self.scan_roots)?;
+        let stores = candidate_store_paths(self.store, &self.scan_roots);
         let (path, existing) = load_declared_link_by_id(&stores, &self.id)
             .map_err(|err| anyhow!(err.to_string()))?
             .ok_or_else(|| {

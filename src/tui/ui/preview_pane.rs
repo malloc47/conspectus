@@ -191,7 +191,7 @@ fn field_view(
 ) -> PreviewView {
     use crate::tui::explorer::FieldValue;
     if let Some(lines) =
-        crate::tui::preview::value_lines(value, crate::tui::rows::tree_current_unix_epoch())
+        crate::tui::preview::value_lines(value, Some(crate::tui::rows::tree_current_unix_epoch()))
     {
         return PreviewView::text(lines);
     }

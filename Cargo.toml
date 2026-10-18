@@ -48,10 +48,16 @@ stable_sort_primitive = "deny"
 uninlined_format_args = "deny"
 unnecessary_struct_initialization = "deny"
 unnested_or_patterns = "deny"
+unnecessary_wraps = "deny"
 # One arm per input case reads better than a merged `A | B | C =>`
 # pattern in the lookup tables (`tui/detail.rs`, `tui/explorer.rs`,
 # `discovery/pins.rs`), so this one stays allowed.
 match_same_arms = "allow"
+# Passing by value is how this codebase spells named arguments (row and
+# detail builders take an `…Inputs<'_>` struct of borrows), moves values
+# into threads and out of effect enums, and passes small enums; taking
+# references there would make the APIs worse without saving a copy.
+needless_pass_by_value = "allow"
 
 [lints.rustdoc]
 broken_intra_doc_links = "deny"
