@@ -100,8 +100,8 @@ pass; the catalog lives in one place so updates are local):
 | `ForksRepo` | `forks repo` | `forked by` |
 | `CreatedCheckout` | `created` | `created by` |
 | `ReferencedCheckout` | `references` | `referenced by` |
-| `ParentSession` | `parent of` | `child of` |
-| `ChildSession` | `child of` | `parent of` |
+| `ParentSession` | `child of` | `parent of` |
+| `ChildSession` | `parent of` | `child of` |
 | `CreatedBranch` | `created branch` | `created by` |
 | `AssociatedBranch` | `associated branch` | `associated by` |
 | `ParentFork` | `forked from` | `forked by` |
@@ -109,6 +109,13 @@ pass; the catalog lives in one place so updates are local):
 | `MuxContainsProcess` | `contains process` | `in mux` |
 | `ProcessIdentifiesSession` | `identifies` | `identified by` |
 | `ProcessCandidatesSession` | `candidate for` | `candidate process` |
+
+The lineage rows follow the link orientation every adapter emits: a
+`parent_session` link runs from the child (or a `Fork`) to the parent,
+and a `child_session` link from a `Fork` to the child. So the source of
+a `parent_session` link is a child of its neighbor, and the source of a
+`child_session` link is a parent of its neighbor. The catalog first
+shipped with these two rows swapped.
 
 Open question (a) from the backlog stays open: for relations whose
 verbs read identically in both directions (`AssociatedWith` is the

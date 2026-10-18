@@ -20,8 +20,8 @@ fn directional_verb_catalog_is_exhaustive_and_disambiguates_inverses() {
         (RelationKind::WorkspaceContainsRepo, "contains", "member of"),
         (RelationKind::LinkedToMux, "attached to", "attached session"),
         (RelationKind::ParentFork, "forked from", "forked by"),
-        (RelationKind::ChildSession, "child of", "parent of"),
-        (RelationKind::ParentSession, "parent of", "child of"),
+        (RelationKind::ChildSession, "parent of", "child of"),
+        (RelationKind::ParentSession, "child of", "parent of"),
         (
             RelationKind::MuxContainsProcess,
             "contains process",
@@ -1582,4 +1582,102 @@ fn neighbor_row_key_survives_a_change_of_representative_link() {
         ExplorerRowKey::ValidatedLink(NeighborRowKey { ref neighbor, .. })
             if *neighbor == NodeId::MuxSession(MuxSessionId::new("main"))
     ));
+}
+
+/// The verb each end of a lineage link renders, read as
+/// `<focused> <verb> <neighbor>`.
+fn lineage_verb(
+    snapshot: &GraphSnapshot,
+    focused: &NodeId,
+    relation: RelationKind,
+) -> &'static str {
+    let view = build(snapshot, focused, Some(home().as_path()));
+    let group = view
+        .relationships
+        .groups
+        .iter()
+        .find(|g| g.relation == relation)
+        .unwrap_or_else(|| panic!("{relation:?} group on {focused}"));
+    directional_verb(&group.relation, group.direction)
+}
+
+#[test]
+fn session_lineage_reads_child_of_from_the_child_and_parent_of_from_the_parent() {
+    let mut snapshot = GraphSnapshot::empty();
+    snapshot
+        .nodes
+        .push(agent("codex", "parent", Some("/x"), None));
+    snapshot
+        .nodes
+        .push(agent("codex", "child", Some("/x"), None));
+    let parent = NodeId::AgentSession(AgentSessionId::new("codex", "/state", "parent"));
+    let child = NodeId::AgentSession(AgentSessionId::new("codex", "/state", "child"));
+    snapshot.candidate_links.push(link(
+        "lineage",
+        child.clone(),
+        parent.clone(),
+        RelationKind::ParentSession,
+    ));
+    let snapshot = resolve_snapshot(snapshot);
+
+    assert_eq!(
+        lineage_verb(&snapshot, &child, RelationKind::ParentSession),
+        "child of"
+    );
+    assert_eq!(
+        lineage_verb(&snapshot, &parent, RelationKind::ParentSession),
+        "parent of"
+    );
+}
+
+#[test]
+fn fork_lineage_reads_correctly_from_both_ends() {
+    let mut snapshot = GraphSnapshot::empty();
+    let fork = NodeId::Fork(crate::model::ForkId::new("atelier/fork-1"));
+    snapshot.nodes.push(GraphNode::Fork(crate::model::ForkNode {
+        id: crate::model::ForkId::new("atelier/fork-1"),
+        provider: "atelier".to_string(),
+        provider_source_key: "fork-1".to_string(),
+        name: None,
+        scope: None,
+        capabilities: Vec::new(),
+    }));
+    snapshot
+        .nodes
+        .push(agent("claude-code", "origin", Some("/x"), None));
+    snapshot
+        .nodes
+        .push(agent("claude-code", "forked", Some("/x"), None));
+    let origin = NodeId::AgentSession(AgentSessionId::new("claude-code", "/state", "origin"));
+    let forked = NodeId::AgentSession(AgentSessionId::new("claude-code", "/state", "forked"));
+    snapshot.candidate_links.push(link(
+        "fork-parent",
+        fork.clone(),
+        origin.clone(),
+        RelationKind::ParentSession,
+    ));
+    snapshot.candidate_links.push(link(
+        "fork-child",
+        fork.clone(),
+        forked.clone(),
+        RelationKind::ChildSession,
+    ));
+    let snapshot = resolve_snapshot(snapshot);
+
+    assert_eq!(
+        lineage_verb(&snapshot, &fork, RelationKind::ParentSession),
+        "child of"
+    );
+    assert_eq!(
+        lineage_verb(&snapshot, &origin, RelationKind::ParentSession),
+        "parent of"
+    );
+    assert_eq!(
+        lineage_verb(&snapshot, &fork, RelationKind::ChildSession),
+        "parent of"
+    );
+    assert_eq!(
+        lineage_verb(&snapshot, &forked, RelationKind::ChildSession),
+        "child of"
+    );
 }

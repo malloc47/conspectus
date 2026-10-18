@@ -342,10 +342,13 @@ pub fn directional_verb(relation: &RelationKind, direction: Direction) -> &'stat
         (CreatedCheckout, Upstream) => "created by",
         (ReferencedCheckout, Downstream) => "references",
         (ReferencedCheckout, Upstream) => "referenced by",
-        (ParentSession, Downstream) => "parent of",
-        (ParentSession, Upstream) => "child of",
-        (ChildSession, Downstream) => "child of",
-        (ChildSession, Upstream) => "parent of",
+        // A `parent_session` link points at the parent and a
+        // `child_session` link at the child, so the source reads as the
+        // other side of the pair.
+        (ParentSession, Downstream) => "child of",
+        (ParentSession, Upstream) => "parent of",
+        (ChildSession, Downstream) => "parent of",
+        (ChildSession, Upstream) => "child of",
         (CreatedBranch, Downstream) => "created branch",
         (CreatedBranch, Upstream) => "created by",
         (AssociatedBranch, Downstream) => "associated branch",
