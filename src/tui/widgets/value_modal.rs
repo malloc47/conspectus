@@ -14,7 +14,7 @@
 //! - `g` / `G` jump to the top / bottom.
 
 use ratatui::buffer::Buffer;
-use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+use ratatui::crossterm::event::KeyEvent;
 use ratatui::layout::Rect;
 use ratatui::macros::{line, span};
 use ratatui::style::{Modifier, Style};
@@ -48,38 +48,34 @@ impl ValueModalState {
     /// [`ValueModalOutcome::Close`] when the modal should close,
     /// otherwise [`ValueModalOutcome::Continue`].
     pub fn handle_key(&mut self, event: KeyEvent) -> ValueModalOutcome {
-        if event.modifiers.contains(KeyModifiers::CONTROL)
-            && matches!(event.code, KeyCode::Char('c'))
-        {
-            return ValueModalOutcome::Close;
-        }
-        match event.code {
-            KeyCode::Esc | KeyCode::Char('q' | 'o') => ValueModalOutcome::Close,
-            KeyCode::Char('j') | KeyCode::Down => {
+        use crate::tui::keybindings::overlay::{PagerKey, VALUE_MODAL_KEYS, resolve};
+        match resolve(VALUE_MODAL_KEYS, event) {
+            Some(PagerKey::Abort | PagerKey::Close) => ValueModalOutcome::Close,
+            Some(PagerKey::Down) => {
                 self.scroll_by(1);
                 ValueModalOutcome::Continue
             }
-            KeyCode::Char('k') | KeyCode::Up => {
+            Some(PagerKey::Up) => {
                 self.scroll_by(-1);
                 ValueModalOutcome::Continue
             }
-            KeyCode::PageDown | KeyCode::Char(' ') => {
+            Some(PagerKey::PageDown) => {
                 self.scroll_by(8);
                 ValueModalOutcome::Continue
             }
-            KeyCode::PageUp => {
+            Some(PagerKey::PageUp) => {
                 self.scroll_by(-8);
                 ValueModalOutcome::Continue
             }
-            KeyCode::Char('g') | KeyCode::Home => {
+            Some(PagerKey::Top) => {
                 self.scroll = 0;
                 ValueModalOutcome::Continue
             }
-            KeyCode::Char('G') | KeyCode::End => {
+            Some(PagerKey::Bottom) => {
                 self.scroll = u16::MAX;
                 ValueModalOutcome::Continue
             }
-            _ => ValueModalOutcome::Continue,
+            None => ValueModalOutcome::Continue,
         }
     }
 
@@ -171,6 +167,7 @@ impl Widget for ValueModalBody<'_> {
 mod tests {
     use super::*;
     use ratatui::crossterm::event::KeyEvent;
+    use ratatui::crossterm::event::{KeyCode, KeyModifiers};
 
     fn press(code: KeyCode) -> KeyEvent {
         KeyEvent::new(code, KeyModifiers::NONE)

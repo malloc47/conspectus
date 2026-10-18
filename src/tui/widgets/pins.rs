@@ -501,9 +501,9 @@ impl PinsOverlayState {
     /// Dispatch a crossterm key event. Returns the outcome the caller
     /// should apply.
     pub fn handle_key(&mut self, ctx: &PinsContext, event: KeyEvent) -> PinsOutcome {
-        if event.modifiers.contains(KeyModifiers::CONTROL)
-            && matches!(event.code, KeyCode::Char('c'))
-        {
+        use crate::tui::keybindings::overlay::{MENU_KEYS, MenuKey, resolve};
+        let action = resolve(MENU_KEYS, event);
+        if action == Some(MenuKey::Abort) {
             return PinsOutcome::Close;
         }
 
@@ -511,18 +511,18 @@ impl PinsOverlayState {
             return Self::dispatch_sub_editor(&mut self.sub_editor, event);
         }
 
-        match event.code {
-            KeyCode::Esc => PinsOutcome::Close,
-            KeyCode::Up | KeyCode::Char('k') => {
+        match action {
+            Some(MenuKey::Abort | MenuKey::Close) => PinsOutcome::Close,
+            Some(MenuKey::Up) => {
                 self.cursor = move_cursor(self.cursor, -1);
                 PinsOutcome::Continue
             }
-            KeyCode::Down | KeyCode::Char('j') => {
+            Some(MenuKey::Down) => {
                 self.cursor = move_cursor(self.cursor, 1);
                 PinsOutcome::Continue
             }
-            KeyCode::Enter => self.activate(ctx),
-            _ => PinsOutcome::Continue,
+            Some(MenuKey::Pick) => self.activate(ctx),
+            None => PinsOutcome::Continue,
         }
     }
 

@@ -28,7 +28,7 @@
 //! mutates the app directly.
 
 use ratatui::buffer::Buffer;
-use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+use ratatui::crossterm::event::KeyEvent;
 use ratatui::layout::Rect;
 use ratatui::macros::{line, span};
 use ratatui::style::{Modifier, Style};
@@ -192,9 +192,9 @@ impl ControlsOverlayState {
     /// caller should apply (or [`ControlsOutcome::Continue`] for
     /// in-overlay navigation that didn't change anything).
     pub fn handle_key(&mut self, ctx: &ControlsContext<'_>, event: KeyEvent) -> ControlsOutcome {
-        if event.modifiers.contains(KeyModifiers::CONTROL)
-            && matches!(event.code, KeyCode::Char('c'))
-        {
+        use crate::tui::keybindings::overlay::{MENU_KEYS, MenuKey, resolve};
+        let action = resolve(MENU_KEYS, event);
+        if action == Some(MenuKey::Abort) {
             return ControlsOutcome::Close;
         }
 
@@ -206,18 +206,18 @@ impl ControlsOverlayState {
             return Self::dispatch_sub_editor(&mut self.sub_editor, ctx, event);
         }
 
-        match event.code {
-            KeyCode::Esc => ControlsOutcome::Close,
-            KeyCode::Up | KeyCode::Char('k') => {
+        match action {
+            Some(MenuKey::Abort | MenuKey::Close) => ControlsOutcome::Close,
+            Some(MenuKey::Up) => {
                 self.cursor = move_cursor(self.cursor, ctx, -1);
                 ControlsOutcome::Continue
             }
-            KeyCode::Down | KeyCode::Char('j') => {
+            Some(MenuKey::Down) => {
                 self.cursor = move_cursor(self.cursor, ctx, 1);
                 ControlsOutcome::Continue
             }
-            KeyCode::Enter => self.activate(ctx),
-            _ => ControlsOutcome::Continue,
+            Some(MenuKey::Pick) => self.activate(ctx),
+            None => ControlsOutcome::Continue,
         }
     }
 
@@ -563,7 +563,7 @@ impl Widget for ControlsOverlayWidget<'_> {
         let mut lines = self.body_lines();
         lines.push(Line::default());
         lines.push(Line::from(
-            span!(Modifier::DIM; "↑/↓ move · Enter pick · Esc close"),
+            span!(Modifier::DIM; "{}", crate::tui::keybindings::overlay::footer(crate::tui::keybindings::overlay::MENU_KEYS)),
         ));
         let modal = centered_modal_rect_for_content(area, lines.len());
         let inner_height = modal.height.saturating_sub(2) as usize;

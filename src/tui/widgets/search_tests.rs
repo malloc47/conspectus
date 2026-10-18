@@ -2,6 +2,7 @@ use super::*;
 use crate::model::{AgentSessionId, NodeId};
 use crate::tui::rows::{AgentSessionRow, MuxIndicator, Row, RowKind};
 use crate::tui::search::items_from_rows;
+use ratatui::crossterm::event::{KeyCode, KeyModifiers};
 use ratatui::crossterm::event::{KeyEventKind, KeyEventState};
 
 fn key(code: KeyCode) -> KeyEvent {

@@ -8,7 +8,7 @@
 //! handling land once instead of three times.
 
 use ratatui::buffer::Buffer;
-use ratatui::crossterm::event::{Event as CrosstermEvent, KeyCode, KeyEvent, KeyModifiers};
+use ratatui::crossterm::event::{Event as CrosstermEvent, KeyEvent};
 use ratatui::layout::Rect;
 use ratatui::style::{Modifier, Style};
 use ratatui::text::Line;
@@ -70,27 +70,18 @@ impl TextInputState {
     /// locks the surrounding `Tab` focus cycle, so `Tab` is
     /// swallowed here (the line editor itself drops it too).
     pub fn handle_key(&mut self, event: KeyEvent) -> InputOutcome {
-        match event.code {
-            KeyCode::Enter => InputOutcome::Confirm(self.input.value().to_string()),
-            KeyCode::Esc => InputOutcome::Cancel,
-            KeyCode::Tab => InputOutcome::Continue,
-            _ => {
-                if event.modifiers.contains(KeyModifiers::CONTROL)
-                    && matches!(event.code, KeyCode::Char('c'))
-                {
-                    return InputOutcome::Cancel;
-                }
+        use crate::tui::keybindings::overlay::{TEXT_INPUT_KEYS, TextInputKey, resolve};
+        match resolve(TEXT_INPUT_KEYS, event) {
+            Some(TextInputKey::Confirm) => InputOutcome::Confirm(self.input.value().to_string()),
+            Some(TextInputKey::Abort | TextInputKey::Cancel) => InputOutcome::Cancel,
+            Some(TextInputKey::Tab) => InputOutcome::Continue,
+            None => {
                 self.input.handle_event(&CrosstermEvent::Key(event));
                 InputOutcome::Continue
             }
         }
     }
 }
-
-/// Status-bar legend rendered while the overlay is open. Mirrors
-/// ADR 0030's locked key map so the operator always sees the
-/// active bindings.
-pub const STATUS_LEGEND: &str = "Enter confirm · Esc cancel";
 
 /// Centered modal rendering of [`TextInputState`]. Defaults to the
 /// upstream popup palette when no `.theme(&Theme)` is provided so

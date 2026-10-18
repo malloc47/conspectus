@@ -15,7 +15,7 @@
 //! `?` help overlay and the `n` binding in the KEYBINDINGS table.
 
 use ratatui::buffer::Buffer;
-use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+use ratatui::crossterm::event::KeyEvent;
 use ratatui::layout::Rect;
 use ratatui::style::{Modifier, Style};
 use ratatui::text::Line;
@@ -120,17 +120,15 @@ impl Overlay for NewMuxFormState {
     fn handle(&mut self, _ctx: (), key: KeyEvent) -> OverlayOutcome {
         // Global chords first (Tab / Esc / Ctrl-C) so they can't be
         // stolen by the line editor.
-        match key.code {
-            KeyCode::Esc => return OverlayOutcome::Close,
-            KeyCode::Tab => {
+        use crate::tui::keybindings::overlay::{NEW_MUX_KEYS, NewMuxKey, resolve};
+        match resolve(NEW_MUX_KEYS, key) {
+            Some(NewMuxKey::Abort | NewMuxKey::Cancel) => return OverlayOutcome::Close,
+            Some(NewMuxKey::SwitchField) => {
                 self.focus = self.focus.toggle();
                 return OverlayOutcome::Consumed;
             }
-            KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => {
-                return OverlayOutcome::Close;
-            }
-            KeyCode::Enter => return self.try_commit(),
-            _ => {}
+            Some(NewMuxKey::Commit) => return self.try_commit(),
+            None => {}
         }
         match self.active_input_mut().handle_key(key) {
             InputOutcome::Continue => OverlayOutcome::Consumed,
@@ -172,7 +170,9 @@ impl Widget for NewMuxFormWidget<'_> {
             name_line,
             cwd_line,
             Line::from(""),
-            Line::from("Tab switch field · Enter next/commit · Esc cancel"),
+            Line::from(crate::tui::keybindings::overlay::footer(
+                crate::tui::keybindings::overlay::NEW_MUX_KEYS,
+            )),
         ];
 
         let height = u16::try_from(lines.len())

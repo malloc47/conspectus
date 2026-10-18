@@ -16,7 +16,7 @@
 //! discoverability once operator muscle memory settles.
 
 use ratatui::buffer::Buffer;
-use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+use ratatui::crossterm::event::KeyEvent;
 use ratatui::layout::Rect;
 use ratatui::style::{Modifier, Style};
 use ratatui::text::Line;
@@ -79,26 +79,24 @@ impl Overlay for MuxMenuState {
     type Ctx<'a> = ();
 
     fn handle(&mut self, _ctx: (), key: KeyEvent) -> OverlayOutcome {
-        match key.code {
-            KeyCode::Esc => OverlayOutcome::Close,
-            KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => {
-                OverlayOutcome::Close
-            }
-            KeyCode::Up | KeyCode::Char('k') => {
+        use crate::tui::keybindings::overlay::{MENU_KEYS, MenuKey, resolve};
+        match resolve(MENU_KEYS, key) {
+            Some(MenuKey::Abort | MenuKey::Close) => OverlayOutcome::Close,
+            Some(MenuKey::Up) => {
                 self.cursor = self.cursor.saturating_sub(1);
                 OverlayOutcome::Consumed
             }
-            KeyCode::Down | KeyCode::Char('j') => {
+            Some(MenuKey::Down) => {
                 self.cursor = (self.cursor + 1).min(MENU_ENTRIES.len() - 1);
                 OverlayOutcome::Consumed
             }
-            KeyCode::Enter => match self.selected() {
+            Some(MenuKey::Pick) => match self.selected() {
                 MuxMenuChoice::NewBareMux => OverlayOutcome::Commit(Box::new(Msg::OpenNewMuxForm)),
                 MuxMenuChoice::LaunchHarnessMux => {
                     OverlayOutcome::Commit(Box::new(Msg::OpenMuxLaunchForm))
                 }
             },
-            _ => OverlayOutcome::Consumed,
+            None => OverlayOutcome::Consumed,
         }
     }
 }
@@ -135,7 +133,9 @@ impl Widget for MuxMenuWidget<'_> {
             lines.push(Line::from(format!("     {}", entry.subtitle())));
         }
         lines.push(Line::from(""));
-        lines.push(Line::from("↑/↓ move · Enter pick · Esc close"));
+        lines.push(Line::from(crate::tui::keybindings::overlay::footer(
+            crate::tui::keybindings::overlay::MENU_KEYS,
+        )));
 
         let height = u16::try_from(lines.len())
             .unwrap_or(u16::MAX)
@@ -157,6 +157,7 @@ impl Widget for MuxMenuWidget<'_> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use ratatui::crossterm::event::{KeyCode, KeyModifiers};
 
     fn key(code: KeyCode) -> KeyEvent {
         KeyEvent::new(code, KeyModifiers::NONE)

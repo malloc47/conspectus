@@ -40,9 +40,10 @@ pub(super) fn open_rename_overlay(app: &mut App) {
     };
     let state = crate::tui::widgets::input::TextInputState::new(title, initial);
     app.open_rename_overlay(state);
-    app.update(Msg::SetStatus(Some(
-        "rename: Enter confirm · Esc cancel".to_string(),
-    )));
+    app.update(Msg::SetStatus(Some(format!(
+        "rename: {}",
+        crate::tui::keybindings::overlay::footer(crate::tui::keybindings::overlay::TEXT_INPUT_KEYS)
+    ))));
 }
 
 /// Forward `key` to the open rename overlay, then act on the
@@ -231,9 +232,9 @@ pub(in crate::tui) fn handle_messages_overlay_key(
     app: &mut App,
     key: ratatui::crossterm::event::KeyEvent,
 ) {
+    use crate::tui::keybindings::overlay::{MESSAGES_KEYS, MessagesKey, resolve};
     use crate::tui::{Overlay, OverlayOutcome};
-    use ratatui::crossterm::event::{KeyCode, KeyModifiers};
-    if key.code == KeyCode::Char('y') && !key.modifiers.contains(KeyModifiers::CONTROL) {
+    if resolve(MESSAGES_KEYS, key) == Some(MessagesKey::Copy) {
         let text = app
             .messages_overlay()
             .and_then(|state| state.selected_entry(app.messages()))

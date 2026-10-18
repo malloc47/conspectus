@@ -28,6 +28,7 @@ use crate::tui::View;
 use crate::tui::actions::{AttachTarget, PinLaunchTarget};
 use crate::tui::app::{App, Msg, SnapshotHandle};
 use crate::tui::effect::Effect;
+use crate::tui::keybindings::overlay as overlay_keymap;
 use crate::tui::preview::{
     PreviewContent, PreviewSource, capture_via, load_offline_preview, pane_native_id,
     preview_source,
@@ -396,16 +397,18 @@ impl LoopMode for LiveMode {
             }
             Some(Action::OpenControls) => {
                 app.open_controls_overlay();
-                app.update(Msg::SetStatus(Some(
-                    "controls: ↑/↓ move · Enter pick · Esc close".to_string(),
-                )));
+                app.update(Msg::SetStatus(Some(format!(
+                    "controls: {}",
+                    overlay_keymap::footer(overlay_keymap::MENU_KEYS)
+                ))));
             }
             Some(Action::ControlsOverlayKey(key)) => handle_controls_overlay_key(app, key),
             Some(Action::OpenPins) => {
                 app.open_pins_overlay();
-                app.update(Msg::SetStatus(Some(
-                    "pins: ↑/↓ move · Enter pick · Esc close".to_string(),
-                )));
+                app.update(Msg::SetStatus(Some(format!(
+                    "pins: {}",
+                    overlay_keymap::footer(overlay_keymap::MENU_KEYS)
+                ))));
             }
             Some(Action::PinsOverlayKey(key)) => {
                 route_pins_overlay_key(app, key, |app, msg| {
@@ -544,16 +547,18 @@ impl LoopMode for StaticMode {
             Some(Action::SearchOverlayKey(key)) => handle_search_overlay_key(app, key),
             Some(Action::OpenControls) => {
                 app.open_controls_overlay();
-                app.update(Msg::SetStatus(Some(
-                    "controls: ↑/↓ move · Enter pick · Esc close".to_string(),
-                )));
+                app.update(Msg::SetStatus(Some(format!(
+                    "controls: {}",
+                    overlay_keymap::footer(overlay_keymap::MENU_KEYS)
+                ))));
             }
             Some(Action::ControlsOverlayKey(key)) => handle_controls_overlay_key(app, key),
             Some(Action::OpenPins) => {
                 app.open_pins_overlay();
-                app.update(Msg::SetStatus(Some(
-                    "pins: ↑/↓ move · Enter pick · Esc close".to_string(),
-                )));
+                app.update(Msg::SetStatus(Some(format!(
+                    "pins: {}",
+                    overlay_keymap::footer(overlay_keymap::MENU_KEYS)
+                ))));
             }
             Some(Action::PinsOverlayKey(key)) => {
                 route_pins_overlay_key(app, key, static_apply_pins_msg);

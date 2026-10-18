@@ -11,7 +11,7 @@
 //! - `Esc` / `q` / `!` close.
 
 use ratatui::buffer::Buffer;
-use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+use ratatui::crossterm::event::KeyEvent;
 use ratatui::layout::Rect;
 use ratatui::macros::{line, span};
 use ratatui::style::{Modifier, Style};
@@ -58,23 +58,22 @@ impl crate::tui::Overlay for MessagesOverlayState {
 
     fn handle(&mut self, log: &MessageLog, key: KeyEvent) -> crate::tui::OverlayOutcome {
         use crate::tui::OverlayOutcome;
-        if key.modifiers.contains(KeyModifiers::CONTROL) && key.code == KeyCode::Char('c') {
-            return OverlayOutcome::Close;
-        }
+        use crate::tui::keybindings::overlay::{MESSAGES_KEYS, MessagesKey, resolve};
         let len = log.len();
-        match key.code {
-            KeyCode::Esc | KeyCode::Char('q' | '!') => return OverlayOutcome::Close,
-            KeyCode::Char('j') | KeyCode::Down => self.select(self.selected + 1, len),
-            KeyCode::Char('k') | KeyCode::Up => {
+        match resolve(MESSAGES_KEYS, key) {
+            Some(MessagesKey::Abort | MessagesKey::Close) => return OverlayOutcome::Close,
+            Some(MessagesKey::Next) => self.select(self.selected + 1, len),
+            Some(MessagesKey::Prev) => {
                 self.select(self.selected.saturating_sub(1), len);
             }
-            KeyCode::Char('g') | KeyCode::Home => self.select(0, len),
-            KeyCode::Char('G') | KeyCode::End => self.select(len.saturating_sub(1), len),
-            KeyCode::Char('J') => self.scroll_detail(1),
-            KeyCode::Char('K') => self.scroll_detail(-1),
-            KeyCode::PageDown | KeyCode::Char(' ') => self.scroll_detail(8),
-            KeyCode::PageUp => self.scroll_detail(-8),
-            _ => {}
+            Some(MessagesKey::First) => self.select(0, len),
+            Some(MessagesKey::Last) => self.select(len.saturating_sub(1), len),
+            Some(MessagesKey::DetailDown) => self.scroll_detail(1),
+            Some(MessagesKey::DetailUp) => self.scroll_detail(-1),
+            Some(MessagesKey::DetailPageDown) => self.scroll_detail(8),
+            Some(MessagesKey::DetailPageUp) => self.scroll_detail(-8),
+            // The runtime copies before the key reaches the widget.
+            Some(MessagesKey::Copy) | None => {}
         }
         OverlayOutcome::Consumed
     }
@@ -160,7 +159,8 @@ impl Widget for MessagesBody<'_, '_> {
         } = *self.widget;
         let footer = line![span!(
             Style::default().add_modifier(theme.placeholder);
-            "j/k select · J/K scroll detail · y copy · Esc close"
+            "{}",
+            crate::tui::keybindings::overlay::footer(crate::tui::keybindings::overlay::MESSAGES_KEYS)
         )];
         if log.is_empty() {
             Paragraph::new(vec![

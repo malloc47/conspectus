@@ -18,6 +18,8 @@
 
 use ratatui::crossterm::event::{KeyCode, KeyModifiers};
 
+pub mod overlay;
+
 use crate::tui::View;
 use crate::tui::keymap::Action;
 

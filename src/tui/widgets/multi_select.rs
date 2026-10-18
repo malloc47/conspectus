@@ -17,7 +17,7 @@
 //! widget falls back to the upstream dark palette.
 
 use ratatui::buffer::Buffer;
-use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+use ratatui::crossterm::event::KeyEvent;
 use ratatui::layout::Rect;
 use ratatui::macros::line;
 use ratatui::style::{Modifier, Style};
@@ -157,27 +157,23 @@ impl MultiSelectState {
     /// upstream `next` / `prev` / `toggle_current` are all no-ops on
     /// an empty option set.
     pub fn handle_key(&mut self, event: KeyEvent) -> MultiSelectOutcome {
-        if event.modifiers.contains(KeyModifiers::CONTROL)
-            && matches!(event.code, KeyCode::Char('c'))
-        {
-            return MultiSelectOutcome::Cancel;
-        }
-        match event.code {
-            KeyCode::Enter => MultiSelectOutcome::Confirm(self.selected_indices()),
-            KeyCode::Esc => MultiSelectOutcome::Cancel,
-            KeyCode::Up | KeyCode::Char('k') => {
+        use crate::tui::keybindings::overlay::{MULTI_SELECT_KEYS, MultiSelectKey, resolve};
+        match resolve(MULTI_SELECT_KEYS, event) {
+            Some(MultiSelectKey::Abort | MultiSelectKey::Cancel) => MultiSelectOutcome::Cancel,
+            Some(MultiSelectKey::Confirm) => MultiSelectOutcome::Confirm(self.selected_indices()),
+            Some(MultiSelectKey::Up) => {
                 self.inner.prev();
                 MultiSelectOutcome::Continue
             }
-            KeyCode::Down | KeyCode::Char('j') => {
+            Some(MultiSelectKey::Down) => {
                 self.inner.next();
                 MultiSelectOutcome::Continue
             }
-            KeyCode::Char(' ') => {
+            Some(MultiSelectKey::Toggle) => {
                 self.inner.toggle_current(None);
                 MultiSelectOutcome::Continue
             }
-            _ => MultiSelectOutcome::Continue,
+            None => MultiSelectOutcome::Continue,
         }
     }
 }
@@ -304,11 +300,6 @@ fn compute_scroll(cursor: usize, visible_rows: usize, total: usize) -> usize {
         0
     }
 }
-
-/// Status-bar legend rendered while the overlay is open. Mirrors
-/// the locked key map so the operator always sees the active
-/// bindings.
-pub const STATUS_LEGEND: &str = "Space toggle · Enter confirm · Esc cancel";
 
 /// Centered modal sized to the item list, capped at the available
 /// area. Width follows the same 60-column cap as the text-input

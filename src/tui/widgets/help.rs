@@ -8,7 +8,7 @@
 //! changing its boundary with the runtime.
 
 use ratatui::buffer::Buffer;
-use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+use ratatui::crossterm::event::KeyEvent;
 use ratatui::layout::{Margin, Rect};
 use ratatui::macros::{line, span};
 use ratatui::style::{Modifier, Style};
@@ -37,38 +37,34 @@ impl HelpOverlayState {
     /// the modal; everything else is swallowed so navigation keys
     /// don't accidentally affect the row tree behind it.
     pub fn handle_key(&mut self, event: KeyEvent) -> HelpOutcome {
-        if event.modifiers.contains(KeyModifiers::CONTROL)
-            && matches!(event.code, KeyCode::Char('c'))
-        {
-            return HelpOutcome::Close;
-        }
-        match event.code {
-            KeyCode::Esc | KeyCode::Char('q' | '?') => HelpOutcome::Close,
-            KeyCode::Char('j') | KeyCode::Down => {
+        use crate::tui::keybindings::overlay::{HELP_KEYS, PagerKey, resolve};
+        match resolve(HELP_KEYS, event) {
+            Some(PagerKey::Abort | PagerKey::Close) => HelpOutcome::Close,
+            Some(PagerKey::Down) => {
                 self.scroll_by(1);
                 HelpOutcome::Continue
             }
-            KeyCode::Char('k') | KeyCode::Up => {
+            Some(PagerKey::Up) => {
                 self.scroll_by(-1);
                 HelpOutcome::Continue
             }
-            KeyCode::PageDown | KeyCode::Char(' ') => {
+            Some(PagerKey::PageDown) => {
                 self.scroll_by(8);
                 HelpOutcome::Continue
             }
-            KeyCode::PageUp => {
+            Some(PagerKey::PageUp) => {
                 self.scroll_by(-8);
                 HelpOutcome::Continue
             }
-            KeyCode::Char('g') | KeyCode::Home => {
+            Some(PagerKey::Top) => {
                 self.scroll = 0;
                 HelpOutcome::Continue
             }
-            KeyCode::Char('G') | KeyCode::End => {
+            Some(PagerKey::Bottom) => {
                 self.scroll = u16::MAX;
                 HelpOutcome::Continue
             }
-            _ => HelpOutcome::Continue,
+            None => HelpOutcome::Continue,
         }
     }
 
@@ -434,7 +430,7 @@ fn body_lines_for_width(theme: &Theme, width: Option<usize>) -> Vec<Line<'static
     blank(&mut lines);
 
     lines.push(line![
-        span!(theme.placeholder; "j/k or PgDn/PgUp to scroll · Esc, q, or ? to close.")
+        span!(theme.placeholder; "{}", crate::tui::keybindings::overlay::footer(crate::tui::keybindings::overlay::HELP_KEYS))
     ]);
     lines
 }

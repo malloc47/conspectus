@@ -26,7 +26,7 @@ impl Widget for PinsOverlayWidget<'_> {
         }
         lines.push(line![""]);
         lines.push(line![
-            span!(Modifier::DIM; "↑/↓ move · Enter pick · Esc close")
+            span!(Modifier::DIM; "{}", crate::tui::keybindings::overlay::footer(crate::tui::keybindings::overlay::MENU_KEYS))
         ]);
         let modal = centered_modal_rect(area);
 

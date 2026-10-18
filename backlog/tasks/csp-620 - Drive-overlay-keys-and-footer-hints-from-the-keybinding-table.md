@@ -1,9 +1,11 @@
 ---
 id: CSP-620
 title: Drive overlay keys and footer hints from the keybinding table
-status: To Do
-assignee: []
+status: In Progress
+assignee:
+  - '@claude'
 created_date: '2026-10-17 03:09'
+updated_date: '2026-10-18 00:41'
 labels:
   - h-hyg
 milestone: m-11
@@ -39,3 +41,26 @@ CSP-468 put global keys in one table (`src/tui/keybindings.rs`, 47 entries) that
 - [ ] #1 `just check` passes, or `git diff --check` for docs-only changes
 - [ ] #2 Docs and ADRs are updated when behavior, architecture, or workflow change
 <!-- DOD:END -->
+
+## Implementation Plan
+
+<!-- SECTION:PLAN:BEGIN -->
+Design (recorded as an ADR in this task):
+- New `tui::keybindings::overlay` module: `KeyRow<A>` = `Bind { key: KeyMatcher, action: A, hint: Hint }` or `Note(&str)`; `Hint` = `Shown { label, verb }` or `Alias` (bound on purpose but left out of the footer, e.g. j/k, Ctrl-C). `resolve(rows, event) -> Option<A>` (first match) and `footer(rows) -> String` (labels sharing a verb join with `/`, segments join with ` · `).
+- Each overlay gets an action enum and a `const` table there. Handlers match exhaustively on their enum, so a row whose action a handler ignores fails to compile. Overlays with identical menus share one table. Unbound keys fall through to the text field where the overlay has one; context-dependent keys (Space types in a text field, toggles on an option field) resolve to an action and the handler decides.
+- Matchers keep today's semantics: code-only matches use `AnyMod`, modifier checks use `Exact`, Ctrl-C rows come first.
+Steps:
+1. Infra + tests: `resolve`, `footer`, and a label check that every `Shown` label names its bound key.
+2. Wave A: controls list and sub-editors, mux menu, pins menu, multi-select, text input/rename, new-mux form, search, value modal, messages, help.
+3. Wave B: worktree menu, mux-launch form, path omnibox.
+4. Wave C: pin create, edit, bind, remove forms.
+5. Viewer: key translation moves into a table; its footer stays viewer-owned (stateful toggle chips behind the ADR 0052 extraction boundary).
+6. Guard test under `tests/` failing on `KeyCode::` matches in overlay widget code; per-overlay test that the rendered footer equals `footer(table)`.
+7. Footers stay byte-identical except where the generator normalizes wording (noted per overlay); verify with `tui --snapshot` against the showcase fixture.
+<!-- SECTION:PLAN:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+Wave A landed: overlay keymap infra (`tui::keybindings::overlay`) plus tables for menus (Controls, pins menu, mux menu), multi-select, text input, new-mux form, search, help, value modal, and messages. Footers, the rename/controls/pins status hints, and the messages copy path are generated from or resolved through those tables. Renders of the snapshot-mode overlays are byte-identical to the baseline; just check green (2408 tests).
+<!-- SECTION:NOTES:END -->

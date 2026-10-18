@@ -1,4 +1,5 @@
 use super::*;
+use ratatui::crossterm::event::{KeyCode, KeyModifiers};
 use ratatui::crossterm::event::{KeyEventKind, KeyEventState};
 
 fn key(code: KeyCode) -> KeyEvent {

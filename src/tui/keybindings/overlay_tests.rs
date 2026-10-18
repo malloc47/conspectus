@@ -1,0 +1,177 @@
+use super::*;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Key {
+    Up,
+    Down,
+    Pick,
+    Close,
+}
+
+const ROWS: &[KeyRow<Key>] = &[
+    KeyRow::Bind {
+        key: KeyMatcher::Exact {
+            modifiers: KeyModifiers::CONTROL,
+            code: KeyCode::Char('c'),
+        },
+        action: Key::Close,
+        hint: Hint::Alias,
+    },
+    KeyRow::Bind {
+        key: KeyMatcher::AnyMod(KeyCode::Up),
+        action: Key::Up,
+        hint: Hint::Shown {
+            label: "↑",
+            verb: "move",
+        },
+    },
+    KeyRow::Bind {
+        key: KeyMatcher::AnyMod(KeyCode::Char('k')),
+        action: Key::Up,
+        hint: Hint::Alias,
+    },
+    KeyRow::Bind {
+        key: KeyMatcher::AnyMod(KeyCode::Down),
+        action: Key::Down,
+        hint: Hint::Shown {
+            label: "↓",
+            verb: "move",
+        },
+    },
+    KeyRow::Note("type to filter"),
+    KeyRow::Bind {
+        key: KeyMatcher::AnyMod(KeyCode::Enter),
+        action: Key::Pick,
+        hint: Hint::Shown {
+            label: "Enter",
+            verb: "pick",
+        },
+    },
+    KeyRow::Bind {
+        key: KeyMatcher::AnyMod(KeyCode::Esc),
+        action: Key::Close,
+        hint: Hint::Shown {
+            label: "Esc",
+            verb: "close",
+        },
+    },
+];
+
+fn press(modifiers: KeyModifiers, code: KeyCode) -> KeyEvent {
+    KeyEvent::new(code, modifiers)
+}
+
+#[test]
+fn resolve_returns_the_first_matching_row() {
+    assert_eq!(
+        resolve(ROWS, press(KeyModifiers::NONE, KeyCode::Up)),
+        Some(Key::Up)
+    );
+    assert_eq!(
+        resolve(ROWS, press(KeyModifiers::NONE, KeyCode::Char('k'))),
+        Some(Key::Up)
+    );
+    assert_eq!(
+        resolve(ROWS, press(KeyModifiers::CONTROL, KeyCode::Char('c'))),
+        Some(Key::Close)
+    );
+    assert_eq!(
+        resolve(ROWS, press(KeyModifiers::NONE, KeyCode::Char('x'))),
+        None
+    );
+}
+
+#[test]
+fn footer_groups_labels_by_verb_and_skips_aliases() {
+    assert_eq!(
+        footer(ROWS),
+        "↑/↓ move · type to filter · Enter pick · Esc close"
+    );
+}
+
+#[test]
+fn mislabeled_flags_a_label_that_names_another_key() {
+    assert!(mislabeled(ROWS).is_empty());
+    let wrong: &[KeyRow<Key>] = &[KeyRow::Bind {
+        key: KeyMatcher::AnyMod(KeyCode::Char('n')),
+        action: Key::Close,
+        hint: Hint::Shown {
+            label: "y",
+            verb: "to confirm",
+        },
+    }];
+    assert_eq!(mislabeled(wrong), vec![("y", "n".to_string())]);
+}
+
+#[test]
+fn labels_accept_arrow_symbols_and_named_keys() {
+    let rows: &[KeyRow<Key>] = &[
+        KeyRow::Bind {
+            key: KeyMatcher::AnyMod(KeyCode::BackTab),
+            action: Key::Up,
+            hint: Hint::Shown {
+                label: "S-Tab",
+                verb: "back",
+            },
+        },
+        KeyRow::Bind {
+            key: KeyMatcher::AnyMod(KeyCode::Char(' ')),
+            action: Key::Pick,
+            hint: Hint::Shown {
+                label: "Space",
+                verb: "toggle",
+            },
+        },
+        KeyRow::Bind {
+            key: KeyMatcher::AnyMod(KeyCode::Left),
+            action: Key::Up,
+            hint: Hint::Shown {
+                label: "←",
+                verb: "toggle",
+            },
+        },
+    ];
+    assert!(mislabeled(rows).is_empty(), "{:?}", mislabeled(rows));
+}
+
+#[test]
+fn every_overlay_table_labels_its_keys_truthfully() {
+    let tables: Vec<(&str, Vec<(&'static str, String)>)> = vec![
+        ("menu", mislabeled(MENU_KEYS)),
+        ("multi-select", mislabeled(MULTI_SELECT_KEYS)),
+        ("text input", mislabeled(TEXT_INPUT_KEYS)),
+        ("new mux", mislabeled(NEW_MUX_KEYS)),
+        ("search", mislabeled(SEARCH_KEYS)),
+        ("help", mislabeled(HELP_KEYS)),
+        ("value modal", mislabeled(VALUE_MODAL_KEYS)),
+        ("messages", mislabeled(MESSAGES_KEYS)),
+    ];
+    for (name, wrong) in tables {
+        assert!(
+            wrong.is_empty(),
+            "{name} footer labels name other keys: {wrong:?}"
+        );
+    }
+}
+
+#[test]
+fn generated_footers_keep_the_established_wording() {
+    assert_eq!(footer(MENU_KEYS), "↑/↓ move · Enter pick · Esc close");
+    assert_eq!(
+        footer(MULTI_SELECT_KEYS),
+        "Space toggle · Enter confirm · Esc cancel"
+    );
+    assert_eq!(footer(TEXT_INPUT_KEYS), "Enter confirm · Esc cancel");
+    assert_eq!(
+        footer(NEW_MUX_KEYS),
+        "Tab switch field · Enter next/commit · Esc cancel"
+    );
+    assert_eq!(
+        footer(MESSAGES_KEYS),
+        "j/k select · J/K scroll detail · y copy · Esc close"
+    );
+    assert_eq!(
+        footer(HELP_KEYS),
+        "j/k/PgDn/PgUp to scroll · Esc/q/? to close"
+    );
+}

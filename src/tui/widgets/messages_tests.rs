@@ -1,5 +1,6 @@
 use super::*;
 use crate::tui::{Overlay, OverlayOutcome};
+use ratatui::crossterm::event::{KeyCode, KeyModifiers};
 
 fn press(code: KeyCode) -> KeyEvent {
     KeyEvent::new(code, KeyModifiers::NONE)

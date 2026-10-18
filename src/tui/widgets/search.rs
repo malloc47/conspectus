@@ -9,7 +9,7 @@
 //! upstream.
 
 use ratatui::buffer::Buffer;
-use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+use ratatui::crossterm::event::KeyEvent;
 use ratatui::layout::Rect;
 use ratatui::macros::{line, span};
 use ratatui::style::{Modifier, Style};
@@ -100,34 +100,22 @@ impl SearchOverlayState {
     ///   query is the common case; result-list navigation uses
     ///   arrow keys + ctrl-N/P instead.
     pub fn handle_key(&mut self, event: KeyEvent) -> SearchOutcome {
-        if event.modifiers.contains(KeyModifiers::CONTROL)
-            && matches!(event.code, KeyCode::Char('c'))
-        {
-            return SearchOutcome::Cancel;
-        }
-        match event.code {
-            KeyCode::Esc => SearchOutcome::Cancel,
-            KeyCode::Enter => match self.matches.get(self.cursor) {
+        use crate::tui::keybindings::overlay::{SEARCH_KEYS, SearchKey, resolve};
+        match resolve(SEARCH_KEYS, event) {
+            Some(SearchKey::Abort | SearchKey::Cancel) => SearchOutcome::Cancel,
+            Some(SearchKey::Pick) => match self.matches.get(self.cursor) {
                 Some(m) => SearchOutcome::Confirm(Box::new(m.id.clone())),
                 None => SearchOutcome::Cancel,
             },
-            KeyCode::Down => {
+            Some(SearchKey::Down) => {
                 self.move_cursor(1);
                 SearchOutcome::Continue
             }
-            KeyCode::Up => {
+            Some(SearchKey::Up) => {
                 self.move_cursor(-1);
                 SearchOutcome::Continue
             }
-            KeyCode::Char('n') if event.modifiers.contains(KeyModifiers::CONTROL) => {
-                self.move_cursor(1);
-                SearchOutcome::Continue
-            }
-            KeyCode::Char('p') if event.modifiers.contains(KeyModifiers::CONTROL) => {
-                self.move_cursor(-1);
-                SearchOutcome::Continue
-            }
-            _ => {
+            None => {
                 // Let the text-input primitive handle the key. We
                 // ignore its outcome here because Enter/Esc are
                 // intercepted above; everything else is "still
