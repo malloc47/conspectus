@@ -241,3 +241,51 @@ fn pi_payload_requires_a_nonempty_session_id() {
         assert!(err.to_string().contains("session_id"), "{err}");
     }
 }
+
+/// The payloads the opencode plugin's 2.x TUI entrypoint
+/// (`plugins/opencode-hook/src/v2/tui.ts`) sends: one per route change
+/// and one per forwarded lifecycle event of the routed session.
+#[test]
+fn opencode_2x_tui_payloads_build_hook_records() {
+    for event in [
+        "tui.route",
+        "session.created",
+        "session.renamed",
+        "session.status",
+        "session.idle",
+        "session.compacted",
+    ] {
+        let record = hook_record_from_payload(
+            "opencode",
+            &serde_json::json!({
+                "session_id": "ses_eb2483494ffe5iKYZYXs2LCXKS",
+                "cwd": "/home/user/proj",
+                "hook_event_name": event
+            }),
+            Some(4242),
+            Some(4241),
+            Some(HookTmuxRecord {
+                session_name: Some("paneA".to_string()),
+                native_id: None,
+                pane_id: Some("%0".to_string()),
+                socket_path: Some("/run/user/1000/tmux-1000/default".to_string()),
+            }),
+            Some("0.2.0".to_string()),
+            1_700_000_500,
+        )
+        .expect("record");
+
+        assert_eq!(
+            record.session_key, "ses_eb2483494ffe5iKYZYXs2LCXKS",
+            "{event}"
+        );
+        assert_eq!(record.hook_event_name.as_deref(), Some(event));
+        assert_eq!(record.cwd.as_deref(), Some("/home/user/proj"));
+        assert_eq!(record.harness_version.as_deref(), Some("0.2.0"));
+        assert!(!record.background_harness);
+        assert_eq!(
+            record.tmux.as_ref().and_then(|t| t.pane_id.as_deref()),
+            Some("%0")
+        );
+    }
+}

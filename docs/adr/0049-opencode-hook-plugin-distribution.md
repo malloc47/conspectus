@@ -2,7 +2,7 @@
 
 ## Status
 
-Accepted
+Accepted. Amended for opencode 2.x by ADR 0126; see the amendment below.
 
 ## Context
 
@@ -163,3 +163,39 @@ authoritative artifact. Boundaries:
 - The Rust writer's flat payload contract is the API boundary between
   the plugin and Conspectus; the writer stays opencode-SDK-shape-
   agnostic.
+
+## Amendment: opencode 2.x (ADR 0126)
+
+opencode 2.x does not load 1.x plugins, runs server plugins inside one
+shared service, and configures TUI plugins separately from server
+plugins (ADR 0125). The distribution decision above is extended as
+follows; everything else stands.
+
+1. **One package serves both majors.** `plugins/opencode-hook` keeps the
+   1.x plugin at the package root (`dist/index.js`, loaded through the
+   1.x `plugin` config key) and adds a 2.x TUI entrypoint at
+   `dist/v2/tui.js`. The two share `src/write.ts`, the spawn helper that
+   runs `conspectus hook write opencode`, so the payload contract and the
+   silent no-op on a missing binary stay identical.
+2. **2.x installs point opencode's TUI plugin config at `dist/v2`.**
+   2.x lists TUI plugins in `$XDG_CONFIG_HOME/opencode/cli.json`
+   (`"plugins": ["<checkout>/plugins/opencode-hook/dist/v2"]`). A local
+   directory resolves its `tui` entrypoint as `<dir>/tui.js`, and
+   `dist/v2` holds no `server` or `index` file, so 2.x never loads the
+   1.x code or a server entrypoint from it. `opencode plugin add` takes
+   only npm and Git specifiers, so the README documents the manual
+   entry. Installing this package by name is not supported: its root
+   export is the 1.x plugin, which 2.x would try to load as a server
+   plugin.
+3. **No server entrypoint.** A 2.x server plugin runs in the shared
+   service and can only write records that ADR 0126 sets aside.
+4. **2.x event selection.** The TUI entrypoint forwards route changes
+   into a session (`tui.route`) and the 2.x lifecycle events
+   `session.created`, `session.renamed` (the 1.x `session.updated`),
+   `session.status`, `session.idle`, and `session.compacted`, and only
+   for the session its client is showing.
+5. **Types without a runtime dependency.** The 2.x entrypoint is typed
+   against `@opencode/plugin` 2.0.32 (a dev dependency) but imports
+   nothing from it at runtime, so it loads without resolving any
+   package. The 1.x entrypoint keeps its `@opencode-ai/plugin` peer
+   dependency.

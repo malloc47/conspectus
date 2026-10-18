@@ -140,12 +140,18 @@ The findings below are the reference for opencode 2.x support.
 - **verified:** 2.x plugins are `{id, setup(ctx)}` objects from npm
   `@opencode/plugin`. A package can ship separate entrypoints: `server`
   (falling back to the package root) runs inside the service, and `tui`
-  runs inside each TUI client. A local plugin is listed in
-  `opencode.jsonc` as `"plugins": [{"package": "<dir>"}]`; the host
-  resolver looks for `<dir>/server`, then `<dir>/index`, and
-  `<dir>/tui`. A package installed by name resolves the same subpaths
+  runs inside each TUI client. The host resolver looks for
+  `<dir>/server`, then `<dir>/index`, and `<dir>/tui` in a local
+  directory; a package installed by name resolves the same subpaths
   through its `exports`.
-  `opencode plugin add` accepts only npm and Git specifiers.
+- **verified:** Server plugins are listed in `opencode.jsonc` as
+  `"plugins": [{"package": "<dir>"}]`, and the TUI also loads the `tui`
+  entrypoint of a package listed there. TUI-only plugins are listed in
+  `$XDG_CONFIG_HOME/opencode/cli.json` (`"plugins": ["<dir>"]`), which
+  2.x migrates from the 1.x `tui.json`. A directory with no server
+  entrypoint listed in `opencode.jsonc` is ignored. `opencode plugin
+  add` accepts only npm and Git specifiers and writes a server package
+  to `opencode.jsonc` and a TUI-only one to `cli.json`.
 - **verified:** A server plugin is instantiated once per location
   (directory) the service serves. Its `process.env` is the service's,
   so `TMUX_PANE` names the first client's pane for every session.

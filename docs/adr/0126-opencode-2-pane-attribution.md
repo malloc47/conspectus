@@ -63,8 +63,10 @@ to be reopened if that stopped holding.
    argv evidence (ADR 0048 ordering). The entrypoint writes a record when
    the client's routed session changes, including in-app switches, and
    for lifecycle events of that routed session only. Events for other
-   sessions reach every client, so forwarding them would repeat the 1.x
-   service bug from the TUI side.
+   sessions reach every client, so forwarding them would repeat the
+   service bug from the TUI side. Operators list the entrypoint's
+   directory in opencode's TUI plugin config, `cli.json` (ADR 0049
+   amendment).
 3. **No server entrypoint and no server API client.** A 2.x server
    entrypoint could only produce background-harness records. Querying the
    V2 server API would mean reading the service password from

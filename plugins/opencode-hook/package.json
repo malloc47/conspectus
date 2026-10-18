@@ -1,8 +1,8 @@
 {
   "$schema": "https://json.schemastore.org/package.json",
   "name": "@conspectus/opencode-hook",
-  "version": "0.1.0",
-  "description": "OpenCode plugin that forwards session lifecycle events to `conspectus hook write opencode` for mux↔session attribution.",
+  "version": "0.2.0",
+  "description": "OpenCode plugin (1.x root entrypoint, 2.x TUI entrypoint in dist/v2) that forwards session lifecycle events to `conspectus hook write opencode` for mux↔session attribution.",
   "license": "MIT",
   "type": "module",
   "main": "./dist/index.js",
@@ -27,6 +27,7 @@
   },
   "devDependencies": {
     "@opencode-ai/plugin": "1.14.19",
+    "@opencode/plugin": "2.0.32",
     "@types/node": "22.13.9",
     "typescript": "5.8.2"
   }
