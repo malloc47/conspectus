@@ -39,7 +39,7 @@ use rusqlite::{Connection, OpenFlags, params};
 
 use crate::discovery::DiscoveryCaches;
 use crate::discovery::harness::codex::HARNESS_KEY as CODEX_HARNESS_KEY;
-use crate::discovery::memo::FileStamp;
+use crate::discovery::memo::SqliteStamp;
 use crate::model::{
     AgentSessionId, AgentSessionNode, Confidence, Freshness, GraphLink, GraphNode, GraphSnapshot,
     LinkEndpoint, LinkState, MatchKind, Metadata, MuxSessionId, NodeId, Provenance, RelationKind,
@@ -297,7 +297,7 @@ struct ThreadObservation {
 /// the query result is deterministic in that case. The cache stores
 /// only the pids that returned an observation; absent keys mean
 /// "queried and got nothing," mirroring `query_freshest_thread`
-/// returning `None`. When the DB advances (mtime or size changes)
+/// returning `None`. When the DB or its `-wal` file advances (mtime or size)
 /// or a new candidate pid appears, the cache is invalidated and
 /// the query runs normally.
 ///
@@ -309,7 +309,7 @@ struct ThreadObservation {
 /// yields the same result as re-querying against the same DB.
 struct CachedQuery {
     db_path: PathBuf,
-    db_stamp: FileStamp,
+    db_stamp: SqliteStamp,
     candidate_pids: Vec<i64>,
     /// `ts_floor` that was in force when the cache was populated.
     /// A later call whose `ts_floor` is >= this value can safely
@@ -358,7 +358,7 @@ fn observations_for_candidates(
     ts_floor: i64,
     cache: &QueryCache,
 ) -> HashMap<i64, ThreadObservation> {
-    let stamp = FileStamp::of(db_path);
+    let stamp = SqliteStamp::of(db_path);
     let mut candidate_pids: Vec<i64> = candidates.iter().map(|c| c.pid).collect();
     candidate_pids.sort_unstable();
     candidate_pids.dedup();

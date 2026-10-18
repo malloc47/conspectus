@@ -3,6 +3,7 @@ use std::fs;
 use tempfile::TempDir;
 
 use super::*;
+use crate::discovery::memo::FileStamp;
 use crate::model::{MuxSessionId, MuxSessionNode};
 
 fn now() -> i64 {
@@ -673,4 +674,61 @@ fn cache_invalidates_when_candidate_pid_set_changes() {
     assert_eq!(session_keys.len(), 2);
     assert!(session_keys.contains(&"thread-a"));
     assert!(session_keys.contains(&"thread-b"));
+}
+
+#[test]
+fn cache_invalidates_when_a_log_row_lands_only_in_the_wal() {
+    // Codex's logs database runs in WAL mode: a commit goes to
+    // `logs_2.sqlite-wal` and leaves the main file untouched until a
+    // checkpoint, so the cache key has to cover the WAL too.
+    let caches = DiscoveryCaches::default();
+
+    let temp = TempDir::new().expect("temp");
+    let state_root = temp.path();
+    let db_path = state_root.join("logs_2.sqlite");
+    write_logs_db(&db_path, &[("pid:100:uuid-a", "thread-a", now() - 10)]);
+    let writer = Connection::open(&db_path).expect("open writer");
+    writer
+        .query_row("PRAGMA journal_mode = WAL", [], |_| Ok(()))
+        .expect("wal mode");
+    writer
+        .execute_batch("PRAGMA wal_autocheckpoint = 0")
+        .expect("no autocheckpoint");
+
+    let pids = codex_pid_map("main", 100);
+    let mut first = build_snapshot("main");
+    apply_codex_log_attribution(
+        &mut first,
+        state_root,
+        &pids,
+        now(),
+        DEFAULT_WINDOW_SECONDS,
+        &caches,
+    );
+    assert_eq!(codex_log_mux_links(&first).len(), 1);
+    let main_stamp = FileStamp::of(&db_path);
+
+    writer
+        .execute(
+            "INSERT INTO logs (ts, thread_id, process_uuid) VALUES (?1, ?2, ?3)",
+            params![now() - 5, "thread-b", "pid:100:uuid-a"],
+        )
+        .expect("insert log row");
+    assert_eq!(FileStamp::of(&db_path), main_stamp);
+
+    let mut second = build_snapshot("main");
+    apply_codex_log_attribution(
+        &mut second,
+        state_root,
+        &pids,
+        now(),
+        DEFAULT_WINDOW_SECONDS,
+        &caches,
+    );
+    let links = codex_log_mux_links(&second);
+    assert_eq!(links.len(), 1);
+    let NodeId::AgentSession(id) = &links[0].source else {
+        panic!();
+    };
+    assert_eq!(id.session_key, "thread-b");
 }
