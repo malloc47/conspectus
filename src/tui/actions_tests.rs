@@ -454,3 +454,29 @@ fn pin_status_hint_unbound_with_last_session_advertises_resume() {
     assert!(hint.contains("Enter resume"), "hint: {hint}");
     assert!(hint.contains("session-a"), "hint: {hint}");
 }
+
+#[test]
+fn pin_launch_target_carries_the_pins_mux_backend() {
+    let mut snapshot = GraphSnapshot::empty();
+    snapshot.pins.push(crate::model::PinCandidate {
+        id: "zp".to_string(),
+        display_name: "zp".to_string(),
+        harness: "codex".to_string(),
+        cwd: "/home/op/src/x".to_string(),
+        mux: crate::model::PinMuxRef {
+            backend: "zellij".to_string(),
+            name: "zp".to_string(),
+            socket_name: None,
+        },
+        launch_argv: None,
+        reason: None,
+        provenance: Provenance::LocalPin,
+        store_path: "/home/op/src/x/.conspectus.toml".to_string(),
+        binding: None,
+    });
+    let app = build_app(snapshot);
+
+    let target = pin_launch_target_from_snapshot(&app, "zp").expect("pin target");
+    assert_eq!(target.mux_backend, "zellij");
+    assert_eq!(target.mux_name, "zp");
+}

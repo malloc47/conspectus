@@ -279,6 +279,20 @@ impl From<GraphSnapshot> for GraphFragment {
 /// scattered across discovery adapters + dev_scenarios. Every
 /// copy did `path.to_string_lossy().to_string()`; this shared
 /// helper is the single canonical version.
+/// The system runner for a registered mux backend key, or `None` for a
+/// key this build does not know. Mutation paths (attach, launch) use it
+/// to drive the backend an entity actually belongs to. Unlike the
+/// discovery wiring it ignores `CONSPECTUS_DISABLE_TMUX` and
+/// `CONSPECTUS_DISABLE_ZELLIJ`, which turn off discovery, not the
+/// operator's own mux commands.
+pub fn system_mux_backend(backend_key: &str) -> Option<Box<dyn tmux::MuxBackend>> {
+    match backend_key {
+        tmux::TMUX_BACKEND => Some(Box::new(tmux::SystemTmux::new())),
+        zellij::ZELLIJ_BACKEND => Some(Box::new(zellij::SystemZellij::new())),
+        _ => None,
+    }
+}
+
 pub fn path_to_string(path: &Path) -> String {
     path.to_string_lossy().into_owned()
 }

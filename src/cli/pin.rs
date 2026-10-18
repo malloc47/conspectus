@@ -15,8 +15,8 @@ use crate::config::ConfigLoader;
 use crate::declared::{DeclaredEndpoint, DeclaredLink, DeclaredLinkState, upsert_declared_link};
 use crate::discovery::harness::launch_argv_for;
 use crate::discovery::tmux::{
-    MuxBackend, SystemTmux, TmuxAttachOutcome, TmuxKillOutcome, TmuxNewSessionOutcome,
-    TmuxPaneStatus, TmuxSendKeysOutcome, dead_pane_output,
+    MuxBackend, TmuxAttachOutcome, TmuxKillOutcome, TmuxNewSessionOutcome, TmuxPaneStatus,
+    TmuxSendKeysOutcome, dead_pane_output,
 };
 use crate::discovery::worktree::{
     SystemGitWorktree, WorktreeBackend, WorktreeCreateRequest, WorktreeMutationOutcome,
@@ -744,15 +744,29 @@ pub struct PinLaunchArgs {
 
 impl PinLaunchArgs {
     fn run(self, intent: PinLaunchIntent) -> Result<()> {
-        let runner = SystemTmux::new();
-        self.run_with_runner(intent, &runner)
+        self.run_with_backends(intent, &crate::discovery::system_mux_backend)
     }
 
-    fn run_with_runner(self, intent: PinLaunchIntent, runner: &dyn MuxBackend) -> Result<()> {
+    /// `backend_for` maps the pin's `mux.backend` to the runner that
+    /// drives it, so a pin is only ever launched or attached through
+    /// its own backend.
+    fn run_with_backends(
+        self,
+        intent: PinLaunchIntent,
+        backend_for: &dyn Fn(&str) -> Option<Box<dyn MuxBackend>>,
+    ) -> Result<()> {
         let snapshot = discover_and_resolve(&self.scan_roots)?;
         let Some(pin) = snapshot.pins.iter().find(|pin| pin.id == self.id) else {
             bail!("no pin `{}` in any discovered store", self.id);
         };
+        let Some(runner) = backend_for(&pin.mux.backend) else {
+            bail!(
+                "pin `{}` uses mux backend `{}`, which this build cannot drive",
+                pin.id,
+                pin.mux.backend
+            );
+        };
+        let runner = runner.as_ref();
 
         let socket = pin.mux.effective_socket();
         let mux_name = pin.mux.name.as_str();
@@ -832,8 +846,8 @@ impl PinLaunchArgs {
                 let literal = format_argv_for_send_keys(&argv);
                 let outcome = runner
                     .send_keys(socket, mux_name, &literal, true)
-                    .map_err(|err| anyhow!("tmux send-keys failed: {err}"))?;
-                report_send_keys(outcome, mux_name)?;
+                    .map_err(|err| anyhow!("{} send-keys failed: {err}", runner.backend_key()))?;
+                report_send_keys(outcome, runner.backend_key(), mux_name)?;
                 if !self.no_attach {
                     attach_and_report(runner, socket, mux_name)?;
                 }
@@ -862,6 +876,14 @@ impl PinLaunchArgs {
         argv: &[std::ffi::OsString],
     ) -> Result<()> {
         let mux_name = pin.mux.name.as_str();
+        if !runner.can_create_sessions() {
+            bail!(
+                "pin `{}`: the `{}` mux backend cannot create sessions, so conspectus cannot launch this pin; start `{mux_name}` with {} yourself and run `pin attach`",
+                pin.id,
+                runner.backend_key(),
+                runner.backend_key()
+            );
+        }
         // ADR 0094: a worktree-backed pin realizes its worktree
         // here — resolve or create it and launch there instead
         // of the repo anchor.
@@ -1102,41 +1124,46 @@ pub(super) fn attach_and_report(
     socket: Option<&str>,
     name: &str,
 ) -> Result<()> {
+    let backend = runner.backend_key();
     let outcome = runner
         .attach_session(socket, name)
-        .map_err(|err| anyhow!("tmux attach failed: {err}"))?;
+        .map_err(|err| anyhow!("{backend} attach failed: {err}"))?;
     match outcome {
         TmuxAttachOutcome::Detached => Ok(()),
         TmuxAttachOutcome::NoTarget => {
-            bail!("tmux session `{name}` vanished between launch and attach (race) — try again")
+            bail!(
+                "{backend} session `{name}` vanished between launch and attach (race) — try again"
+            )
         }
         TmuxAttachOutcome::Unavailable(reason) => bail!(
-            "tmux is unavailable on this host: {reason}",
+            "{backend} is unavailable on this host: {reason}",
             reason = reason.as_str()
         ),
         TmuxAttachOutcome::Failed { code, message } => {
-            bail!("tmux attach failed (exit {code:?}): {message}")
+            bail!("{backend} attach failed (exit {code:?}): {message}")
         }
         TmuxAttachOutcome::Unsupported => {
-            bail!("this tmux runner does not support attach; run `tmux attach -t {name}` manually")
+            bail!("the {backend} runner does not support attach; attach to `{name}` manually")
         }
     }
 }
 
-fn report_send_keys(outcome: TmuxSendKeysOutcome, name: &str) -> Result<()> {
+fn report_send_keys(outcome: TmuxSendKeysOutcome, backend: &str, name: &str) -> Result<()> {
     match outcome {
         TmuxSendKeysOutcome::Sent => Ok(()),
         TmuxSendKeysOutcome::NoTarget => {
-            bail!("tmux session `{name}` disappeared before send-keys reached it")
+            bail!("{backend} session `{name}` disappeared before send-keys reached it")
         }
         TmuxSendKeysOutcome::Unavailable(reason) => bail!(
-            "tmux is unavailable on this host: {reason}",
+            "{backend} is unavailable on this host: {reason}",
             reason = reason.as_str()
         ),
         TmuxSendKeysOutcome::Failed { code, message } => {
-            bail!("tmux send-keys failed (exit {code:?}): {message}")
+            bail!("{backend} send-keys failed (exit {code:?}): {message}")
         }
-        TmuxSendKeysOutcome::Unsupported => bail!("this tmux runner does not support send-keys"),
+        TmuxSendKeysOutcome::Unsupported => {
+            bail!("the {backend} runner does not support send-keys")
+        }
     }
 }
 

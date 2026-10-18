@@ -596,6 +596,12 @@ and print the equivalent attach command.
 unbound pin under `pin attach` falls through to launch with a
 one-line "note: unbound; falling through to launch" hint.
 
+Launch and attach always go through the pin's own `mux.backend`. A
+pin on a backend that cannot create sessions (zellij today supports
+discovery and attach only) attaches when bound, but launching it
+exits with an error naming the backend before anything else happens.
+Start the session with that backend yourself, then `pin attach`.
+
 ### Operator escape hatches
 
 ```sh

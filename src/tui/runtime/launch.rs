@@ -87,7 +87,9 @@ pub(super) fn execute_launch_pin(
         return;
     };
 
-    if let Some(reason) = tmux_session_unavailable(target) {
+    if target.mux_backend == crate::discovery::tmux::TMUX_BACKEND
+        && let Some(reason) = tmux_session_unavailable(target)
+    {
         app.report(
             LogEntry::error(format!(
                 "pin `{pin_id}` launched but tmux session `{}` is not attachable: {reason}",
@@ -99,18 +101,17 @@ pub(super) fn execute_launch_pin(
     }
 
     let attach_target = AttachTarget {
-        mux: MuxSessionId::new(format!("tmux:{}", target.mux_name)),
-        backend: "tmux".to_string(),
+        mux: MuxSessionId::new(format!("{}:{}", target.mux_backend, target.mux_name)),
+        backend: target.mux_backend.clone(),
         native_id: target.mux_name.clone(),
     };
-    let outcome =
-        run_tmux_attach_with_socket(terminal, &attach_target, target.mux_socket.as_deref());
+    let outcome = run_mux_attach(terminal, &attach_target, target.mux_socket.as_deref());
     app.update(Msg::HandoffReturned(attach_target.mux.clone()));
     app.report(attach_return_entry(
         &format!("pin `{pin_id}`"),
         outcome,
         log_target,
-        &attach_target.native_id,
+        &attach_target,
         target.mux_socket.as_deref(),
     ));
 }
@@ -170,23 +171,29 @@ pub(super) fn attach_return_entry(
     what: &str,
     outcome: AttachOutcome,
     target: LogTarget,
-    native_id: &str,
+    mux: &AttachTarget,
     socket: Option<&str>,
 ) -> LogEntry {
     if let AttachOutcome::Failed(reason) = outcome {
         return LogEntry::error(format!("{what} attach failed: {reason}")).with_target(target);
     }
-    let tmux = crate::discovery::tmux::SystemTmux::new();
-    match tmux.pane_status(socket, native_id) {
+    let attached = LogEntry::info(format!("{what} attached/detached")).with_target(target.clone());
+    let Some(runner) = crate::discovery::system_mux_backend(&mux.backend) else {
+        return attached;
+    };
+    let native_id = mux.native_id.as_str();
+    match runner.pane_status(socket, native_id) {
         Ok(crate::discovery::tmux::TmuxPaneStatus::Dead { status }) => {
             let status = status.map_or_else(String::new, |code| format!(" with status {code}"));
             LogEntry::error(format!("{what}: process in `{native_id}` exited{status}"))
                 .with_target(target)
                 .with_detail(crate::discovery::tmux::dead_pane_output(
-                    &tmux, socket, native_id,
+                    runner.as_ref(),
+                    socket,
+                    native_id,
                 ))
         }
-        _ => LogEntry::info(format!("{what} attached/detached")).with_target(target),
+        _ => attached,
     }
 }
 
@@ -280,7 +287,7 @@ pub(super) fn execute_mux_new(
         &format!("mux `{name}`"),
         outcome,
         LogTarget::Mux(mux),
-        name,
+        &attach_target,
         None,
     ));
 }
@@ -394,7 +401,7 @@ pub(super) fn execute_mux_launch(
         &format!("mux `{name}` launch"),
         outcome,
         LogTarget::Mux(mux),
-        &name,
+        &attach_target,
         request.mux_socket.as_deref(),
     ));
 }
@@ -497,6 +504,68 @@ pub(super) fn run_tmux_attach(
     target: &AttachTarget,
 ) -> AttachOutcome {
     run_tmux_attach_with_socket(terminal, target, None)
+}
+
+/// How an attach target's backend is driven.
+pub(super) enum AttachRoute {
+    /// tmux, attached directly so nested clients get `switch-client`.
+    Tmux,
+    /// Any other registered backend, through its `MuxBackend` runner.
+    Backend(Box<dyn MuxBackend>),
+    /// A backend key this build has no runner for.
+    Unknown,
+}
+
+pub(super) fn attach_route(backend_key: &str) -> AttachRoute {
+    if backend_key == crate::discovery::tmux::TMUX_BACKEND {
+        return AttachRoute::Tmux;
+    }
+    crate::discovery::system_mux_backend(backend_key)
+        .map_or(AttachRoute::Unknown, AttachRoute::Backend)
+}
+
+/// Attach to `target` through the backend it belongs to.
+pub(super) fn run_mux_attach(
+    terminal: &mut DefaultTerminal,
+    target: &AttachTarget,
+    socket_name: Option<&str>,
+) -> AttachOutcome {
+    let runner = match attach_route(&target.backend) {
+        AttachRoute::Tmux => return run_tmux_attach_with_socket(terminal, target, socket_name),
+        AttachRoute::Backend(runner) => runner,
+        AttachRoute::Unknown => {
+            return AttachOutcome::Failed(format!(
+                "no runner for mux backend `{}`",
+                target.backend
+            ));
+        }
+    };
+    ratatui::restore();
+    let outcome = runner.attach_session(socket_name, &target.native_id);
+    *terminal = ratatui::init();
+    let _ = terminal.clear();
+    attach_outcome(&target.backend, outcome)
+}
+
+pub(super) fn attach_outcome(
+    backend: &str,
+    outcome: anyhow::Result<crate::discovery::tmux::TmuxAttachOutcome>,
+) -> AttachOutcome {
+    use crate::discovery::tmux::TmuxAttachOutcome;
+    match outcome {
+        Ok(TmuxAttachOutcome::Detached) => AttachOutcome::Detached,
+        Ok(TmuxAttachOutcome::NoTarget) => {
+            AttachOutcome::Failed(format!("{backend} session not found"))
+        }
+        Ok(TmuxAttachOutcome::Unavailable(reason)) => {
+            AttachOutcome::Failed(format!("{backend} is unavailable: {}", reason.as_str()))
+        }
+        Ok(TmuxAttachOutcome::Failed { message, .. }) => AttachOutcome::Failed(message),
+        Ok(TmuxAttachOutcome::Unsupported) => {
+            AttachOutcome::Failed(format!("the {backend} runner does not support attach"))
+        }
+        Err(err) => AttachOutcome::Failed(format!("could not launch {backend}: {err}")),
+    }
 }
 
 pub(super) fn run_tmux_attach_with_socket(

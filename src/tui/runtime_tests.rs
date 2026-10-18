@@ -1926,3 +1926,47 @@ mod forge_status {
         assert_eq!(app.provider_status().forge_available, Some(true));
     }
 }
+
+#[test]
+fn attach_routes_each_backend_to_its_own_runner() {
+    assert!(matches!(attach_route("tmux"), AttachRoute::Tmux));
+    match attach_route("zellij") {
+        AttachRoute::Backend(runner) => assert_eq!(runner.backend_key(), "zellij"),
+        _ => panic!("a zellij target must not attach through tmux"),
+    }
+    assert!(matches!(attach_route("screen"), AttachRoute::Unknown));
+}
+
+#[test]
+fn attach_outcome_names_the_backend_that_failed() {
+    use crate::discovery::tmux::TmuxAttachOutcome;
+    match attach_outcome("zellij", Ok(TmuxAttachOutcome::Unsupported)) {
+        AttachOutcome::Failed(message) => assert!(message.contains("zellij"), "{message}"),
+        AttachOutcome::Detached => panic!("unsupported attach is a failure"),
+    }
+    assert!(matches!(
+        attach_outcome("zellij", Ok(TmuxAttachOutcome::Detached)),
+        AttachOutcome::Detached
+    ));
+}
+
+#[test]
+fn attach_return_entry_checks_pane_status_through_the_targets_backend() {
+    let target = AttachTarget {
+        mux: MuxSessionId::new("zellij:zp"),
+        backend: "zellij".to_string(),
+        native_id: "zp".to_string(),
+    };
+    let entry = attach_return_entry(
+        "pin `zp`",
+        AttachOutcome::Detached,
+        crate::tui::messages::LogTarget::Mux(target.mux.clone()),
+        &target,
+        None,
+    );
+    assert!(
+        entry.summary.contains("attached/detached"),
+        "zellij reports no pane status, so the entry is a plain detach: {}",
+        entry.summary
+    );
+}

@@ -70,6 +70,16 @@ pub trait MuxBackend: Send + Sync {
     /// implementor returns a `&'static` literal.
     fn backend_key(&self) -> &'static str;
 
+    /// Whether [`Self::new_session`] can create a session. Launch
+    /// paths check this before doing anything with side effects
+    /// (realizing a worktree, clearing a resume sidecar), because an
+    /// `Unsupported` outcome from `new_session` arrives too late to
+    /// undo them. Defaults to `false`; a backend that implements
+    /// `new_session` overrides it.
+    fn can_create_sessions(&self) -> bool {
+        false
+    }
+
     fn list_sessions(&self, format: &str) -> Result<TmuxOutcome>;
 
     /// Capture the visible content of pane `target` (e.g. a session
@@ -451,6 +461,10 @@ fn effective_socket(socket_name: Option<&str>) -> Option<&str> {
 impl MuxBackend for SystemTmux {
     fn backend_key(&self) -> &'static str {
         TMUX_BACKEND
+    }
+
+    fn can_create_sessions(&self) -> bool {
+        true
     }
 
     fn list_sessions(&self, format: &str) -> Result<TmuxOutcome> {
@@ -1224,6 +1238,10 @@ impl MuxBackend for FakeTmux {
         TMUX_BACKEND
     }
 
+    fn can_create_sessions(&self) -> bool {
+        true
+    }
+
     fn list_sessions(&self, _format: &str) -> Result<TmuxOutcome> {
         Ok(self.outcome.clone())
     }
@@ -1332,6 +1350,10 @@ impl MuxBackend for FakeTmux {
 impl MuxBackend for Box<dyn MuxBackend> {
     fn backend_key(&self) -> &'static str {
         (**self).backend_key()
+    }
+
+    fn can_create_sessions(&self) -> bool {
+        (**self).can_create_sessions()
     }
 
     fn list_sessions(&self, format: &str) -> Result<TmuxOutcome> {

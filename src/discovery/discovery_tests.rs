@@ -1048,3 +1048,20 @@ fn discover_local_with_reuses_the_callers_caches() {
         .expect("the tmux fragment lands in the caller's caches");
     assert_eq!(cached.nodes.len(), 1);
 }
+
+#[test]
+fn system_mux_backend_returns_the_runner_for_each_registered_backend() {
+    for key in tmux::KNOWN_MUX_BACKENDS {
+        let runner = system_mux_backend(key).expect("every registered backend has a runner");
+        assert_eq!(runner.backend_key(), *key);
+    }
+    assert!(system_mux_backend("screen").is_none());
+}
+
+#[test]
+fn only_backends_that_implement_new_session_claim_they_can_create_sessions() {
+    let tmux = system_mux_backend(tmux::TMUX_BACKEND).expect("tmux runner");
+    let zellij = system_mux_backend(zellij::ZELLIJ_BACKEND).expect("zellij runner");
+    assert!(tmux.can_create_sessions());
+    assert!(!zellij.can_create_sessions());
+}

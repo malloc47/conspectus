@@ -535,6 +535,8 @@ pub fn lookup_mux_node<'a>(
 /// leave detached).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PinLaunchTarget {
+    /// The pin's `mux.backend`; attach goes through this backend only.
+    pub mux_backend: String,
     pub mux_name: String,
     pub mux_socket: Option<String>,
 }
@@ -568,6 +570,7 @@ pub fn pin_launch_target_from_snapshot(app: &App, pin_id: &str) -> Option<PinLau
         .iter()
         .find(|pin| pin.id == pin_id)
         .map(|pin| PinLaunchTarget {
+            mux_backend: pin.mux.backend.clone(),
             mux_name: pin.mux.name.clone(),
             mux_socket: pin.mux.socket_name.clone(),
         })
@@ -593,16 +596,7 @@ pub fn resolve_launch_pin(
         _ => None,
     };
     let pin_id = pin_id.ok_or(PinLaunchDisabled::NotAPinRow)?.to_string();
-    let target = match &row.kind {
-        RowKind::Pin(pin) => Some(PinLaunchTarget {
-            mux_name: pin.mux_name.clone(),
-            mux_socket: pin.mux_socket.clone(),
-        }),
-        RowKind::AgentSession(_) | RowKind::MuxSession(_) => {
-            pin_launch_target_from_snapshot(app, &pin_id)
-        }
-        _ => None,
-    };
+    let target = pin_launch_target_from_snapshot(app, &pin_id);
     Ok((pin_id, target))
 }
 

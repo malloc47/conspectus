@@ -421,6 +421,60 @@ fn pin_launch_no_attach_prints_attach_command_when_unbound() {
     }
 }
 
+#[cfg(unix)]
+#[test]
+fn zellij_pin_launch_fails_naming_zellij_without_touching_tmux() {
+    let home = tempfile::TempDir::new().expect("home");
+    let project = tempfile::TempDir::new().expect("project");
+    fs::write(
+        project.path().join(".conspectus.toml"),
+        format!(
+            r#"
+[pins]
+schema_version = 1
+
+[[pins.entries]]
+id = "zp"
+display_name = "zp"
+harness = "codex"
+cwd = "{}"
+mux = {{ backend = "zellij", name = "zp" }}
+"#,
+            project.path().display()
+        ),
+    )
+    .expect("write zellij pin");
+    let tmux = PrivateTmux::new();
+
+    for intent in ["launch", "attach"] {
+        let mut cmd = isolated_cmd(home.path());
+        tmux.apply(&mut cmd);
+        cmd.env("CONSPECTUS_DISABLE_ZELLIJ", "1")
+            .current_dir(project.path())
+            .args(["pin", intent, "zp", "--no-attach", "--scan-root"])
+            .arg(project.path())
+            .assert()
+            .failure()
+            .stderr(predicate::str::contains(
+                "the `zellij` mux backend cannot create sessions",
+            ));
+    }
+
+    if PrivateTmux::available() {
+        let listed = std::process::Command::new("tmux")
+            .env_remove("TMUX")
+            .env("TMUX_TMPDIR", tmux.dir.path())
+            .arg("ls")
+            .output()
+            .expect("run tmux ls");
+        assert!(
+            !listed.status.success(),
+            "a zellij pin must not start a tmux server: {}",
+            String::from_utf8_lossy(&listed.stdout)
+        );
+    }
+}
+
 #[test]
 fn pin_bind_fails_on_unknown_pin() {
     let home = tempfile::TempDir::new().expect("home");

@@ -350,13 +350,13 @@ pub(super) fn execute_exec_spec(
     use crate::tui::effect::ExecSpec;
     match spec {
         ExecSpec::AttachMux(target) => {
-            let outcome = run_tmux_attach(terminal, &target);
+            let outcome = run_mux_attach(terminal, &target, None);
             app.update(Msg::HandoffReturned(target.mux.clone()));
             app.report(attach_return_entry(
                 &target_short(&target),
                 outcome,
                 LogTarget::Mux(target.mux.clone()),
-                &target.native_id,
+                &target,
                 None,
             ));
         }
