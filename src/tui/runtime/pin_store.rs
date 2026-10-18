@@ -144,8 +144,7 @@ pub(super) fn pin_create_success_toast(is_adopt: bool, pin_id: &str) -> String {
 }
 
 /// Rename the adopted mux to the pin's mux name, through the mux's own
-/// backend. `tmux` is the loop's tmux runner, used when the adopted mux
-/// is a tmux session; any other backend gets its system runner.
+/// backend (`tmux`, the loop's runner, for tmux sessions).
 pub(super) fn apply_pin_adopt_mux_rename(
     tmux: &dyn MuxBackend,
     request: &crate::tui::widgets::pins::PinCreateRequest,
@@ -154,13 +153,9 @@ pub(super) fn apply_pin_adopt_mux_rename(
     if source == request.mux_name {
         return Some(format!("adopted existing mux `{source}`"));
     }
-    let other_backend;
-    let runner: &dyn MuxBackend = if request.mux_backend == tmux.backend_key() {
-        tmux
-    } else if let Some(runner) = crate::discovery::system_mux_backend(&request.mux_backend) {
-        other_backend = runner;
-        other_backend.as_ref()
-    } else {
+    let mut slot = None;
+    let Some(runner) = crate::discovery::mux_runner_for(&request.mux_backend, tmux, &mut slot)
+    else {
         return Some(format!(
             "pin written, but mux backend `{}` has no runner to rename `{source}`",
             request.mux_backend

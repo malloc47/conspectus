@@ -267,34 +267,73 @@ fn execute_rename_plan(
 }
 
 fn run_mux_rename(rename: &MuxNativeRename, tmux: &dyn MuxBackend) -> Result<()> {
-    let outcome = tmux
-        // Default-socket rename — `conspectus rename` is the alias
-        // overlay surface (ADR 0029) that runs on whatever socket
-        // owned the discovered mux. Renaming a pin's mux on a
-        // non-default socket is out of scope here.
-        .rename_session(None, &rename.mux.native_id, &rename.new_name)
-        .map_err(|err| anyhow!("tmux rename-session failed: {err}"))?;
+    let backend = rename.backend.as_str();
+    let mut slot = None;
+    let Some(runner) = crate::discovery::mux_runner_for(backend, tmux, &mut slot) else {
+        bail!(
+            "mux backend `{backend}` has no runner to rename `{}`",
+            rename.target
+        );
+    };
+    let outcome = runner
+        .rename_session(rename.socket.as_deref(), &rename.target, &rename.new_name)
+        .map_err(|err| anyhow!("{backend} rename failed: {err}"))?;
     match outcome {
         TmuxRenameOutcome::Renamed => {
             println!(
-                "renamed tmux session `{}` to `{}`",
-                rename.mux.native_id, rename.new_name
+                "renamed {backend} session `{}` to `{}`",
+                rename.target, rename.new_name
             );
             Ok(())
         }
-        TmuxRenameOutcome::NoTarget => bail!(
-            "tmux session `{}` not found on this server",
-            rename.mux.native_id
-        ),
+        TmuxRenameOutcome::NoTarget => bail!("{backend} session `{}` not found", rename.target),
         TmuxRenameOutcome::NameCollision => bail!(
-            "tmux refused to rename `{}` to `{}`: name already in use",
-            rename.mux.native_id,
+            "{backend} refused to rename `{}` to `{}`: name already in use",
+            rename.target,
             rename.new_name
         ),
-        TmuxRenameOutcome::Unavailable(reason) => bail!("tmux unavailable: {}", reason.as_str()),
-        TmuxRenameOutcome::Failed { code, message } => {
-            bail!("tmux rename-session failed (exit code {code:?}): {message}")
+        TmuxRenameOutcome::Unavailable(reason) => {
+            bail!("{backend} unavailable: {}", reason.as_str())
         }
-        TmuxRenameOutcome::Unsupported => bail!("tmux runner does not support rename_session"),
+        TmuxRenameOutcome::Failed { code, message } => {
+            bail!("{backend} rename failed (exit code {code:?}): {message}")
+        }
+        TmuxRenameOutcome::Unsupported => {
+            bail!("the {backend} runner cannot rename sessions")
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::discovery::tmux::FakeTmux;
+
+    fn rename(backend: &str, target: &str) -> MuxNativeRename {
+        MuxNativeRename {
+            mux: crate::model::MuxSessionId::new(format!("{backend}:{target}")),
+            backend: backend.to_string(),
+            target: target.to_string(),
+            socket: None,
+            new_name: "renamed".to_string(),
+        }
+    }
+
+    #[test]
+    fn cli_mux_rename_passes_the_bare_name_to_tmux() {
+        let tmux = FakeTmux::with_sessions("");
+        run_mux_rename(&rename("tmux", "editor"), &tmux).expect("renamed");
+        assert_eq!(
+            tmux.rename_calls(),
+            vec![(None, "editor".to_string(), "renamed".to_string())]
+        );
+    }
+
+    #[test]
+    fn cli_mux_rename_of_a_zellij_session_fails_naming_zellij_without_tmux() {
+        let tmux = FakeTmux::with_sessions("");
+        let err = run_mux_rename(&rename("zellij", "notes"), &tmux).expect_err("unsupported");
+        assert!(err.to_string().contains("zellij"), "{err}");
+        assert!(tmux.rename_calls().is_empty());
     }
 }

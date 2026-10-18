@@ -32,10 +32,31 @@ pub struct AgentAliasWrite {
     pub display_name: Option<String>,
 }
 
+/// A mux session to rename, with everything the backend needs to find
+/// it. `target` is the backend-native session name, not the graph id:
+/// tmux reads the prefixed `tmux:<name>` as session `tmux`, window
+/// `<name>`.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct MuxNativeRename {
     pub mux: MuxSessionId,
+    pub backend: String,
+    pub target: String,
+    /// Non-default tmux socket, when the session lives on one.
+    pub socket: Option<String>,
     pub new_name: String,
+}
+
+impl MuxNativeRename {
+    fn for_node(mux: &crate::model::MuxSessionNode, new_name: String) -> Self {
+        let (socket, target) = split_socket_and_name(&mux.native_id);
+        Self {
+            mux: mux.id.clone(),
+            backend: mux.backend.clone(),
+            target: target.to_string(),
+            socket: socket.map(str::to_string),
+            new_name,
+        }
+    }
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -105,10 +126,10 @@ pub fn plan_session_rename(
             let candidates = active_mux_candidates(snapshot, &session_node);
             match candidates.len() {
                 0 => None,
-                1 => Some(MuxNativeRename {
-                    mux: candidates[0].clone(),
-                    new_name: name.clone(),
-                }),
+                // A link to a mux discovery no longer sees has nothing to
+                // rename; the alias still lands.
+                1 => mux_node(snapshot, &candidates[0])
+                    .map(|mux| MuxNativeRename::for_node(mux, name.clone())),
                 n => return Err(RenamePlanError::AmbiguousMux { candidate_count: n }),
             }
         }
@@ -215,14 +236,7 @@ pub fn plan_mux_rename(
         return Err(MuxRenamePlanError::EmptyName);
     }
 
-    let mux = snapshot
-        .nodes
-        .iter()
-        .find_map(|node| match node {
-            crate::model::GraphNode::MuxSession(m) if &m.id == mux_id => Some(m),
-            _ => None,
-        })
-        .ok_or(MuxRenamePlanError::MuxNotFound)?;
+    let mux = mux_node(snapshot, mux_id).ok_or(MuxRenamePlanError::MuxNotFound)?;
 
     // `MuxSessionNode.native_id` drops the backend prefix (e.g.
     // `editor` for a default-socket tmux session, `scratch:editor`
@@ -258,11 +272,18 @@ pub fn plan_mux_rename(
     }
 
     Ok(MuxRenamePlan {
-        mux_rename: MuxNativeRename {
-            mux: mux_id.clone(),
-            new_name,
-        },
+        mux_rename: MuxNativeRename::for_node(mux, new_name),
         pin_mux_name_updates,
+    })
+}
+
+fn mux_node<'a>(
+    snapshot: &'a GraphSnapshot,
+    mux_id: &MuxSessionId,
+) -> Option<&'a crate::model::MuxSessionNode> {
+    snapshot.nodes.iter().find_map(|node| match node {
+        crate::model::GraphNode::MuxSession(m) if &m.id == mux_id => Some(m),
+        _ => None,
     })
 }
 

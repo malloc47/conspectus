@@ -293,6 +293,22 @@ pub fn system_mux_backend(backend_key: &str) -> Option<Box<dyn tmux::MuxBackend>
     }
 }
 
+/// The runner that drives `backend_key`: `preferred` when it is that
+/// backend's runner (the caller's long-lived or injected one), otherwise
+/// the system runner, held in `slot`. `None` for a backend this build
+/// does not know.
+pub fn mux_runner_for<'a>(
+    backend_key: &str,
+    preferred: &'a dyn tmux::MuxBackend,
+    slot: &'a mut Option<Box<dyn tmux::MuxBackend>>,
+) -> Option<&'a dyn tmux::MuxBackend> {
+    if preferred.backend_key() == backend_key {
+        return Some(preferred);
+    }
+    *slot = system_mux_backend(backend_key);
+    slot.as_deref()
+}
+
 pub fn path_to_string(path: &Path) -> String {
     path.to_string_lossy().into_owned()
 }

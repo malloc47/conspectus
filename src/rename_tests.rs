@@ -337,3 +337,74 @@ fn plan_mux_rename_socket_mismatch_skips_pin() {
         "pin on a different socket must not cascade"
     );
 }
+
+/// A mux node shaped the way discovery emits it: the id carries the
+/// backend prefix, `native_id` does not.
+fn discovered_mux(backend: &str, name: &str) -> MuxSessionNode {
+    MuxSessionNode::new(
+        MuxSessionId::new(format!("{backend}:{name}")),
+        backend.to_string(),
+        name.to_string(),
+    )
+}
+
+#[test]
+fn lockstep_rename_targets_the_bare_native_name_on_the_muxs_backend() {
+    for backend in ["tmux", "zellij"] {
+        let mut snapshot = GraphSnapshot::empty();
+        let node = session("codex", "alpha");
+        let id = node.id.clone();
+        let mux_node = discovered_mux(backend, "editor");
+        let mux_id = mux_node.id.clone();
+        snapshot.nodes.push(GraphNode::AgentSession(node));
+        snapshot.nodes.push(GraphNode::MuxSession(mux_node));
+        snapshot
+            .candidate_links
+            .push(linked_to_mux("link", &id, &mux_id));
+
+        let plan =
+            plan_session_rename(&snapshot, &id, Some("ingest".to_string()), false).expect("plan");
+        let rename = plan.mux_native_rename.expect("lockstep rename");
+
+        assert_eq!(rename.mux, mux_id);
+        assert_eq!(rename.backend, backend);
+        assert_eq!(
+            rename.target, "editor",
+            "never the prefixed `{backend}:editor`"
+        );
+        assert_eq!(rename.socket, None);
+    }
+}
+
+#[test]
+fn lockstep_rename_skips_a_mux_discovery_no_longer_sees() {
+    let mut snapshot = GraphSnapshot::empty();
+    let node = session("codex", "alpha");
+    let id = node.id.clone();
+    snapshot.nodes.push(GraphNode::AgentSession(node));
+    snapshot
+        .candidate_links
+        .push(linked_to_mux("link", &id, &MuxSessionId::new("tmux:gone")));
+
+    let plan =
+        plan_session_rename(&snapshot, &id, Some("ingest".to_string()), false).expect("plan");
+
+    assert_eq!(
+        plan.agent_alias_write.display_name.as_deref(),
+        Some("ingest")
+    );
+    assert!(plan.mux_native_rename.is_none());
+}
+
+#[test]
+fn plan_mux_rename_carries_the_muxs_backend_and_bare_name() {
+    let mut snapshot = GraphSnapshot::empty();
+    let mux_node = discovered_mux("zellij", "notes");
+    let mux_id = mux_node.id.clone();
+    snapshot.nodes.push(GraphNode::MuxSession(mux_node));
+
+    let plan = plan_mux_rename(&snapshot, &mux_id, "notes-2".to_string()).expect("plan");
+
+    assert_eq!(plan.mux_rename.backend, "zellij");
+    assert_eq!(plan.mux_rename.target, "notes");
+}

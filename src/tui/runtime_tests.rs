@@ -2105,3 +2105,32 @@ fn pin_adopt_mux_rename_never_renames_a_zellij_mux_through_tmux() {
     );
     assert!(status.contains("failed"), "{status}");
 }
+
+fn native_rename(backend: &str, target: &str) -> crate::rename::MuxNativeRename {
+    crate::rename::MuxNativeRename {
+        mux: MuxSessionId::new(format!("{backend}:{target}")),
+        backend: backend.to_string(),
+        target: target.to_string(),
+        socket: None,
+        new_name: "renamed".to_string(),
+    }
+}
+
+#[test]
+fn tui_mux_rename_passes_the_bare_name_to_tmux() {
+    let tmux = crate::discovery::tmux::FakeTmux::with_sessions("");
+    rename_mux_via_backend(&tmux, &native_rename("tmux", "editor")).expect("renamed");
+    assert_eq!(
+        tmux.rename_calls(),
+        vec![(None, "editor".to_string(), "renamed".to_string())]
+    );
+}
+
+#[test]
+fn tui_mux_rename_never_sends_a_zellij_rename_to_tmux() {
+    let tmux = crate::discovery::tmux::FakeTmux::with_sessions("");
+    let err = rename_mux_via_backend(&tmux, &native_rename("zellij", "notes"))
+        .expect_err("zellij cannot rename sessions");
+    assert!(err.contains("zellij"), "{err}");
+    assert!(tmux.rename_calls().is_empty());
+}

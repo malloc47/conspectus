@@ -1065,3 +1065,22 @@ fn only_backends_that_implement_new_session_claim_they_can_create_sessions() {
     assert!(tmux.can_create_sessions());
     assert!(!zellij.can_create_sessions());
 }
+
+#[test]
+fn mux_runner_for_prefers_the_callers_runner_for_its_own_backend() {
+    let fake = tmux::FakeTmux::with_sessions("");
+    let mut slot = None;
+    let runner = mux_runner_for(tmux::TMUX_BACKEND, &fake, &mut slot).expect("tmux runner");
+    assert_eq!(runner.backend_key(), tmux::TMUX_BACKEND);
+    assert!(
+        slot.is_none(),
+        "the caller's tmux runner is used, not a new one"
+    );
+
+    let mut slot = None;
+    let runner = mux_runner_for(zellij::ZELLIJ_BACKEND, &fake, &mut slot).expect("zellij runner");
+    assert_eq!(runner.backend_key(), zellij::ZELLIJ_BACKEND);
+
+    let mut slot = None;
+    assert!(mux_runner_for("screen", &fake, &mut slot).is_none());
+}

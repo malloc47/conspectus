@@ -168,29 +168,16 @@ pub(super) fn execute_commit_alias_rename(
         }
     };
 
-    if let Some(mux_rename) = &plan.mux_native_rename {
-        // Default-socket rename only; pin sockets are not
-        // propagated here.
+    if let Some(mux_rename) = &plan.mux_native_rename
+        && let Err(reason) = rename_mux_via_backend(tmux, mux_rename)
+    {
         let config = app.config().clone();
-        match tmux.rename_session(None, &mux_rename.mux.native_id, &mux_rename.new_name) {
-            Ok(crate::discovery::tmux::TmuxRenameOutcome::Renamed) => {}
-            Ok(other) => {
-                refresh_after_mux_handoff(app, &config);
-                app.report(
-                    LogEntry::warning(format!("alias updated, tmux rename failed: {other:?}"))
-                        .with_target(LogTarget::Mux(mux_rename.mux.clone())),
-                );
-                return;
-            }
-            Err(err) => {
-                refresh_after_mux_handoff(app, &config);
-                app.report(
-                    LogEntry::warning(format!("alias updated, tmux rename errored: {err:#}"))
-                        .with_target(LogTarget::Mux(mux_rename.mux.clone())),
-                );
-                return;
-            }
-        }
+        refresh_after_mux_handoff(app, &config);
+        app.report(
+            LogEntry::warning(format!("alias updated, {reason}"))
+                .with_target(LogTarget::Mux(mux_rename.mux.clone())),
+        );
+        return;
     }
 
     let advisory = live_session_advisory(app, &session_id);
@@ -203,12 +190,32 @@ pub(super) fn execute_commit_alias_rename(
     app.report(LogEntry::info(final_status));
 }
 
+/// Rename `rename`'s session through its mux's own backend: `tmux`,
+/// the loop's runner, for tmux sessions and the system runner for any
+/// other. `Err` carries the reason for the operator.
+pub(super) fn rename_mux_via_backend(
+    tmux: &dyn MuxBackend,
+    rename: &crate::rename::MuxNativeRename,
+) -> Result<(), String> {
+    let backend = rename.backend.as_str();
+    let mut slot = None;
+    let Some(runner) = crate::discovery::mux_runner_for(backend, tmux, &mut slot) else {
+        return Err(format!(
+            "mux backend `{backend}` has no runner to rename it"
+        ));
+    };
+    match runner.rename_session(rename.socket.as_deref(), &rename.target, &rename.new_name) {
+        Ok(crate::discovery::tmux::TmuxRenameOutcome::Renamed) => Ok(()),
+        Ok(other) => Err(format!("{backend} rename failed: {other:?}")),
+        Err(err) => Err(format!("{backend} rename errored: {err:#}")),
+    }
+}
+
 /// Executor branch for `StoreOp::CommitMuxRename`. Graph-aware
 /// cascade: `plan_mux_rename` finds pins whose `mux.name` matches
 /// the mux's current bare native id (and socket), and this executor
 /// rewrites each of those pin store TOMLs before firing the tmux
-/// `rename-session` so pin bindings survive the rename. Default
-/// socket only.
+/// `rename-session` so pin bindings survive the rename.
 pub(super) fn execute_commit_mux_rename(
     app: &mut App,
     tmux: &dyn MuxBackend,
@@ -253,22 +260,13 @@ pub(super) fn execute_commit_mux_rename(
         }
     }
 
-    // Chain the tmux rename (default socket only; see above).
-    let bare_current = plan
-        .mux_rename
-        .mux
-        .native_id
-        .rsplit_once(':')
-        .map_or(plan.mux_rename.mux.native_id.as_str(), |(_, name)| name);
-    let (renamed, mux_status) =
-        match tmux.rename_session(None, bare_current, &plan.mux_rename.new_name) {
-            Ok(crate::discovery::tmux::TmuxRenameOutcome::Renamed) => (
-                true,
-                format!("renamed mux to `{}`", plan.mux_rename.new_name),
-            ),
-            Ok(other) => (false, format!("tmux rename returned {other:?}")),
-            Err(err) => (false, format!("tmux rename errored: {err:#}")),
-        };
+    let (renamed, mux_status) = match rename_mux_via_backend(tmux, &plan.mux_rename) {
+        Ok(()) => (
+            true,
+            format!("renamed mux to `{}`", plan.mux_rename.new_name),
+        ),
+        Err(reason) => (false, reason),
+    };
 
     let mut parts = vec![mux_status];
     if pin_updates_written > 0 {

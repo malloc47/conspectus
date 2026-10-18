@@ -512,6 +512,10 @@ skip that side, or `--clear` to drop the alias entirely.
 writing any alias — mux ids are the native tmux name, so the rename
 mutates the identity directly (per ADR 0029).
 
+Both renames go through the mux's own backend. A backend that cannot
+rename sessions (zellij today) is reported by name; `rename session`
+still writes the alias.
+
 `conspectus alias list [--store project|user|all] [--scan-root PATH]`
 prints existing alias entries grouped by store. The output columns are
 tab-separated: `<store>\t<path>\t<endpoint>\t<display_name>`.
