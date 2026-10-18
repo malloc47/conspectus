@@ -106,7 +106,7 @@ pub fn resolve_node_id(input: &str, snapshot: &GraphSnapshot) -> Result<NodeId, 
                 }
             }
             GraphNode::MuxSession(mux) => {
-                if format!("{}:{}", mux.backend, mux.native_id) == trimmed {
+                if mux.qualified_name() == trimmed {
                     matches.insert(NodeId::MuxSession(mux.id.clone()));
                 }
             }
@@ -165,9 +165,7 @@ fn node_reference_label(snapshot: &GraphSnapshot, id: &NodeId) -> String {
         (NodeId::AgentSession(_), GraphNode::AgentSession(agent)) => {
             format!("{}:{}", agent.harness_key, agent.id.session_key)
         }
-        (NodeId::MuxSession(_), GraphNode::MuxSession(mux)) => {
-            format!("{}:{}", mux.backend, mux.native_id)
-        }
+        (NodeId::MuxSession(_), GraphNode::MuxSession(mux)) => mux.display_label(),
         (NodeId::Pin(_), GraphNode::Pin(pin)) => format!("pin:{}", pin.display_name),
         (NodeId::RuntimeProcess(_), GraphNode::RuntimeProcess(proc)) => {
             match (proc.pid, proc.command.as_deref()) {

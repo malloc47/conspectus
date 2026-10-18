@@ -155,7 +155,7 @@ fn cell(key: &str, ctx: &CellCtx<'_>) -> String {
     let mux = ctx.row.node;
     match key {
         "id" => ctx.short_id.to_string(),
-        "mux" => format!("{}:{}", mux.backend, mux.native_id),
+        "mux" => mux.display_label(),
         "cwd" => mux.cwd.clone().unwrap_or_else(dash),
         "agents" => match ctx.attached {
             Some(entries) if !entries.is_empty() => entries

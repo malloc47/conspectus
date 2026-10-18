@@ -508,7 +508,7 @@ pub(super) fn default_action_status_hint(app: &App) -> String {
     }
     match resolve_attach_target(app) {
         Ok(target) => {
-            let label = target_label(&target);
+            let label = target.label();
             match selected_mux_state(app) {
                 Some(MuxIndicator::Ambiguous { .. }) => {
                     format!("Enter/a attach preferred {label} · Tab inspect candidates")

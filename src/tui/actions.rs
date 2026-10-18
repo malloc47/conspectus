@@ -32,6 +32,14 @@ pub struct AttachTarget {
     pub native_id: String,
 }
 
+impl AttachTarget {
+    /// `<backend>:<native_id>` for status lines and log entries, e.g.
+    /// `tmux:editor`, matching what the backend itself lists.
+    pub fn label(&self) -> String {
+        format!("{}:{}", self.backend, self.native_id)
+    }
+}
+
 /// Pin diagnostic attached to the currently selected row. Mirrors
 /// ADR 0057's resolver diagnostics but keeps only the fields needed
 /// by the TUI.
@@ -508,13 +516,6 @@ pub fn attach_disabled_reason(reason: &AttachDisabled) -> String {
     }
 }
 
-/// Helper: format the target's display label for diagnostics (e.g.
-/// `tmux:editor`). Uses the **raw** native_id so the label matches
-/// what the operator would see in `tmux list-sessions`.
-pub fn target_label(target: &AttachTarget) -> String {
-    format!("{}:{}", target.backend, target.native_id)
-}
-
 /// Pull the mux node out for callers that need its full row (e.g.
 /// status bar messages).
 pub fn lookup_mux_node<'a>(
@@ -535,10 +536,8 @@ pub fn lookup_mux_node<'a>(
 /// leave detached).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PinLaunchTarget {
-    /// The pin's `mux.backend`; attach goes through this backend only.
-    pub mux_backend: String,
-    pub mux_name: String,
-    pub mux_socket: Option<String>,
+    /// The pin's declared mux. Attach goes through `mux.backend` only.
+    pub mux: crate::model::PinMuxRef,
 }
 
 /// Reasons `Msg::LaunchSelectedPin` refuses to fire in the reducer.
@@ -570,9 +569,7 @@ pub fn pin_launch_target_from_snapshot(app: &App, pin_id: &str) -> Option<PinLau
         .iter()
         .find(|pin| pin.id == pin_id)
         .map(|pin| PinLaunchTarget {
-            mux_backend: pin.mux.backend.clone(),
-            mux_name: pin.mux.name.clone(),
-            mux_socket: pin.mux.socket_name.clone(),
+            mux: pin.mux.clone(),
         })
 }
 

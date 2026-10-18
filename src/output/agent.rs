@@ -50,8 +50,7 @@ impl SessionRow<'_> {
 
 #[derive(Debug, Clone)]
 struct MuxInfo {
-    backend: String,
-    native_id: String,
+    label: String,
     provenance: String,
     confidence: String,
     candidate_count: usize,
@@ -160,7 +159,7 @@ fn cell(key: &str, ctx: &CellCtx<'_>) -> String {
         ),
         "cwd" => agent.cwd.clone().unwrap_or_else(dash),
         "mux" => match ctx.mux {
-            Some(m) => format!("{}:{}", m.backend, m.native_id),
+            Some(m) => m.label.clone(),
             None => dash(),
         },
         "mux-conf" => match ctx.mux {
@@ -414,8 +413,7 @@ fn collect_mux_lookup(snapshot: &GraphSnapshot) -> HashMap<SessionKey, MuxInfo> 
         out.insert(
             session_key_of(agent_id),
             MuxInfo {
-                backend: mux.backend.clone(),
-                native_id: mux.native_id.clone(),
+                label: mux.display_label(),
                 provenance: best.provenance.snake_case().to_string(),
                 confidence: best.confidence.snake_case().to_string(),
                 candidate_count,

@@ -40,7 +40,7 @@ use crate::tui::Msg;
 use crate::tui::SessionsGrouping;
 use crate::tui::Theme;
 use crate::tui::View;
-use crate::tui::actions::{attach_disabled_reason, resolve_attach_target, target_label};
+use crate::tui::actions::{attach_disabled_reason, resolve_attach_target};
 use crate::tui::app::{App, Focus, SnapshotHandle};
 use crate::tui::detail::{HeaderField, NodeDetail, SectionKind};
 use crate::tui::icons::{NodeKind, node_kind_style};

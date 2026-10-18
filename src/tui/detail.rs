@@ -321,7 +321,7 @@ pub enum DiagnosticSummary {
 fn title_line(node: &GraphNode) -> String {
     match node {
         GraphNode::AgentSession(session) => agent_session_display_id(session),
-        GraphNode::MuxSession(mux) => mux_display_label(mux),
+        GraphNode::MuxSession(mux) => mux.display_label(),
         GraphNode::Pin(pin) => format!("pin:{}", pin.display_name),
         GraphNode::RuntimeProcess(process) => format!("process:{}", process.observation_key),
         GraphNode::ForgePr(pr) => format!("forge_pr:{}/{}#{}", pr.owner, pr.repo, pr.number),
@@ -931,7 +931,7 @@ fn ambiguous_mux_fields(snapshot: &GraphSnapshot, group: &NodeId) -> Vec<HeaderF
                 .iter()
                 .find_map(|node| match node {
                     GraphNode::MuxSession(m) if NodeId::MuxSession(m.id.clone()) == mux => {
-                        Some(format!("{}:{}", m.backend, m.native_id))
+                        Some(m.display_label())
                     }
                     _ => None,
                 })
@@ -1235,7 +1235,7 @@ fn link_target_label(snapshot: &GraphSnapshot, link: &GraphLink) -> Option<Strin
 fn link_target_label_by_id(snapshot: &GraphSnapshot, target: &NodeId) -> Option<String> {
     let node = snapshot.find_node(target)?;
     match node {
-        GraphNode::MuxSession(mux) => Some(mux_display_label(mux)),
+        GraphNode::MuxSession(mux) => Some(mux.display_label()),
         GraphNode::Pin(pin) => Some(format!("pin:{}", pin.display_name)),
         GraphNode::AgentSession(session) => Some(format!(
             "{}:{}",
@@ -1367,10 +1367,6 @@ fn agent_session_display_id(session: &AgentSessionNode) -> String {
     format!("{}:{}", session.harness_key, session.id.session_key)
 }
 
-fn mux_display_label(mux: &MuxSessionNode) -> String {
-    format!("{}:{}", mux.backend, mux.native_id)
-}
-
 fn process_link_label(snapshot: &GraphSnapshot, process_id: &NodeId) -> Option<String> {
     let GraphNode::RuntimeProcess(process) = snapshot.find_node(process_id)? else {
         return None;
@@ -1390,7 +1386,7 @@ fn runtime_process_display_label(process: &RuntimeProcessNode) -> String {
 fn node_reference_label(node: &GraphNode) -> String {
     match node {
         GraphNode::AgentSession(session) => agent_session_display_id(session),
-        GraphNode::MuxSession(mux) => mux_display_label(mux),
+        GraphNode::MuxSession(mux) => mux.display_label(),
         GraphNode::Pin(pin) => format!("pin:{}", pin.display_name),
         GraphNode::RuntimeProcess(process) => runtime_process_display_label(process),
         GraphNode::ForgePr(pr) => format!("{}/{}#{}", pr.owner, pr.repo, pr.number),

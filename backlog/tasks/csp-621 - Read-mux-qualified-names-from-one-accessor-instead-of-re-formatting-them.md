@@ -1,9 +1,11 @@
 ---
 id: CSP-621
 title: Read mux qualified names from one accessor instead of re-formatting them
-status: To Do
-assignee: []
+status: Done
+assignee:
+  - '@claude'
 created_date: '2026-10-17 03:09'
+updated_date: '2026-10-18 00:11'
 labels:
   - h-hyg
 milestone: m-11
@@ -27,13 +29,41 @@ Every mux backend builds a node id of the form `<backend>:<native_id>` (`src/dis
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 No production code rebuilds a mux qualified name with an inline `format!` over `backend` and `native_id`
-- [ ] #2 The pin-binding lookup key and the displayed mux label each come from a named accessor
-- [ ] #3 Output and TUI snapshots are unchanged
+- [x] #1 No production code rebuilds a mux qualified name with an inline `format!` over `backend` and `native_id`
+- [x] #2 The pin-binding lookup key and the displayed mux label each come from a named accessor
+- [x] #3 Output and TUI snapshots are unchanged
 <!-- AC:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
-- [ ] #1 `just check` passes, or `git diff --check` for docs-only changes
-- [ ] #2 Docs and ADRs are updated when behavior, architecture, or workflow change
+- [x] #1 `just check` passes, or `git diff --check` for docs-only changes
+- [x] #2 Docs and ADRs are updated when behavior, architecture, or workflow change
 <!-- DOD:END -->
+
+## Implementation Plan
+
+<!-- SECTION:PLAN:BEGIN -->
+1. `MuxSessionNode::qualified_name()` is the identity form `<backend>:<native_id>` (what a pin's `mux.native_id()` and an operator-typed `node show` reference name); `MuxSessionNode::display_label()` is the operator-facing label, today the same string, so CSP-188 can change it alone.
+2. Identity sites use `qualified_name()`: the pin-binding key in `resolve/pins.rs` (replacing `pin_key_for_mux`) and the operator-input match in `output/node_show.rs`.
+3. Display sites use `display_label()`: `output/{mux,union,node_show}.rs`, `tui/detail.rs` (drops `mux_display_label`), `tui/explorer.rs` (two label functions).
+4. `output/agent.rs::MuxInfo` and `output/union.rs::PreferredMux` copied `backend` and `native_id` only to format them; they carry the computed label instead.
+5. `AttachTarget::label()` replaces the duplicate `tui::actions::target_label` and `tui::runtime::launch::target_short`.
+6. `PinLaunchTarget` holds the pin's `PinMuxRef`, so the attach id comes from `PinMuxRef::native_id()` instead of a hand-built string (and keeps the socket for socketed pins).
+7. Tests: model test pinning both accessors for tmux default socket and zellij; `AttachTarget::label` test; output and TUI snapshot suites unchanged.
+<!-- SECTION:PLAN:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+- `MuxSessionNode::qualified_name()` (identity: pin-binding key in `resolve/pins.rs`, operator-input match in `output/node_show.rs`) and `MuxSessionNode::display_label()` (tables, detail, explorer) replace 11 inline formats over `backend`/`native_id`. `tui/detail.rs::mux_display_label` is gone.
+- `output/agent.rs::MuxInfo` and `output/union.rs::PreferredMux` carried `backend` and `native_id` only to format them; they now carry `label`. The union relationship cell used a multi-line `"mux={}:{} [{}]"` format the ticket's single-line count missed.
+- `AttachTarget::label()` replaces the identical `tui::actions::target_label` and `tui::runtime::launch::target_short`.
+- `PinLaunchTarget` holds the pin's `PinMuxRef`, so the TUI attach id is `PinMuxRef::native_id()` (socket-qualified for socketed pins) instead of a hand-built string.
+- Validation: a multi-line regex scan of production code finds `backend:native_id` formatting only inside the two accessors; new tests `model::tests::mux_qualified_name_is_backend_and_native_id_and_matches_the_pin_key` and `tui::actions::tests::attach_target_label_is_backend_and_native_name`; `just check` green (2400 tests) with every output and TUI snapshot unchanged.
+<!-- SECTION:NOTES:END -->
+
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+Mux qualified names now come from named accessors instead of 14 inline `format!` calls: `MuxSessionNode::qualified_name()` for identity (pin binding, `node show` lookup), `MuxSessionNode::display_label()` for what operators see, and `AttachTarget::label()`, which also replaces two duplicate helper functions. The pin launch target carries the pin's `PinMuxRef` so its attach id comes from `PinMuxRef::native_id()`. Output is unchanged: `just check` passes (2400 tests) with all snapshots identical.
+<!-- SECTION:FINAL_SUMMARY:END -->

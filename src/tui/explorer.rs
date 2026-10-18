@@ -1216,7 +1216,7 @@ fn title_line(snapshot: &GraphSnapshot, node: &GraphNode) -> String {
                 None => format!("{}:{}", s.harness_key, s.id.session_key),
             }
         }
-        GraphNode::MuxSession(m) => format!("{}:{}", m.backend, m.native_id),
+        GraphNode::MuxSession(m) => m.display_label(),
         GraphNode::Pin(p) => format!("pin:{}", p.display_name),
         GraphNode::RuntimeProcess(p) => match (p.pid, p.command.as_deref()) {
             (Some(pid), Some(cmd)) => format!("pid {pid}: {}", truncate(cmd, 48)),
@@ -2114,7 +2114,7 @@ fn resolved_slots_for<'a>(
 fn neighbor_display_label(node: &GraphNode, home: Option<&Path>) -> String {
     match node {
         GraphNode::AgentSession(s) => format!("{}:{}", s.harness_key, s.id.session_key),
-        GraphNode::MuxSession(m) => format!("{}:{}", m.backend, m.native_id),
+        GraphNode::MuxSession(m) => m.display_label(),
         GraphNode::Pin(p) => format!("pin:{}", p.display_name),
         GraphNode::RuntimeProcess(p) => match (p.pid, p.command.as_deref()) {
             (Some(pid), Some(cmd)) => format!("{} · pid {pid}", truncate(cmd, 24)),

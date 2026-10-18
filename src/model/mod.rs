@@ -732,6 +732,20 @@ pub struct MuxSessionNode {
 // Builder helpers on `MuxSessionNode` mirror
 // `RepoNode::new` / `with_*`.
 impl MuxSessionNode {
+    /// `<backend>:<native_id>`, the name a pin's `mux.native_id()`
+    /// declares and an operator types to reference this mux. Pin
+    /// binding keys muxes by it, so it must stay stable; use
+    /// [`Self::display_label`] for what to show.
+    pub fn qualified_name(&self) -> String {
+        format!("{}:{}", self.backend, self.native_id)
+    }
+
+    /// The operator-facing label for this mux in tables, detail
+    /// fields, and explorer rows. Today it is the qualified name.
+    pub fn display_label(&self) -> String {
+        self.qualified_name()
+    }
+
     /// Minimal ctor. All optional fields default to `None`.
     pub fn new(id: MuxSessionId, backend: impl Into<String>, native_id: impl Into<String>) -> Self {
         Self {

@@ -772,3 +772,20 @@ fn source_metadata_match_kind_prefers_the_field_over_evidence() {
     );
     assert_eq!(metadata.match_kind(), Some(MatchKind::HookSessionMatch));
 }
+
+#[test]
+fn mux_qualified_name_is_backend_and_native_id_and_matches_the_pin_key() {
+    let tmux = MuxSessionNode::new(MuxSessionId::new("tmux:editor"), "tmux", "editor");
+    assert_eq!(tmux.qualified_name(), "tmux:editor");
+    assert_eq!(tmux.display_label(), "tmux:editor");
+    let pin = PinMuxRef {
+        backend: "tmux".to_string(),
+        name: "editor".to_string(),
+        socket_name: None,
+    };
+    assert_eq!(tmux.qualified_name(), pin.native_id());
+
+    let zellij = MuxSessionNode::new(MuxSessionId::new("zellij:notes"), "zellij", "notes");
+    assert_eq!(zellij.qualified_name(), "zellij:notes");
+    assert_eq!(zellij.display_label(), "zellij:notes");
+}

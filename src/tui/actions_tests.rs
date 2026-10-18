@@ -477,6 +477,16 @@ fn pin_launch_target_carries_the_pins_mux_backend() {
     let app = build_app(snapshot);
 
     let target = pin_launch_target_from_snapshot(&app, "zp").expect("pin target");
-    assert_eq!(target.mux_backend, "zellij");
-    assert_eq!(target.mux_name, "zp");
+    assert_eq!(target.mux.backend, "zellij");
+    assert_eq!(target.mux.name, "zp");
+}
+
+#[test]
+fn attach_target_label_is_backend_and_native_name() {
+    let target = AttachTarget {
+        mux: MuxSessionId::new("zellij:notes"),
+        backend: "zellij".to_string(),
+        native_id: "notes".to_string(),
+    };
+    assert_eq!(target.label(), "zellij:notes");
 }

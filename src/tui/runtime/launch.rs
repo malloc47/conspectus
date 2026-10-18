@@ -87,13 +87,14 @@ pub(super) fn execute_launch_pin(
         return;
     };
 
-    if target.mux_backend == crate::discovery::tmux::TMUX_BACKEND
+    let mux = &target.mux;
+    if mux.backend == crate::discovery::tmux::TMUX_BACKEND
         && let Some(reason) = tmux_session_unavailable(target)
     {
         app.report(
             LogEntry::error(format!(
                 "pin `{pin_id}` launched but tmux session `{}` is not attachable: {reason}",
-                target.mux_name
+                mux.name
             ))
             .with_target(log_target),
         );
@@ -101,18 +102,18 @@ pub(super) fn execute_launch_pin(
     }
 
     let attach_target = AttachTarget {
-        mux: MuxSessionId::new(format!("{}:{}", target.mux_backend, target.mux_name)),
-        backend: target.mux_backend.clone(),
-        native_id: target.mux_name.clone(),
+        mux: MuxSessionId::new(mux.native_id()),
+        backend: mux.backend.clone(),
+        native_id: mux.name.clone(),
     };
-    let outcome = run_mux_attach(terminal, &attach_target, target.mux_socket.as_deref());
+    let outcome = run_mux_attach(terminal, &attach_target, mux.socket_name.as_deref());
     app.update(Msg::HandoffReturned(attach_target.mux.clone()));
     app.report(attach_return_entry(
         &format!("pin `{pin_id}`"),
         outcome,
         log_target,
         &attach_target,
-        target.mux_socket.as_deref(),
+        mux.socket_name.as_deref(),
     ));
 }
 
@@ -458,15 +459,11 @@ pub(super) fn command_output_excerpt(output: &Output) -> String {
 
 pub(super) fn tmux_session_unavailable(target: &PinLaunchTarget) -> Option<String> {
     let mut command = crate::exec::command(crate::exec::Program::Tmux, "tmux");
-    if let Some(socket) = target
-        .mux_socket
-        .as_deref()
-        .filter(|socket| *socket != "default")
-    {
+    if let Some(socket) = target.mux.effective_socket() {
         command.args(["-L", socket]);
     }
     let output = command
-        .args(["has-session", "-t", target.mux_name.as_str()])
+        .args(["has-session", "-t", target.mux.name.as_str()])
         .output();
     match output {
         Ok(output) if output.status.success() => None,
@@ -603,10 +600,6 @@ pub(super) fn run_tmux_attach_with_socket(
         Ok(s) => AttachOutcome::Failed(format!("tmux {subcommand} exited with {s}")),
         Err(err) => AttachOutcome::Failed(format!("could not launch tmux: {err}")),
     }
-}
-
-pub(super) fn target_short(target: &AttachTarget) -> String {
-    format!("{}:{}", target.backend, target.native_id)
 }
 
 /// Outcome of a single viewer launch attempt. Errors carry a

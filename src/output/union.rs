@@ -42,8 +42,7 @@ struct UnionRow<'a> {
 
 #[derive(Debug, Clone)]
 struct PreferredMux {
-    backend: String,
-    native_id: String,
+    label: String,
     provenance: String,
     confidence: String,
     candidate_count: usize,
@@ -143,7 +142,7 @@ fn cell(key: &str, ctx: &CellCtx<'_>) -> String {
             None => dash(),
         },
         ("label", UnionKind::Mux) => match ctx.row.mux {
-            Some(mux) => format!("{}:{}", mux.backend, mux.native_id),
+            Some(mux) => mux.display_label(),
             None => dash(),
         },
         ("cwd", UnionKind::Agent) => ctx
@@ -154,9 +153,8 @@ fn cell(key: &str, ctx: &CellCtx<'_>) -> String {
         ("cwd", UnionKind::Mux) => ctx.row.mux.and_then(|m| m.cwd.clone()).unwrap_or_else(dash),
         ("relationship", UnionKind::Agent) => match ctx.preferred_mux {
             Some(m) => format!(
-                "mux={}:{} [{}]",
-                m.backend,
-                m.native_id,
+                "mux={} [{}]",
+                m.label,
                 render::indicator_from_tags(&m.provenance, &m.confidence, m.candidate_count > 1)
             ),
             None => "mux=—".to_string(),
@@ -294,8 +292,7 @@ fn collect_preferred_mux_per_agent(snapshot: &GraphSnapshot) -> HashMap<SessionK
         out.insert(
             session_key_of(agent),
             PreferredMux {
-                backend: mux.backend.clone(),
-                native_id: mux.native_id.clone(),
+                label: mux.display_label(),
                 provenance: best.provenance.snake_case().to_string(),
                 confidence: best.confidence.snake_case().to_string(),
                 candidate_count,
