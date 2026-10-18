@@ -5,11 +5,20 @@
 //! `AgentSession` per discovered session. Records that fail to parse or are
 //! missing the `id` field are skipped silently.
 //!
+//! `opencode.db` comes in two layouts (ADR 0125). opencode 1.x keeps
+//! sessions in `session` and messages in `message` / `part`. opencode 2.x
+//! keeps them in `session_v2` and `session_message`; a fresh 2.x database
+//! has no 1.x tables, and a migrated one keeps its 1.x tables, stale,
+//! beside copies of the same sessions under the same ids. Both layouts are
+//! read and a `session_v2` row wins over a `session` row with its id.
+//!
 //! Per ADR 0018 the SQLite-backed reader also extracts the `parent_id`
 //! column when present and emits intra-harness `parent_session` candidate
 //! links between two `AgentSession` endpoints. Older databases that lack
 //! the column degrade by reading sessions without lineage rather than
-//! dropping everything.
+//! dropping everything. In 2.x `parent_id` is set only by the `subagent`
+//! tool, so it reads as `spawn` lineage and marks the child a subagent,
+//! and a fork's `fork_session_id` reads as `fork` lineage.
 //!
 //! Subagent sessions (openCode `@explore` / `@general` workers) are
 //! classified via a schema probe for the `kind` column, with a title-
@@ -27,7 +36,7 @@ use serde::Deserialize;
 use serde_json::json;
 
 use crate::discovery::harness::HarnessAdapter;
-use crate::discovery::memo::{FileStamp, StampedMap};
+use crate::discovery::memo::{SqliteStamp, StampedMap};
 use crate::discovery::{DiscoveryCaches, DiscoveryContext, GraphFragment};
 use crate::model::{
     AgentSessionId, AgentSessionNode, Confidence, Freshness, GraphLink, GraphNode, LinkEndpoint,
@@ -187,23 +196,33 @@ fn discover_state(state_root: &Path, caches: &DiscoveryCaches) -> Result<GraphFr
     }
 
     for info in sessions.values() {
-        let Some(parent_id) = info.parent_id.as_deref() else {
-            continue;
-        };
+        let parent = info.parent_id.as_deref().map(|parent| {
+            let op = match info.layout {
+                Layout::V1 => LineageOp::Parent,
+                Layout::V2 => LineageOp::Spawn,
+            };
+            (parent, op)
+        });
+        let fork = info
+            .fork_session_id
+            .as_deref()
+            .map(|source| (source, LineageOp::Fork));
+        for (parent_id, op) in parent.into_iter().chain(fork) {
+            if parent_id.is_empty() || parent_id == info.id {
+                // Empty parent strings are meaningless; self-parent links would
+                // create a cycle that can't represent real lineage.
+                continue;
+            }
 
-        if parent_id.is_empty() || parent_id == info.id {
-            // Empty parent strings are meaningless; self-parent links would
-            // create a cycle that can't represent real lineage.
-            continue;
+            let resolved_parent = sessions.get(parent_id).map(|_| parent_id);
+            candidate_links.push(build_lineage_link(
+                &info.id,
+                parent_id,
+                op,
+                &state_scope,
+                resolved_parent,
+            ));
         }
-
-        let resolved_parent = sessions.get(parent_id).map(|_| parent_id);
-        candidate_links.push(build_lineage_link(
-            &info.id,
-            parent_id,
-            &state_scope,
-            resolved_parent,
-        ));
     }
 
     Ok(GraphFragment {
@@ -243,6 +262,20 @@ pub(crate) struct SessionInfo {
     session_kind: Option<SessionKind>,
     #[serde(default)]
     time: Option<SessionTime>,
+    /// Sourced from `session_v2.fork_session_id`: the session this one
+    /// was forked from. 1.x and legacy records leave this `None`.
+    #[serde(skip)]
+    fork_session_id: Option<String>,
+    #[serde(skip)]
+    layout: Layout,
+}
+
+/// Which `opencode.db` layout a session row came from.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+enum Layout {
+    #[default]
+    V1,
+    V2,
 }
 
 #[derive(Clone, Deserialize)]
@@ -265,7 +298,18 @@ fn read_sqlite_sessions(path: &Path) -> Vec<SessionInfo> {
         return Vec::new();
     };
 
-    let Some(mut query) = session_query(&connection) else {
+    let mut sessions: BTreeMap<String, SessionInfo> = read_v1_sessions(&connection)
+        .into_iter()
+        .map(|info| (info.id.clone(), info))
+        .collect();
+    for info in read_v2_sessions(&connection) {
+        sessions.insert(info.id.clone(), info);
+    }
+    sessions.into_values().collect()
+}
+
+fn read_v1_sessions(connection: &Connection) -> Vec<SessionInfo> {
+    let Some(mut query) = session_query(connection) else {
         return Vec::new();
     };
 
@@ -313,34 +357,76 @@ fn read_sqlite_sessions(path: &Path) -> Vec<SessionInfo> {
             last_message_preview: None,
             session_kind,
             time: None,
+            fork_session_id: None,
+            layout: Layout::V1,
         })
     }) else {
         return Vec::new();
     };
 
-    let mut sessions: Vec<SessionInfo> = rows
-        .filter_map(|row| {
-            let info = row.ok()?;
-            if info.id.trim().is_empty() {
-                None
-            } else {
-                Some(info)
-            }
-        })
-        .collect();
+    let mut sessions = nonempty_ids(rows);
 
     // Attach the most recent text-part preview per session. Best-effort:
     // schemas that don't carry the `part` table (or lack JSON1 support
     // in this rusqlite build, which the `bundled` feature ensures we
     // have) degrade to `None`.
-    let previews = read_last_message_previews(&connection);
-    for session in &mut sessions {
+    attach_previews(&mut sessions, &read_last_message_previews(connection));
+    sessions
+}
+
+fn read_v2_sessions(connection: &Connection) -> Vec<SessionInfo> {
+    let Ok(mut statement) = connection.prepare(
+        "SELECT id, directory, title, parent_id, fork_session_id, time_updated, time_created \
+         FROM session_v2 ORDER BY id",
+    ) else {
+        return Vec::new();
+    };
+
+    let Ok(rows) = statement.query_map([], |row| {
+        let parent_id: Option<String> = row.get(3)?;
+        let time_updated: Option<i64> = row.get(5)?;
+        let time_created: Option<i64> = row.get(6)?;
+        // 2.x sets `parent_id` only on sessions the `subagent` tool spawns.
+        let session_kind = parent_id.as_ref().map(|_| SessionKind::Subagent);
+        Ok(SessionInfo {
+            id: row.get(0)?,
+            directory: row.get(1)?,
+            title: row.get(2)?,
+            parent_id,
+            last_active_epoch: epoch_ms_to_seconds(time_updated.or(time_created)),
+            last_message_preview: None,
+            session_kind,
+            time: None,
+            fork_session_id: row.get(4)?,
+            layout: Layout::V2,
+        })
+    }) else {
+        return Vec::new();
+    };
+
+    let mut sessions = nonempty_ids(rows);
+    attach_previews(&mut sessions, &read_v2_last_message_previews(connection));
+    sessions
+}
+
+fn nonempty_ids(rows: impl Iterator<Item = rusqlite::Result<SessionInfo>>) -> Vec<SessionInfo> {
+    rows.filter_map(|row| {
+        let info = row.ok()?;
+        if info.id.trim().is_empty() {
+            None
+        } else {
+            Some(info)
+        }
+    })
+    .collect()
+}
+
+fn attach_previews(sessions: &mut [SessionInfo], previews: &BTreeMap<String, String>) {
+    for session in sessions {
         if let Some(text) = previews.get(&session.id) {
             session.last_message_preview = normalize_last_message_preview(text);
         }
     }
-
-    sessions
 }
 
 struct SessionQuery<'conn> {
@@ -445,6 +531,45 @@ fn read_last_message_previews(connection: &Connection) -> BTreeMap<String, Strin
     out
 }
 
+/// Build a `session_id → most-recent-text` map from 2.x `session_message`
+/// rows: the newest non-empty user prompt or assistant `text` content
+/// item by `seq`. Reasoning and tool content are skipped, matching the
+/// 1.x preview. Best-effort like [`read_last_message_previews`]; a row
+/// whose `data` is not JSON is treated as empty rather than failing the
+/// query.
+fn read_v2_last_message_previews(connection: &Connection) -> BTreeMap<String, String> {
+    let mut out = BTreeMap::new();
+    let sql = "WITH texts AS ( \
+        SELECT m.session_id AS session_id, m.seq AS seq, CAST(c.key AS INTEGER) AS ord, \
+               json_extract(c.value, '$.text') AS text \
+        FROM session_message m, \
+             json_each(CASE WHEN json_valid(m.data) THEN m.data ELSE '{}' END, '$.content') c \
+        WHERE m.type = 'assistant' AND json_extract(c.value, '$.type') = 'text' \
+        UNION ALL \
+        SELECT session_id, seq, -1, \
+               CASE WHEN json_valid(data) THEN json_extract(data, '$.text') END \
+        FROM session_message WHERE type = 'user' \
+    ), ranked AS ( \
+        SELECT session_id, text, \
+               ROW_NUMBER() OVER (PARTITION BY session_id ORDER BY seq DESC, ord DESC) AS rn \
+        FROM texts \
+        WHERE typeof(text) = 'text' AND length(trim(text)) > 0 \
+    ) \
+    SELECT session_id, text FROM ranked WHERE rn = 1";
+    let Ok(mut statement) = connection.prepare(sql) else {
+        return out;
+    };
+    let Ok(rows) = statement.query_map([], |row| {
+        Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+    }) else {
+        return out;
+    };
+    for (session_id, text) in rows.flatten() {
+        out.insert(session_id, text);
+    }
+    out
+}
+
 /// True when the title contains an openCode-convention subagent marker:
 /// `(@<name> subagent)`.  Known variants are `@explore` and `@general`;
 /// the pattern matches any `(@`-prefixed name followed by ` subagent)` to
@@ -486,16 +611,53 @@ fn classify_session_kind(
     None
 }
 
+/// The operation a parent pointer records, in ADR 0018 / ADR 0048
+/// lineage vocabulary.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum LineageOp {
+    /// 1.x `session.parent_id`: a tree-shape pointer without a documented
+    /// operation type, so `unknown` is the honest label.
+    Parent,
+    /// 2.x `session_v2.parent_id`, set only by the `subagent` tool.
+    Spawn,
+    /// 2.x `session_v2.fork_session_id`.
+    Fork,
+}
+
+impl LineageOp {
+    fn kind(self) -> &'static str {
+        match self {
+            LineageOp::Parent => "unknown",
+            LineageOp::Spawn => "spawn",
+            LineageOp::Fork => "fork",
+        }
+    }
+
+    fn evidence(self) -> &'static str {
+        match self {
+            LineageOp::Parent => "opencode session.parent_id unknown",
+            LineageOp::Spawn => "opencode session_v2.parent_id spawn",
+            LineageOp::Fork => "opencode session_v2.fork_session_id fork",
+        }
+    }
+
+    fn link_segment(self) -> &'static str {
+        match self {
+            LineageOp::Parent | LineageOp::Spawn => "parent_session",
+            LineageOp::Fork => "fork_session",
+        }
+    }
+}
+
 fn build_lineage_link(
     child_session_key: &str,
     parent_session_key: &str,
+    op: LineageOp,
     state_scope: &str,
     resolved_parent: Option<&str>,
 ) -> GraphLink {
-    // ADR 0018 vocabulary: opencode `parent_id` is a tree-shape pointer
-    // without a documented operation type, so `unknown` is the honest label
-    // until opencode publishes lineage semantics we can map more precisely.
-    let lineage_kind = "unknown";
+    let lineage_kind = op.kind();
+    let segment = op.link_segment();
 
     let mut fields: Metadata = Metadata::new();
     fields.insert("harness_key".to_string(), json!(HARNESS_KEY));
@@ -520,7 +682,7 @@ fn build_lineage_link(
             LinkEndpoint::Node {
                 id: NodeId::AgentSession(parent_id),
             },
-            format!("opencode:lineage:{child_session_key}:parent_session:{parent_key}"),
+            format!("opencode:lineage:{child_session_key}:{segment}:{parent_key}"),
         )
     } else {
         let evidence = UnresolvedEndpoint {
@@ -534,7 +696,7 @@ fn build_lineage_link(
         (
             LinkEndpoint::Unresolved { evidence },
             format!(
-                "opencode:lineage:{child_session_key}:parent_session:unresolved:{parent_session_key}"
+                "opencode:lineage:{child_session_key}:{segment}:unresolved:{parent_session_key}"
             ),
         )
     };
@@ -549,7 +711,7 @@ fn build_lineage_link(
         freshness: Freshness::Fresh,
         source_metadata: SourceMetadata {
             adapter: HARNESS_KEY.to_string(),
-            evidence: Some(format!("opencode session.parent_id {lineage_kind}")),
+            evidence: Some(op.evidence().to_string()),
             fields,
             freshness_epoch: None,
         },
@@ -601,17 +763,18 @@ fn read_info(path: &Path) -> Option<SessionInfo> {
 //
 // `read_sqlite_sessions` opens `~/.local/share/opencode/opencode.db`
 // (25 MB on the operator's box) and issues a full-table `SELECT`
-// scan of the `session` table (plus a preview lookup per session).
-// The DB uses WAL mode so the main file's mtime is stable across
-// long stretches — perfect for a mtime+size cache. On a warm daemon
-// with an idle opencode the cache hit rate is ~100%, saving the
-// ~5,000 pread64 pages per full-table scan every harness cycle.
+// scan of the session tables (plus a preview lookup per session).
+// The DB uses WAL mode, so commits land in `opencode.db-wal` until a
+// checkpoint; the cache key stamps both files. On a warm daemon with
+// an idle opencode neither changes and the cache hit rate is ~100%,
+// saving the ~5,000 pread64 pages per full-table scan every harness
+// cycle.
 
 fn read_sqlite_sessions_cached(
     path: &Path,
-    cache: &StampedMap<FileStamp, Vec<SessionInfo>>,
+    cache: &StampedMap<SqliteStamp, Vec<SessionInfo>>,
 ) -> Vec<SessionInfo> {
-    let Some(stamp) = FileStamp::of(path) else {
+    let Some(stamp) = SqliteStamp::of(path) else {
         return Vec::new();
     };
     if let Some(sessions) = cache.get(path, &stamp) {

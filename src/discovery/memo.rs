@@ -31,7 +31,7 @@ pub struct DiscoveryCaches {
     pub(crate) forge: forge::ForgeListings,
     pub(crate) codex_rollouts: StampedMap<FileStamp, codex::RolloutScan>,
     pub(crate) claude_sessions: StampedMap<FileStamp, claude_code::DiscoveredSession>,
-    pub(crate) opencode_sessions: StampedMap<FileStamp, Vec<opencode::SessionInfo>>,
+    pub(crate) opencode_sessions: StampedMap<SqliteStamp, Vec<opencode::SessionInfo>>,
     pub(crate) pi_sessions: StampedMap<FileStamp, pi::ScannedSession>,
     pub(crate) codex_log: codex_log::QueryCache,
     /// Fingerprint of the last mux/harness slice, used to skip the
@@ -112,6 +112,28 @@ impl FileStamp {
             .ok()?
             .as_secs();
         i64::try_from(secs).ok()
+    }
+}
+
+/// A SQLite database's [`FileStamp`] together with its `-wal` file's.
+/// In WAL mode a commit lands in the `-wal` file and leaves the main
+/// file untouched until a checkpoint, so the main file's stamp alone
+/// would keep serving a result that predates recent writes.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct SqliteStamp {
+    db: FileStamp,
+    wal: Option<FileStamp>,
+}
+
+impl SqliteStamp {
+    /// `None` when the database file itself can't be stat'ed.
+    pub(crate) fn of(path: &Path) -> Option<Self> {
+        let mut wal = path.as_os_str().to_owned();
+        wal.push("-wal");
+        Some(Self {
+            db: FileStamp::of(path)?,
+            wal: FileStamp::of(Path::new(&wal)),
+        })
     }
 }
 

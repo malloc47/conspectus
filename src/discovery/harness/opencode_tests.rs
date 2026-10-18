@@ -788,3 +788,271 @@ fn subagent_title_pattern_matches_future_subagent_types() {
     let session = discover_session(&context, "future-sub");
     assert_eq!(session.session_kind, Some(SessionKind::Subagent));
 }
+
+const V2_PLAIN: &str = "ses_eb28a8f36ffeMN3kZxz5Jlmcyh";
+const V2_TITLED: &str = "ses_eb28a641fffenZeChGJn545980";
+const V2_SHELL: &str = "ses_eb2894beaffegnOI4nKs48hChb";
+const V2_SUBAGENT_PARENT: &str = "ses_eb2894b15ffejUNOeroIROljGy";
+const V2_SUBAGENT_CHILD: &str = "ses_eb2894ad9ffebJ4LlOK9UvscBN";
+const V2_FORK: &str = "ses_eb28a6308ffe3TFS7uFnn7lwpH";
+const MIGRATED_PLAIN: &str = "ses_eb282f773ffeudkJBYBQedCh1M";
+const MIGRATED_TOOL: &str = "ses_eb27ccda4ffeKjSodHyeONASJp";
+
+/// Load one of the sanitized opencode database dumps (ADR 0125) as the
+/// state root's `opencode.db`.
+fn load_db_fixture(fixture: &HarnessFixture, name: &str) -> Connection {
+    let sql = fs::read_to_string(
+        Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("tests/fixtures/opencode")
+            .join(name),
+    )
+    .expect("read fixture");
+    let root = fixture.opencode_state_root();
+    fs::create_dir_all(&root).expect("state root");
+    let connection = Connection::open(root.join("opencode.db")).expect("open db");
+    connection.execute_batch(&sql).expect("load fixture");
+    connection
+}
+
+fn sessions_by_key(context: &DiscoveryContext) -> BTreeMap<String, AgentSessionNode> {
+    OpenCodeAdapter::new()
+        .discover(context)
+        .expect("discover")
+        .nodes
+        .into_iter()
+        .filter_map(|node| match node {
+            GraphNode::AgentSession(s) => Some((s.id.session_key.clone(), s)),
+            _ => None,
+        })
+        .collect()
+}
+
+#[test]
+fn v2_sessions_are_discovered_with_cwd_title_and_recency() {
+    let temp = TempDir::new().expect("temp");
+    let (context, fixture) = context_with_state(&temp);
+    load_db_fixture(&fixture, "v2-fresh.sql");
+
+    let sessions = sessions_by_key(&context);
+
+    assert_eq!(sessions.len(), 8);
+    let plain = &sessions[V2_PLAIN];
+    assert_eq!(plain.cwd.as_deref(), Some("/home/user/proj"));
+    assert_eq!(plain.title.as_deref(), Some("Hello from the mock model."));
+    assert_eq!(plain.last_active_epoch, Some(1_792_300_915));
+    assert_eq!(plain.session_kind, None);
+    assert_eq!(
+        sessions[V2_TITLED].title.as_deref(),
+        Some("Fixture titled session")
+    );
+}
+
+#[test]
+fn v2_preview_is_the_newest_prompt_or_assistant_text() {
+    let temp = TempDir::new().expect("temp");
+    let (context, fixture) = context_with_state(&temp);
+    let connection = load_db_fixture(&fixture, "v2-fresh.sql");
+    connection
+        .execute(
+            "INSERT INTO session_message (id, session_id, type, seq, time_created, time_updated, data) \
+             VALUES ('msg_late', ?1, 'user', 40, 1, 1, '{\"text\":\"A later prompt\"}')",
+            [V2_TITLED],
+        )
+        .expect("insert prompt");
+
+    let sessions = sessions_by_key(&context);
+
+    assert_eq!(
+        sessions[V2_PLAIN].last_message_preview.as_deref(),
+        Some("Hello from the mock model.")
+    );
+    // The shell tool's output lives in tool state, not in a text item.
+    assert_eq!(
+        sessions[V2_SHELL].last_message_preview.as_deref(),
+        Some("I read the file; it says hello from the fixture.")
+    );
+    assert_eq!(
+        sessions[V2_TITLED].last_message_preview.as_deref(),
+        Some("A later prompt")
+    );
+}
+
+#[test]
+fn v2_message_with_malformed_data_does_not_hide_the_preview() {
+    let temp = TempDir::new().expect("temp");
+    let (context, fixture) = context_with_state(&temp);
+    let connection = load_db_fixture(&fixture, "v2-fresh.sql");
+    connection
+        .execute(
+            "INSERT INTO session_message (id, session_id, type, seq, time_created, time_updated, data) \
+             VALUES ('msg_bad', ?1, 'assistant', 99, 1, 1, 'not json')",
+            [V2_PLAIN],
+        )
+        .expect("insert malformed row");
+
+    let sessions = sessions_by_key(&context);
+
+    assert_eq!(sessions.len(), 8);
+    assert_eq!(
+        sessions[V2_PLAIN].last_message_preview.as_deref(),
+        Some("Hello from the mock model.")
+    );
+}
+
+#[test]
+fn v2_subagent_child_is_a_subagent_with_spawn_lineage() {
+    let temp = TempDir::new().expect("temp");
+    let (context, fixture) = context_with_state(&temp);
+    load_db_fixture(&fixture, "v2-fresh.sql");
+
+    let sessions = sessions_by_key(&context);
+    assert_eq!(
+        sessions[V2_SUBAGENT_CHILD].session_kind,
+        Some(SessionKind::Subagent)
+    );
+    assert_eq!(sessions[V2_SUBAGENT_PARENT].session_kind, None);
+
+    let fragment = OpenCodeAdapter::new().discover(&context).expect("discover");
+    let spawn: Vec<_> = lineage_links(&fragment)
+        .into_iter()
+        .filter(|link| link.source_metadata.fields.get("lineage_kind") == Some(&json!("spawn")))
+        .collect();
+    assert_eq!(spawn.len(), 1);
+    let NodeId::AgentSession(child) = &spawn[0].source else {
+        panic!("expected AgentSession source");
+    };
+    assert_eq!(child.session_key, V2_SUBAGENT_CHILD);
+    let Some(NodeId::AgentSession(parent)) = spawn[0].target_node_id() else {
+        panic!("expected resolved AgentSession target");
+    };
+    assert_eq!(parent.session_key, V2_SUBAGENT_PARENT);
+    assert_eq!(
+        spawn[0].id,
+        format!("opencode:lineage:{V2_SUBAGENT_CHILD}:parent_session:{V2_SUBAGENT_PARENT}")
+    );
+}
+
+#[test]
+fn v2_fork_emits_fork_lineage_to_its_source() {
+    let temp = TempDir::new().expect("temp");
+    let (context, fixture) = context_with_state(&temp);
+    load_db_fixture(&fixture, "v2-fresh.sql");
+
+    let fragment = OpenCodeAdapter::new().discover(&context).expect("discover");
+    let forks: Vec<_> = lineage_links(&fragment)
+        .into_iter()
+        .filter(|link| link.source_metadata.fields.get("lineage_kind") == Some(&json!("fork")))
+        .collect();
+
+    assert_eq!(forks.len(), 1);
+    let NodeId::AgentSession(child) = &forks[0].source else {
+        panic!("expected AgentSession source");
+    };
+    assert_eq!(child.session_key, V2_FORK);
+    let Some(NodeId::AgentSession(source)) = forks[0].target_node_id() else {
+        panic!("expected resolved AgentSession target");
+    };
+    assert_eq!(source.session_key, V2_PLAIN);
+    assert_eq!(sessions_by_key(&context)[V2_FORK].session_kind, None);
+    // Only the subagent spawn and the fork carry lineage.
+    assert_eq!(lineage_links(&fragment).len(), 2);
+}
+
+#[test]
+fn migrated_database_yields_each_session_once_from_session_v2() {
+    let temp = TempDir::new().expect("temp");
+    let (context, fixture) = context_with_state(&temp);
+    let connection = load_db_fixture(&fixture, "v2-migrated.sql");
+    connection
+        .execute(
+            "UPDATE session_v2 SET title = 'Renamed after migration', time_updated = 1792400000000 \
+             WHERE id = ?1",
+            [MIGRATED_PLAIN],
+        )
+        .expect("update v2 row");
+
+    let fragment = OpenCodeAdapter::new().discover(&context).expect("discover");
+    let keys: Vec<_> = fragment
+        .nodes
+        .iter()
+        .filter_map(|node| match node {
+            GraphNode::AgentSession(s) => Some(s.id.session_key.as_str()),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(keys, vec![MIGRATED_TOOL, MIGRATED_PLAIN]);
+
+    let sessions = sessions_by_key(&context);
+    let plain = &sessions[MIGRATED_PLAIN];
+    assert_eq!(plain.title.as_deref(), Some("Renamed after migration"));
+    assert_eq!(plain.last_active_epoch, Some(1_792_400_000));
+    // The migration's `system` note about changed tools is not a preview.
+    assert_eq!(
+        sessions[MIGRATED_TOOL].last_message_preview.as_deref(),
+        Some("I read the file; it says hello from the fixture.")
+    );
+}
+
+#[test]
+fn v1_rows_without_a_session_v2_copy_are_kept() {
+    let temp = TempDir::new().expect("temp");
+    let (context, fixture) = context_with_state(&temp);
+    let connection = load_db_fixture(&fixture, "v2-migrated.sql");
+    connection
+        .execute("DELETE FROM session_v2 WHERE id = ?1", [MIGRATED_PLAIN])
+        .expect("drop v2 copy");
+
+    let sessions = sessions_by_key(&context);
+
+    assert_eq!(sessions.len(), 2);
+    assert_eq!(
+        sessions[MIGRATED_PLAIN].last_message_preview.as_deref(),
+        Some("Hello from the mock model.")
+    );
+}
+
+#[test]
+fn v2_database_without_sessions_discovers_nothing() {
+    let temp = TempDir::new().expect("temp");
+    let (context, fixture) = context_with_state(&temp);
+    let connection = load_db_fixture(&fixture, "v2-fresh.sql");
+    connection
+        .execute_batch("DELETE FROM session_message; DELETE FROM session_v2;")
+        .expect("empty tables");
+
+    assert!(sessions_by_key(&context).is_empty());
+}
+
+#[test]
+fn a_session_committed_to_the_wal_invalidates_the_scan_cache() {
+    let temp = TempDir::new().expect("temp");
+    let (context, fixture) = context_with_state(&temp);
+    let writer = load_db_fixture(&fixture, "v2-fresh.sql");
+    writer
+        .query_row("PRAGMA journal_mode = WAL", [], |_| Ok(()))
+        .expect("wal mode");
+    writer
+        .execute_batch("PRAGMA wal_autocheckpoint = 0")
+        .expect("no autocheckpoint");
+    let db = fixture.opencode_state_root().join("opencode.db");
+    assert_eq!(sessions_by_key(&context).len(), 8);
+    let main_stamp = crate::discovery::memo::FileStamp::of(&db);
+
+    writer
+        .execute(
+            "INSERT INTO session_v2 (id, project_id, slug, directory, title, version, \
+             time_created, time_updated) \
+             VALUES ('ses_newinwal0001', '1f9631d68225be28c7d42b338e5bf12702eed649', 'new', \
+             '/home/user/proj', 'Only in the WAL', '2.0.32', 1792400000000, 1792400000000)",
+            [],
+        )
+        .expect("insert session");
+
+    assert_eq!(crate::discovery::memo::FileStamp::of(&db), main_stamp);
+    let sessions = sessions_by_key(&context);
+    assert_eq!(sessions.len(), 9);
+    assert_eq!(
+        sessions["ses_newinwal0001"].title.as_deref(),
+        Some("Only in the WAL")
+    );
+}
