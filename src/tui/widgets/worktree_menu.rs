@@ -23,7 +23,10 @@ use ratatui::widgets::{Block, Borders, Clear, Paragraph, Widget, Wrap};
 
 use std::path::Path;
 
-use crate::model::{GraphNode, GraphSnapshot, NodeId, RepoId, WorktreeKind, path_is_ancestor_of};
+use crate::model::{
+    CheckoutNode, GraphNode, GraphSnapshot, NodeId, RepoId, SnapshotIndex, WorktreeKind,
+    path_is_ancestor_of,
+};
 use crate::tui::Msg;
 use crate::tui::modal::{Overlay, OverlayOutcome};
 use crate::tui::rows::RowId;
@@ -72,6 +75,7 @@ pub fn context_for_node(
     node: &NodeId,
     can_mutate: bool,
 ) -> WorktreeMenuContext {
+    let index = SnapshotIndex::new(snapshot);
     match node {
         NodeId::Repo(repo_id) => WorktreeMenuContext {
             context: WorktreeContext::Repo,
@@ -82,12 +86,10 @@ pub fn context_for_node(
             reveal_target: None,
         },
         NodeId::Checkout(checkout_id) => {
-            let branch = snapshot.nodes.iter().find_map(|n| match n {
-                GraphNode::Checkout(c) if &c.id == checkout_id => {
-                    c.current_branch.as_ref().map(|b| short_branch(&b.refname))
-                }
+            let branch = match index.node(node) {
+                Some(GraphNode::Checkout(c)) => checkout_short_branch(c),
                 _ => None,
-            });
+            };
             WorktreeMenuContext {
                 context: WorktreeContext::Worktree,
                 repo_root: Some(checkout_id.root.clone()),
@@ -99,37 +101,33 @@ pub fn context_for_node(
             }
         }
         NodeId::MuxSession(_) => {
-            let cwd = snapshot.nodes.iter().find_map(|n| match n {
-                GraphNode::MuxSession(m) if &NodeId::MuxSession(m.id.clone()) == node => {
+            let cwd = match index.node(node) {
+                Some(GraphNode::MuxSession(m)) => {
                     m.active_pane_current_path.clone().or_else(|| m.cwd.clone())
                 }
                 _ => None,
-            });
+            };
             let checkout = cwd
                 .as_deref()
-                .and_then(|c| checkout_containing(snapshot, c));
+                .and_then(|c| worktree_checkout_containing(snapshot, c));
             WorktreeMenuContext {
                 context: WorktreeContext::Mux,
-                repo_root: checkout.as_ref().map(|(root, _)| root.clone()),
-                branch: checkout.and_then(|(_, b)| b),
+                repo_root: checkout.map(|c| c.root.clone()),
+                branch: checkout.and_then(checkout_short_branch),
                 guard_sessions: cwd
                     .as_deref()
                     .map(|c| live_sessions_in_worktree(snapshot, c))
                     .unwrap_or_default(),
                 can_mutate,
                 // Reveal checkout: jump to the containing checkout row.
-                reveal_target: cwd
-                    .as_deref()
-                    .and_then(|c| checkout_row_containing(snapshot, c)),
+                reveal_target: checkout.map(checkout_group_row),
             }
         }
         NodeId::AgentSession(_) => {
-            let cwd = snapshot.nodes.iter().find_map(|n| match n {
-                GraphNode::AgentSession(s) if &NodeId::AgentSession(s.id.clone()) == node => {
-                    s.cwd.clone()
-                }
+            let cwd = match index.node(node) {
+                Some(GraphNode::AgentSession(s)) => s.cwd.clone(),
                 _ => None,
-            });
+            };
             WorktreeMenuContext {
                 context: WorktreeContext::Agent,
                 repo_root: None,
@@ -138,7 +136,8 @@ pub fn context_for_node(
                 can_mutate,
                 reveal_target: cwd
                     .as_deref()
-                    .and_then(|c| checkout_row_containing(snapshot, c)),
+                    .and_then(|c| worktree_checkout_containing(snapshot, c))
+                    .map(checkout_group_row),
             }
         }
         _ => WorktreeMenuContext {
@@ -152,18 +151,38 @@ pub fn context_for_node(
     }
 }
 
-/// The `Group` row of the worktree checkout containing `path` — the
-/// reveal-checkout jump target.
-fn checkout_row_containing(snapshot: &GraphSnapshot, path: &str) -> Option<RowId> {
+/// The innermost worktree checkout whose root contains `path`. Its
+/// group row is the reveal-checkout jump target, and its root and
+/// branch scope the menu for a mux rooted inside it. Innermost, because
+/// a worktree can sit inside another checkout's tree.
+fn worktree_checkout_containing<'a>(
+    snapshot: &'a GraphSnapshot,
+    path: &str,
+) -> Option<&'a CheckoutNode> {
     let p = Path::new(path);
-    snapshot.nodes.iter().find_map(|n| match n {
-        GraphNode::Checkout(c)
-            if c.worktree.is_some() && path_is_ancestor_of(Path::new(&c.root), p) =>
-        {
-            Some(RowId::Group(NodeId::Checkout(c.id.clone())))
-        }
-        _ => None,
-    })
+    snapshot
+        .nodes
+        .iter()
+        .filter_map(|n| match n {
+            GraphNode::Checkout(c)
+                if c.worktree.is_some() && path_is_ancestor_of(Path::new(&c.root), p) =>
+            {
+                Some(c)
+            }
+            _ => None,
+        })
+        .max_by_key(|c| Path::new(&c.root).components().count())
+}
+
+fn checkout_group_row(checkout: &CheckoutNode) -> RowId {
+    RowId::Group(NodeId::Checkout(checkout.id.clone()))
+}
+
+fn checkout_short_branch(checkout: &CheckoutNode) -> Option<String> {
+    checkout
+        .current_branch
+        .as_ref()
+        .map(|b| short_branch(&b.refname))
 }
 
 /// The first live session rooted in `worktree_path` — the
@@ -206,22 +225,6 @@ fn primary_worktree_root(snapshot: &GraphSnapshot, repo: &RepoId) -> Option<Stri
         }
     }
     fallback
-}
-
-/// The worktree checkout containing `path` and its short branch.
-fn checkout_containing(snapshot: &GraphSnapshot, path: &str) -> Option<(String, Option<String>)> {
-    let p = Path::new(path);
-    snapshot.nodes.iter().find_map(|n| match n {
-        GraphNode::Checkout(c)
-            if c.worktree.is_some() && path_is_ancestor_of(Path::new(&c.root), p) =>
-        {
-            Some((
-                c.root.clone(),
-                c.current_branch.as_ref().map(|b| short_branch(&b.refname)),
-            ))
-        }
-        _ => None,
-    })
 }
 
 /// Live agent/mux sessions rooted in `worktree_path` (the

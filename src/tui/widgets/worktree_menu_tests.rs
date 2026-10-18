@@ -338,3 +338,28 @@ fn reveal_dropped_without_a_target() {
     let state = WorktreeMenuState::new(worktree_ctx(vec![], true)).expect("actions");
     assert!(!state.actions.contains(&WorktreeAction::RevealSessions));
 }
+
+#[test]
+fn containing_checkout_is_the_innermost_worktree() {
+    let mut snap = GraphSnapshot::empty();
+    snap.nodes.push(linked_checkout(
+        "/app/.git",
+        "/wt/outer",
+        "refs/heads/outer",
+    ));
+    snap.nodes.push(linked_checkout(
+        "/app/.git",
+        "/wt/outer/inner",
+        "refs/heads/inner",
+    ));
+    snap.canonicalize();
+
+    let inner = worktree_checkout_containing(&snap, "/wt/outer/inner/src")
+        .expect("a checkout contains the path");
+    assert_eq!(inner.root, "/wt/outer/inner");
+    assert_eq!(checkout_short_branch(inner).as_deref(), Some("inner"));
+
+    let outer = worktree_checkout_containing(&snap, "/wt/outer/docs").expect("outer contains it");
+    assert_eq!(outer.root, "/wt/outer");
+    assert!(worktree_checkout_containing(&snap, "/elsewhere").is_none());
+}
