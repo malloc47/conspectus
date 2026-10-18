@@ -8,9 +8,10 @@ impl PinBindState {
     }
 
     pub(super) fn handle_key(&mut self, event: KeyEvent) -> PinBindOutcome {
-        match event.code {
-            KeyCode::Esc => PinBindOutcome::Cancel,
-            KeyCode::Enter => {
+        use crate::tui::keybindings::overlay::{FieldListKey, PIN_BIND_KEYS, resolve};
+        match resolve(PIN_BIND_KEYS, event) {
+            Some(FieldListKey::Abort | FieldListKey::Cancel) => PinBindOutcome::Cancel,
+            Some(FieldListKey::Submit) => {
                 let Some(option) = self.options.get(self.cursor) else {
                     return PinBindOutcome::Continue;
                 };
@@ -19,24 +20,15 @@ impl PinBindState {
                     session_key: option.session_key.clone(),
                 })
             }
-            KeyCode::Up => {
+            Some(FieldListKey::Up) => {
                 self.move_cursor(-1);
                 PinBindOutcome::Continue
             }
-            KeyCode::Down | KeyCode::Tab => {
+            Some(FieldListKey::Down) => {
                 self.move_cursor(1);
                 PinBindOutcome::Continue
             }
-            KeyCode::BackTab => {
-                self.move_cursor(-1);
-                PinBindOutcome::Continue
-            }
-            _ if event.modifiers.contains(KeyModifiers::CONTROL)
-                && matches!(event.code, KeyCode::Char('c')) =>
-            {
-                PinBindOutcome::Cancel
-            }
-            _ => PinBindOutcome::Continue,
+            None => PinBindOutcome::Continue,
         }
     }
 
@@ -54,19 +46,15 @@ impl PinRemoveState {
     }
 
     pub(super) fn handle_key(&mut self, event: KeyEvent) -> PinRemoveOutcome {
-        match event.code {
-            KeyCode::Esc => PinRemoveOutcome::Cancel,
-            KeyCode::Enter => PinRemoveOutcome::Confirm(PinRemoveRequest {
+        use crate::tui::keybindings::overlay::{ConfirmKey, PIN_REMOVE_KEYS, resolve};
+        match resolve(PIN_REMOVE_KEYS, event) {
+            Some(ConfirmKey::Abort | ConfirmKey::No) => PinRemoveOutcome::Cancel,
+            Some(ConfirmKey::Yes) => PinRemoveOutcome::Confirm(PinRemoveRequest {
                 id: self.target.id.clone(),
                 display_name: self.target.display_name.clone(),
                 store_path: self.target.store_path.clone(),
             }),
-            _ if event.modifiers.contains(KeyModifiers::CONTROL)
-                && matches!(event.code, KeyCode::Char('c')) =>
-            {
-                PinRemoveOutcome::Cancel
-            }
-            _ => PinRemoveOutcome::Continue,
+            None => PinRemoveOutcome::Continue,
         }
     }
 }
@@ -88,33 +76,25 @@ impl PinRebindState {
     }
 
     pub(super) fn handle_key(&mut self, event: KeyEvent) -> PinEditOutcome {
-        match event.code {
-            KeyCode::Esc => PinEditOutcome::Cancel,
-            KeyCode::Enter => match self.request() {
+        use crate::tui::keybindings::overlay::{FieldListKey, PIN_REBIND_KEYS, resolve};
+        match resolve(PIN_REBIND_KEYS, event) {
+            Some(FieldListKey::Abort | FieldListKey::Cancel) => PinEditOutcome::Cancel,
+            Some(FieldListKey::Submit) => match self.request() {
                 Ok(request) => PinEditOutcome::Confirm(Box::new(request)),
                 Err(err) => {
                     self.error = Some(err);
                     PinEditOutcome::Continue
                 }
             },
-            KeyCode::Up => {
+            Some(FieldListKey::Up) => {
                 self.move_cursor(-1);
                 PinEditOutcome::Continue
             }
-            KeyCode::Down | KeyCode::Tab => {
+            Some(FieldListKey::Down) => {
                 self.move_cursor(1);
                 PinEditOutcome::Continue
             }
-            KeyCode::BackTab => {
-                self.move_cursor(-1);
-                PinEditOutcome::Continue
-            }
-            _ => {
-                if event.modifiers.contains(KeyModifiers::CONTROL)
-                    && matches!(event.code, KeyCode::Char('c'))
-                {
-                    return PinEditOutcome::Cancel;
-                }
+            None => {
                 if let Some(input) = self.active_input_mut() {
                     let _ = input.handle_key(event);
                     self.error = None;

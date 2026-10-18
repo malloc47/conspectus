@@ -44,11 +44,9 @@ pub struct KeyBinding {
     pub help_text: &'static str,
 }
 
-/// Focus context a [`KeyBinding`] applies to. Wave 1 ships
-/// only [`Global`](KeyMode::Global) — bindings that fire
-/// regardless of pane focus. Waves 2–3 add per-focus
-/// variants (`LeftPane`, `RightPane`, overlay-owned
-/// contexts).
+/// Focus context a [`KeyBinding`] applies to. Keys inside an
+/// overlay live in that overlay's [`overlay`] table instead
+/// (ADR 0123).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum KeyMode {
     /// Fires regardless of pane focus.

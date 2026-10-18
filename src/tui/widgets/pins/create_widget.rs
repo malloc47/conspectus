@@ -114,7 +114,7 @@ impl Widget for PinCreateWidget<'_> {
         lines.push(line![""]);
         lines.push(line![span!(
             Modifier::DIM;
-            "↑/↓/Tab move · S-Tab back · ←/→/Space option · Enter create · Esc cancel"
+            "{}", crate::tui::keybindings::overlay::footer(crate::tui::keybindings::overlay::PIN_CREATE_KEYS)
         )]);
 
         let body = ScrollLinesBody {

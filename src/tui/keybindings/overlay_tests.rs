@@ -149,6 +149,11 @@ fn every_overlay_table_labels_its_keys_truthfully() {
         ("close-down", mislabeled(CLOSE_DOWN_KEYS)),
         ("mux launch", mislabeled(MUX_LAUNCH_KEYS)),
         ("omnibox", mislabeled(OMNIBOX_KEYS)),
+        ("pin create", mislabeled(PIN_CREATE_KEYS)),
+        ("pin edit", mislabeled(PIN_EDIT_KEYS)),
+        ("pin bind", mislabeled(PIN_BIND_KEYS)),
+        ("pin rebind", mislabeled(PIN_REBIND_KEYS)),
+        ("pin remove", mislabeled(PIN_REMOVE_KEYS)),
     ];
     for (name, wrong) in tables {
         assert!(
@@ -187,4 +192,63 @@ fn generated_footers_keep_the_established_wording() {
         footer(MUX_LAUNCH_KEYS),
         "Tab/Shift-Tab move · ←/→ toggle · Enter launch · Esc cancel"
     );
+    assert_eq!(
+        footer(PIN_CREATE_KEYS),
+        "↑/↓/Tab move · S-Tab back · ←/→/Space option · Enter create · Esc cancel"
+    );
+    assert_eq!(
+        footer(PIN_EDIT_KEYS),
+        "↑/↓/Tab move · S-Tab back · ←/→/Space option · Enter save · Esc cancel"
+    );
+    assert_eq!(
+        footer(PIN_BIND_KEYS),
+        "Up/Down choose · Enter bind · Esc cancel"
+    );
+    assert_eq!(
+        footer(PIN_REBIND_KEYS),
+        "Up/Down field · type to edit · Enter save · Esc cancel"
+    );
+    assert_eq!(footer(PIN_REMOVE_KEYS), "Enter remove · Esc cancel");
+}
+
+#[test]
+fn viewer_keys_resolve_as_the_old_match_did() {
+    use crate::viewer::input::ViewerMsg as V;
+    let none = KeyModifiers::NONE;
+    let shift = KeyModifiers::SHIFT;
+    let ctrl_mod = KeyModifiers::CONTROL;
+    let cases = [
+        (ctrl_mod, KeyCode::Char('c'), Some(V::Close)),
+        (none, KeyCode::Esc, Some(V::Close)),
+        (none, KeyCode::Char('q'), Some(V::Close)),
+        (none, KeyCode::Char('j'), Some(V::ScrollDown)),
+        (none, KeyCode::Down, Some(V::ScrollDown)),
+        (none, KeyCode::Char('k'), Some(V::ScrollUp)),
+        (none, KeyCode::Up, Some(V::ScrollUp)),
+        (none, KeyCode::PageDown, Some(V::PageDown)),
+        (none, KeyCode::Char(' '), Some(V::PageDown)),
+        (none, KeyCode::PageUp, Some(V::PageUp)),
+        (ctrl_mod, KeyCode::Char('d'), Some(V::HalfPageDown)),
+        (ctrl_mod, KeyCode::Char('u'), Some(V::HalfPageUp)),
+        (none, KeyCode::Char('d'), None),
+        (none, KeyCode::Char('g'), Some(V::JumpToStart)),
+        (none, KeyCode::Home, Some(V::JumpToStart)),
+        (shift, KeyCode::Char('G'), Some(V::JumpToEnd)),
+        (none, KeyCode::Char('G'), Some(V::JumpToEnd)),
+        (ctrl_mod, KeyCode::Char('G'), None),
+        (none, KeyCode::End, Some(V::JumpToEnd)),
+        (none, KeyCode::Char('t'), Some(V::CycleToolDetail)),
+        (shift, KeyCode::Char('T'), Some(V::ToggleThinking)),
+        (shift, KeyCode::Char('I'), Some(V::ToggleAborted)),
+        (shift, KeyCode::Char('H'), Some(V::ToggleHidden)),
+        (none, KeyCode::Char('?'), Some(V::ToggleHelp)),
+        (none, KeyCode::Char('x'), None),
+    ];
+    for (modifiers, code, expected) in cases {
+        assert_eq!(
+            resolve(VIEWER_KEYS, press(modifiers, code)),
+            expected,
+            "{modifiers:?} {code:?}"
+        );
+    }
 }

@@ -399,36 +399,13 @@ pub(super) fn route_pins_overlay_key(
 /// dismiss the modal. Keys that don't map are dropped silently
 /// (the modal owns every keystroke while open).
 pub(super) fn handle_viewer_overlay_key(app: &mut App, key: ratatui::crossterm::event::KeyEvent) {
-    use crate::viewer::input::ViewerMsg;
     if app.viewer_modal().is_none() {
         return;
     }
-    let vmsg = match (key.modifiers, key.code) {
-        (KeyModifiers::CONTROL, KeyCode::Char('c')) => Some(ViewerMsg::Close),
-        (_, KeyCode::Esc | KeyCode::Char('q')) => Some(ViewerMsg::Close),
-        (_, KeyCode::Char('j') | KeyCode::Down) => Some(ViewerMsg::ScrollDown),
-        (_, KeyCode::Char('k') | KeyCode::Up) => Some(ViewerMsg::ScrollUp),
-        (_, KeyCode::PageDown | KeyCode::Char(' ')) => Some(ViewerMsg::PageDown),
-        (_, KeyCode::PageUp) => Some(ViewerMsg::PageUp),
-        (KeyModifiers::CONTROL, KeyCode::Char('d')) => Some(ViewerMsg::HalfPageDown),
-        (KeyModifiers::CONTROL, KeyCode::Char('u')) => Some(ViewerMsg::HalfPageUp),
-        (_, KeyCode::Char('g') | KeyCode::Home) => Some(ViewerMsg::JumpToStart),
-        (KeyModifiers::SHIFT | KeyModifiers::NONE, KeyCode::Char('G')) | (_, KeyCode::End) => {
-            Some(ViewerMsg::JumpToEnd)
-        }
-        (_, KeyCode::Char('t')) => Some(ViewerMsg::CycleToolDetail),
-        (KeyModifiers::SHIFT | KeyModifiers::NONE, KeyCode::Char('T')) => {
-            Some(ViewerMsg::ToggleThinking)
-        }
-        (KeyModifiers::SHIFT | KeyModifiers::NONE, KeyCode::Char('I')) => {
-            Some(ViewerMsg::ToggleAborted)
-        }
-        (KeyModifiers::SHIFT | KeyModifiers::NONE, KeyCode::Char('H')) => {
-            Some(ViewerMsg::ToggleHidden)
-        }
-        (_, KeyCode::Char('?')) => Some(ViewerMsg::ToggleHelp),
-        _ => None,
-    };
+    let vmsg = crate::tui::keybindings::overlay::resolve(
+        crate::tui::keybindings::overlay::VIEWER_KEYS,
+        key,
+    );
     let Some(vmsg) = vmsg else {
         return;
     };

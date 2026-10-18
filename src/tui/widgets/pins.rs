@@ -20,7 +20,7 @@
 //! ADR 0085 contract 2; this widget only describes intent.
 
 use ratatui::buffer::Buffer;
-use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+use ratatui::crossterm::event::KeyEvent;
 use ratatui::layout::Rect;
 use ratatui::macros::span;
 use ratatui::style::{Color, Modifier, Style};

@@ -63,80 +63,68 @@ impl PinEditState {
     }
 
     pub(super) fn handle_key(&mut self, event: KeyEvent) -> PinEditOutcome {
-        match event.code {
-            KeyCode::Esc => PinEditOutcome::Cancel,
-            KeyCode::Enter => match self.request() {
-                Ok(request) => PinEditOutcome::Confirm(Box::new(request)),
-                Err(err) => {
-                    self.error = Some(err);
-                    PinEditOutcome::Continue
-                }
-            },
-            KeyCode::Up => {
-                self.move_cursor(-1);
-                PinEditOutcome::Continue
+        use crate::tui::keybindings::overlay::{PIN_EDIT_KEYS, PinFormKey, resolve};
+        let option_delta = match resolve(PIN_EDIT_KEYS, event) {
+            Some(PinFormKey::Abort | PinFormKey::Cancel) => return PinEditOutcome::Cancel,
+            Some(PinFormKey::Submit) => {
+                return match self.request() {
+                    Ok(request) => PinEditOutcome::Confirm(Box::new(request)),
+                    Err(err) => {
+                        self.error = Some(err);
+                        PinEditOutcome::Continue
+                    }
+                };
             }
-            KeyCode::Tab if self.logical_cursor() == Self::FIELD_CWD => {
+            Some(PinFormKey::Up | PinFormKey::Back) => {
+                self.move_cursor(-1);
+                return PinEditOutcome::Continue;
+            }
+            Some(PinFormKey::Tab) if self.logical_cursor() == Self::FIELD_CWD => {
                 match self.cwd.handle_key(event) {
                     PathOmniboxOutcome::Completed | PathOmniboxOutcome::Changed => {
                         self.error = None;
                     }
                     PathOmniboxOutcome::NoCompletion | PathOmniboxOutcome::Continue => {}
                 }
-                PinEditOutcome::Continue
+                return PinEditOutcome::Continue;
             }
-            KeyCode::Down | KeyCode::Tab => {
+            Some(PinFormKey::Down | PinFormKey::Tab) => {
                 self.move_cursor(1);
-                PinEditOutcome::Continue
+                return PinEditOutcome::Continue;
             }
-            KeyCode::BackTab => {
-                self.move_cursor(-1);
-                PinEditOutcome::Continue
-            }
-            KeyCode::Left | KeyCode::Right | KeyCode::Char(' ')
-                if self.logical_cursor() == Self::FIELD_HARNESS =>
-            {
-                self.cycle_harness(if matches!(event.code, KeyCode::Left) {
-                    -1
-                } else {
-                    1
-                });
+            Some(PinFormKey::OptionPrev) => Some(-1),
+            Some(PinFormKey::OptionNext) => Some(1),
+            None => None,
+        };
+        // Option keys act on option fields; on a text field they fall
+        // through below and edit the text.
+        if let Some(delta) = option_delta {
+            let field = self.logical_cursor();
+            if field == Self::FIELD_HARNESS {
+                self.cycle_harness(delta);
                 self.error = None;
-                PinEditOutcome::Continue
+                return PinEditOutcome::Continue;
             }
-            KeyCode::Left | KeyCode::Right | KeyCode::Char(' ')
-                if self.logical_cursor() == Self::FIELD_LAUNCH_OPTIONS =>
-            {
-                self.toggle_launch_option(if matches!(event.code, KeyCode::Left) {
-                    -1
-                } else {
-                    1
-                });
+            if field == Self::FIELD_LAUNCH_OPTIONS {
+                self.toggle_launch_option(delta);
                 self.error = None;
-                PinEditOutcome::Continue
-            }
-            _ => {
-                if event.modifiers.contains(KeyModifiers::CONTROL)
-                    && matches!(event.code, KeyCode::Char('c'))
-                {
-                    return PinEditOutcome::Cancel;
-                }
-                let active = self.logical_cursor();
-                if active == Self::FIELD_CWD {
-                    let outcome = self.cwd.handle_key(event);
-                    if matches!(
-                        outcome,
-                        PathOmniboxOutcome::Changed | PathOmniboxOutcome::Completed
-                    ) {
-                        self.error = None;
-                    }
-                } else if let Some(input) = self.active_input_mut() {
-                    let _ = input.handle_key(event);
-                    self.error = None;
-                }
-                PinEditOutcome::Continue
+                return PinEditOutcome::Continue;
             }
         }
+        let active = self.logical_cursor();
+        if active == Self::FIELD_CWD {
+            let outcome = self.cwd.handle_key(event);
+            if matches!(
+                outcome,
+                PathOmniboxOutcome::Changed | PathOmniboxOutcome::Completed
+            ) {
+                self.error = None;
+            }
+        } else if let Some(input) = self.active_input_mut() {
+            let _ = input.handle_key(event);
+            self.error = None;
+        }
+        PinEditOutcome::Continue
     }
 
     pub(super) fn move_cursor(&mut self, delta: i32) {

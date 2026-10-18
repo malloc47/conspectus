@@ -3,6 +3,7 @@ use crate::tui::widgets::pins::{
     PinBindRequest, PinCreateRequest, PinCreateStore, PinEditRequest, PinRemoveRequest,
 };
 use ratatui::crossterm::event::KeyEvent;
+use ratatui::crossterm::event::{KeyCode, KeyModifiers};
 use std::fs;
 use std::os::unix::process::ExitStatusExt;
 

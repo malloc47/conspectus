@@ -159,7 +159,7 @@ impl Widget for PinEditWidget<'_> {
         lines.push(line![""]);
         lines.push(line![span!(
             Modifier::DIM;
-            "↑/↓/Tab move · S-Tab back · ←/→/Space option · Enter save · Esc cancel"
+            "{}", crate::tui::keybindings::overlay::footer(crate::tui::keybindings::overlay::PIN_EDIT_KEYS)
         )]);
 
         let body = ScrollLinesBody {
@@ -234,7 +234,7 @@ impl Widget for PinRebindWidget<'_> {
         lines.push(line![""]);
         lines.push(line![span!(
             Modifier::DIM;
-            "Up/Down field · type to edit · Enter save · Esc cancel"
+            "{}", crate::tui::keybindings::overlay::footer(crate::tui::keybindings::overlay::PIN_REBIND_KEYS)
         )]);
         let modal = pin_rebind_modal_rect(area, lines.len());
 
@@ -292,7 +292,7 @@ impl Widget for PinBindWidget<'_> {
         lines.push(line![""]);
         lines.push(line![span!(
             Modifier::DIM;
-            "Up/Down choose · Enter bind · Esc cancel"
+            "{}", crate::tui::keybindings::overlay::footer(crate::tui::keybindings::overlay::PIN_BIND_KEYS)
         )]);
         let modal = pin_bind_modal_rect(area, lines.len());
         let option_start = usize::from(!self.state.options.is_empty());
@@ -338,7 +338,9 @@ impl Widget for PinRemoveWidget<'_> {
             line![format!("display  {}", self.state.target.display_name)],
             line![format!("store    {}", self.state.target.store_path)],
             line![""],
-            line![span!(Modifier::DIM; "Enter remove · Esc cancel")],
+            line![
+                span!(Modifier::DIM; "{}", crate::tui::keybindings::overlay::footer(crate::tui::keybindings::overlay::PIN_REMOVE_KEYS))
+            ],
         ];
         let modal = pin_remove_modal_rect(area, lines.len());
         let body = ScrollLinesBody {

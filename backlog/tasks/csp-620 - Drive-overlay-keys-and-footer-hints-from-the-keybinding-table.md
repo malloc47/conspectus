@@ -1,11 +1,11 @@
 ---
 id: CSP-620
 title: Drive overlay keys and footer hints from the keybinding table
-status: In Progress
+status: Done
 assignee:
   - '@claude'
 created_date: '2026-10-17 03:09'
-updated_date: '2026-10-18 00:47'
+updated_date: '2026-10-18 01:02'
 labels:
   - h-hyg
 milestone: m-11
@@ -31,15 +31,15 @@ CSP-468 put global keys in one table (`src/tui/keybindings.rs`, 47 entries) that
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 Every overlay resolves its non-text keys through the keybinding table
-- [ ] #2 Every overlay footer hint is generated from the same rows its handler uses
-- [ ] #3 A test fails when an overlay footer and its handler disagree
+- [x] #1 Every overlay resolves its non-text keys through the keybinding table
+- [x] #2 Every overlay footer hint is generated from the same rows its handler uses
+- [x] #3 A test fails when an overlay footer and its handler disagree
 <!-- AC:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
-- [ ] #1 `just check` passes, or `git diff --check` for docs-only changes
-- [ ] #2 Docs and ADRs are updated when behavior, architecture, or workflow change
+- [x] #1 `just check` passes, or `git diff --check` for docs-only changes
+- [x] #2 Docs and ADRs are updated when behavior, architecture, or workflow change
 <!-- DOD:END -->
 
 ## Implementation Plan
@@ -65,4 +65,16 @@ Steps:
 Wave A landed: overlay keymap infra (`tui::keybindings::overlay`) plus tables for menus (Controls, pins menu, mux menu), multi-select, text input, new-mux form, search, help, value modal, and messages. Footers, the rename/controls/pins status hints, and the messages copy path are generated from or resolved through those tables. Renders of the snapshot-mode overlays are byte-identical to the baseline; just check green (2408 tests).
 
 Wave B landed: worktree menu (list via the shared menu table, one confirm table for remove/merge/prune, a close-down table), mux-launch form, and path omnibox. Ctrl-C now backs out of the worktree list and its confirms like Esc does; before, those modes ignored it. Renders byte-identical to baseline; just check green (2408 tests).
+
+- Wave C landed: pin create, edit, bind, rebind, and remove forms resolve through `PIN_CREATE_KEYS`, `PIN_EDIT_KEYS`, `PIN_BIND_KEYS`, `PIN_REBIND_KEYS` (with a `Note("type to edit")` row), and `PIN_REMOVE_KEYS`; their footers are generated.
+- Viewer: key translation now resolves through `VIEWER_KEYS` (all aliases); `viewer_keys_resolve_as_the_old_match_did` pins every old mapping, modifier cases included. Its footer stays viewer-owned behind the ADR 0052 boundary; the ADR records that exception.
+- Guards: `tests/overlay_keymap_hygiene.rs` fails on `KeyCode::` matching or a key-hint-shaped literal in overlay production code (widgets, `runtime/overlay_keys.rs`, `modal.rs`). Probed by injecting both into `mux_menu.rs`: both tests failed naming the line and literal; restored.
+- ADR 0123 records the convention (typed per-overlay tables, `Hint::Alias`, Ctrl-C as `Abort`, text fall-through, viewer exception) and is indexed in `docs/adr/README.md`.
+- Validation: overlay renders against the showcase fixture match the pre-change baseline for every state snapshot mode can reach (Controls, Help, Pins, pin create, Messages), apart from the wall-clock "updated Ns ago" header; footer wording tests pin every table's footer; `just check` green (2411 tests).
 <!-- SECTION:NOTES:END -->
+
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+Overlay keys and footer hints now come from one place. Every overlay resolves its keys through a typed table in `tui::keybindings::overlay` and matches exhaustively on its own action enum, so a bound key the handler ignores fails to compile. Every footer, plus the matching status-bar hints, is generated from the same rows. Footers read as before except the help overlay's (normalized), and Ctrl-C now backs out of the worktree menu like everywhere else. The viewer's keys use a table too, but its stateful footer stays viewer-owned per ADR 0052. ADR 0123 records the convention. A guard test fails on hand-matched `KeyCode` or hand-written key hints in overlay code (verified by injecting both), a label test checks every footer label names its bound key, and `just check` passes (2411 tests).
+<!-- SECTION:FINAL_SUMMARY:END -->

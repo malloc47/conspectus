@@ -16,7 +16,7 @@ use std::time::{Duration, Instant};
 
 use anyhow::{Result, bail};
 use ratatui::DefaultTerminal;
-use ratatui::crossterm::event::{self, Event, KeyCode, KeyEventKind, KeyModifiers};
+use ratatui::crossterm::event::{self, Event, KeyEventKind};
 use ratatui::layout::Rect;
 
 use crate::discovery::tmux::{MuxBackend, SystemTmux};
