@@ -1721,6 +1721,7 @@ mod preview_loading {
                 repo: "r".to_string(),
                 number: 7,
                 state: Some("OPEN".to_string()),
+                title: None,
                 url: None,
                 updated_epoch: None,
                 is_draft: false,

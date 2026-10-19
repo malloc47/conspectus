@@ -1272,8 +1272,8 @@ fn add_forge_prs_to_showcase(world: &mut ScenarioWorld, _project: &Path) -> Resu
     // `showcase-claude` session opened from `feature/extra`.
     world.gh_pull_requests = Some(
         r#"[
-{"number":7,"state":"OPEN","url":"https://github.com/conspectus/project/pull/7","headRefName":"feature/extra","baseRefName":"main","updatedAt":"2026-09-30T10:00:00Z","headRepositoryOwner":{"login":"conspectus"},"headRepository":{"name":"project"},"isDraft":true},
-{"number":8,"state":"OPEN","url":"https://github.com/conspectus/project/pull/8","headRefName":"main","baseRefName":"main","updatedAt":"2026-09-29T12:00:00Z","headRepositoryOwner":{"login":"conspectus"},"headRepository":{"name":"project"},"isDraft":true}
+{"number":7,"state":"OPEN","title":"Release notes for 0.3","url":"https://github.com/conspectus/project/pull/7","headRefName":"feature/extra","baseRefName":"main","updatedAt":"2026-09-30T10:00:00Z","headRepositoryOwner":{"login":"conspectus"},"headRepository":{"name":"project"},"isDraft":true},
+{"number":8,"state":"OPEN","title":"Pin the toolchain and refresh the lockfile","url":"https://github.com/conspectus/project/pull/8","headRefName":"main","baseRefName":"main","updatedAt":"2026-09-29T12:00:00Z","headRepositoryOwner":{"login":"conspectus"},"headRepository":{"name":"project"},"isDraft":true}
 ]"#
         .to_string(),
     );

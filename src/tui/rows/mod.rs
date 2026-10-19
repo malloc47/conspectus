@@ -309,14 +309,20 @@ pub struct MuxSessionRow {
 #[derive(Clone, Debug, PartialEq)]
 pub struct PrRow {
     pub pr_number: u64,
+    /// `owner/repo#N`: the text search matches, and the left-pane
+    /// label unless the group names the repo.
     pub repo_display: String,
+    /// What the left pane shows for the PR: `#N` under a group that
+    /// names the forge repo, else [`Self::repo_display`] (ADR 0131).
+    pub label: String,
     pub state: Option<String>,
     pub is_draft: bool,
     pub branch_name: Option<String>,
     /// True when the PR resolves to a local branch (ADR 0129).
     pub tracked: bool,
+    /// The PR title on one line, when the forge listing gave one.
+    pub title: Option<String>,
     pub updated_recency: Option<String>,
-    pub attached_count: usize,
     pub url: Option<String>,
     pub primary_node: NodeId,
 }

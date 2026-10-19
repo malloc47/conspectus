@@ -1736,12 +1736,13 @@ fn forge_pr_glyph_span_picks_color_from_pr_state() {
     let base = PrRow {
         pr_number: 1,
         repo_display: "owner/repo".into(),
+        label: "owner/repo".into(),
         state: Some("open".into()),
         is_draft: false,
         branch_name: None,
         tracked: false,
+        title: None,
         updated_recency: None,
-        attached_count: 0,
         url: None,
         primary_node: NodeId::ForgePr(crate::model::ForgePrId::new(
             "github",
@@ -1789,19 +1790,20 @@ fn forge_pr_glyph_span_picks_color_from_pr_state() {
 #[test]
 fn pr_tracking_span_tells_a_local_branch_from_none() {
     // ADR 0129: the Branch glyph in the branch color for a PR with a
-    // local branch, a dim hollow circle for one without. Both are two
-    // cells so the repo text stays in one column.
+    // local branch, a dim hollow circle for one without. Both are one
+    // cell so the columns after the marker stay aligned.
     use crate::tui::rows::PrRow;
     let theme = Theme::default();
     let untracked = PrRow {
         pr_number: 1,
         repo_display: "owner/repo#1".into(),
+        label: "#1".into(),
         state: Some("open".into()),
         is_draft: false,
         branch_name: None,
         tracked: false,
+        title: None,
         updated_recency: None,
-        attached_count: 0,
         url: None,
         primary_node: NodeId::ForgePr(crate::model::ForgePrId::new(
             "github",
@@ -1818,11 +1820,11 @@ fn pr_tracking_span_tells_a_local_branch_from_none() {
     };
 
     let none = pr_tracking_span(&untracked, &theme);
-    assert_eq!(none.content, "◌ ");
+    assert_eq!(none.content, "◌");
     assert!(none.style.add_modifier.contains(theme.placeholder));
 
     let some = pr_tracking_span(&tracked, &theme);
-    assert_eq!(some.content, "⎇ ");
+    assert_eq!(some.content, "⎇");
     assert_eq!(some.style.fg, Some(theme.node_branch));
     assert_eq!(some.width(), none.width());
 }
@@ -4753,6 +4755,7 @@ fn prs_app_in(view: View) -> App {
             repo: "project".to_string(),
             number,
             state: Some(state.to_string()),
+            title: None,
             url: Some(format!(
                 "https://github.com/conspectus/project/pull/{number}"
             )),
@@ -4978,4 +4981,144 @@ fn launch_chip_shows_alongside_a_status_message() {
         status_line.contains("Launching dek-serve") && status_line.contains("queued"),
         "chip and message should both render: {status_line}"
     );
+}
+
+fn pr_row_for_layout(label: &str, state: &str, age: Option<&str>) -> crate::tui::rows::PrRow {
+    crate::tui::rows::PrRow {
+        pr_number: 1,
+        repo_display: format!("o/r{label}"),
+        label: label.into(),
+        state: Some(state.into()),
+        is_draft: false,
+        branch_name: None,
+        tracked: false,
+        title: None,
+        updated_recency: age.map(str::to_string),
+        url: None,
+        primary_node: NodeId::ForgePr(crate::model::ForgePrId::new(
+            "github",
+            "github.com",
+            "o",
+            "r",
+            1,
+        )),
+    }
+}
+
+fn pr_text(spans: &[ratatui::text::Span<'_>]) -> String {
+    spans.iter().map(|span| span.content.as_ref()).collect()
+}
+
+fn pr_tree(rows: Vec<crate::tui::rows::PrRow>) -> crate::tui::rows::RowTree {
+    crate::tui::rows::RowTree {
+        rows: rows
+            .into_iter()
+            .map(|pr| crate::tui::rows::Row {
+                id: RowId::Pr(pr.primary_node.clone()),
+                depth: 1,
+                expandable: false,
+                kind: RowKind::Pr(pr),
+            })
+            .collect(),
+        view: crate::tui::rows::ViewLabel::Prs,
+    }
+}
+
+#[test]
+fn pr_columns_align_to_the_widest_value_in_the_tree() {
+    // ADR 0131: number, state, and age pad to the widest value across
+    // the tree, so rows from different groups line up.
+    let theme = Theme::default();
+    let mut long = pr_row_for_layout("#1234", "merged", Some("120d"));
+    long.title = Some("long one".into());
+    let mut short = pr_row_for_layout("#7", "open", Some("2h"));
+    short.title = Some("short one".into());
+    let align = PrAlign::of_tree(&pr_tree(vec![long.clone(), short.clone()]));
+
+    let long_text = pr_text(&render_pr_spans(&long, &theme, align, 80));
+    let short_text = pr_text(&render_pr_spans(&short, &theme, align, 80));
+
+    assert_eq!(long_text, "#1234 ◌  merged  120d  long one");
+    assert_eq!(short_text, "#7    ◌  open      2h  short one");
+    let column = |text: &str, needle: &str| text.find(needle).expect("needle");
+    assert_eq!(column(&long_text, "◌"), column(&short_text, "◌"));
+    assert_eq!(
+        unicode_width::UnicodeWidthStr::width(&long_text[..long_text.find("long").unwrap()]),
+        unicode_width::UnicodeWidthStr::width(&short_text[..short_text.find("short").unwrap()]),
+        "the titles start in the same column"
+    );
+}
+
+#[test]
+fn pr_title_takes_the_remaining_width_and_is_cut_with_an_ellipsis() {
+    let theme = Theme::default();
+    let mut pr = pr_row_for_layout("#9", "open", Some("1d"));
+    pr.title = Some("A rather long pull request title".into());
+    let align = PrAlign::of_tree(&pr_tree(vec![pr.clone()]));
+
+    let spans = render_pr_spans(&pr, &theme, align, 30);
+    let text = pr_text(&spans);
+
+    assert!(text.ends_with('…'), "{text:?}");
+    assert_eq!(unicode_width::UnicodeWidthStr::width(text.as_str()), 30);
+    let title = spans.last().expect("title span");
+    assert_eq!(title.style.fg, Some(theme.secondary_text));
+
+    // No room for even a sliver of title: it is left out, not wrapped.
+    let tight = pr_text(&render_pr_spans(&pr, &theme, align, 16));
+    assert_eq!(tight, "#9 ◌  open  1d");
+}
+
+#[test]
+fn pr_row_without_a_title_or_age_still_pads_its_columns() {
+    let theme = Theme::default();
+    let aged = pr_row_for_layout("#10", "open", Some("3d"));
+    let bare = pr_row_for_layout("#2", "closed", None);
+    let align = PrAlign::of_tree(&pr_tree(vec![aged, bare.clone()]));
+
+    let text = pr_text(&render_pr_spans(&bare, &theme, align, 80));
+
+    assert_eq!(text, "#2  ◌  closed    ");
+}
+
+#[test]
+fn an_open_draft_reads_draft_and_the_local_branch_leads_the_title() {
+    let theme = Theme::default();
+    let mut pr = pr_row_for_layout("#5", "open", Some("4h"));
+    pr.is_draft = true;
+    pr.tracked = true;
+    pr.branch_name = Some("feature/login".into());
+    pr.title = Some("Add login".into());
+    let align = PrAlign::of_tree(&pr_tree(vec![pr.clone()]));
+
+    let text = pr_text(&render_pr_spans(&pr, &theme, align, 80));
+
+    assert_eq!(text, "#5 ⎇  draft  4h  feature/login  Add login");
+    // A draft that was already merged keeps its real state.
+    let mut merged = pr;
+    merged.state = Some("merged".into());
+    assert!(
+        pr_text(&render_pr_spans(
+            &merged,
+            &theme,
+            PrAlign::of_tree(&pr_tree(vec![merged.clone()])),
+            80
+        ))
+        .contains("merged")
+    );
+}
+
+#[test]
+fn a_long_local_branch_is_capped_so_it_cannot_crowd_out_the_title() {
+    let theme = Theme::default();
+    let mut pr = pr_row_for_layout("#5", "open", None);
+    pr.tracked = true;
+    pr.branch_name = Some("a".repeat(60));
+    pr.title = Some("Title".into());
+    let align = PrAlign::of_tree(&pr_tree(vec![pr.clone()]));
+
+    let text = pr_text(&render_pr_spans(&pr, &theme, align, 100));
+
+    assert!(text.contains(&format!("{}…", "a".repeat(23))), "{text:?}");
+    assert!(text.ends_with("  Title"), "{text:?}");
 }

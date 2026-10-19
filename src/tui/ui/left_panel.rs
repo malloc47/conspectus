@@ -57,20 +57,18 @@ pub(super) fn draw_left_panel(app: &mut App, frame: &mut Frame<'_>, area: Rect) 
         }
     }
 
+    align.pr = PrAlign::of_tree(app.tree());
+
+    // Lay rows out against the width the paragraph really gets: the
+    // scrollbar gutter is carved out of the pane when the rows overflow it.
+    let row_width = scrollbar_layout(inner, visible.len()).0.width as usize;
+
     let mut lines: Vec<Line<'static>> = Vec::with_capacity(visible.len());
     let mut selected_primary_line: Option<usize> = None;
     for row in &visible {
         let is_selected = app.selection() == Some(&row.id);
         let summary = summaries.get(&row.id).copied();
-        let primary = render_left_row(
-            row,
-            app,
-            is_selected,
-            inner.width as usize,
-            now,
-            summary,
-            align,
-        );
+        let primary = render_left_row(row, app, is_selected, row_width, now, summary, align);
         if is_selected {
             selected_primary_line = Some(lines.len());
         }
@@ -402,6 +400,54 @@ pub(super) struct GroupAlign {
     /// trailing ambiguity glyph anchors on the same column whether
     /// the count is `(2)` or `(72)`.
     pub(super) count_width: usize,
+    /// Column widths for PR rows (ADR 0131).
+    pub(super) pr: PrAlign,
+}
+
+/// Widest branch name a PR row shows before truncating it, so one long
+/// branch can't crowd out the title. The branch is content, not a
+/// column: only PRs with a local branch have one, so a column would sit
+/// mostly blank.
+const PR_BRANCH_MAX_WIDTH: usize = 24;
+
+/// Column widths for the PR rows of a tree, so the number, state, and
+/// age columns line up across groups. Measured over the whole tree, not
+/// just the visible rows, so folding a group doesn't shift the columns.
+/// The content (branch, then title) takes whatever width is left.
+#[derive(Clone, Copy, Default)]
+pub(super) struct PrAlign {
+    label: usize,
+    state: usize,
+    age: usize,
+}
+
+impl PrAlign {
+    pub(super) fn of_tree(tree: &crate::tui::rows::RowTree) -> Self {
+        let mut align = Self::default();
+        for row in &tree.rows {
+            let RowKind::Pr(pr) = &row.kind else {
+                continue;
+            };
+            align.label = align.label.max(UnicodeWidthStr::width(pr.label.as_str()));
+            align.state = align
+                .state
+                .max(UnicodeWidthStr::width(pr_state_text(pr).as_str()));
+            if let Some(age) = &pr.updated_recency {
+                align.age = align.age.max(UnicodeWidthStr::width(age.as_str()));
+            }
+        }
+        align
+    }
+}
+
+/// The state column's text: a draft that is still open reads `draft`.
+fn pr_state_text(pr: &PrRow) -> String {
+    match pr.state.as_deref() {
+        Some(state) if pr.is_draft && state.eq_ignore_ascii_case("open") => "draft".to_string(),
+        Some(state) => state.to_string(),
+        None if pr.is_draft => "draft".to_string(),
+        None => String::new(),
+    }
 }
 
 /// Build the rendered line for a single visible row.
@@ -495,26 +541,8 @@ pub(super) fn render_left_row(
             ));
         }
         RowKind::Pr(pr) => {
-            spans.push(pr_tracking_span(pr, theme));
-            spans.push(span!(Modifier::BOLD; "{}", pr.repo_display.clone()));
-            if let Some(state) = pr.state.as_deref() {
-                let style = match state {
-                    "open" => Style::default().fg(theme.mux_attached),
-                    "closed" | "merged" => Style::default().add_modifier(theme.placeholder),
-                    _ => Style::default().fg(theme.secondary_text),
-                };
-                spans.push(span!(style; "  {state}"));
-            }
-            if pr.is_draft {
-                spans.push(span!(theme.placeholder; "  draft"));
-            }
-            if let Some(branch) = &pr.branch_name {
-                spans.push(span!(theme.placeholder; "  {branch}"));
-            }
-            if let Some(updated) = &pr.updated_recency {
-                spans.push(span!(Style::default().fg(theme.secondary_text); "  {updated}"));
-            }
-            spans.push(span!(theme.placeholder; "  ({})", pr.attached_count));
+            let budget = width.saturating_sub(spans_width(&spans));
+            spans.extend(render_pr_spans(pr, theme, align.pr, budget));
         }
         RowKind::Fork(fork) => {
             spans.push(span!(Modifier::BOLD; "{}", fork.fork_label.clone()));
@@ -932,15 +960,70 @@ pub(super) fn forge_pr_glyph_span(pr: &PrRow, theme: &Theme) -> Span<'static> {
 
 /// The PR row's local-branch marker (ADR 0129): the Branch glyph in the
 /// branch color when the PR resolves to a local branch, a dim hollow
-/// `◌` when it doesn't. Occupies two cells (glyph and a space) either
-/// way, so the repo text stays in one column.
+/// `◌` when it doesn't. One cell either way.
 pub(super) fn pr_tracking_span(pr: &PrRow, theme: &Theme) -> Span<'static> {
     if pr.tracked {
         let style = node_kind_style(NodeKind::Branch, theme);
-        span!(Style::default().fg(style.color); "{} ", style.glyph)
+        span!(Style::default().fg(style.color); "{}", style.glyph)
     } else {
-        span!(theme.placeholder; "◌ ")
+        span!(theme.placeholder; "◌")
     }
+}
+
+/// The body of a PR row after its kind glyph (ADR 0131): number, local
+/// branch marker, state, age, then the content: the local branch, dim,
+/// and the title, gray. The first four align to `align`; the content
+/// fills `budget`, the cells left in the row, and is cut with an
+/// ellipsis.
+pub(super) fn render_pr_spans(
+    pr: &PrRow,
+    theme: &Theme,
+    align: PrAlign,
+    budget: usize,
+) -> Vec<Span<'static>> {
+    let mut spans: Vec<Span<'static>> = Vec::new();
+    spans.push(span!(Modifier::BOLD; "{}", pad_to_width(pr.label.clone(), align.label)));
+    spans.push(Span::raw(" "));
+    spans.push(pr_tracking_span(pr, theme));
+
+    let state = pr_state_text(pr);
+    let state_style = match state.to_ascii_lowercase().as_str() {
+        "open" => Style::default().fg(theme.mux_attached),
+        "draft" | "closed" | "merged" => Style::default().add_modifier(theme.placeholder),
+        _ => Style::default().fg(theme.secondary_text),
+    };
+    spans.push(span!(state_style; "  {}", pad_to_width(state, align.state)));
+
+    if align.age > 0 {
+        let age = pr.updated_recency.clone().unwrap_or_default();
+        spans.push(span!(
+            Style::default().fg(theme.secondary_text);
+            "  {:>width$}", age, width = align.age
+        ));
+    }
+    // The content: the local branch when there is one, then the title.
+    // Two cells separate each part from what comes before it.
+    let mut room = budget.saturating_sub(spans_width(&spans));
+    let mut push_content = |spans: &mut Vec<Span<'static>>, style: Style, text: &str| {
+        if room <= 2 {
+            return;
+        }
+        let text = truncate_to_width_strict(text, room - 2);
+        room = room.saturating_sub(UnicodeWidthStr::width(text.as_str()) + 2);
+        spans.push(Span::styled(format!("  {text}"), style));
+    };
+    if let Some(branch) = pr.branch_name.as_deref() {
+        let branch = truncate_to_width_strict(branch, PR_BRANCH_MAX_WIDTH);
+        push_content(
+            &mut spans,
+            Style::default().add_modifier(theme.placeholder),
+            &branch,
+        );
+    }
+    if let Some(title) = pr.title.as_deref() {
+        push_content(&mut spans, Style::default().fg(theme.secondary_text), title);
+    }
+    spans
 }
 
 /// Map a [`GroupRow`] to its node kind so the renderer can stamp the

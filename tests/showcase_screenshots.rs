@@ -103,7 +103,7 @@ fn the_showcase_screens_render_real_previews_with_stable_paths_and_ages() {
     );
 
     let prs = frame(scratch.path(), "3jl");
-    assert!(prs.contains("conspectus/project#7  open  draft"), "{prs}");
+    assert!(prs.contains("#7 ⎇  draft"), "{prs}");
     assert!(prs.contains("Release notes for 0.3"), "{prs}");
     assert!(
         prs.contains("checks  2 passed · 1 failed · 1 pending"),

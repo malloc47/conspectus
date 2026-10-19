@@ -72,6 +72,7 @@ fn sparse_world() -> GraphSnapshot {
             repo: "r".to_string(),
             number,
             state: Some(state.to_string()),
+            title: None,
             url: None,
             updated_epoch: None,
             is_draft: false,
@@ -137,7 +138,7 @@ fn checkout_grouping_files_each_pr_under_the_checkout_of_its_branch() {
     // The PR checked out nowhere sits under its repo, not a catch-all.
     assert_eq!(
         outline(&tree),
-        ["0 /r", "1 #1", "0 /r  no checkout", "1 #2"]
+        ["0 o/r  /r", "1 #1", "0 o/r  /r  no checkout", "1 #2"]
     );
     assert_eq!(
         tree.rows[0].id,
@@ -169,7 +170,7 @@ fn checkout_grouping_files_unchecked_prs_under_their_repo_node() {
 fn checkout_grouping_falls_back_to_the_forge_repo_when_the_graph_is_sparse() {
     let snapshot = resolve_snapshot(sparse_world());
     let tree = build(&snapshot, PrsGrouping::Checkout, None);
-    assert_eq!(outline(&tree), ["0 /r", "1 #1", "0 o/r", "1 #2"]);
+    assert_eq!(outline(&tree), ["0 o/r  /r", "1 #1", "0 o/r", "1 #2"]);
 }
 
 #[test]
@@ -205,14 +206,14 @@ fn repo_grouping_files_every_pr_under_its_local_repo() {
     let tree = build(&snapshot, PrsGrouping::Repo, None);
     // The PR without a local branch sits beside the one with, not in a
     // catch-all group. Newest number first within a group.
-    assert_eq!(outline(&tree), ["0 /r", "1 #2", "1 #1"]);
+    assert_eq!(outline(&tree), ["0 o/r  /r", "1 #2", "1 #1"]);
 }
 
 #[test]
 fn repo_grouping_falls_back_to_the_forge_repo_when_the_graph_is_sparse() {
     let snapshot = resolve_snapshot(sparse_world());
     let tree = build(&snapshot, PrsGrouping::Repo, None);
-    assert_eq!(outline(&tree), ["0 /r", "1 #1", "0 o/r", "1 #2"]);
+    assert_eq!(outline(&tree), ["0 o/r  /r", "1 #1", "0 o/r", "1 #2"]);
     assert_eq!(tree.rows[2].id, RowId::Remote("o/r".to_string()));
 }
 
@@ -296,4 +297,115 @@ fn state_grouping_files_prs_by_state() {
     let snapshot = world();
     let tree = build(&snapshot, PrsGrouping::State, None);
     assert_eq!(outline(&tree), ["0 Open", "1 #1", "0 Merged", "1 #2"]);
+}
+
+fn labels(tree: &RowTree) -> Vec<String> {
+    tree.rows
+        .iter()
+        .filter_map(|row| match &row.kind {
+            RowKind::Pr(pr) => Some(pr.label.clone()),
+            _ => None,
+        })
+        .collect()
+}
+
+#[test]
+fn a_group_of_one_forge_repo_names_it_and_its_rows_show_only_the_number() {
+    let snapshot = world();
+    for grouping in [PrsGrouping::Checkout, PrsGrouping::Repo] {
+        let tree = build(&snapshot, grouping, None);
+        let mut seen = 0;
+        for row in &tree.rows {
+            if let RowKind::Pr(pr) = &row.kind {
+                seen += 1;
+                assert_eq!(pr.label, format!("#{}", pr.pr_number));
+                // Search still matches the full name.
+                assert_eq!(pr.repo_display, format!("o/r#{}", pr.pr_number));
+            }
+        }
+        assert_eq!(seen, 2);
+    }
+}
+
+#[test]
+fn state_groups_span_repos_so_their_rows_keep_owner_and_repo() {
+    let snapshot = world();
+    let tree = build(&snapshot, PrsGrouping::State, None);
+    assert_eq!(labels(&tree), ["o/r#1", "o/r#2"]);
+}
+
+#[test]
+fn a_group_with_several_forge_repos_keeps_owner_and_repo_on_its_rows() {
+    // A fork's PRs into its upstream sit in the same local repo group.
+    let mut snapshot = sparse_world();
+    snapshot.nodes.push(GraphNode::ForgePr(ForgePrNode {
+        id: ForgePrId::new("github", "github.com", "up", "r", 9),
+        provider: "github".to_string(),
+        host: "github.com".to_string(),
+        owner: "up".to_string(),
+        repo: "r".to_string(),
+        number: 9,
+        state: Some("OPEN".to_string()),
+        title: None,
+        url: None,
+        updated_epoch: None,
+        is_draft: false,
+        head_ref: None,
+    }));
+    snapshot.candidate_links.push(GraphLink {
+        id: "pr-up".to_string(),
+        source: NodeId::ForgePr(ForgePrId::new("github", "github.com", "up", "r", 9)),
+        target: LinkEndpoint::Node {
+            id: NodeId::Branch(BranchId::new(RepoId::new("/r/.git"), "refs/heads/feature")),
+        },
+        relation: RelationKind::BranchHasForgePr,
+        provenance: Provenance::StrongDiscovered,
+        confidence: Confidence::High,
+        freshness: Freshness::Fresh,
+        source_metadata: SourceMetadata::default(),
+        state: LinkState::Active,
+    });
+    let snapshot = resolve_snapshot(snapshot);
+
+    let tree = build(&snapshot, PrsGrouping::Repo, None);
+
+    let group = match &tree.rows[0].kind {
+        RowKind::Group(group) => group.display_path.clone(),
+        other => panic!("expected a group, got {other:?}"),
+    };
+    assert_eq!(group, "/r", "no single forge repo to name the group after");
+    let mixed: Vec<String> = tree.rows[1..]
+        .iter()
+        .take_while(|row| !matches!(row.kind, RowKind::Group(_)))
+        .filter_map(|row| match &row.kind {
+            RowKind::Pr(pr) => Some(pr.label.clone()),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(mixed, ["o/r#1", "up/r#9"]);
+}
+
+#[test]
+fn rows_carry_the_title_and_no_attached_count() {
+    let mut snapshot = world();
+    for node in &mut snapshot.nodes {
+        if let GraphNode::ForgePr(pr) = node
+            && pr.number == 1
+        {
+            pr.title = Some("Fix the login redirect".to_string());
+        }
+    }
+    let tree = build(&snapshot, PrsGrouping::Repo, None);
+    let titles: Vec<(u64, Option<String>)> = tree
+        .rows
+        .iter()
+        .filter_map(|row| match &row.kind {
+            RowKind::Pr(pr) => Some((pr.pr_number, pr.title.clone())),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(
+        titles,
+        [(2, None), (1, Some("Fix the login redirect".to_string()))]
+    );
 }

@@ -160,6 +160,7 @@ fn cell(key: &str, ctx: &CellCtx<'_>) -> String {
         "branch" => ctx.branch.map_or_else(dash, |(_repo, refname)| {
             strip_branch_prefix(refname).to_string()
         }),
+        "title" => pr.title.clone().unwrap_or_else(dash),
         "tracked" => if ctx.branch.is_some() { "yes" } else { "no" }.to_string(),
         "repo" => format!("{}/{}", pr.owner, pr.repo),
         "updated" => pr

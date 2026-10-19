@@ -258,6 +258,7 @@ pub fn branch_pr_graph() -> GraphSnapshot {
             repo: "repo".to_string(),
             number: pr_number,
             state: Some("open".to_string()),
+            title: None,
             url: Some(format!("https://github.com/owner/repo/pull/{pr_number}")),
             updated_epoch: Some(1_700_000_000 + (pr_number as i64) * 60),
             is_draft: false,

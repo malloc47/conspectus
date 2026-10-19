@@ -1,7 +1,7 @@
 //! In-memory PRs-view row-tree builder (ADR 0082), grouped by
 //! checkout, repo, or state (ADR 0114, 0130).
 
-use std::collections::{BTreeMap, HashMap, HashSet};
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::path::Path;
 
 use crate::filter::RowFilter;
@@ -135,6 +135,8 @@ pub fn build_prs_tree(inputs: PrsBuildInputs<'_>) -> RowTree {
     // Each PR's rows (the PR, then the sessions working in its
     // checkouts), filed under its bucket.
     let mut buckets: BTreeMap<Bucket, Vec<Row>> = BTreeMap::new();
+    // The forge repos (`owner/repo`) each bucket's PRs come from.
+    let mut slugs: BTreeMap<Bucket, BTreeSet<String>> = BTreeMap::new();
     for pr in &prs {
         let branch = branches.get(&pr.node_id);
         if let Some(wanted) = filter.pr_branch
@@ -183,6 +185,10 @@ pub fn build_prs_tree(inputs: PrsBuildInputs<'_>) -> RowTree {
             PrsGrouping::State => Bucket::State(StateBucket::of(pr.node)),
         };
 
+        slugs
+            .entry(bucket.clone())
+            .or_default()
+            .insert(format!("{}/{}", pr.node.owner, pr.node.repo));
         let rows = buckets.entry(bucket).or_default();
         let node_id = NodeId::ForgePr(pr.id.clone());
         rows.push(Row {
@@ -192,6 +198,7 @@ pub fn build_prs_tree(inputs: PrsBuildInputs<'_>) -> RowTree {
             kind: RowKind::Pr(PrRow {
                 pr_number: pr.node.number,
                 repo_display: format!("{}/{}#{}", pr.node.owner, pr.node.repo, pr.node.number),
+                label: format!("{}/{}#{}", pr.node.owner, pr.node.repo, pr.node.number),
                 state: pr.node.state.clone(),
                 is_draft: pr.node.is_draft,
                 branch_name: branch
@@ -199,8 +206,8 @@ pub fn build_prs_tree(inputs: PrsBuildInputs<'_>) -> RowTree {
                     .map(strip_branch_prefix)
                     .map(str::to_string),
                 tracked: branch.is_some(),
+                title: pr.node.title.clone(),
                 updated_recency: format_recency(now, pr.node.updated_epoch),
-                attached_count: visible_agents.len(),
                 url: pr.node.url.clone(),
                 primary_node: node_id,
             }),
@@ -225,9 +232,29 @@ pub fn build_prs_tree(inputs: PrsBuildInputs<'_>) -> RowTree {
         view: ViewLabel::Prs,
         ..RowTree::default()
     };
-    for (bucket, rows) in buckets {
-        tree.rows
-            .push(group_row(&bucket, launch_root.as_deref(), inputs.home));
+    for (bucket, mut rows) in buckets {
+        let mut group = group_row(&bucket, launch_root.as_deref(), inputs.home);
+        // A group whose PRs all come from one forge repo names it, and
+        // its rows drop the `owner/repo` (ADR 0131). A state group
+        // spans repos, so its rows keep it.
+        let named = slugs
+            .get(&bucket)
+            .filter(|slugs| slugs.len() == 1)
+            .and_then(|slugs| slugs.iter().next())
+            .filter(|_| !matches!(bucket, Bucket::State(_)));
+        if let Some(slug) = named {
+            if !matches!(bucket, Bucket::Remote(_))
+                && let RowKind::Group(group) = &mut group.kind
+            {
+                group.display_path = format!("{slug}  {}", group.display_path);
+            }
+            for row in &mut rows {
+                if let RowKind::Pr(pr) = &mut row.kind {
+                    pr.label = format!("#{}", pr.pr_number);
+                }
+            }
+        }
+        tree.rows.push(group);
         tree.rows.extend(rows);
     }
     tree

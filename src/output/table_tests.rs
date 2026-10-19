@@ -483,6 +483,7 @@ fn agent_projection_shows_preferred_pr_when_branch_has_one() {
                 repo: "repo".to_string(),
                 number: 7,
                 state: Some("open".to_string()),
+                title: None,
                 url: None,
                 updated_epoch: None,
                 is_draft: false,
@@ -965,6 +966,7 @@ fn render_color_enabled_colors_pr_state_cell() {
             repo: "repo".to_string(),
             number: 7,
             state: Some("open".to_string()),
+            title: None,
             url: None,
             updated_epoch: None,
             is_draft: false,
@@ -1473,6 +1475,7 @@ fn forge_pr(owner: &str, repo: &str, number: u64, state: &str, draft: bool) -> G
         repo: repo.to_string(),
         number,
         state: Some(state.to_string()),
+        title: None,
         url: None,
         updated_epoch: None,
         is_draft: draft,
@@ -2742,4 +2745,23 @@ fn prs_tracked_column_and_branch_filter_follow_the_local_branch() {
     assert_eq!(only(PrBranchFilter::Tracked).len(), 1);
     assert_eq!(only(PrBranchFilter::Untracked).len(), 1);
     assert_eq!(only(PrBranchFilter::Untracked)[0].1, "no");
+}
+
+#[test]
+fn prs_title_column_shows_the_title_or_a_dash() {
+    let mut titled = forge_pr("octo", "repo", 1, "open", false);
+    if let GraphNode::ForgePr(pr) = &mut titled {
+        pr.title = Some("Fix the login redirect".to_string());
+    }
+    let snapshot = GraphSnapshot {
+        nodes: vec![titled, forge_pr("octo", "repo", 2, "open", false)],
+        ..GraphSnapshot::empty()
+    };
+    let rows = crate::output::prs::build_pr_rows_from_snapshot(
+        &snapshot,
+        &["pr", "title"],
+        &RenderOptions::wide(),
+    );
+    assert_eq!(rows[1][1], "Fix the login redirect");
+    assert_eq!(rows[2][1], "—");
 }

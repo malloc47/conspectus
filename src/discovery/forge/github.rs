@@ -43,6 +43,8 @@ const FORGE_ADAPTER: &str = crate::discovery::providers::GITHUB;
 pub struct PullRequestRecord {
     pub number: u64,
     pub state: PullRequestState,
+    /// The PR title on one line (ADR 0131).
+    pub title: Option<String>,
     pub url: Option<String>,
     pub head_ref: String,
     pub head_owner: Option<String>,
@@ -172,6 +174,7 @@ fn forge_pr_node(id: &ForgePrId, context: &RepoContext, record: &PullRequestReco
         repo: context.repo.clone(),
         number: record.number,
         state: Some(record.state.as_str().to_string()),
+        title: record.title.clone(),
         url: record.url.clone(),
         updated_epoch: record.updated_epoch,
         is_draft: record.is_draft,
@@ -335,6 +338,7 @@ fn parse_row(value: &Value) -> Option<PullRequestRecord> {
         PullRequestState::parse,
     );
 
+    let title = one_line(row.get("title"));
     let url = string_field(row.get("url"));
     let base_ref = string_field(row.get("baseRefName"));
     let updated_at = string_field(row.get("updatedAt"));
@@ -353,6 +357,7 @@ fn parse_row(value: &Value) -> Option<PullRequestRecord> {
     Some(PullRequestRecord {
         number,
         state,
+        title,
         url,
         head_ref,
         head_owner,
@@ -362,6 +367,17 @@ fn parse_row(value: &Value) -> Option<PullRequestRecord> {
         updated_at,
         updated_epoch,
     })
+}
+
+/// A string field on one line: runs of whitespace, newlines included,
+/// collapse to a single space, and an empty result is `None`.
+fn one_line(value: Option<&Value>) -> Option<String> {
+    let collapsed = value?
+        .as_str()?
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ");
+    (!collapsed.is_empty()).then_some(collapsed)
 }
 
 fn string_field(value: Option<&Value>) -> Option<String> {

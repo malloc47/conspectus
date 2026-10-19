@@ -78,6 +78,54 @@ fn rows_missing_required_fields_are_skipped() {
 }
 
 #[test]
+fn title_is_read_onto_one_line() {
+    let body = r#"[
+            {"number": 1, "state": "OPEN", "headRefName": "a", "title": "  Add   the\n thing \t "},
+            {"number": 2, "state": "OPEN", "headRefName": "b", "title": "   "},
+            {"number": 3, "state": "OPEN", "headRefName": "c", "title": 7},
+            {"number": 4, "state": "OPEN", "headRefName": "d"}
+        ]"#;
+
+    let records = GhPullRequestParser::new().parse(body);
+
+    let titles: Vec<Option<&str>> = records.iter().map(|r| r.title.as_deref()).collect();
+    assert_eq!(titles, [Some("Add the thing"), None, None, None]);
+}
+
+#[test]
+fn title_is_carried_onto_the_forge_pr_node() {
+    let mut with_title = record(1, "main", PullRequestState::Open);
+    with_title.title = Some("Fix the login redirect".to_string());
+    let without = record(2, "main", PullRequestState::Open);
+
+    let fragment = fragment_for_repo(
+        &context(),
+        &BTreeSet::new(),
+        &remotes(),
+        &[with_title, without],
+    );
+
+    let titles: Vec<Option<&str>> = fragment
+        .nodes
+        .iter()
+        .filter_map(|node| match node {
+            GraphNode::ForgePr(pr) => Some(pr.title.as_deref()),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(titles, [Some("Fix the login redirect"), None]);
+}
+
+#[test]
+fn the_listing_asks_gh_for_titles() {
+    assert!(
+        crate::discovery::forge::GH_PR_LIST_FIELDS
+            .split(',')
+            .any(|field| field == "title")
+    );
+}
+
+#[test]
 fn draft_flag_is_preserved() {
     let body = r#"[{"number": 1, "state": "OPEN", "headRefName": "wip", "isDraft": true}]"#;
 
@@ -163,6 +211,7 @@ fn record(number: u64, head_ref: &str, state: PullRequestState) -> PullRequestRe
     PullRequestRecord {
         number,
         state,
+        title: None,
         url: Some(format!("https://github.com/octo/repo/pull/{number}")),
         head_ref: head_ref.to_string(),
         head_owner: Some("octo".to_string()),

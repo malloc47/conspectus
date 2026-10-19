@@ -500,6 +500,7 @@ fn agent_session_pr_field_walks_worktree_branch_pr_chain() {
         repo: "repo".into(),
         number: 7,
         state: Some("open".into()),
+        title: None,
         url: None,
         updated_epoch: None,
         is_draft: false,

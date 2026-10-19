@@ -35,7 +35,7 @@ pub const GITHUB_DEFAULT_HOST: &str = "github.com";
 /// JSON fields requested from `gh pr list --json <fields>`. Kept in one
 /// place so the [`GhPullRequestParser`] and any `SystemGh` invocation
 /// agree on the schema. See ADR 0011.
-pub const GH_PR_LIST_FIELDS: &str = "number,state,url,headRefName,baseRefName,\
+pub const GH_PR_LIST_FIELDS: &str = "number,state,title,url,headRefName,baseRefName,\
 updatedAt,headRepositoryOwner,headRepository,isDraft";
 
 /// Gh queries run at once across every discovered repo (ADR 0115).

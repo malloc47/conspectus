@@ -445,6 +445,7 @@ fn populated_snapshot_for_archive_tests() -> GraphSnapshot {
         repo: "repo".to_string(),
         number: 1,
         state: Some("open".to_string()),
+        title: None,
         url: Some("https://example".to_string()),
         updated_epoch: Some(5),
         is_draft: false,
