@@ -4895,7 +4895,7 @@ fn prs_view_frames_by_pr_state() {
 fn a_first_visit_to_the_prs_view_opens_its_first_group() {
     let mut app = prs_app_in(View::Sessions);
     app.update(Msg::SwitchView(View::Prs));
-    let group = RowId::Synthetic("prs-no-checkout");
+    let group = RowId::Remote("conspectus/project".to_string());
     assert_eq!(app.selection(), Some(&group));
     let visible: Vec<&RowId> = app.visible_rows().iter().map(|row| &row.id).collect();
     assert_eq!(visible.len(), 5, "the group and its four PRs: {visible:?}");

@@ -1,5 +1,5 @@
 //! In-memory PRs-view row-tree builder (ADR 0082), grouped by
-//! checkout, repo, or state (ADR 0114).
+//! checkout, repo, or state (ADR 0114, 0130).
 
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::path::Path;
@@ -41,14 +41,20 @@ struct BranchLink {
 }
 
 /// The group a PR sits under (ADR 0114). Ordered so groups sort by
-/// display order: real nodes by path, then the catch-all bucket.
+/// display order: checkouts by path, then repos, then forge repos with
+/// no local repo.
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
 enum Bucket {
     Checkout {
         root: String,
         id: CheckoutId,
     },
-    NoCheckout,
+    /// A repo's PRs that are checked out nowhere, filed under the repo
+    /// instead of one catch-all group (ADR 0130).
+    Unchecked {
+        path: String,
+        id: RepoId,
+    },
     Repo {
         path: String,
         id: RepoId,
@@ -149,29 +155,30 @@ pub fn build_prs_tree(inputs: PrsBuildInputs<'_>) -> RowTree {
             continue;
         }
 
+        // The local repo a PR belongs to: its branch's, else the one it
+        // was queried for (ADR 0129).
+        let repo_group = || {
+            let repo = branch
+                .map(|branch| &branch.repo)
+                .or_else(|| local_repos.get(&pr.node_id))?;
+            let path = repo_paths
+                .get(repo)
+                .cloned()
+                .unwrap_or_else(|| repo.common_dir.clone());
+            Some((path, repo.clone()))
+        };
+        let remote_group = || Bucket::Remote(format!("{}/{}", pr.node.owner, pr.node.repo));
         let bucket = match inputs.grouping {
-            PrsGrouping::Checkout => {
-                pr_checkouts
-                    .first()
-                    .map_or(Bucket::NoCheckout, |(root, id)| Bucket::Checkout {
-                        root: root.clone(),
-                        id: id.clone(),
-                    })
-            }
+            PrsGrouping::Checkout => match pr_checkouts.first() {
+                Some((root, id)) => Bucket::Checkout {
+                    root: root.clone(),
+                    id: id.clone(),
+                },
+                None => repo_group()
+                    .map_or_else(remote_group, |(path, id)| Bucket::Unchecked { path, id }),
+            },
             PrsGrouping::Repo => {
-                let repo = branch
-                    .map(|branch| &branch.repo)
-                    .or_else(|| local_repos.get(&pr.node_id));
-                repo.map_or_else(
-                    || Bucket::Remote(format!("{}/{}", pr.node.owner, pr.node.repo)),
-                    |repo| Bucket::Repo {
-                        path: repo_paths
-                            .get(repo)
-                            .cloned()
-                            .unwrap_or_else(|| repo.common_dir.clone()),
-                        id: repo.clone(),
-                    },
-                )
+                repo_group().map_or_else(remote_group, |(path, id)| Bucket::Repo { path, id })
             }
             PrsGrouping::State => Bucket::State(StateBucket::of(pr.node)),
         };
@@ -263,12 +270,15 @@ fn group_row(bucket: &Bucket, launch_root: Option<&str>, home: Option<&Path>) ->
                 false,
             )
         }
-        Bucket::NoCheckout => (
-            RowId::Synthetic("prs-no-checkout"),
-            "No checkout".to_string(),
-            None,
-            false,
-        ),
+        Bucket::Unchecked { path, id } => {
+            let node = NodeId::Repo(id.clone());
+            (
+                RowId::Group(node.clone()),
+                format!("{}  no checkout", shorten_home(path, home)),
+                Some(node),
+                false,
+            )
+        }
         Bucket::Remote(slug) => (RowId::Remote(slug.clone()), slug.clone(), None, false),
         Bucket::State(state) => {
             let (id, label) = state.row();

@@ -4,7 +4,7 @@ expression: "pr_frame(&mut app, 4, Some(fetched_pr(\"OPEN\", true, \"[]\", \"\")
 ---
 updated 0s ago · 0 sessions · 0 mux                                                                                               
 ┌ ▸ sessions · mux · prs ───────────────────────────────────────┐┌   ⇄ pr ───────────────────────────────────────────────────────┐
-│▼ No checkout                                                  ││  id            c87271dd104aff7b                               │
+│▼ project  conspectus/project                                  ││  id            c87271dd104aff7b                               │
 │    ⇄ ◌ conspectus/project#4  OPEN  draft  (0)                 ││  pr            conspectus/project#4 (OPEN)                    │
 │    ⇄ ◌ conspectus/project#3  MERGED  (0)                      ││  draft         true                                           │
 │    ⇄ ◌ conspectus/project#2  CLOSED  (0)                      ││  head          feature/4                                      │

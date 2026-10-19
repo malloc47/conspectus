@@ -860,11 +860,12 @@ backs config, CLI flags, and TUI controls.
 
 The TUI's view switcher offers sessions, mux, and PRs (`1`–`3`); union and
 forks remain CLI table projections. The PRs view groups by checkout by
-default, so each PR sits with the work checked out for it (ADR 0114). Each PR
+default, so each PR sits with the work checked out for it, and PRs checked out
+nowhere sit under their repo, labelled `no checkout` (ADR 0114, 0130). Each PR
 row carries a marker for whether it has a local branch (`⎇`) or not (dim `◌`);
 the Controls overlay can show only PRs with or without one and float those
-with one to the top, and `repo` grouping files every PR under its local repo
-(ADR 0129).
+with one to the top (settable from config), and `repo` grouping files every PR
+under its local repo (ADR 0129, 0130).
 
 The sessions view defaults to `grouping = "graph"` so the primary switcher
 shows the richer topology: it includes workspace containment when known and

@@ -134,7 +134,11 @@ fn outline(tree: &RowTree) -> Vec<String> {
 fn checkout_grouping_files_each_pr_under_the_checkout_of_its_branch() {
     let snapshot = world();
     let tree = build(&snapshot, PrsGrouping::Checkout, None);
-    assert_eq!(outline(&tree), ["0 /r", "1 #1", "0 No checkout", "1 #2"]);
+    // The PR checked out nowhere sits under its repo, not a catch-all.
+    assert_eq!(
+        outline(&tree),
+        ["0 /r", "1 #1", "0 /r  no checkout", "1 #2"]
+    );
     assert_eq!(
         tree.rows[0].id,
         RowId::Group(NodeId::Checkout(CheckoutId::new(
@@ -142,6 +146,42 @@ fn checkout_grouping_files_each_pr_under_the_checkout_of_its_branch() {
             "/r"
         )))
     );
+}
+
+#[test]
+fn checkout_grouping_files_unchecked_prs_under_their_repo_node() {
+    let snapshot = world();
+    let tree = build(&snapshot, PrsGrouping::Checkout, None);
+    assert_eq!(
+        tree.rows[2].id,
+        RowId::Group(NodeId::Repo(RepoId::new("/r/.git")))
+    );
+    match &tree.rows[2].kind {
+        RowKind::Group(group) => assert_eq!(
+            group.primary_node,
+            Some(NodeId::Repo(RepoId::new("/r/.git")))
+        ),
+        other => panic!("expected a group, got {other:?}"),
+    }
+}
+
+#[test]
+fn checkout_grouping_falls_back_to_the_forge_repo_when_the_graph_is_sparse() {
+    let snapshot = resolve_snapshot(sparse_world());
+    let tree = build(&snapshot, PrsGrouping::Checkout, None);
+    assert_eq!(outline(&tree), ["0 /r", "1 #1", "0 o/r", "1 #2"]);
+}
+
+#[test]
+fn checkout_grouping_never_emits_a_no_checkout_group() {
+    for snapshot in [world(), resolve_snapshot(sparse_world())] {
+        let tree = build(&snapshot, PrsGrouping::Checkout, None);
+        assert!(
+            !outline(&tree).iter().any(|row| row.contains("No checkout")),
+            "{:?}",
+            outline(&tree)
+        );
+    }
 }
 
 #[test]
