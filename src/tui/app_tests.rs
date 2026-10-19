@@ -3764,3 +3764,59 @@ fn pin_adopt_defaults_take_the_selected_muxs_backend() {
     assert_eq!(app.pin_adopt_defaults().mux_backend, "zellij");
     assert_eq!(app.pin_create_defaults().mux_backend, "tmux");
 }
+
+#[test]
+fn launch_started_marks_the_mux_without_requesting_a_refresh() {
+    let mut app = seeded_app(&[("claude-code", "abc", "/p/a")]);
+    let mux = crate::model::MuxSessionId::new("tmux:dek-serve");
+
+    app.update(Msg::LaunchStarted(mux.clone()));
+
+    let handoff = app.handoff().expect("launch marks the row");
+    assert!(handoff.muxes.contains(&mux));
+    assert!(
+        !app.take_handoff_refresh_request(),
+        "the attach that follows asks for the refresh, not the launch"
+    );
+}
+
+#[test]
+fn launch_aborted_drops_only_its_own_mark() {
+    let mut app = seeded_app(&[("claude-code", "abc", "/p/a")]);
+    let launching = crate::model::MuxSessionId::new("tmux:dek-serve");
+    let other = crate::model::MuxSessionId::new("tmux:other");
+
+    app.update(Msg::LaunchStarted(launching.clone()));
+    app.update(Msg::HandoffReturned(other.clone()));
+    app.update(Msg::LaunchAborted(launching.clone()));
+    let handoff = app.handoff().expect("the other hand-off stays pending");
+    assert_eq!(handoff.muxes, BTreeSet::from([other]));
+    assert!(
+        app.take_handoff_refresh_request(),
+        "the other hand-off's refresh request survives"
+    );
+
+    let mut solo = seeded_app(&[("claude-code", "abc", "/p/a")]);
+    solo.update(Msg::LaunchStarted(launching.clone()));
+    solo.update(Msg::LaunchAborted(launching));
+    assert!(solo.handoff().is_none(), "a lone launch leaves no mark");
+}
+
+#[test]
+fn launch_mark_survives_the_attach_return_until_settled() {
+    let mut app = seeded_app(&[("claude-code", "abc", "/p/a")]);
+    let mux = crate::model::MuxSessionId::new("tmux:dek-serve");
+
+    app.update(Msg::LaunchStarted(mux.clone()));
+    let started_at = app.handoff().expect("marked").started_at;
+    app.update(Msg::HandoffReturned(mux));
+
+    let handoff = app.handoff().expect("still marked after the attach");
+    assert_eq!(
+        handoff.started_at, started_at,
+        "the spinner keeps its phase"
+    );
+    assert!(app.take_handoff_refresh_request());
+    app.update(Msg::HandoffSettled);
+    assert!(app.handoff().is_none());
+}

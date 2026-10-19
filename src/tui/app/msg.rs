@@ -190,6 +190,15 @@ pub enum Msg {
     /// A refresh spawned after the last hand-off landed (or failed);
     /// the pending rows show current values again.
     HandoffSettled,
+    /// A pin launch is starting `mux` (ADR 0127). Marks the mux row
+    /// and its linked sessions with the hand-off's dim-and-spinner
+    /// treatment so the row being acted on shows progress. Unlike
+    /// [`Msg::HandoffReturned`] it asks for no refresh: the attach
+    /// that follows sends that.
+    LaunchStarted(MuxSessionId),
+    /// The launch of `mux` ended without an attach. Drops its mark; an
+    /// attach that did run sends [`Msg::HandoffReturned`] instead.
+    LaunchAborted(MuxSessionId),
     /// Nested-reducer entry point for the transcript viewer
     /// (ADR 0085 contract 3). The reducer arm
     /// pops the top viewer state, runs it through

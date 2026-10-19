@@ -993,6 +993,14 @@ impl App {
         }
     }
 
+    /// Agent sessions the loaded snapshot links to `mux`.
+    fn sessions_linked_to(&self, mux: &MuxSessionId) -> Vec<AgentSessionId> {
+        self.handle
+            .as_ref()
+            .map(|handle| sessions_linked_to_mux(handle.snapshot(), mux))
+            .unwrap_or_default()
+    }
+
     /// Take the hand-off's refresh request. Returns `true` once per
     /// [`Msg::HandoffReturned`] batch; the runtime answers it with a
     /// background refresh that rescans the live classes.
@@ -1355,11 +1363,7 @@ impl App {
             }
             Msg::ForgeRefreshRequested => self.preview_store.mark_forge_stale(),
             Msg::HandoffReturned(mux) => {
-                let sessions = self
-                    .handle
-                    .as_ref()
-                    .map(|handle| sessions_linked_to_mux(handle.snapshot(), &mux))
-                    .unwrap_or_default();
+                let sessions = self.sessions_linked_to(&mux);
                 // The pane and the transcripts of the sessions in it
                 // changed while the operator was there.
                 self.preview_store
@@ -1380,6 +1384,32 @@ impl App {
             }
             Msg::HandoffSettled => {
                 self.handoff = None;
+            }
+            Msg::LaunchStarted(mux) => {
+                let sessions = self.sessions_linked_to(&mux);
+                let handoff = self.handoff.get_or_insert_with(|| PendingHandoff {
+                    muxes: BTreeSet::new(),
+                    sessions: BTreeSet::new(),
+                    started_at: Instant::now(),
+                    refresh_requested: false,
+                });
+                handoff.muxes.insert(mux);
+                handoff.sessions.extend(sessions);
+            }
+            Msg::LaunchAborted(mux) => {
+                let sessions = self.sessions_linked_to(&mux);
+                if let Some(handoff) = &mut self.handoff {
+                    handoff.muxes.remove(&mux);
+                    for session in &sessions {
+                        handoff.sessions.remove(session);
+                    }
+                    if handoff.muxes.is_empty()
+                        && handoff.sessions.is_empty()
+                        && !handoff.refresh_requested
+                    {
+                        self.handoff = None;
+                    }
+                }
             }
             Msg::Viewer(vmsg) => {
                 use crate::viewer::input::{ViewerEffect, reduce};

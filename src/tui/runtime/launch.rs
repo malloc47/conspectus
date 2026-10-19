@@ -55,6 +55,29 @@ pub(super) fn execute_launch_pin(
     pin_id: &str,
     target: Option<&PinLaunchTarget>,
 ) {
+    // The pin's mux row shows the hand-off's dim-and-spinner mark for
+    // the whole launch (ADR 0127). The attach's own
+    // `HandoffReturned` keeps it until the refresh lands; a launch
+    // that never reaches the attach drops it.
+    let launching = target.map(|target| MuxSessionId::new(target.mux.native_id()));
+    if let Some(mux) = &launching {
+        app.update(Msg::LaunchStarted(mux.clone()));
+    }
+    let attached = launch_pin_steps(terminal, app, pin_id, target);
+    if let Some(mux) = launching
+        && !attached
+    {
+        app.update(Msg::LaunchAborted(mux));
+    }
+}
+
+/// The launch itself. Returns whether the attach ran.
+fn launch_pin_steps(
+    terminal: &mut DefaultTerminal,
+    app: &mut App,
+    pin_id: &str,
+    target: Option<&PinLaunchTarget>,
+) -> bool {
     // Pass the pin's own `cwd` as `--scan-root` on the subprocess
     // so `conspectus pin launch` discovers from the pin's project
     // root, not the TUI's inherited CWD. Without this, launching a
@@ -74,7 +97,7 @@ pub(super) fn execute_launch_pin(
     let launch = summarize_pin_launch_output(pin_id, output);
     app.report(launch_entry(&launch, record, log_target.clone()));
     if !launch.success {
-        return;
+        return false;
     }
 
     let Some(target) = target else {
@@ -84,7 +107,7 @@ pub(super) fn execute_launch_pin(
             ))
             .with_target(log_target),
         );
-        return;
+        return false;
     };
 
     let mux = &target.mux;
@@ -98,7 +121,7 @@ pub(super) fn execute_launch_pin(
             ))
             .with_target(log_target),
         );
-        return;
+        return false;
     }
 
     let attach_target = AttachTarget {
@@ -115,6 +138,7 @@ pub(super) fn execute_launch_pin(
         &attach_target,
         mux.socket_name.as_deref(),
     ));
+    true
 }
 
 /// Run `conspectus <args>` and capture its full output, both for the

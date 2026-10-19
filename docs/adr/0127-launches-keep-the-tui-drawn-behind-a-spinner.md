@@ -53,7 +53,18 @@ screen to say the launch is happening.
    sit right after the unseen-messages chip (ADR 0105), and they also
    render while a status message replaces the hints. This moves the
    discovery chip too.
-5. **Order is unchanged.** The refresh still finishes before the
+5. **A pin launch marks its own row.** The launching pin's mux row
+   (its placeholder, until the session exists) and the sessions
+   linked to it get ADR 0108's dim-and-spinner treatment from the
+   keypress, so the row being acted on looks the same as one the
+   operator just detached from. `Msg::LaunchStarted` sets the mark and
+   asks for no refresh. The attach's `HandoffReturned` then asks for
+   one and keeps the mark until it lands. A launch that ends without
+   an attach (subprocess failure, attach target missing, session not
+   attachable) sends `Msg::LaunchAborted`, which drops only that mux's
+   mark. `mux new` and `mux launch` create a session with no existing
+   row, so they use the chip alone.
+6. **Order is unchanged.** The refresh still finishes before the
    attach, so the failure checks and log entries read the same state
    as before.
 
@@ -63,18 +74,19 @@ screen to say the launch is happening.
   the attach, instead of a shell screen and then a blank one.
 - Keys typed during the launch stay queued in the terminal and are
   handled after the attach returns, as before.
-- The row for an unstarted pin is not marked: unlike a hand-off, there
-  is no existing mux row to dim, so the chip carries the whole
-  indication.
+- A launching pin's row carries the same mark as a row the operator
+  detached from, so the two read the same. `mux new` and `mux launch`
+  have no row to mark; the chip is their whole indication.
 - A launch no longer clears the screen between the subprocess and the
   refresh.
 
 ## Alternatives Considered
 
-**Dim and spin the pin's row, as hand-offs do.** The row is the right
-place for state about that row, but a launch has no mux row yet, and
-the chip already covers all three launch kinds. A row marker can be
-added later without changing this mechanism.
+**Chip only, no row mark.** The first version did this. The chip
+covers all three launch kinds, but state about a row belongs on the
+row, and the operator expects a launch to look like a detach. A
+pin's placeholder mux row already exists with the id the launch will
+create, so the hand-off mark applies as is.
 
 **Draw one frame, then block.** Cheaper, but the spinner would be
 frozen for the whole wait, which reads as a hang.
