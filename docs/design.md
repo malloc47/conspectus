@@ -1179,6 +1179,9 @@ classes, so it never shows the daemon's pre-hand-off tick (ADR 0104).
 After an attach returns, that refresh runs in the background: the TUI
 redraws right away, with the returned mux's rows and its linked
 sessions' rows dimmed and spinning until the refresh lands (ADR 0108).
+A launch (pin launch, `mux new`, `mux launch`) keeps the TUI drawn
+with a spinner chip through its subprocess and the refresh before the
+attach (ADR 0127).
 Operation outcomes the TUI produces go to an in-memory message log
 (`!`) with full subprocess output; unseen failures stay flagged in the
 status bar and lead the affected row's Preview (ADR 0105).

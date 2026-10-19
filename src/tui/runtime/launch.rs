@@ -42,8 +42,8 @@ pub(super) fn pin_launch_argv(pin_id: &str, scan_root: Option<&str>) -> Vec<Stri
     args
 }
 
-/// Executor branch for `ExecSpec::LaunchPin`: suspend the alt
-/// screen, re-exec into `conspectus pin launch <id> --no-attach`,
+/// Executor branch for `ExecSpec::LaunchPin`: re-exec into
+/// `conspectus pin launch <id> --no-attach` behind a spinner,
 /// refresh so the row tree reflects the just-created session, then
 /// attach to the resulting tmux session when the pin has an
 /// attachable target. Also called directly from the Pins overlay's
@@ -52,7 +52,6 @@ pub(super) fn pin_launch_argv(pin_id: &str, scan_root: Option<&str>) -> Vec<Stri
 pub(super) fn execute_launch_pin(
     terminal: &mut DefaultTerminal,
     app: &mut App,
-    config: &RunConfig,
     pin_id: &str,
     target: Option<&PinLaunchTarget>,
 ) {
@@ -67,9 +66,10 @@ pub(super) fn execute_launch_pin(
     // either way; passing the extra scan-root is safe there too.
     let pin_scan_root = resolve_pin_scan_root(app, pin_id);
     let args = pin_launch_argv(pin_id, pin_scan_root.as_deref());
-    let (record, output) = run_conspectus_subprocess(terminal, &args);
+    let (record, output) =
+        run_conspectus_subprocess(terminal, app, format!("Launching {pin_id}"), args);
 
-    refresh_after_mux_handoff(app, config);
+    refresh_after_launch_with_spinner(terminal, app);
     let log_target = LogTarget::Pin(pin_id.to_string());
     let launch = summarize_pin_launch_output(pin_id, output);
     app.report(launch_entry(&launch, record, log_target.clone()));
@@ -117,24 +117,30 @@ pub(super) fn execute_launch_pin(
     ));
 }
 
-/// Run `conspectus <args>` with the TUI suspended and capture its
-/// full output, both for the caller's summary and as the command
-/// record of the message log entry (ADR 0105).
+/// Run `conspectus <args>` and capture its full output, both for the
+/// caller's summary and as the command record of the message log entry
+/// (ADR 0105). Output is captured and stdin is null, so the TUI stays
+/// up and shows a spinner chip labelled `label` meanwhile (ADR 0127).
 fn run_conspectus_subprocess(
     terminal: &mut DefaultTerminal,
-    args: &[String],
+    app: &mut App,
+    label: String,
+    args: Vec<String>,
 ) -> (CommandRecord, std::io::Result<Output>) {
     let program =
         std::env::current_exe().unwrap_or_else(|_| std::path::PathBuf::from("conspectus"));
-    ratatui::restore();
-    let output = crate::exec::command(crate::exec::Program::Conspectus, &program)
-        .args(args)
-        .output();
-    *terminal = ratatui::init();
-    let _ = terminal.clear();
+    let output = {
+        let program = program.clone();
+        let args = args.clone();
+        run_with_terminal_spinner(terminal, app, label, move || {
+            crate::exec::command(crate::exec::Program::Conspectus, &program)
+                .args(&args)
+                .output()
+        })
+    };
 
     let mut argv = vec![program.display().to_string()];
-    argv.extend(args.iter().cloned());
+    argv.extend(args);
     let record = match &output {
         Ok(output) => CommandRecord::from_output(argv, output),
         Err(err) => CommandRecord {
@@ -254,7 +260,7 @@ pub(super) fn mux_new_argv(name: &str, cwd: &str) -> Vec<String> {
     ]
 }
 
-/// Executor branch for `ExecSpec::MuxNew`: suspend the alt screen,
+/// Executor branch for `ExecSpec::MuxNew`: behind a spinner,
 /// re-exec into `conspectus mux new <name> --cwd <cwd> --no-attach`,
 /// refresh discovery, then attach to the resulting tmux session on
 /// success. Mirrors `execute_launch_pin` but without the pin lookup
@@ -262,14 +268,14 @@ pub(super) fn mux_new_argv(name: &str, cwd: &str) -> Vec<String> {
 pub(super) fn execute_mux_new(
     terminal: &mut DefaultTerminal,
     app: &mut App,
-    config: &RunConfig,
     name: &str,
     cwd: &str,
 ) {
     let args = mux_new_argv(name, cwd);
-    let (record, output) = run_conspectus_subprocess(terminal, &args);
+    let (record, output) =
+        run_conspectus_subprocess(terminal, app, format!("Creating {name}"), args);
 
-    refresh_after_mux_handoff(app, config);
+    refresh_after_launch_with_spinner(terminal, app);
     let mux = MuxSessionId::new(format!("tmux:{name}"));
     let launch = summarize_mux_new_output(name, output);
     app.report(launch_entry(&launch, record, LogTarget::Mux(mux.clone())));
@@ -367,22 +373,22 @@ pub(super) fn mux_launch_argv(
     args
 }
 
-/// Executor branch for `ExecSpec::MuxLaunch`: suspend the alt
-/// screen, re-exec into `conspectus mux launch …`, refresh discovery
+/// Executor branch for `ExecSpec::MuxLaunch`: behind a spinner,
+/// re-exec into `conspectus mux launch …`, refresh discovery
 /// so the row tree picks up the fresh mux + attributed harness
 /// session, then attach. Mirrors [`execute_launch_pin`] and
 /// [`execute_mux_new`] but with the mux-launch argv shape.
 pub(super) fn execute_mux_launch(
     terminal: &mut DefaultTerminal,
     app: &mut App,
-    config: &RunConfig,
     request: crate::tui::widgets::mux_launch::MuxLaunchRequest,
 ) {
     let name = request.name.clone();
     let args = mux_launch_argv(&request);
-    let (record, output) = run_conspectus_subprocess(terminal, &args);
+    let (record, output) =
+        run_conspectus_subprocess(terminal, app, format!("Launching {name}"), args);
 
-    refresh_after_mux_handoff(app, config);
+    refresh_after_launch_with_spinner(terminal, app);
     let mux = MuxSessionId::new(format!("tmux:{name}"));
     let launch = summarize_mux_launch_output(&name, output);
     app.report(launch_entry(&launch, record, LogTarget::Mux(mux.clone())));

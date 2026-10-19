@@ -309,6 +309,10 @@ pub enum InFlightKind {
     /// mux for a fresh graph snapshot. Emitted by `LiveMode::init`,
     /// the timer-driven refresh, and `Action::Refresh`.
     Discovery,
+    /// A launch is starting a tmux session: the `--no-attach`
+    /// subprocess, then the refresh that runs before the attach.
+    /// Emitted by pin launch, `mux new`, and `mux launch`.
+    Launch,
 }
 
 /// One in-flight async operation the status bar surfaces with a

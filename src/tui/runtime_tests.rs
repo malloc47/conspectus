@@ -2134,3 +2134,70 @@ fn tui_mux_rename_never_sends_a_zellij_rename_to_tmux() {
     assert!(err.contains("zellij"), "{err}");
     assert!(tmux.rename_calls().is_empty());
 }
+
+#[test]
+fn spinner_chip_shows_while_work_runs_and_clears_after() {
+    let mut app = App::new(RunConfig::defaults());
+    let (release, gate) = std::sync::mpsc::channel::<()>();
+    let mut frames = 0;
+    let mut chips_during_draw = None;
+
+    let result = run_with_spinner(
+        &mut app,
+        "Launching demo".to_string(),
+        |app| {
+            frames += 1;
+            chips_during_draw = Some(
+                app.in_flight_ops()
+                    .iter()
+                    .map(|op| (op.kind.clone(), op.label.clone()))
+                    .collect::<Vec<_>>(),
+            );
+            if frames == 3 {
+                release.send(()).unwrap();
+            }
+        },
+        move || {
+            gate.recv().unwrap();
+            42
+        },
+    );
+
+    assert_eq!(result, 42);
+    assert!(
+        frames >= 3,
+        "kept redrawing until the work finished: {frames}"
+    );
+    assert_eq!(
+        chips_during_draw,
+        Some(vec![(
+            crate::tui::app::InFlightKind::Launch,
+            "Launching demo".to_string()
+        )])
+    );
+    assert!(app.in_flight_ops().is_empty(), "chip clears when done");
+}
+
+#[test]
+fn spinner_draws_at_least_one_frame_for_instant_work() {
+    let mut app = App::new(RunConfig::defaults());
+    let mut frames = 0;
+    let result = run_with_spinner(&mut app, "x".to_string(), |_| frames += 1, || "done");
+    assert_eq!(result, "done");
+    assert!(frames >= 1);
+    assert!(app.in_flight_ops().is_empty());
+}
+
+#[test]
+fn spinner_worker_panic_propagates_to_the_caller() {
+    let result = std::panic::catch_unwind(|| {
+        let mut app = App::new(RunConfig::defaults());
+        run_with_spinner(
+            &mut app,
+            "x".to_string(),
+            |_| {},
+            || -> () { panic!("boom") },
+        );
+    });
+    assert!(result.is_err());
+}

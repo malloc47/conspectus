@@ -1038,21 +1038,104 @@ fn nudge_daemon(classes: &[&str]) -> Result<(), String> {
     Ok(())
 }
 
-/// Blocking refresh after Conspectus changed a tmux session (launch,
-/// rename): nudge the daemon, then reload. Without the nudge the
-/// reload returns the daemon's pre-hand-off snapshot. Returns from an
-/// attach refresh in the background instead (`Msg::HandoffReturned`,
-/// ADR 0108).
-pub(super) fn refresh_after_mux_handoff(app: &mut App, seed: &RunConfig) {
-    match nudge_daemon_live_classes() {
-        Ok(()) => refresh(app, seed),
-        Err(message) => {
-            let mut config = app.config().clone();
-            config.refresh = true;
-            refresh_with_config(app, &config);
-            app.report(crate::tui::messages::LogEntry::warning(message));
-        }
+/// Blocking refresh after Conspectus changed a tmux session (rename):
+/// nudge the daemon, then reload. Without the nudge the reload
+/// returns the daemon's pre-hand-off snapshot. Returns from an attach
+/// refresh in the background instead (`Msg::HandoffReturned`, ADR
+/// 0108), and launches refresh through
+/// [`refresh_after_launch_with_spinner`] (ADR 0127).
+pub(super) fn refresh_after_mux_handoff(app: &mut App, _seed: &RunConfig) {
+    let fetched = fetch_after_mux_handoff(app.config().clone());
+    apply_handoff_refresh(app, fetched);
+}
+
+/// What a nudged reload produced, ready to apply on the UI thread.
+struct HandoffRefresh {
+    snapshot: Result<crate::model::GraphSnapshot>,
+    /// Why the daemon nudge failed; the snapshot is then a local
+    /// rebuild.
+    warning: Option<String>,
+}
+
+/// Nudge the daemon, then load a snapshot. Touches no UI state, so it
+/// can run on a worker thread.
+fn fetch_after_mux_handoff(mut config: RunConfig) -> HandoffRefresh {
+    let warning = nudge_daemon_live_classes().err();
+    if warning.is_some() {
+        config.refresh = true;
     }
+    HandoffRefresh {
+        snapshot: discover_and_resolve(&config),
+        warning,
+    }
+}
+
+fn apply_handoff_refresh(app: &mut App, fetched: HandoffRefresh) {
+    let config = app.config().clone();
+    apply_discovery(app, &config, fetched.snapshot);
+    if let Some(message) = fetched.warning {
+        app.report(crate::tui::messages::LogEntry::warning(message));
+    }
+}
+
+/// Pause between redraws while [`run_with_spinner`] waits on its
+/// worker; well under one spinner frame.
+const SPINNER_REDRAW: Duration = Duration::from_millis(50);
+
+/// Run `work` on a worker thread while `draw` keeps repainting `app`
+/// with a status-bar spinner chip labelled `label`. Used for the
+/// launch steps that run before an attach, where the UI thread would
+/// otherwise sit on a frozen or blank screen (ADR 0127).
+pub(super) fn run_with_spinner<T: Send + 'static>(
+    app: &mut App,
+    label: String,
+    mut draw: impl FnMut(&mut App),
+    work: impl FnOnce() -> T + Send + 'static,
+) -> T {
+    app.update(Msg::InFlightStart {
+        kind: crate::tui::app::InFlightKind::Launch,
+        label,
+    });
+    let worker = std::thread::spawn(work);
+    loop {
+        draw(app);
+        if worker.is_finished() {
+            break;
+        }
+        std::thread::sleep(SPINNER_REDRAW);
+    }
+    app.update(Msg::InFlightFinish(crate::tui::app::InFlightKind::Launch));
+    match worker.join() {
+        Ok(value) => value,
+        Err(panic) => std::panic::resume_unwind(panic),
+    }
+}
+
+/// [`run_with_spinner`] drawing to the live terminal.
+pub(super) fn run_with_terminal_spinner<T: Send + 'static>(
+    terminal: &mut DefaultTerminal,
+    app: &mut App,
+    label: String,
+    work: impl FnOnce() -> T + Send + 'static,
+) -> T {
+    run_with_spinner(
+        app,
+        label,
+        |app| {
+            let _ = draw_frame(app, terminal);
+        },
+        work,
+    )
+}
+
+/// The refresh a launch runs before it attaches: the same nudge and
+/// reload as [`refresh_after_mux_handoff`], behind a spinner.
+pub(super) fn refresh_after_launch_with_spinner(terminal: &mut DefaultTerminal, app: &mut App) {
+    let config = app.config().clone();
+    let fetched = run_with_terminal_spinner(terminal, app, "Refreshing".to_string(), move || {
+        fetch_after_mux_handoff(config)
+    });
+    apply_handoff_refresh(app, fetched);
 }
 
 /// Run discovery and resolver on the calling thread, returning the
@@ -1741,7 +1824,15 @@ fn pin_mutation_refresh_config(app: &App) -> RunConfig {
 }
 
 fn refresh_with_config(app: &mut App, config: &RunConfig) {
-    match discover_and_resolve(config) {
+    apply_discovery(app, config, discover_and_resolve(config));
+}
+
+fn apply_discovery(
+    app: &mut App,
+    config: &RunConfig,
+    discovered: Result<crate::model::GraphSnapshot>,
+) {
+    match discovered {
         Ok(snapshot) => {
             // Build against `App`'s projection state (ADR 0085
             // contract 4). This is a synchronous refresh so no App

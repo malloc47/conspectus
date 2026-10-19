@@ -378,13 +378,13 @@ pub(super) fn execute_exec_spec(
             pin_id,
             attach_target,
         } => {
-            execute_launch_pin(terminal, app, config, &pin_id, attach_target.as_ref());
+            execute_launch_pin(terminal, app, &pin_id, attach_target.as_ref());
         }
         ExecSpec::MuxNew { name, cwd } => {
-            execute_mux_new(terminal, app, config, &name, &cwd);
+            execute_mux_new(terminal, app, &name, &cwd);
         }
         ExecSpec::MuxLaunch { request } => {
-            execute_mux_launch(terminal, app, config, request);
+            execute_mux_launch(terminal, app, request);
         }
     }
 }
