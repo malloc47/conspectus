@@ -719,7 +719,7 @@ fn which(program: &str) -> PathBuf {
 const SHIMS: &[(&str, &str)] = &[
     (
         "gh",
-        "case \"$1 $2\" in\n  \"pr list\") echo '[]' ;;\n  \"pr view\") echo '{}' ;;\nesac\n",
+        "case \"$1 $2\" in\n  \"pr list\") echo '[]' ;;\n  \"pr view\") echo '{}' ;;\n  \"auth status\") echo '{\"hosts\":{}}' ;;\nesac\n",
     ),
     (
         "tmux",

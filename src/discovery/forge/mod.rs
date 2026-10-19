@@ -203,6 +203,15 @@ pub(crate) struct RemoteListing {
 #[derive(Debug, Default)]
 pub(crate) struct ForgeListings {
     slots: Mutex<HashMap<String, RemoteListing>>,
+    hosts: Mutex<Option<SignedInHosts>>,
+}
+
+/// The hosts `gh` reported it is signed in to, and when it said so
+/// (ADR 0128).
+#[derive(Clone, Debug)]
+struct SignedInHosts {
+    fetched: Instant,
+    hosts: Vec<String>,
 }
 
 impl ForgeListings {
@@ -228,10 +237,33 @@ impl ForgeListings {
         self.lock().insert(remote, listing);
     }
 
-    /// Forget every listing, so the next discovery asks every remote
-    /// again: the TUI's hard refresh and the daemon's forge cycle.
+    /// The signed-in hosts if they may be reused under `max_age`. An
+    /// empty answer is reused for at most [`FORGE_RETRY_AFTER`], so a
+    /// sign-in made after startup shows up without waiting an hour.
+    pub(crate) fn fresh_hosts(&self, max_age: Duration) -> Option<Vec<String>> {
+        let slot = self.hosts.lock().unwrap_or_else(PoisonError::into_inner);
+        let known = slot.as_ref()?;
+        let max_age = if known.hosts.is_empty() {
+            max_age.min(FORGE_RETRY_AFTER)
+        } else {
+            max_age
+        };
+        (known.fetched.elapsed() < max_age).then(|| known.hosts.clone())
+    }
+
+    pub(crate) fn set_hosts(&self, hosts: Vec<String>) {
+        *self.hosts.lock().unwrap_or_else(PoisonError::into_inner) = Some(SignedInHosts {
+            fetched: Instant::now(),
+            hosts,
+        });
+    }
+
+    /// Forget every listing and the signed-in hosts, so the next
+    /// discovery asks every remote again: the TUI's hard refresh and
+    /// the daemon's forge cycle.
     pub(crate) fn clear(&self) {
         self.lock().clear();
+        *self.hosts.lock().unwrap_or_else(PoisonError::into_inner) = None;
     }
 
     fn lock(&self) -> MutexGuard<'_, HashMap<String, RemoteListing>> {
@@ -288,6 +320,13 @@ pub trait GhRunner: Send + Sync {
     /// `repo` is `[HOST/]OWNER/REPO`. Success carries the JSON object
     /// in [`GhOutcome::PullRequests`].
     fn view_pull_request(&self, repo: &str, number: u64, fields: &str) -> Result<GhOutcome>;
+
+    /// The hosts `gh` is signed in to, from `gh auth status --json
+    /// hosts` (ADR 0128). Best effort: any failure yields no hosts,
+    /// which leaves discovery on the built-in host names.
+    fn authenticated_hosts(&self) -> Vec<String> {
+        Vec::new()
+    }
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -376,6 +415,32 @@ impl GhRunner for SystemGh {
             None,
         )
     }
+
+    fn authenticated_hosts(&self) -> Vec<String> {
+        match self.run(&["auth", "status", "--json", "hosts"], None) {
+            Ok(GhOutcome::PullRequests(body)) => parse_authenticated_hosts(&body),
+            _ => Vec::new(),
+        }
+    }
+}
+
+/// The host names in `gh auth status --json hosts` output: the keys of
+/// its `hosts` object, lower-cased. Anything else yields none.
+pub(crate) fn parse_authenticated_hosts(body: &str) -> Vec<String> {
+    let Ok(value) = serde_json::from_str::<serde_json::Value>(body) else {
+        return Vec::new();
+    };
+    let Some(hosts) = value.get("hosts").and_then(serde_json::Value::as_object) else {
+        return Vec::new();
+    };
+    let mut hosts: Vec<String> = hosts
+        .keys()
+        .map(|host| host.trim().to_ascii_lowercase())
+        .filter(|host| !host.is_empty())
+        .collect();
+    hosts.sort();
+    hosts.dedup();
+    hosts
 }
 
 impl SystemGh {
@@ -463,6 +528,8 @@ fn looks_like_not_a_repo(stderr: &str) -> bool {
 pub struct FakeGh {
     outcome: GhOutcome,
     last_repo: std::sync::Arc<std::sync::Mutex<Option<String>>>,
+    hosts: Vec<String>,
+    host_lookups: std::sync::Arc<std::sync::atomic::AtomicUsize>,
 }
 
 impl FakeGh {
@@ -470,6 +537,8 @@ impl FakeGh {
         Self {
             outcome: GhOutcome::PullRequests(stdout.into()),
             last_repo: Default::default(),
+            hosts: Vec::new(),
+            host_lookups: Default::default(),
         }
     }
 
@@ -477,6 +546,8 @@ impl FakeGh {
         Self {
             outcome: GhOutcome::Unavailable(reason),
             last_repo: Default::default(),
+            hosts: Vec::new(),
+            host_lookups: Default::default(),
         }
     }
 
@@ -487,7 +558,21 @@ impl FakeGh {
                 message: message.into(),
             },
             last_repo: Default::default(),
+            hosts: Vec::new(),
+            host_lookups: Default::default(),
         }
+    }
+
+    /// Hosts this fake reports `gh` as signed in to (ADR 0128).
+    pub fn with_hosts(mut self, hosts: &[&str]) -> Self {
+        self.hosts = hosts.iter().map(ToString::to_string).collect();
+        self
+    }
+
+    /// How many times [`GhRunner::authenticated_hosts`] has run, across
+    /// clones.
+    pub fn host_lookups(&self) -> usize {
+        self.host_lookups.load(std::sync::atomic::Ordering::SeqCst)
     }
 
     /// Most-recent repo passed to [`GhRunner::list_pull_requests`].
@@ -511,6 +596,12 @@ impl GhRunner for FakeGh {
     fn view_pull_request(&self, _repo: &str, _number: u64, _fields: &str) -> Result<GhOutcome> {
         Ok(self.outcome.clone())
     }
+
+    fn authenticated_hosts(&self) -> Vec<String> {
+        self.host_lookups
+            .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        self.hosts.clone()
+    }
 }
 
 impl GhRunner for Box<dyn GhRunner> {
@@ -525,6 +616,10 @@ impl GhRunner for Box<dyn GhRunner> {
 
     fn view_pull_request(&self, repo: &str, number: u64, fields: &str) -> Result<GhOutcome> {
         (**self).view_pull_request(repo, number, fields)
+    }
+
+    fn authenticated_hosts(&self) -> Vec<String> {
+        (**self).authenticated_hosts()
     }
 }
 

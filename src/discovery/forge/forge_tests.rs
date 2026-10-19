@@ -357,3 +357,50 @@ fn clearing_forgets_every_listing() {
     listings.clear();
     assert!(listings.get("github.com/o/r").is_none());
 }
+
+#[test]
+fn authenticated_hosts_are_the_keys_of_the_hosts_object() {
+    let body = r#"{"hosts":{
+        "git.example.com":[{"state":"success","active":true,"host":"git.example.com"}],
+        "GitHub.com":[{"state":"error","active":true,"host":"github.com"}]
+    }}"#;
+    assert_eq!(
+        parse_authenticated_hosts(body),
+        ["git.example.com", "github.com"]
+    );
+}
+
+#[test]
+fn unusable_authenticated_hosts_output_yields_none() {
+    assert!(parse_authenticated_hosts("").is_empty());
+    assert!(parse_authenticated_hosts("not json").is_empty());
+    assert!(parse_authenticated_hosts(r#"{"hosts":[]}"#).is_empty());
+    assert!(parse_authenticated_hosts(r#"{"other":{}}"#).is_empty());
+    assert!(parse_authenticated_hosts(r#"{"hosts":{}}"#).is_empty());
+}
+
+#[test]
+fn missing_binary_reports_no_authenticated_hosts() {
+    let runner = SystemGh::with_binary("/definitely/not/here/gh");
+    assert!(runner.authenticated_hosts().is_empty());
+}
+
+#[test]
+fn signed_in_hosts_are_reused_unless_expired_and_empty_ones_retry_sooner() {
+    let listings = ForgeListings::default();
+    assert_eq!(listings.fresh_hosts(Duration::from_secs(3600)), None);
+
+    listings.set_hosts(vec!["git.example.com".to_string()]);
+    assert_eq!(
+        listings.fresh_hosts(Duration::from_secs(3600)),
+        Some(vec!["git.example.com".to_string()])
+    );
+    assert_eq!(listings.fresh_hosts(Duration::ZERO), None);
+
+    listings.clear();
+    assert_eq!(listings.fresh_hosts(Duration::from_secs(3600)), None);
+
+    listings.set_hosts(Vec::new());
+    assert!(listings.fresh_hosts(Duration::from_secs(3600)).is_some());
+    assert_eq!(listings.fresh_hosts(Duration::ZERO), None);
+}

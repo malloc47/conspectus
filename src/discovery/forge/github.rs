@@ -452,11 +452,27 @@ fn days_from_civil(year: i64, month: u32, day: u32) -> i64 {
 }
 
 /// Extracted `(host, owner, repo)` triple from a git remote URL, if
-/// the URL points at a GitHub-shaped host. The parser is tolerant: it
+/// the URL points at a built-in GitHub host. The parser is tolerant: it
 /// accepts `https://github.com/owner/repo[.git]`, `git@github.com:owner/repo[.git]`,
 /// and `ssh://git@github.com/owner/repo[.git]`, plus GitHub Enterprise
 /// hosts whose names start with `github.` or end in `.github.com`.
+/// Hosts `gh` is signed in to are recognized through
+/// [`parse_github_remote_with`] (ADR 0128).
 pub fn parse_github_remote(url: &str) -> Option<(String, String, String)> {
+    parse_github_remote_with(url, &GithubHosts::default())
+}
+
+/// [`parse_github_remote`] that also accepts the hosts in `hosts`.
+pub fn parse_github_remote_with(
+    url: &str,
+    hosts: &GithubHosts,
+) -> Option<(String, String, String)> {
+    let remote = parse_remote(url)?;
+    hosts.recognizes(&remote.0).then_some(remote)
+}
+
+/// The `(host, owner, repo)` of a git remote URL, whatever the host.
+fn parse_remote(url: &str) -> Option<(String, String, String)> {
     let trimmed = url.trim();
     if trimmed.is_empty() {
         return None;
@@ -475,10 +491,6 @@ pub fn parse_github_remote(url: &str) -> Option<(String, String, String)> {
         (host.to_string(), path.to_string())
     };
 
-    if !looks_like_github_host(&host) {
-        return None;
-    }
-
     let path = path.trim_start_matches('/');
     let path = path.strip_suffix(".git").unwrap_or(path);
     let mut parts = path.splitn(2, '/');
@@ -488,6 +500,34 @@ pub fn parse_github_remote(url: &str) -> Option<(String, String, String)> {
         return None;
     }
     Some((host, owner.to_string(), repo.to_string()))
+}
+
+/// The hosts whose remotes count as GitHub: the built-in names plus
+/// the hosts `gh` is signed in to (ADR 0128).
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct GithubHosts {
+    signed_in: BTreeSet<String>,
+}
+
+impl GithubHosts {
+    /// The built-in names and `signed_in`, compared case-insensitively.
+    pub fn with_signed_in<I, S>(signed_in: I) -> Self
+    where
+        I: IntoIterator<Item = S>,
+        S: AsRef<str>,
+    {
+        Self {
+            signed_in: signed_in
+                .into_iter()
+                .map(|host| host.as_ref().trim().to_ascii_lowercase())
+                .filter(|host| !host.is_empty())
+                .collect(),
+        }
+    }
+
+    pub fn recognizes(&self, host: &str) -> bool {
+        looks_like_github_host(host) || self.signed_in.contains(&host.to_ascii_lowercase())
+    }
 }
 
 fn split_host_and_path(rest: &str) -> Option<(String, String)> {
@@ -514,17 +554,46 @@ impl<R: GhRunner> GitHubForgeProvider<R> {
         Self { runner }
     }
 
+    /// The hosts whose remotes count as GitHub for `repos`. `gh` is
+    /// asked which hosts it is signed in to only when a repo has a
+    /// remote on a host the built-in names don't cover, and the answer
+    /// is cached with the listings (ADR 0128).
+    fn hosts(&self, repos: &[super::ForgeRepo], context: &DiscoveryContext) -> GithubHosts {
+        let builtin = GithubHosts::default();
+        let has_unfamiliar_host = repos
+            .iter()
+            .flat_map(|repo| &repo.remotes)
+            .filter_map(|remote| parse_remote(&remote.url))
+            .any(|(host, _, _)| !builtin.recognizes(&host));
+        if !has_unfamiliar_host {
+            return builtin;
+        }
+        let cache = &context.caches().forge;
+        let signed_in = cache
+            .fresh_hosts(context.forge_max_age())
+            .unwrap_or_else(|| {
+                let hosts = self.runner.authenticated_hosts();
+                cache.set_hosts(hosts.clone());
+                hosts
+            });
+        GithubHosts::with_signed_in(signed_in)
+    }
+
     /// The listing for every distinct GitHub remote of `repos`: cached
     /// ones while they are fresh (ADR 0116), and the rest fetched now,
     /// a few remotes at a time.
     fn listings(
         &self,
         repos: &[super::ForgeRepo],
+        hosts: &GithubHosts,
         context: &DiscoveryContext,
     ) -> BTreeMap<RemoteSlug, RemoteListing> {
         let cache = &context.caches().forge;
         let max_age = context.forge_max_age();
-        let remotes: BTreeSet<RemoteSlug> = repos.iter().flat_map(github_remotes).collect();
+        let remotes: BTreeSet<RemoteSlug> = repos
+            .iter()
+            .flat_map(|repo| github_remotes(repo, hosts))
+            .collect();
         let mut listings = BTreeMap::new();
         let mut stale = Vec::new();
         for remote in remotes {
@@ -618,16 +687,17 @@ impl<R: GhRunner + 'static> super::ForgeAdapter for GitHubForgeProvider<R> {
         repos: &[super::ForgeRepo],
         context: &DiscoveryContext,
     ) -> Result<GraphFragment> {
-        let listings = self.listings(repos, context);
+        let hosts = self.hosts(repos, context);
+        let listings = self.listings(repos, &hosts, context);
 
         let mut fragments = Vec::new();
         let mut diagnostics: BTreeSet<Diagnostic> = BTreeSet::new();
         for repo in repos {
-            let remotes: BTreeSet<(String, String)> = github_remotes(repo)
+            let remotes: BTreeSet<(String, String)> = github_remotes(repo, &hosts)
                 .into_iter()
                 .map(|(_, owner, name)| (owner.to_ascii_lowercase(), name.to_ascii_lowercase()))
                 .collect();
-            for remote in github_remotes(repo) {
+            for remote in github_remotes(repo, &hosts) {
                 let Some(listing) = listings.get(&remote) else {
                     continue;
                 };
@@ -677,11 +747,11 @@ fn unavailable(reason: String) -> Diagnostic {
 }
 
 /// A repo's distinct GitHub remotes.
-fn github_remotes(repo: &super::ForgeRepo) -> Vec<RemoteSlug> {
+fn github_remotes(repo: &super::ForgeRepo, hosts: &GithubHosts) -> Vec<RemoteSlug> {
     let mut remotes: Vec<RemoteSlug> = repo
         .remotes
         .iter()
-        .filter_map(|remote| parse_github_remote(&remote.url))
+        .filter_map(|remote| parse_github_remote_with(&remote.url, hosts))
         .collect();
     remotes.sort();
     remotes.dedup();
@@ -707,10 +777,9 @@ fn run_bounded<J: Sync, T: Send>(
     results
 }
 
-/// True when `remote_url` names a GitHub host — either the
-/// canonical `github.com` or a Conspectus operator's declared
-/// enterprise host. Only `github.com` is matched today;
-/// enterprise-host routing is a follow-up.
+/// True when `remote_url` names `github.com`. This is the adapter's
+/// static claim; enterprise hosts are recognized at discovery time from
+/// the hosts `gh` is signed in to (ADR 0128).
 fn remote_url_is_github(remote_url: &str) -> bool {
     let lower = remote_url.to_ascii_lowercase();
     // Accept both HTTPS (`https://github.com/o/r`,

@@ -801,3 +801,140 @@ fn reused_prs_carry_the_time_the_forge_answered() {
         .collect();
     assert_eq!(epochs, [Some(42)]);
 }
+
+const ENTERPRISE_HOST: &str = "git.example.com";
+
+fn enterprise_repo() -> ForgeRepo {
+    forge_repo(
+        &[
+            ("origin", "git@git.example.com:me/repo.git"),
+            ("upstream", "git@git.example.com:team/repo.git"),
+        ],
+        &["feature"],
+    )
+}
+
+#[test]
+fn a_signed_in_host_counts_as_github_whatever_its_name() {
+    let url = "git@git.example.com:octo/repo.git";
+    assert!(parse_github_remote(url).is_none());
+    assert!(parse_github_remote_with(url, &GithubHosts::default()).is_none());
+
+    let hosts = GithubHosts::with_signed_in(["Git.Example.com"]);
+    assert_eq!(
+        parse_github_remote_with(url, &hosts),
+        Some((
+            ENTERPRISE_HOST.to_string(),
+            "octo".to_string(),
+            "repo".to_string()
+        ))
+    );
+    assert!(parse_github_remote_with("https://gitlab.com/octo/repo.git", &hosts).is_none());
+}
+
+#[test]
+fn a_remote_on_a_signed_in_enterprise_host_is_queried_by_host() {
+    let body = r#"[{"number": 2, "state": "MERGED", "headRefName": "main"}]"#;
+    let runner = FakeGh::with_pull_requests(body).with_hosts(&[ENTERPRISE_HOST]);
+    let fragment = discover(
+        runner.clone(),
+        &[forge_repo(
+            &[("origin", "git@git.example.com:team/repo.git")],
+            &[],
+        )],
+    );
+    assert_eq!(
+        runner.last_repo().as_deref(),
+        Some("git.example.com/team/repo")
+    );
+    assert_eq!(pr_ids(&fragment), ["team/repo#2"]);
+    let hosts: Vec<&str> = fragment
+        .nodes
+        .iter()
+        .filter_map(|node| match node {
+            GraphNode::ForgePr(pr) => Some(pr.host.as_str()),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(hosts, [ENTERPRISE_HOST]);
+}
+
+#[test]
+fn a_fork_on_an_enterprise_host_queries_origin_and_upstream() {
+    let body = r#"[{"number": 3, "state": "OPEN", "headRefName": "feature",
+                    "headRepositoryOwner": {"login": "me"},
+                    "headRepository": {"name": "repo"}}]"#;
+    let fragment = discover(
+        FakeGh::with_pull_requests(body).with_hosts(&[ENTERPRISE_HOST]),
+        &[enterprise_repo()],
+    );
+    let mut ids = pr_ids(&fragment);
+    ids.sort();
+    assert_eq!(ids, ["me/repo#3", "team/repo#3"]);
+    // The PR from my fork into upstream links to my local branch.
+    assert!(
+        fragment
+            .candidate_links
+            .iter()
+            .all(|link| matches!(link.target, LinkEndpoint::Node { .. })),
+        "{:?}",
+        fragment.candidate_links
+    );
+}
+
+#[test]
+fn a_host_gh_is_not_signed_in_to_is_left_alone_without_a_diagnostic() {
+    let runner = FakeGh::with_pull_requests(r#"[{"number": 1, "headRefName": "main"}]"#)
+        .with_hosts(&["github.com"]);
+    let fragment = discover(runner.clone(), &[enterprise_repo()]);
+    assert!(fragment.nodes.is_empty());
+    assert!(fragment.diagnostics.is_empty());
+    assert_eq!(runner.last_repo(), None, "gh is never asked");
+}
+
+#[test]
+fn a_failed_host_lookup_falls_back_to_the_built_in_hosts() {
+    // The fake reports no hosts, as a missing or old `gh` would.
+    let runner = FakeGh::with_pull_requests(r#"[{"number": 1, "headRefName": "main"}]"#);
+    let fragment = discover(runner.clone(), &[enterprise_repo(), octo("a")]);
+    assert_eq!(pr_ids(&fragment), ["octo/a#1"]);
+    assert_eq!(runner.host_lookups(), 1);
+}
+
+#[test]
+fn hosts_are_not_looked_up_when_every_remote_is_built_in() {
+    let runner = FakeGh::with_pull_requests("[]").with_hosts(&[ENTERPRISE_HOST]);
+    discover(
+        runner.clone(),
+        &[
+            octo("a"),
+            forge_repo(&[("origin", "git@gitlab.com:o/r.git")], &[]),
+        ],
+    );
+    // A GitLab remote has an unfamiliar host, so the lookup runs once;
+    // a machine with only github.com remotes skips it.
+    assert_eq!(runner.host_lookups(), 1);
+
+    let runner = FakeGh::with_pull_requests("[]").with_hosts(&[ENTERPRISE_HOST]);
+    discover(runner.clone(), &[octo("a"), octo("b")]);
+    assert_eq!(runner.host_lookups(), 0);
+}
+
+#[test]
+fn the_host_lookup_is_cached_until_a_hard_refresh() {
+    let runner = FakeGh::with_pull_requests("[]").with_hosts(&[ENTERPRISE_HOST]);
+    let provider = GitHubForgeProvider::with_runner(runner.clone());
+    let context = DiscoveryContext::default();
+    for _ in 0..3 {
+        provider
+            .discover(&[enterprise_repo()], &context)
+            .expect("discover");
+    }
+    assert_eq!(runner.host_lookups(), 1);
+
+    context.caches().clear_forge();
+    provider
+        .discover(&[enterprise_repo()], &context)
+        .expect("after refresh");
+    assert_eq!(runner.host_lookups(), 2);
+}
