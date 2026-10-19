@@ -342,6 +342,10 @@ pub struct PendingHandoff {
     refresh_requested: bool,
 }
 
+/// What the status bar says when an action on a row is refused because
+/// the row still awaits the refresh after a hand-off (ADR 0132).
+pub const HANDOFF_PENDING_HINT: &str = "refreshing after tmux · wait for the row to update";
+
 /// Right-pane graph explorer state. Owns the focused node's view
 /// model, the cursor position within the flat row list, the set of
 /// expanded multi-link groups, and the breadcrumb stack used by
@@ -993,6 +997,23 @@ impl App {
         }
     }
 
+    /// Whether the selected left-pane row still shows values from
+    /// before the pending hand-off (ADR 0132). Besides the rows
+    /// [`Self::row_awaits_handoff`] dims, a mux-candidate child row of
+    /// the hand-off's mux counts: its mux may be gone too.
+    pub fn selected_row_awaits_handoff(&self) -> bool {
+        let (Some(handoff), Some(selection)) = (&self.handoff, &self.selection) else {
+            return false;
+        };
+        let Some(row) = self.tree.rows.iter().find(|row| &row.id == selection) else {
+            return false;
+        };
+        match &row.kind {
+            RowKind::AgentSessionMuxCandidate(candidate) => handoff.muxes.contains(&candidate.mux),
+            kind => self.row_awaits_handoff(kind),
+        }
+    }
+
     /// Agent sessions the loaded snapshot links to `mux`.
     fn sessions_linked_to(&self, mux: &MuxSessionId) -> Vec<AgentSessionId> {
         self.handle
@@ -1431,6 +1452,10 @@ impl App {
             }
             Msg::AttachSelected => {
                 use crate::tui::effect::ExecSpec;
+                if self.selected_row_awaits_handoff() {
+                    effects.push(Effect::Toast(HANDOFF_PENDING_HINT.to_string()));
+                    return effects;
+                }
                 match crate::tui::actions::resolve_attach_target(self) {
                     Ok(target) => effects.push(Effect::Exec(ExecSpec::AttachMux(target))),
                     Err(reason) => effects.push(Effect::Toast(
@@ -1440,6 +1465,10 @@ impl App {
             }
             Msg::ResumeSelected => {
                 use crate::tui::effect::ExecSpec;
+                if self.selected_row_awaits_handoff() {
+                    effects.push(Effect::Toast(HANDOFF_PENDING_HINT.to_string()));
+                    return effects;
+                }
                 let Some(selection) = self.selection.clone() else {
                     effects.push(Effect::Toast("resume: nothing selected".to_string()));
                     return effects;
@@ -1480,6 +1509,10 @@ impl App {
             }
             Msg::LaunchSelectedPin => {
                 use crate::tui::effect::ExecSpec;
+                if self.selected_row_awaits_handoff() {
+                    effects.push(Effect::Toast(HANDOFF_PENDING_HINT.to_string()));
+                    return effects;
+                }
                 match crate::tui::actions::resolve_launch_pin(self) {
                     Ok((pin_id, attach_target)) => {
                         effects.push(Effect::Exec(ExecSpec::LaunchPin {

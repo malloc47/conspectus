@@ -3820,3 +3820,54 @@ fn launch_mark_survives_the_attach_return_until_settled() {
     app.update(Msg::HandoffSettled);
     assert!(app.handoff().is_none());
 }
+
+#[test]
+fn actions_on_a_row_awaiting_the_handoff_refresh_are_refused_until_it_settles() {
+    // ADR 0132: after a detach the mux row shows pre-hand-off values,
+    // so attaching it could fail. The reducer refuses until the
+    // refresh lands.
+    let mut app = app_with_mux_selected(snapshot_session_with_mux(), "work");
+    assert!(!app.selected_row_awaits_handoff());
+    let effects = app.update(Msg::AttachSelected);
+    assert!(
+        matches!(effects.as_slice(), [crate::tui::Effect::Exec(_)]),
+        "attach works before the hand-off: {effects:?}"
+    );
+
+    app.update(Msg::HandoffReturned(crate::model::MuxSessionId::new(
+        "work",
+    )));
+    assert!(app.selected_row_awaits_handoff());
+    let toast = vec![crate::tui::Effect::Toast(
+        crate::tui::app::HANDOFF_PENDING_HINT.to_string(),
+    )];
+    for msg in [
+        Msg::AttachSelected,
+        Msg::ResumeSelected,
+        Msg::LaunchSelectedPin,
+    ] {
+        assert_eq!(app.update(msg), toast);
+    }
+
+    app.update(Msg::HandoffSettled);
+    assert!(!app.selected_row_awaits_handoff());
+    let effects = app.update(Msg::AttachSelected);
+    assert!(
+        matches!(effects.as_slice(), [crate::tui::Effect::Exec(_)]),
+        "attach works once the refresh lands: {effects:?}"
+    );
+}
+
+#[test]
+fn a_handoff_leaves_rows_it_does_not_touch_actionable() {
+    let mut app = app_with_mux_selected(snapshot_session_with_mux(), "work");
+    app.update(Msg::HandoffReturned(crate::model::MuxSessionId::new(
+        "other",
+    )));
+    assert!(!app.selected_row_awaits_handoff());
+    let effects = app.update(Msg::AttachSelected);
+    assert!(
+        matches!(effects.as_slice(), [crate::tui::Effect::Exec(_)]),
+        "{effects:?}"
+    );
+}

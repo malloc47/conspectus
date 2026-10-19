@@ -340,6 +340,14 @@ impl LoopMode for LiveMode {
         action: Option<Action>,
     ) -> Result<()> {
         let tmux = self.tmux.as_ref();
+        if action.as_ref().is_some_and(acts_on_selected_row) && app.selected_row_awaits_handoff() {
+            // The row shows pre-hand-off values: its mux or session may
+            // be gone, so an action on it could fail (ADR 0132).
+            app.update(Msg::SetStatus(Some(
+                crate::tui::app::HANDOFF_PENDING_HINT.to_string(),
+            )));
+            return Ok(());
+        }
         match action {
             Some(Action::Msg(msg)) => dispatch(app, *msg),
             Some(Action::Refresh) => {
@@ -1954,6 +1962,22 @@ pub(super) use crate::tui::keymap::cycle_view;
 /// muxed agent sessions attach; un-muxed agent sessions open the
 /// transcript viewer. Right-pane focus is handled in
 /// [`remap_for_focus`] before this is reached.
+/// Actions that read the selected row's live mux or session and then
+/// change something (rename, worktree, pin edits). The attach, resume,
+/// and launch actions are guarded in the reducer, so `Enter` can still
+/// fold a row that awaits a refresh. Read-only actions stay available.
+fn acts_on_selected_row(action: &Action) -> bool {
+    matches!(
+        action,
+        Action::OpenRename
+            | Action::OpenWorktreeMenu
+            | Action::OpenWorktreeCloseDown
+            | Action::RemovePin
+            | Action::OpenPinRebind
+            | Action::OpenPinAdopt
+    )
+}
+
 fn default_action(
     terminal: &mut DefaultTerminal,
     app: &mut App,

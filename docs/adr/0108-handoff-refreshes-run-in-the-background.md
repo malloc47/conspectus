@@ -3,7 +3,8 @@
 ## Status
 
 Accepted. Amends ADR 0104 (the TUI rescans live classes after tmux
-hand-offs).
+hand-offs). Amended by ADR 0132: the marked rows refuse actions until
+the refresh lands.
 
 ## Context
 

@@ -2202,3 +2202,32 @@ fn spinner_worker_panic_propagates_to_the_caller() {
     });
     assert!(result.is_err());
 }
+
+mod handoff_guard {
+    use super::*;
+
+    #[test]
+    fn row_mutating_actions_are_guarded_and_read_only_ones_are_not() {
+        for action in [
+            Action::OpenRename,
+            Action::OpenWorktreeMenu,
+            Action::OpenWorktreeCloseDown,
+            Action::RemovePin,
+            Action::OpenPinRebind,
+            Action::OpenPinAdopt,
+        ] {
+            assert!(acts_on_selected_row(&action), "{action:?}");
+        }
+        for action in [
+            Action::Refresh,
+            Action::View,
+            Action::CopySessionId,
+            Action::OpenControls,
+            Action::OpenSearch,
+            Action::DefaultAction,
+            Action::Attach,
+        ] {
+            assert!(!acts_on_selected_row(&action), "{action:?}");
+        }
+    }
+}
