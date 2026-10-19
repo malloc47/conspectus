@@ -4898,3 +4898,42 @@ fn mux_rows_keep_pin_and_preview_columns_aligned_across_attach_states() {
         );
     }
 }
+
+#[test]
+fn launch_chip_stays_visible_on_a_narrow_status_bar() {
+    // The chip leads the bar: the hint text is long enough to push a
+    // trailing chip off the right edge of any terminal under ~190
+    // columns.
+    for width in [60u16, 80, 100, 120] {
+        let mut app = seeded_app();
+        app.update(Msg::InFlightStart {
+            kind: crate::tui::app::InFlightKind::Launch,
+            label: "Launching dek-serve".to_string(),
+        });
+        app.update(Msg::SetStatus(None));
+        let buffer = render_to_buffer(&mut app, Rect::new(0, 0, width, 24));
+        let text = buffer_to_string(&buffer);
+        let status_line = text.lines().last().unwrap_or("");
+        assert!(
+            status_line.contains("Launching dek-serve"),
+            "chip should lead the status bar at width {width}: {status_line}"
+        );
+    }
+}
+
+#[test]
+fn launch_chip_shows_alongside_a_status_message() {
+    let mut app = seeded_app();
+    app.update(Msg::InFlightStart {
+        kind: crate::tui::app::InFlightKind::Launch,
+        label: "Launching dek-serve".to_string(),
+    });
+    app.update(Msg::SetStatus(Some("pin `dek-serve` queued".to_string())));
+    let buffer = render_to_buffer(&mut app, Rect::new(0, 0, 100, 24));
+    let text = buffer_to_string(&buffer);
+    let status_line = text.lines().last().unwrap_or("");
+    assert!(
+        status_line.contains("Launching dek-serve") && status_line.contains("queued"),
+        "chip and message should both render: {status_line}"
+    );
+}

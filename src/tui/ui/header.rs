@@ -184,6 +184,7 @@ pub(super) fn draw_status_bar(app: &App, frame: &mut Frame<'_>, area: Rect) {
     if let Some(message) = app.status_message() {
         let mut spans = Vec::new();
         push_unseen_messages_chip(app, theme, &mut spans);
+        push_in_flight_chips(app, theme, &mut spans);
         spans.push(span!(Style::default().fg(theme.warning); "{message}"));
         frame.render_widget(Paragraph::new(Line::from(spans)), area);
         return;
@@ -200,13 +201,12 @@ pub(super) fn draw_status_bar(app: &App, frame: &mut Frame<'_>, area: Rect) {
 
     let mut spans = Vec::new();
     push_unseen_messages_chip(app, theme, &mut spans);
+    push_in_flight_chips(app, theme, &mut spans);
     spans.extend([
         span!(theme.placeholder; "{scope} "),
         span!(Style::default().fg(theme.cwd_mark); "{settings}"),
         span!(theme.placeholder; " · {hints}"),
     ]);
-
-    push_in_flight_chips(app, theme, &mut spans);
 
     if stale {
         spans.push(span!(
@@ -255,7 +255,9 @@ pub(super) fn spinner_glyph(started_at: std::time::Instant) -> &'static str {
 /// Each chip shows a Braille spinner glyph advanced by wall-clock
 /// elapsed time plus the op's label. The runtime redraws at least
 /// every ~100ms via the poll timeout, so the spinner animates at a
-/// natural cadence without a separate tick source.
+/// natural cadence without a separate tick source. The chips lead
+/// the bar, like the unseen-messages chip, so long hints can't push
+/// them off screen (ADR 0127).
 pub(super) fn push_in_flight_chips(app: &App, theme: &Theme, spans: &mut Vec<Span<'static>>) {
     let ops = app.in_flight_ops();
     if ops.is_empty() {
@@ -265,8 +267,8 @@ pub(super) fn push_in_flight_chips(app: &App, theme: &Theme, spans: &mut Vec<Spa
         .fg(theme.panel_focus_accent)
         .add_modifier(Modifier::BOLD);
     for op in ops {
-        spans.push(Span::raw("  "));
         spans.push(span!(style; "{} {}", spinner_glyph(op.started_at), op.label));
+        spans.push(Span::raw("  "));
     }
 }
 

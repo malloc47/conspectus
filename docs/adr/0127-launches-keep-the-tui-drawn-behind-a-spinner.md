@@ -46,7 +46,14 @@ screen to say the launch is happening.
    the UI thread afterwards (`apply_handoff_refresh`). The synchronous
    `refresh_after_mux_handoff` (used by renames) is the same two steps
    run back to back.
-4. **Order is unchanged.** The refresh still finishes before the
+4. **In-flight chips lead the status bar.** The chips used to trail
+   the hint text, which is long enough to push them off the right
+   edge of any terminal under about 190 columns, so the first version
+   of this change showed no spinner on a typical terminal. They now
+   sit right after the unseen-messages chip (ADR 0105), and they also
+   render while a status message replaces the hints. This moves the
+   discovery chip too.
+5. **Order is unchanged.** The refresh still finishes before the
    attach, so the failure checks and log entries read the same state
    as before.
 
