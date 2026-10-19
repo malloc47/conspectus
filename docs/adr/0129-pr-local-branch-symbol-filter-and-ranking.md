@@ -5,7 +5,8 @@
 Accepted. Amends ADR 0114 (the `repo` grouping's "No local repo" group)
 and extends ADR 0031 (the per-view filter and the Controls overlay).
 Amended by ADR 0130: the config keys and the `checkout` grouping, which
-this ADR left alone, are covered there.
+this ADR left alone, are covered there. Amended by ADR 0131: the marker
+follows the PR number instead of the kind glyph.
 
 ## Context
 

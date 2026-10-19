@@ -202,3 +202,4 @@ How the project is built, tested, tracked, and shipped, including the agent-orie
 | [0128](0128-github-hosts-gh-is-signed-in-to.md) | Forge Discovery Queries The GitHub Hosts `gh` Is Signed In To | Accepted |
 | [0129](0129-pr-local-branch-symbol-filter-and-ranking.md) | PRs Show Whether They Have A Local Branch, With A Filter And A Ranking | Accepted |
 | [0130](0130-pr-config-keys-and-no-checkout-catch-all.md) | PR Tracking Config Keys, And No "No checkout" Catch-All | Accepted |
+| [0131](0131-pr-titles-and-the-pr-row-layout.md) | PR Titles And The PR Row Layout | Accepted |

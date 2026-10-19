@@ -865,7 +865,10 @@ nowhere sit under their repo, labelled `no checkout` (ADR 0114, 0130). Each PR
 row carries a marker for whether it has a local branch (`⎇`) or not (dim `◌`);
 the Controls overlay can show only PRs with or without one and float those
 with one to the top (settable from config), and `repo` grouping files every PR
-under its local repo (ADR 0129, 0130).
+under its local repo (ADR 0129, 0130). A PR row reads number, marker, state,
+age, then the local branch and the PR title (from the forge listing) in the
+space left; a group of one forge repo names its `owner/repo` so rows show only
+`#N` (ADR 0131).
 
 The sessions view defaults to `grouping = "graph"` so the primary switcher
 shows the richer topology: it includes workspace containment when known and

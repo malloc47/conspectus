@@ -40,7 +40,9 @@ scriptable tables, and exports on top of it. See the
   grouping for sessions and checkout/repo/state grouping for PRs, where
   a marker shows whether each PR has a local branch, a filter and
   ranking (also settable from config) can include, exclude, or float
-  those that do, and PRs checked out nowhere sit under their repo;
+  those that do, PRs checked out nowhere sit under their repo, and each
+  row shows its number, state, age, and title in aligned columns under a
+  group that names the `owner/repo`;
   filters and search; a relationship explorer with one row per
   neighbor, drill-down, and breadcrumbs; a native transcript viewer for
   Claude Code, Codex, and opencode; menu-first controls; and
