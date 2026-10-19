@@ -3,7 +3,9 @@
 ## Status
 
 Accepted. Amends ADR 0031 §4 (the PRs view's groupings and default)
-and reverses `CSP-501`'s hide for the PRs view only.
+and reverses `CSP-501`'s hide for the PRs view only. Amended by ADR
+0129: the `repo` grouping no longer has a "No local repo" group; every PR
+is filed under its repo.
 
 ## Context
 

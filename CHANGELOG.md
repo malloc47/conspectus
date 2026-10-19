@@ -37,7 +37,9 @@ scriptable tables, and exports on top of it. See the
   working directories.
 - **Interactive TUI** (`conspectus` or `conspectus tui`): Sessions,
   Mux, and PRs views (`1`/`2`/`3`), with graph/workspace/repo/checkout/flat
-  grouping for sessions and checkout/repo/state grouping for PRs;
+  grouping for sessions and checkout/repo/state grouping for PRs, where
+  a marker shows whether each PR has a local branch and a filter and
+  ranking can include, exclude, or float those that do;
   filters and search; a relationship explorer with one row per
   neighbor, drill-down, and breadcrumbs; a native transcript viewer for
   Claude Code, Codex, and opencode; menu-first controls; and

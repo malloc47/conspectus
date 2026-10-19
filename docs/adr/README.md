@@ -200,3 +200,4 @@ How the project is built, tested, tracked, and shipped, including the agent-orie
 | [0126](0126-opencode-2-pane-attribution.md) | OpenCode 2.x Session-To-Pane Attribution | Accepted |
 | [0127](0127-launches-keep-the-tui-drawn-behind-a-spinner.md) | Launches Keep The TUI Drawn Behind A Spinner | Accepted |
 | [0128](0128-github-hosts-gh-is-signed-in-to.md) | Forge Discovery Queries The GitHub Hosts `gh` Is Signed In To | Accepted |
+| [0129](0129-pr-local-branch-symbol-filter-and-ranking.md) | PRs Show Whether They Have A Local Branch, With A Filter And A Ranking | Accepted |
