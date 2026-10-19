@@ -246,7 +246,7 @@ about what is linked to what. See the
 | Terminal multiplexers | tmux; zellij (discovery and attach only) | Sessions, working directories, activity, attached clients, and pane process trees. |
 | Version control | git | Repos, checkouts, linked worktrees (including worktrees of bare repos), branches, remotes, and upstreams. |
 | Workspaces | Atelier, [agent-deck](https://github.com/asheshgoplani/agent-deck), and generic multi-repo roots | Workspace membership, plus fork provenance from Atelier. |
-| Forges | GitHub, via the `gh` CLI | Open pull requests and the last 30 days of PR history for every GitHub remote of every discovered repo, including a fork's upstream. A PR links to a local branch when its head is one of the repo's remotes. A GitLab adapter exists only as a stub. |
+| Forges | GitHub, via the `gh` CLI | Open pull requests and the last 30 days of PR history for every GitHub remote of every discovered repo, including a fork's upstream and remotes on GitHub Enterprise hosts `gh` is signed in to. A PR links to a local branch when its head is one of the repo's remotes. A GitLab adapter exists only as a stub. |
 | Harness hooks (optional) | Claude Code, Codex, and Pi (`conspectus hook init`), plus an [opencode plugin](plugins/opencode-hook/) | The harness's current session id, which sharpens tmux attribution. |
 
 Discovery starts from the current directory (or the `--scan-root` paths you
@@ -260,7 +260,8 @@ rest: when discovery starts, then once an hour (`[server.intervals] forge`),
 or on demand with `Ctrl-R` in the TUI. A failed query surfaces as a
 diagnostic on the forge status chip
 ([ADR 0115](docs/adr/0115-forge-discovery-over-discovered-repos.md),
-[0116](docs/adr/0116-lazy-forge-cadence-and-hard-refresh.md)).
+[0116](docs/adr/0116-lazy-forge-cadence-and-hard-refresh.md),
+[0128](docs/adr/0128-github-hosts-gh-is-signed-in-to.md)).
 
 ## Quick start
 

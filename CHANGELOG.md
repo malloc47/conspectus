@@ -21,8 +21,9 @@ scriptable tables, and exports on top of it. See the
   agent-deck, and generic multi-repo workspaces; and GitHub pull
   requests through `gh`: open PRs and the last 30 days of history for
   every GitHub remote of every discovered repo, including a fork's
-  upstream, linked to a local branch when the PR's head is one of the
-  repo's remotes. Forge failures surface as diagnostics.
+  upstream and remotes on any GitHub Enterprise host `gh` is signed in
+  to, linked to a local branch when the PR's head is one of the repo's
+  remotes. Forge failures surface as diagnostics.
 - **Evidence-preserving resolution.** Every relationship is a
   `GraphLink` candidate with provenance, confidence, and freshness; the
   resolver picks preferred links and keeps the rest, so ambiguity and

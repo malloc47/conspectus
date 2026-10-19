@@ -62,11 +62,11 @@ dev = [
 ]
 
 [programs.gh]
-adr = ["0011", "0112", "0115", "0116"]
+adr = ["0011", "0112", "0115", "0116", "0128"]
 names = ["gh"]
 # The only program that reaches the network.
 network = true
-read = ["pr list ...", "pr view ..."]
+read = ["pr list ...", "pr view ...", "auth status ..."]
 
 [programs.tmux]
 adr = ["0006", "0057", "0087", "0093", "0108"]
