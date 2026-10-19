@@ -190,7 +190,10 @@ teardown_grace = "3s"
 - **Filters:** `filters` takes one inline table or an array of tables
   (`[[tui.views.<name>.filters]]`); entries OR together per dimension.
   `max_age` accepts `s`, `m`, `h`, and `d` suffixes; `mux_state` values are
-  `attached`, `ambiguous`, and `unmuxed`.
+  `attached`, `ambiguous`, and `unmuxed`. For the PRs view, `pr_branch` takes
+  `tracked` and/or `untracked` to keep only PRs with or without a local branch
+  (both, or neither, keeps every PR), and `float_tracked_prs_top = true` lists
+  PRs with a local branch first (ADR 0129, 0130).
 - **Durations** in `[server.intervals]` and `teardown_grace` use
   `<integer><ms|s|m|h>`.
 - **Forge cadence (ADR 0116):** each GitHub remote's PR listing is fetched

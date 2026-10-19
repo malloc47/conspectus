@@ -574,6 +574,64 @@ fn tui_views_filter_invalid_mux_state_emits_diagnostic() {
     );
 }
 
+fn prs_filter_from(config: &str) -> (RowFilter, Vec<String>) {
+    let temp = TempDir::new().expect("temp dir");
+    let project = temp.path().join("project");
+    fs::create_dir(&project).expect("create project dir");
+    write_file(&project.join(PROJECT_CONFIG_FILENAME), config);
+    let loader = ConfigLoader::new().with_home(temp.path());
+    let outcome = loader.load_from(&project);
+    let messages = outcome
+        .diagnostics
+        .iter()
+        .map(|diagnostic| diagnostic.message.clone())
+        .collect();
+    (outcome.config.tui.views.prs.filter, messages)
+}
+
+#[test]
+fn tui_views_filters_set_the_pr_branch_filter_and_float() {
+    let (filter, diagnostics) = prs_filter_from(
+        "[tui.views.prs]\nfilters = { pr_branch = [\"Untracked\"], float_tracked_prs_top = true }\n",
+    );
+    assert!(diagnostics.is_empty(), "{diagnostics:?}");
+    assert_eq!(filter.pr_branch, Some(PrBranchFilter::Untracked));
+    assert!(filter.float_tracked_prs_top);
+
+    // Unset keys leave every PR visible and unranked.
+    let (filter, _) = prs_filter_from("[tui.views.prs]\nfilters = { max_age = \"7d\" }\n");
+    assert_eq!(filter.pr_branch, None);
+    assert!(!filter.float_tracked_prs_top);
+}
+
+#[test]
+fn tui_views_filters_pr_branch_entries_or_together() {
+    // Tracked OR untracked admits every PR; a float in any entry wins.
+    let (filter, diagnostics) = prs_filter_from(
+        "[[tui.views.prs.filters]]\npr_branch = [\"tracked\"]\n\
+         [[tui.views.prs.filters]]\npr_branch = [\"untracked\"]\nfloat_tracked_prs_top = true\n",
+    );
+    assert!(diagnostics.is_empty(), "{diagnostics:?}");
+    assert_eq!(filter.pr_branch, None);
+    assert!(filter.float_tracked_prs_top);
+
+    let (filter, _) = prs_filter_from(
+        "[[tui.views.prs.filters]]\npr_branch = [\"tracked\"]\n\
+         [[tui.views.prs.filters]]\npr_branch = [\"tracked\"]\n",
+    );
+    assert_eq!(filter.pr_branch, Some(PrBranchFilter::Tracked));
+}
+
+#[test]
+fn tui_views_filter_invalid_pr_branch_emits_diagnostic_and_keeps_valid_values() {
+    let (filter, diagnostics) =
+        prs_filter_from("[tui.views.prs]\nfilters = { pr_branch = [\"tracked\", \"both\"] }\n");
+    assert_eq!(diagnostics.len(), 1, "{diagnostics:?}");
+    assert!(diagnostics[0].contains("invalid `[tui.views.prs.filters].pr_branch` value `both`"));
+    assert!(diagnostics[0].contains("tracked, untracked"));
+    assert_eq!(filter.pr_branch, Some(PrBranchFilter::Tracked));
+}
+
 #[test]
 fn legacy_sessions_grouping_seeds_new_key_with_deprecation_diagnostic() {
     let temp = TempDir::new().expect("temp dir");

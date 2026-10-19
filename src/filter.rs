@@ -112,7 +112,7 @@ impl RowFilter {
 
 /// Which PRs the PRs view keeps, by whether the PR resolves to a
 /// local branch (ADR 0129).
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum PrBranchFilter {
     Tracked,
