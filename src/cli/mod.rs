@@ -459,6 +459,10 @@ pub(super) struct FilterArgs {
     /// Legal values: `attached`, `ambiguous`, `unmuxed`.
     #[arg(long = "mux-state", value_name = "STATE", value_delimiter = ',')]
     mux_state: Vec<String>,
+    /// PRs view: keep only PRs that have (`tracked`) or lack
+    /// (`untracked`) a local branch.
+    #[arg(long = "pr-branch", value_name = "STATE")]
+    pr_branch: Option<String>,
     /// Grouping for the view or row type. Valid values differ per
     /// view; an invalid value errors with the list of valid ones.
     #[arg(long = "grouping", value_name = "VALUE")]
@@ -470,7 +474,9 @@ impl FilterArgs {
     /// Returns an error when a value fails to parse (max-age
     /// duration, mux-state spelling).
     pub(super) fn to_row_filter(&self) -> Result<crate::filter::RowFilter> {
-        use crate::filter::{HarnessFilter, MuxStateFilter, MuxStateKey, RowFilter};
+        use crate::filter::{
+            HarnessFilter, MuxStateFilter, MuxStateKey, PrBranchFilter, RowFilter,
+        };
         let harness = if self.harness.is_empty() {
             None
         } else {
@@ -497,10 +503,17 @@ impl FilterArgs {
             }
             Some(MuxStateFilter::from_values(keys))
         };
+        let pr_branch = match self.pr_branch.as_deref() {
+            Some(raw) => Some(PrBranchFilter::from_str_ci(raw).ok_or_else(|| {
+                anyhow!("invalid --pr-branch `{raw}`; expected one of tracked, untracked")
+            })?),
+            None => None,
+        };
         Ok(RowFilter {
             harness,
             max_age,
             mux_state,
+            pr_branch,
             ..RowFilter::default()
         })
     }

@@ -24,7 +24,7 @@ impl App {
             RowId::Pr(node) => Some(node.clone()),
             RowId::Fork(node) => Some(node.clone()),
             RowId::Pin { pin_id } => Some(NodeId::Pin(PinId::new(pin_id.clone()))),
-            RowId::Synthetic(_) => None,
+            RowId::Remote(_) | RowId::Synthetic(_) => None,
         };
         let Some(raw_target) = raw_target else {
             self.explorer = None;

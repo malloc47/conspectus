@@ -1739,6 +1739,7 @@ fn forge_pr_glyph_span_picks_color_from_pr_state() {
         state: Some("open".into()),
         is_draft: false,
         branch_name: None,
+        tracked: false,
         updated_recency: None,
         attached_count: 0,
         url: None,
@@ -1783,6 +1784,47 @@ fn forge_pr_glyph_span_picks_color_from_pr_state() {
     // Glyph itself stays the `NodeKind::ForgePr` slate glyph
     // regardless of color.
     assert_eq!(forge_pr_glyph_span(&base, &theme).content, "⇄ ");
+}
+
+#[test]
+fn pr_tracking_span_tells_a_local_branch_from_none() {
+    // ADR 0129: the Branch glyph in the branch color for a PR with a
+    // local branch, a dim hollow circle for one without. Both are two
+    // cells so the repo text stays in one column.
+    use crate::tui::rows::PrRow;
+    let theme = Theme::default();
+    let untracked = PrRow {
+        pr_number: 1,
+        repo_display: "owner/repo#1".into(),
+        state: Some("open".into()),
+        is_draft: false,
+        branch_name: None,
+        tracked: false,
+        updated_recency: None,
+        attached_count: 0,
+        url: None,
+        primary_node: NodeId::ForgePr(crate::model::ForgePrId::new(
+            "github",
+            "github.com",
+            "owner",
+            "repo",
+            1,
+        )),
+    };
+    let tracked = PrRow {
+        tracked: true,
+        branch_name: Some("feature/x".into()),
+        ..untracked.clone()
+    };
+
+    let none = pr_tracking_span(&untracked, &theme);
+    assert_eq!(none.content, "◌ ");
+    assert!(none.style.add_modifier.contains(theme.placeholder));
+
+    let some = pr_tracking_span(&tracked, &theme);
+    assert_eq!(some.content, "⎇ ");
+    assert_eq!(some.style.fg, Some(theme.node_branch));
+    assert_eq!(some.width(), none.width());
 }
 
 #[test]

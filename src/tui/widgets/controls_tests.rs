@@ -551,3 +551,110 @@ fn modal_height_budget_covers_the_tallest_body() {
         );
     }
 }
+
+#[test]
+fn pr_branch_rows_only_appear_on_the_prs_view() {
+    let filter = RowFilter::default();
+    for view in [View::Sessions, View::Mux, View::Union, View::Forks] {
+        let rows = flatten_rows(&ctx_with(
+            view,
+            Grouping::default_for(view),
+            &filter,
+            Sort::Hierarchy,
+        ));
+        assert!(!rows.contains(&ControlsCursor::FilterPrBranch));
+        assert!(!rows.contains(&ControlsCursor::FilterFloatTrackedPrs));
+    }
+    let rows = flatten_rows(&ctx_with(
+        View::Prs,
+        Grouping::default_for(View::Prs),
+        &filter,
+        Sort::Hierarchy,
+    ));
+    let at = |cursor| rows.iter().position(|row| *row == cursor).expect("row");
+    assert_eq!(
+        at(ControlsCursor::FilterFloatTrackedPrs),
+        at(ControlsCursor::FilterPrBranch) + 1
+    );
+    assert_eq!(
+        at(ControlsCursor::FilterClear),
+        at(ControlsCursor::FilterFloatTrackedPrs) + 1
+    );
+}
+
+fn prs_ctx(filter: &RowFilter) -> ControlsContext<'_> {
+    ctx_with(
+        View::Prs,
+        Grouping::default_for(View::Prs),
+        filter,
+        Sort::Hierarchy,
+    )
+}
+
+#[test]
+fn enter_on_local_branch_row_cycles_any_tracked_untracked() {
+    use crate::filter::PrBranchFilter;
+
+    let mut filter = RowFilter::default();
+    let mut seen = Vec::new();
+    for _ in 0..3 {
+        let ctx = prs_ctx(&filter);
+        let mut state = ControlsOverlayState::new_at_filters(&ctx);
+        for _ in 0..3 {
+            state.handle_key(&ctx, key(KeyCode::Down));
+        }
+        assert_eq!(state.cursor(), ControlsCursor::FilterPrBranch);
+        match state.handle_key(&ctx, key(KeyCode::Enter)) {
+            ControlsOutcome::ApplyAndStay(crate::tui::Msg::SetFilter(next)) => {
+                seen.push(next.pr_branch);
+                filter = next;
+            }
+            other => panic!("unexpected outcome: {other:?}"),
+        }
+    }
+    assert_eq!(
+        seen,
+        [
+            Some(PrBranchFilter::Tracked),
+            Some(PrBranchFilter::Untracked),
+            None
+        ]
+    );
+}
+
+#[test]
+fn enter_on_float_tracked_prs_toggles_bool() {
+    let filter = RowFilter::default();
+    let ctx = prs_ctx(&filter);
+    let mut state = ControlsOverlayState::new_at_filters(&ctx);
+    for _ in 0..4 {
+        state.handle_key(&ctx, key(KeyCode::Down));
+    }
+    assert_eq!(state.cursor(), ControlsCursor::FilterFloatTrackedPrs);
+    match state.handle_key(&ctx, key(KeyCode::Enter)) {
+        ControlsOutcome::ApplyAndStay(crate::tui::Msg::SetFilter(next)) => {
+            assert!(next.float_tracked_prs_top);
+            assert_eq!(next.pr_branch, None);
+        }
+        other => panic!("unexpected outcome: {other:?}"),
+    }
+}
+
+#[test]
+fn clear_all_resets_the_pr_settings() {
+    let filter = RowFilter {
+        pr_branch: Some(crate::filter::PrBranchFilter::Untracked),
+        float_tracked_prs_top: true,
+        ..RowFilter::default()
+    };
+    let ctx = prs_ctx(&filter);
+    let mut state = ControlsOverlayState::new_at_filters(&ctx);
+    for _ in 0..5 {
+        state.handle_key(&ctx, key(KeyCode::Down));
+    }
+    assert_eq!(state.cursor(), ControlsCursor::FilterClear);
+    assert_eq!(
+        state.handle_key(&ctx, key(KeyCode::Enter)),
+        ControlsOutcome::ApplyAndStay(crate::tui::Msg::SetFilter(RowFilter::default()))
+    );
+}

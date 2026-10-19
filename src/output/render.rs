@@ -475,6 +475,12 @@ pub const PRS_COLUMNS: &[ColumnSpec] = &[
         default: true,
     },
     ColumnSpec {
+        key: "tracked",
+        header: "TRACKED",
+        description: "`yes` when the PR resolves to a local branch; `no` otherwise.",
+        default: false,
+    },
+    ColumnSpec {
         key: "repo",
         header: "REPO",
         description: "Forge repository slug (`{owner}/{repo}`).",

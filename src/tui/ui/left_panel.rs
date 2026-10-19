@@ -495,6 +495,7 @@ pub(super) fn render_left_row(
             ));
         }
         RowKind::Pr(pr) => {
+            spans.push(pr_tracking_span(pr, theme));
             spans.push(span!(Modifier::BOLD; "{}", pr.repo_display.clone()));
             if let Some(state) = pr.state.as_deref() {
                 let style = match state {
@@ -927,6 +928,19 @@ pub(super) fn forge_pr_glyph_span(pr: &PrRow, theme: &Theme) -> Span<'static> {
         }
     };
     span!(Style::default().fg(color); "{} ", style.glyph)
+}
+
+/// The PR row's local-branch marker (ADR 0129): the Branch glyph in the
+/// branch color when the PR resolves to a local branch, a dim hollow
+/// `◌` when it doesn't. Occupies two cells (glyph and a space) either
+/// way, so the repo text stays in one column.
+pub(super) fn pr_tracking_span(pr: &PrRow, theme: &Theme) -> Span<'static> {
+    if pr.tracked {
+        let style = node_kind_style(NodeKind::Branch, theme);
+        span!(Style::default().fg(style.color); "{} ", style.glyph)
+    } else {
+        span!(theme.placeholder; "◌ ")
+    }
 }
 
 /// Map a [`GroupRow`] to its node kind so the renderer can stamp the

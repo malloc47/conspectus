@@ -220,6 +220,7 @@ expression: rendered
           "native_id": "feature",
           "metadata": {
             "host": "github.com",
+            "local_repo": "/fixture/repo/.git",
             "owner": "octo",
             "repo": "repo"
           }
@@ -261,6 +262,7 @@ expression: rendered
           "native_id": "stale",
           "metadata": {
             "host": "github.com",
+            "local_repo": "/fixture/repo/.git",
             "owner": "octo",
             "repo": "repo"
           }

@@ -68,6 +68,11 @@ pub fn build_pr_rows_from_snapshot(
     for (row, full_short) in prs.iter().zip(body_full_ids.iter()) {
         let short_id = &full_short[..id_len];
         let branch = preferred_branch.get(&row.node_id_display);
+        if let Some(wanted) = options.filter.pr_branch
+            && !wanted.admits(branch.is_some())
+        {
+            continue;
+        }
         let attached = branch
             .and_then(|b| checkout_roots_per_branch.get(b))
             .map(|roots| attached_agents_for_roots(&agents, roots, &candidate_counts, options))
@@ -155,6 +160,7 @@ fn cell(key: &str, ctx: &CellCtx<'_>) -> String {
         "branch" => ctx.branch.map_or_else(dash, |(_repo, refname)| {
             strip_branch_prefix(refname).to_string()
         }),
+        "tracked" => if ctx.branch.is_some() { "yes" } else { "no" }.to_string(),
         "repo" => format!("{}/{}", pr.owner, pr.repo),
         "updated" => pr
             .updated_epoch

@@ -53,6 +53,17 @@ pub struct RowFilter {
     /// within-group sort order is preserved.
     #[serde(skip_serializing_if = "is_false")]
     pub float_attached_muxes_top: bool,
+    /// PRs view: include only PRs with, or only PRs without, a local
+    /// branch (ADR 0129). `None` shows every PR. Unlike the
+    /// predicates above it never looks at a PR's attached sessions, so
+    /// it is deliberately left out of [`Self::has_narrowing_predicates`].
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub pr_branch: Option<PrBranchFilter>,
+    /// PRs view: float PRs that have a local branch above those that
+    /// don't. Within each of the two groups the existing order is
+    /// preserved.
+    #[serde(skip_serializing_if = "is_false")]
+    pub float_tracked_prs_top: bool,
 }
 
 impl RowFilter {
@@ -64,8 +75,10 @@ impl RowFilter {
     /// state doesn't change the visible row set.
     pub fn is_empty(&self) -> bool {
         !self.has_narrowing_predicates()
+            && self.pr_branch.is_none()
             && !self.float_muxed_sessions_top
             && !self.float_attached_muxes_top
+            && !self.float_tracked_prs_top
     }
 
     /// True when at least one narrowing dimension is set. Distinct
@@ -94,6 +107,52 @@ impl RowFilter {
             return false;
         }
         true
+    }
+}
+
+/// Which PRs the PRs view keeps, by whether the PR resolves to a
+/// local branch (ADR 0129).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PrBranchFilter {
+    Tracked,
+    Untracked,
+}
+
+impl PrBranchFilter {
+    /// Parse from the CLI text form; `None` for an unknown spelling.
+    pub fn from_str_ci(value: &str) -> Option<Self> {
+        match value.trim().to_ascii_lowercase().as_str() {
+            "tracked" => Some(Self::Tracked),
+            "untracked" => Some(Self::Untracked),
+            _ => None,
+        }
+    }
+
+    /// Stable string form used in chips and CLI output.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Tracked => "tracked",
+            Self::Untracked => "untracked",
+        }
+    }
+
+    /// Whether a PR passes when `tracked` says it has a local branch.
+    pub fn admits(self, tracked: bool) -> bool {
+        match self {
+            Self::Tracked => tracked,
+            Self::Untracked => !tracked,
+        }
+    }
+
+    /// The next state in the any → tracked → untracked → any cycle the
+    /// Controls overlay steps through.
+    pub fn cycle(current: Option<Self>) -> Option<Self> {
+        match current {
+            None => Some(Self::Tracked),
+            Some(Self::Tracked) => Some(Self::Untracked),
+            Some(Self::Untracked) => None,
+        }
     }
 }
 

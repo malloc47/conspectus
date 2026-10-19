@@ -246,6 +246,12 @@ fn unresolved_branch_evidence(
     metadata.insert("host".to_string(), Value::String(context.host.clone()));
     metadata.insert("owner".to_string(), Value::String(context.owner.clone()));
     metadata.insert("repo".to_string(), Value::String(context.repo.clone()));
+    // The local repo the PR was queried for, so a PR with no local
+    // branch can still be filed under its repo (ADR 0129).
+    metadata.insert(
+        "local_repo".to_string(),
+        Value::String(context.repo_id.common_dir.clone()),
+    );
     if let Some(head_owner) = &record.head_owner {
         metadata.insert("head_owner".to_string(), Value::String(head_owner.clone()));
     }

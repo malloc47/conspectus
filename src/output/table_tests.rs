@@ -2690,3 +2690,56 @@ fn filter_union_drops_mux_rows_when_narrowing_active() {
     assert!(table.contains("claude"));
     assert!(!table.contains("editor"));
 }
+
+#[test]
+fn prs_tracked_column_and_branch_filter_follow_the_local_branch() {
+    use crate::filter::{PrBranchFilter, RowFilter};
+
+    let tracked = ForgePrId::new("github", "github.com", "octo", "repo", 1);
+    let branch_id = BranchId::new(
+        RepoId::new("/workspace/repo/.git"),
+        "refs/heads/feature".to_string(),
+    );
+    let snapshot = GraphSnapshot {
+        nodes: vec![
+            forge_pr("octo", "repo", 1, "open", false),
+            forge_pr("octo", "repo", 2, "merged", false),
+        ],
+        candidate_links: vec![branch_has_pr_link(
+            "pr-link",
+            tracked,
+            branch_id,
+            Provenance::StrongDiscovered,
+        )],
+        ..GraphSnapshot::empty()
+    };
+    let rows = |filter: RowFilter| -> Vec<(String, String)> {
+        let options = RenderOptions::wide().with_filter(filter);
+        crate::output::prs::build_pr_rows_from_snapshot(&snapshot, &["pr", "tracked"], &options)
+            .into_iter()
+            .skip(1)
+            .map(|row| (row[0].clone(), row[1].clone()))
+            .collect()
+    };
+
+    let all = rows(RowFilter::default());
+    assert_eq!(all.len(), 2);
+    assert!(
+        all[0].0.contains("octo/repo#1") && all[0].1 == "yes",
+        "{all:?}"
+    );
+    assert!(
+        all[1].0.contains("octo/repo#2") && all[1].1 == "no",
+        "{all:?}"
+    );
+
+    let only = |pr_branch| {
+        rows(RowFilter {
+            pr_branch: Some(pr_branch),
+            ..RowFilter::default()
+        })
+    };
+    assert_eq!(only(PrBranchFilter::Tracked).len(), 1);
+    assert_eq!(only(PrBranchFilter::Untracked).len(), 1);
+    assert_eq!(only(PrBranchFilter::Untracked)[0].1, "no");
+}

@@ -44,10 +44,18 @@ struct BranchLink {
 /// display order: real nodes by path, then the catch-all bucket.
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
 enum Bucket {
-    Checkout { root: String, id: CheckoutId },
+    Checkout {
+        root: String,
+        id: CheckoutId,
+    },
     NoCheckout,
-    Repo { path: String, id: RepoId },
-    NoRepo,
+    Repo {
+        path: String,
+        id: RepoId,
+    },
+    /// A forge repo (`owner/repo`) with no local repo known for its
+    /// PRs, so the graph is too sparse to file them anywhere else.
+    Remote(String),
     State(StateBucket),
 }
 
@@ -94,8 +102,16 @@ pub fn build_prs_tree(inputs: PrsBuildInputs<'_>) -> RowTree {
         .agent_mux_candidate_counts()
         .clone();
     let branches = collect_preferred_branch_per_pr(snapshot);
+    let local_repos = collect_local_repo_per_pr(snapshot);
     let checkouts = collect_checkouts_per_branch(snapshot);
     let repo_paths = collect_repo_paths(snapshot);
+
+    // Floating tracked PRs is a stable partition, so each group keeps
+    // the owner, repo, and number order `collect_prs` gave it.
+    let mut prs = prs;
+    if filter.float_tracked_prs_top {
+        prs.sort_by_key(|pr| !branches.contains_key(&pr.node_id));
+    }
 
     let mut node_ids: Vec<String> = prs.iter().map(|pr| pr.node_id.clone()).collect();
     node_ids.extend(agents.iter().map(|agent| agent.node_id.clone()));
@@ -115,6 +131,11 @@ pub fn build_prs_tree(inputs: PrsBuildInputs<'_>) -> RowTree {
     let mut buckets: BTreeMap<Bucket, Vec<Row>> = BTreeMap::new();
     for pr in &prs {
         let branch = branches.get(&pr.node_id);
+        if let Some(wanted) = filter.pr_branch
+            && !wanted.admits(branch.is_some())
+        {
+            continue;
+        }
         let pr_checkouts: &[(String, CheckoutId)] = branch
             .and_then(|branch| checkouts.get(&branch.branch_node_id))
             .map_or(&[], Vec::as_slice);
@@ -137,13 +158,21 @@ pub fn build_prs_tree(inputs: PrsBuildInputs<'_>) -> RowTree {
                         id: id.clone(),
                     })
             }
-            PrsGrouping::Repo => branch.map_or(Bucket::NoRepo, |branch| Bucket::Repo {
-                path: repo_paths
-                    .get(&branch.repo)
-                    .cloned()
-                    .unwrap_or_else(|| branch.repo.common_dir.clone()),
-                id: branch.repo.clone(),
-            }),
+            PrsGrouping::Repo => {
+                let repo = branch
+                    .map(|branch| &branch.repo)
+                    .or_else(|| local_repos.get(&pr.node_id));
+                repo.map_or_else(
+                    || Bucket::Remote(format!("{}/{}", pr.node.owner, pr.node.repo)),
+                    |repo| Bucket::Repo {
+                        path: repo_paths
+                            .get(repo)
+                            .cloned()
+                            .unwrap_or_else(|| repo.common_dir.clone()),
+                        id: repo.clone(),
+                    },
+                )
+            }
             PrsGrouping::State => Bucket::State(StateBucket::of(pr.node)),
         };
 
@@ -162,6 +191,7 @@ pub fn build_prs_tree(inputs: PrsBuildInputs<'_>) -> RowTree {
                     .map(|branch| branch.refname.as_str())
                     .map(strip_branch_prefix)
                     .map(str::to_string),
+                tracked: branch.is_some(),
                 updated_recency: format_recency(now, pr.node.updated_epoch),
                 attached_count: visible_agents.len(),
                 url: pr.node.url.clone(),
@@ -239,12 +269,7 @@ fn group_row(bucket: &Bucket, launch_root: Option<&str>, home: Option<&Path>) ->
             None,
             false,
         ),
-        Bucket::NoRepo => (
-            RowId::Synthetic("prs-no-repo"),
-            "No local repo".to_string(),
-            None,
-            false,
-        ),
+        Bucket::Remote(slug) => (RowId::Remote(slug.clone()), slug.clone(), None, false),
         Bucket::State(state) => {
             let (id, label) = state.row();
             (RowId::Synthetic(id), label.to_string(), None, false)
@@ -361,6 +386,42 @@ fn collect_preferred_branch_per_pr(snapshot: &GraphSnapshot) -> HashMap<String, 
                 repo: branch_id.repo.clone(),
                 refname: branch_id.refname.clone(),
             });
+    }
+    out
+}
+
+/// The local repo an untracked PR was queried for, from the unresolved
+/// branch link's evidence (ADR 0129). A PR seen from several local
+/// clones gets the first by path, so its row is stable.
+fn collect_local_repo_per_pr(snapshot: &GraphSnapshot) -> HashMap<String, RepoId> {
+    let mut out: HashMap<String, RepoId> = HashMap::new();
+    for link in &snapshot.candidate_links {
+        if !matches!(link.state, LinkState::Active)
+            || !matches!(link.relation, RelationKind::BranchHasForgePr)
+        {
+            continue;
+        }
+        let NodeId::ForgePr(_) = &link.source else {
+            continue;
+        };
+        let LinkEndpoint::Unresolved { evidence } = &link.target else {
+            continue;
+        };
+        let Some(local) = evidence
+            .metadata
+            .get("local_repo")
+            .and_then(serde_json::Value::as_str)
+        else {
+            continue;
+        };
+        let repo = RepoId::new(local);
+        out.entry(link.source.to_string())
+            .and_modify(|known| {
+                if repo.common_dir < known.common_dir {
+                    *known = repo.clone();
+                }
+            })
+            .or_insert(repo);
     }
     out
 }

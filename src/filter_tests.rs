@@ -182,3 +182,83 @@ fn intersection_of_all_dimensions() {
         ..good
     }));
 }
+
+#[test]
+fn pr_branch_filter_admits_by_tracking() {
+    assert!(PrBranchFilter::Tracked.admits(true));
+    assert!(!PrBranchFilter::Tracked.admits(false));
+    assert!(PrBranchFilter::Untracked.admits(false));
+    assert!(!PrBranchFilter::Untracked.admits(true));
+}
+
+#[test]
+fn pr_branch_filter_cycles_through_any_tracked_untracked() {
+    let mut state = None;
+    let mut seen = Vec::new();
+    for _ in 0..4 {
+        state = PrBranchFilter::cycle(state);
+        seen.push(state);
+    }
+    assert_eq!(
+        seen,
+        [
+            Some(PrBranchFilter::Tracked),
+            Some(PrBranchFilter::Untracked),
+            None,
+            Some(PrBranchFilter::Tracked)
+        ]
+    );
+}
+
+#[test]
+fn pr_branch_filter_round_trips_its_text_form() {
+    for value in [PrBranchFilter::Tracked, PrBranchFilter::Untracked] {
+        assert_eq!(PrBranchFilter::from_str_ci(value.as_str()), Some(value));
+    }
+    assert_eq!(
+        PrBranchFilter::from_str_ci(" Tracked "),
+        Some(PrBranchFilter::Tracked)
+    );
+    assert_eq!(PrBranchFilter::from_str_ci("both"), None);
+}
+
+#[test]
+fn pr_settings_clear_with_the_filter_but_do_not_narrow_by_session() {
+    // They are cleared by "Clear all filters" (not empty) yet must not
+    // switch on the session-based narrowing of PR rows.
+    let branch = RowFilter {
+        pr_branch: Some(PrBranchFilter::Untracked),
+        ..RowFilter::default()
+    };
+    let float = RowFilter {
+        float_tracked_prs_top: true,
+        ..RowFilter::default()
+    };
+    for filter in [branch, float] {
+        assert!(!filter.is_empty());
+        assert!(!filter.has_narrowing_predicates());
+    }
+}
+
+#[test]
+fn pr_settings_survive_a_serde_round_trip_and_default_to_off() {
+    let filter = RowFilter {
+        pr_branch: Some(PrBranchFilter::Tracked),
+        float_tracked_prs_top: true,
+        ..RowFilter::default()
+    };
+    let json = serde_json::to_string(&filter).expect("serialize");
+    assert!(json.contains("\"pr_branch\":\"tracked\""), "{json}");
+    assert_eq!(
+        serde_json::from_str::<RowFilter>(&json).expect("read"),
+        filter
+    );
+
+    // State written before the settings existed reads back as off.
+    let old: RowFilter = serde_json::from_str("{}").expect("old state");
+    assert_eq!(old, RowFilter::default());
+    assert_eq!(
+        serde_json::to_string(&RowFilter::default()).expect("serialize"),
+        "{}"
+    );
+}

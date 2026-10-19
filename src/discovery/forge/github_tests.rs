@@ -249,6 +249,22 @@ fn unknown_head_ref_emits_unresolved_endpoint() {
 }
 
 #[test]
+fn unresolved_branch_evidence_names_the_local_repo_it_was_queried_for() {
+    let context = context();
+    let records = vec![record(9, "feature/missing", PullRequestState::Merged)];
+
+    let fragment = fragment_for_repo(&context, &BTreeSet::new(), &remotes(), &records);
+
+    match &fragment.candidate_links[0].target {
+        LinkEndpoint::Unresolved { evidence } => assert_eq!(
+            evidence.metadata.get("local_repo"),
+            Some(&Value::String(context.repo_id.common_dir))
+        ),
+        other @ LinkEndpoint::Node { .. } => panic!("expected unresolved evidence, got {other:?}"),
+    }
+}
+
+#[test]
 fn draft_flag_is_carried_onto_node_and_link_metadata() {
     let context = context();
     let branches = BTreeSet::new();

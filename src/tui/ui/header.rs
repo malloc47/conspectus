@@ -339,10 +339,10 @@ pub(super) fn sort_chip_label(sort: crate::tui::Sort) -> &'static str {
 /// `harness:claude,codex · max-age:7d · mux:unmuxed`. Returns the
 /// empty string when no constraints are active so callers can
 /// short-circuit the separator. Per ADR 0031 the chip order is
-/// stable across runs (harness → max-age → mux-state) so the
+/// stable across runs (harness → max-age → mux-state → branch) so the
 /// operator builds muscle memory for where each predicate lives.
 pub(super) fn render_filter_chips(filter: &crate::filter::RowFilter) -> String {
-    if !filter.has_narrowing_predicates() {
+    if !filter.has_narrowing_predicates() && filter.pr_branch.is_none() {
         return String::new();
     }
     let mut chips: Vec<String> = Vec::new();
@@ -367,6 +367,9 @@ pub(super) fn render_filter_chips(filter: &crate::filter::RowFilter) -> String {
         if !labels.is_empty() {
             chips.push(format!("mux:{}", truncate_chip_list(&labels, 3)));
         }
+    }
+    if let Some(pr_branch) = filter.pr_branch {
+        chips.push(format!("branch:{}", pr_branch.as_str()));
     }
     chips.join(" · ")
 }

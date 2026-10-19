@@ -61,6 +61,9 @@ pub enum RowId {
     Pin {
         pin_id: String,
     },
+    /// A PRs-view group for a forge repo (`owner/repo`) when no local
+    /// repo is known for its PRs (ADR 0129).
+    Remote(String),
     /// Synthetic row not backed by a single node — used for the
     /// "Ungrouped" bucket and any other rendered-only structure.
     Synthetic(&'static str),
@@ -310,6 +313,8 @@ pub struct PrRow {
     pub state: Option<String>,
     pub is_draft: bool,
     pub branch_name: Option<String>,
+    /// True when the PR resolves to a local branch (ADR 0129).
+    pub tracked: bool,
     pub updated_recency: Option<String>,
     pub attached_count: usize,
     pub url: Option<String>,

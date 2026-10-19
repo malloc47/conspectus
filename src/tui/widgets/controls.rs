@@ -36,7 +36,7 @@ use ratatui::text::Line;
 use ratatui::widgets::{Paragraph, Widget};
 use tui_popup::KnownSize;
 
-use crate::filter::{HarnessFilter, MuxStateFilter, MuxStateKey, RowFilter};
+use crate::filter::{HarnessFilter, MuxStateFilter, MuxStateKey, PrBranchFilter, RowFilter};
 use crate::tui::Theme;
 use crate::tui::widgets::input::{InputOutcome, TextInputState};
 use crate::tui::widgets::multi_select::{MultiSelectOutcome, MultiSelectState};
@@ -108,6 +108,11 @@ pub enum ControlsCursor {
     FilterFloatMuxedSessions,
     /// Mux-view-only checkbox: float attached muxes to the top.
     FilterFloatAttachedMuxes,
+    /// PRs-view-only row: cycles the local-branch filter through any,
+    /// tracked, and untracked (ADR 0129).
+    FilterPrBranch,
+    /// PRs-view-only checkbox: float PRs with a local branch to the top.
+    FilterFloatTrackedPrs,
     FilterClear,
     /// Sort option at index in [`SORT_OPTIONS`].
     Sort(usize),
@@ -258,6 +263,16 @@ impl ControlsOverlayState {
             ControlsCursor::FilterFloatAttachedMuxes => {
                 let mut new_filter = ctx.filter.clone();
                 new_filter.float_attached_muxes_top = !new_filter.float_attached_muxes_top;
+                ControlsOutcome::ApplyAndStay(crate::tui::Msg::SetFilter(new_filter))
+            }
+            ControlsCursor::FilterPrBranch => {
+                let mut new_filter = ctx.filter.clone();
+                new_filter.pr_branch = PrBranchFilter::cycle(new_filter.pr_branch);
+                ControlsOutcome::ApplyAndStay(crate::tui::Msg::SetFilter(new_filter))
+            }
+            ControlsCursor::FilterFloatTrackedPrs => {
+                let mut new_filter = ctx.filter.clone();
+                new_filter.float_tracked_prs_top = !new_filter.float_tracked_prs_top;
                 ControlsOutcome::ApplyAndStay(crate::tui::Msg::SetFilter(new_filter))
             }
             ControlsCursor::FilterClear => {
@@ -512,6 +527,10 @@ fn flatten_rows(ctx: &ControlsContext<'_>) -> Vec<ControlsCursor> {
     if matches!(ctx.view, View::Mux) {
         rows.push(ControlsCursor::FilterFloatAttachedMuxes);
     }
+    if matches!(ctx.view, View::Prs) {
+        rows.push(ControlsCursor::FilterPrBranch);
+        rows.push(ControlsCursor::FilterFloatTrackedPrs);
+    }
     rows.push(ControlsCursor::FilterClear);
     for idx in 0..SORT_OPTIONS.len() {
         rows.push(ControlsCursor::Sort(idx));
@@ -691,6 +710,22 @@ impl ControlsOverlayWidget<'_> {
                 here,
             );
         }
+        if matches!(self.ctx.view, View::Prs) {
+            let here = cursor == ControlsCursor::FilterPrBranch;
+            body.push_row(
+                cycle_row("local branch", pr_branch_value(self.ctx.filter), here),
+                here,
+            );
+            let here = cursor == ControlsCursor::FilterFloatTrackedPrs;
+            body.push_row(
+                checkbox_row(
+                    "Float PRs with a local branch to top",
+                    self.ctx.filter.float_tracked_prs_top,
+                    here,
+                ),
+                here,
+            );
+        }
         let here = cursor == ControlsCursor::FilterClear;
         body.push_row(row_line("Clear all filters".to_string(), false, here), here);
         body.push(line![""]);
@@ -838,6 +873,24 @@ fn filter_row(name: &str, value: String, cursored: bool) -> Line<'static> {
     line![span!(style; "{marker}{name:9} {value}  [ Edit ]")]
 }
 
+/// A filter row whose value Enter steps to the next choice rather
+/// than opening an editor.
+fn cycle_row(name: &str, value: String, cursored: bool) -> Line<'static> {
+    let marker = if cursored { "> " } else { "  " };
+    let style = if cursored {
+        Style::default().add_modifier(Modifier::REVERSED)
+    } else {
+        Style::default()
+    };
+    line![span!(style; "{marker}{name:12} {value}  [ Cycle ]")]
+}
+
+fn pr_branch_value(filter: &RowFilter) -> String {
+    filter
+        .pr_branch
+        .map_or_else(|| "any".to_string(), |value| value.as_str().to_string())
+}
+
 fn checkbox_row(label: &str, checked: bool, cursored: bool) -> Line<'static> {
     let marker = if cursored { "> " } else { "  " };
     let mut style = Style::default();
@@ -911,10 +964,11 @@ fn max_controls_content_lines() -> usize {
     VIEW_OPTIONS
         .iter()
         .map(|view| {
-            let filter_rows = if matches!(*view, View::Sessions | View::Mux) {
-                5
-            } else {
-                4
+            let filter_rows = match *view {
+                View::Sessions | View::Mux => 5,
+                // The local-branch row and the float checkbox.
+                View::Prs => 6,
+                _ => 4,
             };
             // Mux view appends a "Recency by" section: blank + header
             // + one row per basis.

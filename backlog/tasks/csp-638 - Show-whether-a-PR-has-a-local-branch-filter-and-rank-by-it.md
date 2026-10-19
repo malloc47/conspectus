@@ -1,9 +1,11 @@
 ---
 id: CSP-638
 title: Show whether a PR has a local branch; filter and rank by it
-status: To Do
-assignee: []
+status: Done
+assignee:
+  - '@claude'
 created_date: '2026-10-19 19:25'
+updated_date: '2026-10-19 19:54'
 labels:
   - tui
   - forge
@@ -23,18 +25,30 @@ Open design points for the ADR: how "local tracking branch" is defined (today: t
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 An ADR records the definition of a local tracking branch, the filter and ranking controls, and the symbol choice; ADR 0114 is amended where it names the No local repo group
-- [ ] #2 Each PR row in the left pane shows one symbol when a local tracking branch exists and a different one when it does not, styled from the theme
-- [ ] #3 The PRs view Controls overlay offers a filter over tracked, untracked, or both, defaulting to both, and a toggle that floats PRs with a local branch above those without
-- [ ] #4 Both settings persist with the other per-view filter state and are cleared by Clear all filters
-- [ ] #5 Under repo grouping a PR with no local branch is filed under its own repo (owner/repo from its remote) instead of a No local repo group
-- [ ] #6 conspectus table prs exposes the tracking state, and the filter applies there too if the other filters do
-- [ ] #7 Row-tree, filter, and rendering tests cover tracked, untracked, mixed, and sparse cases; tui --snapshot output is checked for the symbols
-- [ ] #8 docs/design.md and the TUI controls docs describe the new controls
+- [x] #1 An ADR records the definition of a local tracking branch, the filter and ranking controls, and the symbol choice; ADR 0114 is amended where it names the No local repo group
+- [x] #2 Each PR row in the left pane shows one symbol when a local tracking branch exists and a different one when it does not, styled from the theme
+- [x] #3 The PRs view Controls overlay offers a filter over tracked, untracked, or both, defaulting to both, and a toggle that floats PRs with a local branch above those without
+- [x] #4 Both settings persist with the other per-view filter state and are cleared by Clear all filters
+- [x] #5 Under repo grouping a PR with no local branch is filed under its own repo (owner/repo from its remote) instead of a No local repo group
+- [x] #6 conspectus table prs exposes the tracking state, and the filter applies there too if the other filters do
+- [x] #7 Row-tree, filter, and rendering tests cover tracked, untracked, mixed, and sparse cases; tui --snapshot output is checked for the symbols
+- [x] #8 docs/design.md and the TUI controls docs describe the new controls
 <!-- AC:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
-- [ ] #1 `just check` passes, or `git diff --check` for docs-only changes
-- [ ] #2 Docs and ADRs are updated when behavior, architecture, or workflow change
+- [x] #1 `just check` passes, or `git diff --check` for docs-only changes
+- [x] #2 Docs and ADRs are updated when behavior, architecture, or workflow change
 <!-- DOD:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+Decisions in ADR 0129. The tracking filter is deliberately outside RowFilter::has_narrowing_predicates, which also makes the PRs builder drop PRs with no attached session. Untracked PRs keep an unresolved BranchHasForgePr link whose evidence now carries local_repo, which repo grouping uses; a sparse graph falls back to an owner/repo group (RowId::Remote). Not done: no [tui.views.*.filters] config key; the checkout grouping keeps its No checkout group (ADR 0114). Checked live against this machine's 90 PRs with tui --snapshot (marker, float, branch:untracked chip). Note: the nix dev shell ships its own gh without credentials, so live forge checks must use a binary run outside it.
+<!-- SECTION:NOTES:END -->
+
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+PR rows in the left pane now show `⎇` when the PR resolves to a local branch and a dim `◌` when it does not. The PRs view Controls overlay gains a local-branch cycle (any, tracked, untracked; default any) and a "float PRs with a local branch to top" toggle, with a `branch:` status chip; both persist with the view's filter and reset with Clear all filters. `conspectus tui` and `table prs` accept `--pr-branch`, and `table prs` has an opt-in `tracked` column. Repo grouping files every PR under its local repo (the "No local repo" group is gone) using a new `local_repo` evidence key on the unresolved branch link, with an owner/repo group for sparse graphs. ADR 0129 records this and amends 0114. Verified with fmt, clippy `-D warnings`, `git diff --check`, the full nextest suite (2497 passed, new tests for the filter, builder grouping/float/fallback, Controls, CLI, table, and forge evidence, plus updated PR frame and forge JSON snapshots), and `tui --snapshot` against the live 90-PR world.
+<!-- SECTION:FINAL_SUMMARY:END -->
