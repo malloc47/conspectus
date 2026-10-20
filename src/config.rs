@@ -18,7 +18,10 @@ use serde::Deserialize;
 
 use std::collections::BTreeMap;
 
-use crate::filter::{HarnessFilter, MuxStateFilter, MuxStateKey, PrBranchFilter, RowFilter};
+use crate::filter::{
+    HarnessFilter, MuxStateFilter, MuxStateKey, PrBranchFilter, PrStateFilter, PrStateKey,
+    RowFilter,
+};
 use crate::tui::icons::parse_icon_override;
 use crate::tui::theme::{Theme, ThemeKeyKind, parse_color, parse_modifier, parse_style_spec};
 use crate::tui::{Grouping, View};
@@ -484,6 +487,8 @@ struct TuiViewFilterEntry {
     mux_state: Option<Vec<String>>,
     #[serde(default)]
     pr_branch: Option<Vec<String>>,
+    #[serde(default)]
+    pr_state: Option<Vec<String>>,
     #[serde(default)]
     float_tracked_prs_top: Option<bool>,
 }
@@ -1209,9 +1214,25 @@ fn merge_view_filter_entries(
     let mut mux_states: Vec<MuxStateKey> = Vec::new();
     let mut pr_branches: std::collections::BTreeSet<PrBranchFilter> = Default::default();
     let mut float_tracked_prs_top = false;
+    let mut pr_states: Vec<PrStateKey> = Vec::new();
 
     for entry in entries {
         float_tracked_prs_top |= entry.float_tracked_prs_top.unwrap_or(false);
+        if let Some(values) = entry.pr_state {
+            for raw in values {
+                match PrStateKey::from_str_ci(&raw) {
+                    Some(key) => pr_states.push(key),
+                    None => diagnostics.push(ConfigDiagnostic {
+                        path: path.to_path_buf(),
+                        message: format!(
+                            "invalid `[tui.views.{}.filters].pr_state` value `{raw}`; \
+                             expected one of open, draft, merged, closed",
+                            view_config_key(view)
+                        ),
+                    }),
+                }
+            }
+        }
         if let Some(values) = entry.pr_branch {
             for raw in values {
                 match PrBranchFilter::from_str_ci(&raw) {
@@ -1274,6 +1295,7 @@ fn merge_view_filter_entries(
             1 => pr_branches.first().copied(),
             _ => None,
         },
+        pr_state: (!pr_states.is_empty()).then(|| PrStateFilter::from_values(pr_states)),
         float_tracked_prs_top,
         ..RowFilter::default()
     }

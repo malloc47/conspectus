@@ -409,3 +409,95 @@ fn rows_carry_the_title_and_no_attached_count() {
         [(2, None), (1, Some("Fix the login redirect".to_string()))]
     );
 }
+
+fn world_with_states() -> GraphSnapshot {
+    // #1 open (tracked), #2 merged, plus #3 open draft, #4 closed.
+    let mut snapshot = world();
+    for (number, state, draft) in [(3, "OPEN", true), (4, "CLOSED", false)] {
+        snapshot.nodes.push(GraphNode::ForgePr(ForgePrNode {
+            id: ForgePrId::new("github", "github.com", "o", "r", number),
+            provider: "github".to_string(),
+            host: "github.com".to_string(),
+            owner: "o".to_string(),
+            repo: "r".to_string(),
+            number,
+            state: Some(state.to_string()),
+            title: None,
+            url: None,
+            updated_epoch: None,
+            is_draft: draft,
+            head_ref: None,
+        }));
+    }
+    snapshot
+}
+
+fn numbers_with_state(
+    snapshot: &GraphSnapshot,
+    grouping: PrsGrouping,
+    keys: &[crate::filter::PrStateKey],
+) -> Vec<u64> {
+    let filter = RowFilter {
+        pr_state: Some(crate::filter::PrStateFilter::from_values(
+            keys.iter().copied(),
+        )),
+        ..RowFilter::default()
+    };
+    build_prs_tree(PrsBuildInputs {
+        snapshot,
+        home: None,
+        grouping,
+        filter,
+        now: None,
+        cwd: None,
+    })
+    .rows
+    .iter()
+    .filter_map(|row| match &row.kind {
+        RowKind::Pr(pr) => Some(pr.pr_number),
+        _ => None,
+    })
+    .collect()
+}
+
+#[test]
+fn the_state_filter_keeps_only_prs_in_the_chosen_states_under_every_grouping() {
+    use crate::filter::PrStateKey::{Closed, Draft, Merged, Open};
+    let snapshot = world_with_states();
+    for grouping in [PrsGrouping::Checkout, PrsGrouping::Repo, PrsGrouping::State] {
+        let mut open = numbers_with_state(&snapshot, grouping, &[Open]);
+        open.sort_unstable();
+        assert_eq!(open, [1, 3], "open includes the draft, {grouping:?}");
+        assert_eq!(numbers_with_state(&snapshot, grouping, &[Draft]), [3]);
+        let mut done = numbers_with_state(&snapshot, grouping, &[Merged, Closed]);
+        done.sort_unstable();
+        assert_eq!(done, [2, 4]);
+    }
+}
+
+#[test]
+fn the_state_filter_drops_groups_it_empties_and_the_default_keeps_every_pr() {
+    use crate::filter::PrStateKey::Merged;
+    let snapshot = world_with_states();
+    let filter = RowFilter {
+        pr_state: Some(crate::filter::PrStateFilter::from_values([Merged])),
+        ..RowFilter::default()
+    };
+    let tree = build_prs_tree(PrsBuildInputs {
+        snapshot: &snapshot,
+        home: None,
+        grouping: PrsGrouping::State,
+        filter,
+        now: None,
+        cwd: None,
+    });
+    assert_eq!(outline(&tree), ["0 Merged", "1 #2"]);
+    assert_eq!(
+        build(&snapshot, PrsGrouping::State, None)
+            .rows
+            .iter()
+            .filter(|row| matches!(row.kind, RowKind::Pr(_)))
+            .count(),
+        4
+    );
+}

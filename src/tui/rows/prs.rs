@@ -139,6 +139,11 @@ pub fn build_prs_tree(inputs: PrsBuildInputs<'_>) -> RowTree {
     let mut slugs: BTreeMap<Bucket, BTreeSet<String>> = BTreeMap::new();
     for pr in &prs {
         let branch = branches.get(&pr.node_id);
+        if let Some(wanted) = &filter.pr_state
+            && !wanted.admits(pr.node.state.as_deref(), pr.node.is_draft)
+        {
+            continue;
+        }
         if let Some(wanted) = filter.pr_branch
             && !wanted.admits(branch.is_some())
         {

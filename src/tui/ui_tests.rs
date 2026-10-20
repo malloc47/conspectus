@@ -5122,3 +5122,27 @@ fn a_long_local_branch_is_capped_so_it_cannot_crowd_out_the_title() {
     assert!(text.contains(&format!("{}…", "a".repeat(23))), "{text:?}");
     assert!(text.ends_with("  Title"), "{text:?}");
 }
+
+#[test]
+fn filter_chips_name_the_pr_state_and_branch_filters() {
+    use crate::filter::{PrBranchFilter, PrStateFilter, PrStateKey, RowFilter};
+
+    let filter = RowFilter {
+        pr_state: Some(PrStateFilter::from_values([
+            PrStateKey::Merged,
+            PrStateKey::Open,
+        ])),
+        pr_branch: Some(PrBranchFilter::Untracked),
+        ..RowFilter::default()
+    };
+    assert_eq!(
+        render_filter_chips(&filter),
+        "state:open,merged · branch:untracked"
+    );
+    // A float on its own is ordering, not a filter chip.
+    let float = RowFilter {
+        float_tracked_prs_top: true,
+        ..RowFilter::default()
+    };
+    assert_eq!(render_filter_chips(&float), "");
+}

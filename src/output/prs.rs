@@ -68,6 +68,11 @@ pub fn build_pr_rows_from_snapshot(
     for (row, full_short) in prs.iter().zip(body_full_ids.iter()) {
         let short_id = &full_short[..id_len];
         let branch = preferred_branch.get(&row.node_id_display);
+        if let Some(wanted) = &options.filter.pr_state
+            && !wanted.admits(row.node.state.as_deref(), row.node.is_draft)
+        {
+            continue;
+        }
         if let Some(wanted) = options.filter.pr_branch
             && !wanted.admits(branch.is_some())
         {

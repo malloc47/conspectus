@@ -192,8 +192,10 @@ teardown_grace = "3s"
   `max_age` accepts `s`, `m`, `h`, and `d` suffixes; `mux_state` values are
   `attached`, `ambiguous`, and `unmuxed`. For the PRs view, `pr_branch` takes
   `tracked` and/or `untracked` to keep only PRs with or without a local branch
-  (both, or neither, keeps every PR), and `float_tracked_prs_top = true` lists
-  PRs with a local branch first (ADR 0129, 0130).
+  (both, or neither, keeps every PR), `pr_state` takes `open` (drafts
+  included), `draft`, `merged`, and/or `closed` to keep only PRs in those
+  states, and `float_tracked_prs_top = true` lists PRs with a local branch
+  first (ADR 0129, 0130, 0134).
 - **Durations** in `[server.intervals]` and `teardown_grace` use
   `<integer><ms|s|m|h>`.
 - **Forge cadence (ADR 0116):** each GitHub remote's PR listing is fetched

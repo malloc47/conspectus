@@ -573,6 +573,10 @@ fn pr_branch_rows_only_appear_on_the_prs_view() {
     ));
     let at = |cursor| rows.iter().position(|row| *row == cursor).expect("row");
     assert_eq!(
+        at(ControlsCursor::FilterPrBranch),
+        at(ControlsCursor::FilterPrState) + 1
+    );
+    assert_eq!(
         at(ControlsCursor::FilterFloatTrackedPrs),
         at(ControlsCursor::FilterPrBranch) + 1
     );
@@ -600,7 +604,7 @@ fn enter_on_local_branch_row_cycles_any_tracked_untracked() {
     for _ in 0..3 {
         let ctx = prs_ctx(&filter);
         let mut state = ControlsOverlayState::new_at_filters(&ctx);
-        for _ in 0..3 {
+        for _ in 0..4 {
             state.handle_key(&ctx, key(KeyCode::Down));
         }
         assert_eq!(state.cursor(), ControlsCursor::FilterPrBranch);
@@ -627,7 +631,7 @@ fn enter_on_float_tracked_prs_toggles_bool() {
     let filter = RowFilter::default();
     let ctx = prs_ctx(&filter);
     let mut state = ControlsOverlayState::new_at_filters(&ctx);
-    for _ in 0..4 {
+    for _ in 0..5 {
         state.handle_key(&ctx, key(KeyCode::Down));
     }
     assert_eq!(state.cursor(), ControlsCursor::FilterFloatTrackedPrs);
@@ -649,7 +653,7 @@ fn clear_all_resets_the_pr_settings() {
     };
     let ctx = prs_ctx(&filter);
     let mut state = ControlsOverlayState::new_at_filters(&ctx);
-    for _ in 0..5 {
+    for _ in 0..6 {
         state.handle_key(&ctx, key(KeyCode::Down));
     }
     assert_eq!(state.cursor(), ControlsCursor::FilterClear);
@@ -657,4 +661,78 @@ fn clear_all_resets_the_pr_settings() {
         state.handle_key(&ctx, key(KeyCode::Enter)),
         ControlsOutcome::ApplyAndStay(crate::tui::Msg::SetFilter(RowFilter::default()))
     );
+}
+
+#[test]
+fn pr_state_row_only_appears_on_the_prs_view() {
+    let filter = RowFilter::default();
+    for view in [View::Sessions, View::Mux, View::Union, View::Forks] {
+        let rows = flatten_rows(&ctx_with(
+            view,
+            Grouping::default_for(view),
+            &filter,
+            Sort::Hierarchy,
+        ));
+        assert!(!rows.contains(&ControlsCursor::FilterPrState));
+    }
+    assert!(flatten_rows(&prs_ctx(&filter)).contains(&ControlsCursor::FilterPrState));
+}
+
+#[test]
+fn pr_state_sub_editor_commits_the_chosen_states() {
+    use crate::filter::{PrStateFilter, PrStateKey};
+
+    let filter = RowFilter::default();
+    let ctx = prs_ctx(&filter);
+    let mut state = ControlsOverlayState::new_at_filters(&ctx);
+    for _ in 0..3 {
+        state.handle_key(&ctx, key(KeyCode::Down));
+    }
+    assert_eq!(state.cursor(), ControlsCursor::FilterPrState);
+    assert_eq!(
+        state.handle_key(&ctx, key(KeyCode::Enter)),
+        ControlsOutcome::Continue
+    );
+    assert!(matches!(state.sub_editor(), Some(SubEditor::PrState(_))));
+
+    // Options are open, draft, merged, closed: pick open and merged.
+    state.handle_key(&ctx, key(KeyCode::Char(' ')));
+    state.handle_key(&ctx, key(KeyCode::Down));
+    state.handle_key(&ctx, key(KeyCode::Down));
+    state.handle_key(&ctx, key(KeyCode::Char(' ')));
+    match state.handle_key(&ctx, key(KeyCode::Enter)) {
+        ControlsOutcome::ApplyAndStay(crate::tui::Msg::SetFilter(next)) => assert_eq!(
+            next.pr_state,
+            Some(PrStateFilter::from_values([
+                PrStateKey::Open,
+                PrStateKey::Merged
+            ]))
+        ),
+        other => panic!("unexpected outcome: {other:?}"),
+    }
+    assert!(state.sub_editor().is_none());
+}
+
+#[test]
+fn pr_state_sub_editor_opens_with_the_current_states_selected_and_clears_when_empty() {
+    use crate::filter::{PrStateFilter, PrStateKey};
+
+    let filter = RowFilter {
+        pr_state: Some(PrStateFilter::from_values([PrStateKey::Open])),
+        ..RowFilter::default()
+    };
+    let ctx = prs_ctx(&filter);
+    let mut state = ControlsOverlayState::new_at_filters(&ctx);
+    for _ in 0..3 {
+        state.handle_key(&ctx, key(KeyCode::Down));
+    }
+    state.handle_key(&ctx, key(KeyCode::Enter));
+    // Un-pick the preselected open state and confirm: no constraint.
+    state.handle_key(&ctx, key(KeyCode::Char(' ')));
+    match state.handle_key(&ctx, key(KeyCode::Enter)) {
+        ControlsOutcome::ApplyAndStay(crate::tui::Msg::SetFilter(next)) => {
+            assert_eq!(next.pr_state, None);
+        }
+        other => panic!("unexpected outcome: {other:?}"),
+    }
 }

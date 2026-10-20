@@ -560,6 +560,7 @@ fn mux_matches_filter(
         float_muxed_sessions_top: _,
         float_attached_muxes_top: _,
         pr_branch: _,
+        pr_state: _,
         float_tracked_prs_top: _,
     } = filter;
     harness.is_none()

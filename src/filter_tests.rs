@@ -262,3 +262,56 @@ fn pr_settings_survive_a_serde_round_trip_and_default_to_off() {
         "{}"
     );
 }
+
+#[test]
+fn pr_state_keys_match_forge_state_and_draft_flag_in_any_case() {
+    assert!(PrStateKey::Open.matches(Some("open"), false));
+    assert!(
+        PrStateKey::Open.matches(Some("OPEN"), true),
+        "open includes drafts"
+    );
+    assert!(!PrStateKey::Open.matches(Some("merged"), false));
+    assert!(PrStateKey::Draft.matches(Some("open"), true));
+    assert!(!PrStateKey::Draft.matches(Some("open"), false));
+    assert!(
+        !PrStateKey::Draft.matches(Some("merged"), true),
+        "a merged draft is merged"
+    );
+    assert!(PrStateKey::Merged.matches(Some("Merged"), false));
+    assert!(PrStateKey::Closed.matches(Some("closed"), false));
+    for key in PrStateKey::ALL {
+        assert!(!key.matches(None, false), "{key:?}");
+        assert_eq!(PrStateKey::from_str_ci(key.as_str()), Some(key));
+    }
+    assert_eq!(
+        PrStateKey::from_str_ci(" Merged "),
+        Some(PrStateKey::Merged)
+    );
+    assert_eq!(PrStateKey::from_str_ci("other"), None);
+}
+
+#[test]
+fn pr_state_filter_admits_any_listed_state() {
+    let filter =
+        PrStateFilter::from_values([PrStateKey::Merged, PrStateKey::Draft, PrStateKey::Merged]);
+    assert_eq!(filter.values(), [PrStateKey::Draft, PrStateKey::Merged]);
+    assert!(filter.admits(Some("merged"), false));
+    assert!(filter.admits(Some("open"), true));
+    assert!(!filter.admits(Some("open"), false));
+    assert!(!filter.admits(Some("closed"), false));
+}
+
+#[test]
+fn pr_state_clears_with_the_filter_but_does_not_narrow_by_session() {
+    let filter = RowFilter {
+        pr_state: Some(PrStateFilter::from_values([PrStateKey::Open])),
+        ..RowFilter::default()
+    };
+    assert!(!filter.is_empty());
+    assert!(!filter.has_narrowing_predicates());
+    let json = serde_json::to_string(&filter).expect("serialize");
+    assert_eq!(
+        serde_json::from_str::<RowFilter>(&json).expect("read"),
+        filter
+    );
+}

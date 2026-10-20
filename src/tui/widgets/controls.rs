@@ -36,7 +36,10 @@ use ratatui::text::Line;
 use ratatui::widgets::{Paragraph, Widget};
 use tui_popup::KnownSize;
 
-use crate::filter::{HarnessFilter, MuxStateFilter, MuxStateKey, PrBranchFilter, RowFilter};
+use crate::filter::{
+    HarnessFilter, MuxStateFilter, MuxStateKey, PrBranchFilter, PrStateFilter, PrStateKey,
+    RowFilter,
+};
 use crate::tui::Theme;
 use crate::tui::widgets::input::{InputOutcome, TextInputState};
 use crate::tui::widgets::multi_select::{MultiSelectOutcome, MultiSelectState};
@@ -51,6 +54,9 @@ pub fn harness_options() -> &'static [&'static str] {
 }
 
 /// Display order of the mux-state sub-editor entries.
+/// The PR states the PRs view's state filter offers (ADR 0134).
+pub const PR_STATE_OPTIONS: &[PrStateKey] = &PrStateKey::ALL;
+
 pub const MUX_STATE_OPTIONS: &[MuxStateKey] = &[
     MuxStateKey::Attached,
     MuxStateKey::Ambiguous,
@@ -108,6 +114,8 @@ pub enum ControlsCursor {
     FilterFloatMuxedSessions,
     /// Mux-view-only checkbox: float attached muxes to the top.
     FilterFloatAttachedMuxes,
+    /// PRs-view-only row: edits the PR state set (ADR 0134).
+    FilterPrState,
     /// PRs-view-only row: cycles the local-branch filter through any,
     /// tracked, and untracked (ADR 0129).
     FilterPrBranch,
@@ -133,6 +141,7 @@ pub enum SubEditor {
     Harness(MultiSelectState),
     MaxAge(TextInputState),
     MuxState(MultiSelectState),
+    PrState(MultiSelectState),
 }
 
 /// What the controls overlay returned from a single key event.
@@ -265,6 +274,10 @@ impl ControlsOverlayState {
                 new_filter.float_attached_muxes_top = !new_filter.float_attached_muxes_top;
                 ControlsOutcome::ApplyAndStay(crate::tui::Msg::SetFilter(new_filter))
             }
+            ControlsCursor::FilterPrState => {
+                self.sub_editor = Some(SubEditor::PrState(build_pr_state_editor(ctx.filter)));
+                ControlsOutcome::Continue
+            }
             ControlsCursor::FilterPrBranch => {
                 let mut new_filter = ctx.filter.clone();
                 new_filter.pr_branch = PrBranchFilter::cycle(new_filter.pr_branch);
@@ -344,6 +357,19 @@ impl ControlsOverlayState {
                     ControlsOutcome::ApplyAndStay(crate::tui::Msg::SetFilter(new_filter))
                 }
             },
+            SubEditor::PrState(state) => match state.handle_key(event) {
+                MultiSelectOutcome::Continue => ControlsOutcome::Continue,
+                MultiSelectOutcome::Cancel => {
+                    *slot = None;
+                    ControlsOutcome::Continue
+                }
+                MultiSelectOutcome::Confirm(indices) => {
+                    *slot = None;
+                    let new_filter =
+                        with_pr_state(ctx.filter.clone(), indices_to_pr_states(&indices));
+                    ControlsOutcome::ApplyAndStay(crate::tui::Msg::SetFilter(new_filter))
+                }
+            },
             SubEditor::MaxAge(state) => match state.handle_key(event) {
                 InputOutcome::Continue => ControlsOutcome::Continue,
                 InputOutcome::Cancel => {
@@ -397,6 +423,34 @@ fn build_mux_state_editor(filter: &RowFilter) -> MultiSelectState {
         None => Vec::new(),
     };
     MultiSelectState::new(" mux state ", MUX_STATE_OPTIONS.len(), &selected)
+}
+
+fn build_pr_state_editor(filter: &RowFilter) -> MultiSelectState {
+    let selected: Vec<usize> = match &filter.pr_state {
+        Some(PrStateFilter::Any(values)) => PR_STATE_OPTIONS
+            .iter()
+            .enumerate()
+            .filter_map(|(idx, opt)| values.contains(opt).then_some(idx))
+            .collect(),
+        None => Vec::new(),
+    };
+    MultiSelectState::new(" PR state ", PR_STATE_OPTIONS.len(), &selected)
+}
+
+fn indices_to_pr_states(indices: &[usize]) -> Vec<PrStateKey> {
+    indices
+        .iter()
+        .filter_map(|idx| PR_STATE_OPTIONS.get(*idx).copied())
+        .collect()
+}
+
+fn with_pr_state(mut filter: RowFilter, values: Vec<PrStateKey>) -> RowFilter {
+    filter.pr_state = if values.is_empty() {
+        None
+    } else {
+        Some(PrStateFilter::from_values(values))
+    };
+    filter
 }
 
 fn build_max_age_editor(filter: &RowFilter) -> TextInputState {
@@ -528,6 +582,7 @@ fn flatten_rows(ctx: &ControlsContext<'_>) -> Vec<ControlsCursor> {
         rows.push(ControlsCursor::FilterFloatAttachedMuxes);
     }
     if matches!(ctx.view, View::Prs) {
+        rows.push(ControlsCursor::FilterPrState);
         rows.push(ControlsCursor::FilterPrBranch);
         rows.push(ControlsCursor::FilterFloatTrackedPrs);
     }
@@ -626,6 +681,13 @@ fn render_sub_editor(editor: &SubEditor, area: Rect, buf: &mut Buffer, theme: &T
                 .theme(theme)
                 .render(area, buf);
         }
+        SubEditor::PrState(state) => {
+            use crate::tui::widgets::multi_select::MultiSelectWidget;
+            let labels: Vec<&'static str> = PR_STATE_OPTIONS.iter().map(|k| k.as_str()).collect();
+            MultiSelectWidget::new(state, &labels)
+                .theme(theme)
+                .render(area, buf);
+        }
         SubEditor::MaxAge(state) => {
             use crate::tui::widgets::input::TextInputWidget;
             TextInputWidget::new(state).theme(theme).render(area, buf);
@@ -711,6 +773,11 @@ impl ControlsOverlayWidget<'_> {
             );
         }
         if matches!(self.ctx.view, View::Prs) {
+            let here = cursor == ControlsCursor::FilterPrState;
+            body.push_row(
+                filter_row("PR state", pr_state_value(self.ctx.filter), here),
+                here,
+            );
             let here = cursor == ControlsCursor::FilterPrBranch;
             body.push_row(
                 cycle_row("local branch", pr_branch_value(self.ctx.filter), here),
@@ -885,6 +952,17 @@ fn cycle_row(name: &str, value: String, cursored: bool) -> Line<'static> {
     line![span!(style; "{marker}{name:12} {value}  [ Cycle ]")]
 }
 
+fn pr_state_value(filter: &RowFilter) -> String {
+    match &filter.pr_state {
+        Some(PrStateFilter::Any(values)) if !values.is_empty() => values
+            .iter()
+            .map(|k| k.as_str())
+            .collect::<Vec<_>>()
+            .join(", "),
+        _ => "—".to_string(),
+    }
+}
+
 fn pr_branch_value(filter: &RowFilter) -> String {
     filter
         .pr_branch
@@ -966,8 +1044,9 @@ fn max_controls_content_lines() -> usize {
         .map(|view| {
             let filter_rows = match *view {
                 View::Sessions | View::Mux => 5,
-                // The local-branch row and the float checkbox.
-                View::Prs => 6,
+                // The state row, the local-branch row, and the float
+                // checkbox.
+                View::Prs => 7,
                 _ => 4,
             };
             // Mux view appends a "Recency by" section: blank + header

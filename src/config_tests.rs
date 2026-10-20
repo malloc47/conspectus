@@ -633,6 +633,52 @@ fn tui_views_filter_invalid_pr_branch_emits_diagnostic_and_keeps_valid_values() 
 }
 
 #[test]
+fn tui_views_filters_set_the_pr_state_filter_and_union_across_entries() {
+    use crate::filter::{PrStateFilter, PrStateKey};
+
+    let (filter, diagnostics) =
+        prs_filter_from("[tui.views.prs]\nfilters = { pr_state = [\"Open\", \"draft\"] }\n");
+    assert!(diagnostics.is_empty(), "{diagnostics:?}");
+    assert_eq!(
+        filter.pr_state,
+        Some(PrStateFilter::from_values([
+            PrStateKey::Open,
+            PrStateKey::Draft
+        ]))
+    );
+
+    let (filter, _) = prs_filter_from(
+        "[[tui.views.prs.filters]]\npr_state = [\"open\"]\n\
+         [[tui.views.prs.filters]]\npr_state = [\"merged\"]\n",
+    );
+    assert_eq!(
+        filter.pr_state,
+        Some(PrStateFilter::from_values([
+            PrStateKey::Open,
+            PrStateKey::Merged
+        ]))
+    );
+
+    let (filter, _) = prs_filter_from("[tui.views.prs]\nfilters = { max_age = \"7d\" }\n");
+    assert_eq!(filter.pr_state, None);
+}
+
+#[test]
+fn tui_views_filter_invalid_pr_state_emits_diagnostic_and_keeps_valid_values() {
+    use crate::filter::PrStateKey;
+
+    let (filter, diagnostics) =
+        prs_filter_from("[tui.views.prs]\nfilters = { pr_state = [\"merged\", \"stale\"] }\n");
+    assert_eq!(diagnostics.len(), 1, "{diagnostics:?}");
+    assert!(diagnostics[0].contains("invalid `[tui.views.prs.filters].pr_state` value `stale`"));
+    assert!(diagnostics[0].contains("open, draft, merged, closed"));
+    assert_eq!(
+        filter.pr_state.map(|f| f.values().to_vec()),
+        Some(vec![PrStateKey::Merged])
+    );
+}
+
+#[test]
 fn legacy_sessions_grouping_seeds_new_key_with_deprecation_diagnostic() {
     let temp = TempDir::new().expect("temp dir");
     let project = temp.path().join("project");

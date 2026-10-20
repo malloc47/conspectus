@@ -59,6 +59,11 @@ pub struct RowFilter {
     /// it is deliberately left out of [`Self::has_narrowing_predicates`].
     #[serde(skip_serializing_if = "Option::is_none")]
     pub pr_branch: Option<PrBranchFilter>,
+    /// PRs view: include only PRs in these states (ADR 0134). `None`
+    /// shows every PR. Left out of [`Self::has_narrowing_predicates`]
+    /// for the same reason as [`Self::pr_branch`].
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub pr_state: Option<PrStateFilter>,
     /// PRs view: float PRs that have a local branch above those that
     /// don't. Within each of the two groups the existing order is
     /// preserved.
@@ -76,6 +81,7 @@ impl RowFilter {
     pub fn is_empty(&self) -> bool {
         !self.has_narrowing_predicates()
             && self.pr_branch.is_none()
+            && self.pr_state.is_none()
             && !self.float_muxed_sessions_top
             && !self.float_attached_muxes_top
             && !self.float_tracked_prs_top
@@ -152,6 +158,87 @@ impl PrBranchFilter {
             None => Some(Self::Tracked),
             Some(Self::Tracked) => Some(Self::Untracked),
             Some(Self::Untracked) => None,
+        }
+    }
+}
+
+/// A PR state the PRs view can filter on (ADR 0134).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PrStateKey {
+    /// Open, drafts included, as on the forge.
+    Open,
+    /// Open drafts only.
+    Draft,
+    Merged,
+    Closed,
+}
+
+impl PrStateKey {
+    pub const ALL: [Self; 4] = [Self::Open, Self::Draft, Self::Merged, Self::Closed];
+
+    pub fn from_str_ci(value: &str) -> Option<Self> {
+        match value.trim().to_ascii_lowercase().as_str() {
+            "open" => Some(Self::Open),
+            "draft" => Some(Self::Draft),
+            "merged" => Some(Self::Merged),
+            "closed" => Some(Self::Closed),
+            _ => None,
+        }
+    }
+
+    /// Stable string form used in chips, config, and CLI output.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Open => "open",
+            Self::Draft => "draft",
+            Self::Merged => "merged",
+            Self::Closed => "closed",
+        }
+    }
+
+    /// Whether a PR with forge state `state` (any case) and draft flag
+    /// `is_draft` is in this state.
+    pub fn matches(self, state: Option<&str>, is_draft: bool) -> bool {
+        let state = state.unwrap_or_default();
+        let is = |wanted: &str| state.eq_ignore_ascii_case(wanted);
+        match self {
+            Self::Open => is("open"),
+            Self::Draft => is("open") && is_draft,
+            Self::Merged => is("merged"),
+            Self::Closed => is("closed"),
+        }
+    }
+}
+
+/// Set membership over PR states: a PR passes when it is in any listed
+/// state. Empty matches nothing (callers pass `None` for no constraint).
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PrStateFilter {
+    Any(Vec<PrStateKey>),
+}
+
+impl PrStateFilter {
+    pub fn from_values<I>(values: I) -> Self
+    where
+        I: IntoIterator<Item = PrStateKey>,
+    {
+        let mut canonical: Vec<PrStateKey> = values.into_iter().collect();
+        canonical.sort();
+        canonical.dedup();
+        Self::Any(canonical)
+    }
+
+    pub fn admits(&self, state: Option<&str>, is_draft: bool) -> bool {
+        match self {
+            Self::Any(values) => values.iter().any(|key| key.matches(state, is_draft)),
+        }
+    }
+
+    pub fn values(&self) -> &[PrStateKey] {
+        match self {
+            Self::Any(values) => values,
         }
     }
 }

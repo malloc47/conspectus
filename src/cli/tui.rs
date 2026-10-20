@@ -397,7 +397,8 @@ impl TuiArgs {
             explicit_filter: !self.filter_args.harness.is_empty()
                 || self.filter_args.max_age.is_some()
                 || !self.filter_args.mux_state.is_empty()
-                || self.filter_args.pr_branch.is_some(),
+                || self.filter_args.pr_branch.is_some()
+                || !self.filter_args.pr_state.is_empty(),
             explicit_sort,
             explicit_grouping: self.filter_args.grouping.is_some()
                 || self.sessions_grouping.is_some(),

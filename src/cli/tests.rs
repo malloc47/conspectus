@@ -374,6 +374,7 @@ fn filter_args_with(
         max_age: max_age.map(String::from),
         mux_state: mux_state.into_iter().map(String::from).collect(),
         pr_branch: None,
+        pr_state: Vec::new(),
         grouping: grouping.map(String::from),
     }
 }
@@ -997,4 +998,26 @@ fn opencode_shared_service_is_a_background_hook_harness() {
         "not-a-harness",
         "opencode serve"
     ));
+}
+
+#[test]
+fn filter_args_pr_state_parses_each_value_and_rejects_unknown_ones() {
+    use crate::filter::{PrStateFilter, PrStateKey};
+
+    let mut args = filter_args_with(vec![], None, vec![], None);
+    assert_eq!(args.to_row_filter().expect("none").pr_state, None);
+
+    args.pr_state = vec!["Open".to_string(), "merged".to_string()];
+    assert_eq!(
+        args.to_row_filter().expect("parse").pr_state,
+        Some(PrStateFilter::from_values([
+            PrStateKey::Open,
+            PrStateKey::Merged
+        ]))
+    );
+
+    args.pr_state = vec!["open".to_string(), "stale".to_string()];
+    let err = args.to_row_filter().unwrap_err().to_string();
+    assert!(err.contains("invalid --pr-state `stale`"), "{err}");
+    assert!(err.contains("open, draft, merged, closed"), "{err}");
 }

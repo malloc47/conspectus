@@ -463,6 +463,11 @@ pub(super) struct FilterArgs {
     /// (`untracked`) a local branch.
     #[arg(long = "pr-branch", value_name = "STATE")]
     pr_branch: Option<String>,
+    /// PRs view: keep only PRs in these states. Comma-separated or
+    /// repeatable. Legal values: `open` (drafts included), `draft`,
+    /// `merged`, `closed`.
+    #[arg(long = "pr-state", value_name = "STATE", value_delimiter = ',')]
+    pr_state: Vec<String>,
     /// Grouping for the view or row type. Valid values differ per
     /// view; an invalid value errors with the list of valid ones.
     #[arg(long = "grouping", value_name = "VALUE")]
@@ -475,7 +480,8 @@ impl FilterArgs {
     /// duration, mux-state spelling).
     pub(super) fn to_row_filter(&self) -> Result<crate::filter::RowFilter> {
         use crate::filter::{
-            HarnessFilter, MuxStateFilter, MuxStateKey, PrBranchFilter, RowFilter,
+            HarnessFilter, MuxStateFilter, MuxStateKey, PrBranchFilter, PrStateFilter, PrStateKey,
+            RowFilter,
         };
         let harness = if self.harness.is_empty() {
             None
@@ -509,11 +515,26 @@ impl FilterArgs {
             })?),
             None => None,
         };
+        let pr_state = if self.pr_state.is_empty() {
+            None
+        } else {
+            let mut keys = Vec::with_capacity(self.pr_state.len());
+            for raw in &self.pr_state {
+                let key = PrStateKey::from_str_ci(raw).ok_or_else(|| {
+                    anyhow!(
+                        "invalid --pr-state `{raw}`; expected one of open, draft, merged, closed"
+                    )
+                })?;
+                keys.push(key);
+            }
+            Some(PrStateFilter::from_values(keys))
+        };
         Ok(RowFilter {
             harness,
             max_age,
             mux_state,
             pr_branch,
+            pr_state,
             ..RowFilter::default()
         })
     }

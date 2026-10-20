@@ -2765,3 +2765,40 @@ fn prs_title_column_shows_the_title_or_a_dash() {
     assert_eq!(rows[1][1], "Fix the login redirect");
     assert_eq!(rows[2][1], "—");
 }
+
+#[test]
+fn prs_state_filter_narrows_the_table_to_the_chosen_states() {
+    use crate::filter::{PrStateFilter, PrStateKey, RowFilter};
+
+    let mut draft = forge_pr("octo", "repo", 3, "open", true);
+    if let GraphNode::ForgePr(pr) = &mut draft {
+        pr.is_draft = true;
+    }
+    let snapshot = GraphSnapshot {
+        nodes: vec![
+            forge_pr("octo", "repo", 1, "open", false),
+            forge_pr("octo", "repo", 2, "merged", false),
+            draft,
+        ],
+        ..GraphSnapshot::empty()
+    };
+    let numbers = |keys: &[PrStateKey]| -> Vec<String> {
+        let options = RenderOptions::wide().with_filter(RowFilter {
+            pr_state: Some(PrStateFilter::from_values(keys.iter().copied())),
+            ..RowFilter::default()
+        });
+        crate::output::prs::build_pr_rows_from_snapshot(&snapshot, &["pr"], &options)
+            .into_iter()
+            .skip(1)
+            .map(|row| row[0].clone())
+            .collect()
+    };
+    assert_eq!(numbers(&[PrStateKey::Merged]).len(), 1);
+    assert_eq!(
+        numbers(&[PrStateKey::Open]).len(),
+        2,
+        "open includes drafts"
+    );
+    assert_eq!(numbers(&[PrStateKey::Draft]).len(), 1);
+    assert!(numbers(&[PrStateKey::Closed]).is_empty());
+}
