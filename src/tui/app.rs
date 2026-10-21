@@ -310,7 +310,8 @@ pub enum InFlightKind {
     /// the timer-driven refresh, and `Action::Refresh`.
     Discovery,
     /// A launch is starting a tmux session: the `--no-attach`
-    /// subprocess, then the refresh that runs before the attach.
+    /// subprocess, and the refresh when the launch ends without an
+    /// attach.
     /// Emitted by pin launch, `mux new`, and `mux launch`.
     Launch,
 }

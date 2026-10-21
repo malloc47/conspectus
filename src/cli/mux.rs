@@ -198,17 +198,10 @@ impl MuxLaunchArgs {
         }
         let socket = self.socket.as_deref();
         let name = self.name.as_str();
-        // ADR 0103: a harness that dies at startup fails the launch
-        // with its own output instead of leaving nothing to attach.
-        super::launch_watch::spawn_watched(
-            runner,
-            socket,
-            name,
-            &cwd,
-            &argv,
-            None,
-            super::launch_watch::WatchWindows::default(),
-        )?;
+        // Not watched (ADR 0133): attaching right away shows the
+        // harness's first output, and a harness that dies non-zero
+        // stays as a dead pane with its output (ADR 0103).
+        super::launch_watch::spawn(runner, socket, name, &cwd, &argv)?;
         if self.no_attach {
             let attach_cmd = format_attach_command(socket, name);
             println!("launched `{name}` (detached); attach with: {attach_cmd}");

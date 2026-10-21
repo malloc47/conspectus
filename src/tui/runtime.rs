@@ -1050,8 +1050,8 @@ fn nudge_daemon(classes: &[&str]) -> Result<(), String> {
 /// nudge the daemon, then reload. Without the nudge the reload
 /// returns the daemon's pre-hand-off snapshot. Returns from an attach
 /// refresh in the background instead (`Msg::HandoffReturned`, ADR
-/// 0108), and launches refresh through
-/// [`refresh_after_launch_with_spinner`] (ADR 0127).
+/// 0108), and launches that end without an attach refresh through
+/// [`refresh_after_launch_with_spinner`] (ADR 0127, ADR 0133).
 pub(super) fn refresh_after_mux_handoff(app: &mut App, _seed: &RunConfig) {
     let fetched = fetch_after_mux_handoff(app.config().clone());
     apply_handoff_refresh(app, fetched);
@@ -1136,8 +1136,10 @@ pub(super) fn run_with_terminal_spinner<T: Send + 'static>(
     )
 }
 
-/// The refresh a launch runs before it attaches: the same nudge and
-/// reload as [`refresh_after_mux_handoff`], behind a spinner.
+/// The refresh a launch runs when it ends without an attach: the
+/// same nudge and reload as [`refresh_after_mux_handoff`], behind a
+/// spinner. A launch that attaches refreshes in the background when
+/// the attach returns instead (ADR 0133).
 pub(super) fn refresh_after_launch_with_spinner(terminal: &mut DefaultTerminal, app: &mut App) {
     let config = app.config().clone();
     let fetched = run_with_terminal_spinner(terminal, app, "Refreshing".to_string(), move || {

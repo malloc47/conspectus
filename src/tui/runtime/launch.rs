@@ -43,10 +43,11 @@ pub(super) fn pin_launch_argv(pin_id: &str, scan_root: Option<&str>) -> Vec<Stri
 }
 
 /// Executor branch for `ExecSpec::LaunchPin`: re-exec into
-/// `conspectus pin launch <id> --no-attach` behind a spinner,
-/// refresh so the row tree reflects the just-created session, then
+/// `conspectus pin launch <id> --no-attach` behind a spinner, then
 /// attach to the resulting tmux session when the pin has an
-/// attachable target. Also called directly from the Pins overlay's
+/// attachable target. The attach goes first so the operator sees the
+/// harness's first output; the refresh runs in the background once it
+/// returns (ADR 0133). Also called directly from the Pins overlay's
 /// `PinsAction::LaunchPin` path (which has the pin id in hand from
 /// the modal and bypasses the reducer until Phase D lands).
 pub(super) fn execute_launch_pin(
@@ -92,38 +93,31 @@ fn launch_pin_steps(
     let (record, output) =
         run_conspectus_subprocess(terminal, app, format!("Launching {pin_id}"), args);
 
-    refresh_after_launch_with_spinner(terminal, app);
+    // A launch that ends without an attach may still have changed
+    // state (a dead session removed, a worktree created), so those
+    // paths refresh before reporting. An attach refreshes in the
+    // background when it returns.
     let log_target = LogTarget::Pin(pin_id.to_string());
     let launch = summarize_pin_launch_output(pin_id, output);
-    app.report(launch_entry(&launch, record, log_target.clone()));
+    let entry = launch_entry(&launch, record, log_target.clone());
     if !launch.success {
+        refresh_after_launch_with_spinner(terminal, app);
+        app.report(entry);
         return false;
     }
+    app.report(entry);
 
-    let Some(target) = target else {
-        app.report(
-            LogEntry::warning(format!(
-                "pin `{pin_id}` launched; attach target unavailable after refresh"
-            ))
-            .with_target(log_target),
-        );
-        return false;
-    };
+    let target =
+        match after_pin_launch(pin_id, target, log_target.clone(), tmux_session_unavailable) {
+            AfterPinLaunch::Attach(target) => target,
+            AfterPinLaunch::Stop(entry) => {
+                refresh_after_launch_with_spinner(terminal, app);
+                app.report(entry);
+                return false;
+            }
+        };
 
     let mux = &target.mux;
-    if mux.backend == crate::discovery::tmux::TMUX_BACKEND
-        && let Some(reason) = tmux_session_unavailable(target)
-    {
-        app.report(
-            LogEntry::error(format!(
-                "pin `{pin_id}` launched but tmux session `{}` is not attachable: {reason}",
-                mux.name
-            ))
-            .with_target(log_target),
-        );
-        return false;
-    }
-
     let attach_target = AttachTarget {
         mux: MuxSessionId::new(mux.native_id()),
         backend: mux.backend.clone(),
@@ -139,6 +133,48 @@ fn launch_pin_steps(
         mux.socket_name.as_deref(),
     ));
     true
+}
+
+/// What a pin launch whose subprocess succeeded does next.
+#[derive(Debug)]
+pub(super) enum AfterPinLaunch<'a> {
+    /// Attach to the pin's session right away, so the operator sees
+    /// the harness's first output; the refresh waits for the attach to
+    /// return (ADR 0133).
+    Attach(&'a PinLaunchTarget),
+    /// The launch ends without an attach; refresh, then report `entry`.
+    Stop(LogEntry),
+}
+
+/// Decide whether a launched pin can be attached. `session_unavailable`
+/// checks a tmux target directly, so this needs no refreshed snapshot.
+pub(super) fn after_pin_launch<'a>(
+    pin_id: &str,
+    target: Option<&'a PinLaunchTarget>,
+    log_target: LogTarget,
+    session_unavailable: impl Fn(&PinLaunchTarget) -> Option<String>,
+) -> AfterPinLaunch<'a> {
+    let Some(target) = target else {
+        return AfterPinLaunch::Stop(
+            LogEntry::warning(format!(
+                "pin `{pin_id}` launched; attach target unavailable"
+            ))
+            .with_target(log_target),
+        );
+    };
+    let mux = &target.mux;
+    if mux.backend == crate::discovery::tmux::TMUX_BACKEND
+        && let Some(reason) = session_unavailable(target)
+    {
+        return AfterPinLaunch::Stop(
+            LogEntry::error(format!(
+                "pin `{pin_id}` launched but tmux session `{}` is not attachable: {reason}",
+                mux.name
+            ))
+            .with_target(log_target),
+        );
+    }
+    AfterPinLaunch::Attach(target)
 }
 
 /// Run `conspectus <args>` and capture its full output, both for the
@@ -196,8 +232,8 @@ pub(super) fn launch_entry(
 }
 
 /// Log entry for an attach that returned. When the pane is now dead,
-/// the process inside exited non-zero while attached or after the
-/// launch watch (ADR 0103), and its output is the entry's detail.
+/// the process inside exited non-zero, at startup or while attached
+/// (ADR 0103, ADR 0133), and its output is the entry's detail.
 pub(super) fn attach_return_entry(
     what: &str,
     outcome: AttachOutcome,
@@ -286,8 +322,8 @@ pub(super) fn mux_new_argv(name: &str, cwd: &str) -> Vec<String> {
 
 /// Executor branch for `ExecSpec::MuxNew`: behind a spinner,
 /// re-exec into `conspectus mux new <name> --cwd <cwd> --no-attach`,
-/// refresh discovery, then attach to the resulting tmux session on
-/// success. Mirrors `execute_launch_pin` but without the pin lookup
+/// then attach to the resulting tmux session on success (refreshing
+/// after the attach returns, ADR 0133). Mirrors `execute_launch_pin` but without the pin lookup
 /// or the store-write path.
 pub(super) fn execute_mux_new(
     terminal: &mut DefaultTerminal,
@@ -299,13 +335,15 @@ pub(super) fn execute_mux_new(
     let (record, output) =
         run_conspectus_subprocess(terminal, app, format!("Creating {name}"), args);
 
-    refresh_after_launch_with_spinner(terminal, app);
     let mux = MuxSessionId::new(format!("tmux:{name}"));
     let launch = summarize_mux_new_output(name, output);
-    app.report(launch_entry(&launch, record, LogTarget::Mux(mux.clone())));
+    let entry = launch_entry(&launch, record, LogTarget::Mux(mux.clone()));
     if !launch.success {
+        refresh_after_launch_with_spinner(terminal, app);
+        app.report(entry);
         return;
     }
+    app.report(entry);
 
     let attach_target = AttachTarget {
         mux: mux.clone(),
@@ -398,9 +436,9 @@ pub(super) fn mux_launch_argv(
 }
 
 /// Executor branch for `ExecSpec::MuxLaunch`: behind a spinner,
-/// re-exec into `conspectus mux launch …`, refresh discovery
-/// so the row tree picks up the fresh mux + attributed harness
-/// session, then attach. Mirrors [`execute_launch_pin`] and
+/// re-exec into `conspectus mux launch …`, then attach. The row tree
+/// picks up the fresh mux and its harness session from the refresh
+/// that runs after the attach returns (ADR 0133). Mirrors [`execute_launch_pin`] and
 /// [`execute_mux_new`] but with the mux-launch argv shape.
 pub(super) fn execute_mux_launch(
     terminal: &mut DefaultTerminal,
@@ -412,13 +450,15 @@ pub(super) fn execute_mux_launch(
     let (record, output) =
         run_conspectus_subprocess(terminal, app, format!("Launching {name}"), args);
 
-    refresh_after_launch_with_spinner(terminal, app);
     let mux = MuxSessionId::new(format!("tmux:{name}"));
     let launch = summarize_mux_launch_output(&name, output);
-    app.report(launch_entry(&launch, record, LogTarget::Mux(mux.clone())));
+    let entry = launch_entry(&launch, record, LogTarget::Mux(mux.clone()));
     if !launch.success {
+        refresh_after_launch_with_spinner(terminal, app);
+        app.report(entry);
         return;
     }
+    app.report(entry);
 
     let attach_target = AttachTarget {
         mux: mux.clone(),

@@ -29,7 +29,7 @@ use crate::pins::{
 };
 
 use super::declared::resolve_write_store;
-use super::launch_watch::{Spawned, WatchWindows, resume_fallback_note, spawn_watched};
+use super::launch_watch::{RESUME_WATCH, Spawned, resume_fallback_note, spawn_watched};
 use super::{
     DeclaredStoreFlag, WriteStoreFlag, discover_for_store_selection, effective_scan_roots,
     provenance_label, store_label,
@@ -896,7 +896,8 @@ impl PinLaunchArgs {
         let resume = resolve_resume_argv(snapshot, pin, &cwd, argv);
         // ADR 0103: a resume the harness rejects at startup dies in
         // its pane; fall back to a fresh launch and drop the sidecar
-        // so the next launch doesn't retry it.
+        // so the next launch doesn't retry it. A fresh launch isn't
+        // watched (ADR 0133).
         let spawned = spawn_watched(
             runner,
             socket,
@@ -904,7 +905,7 @@ impl PinLaunchArgs {
             &cwd,
             argv,
             resume.as_deref(),
-            WatchWindows::default(),
+            RESUME_WATCH,
         )?;
         if let (Spawned::FreshAfterFailedResume(dead), Some(resume)) = (&spawned, &resume) {
             eprintln!(
@@ -1132,7 +1133,7 @@ pub(super) fn attach_and_report(
         TmuxAttachOutcome::Detached => Ok(()),
         TmuxAttachOutcome::NoTarget => {
             bail!(
-                "{backend} session `{name}` vanished between launch and attach (race) — try again"
+                "{backend} session `{name}` is gone; the process in it may have exited right after launch"
             )
         }
         TmuxAttachOutcome::Unavailable(reason) => bail!(

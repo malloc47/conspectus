@@ -1,10 +1,7 @@
 use super::*;
 use crate::discovery::tmux::{DEAD_PANE_LINES, FakeTmux, TmuxCaptureOutcome};
 
-const NO_WAIT: WatchWindows = WatchWindows {
-    resume: Duration::ZERO,
-    fresh: Duration::ZERO,
-};
+const NO_WAIT: Duration = Duration::ZERO;
 
 fn argv(tokens: &[&str]) -> Vec<OsString> {
     tokens.iter().map(OsString::from).collect()
@@ -25,7 +22,7 @@ claude --resume abc\n\
 Pane is dead (status 1, Thu Oct  1 13:17:41 2026)\n";
 
 #[test]
-fn live_pane_is_started() {
+fn live_resumed_pane_is_started() {
     let runner = FakeTmux::with_sessions("").with_pane_statuses("w1", [TmuxPaneStatus::Alive]);
 
     let spawned = spawn_watched(
@@ -34,12 +31,40 @@ fn live_pane_is_started() {
         "w1",
         Path::new("/repo"),
         &argv(&["claude"]),
-        None,
+        Some(&argv(&["claude", "--resume", "abc"])),
         NO_WAIT,
     )
     .expect("started");
 
     assert_eq!(spawned, Spawned::Started);
+    assert_eq!(runner.new_session_calls().len(), 1);
+    assert!(runner.kill_calls().is_empty());
+}
+
+#[test]
+fn fresh_launch_returns_without_watching_the_pane() {
+    // The pane is already dead, but a fresh launch doesn't look: the
+    // operator attaches and sees it there (ADR 0133).
+    let runner = FakeTmux::with_sessions("")
+        .with_capture(
+            "w1",
+            TmuxCaptureOutcome::captured("bash: claude: command not found\n".to_string()),
+        )
+        .with_pane_statuses("w1", [dead(127)]);
+
+    let spawned = spawn_watched(
+        &runner,
+        None,
+        "w1",
+        Path::new("/repo"),
+        &argv(&["claude"]),
+        None,
+        RESUME_WATCH,
+    )
+    .expect("started");
+
+    assert_eq!(spawned, Spawned::Started);
+    assert_eq!(runner.new_session_calls().len(), 1);
     assert!(runner.kill_calls().is_empty());
 }
 
@@ -111,53 +136,29 @@ fn failed_resume_is_replaced_by_a_fresh_launch() {
 }
 
 #[test]
-fn failed_fresh_launch_reports_pane_output_and_removes_the_dead_session() {
-    let runner = FakeTmux::with_sessions("")
-        .with_capture(
-            "w1",
-            TmuxCaptureOutcome::captured("bash: claude: command not found\n".to_string()),
-        )
-        .with_pane_statuses("w1", [dead(127)]);
+fn session_gone_right_after_resume_counts_as_dead() {
+    let runner = FakeTmux::with_sessions("").with_pane_statuses("w1", [TmuxPaneStatus::NoTarget]);
+    let resume = argv(&["claude", "--resume", "abc"]);
 
-    let err = spawn_watched(
+    let spawned = spawn_watched(
         &runner,
         None,
         "w1",
         Path::new("/repo"),
         &argv(&["claude"]),
-        None,
+        Some(&resume),
         NO_WAIT,
     )
-    .expect_err("launch fails");
+    .expect("fresh launch succeeds");
 
-    let message = err.to_string();
+    let Spawned::FreshAfterFailedResume(dead) = spawned else {
+        panic!("expected fallback, got {spawned:?}");
+    };
+    assert_eq!(dead.status, None);
+    assert_eq!(runner.new_session_calls().len(), 2);
     assert!(
-        message.starts_with("`claude` exited with status 127: bash: claude: command not found"),
-        "{message}"
-    );
-    assert!(message.contains("--- pane output ---"));
-    assert_eq!(runner.kill_calls(), [(None, "w1".to_string())]);
-}
-
-#[test]
-fn session_gone_right_after_launch_counts_as_dead() {
-    let runner = FakeTmux::with_sessions("").with_pane_statuses("w1", [TmuxPaneStatus::NoTarget]);
-
-    let err = spawn_watched(
-        &runner,
-        None,
-        "w1",
-        Path::new("/repo"),
-        &argv(&["true"]),
-        None,
-        NO_WAIT,
-    )
-    .expect_err("launch fails");
-
-    assert!(
-        err.to_string()
-            .starts_with("`true` exited without output right after launch"),
-        "{err}"
+        resume_fallback_note(&resume, &dead).contains("exited without output"),
+        "{dead:?}"
     );
 }
 

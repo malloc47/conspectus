@@ -1,12 +1,15 @@
-//! Spawn a harness in a new tmux session and confirm it started
-//! (ADR 0103).
+//! Spawn a harness in a new tmux session and confirm a resume started
+//! (ADR 0103, ADR 0133).
 //!
 //! `tmux new-session -d` succeeds as soon as the session exists, even
 //! when the harness inside exits a moment later. Sessions Conspectus
 //! creates keep a pane that exits non-zero (`remain-on-exit failed`),
-//! so after spawning, the launch path watches the pane briefly. A dead
-//! pane's text, which is the harness's own error, goes into the
-//! launch outcome instead of disappearing with the session.
+//! so after spawning a resume, the launch path watches the pane
+//! briefly. A dead pane's text, which is the harness's own error, goes
+//! into the launch outcome, and a fresh launch replaces it. A fresh
+//! launch isn't watched: the harness's first output would scroll past
+//! before the operator attaches, and a fresh launch that dies stays
+//! visible as a dead pane on attach.
 
 use std::ffi::OsString;
 use std::path::Path;
@@ -18,26 +21,10 @@ use crate::discovery::tmux::{MuxBackend, TmuxKillOutcome, TmuxPaneStatus, dead_p
 
 use super::pin::{format_argv_for_send_keys, report_new_session};
 
-/// How long a launch watches a new pane before treating the harness
-/// as started. A harness rejecting a resume target takes a moment to
-/// say so (about a second for Claude Code), and a failed resume has a
-/// fresh-launch fallback, so resumes get the longer window. A fresh
-/// launch only needs to catch exec-level failures such as a missing
-/// binary; later failures stay visible as a dead pane.
-#[derive(Clone, Copy, Debug)]
-pub(super) struct WatchWindows {
-    pub(super) resume: Duration,
-    pub(super) fresh: Duration,
-}
-
-impl Default for WatchWindows {
-    fn default() -> Self {
-        Self {
-            resume: Duration::from_millis(1500),
-            fresh: Duration::from_millis(500),
-        }
-    }
-}
+/// How long a launch watches a resumed pane before treating the
+/// harness as started. A harness rejecting a resume target takes a
+/// moment to say so (about a second for Claude Code).
+pub(super) const RESUME_WATCH: Duration = Duration::from_millis(1500);
 
 const WATCH_POLL: Duration = Duration::from_millis(50);
 
@@ -73,10 +60,9 @@ pub(super) enum Spawned {
 }
 
 /// Create tmux session `name` running `resume_argv` when given, else
-/// `fresh_argv`, and confirm the pane survives its watch window. A
-/// resume that dies is replaced by a fresh launch. A fresh launch that
-/// dies is an error carrying the pane's output; its dead session is
-/// removed so the next launch starts clean.
+/// `fresh_argv`. A resume is watched for `resume_watch`; one that dies
+/// is replaced by a fresh launch. A fresh launch returns as soon as
+/// its session exists.
 pub(super) fn spawn_watched(
     runner: &dyn MuxBackend,
     socket: Option<&str>,
@@ -84,18 +70,18 @@ pub(super) fn spawn_watched(
     cwd: &Path,
     fresh_argv: &[OsString],
     resume_argv: Option<&[OsString]>,
-    windows: WatchWindows,
+    resume_watch: Duration,
 ) -> Result<Spawned> {
     if let Some(resume_argv) = resume_argv {
         spawn(runner, socket, name, cwd, resume_argv)?;
-        let Some(dead) = watch_pane(runner, socket, name, windows.resume) else {
+        let Some(dead) = watch_pane(runner, socket, name, resume_watch) else {
             return Ok(Spawned::Started);
         };
         discard_session(runner, socket, name)?;
-        spawn_fresh(runner, socket, name, cwd, fresh_argv, windows)?;
+        spawn(runner, socket, name, cwd, fresh_argv)?;
         return Ok(Spawned::FreshAfterFailedResume(dead));
     }
-    spawn_fresh(runner, socket, name, cwd, fresh_argv, windows)?;
+    spawn(runner, socket, name, cwd, fresh_argv)?;
     Ok(Spawned::Started)
 }
 
@@ -108,32 +94,8 @@ pub(super) fn resume_fallback_note(resume_argv: &[OsString], dead: &DeadPane) ->
     )
 }
 
-fn spawn_fresh(
-    runner: &dyn MuxBackend,
-    socket: Option<&str>,
-    name: &str,
-    cwd: &Path,
-    argv: &[OsString],
-    windows: WatchWindows,
-) -> Result<()> {
-    spawn(runner, socket, name, cwd, argv)?;
-    let Some(dead) = watch_pane(runner, socket, name, windows.fresh) else {
-        return Ok(());
-    };
-    discard_session(runner, socket, name)?;
-    let mut message = format!(
-        "`{}` {} right after launch",
-        format_argv_for_send_keys(argv),
-        dead.summary()
-    );
-    if !dead.output.trim().is_empty() {
-        message.push_str("\n--- pane output ---\n");
-        message.push_str(&dead.output);
-    }
-    bail!(message)
-}
-
-fn spawn(
+/// Create tmux session `name` running `argv`, without watching it.
+pub(super) fn spawn(
     runner: &dyn MuxBackend,
     socket: Option<&str>,
     name: &str,

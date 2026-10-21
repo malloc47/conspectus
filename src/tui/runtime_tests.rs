@@ -1592,6 +1592,54 @@ fn launch_entry_level_follows_outcome_and_stderr() {
     assert_eq!(failed.command.map(|c| c.stderr), Some("boom".to_string()));
 }
 
+#[test]
+fn launched_pin_attaches_without_waiting_on_a_refresh() {
+    use crate::tui::messages::{LogLevel, LogTarget};
+    let tmux = PinLaunchTarget {
+        mux: crate::model::PinMuxRef {
+            backend: "tmux".to_string(),
+            name: "w1".to_string(),
+            socket_name: None,
+        },
+    };
+    let zellij = PinLaunchTarget {
+        mux: crate::model::PinMuxRef {
+            backend: "zellij".to_string(),
+            name: "w1".to_string(),
+            socket_name: None,
+        },
+    };
+    let target = || LogTarget::Pin("w1".to_string());
+    let live = |_: &PinLaunchTarget| None;
+    let gone = |_: &PinLaunchTarget| Some("can't find session: w1".to_string());
+
+    // The decision reads tmux directly, so a successful launch goes
+    // straight to the attach; only the attach's return refreshes.
+    assert!(matches!(
+        after_pin_launch("w1", Some(&tmux), target(), live),
+        AfterPinLaunch::Attach(t) if t == &tmux
+    ));
+    // The tmux check doesn't apply to other backends.
+    assert!(matches!(
+        after_pin_launch("w1", Some(&zellij), target(), gone),
+        AfterPinLaunch::Attach(t) if t == &zellij
+    ));
+
+    let AfterPinLaunch::Stop(entry) = after_pin_launch("w1", Some(&tmux), target(), gone) else {
+        panic!("a missing session can't be attached");
+    };
+    assert_eq!(entry.level, LogLevel::Error);
+    assert!(
+        entry.summary.contains("can't find session: w1"),
+        "{entry:?}"
+    );
+
+    let AfterPinLaunch::Stop(entry) = after_pin_launch("w1", None, target(), live) else {
+        panic!("no target to attach");
+    };
+    assert_eq!(entry.level, LogLevel::Warning);
+}
+
 mod worker_ledger {
     use super::*;
 
