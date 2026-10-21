@@ -585,13 +585,13 @@ conspectus pin attach <id> [--no-attach]
   <argv>` then attaches.
 
 Sessions Conspectus creates keep a pane whose process exits non-zero
-(`remain-on-exit failed`, ADR 0103). After spawning, launch watches the
-pane for up to 0.5 s (1.5 s when resuming). If the harness dies in that
-window, launch reports its output. A failed resume is retried as a
-fresh launch and the pin's resume sidecar is cleared; a failed fresh
-launch exits non-zero and removes the dead session. A harness that
-fails later stays visible as a dead pane until the next launch
-replaces it.
+(`remain-on-exit failed`, ADR 0103). After spawning a resume, launch
+watches the pane for up to 1.5 s. If the harness dies in that window,
+launch reports its output, retries as a fresh launch, and clears the
+pin's resume sidecar. A fresh launch isn't watched, so the attach
+shows the harness's output from its start (ADR 0133). A fresh launch
+that dies stays visible as a dead pane, which the attach shows and the
+next launch replaces; under `--no-attach` the command still exits 0.
 
 The default argv comes from the harness adapter's `launch_argv`
 (per `HarnessAdapter::launch_argv`); pass `--launch-arg <arg>...`

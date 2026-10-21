@@ -574,10 +574,11 @@ declared `(harness, cwd, display_name, mux)` tuple that
   `tmux send-keys` rather than recreating the mux. When pane-process
   evidence shows the harness still running there, launch attaches
   without typing anything (ADR 0102, ADR 0028). Sessions Conspectus
-  creates keep a pane that exits non-zero, and launch confirms the
-  harness survived its first moments: a resume the harness rejects
-  falls back to a fresh launch, and a fresh launch that dies reports
-  the harness's own output (ADR 0103). Non-default tmux
+  creates keep a pane that exits non-zero, so a harness that dies
+  shows its own output on attach. A resume is watched briefly, and
+  one the harness rejects falls back to a fresh launch; a fresh launch
+  attaches at once so its first output is visible (ADR 0103,
+  ADR 0133). Non-default tmux
   sockets (`mux.socket_name = "<name>"`) launch and attach correctly in
   v1; discovery-side enumeration of non-default sockets is a
   deferred follow-up, so until that lands, non-default-socket pins
@@ -1190,8 +1191,9 @@ After an attach returns, that refresh runs in the background: the TUI
 redraws right away, with the returned mux's rows and its linked
 sessions' rows dimmed and spinning until the refresh lands (ADR 0108).
 A launch (pin launch, `mux new`, `mux launch`) keeps the TUI drawn
-with a spinner chip through its subprocess and the refresh before the
-attach (ADR 0127).
+with a spinner chip through its subprocess (ADR 0127), then attaches
+without refreshing first; the attach's return refreshes. A launch that
+ends without an attach refreshes before reporting (ADR 0133).
 Operation outcomes the TUI produces go to an in-memory message log
 (`!`) with full subprocess output; unseen failures stay flagged in the
 status bar and lead the affected row's Preview (ADR 0105).

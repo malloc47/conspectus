@@ -3,6 +3,7 @@
 ## Status
 
 Accepted. Amends ADR 0108 (the refreshes that run before an attach).
+Amended by ADR 0133: a launch that attaches no longer refreshes first.
 
 ## Context
 
