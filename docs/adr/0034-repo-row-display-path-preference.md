@@ -2,7 +2,10 @@
 
 ## Status
 
-Accepted
+Accepted. Amended: the rule now also labels and sorts the mux view's
+repo buckets and sets the directory a mux opened from a repo header
+starts in, through one shared helper, after a refactor had dropped it
+from the sessions builder (backlog `CSP-650`).
 
 ## Context
 
@@ -51,9 +54,10 @@ example `~/srv/git/foo.git` — there is no canonical checkout location
 implied by the common dir, so the builder falls back to
 `source_paths.first()` and ultimately to the unmodified common dir.
 
-This decision is scoped to the sessions row builder's display label
-(`tui::rows::sessions::repo_display_path`). It does not change `RepoNode`
-storage, `source_paths` semantics, or any other consumer of those fields.
+The rule lives in `tui::rows::repo_display_path`, which the sessions
+builder, the mux view's repo buckets, and the new-mux directory for a
+repo header all call. It does not change `RepoNode` storage,
+`source_paths` semantics, or consumers outside the TUI.
 
 ## Consequences
 

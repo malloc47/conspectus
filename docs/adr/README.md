@@ -131,7 +131,7 @@ Runtime architecture, controls, theming, detail pane, and visual language.
 | [0031](0031-tui-filter-view-switching-and-per-view-state.md) | TUI Filter, View Switching, And Per-View State | Accepted |
 | [0032](0032-tui-theme-config.md) | TUI Theme Configuration | Accepted |
 | [0033](0033-tui-detail-pane-sections.md) | TUI Detail-Pane Section Model | Accepted |
-| [0034](0034-repo-row-display-path-preference.md) | Repo Row Display Path Preference | Accepted |
+| [0034](0034-repo-row-display-path-preference.md) | Repo Row Display Path Preference | Accepted (amended) |
 | [0045](0045-sessions-graph-lineage-and-repo-default.md) | Sessions Graph Lineage And Repo Default | Accepted |
 | [0055](0055-sessions-graph-default.md) | Sessions Graph Default | Accepted |
 | [0056](0056-tui-clipboard-backend-osc52.md) | TUI Clipboard Backend via OSC 52 | Accepted |
