@@ -900,8 +900,9 @@ without group rows.
 The mux view groups by `session` (the default, a flat list), `host`, `repo`,
 or `workspace`. `workspace` is the mux counterpart of the sessions view's
 `graph` shape: after the Pins group, one header per workspace a mux (or an
-unbound pin placeholder) is rooted in, then the `repo` buckets for every other
-mux, then Ungrouped (ADR 0139).
+unbound pin placeholder) is rooted in and the `repo` buckets for every other
+mux, sorted together by header name so neither kind comes first, then
+Ungrouped (ADR 0139).
 
 Every capability in this surface is reachable through a navigable
 **Controls overlay** (sections for view, grouping, filters, sort).

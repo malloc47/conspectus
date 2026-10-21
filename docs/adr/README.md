@@ -161,7 +161,7 @@ Runtime architecture, controls, theming, detail pane, and visual language.
 | [0118](0118-csp-short-name.md) | `csp` Is The Short Name | Accepted |
 | [0119](0119-compass-rose-logo.md) | The Compass-Rose Logo | Accepted |
 | [0123](0123-overlay-keymap-tables.md) | Overlay Keymap Tables | Accepted |
-| [0139](0139-mux-workspace-or-repo-grouping.md) | Workspace-Or-Repo Grouping In The Mux View | Accepted |
+| [0139](0139-mux-workspace-or-repo-grouping.md) | Workspace-Or-Repo Grouping In The Mux View | Accepted (amended) |
 
 ## Transcript viewer
 

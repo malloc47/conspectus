@@ -2,9 +2,11 @@
 
 ## Status
 
-Accepted. Refines ADR 0061 for the mux view. Builds on ADR 0064 (the
-hybrid workspace-and-repo shape), ADR 0065 (sessions-view workspace
-grouping), and ADR 0138 (workspaces found from observed cwds).
+Accepted (amended). Refines ADR 0061 for the mux view. Builds on ADR
+0064 (the hybrid workspace-and-repo shape), ADR 0065 (sessions-view
+workspace grouping), and ADR 0138 (workspaces found from observed cwds).
+Amended so workspace and repo headers share one alphabetical order
+instead of workspaces coming first (backlog `CSP-654`).
 
 ## Context
 
@@ -32,12 +34,14 @@ with explorer labels, but nothing emitted it.
 1. **A `workspace` mux grouping.** `--grouping workspace`,
    `[tui.views.mux] grouping = "workspace"`, the controls overlay, and
    the grouping cycle all offer it, after `repo`.
-2. **Workspace first, then repo.** The Pins group comes first, as under
-   `repo`. Then comes one header per workspace that has a mux or pin
-   placeholder in it, sorted by label then root. Every other mux keeps
-   the bucket `repo` grouping gives it, sorted by repo display path,
-   and muxes with no repo go in Ungrouped last. Muxes inside a bucket
-   sort as they do under `repo`.
+2. **Workspaces and repos in one alphabetical list.** The Pins group
+   comes first, as under `repo`. Then come one header per workspace
+   that has a mux or pin placeholder in it and the bucket `repo`
+   grouping gives every other mux, together, sorted case-insensitively
+   by the bold name each header shows (a workspace's name, a repo
+   path's last component) with the full path breaking ties. Neither
+   kind sorts ahead of the other. Muxes with no repo go in Ungrouped
+   last, and muxes inside a bucket sort as they do under `repo`.
 3. **Membership is a graph link.** Cross-link inference emits a
    `MuxSession --rooted_in--> Workspace` candidate when the mux's
    session path (tmux `session_path`, else the active pane's path) is
@@ -92,6 +96,10 @@ with explorer labels, but nothing emitted it.
   and lose the override's precedence.
 - **Show every workspace, idle or not.** Rejected: the mux view lists
   muxes, and empty headers would crowd it.
+- **Workspace headers before repo headers, as ADR 0064 orders the
+  sessions view.** The first version did this. Rejected on use: the
+  operator scans the mux view by name, and splitting the list by
+  header kind hid where a given name would be.
 
 ## Open Questions Answered
 
