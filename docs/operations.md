@@ -573,7 +573,8 @@ conspectus pin launch <id> [--no-attach]
 conspectus pin attach <id> [--no-attach]
 ```
 
-`pin launch` resolves the binding state and branches:
+`pin launch` resolves the binding state from a fresh discovery that skips
+the forges, so it doesn't wait on `gh` (ADR 0135), and branches:
 
 - **Bound** → attaches to the live mux via `tmux attach-session`
   (or `tmux switch-client` inside an existing tmux client).

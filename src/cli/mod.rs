@@ -751,11 +751,22 @@ pub(super) fn effective_scan_roots(scan_roots: &[PathBuf], cwd: Option<&Path>) -
 /// path would surprise operators who expected the cache to
 /// track their last render.
 pub(super) fn discover_for_store_selection(scan_roots: &[PathBuf]) -> Result<GraphSnapshot> {
+    discover_for_store_selection_with(
+        scan_roots,
+        crate::discovery::LocalDiscoveryConfig::from_env(),
+    )
+}
+
+/// [`discover_for_store_selection`] with a caller-chosen discovery
+/// config, so a command can leave out providers it never reads.
+pub(super) fn discover_for_store_selection_with(
+    scan_roots: &[PathBuf],
+    discovery_config: crate::discovery::LocalDiscoveryConfig,
+) -> Result<GraphSnapshot> {
     let cwd = crate::cwd::current();
     let roots = effective_scan_roots(scan_roots, cwd.as_deref());
     let loader = ConfigLoader::from_env();
     let outcome = loader.load(cwd.as_deref());
-    let discovery_config = crate::discovery::LocalDiscoveryConfig::from_env();
     let snapshot = crate::discovery::discover_local_warm_with(
         roots,
         discovery_config,

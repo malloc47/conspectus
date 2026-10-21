@@ -1194,7 +1194,8 @@ sessions' rows dimmed and spinning until the refresh lands (ADR 0108).
 A launch (pin launch, `mux new`, `mux launch`) keeps the TUI drawn
 with a spinner chip through its subprocess (ADR 0127), then attaches
 without refreshing first; the attach's return refreshes. A launch that
-ends without an attach refreshes before reporting (ADR 0133).
+ends without an attach refreshes before reporting (ADR 0133). The pin
+commands discover without the forges, which they never read (ADR 0135).
 Operation outcomes the TUI produces go to an in-memory message log
 (`!`) with full subprocess output; unseen failures stay flagged in the
 status bar and lead the affected row's Preview (ADR 0105).

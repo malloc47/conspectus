@@ -1021,3 +1021,11 @@ fn filter_args_pr_state_parses_each_value_and_rejects_unknown_ones() {
     assert!(err.contains("invalid --pr-state `stale`"), "{err}");
     assert!(err.contains("open, draft, merged, closed"), "{err}");
 }
+
+#[test]
+fn pin_commands_discover_without_forge_adapters() {
+    // Pin resolution never reads PRs, and a one-shot command has no
+    // forge listings cached, so the forges would only cost `gh` calls
+    // before a launch reaches tmux (ADR 0135).
+    assert!(super::pin::pin_discovery_config().forge_adapters.is_empty());
+}

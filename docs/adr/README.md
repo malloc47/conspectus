@@ -206,3 +206,4 @@ How the project is built, tested, tracked, and shipped, including the agent-orie
 | [0132](0132-refuse-actions-on-rows-awaiting-a-handoff-refresh.md) | Refuse Actions On Rows Awaiting A Hand-Off Refresh | Accepted |
 | [0133](0133-launches-attach-before-they-refresh.md) | Launches Attach Before They Refresh | Accepted |
 | [0134](0134-pr-state-filter.md) | A PR State Filter | Accepted |
+| [0135](0135-pin-commands-skip-forge-discovery.md) | Pin Commands Skip Forge Discovery | Accepted |

@@ -31,7 +31,7 @@ use crate::pins::{
 use super::declared::resolve_write_store;
 use super::launch_watch::{RESUME_WATCH, Spawned, resume_fallback_note, spawn_watched};
 use super::{
-    DeclaredStoreFlag, WriteStoreFlag, discover_for_store_selection, effective_scan_roots,
+    DeclaredStoreFlag, WriteStoreFlag, discover_for_store_selection_with, effective_scan_roots,
     provenance_label, store_label,
 };
 
@@ -1260,11 +1260,20 @@ fn candidate_pin_store_paths(scan_roots: &[PathBuf]) -> Vec<PathBuf> {
 }
 
 fn discover_and_resolve(scan_roots: &[PathBuf]) -> Result<GraphSnapshot> {
-    let snapshot = discover_for_store_selection(scan_roots)?;
+    let snapshot = discover_for_store_selection_with(scan_roots, pin_discovery_config())?;
     let mut resolved = crate::resolve::resolve_snapshot(snapshot);
     record_pin_bindings_best_effort(&resolved);
     decorate_unbound_pins_best_effort(&mut resolved);
     Ok(resolved)
+}
+
+/// Discovery for the pin commands: everything but the forges (ADR 0135).
+/// Pin resolution reads harness, mux, git, and process state, never
+/// PRs, and a one-shot command has no forge listings cached, so forge
+/// discovery would spend seconds of `gh` calls before a launch even
+/// reaches tmux.
+pub(super) fn pin_discovery_config() -> crate::discovery::LocalDiscoveryConfig {
+    crate::discovery::LocalDiscoveryConfig::from_env().without_forge()
 }
 
 /// Enrich `PinUnbound` diagnostics with the sidecar's recorded
