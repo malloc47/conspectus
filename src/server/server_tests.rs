@@ -70,6 +70,8 @@ fn hook_ingest_updates_snapshot_state_and_published_bytes() {
         snapshot_state: Arc::clone(&snapshot_state),
         snapshot_path: Arc::new(temp.path().join("graph.bin")),
         discovery_caches: Arc::default(),
+        forge_fetch_lock: Arc::default(),
+        discovery: Arc::new(|_| LocalDiscoveryConfig::empty()),
     };
     let record = HookRecord {
         schema_version: SCHEMA_VERSION,
@@ -221,5 +223,180 @@ fn throttle_since_returns_early_when_shutdown_flips_mid_wait() {
     assert!(
         waited < Duration::from_millis(600),
         "expected early return well before {min_gap:?}, waited {waited:?}"
+    );
+}
+
+/// A `gh` stand-in that counts calls and sleeps `delay` on each.
+#[derive(Clone, Default)]
+struct SlowGh {
+    calls: Arc<std::sync::atomic::AtomicUsize>,
+    delay: Duration,
+}
+
+impl crate::discovery::forge::GhRunner for SlowGh {
+    fn list_pull_requests(
+        &self,
+        _repo: &str,
+        _filter: &crate::discovery::forge::PrListFilter,
+        _fields: &str,
+    ) -> Result<crate::discovery::forge::GhOutcome> {
+        self.calls.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        std::thread::sleep(self.delay);
+        Ok(crate::discovery::forge::GhOutcome::PullRequests(
+            r#"[{"number": 3, "headRefName": "main"}]"#.to_string(),
+        ))
+    }
+
+    fn view_pull_request(
+        &self,
+        _repo: &str,
+        _number: u64,
+        _fields: &str,
+    ) -> Result<crate::discovery::forge::GhOutcome> {
+        Ok(crate::discovery::forge::GhOutcome::PullRequests(
+            "{}".to_string(),
+        ))
+    }
+}
+
+/// A daemon context whose published snapshot holds one checkout of a
+/// real git repo with a GitHub remote, and whose discovery runs no
+/// providers but the forge, through `gh`.
+fn forge_ctx(temp: &Path, gh: SlowGh) -> DispatchCtx {
+    use crate::model::{CheckoutId, CheckoutNode, RepoId};
+    let root = temp.join("repo");
+    std::fs::create_dir_all(&root).expect("repo dir");
+    for args in [
+        &["init", "--quiet", "--initial-branch", "main"][..],
+        &["remote", "add", "origin", "git@github.com:octo/repo.git"][..],
+    ] {
+        let status = std::process::Command::new("git")
+            .args(args)
+            .current_dir(&root)
+            .status()
+            .expect("git");
+        assert!(status.success());
+    }
+    let snapshot = GraphSnapshot {
+        nodes: vec![GraphNode::Checkout(CheckoutNode {
+            id: CheckoutId::new(
+                RepoId::new(root.join(".git").display().to_string()),
+                root.display().to_string(),
+            ),
+            root: root.display().to_string(),
+            git_dir: None,
+            current_branch: None,
+            worktree: None,
+        })],
+        ..GraphSnapshot::empty()
+    };
+    let caches: Arc<DiscoveryCaches> = Arc::default();
+    let factory_caches = Arc::clone(&caches);
+    DispatchCtx {
+        // Git discovery keeps finding the checkout, as it would in a
+        // running daemon, so cycles don't evict it.
+        scan_roots: Arc::new(crate::cwd::ScanRoots::explicit(vec![root])),
+        intervals: Arc::new(ServerIntervals::default()),
+        writer_lock: Arc::new(Mutex::new(())),
+        state: Arc::new(Mutex::new(SchedulerState::default())),
+        snapshot_bytes: Arc::new(Mutex::new(None)),
+        snapshot_state: Arc::new(Mutex::new(Some(snapshot))),
+        snapshot_path: Arc::new(temp.join("graph.bin")),
+        discovery_caches: caches,
+        forge_fetch_lock: Arc::default(),
+        discovery: Arc::new(move |fetch| {
+            LocalDiscoveryConfig::empty()
+                .with_caches(Arc::clone(&factory_caches))
+                .with_forge_runner(gh.clone())
+                .with_forge_fetch(fetch)
+        }),
+    }
+}
+
+fn refresh_request(class: &str) -> Request {
+    Request {
+        command: "refresh".to_string(),
+        args: serde_json::json!({ "class": class }),
+        id: "t".to_string(),
+    }
+}
+
+#[test]
+fn a_forge_fetch_does_not_need_the_writer_lock() {
+    // ADR 0136: the network round runs under the fetch lock only, so a
+    // cycle holding the writer lock can't stall it and it can't stall
+    // the cycle.
+    let temp = tempfile::tempdir().expect("tempdir");
+    let gh = SlowGh::default();
+    let ctx = forge_ctx(temp.path(), gh.clone());
+    let _writer = ctx.writer_lock.lock().expect("writer lock");
+    let (tx, rx) = std::sync::mpsc::channel();
+    let fetch_ctx = ctx.clone();
+    std::thread::spawn(move || {
+        let _ = tx.send(fetch_forges(&fetch_ctx, false));
+    });
+    let asked = rx
+        .recv_timeout(Duration::from_secs(5))
+        .expect("the fetch finished while the writer lock was held");
+    assert_eq!(asked, 1);
+    assert_eq!(gh.calls.load(std::sync::atomic::Ordering::SeqCst), 2);
+}
+
+#[test]
+fn a_live_class_refresh_does_not_wait_for_a_forge_refresh() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let gh = SlowGh {
+        delay: Duration::from_millis(800),
+        ..SlowGh::default()
+    };
+    let ctx = forge_ctx(temp.path(), gh.clone());
+    let forge_ctx = ctx.clone();
+    let forge = std::thread::spawn(move || handle_refresh(&refresh_request("forge"), &forge_ctx));
+    // Let the forge refresh get into its fetch.
+    while gh.calls.load(std::sync::atomic::Ordering::SeqCst) == 0 {
+        std::thread::sleep(Duration::from_millis(5));
+    }
+
+    let started = Instant::now();
+    let mux = handle_refresh(&refresh_request("mux"), &ctx);
+    let mux_took = started.elapsed();
+
+    assert_eq!(mux.result, "ok");
+    assert!(
+        mux_took < Duration::from_millis(500),
+        "a mux refresh waited {mux_took:?} on the forge fetch"
+    );
+    assert_eq!(forge.join().expect("forge refresh").result, "ok");
+}
+
+#[test]
+fn routine_cycles_never_ask_a_forge() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let gh = SlowGh::default();
+    let ctx = forge_ctx(temp.path(), gh.clone());
+    for class in [
+        ProviderClass::Mux,
+        ProviderClass::Harness,
+        ProviderClass::Git,
+    ] {
+        try_class_cycle(class, &ctx).expect("cycle");
+        assert_eq!(
+            handle_refresh(&refresh_request(class.name()), &ctx).result,
+            "ok"
+        );
+    }
+    run_full_rebuild(&ctx).expect("rebuild");
+    assert_eq!(gh.calls.load(std::sync::atomic::Ordering::SeqCst), 0);
+
+    // An explicit forge refresh does ask, and its cycle merges the PRs.
+    assert_eq!(handle_refresh(&refresh_request("forge"), &ctx).result, "ok");
+    assert_eq!(gh.calls.load(std::sync::atomic::Ordering::SeqCst), 2);
+    let published = load_snapshot_state(&ctx.snapshot_state).expect("published");
+    assert!(
+        published
+            .nodes
+            .iter()
+            .any(|node| matches!(node, GraphNode::ForgePr(pr) if pr.number == 3)),
+        "the forge refresh's PR was merged"
     );
 }

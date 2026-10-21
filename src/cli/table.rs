@@ -143,12 +143,8 @@ impl TableRowsArgs {
         } else {
             self.scan_roots.clone()
         };
-        let snapshot = warm_start_discover_and_resolve(
-            roots,
-            self.refresh,
-            self.no_cache,
-            &outcome.config.server.intervals,
-        )?;
+        let snapshot =
+            warm_start_discover_and_resolve(roots, self.refresh, self.no_cache, &outcome.config)?;
         let render_width = resolve_table_width(self.wide, self.width, &io::stdout());
         let mut options = match (self.layout, render_width) {
             (LayoutFlag::Columnar, Some(w)) => {

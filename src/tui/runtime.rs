@@ -68,6 +68,8 @@ struct DiscoveryResult {
     generation: u64,
     snapshot: Result<crate::model::GraphSnapshot>,
     warning: Option<String>,
+    /// The snapshot came from a running daemon.
+    from_daemon: bool,
 }
 
 /// Mode-specific behavior for the shared [`run_loop`] driver
@@ -168,7 +170,44 @@ struct LiveMode {
     workers: WorkerLedger,
     last_refresh: Instant,
     refresh_interval: Duration,
+    forge: ForgeWorker,
 }
+
+/// The background forge fetch a TUI runs while it has no daemon to do
+/// it (ADR 0136): at most one at a time, at most every [`FORGE_POLL`].
+struct ForgeWorker {
+    tx: mpsc::Sender<usize>,
+    rx: mpsc::Receiver<usize>,
+    running: bool,
+    last_started: Option<Instant>,
+    /// The last discovery came from local providers, not a daemon.
+    daemonless: bool,
+}
+
+impl ForgeWorker {
+    fn new() -> Self {
+        let (tx, rx) = mpsc::channel();
+        Self {
+            tx,
+            rx,
+            running: false,
+            last_started: None,
+            daemonless: false,
+        }
+    }
+
+    /// Whether a fetch should start now.
+    fn due(&self, now: Instant) -> bool {
+        self.daemonless
+            && !self.running
+            && self
+                .last_started
+                .is_none_or(|at| now.duration_since(at) >= FORGE_POLL)
+    }
+}
+
+/// How often a daemonless TUI looks for forge listings to fetch.
+const FORGE_POLL: Duration = Duration::from_secs(10);
 
 /// Bookkeeping for background discovery workers. Each spawn takes the
 /// next generation. Results apply only when newer than the last one
@@ -271,12 +310,26 @@ impl LoopMode for LiveMode {
         }
         // Drain completed background discovery results without
         // blocking. A result older than the one on screen is dropped.
+        // A finished background forge fetch: refresh to merge what it
+        // brought in, unless a refresh is already running (its result
+        // reads the same cache).
+        while let Ok(fetched) = self.forge.rx.try_recv() {
+            self.forge.running = false;
+            if fetched > 0 && self.workers.idle() {
+                let generation = self.workers.start();
+                self.spawn_discovery(app, DaemonNudge::None, generation);
+            }
+        }
         while let Ok(DiscoveryResult {
             generation,
             snapshot,
             warning,
+            from_daemon,
         }) = self.result_rx.try_recv()
         {
+            if snapshot.is_ok() {
+                self.forge.daemonless = !from_daemon;
+            }
             let verdict = self.workers.finish(generation);
             if self.workers.idle() {
                 app.update(Msg::InFlightFinish(
@@ -328,6 +381,17 @@ impl LoopMode for LiveMode {
         if self.workers.idle() && self.last_refresh.elapsed() >= self.refresh_interval {
             let generation = self.workers.start();
             self.spawn_discovery(app, DaemonNudge::None, generation);
+        }
+        // Without a daemon, this TUI keeps its own forge listings
+        // current in the background (ADR 0136).
+        if self.forge.due(Instant::now())
+            && let Some(snapshot) = app
+                .snapshot_handle()
+                .map(|handle| handle.snapshot().clone())
+        {
+            self.forge.running = true;
+            self.forge.last_started = Some(Instant::now());
+            spawn_forge_fetch(app.config(), &self.forge.tx, snapshot);
         }
         Ok(())
     }
@@ -865,7 +929,11 @@ fn read_fixture(path: &std::path::Path) -> Result<crate::model::GraphSnapshot> {
 
 /// Block on terminal input, dispatching crossterm events to the
 /// pure reducer until the app signals quit.
-fn event_loop(terminal: &mut DefaultTerminal, config: RunConfig) -> Result<()> {
+fn event_loop(terminal: &mut DefaultTerminal, mut config: RunConfig) -> Result<()> {
+    // A live TUI's refreshes never wait on a forge: they build PRs from
+    // cached listings, a background worker fetches them, and only
+    // Ctrl-R fetches in its refresh (ADR 0136).
+    config.forge_fetch = crate::discovery::forge::ForgeFetch::CachedOnly;
     let mut app = App::new(config.clone());
     // Enable last-active-view persistence. Snapshot mode and
     // `--no-resume-view` both go through a different entry point
@@ -885,6 +953,7 @@ fn event_loop(terminal: &mut DefaultTerminal, config: RunConfig) -> Result<()> {
         workers: WorkerLedger::default(),
         last_refresh: Instant::now(),
         refresh_interval,
+        forge: ForgeWorker::new(),
     };
     run_loop(terminal, app, config, mode)
 }
@@ -987,6 +1056,7 @@ fn spawn_discovery_worker(
     generation: u64,
 ) {
     let mut config = config.clone();
+    config.forge_fetch = worker_forge_fetch(nudge, config.forge_fetch);
     let tx = tx.clone();
     std::thread::spawn(move || {
         let mut warning = None;
@@ -996,12 +1066,48 @@ fn spawn_discovery_worker(
             config.refresh = true;
             warning = Some(message);
         }
-        let snapshot = discover_and_resolve(&config);
+        let (snapshot, from_daemon) = match discover_and_resolve_sourced(&config) {
+            Ok((snapshot, from_daemon)) => (Ok(snapshot), from_daemon),
+            Err(err) => (Err(err), false),
+        };
         let _ = tx.send(DiscoveryResult {
             generation,
             snapshot,
             warning,
+            from_daemon,
         });
+    });
+}
+
+/// The forge fetch policy for a refresh worker. Ctrl-R is the operator
+/// asking for the forges now, so its local rebuild fetches; every other
+/// refresh keeps the live TUI's cached-only policy (ADR 0136).
+fn worker_forge_fetch(
+    nudge: DaemonNudge,
+    base: crate::discovery::forge::ForgeFetch,
+) -> crate::discovery::forge::ForgeFetch {
+    match nudge {
+        DaemonNudge::LiveAndForge => crate::discovery::forge::ForgeFetch::Fetch,
+        DaemonNudge::None | DaemonNudge::LiveClasses => base,
+    }
+}
+
+/// Fetch the forge listings `snapshot`'s repos need into `config`'s
+/// caches on a background thread, and report how many remotes it asked
+/// (ADR 0136).
+fn spawn_forge_fetch(
+    config: &RunConfig,
+    tx: &mpsc::Sender<usize>,
+    snapshot: crate::model::GraphSnapshot,
+) {
+    let discovery_config = crate::discovery::LocalDiscoveryConfig::from_env()
+        .with_caches(std::sync::Arc::clone(&config.discovery_caches))
+        .with_forge_concurrency(config.forge_concurrency);
+    let intervals = config.intervals.clone();
+    let tx = tx.clone();
+    std::thread::spawn(move || {
+        let fetched = crate::discovery::prefetch_forges(&snapshot, discovery_config, &intervals);
+        let _ = tx.send(fetched);
     });
 }
 
@@ -1172,10 +1278,16 @@ pub(super) fn refresh_after_launch_with_spinner(terminal: &mut DefaultTerminal, 
 /// benefits from the freshest data. `RunConfig::refresh` collapses
 /// the prior to empty for a forced cold scan.
 pub(super) fn discover_and_resolve(config: &RunConfig) -> Result<crate::model::GraphSnapshot> {
+    discover_and_resolve_sourced(config).map(|(snapshot, _)| snapshot)
+}
+
+/// [`discover_and_resolve`], also reporting whether the snapshot came
+/// from a running daemon.
+fn discover_and_resolve_sourced(config: &RunConfig) -> Result<(crate::model::GraphSnapshot, bool)> {
     if !config.refresh
         && let Some(snapshot) = try_daemon_snapshot()
     {
-        return Ok(snapshot);
+        return Ok((snapshot, true));
     }
     let roots = config.scan_roots.effective();
     // The on-disk warm-start prior was the previous
@@ -1186,7 +1298,9 @@ pub(super) fn discover_and_resolve(config: &RunConfig) -> Result<crate::model::G
     // the TUI's typical setup runs `conspectus serve` so the
     // daemon-snapshot short-circuit above is the common path.
     let discovery_config = crate::discovery::LocalDiscoveryConfig::from_env()
-        .with_caches(std::sync::Arc::clone(&config.discovery_caches));
+        .with_caches(std::sync::Arc::clone(&config.discovery_caches))
+        .with_forge_fetch(config.forge_fetch)
+        .with_forge_concurrency(config.forge_concurrency);
     let snapshot = crate::discovery::discover_local_warm_with(
         roots,
         discovery_config,
@@ -1204,7 +1318,7 @@ pub(super) fn discover_and_resolve(config: &RunConfig) -> Result<crate::model::G
             let _ = err;
         }
     }
-    Ok(snapshot)
+    Ok((snapshot, false))
 }
 
 /// Best-effort attempt to fetch the freshest snapshot from a

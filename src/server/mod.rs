@@ -61,6 +61,7 @@ pub mod watcher;
 
 use crate::config::ServerIntervals;
 use crate::discovery::cache::ProviderClass;
+use crate::discovery::forge::ForgeFetch;
 use crate::discovery::{
     DiscoveryCaches, LocalDiscoveryConfig, discover_local_warm_with, hook_sidecar,
 };
@@ -148,6 +149,8 @@ pub struct ServeConfig {
     /// Per-class warm-start TTL intervals. Each class gets its
     /// own scheduler thread that ticks on its interval.
     pub intervals: ServerIntervals,
+    /// `[forge]` settings (ADR 0136).
+    pub forge: crate::config::ForgeConfig,
 }
 
 /// Resolve the canonical Unix-domain socket path per ADR 0038.
@@ -318,7 +321,34 @@ struct DispatchCtx {
     snapshot_path: Arc<PathBuf>,
     /// Discovery results reused across cycles (ADR 0099).
     discovery_caches: Arc<DiscoveryCaches>,
+    /// Held while forge listings are fetched, so two fetches don't
+    /// run at once. Never held with [`Self::writer_lock`] (ADR 0136).
+    forge_fetch_lock: Arc<Mutex<()>>,
+    /// Builds the discovery config for a cycle or a fetch, with the
+    /// daemon's caches and forge settings applied.
+    discovery: DiscoveryFactory,
 }
+
+/// Builds a [`LocalDiscoveryConfig`] for the given forge fetch policy.
+/// Production reads the environment; tests inject fakes.
+type DiscoveryFactory = Arc<dyn Fn(ForgeFetch) -> LocalDiscoveryConfig + Send + Sync>;
+
+/// The production [`DiscoveryFactory`]: the environment's providers,
+/// `caches`, and `forge`'s concurrency.
+fn env_discovery(
+    caches: Arc<DiscoveryCaches>,
+    forge: crate::config::ForgeConfig,
+) -> DiscoveryFactory {
+    Arc::new(move |fetch| {
+        LocalDiscoveryConfig::from_env()
+            .with_caches(Arc::clone(&caches))
+            .with_forge_concurrency(forge.concurrency)
+            .with_forge_fetch(fetch)
+    })
+}
+
+/// How often the forge class looks for listings to fetch (ADR 0136).
+const FORGE_POLL: Duration = Duration::from_secs(10);
 
 /// Outcome of a client-side socket call.
 #[derive(Debug)]
@@ -765,17 +795,18 @@ fn handle_refresh(request: &Request, ctx: &DispatchCtx) -> Response {
         },
     };
 
+    let started = crate::discovery::current_epoch() as u64;
+    // An operator's forge or full refresh asks the forges again, and
+    // waits for it. The fetch runs before the writer lock, so other
+    // classes' cycles and refreshes don't wait on the network
+    // (ADR 0136).
+    if matches!(class, None | Some(ProviderClass::Forge)) {
+        fetch_forges(ctx, true);
+    }
     let _guard = ctx
         .writer_lock
         .lock()
         .unwrap_or_else(PoisonError::into_inner);
-    let started = crate::discovery::current_epoch() as u64;
-    // An operator's forge or full refresh asks the forges again;
-    // scheduled cycles reuse listings until the forge interval
-    // passes (ADR 0116).
-    if matches!(class, None | Some(ProviderClass::Forge)) {
-        ctx.discovery_caches.clear_forge();
-    }
     let outcome = match class {
         None => run_full_rebuild(ctx),
         Some(c) => try_class_cycle(c, ctx),
@@ -806,8 +837,7 @@ fn handle_refresh(request: &Request, ctx: &DispatchCtx) -> Response {
 /// trips for every class, run discovery, write `graph.bin`.
 /// Counterpart to `--refresh` on the one-shot CLI.
 fn run_full_rebuild(ctx: &DispatchCtx) -> Result<()> {
-    let discovery_config =
-        LocalDiscoveryConfig::from_env().with_caches(Arc::clone(&ctx.discovery_caches));
+    let discovery_config = (ctx.discovery)(ForgeFetch::CachedOnly);
     let snapshot = discover_local_warm_with(
         ctx.scan_roots.effective(),
         discovery_config,
@@ -815,7 +845,7 @@ fn run_full_rebuild(ctx: &DispatchCtx) -> Result<()> {
         &ctx.intervals,
     )?;
     let snapshot = resolve_snapshot(snapshot);
-    publish_snapshot(snapshot, &ctx.snapshot_bytes, &ctx.snapshot_state);
+    publish_snapshot(snapshot, ctx);
     Ok(())
 }
 
@@ -840,16 +870,12 @@ fn run_full_rebuild(ctx: &DispatchCtx) -> Result<()> {
 /// The in-memory caches update before the file is written, so a client
 /// that sees `graph.bin` can always fetch the same snapshot over the
 /// socket rather than finding the daemon not yet ready.
-fn publish_snapshot(
-    snapshot: GraphSnapshot,
-    snapshot_bytes: &SnapshotBytes,
-    snapshot_state: &SnapshotState,
-) {
+fn publish_snapshot(snapshot: GraphSnapshot, ctx: &DispatchCtx) {
     publish_snapshot_to_path(
         snapshot,
-        &snapshot::graph_bin_path(),
-        snapshot_bytes,
-        snapshot_state,
+        &ctx.snapshot_path,
+        &ctx.snapshot_bytes,
+        &ctx.snapshot_state,
     );
 }
 
@@ -1027,12 +1053,9 @@ pub fn run(config: ServeConfig) -> Result<()> {
 
     // Single process-local writer lock. Each class thread takes
     // it before its load-prior + evict + run + persist sequence
-    // so two threads cannot race on the merge step. Briefly held
-    // for the entire cycle; for v1 this trades throughput
-    // (forge's minutes-long discovery blocks harness/mux) for
-    // correctness. A future layer splits this into a writer
-    // thread + a request channel so the load is back-pressured
-    // rather than serialized.
+    // so two threads cannot race on the merge step. Held for the
+    // entire cycle, which is local work only: forge fetches run
+    // before it, under their own lock (ADR 0136).
     let writer_lock = Arc::new(Mutex::new(()));
 
     // Per-class scheduler state observed via the `status` socket
@@ -1065,6 +1088,7 @@ pub fn run(config: ServeConfig) -> Result<()> {
     let shutdown = Arc::new(AtomicBool::new(false));
     register_shutdown_signals(&shutdown).context("install signal handlers for SIGINT/SIGTERM")?;
 
+    let discovery_caches: Arc<DiscoveryCaches> = Arc::default();
     let ctx = DispatchCtx {
         scan_roots: Arc::new(config.scan_roots),
         intervals: Arc::new(config.intervals),
@@ -1073,7 +1097,9 @@ pub fn run(config: ServeConfig) -> Result<()> {
         snapshot_bytes,
         snapshot_state,
         snapshot_path: Arc::new(snapshot::graph_bin_path()),
-        discovery_caches: Arc::default(),
+        discovery: env_discovery(Arc::clone(&discovery_caches), config.forge),
+        discovery_caches,
+        forge_fetch_lock: Arc::default(),
     };
 
     let mut handles: Vec<JoinHandle<()>> = Vec::new();
@@ -1083,7 +1109,11 @@ pub fn run(config: ServeConfig) -> Result<()> {
         let class = *class;
         let watcher = build_watcher_for(class);
         handles.push(thread::spawn(move || {
-            class_loop(class, &ctx, watcher, &shutdown);
+            if class == ProviderClass::Forge {
+                forge_loop(&ctx, &shutdown);
+            } else {
+                class_loop(class, &ctx, watcher, &shutdown);
+            }
         }));
     }
 
@@ -1218,6 +1248,64 @@ fn class_loop(
         "conspectus serve: {} scheduler stopping after shutdown signal",
         class.name()
     );
+}
+
+/// The forge class's scheduler (ADR 0136). Instead of a cycle per
+/// forge interval, it polls every [`FORGE_POLL`]: it fetches the
+/// listings the published snapshot's repos are missing or have let
+/// expire, without the writer lock, and runs a short cached-only cycle
+/// to merge them only when it fetched something. A repo the other
+/// classes just found gets its PRs on the next poll.
+fn forge_loop(ctx: &DispatchCtx, shutdown: &AtomicBool) {
+    eprintln!(
+        "conspectus serve: forge scheduler started; polls every {FORGE_POLL:?}, refetches after {:?}",
+        ctx.intervals.forge
+    );
+    while !shutdown.load(Ordering::Relaxed) {
+        let started = crate::discovery::current_epoch();
+        if fetch_forges(ctx, false) > 0 {
+            run_cycle(ProviderClass::Forge, ctx);
+        } else {
+            // A poll with nothing to fetch is still a tick, so status
+            // shows the forge class alive and when it last looked.
+            record_state_started(&ctx.state, ProviderClass::Forge, started);
+            record_state_completed(
+                &ctx.state,
+                ProviderClass::Forge,
+                crate::discovery::current_epoch(),
+                Ok(()),
+            );
+        }
+        if matches!(
+            wait_for_class_signal(&mut NullWatcher, FORGE_POLL, shutdown),
+            WatcherEvent::ShuttingDown
+        ) {
+            break;
+        }
+    }
+    eprintln!("conspectus serve: forge scheduler stopping after shutdown signal");
+}
+
+/// Fetch the forge listings the published snapshot's repos need, under
+/// the fetch lock but not the writer lock (ADR 0136). `refetch` drops
+/// every cached listing first, for an operator's explicit refresh.
+/// Returns how many remotes were asked.
+fn fetch_forges(ctx: &DispatchCtx, refetch: bool) -> usize {
+    let _fetching = ctx
+        .forge_fetch_lock
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner);
+    if refetch {
+        ctx.discovery_caches.clear_forge();
+    }
+    let Some(snapshot) = load_snapshot_state(&ctx.snapshot_state) else {
+        return 0;
+    };
+    crate::discovery::prefetch_forges(
+        &snapshot,
+        (ctx.discovery)(ForgeFetch::Fetch),
+        &ctx.intervals,
+    )
 }
 
 /// Minimum time to wait between the end of one `run_cycle` and
@@ -1365,8 +1453,9 @@ fn try_class_cycle(class: ProviderClass, ctx: &DispatchCtx) -> Result<()> {
     for provider in class.providers() {
         prior.evict_provider(provider);
     }
-    let discovery_config =
-        LocalDiscoveryConfig::from_env().with_caches(Arc::clone(&ctx.discovery_caches));
+    // Cycles build PRs from cached listings and never ask a forge;
+    // the forge class fetches in the background (ADR 0136).
+    let discovery_config = (ctx.discovery)(ForgeFetch::CachedOnly);
     let snapshot = discover_local_warm_with(
         ctx.scan_roots.effective(),
         discovery_config,
@@ -1374,7 +1463,7 @@ fn try_class_cycle(class: ProviderClass, ctx: &DispatchCtx) -> Result<()> {
         &ctx.intervals,
     )?;
     let snapshot = resolve_snapshot(snapshot);
-    publish_snapshot(snapshot, &ctx.snapshot_bytes, &ctx.snapshot_state);
+    publish_snapshot(snapshot, ctx);
     Ok(())
 }
 

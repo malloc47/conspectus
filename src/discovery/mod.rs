@@ -155,6 +155,8 @@ pub struct DiscoveryContext {
     harness_state_roots: BTreeMap<String, PathBuf>,
     caches: Arc<DiscoveryCaches>,
     forge_max_age: Option<Duration>,
+    forge_fetch: forge::ForgeFetch,
+    forge_concurrency: Option<usize>,
 }
 
 impl DiscoveryContext {
@@ -213,6 +215,28 @@ impl DiscoveryContext {
     pub fn with_forge_max_age(mut self, max_age: Duration) -> Self {
         self.forge_max_age = Some(max_age);
         self
+    }
+
+    /// Whether forge discovery may ask the forges or must use cached
+    /// listings (ADR 0136).
+    pub fn with_forge_fetch(mut self, fetch: forge::ForgeFetch) -> Self {
+        self.forge_fetch = fetch;
+        self
+    }
+
+    /// How many forge calls may run at once (ADR 0136).
+    pub fn with_forge_concurrency(mut self, concurrency: usize) -> Self {
+        self.forge_concurrency = Some(concurrency.max(1));
+        self
+    }
+
+    pub fn forge_fetch(&self) -> forge::ForgeFetch {
+        self.forge_fetch
+    }
+
+    pub fn forge_concurrency(&self) -> usize {
+        self.forge_concurrency
+            .unwrap_or(forge::DEFAULT_FORGE_CONCURRENCY)
     }
 
     pub fn roots(&self) -> &[PathBuf] {
@@ -446,6 +470,28 @@ pub fn discover_local_with(
 /// whatever the heavy providers produced this invocation. The
 /// always-evict bucket pulls their cached slices so deleted
 /// upstream state cannot linger.
+/// Fetch the forge listings `snapshot`'s repos are missing or have let
+/// expire, into `config`'s caches, without building a graph (ADR 0136).
+/// Long-lived callers run this off their writer lock and then merge the
+/// listings with a cached-only discovery. Returns how many remotes were
+/// asked.
+pub fn prefetch_forges(
+    snapshot: &GraphSnapshot,
+    config: LocalDiscoveryConfig,
+    intervals: &crate::config::ServerIntervals,
+) -> usize {
+    let context = DiscoveryContext::default()
+        .with_caches(Arc::clone(&config.caches))
+        .with_forge_max_age(intervals.forge)
+        .with_forge_fetch(forge::ForgeFetch::Fetch)
+        .with_forge_concurrency(config.forge_concurrency);
+    let mut coordinator = forge::ForgeDiscovery::new();
+    for adapter in config.forge_adapters {
+        coordinator = coordinator.with_boxed_adapter(adapter);
+    }
+    coordinator.prefetch_graph(snapshot, &context)
+}
+
 pub fn discover_local_warm_with(
     roots: impl IntoIterator<Item = impl Into<PathBuf>>,
     config: LocalDiscoveryConfig,
@@ -454,7 +500,9 @@ pub fn discover_local_warm_with(
 ) -> Result<GraphSnapshot, DiscoveryError> {
     let mut context = DiscoveryContext::from_roots(roots)?
         .with_caches(Arc::clone(&config.caches))
-        .with_forge_max_age(intervals.forge);
+        .with_forge_max_age(intervals.forge)
+        .with_forge_fetch(config.forge_fetch)
+        .with_forge_concurrency(config.forge_concurrency);
 
     for (key, root) in &config.harness_state_roots {
         context = context.with_harness_state_root(key.clone(), root.clone());
@@ -900,6 +948,10 @@ pub struct LocalDiscoveryConfig {
     /// [`Self::empty`] start with empty caches; long-lived callers
     /// pass their own through [`Self::with_caches`].
     pub caches: Arc<DiscoveryCaches>,
+    /// Whether forge discovery may ask the forges (ADR 0136).
+    pub forge_fetch: forge::ForgeFetch,
+    /// How many forge calls may run at once (ADR 0136).
+    pub forge_concurrency: usize,
 }
 
 impl LocalDiscoveryConfig {
@@ -991,6 +1043,8 @@ impl LocalDiscoveryConfig {
             }),
             disabled_aux_harnesses,
             caches: Arc::default(),
+            forge_fetch: forge::ForgeFetch::default(),
+            forge_concurrency: forge::DEFAULT_FORGE_CONCURRENCY,
         }
     }
 
@@ -1007,7 +1061,22 @@ impl LocalDiscoveryConfig {
             pin_store_registry: None,
             disabled_aux_harnesses: BTreeSet::new(),
             caches: Arc::default(),
+            forge_fetch: forge::ForgeFetch::default(),
+            forge_concurrency: forge::DEFAULT_FORGE_CONCURRENCY,
         }
+    }
+
+    /// Ask the forges for missing or expired listings, or build PRs
+    /// from cached listings only (ADR 0136).
+    pub fn with_forge_fetch(mut self, fetch: forge::ForgeFetch) -> Self {
+        self.forge_fetch = fetch;
+        self
+    }
+
+    /// Run at most `concurrency` forge calls at once (ADR 0136).
+    pub fn with_forge_concurrency(mut self, concurrency: usize) -> Self {
+        self.forge_concurrency = concurrency.max(1);
+        self
     }
 
     /// Reuse `caches` from earlier runs instead of starting empty.

@@ -2279,3 +2279,41 @@ mod handoff_guard {
         }
     }
 }
+
+mod lazy_forge {
+    use super::*;
+    use crate::discovery::forge::ForgeFetch;
+
+    #[test]
+    fn only_a_hard_refresh_lets_a_live_refresh_fetch() {
+        for nudge in [DaemonNudge::None, DaemonNudge::LiveClasses] {
+            assert_eq!(
+                worker_forge_fetch(nudge, ForgeFetch::CachedOnly),
+                ForgeFetch::CachedOnly,
+                "{nudge:?}"
+            );
+        }
+        assert_eq!(
+            worker_forge_fetch(DaemonNudge::LiveAndForge, ForgeFetch::CachedOnly),
+            ForgeFetch::Fetch
+        );
+    }
+
+    #[test]
+    fn the_background_fetch_runs_only_without_a_daemon_one_at_a_time() {
+        let now = Instant::now();
+        let mut worker = ForgeWorker::new();
+        assert!(!worker.due(now), "a daemon fetches for a daemon-backed TUI");
+
+        worker.daemonless = true;
+        assert!(worker.due(now));
+
+        worker.running = true;
+        assert!(!worker.due(now), "one fetch at a time");
+
+        worker.running = false;
+        worker.last_started = Some(now);
+        assert!(!worker.due(now));
+        assert!(worker.due(now + FORGE_POLL));
+    }
+}

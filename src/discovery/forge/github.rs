@@ -579,8 +579,14 @@ impl<R: GhRunner> GitHubForgeProvider<R> {
     /// The hosts whose remotes count as GitHub for `repos`. `gh` is
     /// asked which hosts it is signed in to only when a repo has a
     /// remote on a host the built-in names don't cover, and the answer
-    /// is cached with the listings (ADR 0128).
-    fn hosts(&self, repos: &[super::ForgeRepo], context: &DiscoveryContext) -> GithubHosts {
+    /// is cached with the listings (ADR 0128). Without `fetch`, only a
+    /// cached answer of any age is used (ADR 0136).
+    fn hosts(
+        &self,
+        repos: &[super::ForgeRepo],
+        context: &DiscoveryContext,
+        fetch: bool,
+    ) -> GithubHosts {
         let builtin = GithubHosts::default();
         let has_unfamiliar_host = repos
             .iter()
@@ -591,43 +597,62 @@ impl<R: GhRunner> GitHubForgeProvider<R> {
             return builtin;
         }
         let cache = &context.caches().forge;
-        let signed_in = cache
-            .fresh_hosts(context.forge_max_age())
-            .unwrap_or_else(|| {
-                let hosts = self.runner.authenticated_hosts();
-                cache.set_hosts(hosts.clone());
-                hosts
-            });
+        let signed_in = if fetch {
+            cache
+                .fresh_hosts(context.forge_max_age())
+                .unwrap_or_else(|| {
+                    let hosts = self.runner.authenticated_hosts();
+                    cache.set_hosts(hosts.clone());
+                    hosts
+                })
+        } else {
+            cache.cached_hosts().unwrap_or_default()
+        };
         GithubHosts::with_signed_in(signed_in)
     }
 
-    /// The listing for every distinct GitHub remote of `repos`: cached
-    /// ones while they are fresh (ADR 0116), and the rest fetched now,
-    /// a few remotes at a time.
-    fn listings(
-        &self,
+    /// Every distinct GitHub remote of `repos`.
+    fn remotes(repos: &[super::ForgeRepo], hosts: &GithubHosts) -> BTreeSet<RemoteSlug> {
+        repos
+            .iter()
+            .flat_map(|repo| github_remotes(repo, hosts))
+            .collect()
+    }
+
+    /// The cached listing for every remote of `repos` that has one,
+    /// whatever its age. Asks no forge (ADR 0136).
+    fn cached_listings(
         repos: &[super::ForgeRepo],
         hosts: &GithubHosts,
         context: &DiscoveryContext,
     ) -> BTreeMap<RemoteSlug, RemoteListing> {
         let cache = &context.caches().forge;
+        Self::remotes(repos, hosts)
+            .into_iter()
+            .filter_map(|remote| {
+                let listing = cache.get(&remote_key(&remote))?;
+                Some((remote, listing))
+            })
+            .collect()
+    }
+
+    /// Fetch the listings of `repos`' remotes that are missing or no
+    /// longer fresh (ADR 0116), `context.forge_concurrency()` calls at a
+    /// time, into the cache. Returns how many remotes were asked.
+    fn fetch_stale(
+        &self,
+        repos: &[super::ForgeRepo],
+        hosts: &GithubHosts,
+        context: &DiscoveryContext,
+    ) -> usize {
+        let cache = &context.caches().forge;
         let max_age = context.forge_max_age();
-        let remotes: BTreeSet<RemoteSlug> = repos
-            .iter()
-            .flat_map(|repo| github_remotes(repo, hosts))
+        let stale: Vec<RemoteSlug> = Self::remotes(repos, hosts)
+            .into_iter()
+            .filter(|remote| cache.fresh(&remote_key(remote), max_age).is_none())
             .collect();
-        let mut listings = BTreeMap::new();
-        let mut stale = Vec::new();
-        for remote in remotes {
-            match cache.fresh(&remote_key(&remote), max_age) {
-                Some(listing) => {
-                    listings.insert(remote, listing);
-                }
-                None => stale.push(remote),
-            }
-        }
         if stale.is_empty() {
-            return listings;
+            return 0;
         }
 
         let epoch = crate::discovery::current_epoch();
@@ -647,7 +672,7 @@ impl<R: GhRunner> GitHubForgeProvider<R> {
             .iter()
             .flat_map(|remote| filters.iter().map(move |filter| (remote, filter)))
             .collect();
-        let outcomes = run_bounded(&jobs, super::MAX_CONCURRENT_GH, |(remote, filter)| {
+        let outcomes = run_bounded(&jobs, context.forge_concurrency(), |(remote, filter)| {
             self.runner
                 .list_pull_requests(&remote_key(remote), filter, GH_PR_LIST_FIELDS)
         });
@@ -684,10 +709,9 @@ impl<R: GhRunner> GitHubForgeProvider<R> {
                 listing.bodies = previous.bodies;
                 listing.epoch = previous.epoch;
             }
-            cache.set(key, listing.clone());
-            listings.insert(remote.clone(), listing);
+            cache.set(key, listing);
         }
-        listings
+        stale.len()
     }
 }
 
@@ -709,8 +733,12 @@ impl<R: GhRunner + 'static> super::ForgeAdapter for GitHubForgeProvider<R> {
         repos: &[super::ForgeRepo],
         context: &DiscoveryContext,
     ) -> Result<GraphFragment> {
-        let hosts = self.hosts(repos, context);
-        let listings = self.listings(repos, &hosts, context);
+        let fetch = context.forge_fetch() == super::ForgeFetch::Fetch;
+        let hosts = self.hosts(repos, context, fetch);
+        if fetch {
+            self.fetch_stale(repos, &hosts, context);
+        }
+        let listings = Self::cached_listings(repos, &hosts, context);
 
         let mut fragments = Vec::new();
         let mut diagnostics: BTreeSet<Diagnostic> = BTreeSet::new();
@@ -752,6 +780,11 @@ impl<R: GhRunner + 'static> super::ForgeAdapter for GitHubForgeProvider<R> {
             diagnostics: merged.diagnostics.into_iter().chain(diagnostics).collect(),
             node_provenance: merged.node_provenance,
         })
+    }
+
+    fn prefetch(&self, repos: &[super::ForgeRepo], context: &DiscoveryContext) -> usize {
+        let hosts = self.hosts(repos, context, true);
+        self.fetch_stale(repos, &hosts, context)
     }
 
     fn claims_remote_url(&self, remote_url: &str) -> bool {

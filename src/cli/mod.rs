@@ -168,17 +168,18 @@ pub(super) fn warm_start_discover_and_resolve(
     roots: Vec<PathBuf>,
     refresh: bool,
     no_cache: bool,
-    intervals: &crate::config::ServerIntervals,
+    config: &crate::config::Config,
 ) -> Result<crate::model::GraphSnapshot> {
     if !refresh && let Some(snapshot) = try_daemon_snapshot() {
         return Ok(snapshot);
     }
-    let discovery_config = crate::discovery::LocalDiscoveryConfig::from_env();
+    let discovery_config = crate::discovery::LocalDiscoveryConfig::from_env()
+        .with_forge_concurrency(config.forge.concurrency);
     let snapshot = crate::discovery::discover_local_warm_with(
         roots,
         discovery_config,
         crate::model::GraphSnapshot::empty(),
-        intervals,
+        &config.server.intervals,
     )?;
     let snapshot = crate::resolve::resolve_snapshot(snapshot);
     cache_resolved_snapshot(&snapshot, no_cache);
@@ -767,6 +768,8 @@ pub(super) fn discover_for_store_selection_with(
     let roots = effective_scan_roots(scan_roots, cwd.as_deref());
     let loader = ConfigLoader::from_env();
     let outcome = loader.load(cwd.as_deref());
+    let discovery_config =
+        discovery_config.with_forge_concurrency(outcome.config.forge.concurrency);
     let snapshot = crate::discovery::discover_local_warm_with(
         roots,
         discovery_config,

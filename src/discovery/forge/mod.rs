@@ -38,8 +38,22 @@ pub const GITHUB_DEFAULT_HOST: &str = "github.com";
 pub const GH_PR_LIST_FIELDS: &str = "number,state,title,url,headRefName,baseRefName,\
 updatedAt,headRepositoryOwner,headRepository,isDraft";
 
-/// Gh queries run at once across every discovered repo (ADR 0115).
-pub const MAX_CONCURRENT_GH: usize = 4;
+/// Forge calls run at once across every discovered repo unless
+/// `[forge] concurrency` says otherwise (ADR 0115, ADR 0136).
+pub const DEFAULT_FORGE_CONCURRENCY: usize = 4;
+
+/// Whether forge discovery may ask the forges (ADR 0136).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum ForgeFetch {
+    /// Fetch listings that are missing or older than the forge
+    /// interval, then build PRs from them.
+    #[default]
+    Fetch,
+    /// Build PRs from cached listings of any age and never ask a
+    /// forge. Routine cycles use this so they never wait on the
+    /// network; a background fetch keeps the cache current.
+    CachedOnly,
+}
 
 /// Open PRs fetched per remote. Well above `gh`'s default of 30 so a
 /// busy repo doesn't drop open PRs.
@@ -113,6 +127,15 @@ pub trait ForgeAdapter: Send + Sync {
     /// Discover PRs for `repos`, the repos the graph found (ADR 0115).
     fn discover(&self, repos: &[ForgeRepo], context: &DiscoveryContext) -> Result<GraphFragment>;
 
+    /// Fetch the listings `repos` are missing or have let expire into
+    /// `context`'s caches, without building a fragment (ADR 0136).
+    /// Returns how many remotes were asked. Adapters without a cache
+    /// fetch nothing.
+    fn prefetch(&self, repos: &[ForgeRepo], context: &DiscoveryContext) -> usize {
+        let _ = (repos, context);
+        0
+    }
+
     /// Should this adapter own PR discovery for the given remote
     /// origin URL? A repo whose `origin` URL points
     /// at `github.com` should be handled by the GitHub adapter;
@@ -175,6 +198,16 @@ impl ForgeDiscovery {
             fragments.push(adapter.discover(&repos, context)?);
         }
         Ok(GraphFragment::from(merge_fragments(fragments)))
+    }
+
+    /// Fetch the listings `snapshot`'s repos are missing or have let
+    /// expire (ADR 0136). Returns how many remotes were asked.
+    pub fn prefetch_graph(&self, snapshot: &GraphSnapshot, context: &DiscoveryContext) -> usize {
+        let repos = forge_repos(snapshot, context);
+        self.adapters
+            .iter()
+            .map(|adapter| adapter.prefetch(&repos, context))
+            .sum()
     }
 }
 
@@ -249,6 +282,12 @@ impl ForgeListings {
             max_age
         };
         (known.fetched.elapsed() < max_age).then(|| known.hosts.clone())
+    }
+
+    /// The signed-in hosts last cached, however old.
+    pub(crate) fn cached_hosts(&self) -> Option<Vec<String>> {
+        let slot = self.hosts.lock().unwrap_or_else(PoisonError::into_inner);
+        slot.as_ref().map(|known| known.hosts.clone())
     }
 
     pub(crate) fn set_hosts(&self, hosts: Vec<String>) {

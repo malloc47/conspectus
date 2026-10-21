@@ -82,12 +82,8 @@ impl NodeShowArgs {
         } else {
             self.scan_roots.clone()
         };
-        let mut snapshot = warm_start_discover_and_resolve(
-            roots,
-            self.refresh,
-            self.no_cache,
-            &outcome.config.server.intervals,
-        )?;
+        let mut snapshot =
+            warm_start_discover_and_resolve(roots, self.refresh, self.no_cache, &outcome.config)?;
         crate::resolve::explain_resolved_relationships(&mut snapshot);
         let id = match crate::output::node_show::resolve_node_id(&self.id, &snapshot) {
             Ok(id) => id,

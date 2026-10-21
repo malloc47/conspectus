@@ -48,6 +48,23 @@ pub struct Config {
     pub tui: TuiConfig,
     pub server: ServerConfig,
     pub worktree: WorktreeConfig,
+    pub forge: ForgeConfig,
+}
+
+/// Settings under `[forge]` (ADR 0136).
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ForgeConfig {
+    /// `[forge] concurrency`: how many forge calls (`gh pr list`) run
+    /// at once. Defaults to 4.
+    pub concurrency: usize,
+}
+
+impl Default for ForgeConfig {
+    fn default() -> Self {
+        Self {
+            concurrency: crate::discovery::forge::DEFAULT_FORGE_CONCURRENCY,
+        }
+    }
 }
 
 /// Settings under `[worktree]` (ADR 0093). Governs which
@@ -347,6 +364,9 @@ struct ConfigFile {
     /// `[worktree]` table.
     #[serde(default)]
     worktree: Option<WorktreeFile>,
+    /// `[forge]` table (ADR 0136).
+    #[serde(default)]
+    forge: Option<ForgeFile>,
     /// Legacy `[session]` key from before ADR 0021. Its presence
     /// triggers a diagnostic so users discover the schema migrated;
     /// its contents are not read.
@@ -362,6 +382,14 @@ struct WorktreeFile {
     teardown_confirm: Option<String>,
     #[serde(default)]
     teardown_grace: Option<String>,
+}
+
+#[derive(Clone, Debug, Default, Deserialize)]
+struct ForgeFile {
+    /// Read as a raw value so a string or a negative number becomes a
+    /// diagnostic instead of failing the whole file.
+    #[serde(default)]
+    concurrency: Option<toml::Value>,
 }
 
 #[derive(Clone, Debug, Default, Deserialize)]
@@ -688,6 +716,9 @@ fn merge_from_file(
         merge_server(&mut config.server, server, path, diagnostics);
     }
 
+    if let Some(forge) = parsed.forge {
+        merge_forge(&mut config.forge, forge, path, diagnostics);
+    }
     if let Some(worktree) = parsed.worktree {
         merge_worktree(&mut config.worktree, worktree, path, diagnostics);
     }
@@ -770,6 +801,24 @@ fn merge_server_intervals(
     set_server_interval(&mut config.mux, "mux", file.mux, path, diagnostics);
     set_server_interval(&mut config.git, "git", file.git, path, diagnostics);
     set_server_interval(&mut config.forge, "forge", file.forge, path, diagnostics);
+}
+
+fn merge_forge(
+    config: &mut ForgeConfig,
+    file: ForgeFile,
+    path: &Path,
+    diagnostics: &mut Vec<ConfigDiagnostic>,
+) {
+    let Some(raw) = file.concurrency else { return };
+    match raw.as_integer().filter(|n| *n >= 1) {
+        Some(n) => config.concurrency = usize::try_from(n).unwrap_or(usize::MAX),
+        None => diagnostics.push(ConfigDiagnostic {
+            path: path.to_path_buf(),
+            message: format!(
+                "invalid `[forge]` `concurrency` value `{raw}`: expected a positive integer"
+            ),
+        }),
+    }
 }
 
 fn set_server_interval(

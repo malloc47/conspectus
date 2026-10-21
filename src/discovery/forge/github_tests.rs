@@ -1003,3 +1003,157 @@ fn the_host_lookup_is_cached_until_a_hard_refresh() {
         .expect("after refresh");
     assert_eq!(runner.host_lookups(), 2);
 }
+
+fn cache_listing(context: &DiscoveryContext, remote: &str, age: std::time::Duration) {
+    context.caches().forge.set(
+        remote.to_string(),
+        crate::discovery::forge::RemoteListing {
+            fetched: std::time::Instant::now()
+                .checked_sub(age)
+                .expect("instant in range"),
+            epoch: 7,
+            bodies: vec![r#"[{"number": 9, "headRefName": "main"}]"#.to_string()],
+            failures: Vec::new(),
+        },
+    );
+}
+
+#[test]
+fn cached_only_discovery_uses_listings_of_any_age_and_never_asks_gh() {
+    // ADR 0136: a routine cycle rebuilds PRs from whatever is cached,
+    // even long expired, and a remote with nothing cached simply has no
+    // PRs until a fetch brings them in.
+    let runner = CountingGh::default();
+    let context = DiscoveryContext::default()
+        .with_forge_fetch(crate::discovery::forge::ForgeFetch::CachedOnly);
+    cache_listing(
+        &context,
+        "github.com/octo/a",
+        std::time::Duration::from_secs(5 * 3600),
+    );
+
+    let fragment = GitHubForgeProvider::with_runner(runner.clone())
+        .discover(&[octo("a"), octo("b")], &context)
+        .expect("discover");
+
+    assert_eq!(pr_ids(&fragment), ["octo/a#9"]);
+    assert!(runner.calls().is_empty(), "{:?}", runner.calls());
+}
+
+#[test]
+fn cached_only_discovery_does_not_look_up_signed_in_hosts() {
+    let runner = FakeGh::with_pull_requests("[]").with_hosts(&[ENTERPRISE_HOST]);
+    let context = DiscoveryContext::default()
+        .with_forge_fetch(crate::discovery::forge::ForgeFetch::CachedOnly);
+    GitHubForgeProvider::with_runner(runner.clone())
+        .discover(&[enterprise_repo()], &context)
+        .expect("discover");
+    assert_eq!(runner.host_lookups(), 0);
+    assert_eq!(runner.last_repo(), None);
+
+    // Once a fetch has cached the hosts and listings, cached-only
+    // discovery finds the enterprise PRs.
+    let provider = GitHubForgeProvider::with_runner(
+        FakeGh::with_pull_requests(r#"[{"number": 4, "headRefName": "x"}]"#)
+            .with_hosts(&[ENTERPRISE_HOST]),
+    );
+    assert_eq!(provider.prefetch(&[enterprise_repo()], &context), 2);
+    let fragment = provider
+        .discover(&[enterprise_repo()], &context)
+        .expect("discover");
+    let mut ids = pr_ids(&fragment);
+    ids.sort();
+    assert_eq!(ids, ["me/repo#4", "team/repo#4"]);
+}
+
+#[test]
+fn prefetch_asks_only_for_missing_or_expired_listings() {
+    let runner = CountingGh::default();
+    let context = DiscoveryContext::default();
+    cache_listing(&context, "github.com/octo/fresh", std::time::Duration::ZERO);
+    cache_listing(
+        &context,
+        "github.com/octo/expired",
+        std::time::Duration::from_secs(2 * 3600),
+    );
+    let provider = GitHubForgeProvider::with_runner(runner.clone());
+
+    let asked = provider.prefetch(&[octo("fresh"), octo("expired"), octo("new")], &context);
+
+    assert_eq!(asked, 2);
+    let mut calls = runner.calls();
+    calls.sort();
+    assert_eq!(
+        calls,
+        [
+            "github.com/octo/expired",
+            "github.com/octo/expired",
+            "github.com/octo/new",
+            "github.com/octo/new"
+        ]
+    );
+    // Everything is fresh now: a second prefetch asks nothing.
+    assert_eq!(
+        provider.prefetch(&[octo("fresh"), octo("expired"), octo("new")], &context),
+        0
+    );
+}
+
+/// A runner that sleeps on each call and records how many calls ran at
+/// once.
+#[derive(Clone, Default)]
+struct OverlapGh {
+    running: std::sync::Arc<std::sync::atomic::AtomicUsize>,
+    peak: std::sync::Arc<std::sync::atomic::AtomicUsize>,
+}
+
+impl crate::discovery::forge::GhRunner for OverlapGh {
+    fn list_pull_requests(
+        &self,
+        _repo: &str,
+        _filter: &crate::discovery::forge::PrListFilter,
+        _fields: &str,
+    ) -> anyhow::Result<GhOutcome> {
+        use std::sync::atomic::Ordering::SeqCst;
+        let now = self.running.fetch_add(1, SeqCst) + 1;
+        self.peak.fetch_max(now, SeqCst);
+        std::thread::sleep(std::time::Duration::from_millis(30));
+        self.running.fetch_sub(1, SeqCst);
+        Ok(GhOutcome::PullRequests("[]".to_string()))
+    }
+
+    fn view_pull_request(
+        &self,
+        _repo: &str,
+        _number: u64,
+        _fields: &str,
+    ) -> anyhow::Result<GhOutcome> {
+        Ok(GhOutcome::PullRequests("{}".to_string()))
+    }
+}
+
+#[test]
+fn fetches_run_at_most_the_configured_number_of_gh_calls_at_once() {
+    let repos: Vec<ForgeRepo> = (0..6).map(|n| octo(&format!("r{n}"))).collect();
+    for (limit, expected_peak) in [(1, 1), (3, 3), (64, 12)] {
+        let runner = OverlapGh::default();
+        let context = DiscoveryContext::default().with_forge_concurrency(limit);
+        GitHubForgeProvider::with_runner(runner.clone()).prefetch(&repos, &context);
+        assert_eq!(
+            runner.peak.load(std::sync::atomic::Ordering::SeqCst),
+            expected_peak,
+            "limit {limit}"
+        );
+    }
+    assert_eq!(
+        DiscoveryContext::default().forge_concurrency(),
+        crate::discovery::forge::DEFAULT_FORGE_CONCURRENCY
+    );
+    assert_eq!(
+        DiscoveryContext::default()
+            .with_forge_concurrency(0)
+            .forge_concurrency(),
+        1,
+        "zero is clamped, never a stall"
+    );
+}

@@ -68,12 +68,8 @@ impl GraphArgs {
         } else {
             self.scan_roots.clone()
         };
-        let mut snapshot = warm_start_discover_and_resolve(
-            roots,
-            self.refresh,
-            self.no_cache,
-            &outcome.config.server.intervals,
-        )?;
+        let mut snapshot =
+            warm_start_discover_and_resolve(roots, self.refresh, self.no_cache, &outcome.config)?;
         if self.explain {
             crate::resolve::explain_resolved_relationships(&mut snapshot);
         }

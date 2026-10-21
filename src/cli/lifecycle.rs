@@ -41,6 +41,7 @@ impl ServeArgs {
         crate::server::run(crate::server::ServeConfig {
             scan_roots,
             intervals: outcome.config.server.intervals,
+            forge: outcome.config.forge,
         })
     }
 }
@@ -125,19 +126,14 @@ impl RefreshArgs {
         };
         match self.class.as_deref() {
             None => {
-                warm_start_discover_and_resolve(
-                    roots,
-                    true,
-                    false,
-                    &outcome.config.server.intervals,
-                )?;
+                warm_start_discover_and_resolve(roots, true, false, &outcome.config)?;
                 println!("refreshed via in-process cold rebuild");
             }
             Some(name) => {
                 // `parse` was validated above.
                 let class = crate::discovery::cache::ProviderClass::parse(name)
                     .expect("class validated above");
-                in_process_class_refresh(class, roots, &outcome.config.server.intervals)?;
+                in_process_class_refresh(class, roots, &outcome.config)?;
                 println!("refreshed {name} via in-process per-class refresh");
             }
         }
@@ -155,15 +151,20 @@ impl RefreshArgs {
 fn in_process_class_refresh(
     class: crate::discovery::cache::ProviderClass,
     roots: Vec<PathBuf>,
-    intervals: &crate::config::ServerIntervals,
+    config: &crate::config::Config,
 ) -> Result<()> {
     let mut prior = load_prior_from_graph_bin();
     for provider in class.providers() {
         prior.evict_provider(provider);
     }
-    let discovery_config = crate::discovery::LocalDiscoveryConfig::from_env();
-    let snapshot =
-        crate::discovery::discover_local_warm_with(roots, discovery_config, prior, intervals)?;
+    let discovery_config = crate::discovery::LocalDiscoveryConfig::from_env()
+        .with_forge_concurrency(config.forge.concurrency);
+    let snapshot = crate::discovery::discover_local_warm_with(
+        roots,
+        discovery_config,
+        prior,
+        &config.server.intervals,
+    )?;
     let snapshot = crate::resolve::resolve_snapshot(snapshot);
     cache_resolved_snapshot(&snapshot, false);
     Ok(())

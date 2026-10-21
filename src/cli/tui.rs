@@ -424,6 +424,8 @@ impl TuiArgs {
             no_cache: self.no_cache,
             refresh: self.refresh,
             discovery_caches: std::sync::Arc::default(),
+            forge_fetch: crate::discovery::forge::ForgeFetch::default(),
+            forge_concurrency: outcome.config.forge.concurrency,
         };
 
         #[cfg(feature = "snapshot")]

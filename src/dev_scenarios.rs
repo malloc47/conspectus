@@ -277,6 +277,8 @@ impl ScenarioWorld {
             no_cache: true,
             refresh: true,
             discovery_caches: std::sync::Arc::default(),
+            forge_fetch: crate::discovery::forge::ForgeFetch::default(),
+            forge_concurrency: crate::discovery::forge::DEFAULT_FORGE_CONCURRENCY,
         }
     }
 

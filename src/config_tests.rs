@@ -678,6 +678,46 @@ fn tui_views_filter_invalid_pr_state_emits_diagnostic_and_keeps_valid_values() {
     );
 }
 
+fn forge_config_from(text: &str) -> (ForgeConfig, Vec<String>) {
+    let temp = TempDir::new().expect("temp dir");
+    let project = temp.path().join("project");
+    fs::create_dir(&project).expect("create project dir");
+    write_file(&project.join(PROJECT_CONFIG_FILENAME), text);
+    let outcome = ConfigLoader::new()
+        .with_home(temp.path())
+        .load_from(&project);
+    let messages = outcome
+        .diagnostics
+        .iter()
+        .map(|diagnostic| diagnostic.message.clone())
+        .collect();
+    (outcome.config.forge, messages)
+}
+
+#[test]
+fn forge_concurrency_defaults_to_four_and_reads_a_positive_integer() {
+    let (forge, diagnostics) = forge_config_from("");
+    assert!(diagnostics.is_empty(), "{diagnostics:?}");
+    assert_eq!(forge.concurrency, 4);
+
+    let (forge, diagnostics) = forge_config_from("[forge]\nconcurrency = 12\n");
+    assert!(diagnostics.is_empty(), "{diagnostics:?}");
+    assert_eq!(forge.concurrency, 12);
+}
+
+#[test]
+fn an_invalid_forge_concurrency_is_a_diagnostic_and_keeps_the_default() {
+    for raw in ["0", "-3", "\"eight\"", "2.5"] {
+        let (forge, diagnostics) = forge_config_from(&format!("[forge]\nconcurrency = {raw}\n"));
+        assert_eq!(forge.concurrency, 4, "{raw}");
+        assert_eq!(diagnostics.len(), 1, "{raw}: {diagnostics:?}");
+        assert!(
+            diagnostics[0].contains("invalid `[forge]` `concurrency`"),
+            "{raw}: {diagnostics:?}"
+        );
+    }
+}
+
 #[test]
 fn legacy_sessions_grouping_seeds_new_key_with_deprecation_diagnostic() {
     let temp = TempDir::new().expect("temp dir");

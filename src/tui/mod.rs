@@ -145,6 +145,12 @@ pub struct RunConfig {
     /// Discovery results reused across this session's refreshes
     /// (ADR 0099). Clones share the same caches.
     pub discovery_caches: std::sync::Arc<crate::discovery::DiscoveryCaches>,
+    /// Whether this process's own discovery may ask the forges. A live
+    /// TUI runs cached-only and fetches on a background worker; the
+    /// snapshot tool fetches (ADR 0136).
+    pub forge_fetch: crate::discovery::forge::ForgeFetch,
+    /// `[forge] concurrency` (ADR 0136).
+    pub forge_concurrency: usize,
 }
 
 impl RunConfig {
@@ -177,6 +183,8 @@ impl RunConfig {
             no_cache: false,
             refresh: false,
             discovery_caches: std::sync::Arc::default(),
+            forge_fetch: crate::discovery::forge::ForgeFetch::default(),
+            forge_concurrency: crate::discovery::forge::DEFAULT_FORGE_CONCURRENCY,
         }
     }
 }
