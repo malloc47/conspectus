@@ -1,11 +1,11 @@
 ---
 id: CSP-651
 title: Make conspectus serve honour configured scan roots
-status: In Progress
+status: Done
 assignee:
   - '@claude'
 created_date: '2026-10-21 19:39'
-updated_date: '2026-10-21 19:44'
+updated_date: '2026-10-21 20:13'
 labels:
   - server
   - config
@@ -29,16 +29,16 @@ When the daemon is running the TUI reads its snapshot instead of discovering its
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 With `[tui] scan_roots` configured and no `--scan-root` flag, `conspectus serve` discovers from the configured roots, and its startup line lists them
-- [ ] #2 `--scan-root` flags still take precedence over configured roots, and with neither the launch directory is used as before (ADR 0111)
-- [ ] #3 Tests cover the serve root resolution order
-- [ ] #4 docs/operations.md states that serve reads `[tui] scan_roots`
+- [x] #1 With `[tui] scan_roots` configured and no `--scan-root` flag, `conspectus serve` discovers from the configured roots, and its startup line lists them
+- [x] #2 `--scan-root` flags still take precedence over configured roots, and with neither the launch directory is used as before (ADR 0111)
+- [x] #3 Tests cover the serve root resolution order
+- [x] #4 docs/operations.md states that serve reads `[tui] scan_roots`
 <!-- AC:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
-- [ ] #1 `just check` passes, or `git diff --check` for docs-only changes
-- [ ] #2 Docs and ADRs are updated when behavior, architecture, or workflow change
+- [x] #1 `just check` passes, or `git diff --check` for docs-only changes
+- [x] #2 Docs and ADRs are updated when behavior, architecture, or workflow change
 <!-- DOD:END -->
 
 ## Implementation Plan
@@ -55,3 +55,9 @@ When the daemon is running the TUI reads its snapshot instead of discovering its
 <!-- SECTION:NOTES:BEGIN -->
 Landed in 4f24fb5. `tui` and `serve` now share `cli::long_running_scan_roots` (flags, then `[tui] scan_roots`, then launch dir). Manual check with a throwaway config/socket: `serve` printed `scan roots = ["<configured>"]` with config only, `["/tmp"]` with `--scan-root /tmp`, and the launch directory with no config. `refresh`'s in-process fallback still scans flags or cwd, matching the one-shot commands whose `graph.bin` it rebuilds; left as is.
 <!-- SECTION:NOTES:END -->
+
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+`conspectus serve` now resolves scan roots like `conspectus tui` (flags, then `[tui] scan_roots`, then the launch directory, ADR 0111) through the shared `cli::long_running_scan_roots`, so a configured root reaches the daemon whose snapshot the TUI reads. Landed in 4f24fb5 with a unit test of the precedence order and docs/operations.md updates. Verified by running a throwaway `serve` against a temp config: its startup line listed the configured root, `/tmp` with `--scan-root /tmp`, and the launch directory with no config. `just check` passes.
+<!-- SECTION:FINAL_SUMMARY:END -->
