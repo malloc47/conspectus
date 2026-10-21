@@ -5,7 +5,7 @@ status: In Progress
 assignee:
   - '@claude'
 created_date: '2026-10-21 19:39'
-updated_date: '2026-10-21 19:46'
+updated_date: '2026-10-21 19:52'
 labels:
   - discovery
   - workspace
@@ -56,3 +56,9 @@ ADR 0027 keeps generic (manifest-less) workspace inference limited to explicit s
 4. Call it in `discover_local_warm_with` on the merged (fresh + prior) snapshot, before forge discovery and mutators, so cross_link sees the workspace and its membership links.
 5. Tests: workspace discovered via an observed Codex session cwd outside the scan root, with an `associated_with` workspace link; a workspace already found through a scan root is not re-read or duplicated; a malformed manifest yields a diagnostic; registry tests updated.
 <!-- SECTION:PLAN:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+Landed in 82cac5a (ADR 0138) and 3d12164. New tests in atelier_tests.rs: observed Codex session cwd outside the scan root discovers the workspace with `atelier::cwd` provenance, membership links and a session `associated_with` link; a mux session path finds the manifest; a workspace already in the snapshot is skipped (manifest broken afterwards produced no diagnostic, so it was not re-read); a malformed manifest via an active-pane path yields one `Config` diagnostic. Full `cargo nextest run --all-targets --all-features`: 2558 passed. Real machine, in-process `graph --refresh --no-cache` from ~/src/oss/conspectus: `~/src/workspaces/sysadmin` and `~/src/workspaces/documentation` now appear (provider atelier) with 14 resolved session `associated_with` workspace relationships; previously absent.
+<!-- SECTION:NOTES:END -->

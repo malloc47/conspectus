@@ -15,6 +15,9 @@
 //!   cwd lives at or below a workspace member path.
 //! - `AgentSession` ↔ worktree/checkout `AssociatedWith` candidates when a
 //!   session's cwd lives at or below a discovered checkout root.
+//! - `MuxSession` → `Workspace` `RootedIn` candidates when a mux's session
+//!   path lives at or below a workspace member path; only the innermost
+//!   workspace is named (ADR 0139).
 //!
 //! Runtime process observation nodes are created here when active-pane process
 //! or fd evidence is available. Other provider-owned unresolved endpoints already
@@ -24,6 +27,7 @@ use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet, VecDeque};
 use std::fs;
 use std::path::Path;
 
+use crate::model::workspace_paths::{WorkspacePaths, normalize_path, path_at_or_under};
 use crate::model::{
     AgentSessionNode, CheckoutId, Confidence, Freshness, GraphLink, GraphNode, GraphSnapshot,
     LinkEndpoint, LinkState, MatchKind, MuxSessionNode, NodeId, Provenance, RelationKind,
@@ -103,7 +107,7 @@ fn infer_with_readers(
         })
         .collect();
     let checkout_roots = checkout_roots(snapshot);
-    let workspace_member_roots = workspace_member_roots(snapshot);
+    let workspace_paths = WorkspacePaths::from_snapshot(snapshot);
     let fork_roots = fork_roots(snapshot);
     let process_evidence_by_mux = process_snapshot
         .map(|snapshot| active_pane_process_evidence_by_mux(&mux_sessions, snapshot))
@@ -156,12 +160,27 @@ fn infer_with_readers(
             }
         }
 
-        for (workspace, root) in matching_workspaces(&session_cwd, &workspace_member_roots) {
+        for (workspace, root) in workspace_paths.matching(&session_cwd) {
             new_links.push(workspace_association_link(session, workspace, root));
         }
 
         if let Some((worktree, root)) = deepest_matching_checkout(&session_cwd, &checkout_roots) {
             new_links.push(checkout_association_link(session, worktree, root));
+        }
+    }
+
+    // The session path, not the active pane's, so a pane changing
+    // directory doesn't move the mux between workspaces (ADR 0139).
+    for mux in &mux_sessions {
+        let Some(path) = mux
+            .cwd
+            .as_deref()
+            .or(mux.active_pane_current_path.as_deref())
+        else {
+            continue;
+        };
+        if let Some((workspace, root)) = workspace_paths.innermost(path) {
+            new_links.push(mux_workspace_link(mux, workspace, root));
         }
     }
 
@@ -263,83 +282,6 @@ fn checkout_roots(snapshot: &GraphSnapshot) -> Vec<(CheckoutId, String)> {
             _ => None,
         })
         .collect()
-}
-
-/// Index workspaces by every path inside their visible tree —
-/// both the workspace `root` itself (so a session launched at
-/// the multi-repo composite directory attributes correctly, the
-/// agent-deck launch shape) and every member's `logical_path`
-/// (so a session inside a specific member subdir attributes via
-/// the deeper match). Used by [`matching_workspaces`] which
-/// picks the deepest match per workspace, so a session in a
-/// member subdir prefers the member; a session at the workspace
-/// root attributes to the root.
-///
-/// **Crucially excludes `canonical_checkout_root`** even though
-/// that field is also present on the membership link: when a
-/// workspace member is a symlink pointing outside the workspace
-/// tree, the canonical path is the *target* checkout's location
-/// and a session running there is *not* doing workspace-context
-/// work — it just happens to touch a repo that is also a
-/// workspace member. Indexing the canonical root would collapse
-/// the (A) workspace-rooted and (B) repo-shared classes that
-/// `docs/plans/workspace-view-redesign.md` keeps separate.
-///
-/// `canonical_checkout_root` remains on the membership link's
-/// `source_metadata.fields` for downstream consumers that need
-/// the canonical path; it just doesn't drive the
-/// session→workspace association.
-fn workspace_member_roots(snapshot: &GraphSnapshot) -> Vec<(NodeId, String)> {
-    let mut roots = BTreeSet::new();
-
-    for link in &snapshot.candidate_links {
-        if link.relation != RelationKind::WorkspaceContainsRepo {
-            continue;
-        }
-
-        // Workspace root itself — covers `cd <workspace> && agent`
-        // (the typical agent-deck launch shape).
-        if let NodeId::Workspace(ws) = &link.source {
-            roots.insert((link.source.clone(), normalize_path(&ws.root)));
-        }
-
-        // Member `logical_path` — covers `cd <workspace>/<member> && agent`
-        // (the typical atelier composite-tree shape). The deeper
-        // match wins via [`matching_workspaces`] so the member
-        // attribution preempts the root attribution when both fire.
-        if let Some(path) = link
-            .source_metadata
-            .fields
-            .get(crate::model::source_field::LOGICAL_PATH)
-            .and_then(serde_json::Value::as_str)
-        {
-            roots.insert((link.source.clone(), normalize_path(path)));
-        }
-    }
-
-    roots.into_iter().collect()
-}
-
-fn matching_workspaces<'a>(
-    session_cwd: &str,
-    workspace_roots: &'a [(NodeId, String)],
-) -> Vec<(&'a NodeId, &'a str)> {
-    let mut deepest_by_workspace: HashMap<&NodeId, &str> = HashMap::new();
-
-    for (workspace, root) in workspace_roots {
-        if !path_at_or_under(session_cwd, root) {
-            continue;
-        }
-
-        let current = deepest_by_workspace
-            .entry(workspace)
-            .or_insert(root.as_str());
-        if path_depth(root) > path_depth(current) {
-            *current = root;
-        }
-    }
-
-    deepest_by_workspace.into_iter().collect()
 }
 
 fn deepest_matching_checkout<'a>(
@@ -1823,6 +1765,33 @@ fn workspace_association_link(
     }
 }
 
+fn mux_workspace_link(mux: &MuxSessionNode, workspace: &NodeId, member_root: &str) -> GraphLink {
+    let source = NodeId::MuxSession(mux.id.clone());
+    let mut fields = crate::model::Metadata::new();
+    fields.insert(
+        "workspace_member_root".to_string(),
+        serde_json::Value::String(member_root.to_string()),
+    );
+    GraphLink {
+        id: format!("cross_link:{source}:rooted_in:{workspace}:session_path_within_workspace"),
+        source,
+        target: LinkEndpoint::Node {
+            id: workspace.clone(),
+        },
+        relation: RelationKind::RootedIn,
+        provenance: Provenance::Discovered,
+        confidence: Confidence::High,
+        freshness: Freshness::Fresh,
+        source_metadata: SourceMetadata {
+            adapter: ADAPTER_NAME.to_string(),
+            evidence: Some("mux session path within workspace member".to_string()),
+            fields,
+            freshness_epoch: None,
+        },
+        state: LinkState::Active,
+    }
+}
+
 fn checkout_association_link(
     session: &AgentSessionNode,
     worktree: &CheckoutId,
@@ -1851,29 +1820,6 @@ fn checkout_association_link(
         },
         state: LinkState::Active,
     }
-}
-
-fn normalize_path(path: &str) -> String {
-    let trimmed = path.trim_end_matches('/');
-    if trimmed.is_empty() {
-        "/".to_string()
-    } else {
-        trimmed.to_string()
-    }
-}
-
-fn path_at_or_under(child: &str, parent: &str) -> bool {
-    if child == parent {
-        return true;
-    }
-    if parent == "/" {
-        return child.starts_with('/');
-    }
-    child.starts_with(&format!("{parent}/"))
-}
-
-fn path_depth(path: &str) -> usize {
-    path.split('/').filter(|part| !part.is_empty()).count()
 }
 
 #[cfg(test)]

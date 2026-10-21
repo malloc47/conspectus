@@ -2084,3 +2084,40 @@ fn discovery_diagnostics_survive_resolution_without_duplicating() {
     let twice = resolve_snapshot(once);
     assert_eq!(twice.diagnostics, [unavailable]);
 }
+
+#[test]
+fn mux_rooted_in_keeps_one_workspace_and_a_declared_link_outranks_inference() {
+    // `rooted_in` is a single slot per mux (ADR 0139): an operator's
+    // declared workspace replaces the inferred one instead of sitting
+    // next to it.
+    let inferred = GraphLink::new(
+        "inferred",
+        mux("tmux:sysadmin"),
+        LinkEndpoint::Node {
+            id: workspace("/ws/inner"),
+        },
+        RelationKind::RootedIn,
+        Provenance::Discovered,
+    );
+    let declared = GraphLink::new(
+        "declared",
+        mux("tmux:sysadmin"),
+        LinkEndpoint::Node {
+            id: workspace("/ws/sysadmin"),
+        },
+        RelationKind::RootedIn,
+        Provenance::LocalDeclared,
+    );
+
+    let output = resolve_links(&[inferred, declared]);
+
+    assert_eq!(output.resolved_relationships.len(), 1);
+    assert_eq!(
+        output.resolved_relationships[0].target,
+        workspace("/ws/sysadmin")
+    );
+    assert_eq!(
+        output.resolved_relationships[0].competing_link_ids,
+        vec!["inferred"]
+    );
+}

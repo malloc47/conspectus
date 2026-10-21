@@ -8,6 +8,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 pub mod rkyv_adapters;
+pub mod workspace_paths;
 use rkyv_adapters::MetadataAsJson;
 
 mod graph;

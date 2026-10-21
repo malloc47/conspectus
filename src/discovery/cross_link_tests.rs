@@ -2018,3 +2018,122 @@ fn pane_running_only_an_opencode_server_does_not_host_the_harness() {
         "opencode"
     ));
 }
+
+fn rooted_in_targets(snapshot: &GraphSnapshot, native: &str) -> Vec<NodeId> {
+    let source = NodeId::MuxSession(MuxSessionId::new(format!("tmux:{native}")));
+    snapshot
+        .candidate_links
+        .iter()
+        .filter(|link| link.relation == RelationKind::RootedIn && link.source == source)
+        .filter_map(|link| link.target_node_id().cloned())
+        .collect()
+}
+
+fn workspace_id(root: &str) -> NodeId {
+    NodeId::Workspace(WorkspaceId::new(root))
+}
+
+#[test]
+fn mux_at_workspace_root_or_member_is_rooted_in_the_workspace() {
+    let mut snapshot = GraphSnapshot {
+        nodes: vec![
+            mux("root", Some("/workspace")),
+            mux("member", Some("/workspace/repo/crates")),
+            mux("outside", Some("/elsewhere")),
+            mux("no-path", None),
+            workspace("/workspace"),
+            repo("/workspace/repo/.git"),
+        ],
+        candidate_links: vec![workspace_contains_repo(
+            "/workspace",
+            "/workspace/repo/.git",
+            "/workspace/repo",
+        )],
+        ..GraphSnapshot::empty()
+    };
+
+    infer(&mut snapshot);
+
+    assert_eq!(
+        rooted_in_targets(&snapshot, "root"),
+        vec![workspace_id("/workspace")]
+    );
+    assert_eq!(
+        rooted_in_targets(&snapshot, "member"),
+        vec![workspace_id("/workspace")]
+    );
+    assert!(rooted_in_targets(&snapshot, "outside").is_empty());
+    assert!(rooted_in_targets(&snapshot, "no-path").is_empty());
+}
+
+#[test]
+fn mux_in_nested_workspaces_is_rooted_in_the_innermost() {
+    let mut snapshot = GraphSnapshot {
+        nodes: vec![
+            mux("deep", Some("/outer/inner/repo/src")),
+            mux("shallow", Some("/outer/notes")),
+            workspace("/outer"),
+            workspace("/outer/inner"),
+        ],
+        candidate_links: vec![
+            workspace_contains_repo("/outer", "/outer/inner/.git", "/outer/inner"),
+            workspace_contains_repo(
+                "/outer/inner",
+                "/outer/inner/repo/.git",
+                "/outer/inner/repo",
+            ),
+        ],
+        ..GraphSnapshot::empty()
+    };
+
+    infer(&mut snapshot);
+
+    assert_eq!(
+        rooted_in_targets(&snapshot, "deep"),
+        vec![workspace_id("/outer/inner")]
+    );
+    assert_eq!(
+        rooted_in_targets(&snapshot, "shallow"),
+        vec![workspace_id("/outer")]
+    );
+}
+
+#[test]
+fn mux_rooting_ignores_canonical_checkouts_and_the_active_pane_path() {
+    let GraphNode::MuxSession(mut wandering) = mux("wandering", Some("/home/op")) else {
+        unreachable!("mux builds a mux node");
+    };
+    // The pane moved into the workspace; the session still started
+    // outside it, so the mux isn't rooted there.
+    wandering.active_pane_current_path = Some("/home/op/atelier-ws/conspectus".to_string());
+    let GraphNode::MuxSession(mut pathless) = mux("pathless", None) else {
+        unreachable!("mux builds a mux node");
+    };
+    // With no session path the active pane's path is all there is.
+    pathless.active_pane_current_path = Some("/home/op/atelier-ws/conspectus".to_string());
+
+    let mut snapshot = GraphSnapshot {
+        nodes: vec![
+            mux("canonical", Some("/home/op/src/conspectus")),
+            GraphNode::MuxSession(wandering),
+            GraphNode::MuxSession(pathless),
+            workspace("/home/op/atelier-ws"),
+        ],
+        candidate_links: vec![workspace_contains_repo_paths(
+            "/home/op/atelier-ws",
+            "/home/op/src/conspectus/.git",
+            "/home/op/atelier-ws/conspectus",
+            "/home/op/src/conspectus",
+        )],
+        ..GraphSnapshot::empty()
+    };
+
+    infer(&mut snapshot);
+
+    assert!(rooted_in_targets(&snapshot, "canonical").is_empty());
+    assert!(rooted_in_targets(&snapshot, "wandering").is_empty());
+    assert_eq!(
+        rooted_in_targets(&snapshot, "pathless"),
+        vec![workspace_id("/home/op/atelier-ws")]
+    );
+}
