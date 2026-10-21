@@ -7,6 +7,7 @@ fn canonical_strings_are_stable() {
     assert_eq!(GIT, "git");
     assert_eq!(GIT_CWD, "git::cwd");
     assert_eq!(ATELIER, "atelier");
+    assert_eq!(ATELIER_CWD, "atelier::cwd");
     assert_eq!(GENERIC_WORKSPACE, "generic_workspace");
     assert_eq!(AGENT_DECK, "agent_deck");
     assert_eq!(TMUX, "tmux");
@@ -33,6 +34,7 @@ fn descriptor_constants_agree() {
         GIT,
         GIT_CWD,
         ATELIER,
+        ATELIER_CWD,
         GENERIC_WORKSPACE,
         AGENT_DECK,
         TMUX,

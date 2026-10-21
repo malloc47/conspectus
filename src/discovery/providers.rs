@@ -54,6 +54,12 @@ pub const GIT_CWD: &str = "git::cwd";
 /// metadata). Class: `git`.
 pub const ATELIER: &str = "atelier";
 
+/// Atelier workspaces found by walking up from observed agent-session
+/// and mux cwds rather than from scan roots (ADR 0138). Stamped
+/// distinct from [`ATELIER`] so it can be evicted/refreshed
+/// independently. Class: `git`.
+pub const ATELIER_CWD: &str = "atelier::cwd";
+
 /// Generic workspace fallback discovery for trees without an
 /// Atelier annotation. Class: `git`.
 pub const GENERIC_WORKSPACE: &str = "generic_workspace";
@@ -207,6 +213,10 @@ pub const REGISTRY: &[ProviderDescriptor] = &[
     },
     ProviderDescriptor {
         key: ATELIER,
+        kind: ProviderKind::Heavy(ProviderClass::Git),
+    },
+    ProviderDescriptor {
+        key: ATELIER_CWD,
         kind: ProviderKind::Heavy(ProviderClass::Git),
     },
     ProviderDescriptor {

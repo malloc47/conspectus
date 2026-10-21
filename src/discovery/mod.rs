@@ -656,6 +656,14 @@ pub fn discover_local_warm_with(
     // skipped because they were fresh).
     let mut snapshot = merge_with_prior(fresh, prior);
 
+    // Provider workspaces around observed cwds (ADR 0138). Runs on the
+    // merged snapshot so sessions and muxes from providers skipped this
+    // cycle still count, and before forge and the mutators so both see
+    // the workspace's members and membership links.
+    let observed_workspaces =
+        atelier::AtelierWorkspaceDiscovery::new().observed_cwd_fragment(&snapshot, &context);
+    snapshot = merge_fragments([GraphFragment::from(snapshot), observed_workspaces]);
+
     // Every forge stamps the `github` provider key until a second
     // forge emits real data. A fresh `github` slice came through the
     // prior merge above.

@@ -50,6 +50,7 @@ fn every_known_provider_string_maps_to_a_class() {
         "git",
         "git::cwd",
         "atelier",
+        "atelier::cwd",
         "generic_workspace",
         "agent_deck",
         "tmux",

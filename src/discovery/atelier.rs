@@ -69,6 +69,69 @@ impl DiscoveryProvider for AtelierWorkspaceDiscovery {
 }
 
 impl AtelierWorkspaceDiscovery {
+    /// Atelier workspaces whose `atelier.toml` sits at or above a path
+    /// the graph already observed: an agent-session cwd, a mux session
+    /// path, or a mux active-pane path (ADR 0138). Workspaces already
+    /// in `snapshot` (found through a scan root or a still-fresh slice)
+    /// are skipped, so each manifest is read at most once per run and
+    /// only when its workspace is missing. A manifest that fails to
+    /// load becomes a diagnostic rather than failing discovery, since
+    /// nobody asked to scan that directory.
+    pub(crate) fn observed_cwd_fragment(
+        &self,
+        snapshot: &crate::model::GraphSnapshot,
+        context: &DiscoveryContext,
+    ) -> GraphFragment {
+        let mut observed = std::collections::BTreeSet::new();
+        let mut known_roots = std::collections::BTreeSet::new();
+        for node in &snapshot.nodes {
+            match node {
+                GraphNode::AgentSession(session) => observed.extend(session.cwd.as_deref()),
+                GraphNode::MuxSession(mux) => {
+                    observed.extend(mux.cwd.as_deref());
+                    observed.extend(mux.active_pane_current_path.as_deref());
+                }
+                GraphNode::Workspace(workspace) => {
+                    known_roots.insert(workspace.root.as_str());
+                }
+                _ => {}
+            }
+        }
+
+        let configs: std::collections::BTreeSet<PathBuf> = observed
+            .into_iter()
+            .filter_map(|path| find_atelier_config(Path::new(path)))
+            .filter(|config| {
+                config.parent().is_some_and(|root| {
+                    !known_roots.contains(crate::discovery::path_to_string(root).as_str())
+                })
+            })
+            .collect();
+
+        let mut fragments = Vec::new();
+        let mut diagnostics = Vec::new();
+        for config in configs {
+            match self.discover_config(&config, context) {
+                Ok(fragment) => fragments.push(fragment),
+                Err(error) => diagnostics.push(crate::model::Diagnostic::Config {
+                    path: crate::discovery::path_to_string(&config),
+                    message: format!(
+                        "failed to load Atelier workspace found from an observed cwd: {error:#}"
+                    ),
+                }),
+            }
+        }
+
+        let mut fragment = GraphFragment::from(merge_fragments(fragments));
+        fragment.diagnostics.extend(diagnostics);
+        crate::discovery::stamp_fragment(
+            &mut fragment,
+            crate::discovery::providers::ATELIER_CWD,
+            crate::discovery::current_epoch(),
+        );
+        fragment
+    }
+
     fn discover_config(
         &self,
         config_path: &Path,

@@ -67,6 +67,7 @@ impl ProviderClass {
                 providers::GIT,
                 providers::GIT_CWD,
                 providers::ATELIER,
+                providers::ATELIER_CWD,
                 providers::GENERIC_WORKSPACE,
                 providers::AGENT_DECK,
             ],

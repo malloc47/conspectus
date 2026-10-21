@@ -1,10 +1,11 @@
 ---
 id: CSP-652
 title: Discover Atelier workspaces from observed session and mux cwds
-status: To Do
+status: In Progress
 assignee:
   - '@claude'
 created_date: '2026-10-21 19:39'
+updated_date: '2026-10-21 19:46'
 labels:
   - discovery
   - workspace
@@ -45,3 +46,13 @@ ADR 0027 keeps generic (manifest-less) workspace inference limited to explicit s
 - [ ] #1 `just check` passes, or `git diff --check` for docs-only changes
 - [ ] #2 Docs and ADRs are updated when behavior, architecture, or workflow change
 <!-- DOD:END -->
+
+## Implementation Plan
+
+<!-- SECTION:PLAN:BEGIN -->
+1. ADR 0138: provider workspace manifests (Atelier) are discovered from observed agent-session and mux cwds; generic inference stays scan-root-only (ADR 0027). Update docs/design.md and the ADR index.
+2. Add provider key `atelier::cwd` (git class) to the registry and `ProviderClass::Git.providers()` so the slice is gated and evicted with the git class.
+3. Add `atelier::observed_cwd_fragment(snapshot, context)`: collect session cwd, mux cwd and active pane path; walk up for `atelier.toml`; dedupe manifests; skip workspaces already in the snapshot; run the existing `discover_config`; turn errors into `Diagnostic::Config`; stamp `atelier::cwd`.
+4. Call it in `discover_local_warm_with` on the merged (fresh + prior) snapshot, before forge discovery and mutators, so cross_link sees the workspace and its membership links.
+5. Tests: workspace discovered via an observed Codex session cwd outside the scan root, with an `associated_with` workspace link; a workspace already found through a scan root is not re-read or duplicated; a malformed manifest yields a diagnostic; registry tests updated.
+<!-- SECTION:PLAN:END -->

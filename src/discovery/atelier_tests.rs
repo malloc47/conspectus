@@ -541,3 +541,171 @@ fn git(root: &Path, args: &[&str]) {
         String::from_utf8_lossy(&output.stderr)
     );
 }
+
+const OBSERVED_WORKSPACE_CONFIG: &str = r#"
+[workspace]
+name = "sysadmin"
+
+[[repos]]
+name = "config"
+path = "/source/config"
+"#;
+
+fn canonical_root(fixture: &AtelierFixture) -> String {
+    crate::discovery::path_to_string(&fixture.root().canonicalize().expect("canonical root"))
+}
+
+fn workspace_node_id(root: &str) -> crate::model::NodeId {
+    crate::model::NodeId::Workspace(WorkspaceId::new(root.to_string()))
+}
+
+#[test]
+fn observed_session_cwd_discovers_atelier_workspace_outside_scan_roots() {
+    use crate::discovery::harness::codex::HARNESS_KEY as CODEX_KEY;
+    use crate::discovery::harness::fixtures::{CodexSessionRecord, HarnessFixture};
+
+    let fixture = AtelierFixture::new();
+    fixture.write_config(OBSERVED_WORKSPACE_CONFIG);
+    fixture.init_repo("config");
+    let root = canonical_root(&fixture);
+
+    // The scan root is unrelated: the workspace is only reachable
+    // through the session's cwd inside its `config` member.
+    let elsewhere = TempDir::new().expect("temp dir");
+    let scan_root = elsewhere.path().join("scan");
+    fs::create_dir(&scan_root).expect("scan dir");
+    let harness = HarnessFixture::at(elsewhere.path().join("state"));
+    harness
+        .write_codex_session(
+            &CodexSessionRecord::new("session-sysadmin").with_cwd(format!("{root}/config")),
+        )
+        .expect("write codex session");
+    let config = LocalDiscoveryConfig::empty()
+        .with_harness_state_root(CODEX_KEY, harness.codex_state_root());
+
+    let snapshot = discover_local_with([scan_root.as_path()], config).expect("discover");
+
+    let workspace = workspace_node_id(&root);
+    assert!(
+        snapshot.nodes.iter().any(|node| matches!(
+            node,
+            GraphNode::Workspace(ws)
+                if ws.root == root && ws.name.as_deref() == Some("sysadmin")
+        )),
+        "the observed cwd should surface the Atelier workspace"
+    );
+    assert_eq!(
+        snapshot
+            .node_provenance
+            .get(&workspace)
+            .map(|prov| prov.provider.as_str()),
+        Some(crate::discovery::providers::ATELIER_CWD)
+    );
+    assert!(
+        snapshot.candidate_links.iter().any(|link| {
+            link.relation == RelationKind::WorkspaceContainsRepo && link.source == workspace
+        }),
+        "membership links come with the workspace"
+    );
+    assert!(
+        snapshot.candidate_links.iter().any(|link| {
+            link.relation == RelationKind::AssociatedWith
+                && matches!(link.source, crate::model::NodeId::AgentSession(_))
+                && link.target_node_id() == Some(&workspace)
+        }),
+        "the session inside the workspace should be associated with it"
+    );
+}
+
+#[test]
+fn observed_mux_session_path_discovers_atelier_workspace() {
+    let fixture = AtelierFixture::new();
+    fixture.write_config(OBSERVED_WORKSPACE_CONFIG);
+    fixture.init_repo("config");
+    let root = canonical_root(&fixture);
+
+    let mut snapshot = crate::model::GraphSnapshot::empty();
+    let mut mux = crate::model::MuxSessionNode::new(
+        crate::model::MuxSessionId::new("tmux:sysadmin"),
+        "tmux",
+        "sysadmin",
+    );
+    mux.cwd = Some(root.clone());
+    snapshot.nodes.push(GraphNode::MuxSession(mux));
+
+    let fragment = AtelierWorkspaceDiscovery::new()
+        .observed_cwd_fragment(&snapshot, &DiscoveryContext::default());
+
+    assert!(
+        fragment
+            .nodes
+            .iter()
+            .any(|node| matches!(node, GraphNode::Workspace(ws) if ws.root == root))
+    );
+    assert!(fragment.diagnostics.is_empty());
+}
+
+#[test]
+fn observed_cwd_skips_workspaces_already_in_the_snapshot() {
+    let fixture = AtelierFixture::new();
+    fixture.write_config(OBSERVED_WORKSPACE_CONFIG);
+    fixture.init_repo("config");
+    let root = canonical_root(&fixture);
+
+    let mut snapshot = crate::model::GraphSnapshot::empty();
+    snapshot.nodes.push(GraphNode::Workspace(WorkspaceNode {
+        id: WorkspaceId::new(root.clone()),
+        root: root.clone(),
+        provider: Some("atelier".to_string()),
+        name: Some("sysadmin".to_string()),
+    }));
+    let mut mux = crate::model::MuxSessionNode::new(
+        crate::model::MuxSessionId::new("tmux:sysadmin"),
+        "tmux",
+        "sysadmin",
+    );
+    mux.cwd = Some(format!("{root}/config"));
+    snapshot.nodes.push(GraphNode::MuxSession(mux));
+
+    // Breaking the manifest proves it isn't read again: a re-read
+    // would surface a diagnostic.
+    fixture.write_config("not = [valid");
+    let fragment = AtelierWorkspaceDiscovery::new()
+        .observed_cwd_fragment(&snapshot, &DiscoveryContext::default());
+
+    assert!(fragment.nodes.is_empty(), "{:?}", fragment.nodes);
+    assert!(
+        fragment.diagnostics.is_empty(),
+        "{:?}",
+        fragment.diagnostics
+    );
+}
+
+#[test]
+fn malformed_manifest_found_from_an_observed_cwd_is_a_diagnostic() {
+    let fixture = AtelierFixture::new();
+    fixture.write_config("not = [valid");
+    let root = canonical_root(&fixture);
+
+    let mut snapshot = crate::model::GraphSnapshot::empty();
+    let mut mux = crate::model::MuxSessionNode::new(
+        crate::model::MuxSessionId::new("tmux:broken"),
+        "tmux",
+        "broken",
+    );
+    mux.active_pane_current_path = Some(root.clone());
+    snapshot.nodes.push(GraphNode::MuxSession(mux));
+
+    let fragment = AtelierWorkspaceDiscovery::new()
+        .observed_cwd_fragment(&snapshot, &DiscoveryContext::default());
+
+    assert!(fragment.nodes.is_empty());
+    assert!(
+        matches!(
+            fragment.diagnostics.as_slice(),
+            [crate::model::Diagnostic::Config { path, .. }] if path == &format!("{root}/atelier.toml")
+        ),
+        "{:?}",
+        fragment.diagnostics
+    );
+}
