@@ -1550,7 +1550,11 @@ fn cwd_for_node(
     use crate::model::{GraphNode, NodeId};
     snapshot.nodes.iter().find_map(|n| match (node, n) {
         (NodeId::Checkout(id), GraphNode::Checkout(c)) if &c.id == id => Some(c.root.clone()),
-        (NodeId::Repo(id), GraphNode::Repo(r)) if &r.id == id => r.source_paths.first().cloned(),
+        // The path the repo's header shows, so a mux opened from it
+        // starts there rather than in whichever checkout was probed first.
+        (NodeId::Repo(id), GraphNode::Repo(r)) if &r.id == id => {
+            Some(crate::tui::rows::repo_display_path(id, Some(r)))
+        }
         (NodeId::MuxSession(id), GraphNode::MuxSession(m)) if &m.id == id => {
             m.active_pane_current_path.clone().or_else(|| m.cwd.clone())
         }

@@ -643,17 +643,8 @@ impl<'a> SessionsData<'a> {
     }
 
     fn repo_display_path(&self, repo: &RepoId) -> String {
-        let node_id = NodeId::Repo(repo.clone());
-        let common_dir = repo_display_path_from_common_dir(&repo.common_dir).to_string();
-        self.repos
-            .get(&node_id)
-            .and_then(|repo| {
-                repo.source_paths
-                    .iter()
-                    .find(|path| !path.contains("/.agent-deck/multi-repo-worktrees/"))
-            })
-            .cloned()
-            .unwrap_or(common_dir)
+        let node = self.repos.get(&NodeId::Repo(repo.clone())).copied();
+        crate::tui::rows::repo_display_path(repo, node)
     }
 }
 

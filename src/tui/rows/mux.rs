@@ -600,23 +600,11 @@ impl<'a> PathIndex<'a> {
     }
 
     pub(super) fn repo_display_path(&self, repo: &RepoId) -> String {
-        let common_dir = repo
-            .common_dir
-            .strip_suffix("/.git")
-            .unwrap_or(&repo.common_dir)
-            .to_string();
-        for node in &self.snapshot.nodes {
-            if let GraphNode::Repo(r) = node
-                && r.id == *repo
-                && let Some(path) = r
-                    .source_paths
-                    .iter()
-                    .find(|p| !p.contains("/.agent-deck/multi-repo-worktrees/"))
-            {
-                return path.clone();
-            }
-        }
-        common_dir
+        let node = self.snapshot.nodes.iter().find_map(|node| match node {
+            GraphNode::Repo(r) if r.id == *repo => Some(r),
+            _ => None,
+        });
+        crate::tui::rows::repo_display_path(repo, node)
     }
 }
 

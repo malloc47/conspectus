@@ -417,6 +417,30 @@ pub fn format_workspace_display(
     out
 }
 
+/// Operator-facing path for a repo (ADR 0034). A non-bare repo's
+/// `common_dir` is `<checkout>/.git`, so its parent is the canonical
+/// checkout whichever checkout a probe reached first; discovery keeps
+/// only the first probe's `source_paths` (first-write-wins merge), so
+/// reading those instead would make labels, sort order, and launch
+/// directories depend on probe order. A bare repo implies no checkout,
+/// so it falls back to the first probed checkout outside agent-deck's
+/// multi-repo worktrees, then to the common dir itself.
+pub fn repo_display_path(
+    repo: &crate::model::RepoId,
+    node: Option<&crate::model::RepoNode>,
+) -> String {
+    if let Some(canonical) = repo.common_dir.strip_suffix("/.git") {
+        return canonical.to_string();
+    }
+    node.and_then(|node| {
+        node.source_paths
+            .iter()
+            .find(|path| !path.contains("/.agent-deck/multi-repo-worktrees/"))
+    })
+    .cloned()
+    .unwrap_or_else(|| repo.common_dir.clone())
+}
+
 /// Header text for a workspace group, shared by the sessions and mux
 /// views so both read identically: the workspace node's `name`, else
 /// the root's last component, else the `~`-shortened root, followed by

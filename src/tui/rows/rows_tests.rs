@@ -262,3 +262,28 @@ fn mux_program_harness_falls_back_to_the_pin_launch_argv() {
     let npm = bare.with_active_pane_command("npm");
     assert_eq!(mux_program_harness(&npm, Some(&atelier_pin), None), None);
 }
+
+#[test]
+fn repo_display_path_for_non_bare_repos_ignores_probed_paths() {
+    // Whichever checkout a probe reached first, the canonical clone is
+    // the directory holding `.git` (ADR 0034).
+    let repo = crate::model::RepoId::new("/src/drw/developer/.git");
+    let mut node = crate::model::RepoNode::new(repo.clone());
+    node.source_paths
+        .push("/src/workspaces/documentation/developer".to_string());
+
+    assert_eq!(repo_display_path(&repo, Some(&node)), "/src/drw/developer");
+    assert_eq!(repo_display_path(&repo, None), "/src/drw/developer");
+}
+
+#[test]
+fn repo_display_path_for_bare_repos_uses_a_probed_checkout() {
+    let repo = crate::model::RepoId::new("/srv/git/foo.git");
+    let mut node = crate::model::RepoNode::new(repo.clone());
+    node.source_paths
+        .push("/home/op/.agent-deck/multi-repo-worktrees/abc/foo".to_string());
+    node.source_paths.push("/home/op/src/foo".to_string());
+
+    assert_eq!(repo_display_path(&repo, Some(&node)), "/home/op/src/foo");
+    assert_eq!(repo_display_path(&repo, None), "/srv/git/foo.git");
+}

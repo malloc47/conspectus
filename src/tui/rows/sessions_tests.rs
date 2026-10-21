@@ -3017,3 +3017,98 @@ fn worktree_group_marker_is_quiet_for_plain_primary() {
         Some("linked · prunable"),
     );
 }
+
+#[test]
+fn repo_groups_do_not_depend_on_which_checkout_was_probed_first() {
+    // Same repo probed through its linked worktree and its canonical
+    // clone, merged in both orders: first-write-wins keeps a different
+    // `source_paths` each time, and the tree must not change (ADR 0034).
+    let probe = |common_dir: &str, root: &str| {
+        let mut snapshot = GraphSnapshot::empty();
+        snapshot.nodes.push(repo_with_source(common_dir, root));
+        snapshot.nodes.push(worktree(common_dir, root));
+        crate::discovery::GraphFragment::from(snapshot)
+    };
+    let tree_for = |linked_first: bool| {
+        let linked = probe(
+            "/home/op/src/drw/developer/.git",
+            "/home/op/src/workspaces/developer",
+        );
+        let canonical = probe(
+            "/home/op/src/drw/developer/.git",
+            "/home/op/src/drw/developer",
+        );
+        let (first, second) = if linked_first {
+            (linked, canonical)
+        } else {
+            (canonical, linked)
+        };
+        let mut sessions = GraphSnapshot::empty();
+        sessions.nodes.push(agent_session(
+            "codex",
+            "/state",
+            "linked",
+            Some("/home/op/src/workspaces/developer"),
+            None,
+            None,
+        ));
+        sessions.nodes.push(agent_session(
+            "codex",
+            "/state",
+            "canonical",
+            Some("/home/op/src/drw/developer"),
+            None,
+            None,
+        ));
+        sessions.nodes.push(agent_session(
+            "codex",
+            "/state",
+            "csp",
+            Some("/home/op/src/oss/conspectus"),
+            None,
+            None,
+        ));
+        let snapshot = crate::discovery::merge_fragments([
+            first,
+            second,
+            probe(
+                "/home/op/src/oss/conspectus/.git",
+                "/home/op/src/oss/conspectus",
+            ),
+            crate::discovery::GraphFragment::from(sessions),
+        ]);
+        let tree = build(SessionsBuildInputs {
+            snapshot: &resolve_snapshot(snapshot),
+            grouping: SessionsGrouping::Repo,
+            home: Some(home().as_path()),
+            now: None,
+            cwd: None,
+            filter: RowFilter::default(),
+        });
+        tree.rows
+            .iter()
+            .map(|row| {
+                (
+                    row.depth,
+                    row.id.clone(),
+                    match &row.kind {
+                        RowKind::Group(g) => Some(g.display_path.clone()),
+                        _ => None,
+                    },
+                )
+            })
+            .collect::<Vec<_>>()
+    };
+
+    let linked_first = tree_for(true);
+    assert_eq!(linked_first, tree_for(false));
+    let repo_labels: Vec<&str> = linked_first
+        .iter()
+        .filter(|(_, id, _)| matches!(id, RowId::Group(NodeId::Repo(_))))
+        .filter_map(|(_, _, label)| label.as_deref())
+        .collect();
+    assert_eq!(
+        repo_labels,
+        vec!["~/src/drw/developer", "~/src/oss/conspectus"]
+    );
+}

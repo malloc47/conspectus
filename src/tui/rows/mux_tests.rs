@@ -1426,3 +1426,49 @@ fn workspace_grouping_places_unbound_pin_placeholders_by_cwd() {
         ]
     );
 }
+
+/// One git probe's worth of graph: the repo node carrying the probed
+/// checkout as its only source path, plus that checkout.
+fn probe_fragment(common_dir: &str, checkout_root: &str) -> crate::discovery::GraphFragment {
+    let mut snapshot = GraphSnapshot::empty();
+    snapshot
+        .nodes
+        .extend(repo_with_checkouts(common_dir, &[checkout_root]));
+    crate::discovery::GraphFragment::from(snapshot)
+}
+
+#[test]
+fn repo_buckets_do_not_depend_on_which_checkout_was_probed_first() {
+    // Discovery keeps the first probe's repo node, so the developer
+    // repo carries either its canonical clone or its linked worktree
+    // as its only source path depending on fragment order. The bucket
+    // label and its position must come out the same either way.
+    let rows_for = |linked_first: bool| {
+        let linked = probe_fragment("/src/drw/developer/.git", "/src/workspaces/developer");
+        let canonical = probe_fragment("/src/drw/developer/.git", "/src/drw/developer");
+        let (first, second) = if linked_first {
+            (linked, canonical)
+        } else {
+            (canonical, linked)
+        };
+        let mut muxes = GraphSnapshot::empty();
+        muxes.nodes.push(mux_at("dev", "/src/workspaces/developer"));
+        muxes.nodes.push(mux_at("csp", "/src/oss/conspectus"));
+        let snapshot = crate::discovery::merge_fragments([
+            first,
+            second,
+            probe_fragment("/src/oss/conspectus/.git", "/src/oss/conspectus"),
+            crate::discovery::GraphFragment::from(muxes),
+        ]);
+        row_labels(&build_with(&resolve_snapshot(snapshot), MuxGrouping::Repo))
+    };
+
+    let expected = vec![
+        (0, "/src/drw/developer".to_string()),
+        (1, "dev".to_string()),
+        (0, "/src/oss/conspectus".to_string()),
+        (1, "csp".to_string()),
+    ];
+    assert_eq!(rows_for(true), expected);
+    assert_eq!(rows_for(false), expected);
+}
