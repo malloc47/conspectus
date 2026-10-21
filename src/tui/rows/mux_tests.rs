@@ -1164,3 +1164,265 @@ fn agentless_mux_running_atelier_exec_carries_the_harness_from_its_process_tree(
     assert_eq!(row.program.as_deref(), Some("atelier"));
     assert_eq!(row.program_harness.as_deref(), Some("codex"));
 }
+
+fn workspace_node(root: &str, name: &str) -> GraphNode {
+    GraphNode::Workspace(crate::model::WorkspaceNode {
+        id: crate::model::WorkspaceId::new(root.to_string()),
+        root: root.to_string(),
+        provider: Some("atelier".to_string()),
+        name: Some(name.to_string()),
+    })
+}
+
+fn membership_link(workspace_root: &str, member: &str, common_dir: &str) -> GraphLink {
+    let mut source_metadata = SourceMetadata::default();
+    source_metadata.fields.insert(
+        crate::model::source_field::LOGICAL_PATH.to_string(),
+        serde_json::Value::String(format!("{workspace_root}/{member}")),
+    );
+    GraphLink {
+        id: format!("member:{workspace_root}:{member}"),
+        source: crate::model::NodeId::Workspace(crate::model::WorkspaceId::new(
+            workspace_root.to_string(),
+        )),
+        target: LinkEndpoint::Node {
+            id: crate::model::NodeId::Repo(crate::model::RepoId::new(common_dir)),
+        },
+        relation: RelationKind::WorkspaceContainsRepo,
+        provenance: Provenance::Discovered,
+        confidence: Confidence::High,
+        freshness: Freshness::Fresh,
+        source_metadata,
+        state: LinkState::Active,
+    }
+}
+
+fn repo_with_checkouts(common_dir: &str, roots: &[&str]) -> Vec<GraphNode> {
+    let repo_id = crate::model::RepoId::new(common_dir);
+    let mut repo = RepoNode::new(repo_id.clone());
+    repo.source_paths.push(roots[0].to_string());
+    let mut nodes = vec![GraphNode::Repo(repo)];
+    for root in roots {
+        nodes.push(GraphNode::Checkout(CheckoutNode {
+            id: crate::model::CheckoutId::new(repo_id.clone(), root.to_string()),
+            root: root.to_string(),
+            git_dir: None,
+            current_branch: None,
+            worktree: None,
+        }));
+    }
+    nodes
+}
+
+fn mux_at(native: &str, cwd: &str) -> GraphNode {
+    mux_node_with_paths(native, Some(cwd.to_string()), None)
+}
+
+/// Run the cross-link pass and the resolver, as discovery does, so the
+/// builder sees real `rooted_in` slots.
+fn linked_and_resolved(mut snapshot: GraphSnapshot) -> GraphSnapshot {
+    crate::discovery::cross_link::infer_without_process_tree(&mut snapshot);
+    resolve_snapshot(snapshot)
+}
+
+fn build_with(snapshot: &GraphSnapshot, grouping: MuxGrouping) -> RowTree {
+    build_mux_tree(MuxBuildInputs {
+        snapshot,
+        home: None,
+        now: Some(1_700_000_160),
+        filter: RowFilter::default(),
+        grouping,
+        sort: Sort::Hierarchy,
+        mux_recency: crate::tui::MuxRecency::default(),
+    })
+}
+
+fn row_labels(tree: &RowTree) -> Vec<(u8, String)> {
+    tree.rows
+        .iter()
+        .map(|row| {
+            let label = match &row.kind {
+                RowKind::MuxSession(mux) => mux.native_id.clone(),
+                RowKind::Group(g) => g.display_path.clone(),
+                other => format!("{other:?}"),
+            };
+            (row.depth, label)
+        })
+        .collect()
+}
+
+/// An Atelier-style `sysadmin` workspace with `config` and
+/// `work-config` members whose canonical clones live under `/src`.
+fn sysadmin_snapshot(muxes: Vec<GraphNode>) -> GraphSnapshot {
+    let mut snapshot = GraphSnapshot::empty();
+    snapshot
+        .nodes
+        .push(workspace_node("/ws/sysadmin", "sysadmin"));
+    snapshot.nodes.extend(repo_with_checkouts(
+        "/src/config/.git",
+        &["/src/config", "/ws/sysadmin/config"],
+    ));
+    snapshot.nodes.extend(repo_with_checkouts(
+        "/src/work-config/.git",
+        &["/src/work-config", "/ws/sysadmin/work-config"],
+    ));
+    snapshot.candidate_links.push(membership_link(
+        "/ws/sysadmin",
+        "config",
+        "/src/config/.git",
+    ));
+    snapshot.candidate_links.push(membership_link(
+        "/ws/sysadmin",
+        "work-config",
+        "/src/work-config/.git",
+    ));
+    snapshot.nodes.extend(muxes);
+    snapshot
+}
+
+#[test]
+fn workspace_grouping_gathers_a_workspaces_muxes_and_keeps_repo_buckets_for_the_rest() {
+    let snapshot = linked_and_resolved(sysadmin_snapshot(vec![
+        mux_at("sys-root", "/ws/sysadmin"),
+        mux_at("sys-config", "/ws/sysadmin/config/nix"),
+        mux_at("sys-work", "/ws/sysadmin/work-config"),
+        mux_at("canonical", "/src/config"),
+        mux_at("orphan", "/elsewhere"),
+    ]));
+
+    let tree = build_with(&snapshot, MuxGrouping::Workspace);
+
+    // One header for the workspace whichever member each mux is in,
+    // the canonical clone keeps its repo bucket, and the rest go to
+    // Ungrouped.
+    assert_eq!(
+        row_labels(&tree),
+        vec![
+            (0, "sysadmin  config+work-config  (atelier)".to_string()),
+            (1, "sys-config".to_string()),
+            (1, "sys-root".to_string()),
+            (1, "sys-work".to_string()),
+            (0, "/src/config".to_string()),
+            (1, "canonical".to_string()),
+            (0, "Ungrouped".to_string()),
+            (1, "orphan".to_string()),
+        ]
+    );
+    assert_eq!(
+        tree.rows[0].id,
+        RowId::Group(crate::model::NodeId::Workspace(
+            crate::model::WorkspaceId::new("/ws/sysadmin".to_string())
+        ))
+    );
+}
+
+#[test]
+fn workspace_grouping_without_workspaces_matches_repo_grouping() {
+    let mut snapshot = GraphSnapshot::empty();
+    snapshot
+        .nodes
+        .extend(repo_with_checkouts("/p/foo/.git", &["/p/foo"]));
+    snapshot.nodes.push(mux_at("foo", "/p/foo/src"));
+    snapshot.nodes.push(mux_at("orphan", "/elsewhere"));
+    let snapshot = linked_and_resolved(snapshot);
+
+    let workspace = build_with(&snapshot, MuxGrouping::Workspace);
+    let repo = build_with(&snapshot, MuxGrouping::Repo);
+
+    assert_eq!(row_labels(&workspace), row_labels(&repo));
+    assert_eq!(
+        row_labels(&workspace),
+        vec![
+            (0, "/p/foo".to_string()),
+            (1, "foo".to_string()),
+            (0, "Ungrouped".to_string()),
+            (1, "orphan".to_string()),
+        ]
+    );
+}
+
+#[test]
+fn workspace_headers_sort_by_label_ahead_of_repo_buckets_and_nest_innermost() {
+    let mut snapshot = GraphSnapshot::empty();
+    // `beta` has the lexically earlier root but the later label.
+    snapshot.nodes.push(workspace_node("/a/beta", "beta"));
+    snapshot.nodes.push(workspace_node("/z/alpha", "alpha"));
+    snapshot
+        .nodes
+        .push(workspace_node("/z/alpha/inner", "inner"));
+    snapshot
+        .candidate_links
+        .push(membership_link("/a/beta", "repo", "/src/beta-repo/.git"));
+    snapshot
+        .candidate_links
+        .push(membership_link("/z/alpha", "inner", "/src/inner-repo/.git"));
+    snapshot.candidate_links.push(membership_link(
+        "/z/alpha/inner",
+        "repo",
+        "/src/nested-repo/.git",
+    ));
+    snapshot
+        .nodes
+        .extend(repo_with_checkouts("/0/first/.git", &["/0/first"]));
+    snapshot.nodes.push(mux_at("in-beta", "/a/beta/repo"));
+    snapshot.nodes.push(mux_at("in-alpha", "/z/alpha"));
+    snapshot
+        .nodes
+        .push(mux_at("in-inner", "/z/alpha/inner/repo/src"));
+    snapshot.nodes.push(mux_at("in-repo", "/0/first"));
+    let snapshot = linked_and_resolved(snapshot);
+
+    let tree = build_with(&snapshot, MuxGrouping::Workspace);
+
+    assert_eq!(
+        row_labels(&tree),
+        vec![
+            (0, "alpha  inner  (atelier)".to_string()),
+            (1, "in-alpha".to_string()),
+            (0, "beta  repo  (atelier)".to_string()),
+            (1, "in-beta".to_string()),
+            (0, "inner  repo  (atelier)".to_string()),
+            (1, "in-inner".to_string()),
+            (0, "/0/first".to_string()),
+            (1, "in-repo".to_string()),
+        ]
+    );
+}
+
+#[test]
+fn workspace_grouping_places_unbound_pin_placeholders_by_cwd() {
+    use crate::model::{PinCandidate, PinMuxRef};
+    let mut snapshot = sysadmin_snapshot(vec![mux_at("sys-root", "/ws/sysadmin")]);
+    snapshot.pins.push(PinCandidate {
+        id: "nix".to_string(),
+        display_name: "Nix".to_string(),
+        harness: "claude-code".to_string(),
+        cwd: "/ws/sysadmin/config".to_string(),
+        mux: PinMuxRef {
+            backend: "tmux".to_string(),
+            name: "nix-pin".to_string(),
+            socket_name: None,
+        },
+        launch_argv: None,
+        reason: None,
+        provenance: Provenance::LocalPin,
+        store_path: "/ws/sysadmin/.conspectus.toml".to_string(),
+        binding: Some(crate::model::PinBinding::Unbound),
+    });
+    let snapshot = linked_and_resolved(snapshot);
+
+    let tree = build_with(&snapshot, MuxGrouping::Workspace);
+
+    // The placeholder shows in Pins and, by its cwd, under the
+    // workspace, ahead of the live mux because pinned rows float.
+    assert_eq!(
+        row_labels(&tree),
+        vec![
+            (0, "Pins".to_string()),
+            (1, "nix-pin".to_string()),
+            (0, "sysadmin  config+work-config  (atelier)".to_string()),
+            (1, "nix-pin".to_string()),
+            (1, "sys-root".to_string()),
+        ]
+    );
+}

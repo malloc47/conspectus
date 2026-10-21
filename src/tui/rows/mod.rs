@@ -417,6 +417,71 @@ pub fn format_workspace_display(
     out
 }
 
+/// Header text for a workspace group, shared by the sessions and mux
+/// views so both read identically: the workspace node's `name`, else
+/// the root's last component, else the `~`-shortened root, followed by
+/// its members and provider per [`format_workspace_display`].
+pub fn workspace_header_label(
+    snapshot: &crate::model::GraphSnapshot,
+    workspace_root: &str,
+    home: Option<&Path>,
+) -> String {
+    let workspace = snapshot.nodes.iter().find_map(|node| match node {
+        crate::model::GraphNode::Workspace(w) if w.id.root == workspace_root => Some(w),
+        _ => None,
+    });
+    let label = workspace
+        .and_then(|w| w.name.clone())
+        .or_else(|| {
+            Path::new(workspace_root)
+                .file_name()
+                .and_then(|n| n.to_str())
+                .map(str::to_string)
+        })
+        .unwrap_or_else(|| shorten_home(workspace_root, home));
+    let provider = workspace.and_then(|w| w.provider.as_deref());
+    let members = workspace_member_names(snapshot, workspace_root);
+    format_workspace_display(&label, &members, provider)
+}
+
+/// Member display names for a workspace, derived from the
+/// resolver-selected `WorkspaceContainsRepo` candidate links'
+/// `logical_path` source field. Sorted alphabetically and deduped.
+fn workspace_member_names(
+    snapshot: &crate::model::GraphSnapshot,
+    workspace_root: &str,
+) -> Vec<String> {
+    let workspace_id = NodeId::Workspace(crate::model::WorkspaceId {
+        root: workspace_root.to_string(),
+    });
+    let mut names: Vec<String> = snapshot
+        .resolved_relationships
+        .iter()
+        .filter(|rel| {
+            rel.relation == crate::model::RelationKind::WorkspaceContainsRepo
+                && rel.source == workspace_id
+        })
+        .filter_map(|rel| {
+            // ADR 0077: only resolved slots feed the member-name
+            // lookup; no-winner slots have no link to anchor a
+            // `logical_path` field on.
+            let winner_id = rel.selected_link_id.as_deref()?;
+            let link = snapshot
+                .candidate_links
+                .iter()
+                .find(|cl| cl.id == winner_id)?;
+            let logical_path = link.source_metadata.fields.get("logical_path")?.as_str()?;
+            Path::new(logical_path)
+                .file_name()
+                .and_then(|n| n.to_str())
+                .map(str::to_string)
+        })
+        .collect();
+    names.sort();
+    names.dedup();
+    names
+}
+
 /// Translate a harness key to the short label rendered in the row.
 /// Delegates to the adapter registry so
 /// `claude-code`'s `claude` collapse lives on

@@ -642,54 +642,6 @@ impl<'a> SessionsData<'a> {
             })
     }
 
-    /// Look up a workspace node by root path. Used by the hybrid
-    /// Graph header (ADR 0064) to pull the workspace's `name` and
-    /// `provider` for the shared `format_workspace_display` helper.
-    fn workspace_node(&self, workspace_root: &str) -> Option<&'a crate::model::WorkspaceNode> {
-        self.snapshot.nodes.iter().find_map(|node| match node {
-            GraphNode::Workspace(w) if w.id.root == workspace_root => Some(w),
-            _ => None,
-        })
-    }
-
-    /// Member display names for a workspace, derived from the
-    /// resolver-selected `WorkspaceContainsRepo` candidate links'
-    /// `logical_path` source field — same source the Workspaces view
-    /// uses, so the two view headers read identically.
-    /// Sorted alphabetically and deduped.
-    fn workspace_member_names(&self, workspace_root: &str) -> Vec<String> {
-        let workspace_id = NodeId::Workspace(WorkspaceId {
-            root: workspace_root.to_string(),
-        });
-        let mut names: Vec<String> = self
-            .snapshot
-            .resolved_relationships
-            .iter()
-            .filter(|rel| {
-                rel.relation == RelationKind::WorkspaceContainsRepo && rel.source == workspace_id
-            })
-            .filter_map(|rel| {
-                // ADR 0077: only resolved slots feed the
-                // member-name lookup; no-winner slots have no
-                // link to anchor a `logical_path` field on.
-                let winner_id = rel.selected_link_id.as_deref()?;
-                let link = self
-                    .snapshot
-                    .candidate_links
-                    .iter()
-                    .find(|cl| cl.id == winner_id)?;
-                let logical_path = link.source_metadata.fields.get("logical_path")?.as_str()?;
-                Path::new(logical_path)
-                    .file_name()
-                    .and_then(|n| n.to_str())
-                    .map(str::to_string)
-            })
-            .collect();
-        names.sort();
-        names.dedup();
-        names
-    }
-
     fn repo_display_path(&self, repo: &RepoId) -> String {
         let node_id = NodeId::Repo(repo.clone());
         let common_dir = repo_display_path_from_common_dir(&repo.common_dir).to_string();
@@ -978,19 +930,8 @@ fn push_workspace_row(
         root: workspace_root.to_string(),
     });
 
-    let workspace = data.workspace_node(workspace_root);
-    let label = workspace
-        .and_then(|w| w.name.clone())
-        .or_else(|| {
-            Path::new(workspace_root)
-                .file_name()
-                .and_then(|n| n.to_str())
-                .map(str::to_string)
-        })
-        .unwrap_or_else(|| shorten_home(workspace_root, home));
-    let provider = workspace.and_then(|w| w.provider.as_deref());
-    let members = data.workspace_member_names(workspace_root);
-    let display_path = crate::tui::rows::format_workspace_display(&label, &members, provider);
+    let display_path =
+        crate::tui::rows::workspace_header_label(data.snapshot, workspace_root, home);
 
     tree.rows.push(Row {
         id: RowId::Group(node_id.clone()),

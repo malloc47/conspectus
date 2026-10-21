@@ -10,10 +10,11 @@ use std::collections::{BTreeMap, HashMap, HashSet};
 use std::path::{Path, PathBuf};
 
 use crate::filter::{MuxStateKey, RowFilter, SessionMatchInputs};
+use crate::model::workspace_paths::WorkspacePaths;
 use crate::model::{
     AgentSessionId, AgentSessionNode, CheckoutId, GraphNode, GraphSnapshot, LinkEndpoint,
     LinkState, MuxSessionId, MuxSessionNode, NodeId, PinBinding, PinCandidate, PinId, RelationKind,
-    RepoId, path_is_ancestor_of,
+    RepoId, WorkspaceId, path_is_ancestor_of,
 };
 use crate::output::render::{node_short_id_from_display, unique_prefix_len};
 use crate::tui::rows::{
@@ -193,6 +194,12 @@ pub fn build_mux_tree(inputs: MuxBuildInputs<'_>) -> RowTree {
 
             let path_index = PathIndex::from_snapshot(snapshot);
             emit_repo_grouped(&mut tree, groups, &inputs, &short_ids, &path_index, now);
+        }
+        MuxGrouping::Workspace => {
+            emit_pins_group_for_mux(&mut tree, &pins, &groups, &short_ids, inputs.home, now);
+
+            let path_index = PathIndex::from_snapshot(snapshot);
+            emit_workspace_grouped(&mut tree, groups, &inputs, &short_ids, &path_index, now);
         }
     }
 
@@ -396,6 +403,95 @@ fn emit_repo_grouped(
             group.push_into(tree, 1, short_ids, inputs.home, now);
         }
     }
+}
+
+/// Workspace headers for the muxes rooted in a workspace, then the
+/// `repo` layout for every other mux (ADR 0139). A mux's workspace is
+/// its resolved `rooted_in` target. An unbound pin placeholder has no
+/// mux in the graph, so its cwd goes through the same path index
+/// discovery roots muxes with.
+fn emit_workspace_grouped(
+    tree: &mut RowTree,
+    groups: Vec<MuxGroup>,
+    inputs: &MuxBuildInputs<'_>,
+    short_ids: &HashMap<&str, String>,
+    path_index: &PathIndex<'_>,
+    now: Option<i64>,
+) {
+    let rooted_in = rooted_in_workspaces(inputs.snapshot);
+    let workspace_paths = WorkspacePaths::from_snapshot(inputs.snapshot);
+    let mut buckets: BTreeMap<WorkspaceBucketKey, Vec<MuxGroup>> = BTreeMap::new();
+    let mut rest: Vec<MuxGroup> = Vec::new();
+
+    for group in groups {
+        let workspace = match &group.parent_node_id {
+            NodeId::MuxSession(_) => rooted_in.get(&group.parent_node_id).copied(),
+            _ => group
+                .cwd
+                .as_deref()
+                .and_then(|cwd| workspace_paths.innermost(cwd))
+                .and_then(|(workspace, _)| match workspace {
+                    NodeId::Workspace(id) => Some(id),
+                    _ => None,
+                }),
+        };
+        match workspace {
+            Some(id) => {
+                let key = WorkspaceBucketKey {
+                    label: crate::tui::rows::workspace_header_label(
+                        inputs.snapshot,
+                        &id.root,
+                        inputs.home,
+                    ),
+                    workspace: id.clone(),
+                };
+                buckets.entry(key).or_default().push(group);
+            }
+            None => rest.push(group),
+        }
+    }
+
+    for (key, mut groups) in buckets {
+        let node_id = NodeId::Workspace(key.workspace);
+        tree.rows.push(Row {
+            id: RowId::Group(node_id.clone()),
+            depth: 0,
+            expandable: true,
+            kind: RowKind::Group(GroupRow {
+                display_path: key.label,
+                primary_node: Some(node_id),
+                is_launch_context: false,
+            }),
+        });
+        sort_mux_groups(&mut groups, inputs);
+        for group in groups {
+            group.push_into(tree, 1, short_ids, inputs.home, now);
+        }
+    }
+
+    emit_repo_grouped(tree, rest, inputs, short_ids, path_index, now);
+}
+
+/// Each mux's resolved `rooted_in` workspace. Slots without a winner
+/// (ADR 0077) don't place a mux.
+fn rooted_in_workspaces(snapshot: &GraphSnapshot) -> HashMap<NodeId, &WorkspaceId> {
+    snapshot
+        .resolved_relationships
+        .iter()
+        .filter(|rel| rel.relation == RelationKind::RootedIn && rel.selected_link_id.is_some())
+        .filter_map(|rel| match (&rel.source, &rel.target) {
+            (NodeId::MuxSession(_), NodeId::Workspace(id)) => Some((rel.source.clone(), id)),
+            _ => None,
+        })
+        .collect()
+}
+
+/// Workspace buckets sort by header label, then by workspace root so
+/// two same-named workspaces stay apart and in a stable order.
+#[derive(Clone, Debug, Eq, Ord, PartialEq, PartialOrd)]
+struct WorkspaceBucketKey {
+    label: String,
+    workspace: WorkspaceId,
 }
 
 /// Recency ordering key for a mux row under the chosen basis.

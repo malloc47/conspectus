@@ -372,6 +372,9 @@ pub enum MuxGrouping {
     Session,
     Host,
     Repo,
+    /// Workspace headers for muxes rooted in a workspace, `Repo`
+    /// buckets for the rest (ADR 0139).
+    Workspace,
 }
 
 /// Top-level grouping in the union view (per ADR 0031).
@@ -452,7 +455,9 @@ impl Grouping {
     pub fn as_str(self) -> &'static str {
         match self {
             Self::Sessions(SessionsGrouping::Graph) => "graph",
-            Self::Sessions(SessionsGrouping::Workspace) => "workspace",
+            Self::Sessions(SessionsGrouping::Workspace) | Self::Mux(MuxGrouping::Workspace) => {
+                "workspace"
+            }
             Self::Sessions(SessionsGrouping::Repo)
             | Self::Mux(MuxGrouping::Repo)
             | Self::Union(UnionGrouping::Repo) => "repo",
@@ -500,6 +505,7 @@ impl Grouping {
                 Self::Mux(MuxGrouping::Session),
                 Self::Mux(MuxGrouping::Host),
                 Self::Mux(MuxGrouping::Repo),
+                Self::Mux(MuxGrouping::Workspace),
             ],
             View::Union => &[
                 Self::Union(UnionGrouping::Kind),

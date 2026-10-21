@@ -1,10 +1,11 @@
 ---
 id: CSP-653
 title: Add workspace-or-repo grouping to the mux view
-status: To Do
+status: In Progress
 assignee:
   - '@claude'
 created_date: '2026-10-21 19:39'
+updated_date: '2026-10-21 19:54'
 labels:
   - tui
   - workspace
@@ -38,10 +39,10 @@ The operator chose a workspace-or-repo shape, the mux analogue of the sessions v
 - [ ] #2 Under it, every mux rooted in a workspace sits under one header for that workspace, whichever member checkout or subdirectory it is in, using the same header format as the sessions view
 - [ ] #3 Muxes not rooted in any workspace fall back to the `repo` grouping buckets; muxes with no resolvable repo go to Ungrouped last, and the Pins group stays first
 - [ ] #4 Workspace headers sort before repo headers, each by display label
-- [ ] #5 Discovery emits `rooted_in` candidate links from a mux to the deepest workspace containing its session path, and the resolver keeps one resolved slot per target kind
-- [ ] #6 Unbound pin placeholders inside a workspace group under that workspace
-- [ ] #7 Tests cover no workspaces, nested workspaces, a mux at the workspace root and in a member subdirectory, and a pin placeholder
-- [ ] #8 An ADR records the decision (refining ADR 0061 for the mux view), and docs/design.md and docs/operations.md list the new grouping
+- [ ] #5 Unbound pin placeholders inside a workspace group under that workspace
+- [ ] #6 Tests cover no workspaces, nested workspaces, a mux at the workspace root and in a member subdirectory, and a pin placeholder
+- [ ] #7 An ADR records the decision (refining ADR 0061 for the mux view), and docs/design.md and docs/operations.md list the new grouping
+- [ ] #8 Discovery emits a `rooted_in` candidate link from a mux to the innermost workspace containing its session path, and the resolver keeps one rooted-in workspace per mux, with declared links outranking inferred ones
 <!-- AC:END -->
 
 ## Definition of Done
@@ -49,3 +50,13 @@ The operator chose a workspace-or-repo shape, the mux analogue of the sessions v
 - [ ] #1 `just check` passes, or `git diff --check` for docs-only changes
 - [ ] #2 Docs and ADRs are updated when behavior, architecture, or workflow change
 <!-- DOD:END -->
+
+## Implementation Plan
+
+<!-- SECTION:PLAN:BEGIN -->
+1. ADR 0139: mux `workspace` grouping (workspace-or-repo, refines ADR 0061 for the mux view), `MuxSession --rooted_in--> Workspace` from the mux session path, single resolved slot per mux. Update docs/design.md, docs/operations.md, ADR index.
+2. Move cross_link's workspace path index (workspace root + member `logical_path`s, deepest match) and its path helpers into `src/model/workspace_paths.rs` so discovery and the TUI share one matcher; add an innermost-workspace query.
+3. cross_link: emit `rooted_in` for each mux whose session path (`cwd`, else active pane path) sits in a workspace, targeting the innermost one.
+4. TUI: `MuxGrouping::Workspace` ("workspace") in values_for/as_str/dispatch. Builder: Pins group first, then one header per workspace (resolved `rooted_in` for muxes, the shared matcher for unbound pin placeholders), sorted by label then root, then the remaining muxes through the existing repo bucketing + Ungrouped. Share the workspace header label with the sessions view via a helper in rows/mod.rs.
+5. Tests: cross_link rooted_in (root, member subdir, nested workspaces, none); mux builder workspace grouping (no workspaces, mux at root and in member, nested, pin placeholder, ordering vs repo buckets); grouping round-trip. Snapshot check with `tui --snapshot`.
+<!-- SECTION:PLAN:END -->
