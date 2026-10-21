@@ -134,10 +134,11 @@ bind = ["$RUNTIME/conspectus/server.sock"]
 connect = ["$RUNTIME/conspectus/server.sock"]
 
 # Signals Conspectus sends to other processes. Signal 0 only probes
-# whether a process is alive.
+# whether a process is alive. SIGKILL goes only to a `gh` child whose
+# fetch the daemon's shutdown cancels.
 [signals]
-adr = ["0093"]
-act = ["SIGTERM", "0"]
+adr = ["0093", "0137"]
+act = ["SIGTERM", "SIGKILL", "0"]
 
 # Files and directories Conspectus creates, writes, renames, or
 # removes. `**` matches any path below; `*` matches within one path

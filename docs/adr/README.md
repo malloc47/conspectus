@@ -208,3 +208,4 @@ How the project is built, tested, tracked, and shipped, including the agent-orie
 | [0134](0134-pr-state-filter.md) | A PR State Filter | Accepted |
 | [0135](0135-pin-commands-skip-forge-discovery.md) | Pin Commands Skip Forge Discovery | Accepted |
 | [0136](0136-lazy-forge-fetches-outside-the-writer-lock.md) | Lazy Forge Fetches Outside The Writer Lock | Accepted |
+| [0137](0137-forge-fetches-stop-on-shutdown.md) | Forge Fetches Stop On Daemon Shutdown | Accepted |
