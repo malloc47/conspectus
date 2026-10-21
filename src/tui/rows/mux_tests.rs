@@ -1293,23 +1293,23 @@ fn workspace_grouping_gathers_a_workspaces_muxes_and_keeps_repo_buckets_for_the_
     let tree = build_with(&snapshot, MuxGrouping::Workspace);
 
     // One header for the workspace whichever member each mux is in,
-    // the canonical clone keeps its repo bucket, and the rest go to
-    // Ungrouped.
+    // the canonical clone keeps its repo bucket (`config` sorts before
+    // `sysadmin`), and the rest go to Ungrouped.
     assert_eq!(
         row_labels(&tree),
         vec![
+            (0, "/src/config".to_string()),
+            (1, "canonical".to_string()),
             (0, "sysadmin  config+work-config  (atelier)".to_string()),
             (1, "sys-config".to_string()),
             (1, "sys-root".to_string()),
             (1, "sys-work".to_string()),
-            (0, "/src/config".to_string()),
-            (1, "canonical".to_string()),
             (0, "Ungrouped".to_string()),
             (1, "orphan".to_string()),
         ]
     );
     assert_eq!(
-        tree.rows[0].id,
+        tree.rows[2].id,
         RowId::Group(crate::model::NodeId::Workspace(
             crate::model::WorkspaceId::new("/ws/sysadmin".to_string())
         ))
@@ -1342,7 +1342,7 @@ fn workspace_grouping_without_workspaces_matches_repo_grouping() {
 }
 
 #[test]
-fn workspace_headers_sort_by_label_ahead_of_repo_buckets_and_nest_innermost() {
+fn workspace_and_repo_headers_interleave_by_name_and_nest_innermost() {
     let mut snapshot = GraphSnapshot::empty();
     // `beta` has the lexically earlier root but the later label.
     snapshot.nodes.push(workspace_node("/a/beta", "beta"));
@@ -1374,6 +1374,8 @@ fn workspace_headers_sort_by_label_ahead_of_repo_buckets_and_nest_innermost() {
 
     let tree = build_with(&snapshot, MuxGrouping::Workspace);
 
+    // Names, not roots or header kinds, set the order: the `first`
+    // repo lands between the `beta` and `inner` workspaces.
     assert_eq!(
         row_labels(&tree),
         vec![
@@ -1381,10 +1383,55 @@ fn workspace_headers_sort_by_label_ahead_of_repo_buckets_and_nest_innermost() {
             (1, "in-alpha".to_string()),
             (0, "beta  repo  (atelier)".to_string()),
             (1, "in-beta".to_string()),
-            (0, "inner  repo  (atelier)".to_string()),
-            (1, "in-inner".to_string()),
             (0, "/0/first".to_string()),
             (1, "in-repo".to_string()),
+            (0, "inner  repo  (atelier)".to_string()),
+            (1, "in-inner".to_string()),
+        ]
+    );
+}
+
+#[test]
+fn workspace_grouping_header_order_ignores_case_and_breaks_name_ties_by_path() {
+    let mut snapshot = GraphSnapshot::empty();
+    snapshot.nodes.push(workspace_node("/w/zeta", "Zeta"));
+    snapshot.nodes.push(workspace_node("/w/docs-ws", "docs"));
+    snapshot
+        .candidate_links
+        .push(membership_link("/w/zeta", "repo", "/src/zeta-repo/.git"));
+    snapshot
+        .candidate_links
+        .push(membership_link("/w/docs-ws", "repo", "/src/docs-repo/.git"));
+    for root in ["/r/alpha", "/r/Delta", "/other/docs"] {
+        snapshot
+            .nodes
+            .extend(repo_with_checkouts(&format!("{root}/.git"), &[root]));
+    }
+    snapshot.nodes.push(mux_at("z", "/w/zeta/repo"));
+    snapshot.nodes.push(mux_at("d-ws", "/w/docs-ws"));
+    snapshot.nodes.push(mux_at("a", "/r/alpha"));
+    snapshot.nodes.push(mux_at("delta", "/r/Delta"));
+    snapshot.nodes.push(mux_at("d-repo", "/other/docs"));
+    let snapshot = linked_and_resolved(snapshot);
+
+    let tree = build_with(&snapshot, MuxGrouping::Workspace);
+    let headers: Vec<String> = row_labels(&tree)
+        .into_iter()
+        .filter(|(depth, _)| *depth == 0)
+        .map(|(_, label)| label)
+        .collect();
+
+    // `Delta` sorts as `delta`, `Zeta` as `zeta`; the two `docs`
+    // headers tie on name and fall back to path, so `/other/docs`
+    // precedes `/w/docs-ws`.
+    assert_eq!(
+        headers,
+        vec![
+            "/r/alpha".to_string(),
+            "/r/Delta".to_string(),
+            "/other/docs".to_string(),
+            "docs  repo  (atelier)".to_string(),
+            "Zeta  repo  (atelier)".to_string(),
         ]
     );
 }

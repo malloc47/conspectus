@@ -355,6 +355,22 @@ fn emit_repo_grouped(
     path_index: &PathIndex<'_>,
     now: Option<i64>,
 ) {
+    let (buckets, ungrouped) = bucket_by_repo(groups, path_index);
+
+    for (key, groups) in buckets {
+        push_repo_header(tree, 0, &key.repo_id, &key.display_path, inputs.home);
+        push_bucket_members(tree, groups, inputs, short_ids, now);
+    }
+
+    push_ungrouped(tree, ungrouped, inputs, short_ids, now);
+}
+
+/// Repo buckets keyed by the checkout each mux's cwd sits in, in
+/// display-path order, plus the muxes no checkout contains.
+fn bucket_by_repo(
+    groups: Vec<MuxGroup>,
+    path_index: &PathIndex<'_>,
+) -> (BTreeMap<RepoBucketKey, Vec<MuxGroup>>, Vec<MuxGroup>) {
     let mut buckets: BTreeMap<RepoBucketKey, Vec<MuxGroup>> = BTreeMap::new();
     let mut ungrouped: Vec<MuxGroup> = Vec::new();
 
@@ -375,41 +391,50 @@ fn emit_repo_grouped(
         }
     }
 
-    for (key, mut groups) in buckets {
-        let RepoBucketKey {
-            repo_id,
-            display_path,
-        } = key;
-        push_repo_header(tree, 0, &repo_id, &display_path, inputs.home);
-        sort_mux_groups(&mut groups, inputs);
-        for group in groups {
-            group.push_into(tree, 1, short_ids, inputs.home, now);
-        }
-    }
+    (buckets, ungrouped)
+}
 
-    if !ungrouped.is_empty() {
-        tree.rows.push(Row {
-            id: RowId::Synthetic("ungrouped"),
-            depth: 0,
-            expandable: true,
-            kind: RowKind::Group(GroupRow {
-                display_path: "Ungrouped".to_string(),
-                primary_node: None,
-                is_launch_context: false,
-            }),
-        });
-        sort_mux_groups(&mut ungrouped, inputs);
-        for group in ungrouped {
-            group.push_into(tree, 1, short_ids, inputs.home, now);
-        }
+fn push_bucket_members(
+    tree: &mut RowTree,
+    mut groups: Vec<MuxGroup>,
+    inputs: &MuxBuildInputs<'_>,
+    short_ids: &HashMap<&str, String>,
+    now: Option<i64>,
+) {
+    sort_mux_groups(&mut groups, inputs);
+    for group in groups {
+        group.push_into(tree, 1, short_ids, inputs.home, now);
     }
 }
 
-/// Workspace headers for the muxes rooted in a workspace, then the
-/// `repo` layout for every other mux (ADR 0139). A mux's workspace is
-/// its resolved `rooted_in` target. An unbound pin placeholder has no
-/// mux in the graph, so its cwd goes through the same path index
-/// discovery roots muxes with.
+fn push_ungrouped(
+    tree: &mut RowTree,
+    ungrouped: Vec<MuxGroup>,
+    inputs: &MuxBuildInputs<'_>,
+    short_ids: &HashMap<&str, String>,
+    now: Option<i64>,
+) {
+    if ungrouped.is_empty() {
+        return;
+    }
+    tree.rows.push(Row {
+        id: RowId::Synthetic("ungrouped"),
+        depth: 0,
+        expandable: true,
+        kind: RowKind::Group(GroupRow {
+            display_path: "Ungrouped".to_string(),
+            primary_node: None,
+            is_launch_context: false,
+        }),
+    });
+    push_bucket_members(tree, ungrouped, inputs, short_ids, now);
+}
+
+/// Workspace headers for the muxes rooted in a workspace and repo
+/// headers for every other mux, as one list in name order, then
+/// Ungrouped (ADR 0139). A mux's workspace is its resolved `rooted_in`
+/// target. An unbound pin placeholder has no mux in the graph, so its
+/// cwd goes through the same path index discovery roots muxes with.
 fn emit_workspace_grouped(
     tree: &mut RowTree,
     groups: Vec<MuxGroup>,
@@ -420,7 +445,7 @@ fn emit_workspace_grouped(
 ) {
     let rooted_in = rooted_in_workspaces(inputs.snapshot);
     let workspace_paths = WorkspacePaths::from_snapshot(inputs.snapshot);
-    let mut buckets: BTreeMap<WorkspaceBucketKey, Vec<MuxGroup>> = BTreeMap::new();
+    let mut workspaces: BTreeMap<&WorkspaceId, Vec<MuxGroup>> = BTreeMap::new();
     let mut rest: Vec<MuxGroup> = Vec::new();
 
     for group in groups {
@@ -436,40 +461,90 @@ fn emit_workspace_grouped(
                 }),
         };
         match workspace {
-            Some(id) => {
-                let key = WorkspaceBucketKey {
-                    label: crate::tui::rows::workspace_header_label(
-                        inputs.snapshot,
-                        &id.root,
-                        inputs.home,
-                    ),
-                    workspace: id.clone(),
-                };
-                buckets.entry(key).or_default().push(group);
-            }
+            Some(id) => workspaces.entry(id).or_default().push(group),
             None => rest.push(group),
         }
     }
 
-    for (key, mut groups) in buckets {
-        let node_id = NodeId::Workspace(key.workspace);
-        tree.rows.push(Row {
-            id: RowId::Group(node_id.clone()),
-            depth: 0,
-            expandable: true,
-            kind: RowKind::Group(GroupRow {
-                display_path: key.label,
-                primary_node: Some(node_id),
-                is_launch_context: false,
-            }),
-        });
-        sort_mux_groups(&mut groups, inputs);
-        for group in groups {
-            group.push_into(tree, 1, short_ids, inputs.home, now);
+    let (repos, ungrouped) = bucket_by_repo(rest, path_index);
+    let mut headers: Vec<(HeaderSortKey, GroupHeader, Vec<MuxGroup>)> = Vec::new();
+    for (id, groups) in workspaces {
+        let name = crate::tui::rows::workspace_display_name(inputs.snapshot, &id.root, inputs.home);
+        headers.push((
+            HeaderSortKey::new(name, id.root.clone()),
+            GroupHeader::Workspace(id.clone()),
+            groups,
+        ));
+    }
+    for (key, groups) in repos {
+        let name = Path::new(&key.display_path)
+            .file_name()
+            .and_then(|name| name.to_str())
+            .unwrap_or(&key.display_path)
+            .to_string();
+        headers.push((
+            HeaderSortKey::new(name, key.display_path.clone()),
+            GroupHeader::Repo(key),
+            groups,
+        ));
+    }
+    headers.sort_by(|left, right| left.0.cmp(&right.0));
+
+    for (_, header, groups) in headers {
+        match header {
+            GroupHeader::Workspace(id) => {
+                let display_path = crate::tui::rows::workspace_header_label(
+                    inputs.snapshot,
+                    &id.root,
+                    inputs.home,
+                );
+                let node_id = NodeId::Workspace(id);
+                tree.rows.push(Row {
+                    id: RowId::Group(node_id.clone()),
+                    depth: 0,
+                    expandable: true,
+                    kind: RowKind::Group(GroupRow {
+                        display_path,
+                        primary_node: Some(node_id),
+                        is_launch_context: false,
+                    }),
+                });
+            }
+            GroupHeader::Repo(key) => {
+                push_repo_header(tree, 0, &key.repo_id, &key.display_path, inputs.home);
+            }
         }
+        push_bucket_members(tree, groups, inputs, short_ids, now);
     }
 
-    emit_repo_grouped(tree, rest, inputs, short_ids, path_index, now);
+    push_ungrouped(tree, ungrouped, inputs, short_ids, now);
+}
+
+/// A top-level header under `workspace` grouping.
+enum GroupHeader {
+    Workspace(WorkspaceId),
+    Repo(RepoBucketKey),
+}
+
+/// Headers sort by the bold name they show (a workspace's name, a
+/// repo path's last component), ignoring case, so workspaces and repos
+/// interleave alphabetically; the exact name and then the full path
+/// break ties so the order is total.
+#[derive(Eq, Ord, PartialEq, PartialOrd)]
+struct HeaderSortKey {
+    folded: String,
+    name: String,
+    path: String,
+}
+
+impl HeaderSortKey {
+    fn new(name: String, path: String) -> Self {
+        Self {
+            folded: name.to_lowercase(),
+            name,
+            path,
+        }
+    }
 }
 
 /// Each mux's resolved `rooted_in` workspace. Slots without a winner
@@ -484,14 +559,6 @@ fn rooted_in_workspaces(snapshot: &GraphSnapshot) -> HashMap<NodeId, &WorkspaceI
             _ => None,
         })
         .collect()
-}
-
-/// Workspace buckets sort by header label, then by workspace root so
-/// two same-named workspaces stay apart and in a stable order.
-#[derive(Clone, Debug, Eq, Ord, PartialEq, PartialOrd)]
-struct WorkspaceBucketKey {
-    label: String,
-    workspace: WorkspaceId,
 }
 
 /// Recency ordering key for a mux row under the chosen basis.

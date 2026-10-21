@@ -450,11 +450,21 @@ pub fn workspace_header_label(
     workspace_root: &str,
     home: Option<&Path>,
 ) -> String {
-    let workspace = snapshot.nodes.iter().find_map(|node| match node {
-        crate::model::GraphNode::Workspace(w) if w.id.root == workspace_root => Some(w),
-        _ => None,
-    });
-    let label = workspace
+    let label = workspace_display_name(snapshot, workspace_root, home);
+    let provider = workspace_node(snapshot, workspace_root).and_then(|w| w.provider.as_deref());
+    let members = workspace_member_names(snapshot, workspace_root);
+    format_workspace_display(&label, &members, provider)
+}
+
+/// The name a workspace header leads with (its bold label): the
+/// workspace node's `name`, else the root's last component, else the
+/// `~`-shortened root.
+pub fn workspace_display_name(
+    snapshot: &crate::model::GraphSnapshot,
+    workspace_root: &str,
+    home: Option<&Path>,
+) -> String {
+    workspace_node(snapshot, workspace_root)
         .and_then(|w| w.name.clone())
         .or_else(|| {
             Path::new(workspace_root)
@@ -462,10 +472,17 @@ pub fn workspace_header_label(
                 .and_then(|n| n.to_str())
                 .map(str::to_string)
         })
-        .unwrap_or_else(|| shorten_home(workspace_root, home));
-    let provider = workspace.and_then(|w| w.provider.as_deref());
-    let members = workspace_member_names(snapshot, workspace_root);
-    format_workspace_display(&label, &members, provider)
+        .unwrap_or_else(|| shorten_home(workspace_root, home))
+}
+
+fn workspace_node<'a>(
+    snapshot: &'a crate::model::GraphSnapshot,
+    workspace_root: &str,
+) -> Option<&'a crate::model::WorkspaceNode> {
+    snapshot.nodes.iter().find_map(|node| match node {
+        crate::model::GraphNode::Workspace(w) if w.id.root == workspace_root => Some(w),
+        _ => None,
+    })
 }
 
 /// Member display names for a workspace, derived from the
