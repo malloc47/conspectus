@@ -49,6 +49,7 @@ How providers read local state, and how agent sessions get attributed to tmux pa
 | [0088](0088-provider-descriptor-registry.md) | Provider Descriptor Registry | Accepted |
 | [0089](0089-mux-backend-trait.md) | Mux Backend Trait | Accepted |
 | [0111](0111-launch-directory-is-optional.md) | The Launch Directory Is An Optional Input | Accepted |
+| [0138](0138-provider-workspaces-from-observed-cwds.md) | Provider Workspaces From Observed Cwds | Accepted |
 
 ## User intent and the write envelope
 

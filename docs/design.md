@@ -386,7 +386,10 @@ The sane default is:
 - inspect git metadata for discovered repos/checkouts
 - probe distinct agent-session and mux-session cwd paths read-only to backfill
   repo, checkout, branch, and workspace context even when those paths are
-  outside the launch cwd or configured scan roots
+  outside the launch cwd or configured scan roots; workspace context comes
+  from provider manifests (Atelier's `atelier.toml`) at or above the cwd,
+  while manifest-less generic inference stays limited to explicit scan roots
+  (ADR 0027, 0138)
 - query GitHub for PRs associated with discovered repo/branch pairs: after
   the working-directory pass, every discovered repo's GitHub remotes are asked
   for open PRs and the last 30 days of history, and a PR links to a local branch
