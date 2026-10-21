@@ -187,7 +187,7 @@ teardown_grace = "3s"
 
 - **Grouping values per view:** sessions `graph` (default), `workspace`,
   `repo`, `checkout`, `scan-root`, `none`; mux `session`, `host`,
-  `repo`; union `kind`, `repo`; prs `checkout` (default), `repo`, `state`
+  `repo`, `workspace` (ADR 0139); union `kind`, `repo`; prs `checkout` (default), `repo`, `state`
   (ADR 0114); forks `provider`,
   `parent`.
 - **Filters:** `filters` takes one inline table or an array of tables

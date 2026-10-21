@@ -135,7 +135,7 @@ Runtime architecture, controls, theming, detail pane, and visual language.
 | [0045](0045-sessions-graph-lineage-and-repo-default.md) | Sessions Graph Lineage And Repo Default | Accepted |
 | [0055](0055-sessions-graph-default.md) | Sessions Graph Default | Accepted |
 | [0056](0056-tui-clipboard-backend-osc52.md) | TUI Clipboard Backend via OSC 52 | Accepted |
-| [0061](0061-drop-workspace-grouping-from-non-workspaces-views.md) | Drop Workspace Grouping From Non-Workspaces Views | Accepted |
+| [0061](0061-drop-workspace-grouping-from-non-workspaces-views.md) | Drop Workspace Grouping From Non-Workspaces Views | Accepted (mux view refined by 0139) |
 | [0062](0062-workspaces-view-polish.md) | Workspaces View Polish — Inline Members, Drop Related | Superseded by 0065 |
 | [0063](0063-drop-workspace-cross-reference-chip.md) | Drop The Workspace Cross-Reference Chip | Accepted |
 | [0064](0064-hybrid-sessions-graph-grouping.md) | Hybrid Workspace+Repo Grouping In Sessions/Graph | Accepted |
@@ -161,6 +161,7 @@ Runtime architecture, controls, theming, detail pane, and visual language.
 | [0118](0118-csp-short-name.md) | `csp` Is The Short Name | Accepted |
 | [0119](0119-compass-rose-logo.md) | The Compass-Rose Logo | Accepted |
 | [0123](0123-overlay-keymap-tables.md) | Overlay Keymap Tables | Accepted |
+| [0139](0139-mux-workspace-or-repo-grouping.md) | Workspace-Or-Repo Grouping In The Mux View | Accepted |
 
 ## Transcript viewer
 

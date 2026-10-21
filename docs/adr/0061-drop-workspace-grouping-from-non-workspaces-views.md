@@ -2,7 +2,8 @@
 
 ## Status
 
-Accepted
+Accepted. Refined by ADR 0139, which gives the mux view a real
+`workspace` grouping now that the Workspaces view is gone (ADR 0065).
 
 ## Context
 

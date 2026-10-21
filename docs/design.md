@@ -259,7 +259,11 @@ Entity notes:
 - `AgentSession` is a harness-native session record. It may be global, orphaned,
   repo-rooted, checkout-rooted, workspace-rooted, or fork-associated.
 - `MuxSession` is a terminal multiplexer session. It can be linked to an agent
-  session and/or rooted in a workspace, repo, checkout, or fork path. When the
+  session and/or rooted in a workspace, repo, checkout, or fork path. Cross-link
+  inference emits `rooted_in` to the innermost workspace containing the mux's
+  session path, using the same path index that associates agent sessions; a
+  mux has one rooted-in workspace, and a declared link outranks the inferred
+  one (ADR 0139). When the
   mux provider can observe active-pane process hints, open session files,
   recent session-file activity, descendant harness processes, and
   start-command session keys may refine weak cwd-based session links.
@@ -892,6 +896,12 @@ renders a flat, table-like session list rather than workspace/repo/checkout
 group rows. The flat list carries an inline project-name column before the
 preview text and uses recency order; hierarchy sorting is not applicable
 without group rows.
+
+The mux view groups by `session` (the default, a flat list), `host`, `repo`,
+or `workspace`. `workspace` is the mux counterpart of the sessions view's
+`graph` shape: after the Pins group, one header per workspace a mux (or an
+unbound pin placeholder) is rooted in, then the `repo` buckets for every other
+mux, then Ungrouped (ADR 0139).
 
 Every capability in this surface is reachable through a navigable
 **Controls overlay** (sections for view, grouping, filters, sort).
