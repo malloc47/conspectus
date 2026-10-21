@@ -290,11 +290,8 @@ impl TuiArgs {
                 diagnostic.message
             );
         }
-        let scan_roots = crate::cwd::ScanRoots::resolve(
-            self.scan_roots,
-            &outcome.config.tui.scan_roots,
-            cwd.clone(),
-        );
+        let scan_roots =
+            super::long_running_scan_roots(self.scan_roots, &outcome.config, cwd.clone());
 
         // View precedence:
         //   1. explicit `--view` flag wins.

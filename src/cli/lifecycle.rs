@@ -16,9 +16,9 @@ use super::{cache_resolved_snapshot, warm_start_discover_and_resolve};
 
 #[derive(Debug, Args)]
 pub(super) struct ServeArgs {
-    /// Discovery scan root. Repeatable. Defaults to the current
-    /// working directory when omitted, mirroring the one-shot
-    /// CLI's discovery surface.
+    /// Discovery scan root. Repeatable. When omitted, uses
+    /// `[tui] scan_roots` from config, then the current working
+    /// directory, the same roots `conspectus tui` would scan.
     #[arg(long = "scan-root", value_name = "PATH")]
     scan_roots: Vec<PathBuf>,
 }
@@ -37,7 +37,7 @@ impl ServeArgs {
         }
         // The launch directory is re-checked each tick, so deleting it
         // drops the root instead of failing discovery (ADR 0111).
-        let scan_roots = crate::cwd::ScanRoots::resolve(self.scan_roots, &[], cwd);
+        let scan_roots = super::long_running_scan_roots(self.scan_roots, &outcome.config, cwd);
         crate::server::run(crate::server::ServeConfig {
             scan_roots,
             intervals: outcome.config.server.intervals,

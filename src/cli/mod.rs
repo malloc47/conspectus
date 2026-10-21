@@ -733,6 +733,19 @@ pub(super) fn project_store_path(scan_roots: &[PathBuf]) -> Result<PathBuf> {
     Ok(roots[0].join(PROJECT_CONFIG_FILENAME))
 }
 
+/// Scan roots for the long-running survey processes, `tui` and
+/// `serve`: the `--scan-root` flags, else `[tui] scan_roots`, else
+/// the launch directory (ADR 0111). Both resolve through here because
+/// the TUI reads the daemon's snapshot instead of discovering when one
+/// is running, so the two must agree on what gets scanned.
+pub(super) fn long_running_scan_roots(
+    flags: Vec<PathBuf>,
+    config: &crate::config::Config,
+    launch_dir: Option<PathBuf>,
+) -> crate::cwd::ScanRoots {
+    crate::cwd::ScanRoots::resolve(flags, &config.tui.scan_roots, launch_dir)
+}
+
 /// Effective list of roots used for nearest-store probing: the
 /// `--scan-root` flags, else the current working directory when it
 /// still exists, else none (ADR 0111).

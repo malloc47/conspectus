@@ -156,7 +156,7 @@ columns = ["default", "+preview"]   # same tokens as `--columns`
 
 [tui]
 default_view = "sessions"   # sessions | mux | prs (union | forks also accepted)
-scan_roots = ["~/work"]     # used when --scan-root is absent; `~` expands
+scan_roots = ["~/work"]     # tui and serve, when --scan-root is absent; `~` expands
 show_harness_chips = false  # per-harness count chips in the header
 narrow_layout_threshold = 100  # columns below which the panes stack
 preview_wrap = "smart"      # smart | plain | none — how the Preview fits a mux pane
@@ -348,6 +348,11 @@ conspectus status [--format {human|json}]
 
 Running `conspectus` with no subcommand opens the TUI. Every command's
 `--help` lists its full flag set.
+
+`tui` and `serve` scan the `--scan-root` flags, else `[tui] scan_roots`,
+else the launch directory, so the daemon's snapshot covers the same roots
+the TUI would scan on its own. The one-shot commands scan their flags or
+the current directory.
 
 `graph`, `table`, `node show`, and `tui` also take `--refresh` (ignore a
 running `conspectus serve` and rebuild in-process) and `--no-cache`

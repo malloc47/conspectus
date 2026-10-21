@@ -1029,3 +1029,30 @@ fn pin_commands_discover_without_forge_adapters() {
     // before a launch reaches tmux (ADR 0135).
     assert!(super::pin::pin_discovery_config().forge_adapters.is_empty());
 }
+
+#[test]
+fn long_running_scan_roots_prefer_flags_then_config_then_launch_dir() {
+    // `serve` and `tui` share this resolution, so a configured
+    // `[tui] scan_roots` reaches the daemon too (ADR 0111).
+    use crate::cwd::ScanRoots;
+    use std::path::PathBuf;
+
+    let mut config = crate::config::Config::default();
+    config.tui.scan_roots = vec![PathBuf::from("/configured")];
+    let launch = Some(PathBuf::from("/launch"));
+
+    assert_eq!(
+        long_running_scan_roots(vec![PathBuf::from("/flag")], &config, launch.clone()),
+        ScanRoots::explicit(vec![PathBuf::from("/flag")])
+    );
+    assert_eq!(
+        long_running_scan_roots(Vec::new(), &config, launch.clone()),
+        ScanRoots::explicit(vec![PathBuf::from("/configured")])
+    );
+
+    config.tui.scan_roots.clear();
+    assert_eq!(
+        long_running_scan_roots(Vec::new(), &config, launch.clone()),
+        ScanRoots::launch_dir(launch)
+    );
+}
