@@ -256,12 +256,14 @@ is missing (no tmux server, no `gh`, no harness state), that part of the
 graph is simply empty rather than an error.
 
 Forge queries are the only network calls, so they run less often than the
-rest: when discovery starts, then once an hour (`[server.intervals] forge`),
-or on demand with `Ctrl-R` in the TUI. A failed query surfaces as a
-diagnostic on the forge status chip
+rest and in the background: when a repo first appears, then once an hour
+(`[server.intervals] forge`), or on demand with `Ctrl-R` in the TUI. Nothing
+else waits on them; `[forge] concurrency` caps concurrent `gh` calls. A
+failed query surfaces as a diagnostic on the forge status chip
 ([ADR 0115](docs/adr/0115-forge-discovery-over-discovered-repos.md),
 [0116](docs/adr/0116-lazy-forge-cadence-and-hard-refresh.md),
-[0128](docs/adr/0128-github-hosts-gh-is-signed-in-to.md)).
+[0128](docs/adr/0128-github-hosts-gh-is-signed-in-to.md),
+[0136](docs/adr/0136-lazy-forge-fetches-outside-the-writer-lock.md)).
 
 ## Quick start
 

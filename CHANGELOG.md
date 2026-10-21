@@ -56,8 +56,10 @@ scriptable tables, and exports on top of it. See the
   link's evidence above the neighbor's preview.
 - **Refresh controls**: the TUI refreshes in the background, `r`
   rescans now, and `Ctrl-R` is a hard refresh that also asks GitHub
-  again. Forge data is otherwise fetched at startup and hourly, set by
-  `[server.intervals] forge`.
+  again. Forge data is otherwise fetched in the background, off the
+  daemon's writer lock, when a repo appears and then hourly (`[server.intervals]
+  forge`); no other refresh waits on it. `[forge] concurrency` caps
+  concurrent `gh` calls (default 4).
 - **CLI views**: `conspectus table sessions|mux|union|prs|forks` with
   column selection, card layout, paging, and color; `conspectus columns`;
   `conspectus node show`.

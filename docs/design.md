@@ -394,9 +394,13 @@ The sane default is:
   diagnostics (ADR 0115); a remote counts as GitHub when its host is
   `github.com`-shaped or one `gh` is signed in to, enterprise hosts included
   (ADR 0128)
-- keep forge reads rare: each remote's listing is fetched at startup and then
-  reused for the forge interval (default one hour), and the TUI's `Ctrl-R`
-  hard refresh asks the forges again on demand (ADR 0116)
+- keep forge reads rare and off the critical path: each remote's listing is
+  fetched in the background (the daemon's forge class, or a daemonless
+  TUI's worker) and reused for the forge interval (default one hour);
+  routine cycles and refreshes only read the cache, never wait on the
+  network or the daemon's writer lock, and the TUI's `Ctrl-R` hard refresh
+  is the explicit synchronous fetch (ADR 0116, ADR 0136); `[forge]
+  concurrency` bounds concurrent `gh` calls
 
 Discovery should prefer direct on-disk evidence first, then provider metadata,
 then common conventions, then user-declared overrides. Conventions such as

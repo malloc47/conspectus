@@ -2,7 +2,8 @@
 
 ## Status
 
-Accepted. Refines ADR 0011 (forge discovery via `gh`).
+Accepted. Refines ADR 0011 (forge discovery via `gh`). Amended by ADR 0136:
+the concurrency cap is `[forge] concurrency`, default 4.
 
 ## Context
 

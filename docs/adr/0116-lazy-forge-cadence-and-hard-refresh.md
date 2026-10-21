@@ -3,7 +3,10 @@
 ## Status
 
 Accepted. Refines ADR 0115 (forge discovery over every discovered repo) and
-ADR 0038 (the forge interval default).
+ADR 0038 (the forge interval default). Amended by ADR 0136: listings are
+fetched in the background off the daemon's writer lock, routine cycles and
+TUI refreshes only read the cache, and only an explicit refresh fetches
+synchronously.
 
 ## Context
 

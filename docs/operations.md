@@ -176,6 +176,9 @@ mux = "5s"
 git = "30s"
 forge = "1h"                # gh pr list per remote; Ctrl-R in the TUI asks now (ADR 0116)
 
+[forge]
+concurrency = 4             # gh calls at once (ADR 0136)
+
 [worktree]                  # see docs/worktrees.md
 backend = "auto"            # auto | git | worktrunk
 teardown_confirm = "live"   # always | live | never
@@ -198,12 +201,19 @@ teardown_grace = "3s"
   first (ADR 0129, 0130, 0134).
 - **Durations** in `[server.intervals]` and `teardown_grace` use
   `<integer><ms|s|m|h>`.
-- **Forge cadence (ADR 0116):** each GitHub remote's PR listing is fetched
-  when discovery starts and reused until it is older than `forge`. A failed
-  fetch retries after at most five minutes. `r` in the TUI keeps the
-  listings; `Ctrl-R` drops them, refreshes a running daemon's forge class,
-  and reloads PR previews. `conspectus refresh --class forge` does the same
-  from a shell.
+- **Forge cadence (ADR 0116, 0136):** each GitHub remote's PR listing is
+  fetched in the background, by the daemon's forge class or, without a
+  daemon, by the TUI, and reused until it is older than `forge`. A failed
+  fetch retries after at most five minutes. Nothing else waits on a forge:
+  routine refreshes, `r`, and the refresh after a tmux detach build PRs
+  from the cached listings. `Ctrl-R` is the explicit opt-in: it drops the
+  listings, fetches them for you, and reloads PR previews.
+  `conspectus refresh --class forge` (or a plain `conspectus refresh`) does
+  the same from a shell. One-shot commands without a daemon (`graph`,
+  `table prs`) fetch, since they have nothing cached.
+- **Forge concurrency:** `[forge] concurrency` (default 4) sets how many
+  `gh` calls run at once. Higher fetches faster but can trip a forge's
+  rate limits.
 - **View precedence at startup:** `--view`, then the view you last used
   (unless `--no-resume-view`), then `[tui] default_view`, then
   `sessions`.
