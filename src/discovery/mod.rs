@@ -157,6 +157,7 @@ pub struct DiscoveryContext {
     forge_max_age: Option<Duration>,
     forge_fetch: forge::ForgeFetch,
     forge_concurrency: Option<usize>,
+    forge_cancel: Option<Arc<std::sync::atomic::AtomicBool>>,
 }
 
 impl DiscoveryContext {
@@ -228,6 +229,19 @@ impl DiscoveryContext {
     pub fn with_forge_concurrency(mut self, concurrency: usize) -> Self {
         self.forge_concurrency = Some(concurrency.max(1));
         self
+    }
+
+    /// Stop forge fetches once `cancel` is set: no further calls start
+    /// and calls in flight are abandoned (ADR 0137).
+    pub fn with_forge_cancel(mut self, cancel: Option<Arc<std::sync::atomic::AtomicBool>>) -> Self {
+        self.forge_cancel = cancel;
+        self
+    }
+
+    /// The flag that cancels forge fetches; never set when none was given.
+    pub fn forge_cancel(&self) -> &std::sync::atomic::AtomicBool {
+        static NEVER: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+        self.forge_cancel.as_deref().unwrap_or(&NEVER)
     }
 
     pub fn forge_fetch(&self) -> forge::ForgeFetch {
@@ -484,7 +498,8 @@ pub fn prefetch_forges(
         .with_caches(Arc::clone(&config.caches))
         .with_forge_max_age(intervals.forge)
         .with_forge_fetch(forge::ForgeFetch::Fetch)
-        .with_forge_concurrency(config.forge_concurrency);
+        .with_forge_concurrency(config.forge_concurrency)
+        .with_forge_cancel(config.forge_cancel.clone());
     let mut coordinator = forge::ForgeDiscovery::new();
     for adapter in config.forge_adapters {
         coordinator = coordinator.with_boxed_adapter(adapter);
@@ -502,7 +517,8 @@ pub fn discover_local_warm_with(
         .with_caches(Arc::clone(&config.caches))
         .with_forge_max_age(intervals.forge)
         .with_forge_fetch(config.forge_fetch)
-        .with_forge_concurrency(config.forge_concurrency);
+        .with_forge_concurrency(config.forge_concurrency)
+        .with_forge_cancel(config.forge_cancel.clone());
 
     for (key, root) in &config.harness_state_roots {
         context = context.with_harness_state_root(key.clone(), root.clone());
@@ -952,6 +968,8 @@ pub struct LocalDiscoveryConfig {
     pub forge_fetch: forge::ForgeFetch,
     /// How many forge calls may run at once (ADR 0136).
     pub forge_concurrency: usize,
+    /// Set to stop forge fetches early (ADR 0137).
+    pub forge_cancel: Option<Arc<std::sync::atomic::AtomicBool>>,
 }
 
 impl LocalDiscoveryConfig {
@@ -1045,6 +1063,7 @@ impl LocalDiscoveryConfig {
             caches: Arc::default(),
             forge_fetch: forge::ForgeFetch::default(),
             forge_concurrency: forge::DEFAULT_FORGE_CONCURRENCY,
+            forge_cancel: None,
         }
     }
 
@@ -1063,6 +1082,7 @@ impl LocalDiscoveryConfig {
             caches: Arc::default(),
             forge_fetch: forge::ForgeFetch::default(),
             forge_concurrency: forge::DEFAULT_FORGE_CONCURRENCY,
+            forge_cancel: None,
         }
     }
 
@@ -1076,6 +1096,12 @@ impl LocalDiscoveryConfig {
     /// Run at most `concurrency` forge calls at once (ADR 0136).
     pub fn with_forge_concurrency(mut self, concurrency: usize) -> Self {
         self.forge_concurrency = concurrency.max(1);
+        self
+    }
+
+    /// Stop forge fetches once `cancel` is set (ADR 0137).
+    pub fn with_forge_cancel(mut self, cancel: Arc<std::sync::atomic::AtomicBool>) -> Self {
+        self.forge_cancel = Some(cancel);
         self
     }
 

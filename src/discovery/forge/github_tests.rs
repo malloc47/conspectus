@@ -1157,3 +1157,109 @@ fn fetches_run_at_most_the_configured_number_of_gh_calls_at_once() {
         "zero is clamped, never a stall"
     );
 }
+
+/// A runner whose first call sets `cancel`, as a shutdown arriving
+/// mid-fetch would.
+#[derive(Clone)]
+struct CancellingGh {
+    cancel: std::sync::Arc<std::sync::atomic::AtomicBool>,
+    calls: std::sync::Arc<std::sync::atomic::AtomicUsize>,
+}
+
+impl crate::discovery::forge::GhRunner for CancellingGh {
+    fn list_pull_requests(
+        &self,
+        _repo: &str,
+        _filter: &crate::discovery::forge::PrListFilter,
+        _fields: &str,
+    ) -> anyhow::Result<GhOutcome> {
+        self.calls.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        self.cancel.store(true, std::sync::atomic::Ordering::SeqCst);
+        Ok(GhOutcome::PullRequests("[]".to_string()))
+    }
+
+    fn view_pull_request(
+        &self,
+        _repo: &str,
+        _number: u64,
+        _fields: &str,
+    ) -> anyhow::Result<GhOutcome> {
+        Ok(GhOutcome::PullRequests("{}".to_string()))
+    }
+}
+
+#[test]
+fn a_cancelled_fetch_starts_no_further_batch_and_caches_nothing() {
+    // ADR 0137: the batch in flight finishes, no later batch starts, and
+    // the listings it did get are dropped rather than cached half-done.
+    let cancel = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let runner = CancellingGh {
+        cancel: std::sync::Arc::clone(&cancel),
+        calls: std::sync::Arc::default(),
+    };
+    let context = DiscoveryContext::default()
+        .with_forge_concurrency(2)
+        .with_forge_cancel(Some(std::sync::Arc::clone(&cancel)));
+    let repos: Vec<ForgeRepo> = (0..6).map(|n| octo(&format!("r{n}"))).collect();
+
+    let asked = GitHubForgeProvider::with_runner(runner.clone()).prefetch(&repos, &context);
+
+    assert_eq!(asked, 0);
+    assert_eq!(runner.calls.load(std::sync::atomic::Ordering::SeqCst), 2);
+    for n in 0..6 {
+        assert!(
+            context
+                .caches()
+                .forge
+                .get(&format!("github.com/octo/r{n}"))
+                .is_none()
+        );
+    }
+}
+
+/// A runner that is signed in to the enterprise host, but whose hosts
+/// lookup a shutdown cuts short.
+#[derive(Clone, Default)]
+struct CancelledHostsGh {
+    lists: std::sync::Arc<std::sync::atomic::AtomicUsize>,
+}
+
+impl crate::discovery::forge::GhRunner for CancelledHostsGh {
+    fn list_pull_requests(
+        &self,
+        _repo: &str,
+        _filter: &crate::discovery::forge::PrListFilter,
+        _fields: &str,
+    ) -> anyhow::Result<GhOutcome> {
+        self.lists.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        Ok(GhOutcome::PullRequests("[]".to_string()))
+    }
+
+    fn view_pull_request(
+        &self,
+        _repo: &str,
+        _number: u64,
+        _fields: &str,
+    ) -> anyhow::Result<GhOutcome> {
+        Ok(GhOutcome::PullRequests("{}".to_string()))
+    }
+
+    fn authenticated_hosts_until(
+        &self,
+        _cancel: &std::sync::atomic::AtomicBool,
+    ) -> Option<Vec<String>> {
+        None
+    }
+}
+
+#[test]
+fn a_hosts_lookup_cut_short_caches_no_hosts() {
+    let cancel = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(true));
+    let context = DiscoveryContext::default().with_forge_cancel(Some(cancel));
+    let runner = CancelledHostsGh::default();
+    let asked =
+        GitHubForgeProvider::with_runner(runner.clone()).prefetch(&[enterprise_repo()], &context);
+    assert_eq!(asked, 0);
+    assert_eq!(runner.lists.load(std::sync::atomic::Ordering::SeqCst), 0);
+    assert_eq!(context.caches().forge.cached_hosts(), None);
+}

@@ -406,3 +406,123 @@ fn signed_in_hosts_are_reused_unless_expired_and_empty_ones_retry_sooner() {
     assert!(listings.fresh_hosts(Duration::from_secs(3600)).is_some());
     assert_eq!(listings.fresh_hosts(Duration::ZERO), None);
 }
+
+/// A stand-in `gh` that runs `body` as a shell script.
+fn shim_gh(dir: &Path, body: &str) -> SystemGh {
+    use std::os::unix::fs::PermissionsExt;
+    let path = dir.join("gh");
+    std::fs::write(&path, format!("#!/bin/sh\n{body}\n")).expect("write shim");
+    std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).expect("chmod");
+    SystemGh::with_binary(path)
+}
+
+#[test]
+fn a_cancelled_gh_call_kills_its_child_promptly() {
+    // ADR 0137: a shutdown abandons the call instead of waiting it out.
+    let temp = tempfile::tempdir().expect("temp dir");
+    let runner = shim_gh(temp.path(), "sleep 30");
+    let cancel = std::sync::Arc::new(AtomicBool::new(false));
+    let setter = std::sync::Arc::clone(&cancel);
+    std::thread::spawn(move || {
+        std::thread::sleep(Duration::from_millis(150));
+        setter.store(true, Ordering::SeqCst);
+    });
+
+    let started = Instant::now();
+    let outcome = runner
+        .list_pull_requests_until(
+            "github.com/o/r",
+            &PrListFilter::Open { limit: 1 },
+            "number",
+            &cancel,
+        )
+        .expect("outcome");
+
+    assert!(
+        started.elapsed() < Duration::from_secs(3),
+        "took {:?}",
+        started.elapsed()
+    );
+    match outcome {
+        GhOutcome::Failed { message, .. } => assert!(message.contains("cancelled"), "{message}"),
+        other => panic!("expected a cancelled failure, got {other:?}"),
+    }
+}
+
+#[test]
+fn a_cancellable_gh_call_reads_a_listing_larger_than_a_pipe_buffer() {
+    let temp = tempfile::tempdir().expect("temp dir");
+    let runner = shim_gh(temp.path(), "head -c 300000 /dev/zero | tr '\\0' a");
+    let outcome = runner
+        .list_pull_requests_until(
+            "github.com/o/r",
+            &PrListFilter::Open { limit: 1 },
+            "number",
+            &AtomicBool::new(false),
+        )
+        .expect("outcome");
+    match outcome {
+        GhOutcome::PullRequests(body) => assert_eq!(body.len(), 300_000),
+        other => panic!("expected the listing, got {other:?}"),
+    }
+}
+
+#[test]
+fn a_cancellable_gh_call_classifies_failures_like_a_plain_one() {
+    let temp = tempfile::tempdir().expect("temp dir");
+    let runner = shim_gh(
+        temp.path(),
+        "echo 'error connecting to api.github.com' >&2; exit 1",
+    );
+    assert_eq!(
+        runner
+            .list_pull_requests_until(
+                "github.com/o/r",
+                &PrListFilter::Open { limit: 1 },
+                "number",
+                &AtomicBool::new(false),
+            )
+            .expect("outcome"),
+        GhOutcome::Unavailable(GhUnavailableReason::Offline)
+    );
+    let missing = SystemGh::with_binary("/definitely/not/here/gh");
+    assert_eq!(
+        missing
+            .list_pull_requests_until(
+                "github.com/o/r",
+                &PrListFilter::Open { limit: 1 },
+                "number",
+                &AtomicBool::new(false),
+            )
+            .expect("outcome"),
+        GhOutcome::Unavailable(GhUnavailableReason::BinaryNotFound)
+    );
+}
+
+#[test]
+fn a_cancelled_hosts_lookup_returns_promptly_with_no_answer() {
+    let temp = tempfile::tempdir().expect("temp dir");
+    let runner = shim_gh(temp.path(), "sleep 30");
+    let cancel = std::sync::Arc::new(AtomicBool::new(false));
+    let setter = std::sync::Arc::clone(&cancel);
+    std::thread::spawn(move || {
+        std::thread::sleep(Duration::from_millis(150));
+        setter.store(true, Ordering::SeqCst);
+    });
+    let started = Instant::now();
+    assert_eq!(runner.authenticated_hosts_until(&cancel), None);
+    assert!(
+        started.elapsed() < Duration::from_secs(3),
+        "took {:?}",
+        started.elapsed()
+    );
+
+    let answering = shim_gh(
+        temp.path(),
+        r#"echo '{"hosts":{"git.example.com":[{"state":"success"}]}}'"#,
+    );
+    assert_eq!(
+        answering.authenticated_hosts_until(&AtomicBool::new(false)),
+        Some(vec!["git.example.com".to_string()])
+    );
+}

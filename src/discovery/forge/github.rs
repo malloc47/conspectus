@@ -601,7 +601,14 @@ impl<R: GhRunner> GitHubForgeProvider<R> {
             cache
                 .fresh_hosts(context.forge_max_age())
                 .unwrap_or_else(|| {
-                    let hosts = self.runner.authenticated_hosts();
+                    // A lookup a shutdown cut short caches nothing
+                    // (ADR 0137); the fetch it began stops too.
+                    let Some(hosts) = self
+                        .runner
+                        .authenticated_hosts_until(context.forge_cancel())
+                    else {
+                        return Vec::new();
+                    };
                     cache.set_hosts(hosts.clone());
                     hosts
                 })
@@ -672,10 +679,25 @@ impl<R: GhRunner> GitHubForgeProvider<R> {
             .iter()
             .flat_map(|remote| filters.iter().map(move |filter| (remote, filter)))
             .collect();
-        let outcomes = run_bounded(&jobs, context.forge_concurrency(), |(remote, filter)| {
-            self.runner
-                .list_pull_requests(&remote_key(remote), filter, GH_PR_LIST_FIELDS)
-        });
+        let cancel = context.forge_cancel();
+        let outcomes = run_bounded(
+            &jobs,
+            context.forge_concurrency(),
+            cancel,
+            |(remote, filter)| {
+                self.runner.list_pull_requests_until(
+                    &remote_key(remote),
+                    filter,
+                    GH_PR_LIST_FIELDS,
+                    cancel,
+                )
+            },
+        );
+        // A fetch cut short changes nothing: its listings would record
+        // the calls it abandoned as failures (ADR 0137).
+        if cancel.load(std::sync::atomic::Ordering::Relaxed) {
+            return 0;
+        }
 
         let fetched = Instant::now();
         let mut answered: BTreeMap<&RemoteSlug, RemoteListing> = BTreeMap::new();
@@ -814,14 +836,19 @@ fn github_remotes(repo: &super::ForgeRepo, hosts: &GithubHosts) -> Vec<RemoteSlu
 }
 
 /// Run `call` over `jobs`, at most `limit` at a time on scoped threads,
-/// returning results in job order.
+/// returning results in job order. No batch starts once `cancel` is set
+/// (ADR 0137), so the result can be shorter than `jobs`.
 fn run_bounded<J: Sync, T: Send>(
     jobs: &[J],
     limit: usize,
+    cancel: &std::sync::atomic::AtomicBool,
     call: impl Fn(&J) -> T + Sync,
 ) -> Vec<T> {
     let mut results = Vec::with_capacity(jobs.len());
     for chunk in jobs.chunks(limit.max(1)) {
+        if cancel.load(std::sync::atomic::Ordering::Relaxed) {
+            break;
+        }
         std::thread::scope(|scope| {
             let handles: Vec<_> = chunk.iter().map(|job| scope.spawn(|| call(job))).collect();
             for handle in handles {

@@ -327,6 +327,9 @@ struct DispatchCtx {
     /// Builds the discovery config for a cycle or a fetch, with the
     /// daemon's caches and forge settings applied.
     discovery: DiscoveryFactory,
+    /// The shutdown latch (ADR 0080); also cancels forge fetches
+    /// (ADR 0137).
+    shutdown: Arc<AtomicBool>,
 }
 
 /// Builds a [`LocalDiscoveryConfig`] for the given forge fetch policy.
@@ -338,12 +341,14 @@ type DiscoveryFactory = Arc<dyn Fn(ForgeFetch) -> LocalDiscoveryConfig + Send + 
 fn env_discovery(
     caches: Arc<DiscoveryCaches>,
     forge: crate::config::ForgeConfig,
+    shutdown: Arc<AtomicBool>,
 ) -> DiscoveryFactory {
     Arc::new(move |fetch| {
         LocalDiscoveryConfig::from_env()
             .with_caches(Arc::clone(&caches))
             .with_forge_concurrency(forge.concurrency)
             .with_forge_fetch(fetch)
+            .with_forge_cancel(Arc::clone(&shutdown))
     })
 }
 
@@ -802,6 +807,19 @@ fn handle_refresh(request: &Request, ctx: &DispatchCtx) -> Response {
     // (ADR 0136).
     if matches!(class, None | Some(ProviderClass::Forge)) {
         fetch_forges(ctx, true);
+        if ctx.shutdown.load(Ordering::Relaxed) {
+            // The fetch was cut short; publishing would record its
+            // abandoned calls as failures (ADR 0137).
+            return Response {
+                id: request.id.clone(),
+                result: "error",
+                data: None,
+                error: Some(ErrorBody {
+                    code: "shutting_down".to_string(),
+                    message: "the daemon is shutting down".to_string(),
+                }),
+            };
+        }
     }
     let _guard = ctx
         .writer_lock
@@ -1097,9 +1115,14 @@ pub fn run(config: ServeConfig) -> Result<()> {
         snapshot_bytes,
         snapshot_state,
         snapshot_path: Arc::new(snapshot::graph_bin_path()),
-        discovery: env_discovery(Arc::clone(&discovery_caches), config.forge),
+        discovery: env_discovery(
+            Arc::clone(&discovery_caches),
+            config.forge,
+            Arc::clone(&shutdown),
+        ),
         discovery_caches,
         forge_fetch_lock: Arc::default(),
+        shutdown: Arc::clone(&shutdown),
     };
 
     let mut handles: Vec<JoinHandle<()>> = Vec::new();
@@ -1262,20 +1285,7 @@ fn forge_loop(ctx: &DispatchCtx, shutdown: &AtomicBool) {
         ctx.intervals.forge
     );
     while !shutdown.load(Ordering::Relaxed) {
-        let started = crate::discovery::current_epoch();
-        if fetch_forges(ctx, false) > 0 {
-            run_cycle(ProviderClass::Forge, ctx);
-        } else {
-            // A poll with nothing to fetch is still a tick, so status
-            // shows the forge class alive and when it last looked.
-            record_state_started(&ctx.state, ProviderClass::Forge, started);
-            record_state_completed(
-                &ctx.state,
-                ProviderClass::Forge,
-                crate::discovery::current_epoch(),
-                Ok(()),
-            );
-        }
+        forge_tick(ctx, shutdown);
         if matches!(
             wait_for_class_signal(&mut NullWatcher, FORGE_POLL, shutdown),
             WatcherEvent::ShuttingDown
@@ -1284,6 +1294,32 @@ fn forge_loop(ctx: &DispatchCtx, shutdown: &AtomicBool) {
         }
     }
     eprintln!("conspectus serve: forge scheduler stopping after shutdown signal");
+}
+
+/// One forge poll: fetch what the published snapshot's repos need and,
+/// if that brought anything in, merge it in a cached-only cycle. A
+/// shutdown during the fetch skips the merge (ADR 0137). Returns
+/// whether the merge cycle ran.
+fn forge_tick(ctx: &DispatchCtx, shutdown: &AtomicBool) -> bool {
+    let started = crate::discovery::current_epoch();
+    let fetched = fetch_forges(ctx, false);
+    if shutdown.load(Ordering::Relaxed) {
+        return false;
+    }
+    if fetched > 0 {
+        run_cycle(ProviderClass::Forge, ctx);
+        return true;
+    }
+    // A poll with nothing to fetch is still a tick, so status shows the
+    // forge class alive and when it last looked.
+    record_state_started(&ctx.state, ProviderClass::Forge, started);
+    record_state_completed(
+        &ctx.state,
+        ProviderClass::Forge,
+        crate::discovery::current_epoch(),
+        Ok(()),
+    );
+    false
 }
 
 /// Fetch the forge listings the published snapshot's repos need, under

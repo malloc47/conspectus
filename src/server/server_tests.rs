@@ -72,6 +72,7 @@ fn hook_ingest_updates_snapshot_state_and_published_bytes() {
         discovery_caches: Arc::default(),
         forge_fetch_lock: Arc::default(),
         discovery: Arc::new(|_| LocalDiscoveryConfig::empty()),
+        shutdown: Arc::default(),
     };
     let record = HookRecord {
         schema_version: SCHEMA_VERSION,
@@ -226,11 +227,14 @@ fn throttle_since_returns_early_when_shutdown_flips_mid_wait() {
     );
 }
 
-/// A `gh` stand-in that counts calls and sleeps `delay` on each.
+/// A `gh` stand-in that counts calls and sleeps `delay` on each. With
+/// `stops` set, each call flips that latch, as a shutdown arriving
+/// mid-fetch would.
 #[derive(Clone, Default)]
 struct SlowGh {
     calls: Arc<std::sync::atomic::AtomicUsize>,
     delay: Duration,
+    stops: Option<Arc<AtomicBool>>,
 }
 
 impl crate::discovery::forge::GhRunner for SlowGh {
@@ -241,6 +245,9 @@ impl crate::discovery::forge::GhRunner for SlowGh {
         _fields: &str,
     ) -> Result<crate::discovery::forge::GhOutcome> {
         self.calls.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        if let Some(stops) = &self.stops {
+            stops.store(true, std::sync::atomic::Ordering::SeqCst);
+        }
         std::thread::sleep(self.delay);
         Ok(crate::discovery::forge::GhOutcome::PullRequests(
             r#"[{"number": 3, "headRefName": "main"}]"#.to_string(),
@@ -263,6 +270,11 @@ impl crate::discovery::forge::GhRunner for SlowGh {
 /// real git repo with a GitHub remote, and whose discovery runs no
 /// providers but the forge, through `gh`.
 fn forge_ctx(temp: &Path, gh: SlowGh) -> DispatchCtx {
+    forge_ctx_with(temp, gh, Arc::default())
+}
+
+/// [`forge_ctx`] with a given shutdown latch.
+fn forge_ctx_with(temp: &Path, gh: SlowGh, shutdown: Arc<AtomicBool>) -> DispatchCtx {
     use crate::model::{CheckoutId, CheckoutNode, RepoId};
     let root = temp.join("repo");
     std::fs::create_dir_all(&root).expect("repo dir");
@@ -292,6 +304,7 @@ fn forge_ctx(temp: &Path, gh: SlowGh) -> DispatchCtx {
     };
     let caches: Arc<DiscoveryCaches> = Arc::default();
     let factory_caches = Arc::clone(&caches);
+    let factory_shutdown = Arc::clone(&shutdown);
     DispatchCtx {
         // Git discovery keeps finding the checkout, as it would in a
         // running daemon, so cycles don't evict it.
@@ -309,7 +322,9 @@ fn forge_ctx(temp: &Path, gh: SlowGh) -> DispatchCtx {
                 .with_caches(Arc::clone(&factory_caches))
                 .with_forge_runner(gh.clone())
                 .with_forge_fetch(fetch)
+                .with_forge_cancel(Arc::clone(&factory_shutdown))
         }),
+        shutdown,
     }
 }
 
@@ -399,4 +414,69 @@ fn routine_cycles_never_ask_a_forge() {
             .any(|node| matches!(node, GraphNode::ForgePr(pr) if pr.number == 3)),
         "the forge refresh's PR was merged"
     );
+}
+
+fn has_prs(ctx: &DispatchCtx) -> bool {
+    load_snapshot_state(&ctx.snapshot_state).is_some_and(|snapshot| {
+        snapshot
+            .nodes
+            .iter()
+            .any(|node| matches!(node, GraphNode::ForgePr(_)))
+    })
+}
+
+#[test]
+fn a_shutdown_during_a_forge_poll_skips_the_merge() {
+    // ADR 0137: the fetch is abandoned, nothing is cached, and the
+    // scheduler doesn't take the writer lock to publish it.
+    let temp = tempfile::tempdir().expect("tempdir");
+    let shutdown: Arc<AtomicBool> = Arc::default();
+    let gh = SlowGh {
+        stops: Some(Arc::clone(&shutdown)),
+        ..SlowGh::default()
+    };
+    let ctx = forge_ctx_with(temp.path(), gh, Arc::clone(&shutdown));
+
+    assert!(!forge_tick(&ctx, &shutdown), "no merge cycle");
+    assert!(!has_prs(&ctx));
+    assert!(
+        ctx.discovery_caches
+            .forge
+            .get("github.com/octo/repo")
+            .is_none()
+    );
+    assert!(
+        !ctx.state
+            .lock()
+            .expect("state")
+            .snapshot()
+            .contains_key("forge"),
+        "no tick recorded"
+    );
+
+    // Without a shutdown the same poll merges its PRs.
+    let temp = tempfile::tempdir().expect("tempdir");
+    let ctx = forge_ctx(temp.path(), SlowGh::default());
+    assert!(forge_tick(&ctx, &ctx.shutdown));
+    assert!(has_prs(&ctx));
+}
+
+#[test]
+fn a_refresh_whose_fetch_a_shutdown_cut_short_does_not_publish() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let shutdown: Arc<AtomicBool> = Arc::default();
+    let gh = SlowGh {
+        stops: Some(Arc::clone(&shutdown)),
+        ..SlowGh::default()
+    };
+    let ctx = forge_ctx_with(temp.path(), gh, shutdown);
+
+    let response = handle_refresh(&refresh_request("forge"), &ctx);
+
+    assert_eq!(response.result, "error");
+    assert_eq!(
+        response.error.as_ref().map(|error| error.code.as_str()),
+        Some("shutting_down")
+    );
+    assert!(!has_prs(&ctx));
 }

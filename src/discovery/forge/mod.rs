@@ -16,6 +16,7 @@
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::io;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Mutex, MutexGuard, PoisonError};
 use std::time::{Duration, Instant};
 
@@ -355,6 +356,19 @@ pub trait GhRunner: Send + Sync {
         fields: &str,
     ) -> Result<GhOutcome>;
 
+    /// [`Self::list_pull_requests`], abandoned once `cancel` is set
+    /// (ADR 0137). A runner that can't stop a call early just makes it.
+    fn list_pull_requests_until(
+        &self,
+        repo: &str,
+        filter: &PrListFilter,
+        fields: &str,
+        cancel: &AtomicBool,
+    ) -> Result<GhOutcome> {
+        let _ = cancel;
+        self.list_pull_requests(repo, filter, fields)
+    }
+
     /// Run `gh pr view <number> --repo <repo> --json <fields>`, where
     /// `repo` is `[HOST/]OWNER/REPO`. Success carries the JSON object
     /// in [`GhOutcome::PullRequests`].
@@ -365,6 +379,13 @@ pub trait GhRunner: Send + Sync {
     /// which leaves discovery on the built-in host names.
     fn authenticated_hosts(&self) -> Vec<String> {
         Vec::new()
+    }
+
+    /// [`Self::authenticated_hosts`], abandoned once `cancel` is set
+    /// (ADR 0137); `None` when it was.
+    fn authenticated_hosts_until(&self, cancel: &AtomicBool) -> Option<Vec<String>> {
+        let hosts = self.authenticated_hosts();
+        (!cancel.load(Ordering::Relaxed)).then_some(hosts)
     }
 }
 
@@ -438,13 +459,21 @@ impl GhRunner for SystemGh {
         filter: &PrListFilter,
         fields: &str,
     ) -> Result<GhOutcome> {
-        let mut args: Vec<String> = ["pr", "list", "--repo", repo, "--json", fields]
-            .iter()
-            .map(ToString::to_string)
-            .collect();
-        args.extend(filter.args());
+        let args = pr_list_args(repo, filter, fields);
         let args: Vec<&str> = args.iter().map(String::as_str).collect();
         self.run(&args, None)
+    }
+
+    fn list_pull_requests_until(
+        &self,
+        repo: &str,
+        filter: &PrListFilter,
+        fields: &str,
+        cancel: &AtomicBool,
+    ) -> Result<GhOutcome> {
+        let args = pr_list_args(repo, filter, fields);
+        let args: Vec<&str> = args.iter().map(String::as_str).collect();
+        self.run_until(&args, cancel)
     }
 
     fn view_pull_request(&self, repo: &str, number: u64, fields: &str) -> Result<GhOutcome> {
@@ -460,6 +489,17 @@ impl GhRunner for SystemGh {
             Ok(GhOutcome::PullRequests(body)) => parse_authenticated_hosts(&body),
             _ => Vec::new(),
         }
+    }
+
+    fn authenticated_hosts_until(&self, cancel: &AtomicBool) -> Option<Vec<String>> {
+        let outcome = self.run_until(&["auth", "status", "--json", "hosts"], cancel);
+        if cancel.load(Ordering::Relaxed) {
+            return None;
+        }
+        Some(match outcome {
+            Ok(GhOutcome::PullRequests(body)) => parse_authenticated_hosts(&body),
+            _ => Vec::new(),
+        })
     }
 }
 
@@ -482,20 +522,107 @@ pub(crate) fn parse_authenticated_hosts(body: &str) -> Vec<String> {
     hosts
 }
 
+/// The `gh pr list` arguments for `repo` narrowed by `filter`.
+fn pr_list_args(repo: &str, filter: &PrListFilter, fields: &str) -> Vec<String> {
+    let mut args: Vec<String> = ["pr", "list", "--repo", repo, "--json", fields]
+        .iter()
+        .map(ToString::to_string)
+        .collect();
+    args.extend(filter.args());
+    args
+}
+
+/// How often a cancellable `gh` call checks its cancel flag.
+const CANCEL_POLL: Duration = Duration::from_millis(50);
+
 impl SystemGh {
-    /// Run `gh` read-only, from `cwd` when given, and classify the
-    /// failures callers degrade on.
-    fn run(&self, args: &[&str], cwd: Option<&Path>) -> Result<GhOutcome> {
+    fn command(&self, args: &[&str]) -> std::process::Command {
         let mut command = crate::exec::command(crate::exec::Program::Gh, &self.binary);
         command
             .args(args)
             .env("GH_PROMPT_DISABLED", "1")
             .stdin(std::process::Stdio::null());
+        command
+    }
+
+    /// Run `gh` read-only, from `cwd` when given, and classify the
+    /// failures callers degrade on.
+    fn run(&self, args: &[&str], cwd: Option<&Path>) -> Result<GhOutcome> {
+        let mut command = self.command(args);
         if let Some(cwd) = cwd {
             command.current_dir(cwd);
         }
         let output = command.output();
+        self.classify(output)
+    }
 
+    /// [`Self::run`], killing the child once `cancel` is set (ADR
+    /// 0137). Its output is read on separate threads so a listing larger
+    /// than a pipe buffer can't stall the child while it is polled.
+    fn run_until(&self, args: &[&str], cancel: &AtomicBool) -> Result<GhOutcome> {
+        use std::io::Read;
+        use std::process::Stdio;
+
+        let mut command = self.command(args);
+        command.stdout(Stdio::piped()).stderr(Stdio::piped());
+        let mut child = match command.spawn() {
+            Ok(child) => child,
+            Err(err) => return self.classify(Err(err)),
+        };
+        let reader = |pipe: Option<Box<dyn Read + Send>>| {
+            std::thread::spawn(move || {
+                let mut bytes = Vec::new();
+                if let Some(mut pipe) = pipe {
+                    let _ = pipe.read_to_end(&mut bytes);
+                }
+                bytes
+            })
+        };
+        let stdout = reader(
+            child
+                .stdout
+                .take()
+                .map(|p| Box::new(p) as Box<dyn Read + Send>),
+        );
+        let stderr = reader(
+            child
+                .stderr
+                .take()
+                .map(|p| Box::new(p) as Box<dyn Read + Send>),
+        );
+        let status = loop {
+            if cancel.load(Ordering::Relaxed) {
+                let _ = child.kill();
+                let _ = child.wait();
+                // The readers aren't joined: a process `gh` started can
+                // still hold the pipes open, and its output is being
+                // discarded anyway. They end when the pipes close.
+                drop((stdout, stderr));
+                return Ok(GhOutcome::Failed {
+                    code: None,
+                    message: "cancelled: the daemon is shutting down".to_string(),
+                });
+            }
+            match child.try_wait() {
+                Ok(Some(status)) => break status,
+                Ok(None) => std::thread::sleep(CANCEL_POLL),
+                Err(err) => {
+                    let _ = child.kill();
+                    return Err(err).context("wait for gh");
+                }
+            }
+        };
+        let output = std::process::Output {
+            status,
+            stdout: stdout.join().unwrap_or_default(),
+            stderr: stderr.join().unwrap_or_default(),
+        };
+        self.classify(Ok(output))
+    }
+
+    /// Turn a finished `gh` run into an outcome, classifying the
+    /// failures callers degrade on.
+    fn classify(&self, output: io::Result<std::process::Output>) -> Result<GhOutcome> {
         let output = match output {
             Ok(output) => output,
             Err(err) if err.kind() == io::ErrorKind::NotFound => {
@@ -653,12 +780,26 @@ impl GhRunner for Box<dyn GhRunner> {
         (**self).list_pull_requests(repo, filter, fields)
     }
 
+    fn list_pull_requests_until(
+        &self,
+        repo: &str,
+        filter: &PrListFilter,
+        fields: &str,
+        cancel: &AtomicBool,
+    ) -> Result<GhOutcome> {
+        (**self).list_pull_requests_until(repo, filter, fields, cancel)
+    }
+
     fn view_pull_request(&self, repo: &str, number: u64, fields: &str) -> Result<GhOutcome> {
         (**self).view_pull_request(repo, number, fields)
     }
 
     fn authenticated_hosts(&self) -> Vec<String> {
         (**self).authenticated_hosts()
+    }
+
+    fn authenticated_hosts_until(&self, cancel: &AtomicBool) -> Option<Vec<String>> {
+        (**self).authenticated_hosts_until(cancel)
     }
 }
 
