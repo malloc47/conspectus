@@ -31,6 +31,7 @@ pub mod invocation;
 pub mod model;
 pub mod output;
 pub(crate) mod pin_bindings;
+pub mod pin_slots;
 pub(crate) mod pin_store_registry;
 pub(crate) mod pins;
 pub mod rename;

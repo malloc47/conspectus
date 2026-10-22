@@ -323,6 +323,11 @@ fn match_live_muxes(snapshot: &GraphSnapshot, records: &[MuxRecord]) -> BTreeMap
     matched
 }
 
+/// The live mux node a record matches now, by incarnation or name.
+pub fn live_mux_for(snapshot: &GraphSnapshot, record: &MuxRecord) -> Option<NodeId> {
+    match_live_muxes(snapshot, std::slice::from_ref(record)).remove(&record.meta.id)
+}
+
 /// Gone when the latest probe of the mux's server succeeded without
 /// listing it; unknown when that probe failed, the backend is missing,
 /// or the server was never probed.

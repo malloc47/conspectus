@@ -304,3 +304,58 @@ impl fmt::Display for NodeId {
         }
     }
 }
+
+impl NodeId {
+    /// Parse the `Display` form back into an id. Paths may contain
+    /// `:` and `@`, so the splits follow each kind's own shape: the
+    /// last `@` separates a checkout's or branch's repo from its tail,
+    /// and an agent session's key is everything after its scope.
+    /// `None` for text that isn't a node id.
+    pub fn parse(text: &str) -> Option<Self> {
+        let (kind, rest) = text.split_once(':')?;
+        if rest.is_empty() {
+            return None;
+        }
+        Some(match kind {
+            "repo" => Self::Repo(RepoId::new(rest)),
+            "workspace" => Self::Workspace(WorkspaceId::new(rest)),
+            "mux_session" => Self::MuxSession(MuxSessionId::new(rest)),
+            "fork" => Self::Fork(ForkId::new(rest)),
+            "runtime_process" => Self::RuntimeProcess(RuntimeProcessId::new(rest)),
+            "pin" => Self::Pin(PinId::new(rest)),
+            "checkout" => {
+                let (repo, root) = rest.rsplit_once('@')?;
+                let Self::Repo(repo) = Self::parse(repo)? else {
+                    return None;
+                };
+                Self::Checkout(CheckoutId::new(repo, root))
+            }
+            "branch" => {
+                let (repo, refname) = rest.rsplit_once('@')?;
+                let Self::Repo(repo) = Self::parse(repo)? else {
+                    return None;
+                };
+                Self::Branch(BranchId::new(repo, refname))
+            }
+            "agent_session" => {
+                let mut parts = rest.splitn(3, ':');
+                let (harness, scope, key) = (parts.next()?, parts.next()?, parts.next()?);
+                Self::AgentSession(AgentSessionId::new(harness, scope, key))
+            }
+            "forge_pr" => {
+                let (provider, rest) = rest.split_once(':')?;
+                let (path, number) = rest.rsplit_once('#')?;
+                let mut parts = path.splitn(3, '/');
+                let (host, owner, repo) = (parts.next()?, parts.next()?, parts.next()?);
+                Self::ForgePr(ForgePrId::new(
+                    provider,
+                    host,
+                    owner,
+                    repo,
+                    number.parse().ok()?,
+                ))
+            }
+            _ => return None,
+        })
+    }
+}

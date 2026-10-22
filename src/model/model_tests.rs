@@ -792,3 +792,31 @@ fn mux_qualified_name_is_backend_and_native_id_and_matches_the_pin_key() {
     assert_eq!(zellij.qualified_name(), "zellij:notes");
     assert_eq!(zellij.display_label(), "zellij:notes");
 }
+
+#[test]
+fn node_ids_parse_back_from_their_display_form() {
+    let ids = [
+        NodeId::Repo(RepoId::new("/home/me/src/app/.git")),
+        NodeId::Workspace(WorkspaceId::new("/home/me/ws")),
+        NodeId::MuxSession(MuxSessionId::new("tmux:scratch:main")),
+        NodeId::Fork(ForkId::new("atelier:alpha")),
+        NodeId::Pin(PinId::new("conspectus-main")),
+        NodeId::Checkout(CheckoutId::new(
+            RepoId::new("/src/app/.git"),
+            "/home/me/wt/app.feature",
+        )),
+        NodeId::Branch(BranchId::new(
+            RepoId::new("/src/app/.git"),
+            "refs/heads/feature/x",
+        )),
+        NodeId::AgentSession(AgentSessionId::new("claude-code", "global", "e44d01cb")),
+        NodeId::AgentSession(AgentSessionId::new("codex", "global", "a:b:c")),
+        NodeId::ForgePr(ForgePrId::new("github", "github.com", "me", "app", 612)),
+    ];
+    for id in ids {
+        assert_eq!(NodeId::parse(&id.to_string()), Some(id.clone()), "{id}");
+    }
+    assert_eq!(NodeId::parse("history:h_1"), None);
+    assert_eq!(NodeId::parse("nonsense"), None);
+    assert_eq!(NodeId::parse("forge_pr:github:no-number"), None);
+}

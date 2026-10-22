@@ -8,6 +8,7 @@ use crate::model::{
     ResolvedRelationship, RuntimeProcessRole, ScoreAxis, SourceMetadata,
 };
 pub mod pins;
+pub mod slots;
 
 pub fn resolve_snapshot(mut snapshot: GraphSnapshot) -> GraphSnapshot {
     let process_links = derive_process_mux_links(&snapshot);

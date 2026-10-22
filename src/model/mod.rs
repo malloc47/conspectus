@@ -18,6 +18,7 @@ mod link;
 mod node;
 mod pin;
 mod resolution;
+mod slot;
 
 pub use graph::*;
 pub use history::*;
@@ -26,6 +27,7 @@ pub use link::*;
 pub use node::*;
 pub use pin::*;
 pub use resolution::*;
+pub use slot::*;
 
 pub type Metadata = BTreeMap<String, Value>;
 
