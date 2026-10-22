@@ -839,3 +839,39 @@ fn the_harness_default_adds_no_note() {
         plan.render()
     );
 }
+
+#[test]
+fn a_profile_wrapper_takes_the_resume_after_the_binary() {
+    let cwd = tempfile::tempdir().unwrap();
+    let cwd = cwd.path().to_str().unwrap().to_string();
+    let mut record = harness_only_record(&cwd);
+    record.recipe.hosted = vec![HostedSession {
+        harness: "claude-code".into(),
+        session_id: "e44d01cb".into(),
+        first_seen: NOW - 20_000,
+        last_seen: NOW - 100_000,
+    }];
+    let snapshot = gone_world(record, &["e44d01cb"]);
+    let harness = Harness::new(FakeTmux::with_sessions("")).with_launch(profile(
+        crate::config::ProfileOrigin::User,
+        &[
+            "nix",
+            "develop",
+            "-c",
+            "claude",
+            "--dangerously-skip-permissions",
+        ],
+    ));
+
+    let plan = harness
+        .plan(&snapshot, &subject(&snapshot), &Options::default())
+        .unwrap();
+
+    assert!(
+        plan.steps[0]
+            .command
+            .ends_with("nix develop -c claude --resume e44d01cb --dangerously-skip-permissions"),
+        "the resume lands after the harness binary, inside the wrapper: {}",
+        plan.steps[0].command
+    );
+}
