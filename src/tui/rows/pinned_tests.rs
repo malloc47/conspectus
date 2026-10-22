@@ -147,12 +147,10 @@ fn project_grouping_buckets_by_repo_with_other_last() {
     };
     assert_eq!(
         members("~/src/conspectus"),
-        ["conspectus-main", "e44d01cb", "nightly"]
+        ["conspectus-main", "e44d01cb", "ledger-worktree", "nightly"],
+        "a worktree belongs to the repo it was made from, wherever its directory is"
     );
-    assert_eq!(
-        members("Other"),
-        ["config-agent3", "ledger-worktree", "ledger-pr", "old-api"]
-    );
+    assert_eq!(members("Other"), ["config-agent3", "ledger-pr", "old-api"]);
 }
 
 #[test]

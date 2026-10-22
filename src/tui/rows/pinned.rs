@@ -305,7 +305,11 @@ fn project_of(snapshot: &GraphSnapshot, pin: &PinNode, home: Option<&Path>) -> O
     let path = match pin.kind {
         PinKind::Mux => pin.text("cwd").map(str::to_string).or_else(target_cwd),
         PinKind::Session => target_cwd(),
-        PinKind::Checkout => pin.text("root").map(str::to_string),
+        PinKind::Checkout => pin
+            .text("repo")
+            .map(|r| r.strip_prefix("repo:").unwrap_or(r))
+            .map(|dir| dir.strip_suffix("/.git").unwrap_or(dir).to_string())
+            .or_else(|| pin.text("root").map(str::to_string)),
         PinKind::Repo => pin.text("path").map(str::to_string).or_else(|| {
             pin.text("common_dir")
                 .map(|dir| dir.strip_suffix("/.git").unwrap_or(dir).to_string())
