@@ -676,6 +676,53 @@
       "pinned_at": "2026-09-20T09:00:00Z"
     },
     {
+      "type": "pin",
+      "id": {
+        "id": "weekly-review"
+      },
+      "kind": "mux",
+      "label": "weekly-review",
+      "status": "planned",
+      "overrides": {
+        "cwd": "/fixture/repos/project",
+        "harness": "codex",
+        "name": "weekly-review"
+      },
+      "snapshot": {
+        "label": "weekly-review"
+      },
+      "effective": [
+        {
+          "name": "label",
+          "value": "weekly-review",
+          "source": "snapshot"
+        },
+        {
+          "name": "name",
+          "value": "weekly-review",
+          "source": "override"
+        },
+        {
+          "name": "cwd",
+          "value": "/fixture/repos/project",
+          "source": "override"
+        },
+        {
+          "name": "harness",
+          "value": "codex",
+          "source": "override"
+        },
+        {
+          "name": "argv",
+          "value": [
+            "codex"
+          ],
+          "source": "default"
+        }
+      ],
+      "order": 5
+    },
+    {
       "type": "branch",
       "id": {
         "repo": {
@@ -845,7 +892,7 @@
           "logical_path": "/fixture/.agent-deck/multi-repo-worktrees/showcase-deck-c0debeef/atelier-repo-a",
           "member_path_kind": "symlink"
         },
-        "freshness_epoch": 1792688500
+        "freshness_epoch": 1792692588
       },
       "state": {
         "state": "active"
@@ -876,7 +923,7 @@
           "logical_path": "/fixture/.agent-deck/multi-repo-worktrees/showcase-deck-c0debeef/project",
           "member_path_kind": "symlink"
         },
-        "freshness_epoch": 1792688500
+        "freshness_epoch": 1792692588
       },
       "state": {
         "state": "active"
@@ -920,7 +967,7 @@
           "lineage_fidelity": "native",
           "lineage_kind": "fork"
         },
-        "freshness_epoch": 1792688500
+        "freshness_epoch": 1792692588
       },
       "state": {
         "state": "active"
@@ -957,7 +1004,7 @@
           "link": false,
           "repo_name": "repo-a"
         },
-        "freshness_epoch": 1792688500
+        "freshness_epoch": 1792692588
       },
       "state": {
         "state": "active"
@@ -994,7 +1041,7 @@
           "link": false,
           "repo_name": "repo-a"
         },
-        "freshness_epoch": 1792688500
+        "freshness_epoch": 1792692588
       },
       "state": {
         "state": "active"
@@ -1028,7 +1075,7 @@
           "link": false,
           "repo_name": "repo-a"
         },
-        "freshness_epoch": 1792688500
+        "freshness_epoch": 1792692588
       },
       "state": {
         "state": "active"
@@ -1059,7 +1106,7 @@
           "fork_mode": "worktree",
           "fork_name": "alpha"
         },
-        "freshness_epoch": 1792688500
+        "freshness_epoch": 1792692588
       },
       "state": {
         "state": "active"
@@ -1103,7 +1150,7 @@
           "lineage_fidelity": "native",
           "lineage_kind": "fork"
         },
-        "freshness_epoch": 1792688500
+        "freshness_epoch": 1792692588
       },
       "state": {
         "state": "active"
@@ -1139,7 +1186,7 @@
           "fork_mode": "worktree",
           "fork_name": "alpha"
         },
-        "freshness_epoch": 1792688500
+        "freshness_epoch": 1792692588
       },
       "state": {
         "state": "active"
@@ -1172,7 +1219,7 @@
           "provider_source_path": "/fixture/atelier-demo/repo-a",
           "repo_name": "repo-a"
         },
-        "freshness_epoch": 1792688500
+        "freshness_epoch": 1792692588
       },
       "state": {
         "state": "active"
@@ -1205,7 +1252,7 @@
           "provider_source_path": "/fixture/atelier-demo/repo-b",
           "repo_name": "repo-b"
         },
-        "freshness_epoch": 1792688500
+        "freshness_epoch": 1792692588
       },
       "state": {
         "state": "active"
@@ -1240,7 +1287,7 @@
           "lineage_kind": "fork",
           "parent_native_id": "showcase-codex-parent"
         },
-        "freshness_epoch": 1792688500
+        "freshness_epoch": 1792692588
       },
       "state": {
         "state": "active"
@@ -1274,7 +1321,7 @@
         "fields": {
           "checkout_root": "/fixture/repos/project"
         },
-        "freshness_epoch": 1792688500
+        "freshness_epoch": 1792692589
       },
       "state": {
         "state": "active"
@@ -1306,7 +1353,7 @@
           "match_kind": "exact_cwd_match",
           "mux_activity_epoch": 1790768700
         },
-        "freshness_epoch": 1792688500
+        "freshness_epoch": 1792692589
       },
       "state": {
         "state": "active"
@@ -1338,7 +1385,7 @@
           "match_kind": "exact_cwd_match",
           "mux_activity_epoch": 1790769300
         },
-        "freshness_epoch": 1792688500
+        "freshness_epoch": 1792692589
       },
       "state": {
         "state": "active"
@@ -1372,7 +1419,7 @@
         "fields": {
           "checkout_root": "/fixture/repos/project"
         },
-        "freshness_epoch": 1792688500
+        "freshness_epoch": 1792692589
       },
       "state": {
         "state": "active"
@@ -1404,7 +1451,7 @@
           "match_kind": "exact_cwd_match",
           "mux_activity_epoch": 1790768700
         },
-        "freshness_epoch": 1792688500
+        "freshness_epoch": 1792692589
       },
       "state": {
         "state": "active"
@@ -1436,7 +1483,7 @@
           "match_kind": "exact_cwd_match",
           "mux_activity_epoch": 1790769300
         },
-        "freshness_epoch": 1792688500
+        "freshness_epoch": 1792692589
       },
       "state": {
         "state": "active"
@@ -1470,7 +1517,7 @@
         "fields": {
           "checkout_root": "/fixture/repos/project"
         },
-        "freshness_epoch": 1792688500
+        "freshness_epoch": 1792692589
       },
       "state": {
         "state": "active"
@@ -1502,7 +1549,7 @@
           "match_kind": "exact_cwd_match",
           "mux_activity_epoch": 1790768700
         },
-        "freshness_epoch": 1792688500
+        "freshness_epoch": 1792692589
       },
       "state": {
         "state": "active"
@@ -1534,7 +1581,7 @@
           "match_kind": "exact_cwd_match",
           "mux_activity_epoch": 1790769300
         },
-        "freshness_epoch": 1792688500
+        "freshness_epoch": 1792692589
       },
       "state": {
         "state": "active"
@@ -1565,7 +1612,7 @@
         "fields": {
           "workspace_member_root": "/fixture/.agent-deck/multi-repo-worktrees/showcase-deck-c0debeef"
         },
-        "freshness_epoch": 1792688500
+        "freshness_epoch": 1792692589
       },
       "state": {
         "state": "active"
@@ -1597,7 +1644,7 @@
           "match_kind": "exact_cwd_match",
           "mux_activity_epoch": 1790767800
         },
-        "freshness_epoch": 1792688500
+        "freshness_epoch": 1792692589
       },
       "state": {
         "state": "active"
@@ -1631,7 +1678,7 @@
         "fields": {
           "checkout_root": "/fixture/repos/project"
         },
-        "freshness_epoch": 1792688500
+        "freshness_epoch": 1792692589
       },
       "state": {
         "state": "active"
@@ -1663,7 +1710,7 @@
           "match_kind": "exact_cwd_match",
           "mux_activity_epoch": 1790768700
         },
-        "freshness_epoch": 1792688500
+        "freshness_epoch": 1792692589
       },
       "state": {
         "state": "active"
@@ -1695,7 +1742,7 @@
           "match_kind": "exact_cwd_match",
           "mux_activity_epoch": 1790769300
         },
-        "freshness_epoch": 1792688500
+        "freshness_epoch": 1792692589
       },
       "state": {
         "state": "active"
@@ -1729,7 +1776,7 @@
         "fields": {
           "checkout_root": "/fixture/checkouts/bare-project"
         },
-        "freshness_epoch": 1792688500
+        "freshness_epoch": 1792692589
       },
       "state": {
         "state": "active"
@@ -1761,7 +1808,7 @@
           "match_kind": "exact_cwd_match",
           "mux_activity_epoch": 1790762400
         },
-        "freshness_epoch": 1792688500
+        "freshness_epoch": 1792692589
       },
       "state": {
         "state": "active"
@@ -1792,7 +1839,7 @@
         "fields": {
           "fork_root": "/fixture/atelier-demo/.atelier/forks/alpha"
         },
-        "freshness_epoch": 1792688500
+        "freshness_epoch": 1792692589
       },
       "state": {
         "state": "active"
@@ -1823,7 +1870,7 @@
         "fields": {
           "workspace_member_root": "/fixture/atelier-demo"
         },
-        "freshness_epoch": 1792688500
+        "freshness_epoch": 1792692589
       },
       "state": {
         "state": "active"
@@ -1857,7 +1904,7 @@
         "fields": {
           "checkout_root": "/fixture/atelier-demo/repo-a"
         },
-        "freshness_epoch": 1792688500
+        "freshness_epoch": 1792692589
       },
       "state": {
         "state": "active"
@@ -1888,7 +1935,7 @@
         "fields": {
           "workspace_member_root": "/fixture/atelier-demo/repo-a"
         },
-        "freshness_epoch": 1792688500
+        "freshness_epoch": 1792692589
       },
       "state": {
         "state": "active"
@@ -1922,7 +1969,7 @@
         "fields": {
           "checkout_root": "/fixture/atelier-demo/repo-b"
         },
-        "freshness_epoch": 1792688500
+        "freshness_epoch": 1792692589
       },
       "state": {
         "state": "active"
@@ -1953,7 +2000,7 @@
         "fields": {
           "workspace_member_root": "/fixture/atelier-demo/repo-b"
         },
-        "freshness_epoch": 1792688500
+        "freshness_epoch": 1792692589
       },
       "state": {
         "state": "active"
@@ -1987,7 +2034,7 @@
         "fields": {
           "checkout_root": "/fixture/atelier-demo/repo-a"
         },
-        "freshness_epoch": 1792688500
+        "freshness_epoch": 1792692589
       },
       "state": {
         "state": "active"
@@ -2018,7 +2065,7 @@
         "fields": {
           "workspace_member_root": "/fixture/atelier-demo/repo-a"
         },
-        "freshness_epoch": 1792688500
+        "freshness_epoch": 1792692589
       },
       "state": {
         "state": "active"
@@ -2047,7 +2094,7 @@
         "fields": {
           "workspace_member_root": "/fixture/.agent-deck/multi-repo-worktrees/showcase-deck-c0debeef"
         },
-        "freshness_epoch": 1792688500
+        "freshness_epoch": 1792692589
       },
       "state": {
         "state": "active"
@@ -2076,7 +2123,7 @@
       "source_metadata": {
         "adapter": "git",
         "evidence": "git common dir",
-        "freshness_epoch": 1792688500
+        "freshness_epoch": 1792692588
       },
       "state": {
         "state": "active"
@@ -2108,7 +2155,7 @@
       "source_metadata": {
         "adapter": "git",
         "evidence": "symbolic HEAD",
-        "freshness_epoch": 1792688500
+        "freshness_epoch": 1792692588
       },
       "state": {
         "state": "active"
@@ -2137,7 +2184,7 @@
       "source_metadata": {
         "adapter": "git",
         "evidence": "git common dir",
-        "freshness_epoch": 1792688500
+        "freshness_epoch": 1792692588
       },
       "state": {
         "state": "active"
@@ -2169,7 +2216,7 @@
       "source_metadata": {
         "adapter": "git",
         "evidence": "symbolic HEAD",
-        "freshness_epoch": 1792688500
+        "freshness_epoch": 1792692588
       },
       "state": {
         "state": "active"
@@ -2198,7 +2245,7 @@
       "source_metadata": {
         "adapter": "git",
         "evidence": "git common dir",
-        "freshness_epoch": 1792688500
+        "freshness_epoch": 1792692589
       },
       "state": {
         "state": "active"
@@ -2230,7 +2277,7 @@
       "source_metadata": {
         "adapter": "git",
         "evidence": "symbolic HEAD",
-        "freshness_epoch": 1792688500
+        "freshness_epoch": 1792692589
       },
       "state": {
         "state": "active"
@@ -2259,7 +2306,7 @@
       "source_metadata": {
         "adapter": "git",
         "evidence": "git common dir",
-        "freshness_epoch": 1792688500
+        "freshness_epoch": 1792692588
       },
       "state": {
         "state": "active"
@@ -2291,7 +2338,7 @@
       "source_metadata": {
         "adapter": "git",
         "evidence": "symbolic HEAD",
-        "freshness_epoch": 1792688500
+        "freshness_epoch": 1792692588
       },
       "state": {
         "state": "active"
@@ -2330,7 +2377,7 @@
           "state": "open",
           "updated_epoch": 1790762400
         },
-        "freshness_epoch": 1792688500
+        "freshness_epoch": 1792692589
       },
       "state": {
         "state": "active"
@@ -2369,7 +2416,7 @@
           "state": "open",
           "updated_epoch": 1790683200
         },
-        "freshness_epoch": 1792688500
+        "freshness_epoch": 1792692589
       },
       "state": {
         "state": "active"
@@ -2398,7 +2445,7 @@
       "source_metadata": {
         "adapter": "history",
         "evidence": "recorded checkout of this repo",
-        "freshness_epoch": 1792688500
+        "freshness_epoch": 1792692589
       },
       "state": {
         "state": "active"
@@ -2427,7 +2474,7 @@
       "source_metadata": {
         "adapter": "history",
         "evidence": "recorded checkout of this repo",
-        "freshness_epoch": 1792688500
+        "freshness_epoch": 1792692589
       },
       "state": {
         "state": "active"
@@ -2465,7 +2512,7 @@
             "session_name": "project"
           }
         },
-        "freshness_epoch": 1792688500
+        "freshness_epoch": 1792692589
       },
       "state": {
         "state": "ignored",
@@ -3490,6 +3537,19 @@
         "label": "#5 Ledger store and merge"
       },
       "order": 4
+    },
+    {
+      "id": "weekly-review",
+      "kind": "mux",
+      "overrides": {
+        "cwd": "/fixture/repos/project",
+        "harness": "codex",
+        "name": "weekly-review"
+      },
+      "snapshot": {
+        "label": "weekly-review"
+      },
+      "order": 5
     }
   ],
   "node_provenance": [
@@ -3499,7 +3559,7 @@
         "common_dir": "/fixture/atelier-demo/repo-a/.git"
       },
       "provider": "atelier",
-      "freshness_epoch": 1792688500
+      "freshness_epoch": 1792692588
     },
     {
       "node_id": {
@@ -3507,7 +3567,7 @@
         "common_dir": "/fixture/atelier-demo/repo-b/.git"
       },
       "provider": "atelier",
-      "freshness_epoch": 1792688500
+      "freshness_epoch": 1792692588
     },
     {
       "node_id": {
@@ -3515,7 +3575,7 @@
         "common_dir": "/fixture/repos/bare-project.git"
       },
       "provider": "git::cwd",
-      "freshness_epoch": 1792688500
+      "freshness_epoch": 1792692589
     },
     {
       "node_id": {
@@ -3523,7 +3583,7 @@
         "common_dir": "/fixture/repos/project/.git"
       },
       "provider": "agent_deck",
-      "freshness_epoch": 1792688500
+      "freshness_epoch": 1792692588
     },
     {
       "node_id": {
@@ -3531,7 +3591,7 @@
         "common_dir": "repo-a"
       },
       "provider": "atelier",
-      "freshness_epoch": 1792688500
+      "freshness_epoch": 1792692588
     },
     {
       "node_id": {
@@ -3542,7 +3602,7 @@
         "root": "/fixture/atelier-demo/repo-a"
       },
       "provider": "atelier",
-      "freshness_epoch": 1792688500
+      "freshness_epoch": 1792692588
     },
     {
       "node_id": {
@@ -3553,7 +3613,7 @@
         "root": "/fixture/atelier-demo/repo-b"
       },
       "provider": "atelier",
-      "freshness_epoch": 1792688500
+      "freshness_epoch": 1792692588
     },
     {
       "node_id": {
@@ -3564,7 +3624,7 @@
         "root": "/fixture/checkouts/bare-project"
       },
       "provider": "git::cwd",
-      "freshness_epoch": 1792688500
+      "freshness_epoch": 1792692589
     },
     {
       "node_id": {
@@ -3575,7 +3635,7 @@
         "root": "/fixture/checkouts/ledger-worktree"
       },
       "provider": "history",
-      "freshness_epoch": 1792688500
+      "freshness_epoch": 1792692589
     },
     {
       "node_id": {
@@ -3586,7 +3646,7 @@
         "root": "/fixture/checkouts/spike-cache"
       },
       "provider": "history",
-      "freshness_epoch": 1792688500
+      "freshness_epoch": 1792692589
     },
     {
       "node_id": {
@@ -3597,7 +3657,7 @@
         "root": "/fixture/repos/project"
       },
       "provider": "agent_deck",
-      "freshness_epoch": 1792688500
+      "freshness_epoch": 1792692588
     },
     {
       "node_id": {
@@ -3608,7 +3668,7 @@
         "root": ".atelier/forks/alpha/repo-a"
       },
       "provider": "atelier",
-      "freshness_epoch": 1792688500
+      "freshness_epoch": 1792692588
     },
     {
       "node_id": {
@@ -3616,7 +3676,7 @@
         "root": "/fixture/.agent-deck/multi-repo-worktrees/showcase-deck-c0debeef"
       },
       "provider": "agent_deck",
-      "freshness_epoch": 1792688500
+      "freshness_epoch": 1792692588
     },
     {
       "node_id": {
@@ -3624,7 +3684,7 @@
         "root": "/fixture/atelier-demo"
       },
       "provider": "atelier",
-      "freshness_epoch": 1792688500
+      "freshness_epoch": 1792692588
     },
     {
       "node_id": {
@@ -3634,7 +3694,7 @@
         "session_key": "showcase-claude"
       },
       "provider": "claude-code",
-      "freshness_epoch": 1792688500
+      "freshness_epoch": 1792692588
     },
     {
       "node_id": {
@@ -3644,7 +3704,7 @@
         "session_key": "showcase-claude-ambig-a"
       },
       "provider": "claude-code",
-      "freshness_epoch": 1792688500
+      "freshness_epoch": 1792692588
     },
     {
       "node_id": {
@@ -3654,7 +3714,7 @@
         "session_key": "showcase-claude-ambig-b"
       },
       "provider": "claude-code",
-      "freshness_epoch": 1792688500
+      "freshness_epoch": 1792692588
     },
     {
       "node_id": {
@@ -3664,7 +3724,7 @@
         "session_key": "showcase-deck-launcher"
       },
       "provider": "claude-code",
-      "freshness_epoch": 1792688500
+      "freshness_epoch": 1792692588
     },
     {
       "node_id": {
@@ -3674,7 +3734,7 @@
         "session_key": "showcase-hook-current"
       },
       "provider": "claude-code",
-      "freshness_epoch": 1792688500
+      "freshness_epoch": 1792692588
     },
     {
       "node_id": {
@@ -3684,7 +3744,7 @@
         "session_key": "showcase-bare-codex"
       },
       "provider": "codex",
-      "freshness_epoch": 1792688500
+      "freshness_epoch": 1792692588
     },
     {
       "node_id": {
@@ -3694,7 +3754,7 @@
         "session_key": "showcase-codex-child"
       },
       "provider": "codex",
-      "freshness_epoch": 1792688500
+      "freshness_epoch": 1792692588
     },
     {
       "node_id": {
@@ -3704,7 +3764,7 @@
         "session_key": "showcase-codex-parent"
       },
       "provider": "codex",
-      "freshness_epoch": 1792688500
+      "freshness_epoch": 1792692588
     },
     {
       "node_id": {
@@ -3714,7 +3774,7 @@
         "session_key": "showcase-orphan"
       },
       "provider": "codex",
-      "freshness_epoch": 1792688500
+      "freshness_epoch": 1792692588
     },
     {
       "node_id": {
@@ -3724,7 +3784,7 @@
         "session_key": "showcase-opencode"
       },
       "provider": "opencode",
-      "freshness_epoch": 1792688500
+      "freshness_epoch": 1792692588
     },
     {
       "node_id": {
@@ -3734,7 +3794,7 @@
         "session_key": "showcase-pi"
       },
       "provider": "pi",
-      "freshness_epoch": 1792688500
+      "freshness_epoch": 1792692588
     },
     {
       "node_id": {
@@ -3742,7 +3802,7 @@
         "native_id": "tmux:ambiguous"
       },
       "provider": "tmux",
-      "freshness_epoch": 1792688500
+      "freshness_epoch": 1792692588
     },
     {
       "node_id": {
@@ -3750,7 +3810,7 @@
         "native_id": "tmux:bare-work"
       },
       "provider": "tmux",
-      "freshness_epoch": 1792688500
+      "freshness_epoch": 1792692588
     },
     {
       "node_id": {
@@ -3758,7 +3818,7 @@
         "native_id": "tmux:docs-sweep"
       },
       "provider": "history",
-      "freshness_epoch": 1792688500
+      "freshness_epoch": 1792692589
     },
     {
       "node_id": {
@@ -3766,7 +3826,7 @@
         "native_id": "tmux:nightly-refactor"
       },
       "provider": "history",
-      "freshness_epoch": 1792688500
+      "freshness_epoch": 1792692589
     },
     {
       "node_id": {
@@ -3774,7 +3834,7 @@
         "native_id": "tmux:project"
       },
       "provider": "tmux",
-      "freshness_epoch": 1792688500
+      "freshness_epoch": 1792692588
     },
     {
       "node_id": {
@@ -3782,7 +3842,7 @@
         "native_id": "tmux:showcase-deck"
       },
       "provider": "tmux",
-      "freshness_epoch": 1792688500
+      "freshness_epoch": 1792692588
     },
     {
       "node_id": {
@@ -3821,6 +3881,13 @@
     },
     {
       "node_id": {
+        "type": "pin",
+        "id": "weekly-review"
+      },
+      "provider": "pins"
+    },
+    {
+      "node_id": {
         "type": "branch",
         "repo": {
           "common_dir": "/fixture/atelier-demo/repo-a/.git"
@@ -3828,7 +3895,7 @@
         "refname": "refs/heads/main"
       },
       "provider": "atelier",
-      "freshness_epoch": 1792688500
+      "freshness_epoch": 1792692588
     },
     {
       "node_id": {
@@ -3839,7 +3906,7 @@
         "refname": "refs/heads/main"
       },
       "provider": "atelier",
-      "freshness_epoch": 1792688500
+      "freshness_epoch": 1792692588
     },
     {
       "node_id": {
@@ -3850,7 +3917,7 @@
         "refname": "refs/heads/feature/bare"
       },
       "provider": "git::cwd",
-      "freshness_epoch": 1792688500
+      "freshness_epoch": 1792692589
     },
     {
       "node_id": {
@@ -3861,7 +3928,7 @@
         "refname": "refs/heads/main"
       },
       "provider": "git::cwd",
-      "freshness_epoch": 1792688500
+      "freshness_epoch": 1792692589
     },
     {
       "node_id": {
@@ -3872,7 +3939,7 @@
         "refname": "refs/heads/feature/extra"
       },
       "provider": "agent_deck",
-      "freshness_epoch": 1792688500
+      "freshness_epoch": 1792692588
     },
     {
       "node_id": {
@@ -3883,7 +3950,7 @@
         "refname": "refs/heads/main"
       },
       "provider": "agent_deck",
-      "freshness_epoch": 1792688500
+      "freshness_epoch": 1792692588
     },
     {
       "node_id": {
@@ -3894,7 +3961,7 @@
         "refname": "fork/alpha/repo-a"
       },
       "provider": "atelier",
-      "freshness_epoch": 1792688500
+      "freshness_epoch": 1792692588
     },
     {
       "node_id": {
@@ -3902,7 +3969,7 @@
         "provider_source_key": "atelier:alpha"
       },
       "provider": "atelier",
-      "freshness_epoch": 1792688500
+      "freshness_epoch": 1792692588
     },
     {
       "node_id": {
@@ -3926,7 +3993,7 @@
         "number": 7
       },
       "provider": "github",
-      "freshness_epoch": 1792688500
+      "freshness_epoch": 1792692589
     },
     {
       "node_id": {
@@ -3938,7 +4005,7 @@
         "number": 8
       },
       "provider": "github",
-      "freshness_epoch": 1792688500
+      "freshness_epoch": 1792692589
     }
   ],
   "node_presence": [

@@ -1130,6 +1130,29 @@ fn add_pins_and_history_to_showcase(world: &mut ScenarioWorld, project: &Path) -
             .add(pin)
             .map_err(|err| anyhow::anyhow!("write showcase pin: {err}"))?;
     }
+    // A planned slot: nothing exists yet, and its first rebuild builds it.
+    store
+        .add(PinSlot {
+            id: "weekly-review".to_string(),
+            kind: PinKind::Mux,
+            target: None,
+            pinned_at: None,
+            overrides: SlotFields::from([
+                ("name".to_string(), FieldValue::Text("weekly-review".into())),
+                (
+                    "cwd".to_string(),
+                    FieldValue::Text(project.display().to_string()),
+                ),
+                ("harness".to_string(), FieldValue::Text("codex".into())),
+            ]),
+            snapshot: SlotFields::from([(
+                "label".to_string(),
+                FieldValue::Text("weekly-review".into()),
+            )]),
+            order: 0,
+            legacy: false,
+        })
+        .map_err(|err| anyhow::anyhow!("write showcase pin: {err}"))?;
     Ok(())
 }
 
