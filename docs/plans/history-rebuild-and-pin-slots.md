@@ -1,9 +1,10 @@
 # History, rebuild, and pin slots
 
-Status: accepted plan (operator review 2026-10-19 and 2026-10-21).
-Milestone m-23 (CSP-656..CSP-691) tracks the work. The decision tickets
-turn this plan into ADRs, after which the ADRs, not this document, are
-authoritative.
+Status: accepted plan (operator review 2026-10-19 and 2026-10-21), now
+carried by ADRs 0140 (history and presence), 0141 (pin slots), 0142
+(rebuild plans and executors), 0143 (the mutation envelope), and 0144
+(the Pinned and History views). The ADRs, not this document, are
+authoritative. Milestone m-23 (CSP-656..CSP-691) tracks the work.
 
 The first revision (2026-10-16) proposed a mux-only ledger and pins as
 lightweight references. Operator review on 2026-10-19 widened it:
