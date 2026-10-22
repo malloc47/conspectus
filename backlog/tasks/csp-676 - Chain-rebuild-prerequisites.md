@@ -1,9 +1,10 @@
 ---
 id: CSP-676
 title: Chain rebuild prerequisites
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-10-22 01:11'
+updated_date: '2026-10-22 15:06'
 labels:
   - history-pins
 milestone: m-23
@@ -30,13 +31,19 @@ Some rebuilds need another rebuild first: a mux whose cwd was a removed worktree
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 A ghost mux on a gone worktree rebuilds the worktree, then the mux, in one plan
-- [ ] #2 A worktree in a gone repo clones the repo first
-- [ ] #3 A failed step stops the plan and reports which step failed and what was already done
+- [x] #1 A ghost mux on a gone worktree rebuilds the worktree, then the mux, in one plan
+- [x] #2 A worktree in a gone repo clones the repo first
+- [x] #3 A failed step stops the plan and reports which step failed and what was already done
 <!-- AC:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
-- [ ] #1 `just check` passes, or `git diff --check` for docs-only changes
-- [ ] #2 Docs and ADRs are updated when behavior, architecture, or workflow change
+- [x] #1 `just check` passes, or `git diff --check` for docs-only changes
+- [x] #2 Docs and ADRs are updated when behavior, architecture, or workflow change
 <!-- DOD:END -->
+
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+Rebuild plans chain prerequisites through landing keys: a ghost mux on a gone worktree rebuilds the worktree then the mux, and a worktree in a gone repo clones the repo first; a failed step stops the plan and reports what already ran. Verified by the `chain` tests in `rebuild/mux_tests.rs` and `worktree_tests.rs`.
+<!-- SECTION:FINAL_SUMMARY:END -->

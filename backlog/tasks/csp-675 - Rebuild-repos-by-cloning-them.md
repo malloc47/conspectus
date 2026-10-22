@@ -1,9 +1,10 @@
 ---
 id: CSP-675
 title: Rebuild repos by cloning them
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-10-22 01:11'
+updated_date: '2026-10-22 15:06'
 labels:
   - history-pins
 milestone: m-23
@@ -31,13 +32,19 @@ The operator chose repo clone as in scope, under the new envelope ADR's narrow `
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 A gone repo or primary checkout rebuilds by cloning its recorded remote to its recorded path
-- [ ] #2 Cloning refuses when the destination exists and never runs from a read context
-- [ ] #3 The capability manifest allows exactly this clone and cites the envelope ADR
+- [x] #1 A gone repo or primary checkout rebuilds by cloning its recorded remote to its recorded path
+- [x] #2 Cloning refuses when the destination exists and never runs from a read context
+- [x] #3 The capability manifest allows exactly this clone and cites the envelope ADR
 <!-- AC:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
-- [ ] #1 `just check` passes, or `git diff --check` for docs-only changes
-- [ ] #2 Docs and ADRs are updated when behavior, architecture, or workflow change
+- [x] #1 `just check` passes, or `git diff --check` for docs-only changes
+- [x] #2 Docs and ADRs are updated when behavior, architecture, or workflow change
 <!-- DOD:END -->
+
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+Repo rebuild clones the recorded remote to the recorded path with `git clone` (`rebuild/clone.rs`), refuses an existing destination, and only runs from the act context; the manifest allows exactly `clone * *` and writes under `$CLONE/**`, citing ADR 0143. Verified by `clone_tests` (including a real local clone) and the traced capability test, which clones for real.
+<!-- SECTION:FINAL_SUMMARY:END -->

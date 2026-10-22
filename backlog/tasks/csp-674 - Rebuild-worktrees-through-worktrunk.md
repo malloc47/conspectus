@@ -1,9 +1,10 @@
 ---
 id: CSP-674
 title: Rebuild worktrees through worktrunk
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-10-22 01:11'
+updated_date: '2026-10-22 15:06'
 labels:
   - history-pins
 milestone: m-23
@@ -31,13 +32,19 @@ A worktree slot or history record is repo + branch + location. Rebuilding goes t
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 A gone linked worktree rebuilds for its branch, recreating a deleted branch from its last head
-- [ ] #2 A rebuild that lands at a different path links the records and moves slots to the new one, telling the operator
-- [ ] #3 No git command other than through worktrunk runs
+- [x] #1 A gone linked worktree rebuilds for its branch, recreating a deleted branch from its last head
+- [x] #2 A rebuild that lands at a different path links the records and moves slots to the new one, telling the operator
+- [x] #3 No git command other than through worktrunk runs
 <!-- AC:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
-- [ ] #1 `just check` passes, or `git diff --check` for docs-only changes
-- [ ] #2 Docs and ADRs are updated when behavior, architecture, or workflow change
+- [x] #1 `just check` passes, or `git diff --check` for docs-only changes
+- [x] #2 Docs and ADRs are updated when behavior, architecture, or workflow change
 <!-- DOD:END -->
+
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+Worktree rebuild goes through `wt switch` (`rebuild/worktree.rs`), recreates a deleted branch from its last head, links the records and moves slots when the path differs, and calls a location override advisory. The capability manifest allows `wt switch` and no other git mutation beyond the clone. Verified by `worktree_tests` and the traced capability test.
+<!-- SECTION:FINAL_SUMMARY:END -->

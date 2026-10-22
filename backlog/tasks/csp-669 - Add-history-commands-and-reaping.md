@@ -1,9 +1,10 @@
 ---
 id: CSP-669
 title: Add history commands and reaping
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-10-22 01:11'
+updated_date: '2026-10-22 15:05'
 labels:
   - history-pins
 milestone: m-23
@@ -30,13 +31,19 @@ The operator needs to see what history holds, rebuild from it, and clean up old 
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 History can be listed, inspected, reaped by age and kind, and forgotten record by record from the CLI
-- [ ] #2 Reaping never removes a pinned or Unknown record and never touches tmux, git, or the filesystem
-- [ ] #3 `worktree close` forgets the worktree's gone history records
+- [x] #1 History can be listed, inspected, reaped by age and kind, and forgotten record by record from the CLI
+- [x] #2 Reaping never removes a pinned or Unknown record and never touches tmux, git, or the filesystem
+- [x] #3 `worktree close` forgets the worktree's gone history records
 <!-- AC:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
-- [ ] #1 `just check` passes, or `git diff --check` for docs-only changes
-- [ ] #2 Docs and ADRs are updated when behavior, architecture, or workflow change
+- [x] #1 `just check` passes, or `git diff --check` for docs-only changes
+- [x] #2 Docs and ADRs are updated when behavior, architecture, or workflow change
 <!-- DOD:END -->
+
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+Added `conspectus history list|show|reap|forget` (`src/cli/history.rs`) and `history::reap` (candidates by per-kind threshold or `--older-than`, never pinned or Unknown records, repos only with an explicit age). `worktree close` forgets the gone records rooted in the worktree except those a slot targets. Covered by `reap_tests`, `close_down_tests`, and `tests/cli_pin.rs`; the capability trace runs `history reap --dry-run` as a read command and shows reaping touches only the history store.
+<!-- SECTION:FINAL_SUMMARY:END -->
