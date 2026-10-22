@@ -649,8 +649,7 @@ pub(super) fn render_left_row(
     if matches!(
         app.active_view(),
         crate::tui::View::Sessions | crate::tui::View::Mux | crate::tui::View::Prs
-    ) && !matches!(row.kind, RowKind::Mixed(_))
-        && let Some(handle) = app.snapshot_handle()
+    ) && let Some(handle) = app.snapshot_handle()
         && !handle.pinned_nodes().is_empty()
     {
         let pinned = crate::tui::rows::row_node(&row.id)
@@ -781,20 +780,13 @@ pub(super) fn render_session_spans(
     const SESSION_DISPLAY_LABEL_WIDTH: usize = 32;
 
     let mut spans = Vec::new();
-    let placeholder = row_primary_node_is_pin(&session.primary_node);
     // Lead with the harness-native session key rather than
     // Conspectus's internal short node id. Operators recognize the
     // external session id; the internal id is still accepted by
     // explicit node lookup commands.
     let session_id =
         truncate_to_width_no_marker(&session.session.session_key, SESSION_ID_COLUMN_WIDTH);
-    let id_style = if placeholder {
-        Style::default()
-            .fg(theme.secondary_text)
-            .add_modifier(theme.placeholder)
-    } else {
-        Style::default().fg(theme.secondary_text)
-    };
+    let id_style = Style::default().fg(theme.secondary_text);
     spans.push(span!(id_style; "{session_id}  "));
     // The badge widget pads internally so every chip is the same
     // width regardless of label length; no external padding span
@@ -810,11 +802,6 @@ pub(super) fn render_session_spans(
     spans.push(Span::raw("  "));
     if let Some(glyph) = handoff_spinner {
         spans.push(span!(Style::default().fg(theme.secondary_text); "{glyph}"));
-    } else if placeholder {
-        // Mirror the mux view: an unbound-pin session has no live mux
-        // to attach to, so the attached-glyph column shows the same
-        // dotted-circle marker as the mux-view placeholder row.
-        spans.push(span!(Style::default().fg(theme.pin_placeholder); "◌"));
     } else {
         spans.push(mux_indicator_span(session.mux_state, theme));
     }
@@ -824,9 +811,7 @@ pub(super) fn render_session_spans(
     // search index, and status hints still read `display_label`.
     if let Some(label) = session.tree_label().filter(|label| !label.is_empty()) {
         let label = truncate_to_width_strict(label, SESSION_DISPLAY_LABEL_WIDTH);
-        let style = if placeholder {
-            Style::default().add_modifier(theme.placeholder | Modifier::BOLD)
-        } else if session
+        let style = if session
             .alias
             .as_deref()
             .is_some_and(|alias| !alias.is_empty())
@@ -937,7 +922,6 @@ pub(super) fn render_mux_session_spans(
     if width == 0 {
         return spans;
     }
-    let placeholder = row_primary_node_is_pin(&mux.primary_node);
 
     // Column order mirrors the agent-session row so muxed and
     // session rows scan as a single visual rhythm:
@@ -947,13 +931,7 @@ pub(super) fn render_mux_session_spans(
     // steals horizontal space.
     let label = compact_mux_native_id(&mux.native_id);
     let label_width = mux_label_column_width(width);
-    let label_style = if placeholder {
-        Style::default()
-            .fg(theme.link_id)
-            .add_modifier(theme.placeholder)
-    } else {
-        Style::default().fg(theme.link_id)
-    };
+    let label_style = Style::default().fg(theme.link_id);
     spans.push(span!(
         label_style;
         "{}",
@@ -986,13 +964,6 @@ pub(super) fn render_mux_session_spans(
     spans.push(Span::raw("  "));
     if let Some(glyph) = handoff_spinner {
         spans.push(span!(Style::default().fg(theme.secondary_text); "{glyph}"));
-    } else if placeholder {
-        // Single-char colored glyph keeps the attached-glyph column
-        // in rhythm with ◉/◯/? on real rows. The dotted circle
-        // (U+25CC) reads as "phantom / not currently live"; the
-        // `pin_placeholder` color (default yellow) keeps it from
-        // being confused with the dim `◯` unmuxed glyph.
-        spans.push(span!(Style::default().fg(theme.pin_placeholder); "◌"));
     } else {
         match mux.client_attached {
             Some(true) => {
@@ -1009,10 +980,6 @@ pub(super) fn render_mux_session_spans(
 
     append_mux_single_session_preview(&mut spans, mux, theme, width);
     fit_spans_to_width(spans, width)
-}
-
-pub(super) fn row_primary_node_is_pin(node: &NodeId) -> bool {
-    matches!(node, NodeId::Pin(_))
 }
 
 pub(super) fn append_mux_agent_labels(

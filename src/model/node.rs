@@ -401,9 +401,8 @@ pub struct MuxSessionNode {
 // Builder helpers on `MuxSessionNode` mirror
 // `RepoNode::new` / `with_*`.
 impl MuxSessionNode {
-    /// `<backend>:<native_id>`, the name a pin's `mux.native_id()`
-    /// declares and an operator types to reference this mux. Pin
-    /// binding keys muxes by it, so it must stay stable; use
+    /// `<backend>:<native_id>`, the name an operator types to reference
+    /// this mux. Mux lookups key on it, so it must stay stable; use
     /// [`Self::display_label`] for what to show.
     pub fn qualified_name(&self) -> String {
         format!("{}:{}", self.backend, self.native_id)

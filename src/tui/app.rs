@@ -21,10 +21,10 @@ use crate::tui::preview::{PreviewContent, PreviewEntry, PreviewSource, PreviewSt
 use crate::tui::rows::{Row, RowId, RowKind, RowTree};
 use crate::tui::{RunConfig, View};
 
+mod controls;
 mod explorer_nav;
 mod msg;
 mod overlays;
-mod pins;
 mod tree;
 
 pub use msg::Msg;
@@ -323,7 +323,7 @@ pub enum InFlightKind {
     /// A launch is starting a tmux session: the `--no-attach`
     /// subprocess, and the refresh when the launch ends without an
     /// attach.
-    /// Emitted by pin launch, `mux new`, and `mux launch`.
+    /// Emitted by `rebuild`, `mux new`, and `mux launch`.
     Launch,
 }
 
@@ -686,21 +686,6 @@ impl App {
         self.selection = Some(id);
         self.status_message = None;
         self.recompute_detail();
-    }
-
-    /// Returns true when the active selection is a live mux row.
-    /// Used by the `A` (adopt) direct shortcut, which is scoped to
-    /// mux rows because the rest of the flow seeds pin defaults from
-    /// the mux's name / cwd.
-    pub fn selection_is_live_mux(&self) -> bool {
-        let Some(selection) = self.selection.as_ref() else {
-            return false;
-        };
-        self.tree
-            .rows
-            .iter()
-            .find(|row| &row.id == selection)
-            .is_some_and(|row| matches!(row.kind, RowKind::MuxSession(_)))
     }
 
     /// Active row filter for the visible view.

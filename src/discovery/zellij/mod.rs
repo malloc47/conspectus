@@ -7,7 +7,7 @@
 //! `discovery::providers::REGISTRY`,
 //! `discovery::tmux::KNOWN_MUX_BACKENDS`, and
 //! `LocalDiscoveryConfig::from_env`. Every downstream consumer
-//! (pin validation, attach dispatch, TUI badge rendering,
+//! (slot validation, attach dispatch, TUI badge rendering,
 //! provenance stamping) already routes by `backend_key`.
 //!
 //! Zellij's `list-sessions` output differs from tmux's — it's a

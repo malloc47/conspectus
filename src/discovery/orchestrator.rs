@@ -94,8 +94,7 @@ impl OrchestratorDescriptor {
 /// config table parser, and env-var walk pick it up
 /// automatically.
 ///
-/// Order is stable (registration order); pin adapters slot
-/// into this array in the order H-AGENTMUX-* decides.
+/// Order is stable (registration order).
 pub const REGISTRY: &[OrchestratorDescriptor] = &[OrchestratorDescriptor {
     key: crate::discovery::providers::AGENT_DECK,
     env_root_var: "CONSPECTUS_AGENT_DECK_ROOT",

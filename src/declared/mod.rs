@@ -44,7 +44,9 @@ pub use store::{
 // `write_atomic` remains reachable at
 // `crate::declared::write_atomic` for the pin / alias / tui
 // state consumers that share the atomic-write primitive.
-pub(crate) use store::write_atomic;
+pub(crate) use store::{
+    create_private_dir_all, open_private_lock, write_atomic, write_private_atomic,
+};
 
 pub const DECLARED_SCHEMA_VERSION: u32 = 1;
 

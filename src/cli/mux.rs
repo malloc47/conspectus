@@ -440,8 +440,8 @@ fn write_pin(
 
 /// Realize the worktree for `branch` under `repo` and return the
 /// worktree's absolute path. Idempotent — if the worktree already
-/// exists, its path is returned unchanged. Mirrors ADR 0094 pin-side
-/// realize-at-launch minus the pin-store read.
+/// exists, its path is returned unchanged. Mirrors the worktree step
+/// of a rebuild.
 fn realize_worktree(repo: &std::path::Path, branch: &str) -> Result<PathBuf> {
     use crate::discovery::worktree::{
         WorktreeBackendSelection, WorktreeCreateRequest, WorktreeMutationOutcome,

@@ -7,6 +7,48 @@ onward (pre-1.0, so minor versions may break).
 
 ## [Unreleased]
 
+Targeted for 0.2.0, after 0.1.0 is tagged. History, rebuild, and pin
+slots (ADRs 0140 to 0144) rework how pinning works.
+
+### Added
+
+- **History.** Conspectus remembers every mux, checkout, repo, and PR it
+  sees under `$XDG_STATE_HOME/conspectus/history/`, so an entity that
+  disappears stays visible as *gone* (decided by a targeted check, never
+  by absence from a scan). `conspectus history list|show|reap|forget`
+  inspects and prunes it; `reap` honors `[history.reap_after]` and never
+  removes a pinned or Unknown record.
+- **Pin slots.** `conspectus pin
+  add|edit|rename|retarget|refresh|move|rm|list|show|migrate`. A pin is
+  a named slot in `$XDG_DATA_HOME/conspectus/pins.toml` that points at a
+  mux, session, worktree, repo, or PR (live or gone), with overrides
+  layered over the live graph, history, and a snapshot. Pinning writes
+  only that file. Renaming a live mux slot renames its tmux session with
+  it, and `mux new|launch --pin [--no-launch]` pins a new mux or plans
+  one.
+- **Rebuild.** `conspectus rebuild <slot|h_id|node|mux> [--dry-run]`
+  brings a gone mux (resuming its last session), session, worktree
+  (through worktrunk), or repo (`git clone` into an absent path) back as
+  a plan that stops at the first failure. Launch argv comes from the
+  slot, the recorded launch, `[launch.<harness>]` profiles, `atelier
+  exec`, then the harness default.
+- **Pinned and History views** (`4`, `5`), ghost muxes in the Mux view,
+  a `.` row menu with Pin / Unpin (`p`), a `◉` pin marker, a `pinned
+  only` filter, and `N` for mux launch with a worktree toggle.
+
+### Changed
+
+- **Breaking: pins moved and the pin verbs changed.** Pins live in
+  `$XDG_DATA_HOME/conspectus/pins.toml`, not as `[[pins.entries]]` in
+  config files. `pin create`, `launch`, `attach`, `bind`, `rebind`, and
+  `adopt` are retired and print their replacement (`pin add`,
+  `conspectus rebuild`, `pin retarget`). Legacy entries still load, read
+  only, with a diagnostic until `conspectus pin migrate` converts them
+  and removes the old tables. The Pins modal and the `B`, `b`, `A`, and
+  `L` keys are gone.
+
+## [0.1.0] - not yet released
+
 The first public release, 0.1.0. Conspectus builds one evidence-backed
 graph of the AI-agent work on your machine and gives you a TUI,
 scriptable tables, and exports on top of it. See the
@@ -69,29 +111,6 @@ scriptable tables, and exports on top of it. See the
   list|create|remove|confirm|ignore|override`, `conspectus rename
   session|mux` (alias plus lockstep tmux rename), and `conspectus alias
   list`, all stored as reviewable TOML.
-- **History.** Conspectus remembers every mux, checkout, repo, and PR it
-  sees under `$XDG_STATE_HOME/conspectus/history/`, so an entity that
-  disappears stays visible as *gone* (decided by a targeted check, never
-  by absence from a scan). `conspectus history list|show|reap|forget`
-  inspects and prunes it; `reap` honors `[history.reap_after]` and never
-  removes a pinned or Unknown record.
-- **Pin slots.** `conspectus pin
-  add|edit|rename|retarget|refresh|move|rm|list|show|migrate`. A pin is
-  a named slot in `$XDG_DATA_HOME/conspectus/pins.toml` that points at a
-  mux, session, worktree, repo, or PR (live or gone), with overrides
-  layered over the live graph, history, and a snapshot. Pinning writes
-  only that file. Renaming a live mux slot renames its tmux session with
-  it, and `mux new|launch --pin [--no-launch]` pins a new mux or plans
-  one.
-- **Rebuild.** `conspectus rebuild <slot|h_id|node|mux> [--dry-run]`
-  brings a gone mux (resuming its last session), session, worktree
-  (through worktrunk), or repo (`git clone` into an absent path) back as
-  a plan that stops at the first failure. Launch argv comes from the
-  slot, the recorded launch, `[launch.<harness>]` profiles, `atelier
-  exec`, then the harness default.
-- **Pinned and History views** (`4`, `5`), ghost muxes in the Mux view,
-  a `.` row menu with Pin / Unpin (`p`), a `◉` pin marker, a `pinned
-  only` filter, and `N` for mux launch with a worktree toggle.
 - **tmux lifecycle**: `conspectus mux new` (bare shell) and `conspectus
   mux launch` (a harness in a fresh tmux session).
 - **Worktrees**: `conspectus worktree list` (read-only) and
@@ -110,14 +129,3 @@ scriptable tables, and exports on top of it. See the
   It is the same program; help and suggested commands use the name you
   ran.
 - **Library API** at `conspectus::api` (not yet a stable contract).
-
-### Changed
-
-- **Breaking: pins moved and the pin verbs changed.** Pins live in
-  `$XDG_DATA_HOME/conspectus/pins.toml`, not as `[[pins.entries]]` in
-  config files. `pin create`, `launch`, `attach`, `bind`, `rebind`, and
-  `adopt` are retired and print their replacement (`pin add`,
-  `conspectus rebuild`, `pin retarget`). Legacy entries still load, read
-  only, with a diagnostic until `conspectus pin migrate` converts them
-  and removes the old tables. The Pins modal and the `B`, `b`, `A`, and
-  `L` keys are gone.

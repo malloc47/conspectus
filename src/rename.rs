@@ -247,13 +247,11 @@ impl std::error::Error for MuxRenamePlanError {}
 /// Build a [`MuxRenamePlan`] for `mux_id` with `new_name`.
 ///
 /// `new_name` is the bare tmux session name — no `tmux:` prefix, no
-/// `<socket>:` prefix. Callers who want to change the socket use the
-/// separate pin-rebind form, not this plan.
+/// `<socket>:` prefix. A socket can't be changed by a rename.
 ///
-/// Every pin whose `mux.name` matches the mux's current bare name
-/// (and whose `mux.socket_name` matches the mux's socket) picks up a
-/// [`PinMuxNameUpdate`] so the executor rewrites the pin store in
-/// lockstep with the tmux rename.
+/// Every pin slot that targets this mux and overrides its `name` with
+/// the current bare name picks up a [`PinSlotNameUpdate`] so the
+/// executor rewrites `pins.toml` in lockstep with the tmux rename.
 pub fn plan_mux_rename(
     snapshot: &GraphSnapshot,
     mux_id: &MuxSessionId,
@@ -272,7 +270,7 @@ pub fn plan_mux_rename(
     // `editor` for a default-socket tmux session, `scratch:editor`
     // for a non-default socket). Split off the leading `<socket>:`
     // if present so we compare against the bare tmux name — which
-    // is what `PinMux.name` stores.
+    // is what a slot's `name` override holds.
     let (_mux_socket, bare_current) = split_socket_and_name(&mux.native_id);
 
     if bare_current == new_name {
@@ -322,8 +320,8 @@ fn mux_node<'a>(
 /// Split a `MuxSessionNode.native_id` like `scratch:editor` into
 /// `(Some("scratch"), "editor")`, or `editor` into `(None, "editor")`.
 /// The bare tmux name is the second element — what
-/// `PinMux.name` stores and what the operator types in the rename
-/// modal.
+/// a slot's `name` override holds and what the operator types in the
+/// rename modal.
 fn split_socket_and_name(native_id: &str) -> (Option<&str>, &str) {
     match native_id.split_once(':') {
         Some((socket, name)) => (Some(socket), name),

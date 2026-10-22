@@ -75,13 +75,15 @@ enum Command {
     Rename(RenameArgs),
     /// Inspect operator-authored session aliases.
     Alias(AliasArgs),
-    /// Author, launch, or inspect session pins. See `docs/pins-walkthrough.md`.
+    /// Manage pin slots: named places for muxes, sessions, checkouts,
+    /// repos, and PRs. See `docs/pins-walkthrough.md`.
     Pin(Box<PinArgs>),
-    /// Start a tmux session: a bare shell (`new`) or a harness with no
-    /// pin (`launch`).
+    /// Start a tmux session: a bare shell (`new`) or a harness
+    /// (`launch`). `--pin` also pins it, or plans a slot with
+    /// `--no-launch`.
     Mux(MuxArgs),
-    /// Bring a mux back from a pin slot, a history record, or a node.
-    /// `--dry-run` prints the plan.
+    /// Bring a mux, session, worktree, or repo back from a pin slot, a
+    /// history record, or a node. `--dry-run` prints the plan.
     Rebuild(RebuildArgs),
     /// List, inspect, and prune the entities Conspectus has observed.
     History(HistoryArgs),

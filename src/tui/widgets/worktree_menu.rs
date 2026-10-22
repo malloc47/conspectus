@@ -164,8 +164,7 @@ fn worktree_checkout_containing<'a>(
 ) -> Option<&'a CheckoutNode> {
     let p = Path::new(path);
     snapshot
-        .nodes
-        .iter()
+        .live_nodes()
         .filter_map(|n| match n {
             GraphNode::Checkout(c)
                 if c.worktree.is_some() && path_is_ancestor_of(Path::new(&c.root), p) =>
@@ -615,7 +614,9 @@ impl Widget for WorktreeMenuWidget<'_> {
                         format!("Close down stream `{branch}`"),
                         Style::default().add_modifier(Modifier::BOLD),
                     ),
-                    Line::from("Ends its sessions, removes the worktree, drops its pins."),
+                    Line::from(
+                        "Ends its sessions, removes the worktree, forgets its history records.",
+                    ),
                     Line::from(""),
                 ];
                 if !self.state.ctx.guard_sessions.is_empty() {

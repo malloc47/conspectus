@@ -2093,55 +2093,6 @@ fn session_display_label_is_truncated_in_left_row() {
 }
 
 #[test]
-fn placeholder_session_row_renders_pin_marker_without_planned_vocab() {
-    use crate::tui::rows::{AgentSessionRow, MuxIndicator};
-    let theme = Theme::default();
-    let row = AgentSessionRow {
-        session: AgentSessionId::new("codex", "pin:ingest", "ingest"),
-        short_id: "ingest".into(),
-        harness_label: "codex".into(),
-        cwd_display: Some("~/repo".into()),
-        project_display: None,
-        recency: None,
-        activity_epoch: None,
-        mux_state: MuxIndicator::Unmuxed,
-        preview: Some("~/repo".into()),
-        title: None,
-        alias: Some("ingest".into()),
-        title_disambiguates: false,
-        mux_host: None,
-        primary_node: NodeId::Pin(crate::model::PinId::new("ingest")),
-        pin_id: Some("ingest".into()),
-    };
-
-    let spans = render_session_spans(&row, &theme, 1_700_000_000, None);
-    let rendered: String = spans.iter().map(|span| span.content.as_ref()).collect();
-
-    assert!(!rendered.contains("📌"), "{rendered}");
-    assert!(
-        rendered.contains('◌'),
-        "placeholder session row should render the dotted-circle glyph: {rendered}"
-    );
-    assert!(
-        !rendered.contains('◯'),
-        "placeholder session row should not render the unmuxed glyph: {rendered}"
-    );
-    let glyph_span = spans
-        .iter()
-        .find(|span| span.content.as_ref() == "◌")
-        .expect("dotted-circle span present");
-    assert_eq!(
-        glyph_span.style.fg,
-        Some(theme.pin_placeholder),
-        "dotted-circle glyph should use the pin_placeholder color",
-    );
-    assert!(
-        !rendered.contains("planned"),
-        "placeholder session row should not spell out 'planned': {rendered}"
-    );
-}
-
-#[test]
 fn mux_session_row_mirrors_session_column_order() {
     let theme = Theme::default();
     let now: i64 = 1_700_000_000;
@@ -2210,55 +2161,6 @@ fn mux_session_row_mirrors_session_column_order() {
     assert!(chip_idx < recency_idx, "chip before recency: {rendered}");
     assert!(recency_idx < glyph_idx, "recency before glyph: {rendered}");
     assert!(glyph_idx < preview_idx, "glyph before preview: {rendered}");
-}
-
-#[test]
-fn placeholder_mux_row_renders_dotted_glyph_and_cwd_preview() {
-    let theme = Theme::default();
-    let row = MuxSessionRow {
-        mux: MuxSessionId::new("tmux:ingest"),
-        backend: "tmux".into(),
-        native_id: "ingest".into(),
-        client_attached: None,
-        cwd_display: Some("~/repo".into()),
-        attached_count: 0,
-        recency: None,
-        activity_epoch: None,
-        created_epoch: None,
-        last_attached_epoch: None,
-        agent_labels: vec!["codex".into()],
-        program: None,
-        program_harness: None,
-        single_session_preview: Some("~/repo".into()),
-        pin_id: Some("ingest".into()),
-        primary_node: NodeId::Pin(crate::model::PinId::new("ingest")),
-    };
-
-    let spans = render_mux_session_spans(&row, &theme, 1_700_000_000, 100, None);
-    let rendered: String = spans.iter().map(|span| span.content.as_ref()).collect();
-
-    assert!(
-        rendered.contains('◌'),
-        "placeholder attached glyph should render as ◌: {rendered}"
-    );
-    let glyph_span = spans
-        .iter()
-        .find(|span| span.content.as_ref() == "◌")
-        .expect("dotted-circle span present");
-    assert_eq!(
-        glyph_span.style.fg,
-        Some(theme.pin_placeholder),
-        "dotted-circle glyph should use the pin_placeholder color",
-    );
-    assert!(!rendered.contains("📌"), "{rendered}");
-    assert!(
-        rendered.contains("~/repo"),
-        "preview should fall through to the pin cwd: {rendered}"
-    );
-    assert!(
-        !rendered.contains("planned"),
-        "placeholder mux row should not spell out 'planned': {rendered}"
-    );
 }
 
 #[test]
@@ -5177,21 +5079,24 @@ fn the_header_counts_only_muxes_that_exist() {
 ///
 /// [`fixture_world`]: crate::tui::rows::pinned::fixture_world
 fn slots_app(grouping: crate::tui::PinnedGrouping) -> App {
-    let snapshot = crate::tui::rows::pinned::fixture_world();
+    slots_app_over(&crate::tui::rows::pinned::fixture_world(), grouping)
+}
+
+fn slots_app_over(snapshot: &GraphSnapshot, grouping: crate::tui::PinnedGrouping) -> App {
     let mut config = RunConfig::defaults();
     config.default_view = View::Pinned;
     let mut app = App::new(config);
     app.update(Msg::SetGrouping(crate::tui::Grouping::Pinned(grouping)));
     let tree =
         crate::tui::rows::pinned::build_pinned_tree(crate::tui::rows::pinned::PinnedBuildInputs {
-            snapshot: &snapshot,
+            snapshot,
             home: Some(std::path::Path::new("/home/op")),
             now: Some(1_700_000_000),
             grouping,
             sort: crate::tui::Sort::Hierarchy,
         });
     app.update(Msg::SetData {
-        snapshot: SnapshotHandle::from_snapshot(&snapshot),
+        snapshot: SnapshotHandle::from_snapshot(snapshot),
         tree,
         loaded_at_epoch: 1_700_000_000,
         initial_selection_hint: None,
@@ -6056,4 +5961,170 @@ fn the_mux_launch_form_opens_with_defaults_and_the_worktree_toggle() {
     };
     assert!(form.spec().worktree_enabled());
     assert!(form.default_hint().is_some() || form.spec().harness().value().is_empty());
+}
+
+// ----- Gone nodes in previews, reveal, and hints --------------------
+
+#[test]
+fn a_ghost_mux_has_no_pane_to_preview_but_a_live_one_does() {
+    let snapshot = ghost_world();
+    let app = mux_app_over(&snapshot, crate::filter::RowFilter::default());
+    let mux_ids: Vec<(NodeId, bool)> = snapshot
+        .nodes
+        .iter()
+        .filter_map(|node| match node {
+            GraphNode::MuxSession(mux) => {
+                let id = NodeId::MuxSession(mux.id.clone());
+                let live = snapshot.is_live(&id);
+                Some((id, live))
+            }
+            _ => None,
+        })
+        .collect();
+    assert!(mux_ids.iter().any(|(_, live)| *live) && mux_ids.iter().any(|(_, live)| !live));
+    for (id, live) in mux_ids {
+        let source = crate::tui::preview::node_source(&app, &id);
+        assert_eq!(source.is_some(), live, "{id}: {source:?}");
+    }
+}
+
+#[test]
+fn gone_checkouts_and_repos_have_no_git_preview() {
+    let snapshot = ghost_world();
+    let app = mux_app_over(&snapshot, crate::filter::RowFilter::default());
+    let gone: Vec<NodeId> = snapshot
+        .nodes
+        .iter()
+        .map(GraphNode::id)
+        .filter(|id| !snapshot.is_live(id))
+        .filter(|id| matches!(id, NodeId::Checkout(_) | NodeId::Repo(_)))
+        .collect();
+    assert!(!gone.is_empty(), "the fixture has a gone worktree");
+    for id in gone {
+        assert_eq!(crate::tui::preview::node_source(&app, &id), None, "{id}");
+    }
+}
+
+#[test]
+fn a_pinned_ghost_mux_keeps_the_pin_marker_and_its_column() {
+    let snapshot = ghost_world();
+    let mut app = mux_app_over(&snapshot, crate::filter::RowFilter::default());
+    let frame = pinned_frame(&mut app, 110);
+    let ghost_line = frame
+        .lines()
+        .find(|line| line.contains("config-agent3"))
+        .expect("ghost row");
+    let live_line = frame
+        .lines()
+        .find(|line| line.contains("conspectus-main"))
+        .expect("live row");
+    assert!(ghost_line.contains('◉'), "{ghost_line}");
+    let column = |line: &str, needle: &str| line.find(needle).map(|i| line[..i].chars().count());
+    assert_eq!(
+        column(ghost_line, "config-agent3"),
+        column(live_line, "conspectus-main"),
+        "ghost and live labels share a left edge:\n{frame}"
+    );
+}
+
+#[test]
+fn revealing_a_gone_entity_opens_the_history_view() {
+    // The fixture's worktree record is gone; mark its node gone too, as
+    // a discovery cycle does.
+    let mut snapshot = crate::tui::rows::pinned::fixture_world();
+    let node = crate::tui::rows::pin_nodes(&snapshot)
+        .into_iter()
+        .find(|pin| pin.id.id == "ledger-worktree")
+        .and_then(|pin| pin.target_node.clone())
+        .expect("the slot resolves to its worktree");
+    snapshot.node_presence.insert(
+        node,
+        crate::model::NodePresence::Gone {
+            last_seen: 1_699_000_000,
+        },
+    );
+    let mut app = slots_app_over(&snapshot, crate::tui::PinnedGrouping::None);
+    let effects = app.update(Msg::RevealSlot("ledger-worktree".into()));
+    assert_eq!(app.active_view(), View::History, "{effects:?}");
+    assert!(
+        matches!(app.selection(), Some(RowId::History { .. })),
+        "{:?}",
+        app.selection()
+    );
+}
+
+#[test]
+fn a_failed_reveal_leaves_the_operator_where_they_were() {
+    use crate::tui::Effect;
+    let mut app = slots_app(crate::tui::PinnedGrouping::None);
+    let before = app.selection().cloned();
+    let effects = app.update(Msg::RevealSlot("no-such-slot".into()));
+    assert!(
+        matches!(effects.as_slice(), [Effect::Toast(_)]),
+        "{effects:?}"
+    );
+    assert_eq!(app.active_view(), View::Pinned);
+    assert_eq!(app.selection().cloned(), before);
+}
+
+#[test]
+fn the_status_hint_for_a_live_repo_slot_matches_what_enter_does() {
+    let snapshot = crate::tui::rows::pinned::all_kinds_world();
+    let pins = crate::tui::rows::pin_nodes(&snapshot);
+    let repo = pins
+        .iter()
+        .find(|pin| {
+            pin.kind == crate::model::PinKind::Repo && pin.status == crate::model::SlotStatus::Live
+        })
+        .expect("a live repo slot");
+    let hint = crate::tui::actions::pin_status_hint(&snapshot, &repo.id.id).expect("a hint");
+    assert!(
+        hint.contains("live repo") && hint.contains("nothing to rebuild"),
+        "{hint}"
+    );
+    let mux = pins
+        .iter()
+        .find(|pin| {
+            pin.kind == crate::model::PinKind::Mux && pin.status == crate::model::SlotStatus::Live
+        })
+        .expect("a live mux slot");
+    assert_eq!(
+        crate::tui::actions::pin_status_hint(&snapshot, &mux.id.id),
+        None,
+        "a live mux is attached, not described"
+    );
+}
+
+#[test]
+fn clean_up_shows_a_deselected_record_unticked() {
+    use crate::tui::modal::Overlay;
+    use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+    let mut config = RunConfig::defaults();
+    let zero = Some(std::time::Duration::from_secs(0));
+    config
+        .history
+        .reap_after
+        .insert(crate::model::HistoryKind::Mux, zero);
+    config
+        .history
+        .reap_after
+        .insert(crate::model::HistoryKind::Checkout, zero);
+    let mut snapshot = crate::tui::rows::pinned::fixture_world();
+    snapshot.pins.clear();
+    let mut app = history_app_over(&snapshot, crate::tui::HistoryGrouping::None, config);
+    app.update(Msg::OpenCleanUp);
+    {
+        let state = app.clean_up_mut().expect("the modal opened");
+        let press = |code| KeyEvent::new(code, KeyModifiers::NONE);
+        state.handle((), press(KeyCode::Down));
+        state.handle((), press(KeyCode::Char(' ')));
+        assert_eq!(state.selected(), [0], "the second record was deselected");
+    }
+    let frame = pinned_frame(&mut app, 100);
+    assert!(frame.contains("Clean up: forget these records"), "{frame}");
+    assert!(frame.contains('✓'), "one record stays ticked: {frame}");
+    assert!(
+        frame.lines().filter(|l| l.contains('✓')).count() == 1,
+        "only one record is ticked:\n{frame}"
+    );
 }

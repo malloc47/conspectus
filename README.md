@@ -65,7 +65,7 @@ you don't have to change how you launch your agents.
 
 Conspectus has ten node kinds: agent session, mux (terminal multiplexer)
 session, repo, checkout (a plain clone or a linked worktree), branch,
-workspace, fork, forge PR, pin, and runtime process. Twenty-two typed
+workspace, fork, forge PR, pin, and runtime process. Twenty-three typed
 relation kinds connect them. The graph is sparse by default: an orphan agent
 session, a tmux session with no agent, and a branch with a PR but no session
 are all valid, not errors. Projections never assume things connect.
@@ -312,7 +312,7 @@ conspectus serve                   # keep the graph warm in the background
 
 ### Interactive TUI
 
-- **Views.** `1`, `2`, and `3` switch between the Sessions, Mux, and PRs
+- **Views.** `1` to `5` switch between the Sessions, Mux, PRs, Pinned, and History
   views. The Sessions view groups sessions by graph topology by default:
   workspace, then repo, then checkout, with resumed and forked sessions
   nested under their parents. It can also group by workspace, repo,
@@ -351,7 +351,7 @@ conspectus serve                   # keep the graph warm in the background
 |---|---|
 | ![The explorer cursor on a session's checkout: the link's evidence above the checkout's git status and files](docs/images/related-preview.png) | ![A repo row: its recent commits and remotes](docs/images/repo-history.png) |
 | **A tmux session's pane** | **A pull request under its checkout** |
-| ![The mux view: tmux sessions on the left, the selected one's live pane on the right](docs/images/mux-pane.png) | ![The PRs view: a draft PR under the checkout of its branch, the sessions working there beneath it, and its checks, reviews, and description in the Preview](docs/images/prs-view.png) |
+| ![The mux view: live tmux sessions with a pin marker, gone muxes dimmed below them, and the selected mux's related rows and a transcript-style preview on the right](docs/images/mux-pane.png) | ![The PRs view: a draft PR under the checkout of its branch, the sessions working there beneath it, and its checks, reviews, and description in the Preview](docs/images/prs-view.png) |
 | **Pinned slots** | **Gone entities, ready to rebuild** |
 | ![The Pinned view: slots for a live mux, a gone mux, a session, a removed worktree, and a merged PR, grouped by project, each with its status and age](docs/images/pinned-view.png) | ![The History view: gone muxes and worktrees with how long ago they were last seen](docs/images/history-view.png) |
 
@@ -483,7 +483,7 @@ adapters and metadata rather than in the shape of the graph. The design
 document stays short enough to plan from, and the detailed reasoning lives in
 ADRs.
 
-### `docs/adr/`: 119 architecture decision records
+### `docs/adr/`: 144 architecture decision records
 
 Every significant decision gets an ADR, whether it's a model change, a new
 dependency, a new write path, a workflow tool, or a UI convention. Each ADR
@@ -542,7 +542,9 @@ daily use.
 
 When agents write most of the code, a change can add a subprocess, a socket,
 or a write path that nobody decided to allow. The mutation envelope
-([ADR 0087](docs/adr/0087-mutation-envelope.md)) always listed what
+([ADR 0087](docs/adr/0087-mutation-envelope.md), restated by
+[ADR 0143](docs/adr/0143-mutation-envelope-with-history-pins-and-clone.md)
+for history, pin slots, and rebuild clones) always listed what
 Conspectus may write and what it must never do, but for most of the project
 only review enforced it.
 [`docs/capabilities.toml`](docs/capabilities.toml) turns it into an
@@ -622,7 +624,9 @@ category of its own.
   ([ADR 0084](docs/adr/0084-first-class-pin-nodes.md)), the mutation
   envelope bounded every write
   ([ADR 0087](docs/adr/0087-mutation-envelope.md)), and worktree streams
-  followed ([ADR 0092](docs/adr/0092-worktree-backend-seam.md)). A
+  followed ([ADR 0092](docs/adr/0092-worktree-backend-seam.md)). Pins
+  were later reworked into slots with history and rebuild (ADRs 0140 to
+  0144). A
   hardening workstream of nearly 300 stories absorbed what came up.
 - **Late September to October:** release readiness for 0.1.0. The docs and
   `--help` were checked against the binary, the screenshots added, and the
@@ -644,7 +648,7 @@ the work moved from building to hardening.
 | --- | --- |
 | Development window | 2026-05-12 to 2026-10-13 |
 | Commits | 998, of which 798 (80%) have an AI co-author trailer |
-| Architecture decision records | 119, of which 11 are superseded or partially superseded |
+| Architecture decision records | 119 on that date (144 now, after the history, rebuild, and pin-slot ADRs 0140 to 0144), of which 11 were superseded or partially superseded |
 | Backlog stories | 643, of which 533 (83%) are done |
 | Commits that touch the backlog | 470 (47%) |
 | Rust | about 147k lines, over 40% of it tests |

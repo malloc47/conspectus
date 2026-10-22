@@ -307,3 +307,25 @@ fn failed_worktree_step_leaves_history_alone() {
         WorktreeMutationOutcome::Failed { .. }
     ));
 }
+
+#[test]
+fn protected_records_come_from_the_slot_list_of_an_unresolved_snapshot() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = HistoryStore::at(dir.path());
+    let ids = history_with(&store, &[("a", "/wt/feature"), ("b", "/x")]);
+    let mut snap = snapshot();
+    snap.pins.push(crate::model::PinSlot {
+        id: "s".into(),
+        kind: PinKind::Mux,
+        target: Some(crate::model::PinSlot::history_target(&ids[0])),
+        pinned_at: None,
+        overrides: Default::default(),
+        snapshot: Default::default(),
+        order: 0,
+        legacy: false,
+    });
+
+    let plan = plan_close_down(&snap, PathBuf::from("/app"), "feature").expect("plan");
+
+    assert_eq!(plan.protected_records, BTreeSet::from([ids[0].clone()]));
+}

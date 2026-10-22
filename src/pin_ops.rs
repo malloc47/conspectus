@@ -23,7 +23,7 @@ pub enum PinError {
         slot: PinKind,
         target: PinKind,
     },
-    /// A mux, worktree, or repo needs a history record to point at, and
+    /// A mux, checkout, or repo needs a history record to point at, and
     /// there is no history store to make one in.
     NoHistory(String),
     Slot(SlotError),
@@ -182,7 +182,7 @@ fn node_kind_name(id: &NodeId) -> &'static str {
     }
 }
 
-/// Make sure a live mux, worktree, or repo has a history record, so a
+/// Make sure a live mux, checkout, or repo has a history record, so a
 /// slot has something stable to point at, and return its id.
 fn ensure_record(
     snapshot: &GraphSnapshot,
@@ -221,10 +221,23 @@ fn ensure_record(
     if only.is_empty() {
         return Err(PinError::NotFound(key));
     }
-    let (_, outcome) = writer
+    let (load, outcome) = writer
         .store
         .record(&only)
         .map_err(|err| PinError::Invalid(format!("could not record `{key}` in history: {err}")))?;
+    // A file this build must not rewrite (a newer schema, a corrupt
+    // record) keeps the record out, so a slot would point at nothing.
+    if let Some(kind) = outcome
+        .changed
+        .iter()
+        .find(|kind| !load.is_writable(**kind))
+    {
+        let why = load.problems.join("; ");
+        return Err(PinError::Invalid(format!(
+            "could not record `{key}` in history: the {} file can't be written ({why})",
+            kind.as_str()
+        )));
+    }
     outcome
         .mux_ids
         .into_iter()
@@ -315,7 +328,7 @@ fn now_rfc3339() -> String {
 
 /// Pin an entity: add a slot targeting it, with a snapshot of its
 /// current recipe and no overrides. `id` defaults to the entity's name,
-/// made unique. A live mux, worktree, or repo with no history record
+/// made unique. A live mux, checkout, or repo with no history record
 /// gets one first.
 pub fn pin(
     snapshot: &GraphSnapshot,

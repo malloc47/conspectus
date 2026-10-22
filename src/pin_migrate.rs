@@ -34,6 +34,9 @@ pub struct Item {
     pub last_session: Option<LastSession>,
     /// The alias to keep, as `(session, name)`.
     pub alias: Option<(AgentSessionId, String)>,
+    /// A slot this migration already made for the entry exists, so only
+    /// the leftover entry needs removing.
+    pub already_migrated: bool,
 }
 
 #[derive(Clone, Debug)]
@@ -48,6 +51,9 @@ pub struct Plan {
     pub items: Vec<Item>,
     /// `(id, why)` for entries left alone.
     pub skipped: Vec<(String, String)>,
+    /// Things worth saying that don't stop the migration, such as a
+    /// sidecar that couldn't be read.
+    pub warnings: Vec<String>,
 }
 
 impl Plan {
@@ -60,6 +66,14 @@ impl Plan {
         let mut out = String::new();
         for item in &self.items {
             let e = &item.entry;
+            if item.already_migrated {
+                out.push_str(&format!(
+                    "pin `{}`: already migrated, removes the leftover entry from {}\n",
+                    e.id,
+                    item.path.display()
+                ));
+                continue;
+            }
             out.push_str(&format!(
                 "pin `{}` -> mux slot (mux `{}`, {}, {})\n",
                 e.id, e.mux.name, e.harness, e.cwd
@@ -94,6 +108,20 @@ pub fn plan(
     let mut taken: BTreeSet<&str> = existing.iter().map(|slot| slot.id.as_str()).collect();
     let owned: Vec<String> = entries.iter().map(|e| e.entry.id.clone()).collect();
     for (legacy, id) in entries.into_iter().zip(&owned) {
+        let migrated_before = existing
+            .iter()
+            .find(|slot| slot.id == *id)
+            .is_some_and(|slot| is_migration_of(snapshot, slot, &legacy.entry));
+        if migrated_before {
+            plan.items.push(Item {
+                path: legacy.path,
+                entry: legacy.entry,
+                last_session: None,
+                alias: None,
+                already_migrated: true,
+            });
+            continue;
+        }
         if taken.contains(id.as_str()) {
             plan.skipped.push((
                 id.clone(),
@@ -102,23 +130,46 @@ pub fn plan(
             continue;
         }
         taken.insert(id.as_str());
-        let last_session = read_sidecar(sidecars, id)
-            .ok()
-            .flatten()
-            .map(|record| LastSession {
-                harness: record.harness,
-                session_id: record.session_id,
-                observed_epoch: record.observed_epoch,
-            });
+        let record = match read_sidecar(sidecars, id) {
+            Ok(record) => record,
+            Err(err) => {
+                plan.warnings.push(format!(
+                    "pin `{id}`: its last-session file can't be used ({err}); the slot starts without a remembered session"
+                ));
+                None
+            }
+        };
+        let last_session = record.map(|record| LastSession {
+            harness: record.harness,
+            session_id: record.session_id,
+            observed_epoch: record.observed_epoch,
+        });
         let alias = alias_to_keep(snapshot, &legacy.entry, last_session.as_ref());
         plan.items.push(Item {
             path: legacy.path,
             entry: legacy.entry,
             last_session,
             alias,
+            already_migrated: false,
         });
     }
     plan
+}
+
+/// Whether `slot` is what an earlier run of this migration made for
+/// `entry`: it targets a record seeded by migration for the same mux.
+fn is_migration_of(snapshot: &GraphSnapshot, slot: &PinSlot, entry: &PinEntry) -> bool {
+    let Some(record) = slot
+        .target
+        .as_deref()
+        .and_then(|target| target.strip_prefix(PinSlot::HISTORY_PREFIX))
+        .and_then(|id| snapshot.history.mux(id))
+    else {
+        return false;
+    };
+    record.meta.origin == RecordOrigin::Migrated
+        && record.recipe.name == entry.mux.name
+        && record.recipe.cwd.as_deref() == Some(entry.cwd.as_str())
 }
 
 /// A pin's display name used to name its bound session. Keep it when it
@@ -174,6 +225,10 @@ pub fn run(plan: &Plan, targets: &Targets<'_>) -> Report {
     let mut report = Report::default();
     let mut removable: Vec<(PathBuf, String)> = Vec::new();
     for item in &plan.items {
+        if item.already_migrated {
+            removable.push((item.path.clone(), item.entry.id.clone()));
+            continue;
+        }
         match migrate_one(item, targets, &mut report) {
             Ok(()) => {
                 report.migrated.push(item.entry.id.clone());

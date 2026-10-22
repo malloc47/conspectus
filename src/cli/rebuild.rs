@@ -2,6 +2,7 @@
 //! worktree, or repo back from a pin slot, a history record, or a node,
 //! as a plan that `--dry-run` prints and a run executes step by step.
 
+use std::io::IsTerminal;
 use std::path::PathBuf;
 
 use anyhow::{Result, anyhow};
@@ -27,7 +28,7 @@ pub(super) struct RebuildArgs {
     /// Skip the terminal hand-off; print the attach command instead.
     #[arg(long = "no-attach")]
     no_attach: bool,
-    /// Resume this session instead of the one the mux hosted last.
+    /// For a mux: resume this session instead of the one it hosted last.
     #[arg(long, value_name = "ID")]
     session: Option<String>,
     /// Discovery scan root. Defaults to the working directory.
@@ -44,9 +45,10 @@ impl RebuildArgs {
             crate::discovery::LocalDiscoveryConfig::from_env().without_forge(),
         )?;
         let snapshot = crate::resolve::resolve_snapshot(discovered);
-        let slots = SlotStore::from_env()
-            .map(|store| store.load().slots)
-            .unwrap_or_default();
+        super::pin::report_store_problems(&snapshot);
+        // The graph's slot list includes unconverted legacy pins, so a
+        // rebuild of one can say to migrate instead of "nothing matches".
+        let slots = snapshot.pins.clone();
         let subject = resolve_subject(&snapshot, &slots, &self.reference).map_err(describe)?;
 
         let config = crate::config::load_from_cwd().config;
@@ -64,9 +66,12 @@ impl RebuildArgs {
             cloner: &SystemCloner,
             launch: &launch,
         };
+        // Without a terminal there is nothing to hand over to; say how
+        // to attach instead of failing after the session is made.
+        let attach_here = !self.no_attach && std::io::stdin().is_terminal();
         let options = Options {
             session: self.session,
-            attach: !self.no_attach && !self.dry_run,
+            attach: attach_here && !self.dry_run,
         };
         let plan = plan(
             &snapshot,
@@ -91,7 +96,7 @@ impl RebuildArgs {
         for line in &executed.done {
             println!("{line}");
         }
-        if self.no_attach
+        if !attach_here
             && let Some(target) = &plan.target
             && plan.creates_something()
         {

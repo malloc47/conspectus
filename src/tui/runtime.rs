@@ -1470,13 +1470,13 @@ fn derive_new_mux_cwd(app: &App) -> Option<String> {
             .as_ref()
             .and_then(|node| cwd_for_node(snapshot, node)),
         RowKind::Repo(r) => cwd_for_node(snapshot, &r.primary_node),
-        RowKind::MuxSession(mux) => snapshot.nodes.iter().find_map(|n| match n {
+        RowKind::MuxSession(mux) => snapshot.live_nodes().find_map(|n| match n {
             GraphNode::MuxSession(m) if m.id == mux.mux => {
                 m.active_pane_current_path.clone().or_else(|| m.cwd.clone())
             }
             _ => None,
         }),
-        RowKind::AgentSession(session) => snapshot.nodes.iter().find_map(|n| match n {
+        RowKind::AgentSession(session) => snapshot.live_nodes().find_map(|n| match n {
             GraphNode::AgentSession(s) if s.id == session.session => s.cwd.clone(),
             _ => None,
         }),
@@ -1489,7 +1489,9 @@ fn cwd_for_node(
     node: &crate::model::NodeId,
 ) -> Option<String> {
     use crate::model::{GraphNode, NodeId};
-    snapshot.nodes.iter().find_map(|n| match (node, n) {
+    // A gone node's directory may no longer exist, so it can't seed a
+    // new mux's working directory.
+    snapshot.live_nodes().find_map(|n| match (node, n) {
         (NodeId::Checkout(id), GraphNode::Checkout(c)) if &c.id == id => Some(c.root.clone()),
         // The path the repo's header shows, so a mux opened from it
         // starts there rather than in whichever checkout was probed first.

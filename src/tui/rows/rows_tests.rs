@@ -245,7 +245,7 @@ fn mux_program_harness_prefers_the_observed_process_harness() {
 }
 
 #[test]
-fn mux_program_harness_falls_back_to_the_pin_launch_argv() {
+fn mux_program_harness_falls_back_to_the_slots_argv() {
     use crate::model::{MuxSessionId, MuxSessionNode};
     let bare = MuxSessionNode::new(MuxSessionId::new("tmux:x"), "tmux", "x");
     let atelier_pin = program_test_pin(

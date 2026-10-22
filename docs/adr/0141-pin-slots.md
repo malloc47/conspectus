@@ -190,7 +190,7 @@ the pin-binding sidecar directory, and `pin-stores.json` are removed
 
 | Command | Effect |
 |---|---|
-| `pin add <ref> [--id <id>]` | Pin a slot id, history id, or node reference. Replaces `pin create` and `pin adopt` |
+| `pin add <ref> [--name <id>]` | Pin a slot id, history id, or node reference. Replaces `pin create` and `pin adopt` |
 | `pin edit <id> --set <field>=<value> / --unset <field>` | Edit overrides |
 | `pin rename <id> <new-id>` | Rename, with mux lockstep |
 | `pin retarget <id> <ref>` | Replaces `pin rebind` |
@@ -199,7 +199,7 @@ the pin-binding sidecar directory, and `pin-stores.json` are removed
 | `mux new` / `mux launch … --pin [--no-launch]` | Pin the result in the same gesture, or write a planned slot |
 
 `pin create`, `pin launch`, `pin attach`, `pin bind`, `pin rebind`, and
-`pin adopt` are retired with the 0.2.0 version bump. Each fails with a
+`pin adopt` are retired in the release that ships this plan (0.2.0, after the unreleased 0.1.0; backlog `CSP-689`). Each fails with a
 message naming its replacement (`rebuild`, `declared create`, `pin
 retarget`, `pin add`) rather than keeping a shim.
 
@@ -216,7 +216,7 @@ retarget`, `pin add`) rather than keeping a shim.
   can point across projects.
 - The binding pass, its diagnostics, its sidecar, and its registry
   leave the code; `rebuild` replaces `pin launch` (ADR 0142).
-- The `pin` CLI breaks with the 0.2.0 version bump, deliberately.
+- The `pin` CLI breaks in the release that ships this plan (0.2.0), deliberately.
 
 ## Alternatives Considered
 

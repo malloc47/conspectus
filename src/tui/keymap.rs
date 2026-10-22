@@ -220,7 +220,7 @@ pub fn translate(event: Event, viewport_height: u16) -> Option<Action> {
     match event {
         Event::Key(key) if key.kind == KeyEventKind::Press => match (key.modifiers, key.code) {
             // All single-char parametric guards
-            // (r/a/b/v/f/p/[/]//?/l/h/e) + arrow / nav keys
+            // (r/a/v/f/p/[/]//?/l/h/e) + arrow / nav keys
             // (j/k/Down/Up/Right/Left/Enter/Backspace/Home/End/g/G)
             // migrated to `keybindings::KEYBINDINGS` via
             // `KeyMatcher::AnyModExceptCtrl` and `KeyMatcher::AnyMod`.

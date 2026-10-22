@@ -670,7 +670,7 @@ worktree-backed pins (ADR 0094). The effective argv comes from the slot's
 override, the recorded argv, the project and then user launch profile
 (`[launch.<harness>] argv`), a discovered `atelier exec` wrapper, and
 finally `HarnessAdapter::launch_argv`. Orchestrator-owned muxes are shown
-but not rebuilt. `rebuild --pinned` rebuilds every gone pinned slot.
+but not rebuilt. `rebuild --pinned`, which would rebuild every gone pinned slot, is planned (backlog `CSP-686`); today each slot is rebuilt by name.
 
 ## Worktree Management
 
@@ -690,11 +690,11 @@ Management flows through a **pluggable worktree backend seam**
   this via `git worktree list --porcelain` (a read command).
 - **`create` / `remove` are mutation and delegated.** Conspectus
   never runs `git worktree add/remove` itself — ADR 0087 prohibition 6
-  (never mutate git state) stays absolute. Instead, mutation-capable
+  (never mutate git state, restated in ADR 0143) stays absolute. Instead, mutation-capable
   backends are external dedicated tools; the v1 rich backend is
   [`worktrunk`](https://github.com/max-sixty/worktrunk), which
   Conspectus invokes as a Conspectus-owned subprocess launch
-  (ADR 0087 category 4). The built-in `git` backend deliberately stops
+  (ADR 0087 category 4, ADR 0143). The built-in `git` backend deliberately stops
   at read/list.
 
 Backend selection mirrors the mux-backend / forge-adapter registries

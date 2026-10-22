@@ -367,8 +367,8 @@ fn push_ungrouped(
 /// Workspace headers for the muxes rooted in a workspace and repo
 /// headers for every other mux, as one list in name order, then
 /// Ungrouped (ADR 0139). A mux's workspace is its resolved `rooted_in`
-/// target. An unbound pin placeholder has no mux in the graph, so its
-/// cwd goes through the same path index discovery roots muxes with.
+/// target; a mux with none is rooted by its cwd through the same path
+/// index discovery uses.
 fn emit_workspace_grouped(
     tree: &mut RowTree,
     groups: Vec<MuxGroup>,

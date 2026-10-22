@@ -528,7 +528,7 @@ The header reads `11 mux · 4 gone`.
 | `history list [--kind <k>] [--gone]`, `history show <ref>` | New |
 | `history reap`, `history forget <ref>` | New |
 | `rebuild <ref> [--dry-run] [--no-attach]` | New. `<ref>` is a slot id, a history id, or a node reference |
-| `pin add <ref> [--id <id>]` | New. Replaces `pin create` and `pin adopt` |
+| `pin add <ref> [--name <id>]` | New. Replaces `pin create` and `pin adopt` |
 | `pin edit <id> --set <field>=<value> / --unset <field>` | New |
 | `pin rename <id> <new-id>` | Kept, with lockstep for mux slots |
 | `pin retarget <id> <ref>` | New. Replaces `pin rebind` |

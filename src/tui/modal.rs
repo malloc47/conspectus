@@ -10,8 +10,8 @@
 //!
 //! Every `Modal` variant implements [`Overlay`]. The trait carries
 //! an associated `Ctx<'a>` type so overlays that need live App
-//! state (Controls read view/grouping/filter/sort; Pins read a
-//! `PinsContext`; Search reads the current row items) can declare
+//! state (Controls read view/grouping/filter/sort; Search reads the
+//! current row items) can declare
 //! it in one place instead of via a specialized runtime handler.
 //! Context-free overlays (Help / ValueModal / Viewer / Rename) set
 //! `type Ctx<'a> = ()`. The runtime's stack dispatcher matches per
@@ -105,8 +105,7 @@ pub enum OverlayOutcome {
     /// Overlay committed a value but wants to stay open. The
     /// runtime dispatches the [`Msg`] and leaves the overlay on
     /// the stack. Used by Controls (`ApplyAndStay`, e.g. toggling
-    /// a filter chip without closing the overlay) and Pins
-    /// (`ApplyAndStay`, e.g. arming a Delete confirmation).
+    /// a filter chip without closing the overlay).
     CommitAndStay(Box<Msg>),
     /// Operator asked to close (Esc / Ctrl-C / dedicated key).
     /// The runtime pops the overlay; no follow-up dispatch.
@@ -123,14 +122,14 @@ pub enum OverlayOutcome {
 /// The `Ctx<'a>` associated type carries any live App state the
 /// widget needs to see on every event. Widgets that need no
 /// context set `type Ctx<'a> = ()`; widgets that need borrowed
-/// App data (Controls, Pins, Search) declare a lifetime-carrying
+/// App data (Controls, Search) declare a lifetime-carrying
 /// context type and the dispatcher builds a fresh borrow per
 /// event.
 pub trait Overlay {
     /// Live App context the widget consumes on every event. `()`
     /// for context-free widgets (Help, ValueModal, Viewer,
     /// Rename); a lifetime-parameterized reference type for
-    /// Controls / Pins / Search.
+    /// Controls / Search.
     type Ctx<'a>;
 
     /// Handle one key event against fresh `ctx`.

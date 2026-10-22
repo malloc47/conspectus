@@ -3,6 +3,9 @@
 ## Status
 
 Accepted. Follows up ADR 0133 (launches attach before they refresh).
+Amended by ADR 0141 and ADR 0142: `conspectus rebuild` replaces `pin
+launch` and `pin attach`; `rebuild` and the `pin` commands both still skip
+forge discovery.
 
 ## Context
 

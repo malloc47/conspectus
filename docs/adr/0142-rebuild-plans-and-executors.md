@@ -2,7 +2,7 @@
 
 ## Status
 
-Accepted. Supersedes ADR 0094 (worktree-backed pins realized at
+Accepted. Amended: `rebuild --pinned` is planned, not shipped (backlog `CSP-686`); the retired `pin` verbs go with the release that ships this plan (see ADR 0141). Supersedes ADR 0094 (worktree-backed pins realized at
 launch). Amends ADR 0093 (a torn-down mux leaves a ghost), ADR 0095
 and ADR 0096 (adopting the result as a pin gives way to `--pin`), and
 ADR 0098 (the splice applies to any effective argv). The worktree
@@ -52,7 +52,7 @@ step leaves something the operator can see and remove.
 
 ```
 conspectus rebuild <ref> [--dry-run] [--no-attach] [--session <id>]
-conspectus rebuild --pinned [--dry-run]
+conspectus rebuild --pinned [--dry-run]   # planned (CSP-686); not yet available
 ```
 
 `<ref>` is a slot id, a history record id (`h_…`), or a node reference
@@ -152,8 +152,9 @@ removed (ADR 0140), so closing a stream doesn't leave its ghosts.
 ## Consequences
 
 - Any recorded mux, worktree, or repo can be rebuilt without a pin.
-  After a reboot, every mux is a ghost and `rebuild --pinned` restores
-  the pinned ones in one gesture.
+  After a reboot, every mux is a ghost; each pinned one rebuilds by name
+  today, and `rebuild --pinned` (planned, `CSP-686`) will restore them in
+  one gesture.
 - The operator always sees what a rebuild will run before it runs.
 - Launch behavior carries over from `pin launch`: resume splicing,
   failed-resume fallback, the agent-exited path, and never typing into
@@ -175,7 +176,7 @@ removed (ADR 0140), so closing a stream doesn't leave its ghosts.
   Honors the location exactly, but it is a git mutation outside
   worktrunk, which the envelope keeps out (ADR 0092, ADR 0143). The
   location investigation may revisit this.
-- **Keep `pin launch` as an alias.** The 0.2.0 version bump breaks the
+- **Keep `pin launch` as an alias.** The release that ships this plan (0.2.0, after 0.1.0) breaks the
   `pin` CLI on purpose (ADR 0141); an alias would keep a verb whose
   meaning changed.
 

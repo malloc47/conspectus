@@ -380,3 +380,53 @@ fn the_dry_run_text_names_each_pin_and_its_file() {
     assert!(rendered.contains("sess-1"), "{rendered}");
     assert!(rendered.contains(&path.display().to_string()), "{rendered}");
 }
+
+#[test]
+fn a_run_interrupted_before_removal_is_finished_by_the_next_one() {
+    let w = world();
+    let text = config_text(&[entry("a", "a", "a"), entry("b", "b", "b")]);
+    let path = w.config(".conspectus.toml", &text);
+    run(
+        &plan(&empty_snapshot(), w.entries(&path), &[], &w.sidecars),
+        &w.targets(),
+    );
+    // The removal never happened: the entries are back.
+    fs::write(&path, &text).unwrap();
+    let snapshot = GraphSnapshot {
+        history: w.history.store.load().history,
+        ..GraphSnapshot::empty()
+    };
+    let existing = w.slots.load().slots;
+
+    let again = plan(&snapshot, w.entries(&path), &existing, &w.sidecars);
+    assert!(again.skipped.is_empty(), "{:?}", again.skipped);
+    assert!(again.items.iter().all(|item| item.already_migrated));
+    assert!(again.render().contains("already migrated"));
+    let report = run(&again, &w.targets());
+
+    assert_eq!(report.removed_entries, 2);
+    assert_eq!(w.slots.load().slots.len(), 2, "no duplicate slots");
+    assert_eq!(w.history.store.load().history.muxes.len(), 2);
+    assert!(!fs::read_to_string(&path).unwrap().contains("[pins"));
+}
+
+#[test]
+fn a_same_named_slot_that_is_not_ours_still_blocks() {
+    let w = world();
+    let path = w.config(".conspectus.toml", &config_text(&[entry("a", "a", "a")]));
+    let existing = vec![PinSlot {
+        id: "a".into(),
+        kind: PinKind::Mux,
+        target: Some("history:h_other".into()),
+        pinned_at: None,
+        overrides: SlotFields::new(),
+        snapshot: SlotFields::new(),
+        order: 0,
+        legacy: false,
+    }];
+
+    let plan = plan(&empty_snapshot(), w.entries(&path), &existing, &w.sidecars);
+
+    assert_eq!(plan.skipped.len(), 1);
+    assert!(plan.items.is_empty());
+}

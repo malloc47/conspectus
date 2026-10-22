@@ -460,3 +460,389 @@ fn renaming_a_live_mux_slot_renames_the_tmux_session_with_it() {
         "{text}"
     );
 }
+
+fn planned(world: &World, names: &[&str]) {
+    for name in names {
+        world.ok(&["pin", "add", "--planned", "--kind", "mux", "--name", name]);
+    }
+}
+
+fn order(world: &World) -> Vec<String> {
+    world
+        .ok(&["pin", "list"])
+        .lines()
+        .filter_map(|line| line.split_whitespace().next())
+        .map(str::to_string)
+        .collect()
+}
+
+#[test]
+fn pin_move_reorders_relative_to_a_slot_or_one_step() {
+    let world = World::new();
+    planned(&world, &["a", "b", "c"]);
+
+    world.ok(&["pin", "move", "c", "--before", "a"]);
+    assert_eq!(order(&world), ["c", "a", "b"]);
+    world.ok(&["pin", "move", "c", "--after", "b"]);
+    assert_eq!(order(&world), ["a", "b", "c"]);
+    world.ok(&["pin", "move", "c", "--up"]);
+    assert_eq!(order(&world), ["a", "c", "b"]);
+    world.ok(&["pin", "move", "a", "--down"]);
+    assert_eq!(order(&world), ["c", "a", "b"]);
+    // At the edge a step changes nothing.
+    let out = world.ok(&["pin", "move", "c", "--up"]);
+    assert!(out.contains("unchanged"), "{out}");
+    assert_eq!(order(&world), ["c", "a", "b"]);
+
+    let stderr = world.fails(&["pin", "move", "a", "--before", "nope"]);
+    assert!(stderr.contains("nope"), "{stderr}");
+    let stderr = world.fails(&["pin", "move", "a", "--before", "a"]);
+    assert!(!stderr.is_empty());
+    assert_eq!(
+        order(&world),
+        ["c", "a", "b"],
+        "failed moves change nothing"
+    );
+    let stderr = world.fails(&["pin", "move", "a"]);
+    assert!(stderr.contains("--top"), "{stderr}");
+}
+
+#[test]
+fn history_list_filters_by_kind_and_says_when_empty() {
+    let world = World::new();
+    let out = world.ok(&["history", "list", "--kind", "pr"]);
+    assert!(out.contains("no history records"), "{out}");
+    world.ok(&["graph", "--format", "json"]);
+    let out = world.ok(&["history", "list", "--kind", "pr"]);
+    assert!(out.contains("no history records"), "{out}");
+    let out = world.ok(&["history", "list", "--kind", "repo"]);
+    assert!(out.contains("repo"), "{out}");
+}
+
+#[test]
+fn history_reap_rejects_a_bad_age_and_never_takes_repos_by_default() {
+    let world = World::new();
+    world.ok(&["graph", "--format", "json"]);
+    let stderr = world.fails(&["history", "reap", "--older-than", "5x"]);
+    assert!(stderr.contains("unknown unit"), "{stderr}");
+    let out = world.ok(&["history", "reap", "--kind", "repo", "--dry-run"]);
+    assert!(out.contains("nothing to reap"), "{out}");
+}
+
+#[test]
+fn a_gone_mux_cannot_be_renamed() {
+    if !tmux_available() {
+        eprintln!("tmux not installed; skipping");
+        return;
+    }
+    let world = World::new();
+    world.start_mux("gone-a");
+    world.ok(&["graph", "--format", "json"]);
+    assert!(world.tmux(&["kill-server"]));
+
+    let stderr = world.fails(&["rename", "mux", "tmux:gone-a", "gone-b"]);
+    assert!(
+        stderr.contains("gone") || stderr.contains("rebuild"),
+        "{stderr}"
+    );
+}
+
+#[test]
+fn rebuild_session_says_when_a_mux_has_no_harness_to_resume_into() {
+    if !tmux_available() {
+        eprintln!("tmux not installed; skipping");
+        return;
+    }
+    let world = World::new();
+    world.start_mux("sess-a");
+    world.ok(&["pin", "add", "sess-a"]);
+    assert!(world.tmux(&["kill-server"]));
+
+    let plan = world.ok(&[
+        "rebuild",
+        "sess-a",
+        "--session",
+        "no-such-session",
+        "--dry-run",
+    ]);
+    assert!(plan.contains("`--session` ignored"), "{plan}");
+}
+
+#[test]
+fn a_planned_slot_that_is_not_a_mux_explains_what_it_needs() {
+    let world = World::new();
+    world.ok(&[
+        "pin",
+        "add",
+        "--planned",
+        "--kind",
+        "session",
+        "--name",
+        "later-session",
+    ]);
+    let stderr = world.fails(&["rebuild", "later-session", "--dry-run"]);
+    assert!(
+        stderr.contains("planned") && stderr.contains("pin retarget later-session"),
+        "{stderr}"
+    );
+    // `worktree` is the user-facing name of a checkout slot.
+    world.ok(&[
+        "pin",
+        "add",
+        "--planned",
+        "--kind",
+        "worktree",
+        "--name",
+        "later-wt",
+    ]);
+    assert!(world.ok(&["pin", "list"]).contains("checkout"));
+    let stderr = world.fails(&["pin", "add", "--planned", "--kind", "bogus", "--name", "x"]);
+    assert!(stderr.contains("checkout (alias worktree)"), "{stderr}");
+}
+
+#[test]
+fn mux_launch_pin_no_launch_refuses_a_taken_slot_name() {
+    let world = World::new();
+    world.ok(&[
+        "pin",
+        "add",
+        "--planned",
+        "--kind",
+        "mux",
+        "--name",
+        "taken",
+    ]);
+    let stderr = world.fails(&[
+        "mux",
+        "launch",
+        "codex",
+        "--name",
+        "other",
+        "--pin",
+        "taken",
+        "--no-launch",
+    ]);
+    assert!(stderr.contains("already exists"), "{stderr}");
+}
+
+#[test]
+fn forgetting_a_pinned_record_needs_force() {
+    let world = World::new();
+    world.ok(&["graph", "--format", "json"]);
+    let list = world.ok(&["history", "list", "--kind", "repo"]);
+    let id = list.split_whitespace().next().unwrap().to_string();
+    world.ok(&["pin", "add", &id, "--name", "the-repo"]);
+
+    let stderr = world.fails(&["history", "forget", &id]);
+    assert!(
+        stderr.contains("the-repo") && stderr.contains("--force"),
+        "{stderr}"
+    );
+    assert!(
+        world
+            .ok(&["history", "list", "--kind", "repo"])
+            .contains(&id)
+    );
+
+    world.ok(&["history", "forget", &id, "--force"]);
+    assert!(
+        !world
+            .ok(&["history", "list", "--kind", "repo"])
+            .contains(&id)
+    );
+}
+
+#[test]
+fn a_user_config_legacy_pin_migrates_and_a_taken_name_is_skipped() {
+    let world = World::new();
+    let user = world.home.join(".config/conspectus/config.toml");
+    std::fs::create_dir_all(user.parent().unwrap()).unwrap();
+    let cwd = world.repo.display().to_string();
+    let entries = ["usr-a", "taken"]
+        .iter()
+        .map(|id| {
+            format!(
+                "[[pins.entries]]\nid = \"{id}\"\ndisplay_name = \"{id}\"\nharness = \"codex\"\ncwd = \"{cwd}\"\n[pins.entries.mux]\nbackend = \"tmux\"\nname = \"{id}\"\n"
+            )
+        })
+        .collect::<String>();
+    std::fs::write(&user, format!("[pins]\nschema_version = 1\n\n{entries}")).unwrap();
+    world.ok(&[
+        "pin",
+        "add",
+        "--planned",
+        "--kind",
+        "mux",
+        "--name",
+        "taken",
+    ]);
+
+    let (success, out, stderr) = world.run(&["pin", "migrate"]);
+
+    assert!(success, "{stderr}");
+    assert!(out.contains("migrated 1 pin(s)"), "{out}");
+    assert!(stderr.contains("pin `taken` skipped"), "{stderr}");
+    let text = world.pins_text();
+    assert!(text.contains("id = \"usr-a\""), "{text}");
+    let config = std::fs::read_to_string(&user).unwrap();
+    assert!(
+        !config.contains("usr-a") && config.contains("taken"),
+        "{config}"
+    );
+}
+
+#[test]
+fn migrate_names_a_legacy_file_it_cannot_parse_and_fails() {
+    let world = World::new();
+    let config = world.repo.join(".conspectus.toml");
+    std::fs::write(
+        &config,
+        "[pins]\nschema_version = 1\n\n[[pins.entries]]\nid = \"bad\"\ndisplay_name = \"bad\"\nharness = \"codex\"\ncwd = \"relative/dir\"\n[pins.entries.mux]\nbackend = \"tmux\"\nname = \"bad\"\n",
+    )
+    .unwrap();
+
+    let stderr = world.fails(&["pin", "migrate"]);
+
+    assert!(stderr.contains(".conspectus.toml"), "{stderr}");
+    assert!(stderr.contains("must be an absolute path"), "{stderr}");
+    assert!(stderr.contains("couldn't be read"), "{stderr}");
+    assert!(
+        std::fs::read_to_string(&config).unwrap().contains("bad"),
+        "left in place"
+    );
+}
+
+#[test]
+fn an_unusable_pins_file_is_reported_not_hidden() {
+    let world = World::new();
+    std::fs::create_dir_all(world.pins_file().parent().unwrap()).unwrap();
+    std::fs::write(world.pins_file(), "[pins]\nschema_version = 3\n").unwrap();
+
+    let (success, out, stderr) = world.run(&["pin", "list"]);
+
+    assert!(success, "{stderr}");
+    assert!(out.contains("no pin slots"), "{out}");
+    assert!(stderr.contains("schema_version is 3, not 2"), "{stderr}");
+    assert!(!stderr.contains("Some("), "{stderr}");
+    let stderr = world.fails(&["pin", "add", "--planned", "--kind", "mux", "--name", "x"]);
+    assert!(stderr.contains("schema_version"), "{stderr}");
+    std::fs::write(world.pins_file(), "[pins\nbroken").unwrap();
+    let stderr = world.fails(&["pin", "add", "--planned", "--kind", "mux", "--name", "x"]);
+    assert!(
+        stderr.contains("malformed") || stderr.contains("TOML"),
+        "{stderr}"
+    );
+}
+
+#[test]
+fn the_store_files_are_private() {
+    use std::os::unix::fs::MetadataExt;
+    let world = World::new();
+    world.ok(&["pin", "add", "--planned", "--kind", "mux", "--name", "p"]);
+    world.ok(&["graph", "--format", "json"]);
+
+    let mode = |path: &std::path::Path| std::fs::metadata(path).unwrap().mode() & 0o777;
+    assert_eq!(mode(&world.pins_file()), 0o600);
+    assert_eq!(mode(world.pins_file().parent().unwrap()), 0o700);
+    let history = world.home.join(".local/state/conspectus/history");
+    assert_eq!(mode(&history), 0o700);
+    assert_eq!(mode(&history.join("repos.json")), 0o600);
+}
+
+#[test]
+fn legacy_slots_get_the_migrate_hint_from_every_verb() {
+    let world = World::new();
+    let config = world.repo.join(".conspectus.toml");
+    let cwd = world.repo.display().to_string();
+    std::fs::write(
+        &config,
+        format!("[pins]\nschema_version = 1\n\n[[pins.entries]]\nid = \"old\"\ndisplay_name = \"old\"\nharness = \"codex\"\ncwd = \"{cwd}\"\n[pins.entries.mux]\nbackend = \"tmux\"\nname = \"old\"\n"),
+    )
+    .unwrap();
+    for args in [
+        &["pin", "rm", "old"][..],
+        &["pin", "rename", "old", "new"],
+        &["pin", "move", "old", "--top"],
+        &["pin", "add", "old"],
+        &["rebuild", "old", "--dry-run"],
+    ] {
+        let stderr = world.fails(args);
+        assert!(stderr.contains("pin migrate"), "{args:?}: {stderr}");
+    }
+}
+
+#[test]
+fn worktree_close_forgets_unpinned_records_and_keeps_pinned_ones() {
+    if !tmux_available() {
+        eprintln!("tmux not installed; skipping");
+        return;
+    }
+    let world = World::new();
+    let wt = world.repo.parent().unwrap().join("app-feat");
+    assert!(
+        StdCommand::new("git")
+            .args(["worktree", "add", "--quiet", "-b", "feat"])
+            .arg(&wt)
+            .current_dir(&world.repo)
+            .status()
+            .unwrap()
+            .success()
+    );
+    // A stand-in for worktrunk that removes the worktree with git.
+    let bin = world.home.join("bin");
+    std::fs::create_dir_all(&bin).unwrap();
+    let stub = bin.join("wt");
+    std::fs::write(
+        &stub,
+        "#!/bin/sh\nrepo=$2\nfor a; do branch=$a; done\npath=$(git -C \"$repo\" worktree list --porcelain | awk -v b=\"refs/heads/$branch\" '/^worktree /{p=$2} $0==\"branch \" b {print p}')\nexec git -C \"$repo\" worktree remove --force \"$path\"\n",
+    )
+    .unwrap();
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&stub, std::fs::Permissions::from_mode(0o755)).unwrap();
+    }
+    let path = format!(
+        "{}:{}",
+        bin.display(),
+        std::env::var("PATH").unwrap_or_default()
+    );
+    let wt_s = wt.display().to_string();
+    for name in ["keep-me", "drop-me"] {
+        assert!(world.tmux(&["new-session", "-d", "-s", name, "-c", &wt_s, "sleep", "600"]));
+    }
+    world.ok(&["graph", "--format", "json"]);
+    world.ok(&["pin", "add", "keep-me"]);
+
+    let output = world
+        .conspectus()
+        .env("PATH", path)
+        .args([
+            "worktree",
+            "close",
+            "feat",
+            "--discard",
+            "-y",
+            "--grace",
+            "0s",
+            "--repo",
+        ])
+        .arg(&world.repo)
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let list = world.ok(&["history", "list", "--kind", "mux"]);
+    assert!(
+        list.contains("keep-me") && !list.contains("drop-me"),
+        "{list}"
+    );
+    let show = world.ok(&["pin", "show", "keep-me"]);
+    assert!(
+        !show.contains("missing"),
+        "the slot still has its record: {show}"
+    );
+}

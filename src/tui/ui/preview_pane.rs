@@ -94,7 +94,7 @@ pub(super) fn preview_text_for_selection(app: &App, width: u16, height: usize) -
 /// Source the preview body from whatever the selection points at
 /// (ADR 0112), led by the failure banner when the row's last operation
 /// failed (ADR 0105). See [`preview_source`] for which source each row
-/// shows; rows without one show pin diagnostics or a placeholder.
+/// shows; rows without one show their fields or a placeholder.
 pub(super) fn preview_view_for_selection(app: &App, width: u16, height: usize) -> PreviewView {
     match latest_failure_for_selection(app) {
         Some(entry) => {
@@ -257,7 +257,7 @@ fn sourceless_preview(
         app.snapshot_handle()
             .and_then(|handle| render_pin_summary(handle.snapshot(), pin_id))
             .map_or_else(
-                || Text::raw("pin unavailable — try `r` to refresh"),
+                || Text::raw("pin slot unavailable — try `r` to refresh"),
                 Text::raw,
             )
     };

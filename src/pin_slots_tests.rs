@@ -305,3 +305,43 @@ fn concurrent_gestures_do_not_lose_each_other() {
     assert!(load.problems.is_empty(), "{:?}", load.problems);
     assert_eq!(load.slots.len(), 30);
 }
+
+#[test]
+fn an_io_error_names_the_file() {
+    let dir = tempfile::tempdir().unwrap();
+    let blocker = dir.path().join("not-a-dir");
+    std::fs::write(&blocker, "").unwrap();
+    let store = SlotStore::at(blocker.join("pins.toml"));
+
+    let err = store
+        .add(PinSlot {
+            id: "a".into(),
+            kind: PinKind::Mux,
+            target: None,
+            pinned_at: None,
+            overrides: Default::default(),
+            snapshot: Default::default(),
+            order: 0,
+            legacy: false,
+        })
+        .unwrap_err();
+
+    assert!(
+        err.to_string().contains("pins.toml") || err.to_string().contains("not-a-dir"),
+        "{err}"
+    );
+}
+
+#[test]
+fn a_malformed_file_is_reported_as_malformed_not_as_schema_zero() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("pins.toml");
+    std::fs::write(&path, "[pins\nbroken").unwrap();
+    let store = SlotStore::at(&path);
+
+    let err = store.remove("x").unwrap_err().to_string();
+
+    assert!(err.contains("malformed") || err.contains("TOML"), "{err}");
+    assert!(!err.contains("schema_version 0"), "{err}");
+    assert_eq!(std::fs::read_to_string(&path).unwrap(), "[pins\nbroken");
+}

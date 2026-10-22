@@ -156,7 +156,7 @@ impersonation, not a backend.
   `AttachDisabled::UnsupportedBackend` with the operator-facing message
   "only tmux" (:442); the CLI builds `tmux [-L sock] attach-session -t`
   argv strings and exec-replaces (`cli.rs`, `format_attach_command`).
-- **Pins (ADR 0057/0058):** `PinMux.backend` is validated to literal
+- **Pins (ADR 0057/0058, superseded by ADR 0141):** `PinMux.backend` is validated to literal
   `"tmux"` (`src/pins.rs:260, 326`); `socket_name` is tmux-specific schema;
   pin launch/relaunch call `TmuxRunner::new_session` / `send_keys`
   (`cli.rs:5063-5105`); `resolve/pins.rs` reconstructs `tmux:<socket>:<name>`

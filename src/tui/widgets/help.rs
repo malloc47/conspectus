@@ -236,7 +236,7 @@ fn keymap_sections() -> Vec<HelpSection> {
             bindings: vec![
                 Binding::new(
                     "Enter",
-                    "Default action on the selected row: attach mux/muxed sessions, view un-muxed sessions, expand groups",
+                    "Default action on the selected row: attach mux/muxed sessions, view un-muxed sessions, rebuild a gone mux, pin slot, or history record, expand groups",
                 ),
                 Binding::new("a", "Attach to the selected mux"),
                 Binding::new(
@@ -335,7 +335,7 @@ fn keymap_sections() -> Vec<HelpSection> {
                 Binding::new("g / G", "First / last row"),
                 Binding::new(
                     "Enter",
-                    "Left tree: row-kind default action (attach / view / expand); right pane: drill or expand a group",
+                    "Left tree: row-kind default action (attach / view / rebuild / expand); right pane: drill or expand a group",
                 ),
                 Binding::new("Tab", "Cycle focus between left tree and right panel"),
                 Binding::new("J / K", "Scroll the right-panel preview"),
@@ -485,7 +485,7 @@ fn push_mux_state_legend(lines: &mut Vec<Line<'static>>, theme: &Theme) {
     let bold_warning = Style::default()
         .fg(theme.warning)
         .add_modifier(Modifier::BOLD);
-    let entries: [(&str, Style, &str, &str); 5] = [
+    let entries: [(&str, Style, &str, &str); 4] = [
         (
             "◉",
             Style::default().fg(theme.mux_attached),
@@ -497,12 +497,6 @@ fn push_mux_state_legend(lines: &mut Vec<Line<'static>>, theme: &Theme) {
             Style::default().add_modifier(theme.mux_unmuxed),
             "Not attached",
             "session: no mux, or several candidates · mux: no client",
-        ),
-        (
-            "◌",
-            Style::default().fg(theme.pin_placeholder),
-            "Pin placeholder",
-            "pin slot whose target isn't running",
         ),
         (
             "?",
@@ -555,7 +549,9 @@ fn node_kind_help_blurb(kind: NodeKind) -> &'static str {
         NodeKind::Checkout => "working-tree checkout of a repo",
         NodeKind::AgentSession => "harness session (claude, codex, opencode, …)",
         NodeKind::MuxSession => "tmux / mux backend session",
-        NodeKind::Pin => "declared pinned session intent",
+        NodeKind::Pin => {
+            "pin slot: a named place pointing at a mux, session, checkout, repo, or PR"
+        }
         NodeKind::RuntimeProcess => "live process attached to a mux pane",
         NodeKind::Branch => "git branch reference",
         NodeKind::Fork => "atelier fork (worktree-backed branch family)",

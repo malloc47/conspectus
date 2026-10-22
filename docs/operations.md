@@ -653,9 +653,9 @@ neither graph nor history, so the slot renders from its snapshot), or
 
 ```sh
 conspectus pin add <mux name | node id | h_...> [--name NAME] [--set FIELD=VALUE]...
-conspectus pin add --planned --kind mux --name NAME [--set FIELD=VALUE]...
+conspectus pin add --planned --kind KIND --name NAME [--set FIELD=VALUE]...
 conspectus pin edit <name> [--set FIELD=VALUE]... [--unset FIELD]...
-conspectus pin rename <name> <new-name>
+conspectus pin rename <name> <new-name> [--no-mux]
 conspectus pin retarget <name> <target>     # same kind only
 conspectus pin refresh <name>               # copy the current recipe into the snapshot
 conspectus pin move <name> {--top|--bottom|--before N|--after N|--up|--down}
@@ -664,13 +664,20 @@ conspectus pin list
 conspectus pin show <name>
 ```
 
-`FIELD=VALUE` lists (such as `argv`) are split like a shell command
+`KIND` is `mux`, `session`, `checkout` (also spelled `worktree`), `repo`,
+`pr`, `branch`, `workspace`, or `fork`. `pin rename` on a live mux slot also
+renames the tmux session and pins the `name` override; `--no-mux` renames
+the slot alone. `FIELD=VALUE` lists (such as `argv`) are split like a shell command
 line. Pinning a live mux, worktree, or repo first records it in
 history so the slot has a stable record to point at. `rm` removes the
 slot and nothing else. `pin add`, `edit`, `rename`, `retarget`,
 `refresh`, `move`, `rm`, and `migrate` are the only commands that write
 `pins.toml`; the daemon never does, and `graph`, `table`, `node show`,
-`pin list`, and `pin show` leave it alone.
+`pin list`, and `pin show` leave it alone. The store, like the history
+files, is created with mode 0600 (directories 0700), since slots and
+records can hold launch command lines. A relative `$XDG_DATA_HOME` is
+ignored in favor of `$HOME/.local/share`, so slots never land inside a
+project tree.
 
 The `pin create`, `launch`, `attach`, `bind`, `rebind`, and `adopt`
 verbs from the earlier pin model are retired. They still parse, then
@@ -749,7 +756,7 @@ overrides…** (type `field=value`; `field=` clears it), **Rename…** (a live m
 slot renames its tmux session with it and pins the name, as `pin rename`
 does), **Retarget…** (type a node id, a history id, or a mux name of the same
 kind), **Refresh snapshot**, **Reveal in its view** (switches to Sessions, Mux,
-or PRs and selects the entity), and **Unpin** (press `Enter` twice). Each is
+or PRs and selects the entity; a gone entity opens in History), and **Unpin** (press `Enter` twice). Each is
 the same write as the `pin` command of that name. Legacy slots refuse edits
 until they are migrated.
 
@@ -811,8 +818,9 @@ attach and rename refuse with a message that names the fix.
 
 Pins from earlier builds (`[[pins.entries]]` in `.conspectus.toml` or the
 user config) still load as in-memory slots after the real ones, and a
-`LegacyPins` diagnostic points here. Legacy slots are read-only: `pin
-edit`, `retarget`, and `refresh` ask you to migrate first.
+`LegacyPins` diagnostic points here. Legacy slots are read-only: every `pin`
+write gesture (`edit`, `rename`, `retarget`, `refresh`, `move`, `rm`) and
+`rebuild` ask you to migrate first.
 
 ```sh
 conspectus pin migrate --dry-run

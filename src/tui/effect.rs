@@ -86,7 +86,8 @@ pub enum ExecSpec {
     /// `conspectus mux launch <harness> --name <name> …
     /// --no-attach`, refresh so the row tree picks up the new mux
     /// and its attributed harness session, then attach
-    /// (ADR 0096). No pin is written.
+    /// (ADR 0096). A pin slot is written only when the form asked
+    /// for one (`--pin`).
     MuxLaunch { request: MuxLaunchRequest },
     /// Run `conspectus rebuild <reference> --no-attach` behind a
     /// spinner and refresh, so a gone slot comes back without leaving
@@ -183,7 +184,8 @@ pub enum StoreOp {
     /// executor rebuilds the close-down plan from the held snapshot,
     /// terminates the worktree's mux sessions (graceful->hard),
     /// merges (`discard == false`) or removes (`discard == true`) the
-    /// worktree, and drops its pins.
+    /// worktree, and forgets its history records (except ones a pin
+    /// slot targets).
     WorktreeCloseDown {
         repo_root: String,
         branch: String,

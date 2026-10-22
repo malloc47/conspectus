@@ -4,7 +4,7 @@
 //! runtime turns into a subprocess re-exec of
 //! `conspectus mux launch <harness>`. On submit the mux and its
 //! attributed harness session appear in discovery next refresh; the
-//! operator can pin the mux afterwards with `p`.
+//! form can also pin the mux (or only plan a pin slot) in the same step.
 //!
 //! An empty launch argv resolves to the default for the harness
 //! (profile, `atelier exec`, or the harness default, ADR 0142), shown

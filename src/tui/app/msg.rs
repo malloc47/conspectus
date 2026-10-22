@@ -273,7 +273,7 @@ pub enum Msg {
     /// Commit the bare tmux `new-session` form (ADR 0095). Reducer emits `Effect::Exec(ExecSpec::MuxNew)` so
     /// the runtime re-execs into `conspectus mux new` with the same
     /// UX (alt-screen suspend → subprocess → refresh → attach) as
-    /// pin launch.
+    /// `mux launch`.
     CommitMuxNew {
         name: String,
         cwd: String,
@@ -323,7 +323,8 @@ pub enum Msg {
     /// Commit the mux-launch form (ADR 0096).
     /// Reducer emits `Effect::Exec(ExecSpec::MuxLaunch)` so the
     /// runtime re-execs into `conspectus mux launch <harness> …`,
-    /// refreshes discovery, then attaches. No pin write; no sidecar.
+    /// refreshes discovery, then attaches. A pin slot is written only when the form asked for
+    /// one.
     CommitMuxLaunch(crate::tui::widgets::mux_launch::MuxLaunchRequest),
     /// Switch the active row-tree view (ADR 0031). Reducer saves
     /// the current view's per-view slot, loads the target's slot

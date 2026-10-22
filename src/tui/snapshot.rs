@@ -107,7 +107,7 @@ pub fn run(config: RunConfig, snap: SnapshotConfig) -> Result<()> {
     }
 
     if let Some(now) = snap.now {
-        crate::tui::rows::pin_clock(now);
+        crate::tui::rows::freeze_clock(now);
     }
     let mut app = App::new(config.clone());
 

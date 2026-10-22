@@ -386,10 +386,18 @@ pub fn value_source(app: &App, value: &FieldValue) -> Option<PreviewSource> {
 ///   how far it is ahead and behind;
 /// - a runtime process shows its process tree;
 /// - a pull request shows its title, state, checks, reviews, and body;
-/// - a pin shows its bound session's preview, or, with no session but
-///   a live mux, that mux's pane;
+/// - a pin slot shows the preview of what it points at while that is
+///   live;
+/// - a gone node has none, and the renderer shows its fields;
 /// - a fork has none, and the renderer shows its fields.
 pub fn node_source(app: &App, node: &NodeId) -> Option<PreviewSource> {
+    // A gone node has no pane, repository, or directory to read
+    // (ADR 0140); its fields are all the preview has.
+    if let Some(handle) = app.snapshot_handle()
+        && !handle.snapshot().is_live(node)
+    {
+        return None;
+    }
     match node {
         NodeId::AgentSession(session) => {
             let pane = (app.session_preview() == crate::tui::SessionPreview::Pane)
@@ -467,7 +475,7 @@ fn hosts_this_tui(app: &App, mux: &MuxSessionId) -> bool {
 ///
 /// - an agent session row resolves as its node does ([`node_source`]),
 ///   keeping its row's tmux state;
-/// - a mux row, a mux candidate, and a pin placeholder whose mux is
+/// - a mux row, a mux candidate, and a pin slot row whose mux is
 ///   live show the pane;
 /// - any other row resolves as the node the right pane shows for it;
 ///   without a source, the renderer decides what to say.

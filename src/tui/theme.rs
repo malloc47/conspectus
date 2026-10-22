@@ -65,11 +65,9 @@ pub struct Theme {
     pub cwd_mark: Color,
     pub link_id: Color,
     pub placeholder: Modifier,
-    /// Foreground color for the placeholder-pin glyph (`◌`) that
-    /// stands in for the attached-state glyph on unbound-pin rows.
-    /// Default is a bright yellow so the dotted circle reads as a
-    /// distinct affordance against the solid `◉` / `◯` glyphs without
-    /// being mistaken for the dim `mux_unmuxed` state.
+    /// No longer drawn: pin slots have their own view and no
+    /// placeholder rows. The key stays so existing theme files keep
+    /// loading.
     pub pin_placeholder: Color,
     /// Background of the pane-command chip a mux row shows when no
     /// agent is linked (`npm`, `zsh`, …). One color for every

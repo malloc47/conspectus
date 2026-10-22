@@ -287,8 +287,7 @@ pub(super) fn mux_launch_argv(
 /// Executor branch for `ExecSpec::MuxLaunch`: behind a spinner,
 /// re-exec into `conspectus mux launch …`, then attach. The row tree
 /// picks up the fresh mux and its harness session from the refresh
-/// that runs after the attach returns (ADR 0133). Mirrors [`execute_launch_pin`] and
-/// [`execute_mux_new`] but with the mux-launch argv shape.
+/// that runs after the attach returns (ADR 0133). Mirrors [`execute_mux_new`] but with the mux-launch argv shape.
 pub(super) fn execute_mux_launch(
     terminal: &mut DefaultTerminal,
     app: &mut App,

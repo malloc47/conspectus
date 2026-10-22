@@ -59,7 +59,7 @@ pub fn build_union_tree(inputs: UnionBuildInputs<'_>) -> RowTree {
     let candidate_counts = crate::model::SnapshotIndex::new(snapshot)
         .agent_mux_candidate_counts()
         .clone();
-    let pin_id_by_bound_mux = collect_pin_id_by_bound_mux(snapshot);
+    let slot_by_target_mux = collect_slot_by_target_mux(snapshot);
     let process_harnesses = super::mux_process_harnesses(snapshot);
 
     let full_ids: Vec<String> = rows
@@ -126,7 +126,7 @@ pub fn build_union_tree(inputs: UnionBuildInputs<'_>) -> RowTree {
                             process_harnesses.get(&node_id).map(String::as_str),
                         ),
                         single_session_preview: None,
-                        pin_id: pin_id_by_bound_mux.get(&mux.node.native_id).cloned(),
+                        pin_id: slot_by_target_mux.get(&mux.node.native_id).cloned(),
                         primary_node: node_id,
                     }),
                 });
@@ -226,7 +226,7 @@ fn collect_mux_attached_counts(snapshot: &GraphSnapshot) -> HashMap<String, usiz
 
 /// Slot name by the pinned mux's `native_id`, for the live muxes
 /// slots point at.
-fn collect_pin_id_by_bound_mux(snapshot: &GraphSnapshot) -> HashMap<String, String> {
+fn collect_slot_by_target_mux(snapshot: &GraphSnapshot) -> HashMap<String, String> {
     let mut out: HashMap<String, String> = HashMap::new();
     for pin in super::pin_nodes(snapshot) {
         if let Some(id @ NodeId::MuxSession(_)) = super::live_pin_target(snapshot, pin)
@@ -256,7 +256,7 @@ mod tests {
     }
 
     #[test]
-    fn union_view_paints_pin_id_on_bound_mux_rows() {
+    fn union_view_paints_the_slot_on_its_target_mux_rows() {
         let mut snapshot = GraphSnapshot::empty();
         snapshot.nodes.push(mux("editor"));
         snapshot.nodes.push(mux("scratch"));

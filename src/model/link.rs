@@ -59,6 +59,9 @@ pub enum RelationKind {
     ProcessIdentifiesSession,
     ProcessCandidatesSession,
     /// From a pin slot to what it points at, live or gone (ADR 0141).
+    /// The two relations it replaced still read, so a declared link
+    /// written for them keeps its file loadable.
+    #[serde(alias = "pin_targets_mux", alias = "pin_realized_by_session")]
     PinTargets,
     /// From a gone mux to the session it hosted last (ADR 0140).
     MuxLastHosted,
@@ -126,7 +129,7 @@ impl RelationKind {
             "mux_contains_process" => Ok(Self::MuxContainsProcess),
             "process_identifies_session" => Ok(Self::ProcessIdentifiesSession),
             "process_candidates_session" => Ok(Self::ProcessCandidatesSession),
-            "pin_targets" => Ok(Self::PinTargets),
+            "pin_targets" | "pin_targets_mux" | "pin_realized_by_session" => Ok(Self::PinTargets),
             "mux_last_hosted" => Ok(Self::MuxLastHosted),
             "rebuilt_from" => Ok(Self::RebuiltFrom),
             _ => Err(format!(

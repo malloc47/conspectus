@@ -875,3 +875,25 @@ fn a_profile_wrapper_takes_the_resume_after_the_binary() {
         plan.steps[0].command
     );
 }
+
+#[test]
+fn a_session_flag_on_a_mux_without_a_harness_is_called_out() {
+    let cwd = tempfile::tempdir().unwrap();
+    let cwd = cwd.path().to_str().unwrap().to_string();
+    let snapshot = gone_world(record(&cwd, &["sleep", "600"], &[]), &[]);
+    let harness = Harness::new(FakeTmux::with_sessions(""));
+    let options = Options {
+        session: Some("abc".into()),
+        ..Options::default()
+    };
+
+    let plan = harness
+        .plan(&snapshot, &subject(&snapshot), &options)
+        .unwrap();
+
+    assert!(
+        plan.render().contains("`--session` ignored"),
+        "{}",
+        plan.render()
+    );
+}

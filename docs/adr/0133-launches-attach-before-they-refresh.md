@@ -3,7 +3,9 @@
 ## Status
 
 Accepted. Amends ADR 0103 (item 2, the watch after a fresh launch) and
-ADR 0127 (item 6, the refresh that ran before the attach).
+ADR 0127 (item 6, the refresh that ran before the attach). Amended by ADR 0142:
+`pin launch` is retired and `conspectus rebuild` takes its place wherever
+this ADR says "pin launch"; the attach and no-watch rules carry over.
 
 ## Context
 

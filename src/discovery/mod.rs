@@ -1196,7 +1196,7 @@ impl LocalDiscoveryConfig {
     /// Push a mux backend onto the registry (ADR 0089).
     /// Backends can be added in any order; discovery iterates them
     /// in registration order and picks the first one whose
-    /// [`tmux::MuxBackend::backend_key`] matches a pin or session's
+    /// [`tmux::MuxBackend::backend_key`] matches a mux session's
     /// `backend` field.
     pub fn with_mux_backend(mut self, backend: impl tmux::MuxBackend + 'static) -> Self {
         self.mux_backends.push(Box::new(backend));
@@ -1220,7 +1220,7 @@ impl LocalDiscoveryConfig {
 
     /// Find the first registered backend whose `backend_key()`
     /// matches `key`. Used by CLI + TUI dispatch to
-    /// resolve a pin's / mux session's `backend` field to a
+    /// resolve a mux session's `backend` field to a
     /// concrete runner.
     pub fn mux_backend_by_key(&self, key: &str) -> Option<&dyn tmux::MuxBackend> {
         self.mux_backends
@@ -1414,8 +1414,8 @@ pub fn merge_fragments(fragments: impl IntoIterator<Item = GraphFragment>) -> Gr
 /// semantics the warm-start path wants. `resolved_relationships`,
 /// `pins`, and `aliases` from the prior snapshot are intentionally
 /// dropped: the resolver re-runs on the merged candidate set, and
-/// pins / aliases reload from their on-disk configs alongside the
-/// fresh discovery pass. Per-provider freshness is handled before
+/// pin slots / aliases reload from disk alongside the fresh
+/// discovery pass. Per-provider freshness is handled before
 /// this merge: [`discover_local_warm_with`] evicts stale slices from
 /// `prior` first.
 pub fn merge_with_prior(fresh: GraphSnapshot, prior: GraphSnapshot) -> GraphSnapshot {

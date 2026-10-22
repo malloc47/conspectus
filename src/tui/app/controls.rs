@@ -1,4 +1,4 @@
-//! Pin slot helpers on [`App`].
+//! The Controls overlay's view of [`App`].
 
 use super::*;
 

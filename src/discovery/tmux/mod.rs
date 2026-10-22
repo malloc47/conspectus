@@ -29,16 +29,15 @@ pub mod teardown;
 pub const TMUX_BACKEND: &str = crate::discovery::providers::TMUX;
 
 /// Compile-time list of mux backend keys this build supports.
-/// Pin parsing and attach-target resolution
+/// Slot validation and attach-target resolution
 /// consult this instead of comparing to the literal `"tmux"`
 /// string so a new backend is one array entry away. Runtime capability checks (does this backend
 /// *actually* support attach / rename / etc.) come from the
 /// [`MuxBackend`] impl's outcome returns.
 pub const KNOWN_MUX_BACKENDS: &[&str] = &[
     TMUX_BACKEND,
-    // Zellij backend. Added here so pin validation
-    // and attach dispatch accept `mux.backend = "zellij"`
-    // without touching `pins.rs` / `tui/actions.rs`.
+    // Zellij backend. Added here so slot validation and attach
+    // dispatch accept it without touching their own code.
     crate::discovery::providers::ZELLIJ,
 ];
 
@@ -56,8 +55,8 @@ pub const TMUX_LIST_FORMAT: &str = "#{session_name}\t#{session_path}\t#{session_
 /// gate on the outcome instead of naming a specific
 /// backend.
 ///
-/// `backend_key` is the string every consumer keys off. Pin
-/// entries carry `mux.backend = "<backend_key>"` per ADR 0057;
+/// `backend_key` is the string every consumer keys off. History
+/// records carry it as their `backend` (ADR 0140);
 /// discovery stamps `MuxSessionNode.backend` with the same
 /// string. Two backends must never share a key.
 ///
@@ -66,8 +65,8 @@ pub const TMUX_LIST_FORMAT: &str = "#{session_name}\t#{session_path}\t#{session_
 /// (`Sessions`, `NoTarget`, `NameCollision`, `Unavailable`,
 /// `Failed`, `Unsupported`) are backend-neutral.
 pub trait MuxBackend: Send + Sync {
-    /// Backend identity. Stamped on pin entries
-    /// (`mux.backend`) and `MuxSessionNode.backend`. Every
+    /// Backend identity. Stamped on history records
+    /// and `MuxSessionNode.backend`. Every
     /// implementor returns a `&'static` literal.
     fn backend_key(&self) -> &'static str;
 
@@ -469,7 +468,7 @@ impl SystemTmux {
 }
 
 /// Collapse `None` and `Some("default")` to `None` so the caller's
-/// `pin.mux.socket_name` slot maps directly to the `-L` switch
+/// socket name maps directly to the `-L` switch
 /// without sentinel handling everywhere.
 fn effective_socket(socket_name: Option<&str>) -> Option<&str> {
     match socket_name {
@@ -927,7 +926,10 @@ fn display_message_value(binary: &Path, format: &str) -> Option<String> {
 
 fn looks_like_no_server(stderr: &str) -> bool {
     let lower = stderr.to_ascii_lowercase();
-    lower.contains("no server running") || lower.contains("no sessions")
+    lower.contains("no server running")
+        || lower.contains("no sessions")
+        // The socket directory is gone, as after /tmp is cleaned.
+        || (lower.contains("error connecting to") && lower.contains("no such file or directory"))
 }
 
 /// Parse `#{pane_dead} #{pane_dead_status}` output.

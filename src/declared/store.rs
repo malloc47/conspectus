@@ -209,7 +209,63 @@ fn replace_declared_section(
     Ok(())
 }
 
+/// Create `dir` and any missing parents, with mode 0700 on unix.
+pub(crate) fn create_private_dir_all(dir: &Path) -> io::Result<()> {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::DirBuilderExt;
+        fs::DirBuilder::new()
+            .recursive(true)
+            .mode(0o700)
+            .create(dir)
+    }
+    #[cfg(not(unix))]
+    {
+        fs::create_dir_all(dir)
+    }
+}
+
+/// Open (creating if needed) the lock file at `path`, mode 0600 on unix.
+pub(crate) fn open_private_lock(path: &Path) -> io::Result<fs::File> {
+    let mut options = fs::OpenOptions::new();
+    options.read(true).write(true).create(true).truncate(false);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.mode(0o600);
+    }
+    options.open(path)
+}
+
+/// Write `text` to `path` through a sibling temporary file renamed into
+/// place. A symlinked `path` is written through to its target, an
+/// existing file keeps its mode, and a read-only file is refused.
 pub(crate) fn write_atomic(path: &Path, text: &str) -> io::Result<()> {
+    write_atomic_with_mode(path, text, None)
+}
+
+/// [`write_atomic`] for files that hold command lines or other private
+/// data: a file that doesn't exist yet gets `new_mode` (unix only).
+pub(crate) fn write_private_atomic(path: &Path, text: &str) -> io::Result<()> {
+    write_atomic_with_mode(path, text, Some(0o600))
+}
+
+fn write_atomic_with_mode(path: &Path, text: &str, new_mode: Option<u32>) -> io::Result<()> {
+    // Resolve a symlink so the link survives and its target is updated.
+    let resolved = match fs::canonicalize(path) {
+        Ok(real) => real,
+        Err(_) => path.to_path_buf(),
+    };
+    let path = resolved.as_path();
+    let existing = fs::metadata(path).ok();
+    if let Some(meta) = &existing
+        && meta.permissions().readonly()
+    {
+        return Err(io::Error::new(
+            io::ErrorKind::PermissionDenied,
+            format!("{} is read-only", path.display()),
+        ));
+    }
     let parent = path.parent().unwrap_or_else(|| Path::new("."));
     fs::create_dir_all(parent)?;
     let file_name = path
@@ -219,15 +275,28 @@ pub(crate) fn write_atomic(path: &Path, text: &str) -> io::Result<()> {
 
     for attempt in 0..100 {
         let temp_path = parent.join(format!(".{file_name}.tmp-{}-{attempt}", std::process::id()));
-        let mut file = match fs::OpenOptions::new()
-            .write(true)
-            .create_new(true)
-            .open(&temp_path)
+        let mut options = fs::OpenOptions::new();
+        options.write(true).create_new(true);
+        #[cfg(unix)]
         {
+            use std::os::unix::fs::{MetadataExt, OpenOptionsExt};
+            if let Some(meta) = &existing {
+                options.mode(meta.mode() & 0o7777);
+            } else if let Some(mode) = new_mode {
+                options.mode(mode);
+            }
+        }
+        let mut file = match options.open(&temp_path) {
             Ok(file) => file,
             Err(err) if err.kind() == io::ErrorKind::AlreadyExists => continue,
             Err(err) => return Err(err),
         };
+        #[cfg(unix)]
+        if let Some(meta) = &existing {
+            // The open mode is masked by the umask; restore the original.
+            use std::os::unix::fs::{MetadataExt, PermissionsExt};
+            let _ = file.set_permissions(fs::Permissions::from_mode(meta.mode() & 0o7777));
+        }
         if let Err(err) = file
             .write_all(text.as_bytes())
             .and_then(|()| file.sync_all())

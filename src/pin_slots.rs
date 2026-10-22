@@ -31,7 +31,7 @@ use std::path::{Path, PathBuf};
 use serde::Deserialize;
 use toml_edit::{Array, ArrayOfTables, DocumentMut, Item, Table, Value};
 
-use crate::declared::write_atomic;
+use crate::declared::{create_private_dir_all, open_private_lock, write_private_atomic};
 use crate::model::{FieldValue, PinKind, PinSlot, SlotFields};
 
 /// Schema version of the `[pins]` table this binary reads and writes.
@@ -160,6 +160,14 @@ impl SlotStore {
 
     pub fn path(&self) -> &Path {
         &self.path
+    }
+
+    /// An I/O error that names the file it concerns.
+    fn io_error(&self, err: io::Error) -> SlotError {
+        SlotError::Io(io::Error::new(
+            err.kind(),
+            format!("{}: {err}", self.path.display()),
+        ))
     }
 
     /// Read the slots. A missing file is no slots.
@@ -336,23 +344,22 @@ impl SlotStore {
         change: impl FnOnce(&mut DocumentMut, &SlotLoad) -> Result<bool, SlotError>,
     ) -> Result<SlotWrite, SlotError> {
         if let Some(dir) = self.path.parent() {
-            fs::create_dir_all(dir)?;
+            create_private_dir_all(dir).map_err(|err| self.io_error(err))?;
         }
-        let lock = fs::OpenOptions::new()
-            .read(true)
-            .write(true)
-            .create(true)
-            .truncate(false)
-            .open(self.path.with_extension("toml.lock"))?;
-        lock.lock()?;
+        let lock = open_private_lock(&self.path.with_extension("toml.lock"))
+            .map_err(|err| self.io_error(err))?;
+        lock.lock().map_err(|err| self.io_error(err))?;
 
         let text = match fs::read_to_string(&self.path) {
             Ok(text) => text,
             Err(err) if err.kind() == io::ErrorKind::NotFound => String::new(),
-            Err(err) => return Err(err.into()),
+            Err(err) => return Err(self.io_error(err)),
         };
         let load = parse_slots(&text, &self.path);
         if load.unsupported {
+            if let Err(err) = toml::from_str::<toml::Table>(&text) {
+                return Err(SlotError::Parse(format!("{}: {err}", self.path.display())));
+            }
             return Err(SlotError::UnsupportedSchema(schema_version_of(&text)));
         }
         let mut doc = text
@@ -362,7 +369,7 @@ impl SlotStore {
         let slot_count = slots_of(&doc).map_or(0, ArrayOfTables::len);
         if changed {
             stamp_schema(&mut doc);
-            write_atomic(&self.path, &doc.to_string())?;
+            write_private_atomic(&self.path, &doc.to_string()).map_err(|err| self.io_error(err))?;
         }
         drop(lock);
         Ok(SlotWrite {
@@ -374,8 +381,10 @@ impl SlotStore {
 }
 
 fn env_path(key: &str) -> Option<PathBuf> {
-    match std::env::var_os(key) {
-        Some(value) if !value.is_empty() => Some(PathBuf::from(value)),
+    // A relative base directory is ignored, as the XDG specification
+    // says, so slots never land in whatever directory the command ran in.
+    match std::env::var_os(key).map(PathBuf::from) {
+        Some(path) if path.is_absolute() => Some(path),
         _ => None,
     }
 }
@@ -407,10 +416,12 @@ pub fn parse_slots(text: &str, path: &Path) -> SlotLoad {
         return load;
     };
     if pins.schema_version != Some(PINS_SCHEMA_VERSION) {
+        let found = pins
+            .schema_version
+            .map_or_else(|| "is missing".to_string(), |v| format!("is {v}"));
         load.problems.push(format!(
-            "{}: [pins] schema_version {:?} is not {PINS_SCHEMA_VERSION}; the file is left alone",
+            "{}: [pins] schema_version {found}, not {PINS_SCHEMA_VERSION}; the file is left alone",
             path.display(),
-            pins.schema_version
         ));
         load.unsupported = true;
         return load;

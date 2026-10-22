@@ -1,14 +1,14 @@
 //! Reading and writing the history files under the advisory lock.
 
 use std::collections::{BTreeMap, BTreeSet};
-use std::fs::{self, OpenOptions};
+use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use serde_json::Value;
 
-use crate::declared::write_atomic;
+use crate::declared::{create_private_dir_all, open_private_lock, write_private_atomic};
 use crate::model::{CheckoutRecord, HistoryKind, HistorySnapshot, MuxRecord, PrRecord, RepoRecord};
 
 use super::merge::{self, MergeOutcome, Observations};
@@ -159,13 +159,8 @@ impl HistoryStore {
     where
         F: FnOnce(&mut HistorySnapshot) -> MergeOutcome,
     {
-        fs::create_dir_all(&self.dir)?;
-        let lock = OpenOptions::new()
-            .read(true)
-            .write(true)
-            .create(true)
-            .truncate(false)
-            .open(self.dir.join("history.lock"))?;
+        create_private_dir_all(&self.dir)?;
+        let lock = open_private_lock(&self.dir.join("history.lock"))?;
         lock.lock()?;
         let result = self.update_locked(change);
         drop(lock);
@@ -189,7 +184,7 @@ impl HistoryStore {
                 HistoryKind::Repo => render(&load.history.repos, extra),
                 HistoryKind::Pr => render(&load.history.prs, extra),
             }?;
-            write_atomic(&self.path(*kind), &text)?;
+            write_private_atomic(&self.path(*kind), &text)?;
         }
         Ok((load, outcome))
     }
@@ -218,7 +213,7 @@ fn render<R: Serialize>(records: &[R], extra: BTreeMap<String, Value>) -> io::Re
 #[cfg(test)]
 pub(crate) fn with_lock<T>(dir: &Path, f: impl FnOnce() -> T) -> io::Result<T> {
     fs::create_dir_all(dir)?;
-    let lock: fs::File = OpenOptions::new()
+    let lock: fs::File = fs::OpenOptions::new()
         .read(true)
         .write(true)
         .create(true)
@@ -229,8 +224,9 @@ pub(crate) fn with_lock<T>(dir: &Path, f: impl FnOnce() -> T) -> io::Result<T> {
 }
 
 fn env_path(key: &str) -> Option<PathBuf> {
-    match std::env::var_os(key) {
-        Some(value) if !value.is_empty() => Some(PathBuf::from(value)),
+    // A relative base directory is ignored, as the XDG specification says.
+    match std::env::var_os(key).map(PathBuf::from) {
+        Some(path) if path.is_absolute() => Some(path),
         _ => None,
     }
 }

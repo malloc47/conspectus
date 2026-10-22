@@ -86,7 +86,7 @@ pub fn plan_close_down(
 
 /// Path of the worktree checking out `branch` (short name).
 fn worktree_path_for_branch(snapshot: &GraphSnapshot, branch: &str) -> Option<String> {
-    for node in &snapshot.nodes {
+    for node in snapshot.live_nodes() {
         let GraphNode::Checkout(checkout) = node else {
             continue;
         };
@@ -173,20 +173,33 @@ pub fn live_mux_teardown_targets(
     targets
 }
 
-/// The history record ids pin slots point at.
+/// The history record ids pin slots point at, by `history:<id>` or by
+/// the key of the node a slot names. Read from the slot list as well as
+/// the pin nodes, since a snapshot that was never resolved has only the
+/// list.
 fn pinned_records(snapshot: &GraphSnapshot) -> BTreeSet<String> {
-    snapshot
-        .nodes
+    let mut targets: BTreeSet<&str> = snapshot
+        .pins
         .iter()
-        .filter_map(|node| match node {
-            GraphNode::Pin(pin) => pin
-                .target
-                .as_deref()?
-                .strip_prefix("history:")
-                .map(str::to_string),
-            _ => None,
-        })
-        .collect()
+        .filter_map(|slot| slot.target.as_deref())
+        .collect();
+    targets.extend(snapshot.nodes.iter().filter_map(|node| match node {
+        GraphNode::Pin(pin) => pin.target.as_deref(),
+        _ => None,
+    }));
+    let mut records: BTreeSet<String> = targets
+        .iter()
+        .filter_map(|target| target.strip_prefix(crate::model::PinSlot::HISTORY_PREFIX))
+        .map(str::to_string)
+        .collect();
+    records.extend(
+        snapshot
+            .history
+            .metas()
+            .filter(|(_, meta)| targets.contains(meta.key.as_str()))
+            .map(|(_, meta)| meta.id.clone()),
+    );
+    records
 }
 
 /// Outcome of a close-down run — enough for a caller to render a

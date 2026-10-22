@@ -56,8 +56,25 @@ impl PinKind {
         }
     }
 
+    /// The kind named `text`; `worktree` is the user-facing name of
+    /// a checkout slot.
     pub fn parse(text: &str) -> Option<Self> {
+        if text == "worktree" {
+            return Some(PinKind::Checkout);
+        }
         Self::ALL.into_iter().find(|kind| kind.as_str() == text)
+    }
+
+    /// Every kind's name for help and error text, with the alias.
+    pub fn names() -> String {
+        Self::ALL
+            .iter()
+            .map(|kind| match kind {
+                PinKind::Checkout => "checkout (alias worktree)",
+                other => other.as_str(),
+            })
+            .collect::<Vec<_>>()
+            .join(", ")
     }
 
     /// The slot kind for a node, or `None` for kinds that can't be

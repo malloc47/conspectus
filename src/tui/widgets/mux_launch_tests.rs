@@ -176,3 +176,37 @@ fn the_pin_field_cycles_and_rides_the_request() {
     state.handle((), key(KeyCode::Right));
     assert_eq!(state.build_request().unwrap().pin, PinChoice::Off);
 }
+
+#[test]
+fn the_form_shows_the_pin_choice_in_words() {
+    use ratatui::{buffer::Buffer, layout::Rect, widgets::Widget};
+    let mut state = MuxLaunchFormState::new("codex", "/tmp", "adhoc", Vec::new(), Vec::new());
+    for _ in 0..6 {
+        state.handle((), key(KeyCode::Tab));
+    }
+    state.handle((), key(KeyCode::Right));
+    state.handle((), key(KeyCode::Right));
+    assert_eq!(state.build_request().unwrap().pin, PinChoice::PlanOnly);
+
+    let theme = crate::tui::Theme::default();
+    let area = Rect::new(0, 0, 90, 20);
+    let mut buf = Buffer::empty(area);
+    MuxLaunchFormWidget::new(&state, &theme).render(area, &mut buf);
+    let text: String = (0..area.height)
+        .map(|y| {
+            (0..area.width)
+                .map(|x| buf[(x, y)].symbol().to_string())
+                .collect::<String>()
+                .trim_end()
+                .to_string()
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+    assert!(text.contains("pin"), "{text}");
+    assert!(
+        text.to_lowercase().contains("don't launch")
+            || text.to_lowercase().contains("without launching")
+            || text.to_lowercase().contains("plan"),
+        "the plan-only choice is spelled out:\n{text}"
+    );
+}

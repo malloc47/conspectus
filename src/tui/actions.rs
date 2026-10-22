@@ -514,7 +514,7 @@ pub fn pinned_primary_effect(app: &App) -> Option<crate::tui::Effect> {
             None => format!("pin `{pin_id}`: this PR has no URL on record"),
         })),
         (SlotStatus::Live, kind) => Some(Effect::Toast(format!(
-            "pin `{pin_id}` is a live {}; nothing to launch",
+            "pin `{pin_id}` is a live {}; nothing to rebuild",
             kind.as_str()
         ))),
         (_, kind) => Some(Effect::Toast(format!(
@@ -531,9 +531,19 @@ pub fn pin_status_hint(snapshot: &GraphSnapshot, pin_id: &str) -> Option<String>
     let pin = crate::tui::rows::pin_nodes(snapshot)
         .into_iter()
         .find(|pin| pin.id.id == pin_id)?;
-    let rebuild = format!("{} rebuild {pin_id}", crate::invocation::invoked_name());
+    let name = crate::invocation::invoked_name();
+    let rebuild = format!("{name} rebuild {pin_id}");
     match pin.status {
-        crate::model::SlotStatus::Live => None,
+        crate::model::SlotStatus::Live => match pin.kind {
+            crate::model::PinKind::Mux | crate::model::PinKind::Session => None,
+            crate::model::PinKind::Pr => {
+                Some(format!("pin `{pin_id}` is a live PR · Enter shows its URL"))
+            }
+            kind => Some(format!(
+                "pin `{pin_id}` is a live {} · nothing to rebuild",
+                kind.as_str()
+            )),
+        },
         crate::model::SlotStatus::Gone => Some(format!(
             "pin `{pin_id}` is gone · Enter runs `{rebuild}` to bring it back"
         )),
@@ -541,7 +551,7 @@ pub fn pin_status_hint(snapshot: &GraphSnapshot, pin_id: &str) -> Option<String>
             "pin `{pin_id}`: couldn't check whether its target exists"
         )),
         crate::model::SlotStatus::Missing => Some(format!(
-            "pin `{pin_id}`: target not found · `pin retarget {pin_id} <target>`, or Enter runs `{rebuild}`"
+            "pin `{pin_id}`: target not found · `{name} pin retarget {pin_id} <target>`, or Enter runs `{rebuild}`"
         )),
         crate::model::SlotStatus::Planned => Some(format!(
             "pin `{pin_id}` isn't built yet · Enter runs `{rebuild}`"

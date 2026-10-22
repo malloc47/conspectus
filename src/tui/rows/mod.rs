@@ -366,10 +366,8 @@ pub struct MuxSessionRow {
     /// muxes expose sessions as child rows where each preview is shown
     /// individually.
     pub single_session_preview: Option<String>,
-    /// `Some(pin_id)` when this mux is the bound mux of a declared
-    /// session pin (ADR 0057). Renderers paint a pin glyph next to
-    /// the mux label so the operator can spot pin-linked muxes from
-    /// any view.
+    /// `Some(slot id)` when a pin slot points at this mux (ADR 0141).
+    /// Renderers mark it so pinned muxes stand out in any view.
     pub pin_id: Option<String>,
     pub primary_node: NodeId,
 }
@@ -1106,16 +1104,16 @@ fn tree_home_dir() -> Option<std::path::PathBuf> {
 /// node explorer) use for relative ages.
 /// A fixed time snapshot mode renders against (ADR 0113). Unset, the
 /// TUI reads the clock.
-static PINNED_NOW: std::sync::OnceLock<i64> = std::sync::OnceLock::new();
+static FROZEN_NOW: std::sync::OnceLock<i64> = std::sync::OnceLock::new();
 
 /// Render ages against `epoch` for the rest of the process.
 #[cfg(feature = "snapshot")]
-pub(crate) fn pin_clock(epoch: i64) {
-    let _ = PINNED_NOW.set(epoch);
+pub(crate) fn freeze_clock(epoch: i64) {
+    let _ = FROZEN_NOW.set(epoch);
 }
 
 pub(crate) fn tree_current_unix_epoch() -> i64 {
-    PINNED_NOW
+    FROZEN_NOW
         .get()
         .copied()
         .unwrap_or_else(crate::discovery::current_epoch)

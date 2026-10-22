@@ -1,11 +1,12 @@
 //! `conspectus pin` subcommand tree (ADR 0141).
 //!
 //! A pin is a named slot in `$XDG_DATA_HOME/conspectus/pins.toml` that
-//! points at a mux, session, worktree, repo, or PR and can carry
+//! points at a mux, session, checkout, repo, or PR and can carry
 //! overrides. Pinning writes only that file (plus a history record when
 //! the entity has none yet); bringing a gone entity back is
 //! `conspectus rebuild`.
 
+use std::collections::BTreeSet;
 use std::path::PathBuf;
 
 use anyhow::{Result, anyhow, bail};
@@ -61,7 +62,7 @@ impl PinArgs {
 
 #[derive(Debug, Subcommand)]
 enum PinCommand {
-    /// Pin a mux, session, worktree, repo, or PR as a named slot.
+    /// Pin a mux, session, checkout, repo, branch, or PR as a named slot.
     Add(PinAddArgs),
     /// Set or clear a slot's overrides.
     Edit(PinEditArgs),
@@ -117,7 +118,9 @@ impl Retired {
             "launch" => "`conspectus rebuild <slot>` (or `conspectus mux launch`)",
             "attach" => "`conspectus rebuild <slot>`",
             "bind" => "`conspectus pin retarget <slot> <session or history id>`",
-            "rebind" => "nothing: a slot follows its mux through renames; or `pin retarget`",
+            "rebind" => {
+                "`conspectus pin retarget <slot> <mux>` (a slot already follows its mux through renames)"
+            }
             _ => "`conspectus pin add <mux>`",
         };
         bail!(
@@ -134,7 +137,24 @@ fn slot_store() -> Result<SlotStore> {
 
 pub(super) fn discover(scan_roots: &[PathBuf]) -> Result<GraphSnapshot> {
     let discovered = discover_for_store_selection_with(scan_roots, pin_discovery_config())?;
-    Ok(crate::resolve::resolve_snapshot(discovered))
+    let snapshot = crate::resolve::resolve_snapshot(discovered);
+    report_store_problems(&snapshot);
+    Ok(snapshot)
+}
+
+/// Say on stderr why `pins.toml` or the history files couldn't be read
+/// (a newer schema, bad TOML or JSON), once each, so an empty list isn't
+/// mistaken for no data.
+pub(super) fn report_store_problems(snapshot: &GraphSnapshot) {
+    let mut seen = BTreeSet::new();
+    for diagnostic in &snapshot.diagnostics {
+        if let crate::model::Diagnostic::Config { path, message } = diagnostic
+            && (path == "history" || path.ends_with("pins.toml"))
+            && seen.insert(message.clone())
+        {
+            eprintln!("conspectus: {message}");
+        }
+    }
 }
 
 fn history_writer() -> Option<HistoryWriter> {
@@ -167,11 +187,26 @@ fn pinned_node<'a>(snapshot: &'a GraphSnapshot, id: &str) -> Result<&'a PinNode>
 /// entry.
 fn refuse_legacy(snapshot: &GraphSnapshot, id: &str) -> Result<()> {
     if pinned_node(snapshot, id)?.legacy {
-        bail!(
-            "`{id}` is a legacy pin that hasn't been converted yet; run `conspectus pin migrate` first"
-        );
+        bail!(legacy_message(id));
     }
     Ok(())
+}
+
+fn legacy_message(id: &str) -> String {
+    format!(
+        "`{id}` is a legacy pin that hasn't been converted yet; run `conspectus pin migrate` first"
+    )
+}
+
+/// The error for a slot command that found no slot called `name`: a
+/// legacy pin of that name gets the migrate hint instead.
+fn missing_slot(name: &str, err: anyhow::Error) -> anyhow::Error {
+    if let Ok(snapshot) = discover(&[])
+        && pinned_node(&snapshot, name).is_ok_and(|pin| pin.legacy)
+    {
+        return anyhow!(legacy_message(name));
+    }
+    err
 }
 
 #[derive(Debug, Args)]
@@ -186,7 +221,8 @@ struct PinAddArgs {
     /// `--kind`.
     #[arg(long, requires = "kind", conflicts_with = "target")]
     planned: bool,
-    /// Kind of a planned slot: mux, session, worktree, repo, or pr.
+    /// Kind of a planned slot: mux, session, checkout (alias worktree),
+    /// repo, branch, pr, workspace, or fork.
     #[arg(long, value_name = "KIND")]
     kind: Option<String>,
     /// Override a recipe field: `field=value`. Repeatable.
@@ -206,9 +242,8 @@ impl PinAddArgs {
                 .as_deref()
                 .ok_or_else(|| anyhow!("a planned slot needs `--name`"))?;
             let kind = self.kind.as_deref().unwrap_or_default();
-            let kind = PinKind::parse(kind).ok_or_else(|| {
-                anyhow!("unknown kind `{kind}` (mux, session, worktree, repo, pr)")
-            })?;
+            let kind = PinKind::parse(kind)
+                .ok_or_else(|| anyhow!("unknown kind `{kind}` ({})", PinKind::names()))?;
             let mut overrides = SlotFields::new();
             for (field, value) in parse_assignments(kind, &self.set)? {
                 overrides.insert(field, value);
@@ -220,7 +255,13 @@ impl PinAddArgs {
 
         let target = self.target.as_deref().unwrap_or_default();
         let snapshot = discover(&self.scan_roots)?;
-        let what = pin_ops::find_pinnable(&snapshot, target).map_err(|e| anyhow!("{e}"))?;
+        let what = pin_ops::find_pinnable(&snapshot, target).map_err(|e| {
+            if pinned_node(&snapshot, target).is_ok_and(|pin| pin.legacy) {
+                anyhow!(legacy_message(target))
+            } else {
+                anyhow!("{e}")
+            }
+        })?;
         let history = history_writer();
         let slot = pin_ops::pin(
             &snapshot,
@@ -303,6 +344,7 @@ impl PinRenameArgs {
             // plan sets the slot's `name` override so it keeps following
             // the mux (ADR 0029).
             let snapshot = discover(&self.scan_roots)?;
+            refuse_legacy(&snapshot, &self.name)?;
             let pin = pinned_node(&snapshot, &self.name)?;
             if let (PinKind::Mux, SlotStatus::Live, Some(NodeId::MuxSession(mux))) =
                 (pin.kind, pin.status, pin.target_node.as_ref())
@@ -322,8 +364,8 @@ impl PinRenameArgs {
                 pin_ops::edit(&store, &self.name, &[name], &[]).map_err(|e| anyhow!("{e}"))?;
             }
         }
-        let changed =
-            pin_ops::rename(&store, &self.name, &self.new_name).map_err(|e| anyhow!("{e}"))?;
+        let changed = pin_ops::rename(&store, &self.name, &self.new_name)
+            .map_err(|e| missing_slot(&self.name, anyhow!("{e}")))?;
         println!(
             "{} `{}` → `{}`",
             if changed { "renamed" } else { "unchanged" },
@@ -427,7 +469,7 @@ impl PinMoveArgs {
         };
         let write = slot_store()?
             .move_slot(&self.name, &placement)
-            .map_err(|e| anyhow!("{e}"))?;
+            .map_err(|e| missing_slot(&self.name, anyhow!("{e}")))?;
         println!(
             "{} `{}`",
             if write.changed { "moved" } else { "unchanged" },
@@ -447,9 +489,12 @@ impl PinRmArgs {
     fn run(self) -> Result<()> {
         let write = slot_store()?
             .remove(&self.name)
-            .map_err(|e| anyhow!("{e}"))?;
+            .map_err(|e| missing_slot(&self.name, anyhow!("{e}")))?;
         if !write.changed {
-            bail!("no pin slot named `{}`", self.name);
+            return Err(missing_slot(
+                &self.name,
+                anyhow!("no pin slot named `{}`", self.name),
+            ));
         }
         println!("removed slot `{}`", self.name);
         Ok(())
@@ -553,17 +598,47 @@ impl PinMigrateArgs {
             &registry,
             &mut diagnostics,
         );
+        // A config file that can't be read or parsed hides every pin in
+        // it; say which, and fail at the end so the operator notices.
+        let mut unreadable = 0usize;
+        for diagnostic in &diagnostics {
+            if let crate::model::Diagnostic::Config { path, message } = diagnostic
+                && (message.starts_with("failed to parse pins")
+                    || message.starts_with("failed to read pins"))
+            {
+                unreadable += 1;
+                eprintln!("conspectus: {path}: {message}; its pins weren't migrated");
+            }
+        }
         let store = slot_store()?;
         let existing = store.load().slots;
         let plan =
             crate::pin_migrate::plan(&snapshot, entries, &existing, &PinBindingsCache::from_env());
+        for warning in &plan.warnings {
+            eprintln!("conspectus: {warning}");
+        }
+        let unreadable_error = || {
+            anyhow!(
+                "{unreadable} legacy config file(s) couldn't be read, so their pins weren't migrated"
+            )
+        };
         if plan.is_empty() {
+            if unreadable > 0 {
+                return Err(unreadable_error());
+            }
             println!("no legacy pins to migrate");
             return Ok(());
         }
-        print!("{}", plan.render());
         if self.dry_run {
-            return Ok(());
+            print!("{}", plan.render());
+            return if unreadable > 0 {
+                Err(unreadable_error())
+            } else {
+                Ok(())
+            };
+        }
+        for (id, why) in &plan.skipped {
+            eprintln!("conspectus: pin `{id}` skipped: {why}");
         }
         let history = history_writer()
             .ok_or_else(|| anyhow!("no state home: history is needed to migrate pins"))?;
@@ -594,6 +669,9 @@ impl PinMigrateArgs {
             eprintln!("conspectus: {note}");
         }
         if report.failed.is_empty() {
+            if unreadable > 0 {
+                return Err(unreadable_error());
+            }
             Ok(())
         } else {
             for (id, why) in &report.failed {

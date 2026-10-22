@@ -260,3 +260,45 @@ fn session_preview_round_trips_and_ignores_unknown_tokens() {
     let read = read_tui_state(&cache).expect("read");
     assert_eq!(read.session_preview, None);
 }
+
+#[test]
+fn one_unknown_nested_value_costs_only_that_setting() {
+    let dir = TempDir::new().expect("tempdir");
+    let cache = cache_in(&dir);
+    let path = cache.path().expect("path");
+    std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+    std::fs::write(
+        &path,
+        r#"{
+          "schema_version": 1,
+          "last_view": "mux",
+          "sort": "recency",
+          "future_key": {"x": 1},
+          "view_states": {
+            "pins": {"grouping": {"Pins": "x"}, "filter": "not a filter"},
+            "sessions": {"grouping": {"Pins": "x"}}
+          }
+        }"#,
+    )
+    .unwrap();
+
+    let state = read_tui_state(&cache).expect("the file still reads");
+    assert_eq!(state.last_view, Some(View::Mux));
+    assert_eq!(state.sort, Some(Sort::Recency));
+    let sessions = state
+        .view_states
+        .get(&View::Sessions)
+        .expect("sessions slot");
+    assert_eq!(
+        sessions.grouping,
+        Some(Grouping::default_for(View::Sessions))
+    );
+
+    write_last_view(&cache, View::Prs).expect("write");
+    let text = std::fs::read_to_string(&path).unwrap();
+    assert!(
+        text.contains("future_key"),
+        "unknown fields round-trip: {text}"
+    );
+    assert!(text.contains("\"sort\""), "{text}");
+}

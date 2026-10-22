@@ -122,7 +122,7 @@ env = "PAGER"
 read = ["..."]
 
 [programs.conspectus]
-adr = ["0057", "0143", "0105", "0142"]
+adr = ["0141", "0142", "0143", "0105"]
 # The running binary, whatever its file name.
 self = true
 act = ["rebuild ...", "mux new ...", "mux launch ..."]

@@ -202,6 +202,23 @@ pub fn plan(
     env: &Env<'_>,
     now: i64,
 ) -> Result<Plan, RebuildError> {
+    let slot = &subject.slot;
+    if slot.legacy {
+        return Err(RebuildError::Cannot(format!(
+            "`{}` is a legacy pin that hasn't been converted yet; run `conspectus pin migrate` first",
+            slot.id
+        )));
+    }
+    // A planned mux is built from its overrides; the other kinds need
+    // something to bring back.
+    if slot.target.is_none() && slot.kind != crate::model::PinKind::Mux {
+        return Err(RebuildError::Cannot(format!(
+            "slot `{id}` is planned and has no target yet; point it at a {kind} with \
+             `pin retarget {id} <{kind}>`",
+            id = slot.id,
+            kind = slot.kind.as_str()
+        )));
+    }
     match subject.slot.kind {
         crate::model::PinKind::Mux => mux::plan(snapshot, subject, options, env, now),
         crate::model::PinKind::Session => session::plan(snapshot, subject, options, env, now),

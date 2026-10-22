@@ -59,6 +59,12 @@ fn no_server_stderr_maps_to_unavailable() {
     assert!(looks_like_no_server(
         "error connecting to /tmp/tmux-1000/default (No sessions)"
     ));
+    assert!(looks_like_no_server(
+        "error connecting to /tmp/tmux-1000/default (No such file or directory)"
+    ));
+    assert!(!looks_like_no_server(
+        "error connecting to /tmp/tmux-1000/default (Permission denied)"
+    ));
     assert!(!looks_like_no_server("permission denied"));
 }
 

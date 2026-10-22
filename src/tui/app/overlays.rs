@@ -80,19 +80,43 @@ impl App {
                     .and_then(|pin| pin.target_node.clone())
             })
             .ok_or_else(|| format!("slot `{slot}` has no entity to reveal"))?;
+        let live = self
+            .snapshot_handle()
+            .is_none_or(|handle| handle.snapshot().is_live(&node));
+        // A gone entity is listed only where history is: the Mux view
+        // keeps its ghosts, and everything else is in History.
         let view = match node {
             NodeId::MuxSession(_) => View::Mux,
-            NodeId::ForgePr(_) => View::Prs,
+            NodeId::ForgePr(_) if live => View::Prs,
+            _ if !live => View::History,
             _ => View::Sessions,
         };
+        let previous = self.active_view;
         self.switch_to_view(view);
         self.rebuild_tree_in_place();
-        let Some(index) = self
-            .tree
-            .rows
-            .iter()
-            .position(|row| crate::tui::rows::row_node(&row.id) == Some(&node))
-        else {
+        // History lists a gone entity by its record rather than by node.
+        let record = self.snapshot_handle().and_then(|handle| {
+            let snapshot = handle.snapshot();
+            crate::tui::rows::pin_nodes(snapshot)
+                .into_iter()
+                .find(|pin| pin.id.id == slot)
+                .and_then(|pin| pin.target.as_deref())
+                .and_then(|target| target.strip_prefix(crate::model::PinSlot::HISTORY_PREFIX))
+                .map(str::to_string)
+                .or_else(|| {
+                    snapshot
+                        .history
+                        .by_key(&node.to_string())
+                        .map(|(_, meta)| meta.id.clone())
+                })
+        });
+        let Some(index) = self.tree.rows.iter().position(|row| {
+            crate::tui::rows::row_node(&row.id) == Some(&node)
+                || matches!(&row.id, RowId::History { record_id } if Some(record_id) == record.as_ref())
+        }) else {
+            // Stay where the operator was.
+            self.switch_to_view(previous);
+            self.rebuild_tree_in_place();
             return Err(format!("`{slot}` isn't listed in the {view:?} view"));
         };
         let depth = self.tree.rows[index].depth;

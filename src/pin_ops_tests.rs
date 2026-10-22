@@ -409,3 +409,28 @@ fn renaming_carries_a_label_that_was_only_the_old_name() {
         "{err}"
     );
 }
+
+#[test]
+fn pinning_fails_when_history_cannot_take_the_record() {
+    let env = env();
+    let dir = env.history.store.dir().to_path_buf();
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(
+        dir.join("muxes.json"),
+        r#"{"schema_version": 99, "records": []}"#,
+    )
+    .unwrap();
+    let snap = snapshot(vec![mux_node("work")]);
+    let what = find_pinnable(&snap, "work").unwrap();
+
+    let err = pin(&snap, &env.store, Some(&env.history), &what, None).unwrap_err();
+
+    assert!(
+        matches!(err, PinError::Invalid(ref m) if m.contains("can't be written")),
+        "{err}"
+    );
+    assert!(
+        env.store.load().slots.is_empty(),
+        "no slot points at nothing"
+    );
+}

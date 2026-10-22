@@ -306,7 +306,15 @@ fn push_new_session(
                 None
             }
         }
-        _ => None,
+        _ => {
+            if options.session.is_some() {
+                plan.warnings.push(format!(
+                    "`--session` ignored: `{}` has no known agent harness to resume into",
+                    target.name
+                ));
+            }
+            None
+        }
     };
 
     let shown: Vec<OsString> = resume

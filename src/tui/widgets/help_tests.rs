@@ -124,7 +124,6 @@ fn help_body_includes_mux_state_legend() {
     for (glyph, name) in [
         ("◉", "Attached"),
         ("◯", "Not attached"),
-        ("◌", "Pin placeholder"),
         ("?", "Unknown"),
         ("⚠", "Ambiguous mux"),
     ] {

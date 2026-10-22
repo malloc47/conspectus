@@ -328,10 +328,9 @@ struct SessionsData<'a> {
     /// nested rows from the top-level bucket only when the parent
     /// is visible in the current build.
     lineage_parent: BTreeMap<NodeId, NodeId>,
-    /// Bound session `NodeId` → pin id. Built once from
-    /// `snapshot.pins` so the per-row emit can attach the pin
-    /// marker (ADR 0057) without re-walking the pin
-    /// vector for every session.
+    /// Pinned session `NodeId` → slot id. Built once from the pin
+    /// nodes so the per-row emit can attach the pin marker (ADR 0141)
+    /// without re-walking them for every session.
     pin_id_by_bound_session: BTreeMap<NodeId, String>,
 }
 
