@@ -226,4 +226,7 @@ pub struct Env<'a> {
     /// retarget the slots that pointed at the old place.
     pub slots: Option<&'a SlotStore>,
     pub cloner: &'a dyn RepoCloner,
+    /// Launch profiles and `atelier exec`, for muxes with no recorded
+    /// or overridden argv.
+    pub launch: &'a crate::launch_default::LaunchDefaults,
 }

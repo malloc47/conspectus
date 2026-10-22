@@ -110,6 +110,7 @@ pub struct Harness {
     pub worktree: Option<FakeWorktrees>,
     pub cloner: RecordingCloner,
     pub slots: Option<SlotStore>,
+    pub launch: crate::launch_default::LaunchDefaults,
 }
 
 impl Harness {
@@ -127,7 +128,13 @@ impl Harness {
             worktree: None,
             cloner: RecordingCloner::default(),
             slots: None,
+            launch: crate::launch_default::LaunchDefaults::default(),
         }
+    }
+
+    pub fn with_launch(mut self, launch: crate::launch_default::LaunchDefaults) -> Self {
+        self.launch = launch;
+        self
     }
 
     pub fn with_worktrees(mut self, worktrees: FakeWorktrees) -> Self {
@@ -152,6 +159,7 @@ impl Harness {
             worktree: self.worktree.as_ref().map(|w| w as &dyn WorktreeBackend),
             slots: self.slots.as_ref(),
             cloner: &self.cloner,
+            launch: &self.launch,
         };
         f(&env)
     }

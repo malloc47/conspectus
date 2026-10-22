@@ -241,7 +241,19 @@ impl MuxLaunchArgs {
             Some(argv) if !argv.is_empty() => {
                 argv.into_iter().map(std::ffi::OsString::from).collect()
             }
-            _ => launch_argv_for(self.harness.trim()),
+            _ => {
+                let config = crate::config::load_from_cwd().config;
+                let defaults = crate::launch_default::LaunchDefaults::new(config.launch);
+                match defaults.default_argv(self.harness.trim(), Some(&cwd)) {
+                    Some((argv, source)) => {
+                        if source != crate::launch_default::DefaultSource::HarnessDefault {
+                            eprintln!("conspectus: argv from {}", source.label());
+                        }
+                        argv
+                    }
+                    None => launch_argv_for(self.harness.trim()),
+                }
+            }
         };
         if argv.is_empty() {
             bail!(

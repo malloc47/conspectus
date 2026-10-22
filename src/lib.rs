@@ -28,6 +28,7 @@ pub mod history;
 pub mod hook;
 #[doc(hidden)]
 pub mod invocation;
+pub mod launch_default;
 pub(crate) mod legacy_bindings;
 pub(crate) mod legacy_pins;
 pub(crate) mod legacy_registry;

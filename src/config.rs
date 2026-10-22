@@ -50,6 +50,29 @@ pub struct Config {
     pub worktree: WorktreeConfig,
     pub forge: ForgeConfig,
     pub history: HistoryConfig,
+    pub launch: LaunchConfig,
+}
+
+/// Which config file a launch profile came from.
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+pub enum ProfileOrigin {
+    User,
+    Project,
+}
+
+/// One `[launch.<harness>]` profile (ADR 0142).
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct LaunchProfile {
+    pub argv: Vec<String>,
+    pub origin: ProfileOrigin,
+}
+
+/// Settings under `[launch.<harness>]`: how to start each harness when
+/// no slot override or recorded argv says otherwise (ADR 0142). A
+/// project's profile replaces the user's for the same harness.
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+pub struct LaunchConfig {
+    pub profiles: BTreeMap<String, LaunchProfile>,
 }
 
 /// Settings under `[history]` (ADR 0140).
@@ -305,6 +328,7 @@ pub struct TuiViewsConfig {
     pub union: TuiViewConfig,
     pub prs: TuiViewConfig,
     pub forks: TuiViewConfig,
+    pub pinned: TuiViewConfig,
 }
 
 impl TuiViewsConfig {
@@ -316,6 +340,7 @@ impl TuiViewsConfig {
             View::Union => &self.union,
             View::Prs => &self.prs,
             View::Forks => &self.forks,
+            View::Pinned => &self.pinned,
         }
     }
 }
@@ -417,6 +442,9 @@ struct ConfigFile {
     /// `[history]` table (ADR 0140).
     #[serde(default)]
     history: Option<HistoryFile>,
+    /// `[launch.<harness>]` tables (ADR 0142).
+    #[serde(default)]
+    launch: Option<BTreeMap<String, LaunchFile>>,
     /// Legacy `[session]` key from before ADR 0021. Its presence
     /// triggers a diagnostic so users discover the schema migrated;
     /// its contents are not read.
@@ -432,6 +460,12 @@ struct WorktreeFile {
     teardown_confirm: Option<String>,
     #[serde(default)]
     teardown_grace: Option<String>,
+}
+
+#[derive(Clone, Debug, Default, Deserialize)]
+struct LaunchFile {
+    #[serde(default)]
+    argv: Option<Vec<String>>,
 }
 
 #[derive(Clone, Debug, Default, Deserialize)]
@@ -698,6 +732,7 @@ impl ConfigLoader {
             merge_from_file(
                 &mut config,
                 &path,
+                ProfileOrigin::User,
                 self.home.as_deref(),
                 &mut outcome.diagnostics,
             );
@@ -708,6 +743,7 @@ impl ConfigLoader {
             merge_from_file(
                 &mut config,
                 &path,
+                ProfileOrigin::Project,
                 self.home.as_deref(),
                 &mut outcome.diagnostics,
             );
@@ -728,6 +764,7 @@ pub fn load_from_cwd() -> LoadOutcome {
 fn merge_from_file(
     config: &mut Config,
     path: &Path,
+    origin: ProfileOrigin,
     home: Option<&Path>,
     diagnostics: &mut Vec<ConfigDiagnostic>,
 ) {
@@ -782,6 +819,38 @@ fn merge_from_file(
     }
     if let Some(history) = parsed.history {
         merge_history(&mut config.history, history, path, diagnostics);
+    }
+    if let Some(launch) = parsed.launch {
+        merge_launch(&mut config.launch, launch, origin, path, diagnostics);
+    }
+}
+
+fn merge_launch(
+    config: &mut LaunchConfig,
+    file: BTreeMap<String, LaunchFile>,
+    origin: ProfileOrigin,
+    path: &Path,
+    diagnostics: &mut Vec<ConfigDiagnostic>,
+) {
+    for (harness, profile) in file {
+        if crate::discovery::harness::launch_argv_for(&harness).is_empty() {
+            diagnostics.push(ConfigDiagnostic {
+                path: path.to_path_buf(),
+                message: format!("`[launch.{harness}]` names no known harness; ignored"),
+            });
+            continue;
+        }
+        match profile.argv {
+            Some(argv) if argv.first().is_some_and(|program| !program.is_empty()) => {
+                config
+                    .profiles
+                    .insert(harness, LaunchProfile { argv, origin });
+            }
+            _ => diagnostics.push(ConfigDiagnostic {
+                path: path.to_path_buf(),
+                message: format!("`[launch.{harness}]` needs a non-empty `argv`; ignored"),
+            }),
+        }
     }
 }
 
@@ -1463,6 +1532,7 @@ fn view_config_key(view: View) -> &'static str {
         View::Union => "union",
         View::Prs => "prs",
         View::Forks => "forks",
+        View::Pinned => "pinned",
     }
 }
 
@@ -1550,6 +1620,7 @@ fn parse_view_name(raw: &str) -> Option<crate::tui::View> {
         "union" => Some(View::Union),
         "prs" => Some(View::Prs),
         "forks" => Some(View::Forks),
+        "pinned" => Some(View::Pinned),
         _ => None,
     }
 }

@@ -17,9 +17,10 @@ use std::path::{Path, PathBuf};
 use crate::discovery::harness::adapter_in_command;
 use crate::discovery::orchestrator;
 use crate::discovery::tmux::{MuxBackend, TmuxPaneStatus};
+use crate::launch_default::DefaultSource;
 use crate::model::{
-    GraphLink, GraphNode, GraphSnapshot, LinkState, MuxRecord, MuxSessionId, MuxSessionNode,
-    NodeId, RelationKind, SlotStatus,
+    FieldSource, GraphLink, GraphNode, GraphSnapshot, LinkState, MuxRecord, MuxSessionId,
+    MuxSessionNode, NodeId, RelationKind, SlotStatus,
 };
 use crate::output::render::format_relative_age;
 use crate::resolve::slots::{ResolvedSlot, resolve_slot};
@@ -78,7 +79,14 @@ pub fn plan(
         target: Some(target.clone()),
     };
     let harness = resolved.text("harness").map(str::to_string);
-    let argv = effective_argv(&resolved);
+    let (argv, argv_default) = effective_argv(&resolved, harness.as_deref(), env);
+    if let Some(source) = argv_default
+        && source != DefaultSource::HarnessDefault
+        && !argv.is_empty()
+    {
+        plan.warnings
+            .push(format!("argv comes from {}", source.label()));
+    }
 
     if resolved.status == SlotStatus::Live
         && let Some(node) = live
@@ -172,13 +180,34 @@ fn owner_of(record: Option<&MuxRecord>, name: &str) -> Option<String> {
         .or_else(|| orchestrator::owner_of_mux(name).map(|o| o.display_name.to_string()))
 }
 
-fn effective_argv(resolved: &ResolvedSlot) -> Vec<OsString> {
-    resolved
+/// The argv to start with. The slot resolver's own answer stands when
+/// an override, the live pane, history, or the snapshot supplied it;
+/// when it only fell back to the harness default, the launch profiles
+/// and `atelier exec` get their say (ADR 0142). The second value is
+/// the source of such a default.
+fn effective_argv(
+    resolved: &ResolvedSlot,
+    harness: Option<&str>,
+    env: &Env<'_>,
+) -> (Vec<OsString>, Option<DefaultSource>) {
+    let is_default = resolved
+        .effective
+        .iter()
+        .find(|field| field.name == "argv")
+        .is_none_or(|field| field.source == FieldSource::Default);
+    if is_default && let Some(harness) = harness {
+        let cwd = resolved.text("cwd").map(PathBuf::from);
+        if let Some((argv, source)) = env.launch.default_argv(harness, cwd.as_deref()) {
+            return (argv, Some(source));
+        }
+    }
+    let argv = resolved
         .list("argv")
         .unwrap_or_default()
         .iter()
         .map(OsString::from)
-        .collect()
+        .collect();
+    (argv, None)
 }
 
 fn describe(name: &str, resolved: &ResolvedSlot, record: Option<&MuxRecord>, now: i64) -> String {

@@ -751,3 +751,91 @@ mod chain {
         assert_eq!(h.tmux.new_session_calls()[0].2, existing);
     }
 }
+
+fn harness_only_record(cwd: &str) -> MuxRecord {
+    let mut record = record(cwd, &[], &[]);
+    record.recipe.harness = Some("claude-code".into());
+    record
+}
+
+fn profile(
+    origin: crate::config::ProfileOrigin,
+    argv: &[&str],
+) -> crate::launch_default::LaunchDefaults {
+    let mut config = crate::config::LaunchConfig::default();
+    config.profiles.insert(
+        "claude-code".into(),
+        crate::config::LaunchProfile {
+            argv: argv.iter().map(|a| (*a).to_string()).collect(),
+            origin,
+        },
+    );
+    crate::launch_default::LaunchDefaults::new(config).with_atelier(false)
+}
+
+#[test]
+fn a_mux_with_no_recorded_argv_starts_from_the_launch_profile_and_says_so() {
+    let cwd = tempfile::tempdir().unwrap();
+    let cwd = cwd.path().to_str().unwrap().to_string();
+    let snapshot = gone_world(harness_only_record(&cwd), &[]);
+    let harness = Harness::new(FakeTmux::with_sessions("")).with_launch(profile(
+        crate::config::ProfileOrigin::Project,
+        &["nix", "develop", "-c", "claude", "--flag"],
+    ));
+
+    let plan = harness
+        .plan(&snapshot, &subject(&snapshot), &Options::default())
+        .unwrap();
+
+    let Action::NewSession { argv, .. } = &plan.steps[0].action else {
+        panic!("{plan:?}")
+    };
+    assert_eq!(args(argv), ["nix", "develop", "-c", "claude", "--flag"]);
+    assert!(
+        plan.render()
+            .contains("note: argv comes from the project launch profile"),
+        "{}",
+        plan.render()
+    );
+}
+
+#[test]
+fn a_recorded_argv_beats_the_launch_profile() {
+    let cwd = tempfile::tempdir().unwrap();
+    let cwd = cwd.path().to_str().unwrap().to_string();
+    let snapshot = gone_world(record(&cwd, &["claude", "--recorded"], &[]), &[]);
+    let harness = Harness::new(FakeTmux::with_sessions(""))
+        .with_launch(profile(crate::config::ProfileOrigin::User, &["other"]));
+
+    let plan = harness
+        .plan(&snapshot, &subject(&snapshot), &Options::default())
+        .unwrap();
+
+    let Action::NewSession { argv, .. } = &plan.steps[0].action else {
+        panic!("{plan:?}")
+    };
+    assert_eq!(args(argv), ["claude", "--recorded"]);
+    assert!(
+        !plan.render().contains("argv comes from"),
+        "{}",
+        plan.render()
+    );
+}
+
+#[test]
+fn the_harness_default_adds_no_note() {
+    let cwd = tempfile::tempdir().unwrap();
+    let cwd = cwd.path().to_str().unwrap().to_string();
+    let snapshot = gone_world(harness_only_record(&cwd), &[]);
+    let harness = Harness::new(FakeTmux::with_sessions(""));
+
+    let plan = harness
+        .plan(&snapshot, &subject(&snapshot), &Options::default())
+        .unwrap();
+
+    assert!(
+        !plan.render().contains("argv comes from"),
+        "{}",
+        plan.render()
+    );
+}

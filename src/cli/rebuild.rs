@@ -53,6 +53,7 @@ impl RebuildArgs {
         let history = crate::history::HistoryWriter::from_env(config.history.clone());
         let worktree = resolve_mutation_backend(config.worktree.backend, worktrunk_available())?;
         let slot_store = SlotStore::from_env();
+        let launch = crate::launch_default::LaunchDefaults::new(config.launch);
         let backend_for = |backend: &str| system_mux_backend(backend);
         let env = Env {
             backend_for: &backend_for,
@@ -61,6 +62,7 @@ impl RebuildArgs {
             worktree: worktree.as_deref(),
             slots: slot_store.as_ref(),
             cloner: &SystemCloner,
+            launch: &launch,
         };
         let options = Options {
             session: self.session,

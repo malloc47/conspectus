@@ -737,6 +737,11 @@ pub struct AtelierRepoEntry {
     pub branch: Option<String>,
 }
 
+/// Whether `path` is at or below an Atelier workspace root.
+pub fn in_atelier_workspace(path: &Path) -> bool {
+    find_atelier_config(path).is_some()
+}
+
 fn find_atelier_config(start: &Path) -> Option<PathBuf> {
     let start = start.canonicalize().ok()?;
     let mut current = if start.is_file() {

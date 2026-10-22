@@ -155,7 +155,7 @@ The tables below are the configuration keys.
 columns = ["default", "+preview"]   # same tokens as `--columns`
 
 [tui]
-default_view = "sessions"   # sessions | mux | prs (union | forks also accepted)
+default_view = "sessions"   # sessions | mux | prs | pinned (union | forks also accepted)
 scan_roots = ["~/work"]     # tui and serve, when --scan-root is absent; `~` expands
 show_harness_chips = false  # per-harness count chips in the header
 narrow_layout_threshold = 100  # columns below which the panes stack
@@ -189,7 +189,7 @@ teardown_grace = "3s"
   `repo`, `checkout`, `scan-root`, `none`; mux `session`, `host`,
   `repo`, `workspace` (ADR 0139); union `kind`, `repo`; prs `checkout` (default), `repo`, `state`
   (ADR 0114); forks `provider`,
-  `parent`.
+  `parent`; pinned `project` (default), `kind`, `none` (ADR 0141).
 - **Filters:** `filters` takes one inline table or an array of tables
   (`[[tui.views.<name>.filters]]`); entries OR together per dimension.
   `max_age` accepts `s`, `m`, `h`, and `d` suffixes; `mux_state` values are
@@ -327,7 +327,7 @@ conspectus node show <id> [--scan-root PATH]...
 conspectus columns {sessions|mux|union|prs|forks}
                    [--pager | --no-pager]
                    [--color {auto|always|never}]
-conspectus tui [--view {sessions|mux|prs}] [--grouping VALUE] [--sort {hierarchy|recency}]
+conspectus tui [--view {sessions|mux|prs|pinned}] [--grouping VALUE] [--sort {hierarchy|recency}]
                [--harness H]... [--max-age D] [--mux-state S]...
                [--scan-root PATH]... [--refresh-interval D] [--no-live-preview]
 conspectus declared {list|create|remove|confirm|ignore|override} ...
@@ -605,6 +605,18 @@ pr = "30d"
 repo = "never"
 ```
 
+Launch profiles say how to start a harness when nothing more specific
+does. A project's `.conspectus.toml` replaces the user config's profile
+for the same harness, and a wrapper prefix is fine:
+
+```toml
+[launch.claude-code]
+argv = ["claude", "--dangerously-skip-permissions"]
+
+[launch.codex]
+argv = ["nix", "develop", "-c", "codex"]
+```
+
 ### Pin slots
 
 A slot is a table in `$XDG_DATA_HOME/conspectus/pins.toml`:
@@ -689,8 +701,12 @@ rebuilds the worktree first, which in turn clones a missing repo.
 - A **repo or primary checkout** is cloned from its recorded remote with
   `git clone`, only into a path that doesn't exist.
 
-The launch argv is the slot's `argv` override, else the recorded argv,
-else the harness default. After attaching, Conspectus watches the
+The launch argv is the first of: the slot's `argv` override, the recorded
+argv, the project's `[launch.<harness>]` profile, the user's profile, an
+`atelier exec <harness>` wrapper (when the mux's directory is inside an
+Atelier workspace and `atelier` is on your `PATH`), and the harness
+default. `rebuild --dry-run` notes when the argv comes from a profile or
+from `atelier exec`; `mux launch` uses the same last four layers. After attaching, Conspectus watches the
 resumed harness for its first moments and reports if it didn't survive
 (ADR 0103). Muxes owned by an orchestrator such as agent-deck are shown
 but not rebuilt.
@@ -701,6 +717,33 @@ but not rebuilt.
 step; it refuses a gone mux. `conspectus worktree close` forgets the
 gone history records rooted in the removed worktree, except records a
 slot targets.
+
+### The Pinned view
+
+Key `4` (or `--view pinned`) lists every slot, whatever its kind, in one set
+of columns: `<kind glyph> <slot> <status> <age> <content>`. The slot name is
+cut at 28 cells, the status is one word (`live`, `gone`, `unknown`,
+`planned`, `missing`, `in mux`, `resumable`, or a PR's state), the age is the
+last activity of a live entity or the time a gone one was last seen, and the
+content is the harness and place, the title, or the remote. Gone, missing,
+planned, and unknown rows are dimmed. Columns pad to the widest value in the
+whole tree, so folding a group doesn't move them.
+
+Slots group by `project` (the repo above the slot's cwd or path; the rest go
+under Other), by `kind`, or not at all (`Ctrl-G` cycles), and sort in slot order or,
+with the Recency sort, freshest first. A mux slot expands to the sessions it
+hosts, and a checkout slot to its muxes and their sessions. The detail pane
+shows the slot, its target, and each effective field with the layer that
+supplied it (override, live, history, snapshot, or default).
+
+`Enter` attaches a slot whose mux is live (or a session slot whose session is
+in a mux). On a gone, missing, or planned mux, session, worktree, or repo slot,
+it runs `conspectus rebuild <slot> --no-attach` behind a spinner and refreshes;
+press `Enter` again to attach. A live session that isn't in a mux is rebuilt
+the same way, which resumes it. A PR slot shows its URL, and the other live
+kinds say there is nothing to launch. Editing, renaming, retargeting, and
+unpinning happen on the command line for now. While legacy `[[pins.entries]]`
+remain, a line under the rows names `conspectus pin migrate`.
 
 ### Migrating legacy pins
 
@@ -794,8 +837,8 @@ Schema v1:
 }
 ```
 
-`last_view` is one of `sessions`, `mux`, `union`, `prs`, or
-`forks`. Unknown values, malformed JSON, or a missing file all
+`last_view` is one of `sessions`, `mux`, `union`, `prs`,
+`forks`, or `pinned`. Unknown values, malformed JSON, or a missing file all
 collapse to "no persisted view" without surfacing an error;
 unknown fields round-trip through writes so future schema bumps
 do not strand old payloads.
