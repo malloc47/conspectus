@@ -22,6 +22,7 @@ pub mod discovery;
 pub mod exec;
 #[doc(hidden)]
 pub mod filter;
+pub mod history;
 #[doc(hidden)]
 pub mod hook;
 #[doc(hidden)]
