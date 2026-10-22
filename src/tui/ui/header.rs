@@ -408,6 +408,7 @@ pub(super) fn view_label(view: View) -> &'static str {
         View::Union => "union",
         View::Prs => "prs",
         View::Forks => "forks",
+        View::Pinned => "pinned",
     }
 }
 
@@ -465,9 +466,10 @@ pub(super) fn default_action_status_hint(app: &App) -> String {
     if matches!(row.kind, RowKind::Group(_)) {
         return "Enter/l expand · h collapse".to_string();
     }
-    let selected_pin_id = match &row.kind {
-        RowKind::AgentSession(session) => session.pin_id.as_deref(),
-        RowKind::MuxSession(mux) => mux.pin_id.as_deref(),
+    let selected_pin_id = match (&row.id, &row.kind) {
+        (RowId::Pin { pin_id }, _) => Some(pin_id.as_str()),
+        (_, RowKind::AgentSession(session)) => session.pin_id.as_deref(),
+        (_, RowKind::MuxSession(mux)) => mux.pin_id.as_deref(),
         _ => None,
     };
     if let Some(pin_id) = selected_pin_id

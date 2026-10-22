@@ -143,6 +143,15 @@ pub const KEYBINDINGS: &[KeyBinding] = &[
         action: || Action::SwitchView(View::Prs),
         help_text: "Switch to PRs view",
     },
+    KeyBinding {
+        mode: KeyMode::Global,
+        key: KeyMatcher::Exact {
+            modifiers: KeyModifiers::NONE,
+            code: KeyCode::Char('4'),
+        },
+        action: || Action::SwitchView(View::Pinned),
+        help_text: "Switch to Pinned view",
+    },
     // Union and Forks are hidden from the interactive UI for now, so
     // they have no digit keys (`VIEW_OPTIONS` excludes them). The
     // `View` variants and CLI `table` projections remain so this stays

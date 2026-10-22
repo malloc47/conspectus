@@ -336,6 +336,7 @@ fn view_to_snake_case(view: View) -> &'static str {
         View::Union => "union",
         View::Prs => "prs",
         View::Forks => "forks",
+        View::Pinned => "pinned",
     }
 }
 
@@ -346,6 +347,7 @@ fn view_from_snake_case(value: &str) -> Option<View> {
         "union" => Some(View::Union),
         "prs" => Some(View::Prs),
         "forks" => Some(View::Forks),
+        "pinned" => Some(View::Pinned),
         _ => None,
     }
 }

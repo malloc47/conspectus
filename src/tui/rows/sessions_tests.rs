@@ -2390,113 +2390,47 @@ fn none_grouping_floats_pinned_session_rows_to_top() {
 }
 
 #[test]
-fn planned_pin_emits_synthetic_pins_group_and_placeholder_session_row() {
-    use crate::model::PinKind;
+fn slots_add_no_rows_of_their_own_to_the_sessions_view() {
+    use crate::model::{PinKind, SlotStatus};
+    // Planned, dangling, and live slots live in the Pinned view; the
+    // Sessions view lists sessions only.
     let mut snapshot = GraphSnapshot::empty();
-    snapshot.pins.push(slot(
-        "ingest",
-        PinKind::Mux,
-        None,
-        0,
-        &[("harness", "codex"), ("cwd", "/home/op/work/repo")],
-    ));
-    let snapshot = resolve_snapshot(snapshot);
-
-    let tree = build_tree(&snapshot);
-
-    // Synthetic group + the one pin row.
-    let pin_group_idx = tree
-        .rows
+    snapshot.pins.extend([
+        slot(
+            "planned",
+            PinKind::Mux,
+            None,
+            0,
+            &[("harness", "codex"), ("cwd", "/home/op/work/repo")],
+        ),
+        slot(
+            "dangling",
+            PinKind::Session,
+            Some(session_id("ghost")),
+            1,
+            &[("harness", "codex")],
+        ),
+    ]);
+    let resolved = resolve_snapshot(snapshot);
+    let statuses: Vec<_> = resolved
+        .nodes
         .iter()
-        .position(|row| matches!(&row.id, RowId::Synthetic(tag) if *tag == "pins"))
-        .expect("pins group emitted");
-    assert!(matches!(&tree.rows[pin_group_idx].kind, RowKind::Group(_)));
-
-    let pin_row = tree
-        .rows
-        .iter()
-        .find(|row| matches!(&row.id, RowId::Pin { pin_id } if pin_id == "ingest"))
-        .expect("pin row emitted");
-    match &pin_row.kind {
-        RowKind::AgentSession(row) => {
-            assert_eq!(row.session.session_key, "ingest");
-            assert_eq!(row.harness_label, "codex");
-            assert_eq!(row.cwd_display.as_deref(), Some("~/work/repo"));
-            assert_eq!(row.preview.as_deref(), Some("~/work/repo"));
-            assert_eq!(row.title, None);
-            assert_eq!(row.alias.as_deref(), Some("ingest"));
-            assert_eq!(row.pin_id.as_deref(), Some("ingest"));
-            assert!(matches!(&row.primary_node, NodeId::Pin(pin) if pin.id == "ingest"));
-        }
-        other => panic!("expected placeholder AgentSession row, got {other:?}"),
-    }
-    assert_eq!(pin_row.depth, 1);
-}
-
-#[test]
-fn planned_pin_appears_only_in_the_pins_group() {
-    use crate::model::PinKind;
-    // A placeholder lists once, in the Pins group, even when its cwd
-    // sits under a known checkout: the project bucket shows sessions.
-    let mut snapshot = GraphSnapshot {
-        nodes: vec![
-            repo("/home/op/work/repo/.git"),
-            worktree("/home/op/work/repo/.git", "/home/op/work/repo"),
-        ],
-        ..GraphSnapshot::empty()
-    };
-    snapshot.pins.push(slot(
-        "ingest",
-        PinKind::Mux,
-        None,
-        0,
-        &[("harness", "codex"), ("cwd", "/home/op/work/repo")],
-    ));
-    let snapshot = resolve_snapshot(snapshot);
-
-    let tree = build_tree(&snapshot);
-    let pin_rows = tree
-        .rows
-        .iter()
-        .filter(|row| matches!(&row.id, RowId::Pin { pin_id } if pin_id == "ingest"))
-        .count();
-    assert_eq!(pin_rows, 1, "{:#?}", tree.rows);
-}
-
-#[test]
-fn pin_with_a_missing_target_emits_a_placeholder_session_row() {
-    use crate::model::PinKind;
-    let mut snapshot = GraphSnapshot::empty();
-    snapshot.pins.push(slot(
-        "ingest",
-        PinKind::Session,
-        Some(session_id("ghost")),
-        0,
-        &[("harness", "codex")],
-    ));
-    let snapshot = resolve_snapshot(snapshot);
-
-    let tree = build_tree(&snapshot);
-    let row = tree
-        .rows
-        .iter()
-        .find_map(|r| match &r.kind {
-            RowKind::AgentSession(session) if session.pin_id.as_deref() == Some("ingest") => {
-                Some(session.clone())
-            }
+        .filter_map(|node| match node {
+            GraphNode::Pin(pin) => Some(pin.status),
             _ => None,
         })
-        .expect("placeholder session row");
-    assert_eq!(row.title, None);
-    assert!(matches!(&row.primary_node, NodeId::Pin(pin) if pin.id == "ingest"));
+        .collect();
+    assert!(statuses.contains(&SlotStatus::Planned) && statuses.contains(&SlotStatus::Missing));
+    assert_eq!(statuses.len(), 2);
+
+    let tree = build_tree(&resolved);
+
+    assert!(tree.rows.is_empty(), "{:#?}", tree.rows);
 }
 
 #[test]
-fn pinned_session_appears_in_pins_group_and_marks_agent_session_row() {
+fn a_pinned_session_keeps_its_one_row_and_its_pin_marker() {
     use crate::model::PinKind;
-    // A pinned session appears as an agent-session row in BOTH the
-    // synthetic "Pins" group (top of view) AND the regular project
-    // group so the operator sees the same session shape in both.
     let alpha = AgentSessionId::new("codex", "/state", "alpha");
     let mut snapshot = GraphSnapshot {
         nodes: vec![
@@ -2524,159 +2458,21 @@ fn pinned_session_appears_in_pins_group_and_marks_agent_session_row() {
 
     let tree = build_tree(&snapshot);
 
-    // The pinned session appears in the synthetic Pins group as its
-    // realized session row, not as a pin config row.
-    let pin_group_idx = tree
+    let rows: Vec<_> = tree
         .rows
         .iter()
-        .position(|r| matches!(&r.id, RowId::Synthetic(tag) if *tag == "pins"))
-        .expect("Pins group present");
-    let pinned_session_row = tree
-        .rows
-        .iter()
-        .skip(pin_group_idx + 1)
-        .take_while(|r| r.depth > 0)
-        .find_map(|r| match &r.kind {
-            RowKind::AgentSession(s) if s.session == alpha => Some(s.clone()),
-            _ => None,
-        })
-        .expect("session row in synthetic Pins group");
-    assert_eq!(pinned_session_row.pin_id.as_deref(), Some("ingest"));
-
-    // The Pins group must come BEFORE the regular session groups so
-    // it's the first thing the operator sees.
-    let first_other_group_idx = tree.rows.iter().position(|r| {
-        matches!(&r.kind, RowKind::Group(_))
-            && !matches!(&r.id, RowId::Synthetic(tag) if *tag == "pins")
-    });
-    if let Some(idx) = first_other_group_idx {
-        assert!(
-            pin_group_idx < idx,
-            "Pins group should precede other groups (Pins at {pin_group_idx}, first other at {idx})",
-        );
-    }
-
-    // The natural agent-session row still carries the pin marker.
-    let session_row = tree
-        .rows
-        .iter()
-        .skip(pin_group_idx + 2)
-        .find_map(|r| match &r.kind {
-            RowKind::AgentSession(s) if s.session == alpha => Some(s.clone()),
-            _ => None,
-        })
-        .expect("agent session row emitted");
-    assert_eq!(session_row.pin_id.as_deref(), Some("ingest"));
-}
-
-#[test]
-fn mixed_pin_states_all_emit_in_synthetic_group_in_slot_order() {
-    use crate::model::PinKind;
-    // All slots surface in the Pins group regardless of status. A
-    // slot pointing at a live session uses that session's row;
-    // others use placeholder session rows.
-    let mut snapshot = GraphSnapshot {
-        nodes: vec![
-            repo("/home/op/work/repo/.git"),
-            worktree("/home/op/work/repo/.git", "/home/op/work/repo"),
-            agent_session(
-                "codex",
-                "/state",
-                "alpha",
-                Some("/home/op/work/repo"),
-                None,
-                None,
-            ),
-        ],
-        ..GraphSnapshot::empty()
-    };
-    snapshot.pins.extend([
-        slot(
-            "bound-one",
-            PinKind::Session,
-            Some(session_id("alpha")),
-            0,
-            &[],
-        ),
-        slot(
-            "free-one",
-            PinKind::Mux,
-            None,
-            1,
-            &[("harness", "codex"), ("cwd", "/home/op/other")],
-        ),
-        slot(
-            "free-two",
-            PinKind::Mux,
-            None,
-            2,
-            &[("harness", "claude-code"), ("cwd", "/home/op/another")],
-        ),
-    ]);
-    let snapshot = resolve_snapshot(snapshot);
-
-    let tree = build_tree(&snapshot);
-
-    let pins_group_idx = tree
-        .rows
-        .iter()
-        .position(|r| matches!(&r.id, RowId::Synthetic(tag) if *tag == "pins"))
-        .expect("Pins group present");
-    let pins_group_rows: Vec<_> = tree
-        .rows
-        .iter()
-        .skip(pins_group_idx + 1)
-        .take_while(|r| r.depth > 0)
         .filter_map(|r| match &r.kind {
-            RowKind::AgentSession(s) => s.pin_id.as_deref(),
+            RowKind::AgentSession(s) if s.session == alpha => Some(s.pin_id.clone()),
             _ => None,
         })
         .collect();
-    assert_eq!(pins_group_rows, vec!["bound-one", "free-one", "free-two"]);
-}
-
-#[test]
-fn resolver_drives_pin_rows_end_to_end() {
-    use crate::model::{PinKind, SlotStatus};
-    // Smoke test that wires the slot resolver and the row builder
-    // together: a planned slot surfaces as a placeholder
-    // `RowKind::AgentSession` after `resolve_snapshot` runs.
-    let mut snapshot = GraphSnapshot::empty();
-    snapshot.pins.push(slot(
-        "ingest",
-        PinKind::Mux,
-        None,
-        0,
-        &[("harness", "codex"), ("cwd", "/home/op/work/repo")],
-    ));
-
-    let resolved = resolve_snapshot(snapshot);
-    let status = resolved.nodes.iter().find_map(|node| match node {
-        GraphNode::Pin(pin) => Some(pin.status),
-        _ => None,
-    });
-    assert_eq!(status, Some(SlotStatus::Planned));
-
-    let tree = build(SessionsBuildInputs {
-        snapshot: &resolved,
-        grouping: SessionsGrouping::Graph,
-        home: Some(home().as_path()),
-        now: None,
-        cwd: None,
-        filter: RowFilter::default(),
-    });
-    let has_pin_row = tree.rows.iter().any(|r| {
-        matches!(
-            &r.kind,
-            RowKind::AgentSession(session)
-                if session.pin_id.as_deref() == Some("ingest")
-                    && matches!(&session.primary_node, NodeId::Pin(_))
-        )
-    });
+    assert_eq!(rows, vec![Some("ingest".to_string())], "{:#?}", tree.rows);
     assert!(
-        has_pin_row,
-        "expected a pin row after resolver run: {:#?}",
-        tree.rows
+        !tree
+            .rows
+            .iter()
+            .any(|r| matches!(r.id, RowId::Synthetic("pins") | RowId::Pin { .. })),
+        "no Pins group or slot rows in the Sessions view"
     );
 }
 

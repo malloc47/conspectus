@@ -172,9 +172,8 @@ fn active_mux_candidates(snapshot: &GraphSnapshot, session: &NodeId) -> Vec<MuxS
 }
 
 /// Graph-aware plan for renaming a mux session. Beyond the tmux
-/// native-name change, this cascades to any pin whose `mux.name`
-/// matches the current native id + socket so pin bindings survive
-/// the rename.
+/// native-name change, this cascades to any pin slot that overrides
+/// the mux's name so the slot keeps following it.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct MuxRenamePlan {
     pub mux_rename: MuxNativeRename,

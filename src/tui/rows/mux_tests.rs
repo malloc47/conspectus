@@ -763,10 +763,8 @@ fn mux_view_flat_grouping_floats_pinned_mux_rows_to_top() {
 }
 
 #[test]
-fn mux_view_emits_pins_group_at_top_under_repo_grouping() {
-    // Repo grouping introduces header rows. The Pins group
-    // should sit above every repo bucket so the operator sees
-    // pinned work first.
+fn mux_view_lists_no_pins_group_under_repo_grouping() {
+    // Repo grouping introduces header rows; slots add none.
     let mut snapshot = GraphSnapshot::empty();
     snapshot.nodes.push(GraphNode::Repo(RepoNode {
         id: crate::model::RepoId::new("/p/foo/.git"),
@@ -818,18 +816,16 @@ fn mux_view_emits_pins_group_at_top_under_repo_grouping() {
             (row.depth, label)
         })
         .collect();
-    // Pins group first, then the repo bucket. A planned slot also
-    // appears in its natural repo location as a placeholder mux row,
-    // mirroring live pinned muxes appearing both in Pins and in place.
-    assert_eq!(row_summary[0], (0, "Pins".to_string()));
-    assert_eq!(row_summary[1], (1, "mux:ingest".to_string()));
-    assert_eq!(row_summary[2], (0, "/p/foo".to_string()));
-    assert_eq!(row_summary[3], (1, "mux:ingest".to_string()));
-    assert_eq!(row_summary[4], (1, "mux:foo-a".to_string()));
+    // A planned slot has no mux to list: the repo bucket holds only the
+    // live mux, and there is no Pins group.
+    assert_eq!(
+        row_summary,
+        vec![(0, "/p/foo".to_string()), (1, "mux:foo-a".to_string())]
+    );
 }
 
 #[test]
-fn mux_view_repo_grouping_renders_bound_pins_as_mux_rows() {
+fn mux_view_repo_grouping_marks_a_pinned_mux_in_place() {
     let mut snapshot = GraphSnapshot::empty();
     snapshot.nodes.push(GraphNode::Repo(RepoNode {
         id: crate::model::RepoId::new("/p/foo/.git"),
@@ -873,33 +869,30 @@ fn mux_view_repo_grouping_renders_bound_pins_as_mux_rows() {
         mux_recency: crate::tui::MuxRecency::default(),
     });
 
-    let pins_group_idx = tree
+    assert!(
+        !tree
+            .rows
+            .iter()
+            .any(|row| matches!(&row.id, RowId::Synthetic(tag) if *tag == "pins")),
+        "no Pins group: {:#?}",
+        tree.rows,
+    );
+    let muxes: Vec<_> = tree
         .rows
         .iter()
-        .position(|row| matches!(&row.id, RowId::Synthetic(tag) if *tag == "pins"))
-        .expect("Pins group present");
-    let pins_children: Vec<_> = tree
-        .rows
-        .iter()
-        .skip(pins_group_idx + 1)
-        .take_while(|row| row.depth > 0)
+        .filter_map(|row| match &row.kind {
+            RowKind::MuxSession(mux) => Some(mux),
+            _ => None,
+        })
         .collect();
-    assert_eq!(pins_children.len(), 1, "{:#?}", tree.rows);
-    match &pins_children[0].kind {
-        RowKind::MuxSession(mux) => {
-            assert_eq!(mux.native_id, "foo-a");
-            assert_eq!(mux.pin_id.as_deref(), Some("ingest"));
-        }
-        other => panic!("expected pinned mux row, got {other:?}"),
-    }
+    assert_eq!(muxes.len(), 1, "{:#?}", tree.rows);
+    assert_eq!(muxes[0].native_id, "foo-a");
+    assert_eq!(muxes[0].pin_id.as_deref(), Some("ingest"));
 }
 
 #[test]
-fn mux_view_flat_grouping_renders_a_planned_pin_as_placeholder_mux_row() {
-    // Flat groupings float pinned mux entities directly rather
-    // than inserting a synthetic Pins group header. Unbound pins
-    // still get a mux-shaped placeholder row so the operator can
-    // launch them from the mux view before tmux exists.
+fn mux_view_flat_grouping_lists_no_row_for_a_planned_slot() {
+    // A planned slot has no mux yet; the Pinned view lists it.
     let mut snapshot = GraphSnapshot::empty();
     snapshot
         .pins
@@ -917,27 +910,7 @@ fn mux_view_flat_grouping_renders_a_planned_pin_as_placeholder_mux_row() {
         mux_recency: crate::tui::MuxRecency::default(),
     });
 
-    let has_pins_group = tree
-        .rows
-        .iter()
-        .any(|row| matches!(&row.id, RowId::Synthetic(tag) if *tag == "pins"));
-    assert!(
-        !has_pins_group,
-        "session/host groupings should not emit a Pins group: {:#?}",
-        tree.rows,
-    );
-    let mux = tree
-        .rows
-        .iter()
-        .find_map(|row| match &row.kind {
-            RowKind::MuxSession(mux) if mux.pin_id.as_deref() == Some("code") => Some(mux),
-            _ => None,
-        })
-        .expect("placeholder mux row");
-    assert_eq!(mux.native_id, "editor");
-    assert_eq!(mux.agent_labels, vec!["claude".to_string()]);
-    assert_eq!(mux.single_session_preview.as_deref(), Some("/p"));
-    assert!(matches!(&mux.primary_node, NodeId::Pin(pin) if pin.id == "code"));
+    assert!(tree.rows.is_empty(), "{:#?}", tree.rows);
 }
 
 fn mux_node_with_epochs(
@@ -1403,7 +1376,7 @@ fn workspace_grouping_header_order_ignores_case_and_breaks_name_ties_by_path() {
 }
 
 #[test]
-fn workspace_grouping_places_planned_pin_placeholders_by_cwd() {
+fn workspace_grouping_lists_no_row_for_a_planned_slot() {
     let mut snapshot = sysadmin_snapshot(vec![mux_at("sys-root", "/ws/sysadmin")]);
     snapshot.pins.push(mux_slot(
         "nix",
@@ -1417,15 +1390,10 @@ fn workspace_grouping_places_planned_pin_placeholders_by_cwd() {
 
     let tree = build_with(&snapshot, MuxGrouping::Workspace);
 
-    // The placeholder shows in Pins and, by its cwd, under the
-    // workspace, ahead of the live mux because pinned rows float.
     assert_eq!(
         row_labels(&tree),
         vec![
-            (0, "Pins".to_string()),
-            (1, "nix-pin".to_string()),
             (0, "sysadmin  config+work-config  (atelier)".to_string()),
-            (1, "nix-pin".to_string()),
             (1, "sys-root".to_string()),
         ]
     );

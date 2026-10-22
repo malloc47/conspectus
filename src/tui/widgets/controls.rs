@@ -69,7 +69,7 @@ pub const MUX_STATE_OPTIONS: &[MuxStateKey] = &[
 /// strip, and the `[` / `]` view-cycle accelerator, so trimming it here
 /// hides those views everywhere without touching the `View` enum or the
 /// `conspectus table union|forks` CLI projections.
-pub const VIEW_OPTIONS: &[View] = &[View::Sessions, View::Mux, View::Prs];
+pub const VIEW_OPTIONS: &[View] = &[View::Sessions, View::Mux, View::Prs, View::Pinned];
 
 /// Sort options surfaced in the Sort section, in stable order.
 pub const SORT_OPTIONS: &[Sort] = &[Sort::Hierarchy, Sort::Recency];
@@ -1010,6 +1010,7 @@ fn view_label(view: View) -> &'static str {
         View::Union => "Union",
         View::Prs => "PRs",
         View::Forks => "Forks",
+        View::Pinned => "Pinned",
     }
 }
 

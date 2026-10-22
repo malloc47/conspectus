@@ -242,6 +242,14 @@ pub fn items_from_rows<'r>(rows: impl IntoIterator<Item = &'r Row>) -> Vec<Searc
                     None => format!("repo {} {}", repo.display_name, repo.common_dir),
                 }),
             },
+            RowKind::Mixed(mixed) => SearchItem {
+                id: row.id.clone(),
+                label: Cow::Owned(mixed.label.clone()),
+                haystack: Cow::Owned(format!(
+                    "{} {} {}",
+                    mixed.label, mixed.status, mixed.content
+                )),
+            },
         })
         .collect()
 }

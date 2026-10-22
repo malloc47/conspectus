@@ -257,6 +257,7 @@ pub(super) fn view_flag_label(view: crate::tui::View) -> &'static str {
         crate::tui::View::Union => "union",
         crate::tui::View::Prs => "prs",
         crate::tui::View::Forks => "forks",
+        crate::tui::View::Pinned => "pinned",
     }
 }
 

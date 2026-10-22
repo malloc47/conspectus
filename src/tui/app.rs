@@ -12,7 +12,7 @@ use std::fmt;
 use std::rc::Rc;
 use std::time::Instant;
 
-use crate::model::{AgentSessionId, GraphNode, GraphSnapshot, MuxSessionId, NodeId, PinId};
+use crate::model::{AgentSessionId, GraphSnapshot, MuxSessionId, NodeId, PinId};
 use crate::tui::detail::{DetailInputs, NodeDetail, build_node_detail};
 use crate::tui::explorer::{
     BreadcrumbHop, ExplorerInputs, ExplorerRow, ExplorerRowKey, NodeView, build_node_view,
@@ -442,7 +442,9 @@ impl App {
         let grouping = match active_view {
             View::Sessions => super::Grouping::Sessions(config.sessions_grouping),
             View::Mux => super::Grouping::Mux(config.mux_grouping),
-            View::Union | View::Prs | View::Forks => super::Grouping::default_for(active_view),
+            View::Union | View::Prs | View::Forks | View::Pinned => {
+                super::Grouping::default_for(active_view)
+            }
         };
         let edge_meta_visible = config.show_edge_meta;
         Self {
@@ -1437,6 +1439,10 @@ impl App {
                     effects.push(Effect::Toast(HANDOFF_PENDING_HINT.to_string()));
                     return effects;
                 }
+                if let Some(effect) = crate::tui::actions::pinned_primary_effect(self) {
+                    effects.push(effect);
+                    return effects;
+                }
                 match crate::tui::actions::resolve_attach_target(self) {
                     Ok(target) => effects.push(Effect::Exec(ExecSpec::AttachMux(target))),
                     Err(reason) => effects.push(Effect::Toast(
@@ -1664,28 +1670,6 @@ impl App {
             }
             _ => Effect::Toast("rename: lost selection before commit".to_string()),
         }
-    }
-}
-
-/// Pick the detail-pane target for a pin row given the active view.
-/// View-aligned: the sessions view shows the slot's session and the
-/// mux view its mux when the slot points at a node of that kind that
-/// is in the graph. Otherwise the slot itself is the target, so the
-/// operator sees its recipe and status instead of a mismatched view.
-fn placeholder_detail_target(snapshot: &GraphSnapshot, pin_id: &str, view: View) -> NodeId {
-    let pin_node = || NodeId::Pin(PinId::new(pin_id.to_string()));
-    let target = snapshot.nodes.iter().find_map(|node| match node {
-        GraphNode::Pin(pin) if pin.id.id == pin_id => pin.target_node.clone(),
-        _ => None,
-    });
-    match (view, target) {
-        (View::Mux, Some(id @ NodeId::MuxSession(_)))
-        | (View::Sessions, Some(id @ NodeId::AgentSession(_)))
-            if snapshot.find_node(&id).is_some() =>
-        {
-            id
-        }
-        _ => pin_node(),
     }
 }
 

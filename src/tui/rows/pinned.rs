@@ -1,0 +1,745 @@
+//! The Pinned view's row tree (ADR 0141).
+//!
+//! One row per pin slot, whatever its kind, in `pins.toml` order or by
+//! recency, grouped by project, kind, or not at all. A mux slot expands
+//! to the sessions it hosts and a checkout slot to its muxes and their
+//! sessions. Every row is a [`MixedRow`], so kinds share columns.
+
+use std::collections::BTreeMap;
+use std::path::Path;
+
+use crate::model::{
+    GraphNode, GraphSnapshot, LinkState, NodeId, NodeKind, PinId, PinKind, PinNode, RelationKind,
+    SlotStatus, path_is_ancestor_of,
+};
+use crate::tui::{PinnedGrouping, Sort};
+
+use super::{
+    GroupRow, MixedRow, MixedTone, Row, RowId, RowKind, RowTree, ViewLabel, format_recency,
+    harness_label, pin_nodes, repo_display_path, shorten_home,
+};
+
+pub struct PinnedBuildInputs<'a> {
+    pub snapshot: &'a GraphSnapshot,
+    pub home: Option<&'a Path>,
+    pub now: Option<i64>,
+    pub grouping: PinnedGrouping,
+    pub sort: Sort,
+}
+
+/// The bucket slots with no local project fall into.
+pub const OTHER_BUCKET: &str = "Other";
+
+struct Entry<'a> {
+    pin: &'a PinNode,
+    epoch: Option<i64>,
+}
+
+pub fn build_pinned_tree(inputs: PinnedBuildInputs<'_>) -> RowTree {
+    let PinnedBuildInputs {
+        snapshot,
+        home,
+        now,
+        grouping,
+        sort,
+    } = inputs;
+    let mut entries: Vec<Entry<'_>> = pin_nodes(snapshot)
+        .into_iter()
+        .map(|pin| Entry {
+            epoch: describe(snapshot, pin, home).epoch,
+            pin,
+        })
+        .collect();
+    if sort == Sort::Recency {
+        entries.sort_by(|a, b| {
+            b.epoch
+                .is_some()
+                .cmp(&a.epoch.is_some())
+                .then_with(|| b.epoch.cmp(&a.epoch))
+                .then_with(|| a.pin.order.cmp(&b.pin.order))
+        });
+    }
+
+    let mut tree = RowTree {
+        rows: Vec::new(),
+        view: ViewLabel::Pinned,
+    };
+    match grouping {
+        PinnedGrouping::None => {
+            for entry in &entries {
+                push_slot(&mut tree, snapshot, entry.pin, 0, home, now);
+            }
+        }
+        PinnedGrouping::Project | PinnedGrouping::Kind => {
+            let mut buckets: BTreeMap<(u8, String), Vec<&Entry<'_>>> = BTreeMap::new();
+            for entry in &entries {
+                let key = match grouping {
+                    PinnedGrouping::Kind => (
+                        PinKind::ALL
+                            .iter()
+                            .position(|k| *k == entry.pin.kind)
+                            .map_or(u8::MAX, |i| u8::try_from(i).unwrap_or(u8::MAX)),
+                        kind_bucket_label(entry.pin.kind).to_string(),
+                    ),
+                    _ => match project_of(snapshot, entry.pin, home) {
+                        Some(project) => (0, project),
+                        None => (1, OTHER_BUCKET.to_string()),
+                    },
+                };
+                buckets.entry(key).or_default().push(entry);
+            }
+            for ((_, label), members) in buckets {
+                tree.rows.push(Row {
+                    id: RowId::Bucket(label.clone()),
+                    depth: 0,
+                    expandable: true,
+                    kind: RowKind::Group(GroupRow {
+                        display_path: label,
+                        primary_node: None,
+                        is_launch_context: false,
+                    }),
+                });
+                for entry in members {
+                    push_slot(&mut tree, snapshot, entry.pin, 1, home, now);
+                }
+            }
+        }
+    }
+    tree
+}
+
+fn kind_bucket_label(kind: PinKind) -> &'static str {
+    match kind {
+        PinKind::Mux => "Muxes",
+        PinKind::Session => "Sessions",
+        PinKind::Checkout => "Worktrees",
+        PinKind::Repo => "Repos",
+        PinKind::Branch => "Branches",
+        PinKind::Pr => "PRs",
+        PinKind::Workspace => "Workspaces",
+        PinKind::Fork => "Forks",
+    }
+}
+
+fn node_kind(kind: PinKind) -> NodeKind {
+    match kind {
+        PinKind::Mux => NodeKind::MuxSession,
+        PinKind::Session => NodeKind::AgentSession,
+        PinKind::Checkout => NodeKind::Checkout,
+        PinKind::Repo => NodeKind::Repo,
+        PinKind::Branch => NodeKind::Branch,
+        PinKind::Pr => NodeKind::ForgePr,
+        PinKind::Workspace => NodeKind::Workspace,
+        PinKind::Fork => NodeKind::Fork,
+    }
+}
+
+/// What a slot's row shows besides its name.
+struct Described {
+    status: String,
+    tone: MixedTone,
+    epoch: Option<i64>,
+    content: String,
+    pr_state: Option<String>,
+}
+
+/// Status, age source, and content for one slot (ADR 0141's kind
+/// vocabulary).
+fn describe(snapshot: &GraphSnapshot, pin: &PinNode, home: Option<&Path>) -> Described {
+    let target = pin
+        .target_node
+        .as_ref()
+        .and_then(|id| snapshot.find_node(id));
+    let mut pr_state = None;
+    let status = match pin.status {
+        SlotStatus::Planned => "planned".to_string(),
+        SlotStatus::Missing => "missing".to_string(),
+        SlotStatus::Gone => match pin.kind {
+            PinKind::Session => "missing".to_string(),
+            _ => "gone".to_string(),
+        },
+        SlotStatus::Unknown => "unknown".to_string(),
+        SlotStatus::Live => match (pin.kind, target) {
+            (PinKind::Session, _) => {
+                if pin
+                    .target_node
+                    .as_ref()
+                    .is_some_and(|id| !muxes_of_session(snapshot, id).is_empty())
+                {
+                    "in mux".to_string()
+                } else {
+                    "resumable".to_string()
+                }
+            }
+            (PinKind::Pr, Some(GraphNode::ForgePr(pr))) => {
+                let state = pr.state.clone().unwrap_or_default().to_ascii_lowercase();
+                pr_state = Some(state.clone());
+                if pr.is_draft && (state.is_empty() || state == "open") {
+                    "draft".to_string()
+                } else if state.is_empty() {
+                    "open".to_string()
+                } else {
+                    state
+                }
+            }
+            _ => "live".to_string(),
+        },
+    };
+    let tone = if pin.status == SlotStatus::Live {
+        MixedTone::Normal
+    } else {
+        MixedTone::Dim
+    };
+    // When the entity isn't in the graph, its history record says when
+    // it was last seen.
+    let recorded = || {
+        pin.target
+            .as_deref()
+            .and_then(|t| t.strip_prefix(crate::model::PinSlot::HISTORY_PREFIX))
+            .or(pin.target.as_deref())
+            .and_then(|id| {
+                snapshot
+                    .history
+                    .meta(id)
+                    .or_else(|| snapshot.history.by_key(id))
+            })
+            .map(|(_, meta)| meta.last_seen)
+    };
+    let epoch = match pin.status {
+        SlotStatus::Live => match target {
+            Some(GraphNode::MuxSession(mux)) => mux.activity_epoch,
+            Some(GraphNode::AgentSession(session)) => session.last_active_epoch,
+            Some(GraphNode::ForgePr(pr)) => pr.updated_epoch.or_else(recorded),
+            Some(_) => None,
+            None => recorded(),
+        },
+        SlotStatus::Gone | SlotStatus::Unknown => pin
+            .target_node
+            .as_ref()
+            .and_then(|id| snapshot.presence(id))
+            .map(crate::model::NodePresence::last_seen)
+            .or_else(recorded),
+        SlotStatus::Missing | SlotStatus::Planned => None,
+    };
+    Described {
+        status,
+        tone,
+        epoch,
+        content: content_of(pin, home),
+        pr_state,
+    }
+}
+
+fn join_dot(parts: impl IntoIterator<Item = String>) -> String {
+    parts
+        .into_iter()
+        .filter(|part| !part.is_empty())
+        .collect::<Vec<_>>()
+        .join(" · ")
+}
+
+fn content_of(pin: &PinNode, home: Option<&Path>) -> String {
+    let text = |name: &str| pin.text(name).unwrap_or_default().to_string();
+    let path = |name: &str| {
+        pin.text(name)
+            .map(|p| shorten_home(p, home))
+            .unwrap_or_default()
+    };
+    match pin.kind {
+        PinKind::Mux => {
+            let harness = pin.text("harness").map_or_else(
+                || super::pin_program(pin).unwrap_or_default(),
+                harness_label,
+            );
+            join_dot([harness, path("cwd")])
+        }
+        PinKind::Session => join_dot([
+            pin.text("harness").map(harness_label).unwrap_or_default(),
+            text("title"),
+        ]),
+        PinKind::Checkout => {
+            let repo = pin
+                .text("repo")
+                .map(|r| crate::history::recorder::repo_name(r.strip_prefix("repo:").unwrap_or(r)))
+                .unwrap_or_default();
+            join_dot([repo, text("branch")])
+        }
+        PinKind::Repo => {
+            let remote = text("remote");
+            if remote.is_empty() {
+                path("common_dir")
+            } else {
+                remote
+            }
+        }
+        PinKind::Branch => join_dot([
+            pin.text("repo")
+                .map(|r| crate::history::recorder::repo_name(r.strip_prefix("repo:").unwrap_or(r)))
+                .unwrap_or_default(),
+            pin.text("refname")
+                .map(|r| crate::history::recorder::short_ref(r).to_string())
+                .unwrap_or_default(),
+        ]),
+        PinKind::Pr => join_dot([text("repo"), text("title")]),
+        PinKind::Workspace => path("root"),
+        PinKind::Fork => join_dot([text("provider"), text("name")]),
+    }
+    .replace('\n', " ")
+    .trim()
+    .to_string()
+}
+
+/// The project a slot belongs to: the nearest local repo above the
+/// path its recipe or target names, `~`-shortened.
+fn project_of(snapshot: &GraphSnapshot, pin: &PinNode, home: Option<&Path>) -> Option<String> {
+    let target_cwd = || {
+        pin.target_node
+            .as_ref()
+            .and_then(|id| snapshot.find_node(id))
+            .and_then(|node| match node {
+                GraphNode::AgentSession(session) => session.cwd.clone(),
+                GraphNode::MuxSession(mux) => mux.cwd.clone(),
+                _ => None,
+            })
+    };
+    let path = match pin.kind {
+        PinKind::Mux => pin.text("cwd").map(str::to_string).or_else(target_cwd),
+        PinKind::Session => target_cwd(),
+        PinKind::Checkout => pin.text("root").map(str::to_string),
+        PinKind::Repo => pin.text("path").map(str::to_string).or_else(|| {
+            pin.text("common_dir")
+                .map(|dir| dir.strip_suffix("/.git").unwrap_or(dir).to_string())
+        }),
+        PinKind::Branch => pin
+            .text("repo")
+            .map(|r| r.strip_prefix("repo:").unwrap_or(r))
+            .map(|dir| dir.strip_suffix("/.git").unwrap_or(dir).to_string()),
+        PinKind::Workspace => pin.text("root").map(str::to_string),
+        PinKind::Pr | PinKind::Fork => None,
+    }?;
+    let path = Path::new(&path);
+    let mut best: Option<String> = None;
+    for node in &snapshot.nodes {
+        let GraphNode::Repo(repo) = node else {
+            continue;
+        };
+        let root = repo_display_path(&repo.id, Some(repo));
+        if path_is_ancestor_of(Path::new(&root), path)
+            && best.as_ref().is_none_or(|b| root.len() > b.len())
+        {
+            best = Some(root);
+        }
+    }
+    let root = best.or_else(|| {
+        // A repo that is gone from the graph still names its own path.
+        (pin.kind == PinKind::Repo).then(|| path.to_string_lossy().into_owned())
+    })?;
+    Some(shorten_home(&root, home))
+}
+
+fn push_slot(
+    tree: &mut RowTree,
+    snapshot: &GraphSnapshot,
+    pin: &PinNode,
+    depth: u8,
+    home: Option<&Path>,
+    now: Option<i64>,
+) {
+    let described = describe(snapshot, pin, home);
+    let children = children_of(snapshot, pin, now);
+    let pin_node = NodeId::Pin(PinId::new(pin.id.id.clone()));
+    tree.rows.push(Row {
+        id: RowId::Pin {
+            pin_id: pin.id.id.clone(),
+        },
+        depth,
+        expandable: !children.is_empty(),
+        kind: RowKind::Mixed(MixedRow {
+            node_kind: node_kind(pin.kind),
+            label: pin.id.id.clone(),
+            status: described.status,
+            tone: described.tone,
+            age: format_recency(now, described.epoch),
+            content: described.content,
+            primary_node: pin_node,
+            pr_state: described.pr_state,
+        }),
+    });
+    for (offset, child) in children {
+        tree.rows.push(Row {
+            id: RowId::Nested {
+                pin_id: pin.id.id.clone(),
+                node: child.primary_node.clone(),
+            },
+            depth: depth + offset,
+            expandable: false,
+            kind: RowKind::Mixed(child),
+        });
+    }
+}
+
+/// Muxes a session is linked to.
+fn muxes_of_session(snapshot: &GraphSnapshot, session: &NodeId) -> Vec<NodeId> {
+    snapshot
+        .candidate_links
+        .iter()
+        .filter(|link| {
+            link.relation == RelationKind::LinkedToMux
+                && matches!(link.state, LinkState::Active)
+                && &link.source == session
+        })
+        .filter_map(|link| link.target_node_id().cloned())
+        .collect()
+}
+
+/// Sessions a mux hosts now or hosted last, newest first.
+fn sessions_of_mux(snapshot: &GraphSnapshot, mux: &NodeId) -> Vec<NodeId> {
+    let mut sessions: Vec<NodeId> = Vec::new();
+    for link in &snapshot.candidate_links {
+        let hosted = match link.relation {
+            RelationKind::LinkedToMux
+                if matches!(link.state, LinkState::Active)
+                    && link.target_node_id() == Some(mux) =>
+            {
+                Some(link.source.clone())
+            }
+            RelationKind::MuxLastHosted if &link.source == mux => link.target_node_id().cloned(),
+            _ => None,
+        };
+        if let Some(id @ NodeId::AgentSession(_)) = hosted
+            && !sessions.contains(&id)
+        {
+            sessions.push(id);
+        }
+    }
+    let epoch = |id: &NodeId| match snapshot.find_node(id) {
+        Some(GraphNode::AgentSession(s)) => s.last_active_epoch,
+        _ => None,
+    };
+    sessions.sort_by_key(|id| std::cmp::Reverse(epoch(id)));
+    sessions
+}
+
+fn session_row(
+    snapshot: &GraphSnapshot,
+    id: &NodeId,
+    mux_live: bool,
+    now: Option<i64>,
+) -> Option<MixedRow> {
+    let Some(GraphNode::AgentSession(session)) = snapshot.find_node(id) else {
+        return None;
+    };
+    let alias = snapshot.aliases.get(id).map(ToString::to_string);
+    let key = &session.id.session_key;
+    let label = alias
+        .or_else(|| session.title.clone().filter(|t| !t.is_empty()))
+        .unwrap_or_else(|| key.chars().take(8).collect());
+    let live = mux_live && snapshot.is_live(id);
+    Some(MixedRow {
+        node_kind: NodeKind::AgentSession,
+        label: label.replace('\n', " "),
+        status: if live { "in mux" } else { "resumable" }.to_string(),
+        tone: MixedTone::Normal,
+        age: format_recency(now, session.last_active_epoch),
+        content: join_dot([
+            harness_label(&session.harness_key),
+            session.title.clone().unwrap_or_default().replace('\n', " "),
+        ]),
+        primary_node: id.clone(),
+        pr_state: None,
+    })
+}
+
+fn mux_row(
+    snapshot: &GraphSnapshot,
+    id: &NodeId,
+    home: Option<&Path>,
+    now: Option<i64>,
+) -> Option<MixedRow> {
+    let Some(GraphNode::MuxSession(mux)) = snapshot.find_node(id) else {
+        return None;
+    };
+    Some(MixedRow {
+        node_kind: NodeKind::MuxSession,
+        label: mux.session_name().to_string(),
+        status: "live".to_string(),
+        tone: MixedTone::Normal,
+        age: format_recency(now, mux.activity_epoch),
+        content: join_dot([
+            super::mux_program(mux, None).unwrap_or_default(),
+            mux.cwd
+                .as_deref()
+                .map(|cwd| shorten_home(cwd, home))
+                .unwrap_or_default(),
+        ]),
+        primary_node: id.clone(),
+        pr_state: None,
+    })
+}
+
+/// Nested rows with their depth offset below the slot row.
+fn children_of(snapshot: &GraphSnapshot, pin: &PinNode, now: Option<i64>) -> Vec<(u8, MixedRow)> {
+    let Some(target) = pin.target_node.as_ref() else {
+        return Vec::new();
+    };
+    let home = std::env::var_os("HOME").map(std::path::PathBuf::from);
+    let home = home.as_deref();
+    let mut out = Vec::new();
+    match pin.kind {
+        PinKind::Mux => {
+            let mux_live = pin.status == SlotStatus::Live;
+            for id in sessions_of_mux(snapshot, target) {
+                out.extend(session_row(snapshot, &id, mux_live, now).map(|row| (1, row)));
+            }
+        }
+        PinKind::Checkout if pin.status == SlotStatus::Live => {
+            let Some(root) = pin.text("root") else {
+                return out;
+            };
+            let root = Path::new(root);
+            let mut muxes: Vec<(&crate::model::MuxSessionNode, NodeId)> = snapshot
+                .live_nodes()
+                .filter_map(|node| match node {
+                    GraphNode::MuxSession(mux)
+                        if mux
+                            .cwd
+                            .as_deref()
+                            .is_some_and(|cwd| path_is_ancestor_of(root, Path::new(cwd))) =>
+                    {
+                        Some((mux, NodeId::MuxSession(mux.id.clone())))
+                    }
+                    _ => None,
+                })
+                .collect();
+            muxes.sort_by_key(|(mux, _)| std::cmp::Reverse(mux.activity_epoch));
+            for (_, id) in muxes {
+                out.extend(mux_row(snapshot, &id, home, now).map(|row| (1, row)));
+                for session in sessions_of_mux(snapshot, &id) {
+                    out.extend(session_row(snapshot, &session, true, now).map(|row| (2, row)));
+                }
+            }
+        }
+        _ => {}
+    }
+    out
+}
+
+#[cfg(test)]
+#[path = "pinned_tests.rs"]
+mod tests;
+
+/// A world with one slot of each state across kinds, for tests and the
+/// Pinned view's snapshot checks.
+#[cfg(test)]
+pub(crate) fn fixture_world() -> GraphSnapshot {
+    use crate::model::{
+        AgentSessionId, AgentSessionNode, CheckoutId, CheckoutNode, CheckoutRecipe, CheckoutRecord,
+        FieldValue, HistorySnapshot, MuxIncarnation, MuxRecipe, MuxRecord, MuxSessionId,
+        MuxSessionNode, NodePresence, PinSlot, PrRecipe, PrRecord, RecordMeta, RepoId, RepoNode,
+        SlotFields,
+    };
+
+    fn meta(id: &str, key: &str, last_seen: i64) -> RecordMeta {
+        RecordMeta {
+            id: id.into(),
+            key: key.into(),
+            first_seen: 1,
+            last_seen,
+            origin: Default::default(),
+            display: Default::default(),
+            rebuilt_from: None,
+        }
+    }
+    fn slot(id: &str, kind: PinKind, target: Option<&str>, order: u32) -> PinSlot {
+        PinSlot {
+            id: id.into(),
+            kind,
+            target: target.map(str::to_string),
+            pinned_at: None,
+            overrides: SlotFields::new(),
+            snapshot: SlotFields::from([("label".to_string(), FieldValue::Text(id.into()))]),
+            order,
+            legacy: false,
+        }
+    }
+    fn text(value: &str) -> FieldValue {
+        FieldValue::Text(value.into())
+    }
+
+    const NOW: i64 = 1_700_000_000;
+    let repo_id = RepoId::new("/home/op/src/conspectus/.git");
+    let mut repo = RepoNode::new(repo_id.clone());
+    repo.source_paths = vec!["/home/op/src/conspectus".into()];
+    let checkout = CheckoutNode::new(
+        CheckoutId::new(repo_id, "/home/op/src/conspectus"),
+        "/home/op/src/conspectus",
+    );
+
+    let mut main_mux = MuxSessionNode::new(
+        MuxSessionId::new("tmux:conspectus-main"),
+        "tmux",
+        "conspectus-main",
+    );
+    main_mux.cwd = Some("/home/op/src/conspectus".into());
+    main_mux.activity_epoch = Some(NOW - 120);
+    main_mux.created_epoch = Some(NOW - 9_000);
+    main_mux.backend_session_id = Some("$1".into());
+
+    let mut session = AgentSessionNode::new(
+        AgentSessionId::new("claude-code", "/state", "e44d01cb5a"),
+        "claude-code",
+    );
+    session.cwd = Some("/home/op/src/conspectus".into());
+    session.title = Some("Fix the ledger merge".into());
+    session.last_active_epoch = Some(NOW - 1_020);
+
+    let history = HistorySnapshot {
+        muxes: vec![
+            MuxRecord {
+                meta: meta("h_main", "mux_session:tmux:conspectus-main", NOW - 120),
+                recipe: MuxRecipe {
+                    backend: "tmux".into(),
+                    name: "conspectus-main".into(),
+                    cwd: Some("/home/op/src/conspectus".into()),
+                    incarnation: Some(MuxIncarnation {
+                        session_id: Some("$1".into()),
+                        created: Some(NOW - 9_000),
+                    }),
+                    harness: Some("claude-code".into()),
+                    ..Default::default()
+                },
+                extra: Default::default(),
+            },
+            MuxRecord {
+                meta: meta("h_agent", "mux_session:tmux:config-agent3", NOW - 259_200),
+                recipe: MuxRecipe {
+                    backend: "tmux".into(),
+                    name: "config-agent3".into(),
+                    cwd: Some("/home/op/src/config".into()),
+                    harness: Some("claude-code".into()),
+                    ..Default::default()
+                },
+                extra: Default::default(),
+            },
+        ],
+        checkouts: vec![CheckoutRecord {
+            meta: meta(
+                "h_wt",
+                "checkout:/home/op/src/conspectus-ledger",
+                NOW - 172_800,
+            ),
+            recipe: CheckoutRecipe {
+                repo: "repo:/home/op/src/conspectus/.git".into(),
+                root: "/home/op/src/conspectus-ledger".into(),
+                linked: true,
+                branch: Some("feature/ledger".into()),
+                ..Default::default()
+            },
+            extra: Default::default(),
+        }],
+        prs: vec![PrRecord {
+            meta: meta(
+                "h_pr",
+                "forge_pr:github:github.com/malloc47/conspectus#41",
+                NOW - 18_000,
+            ),
+            recipe: PrRecipe {
+                provider: "github".into(),
+                host: "github.com".into(),
+                owner: "malloc47".into(),
+                repo: "conspectus".into(),
+                number: 41,
+                title: Some("Ledger store and merge".into()),
+                state: Some("merged".into()),
+                ..Default::default()
+            },
+            extra: Default::default(),
+        }],
+        presence: std::collections::BTreeMap::from([
+            (
+                "h_agent".to_string(),
+                NodePresence::Gone {
+                    last_seen: NOW - 259_200,
+                },
+            ),
+            (
+                "h_wt".to_string(),
+                NodePresence::Gone {
+                    last_seen: NOW - 172_800,
+                },
+            ),
+        ]),
+        ..Default::default()
+    };
+
+    let mut legacy = slot("old-api", PinKind::Mux, None, 6);
+    legacy.legacy = true;
+    legacy.overrides = SlotFields::from([
+        ("name".to_string(), text("old-api")),
+        ("cwd".to_string(), text("/home/op/src/api")),
+        ("harness".to_string(), text("codex")),
+    ]);
+    let mut planned = slot("nightly", PinKind::Mux, None, 5);
+    planned.overrides = SlotFields::from([
+        ("name".to_string(), text("nightly")),
+        ("cwd".to_string(), text("/home/op/src/conspectus")),
+        ("harness".to_string(), text("claude-code")),
+    ]);
+
+    let mut snapshot = GraphSnapshot {
+        nodes: vec![
+            GraphNode::Repo(repo),
+            GraphNode::Checkout(checkout),
+            GraphNode::MuxSession(main_mux),
+            GraphNode::AgentSession(session),
+        ],
+        history,
+        pins: vec![
+            slot("conspectus-main", PinKind::Mux, Some("history:h_main"), 0),
+            slot("config-agent3", PinKind::Mux, Some("history:h_agent"), 1),
+            slot(
+                "e44d01cb",
+                PinKind::Session,
+                Some("agent_session:claude-code:/state:e44d01cb5a"),
+                2,
+            ),
+            slot(
+                "ledger-worktree",
+                PinKind::Checkout,
+                Some("history:h_wt"),
+                3,
+            ),
+            slot(
+                "ledger-pr",
+                PinKind::Pr,
+                Some("forge_pr:github:github.com/malloc47/conspectus#41"),
+                4,
+            ),
+            planned,
+            legacy,
+        ],
+        ..GraphSnapshot::empty()
+    };
+    let mut hosted = crate::model::GraphLink::new(
+        "fixture:session-in-main".to_string(),
+        NodeId::AgentSession(crate::model::AgentSessionId::new(
+            "claude-code",
+            "/state",
+            "e44d01cb5a",
+        )),
+        crate::model::LinkEndpoint::Node {
+            id: NodeId::MuxSession(crate::model::MuxSessionId::new("tmux:conspectus-main")),
+        },
+        RelationKind::LinkedToMux,
+        crate::model::Provenance::Discovered,
+    );
+    hosted.state = LinkState::Active;
+    snapshot.candidate_links.push(hosted);
+    snapshot
+        .diagnostics
+        .push(crate::model::Diagnostic::LegacyPins {
+            count: 1,
+            ids: vec!["old-api".into()],
+        });
+    crate::resolve::resolve_snapshot(snapshot)
+}

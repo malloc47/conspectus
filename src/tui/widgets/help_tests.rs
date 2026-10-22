@@ -29,7 +29,11 @@ fn every_keybindings_entry_appears_in_help_sections() {
     // least one of those forms is present.
     fn equivalent_forms(label: &str) -> Vec<String> {
         match label {
-            "1" | "2" | "3" | "4" | "5" => vec![label.to_string(), "1 – 5".to_string()],
+            "1" | "2" | "3" | "4" | "5" => vec![
+                label.to_string(),
+                "1 – 5".to_string(),
+                "1 / 2 / 3 / 4".to_string(),
+            ],
             "Ctrl-c" => vec!["Ctrl-C".to_string()],
             "Ctrl-g" => vec!["Ctrl-G".to_string()],
             "Ctrl-r" => vec!["Ctrl-R".to_string()],
@@ -235,7 +239,7 @@ fn body_lines_cover_every_documented_key() {
         "Refresh discovery now",
         "Resume the selected un-muxed agent session",
         "Quit",
-        "Switch directly to the sessions / mux / PRs view",
+        "Switch directly to the sessions / mux / PRs / pinned view",
         "Cycle to next / previous view",
         "Clear all active filters",
         "Cycle grouping forward",

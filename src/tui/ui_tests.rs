@@ -197,16 +197,16 @@ fn pinned_app_with(target: Option<NodeId>, extend: impl FnOnce(&mut GraphSnapsho
     snapshot.pins.push(ingest_slot(target));
     extend(&mut snapshot);
     let snapshot = crate::resolve::resolve_snapshot(snapshot);
-    let tree = build_sessions_tree(SessionsBuildInputs {
-        snapshot: &snapshot,
-        grouping: SessionsGrouping::Graph,
-        home: Some(std::path::Path::new("/home/op")),
-        now: None,
-        cwd: None,
-        filter: RowFilter::default(),
-    });
+    let tree =
+        crate::tui::rows::pinned::build_pinned_tree(crate::tui::rows::pinned::PinnedBuildInputs {
+            snapshot: &snapshot,
+            home: Some(std::path::Path::new("/home/op")),
+            now: None,
+            grouping: crate::tui::PinnedGrouping::None,
+            sort: crate::tui::Sort::Hierarchy,
+        });
     let mut config = RunConfig::defaults();
-    config.default_view = View::Sessions;
+    config.default_view = View::Pinned;
     let mut app = App::new(config);
     app.update(Msg::SetData {
         snapshot: crate::tui::app::SnapshotHandle::from_snapshot(&snapshot),
@@ -214,7 +214,7 @@ fn pinned_app_with(target: Option<NodeId>, extend: impl FnOnce(&mut GraphSnapsho
         loaded_at_epoch: 1_700_000_000,
         initial_selection_hint: None,
     });
-    // Step to the synthetic Pins group header, then to the pin row.
+    // Select the slot row.
     let pin_row = app
         .tree()
         .rows
@@ -5099,4 +5099,201 @@ fn the_header_counts_only_muxes_that_exist() {
     let handle = SnapshotHandle::from_snapshot(&snapshot);
     let (_, mux) = header::snapshot_counts(Some(&handle));
     assert_eq!(mux, 1, "one live mux and one ghost");
+}
+
+// ----- The Pinned view (mixed-kind rows) -----------------------------
+
+/// An app showing the Pinned view over [`fixture_world`], grouped as
+/// asked, with every bucket and slot expanded.
+///
+/// [`fixture_world`]: crate::tui::rows::pinned::fixture_world
+fn slots_app(grouping: crate::tui::PinnedGrouping) -> App {
+    let snapshot = crate::tui::rows::pinned::fixture_world();
+    let mut config = RunConfig::defaults();
+    config.default_view = View::Pinned;
+    let mut app = App::new(config);
+    app.update(Msg::SetGrouping(crate::tui::Grouping::Pinned(grouping)));
+    let tree =
+        crate::tui::rows::pinned::build_pinned_tree(crate::tui::rows::pinned::PinnedBuildInputs {
+            snapshot: &snapshot,
+            home: Some(std::path::Path::new("/home/op")),
+            now: Some(1_700_000_000),
+            grouping,
+            sort: crate::tui::Sort::Hierarchy,
+        });
+    app.update(Msg::SetData {
+        snapshot: SnapshotHandle::from_snapshot(&snapshot),
+        tree,
+        loaded_at_epoch: 1_700_000_000,
+        initial_selection_hint: None,
+    });
+    app
+}
+
+fn pinned_frame(app: &mut App, width: u16) -> String {
+    buffer_to_string(&render_to_buffer(app, Rect::new(0, 0, width, 24)))
+}
+
+#[test]
+fn the_pinned_view_lists_every_kind_and_state_in_aligned_columns() {
+    let mut app = slots_app(crate::tui::PinnedGrouping::None);
+    for width in [70, 110, 160] {
+        insta::assert_snapshot!(
+            format!("pinned_view_ungrouped_{width}"),
+            pinned_frame(&mut app, width)
+        );
+    }
+}
+
+#[test]
+fn the_pinned_view_groups_by_project_and_by_kind() {
+    let mut app = slots_app(crate::tui::PinnedGrouping::Project);
+    insta::assert_snapshot!("pinned_view_by_project", pinned_frame(&mut app, 120));
+    let mut app = slots_app(crate::tui::PinnedGrouping::Kind);
+    insta::assert_snapshot!("pinned_view_by_kind", pinned_frame(&mut app, 120));
+}
+
+/// The terminal column each slot row's status word starts at.
+fn status_columns(frame: &str) -> Vec<usize> {
+    frame
+        .lines()
+        .filter(|line| {
+            ["live", "gone", "planned", "merged", "in mux"]
+                .iter()
+                .any(|status| line.contains(&format!(" {status} ")))
+        })
+        .filter_map(|line| {
+            ["planned", "merged", "in mux", "live", "gone"]
+                .iter()
+                .filter_map(|status| line.find(&format!("  {status}")))
+                .min()
+                .map(|byte| line[..byte].chars().count())
+        })
+        .collect()
+}
+
+#[test]
+fn folding_a_group_does_not_shift_the_columns_of_the_rows_left() {
+    let mut app = slots_app(crate::tui::PinnedGrouping::Project);
+    let open = pinned_frame(&mut app, 120);
+    let columns = status_columns(&open);
+    assert!(columns.len() >= 5, "{open}");
+    assert!(
+        columns.windows(2).all(|pair| pair[0] == pair[1]),
+        "status words start in one column: {columns:?}\n{open}"
+    );
+
+    // Fold the first bucket and look again.
+    let first_bucket = app
+        .tree()
+        .rows
+        .iter()
+        .find(|row| matches!(row.id, RowId::Bucket(_)))
+        .map(|row| row.id.clone())
+        .unwrap();
+    app.set_selection(first_bucket);
+    app.update(Msg::ToggleExpand);
+    let folded = pinned_frame(&mut app, 120);
+    let after = status_columns(&folded);
+    assert!(after.len() < columns.len(), "something folded: {folded}");
+    assert!(
+        after.iter().all(|column| *column == columns[0]),
+        "columns stayed put: {after:?} vs {columns:?}"
+    );
+}
+
+#[test]
+fn the_pinned_view_points_at_pin_migrate_while_legacy_pins_remain() {
+    let mut app = slots_app(crate::tui::PinnedGrouping::None);
+    let frame = pinned_frame(&mut app, 130);
+    assert!(frame.contains("1 legacy pin is still read"), "{frame}");
+    assert!(frame.contains("conspectus pin migrate"), "{frame}");
+}
+
+#[test]
+fn gone_and_planned_rows_render_dimmed_and_live_rows_do_not() {
+    let mut app = slots_app(crate::tui::PinnedGrouping::None);
+    let buffer = render_to_buffer(&mut app, Rect::new(0, 0, 130, 24));
+    // Whether the first cell of `needle`'s row label carries the dim
+    // modifier.
+    let dimmed_row = |needle: &str| -> bool {
+        (0..buffer.area.height).any(|y| {
+            let cells: Vec<String> = (0..60)
+                .map(|x| buffer[(x, y)].symbol().to_string())
+                .collect();
+            let line = cells.concat();
+            let Some(byte) = line.find(needle) else {
+                return false;
+            };
+            let x = u16::try_from(line[..byte].chars().count()).unwrap();
+            buffer[(x, y)]
+                .style()
+                .add_modifier
+                .contains(Theme::default().placeholder)
+        })
+    };
+    assert!(dimmed_row("config-agent3"));
+    assert!(dimmed_row("nightly"));
+    assert!(!dimmed_row("conspectus-main"));
+}
+
+#[test]
+fn enter_on_a_gone_slot_rebuilds_it_and_on_a_live_mux_slot_attaches() {
+    use crate::tui::Effect;
+    use crate::tui::effect::ExecSpec;
+    let mut app = slots_app(crate::tui::PinnedGrouping::None);
+
+    app.set_selection(RowId::Pin {
+        pin_id: "config-agent3".into(),
+    });
+    let effects = app.update(Msg::AttachSelected);
+    assert_eq!(
+        effects,
+        vec![Effect::Exec(ExecSpec::Rebuild {
+            reference: "config-agent3".into()
+        })]
+    );
+
+    app.set_selection(RowId::Pin {
+        pin_id: "nightly".into(),
+    });
+    assert_eq!(
+        app.update(Msg::AttachSelected),
+        vec![Effect::Exec(ExecSpec::Rebuild {
+            reference: "nightly".into()
+        })],
+        "a planned slot builds on its first rebuild"
+    );
+
+    app.set_selection(RowId::Pin {
+        pin_id: "conspectus-main".into(),
+    });
+    let effects = app.update(Msg::AttachSelected);
+    assert!(
+        matches!(effects.as_slice(), [Effect::Exec(ExecSpec::AttachMux(target))] if target.native_id == "conspectus-main"),
+        "{effects:?}"
+    );
+
+    app.set_selection(RowId::Pin {
+        pin_id: "ledger-pr".into(),
+    });
+    let effects = app.update(Msg::AttachSelected);
+    assert!(
+        matches!(effects.as_slice(), [Effect::Toast(text)] if text.contains("ledger-pr")),
+        "{effects:?}"
+    );
+}
+
+#[test]
+fn the_detail_pane_shows_where_each_slot_field_came_from() {
+    let mut app = slots_app(crate::tui::PinnedGrouping::None);
+    app.set_selection(RowId::Pin {
+        pin_id: "conspectus-main".into(),
+    });
+    let frame = pinned_frame(&mut app, 160);
+    assert!(
+        frame.contains("history") || frame.contains("live"),
+        "{frame}"
+    );
+    assert!(frame.contains("cwd"), "{frame}");
 }

@@ -208,6 +208,8 @@ pub enum View {
     Union,
     Prs,
     Forks,
+    /// Pin slots, whatever their kind (ADR 0141).
+    Pinned,
 }
 
 /// Row sort within each group.
@@ -413,6 +415,18 @@ pub enum ForksGrouping {
     Parent,
 }
 
+/// Top-level grouping in the Pinned view (ADR 0141).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PinnedGrouping {
+    /// Under the project (repo) the slot's target or cwd belongs to.
+    Project,
+    /// By slot kind.
+    Kind,
+    /// One flat list.
+    None,
+}
+
 /// Per-view grouping dispatch. Each variant wraps the per-view
 /// grouping enum so a single [`Grouping`] value can be persisted in
 /// [`crate::tui::app::App`], passed through the CLI surface, or
@@ -431,6 +445,7 @@ pub enum Grouping {
     Union(UnionGrouping),
     Prs(PrsGrouping),
     Forks(ForksGrouping),
+    Pinned(PinnedGrouping),
 }
 
 impl Grouping {
@@ -442,6 +457,7 @@ impl Grouping {
             Self::Union(_) => View::Union,
             Self::Prs(_) => View::Prs,
             Self::Forks(_) => View::Forks,
+            Self::Pinned(_) => View::Pinned,
         }
     }
 
@@ -455,6 +471,7 @@ impl Grouping {
             View::Union => Self::Union(UnionGrouping::Kind),
             View::Prs => Self::Prs(PrsGrouping::Checkout),
             View::Forks => Self::Forks(ForksGrouping::Provider),
+            View::Pinned => Self::Pinned(PinnedGrouping::Project),
         }
     }
 
@@ -480,6 +497,9 @@ impl Grouping {
             Self::Prs(PrsGrouping::State) => "state",
             Self::Forks(ForksGrouping::Provider) => "provider",
             Self::Forks(ForksGrouping::Parent) => "parent",
+            Self::Pinned(PinnedGrouping::Project) => "project",
+            Self::Pinned(PinnedGrouping::Kind) => "kind",
+            Self::Pinned(PinnedGrouping::None) => "none",
         }
     }
 
@@ -527,6 +547,11 @@ impl Grouping {
             View::Forks => &[
                 Self::Forks(ForksGrouping::Provider),
                 Self::Forks(ForksGrouping::Parent),
+            ],
+            View::Pinned => &[
+                Self::Pinned(PinnedGrouping::Project),
+                Self::Pinned(PinnedGrouping::Kind),
+                Self::Pinned(PinnedGrouping::None),
             ],
         }
     }
@@ -592,6 +617,7 @@ mod tests {
             View::Union,
             View::Prs,
             View::Forks,
+            View::Pinned,
         ] {
             for option in Grouping::values_for(view) {
                 let parsed = Grouping::parse_for(view, option.as_str());
@@ -641,6 +667,7 @@ mod tests {
             View::Union,
             View::Prs,
             View::Forks,
+            View::Pinned,
         ] {
             assert_eq!(Grouping::default_for(view).view(), view);
         }

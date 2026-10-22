@@ -1,0 +1,28 @@
+---
+source: src/tui/ui_tests.rs
+expression: "pinned_frame(&mut app, width)"
+---
+updated 0s ago · 0/1 sessions · 1 mux                                                                         
+┌ ▸ sessions · mux · prs · pinned ────────────────────┐┌   ◉ pin ────────────────────────────────────────────┐
+│▶ ▣ conspectus-main         live      2m  claude · ~…││  id            conspectus-main                      │
+│  ▣ config-agent3           gone      3d  claude · ~…││  name          conspectus-main                      │
+│  ● e44d01cb                in mux   17m  claude · F…││  kind          mux                                  │
+│  ◇ ledger-worktree         gone      2d  conspectus…││  status        live                                 │
+│  ⇄ ledger-pr               merged    5h  malloc47/c…││  target        mux_session:tmux:conspectus-main     │
+│  ▣ nightly                 planned       claude · ~…││  name          conspectus-main                      │
+│  ▣ old-api                 planned       codex · ~/…││  cwd           /home/op/src/conspectus              │
+│                                                     ││  harness       claude-code                          │
+│                                                     ││  argv          claude                               │
+│                                                     ││──────────────────────────── 1 validated  Related ── │
+│                                                     ││  targets                ▣ tmux:conspectus-main      │
+│                                                     ││                                                     │
+│                                                     ││────────────────────────────────────────── Preview ──│
+│                                                     ││loading mux preview…                                 │
+│                                                     ││                                                     │
+│                                                     ││                                                     │
+│                                                     ││                                                     │
+│                                                     ││                                                     │
+│1 legacy pin is still read from config files         ││                                                     │
+│(old-api); run `conspectus pin migrate` to convert it││                                                     │
+└─────────────────────────────────────────────────────┘└─────────────────────────────────────────────────────┘
+[left] group:none · filter:all · sort:hierarchy · Enter/a attach tmux:conspectus-main · j/k move · h/l fold ·

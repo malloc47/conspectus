@@ -24,6 +24,7 @@ use crate::tui::View;
 
 pub mod forks;
 pub mod mux;
+pub mod pinned;
 pub mod prs;
 pub mod sessions;
 pub mod union;
@@ -52,15 +53,21 @@ pub enum RowId {
     MuxSession(NodeId),
     Pr(NodeId),
     Fork(NodeId),
-    /// An unbound session pin row (ADR 0057). Keyed on the pin id
-    /// so the row is stable across refreshes even as the pin's
-    /// binding state changes — once a pin binds, the same logical
-    /// entry switches from a placeholder row to a
-    /// [`RowKind::AgentSession`] row whose `pin_id` field carries
-    /// the pin marker.
+    /// A slot row in the Pinned view (ADR 0141), keyed on the slot
+    /// name so it is stable while the slot's target changes state.
     Pin {
         pin_id: String,
     },
+    /// An entity listed under a slot in the Pinned view: the sessions
+    /// of a mux slot, the muxes of a checkout slot. Keyed on the slot
+    /// as well, so the same entity under two slots gets two rows.
+    Nested {
+        pin_id: String,
+        node: NodeId,
+    },
+    /// A named bucket of a view that groups by something other than a
+    /// node: the project or kind buckets of the Pinned view.
+    Bucket(String),
     /// A PRs-view group for a forge repo (`owner/repo`) when no local
     /// repo is known for its PRs (ADR 0129).
     Remote(String),
@@ -88,6 +95,7 @@ pub enum ViewLabel {
     Union,
     Prs,
     Forks,
+    Pinned,
 }
 
 impl From<View> for ViewLabel {
@@ -98,6 +106,7 @@ impl From<View> for ViewLabel {
             View::Union => Self::Union,
             View::Prs => Self::Prs,
             View::Forks => Self::Forks,
+            View::Pinned => Self::Pinned,
         }
     }
 }
@@ -132,6 +141,35 @@ pub enum RowKind {
     /// mux rows so it scans as the same visual rhythm rather than
     /// as a bare group header.
     Repo(RepoRow),
+    /// A row of any kind in the Pinned and History views, drawn in the
+    /// shared mixed-kind columns.
+    Mixed(MixedRow),
+}
+
+/// How a mixed-kind row's status reads: dimmed rows are the ones whose
+/// entity isn't there to act on.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum MixedTone {
+    Normal,
+    /// Gone, missing, planned, or unknown.
+    Dim,
+}
+
+/// One row in `<kind> <label> <status> <age> <content>` (ADR 0141).
+/// The kind glyph shows for every kind, sessions included, because it
+/// is the only kind signal in a list of mixed kinds.
+#[derive(Clone, Debug, PartialEq)]
+pub struct MixedRow {
+    pub node_kind: crate::model::NodeKind,
+    pub label: String,
+    pub status: String,
+    pub tone: MixedTone,
+    /// Age as `format_recency` renders it; empty when unknown.
+    pub age: Option<String>,
+    pub content: String,
+    pub primary_node: NodeId,
+    /// PR state, which tints the PR glyph.
+    pub pr_state: Option<String>,
 }
 
 /// A workspace / repo / worktree label row.
@@ -949,6 +987,16 @@ pub(crate) fn build_tree_for_view(inputs: TreeInputs<'_>) -> RowTree {
         View::Forks => forks::build_forks_tree(forks::ForksBuildInputs {
             snapshot,
             home: home.as_deref(),
+        }),
+        View::Pinned => pinned::build_pinned_tree(pinned::PinnedBuildInputs {
+            snapshot,
+            home: home.as_deref(),
+            now,
+            grouping: match grouping {
+                crate::tui::Grouping::Pinned(g) => g,
+                _ => crate::tui::PinnedGrouping::Project,
+            },
+            sort,
         }),
     }
 }

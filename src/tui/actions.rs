@@ -90,10 +90,8 @@ pub fn resolve_attach_target(app: &App) -> Result<AttachTarget, AttachDisabled> 
         .ok_or(AttachDisabled::NoSelection)?;
 
     let mux_id = match (&row.kind, selection) {
-        // A pin placeholder row stands in for a pin with no realized
-        // session. When its mux is live anyway (a stale mux, or a
-        // pin whose process isn't an agent harness), that mux is the
-        // row's target.
+        // A slot row attaches to the live mux it points at, or to the
+        // mux hosting the live session it points at.
         (_, RowId::Pin { pin_id }) => match pin_live_mux(snapshot, pin_id) {
             Some(id) => id,
             None => {
@@ -102,6 +100,16 @@ pub fn resolve_attach_target(app: &App) -> Result<AttachTarget, AttachDisabled> 
                     None => AttachDisabled::UnmuxedSession,
                 });
             }
+        },
+        // An entity listed under a slot attaches like its own row.
+        (_, RowId::Nested { node, .. }) => match node {
+            NodeId::MuxSession(id) => id.clone(),
+            session @ NodeId::AgentSession(_) => match preferred_mux_for_session(snapshot, session)
+            {
+                Some(id) => id,
+                None => return Err(AttachDisabled::UnmuxedSession),
+            },
+            _ => return Err(AttachDisabled::UnsupportedRow),
         },
         (RowKind::AgentSessionMuxCandidate(candidate), _) => candidate.mux.clone(),
         (RowKind::AgentSession(session), _) => {
@@ -221,7 +229,55 @@ pub fn pin_live_mux(snapshot: &GraphSnapshot, pin_id: &str) -> Option<MuxSession
         .find(|pin| pin.id.id == pin_id)?;
     match crate::tui::rows::live_pin_target(snapshot, pin)? {
         NodeId::MuxSession(id) => Some(id),
+        session @ NodeId::AgentSession(_) => preferred_mux_for_session(snapshot, &session),
         _ => None,
+    }
+}
+
+/// What `Enter` does on a slot row when attaching isn't it: run
+/// `conspectus rebuild <slot>` for a slot whose target is gone, missing,
+/// planned, or a session that isn't in a mux, and explain otherwise.
+/// `None` means the slot attaches.
+pub fn pinned_primary_effect(app: &App) -> Option<crate::tui::Effect> {
+    use crate::model::{PinKind, SlotStatus};
+    use crate::tui::Effect;
+    use crate::tui::effect::ExecSpec;
+    let RowId::Pin { pin_id } = app.selection()? else {
+        return None;
+    };
+    let snapshot = app.snapshot_handle()?.snapshot();
+    let pin = crate::tui::rows::pin_nodes(snapshot)
+        .into_iter()
+        .find(|pin| pin.id.id == *pin_id)?;
+    if pin_live_mux(snapshot, pin_id).is_some() {
+        return None;
+    }
+    let rebuild = || {
+        Some(Effect::Exec(ExecSpec::Rebuild {
+            reference: pin_id.clone(),
+        }))
+    };
+    match (pin.status, pin.kind) {
+        (SlotStatus::Unknown, _) => Some(Effect::Toast(format!(
+            "pin `{pin_id}`: couldn't check whether its target exists; refresh and try again"
+        ))),
+        (
+            SlotStatus::Gone | SlotStatus::Missing | SlotStatus::Planned,
+            PinKind::Mux | PinKind::Session | PinKind::Checkout | PinKind::Repo,
+        ) => rebuild(),
+        (SlotStatus::Live, PinKind::Session) => rebuild(),
+        (SlotStatus::Live, PinKind::Pr) => Some(Effect::Toast(match pin.text("url") {
+            Some(url) => format!("pin `{pin_id}`: {url}"),
+            None => format!("pin `{pin_id}`: this PR has no URL on record"),
+        })),
+        (SlotStatus::Live, kind) => Some(Effect::Toast(format!(
+            "pin `{pin_id}` is a live {}; nothing to launch",
+            kind.as_str()
+        ))),
+        (_, kind) => Some(Effect::Toast(format!(
+            "pin `{pin_id}`: a {} can't be rebuilt",
+            kind.as_str()
+        ))),
     }
 }
 
@@ -236,17 +292,17 @@ pub fn pin_status_hint(snapshot: &GraphSnapshot, pin_id: &str) -> Option<String>
     match pin.status {
         crate::model::SlotStatus::Live => None,
         crate::model::SlotStatus::Gone => Some(format!(
-            "pin `{pin_id}` is gone · `{rebuild}` brings it back"
+            "pin `{pin_id}` is gone · Enter runs `{rebuild}` to bring it back"
         )),
         crate::model::SlotStatus::Unknown => Some(format!(
             "pin `{pin_id}`: couldn't check whether its target exists"
         )),
         crate::model::SlotStatus::Missing => Some(format!(
-            "pin `{pin_id}`: target not found · `pin retarget {pin_id} <target>` or `{rebuild}`"
+            "pin `{pin_id}`: target not found · `pin retarget {pin_id} <target>`, or Enter runs `{rebuild}`"
         )),
-        crate::model::SlotStatus::Planned => {
-            Some(format!("pin `{pin_id}` isn't built yet · `{rebuild}`"))
-        }
+        crate::model::SlotStatus::Planned => Some(format!(
+            "pin `{pin_id}` isn't built yet · Enter runs `{rebuild}`"
+        )),
     }
 }
 

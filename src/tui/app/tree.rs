@@ -274,13 +274,14 @@ pub(super) fn row_matches(row: &crate::tui::rows::Row, target: &NodeId) -> bool 
         RowKind::Pr(p) => &p.primary_node == target,
         RowKind::Fork(f) => &f.primary_node == target,
         RowKind::Repo(r) => &r.primary_node == target,
+        RowKind::Mixed(m) => &m.primary_node == target,
     }
 }
 
 pub(super) fn initial_expanded_rows(tree: &RowTree) -> BTreeSet<RowId> {
     let mut expanded = BTreeSet::new();
     for row in &tree.rows {
-        if matches!(row.id, RowId::Synthetic("pins")) {
+        if matches!(row.id, RowId::Bucket(_)) {
             add_expandable_group(&mut expanded, row);
         }
     }

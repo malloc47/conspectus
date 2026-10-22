@@ -350,6 +350,9 @@ pub(super) fn execute_exec_spec(
         ExecSpec::MuxLaunch { request } => {
             execute_mux_launch(terminal, app, request);
         }
+        ExecSpec::Rebuild { reference } => {
+            execute_rebuild(terminal, app, &reference);
+        }
     }
 }
 

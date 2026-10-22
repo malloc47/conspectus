@@ -9,6 +9,32 @@ pub(super) fn draw_left_panel(app: &mut App, frame: &mut Frame<'_>, area: Rect) 
     let inner = block.inner(area);
     frame.render_widget(block, area);
 
+    // The Pinned view advertises legacy pins that still need
+    // `pin migrate` on the last line of the pane.
+    let inner = match pinned_banner(app) {
+        Some(banner) if inner.height > 4 => {
+            let wrapped = u16::try_from(
+                UnicodeWidthStr::width(banner.as_str()).div_ceil(usize::from(inner.width).max(1)),
+            )
+            .unwrap_or(u16::MAX)
+            .clamp(1, 3);
+            let banner_area = Rect {
+                y: inner.y + inner.height - wrapped,
+                height: wrapped,
+                ..inner
+            };
+            let widget = Paragraph::new(banner)
+                .wrap(Wrap { trim: true })
+                .style(Style::default().fg(app.theme().warning));
+            frame.render_widget(widget, banner_area);
+            Rect {
+                height: inner.height - wrapped,
+                ..inner
+            }
+        }
+        _ => inner,
+    };
+
     let visible = app.visible_rows();
     if visible.is_empty() {
         let placeholder = empty_left_panel_text(app);
@@ -58,6 +84,7 @@ pub(super) fn draw_left_panel(app: &mut App, frame: &mut Frame<'_>, area: Rect) 
     }
 
     align.pr = PrAlign::of_tree(app.tree());
+    align.mixed = MixedAlign::of_tree(app.tree());
 
     // Lay rows out against the width the paragraph really gets: the
     // scrollbar gutter is carved out of the pane when the rows overflow it.
@@ -198,6 +225,19 @@ pub(super) fn left_panel_title(app: &App) -> Line<'static> {
     Line::from(spans)
 }
 
+/// The one-line notice under the Pinned view's rows when legacy pins
+/// are still being read from config files.
+pub(super) fn pinned_banner(app: &App) -> Option<String> {
+    if app.active_view() != crate::tui::View::Pinned {
+        return None;
+    }
+    app.snapshot_handle()?
+        .snapshot()
+        .diagnostics
+        .iter()
+        .find_map(crate::model::Diagnostic::advice)
+}
+
 pub(super) fn empty_left_panel_text(app: &App) -> String {
     if app.snapshot_handle().is_none() {
         return "Loading discovery…".to_string();
@@ -209,6 +249,12 @@ pub(super) fn empty_left_panel_text(app: &App) -> String {
         // filter — not the world — is the reason.
         let chips = render_filter_chips(app.filter());
         return format!("No rows match `{chips}`.\nPress `F` to clear filters, `f` to edit.");
+    }
+    if app.active_view() == crate::tui::View::Pinned {
+        return format!(
+            "No pinned slots yet.\nPin something with `{} pin add <target>`.",
+            crate::invocation::invoked_name()
+        );
     }
     if app.active_view() == crate::tui::View::Prs {
         // Forge listings are reused for the forge interval, so `r`
@@ -402,6 +448,9 @@ pub(super) struct GroupAlign {
     pub(super) count_width: usize,
     /// Column widths for PR rows (ADR 0131).
     pub(super) pr: PrAlign,
+    /// Column widths for the mixed-kind rows of the Pinned and History
+    /// views.
+    pub(super) mixed: MixedAlign,
 }
 
 /// Widest branch name a PR row shows before truncating it, so one long
@@ -438,6 +487,111 @@ impl PrAlign {
         }
         align
     }
+}
+
+/// Widest label a mixed-kind row shows before cutting it.
+const MIXED_LABEL_MAX_WIDTH: usize = 28;
+/// Widest status a mixed-kind row shows.
+const MIXED_STATUS_MAX_WIDTH: usize = 9;
+
+/// Column widths for the mixed-kind rows of a tree (ADR 0131's rule):
+/// label, status, and age pad to the widest value in the whole tree, so
+/// folding a group doesn't shift them. The content takes what is left.
+#[derive(Clone, Copy, Default)]
+pub(super) struct MixedAlign {
+    label: usize,
+    status: usize,
+    age: usize,
+}
+
+impl MixedAlign {
+    pub(super) fn of_tree(tree: &crate::tui::rows::RowTree) -> Self {
+        let mut align = Self::default();
+        for row in &tree.rows {
+            let RowKind::Mixed(mixed) = &row.kind else {
+                continue;
+            };
+            // The label cell runs from the row's own indent to a common
+            // column, so nested rows line their status up with their
+            // parents'.
+            let label_width =
+                UnicodeWidthStr::width(mixed.label.as_str()).min(MIXED_LABEL_MAX_WIDTH);
+            align.label = align.label.max(mixed_prefix_width(row.depth) + label_width);
+            align.status = align
+                .status
+                .max(UnicodeWidthStr::width(mixed.status.as_str()).min(MIXED_STATUS_MAX_WIDTH));
+            if let Some(age) = &mixed.age {
+                align.age = align.age.max(UnicodeWidthStr::width(age.as_str()));
+            }
+        }
+        align
+    }
+}
+
+/// Cells before a mixed-kind row's label: indent, disclosure, and the
+/// kind glyph with its space.
+fn mixed_prefix_width(depth: u8) -> usize {
+    usize::from(depth) * 2 + 4
+}
+
+/// The body of a mixed-kind row after its kind glyph: label, status,
+/// age, then the content, which fills `budget` and is cut with an
+/// ellipsis. Gone, missing, planned, and unknown rows are dimmed whole,
+/// their status word included.
+pub(super) fn render_mixed_spans(
+    mixed: &crate::tui::rows::MixedRow,
+    theme: &Theme,
+    align: MixedAlign,
+    prefix_width: usize,
+    budget: usize,
+) -> Vec<Span<'static>> {
+    use crate::tui::rows::MixedTone;
+    let mut spans: Vec<Span<'static>> = Vec::new();
+    let label = truncate_to_width_strict(&mixed.label, MIXED_LABEL_MAX_WIDTH);
+    let label_cell = align.label.saturating_sub(prefix_width);
+    spans.push(span!(Modifier::BOLD; "{}", pad_to_width(label, label_cell)));
+    let status = truncate_to_width_strict(&mixed.status, MIXED_STATUS_MAX_WIDTH);
+    let status_style = match mixed.tone {
+        MixedTone::Normal => Style::default().fg(theme.mux_attached),
+        MixedTone::Dim => Style::default(),
+    };
+    spans.push(span!(status_style; "  {}", pad_to_width(status, align.status)));
+    if align.age > 0 {
+        let age = mixed.age.clone().unwrap_or_default();
+        spans.push(span!(
+            Style::default().fg(theme.secondary_text);
+            "  {:>width$}", age, width = align.age
+        ));
+    }
+    let room = budget.saturating_sub(spans_width(&spans));
+    if room > 2 && !mixed.content.is_empty() {
+        let content = truncate_to_width_strict(&mixed.content, room - 2);
+        spans.push(Span::styled(
+            format!("  {content}"),
+            Style::default().fg(theme.secondary_text),
+        ));
+    }
+    if mixed.tone == MixedTone::Dim {
+        for span in &mut spans {
+            span.style = span.style.add_modifier(theme.placeholder);
+        }
+    }
+    spans
+}
+
+/// The kind glyph of a mixed-kind row; PR glyphs take their state's hue.
+fn mixed_glyph_span(mixed: &crate::tui::rows::MixedRow, theme: &Theme) -> Span<'static> {
+    if mixed.node_kind == NodeKind::ForgePr {
+        let style = node_kind_style(NodeKind::ForgePr, theme);
+        let color = match mixed.pr_state.as_deref() {
+            Some("closed") => theme.pr_closed,
+            Some("merged") => theme.pr_merged,
+            Some("draft") => theme.pr_draft,
+            _ => theme.pr_open,
+        };
+        return span!(Style::default().fg(color); "{} ", style.glyph);
+    }
+    node_kind_glyph_span(mixed.node_kind, theme)
 }
 
 /// The state column's text: a draft that is still open reads `draft`.
@@ -559,6 +713,17 @@ pub(super) fn render_left_row(
         }
         RowKind::Repo(repo) => {
             spans.extend(render_repo_spans(repo, theme));
+        }
+        RowKind::Mixed(mixed) => {
+            let prefix_width = spans_width(&spans);
+            let budget = width.saturating_sub(prefix_width);
+            spans.extend(render_mixed_spans(
+                mixed,
+                theme,
+                align.mixed,
+                prefix_width,
+                budget,
+            ));
         }
     }
 
@@ -1057,6 +1222,7 @@ pub(super) fn row_kind_glyph_span(kind: &RowKind, theme: &Theme) -> Option<Span<
         RowKind::Pr(pr) => return Some(forge_pr_glyph_span(pr, theme)),
         RowKind::Fork(_) => NodeKind::Fork,
         RowKind::Repo(_) => NodeKind::Repo,
+        RowKind::Mixed(mixed) => return Some(mixed_glyph_span(mixed, theme)),
     };
     Some(node_kind_glyph_span(node_kind, theme))
 }

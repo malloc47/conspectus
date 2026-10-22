@@ -491,7 +491,7 @@ fn filter_args_grouping_none_when_flag_omitted() {
     assert!(args.to_grouping(View::Sessions).expect("parse").is_none());
 }
 
-// ---- Pin launch helpers --------------------------
+// ---- Launch helpers --------------------------
 
 #[test]
 fn format_attach_command_uses_bare_tmux_for_default_socket() {

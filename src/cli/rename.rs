@@ -173,9 +173,8 @@ impl RenameMuxArgs {
             ),
         };
 
-        // H-RENAME-MUX: graph-aware cascade — rewrite any pin whose
-        // `mux.name` matches the current mux native id + socket so
-        // pin bindings survive the tmux rename.
+        // Graph-aware cascade: a slot that overrides the mux name
+        // follows the rename.
         let plan = match plan_mux_rename(&snapshot, &mux_id, new_name) {
             Ok(plan) => plan,
             Err(err) => bail!("mux rename planning failed: {err}"),

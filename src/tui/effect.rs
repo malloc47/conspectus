@@ -88,6 +88,10 @@ pub enum ExecSpec {
     /// and its attributed harness session, then attach
     /// (ADR 0096). No pin is written.
     MuxLaunch { request: MuxLaunchRequest },
+    /// Run `conspectus rebuild <reference> --no-attach` behind a
+    /// spinner and refresh, so a gone slot comes back without leaving
+    /// the TUI.
+    Rebuild { reference: String },
 }
 
 /// A mux backend op the executor should run. The reducer emits this

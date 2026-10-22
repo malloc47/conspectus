@@ -451,6 +451,7 @@ pub(super) enum ViewFlag {
     Sessions,
     Mux,
     Prs,
+    Pinned,
     // Hidden from the TUI's view switcher; still accepted
     // so existing scripts and configs keep working.
     #[value(hide = true)]
@@ -605,6 +606,7 @@ pub(super) fn view_from_flag(flag: ViewFlag) -> crate::tui::View {
         ViewFlag::Union => crate::tui::View::Union,
         ViewFlag::Prs => crate::tui::View::Prs,
         ViewFlag::Forks => crate::tui::View::Forks,
+        ViewFlag::Pinned => crate::tui::View::Pinned,
     }
 }
 
@@ -622,7 +624,8 @@ pub(super) fn apply_grouping_to_tui_config(
         }
         crate::tui::Grouping::Union(_)
         | crate::tui::Grouping::Prs(_)
-        | crate::tui::Grouping::Forks(_) => {}
+        | crate::tui::Grouping::Forks(_)
+        | crate::tui::Grouping::Pinned(_) => {}
     }
 }
 

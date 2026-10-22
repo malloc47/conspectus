@@ -1,0 +1,28 @@
+---
+source: src/tui/ui_tests.rs
+expression: "pinned_frame(&mut app, 120)"
+---
+updated 0s ago · 0/1 sessions · 1 mux                                                                                   
+┌ ▸ sessions · mux · prs · pinned ─────────────────────────┐┌   detail ────────────────────────────────────────────────┐
+│▼ conspectus  ~/src/conspectus                            ││Select a row to view its detail.                          │
+│  ▶ ▣ conspectus-main         live      2m  claude · ~/sr…││                                                          │
+│    ● e44d01cb                in mux   17m  claude · Fix …││                                                          │
+│    ▣ nightly                 planned       claude · ~/sr…││                                                          │
+│▼ Other                                                   ││                                                          │
+│    ▣ config-agent3           gone      3d  claude · ~/sr…││                                                          │
+│    ◇ ledger-worktree         gone      2d  conspectus · …││                                                          │
+│    ⇄ ledger-pr               merged    5h  malloc47/cons…││                                                          │
+│    ▣ old-api                 planned       codex · ~/src…││                                                          │
+│                                                          ││                                                          │
+│                                                          ││                                                          │
+│                                                          ││                                                          │
+│                                                          ││                                                          │
+│                                                          ││                                                          │
+│                                                          ││                                                          │
+│                                                          ││                                                          │
+│                                                          ││                                                          │
+│                                                          ││                                                          │
+│1 legacy pin is still read from config files (old-api);   ││                                                          │
+│run `conspectus pin migrate` to convert it                ││                                                          │
+└──────────────────────────────────────────────────────────┘└──────────────────────────────────────────────────────────┘
+[left] group:project · filter:all · sort:hierarchy · Enter/l expand · h collapse · j/k move · h/l fold · Enter default ·

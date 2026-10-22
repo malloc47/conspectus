@@ -186,6 +186,56 @@ pub(super) fn summarize_mux_new_output(
     }
 }
 
+/// Argv the TUI passes when re-execing into `conspectus rebuild`. The
+/// subprocess never attaches; the operator presses `Enter` again to
+/// attach once the refresh shows the rebuilt row.
+pub(super) fn rebuild_argv(reference: &str) -> Vec<String> {
+    vec![
+        "rebuild".to_string(),
+        reference.to_string(),
+        "--no-attach".to_string(),
+    ]
+}
+
+/// Executor branch for `ExecSpec::Rebuild`: behind a spinner, re-exec
+/// into `conspectus rebuild <reference> --no-attach`, log the outcome
+/// with the command record, and refresh.
+pub(super) fn execute_rebuild(terminal: &mut DefaultTerminal, app: &mut App, reference: &str) {
+    let (record, output) = run_conspectus_subprocess(
+        terminal,
+        app,
+        format!("Rebuilding {reference}"),
+        rebuild_argv(reference),
+    );
+    let launch = match output {
+        Ok(output) if output.status.success() => {
+            let detail = command_output_excerpt(&output);
+            LaunchSummary {
+                success: true,
+                message: if detail.is_empty() {
+                    format!("rebuilt `{reference}`")
+                } else {
+                    format!("rebuilt `{reference}`: {detail}")
+                },
+            }
+        }
+        Ok(output) => LaunchSummary {
+            success: false,
+            message: format!(
+                "rebuild of `{reference}` failed: {}",
+                command_output_excerpt(&output)
+            ),
+        },
+        Err(err) => LaunchSummary {
+            success: false,
+            message: format!("rebuild of `{reference}` failed to spawn: {err}"),
+        },
+    };
+    let entry = launch_entry(&launch, record, LogTarget::Pin(reference.to_string()));
+    refresh_after_launch_with_spinner(terminal, app);
+    app.report(entry);
+}
+
 /// Argv the TUI passes when re-execing into
 /// `conspectus mux launch` (ADR 0096). Split out
 /// so the shape is unit-testable without running the actual

@@ -131,8 +131,8 @@ pub trait MuxBackend: Send + Sync {
     }
 
     /// Spawn a detached tmux session named `name` rooted at `cwd`
-    /// running `argv`. Used by `conspectus pin launch` (ADR 0057)
-    /// when no matching mux exists yet. Default returns
+    /// running `argv`. Used by `conspectus rebuild`, `mux new`, and
+    /// `mux launch` when no matching mux exists yet. Default returns
     /// [`TmuxNewSessionOutcome::Unsupported`].
     fn new_session(
         &self,
@@ -155,8 +155,8 @@ pub trait MuxBackend: Send + Sync {
     }
 
     /// Send `literal` to pane `target`, optionally followed by an
-    /// `Enter` key (ADR 0057 §Launch §`PinStaleMux`). Used by the
-    /// stale-mux relaunch path so the harness command lands inside
+    /// `Enter` key (ADR 0142). Used by the rebuild path for a live mux
+    /// whose agent exited so the harness command lands inside
     /// the existing pane without recreating the mux. Default returns
     /// [`TmuxSendKeysOutcome::Unsupported`].
     fn send_keys(
