@@ -342,12 +342,6 @@ impl WorktreeCloseArgs {
                     summary.push_str(&format!("\n  - {label}"));
                 }
             }
-            if !plan.pins.is_empty() {
-                summary.push_str("\nDrops these pins:");
-                for pin in &plan.pins {
-                    summary.push_str(&format!("\n  - {}", pin.display_name));
-                }
-            }
             if !confirm_prompt(&summary)? {
                 println!("aborted");
                 return Ok(());
@@ -355,6 +349,7 @@ impl WorktreeCloseArgs {
         }
 
         let backend = mutation_backend()?;
+        let history_store = crate::history::HistoryStore::from_env();
         let report = execute_close_down(
             &plan,
             self.discard,
@@ -363,6 +358,7 @@ impl WorktreeCloseArgs {
             &SystemTmux::new(),
             &SystemSignaller,
             grace,
+            history_store.as_ref(),
         )?;
 
         render_close_down_report(&plan, &report)
@@ -485,11 +481,14 @@ fn render_close_down_report(plan: &CloseDownPlan, report: &CloseDownReport) -> R
         }
     }
 
-    for name in &report.dropped_pins {
-        println!("dropped pin `{name}`");
+    if report.forgotten_records > 0 {
+        println!(
+            "forgot {} history record(s) rooted in the worktree",
+            report.forgotten_records
+        );
     }
-    for (name, err) in &report.pin_errors {
-        eprintln!("warning: could not drop pin `{name}`: {err}");
+    if let Some(err) = &report.history_error {
+        eprintln!("warning: could not forget the worktree's history: {err}");
     }
     Ok(())
 }

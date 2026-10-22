@@ -512,25 +512,46 @@ fn populated_snapshot_for_archive_tests() -> GraphSnapshot {
     snap.aliases
         .insert(NodeId::AgentSession(agent_id.clone()), "Alpha".to_string());
 
-    snap.pins.push(PinCandidate {
+    snap.pins.push(PinSlot {
         id: "pin-1".to_string(),
-        display_name: "Pin Alpha".to_string(),
-        harness: "codex".to_string(),
-        cwd: "/r".to_string(),
-        mux: PinMuxRef {
-            backend: "tmux".to_string(),
-            name: "editor".to_string(),
-            socket_name: None,
-        },
-        launch_argv: Some(vec!["codex".to_string()]),
-        reason: Some("primary".to_string()),
-        provenance: Provenance::LocalPin,
-        store_path: "/r/.conspectus.toml".to_string(),
-        binding: Some(PinBinding::Bound {
-            mux: mux_id,
-            session: agent_id.clone(),
-        }),
+        kind: PinKind::Mux,
+        target: Some(NodeId::MuxSession(mux_id.clone()).to_string()),
+        pinned_at: Some("2026-06-01T00:00:00Z".to_string()),
+        overrides: SlotFields::from([(
+            "argv".to_string(),
+            FieldValue::List(vec!["codex".to_string()]),
+        )]),
+        snapshot: SlotFields::from([("label".to_string(), FieldValue::Text("Pin Alpha".into()))]),
+        order: 0,
+        legacy: false,
     });
+    snap.nodes.push(GraphNode::Pin(PinNode {
+        id: PinId::new("pin-1"),
+        kind: PinKind::Mux,
+        label: "Pin Alpha".to_string(),
+        target: Some(NodeId::MuxSession(mux_id.clone()).to_string()),
+        target_node: Some(NodeId::MuxSession(mux_id)),
+        status: SlotStatus::Live,
+        overrides: SlotFields::new(),
+        snapshot: SlotFields::new(),
+        effective: vec![RecipeField {
+            name: "harness".to_string(),
+            value: FieldValue::Text("codex".to_string()),
+            source: FieldSource::Live,
+        }],
+        order: 0,
+        legacy: false,
+        pinned_at: None,
+    }));
+    snap.candidate_links.push(GraphLink::new(
+        "pin-link",
+        NodeId::Pin(PinId::new("pin-1")),
+        LinkEndpoint::Node {
+            id: NodeId::MuxSession(MuxSessionId::new("tmux:editor")),
+        },
+        RelationKind::PinTargets,
+        Provenance::GlobalPin,
+    ));
 
     snap.node_provenance.insert(
         NodeId::Repo(repo_id),
@@ -547,7 +568,6 @@ fn populated_snapshot_for_archive_tests() -> GraphSnapshot {
         },
     );
 
-    snap.sync_pin_nodes();
     snap.canonicalize();
     snap
 }
@@ -690,8 +710,9 @@ fn relation_kind_snake_case_round_trips_for_every_variant() {
         RelationKind::MuxContainsProcess,
         RelationKind::ProcessIdentifiesSession,
         RelationKind::ProcessCandidatesSession,
-        RelationKind::PinTargetsMux,
-        RelationKind::PinRealizedBySession,
+        RelationKind::PinTargets,
+        RelationKind::MuxLastHosted,
+        RelationKind::RebuiltFrom,
     ];
     for r in &variants {
         let label = r.snake_case();
@@ -777,16 +798,10 @@ fn source_metadata_match_kind_prefers_the_field_over_evidence() {
 }
 
 #[test]
-fn mux_qualified_name_is_backend_and_native_id_and_matches_the_pin_key() {
+fn mux_qualified_name_is_backend_and_native_id() {
     let tmux = MuxSessionNode::new(MuxSessionId::new("tmux:editor"), "tmux", "editor");
     assert_eq!(tmux.qualified_name(), "tmux:editor");
     assert_eq!(tmux.display_label(), "tmux:editor");
-    let pin = PinMuxRef {
-        backend: "tmux".to_string(),
-        name: "editor".to_string(),
-        socket_name: None,
-    };
-    assert_eq!(tmux.qualified_name(), pin.native_id());
 
     let zellij = MuxSessionNode::new(MuxSessionId::new("zellij:notes"), "zellij", "notes");
     assert_eq!(zellij.qualified_name(), "zellij:notes");

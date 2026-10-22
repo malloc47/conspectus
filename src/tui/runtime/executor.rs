@@ -42,8 +42,8 @@ pub(super) fn execute_pure_effect(app: &mut App, effect: Effect) {
             // this branch is a safety net.
         }
         Effect::WriteStore(_) => {
-            // Some `WriteStore` variants (`PinCreate`,
-            // `CommitAliasRename`) chain a tmux rename through the
+            // Some `WriteStore` variants (`CommitAliasRename`,
+            // `CommitMuxRename`) chain a tmux rename through the
             // executor, so all store writes flow through
             // `execute_effects_live` where the `MuxBackend`
             // reference lives. The pure executor drops them the
@@ -64,10 +64,6 @@ pub(super) fn execute_store_op(
 ) {
     use crate::tui::effect::StoreOp;
     match op {
-        StoreOp::PinCreate(request) => execute_pin_create(app, tmux, request),
-        StoreOp::PinEdit(request) => execute_pin_edit(app, request),
-        StoreOp::PinRemove(request) => execute_pin_remove(app, request),
-        StoreOp::PinBind(request) => execute_pin_bind(app, request),
         StoreOp::CommitAliasRename {
             session_id,
             new_display_name,
@@ -212,10 +208,9 @@ pub(super) fn rename_mux_via_backend(
 }
 
 /// Executor branch for `StoreOp::CommitMuxRename`. Graph-aware
-/// cascade: `plan_mux_rename` finds pins whose `mux.name` matches
-/// the mux's current bare native id (and socket), and this executor
-/// rewrites each of those pin store TOMLs before firing the tmux
-/// `rename-session` so pin bindings survive the rename.
+/// cascade: `plan_mux_rename` finds pin slots that name the mux, and
+/// this executor updates each slot's name override before firing the
+/// tmux `rename-session` so the slots keep pointing at the mux.
 pub(super) fn execute_commit_mux_rename(
     app: &mut App,
     tmux: &dyn MuxBackend,
@@ -241,21 +236,19 @@ pub(super) fn execute_commit_mux_rename(
         }
     };
 
-    // Rewrite each affected pin store first. If any write fails we
-    // still attempt the tmux rename — the pin store update is
-    // idempotent on the next run and the operator is more likely to
-    // want the tmux rename effective than to want it reverted.
+    // Update each affected pin slot's name override first. If a write
+    // fails we still attempt the tmux rename: the update is idempotent
+    // on the next run and the operator is more likely to want the
+    // rename than to want it reverted.
     let mut pin_updates_written = 0usize;
     let mut pin_update_failures = Vec::new();
-    for update in &plan.pin_mux_name_updates {
-        match rewrite_pin_mux_name(update) {
-            Ok(changed) => {
-                if changed {
-                    pin_updates_written += 1;
-                }
-            }
-            Err(err) => {
-                pin_update_failures.push(format!("{}: {err}", update.pin_id));
+    if let Some(store) = crate::pin_slots::SlotStore::from_env() {
+        for (slot, result) in crate::rename::apply_pin_slot_updates(&store, &plan.pin_slot_updates)
+        {
+            match result {
+                Ok(true) => pin_updates_written += 1,
+                Ok(false) => {}
+                Err(err) => pin_update_failures.push(format!("{slot}: {err}")),
             }
         }
     }
@@ -290,29 +283,6 @@ pub(super) fn execute_commit_mux_rename(
         LogEntry::warning(summary)
     };
     app.report(entry.with_target(LogTarget::Mux(mux_id)));
-}
-
-/// Load the pin entry by id, rewrite its `mux.name`, and write it
-/// back through `upsert_pin_entry`. Returns `Ok(true)` when the
-/// store actually changed; `Ok(false)` when the pin was already
-/// pointing at the new name (idempotent). Errors from either half
-/// bubble up as `String`s so the caller can list them in the
-/// aggregate status message.
-pub(super) fn rewrite_pin_mux_name(
-    update: &crate::rename::PinMuxNameUpdate,
-) -> Result<bool, String> {
-    let store_paths = [std::path::PathBuf::from(&update.store_path)];
-    let loaded = crate::pins::load_pin_entry_by_id(&store_paths, &update.pin_id)
-        .map_err(|err| err.to_string())?
-        .ok_or_else(|| format!("pin `{}` not found in store", update.pin_id))?;
-    let (_path, mut entry) = loaded;
-    if entry.mux.name == update.new_mux_name {
-        return Ok(false);
-    }
-    entry.mux.name = update.new_mux_name.clone();
-    let outcome =
-        crate::pins::upsert_pin_entry(&update.store_path, entry).map_err(|err| err.to_string())?;
-    Ok(outcome.changed)
 }
 
 /// Dispatch a [`MuxOp`] against the executor's `MuxBackend`. The
@@ -373,12 +343,6 @@ pub(super) fn execute_exec_spec(
         },
         ExecSpec::ViewSession(session_id) => {
             execute_view_session(terminal, app, config, session_id);
-        }
-        ExecSpec::LaunchPin {
-            pin_id,
-            attach_target,
-        } => {
-            execute_launch_pin(terminal, app, &pin_id, attach_target.as_ref());
         }
         ExecSpec::MuxNew { name, cwd } => {
             execute_mux_new(terminal, app, &name, &cwd);

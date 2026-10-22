@@ -197,6 +197,7 @@ pub(super) fn execute_worktree_close_down(
         tmux,
         &SystemSignaller,
         grace,
+        crate::history::HistoryStore::from_env().as_ref(),
     );
 
     let entry = match result {
@@ -210,9 +211,9 @@ pub(super) fn execute_worktree_close_down(
                     "closed"
                 };
                 LogEntry::info(format!(
-                    "{verb} `{branch}` — ended {} session(s), dropped {} pin(s)",
+                    "{verb} `{branch}` — ended {} session(s), forgot {} history record(s)",
                     report.teardowns.len(),
-                    report.dropped_pins.len(),
+                    report.forgotten_records,
                 ))
             }
             WorktreeMutationOutcome::Unsupported => LogEntry::warning(format!(

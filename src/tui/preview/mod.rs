@@ -408,19 +408,13 @@ pub fn node_source(app: &App, node: &NodeId) -> Option<PreviewSource> {
             (!hosts_this_tui(app, mux)).then(|| PreviewSource::Pane(mux.clone()))
         }
         NodeId::Pin(pin) => {
-            // The pin sidecar is the source of truth for bindings; pin
-            // nodes are projected from it.
+            // A slot previews what it points at while that is live.
             let snapshot = app.snapshot_handle()?.snapshot();
-            let candidate = snapshot.pins.iter().find(|p| p.id == pin.id)?;
-            match candidate.binding.as_ref()? {
-                crate::model::PinBinding::Bound { session, .. } => {
-                    node_source(app, &NodeId::AgentSession(session.clone()))
-                }
-                crate::model::PinBinding::StaleMux { mux } => {
-                    node_source(app, &NodeId::MuxSession(mux.clone()))
-                }
-                crate::model::PinBinding::Unbound => None,
-            }
+            let slot = crate::tui::rows::pin_nodes(snapshot)
+                .into_iter()
+                .find(|p| p.id == *pin)?;
+            let target = crate::tui::rows::live_pin_target(snapshot, slot)?;
+            node_source(app, &target)
         }
         NodeId::Workspace(_)
         | NodeId::Checkout(_)

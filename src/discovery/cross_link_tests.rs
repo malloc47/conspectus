@@ -1994,7 +1994,7 @@ fn opencode_shared_service_child_is_not_a_pane_agent() {
                     .is_some_and(|target| target.to_string().contains("pid:101"))),
         "the shared service must not emit process links"
     );
-    assert!(crate::resolve::pins::mux_hosts_harness(
+    assert!(mux_hosts_harness(
         &snapshot,
         &MuxSessionId::new("tmux:editor"),
         "opencode"
@@ -2019,11 +2019,30 @@ fn pane_running_only_an_opencode_server_does_not_host_the_harness() {
 
     infer_with_process_snapshot(&mut snapshot, &processes);
 
-    assert!(!crate::resolve::pins::mux_hosts_harness(
+    assert!(!mux_hosts_harness(
         &snapshot,
         &MuxSessionId::new("tmux:server"),
         "opencode"
     ));
+}
+
+/// Whether an active `MuxContainsProcess` link ties `mux` to a
+/// process of `harness`.
+fn mux_hosts_harness(snapshot: &GraphSnapshot, mux: &MuxSessionId, harness: &str) -> bool {
+    let mux_node = NodeId::MuxSession(mux.clone());
+    snapshot.nodes.iter().any(|node| match node {
+        GraphNode::RuntimeProcess(process) => {
+            process.harness_key.as_deref() == Some(harness)
+                && snapshot.candidate_links.iter().any(|link| {
+                    link.relation == RelationKind::MuxContainsProcess
+                        && matches!(link.state, LinkState::Active)
+                        && link.source == mux_node
+                        && link.target_node_id()
+                            == Some(&NodeId::RuntimeProcess(process.id.clone()))
+                })
+        }
+        _ => false,
+    })
 }
 
 fn rooted_in_targets(snapshot: &GraphSnapshot, native: &str) -> Vec<NodeId> {

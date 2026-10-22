@@ -125,7 +125,7 @@ read = ["..."]
 adr = ["0057", "0143", "0105", "0142"]
 # The running binary, whatever its file name.
 self = true
-act = ["pin launch ...", "rebuild ...", "mux new ...", "mux launch ..."]
+act = ["rebuild ...", "mux new ...", "mux launch ..."]
 
 # Sockets. Conspectus opens no network sockets of its own; `gh` is the
 # only program that reaches the network. Paths use the same variables

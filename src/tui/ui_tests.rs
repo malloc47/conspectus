@@ -165,37 +165,38 @@ fn muxed_app_previewing(
     app
 }
 
-fn pinned_app(binding: crate::model::PinBinding) -> App {
-    pinned_app_with(binding, |_| {})
+/// The slot `ingest`: a mux slot with harness and cwd overrides,
+/// pointing at `target` (or planned when `None`).
+fn ingest_slot(target: Option<NodeId>) -> crate::model::PinSlot {
+    use crate::model::{FieldValue, PinKind, PinSlot, SlotFields};
+    PinSlot {
+        id: "ingest".to_string(),
+        kind: PinKind::Mux,
+        target: target.map(|node| node.to_string()),
+        pinned_at: None,
+        overrides: SlotFields::from([
+            ("name".to_string(), FieldValue::Text("ingest".to_string())),
+            ("harness".to_string(), FieldValue::Text("codex".to_string())),
+            (
+                "cwd".to_string(),
+                FieldValue::Text("/home/op/src/proj".to_string()),
+            ),
+        ]),
+        snapshot: SlotFields::new(),
+        order: 0,
+        legacy: false,
+    }
 }
 
-fn pinned_app_with(
-    binding: crate::model::PinBinding,
-    extend: impl FnOnce(&mut GraphSnapshot),
-) -> App {
-    use crate::model::{PinCandidate, PinMuxRef, Provenance};
+fn pinned_app(target: Option<NodeId>) -> App {
+    pinned_app_with(target, |_| {})
+}
+
+fn pinned_app_with(target: Option<NodeId>, extend: impl FnOnce(&mut GraphSnapshot)) -> App {
     let mut snapshot = GraphSnapshot::empty();
-    snapshot.pins.push(PinCandidate {
-        id: "ingest".to_string(),
-        display_name: "ingest".to_string(),
-        harness: "codex".to_string(),
-        cwd: "/home/op/src/proj".to_string(),
-        mux: PinMuxRef {
-            backend: "tmux".to_string(),
-            name: "ingest".to_string(),
-            socket_name: None,
-        },
-        launch_argv: None,
-        reason: None,
-        provenance: Provenance::LocalPin,
-        store_path: "/tmp/.conspectus.toml".to_string(),
-        binding: Some(binding),
-    });
+    snapshot.pins.push(ingest_slot(target));
     extend(&mut snapshot);
-    // Skip `resolve_snapshot` here — it would overwrite the
-    // explicit binding state with whatever the resolver derives
-    // from the empty live evidence. Builder consumes the
-    // pre-bound snapshot directly.
+    let snapshot = crate::resolve::resolve_snapshot(snapshot);
     let tree = build_sessions_tree(SessionsBuildInputs {
         snapshot: &snapshot,
         grouping: SessionsGrouping::Graph,
@@ -226,42 +227,39 @@ fn pinned_app_with(
 }
 
 #[test]
-fn status_hint_for_unbound_pin_advertises_enter_to_launch() {
-    let app = pinned_app(crate::model::PinBinding::Unbound);
+fn status_hint_for_a_planned_pin_points_at_rebuild() {
+    let app = pinned_app(None);
     let hint = default_action_status_hint(&app);
     assert!(
-        hint.contains("Enter to launch") && hint.contains("ingest"),
-        "unexpected hint for unbound pin: {hint}"
+        hint.contains("rebuild ingest") && hint.contains("isn't built yet"),
+        "unexpected hint for planned pin: {hint}"
     );
 }
 
 #[test]
-fn status_hint_for_stale_mux_pin_advertises_relaunch_in_existing_mux() {
-    let app = pinned_app(crate::model::PinBinding::StaleMux {
-        mux: crate::model::MuxSessionId::new("tmux:ingest"),
-    });
+fn status_hint_for_a_pin_with_a_missing_target_names_the_fixes() {
+    let app = pinned_app(Some(NodeId::MuxSession(crate::model::MuxSessionId::new(
+        "tmux:gone",
+    ))));
     let hint = default_action_status_hint(&app);
     assert!(
-        hint.contains("relaunch") && hint.contains("existing mux"),
-        "unexpected hint for stale-mux pin: {hint}"
+        hint.contains("target not found") && hint.contains("pin retarget ingest"),
+        "unexpected hint for missing target: {hint}"
     );
 }
 
 #[test]
-fn stale_mux_pin_placeholder_previews_its_live_pane() {
+fn live_pin_placeholder_previews_its_live_pane() {
     let mux = crate::model::MuxSessionId::new("tmux:ingest");
-    let mut app = pinned_app_with(
-        crate::model::PinBinding::StaleMux { mux: mux.clone() },
-        |snapshot| {
-            snapshot
-                .nodes
-                .push(GraphNode::MuxSession(crate::model::MuxSessionNode::new(
-                    mux.clone(),
-                    "tmux",
-                    "ingest",
-                )));
-        },
-    );
+    let mut app = pinned_app_with(Some(NodeId::MuxSession(mux.clone())), |snapshot| {
+        snapshot
+            .nodes
+            .push(GraphNode::MuxSession(crate::model::MuxSessionNode::new(
+                mux.clone(),
+                "tmux",
+                "ingest",
+            )));
+    });
 
     let target = resolve_attach_target(&app).expect("pin row targets its live mux");
     assert_eq!(target.native_id, "ingest");
@@ -274,58 +272,16 @@ fn stale_mux_pin_placeholder_previews_its_live_pane() {
 }
 
 #[test]
-fn unbound_pin_placeholder_previews_its_diagnostics() {
-    let app = pinned_app_with(crate::model::PinBinding::Unbound, |snapshot| {
-        snapshot
-            .diagnostics
-            .push(crate::model::Diagnostic::PinUnbound {
-                pin_id: "ingest".to_string(),
-                expected_mux_native_id: "tmux:ingest".to_string(),
-                last_session: None,
-            });
-    });
+fn planned_pin_placeholder_previews_its_status() {
+    let app = pinned_app(None);
 
     assert!(resolve_attach_target(&app).is_err());
     let preview = preview_text_for_selection(&app, 80, 10).to_string();
-    assert!(preview.contains("Pin `ingest` is unbound."), "{preview}");
-    assert!(preview.contains("Enter launches the pin."), "{preview}");
-}
-
-#[test]
-fn stale_mux_preview_names_the_pin_holding_a_contested_session() {
-    let text = render_pin_diagnostics(&[crate::tui::actions::PinDiagnosticView::StaleMux {
-        pin_id: "agent3".to_string(),
-        mux: crate::model::MuxSessionId::new("tmux:agent3"),
-        claimed_elsewhere: vec![crate::model::PinSessionClaim {
-            session: AgentSessionId::new("claude-code", "/state", "e44d01cb"),
-            claimed_by_pin: "agent".to_string(),
-        }],
-        harness_running: true,
-    }]);
-
-    assert!(text.contains("Enter attaches."), "{text}");
     assert!(
-        text.contains("claude-code:e44d01cb matched here but is bound to pin `agent`"),
-        "{text}"
+        preview.contains("Pin `ingest` (mux · planned)"),
+        "{preview}"
     );
-}
-
-#[test]
-fn pin_diagnostic_preview_lists_ambiguous_competitors() {
-    let text = render_pin_diagnostics(&[crate::tui::actions::PinDiagnosticView::Ambiguous {
-        pin_id: "ingest".to_string(),
-        chosen: AgentSessionId::new("codex", "/state", "alpha"),
-        competing: vec![
-            AgentSessionId::new("codex", "/state", "beta"),
-            AgentSessionId::new("codex", "/state", "gamma"),
-        ],
-    }]);
-
-    assert!(text.contains("Pin `ingest` is ambiguous."));
-    assert!(text.contains("Chosen: codex:alpha"));
-    assert!(text.contains("codex:beta"));
-    assert!(text.contains("codex:gamma"));
-    assert!(text.contains("Press b for the bind command."));
+    assert!(preview.contains("rebuild ingest"), "{preview}");
 }
 
 #[test]
@@ -3772,15 +3728,7 @@ fn mux_view_header_counts_sessions_in_visible_muxes() {
 #[test]
 fn reported_failure_leads_the_rows_preview_until_a_later_success() {
     use crate::tui::messages::{CommandRecord, LogEntry, LogTarget};
-    let mut app = pinned_app_with(crate::model::PinBinding::Unbound, |snapshot| {
-        snapshot
-            .diagnostics
-            .push(crate::model::Diagnostic::PinUnbound {
-                pin_id: "ingest".to_string(),
-                expected_mux_native_id: "tmux:ingest".to_string(),
-                last_session: None,
-            });
-    });
+    let mut app = pinned_app(None);
     app.report(
         LogEntry::error("pin `ingest` launch failed: exited with status 1")
             .with_target(LogTarget::Pin("ingest".to_string()))
@@ -3803,7 +3751,7 @@ fn reported_failure_leads_the_rows_preview_until_a_later_success() {
         "{preview}"
     );
     assert!(
-        preview.contains("Pin `ingest` is unbound."),
+        preview.contains("Pin `ingest` (mux · planned)"),
         "the row's own preview follows the banner: {preview}"
     );
 
@@ -3817,7 +3765,7 @@ fn reported_failure_leads_the_rows_preview_until_a_later_success() {
 #[test]
 fn unseen_failures_keep_a_status_bar_chip_until_the_log_is_opened() {
     use crate::tui::messages::LogEntry;
-    let mut app = pinned_app(crate::model::PinBinding::Unbound);
+    let mut app = pinned_app(None);
     app.report(LogEntry::error("mux `w1` attach failed"));
     assert_eq!(
         app.status_message(),
@@ -3838,7 +3786,7 @@ fn unseen_failures_keep_a_status_bar_chip_until_the_log_is_opened() {
 
 #[test]
 fn info_report_sets_a_plain_status_message() {
-    let mut app = pinned_app(crate::model::PinBinding::Unbound);
+    let mut app = pinned_app(None);
     app.report(crate::tui::messages::LogEntry::info("renamed: w1"));
     assert_eq!(app.status_message(), Some("renamed: w1"));
     assert_eq!(app.messages().unseen(), 0);
@@ -4596,32 +4544,13 @@ fn processes_and_pid_fields_preview_process_trees() {
     );
 }
 
-/// An app holding only the pin `ingest` with `binding`, plus whatever
-/// `extend` adds, with nothing selected.
-fn pin_snapshot_app(
-    binding: crate::model::PinBinding,
-    extend: impl FnOnce(&mut GraphSnapshot),
-) -> App {
-    use crate::model::{PinCandidate, PinMuxRef, Provenance};
+/// An app holding only the slot `ingest` pointing at `target`, plus
+/// whatever `extend` adds, with nothing selected.
+fn pin_snapshot_app(target: Option<NodeId>, extend: impl FnOnce(&mut GraphSnapshot)) -> App {
     let mut snapshot = GraphSnapshot::empty();
-    snapshot.pins.push(PinCandidate {
-        id: "ingest".to_string(),
-        display_name: "ingest".to_string(),
-        harness: "codex".to_string(),
-        cwd: "/home/op/src/proj".to_string(),
-        mux: PinMuxRef {
-            backend: "tmux".to_string(),
-            name: "ingest".to_string(),
-            socket_name: None,
-        },
-        launch_argv: None,
-        reason: None,
-        provenance: Provenance::LocalPin,
-        store_path: "/tmp/.conspectus.toml".to_string(),
-        binding: Some(binding),
-    });
+    snapshot.pins.push(ingest_slot(target));
     extend(&mut snapshot);
-    snapshot.sync_pin_nodes();
+    let snapshot = crate::resolve::resolve_snapshot(snapshot);
     let mut app = App::new(RunConfig::defaults());
     app.update(Msg::SetData {
         snapshot: SnapshotHandle::from_snapshot(&snapshot),
@@ -4637,15 +4566,13 @@ fn ingest_pin() -> NodeId {
 }
 
 #[test]
-fn a_bound_pin_previews_its_sessions_transcript() {
+fn a_pin_on_a_live_session_previews_its_transcript() {
     let session = AgentSessionId::new("codex", "/state", "abc");
-    let app = pin_snapshot_app(
-        crate::model::PinBinding::Bound {
-            mux: MuxSessionId::new("tmux:ingest"),
-            session: session.clone(),
-        },
-        |_| {},
-    );
+    let app = pin_snapshot_app(Some(NodeId::AgentSession(session.clone())), |snapshot| {
+        snapshot.nodes.push(GraphNode::AgentSession(
+            crate::model::AgentSessionNode::new(session.clone(), "codex".to_string()),
+        ));
+    });
     assert_eq!(
         crate::tui::preview::node_source(&app, &ingest_pin()),
         Some(PreviewSource::Transcript(session))
@@ -4653,20 +4580,17 @@ fn a_bound_pin_previews_its_sessions_transcript() {
 }
 
 #[test]
-fn an_unbound_pin_with_a_live_mux_previews_the_pane() {
+fn a_pin_on_a_live_mux_previews_the_pane() {
     let mux = MuxSessionId::new("tmux:ingest");
-    let app = pin_snapshot_app(
-        crate::model::PinBinding::StaleMux { mux: mux.clone() },
-        |snapshot| {
-            snapshot
-                .nodes
-                .push(GraphNode::MuxSession(crate::model::MuxSessionNode::new(
-                    mux.clone(),
-                    "tmux",
-                    "ingest",
-                )));
-        },
-    );
+    let app = pin_snapshot_app(Some(NodeId::MuxSession(mux.clone())), |snapshot| {
+        snapshot
+            .nodes
+            .push(GraphNode::MuxSession(crate::model::MuxSessionNode::new(
+                mux.clone(),
+                "tmux",
+                "ingest",
+            )));
+    });
     assert_eq!(
         crate::tui::preview::node_source(&app, &ingest_pin()),
         Some(PreviewSource::Pane(mux))
@@ -4674,21 +4598,13 @@ fn an_unbound_pin_with_a_live_mux_previews_the_pane() {
 }
 
 #[test]
-fn any_other_pin_previews_its_diagnostics() {
-    let app = pin_snapshot_app(crate::model::PinBinding::Unbound, |snapshot| {
-        snapshot
-            .diagnostics
-            .push(crate::model::Diagnostic::PinUnbound {
-                pin_id: "ingest".to_string(),
-                expected_mux_native_id: "tmux:ingest".to_string(),
-                last_session: None,
-            });
-    });
+fn any_other_pin_previews_its_status() {
+    let app = pin_snapshot_app(None, |_| {});
     assert_eq!(crate::tui::preview::node_source(&app, &ingest_pin()), None);
     let text = sourceless_node_text(&app, &ingest_pin())
-        .expect("diagnostics")
+        .expect("status")
         .to_string();
-    assert!(text.contains("Pin `ingest` is unbound."), "{text}");
+    assert!(text.contains("Pin `ingest` (mux · planned)"), "{text}");
 }
 
 #[test]

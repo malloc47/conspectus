@@ -277,14 +277,6 @@ pub(super) fn row_matches(row: &crate::tui::rows::Row, target: &NodeId) -> bool 
     }
 }
 
-pub(super) fn row_pin_id(row: &crate::tui::rows::Row) -> Option<&str> {
-    match &row.kind {
-        RowKind::AgentSession(session) => session.pin_id.as_deref(),
-        RowKind::MuxSession(mux) => mux.pin_id.as_deref(),
-        _ => None,
-    }
-}
-
 pub(super) fn initial_expanded_rows(tree: &RowTree) -> BTreeSet<RowId> {
     let mut expanded = BTreeSet::new();
     for row in &tree.rows {

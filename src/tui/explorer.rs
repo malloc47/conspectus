@@ -363,10 +363,8 @@ pub fn directional_verb(relation: &RelationKind, direction: Direction) -> &'stat
         (ProcessIdentifiesSession, Upstream) => "identified by",
         (ProcessCandidatesSession, Downstream) => "candidate for",
         (ProcessCandidatesSession, Upstream) => "candidate process",
-        (PinTargetsMux, Downstream) => "targets mux",
-        (PinTargetsMux, Upstream) => "targeted by pin",
-        (PinRealizedBySession, Downstream) => "realized by",
-        (PinRealizedBySession, Upstream) => "realizes pin",
+        (PinTargets, Downstream) => "targets",
+        (PinTargets, Upstream) => "pinned by",
         (MuxLastHosted, Downstream) => "last hosted",
         (MuxLastHosted, Upstream) => "last ran in",
         (RebuiltFrom, Downstream) => "rebuilt from",
@@ -1184,7 +1182,7 @@ pub fn short_node_label(node: &GraphNode) -> String {
             format!("session:{tag}")
         }
         GraphNode::MuxSession(m) => format!("mux:{}", m.native_id),
-        GraphNode::Pin(p) => format!("pin:{}", truncate(&p.display_name, 16)),
+        GraphNode::Pin(p) => format!("pin:{}", truncate(&p.label, 16)),
         GraphNode::RuntimeProcess(p) => {
             let head = p
                 .command
@@ -1224,7 +1222,7 @@ fn title_line(snapshot: &GraphSnapshot, node: &GraphNode) -> String {
             }
         }
         GraphNode::MuxSession(m) => m.display_label(),
-        GraphNode::Pin(p) => format!("pin:{}", p.display_name),
+        GraphNode::Pin(p) => format!("pin:{}", p.label),
         GraphNode::RuntimeProcess(p) => match (p.pid, p.command.as_deref()) {
             (Some(pid), Some(cmd)) => format!("pid {pid}: {}", truncate(cmd, 48)),
             (Some(pid), None) => format!("pid {pid}"),
@@ -1563,39 +1561,44 @@ fn mux_session_extras(m: &MuxSessionNode, now: Option<i64>) -> Vec<CoreField> {
 }
 
 fn pin_core(p: &PinNode, home: Option<&Path>) -> Vec<CoreField> {
-    vec![
-        CoreField::plain("id", p.id.id.clone()),
-        CoreField::text("name", p.display_name.clone()),
-        CoreField::glossary("harness", p.harness.clone()),
-        CoreField::path("cwd", &p.cwd, home),
-        {
-            let field = CoreField::plain("mux", p.mux.native_id());
-            match &p.binding {
-                Some(
-                    crate::model::PinBinding::Bound { mux, .. }
-                    | crate::model::PinBinding::StaleMux { mux },
-                ) => field.previewing(FieldValue::Node(NodeId::MuxSession(mux.clone()))),
-                _ => field,
-            }
-        },
-    ]
-}
-
-fn pin_extras(p: &PinNode, home: Option<&Path>) -> Vec<CoreField> {
     let mut fields = vec![
-        CoreField::path("store", &p.store_path, home),
-        CoreField::glossary("source", p.provenance.snake_case()),
+        CoreField::plain("id", p.id.id.clone()),
+        CoreField::text("name", p.label.clone()),
+        CoreField::glossary("kind", p.kind.as_str()),
+        CoreField::glossary("status", p.status.as_str()),
     ];
-    if let Some(argv) = &p.launch_argv
-        && !argv.is_empty()
-    {
+    if let Some(target) = &p.target_node {
         fields.push(
-            CoreField::plain("launch", argv.join(" "))
-                .previewing(FieldValue::Command(argv.clone())),
+            CoreField::plain("target", target.to_string())
+                .previewing(FieldValue::Node(target.clone())),
         );
     }
-    if let Some(reason) = &p.reason {
-        fields.push(CoreField::text("reason", reason.clone()));
+    for label in p.kind.recipe_fields() {
+        let Some(field) = p.field(label) else {
+            continue;
+        };
+        fields.push(match field {
+            crate::model::FieldValue::List(items) => CoreField::plain(label, items.join(" "))
+                .previewing(FieldValue::Command(items.clone())),
+            crate::model::FieldValue::Text(text) if matches!(*label, "cwd" | "root" | "path") => {
+                CoreField::path(label, text, home)
+            }
+            crate::model::FieldValue::Text(text) => CoreField::text(label, text.clone()),
+        });
+    }
+    fields
+}
+
+fn pin_extras(p: &PinNode, _home: Option<&Path>) -> Vec<CoreField> {
+    let mut fields = Vec::new();
+    if !p.effective.is_empty() {
+        let sources = p
+            .effective
+            .iter()
+            .map(|field| format!("{}={}", field.name, field.source.as_str()))
+            .collect::<Vec<_>>()
+            .join(" ");
+        fields.push(CoreField::text("sources", sources));
     }
     fields.push(CoreField::plain(
         "full_id",
@@ -2122,7 +2125,7 @@ fn neighbor_display_label(node: &GraphNode, home: Option<&Path>) -> String {
     match node {
         GraphNode::AgentSession(s) => format!("{}:{}", s.harness_key, s.id.session_key),
         GraphNode::MuxSession(m) => m.display_label(),
-        GraphNode::Pin(p) => format!("pin:{}", p.display_name),
+        GraphNode::Pin(p) => format!("pin:{}", p.label),
         GraphNode::RuntimeProcess(p) => match (p.pid, p.command.as_deref()) {
             (Some(pid), Some(cmd)) => format!("{} · pid {pid}", truncate(cmd, 24)),
             (Some(pid), None) => format!("pid {pid}"),

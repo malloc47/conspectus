@@ -377,7 +377,7 @@ fn config_diagnostic(path: &Path, message: String) -> Diagnostic {
 
 fn provenance_key(provenance: Provenance) -> &'static str {
     match provenance {
-        Provenance::LocalDeclared | Provenance::LocalPin => "local",
+        Provenance::LocalDeclared => "local",
         Provenance::GlobalDeclared | Provenance::GlobalPin => "global",
         Provenance::StrongDiscovered
         | Provenance::Discovered

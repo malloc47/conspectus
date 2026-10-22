@@ -49,11 +49,23 @@ impl Drop for KillServer<'_> {
     }
 }
 
-fn pin_create(home: &Path, project: &Path, extra: &[&str]) {
+/// A planned mux slot anchored on `project`: nothing is running, so
+/// the commands under test only read the slot store.
+fn pin_planned(home: &Path, project: &Path) {
     from_deleted_dir(home)
-        .args(["pin", "create", "ingest", "--harness", "codex", "--cwd"])
-        .arg(project)
-        .args(extra)
+        .args([
+            "pin",
+            "add",
+            "--planned",
+            "--kind",
+            "mux",
+            "--name",
+            "ingest",
+            "--set",
+            "harness=codex",
+            "--set",
+        ])
+        .arg(format!("cwd={}", project.display()))
         .assert()
         .success();
 }
@@ -65,6 +77,7 @@ fn survey_commands_succeed_from_a_deleted_directory() {
         &["graph", "--format", "json"][..],
         &["table", "sessions"],
         &["pin", "list"],
+        &["history", "list"],
         &["alias", "list"],
         &["declared", "list"],
         &["worktree", "list"],
@@ -79,37 +92,25 @@ fn survey_commands_succeed_from_a_deleted_directory() {
 }
 
 #[test]
-fn user_store_pins_stay_visible_from_a_deleted_directory() {
+fn slots_stay_visible_from_a_deleted_directory() {
     let home = tempfile::TempDir::new().expect("home");
     let project = tempfile::TempDir::new().expect("project");
-    pin_create(home.path(), project.path(), &["--store", "user"]);
+    pin_planned(home.path(), project.path());
 
     from_deleted_dir(home.path())
         .args(["pin", "list"])
         .assert()
         .success()
         .stdout(predicate::str::contains("ingest"));
-}
-
-#[test]
-fn project_pin_is_found_through_its_scan_root_from_a_deleted_directory() {
-    // The TUI launches a pin by running `conspectus pin launch <id>
-    // --scan-root <pin cwd>` from its own, possibly deleted, directory.
-    let home = tempfile::TempDir::new().expect("home");
-    let project = tempfile::TempDir::new().expect("project");
-    pin_create(home.path(), project.path(), &["--store", "project"]);
-    assert!(project.path().join(".conspectus.toml").is_file());
-
     from_deleted_dir(home.path())
-        .args(["pin", "show", "ingest", "--scan-root"])
-        .arg(project.path())
+        .args(["pin", "show", "ingest"])
         .assert()
         .success()
         .stdout(predicate::str::contains("ingest"));
 }
 
 #[test]
-fn pin_launch_succeeds_from_a_deleted_directory() {
+fn rebuild_succeeds_from_a_deleted_directory() {
     use std::os::unix::fs::PermissionsExt;
 
     let tmux_available = std::process::Command::new("tmux")
@@ -136,17 +137,24 @@ fn pin_launch_succeeds_from_a_deleted_directory() {
         .expect("private tmux dir");
     let _server = KillServer(tmux_dir.path());
 
-    // A project pin, launched the way the TUI does it.
-    pin_create(home.path(), project.path(), &["--store", "project"]);
+    // The TUI runs `conspectus rebuild <slot>` from its own, possibly
+    // deleted, directory.
+    pin_planned(home.path(), project.path());
     from_deleted_dir(home.path())
         .env("TMUX_TMPDIR", tmux_dir.path())
+        .env_remove("CONSPECTUS_DISABLE_TMUX")
         .env("PATH", &path)
         .env("SHELL", "/bin/sh")
-        .args(["pin", "launch", "ingest", "--no-attach", "--scan-root"])
-        .arg(project.path())
+        .args(["rebuild", "ingest", "--no-attach"])
         .assert()
-        .success()
-        .stdout(predicate::str::contains("spawned `ingest` (detached)"));
+        .success();
+    let has_session = std::process::Command::new("tmux")
+        .env_remove("TMUX")
+        .env("TMUX_TMPDIR", tmux_dir.path())
+        .args(["has-session", "-t", "ingest"])
+        .status()
+        .expect("tmux");
+    assert!(has_session.success(), "the rebuild started the mux");
 }
 
 #[test]

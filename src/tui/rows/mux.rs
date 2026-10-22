@@ -13,8 +13,8 @@ use crate::filter::{MuxStateKey, RowFilter, SessionMatchInputs};
 use crate::model::workspace_paths::WorkspacePaths;
 use crate::model::{
     AgentSessionId, AgentSessionNode, CheckoutId, GraphNode, GraphSnapshot, LinkEndpoint,
-    LinkState, MuxSessionId, MuxSessionNode, NodeId, PinBinding, PinCandidate, PinId, RelationKind,
-    RepoId, WorkspaceId, path_is_ancestor_of,
+    LinkState, MuxSessionId, MuxSessionNode, NodeId, PinId, PinKind, PinNode, RelationKind, RepoId,
+    WorkspaceId, path_is_ancestor_of,
 };
 use crate::output::render::{node_short_id_from_display, unique_prefix_len};
 use crate::tui::rows::{
@@ -71,16 +71,16 @@ pub fn build_mux_tree(inputs: MuxBuildInputs<'_>) -> RowTree {
 
     let muxes = collect_muxes(snapshot);
     let attachments = collect_attached_agents(snapshot);
-    let pins: Vec<&PinCandidate> = snapshot.pins.iter().collect();
+    let pins: Vec<&PinNode> = super::pin_nodes(snapshot)
+        .into_iter()
+        .filter(|pin| pin.kind == PinKind::Mux)
+        .collect();
     let process_harnesses = mux_process_harnesses(snapshot);
 
-    let mut pin_by_mux: HashMap<NodeId, &PinCandidate> = HashMap::new();
+    let mut pin_by_mux: HashMap<NodeId, &PinNode> = HashMap::new();
     for pin in &pins {
-        match &pin.binding {
-            Some(PinBinding::Bound { mux, .. } | PinBinding::StaleMux { mux }) => {
-                pin_by_mux.insert(NodeId::MuxSession(mux.clone()), pin);
-            }
-            Some(PinBinding::Unbound) | None => {}
+        if let Some(mux @ NodeId::MuxSession(_)) = super::live_pin_target(snapshot, pin) {
+            pin_by_mux.insert(mux, pin);
         }
     }
 
@@ -157,7 +157,7 @@ pub fn build_mux_tree(inputs: MuxBuildInputs<'_>) -> RowTree {
                 process_harnesses.get(&node_id).map(String::as_str),
             ),
             single_session_preview,
-            pin_id: pin_by_mux.get(&node_id).map(|pin| pin.id.clone()),
+            pin_id: pin_by_mux.get(&node_id).map(|pin| pin.id.id.clone()),
             primary_node: node_id.clone(),
         };
 
@@ -178,7 +178,7 @@ pub fn build_mux_tree(inputs: MuxBuildInputs<'_>) -> RowTree {
 
     for pin in pins
         .iter()
-        .filter(|pin| matches!(pin.binding, Some(PinBinding::Unbound) | None))
+        .filter(|pin| super::live_pin_target(snapshot, pin).is_none())
     {
         groups.push(placeholder_mux_group_for_pin(pin, inputs.home));
     }
@@ -190,13 +190,29 @@ pub fn build_mux_tree(inputs: MuxBuildInputs<'_>) -> RowTree {
         MuxGrouping::Repo => {
             // Pins group sits above the repo-grouped muxes so
             // the operator sees the deck's pinned work first.
-            emit_pins_group_for_mux(&mut tree, &pins, &groups, &short_ids, inputs.home, now);
+            emit_pins_group_for_mux(
+                &mut tree,
+                snapshot,
+                &pins,
+                &groups,
+                &short_ids,
+                inputs.home,
+                now,
+            );
 
             let path_index = PathIndex::from_snapshot(snapshot);
             emit_repo_grouped(&mut tree, groups, &inputs, &short_ids, &path_index, now);
         }
         MuxGrouping::Workspace => {
-            emit_pins_group_for_mux(&mut tree, &pins, &groups, &short_ids, inputs.home, now);
+            emit_pins_group_for_mux(
+                &mut tree,
+                snapshot,
+                &pins,
+                &groups,
+                &short_ids,
+                inputs.home,
+                now,
+            );
 
             let path_index = PathIndex::from_snapshot(snapshot);
             emit_workspace_grouped(&mut tree, groups, &inputs, &short_ids, &path_index, now);
@@ -208,7 +224,8 @@ pub fn build_mux_tree(inputs: MuxBuildInputs<'_>) -> RowTree {
 
 fn emit_pins_group_for_mux(
     tree: &mut RowTree,
-    pins: &[&PinCandidate],
+    snapshot: &crate::model::GraphSnapshot,
+    pins: &[&PinNode],
     groups: &[MuxGroup],
     short_ids: &HashMap<&str, String>,
     home: Option<&Path>,
@@ -236,13 +253,7 @@ fn emit_pins_group_for_mux(
     let mut emitted_muxes: HashSet<NodeId> = HashSet::new();
 
     for pin in pins {
-        let bound_mux = match &pin.binding {
-            Some(PinBinding::Bound { mux, .. } | PinBinding::StaleMux { mux }) => {
-                Some(NodeId::MuxSession(mux.clone()))
-            }
-            Some(PinBinding::Unbound) | None => None,
-        };
-        if let Some(mux_id) = bound_mux
+        if let Some(mux_id) = super::live_pin_target(snapshot, pin)
             && emitted_muxes.insert(mux_id.clone())
             && let Some(group) = group_by_mux.get(&mux_id)
         {
@@ -254,35 +265,36 @@ fn emit_pins_group_for_mux(
     }
 }
 
-fn placeholder_mux_group_for_pin(pin: &PinCandidate, home: Option<&Path>) -> MuxGroup {
-    let pin_node = NodeId::Pin(PinId::new(pin.id.clone()));
-    let native_id = pin.mux.socket_name.as_ref().map_or_else(
-        || pin.mux.name.clone(),
-        |socket| format!("{socket}:{}", pin.mux.name),
-    );
+fn placeholder_mux_group_for_pin(pin: &PinNode, home: Option<&Path>) -> MuxGroup {
+    let pin_node = NodeId::Pin(PinId::new(pin.id.id.clone()));
+    let name = pin.text("name").unwrap_or(&pin.label).to_string();
+    let socket = crate::model::effective_socket(pin.text("socket"));
+    let native_id = socket.map_or_else(|| name.clone(), |socket| format!("{socket}:{name}"));
+    let cwd = pin.text("cwd").map(str::to_string);
+    let cwd_display = cwd.as_deref().map(|cwd| shorten_home(cwd, home));
     MuxGroup {
         parent_row: MuxSessionRow {
-            mux: MuxSessionId::new(pin.mux.native_id()),
-            backend: pin.mux.backend.clone(),
+            mux: MuxSessionId::new(format!("tmux:{native_id}")),
+            backend: "tmux".to_string(),
             native_id,
             client_attached: None,
-            cwd_display: Some(shorten_home(&pin.cwd, home)),
+            cwd_display: cwd_display.clone(),
             attached_count: 0,
             recency: None,
             activity_epoch: None,
             created_epoch: None,
             last_attached_epoch: None,
-            agent_labels: vec![harness_label(&pin.harness)],
+            agent_labels: pin.text("harness").map(harness_label).into_iter().collect(),
             program: None,
             program_harness: None,
-            single_session_preview: Some(shorten_home(&pin.cwd, home)),
-            pin_id: Some(pin.id.clone()),
+            single_session_preview: cwd_display,
+            pin_id: Some(pin.id.id.clone()),
             primary_node: pin_node.clone(),
         },
         parent_node_id: pin_node,
         children: Vec::new(),
         attached_count: 0,
-        cwd: Some(pin.cwd.clone()),
+        cwd,
     }
 }
 

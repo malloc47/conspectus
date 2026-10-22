@@ -37,11 +37,6 @@ pub enum Modal {
     /// event so view / grouping / filter / sort surface fresh
     /// values as the operator toggles them.
     Controls(crate::tui::widgets::controls::ControlsOverlayState),
-    /// Pins overlay (ADR 0057). Reads a
-    /// [`crate::tui::widgets::pins::PinsContext`] on every event
-    /// so the "adopt selected mux" flow sees the current
-    /// selection.
-    Pins(crate::tui::widgets::pins::PinsOverlayState),
     /// Rename overlay (ADR 0029 / ADR 0030). Wraps the generic
     /// text-input widget with a [`Msg::CommitRename`] mapper so
     /// the trait's uniform `Commit(Msg)` outcome carries the

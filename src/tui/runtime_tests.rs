@@ -1,12 +1,6 @@
 use super::*;
-use crate::pins::TMUX_MUX_BACKEND;
-use crate::tui::widgets::pins::{
-    PinBindRequest, PinCreateRequest, PinCreateStore, PinEditRequest, PinRemoveRequest,
-};
 use ratatui::crossterm::event::KeyEvent;
 use ratatui::crossterm::event::{KeyCode, KeyModifiers};
-use std::fs;
-use std::os::unix::process::ExitStatusExt;
 
 fn press(code: KeyCode, mods: KeyModifiers) -> Event {
     let mut key = KeyEvent::new(code, mods);
@@ -94,56 +88,6 @@ fn translate_a_requests_attach() {
 }
 
 #[test]
-fn translate_delete_requests_pin_remove() {
-    assert_eq!(
-        translate(press(KeyCode::Delete, KeyModifiers::NONE), 24),
-        Some(Action::RemovePin)
-    );
-}
-
-#[test]
-fn pin_launch_summary_surfaces_stderr_on_failure() {
-    let output = Output {
-        status: std::process::ExitStatus::from_raw(1 << 8),
-        stdout: b"stdout line\n".to_vec(),
-        stderr: b"tmux session `demo` vanished before attach\n".to_vec(),
-    };
-
-    let summary = summarize_pin_launch_output("demo", Ok(output));
-
-    assert!(!summary.success);
-    assert_eq!(
-        summary.message,
-        "pin `demo` launch failed: tmux session `demo` vanished before attach"
-    );
-}
-
-#[test]
-fn pin_launch_summary_uses_stdout_on_success() {
-    let output = Output {
-        status: std::process::ExitStatus::from_raw(0),
-        stdout: b"spawned `demo` (detached); attach with: tmux attach-session -t demo\n".to_vec(),
-        stderr: Vec::new(),
-    };
-
-    let summary = summarize_pin_launch_output("demo", Ok(output));
-
-    assert!(summary.success);
-    assert_eq!(
-        summary.message,
-        "pin `demo` launched: spawned `demo` (detached); attach with: tmux attach-session -t demo"
-    );
-}
-
-#[test]
-fn translate_b_requests_pin_bind_hint() {
-    assert_eq!(
-        translate(press(KeyCode::Char('b'), KeyModifiers::NONE), 24),
-        Some(Action::PinBindHint)
-    );
-}
-
-#[test]
 fn translate_i_requests_copy_session_id() {
     // `i` resolves the selected agent or mux session's
     // full id and routes it through the OSC 52 clipboard
@@ -177,64 +121,6 @@ fn translate_f_opens_controls_overlay() {
 }
 
 #[test]
-fn translate_p_opens_pins_overlay() {
-    assert_eq!(
-        translate(press(KeyCode::Char('p'), KeyModifiers::NONE), 24),
-        Some(Action::OpenPins)
-    );
-}
-
-#[test]
-fn translate_capital_n_requests_open_pin_create() {
-    assert_eq!(
-        translate(press(KeyCode::Char('N'), KeyModifiers::SHIFT), 24),
-        Some(Action::OpenPinCreate)
-    );
-    assert_eq!(
-        translate(press(KeyCode::Char('N'), KeyModifiers::NONE), 24),
-        Some(Action::OpenPinCreate)
-    );
-}
-
-#[test]
-fn translate_capital_b_requests_open_pin_rebind() {
-    assert_eq!(
-        translate(press(KeyCode::Char('B'), KeyModifiers::SHIFT), 24),
-        Some(Action::OpenPinRebind)
-    );
-    // Lowercase b still routes to the bind picker / hint.
-    assert_eq!(
-        translate(press(KeyCode::Char('b'), KeyModifiers::NONE), 24),
-        Some(Action::PinBindHint)
-    );
-}
-
-#[test]
-fn translate_capital_l_requests_pin_launch() {
-    assert_eq!(
-        translate(press(KeyCode::Char('L'), KeyModifiers::SHIFT), 24),
-        Some(Action::LaunchPin)
-    );
-    assert_eq!(
-        translate(press(KeyCode::Char('L'), KeyModifiers::NONE), 24),
-        Some(Action::LaunchPin)
-    );
-}
-
-#[test]
-fn translate_capital_a_requests_open_pin_adopt() {
-    assert_eq!(
-        translate(press(KeyCode::Char('A'), KeyModifiers::SHIFT), 24),
-        Some(Action::OpenPinAdopt)
-    );
-    // Lowercase a still attaches.
-    assert_eq!(
-        translate(press(KeyCode::Char('a'), KeyModifiers::NONE), 24),
-        Some(Action::Attach)
-    );
-}
-
-#[test]
 fn translate_upper_t_no_longer_bound_to_view() {
     // `v` owns View; `T` is unbound and falls through to None.
     assert_eq!(
@@ -260,370 +146,6 @@ fn translate_shift_f_clears_filters() {
         translate(press(KeyCode::Char('F'), KeyModifiers::NONE), 24),
         Some(Action::ClearFilters)
     );
-}
-
-#[test]
-fn write_pin_create_writes_project_store() {
-    let home = tempfile::TempDir::new().expect("home");
-    let project = tempfile::TempDir::new().expect("project");
-    let loader = crate::config::ConfigLoader::new()
-        .with_home(home.path())
-        .with_xdg_config_home(home.path().join(".config"));
-    let request = PinCreateRequest {
-        id: "ingest".to_string(),
-        display_name: "Ingest".to_string(),
-        harness: "codex".to_string(),
-        cwd: project.path().display().to_string(),
-        mux_name: "ingest-mux".to_string(),
-        mux_backend: "tmux".to_string(),
-        mux_socket: Some("scratch".to_string()),
-        adopt_source_mux_name: None,
-        launch_argv: vec!["codex".to_string(), "--resume".to_string()],
-        worktree_branch: None,
-        store: PinCreateStore::Project,
-    };
-
-    let state = tempfile::TempDir::new().expect("state");
-    let registry =
-        crate::pin_store_registry::PinStoreRegistry::new().with_xdg_state_home(state.path());
-    let (outcome, entry, kind) = write_pin_create(&request, &loader, &registry).expect("write pin");
-    assert!(outcome.changed);
-    assert_eq!(kind, PinStoreKind::Project);
-    assert_eq!(entry.id, "ingest");
-    assert_eq!(entry.mux.native_id(), "tmux:scratch:ingest-mux");
-    assert_eq!(outcome.path, project.path().join(".conspectus.toml"));
-
-    // Creating a project pin records its store in the
-    // registry so it survives a later scan from an unrelated root.
-    assert_eq!(
-        registry.read(),
-        vec![project.path().join(".conspectus.toml")],
-    );
-
-    let written = fs::read_to_string(&outcome.path).expect("project config");
-    assert!(written.contains("[pins]"));
-    assert!(written.contains(r#"id = "ingest""#));
-    assert!(written.contains(r#"display_name = "Ingest""#));
-    assert!(written.contains(r#"harness = "codex""#));
-    assert!(written.contains(r#"name = "ingest-mux""#));
-    assert!(written.contains(r#"socket_name = "scratch""#));
-    assert!(written.contains("argv = ["));
-    assert!(written.contains(r#""codex""#));
-    assert!(written.contains(r#""--resume""#));
-}
-
-#[test]
-fn write_pin_create_user_store_uses_user_config_path() {
-    let home = tempfile::TempDir::new().expect("home");
-    let xdg = home.path().join(".config");
-    let project = tempfile::TempDir::new().expect("project");
-    let loader = crate::config::ConfigLoader::new()
-        .with_home(home.path())
-        .with_xdg_config_home(&xdg);
-    let request = PinCreateRequest {
-        id: "scratch".to_string(),
-        display_name: "Scratch".to_string(),
-        harness: "codex".to_string(),
-        cwd: project.path().display().to_string(),
-        mux_name: "scratch".to_string(),
-        mux_backend: "tmux".to_string(),
-        mux_socket: None,
-        adopt_source_mux_name: None,
-        launch_argv: Vec::new(),
-        worktree_branch: None,
-        store: PinCreateStore::User,
-    };
-
-    let state = tempfile::TempDir::new().expect("state");
-    let registry =
-        crate::pin_store_registry::PinStoreRegistry::new().with_xdg_state_home(state.path());
-    let (outcome, _, kind) =
-        write_pin_create(&request, &loader, &registry).expect("write user pin");
-    assert_eq!(kind, PinStoreKind::User);
-    assert_eq!(outcome.path, xdg.join(crate::config::USER_CONFIG_RELATIVE));
-    assert!(outcome.path.exists());
-    assert!(!project.path().join(".conspectus.toml").exists());
-
-    // The user-scope store is consulted directly by discovery, so it's
-    // never recorded in the project-store registry.
-    assert!(registry.read().is_empty());
-}
-
-#[test]
-fn pin_adopt_mux_rename_renames_source_mux_to_requested_mux_name() {
-    let tmux = crate::discovery::tmux::FakeTmux::with_sessions("");
-    let request = PinCreateRequest {
-        id: "agentdeck-conspectus-2".to_string(),
-        display_name: "agentdeck-conspectus-2".to_string(),
-        harness: "codex".to_string(),
-        cwd: "/workspace/project".to_string(),
-        mux_name: "agentdeck-conspectus-2".to_string(),
-        mux_backend: "tmux".to_string(),
-        mux_socket: Some("scratch".to_string()),
-        adopt_source_mux_name: Some("agentdeck_conspectus".to_string()),
-        launch_argv: Vec::new(),
-        worktree_branch: None,
-        store: PinCreateStore::Project,
-    };
-
-    let status = apply_pin_adopt_mux_rename(&tmux, &request).expect("rename status");
-
-    assert_eq!(
-        status,
-        "renamed adopted mux `agentdeck_conspectus` to `agentdeck-conspectus-2`"
-    );
-    assert_eq!(
-        tmux.rename_calls(),
-        vec![(
-            Some("scratch".to_string()),
-            "agentdeck_conspectus".to_string(),
-            "agentdeck-conspectus-2".to_string()
-        )]
-    );
-}
-
-#[test]
-fn pin_adopt_mux_rename_skips_when_source_already_matches_target() {
-    let tmux = crate::discovery::tmux::FakeTmux::with_sessions("");
-    let request = PinCreateRequest {
-        id: "work".to_string(),
-        display_name: "work".to_string(),
-        harness: "codex".to_string(),
-        cwd: "/workspace/project".to_string(),
-        mux_name: "work".to_string(),
-        mux_backend: "tmux".to_string(),
-        mux_socket: None,
-        adopt_source_mux_name: Some("work".to_string()),
-        launch_argv: Vec::new(),
-        worktree_branch: None,
-        store: PinCreateStore::Project,
-    };
-
-    let status = apply_pin_adopt_mux_rename(&tmux, &request).expect("rename status");
-
-    assert_eq!(status, "adopted existing mux `work`");
-    assert!(tmux.rename_calls().is_empty());
-}
-
-#[test]
-fn pin_create_success_toast_distinguishes_new_and_adopted_pins() {
-    assert_eq!(
-        pin_create_success_toast(false, "ingest"),
-        "pin created, not started: `ingest`"
-    );
-    assert_eq!(
-        pin_create_success_toast(true, "ingest"),
-        "pin adopted; mux already running: `ingest`"
-    );
-}
-
-#[test]
-fn write_pin_edit_updates_id_display_mux_and_launch() {
-    let project = tempfile::TempDir::new().expect("project");
-    let path = project.path().join(".conspectus.toml");
-    let entry = PinEntry {
-        id: "ingest".to_string(),
-        display_name: "Ingest".to_string(),
-        harness: "codex".to_string(),
-        cwd: project.path().display().to_string(),
-        mux: PinMux {
-            backend: TMUX_MUX_BACKEND.to_string(),
-            name: "ingest".to_string(),
-            socket_name: None,
-        },
-        launch: None,
-        worktree: None,
-        reason: None,
-    };
-    crate::pins::upsert_pin_entry(&path, entry).expect("seed pin");
-
-    let outcome = write_pin_edit(&PinEditRequest {
-        original_id: "ingest".to_string(),
-        id: "daily-ingest".to_string(),
-        display_name: "Daily Ingest".to_string(),
-        harness: "codex".to_string(),
-        cwd: project.path().display().to_string(),
-        mux_name: "daily".to_string(),
-        mux_backend: "tmux".to_string(),
-        mux_socket: Some("scratch".to_string()),
-        launch_argv: vec!["codex".to_string(), "--resume".to_string()],
-        store_path: path.display().to_string(),
-    })
-    .expect("edit pin");
-
-    assert!(outcome.changed);
-    let written = fs::read_to_string(&path).expect("config");
-    assert!(!written.contains(r#"id = "ingest""#));
-    assert!(written.contains(r#"id = "daily-ingest""#));
-    assert!(written.contains(r#"display_name = "Daily Ingest""#));
-    assert!(written.contains(r#"name = "daily""#));
-    assert!(written.contains(r#"socket_name = "scratch""#));
-    assert!(written.contains(r#""--resume""#));
-}
-
-#[test]
-fn write_pin_edit_rejects_duplicate_id_without_mutating() {
-    let project = tempfile::TempDir::new().expect("project");
-    let path = project.path().join(".conspectus.toml");
-    for (id, mux) in [("ingest", "ingest"), ("scratch", "scratch")] {
-        crate::pins::upsert_pin_entry(
-            &path,
-            PinEntry {
-                id: id.to_string(),
-                display_name: id.to_string(),
-                harness: "codex".to_string(),
-                cwd: project.path().display().to_string(),
-                mux: PinMux {
-                    backend: TMUX_MUX_BACKEND.to_string(),
-                    name: mux.to_string(),
-                    socket_name: None,
-                },
-                launch: None,
-                worktree: None,
-                reason: None,
-            },
-        )
-        .expect("seed pin");
-    }
-    let before = fs::read_to_string(&path).expect("before");
-
-    let err = write_pin_edit(&PinEditRequest {
-        original_id: "ingest".to_string(),
-        id: "scratch".to_string(),
-        display_name: "Ingest".to_string(),
-        harness: "codex".to_string(),
-        cwd: project.path().display().to_string(),
-        mux_name: "ingest".to_string(),
-        mux_backend: "tmux".to_string(),
-        mux_socket: None,
-        launch_argv: Vec::new(),
-        store_path: path.display().to_string(),
-    })
-    .expect_err("duplicate id");
-    assert!(err.to_string().contains("already exists"));
-    assert_eq!(fs::read_to_string(&path).expect("after"), before);
-}
-
-#[test]
-fn write_pin_edit_rejects_duplicate_mux_without_mutating() {
-    let project = tempfile::TempDir::new().expect("project");
-    let path = project.path().join(".conspectus.toml");
-    for (id, mux) in [("ingest", "ingest"), ("scratch", "scratch")] {
-        crate::pins::upsert_pin_entry(
-            &path,
-            PinEntry {
-                id: id.to_string(),
-                display_name: id.to_string(),
-                harness: "codex".to_string(),
-                cwd: project.path().display().to_string(),
-                mux: PinMux {
-                    backend: TMUX_MUX_BACKEND.to_string(),
-                    name: mux.to_string(),
-                    socket_name: None,
-                },
-                launch: None,
-                worktree: None,
-                reason: None,
-            },
-        )
-        .expect("seed pin");
-    }
-    let before = fs::read_to_string(&path).expect("before");
-
-    let err = write_pin_edit(&PinEditRequest {
-        original_id: "ingest".to_string(),
-        id: "ingest".to_string(),
-        display_name: "Ingest".to_string(),
-        harness: "codex".to_string(),
-        cwd: project.path().display().to_string(),
-        mux_name: "scratch".to_string(),
-        mux_backend: "tmux".to_string(),
-        mux_socket: None,
-        launch_argv: Vec::new(),
-        store_path: path.display().to_string(),
-    })
-    .expect_err("duplicate mux");
-    assert!(err.to_string().contains("already used"));
-    assert_eq!(fs::read_to_string(&path).expect("after"), before);
-}
-
-#[test]
-fn write_pin_bind_writes_declared_override() {
-    let temp = tempfile::TempDir::new().expect("temp");
-    let loader = crate::config::ConfigLoader::new()
-        .with_home(temp.path())
-        .with_xdg_config_home(temp.path().join(".config"));
-    let session_id = crate::model::AgentSessionId::new("codex", "/state", "session-a");
-    let mut snapshot = crate::model::GraphSnapshot::empty();
-    snapshot.nodes.push(crate::model::GraphNode::AgentSession(
-        crate::model::AgentSessionNode::new(session_id, "codex".to_string())
-            .with_cwd("/workspace".to_string()),
-    ));
-    snapshot.pins.push(crate::model::PinCandidate {
-        id: "ingest".to_string(),
-        display_name: "Ingest".to_string(),
-        harness: "codex".to_string(),
-        cwd: "/workspace".to_string(),
-        mux: crate::model::PinMuxRef {
-            backend: TMUX_MUX_BACKEND.to_string(),
-            name: "ingest".to_string(),
-            socket_name: None,
-        },
-        launch_argv: None,
-        reason: None,
-        provenance: crate::model::Provenance::LocalPin,
-        store_path: "/workspace/.conspectus.toml".to_string(),
-        binding: None,
-    });
-
-    let outcome = write_pin_bind(
-        &PinBindRequest {
-            pin_id: "ingest".to_string(),
-            session_key: "session-a".to_string(),
-        },
-        &snapshot,
-        &loader,
-    )
-    .expect("bind pin");
-
-    assert!(outcome.changed);
-    let written = fs::read_to_string(outcome.path).expect("declared config");
-    assert!(written.contains(r#"id = "pin:ingest:bound""#));
-    assert!(written.contains(r#"label = "pin:ingest""#));
-    assert!(written.contains(r#"session_key = "session-a""#));
-    assert!(written.contains(r#"native_id = "tmux:ingest""#));
-}
-
-#[test]
-fn write_pin_remove_removes_from_explicit_store_path() {
-    let project = tempfile::TempDir::new().expect("project");
-    let path = project.path().join(".conspectus.toml");
-    let entry = PinEntry {
-        id: "ingest".to_string(),
-        display_name: "Ingest".to_string(),
-        harness: "codex".to_string(),
-        cwd: project.path().display().to_string(),
-        mux: PinMux {
-            backend: TMUX_MUX_BACKEND.to_string(),
-            name: "ingest".to_string(),
-            socket_name: None,
-        },
-        launch: None,
-        worktree: None,
-        reason: None,
-    };
-    crate::pins::upsert_pin_entry(&path, entry).expect("seed pin");
-    assert!(path.exists());
-
-    let outcome = write_pin_remove(&PinRemoveRequest {
-        id: "ingest".to_string(),
-        display_name: "Ingest".to_string(),
-        store_path: path.display().to_string(),
-    })
-    .expect("remove pin");
-    assert!(outcome.changed);
-    assert_eq!(outcome.path, path);
-    assert!(!outcome.path.exists());
 }
 
 #[test]
@@ -1140,43 +662,6 @@ mod selected_default_action_tests {
         app.update(Msg::NavDown);
         assert_eq!(selected_default_action(&app), SelectedDefault::View);
     }
-
-    #[test]
-    fn unbound_pin_row_resolves_to_launch_pin() {
-        use crate::model::{PinBinding, PinCandidate, PinMuxRef, Provenance};
-
-        let mut snapshot = GraphSnapshot::empty();
-        snapshot.pins.push(PinCandidate {
-            id: "ingest".to_string(),
-            display_name: "ingest".to_string(),
-            harness: "codex".to_string(),
-            cwd: "/p/proj".to_string(),
-            mux: PinMuxRef {
-                backend: "tmux".to_string(),
-                name: "ingest".to_string(),
-                socket_name: None,
-            },
-            launch_argv: None,
-            reason: None,
-            provenance: Provenance::LocalPin,
-            store_path: "/tmp/.conspectus.toml".to_string(),
-            binding: Some(PinBinding::Unbound),
-        });
-        // Auto-selection lands on the first row of the synthetic
-        // "Pins" group (the group header). Walk the tree to find
-        // the pin placeholder row and select it so the dispatch
-        // exercises the pin row instead of the group header.
-        let mut app = build_sessions_app(snapshot);
-        let pin_row_id = app
-            .tree()
-            .rows
-            .iter()
-            .find(|r| matches!(&r.id, crate::tui::rows::RowId::Pin { .. }))
-            .map(|r| r.id.clone())
-            .expect("pin row emitted");
-        app.set_selection(pin_row_id);
-        assert_eq!(selected_default_action(&app), SelectedDefault::LaunchPin);
-    }
 }
 
 #[test]
@@ -1440,97 +925,10 @@ mod overlay_routing {
     }
 }
 
-mod pin_launch_scan_root {
-    //! Regression coverage for the CWD-drift bug: launching a pin
-    //! from a TUI started outside the pin's project root used to
-    //! fail because the subprocess re-discovered pins using its
-    //! inherited CWD. Fixed by passing the pin's `cwd` field as
-    //! `--scan-root` on the subprocess argv.
+mod mux_launch_argv {
+    //! The argv the TUI hands `conspectus mux new` / `mux launch`.
 
     use super::*;
-
-    fn seed_app_with_pin(pin_id: &str, cwd: &str) -> App {
-        let mut snapshot = crate::model::GraphSnapshot::empty();
-        snapshot.pins.push(crate::model::PinCandidate {
-            id: pin_id.to_string(),
-            display_name: pin_id.to_string(),
-            harness: "codex".to_string(),
-            cwd: cwd.to_string(),
-            mux: crate::model::PinMuxRef {
-                backend: TMUX_MUX_BACKEND.to_string(),
-                name: pin_id.to_string(),
-                socket_name: None,
-            },
-            launch_argv: None,
-            reason: None,
-            provenance: crate::model::Provenance::LocalPin,
-            store_path: format!("{cwd}/.conspectus.toml"),
-            binding: None,
-        });
-        let resolved = crate::resolve::resolve_snapshot(snapshot);
-        let mut app = App::new(RunConfig::defaults());
-        let tree = crate::tui::rows::build_tree_for_view(crate::tui::rows::TreeInputs::from_app(
-            &resolved, &app,
-        ));
-        app.update(Msg::SetData {
-            snapshot: crate::tui::app::SnapshotHandle::new(resolved),
-            tree,
-            loaded_at_epoch: 0,
-            initial_selection_hint: None,
-        });
-        app
-    }
-
-    #[test]
-    fn resolve_pin_scan_root_returns_pin_cwd() {
-        let app = seed_app_with_pin("ingest", "/workspace/ingest");
-        assert_eq!(
-            resolve_pin_scan_root(&app, "ingest"),
-            Some("/workspace/ingest".to_string())
-        );
-    }
-
-    #[test]
-    fn resolve_pin_scan_root_none_for_unknown_pin() {
-        let app = seed_app_with_pin("ingest", "/workspace/ingest");
-        assert_eq!(resolve_pin_scan_root(&app, "does-not-exist"), None);
-    }
-
-    #[test]
-    fn resolve_pin_scan_root_none_before_snapshot_loads() {
-        let app = App::new(RunConfig::defaults());
-        assert_eq!(resolve_pin_scan_root(&app, "ingest"), None);
-    }
-
-    #[test]
-    fn pin_launch_argv_includes_scan_root_when_present() {
-        let argv = pin_launch_argv("ingest", Some("/workspace/ingest"));
-        assert_eq!(
-            argv,
-            vec![
-                "pin".to_string(),
-                "launch".to_string(),
-                "ingest".to_string(),
-                "--no-attach".to_string(),
-                "--scan-root".to_string(),
-                "/workspace/ingest".to_string(),
-            ]
-        );
-    }
-
-    #[test]
-    fn pin_launch_argv_omits_scan_root_when_absent() {
-        let argv = pin_launch_argv("ingest", None);
-        assert_eq!(
-            argv,
-            vec![
-                "pin".to_string(),
-                "launch".to_string(),
-                "ingest".to_string(),
-                "--no-attach".to_string(),
-            ]
-        );
-    }
 
     #[test]
     fn mux_new_argv_carries_name_cwd_and_no_attach() {
@@ -1564,7 +962,7 @@ fn translate_bang_opens_messages() {
 #[test]
 fn launch_entry_level_follows_outcome_and_stderr() {
     use crate::tui::messages::{CommandRecord, LogLevel, LogTarget};
-    let summary = |success| PinLaunchSummary {
+    let summary = |success| LaunchSummary {
         success,
         message: "pin `w1` launched".to_string(),
     };
@@ -1592,54 +990,6 @@ fn launch_entry_level_follows_outcome_and_stderr() {
     let failed = launch_entry(&summary(false), record("boom"), target());
     assert_eq!(failed.level, LogLevel::Error);
     assert_eq!(failed.command.map(|c| c.stderr), Some("boom".to_string()));
-}
-
-#[test]
-fn launched_pin_attaches_without_waiting_on_a_refresh() {
-    use crate::tui::messages::{LogLevel, LogTarget};
-    let tmux = PinLaunchTarget {
-        mux: crate::model::PinMuxRef {
-            backend: "tmux".to_string(),
-            name: "w1".to_string(),
-            socket_name: None,
-        },
-    };
-    let zellij = PinLaunchTarget {
-        mux: crate::model::PinMuxRef {
-            backend: "zellij".to_string(),
-            name: "w1".to_string(),
-            socket_name: None,
-        },
-    };
-    let target = || LogTarget::Pin("w1".to_string());
-    let live = |_: &PinLaunchTarget| None;
-    let gone = |_: &PinLaunchTarget| Some("can't find session: w1".to_string());
-
-    // The decision reads tmux directly, so a successful launch goes
-    // straight to the attach; only the attach's return refreshes.
-    assert!(matches!(
-        after_pin_launch("w1", Some(&tmux), target(), live),
-        AfterPinLaunch::Attach(t) if t == &tmux
-    ));
-    // The tmux check doesn't apply to other backends.
-    assert!(matches!(
-        after_pin_launch("w1", Some(&zellij), target(), gone),
-        AfterPinLaunch::Attach(t) if t == &zellij
-    ));
-
-    let AfterPinLaunch::Stop(entry) = after_pin_launch("w1", Some(&tmux), target(), gone) else {
-        panic!("a missing session can't be attached");
-    };
-    assert_eq!(entry.level, LogLevel::Error);
-    assert!(
-        entry.summary.contains("can't find session: w1"),
-        "{entry:?}"
-    );
-
-    let AfterPinLaunch::Stop(entry) = after_pin_launch("w1", None, target(), live) else {
-        panic!("no target to attach");
-    };
-    assert_eq!(entry.level, LogLevel::Warning);
 }
 
 mod worker_ledger {
@@ -2031,132 +1381,6 @@ fn attach_return_entry_checks_pane_status_through_the_targets_backend() {
     );
 }
 
-#[test]
-fn pins_overlay_commits_reach_the_sink_each_loop_mode_supplies() {
-    use crate::tui::widgets::pins::pin_placeholder_status;
-    use ratatui::crossterm::event::KeyEvent;
-
-    let keys = [KeyCode::Down, KeyCode::Down, KeyCode::Enter].map(KeyEvent::from);
-    let expected = Msg::SetStatus(Some(pin_placeholder_status("edit")));
-
-    // Live mode hands commits to `dispatch_live`; a recording sink
-    // stands in for it.
-    let mut live = App::new(RunConfig::defaults());
-    live.open_pins_overlay();
-    let mut delivered = Vec::new();
-    for key in keys {
-        route_pins_overlay_key(&mut live, key, |_, msg| delivered.push(msg));
-    }
-    assert_eq!(delivered, vec![expected]);
-    assert!(
-        live.pins_overlay().is_some(),
-        "CommitAndStay keeps the overlay open"
-    );
-
-    // Fixture mode routes the same keys through the same function and
-    // lets this harmless status message through to the reducer.
-    let mut fixture = App::new(RunConfig::defaults());
-    fixture.open_pins_overlay();
-    for key in keys {
-        route_pins_overlay_key(&mut fixture, key, static_apply_pins_msg);
-    }
-    assert_eq!(
-        fixture.status_message(),
-        Some(pin_placeholder_status("edit").as_str())
-    );
-}
-
-fn seeded_pin(path: &std::path::Path, id: &str, backend: &str, mux: &str) {
-    crate::pins::upsert_pin_entry(
-        path,
-        PinEntry {
-            id: id.to_string(),
-            display_name: id.to_string(),
-            harness: "codex".to_string(),
-            cwd: path.parent().expect("dir").display().to_string(),
-            mux: PinMux {
-                backend: backend.to_string(),
-                name: mux.to_string(),
-                socket_name: None,
-            },
-            launch: None,
-            worktree: None,
-            reason: None,
-        },
-    )
-    .expect("seed pin");
-}
-
-fn edit_request(path: &std::path::Path, id: &str, backend: &str, mux: &str) -> PinEditRequest {
-    PinEditRequest {
-        original_id: id.to_string(),
-        id: id.to_string(),
-        display_name: id.to_string(),
-        harness: "codex".to_string(),
-        cwd: path.parent().expect("dir").display().to_string(),
-        mux_name: mux.to_string(),
-        mux_backend: backend.to_string(),
-        mux_socket: None,
-        launch_argv: Vec::new(),
-        store_path: path.display().to_string(),
-    }
-}
-
-#[test]
-fn write_pin_edit_keeps_a_zellij_pin_on_zellij() {
-    let project = tempfile::TempDir::new().expect("project");
-    let path = project.path().join(".conspectus.toml");
-    seeded_pin(&path, "notes", "zellij", "notes");
-
-    write_pin_edit(&edit_request(&path, "notes", "zellij", "notes-2")).expect("edit pin");
-
-    let written = fs::read_to_string(&path).expect("config");
-    assert!(written.contains(r#"backend = "zellij""#), "{written}");
-    assert!(!written.contains(r#"backend = "tmux""#), "{written}");
-}
-
-#[test]
-fn write_pin_edit_checks_mux_collisions_within_the_same_backend() {
-    let project = tempfile::TempDir::new().expect("project");
-    let path = project.path().join(".conspectus.toml");
-    seeded_pin(&path, "a", "zellij", "za");
-    seeded_pin(&path, "b", "zellij", "shared");
-    seeded_pin(&path, "c", "tmux", "other");
-
-    let err = write_pin_edit(&edit_request(&path, "a", "zellij", "shared"))
-        .expect_err("same backend, same mux name collides");
-    assert!(err.to_string().contains("already used by pin `b`"), "{err}");
-
-    write_pin_edit(&edit_request(&path, "c", "tmux", "shared"))
-        .expect("a tmux pin may share a name with a zellij pin");
-}
-
-#[test]
-fn pin_adopt_mux_rename_never_renames_a_zellij_mux_through_tmux() {
-    let tmux = crate::discovery::tmux::FakeTmux::with_sessions("");
-    let request = PinCreateRequest {
-        id: "notes-pin".to_string(),
-        display_name: "notes-pin".to_string(),
-        harness: "codex".to_string(),
-        cwd: "/workspace/project".to_string(),
-        mux_name: "notes-pin".to_string(),
-        mux_backend: "zellij".to_string(),
-        mux_socket: None,
-        adopt_source_mux_name: Some("notes".to_string()),
-        launch_argv: Vec::new(),
-        worktree_branch: None,
-        store: PinCreateStore::Project,
-    };
-
-    let status = apply_pin_adopt_mux_rename(&tmux, &request).expect("rename status");
-
-    assert!(
-        tmux.rename_calls().is_empty(),
-        "tmux must not see a zellij rename"
-    );
-    assert!(status.contains("failed"), "{status}");
-}
-
 fn native_rename(backend: &str, target: &str) -> crate::rename::MuxNativeRename {
     crate::rename::MuxNativeRename {
         mux: MuxSessionId::new(format!("{backend}:{target}")),
@@ -2262,9 +1486,6 @@ mod handoff_guard {
             Action::OpenRename,
             Action::OpenWorktreeMenu,
             Action::OpenWorktreeCloseDown,
-            Action::RemovePin,
-            Action::OpenPinRebind,
-            Action::OpenPinAdopt,
         ] {
             assert!(acts_on_selected_row(&action), "{action:?}");
         }
@@ -2317,5 +1538,22 @@ mod lazy_forge {
         worker.last_started = Some(now);
         assert!(!worker.due(now));
         assert!(worker.due(now + FORGE_POLL));
+    }
+}
+
+#[test]
+fn keys_of_the_retired_pin_surfaces_are_unbound() {
+    // The pins overlay and its direct shortcuts left with the old pin
+    // model; pins are slots managed from the CLI and the Pinned view.
+    for (code, mods) in [
+        (KeyCode::Char('p'), KeyModifiers::NONE),
+        (KeyCode::Char('N'), KeyModifiers::SHIFT),
+        (KeyCode::Char('B'), KeyModifiers::SHIFT),
+        (KeyCode::Char('L'), KeyModifiers::SHIFT),
+        (KeyCode::Char('A'), KeyModifiers::SHIFT),
+        (KeyCode::Char('b'), KeyModifiers::NONE),
+        (KeyCode::Delete, KeyModifiers::NONE),
+    ] {
+        assert_eq!(translate(press(code, mods), 24), None, "{code:?}");
     }
 }

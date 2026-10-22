@@ -11,6 +11,8 @@ fn mux_new_spawns_bare_session_with_empty_argv() {
         cwd: Some(cwd.clone()),
         socket: None,
         no_attach: true,
+        pin: None,
+        no_launch: false,
     };
     args.run_with_runner(&runner).expect("bare mux create");
     let calls = runner.new_session_calls();
@@ -30,6 +32,8 @@ fn mux_new_rejects_empty_name() {
         cwd: Some(std::env::temp_dir()),
         socket: None,
         no_attach: true,
+        pin: None,
+        no_launch: false,
     };
     let err = args
         .run_with_runner(&runner)
@@ -46,6 +50,8 @@ fn mux_new_rejects_missing_cwd() {
         cwd: Some(PathBuf::from("/nonexistent/definitely-not-here-12345")),
         socket: None,
         no_attach: true,
+        pin: None,
+        no_launch: false,
     };
     let err = args.run_with_runner(&runner).expect_err("bad cwd rejected");
     assert!(err.to_string().contains("not an existing directory"));
@@ -61,6 +67,8 @@ fn mux_new_threads_socket_argument() {
         cwd: Some(std::env::temp_dir()),
         socket: Some("iso".to_string()),
         no_attach: true,
+        pin: None,
+        no_launch: false,
     };
     args.run_with_runner(&runner).expect("socketed create");
     let (socket, _, _, _) = &runner.new_session_calls()[0];
@@ -76,6 +84,8 @@ fn mux_new_surfaces_name_taken_error() {
         cwd: Some(std::env::temp_dir()),
         socket: None,
         no_attach: true,
+        pin: None,
+        no_launch: false,
     };
     let err = args
         .run_with_runner(&runner)
@@ -100,6 +110,8 @@ fn mux_launch_spawns_with_harness_default_argv() {
         worktree_branch: None,
         worktree_repo: None,
         no_attach: true,
+        pin: None,
+        no_launch: false,
         scan_root: Vec::new(),
     };
     args.run_with_runner(&runner).expect("mux launch");
@@ -134,6 +146,8 @@ fn mux_launch_argv_override_overrides_harness_default() {
         worktree_branch: None,
         worktree_repo: None,
         no_attach: true,
+        pin: None,
+        no_launch: false,
         scan_root: Vec::new(),
     };
     args.run_with_runner(&runner).expect("mux launch");
@@ -155,6 +169,8 @@ fn mux_launch_rejects_empty_name() {
         worktree_branch: None,
         worktree_repo: None,
         no_attach: true,
+        pin: None,
+        no_launch: false,
         scan_root: Vec::new(),
     };
     let err = args
@@ -176,6 +192,8 @@ fn mux_launch_rejects_empty_harness() {
         worktree_branch: None,
         worktree_repo: None,
         no_attach: true,
+        pin: None,
+        no_launch: false,
         scan_root: Vec::new(),
     };
     let err = args
@@ -196,6 +214,8 @@ fn mux_launch_rejects_worktree_branch_without_repo() {
         worktree_branch: Some("feat/foo".to_string()),
         worktree_repo: None,
         no_attach: true,
+        pin: None,
+        no_launch: false,
         scan_root: Vec::new(),
     };
     let err = args
@@ -217,6 +237,8 @@ fn mux_launch_threads_socket_argument() {
         worktree_branch: None,
         worktree_repo: None,
         no_attach: true,
+        pin: None,
+        no_launch: false,
         scan_root: Vec::new(),
     };
     args.run_with_runner(&runner).expect("socketed launch");
@@ -236,6 +258,8 @@ fn mux_launch_rejects_unknown_harness_with_no_argv() {
         worktree_branch: None,
         worktree_repo: None,
         no_attach: true,
+        pin: None,
+        no_launch: false,
         scan_root: Vec::new(),
     };
     let err = args

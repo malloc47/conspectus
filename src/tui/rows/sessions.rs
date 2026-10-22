@@ -23,8 +23,8 @@ use std::path::{Path, PathBuf};
 use crate::filter::{MuxStateKey, RowFilter, SessionMatchInputs};
 use crate::model::{
     AgentSessionId, AgentSessionNode, CheckoutId, GraphLink, GraphNode, GraphSnapshot, LinkState,
-    NodeId, PinBinding, PinCandidate, PinId, RelationKind, RepoId, WorkspaceId, WorktreeKind,
-    WorktreeMeta, path_is_ancestor_of,
+    NodeId, PinId, PinNode, RelationKind, RepoId, WorkspaceId, WorktreeKind, WorktreeMeta,
+    path_is_ancestor_of,
 };
 use crate::tui::SessionsGrouping;
 use crate::tui::rows::{
@@ -116,8 +116,8 @@ pub fn build_sessions_tree(inputs: SessionsBuildInputs<'_>) -> RowTree {
             session_bearing_worktrees: &session_bearing_worktrees,
         };
         let disambiguating = title_disambiguating_sessions(&sessions);
-        for pin in &data.snapshot.pins {
-            if !matches!(pin.binding, Some(PinBinding::Bound { .. })) {
+        for pin in super::pin_nodes(data.snapshot) {
+            if data.bound_session(pin).is_none() {
                 emit_pin_placeholder_session_row(&mut ctx, pin, 0);
             }
         }
@@ -224,26 +224,6 @@ pub fn build_sessions_tree(inputs: SessionsBuildInputs<'_>) -> RowTree {
     // so selection/detail/formatting all remain session-oriented.
     emit_pins_group(&mut ctx);
 
-    // Mirror bound pins' "appear in both the Pins group AND the
-    // natural project bucket" pattern for unbound / stale-mux pins:
-    // bucket each non-bound pin's placeholder by the same group key
-    // its cwd would produce, pre-seed any buckets that contain only
-    // placeholders so the project header still emits, then hand the
-    // placeholder list to `emit_checkout_bucket` so it emits after
-    // the bucket's sessions at the matching depth.
-    let mut placeholders_by_key: BTreeMap<GroupKey, Vec<&PinCandidate>> = BTreeMap::new();
-    for pin in &ctx.data.snapshot.pins {
-        if matches!(pin.binding, Some(PinBinding::Bound { .. })) {
-            continue;
-        }
-        if let Some(key) = pin_group_key(pin, ctx.data, inputs.grouping) {
-            placeholders_by_key.entry(key).or_default().push(pin);
-        }
-    }
-    for key in placeholders_by_key.keys() {
-        buckets.entry(key.clone()).or_default();
-    }
-
     // Iterate worktree-keyed buckets while deduplicating their
     // ancestor headers. Buckets ordered by (workspace, repo,
     // worktree) come out adjacent for the same (workspace, repo)
@@ -251,8 +231,7 @@ pub fn build_sessions_tree(inputs: SessionsBuildInputs<'_>) -> RowTree {
     // each only on change.
     let mut previous = PreviousHeader::Nothing;
     for (key, sessions) in buckets {
-        let placeholders = placeholders_by_key.remove(&key).unwrap_or_default();
-        emit_checkout_bucket(&mut ctx, key, sessions, placeholders, &mut previous);
+        emit_checkout_bucket(&mut ctx, key, sessions, &mut previous);
     }
 
     if !ungrouped.is_empty() {
@@ -265,15 +244,13 @@ pub fn build_sessions_tree(inputs: SessionsBuildInputs<'_>) -> RowTree {
 }
 
 /// Emit a synthetic "Pins" group for the grouped sessions view.
-/// Bound pins use the realized [`RowKind::AgentSession`] row because
-/// this view is session-first: the top bucket should answer "which
-/// sessions are pinned?" rather than "which pin declarations exist?".
-/// Unbound/stale/pre-resolve pins render as session-shaped
-/// placeholder rows: the row still points at the pin node, and a dim
-/// placeholder glyph plus the pin's cwd identifies it as a not-running
-/// declaration without overloading the row with extra vocabulary.
+/// A slot whose target is a live agent session uses that session's
+/// row, because this view is session-first. Every other slot renders
+/// as a session-shaped placeholder pointing at the slot node, with a
+/// dim placeholder glyph, so a gone or planned slot is still listed.
 fn emit_pins_group(ctx: &mut EmitCtx<'_, '_>) {
-    if ctx.data.snapshot.pins.is_empty() {
+    let pins = super::pin_nodes(ctx.data.snapshot);
+    if pins.is_empty() {
         return;
     }
 
@@ -288,55 +265,59 @@ fn emit_pins_group(ctx: &mut EmitCtx<'_, '_>) {
         }),
     });
 
-    for pin in &ctx.data.snapshot.pins {
-        if let Some(PinBinding::Bound { session, .. }) = &pin.binding {
-            let session_id = NodeId::AgentSession(session.clone());
-            if let Some(session_node) = ctx.data.agent_sessions.get(&session_id) {
-                let mux_state = MuxStateKey::from_candidate_count(
-                    ctx.data.mux_candidates_for_session(&session_id).len(),
-                );
-                emit_session_row_only(
-                    ctx,
-                    1,
-                    SessionEntry {
-                        id: session_id,
-                        node: session_node,
-                        mux_state,
-                        pinned: true,
-                    },
-                    false,
-                );
-                continue;
-            }
+    for pin in pins {
+        if let Some(session_id) = ctx.data.bound_session(pin)
+            && let Some(session_node) = ctx.data.agent_sessions.get(&session_id)
+        {
+            let mux_state = MuxStateKey::from_candidate_count(
+                ctx.data.mux_candidates_for_session(&session_id).len(),
+            );
+            emit_session_row_only(
+                ctx,
+                1,
+                SessionEntry {
+                    id: session_id,
+                    node: session_node,
+                    mux_state,
+                    pinned: true,
+                },
+                false,
+            );
+            continue;
         }
 
         emit_pin_placeholder_session_row(ctx, pin, 1);
     }
 }
 
-fn emit_pin_placeholder_session_row(ctx: &mut EmitCtx<'_, '_>, pin: &PinCandidate, depth: u8) {
-    let pin_node = NodeId::Pin(PinId::new(pin.id.clone()));
+fn emit_pin_placeholder_session_row(ctx: &mut EmitCtx<'_, '_>, pin: &PinNode, depth: u8) {
+    let pin_node = NodeId::Pin(PinId::new(pin.id.id.clone()));
+    let harness = pin.text("harness").unwrap_or_default();
+    let cwd = pin
+        .text("cwd")
+        .or_else(|| pin.text("root"))
+        .map(|cwd| shorten_home(cwd, ctx.home));
     ctx.tree.rows.push(Row {
         id: RowId::Pin {
-            pin_id: pin.id.clone(),
+            pin_id: pin.id.id.clone(),
         },
         depth,
         expandable: false,
         kind: RowKind::AgentSession(AgentSessionRow {
-            session: AgentSessionId::new(&pin.harness, format!("pin:{}", pin.id), &pin.id),
-            short_id: pin.id.clone(),
-            harness_label: harness_label(&pin.harness),
-            cwd_display: Some(shorten_home(&pin.cwd, ctx.home)),
+            session: AgentSessionId::new(harness, format!("pin:{}", pin.id.id), &pin.id.id),
+            short_id: pin.id.id.clone(),
+            harness_label: harness_label(harness),
+            cwd_display: cwd.clone(),
             project_display: None,
             recency: None,
             activity_epoch: None,
             mux_state: MuxIndicator::Unmuxed,
-            preview: Some(shorten_home(&pin.cwd, ctx.home)),
+            preview: cwd,
             title: None,
-            alias: Some(pin.display_name.clone()),
+            alias: Some(pin.label.clone()),
             title_disambiguates: false,
             primary_node: pin_node,
-            pin_id: Some(pin.id.clone()),
+            pin_id: Some(pin.id.id.clone()),
         }),
     });
 }
@@ -542,10 +523,11 @@ impl<'a> SessionsData<'a> {
         }
 
         let mut pin_id_by_bound_session = BTreeMap::new();
-        for pin in &snapshot.pins {
-            if let Some(PinBinding::Bound { session, .. }) = &pin.binding {
-                pin_id_by_bound_session
-                    .insert(NodeId::AgentSession(session.clone()), pin.id.clone());
+        for pin in super::pin_nodes(snapshot) {
+            if let Some(session) = super::live_pin_target(snapshot, pin)
+                && matches!(session, NodeId::AgentSession(_))
+            {
+                pin_id_by_bound_session.insert(session, pin.id.id.clone());
             }
         }
 
@@ -602,6 +584,12 @@ impl<'a> SessionsData<'a> {
             .candidate_links
             .iter()
             .find(|link| link.id == link_id)
+    }
+
+    /// The live agent session a slot points at.
+    fn bound_session(&self, pin: &PinNode) -> Option<NodeId> {
+        super::live_pin_target(self.snapshot, pin)
+            .filter(|id| matches!(id, NodeId::AgentSession(_)))
     }
 
     fn is_pinned_session(&self, session: &NodeId) -> bool {
@@ -719,37 +707,6 @@ struct SessionEntry<'a> {
     pinned: bool,
 }
 
-/// Pick the group key an unbound / stale-mux pin's placeholder row
-/// should land in, alongside any sessions that bucket to the same
-/// key. Mirrors the repo-path arm of `resolve_group_key` so a
-/// placeholder shows up under its declared cwd's project bucket — the
-/// same way a bound pin's realized session row does. Pins do not
-/// carry an `AssociatedWith Workspace` edge, so the workspace and
-/// workspace-only grouping arms simply return `None` and leave the
-/// pin in the synthetic Pins group only.
-fn pin_group_key(
-    pin: &PinCandidate,
-    data: &SessionsData<'_>,
-    grouping: SessionsGrouping,
-) -> Option<GroupKey> {
-    if matches!(grouping, SessionsGrouping::Workspace) {
-        return None;
-    }
-    let (worktree_id, _worktree) = data.checkout_for_path(&pin.cwd)?;
-    let repo_id = worktree_id.repo.clone();
-    let repo = Some(RepoBucket {
-        common_dir: repo_id.common_dir.clone(),
-        repo_display_path: data.repo_display_path(&repo_id),
-        repo_id,
-    });
-    let worktree = Some(worktree_id.root);
-    Some(GroupKey {
-        workspace: None,
-        repo,
-        worktree,
-    })
-}
-
 fn resolve_group_key(
     entry: &SessionEntry<'_>,
     data: &SessionsData<'_>,
@@ -832,7 +789,6 @@ fn emit_checkout_bucket(
     ctx: &mut EmitCtx<'_, '_>,
     key: GroupKey,
     mut sessions: Vec<SessionEntry<'_>>,
-    placeholder_pins: Vec<&PinCandidate>,
     previous: &mut PreviousHeader,
 ) {
     sessions.sort_by(|a, b| compare_sessions(a, b, ctx.float_muxed_top));
@@ -846,16 +802,13 @@ fn emit_checkout_bucket(
             let flag = disambiguating.contains(&entry.id);
             emit_session(ctx, 1, entry, flag);
         }
-        for pin in placeholder_pins {
-            emit_pin_placeholder_session_row(ctx, pin, 1);
-        }
         *previous = PreviousHeader::Workspace(workspace_root);
         return;
     }
 
     // Repo path. `key.repo` is `Some` here by construction
-    // (`resolve_group_key` and `pin_group_key` both build either a
-    // workspace-only or a repo bucket, never neither).
+    // (`resolve_group_key` builds either a workspace-only or a repo
+    // bucket, never neither).
     let Some(repo_bucket) = key.repo else {
         return;
     };
@@ -902,9 +855,6 @@ fn emit_checkout_bucket(
     for entry in sessions {
         let flag = disambiguating.contains(&entry.id);
         emit_session(ctx, session_depth, entry, flag);
-    }
-    for pin in placeholder_pins {
-        emit_pin_placeholder_session_row(ctx, pin, session_depth);
     }
 
     *previous = PreviousHeader::Repo(repo_bucket.repo_id);

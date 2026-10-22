@@ -1,9 +1,11 @@
 // Extracted alongside close_down.rs — see #[path = "close_down_tests.rs"].
 use super::*;
 use crate::discovery::tmux::FakeTmux;
+use crate::history::{HistoryStore, MuxObservation, Observations};
 use crate::model::{
-    AgentSessionId, AgentSessionNode, BranchId, CheckoutId, CheckoutNode, MuxSessionId,
-    MuxSessionNode, PinId, PinMuxRef, PinNode, Provenance, RepoId, WorktreeMeta,
+    AgentSessionId, AgentSessionNode, BranchId, CheckoutId, CheckoutNode, MuxRecipe, MuxSessionId,
+    MuxSessionNode, NodeId, PinKind, PinNode, PinSlot, RecordDisplay, RecordOrigin, RepoId,
+    SlotStatus, WorktreeMeta,
 };
 use std::sync::Mutex;
 
@@ -84,23 +86,42 @@ fn linked_checkout(repo: &str, path: &str, branch: &str) -> GraphNode {
     GraphNode::Checkout(c)
 }
 
-fn pin(id: &str, cwd: &str, store: &str) -> GraphNode {
-    GraphNode::Pin(PinNode {
-        id: PinId::new(id),
-        display_name: id.to_string(),
-        harness: "codex".to_string(),
-        cwd: cwd.to_string(),
-        mux: PinMuxRef {
-            backend: "tmux".to_string(),
-            name: id.to_string(),
-            socket_name: None,
+/// A mux slot node pointing at the history record `record`.
+fn slot_for(id: &str, record: &str) -> GraphNode {
+    let mut pin = PinNode::for_test(id, PinKind::Mux, None, SlotStatus::Gone, &[("name", id)]);
+    pin.target = Some(PinSlot::history_target(record));
+    GraphNode::Pin(pin)
+}
+
+/// A mux record observed running in `cwd`.
+fn mux_in(name: &str, cwd: &str) -> MuxObservation {
+    MuxObservation {
+        seen_at: 1_000,
+        key: format!("mux_session:tmux:{name}"),
+        recipe: MuxRecipe {
+            backend: "tmux".into(),
+            name: name.into(),
+            cwd: Some(cwd.into()),
+            ..Default::default()
         },
-        launch_argv: None,
-        reason: None,
-        provenance: Provenance::LocalPin,
-        store_path: store.to_string(),
-        binding: None,
-    })
+        display: RecordDisplay {
+            label: name.into(),
+            context: None,
+        },
+        origin: RecordOrigin::Observed,
+    }
+}
+
+/// History holding one mux per `(name, cwd)`; returns each record's id
+/// in the same order.
+fn history_with(store: &HistoryStore, muxes: &[(&str, &str)]) -> Vec<String> {
+    let (_, outcome) = store
+        .record(&Observations {
+            muxes: muxes.iter().map(|(name, cwd)| mux_in(name, cwd)).collect(),
+            ..Default::default()
+        })
+        .unwrap();
+    outcome.mux_ids
 }
 
 fn snapshot() -> GraphSnapshot {
@@ -125,12 +146,21 @@ fn snapshot() -> GraphSnapshot {
 // ---- planning ----
 
 #[test]
-fn plan_resolves_worktree_live_sessions_and_pins() {
+fn plan_resolves_worktree_live_sessions_and_protected_records() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = HistoryStore::at(dir.path());
+    let ids = history_with(&store, &[("a", "/wt/feature"), ("b", "/x"), ("c", "/y")]);
     let mut snap = snapshot();
-    snap.nodes
-        .push(pin("p", "/wt/feature/src", "/wt/feature/.conspectus.toml"));
-    snap.nodes
-        .push(pin("out", "/elsewhere", "/elsewhere/.conspectus.toml"));
+    snap.nodes.push(slot_for("p", &ids[0]));
+    snap.nodes.push(slot_for("q", &ids[1]));
+    // A slot that targets a live node protects no history record.
+    snap.nodes.push(GraphNode::Pin(PinNode::for_test(
+        "live",
+        PinKind::Mux,
+        Some(NodeId::MuxSession(MuxSessionId::new("tmux:feat"))),
+        SlotStatus::Live,
+        &[],
+    )));
 
     let plan = plan_close_down(&snap, PathBuf::from("/app"), "feature").expect("plan");
     assert_eq!(plan.worktree_root, "/wt/feature");
@@ -146,12 +176,9 @@ fn plan_resolves_worktree_live_sessions_and_pins() {
     assert_eq!(plan.mux_targets[0].native_id, "feat");
     assert_eq!(plan.mux_targets[0].pane_pid, Some(4242));
     assert_eq!(
-        plan.pins.len(),
-        1,
-        "only the in-worktree pin: {:?}",
-        plan.pins
+        plan.protected_records,
+        BTreeSet::from([ids[0].clone(), ids[1].clone()])
     );
-    assert_eq!(plan.pins[0].id, "p");
 }
 
 #[test]
@@ -163,22 +190,19 @@ fn plan_is_none_without_a_matching_worktree() {
 // ---- execution ----
 
 #[test]
-fn discard_removes_worktree_kills_sessions_and_drops_pins() {
-    let mut snap = snapshot();
-    snap.nodes
-        .push(pin("p", "/wt/feature", "/wt/feature/.conspectus.toml"));
-    // Point the pin store at a real temp file so the drop can write.
+fn discard_removes_worktree_kills_sessions_and_forgets_unpinned_history() {
     let dir = tempfile::tempdir().unwrap();
-    let store = dir.path().join(".conspectus.toml");
-    std::fs::write(
+    let store = HistoryStore::at(dir.path());
+    let ids = history_with(
         &store,
-        "[pins]\nschema_version = 1\n\n[[pins.entry]]\nid = \"p\"\ndisplay_name = \"p\"\nharness = \"codex\"\ncwd = \"/wt/feature\"\n\n[pins.entry.mux]\nbackend = \"tmux\"\nname = \"p\"\n",
-    )
-    .unwrap();
-    // Replace the pin's store_path with the real file.
-    if let GraphNode::Pin(p) = snap.nodes.last_mut().unwrap() {
-        p.store_path = store.to_string_lossy().to_string();
-    }
+        &[
+            ("scratch", "/wt/feature/src"),
+            ("pinned", "/wt/feature"),
+            ("elsewhere", "/other"),
+        ],
+    );
+    let mut snap = snapshot();
+    snap.nodes.push(slot_for("keep", &ids[1]));
 
     let plan = plan_close_down(&snap, PathBuf::from("/app"), "feature").expect("plan");
     let backend = RecordingBackend::new(WorktreeMutationOutcome::Succeeded { path: None });
@@ -193,6 +217,7 @@ fn discard_removes_worktree_kills_sessions_and_drops_pins() {
         &mux,
         &sig,
         Duration::from_secs(3),
+        Some(&store),
     )
     .expect("ok");
 
@@ -206,9 +231,18 @@ fn discard_removes_worktree_kills_sessions_and_drops_pins() {
         vec![("feature".to_string(), true)]
     );
     assert!(backend.merges.lock().unwrap().is_empty());
-    // Pin dropped.
-    assert_eq!(report.dropped_pins, vec!["p".to_string()]);
-    assert!(report.pin_errors.is_empty());
+    // The record rooted in the worktree went; the pinned one and the
+    // one elsewhere stayed.
+    assert_eq!(report.forgotten_records, 1);
+    assert!(report.history_error.is_none());
+    let left: Vec<_> = store
+        .load()
+        .history
+        .muxes
+        .iter()
+        .map(|record| record.recipe.name.clone())
+        .collect();
+    assert_eq!(left, ["pinned", "elsewhere"]);
 }
 
 #[test]
@@ -226,6 +260,7 @@ fn merge_lands_branch_and_passes_target() {
         &mux,
         &sig,
         Duration::from_secs(3),
+        None,
     )
     .expect("ok");
 
@@ -235,14 +270,15 @@ fn merge_lands_branch_and_passes_target() {
         vec![Some("main".to_string())]
     );
     assert!(backend.removes.lock().unwrap().is_empty());
+    assert_eq!(report.forgotten_records, 0);
 }
 
 #[test]
-fn failed_worktree_step_skips_pin_drop() {
-    let mut snap = snapshot();
-    snap.nodes
-        .push(pin("p", "/wt/feature", "/nonexistent/.conspectus.toml"));
-    let plan = plan_close_down(&snap, PathBuf::from("/app"), "feature").expect("plan");
+fn failed_worktree_step_leaves_history_alone() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = HistoryStore::at(dir.path());
+    history_with(&store, &[("scratch", "/wt/feature")]);
+    let plan = plan_close_down(&snapshot(), PathBuf::from("/app"), "feature").expect("plan");
     let backend = RecordingBackend::new(WorktreeMutationOutcome::Failed {
         code: Some(1),
         message: "merge conflict".to_string(),
@@ -258,13 +294,14 @@ fn failed_worktree_step_skips_pin_drop() {
         &mux,
         &sig,
         Duration::from_secs(3),
+        Some(&store),
     )
     .expect("ok");
 
-    // Sessions were still terminated, but no pin was touched because the
-    // merge failed — the stream is intact.
-    assert!(report.dropped_pins.is_empty());
-    assert!(report.pin_errors.is_empty());
+    // Sessions were still terminated, but no record was forgotten
+    // because the merge failed: the stream is intact.
+    assert_eq!(report.forgotten_records, 0);
+    assert_eq!(store.load().history.muxes.len(), 1);
     assert!(matches!(
         report.worktree,
         WorktreeMutationOutcome::Failed { .. }

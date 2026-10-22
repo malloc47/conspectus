@@ -12,20 +12,13 @@ use std::fmt;
 use std::rc::Rc;
 use std::time::Instant;
 
-use crate::model::{
-    AgentSessionId, Diagnostic, GraphNode, GraphSnapshot, MuxSessionId, NodeId, PinBinding, PinId,
-};
+use crate::model::{AgentSessionId, GraphNode, GraphSnapshot, MuxSessionId, NodeId, PinId};
 use crate::tui::detail::{DetailInputs, NodeDetail, build_node_detail};
 use crate::tui::explorer::{
     BreadcrumbHop, ExplorerInputs, ExplorerRow, ExplorerRowKey, NodeView, build_node_view,
 };
 use crate::tui::preview::{PreviewContent, PreviewEntry, PreviewSource, PreviewStore};
 use crate::tui::rows::{Row, RowId, RowKind, RowTree};
-use crate::tui::widgets::controls::harness_options;
-use crate::tui::widgets::path_omnibox::PathCandidate;
-use crate::tui::widgets::pins::{
-    PinBindOption, PinCreateDefaults, PinCreateMode, PinMutationTarget,
-};
 use crate::tui::{RunConfig, View};
 
 mod explorer_nav;
@@ -192,9 +185,6 @@ pub struct App {
     /// later duplicate snaps the cursor back to the row after the
     /// first one.
     last_visible_index: Option<usize>,
-    /// Pin id waiting for a second `Delete` press. This gives pin
-    /// removal a confirmation step without a full modal.
-    pending_pin_remove: Option<String>,
     /// Open overlays as a stack (ADR 0085 contract 3). Input routes
     /// to the top entry first, `draw` renders bottom-to-top, and
     /// commit / close outcomes pop the top. Grows one variant per
@@ -481,7 +471,6 @@ impl App {
             left_scroll: 0,
             explorer_scroll: 0,
             last_visible_index: None,
-            pending_pin_remove: None,
             modal_stack: Vec::new(),
             toast: crate::tui::widgets::toast::ToastEngineHolder(
                 crate::tui::widgets::toast::engine(),
@@ -1247,31 +1236,24 @@ impl App {
                 loaded_at_epoch,
                 initial_selection_hint,
             } => {
-                self.pending_pin_remove = None;
                 self.set_data(snapshot, tree, loaded_at_epoch, initial_selection_hint);
             }
             Msg::SetTree(tree) => {
-                self.pending_pin_remove = None;
                 self.set_tree(tree);
             }
             Msg::SelectRow(id) => {
-                self.pending_pin_remove = None;
                 self.set_selection(*id);
             }
             Msg::NavDown => {
-                self.pending_pin_remove = None;
                 self.move_selection(1);
             }
             Msg::NavUp => {
-                self.pending_pin_remove = None;
                 self.move_selection(-1);
             }
             Msg::PageDown(viewport) => {
-                self.pending_pin_remove = None;
                 self.move_selection(i32::from(viewport.max(1)));
             }
             Msg::PageUp(viewport) => {
-                self.pending_pin_remove = None;
                 self.move_selection(-i32::from(viewport.max(1)));
             }
             Msg::LeftViewportChanged { viewport_height } => {
@@ -1306,11 +1288,9 @@ impl App {
                 self.adjust_explorer_scroll(cursor_first_row, cursor_last_row, viewport_height);
             }
             Msg::Home => {
-                self.pending_pin_remove = None;
                 self.move_selection_to(0);
             }
             Msg::End => {
-                self.pending_pin_remove = None;
                 self.move_selection_to(usize::MAX);
             }
             Msg::ToggleExpand => self.toggle_expand_selected(),
@@ -1508,59 +1488,6 @@ impl App {
                     )),
                 }
             }
-            Msg::LaunchSelectedPin => {
-                use crate::tui::effect::ExecSpec;
-                if self.selected_row_awaits_handoff() {
-                    effects.push(Effect::Toast(HANDOFF_PENDING_HINT.to_string()));
-                    return effects;
-                }
-                match crate::tui::actions::resolve_launch_pin(self) {
-                    Ok((pin_id, attach_target)) => {
-                        effects.push(Effect::Exec(ExecSpec::LaunchPin {
-                            pin_id,
-                            attach_target,
-                        }));
-                    }
-                    Err(reason) => effects.push(Effect::Toast(
-                        crate::tui::actions::pin_launch_disabled_reason(&reason),
-                    )),
-                }
-            }
-            Msg::LaunchPinById(pin_id) => {
-                use crate::tui::effect::ExecSpec;
-                let attach_target =
-                    crate::tui::actions::pin_launch_target_from_snapshot(self, &pin_id);
-                effects.push(Effect::Exec(ExecSpec::LaunchPin {
-                    pin_id,
-                    attach_target,
-                }));
-            }
-            Msg::PinRemove(request) => {
-                effects.push(Effect::WriteStore(crate::tui::effect::StoreOp::PinRemove(
-                    request,
-                )));
-            }
-            Msg::PinBind(request) => {
-                if self.handle.is_none() {
-                    effects.push(Effect::Toast(
-                        "pin bind failed: no graph loaded yet".to_string(),
-                    ));
-                } else {
-                    effects.push(Effect::WriteStore(crate::tui::effect::StoreOp::PinBind(
-                        request,
-                    )));
-                }
-            }
-            Msg::PinCreate(request) => {
-                effects.push(Effect::WriteStore(crate::tui::effect::StoreOp::PinCreate(
-                    request,
-                )));
-            }
-            Msg::PinEdit(request) => {
-                effects.push(Effect::WriteStore(crate::tui::effect::StoreOp::PinEdit(
-                    request,
-                )));
-            }
             Msg::SwitchView(view) => {
                 let before = self.active_view;
                 let first_visit = self.switch_to_view(view);
@@ -1708,7 +1635,7 @@ impl App {
     }
 
     /// The effect that commits the rename overlay's value for the
-    /// current selection: an alias, pin, or mux rename, or a toast
+    /// current selection: an alias or mux rename, or a toast
     /// explaining why nothing can be renamed.
     fn rename_commit_effect(&self, value: &str) -> super::Effect {
         use super::Effect;
@@ -1721,31 +1648,10 @@ impl App {
                     new_display_name,
                 })
             }
-            Some(RowId::Pin { pin_id }) => {
-                let display = value.trim();
-                if display.is_empty() {
-                    return Effect::Toast("pin rename: display name cannot be empty".to_string());
-                }
-                let Some(target) = self.pins_context().pin_target else {
-                    return Effect::Toast(format!(
-                        "pin rename: no editable pin `{pin_id}` in current selection"
-                    ));
-                };
-                Effect::WriteStore(crate::tui::effect::StoreOp::PinEdit(
-                    crate::tui::widgets::pins::PinEditRequest {
-                        original_id: target.id.clone(),
-                        id: target.id,
-                        display_name: display.to_string(),
-                        harness: target.harness,
-                        cwd: target.cwd,
-                        mux_name: target.mux_name,
-                        mux_backend: target.mux_backend,
-                        mux_socket: target.mux_socket,
-                        launch_argv: target.launch_argv,
-                        store_path: target.store_path,
-                    },
-                ))
-            }
+            Some(RowId::Pin { pin_id }) => Effect::Toast(format!(
+                "rename the slot with `{} pin rename {pin_id} <new name>`",
+                crate::invocation::invoked_name()
+            )),
             Some(RowId::MuxSession(NodeId::MuxSession(mux_id))) => {
                 let new_name = value.trim().to_string();
                 if new_name.is_empty() {
@@ -1761,53 +1667,25 @@ impl App {
     }
 }
 
-/// Pick the detail-pane target for a placeholder pin row given the
-/// active view. View-aligned: the sessions view upgrades to the
-/// pin's `last_session` when one is recorded *and* the corresponding
-/// agent-session node is in the snapshot; the mux view upgrades to
-/// the bound / stale-mux target when the pin has one. Otherwise the
-/// pin node itself is the detail target so the operator sees a sparse
-/// "no live entity" surface rather than a mismatched session/mux view.
+/// Pick the detail-pane target for a pin row given the active view.
+/// View-aligned: the sessions view shows the slot's session and the
+/// mux view its mux when the slot points at a node of that kind that
+/// is in the graph. Otherwise the slot itself is the target, so the
+/// operator sees its recipe and status instead of a mismatched view.
 fn placeholder_detail_target(snapshot: &GraphSnapshot, pin_id: &str, view: View) -> NodeId {
     let pin_node = || NodeId::Pin(PinId::new(pin_id.to_string()));
-    let Some(pin) = snapshot.pins.iter().find(|p| p.id == pin_id) else {
-        return pin_node();
-    };
-    match view {
-        View::Mux => match &pin.binding {
-            Some(PinBinding::Bound { mux, .. } | PinBinding::StaleMux { mux }) => {
-                NodeId::MuxSession(mux.clone())
-            }
-            _ => pin_node(),
-        },
-        View::Sessions => {
-            if let Some(PinBinding::Bound { session, .. }) = &pin.binding {
-                return NodeId::AgentSession(session.clone());
-            }
-            let last_session_key = snapshot.diagnostics.iter().find_map(|d| match d {
-                Diagnostic::PinUnbound {
-                    pin_id: id,
-                    last_session: Some(last),
-                    ..
-                } if id == pin_id => Some(last.session_id.as_str()),
-                _ => None,
-            });
-            if let Some(session_key) = last_session_key {
-                let upgraded = snapshot.nodes.iter().find_map(|n| match n {
-                    GraphNode::AgentSession(s)
-                        if s.id.harness_key == pin.harness && s.id.session_key == session_key =>
-                    {
-                        Some(NodeId::AgentSession(s.id.clone()))
-                    }
-                    _ => None,
-                });
-                if let Some(upgraded) = upgraded {
-                    return upgraded;
-                }
-            }
-            pin_node()
+    let target = snapshot.nodes.iter().find_map(|node| match node {
+        GraphNode::Pin(pin) if pin.id.id == pin_id => pin.target_node.clone(),
+        _ => None,
+    });
+    match (view, target) {
+        (View::Mux, Some(id @ NodeId::MuxSession(_)))
+        | (View::Sessions, Some(id @ NodeId::AgentSession(_)))
+            if snapshot.find_node(&id).is_some() =>
+        {
+            id
         }
-        View::Union | View::Prs | View::Forks => pin_node(),
+        _ => pin_node(),
     }
 }
 

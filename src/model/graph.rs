@@ -24,15 +24,11 @@ pub struct GraphSnapshot {
     /// that don't load aliases.
     #[serde(skip, default)]
     pub aliases: crate::aliases::AliasOverlay,
-    /// Session pin declarations per ADR 0057. Loaded from
-    /// `[[pins.entries]]` TOML by `discovery::pins`; the resolver
-    /// consumes this to synthesize bound-state
-    /// `LinkedToMux` candidates with `LocalPin`/`GlobalPin`
-    /// provenance. Pins remain in this sidecar even after binding so
-    /// row builders can render unbound pins as first-class rows
-    /// without walking `candidate_links`.
+    /// The pin slots (ADR 0141), from `pins.toml` and any legacy
+    /// `[[pins.entries]]`, in slot order. The resolver turns each into
+    /// a `PinNode` with its status and effective recipe.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub pins: Vec<PinCandidate>,
+    pub pins: Vec<PinSlot>,
     /// Per-node producing-provider metadata (ADR 0037).
     /// Empty for snapshots whose producers have not been
     /// instrumented yet; the loader falls back to the schema's
@@ -374,34 +370,8 @@ impl GraphSnapshot {
         self.candidate_links.sort_by_key(stable_json_key);
         self.resolved_relationships.sort();
         self.diagnostics.sort();
-        self.pins.sort_by(|a, b| {
-            a.provenance
-                .cmp(&b.provenance)
-                .then_with(|| a.id.cmp(&b.id))
-                .then_with(|| a.store_path.cmp(&b.store_path))
-        });
-    }
-
-    /// Rebuild the first-class pin-node projection from the current
-    /// pin sidecar. The sidecar remains the TOML-backed source of
-    /// truth; graph nodes are derived so consumers can select and link
-    /// pins like every other node kind.
-    pub fn sync_pin_nodes(&mut self) {
-        self.nodes.retain(|node| !matches!(node, GraphNode::Pin(_)));
-        self.node_provenance
-            .retain(|id, _| !matches!(id, NodeId::Pin(_)));
-        for pin in &self.pins {
-            let node = PinNode::from(pin);
-            let id = NodeId::Pin(node.id.clone());
-            self.node_provenance.insert(
-                id,
-                NodeProvenance {
-                    provider: "pins".to_string(),
-                    freshness_epoch: None,
-                },
-            );
-            self.nodes.push(GraphNode::Pin(node));
-        }
+        self.pins
+            .sort_by(|a, b| a.order.cmp(&b.order).then_with(|| a.id.cmp(&b.id)));
     }
 
     /// Remove every node, candidate link, and provenance entry

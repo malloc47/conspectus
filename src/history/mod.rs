@@ -19,6 +19,7 @@
 
 pub mod merge;
 pub mod project;
+pub mod reap;
 pub mod recorder;
 mod store;
 

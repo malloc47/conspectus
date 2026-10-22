@@ -27,8 +27,8 @@ use std::path::Path;
 use crate::model::{
     AgentSessionNode, BranchNode, CheckoutNode, Confidence, Diagnostic, ForgePrNode, ForkNode,
     GraphLink, GraphNode, GraphSnapshot, LinkEndpoint, LinkState, MuxSessionNode, NodeId, NodeKind,
-    PinBinding, PinCandidate, PinNode, Provenance, RelationKind, RepoNode, ResolvedRelationship,
-    RuntimeProcessNode, RuntimeProcessRole, WorkspaceNode, WorktreeKind, WorktreeMeta,
+    PinNode, Provenance, RelationKind, RepoNode, ResolvedRelationship, RuntimeProcessNode,
+    RuntimeProcessRole, WorkspaceNode, WorktreeKind, WorktreeMeta,
 };
 use crate::output::table::node_short_id;
 use crate::tui::rows::shorten_home;
@@ -224,9 +224,7 @@ fn section_for(kind: NodeKind, field_label: &str) -> SectionKind {
         (NodeKind::AgentSession, "process") => Process,
         (NodeKind::AgentSession, "pr") => Pr,
         (NodeKind::AgentSession, "lineage") => Lineage,
-        (NodeKind::Pin, "store" | "source") => Lineage,
-        (NodeKind::Pin, "mux" | "binding") => Mux,
-        (NodeKind::Pin, "session") => Session,
+        (NodeKind::Pin, "target") => Mux,
         (NodeKind::MuxSession, "name" | "backend" | "cwd" | "attached" | "pin") => Mux,
         (NodeKind::MuxSession, "session" | "id" | "harness" | "alias" | "title") => Session,
         (NodeKind::MuxSession, "process") => Process,
@@ -322,7 +320,7 @@ fn title_line(node: &GraphNode) -> String {
     match node {
         GraphNode::AgentSession(session) => agent_session_display_id(session),
         GraphNode::MuxSession(mux) => mux.display_label(),
-        GraphNode::Pin(pin) => format!("pin:{}", pin.display_name),
+        GraphNode::Pin(pin) => format!("pin:{}", pin.label),
         GraphNode::RuntimeProcess(process) => format!("process:{}", process.observation_key),
         GraphNode::ForgePr(pr) => format!("forge_pr:{}/{}#{}", pr.owner, pr.repo, pr.number),
         GraphNode::Fork(fork) => match &fork.name {
@@ -426,120 +424,31 @@ fn pin_fields_for_session(
     snapshot: &GraphSnapshot,
     session: &AgentSessionNode,
 ) -> Vec<HeaderField> {
-    let pin = snapshot.pins.iter().find(|pin| match &pin.binding {
-        Some(PinBinding::Bound { session: bound, .. }) => bound == &session.id,
-        _ => false,
-    });
-    let Some(pin) = pin else {
-        return Vec::new();
-    };
-    let diagnostics: Vec<HeaderField> = crate::tui::actions::pin_diagnostics_for_id(
-        snapshot, &pin.id,
-    )
-    .into_iter()
-    .map(|diagnostic| match diagnostic {
-        crate::tui::actions::PinDiagnosticView::Ambiguous {
-            pin_id,
-            chosen,
-            competing,
-        } => {
-            let competitors = competing
-                .iter()
-                .map(|id| format!("{}:{}", id.harness_key, id.session_key))
-                .collect::<Vec<_>>()
-                .join(", ");
-            let mut field = plain(
-                "pin",
-                format!(
-                    "{pin_id} ambiguous: chosen {}:{}; competing {competitors}",
-                    chosen.harness_key, chosen.session_key
-                ),
-            );
-            field.annotation = Some("b to bind");
-            field
-        }
-        crate::tui::actions::PinDiagnosticView::Drift {
-            pin_id,
-            declared_cwd,
-            observed_cwd,
-        } => {
-            let mut field = plain(
-                "pin",
-                format!("{pin_id} cwd drift: declared {declared_cwd}; observed {observed_cwd}"),
-            );
-            field.annotation = Some("advisory");
-            field
-        }
-        crate::tui::actions::PinDiagnosticView::StaleMux {
-            pin_id,
-            mux,
-            harness_running,
-            ..
-        } => {
-            let mut field = plain("pin", format!("{pin_id} stale mux {}", mux.native_id));
-            field.annotation = Some(crate::tui::actions::stale_mux_enter_hint(harness_running));
-            field
-        }
-        crate::tui::actions::PinDiagnosticView::Unbound {
-            pin_id,
-            expected_mux_native_id,
-            last_session,
-        } => {
-            let (value, annotation) = match last_session {
-                Some(last) => (
-                    format!(
-                        "{pin_id} unbound: expected {expected_mux_native_id} · last session {}",
-                        last.session_id
-                    ),
-                    "Enter resume",
-                ),
-                None => (
-                    format!("{pin_id} unbound: expected {expected_mux_native_id}"),
-                    "Enter launch",
-                ),
-            };
-            let mut field = plain("pin", value);
-            field.annotation = Some(annotation);
-            field
-        }
-    })
-    .collect();
-    if diagnostics.is_empty() {
-        vec![pin_summary_field(pin)]
-    } else {
-        diagnostics
-    }
+    pin_fields_targeting(snapshot, &NodeId::AgentSession(session.id.clone()))
 }
 
 fn pin_fields_for_mux(snapshot: &GraphSnapshot, mux: &MuxSessionNode) -> Vec<HeaderField> {
-    snapshot
-        .pins
-        .iter()
-        .filter(|pin| match &pin.binding {
-            Some(PinBinding::Bound { mux: bound, .. } | PinBinding::StaleMux { mux: bound }) => {
-                bound == &mux.id
-            }
-            Some(PinBinding::Unbound) | None => false,
-        })
+    pin_fields_targeting(snapshot, &NodeId::MuxSession(mux.id.clone()))
+}
+
+/// One `pin` field per slot pointing at `target`.
+fn pin_fields_targeting(snapshot: &GraphSnapshot, target: &NodeId) -> Vec<HeaderField> {
+    crate::tui::rows::pin_nodes(snapshot)
+        .into_iter()
+        .filter(|pin| pin.target_node.as_ref() == Some(target))
         .map(pin_summary_field)
         .collect()
 }
 
-fn pin_summary_field(pin: &PinCandidate) -> HeaderField {
-    let scope = match pin.provenance {
-        Provenance::LocalPin => "project",
-        Provenance::GlobalPin => "user",
-        _ => "pin",
-    };
-    let state = match pin.binding {
-        Some(PinBinding::Bound { .. }) => "bound",
-        Some(PinBinding::StaleMux { .. }) => "stale-mux",
-        Some(PinBinding::Unbound) => "unbound",
-        None => "unresolved",
-    };
+fn pin_summary_field(pin: &PinNode) -> HeaderField {
     plain(
         "pin",
-        format!("{} ({state} · {scope} · {})", pin.id, pin.store_path),
+        format!(
+            "{} ({} · {})",
+            pin.id.id,
+            pin.kind.as_str(),
+            pin.status.as_str()
+        ),
     )
 }
 
@@ -719,48 +628,33 @@ fn pin_fields(
 ) -> Vec<HeaderField> {
     let mut fields = vec![
         plain("id", pin.id.id.clone()),
-        plain("name", pin.display_name.clone()),
-        plain("harness", pin.harness.clone()),
-        plain("cwd", shorten_home(&pin.cwd, home)),
-        plain("mux", pin.mux.native_id()),
-        plain("store", shorten_home(&pin.store_path, home)),
-        plain("source", pin.provenance.snake_case().to_string()),
+        plain("name", pin.label.clone()),
+        plain("kind", pin.kind.as_str().to_string()),
+        plain("status", pin.status.as_str().to_string()),
     ];
-    if let Some(argv) = &pin.launch_argv
-        && !argv.is_empty()
-    {
-        fields.push(plain("launch", argv.join(" ")));
+    match (&pin.target_node, &pin.target) {
+        (Some(node), _) => fields.push(linked(
+            "target",
+            node.to_string(),
+            snapshot.find_node(node).map(|_| node.clone()),
+        )),
+        (None, Some(target)) => fields.push(placeholder("target", target)),
+        (None, None) => fields.push(placeholder("target", "none yet (built on first rebuild)")),
     }
-    if let Some(reason) = &pin.reason {
-        fields.push(plain("reason", reason.clone()));
-    }
-    match &pin.binding {
-        Some(PinBinding::Bound { mux, session }) => {
-            fields.push(linked(
-                "binding",
-                format!("bound · {}", mux.native_id),
-                Some(NodeId::MuxSession(mux.clone())),
-            ));
-            fields.push(linked(
-                "session",
-                agent_session_link_label(snapshot, &NodeId::AgentSession(session.clone()))
-                    .unwrap_or_else(|| format!("{}:{}", session.harness_key, session.session_key)),
-                Some(NodeId::AgentSession(session.clone())),
-            ));
-        }
-        Some(PinBinding::StaleMux { mux }) => {
-            fields.push(linked(
-                "binding",
-                format!("stale-mux · {}", mux.native_id),
-                Some(NodeId::MuxSession(mux.clone())),
-            ));
-        }
-        Some(PinBinding::Unbound) => {
-            fields.push(placeholder("binding", "unbound"));
-        }
-        None => {
-            fields.push(placeholder("binding", "unresolved"));
-        }
+    // Each recipe field with the layer that supplied it.
+    for label in pin.kind.recipe_fields() {
+        let Some(field) = pin.effective.iter().find(|field| field.name == *label) else {
+            continue;
+        };
+        let value = field.value.display();
+        let value = if *label == "cwd" || *label == "root" || *label == "path" {
+            shorten_home(&value, home)
+        } else {
+            value
+        };
+        let mut row = plain(label, value);
+        row.annotation = Some(field.source.as_str());
+        fields.push(row);
     }
     if include_linked_details {
         attach_linked_details(snapshot, &mut fields, home);
@@ -1236,7 +1130,7 @@ fn link_target_label_by_id(snapshot: &GraphSnapshot, target: &NodeId) -> Option<
     let node = snapshot.find_node(target)?;
     match node {
         GraphNode::MuxSession(mux) => Some(mux.display_label()),
-        GraphNode::Pin(pin) => Some(format!("pin:{}", pin.display_name)),
+        GraphNode::Pin(pin) => Some(format!("pin:{}", pin.label)),
         GraphNode::AgentSession(session) => Some(format!(
             "{}:{}",
             session.harness_key, session.id.session_key
@@ -1387,7 +1281,7 @@ fn node_reference_label(node: &GraphNode) -> String {
     match node {
         GraphNode::AgentSession(session) => agent_session_display_id(session),
         GraphNode::MuxSession(mux) => mux.display_label(),
-        GraphNode::Pin(pin) => format!("pin:{}", pin.display_name),
+        GraphNode::Pin(pin) => format!("pin:{}", pin.label),
         GraphNode::RuntimeProcess(process) => runtime_process_display_label(process),
         GraphNode::ForgePr(pr) => format!("{}/{}#{}", pr.owner, pr.repo, pr.number),
         GraphNode::Fork(fork) => fork

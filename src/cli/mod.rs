@@ -40,6 +40,7 @@ impl Cli {
             Command::Pin(args) => args.run(),
             Command::Mux(args) => args.run(),
             Command::Rebuild(args) => args.run(),
+            Command::History(args) => args.run(),
             Command::Worktree(args) => args.run(),
             Command::Serve(args) => args.run(),
             Command::Refresh(args) => args.run(),
@@ -82,6 +83,8 @@ enum Command {
     /// Bring a mux back from a pin slot, a history record, or a node.
     /// `--dry-run` prints the plan.
     Rebuild(RebuildArgs),
+    /// List, inspect, and prune the entities Conspectus has observed.
+    History(HistoryArgs),
     /// List, create, and tear down git worktrees. `list` is read-only;
     /// new / rm / merge / close / prune delegate to the configured
     /// mutation backend (worktrunk). See `docs/worktrees.md`.
@@ -664,6 +667,10 @@ pub(super) fn resolve_alias_store(
 mod pin;
 use pin::PinArgs;
 
+// ADR 0140: `conspectus history`.
+mod history;
+use history::HistoryArgs;
+
 // ADR 0142: `conspectus rebuild`.
 mod rebuild;
 use rebuild::RebuildArgs;
@@ -735,7 +742,6 @@ pub(super) fn store_label(store: DeclaredStoreFlag) -> &'static str {
 pub(super) fn provenance_label(provenance: Provenance) -> &'static str {
     match provenance {
         Provenance::LocalDeclared => "local_declared",
-        Provenance::LocalPin => "local_pin",
         Provenance::GlobalDeclared => "global_declared",
         Provenance::GlobalPin => "global_pin",
         Provenance::StrongDiscovered => "strong_discovered",

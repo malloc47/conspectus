@@ -166,14 +166,6 @@ impl App {
         }
     }
 
-    pub fn pending_pin_remove(&self) -> Option<&str> {
-        self.pending_pin_remove.as_deref()
-    }
-
-    pub fn set_pending_pin_remove(&mut self, pin_id: Option<String>) {
-        self.pending_pin_remove = pin_id;
-    }
-
     /// Active controls-overlay state (ADR 0031), if any.
     /// Lives on the modal stack (ADR 0085 contract 3); this
     /// accessor peeks the top entry.
@@ -210,61 +202,6 @@ impl App {
             Some(crate::tui::Modal::Controls(_))
         ) {
             self.modal_stack.pop();
-        }
-    }
-
-    /// Active pins-overlay state (ADR 0057), if any. Lives on the
-    /// modal stack (ADR 0085 contract 3); this accessor peeks the
-    /// top entry.
-    pub fn pins_overlay(&self) -> Option<&crate::tui::widgets::pins::PinsOverlayState> {
-        match self.modal_stack.last()? {
-            crate::tui::Modal::Pins(state) => Some(state),
-            _ => None,
-        }
-    }
-
-    pub fn pins_overlay_mut(&mut self) -> Option<&mut crate::tui::widgets::pins::PinsOverlayState> {
-        match self.modal_stack.last_mut()? {
-            crate::tui::Modal::Pins(state) => Some(state),
-            _ => None,
-        }
-    }
-
-    /// Push a fresh pins overlay onto the modal stack at the top
-    /// of the action list.
-    pub fn open_pins_overlay(&mut self) {
-        self.modal_stack.push(crate::tui::Modal::Pins(
-            crate::tui::widgets::pins::PinsOverlayState::new(),
-        ));
-    }
-
-    /// Push a pre-configured pins overlay state — used by direct
-    /// shortcuts (`N`/`B`/`A`/`b`) that skip the menu and open a
-    /// sub-editor directly.
-    pub fn set_pins_overlay(&mut self, state: crate::tui::widgets::pins::PinsOverlayState) {
-        self.modal_stack.push(crate::tui::Modal::Pins(state));
-    }
-
-    /// Pop the pins overlay if it's on top; no-op otherwise.
-    pub fn close_pins_overlay(&mut self) {
-        if matches!(self.modal_stack.last(), Some(crate::tui::Modal::Pins(_))) {
-            self.modal_stack.pop();
-        }
-    }
-
-    /// Snapshot of the live pin state the pins overlay renders against.
-    pub fn pins_context(&self) -> crate::tui::widgets::pins::PinsContext {
-        crate::tui::widgets::pins::PinsContext {
-            pin_create_defaults: self.pin_create_defaults(),
-            pin_adopt_defaults: self.pin_adopt_defaults_if_available(),
-            known_cwd_candidates: self.known_pin_cwd_candidates(),
-            known_harness_keys: self.known_harness_keys().into_iter().collect(),
-            known_mux_names: self.used_mux_names().into_iter().collect(),
-            known_pin_ids: self.used_pin_ids().into_iter().collect(),
-            known_pin_mux_names: self.used_pin_mux_names().into_iter().collect(),
-            selected_pin_id: self.selected_pin_id(),
-            pin_target: self.pin_mutation_target(),
-            pin_bind_options: self.pin_bind_options(),
         }
     }
 

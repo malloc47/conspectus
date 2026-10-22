@@ -2,8 +2,8 @@
 //!
 //! "Close down a stream of work" is the compound gesture that lands or
 //! discards a worktree's branch, terminates the mux/agent sessions
-//! rooted in it, removes the worktree, and drops the pins declared
-//! there. This module holds the provider-neutral planning + execution
+//! rooted in it, removes the worktree, and forgets the history records
+//! rooted there. This module holds the provider-neutral planning + execution
 //! so the CLI (`worktree close`) and the TUI (close-down action / `X`)
 //! run one tested orchestration rather than two drifting copies.
 //!
@@ -12,6 +12,7 @@
 //! [`ProcessSignaller`] as trait objects, so the whole flow is
 //! exercised in tests with fakes and never spawns a process.
 
+use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
@@ -19,8 +20,8 @@ use anyhow::Result;
 
 use crate::discovery::tmux::MuxBackend;
 use crate::discovery::tmux::teardown::{ProcessSignaller, TeardownReport, teardown_mux_session};
+use crate::history::HistoryStore;
 use crate::model::{GraphNode, GraphSnapshot, path_is_ancestor_of};
-use crate::pins::remove_pin_entry;
 
 use super::{
     WorktreeBackend, WorktreeMergeRequest, WorktreeMutationOutcome, WorktreeRemoveRequest,
@@ -36,14 +37,6 @@ pub struct MuxTeardownTarget {
     pub pane_pid: Option<i64>,
 }
 
-/// A pin to drop because its stream is going away.
-#[derive(Clone, Debug, Eq, PartialEq, Ord, PartialOrd)]
-pub struct PinDropTarget {
-    pub store_path: String,
-    pub id: String,
-    pub display_name: String,
-}
-
 /// Everything close-down needs to know about a worktree, resolved from
 /// the discovered graph. Built by [`plan_close_down`]; consumed by
 /// [`execute_close_down`] and the confirmation UI.
@@ -56,7 +49,9 @@ pub struct CloseDownPlan {
     /// worktree — what the confirmation surfaces.
     pub live_labels: Vec<String>,
     pub mux_targets: Vec<MuxTeardownTarget>,
-    pub pins: Vec<PinDropTarget>,
+    /// History records a pin slot targets. Closing a stream forgets
+    /// the records rooted in the worktree but never these (ADR 0140).
+    pub protected_records: BTreeSet<String>,
 }
 
 impl CloseDownPlan {
@@ -78,14 +73,14 @@ pub fn plan_close_down(
     let worktree_root = worktree_path_for_branch(snapshot, branch)?;
     let live_labels = live_session_labels(snapshot, &worktree_root);
     let mux_targets = live_mux_teardown_targets(snapshot, &worktree_root);
-    let pins = pins_rooted_in(snapshot, &worktree_root);
+    let protected_records = pinned_records(snapshot);
     Some(CloseDownPlan {
         worktree_root,
         branch: branch.to_string(),
         repo_root,
         live_labels,
         mux_targets,
-        pins,
+        protected_records,
     })
 }
 
@@ -178,26 +173,20 @@ pub fn live_mux_teardown_targets(
     targets
 }
 
-/// Pins whose declared cwd is at or under `worktree_path` — the pins
-/// close-down drops. Deduped and ordered for deterministic output.
-pub fn pins_rooted_in(snapshot: &GraphSnapshot, worktree_path: &str) -> Vec<PinDropTarget> {
-    let root = Path::new(worktree_path);
-    let mut pins = Vec::new();
-    for node in &snapshot.nodes {
-        let GraphNode::Pin(pin) = node else {
-            continue;
-        };
-        if path_is_ancestor_of(root, Path::new(&pin.cwd)) {
-            pins.push(PinDropTarget {
-                store_path: pin.store_path.clone(),
-                id: pin.id.id.clone(),
-                display_name: pin.display_name.clone(),
-            });
-        }
-    }
-    pins.sort();
-    pins.dedup();
-    pins
+/// The history record ids pin slots point at.
+fn pinned_records(snapshot: &GraphSnapshot) -> BTreeSet<String> {
+    snapshot
+        .nodes
+        .iter()
+        .filter_map(|node| match node {
+            GraphNode::Pin(pin) => pin
+                .target
+                .as_deref()?
+                .strip_prefix("history:")
+                .map(str::to_string),
+            _ => None,
+        })
+        .collect()
 }
 
 /// Outcome of a close-down run — enough for a caller to render a
@@ -211,11 +200,11 @@ pub struct CloseDownReport {
     pub landed: bool,
     /// Outcome of the worktree merge/remove step.
     pub worktree: WorktreeMutationOutcome,
-    /// Display names of pins successfully dropped.
-    pub dropped_pins: Vec<String>,
-    /// `(display_name, error)` for pins that couldn't be dropped —
-    /// best-effort; a pin-write failure doesn't fail the close.
-    pub pin_errors: Vec<(String, String)>,
+    /// How many history records rooted in the worktree were forgotten.
+    pub forgotten_records: usize,
+    /// Why forgetting failed, if it did. Best-effort: a history failure
+    /// doesn't fail the close.
+    pub history_error: Option<String>,
 }
 
 /// Run the close-down sequence for `plan` (ADR 0093):
@@ -226,11 +215,13 @@ pub struct CloseDownReport {
 /// 2. Land (`discard == false`) or drop (`discard == true`) the branch
 ///    and remove the worktree. `merge` removes the worktree itself;
 ///    `discard` removes it directly with `force` (sessions are gone).
-/// 3. Drop the plan's pins, best-effort.
+/// 3. Forget the history records rooted in the worktree, except those
+///    a pin slot targets, best-effort.
 ///
 /// Confirmation is the caller's responsibility (interactive prompt in
 /// the CLI; modal in the TUI) — this function assumes the operator has
 /// already agreed.
+#[allow(clippy::too_many_arguments)]
 pub fn execute_close_down(
     plan: &CloseDownPlan,
     discard: bool,
@@ -239,6 +230,7 @@ pub fn execute_close_down(
     mux: &dyn MuxBackend,
     signaller: &dyn ProcessSignaller,
     grace: Duration,
+    history: Option<&HistoryStore>,
 ) -> Result<CloseDownReport> {
     // 1. Terminate mux sessions first.
     let mut teardowns = Vec::new();
@@ -268,17 +260,21 @@ pub fn execute_close_down(
         })?
     };
 
-    // 3. Drop pins (best-effort). Only attempt when the worktree step
-    //    succeeded — a failed merge/remove leaves the stream intact, so
-    //    the pins should stay too.
-    let mut dropped_pins = Vec::new();
-    let mut pin_errors = Vec::new();
-    if matches!(worktree, WorktreeMutationOutcome::Succeeded { .. }) {
-        for pin in &plan.pins {
-            match remove_pin_entry(&pin.store_path, &pin.id) {
-                Ok(_) => dropped_pins.push(pin.display_name.clone()),
-                Err(err) => pin_errors.push((pin.display_name.clone(), err.to_string())),
-            }
+    // 3. Forget the stream's history (best-effort). Only when the
+    //    worktree step succeeded: a failed merge or remove leaves the
+    //    stream intact, so its records stay too.
+    let mut forgotten_records = 0;
+    let mut history_error = None;
+    if let Some(store) = history
+        && matches!(worktree, WorktreeMutationOutcome::Succeeded { .. })
+    {
+        match crate::history::reap::forget_rooted_in(
+            store,
+            Path::new(&plan.worktree_root),
+            &plan.protected_records,
+        ) {
+            Ok(count) => forgotten_records = count,
+            Err(err) => history_error = Some(err.to_string()),
         }
     }
 
@@ -286,8 +282,8 @@ pub fn execute_close_down(
         teardowns,
         landed: !discard,
         worktree,
-        dropped_pins,
-        pin_errors,
+        forgotten_records,
+        history_error,
     })
 }
 

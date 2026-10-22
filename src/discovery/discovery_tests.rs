@@ -706,7 +706,7 @@ fn discover_local_with_loads_project_pins_from_observed_session_cwd() {
         snapshot
             .pins
             .iter()
-            .any(|pin| pin.id == "observed" && pin.provenance == Provenance::LocalPin),
+            .any(|pin| pin.id == "observed" && pin.legacy),
         "project pin should load from the observed session cwd, not only the scan root"
     );
 }

@@ -1,12 +1,14 @@
 //! `conspectus mux` subcommand tree (ADR 0095, ADR 0096).
 //!
 //! Two verbs:
-//! - `mux new` — bare tmux session, no pin, no agent, no worktree.
-//! - `mux launch` — harness in a fresh tmux, no pin persistence.
+//! - `mux new` — bare tmux session, no agent, no worktree.
+//! - `mux launch` — harness in a fresh tmux.
 //!
 //! Both are sanctioned under ADR 0143 category 3 (operator-initiated
 //! mux lifecycle) plus category 4 (Conspectus-constructed harness
-//! argv for `mux launch`). Neither writes a pin or sidecar.
+//! argv for `mux launch`). They record the new mux in history, and
+//! `--pin` also adds a pin slot for it (ADR 0141): with `--no-launch`
+//! the slot is planned and nothing starts until `conspectus rebuild`.
 
 use std::path::PathBuf;
 
@@ -35,17 +37,15 @@ impl MuxArgs {
 
 #[derive(Debug, Subcommand)]
 enum MuxCommand {
-    /// Create a bare tmux session (no pin, no agent, no worktree).
-    /// The next discovery cycle picks the mux up; if you
-    /// want a durable declaration, follow up with `conspectus pin
-    /// adopt <name>`.
+    /// Create a bare tmux session (no agent, no worktree). The next
+    /// discovery cycle picks the mux up; `--pin` also adds a pin slot
+    /// for it, and `conspectus pin add <name>` does so afterwards.
     New(MuxNewArgs),
-    /// Launch a harness in a fresh tmux session with no pin
-    /// persistence. Distinct from `pin launch` (which
-    /// requires + writes a pin) and from `mux new` (which spawns a
-    /// bare shell). The mux and its attributed harness session
-    /// appear in discovery on the next refresh; `conspectus pin
-    /// adopt <name>` remains the after-the-fact persistence path.
+    /// Launch a harness in a fresh tmux session. Distinct from `mux
+    /// new`, which spawns a bare shell. The mux and its attributed
+    /// harness session appear in discovery on the next refresh;
+    /// `--pin` also adds a pin slot, and `--pin --no-launch` only
+    /// plans one.
     Launch(MuxLaunchArgs),
 }
 
@@ -63,9 +63,17 @@ struct MuxNewArgs {
     socket: Option<String>,
     /// Skip the terminal hand-off. The new session is spawned
     /// detached and the attach command is printed for the operator
-    /// to run by hand. Mirrors `pin launch --no-attach`.
+    /// to run by hand. Mirrors `mux launch --no-attach`.
     #[arg(long = "no-attach")]
     no_attach: bool,
+    /// Also pin the mux as a slot. Takes an optional slot name,
+    /// defaulting to the mux name.
+    #[arg(long, value_name = "SLOT", num_args = 0..=1, default_missing_value = "")]
+    pin: Option<String>,
+    /// With `--pin`: write the slot without starting the mux. The first
+    /// `conspectus rebuild <slot>` builds it.
+    #[arg(long = "no-launch", requires = "pin")]
+    no_launch: bool,
 }
 
 impl MuxNewArgs {
@@ -100,13 +108,25 @@ impl MuxNewArgs {
         }
         let socket = self.socket.as_deref();
         let name = self.name.as_str();
+        let pin = pin_request(self.pin.as_deref(), self.no_launch, name, history)?;
+        if let Some(pin) = pin.as_ref().filter(|pin| pin.no_launch) {
+            return write_pin(pin, None, recipe_fields(name, socket, &cwd, &[], None));
+        }
         // ADR 0095: empty argv — tmux launches the operator's login
         // shell. No `send-keys` is used to seed the pane (ADR 0028).
         let outcome = runner
             .new_session(socket, name, &cwd, &[])
             .map_err(|err| anyhow!("tmux new-session failed: {err}"))?;
         report_new_session(outcome, name)?;
-        record_launch(history, runner.backend_key(), socket, name, &cwd, &[], None);
+        let record = record_launch(history, runner.backend_key(), socket, name, &cwd, &[], None);
+        if let Some(pin) = &pin {
+            write_pin(
+                pin,
+                record.as_deref(),
+                recipe_fields(name, socket, &cwd, &[], None),
+            )
+            .unwrap_or_else(|err| eprintln!("conspectus: warning: {err}"));
+        }
         if self.no_attach {
             let attach_cmd = format_attach_command(socket, name);
             println!("spawned `{name}` (detached); attach with: {attach_cmd}");
@@ -149,10 +169,17 @@ struct MuxLaunchArgs {
     /// `--worktree-branch`, ignored otherwise.
     #[arg(long = "worktree-repo", value_name = "PATH")]
     worktree_repo: Option<PathBuf>,
-    /// Skip the terminal hand-off. Mirrors `pin launch --no-attach`
-    /// and `mux new --no-attach`.
+    /// Skip the terminal hand-off. Mirrors `mux new --no-attach`.
     #[arg(long = "no-attach")]
     no_attach: bool,
+    /// Also pin the mux as a slot. Takes an optional slot name,
+    /// defaulting to the mux name.
+    #[arg(long, value_name = "SLOT", num_args = 0..=1, default_missing_value = "")]
+    pin: Option<String>,
+    /// With `--pin`: write the slot without starting the mux. The first
+    /// `conspectus rebuild <slot>` builds it.
+    #[arg(long = "no-launch", requires = "pin")]
+    no_launch: bool,
     /// Accepted for symmetry with other verbs; `mux launch` has no
     /// discovery-driven state, so it's hidden from help.
     #[arg(long = "scan-root", value_name = "PATH", hide = true)]
@@ -182,6 +209,11 @@ impl MuxLaunchArgs {
         }
         if self.harness.trim().is_empty() {
             bail!("mux launch requires a non-empty <HARNESS>");
+        }
+        if self.no_launch && self.worktree_branch.is_some() {
+            bail!(
+                "mux launch: --no-launch can't realize a worktree; rebuild the slot to create it"
+            );
         }
         // Resolve cwd: prefer worktree realization when --worktree-branch
         // is set; otherwise use --cwd or $PWD.
@@ -219,23 +251,40 @@ impl MuxLaunchArgs {
         }
         let socket = self.socket.as_deref();
         let name = self.name.as_str();
-        // Not watched (ADR 0133): attaching right away shows the
-        // harness's first output, and a harness that dies non-zero
-        // stays as a dead pane with its output (ADR 0103).
-        crate::rebuild::launch::spawn(runner, socket, name, &cwd, &argv)?;
         let recorded: Vec<String> = argv
             .iter()
             .map(|arg| arg.to_string_lossy().into_owned())
             .collect();
-        record_launch(
+        let harness = self.harness.trim();
+        let pin = pin_request(self.pin.as_deref(), self.no_launch, name, history)?;
+        if let Some(pin) = pin.as_ref().filter(|pin| pin.no_launch) {
+            return write_pin(
+                pin,
+                None,
+                recipe_fields(name, socket, &cwd, &recorded, Some(harness)),
+            );
+        }
+        // Not watched (ADR 0133): attaching right away shows the
+        // harness's first output, and a harness that dies non-zero
+        // stays as a dead pane with its output (ADR 0103).
+        crate::rebuild::launch::spawn(runner, socket, name, &cwd, &argv)?;
+        let record = record_launch(
             history,
             runner.backend_key(),
             socket,
             name,
             &cwd,
             &recorded,
-            Some(self.harness.trim()),
+            Some(harness),
         );
+        if let Some(pin) = &pin {
+            write_pin(
+                pin,
+                record.as_deref(),
+                recipe_fields(name, socket, &cwd, &recorded, Some(harness)),
+            )
+            .unwrap_or_else(|err| eprintln!("conspectus: warning: {err}"));
+        }
         if self.no_attach {
             let attach_cmd = format_attach_command(socket, name);
             println!("launched `{name}` (detached); attach with: {attach_cmd}");
@@ -262,10 +311,8 @@ pub(super) fn record_launch(
     cwd: &std::path::Path,
     argv: &[String],
     harness: Option<&str>,
-) {
-    let Some(writer) = history else {
-        return;
-    };
+) -> Option<String> {
+    let writer = history?;
     let cwd = cwd.to_string_lossy();
     let launch = crate::history::LaunchedMux {
         backend,
@@ -275,12 +322,108 @@ pub(super) fn record_launch(
         argv,
         harness,
     };
-    if let Err(err) = writer.record_launched_mux(&launch) {
-        eprintln!(
-            "conspectus: warning: failed to record `{name}` in history at {}: {err}",
-            writer.store.dir().display()
-        );
+    match writer.record_launched_mux(&launch) {
+        Ok(id) => id,
+        Err(err) => {
+            eprintln!(
+                "conspectus: warning: failed to record `{name}` in history at {}: {err}",
+                writer.store.dir().display()
+            );
+            None
+        }
     }
+}
+
+/// What `--pin` asked for.
+struct PinRequest {
+    store: crate::pin_slots::SlotStore,
+    slot: String,
+    no_launch: bool,
+}
+
+/// Validate `--pin` before anything starts: a usable slot name, not
+/// already taken, a slot store to write, and (unless only planning) a
+/// history store to point the slot at.
+fn pin_request(
+    pin: Option<&str>,
+    no_launch: bool,
+    default_name: &str,
+    history: Option<&crate::history::HistoryWriter>,
+) -> Result<Option<PinRequest>> {
+    let Some(pin) = pin else {
+        return Ok(None);
+    };
+    let slot = if pin.trim().is_empty() {
+        default_name
+    } else {
+        pin
+    };
+    crate::pin_slots::validate_id(slot).map_err(|err| anyhow!("--pin: {err}"))?;
+    let store = crate::pin_slots::SlotStore::from_env()
+        .ok_or_else(|| anyhow!("--pin: no data home: set $XDG_DATA_HOME or $HOME"))?;
+    if store
+        .load()
+        .slots
+        .iter()
+        .any(|existing| existing.id == slot)
+    {
+        bail!("--pin: a pin slot named `{slot}` already exists");
+    }
+    if !no_launch && history.is_none() {
+        bail!("--pin needs the history store to point the slot at; none is available");
+    }
+    Ok(Some(PinRequest {
+        store,
+        slot: slot.to_string(),
+        no_launch,
+    }))
+}
+
+/// The recipe fields a slot for this launch carries.
+fn recipe_fields(
+    name: &str,
+    socket: Option<&str>,
+    cwd: &std::path::Path,
+    argv: &[String],
+    harness: Option<&str>,
+) -> crate::model::SlotFields {
+    use crate::model::FieldValue::{List, Text};
+    let mut fields = crate::model::SlotFields::new();
+    fields.insert("name".into(), Text(name.to_string()));
+    if let Some(socket) = crate::model::effective_socket(socket) {
+        fields.insert("socket".into(), Text(socket.to_string()));
+    }
+    fields.insert("cwd".into(), Text(cwd.to_string_lossy().into_owned()));
+    if !argv.is_empty() {
+        fields.insert("argv".into(), List(argv.to_vec()));
+    }
+    if let Some(harness) = harness {
+        fields.insert("harness".into(), Text(harness.to_string()));
+    }
+    fields
+}
+
+/// Write the slot for a launch (or, with `--no-launch`, for a mux that
+/// doesn't exist yet). A failure after launching warns: the mux is up.
+fn write_pin(
+    request: &PinRequest,
+    record: Option<&str>,
+    fields: crate::model::SlotFields,
+) -> Result<()> {
+    use crate::model::PinKind;
+    let slot = match record {
+        Some(record) => {
+            crate::pin_ops::pin_record(&request.store, &request.slot, PinKind::Mux, record, fields)
+        }
+        None => crate::pin_ops::pin_planned(&request.store, &request.slot, PinKind::Mux, fields),
+    }
+    .map_err(|err| anyhow!("{err}"))?;
+    println!(
+        "pinned `{}` ({})",
+        slot.id,
+        if record.is_some() { "live" } else { "planned" }
+    );
+    Ok(())
 }
 
 /// Realize the worktree for `branch` under `repo` and return the

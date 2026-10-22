@@ -28,12 +28,14 @@ pub mod history;
 pub mod hook;
 #[doc(hidden)]
 pub mod invocation;
+pub(crate) mod legacy_bindings;
+pub(crate) mod legacy_pins;
+pub(crate) mod legacy_registry;
 pub mod model;
 pub mod output;
-pub(crate) mod pin_bindings;
+pub mod pin_migrate;
+pub mod pin_ops;
 pub mod pin_slots;
-pub(crate) mod pin_store_registry;
-pub(crate) mod pins;
 pub mod rebuild;
 pub mod rename;
 pub mod resolve;

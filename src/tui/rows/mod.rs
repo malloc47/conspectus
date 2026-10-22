@@ -531,12 +531,12 @@ fn workspace_member_names(
 /// The program a mux runs, by basename, for rows with no linked agent
 /// to label them. Prefers what the active pane runs now
 /// (`#{pane_current_command}`), then the program the pane was started
-/// with, then the launch program of the pin bound to the mux, so a
-/// freshly launched pin keeps its label even if the backend hasn't
+/// with, then the launch program of the slot pinning the mux, so a
+/// freshly launched mux keeps its label even if the backend hasn't
 /// reported the pane yet. `None` when nothing names a program.
 pub(crate) fn mux_program(
     mux: &crate::model::MuxSessionNode,
-    pin: Option<&crate::model::PinCandidate>,
+    pin: Option<&crate::model::PinNode>,
 ) -> Option<String> {
     let start_program = mux
         .active_pane_start_command
@@ -601,7 +601,7 @@ pub(crate) fn mux_process_harnesses(
 /// harness exits reads as the shell.
 pub(crate) fn mux_program_harness(
     mux: &crate::model::MuxSessionNode,
-    pin: Option<&crate::model::PinCandidate>,
+    pin: Option<&crate::model::PinNode>,
     observed_harness: Option<&str>,
 ) -> Option<String> {
     use crate::discovery::harness::adapter_in_command;
@@ -622,9 +622,9 @@ pub(crate) fn mux_program_harness(
             adapter_in_command([current])
         }
         (_, Some(start)) => adapter_in_command(start.split_whitespace()),
-        (_, None) => pin.and_then(|pin| match &pin.launch_argv {
-            Some(argv) => adapter_in_command(argv.iter().map(String::as_str)),
-            None => pin_program(pin)
+        (_, None) => pin.and_then(|pin| match pin.list("argv") {
+            Some(argv) if !argv.is_empty() => adapter_in_command(argv.iter().map(String::as_str)),
+            _ => pin_program(pin)
                 .as_deref()
                 .and_then(|program| adapter_in_command([program])),
         }),
@@ -632,17 +632,44 @@ pub(crate) fn mux_program_harness(
     adapter.map(|adapter| adapter.display_label().to_string())
 }
 
-/// The program a pin launches: its `launch.argv` override, else the
-/// harness's default argv, else the harness key itself.
-pub(crate) fn pin_program(pin: &crate::model::PinCandidate) -> Option<String> {
-    if let Some(program) = pin.launch_argv.as_ref().and_then(|argv| argv.first()) {
+/// The program a mux slot launches: the first token of its `argv`,
+/// else the harness's default argv, else the harness key itself.
+pub(crate) fn pin_program(pin: &crate::model::PinNode) -> Option<String> {
+    if let Some(program) = pin.list("argv").and_then(|argv| argv.first()) {
         return program_name(program);
     }
-    let default_argv = crate::discovery::harness::launch_argv_for(&pin.harness);
+    let harness = pin.text("harness")?;
+    let default_argv = crate::discovery::harness::launch_argv_for(harness);
     match default_argv.first() {
         Some(program) => program_name(&program.to_string_lossy()),
-        None => program_name(&pin.harness),
+        None => program_name(harness),
     }
+}
+
+/// Every slot in the snapshot, in `pins.toml` order.
+pub(crate) fn pin_nodes(snapshot: &crate::model::GraphSnapshot) -> Vec<&crate::model::PinNode> {
+    let mut pins: Vec<&crate::model::PinNode> = snapshot
+        .nodes
+        .iter()
+        .filter_map(|node| match node {
+            crate::model::GraphNode::Pin(pin) => Some(pin),
+            _ => None,
+        })
+        .collect();
+    pins.sort_by_key(|pin| pin.order);
+    pins
+}
+
+/// The node a slot points at when it is live in the graph.
+pub(crate) fn live_pin_target(
+    snapshot: &crate::model::GraphSnapshot,
+    pin: &crate::model::PinNode,
+) -> Option<NodeId> {
+    if pin.status != crate::model::SlotStatus::Live {
+        return None;
+    }
+    let id = pin.target_node.clone()?;
+    snapshot.find_node(&id).is_some().then_some(id)
 }
 
 fn program_name(command: &str) -> Option<String> {

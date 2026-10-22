@@ -1,43 +1,32 @@
-//! `conspectus pin` subcommand tree.
+//! `conspectus pin` subcommand tree (ADR 0141).
 //!
-//! Pin CRUD, bind / rebind / adopt, launch / attach commands
-//! per ADR 0057. This is the largest single-command tree in
-//! the CLI; the extraction folds every pin-only helper into
-//! this module alongside the args + impls.
+//! A pin is a named slot in `$XDG_DATA_HOME/conspectus/pins.toml` that
+//! points at a mux, session, worktree, repo, or PR and can carry
+//! overrides. Pinning writes only that file (plus a history record when
+//! the entity has none yet); bringing a gone entity back is
+//! `conspectus rebuild`.
 
-use std::collections::BTreeSet;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
 use anyhow::{Result, anyhow, bail};
-use clap::{Args, Subcommand, ValueEnum};
+use clap::{Args, Subcommand};
 
 use crate::config::ConfigLoader;
-use crate::declared::{DeclaredEndpoint, DeclaredLink, DeclaredLinkState, upsert_declared_link};
-use crate::discovery::harness::launch_argv_for;
-use crate::discovery::tmux::{MuxBackend, TmuxKillOutcome, TmuxPaneStatus, dead_pane_output};
-use crate::discovery::worktree::{
-    SystemGitWorktree, WorktreeBackend, WorktreeCreateRequest, WorktreeMutationOutcome,
-    WorktreeRecord, resolve_mutation_backend, worktrunk_available,
-};
-use crate::model::{GraphSnapshot, NodeId, PinBinding, Provenance, RelationKind};
-use crate::pins::{
-    PinEntry, PinLaunch, PinMux, PinStoreKind, PinStoreSelection, TMUX_MUX_BACKEND,
-    load_pin_entry_by_id, remove_pin_entry, select_store_for_pin, upsert_pin_entry, user_pin_store,
-};
+use crate::discovery::{DiscoveryContext, LocalDiscoveryConfig};
+use crate::history::HistoryWriter;
+use crate::legacy_bindings::PinBindingsCache;
+use crate::legacy_registry::PinStoreRegistry;
+use crate::model::{GraphNode, GraphSnapshot, NodeId, PinId, PinKind, PinNode, SlotFields};
+use crate::pin_ops;
+use crate::pin_slots::{Placement, SlotStore};
 
-use super::declared::resolve_write_store;
-use super::{
-    DeclaredStoreFlag, WriteStoreFlag, discover_for_store_selection_with, effective_scan_roots,
-    provenance_label, store_label,
-};
-use crate::rebuild::launch::{
-    RESUME_WATCH, Spawned, attach_and_report, format_argv_for_send_keys, format_attach_command,
-    report_send_keys, resume_fallback_note, spawn_watched,
-};
+use super::{discover_for_store_selection_with, effective_scan_roots};
 
-// =====================================================================
-// Pin command tree (ADR 0057).
-// =====================================================================
+/// Discovery for the pin commands: no forge calls, which pinning,
+/// listing, and migrating never need (ADR 0135).
+pub(super) fn pin_discovery_config() -> LocalDiscoveryConfig {
+    LocalDiscoveryConfig::from_env().without_forge()
+}
 
 #[derive(Debug, Args)]
 pub struct PinArgs {
@@ -48,212 +37,428 @@ pub struct PinArgs {
 impl PinArgs {
     pub(super) fn run(self) -> Result<()> {
         match self.command {
-            PinCommand::Create(args) => args.run(),
+            PinCommand::Add(args) => args.run(),
+            PinCommand::Edit(args) => args.run(),
+            PinCommand::Rename(args) => args.run(),
+            PinCommand::Retarget(args) => args.run(),
+            PinCommand::Refresh(args) => args.run(),
+            PinCommand::Move(args) => args.run(),
+            PinCommand::Rm(args) => args.run(),
             PinCommand::List(args) => args.run(),
             PinCommand::Show(args) => args.run(),
-            PinCommand::Rename(args) => args.run(),
-            PinCommand::Rm(args) => args.run(),
-            PinCommand::Launch(args) => args.run(PinLaunchIntent::Launch),
-            PinCommand::Attach(args) => args.run(PinLaunchIntent::Attach),
-            PinCommand::Bind(args) => args.run(),
-            PinCommand::Rebind(args) => args.run(),
-            PinCommand::Adopt(args) => args.run(),
+            PinCommand::Migrate(args) => args.run(),
+            PinCommand::Create(args) => args.run("create"),
+            PinCommand::Launch(args) => args.run("launch"),
+            PinCommand::Attach(args) => args.run("attach"),
+            PinCommand::Bind(args) => args.run("bind"),
+            PinCommand::Rebind(args) => args.run("rebind"),
+            PinCommand::Adopt(args) => args.run("adopt"),
         }
     }
 }
 
 #[derive(Debug, Subcommand)]
 enum PinCommand {
-    /// Declare a session pin.
-    Create(Box<PinCreateArgs>),
-    /// List session pins from the discovered config stores.
-    List(PinListArgs),
-    /// Show a single pin by id, including resolver binding state.
-    Show(PinShowArgs),
-    /// Rename a pin's `id` or `display_name`.
+    /// Pin a mux, session, worktree, repo, or PR as a named slot.
+    Add(PinAddArgs),
+    /// Set or clear a slot's overrides.
+    Edit(PinEditArgs),
+    /// Rename a slot.
     Rename(PinRenameArgs),
-    /// Remove a pin by id.
+    /// Point a slot at another entity of the same kind.
+    Retarget(PinRetargetArgs),
+    /// Copy a slot's current recipe into its snapshot.
+    Refresh(PinRefreshArgs),
+    /// Reorder a slot in the Pinned view.
+    Move(PinMoveArgs),
+    /// Remove a slot. The entity and its history are left alone.
     Rm(PinRmArgs),
-    /// Launch a pin's session (creating the tmux session if needed)
-    /// and attach the terminal.
-    Launch(PinLaunchArgs),
-    /// Attach to a pin's already-bound session, or fall through to
-    /// launch when no live session exists yet.
-    Attach(PinLaunchArgs),
-    /// Resolve `PinAmbiguous` by binding the pin to a specific
-    /// agent-session id. Writes a `LocalDeclared linked_to_mux`
-    /// link the resolver treats as authoritative.
-    Bind(PinBindArgs),
-    /// Update the pin's `mux.name` (and optionally
-    /// `mux.socket_name`) after an external tmux rename. Pure TOML
-    /// mutation — does not touch tmux.
-    Rebind(PinRebindArgs),
-    /// Convert an existing live tmux session into a pin without
-    /// creating a new mux. Harness and cwd are inferred from the
-    /// running session unless overridden.
-    Adopt(PinAdoptArgs),
+    /// List the slots.
+    List(PinListArgs),
+    /// Show one slot: target, status, and where each field comes from.
+    Show(PinShowArgs),
+    /// Convert legacy `[[pins.entries]]` into slots.
+    Migrate(PinMigrateArgs),
+
+    /// Retired: use `pin add`.
+    #[command(hide = true)]
+    Create(Retired),
+    /// Retired: use `conspectus rebuild <slot>`.
+    #[command(hide = true)]
+    Launch(Retired),
+    /// Retired: use `conspectus rebuild <slot>`.
+    #[command(hide = true)]
+    Attach(Retired),
+    /// Retired: slots bind by incarnation; use `pin retarget`.
+    #[command(hide = true)]
+    Bind(Retired),
+    /// Retired: renames follow automatically; use `pin retarget`.
+    #[command(hide = true)]
+    Rebind(Retired),
+    /// Retired: use `pin add <mux>`.
+    #[command(hide = true)]
+    Adopt(Retired),
 }
 
-/// Filter the binding states `pin list` includes (ADR 0057).
-#[derive(Copy, Clone, Debug, Eq, PartialEq, ValueEnum)]
-enum PinStateFilter {
-    All,
-    Bound,
-    Unbound,
-    Stale,
+/// A verb from the old pin model. It still parses, so the operator
+/// gets the replacement instead of a usage error.
+#[derive(Debug, Args)]
+struct Retired {
+    #[arg(trailing_var_arg = true, allow_hyphen_values = true, hide = true)]
+    _rest: Vec<String>,
+}
+
+impl Retired {
+    fn run(self, verb: &str) -> Result<()> {
+        let instead = match verb {
+            "create" => "`conspectus pin add <mux|node id|h_…>`",
+            "launch" => "`conspectus rebuild <slot>` (or `conspectus mux launch`)",
+            "attach" => "`conspectus rebuild <slot>`",
+            "bind" => "`conspectus pin retarget <slot> <session or history id>`",
+            "rebind" => "nothing: a slot follows its mux through renames; or `pin retarget`",
+            _ => "`conspectus pin add <mux>`",
+        };
+        bail!(
+            "`conspectus pin {verb}` was retired with the slot model (ADR 0141); use {instead}. \
+             Convert existing pins with `conspectus pin migrate`."
+        )
+    }
+}
+
+fn slot_store() -> Result<SlotStore> {
+    SlotStore::from_env()
+        .ok_or_else(|| anyhow!("no data home: set $XDG_DATA_HOME or $HOME to store pin slots"))
+}
+
+pub(super) fn discover(scan_roots: &[PathBuf]) -> Result<GraphSnapshot> {
+    let discovered = discover_for_store_selection_with(scan_roots, pin_discovery_config())?;
+    Ok(crate::resolve::resolve_snapshot(discovered))
+}
+
+fn history_writer() -> Option<HistoryWriter> {
+    let config = crate::config::load_from_cwd().config;
+    HistoryWriter::from_env(config.history)
+}
+
+fn parse_assignments(
+    kind: PinKind,
+    assignments: &[String],
+) -> Result<Vec<(String, crate::model::FieldValue)>> {
+    assignments
+        .iter()
+        .map(|assignment| pin_ops::parse_override(kind, assignment).map_err(|e| anyhow!("{e}")))
+        .collect()
+}
+
+fn pinned_node<'a>(snapshot: &'a GraphSnapshot, id: &str) -> Result<&'a PinNode> {
+    snapshot
+        .nodes
+        .iter()
+        .find_map(|node| match node {
+            GraphNode::Pin(pin) if pin.id.id == id => Some(pin),
+            _ => None,
+        })
+        .ok_or_else(|| anyhow!("no pin slot named `{id}`"))
+}
+
+/// Refuse to write a slot that only exists as an unconverted legacy
+/// entry.
+fn refuse_legacy(snapshot: &GraphSnapshot, id: &str) -> Result<()> {
+    if pinned_node(snapshot, id)?.legacy {
+        bail!(
+            "`{id}` is a legacy pin that hasn't been converted yet; run `conspectus pin migrate` first"
+        );
+    }
+    Ok(())
 }
 
 #[derive(Debug, Args)]
-struct PinCreateArgs {
-    /// Stable pin id (unique within the chosen store).
-    id: String,
-    /// Harness key (`claude-code`, `codex`, `opencode`, `aider`, `pi`).
-    #[arg(long)]
-    harness: String,
-    /// Absolute path the pin anchors on (also passed as `tmux -c` at
-    /// launch). Required to exist on disk at write time.
-    #[arg(long, value_name = "PATH")]
-    cwd: PathBuf,
-    /// Operator-chosen display name. Defaults to `<id>`.
-    #[arg(long)]
-    display: Option<String>,
-    /// Mux session name. Defaults to the chosen `--display` (and
-    /// therefore to `<id>` when neither is set).
-    #[arg(long = "mux-name", value_name = "NAME")]
-    mux_name: Option<String>,
-    /// Optional tmux socket name (the equivalent of `tmux -L
-    /// <name>`). Absent ⇒ default socket.
-    #[arg(long = "mux-socket", value_name = "NAME")]
-    mux_socket: Option<String>,
-    /// Override the per-harness default `launch.argv`. Repeatable —
-    /// each value is one argv token.
-    #[arg(long = "launch-arg", value_name = "ARG")]
-    launch_argv: Vec<String>,
-    /// Free-form explanatory text written under the pin's `reason`
-    /// field.
-    #[arg(long)]
-    reason: Option<String>,
-    /// Make the pin worktree-backed: `cwd` is the repo
-    /// anchor and this branch's worktree is created (if absent) and
-    /// entered at launch.
-    #[arg(long, value_name = "BRANCH")]
-    worktree: Option<String>,
-    /// Override automatic nearest-store selection.
-    #[arg(long, value_enum)]
-    store: Option<WriteStoreFlag>,
+struct PinAddArgs {
+    /// What to pin: a node id, a history id (`h_…`), or a mux name.
+    #[arg(value_name = "TARGET", required_unless_present = "planned")]
+    target: Option<String>,
+    /// Slot name. Defaults to the entity's name.
+    #[arg(long, value_name = "NAME")]
+    name: Option<String>,
+    /// Create a slot with no target, built by its first rebuild. Needs
+    /// `--kind`.
+    #[arg(long, requires = "kind", conflicts_with = "target")]
+    planned: bool,
+    /// Kind of a planned slot: mux, session, worktree, repo, or pr.
+    #[arg(long, value_name = "KIND")]
+    kind: Option<String>,
+    /// Override a recipe field: `field=value`. Repeatable.
+    #[arg(long = "set", value_name = "FIELD=VALUE")]
+    set: Vec<String>,
+    /// Discovery scan root. Defaults to the working directory.
+    #[arg(long = "scan-root", value_name = "PATH")]
+    scan_roots: Vec<PathBuf>,
 }
 
-impl PinCreateArgs {
+impl PinAddArgs {
     fn run(self) -> Result<()> {
-        let display = self.display.clone().unwrap_or_else(|| self.id.clone());
-        let mux_name = self.mux_name.clone().unwrap_or_else(|| display.clone());
-
-        let entry = PinEntry {
-            id: self.id.clone(),
-            display_name: display,
-            harness: self.harness,
-            cwd: self.cwd.display().to_string(),
-            mux: PinMux {
-                backend: TMUX_MUX_BACKEND.to_string(),
-                name: mux_name,
-                socket_name: self.mux_socket,
-            },
-            launch: if self.launch_argv.is_empty() {
-                None
-            } else {
-                Some(PinLaunch {
-                    argv: self.launch_argv,
-                })
-            },
-            worktree: self
-                .worktree
-                .map(|branch| crate::pins::PinWorktree { branch }),
-            reason: self.reason,
-        };
-
-        let selection = resolve_pin_write_store(self.store.map(Into::into), &self.cwd)?;
-
-        let outcome = upsert_pin_entry(&selection.path, entry.clone())
-            .map_err(|err| anyhow!(err.to_string()))?;
-        // Record the project store so a pin created in a repo outside
-        // the scan root stays visible on later discovery cycles.
-        // Best-effort: a failed cache write must not
-        // fail the pin create. `record` no-ops for the user-scope store.
-        let _ = crate::pin_store_registry::PinStoreRegistry::from_env().record(&selection.path);
-        let verb = if outcome.changed {
-            if outcome.entry_count == 1 {
-                "wrote"
-            } else {
-                "updated"
+        let store = slot_store()?;
+        if self.planned {
+            let name = self
+                .name
+                .as_deref()
+                .ok_or_else(|| anyhow!("a planned slot needs `--name`"))?;
+            let kind = self.kind.as_deref().unwrap_or_default();
+            let kind = PinKind::parse(kind).ok_or_else(|| {
+                anyhow!("unknown kind `{kind}` (mux, session, worktree, repo, pr)")
+            })?;
+            let mut overrides = SlotFields::new();
+            for (field, value) in parse_assignments(kind, &self.set)? {
+                overrides.insert(field, value);
             }
-        } else {
-            "unchanged"
-        };
+            pin_ops::pin_planned(&store, name, kind, overrides).map_err(|e| anyhow!("{e}"))?;
+            println!("pinned planned {} slot `{name}`", kind.as_str());
+            return Ok(());
+        }
+
+        let target = self.target.as_deref().unwrap_or_default();
+        let snapshot = discover(&self.scan_roots)?;
+        let what = pin_ops::find_pinnable(&snapshot, target).map_err(|e| anyhow!("{e}"))?;
+        let history = history_writer();
+        let slot = pin_ops::pin(
+            &snapshot,
+            &store,
+            history.as_ref(),
+            &what,
+            self.name.as_deref(),
+        )
+        .map_err(|e| anyhow!("{e}"))?;
+        if !self.set.is_empty() {
+            let set = parse_assignments(slot.kind, &self.set)?;
+            pin_ops::edit(&store, &slot.id, &set, &[]).map_err(|e| anyhow!("{e}"))?;
+        }
         println!(
-            "{verb} pin `{}` in {} ({})",
-            entry.id,
-            selection.path.display(),
-            pin_store_label(selection.kind)
+            "pinned {} `{}` as `{}`",
+            slot.kind.as_str(),
+            target,
+            slot.id
         );
         Ok(())
     }
 }
 
 #[derive(Debug, Args)]
+struct PinEditArgs {
+    /// Slot name.
+    name: String,
+    /// Override a recipe field: `field=value`. Repeatable.
+    #[arg(long = "set", value_name = "FIELD=VALUE")]
+    set: Vec<String>,
+    /// Clear an override. Repeatable.
+    #[arg(long = "unset", value_name = "FIELD")]
+    unset: Vec<String>,
+    /// Discovery scan root. Defaults to the working directory.
+    #[arg(long = "scan-root", value_name = "PATH")]
+    scan_roots: Vec<PathBuf>,
+}
+
+impl PinEditArgs {
+    fn run(self) -> Result<()> {
+        if self.set.is_empty() && self.unset.is_empty() {
+            bail!("`pin edit` needs `--set FIELD=VALUE` or `--unset FIELD`");
+        }
+        let store = slot_store()?;
+        let snapshot = discover(&self.scan_roots)?;
+        refuse_legacy(&snapshot, &self.name)?;
+        let kind = pinned_node(&snapshot, &self.name)?.kind;
+        let set = parse_assignments(kind, &self.set)?;
+        let changed =
+            pin_ops::edit(&store, &self.name, &set, &self.unset).map_err(|e| anyhow!("{e}"))?;
+        println!(
+            "{} `{}`",
+            if changed { "edited" } else { "unchanged" },
+            self.name
+        );
+        Ok(())
+    }
+}
+
+#[derive(Debug, Args)]
+struct PinRenameArgs {
+    /// Current slot name.
+    name: String,
+    /// New slot name.
+    new_name: String,
+}
+
+impl PinRenameArgs {
+    fn run(self) -> Result<()> {
+        let changed = pin_ops::rename(&slot_store()?, &self.name, &self.new_name)
+            .map_err(|e| anyhow!("{e}"))?;
+        println!(
+            "{} `{}` → `{}`",
+            if changed { "renamed" } else { "unchanged" },
+            self.name,
+            self.new_name
+        );
+        Ok(())
+    }
+}
+
+#[derive(Debug, Args)]
+struct PinRetargetArgs {
+    /// Slot name.
+    name: String,
+    /// The new target: a node id, a history id (`h_…`), or a mux name.
+    target: String,
+    /// Discovery scan root. Defaults to the working directory.
+    #[arg(long = "scan-root", value_name = "PATH")]
+    scan_roots: Vec<PathBuf>,
+}
+
+impl PinRetargetArgs {
+    fn run(self) -> Result<()> {
+        let store = slot_store()?;
+        let snapshot = discover(&self.scan_roots)?;
+        refuse_legacy(&snapshot, &self.name)?;
+        let what = pin_ops::find_pinnable(&snapshot, &self.target).map_err(|e| anyhow!("{e}"))?;
+        let history = history_writer();
+        pin_ops::retarget(&snapshot, &store, history.as_ref(), &self.name, &what)
+            .map_err(|e| anyhow!("{e}"))?;
+        println!("`{}` now points at `{}`", self.name, self.target);
+        Ok(())
+    }
+}
+
+#[derive(Debug, Args)]
+struct PinRefreshArgs {
+    /// Slot name.
+    name: String,
+    /// Discovery scan root. Defaults to the working directory.
+    #[arg(long = "scan-root", value_name = "PATH")]
+    scan_roots: Vec<PathBuf>,
+}
+
+impl PinRefreshArgs {
+    fn run(self) -> Result<()> {
+        let store = slot_store()?;
+        let snapshot = discover(&self.scan_roots)?;
+        refuse_legacy(&snapshot, &self.name)?;
+        let changed =
+            pin_ops::refresh_snapshot(&snapshot, &store, &self.name).map_err(|e| anyhow!("{e}"))?;
+        println!(
+            "{} the snapshot of `{}`",
+            if changed { "refreshed" } else { "no change to" },
+            self.name
+        );
+        Ok(())
+    }
+}
+
+#[derive(Debug, Args)]
+struct PinMoveArgs {
+    /// Slot name.
+    name: String,
+    /// Move to the top.
+    #[arg(long, conflicts_with_all = ["bottom", "before", "after", "up", "down"])]
+    top: bool,
+    /// Move to the bottom.
+    #[arg(long, conflicts_with_all = ["before", "after", "up", "down"])]
+    bottom: bool,
+    /// Move just before this slot.
+    #[arg(long, value_name = "NAME", conflicts_with_all = ["after", "up", "down"])]
+    before: Option<String>,
+    /// Move just after this slot.
+    #[arg(long, value_name = "NAME", conflicts_with_all = ["up", "down"])]
+    after: Option<String>,
+    /// Move one place up.
+    #[arg(long, conflicts_with = "down")]
+    up: bool,
+    /// Move one place down.
+    #[arg(long)]
+    down: bool,
+}
+
+impl PinMoveArgs {
+    fn run(self) -> Result<()> {
+        let placement = if self.top {
+            Placement::Top
+        } else if self.bottom {
+            Placement::Bottom
+        } else if let Some(other) = self.before {
+            Placement::Before(other)
+        } else if let Some(other) = self.after {
+            Placement::After(other)
+        } else if self.up {
+            Placement::Step(-1)
+        } else if self.down {
+            Placement::Step(1)
+        } else {
+            bail!("`pin move` needs one of --top, --bottom, --before, --after, --up, --down");
+        };
+        let write = slot_store()?
+            .move_slot(&self.name, &placement)
+            .map_err(|e| anyhow!("{e}"))?;
+        println!(
+            "{} `{}`",
+            if write.changed { "moved" } else { "unchanged" },
+            self.name
+        );
+        Ok(())
+    }
+}
+
+#[derive(Debug, Args)]
+struct PinRmArgs {
+    /// Slot name.
+    name: String,
+}
+
+impl PinRmArgs {
+    fn run(self) -> Result<()> {
+        let write = slot_store()?
+            .remove(&self.name)
+            .map_err(|e| anyhow!("{e}"))?;
+        if !write.changed {
+            bail!("no pin slot named `{}`", self.name);
+        }
+        println!("removed slot `{}`", self.name);
+        Ok(())
+    }
+}
+
+#[derive(Debug, Args)]
 struct PinListArgs {
-    /// Limit the list to a store.
-    #[arg(long, value_enum, default_value_t = DeclaredStoreFlag::All)]
-    store: DeclaredStoreFlag,
-    /// Filter by binding state.
-    #[arg(long, value_enum, default_value_t = PinStateFilter::All)]
-    state: PinStateFilter,
-    /// Root used to discover project-local pin stores.
+    /// Discovery scan root. Defaults to the working directory.
     #[arg(long = "scan-root", value_name = "PATH")]
     scan_roots: Vec<PathBuf>,
 }
 
 impl PinListArgs {
     fn run(self) -> Result<()> {
-        let snapshot = discover_and_resolve(&self.scan_roots)?;
-        let include_project = matches!(
-            self.store,
-            DeclaredStoreFlag::All | DeclaredStoreFlag::Project
-        );
-        let include_user = matches!(self.store, DeclaredStoreFlag::All | DeclaredStoreFlag::User);
-
-        let mut rows: Vec<String> = Vec::new();
-        for pin in &snapshot.pins {
-            let store_flag = match pin.provenance {
-                Provenance::LocalPin => DeclaredStoreFlag::Project,
-                Provenance::GlobalPin => DeclaredStoreFlag::User,
-                _ => continue,
-            };
-            if matches!(store_flag, DeclaredStoreFlag::Project) && !include_project {
-                continue;
-            }
-            if matches!(store_flag, DeclaredStoreFlag::User) && !include_user {
-                continue;
-            }
-            if !pin_matches_filter(pin.binding.as_ref(), self.state) {
-                continue;
-            }
-            rows.push(render_pin_row(
-                store_flag,
-                pin.provenance,
-                &pin.id,
-                &pin.display_name,
-                &pin.harness,
-                &pin.cwd,
-                pin.mux.native_id(),
-                bound_session_label(pin.binding.as_ref()).unwrap_or_default(),
-                pin_state_label(pin.binding.as_ref()),
-                &pin.store_path,
-            ));
+        let snapshot = discover(&self.scan_roots)?;
+        let mut pins: Vec<&PinNode> = snapshot
+            .nodes
+            .iter()
+            .filter_map(|node| match node {
+                GraphNode::Pin(pin) => Some(pin),
+                _ => None,
+            })
+            .collect();
+        pins.sort_by_key(|pin| pin.order);
+        if pins.is_empty() {
+            println!("no pin slots; `conspectus pin add <target>` makes one");
+            return Ok(());
         }
-
-        rows.sort();
-        for row in rows {
-            println!("{row}");
+        let width = pins.iter().map(|pin| pin.id.id.len()).max().unwrap_or(0);
+        for pin in pins {
+            println!(
+                "{:<width$}  {:<8}  {:<8}  {}{}",
+                pin.id.id,
+                pin.kind.as_str(),
+                pin.status.as_str(),
+                pin.label,
+                if pin.legacy {
+                    "  (legacy: run `pin migrate`)"
+                } else {
+                    ""
+                },
+            );
         }
         Ok(())
     }
@@ -261,1127 +466,99 @@ impl PinListArgs {
 
 #[derive(Debug, Args)]
 struct PinShowArgs {
-    /// Pin id.
-    id: String,
-    /// Root used to discover project-local pin stores.
+    /// Slot name.
+    name: String,
+    /// Discovery scan root. Defaults to the working directory.
     #[arg(long = "scan-root", value_name = "PATH")]
     scan_roots: Vec<PathBuf>,
 }
 
 impl PinShowArgs {
     fn run(self) -> Result<()> {
-        let snapshot = discover_and_resolve(&self.scan_roots)?;
-        let Some(pin) = snapshot.pins.iter().find(|pin| pin.id == self.id) else {
-            bail!("no pin `{}` in any discovered store", self.id);
-        };
-        println!("id           {}", pin.id);
-        println!("display_name {}", pin.display_name);
-        println!("harness      {}", pin.harness);
-        println!("cwd          {}", pin.cwd);
-        println!("mux          {}", pin.mux.native_id());
-        if let Some(socket) = pin.mux.socket_name.as_deref() {
-            println!("socket_name  {socket}");
-        }
-        if let Some(argv) = pin.launch_argv.as_ref() {
-            println!("launch_argv  {}", argv.join(" "));
-        }
-        if let Some(reason) = pin.reason.as_deref() {
-            println!("reason       {reason}");
-        }
-        println!("provenance   {}", provenance_label(pin.provenance));
-        println!("store        {}", pin.store_path);
-        println!("state        {}", pin_state_label(pin.binding.as_ref()));
-        match pin.binding.as_ref() {
-            Some(PinBinding::Bound { session, mux }) => {
-                println!("bound_mux    {}", mux.native_id);
-                println!("bound_session {}", session.session_key);
-            }
-            Some(PinBinding::StaleMux { mux }) => {
-                println!("bound_mux    {} (no live harness session)", mux.native_id);
-            }
-            _ => {}
-        }
-        // ADR 0058: when the pin is unbound and the
-        // sidecar has a recorded last-bound session, surface it so
-        // the operator can see what `pin launch` would resume into.
-        if let Some(last) = pin_last_session_for(&snapshot, &self.id) {
-            println!(
-                "last_session {} (observed {})",
-                last.session_id,
-                format_epoch_iso8601(last.observed_epoch),
-            );
-        }
-        // Surface pin-specific diagnostics for this pin (PinAmbiguous,
-        // PinDrift, etc.). Each is rendered on its own line so the
-        // operator can pipe / grep the output.
-        for diagnostic in snapshot
-            .diagnostics
-            .iter()
-            .filter(|d| pin_diagnostic_matches(d, &self.id))
-        {
-            println!("diagnostic   {}", format_pin_diagnostic(diagnostic));
-        }
-        Ok(())
-    }
-}
-
-fn pin_last_session_for<'a>(
-    snapshot: &'a GraphSnapshot,
-    pin_id: &str,
-) -> Option<&'a crate::model::PinLastSession> {
-    use crate::model::Diagnostic;
-    snapshot.diagnostics.iter().find_map(|d| match d {
-        Diagnostic::PinUnbound {
-            pin_id: id,
-            last_session: Some(last),
-            ..
-        } if id == pin_id => Some(last),
-        _ => None,
-    })
-}
-
-pub(super) fn format_epoch_iso8601(epoch: i64) -> String {
-    // Minimal UTC ISO 8601 formatter using the standard library's
-    // civil-time algorithm. Mirrors RFC 3339 (`YYYY-MM-DDTHH:MM:SSZ`)
-    // without pulling in chrono/humantime for a single output line.
-    let secs = epoch.max(0) as u64;
-    let (year, month, day, hour, minute, second) = civil_from_unix_seconds(secs);
-    format!("{year:04}-{month:02}-{day:02}T{hour:02}:{minute:02}:{second:02}Z")
-}
-
-/// Convert a Unix epoch (seconds, UTC) into a civil
-/// `(year, month, day, hour, minute, second)` tuple. Uses the
-/// Hinnant algorithm (Howard Hinnant's `days_from_civil` inverse)
-/// so we don't need a date library for one CLI line.
-fn civil_from_unix_seconds(secs: u64) -> (i32, u32, u32, u32, u32, u32) {
-    let days = (secs / 86_400) as i64;
-    let time_of_day = secs % 86_400;
-    let hour = (time_of_day / 3_600) as u32;
-    let minute = ((time_of_day % 3_600) / 60) as u32;
-    let second = (time_of_day % 60) as u32;
-
-    // Hinnant: days since 1970-01-01 → civil date.
-    let z = days + 719_468;
-    let era = z.div_euclid(146_097);
-    let doe = z.rem_euclid(146_097) as u64;
-    let yoe = (doe - doe / 1_460 + doe / 36_524 - doe / 146_096) / 365;
-    let y = yoe as i64 + era * 400;
-    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
-    let mp = (5 * doy + 2) / 153;
-    let day = (doy - (153 * mp + 2) / 5 + 1) as u32;
-    let month = if mp < 10 { mp + 3 } else { mp - 9 } as u32;
-    let year = (y + i64::from(month <= 2)) as i32;
-
-    (year, month, day, hour, minute, second)
-}
-
-#[derive(Debug, Args)]
-struct PinRenameArgs {
-    /// Existing pin id.
-    id: String,
-    /// New pin id. Omit to keep the current id and only change
-    /// `--display`.
-    new_id: Option<String>,
-    /// New display name.
-    #[arg(long)]
-    display: Option<String>,
-    /// Root used to discover project-local pin stores.
-    #[arg(long = "scan-root", value_name = "PATH")]
-    scan_roots: Vec<PathBuf>,
-}
-
-impl PinRenameArgs {
-    fn run(self) -> Result<()> {
-        if self.new_id.is_none() && self.display.is_none() {
-            bail!("`pin rename` requires either a new id, `--display <name>`, or both");
-        }
-        let paths = candidate_pin_store_paths(&self.scan_roots);
-        let Some((path, mut entry)) =
-            load_pin_entry_by_id(&paths, &self.id).map_err(|err| anyhow!(err.to_string()))?
-        else {
-            bail!("no pin `{}` in any discovered store", self.id);
-        };
-
-        let original_id = entry.id.clone();
-        if let Some(new_display) = self.display {
-            entry.display_name = new_display;
-        }
-        let new_id_value = self.new_id.clone().unwrap_or_else(|| entry.id.clone());
-
-        if new_id_value != original_id {
-            // Storage rename: remove the old entry, then upsert the
-            // entry under the new id. Both writes target the same
-            // store so the operation is a single
-            // remove-then-upsert flow.
-            entry.id = new_id_value.clone();
-            remove_pin_entry(&path, &original_id).map_err(|err| anyhow!(err.to_string()))?;
-        }
-        let outcome = upsert_pin_entry(&path, entry).map_err(|err| anyhow!(err.to_string()))?;
-        let verb = if outcome.changed {
-            "renamed"
-        } else {
-            "unchanged"
-        };
-        if new_id_value == original_id {
-            println!("{verb} pin `{}` in {}", original_id, path.display());
-        } else {
-            println!(
-                "{verb} pin `{}` → `{}` in {}",
-                original_id,
-                new_id_value,
-                path.display()
-            );
-        }
-        Ok(())
-    }
-}
-
-#[derive(Debug, Args)]
-struct PinRmArgs {
-    /// Pin id to remove.
-    id: String,
-    /// Root used to discover project-local pin stores.
-    #[arg(long = "scan-root", value_name = "PATH")]
-    scan_roots: Vec<PathBuf>,
-}
-
-impl PinRmArgs {
-    fn run(self) -> Result<()> {
-        let paths = candidate_pin_store_paths(&self.scan_roots);
-        for path in &paths {
-            let outcome =
-                remove_pin_entry(path, &self.id).map_err(|err| anyhow!(err.to_string()))?;
-            if outcome.changed {
-                println!("removed pin `{}` from {}", self.id, path.display());
-                return Ok(());
-            }
-        }
-        bail!("no pin `{}` in any discovered store", self.id);
-    }
-}
-
-#[derive(Debug, Args)]
-pub struct PinBindArgs {
-    /// Pin id to bind.
-    id: String,
-    /// Harness-native session key of the agent session the pin
-    /// should bind to. Must already be visible in discovery.
-    #[arg(long = "to", value_name = "SESSION_KEY")]
-    to: String,
-    /// Optional reason recorded on the declared link.
-    #[arg(long)]
-    reason: Option<String>,
-    /// Override automatic nearest-store selection for the declared
-    /// link write.
-    #[arg(long, value_enum)]
-    store: Option<WriteStoreFlag>,
-    /// Root used to discover project-local stores.
-    #[arg(long = "scan-root", value_name = "PATH")]
-    scan_roots: Vec<PathBuf>,
-}
-
-impl PinBindArgs {
-    fn run(self) -> Result<()> {
-        let snapshot = discover_and_resolve(&self.scan_roots)?;
-        let Some(pin) = snapshot.pins.iter().find(|pin| pin.id == self.id) else {
-            bail!("no pin `{}` in any discovered store", self.id);
-        };
-
-        // Pin and target must share a harness so the resolver's
-        // post-bind attribution sees the LocalDeclared link as the
-        // authoritative `LinkedToMux` for the pin's harness.
-        let target = snapshot
-            .nodes
-            .iter()
-            .find_map(|node| match node {
-                crate::model::GraphNode::AgentSession(session)
-                    if session.id.harness_key == pin.harness
-                        && session.id.session_key == self.to =>
-                {
-                    Some(session.id.clone())
-                }
-                _ => None,
-            })
-            .ok_or_else(|| {
-                anyhow!(
-                    "no `{}` agent session with session_key `{}` in discovery",
-                    pin.harness,
-                    self.to
-                )
-            })?;
-
-        let source_endpoint = DeclaredEndpoint::AgentSession {
-            harness_key: target.harness_key.clone(),
-            state_scope: target.state_scope.clone(),
-            session_key: target.session_key,
-        };
-        let target_endpoint = DeclaredEndpoint::MuxSession {
-            native_id: pin.mux.native_id(),
-        };
-        let link = DeclaredLink {
-            id: format!("pin:{}:bound", pin.id),
-            relation: RelationKind::LinkedToMux,
-            state: DeclaredLinkState::Active,
-            source: source_endpoint,
-            target: target_endpoint,
-            reason: self.reason,
-            overridden_by: None,
-            // Operator-facing breadcrumb tying the declared link to
-            // its originating pin. Read by `declared list` so
-            // operators see WHY this override exists.
-            label: Some(format!("pin:{}", pin.id)),
-        };
-
-        let path = resolve_write_store(
-            self.store.map(Into::into),
-            Some(&link.source),
-            Some(&link.target),
-            &self.scan_roots,
-        )?;
-        let outcome = upsert_declared_link(&path, link).map_err(|err| anyhow!(err.to_string()))?;
-        let verb = if outcome.changed {
-            "wrote"
-        } else {
-            "unchanged"
-        };
-        println!(
-            "{verb} declared override for pin `{}` → session `{}` in {}",
-            pin.id,
-            self.to,
-            path.display()
+        let snapshot = discover(&self.scan_roots)?;
+        pinned_node(&snapshot, &self.name)?;
+        let id = NodeId::Pin(PinId::new(&self.name));
+        print!(
+            "{}",
+            crate::output::node_show::render_node_show(&snapshot, &id, false)
         );
         Ok(())
     }
 }
 
 #[derive(Debug, Args)]
-pub struct PinRebindArgs {
-    /// Pin id to rebind.
-    id: String,
-    /// New tmux session name to bind the pin to.
-    #[arg(long = "mux", value_name = "NAME")]
-    mux: String,
-    /// Optional non-default tmux socket. Absent ⇒ default socket.
-    #[arg(long = "mux-socket", value_name = "NAME")]
-    mux_socket: Option<String>,
-    /// Root used to discover project-local pin stores.
+struct PinMigrateArgs {
+    /// Print what would change and stop.
+    #[arg(long = "dry-run")]
+    dry_run: bool,
+    /// Discovery scan root. Defaults to the working directory.
     #[arg(long = "scan-root", value_name = "PATH")]
     scan_roots: Vec<PathBuf>,
 }
 
-impl PinRebindArgs {
+impl PinMigrateArgs {
     fn run(self) -> Result<()> {
-        let paths = candidate_pin_store_paths(&self.scan_roots);
-        let Some((path, mut entry)) =
-            load_pin_entry_by_id(&paths, &self.id).map_err(|err| anyhow!(err.to_string()))?
-        else {
-            bail!("no pin `{}` in any discovered store", self.id);
-        };
-        let previous = entry.mux.clone();
-        entry.mux = PinMux {
-            backend: previous.backend,
-            name: self.mux,
-            socket_name: self.mux_socket,
-        };
-        let outcome =
-            upsert_pin_entry(&path, entry.clone()).map_err(|err| anyhow!(err.to_string()))?;
-        let verb = if outcome.changed {
-            "rebound"
-        } else {
-            "unchanged"
-        };
-        println!(
-            "{verb} pin `{}` → mux `{}` in {}",
-            entry.id,
-            entry.mux.native_id(),
-            path.display()
+        let snapshot = discover(&self.scan_roots)?;
+        let cwd = crate::cwd::current();
+        let roots = effective_scan_roots(&self.scan_roots, cwd.as_deref());
+        let context = DiscoveryContext::from_roots(roots)?;
+        let loader = ConfigLoader::from_env();
+        let registry = PinStoreRegistry::from_env().read();
+        let mut diagnostics = Vec::new();
+        let entries = crate::discovery::pins::legacy_entries(
+            &snapshot,
+            &context,
+            &loader,
+            &registry,
+            &mut diagnostics,
         );
-        Ok(())
-    }
-}
-
-#[derive(Debug, Args)]
-pub struct PinAdoptArgs {
-    /// New pin id.
-    id: String,
-    /// Existing tmux session name to adopt as this pin's bound mux.
-    mux_name: String,
-    /// Override the inferred harness when discovery can't or
-    /// shouldn't attribute one.
-    #[arg(long)]
-    harness: Option<String>,
-    /// Display name for the new pin. Defaults to `<id>`.
-    #[arg(long)]
-    display: Option<String>,
-    /// Optional non-default tmux socket. Absent ⇒ default socket.
-    #[arg(long = "mux-socket", value_name = "NAME")]
-    mux_socket: Option<String>,
-    /// Override the inferred cwd. By default, adopt uses the mux's
-    /// observed cwd; pass `--cwd` to set a different anchor.
-    #[arg(long, value_name = "PATH")]
-    cwd: Option<PathBuf>,
-    /// Override automatic nearest-store selection.
-    #[arg(long, value_enum)]
-    store: Option<WriteStoreFlag>,
-    /// Root used to discover project-local pin stores.
-    #[arg(long = "scan-root", value_name = "PATH")]
-    scan_roots: Vec<PathBuf>,
-}
-
-impl PinAdoptArgs {
-    fn run(self) -> Result<()> {
-        let snapshot = discover_and_resolve(&self.scan_roots)?;
-
-        let pin_mux = PinMux {
-            backend: TMUX_MUX_BACKEND.to_string(),
-            name: self.mux_name.clone(),
-            socket_name: self.mux_socket.clone(),
-        };
-        let native_id = pin_mux.native_id();
-
-        let mux_node = crate::resolve::pins::live_mux_for_pin_key(&snapshot.nodes, &native_id)
-            .ok_or_else(|| match pin_mux.effective_socket() {
-                Some(socket) => anyhow!(
-                    "no live mux `{native_id}` — discovery only lists the default tmux socket, so a session on socket `{socket}` cannot be adopted yet"
-                ),
-                None => anyhow!(
-                    "no live mux `{native_id}` — start the tmux session first or rebind to an existing pin"
-                ),
-            })?;
-
-        // Harness inference: walk active LinkedToMux candidates with
-        // this mux as the target; the first AgentSession source wins.
-        let inferred_harness = snapshot
-            .candidate_links
-            .iter()
-            .filter(|link| {
-                link.relation == RelationKind::LinkedToMux
-                    && matches!(link.state, crate::model::LinkState::Active)
-                    && link.target_node_id() == Some(&NodeId::MuxSession(mux_node.id.clone()))
-            })
-            .find_map(|link| match &link.source {
-                NodeId::AgentSession(session) => Some(session.harness_key.clone()),
-                _ => None,
-            });
-
-        let harness = match (self.harness, inferred_harness) {
-            (Some(explicit), _) => explicit,
-            (None, Some(inferred)) => inferred,
-            (None, None) => bail!(
-                "could not infer a harness for mux `{native_id}`; pass `--harness <key>` explicitly"
-            ),
-        };
-
-        let cwd = if let Some(explicit) = self.cwd {
-            explicit
-        } else {
-            let observed = mux_node.cwd.as_deref().ok_or_else(|| {
-                anyhow!("mux `{native_id}` has no observed cwd; pass `--cwd <PATH>` explicitly")
-            })?;
-            PathBuf::from(observed)
-        };
-
-        let display = self.display.clone().unwrap_or_else(|| self.id.clone());
-        let entry = PinEntry {
-            id: self.id.clone(),
-            display_name: display,
-            harness,
-            cwd: cwd.display().to_string(),
-            mux: pin_mux,
-            launch: None,
-            // Adopt binds to a live mux that already has a cwd; worktree
-            // realization is a launch-time concern, so it's a no-op here.
-            worktree: None,
-            reason: None,
-        };
-
-        let selection = resolve_pin_write_store(self.store.map(Into::into), &cwd)?;
-        let outcome = upsert_pin_entry(&selection.path, entry.clone())
-            .map_err(|err| anyhow!(err.to_string()))?;
-        // Record the project store so an adopted pin
-        // in a repo outside the scan root stays visible. Best-effort;
-        // no-ops for the user-scope store.
-        let _ = crate::pin_store_registry::PinStoreRegistry::from_env().record(&selection.path);
-        let verb = if outcome.changed {
-            "adopted"
-        } else {
-            "unchanged"
-        };
-        println!(
-            "{verb} pin `{}` from mux `{}` (harness: {}) in {}",
-            entry.id,
-            entry.mux.native_id(),
-            entry.harness,
-            selection.path.display()
-        );
-        Ok(())
-    }
-}
-
-#[derive(Copy, Clone, Debug, Eq, PartialEq)]
-enum PinLaunchIntent {
-    /// `pin launch` — operator wants the pin running. Spawn if
-    /// needed, then attach.
-    Launch,
-    /// `pin attach` — operator expects the pin already running but
-    /// will accept a fresh spawn if not.
-    Attach,
-}
-
-#[derive(Debug, Args)]
-pub struct PinLaunchArgs {
-    /// Pin id to launch / attach.
-    id: String,
-    /// Skip the terminal hand-off. The new session (if any) is
-    /// spawned detached and the attach command is printed for the
-    /// operator to run by hand. Useful for scripts and CI dry runs.
-    #[arg(long = "no-attach")]
-    no_attach: bool,
-    /// Root used to discover project-local pin stores.
-    #[arg(long = "scan-root", value_name = "PATH")]
-    scan_roots: Vec<PathBuf>,
-}
-
-impl PinLaunchArgs {
-    fn run(self, intent: PinLaunchIntent) -> Result<()> {
-        self.run_with_backends(intent, &crate::discovery::system_mux_backend)
-    }
-
-    /// `backend_for` maps the pin's `mux.backend` to the runner that
-    /// drives it, so a pin is only ever launched or attached through
-    /// its own backend.
-    fn run_with_backends(
-        self,
-        intent: PinLaunchIntent,
-        backend_for: &dyn Fn(&str) -> Option<Box<dyn MuxBackend>>,
-    ) -> Result<()> {
-        let snapshot = discover_and_resolve(&self.scan_roots)?;
-        let Some(pin) = snapshot.pins.iter().find(|pin| pin.id == self.id) else {
-            bail!("no pin `{}` in any discovered store", self.id);
-        };
-        let Some(runner) = backend_for(&pin.mux.backend) else {
-            bail!(
-                "pin `{}` uses mux backend `{}`, which this build cannot drive",
-                pin.id,
-                pin.mux.backend
-            );
-        };
-        let runner = runner.as_ref();
-
-        let socket = pin.mux.effective_socket();
-        let mux_name = pin.mux.name.as_str();
-        let argv: Vec<std::ffi::OsString> = pin
-            .launch_argv
-            .as_ref()
-            .map(|argv| argv.iter().map(std::ffi::OsString::from).collect())
-            .filter(|argv: &Vec<_>| !argv.is_empty())
-            .unwrap_or_else(|| launch_argv_for(&pin.harness));
-
-        if argv.is_empty() {
-            bail!(
-                "no launch argv configured for harness `{}`; set `launch.argv` on the pin",
-                pin.harness
-            );
-        }
-
-        match pin.binding.as_ref() {
-            Some(PinBinding::Bound { mux, session }) => {
-                println!(
-                    "pin `{}` already bound to session `{}` in mux `{}`",
-                    pin.id, session.session_key, mux.native_id
-                );
-                if !self.no_attach {
-                    attach_and_report(runner, socket, mux_name)?;
-                }
-                Ok(())
-            }
-            Some(PinBinding::StaleMux { mux })
-                if crate::resolve::pins::mux_hosts_harness(&snapshot, mux, &pin.harness) =>
-            {
-                // The harness is already running in the pane; typing
-                // the launch argv would land in its prompt (ADR 0028).
-                println!(
-                    "pin `{}` mux `{}` already runs `{}` (session not identified); \
-                     attaching without relaunch",
-                    pin.id, mux.native_id, pin.harness
-                );
-                if !self.no_attach {
-                    attach_and_report(runner, socket, mux_name)?;
-                }
-                Ok(())
-            }
-            Some(PinBinding::StaleMux { mux })
-                if matches!(
-                    runner.pane_status(socket, mux_name),
-                    Ok(TmuxPaneStatus::Dead { .. })
-                ) =>
-            {
-                // The harness exited non-zero and tmux kept the pane
-                // (ADR 0103). A dead pane takes no input, so replace
-                // the session instead of typing into it.
-                let output = dead_pane_output(runner, socket, mux_name);
-                eprintln!(
-                    "conspectus: pin `{}`: previous launch in `{}` had exited; replacing it",
-                    pin.id, mux.native_id
-                );
-                if !output.trim().is_empty() {
-                    eprintln!("--- previous pane output ---\n{output}");
-                }
-                match runner
-                    .kill_session(socket, mux_name)
-                    .map_err(|err| anyhow!("tmux kill-session failed: {err}"))?
-                {
-                    TmuxKillOutcome::Killed | TmuxKillOutcome::NoTarget => {}
-                    other => {
-                        bail!("could not remove the dead tmux session `{mux_name}`: {other:?}")
-                    }
-                }
-                self.launch_new(&snapshot, pin, runner, socket, &argv)
-            }
-            Some(PinBinding::StaleMux { mux }) => {
-                println!(
-                    "pin `{}` mux `{}` is live but has no `{}` session; relaunching via send-keys",
-                    pin.id, mux.native_id, pin.harness
-                );
-                let literal = format_argv_for_send_keys(&argv);
-                let outcome = runner
-                    .send_keys(socket, mux_name, &literal, true)
-                    .map_err(|err| anyhow!("{} send-keys failed: {err}", runner.backend_key()))?;
-                report_send_keys(outcome, runner.backend_key(), mux_name)?;
-                if !self.no_attach {
-                    attach_and_report(runner, socket, mux_name)?;
-                }
-                Ok(())
-            }
-            Some(PinBinding::Unbound) | None => {
-                if matches!(intent, PinLaunchIntent::Attach) {
-                    eprintln!(
-                        "conspectus: note: pin `{}` is unbound; falling through to launch",
-                        pin.id
-                    );
-                }
-                self.launch_new(&snapshot, pin, runner, socket, &argv)
-            }
-        }
-    }
-
-    /// Create the pin's tmux session and attach (or print the attach
-    /// command under `--no-attach`).
-    fn launch_new(
-        &self,
-        snapshot: &GraphSnapshot,
-        pin: &crate::model::PinCandidate,
-        runner: &dyn MuxBackend,
-        socket: Option<&str>,
-        argv: &[std::ffi::OsString],
-    ) -> Result<()> {
-        let mux_name = pin.mux.name.as_str();
-        if !runner.can_create_sessions() {
-            bail!(
-                "pin `{}`: the `{}` mux backend cannot create sessions, so conspectus cannot launch this pin; start `{mux_name}` with {} yourself and run `pin attach`",
-                pin.id,
-                runner.backend_key(),
-                runner.backend_key()
-            );
-        }
-        // ADR 0094: a worktree-backed pin realizes its worktree
-        // here — resolve or create it and launch there instead
-        // of the repo anchor.
-        let cwd = realize_worktree_cwd(pin)?;
-        // ADR 0058: consult the per-pin sidecar to splice in
-        // resume_argv when a prior session is known and still
-        // reachable. `None` on every honest failure path (no
-        // sidecar, session missing, fork, harness without resume
-        // CLI) launches fresh.
-        let resume = resolve_resume_argv(snapshot, pin, &cwd, argv);
-        // ADR 0103: a resume the harness rejects at startup dies in
-        // its pane; fall back to a fresh launch and drop the sidecar
-        // so the next launch doesn't retry it. A fresh launch isn't
-        // watched (ADR 0133).
-        let spawned = spawn_watched(
-            runner,
-            socket,
-            mux_name,
-            &cwd,
-            argv,
-            resume.as_deref(),
-            RESUME_WATCH,
-        )?;
-        if let (Spawned::FreshAfterFailedResume(dead), Some(resume)) = (&spawned, &resume) {
-            eprintln!(
-                "conspectus: pin `{}`: {}",
-                pin.id,
-                resume_fallback_note(resume, dead)
-            );
-            if !dead.output.trim().is_empty() {
-                eprintln!("--- resume pane output ---\n{}", dead.output);
-            }
-            let cache = crate::pin_bindings::PinBindingsCache::from_env();
-            if let Err(err) = crate::pin_bindings::delete(&cache, &pin.id) {
-                eprintln!(
-                    "conspectus: pin `{}`: could not clear resume sidecar ({err})",
-                    pin.id
-                );
-            }
-        }
-        if self.no_attach {
-            let attach_cmd = format_attach_command(socket, mux_name);
-            println!("spawned `{mux_name}` (detached); attach with: {attach_cmd}");
+        let store = slot_store()?;
+        let existing = store.load().slots;
+        let plan =
+            crate::pin_migrate::plan(&snapshot, entries, &existing, &PinBindingsCache::from_env());
+        if plan.is_empty() {
+            println!("no legacy pins to migrate");
             return Ok(());
         }
-        attach_and_report(runner, socket, mux_name)
-    }
-}
-
-/// Resolve the launch working directory for `pin` (ADR 0094). For a
-/// plain pin this is just its `cwd`. For a worktree-backed pin it
-/// resolves the branch's worktree under the repo anchor, creating it
-/// (from the repo default) via the mutation backend when absent, and
-/// returns the worktree path. Idempotent: an existing worktree is
-/// reused.
-fn realize_worktree_cwd(pin: &crate::model::PinCandidate) -> Result<PathBuf> {
-    // The graph candidate doesn't carry the worktree block; read it
-    // from the pin's own store file (cheap, and avoids threading the
-    // field through the whole model/projection chain).
-    let Some(branch) = pin_worktree_branch(&pin.store_path, &pin.id) else {
-        return Ok(PathBuf::from(&pin.cwd));
-    };
-    let branch = branch.as_str();
-    let repo_anchor = PathBuf::from(&pin.cwd);
-    let git = SystemGitWorktree::new();
-
-    // 1. Reuse an existing worktree for the branch.
-    if let Some(path) = worktree_path_in_records(&git.list(&repo_anchor)?, branch) {
-        return Ok(PathBuf::from(path));
-    }
-
-    // 2. Create it via the configured mutation backend.
-    let config = ConfigLoader::from_env()
-        .load(crate::cwd::current().as_deref())
-        .config;
-    let Some(backend) = resolve_mutation_backend(config.worktree.backend, worktrunk_available())?
-    else {
-        bail!(
-            "pin `{}` is worktree-backed but no mutation backend is available; \
-             install worktrunk or set `[worktree] backend`",
-            pin.id
-        )
-    };
-    match backend.create(&WorktreeCreateRequest {
-        repo_root: repo_anchor.clone(),
-        branch: branch.to_string(),
-        base: None,
-    })? {
-        WorktreeMutationOutcome::Succeeded { path: Some(path) } => return Ok(PathBuf::from(path)),
-        WorktreeMutationOutcome::Succeeded { path: None } => {}
-        WorktreeMutationOutcome::Unsupported => {
-            bail!("the configured worktree backend cannot create worktrees")
+        print!("{}", plan.render());
+        if self.dry_run {
+            return Ok(());
         }
-        WorktreeMutationOutcome::Failed { message, .. } => {
-            bail!("worktree create for `{branch}` failed: {message}")
-        }
-    }
-
-    // 3. Re-resolve the freshly created worktree's path.
-    worktree_path_in_records(&git.list(&repo_anchor)?, branch)
-        .map(PathBuf::from)
-        .ok_or_else(|| anyhow!("created worktree for `{branch}` but could not resolve its path"))
-}
-
-/// Path of the worktree checking out `branch` (short name) among
-/// `records`, if any.
-fn worktree_path_in_records(records: &[WorktreeRecord], branch: &str) -> Option<String> {
-    records
-        .iter()
-        .find(|record| record.branch.as_deref().map(short_ref).as_deref() == Some(branch))
-        .map(|record| record.path.clone())
-}
-
-/// `refs/heads/foo` -> `foo`; already-short names pass through.
-fn short_ref(refname: &str) -> String {
-    refname
-        .strip_prefix("refs/heads/")
-        .unwrap_or(refname)
-        .to_string()
-}
-
-/// Read the worktree branch (ADR 0094) of pin `id` from its store
-/// file. Best-effort: a read/parse miss or a plain pin yields `None`.
-fn pin_worktree_branch(store_path: &str, id: &str) -> Option<String> {
-    let text = std::fs::read_to_string(store_path).ok()?;
-    let document = crate::pins::parse_pins_document(&text).ok()?;
-    document
-        .entries()
-        .iter()
-        .find(|entry| entry.id == id)
-        .and_then(|entry| entry.worktree.as_ref())
-        .map(|worktree| worktree.branch.clone())
-}
-
-/// Consult the per-pin sidecar (ADR 0058) for a prior session and, when
-/// reachable, build the harness's `resume_argv` for it. Returns `None`
-/// (so the caller falls back to default argv) on every honest failure
-/// mode: no sidecar, recorded session no longer on disk (deletes the
-/// sidecar), fork in the lineage chain, or the harness has no
-/// resume CLI.
-///
-/// ADR 0098: the resume tokens are spliced into `base_argv` (the pin's
-/// effective launch argv) so wrapper prefixes and launch options
-/// survive; a `base_argv` that never invokes the harness binary also
-/// falls back to a fresh launch.
-fn resolve_resume_argv(
-    snapshot: &GraphSnapshot,
-    pin: &crate::model::PinCandidate,
-    cwd: &std::path::Path,
-    base_argv: &[std::ffi::OsString],
-) -> Option<Vec<std::ffi::OsString>> {
-    let cache = crate::pin_bindings::PinBindingsCache::from_env();
-    cache.directory()?;
-    resolve_resume_argv_with_cache(snapshot, pin, cwd, base_argv, &cache)
-}
-
-pub(super) fn resolve_resume_argv_with_cache(
-    snapshot: &GraphSnapshot,
-    pin: &crate::model::PinCandidate,
-    cwd: &std::path::Path,
-    base_argv: &[std::ffi::OsString],
-    cache: &crate::pin_bindings::PinBindingsCache,
-) -> Option<Vec<std::ffi::OsString>> {
-    use crate::discovery::harness::{resume_argv_for, splice_resume_argv};
-    use crate::pin_bindings::{LineageOutcome, delete as delete_sidecar, lineage_head, read};
-
-    let record = match read(cache, &pin.id) {
-        Ok(Some(record)) => record,
-        Ok(None) => return None,
-        Err(err) => {
-            eprintln!(
-                "conspectus: pin `{}`: ignoring unreadable sidecar ({err}); launching fresh",
-                pin.id
-            );
-            return None;
-        }
-    };
-
-    let head = match lineage_head(snapshot, &record.harness, &record.session_id) {
-        LineageOutcome::Head(head) => head,
-        LineageOutcome::SessionMissing => {
-            // ADR 0058 Q7: stale sidecar — recorded session can't
-            // be found anywhere in the current snapshot. Delete it
-            // so it doesn't keep producing this hint on subsequent
-            // launches.
-            match delete_sidecar(cache, &pin.id) {
-                Ok(_) => eprintln!(
-                    "conspectus: pin `{}`: previous session `{}` no longer exists; \
-                     cleared sidecar, launching fresh",
-                    pin.id, record.session_id
-                ),
-                Err(err) => eprintln!(
-                    "conspectus: pin `{}`: previous session `{}` no longer exists; \
-                     could not clear sidecar ({err}); launching fresh",
-                    pin.id, record.session_id
-                ),
-            }
-            return None;
-        }
-        LineageOutcome::Fork { at, successors } => {
-            eprintln!(
-                "conspectus: pin `{}`: session `{}` has {} compacted successors; \
-                 launching fresh — resume the one you want with `S` in the TUI or by hand",
-                pin.id,
-                at.session_key,
-                successors.len(),
-            );
-            return None;
-        }
-    };
-
-    let Some(resume) = resume_argv_for(&pin.harness, &head.session_key, cwd) else {
-        eprintln!(
-            "conspectus: pin `{}`: harness `{}` does not expose a resume command; \
-             launching fresh",
-            pin.id, pin.harness
-        );
-        return None;
-    };
-    let Some(argv) = splice_resume_argv(base_argv, &resume) else {
-        eprintln!(
-            "conspectus: pin `{}`: launch argv does not invoke `{}`; \
-             cannot splice resume of session `{}`, launching fresh",
-            pin.id,
-            resume[0].to_string_lossy(),
-            head.session_key,
-        );
-        return None;
-    };
-    println!(
-        "pin `{}`: resuming recorded session `{}`",
-        pin.id, head.session_key
-    );
-    Some(argv)
-}
-
-fn resolve_pin_write_store(
-    flag: Option<DeclaredStoreFlag>,
-    cwd: &Path,
-) -> Result<PinStoreSelection> {
-    let loader = ConfigLoader::from_env();
-    match flag {
-        Some(DeclaredStoreFlag::User) => {
-            user_pin_store(&loader).map_err(|err| anyhow!(err.to_string()))
-        }
-        Some(DeclaredStoreFlag::All) => {
-            bail!("`--store all` is not valid for `pin create` (pick `project` or `user`)");
-        }
-        Some(DeclaredStoreFlag::Project) | None => {
-            select_store_for_pin(cwd, &loader).map_err(|err| anyhow!(err.to_string()))
-        }
-    }
-}
-
-/// Candidate stores `pin rename` / `pin rm` should look in. Order
-/// matters: project before user so a project-local pin shadows a
-/// same-id user pin, matching the resolver's local-over-global rule.
-fn candidate_pin_store_paths(scan_roots: &[PathBuf]) -> Vec<PathBuf> {
-    let loader = ConfigLoader::from_env();
-    let cwd = crate::cwd::current();
-    let roots = effective_scan_roots(scan_roots, cwd.as_deref());
-    let mut paths = Vec::new();
-    let mut seen = BTreeSet::new();
-    for root in roots {
-        if let Some(path) = loader.locate_project_config(&root)
-            && seen.insert(path.clone())
-        {
-            paths.push(path);
-        }
-    }
-    if let Some(path) = loader.user_config_path()
-        && seen.insert(path.clone())
-    {
-        paths.push(path);
-    }
-    paths
-}
-
-fn discover_and_resolve(scan_roots: &[PathBuf]) -> Result<GraphSnapshot> {
-    let snapshot = discover_for_store_selection_with(scan_roots, pin_discovery_config())?;
-    let mut resolved = crate::resolve::resolve_snapshot(snapshot);
-    record_pin_bindings_best_effort(&resolved);
-    decorate_unbound_pins_best_effort(&mut resolved);
-    Ok(resolved)
-}
-
-/// Discovery for the pin commands: everything but the forges (ADR 0135).
-/// Pin resolution reads harness, mux, git, and process state, never
-/// PRs, and a one-shot command has no forge listings cached, so forge
-/// discovery would spend seconds of `gh` calls before a launch even
-/// reaches tmux.
-pub(super) fn pin_discovery_config() -> crate::discovery::LocalDiscoveryConfig {
-    crate::discovery::LocalDiscoveryConfig::from_env().without_forge()
-}
-
-/// Enrich `PinUnbound` diagnostics with the sidecar's recorded
-/// last-bound session so the launch path's UX surfaces
-/// (`pin show`, TUI hint, right detail pane) can advertise resume
-/// affordances. Mirrors `record_pin_bindings_best_effort`: silent
-/// no-op when the cache root is absent.
-fn decorate_unbound_pins_best_effort(snapshot: &mut GraphSnapshot) {
-    use crate::pin_bindings::{PinBindingsCache, decorate_unbound_diagnostics};
-    let cache = PinBindingsCache::from_env();
-    if cache.directory().is_none() {
-        return;
-    }
-    decorate_unbound_diagnostics(snapshot, &cache);
-}
-
-/// Record the resolver's pin bindings to per-pin sidecar files
-/// (ADR 0058). Best-effort — sidecar I/O failures
-/// log to stderr and never propagate up through discovery, so a
-/// missing cache directory or read-only mount degrades pin launch's
-/// continuity story without breaking the cycle.
-fn record_pin_bindings_best_effort(snapshot: &GraphSnapshot) {
-    use crate::pin_bindings::{PinBindingsCache, record_bindings};
-    let cache = PinBindingsCache::from_env();
-    if cache.directory().is_none() {
-        // No $XDG_CACHE_HOME, no $HOME — silently skip rather than
-        // log on every cycle. Operators without a cache directory
-        // opt out of the continuity feature implicitly.
-        return;
-    }
-    let now = crate::discovery::current_epoch();
-    for (pin_id, result) in record_bindings(snapshot, &cache, now) {
-        if let Err(err) = result {
-            eprintln!("conspectus: pin-binding sidecar write failed for `{pin_id}`: {err}");
-        }
-    }
-}
-
-fn pin_state_label(binding: Option<&PinBinding>) -> &'static str {
-    match binding {
-        Some(PinBinding::Bound { .. }) => "bound",
-        Some(PinBinding::StaleMux { .. }) => "stale",
-        Some(PinBinding::Unbound) => "unbound",
-        None => "unresolved",
-    }
-}
-
-fn pin_matches_filter(binding: Option<&PinBinding>, filter: PinStateFilter) -> bool {
-    match filter {
-        PinStateFilter::All => true,
-        PinStateFilter::Bound => matches!(binding, Some(PinBinding::Bound { .. })),
-        PinStateFilter::Stale => matches!(binding, Some(PinBinding::StaleMux { .. })),
-        PinStateFilter::Unbound => matches!(binding, Some(PinBinding::Unbound) | None),
-    }
-}
-
-fn pin_store_label(kind: PinStoreKind) -> &'static str {
-    match kind {
-        PinStoreKind::Project => "project",
-        PinStoreKind::User => "user",
-    }
-}
-
-fn bound_session_label(binding: Option<&PinBinding>) -> Option<String> {
-    match binding {
-        Some(PinBinding::Bound { session, .. }) => Some(session.session_key.clone()),
-        _ => None,
-    }
-}
-
-#[allow(clippy::too_many_arguments)]
-fn render_pin_row(
-    store: DeclaredStoreFlag,
-    provenance: Provenance,
-    id: &str,
-    display_name: &str,
-    harness: &str,
-    cwd: &str,
-    mux_native_id: String,
-    bound_session: String,
-    state_label: &str,
-    store_path: &str,
-) -> String {
-    [
-        store_label(store).to_string(),
-        provenance_label(provenance).to_string(),
-        state_label.to_string(),
-        id.to_string(),
-        display_name.to_string(),
-        harness.to_string(),
-        cwd.to_string(),
-        mux_native_id,
-        bound_session,
-        store_path.to_string(),
-    ]
-    .join("\t")
-}
-
-fn pin_diagnostic_matches(diagnostic: &crate::model::Diagnostic, pin_id: &str) -> bool {
-    use crate::model::Diagnostic;
-    match diagnostic {
-        Diagnostic::PinUnbound { pin_id: id, .. }
-        | Diagnostic::PinStaleMux { pin_id: id, .. }
-        | Diagnostic::PinAmbiguous { pin_id: id, .. }
-        | Diagnostic::PinDrift { pin_id: id, .. } => id == pin_id,
-        _ => false,
-    }
-}
-
-fn format_pin_diagnostic(diagnostic: &crate::model::Diagnostic) -> String {
-    use crate::model::Diagnostic;
-    match diagnostic {
-        Diagnostic::PinUnbound {
-            expected_mux_native_id,
-            ..
-        } => format!("unbound (no live mux matching `{expected_mux_native_id}`)"),
-        Diagnostic::PinStaleMux {
-            mux,
-            claimed_elsewhere,
-            ..
-        } => {
-            let mut text = format!(
-                "stale_mux (mux `{}` has no attributed harness session",
-                mux.native_id
-            );
-            for claim in claimed_elsewhere {
-                text.push_str(&format!(
-                    "; session `{}` matched but is bound to pin `{}`",
-                    claim.session.session_key, claim.claimed_by_pin
-                ));
-            }
-            text.push(')');
-            text
-        }
-        Diagnostic::PinAmbiguous {
-            chosen, competing, ..
-        } => format!(
-            "ambiguous (chose `{}`; {} competing: [{}])",
-            chosen.session_key,
-            competing.len(),
-            competing
-                .iter()
-                .map(|s| s.session_key.as_str())
-                .collect::<Vec<_>>()
-                .join(", ")
-        ),
-        Diagnostic::PinDrift {
-            declared_cwd,
-            observed_cwd,
-            ..
-        } => format!("drift (declared `{declared_cwd}`, observed `{observed_cwd}`)"),
-        _ => format!("{diagnostic:?}"),
-    }
-}
-
-#[cfg(test)]
-mod worktree_realize_tests {
-    use super::*;
-    use crate::discovery::worktree::parse_worktree_porcelain;
-
-    #[test]
-    fn short_ref_strips_heads_prefix() {
-        assert_eq!(short_ref("refs/heads/feature"), "feature");
-        assert_eq!(short_ref("feature"), "feature");
-    }
-
-    #[test]
-    fn worktree_path_in_records_matches_branch_short_name() {
-        let records = parse_worktree_porcelain(
-            "worktree /repo\nHEAD aaa\nbranch refs/heads/main\n\n\
-             worktree /wt/feature\nHEAD bbb\nbranch refs/heads/feature\n",
-        );
-        assert_eq!(
-            worktree_path_in_records(&records, "feature").as_deref(),
-            Some("/wt/feature")
-        );
-        assert_eq!(worktree_path_in_records(&records, "missing"), None);
-    }
-
-    #[test]
-    fn pin_worktree_branch_reads_the_block() {
-        let dir = tempfile::tempdir().unwrap();
-        let store = dir.path().join(".conspectus.toml");
-        let entry = PinEntry {
-            id: "feature".to_string(),
-            display_name: "feature".to_string(),
-            harness: "codex".to_string(),
-            cwd: "/repo".to_string(),
-            mux: PinMux {
-                backend: TMUX_MUX_BACKEND.to_string(),
-                name: "feature".to_string(),
-                socket_name: None,
+        let history = history_writer()
+            .ok_or_else(|| anyhow!("no state home: history is needed to migrate pins"))?;
+        let user_config = loader.user_config_path();
+        let report = crate::pin_migrate::run(
+            &plan,
+            &crate::pin_migrate::Targets {
+                slots: &store,
+                history: &history,
+                user_config: user_config.as_deref(),
+                fallback_epoch: crate::discovery::current_epoch(),
             },
-            launch: None,
-            worktree: Some(crate::pins::PinWorktree {
-                branch: "feature".to_string(),
-            }),
-            reason: None,
-        };
-        upsert_pin_entry(&store, entry).expect("seed pin");
-        let path = store.to_string_lossy().to_string();
-        assert_eq!(
-            pin_worktree_branch(&path, "feature").as_deref(),
-            Some("feature")
         );
-        assert_eq!(pin_worktree_branch(&path, "absent"), None);
+        println!(
+            "migrated {} pin(s); removed {} legacy entr{}",
+            report.migrated.len(),
+            report.removed_entries,
+            if report.removed_entries == 1 {
+                "y"
+            } else {
+                "ies"
+            },
+        );
+        for alias in &report.aliases {
+            println!("kept alias {alias}");
+        }
+        for note in &report.notes {
+            eprintln!("conspectus: {note}");
+        }
+        if report.failed.is_empty() {
+            Ok(())
+        } else {
+            for (id, why) in &report.failed {
+                eprintln!("conspectus: pin `{id}` not migrated: {why}");
+            }
+            bail!("{} pin(s) could not be migrated", report.failed.len())
+        }
     }
 }

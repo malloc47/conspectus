@@ -11,6 +11,42 @@ fn mux_node(native: &str) -> GraphNode {
     mux_node_with_paths(native, Some(format!("/p/{native}")), None)
 }
 
+/// A mux slot named `id`. `target` is a live mux's native name, or
+/// `None` for a planned slot; the rest become overrides.
+fn mux_slot(
+    id: &str,
+    target: Option<&str>,
+    name: &str,
+    cwd: &str,
+    harness: &str,
+    argv: Option<&[&str]>,
+) -> crate::model::PinSlot {
+    use crate::model::{FieldValue, PinKind, PinSlot, SlotFields};
+    let mut overrides = SlotFields::from([
+        ("name".to_string(), FieldValue::Text(name.to_string())),
+        ("cwd".to_string(), FieldValue::Text(cwd.to_string())),
+        ("harness".to_string(), FieldValue::Text(harness.to_string())),
+    ]);
+    if let Some(argv) = argv {
+        overrides.insert(
+            "argv".to_string(),
+            FieldValue::List(argv.iter().map(ToString::to_string).collect()),
+        );
+    }
+    PinSlot {
+        id: id.to_string(),
+        kind: PinKind::Mux,
+        target: target.map(|native| {
+            NodeId::MuxSession(MuxSessionId::new(format!("tmux:{native}"))).to_string()
+        }),
+        pinned_at: None,
+        overrides,
+        snapshot: SlotFields::new(),
+        order: 0,
+        legacy: false,
+    }
+}
+
 fn mux_node_with_activity(native: &str, activity_epoch: i64) -> GraphNode {
     let mut node = mux_node(native);
     if let GraphNode::MuxSession(mux) = &mut node {
@@ -642,40 +678,22 @@ fn repo_grouping_buckets_muxes_under_repo_headers() {
 }
 
 #[test]
-fn mux_view_paints_pin_id_on_bound_mux_rows() {
-    // A pin bound to `tmux:editor` should leave its `pin_id` on
-    // the mux row so the renderer can paint the bound-pin glyph
-    // (regardless of grouping). Other muxes stay None. We set
-    // `binding` directly rather than running the resolver
-    // because the resolver test fixtures and production
-    // discovery encode `MuxSessionNode.native_id` differently
-    // (resolver-test fixtures prefix `tmux:`, production
-    // discovery emits the bare name); the mux-view code path
-    // we're testing only cares about the value already stored
-    // on the pin.
-    use crate::model::{PinBinding, PinCandidate, PinMuxRef, Provenance};
+fn mux_view_paints_pin_id_on_pinned_mux_rows() {
+    // A slot pointing at `tmux:editor` leaves its name on the mux
+    // row so the renderer can paint the pin glyph (regardless of
+    // grouping). Other muxes stay None.
     let mut snapshot = GraphSnapshot::empty();
     snapshot.nodes.push(mux_node("editor"));
     snapshot.nodes.push(mux_node("scratch"));
-    snapshot.pins.push(PinCandidate {
-        id: "code".to_string(),
-        display_name: "Code Review".to_string(),
-        harness: "claude-code".to_string(),
-        cwd: "/p/work".to_string(),
-        mux: PinMuxRef {
-            backend: "tmux".to_string(),
-            name: "editor".to_string(),
-            socket_name: None,
-        },
-        launch_argv: None,
-        reason: None,
-        provenance: Provenance::LocalPin,
-        store_path: "/p/work/.conspectus.toml".to_string(),
-        binding: Some(PinBinding::Bound {
-            mux: MuxSessionId::new("tmux:editor"),
-            session: AgentSessionId::new("claude-code", "/state", "session"),
-        }),
-    });
+    snapshot.pins.push(mux_slot(
+        "code",
+        Some("editor"),
+        "editor",
+        "/p/work",
+        "claude-code",
+        None,
+    ));
+    let snapshot = resolve_snapshot(snapshot);
 
     let tree = build_mux_tree(MuxBuildInputs {
         snapshot: &snapshot,
@@ -707,28 +725,18 @@ fn mux_view_paints_pin_id_on_bound_mux_rows() {
 
 #[test]
 fn mux_view_flat_grouping_floats_pinned_mux_rows_to_top() {
-    use crate::model::{PinBinding, PinCandidate, PinMuxRef, Provenance};
     let mut snapshot = GraphSnapshot::empty();
     snapshot.nodes.push(mux_node("newer"));
     snapshot.nodes.push(mux_node("older"));
-    snapshot.pins.push(PinCandidate {
-        id: "old-pin".to_string(),
-        display_name: "Old Pin".to_string(),
-        harness: "codex".to_string(),
-        cwd: "/p/older".to_string(),
-        mux: PinMuxRef {
-            backend: "tmux".to_string(),
-            name: "older".to_string(),
-            socket_name: None,
-        },
-        launch_argv: None,
-        reason: None,
-        provenance: Provenance::LocalPin,
-        store_path: "/p/older/.conspectus.toml".to_string(),
-        binding: Some(PinBinding::StaleMux {
-            mux: MuxSessionId::new("tmux:older"),
-        }),
-    });
+    snapshot.pins.push(mux_slot(
+        "old-pin",
+        Some("older"),
+        "older",
+        "/p/older",
+        "codex",
+        None,
+    ));
+    let snapshot = resolve_snapshot(snapshot);
 
     let tree = build_mux_tree(MuxBuildInputs {
         snapshot: &snapshot,
@@ -759,7 +767,6 @@ fn mux_view_emits_pins_group_at_top_under_repo_grouping() {
     // Repo grouping introduces header rows. The Pins group
     // should sit above every repo bucket so the operator sees
     // pinned work first.
-    use crate::model::{PinBinding, PinCandidate, PinMuxRef, Provenance};
     let mut snapshot = GraphSnapshot::empty();
     snapshot.nodes.push(GraphNode::Repo(RepoNode {
         id: crate::model::RepoId::new("/p/foo/.git"),
@@ -783,22 +790,9 @@ fn mux_view_emits_pins_group_at_top_under_repo_grouping() {
         Some("/p/foo".to_string()),
         None,
     ));
-    snapshot.pins.push(PinCandidate {
-        id: "ingest".to_string(),
-        display_name: "Ingest Pin".to_string(),
-        harness: "codex".to_string(),
-        cwd: "/p/foo".to_string(),
-        mux: PinMuxRef {
-            backend: "tmux".to_string(),
-            name: "ingest".to_string(),
-            socket_name: None,
-        },
-        launch_argv: None,
-        reason: None,
-        provenance: Provenance::LocalPin,
-        store_path: "/p/foo/.conspectus.toml".to_string(),
-        binding: Some(PinBinding::Unbound),
-    });
+    snapshot
+        .pins
+        .push(mux_slot("ingest", None, "ingest", "/p/foo", "codex", None));
 
     let snapshot = resolve_snapshot(snapshot);
 
@@ -824,10 +818,9 @@ fn mux_view_emits_pins_group_at_top_under_repo_grouping() {
             (row.depth, label)
         })
         .collect();
-    // Pins group first, then the repo bucket. The unbound pin
-    // also appears in its natural repo location as a placeholder
-    // mux row, mirroring bound pins appearing both in Pins and
-    // in place.
+    // Pins group first, then the repo bucket. A planned slot also
+    // appears in its natural repo location as a placeholder mux row,
+    // mirroring live pinned muxes appearing both in Pins and in place.
     assert_eq!(row_summary[0], (0, "Pins".to_string()));
     assert_eq!(row_summary[1], (1, "mux:ingest".to_string()));
     assert_eq!(row_summary[2], (0, "/p/foo".to_string()));
@@ -837,7 +830,6 @@ fn mux_view_emits_pins_group_at_top_under_repo_grouping() {
 
 #[test]
 fn mux_view_repo_grouping_renders_bound_pins_as_mux_rows() {
-    use crate::model::{PinBinding, PinCandidate, PinMuxRef, Provenance};
     let mut snapshot = GraphSnapshot::empty();
     snapshot.nodes.push(GraphNode::Repo(RepoNode {
         id: crate::model::RepoId::new("/p/foo/.git"),
@@ -861,24 +853,15 @@ fn mux_view_repo_grouping_renders_bound_pins_as_mux_rows() {
         Some("/p/foo".to_string()),
         None,
     ));
-    snapshot.pins.push(PinCandidate {
-        id: "ingest".to_string(),
-        display_name: "Ingest Pin".to_string(),
-        harness: "codex".to_string(),
-        cwd: "/p/foo".to_string(),
-        mux: PinMuxRef {
-            backend: "tmux".to_string(),
-            name: "foo-a".to_string(),
-            socket_name: None,
-        },
-        launch_argv: None,
-        reason: None,
-        provenance: Provenance::LocalPin,
-        store_path: "/p/foo/.conspectus.toml".to_string(),
-        binding: Some(PinBinding::StaleMux {
-            mux: MuxSessionId::new("tmux:foo-a"),
-        }),
-    });
+    snapshot.pins.push(mux_slot(
+        "ingest",
+        Some("foo-a"),
+        "foo-a",
+        "/p/foo",
+        "codex",
+        None,
+    ));
+    let snapshot = resolve_snapshot(snapshot);
 
     let tree = build_mux_tree(MuxBuildInputs {
         snapshot: &snapshot,
@@ -912,29 +895,15 @@ fn mux_view_repo_grouping_renders_bound_pins_as_mux_rows() {
 }
 
 #[test]
-fn mux_view_flat_grouping_renders_unbound_pin_as_placeholder_mux_row() {
+fn mux_view_flat_grouping_renders_a_planned_pin_as_placeholder_mux_row() {
     // Flat groupings float pinned mux entities directly rather
     // than inserting a synthetic Pins group header. Unbound pins
     // still get a mux-shaped placeholder row so the operator can
     // launch them from the mux view before tmux exists.
-    use crate::model::{PinBinding, PinCandidate, PinMuxRef, Provenance};
     let mut snapshot = GraphSnapshot::empty();
-    snapshot.pins.push(PinCandidate {
-        id: "code".to_string(),
-        display_name: "Pin".to_string(),
-        harness: "claude-code".to_string(),
-        cwd: "/p".to_string(),
-        mux: PinMuxRef {
-            backend: "tmux".to_string(),
-            name: "editor".to_string(),
-            socket_name: None,
-        },
-        launch_argv: None,
-        reason: None,
-        provenance: Provenance::LocalPin,
-        store_path: "/p/.conspectus.toml".to_string(),
-        binding: Some(PinBinding::Unbound),
-    });
+    snapshot
+        .pins
+        .push(mux_slot("code", None, "editor", "/p", "claude-code", None));
 
     let snapshot = resolve_snapshot(snapshot);
 
@@ -1053,28 +1022,18 @@ fn mux_recency_missing_signal_sorts_to_the_bottom() {
 }
 
 #[test]
-fn stale_pin_mux_without_a_reported_command_shows_the_pin_program() {
-    use crate::model::{PinBinding, PinCandidate, PinMuxRef, Provenance};
+fn pinned_mux_without_a_reported_command_shows_the_pin_program() {
     let mut snapshot = GraphSnapshot::empty();
     snapshot.nodes.push(mux_node("serve"));
-    snapshot.pins.push(PinCandidate {
-        id: "serve".to_string(),
-        display_name: "serve".to_string(),
-        harness: "conspectus".to_string(),
-        cwd: "/p/work".to_string(),
-        mux: PinMuxRef {
-            backend: "tmux".to_string(),
-            name: "serve".to_string(),
-            socket_name: None,
-        },
-        launch_argv: Some(vec!["conspectus".to_string(), "serve".to_string()]),
-        reason: None,
-        provenance: Provenance::LocalPin,
-        store_path: "/p/work/.conspectus.toml".to_string(),
-        binding: Some(PinBinding::StaleMux {
-            mux: MuxSessionId::new("tmux:serve"),
-        }),
-    });
+    snapshot.pins.push(mux_slot(
+        "serve",
+        Some("serve"),
+        "serve",
+        "/p/work",
+        "conspectus",
+        Some(&["conspectus", "serve"]),
+    ));
+    let snapshot = resolve_snapshot(snapshot);
 
     let tree = build_mux_tree(MuxBuildInputs {
         snapshot: &snapshot,
@@ -1444,25 +1403,16 @@ fn workspace_grouping_header_order_ignores_case_and_breaks_name_ties_by_path() {
 }
 
 #[test]
-fn workspace_grouping_places_unbound_pin_placeholders_by_cwd() {
-    use crate::model::{PinCandidate, PinMuxRef};
+fn workspace_grouping_places_planned_pin_placeholders_by_cwd() {
     let mut snapshot = sysadmin_snapshot(vec![mux_at("sys-root", "/ws/sysadmin")]);
-    snapshot.pins.push(PinCandidate {
-        id: "nix".to_string(),
-        display_name: "Nix".to_string(),
-        harness: "claude-code".to_string(),
-        cwd: "/ws/sysadmin/config".to_string(),
-        mux: PinMuxRef {
-            backend: "tmux".to_string(),
-            name: "nix-pin".to_string(),
-            socket_name: None,
-        },
-        launch_argv: None,
-        reason: None,
-        provenance: Provenance::LocalPin,
-        store_path: "/ws/sysadmin/.conspectus.toml".to_string(),
-        binding: Some(crate::model::PinBinding::Unbound),
-    });
+    snapshot.pins.push(mux_slot(
+        "nix",
+        None,
+        "nix-pin",
+        "/ws/sysadmin/config",
+        "claude-code",
+        None,
+    ));
     let snapshot = linked_and_resolved(snapshot);
 
     let tree = build_with(&snapshot, MuxGrouping::Workspace);

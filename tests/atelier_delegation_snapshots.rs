@@ -16,7 +16,7 @@ use conspectus::api::{
 use conspectus::discovery::harness::codex::HARNESS_KEY as CODEX_HARNESS_KEY;
 use conspectus::discovery::harness::fixtures::{CodexSessionRecord, HarnessFixture};
 use conspectus::discovery::tmux::FakeTmux;
-use conspectus::model::GraphSnapshot;
+use conspectus::model::{FieldValue, GraphSnapshot};
 
 mod support;
 
@@ -196,8 +196,20 @@ impl AtelierDelegationFixture {
                     node.cwd = node.cwd.as_ref().map(|path| self.normalize(path));
                 }
                 GraphNode::Pin(node) => {
-                    node.cwd = self.normalize(&node.cwd);
-                    node.store_path = self.normalize(&node.store_path);
+                    for fields in [&mut node.overrides, &mut node.snapshot] {
+                        for key in ["cwd", "root"] {
+                            if let Some(FieldValue::Text(path)) = fields.get_mut(key) {
+                                *path = self.normalize(path);
+                            }
+                        }
+                    }
+                    for field in &mut node.effective {
+                        if matches!(field.name.as_str(), "cwd" | "root")
+                            && let FieldValue::Text(path) = &mut field.value
+                        {
+                            *path = self.normalize(path);
+                        }
+                    }
                 }
                 GraphNode::RuntimeProcess(node) => {
                     node.cwd = node.cwd.as_ref().map(|path| self.normalize(path));

@@ -459,3 +459,220 @@ fn a_repo_node_in_the_graph_is_live() {
     assert_eq!(resolved.status, SlotStatus::Live);
     assert_eq!(resolved.text("common_dir"), Some("/src/app/.git"));
 }
+
+fn with_slots(mut snapshot: GraphSnapshot, slots: Vec<PinSlot>) -> GraphSnapshot {
+    snapshot.pins = slots;
+    apply_slots(&mut snapshot);
+    snapshot
+}
+
+fn pin_nodes(snapshot: &GraphSnapshot) -> Vec<&PinNode> {
+    snapshot
+        .nodes
+        .iter()
+        .filter_map(|node| match node {
+            GraphNode::Pin(pin) => Some(pin),
+            _ => None,
+        })
+        .collect()
+}
+
+fn pin_links(snapshot: &GraphSnapshot) -> Vec<&GraphLink> {
+    snapshot
+        .candidate_links
+        .iter()
+        .filter(|link| link.relation == RelationKind::PinTargets)
+        .collect()
+}
+
+#[test]
+fn every_slot_becomes_a_pin_node_with_a_targets_link_to_a_live_node() {
+    let history = HistorySnapshot {
+        muxes: vec![mux_record("h_m", "$7")],
+        ..Default::default()
+    };
+    let snapshot = with_slots(
+        world(vec![live_mux("$7")], history),
+        vec![slot(PinKind::Mux, Some("history:h_m".into()))],
+    );
+
+    let [pin] = pin_nodes(&snapshot)[..] else {
+        panic!("one pin node");
+    };
+    assert_eq!(pin.id.id, "my-slot");
+    assert_eq!(pin.status, SlotStatus::Live);
+    assert_eq!(pin.text("name"), Some("work"));
+    assert_eq!(
+        pin.target_node,
+        Some(NodeId::MuxSession(MuxSessionId::new("tmux:work")))
+    );
+    let [link] = pin_links(&snapshot)[..] else {
+        panic!("one pin_targets link");
+    };
+    assert_eq!(link.source, NodeId::Pin(PinId::new("my-slot")));
+    assert!(matches!(
+        &link.target,
+        LinkEndpoint::Node { id } if *id == NodeId::MuxSession(MuxSessionId::new("tmux:work"))
+    ));
+    assert_eq!(link.source_metadata.adapter, PINS_ADAPTER);
+}
+
+#[test]
+fn a_planned_slot_is_a_node_without_a_link() {
+    let snapshot = with_slots(
+        world(Vec::new(), HistorySnapshot::default()),
+        vec![slot(PinKind::Mux, None)],
+    );
+
+    let [pin] = pin_nodes(&snapshot)[..] else {
+        panic!("one pin node");
+    };
+    assert_eq!(pin.status, SlotStatus::Planned);
+    assert_eq!(pin.target_node, None);
+    assert!(pin_links(&snapshot).is_empty());
+}
+
+#[test]
+fn applying_twice_does_not_duplicate_nodes_or_links() {
+    let history = HistorySnapshot {
+        muxes: vec![mux_record("h_m", "$7")],
+        ..Default::default()
+    };
+    let mut snapshot = with_slots(
+        world(vec![live_mux("$7")], history),
+        vec![slot(PinKind::Mux, Some("history:h_m".into()))],
+    );
+    let once = snapshot.clone();
+
+    apply_slots(&mut snapshot);
+
+    assert_eq!(snapshot, once);
+    assert_eq!(pin_nodes(&snapshot).len(), 1);
+    assert_eq!(pin_links(&snapshot).len(), 1);
+}
+
+#[test]
+fn removing_a_slot_removes_its_node_and_link_on_the_next_pass() {
+    let history = HistorySnapshot {
+        muxes: vec![mux_record("h_m", "$7")],
+        ..Default::default()
+    };
+    let mut snapshot = with_slots(
+        world(vec![live_mux("$7")], history),
+        vec![slot(PinKind::Mux, Some("history:h_m".into()))],
+    );
+    snapshot.pins.clear();
+
+    apply_slots(&mut snapshot);
+
+    assert!(pin_nodes(&snapshot).is_empty());
+    assert!(pin_links(&snapshot).is_empty());
+    assert!(
+        snapshot
+            .node_provenance
+            .keys()
+            .all(|id| !matches!(id, NodeId::Pin(_)))
+    );
+}
+
+#[test]
+fn a_slot_for_a_gone_mux_links_to_its_ghost_node() {
+    let history = HistorySnapshot {
+        muxes: vec![mux_record("h_m", "$7")],
+        ..Default::default()
+    };
+    // Nothing live and the mux unprobed: the slot is Unknown but still
+    // names the node the history record stands for.
+    let snapshot = with_slots(
+        world(Vec::new(), history),
+        vec![slot(PinKind::Mux, Some("history:h_m".into()))],
+    );
+
+    let [pin] = pin_nodes(&snapshot)[..] else {
+        panic!("one pin node");
+    };
+    assert_eq!(pin.status, SlotStatus::Unknown);
+    assert_eq!(pin.text("name"), Some("work"), "recipe comes from history");
+    assert!(pin.target_node.is_some());
+}
+
+#[test]
+fn a_dangling_slot_renders_from_its_snapshot_with_no_link() {
+    let mut dangling = slot(PinKind::Mux, Some("history:h_deleted".into()));
+    dangling.snapshot = SlotFields::from([
+        ("name".to_string(), text("old")),
+        ("label".to_string(), text("Old work")),
+    ]);
+    let snapshot = with_slots(
+        world(Vec::new(), HistorySnapshot::default()),
+        vec![dangling],
+    );
+
+    let [pin] = pin_nodes(&snapshot)[..] else {
+        panic!("one pin node");
+    };
+    assert_eq!(pin.status, SlotStatus::Missing);
+    assert_eq!(pin.label, "Old work");
+    assert_eq!(pin.text("name"), Some("old"));
+    assert!(pin_links(&snapshot).is_empty());
+}
+
+#[test]
+fn a_pr_slot_projects_its_pr_node_from_history_once_it_leaves_the_listing() {
+    let record = PrRecord {
+        meta: RecordMeta {
+            key: NodeId::ForgePr(pr_id()).to_string(),
+            ..meta("h_p")
+        },
+        recipe: PrRecipe {
+            provider: "github".into(),
+            host: "github.com".into(),
+            owner: "me".into(),
+            repo: "app".into(),
+            number: 7,
+            title: Some("Ship it".into()),
+            state: Some("merged".into()),
+            ..Default::default()
+        },
+        extra: Default::default(),
+    };
+    let history = HistorySnapshot {
+        prs: vec![record],
+        ..Default::default()
+    };
+    let snapshot = with_slots(
+        world(Vec::new(), history),
+        vec![slot(
+            PinKind::Pr,
+            Some(NodeId::ForgePr(pr_id()).to_string()),
+        )],
+    );
+
+    let projected = snapshot
+        .find_node(&NodeId::ForgePr(pr_id()))
+        .expect("PR node");
+    let GraphNode::ForgePr(pr) = projected else {
+        panic!("a PR node");
+    };
+    assert_eq!(pr.state.as_deref(), Some("merged"));
+    assert_eq!(pr.title.as_deref(), Some("Ship it"));
+    assert_eq!(pin_links(&snapshot).len(), 1);
+}
+
+#[test]
+fn slots_keep_their_file_order_among_pin_nodes() {
+    let mut a = slot(PinKind::Mux, None);
+    a.id = "a".into();
+    a.order = 1;
+    let mut b = slot(PinKind::Mux, None);
+    b.id = "b".into();
+    b.order = 0;
+    let snapshot = with_slots(world(Vec::new(), HistorySnapshot::default()), vec![a, b]);
+
+    let mut pins = pin_nodes(&snapshot);
+    pins.sort_by_key(|pin| pin.order);
+    assert_eq!(
+        pins.iter().map(|p| p.id.id.as_str()).collect::<Vec<_>>(),
+        ["b", "a"]
+    );
+}

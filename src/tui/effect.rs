@@ -8,12 +8,9 @@
 //! reducer never emits an effect nobody can execute.
 
 use crate::model::{AgentSessionId, MuxSessionId};
-use crate::tui::actions::{AttachTarget, PinLaunchTarget};
+use crate::tui::actions::AttachTarget;
 use crate::tui::resume::ResumeTarget;
 use crate::tui::widgets::mux_launch::MuxLaunchRequest;
-use crate::tui::widgets::pins::{
-    PinBindRequest, PinCreateRequest, PinEditRequest, PinRemoveRequest,
-};
 
 /// A side effect the reducer wants the runtime to schedule.
 #[derive(Debug, Clone, PartialEq)]
@@ -81,20 +78,9 @@ pub enum ExecSpec {
     /// reducer never touches them.
     ViewSession(AgentSessionId),
     /// Suspend the alt screen, re-exec into
-    /// `conspectus pin launch <id> --no-attach`, refresh so the row
-    /// tree reflects the just-created session, then attach to the
-    /// resulting tmux session when `attach_target` is available. The
-    /// executor owns the full sequence; the reducer never sees the
-    /// intermediate states.
-    LaunchPin {
-        pin_id: String,
-        attach_target: Option<PinLaunchTarget>,
-    },
-    /// Suspend the alt screen, re-exec into
     /// `conspectus mux new <name> --cwd <cwd> --no-attach`, refresh
     /// so the row tree picks up the new session, then attach.
-    /// Mirrors [`ExecSpec::LaunchPin`] but with no pin lookup —
-    /// the operator supplied the fields via the form (ADR 0095).
+    /// The operator supplied the fields via the form (ADR 0095).
     MuxNew { name: String, cwd: String },
     /// Suspend the alt screen, re-exec into
     /// `conspectus mux launch <harness> --name <name> …
@@ -129,21 +115,6 @@ pub enum MuxOp {
 /// summary status.
 #[derive(Debug, Clone, PartialEq)]
 pub enum StoreOp {
-    /// Write a new pin entry to its TOML store (ADR 0057). When
-    /// `request.adopt_source_mux_name` is `Some`, the executor
-    /// chains a tmux rename after the write so the just-adopted
-    /// mux session takes the pin's declared name — see
-    /// [`crate::tui::effect::MuxOp`]'s roadmap in the
-    /// backlog.
-    PinCreate(PinCreateRequest),
-    /// Update an existing pin entry (id / display name / harness /
-    /// cwd / mux / launch argv).
-    PinEdit(PinEditRequest),
-    /// Remove a pin entry from its TOML store (ADR 0057).
-    PinRemove(PinRemoveRequest),
-    /// Write a pin-binding declaration linking a pin to an
-    /// existing agent session (ADR 0057 / ADR 0058).
-    PinBind(PinBindRequest),
     /// Commit the rename-overlay's confirm on an agent-session
     /// row (ADR 0029). The executor plans the rename against the
     /// held snapshot, writes the alias entry (or removes it when

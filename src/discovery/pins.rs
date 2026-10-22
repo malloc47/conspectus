@@ -1,20 +1,13 @@
-//! Session-pin discovery.
+//! Load pin slots (ADR 0141) onto [`GraphSnapshot::pins`].
 //!
-//! Reads `[[pins.entries]]` TOML sections (ADR 0057) from project-local
-//! `.conspectus.toml` files and the user-level config and surfaces them
-//! on [`GraphSnapshot::pins`] for downstream consumption.
+//! The slots come from `$XDG_DATA_HOME/conspectus/pins.toml`. Until
+//! the operator runs `conspectus pin migrate`, any legacy
+//! `[[pins.entries]]` in the user config, the project configs under
+//! the scan roots and the observed paths, and the old store registry
+//! also load, each as an in-memory mux slot after the real ones, with a
+//! `LegacyPins` diagnostic naming the command.
 //!
-//! Parallel structure to [`crate::discovery::declared`]: enumerate
-//! stores (user config first, then per-root project configs), parse
-//! each via the `crate::pins` schema module, and emit one
-//! [`PinCandidate`] per valid entry plus diagnostics for malformed
-//! files. The resolver pass consumes the resulting sidecar
-//! to perform mux-anchored binding and to synthesize the matching
-//! `LinkedToMux` candidates with `LocalPin`/`GlobalPin` provenance per
-//! ADR 0057.
-//!
-//! This pass is strictly read-only: no config file is created or
-//! mutated. Mirrors the ADR 0014 / ADR 0029 read-only invariant.
+//! This pass is strictly read-only: no file is created or changed.
 
 use std::collections::BTreeSet;
 use std::fs;
@@ -22,90 +15,148 @@ use std::path::{Path, PathBuf};
 
 use crate::config::ConfigLoader;
 use crate::discovery::DiscoveryContext;
-use crate::model::{Diagnostic, GraphNode, GraphSnapshot, PinCandidate, PinMuxRef, Provenance};
-use crate::pins::{PinEntry, PinsDocument, parse_pins_document};
+use crate::legacy_pins::{entry_to_slot, parse_pins_document};
+use crate::model::{Diagnostic, GraphNode, GraphSnapshot};
+use crate::pin_slots::SlotStore;
+
+/// What the loader reads from.
+pub struct PinSources<'a> {
+    pub slots: Option<&'a SlotStore>,
+    /// Config files that may hold legacy entries are found through the
+    /// loader; `None` skips the legacy pass.
+    pub legacy_loader: Option<&'a ConfigLoader>,
+    /// Project stores the old registry recorded.
+    pub legacy_registry_stores: &'a [PathBuf],
+}
 
 pub fn apply_pins(
     snapshot: &mut GraphSnapshot,
     context: &DiscoveryContext,
-    loader: &ConfigLoader,
-    registry_stores: &[PathBuf],
+    sources: &PinSources<'_>,
 ) {
-    let mut stores: Vec<PinStore> = Vec::new();
+    snapshot.pins.clear();
+    let mut taken: BTreeSet<String> = BTreeSet::new();
 
-    if let Some(path) = loader.user_config_path()
-        && path.is_file()
-    {
-        stores.push(PinStore {
-            path,
-            provenance: Provenance::GlobalPin,
-        });
-    }
-
-    for path in local_pin_store_paths(snapshot, context, loader, registry_stores) {
-        stores.push(PinStore {
-            path,
-            provenance: Provenance::LocalPin,
-        });
-    }
-
-    // Local-pin entries shadow global-pin entries with the same id.
-    // We track ids per-effective-store: an `id` that wins at the
-    // project tier suppresses a same-id entry that loads from the
-    // user config in the same snapshot.
-    let mut effective_ids: BTreeSet<String> = BTreeSet::new();
-
-    // Iterate stores in order of weakest precedence first so the
-    // strongest tier overwrites; the candidate vector itself is sorted
-    // by `GraphSnapshot::canonicalize` at the end so order in the
-    // input vec doesn't affect output stability.
-    stores.sort_by_key(|store| std::cmp::Reverse(store.provenance.precedence()));
-
-    for store in stores {
-        let Some(document) = read_pins_document(&store, &mut snapshot.diagnostics) else {
-            continue;
-        };
-
-        for entry in document.entries() {
-            if !effective_ids.insert(entry.id.clone()) {
-                snapshot
-                    .diagnostics
-                    .push(shadowed_pin_diagnostic(&store, &entry.id));
-                continue;
-            }
-
-            snapshot.pins.push(pin_candidate_from(&store, entry));
+    if let Some(store) = sources.slots {
+        let load = store.load();
+        for problem in load.problems {
+            snapshot.diagnostics.push(Diagnostic::Config {
+                path: store.path().display().to_string(),
+                message: problem,
+            });
+        }
+        for slot in load.slots {
+            taken.insert(slot.id.clone());
+            snapshot.pins.push(slot);
         }
     }
 
-    snapshot.sync_pin_nodes();
+    if let Some(loader) = sources.legacy_loader {
+        let mut legacy_ids = Vec::new();
+        let mut diagnostics = Vec::new();
+        for LegacyEntry { path, entry } in legacy_entries(
+            snapshot,
+            context,
+            loader,
+            sources.legacy_registry_stores,
+            &mut diagnostics,
+        ) {
+            if !taken.insert(entry.id.clone()) {
+                diagnostics.push(Diagnostic::Config {
+                    path: path.display().to_string(),
+                    message: format!(
+                        "pin `{}` is already a slot (this legacy entry skipped)",
+                        entry.id
+                    ),
+                });
+                continue;
+            }
+            let order = u32::try_from(snapshot.pins.len()).unwrap_or(u32::MAX);
+            legacy_ids.push(entry.id.clone());
+            snapshot.pins.push(entry_to_slot(&entry, order));
+        }
+        snapshot.diagnostics.extend(diagnostics);
+        if !legacy_ids.is_empty() {
+            snapshot.diagnostics.push(Diagnostic::LegacyPins {
+                count: u32::try_from(legacy_ids.len()).unwrap_or(u32::MAX),
+                ids: legacy_ids,
+            });
+        }
+    }
     snapshot.canonicalize();
 }
 
-fn local_pin_store_paths(
+/// A legacy entry and the config file it lives in.
+#[derive(Clone, Debug)]
+pub struct LegacyEntry {
+    pub path: PathBuf,
+    pub entry: crate::legacy_pins::PinEntry,
+}
+
+/// Every legacy `[[pins.entries]]` entry the config files reach, project
+/// stores before the user store, an entry shadowed by an earlier one
+/// with the same id left out. Read problems go to `diagnostics`.
+pub fn legacy_entries(
+    snapshot: &GraphSnapshot,
+    context: &DiscoveryContext,
+    loader: &ConfigLoader,
+    registry_stores: &[PathBuf],
+    diagnostics: &mut Vec<Diagnostic>,
+) -> Vec<LegacyEntry> {
+    let mut seen_ids = BTreeSet::new();
+    let mut entries = Vec::new();
+    for path in legacy_store_paths(snapshot, context, loader, registry_stores) {
+        let Some(document) = read_pins_document(&path, diagnostics) else {
+            continue;
+        };
+        for entry in document.entries() {
+            if seen_ids.insert(entry.id.clone()) {
+                entries.push(LegacyEntry {
+                    path: path.clone(),
+                    entry: entry.clone(),
+                });
+            } else {
+                diagnostics.push(Diagnostic::Config {
+                    path: path.display().to_string(),
+                    message: format!(
+                        "pin `{}` is shadowed by an earlier legacy pin (this entry skipped)",
+                        entry.id
+                    ),
+                });
+            }
+        }
+    }
+    entries
+}
+
+/// The user config, then the project configs, that may hold legacy
+/// entries, in the order the old loader read them (project before user,
+/// so a project entry shadows a user one with the same id).
+fn legacy_store_paths(
     snapshot: &GraphSnapshot,
     context: &DiscoveryContext,
     loader: &ConfigLoader,
     registry_stores: &[PathBuf],
 ) -> Vec<PathBuf> {
-    let mut seen_project_paths = BTreeSet::new();
+    let mut seen = BTreeSet::new();
     let mut paths = Vec::new();
     for root in project_config_search_roots(snapshot, context) {
         if let Some(path) = loader.locate_project_config(&root)
-            && seen_project_paths.insert(path.clone())
+            && seen.insert(path.clone())
         {
             paths.push(path);
         }
     }
-    // Registry-recorded project stores are already full
-    // `.conspectus.toml` paths, so they're appended directly (not walked
-    // up from a search root). Dedup shares the same set as the
-    // root-derived paths, and the registry read already dropped stores
-    // whose file no longer exists.
     for path in registry_stores {
-        if path.is_file() && seen_project_paths.insert(path.clone()) {
+        if path.is_file() && seen.insert(path.clone()) {
             paths.push(path.clone());
         }
+    }
+    if let Some(path) = loader.user_config_path()
+        && path.is_file()
+        && seen.insert(path.clone())
+    {
+        paths.push(path);
     }
     paths
 }
@@ -119,7 +170,7 @@ fn project_config_search_roots(
     for root in context.roots() {
         push_search_root(&mut roots, &mut seen, root);
     }
-    for node in &snapshot.nodes {
+    for node in snapshot.live_nodes() {
         match node {
             GraphNode::Repo(repo) => {
                 for path in &repo.source_paths {
@@ -157,8 +208,10 @@ fn project_config_search_roots(
                     push_search_root(&mut roots, &mut seen, Path::new(cwd));
                 }
             }
-            GraphNode::Pin(_) => {}
-            GraphNode::Branch(_) | GraphNode::ForgePr(_) | GraphNode::Fork(_) => {}
+            GraphNode::Pin(_)
+            | GraphNode::Branch(_)
+            | GraphNode::ForgePr(_)
+            | GraphNode::Fork(_) => {}
         }
     }
     roots
@@ -179,76 +232,29 @@ fn push_search_root(
     }
 }
 
-#[derive(Clone, Debug)]
-struct PinStore {
-    path: PathBuf,
-    provenance: Provenance,
-}
-
-fn read_pins_document(store: &PinStore, diagnostics: &mut Vec<Diagnostic>) -> Option<PinsDocument> {
-    let text = match fs::read_to_string(&store.path) {
+fn read_pins_document(
+    path: &Path,
+    diagnostics: &mut Vec<Diagnostic>,
+) -> Option<crate::legacy_pins::PinsDocument> {
+    let text = match fs::read_to_string(path) {
         Ok(text) => text,
         Err(err) => {
-            diagnostics.push(config_diagnostic(
-                &store.path,
-                format!("failed to read pins: {err}"),
-            ));
+            diagnostics.push(Diagnostic::Config {
+                path: path.display().to_string(),
+                message: format!("failed to read pins: {err}"),
+            });
             return None;
         }
     };
-
     match parse_pins_document(&text) {
         Ok(document) => Some(document),
         Err(err) => {
-            diagnostics.push(config_diagnostic(
-                &store.path,
-                format!("failed to parse pins: {err}"),
-            ));
+            diagnostics.push(Diagnostic::Config {
+                path: path.display().to_string(),
+                message: format!("failed to parse pins: {err}"),
+            });
             None
         }
-    }
-}
-
-fn pin_candidate_from(store: &PinStore, entry: &PinEntry) -> PinCandidate {
-    PinCandidate {
-        id: entry.id.clone(),
-        display_name: entry.display_name.clone(),
-        harness: entry.harness.clone(),
-        cwd: entry.cwd.clone(),
-        mux: PinMuxRef {
-            backend: entry.mux.backend.clone(),
-            name: entry.mux.name.clone(),
-            socket_name: entry.mux.socket_name.clone(),
-        },
-        launch_argv: entry
-            .launch
-            .as_ref()
-            .filter(|launch| !launch.argv.is_empty())
-            .map(|launch| launch.argv.clone()),
-        reason: entry.reason.clone(),
-        provenance: store.provenance,
-        store_path: store.path.to_string_lossy().into_owned(),
-        // Loader leaves the binding state empty; the resolver pass
-        // populates it.
-        binding: None,
-    }
-}
-
-fn config_diagnostic(path: &Path, message: String) -> Diagnostic {
-    Diagnostic::Config {
-        path: path.display().to_string(),
-        message,
-    }
-}
-
-fn shadowed_pin_diagnostic(store: &PinStore, id: &str) -> Diagnostic {
-    // The shadow is a config concern; matches how
-    // `discovery::declared` surfaces same-id collisions today.
-    Diagnostic::Config {
-        path: store.path.display().to_string(),
-        message: format!(
-            "pin `{id}` is shadowed by a same-id project-local pin (this entry skipped)"
-        ),
     }
 }
 

@@ -470,29 +470,11 @@ pub(super) fn default_action_status_hint(app: &App) -> String {
         RowKind::MuxSession(mux) => mux.pin_id.as_deref(),
         _ => None,
     };
-    if selected_pin_id.is_some() {
-        let diagnostics = crate::tui::actions::selected_pin_diagnostics(app);
-        if let Some(hint) = crate::tui::actions::pin_status_hint(&diagnostics) {
-            if !hint.contains(" b bind") {
-                return format!("{hint} · b bind");
-            }
-            return hint;
-        }
-        if pin_placeholder_row_kind(&row.kind) {
-            let pin_id = selected_pin_id.unwrap_or("pin");
-            let pin = app
-                .snapshot_handle()
-                .and_then(|db| db.snapshot().pins.iter().find(|pin| pin.id == pin_id));
-            let display = pin.map_or(pin_id, |pin| pin.display_name.as_str());
-            let launch_hint = match pin.and_then(|p| p.binding.as_ref()) {
-                Some(crate::model::PinBinding::StaleMux { mux }) => format!(
-                    "Enter to relaunch `{display}` in existing mux `{}`",
-                    mux.native_id
-                ),
-                _ => format!("Enter to launch `{display}`"),
-            };
-            return format!("{launch_hint} · b bind · Del remove");
-        }
+    if let Some(pin_id) = selected_pin_id
+        && let Some(handle) = app.snapshot_handle()
+        && let Some(hint) = crate::tui::actions::pin_status_hint(handle.snapshot(), pin_id)
+    {
+        return hint;
     }
     match resolve_attach_target(app) {
         Ok(target) => {
@@ -528,14 +510,6 @@ pub(super) fn default_action_status_hint(app: &App) -> String {
             }
             attach_disabled_reason(&reason)
         }
-    }
-}
-
-pub(super) fn pin_placeholder_row_kind(kind: &RowKind) -> bool {
-    match kind {
-        RowKind::AgentSession(session) => row_primary_node_is_pin(&session.primary_node),
-        RowKind::MuxSession(mux) => row_primary_node_is_pin(&mux.primary_node),
-        _ => false,
     }
 }
 

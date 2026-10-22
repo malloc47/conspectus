@@ -1,9 +1,9 @@
 use super::*;
 use crate::model::{
-    AgentSessionId, AgentSessionNode, CheckoutId, CheckoutNode, Confidence, Diagnostic, ForgePrId,
-    ForgePrNode, GraphSnapshot, LinkEndpoint, LinkState, MuxSessionId, MuxSessionNode, PinBinding,
-    PinCandidate, PinMuxRef, Provenance, RepoId, RepoNode, RuntimeProcessId, RuntimeProcessNode,
-    RuntimeProcessRole, SourceMetadata, WorkspaceId, WorkspaceNode,
+    AgentSessionId, AgentSessionNode, CheckoutId, CheckoutNode, Confidence, ForgePrId, ForgePrNode,
+    GraphSnapshot, LinkEndpoint, LinkState, MuxSessionId, MuxSessionNode, PinKind, PinNode, RepoId,
+    RepoNode, RuntimeProcessId, RuntimeProcessNode, RuntimeProcessRole, SlotStatus, SourceMetadata,
+    WorkspaceId, WorkspaceNode,
 };
 use crate::resolve::resolve_snapshot;
 use std::path::PathBuf;
@@ -126,81 +126,19 @@ fn agent_session_with_no_mux_or_pr_shows_placeholders() {
 }
 
 #[test]
-fn agent_session_bound_to_ambiguous_pin_shows_bind_hint() {
-    let mut snapshot = GraphSnapshot::empty();
-    snapshot
-        .nodes
-        .push(agent("codex", "alpha", Some("/home/op/src/x"), None));
-    let chosen = AgentSessionId::new("codex", "/state", "alpha");
-    let competing = AgentSessionId::new("codex", "/state", "beta");
-    snapshot.pins.push(PinCandidate {
-        id: "ingest".to_string(),
-        display_name: "ingest".to_string(),
-        harness: "codex".to_string(),
-        cwd: "/home/op/src/x".to_string(),
-        mux: PinMuxRef {
-            backend: "tmux".to_string(),
-            name: "ingest".to_string(),
-            socket_name: None,
-        },
-        launch_argv: None,
-        reason: None,
-        provenance: Provenance::LocalPin,
-        store_path: "/home/op/src/x/.conspectus.toml".to_string(),
-        binding: Some(PinBinding::Bound {
-            mux: MuxSessionId::new("tmux:ingest"),
-            session: chosen.clone(),
-        }),
-    });
-    snapshot.diagnostics.push(Diagnostic::PinAmbiguous {
-        pin_id: "ingest".to_string(),
-        chosen: chosen.clone(),
-        competing: vec![competing],
-    });
-
-    let detail = build(
-        &snapshot,
-        &NodeId::AgentSession(chosen),
-        Some(home().as_path()),
-    );
-    let pin = detail
-        .header_fields
-        .iter()
-        .find(|field| field.label == "pin")
-        .expect("pin diagnostic field");
-
-    assert!(pin.value.contains("ingest ambiguous"));
-    assert!(pin.value.contains("chosen codex:alpha"));
-    assert!(pin.value.contains("competing codex:beta"));
-    assert_eq!(pin.annotation, Some("b to bind"));
-}
-
-#[test]
-fn agent_session_bound_to_healthy_pin_shows_pin_summary() {
+fn agent_session_pinned_by_a_slot_shows_pin_summary() {
     let mut snapshot = GraphSnapshot::empty();
     let session = AgentSessionId::new("codex", "/state", "alpha");
     snapshot
         .nodes
         .push(agent("codex", "alpha", Some("/home/op/src/x"), None));
-    snapshot.pins.push(PinCandidate {
-        id: "ingest".to_string(),
-        display_name: "ingest".to_string(),
-        harness: "codex".to_string(),
-        cwd: "/home/op/src/x".to_string(),
-        mux: PinMuxRef {
-            backend: "tmux".to_string(),
-            name: "ingest".to_string(),
-            socket_name: None,
-        },
-        launch_argv: None,
-        reason: None,
-        provenance: Provenance::LocalPin,
-        store_path: "/home/op/src/x/.conspectus.toml".to_string(),
-        binding: Some(PinBinding::Bound {
-            mux: MuxSessionId::new("tmux:ingest"),
-            session: session.clone(),
-        }),
-    });
+    snapshot.nodes.push(GraphNode::Pin(PinNode::for_test(
+        "ingest",
+        PinKind::Session,
+        Some(NodeId::AgentSession(session.clone())),
+        SlotStatus::Live,
+        &[("harness", "codex")],
+    )));
 
     let detail = build(
         &snapshot,
@@ -214,34 +152,25 @@ fn agent_session_bound_to_healthy_pin_shows_pin_summary() {
         .expect("pin summary field");
 
     assert!(pin.value.contains("ingest"));
-    assert!(pin.value.contains("bound"));
-    assert!(pin.value.contains(".conspectus.toml"));
+    assert!(pin.value.contains("session"));
+    assert!(pin.value.contains("live"));
 }
 
 #[test]
-fn mux_targeted_by_stale_pin_shows_pin_summary() {
+fn mux_pinned_by_a_gone_slot_shows_pin_summary() {
     let mut snapshot = GraphSnapshot::empty();
     let mux = MuxSessionId::new("tmux:ingest");
     snapshot.nodes.push(GraphNode::MuxSession(
         MuxSessionNode::new(mux.clone(), "tmux".to_string(), "ingest".to_string())
             .with_cwd("/home/op/src/x".to_string()),
     ));
-    snapshot.pins.push(PinCandidate {
-        id: "ingest".to_string(),
-        display_name: "ingest".to_string(),
-        harness: "codex".to_string(),
-        cwd: "/home/op/src/x".to_string(),
-        mux: PinMuxRef {
-            backend: "tmux".to_string(),
-            name: "ingest".to_string(),
-            socket_name: None,
-        },
-        launch_argv: None,
-        reason: None,
-        provenance: Provenance::LocalPin,
-        store_path: "/home/op/src/x/.conspectus.toml".to_string(),
-        binding: Some(PinBinding::StaleMux { mux: mux.clone() }),
-    });
+    snapshot.nodes.push(GraphNode::Pin(PinNode::for_test(
+        "ingest",
+        PinKind::Mux,
+        Some(NodeId::MuxSession(mux.clone())),
+        SlotStatus::Gone,
+        &[("name", "ingest")],
+    )));
 
     let detail = build(&snapshot, &NodeId::MuxSession(mux), Some(home().as_path()));
     let pin = detail
@@ -251,7 +180,7 @@ fn mux_targeted_by_stale_pin_shows_pin_summary() {
         .expect("pin summary field");
 
     assert!(pin.value.contains("ingest"));
-    assert!(pin.value.contains("stale-mux"));
+    assert!(pin.value.contains("gone"));
 }
 
 #[test]

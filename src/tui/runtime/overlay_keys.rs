@@ -32,7 +32,7 @@ pub(super) fn open_rename_overlay(app: &mut App) {
         }
         _ => {
             app.update(Msg::SetStatus(Some(
-                "rename: select an agent session, mux, or pin row first".to_string(),
+                "rename: select an agent session or mux row first".to_string(),
             )));
             return;
         }
@@ -360,34 +360,6 @@ pub(in crate::tui) fn handle_controls_overlay_key(
         OverlayOutcome::Commit(msg) => {
             app.close_controls_overlay();
             dispatch(app, *msg);
-        }
-    }
-}
-
-/// Handle the pins overlay's key event. A committed `Msg` goes to
-/// `deliver`, which is where the loop modes differ: the live loop
-/// reduces and executes it against the terminal, fixture mode keeps
-/// mutating pin actions off.
-pub(super) fn route_pins_overlay_key(
-    app: &mut App,
-    key: ratatui::crossterm::event::KeyEvent,
-    mut deliver: impl FnMut(&mut App, Msg),
-) {
-    use crate::tui::{Overlay, OverlayOutcome};
-    let ctx = app.pins_context();
-    let outcome = match app.pins_overlay_mut() {
-        Some(state) => state.handle(&ctx, key),
-        None => return,
-    };
-    match outcome {
-        OverlayOutcome::Consumed => {}
-        OverlayOutcome::Close => {
-            app.close_pins_overlay();
-        }
-        OverlayOutcome::CommitAndStay(msg) => deliver(app, *msg),
-        OverlayOutcome::Commit(msg) => {
-            app.close_pins_overlay();
-            deliver(app, *msg);
         }
     }
 }

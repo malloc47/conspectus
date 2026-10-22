@@ -940,17 +940,25 @@ fn apply_mutators(
     if let Some(loader) = &config.declared_config_loader {
         declared::apply_declared_links(snapshot, context, loader);
         aliases::apply_aliases(snapshot, context, loader);
-        // Fold in any project pin stores recorded by the registry
-        // sidecar so pins registered outside the scan
-        // root stay visible. Read fresh each cycle so a pin created
-        // during a live session appears on the next refresh.
-        let registry_stores = config
-            .pin_store_registry
-            .as_ref()
-            .map(super::pin_store_registry::PinStoreRegistry::read)
-            .unwrap_or_default();
-        pins::apply_pins(snapshot, context, loader, &registry_stores);
     }
+    // Pin slots (ADR 0141), read fresh each cycle so a slot added in
+    // another process shows up on the next refresh. Legacy entries
+    // load too until `pin migrate` converts them, found through the
+    // config loader and the old store registry.
+    let registry_stores = config
+        .legacy_pin_registry
+        .as_ref()
+        .map(crate::legacy_registry::PinStoreRegistry::read)
+        .unwrap_or_default();
+    pins::apply_pins(
+        snapshot,
+        context,
+        &pins::PinSources {
+            slots: config.pin_slots.as_ref(),
+            legacy_loader: config.declared_config_loader.as_ref(),
+            legacy_registry_stores: &registry_stores,
+        },
+    );
 }
 
 /// Configuration that controls which providers run during local discovery.
@@ -988,12 +996,12 @@ pub struct LocalDiscoveryConfig {
     /// [`Self::without_orchestrator`].
     pub orchestrator_roots: BTreeMap<String, PathBuf>,
     pub declared_config_loader: Option<ConfigLoader>,
-    /// Resolver for the pin-store registry sidecar (ADR 0090). When present, each discovery cycle reads the
-    /// registered project `.conspectus.toml` store paths and folds them
-    /// into the pin loader's search set so pins registered in repos
-    /// outside the scan root stay visible. `None` disables the registry
-    /// (tests and headless fixtures that don't want state-home I/O).
-    pub pin_store_registry: Option<crate::pin_store_registry::PinStoreRegistry>,
+    /// Where the pin slots live (ADR 0141). `None` loads none (tests,
+    /// headless fixtures, and the dev scenario builder).
+    pub pin_slots: Option<crate::pin_slots::SlotStore>,
+    /// The old store registry (ADR 0090), read until `pin migrate` has
+    /// converted every legacy entry. `None` skips it.
+    pub legacy_pin_registry: Option<crate::legacy_registry::PinStoreRegistry>,
     /// Read-only worktree backend used by git discovery to enumerate a
     /// repo's worktrees (ADR 0092). `None` disables worktree
     /// enumeration (tests / headless fixtures); `from_env` installs the
@@ -1107,7 +1115,8 @@ impl LocalDiscoveryConfig {
             hook_sidecar_root: hook_sidecar::default_sidecar_root(),
             orchestrator_roots,
             declared_config_loader: Some(ConfigLoader::from_env()),
-            pin_store_registry: Some(crate::pin_store_registry::PinStoreRegistry::from_env()),
+            pin_slots: crate::pin_slots::SlotStore::from_env(),
+            legacy_pin_registry: Some(crate::legacy_registry::PinStoreRegistry::from_env()),
             // Enumerate worktrees via the thin git backend
             // unless explicitly disabled. Read-only; ADR 0143 clean.
             worktree_backend: (env::var_os("CONSPECTUS_DISABLE_WORKTREE").is_none()).then(|| {
@@ -1132,7 +1141,8 @@ impl LocalDiscoveryConfig {
             orchestrator_roots: BTreeMap::new(),
             worktree_backend: None,
             declared_config_loader: None,
-            pin_store_registry: None,
+            pin_slots: None,
+            legacy_pin_registry: None,
             disabled_aux_harnesses: BTreeSet::new(),
             caches: Arc::default(),
             forge_fetch: forge::ForgeFetch::default(),

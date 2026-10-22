@@ -14,18 +14,17 @@ use std::process::Output;
 use std::sync::mpsc;
 use std::time::{Duration, Instant};
 
-use anyhow::{Result, bail};
+use anyhow::Result;
 use ratatui::DefaultTerminal;
 use ratatui::crossterm::event::{self, Event, KeyEventKind};
 use ratatui::layout::Rect;
 
 use crate::discovery::tmux::{MuxBackend, SystemTmux};
 use crate::model::MuxSessionId;
-use crate::pins::{PinEntry, PinLaunch, PinMux, PinStoreKind, PinWriteOutcome};
 use crate::resolve::resolve_snapshot;
 #[cfg(test)]
 use crate::tui::View;
-use crate::tui::actions::{AttachTarget, PinLaunchTarget};
+use crate::tui::actions::AttachTarget;
 use crate::tui::app::{App, Msg, SnapshotHandle};
 use crate::tui::effect::Effect;
 use crate::tui::keybindings::overlay as overlay_keymap;
@@ -34,7 +33,6 @@ use crate::tui::preview::{
     preview_source,
 };
 use crate::tui::resume::{ResumeTarget, launch_resume, resume_disabled_reason};
-use crate::tui::rows::RowId;
 use crate::tui::rows::RowTree;
 use crate::tui::viewer::{
     LaunchPlan, PathBinaryProbe, ViewerTarget, resolve_viewer_target, viewer_disabled_reason,
@@ -47,13 +45,11 @@ use crate::tui::{RunConfig, ui};
 mod executor;
 mod launch;
 mod overlay_keys;
-mod pin_store;
 mod worktree_exec;
 
 use executor::*;
 use launch::*;
 use overlay_keys::*;
-use pin_store::*;
 use worktree_exec::*;
 
 pub(super) use overlay_keys::{
@@ -459,14 +455,6 @@ impl LoopMode for LiveMode {
             Some(Action::MuxLaunchFormKey(key)) => {
                 handle_mux_launch_form_key(terminal, app, config, tmux, key);
             }
-            Some(Action::RemovePin) => remove_pin_action(terminal, app, config, tmux),
-            Some(Action::PinBindHint) => pin_bind_hint_action(app),
-            Some(Action::OpenPinCreate) => open_pin_create_action(app),
-            Some(Action::OpenPinRebind) => open_pin_rebind_action(app),
-            Some(Action::OpenPinAdopt) => open_pin_adopt_action(app),
-            Some(Action::LaunchPin) => {
-                dispatch_live(terminal, app, config, tmux, Msg::LaunchSelectedPin);
-            }
             Some(Action::OpenControls) => {
                 app.open_controls_overlay();
                 app.update(Msg::SetStatus(Some(format!(
@@ -475,18 +463,6 @@ impl LoopMode for LiveMode {
                 ))));
             }
             Some(Action::ControlsOverlayKey(key)) => handle_controls_overlay_key(app, key),
-            Some(Action::OpenPins) => {
-                app.open_pins_overlay();
-                app.update(Msg::SetStatus(Some(format!(
-                    "pins: {}",
-                    overlay_keymap::footer(overlay_keymap::MENU_KEYS)
-                ))));
-            }
-            Some(Action::PinsOverlayKey(key)) => {
-                route_pins_overlay_key(app, key, |app, msg| {
-                    dispatch_live(terminal, app, config, tmux, msg);
-                });
-            }
             Some(Action::SwitchView(view)) => dispatch(app, Msg::SwitchView(view)),
             Some(Action::CycleView(delta)) => {
                 let next = cycle_view(app.active_view(), delta);
@@ -625,16 +601,6 @@ impl LoopMode for StaticMode {
                 ))));
             }
             Some(Action::ControlsOverlayKey(key)) => handle_controls_overlay_key(app, key),
-            Some(Action::OpenPins) => {
-                app.open_pins_overlay();
-                app.update(Msg::SetStatus(Some(format!(
-                    "pins: {}",
-                    overlay_keymap::footer(overlay_keymap::MENU_KEYS)
-                ))));
-            }
-            Some(Action::PinsOverlayKey(key)) => {
-                route_pins_overlay_key(app, key, static_apply_pins_msg);
-            }
             Some(Action::SwitchView(view)) => dispatch(app, Msg::SwitchView(view)),
             Some(Action::CycleView(delta)) => {
                 let next = cycle_view(app.active_view(), delta);
@@ -699,9 +665,6 @@ impl LoopMode for StaticMode {
                     SelectedDefault::View => {
                         Msg::SetStatus(Some("scenario TUI is static; view is disabled".to_string()))
                     }
-                    SelectedDefault::LaunchPin => Msg::SetStatus(Some(
-                        "scenario TUI is static; pin launch is disabled".to_string(),
-                    )),
                 };
                 dispatch(app, msg);
             }
@@ -731,20 +694,6 @@ impl LoopMode for StaticMode {
             ) => {
                 app.update(Msg::SetStatus(Some(
                     "scenario TUI keeps mutating actions disabled".to_string(),
-                )));
-            }
-            Some(Action::RemovePin) => {
-                app.update(Msg::SetStatus(Some(
-                    "scenario TUI keeps mutating actions disabled".to_string(),
-                )));
-            }
-            Some(Action::PinBindHint) => pin_bind_hint_action(app),
-            Some(Action::OpenPinCreate) => open_pin_create_action(app),
-            Some(Action::OpenPinRebind) => open_pin_rebind_action(app),
-            Some(Action::OpenPinAdopt) => open_pin_adopt_action(app),
-            Some(Action::LaunchPin) => {
-                app.update(Msg::SetStatus(Some(
-                    "scenario TUI is static; pin launch is disabled".to_string(),
                 )));
             }
             Some(Action::ExplorerEnter) => explorer_enter_action(app),
@@ -843,9 +792,6 @@ fn overlay_key_from_event(app: &App, event: &Event) -> Option<Action> {
     }
     if app.controls_overlay().is_some() {
         return Some(Action::ControlsOverlayKey(key));
-    }
-    if app.pins_overlay().is_some() {
-        return Some(Action::PinsOverlayKey(key));
     }
     if app.search_overlay().is_some() {
         return Some(Action::SearchOverlayKey(key));
@@ -982,28 +928,6 @@ fn static_event_loop(
         recordings,
     };
     run_loop(terminal, app, config, mode)
-}
-
-#[cfg(any(test, debug_assertions, feature = "snapshot"))]
-fn static_apply_pins_msg(app: &mut App, msg: Msg) {
-    // Scenario TUI keeps every mutating pin action off. Anything
-    // that would write TOML or spawn a subprocess gets replaced
-    // with a status hint; harmless status/placeholder Msgs pass
-    // through to the reducer.
-    match msg {
-        Msg::PinCreate(_)
-        | Msg::PinEdit(_)
-        | Msg::PinBind(_)
-        | Msg::PinRemove(_)
-        | Msg::LaunchPinById(_) => {
-            app.update(Msg::SetStatus(Some(
-                "scenario TUI keeps mutating actions disabled".to_string(),
-            )));
-        }
-        other => {
-            app.update(other);
-        }
-    }
 }
 
 #[cfg(any(test, debug_assertions, feature = "snapshot"))]
@@ -1593,118 +1517,6 @@ pub(super) fn open_mux_menu_action(app: &mut App) {
     )));
 }
 
-fn remove_pin_action(
-    terminal: &mut DefaultTerminal,
-    app: &mut App,
-    config: &RunConfig,
-    tmux: &dyn MuxBackend,
-) {
-    let Some(selection) = app.selection().cloned() else {
-        app.update(Msg::SetStatus(Some(
-            "pin remove: nothing selected".to_string(),
-        )));
-        return;
-    };
-    let RowId::Pin { pin_id } = selection else {
-        app.set_pending_pin_remove(None);
-        app.update(Msg::SetStatus(Some(
-            "pin remove: select an unbound pin row".to_string(),
-        )));
-        return;
-    };
-    if app.pending_pin_remove() != Some(pin_id.as_str()) {
-        app.set_pending_pin_remove(Some(pin_id.clone()));
-        app.update(Msg::SetStatus(Some(format!(
-            "pin remove: press Delete again to remove `{pin_id}`"
-        ))));
-        return;
-    }
-    app.set_pending_pin_remove(None);
-    let Some(target) = app.pins_context().pin_target else {
-        app.update(Msg::SetStatus(Some(format!(
-            "pin remove: no editable pin `{pin_id}` in current selection"
-        ))));
-        return;
-    };
-    dispatch_live(
-        terminal,
-        app,
-        config,
-        tmux,
-        Msg::PinRemove(crate::tui::widgets::pins::PinRemoveRequest {
-            id: target.id,
-            display_name: target.display_name,
-            store_path: target.store_path,
-        }),
-    );
-}
-
-fn pin_bind_hint_action(app: &mut App) {
-    // Selection has competing PinAmbiguous candidates → open the
-    // picker directly. Otherwise fall back to the existing hint
-    // surface so the operator gets a single-line nudge instead of a
-    // silent press.
-    let options = app.pins_context().pin_bind_options;
-    if let Some(state) = crate::tui::widgets::pins::PinsOverlayState::open_with_bind(options) {
-        app.set_pins_overlay(state);
-        app.update(Msg::SetStatus(Some(
-            "pins: bind ↑/↓ pick · Enter confirm · Esc cancel".to_string(),
-        )));
-        return;
-    }
-    let diagnostics = crate::tui::actions::selected_pin_diagnostics(app);
-    let status = match crate::tui::actions::pin_bind_hint(&diagnostics) {
-        Some(message) => message,
-        None => "pin bind: select a pin-bound row with a PinAmbiguous diagnostic".to_string(),
-    };
-    dispatch(app, Msg::SetStatus(Some(status)));
-}
-
-fn open_pin_create_action(app: &mut App) {
-    // `N` is the new-stream entry (ADR 0094): open the create form with
-    // the worktree toggle pre-enabled. Plain pin creation stays one
-    // keystroke away via the `p` pins menu.
-    let ctx = app.pins_context();
-    let state = crate::tui::widgets::pins::PinsOverlayState::open_with_new_stream_context(&ctx);
-    app.set_pins_overlay(state);
-    app.update(Msg::SetStatus(Some(
-        "pins: new stream · Space toggles worktree · Enter create · Esc cancel".to_string(),
-    )));
-}
-
-fn open_pin_rebind_action(app: &mut App) {
-    let Some(target) = app.pins_context().pin_target else {
-        app.update(Msg::SetStatus(Some(
-            "pin rebind: select a pin row first".to_string(),
-        )));
-        return;
-    };
-    let state = crate::tui::widgets::pins::PinsOverlayState::open_with_rebind(target);
-    app.set_pins_overlay(state);
-    app.update(Msg::SetStatus(Some(
-        "pins: rebind mux · Enter save · Esc cancel".to_string(),
-    )));
-}
-
-fn open_pin_adopt_action(app: &mut App) {
-    // Adopt only makes sense from a live mux row: pin defaults are
-    // seeded from the mux's name, observed cwd, and current
-    // attribution. Refuse on any other selection so the operator
-    // doesn't have to type those fields from scratch.
-    let ctx = app.pins_context();
-    if ctx.pin_adopt_defaults.is_none() {
-        app.update(Msg::SetStatus(Some(
-            "pin adopt: select a live mux row first".to_string(),
-        )));
-        return;
-    }
-    let state = crate::tui::widgets::pins::PinsOverlayState::open_with_adopt_context(&ctx);
-    app.set_pins_overlay(state);
-    app.update(Msg::SetStatus(Some(
-        "pins: new pin · adopt enabled · Enter create · Esc cancel".to_string(),
-    )));
-}
-
 /// Append an informational advisory when the rename target is a
 /// live session per ADR 0029's live-session safety rule. "Live"
 /// here means the row's mux indicator was `Attached` or `Ambiguous`
@@ -2096,12 +1908,7 @@ pub(super) use crate::tui::keymap::cycle_view;
 fn acts_on_selected_row(action: &Action) -> bool {
     matches!(
         action,
-        Action::OpenRename
-            | Action::OpenWorktreeMenu
-            | Action::OpenWorktreeCloseDown
-            | Action::RemovePin
-            | Action::OpenPinRebind
-            | Action::OpenPinAdopt
+        Action::OpenRename | Action::OpenWorktreeMenu | Action::OpenWorktreeCloseDown
     )
 }
 
@@ -2115,9 +1922,6 @@ fn default_action(
         SelectedDefault::ToggleExpand => dispatch(app, Msg::ToggleExpand),
         SelectedDefault::Attach => dispatch_live(terminal, app, config, tmux, Msg::AttachSelected),
         SelectedDefault::View => dispatch_live(terminal, app, config, tmux, Msg::ViewSelected),
-        SelectedDefault::LaunchPin => {
-            dispatch_live(terminal, app, config, tmux, Msg::LaunchSelectedPin);
-        }
     }
 }
 

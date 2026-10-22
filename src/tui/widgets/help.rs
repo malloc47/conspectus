@@ -227,10 +227,6 @@ fn keymap_sections() -> Vec<HelpSection> {
                     "f",
                     "Open the controls overlay (view / grouping / filters / sort / preview wrap)",
                 ),
-                Binding::new(
-                    "p",
-                    "Open the pins overlay (create / edit / remove / bind / rebind / adopt)",
-                ),
                 Binding::new("!", crate::tui::keybindings::MESSAGES_HELP),
                 Binding::new("?", "This help"),
             ],
@@ -249,7 +245,7 @@ fn keymap_sections() -> Vec<HelpSection> {
                 ),
                 Binding::new(
                     "R",
-                    "Rename the selected agent session (alias), mux (tmux + pin cascade), or pin's display name",
+                    "Rename the selected agent session (alias) or mux (tmux + pin slot cascade)",
                 ),
                 Binding::new(
                     "w",
@@ -257,7 +253,7 @@ fn keymap_sections() -> Vec<HelpSection> {
                 ),
                 Binding::new(
                     "X",
-                    "Close down the selected stream: merge or discard the branch, end its sessions, remove the worktree, drop its pins",
+                    "Close down the selected stream: merge or discard the branch, end its sessions, remove the worktree, forget its history",
                 ),
                 Binding::new(
                     "v",
@@ -277,40 +273,12 @@ fn keymap_sections() -> Vec<HelpSection> {
             bindings: vec![
                 Binding::new(
                     "n",
-                    "Create a bare tmux session (no pin, no agent, no worktree) — shell in the selected cwd",
+                    "Create a bare tmux session (no agent, no worktree) — shell in the selected cwd",
                 ),
                 Binding::new(
                     "m",
-                    "Open the Mux action menu — pick between new bare session and launching a harness in a fresh mux with no pin",
+                    "Open the Mux action menu — pick between new bare session and launching a harness in a fresh mux",
                 ),
-            ],
-        },
-        HelpSection {
-            title: "Pins",
-            bindings: vec![
-                Binding::new("p", "Open the pins overlay (menu listing every action)"),
-                Binding::new(
-                    "N",
-                    "New stream — opens the create form (worktree toggle pre-enabled) seeded from the current selection; Space toggles the worktree off for a plain pin",
-                ),
-                Binding::new(
-                    "L",
-                    "Launch the selected pin (same code path as Enter on an unbound pin row)",
-                ),
-                Binding::new(
-                    "R",
-                    "Rename the selected pin's display name (same key as session rename)",
-                ),
-                Binding::new(
-                    "B",
-                    "Rebind the selected pin's mux target (mux name + optional socket)",
-                ),
-                Binding::new(
-                    "b",
-                    "Bind picker for the selected PinAmbiguous row (status hint otherwise)",
-                ),
-                Binding::new("A", "Adopt the selected live mux row as a new pin"),
-                Binding::new("Delete", "Remove the selected pin (two-press confirmation)"),
             ],
         },
         HelpSection {
@@ -516,7 +484,7 @@ fn push_mux_state_legend(lines: &mut Vec<Line<'static>>, theme: &Theme) {
             "◌",
             Style::default().fg(theme.pin_placeholder),
             "Pin placeholder",
-            "pinned mux session that isn't running",
+            "pin slot whose target isn't running",
         ),
         (
             "?",

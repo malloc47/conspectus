@@ -7,9 +7,6 @@
 //! accelerators (`v`, `1`–`5`, `]`/`[`, `f`, `F`, `G`) reach the
 //! same outcomes for muscle-memory operators.
 //!
-//! Pin CRUD lives in its own [`pins`](super::pins) overlay, opened
-//! with `p` or the direct shortcuts (`N`/`B`/`A`/`b`/`R`/`Delete`).
-//!
 //! ## Architecture
 //!
 //! The overlay holds **only** what is unique to its UI: a cursor

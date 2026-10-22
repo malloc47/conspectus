@@ -6,8 +6,7 @@
 //! stories per `docs/implementation/phase-08-interactive-tui.md`.
 
 use crate::model::{
-    AgentSessionId, Diagnostic, GraphLink, GraphSnapshot, MuxSessionId, MuxSessionNode, NodeId,
-    PinBinding, PinLastSession, PinSessionClaim, RelationKind,
+    AgentSessionId, GraphLink, GraphSnapshot, MuxSessionId, MuxSessionNode, NodeId, RelationKind,
 };
 use crate::tui::app::App;
 use crate::tui::rows::{RowId, RowKind};
@@ -37,53 +36,6 @@ impl AttachTarget {
     /// `tmux:editor`, matching what the backend itself lists.
     pub fn label(&self) -> String {
         format!("{}:{}", self.backend, self.native_id)
-    }
-}
-
-/// Pin diagnostic attached to the currently selected row. Mirrors
-/// ADR 0057's resolver diagnostics but keeps only the fields needed
-/// by the TUI.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum PinDiagnosticView {
-    Unbound {
-        pin_id: String,
-        expected_mux_native_id: String,
-        /// Optional last-recorded session from the pin-bindings
-        /// sidecar (ADR 0058). When present, the launch path can
-        /// advertise a "resume `<id>`" affordance instead of a plain
-        /// "launch" hint.
-        last_session: Option<PinLastSession>,
-    },
-    StaleMux {
-        pin_id: String,
-        mux: MuxSessionId,
-        /// Sessions this mux had evidence for that other pins bound
-        /// first (ADR 0102).
-        claimed_elsewhere: Vec<PinSessionClaim>,
-        /// The pane already runs the pin's harness, so `Enter`
-        /// attaches rather than relaunching into it.
-        harness_running: bool,
-    },
-    Ambiguous {
-        pin_id: String,
-        chosen: AgentSessionId,
-        competing: Vec<AgentSessionId>,
-    },
-    Drift {
-        pin_id: String,
-        declared_cwd: String,
-        observed_cwd: String,
-    },
-}
-
-impl PinDiagnosticView {
-    pub fn pin_id(&self) -> &str {
-        match self {
-            Self::Unbound { pin_id, .. }
-            | Self::StaleMux { pin_id, .. }
-            | Self::Ambiguous { pin_id, .. }
-            | Self::Drift { pin_id, .. } => pin_id,
-        }
     }
 }
 
@@ -144,7 +96,12 @@ pub fn resolve_attach_target(app: &App) -> Result<AttachTarget, AttachDisabled> 
         // row's target.
         (_, RowId::Pin { pin_id }) => match pin_live_mux(snapshot, pin_id) {
             Some(id) => id,
-            None => return Err(AttachDisabled::UnmuxedSession),
+            None => {
+                return Err(match pin_status_hint(snapshot, pin_id) {
+                    Some(_) => AttachDisabled::MuxGone(pin_id.clone()),
+                    None => AttachDisabled::UnmuxedSession,
+                });
+            }
         },
         (RowKind::AgentSessionMuxCandidate(candidate), _) => candidate.mux.clone(),
         (RowKind::AgentSession(session), _) => {
@@ -257,181 +214,40 @@ pub fn resolve_view_session(app: &App) -> Result<AgentSessionId, ViewerDisabled>
     }
 }
 
-/// Diagnostics for the selected pin-bearing row. Unbound/stale pin
-/// rows carry the pin id directly; bound pin rows surface as regular
-/// agent-session rows with `pin_id` set.
-/// The live mux pin `pin_id` is bound to, if any.
+/// The live mux the slot `pin_id` points at, if any.
 pub fn pin_live_mux(snapshot: &GraphSnapshot, pin_id: &str) -> Option<MuxSessionId> {
-    let pin = snapshot.pins.iter().find(|pin| pin.id == pin_id)?;
-    match pin.binding.as_ref()? {
-        PinBinding::StaleMux { mux } | PinBinding::Bound { mux, .. } => Some(mux.clone()),
-        PinBinding::Unbound => None,
-    }
-}
-
-pub fn selected_pin_diagnostics(app: &App) -> Vec<PinDiagnosticView> {
-    let Some(selection) = app.selection() else {
-        return Vec::new();
-    };
-    let Some(row) = app.tree().rows.iter().find(|r| &r.id == selection) else {
-        return Vec::new();
-    };
-    let pin_id = match &row.kind {
-        RowKind::AgentSession(session) => session.pin_id.as_deref(),
-        RowKind::MuxSession(mux) => mux.pin_id.as_deref(),
+    let pin = crate::tui::rows::pin_nodes(snapshot)
+        .into_iter()
+        .find(|pin| pin.id.id == pin_id)?;
+    match crate::tui::rows::live_pin_target(snapshot, pin)? {
+        NodeId::MuxSession(id) => Some(id),
         _ => None,
-    };
-    let Some(pin_id) = pin_id else {
-        return Vec::new();
-    };
-    let Some(handle) = app.snapshot_handle() else {
-        return Vec::new();
-    };
-    pin_diagnostics_for_id(handle.snapshot(), pin_id)
-}
-
-pub fn pin_diagnostics_for_id(snapshot: &GraphSnapshot, pin_id: &str) -> Vec<PinDiagnosticView> {
-    snapshot
-        .diagnostics
-        .iter()
-        .filter_map(|diagnostic| match diagnostic {
-            Diagnostic::PinUnbound {
-                pin_id: id,
-                expected_mux_native_id,
-                last_session,
-            } if id == pin_id => Some(PinDiagnosticView::Unbound {
-                pin_id: id.clone(),
-                expected_mux_native_id: expected_mux_native_id.clone(),
-                last_session: last_session.clone(),
-            }),
-            Diagnostic::PinStaleMux {
-                pin_id: id,
-                mux,
-                claimed_elsewhere,
-            } if id == pin_id => Some(PinDiagnosticView::StaleMux {
-                pin_id: id.clone(),
-                mux: mux.clone(),
-                claimed_elsewhere: claimed_elsewhere.clone(),
-                harness_running: snapshot.pins.iter().find(|pin| pin.id == *id).is_some_and(
-                    |pin| crate::resolve::pins::mux_hosts_harness(snapshot, mux, &pin.harness),
-                ),
-            }),
-            Diagnostic::PinAmbiguous {
-                pin_id: id,
-                chosen,
-                competing,
-            } if id == pin_id => Some(PinDiagnosticView::Ambiguous {
-                pin_id: id.clone(),
-                chosen: chosen.clone(),
-                competing: competing.clone(),
-            }),
-            Diagnostic::PinDrift {
-                pin_id: id,
-                declared_cwd,
-                observed_cwd,
-            } if id == pin_id => Some(PinDiagnosticView::Drift {
-                pin_id: id.clone(),
-                declared_cwd: declared_cwd.clone(),
-                observed_cwd: observed_cwd.clone(),
-            }),
-            _ => None,
-        })
-        .collect()
-}
-
-/// What `Enter` does on a `StaleMux` pin: relaunch the harness into
-/// the idle pane, or just attach when the harness is already running
-/// there.
-pub fn stale_mux_enter_hint(harness_running: bool) -> &'static str {
-    if harness_running {
-        "Enter attach (harness running, session not identified)"
-    } else {
-        "Enter relaunch"
     }
 }
 
-pub fn pin_status_hint(diagnostics: &[PinDiagnosticView]) -> Option<String> {
-    diagnostics
-        .iter()
-        .find_map(|diagnostic| match diagnostic {
-            PinDiagnosticView::Ambiguous {
-                pin_id,
-                chosen,
-                competing,
-            } => Some(format!(
-                "pin `{pin_id}` ambiguous: chosen {} · {} competing · b bind",
-                session_label(chosen),
-                competing.len()
-            )),
-            _ => None,
-        })
-        .or_else(|| {
-            diagnostics.iter().find_map(|diagnostic| match diagnostic {
-                PinDiagnosticView::Drift {
-                    pin_id,
-                    declared_cwd,
-                    observed_cwd,
-                } => Some(format!(
-                    "pin `{pin_id}` cwd drift: declared {declared_cwd} · observed {observed_cwd}"
-                )),
-                _ => None,
-            })
-        })
-        .or_else(|| {
-            diagnostics.iter().find_map(|diagnostic| match diagnostic {
-                PinDiagnosticView::StaleMux {
-                    pin_id,
-                    mux,
-                    harness_running,
-                    ..
-                } => Some(format!(
-                    "pin `{pin_id}` stale mux {}: {}",
-                    mux.native_id,
-                    stale_mux_enter_hint(*harness_running)
-                )),
-                PinDiagnosticView::Unbound {
-                    pin_id,
-                    expected_mux_native_id,
-                    last_session,
-                } => Some(match last_session {
-                    Some(last) => format!(
-                        "pin `{pin_id}` unbound: expected {expected_mux_native_id} · \
-                         Enter resume `{}`",
-                        last.session_id
-                    ),
-                    None => format!(
-                        "pin `{pin_id}` unbound: expected {expected_mux_native_id} · Enter launch"
-                    ),
-                }),
-                _ => None,
-            })
-        })
-}
-
-pub fn pin_bind_hint(diagnostics: &[PinDiagnosticView]) -> Option<String> {
-    diagnostics.iter().find_map(|diagnostic| {
-        let PinDiagnosticView::Ambiguous {
-            pin_id,
-            chosen,
-            competing,
-        } = diagnostic
-        else {
-            return None;
-        };
-        let candidates = std::iter::once(chosen)
-            .chain(competing.iter())
-            .map(session_label)
-            .collect::<Vec<_>>()
-            .join(", ");
-        Some(format!(
-            "pin bind `{pin_id}`: choose one of [{candidates}] with `{} pin bind {pin_id} --to <session-id>`",
-            crate::invocation::invoked_name()
-        ))
-    })
-}
-
-fn session_label(id: &AgentSessionId) -> String {
-    format!("{}:{}", id.harness_key, id.session_key)
+/// One-line status for the slot `pin_id` when it needs the operator's
+/// attention: the target is gone, unchecked, unresolved, or not built
+/// yet. `None` for a live slot.
+pub fn pin_status_hint(snapshot: &GraphSnapshot, pin_id: &str) -> Option<String> {
+    let pin = crate::tui::rows::pin_nodes(snapshot)
+        .into_iter()
+        .find(|pin| pin.id.id == pin_id)?;
+    let rebuild = format!("{} rebuild {pin_id}", crate::invocation::invoked_name());
+    match pin.status {
+        crate::model::SlotStatus::Live => None,
+        crate::model::SlotStatus::Gone => Some(format!(
+            "pin `{pin_id}` is gone · `{rebuild}` brings it back"
+        )),
+        crate::model::SlotStatus::Unknown => Some(format!(
+            "pin `{pin_id}`: couldn't check whether its target exists"
+        )),
+        crate::model::SlotStatus::Missing => Some(format!(
+            "pin `{pin_id}`: target not found · `pin retarget {pin_id} <target>` or `{rebuild}`"
+        )),
+        crate::model::SlotStatus::Planned => {
+            Some(format!("pin `{pin_id}` isn't built yet · `{rebuild}`"))
+        }
+    }
 }
 
 /// Inverse of [`preferred_mux_for_session`]: find the resolver-
@@ -516,10 +332,13 @@ pub fn attach_disabled_reason(reason: &AttachDisabled) -> String {
             format!("attach: refusing to attach current tmux session `{name}`")
         }
         AttachDisabled::AmbiguousGroupMuxes(n) => {
-            format!("attach: {n} ambiguous muxes here — pick one in detail, or `b` to bind",)
+            format!("attach: {n} ambiguous muxes here — pick one in the detail pane")
         }
         AttachDisabled::MuxGone(name) => {
-            format!("attach: `{name}` is gone; Enter rebuilds it")
+            format!(
+                "attach: `{name}` isn't running · `{} rebuild {name}` brings it back",
+                crate::invocation::invoked_name()
+            )
         }
     }
 }
@@ -534,74 +353,6 @@ pub fn lookup_mux_node<'a>(
         crate::model::GraphNode::MuxSession(mux) if mux.id == target.mux => Some(mux),
         _ => None,
     })
-}
-
-/// Resolved tmux launch target for a pin (ADR 0057). Carries the
-/// pin's declared mux name and optional socket so the executor can
-/// attach to the session once `conspectus pin launch <id>`
-/// finishes. `None` when the pin has no attachable target yet
-/// (e.g. the launch synthesized a mux the operator asked us to
-/// leave detached).
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct PinLaunchTarget {
-    /// The pin's declared mux. Attach goes through `mux.backend` only.
-    pub mux: crate::model::PinMuxRef,
-}
-
-/// Reasons `Msg::LaunchSelectedPin` refuses to fire in the reducer.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum PinLaunchDisabled {
-    /// No selection to derive a pin from.
-    NoSelection,
-    /// The selected row is not a pin, a pin-bound session, or a
-    /// pin-bound mux — nothing to launch.
-    NotAPinRow,
-}
-
-/// Format `PinLaunchDisabled` as an operator-facing status hint.
-pub fn pin_launch_disabled_reason(reason: &PinLaunchDisabled) -> String {
-    match reason {
-        PinLaunchDisabled::NoSelection => "launch: nothing selected".to_string(),
-        PinLaunchDisabled::NotAPinRow => "launch: select a pin or placeholder row".to_string(),
-    }
-}
-
-/// Look up a pin's launch target from the loaded snapshot. Public
-/// so both the reducer (via `resolve_launch_pin`) and the Pins-
-/// overlay dispatch (which already has the `pin_id` in hand from
-/// the modal) can share the same lookup.
-pub fn pin_launch_target_from_snapshot(app: &App, pin_id: &str) -> Option<PinLaunchTarget> {
-    app.snapshot_handle()?
-        .snapshot()
-        .pins
-        .iter()
-        .find(|pin| pin.id == pin_id)
-        .map(|pin| PinLaunchTarget {
-            mux: pin.mux.clone(),
-        })
-}
-
-/// Resolve the launch-pin action against `App` state. Pure. Returns
-/// the pin id plus its optional attach target on success. The
-/// executor is the only code that runs the launch subprocess.
-pub fn resolve_launch_pin(
-    app: &App,
-) -> Result<(String, Option<PinLaunchTarget>), PinLaunchDisabled> {
-    let selection = app.selection().ok_or(PinLaunchDisabled::NoSelection)?;
-    let row = app
-        .tree()
-        .rows
-        .iter()
-        .find(|row| &row.id == selection)
-        .ok_or(PinLaunchDisabled::NoSelection)?;
-    let pin_id = match &row.kind {
-        RowKind::AgentSession(session) => session.pin_id.as_deref(),
-        RowKind::MuxSession(mux) => mux.pin_id.as_deref(),
-        _ => None,
-    };
-    let pin_id = pin_id.ok_or(PinLaunchDisabled::NotAPinRow)?.to_string();
-    let target = pin_launch_target_from_snapshot(app, &pin_id);
-    Ok((pin_id, target))
 }
 
 #[cfg(test)]

@@ -1,16 +1,15 @@
 //! Shared launch-spec form primitive (ADR 0097).
 //!
-//! Container for the fields that pin-create and mux-launch share:
+//! Container for the fields the mux-launch form uses:
 //! harness, cwd (with autocomplete), mux name + socket, launch argv
 //! override, worktree toggle + branch, plus known-harness and known-
 //! live-mux collections used for autocomplete + collision detection.
 //!
-//! Wrappers ([`crate::tui::widgets::pins::PinCreateState`],
-//! [`crate::tui::widgets::mux_launch::MuxLaunchFormState`]) hold this
-//! by composition, own their own cursor sequence + rendering, and
-//! decide which of the primitive's fields are visible in their layout.
-//! Neither wrapper reads or writes the shared fields except through
-//! this struct's accessors.
+//! Wrappers ([`crate::tui::widgets::mux_launch::MuxLaunchFormState`])
+//! hold this by composition, own their own cursor sequence +
+//! rendering, and decide which of the primitive's fields are visible
+//! in their layout. A wrapper reads or writes the shared fields only
+//! through this struct's accessors.
 //!
 //! No cursor lives here. No Msg dispatch lives here. The primitive is
 //! pure state + a handful of validation helpers that both wrappers
@@ -21,9 +20,9 @@ use ratatui::crossterm::event::KeyEvent;
 use crate::tui::widgets::input::{InputOutcome, TextInputState};
 use crate::tui::widgets::path_omnibox::{PathCandidate, PathOmniboxOutcome, PathOmniboxState};
 
-/// Owned state for the launch-spec form's shared fields. Both
-/// `PinCreateState` and `MuxLaunchFormState` embed this exactly once
-/// and route every read/write of a shared field through the accessors.
+/// Owned state for the launch-spec form's shared fields.
+/// `MuxLaunchFormState` embeds this exactly once and routes every
+/// read/write of a shared field through the accessors.
 #[derive(Debug, Clone)]
 pub struct LaunchSpecFormState {
     harness: TextInputState,
@@ -144,16 +143,14 @@ impl LaunchSpecFormState {
         self.harness = TextInputState::new(title.into(), value);
     }
 
-    /// Replace the mux-name field wholesale — the pin-create adopt
-    /// flow re-derives this from the current mode / id, so the
-    /// wholesale-replace shape matches the existing behavior.
+    /// Replace the mux-name field wholesale.
     pub fn set_mux_name(&mut self, title: impl Into<String>, value: impl Into<String>) {
         self.mux_name = TextInputState::new(title.into(), value);
     }
 
-    /// Replace the launch-argv field wholesale (harness cycling in
-    /// pin-create rebuilds this when the previous value matched the
-    /// old harness's default).
+    /// Replace the launch-argv field wholesale (harness cycling
+    /// rebuilds this when the previous value matched the old
+    /// harness's default).
     pub fn set_launch_argv(&mut self, title: impl Into<String>, value: impl Into<String>) {
         self.launch_argv = TextInputState::new(title.into(), value);
     }
@@ -213,8 +210,7 @@ impl LaunchSpecFormState {
     }
 
     /// `true` when the currently-typed mux name matches any known
-    /// live mux (used by pin-create's adopt trigger and mux-launch's
-    /// hard-error collision check).
+    /// live mux (used by mux-launch's hard-error collision check).
     pub fn mux_name_collides_with_known(&self) -> bool {
         let name = self.mux_name.value().trim();
         if name.is_empty() {
@@ -224,7 +220,7 @@ impl LaunchSpecFormState {
     }
 
     /// The known-mux entry whose native name matches the typed mux
-    /// name, if any. Used by pin-create's adopt provenance.
+    /// name, if any.
     pub fn matching_known_mux_name(&self) -> Option<&str> {
         let name = self.mux_name.value().trim();
         if name.is_empty() {

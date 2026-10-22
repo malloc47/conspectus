@@ -12,10 +12,150 @@ use crate::discovery::harness::{adapter_in_command, launch_argv_for};
 use crate::history::project::live_mux_for;
 use crate::history::recorder::short_ref;
 use crate::model::{
-    ArgvSource, CheckoutId, FieldSource, FieldValue, ForgePrId, GraphNode, GraphSnapshot,
-    MuxRecord, MuxSessionId, NodeId, NodePresence, PinKind, PinSlot, RecipeField, RepoId,
-    SlotStatus, SlotTarget,
+    ArgvSource, CheckoutId, Confidence, FieldSource, FieldValue, ForgePrId, ForgePrNode, Freshness,
+    GraphLink, GraphNode, GraphSnapshot, LinkEndpoint, MuxRecord, MuxSessionId, NodeId,
+    NodePresence, NodeProvenance, PinId, PinKind, PinNode, PinSlot, Provenance, RecipeField,
+    RelationKind, RepoId, SlotStatus, SlotTarget, UnresolvedEndpoint,
 };
+
+/// The adapter and provider key pin nodes and their links carry.
+pub const PINS_ADAPTER: &str = "pins";
+
+/// Build the `PinNode` for every slot, with its status and effective
+/// recipe, and a `pin_targets` link to what it points at. Idempotent:
+/// it drops what an earlier pass built first, so the daemon can
+/// resolve an already-resolved snapshot again.
+///
+/// A PR slot whose PR left the open listing still needs a PR node to
+/// point at, so the node is projected from the PR's history record
+/// (ADR 0140).
+pub fn apply_slots(snapshot: &mut GraphSnapshot) {
+    snapshot
+        .nodes
+        .retain(|node| !matches!(node, GraphNode::Pin(_)));
+    snapshot
+        .node_provenance
+        .retain(|id, _| !matches!(id, NodeId::Pin(_)));
+    snapshot
+        .candidate_links
+        .retain(|link| link.source_metadata.adapter != PINS_ADAPTER);
+
+    let slots = snapshot.pins.clone();
+    let mut resolved: Vec<(PinSlot, ResolvedSlot)> = Vec::with_capacity(slots.len());
+    for slot in slots {
+        let resolution = resolve_slot(snapshot, &slot);
+        project_pr(snapshot, &resolution);
+        resolved.push((slot, resolution));
+    }
+
+    for (slot, resolution) in resolved {
+        let pin_id = PinId::new(slot.id.clone());
+        let id = NodeId::Pin(pin_id.clone());
+        let node = PinNode {
+            id: pin_id,
+            kind: slot.kind,
+            label: slot.label(),
+            target: slot.target.clone(),
+            target_node: resolution.target_node.clone(),
+            status: resolution.status,
+            overrides: slot.overrides.clone(),
+            snapshot: slot.snapshot.clone(),
+            effective: resolution.effective.clone(),
+            order: slot.order,
+            legacy: slot.legacy,
+            pinned_at: slot.pinned_at.clone(),
+        };
+        snapshot.node_provenance.insert(
+            id.clone(),
+            NodeProvenance {
+                provider: PINS_ADAPTER.to_string(),
+                freshness_epoch: None,
+            },
+        );
+        snapshot.nodes.push(GraphNode::Pin(node));
+        if let Some(target) = &resolution.target_node {
+            snapshot
+                .candidate_links
+                .push(target_link(snapshot, &slot, id, target));
+        }
+    }
+    snapshot.canonicalize();
+}
+
+fn target_link(
+    snapshot: &GraphSnapshot,
+    slot: &PinSlot,
+    source: NodeId,
+    target: &NodeId,
+) -> GraphLink {
+    let endpoint = if snapshot.find_node(target).is_some() {
+        LinkEndpoint::Node { id: target.clone() }
+    } else {
+        // The target is real but outside this scan: a checkout whose
+        // root exists but isn't under the scan roots.
+        LinkEndpoint::Unresolved {
+            evidence: UnresolvedEndpoint {
+                node_type: slot.kind.as_str().to_string(),
+                harness_key: None,
+                native_id: Some(target.to_string()),
+                state_scope: None,
+                path: None,
+                metadata: Default::default(),
+            },
+        }
+    };
+    let mut link = GraphLink::new(
+        format!("pin:{}:targets", slot.id),
+        source,
+        endpoint,
+        RelationKind::PinTargets,
+        Provenance::GlobalPin,
+    );
+    link.confidence = Confidence::High;
+    link.freshness = Freshness::Fresh;
+    link.source_metadata.adapter = PINS_ADAPTER.to_string();
+    link
+}
+
+/// Add a PR node from history for a PR slot whose PR is no longer
+/// listed.
+fn project_pr(snapshot: &mut GraphSnapshot, resolution: &ResolvedSlot) {
+    let (Some(NodeId::ForgePr(id)), Some(record_id)) =
+        (&resolution.target_node, &resolution.record_id)
+    else {
+        return;
+    };
+    if snapshot.find_node(&NodeId::ForgePr(id.clone())).is_some() {
+        return;
+    }
+    let Some(record) = snapshot.history.pr(record_id) else {
+        return;
+    };
+    let r = &record.recipe;
+    let node = ForgePrNode {
+        id: id.clone(),
+        provider: r.provider.clone(),
+        host: r.host.clone(),
+        owner: r.owner.clone(),
+        repo: r.repo.clone(),
+        number: r.number,
+        state: r.state.clone(),
+        title: r.title.clone(),
+        url: r.url.clone(),
+        updated_epoch: None,
+        is_draft: r.draft,
+        head_ref: r.head_ref.clone(),
+    };
+    let last_seen = record.meta.last_seen;
+    snapshot.node_provenance.insert(
+        NodeId::ForgePr(id.clone()),
+        NodeProvenance {
+            provider: crate::history::HISTORY_ADAPTER.to_string(),
+            freshness_epoch: Some(last_seen),
+        },
+    );
+    snapshot.nodes.push(GraphNode::ForgePr(node));
+}
 
 /// What a slot resolves to.
 #[derive(Clone, Debug, PartialEq)]

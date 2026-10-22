@@ -11,7 +11,6 @@ pub mod mux_launch;
 pub mod mux_menu;
 pub mod new_mux;
 pub mod path_omnibox;
-pub mod pins;
 pub mod popup_frame;
 pub mod search;
 pub mod toast;

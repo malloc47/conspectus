@@ -190,7 +190,7 @@ pub enum Msg {
     /// A refresh spawned after the last hand-off landed (or failed);
     /// the pending rows show current values again.
     HandoffSettled,
-    /// A pin launch is starting `mux` (ADR 0127). Marks the mux row
+    /// A launch is starting `mux` (ADR 0127). Marks the mux row
     /// and its linked sessions with the hand-off's dim-and-spinner
     /// treatment so the row being acted on shows progress. Unlike
     /// [`Msg::HandoffReturned`] it asks for no refresh: the attach
@@ -227,41 +227,9 @@ pub enum Msg {
     /// (and the accompanying filesystem read) happens in the
     /// executor, not here.
     ViewSelected,
-    /// Launch the pin backing the current selection (ADR 0085
-    /// contract 2). The reducer resolves the pin id + optional
-    /// attach target via `resolve_launch_pin` and emits either
-    /// `Effect::Exec(ExecSpec::LaunchPin { pin_id, attach_target })`
-    /// or `Effect::Toast(reason)`.
-    LaunchSelectedPin,
-    /// Launch a specific pin by id (ADR 0057 / ADR 0058). Used by
-    /// the Pins overlay's launch entry, which already knows the
-    /// pin id and doesn't need selection-based resolution. The
-    /// reducer looks up the optional attach target from the held
-    /// snapshot and emits
-    /// `Effect::Exec(ExecSpec::LaunchPin { pin_id, attach_target })`.
-    LaunchPinById(String),
-    /// Remove a pin declaration from its TOML store (ADR 0057).
-    /// Carries the already-resolved `PinRemoveRequest`; the
-    /// reducer emits `Effect::WriteStore(StoreOp::PinRemove(...))`
-    /// and the executor performs the write.
-    PinRemove(crate::tui::widgets::pins::PinRemoveRequest),
-    /// Write a pin-binding declaration linking a pin to an existing
-    /// agent session (ADR 0057 / ADR 0058). The reducer checks that
-    /// a graph snapshot is loaded (needed for the target lookup at
-    /// executor time) and emits either
-    /// `Effect::WriteStore(StoreOp::PinBind(...))` or
-    /// `Effect::Toast(reason)`.
-    PinBind(crate::tui::widgets::pins::PinBindRequest),
-    /// Write a new pin entry (ADR 0057). When the request carries
-    /// an `adopt_source_mux_name`, the executor chains a tmux
-    /// rename after the write to promote the adopted mux to the
-    /// pin's declared name.
-    PinCreate(crate::tui::widgets::pins::PinCreateRequest),
-    /// Update an existing pin entry (ADR 0057).
-    PinEdit(crate::tui::widgets::pins::PinEditRequest),
     /// Confirm the rename overlay's typed value (ADR 0029).
-    /// Reducer resolves the selected row and emits either a pin
-    /// edit, an agent-session alias rename, or a "lost selection"
+    /// Reducer resolves the selected row and emits either a mux
+    /// rename, an agent-session alias rename, or a "lost selection"
     /// toast. The alias-rename branch also chains an optional
     /// native mux rename inside the executor per lockstep.
     CommitRename(String),

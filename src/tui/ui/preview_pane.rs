@@ -207,15 +207,14 @@ fn field_view(
     }
 }
 
-/// What a node with no source previews instead: a pin's diagnostics,
-/// which say why it has no session or pane to show (ADR 0112 §1).
+/// What a node with no source previews instead: a slot's status,
+/// which says why it has no session or pane to show (ADR 0112 §1).
 pub(super) fn sourceless_node_text(app: &App, node: &NodeId) -> Option<Text<'static>> {
     let NodeId::Pin(pin) = node else {
         return None;
     };
     let snapshot = app.snapshot_handle()?.snapshot();
-    let diagnostics = crate::tui::actions::pin_diagnostics_for_id(snapshot, &pin.id);
-    (!diagnostics.is_empty()).then(|| Text::raw(render_pin_diagnostics(&diagnostics)))
+    render_pin_summary(snapshot, &pin.id).map(Text::raw)
 }
 
 /// The Preview of a loaded source, or why it can't show one.
@@ -246,21 +245,21 @@ pub(super) fn source_view(
     }
 }
 
-/// Preview for a row with no source: a pin's diagnostics, which say
-/// what `Enter` will do, or a placeholder.
+/// Preview for a row with no source: a slot's status, or a
+/// placeholder.
 fn sourceless_preview(
     app: &App,
     row: &crate::tui::rows::Row,
     selection: &RowId,
     live_preview: bool,
 ) -> Text<'static> {
-    let pin_diagnostics = || {
-        let diagnostics = crate::tui::actions::selected_pin_diagnostics(app);
-        if diagnostics.is_empty() {
-            Text::raw("pin diagnostic unavailable — try `r` to refresh")
-        } else {
-            Text::raw(render_pin_diagnostics(&diagnostics))
-        }
+    let pin_summary = |pin_id: &str| {
+        app.snapshot_handle()
+            .and_then(|handle| render_pin_summary(handle.snapshot(), pin_id))
+            .map_or_else(
+                || Text::raw("pin unavailable — try `r` to refresh"),
+                Text::raw,
+            )
     };
     let disabled_or = |text: &'static str| {
         Text::raw(if live_preview {
@@ -279,7 +278,7 @@ fn sourceless_preview(
             if live_mux.is_some() {
                 disabled_or("no mux target for this row")
             } else {
-                pin_diagnostics()
+                pin_summary(pin_id)
             }
         }
         (RowKind::AgentSession(_) | RowKind::AgentSessionMuxCandidate(_), _)
@@ -386,77 +385,25 @@ pub(super) fn format_preview_for_mux(
     }
 }
 
-pub(super) fn render_pin_diagnostics(
-    diagnostics: &[crate::tui::actions::PinDiagnosticView],
-) -> String {
-    diagnostics
-        .iter()
-        .map(|diagnostic| match diagnostic {
-            crate::tui::actions::PinDiagnosticView::Unbound {
-                pin_id,
-                expected_mux_native_id,
-                last_session,
-            } => match last_session {
-                Some(last) => format!(
-                    "Pin `{pin_id}` is unbound.\nExpected mux: {expected_mux_native_id}\n\
-                     Last session: {} (observed {})\n\
-                     Enter resumes into the recorded session.",
-                    last.session_id, last.observed_epoch
-                ),
-                None => format!(
-                    "Pin `{pin_id}` is unbound.\nExpected mux: {expected_mux_native_id}\n\
-                     Enter launches the pin."
-                ),
-            },
-            crate::tui::actions::PinDiagnosticView::StaleMux {
-                pin_id,
-                mux,
-                claimed_elsewhere,
-                harness_running,
-            } => {
-                let action = if *harness_running {
-                    "The harness is running there but its session isn't identified; \
-                     Enter attaches."
-                } else {
-                    "Enter relaunches the harness in the existing mux."
-                };
-                let mut text = format!(
-                    "Pin `{pin_id}` has a stale mux.\nMux: {}\n{action}",
-                    mux.native_id
-                );
-                for claim in claimed_elsewhere {
-                    text.push_str(&format!(
-                        "\nSession {}:{} matched here but is bound to pin `{}`.",
-                        claim.session.harness_key, claim.session.session_key, claim.claimed_by_pin
-                    ));
-                }
-                text
-            }
-            crate::tui::actions::PinDiagnosticView::Ambiguous {
-                pin_id,
-                chosen,
-                competing,
-            } => {
-                let competing = competing
-                    .iter()
-                    .map(|id| format!("{}:{}", id.harness_key, id.session_key))
-                    .collect::<Vec<_>>()
-                    .join("\n  ");
-                format!(
-                    "Pin `{pin_id}` is ambiguous.\nChosen: {}:{}\nCompeting sessions:\n  {competing}\nPress b for the bind command.",
-                    chosen.harness_key, chosen.session_key
-                )
-            }
-            crate::tui::actions::PinDiagnosticView::Drift {
-                pin_id,
-                declared_cwd,
-                observed_cwd,
-            } => format!(
-                "Pin `{pin_id}` has cwd drift.\nDeclared cwd: {declared_cwd}\nObserved cwd: {observed_cwd}\nBinding still holds."
-            ),
-        })
-        .collect::<Vec<_>>()
-        .join("\n\n")
+/// What a slot previews when it has no pane or session to show: its
+/// status and, when it needs attention, what to do about it.
+pub(super) fn render_pin_summary(
+    snapshot: &crate::model::GraphSnapshot,
+    pin_id: &str,
+) -> Option<String> {
+    let pin = crate::tui::rows::pin_nodes(snapshot)
+        .into_iter()
+        .find(|pin| pin.id.id == pin_id)?;
+    let mut text = format!(
+        "Pin `{pin_id}` ({} · {})",
+        pin.kind.as_str(),
+        pin.status.as_str()
+    );
+    if let Some(hint) = crate::tui::actions::pin_status_hint(snapshot, pin_id) {
+        text.push('\n');
+        text.push_str(&hint);
+    }
+    Some(text)
 }
 
 /// Translate a raw `tmux capture-pane -e` payload into styled

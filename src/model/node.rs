@@ -358,10 +358,9 @@ pub struct MuxSessionNode {
     /// type, but the id holds the prefixed form while this field
     /// drops the backend prefix.
     ///
-    /// Resolver consumers (`resolve::pins::mux_index`, the pin
-    /// lookup path) reconstruct the prefixed key by formatting
-    /// `<backend>:<native_id>` so the bookkeeping stays
-    /// consistent with `PinMux::native_id()`'s output.
+    /// Consumers that need the prefixed key reconstruct it by
+    /// formatting `<backend>:<native_id>`, which matches
+    /// `MuxRecipe::native_id`.
     pub native_id: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub cwd: Option<String>,
@@ -615,12 +614,12 @@ pub struct ForgePrNode {
     pub head_ref: Option<String>,
 }
 
-/// First-class graph representation of a session pin declaration.
+/// A pin slot's graph identity (ADR 0084, ADR 0141): `pin:<id>`.
 ///
-/// The persisted TOML entry remains the source of truth; this node is
-/// rebuilt from [`PinCandidate`] so graph consumers can address pins by
-/// stable [`NodeId`] and inspect their store lineage, target mux, and
-/// current binding without consulting a private sidecar.
+/// The slot in `pins.toml` stays the source of truth; this node is
+/// rebuilt from it each resolve, with the slot's status and effective
+/// recipe worked out against the graph and history, so Pinned rows have
+/// a detail target and slots show up in search and exports.
 #[derive(
     Clone,
     Debug,
@@ -636,34 +635,80 @@ pub struct ForgePrNode {
 )]
 pub struct PinNode {
     pub id: PinId,
-    pub display_name: String,
-    pub harness: String,
-    pub cwd: String,
-    pub mux: PinMuxRef,
+    pub kind: PinKind,
+    /// What lists show: the slot's label, else its id.
+    pub label: String,
+    /// `history:<id>`, a node id, or none for a planned slot.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub launch_argv: Option<Vec<String>>,
+    pub target: Option<String>,
+    /// The node the slot points at, live or gone.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub reason: Option<String>,
-    pub provenance: Provenance,
-    pub store_path: String,
+    pub target_node: Option<NodeId>,
+    pub status: SlotStatus,
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub overrides: SlotFields,
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub snapshot: SlotFields,
+    /// Each recipe field with the layer that supplied it.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub effective: Vec<RecipeField>,
+    /// Position among the slots.
+    pub order: u32,
+    /// Loaded from a legacy `[[pins.entries]]` table.
+    #[serde(default, skip_serializing_if = "core::ops::Not::not")]
+    pub legacy: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub binding: Option<PinBinding>,
+    pub pinned_at: Option<String>,
 }
 
-impl From<&PinCandidate> for PinNode {
-    fn from(pin: &PinCandidate) -> Self {
+impl PinNode {
+    /// A slot node for tests: `fields` become effective text fields
+    /// sourced from the live graph.
+    #[cfg(test)]
+    pub fn for_test(
+        id: &str,
+        kind: PinKind,
+        target_node: Option<NodeId>,
+        status: SlotStatus,
+        fields: &[(&str, &str)],
+    ) -> Self {
         Self {
-            id: PinId::new(pin.id.clone()),
-            display_name: pin.display_name.clone(),
-            harness: pin.harness.clone(),
-            cwd: pin.cwd.clone(),
-            mux: pin.mux.clone(),
-            launch_argv: pin.launch_argv.clone(),
-            reason: pin.reason.clone(),
-            provenance: pin.provenance,
-            store_path: pin.store_path.clone(),
-            binding: pin.binding.clone(),
+            id: PinId::new(id),
+            kind,
+            label: id.to_string(),
+            target: target_node.as_ref().map(ToString::to_string),
+            target_node,
+            status,
+            overrides: SlotFields::new(),
+            snapshot: SlotFields::new(),
+            effective: fields
+                .iter()
+                .map(|(name, value)| RecipeField {
+                    name: (*name).to_string(),
+                    value: FieldValue::Text((*value).to_string()),
+                    source: FieldSource::Live,
+                })
+                .collect(),
+            order: 0,
+            legacy: false,
+            pinned_at: None,
         }
+    }
+
+    /// The effective value of a recipe field.
+    pub fn field(&self, name: &str) -> Option<&FieldValue> {
+        self.effective
+            .iter()
+            .find(|field| field.name == name)
+            .map(|field| &field.value)
+    }
+
+    pub fn text(&self, name: &str) -> Option<&str> {
+        self.field(name).and_then(FieldValue::as_text)
+    }
+
+    pub fn list(&self, name: &str) -> Option<&[String]> {
+        self.field(name).and_then(FieldValue::as_list)
     }
 }
 

@@ -1,7 +1,7 @@
 //! Declarative keybinding table.
 //!
 //! A `(mode/focus, key, action, help)` table so the dispatcher,
-//! the focus remap, the help overlay, and the controls / pins hint
+//! the focus remap, the help overlay, and the controls hint
 //! footers all consume the same source-of-truth list. A drift test
 //! asserts every entry's `help_text` appears in
 //! `crate::tui::widgets::help::keymap_sections`. Keys the table
@@ -104,8 +104,7 @@ impl KeyMatcher {
 ///
 /// Wave 2 folds `translate`'s 52 `KeyCode::` arms into this
 /// same table; wave 3 does the same for the runtime
-/// dispatcher's 76 arms; wave 4 the pins overlay's 137;
-/// wave 5 rewires `keymap_sections` to be derived from
+/// dispatcher's 76 arms; wave 4 rewires `keymap_sections` to be derived from
 /// the table so the help overlay can't drift.
 /// Help text for `!`, shared with the help overlay's
 /// "Discoverable controls" section.
@@ -185,7 +184,7 @@ pub const KEYBINDINGS: &[KeyBinding] = &[
         mode: KeyMode::Global,
         key: KeyMatcher::UpperChar('R'),
         action: || Action::OpenRename,
-        help_text: "Rename the selected agent session, mux, or pin",
+        help_text: "Rename the selected agent session or mux",
     },
     KeyBinding {
         mode: KeyMode::Global,
@@ -201,48 +200,15 @@ pub const KEYBINDINGS: &[KeyBinding] = &[
     },
     KeyBinding {
         mode: KeyMode::Global,
-        key: KeyMatcher::Exact {
-            modifiers: KeyModifiers::NONE,
-            code: KeyCode::Delete,
-        },
-        action: || Action::RemovePin,
-        help_text: "Remove the selected pin",
-    },
-    KeyBinding {
-        mode: KeyMode::Global,
-        key: KeyMatcher::UpperChar('N'),
-        action: || Action::OpenPinCreate,
-        help_text: "Create a new pin",
-    },
-    KeyBinding {
-        mode: KeyMode::Global,
         key: KeyMatcher::AnyModExceptCtrl('n'),
         action: || Action::OpenNewMuxForm,
-        help_text: "Create a new bare tmux session (no pin, no agent)",
+        help_text: "Create a new bare tmux session (no agent)",
     },
     KeyBinding {
         mode: KeyMode::Global,
         key: KeyMatcher::AnyModExceptCtrl('m'),
         action: || Action::OpenMuxMenu,
         help_text: "Open the Mux action menu (new session / launch harness)",
-    },
-    KeyBinding {
-        mode: KeyMode::Global,
-        key: KeyMatcher::UpperChar('B'),
-        action: || Action::OpenPinRebind,
-        help_text: "Rebind the selected pin",
-    },
-    KeyBinding {
-        mode: KeyMode::Global,
-        key: KeyMatcher::UpperChar('A'),
-        action: || Action::OpenPinAdopt,
-        help_text: "Adopt the selected mux row as a pin",
-    },
-    KeyBinding {
-        mode: KeyMode::Global,
-        key: KeyMatcher::UpperChar('L'),
-        action: || Action::LaunchPin,
-        help_text: "Launch the selected pin",
     },
     KeyBinding {
         mode: KeyMode::Global,
@@ -282,12 +248,6 @@ pub const KEYBINDINGS: &[KeyBinding] = &[
     },
     KeyBinding {
         mode: KeyMode::Global,
-        key: KeyMatcher::AnyModExceptCtrl('b'),
-        action: || Action::PinBindHint,
-        help_text: "Open bind picker for ambiguous pin row",
-    },
-    KeyBinding {
-        mode: KeyMode::Global,
         key: KeyMatcher::AnyModExceptCtrl('v'),
         action: || Action::View,
         help_text: "Open the selected session's transcript viewer",
@@ -297,12 +257,6 @@ pub const KEYBINDINGS: &[KeyBinding] = &[
         key: KeyMatcher::AnyModExceptCtrl('f'),
         action: || Action::OpenControls,
         help_text: "Open the controls overlay (view / grouping / filters / sort / preview wrap)",
-    },
-    KeyBinding {
-        mode: KeyMode::Global,
-        key: KeyMatcher::AnyModExceptCtrl('p'),
-        action: || Action::OpenPins,
-        help_text: "Open the pins overlay",
     },
     KeyBinding {
         mode: KeyMode::Global,

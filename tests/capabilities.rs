@@ -1031,11 +1031,39 @@ fn the_built_binary_stays_inside_the_capability_manifest() {
     let acts = vec![
         world.run(
             &strace,
-            "pin-create",
-            &["pin", "create", "demo", "--harness", "codex", "--cwd", &cwd],
+            "pin-add",
+            &[
+                "pin",
+                "add",
+                "--planned",
+                "--kind",
+                "mux",
+                "--name",
+                "demo",
+                "--set",
+                &format!("cwd={cwd}"),
+            ],
             project,
         ),
-        world.run(&strace, "pin-rm", &["pin", "rm", "demo"], project),
+        world.run(
+            &strace,
+            "pin-edit",
+            &["pin", "edit", "demo", "--set", "harness=codex"],
+            project,
+        ),
+        world.run(
+            &strace,
+            "pin-rename",
+            &["pin", "rename", "demo", "demo2"],
+            project,
+        ),
+        world.run(&strace, "pin-rm", &["pin", "rm", "demo2"], project),
+        world.run(
+            &strace,
+            "mux-new-pinned",
+            &["mux", "new", "later", "--pin", "--no-launch"],
+            project,
+        ),
         world.run(
             &strace,
             "mux-new",
