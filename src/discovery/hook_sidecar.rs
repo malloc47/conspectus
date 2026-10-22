@@ -231,9 +231,9 @@ fn inferred_state_scope(record: &HookRecord) -> String {
 }
 
 fn find_mux(snapshot: &GraphSnapshot, record: &HookRecord) -> Option<MuxSessionNode> {
+    // A gone mux can't host what a hook just reported (ADR 0140).
     let muxes: Vec<_> = snapshot
-        .nodes
-        .iter()
+        .live_nodes()
         .filter_map(|node| match node {
             GraphNode::MuxSession(mux) => Some(mux),
             _ => None,

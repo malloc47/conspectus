@@ -203,6 +203,9 @@ pub enum MuxRenamePlanError {
     /// snapshot. Distinguishes "mux vanished mid-session" from other
     /// failures.
     MuxNotFound,
+    /// The mux is only in history (ADR 0140): there is no session to
+    /// rename until it is rebuilt.
+    MuxGone,
 }
 
 impl std::fmt::Display for MuxRenamePlanError {
@@ -211,6 +214,7 @@ impl std::fmt::Display for MuxRenamePlanError {
             Self::EmptyName => write!(f, "mux rename requires a non-empty name"),
             Self::NoOp => write!(f, "mux rename: new name matches current name"),
             Self::MuxNotFound => write!(f, "mux not present in the discovered snapshot"),
+            Self::MuxGone => write!(f, "the mux is gone; rebuild it before renaming"),
         }
     }
 }
@@ -237,6 +241,9 @@ pub fn plan_mux_rename(
     }
 
     let mux = mux_node(snapshot, mux_id).ok_or(MuxRenamePlanError::MuxNotFound)?;
+    if !snapshot.is_live(&crate::model::NodeId::MuxSession(mux_id.clone())) {
+        return Err(MuxRenamePlanError::MuxGone);
+    }
 
     // `MuxSessionNode.native_id` drops the backend prefix (e.g.
     // `editor` for a default-socket tmux session, `scratch:editor`

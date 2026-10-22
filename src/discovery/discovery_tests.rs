@@ -41,6 +41,7 @@ fn local_discovery_merges_provider_fragments_without_resolving() {
             candidate_links: vec![link.clone()],
             diagnostics: Vec::new(),
             node_provenance: BTreeMap::new(),
+            mux_probes: Default::default(),
         }))
         .with_provider(StaticProvider(GraphFragment {
             nodes: vec![GraphNode::MuxSession(MuxSessionNode::new(
@@ -51,6 +52,7 @@ fn local_discovery_merges_provider_fragments_without_resolving() {
             candidate_links: Vec::new(),
             diagnostics: Vec::new(),
             node_provenance: BTreeMap::new(),
+            mux_probes: Default::default(),
         }));
 
     let snapshot = discovery
@@ -85,12 +87,14 @@ fn merge_fragments_deduplicates_nodes_and_links_by_identity() {
             candidate_links: vec![link.clone()],
             diagnostics: Vec::new(),
             node_provenance: BTreeMap::new(),
+            mux_probes: Default::default(),
         },
         GraphFragment {
             nodes: vec![node],
             candidate_links: vec![link.clone()],
             diagnostics: Vec::new(),
             node_provenance: BTreeMap::new(),
+            mux_probes: Default::default(),
         },
     ]);
 
@@ -150,12 +154,14 @@ fn merge_fragments_folds_node_provenance_first_write_wins() {
             candidate_links: Vec::new(),
             diagnostics: Vec::new(),
             node_provenance: prov_a,
+            mux_probes: Default::default(),
         },
         GraphFragment {
             nodes: vec![mux_node, agent_node],
             candidate_links: Vec::new(),
             diagnostics: Vec::new(),
             node_provenance: prov_b,
+            mux_probes: Default::default(),
         },
     ]);
 

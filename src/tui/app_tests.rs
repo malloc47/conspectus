@@ -24,6 +24,7 @@ fn make_snapshot_with(sessions: &[(&str, &str, &str)]) -> GraphSnapshot {
             git_dir: None,
             current_branch: None,
             worktree: None,
+            head_commit: None,
         }));
         snap.nodes.push(GraphNode::AgentSession(
             AgentSessionNode::new(
@@ -227,6 +228,7 @@ fn snapshot_with_numbered_pin_and_mux(name: &str) -> GraphSnapshot {
         git_dir: None,
         current_branch: None,
         worktree: None,
+        head_commit: None,
     }));
     snap.nodes.push(GraphNode::AgentSession(
         AgentSessionNode::new(
@@ -1709,6 +1711,7 @@ fn snapshot_session_with_mux() -> GraphSnapshot {
         git_dir: None,
         current_branch: None,
         worktree: None,
+        head_commit: None,
     }));
     snap.nodes.push(GraphNode::AgentSession(
         AgentSessionNode::new(
@@ -2380,6 +2383,7 @@ fn open_value_modal_when_cursor_has_a_long_value() {
             git_dir: None,
             current_branch: None,
             worktree: None,
+            head_commit: None,
         }));
         snap.nodes.push(GraphNode::AgentSession(
             AgentSessionNode::new(

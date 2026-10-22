@@ -158,6 +158,9 @@ pub struct DiscoveryContext {
     forge_fetch: forge::ForgeFetch,
     forge_concurrency: Option<usize>,
     forge_cancel: Option<Arc<std::sync::atomic::AtomicBool>>,
+    /// Named mux servers to probe besides the default one (tmux `-L`
+    /// sockets): those history records and pin slots name (ADR 0140).
+    mux_sockets: BTreeSet<String>,
 }
 
 impl DiscoveryContext {
@@ -209,6 +212,22 @@ impl DiscoveryContext {
     pub fn with_caches(mut self, caches: Arc<DiscoveryCaches>) -> Self {
         self.caches = caches;
         self
+    }
+
+    /// Also probe these named mux servers. The default server and its
+    /// spellings (`default`, empty) are dropped.
+    pub fn with_mux_sockets(mut self, sockets: impl IntoIterator<Item = String>) -> Self {
+        self.mux_sockets.extend(
+            sockets
+                .into_iter()
+                .filter(|socket| crate::model::effective_socket(Some(socket)).is_some()),
+        );
+        self
+    }
+
+    /// The named mux servers to probe besides the default one.
+    pub fn mux_sockets(&self) -> impl Iterator<Item = &str> {
+        self.mux_sockets.iter().map(String::as_str)
     }
 
     /// Reuse forge listings younger than `max_age` instead of asking
@@ -285,6 +304,9 @@ pub struct GraphFragment {
     /// folds the per-fragment map into [`GraphSnapshot::node_provenance`]
     /// at snapshot-assembly time. See [`crate::model::NodeProvenance`].
     pub node_provenance: BTreeMap<NodeId, NodeProvenance>,
+    /// Mux probe statuses keyed by [`crate::model::probe_key`] (ADR
+    /// 0140), from the mux providers.
+    pub mux_probes: BTreeMap<String, crate::model::MuxProbe>,
 }
 
 impl GraphFragment {
@@ -309,6 +331,7 @@ impl From<GraphSnapshot> for GraphFragment {
             candidate_links: snapshot.candidate_links,
             diagnostics: snapshot.diagnostics,
             node_provenance: snapshot.node_provenance,
+            mux_probes: snapshot.mux_probes,
         }
     }
 }
@@ -524,6 +547,21 @@ pub fn discover_local_warm_with(
         context = context.with_harness_state_root(key.clone(), root.clone());
     }
 
+    // History names the mux sockets worth probing besides the default
+    // one, and its records become the gone nodes below (ADR 0140).
+    let history = config
+        .history
+        .as_ref()
+        .map(crate::history::HistoryStore::load);
+    if let Some(load) = &history {
+        context = context.with_mux_sockets(
+            load.history
+                .muxes
+                .iter()
+                .filter_map(|record| record.recipe.socket.clone()),
+        );
+    }
+
     let now = current_epoch();
     let gate = cache::compute_freshness_gate(&prior, intervals, now);
     let mut prior = prior;
@@ -690,6 +728,9 @@ pub fn discover_local_warm_with(
     }
 
     apply_mutators(&mut snapshot, &config, &context, run_process_tree);
+    if let Some(load) = history {
+        crate::history::project::project(&mut snapshot, load, current_epoch());
+    }
     Ok(snapshot)
 }
 
@@ -978,6 +1019,11 @@ pub struct LocalDiscoveryConfig {
     pub forge_concurrency: usize,
     /// Set to stop forge fetches early (ADR 0137).
     pub forge_cancel: Option<Arc<std::sync::atomic::AtomicBool>>,
+    /// The history store discovery reads each cycle (ADR 0140): its
+    /// mux records name the sockets to probe, and its records project
+    /// gone entities into the graph. `None` reads no history (tests
+    /// and the dev scenario builder).
+    pub history: Option<crate::history::HistoryStore>,
 }
 
 impl LocalDiscoveryConfig {
@@ -1072,6 +1118,7 @@ impl LocalDiscoveryConfig {
             forge_fetch: forge::ForgeFetch::default(),
             forge_concurrency: forge::DEFAULT_FORGE_CONCURRENCY,
             forge_cancel: None,
+            history: crate::history::HistoryStore::from_env(),
         }
     }
 
@@ -1091,7 +1138,14 @@ impl LocalDiscoveryConfig {
             forge_fetch: forge::ForgeFetch::default(),
             forge_concurrency: forge::DEFAULT_FORGE_CONCURRENCY,
             forge_cancel: None,
+            history: None,
         }
+    }
+
+    /// Read history from `store` (ADR 0140).
+    pub fn with_history(mut self, store: crate::history::HistoryStore) -> Self {
+        self.history = Some(store);
+        self
     }
 
     /// Ask the forges for missing or expired listings, or build PRs
@@ -1300,6 +1354,7 @@ pub fn merge_fragments(fragments: impl IntoIterator<Item = GraphFragment>) -> Gr
     // a downstream mutator (cross_link, hook_sidecar, …) revisits
     // the node id.
     let mut node_provenance: BTreeMap<NodeId, NodeProvenance> = BTreeMap::new();
+    let mut mux_probes: BTreeMap<String, crate::model::MuxProbe> = BTreeMap::new();
 
     for fragment in fragments {
         for node in fragment.nodes {
@@ -1314,6 +1369,10 @@ pub fn merge_fragments(fragments: impl IntoIterator<Item = GraphFragment>) -> Gr
             node_provenance.entry(id).or_insert(prov);
         }
 
+        for (key, probe) in fragment.mux_probes {
+            mux_probes.entry(key).or_insert(probe);
+        }
+
         diagnostics.extend(fragment.diagnostics);
     }
 
@@ -1325,6 +1384,9 @@ pub fn merge_fragments(fragments: impl IntoIterator<Item = GraphFragment>) -> Gr
         aliases: crate::aliases::AliasOverlay::new(),
         pins: Vec::new(),
         node_provenance,
+        node_presence: BTreeMap::new(),
+        mux_probes,
+        history: Default::default(),
     };
     snapshot.canonicalize();
     snapshot
@@ -1358,7 +1420,7 @@ pub fn merge_with_prior(fresh: GraphSnapshot, prior: GraphSnapshot) -> GraphSnap
 fn observed_cwd_git_fragment(snapshot: &GraphSnapshot, caches: &DiscoveryCaches) -> GraphFragment {
     let mut roots = BTreeSet::new();
 
-    for node in &snapshot.nodes {
+    for node in snapshot.live_nodes() {
         match node {
             GraphNode::AgentSession(session) => {
                 if let Some(cwd) = &session.cwd {

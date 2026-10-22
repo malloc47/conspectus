@@ -73,6 +73,7 @@ fn hook_ingest_updates_snapshot_state_and_published_bytes() {
         forge_fetch_lock: Arc::default(),
         discovery: Arc::new(|_| LocalDiscoveryConfig::empty()),
         shutdown: Arc::default(),
+        history: None,
     };
     let record = HookRecord {
         schema_version: SCHEMA_VERSION,
@@ -299,6 +300,7 @@ fn forge_ctx_with(temp: &Path, gh: SlowGh, shutdown: Arc<AtomicBool>) -> Dispatc
             git_dir: None,
             current_branch: None,
             worktree: None,
+            head_commit: None,
         })],
         ..GraphSnapshot::empty()
     };
@@ -325,6 +327,7 @@ fn forge_ctx_with(temp: &Path, gh: SlowGh, shutdown: Arc<AtomicBool>) -> Dispatc
                 .with_forge_cancel(Arc::clone(&factory_shutdown))
         }),
         shutdown,
+        history: None,
     }
 }
 
@@ -394,7 +397,7 @@ fn routine_cycles_never_ask_a_forge() {
         ProviderClass::Harness,
         ProviderClass::Git,
     ] {
-        try_class_cycle(class, &ctx).expect("cycle");
+        try_class_cycle(class, &ctx, crate::discovery::current_epoch()).expect("cycle");
         assert_eq!(
             handle_refresh(&refresh_request(class.name()), &ctx).result,
             "ok"

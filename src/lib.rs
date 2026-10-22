@@ -9,6 +9,7 @@
 
 pub mod aliases;
 pub mod api;
+pub mod argv;
 #[doc(hidden)]
 pub mod cli;
 pub mod config;

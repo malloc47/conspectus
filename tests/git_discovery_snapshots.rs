@@ -19,6 +19,7 @@ fn plain_repo_git_mapping_snapshot() {
                 url: "git@example.com:owner/repo.git".to_string(),
             }],
             local_branches: vec!["main".to_string()],
+            head: None,
         },
     );
 }
@@ -35,6 +36,7 @@ fn detached_worktree_git_mapping_snapshot() {
             upstream: None,
             remotes: Vec::new(),
             local_branches: vec!["main".to_string()],
+            head: None,
         },
     );
 }
@@ -54,6 +56,7 @@ fn linked_worktree_git_mapping_snapshot() {
                 url: "git@example.com:owner/repo.git".to_string(),
             }],
             local_branches: vec!["feature".to_string(), "main".to_string()],
+            head: None,
         },
     );
 }

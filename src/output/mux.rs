@@ -199,8 +199,7 @@ fn cell(key: &str, ctx: &CellCtx<'_>) -> String {
 
 fn collect_mux_rows(snapshot: &GraphSnapshot) -> Vec<MuxRow<'_>> {
     let mut rows: Vec<MuxRow<'_>> = snapshot
-        .nodes
-        .iter()
+        .live_nodes()
         .filter_map(|node| match node {
             GraphNode::MuxSession(mux) => Some(MuxRow {
                 node_id_display: NodeId::MuxSession(mux.id.clone()).to_string(),

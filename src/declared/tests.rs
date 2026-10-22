@@ -263,6 +263,7 @@ fn store_selection_reuses_existing_workspace_config_for_nested_worktree() {
                 git_dir: None,
                 current_branch: None,
                 worktree: None,
+                head_commit: None,
             }),
         ],
         ..GraphSnapshot::empty()
@@ -326,6 +327,7 @@ fn store_selection_uses_session_cwd_when_it_sits_under_known_worktree() {
                 git_dir: None,
                 current_branch: None,
                 worktree: None,
+                head_commit: None,
             }),
             GraphNode::AgentSession(
                 AgentSessionNode::new(
@@ -370,6 +372,7 @@ fn store_selection_uses_mux_cwd_when_it_sits_under_known_worktree() {
                 git_dir: None,
                 current_branch: None,
                 worktree: None,
+                head_commit: None,
             }),
             GraphNode::MuxSession(
                 MuxSessionNode::new(

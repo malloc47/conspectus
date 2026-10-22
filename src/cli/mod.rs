@@ -175,15 +175,38 @@ pub(super) fn warm_start_discover_and_resolve(
     }
     let discovery_config = crate::discovery::LocalDiscoveryConfig::from_env()
         .with_forge_concurrency(config.forge.concurrency);
+    let fresh_since = crate::discovery::current_epoch();
     let snapshot = crate::discovery::discover_local_warm_with(
         roots,
         discovery_config,
         crate::model::GraphSnapshot::empty(),
         &config.server.intervals,
     )?;
-    let snapshot = crate::resolve::resolve_snapshot(snapshot);
+    let mut snapshot = crate::resolve::resolve_snapshot(snapshot);
+    if !no_cache {
+        record_history(&mut snapshot, fresh_since, config);
+    }
     cache_resolved_snapshot(&snapshot, no_cache);
     Ok(snapshot)
+}
+
+/// Record what this run's discovery observed in history (ADR 0140),
+/// where `graph.bin` is written. Best-effort, like the `graph.bin`
+/// write: a failure warns and the command carries on.
+pub(super) fn record_history(
+    snapshot: &mut crate::model::GraphSnapshot,
+    fresh_since: i64,
+    config: &crate::config::Config,
+) {
+    let Some(writer) = crate::history::HistoryWriter::from_env(config.history.clone()) else {
+        return;
+    };
+    if let Err(err) = writer.record(snapshot, fresh_since) {
+        eprintln!(
+            "conspectus: warning: failed to record history in {}: {err}",
+            writer.store.dir().display()
+        );
+    }
 }
 
 /// Best-effort daemon-snapshot fetch. Returns `Some` only when

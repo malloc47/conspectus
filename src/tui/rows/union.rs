@@ -145,7 +145,7 @@ pub fn build_union_tree(inputs: UnionBuildInputs<'_>) -> RowTree {
 fn collect_union_rows(snapshot: &GraphSnapshot) -> Vec<UnionData<'_>> {
     let attached_counts = collect_mux_attached_counts(snapshot);
     let mut rows: Vec<UnionData<'_>> = Vec::new();
-    for node in &snapshot.nodes {
+    for node in snapshot.live_nodes() {
         match node {
             GraphNode::AgentSession(agent) => {
                 let id = agent.id.clone();

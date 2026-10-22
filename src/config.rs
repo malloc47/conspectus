@@ -49,6 +49,53 @@ pub struct Config {
     pub server: ServerConfig,
     pub worktree: WorktreeConfig,
     pub forge: ForgeConfig,
+    pub history: HistoryConfig,
+}
+
+/// Settings under `[history]` (ADR 0140).
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct HistoryConfig {
+    /// `[history.ignore]`: globs per kind (`mux` on the mux name,
+    /// `checkout` and `repo` on the path, `pr` on `owner/repo#number`).
+    /// Matching entities are never recorded. Lists from the user and
+    /// project files add up.
+    pub ignore: BTreeMap<crate::model::HistoryKind, Vec<String>>,
+    /// `[history.reap_after]`: how long a gone record of each kind
+    /// waits before `history reap` removes it. `None` means only
+    /// `history forget` removes it.
+    pub reap_after: BTreeMap<crate::model::HistoryKind, Option<Duration>>,
+}
+
+impl Default for HistoryConfig {
+    fn default() -> Self {
+        use crate::model::HistoryKind;
+        const DAY: u64 = 86_400;
+        Self {
+            ignore: BTreeMap::new(),
+            reap_after: BTreeMap::from([
+                (HistoryKind::Mux, Some(Duration::from_secs(14 * DAY))),
+                (HistoryKind::Checkout, Some(Duration::from_secs(30 * DAY))),
+                (HistoryKind::Pr, Some(Duration::from_secs(30 * DAY))),
+                (HistoryKind::Repo, None),
+            ]),
+        }
+    }
+}
+
+impl HistoryConfig {
+    /// Whether `label` matches one of `kind`'s ignore globs.
+    pub fn ignores(&self, kind: crate::model::HistoryKind, label: &str) -> bool {
+        self.ignore.get(&kind).is_some_and(|globs| {
+            globs
+                .iter()
+                .any(|glob| crate::history::glob_matches(glob, label))
+        })
+    }
+
+    /// The reap threshold for `kind`.
+    pub fn reap_after(&self, kind: crate::model::HistoryKind) -> Option<Duration> {
+        self.reap_after.get(&kind).copied().flatten()
+    }
 }
 
 /// Settings under `[forge]` (ADR 0136).
@@ -367,6 +414,9 @@ struct ConfigFile {
     /// `[forge]` table (ADR 0136).
     #[serde(default)]
     forge: Option<ForgeFile>,
+    /// `[history]` table (ADR 0140).
+    #[serde(default)]
+    history: Option<HistoryFile>,
     /// Legacy `[session]` key from before ADR 0021. Its presence
     /// triggers a diagnostic so users discover the schema migrated;
     /// its contents are not read.
@@ -382,6 +432,14 @@ struct WorktreeFile {
     teardown_confirm: Option<String>,
     #[serde(default)]
     teardown_grace: Option<String>,
+}
+
+#[derive(Clone, Debug, Default, Deserialize)]
+struct HistoryFile {
+    #[serde(default)]
+    ignore: Option<BTreeMap<String, Vec<String>>>,
+    #[serde(default)]
+    reap_after: Option<BTreeMap<String, String>>,
 }
 
 #[derive(Clone, Debug, Default, Deserialize)]
@@ -722,6 +780,53 @@ fn merge_from_file(
     if let Some(worktree) = parsed.worktree {
         merge_worktree(&mut config.worktree, worktree, path, diagnostics);
     }
+    if let Some(history) = parsed.history {
+        merge_history(&mut config.history, history, path, diagnostics);
+    }
+}
+
+fn merge_history(
+    config: &mut HistoryConfig,
+    file: HistoryFile,
+    path: &Path,
+    diagnostics: &mut Vec<ConfigDiagnostic>,
+) {
+    use crate::model::HistoryKind;
+    for (key, globs) in file.ignore.unwrap_or_default() {
+        match HistoryKind::parse(&key) {
+            Some(kind) => config.ignore.entry(kind).or_default().extend(globs),
+            None => diagnostics.push(ConfigDiagnostic {
+                path: path.to_path_buf(),
+                message: format!(
+                    "unknown `[history.ignore]` kind `{key}`; expected mux, checkout, repo, or pr"
+                ),
+            }),
+        }
+    }
+    for (key, raw) in file.reap_after.unwrap_or_default() {
+        let Some(kind) = HistoryKind::parse(&key) else {
+            diagnostics.push(ConfigDiagnostic {
+                path: path.to_path_buf(),
+                message: format!(
+                    "unknown `[history.reap_after]` kind `{key}`; expected mux, checkout, repo, or pr"
+                ),
+            });
+            continue;
+        };
+        if raw.trim() == "never" {
+            config.reap_after.insert(kind, None);
+            continue;
+        }
+        match parse_duration_short(&raw) {
+            Ok(after) => {
+                config.reap_after.insert(kind, Some(after));
+            }
+            Err(message) => diagnostics.push(ConfigDiagnostic {
+                path: path.to_path_buf(),
+                message: format!("invalid `[history.reap_after] {key}` value `{raw}`: {message}"),
+            }),
+        }
+    }
 }
 
 fn merge_worktree(
@@ -839,7 +944,7 @@ fn set_server_interval(
 }
 
 /// Parse a short-form duration string of the shape
-/// `<non-negative-integer><ms|s|m|h>`. Shared with the CLI
+/// `<non-negative-integer><ms|s|m|h|d>`. Shared with the CLI
 /// `--refresh-interval` flag (which calls through its own
 /// historical `parse_tui_duration` wrapper) and the
 /// `worktree close --grace` override; the format is the same so
@@ -851,7 +956,7 @@ pub fn parse_duration_short(input: &str) -> Result<Duration, String> {
     }
     let split = trimmed
         .find(|c: char| !c.is_ascii_digit())
-        .ok_or_else(|| "missing unit (expected ms/s/m/h)".to_string())?;
+        .ok_or_else(|| "missing unit (expected ms/s/m/h/d)".to_string())?;
     let (num_str, suffix) = trimmed.split_at(split);
     let value: u64 = num_str
         .parse()
@@ -861,7 +966,8 @@ pub fn parse_duration_short(input: &str) -> Result<Duration, String> {
         "s" => Duration::from_secs(value),
         "m" => Duration::from_secs(value.saturating_mul(60)),
         "h" => Duration::from_secs(value.saturating_mul(3600)),
-        other => return Err(format!("unknown unit `{other}` (expected ms/s/m/h)")),
+        "d" => Duration::from_secs(value.saturating_mul(86_400)),
+        other => return Err(format!("unknown unit `{other}` (expected ms/s/m/h/d)")),
     };
     Ok(dur)
 }

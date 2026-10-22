@@ -356,8 +356,7 @@ fn collect_branch_lookup(snapshot: &GraphSnapshot) -> HashMap<NodeId, String> {
 /// `*` marker).
 fn collect_mux_lookup(snapshot: &GraphSnapshot) -> HashMap<SessionKey, MuxInfo> {
     let mux_lookup: HashMap<NodeId, &MuxSessionNode> = snapshot
-        .nodes
-        .iter()
+        .live_nodes()
         .filter_map(|node| match node {
             GraphNode::MuxSession(mux) => Some((NodeId::MuxSession(mux.id.clone()), mux)),
             _ => None,

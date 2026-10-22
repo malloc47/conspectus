@@ -57,6 +57,8 @@ fn mux_session(backend: &str, name: &str, cwd: Option<&str>) -> GraphNode {
         activity_epoch: None,
         created_epoch: None,
         last_attached_epoch: None,
+        socket: None,
+        backend_session_id: None,
     })
 }
 
@@ -1042,6 +1044,8 @@ fn mux_session_with_epochs(
         activity_epoch,
         created_epoch,
         last_attached_epoch: None,
+        socket: None,
+        backend_session_id: None,
     })
 }
 
@@ -1181,6 +1185,7 @@ fn sessions_projection_optional_branch_repo_worktree_columns() {
                 git_dir: None,
                 current_branch: None,
                 worktree: None,
+                head_commit: None,
             }),
         ],
         candidate_links: vec![worktree_to_branch],
@@ -1558,6 +1563,7 @@ fn prs_projection_attached_shows_agent_with_matching_cwd() {
         git_dir: None,
         current_branch: None,
         worktree: None,
+        head_commit: None,
     });
     let agent_node = agent_session("codex", "alpha", Some("/workspace/repo/crates/core"));
     let pr_node = forge_pr("octo", "repo", 7, "open", false);

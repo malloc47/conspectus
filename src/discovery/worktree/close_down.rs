@@ -120,7 +120,8 @@ fn short_branch(refname: &str) -> String {
 fn live_session_labels(snapshot: &GraphSnapshot, worktree_path: &str) -> Vec<String> {
     let root = Path::new(worktree_path);
     let mut sessions = Vec::new();
-    for node in &snapshot.nodes {
+    // Gone muxes run nothing to end (ADR 0140).
+    for node in snapshot.live_nodes() {
         match node {
             GraphNode::AgentSession(session) => {
                 if let Some(cwd) = &session.cwd
@@ -155,7 +156,7 @@ pub fn live_mux_teardown_targets(
 ) -> Vec<MuxTeardownTarget> {
     let root = Path::new(worktree_path);
     let mut targets = Vec::new();
-    for node in &snapshot.nodes {
+    for node in snapshot.live_nodes() {
         let GraphNode::MuxSession(mux) = node else {
             continue;
         };
@@ -167,10 +168,8 @@ pub fn live_mux_teardown_targets(
             && path_is_ancestor_of(root, Path::new(cwd))
         {
             targets.push(MuxTeardownTarget {
-                native_id: mux.native_id.clone(),
-                // Default socket only, matching the rename mux
-                // mutation's scope.
-                socket_name: None,
+                native_id: mux.session_name().to_string(),
+                socket_name: mux.socket.clone(),
                 pane_pid: mux.active_pane_pid,
             });
         }

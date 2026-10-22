@@ -151,6 +151,8 @@ pub struct ServeConfig {
     pub intervals: ServerIntervals,
     /// `[forge]` settings (ADR 0136).
     pub forge: crate::config::ForgeConfig,
+    /// `[history]` settings (ADR 0140).
+    pub history: crate::config::HistoryConfig,
 }
 
 /// Resolve the canonical Unix-domain socket path per ADR 0038.
@@ -330,6 +332,9 @@ struct DispatchCtx {
     /// The shutdown latch (ADR 0080); also cancels forge fetches
     /// (ADR 0137).
     shutdown: Arc<AtomicBool>,
+    /// Records each cycle's fresh observations (ADR 0140). The daemon
+    /// writes category 2 observations and nothing else (ADR 0143).
+    history: Option<Arc<crate::history::HistoryWriter>>,
 }
 
 /// Builds a [`LocalDiscoveryConfig`] for the given forge fetch policy.
@@ -827,7 +832,7 @@ fn handle_refresh(request: &Request, ctx: &DispatchCtx) -> Response {
         .unwrap_or_else(PoisonError::into_inner);
     let outcome = match class {
         None => run_full_rebuild(ctx),
-        Some(c) => try_class_cycle(c, ctx),
+        Some(c) => try_class_cycle(c, ctx, crate::discovery::current_epoch()),
     };
     match outcome {
         Ok(()) => Response {
@@ -855,6 +860,7 @@ fn handle_refresh(request: &Request, ctx: &DispatchCtx) -> Response {
 /// trips for every class, run discovery, write `graph.bin`.
 /// Counterpart to `--refresh` on the one-shot CLI.
 fn run_full_rebuild(ctx: &DispatchCtx) -> Result<()> {
+    let fresh_since = crate::discovery::current_epoch();
     let discovery_config = (ctx.discovery)(ForgeFetch::CachedOnly);
     let snapshot = discover_local_warm_with(
         ctx.scan_roots.effective(),
@@ -862,7 +868,8 @@ fn run_full_rebuild(ctx: &DispatchCtx) -> Result<()> {
         GraphSnapshot::empty(),
         &ctx.intervals,
     )?;
-    let snapshot = resolve_snapshot(snapshot);
+    let mut snapshot = resolve_snapshot(snapshot);
+    record_history(ctx, &mut snapshot, fresh_since);
     publish_snapshot(snapshot, ctx);
     Ok(())
 }
@@ -1123,6 +1130,7 @@ pub fn run(config: ServeConfig) -> Result<()> {
         discovery_caches,
         forge_fetch_lock: Arc::default(),
         shutdown: Arc::clone(&shutdown),
+        history: crate::history::HistoryWriter::from_env(config.history).map(Arc::new),
     };
 
     let mut handles: Vec<JoinHandle<()>> = Vec::new();
@@ -1307,7 +1315,7 @@ fn forge_tick(ctx: &DispatchCtx, shutdown: &AtomicBool) -> bool {
         return false;
     }
     if fetched > 0 {
-        run_cycle(ProviderClass::Forge, ctx);
+        run_cycle_since(ProviderClass::Forge, ctx, started);
         return true;
     }
     // A poll with nothing to fetch is still a tick, so status shows the
@@ -1417,6 +1425,13 @@ fn wait_for_class_signal(
 /// / error + message) into the shared [`SchedulerState`] for
 /// `conspectus status` to observe.
 fn run_cycle(class: ProviderClass, ctx: &DispatchCtx) {
+    run_cycle_since(class, ctx, crate::discovery::current_epoch());
+}
+
+/// [`run_cycle`], counting observations made since `fresh_since` as
+/// fresh: the forge class passes the start of the tick whose fetch
+/// fed the cycle.
+fn run_cycle_since(class: ProviderClass, ctx: &DispatchCtx, fresh_since: i64) {
     let state = &ctx.state;
     let started = crate::discovery::current_epoch();
     record_state_started(state, class, started);
@@ -1429,7 +1444,7 @@ fn run_cycle(class: ProviderClass, ctx: &DispatchCtx) {
         .writer_lock
         .lock()
         .unwrap_or_else(PoisonError::into_inner);
-    let outcome = try_class_cycle(class, ctx);
+    let outcome = try_class_cycle(class, ctx, fresh_since);
     let completed = crate::discovery::current_epoch();
     match outcome {
         Ok(()) => record_state_completed(state, class, completed, Ok(())),
@@ -1484,7 +1499,7 @@ fn record_state_completed(
 /// restart with no warm-start path arrives at the first cycle
 /// with `None` — the cycle runs as a cold rebuild (since every
 /// provider's "prior slice" is empty) and seeds the cache.
-fn try_class_cycle(class: ProviderClass, ctx: &DispatchCtx) -> Result<()> {
+fn try_class_cycle(class: ProviderClass, ctx: &DispatchCtx, fresh_since: i64) -> Result<()> {
     let mut prior = load_snapshot_state(&ctx.snapshot_state).unwrap_or_else(GraphSnapshot::empty);
     for provider in class.providers() {
         prior.evict_provider(provider);
@@ -1498,9 +1513,26 @@ fn try_class_cycle(class: ProviderClass, ctx: &DispatchCtx) -> Result<()> {
         prior,
         &ctx.intervals,
     )?;
-    let snapshot = resolve_snapshot(snapshot);
+    let mut snapshot = resolve_snapshot(snapshot);
+    record_history(ctx, &mut snapshot, fresh_since);
     publish_snapshot(snapshot, ctx);
     Ok(())
+}
+
+/// Record the cycle's fresh observations (ADR 0140). Only probes that
+/// ran at or after `fresh_since` count, so a cycle that reused another
+/// class's slice records nothing for it. Failures are logged and the
+/// cycle publishes anyway.
+fn record_history(ctx: &DispatchCtx, snapshot: &mut GraphSnapshot, fresh_since: i64) {
+    let Some(writer) = &ctx.history else {
+        return;
+    };
+    if let Err(err) = writer.record(snapshot, fresh_since) {
+        eprintln!(
+            "conspectus serve: failed to record history in {}: {err}",
+            writer.store.dir().display()
+        );
+    }
 }
 
 /// Clone the live snapshot out of the in-memory cache so the

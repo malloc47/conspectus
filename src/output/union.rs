@@ -203,8 +203,7 @@ fn collect_union_rows(snapshot: &GraphSnapshot) -> Vec<UnionRow<'_>> {
     agents.sort_by(|a, b| a.node_id_display.cmp(&b.node_id_display));
 
     let mut muxes: Vec<UnionRow<'_>> = snapshot
-        .nodes
-        .iter()
+        .live_nodes()
         .filter_map(|node| match node {
             GraphNode::MuxSession(mux) => Some(UnionRow {
                 node_id_display: NodeId::MuxSession(mux.id.clone()).to_string(),
@@ -235,8 +234,7 @@ fn collect_preferred_mux_per_agent(snapshot: &GraphSnapshot) -> HashMap<SessionK
         })
         .collect();
     let mux_lookup: HashMap<NodeId, &MuxSessionNode> = snapshot
-        .nodes
-        .iter()
+        .live_nodes()
         .filter_map(|node| match node {
             GraphNode::MuxSession(mux) => Some((NodeId::MuxSession(mux.id.clone()), mux)),
             _ => None,

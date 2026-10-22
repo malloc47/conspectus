@@ -1301,13 +1301,21 @@ fn discover_and_resolve_sourced(config: &RunConfig) -> Result<(crate::model::Gra
         .with_caches(std::sync::Arc::clone(&config.discovery_caches))
         .with_forge_fetch(config.forge_fetch)
         .with_forge_concurrency(config.forge_concurrency);
+    let fresh_since = crate::discovery::current_epoch();
     let snapshot = crate::discovery::discover_local_warm_with(
         roots,
         discovery_config,
         crate::model::GraphSnapshot::empty(),
         &config.intervals,
     )?;
-    let snapshot = resolve_snapshot(snapshot);
+    let mut snapshot = resolve_snapshot(snapshot);
+    if config.record_history
+        && let Some(writer) = crate::history::HistoryWriter::from_env(config.history.clone())
+    {
+        // Like the `graph.bin` write below, a failure stays quiet in a
+        // live session; the next one-shot command reports it.
+        let _ = writer.record(&mut snapshot, fresh_since);
+    }
     if !config.no_cache {
         let path = crate::snapshot::graph_bin_path();
         if let Err(err) = crate::snapshot::write_atomic(&path, &snapshot) {
@@ -1482,8 +1490,7 @@ pub(crate) fn known_live_mux_names(app: &App) -> Vec<String> {
     };
     let mut names: Vec<String> = db
         .snapshot()
-        .nodes
-        .iter()
+        .live_nodes()
         .filter_map(|n| match n {
             GraphNode::MuxSession(m) => Some(strip_tmux_prefix(&m.native_id)),
             _ => None,

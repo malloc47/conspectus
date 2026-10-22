@@ -84,7 +84,7 @@ impl AtelierWorkspaceDiscovery {
     ) -> GraphFragment {
         let mut observed = std::collections::BTreeSet::new();
         let mut known_roots = std::collections::BTreeSet::new();
-        for node in &snapshot.nodes {
+        for node in snapshot.live_nodes() {
             match node {
                 GraphNode::AgentSession(session) => observed.extend(session.cwd.as_deref()),
                 GraphNode::MuxSession(mux) => {
@@ -455,6 +455,7 @@ pub fn fork_records_fragment(workspace: &NodeId, records: &[AtelierForkRecord]) 
                         .as_ref()
                         .map(|branch| BranchId::new(repo_id.clone(), branch.clone())),
                     worktree: None,
+                    head_commit: None,
                 }));
                 fragment.candidate_links.push(atelier_link(
                     fork.clone(),
@@ -478,6 +479,7 @@ pub fn fork_records_fragment(workspace: &NodeId, records: &[AtelierForkRecord]) 
                     git_dir: None,
                     current_branch: None,
                     worktree: None,
+                    head_commit: None,
                 }));
                 fragment.candidate_links.push(atelier_link(
                     fork.clone(),

@@ -481,6 +481,7 @@ fn agent_session_pr_field_walks_worktree_branch_pr_chain() {
         git_dir: None,
         current_branch: None,
         worktree: None,
+        head_commit: None,
     }));
     let branch_id = crate::model::BranchId::new(repo_id.clone(), "refs/heads/main");
     snapshot

@@ -217,6 +217,17 @@ fn write_node_summary(
         crate::model::NodeKind::from(id).snake_case()
     );
     let _ = writeln!(out, "  id:   {display}");
+    if let Some(presence) = snapshot.presence(id) {
+        let _ = writeln!(
+            out,
+            "  presence: {} (last seen {} ago)",
+            presence.label(),
+            crate::output::render::format_relative_age(
+                presence.last_seen(),
+                crate::discovery::current_epoch()
+            )
+        );
+    }
 
     match (id, find_node(snapshot, id)) {
         (NodeId::Repo(_), Some(GraphNode::Repo(repo))) => {

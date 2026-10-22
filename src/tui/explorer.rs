@@ -367,6 +367,10 @@ pub fn directional_verb(relation: &RelationKind, direction: Direction) -> &'stat
         (PinTargetsMux, Upstream) => "targeted by pin",
         (PinRealizedBySession, Downstream) => "realized by",
         (PinRealizedBySession, Upstream) => "realizes pin",
+        (MuxLastHosted, Downstream) => "last hosted",
+        (MuxLastHosted, Upstream) => "last ran in",
+        (RebuiltFrom, Downstream) => "rebuilt from",
+        (RebuiltFrom, Upstream) => "rebuilt as",
     }
 }
 

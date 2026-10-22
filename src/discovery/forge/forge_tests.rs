@@ -176,6 +176,7 @@ fn forge_discovery_merges_adapter_fragments_deterministically() {
                 candidate_links: Vec::new(),
                 diagnostics: Vec::new(),
                 node_provenance: BTreeMap::new(),
+                mux_probes: Default::default(),
             },
         })
         .with_adapter(StaticAdapter {
@@ -185,6 +186,7 @@ fn forge_discovery_merges_adapter_fragments_deterministically() {
                 candidate_links: Vec::new(),
                 diagnostics: Vec::new(),
                 node_provenance: BTreeMap::new(),
+                mux_probes: Default::default(),
             },
         })
         .discover_graph(&GraphSnapshot::empty(), &DiscoveryContext::default())
@@ -293,6 +295,7 @@ fn snapshot_with_repo(parent: &Path, name: &str) -> GraphSnapshot {
         git_dir: None,
         current_branch: None,
         worktree: None,
+        head_commit: None,
     }));
     snapshot
 }

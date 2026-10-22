@@ -167,9 +167,16 @@ pub fn render_graph_dot(snapshot: &GraphSnapshot, opts: DotOptions) -> Result<St
         for node in members {
             let id = node.id();
             let style = node_style(node);
+            // A gone or unknown node (ADR 0140) draws dashed and grey.
+            let presence = snapshot.presence(&id).map_or(String::new(), |presence| {
+                format!(
+                    ", style=\"filled,rounded,dashed\", fontcolor=\"#757575\", tooltip=\"{}\"",
+                    presence.label()
+                )
+            });
             writeln!(
                 out,
-                "    {dot_id} [label={label}, shape={shape}, fillcolor=\"{fill}\"{extra}];",
+                "    {dot_id} [label={label}, shape={shape}, fillcolor=\"{fill}\"{extra}{presence}];",
                 dot_id = node_dot_id(&id),
                 label = dot_quote(&node_label(node)),
                 shape = style.shape,
@@ -543,7 +550,10 @@ fn relation_arrowhead(rel: &RelationKind) -> &'static str {
         | RelationKind::ForksWorkspace
         | RelationKind::ForksRepo
         | RelationKind::CreatedCheckout
-        | RelationKind::CreatedBranch => "normal",
+        | RelationKind::CreatedBranch
+        | RelationKind::RebuiltFrom => "normal",
+        // History: the session a gone mux last hosted.
+        RelationKind::MuxLastHosted => "odot",
         // Runtime-process attribution: dot heads to read as "observes".
         RelationKind::ProcessIdentifiesSession | RelationKind::ProcessCandidatesSession => "dot",
     }

@@ -25,6 +25,7 @@ fn seeded_app() -> App {
         git_dir: None,
         current_branch: None,
         worktree: None,
+        head_commit: None,
     }));
     snapshot.nodes.push(GraphNode::AgentSession(
         AgentSessionNode::new(
@@ -102,6 +103,7 @@ fn muxed_app_previewing(
         git_dir: None,
         current_branch: None,
         worktree: None,
+        head_commit: None,
     }));
     snapshot.nodes.push(GraphNode::AgentSession(
         AgentSessionNode::new(
@@ -459,6 +461,7 @@ fn seeded_app_with_harness_chips() -> App {
         git_dir: None,
         current_branch: None,
         worktree: None,
+        head_commit: None,
     }));
     snapshot.nodes.push(GraphNode::AgentSession(
         AgentSessionNode::new(
@@ -609,6 +612,7 @@ fn two_repo_app() -> App {
             git_dir: None,
             current_branch: None,
             worktree: None,
+            head_commit: None,
         }));
         snapshot.nodes.push(GraphNode::AgentSession(
             AgentSessionNode::new(
@@ -1465,6 +1469,7 @@ fn mux_detail_session_section_shows_session_id_when_collapsed() {
         git_dir: None,
         current_branch: None,
         worktree: None,
+        head_commit: None,
     }));
     snapshot.nodes.push(GraphNode::AgentSession(
         AgentSessionNode::new(
@@ -1569,6 +1574,7 @@ fn expanded_session_under_mux_matches_standalone_session_detail() {
         git_dir: None,
         current_branch: None,
         worktree: None,
+        head_commit: None,
     }));
     snapshot.nodes.push(GraphNode::AgentSession(
         AgentSessionNode::new(
@@ -2398,6 +2404,7 @@ fn no_live_preview_muxed_session_shows_privacy_banner() {
         git_dir: None,
         current_branch: None,
         worktree: None,
+        head_commit: None,
     }));
     snapshot.nodes.push(GraphNode::AgentSession(
         AgentSessionNode::new(
@@ -2626,6 +2633,7 @@ fn contextual_status_offers_ambiguous_attach_hint_with_inspect_affordance() {
         git_dir: None,
         current_branch: None,
         worktree: None,
+        head_commit: None,
     }));
     snapshot.nodes.push(GraphNode::AgentSession(
         AgentSessionNode::new(
@@ -3062,6 +3070,7 @@ fn left_panel_scrolls_to_keep_selected_row_visible_past_viewport() {
         git_dir: None,
         current_branch: None,
         worktree: None,
+        head_commit: None,
     }));
     for i in 0..20 {
         snapshot.nodes.push(GraphNode::AgentSession(
@@ -3377,6 +3386,7 @@ fn left_pane_renders_scrollbar_when_content_exceeds_viewport() {
         git_dir: None,
         current_branch: None,
         worktree: None,
+        head_commit: None,
     }));
     for i in 0..20 {
         snapshot.nodes.push(GraphNode::AgentSession(
@@ -3495,6 +3505,7 @@ fn left_pane_scrollbar_thumb_reaches_bottom_at_max_scroll() {
         git_dir: None,
         current_branch: None,
         worktree: None,
+        head_commit: None,
     }));
     for i in 0..40 {
         snapshot.nodes.push(GraphNode::AgentSession(
@@ -3585,6 +3596,7 @@ fn left_pane_scrollbar_column_carries_only_scrollbar_glyphs() {
         git_dir: None,
         current_branch: None,
         worktree: None,
+        head_commit: None,
     }));
     for i in 0..30 {
         snapshot.nodes.push(GraphNode::AgentSession(
@@ -4443,6 +4455,7 @@ fn git_app() -> (App, crate::model::BranchId) {
         git_dir: None,
         current_branch: Some(branch.clone()),
         worktree: None,
+        head_commit: None,
     }));
     snapshot
         .nodes

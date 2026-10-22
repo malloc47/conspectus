@@ -66,6 +66,8 @@ fn mux(native: &str, cwd: Option<&str>) -> GraphNode {
         activity_epoch: None,
         created_epoch: None,
         last_attached_epoch: None,
+        socket: None,
+        backend_session_id: None,
     })
 }
 
@@ -84,6 +86,8 @@ fn mux_with_active_command(native: &str, cwd: Option<&str>, command: &str) -> Gr
         activity_epoch: None,
         created_epoch: None,
         last_attached_epoch: None,
+        socket: None,
+        backend_session_id: None,
     })
 }
 
@@ -102,6 +106,8 @@ fn mux_with_active_process(native: &str, cwd: Option<&str>, command: &str, pid: 
         activity_epoch: None,
         created_epoch: None,
         last_attached_epoch: None,
+        socket: None,
+        backend_session_id: None,
     })
 }
 
@@ -152,6 +158,7 @@ fn worktree(repo_common_dir: &str, root: &str) -> GraphNode {
         git_dir: None,
         current_branch: None,
         worktree: None,
+        head_commit: None,
     })
 }
 

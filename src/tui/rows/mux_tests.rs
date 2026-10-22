@@ -37,6 +37,8 @@ fn mux_node_with_paths(
         activity_epoch: Some(1_700_000_050),
         created_epoch: None,
         last_attached_epoch: None,
+        socket: None,
+        backend_session_id: None,
     })
 }
 
@@ -561,6 +563,7 @@ fn repo_grouping_buckets_muxes_under_repo_headers() {
         git_dir: None,
         current_branch: None,
         worktree: None,
+        head_commit: None,
     }));
     snapshot.nodes.push(GraphNode::Checkout(CheckoutNode {
         id: crate::model::CheckoutId::new(
@@ -571,6 +574,7 @@ fn repo_grouping_buckets_muxes_under_repo_headers() {
         git_dir: None,
         current_branch: None,
         worktree: None,
+        head_commit: None,
     }));
     snapshot.nodes.push(mux_node_with_paths(
         "foo-a",
@@ -772,6 +776,7 @@ fn mux_view_emits_pins_group_at_top_under_repo_grouping() {
         git_dir: None,
         current_branch: None,
         worktree: None,
+        head_commit: None,
     }));
     snapshot.nodes.push(mux_node_with_paths(
         "foo-a",
@@ -849,6 +854,7 @@ fn mux_view_repo_grouping_renders_bound_pins_as_mux_rows() {
         git_dir: None,
         current_branch: None,
         worktree: None,
+        head_commit: None,
     }));
     snapshot.nodes.push(mux_node_with_paths(
         "foo-a",
@@ -1209,6 +1215,7 @@ fn repo_with_checkouts(common_dir: &str, roots: &[&str]) -> Vec<GraphNode> {
             git_dir: None,
             current_branch: None,
             worktree: None,
+            head_commit: None,
         }));
     }
     nodes

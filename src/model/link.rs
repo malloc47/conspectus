@@ -60,6 +60,10 @@ pub enum RelationKind {
     ProcessCandidatesSession,
     PinTargetsMux,
     PinRealizedBySession,
+    /// From a gone mux to the session it hosted last (ADR 0140).
+    MuxLastHosted,
+    /// From a rebuilt checkout to the one it replaced (ADR 0140).
+    RebuiltFrom,
 }
 
 impl RelationKind {
@@ -89,6 +93,8 @@ impl RelationKind {
             Self::ProcessCandidatesSession => "process_candidates_session",
             Self::PinTargetsMux => "pin_targets_mux",
             Self::PinRealizedBySession => "pin_realized_by_session",
+            Self::MuxLastHosted => "mux_last_hosted",
+            Self::RebuiltFrom => "rebuilt_from",
         }
     }
 
@@ -123,6 +129,8 @@ impl RelationKind {
             "process_candidates_session" => Ok(Self::ProcessCandidatesSession),
             "pin_targets_mux" => Ok(Self::PinTargetsMux),
             "pin_realized_by_session" => Ok(Self::PinRealizedBySession),
+            "mux_last_hosted" => Ok(Self::MuxLastHosted),
+            "rebuilt_from" => Ok(Self::RebuiltFrom),
             _ => Err(format!(
                 "invalid relation `{raw}`; expected a declared relation such as linked_to_mux"
             )),

@@ -39,6 +39,7 @@ impl ServeArgs {
         // drops the root instead of failing discovery (ADR 0111).
         let scan_roots = super::long_running_scan_roots(self.scan_roots, &outcome.config, cwd);
         crate::server::run(crate::server::ServeConfig {
+            history: outcome.config.history.clone(),
             scan_roots,
             intervals: outcome.config.server.intervals,
             forge: outcome.config.forge,
@@ -159,13 +160,15 @@ fn in_process_class_refresh(
     }
     let discovery_config = crate::discovery::LocalDiscoveryConfig::from_env()
         .with_forge_concurrency(config.forge.concurrency);
+    let fresh_since = crate::discovery::current_epoch();
     let snapshot = crate::discovery::discover_local_warm_with(
         roots,
         discovery_config,
         prior,
         &config.server.intervals,
     )?;
-    let snapshot = crate::resolve::resolve_snapshot(snapshot);
+    let mut snapshot = crate::resolve::resolve_snapshot(snapshot);
+    super::record_history(&mut snapshot, fresh_since, config);
     cache_resolved_snapshot(&snapshot, false);
     Ok(())
 }

@@ -8,6 +8,7 @@ use crate::model::{
 
 fn mux_obs(name: &str, session_id: &str, created: i64) -> MuxObservation {
     MuxObservation {
+        seen_at: 0,
         key: format!("mux_session:tmux:{name}"),
         recipe: MuxRecipe {
             backend: "tmux".into(),
@@ -38,8 +39,10 @@ fn hosted(id: &str, first: i64, last: i64) -> HostedSession {
 
 fn observations(seen_at: i64, muxes: Vec<MuxObservation>) -> Observations {
     Observations {
-        seen_at,
-        muxes,
+        muxes: muxes
+            .into_iter()
+            .map(|obs| MuxObservation { seen_at, ..obs })
+            .collect(),
         ..Default::default()
     }
 }
@@ -149,16 +152,18 @@ fn merging_in_either_order_agrees() {
     b.recipe.hosted = vec![hosted("s2", 2_000, 2_000), hosted("s1", 1_500, 1_900)];
     b.recipe.cwd = Some("/src/new".into());
     let first = Observations {
-        seen_at: 1_000,
-        muxes: vec![a, mux_obs("other", "$2", 950)],
-        checkouts: vec![checkout_obs("/wt/a", "feature", "aaa")],
-        ..Default::default()
+        checkouts: vec![CheckoutObservation {
+            seen_at: 1_000,
+            ..checkout_obs("/wt/a", "feature", "aaa")
+        }],
+        ..observations(1_000, vec![a, mux_obs("other", "$2", 950)])
     };
     let second = Observations {
-        seen_at: 2_000,
-        muxes: vec![b],
-        checkouts: vec![checkout_obs("/wt/a", "feature", "bbb")],
-        ..Default::default()
+        checkouts: vec![CheckoutObservation {
+            seen_at: 2_000,
+            ..checkout_obs("/wt/a", "feature", "bbb")
+        }],
+        ..observations(2_000, vec![b])
     };
 
     let mut forward = HistorySnapshot::default();
@@ -498,6 +503,7 @@ fn a_malformed_record_makes_its_file_read_only() {
     fs::write(dir.path().join("prs.json"), broken).unwrap();
     let store = HistoryStore::at(dir.path());
     let pr = PrObservation {
+        seen_at: 0,
         key: "forge_pr:github:github.com/o/r#1".into(),
         recipe: PrRecipe {
             provider: "github".into(),
@@ -511,8 +517,10 @@ fn a_malformed_record_makes_its_file_read_only() {
     };
     let (load, _) = store
         .record(&Observations {
-            seen_at: 1_000,
-            prs: vec![pr],
+            prs: vec![PrObservation {
+                seen_at: 1_000,
+                ..pr
+            }],
             ..Default::default()
         })
         .unwrap();
@@ -540,4 +548,38 @@ fn globs_match_stars_and_question_marks() {
     assert!(glob_matches("*/tmp/*", "/home/me/tmp/x"));
     assert!(!glob_matches("scratch*", "my-scratch"));
     assert!(!glob_matches("a?c", "ac"));
+}
+
+#[test]
+fn a_pr_missing_from_the_next_listing_keeps_its_snapshot_and_state() {
+    let mut history = HistorySnapshot::default();
+    let pr = PrObservation {
+        seen_at: 1_000,
+        key: "forge_pr:github:github.com/o/r#1".into(),
+        recipe: PrRecipe {
+            provider: "github".into(),
+            host: "github.com".into(),
+            owner: "o".into(),
+            repo: "r".into(),
+            number: 1,
+            state: Some("merged".into()),
+            title: Some("Ship it".into()),
+            ..Default::default()
+        },
+        display: RecordDisplay::default(),
+    };
+    merge::merge(
+        &mut history,
+        &Observations {
+            prs: vec![pr],
+            ..Default::default()
+        },
+    );
+    // The next listing no longer returns it: nothing is observed, and
+    // nothing about the record changes.
+    let outcome = merge::merge(&mut history, &Observations::default());
+    assert!(outcome.changed.is_empty());
+    assert_eq!(history.prs.len(), 1);
+    assert_eq!(history.prs[0].recipe.state.as_deref(), Some("merged"));
+    assert_eq!(history.prs[0].meta.last_seen, 1_000);
 }

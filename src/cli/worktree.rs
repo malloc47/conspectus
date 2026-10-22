@@ -501,7 +501,7 @@ fn code_suffix(code: Option<i32>) -> String {
 /// Path of the worktree checking out `branch` (short name), from the
 /// discovered graph. `None` when no enumerated worktree matches.
 fn worktree_path_for_branch(snapshot: &GraphSnapshot, branch: &str) -> Option<String> {
-    for node in &snapshot.nodes {
+    for node in snapshot.live_nodes() {
         let GraphNode::Checkout(checkout) = node else {
             continue;
         };
@@ -523,7 +523,7 @@ fn worktree_path_for_branch(snapshot: &GraphSnapshot, branch: &str) -> Option<St
 fn live_sessions_in_worktree(snapshot: &GraphSnapshot, worktree_path: &str) -> Vec<String> {
     let root = Path::new(worktree_path);
     let mut sessions = Vec::new();
-    for node in &snapshot.nodes {
+    for node in snapshot.live_nodes() {
         match node {
             GraphNode::AgentSession(session) => {
                 if let Some(cwd) = &session.cwd
@@ -580,7 +580,7 @@ struct WorktreeRow {
 /// from git worktree enumeration) are included.
 fn collect_worktrees(snapshot: &GraphSnapshot) -> BTreeMap<RepoId, Vec<WorktreeRow>> {
     let mut by_repo: BTreeMap<RepoId, Vec<WorktreeRow>> = BTreeMap::new();
-    for node in &snapshot.nodes {
+    for node in snapshot.live_nodes() {
         let GraphNode::Checkout(checkout) = node else {
             continue;
         };

@@ -408,6 +408,8 @@ fn populated_snapshot_for_archive_tests() -> GraphSnapshot {
         activity_epoch: Some(2),
         created_epoch: Some(3),
         last_attached_epoch: None,
+        socket: None,
+        backend_session_id: None,
     }));
     snap.nodes
         .push(GraphNode::RuntimeProcess(RuntimeProcessNode {

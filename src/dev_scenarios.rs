@@ -279,6 +279,8 @@ impl ScenarioWorld {
             discovery_caches: std::sync::Arc::default(),
             forge_fetch: crate::discovery::forge::ForgeFetch::default(),
             forge_concurrency: crate::discovery::forge::DEFAULT_FORGE_CONCURRENCY,
+            history: crate::config::HistoryConfig::default(),
+            record_history: false,
         }
     }
 

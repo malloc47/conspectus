@@ -422,9 +422,9 @@ pub(super) fn snapshot_counts(handle: Option<&SnapshotHandle>) -> (usize, usize)
         .iter()
         .filter(|node| matches!(node, GraphNode::AgentSession(_)))
         .count();
+    // Gone muxes are history, not muxes that exist (ADR 0140).
     let mux = snapshot
-        .nodes
-        .iter()
+        .live_nodes()
         .filter(|node| matches!(node, GraphNode::MuxSession(_)))
         .count();
     (agents, mux)

@@ -619,6 +619,62 @@ impl HistorySnapshot {
     }
 }
 
+/// How one mux backend and socket answered its latest probe (ADR
+/// 0140). A mux is gone only when a successful probe of its server
+/// didn't list it; a failure or a missing binary makes it unknown.
+#[derive(
+    Clone,
+    Debug,
+    Eq,
+    PartialEq,
+    Serialize,
+    Deserialize,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+)]
+#[serde(tag = "status", rename_all = "snake_case")]
+pub enum MuxProbeStatus {
+    /// The probe listed the server's sessions (possibly none).
+    Listed,
+    /// No server is running there. A success: every mux it had is
+    /// gone, as after a reboot.
+    NoServer,
+    /// The backend binary isn't installed.
+    Unavailable,
+    /// The probe ran and failed.
+    Failed { message: String },
+}
+
+impl MuxProbeStatus {
+    /// Whether the probe can prove a mux is gone.
+    pub fn succeeded(&self) -> bool {
+        matches!(self, MuxProbeStatus::Listed | MuxProbeStatus::NoServer)
+    }
+}
+
+/// A probe's status and when it ran.
+#[derive(
+    Clone,
+    Debug,
+    Eq,
+    PartialEq,
+    Serialize,
+    Deserialize,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+)]
+pub struct MuxProbe {
+    #[serde(flatten)]
+    pub status: MuxProbeStatus,
+    pub epoch: i64,
+    /// Sessions the probe listed that the backend reports as exited
+    /// but resurrectable (zellij's `EXITED`). They are gone, not live.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub exited: Vec<String>,
+}
+
 /// Access to a record's envelope, whatever its kind.
 pub trait Record {
     fn meta(&self) -> &RecordMeta;

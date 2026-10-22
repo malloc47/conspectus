@@ -309,6 +309,8 @@ fn mux(backend: &str, native: &str, cwd: Option<&str>) -> GraphNode {
         activity_epoch: Some(1_700_000_005),
         created_epoch: Some(1_699_000_000),
         last_attached_epoch: None,
+        socket: None,
+        backend_session_id: None,
     })
 }
 
@@ -1317,6 +1319,7 @@ fn cwd_owner_kind_resolves_to_checkout_workspace_then_repo() {
         git_dir: None,
         current_branch: None,
         worktree: None,
+        head_commit: None,
     }));
     // Checkout wins over Repo for the same path.
     assert_eq!(
@@ -1357,6 +1360,7 @@ fn agent_session_cwd_field_carries_kind_chip_when_resolved() {
         git_dir: None,
         current_branch: None,
         worktree: None,
+        head_commit: None,
     }));
     snapshot.nodes.push(agent(
         "claude-code",

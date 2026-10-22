@@ -28,6 +28,7 @@ fn worktree(repo_common: &str, root: &str) -> GraphNode {
         git_dir: None,
         current_branch: None,
         worktree: None,
+        head_commit: None,
     })
 }
 
@@ -2130,6 +2131,7 @@ fn checkout_node(repo_common_dir: &str, root: &str) -> GraphNode {
         git_dir: None,
         current_branch: None,
         worktree: None,
+        head_commit: None,
     })
 }
 

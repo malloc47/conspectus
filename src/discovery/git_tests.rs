@@ -131,6 +131,7 @@ fn fragment_maps_git_probe_to_repo_worktree_branch_and_links() {
             url: "git@example.com:owner/repo.git".to_string(),
         }],
         local_branches: vec!["feature".to_string(), "main".to_string()],
+        head: None,
     };
 
     let fragment = fragment_from_probe(&probe);
@@ -355,6 +356,7 @@ fn sibling_worktree_fragment_skips_current_and_carries_metadata() {
         upstream: None,
         remotes: Vec::new(),
         local_branches: Vec::new(),
+        head: None,
     };
     let mut locked_sibling = wt_record(
         "/wt/bugfix",
@@ -408,6 +410,7 @@ fn sibling_worktree_fragment_is_none_without_siblings() {
         upstream: None,
         remotes: Vec::new(),
         local_branches: Vec::new(),
+        head: None,
     };
     // Only the current worktree — nothing to add.
     let records = vec![wt_record(
@@ -430,6 +433,7 @@ fn checkout_node_marks_primary_and_linked_from_probe() {
         upstream: None,
         remotes: Vec::new(),
         local_branches: Vec::new(),
+        head: None,
     };
     let node = checkout_node(
         CheckoutId::new(RepoId::new("/repo/.git"), "/repo"),

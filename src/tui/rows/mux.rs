@@ -740,8 +740,7 @@ fn agent_matches_filter(agent: &AttachedAgent, now: Option<i64>, filter: &RowFil
 
 fn collect_muxes(snapshot: &GraphSnapshot) -> Vec<MuxData<'_>> {
     let mut rows: Vec<MuxData<'_>> = snapshot
-        .nodes
-        .iter()
+        .live_nodes()
         .filter_map(|node| match node {
             GraphNode::MuxSession(mux) => Some(MuxData {
                 node_id: NodeId::MuxSession(mux.id.clone()).to_string(),

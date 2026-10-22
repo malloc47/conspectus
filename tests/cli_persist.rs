@@ -26,6 +26,7 @@ fn isolated_cmd(home: &Path, data_home: &Path) -> Command {
     let mut cmd = Command::cargo_bin("conspectus").expect("conspectus binary exists");
     cmd.env("HOME", home);
     cmd.env("XDG_DATA_HOME", data_home);
+    cmd.env("XDG_STATE_HOME", home.join(".local").join("state"));
     cmd.env("XDG_RUNTIME_DIR", home.join("no-daemon-runtime-dir"));
     cmd.env("CONSPECTUS_DISABLE_TMUX", "1");
     cmd.env("CONSPECTUS_DISABLE_FORGE", "1");

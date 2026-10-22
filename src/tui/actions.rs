@@ -114,6 +114,9 @@ pub enum AttachDisabled {
     /// doesn't have a sensible default pick. The renderer surfaces
     /// the count as a status hint pointing at the detail section.
     AmbiguousGroupMuxes(usize),
+    /// The mux is only in history (ADR 0140); rebuilding it, not
+    /// attaching, brings it back.
+    MuxGone(String),
 }
 
 /// Decide whether the current selection is attachable. Pure: works
@@ -191,6 +194,9 @@ pub fn resolve_attach_target(app: &App) -> Result<AttachTarget, AttachDisabled> 
             _ => None,
         })
         .ok_or(AttachDisabled::MuxNodeMissing)?;
+    if !snapshot.is_live(&NodeId::MuxSession(mux_node.id.clone())) {
+        return Err(AttachDisabled::MuxGone(mux_node.session_name().to_string()));
+    }
 
     let target = AttachTarget {
         mux: mux_node.id.clone(),
@@ -511,6 +517,9 @@ pub fn attach_disabled_reason(reason: &AttachDisabled) -> String {
         }
         AttachDisabled::AmbiguousGroupMuxes(n) => {
             format!("attach: {n} ambiguous muxes here — pick one in detail, or `b` to bind",)
+        }
+        AttachDisabled::MuxGone(name) => {
+            format!("attach: `{name}` is gone; Enter rebuilds it")
         }
     }
 }

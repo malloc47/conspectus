@@ -82,6 +82,7 @@ fn add_repo_and_worktree(snapshot: &mut GraphSnapshot, common_dir: &str) {
         git_dir: None,
         current_branch: None,
         worktree: None,
+        head_commit: None,
     }));
 }
 

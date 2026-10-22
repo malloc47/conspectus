@@ -89,6 +89,7 @@ impl HarnessAdapter for AiderAdapter {
             candidate_links: Vec::new(),
             diagnostics: Vec::new(),
             node_provenance: BTreeMap::new(),
+            mux_probes: Default::default(),
         };
         crate::discovery::stamp_fragment(
             &mut fragment,

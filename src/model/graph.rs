@@ -51,6 +51,70 @@ pub struct GraphSnapshot {
         with = "node_provenance_serde"
     )]
     pub node_provenance: BTreeMap<NodeId, NodeProvenance>,
+    /// Presence of nodes that aren't live (ADR 0140): history records
+    /// projected as gone or unknown nodes. Live is the default and has
+    /// no entry. Serializes as a list, like `node_provenance`.
+    #[serde(
+        default,
+        skip_serializing_if = "BTreeMap::is_empty",
+        with = "node_presence_serde"
+    )]
+    pub node_presence: BTreeMap<NodeId, NodePresence>,
+    /// The latest probe of each mux backend and socket, keyed by
+    /// [`probe_key`]. Kept across cycles that reuse a mux slice (it
+    /// rides in `graph.bin`), so gone and unknown stay decidable
+    /// between probes. Left out of JSON: it is discovery bookkeeping
+    /// with wall-clock times, and `node_presence` carries its effect.
+    #[serde(skip)]
+    pub mux_probes: BTreeMap<String, MuxProbe>,
+    /// The history records discovery read and wrote this cycle (ADR
+    /// 0140), so views, pin slots, exports, and fixtures have recipes
+    /// and record ids without the store.
+    #[serde(default, skip_serializing_if = "HistorySnapshot::is_empty")]
+    pub history: HistorySnapshot,
+}
+
+mod node_presence_serde {
+    use std::collections::BTreeMap;
+
+    use serde::{Deserialize, Deserializer, Serialize, Serializer};
+
+    use super::{NodeId, NodePresence};
+
+    #[derive(Serialize, Deserialize)]
+    struct Entry {
+        node_id: NodeId,
+        #[serde(flatten)]
+        presence: NodePresence,
+    }
+
+    pub fn serialize<S>(
+        map: &BTreeMap<NodeId, NodePresence>,
+        serializer: S,
+    ) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        let entries: Vec<Entry> = map
+            .iter()
+            .map(|(node_id, presence)| Entry {
+                node_id: node_id.clone(),
+                presence: *presence,
+            })
+            .collect();
+        entries.serialize(serializer)
+    }
+
+    pub fn deserialize<'de, D>(deserializer: D) -> Result<BTreeMap<NodeId, NodePresence>, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let entries: Vec<Entry> = Vec::deserialize(deserializer)?;
+        Ok(entries
+            .into_iter()
+            .map(|entry| (entry.node_id, entry.presence))
+            .collect())
+    }
 }
 
 /// Round-trip helper for the `GraphSnapshot::node_provenance`
@@ -143,6 +207,16 @@ pub struct SnapshotIndex<'a> {
 }
 
 impl<'a> SnapshotIndex<'a> {
+    /// A node's presence (ADR 0140); `None` means live.
+    pub fn presence(&self, id: &NodeId) -> Option<NodePresence> {
+        self.snapshot.presence(id)
+    }
+
+    /// Whether `id` exists now rather than only in history.
+    pub fn is_live(&self, id: &NodeId) -> bool {
+        self.snapshot.is_live(id)
+    }
+
     /// Build the index by walking `snapshot.nodes` +
     /// `snapshot.candidate_links` once.
     pub fn new(snapshot: &'a GraphSnapshot) -> Self {
@@ -276,6 +350,25 @@ impl GraphSnapshot {
         self.nodes.iter().find(|node| node.has_id(id))
     }
 
+    /// A node's presence (ADR 0140); `None` means live.
+    pub fn presence(&self, id: &NodeId) -> Option<NodePresence> {
+        self.node_presence.get(id).copied()
+    }
+
+    /// Whether `id` exists now rather than only in history. Code that
+    /// acts on a node, counts it, or links to it checks this first.
+    pub fn is_live(&self, id: &NodeId) -> bool {
+        !self.node_presence.contains_key(id)
+    }
+
+    /// The nodes that exist now, without history's gone and unknown
+    /// ones.
+    pub fn live_nodes(&self) -> impl Iterator<Item = &GraphNode> {
+        self.nodes
+            .iter()
+            .filter(|node| self.node_presence.is_empty() || self.is_live(&node.id()))
+    }
+
     pub fn canonicalize(&mut self) {
         self.nodes.sort_by_key(GraphNode::id);
         self.candidate_links.sort_by_key(stable_json_key);
@@ -346,6 +439,14 @@ impl GraphSnapshot {
             .retain(|link| link.source_metadata.adapter != provider);
         self.node_provenance
             .retain(|_, prov| prov.provider != provider);
+        self.node_presence.retain(|id, _| !evicted_ids.contains(id));
+        // A mux provider's probes go with its nodes: keeping a probe
+        // whose sessions were evicted would read every one as gone.
+        self.mux_probes.retain(|key, _| {
+            key.split_once(':')
+                .map_or(key.as_str(), |(backend, _)| backend)
+                != provider
+        });
         self.resolved_relationships.clear();
     }
 }

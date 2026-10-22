@@ -127,6 +127,10 @@ pub struct CheckoutNode {
     /// lock / prune status from `git worktree list --porcelain`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub worktree: Option<WorktreeMeta>,
+    /// The commit HEAD points at. History keeps it so a worktree whose
+    /// branch was deleted can be recreated from it (ADR 0140).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub head_commit: Option<String>,
 }
 
 impl CheckoutNode {
@@ -137,6 +141,7 @@ impl CheckoutNode {
             git_dir: None,
             current_branch: None,
             worktree: None,
+            head_commit: None,
         }
     }
 
@@ -382,6 +387,16 @@ pub struct MuxSessionNode {
     /// sort basis.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub last_attached_epoch: Option<i64>,
+    /// The non-default server the mux lives on (tmux `-L <socket>`);
+    /// `None` for the default server. `native_id` carries it as a
+    /// `<socket>:` prefix too, so qualified names stay unique.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub socket: Option<String>,
+    /// The backend's own id for the session (tmux `#{session_id}`,
+    /// e.g. `$3`). With `created_epoch` it identifies one incarnation,
+    /// which survives an outside rename (ADR 0140).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub backend_session_id: Option<String>,
 }
 
 // Builder helpers on `MuxSessionNode` mirror
@@ -401,6 +416,19 @@ impl MuxSessionNode {
         self.qualified_name()
     }
 
+    /// The bare session name the backend knows, without the socket
+    /// prefix `native_id` carries for a non-default server.
+    pub fn session_name(&self) -> &str {
+        match self.socket.as_deref() {
+            Some(socket) => self
+                .native_id
+                .strip_prefix(socket)
+                .and_then(|rest| rest.strip_prefix(':'))
+                .unwrap_or(&self.native_id),
+            None => &self.native_id,
+        }
+    }
+
     /// Minimal ctor. All optional fields default to `None`.
     pub fn new(id: MuxSessionId, backend: impl Into<String>, native_id: impl Into<String>) -> Self {
         Self {
@@ -416,6 +444,8 @@ impl MuxSessionNode {
             activity_epoch: None,
             created_epoch: None,
             last_attached_epoch: None,
+            socket: None,
+            backend_session_id: None,
         }
     }
 

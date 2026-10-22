@@ -71,10 +71,20 @@ struct MuxNewArgs {
 impl MuxNewArgs {
     fn run(self) -> Result<()> {
         let runner = SystemTmux::new();
-        self.run_with_runner(&runner)
+        let history = launch_history_writer();
+        self.run_recording(&runner, history.as_ref())
     }
 
+    #[cfg(test)]
     fn run_with_runner(self, runner: &dyn MuxBackend) -> Result<()> {
+        self.run_recording(runner, None)
+    }
+
+    fn run_recording(
+        self,
+        runner: &dyn MuxBackend,
+        history: Option<&crate::history::HistoryWriter>,
+    ) -> Result<()> {
         if self.name.trim().is_empty() {
             bail!("mux new requires a non-empty <NAME>");
         }
@@ -96,6 +106,7 @@ impl MuxNewArgs {
             .new_session(socket, name, &cwd, &[])
             .map_err(|err| anyhow!("tmux new-session failed: {err}"))?;
         report_new_session(outcome, name)?;
+        record_launch(history, runner.backend_key(), socket, name, &cwd, &[], None);
         if self.no_attach {
             let attach_cmd = format_attach_command(socket, name);
             println!("spawned `{name}` (detached); attach with: {attach_cmd}");
@@ -152,10 +163,20 @@ struct MuxLaunchArgs {
 impl MuxLaunchArgs {
     fn run(self) -> Result<()> {
         let runner = SystemTmux::new();
-        self.run_with_runner(&runner)
+        let history = launch_history_writer();
+        self.run_recording(&runner, history.as_ref())
     }
 
+    #[cfg(test)]
     fn run_with_runner(self, runner: &dyn MuxBackend) -> Result<()> {
+        self.run_recording(runner, None)
+    }
+
+    fn run_recording(
+        self,
+        runner: &dyn MuxBackend,
+        history: Option<&crate::history::HistoryWriter>,
+    ) -> Result<()> {
         if self.name.trim().is_empty() {
             bail!("mux launch requires a non-empty --name");
         }
@@ -202,12 +223,63 @@ impl MuxLaunchArgs {
         // harness's first output, and a harness that dies non-zero
         // stays as a dead pane with its output (ADR 0103).
         super::launch_watch::spawn(runner, socket, name, &cwd, &argv)?;
+        let recorded: Vec<String> = argv
+            .iter()
+            .map(|arg| arg.to_string_lossy().into_owned())
+            .collect();
+        record_launch(
+            history,
+            runner.backend_key(),
+            socket,
+            name,
+            &cwd,
+            &recorded,
+            Some(self.harness.trim()),
+        );
         if self.no_attach {
             let attach_cmd = format_attach_command(socket, name);
             println!("launched `{name}` (detached); attach with: {attach_cmd}");
             return Ok(());
         }
         attach_and_report(runner, socket, name)
+    }
+}
+
+/// The history writer launch paths record into (ADR 0140), with the
+/// `[history]` settings from config.
+pub(super) fn launch_history_writer() -> Option<crate::history::HistoryWriter> {
+    crate::history::HistoryWriter::from_env(crate::config::load_from_cwd().config.history)
+}
+
+/// Record a mux a launch path just created, with the argv it used, so
+/// it is rebuildable before discovery sees it. A failure warns; the
+/// mux is already running.
+pub(super) fn record_launch(
+    history: Option<&crate::history::HistoryWriter>,
+    backend: &str,
+    socket: Option<&str>,
+    name: &str,
+    cwd: &std::path::Path,
+    argv: &[String],
+    harness: Option<&str>,
+) {
+    let Some(writer) = history else {
+        return;
+    };
+    let cwd = cwd.to_string_lossy();
+    let launch = crate::history::LaunchedMux {
+        backend,
+        socket,
+        name,
+        cwd: &cwd,
+        argv,
+        harness,
+    };
+    if let Err(err) = writer.record_launched_mux(&launch) {
+        eprintln!(
+            "conspectus: warning: failed to record `{name}` in history at {}: {err}",
+            writer.store.dir().display()
+        );
     }
 }
 

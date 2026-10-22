@@ -151,6 +151,12 @@ pub struct RunConfig {
     pub forge_fetch: crate::discovery::forge::ForgeFetch,
     /// `[forge] concurrency` (ADR 0136).
     pub forge_concurrency: usize,
+    /// `[history]` (ADR 0140): ignore globs and reap thresholds.
+    pub history: crate::config::HistoryConfig,
+    /// Whether this TUI's own discovery records history. Off under
+    /// `--no-cache`, in snapshot and fixture modes, and for the dev
+    /// scenario builder (ADR 0140).
+    pub record_history: bool,
 }
 
 impl RunConfig {
@@ -185,6 +191,8 @@ impl RunConfig {
             discovery_caches: std::sync::Arc::default(),
             forge_fetch: crate::discovery::forge::ForgeFetch::default(),
             forge_concurrency: crate::discovery::forge::DEFAULT_FORGE_CONCURRENCY,
+            history: crate::config::HistoryConfig::default(),
+            record_history: false,
         }
     }
 }

@@ -520,10 +520,10 @@ fn graph_node<'a>(app: &'a App, id: &NodeId) -> Option<&'a GraphNode> {
 /// The name tmux knows a mux session by (`editor`, not the graph id
 /// `tmux:editor`), from the snapshot's mux node.
 pub fn pane_native_id(app: &App, mux: &MuxSessionId) -> Option<String> {
+    // A gone mux has no pane to capture (ADR 0140).
     app.snapshot_handle()?
         .snapshot()
-        .nodes
-        .iter()
+        .live_nodes()
         .find_map(|node| match node {
             GraphNode::MuxSession(node) if &node.id == mux => Some(node.native_id.clone()),
             _ => None,

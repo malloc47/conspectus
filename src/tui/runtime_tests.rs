@@ -991,6 +991,7 @@ mod selected_default_action_tests {
             git_dir: None,
             current_branch: None,
             worktree: None,
+            head_commit: None,
         }));
     }
 
@@ -1225,6 +1226,7 @@ mod projection_zero_discovery {
             git_dir: None,
             current_branch: None,
             worktree: None,
+            head_commit: None,
         }));
         snapshot.nodes.push(GraphNode::AgentSession(
             AgentSessionNode::new(

@@ -18,10 +18,11 @@ use crate::model::{
 
 use super::{LAST_SEEN_CADENCE_SECS, new_record_id};
 
-/// What one writer saw in one cycle, all at `seen_at`.
+/// What one writer saw in one cycle. Each observation carries the
+/// time its probe or listing ran, so data reused from an earlier cycle
+/// can't move a record's `last_seen` past when it was really seen.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Observations {
-    pub seen_at: i64,
     pub muxes: Vec<MuxObservation>,
     pub checkouts: Vec<CheckoutObservation>,
     pub repos: Vec<RepoObservation>,
@@ -41,6 +42,7 @@ impl Observations {
 /// the sessions attributed to it this cycle.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct MuxObservation {
+    pub seen_at: i64,
     pub key: String,
     pub recipe: MuxRecipe,
     pub display: RecordDisplay,
@@ -49,6 +51,7 @@ pub struct MuxObservation {
 
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct CheckoutObservation {
+    pub seen_at: i64,
     pub key: String,
     pub recipe: CheckoutRecipe,
     pub display: RecordDisplay,
@@ -59,6 +62,7 @@ pub struct CheckoutObservation {
 
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct RepoObservation {
+    pub seen_at: i64,
     pub key: String,
     pub recipe: RepoRecipe,
     pub display: RecordDisplay,
@@ -67,6 +71,7 @@ pub struct RepoObservation {
 
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct PrObservation {
+    pub seen_at: i64,
     pub key: String,
     pub recipe: PrRecipe,
     pub display: RecordDisplay,
@@ -96,38 +101,28 @@ impl MergeOutcome {
 /// Merge `observations` into `history`.
 pub fn merge(history: &mut HistorySnapshot, observations: &Observations) -> MergeOutcome {
     let mut ids: BTreeSet<String> = history.metas().map(|(_, meta)| meta.id.clone()).collect();
-    let seen_at = observations.seen_at;
     let mut outcome = MergeOutcome::default();
 
-    let (mux_ids, changed) =
-        merge_muxes(&mut history.muxes, &observations.muxes, seen_at, &mut ids);
+    let (mux_ids, changed) = merge_muxes(&mut history.muxes, &observations.muxes, &mut ids);
     outcome.mux_ids = mux_ids;
     if changed {
         outcome.changed.insert(HistoryKind::Mux);
     }
 
-    let (ids_out, changed) = merge_keyed(
+    let (checkout_ids, changed) = merge_keyed(
         &mut history.checkouts,
         &observations.checkouts,
-        seen_at,
         &mut ids,
-        |obs| &obs.key,
+        |obs| (&obs.key, obs.seen_at),
         |obs, id| CheckoutRecord {
-            meta: new_meta(
-                id,
-                &obs.key,
-                seen_at,
-                obs.origin,
-                &obs.display,
-                obs.rebuilt_from.clone(),
-            ),
+            meta: new_meta(id, &obs.key, obs.seen_at, obs.origin, &obs.display),
             recipe: obs.recipe.clone(),
             extra: Default::default(),
         },
         |record, obs| {
             let recipe = &mut record.recipe;
-            recipe.root = obs.recipe.root.clone();
-            recipe.repo = obs.recipe.repo.clone();
+            recipe.root.clone_from(&obs.recipe.root);
+            recipe.repo.clone_from(&obs.recipe.repo);
             recipe.linked = obs.recipe.linked;
             set_if_some(&mut recipe.branch, &obs.recipe.branch);
             set_if_some(&mut recipe.head, &obs.recipe.head);
@@ -136,31 +131,30 @@ pub fn merge(history: &mut HistorySnapshot, observations: &Observations) -> Merg
         },
         |record, obs| {
             if record.meta.rebuilt_from.is_none() {
-                record.meta.rebuilt_from = obs.rebuilt_from.clone();
+                record.meta.rebuilt_from.clone_from(&obs.rebuilt_from);
             }
         },
     );
-    outcome.checkout_ids = ids_out;
+    outcome.checkout_ids = checkout_ids;
     if changed {
         outcome.changed.insert(HistoryKind::Checkout);
     }
 
-    let (ids_out, changed) = merge_keyed(
+    let (repo_ids, changed) = merge_keyed(
         &mut history.repos,
         &observations.repos,
-        seen_at,
         &mut ids,
-        |obs| &obs.key,
+        |obs| (&obs.key, obs.seen_at),
         |obs, id| RepoRecord {
-            meta: new_meta(id, &obs.key, seen_at, obs.origin, &obs.display, None),
+            meta: new_meta(id, &obs.key, obs.seen_at, obs.origin, &obs.display),
             recipe: obs.recipe.clone(),
             extra: Default::default(),
         },
         |record, obs| {
             let recipe = &mut record.recipe;
-            recipe.common_dir = obs.recipe.common_dir.clone();
+            recipe.common_dir.clone_from(&obs.recipe.common_dir);
             if !obs.recipe.remotes.is_empty() {
-                recipe.remotes = obs.recipe.remotes.clone();
+                recipe.remotes.clone_from(&obs.recipe.remotes);
             }
             set_if_some(&mut recipe.primary_root, &obs.recipe.primary_root);
             set_if_some(&mut recipe.default_branch, &obs.recipe.default_branch);
@@ -168,25 +162,23 @@ pub fn merge(history: &mut HistorySnapshot, observations: &Observations) -> Merg
         },
         |_, _| {},
     );
-    outcome.repo_ids = ids_out;
+    outcome.repo_ids = repo_ids;
     if changed {
         outcome.changed.insert(HistoryKind::Repo);
     }
 
-    let (ids_out, changed) = merge_keyed(
+    let (pr_ids, changed) = merge_keyed(
         &mut history.prs,
         &observations.prs,
-        seen_at,
         &mut ids,
-        |obs| &obs.key,
+        |obs| (&obs.key, obs.seen_at),
         |obs, id| PrRecord {
             meta: new_meta(
                 id,
                 &obs.key,
-                seen_at,
+                obs.seen_at,
                 RecordOrigin::Observed,
                 &obs.display,
-                None,
             ),
             recipe: obs.recipe.clone(),
             extra: Default::default(),
@@ -201,7 +193,7 @@ pub fn merge(history: &mut HistorySnapshot, observations: &Observations) -> Merg
         },
         |_, _| {},
     );
-    outcome.pr_ids = ids_out;
+    outcome.pr_ids = pr_ids;
     if changed {
         outcome.changed.insert(HistoryKind::Pr);
     }
@@ -215,7 +207,6 @@ fn new_meta(
     seen_at: i64,
     origin: RecordOrigin,
     display: &RecordDisplay,
-    rebuilt_from: Option<String>,
 ) -> RecordMeta {
     RecordMeta {
         id,
@@ -224,7 +215,7 @@ fn new_meta(
         last_seen: seen_at,
         origin,
         display: display.clone(),
-        rebuilt_from,
+        rebuilt_from: None,
     }
 }
 
@@ -267,13 +258,13 @@ fn touch<R: Record + Clone + PartialEq>(
 }
 
 /// Merge kinds that match on their key: checkouts (repo and root),
-/// repos (common dir), and PRs (PR id).
+/// repos (common dir), and PRs (PR id). `key_of` gives an
+/// observation's key and when it was seen.
 fn merge_keyed<R: Record + Clone + PartialEq, O>(
     records: &mut Vec<R>,
     observations: &[O],
-    seen_at: i64,
     ids: &mut BTreeSet<String>,
-    key_of: fn(&O) -> &String,
+    key_of: fn(&O) -> (&String, i64),
     create: impl Fn(&O, String) -> R,
     update: impl Fn(&mut R, &O),
     always: impl Fn(&mut R, &O),
@@ -286,7 +277,7 @@ fn merge_keyed<R: Record + Clone + PartialEq, O>(
         .map(|(i, r)| (r.meta().key.clone(), i))
         .collect();
     for obs in observations {
-        let key = key_of(obs);
+        let (key, seen_at) = key_of(obs);
         if let Some(&i) = index.get(key) {
             let record = &mut records[i];
             let before = record.clone();
@@ -297,7 +288,9 @@ fn merge_keyed<R: Record + Clone + PartialEq, O>(
         } else {
             let id = new_record_id(ids);
             ids.insert(id.clone());
-            records.push(create(obs, id.clone()));
+            let mut record = create(obs, id.clone());
+            always(&mut record, obs);
+            records.push(record);
             index.insert(key.clone(), records.len() - 1);
             changed = true;
             out.push(id);
@@ -313,7 +306,6 @@ fn merge_keyed<R: Record + Clone + PartialEq, O>(
 fn merge_muxes(
     records: &mut Vec<MuxRecord>,
     observations: &[MuxObservation],
-    seen_at: i64,
     ids: &mut BTreeSet<String>,
 ) -> (Vec<String>, bool) {
     let mut matched: Vec<Option<usize>> = vec![None; observations.len()];
@@ -354,38 +346,30 @@ fn merge_muxes(
     let mut changed = false;
     let mut out = Vec::with_capacity(observations.len());
     for (i, obs) in observations.iter().enumerate() {
-        match matched[i] {
-            Some(r) => {
-                let record = &mut records[r];
-                changed |= touch(record, &obs.key, seen_at, |record| update_mux(record, obs));
-                // Hosted sessions union regardless of which sighting is
-                // newer, so they don't depend on write order.
-                let before = record.recipe.hosted.clone();
-                union_hosted(&mut record.recipe.hosted, &obs.recipe.hosted);
-                changed |= record.recipe.hosted != before;
-                out.push(record.meta.id.clone());
-            }
-            None => {
-                let id = new_record_id(ids);
-                ids.insert(id.clone());
-                let mut recipe = obs.recipe.clone();
-                recipe.hosted.clear();
-                union_hosted(&mut recipe.hosted, &obs.recipe.hosted);
-                records.push(MuxRecord {
-                    meta: new_meta(
-                        id.clone(),
-                        &obs.key,
-                        seen_at,
-                        obs.origin,
-                        &obs.display,
-                        None,
-                    ),
-                    recipe,
-                    extra: Default::default(),
-                });
-                changed = true;
-                out.push(id);
-            }
+        if let Some(r) = matched[i] {
+            let record = &mut records[r];
+            changed |= touch(record, &obs.key, obs.seen_at, |record| {
+                update_mux(record, obs);
+            });
+            // Hosted sessions union regardless of which sighting is
+            // newer, so they don't depend on write order.
+            let before = record.recipe.hosted.clone();
+            union_hosted(&mut record.recipe.hosted, &obs.recipe.hosted);
+            changed |= record.recipe.hosted != before;
+            out.push(record.meta.id.clone());
+        } else {
+            let id = new_record_id(ids);
+            ids.insert(id.clone());
+            let mut recipe = obs.recipe.clone();
+            recipe.hosted.clear();
+            union_hosted(&mut recipe.hosted, &obs.recipe.hosted);
+            records.push(MuxRecord {
+                meta: new_meta(id.clone(), &obs.key, obs.seen_at, obs.origin, &obs.display),
+                recipe,
+                extra: Default::default(),
+            });
+            changed = true;
+            out.push(id);
         }
     }
     (out, changed)
@@ -413,7 +397,7 @@ fn update_mux(record: &mut MuxRecord, obs: &MuxObservation) {
         recipe.argv = None;
         recipe.argv_source = None;
     }
-    recipe.name = new.name.clone();
+    recipe.name.clone_from(&new.name);
     set_if_some(&mut recipe.cwd, &new.cwd);
     if let Some(incarnation) = &new.incarnation {
         merge_incarnation(&mut recipe.incarnation, incarnation);

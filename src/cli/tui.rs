@@ -261,7 +261,21 @@ pub(super) fn view_flag_label(view: crate::tui::View) -> &'static str {
 }
 
 impl TuiArgs {
+    /// Whether `--snapshot` asked for one rendered frame instead of
+    /// the live TUI. Snapshot mode never records history (ADR 0140).
+    fn snapshot_requested(&self) -> bool {
+        #[cfg(feature = "snapshot")]
+        {
+            self.snapshot
+        }
+        #[cfg(not(feature = "snapshot"))]
+        {
+            false
+        }
+    }
+
     pub(super) fn run(self) -> Result<()> {
+        let record_history = !self.no_cache && !self.snapshot_requested();
         let refresh_interval = parse_tui_duration(&self.refresh_interval).map_err(|err| {
             anyhow!(
                 "invalid --refresh-interval `{}`: {err}",
@@ -423,6 +437,8 @@ impl TuiArgs {
             discovery_caches: std::sync::Arc::default(),
             forge_fetch: crate::discovery::forge::ForgeFetch::default(),
             forge_concurrency: outcome.config.forge.concurrency,
+            history: outcome.config.history,
+            record_history,
         };
 
         #[cfg(feature = "snapshot")]

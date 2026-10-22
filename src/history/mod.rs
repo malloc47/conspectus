@@ -18,12 +18,132 @@
 //! verbatim (ADR 0086 as amended by ADR 0140).
 
 pub mod merge;
+pub mod project;
+pub mod recorder;
 mod store;
 
 pub use merge::{
     CheckoutObservation, MergeOutcome, MuxObservation, Observations, PrObservation, RepoObservation,
 };
+pub use recorder::{HISTORY_ADAPTER, RecordContext, observe};
 pub use store::{HISTORY_SCHEMA_VERSION, HistoryLoad, HistoryStore};
+
+/// A mux a launch path just created.
+#[derive(Clone, Debug)]
+pub struct LaunchedMux<'a> {
+    pub backend: &'a str,
+    pub socket: Option<&'a str>,
+    pub name: &'a str,
+    pub cwd: &'a str,
+    pub argv: &'a [String],
+    pub harness: Option<&'a str>,
+}
+
+/// A history writer: the store, the `[history]` settings, and the
+/// home directory display context abbreviates to `~`.
+#[derive(Clone, Debug)]
+pub struct HistoryWriter {
+    pub store: HistoryStore,
+    pub config: crate::config::HistoryConfig,
+    pub home: Option<std::path::PathBuf>,
+}
+
+impl HistoryWriter {
+    /// The writer for this process's state home, or `None` without one.
+    pub fn from_env(config: crate::config::HistoryConfig) -> Option<Self> {
+        Some(Self {
+            store: HistoryStore::from_env()?,
+            config,
+            home: std::env::var_os("HOME")
+                .filter(|home| !home.is_empty())
+                .map(std::path::PathBuf::from),
+        })
+    }
+
+    /// Record a mux this process just created with `argv`, so it is
+    /// rebuildable before the next probe sees it (ADR 0140). Returns
+    /// the record's id, or `None` when an ignore glob skips it.
+    pub fn record_launched_mux(&self, launch: &LaunchedMux<'_>) -> std::io::Result<Option<String>> {
+        if self
+            .config
+            .ignores(crate::model::HistoryKind::Mux, launch.name)
+        {
+            return Ok(None);
+        }
+        let argv: Vec<String> = launch.argv.to_vec();
+        let recipe = crate::model::MuxRecipe {
+            backend: launch.backend.to_string(),
+            socket: crate::model::effective_socket(launch.socket).map(str::to_string),
+            name: launch.name.to_string(),
+            cwd: Some(launch.cwd.to_string()),
+            argv_source: (!argv.is_empty()).then_some(crate::model::ArgvSource::Conspectus),
+            argv: (!argv.is_empty()).then_some(argv),
+            harness: launch.harness.map(str::to_string),
+            ..Default::default()
+        };
+        let key =
+            crate::model::NodeId::MuxSession(crate::model::MuxSessionId::new(recipe.native_id()))
+                .to_string();
+        let context = recorder::mux_context(
+            launch.harness,
+            recipe.argv.as_deref(),
+            recipe.cwd.as_deref(),
+            self.home.as_deref(),
+        );
+        let observation = MuxObservation {
+            seen_at: crate::discovery::current_epoch(),
+            key,
+            display: crate::model::RecordDisplay {
+                label: launch.name.to_string(),
+                context,
+            },
+            origin: crate::model::RecordOrigin::Launched,
+            recipe,
+        };
+        let (_, outcome) = self.store.record(&Observations {
+            muxes: vec![observation],
+            ..Default::default()
+        })?;
+        Ok(outcome.mux_ids.into_iter().next())
+    }
+
+    /// Record what `snapshot`'s probes since `fresh_since` observed.
+    pub fn record(
+        &self,
+        snapshot: &mut crate::model::GraphSnapshot,
+        fresh_since: i64,
+    ) -> std::io::Result<()> {
+        record_snapshot(
+            &self.store,
+            snapshot,
+            &RecordContext {
+                fresh_since,
+                config: &self.config,
+                home: self.home.as_deref(),
+            },
+        )
+    }
+}
+
+/// Record what `snapshot`'s fresh data observed and copy the merged
+/// records into it, keeping each record's computed presence. Errors
+/// are returned for the caller to report; history is best-effort and
+/// never fails discovery.
+pub fn record_snapshot(
+    store: &HistoryStore,
+    snapshot: &mut crate::model::GraphSnapshot,
+    ctx: &RecordContext<'_>,
+) -> std::io::Result<()> {
+    let observations = observe(snapshot, ctx);
+    if observations.is_empty() {
+        return Ok(());
+    }
+    let (load, _) = store.record(&observations)?;
+    let presence = std::mem::take(&mut snapshot.history.presence);
+    snapshot.history = load.history;
+    snapshot.history.presence = presence;
+    Ok(())
+}
 
 use std::collections::BTreeSet;
 
@@ -90,3 +210,7 @@ pub fn glob_matches(pattern: &str, text: &str) -> bool {
 #[cfg(test)]
 #[path = "history_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "audit_tests.rs"]
+mod audit_tests;
