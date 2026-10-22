@@ -62,6 +62,10 @@ where possible.
 | `discovery` | `DiscoveryContext::from_current_dir` reads current directory; `LocalDiscoveryConfig::from_env` reads env and installs real runners | prefer `DiscoveryContext::from_roots` and `LocalDiscoveryConfig::empty` plus explicit runners in tests |
 | `discovery::git` | `GitProbe` shells out to `git`; `GitDiscovery` uses probes over explicit roots | call `fragment_from_probe` for pure tests, or run `GitDiscovery` only where `git` is allowed |
 | `discovery::tmux` | `SystemTmux` shells out to `tmux` | inject a `TmuxRunner`; parse rows with `parse_list_sessions` for pure tests |
+| `history` | `HistoryStore::at(dir)` reads and writes the history files under an advisory lock; `HistoryStore::from_env` reads `$XDG_STATE_HOME` | construct a store over a temp directory in tests; `merge::merge` and `project::project_into` are pure |
+| `pin_slots` | `SlotStore::at(path)` reads and writes `pins.toml` atomically; `SlotStore::from_env` reads `$XDG_DATA_HOME` | construct a store over a temp path in tests; `parse_slots` is pure |
+| `pin_ops`, `pin_migrate` | slot gestures and legacy conversion over a `SlotStore` and a `HistoryWriter` | inject temp stores; `pin_migrate::plan` is pure |
+| `rebuild` | `plan` is pure over a snapshot and an `Env` of injected backends; `execute` runs the plan through those backends | inject a mux backend, worktree backend, and `Cloner`; print `Plan::render` for dry runs |
 | `discovery::forge` | `SystemGh` shells out to `gh`; `ForgeDiscovery` asks adapters to inspect repos | inject a `GhRunner`; use `GhPullRequestParser` and `github::fragment_for_repo` for pure tests |
 
 ## Internal Modules
@@ -70,7 +74,8 @@ These modules are not part of the library contract (ADR 0015, amended
 2026-10-01):
 
 - `pub(crate)`, unreachable from outside the crate: `server`, `viewer`,
-  `tui_state`, `pins`, `pin_bindings`, `pin_store_registry`.
+  `tui_state`, `legacy_pins`, `legacy_bindings`, `legacy_registry` (read-only
+  readers for the earlier pin model, kept until `pin migrate` is retired).
 - `pub` but `#[doc(hidden)]`, reachable only because the binary,
   integration tests, or the widget preview example use them: `cli`,
   `tui`, `snapshot`, `hook`, `filter`, `dev_scenarios`.

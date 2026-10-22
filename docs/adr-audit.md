@@ -98,7 +98,8 @@ The guardrail (CLAUDE.md, design.md: "Start read-only unless a task
 explicitly calls for persistence or link CRUD") predates a now-substantial
 sanctioned mutation surface: lockstep tmux renames (0029), pin launch /
 send-keys / new-session (0057), resume splicing (0058), TOML store writes
-(0014/0029/0057). Each mutation was individually ADR'd, but the tenet text
+(0014/0029/0057). (ADR 0141 and ADR 0143 later replaced the pin parts of
+this list with pin slots, rebuild, and an explicit mutation envelope.) Each mutation was individually ADR'd, but the tenet text
 still says "read-only," which makes every new mutation look like an
 exception rather than part of a defined envelope.
 

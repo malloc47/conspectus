@@ -1,6 +1,9 @@
 # TUI Architecture Review
 
-Status: draft review, 2026-07-01. A fresh-eyes read of the TUI as
+Status: draft review, 2026-07-01. Its pins overlay and pin-CRUD findings
+describe the TUI before ADR 0141 and ADR 0144 replaced the pins modal with
+the Pinned and History views and a row action menu; read them as
+historical. A fresh-eyes read of the TUI as
 implemented today — deliberately ignoring prior ADRs and design history per
 the review request — evaluated against the common interactive-UI
 architectures, with recommendations for making further TUI development

@@ -1,6 +1,9 @@
 # Provider Extensibility Assessment
 
-Status: draft assessment, 2026-07-01. Companion to `docs/design.md` and the
+Status: draft assessment, 2026-07-01. Its pin findings describe the model
+superseded by ADR 0141 (pin slots, `rebuild`, and history replaced
+`resolve/pins.rs`, `pin_bindings`, and the pin launch paths); read them as
+historical. Companion to `docs/design.md` and the
 `H-REF-*` / `H-FUTURE-*` / `H-AGENTMUX-*` backlog sections. This document
 inventories how hardcoded each provider entity family is today, measures the
 gap between "implement one interface" and "the new provider flows through

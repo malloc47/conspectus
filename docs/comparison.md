@@ -53,7 +53,7 @@ Add a persistent attention chip, lane, or view that jumps through actionable
 graph problems:
 
 - ambiguous mux attribution
-- stale or unbound pins
+- gone pinned entities and legacy pins awaiting `pin migrate`
 - conflicting `GraphLink` candidates
 - unresolved evidence
 - PR/branch drift
@@ -149,7 +149,7 @@ Use small fixed-width activity indicators for scan-heavy columns:
 - transcript activity
 - mux liveness
 - PR freshness
-- pin binding state
+- pin slot status (live, gone, unknown, missing, planned)
 
 These should be stable-width so hover/focus/refresh states do not shift the row
 layout.
