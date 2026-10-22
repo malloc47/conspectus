@@ -1,9 +1,11 @@
 ---
 id: CSP-656
 title: Record the history and presence decision
-status: To Do
-assignee: []
+status: Done
+assignee:
+  - '@claude'
 created_date: '2026-10-22 01:10'
+updated_date: '2026-10-22 02:34'
 labels:
   - history-pins
 milestone: m-23
@@ -34,14 +36,27 @@ Operator decision to record: launch argv is stored verbatim, including the `pane
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 A new ADR under `docs/adr/` in the house style (status, context, decision, consequences, alternatives, open questions answered) is indexed in `docs/adr/README.md`
-- [ ] #2 The ADR supersedes ADR 0058 and ADR 0102 and amends ADR 0057 (binding) and ADR 0086 (verbatim argv in Tier 3 records); each of those ADRs gets a status line pointing at it
-- [ ] #3 The ADR covers record shapes per kind, presence rules per kind, mux matching order, writer coordination and merge rules, cadence, read-only modes, ignore rules, and reaping thresholds
-- [ ] #4 Alternatives considered include storing history in `graph.bin`, name-only mux identity, a single elected discovery writer, automatic reaping, and scrubbing prompts from argv
+- [x] #1 A new ADR under `docs/adr/` in the house style (status, context, decision, consequences, alternatives, open questions answered) is indexed in `docs/adr/README.md`
+- [x] #2 The ADR supersedes ADR 0058 and ADR 0102 and amends ADR 0057 (binding) and ADR 0086 (verbatim argv in Tier 3 records); each of those ADRs gets a status line pointing at it
+- [x] #3 The ADR covers record shapes per kind, presence rules per kind, mux matching order, writer coordination and merge rules, cadence, read-only modes, ignore rules, and reaping thresholds
+- [x] #4 Alternatives considered include storing history in `graph.bin`, name-only mux identity, a single elected discovery writer, automatic reaping, and scrubbing prompts from argv
 <!-- AC:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
-- [ ] #1 `just check` passes, or `git diff --check` for docs-only changes
-- [ ] #2 Docs and ADRs are updated when behavior, architecture, or workflow change
+- [x] #1 `just check` passes, or `git diff --check` for docs-only changes
+- [x] #2 Docs and ADRs are updated when behavior, architecture, or workflow change
 <!-- DOD:END -->
+
+## Implementation Plan
+
+<!-- SECTION:PLAN:BEGIN -->
+1. Write ADR 0140 from the plan's History sections and the code map (presence per kind, matching, writers, merge, projection).
+2. Index it and put status lines on ADRs 0057, 0058, 0086, and 0102.
+<!-- SECTION:PLAN:END -->
+
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+Recorded ADR 0140 (history and presence): per-kind JSON records under `$XDG_STATE_HOME/conspectus/history/` with stable ids and recipes, presence by targeted checks with probe status per backend and socket, mux matching by incarnation then key, lock-and-merge writers with a commutative merge, fresh-probe-only `last_seen` at a 10-minute cadence, read-only modes, ignore globs, manual reaping, and projection (`node_presence`, gone nodes, `mux_last_hosted`, `rebuilt_from`, a `Cached` `linked_to_mux` fallback). Supersedes ADRs 0058 and 0102; amends 0057 and 0086 (verbatim argv in Tier 3). Indexed in `docs/adr/README.md`; status lines added. Verified with `git diff --check`.
+<!-- SECTION:FINAL_SUMMARY:END -->
