@@ -1,9 +1,10 @@
 ---
 id: CSP-678
 title: Render rows of mixed kinds in aligned columns
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-10-22 01:11'
+updated_date: '2026-10-22 18:12'
 labels:
   - history-pins
 milestone: m-23
@@ -31,13 +32,19 @@ The Pinned and History views list different kinds together. No current row rende
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 Rows of every pinnable kind align in the same columns, and folding a group doesn't shift them
-- [ ] #2 Gone, missing, and planned rows render dimmed with their status word
-- [ ] #3 Snapshot tests cover each kind and state at narrow and wide widths
+- [x] #1 Rows of every pinnable kind align in the same columns, and folding a group doesn't shift them
+- [x] #2 Gone, missing, and planned rows render dimmed with their status word
+- [x] #3 Snapshot tests cover each kind and state at narrow and wide widths
 <!-- AC:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
-- [ ] #1 `just check` passes, or `git diff --check` for docs-only changes
-- [ ] #2 Docs and ADRs are updated when behavior, architecture, or workflow change
+- [x] #1 `just check` passes, or `git diff --check` for docs-only changes
+- [x] #2 Docs and ADRs are updated when behavior, architecture, or workflow change
 <!-- DOD:END -->
+
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+Added the mixed-kind row renderer (kind glyph, label, status, age, content; columns padded tree-wide; gone, missing, and planned rows dimmed) in ui/left_panel.rs. Insta snapshots cover every pinnable kind and state at 70, 110, and 160 columns, with an alignment assertion that survives folding. Verified with the full nextest run (2600 tests), clippy, and tui --snapshot.
+<!-- SECTION:FINAL_SUMMARY:END -->

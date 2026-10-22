@@ -1,9 +1,10 @@
 ---
 id: CSP-682
 title: Pin from every view and retire the Pins groups and modal
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-10-22 01:11'
+updated_date: '2026-10-22 18:13'
 labels:
   - history-pins
 milestone: m-23
@@ -31,14 +32,20 @@ Pinning becomes a gesture available on any pinnable row, and slots are edited in
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 Any pinnable row in any view can be pinned or unpinned from its action menu
-- [ ] #2 Native views mark pinned rows without floating them and can filter to pinned only
-- [ ] #3 Slots can be edited and retargeted from the TUI
-- [ ] #4 The Pins groups, placeholder rows, Pins modal, and old pin keys no longer exist
+- [x] #1 Any pinnable row in any view can be pinned or unpinned from its action menu
+- [x] #2 Native views mark pinned rows without floating them and can filter to pinned only
+- [x] #3 Slots can be edited and retargeted from the TUI
+- [x] #4 The Pins groups, placeholder rows, Pins modal, and old pin keys no longer exist
 <!-- AC:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
-- [ ] #1 `just check` passes, or `git diff --check` for docs-only changes
-- [ ] #2 Docs and ADRs are updated when behavior, architecture, or workflow change
+- [x] #1 `just check` passes, or `git diff --check` for docs-only changes
+- [x] #2 Docs and ADRs are updated when behavior, architecture, or workflow change
 <!-- DOD:END -->
+
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+p and the . row menu pin or unpin the focused row in every view; pinned entities get a marker and stay where they sort; Controls filters to pinned only; the Pinned view menu edits (field=value prompt) and retargets slots; N opens the mux launch form with the worktree toggle and a pin choice. The Pins groups, placeholders, modal, and B/b/A/L keys are gone, and the dead overlay key tables and placeholder rendering were removed in the review pass.
+<!-- SECTION:FINAL_SUMMARY:END -->

@@ -1,9 +1,10 @@
 ---
 id: CSP-683
 title: Add launch profiles with `atelier exec` discovery
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-10-22 01:11'
+updated_date: '2026-10-22 18:13'
 labels:
   - history-pins
 milestone: m-23
@@ -32,13 +33,19 @@ Interpretation to confirm when picking this up: "discovery of `atelier exec`" me
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 Launch profiles in user and project config set the default argv per harness, wrappers included
-- [ ] #2 Inside an Atelier workspace with `atelier` on `PATH`, the default argv wraps the harness in `atelier exec` unless a profile says otherwise
-- [ ] #3 Argv precedence matches the rebuild ADR, with tests
+- [x] #1 Launch profiles in user and project config set the default argv per harness, wrappers included
+- [x] #2 Inside an Atelier workspace with `atelier` on `PATH`, the default argv wraps the harness in `atelier exec` unless a profile says otherwise
+- [x] #3 Argv precedence matches the rebuild ADR, with tests
 <!-- AC:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
-- [ ] #1 `just check` passes, or `git diff --check` for docs-only changes
-- [ ] #2 Docs and ADRs are updated when behavior, architecture, or workflow change
+- [x] #1 `just check` passes, or `git diff --check` for docs-only changes
+- [x] #2 Docs and ADRs are updated when behavior, architecture, or workflow change
 <!-- DOD:END -->
+
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+Launch profiles ([launch.<harness>] argv in user and project config, project winning), atelier exec discovery (atelier on PATH and cwd inside an atelier.toml workspace), and the full precedence slot override > recorded > project profile > user profile > atelier exec > harness default, used by rebuild, mux launch, and the TUI launch form (which shows the source). Verified by launch_default_tests, rebuild mux_tests (including resume splicing through a profile wrapper), and the capability tests.
+<!-- SECTION:FINAL_SUMMARY:END -->
