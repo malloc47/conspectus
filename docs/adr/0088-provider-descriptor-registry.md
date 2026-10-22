@@ -267,4 +267,6 @@ actually consumes the table.
   each provider stays within envelope category 2 (rebuildable
   observations) or category 1 (declared) as before; the
   registry doesn't license any new writes.
+- ADR 0143 (mutation envelope) — supersedes ADR 0087, keeping its
+  category and prohibition numbers.
 - CSP-473 backlog entry — the story this ADR closes out.

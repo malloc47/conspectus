@@ -1063,7 +1063,7 @@ impl LocalDiscoveryConfig {
             declared_config_loader: Some(ConfigLoader::from_env()),
             pin_store_registry: Some(crate::pin_store_registry::PinStoreRegistry::from_env()),
             // Enumerate worktrees via the thin git backend
-            // unless explicitly disabled. Read-only; ADR 0087 clean.
+            // unless explicitly disabled. Read-only; ADR 0143 clean.
             worktree_backend: (env::var_os("CONSPECTUS_DISABLE_WORKTREE").is_none()).then(|| {
                 Box::new(worktree::SystemGitWorktree::new()) as Box<dyn worktree::WorktreeBackend>
             }),

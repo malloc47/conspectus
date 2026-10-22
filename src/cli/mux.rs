@@ -4,7 +4,7 @@
 //! - `mux new` — bare tmux session, no pin, no agent, no worktree.
 //! - `mux launch` — harness in a fresh tmux, no pin persistence.
 //!
-//! Both are sanctioned under ADR 0087 category 3 (operator-initiated
+//! Both are sanctioned under ADR 0143 category 3 (operator-initiated
 //! mux lifecycle) plus category 4 (Conspectus-constructed harness
 //! argv for `mux launch`). Neither writes a pin or sidecar.
 

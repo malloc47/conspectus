@@ -2,7 +2,9 @@
 
 ## Status
 
-Accepted
+Superseded by [ADR 0142](0142-rebuild-plans-and-executors.md). A mux slot
+with a `worktree_branch` override, or a mux whose worktree is gone,
+rebuilds the worktree first as a prerequisite step.
 
 ## Context
 

@@ -1,5 +1,5 @@
 //! Path previews (ADR 0112 §2): a directory's listing or a file's
-//! contents. Read-only (ADR 0087): one `read_dir` or one capped read,
+//! contents. Read-only (ADR 0143): one `read_dir` or one capped read,
 //! and no listing follows a symlink.
 
 use std::fs;

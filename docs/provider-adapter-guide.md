@@ -284,7 +284,7 @@ If you're adding a new adapter, read in this order:
 1. **This guide** — the end-to-end checklist above.
 2. **The family's ADR** —
    ADR 0088 (provider descriptor registry) for cross-family
-   context; ADR 0087 (mutation envelope) for what mutations
+   context; ADR 0143 (mutation envelope) for what mutations
    your adapter can perform; the family-specific ADR
    (ADR 0089 for mux, ADR 0060 for orchestrator, no dedicated
    forge ADR yet).

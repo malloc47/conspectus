@@ -177,5 +177,7 @@ by subprocess, not a code dependency, which respects that boundary.
   the node worktrees map onto.
 - ADR 0087 (mutation envelope) — prohibition 6 (git state) unchanged;
   worktrunk create/remove is a category-4 delegated subprocess launch.
+- ADR 0143 (mutation envelope) — supersedes ADR 0087, keeping its
+  category and prohibition numbers.
 - ADR 0089 (mux backend trait) — the registry/seam pattern this
   backend seam mirrors.

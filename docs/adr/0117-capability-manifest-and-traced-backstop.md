@@ -2,7 +2,8 @@
 
 ## Status
 
-Accepted. Makes ADR 0087 (the mutation envelope) enforceable.
+Accepted. Makes ADR 0087 (the mutation envelope) enforceable. ADR 0143
+supersedes ADR 0087; the manifest now enforces ADR 0143.
 
 ## Context
 

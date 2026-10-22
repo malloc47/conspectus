@@ -1,7 +1,7 @@
 //! Git previews (ADR 0112 §1–2): a checkout's status, a repo's history
 //! and remotes, a ref's recent commits, a commit's stat. Every call is a
 //! read-only `git -C <dir>` with optional locks off, so even `status`
-//! never rewrites the index (ADR 0087).
+//! never rewrites the index (ADR 0143).
 
 use std::path::{Path, PathBuf};
 use std::process::Stdio;

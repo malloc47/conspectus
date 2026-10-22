@@ -28,7 +28,7 @@ The provider-neutral node model, evidence-preserving `GraphLink` candidates, and
 | [0047](0047-runtime-process-nodes-candidate.md) | Runtime Process Nodes | Accepted |
 | [0059](0059-resolver-rules-engine-evaluation.md) | Resolver Rules-Engine Evaluation | Accepted |
 | [0077](0077-resolver-ambiguous-slot-preservation.md) | Resolver-Side Preservation Of Ambiguous Resolution Slots | Accepted |
-| [0084](0084-first-class-pin-nodes.md) | First-Class Pin Nodes | Accepted |
+| [0084](0084-first-class-pin-nodes.md) | First-Class Pin Nodes | Accepted (amended by 0141) |
 
 ## Discovery and attribution
 
@@ -60,27 +60,31 @@ Where user-authored intent lives, what Conspectus may write, and what it must ne
 | [0012](0012-config-file-layout.md) | Conspectus Configuration File Layout | Accepted |
 | [0014](0014-declared-link-storage-schema.md) | Declared Link Storage Schema | Accepted |
 | [0029](0029-session-alias-overlay.md) | Session Alias Overlay | Accepted |
-| [0086](0086-payload-privacy-tenet.md) | Payload Privacy Tenet | Accepted |
-| [0087](0087-mutation-envelope.md) | Mutation Envelope | Accepted (amended) |
-| [0090](0090-pin-store-registry-sidecar.md) | Pin-Store Registry Sidecar | Accepted |
+| [0086](0086-payload-privacy-tenet.md) | Payload Privacy Tenet | Accepted (amended by 0140) |
+| [0087](0087-mutation-envelope.md) | Mutation Envelope | Superseded by 0143 |
+| [0090](0090-pin-store-registry-sidecar.md) | Pin-Store Registry Sidecar | Superseded by 0141 |
+| [0143](0143-mutation-envelope-with-history-pins-and-clone.md) | Mutation Envelope With History, Pin Slots, And Clone | Accepted |
 
-## Pins, mux lifecycle, and worktrees
+## History, pins, mux lifecycle, and worktrees
 
-Declared logical sessions, tmux session creation and teardown, and worktree streams.
+What Conspectus remembers about entities that are gone, the slots the operator pins, rebuilding, tmux session creation and teardown, and worktree streams.
 
 | ADR | Decision | Status |
 | --- | --- | --- |
-| [0057](0057-session-pins.md) | Session Pins | Accepted |
-| [0058](0058-pin-session-continuity.md) | Pin Session Continuity | Accepted |
+| [0057](0057-session-pins.md) | Session Pins | Superseded by 0140 and 0141 |
+| [0058](0058-pin-session-continuity.md) | Pin Session Continuity | Superseded by 0140 |
 | [0092](0092-worktree-backend-seam.md) | Worktree Management Backend Seam | Accepted |
-| [0093](0093-operator-initiated-mux-teardown.md) | Operator-Initiated Mux Teardown (`kill-session`) | Accepted |
-| [0094](0094-worktree-backed-pins-realized-at-launch.md) | Worktree-Backed Pins Realized at Launch | Accepted |
-| [0095](0095-bare-mux-session-creation.md) | Bare Mux Session Creation (No Pin, No Agent) | Accepted |
-| [0096](0096-ephemeral-harness-mux-launch.md) | Mux Launch — Harness in a New Mux Without a Pin | Accepted |
+| [0093](0093-operator-initiated-mux-teardown.md) | Operator-Initiated Mux Teardown (`kill-session`) | Accepted (amended by 0142) |
+| [0094](0094-worktree-backed-pins-realized-at-launch.md) | Worktree-Backed Pins Realized at Launch | Superseded by 0142 |
+| [0095](0095-bare-mux-session-creation.md) | Bare Mux Session Creation (No Pin, No Agent) | Accepted (amended by 0142) |
+| [0096](0096-ephemeral-harness-mux-launch.md) | Mux Launch — Harness in a New Mux Without a Pin | Accepted (amended by 0142) |
 | [0097](0097-launch-spec-form-primitive.md) | Shared Launch-Spec Form Primitive | Accepted |
-| [0098](0098-pin-resume-preserves-launch-argv.md) | Pin Resume Preserves the Pin's Launch Argv | Accepted |
-| [0102](0102-pin-bindings-are-one-to-one.md) | Pin Bindings Are One-To-One | Accepted |
+| [0098](0098-pin-resume-preserves-launch-argv.md) | Pin Resume Preserves the Pin's Launch Argv | Accepted (amended by 0142) |
+| [0102](0102-pin-bindings-are-one-to-one.md) | Pin Bindings Are One-To-One | Superseded by 0140 |
 | [0103](0103-launches-keep-failed-panes.md) | Launches Keep Failed Panes And Confirm The Harness Started | Accepted |
+| [0140](0140-history-and-presence.md) | History And Presence | Accepted |
+| [0141](0141-pin-slots.md) | Pin Slots | Accepted |
+| [0142](0142-rebuild-plans-and-executors.md) | Rebuild Plans And Executors | Accepted |
 
 ## Persistence, daemon, and performance
 
@@ -143,7 +147,7 @@ Runtime architecture, controls, theming, detail pane, and visual language.
 | [0071](0071-ambiguous-mux-scope-and-detail.md) | Ambiguous Mux Surface Moves From Session Row To Group Detail | Accepted |
 | [0072](0072-mux-indicator-attachable-binary.md) | Mux Indicator Becomes Attachable-Binary; Group Rows Own The Ambiguity Glyph | Accepted |
 | [0120](0120-mux-rows-drop-the-ambiguity-glyph.md) | Mux Rows Drop The Ambiguity Glyph | Accepted |
-| [0073](0073-node-kind-visual-identity.md) | Per-Node-Kind Visual Identity (Glyph + Color) | Accepted |
+| [0073](0073-node-kind-visual-identity.md) | Per-Node-Kind Visual Identity (Glyph + Color) | Accepted (amended by 0144) |
 | [0074](0074-detail-pane-related-entities-flatten.md) | Detail-Pane Related-Entities Flatten | Accepted |
 | [0075](0075-edge-state-visual-language.md) | Edge-State Visual Language In The Detail-Pane Other Zone | Accepted |
 | [0076](0076-scrollbar-widget-choice.md) | Scrollbar Widget Choice For Scrolled Panes | Accepted |
@@ -162,6 +166,7 @@ Runtime architecture, controls, theming, detail pane, and visual language.
 | [0119](0119-compass-rose-logo.md) | The Compass-Rose Logo | Accepted |
 | [0123](0123-overlay-keymap-tables.md) | Overlay Keymap Tables | Accepted |
 | [0139](0139-mux-workspace-or-repo-grouping.md) | Workspace-Or-Repo Grouping In The Mux View | Accepted (amended) |
+| [0144](0144-pinned-and-history-views.md) | Pinned And History Views | Accepted |
 
 ## Transcript viewer
 

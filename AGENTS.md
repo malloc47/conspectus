@@ -53,17 +53,21 @@ standard checks.
 ## Implementation Notes
 
 - Read-only is the default for discovery and orchestration. Writes are
-  bounded by the mutation envelope in ADR 0087: user-intent TOML stores,
-  rebuildable observation sidecars under `$XDG_STATE_HOME/conspectus/`,
-  operator-initiated mux lifecycle (rename / new-session / attach and the
-  narrow pin-launch `send-keys` on Conspectus-constructed argv),
-  Conspectus-owned subprocess launches, and operator-initiated harness
-  hook installation (`hook init` / `hook remove`). Conspectus never
-  mutates harness-native state beyond that hook entry, injects terminal input into live agent panes
+  bounded by the mutation envelope in ADR 0143: user-intent TOML stores
+  (including the pin slot store `$XDG_DATA_HOME/conspectus/pins.toml`),
+  rebuildable observations under `$XDG_STATE_HOME/conspectus/` (hook
+  sidecars, the history store) plus `graph.bin`, operator-initiated mux
+  lifecycle (rename / new-session / attach / kill and the narrow
+  agent-exited `send-keys` of Conspectus-constructed argv),
+  Conspectus-owned subprocess launches, operator-initiated harness hook
+  installation (`hook init` / `hook remove`), and `git clone` into an
+  absent path during a rebuild. The daemon writes category 2
+  observations only. Conspectus never mutates harness-native state
+  beyond that hook entry, injects terminal input into live agent panes
   (ADR 0028 absolute), persists payload (ADR 0086), writes shared/system
-  locations, performs background mutation, mutates git state, or bypasses
-  hooks. Any new write path must cite ADR 0087 and land inside one of
-  its sanctioned categories.
+  locations, performs background mutation, mutates git state beyond that
+  clone, or bypasses hooks. Any new write path must cite ADR 0143 and
+  land inside one of its sanctioned categories.
 - Start processes only through `exec::command` (`src/exec.rs`). A new
   program, subcommand, socket, signal, or write path needs an entry in
   `docs/capabilities.toml`, citing its ADR, or `tests/capabilities_static.rs`

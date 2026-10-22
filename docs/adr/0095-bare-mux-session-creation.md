@@ -2,7 +2,9 @@
 
 ## Status
 
-Accepted
+Accepted. Amended by [ADR 0142](0142-rebuild-plans-and-executors.md): every
+mux is recorded in history, so a bare mux is rebuildable without a pin,
+and `--pin` replaces adopting it as a pin afterwards.
 
 ## Context
 

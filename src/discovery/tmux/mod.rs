@@ -154,7 +154,7 @@ pub trait MuxBackend: Send + Sync {
     /// (category 3, destructive). `socket_name` selects the tmux
     /// server when set. This ends the session and its child
     /// processes (the agent); it does **not** delete the harness's
-    /// session record or transcript (ADR 0087 prohibition 1) and it
+    /// session record or transcript (ADR 0143 prohibition 1) and it
     /// is **not** terminal injection (ADR 0028) — no characters enter
     /// the pane's stdin. The graceful `SIGTERM` + grace-poll is the
     /// orchestrator's job; this primitive is the terminal kill.

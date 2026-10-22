@@ -2,7 +2,9 @@
 
 ## Status
 
-Accepted
+Superseded by [ADR 0140](0140-history-and-presence.md). A mux's history
+record lists the sessions it hosted, which replaces the pin-binding
+sidecar; `pin migrate` reads the sidecar once.
 
 ## Context
 

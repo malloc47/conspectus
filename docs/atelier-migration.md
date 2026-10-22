@@ -29,7 +29,7 @@ conspectus graph --format json --scan-root /work/example
 
 Conspectus discovery is read-only. It never creates forks, edits Atelier
 metadata, or writes provider state. Its writes are limited to the mutation
-envelope in ADR 0087: user-authored intent in `.conspectus.toml` or user
+envelope in ADR 0143: user-authored intent in `.conspectus.toml` or user
 config (`declared` links, aliases, pins), rebuildable caches under the XDG
 directories, and tmux sessions or worktrees you ask it to create or tear
 down.

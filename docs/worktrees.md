@@ -17,7 +17,7 @@ concrete editable working tree of a repo, ADR 0026), distinguished from
 a plain clone by source metadata: linked vs primary, the branch it
 checks out, and its locked / prunable status. Discovery always surfaces
 worktrees read-only. **Mutation is delegated**: Conspectus never runs
-`git worktree add/remove` itself (ADR 0087 keeps "never mutate git
+`git worktree add/remove` itself (ADR 0143 keeps "never mutate git
 state" absolute). Instead it drives an external, mutation-capable
 backend — [`worktrunk`](https://github.com/max-sixty/worktrunk) (`wt`)
 — as a subprocess. No backend ⇒ listing still works, but the mutating

@@ -2,7 +2,9 @@
 
 ## Status
 
-Accepted
+Accepted. Amended by [ADR 0140](0140-history-and-presence.md): a history
+record may carry a mux's launch argv verbatim, prompts included. That
+is the one Tier 3 field that can carry payload.
 
 ## Context
 

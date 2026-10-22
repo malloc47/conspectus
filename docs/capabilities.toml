@@ -1,6 +1,6 @@
 # What Conspectus may run, connect to, signal, and write (ADR 0117).
 #
-# This file is the enforced form of the mutation envelope (ADR 0087).
+# This file is the enforced form of the mutation envelope (ADR 0143).
 # Two tests check the code against it:
 #
 # - `tests/capabilities_static.rs` reads the source and `Cargo.lock`:
@@ -69,7 +69,7 @@ network = true
 read = ["pr list ...", "pr view ...", "auth status ..."]
 
 [programs.tmux]
-adr = ["0006", "0057", "0087", "0093", "0108"]
+adr = ["0006", "0057", "0143", "0093", "0108"]
 names = ["tmux"]
 globals = { "-L" = 1 }
 chain = ";"
@@ -102,12 +102,12 @@ globals = { "-C" = 1 }
 act = ["switch ...", "remove ...", "merge ...", "step prune ..."]
 
 [programs.harness]
-adr = ["0058", "0087", "0121"]
+adr = ["0058", "0143", "0121"]
 names = ["claude", "codex", "opencode", "pi"]
 act = ["--resume *", "exec --resume *", "--session *"]
 
 [programs.claude-history]
-adr = ["0052", "0087"]
+adr = ["0052", "0143"]
 names = ["claude-history"]
 act = ["*"]
 
@@ -119,7 +119,7 @@ env = "PAGER"
 read = ["..."]
 
 [programs.conspectus]
-adr = ["0057", "0087", "0105"]
+adr = ["0057", "0143", "0105"]
 # The running binary, whatever its file name.
 self = true
 act = ["pin launch ...", "mux new ...", "mux launch ..."]
@@ -148,7 +148,7 @@ act = ["SIGTERM", "SIGKILL", "0"]
 # `$SCRATCH` is the directory the dev scenario builder was given.
 # Creating the missing parents of an allowed path is allowed too.
 [writes]
-adr = ["0012", "0014", "0028", "0057", "0058", "0083", "0087", "0121"]
+adr = ["0012", "0014", "0028", "0057", "0058", "0083", "0143", "0121"]
 # Terminals and the null device, in every context.
 always = ["/dev/null", "/dev/tty", "/dev/pts/*"]
 # Rebuildable caches and observations.
@@ -165,7 +165,7 @@ act = [
     "$PROJECT/.conspectus.toml",
     "$PROJECT/..conspectus.toml.tmp-*",
 ]
-# Hook installation into harness configuration: ADR 0087 category 5,
+# Hook installation into harness configuration: ADR 0143 category 5,
 # from ADR 0028. Pi's hook is one Conspectus-owned extension file that
 # `hook remove pi` deletes (ADR 0121).
 # `--scope project` writes the same files under the project,

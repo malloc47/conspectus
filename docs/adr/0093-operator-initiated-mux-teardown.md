@@ -2,7 +2,10 @@
 
 ## Status
 
-Accepted
+Accepted. Amended by [ADR 0142](0142-rebuild-plans-and-executors.md): a
+torn-down mux keeps its history record and shows as a ghost, and
+`worktree close` forgets the gone records rooted in the worktree
+instead of dropping pins.
 
 ## Context
 
@@ -220,6 +223,8 @@ new envelope category.
   `rename-session` mux mutation this sits beside.
 - ADR 0087 (mutation envelope) — extends category 3 with session
   termination; cites this ADR from its Related ADRs.
+- ADR 0143 (mutation envelope) — supersedes ADR 0087, keeping its
+  category and prohibition numbers.
 - ADR 0089 (mux backend trait) — `kill_session` joins the trait with a
   default `Unsupported`.
 - ADR 0092 (worktree backend seam) — the worktree teardown that drives

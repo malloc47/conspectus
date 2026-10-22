@@ -3,7 +3,7 @@
 //! `worktree list` renders the git worktrees discovery found
 //! (read-only). `worktree new` / `rm` delegate to the configured
 //! mutation backend (worktrunk) — a category-4 subprocess launch
-//! (ADR 0087); `rm` refuses to remove a worktree hosting a live
+//! (ADR 0143); `rm` refuses to remove a worktree hosting a live
 //! agent/mux session unless `--force`.
 
 use std::collections::BTreeMap;

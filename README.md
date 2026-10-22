@@ -182,7 +182,7 @@ subcommand, socket, signal, and write path Conspectus may use. One test reads
 the source against it, and another runs the built binary under `strace` and
 fails on anything the manifest doesn't allow.
 ([ADR 0086](docs/adr/0086-payload-privacy-tenet.md),
-[0087](docs/adr/0087-mutation-envelope.md),
+[0143](docs/adr/0143-mutation-envelope-with-history-pins-and-clone.md),
 [0092](docs/adr/0092-worktree-backend-seam.md),
 [0093](docs/adr/0093-operator-initiated-mux-teardown.md),
 [0117](docs/adr/0117-capability-manifest-and-traced-backstop.md))

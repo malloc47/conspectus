@@ -2,7 +2,9 @@
 
 ## Status
 
-Accepted
+Accepted. Amended by [ADR 0144](0144-pinned-and-history-views.md): views that
+mix node kinds (Pinned, History) show the kind glyph on every row,
+sessions included.
 
 ## Context
 
