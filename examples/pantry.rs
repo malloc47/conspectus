@@ -1011,8 +1011,8 @@ fn search_mock_items() -> Vec<SearchMockItem> {
             "pr_92",
         ),
         (
-            "Pin: ingest-refactor (unbound)",
-            "pin ingest refactor unbound codex",
+            "Pin: ingest-refactor (gone)",
+            "pin ingest refactor gone mux codex",
             "pin_ingest",
         ),
     ]

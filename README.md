@@ -352,6 +352,8 @@ conspectus serve                   # keep the graph warm in the background
 | ![The explorer cursor on a session's checkout: the link's evidence above the checkout's git status and files](docs/images/related-preview.png) | ![A repo row: its recent commits and remotes](docs/images/repo-history.png) |
 | **A tmux session's pane** | **A pull request under its checkout** |
 | ![The mux view: tmux sessions on the left, the selected one's live pane on the right](docs/images/mux-pane.png) | ![The PRs view: a draft PR under the checkout of its branch, the sessions working there beneath it, and its checks, reviews, and description in the Preview](docs/images/prs-view.png) |
+| **Pinned slots** | **Gone entities, ready to rebuild** |
+| ![The Pinned view: slots for a live mux, a gone mux, a session, a removed worktree, and a merged PR, grouped by project, each with its status and age](docs/images/pinned-view.png) | ![The History view: gone muxes and worktrees with how long ago they were last seen](docs/images/history-view.png) |
 
 ### Scriptable CLI
 

@@ -85,6 +85,10 @@ screenshots:
     shot mux-pane "2jj"
     # The PRs view: a PR under its checkout, with its sessions and preview.
     shot prs-view "3jl"
+    # The Pinned view: slots of several kinds, live and gone.
+    shot pinned-view "4"
+    # The History view: gone entities, ready to rebuild.
+    shot history-view "5"
 
 # Needs the dev-only `snapshot` feature (fixture mode). There is no live
 # discovery, so nothing on the demo machine leaks into the view; press `r`

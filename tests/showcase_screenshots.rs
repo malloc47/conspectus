@@ -115,4 +115,28 @@ fn the_showcase_screens_render_real_previews_with_stable_paths_and_ages() {
         mux.contains("Bash(gh pr create --draft --base main)"),
         "{mux}"
     );
+
+    // The Pinned view: slots of several kinds, live and gone.
+    let pinned = frame(scratch.path(), "4");
+    for row in [
+        "project-main",
+        "nightly",
+        "parser-session",
+        "ledger-worktree",
+        "ledger-pr",
+    ] {
+        assert!(pinned.contains(row), "{row}: {pinned}");
+    }
+    assert!(pinned.contains("gone"), "{pinned}");
+
+    // The History view: gone records, pinned or not.
+    let history = frame(scratch.path(), "5");
+    for row in [
+        "nightly-refactor",
+        "docs-sweep",
+        "feature/ledger",
+        "spike/cache",
+    ] {
+        assert!(history.contains(row), "{row}: {history}");
+    }
 }

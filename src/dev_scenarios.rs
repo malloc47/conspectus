@@ -310,7 +310,14 @@ impl ScenarioWorld {
         if let Some(root) = &self.agent_deck_root {
             config = config.with_agent_deck_root(root.clone());
         }
-        config
+        // The world's own history and slot stores; absent ones read as
+        // empty.
+        config.pin_slots = Some(crate::pin_slots::SlotStore::at(
+            self.root.join("data/conspectus/pins.toml"),
+        ));
+        config.with_history(crate::history::HistoryStore::at(
+            self.root.join("state/conspectus/history"),
+        ))
     }
 
     fn mkdir(&self, relative: &str) -> Result<PathBuf> {
@@ -924,6 +931,205 @@ fn build_showcase(world: &mut ScenarioWorld) -> Result<()> {
     add_mux_layout_to_showcase(world, &project, &worktree, &deck_dir)?;
     add_forge_prs_to_showcase(world, &project)?;
     add_hook_supersession_to_showcase(world, &project)?;
+    add_pins_and_history_to_showcase(world, &project)?;
+    Ok(())
+}
+
+/// History records and pin slots for the Pinned and History views: a
+/// live mux and a gone one, a session, a worktree that was removed, and
+/// a PR, each pinned, plus a few gone records nobody pinned.
+fn add_pins_and_history_to_showcase(world: &mut ScenarioWorld, project: &Path) -> Result<()> {
+    use crate::history::merge::MergeOutcome;
+    use crate::model::{
+        AgentSessionId, ArgvSource, CheckoutId, CheckoutRecipe, CheckoutRecord, FieldValue,
+        ForgePrId, HistoryKind, MuxIncarnation, MuxRecipe, MuxRecord, MuxSessionId, NodeId,
+        PinKind, PinSlot, PrRecipe, PrRecord, RecordDisplay, RecordMeta, RecordOrigin, RepoId,
+        SlotFields,
+    };
+
+    let day = 86_400;
+    let now = SHOWCASE_NOW_EPOCH;
+    let project_path = path_to_string(project);
+    let common_dir = format!("{project_path}/.git");
+    let meta =
+        |id: &str, key: String, first: i64, last: i64, label: &str, context: &str| RecordMeta {
+            id: id.to_string(),
+            key,
+            first_seen: first,
+            last_seen: last,
+            origin: RecordOrigin::Observed,
+            display: RecordDisplay {
+                label: label.to_string(),
+                context: Some(context.to_string()),
+            },
+            rebuilt_from: None,
+        };
+    let mux_key =
+        |name: &str| NodeId::MuxSession(MuxSessionId::new(format!("tmux:{name}"))).to_string();
+    let mux_record = |id: &str, name: &str, last: i64, argv: &[&str]| MuxRecord {
+        meta: meta(
+            id,
+            mux_key(name),
+            now - 30 * day,
+            last,
+            name,
+            "claude · ~/repos/project",
+        ),
+        recipe: MuxRecipe {
+            backend: "tmux".into(),
+            name: name.into(),
+            cwd: Some(project_path.clone()),
+            incarnation: Some(MuxIncarnation {
+                session_id: Some(format!("${name}")),
+                created: Some(now - 30 * day),
+            }),
+            argv: Some(argv.iter().map(|a| (*a).to_string()).collect()),
+            argv_source: Some(ArgvSource::Conspectus),
+            harness: Some("claude-code".into()),
+            ..Default::default()
+        },
+        extra: Default::default(),
+    };
+    let claude = ["claude", "--dangerously-skip-permissions"];
+    let worktree_root = path_to_string(&world.root.join("checkouts/ledger-worktree"));
+    let checkout = |id: &str, root: String, branch: &str, last: i64| CheckoutRecord {
+        meta: meta(
+            id,
+            NodeId::Checkout(CheckoutId::new(
+                RepoId::new(common_dir.clone()),
+                root.clone(),
+            ))
+            .to_string(),
+            now - 40 * day,
+            last,
+            branch,
+            &format!("project · {branch}"),
+        ),
+        recipe: CheckoutRecipe {
+            repo: format!("repo:{common_dir}"),
+            root,
+            linked: true,
+            branch: Some(branch.to_string()),
+            head: Some("5c0ffee5c0ffee5c0ffee5c0ffee5c0ffee5c0ff".to_string()),
+            upstream: None,
+            extra: Default::default(),
+        },
+        extra: Default::default(),
+    };
+    let pr_id = ForgePrId::new("github", "github.com", "conspectus", "project", 5);
+    let pr_record = PrRecord {
+        meta: meta(
+            "h_5c0000000007",
+            NodeId::ForgePr(pr_id).to_string(),
+            now - 20 * day,
+            now - 5 * day,
+            "#5 Ledger store and merge",
+            "conspectus/project · merged",
+        ),
+        recipe: PrRecipe {
+            provider: "github".into(),
+            host: "github.com".into(),
+            owner: "conspectus".into(),
+            repo: "project".into(),
+            number: 5,
+            title: Some("Ledger store and merge".into()),
+            state: Some("merged".into()),
+            ..Default::default()
+        },
+        extra: Default::default(),
+    };
+
+    let history = crate::history::HistoryStore::at(world.root.join("state/conspectus/history"));
+    history
+        .update(|h| {
+            h.muxes = vec![
+                mux_record("h_5c0000000001", "project", now - 300, &claude),
+                mux_record("h_5c0000000002", "nightly-refactor", now - 2 * day, &claude),
+                mux_record("h_5c0000000003", "docs-sweep", now - 9 * day, &["codex"]),
+            ];
+            h.checkouts = vec![
+                checkout(
+                    "h_5c0000000004",
+                    worktree_root.clone(),
+                    "feature/ledger",
+                    now - 3 * day,
+                ),
+                checkout(
+                    "h_5c0000000005",
+                    path_to_string(&world.root.join("checkouts/spike-cache")),
+                    "spike/cache",
+                    now - 12 * day,
+                ),
+            ];
+            h.prs = vec![pr_record.clone()];
+            let mut outcome = MergeOutcome::default();
+            outcome.changed.extend(HistoryKind::ALL);
+            outcome
+        })
+        .context("write showcase history")?;
+
+    let store = crate::pin_slots::SlotStore::at(world.root.join("data/conspectus/pins.toml"));
+    let text = |value: &str| FieldValue::Text(value.to_string());
+    let slot = |id: &str, kind: PinKind, target: String, label: &str| PinSlot {
+        id: id.to_string(),
+        kind,
+        target: Some(target),
+        pinned_at: Some("2026-09-20T09:00:00Z".to_string()),
+        overrides: SlotFields::new(),
+        snapshot: SlotFields::from([("label".to_string(), text(label))]),
+        order: 0,
+        legacy: false,
+    };
+    let claude_scope = path_to_string(&world.harness.claude_code_state_root());
+    let session = NodeId::AgentSession(AgentSessionId::new(
+        "claude-code",
+        claude_scope,
+        "showcase-claude",
+    ))
+    .to_string();
+    for pin in [
+        slot(
+            "project-main",
+            PinKind::Mux,
+            PinSlot::history_target("h_5c0000000001"),
+            "project",
+        ),
+        slot(
+            "nightly",
+            PinKind::Mux,
+            PinSlot::history_target("h_5c0000000002"),
+            "nightly-refactor",
+        ),
+        slot(
+            "parser-session",
+            PinKind::Session,
+            session,
+            "claude-code in project repo",
+        ),
+        slot(
+            "ledger-worktree",
+            PinKind::Checkout,
+            PinSlot::history_target("h_5c0000000004"),
+            "feature/ledger",
+        ),
+        slot(
+            "ledger-pr",
+            PinKind::Pr,
+            NodeId::ForgePr(ForgePrId::new(
+                "github",
+                "github.com",
+                "conspectus",
+                "project",
+                5,
+            ))
+            .to_string(),
+            "#5 Ledger store and merge",
+        ),
+    ] {
+        store
+            .add(pin)
+            .map_err(|err| anyhow::anyhow!("write showcase pin: {err}"))?;
+    }
     Ok(())
 }
 
