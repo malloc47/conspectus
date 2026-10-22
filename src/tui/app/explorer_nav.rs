@@ -25,6 +25,11 @@ impl App {
             RowId::Fork(node) => Some(node.clone()),
             RowId::Pin { pin_id } => Some(NodeId::Pin(PinId::new(pin_id.clone()))),
             RowId::Nested { node, .. } => Some(node.clone()),
+            RowId::History { record_id } => {
+                snapshot.history.meta(record_id).and_then(|(kind, _)| {
+                    crate::tui::rows::history::node_of(snapshot, kind, record_id)
+                })
+            }
             RowId::Remote(_) | RowId::Bucket(_) | RowId::Synthetic(_) => None,
         };
         let Some(raw_target) = raw_target else {

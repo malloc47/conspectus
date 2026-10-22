@@ -613,6 +613,32 @@ impl HistorySnapshot {
         self.metas().find(|(_, meta)| meta.key == key)
     }
 
+    /// What to call a record: its display label, else a name from its
+    /// recipe (the mux name, the worktree directory, the repo
+    /// directory, or `owner/repo#number`).
+    pub fn label_of(&self, id: &str) -> Option<String> {
+        let (kind, meta) = self.meta(id)?;
+        if !meta.display.label.is_empty() {
+            return Some(meta.display.label.clone());
+        }
+        let base = |path: &str| {
+            let path = path.trim_end_matches('/');
+            path.rsplit('/').next().unwrap_or(path).to_string()
+        };
+        Some(match kind {
+            HistoryKind::Mux => self.mux(id)?.recipe.name.clone(),
+            HistoryKind::Checkout => base(&self.checkout(id)?.recipe.root),
+            HistoryKind::Repo => {
+                let dir = &self.repo(id)?.recipe.common_dir;
+                base(dir.strip_suffix("/.git").unwrap_or(dir))
+            }
+            HistoryKind::Pr => {
+                let r = &self.pr(id)?.recipe;
+                format!("{}/{}#{}", r.owner, r.repo, r.number)
+            }
+        })
+    }
+
     /// A record's presence; `None` means live.
     pub fn presence_of(&self, id: &str) -> Option<NodePresence> {
         self.presence.get(id).copied()

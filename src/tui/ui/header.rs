@@ -24,7 +24,13 @@ pub(super) fn draw_header(app: &App, frame: &mut Frame<'_>, area: Rect) {
 
     // Identity prefix renders bold; chips after it carry their own
     // colors and stay independent of the prefix style.
-    let prefix = format!("{freshness}{session_cell} sessions · {mux_total} mux");
+    let gone = gone_mux_count(app.snapshot_handle());
+    let gone_cell = if gone > 0 {
+        format!(" · {gone} gone")
+    } else {
+        String::new()
+    };
+    let prefix = format!("{freshness}{session_cell} sessions · {mux_total} mux{gone_cell}");
     let mut spans: Vec<Span<'static>> = vec![span!(Modifier::BOLD; "{prefix}")];
 
     // Counts walk the visible row tree, matching the count rule.
@@ -409,7 +415,27 @@ pub(super) fn view_label(view: View) -> &'static str {
         View::Prs => "prs",
         View::Forks => "forks",
         View::Pinned => "pinned",
+        View::History => "history",
     }
+}
+
+/// Muxes whose session a successful probe found gone (ADR 0140).
+pub(super) fn gone_mux_count(handle: Option<&SnapshotHandle>) -> usize {
+    use crate::model::GraphNode;
+    let Some(handle) = handle else {
+        return 0;
+    };
+    let snapshot = handle.snapshot();
+    snapshot
+        .nodes
+        .iter()
+        .filter(|node| matches!(node, GraphNode::MuxSession(_)))
+        .filter(|node| {
+            snapshot
+                .presence(&node.id())
+                .is_some_and(crate::model::NodePresence::is_gone)
+        })
+        .count()
 }
 
 pub(super) fn snapshot_counts(handle: Option<&SnapshotHandle>) -> (usize, usize) {
@@ -465,6 +491,9 @@ pub(super) fn default_action_status_hint(app: &App) -> String {
     // Group rows: Enter expands/collapses; h/l explicitly fold.
     if matches!(row.kind, RowKind::Group(_)) {
         return "Enter/l expand · h collapse".to_string();
+    }
+    if crate::tui::actions::selected_record(app).is_some() {
+        return "Enter rebuild · . menu (pin, forget, plan, clean up)".to_string();
     }
     let selected_pin_id = match (&row.id, &row.kind) {
         (RowId::Pin { pin_id }, _) => Some(pin_id.as_str()),

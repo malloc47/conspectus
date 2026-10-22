@@ -230,7 +230,7 @@ fn describe(snapshot: &GraphSnapshot, pin: &PinNode, home: Option<&Path>) -> Des
     }
 }
 
-fn join_dot(parts: impl IntoIterator<Item = String>) -> String {
+pub(super) fn join_dot(parts: impl IntoIterator<Item = String>) -> String {
     parts
         .into_iter()
         .filter(|part| !part.is_empty())
@@ -317,7 +317,19 @@ fn project_of(snapshot: &GraphSnapshot, pin: &PinNode, home: Option<&Path>) -> O
         PinKind::Workspace => pin.text("root").map(str::to_string),
         PinKind::Pr | PinKind::Fork => None,
     }?;
-    let path = Path::new(&path);
+    project_for_path(snapshot, &path, pin.kind == PinKind::Repo, home)
+}
+
+/// The project a path belongs to: the nearest local repo above it,
+/// `~`-shortened. A repo that is gone from the graph names its own
+/// path when `self_if_none` is set.
+pub(super) fn project_for_path(
+    snapshot: &GraphSnapshot,
+    path: &str,
+    self_if_none: bool,
+    home: Option<&Path>,
+) -> Option<String> {
+    let path = Path::new(path);
     let mut best: Option<String> = None;
     for node in &snapshot.nodes {
         let GraphNode::Repo(repo) = node else {
@@ -330,10 +342,7 @@ fn project_of(snapshot: &GraphSnapshot, pin: &PinNode, home: Option<&Path>) -> O
             best = Some(root);
         }
     }
-    let root = best.or_else(|| {
-        // A repo that is gone from the graph still names its own path.
-        (pin.kind == PinKind::Repo).then(|| path.to_string_lossy().into_owned())
-    })?;
+    let root = best.or_else(|| self_if_none.then(|| path.to_string_lossy().into_owned()))?;
     Some(shorten_home(&root, home))
 }
 

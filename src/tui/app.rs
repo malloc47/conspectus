@@ -442,7 +442,7 @@ impl App {
         let grouping = match active_view {
             View::Sessions => super::Grouping::Sessions(config.sessions_grouping),
             View::Mux => super::Grouping::Mux(config.mux_grouping),
-            View::Union | View::Prs | View::Forks | View::Pinned => {
+            View::Union | View::Prs | View::Forks | View::Pinned | View::History => {
                 super::Grouping::default_for(active_view)
             }
         };
@@ -1439,6 +1439,10 @@ impl App {
                     effects.push(Effect::Toast(HANDOFF_PENDING_HINT.to_string()));
                     return effects;
                 }
+                if let Some(effect) = crate::tui::actions::history_primary_effect(self) {
+                    effects.push(effect);
+                    return effects;
+                }
                 if let Some(effect) = crate::tui::actions::pinned_primary_effect(self) {
                     effects.push(effect);
                     return effects;
@@ -1604,6 +1608,50 @@ impl App {
                     name,
                     cwd,
                 }));
+            }
+            Msg::OpenRowMenu => match crate::tui::actions::row_menu_for(self) {
+                Some(menu) => self.open_row_menu(menu),
+                None => effects.push(Effect::Toast("no row actions here yet".to_string())),
+            },
+            Msg::PinRecord(record_id) => {
+                effects.push(Effect::WriteStore(crate::tui::effect::StoreOp::PinRecord {
+                    record_id,
+                }));
+            }
+            Msg::ForgetRecord(record_id) => {
+                effects.push(Effect::WriteStore(
+                    crate::tui::effect::StoreOp::ForgetRecord { record_id },
+                ));
+            }
+            Msg::ReapRecords(ids) => {
+                effects.push(Effect::WriteStore(
+                    crate::tui::effect::StoreOp::ReapRecords { ids },
+                ));
+            }
+            Msg::ShowRebuildPlan(reference) => {
+                effects.push(Effect::Exec(
+                    crate::tui::effect::ExecSpec::ShowRebuildPlan { reference },
+                ));
+            }
+            Msg::RebuildReference(reference) => {
+                effects.push(Effect::Exec(crate::tui::effect::ExecSpec::Rebuild {
+                    reference,
+                }));
+            }
+            Msg::OpenCleanUp => {
+                if let Some(handle) = self.snapshot_handle() {
+                    let now = crate::tui::rows::tree_current_unix_epoch();
+                    let candidates = crate::history::reap::candidates(
+                        handle.snapshot(),
+                        &self.config().history,
+                        now,
+                        None,
+                        None,
+                    );
+                    self.open_clean_up(crate::tui::widgets::clean_up::CleanUpState::new(
+                        candidates, now,
+                    ));
+                }
             }
             Msg::OpenNewMuxForm => {
                 let seeded_cwd = crate::tui::runtime::derive_mux_form_cwd(self)

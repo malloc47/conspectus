@@ -129,6 +129,9 @@ pub fn resolve_attach_target(app: &App) -> Result<AttachTarget, AttachDisabled> 
             let _ = mux;
             id.clone()
         }
+        // A ghost mux row: the liveness check below refuses it by
+        // name instead of the row being unsupported.
+        (RowKind::Mixed(_), RowId::MuxSession(NodeId::MuxSession(id))) => id.clone(),
         // ADR 0071: `a` on a workspace/repo/checkout row attaches
         // to the single ambiguous mux scoped to that group, if any.
         // Zero → UnmuxedSession (no attach possible). Multiple →
@@ -232,6 +235,100 @@ pub fn pin_live_mux(snapshot: &GraphSnapshot, pin_id: &str) -> Option<MuxSession
         session @ NodeId::AgentSession(_) => preferred_mux_for_session(snapshot, &session),
         _ => None,
     }
+}
+
+/// The history record behind the selected row, when it has one: a
+/// History row, or a ghost mux in the Mux view.
+pub fn selected_record(app: &App) -> Option<String> {
+    let selection = app.selection()?;
+    if let RowId::History { record_id } = selection {
+        return Some(record_id.clone());
+    }
+    let snapshot = app.snapshot_handle()?.snapshot();
+    let RowId::MuxSession(node @ NodeId::MuxSession(mux)) = selection else {
+        return None;
+    };
+    if snapshot.is_live(node) {
+        return None;
+    }
+    snapshot
+        .history
+        .muxes
+        .iter()
+        .find(|record| record.recipe.native_id() == mux.native_id)
+        .map(|record| record.meta.id.clone())
+}
+
+/// The `.` menu for the selected row, or `None` when the row has no
+/// actions yet. The History view always has one: even with nothing
+/// selected it offers Clean up.
+pub fn row_menu_for(app: &App) -> Option<crate::tui::widgets::row_menu::RowMenuState> {
+    use crate::tui::Msg;
+    use crate::tui::widgets::row_menu::{RowMenuEntry, RowMenuState};
+    let snapshot = app.snapshot_handle()?.snapshot();
+    let in_history = app.active_view() == crate::tui::View::History;
+    let mut entries = Vec::new();
+    let mut title = "History".to_string();
+    if let Some(id) = selected_record(app)
+        && let Some((kind, meta)) = snapshot.history.meta(&id)
+    {
+        title = format!(
+            "{} {}",
+            kind.as_str(),
+            snapshot
+                .history
+                .label_of(&id)
+                .unwrap_or_else(|| meta.display.label.clone())
+        );
+        let pins = crate::tui::rows::history::pinned_by(snapshot, &id);
+        let pin_note = if pins.is_empty() {
+            "add a slot that points at this record".to_string()
+        } else {
+            format!("already pinned as {}", pins.join(", "))
+        };
+        let forget_note = if pins.is_empty() {
+            "remove the record from history".to_string()
+        } else {
+            format!(
+                "remove the record; {} would lose its target",
+                pins.join(", ")
+            )
+        };
+        entries.push(RowMenuEntry::new(
+            "Rebuild",
+            "bring it back (conspectus rebuild)",
+            Msg::RebuildReference(id.clone()),
+        ));
+        entries.push(RowMenuEntry::new(
+            "Pin",
+            pin_note,
+            Msg::PinRecord(id.clone()),
+        ));
+        entries.push(RowMenuEntry::new(
+            "Show rebuild plan",
+            "what rebuild would run, without running it",
+            Msg::ShowRebuildPlan(id.clone()),
+        ));
+        entries.push(RowMenuEntry::new("Forget", forget_note, Msg::ForgetRecord(id)).confirming());
+    }
+    if in_history {
+        entries.push(RowMenuEntry::new(
+            "Clean up…",
+            "forget gone records past their reap age",
+            Msg::OpenCleanUp,
+        ));
+    }
+    (!entries.is_empty()).then(|| RowMenuState::new(title, entries))
+}
+
+/// What `Enter` does on a History row or a ghost mux: rebuild the
+/// record with `conspectus rebuild <record id>`. `None` on any other
+/// row.
+pub fn history_primary_effect(app: &App) -> Option<crate::tui::Effect> {
+    let reference = selected_record(app)?;
+    Some(crate::tui::Effect::Exec(
+        crate::tui::effect::ExecSpec::Rebuild { reference },
+    ))
 }
 
 /// What `Enter` does on a slot row when attaching isn't it: run

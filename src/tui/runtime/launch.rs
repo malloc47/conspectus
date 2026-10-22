@@ -551,3 +551,37 @@ pub(super) fn run_viewer_launch(
     let _ = terminal.clear();
     outcome
 }
+
+/// Executor branch for `ExecSpec::ShowRebuildPlan`: run
+/// `conspectus rebuild <reference> --dry-run` behind a spinner and show
+/// what it printed in the full-value modal.
+pub(super) fn execute_show_rebuild_plan(
+    terminal: &mut DefaultTerminal,
+    app: &mut App,
+    reference: &str,
+) {
+    let (_, output) = run_conspectus_subprocess(
+        terminal,
+        app,
+        format!("Planning rebuild of {reference}"),
+        vec![
+            "rebuild".to_string(),
+            reference.to_string(),
+            "--dry-run".to_string(),
+        ],
+    );
+    let text = match output {
+        Ok(output) if output.status.success() => String::from_utf8_lossy(&output.stdout)
+            .trim_end()
+            .to_string(),
+        Ok(output) => format!(
+            "rebuild of `{reference}` can't be planned: {}",
+            command_output_excerpt(&output)
+        ),
+        Err(err) => format!("rebuild of `{reference}` failed to spawn: {err}"),
+    };
+    app.open_value_modal(crate::tui::widgets::value_modal::ValueModalState::new(
+        format!("rebuild plan · {reference}"),
+        text,
+    ));
+}

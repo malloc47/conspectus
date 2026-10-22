@@ -745,6 +745,41 @@ kinds say there is nothing to launch. Editing, renaming, retargeting, and
 unpinning happen on the command line for now. While legacy `[[pins.entries]]`
 remain, a line under the rows names `conspectus pin migrate`.
 
+### The History view
+
+Key `5` (or `--view history`) lists the history records whose entity is
+gone, in the same columns as the Pinned view, newest sighting first. A
+record is gone when a targeted check found it so: a mux a successful tmux
+probe didn't list, a worktree or repo whose path is missing under an
+existing parent, or a PR that left the listing once the forge has been read.
+Unknown records aren't listed, because an unreadable probe proves nothing.
+Rows group by `project` (the repo above the record's path; a worktree
+belongs to the repo it was made from), by `kind`, or not at all.
+
+`Enter` runs `conspectus rebuild <record id> --no-attach` behind a spinner and
+refreshes. `.` opens the row menu: **Rebuild**, **Pin** (the same as `pin add
+<record id>`), **Show rebuild plan** (the output of `rebuild --dry-run` in a
+scrollable modal), **Forget** (press `Enter` twice; the record leaves history
+and any slot pointing at it falls back to its snapshot), and **Clean up…**.
+
+Clean up lists what `conspectus history reap` would remove: gone records past
+their `[history.reap_after]` age, minus records a slot targets. All are
+selected; `Space` deselects, `Enter` forgets exactly the selected ones, and
+`Esc` cancels. With nothing past its age the modal says so. Forgetting and
+cleaning up only remove history records; they never touch tmux, git, or the
+filesystem, and they are the same writes as `history forget` and `history
+reap`.
+
+### Ghost muxes in the Mux view
+
+The Mux view lists a gone mux below the live muxes of its group, dimmed, with
+a `gone` status and the time it was last seen; the header reads `11 mux ·
+4 gone`. A mux whose probe couldn't run shows as `unknown` and isn't counted
+as gone. Controls has a **Hide gone muxes** checkbox, and any narrowing filter
+(harness, max age, mux state) leaves ghosts out because they can't match.
+`Enter` on a ghost rebuilds it, `.` opens the same menu as in History, and
+attach and rename refuse with a message that names the fix.
+
 ### Migrating legacy pins
 
 Pins from earlier builds (`[[pins.entries]]` in `.conspectus.toml` or the

@@ -3,7 +3,7 @@ source: src/tui/ui_tests.rs
 expression: "pinned_frame(&mut app, width)"
 ---
 updated 0s ago · 0/1 sessions · 1 mux                                 
-┌ ▸ sessions · mux · prs · pinned ───────────────────────────────────┐
+┌ ▸ sessions · mux · prs · pinned · history ─────────────────────────┐
 │▶ ▣ conspectus-main         live      2m  claude · ~/src/conspectus │
 │  ▣ config-agent3           gone      3d  claude · ~/src/config     │
 │  ● e44d01cb                in mux   17m  claude · Fix the ledger m…│

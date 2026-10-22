@@ -30,6 +30,12 @@ pub(super) fn open_rename_overlay(app: &mut App) {
                 .map_or(mux.native_id.as_str(), |(_, name)| name);
             (" rename mux ", bare.to_string())
         }
+        (RowId::MuxSession(_), Some(RowKind::Mixed(_))) => {
+            app.update(Msg::SetStatus(Some(
+                "rename: that mux is gone; rebuild it first (Enter, or . for the menu)".to_string(),
+            )));
+            return;
+        }
         _ => {
             app.update(Msg::SetStatus(Some(
                 "rename: select an agent session or mux row first".to_string(),
@@ -161,6 +167,60 @@ pub(super) fn handle_mux_menu_key(
         }
         OverlayOutcome::Commit(msg) => {
             app.close_mux_menu();
+            dispatch_live(terminal, app, config, tmux, *msg);
+        }
+        OverlayOutcome::CommitAndStay(msg) => {
+            dispatch_live(terminal, app, config, tmux, *msg);
+        }
+    }
+}
+
+/// Forward a key to the row action menu. A pick pops the menu and
+/// dispatches its message; the reducer does the rest.
+pub(super) fn handle_row_menu_key(
+    terminal: &mut DefaultTerminal,
+    app: &mut App,
+    config: &RunConfig,
+    tmux: &dyn MuxBackend,
+    key: ratatui::crossterm::event::KeyEvent,
+) {
+    use crate::tui::{Overlay, OverlayOutcome};
+    let outcome = match app.row_menu_mut() {
+        Some(state) => state.handle((), key),
+        None => return,
+    };
+    match outcome {
+        OverlayOutcome::Consumed => {}
+        OverlayOutcome::Close => app.close_row_menu(),
+        OverlayOutcome::Commit(msg) => {
+            app.close_row_menu();
+            dispatch_live(terminal, app, config, tmux, *msg);
+        }
+        OverlayOutcome::CommitAndStay(msg) => {
+            dispatch_live(terminal, app, config, tmux, *msg);
+        }
+    }
+}
+
+/// Forward a key to the Clean up modal. Confirming pops it and
+/// dispatches the reap of the selected records.
+pub(super) fn handle_clean_up_key(
+    terminal: &mut DefaultTerminal,
+    app: &mut App,
+    config: &RunConfig,
+    tmux: &dyn MuxBackend,
+    key: ratatui::crossterm::event::KeyEvent,
+) {
+    use crate::tui::{Overlay, OverlayOutcome};
+    let outcome = match app.clean_up_mut() {
+        Some(state) => state.handle((), key),
+        None => return,
+    };
+    match outcome {
+        OverlayOutcome::Consumed => {}
+        OverlayOutcome::Close => app.close_clean_up(),
+        OverlayOutcome::Commit(msg) => {
+            app.close_clean_up();
             dispatch_live(terminal, app, config, tmux, *msg);
         }
         OverlayOutcome::CommitAndStay(msg) => {

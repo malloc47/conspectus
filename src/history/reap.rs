@@ -151,7 +151,10 @@ pub fn candidates(
             out.push(Candidate {
                 kind: record_kind,
                 id: meta.id.clone(),
-                label: meta.display.label.clone(),
+                label: snapshot
+                    .history
+                    .label_of(&meta.id)
+                    .unwrap_or_else(|| meta.display.label.clone()),
                 last_seen,
             });
         }

@@ -132,6 +132,64 @@ impl App {
         }
     }
 
+    /// Open the full-value modal on `state`.
+    pub fn open_value_modal(&mut self, state: crate::tui::widgets::value_modal::ValueModalState) {
+        self.modal_stack.push(crate::tui::Modal::ValueModal(state));
+        self.status_message = None;
+    }
+
+    /// Active row action menu, if on top of stack.
+    pub fn row_menu(&self) -> Option<&crate::tui::widgets::row_menu::RowMenuState> {
+        match self.modal_stack.last()? {
+            crate::tui::Modal::RowMenu(state) => Some(state.as_ref()),
+            _ => None,
+        }
+    }
+
+    pub fn row_menu_mut(&mut self) -> Option<&mut crate::tui::widgets::row_menu::RowMenuState> {
+        match self.modal_stack.last_mut()? {
+            crate::tui::Modal::RowMenu(state) => Some(state.as_mut()),
+            _ => None,
+        }
+    }
+
+    pub fn open_row_menu(&mut self, state: crate::tui::widgets::row_menu::RowMenuState) {
+        self.modal_stack
+            .push(crate::tui::Modal::RowMenu(Box::new(state)));
+    }
+
+    pub fn close_row_menu(&mut self) {
+        if matches!(self.modal_stack.last(), Some(crate::tui::Modal::RowMenu(_))) {
+            self.modal_stack.pop();
+        }
+    }
+
+    /// Active Clean up modal, if on top of stack.
+    pub fn clean_up(&self) -> Option<&crate::tui::widgets::clean_up::CleanUpState> {
+        match self.modal_stack.last()? {
+            crate::tui::Modal::CleanUp(state) => Some(state.as_ref()),
+            _ => None,
+        }
+    }
+
+    pub fn clean_up_mut(&mut self) -> Option<&mut crate::tui::widgets::clean_up::CleanUpState> {
+        match self.modal_stack.last_mut()? {
+            crate::tui::Modal::CleanUp(state) => Some(state.as_mut()),
+            _ => None,
+        }
+    }
+
+    pub fn open_clean_up(&mut self, state: crate::tui::widgets::clean_up::CleanUpState) {
+        self.modal_stack
+            .push(crate::tui::Modal::CleanUp(Box::new(state)));
+    }
+
+    pub fn close_clean_up(&mut self) {
+        if matches!(self.modal_stack.last(), Some(crate::tui::Modal::CleanUp(_))) {
+            self.modal_stack.pop();
+        }
+    }
+
     /// Active mux-launch form, if on top of stack.
     pub fn mux_launch_form(&self) -> Option<&crate::tui::widgets::mux_launch::MuxLaunchFormState> {
         match self.modal_stack.last()? {

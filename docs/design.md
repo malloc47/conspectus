@@ -905,7 +905,8 @@ separately (ADR 0144).
 Two views list rows of mixed kinds in one set of aligned columns,
 `<kind> <label> <status> <age> <content>` (ADR 0144): **Pinned** lists
 every pin slot in slot order, grouped by project, and **History** lists
-the gone and unknown history records, newest first, with a Clean up modal
+the history records whose entity a check found gone (an Unknown record
+proves nothing, so it isn't listed), newest first, with a Clean up modal
 for reaping. Native views mark pinned rows with `◉` instead of floating
 them, and Controls offers a `pinned only` filter. A row action menu (`.`)
 lists what applies to the selected row, including Pin / Unpin (`p`).

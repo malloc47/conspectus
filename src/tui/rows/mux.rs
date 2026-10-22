@@ -18,9 +18,9 @@ use crate::model::{
 };
 use crate::output::render::{node_short_id_from_display, unique_prefix_len};
 use crate::tui::rows::{
-    AgentSessionRow, GroupRow, MuxSessionRow, Row, RowId, RowKind, RowTree, ViewLabel,
-    format_recency, harness_label, mux_process_harnesses, mux_program, mux_program_harness,
-    shorten_home,
+    AgentSessionRow, GroupRow, MixedRow, MixedTone, MuxSessionRow, Row, RowId, RowKind, RowTree,
+    ViewLabel, format_recency, harness_label, mux_process_harnesses, mux_program,
+    mux_program_harness, shorten_home,
 };
 use crate::tui::{MuxGrouping, Sort};
 
@@ -109,6 +109,14 @@ pub fn build_mux_tree(inputs: MuxBuildInputs<'_>) -> RowTree {
     // adjacent and the optional float-top sort can move them as a
     // unit.
     let mut groups: Vec<MuxGroup> = Vec::new();
+    // Ghosts are muxes history remembers whose session is gone; a
+    // narrowing filter can't match them, and the Controls toggle hides
+    // them outright.
+    if !inputs.filter.hide_gone_muxes && !inputs.filter.has_narrowing_predicates() {
+        for ghost in collect_ghosts(snapshot, inputs.home, now) {
+            groups.push(ghost);
+        }
+    }
     for mux in &muxes {
         let attached = attachments.get(&mux.node_id).cloned().unwrap_or_default();
         let visible_attached: Vec<AttachedAgent> = attached
@@ -173,6 +181,7 @@ pub fn build_mux_tree(inputs: MuxBuildInputs<'_>) -> RowTree {
             children,
             attached_count,
             cwd,
+            ghost: None,
         });
     }
 
@@ -201,6 +210,14 @@ struct MuxGroup {
     children: Vec<AttachedAgent>,
     attached_count: usize,
     cwd: Option<String>,
+    /// Set for a gone mux, which renders as a dimmed mixed-kind row.
+    ghost: Option<Ghost>,
+}
+
+#[derive(Clone, Debug)]
+struct Ghost {
+    row: MixedRow,
+    last_seen: i64,
 }
 
 impl MuxGroup {
@@ -218,7 +235,17 @@ impl MuxGroup {
             children,
             attached_count,
             cwd: _,
+            ghost,
         } = self;
+        if let Some(ghost) = ghost {
+            tree.rows.push(Row {
+                id: RowId::MuxSession(parent_node_id),
+                depth,
+                expandable: false,
+                kind: RowKind::Mixed(ghost.row),
+            });
+            return;
+        }
         tree.rows.push(Row {
             id: RowId::MuxSession(parent_node_id),
             depth,
@@ -484,6 +511,18 @@ fn recency_key(row: &MuxSessionRow, basis: crate::tui::MuxRecency) -> Option<i64
 
 fn sort_mux_groups(groups: &mut [MuxGroup], inputs: &MuxBuildInputs<'_>) {
     groups.sort_by(|left, right| {
+        // Ghosts sit below the live muxes, most recently seen first.
+        match (&left.ghost, &right.ghost) {
+            (Some(l), Some(r)) => {
+                return r
+                    .last_seen
+                    .cmp(&l.last_seen)
+                    .then_with(|| left.parent_node_id.cmp(&right.parent_node_id));
+            }
+            (Some(_), None) => return std::cmp::Ordering::Greater,
+            (None, Some(_)) => return std::cmp::Ordering::Less,
+            (None, None) => {}
+        }
         let pinned = usize::from(left.parent_row.pin_id.is_none())
             .cmp(&usize::from(right.parent_row.pin_id.is_none()));
         if pinned != std::cmp::Ordering::Equal {
@@ -620,6 +659,7 @@ fn mux_matches_filter(
         pr_branch: _,
         pr_state: _,
         float_tracked_prs_top: _,
+        hide_gone_muxes: _,
     } = filter;
     harness.is_none()
         && max_age.is_none()
@@ -659,6 +699,82 @@ fn collect_muxes(snapshot: &GraphSnapshot) -> Vec<MuxData<'_>> {
         .collect();
     rows.sort_by(|a, b| a.node_id.cmp(&b.node_id));
     rows
+}
+
+/// The muxes the graph keeps as ghosts: nodes history projected for a
+/// session that is gone, or whose check couldn't run.
+fn collect_ghosts(
+    snapshot: &GraphSnapshot,
+    home: Option<&Path>,
+    now: Option<i64>,
+) -> Vec<MuxGroup> {
+    use crate::model::NodePresence;
+    snapshot
+        .nodes
+        .iter()
+        .filter_map(|node| {
+            let GraphNode::MuxSession(mux) = node else {
+                return None;
+            };
+            let id = NodeId::MuxSession(mux.id.clone());
+            let presence = snapshot.presence(&id)?;
+            let status = match presence {
+                NodePresence::Gone { .. } => "gone",
+                NodePresence::Unknown { .. } => "unknown",
+            };
+            let harness = snapshot
+                .history
+                .muxes
+                .iter()
+                .find(|record| record.recipe.native_id() == mux.id.native_id)
+                .and_then(|record| record.recipe.harness.as_deref())
+                .map(harness_label)
+                .unwrap_or_default();
+            let cwd = mux.cwd.clone();
+            let content = super::pinned::join_dot([
+                harness,
+                cwd.as_deref()
+                    .map(|cwd| shorten_home(cwd, home))
+                    .unwrap_or_default(),
+            ]);
+            let last_seen = presence.last_seen();
+            let row = MixedRow {
+                node_kind: crate::model::NodeKind::MuxSession,
+                label: mux.session_name().to_string(),
+                status: status.to_string(),
+                tone: MixedTone::Dim,
+                age: format_recency(now, Some(last_seen)),
+                content,
+                primary_node: id.clone(),
+                pr_state: None,
+            };
+            Some(MuxGroup {
+                parent_row: MuxSessionRow {
+                    mux: mux.id.clone(),
+                    backend: mux.backend.clone(),
+                    native_id: mux.native_id.clone(),
+                    client_attached: None,
+                    cwd_display: cwd.as_deref().map(|cwd| shorten_home(cwd, home)),
+                    attached_count: 0,
+                    recency: None,
+                    activity_epoch: None,
+                    created_epoch: mux.created_epoch,
+                    last_attached_epoch: None,
+                    agent_labels: Vec::new(),
+                    program: None,
+                    program_harness: None,
+                    single_session_preview: None,
+                    pin_id: None,
+                    primary_node: id.clone(),
+                },
+                parent_node_id: id,
+                children: Vec::new(),
+                attached_count: 0,
+                cwd,
+                ghost: Some(Ghost { row, last_seen }),
+            })
+        })
+        .collect()
 }
 
 /// Attached agents filter through the resolver. Only

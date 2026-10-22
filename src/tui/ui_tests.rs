@@ -5297,3 +5297,324 @@ fn the_detail_pane_shows_where_each_slot_field_came_from() {
     );
     assert!(frame.contains("cwd"), "{frame}");
 }
+
+// ----- The History view and the row menu -----------------------------
+
+/// An app showing the History view over [`fixture_world`] (a gone mux
+/// and a gone worktree among its records), grouped as asked.
+///
+/// [`fixture_world`]: crate::tui::rows::pinned::fixture_world
+fn history_app_over(
+    snapshot: &GraphSnapshot,
+    grouping: crate::tui::HistoryGrouping,
+    config: RunConfig,
+) -> App {
+    let mut config = config;
+    config.default_view = View::History;
+    let mut app = App::new(config);
+    app.update(Msg::SetGrouping(crate::tui::Grouping::History(grouping)));
+    let tree = crate::tui::rows::history::build_history_tree(
+        crate::tui::rows::history::HistoryBuildInputs {
+            snapshot,
+            home: Some(std::path::Path::new("/home/op")),
+            now: Some(1_700_000_000),
+            grouping,
+        },
+    );
+    app.update(Msg::SetData {
+        snapshot: SnapshotHandle::from_snapshot(snapshot),
+        tree,
+        loaded_at_epoch: 1_700_000_000,
+        initial_selection_hint: None,
+    });
+    app
+}
+
+fn history_app(grouping: crate::tui::HistoryGrouping) -> App {
+    history_app_over(
+        &crate::tui::rows::pinned::fixture_world(),
+        grouping,
+        RunConfig::defaults(),
+    )
+}
+
+#[test]
+fn the_history_view_lists_gone_records_with_their_age() {
+    let mut app = history_app(crate::tui::HistoryGrouping::None);
+    insta::assert_snapshot!("history_view_flat", pinned_frame(&mut app, 110));
+    let mut app = history_app(crate::tui::HistoryGrouping::Project);
+    insta::assert_snapshot!("history_view_by_project", pinned_frame(&mut app, 110));
+}
+
+#[test]
+fn an_empty_history_view_points_at_the_menu() {
+    let mut app = history_app_over(
+        &GraphSnapshot::empty(),
+        crate::tui::HistoryGrouping::None,
+        RunConfig::defaults(),
+    );
+    let frame = pinned_frame(&mut app, 100);
+    assert!(frame.contains("Nothing is gone"), "{frame}");
+    assert!(frame.contains("Clean up"), "{frame}");
+}
+
+#[test]
+fn enter_on_a_history_row_rebuilds_its_record() {
+    use crate::tui::Effect;
+    use crate::tui::effect::ExecSpec;
+    let mut app = history_app(crate::tui::HistoryGrouping::None);
+    app.set_selection(RowId::History {
+        record_id: "h_agent".into(),
+    });
+    assert_eq!(
+        app.update(Msg::AttachSelected),
+        vec![Effect::Exec(ExecSpec::Rebuild {
+            reference: "h_agent".into()
+        })]
+    );
+}
+
+#[test]
+fn the_row_menu_offers_the_record_verbs_and_clean_up() {
+    let mut app = history_app(crate::tui::HistoryGrouping::None);
+    app.set_selection(RowId::History {
+        record_id: "h_agent".into(),
+    });
+    assert!(app.update(Msg::OpenRowMenu).is_empty());
+    let menu = app.row_menu().expect("the menu opened");
+    let labels: Vec<&str> = menu.entries().iter().map(|e| e.label.as_str()).collect();
+    assert_eq!(
+        labels,
+        ["Rebuild", "Pin", "Show rebuild plan", "Forget", "Clean up…"]
+    );
+    assert!(menu.entries()[3].confirm, "forget asks twice");
+    // The pinned record says so.
+    let pin_note = &menu.entries()[1].subtitle;
+    assert!(pin_note.contains("config-agent3"), "{pin_note}");
+    insta::assert_snapshot!("history_row_menu", pinned_frame(&mut app, 100));
+}
+
+#[test]
+fn the_history_view_menu_works_with_nothing_selected() {
+    let mut app = history_app_over(
+        &GraphSnapshot::empty(),
+        crate::tui::HistoryGrouping::None,
+        RunConfig::defaults(),
+    );
+    app.update(Msg::OpenRowMenu);
+    let menu = app.row_menu().expect("the menu opened");
+    assert_eq!(menu.entries().len(), 1);
+    assert_eq!(menu.entries()[0].msg, Msg::OpenCleanUp);
+}
+
+#[test]
+fn rows_without_actions_say_so_instead_of_opening_an_empty_menu() {
+    use crate::tui::Effect;
+    let mut app = slots_app(crate::tui::PinnedGrouping::None);
+    app.set_selection(RowId::Pin {
+        pin_id: "conspectus-main".into(),
+    });
+    let effects = app.update(Msg::OpenRowMenu);
+    assert!(app.row_menu().is_none());
+    assert!(
+        matches!(effects.as_slice(), [Effect::Toast(_)]),
+        "{effects:?}"
+    );
+}
+
+#[test]
+fn row_menu_messages_become_the_matching_effects() {
+    use crate::tui::Effect;
+    use crate::tui::effect::{ExecSpec, StoreOp};
+    let mut app = history_app(crate::tui::HistoryGrouping::None);
+    assert_eq!(
+        app.update(Msg::PinRecord("h_agent".into())),
+        vec![Effect::WriteStore(StoreOp::PinRecord {
+            record_id: "h_agent".into()
+        })]
+    );
+    assert_eq!(
+        app.update(Msg::ForgetRecord("h_agent".into())),
+        vec![Effect::WriteStore(StoreOp::ForgetRecord {
+            record_id: "h_agent".into()
+        })]
+    );
+    assert_eq!(
+        app.update(Msg::ReapRecords(vec!["h_a".into(), "h_b".into()])),
+        vec![Effect::WriteStore(StoreOp::ReapRecords {
+            ids: vec!["h_a".into(), "h_b".into()]
+        })]
+    );
+    assert_eq!(
+        app.update(Msg::ShowRebuildPlan("h_agent".into())),
+        vec![Effect::Exec(ExecSpec::ShowRebuildPlan {
+            reference: "h_agent".into()
+        })]
+    );
+    assert_eq!(
+        app.update(Msg::RebuildReference("h_agent".into())),
+        vec![Effect::Exec(ExecSpec::Rebuild {
+            reference: "h_agent".into()
+        })]
+    );
+}
+
+#[test]
+fn clean_up_lists_what_has_aged_out_and_nothing_pinned() {
+    let mut config = RunConfig::defaults();
+    let zero = Some(std::time::Duration::from_secs(0));
+    config
+        .history
+        .reap_after
+        .insert(crate::model::HistoryKind::Mux, zero);
+    config
+        .history
+        .reap_after
+        .insert(crate::model::HistoryKind::Checkout, zero);
+    // The fixture pins both gone records; unpin them to see them listed.
+    let mut snapshot = crate::tui::rows::pinned::fixture_world();
+    snapshot.pins.clear();
+    let mut app = history_app_over(&snapshot, crate::tui::HistoryGrouping::None, config.clone());
+    app.update(Msg::OpenCleanUp);
+    let clean_up = app.clean_up().expect("the modal opened");
+    let ids: Vec<&str> = clean_up
+        .candidates()
+        .iter()
+        .map(|c| c.id.as_str())
+        .collect();
+    assert_eq!(ids, ["h_agent", "h_wt"], "oldest sighting first");
+    assert_eq!(clean_up.selected(), [0, 1], "all preselected");
+    let frame = pinned_frame(&mut app, 100);
+    assert!(frame.contains("Clean up: forget these records"), "{frame}");
+    assert!(frame.contains("config-agent3"), "{frame}");
+    assert!(
+        frame.contains("ledger-worktree") || frame.contains("conspectus-ledger"),
+        "{frame}"
+    );
+    assert!(frame.contains("✓"), "all preselected: {frame}");
+
+    // With the slots back, their records are protected.
+    let snapshot = crate::tui::rows::pinned::fixture_world();
+    let mut app = history_app_over(&snapshot, crate::tui::HistoryGrouping::None, config);
+    app.update(Msg::OpenCleanUp);
+    assert!(app.clean_up().expect("modal").is_empty());
+    let frame = pinned_frame(&mut app, 100);
+    assert!(frame.contains("Nothing to clean up"), "{frame}");
+}
+
+// ----- Ghost muxes in the Mux view -----------------------------------
+
+/// [`fixture_world`] with history projected into the graph the way a
+/// discovery cycle does it, after a clean tmux probe: `config-agent3`
+/// is a ghost beside the live `conspectus-main`.
+///
+/// [`fixture_world`]: crate::tui::rows::pinned::fixture_world
+fn ghost_world() -> GraphSnapshot {
+    let mut snapshot = crate::tui::rows::pinned::fixture_world();
+    snapshot.mux_probes.insert(
+        "tmux".to_string(),
+        crate::model::MuxProbe {
+            status: crate::model::MuxProbeStatus::Listed,
+            epoch: 1_700_000_000,
+            exited: Vec::new(),
+        },
+    );
+    let mut history = std::mem::take(&mut snapshot.history);
+    crate::history::project::project_into(&mut snapshot, &mut history, 1_700_000_000);
+    snapshot.history = history;
+    crate::resolve::resolve_snapshot(snapshot)
+}
+
+fn mux_app_over(snapshot: &GraphSnapshot, filter: crate::filter::RowFilter) -> App {
+    let mut config = RunConfig::defaults();
+    config.default_view = View::Mux;
+    let mut app = App::new(config);
+    let tree = crate::tui::rows::mux::build_mux_tree(crate::tui::rows::mux::MuxBuildInputs {
+        snapshot,
+        home: Some(std::path::Path::new("/home/op")),
+        now: Some(1_700_000_000),
+        filter,
+        grouping: crate::tui::MuxGrouping::Session,
+        sort: crate::tui::Sort::Hierarchy,
+        mux_recency: crate::tui::MuxRecency::default(),
+    });
+    app.update(Msg::SetData {
+        snapshot: SnapshotHandle::from_snapshot(snapshot),
+        tree,
+        loaded_at_epoch: 1_700_000_000,
+        initial_selection_hint: None,
+    });
+    app
+}
+
+#[test]
+fn ghost_muxes_sit_below_live_ones_dimmed_with_their_age() {
+    let snapshot = ghost_world();
+    let mut app = mux_app_over(&snapshot, crate::filter::RowFilter::default());
+    let frame = pinned_frame(&mut app, 110);
+    let live = frame.find("conspectus-main").expect("live mux");
+    let ghost = frame.find("config-agent3").expect("ghost mux");
+    assert!(live < ghost, "{frame}");
+    assert!(frame.contains("gone"), "{frame}");
+    assert!(
+        frame.contains("· 1 gone"),
+        "the header counts ghosts: {frame}"
+    );
+}
+
+#[test]
+fn hiding_gone_muxes_drops_the_ghosts_and_keeps_the_count() {
+    let snapshot = ghost_world();
+    let filter = crate::filter::RowFilter {
+        hide_gone_muxes: true,
+        ..Default::default()
+    };
+    let mut app = mux_app_over(&snapshot, filter);
+    let frame = pinned_frame(&mut app, 110);
+    assert!(!frame.contains("config-agent3"), "{frame}");
+    assert!(frame.contains("conspectus-main"), "{frame}");
+    assert!(frame.contains("1 gone"), "{frame}");
+}
+
+#[test]
+fn a_narrowing_filter_cannot_match_a_ghost() {
+    let snapshot = ghost_world();
+    let filter = crate::filter::RowFilter {
+        max_age: Some(std::time::Duration::from_secs(86_400 * 365)),
+        ..Default::default()
+    };
+    let mut app = mux_app_over(&snapshot, filter);
+    let frame = pinned_frame(&mut app, 110);
+    assert!(!frame.contains("config-agent3"), "{frame}");
+}
+
+#[test]
+fn actions_on_a_ghost_mux_rebuild_or_refuse_instead_of_erroring() {
+    use crate::tui::Effect;
+    use crate::tui::effect::ExecSpec;
+    let snapshot = ghost_world();
+    let mut app = mux_app_over(&snapshot, crate::filter::RowFilter::default());
+    let ghost = NodeId::MuxSession(crate::model::MuxSessionId::new("tmux:config-agent3"));
+    app.set_selection(RowId::MuxSession(ghost));
+
+    // Enter rebuilds the record the ghost came from.
+    assert_eq!(
+        app.update(Msg::AttachSelected),
+        vec![Effect::Exec(ExecSpec::Rebuild {
+            reference: "h_agent".into()
+        })]
+    );
+    // The menu is the same one History offers.
+    app.update(Msg::OpenRowMenu);
+    let menu = app.row_menu().expect("menu");
+    assert_eq!(
+        menu.entries()[0].msg,
+        Msg::RebuildReference("h_agent".into())
+    );
+    // Attach refuses by name, never reaching tmux.
+    let reason = crate::tui::actions::resolve_attach_target(&app).unwrap_err();
+    assert!(
+        matches!(&reason, crate::tui::actions::AttachDisabled::MuxGone(name) if name == "config-agent3"),
+        "{reason:?}"
+    );
+}

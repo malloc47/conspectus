@@ -64,6 +64,11 @@ pub(super) fn execute_store_op(
 ) {
     use crate::tui::effect::StoreOp;
     match op {
+        StoreOp::PinRecord { record_id } => execute_pin_record(app, &record_id),
+        StoreOp::ForgetRecord { record_id } => {
+            execute_reap_records(app, std::iter::once(record_id).collect());
+        }
+        StoreOp::ReapRecords { ids } => execute_reap_records(app, ids.into_iter().collect()),
         StoreOp::CommitAliasRename {
             session_id,
             new_display_name,
@@ -353,6 +358,9 @@ pub(super) fn execute_exec_spec(
         ExecSpec::Rebuild { reference } => {
             execute_rebuild(terminal, app, &reference);
         }
+        ExecSpec::ShowRebuildPlan { reference } => {
+            execute_show_rebuild_plan(terminal, app, &reference);
+        }
     }
 }
 
@@ -387,4 +395,57 @@ pub(super) fn execute_view_session(
             let _ = app.update(Msg::SetStatus(Some(viewer_disabled_reason(&reason))));
         }
     }
+}
+
+/// Executor branch for `StoreOp::PinRecord`: add a slot that points at
+/// a history record (the same gesture as `conspectus pin add <id>`).
+fn execute_pin_record(app: &mut App, record_id: &str) {
+    use crate::pin_ops::{Pinnable, pin};
+    let Some(store) = crate::pin_slots::SlotStore::from_env() else {
+        app.report(LogEntry::error("pin: no data home to store slots in"));
+        return;
+    };
+    let Some(handle) = app.snapshot_handle() else {
+        return;
+    };
+    let result = pin(
+        handle.snapshot(),
+        &store,
+        None,
+        &Pinnable::Record(record_id.to_string()),
+        None,
+    );
+    let entry = match result {
+        Ok(slot) => {
+            let config = app.config().clone();
+            refresh_after_pin_mutation(app, &config);
+            LogEntry::info(format!("pinned `{}` as slot `{}`", record_id, slot.id))
+        }
+        Err(err) => LogEntry::error(format!("pin failed: {err}")),
+    };
+    app.report(entry);
+}
+
+/// Executor branch for `StoreOp::ForgetRecord` and `ReapRecords`:
+/// remove history records. Only records go; nothing touches tmux, git,
+/// or the filesystem (ADR 0140).
+fn execute_reap_records(app: &mut App, ids: std::collections::BTreeSet<String>) {
+    let Some(store) = crate::history::HistoryStore::from_env() else {
+        app.report(LogEntry::error(
+            "history: no state home to read records from",
+        ));
+        return;
+    };
+    let entry = match crate::history::reap::reap(&store, &ids) {
+        Ok(removed) => {
+            let config = app.config().clone();
+            refresh_after_pin_mutation(app, &config);
+            LogEntry::info(format!(
+                "forgot {removed} history record{}",
+                if removed == 1 { "" } else { "s" }
+            ))
+        }
+        Err(err) => LogEntry::error(format!("history: could not forget records: {err}")),
+    };
+    app.report(entry);
 }

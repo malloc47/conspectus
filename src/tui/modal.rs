@@ -78,6 +78,12 @@ pub enum Modal {
     /// discriminant small — the launch form carries eight
     /// `TextInputState` fields.
     MuxLaunch(Box<crate::tui::widgets::mux_launch::MuxLaunchFormState>),
+    /// `.` row action menu: the verbs for the selected row, each
+    /// committing a [`Msg`].
+    RowMenu(Box<crate::tui::widgets::row_menu::RowMenuState>),
+    /// The History view's Clean up modal: reap candidates the
+    /// operator can deselect before confirming (ADR 0140).
+    CleanUp(Box<crate::tui::widgets::clean_up::CleanUpState>),
 }
 
 /// What an overlay wants the runtime to do after a single key

@@ -152,6 +152,15 @@ pub const KEYBINDINGS: &[KeyBinding] = &[
         action: || Action::SwitchView(View::Pinned),
         help_text: "Switch to Pinned view",
     },
+    KeyBinding {
+        mode: KeyMode::Global,
+        key: KeyMatcher::Exact {
+            modifiers: KeyModifiers::NONE,
+            code: KeyCode::Char('5'),
+        },
+        action: || Action::SwitchView(View::History),
+        help_text: "Switch to History view",
+    },
     // Union and Forks are hidden from the interactive UI for now, so
     // they have no digit keys (`VIEW_OPTIONS` excludes them). The
     // `View` variants and CLI `table` projections remain so this stays
@@ -218,6 +227,15 @@ pub const KEYBINDINGS: &[KeyBinding] = &[
         key: KeyMatcher::AnyModExceptCtrl('m'),
         action: || Action::OpenMuxMenu,
         help_text: "Open the Mux action menu (new session / launch harness)",
+    },
+    KeyBinding {
+        mode: KeyMode::Global,
+        key: KeyMatcher::Exact {
+            modifiers: KeyModifiers::NONE,
+            code: KeyCode::Char('.'),
+        },
+        action: || Action::Msg(Box::new(crate::tui::Msg::OpenRowMenu)),
+        help_text: "Open the row action menu (rebuild, pin, forget, clean up)",
     },
     KeyBinding {
         mode: KeyMode::Global,

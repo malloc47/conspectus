@@ -3,7 +3,7 @@ source: src/tui/ui_tests.rs
 expression: "pr_frame(&mut app, 1, None)"
 ---
 updated 0s ago · 0 sessions · 0 mux                                                                                               
-┌ ▸ sessions · mux · prs · pinned ──────────────────────────────┐┌   ⇄ pr ───────────────────────────────────────────────────────┐
+┌ ▸ sessions · mux · prs · pinned · history ────────────────────┐┌   ⇄ pr ───────────────────────────────────────────────────────┐
 │▼ project  conspectus/project                                  ││  id            c87274dd104b0494                               │
 │    ⇄ #4 ◌  draft                                              ││  pr            conspectus/project#1 (OPEN)                    │
 │    ⇄ #3 ◌  MERGED                                             ││  draft         false                                          │

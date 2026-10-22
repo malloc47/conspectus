@@ -455,6 +455,8 @@ impl LoopMode for LiveMode {
             Some(Action::MuxLaunchFormKey(key)) => {
                 handle_mux_launch_form_key(terminal, app, config, tmux, key);
             }
+            Some(Action::RowMenuKey(key)) => handle_row_menu_key(terminal, app, config, tmux, key),
+            Some(Action::CleanUpKey(key)) => handle_clean_up_key(terminal, app, config, tmux, key),
             Some(Action::OpenControls) => {
                 app.open_controls_overlay();
                 app.update(Msg::SetStatus(Some(format!(
@@ -690,6 +692,8 @@ impl LoopMode for StaticMode {
                 | Action::NewMuxFormKey(_)
                 | Action::OpenMuxMenu
                 | Action::MuxMenuKey(_)
+                | Action::RowMenuKey(_)
+                | Action::CleanUpKey(_)
                 | Action::MuxLaunchFormKey(_),
             ) => {
                 app.update(Msg::SetStatus(Some(
@@ -786,6 +790,12 @@ fn overlay_key_from_event(app: &App, event: &Event) -> Option<Action> {
     }
     if app.mux_menu().is_some() {
         return Some(Action::MuxMenuKey(key));
+    }
+    if app.row_menu().is_some() {
+        return Some(Action::RowMenuKey(key));
+    }
+    if app.clean_up().is_some() {
+        return Some(Action::CleanUpKey(key));
     }
     if app.mux_launch_form().is_some() {
         return Some(Action::MuxLaunchFormKey(key));

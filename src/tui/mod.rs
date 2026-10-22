@@ -210,6 +210,8 @@ pub enum View {
     Forks,
     /// Pin slots, whatever their kind (ADR 0141).
     Pinned,
+    /// Gone entities Conspectus remembers (ADR 0140).
+    History,
 }
 
 /// Row sort within each group.
@@ -427,6 +429,18 @@ pub enum PinnedGrouping {
     None,
 }
 
+/// Top-level grouping in the History view (ADR 0140).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum HistoryGrouping {
+    /// Under the project (repo) the record's path belongs to.
+    Project,
+    /// By record kind.
+    Kind,
+    /// One flat list.
+    None,
+}
+
 /// Per-view grouping dispatch. Each variant wraps the per-view
 /// grouping enum so a single [`Grouping`] value can be persisted in
 /// [`crate::tui::app::App`], passed through the CLI surface, or
@@ -446,6 +460,7 @@ pub enum Grouping {
     Prs(PrsGrouping),
     Forks(ForksGrouping),
     Pinned(PinnedGrouping),
+    History(HistoryGrouping),
 }
 
 impl Grouping {
@@ -458,6 +473,7 @@ impl Grouping {
             Self::Prs(_) => View::Prs,
             Self::Forks(_) => View::Forks,
             Self::Pinned(_) => View::Pinned,
+            Self::History(_) => View::History,
         }
     }
 
@@ -472,6 +488,7 @@ impl Grouping {
             View::Prs => Self::Prs(PrsGrouping::Checkout),
             View::Forks => Self::Forks(ForksGrouping::Provider),
             View::Pinned => Self::Pinned(PinnedGrouping::Project),
+            View::History => Self::History(HistoryGrouping::Project),
         }
     }
 
@@ -500,6 +517,9 @@ impl Grouping {
             Self::Pinned(PinnedGrouping::Project) => "project",
             Self::Pinned(PinnedGrouping::Kind) => "kind",
             Self::Pinned(PinnedGrouping::None) => "none",
+            Self::History(HistoryGrouping::Project) => "project",
+            Self::History(HistoryGrouping::Kind) => "kind",
+            Self::History(HistoryGrouping::None) => "none",
         }
     }
 
@@ -552,6 +572,11 @@ impl Grouping {
                 Self::Pinned(PinnedGrouping::Project),
                 Self::Pinned(PinnedGrouping::Kind),
                 Self::Pinned(PinnedGrouping::None),
+            ],
+            View::History => &[
+                Self::History(HistoryGrouping::Project),
+                Self::History(HistoryGrouping::Kind),
+                Self::History(HistoryGrouping::None),
             ],
         }
     }
@@ -618,6 +643,7 @@ mod tests {
             View::Prs,
             View::Forks,
             View::Pinned,
+            View::History,
         ] {
             for option in Grouping::values_for(view) {
                 let parsed = Grouping::parse_for(view, option.as_str());
@@ -668,6 +694,7 @@ mod tests {
             View::Prs,
             View::Forks,
             View::Pinned,
+            View::History,
         ] {
             assert_eq!(Grouping::default_for(view).view(), view);
         }

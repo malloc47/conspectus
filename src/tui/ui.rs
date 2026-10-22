@@ -94,6 +94,8 @@ pub fn draw(app: &mut App, frame: &mut Frame<'_>) {
     draw_worktree_menu(app, frame, area);
     draw_new_mux_form(app, frame, area);
     draw_mux_menu(app, frame, area);
+    draw_row_menu(app, frame, area);
+    draw_clean_up(app, frame, area);
     draw_mux_launch_form(app, frame, area);
     draw_value_modal(app, frame, area);
     draw_messages_overlay(app, frame, area);
@@ -107,6 +109,24 @@ fn draw_mux_menu(app: &App, frame: &mut Frame<'_>, area: Rect) {
         return;
     };
     frame.render_widget(MuxMenuWidget::new(state, app.theme()), area);
+}
+
+fn draw_row_menu(app: &App, frame: &mut Frame<'_>, area: Rect) {
+    use crate::tui::widgets::row_menu::RowMenuWidget;
+
+    let Some(state) = app.row_menu() else {
+        return;
+    };
+    frame.render_widget(RowMenuWidget::new(state, app.theme()), area);
+}
+
+fn draw_clean_up(app: &App, frame: &mut Frame<'_>, area: Rect) {
+    use crate::tui::widgets::clean_up::CleanUpWidget;
+
+    let Some(state) = app.clean_up() else {
+        return;
+    };
+    frame.render_widget(CleanUpWidget::new(state, app.theme()), area);
 }
 
 fn draw_mux_launch_form(app: &App, frame: &mut Frame<'_>, area: Rect) {

@@ -329,6 +329,7 @@ pub struct TuiViewsConfig {
     pub prs: TuiViewConfig,
     pub forks: TuiViewConfig,
     pub pinned: TuiViewConfig,
+    pub history: TuiViewConfig,
 }
 
 impl TuiViewsConfig {
@@ -341,6 +342,7 @@ impl TuiViewsConfig {
             View::Prs => &self.prs,
             View::Forks => &self.forks,
             View::Pinned => &self.pinned,
+            View::History => &self.history,
         }
     }
 }
@@ -1533,6 +1535,7 @@ fn view_config_key(view: View) -> &'static str {
         View::Prs => "prs",
         View::Forks => "forks",
         View::Pinned => "pinned",
+        View::History => "history",
     }
 }
 
@@ -1621,6 +1624,7 @@ fn parse_view_name(raw: &str) -> Option<crate::tui::View> {
         "prs" => Some(View::Prs),
         "forks" => Some(View::Forks),
         "pinned" => Some(View::Pinned),
+        "history" => Some(View::History),
         _ => None,
     }
 }

@@ -286,6 +286,21 @@ pub enum Msg {
     /// the modal after seeding defaults from the current selection
     /// (ADR 0096).
     OpenMuxLaunchForm,
+    /// `.` — open the row action menu for the selected row.
+    OpenRowMenu,
+    /// Row menu → pin a history record as a slot.
+    PinRecord(String),
+    /// Row menu → run `conspectus rebuild <reference> --dry-run` and
+    /// show the plan.
+    ShowRebuildPlan(String),
+    /// Row menu → run `conspectus rebuild <reference>`.
+    RebuildReference(String),
+    /// Row menu → remove one history record.
+    ForgetRecord(String),
+    /// Row menu → open the Clean up modal.
+    OpenCleanUp,
+    /// Clean up modal → remove exactly these history records.
+    ReapRecords(Vec<String>),
     /// Commit the mux-launch form (ADR 0096).
     /// Reducer emits `Effect::Exec(ExecSpec::MuxLaunch)` so the
     /// runtime re-execs into `conspectus mux launch <harness> …`,

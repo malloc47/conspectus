@@ -282,12 +282,20 @@ fn keymap_sections() -> Vec<HelpSection> {
             ],
         },
         HelpSection {
+            title: "Row actions",
+            bindings: vec![Binding::new(
+                ".",
+                "Open the row action menu — rebuild, pin, forget, or show the rebuild plan for a gone record; Clean up… in the History view",
+            )],
+        },
+        HelpSection {
             title: "View switching",
             bindings: vec![
                 Binding::new(
                     "1 / 2 / 3 / 4",
                     "Switch directly to the sessions / mux / PRs / pinned view",
                 ),
+                Binding::new("5", "Switch directly to the history view"),
                 Binding::new("] / [", "Cycle to next / previous view"),
             ],
         },

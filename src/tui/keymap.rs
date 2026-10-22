@@ -59,6 +59,10 @@ pub enum Action {
     OpenMuxMenu,
     /// Forward a key event into the open Mux action menu.
     MuxMenuKey(ratatui::crossterm::event::KeyEvent),
+    /// Forward a key event into the open row action menu.
+    RowMenuKey(ratatui::crossterm::event::KeyEvent),
+    /// Forward a key event into the open Clean up modal.
+    CleanUpKey(ratatui::crossterm::event::KeyEvent),
     /// Forward a key event into the open mux-launch form.
     MuxLaunchFormKey(ratatui::crossterm::event::KeyEvent),
     /// Open the controls overlay (ADR 0031) at its top
@@ -277,7 +281,11 @@ pub fn selected_default_action(app: &App) -> SelectedDefault {
     };
     // A slot row attaches to its mux when live; the attach resolver
     // explains otherwise.
-    if matches!(row.id, crate::tui::rows::RowId::Pin { .. }) {
+    if matches!(
+        row.id,
+        crate::tui::rows::RowId::Pin { .. } | crate::tui::rows::RowId::History { .. }
+    ) || crate::tui::actions::selected_record(app).is_some()
+    {
         return SelectedDefault::Attach;
     }
     match &row.kind {

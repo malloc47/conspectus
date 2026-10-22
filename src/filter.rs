@@ -53,6 +53,11 @@ pub struct RowFilter {
     /// within-group sort order is preserved.
     #[serde(skip_serializing_if = "is_false")]
     pub float_attached_muxes_top: bool,
+    /// Mux view: leave out gone muxes, the ghosts history keeps
+    /// (ADR 0140). Off shows them below the live muxes. Like the
+    /// ordering toggles it isn't a narrowing predicate over sessions.
+    #[serde(skip_serializing_if = "is_false")]
+    pub hide_gone_muxes: bool,
     /// PRs view: include only PRs with, or only PRs without, a local
     /// branch (ADR 0129). `None` shows every PR. Unlike the
     /// predicates above it never looks at a PR's attached sessions, so
@@ -84,6 +89,7 @@ impl RowFilter {
             && self.pr_state.is_none()
             && !self.float_muxed_sessions_top
             && !self.float_attached_muxes_top
+            && !self.hide_gone_muxes
             && !self.float_tracked_prs_top
     }
 

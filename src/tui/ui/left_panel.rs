@@ -256,6 +256,10 @@ pub(super) fn empty_left_panel_text(app: &App) -> String {
             crate::invocation::invoked_name()
         );
     }
+    if app.active_view() == crate::tui::View::History {
+        return "Nothing is gone. Entities Conspectus has seen vanish here.\nPress `.` for the menu (Clean up…)."
+            .to_string();
+    }
     if app.active_view() == crate::tui::View::Prs {
         // Forge listings are reused for the forge interval, so `r`
         // alone won't show a PR opened a minute ago.

@@ -337,6 +337,7 @@ fn view_to_snake_case(view: View) -> &'static str {
         View::Prs => "prs",
         View::Forks => "forks",
         View::Pinned => "pinned",
+        View::History => "history",
     }
 }
 
@@ -348,6 +349,7 @@ fn view_from_snake_case(value: &str) -> Option<View> {
         "prs" => Some(View::Prs),
         "forks" => Some(View::Forks),
         "pinned" => Some(View::Pinned),
+        "history" => Some(View::History),
         _ => None,
     }
 }

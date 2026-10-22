@@ -92,6 +92,9 @@ pub enum ExecSpec {
     /// spinner and refresh, so a gone slot comes back without leaving
     /// the TUI.
     Rebuild { reference: String },
+    /// Run `conspectus rebuild <reference> --dry-run` behind a spinner
+    /// and show the plan it prints.
+    ShowRebuildPlan { reference: String },
 }
 
 /// A mux backend op the executor should run. The reducer emits this
@@ -119,6 +122,12 @@ pub enum MuxOp {
 /// summary status.
 #[derive(Debug, Clone, PartialEq)]
 pub enum StoreOp {
+    /// Pin a history record as a slot (`pin add <record id>`).
+    PinRecord { record_id: String },
+    /// Remove one history record.
+    ForgetRecord { record_id: String },
+    /// Remove these history records (the Clean up modal).
+    ReapRecords { ids: Vec<String> },
     /// Commit the rename-overlay's confirm on an agent-session
     /// row (ADR 0029). The executor plans the rename against the
     /// held snapshot, writes the alias entry (or removes it when

@@ -23,6 +23,7 @@ use crate::model::{AgentSessionId, MuxSessionId, NodeId};
 use crate::tui::View;
 
 pub mod forks;
+pub mod history;
 pub mod mux;
 pub mod pinned;
 pub mod prs;
@@ -53,6 +54,11 @@ pub enum RowId {
     MuxSession(NodeId),
     Pr(NodeId),
     Fork(NodeId),
+    /// A record row in the History view (ADR 0140), keyed on the
+    /// record's stable id.
+    History {
+        record_id: String,
+    },
     /// A slot row in the Pinned view (ADR 0141), keyed on the slot
     /// name so it is stable while the slot's target changes state.
     Pin {
@@ -96,6 +102,7 @@ pub enum ViewLabel {
     Prs,
     Forks,
     Pinned,
+    History,
 }
 
 impl From<View> for ViewLabel {
@@ -107,6 +114,7 @@ impl From<View> for ViewLabel {
             View::Prs => Self::Prs,
             View::Forks => Self::Forks,
             View::Pinned => Self::Pinned,
+            View::History => Self::History,
         }
     }
 }
@@ -987,6 +995,15 @@ pub(crate) fn build_tree_for_view(inputs: TreeInputs<'_>) -> RowTree {
         View::Forks => forks::build_forks_tree(forks::ForksBuildInputs {
             snapshot,
             home: home.as_deref(),
+        }),
+        View::History => history::build_history_tree(history::HistoryBuildInputs {
+            snapshot,
+            home: home.as_deref(),
+            now,
+            grouping: match grouping {
+                crate::tui::Grouping::History(g) => g,
+                _ => crate::tui::HistoryGrouping::Project,
+            },
         }),
         View::Pinned => pinned::build_pinned_tree(pinned::PinnedBuildInputs {
             snapshot,

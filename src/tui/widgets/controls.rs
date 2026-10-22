@@ -69,7 +69,13 @@ pub const MUX_STATE_OPTIONS: &[MuxStateKey] = &[
 /// strip, and the `[` / `]` view-cycle accelerator, so trimming it here
 /// hides those views everywhere without touching the `View` enum or the
 /// `conspectus table union|forks` CLI projections.
-pub const VIEW_OPTIONS: &[View] = &[View::Sessions, View::Mux, View::Prs, View::Pinned];
+pub const VIEW_OPTIONS: &[View] = &[
+    View::Sessions,
+    View::Mux,
+    View::Prs,
+    View::Pinned,
+    View::History,
+];
 
 /// Sort options surfaced in the Sort section, in stable order.
 pub const SORT_OPTIONS: &[Sort] = &[Sort::Hierarchy, Sort::Recency];
@@ -111,6 +117,8 @@ pub enum ControlsCursor {
     FilterFloatMuxedSessions,
     /// Mux-view-only checkbox: float attached muxes to the top.
     FilterFloatAttachedMuxes,
+    /// Mux-view-only checkbox: hide gone muxes.
+    FilterHideGoneMuxes,
     /// PRs-view-only row: edits the PR state set (ADR 0134).
     FilterPrState,
     /// PRs-view-only row: cycles the local-branch filter through any,
@@ -269,6 +277,11 @@ impl ControlsOverlayState {
             ControlsCursor::FilterFloatAttachedMuxes => {
                 let mut new_filter = ctx.filter.clone();
                 new_filter.float_attached_muxes_top = !new_filter.float_attached_muxes_top;
+                ControlsOutcome::ApplyAndStay(crate::tui::Msg::SetFilter(new_filter))
+            }
+            ControlsCursor::FilterHideGoneMuxes => {
+                let mut new_filter = ctx.filter.clone();
+                new_filter.hide_gone_muxes = !new_filter.hide_gone_muxes;
                 ControlsOutcome::ApplyAndStay(crate::tui::Msg::SetFilter(new_filter))
             }
             ControlsCursor::FilterPrState => {
@@ -577,6 +590,7 @@ fn flatten_rows(ctx: &ControlsContext<'_>) -> Vec<ControlsCursor> {
     }
     if matches!(ctx.view, View::Mux) {
         rows.push(ControlsCursor::FilterFloatAttachedMuxes);
+        rows.push(ControlsCursor::FilterHideGoneMuxes);
     }
     if matches!(ctx.view, View::Prs) {
         rows.push(ControlsCursor::FilterPrState);
@@ -766,6 +780,11 @@ impl ControlsOverlayWidget<'_> {
                     self.ctx.filter.float_attached_muxes_top,
                     here,
                 ),
+                here,
+            );
+            let here = cursor == ControlsCursor::FilterHideGoneMuxes;
+            body.push_row(
+                checkbox_row("Hide gone muxes", self.ctx.filter.hide_gone_muxes, here),
                 here,
             );
         }
@@ -1011,6 +1030,7 @@ fn view_label(view: View) -> &'static str {
         View::Prs => "PRs",
         View::Forks => "Forks",
         View::Pinned => "Pinned",
+        View::History => "History",
     }
 }
 
@@ -1041,7 +1061,9 @@ fn max_controls_content_lines() -> usize {
         .iter()
         .map(|view| {
             let filter_rows = match *view {
-                View::Sessions | View::Mux => 5,
+                View::Sessions => 5,
+                // Mux adds the hide-gone-muxes checkbox.
+                View::Mux => 6,
                 // The state row, the local-branch row, and the float
                 // checkbox.
                 View::Prs => 7,
