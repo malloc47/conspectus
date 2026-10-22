@@ -491,3 +491,43 @@ fn attach_target_label_is_backend_and_native_name() {
     };
     assert_eq!(target.label(), "zellij:notes");
 }
+
+#[test]
+fn attach_refuses_a_mux_that_is_only_in_history() {
+    let mut snapshot = GraphSnapshot::empty();
+    snapshot.nodes.push(mux_node("tmux", "editor"));
+    let snapshot = resolve_snapshot(snapshot);
+    let tree = crate::tui::rows::mux::build_mux_tree(crate::tui::rows::mux::MuxBuildInputs {
+        snapshot: &snapshot,
+        home: None,
+        now: None,
+        filter: RowFilter::default(),
+        grouping: crate::tui::MuxGrouping::Session,
+        sort: crate::tui::Sort::Hierarchy,
+        mux_recency: crate::tui::MuxRecency::default(),
+    });
+    // The same row, now that history says the mux is gone.
+    let mut gone = snapshot;
+    gone.node_presence.insert(
+        NodeId::MuxSession(MuxSessionId::new("tmux:editor")),
+        crate::model::NodePresence::Gone { last_seen: 1 },
+    );
+    let mut cfg = RunConfig::defaults();
+    cfg.default_view = View::Mux;
+    let mut app = App::new(cfg);
+    app.update(Msg::SetData {
+        snapshot: SnapshotHandle::new(gone),
+        tree,
+        loaded_at_epoch: 1_700_000_000,
+        initial_selection_hint: None,
+    });
+
+    assert_eq!(
+        resolve_attach_target(&app),
+        Err(AttachDisabled::MuxGone("editor".to_string()))
+    );
+    assert_eq!(
+        attach_disabled_reason(&AttachDisabled::MuxGone("editor".into())),
+        "attach: `editor` is gone; Enter rebuilds it"
+    );
+}

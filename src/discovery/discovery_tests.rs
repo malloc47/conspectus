@@ -1090,3 +1090,32 @@ fn mux_runner_for_prefers_the_callers_runner_for_its_own_backend() {
     let mut slot = None;
     assert!(mux_runner_for("screen", &fake, &mut slot).is_none());
 }
+
+#[test]
+fn cwd_git_probes_skip_the_cwd_of_a_gone_mux() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    assert!(
+        std::process::Command::new("git")
+            .args(["init", "--quiet"])
+            .current_dir(dir.path())
+            .status()
+            .expect("git init")
+            .success()
+    );
+    let mut mux = MuxSessionNode::new(MuxSessionId::new("tmux:work"), "tmux", "work");
+    mux.cwd = Some(dir.path().display().to_string());
+    let id = NodeId::MuxSession(mux.id.clone());
+    let mut snapshot = GraphSnapshot {
+        nodes: vec![GraphNode::MuxSession(mux)],
+        ..GraphSnapshot::empty()
+    };
+
+    let live = observed_cwd_git_fragment(&snapshot, &DiscoveryCaches::default());
+    assert!(!live.nodes.is_empty(), "a live mux's cwd is probed");
+
+    snapshot
+        .node_presence
+        .insert(id, crate::model::NodePresence::Gone { last_seen: 1 });
+    let gone = observed_cwd_git_fragment(&snapshot, &DiscoveryCaches::default());
+    assert!(gone.nodes.is_empty(), "a ghost's cwd is not");
+}

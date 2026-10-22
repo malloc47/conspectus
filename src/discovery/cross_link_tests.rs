@@ -2144,3 +2144,26 @@ fn mux_rooting_ignores_canonical_checkouts_and_the_active_pane_path() {
         vec![workspace_id("/home/op/atelier-ws")]
     );
 }
+
+#[test]
+fn the_process_walk_skips_gone_muxes() {
+    let mut live = mux("live", None);
+    let mut ghost = mux("ghost", None);
+    for node in [&mut live, &mut ghost] {
+        if let GraphNode::MuxSession(m) = node {
+            m.active_pane_pid = Some(10);
+        }
+    }
+    let ghost_id = ghost.id();
+    let mut snapshot = GraphSnapshot {
+        nodes: vec![live, ghost],
+        ..GraphSnapshot::empty()
+    };
+    snapshot
+        .node_presence
+        .insert(ghost_id, crate::model::NodePresence::Gone { last_seen: 1 });
+    let processes = FakeProcessSnapshot::new([process(11, Some(10), "claude", Some("/p"))]);
+    let pids = active_harness_pids_per_mux(&snapshot, &processes);
+    assert!(pids.contains_key(&MuxSessionId::new("tmux:live")));
+    assert!(!pids.contains_key(&MuxSessionId::new("tmux:ghost")));
+}

@@ -5159,3 +5159,28 @@ fn filter_chips_name_the_pr_state_and_branch_filters() {
     };
     assert_eq!(render_filter_chips(&float), "");
 }
+
+#[test]
+fn the_header_counts_only_muxes_that_exist() {
+    use crate::model::{
+        GraphNode, GraphSnapshot, MuxSessionId, MuxSessionNode, NodeId, NodePresence,
+    };
+    use crate::tui::app::SnapshotHandle;
+
+    let live = MuxSessionNode::new(MuxSessionId::new("tmux:live"), "tmux", "live");
+    let ghost = MuxSessionNode::new(MuxSessionId::new("tmux:ghost"), "tmux", "ghost");
+    let mut snapshot = GraphSnapshot {
+        nodes: vec![
+            GraphNode::MuxSession(live),
+            GraphNode::MuxSession(ghost.clone()),
+        ],
+        ..GraphSnapshot::empty()
+    };
+    snapshot.node_presence.insert(
+        NodeId::MuxSession(ghost.id),
+        NodePresence::Gone { last_seen: 1 },
+    );
+    let handle = SnapshotHandle::from_snapshot(&snapshot);
+    let (_, mux) = header::snapshot_counts(Some(&handle));
+    assert_eq!(mux, 1, "one live mux and one ghost");
+}

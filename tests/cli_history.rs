@@ -281,7 +281,14 @@ fn snapshot_mode_never_records_history() {
     let world = World::new();
     let output = world
         .conspectus()
-        .args(["tui", "--snapshot", "--snapshot-width", "80", "--snapshot-height", "10"])
+        .args([
+            "tui",
+            "--snapshot",
+            "--snapshot-width",
+            "80",
+            "--snapshot-height",
+            "10",
+        ])
         .output()
         .unwrap();
     if !output.status.success() {
