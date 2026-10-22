@@ -724,7 +724,7 @@ fn mux_view_paints_pin_id_on_pinned_mux_rows() {
 }
 
 #[test]
-fn mux_view_flat_grouping_floats_pinned_mux_rows_to_top() {
+fn mux_view_flat_grouping_keeps_pinned_mux_rows_where_they_sort() {
     let mut snapshot = GraphSnapshot::empty();
     snapshot.nodes.push(mux_node("newer"));
     snapshot.nodes.push(mux_node("older"));
@@ -757,9 +757,12 @@ fn mux_view_flat_grouping_floats_pinned_mux_rows_to_top() {
         })
         .collect();
     assert_eq!(muxes.len(), 2, "{:#?}", tree.rows);
-    assert_eq!(muxes[0].native_id, "older");
-    assert_eq!(muxes[0].pin_id.as_deref(), Some("old-pin"));
-    assert_eq!(muxes[1].native_id, "newer");
+    // Pinning doesn't float a row: the view's own order stands.
+    let older = muxes.iter().position(|m| m.native_id == "older").unwrap();
+    assert_eq!(muxes[older].pin_id.as_deref(), Some("old-pin"));
+    let newer = muxes.iter().position(|m| m.native_id == "newer").unwrap();
+    assert_eq!(muxes[newer].pin_id, None);
+    assert!(newer < older, "{:#?}", tree.rows);
 }
 
 #[test]

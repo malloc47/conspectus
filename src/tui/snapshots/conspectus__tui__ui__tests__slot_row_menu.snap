@@ -1,0 +1,28 @@
+---
+source: src/tui/ui_tests.rs
+expression: "pinned_frame(&mut app, 100)"
+---
+updated 0s ago · 0/1 sessions · 1 mux                                                               
+┌ ▸ sessions ·┌ slot conspectus-main ────────────────────────────────────────────────┐─────────────┐
+│▶ ▣ conspectu│                                                                      │             │
+│  ▣ config-ag│▸ Rebuild                                                             │             │
+│  ● e44d01cb │     bring it back, or attach if it is up (conspectus rebuild)        │             │
+│  ◇ ledger-wo│  Show rebuild plan                                                   │             │
+│  ⇄ ledger-pr│     what rebuild would run, without running it                       │nspectus-main│
+│  ▣ nightly  │  Edit overrides…                                                     │             │
+│  ▣ old-api  │     set or clear a field: name=value                                 │ctus         │
+│             │  Rename…                                                             │             │
+│             │     change the slot name (a live mux is renamed with it)             │             │
+│             │  Retarget…                                                           │  Related ── │
+│             │     point it at another entity of the same kind                      │spectus-main │
+│             │  Refresh snapshot                                                    │             │
+│             │     copy the entity's current recipe into the slot                   │             │
+│             │  Reveal in its view                                                  │── Preview ──│
+│             │     jump to the entity in Sessions, Mux, or PRs                      │             │
+│             │  Unpin                                                               │             │
+│             │     remove the slot; the entity and its history stay                 │             │
+│1 legacy pin │                                                                      │             │
+│(old-api); ru│↑/↓ move · Enter pick · Esc close                                     │             │
+│convert it   └──────────────────────────────────────────────────────────────────────┘             │
+└────────────────────────────────────────────────┘└────────────────────────────────────────────────┘
+[left] group:none · filter:all · sort:hierarchy · Enter/a attach tmux:conspectus-main · j/k move · h

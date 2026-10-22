@@ -639,11 +639,27 @@ pub(super) fn render_left_row(
     }
 
     // ADR 0073: per-row node-kind glyph between the disclosure and
-    // the row body. Skipped for `Pin` rows (no graph NodeKind — the
-    // 📌 sentinel is the identity) and for synthetic group buckets
-    // without a backing node.
+    // the row body. Skipped for synthetic group buckets without a
+    // backing node.
     if let Some(glyph) = row_kind_glyph_span(&row.kind, theme) {
         spans.push(glyph);
+    }
+    // Native views mark a pinned entity where it sits. Once any pin
+    // exists the cell is reserved on every row, so columns hold still.
+    if matches!(
+        app.active_view(),
+        crate::tui::View::Sessions | crate::tui::View::Mux | crate::tui::View::Prs
+    ) && !matches!(row.kind, RowKind::Mixed(_))
+        && let Some(handle) = app.snapshot_handle()
+        && !handle.pinned_nodes().is_empty()
+    {
+        let pinned = crate::tui::rows::row_node(&row.id)
+            .is_some_and(|node| handle.pinned_nodes().contains(node));
+        spans.push(if pinned {
+            node_kind_glyph_span(NodeKind::Pin, theme)
+        } else {
+            Span::raw("  ")
+        });
     }
 
     match &row.kind {
@@ -801,11 +817,6 @@ pub(super) fn render_session_spans(
         spans.push(span!(Style::default().fg(theme.pin_placeholder); "◌"));
     } else {
         spans.push(mux_indicator_span(session.mux_state, theme));
-    }
-    if session.pin_id.is_some() {
-        // ADR 0057 bound-pin marker. Reuses `placeholder` rather
-        // than a dedicated theme key.
-        spans.push(span!(theme.placeholder; "  📌"));
     }
     // The row's tree label surfaces the operator-chosen
     // alias unconditionally and the harness-recorded title only when
@@ -980,12 +991,6 @@ pub(super) fn render_mux_session_spans(
                 spans.push(span!(theme.placeholder; "?"));
             }
         }
-    }
-    if mux.pin_id.is_some() {
-        // Bound-pin marker on the mux row. Same glyph the agent-
-        // session row uses (ui.rs:1027) so pin-bound muxes scan
-        // the same way pin-bound sessions do.
-        spans.push(span!(theme.placeholder; "  📌"));
     }
 
     append_mux_single_session_preview(&mut spans, mux, theme, width);

@@ -90,7 +90,6 @@ pub fn build_sessions_tree(inputs: SessionsBuildInputs<'_>) -> RowTree {
                     id: session_id.clone(),
                     node: session,
                     mux_state,
-                    pinned: data.is_pinned_session(session_id),
                 })
             })
             .collect();
@@ -143,7 +142,6 @@ pub fn build_sessions_tree(inputs: SessionsBuildInputs<'_>) -> RowTree {
             id: session_id.clone(),
             node: session,
             mux_state,
-            pinned: data.is_pinned_session(session_id),
         };
         match resolve_group_key(&entry, &data, inputs.grouping) {
             Some(key) => buckets.entry(key).or_default().push(entry),
@@ -494,10 +492,6 @@ impl<'a> SessionsData<'a> {
             .find(|link| link.id == link_id)
     }
 
-    fn is_pinned_session(&self, session: &NodeId) -> bool {
-        self.pin_id_by_bound_session.contains_key(session)
-    }
-
     fn checkout_for_path(
         &self,
         path: &str,
@@ -604,9 +598,6 @@ struct SessionEntry<'a> {
     /// is consistent across all call sites without re-walking the
     /// graph at compare time.
     mux_state: MuxStateKey,
-    /// True when this session is the live realization of a declared
-    /// pin. Flat views float these entities above non-pinned rows.
-    pinned: bool,
 }
 
 fn resolve_group_key(
@@ -1007,7 +998,6 @@ fn visible_lineage_children<'snap>(
                 id: child_id.clone(),
                 node: child_node,
                 mux_state,
-                pinned: ctx.data.is_pinned_session(child_id),
             })
         })
         .collect()
@@ -1038,7 +1028,7 @@ fn project_name_from_path(path: &str) -> Option<String> {
         .map(str::to_string)
 }
 
-/// Sessions sort pinned rows first, then by recency desc (None last),
+/// Sessions sort by recency desc (None last),
 /// then alphabetical by harness then short id for a stable tie-breaker.
 /// When `float_muxed_top` is set, sessions with an attached mux
 /// candidate sort before sessions without one, with the existing
@@ -1049,10 +1039,6 @@ fn compare_sessions(
     b: &SessionEntry<'_>,
     float_muxed_top: bool,
 ) -> std::cmp::Ordering {
-    let pinned = usize::from(!a.pinned).cmp(&usize::from(!b.pinned));
-    if pinned != std::cmp::Ordering::Equal {
-        return pinned;
-    }
     if float_muxed_top {
         let muxed_priority = |state: MuxStateKey| match state {
             MuxStateKey::Attached | MuxStateKey::Ambiguous => 0,

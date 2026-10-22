@@ -99,3 +99,80 @@ fn launch_argv_parses_shell_quoted() {
     let req = state.build_request().expect("parse ok");
     assert_eq!(req.launch_argv, vec!["codex", "--model", "gpt-5 pro"]);
 }
+
+fn profile_defaults(argv: &[&str]) -> crate::launch_default::LaunchDefaults {
+    let mut config = crate::config::LaunchConfig::default();
+    config.profiles.insert(
+        "codex".into(),
+        crate::config::LaunchProfile {
+            argv: argv.iter().map(|a| (*a).to_string()).collect(),
+            origin: crate::config::ProfileOrigin::Project,
+        },
+    );
+    crate::launch_default::LaunchDefaults::new(config).with_atelier(false)
+}
+
+#[test]
+fn an_empty_argv_shows_the_default_and_where_it_comes_from() {
+    let state = MuxLaunchFormState::new(
+        "codex",
+        "/tmp",
+        "adhoc",
+        vec!["codex".to_string()],
+        Vec::new(),
+    )
+    .with_defaults(profile_defaults(&["nix", "develop", "-c", "codex"]));
+
+    assert_eq!(
+        state.default_hint().as_deref(),
+        Some("nix develop -c codex — from the project launch profile")
+    );
+}
+
+#[test]
+fn a_typed_argv_replaces_the_default_hint() {
+    let mut state = MuxLaunchFormState::new(
+        "codex",
+        "/tmp",
+        "adhoc",
+        vec!["codex".to_string()],
+        Vec::new(),
+    )
+    .with_defaults(profile_defaults(&["codex", "--flag"]));
+    state.spec.set_launch_argv("Launch argv", "codex --mine");
+
+    assert_eq!(state.default_hint(), None);
+}
+
+#[test]
+fn without_defaults_there_is_no_hint() {
+    let state = MuxLaunchFormState::new("codex", "/tmp", "adhoc", Vec::new(), Vec::new());
+    assert_eq!(state.default_hint(), None);
+}
+
+#[test]
+fn the_worktree_form_opens_with_the_toggle_on_and_the_repo_seeded() {
+    let state = MuxLaunchFormState::new("codex", "/src/app", "adhoc", Vec::new(), Vec::new())
+        .with_worktree("/src/app");
+
+    assert!(state.spec().worktree_enabled());
+    assert_eq!(state.worktree_repo_value(), "/src/app");
+}
+
+#[test]
+fn the_pin_field_cycles_and_rides_the_request() {
+    let mut state = MuxLaunchFormState::new("codex", "/tmp", "adhoc", Vec::new(), Vec::new());
+    // Walk to the last field, the pin choice.
+    for _ in 0..5 {
+        state.handle((), key(KeyCode::Tab));
+    }
+    state.handle((), key(KeyCode::Tab));
+    assert_eq!(state.focus, MuxLaunchField::Pin);
+
+    state.handle((), key(KeyCode::Right));
+    assert_eq!(state.build_request().unwrap().pin, PinChoice::Pin);
+    state.handle((), key(KeyCode::Right));
+    assert_eq!(state.build_request().unwrap().pin, PinChoice::PlanOnly);
+    state.handle((), key(KeyCode::Right));
+    assert_eq!(state.build_request().unwrap().pin, PinChoice::Off);
+}

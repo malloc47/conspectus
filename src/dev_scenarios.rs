@@ -280,6 +280,7 @@ impl ScenarioWorld {
             forge_fetch: crate::discovery::forge::ForgeFetch::default(),
             forge_concurrency: crate::discovery::forge::DEFAULT_FORGE_CONCURRENCY,
             history: crate::config::HistoryConfig::default(),
+            launch: crate::config::LaunchConfig::default(),
             record_history: false,
         }
     }

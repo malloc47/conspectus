@@ -523,11 +523,6 @@ fn sort_mux_groups(groups: &mut [MuxGroup], inputs: &MuxBuildInputs<'_>) {
             (None, Some(_)) => return std::cmp::Ordering::Less,
             (None, None) => {}
         }
-        let pinned = usize::from(left.parent_row.pin_id.is_none())
-            .cmp(&usize::from(right.parent_row.pin_id.is_none()));
-        if pinned != std::cmp::Ordering::Equal {
-            return pinned;
-        }
         let left_float = usize::from(left.attached_count == 0);
         let right_float = usize::from(right.attached_count == 0);
         let float_order = if inputs.filter.float_attached_muxes_top {
@@ -660,6 +655,7 @@ fn mux_matches_filter(
         pr_state: _,
         float_tracked_prs_top: _,
         hide_gone_muxes: _,
+        pinned_only: _,
     } = filter;
     harness.is_none()
         && max_age.is_none()

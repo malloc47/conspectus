@@ -706,6 +706,51 @@ pub(crate) fn pin_nodes(snapshot: &crate::model::GraphSnapshot) -> Vec<&crate::m
     pins
 }
 
+/// The entities pin slots point at, whatever their status.
+pub(crate) fn pinned_node_set(
+    snapshot: &crate::model::GraphSnapshot,
+) -> std::collections::BTreeSet<NodeId> {
+    pin_nodes(snapshot)
+        .into_iter()
+        .filter_map(|pin| pin.target_node.clone())
+        .collect()
+}
+
+/// The graph node a row stands for, when it stands for one.
+pub(crate) fn row_node(id: &RowId) -> Option<&NodeId> {
+    match id {
+        RowId::Group(node)
+        | RowId::AgentSession(node)
+        | RowId::MuxSession(node)
+        | RowId::Pr(node)
+        | RowId::Fork(node)
+        | RowId::Nested { node, .. } => Some(node),
+        _ => None,
+    }
+}
+
+/// Keep the rows of pinned entities and the groups above them
+/// (`pinned only`). The tree is depth-first, so a row stays when it or
+/// a descendant is pinned.
+fn retain_pinned_rows(tree: &mut RowTree, pinned: &std::collections::BTreeSet<NodeId>) {
+    let rows = std::mem::take(&mut tree.rows);
+    let keep: Vec<bool> = (0..rows.len())
+        .map(|index| {
+            let depth = rows[index].depth;
+            rows[index..]
+                .iter()
+                .enumerate()
+                .take_while(|(offset, row)| *offset == 0 || row.depth > depth)
+                .any(|(_, row)| row_node(&row.id).is_some_and(|node| pinned.contains(node)))
+        })
+        .collect();
+    tree.rows = rows
+        .into_iter()
+        .zip(keep)
+        .filter_map(|(row, keep)| keep.then_some(row))
+        .collect();
+}
+
 /// The node a slot points at when it is live in the graph.
 pub(crate) fn live_pin_target(
     snapshot: &crate::model::GraphSnapshot,
@@ -935,6 +980,17 @@ impl<'a> TreeInputs<'a> {
 /// [`crate::tui::RunConfig`] at startup, and post-first-load
 /// projection changes pull it from `App` state.
 pub(crate) fn build_tree_for_view(inputs: TreeInputs<'_>) -> RowTree {
+    let pinned_only =
+        inputs.filter.pinned_only && matches!(inputs.view, View::Sessions | View::Mux | View::Prs);
+    let pinned = pinned_only.then(|| pinned_node_set(inputs.snapshot));
+    let mut tree = build_tree_for_view_unfiltered(inputs);
+    if let Some(pinned) = pinned {
+        retain_pinned_rows(&mut tree, &pinned);
+    }
+    tree
+}
+
+fn build_tree_for_view_unfiltered(inputs: TreeInputs<'_>) -> RowTree {
     let home = tree_home_dir();
     let now = Some(tree_current_unix_epoch());
     let TreeInputs {

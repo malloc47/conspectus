@@ -741,9 +741,36 @@ in a mux). On a gone, missing, or planned mux, session, worktree, or repo slot,
 it runs `conspectus rebuild <slot> --no-attach` behind a spinner and refreshes;
 press `Enter` again to attach. A live session that isn't in a mux is rebuilt
 the same way, which resumes it. A PR slot shows its URL, and the other live
-kinds say there is nothing to launch. Editing, renaming, retargeting, and
-unpinning happen on the command line for now. While legacy `[[pins.entries]]`
+kinds say there is nothing to launch. While legacy `[[pins.entries]]`
 remain, a line under the rows names `conspectus pin migrate`.
+
+`.` opens the slot menu: **Rebuild**, **Show rebuild plan**, **Edit
+overrides…** (type `field=value`; `field=` clears it), **Rename…** (a live mux
+slot renames its tmux session with it and pins the name, as `pin rename`
+does), **Retarget…** (type a node id, a history id, or a mux name of the same
+kind), **Refresh snapshot**, **Reveal in its view** (switches to Sessions, Mux,
+or PRs and selects the entity), and **Unpin** (press `Enter` twice). Each is
+the same write as the `pin` command of that name. Legacy slots refuse edits
+until they are migrated.
+
+### Pinning from the other views
+
+`p` pins the selected row in any view, and unpins it (after a confirming menu)
+when a slot already points at it; `.` offers the same as **Pin** or **Unpin
+\<slot\>** at the top of every row's menu. A runtime process can't be pinned.
+Pinning a live mux, worktree, or repo records it in history first so the slot
+has something to point at. The native views mark a pinned row with `◉` after
+its kind glyph and leave it where it sorts; once any slot exists the marker
+cell is reserved on every row so columns hold still. Controls has a **Pinned
+only** checkbox in Sessions, Mux, and PRs that keeps pinned rows and the
+groups above them.
+
+`N` opens the mux launch form with the worktree toggle on, and `m` then
+**Launch harness in new mux…** opens it with the toggle off. An empty `launch
+argv` resolves to the harness's default (a project or user `[launch.*]`
+profile, `atelier exec`, or the harness default) and the form shows the
+command and where it came from. The last field, **pin**, can also pin the new
+mux or, with *pin, don't launch*, write a planned slot and start nothing.
 
 ### The History view
 
@@ -758,7 +785,7 @@ belongs to the repo it was made from), by `kind`, or not at all.
 
 `Enter` runs `conspectus rebuild <record id> --no-attach` behind a spinner and
 refreshes. `.` opens the row menu: **Rebuild**, **Pin** (the same as `pin add
-<record id>`), **Show rebuild plan** (the output of `rebuild --dry-run` in a
+<record id>`; **Unpin \<slot\>** once a slot points at it), **Show rebuild plan** (the output of `rebuild --dry-run` in a
 scrollable modal), **Forget** (press `Enter` twice; the record leaves history
 and any slot pointing at it falls back to its snapshot), and **Clean up…**.
 

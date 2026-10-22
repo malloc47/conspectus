@@ -2053,7 +2053,7 @@ fn placeholder_session_row_renders_pin_marker_without_planned_vocab() {
     let spans = render_session_spans(&row, &theme, 1_700_000_000, None);
     let rendered: String = spans.iter().map(|span| span.content.as_ref()).collect();
 
-    assert!(rendered.contains("📌"), "{rendered}");
+    assert!(!rendered.contains("📌"), "{rendered}");
     assert!(
         rendered.contains('◌'),
         "placeholder session row should render the dotted-circle glyph: {rendered}"
@@ -2186,7 +2186,7 @@ fn placeholder_mux_row_renders_dotted_glyph_and_cwd_preview() {
         Some(theme.pin_placeholder),
         "dotted-circle glyph should use the pin_placeholder color",
     );
-    assert!(rendered.contains("📌"), "{rendered}");
+    assert!(!rendered.contains("📌"), "{rendered}");
     assert!(
         rendered.contains("~/repo"),
         "preview should fall through to the pin cwd: {rendered}"
@@ -4864,7 +4864,10 @@ fn mux_rows_keep_pin_and_preview_columns_aligned_across_attach_states() {
             !row.contains('◐'),
             "mux rows carry no ambiguity glyph: {row}"
         );
-        assert_eq!(column_of(row, "📌"), column_of(&rows[0], "📌"), "{row}");
+        assert!(
+            !row.contains("📌"),
+            "the pin marker is the tree's, not the row's: {row}"
+        );
         assert_eq!(
             column_of(row, "pushed to main"),
             column_of(&rows[0], "pushed to main"),
@@ -5385,12 +5388,18 @@ fn the_row_menu_offers_the_record_verbs_and_clean_up() {
     let labels: Vec<&str> = menu.entries().iter().map(|e| e.label.as_str()).collect();
     assert_eq!(
         labels,
-        ["Rebuild", "Pin", "Show rebuild plan", "Forget", "Clean up…"]
+        [
+            "Rebuild",
+            "Unpin config-agent3",
+            "Show rebuild plan",
+            "Forget",
+            "Clean up…"
+        ]
     );
     assert!(menu.entries()[3].confirm, "forget asks twice");
-    // The pinned record says so.
-    let pin_note = &menu.entries()[1].subtitle;
-    assert!(pin_note.contains("config-agent3"), "{pin_note}");
+    // The pinned record offers to unpin its slot, also behind a confirm.
+    assert!(menu.entries()[1].confirm, "unpin asks twice");
+    assert_eq!(menu.entries()[1].msg, Msg::Unpin("config-agent3".into()));
     insta::assert_snapshot!("history_row_menu", pinned_frame(&mut app, 100));
 }
 
@@ -5410,10 +5419,8 @@ fn the_history_view_menu_works_with_nothing_selected() {
 #[test]
 fn rows_without_actions_say_so_instead_of_opening_an_empty_menu() {
     use crate::tui::Effect;
-    let mut app = slots_app(crate::tui::PinnedGrouping::None);
-    app.set_selection(RowId::Pin {
-        pin_id: "conspectus-main".into(),
-    });
+    let mut app = slots_app(crate::tui::PinnedGrouping::Project);
+    app.set_selection(first_bucket(&app));
     let effects = app.update(Msg::OpenRowMenu);
     assert!(app.row_menu().is_none());
     assert!(
@@ -5617,4 +5624,298 @@ fn actions_on_a_ghost_mux_rebuild_or_refuse_instead_of_erroring() {
         matches!(&reason, crate::tui::actions::AttachDisabled::MuxGone(name) if name == "config-agent3"),
         "{reason:?}"
     );
+}
+
+// ---- Pin and unpin from the native views ----------------------------
+
+/// The fixture world with one more live mux nobody pinned, resolved so
+/// the slots have their nodes.
+fn native_world() -> GraphSnapshot {
+    let mut snapshot = crate::tui::rows::pinned::fixture_world();
+    let mut loose = crate::model::MuxSessionNode::new(
+        crate::model::MuxSessionId::new("tmux:scratch"),
+        "tmux",
+        "scratch",
+    );
+    loose.cwd = Some("/home/op/src/conspectus".into());
+    loose.backend_session_id = Some("$9".into());
+    loose.created_epoch = Some(1_699_990_000);
+    snapshot
+        .nodes
+        .push(crate::model::GraphNode::MuxSession(loose));
+    resolve_snapshot(snapshot)
+}
+
+fn native_app(view: View, filter: RowFilter) -> App {
+    let snapshot = native_world();
+    let mut config = RunConfig::defaults();
+    config.default_view = view;
+    config.initial_filter = filter.clone();
+    let mut app = App::new(config);
+    let tree = crate::tui::rows::build_tree_for_view(crate::tui::rows::TreeInputs {
+        snapshot: &snapshot,
+        view,
+        grouping: crate::tui::Grouping::default_for(view),
+        filter,
+        sort: crate::tui::Sort::Hierarchy,
+        mux_recency: crate::tui::MuxRecency::default(),
+        cwd: None,
+    });
+    app.update(Msg::SetData {
+        snapshot: SnapshotHandle::from_snapshot(&snapshot),
+        tree,
+        loaded_at_epoch: 1_700_000_000,
+        initial_selection_hint: None,
+    });
+    app
+}
+
+fn first_bucket(app: &App) -> RowId {
+    app.tree()
+        .rows
+        .iter()
+        .find(|row| matches!(row.id, RowId::Bucket(_)))
+        .expect("a project bucket")
+        .id
+        .clone()
+}
+
+fn mux_row(name: &str) -> RowId {
+    RowId::MuxSession(NodeId::MuxSession(crate::model::MuxSessionId::new(
+        format!("tmux:{name}"),
+    )))
+}
+
+#[test]
+fn native_views_mark_pinned_rows_without_moving_them() {
+    let mut app = native_app(View::Mux, RowFilter::default());
+    let frame = pinned_frame(&mut app, 120);
+    let line_of = |name: &str| {
+        frame
+            .lines()
+            .find(|line| line.contains(name))
+            .unwrap_or_else(|| panic!("no row for {name}:\n{frame}"))
+            .to_string()
+    };
+    assert!(line_of("conspectus-main").contains("◉ "), "{frame}");
+    assert!(!line_of("scratch").contains("◉"), "{frame}");
+    // The marker doesn't float the row: sort order is the view's own.
+    let order: Vec<&str> = app
+        .tree()
+        .rows
+        .iter()
+        .filter_map(|row| match &row.kind {
+            RowKind::MuxSession(mux) => Some(mux.native_id.as_str()),
+            _ => None,
+        })
+        .collect();
+    let main = order.iter().position(|n| n.contains("conspectus-main"));
+    let loose = order.iter().position(|n| n.contains("scratch"));
+    assert!(main.is_some() && loose.is_some(), "{order:?}");
+}
+
+#[test]
+fn pinned_only_keeps_pinned_rows_and_the_groups_above_them() {
+    let filter = RowFilter {
+        pinned_only: true,
+        ..RowFilter::default()
+    };
+    let app = native_app(View::Mux, filter);
+    let muxes: Vec<&str> = app
+        .tree()
+        .rows
+        .iter()
+        .filter_map(|row| match &row.kind {
+            RowKind::MuxSession(mux) => Some(mux.native_id.as_str()),
+            _ => None,
+        })
+        .collect();
+    assert!(
+        muxes.iter().any(|n| n.contains("conspectus-main")),
+        "{muxes:?}"
+    );
+    assert!(!muxes.iter().any(|n| n.contains("scratch")), "{muxes:?}");
+}
+
+#[test]
+fn p_on_an_unpinned_row_pins_it_and_on_a_pinned_row_asks_to_unpin() {
+    use crate::tui::Effect;
+    use crate::tui::effect::StoreOp;
+    let mut app = native_app(View::Mux, RowFilter::default());
+
+    app.set_selection(mux_row("scratch"));
+    let effects = app.update(Msg::TogglePin);
+    assert_eq!(
+        effects,
+        vec![Effect::WriteStore(StoreOp::PinNode {
+            node: NodeId::MuxSession(crate::model::MuxSessionId::new("tmux:scratch")),
+        })]
+    );
+
+    app.set_selection(mux_row("conspectus-main"));
+    assert!(app.update(Msg::TogglePin).is_empty());
+    let menu = app.row_menu().expect("a menu confirms the unpin");
+    assert_eq!(menu.entries().len(), 1);
+    assert_eq!(menu.entries()[0].label, "Unpin conspectus-main");
+    assert!(menu.entries()[0].confirm);
+    assert_eq!(menu.entries()[0].msg, Msg::Unpin("conspectus-main".into()));
+}
+
+#[test]
+fn the_row_menu_of_a_native_row_offers_pin_or_unpin() {
+    let mut app = native_app(View::Mux, RowFilter::default());
+    app.set_selection(mux_row("scratch"));
+    app.update(Msg::OpenRowMenu);
+    let menu = app.row_menu().expect("menu");
+    let labels: Vec<&str> = menu.entries().iter().map(|e| e.label.as_str()).collect();
+    assert_eq!(labels, ["Pin"]);
+    assert!(matches!(menu.entries()[0].msg, Msg::PinNode(_)));
+    app.close_row_menu();
+
+    app.set_selection(mux_row("conspectus-main"));
+    app.update(Msg::OpenRowMenu);
+    let labels: Vec<String> = app
+        .row_menu()
+        .expect("menu")
+        .entries()
+        .iter()
+        .map(|e| e.label.clone())
+        .collect();
+    assert_eq!(labels, ["Unpin conspectus-main"]);
+}
+
+#[test]
+fn a_row_with_no_pinnable_entity_says_why() {
+    use crate::tui::Effect;
+    let mut app = slots_app(crate::tui::PinnedGrouping::Project);
+    app.set_selection(first_bucket(&app));
+    let effects = app.update(Msg::TogglePin);
+    assert!(
+        matches!(effects.as_slice(), [Effect::Toast(text)] if text.starts_with("pin:")),
+        "{effects:?}"
+    );
+}
+
+#[test]
+fn the_slot_menu_offers_every_gesture() {
+    let mut app = slots_app(crate::tui::PinnedGrouping::None);
+    app.set_selection(RowId::Pin {
+        pin_id: "conspectus-main".into(),
+    });
+    assert!(app.update(Msg::OpenRowMenu).is_empty());
+    let menu = app.row_menu().expect("the slot menu");
+    let labels: Vec<&str> = menu.entries().iter().map(|e| e.label.as_str()).collect();
+    assert_eq!(
+        labels,
+        [
+            "Rebuild",
+            "Show rebuild plan",
+            "Edit overrides…",
+            "Rename…",
+            "Retarget…",
+            "Refresh snapshot",
+            "Reveal in its view",
+            "Unpin"
+        ]
+    );
+    assert!(menu.entries()[7].confirm, "unpin asks twice");
+    insta::assert_snapshot!("slot_row_menu", pinned_frame(&mut app, 100));
+}
+
+#[test]
+fn slot_prompts_commit_to_their_own_store_write() {
+    use crate::tui::Effect;
+    use crate::tui::effect::StoreOp;
+    let mut app = slots_app(crate::tui::PinnedGrouping::None);
+    app.set_selection(RowId::Pin {
+        pin_id: "conspectus-main".into(),
+    });
+
+    app.update(Msg::OpenSlotRename("conspectus-main".into()));
+    assert_eq!(
+        app.rename_overlay()
+            .map(crate::tui::widgets::input::TextInputState::value),
+        Some("conspectus-main")
+    );
+    assert_eq!(
+        app.update(Msg::CommitRename("renamed".into())),
+        vec![Effect::WriteStore(StoreOp::RenameSlot {
+            slot: "conspectus-main".into(),
+            new_name: "renamed".into(),
+        })]
+    );
+
+    app.update(Msg::OpenSlotEdit("conspectus-main".into()));
+    assert_eq!(
+        app.update(Msg::CommitRename("cwd=/tmp".into())),
+        vec![Effect::WriteStore(StoreOp::EditSlot {
+            slot: "conspectus-main".into(),
+            assignment: "cwd=/tmp".into(),
+        })]
+    );
+
+    app.update(Msg::OpenSlotRetarget("conspectus-main".into()));
+    assert_eq!(
+        app.update(Msg::CommitRename("other".into())),
+        vec![Effect::WriteStore(StoreOp::RetargetSlot {
+            slot: "conspectus-main".into(),
+            target: "other".into(),
+        })]
+    );
+    assert!(matches!(
+        app.update(Msg::CommitRename("   ".into())).as_slice(),
+        [Effect::Toast(_)]
+    ));
+}
+
+#[test]
+fn a_cancelled_slot_prompt_does_not_capture_the_next_rename() {
+    use crate::tui::Effect;
+    use crate::tui::effect::StoreOp;
+    let mut app = native_app(View::Mux, RowFilter::default());
+    app.update(Msg::OpenSlotRename("conspectus-main".into()));
+    app.close_rename_overlay();
+
+    // A later rename of the selected mux opens its own overlay, which
+    // forgets the abandoned slot prompt.
+    app.set_selection(mux_row("scratch"));
+    app.open_rename_overlay(crate::tui::widgets::input::TextInputState::new(
+        "Rename mux",
+        "scratch",
+    ));
+    let effects = app.update(Msg::CommitRename("renamed".into()));
+    assert!(
+        matches!(
+            effects.as_slice(),
+            [Effect::WriteStore(StoreOp::CommitMuxRename { .. })]
+        ),
+        "{effects:?}"
+    );
+}
+
+#[test]
+fn reveal_switches_to_the_native_view_and_selects_the_entity() {
+    let mut app = slots_app(crate::tui::PinnedGrouping::None);
+    // The Pinned fixture's snapshot is shared with the native views.
+    app.update(Msg::RevealSlot("conspectus-main".into()));
+    assert_eq!(app.active_view(), View::Mux);
+    assert_eq!(app.selection(), Some(&mux_row("conspectus-main")));
+
+    app.update(Msg::SwitchView(View::Pinned));
+    let effects = app.update(Msg::RevealSlot("nightly".into()));
+    assert!(
+        matches!(effects.as_slice(), [crate::tui::Effect::Toast(_)]),
+        "a planned slot has no entity: {effects:?}"
+    );
+}
+
+#[test]
+fn the_mux_launch_form_opens_with_defaults_and_the_worktree_toggle() {
+    let mut app = native_app(View::Mux, RowFilter::default());
+    app.update(Msg::OpenMuxLaunchWorktreeForm);
+    let Some(crate::tui::Modal::MuxLaunch(form)) = app.modal_stack().last() else {
+        panic!("the launch form is on top");
+    };
+    assert!(form.spec().worktree_enabled());
+    assert!(form.default_hint().is_some() || form.spec().harness().value().is_empty());
 }

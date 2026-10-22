@@ -10,8 +10,8 @@ updated 0s ago · 0/1 sessions · 1 mux
 │             │                                                                      │             │
 │             │▸ Rebuild                                                             │             │
 │             │     bring it back (conspectus rebuild)                               │             │
-│             │  Pin                                                                 │             │
-│             │     already pinned as config-agent3                                  │             │
+│             │  Unpin config-agent3                                                 │             │
+│             │     remove the slot; the entity and its history stay                 │             │
 │             │  Show rebuild plan                                                   │             │
 │             │     what rebuild would run, without running it                       │             │
 │             │  Forget                                                              │             │

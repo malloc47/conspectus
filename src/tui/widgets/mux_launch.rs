@@ -2,15 +2,13 @@
 //!
 //! Multi-field modal that commits a [`Msg::CommitMuxLaunch`] the
 //! runtime turns into a subprocess re-exec of
-//! `conspectus mux launch <harness>`. Distinct from the pin-create
-//! form because no pin is written: on submit the mux and its
+//! `conspectus mux launch <harness>`. On submit the mux and its
 //! attributed harness session appear in discovery next refresh; the
-//! operator can `pin adopt` later if they change their mind.
+//! operator can pin the mux afterwards with `p`.
 //!
-//! Mode is fixed at open time — there is no persistence toggle
-//! (operator preference, ADR 0096 intake). The title reads
-//! "Launch harness in new mux — no pin" and the submit label reads
-//! "Launch" so the outcome is obvious before the operator commits.
+//! An empty launch argv resolves to the default for the harness
+//! (profile, `atelier exec`, or the harness default, ADR 0142), shown
+//! under the field with its source.
 //!
 //! ADR 0097: the shared fields (harness, cwd,
 //! mux name / socket, launch argv, worktree toggle + branch, known-
@@ -57,6 +55,34 @@ pub enum MuxLaunchField {
     WorktreeToggle,
     WorktreeBranch,
     WorktreeRepo,
+    Pin,
+}
+
+/// Whether the launch also pins the new mux (ADR 0141).
+#[derive(Debug, Clone, Copy, Default, Eq, PartialEq)]
+pub enum PinChoice {
+    #[default]
+    Off,
+    /// `--pin`: launch, then add a slot for the new mux.
+    Pin,
+    /// `--pin --no-launch`: add a planned slot and start nothing.
+    PlanOnly,
+}
+
+impl PinChoice {
+    fn cycled(self, delta: i32) -> Self {
+        const ORDER: [PinChoice; 3] = [PinChoice::Off, PinChoice::Pin, PinChoice::PlanOnly];
+        let idx = ORDER.iter().position(|c| *c == self).unwrap_or(0);
+        ORDER[crate::tui::cursor::wrap_step(idx, ORDER.len(), delta)]
+    }
+
+    fn label(self) -> &'static str {
+        match self {
+            Self::Off => "[ ] don't pin",
+            Self::Pin => "[x] launch, then pin",
+            Self::PlanOnly => "[x] pin, don't launch (planned slot)",
+        }
+    }
 }
 
 /// Request shape the runtime translates into
@@ -70,6 +96,7 @@ pub struct MuxLaunchRequest {
     pub launch_argv: Vec<String>,
     pub worktree_branch: Option<String>,
     pub worktree_repo: Option<String>,
+    pub pin: PinChoice,
 }
 
 /// Ephemeral harness launch form state. Owns the shared launch-spec
@@ -80,6 +107,10 @@ pub struct MuxLaunchFormState {
     spec: LaunchSpecFormState,
     worktree_repo: TextInputState,
     focus: MuxLaunchField,
+    pin: PinChoice,
+    /// Where an empty launch argv comes from, so the form can show the
+    /// command it will run (ADR 0142).
+    defaults: Option<crate::launch_default::LaunchDefaults>,
 }
 
 impl MuxLaunchFormState {
@@ -111,7 +142,43 @@ impl MuxLaunchFormState {
             spec,
             worktree_repo: TextInputState::new(WORKTREE_REPO_LABEL, String::new()),
             focus: MuxLaunchField::Harness,
+            pin: PinChoice::Off,
+            defaults: None,
         }
+    }
+
+    /// Show the argv an empty `launch argv` field resolves to.
+    #[must_use]
+    pub fn with_defaults(mut self, defaults: crate::launch_default::LaunchDefaults) -> Self {
+        self.defaults = Some(defaults);
+        self
+    }
+
+    /// Start with the worktree toggle on (`N`).
+    #[must_use]
+    pub fn with_worktree(mut self, repo: impl Into<String>) -> Self {
+        self.spec.set_worktree_enabled(true);
+        self.worktree_repo = TextInputState::new(WORKTREE_REPO_LABEL, repo.into());
+        self
+    }
+
+    /// The command an empty argv field launches, and where it comes
+    /// from: `claude --x (project launch profile)`.
+    pub fn default_hint(&self) -> Option<String> {
+        let defaults = self.defaults.as_ref()?;
+        if !self.spec.launch_argv().value().trim().is_empty() {
+            return None;
+        }
+        let cwd = self.spec.cwd().value().trim();
+        let (argv, source) = defaults.default_argv(
+            self.spec.harness().value().trim(),
+            (!cwd.is_empty()).then(|| std::path::Path::new(cwd)),
+        )?;
+        let command: Vec<String> = argv
+            .iter()
+            .map(|arg| arg.to_string_lossy().into_owned())
+            .collect();
+        Some(format!("{} — from {}", command.join(" "), source.label()))
     }
 
     /// Borrow the shared spec (read-only).
@@ -150,6 +217,7 @@ impl MuxLaunchFormState {
             fields.push(MuxLaunchField::WorktreeBranch);
             fields.push(MuxLaunchField::WorktreeRepo);
         }
+        fields.push(MuxLaunchField::Pin);
         fields
     }
 
@@ -210,6 +278,7 @@ impl MuxLaunchFormState {
             launch_argv,
             worktree_branch,
             worktree_repo,
+            pin: self.pin,
         })
     }
 }
@@ -244,6 +313,13 @@ impl Overlay for MuxLaunchFormState {
                     return OverlayOutcome::Consumed;
                 }
             }
+            MuxLaunchField::Pin => {
+                if let Some(delta) = option_delta {
+                    self.pin = self.pin.cycled(delta);
+                    self.spec.clear_error();
+                }
+                return OverlayOutcome::Consumed;
+            }
             MuxLaunchField::WorktreeToggle => {
                 if option_delta.is_some() {
                     self.spec.toggle_worktree();
@@ -277,7 +353,7 @@ impl Overlay for MuxLaunchFormState {
                     .handle_text_key(SpecTextField::WorktreeBranch, key),
             ),
             MuxLaunchField::WorktreeRepo => Some(self.worktree_repo.handle_key(key)),
-            MuxLaunchField::WorktreeToggle | MuxLaunchField::Cwd => None,
+            MuxLaunchField::WorktreeToggle | MuxLaunchField::Cwd | MuxLaunchField::Pin => None,
         };
         match input_outcome {
             Some(InputOutcome::Continue) => {
@@ -309,7 +385,7 @@ impl Widget for MuxLaunchFormWidget<'_> {
         let spec = self.state.spec();
         let mut lines: Vec<Line> = vec![
             Line::styled(
-                "Launch harness in new mux — no pin",
+                "Launch harness in new mux",
                 Style::default().add_modifier(Modifier::BOLD),
             ),
             Line::from(""),
@@ -338,6 +414,7 @@ impl Widget for MuxLaunchFormWidget<'_> {
                 spec.launch_argv().value(),
                 self.state.focus == MuxLaunchField::LaunchArgv,
             ),
+            hint_line(self.state.default_hint(), self.theme),
             format_field_line(
                 "worktree",
                 if spec.worktree_enabled() {
@@ -360,6 +437,11 @@ impl Widget for MuxLaunchFormWidget<'_> {
                 self.state.focus == MuxLaunchField::WorktreeRepo,
             ));
         }
+        lines.push(format_field_line(
+            "pin",
+            self.state.pin.label(),
+            self.state.focus == MuxLaunchField::Pin,
+        ));
         if let Some(err) = spec.error() {
             lines.push(Line::from(""));
             lines.push(Line::styled(
@@ -386,6 +468,16 @@ impl Widget for MuxLaunchFormWidget<'_> {
         let inner = block.inner(rect);
         block.render(rect, buf);
         Paragraph::new(lines).render(inner, buf);
+    }
+}
+
+fn hint_line(hint: Option<String>, theme: &Theme) -> Line<'static> {
+    match hint {
+        Some(hint) => Line::styled(
+            format!("    default: {hint}"),
+            Style::default().fg(theme.secondary_text),
+        ),
+        None => Line::from(""),
     }
 }
 

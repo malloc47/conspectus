@@ -267,6 +267,14 @@ pub(super) fn mux_launch_argv(
         args.push("--worktree-repo".to_string());
         args.push(repo.to_string());
     }
+    match request.pin {
+        crate::tui::widgets::mux_launch::PinChoice::Off => {}
+        crate::tui::widgets::mux_launch::PinChoice::Pin => args.push("--pin".to_string()),
+        crate::tui::widgets::mux_launch::PinChoice::PlanOnly => {
+            args.push("--pin".to_string());
+            args.push("--no-launch".to_string());
+        }
+    }
     if !request.launch_argv.is_empty() {
         args.push("--argv".to_string());
         for arg in &request.launch_argv {

@@ -124,6 +124,19 @@ pub enum MuxOp {
 pub enum StoreOp {
     /// Pin a history record as a slot (`pin add <record id>`).
     PinRecord { record_id: String },
+    /// Pin a graph node as a slot (`pin add <node id>`).
+    PinNode { node: crate::model::NodeId },
+    /// Remove a slot (`pin rm`).
+    Unpin { slot: String },
+    /// Rename a slot, and its mux when it is live (`pin rename`).
+    RenameSlot { slot: String, new_name: String },
+    /// Set or clear one override (`pin edit`): `field=value`, or
+    /// `field=` to clear it.
+    EditSlot { slot: String, assignment: String },
+    /// Point a slot at another entity (`pin retarget`).
+    RetargetSlot { slot: String, target: String },
+    /// Copy the entity's current recipe into the snapshot (`pin refresh`).
+    RefreshSlot { slot: String },
     /// Remove one history record.
     ForgetRecord { record_id: String },
     /// Remove these history records (the Clean up modal).

@@ -72,7 +72,7 @@ pub enum Modal {
     /// mux-specific verbs; each entry commits a Msg that opens the
     /// corresponding target overlay.
     MuxMenu(crate::tui::widgets::mux_menu::MuxMenuState),
-    /// Mux-launch form — ephemeral harness in a fresh mux, no pin
+    /// Mux-launch form — harness in a fresh mux
     /// (ADR 0096). Commits
     /// [`Msg::CommitMuxLaunch`]. Boxed to keep the `Modal` enum
     /// discriminant small — the launch form carries eight

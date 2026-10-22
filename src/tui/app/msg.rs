@@ -286,10 +286,29 @@ pub enum Msg {
     /// the modal after seeding defaults from the current selection
     /// (ADR 0096).
     OpenMuxLaunchForm,
+    /// `N` — the same form with the worktree toggle already on.
+    OpenMuxLaunchWorktreeForm,
     /// `.` — open the row action menu for the selected row.
     OpenRowMenu,
     /// Row menu → pin a history record as a slot.
     PinRecord(String),
+    /// Row menu → pin a graph node as a slot.
+    PinNode(crate::model::NodeId),
+    /// `p` — pin the selected row, or ask to unpin it when a slot
+    /// already points at it.
+    TogglePin,
+    /// Row menu → remove a slot.
+    Unpin(String),
+    /// Slot menu → open the override editor (`field=value`).
+    OpenSlotEdit(String),
+    /// Slot menu → open the rename prompt.
+    OpenSlotRename(String),
+    /// Slot menu → open the retarget prompt.
+    OpenSlotRetarget(String),
+    /// Slot menu → copy the entity's current recipe into the slot.
+    RefreshSlot(String),
+    /// Slot menu → switch to the entity's native view and select it.
+    RevealSlot(String),
     /// Row menu → run `conspectus rebuild <reference> --dry-run` and
     /// show the plan.
     ShowRebuildPlan(String),

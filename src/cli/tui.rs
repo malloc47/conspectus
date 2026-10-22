@@ -440,6 +440,7 @@ impl TuiArgs {
             forge_fetch: crate::discovery::forge::ForgeFetch::default(),
             forge_concurrency: outcome.config.forge.concurrency,
             history: outcome.config.history,
+            launch: outcome.config.launch,
             record_history,
         };
 

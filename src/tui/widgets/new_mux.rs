@@ -86,8 +86,7 @@ impl NewMuxFormState {
     }
 
     /// Try to commit. `Enter` on the name field advances focus to cwd
-    /// rather than committing (mirrors two-field forms in the pins
-    /// overlay); `Enter` on cwd commits when both fields are non-empty.
+    /// rather than committing (mirrors other two-field forms); `Enter` on cwd commits when both fields are non-empty.
     /// Empty-field commit stays on that field with no side effect.
     fn try_commit(&mut self) -> OverlayOutcome {
         match self.focus {

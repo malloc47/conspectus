@@ -32,16 +32,26 @@ pub use msg::Msg;
 /// Cheap-to-clone, reference-counted handle to the App's resolved
 /// [`GraphSnapshot`]. Read consumers borrow it via [`Self::snapshot`].
 #[derive(Clone)]
-pub struct SnapshotHandle(Rc<crate::model::GraphSnapshot>);
+pub struct SnapshotHandle(
+    Rc<crate::model::GraphSnapshot>,
+    Rc<std::cell::OnceCell<BTreeSet<NodeId>>>,
+);
 
 impl SnapshotHandle {
     pub(crate) fn new(snapshot: crate::model::GraphSnapshot) -> Self {
-        Self(Rc::new(snapshot))
+        Self(Rc::new(snapshot), Rc::default())
     }
 
     #[cfg(test)]
     pub(crate) fn from_snapshot(snapshot: &crate::model::GraphSnapshot) -> Self {
-        Self(Rc::new(snapshot.clone()))
+        Self(Rc::new(snapshot.clone()), Rc::default())
+    }
+
+    /// The entities pin slots point at, live or gone (ADR 0141); the
+    /// native views mark their rows.
+    pub(crate) fn pinned_nodes(&self) -> &BTreeSet<NodeId> {
+        self.1
+            .get_or_init(|| crate::tui::rows::pinned_node_set(&self.0))
     }
 
     pub(crate) fn snapshot(&self) -> &crate::model::GraphSnapshot {
@@ -82,6 +92,14 @@ impl ProviderStatus {
             || self.forge_disabled
             || !self.forge_available.unwrap_or(true)
     }
+}
+
+/// The slot a text prompt is editing, and how.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) enum SlotPrompt {
+    Rename(String),
+    Edit(String),
+    Retarget(String),
 }
 
 /// Top-level state. Owns the resolved run configuration plus the
@@ -193,6 +211,9 @@ pub struct App {
     /// that haven't migrated yet; each wave deletes one field and
     /// moves the state to a `Modal` variant.
     modal_stack: Vec<crate::tui::Modal>,
+    /// What the text prompt on top of the stack edits, when it edits a
+    /// pin slot rather than the selected row's name.
+    slot_prompt: Option<SlotPrompt>,
     /// Active transient toast. The
     /// `ratatui_comfy_toaster::ToastEngine` owns the per-toast
     /// lifetime + bordered rendering; the runtime calls
@@ -474,6 +495,7 @@ impl App {
             explorer_scroll: 0,
             last_visible_index: None,
             modal_stack: Vec::new(),
+            slot_prompt: None,
             toast: crate::tui::widgets::toast::ToastEngineHolder(
                 crate::tui::widgets::toast::engine(),
             ),
@@ -1555,7 +1577,13 @@ impl App {
                 self.preview_scroll = 0;
                 effects.push(Effect::Persist);
             }
-            Msg::CommitRename(value) => effects.push(self.rename_commit_effect(&value)),
+            Msg::CommitRename(value) => {
+                let effect = match self.slot_prompt.take() {
+                    Some(prompt) => slot_prompt_effect(prompt, &value),
+                    None => self.rename_commit_effect(&value),
+                };
+                effects.push(effect);
+            }
             Msg::CommitWorktreeCreate { repo_root, branch } => {
                 effects.push(Effect::WriteStore(
                     crate::tui::effect::StoreOp::WorktreeCreate { repo_root, branch },
@@ -1613,6 +1641,69 @@ impl App {
                 Some(menu) => self.open_row_menu(menu),
                 None => effects.push(Effect::Toast("no row actions here yet".to_string())),
             },
+            Msg::PinNode(node) => {
+                effects.push(Effect::WriteStore(crate::tui::effect::StoreOp::PinNode {
+                    node,
+                }));
+            }
+            Msg::TogglePin => match crate::tui::actions::pin_subject(self) {
+                Err(why) => effects.push(Effect::Toast(format!("pin: {why}"))),
+                Ok(subject) => {
+                    let slots = self.snapshot_handle().map_or_else(Vec::new, |handle| {
+                        crate::tui::actions::slots_pinning(handle.snapshot(), &subject)
+                    });
+                    if let Some(RowId::Pin { pin_id }) = self.selection().cloned() {
+                        // On a slot row `p` asks to unpin that slot.
+                        self.open_pin_menu(vec![pin_id]);
+                    } else if slots.is_empty() {
+                        effects.push(Effect::WriteStore(match subject {
+                            crate::tui::actions::PinSubject::Node(node) => {
+                                crate::tui::effect::StoreOp::PinNode { node }
+                            }
+                            crate::tui::actions::PinSubject::Record(record_id) => {
+                                crate::tui::effect::StoreOp::PinRecord { record_id }
+                            }
+                        }));
+                    } else {
+                        self.open_pin_menu(slots);
+                    }
+                }
+            },
+            Msg::Unpin(slot) => {
+                effects.push(Effect::WriteStore(crate::tui::effect::StoreOp::Unpin {
+                    slot,
+                }));
+            }
+            Msg::OpenSlotEdit(slot) => {
+                self.open_slot_prompt(
+                    SlotPrompt::Edit(slot),
+                    "Override (field=value; field= clears)",
+                    "",
+                );
+            }
+            Msg::OpenSlotRename(slot) => {
+                let initial = slot.clone();
+                self.open_slot_prompt(SlotPrompt::Rename(slot), "Rename slot", &initial);
+            }
+            Msg::OpenSlotRetarget(slot) => {
+                self.open_slot_prompt(
+                    SlotPrompt::Retarget(slot),
+                    "Retarget (node id, h_… record, or mux name)",
+                    "",
+                );
+            }
+            Msg::RefreshSlot(slot) => {
+                effects.push(Effect::WriteStore(
+                    crate::tui::effect::StoreOp::RefreshSlot { slot },
+                ));
+            }
+            Msg::RevealSlot(slot) => {
+                if let Err(why) = self.reveal_slot(&slot) {
+                    effects.push(Effect::Toast(why));
+                } else {
+                    effects.push(Effect::Persist);
+                }
+            }
             Msg::PinRecord(record_id) => {
                 effects.push(Effect::WriteStore(crate::tui::effect::StoreOp::PinRecord {
                     record_id,
@@ -1661,7 +1752,8 @@ impl App {
                     seeded_cwd,
                 ));
             }
-            Msg::OpenMuxLaunchForm => {
+            Msg::OpenMuxLaunchForm | Msg::OpenMuxLaunchWorktreeForm => {
+                let with_worktree = matches!(msg, Msg::OpenMuxLaunchWorktreeForm);
                 let seeded_cwd = crate::tui::runtime::derive_mux_form_cwd(self)
                     .unwrap_or_else(|| std::env::var("HOME").unwrap_or_else(|_| "/".to_string()));
                 let seeded_mux_name =
@@ -1669,15 +1761,21 @@ impl App {
                 let known_harness_keys = crate::tui::runtime::known_harness_keys();
                 let known_mux_names = crate::tui::runtime::known_live_mux_names(self);
                 let default_harness = known_harness_keys.first().cloned().unwrap_or_default();
-                self.open_mux_launch_form(
-                    crate::tui::widgets::mux_launch::MuxLaunchFormState::new(
-                        default_harness,
-                        seeded_cwd,
-                        seeded_mux_name,
-                        known_harness_keys,
-                        known_mux_names,
-                    ),
-                );
+                let repo = seeded_cwd.clone();
+                let mut form = crate::tui::widgets::mux_launch::MuxLaunchFormState::new(
+                    default_harness,
+                    seeded_cwd,
+                    seeded_mux_name,
+                    known_harness_keys,
+                    known_mux_names,
+                )
+                .with_defaults(crate::launch_default::LaunchDefaults::new(
+                    self.config().launch.clone(),
+                ));
+                if with_worktree {
+                    form = form.with_worktree(repo);
+                }
+                self.open_mux_launch_form(form);
             }
             Msg::CommitMuxLaunch(request) => {
                 effects.push(Effect::Exec(crate::tui::effect::ExecSpec::MuxLaunch {
@@ -1752,3 +1850,27 @@ fn sessions_linked_to_mux(snapshot: &GraphSnapshot, mux: &MuxSessionId) -> Vec<A
 #[cfg(test)]
 #[path = "app_tests.rs"]
 mod tests;
+
+/// The store write that commits a slot prompt's text.
+fn slot_prompt_effect(prompt: SlotPrompt, value: &str) -> super::Effect {
+    use super::Effect;
+    use crate::tui::effect::StoreOp;
+    let value = value.trim().to_string();
+    if value.is_empty() {
+        return Effect::Toast("pin: nothing entered".to_string());
+    }
+    Effect::WriteStore(match prompt {
+        SlotPrompt::Rename(slot) => StoreOp::RenameSlot {
+            slot,
+            new_name: value,
+        },
+        SlotPrompt::Edit(slot) => StoreOp::EditSlot {
+            slot,
+            assignment: value,
+        },
+        SlotPrompt::Retarget(slot) => StoreOp::RetargetSlot {
+            slot,
+            target: value,
+        },
+    })
+}

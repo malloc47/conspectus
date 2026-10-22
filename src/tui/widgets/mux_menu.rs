@@ -37,14 +37,14 @@ impl MuxMenuChoice {
     fn label(self) -> &'static str {
         match self {
             Self::NewBareMux => "New tmux session (bare shell)",
-            Self::LaunchHarnessMux => "Launch harness in new mux… (no pin)",
+            Self::LaunchHarnessMux => "Launch harness in new mux…",
         }
     }
 
     fn subtitle(self) -> &'static str {
         match self {
-            Self::NewBareMux => "ADR 0095 · shell only, no harness, no pin",
-            Self::LaunchHarnessMux => "ADR 0096 · spawn harness, no pin persistence",
+            Self::NewBareMux => "ADR 0095 · shell only, no harness",
+            Self::LaunchHarnessMux => "ADR 0096 · spawn harness; pin it afterwards with p",
         }
     }
 }

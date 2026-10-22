@@ -232,9 +232,9 @@ fn clear_all_with_empty_filter_is_silent_noop() {
         Sort::Hierarchy,
     );
     let mut state = ControlsOverlayState::new_at_filters(&ctx);
-    // Step past the three predicate rows and the sessions-only
-    // float checkbox to land on FilterClear.
-    for _ in 0..4 {
+    // Step past the three predicate rows, the sessions-only float
+    // checkbox, and pinned only to land on FilterClear.
+    for _ in 0..5 {
         state.handle_key(&ctx, key(KeyCode::Down));
     }
     assert_eq!(state.cursor(), ControlsCursor::FilterClear);
@@ -255,7 +255,7 @@ fn clear_all_with_active_filter_emits_empty_filter() {
         Sort::Hierarchy,
     );
     let mut state = ControlsOverlayState::new_at_filters(&ctx);
-    for _ in 0..4 {
+    for _ in 0..5 {
         state.handle_key(&ctx, key(KeyCode::Down));
     }
     assert_eq!(state.cursor(), ControlsCursor::FilterClear);
@@ -581,8 +581,12 @@ fn pr_branch_rows_only_appear_on_the_prs_view() {
         at(ControlsCursor::FilterPrBranch) + 1
     );
     assert_eq!(
-        at(ControlsCursor::FilterClear),
+        at(ControlsCursor::FilterPinnedOnly),
         at(ControlsCursor::FilterFloatTrackedPrs) + 1
+    );
+    assert_eq!(
+        at(ControlsCursor::FilterClear),
+        at(ControlsCursor::FilterPinnedOnly) + 1
     );
 }
 
@@ -653,7 +657,7 @@ fn clear_all_resets_the_pr_settings() {
     };
     let ctx = prs_ctx(&filter);
     let mut state = ControlsOverlayState::new_at_filters(&ctx);
-    for _ in 0..6 {
+    for _ in 0..7 {
         state.handle_key(&ctx, key(KeyCode::Down));
     }
     assert_eq!(state.cursor(), ControlsCursor::FilterClear);

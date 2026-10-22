@@ -1762,19 +1762,19 @@ pub(super) fn dispatch_live(
     execute_effects_live(terminal, app, config, tmux, effects);
 }
 
-/// Refresh immediately after a pin mutation.
+/// Refresh immediately after a store write (a pin slot, a history
+/// record, a worktree).
 ///
-/// Pin writes update `.conspectus.toml` synchronously, but the
-/// regular refresh path may short-circuit through a running daemon.
-/// Force the local discovery branch here so the row tree reflects
-/// the just-written pin store without waiting for the daemon's next
-/// tick.
-fn refresh_after_pin_mutation(app: &mut App, _seed: &RunConfig) {
-    let config = pin_mutation_refresh_config(app);
+/// The write lands synchronously, but the regular refresh path may
+/// short-circuit through a running daemon. Force the local discovery
+/// branch here so the row tree reflects it without waiting for the
+/// daemon's next tick.
+fn refresh_after_store_write(app: &mut App, _seed: &RunConfig) {
+    let config = store_write_refresh_config(app);
     refresh_with_config(app, &config);
 }
 
-fn pin_mutation_refresh_config(app: &App) -> RunConfig {
+fn store_write_refresh_config(app: &App) -> RunConfig {
     let mut config = app.config().clone();
     config.refresh = true;
     config

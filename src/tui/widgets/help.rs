@@ -276,6 +276,10 @@ fn keymap_sections() -> Vec<HelpSection> {
                     "Create a bare tmux session (no agent, no worktree) — shell in the selected cwd",
                 ),
                 Binding::new(
+                    "N",
+                    "Launch a harness in a new mux with a worktree: the launch form opens with the worktree toggle on",
+                ),
+                Binding::new(
                     "m",
                     "Open the Mux action menu — pick between new bare session and launching a harness in a fresh mux",
                 ),
@@ -283,10 +287,16 @@ fn keymap_sections() -> Vec<HelpSection> {
         },
         HelpSection {
             title: "Row actions",
-            bindings: vec![Binding::new(
-                ".",
-                "Open the row action menu — rebuild, pin, forget, or show the rebuild plan for a gone record; Clean up… in the History view",
-            )],
+            bindings: vec![
+                Binding::new(
+                    "p",
+                    "Pin the selected row as a slot, or ask to unpin it when a slot already points at it; pinned rows carry ◉",
+                ),
+                Binding::new(
+                    ".",
+                    "Open the row action menu — pin or unpin; rebuild, forget, or show the rebuild plan for a gone record; edit, rename, retarget, refresh, or reveal a slot in the Pinned view; Clean up… in the History view",
+                ),
+            ],
         },
         HelpSection {
             title: "View switching",

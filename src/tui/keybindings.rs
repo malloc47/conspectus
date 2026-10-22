@@ -224,6 +224,12 @@ pub const KEYBINDINGS: &[KeyBinding] = &[
     },
     KeyBinding {
         mode: KeyMode::Global,
+        key: KeyMatcher::UpperChar('N'),
+        action: || Action::Msg(Box::new(crate::tui::Msg::OpenMuxLaunchWorktreeForm)),
+        help_text: "Launch a harness in a new mux with a worktree",
+    },
+    KeyBinding {
+        mode: KeyMode::Global,
         key: KeyMatcher::AnyModExceptCtrl('m'),
         action: || Action::OpenMuxMenu,
         help_text: "Open the Mux action menu (new session / launch harness)",
@@ -235,7 +241,13 @@ pub const KEYBINDINGS: &[KeyBinding] = &[
             code: KeyCode::Char('.'),
         },
         action: || Action::Msg(Box::new(crate::tui::Msg::OpenRowMenu)),
-        help_text: "Open the row action menu (rebuild, pin, forget, clean up)",
+        help_text: "Open the row action menu (pin, rebuild, forget, clean up)",
+    },
+    KeyBinding {
+        mode: KeyMode::Global,
+        key: KeyMatcher::AnyModExceptCtrl('p'),
+        action: || Action::Msg(Box::new(crate::tui::Msg::TogglePin)),
+        help_text: "Pin the selected row, or unpin it when it already is",
     },
     KeyBinding {
         mode: KeyMode::Global,

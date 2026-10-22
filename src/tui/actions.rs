@@ -259,8 +259,78 @@ pub fn selected_record(app: &App) -> Option<String> {
         .map(|record| record.meta.id.clone())
 }
 
+/// What the selected row can be pinned as.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum PinSubject {
+    /// A node in the graph (live, or a ghost without a record).
+    Node(NodeId),
+    /// A history record, by id.
+    Record(String),
+}
+
+/// The entity under the cursor that a slot could point at, or the
+/// reason it can't be pinned.
+pub fn pin_subject(app: &App) -> Result<PinSubject, String> {
+    let selection = app.selection().ok_or("nothing is selected")?;
+    if let Some(record) = selected_record(app) {
+        return Ok(PinSubject::Record(record));
+    }
+    let node = crate::tui::rows::row_node(selection).ok_or("this row can't be pinned")?;
+    match crate::model::PinKind::of_node(node) {
+        Some(_) => Ok(PinSubject::Node(node.clone())),
+        None => Err("a runtime process is ephemeral and can't be pinned".to_string()),
+    }
+}
+
+/// The slots that already point at `subject`.
+pub fn slots_pinning(snapshot: &GraphSnapshot, subject: &PinSubject) -> Vec<String> {
+    match subject {
+        PinSubject::Record(id) => crate::tui::rows::history::pinned_by(snapshot, id),
+        PinSubject::Node(node) => crate::tui::rows::pin_nodes(snapshot)
+            .into_iter()
+            .filter(|pin| {
+                pin.target_node.as_ref() == Some(node)
+                    || pin.target.as_deref() == Some(node.to_string().as_str())
+            })
+            .map(|pin| pin.id.id.clone())
+            .collect(),
+    }
+}
+
+/// The row menu entries that pin or unpin `subject`.
+fn pin_entries(
+    snapshot: &GraphSnapshot,
+    subject: &PinSubject,
+) -> Vec<crate::tui::widgets::row_menu::RowMenuEntry> {
+    use crate::tui::Msg;
+    use crate::tui::widgets::row_menu::RowMenuEntry;
+    let slots = slots_pinning(snapshot, subject);
+    if slots.is_empty() {
+        let msg = match subject {
+            PinSubject::Node(node) => Msg::PinNode(node.clone()),
+            PinSubject::Record(id) => Msg::PinRecord(id.clone()),
+        };
+        return vec![RowMenuEntry::new(
+            "Pin",
+            "add a slot that points at this (p)",
+            msg,
+        )];
+    }
+    slots
+        .into_iter()
+        .map(|slot| {
+            RowMenuEntry::new(
+                format!("Unpin {slot}"),
+                "remove the slot; the entity and its history stay",
+                Msg::Unpin(slot),
+            )
+            .confirming()
+        })
+        .collect()
+}
+
 /// The `.` menu for the selected row, or `None` when the row has no
-/// actions yet. The History view always has one: even with nothing
+/// actions. The History view always has one: even with nothing
 /// selected it offers Clean up.
 pub fn row_menu_for(app: &App) -> Option<crate::tui::widgets::row_menu::RowMenuState> {
     use crate::tui::Msg;
@@ -268,7 +338,10 @@ pub fn row_menu_for(app: &App) -> Option<crate::tui::widgets::row_menu::RowMenuS
     let snapshot = app.snapshot_handle()?.snapshot();
     let in_history = app.active_view() == crate::tui::View::History;
     let mut entries = Vec::new();
-    let mut title = "History".to_string();
+    let mut title = "Actions".to_string();
+    if let Some(RowId::Pin { pin_id }) = app.selection() {
+        return slot_menu(snapshot, pin_id);
+    }
     if let Some(id) = selected_record(app)
         && let Some((kind, meta)) = snapshot.history.meta(&id)
     {
@@ -281,11 +354,6 @@ pub fn row_menu_for(app: &App) -> Option<crate::tui::widgets::row_menu::RowMenuS
                 .unwrap_or_else(|| meta.display.label.clone())
         );
         let pins = crate::tui::rows::history::pinned_by(snapshot, &id);
-        let pin_note = if pins.is_empty() {
-            "add a slot that points at this record".to_string()
-        } else {
-            format!("already pinned as {}", pins.join(", "))
-        };
         let forget_note = if pins.is_empty() {
             "remove the record from history".to_string()
         } else {
@@ -300,16 +368,28 @@ pub fn row_menu_for(app: &App) -> Option<crate::tui::widgets::row_menu::RowMenuS
             Msg::RebuildReference(id.clone()),
         ));
         entries.push(RowMenuEntry::new(
-            "Pin",
-            pin_note,
-            Msg::PinRecord(id.clone()),
-        ));
-        entries.push(RowMenuEntry::new(
             "Show rebuild plan",
             "what rebuild would run, without running it",
             Msg::ShowRebuildPlan(id.clone()),
         ));
         entries.push(RowMenuEntry::new("Forget", forget_note, Msg::ForgetRecord(id)).confirming());
+    } else if let Some(row) = app
+        .tree()
+        .rows
+        .iter()
+        .find(|r| Some(&r.id) == app.selection())
+    {
+        title = row_title(row);
+    }
+    if let Ok(subject) = pin_subject(app) {
+        let mut pin = pin_entries(snapshot, &subject);
+        // Pin/Unpin leads the menu where it is the main verb.
+        if entries.is_empty() {
+            pin.append(&mut entries);
+            entries = pin;
+        } else {
+            entries.splice(1..1, pin);
+        }
     }
     if in_history {
         entries.push(RowMenuEntry::new(
@@ -319,6 +399,72 @@ pub fn row_menu_for(app: &App) -> Option<crate::tui::widgets::row_menu::RowMenuS
         ));
     }
     (!entries.is_empty()).then(|| RowMenuState::new(title, entries))
+}
+
+fn row_title(row: &crate::tui::rows::Row) -> String {
+    match &row.kind {
+        RowKind::MuxSession(mux) => format!("mux {}", mux.native_id),
+        RowKind::AgentSession(session) => format!("session {}", session.short_id),
+        RowKind::Pr(pr) => format!("PR #{}", pr.pr_number),
+        _ => "row".to_string(),
+    }
+}
+
+/// The menu of a slot row in the Pinned view.
+fn slot_menu(
+    snapshot: &GraphSnapshot,
+    slot: &str,
+) -> Option<crate::tui::widgets::row_menu::RowMenuState> {
+    use crate::tui::Msg;
+    use crate::tui::widgets::row_menu::{RowMenuEntry, RowMenuState};
+    crate::tui::rows::pin_nodes(snapshot)
+        .into_iter()
+        .find(|pin| pin.id.id == slot)?;
+    let slot = slot.to_string();
+    let entries = vec![
+        RowMenuEntry::new(
+            "Rebuild",
+            "bring it back, or attach if it is up (conspectus rebuild)",
+            Msg::RebuildReference(slot.clone()),
+        ),
+        RowMenuEntry::new(
+            "Show rebuild plan",
+            "what rebuild would run, without running it",
+            Msg::ShowRebuildPlan(slot.clone()),
+        ),
+        RowMenuEntry::new(
+            "Edit overrides…",
+            "set or clear a field: name=value",
+            Msg::OpenSlotEdit(slot.clone()),
+        ),
+        RowMenuEntry::new(
+            "Rename…",
+            "change the slot name (a live mux is renamed with it)",
+            Msg::OpenSlotRename(slot.clone()),
+        ),
+        RowMenuEntry::new(
+            "Retarget…",
+            "point it at another entity of the same kind",
+            Msg::OpenSlotRetarget(slot.clone()),
+        ),
+        RowMenuEntry::new(
+            "Refresh snapshot",
+            "copy the entity's current recipe into the slot",
+            Msg::RefreshSlot(slot.clone()),
+        ),
+        RowMenuEntry::new(
+            "Reveal in its view",
+            "jump to the entity in Sessions, Mux, or PRs",
+            Msg::RevealSlot(slot.clone()),
+        ),
+        RowMenuEntry::new(
+            "Unpin",
+            "remove the slot; the entity and its history stay",
+            Msg::Unpin(slot.clone()),
+        )
+        .confirming(),
+    ];
+    Some(RowMenuState::new(format!("slot {slot}"), entries))
 }
 
 /// What `Enter` does on a History row or a ghost mux: rebuild the

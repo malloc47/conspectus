@@ -119,6 +119,7 @@ pub enum ControlsCursor {
     FilterFloatAttachedMuxes,
     /// Mux-view-only checkbox: hide gone muxes.
     FilterHideGoneMuxes,
+    FilterPinnedOnly,
     /// PRs-view-only row: edits the PR state set (ADR 0134).
     FilterPrState,
     /// PRs-view-only row: cycles the local-branch filter through any,
@@ -282,6 +283,11 @@ impl ControlsOverlayState {
             ControlsCursor::FilterHideGoneMuxes => {
                 let mut new_filter = ctx.filter.clone();
                 new_filter.hide_gone_muxes = !new_filter.hide_gone_muxes;
+                ControlsOutcome::ApplyAndStay(crate::tui::Msg::SetFilter(new_filter))
+            }
+            ControlsCursor::FilterPinnedOnly => {
+                let mut new_filter = ctx.filter.clone();
+                new_filter.pinned_only = !new_filter.pinned_only;
                 ControlsOutcome::ApplyAndStay(crate::tui::Msg::SetFilter(new_filter))
             }
             ControlsCursor::FilterPrState => {
@@ -597,6 +603,9 @@ fn flatten_rows(ctx: &ControlsContext<'_>) -> Vec<ControlsCursor> {
         rows.push(ControlsCursor::FilterPrBranch);
         rows.push(ControlsCursor::FilterFloatTrackedPrs);
     }
+    if matches!(ctx.view, View::Sessions | View::Mux | View::Prs) {
+        rows.push(ControlsCursor::FilterPinnedOnly);
+    }
     rows.push(ControlsCursor::FilterClear);
     for idx in 0..SORT_OPTIONS.len() {
         rows.push(ControlsCursor::Sort(idx));
@@ -806,6 +815,13 @@ impl ControlsOverlayWidget<'_> {
                     self.ctx.filter.float_tracked_prs_top,
                     here,
                 ),
+                here,
+            );
+        }
+        if matches!(self.ctx.view, View::Sessions | View::Mux | View::Prs) {
+            let here = cursor == ControlsCursor::FilterPinnedOnly;
+            body.push_row(
+                checkbox_row("Pinned only", self.ctx.filter.pinned_only, here),
                 here,
             );
         }
@@ -1061,12 +1077,14 @@ fn max_controls_content_lines() -> usize {
         .iter()
         .map(|view| {
             let filter_rows = match *view {
-                View::Sessions => 5,
+                // The pinned-only checkbox closes each native view's
+                // filters.
+                View::Sessions => 6,
                 // Mux adds the hide-gone-muxes checkbox.
-                View::Mux => 6,
+                View::Mux => 7,
                 // The state row, the local-branch row, and the float
                 // checkbox.
-                View::Prs => 7,
+                View::Prs => 8,
                 _ => 4,
             };
             // Mux view appends a "Recency by" section: blank + header

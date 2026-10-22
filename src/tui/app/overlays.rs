@@ -28,9 +28,91 @@ impl App {
     /// overlay's Confirm(String) maps to Msg::CommitRename via
     /// the uniform Overlay trait.
     pub fn open_rename_overlay(&mut self, state: crate::tui::widgets::input::TextInputState) {
+        self.slot_prompt = None;
         self.modal_stack.push(crate::tui::Modal::Rename(
             crate::tui::RenameOverlayState::new(state),
         ));
+    }
+
+    /// Open the text prompt that edits a pin slot.
+    pub(crate) fn open_slot_prompt(
+        &mut self,
+        prompt: super::SlotPrompt,
+        title: &str,
+        initial: &str,
+    ) {
+        self.open_rename_overlay(crate::tui::widgets::input::TextInputState::new(
+            title, initial,
+        ));
+        self.slot_prompt = Some(prompt);
+    }
+
+    /// Open a menu that confirms unpinning each of `slots`.
+    pub(crate) fn open_pin_menu(&mut self, slots: Vec<String>) {
+        use crate::tui::Msg;
+        use crate::tui::widgets::row_menu::{RowMenuEntry, RowMenuState};
+        let entries: Vec<RowMenuEntry> = slots
+            .into_iter()
+            .map(|slot| {
+                RowMenuEntry::new(
+                    format!("Unpin {slot}"),
+                    "remove the slot; the entity and its history stay",
+                    Msg::Unpin(slot),
+                )
+                .confirming()
+            })
+            .collect();
+        if !entries.is_empty() {
+            self.open_row_menu(RowMenuState::new("Pinned", entries));
+        }
+    }
+
+    /// Switch to the native view of the entity slot `slot` points at
+    /// and select its row.
+    pub(crate) fn reveal_slot(&mut self, slot: &str) -> Result<(), String> {
+        use crate::tui::View;
+        let node = self
+            .snapshot_handle()
+            .and_then(|handle| {
+                crate::tui::rows::pin_nodes(handle.snapshot())
+                    .into_iter()
+                    .find(|pin| pin.id.id == slot)
+                    .and_then(|pin| pin.target_node.clone())
+            })
+            .ok_or_else(|| format!("slot `{slot}` has no entity to reveal"))?;
+        let view = match node {
+            NodeId::MuxSession(_) => View::Mux,
+            NodeId::ForgePr(_) => View::Prs,
+            _ => View::Sessions,
+        };
+        self.switch_to_view(view);
+        self.rebuild_tree_in_place();
+        let Some(index) = self
+            .tree
+            .rows
+            .iter()
+            .position(|row| crate::tui::rows::row_node(&row.id) == Some(&node))
+        else {
+            return Err(format!("`{slot}` isn't listed in the {view:?} view"));
+        };
+        let depth = self.tree.rows[index].depth;
+        let mut wanted = depth;
+        let ancestors: Vec<RowId> = self.tree.rows[..index]
+            .iter()
+            .rev()
+            .filter(|row| {
+                let keep = row.depth < wanted;
+                if keep {
+                    wanted = row.depth;
+                }
+                keep
+            })
+            .map(|row| row.id.clone())
+            .collect();
+        self.expanded.extend(ancestors);
+        let id = self.tree.rows[index].id.clone();
+        self.set_selection(id);
+        Ok(())
     }
 
     /// Pop the rename overlay if it's on top; no-op otherwise.

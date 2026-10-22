@@ -65,14 +65,14 @@ fn translate_lowercase_r_still_refreshes() {
 }
 
 #[test]
-fn pin_mutation_refresh_config_forces_local_discovery() {
+fn store_write_refresh_config_forces_local_discovery() {
     let mut config = RunConfig::defaults();
     config.refresh = false;
     config.no_cache = true;
     config.default_view = View::Mux;
     let app = App::new(config);
 
-    let refresh_config = pin_mutation_refresh_config(&app);
+    let refresh_config = store_write_refresh_config(&app);
 
     assert!(refresh_config.refresh);
     assert!(refresh_config.no_cache);
@@ -957,6 +957,38 @@ mod mux_launch_argv {
             ]
         );
     }
+
+    fn request(
+        pin: crate::tui::widgets::mux_launch::PinChoice,
+    ) -> crate::tui::widgets::mux_launch::MuxLaunchRequest {
+        crate::tui::widgets::mux_launch::MuxLaunchRequest {
+            harness: "codex".into(),
+            name: "w".into(),
+            cwd: "/src".into(),
+            mux_socket: None,
+            launch_argv: vec!["codex".into(), "--x".into()],
+            worktree_branch: None,
+            worktree_repo: None,
+            pin,
+        }
+    }
+
+    #[test]
+    fn launch_argv_carries_the_pin_choice_before_the_argv() {
+        use crate::tui::widgets::mux_launch::PinChoice;
+        let off = mux_launch_argv(&request(PinChoice::Off));
+        assert!(!off.contains(&"--pin".to_string()), "{off:?}");
+
+        let pin = mux_launch_argv(&request(PinChoice::Pin));
+        assert!(pin.contains(&"--pin".to_string()), "{pin:?}");
+        assert!(!pin.contains(&"--no-launch".to_string()), "{pin:?}");
+
+        let plan = mux_launch_argv(&request(PinChoice::PlanOnly));
+        let pin_at = plan.iter().position(|a| a == "--pin").unwrap();
+        assert_eq!(plan[pin_at + 1], "--no-launch");
+        let argv_at = plan.iter().position(|a| a == "--argv").unwrap();
+        assert!(pin_at < argv_at, "flags precede the argv tokens: {plan:?}");
+    }
 }
 
 #[test]
@@ -1552,10 +1584,8 @@ mod lazy_forge {
 #[test]
 fn keys_of_the_retired_pin_surfaces_are_unbound() {
     // The pins overlay and its direct shortcuts left with the old pin
-    // model; pins are slots managed from the CLI and the Pinned view.
+    // model; pins are slots managed from the row menu.
     for (code, mods) in [
-        (KeyCode::Char('p'), KeyModifiers::NONE),
-        (KeyCode::Char('N'), KeyModifiers::SHIFT),
         (KeyCode::Char('B'), KeyModifiers::SHIFT),
         (KeyCode::Char('L'), KeyModifiers::SHIFT),
         (KeyCode::Char('A'), KeyModifiers::SHIFT),
@@ -1564,4 +1594,16 @@ fn keys_of_the_retired_pin_surfaces_are_unbound() {
     ] {
         assert_eq!(translate(press(code, mods), 24), None, "{code:?}");
     }
+}
+
+#[test]
+fn p_pins_and_capital_n_launches_with_a_worktree() {
+    assert!(matches!(
+        translate(press(KeyCode::Char('p'), KeyModifiers::NONE), 24),
+        Some(Action::Msg(msg)) if *msg == Msg::TogglePin
+    ));
+    assert!(matches!(
+        translate(press(KeyCode::Char('N'), KeyModifiers::SHIFT), 24),
+        Some(Action::Msg(msg)) if *msg == Msg::OpenMuxLaunchWorktreeForm
+    ));
 }

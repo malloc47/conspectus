@@ -64,7 +64,15 @@ pub(super) fn execute_store_op(
 ) {
     use crate::tui::effect::StoreOp;
     match op {
-        StoreOp::PinRecord { record_id } => execute_pin_record(app, &record_id),
+        StoreOp::PinRecord { record_id } => {
+            execute_pin(app, &crate::pin_ops::Pinnable::Record(record_id));
+        }
+        StoreOp::PinNode { node } => execute_pin(app, &crate::pin_ops::Pinnable::Node(node)),
+        StoreOp::Unpin { slot } => execute_unpin(app, &slot),
+        StoreOp::RenameSlot { slot, new_name } => execute_rename_slot(app, tmux, &slot, &new_name),
+        StoreOp::EditSlot { slot, assignment } => execute_edit_slot(app, &slot, &assignment),
+        StoreOp::RetargetSlot { slot, target } => execute_retarget_slot(app, &slot, &target),
+        StoreOp::RefreshSlot { slot } => execute_refresh_slot(app, &slot),
         StoreOp::ForgetRecord { record_id } => {
             execute_reap_records(app, std::iter::once(record_id).collect());
         }
@@ -397,33 +405,203 @@ pub(super) fn execute_view_session(
     }
 }
 
-/// Executor branch for `StoreOp::PinRecord`: add a slot that points at
-/// a history record (the same gesture as `conspectus pin add <id>`).
-fn execute_pin_record(app: &mut App, record_id: &str) {
-    use crate::pin_ops::{Pinnable, pin};
-    let Some(store) = crate::pin_slots::SlotStore::from_env() else {
+/// The slot store, or an error entry in the log when there is no data
+/// home to keep one in.
+fn slot_store_or_report(app: &mut App) -> Option<crate::pin_slots::SlotStore> {
+    let store = crate::pin_slots::SlotStore::from_env();
+    if store.is_none() {
         app.report(LogEntry::error("pin: no data home to store slots in"));
-        return;
-    };
-    let Some(handle) = app.snapshot_handle() else {
-        return;
-    };
-    let result = pin(
-        handle.snapshot(),
-        &store,
-        None,
-        &Pinnable::Record(record_id.to_string()),
-        None,
-    );
-    let entry = match result {
-        Ok(slot) => {
+    }
+    store
+}
+
+/// Record the outcome of a slot write: refresh the tree on success so
+/// markers and the Pinned view catch up, and log either way.
+fn finish_slot_write(app: &mut App, outcome: Result<String, String>) {
+    let entry = match outcome {
+        Ok(summary) => {
             let config = app.config().clone();
-            refresh_after_pin_mutation(app, &config);
-            LogEntry::info(format!("pinned `{}` as slot `{}`", record_id, slot.id))
+            refresh_after_store_write(app, &config);
+            LogEntry::info(summary)
         }
-        Err(err) => LogEntry::error(format!("pin failed: {err}")),
+        Err(message) => LogEntry::error(message),
     };
     app.report(entry);
+}
+
+/// Executor branch for `StoreOp::PinRecord` and `PinNode`: add a slot
+/// that points at the entity (the same gesture as `conspectus pin
+/// add`). A live mux, worktree, or repo with no history record gets one
+/// first, so the history writer comes along.
+fn execute_pin(app: &mut App, what: &crate::pin_ops::Pinnable) {
+    let Some(store) = slot_store_or_report(app) else {
+        return;
+    };
+    let Some(handle) = app.snapshot_handle().cloned() else {
+        return;
+    };
+    let history = crate::history::HistoryWriter::from_env(app.config().history.clone());
+    let outcome = crate::pin_ops::pin(handle.snapshot(), &store, history.as_ref(), what, None)
+        .map(|slot| format!("pinned as slot `{}`", slot.id))
+        .map_err(|err| format!("pin failed: {err}"));
+    finish_slot_write(app, outcome);
+}
+
+/// Executor branch for `StoreOp::Unpin`: remove the slot. The entity
+/// and its history record stay (the record becomes reapable again).
+fn execute_unpin(app: &mut App, slot: &str) {
+    let Some(store) = slot_store_or_report(app) else {
+        return;
+    };
+    let outcome = match store.remove(slot) {
+        Ok(write) if write.changed => Ok(format!("unpinned `{slot}`")),
+        Ok(_) => Err(format!("unpin: no slot named `{slot}`")),
+        Err(err) => Err(format!("unpin failed: {err}")),
+    };
+    finish_slot_write(app, outcome);
+}
+
+/// Executor branch for `StoreOp::RenameSlot`: rename the slot, and a
+/// live mux slot's tmux session with it, pinning the name override
+/// (ADR 0029 lockstep, as `pin rename`).
+fn execute_rename_slot(app: &mut App, tmux: &dyn MuxBackend, slot: &str, new_name: &str) {
+    let Some(store) = slot_store_or_report(app) else {
+        return;
+    };
+    let Some(handle) = app.snapshot_handle().cloned() else {
+        return;
+    };
+    let snapshot = handle.snapshot();
+    let mut notes = Vec::new();
+    let live_mux = crate::tui::rows::pin_nodes(snapshot)
+        .into_iter()
+        .find(|pin| pin.id.id == slot)
+        .and_then(
+            |pin| match (pin.kind, pin.status, pin.target_node.as_ref()) {
+                (
+                    crate::model::PinKind::Mux,
+                    crate::model::SlotStatus::Live,
+                    Some(crate::model::NodeId::MuxSession(mux)),
+                ) => Some(mux.clone()),
+                _ => None,
+            },
+        );
+    if let Some(mux) = live_mux {
+        match crate::rename::plan_mux_rename(snapshot, &mux, new_name.to_string()) {
+            Ok(plan) => {
+                for (slot, result) in
+                    crate::rename::apply_pin_slot_updates(&store, &plan.pin_slot_updates)
+                {
+                    if let Err(err) = result {
+                        notes.push(format!("pin update failed: {slot}: {err}"));
+                    }
+                }
+                match rename_mux_via_backend(tmux, &plan.mux_rename) {
+                    Ok(()) => notes.push(format!("renamed the mux to `{new_name}`")),
+                    Err(reason) => {
+                        finish_slot_write(app, Err(format!("rename failed: {reason}")));
+                        return;
+                    }
+                }
+                let name = (
+                    "name".to_string(),
+                    crate::model::FieldValue::Text(new_name.to_string()),
+                );
+                if let Err(err) = crate::pin_ops::edit(&store, slot, &[name], &[]) {
+                    notes.push(format!("name override not set: {err}"));
+                }
+            }
+            Err(err) => notes.push(format!("the mux keeps its name: {err}")),
+        }
+    }
+    let outcome = crate::pin_ops::rename(&store, slot, new_name)
+        .map(|_| {
+            let mut parts = vec![format!("renamed slot `{slot}` to `{new_name}`")];
+            parts.extend(notes);
+            parts.join(" · ")
+        })
+        .map_err(|err| format!("rename failed: {err}"));
+    finish_slot_write(app, outcome);
+}
+
+/// Executor branch for `StoreOp::EditSlot`: `field=value` sets an
+/// override and `field=` clears it.
+fn execute_edit_slot(app: &mut App, slot: &str, assignment: &str) {
+    let Some(store) = slot_store_or_report(app) else {
+        return;
+    };
+    let Some(kind) = store
+        .load()
+        .slots
+        .into_iter()
+        .find(|existing| existing.id == slot)
+        .map(|existing| existing.kind)
+    else {
+        finish_slot_write(app, Err(format!("edit: no slot named `{slot}`")));
+        return;
+    };
+    let outcome = (|| {
+        let (field, value) = assignment
+            .split_once('=')
+            .ok_or_else(|| format!("`{assignment}` isn't field=value"))?;
+        let field = field.trim();
+        let (set, unset) = if value.trim().is_empty() {
+            (Vec::new(), vec![field.to_string()])
+        } else {
+            let parsed =
+                crate::pin_ops::parse_override(kind, assignment).map_err(|err| err.to_string())?;
+            (vec![parsed], Vec::new())
+        };
+        crate::pin_ops::edit(&store, slot, &set, &unset)
+            .map(|changed| {
+                if changed {
+                    format!("edited `{slot}`: {field}")
+                } else {
+                    format!("`{slot}` already had that")
+                }
+            })
+            .map_err(|err| err.to_string())
+    })()
+    .map_err(|why| format!("edit failed: {why}"));
+    finish_slot_write(app, outcome);
+}
+
+/// Executor branch for `StoreOp::RetargetSlot`.
+fn execute_retarget_slot(app: &mut App, slot: &str, target: &str) {
+    let Some(store) = slot_store_or_report(app) else {
+        return;
+    };
+    let Some(handle) = app.snapshot_handle().cloned() else {
+        return;
+    };
+    let history = crate::history::HistoryWriter::from_env(app.config().history.clone());
+    let outcome = crate::pin_ops::find_pinnable(handle.snapshot(), target)
+        .and_then(|what| {
+            crate::pin_ops::retarget(handle.snapshot(), &store, history.as_ref(), slot, &what)
+        })
+        .map(|_| format!("`{slot}` now points at `{target}`"))
+        .map_err(|err| format!("retarget failed: {err}"));
+    finish_slot_write(app, outcome);
+}
+
+/// Executor branch for `StoreOp::RefreshSlot`.
+fn execute_refresh_slot(app: &mut App, slot: &str) {
+    let Some(store) = slot_store_or_report(app) else {
+        return;
+    };
+    let Some(handle) = app.snapshot_handle().cloned() else {
+        return;
+    };
+    let outcome = crate::pin_ops::refresh_snapshot(handle.snapshot(), &store, slot)
+        .map(|changed| {
+            if changed {
+                format!("refreshed the snapshot of `{slot}`")
+            } else {
+                format!("the snapshot of `{slot}` was already current")
+            }
+        })
+        .map_err(|err| format!("refresh failed: {err}"));
+    finish_slot_write(app, outcome);
 }
 
 /// Executor branch for `StoreOp::ForgetRecord` and `ReapRecords`:
@@ -439,7 +617,7 @@ fn execute_reap_records(app: &mut App, ids: std::collections::BTreeSet<String>) 
     let entry = match crate::history::reap::reap(&store, &ids) {
         Ok(removed) => {
             let config = app.config().clone();
-            refresh_after_pin_mutation(app, &config);
+            refresh_after_store_write(app, &config);
             LogEntry::info(format!(
                 "forgot {removed} history record{}",
                 if removed == 1 { "" } else { "s" }

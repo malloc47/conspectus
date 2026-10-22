@@ -2340,7 +2340,7 @@ fn session_id(key: &str) -> NodeId {
 }
 
 #[test]
-fn none_grouping_floats_pinned_session_rows_to_top() {
+fn none_grouping_keeps_pinned_session_rows_where_they_sort() {
     use crate::model::PinKind;
     let mut snapshot = GraphSnapshot::empty();
     snapshot.nodes.push(agent_session_with_activity(
@@ -2384,9 +2384,10 @@ fn none_grouping_floats_pinned_session_rows_to_top() {
         })
         .collect();
     assert_eq!(sessions.len(), 2, "{:#?}", tree.rows);
-    assert_eq!(sessions[0].session.session_key, "older");
-    assert_eq!(sessions[0].pin_id.as_deref(), Some("older-pin"));
-    assert_eq!(sessions[1].session.session_key, "newer");
+    // Pinning doesn't float a row: the newer session still leads.
+    assert_eq!(sessions[0].session.session_key, "newer");
+    assert_eq!(sessions[1].session.session_key, "older");
+    assert_eq!(sessions[1].pin_id.as_deref(), Some("older-pin"));
 }
 
 #[test]
