@@ -158,13 +158,19 @@ always = ["/dev/null", "/dev/tty", "/dev/pts/*"]
 read = [
     "$STATE/conspectus/**",
     "$CACHE/conspectus/**",
-    "$DATA/conspectus/**",
+    "$DATA/conspectus/graph.bin",
+    "$DATA/conspectus/graph.bin.tmp.*",
     "$RUNTIME/conspectus/**",
 ]
 # User-intent TOML stores, each written through a sibling temporary
 # file (`.<name>.tmp-<pid>-<attempt>`) renamed into place.
+# The pin slot store is one of them: the daemon and every read command
+# leave it alone (ADR 0141, ADR 0143 category 1).
 act = [
     "$CONFIG/conspectus/**",
+    "$DATA/conspectus/pins.toml",
+    "$DATA/conspectus/pins.toml.lock",
+    "$DATA/conspectus/.pins.toml.tmp-*",
     "$PROJECT/.conspectus.toml",
     "$PROJECT/..conspectus.toml.tmp-*",
     # The destination of a rebuild's `git clone` (ADR 0142).

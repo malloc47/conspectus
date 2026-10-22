@@ -950,11 +950,29 @@ fn the_built_binary_stays_inside_the_capability_manifest() {
     let vars = world.vars(None);
     let project = &world.project;
 
+    // A pin slot already on disk: no read command or the daemon may
+    // rewrite the store (ADR 0143 category 1).
+    let pins = world.root.join("xdg/data/conspectus/pins.toml");
+    fs::create_dir_all(pins.parent().expect("data dir")).expect("data dir");
+    fs::write(
+        &pins,
+        "[pins]\nschema_version = 2\n\n[[pins.slots]]\nid = \"seeded\"\nkind = \"mux\"\n",
+    )
+    .expect("seed pins.toml");
+
     // Read-only commands: discovery, tables, exports, the TUI.
     let mut reads = vec![
         world.run(&strace, "graph", &["graph", "--format", "json"], project),
         world.run(&strace, "table", &["table", "sessions"], project),
         world.run(&strace, "node", &["columns", "sessions"], project),
+        world.run(&strace, "pin-list", &["pin", "list"], project),
+        world.run(&strace, "history-list", &["history", "list"], project),
+        world.run(
+            &strace,
+            "history-reap-dry-run",
+            &["history", "reap", "--dry-run"],
+            project,
+        ),
     ];
     if cfg!(feature = "snapshot") {
         // The TUI opens on the project's repo row, which previews its
@@ -987,6 +1005,13 @@ fn the_built_binary_stays_inside_the_capability_manifest() {
         project,
     );
 
+    assert!(
+        fs::read_to_string(&pins)
+            .expect("pins.toml")
+            .contains("seeded"),
+        "read commands left the slot store alone"
+    );
+
     // The daemon, with clients asking it for a snapshot and a forge
     // refresh.
     let (serve, serve_dir) = world.spawn(&strace, "serve", &["serve"], project);
@@ -1012,6 +1037,11 @@ fn the_built_binary_stays_inside_the_capability_manifest() {
         output.status.success(),
         "`conspectus serve` failed: {}",
         String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(
+        fs::read_to_string(&pins).expect("pins.toml"),
+        "[pins]\nschema_version = 2\n\n[[pins.slots]]\nid = \"seeded\"\nkind = \"mux\"\n",
+        "the daemon left the slot store byte for byte alone"
     );
     let mut daemon = clients;
     daemon.push(serve_dir);

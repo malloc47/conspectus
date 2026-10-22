@@ -421,3 +421,42 @@ fn history_show_prints_the_record_and_its_pins() {
     let stderr = world.fails(&["history", "show", "h_000000000000"]);
     assert!(stderr.contains("no history record"), "{stderr}");
 }
+
+#[test]
+fn renaming_a_live_mux_slot_renames_the_tmux_session_with_it() {
+    if !tmux_available() {
+        eprintln!("tmux not installed; skipping");
+        return;
+    }
+    let world = World::new();
+    world.start_mux("ren-a");
+    world.ok(&["pin", "add", "ren-a"]);
+
+    world.ok(&["pin", "rename", "ren-a", "ren-b"]);
+
+    assert!(
+        world.tmux(&["has-session", "-t", "ren-b"]),
+        "the session was renamed"
+    );
+    assert!(!world.tmux(&["has-session", "-t", "=ren-a"]));
+    let text = world.pins_text();
+    assert!(text.contains("id = \"ren-b\""), "{text}");
+    assert!(
+        text.contains("name = \"ren-b\""),
+        "the name override follows: {text}"
+    );
+    let list = world.ok(&["pin", "list"]);
+    assert!(list.contains("ren-b") && list.contains("live"), "{list}");
+
+    // `--no-mux` renames the slot alone.
+    world.ok(&["pin", "rename", "ren-b", "ren-c", "--no-mux"]);
+    assert!(
+        world.tmux(&["has-session", "-t", "ren-b"]),
+        "tmux kept its name"
+    );
+    let text = world.pins_text();
+    assert!(
+        text.contains("id = \"ren-c\"") && text.contains("name = \"ren-b\""),
+        "{text}"
+    );
+}

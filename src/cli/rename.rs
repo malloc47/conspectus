@@ -186,7 +186,7 @@ impl RenameMuxArgs {
 
 /// Execute a [`MuxRenamePlan`]: update each affected pin slot's name
 /// override, then chain the tmux `rename-session`.
-fn execute_mux_rename_plan(plan: &MuxRenamePlan, tmux: &dyn MuxBackend) -> Result<()> {
+pub(super) fn execute_mux_rename_plan(plan: &MuxRenamePlan, tmux: &dyn MuxBackend) -> Result<()> {
     if !plan.pin_slot_updates.is_empty()
         && let Some(store) = crate::pin_slots::SlotStore::from_env()
     {

@@ -200,6 +200,21 @@ pub enum Diagnostic {
 }
 
 impl Diagnostic {
+    /// The operator-facing line for a diagnostic that tells them what
+    /// to do next, if it is one.
+    pub fn advice(&self) -> Option<String> {
+        match self {
+            Self::LegacyPins { count, ids } => Some(format!(
+                "{count} legacy pin{} still read from config files ({}); \
+                 run `conspectus pin migrate` to convert {}",
+                if *count == 1 { " is" } else { "s are" },
+                ids.join(", "),
+                if *count == 1 { "it" } else { "them" },
+            )),
+            _ => None,
+        }
+    }
+
     /// Whether discovery, rather than resolution, produced this
     /// diagnostic. Resolution regenerates its own each run and keeps
     /// these.

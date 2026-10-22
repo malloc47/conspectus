@@ -16,7 +16,9 @@ use crate::discovery::{DiscoveryContext, LocalDiscoveryConfig};
 use crate::history::HistoryWriter;
 use crate::legacy_bindings::PinBindingsCache;
 use crate::legacy_registry::PinStoreRegistry;
-use crate::model::{GraphNode, GraphSnapshot, NodeId, PinId, PinKind, PinNode, SlotFields};
+use crate::model::{
+    GraphNode, GraphSnapshot, NodeId, PinId, PinKind, PinNode, SlotFields, SlotStatus,
+};
 use crate::pin_ops;
 use crate::pin_slots::{Placement, SlotStore};
 
@@ -284,12 +286,44 @@ struct PinRenameArgs {
     name: String,
     /// New slot name.
     new_name: String,
+    /// Rename the slot only; leave a live mux slot's tmux session as it
+    /// is.
+    #[arg(long = "no-mux")]
+    no_mux: bool,
+    /// Discovery scan root. Defaults to the working directory.
+    #[arg(long = "scan-root", value_name = "PATH")]
+    scan_roots: Vec<PathBuf>,
 }
 
 impl PinRenameArgs {
     fn run(self) -> Result<()> {
-        let changed = pin_ops::rename(&slot_store()?, &self.name, &self.new_name)
-            .map_err(|e| anyhow!("{e}"))?;
+        let store = slot_store()?;
+        if !self.no_mux {
+            // A live mux slot renames its tmux session too, and the
+            // plan sets the slot's `name` override so it keeps following
+            // the mux (ADR 0029).
+            let snapshot = discover(&self.scan_roots)?;
+            let pin = pinned_node(&snapshot, &self.name)?;
+            if let (PinKind::Mux, SlotStatus::Live, Some(NodeId::MuxSession(mux))) =
+                (pin.kind, pin.status, pin.target_node.as_ref())
+            {
+                let plan = crate::rename::plan_mux_rename(&snapshot, mux, self.new_name.clone())
+                    .map_err(|err| anyhow!("mux rename planning failed: {err}"))?;
+                super::rename::execute_mux_rename_plan(
+                    &plan,
+                    &crate::discovery::tmux::SystemTmux::new(),
+                )?;
+                // The plan only rewrites an override that already
+                // exists; a slot renamed on purpose pins the name.
+                let name = (
+                    "name".to_string(),
+                    crate::model::FieldValue::Text(self.new_name.clone()),
+                );
+                pin_ops::edit(&store, &self.name, &[name], &[]).map_err(|e| anyhow!("{e}"))?;
+            }
+        }
+        let changed =
+            pin_ops::rename(&store, &self.name, &self.new_name).map_err(|e| anyhow!("{e}"))?;
         println!(
             "{} `{}` → `{}`",
             if changed { "renamed" } else { "unchanged" },
@@ -441,6 +475,13 @@ impl PinListArgs {
             })
             .collect();
         pins.sort_by_key(|pin| pin.order);
+        for advice in snapshot
+            .diagnostics
+            .iter()
+            .filter_map(crate::model::Diagnostic::advice)
+        {
+            eprintln!("conspectus: {advice}");
+        }
         if pins.is_empty() {
             println!("no pin slots; `conspectus pin add <target>` makes one");
             return Ok(());

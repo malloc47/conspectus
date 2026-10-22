@@ -835,3 +835,34 @@ fn node_ids_parse_back_from_their_display_form() {
     assert_eq!(NodeId::parse("nonsense"), None);
     assert_eq!(NodeId::parse("forge_pr:github:no-number"), None);
 }
+
+#[test]
+fn legacy_pin_advice_names_the_migration_command() {
+    let one = Diagnostic::LegacyPins {
+        count: 1,
+        ids: vec!["api".into()],
+    };
+    let many = Diagnostic::LegacyPins {
+        count: 2,
+        ids: vec!["api".into(), "docs".into()],
+    };
+    assert_eq!(
+        one.advice().as_deref(),
+        Some(
+            "1 legacy pin is still read from config files (api); run `conspectus pin migrate` to convert it"
+        )
+    );
+    assert!(
+        many.advice()
+            .unwrap()
+            .contains("2 legacy pins are still read")
+    );
+    assert!(
+        Diagnostic::Config {
+            path: "p".into(),
+            message: "m".into()
+        }
+        .advice()
+        .is_none()
+    );
+}
