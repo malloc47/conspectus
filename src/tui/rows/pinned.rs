@@ -438,11 +438,14 @@ fn session_row(
     let Some(GraphNode::AgentSession(session)) = snapshot.find_node(id) else {
         return None;
     };
-    let alias = snapshot.aliases.get(id).map(ToString::to_string);
     let key = &session.id.session_key;
-    let label = alias
-        .or_else(|| session.title.clone().filter(|t| !t.is_empty()))
-        .unwrap_or_else(|| key.chars().take(8).collect());
+    let mux = snapshot.mux_host_of(id);
+    let label = crate::aliases::session_display_name(
+        snapshot.aliases.get(id),
+        session.title.as_deref(),
+        mux.as_ref().map(|host| host.name.as_str()),
+    )
+    .map_or_else(|| key.chars().take(8).collect(), str::to_string);
     let live = mux_live && snapshot.is_live(id);
     Some(MixedRow {
         node_kind: NodeKind::AgentSession,
@@ -536,6 +539,304 @@ fn children_of(snapshot: &GraphSnapshot, pin: &PinNode, now: Option<i64>) -> Vec
 #[cfg(test)]
 #[path = "pinned_tests.rs"]
 mod tests;
+
+/// A world with a slot of every pinnable kind in each state that kind
+/// can be in, for the Pinned view's width snapshots.
+#[cfg(test)]
+pub(crate) fn all_kinds_world() -> GraphSnapshot {
+    use crate::model::{
+        AgentSessionId, AgentSessionNode, BranchId, BranchNode, CheckoutId, CheckoutNode,
+        CheckoutRecipe, CheckoutRecord, FieldValue, ForgePrId, ForgePrNode, ForkId, ForkNode,
+        HistorySnapshot, MuxRecipe, MuxRecord, MuxSessionId, MuxSessionNode, NodePresence, PinSlot,
+        RecordMeta, RepoId, RepoNode, RepoRecipe, RepoRecord, SlotFields, WorkspaceId,
+        WorkspaceNode,
+    };
+
+    const NOW: i64 = 1_700_000_000;
+    fn meta(id: &str, key: &str, last_seen: i64) -> RecordMeta {
+        RecordMeta {
+            id: id.into(),
+            key: key.into(),
+            first_seen: 1,
+            last_seen,
+            origin: Default::default(),
+            display: Default::default(),
+            rebuilt_from: None,
+        }
+    }
+    fn slot(id: &str, kind: PinKind, target: Option<String>, order: u32) -> PinSlot {
+        PinSlot {
+            id: id.into(),
+            kind,
+            target,
+            pinned_at: None,
+            overrides: SlotFields::new(),
+            snapshot: SlotFields::from([("label".to_string(), FieldValue::Text(id.into()))]),
+            order,
+            legacy: false,
+        }
+    }
+    fn mux_record(id: &str, name: &str, last_seen: i64) -> MuxRecord {
+        MuxRecord {
+            meta: meta(id, &format!("mux_session:tmux:{name}"), last_seen),
+            recipe: MuxRecipe {
+                backend: "tmux".into(),
+                name: name.into(),
+                cwd: Some("/home/op/src/conspectus".into()),
+                harness: Some("codex".into()),
+                ..Default::default()
+            },
+            extra: Default::default(),
+        }
+    }
+    fn pr(number: u64, state: &str, draft: bool) -> ForgePrNode {
+        ForgePrNode {
+            id: ForgePrId::new("github", "github.com", "malloc47", "conspectus", number),
+            provider: "github".into(),
+            host: "github.com".into(),
+            owner: "malloc47".into(),
+            repo: "conspectus".into(),
+            number,
+            state: Some(state.into()),
+            title: Some(format!("Change number {number}")),
+            url: None,
+            updated_epoch: None,
+            is_draft: draft,
+            head_ref: None,
+        }
+    }
+
+    let repo_id = RepoId::new("/home/op/src/conspectus/.git");
+    let mut repo = RepoNode::new(repo_id.clone());
+    repo.source_paths = vec!["/home/op/src/conspectus".into()];
+    let checkout = CheckoutNode::new(
+        CheckoutId::new(repo_id.clone(), "/home/op/src/conspectus"),
+        "/home/op/src/conspectus",
+    );
+    let mut live_mux = MuxSessionNode::new(MuxSessionId::new("tmux:main"), "tmux", "main");
+    live_mux.cwd = Some("/home/op/src/conspectus".into());
+    live_mux.activity_epoch = Some(NOW - 60);
+    let mut session = AgentSessionNode::new(
+        AgentSessionId::new("claude-code", "/state", "aaaaaaaa11"),
+        "claude-code",
+    );
+    session.cwd = Some("/home/op/src/conspectus".into());
+    session.title = Some("Fix the ledger merge".into());
+    session.last_active_epoch = Some(NOW - 600);
+    let branch = BranchNode {
+        id: BranchId::new(repo_id.clone(), "refs/heads/main"),
+        refname: "refs/heads/main".into(),
+        current_commit: None,
+        upstream: Some("origin/main".into()),
+    };
+    let workspace = WorkspaceNode {
+        id: WorkspaceId::new("/home/op/src"),
+        root: "/home/op/src".into(),
+        provider: Some("atelier".into()),
+        name: Some("src".into()),
+    };
+    let fork = ForkNode {
+        id: ForkId::new("atelier/fork-1"),
+        provider: "atelier".into(),
+        provider_source_key: "atelier/fork-1".into(),
+        name: Some("spike".into()),
+        scope: None,
+        capabilities: Vec::new(),
+    };
+
+    let history = HistorySnapshot {
+        muxes: vec![
+            mux_record("h_main", "main", NOW - 60),
+            mux_record("h_gone", "gone-mux", NOW - 400_000),
+            mux_record("h_unknown", "far-mux", NOW - 7_200),
+        ],
+        checkouts: vec![CheckoutRecord {
+            meta: meta(
+                "h_wt",
+                "checkout:/home/op/src/conspectus-old",
+                NOW - 172_800,
+            ),
+            recipe: CheckoutRecipe {
+                repo: "repo:/home/op/src/conspectus/.git".into(),
+                root: "/home/op/src/conspectus-old".into(),
+                linked: true,
+                branch: Some("feature/old".into()),
+                ..Default::default()
+            },
+            extra: Default::default(),
+        }],
+        repos: vec![RepoRecord {
+            meta: meta("h_repo", "repo:/home/op/src/lost/.git", NOW - 864_000),
+            recipe: RepoRecipe {
+                common_dir: "/home/op/src/lost/.git".into(),
+                primary_root: Some("/home/op/src/lost".into()),
+                ..Default::default()
+            },
+            extra: Default::default(),
+        }],
+        presence: std::collections::BTreeMap::from([
+            (
+                "h_gone".to_string(),
+                NodePresence::Gone {
+                    last_seen: NOW - 400_000,
+                },
+            ),
+            (
+                "h_unknown".to_string(),
+                NodePresence::Unknown {
+                    last_seen: NOW - 7_200,
+                },
+            ),
+            (
+                "h_wt".to_string(),
+                NodePresence::Gone {
+                    last_seen: NOW - 172_800,
+                },
+            ),
+            (
+                "h_repo".to_string(),
+                NodePresence::Gone {
+                    last_seen: NOW - 864_000,
+                },
+            ),
+        ]),
+        ..Default::default()
+    };
+
+    let node = |id: NodeId| id.to_string();
+    let pins = vec![
+        slot("mux-live", PinKind::Mux, Some("history:h_main".into()), 0),
+        slot("mux-gone", PinKind::Mux, Some("history:h_gone".into()), 1),
+        slot(
+            "mux-unknown",
+            PinKind::Mux,
+            Some("history:h_unknown".into()),
+            2,
+        ),
+        slot("mux-planned", PinKind::Mux, None, 3),
+        slot(
+            "mux-missing",
+            PinKind::Mux,
+            Some("history:h_deleted".into()),
+            4,
+        ),
+        slot(
+            "session-live",
+            PinKind::Session,
+            Some(node(NodeId::AgentSession(AgentSessionId::new(
+                "claude-code",
+                "/state",
+                "aaaaaaaa11",
+            )))),
+            5,
+        ),
+        slot(
+            "session-missing",
+            PinKind::Session,
+            Some(node(NodeId::AgentSession(AgentSessionId::new(
+                "claude-code",
+                "/state",
+                "bbbbbbbb22",
+            )))),
+            6,
+        ),
+        slot(
+            "worktree-live",
+            PinKind::Checkout,
+            Some(node(NodeId::Checkout(CheckoutId::new(
+                repo_id.clone(),
+                "/home/op/src/conspectus",
+            )))),
+            7,
+        ),
+        slot(
+            "worktree-gone",
+            PinKind::Checkout,
+            Some("history:h_wt".into()),
+            8,
+        ),
+        slot("worktree-planned", PinKind::Checkout, None, 9),
+        slot(
+            "repo-live",
+            PinKind::Repo,
+            Some(node(NodeId::Repo(repo_id.clone()))),
+            10,
+        ),
+        slot(
+            "repo-gone",
+            PinKind::Repo,
+            Some("history:h_repo".into()),
+            11,
+        ),
+        slot(
+            "pr-open",
+            PinKind::Pr,
+            Some(node(NodeId::ForgePr(pr(41, "open", false).id))),
+            12,
+        ),
+        slot(
+            "pr-draft",
+            PinKind::Pr,
+            Some(node(NodeId::ForgePr(pr(42, "open", true).id))),
+            13,
+        ),
+        slot(
+            "pr-closed",
+            PinKind::Pr,
+            Some(node(NodeId::ForgePr(pr(43, "closed", false).id))),
+            14,
+        ),
+        slot(
+            "branch-live",
+            PinKind::Branch,
+            Some(node(NodeId::Branch(BranchId::new(
+                repo_id.clone(),
+                "refs/heads/main",
+            )))),
+            15,
+        ),
+        slot(
+            "branch-missing",
+            PinKind::Branch,
+            Some(node(NodeId::Branch(BranchId::new(
+                repo_id,
+                "refs/heads/deleted",
+            )))),
+            16,
+        ),
+        slot(
+            "workspace-live",
+            PinKind::Workspace,
+            Some(node(NodeId::Workspace(WorkspaceId::new("/home/op/src")))),
+            17,
+        ),
+        slot(
+            "fork-live",
+            PinKind::Fork,
+            Some(node(NodeId::Fork(ForkId::new("atelier/fork-1")))),
+            18,
+        ),
+    ];
+
+    let snapshot = GraphSnapshot {
+        nodes: vec![
+            GraphNode::Repo(repo),
+            GraphNode::Checkout(checkout),
+            GraphNode::MuxSession(live_mux),
+            GraphNode::AgentSession(session),
+            GraphNode::Branch(branch),
+            GraphNode::Workspace(workspace),
+            GraphNode::Fork(fork),
+            GraphNode::ForgePr(pr(41, "open", false)),
+            GraphNode::ForgePr(pr(42, "open", true)),
+            GraphNode::ForgePr(pr(43, "closed", false)),
+        ],
+        history,
+        pins,
+        ..GraphSnapshot::empty()
+    };
+    crate::resolve::resolve_snapshot(snapshot)
+}
 
 /// A world with one slot of each state across kinds, for tests and the
 /// Pinned view's snapshot checks.

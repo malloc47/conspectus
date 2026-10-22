@@ -1,0 +1,6 @@
+---
+source: src/tui/ui_tests.rs
+expression: "format!(\"{gone}\\n{titled}\")"
+---
+abc   codex        2d  ◯  old-ledger  (mux gone)  conspectus      
+abc   codex        2d  ◯  Nightly  was in old-ledger  conspectus

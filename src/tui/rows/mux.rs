@@ -885,6 +885,7 @@ fn agent_row(
             title: agent.title.clone(),
             alias: agent.alias.clone(),
             title_disambiguates: false,
+            mux_host: None,
             primary_node: node_id,
         }),
     }

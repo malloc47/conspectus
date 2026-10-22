@@ -837,6 +837,20 @@ pub(super) fn render_session_spans(
         };
         spans.push(span!(style; "  {label}"));
     }
+    if let Some(mux) = session.gone_mux_name() {
+        // An untitled session is already named after its mux, so the
+        // chip only says that mux is gone.
+        let named_after_it = session.tree_label() == Some(mux);
+        let chip = if named_after_it {
+            "(mux gone)".to_string()
+        } else {
+            format!("was in {}", truncate_to_width(mux, 20))
+        };
+        spans.push(span!(
+            Style::default().fg(theme.secondary_text).add_modifier(theme.placeholder);
+            "  {chip}"
+        ));
+    }
     if let Some(project) = session
         .project_display
         .as_deref()

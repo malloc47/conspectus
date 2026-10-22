@@ -243,23 +243,27 @@ pub struct AgentSessionRow {
     /// search index, and status hints continue to read
     /// [`Self::display_label`] / [`Self::title`] unconditionally.
     pub title_disambiguates: bool,
+    /// The mux hosting this session, or the one that hosted it last
+    /// when that mux is gone. Untitled sessions are named after it,
+    /// and a gone one shows as a `was in` chip.
+    pub mux_host: Option<crate::model::MuxHost>,
     pub primary_node: NodeId,
-    /// Pin id when this agent-session row is the live realization of
-    /// a [`crate::model::PinCandidate`] (ADR 0057). Renderers add a
-    /// pin glyph so the operator can distinguish pin-bound sessions
-    /// at a glance; the rest of the row shape stays identical to a
-    /// non-pinned session — the alias overlay already injected the
-    /// pin's `display_name` via [`crate::resolve::pins`].
+    /// Pin slot name when this row is the live session a slot points
+    /// at. Renderers add a pin glyph.
     pub pin_id: Option<String>,
 }
 
 impl AgentSessionRow {
-    /// Apply ADR 0029's `alias > title > id-suffix` precedence and
+    /// Apply the `alias > title > mux name > id-suffix` precedence and
     /// return the strongest display label available for this row.
-    /// Falls back to `None` when neither alias nor title is set so
+    /// Falls back to `None` when none of the first three is set so
     /// callers can render the short-id suffix instead.
     pub fn display_label(&self) -> Option<&str> {
-        self.alias.as_deref().or(self.title.as_deref())
+        crate::aliases::session_display_name(
+            self.alias.as_deref(),
+            self.title.as_deref(),
+            self.mux_host.as_ref().map(|host| host.name.as_str()),
+        )
     }
 
     /// Display label for the left-tree row body. Alias wins
@@ -276,7 +280,26 @@ impl AgentSessionRow {
         if self.title_disambiguates {
             return self.title.as_deref().filter(|s| !s.is_empty());
         }
+        // An untitled session is named after its mux; a titled one
+        // that doesn't need disambiguating keeps its short id.
+        if self.title.as_deref().is_none_or(|t| t.trim().is_empty()) {
+            return self
+                .mux_host
+                .as_ref()
+                .map(|host| host.name.as_str())
+                .filter(|name| !name.is_empty());
+        }
         None
+    }
+
+    /// The name of the gone mux this session last ran in, for the
+    /// `was in` chip. `None` while the mux exists, since the live mux
+    /// already shows in the row.
+    pub fn gone_mux_name(&self) -> Option<&str> {
+        self.mux_host
+            .as_ref()
+            .filter(|host| !host.live)
+            .map(|host| host.name.as_str())
     }
 }
 
@@ -874,6 +897,7 @@ pub(crate) fn agent_row(
             title: agent.node.title.clone(),
             alias: agent.alias.clone(),
             title_disambiguates: false,
+            mux_host: None,
             primary_node: node_id,
         }),
     }

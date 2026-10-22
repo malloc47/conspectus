@@ -585,28 +585,7 @@ pub(crate) fn preferred_mux_for_session(
     snapshot: &GraphSnapshot,
     session: &NodeId,
 ) -> Option<MuxSessionId> {
-    let mut candidates: Vec<&GraphLink> = snapshot
-        .candidate_links
-        .iter()
-        .filter(|link| {
-            link.source == *session
-                && link.relation == RelationKind::LinkedToMux
-                && matches!(link.state, crate::model::LinkState::Active)
-        })
-        .collect();
-    candidates.sort_by(|left, right| {
-        right
-            .provenance
-            .precedence()
-            .cmp(&left.provenance.precedence())
-            .then_with(|| right.confidence.cmp(&left.confidence))
-            .then_with(|| left.id.cmp(&right.id))
-    });
-    let chosen = candidates.into_iter().next()?;
-    match chosen.target_node_id()? {
-        NodeId::MuxSession(id) => Some(id.clone()),
-        _ => None,
-    }
+    snapshot.preferred_mux_for(session)
 }
 
 /// Human-readable reason text for [`AttachDisabled`]. The runtime

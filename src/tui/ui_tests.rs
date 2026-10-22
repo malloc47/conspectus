@@ -1660,6 +1660,7 @@ fn session_harness_span_renders_as_filled_badge() {
         title: None,
         alias: None,
         title_disambiguates: false,
+        mux_host: None,
         primary_node: NodeId::AgentSession(AgentSessionId::new("codex", "/state", "abc")),
         pin_id: None,
     };
@@ -1837,6 +1838,7 @@ fn row_kind_glyph_span_dispatches_per_row_kind() {
         title: None,
         alias: None,
         title_disambiguates: false,
+        mux_host: None,
         primary_node: NodeId::AgentSession(AgentSessionId::new("claude", "/state", "abc")),
         pin_id: None,
     });
@@ -1931,6 +1933,7 @@ fn session_alias_renders_after_mux_glyph_in_left_row() {
         title: Some("harness title".into()),
         alias: Some("ingest-refactor".into()),
         title_disambiguates: false,
+        mux_host: None,
         primary_node: NodeId::AgentSession(AgentSessionId::new("codex", "/state", "abc")),
         pin_id: None,
     };
@@ -1953,6 +1956,64 @@ fn session_alias_renders_after_mux_glyph_in_left_row() {
 }
 
 #[test]
+fn a_session_last_hosted_by_a_gone_mux_carries_a_was_in_chip() {
+    use crate::model::MuxHost;
+    use crate::tui::rows::{AgentSessionRow, MuxIndicator};
+    let theme = Theme::default();
+    let now: i64 = 1_700_000_000;
+    let row = |host: Option<MuxHost>| AgentSessionRow {
+        session: AgentSessionId::new("codex", "/state", "abc"),
+        short_id: "abc".into(),
+        harness_label: "codex".into(),
+        cwd_display: None,
+        project_display: Some("conspectus".into()),
+        recency: Some("2d".into()),
+        activity_epoch: Some(now - 172_800),
+        mux_state: MuxIndicator::Unmuxed,
+        preview: None,
+        title: None,
+        alias: None,
+        title_disambiguates: false,
+        mux_host: host,
+        primary_node: NodeId::AgentSession(AgentSessionId::new("codex", "/state", "abc")),
+        pin_id: None,
+    };
+    let text = |row: &AgentSessionRow| -> String {
+        render_session_spans(row, &theme, now, None)
+            .iter()
+            .map(|span| span.content.as_ref())
+            .collect()
+    };
+
+    let gone = text(&row(Some(MuxHost {
+        name: "old-ledger".into(),
+        live: false,
+    })));
+    let live = text(&row(Some(MuxHost {
+        name: "ledger".into(),
+        live: true,
+    })));
+    let none = text(&row(None));
+
+    let mut titled = row(Some(MuxHost {
+        name: "old-ledger".into(),
+        live: false,
+    }));
+    titled.alias = Some("Nightly".into());
+    let titled = text(&titled);
+
+    insta::assert_snapshot!("session_row_was_in_chip", format!("{gone}\n{titled}"));
+    assert!(gone.contains("old-ledger  (mux gone)"), "{gone}");
+    assert!(titled.contains("Nightly  was in old-ledger"), "{titled}");
+    assert!(!live.contains("was in"), "a live mux needs no chip: {live}");
+    assert!(
+        live.contains("ledger"),
+        "the live mux still names the session: {live}"
+    );
+    assert!(!none.contains("was in"), "{none}");
+}
+
+#[test]
 fn session_id_is_strictly_truncated_in_left_row() {
     use crate::tui::rows::{AgentSessionRow, MuxIndicator};
     let theme = Theme::default();
@@ -1971,6 +2032,7 @@ fn session_id_is_strictly_truncated_in_left_row() {
         title: None,
         alias: None,
         title_disambiguates: false,
+        mux_host: None,
         primary_node: NodeId::AgentSession(AgentSessionId::new("opencode", "/state", long_id)),
         pin_id: None,
     };
@@ -2008,6 +2070,7 @@ fn session_display_label_is_truncated_in_left_row() {
         // width cap, so flip this on so the title actually
         // reaches the row.
         title_disambiguates: true,
+        mux_host: None,
         primary_node: NodeId::AgentSession(AgentSessionId::new("codex", "/state", "abc")),
         pin_id: None,
     };
@@ -2046,6 +2109,7 @@ fn placeholder_session_row_renders_pin_marker_without_planned_vocab() {
         title: None,
         alias: Some("ingest".into()),
         title_disambiguates: false,
+        mux_host: None,
         primary_node: NodeId::Pin(crate::model::PinId::new("ingest")),
         pin_id: Some("ingest".into()),
     };
@@ -2215,6 +2279,7 @@ fn session_project_column_renders_before_inline_preview() {
         title: None,
         alias: None,
         title_disambiguates: false,
+        mux_host: None,
         primary_node: NodeId::AgentSession(AgentSessionId::new("codex", "/state", "abc")),
         pin_id: None,
     };
@@ -2266,6 +2331,7 @@ fn session_recency_span_picks_bucket_style_from_theme() {
         title: None,
         alias: None,
         title_disambiguates: false,
+        mux_host: None,
         primary_node: NodeId::AgentSession(AgentSessionId::new("codex", "/state", "abc")),
         pin_id: None,
     };
@@ -5154,6 +5220,78 @@ fn the_pinned_view_groups_by_project_and_by_kind() {
     insta::assert_snapshot!("pinned_view_by_project", pinned_frame(&mut app, 120));
     let mut app = slots_app(crate::tui::PinnedGrouping::Kind);
     insta::assert_snapshot!("pinned_view_by_kind", pinned_frame(&mut app, 120));
+}
+
+/// The Pinned view over [`all_kinds_world`], ungrouped and tall enough
+/// to show every slot.
+///
+/// [`all_kinds_world`]: crate::tui::rows::pinned::all_kinds_world
+fn all_kinds_frame(width: u16) -> String {
+    let snapshot = crate::tui::rows::pinned::all_kinds_world();
+    let mut config = RunConfig::defaults();
+    config.default_view = View::Pinned;
+    let mut app = App::new(config);
+    let grouping = crate::tui::PinnedGrouping::None;
+    app.update(Msg::SetGrouping(crate::tui::Grouping::Pinned(grouping)));
+    let tree =
+        crate::tui::rows::pinned::build_pinned_tree(crate::tui::rows::pinned::PinnedBuildInputs {
+            snapshot: &snapshot,
+            home: Some(std::path::Path::new("/home/op")),
+            now: Some(1_700_000_000),
+            grouping,
+            sort: crate::tui::Sort::Hierarchy,
+        });
+    app.update(Msg::SetData {
+        snapshot: SnapshotHandle::from_snapshot(&snapshot),
+        tree,
+        loaded_at_epoch: 1_700_000_000,
+        initial_selection_hint: None,
+    });
+    buffer_to_string(&render_to_buffer(&mut app, Rect::new(0, 0, width, 30)))
+}
+
+#[test]
+fn the_pinned_view_shows_every_kind_in_each_state_it_can_be_in() {
+    const SLOTS: [&str; 7] = [
+        "mux-",
+        "session-",
+        "worktree-",
+        "repo-",
+        "pr-",
+        "branch-",
+        "workspace-",
+    ];
+    for width in [70, 110, 160] {
+        // The status word starts in one column for every kind.
+        let frame = all_kinds_frame(width);
+        let columns: Vec<usize> = frame
+            .lines()
+            .filter_map(|line| {
+                // The left pane is the text between the first two borders.
+                let pane: Vec<char> = line.split('│').nth(1)?.chars().collect();
+                if !pane.iter().any(|c| "▣●◇◆⇄⎇▦⑂".contains(*c)) {
+                    return None;
+                }
+                let label = (0..pane.len()).find(|&i| {
+                    pane[i] == ' '
+                        && SLOTS.iter().any(|slot| {
+                            pane[i + 1..].iter().take(slot.len()).collect::<String>() == *slot
+                        })
+                })?;
+                let name_end = (label + 1..pane.len()).find(|&i| pane[i] == ' ')?;
+                (name_end..pane.len()).find(|&i| pane[i] != ' ')
+            })
+            .collect();
+        assert!(columns.len() >= 10, "{columns:?}\n{frame}");
+        assert!(
+            columns.windows(2).all(|w| w[0] == w[1]),
+            "{columns:?}\n{frame}"
+        );
+        insta::assert_snapshot!(
+            format!("pinned_view_all_kinds_{width}"),
+            all_kinds_frame(width)
+        );
+    }
 }
 
 /// The terminal column each slot row's status word starts at.

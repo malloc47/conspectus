@@ -1,0 +1,34 @@
+---
+source: src/tui/ui_tests.rs
+expression: all_kinds_frame(width)
+---
+updated 0s ago · 0/1 sessions · 1 mux                                 
+┌ ▸ sessions · mux · prs · pinned · history ─────────────────────────┐
+│  ▣ mux-live          live        1m  codex · ~/src/conspectus      │
+│  ▣ mux-gone          gone        4d  codex · ~/src/conspectus     ▲│
+│  ▣ mux-unknown       unknown     2h  codex · ~/src/conspectus     █│
+│  ▣ mux-planned       planned                                      █│
+│  ▣ mux-missing       missing                                      █│
+│  ● session-live      resumable  10m  claude · Fix the ledger merge█│
+│  ● session-missing   missing                                      █│
+│▶ ◇ worktree-live     live            conspectus                   ║│
+│  ◇ worktree-gone     gone        2d  conspectus · feature/old     ║│
+│  ◇ worktree-planned  planned                                      ║│
+│  ◆ repo-live         live            ~/src/conspectus/.git        ▼│
+│  ◆ repo-gone         gone       10d  ~/src/lost/.git               │
+└────────────────────────────────────────────────────────────────────┘
+┌   ◉ pin ───────────────────────────────────────────────────────────┐
+│  id            mux-live                                            │
+│  name          mux-live                                           ▲│
+│  kind          mux                                                █│
+│  status        live                                               ▼│
+│  target        mux_session:tmux:main                               │
+│───────────────────────────────────────────────────────── Preview ──│
+│loading mux preview…                                                │
+│                                                                    │
+│                                                                    │
+│                                                                    │
+│                                                                    │
+│                                                                    │
+└────────────────────────────────────────────────────────────────────┘
+[left] group:none · filter:all · sort:hierarchy · Enter/a attach tmux:

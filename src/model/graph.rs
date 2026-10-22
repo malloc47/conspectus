@@ -351,6 +351,65 @@ impl GraphSnapshot {
         self.node_presence.get(id).copied()
     }
 
+    /// The resolver-preferred live mux for `session`: the strongest
+    /// active `linked_to_mux` candidate.
+    pub fn preferred_mux_for(&self, session: &NodeId) -> Option<MuxSessionId> {
+        let mut candidates: Vec<&GraphLink> = self
+            .candidate_links
+            .iter()
+            .filter(|link| {
+                link.source == *session
+                    && link.relation == RelationKind::LinkedToMux
+                    && matches!(link.state, LinkState::Active)
+            })
+            .collect();
+        candidates.sort_by(|left, right| {
+            right
+                .provenance
+                .precedence()
+                .cmp(&left.provenance.precedence())
+                .then_with(|| right.confidence.cmp(&left.confidence))
+                .then_with(|| left.id.cmp(&right.id))
+        });
+        match candidates.into_iter().next()?.target_node_id()? {
+            NodeId::MuxSession(id) => Some(id.clone()),
+            _ => None,
+        }
+    }
+
+    /// The mux that hosts `session` now, or failing that the one that
+    /// hosted it last (ADR 0140). `None` when no mux is known for it.
+    pub fn mux_host_of(&self, session: &NodeId) -> Option<MuxHost> {
+        if let Some(mux) = self.preferred_mux_for(session) {
+            let id = NodeId::MuxSession(mux);
+            if let Some(GraphNode::MuxSession(node)) = self.find_node(&id) {
+                return Some(MuxHost {
+                    name: node.session_name().to_string(),
+                    live: self.is_live(&id),
+                });
+            }
+        }
+        let NodeId::AgentSession(agent) = session else {
+            return None;
+        };
+        // Among the muxes whose history lists the session, the one that
+        // saw it most recently.
+        self.history
+            .muxes
+            .iter()
+            .filter_map(|record| {
+                let hosted = record.recipe.hosted.iter().find(|h| {
+                    h.harness == agent.harness_key && h.session_id == agent.session_key
+                })?;
+                Some((hosted.last_seen, record))
+            })
+            .max_by(|(a, ra), (b, rb)| a.cmp(b).then_with(|| rb.meta.id.cmp(&ra.meta.id)))
+            .map(|(_, record)| MuxHost {
+                name: record.recipe.name.clone(),
+                live: self.history.presence_of(&record.meta.id).is_none(),
+            })
+    }
+
     /// Whether `id` exists now rather than only in history. Code that
     /// acts on a node, counts it, or links to it checks this first.
     pub fn is_live(&self, id: &NodeId) -> bool {
@@ -423,4 +482,14 @@ impl GraphSnapshot {
 
 fn stable_json_key<T: Serialize>(value: &T) -> String {
     serde_json::to_string(value).expect("graph model values serialize")
+}
+
+/// The mux that hosts or last hosted a session.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct MuxHost {
+    /// The bare mux session name.
+    pub name: String,
+    /// Whether that mux exists now. A session whose mux is gone shows
+    /// it as a `was in` chip.
+    pub live: bool,
 }

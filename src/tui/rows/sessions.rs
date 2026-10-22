@@ -947,6 +947,7 @@ fn emit_session_row(
             title: entry.node.title.clone(),
             alias: ctx.data.snapshot.aliases.get(&entry.id).map(str::to_string),
             title_disambiguates,
+            mux_host: ctx.data.snapshot.mux_host_of(&entry.id),
             primary_node: entry.id.clone(),
             pin_id: ctx.data.pin_id_by_bound_session.get(&entry.id).cloned(),
         }),

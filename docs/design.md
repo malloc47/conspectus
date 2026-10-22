@@ -569,7 +569,8 @@ Conspectus-owned overlay on top of the adapter-populated `title` field.
 Aliases live in a sibling `[[aliases]]` TOML table in the same local/global
 config files as declared links, follow the same store-selection and
 provenance rules, and are applied at projection time with precedence
-`alias > title > id-suffix`. The harness-native title is never mutated; the
+`alias > title > mux name > id-suffix` (the mux hosting the session, or
+the gone one that last hosted it; ADR 0029 as amended). The harness-native title is never mutated; the
 alias-only model works uniformly across every harness, including those with
 no writeable title field. Renaming a muxed agent session also renames the
 tmux session in lockstep by default. ADR 0029 captures the schema, mux

@@ -2808,3 +2808,98 @@ fn prs_state_filter_narrows_the_table_to_the_chosen_states() {
     assert_eq!(numbers(&[PrStateKey::Draft]).len(), 1);
     assert!(numbers(&[PrStateKey::Closed]).is_empty());
 }
+
+fn title_cells(snapshot: &GraphSnapshot) -> Vec<String> {
+    let options = RenderOptions {
+        columns: Some(vec!["title"]),
+        ..RenderOptions::wide()
+    };
+    render_with(snapshot, Projection::Agent, &options)
+        .lines()
+        .skip(2)
+        .map(|line| line.trim().to_string())
+        .collect()
+}
+
+#[test]
+fn title_column_runs_alias_then_title_then_mux_name() {
+    let titled = AgentSessionId::new("codex", "global", "titled");
+    let untitled = AgentSessionId::new("codex", "global", "untitled");
+    let aliased = AgentSessionId::new("codex", "global", "aliased");
+    let loose = AgentSessionId::new("codex", "global", "loose");
+    let mut nodes = vec![mux_session("tmux", "ledger", Some("/work"))];
+    for (id, title) in [
+        (&titled, Some("Fix the parser")),
+        (&untitled, Some("  ")),
+        (&aliased, Some("Ignored")),
+        (&loose, None),
+    ] {
+        let mut node = AgentSessionNode::new(id.clone(), "codex".to_string());
+        node.title = title.map(str::to_string);
+        nodes.push(GraphNode::AgentSession(node));
+    }
+    let mut snapshot = GraphSnapshot {
+        nodes,
+        candidate_links: [&titled, &untitled, &aliased]
+            .iter()
+            .map(|id| {
+                linked_to_mux_link(
+                    &format!("link-{}", id.session_key),
+                    (*id).clone(),
+                    MuxSessionId::new("tmux:ledger"),
+                    Provenance::StrongDiscovered,
+                    Confidence::High,
+                )
+            })
+            .collect(),
+        ..GraphSnapshot::empty()
+    };
+    snapshot
+        .aliases
+        .insert(NodeId::AgentSession(aliased), "Nightly".to_string());
+    let snapshot = resolve_snapshot(snapshot);
+
+    let mut cells = title_cells(&snapshot);
+    cells.sort();
+
+    // Sorted: "Fix the parser", "Nightly", "ledger" (untitled), "—" (no mux).
+    assert_eq!(cells, ["Fix the parser", "Nightly", "ledger", "—"]);
+}
+
+#[test]
+fn title_column_names_a_session_after_the_gone_mux_that_last_hosted_it() {
+    let id = AgentSessionId::new("codex", "global", "alpha");
+    let mut snapshot = GraphSnapshot {
+        nodes: vec![agent_session("codex", "alpha", Some("/work"))],
+        ..GraphSnapshot::empty()
+    };
+    snapshot.history.muxes = vec![crate::model::MuxRecord {
+        meta: crate::model::RecordMeta {
+            id: "h_gone".into(),
+            key: "mux_session:tmux:old-ledger".into(),
+            first_seen: 1,
+            last_seen: 50,
+            origin: Default::default(),
+            display: Default::default(),
+            rebuilt_from: None,
+        },
+        recipe: crate::model::MuxRecipe {
+            backend: "tmux".into(),
+            name: "old-ledger".into(),
+            hosted: vec![crate::model::HostedSession {
+                harness: id.harness_key.clone(),
+                session_id: id.session_key,
+                first_seen: 1,
+                last_seen: 50,
+            }],
+            ..Default::default()
+        },
+        extra: Default::default(),
+    }];
+    snapshot.history.presence.insert(
+        "h_gone".into(),
+        crate::model::NodePresence::Gone { last_seen: 50 },
+    );
+
+    assert_eq!(title_cells(&snapshot), ["old-ledger"]);
+}

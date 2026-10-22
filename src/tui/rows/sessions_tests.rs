@@ -2770,3 +2770,168 @@ fn repo_groups_do_not_depend_on_which_checkout_was_probed_first() {
         vec!["~/src/drw/developer", "~/src/oss/conspectus"]
     );
 }
+
+fn build_graph(snapshot: &GraphSnapshot) -> RowTree {
+    build(SessionsBuildInputs {
+        snapshot,
+        grouping: SessionsGrouping::Graph,
+        home: Some(home().as_path()),
+        now: None,
+        cwd: None,
+        filter: RowFilter::default(),
+    })
+}
+
+fn history_mux(id: &str, name: &str, hosted: &[(&str, i64)]) -> crate::model::MuxRecord {
+    crate::model::MuxRecord {
+        meta: crate::model::RecordMeta {
+            id: id.into(),
+            key: format!("mux_session:tmux:{name}"),
+            first_seen: 1,
+            last_seen: 100,
+            origin: Default::default(),
+            display: Default::default(),
+            rebuilt_from: None,
+        },
+        recipe: crate::model::MuxRecipe {
+            backend: "tmux".into(),
+            name: name.into(),
+            hosted: hosted
+                .iter()
+                .map(|(session, last_seen)| crate::model::HostedSession {
+                    harness: "codex".into(),
+                    session_id: (*session).into(),
+                    first_seen: 1,
+                    last_seen: *last_seen,
+                })
+                .collect(),
+            ..Default::default()
+        },
+        extra: Default::default(),
+    }
+}
+
+fn untitled_world() -> GraphSnapshot {
+    let mut snapshot = GraphSnapshot::empty();
+    snapshot.nodes.push(repo("/home/op/src/proj"));
+    snapshot
+        .nodes
+        .push(worktree("/home/op/src/proj", "/home/op/src/proj"));
+    snapshot.nodes.push(agent_session(
+        "codex",
+        "/state",
+        "abc",
+        Some("/home/op/src/proj"),
+        None,
+        None,
+    ));
+    snapshot
+}
+
+#[test]
+fn an_untitled_session_is_named_after_its_live_mux() {
+    let mut snapshot = untitled_world();
+    let session = NodeId::AgentSession(AgentSessionId::new("codex", "/state", "abc"));
+    let mux = NodeId::MuxSession(MuxSessionId::new("ledger"));
+    snapshot.nodes.push(mux_node("tmux", "ledger"));
+    snapshot
+        .candidate_links
+        .push(linked_to_mux(&session, &mux, Provenance::Discovered, "a"));
+    let snapshot = resolve_snapshot(snapshot);
+
+    let tree = build_graph(&snapshot);
+    let (_, row) = first_session_row(&tree);
+
+    assert_eq!(row.tree_label(), Some("ledger"));
+    assert_eq!(row.display_label(), Some("ledger"));
+    assert_eq!(row.gone_mux_name(), None, "a live mux needs no chip");
+}
+
+#[test]
+fn alias_and_title_beat_the_mux_name() {
+    let mut snapshot = untitled_world();
+    let session = NodeId::AgentSession(AgentSessionId::new("codex", "/state", "abc"));
+    let mux = NodeId::MuxSession(MuxSessionId::new("ledger"));
+    snapshot.nodes.push(mux_node("tmux", "ledger"));
+    snapshot
+        .candidate_links
+        .push(linked_to_mux(&session, &mux, Provenance::Discovered, "a"));
+    if let GraphNode::AgentSession(node) = &mut snapshot.nodes[2] {
+        node.title = Some("Fix the parser".into());
+    }
+    let mut titled = resolve_snapshot(snapshot);
+
+    let tree = build_graph(&titled);
+    let (_, row) = first_session_row(&tree);
+    assert_eq!(row.display_label(), Some("Fix the parser"));
+    assert_eq!(
+        row.tree_label(),
+        None,
+        "a lone titled session keeps its short id"
+    );
+
+    titled.aliases.insert(session, "Nightly".to_string());
+    let tree = build_graph(&titled);
+    let (_, row) = first_session_row(&tree);
+    assert_eq!(row.display_label(), Some("Nightly"));
+    assert_eq!(row.tree_label(), Some("Nightly"));
+}
+
+#[test]
+fn a_blank_title_counts_as_missing() {
+    let mut snapshot = untitled_world();
+    let session = NodeId::AgentSession(AgentSessionId::new("codex", "/state", "abc"));
+    let mux = NodeId::MuxSession(MuxSessionId::new("ledger"));
+    snapshot.nodes.push(mux_node("tmux", "ledger"));
+    snapshot
+        .candidate_links
+        .push(linked_to_mux(&session, &mux, Provenance::Discovered, "a"));
+    if let GraphNode::AgentSession(node) = &mut snapshot.nodes[2] {
+        node.title = Some("   ".into());
+    }
+    let snapshot = resolve_snapshot(snapshot);
+
+    let tree = build_graph(&snapshot);
+    let (_, row) = first_session_row(&tree);
+
+    assert_eq!(row.display_label(), Some("ledger"));
+    assert_eq!(row.tree_label(), Some("ledger"));
+}
+
+#[test]
+fn a_session_last_hosted_by_a_gone_mux_names_it_in_a_chip() {
+    let mut snapshot = untitled_world();
+    snapshot.history.muxes = vec![
+        history_mux("h_old", "old-ledger", &[("abc", 50)]),
+        history_mux("h_older", "older-ledger", &[("abc", 10)]),
+    ];
+    for id in ["h_old", "h_older"] {
+        snapshot.history.presence.insert(
+            id.into(),
+            crate::model::NodePresence::Gone { last_seen: 100 },
+        );
+    }
+    let snapshot = resolve_snapshot(snapshot);
+
+    let tree = build_graph(&snapshot);
+    let (_, row) = first_session_row(&tree);
+
+    assert_eq!(
+        row.gone_mux_name(),
+        Some("old-ledger"),
+        "the most recent host"
+    );
+    assert_eq!(row.display_label(), Some("old-ledger"));
+}
+
+#[test]
+fn a_session_with_no_known_mux_has_no_name_to_fall_back_on() {
+    let snapshot = resolve_snapshot(untitled_world());
+
+    let tree = build_graph(&snapshot);
+    let (_, row) = first_session_row(&tree);
+
+    assert_eq!(row.display_label(), None);
+    assert_eq!(row.tree_label(), None);
+    assert_eq!(row.gone_mux_name(), None);
+}
