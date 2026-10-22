@@ -497,7 +497,7 @@ fn filter_args_grouping_none_when_flag_omitted() {
 #[test]
 fn format_attach_command_uses_bare_tmux_for_default_socket() {
     assert_eq!(
-        super::pin::format_attach_command(None, "ingest"),
+        crate::rebuild::launch::format_attach_command(None, "ingest"),
         "tmux attach-session -t ingest"
     );
 }
@@ -505,7 +505,7 @@ fn format_attach_command_uses_bare_tmux_for_default_socket() {
 #[test]
 fn format_attach_command_threads_socket_via_dash_l() {
     assert_eq!(
-        super::pin::format_attach_command(Some("scratch"), "ingest"),
+        crate::rebuild::launch::format_attach_command(Some("scratch"), "ingest"),
         "tmux -L scratch attach-session -t ingest"
     );
 }
@@ -518,7 +518,7 @@ fn format_argv_for_send_keys_quotes_whitespace_tokens() {
         std::ffi::OsString::from("hello world"),
     ];
     assert_eq!(
-        super::pin::format_argv_for_send_keys(&argv),
+        crate::rebuild::launch::format_argv_for_send_keys(&argv),
         "codex --prompt \"hello world\""
     );
 }
@@ -530,7 +530,7 @@ fn format_argv_for_send_keys_leaves_bare_tokens_unquoted() {
         std::ffi::OsString::from("--model=opus"),
     ];
     assert_eq!(
-        super::pin::format_argv_for_send_keys(&argv),
+        crate::rebuild::launch::format_argv_for_send_keys(&argv),
         "codex --model=opus"
     );
 }

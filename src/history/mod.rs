@@ -107,6 +107,54 @@ impl HistoryWriter {
         Ok(outcome.mux_ids.into_iter().next())
     }
 
+    /// Record a worktree a rebuild just brought back (ADR 0142), linked
+    /// to the record it replaced when it landed somewhere else. Returns
+    /// the record's id.
+    pub fn record_rebuilt_checkout(
+        &self,
+        repo_key: &str,
+        root: &str,
+        branch: Option<&str>,
+        head: Option<&str>,
+        rebuilt_from: Option<&str>,
+    ) -> std::io::Result<String> {
+        use crate::model::{CheckoutId, NodeId, RepoId};
+        let common_dir = repo_key.strip_prefix("repo:").unwrap_or(repo_key);
+        let key = NodeId::Checkout(CheckoutId::new(RepoId::new(common_dir), root)).to_string();
+        let label = std::path::Path::new(root)
+            .file_name()
+            .map_or_else(|| root.to_string(), |n| n.to_string_lossy().into_owned());
+        let context = Some(match branch {
+            Some(branch) => format!("{} · {branch}", recorder::repo_name(common_dir)),
+            None => recorder::repo_name(common_dir),
+        });
+        let observation = CheckoutObservation {
+            seen_at: crate::discovery::current_epoch(),
+            key,
+            recipe: crate::model::CheckoutRecipe {
+                repo: repo_key.to_string(),
+                root: root.to_string(),
+                linked: true,
+                branch: branch.map(str::to_string),
+                head: head.map(str::to_string),
+                upstream: None,
+                extra: Default::default(),
+            },
+            display: crate::model::RecordDisplay { label, context },
+            origin: crate::model::RecordOrigin::Launched,
+            rebuilt_from: rebuilt_from.map(str::to_string),
+        };
+        let (_, outcome) = self.store.record(&Observations {
+            checkouts: vec![observation],
+            ..Default::default()
+        })?;
+        outcome
+            .checkout_ids
+            .into_iter()
+            .next()
+            .ok_or_else(|| std::io::Error::other("the checkout wasn't recorded"))
+    }
+
     /// Record what `snapshot`'s probes since `fresh_since` observed.
     pub fn record(
         &self,

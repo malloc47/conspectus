@@ -17,25 +17,26 @@ use std::time::{Duration, Instant};
 
 use anyhow::{Result, anyhow, bail};
 
-use crate::discovery::tmux::{MuxBackend, TmuxKillOutcome, TmuxPaneStatus, dead_pane_output};
-
-use super::pin::{format_argv_for_send_keys, report_new_session};
+use crate::discovery::tmux::{
+    MuxBackend, TmuxAttachOutcome, TmuxKillOutcome, TmuxNewSessionOutcome, TmuxPaneStatus,
+    TmuxSendKeysOutcome, dead_pane_output,
+};
 
 /// How long a launch watches a resumed pane before treating the
 /// harness as started. A harness rejecting a resume target takes a
 /// moment to say so (about a second for Claude Code).
-pub(super) const RESUME_WATCH: Duration = Duration::from_millis(1500);
+pub(crate) const RESUME_WATCH: Duration = Duration::from_millis(1500);
 
 const WATCH_POLL: Duration = Duration::from_millis(50);
 
 /// A pane whose process exited right after launch.
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub(super) struct DeadPane {
+pub(crate) struct DeadPane {
     /// Exit status when tmux kept the pane; `None` when the session
     /// was already gone, which is what a clean (zero) exit does.
-    pub(super) status: Option<i32>,
+    pub(crate) status: Option<i32>,
     /// The pane's last lines, ANSI stripped.
-    pub(super) output: String,
+    pub(crate) output: String,
 }
 
 impl DeadPane {
@@ -52,7 +53,7 @@ impl DeadPane {
 }
 
 #[derive(Debug, Eq, PartialEq)]
-pub(super) enum Spawned {
+pub(crate) enum Spawned {
     /// The harness started (or its pane couldn't be observed).
     Started,
     /// The resume launch died; a fresh launch replaced it.
@@ -63,7 +64,7 @@ pub(super) enum Spawned {
 /// `fresh_argv`. A resume is watched for `resume_watch`; one that dies
 /// is replaced by a fresh launch. A fresh launch returns as soon as
 /// its session exists.
-pub(super) fn spawn_watched(
+pub(crate) fn spawn_watched(
     runner: &dyn MuxBackend,
     socket: Option<&str>,
     name: &str,
@@ -86,7 +87,7 @@ pub(super) fn spawn_watched(
 }
 
 /// One-line note for a resume that died and was replaced.
-pub(super) fn resume_fallback_note(resume_argv: &[OsString], dead: &DeadPane) -> String {
+pub(crate) fn resume_fallback_note(resume_argv: &[OsString], dead: &DeadPane) -> String {
     format!(
         "resume `{}` {}; launched fresh instead",
         format_argv_for_send_keys(resume_argv),
@@ -95,7 +96,7 @@ pub(super) fn resume_fallback_note(resume_argv: &[OsString], dead: &DeadPane) ->
 }
 
 /// Create tmux session `name` running `argv`, without watching it.
-pub(super) fn spawn(
+pub(crate) fn spawn(
     runner: &dyn MuxBackend,
     socket: Option<&str>,
     name: &str,
@@ -111,7 +112,7 @@ pub(super) fn spawn(
 /// Poll the pane until it dies or `window` passes. `None` means the
 /// harness is running, or the runner can't report pane status (in
 /// which case the launch is assumed to have started, as before).
-pub(super) fn watch_pane(
+pub(crate) fn watch_pane(
     runner: &dyn MuxBackend,
     socket: Option<&str>,
     name: &str,
@@ -142,7 +143,11 @@ pub(super) fn watch_pane(
     }
 }
 
-fn discard_session(runner: &dyn MuxBackend, socket: Option<&str>, name: &str) -> Result<()> {
+pub(crate) fn discard_session(
+    runner: &dyn MuxBackend,
+    socket: Option<&str>,
+    name: &str,
+) -> Result<()> {
     match runner
         .kill_session(socket, name)
         .map_err(|err| anyhow!("tmux kill-session failed: {err}"))?
@@ -159,6 +164,107 @@ fn discard_session(runner: &dyn MuxBackend, socket: Option<&str>, name: &str) ->
     }
 }
 
+pub(crate) fn attach_and_report(
+    runner: &dyn MuxBackend,
+    socket: Option<&str>,
+    name: &str,
+) -> Result<()> {
+    let backend = runner.backend_key();
+    let outcome = runner
+        .attach_session(socket, name)
+        .map_err(|err| anyhow!("{backend} attach failed: {err}"))?;
+    match outcome {
+        TmuxAttachOutcome::Detached => Ok(()),
+        TmuxAttachOutcome::NoTarget => {
+            bail!(
+                "{backend} session `{name}` is gone; the process in it may have exited right after launch"
+            )
+        }
+        TmuxAttachOutcome::Unavailable(reason) => bail!(
+            "{backend} is unavailable on this host: {reason}",
+            reason = reason.as_str()
+        ),
+        TmuxAttachOutcome::Failed { code, message } => {
+            bail!("{backend} attach failed (exit {code:?}): {message}")
+        }
+        TmuxAttachOutcome::Unsupported => {
+            bail!("the {backend} runner does not support attach; attach to `{name}` manually")
+        }
+    }
+}
+
+pub(crate) fn report_send_keys(
+    outcome: TmuxSendKeysOutcome,
+    backend: &str,
+    name: &str,
+) -> Result<()> {
+    match outcome {
+        TmuxSendKeysOutcome::Sent => Ok(()),
+        TmuxSendKeysOutcome::NoTarget => {
+            bail!("{backend} session `{name}` disappeared before send-keys reached it")
+        }
+        TmuxSendKeysOutcome::Unavailable(reason) => bail!(
+            "{backend} is unavailable on this host: {reason}",
+            reason = reason.as_str()
+        ),
+        TmuxSendKeysOutcome::Failed { code, message } => {
+            bail!("{backend} send-keys failed (exit {code:?}): {message}")
+        }
+        TmuxSendKeysOutcome::Unsupported => {
+            bail!("the {backend} runner does not support send-keys")
+        }
+    }
+}
+
+pub(crate) fn report_new_session(outcome: TmuxNewSessionOutcome, name: &str) -> Result<()> {
+    match outcome {
+        TmuxNewSessionOutcome::Created => Ok(()),
+        TmuxNewSessionOutcome::NameTaken => bail!(
+            "a tmux session named `{name}` already exists; rename the existing tmux or pick a different `mux.name`"
+        ),
+        TmuxNewSessionOutcome::Unavailable(reason) => bail!(
+            "tmux is unavailable on this host: {reason}",
+            reason = reason.as_str()
+        ),
+        TmuxNewSessionOutcome::Failed { code, message } => {
+            bail!("tmux new-session failed (exit {code:?}): {message}")
+        }
+        TmuxNewSessionOutcome::Unsupported => {
+            bail!("this tmux runner does not support new-session")
+        }
+    }
+}
+
+/// Build the `tmux [-L <socket>] attach-session -t <name>` command
+/// string used in `--no-attach` output. Single-arg quoting is
+/// intentionally minimal — `mux.name` is operator-typed and the
+/// schema rejects shell metacharacters by virtue of tmux's own
+/// session-name rules (alphanumeric + a small set of punctuation).
+pub(crate) fn format_attach_command(socket: Option<&str>, name: &str) -> String {
+    match socket {
+        None => format!("tmux attach-session -t {name}"),
+        Some(socket) => format!("tmux -L {socket} attach-session -t {name}"),
+    }
+}
+
+/// Render an argv slice as a tmux `send-keys` literal so the
+/// harness command lands in the existing pane. We quote each
+/// arg with double-quotes when it contains spaces; this matches
+/// the way operators would type the command interactively.
+pub(crate) fn format_argv_for_send_keys(argv: &[std::ffi::OsString]) -> String {
+    argv.iter()
+        .map(|token| {
+            let token = token.to_string_lossy();
+            if token.is_empty() || token.contains(char::is_whitespace) {
+                format!("\"{token}\"")
+            } else {
+                token.into_owned()
+            }
+        })
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
 #[cfg(test)]
-#[path = "launch_watch_tests.rs"]
+#[path = "launch_tests.rs"]
 mod tests;

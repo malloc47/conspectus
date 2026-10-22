@@ -16,7 +16,7 @@ use clap::{Args, Subcommand};
 use crate::discovery::harness::launch_argv_for;
 use crate::discovery::tmux::{MuxBackend, SystemTmux};
 
-use super::pin::{attach_and_report, format_attach_command, report_new_session};
+use crate::rebuild::launch::{attach_and_report, format_attach_command, report_new_session};
 
 #[derive(Debug, Args)]
 pub struct MuxArgs {
@@ -222,7 +222,7 @@ impl MuxLaunchArgs {
         // Not watched (ADR 0133): attaching right away shows the
         // harness's first output, and a harness that dies non-zero
         // stays as a dead pane with its output (ADR 0103).
-        super::launch_watch::spawn(runner, socket, name, &cwd, &argv)?;
+        crate::rebuild::launch::spawn(runner, socket, name, &cwd, &argv)?;
         let recorded: Vec<String> = argv
             .iter()
             .map(|arg| arg.to_string_lossy().into_owned())

@@ -34,6 +34,7 @@ pub(crate) mod pin_bindings;
 pub mod pin_slots;
 pub(crate) mod pin_store_registry;
 pub(crate) mod pins;
+pub mod rebuild;
 pub mod rename;
 pub mod resolve;
 pub(crate) mod server;

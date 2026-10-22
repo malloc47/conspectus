@@ -299,3 +299,89 @@ fn snapshot_mode_never_records_history() {
     }
     assert!(!world.history_dir().exists());
 }
+
+#[test]
+fn rebuild_brings_a_killed_mux_back_with_its_recorded_command() {
+    if !tmux_available() {
+        eprintln!("tmux not installed; skipping");
+        return;
+    }
+    let world = World::new();
+    let repo = world.repo.display().to_string();
+    assert!(world.tmux(&[
+        "new-session",
+        "-d",
+        "-s",
+        "reb-a",
+        "-c",
+        &repo,
+        "sleep",
+        "600"
+    ]));
+    world.graph(&[]);
+    assert!(world.tmux(&["kill-server"]));
+
+    // The plan names every step and runs nothing.
+    let dry = world
+        .conspectus()
+        .args(["rebuild", "reb-a", "--dry-run"])
+        .output()
+        .unwrap();
+    let plan = String::from_utf8_lossy(&dry.stdout);
+    assert!(
+        dry.status.success(),
+        "{}",
+        String::from_utf8_lossy(&dry.stderr)
+    );
+    assert!(plan.contains("mux `reb-a` (gone"), "{plan}");
+    assert!(plan.contains("new-session -d -s reb-a"), "{plan}");
+    assert!(plan.contains("sleep 600"), "{plan}");
+    assert!(
+        !world.tmux(&["has-session", "-t", "reb-a"]),
+        "dry run created nothing"
+    );
+
+    let run = world
+        .conspectus()
+        .args(["rebuild", "reb-a", "--no-attach"])
+        .output()
+        .unwrap();
+    assert!(
+        run.status.success(),
+        "{}",
+        String::from_utf8_lossy(&run.stderr)
+    );
+    let out = String::from_utf8_lossy(&run.stdout);
+    assert!(out.contains("created `reb-a`"), "{out}");
+    assert!(
+        out.contains("attach with: tmux attach-session -t reb-a"),
+        "{out}"
+    );
+    assert!(
+        world.tmux(&["has-session", "-t", "reb-a"]),
+        "the mux is back"
+    );
+
+    // A second rebuild finds it live and only offers to attach.
+    let again = world
+        .conspectus()
+        .args(["rebuild", "reb-a", "--dry-run"])
+        .output()
+        .unwrap();
+    let plan = String::from_utf8_lossy(&again.stdout);
+    assert!(plan.contains("mux `reb-a` (live)"), "{plan}");
+    assert!(!plan.contains("new-session"), "{plan}");
+}
+
+#[test]
+fn rebuild_of_an_unknown_ref_says_what_to_pass() {
+    let world = World::new();
+    let output = world
+        .conspectus()
+        .args(["rebuild", "nope"])
+        .output()
+        .unwrap();
+    assert!(!output.status.success());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("nothing matches `nope`"), "{stderr}");
+}

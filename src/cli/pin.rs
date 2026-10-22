@@ -14,10 +14,7 @@ use clap::{Args, Subcommand, ValueEnum};
 use crate::config::ConfigLoader;
 use crate::declared::{DeclaredEndpoint, DeclaredLink, DeclaredLinkState, upsert_declared_link};
 use crate::discovery::harness::launch_argv_for;
-use crate::discovery::tmux::{
-    MuxBackend, TmuxAttachOutcome, TmuxKillOutcome, TmuxNewSessionOutcome, TmuxPaneStatus,
-    TmuxSendKeysOutcome, dead_pane_output,
-};
+use crate::discovery::tmux::{MuxBackend, TmuxKillOutcome, TmuxPaneStatus, dead_pane_output};
 use crate::discovery::worktree::{
     SystemGitWorktree, WorktreeBackend, WorktreeCreateRequest, WorktreeMutationOutcome,
     WorktreeRecord, resolve_mutation_backend, worktrunk_available,
@@ -29,10 +26,13 @@ use crate::pins::{
 };
 
 use super::declared::resolve_write_store;
-use super::launch_watch::{RESUME_WATCH, Spawned, resume_fallback_note, spawn_watched};
 use super::{
     DeclaredStoreFlag, WriteStoreFlag, discover_for_store_selection_with, effective_scan_roots,
     provenance_label, store_label,
+};
+use crate::rebuild::launch::{
+    RESUME_WATCH, Spawned, attach_and_report, format_argv_for_send_keys, format_attach_command,
+    report_send_keys, resume_fallback_note, spawn_watched,
 };
 
 // =====================================================================
@@ -1118,103 +1118,6 @@ pub(super) fn resolve_resume_argv_with_cache(
         pin.id, head.session_key
     );
     Some(argv)
-}
-
-pub(super) fn attach_and_report(
-    runner: &dyn MuxBackend,
-    socket: Option<&str>,
-    name: &str,
-) -> Result<()> {
-    let backend = runner.backend_key();
-    let outcome = runner
-        .attach_session(socket, name)
-        .map_err(|err| anyhow!("{backend} attach failed: {err}"))?;
-    match outcome {
-        TmuxAttachOutcome::Detached => Ok(()),
-        TmuxAttachOutcome::NoTarget => {
-            bail!(
-                "{backend} session `{name}` is gone; the process in it may have exited right after launch"
-            )
-        }
-        TmuxAttachOutcome::Unavailable(reason) => bail!(
-            "{backend} is unavailable on this host: {reason}",
-            reason = reason.as_str()
-        ),
-        TmuxAttachOutcome::Failed { code, message } => {
-            bail!("{backend} attach failed (exit {code:?}): {message}")
-        }
-        TmuxAttachOutcome::Unsupported => {
-            bail!("the {backend} runner does not support attach; attach to `{name}` manually")
-        }
-    }
-}
-
-fn report_send_keys(outcome: TmuxSendKeysOutcome, backend: &str, name: &str) -> Result<()> {
-    match outcome {
-        TmuxSendKeysOutcome::Sent => Ok(()),
-        TmuxSendKeysOutcome::NoTarget => {
-            bail!("{backend} session `{name}` disappeared before send-keys reached it")
-        }
-        TmuxSendKeysOutcome::Unavailable(reason) => bail!(
-            "{backend} is unavailable on this host: {reason}",
-            reason = reason.as_str()
-        ),
-        TmuxSendKeysOutcome::Failed { code, message } => {
-            bail!("{backend} send-keys failed (exit {code:?}): {message}")
-        }
-        TmuxSendKeysOutcome::Unsupported => {
-            bail!("the {backend} runner does not support send-keys")
-        }
-    }
-}
-
-pub(super) fn report_new_session(outcome: TmuxNewSessionOutcome, name: &str) -> Result<()> {
-    match outcome {
-        TmuxNewSessionOutcome::Created => Ok(()),
-        TmuxNewSessionOutcome::NameTaken => bail!(
-            "a tmux session named `{name}` already exists; rename the existing tmux or pick a different `mux.name`"
-        ),
-        TmuxNewSessionOutcome::Unavailable(reason) => bail!(
-            "tmux is unavailable on this host: {reason}",
-            reason = reason.as_str()
-        ),
-        TmuxNewSessionOutcome::Failed { code, message } => {
-            bail!("tmux new-session failed (exit {code:?}): {message}")
-        }
-        TmuxNewSessionOutcome::Unsupported => {
-            bail!("this tmux runner does not support new-session")
-        }
-    }
-}
-
-/// Build the `tmux [-L <socket>] attach-session -t <name>` command
-/// string used in `--no-attach` output. Single-arg quoting is
-/// intentionally minimal — `mux.name` is operator-typed and the
-/// schema rejects shell metacharacters by virtue of tmux's own
-/// session-name rules (alphanumeric + a small set of punctuation).
-pub(super) fn format_attach_command(socket: Option<&str>, name: &str) -> String {
-    match socket {
-        None => format!("tmux attach-session -t {name}"),
-        Some(socket) => format!("tmux -L {socket} attach-session -t {name}"),
-    }
-}
-
-/// Render an argv slice as a tmux `send-keys` literal so the
-/// harness command lands in the existing pane. We quote each
-/// arg with double-quotes when it contains spaces; this matches
-/// the way operators would type the command interactively.
-pub(super) fn format_argv_for_send_keys(argv: &[std::ffi::OsString]) -> String {
-    argv.iter()
-        .map(|token| {
-            let token = token.to_string_lossy();
-            if token.is_empty() || token.contains(char::is_whitespace) {
-                format!("\"{token}\"")
-            } else {
-                token.into_owned()
-            }
-        })
-        .collect::<Vec<_>>()
-        .join(" ")
 }
 
 fn resolve_pin_write_store(

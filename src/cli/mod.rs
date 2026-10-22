@@ -39,6 +39,7 @@ impl Cli {
             Command::Alias(args) => args.run(),
             Command::Pin(args) => args.run(),
             Command::Mux(args) => args.run(),
+            Command::Rebuild(args) => args.run(),
             Command::Worktree(args) => args.run(),
             Command::Serve(args) => args.run(),
             Command::Refresh(args) => args.run(),
@@ -78,6 +79,9 @@ enum Command {
     /// Start a tmux session: a bare shell (`new`) or a harness with no
     /// pin (`launch`).
     Mux(MuxArgs),
+    /// Bring a mux back from a pin slot, a history record, or a node.
+    /// `--dry-run` prints the plan.
+    Rebuild(RebuildArgs),
     /// List, create, and tear down git worktrees. `list` is read-only;
     /// new / rm / merge / close / prune delegate to the configured
     /// mutation backend (worktrunk). See `docs/worktrees.md`.
@@ -660,8 +664,11 @@ pub(super) fn resolve_alias_store(
 mod pin;
 use pin::PinArgs;
 
+// ADR 0142: `conspectus rebuild`.
+mod rebuild;
+use rebuild::RebuildArgs;
+
 // ADR 0103: confirm a resumed harness survived its first moments.
-mod launch_watch;
 
 // ADR 0095, ADR 0096: `conspectus mux new` / `mux launch`.
 mod mux;

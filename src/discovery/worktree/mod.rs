@@ -160,6 +160,20 @@ pub struct WorktreeCreateRequest {
     pub base: Option<String>,
 }
 
+/// Operator request to bring a branch's worktree back (a rebuild,
+/// ADR 0142): switch to the branch's existing worktree or check the
+/// branch out into a new one, or create the branch first.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct WorktreeSwitchRequest {
+    /// A path inside the repo the worktree belongs to.
+    pub repo_root: PathBuf,
+    pub branch: String,
+    /// Create the branch, because it no longer exists, from `base`.
+    pub create: bool,
+    /// The commit or ref to create the branch from. Only with `create`.
+    pub base: Option<String>,
+}
+
 /// Operator request to remove a worktree.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct WorktreeRemoveRequest {
@@ -238,6 +252,12 @@ pub trait WorktreeBackend: Send + Sync {
     /// *launch* the backend; an operation that ran and failed is a
     /// [`WorktreeMutationOutcome::Failed`].
     fn create(&self, _req: &WorktreeCreateRequest) -> Result<WorktreeMutationOutcome> {
+        Ok(WorktreeMutationOutcome::Unsupported)
+    }
+
+    /// Bring a branch's worktree back, creating the branch when asked.
+    /// Defaults to [`WorktreeMutationOutcome::Unsupported`].
+    fn switch(&self, _req: &WorktreeSwitchRequest) -> Result<WorktreeMutationOutcome> {
         Ok(WorktreeMutationOutcome::Unsupported)
     }
 
@@ -449,6 +469,21 @@ impl WorktreeBackend for WorktrunkBackend {
         if let Some(base) = &req.base {
             args.push("--base");
             args.push(base);
+        }
+        args.push(&req.branch);
+        Self::interpret(self.runner.run(&args))
+    }
+
+    fn switch(&self, req: &WorktreeSwitchRequest) -> Result<WorktreeMutationOutcome> {
+        // wt -C <repo> switch --no-cd [--create [--base <ref>]] <branch>
+        let repo = req.repo_root.to_string_lossy();
+        let mut args: Vec<&str> = vec!["-C", &repo, "switch", "--no-cd"];
+        if req.create {
+            args.push("--create");
+            if let Some(base) = &req.base {
+                args.push("--base");
+                args.push(base);
+            }
         }
         args.push(&req.branch);
         Self::interpret(self.runner.run(&args))
