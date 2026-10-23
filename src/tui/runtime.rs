@@ -517,7 +517,21 @@ impl LoopMode for LiveMode {
         // hand-off (ADR 0108).
         if app.take_handoff_refresh_request() {
             let generation = self.workers.start_for_handoff();
-            self.spawn_discovery(app, DaemonNudge::LiveClasses, generation);
+            let before = app
+                .snapshot_handle()
+                .map(|handle| live_mux_ids(handle.snapshot()));
+            self.last_refresh = Instant::now();
+            spawn_discovery_worker_settling(
+                app.config(),
+                &self.result_tx,
+                DaemonNudge::for_request(&crate::tui::effect::RefreshRequest::LIVE),
+                generation,
+                before,
+            );
+            app.update(Msg::InFlightStart {
+                kind: crate::tui::app::InFlightKind::Discovery,
+                label: "Discovering".to_string(),
+            });
         }
         // An action changed state the views show: reload them the way
         // `r` does, through the daemon when there is one, so nothing
@@ -529,7 +543,7 @@ impl LoopMode for LiveMode {
             spawn_discovery_worker(
                 &config,
                 &self.result_tx,
-                DaemonNudge::LiveClasses,
+                DaemonNudge::for_request(&crate::tui::effect::RefreshRequest::LIVE),
                 generation,
             );
             app.update(Msg::InFlightStart {
@@ -993,7 +1007,7 @@ fn set_static_data(app: &mut App, config: &RunConfig, snapshot: &crate::model::G
 
 /// Whether a refresh first asks a running daemon to rescan.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-enum DaemonNudge {
+pub(in crate::tui) enum DaemonNudge {
     /// Take the daemon's snapshot as it is (timer refreshes).
     None,
     /// Rescan the mux and harness classes first; see
@@ -1005,12 +1019,27 @@ enum DaemonNudge {
 }
 
 impl DaemonNudge {
+    /// The nudge that carries out `request`.
+    pub(in crate::tui) fn for_request(request: &crate::tui::effect::RefreshRequest) -> Self {
+        if request.classes.contains(&"forge") {
+            Self::LiveAndForge
+        } else {
+            Self::LiveClasses
+        }
+    }
+
+    /// Whether the refresh must ask the mux server again instead of
+    /// reusing a cached listing.
+    pub(in crate::tui) fn rescans_mux(self) -> bool {
+        self.classes().contains(&"mux")
+    }
+
     /// The daemon classes to rescan before taking its snapshot.
-    fn classes(self) -> &'static [&'static str] {
+    pub(in crate::tui) fn classes(self) -> &'static [&'static str] {
         match self {
             Self::None => &[],
-            Self::LiveClasses => &LIVE_CLASSES,
-            Self::LiveAndForge => &HARD_REFRESH_CLASSES,
+            Self::LiveClasses => crate::tui::effect::RefreshRequest::LIVE.classes,
+            Self::LiveAndForge => crate::tui::effect::RefreshRequest::LIVE_AND_FORGE.classes,
         }
     }
 }
@@ -1024,21 +1053,44 @@ fn spawn_discovery_worker(
     nudge: DaemonNudge,
     generation: u64,
 ) {
+    spawn_discovery_worker_settling(config, tx, nudge, generation, None);
+}
+
+/// [`spawn_discovery_worker`] for the refresh after a mux hand-off.
+/// `before` is the live mux set the screen showed before the hand-off;
+/// a result that equals it is probed again a moment later (see
+/// [`SETTLE_TRIES`]), since the hand-off nearly always changes it.
+fn spawn_discovery_worker_settling(
+    config: &RunConfig,
+    tx: &mpsc::Sender<DiscoveryResult>,
+    nudge: DaemonNudge,
+    generation: u64,
+    before: Option<std::collections::BTreeSet<crate::model::NodeId>>,
+) {
     let mut config = config.clone();
     config.forge_fetch = worker_forge_fetch(nudge, config.forge_fetch);
     let tx = tx.clone();
     std::thread::spawn(move || {
         let mut warning = None;
-        if let Err(message) = nudge_daemon(nudge.classes()) {
-            // The daemon's snapshot may be stale; rebuild locally so
-            // the operator still sees current state.
-            config.refresh = true;
-            warning = Some(message);
-        }
-        let (snapshot, from_daemon) = match discover_and_resolve_sourced(&config) {
-            Ok((snapshot, from_daemon)) => (Ok(snapshot), from_daemon),
-            Err(err) => (Err(err), false),
-        };
+        let (snapshot, from_daemon) = probe_until_changed(
+            before.as_ref(),
+            SETTLE_TRIES,
+            SETTLE_DELAY,
+            std::thread::sleep,
+            || {
+                prepare_rescan(&config, nudge);
+                if let Err(message) = nudge_daemon(nudge.classes()) {
+                    // The daemon's snapshot may be stale; rebuild
+                    // locally so the operator still sees current state.
+                    config.refresh = true;
+                    warning = Some(message);
+                }
+                match discover_and_resolve_sourced(&config) {
+                    Ok((snapshot, from_daemon)) => (Ok(snapshot), from_daemon),
+                    Err(err) => (Err(err), false),
+                }
+            },
+        );
         let _ = tx.send(DiscoveryResult {
             generation,
             snapshot,
@@ -1046,6 +1098,58 @@ fn spawn_discovery_worker(
             from_daemon,
         });
     });
+}
+
+/// What a refresh does before it asks anyone for a snapshot. The
+/// refresh exists to see what the action just did, so a mux listing
+/// cached a few seconds ago is not good enough, here or in a daemonless
+/// rebuild.
+pub(in crate::tui) fn prepare_rescan(config: &RunConfig, nudge: DaemonNudge) {
+    if nudge.rescans_mux() {
+        config.discovery_caches.clear_mux();
+    }
+}
+
+/// Run `probe` and, while its snapshot's live mux set still equals
+/// `before` (nothing changed across a hand-off, which is almost never
+/// true), wait `delay` and probe again, at most `tries` more times.
+/// Returns the last probe's result.
+fn probe_until_changed<T>(
+    before: Option<&std::collections::BTreeSet<crate::model::NodeId>>,
+    tries: u32,
+    delay: Duration,
+    mut sleep: impl FnMut(Duration),
+    mut probe: impl FnMut() -> (Result<crate::model::GraphSnapshot>, T),
+) -> (Result<crate::model::GraphSnapshot>, T) {
+    let mut retried = 0;
+    loop {
+        let (snapshot, extra) = probe();
+        let unchanged = match (before, &snapshot) {
+            (Some(before), Ok(snapshot)) => live_mux_ids(snapshot) == *before,
+            _ => false,
+        };
+        if unchanged && retried < tries {
+            retried += 1;
+            sleep(delay);
+            continue;
+        }
+        return (snapshot, extra);
+    }
+}
+
+/// The muxes `snapshot` shows as running.
+fn live_mux_ids(
+    snapshot: &crate::model::GraphSnapshot,
+) -> std::collections::BTreeSet<crate::model::NodeId> {
+    snapshot
+        .live_nodes()
+        .filter_map(|node| match node {
+            crate::model::GraphNode::MuxSession(mux) => {
+                Some(crate::model::NodeId::MuxSession(mux.id.clone()))
+            }
+            _ => None,
+        })
+        .collect()
 }
 
 /// The forge fetch policy for a refresh worker. Ctrl-R is the operator
@@ -1080,22 +1184,21 @@ fn spawn_forge_fetch(
     });
 }
 
-/// Provider classes whose state changes while the operator works in
-/// tmux: sessions appear, die, get renamed, and harnesses start new
-/// transcripts. Both rescan in well under a second.
-const LIVE_CLASSES: [&str; 2] = ["mux", "harness"];
-
-/// What a hard refresh rescans: the live classes, and the forges,
-/// whose listings are otherwise reused for the forge interval.
-const HARD_REFRESH_CLASSES: [&str; 3] = ["mux", "harness", "forge"];
+/// How many times a refresh after a mux hand-off re-probes when the
+/// mux set came back exactly as it was before the hand-off, and how
+/// long it waits between tries. A session that ended, or a server that
+/// was killed, can still answer a listing for a moment; both probes
+/// rescan in well under a second.
+const SETTLE_TRIES: u32 = 2;
+const SETTLE_DELAY: Duration = Duration::from_millis(150);
 
 /// Ask a running `conspectus serve` daemon to rescan
-/// [`LIVE_CLASSES`] now. The daemon otherwise serves its last tick,
+/// the live classes now. The daemon otherwise serves its last tick,
 /// which after a tmux hand-off still shows the world from before it.
 /// No daemon is not an error (the caller's refresh runs discovery
 /// itself); a daemon that fails the refresh is.
 pub(super) fn nudge_daemon_live_classes() -> Result<(), String> {
-    nudge_daemon(&LIVE_CLASSES)
+    nudge_daemon(crate::tui::effect::RefreshRequest::LIVE.classes)
 }
 
 /// Ask a running daemon to rescan `classes` now, as
@@ -1132,6 +1235,7 @@ struct HandoffRefresh {
 /// Nudge the daemon, then load a snapshot. Touches no UI state, so it
 /// can run on a worker thread.
 fn fetch_after_mux_handoff(mut config: RunConfig) -> HandoffRefresh {
+    prepare_rescan(&config, DaemonNudge::LiveClasses);
     let warning = nudge_daemon_live_classes().err();
     if warning.is_some() {
         config.refresh = true;

@@ -236,6 +236,43 @@ impl Lifecycle {
     };
 }
 
+/// What a refresh rescans before the screen is rebuilt. The rescan is
+/// forced: the mux listing is asked of the server again and a running
+/// daemon is told to re-probe, because the point of the refresh is to
+/// see what the action just did, not what was cached a few seconds ago.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct RefreshRequest {
+    /// Provider classes to re-probe, in order.
+    pub classes: &'static [&'static str],
+}
+
+impl RefreshRequest {
+    /// The classes whose state changes while the operator works in a
+    /// mux: sessions appear, die, and get renamed, and harnesses start
+    /// new transcripts.
+    pub const LIVE: Self = Self {
+        classes: &["mux", "harness"],
+    };
+
+    /// [`Self::LIVE`] plus the forges, whose listings are otherwise
+    /// reused for the forge interval.
+    pub const LIVE_AND_FORGE: Self = Self {
+        classes: &["mux", "harness", "forge"],
+    };
+
+    /// Whether the mux listing must be asked of the server again.
+    pub fn rescans_mux(&self) -> bool {
+        self.classes.contains(&"mux")
+    }
+}
+
+impl Lifecycle {
+    /// The rescan the refresh after this effect runs, if it refreshes.
+    pub fn refresh_request(&self) -> Option<RefreshRequest> {
+        self.refreshes.then_some(RefreshRequest::LIVE)
+    }
+}
+
 /// The lifecycle `effect` runs with today.
 pub fn lifecycle(effect: &Effect) -> Lifecycle {
     match effect {

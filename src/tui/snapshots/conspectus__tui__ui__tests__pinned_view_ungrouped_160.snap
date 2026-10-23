@@ -5,9 +5,9 @@ expression: "pinned_frame(&mut app, width)"
 updated 0s ago · 0/1 sessions · 1 mux                                                                                                                           
 ┌ ▸ sessions · mux · prs · pinned · history ───────────────────────────────────┐┌   ◉ pin ─────────────────────────────────────────────────────────────────────┐
 │▶ ▣   conspectus-main         live      2m   claude     ~/src/conspectus      ││  id            conspectus-main                                               │
-│  ▣   config-agent3           gone      3d   claude     ~/src/config          ││  name          conspectus-main                                               │
+│  ▣ ◎ config-agent3           stopped   3d   claude     ~/src/config          ││  name          conspectus-main                                               │
 │  ●   e44d01cb                in mux   17m   claude     Fix the ledger merge  ││  kind          mux                                                           │
-│  ◇   ledger-worktree         gone      2d  conspectus · feature/ledger       ││  status        live                                                          │
+│  ◇ ◎ ledger-worktree         removed   2d  conspectus · feature/ledger       ││  status        live                                                          │
 │  ⇄   ledger-pr               merged    5h  malloc47/conspectus · Ledger stor…││  target        mux_session:tmux:conspectus-main                              │
 │  ▣ ◎ nightly                 planned        claude     ~/src/conspectus      ││  name          conspectus-main                                               │
 │  ▣ ◎ old-api                 planned        codex      ~/src/api             ││  cwd           /home/op/src/conspectus                                       │

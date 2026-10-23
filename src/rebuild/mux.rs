@@ -25,7 +25,7 @@ use crate::model::{
 use crate::output::render::format_relative_age;
 use crate::resolve::slots::{ResolvedSlot, resolve_slot};
 
-use super::resume::{NoResume, Resume, build_resume, session_to_resume};
+use super::resume::{NoResume, build_resume, session_to_resume};
 use super::{
     Action, Env, Landing, MuxTarget, Options, Plan, RebuildError, Step, Subject, worktree,
 };
@@ -72,8 +72,11 @@ pub fn plan(
         name: name.clone(),
     };
 
+    // Asked what a rebuild would do if a running mux had stopped: plan it
+    // the way a gone one is planned, from what is known now.
+    let hypothetical = options.assume_stopped && resolved.status == SlotStatus::Live;
     let mut plan = Plan {
-        subject: describe(&name, &resolved, record, now),
+        subject: describe(&name, &resolved, record, now, hypothetical),
         steps: Vec::new(),
         warnings: Vec::new(),
         target: Some(target.clone()),
@@ -88,7 +91,14 @@ pub fn plan(
             .push(format!("argv comes from {}", source.label()));
     }
 
+    if hypothetical {
+        plan.warnings.push(format!(
+            "hypothetical: `{name}` is running; this is what a rebuild would do if it had stopped"
+        ));
+    }
+
     if resolved.status == SlotStatus::Live
+        && !hypothetical
         && let Some(node) = live
     {
         let pane = runner
@@ -210,7 +220,16 @@ fn effective_argv(
     (argv, None)
 }
 
-fn describe(name: &str, resolved: &ResolvedSlot, record: Option<&MuxRecord>, now: i64) -> String {
+fn describe(
+    name: &str,
+    resolved: &ResolvedSlot,
+    record: Option<&MuxRecord>,
+    now: i64,
+    hypothetical: bool,
+) -> String {
+    if hypothetical {
+        return format!("mux `{name}` (running; planned as if stopped)");
+    }
     let state = match (resolved.status, record) {
         (SlotStatus::Gone | SlotStatus::Unknown, Some(record)) => format!(
             "{}, last seen {} ago",
@@ -222,56 +241,38 @@ fn describe(name: &str, resolved: &ResolvedSlot, record: Option<&MuxRecord>, now
     format!("mux `{name}` ({state})")
 }
 
-fn display_command(target: &MuxTarget, rest: &str) -> String {
-    match target.socket.as_deref() {
-        Some(socket) if target.backend == "tmux" => format!("tmux -L {socket} {rest}"),
-        _ => format!("{} {rest}", target.backend),
-    }
-}
-
 fn kill_step(target: &MuxTarget) -> Step {
-    Step {
-        title: "end the dead session".to_string(),
-        command: display_command(target, &format!("kill-session -t {}", target.name)),
-        action: Action::KillSession {
+    Step::new(
+        "end the dead session",
+        Action::KillSession {
             backend: target.backend.clone(),
             socket: target.socket.clone(),
             name: target.name.clone(),
         },
-    }
+    )
 }
 
 fn send_keys_step(target: &MuxTarget, argv: &[OsString]) -> Step {
-    let literal = super::launch::format_argv_for_send_keys(argv);
-    Step {
-        title: "relaunch the agent".to_string(),
-        command: display_command(
-            target,
-            &format!("send-keys -t {} {literal} Enter", target.name),
-        ),
-        action: Action::SendKeys {
+    Step::new(
+        "relaunch the agent",
+        Action::SendKeys {
             backend: target.backend.clone(),
             socket: target.socket.clone(),
             name: target.name.clone(),
             argv: argv.to_vec(),
         },
-    }
+    )
 }
 
 fn attach_step(target: &MuxTarget) -> Step {
-    Step {
-        title: "attach".to_string(),
-        command: if target.backend == "tmux" {
-            super::launch::format_attach_command(target.socket.as_deref(), &target.name)
-        } else {
-            format!("{} attach {}", target.backend, target.name)
-        },
-        action: Action::Attach {
+    Step::new(
+        "attach",
+        Action::Attach {
             backend: target.backend.clone(),
             socket: target.socket.clone(),
             name: target.name.clone(),
         },
-    }
+    )
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -317,28 +318,13 @@ fn push_new_session(
         }
     };
 
-    let shown: Vec<OsString> = resume
-        .as_ref()
-        .map_or_else(|| argv.to_vec(), |r: &Resume| r.argv.clone());
-    let command_tail = if shown.is_empty() {
-        String::new()
-    } else {
-        format!(" {}", super::launch::format_argv_for_send_keys(&shown))
+    let title = match &resume {
+        Some(resume) => format!("new session, resume {}", short(&resume.session_key)),
+        None => "new session".to_string(),
     };
-    plan.steps.push(Step {
-        title: match &resume {
-            Some(resume) => format!("new session, resume {}", short(&resume.session_key)),
-            None => "new session".to_string(),
-        },
-        command: display_command(
-            target,
-            &format!(
-                "new-session -d -s {} -c {}{command_tail}",
-                target.name,
-                cwd.display()
-            ),
-        ),
-        action: Action::NewSession {
+    plan.steps.push(Step::new(
+        title,
+        Action::NewSession {
             backend: target.backend.clone(),
             socket: target.socket.clone(),
             name: target.name.clone(),
@@ -348,7 +334,7 @@ fn push_new_session(
             resume,
             harness: harness.map(str::to_string),
         },
-    });
+    ));
     Ok(())
 }
 

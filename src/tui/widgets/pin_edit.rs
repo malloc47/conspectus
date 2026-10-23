@@ -17,7 +17,7 @@ use ratatui::buffer::Buffer;
 use ratatui::crossterm::event::KeyEvent;
 use ratatui::layout::Rect;
 use ratatui::macros::line;
-use ratatui::style::{Modifier, Style};
+use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::Widget;
 
@@ -29,8 +29,7 @@ use crate::tui::Msg;
 use crate::tui::modal::{Overlay, OverlayOutcome};
 use crate::tui::theme::Theme;
 use crate::tui::widgets::form::{
-    self, Cols, ScrollLinesBody, display_argv, harness_row, note_row, options_row,
-    scroll_offset_for_cursor, value_row, wrap_footer,
+    self, Cols, SplitBody, display_argv, note_row, options_row, wrap_footer,
 };
 use crate::tui::widgets::input::{InputOutcome, TextInputState};
 use crate::tui::widgets::launch_spec_form::parse_launch_argv;
@@ -122,30 +121,87 @@ impl Row {
         self.control.value() != self.initial
     }
 
-    /// The note after the value: where it comes from, and what saving
-    /// will do.
-    fn tag(&self) -> String {
+    /// The word at the end of the row: where the value comes from, and
+    /// what saving will do. At most [`TAG_WIDTH`] cells.
+    fn tag(&self) -> &'static str {
         match self.which {
-            Which::PinName => "pin name".to_string(),
+            Which::PinName => "",
             Which::Field(_) => {
                 if self.cleared {
-                    return match self.inherited.1 {
-                        Some(layer) => format!("← inherits {}", layer.as_str()),
-                        None => "← inherits (unset)".to_string(),
-                    };
-                }
-                if self.edited() {
-                    return "→ will override".to_string();
-                }
-                match (self.overridden, self.source) {
-                    (true, _) => "override".to_string(),
-                    (false, Some(layer)) => layer.as_str().to_string(),
-                    (false, None) => "unset".to_string(),
+                    "will follow"
+                } else if self.edited() {
+                    "will keep"
+                } else if self.overridden {
+                    "kept"
+                } else {
+                    layer_word(self.source)
                 }
             }
         }
     }
+
+    /// What the focused row says about itself, in two lines: its state,
+    /// and what following would give.
+    fn hint(&self, kind: PinKind) -> (String, String) {
+        let Which::Field(_) = self.which else {
+            return (
+                "the name this pin is listed under".to_string(),
+                String::new(),
+            );
+        };
+        let value = self.control.value().trim();
+        let (inherited_value, inherited_layer) = &self.inherited;
+        let follows = |value: &str, layer: Option<FieldSource>| match layer {
+            Some(FieldSource::Live) => format!("following the running {}: {value}", kind.as_str()),
+            Some(FieldSource::History) => format!("following the last seen value: {value}"),
+            Some(FieldSource::Snapshot) => {
+                format!("following the value saved with the pin: {value}")
+            }
+            Some(FieldSource::Default) => format!("following the default: {value}"),
+            _ => "nothing to follow yet; type a value to keep with this pin".to_string(),
+        };
+        let back = || {
+            let again = follows(inherited_value, *inherited_layer);
+            format!(
+                "Ctrl-R goes back to {}",
+                again.replacen("following", "following —", 1)
+            )
+        };
+        if self.cleared {
+            return (
+                "will follow again when saved".to_string(),
+                follows(inherited_value, *inherited_layer),
+            );
+        }
+        if self.edited() {
+            let second = if inherited_layer.is_some() {
+                back()
+            } else {
+                String::new()
+            };
+            return (format!("will be kept with this pin: {value}"), second);
+        }
+        if self.overridden {
+            return (format!("kept with this pin: {value}"), back());
+        }
+        (follows(value, self.source), String::new())
+    }
 }
+
+/// The word for where a value comes from.
+fn layer_word(layer: Option<FieldSource>) -> &'static str {
+    match layer {
+        Some(FieldSource::Live) => "running",
+        Some(FieldSource::History) => "last seen",
+        Some(FieldSource::Snapshot) => "saved",
+        Some(FieldSource::Default) => "default",
+        Some(FieldSource::Override) => "kept",
+        None => "unset",
+    }
+}
+
+/// Cells of the right-hand column that names where a value comes from.
+const TAG_WIDTH: usize = 11;
 
 /// Form state: one row per editable field, and the cursor.
 #[derive(Debug, Clone)]
@@ -591,36 +647,58 @@ impl Widget for PinEditFormWidget<'_> {
             .map(|row| row.label.chars().count())
             .max()
             .unwrap_or(11)
-            .max(11);
+            .clamp(11, 16);
         let cols = Cols::new(inner_width).with_label(label_width);
+        let grid = Grid::new(inner_width, label_width);
         let stops = state.stops();
         let focus = stops.get(state.focus).copied().unwrap_or(Stop::Row(0));
+        let dim = Style::default().add_modifier(Modifier::DIM);
 
-        let mut lines: Vec<Line<'static>> = vec![
-            note_row(
-                "pin",
-                &format!("{} · {} · {}", state.pin, state.kind.as_str(), state.status),
-                cols,
-            ),
-            line![""],
-        ];
-        let mut cursor_line = 0;
+        let mut top: Vec<Line<'static>> = vec![note_row(
+            "pin",
+            &format!("{} · {} · {}", state.pin, state.kind.as_str(), state.status),
+            cols,
+        )];
+        let help = format!(
+            "A blank field follows the running {}, then its last seen value, then what was \
+             saved with the pin. Type to keep a value of your own with this pin; Ctrl-R goes \
+             back to following.",
+            state.kind.as_str()
+        );
+        top.extend(
+            form::wrap_words(&help, inner_width.saturating_sub(2))
+                .into_iter()
+                .map(|text| Line::styled(format!("  {text}"), dim)),
+        );
+        top.push(line![""]);
+
+        let mut rows: Vec<Line<'static>> = Vec::new();
+        let mut cursor_row = 0;
+        let mut detail = (String::new(), String::new());
         for (idx, row) in state.rows.iter().enumerate() {
             let active = focus == Stop::Row(idx);
             if active {
-                cursor_line = lines.len();
+                cursor_row = rows.len();
+                detail = row.hint(state.kind);
+                if detail.1.is_empty() {
+                    detail.1 = row_help(row);
+                }
             }
-            lines.push(render_row(state, row, active, cols));
+            rows.push(render_row(state, row, active, grid, cols));
             if row.which == Which::PinName && state.live_mux {
-                lines.push(note_row("", "renames the tmux session too", cols));
+                rows.push(note_row("", "renames the tmux session too", cols));
             }
             if row.which == Which::Field("harness") && state.has_options() {
                 let active = focus == Stop::Options;
                 if active {
-                    cursor_line = lines.len();
+                    cursor_row = rows.len();
+                    detail = (
+                        "launch options for this harness".to_string(),
+                        "Space or ←/→ turns an option on or off".to_string(),
+                    );
                 }
                 let harness = state.harness_text();
-                lines.push(options_row(
+                rows.push(options_row(
                     "options",
                     launch_options_for(&harness),
                     &state.argv_now(),
@@ -629,64 +707,142 @@ impl Widget for PinEditFormWidget<'_> {
                 ));
             }
         }
+
+        // The focused row's explanation always takes the same two lines,
+        // so the form never changes height as the cursor moves.
+        let detail_width = inner_width.saturating_sub(2);
+        let mut bottom: Vec<Line<'static>> = vec![
+            line![""],
+            Line::styled(format!("  {}", form::fit(&detail.0, detail_width)), dim),
+            Line::styled(format!("  {}", form::fit(&detail.1, detail_width)), dim),
+        ];
         if let Some(err) = state.error() {
-            lines.push(line![""]);
-            lines.push(line![Span::styled(
-                err.to_string(),
-                Style::default().fg(self.theme.error)
-            )]);
+            bottom.push(Line::styled(
+                format!("  {}", form::fit(err, detail_width)),
+                Style::default().fg(self.theme.error),
+            ));
         }
-        lines.push(line![""]);
-        lines.extend(wrap_footer(
+        bottom.push(line![""]);
+        bottom.extend(wrap_footer(
             &crate::tui::keybindings::overlay::footer(
                 crate::tui::keybindings::overlay::PIN_EDIT_KEYS,
             ),
             inner_width,
         ));
 
-        let modal = form::modal_rect(area, modal_width, lines.len(), 10);
-        let inner_height = usize::from(modal.height.saturating_sub(2));
-        let body = ScrollLinesBody {
-            scroll_offset: scroll_offset_for_cursor(cursor_line, inner_height, lines.len()),
-            lines,
+        let content = top.len() + rows.len() + bottom.len();
+        let modal = form::modal_rect(area, modal_width, content, 10);
+        let body = SplitBody {
+            top,
+            rows,
+            bottom,
+            cursor_row,
             inner_width: usize::from(modal.width.saturating_sub(2)),
-            inner_height,
+            inner_height: usize::from(modal.height.saturating_sub(2)),
         };
         crate::tui::widgets::popup_frame::themed_popup(body, line![" Edit pin "], self.theme)
             .render(area, buf);
     }
 }
 
-fn render_row(state: &PinEditFormState, row: &Row, active: bool, cols: Cols) -> Line<'static> {
-    let tag = row.tag();
-    let tag_text = format!("  {tag}");
-    let tag_span = Span::styled(
-        tag_text.clone(),
-        Style::default().add_modifier(Modifier::DIM),
-    );
+/// The second explanation line of a focused row: what its keys do.
+fn row_help(row: &Row) -> String {
+    match &row.control {
+        Control::Path(_) => "Tab completes the path".to_string(),
+        Control::Harness(_) => "←/→ choose a harness".to_string(),
+        Control::Text(_) => String::new(),
+    }
+}
+
+/// The columns of a row, in cells: the two-cell selection gutter, the
+/// label, a gap, the value, a gap, and the right-aligned tag. Every row
+/// uses the same widths, focused or not.
+#[derive(Clone, Copy)]
+struct Grid {
+    label: usize,
+    value: usize,
+}
+
+impl Grid {
+    fn new(inner: usize, label: usize) -> Self {
+        let fixed = 2 + label + 2 + 1 + TAG_WIDTH;
+        Self {
+            label,
+            value: inner.saturating_sub(fixed).max(4),
+        }
+    }
+}
+
+fn render_row(
+    state: &PinEditFormState,
+    row: &Row,
+    active: bool,
+    grid: Grid,
+    cols: Cols,
+) -> Line<'static> {
+    let (prefix, label_style) = form::prefix(&row.label, active, grid.label);
+    let mut spans = vec![Span::styled(prefix, label_style)];
     match &row.control {
         Control::Harness(input) => {
-            let mut line = harness_row(&row.label, input, &state.known_harness_keys, active, cols);
-            line.spans.push(tag_span);
-            line
+            let value = input.value().trim();
+            let custom = !value.is_empty() && !state.known_harness_keys.iter().any(|k| k == value);
+            if custom {
+                let mark = " [custom]";
+                let width = grid.value.saturating_sub(mark.chars().count());
+                spans.extend(form::value_cells(
+                    input.value(),
+                    input.cursor(),
+                    width,
+                    active,
+                ));
+                spans.push(Span::styled(mark, Style::default().fg(Color::Yellow)));
+            } else {
+                let slot = 18.min(grid.value);
+                spans.extend(form::value_cells(
+                    input.value(),
+                    input.cursor(),
+                    slot,
+                    active,
+                ));
+                let chips =
+                    form::harness_chips(value, &state.known_harness_keys, grid.value - slot);
+                let used: usize = chips.iter().map(|s| s.content.chars().count()).sum();
+                spans.extend(chips);
+                spans.push(Span::raw(" ".repeat(grid.value - slot - used)));
+            }
         }
         Control::Path(path) => {
-            let mut line = form::path_row(&row.label, path, active, cols);
-            line.spans.push(tag_span);
-            line
+            let width = grid.value.saturating_sub(2);
+            spans.extend(form::value_cells(
+                path.value(),
+                path.cursor(),
+                width,
+                active,
+            ));
+            spans.extend(form::path_mark(path));
         }
-        Control::Text(input) => value_row(
-            &row.label,
-            input.value(),
-            input.cursor(),
-            active,
-            cols,
-            Some(form::Suffix {
-                width: tag_text.chars().count(),
-                spans: vec![tag_span],
-            }),
-        ),
+        Control::Text(input) => {
+            spans.extend(form::value_cells(
+                input.value(),
+                input.cursor(),
+                grid.value,
+                active,
+            ));
+        }
     }
+    spans.push(Span::raw(" "));
+    let pending = row.cleared || row.edited();
+    let tag_style = if pending {
+        Style::default().fg(Color::Yellow)
+    } else {
+        Style::default().add_modifier(Modifier::DIM)
+    };
+    spans.push(Span::styled(
+        format!("{:>width$}", row.tag(), width = TAG_WIDTH),
+        tag_style,
+    ));
+    let _ = cols;
+    Line::from(spans)
 }
 
 #[cfg(test)]

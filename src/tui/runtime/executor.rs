@@ -432,8 +432,18 @@ fn execute_unpin(app: &mut App, slot: &str) {
     let Some(store) = slot_store_or_report(app) else {
         return;
     };
+    let overrides = store
+        .load()
+        .slots
+        .iter()
+        .find(|existing| existing.id == slot)
+        .map_or(0, |existing| existing.overrides.len());
     let outcome = match store.remove(slot) {
-        Ok(write) if write.changed => Ok(format!("unpinned `{slot}`")),
+        Ok(write) if write.changed => Ok(match overrides {
+            0 => format!("unpinned `{slot}`"),
+            1 => format!("unpinned `{slot}` (its 1 override was removed)"),
+            n => format!("unpinned `{slot}` (its {n} overrides were removed)"),
+        }),
         Ok(_) => Err(format!("unpin: no pin named `{slot}`")),
         Err(err) => Err(format!("unpin failed: {err}")),
     };

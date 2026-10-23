@@ -248,21 +248,10 @@ pub(crate) fn format_attach_command(socket: Option<&str>, name: &str) -> String 
 }
 
 /// Render an argv slice as a tmux `send-keys` literal so the
-/// harness command lands in the existing pane. We quote each
-/// arg with double-quotes when it contains spaces; this matches
-/// the way operators would type the command interactively.
+/// harness command lands in the existing pane, quoted so a shell reads
+/// back the same arguments.
 pub(crate) fn format_argv_for_send_keys(argv: &[std::ffi::OsString]) -> String {
-    argv.iter()
-        .map(|token| {
-            let token = token.to_string_lossy();
-            if token.is_empty() || token.contains(char::is_whitespace) {
-                format!("\"{token}\"")
-            } else {
-                token.into_owned()
-            }
-        })
-        .collect::<Vec<_>>()
-        .join(" ")
+    crate::argv::shell_join(argv)
 }
 
 #[cfg(test)]

@@ -64,7 +64,7 @@ fn the_plain_executor_says_so_when_handed_what_it_cannot_run() {
     );
 }
 
-fn every_store_op() -> Vec<StoreOp> {
+pub(super) fn every_store_op() -> Vec<StoreOp> {
     let node = NodeId::MuxSession(MuxSessionId::new("tmux:scratch"));
     vec![
         StoreOp::PinRecord {

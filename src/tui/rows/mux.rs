@@ -110,11 +110,14 @@ pub fn build_mux_tree(inputs: MuxBuildInputs<'_>) -> RowTree {
     // unit.
     let mut groups: Vec<MuxGroup> = Vec::new();
     // Ghosts are muxes history remembers whose session is gone; a
-    // narrowing filter can't match them, and the Controls toggle hides
-    // them outright.
-    if !inputs.filter.hide_gone_muxes && !inputs.filter.has_narrowing_predicates() {
+    // narrowing filter can't match them. Only the ones a pin points at
+    // show unless Controls asks for every stopped mux.
+    if !inputs.filter.has_narrowing_predicates() {
+        let pinned = super::pinned_node_set(snapshot);
         for ghost in collect_ghosts(snapshot, inputs.home, now) {
-            groups.push(ghost);
+            if inputs.filter.show_stopped_muxes || pinned.contains(&ghost.parent_node_id) {
+                groups.push(ghost);
+            }
         }
     }
     for mux in &muxes {
@@ -654,7 +657,7 @@ fn mux_matches_filter(
         pr_branch: _,
         pr_state: _,
         float_tracked_prs_top: _,
-        hide_gone_muxes: _,
+        show_stopped_muxes: _,
         pinned_only: _,
         show_pinned_history: _,
     } = filter;

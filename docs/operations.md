@@ -211,6 +211,16 @@ teardown_grace = "3s"
   `conspectus refresh --class forge` (or a plain `conspectus refresh`) does
   the same from a shell. One-shot commands without a daemon (`graph`,
   `table prs`) fetch, since they have nothing cached.
+- **Refreshes see what you just did.** The mux listing is otherwise reused
+  for a few seconds. `conspectus refresh --class mux` (and a plain
+  `refresh`), `r`, the refresh after any action that starts, stops, or
+  renames a mux, and the refresh after you detach from or kill a mux all
+  ask the mux server again first, and a running daemon does not reply until
+  the re-probe is published, so the next read of its snapshot has the new
+  state. After a detach the TUI re-probes up to twice more, 150ms apart, if
+  the set of running muxes came back exactly as it was before. Timer
+  refreshes still reuse the cached listing. Forges are never re-fetched by
+  these refreshes, and their data is kept.
 - **Forge concurrency:** `[forge] concurrency` (default 4) sets how many
   `gh` calls run at once. Higher fetches faster but can trip a forge's
   rate limits.
@@ -686,10 +696,11 @@ exit with a message naming the replacement.
 ### Rebuild
 
 ```sh
-conspectus rebuild <pin | h_... | node id | mux name> [--dry-run] [--no-attach] [--session ID]
+conspectus rebuild <pin | h_... | node id | mux name> [--dry-run [--assume-stopped] [--script]] [--no-attach] [--session ID]
 ```
 
-A rebuild is a plan of steps. `--dry-run` prints it and stops; a real
+A rebuild is a plan of steps. `--dry-run` prints it and stops, with the exact
+command under each step, quoted for a shell; a real
 run executes the steps in order and stops at the first failure, with no
 rollback. Steps chain prerequisites: a mux whose worktree is gone
 rebuilds the worktree first, which in turn clones a missing repo.
@@ -707,6 +718,24 @@ rebuilds the worktree first, which in turn clones a missing repo.
   be on your `PATH`), creating a deleted branch from its last head.
 - A **repo or primary checkout** is cloned from its recorded remote with
   `git clone`, only into a path that doesn't exist.
+
+**Planning for something that is running.** A real rebuild leaves a running
+mux alone (it only attaches). To see what it would take to recreate one from
+what Conspectus knows now, add `--assume-stopped` (only with `--dry-run`): the
+plan is built as if the mux, worktree, repo, or session's mux had stopped, from
+its live command, directory, harness, and last session, and is marked
+hypothetical. `--script` prints just the commands, with `#` comment lines for
+the step titles, so you can paste them into a shell or pipe them to `sh` and
+rebuild the state outside Conspectus. The commands come from the same builders
+the rebuild runs, so what the plan shows is what would execute:
+
+```sh
+conspectus rebuild work --dry-run --assume-stopped --script --no-attach
+# rebuild mux `work` (running; planned as if stopped)
+# note: hypothetical: `work` is running; this is what a rebuild would do if it had stopped
+# new session, resume e44d01cb
+tmux new-session -d -s work -c /home/me/src/app claude --resume e44d01cb \; set-option -t work remain-on-exit failed
+```
 
 The launch argv is the first of: the pin's `argv` override, the recorded
 argv, the project's `[launch.<harness>]` profile, the user's profile, an
@@ -729,16 +758,17 @@ pin targets.
 
 Key `4` (or `--view pinned`) lists every pin, whatever its kind, in one set
 of columns: `<kind glyph> <pin> <status> <age> <content>`. The pin name is
-cut at 28 cells, the status is one word (`live`, `gone`, `unknown`,
-`planned`, `missing`, `in mux`, `resumable`, or a PR's state), the age is the
+cut at 28 cells, the status is one word (`live`, `stopped`, `removed`,
+`unknown`, `planned`, `missing`, `in mux`, `resumable`, or a PR's state), the age is the
 last activity of a live entity or the time a gone one was last seen, and the
 content is the harness and place, the title, or the remote. Gone, missing,
-planned, and unknown rows are dimmed. The agent or program that runs is a
+planned, and unknown rows wear the ghost style (the theme's `ghost` color, in italics). The agent or program that runs is a
 filled chip, the same as in the other views, ahead of the text that follows
-it. A pin with nothing running yet (`planned`) wears a hollow pin glyph, `◎`,
-in the dimmed ghost color after its kind glyph; the filled `◉` is for an
-entity a pin points at. `gone` means an entity that existed and is no longer
-running, and never describes an unstarted pin. Columns pad to the widest
+it. A pin with nothing running (`planned`, `stopped`, `removed`, `missing`, or
+`unknown`) wears a hollow pin glyph, `◎`, in the ghost color after its kind
+glyph; the filled `◉` is for an entity a pin points at. `gone` means an
+entity that existed and is no longer there, and labels it in History and the
+Mux view, never a pin. Columns pad to the widest
 value in the whole tree, so folding a group doesn't move them. Changing the
 grouping scrolls back to the top so every group is visible.
 
@@ -763,8 +793,10 @@ migrate`.
 
 `.` opens the pin menu, the same one every view offers for a pinned entity:
 **Rebuild** (start it without attaching; only where there is something to
-bring back), **Show rebuild plan** (for a running mux it says so and that
-`Enter` attaches; it isn't offered for PRs, sessions, or a live worktree),
+bring back), **Show rebuild plan** (the plan with its exact commands in a modal,
+where `y` copies them as a script; for a running mux, worktree, repo, or
+session it is the plan for the case that it had stopped, under a line saying
+what `Enter` does; not offered for PRs),
 **Edit…** (the edit form, below), **Rename…** (a live mux pin renames its tmux
 session with it and pins the name, as `pin rename` does), **Retarget…** (a
 searchable list of the other entities of the same kind, running or gone; type
@@ -795,14 +827,20 @@ groups above them.
 
 **Edit…** opens a form with one row per field the pin can change: its name
 first (renaming a live mux pin renames its tmux session), then the label and
-the fields its kind can override, the same names `pin edit --set` takes. Each
-row shows the value in effect and where it comes from (`override`, `live`,
-`history`, `snapshot`, or `default`). Typing in a row makes an override;
-`Ctrl-R` drops the row's override so it follows the entity again. Paths
-complete with `Tab`, the harness row lists the known harnesses (`←`/`→` choose
-one), and a harness's launch options, such as skipping permissions, are
-checkboxes under it that add or remove their flags on the `argv` row. `↑`/`↓`
-move between rows, `Enter` saves, and `Esc` cancels.
+the fields its kind can change, the same names `pin edit --set` takes. A
+short note at the top explains the idea: a blank field follows the running
+target, then its last seen value, then what was saved with the pin; typing a
+value keeps one of your own with the pin. Each row has the same three
+columns: the field, its value, and a word on the right for where the value
+comes from (`running`, `last seen`, `saved`, `default`, or `kept` for a value
+you set), which changes to `will keep` or `will follow` while an edit is
+pending. The two lines under the rows describe the focused field: what it is
+following now, or what `Ctrl-R` would go back to. Nothing moves when the
+selection does. Paths complete with `Tab`, the harness row lists the known
+harnesses (`←`/`→` choose one), and a harness's launch options, such as
+skipping permissions, are checkboxes under it that add or remove their flags
+on the `argv` row. `↑`/`↓` move between rows, `Enter` saves, and `Esc`
+cancels.
 
 The launch and new mux forms work the same way: `↑`/`↓` move between fields,
 `Tab` completes a directory in a path field (offering directories from
@@ -837,7 +875,8 @@ the mux, and on return selects it in the Mux view (a gone worktree or repo is
 rebuilt and focus moves to where it now lives). `.` opens the row menu:
 **Pin** (the same as `pin add <record id>`; the full pin menu once a pin points
 at it), **Rebuild** (without attaching), **Show rebuild plan** (the output of
-`rebuild --dry-run` in a scrollable modal), **Forget** (press `Enter` twice; the record leaves history
+`rebuild --dry-run --assume-stopped` in a scrollable modal; `y` copies the
+commands as a script), **Forget** (press `Enter` twice; the record leaves history
 and any pin pointing at it falls back to its snapshot), and **Clean up…**.
 
 Clean up lists what `conspectus history reap` would remove: gone records past
@@ -850,11 +889,14 @@ reap`.
 
 ### Ghost muxes in the Mux view
 
-The Mux view lists a gone mux below the live muxes of its group, dimmed, with
-a `gone` status and the time it was last seen; the header reads `11 mux ·
-4 gone`. A mux whose probe couldn't run shows as `unknown` and isn't counted
-as gone. Controls has a **Hide gone muxes** checkbox, and any narrowing filter
-(harness, max age, mux state) leaves ghosts out because they can't match.
+The Mux view lists a stopped mux below the running muxes of its group, in the
+ghost style (dimmed gray italics), with a `gone` status and the time it was
+last seen, but only when a pin points at it: stopped muxes you haven't pinned
+live in History. The header counts them all (`11 mux · 4 gone`). A mux whose
+probe couldn't run shows as `unknown` and isn't counted as gone. Controls has
+a **Show all stopped muxes** checkbox (off by default), and any narrowing
+filter (harness, max age, mux state) leaves ghosts out because they can't
+match.
 `Enter` on a ghost rebuilds it, `.` opens the same menu as in History, and
 attach and rename refuse with a message that names the fix.
 

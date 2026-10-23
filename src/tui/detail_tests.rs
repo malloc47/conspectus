@@ -180,7 +180,7 @@ fn mux_pinned_by_a_gone_slot_shows_pin_summary() {
         .expect("pin summary field");
 
     assert!(pin.value.contains("ingest"));
-    assert!(pin.value.contains("gone"));
+    assert!(pin.value.contains("stopped"));
 }
 
 #[test]

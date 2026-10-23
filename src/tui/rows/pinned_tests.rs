@@ -55,9 +55,9 @@ fn status_words_follow_the_kind_vocabulary() {
     let tree = tree(PinnedGrouping::None, Sort::Hierarchy);
     let status = |label: &str| mixed(&tree, label).status.clone();
     assert_eq!(status("conspectus-main"), "live");
-    assert_eq!(status("config-agent3"), "gone");
+    assert_eq!(status("config-agent3"), "stopped");
     assert_eq!(status("e44d01cb"), "in mux");
-    assert_eq!(status("ledger-worktree"), "gone");
+    assert_eq!(status("ledger-worktree"), "removed");
     assert_eq!(status("ledger-pr"), "merged");
     assert_eq!(status("nightly"), "planned");
     assert_eq!(status("old-api"), "planned");

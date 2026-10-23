@@ -5,9 +5,9 @@ expression: "trimmed(pinned_frame(&mut app, 100))"
 updated 0s ago · 0/1 sessions · 1 mux
 ┌ ▸ sessions · mux · prs · pinned · history ─────┐┌   ◉ pin ───────────────────────────────────────┐
 │▶ ▣   conspec┌ pin conspectus-main ─────────────────────────────────────────────────┐             │
-│  ▣   config-│                                                                      │             │
+│  ▣ ◎ config-│                                                                      │             │
 │  ●   e44d01c│▸ Show rebuild plan                                                   │             │
-│  ◇   ledger-│     what rebuild would run, without running it                       │             │
+│  ◇ ◎ ledger-│     the commands that would recreate it, as if it had stopped        │             │
 │  ⇄   ledger-│  Edit…                                                               │nspectus-main│
 │  ▣ ◎ nightly│     change the name, cwd, harness, arguments, and more               │             │
 │  ▣ ◎ old-api│  Rename…                                                             │ctus         │

@@ -190,7 +190,7 @@ fn generated_footers_keep_the_established_wording() {
     );
     assert_eq!(
         footer(PIN_EDIT_KEYS),
-        "↑/↓ move · Tab complete/next · S-Tab back · ←/→/Space option · Ctrl-R inherit · Enter save · Esc cancel"
+        "↑/↓ move · Tab complete/next · S-Tab back · ←/→/Space option · Ctrl-R follow again · Enter save · Esc cancel"
     );
 }
 

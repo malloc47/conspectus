@@ -1661,3 +1661,100 @@ fn saving_the_pin_edit_form_sets_and_drops_overrides_in_the_store() {
     };
     assert!(!executor::apply_pin_overrides(&store, &none).unwrap());
 }
+
+mod settle {
+    use std::cell::RefCell;
+    use std::collections::BTreeSet;
+
+    use super::*;
+    use crate::model::{GraphNode, GraphSnapshot, MuxSessionId, MuxSessionNode, NodeId};
+
+    fn world(names: &[&str]) -> GraphSnapshot {
+        GraphSnapshot {
+            nodes: names
+                .iter()
+                .map(|name| {
+                    GraphNode::MuxSession(MuxSessionNode::new(
+                        MuxSessionId::new(format!("tmux:{name}")),
+                        "tmux",
+                        *name,
+                    ))
+                })
+                .collect(),
+            ..GraphSnapshot::empty()
+        }
+    }
+
+    fn ids(names: &[&str]) -> BTreeSet<NodeId> {
+        live_mux_ids(&world(names))
+    }
+
+    /// Probe results in order; the last repeats.
+    fn run(
+        before: Option<&BTreeSet<NodeId>>,
+        results: &[&[&str]],
+    ) -> (usize, usize, GraphSnapshot) {
+        let calls = RefCell::new(0usize);
+        let sleeps = RefCell::new(0usize);
+        let (snapshot, ()) = probe_until_changed(
+            before,
+            2,
+            Duration::from_millis(150),
+            |_| *sleeps.borrow_mut() += 1,
+            || {
+                let i = (*calls.borrow()).min(results.len() - 1);
+                *calls.borrow_mut() += 1;
+                (Ok(world(results[i])), ())
+            },
+        );
+        (calls.into_inner(), sleeps.into_inner(), snapshot.unwrap())
+    }
+
+    #[test]
+    fn a_changed_mux_set_is_taken_at_once() {
+        let before = ids(&["a"]);
+        let (calls, sleeps, snapshot) = run(Some(&before), &[&["a", "b"]]);
+        assert_eq!((calls, sleeps), (1, 0));
+        assert_eq!(live_mux_ids(&snapshot), ids(&["a", "b"]));
+    }
+
+    #[test]
+    fn an_unchanged_set_is_probed_again_until_it_changes() {
+        let before = ids(&["a", "b"]);
+        // The first probe still sees the session that just ended.
+        let (calls, sleeps, snapshot) = run(Some(&before), &[&["a", "b"], &["a"]]);
+        assert_eq!((calls, sleeps), (2, 1));
+        assert_eq!(live_mux_ids(&snapshot), ids(&["a"]));
+    }
+
+    #[test]
+    fn a_set_that_never_changes_stops_after_the_bounded_retries() {
+        let before = ids(&["a"]);
+        let (calls, sleeps, _) = run(Some(&before), &[&["a"]]);
+        assert_eq!((calls, sleeps), (3, 2));
+    }
+
+    #[test]
+    fn without_a_hand_off_set_it_probes_once() {
+        let (calls, sleeps, _) = run(None, &[&["a"]]);
+        assert_eq!((calls, sleeps), (1, 0));
+    }
+
+    #[test]
+    fn a_failed_probe_is_returned_without_retrying() {
+        let before = ids(&["a"]);
+        let calls = RefCell::new(0);
+        let (result, ()) = probe_until_changed(
+            Some(&before),
+            2,
+            Duration::ZERO,
+            |_| {},
+            || {
+                *calls.borrow_mut() += 1;
+                (Err(anyhow::anyhow!("boom")), ())
+            },
+        );
+        assert!(result.is_err());
+        assert_eq!(calls.into_inner(), 1);
+    }
+}

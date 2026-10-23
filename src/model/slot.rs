@@ -319,6 +319,19 @@ pub enum SlotStatus {
 }
 
 impl SlotStatus {
+    /// What the interface calls this status for a pin of `kind`. `gone`
+    /// names an entity that existed and is no longer there; a pin whose
+    /// mux isn't running is `stopped`, and one whose worktree or repo
+    /// was deleted is `removed`.
+    pub fn label_for(self, kind: PinKind) -> &'static str {
+        match (self, kind) {
+            (SlotStatus::Gone, PinKind::Mux) => "stopped",
+            (SlotStatus::Gone, PinKind::Session) => "missing",
+            (SlotStatus::Gone, _) => "removed",
+            _ => self.as_str(),
+        }
+    }
+
     pub fn as_str(self) -> &'static str {
         match self {
             SlotStatus::Live => "live",

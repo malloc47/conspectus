@@ -55,8 +55,12 @@ session.
    `pin list` shows the pin as `gone`. In the TUI the Mux view dims the
    ghost, and the Pinned view (`4`) and History view (`5`) list it too.
 4. Read the plan: `conspectus rebuild walkthrough --dry-run`. It prints
-   each step: a `tmux new-session` with the recorded argv, with the last
-   session's resume spliced in after the harness binary.
+   each step with the exact command under it: a `tmux new-session` with the
+   recorded argv, with the last session's resume spliced in after the harness
+   binary. `--script` prints only those commands to paste into a shell, and
+   `--assume-stopped` gives the same plan for a mux that is still running.
+   In the TUI, the row menu's **Show rebuild plan** shows it and `y` copies
+   the commands.
 5. Run it: `conspectus rebuild walkthrough`. Conspectus recreates the
    session, resumes the same conversation, and hands the terminal to
    tmux. Pass `--no-attach` to get the attach command printed instead.

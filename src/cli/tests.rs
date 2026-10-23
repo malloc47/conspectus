@@ -518,7 +518,7 @@ fn format_argv_for_send_keys_quotes_whitespace_tokens() {
     ];
     assert_eq!(
         crate::rebuild::launch::format_argv_for_send_keys(&argv),
-        "codex --prompt \"hello world\""
+        "codex --prompt 'hello world'"
     );
 }
 

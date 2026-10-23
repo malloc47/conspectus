@@ -38,11 +38,14 @@ pub fn plan(
     let resume_options = Options {
         session: Some(id.session_key.clone()),
         attach: options.attach,
+        assume_stopped: options.assume_stopped,
     };
     let mut plan = if let Some(record) = hosting {
         let subject = mux_subject(&record.meta.id, &record.recipe.name);
         let resolved_mux = resolve_slot(snapshot, &subject.slot);
-        let busy = resolved_mux.status == SlotStatus::Live
+        // Asked what would happen if its mux had stopped, it isn't busy.
+        let busy = !options.assume_stopped
+            && resolved_mux.status == SlotStatus::Live
             && resolved_mux
                 .target_node
                 .as_ref()

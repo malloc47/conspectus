@@ -782,7 +782,9 @@ fn handle_status(request: &Request, ctx: &DispatchCtx) -> Response {
 /// passes `args.class = "<name>"` — only that class's slice via
 /// the same `try_class_cycle` the scheduler uses. Synchronous
 /// from the client's perspective; the response lands only after
-/// the rebuild commits.
+/// the rebuild commits and the new snapshot is published. A mux
+/// refresh drops the cached mux listing first, so the re-probe asks
+/// the server rather than reusing a listing up to a TTL old.
 fn handle_refresh(request: &Request, ctx: &DispatchCtx) -> Response {
     let class_arg = request.args.get("class").and_then(|v| v.as_str());
     let class = match class_arg {
@@ -830,6 +832,12 @@ fn handle_refresh(request: &Request, ctx: &DispatchCtx) -> Response {
         .writer_lock
         .lock()
         .unwrap_or_else(PoisonError::into_inner);
+    // The writer lock is held, so no cycle can store a listing taken
+    // before this point after the clear: the re-probe below is the
+    // first thing to repopulate the mux caches.
+    if matches!(class, None | Some(ProviderClass::Mux)) {
+        ctx.discovery_caches.clear_mux();
+    }
     let outcome = match class {
         None => run_full_rebuild(ctx),
         Some(c) => try_class_cycle(c, ctx, crate::discovery::current_epoch()),

@@ -449,7 +449,7 @@ fn write_mux_summary(out: &mut String, mux: &MuxSessionNode) {
 fn write_pin_summary(out: &mut String, pin: &PinNode) {
     let _ = writeln!(out, "  label:    {}", pin.label);
     let _ = writeln!(out, "  kind:     {}", pin.kind.as_str());
-    let _ = writeln!(out, "  status:   {}", pin.status.as_str());
+    let _ = writeln!(out, "  status:   {}", pin.status.label_for(pin.kind));
     let _ = writeln!(
         out,
         "  target:   {}",

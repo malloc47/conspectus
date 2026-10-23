@@ -800,3 +800,50 @@ fn a_backend_without_named_servers_fails_a_socket_probe() {
         TmuxOutcome::Sessions(_)
     ));
 }
+
+fn mux_names(fragment: &GraphFragment) -> Vec<String> {
+    fragment
+        .nodes
+        .iter()
+        .filter_map(|node| match node {
+            GraphNode::MuxSession(mux) => Some(mux.session_name().to_string()),
+            _ => None,
+        })
+        .collect()
+}
+
+const ALPHA: &str = "alpha\t/work\t1\t1\n";
+
+#[test]
+fn a_cached_listing_hides_a_started_mux_until_the_mux_cache_is_cleared() {
+    let server = ScriptedTmux::default();
+    server.lists("");
+    let discovery = TmuxDiscovery::with_runner(server.clone());
+    let context = DiscoveryContext::default();
+    assert!(mux_names(&discovery.discover(&context).unwrap()).is_empty());
+
+    server.lists(ALPHA);
+    // Within the cache lifetime the old listing is served: the hazard a
+    // forced refresh must get past.
+    assert!(mux_names(&discovery.discover(&context).unwrap()).is_empty());
+
+    context.caches().clear_mux();
+    assert_eq!(mux_names(&discovery.discover(&context).unwrap()), ["alpha"]);
+}
+
+#[test]
+fn a_cached_listing_hides_a_killed_mux_until_the_mux_cache_is_cleared() {
+    let server = ScriptedTmux::default();
+    server.lists(ALPHA);
+    let discovery = TmuxDiscovery::with_runner(server.clone());
+    let context = DiscoveryContext::default();
+    assert_eq!(mux_names(&discovery.discover(&context).unwrap()), ["alpha"]);
+
+    server.stops();
+    assert_eq!(mux_names(&discovery.discover(&context).unwrap()), ["alpha"]);
+
+    context.caches().clear_mux();
+    let fragment = discovery.discover(&context).unwrap();
+    assert!(mux_names(&fragment).is_empty());
+    assert_eq!(probes(&fragment)["tmux"], MuxProbeStatus::NoServer);
+}

@@ -54,7 +54,7 @@ top of the Sessions and Mux views go away.
    and the edits the operator made. It doesn't depend on history to
    exist (see Pin slots).
 2. **History is browsable without pinning**, through a History view,
-   with ghost muxes also shown inline in the Mux view.
+   with pinned ghost muxes also shown inline in the Mux view.
 3. **Rebuild scope for this milestone:** mux plus session resume,
    worktree, mux on a gone worktree, and repo clone.
 4. **Pins live in `$XDG_DATA_HOME/conspectus/pins.toml`**, user scope
@@ -506,9 +506,10 @@ Pinned · by project
 
 ### Mux view
 
-Ghost muxes sort below live muxes in each group, dimmed, with the
-`gone` status and their last-seen age. A Controls toggle hides them.
-The header reads `11 mux · 4 gone`.
+Ghost muxes that a pin points at sort below live muxes in each group,
+in the ghost style, with the `gone` status and their last-seen age.
+Unpinned ones live in History; a Controls option lists them all. The
+header reads `11 mux · 4 gone`.
 
 ### Removed
 

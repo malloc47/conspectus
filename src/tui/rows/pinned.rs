@@ -155,10 +155,9 @@ fn describe(snapshot: &GraphSnapshot, pin: &PinNode, home: Option<&Path>) -> Des
     let status = match pin.status {
         SlotStatus::Planned => "planned".to_string(),
         SlotStatus::Missing => "missing".to_string(),
-        SlotStatus::Gone => match pin.kind {
-            PinKind::Session => "missing".to_string(),
-            _ => "gone".to_string(),
-        },
+        // `gone` names an entity; a pin whose entity isn't there reads
+        // as stopped (or removed, for things that don't run).
+        SlotStatus::Gone => SlotStatus::Gone.label_for(pin.kind).to_string(),
         SlotStatus::Unknown => "unknown".to_string(),
         SlotStatus::Live => match (pin.kind, target) {
             (PinKind::Session, _) => {
@@ -381,10 +380,10 @@ fn push_slot(
             content: described.content,
             primary_node: pin_node,
             pr_state: described.pr_state,
-            marker: if pin.status == SlotStatus::Planned {
-                PinMarker::Unstarted
-            } else {
+            marker: if pin.status == SlotStatus::Live {
                 PinMarker::None
+            } else {
+                PinMarker::Unstarted
             },
             grid: MixedGrid::Columns,
         }),

@@ -95,46 +95,40 @@ fn pins() -> Vec<(String, PinKind, crate::model::SlotStatus)> {
 #[test]
 fn entries_that_have_nothing_to_say_are_hidden() {
     use crate::model::SlotStatus;
-    let mut offered_plan_for_live = Vec::new();
-    let mut offered_rebuild_for_pr = Vec::new();
+    let mut plan_missing = Vec::new();
+    let mut rebuild_for_live = Vec::new();
+    let mut offered_for_pr = Vec::new();
     for (name, kind, status) in pins() {
         let labels = labels_in(View::Pinned, &name);
-        if kind == PinKind::Pr
-            && labels
-                .iter()
-                .any(|l| l == "Show rebuild plan" || l == "Rebuild")
-        {
-            offered_rebuild_for_pr.push(name.clone());
+        let has = |label: &str| labels.iter().any(|l| l == label);
+        // A PR can't be rebuilt, so neither entry means anything.
+        if kind == PinKind::Pr && (has("Show rebuild plan") || has("Rebuild")) {
+            offered_for_pr.push(name.clone());
         }
-        // A running mux's plan says it is running and Enter attaches;
-        // every other live entity has no plan to show.
+        // A running entity shows the plan for the case that it stopped;
+        // there is nothing to rebuild yet.
         if status == SlotStatus::Live
-            && kind != PinKind::Mux
-            && labels.iter().any(|l| l == "Show rebuild plan")
+            && matches!(
+                kind,
+                PinKind::Mux | PinKind::Session | PinKind::Checkout | PinKind::Repo
+            )
         {
-            offered_plan_for_live.push(name);
+            if !has("Show rebuild plan") {
+                plan_missing.push(name.clone());
+            }
+            if has("Rebuild") {
+                rebuild_for_live.push(name);
+            }
         }
     }
+    assert!(plan_missing.is_empty(), "no plan for: {plan_missing:?}");
     assert!(
-        offered_plan_for_live.is_empty(),
-        "a live entity has no plan to show: {offered_plan_for_live:?}"
+        rebuild_for_live.is_empty(),
+        "a running entity isn't rebuilt: {rebuild_for_live:?}"
     );
-    for (name, kind, status) in pins() {
-        if kind == PinKind::Mux && status == SlotStatus::Live {
-            let labels = labels_in(View::Pinned, &name);
-            assert!(
-                labels.iter().any(|l| l == "Show rebuild plan"),
-                "a running mux's plan says it is running: {labels:?}"
-            );
-            assert!(
-                !labels.iter().any(|l| l == "Rebuild"),
-                "a running mux isn't rebuilt: {labels:?}"
-            );
-        }
-    }
     assert!(
-        offered_rebuild_for_pr.is_empty(),
-        "a PR can't be rebuilt: {offered_rebuild_for_pr:?}"
+        offered_for_pr.is_empty(),
+        "a PR can't be rebuilt: {offered_for_pr:?}"
     );
 }
 

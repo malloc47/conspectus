@@ -302,7 +302,23 @@ pub(super) fn handle_mux_launch_form_key(
 /// [`crate::tui::Overlay`] contract (ADR 0085 contract 3). Close /
 /// Commit outcomes pop the stack; Consumed leaves the modal open.
 pub(super) fn handle_value_modal_key(app: &mut App, key: ratatui::crossterm::event::KeyEvent) {
+    use crate::tui::keybindings::overlay::{PagerKey, VALUE_MODAL_KEYS, resolve};
     use crate::tui::{Overlay, OverlayOutcome};
+    // `y` copies; the clipboard write is a side effect the widget
+    // doesn't own.
+    if resolve(VALUE_MODAL_KEYS, key) == Some(PagerKey::Copy) {
+        let copied = app.value_modal().map(|state| {
+            let (text, what) = state.copy_payload();
+            (text.to_string(), what)
+        });
+        if let Some((text, what)) = copied {
+            match crate::tui::clipboard::copy_to_clipboard(&text) {
+                Ok(()) => app.post_toast(format!("Copied {what}")),
+                Err(err) => app.post_toast(format!("copy failed: {err}")),
+            }
+        }
+        return;
+    }
     let outcome = match app.value_modal_mut() {
         Some(state) => state.handle((), key),
         None => return,

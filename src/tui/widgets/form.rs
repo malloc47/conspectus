@@ -94,6 +94,10 @@ struct Window {
 
 /// The part of `value` that fits in `width` cells around the cursor,
 /// with `<` and `>` marking what scrolled out of view.
+///
+/// The result is always exactly `width` cells wide, focused or not: the
+/// cell the cursor sits on exists either way, so moving the focus never
+/// shifts what follows the value.
 fn window(value: &str, cursor: usize, width: usize, active: bool) -> Window {
     let width = width.max(1);
     let edge = if active {
@@ -112,47 +116,37 @@ fn window(value: &str, cursor: usize, width: usize, active: bool) -> Window {
         Style::default()
     };
     let value = if value.trim().is_empty() { "-" } else { value };
-    let chars: Vec<char> = value.chars().collect();
-    let total = chars.len();
+    // The characters, plus the blank cell a cursor at the end sits on.
+    let mut cells: Vec<char> = value.chars().collect();
+    let total = cells.len();
+    cells.push(' ');
     let cursor = cursor.min(total);
 
-    if width == 1 {
-        let ch = chars.get(cursor).copied().unwrap_or(' ');
+    if width <= 4 {
+        let ch = cells[cursor];
         return Window {
-            left: if cursor > 0 { "<" } else { " " },
+            left: "",
             before: String::new(),
             cursor_text: ch.to_string(),
-            after: String::new(),
-            right: if cursor + usize::from(cursor < total) < total {
-                ">"
-            } else {
-                " "
-            },
+            after: " ".repeat(width.saturating_sub(1)),
+            right: "",
             edge,
             cursor_style,
         };
     }
 
-    let content_width = width.saturating_sub(4).max(1);
-    let start = if total <= content_width || cursor < content_width {
+    let content_width = width - 4;
+    let start = if cells.len() <= content_width || cursor < content_width {
         0
     } else {
-        cursor.saturating_sub(content_width.saturating_sub(1))
+        (cursor + 1 - content_width).min(cells.len() - content_width)
     };
-    let end = (start + content_width).min(total);
-    let cursor_offset = cursor.saturating_sub(start).min(content_width);
-    let before: String = chars[start..(start + cursor_offset).min(end)]
-        .iter()
-        .collect();
-    let cursor_text = if cursor < end {
-        chars[start + cursor_offset].to_string()
-    } else if active {
-        " ".to_string()
-    } else {
-        String::new()
-    };
-    let after_start = (start + cursor_offset + usize::from(cursor < end)).min(end);
-    let after: String = chars[after_start..end].iter().collect();
+    let end = (start + content_width).min(cells.len());
+    let before: String = cells[start..cursor].iter().collect();
+    let cursor_text = cells[cursor].to_string();
+    let mut after: String = cells[cursor + 1..end].iter().collect();
+    let used = before.chars().count() + 1 + after.chars().count();
+    after.push_str(&" ".repeat(content_width.saturating_sub(used)));
     Window {
         left: if start > 0 { "< " } else { "  " },
         before,
@@ -162,6 +156,11 @@ fn window(value: &str, cursor: usize, width: usize, active: bool) -> Window {
         edge,
         cursor_style,
     }
+}
+
+/// `value` windowed around `cursor` into exactly `width` cells.
+pub fn value_cells(value: &str, cursor: usize, width: usize, active: bool) -> Vec<Span<'static>> {
+    window_spans(&window(value, cursor, width, active), entry_style(active))
 }
 
 fn window_spans(w: &Window, value_style: Style) -> Vec<Span<'static>> {
@@ -276,7 +275,18 @@ fn path_suffix(omnibox: &PathOmniboxState, focused: bool) -> Suffix {
     }
 }
 
-fn completion_hint(omnibox: &PathOmniboxState, focused: bool) -> Option<String> {
+/// The validity mark after a path value: two cells, a space and `✓`
+/// (exists), `!` (missing) or `?` (empty).
+pub fn path_mark(omnibox: &PathOmniboxState) -> Vec<Span<'static>> {
+    let (symbol, style) = match omnibox.validation() {
+        PathValidation::Empty => ("?", Style::default().fg(Color::DarkGray)),
+        PathValidation::Exists => ("✓", Style::default().fg(Color::Green)),
+        PathValidation::Missing => ("!", Style::default().fg(Color::Yellow)),
+    };
+    vec![Span::raw(" "), Span::styled(symbol, style)]
+}
+
+pub fn completion_hint(omnibox: &PathOmniboxState, focused: bool) -> Option<String> {
     if !focused {
         return None;
     }
@@ -351,7 +361,7 @@ pub fn harness_row(
     Line::from(spans)
 }
 
-fn harness_chips(selected: &str, known: &[String], width: usize) -> Vec<Span<'static>> {
+pub fn harness_chips(selected: &str, known: &[String], width: usize) -> Vec<Span<'static>> {
     if width < 3 {
         return Vec::new();
     }
@@ -532,6 +542,42 @@ pub fn truncate_chars(value: &str, width: usize) -> String {
     value.chars().take(width).collect()
 }
 
+/// `text` cut to `width` cells with a trailing `…` when it is longer,
+/// and padded with spaces to exactly `width` cells when shorter.
+pub fn fit(text: &str, width: usize) -> String {
+    let count = text.chars().count();
+    if count <= width {
+        return format!("{text}{}", " ".repeat(width - count));
+    }
+    if width == 0 {
+        return String::new();
+    }
+    let mut cut: String = text.chars().take(width - 1).collect();
+    cut.push('…');
+    cut
+}
+
+/// `text` broken at spaces into lines of at most `width` cells.
+pub fn wrap_words(text: &str, width: usize) -> Vec<String> {
+    let width = width.max(1);
+    let mut lines = Vec::new();
+    let mut current = String::new();
+    for word in text.split_whitespace() {
+        let needed = usize::from(!current.is_empty()) + word.chars().count();
+        if !current.is_empty() && current.chars().count() + needed > width {
+            lines.push(std::mem::take(&mut current));
+        }
+        if !current.is_empty() {
+            current.push(' ');
+        }
+        current.push_str(word);
+    }
+    if !current.is_empty() {
+        lines.push(current);
+    }
+    lines
+}
+
 /// An argv shown the way a shell would take it back.
 pub fn display_argv(argv: &[String]) -> String {
     argv.iter()
@@ -583,6 +629,62 @@ impl Widget for ScrollLinesBody {
         Paragraph::new(self.lines)
             .scroll((self.scroll_offset, 0))
             .render(area, buf);
+    }
+}
+
+/// Popup body in three bands: lines that stay put at the top and bottom,
+/// and between them rows that scroll to keep the cursor row visible.
+/// The fixed bands keep their place however many rows there are.
+pub struct SplitBody {
+    pub top: Vec<Line<'static>>,
+    pub rows: Vec<Line<'static>>,
+    pub bottom: Vec<Line<'static>>,
+    pub cursor_row: usize,
+    pub inner_width: usize,
+    pub inner_height: usize,
+}
+
+impl KnownSize for SplitBody {
+    fn width(&self) -> usize {
+        self.inner_width
+    }
+
+    fn height(&self) -> usize {
+        self.inner_height
+    }
+}
+
+impl Widget for SplitBody {
+    fn render(self, area: Rect, buf: &mut Buffer) {
+        let height = usize::from(area.height);
+        let bottom = self.bottom.len().min(height);
+        let top = self.top.len().min(height - bottom);
+        let rows_height = height - bottom - top;
+        let offset = scroll_offset_for_cursor(self.cursor_row, rows_height, self.rows.len());
+        let line_at = |y: usize| {
+            Rect::new(
+                area.x,
+                area.y + u16::try_from(y).unwrap_or(0),
+                area.width,
+                1,
+            )
+        };
+        for (i, line) in self.top.into_iter().take(top).enumerate() {
+            Paragraph::new(line).render(line_at(i), buf);
+        }
+        for (i, line) in self
+            .rows
+            .into_iter()
+            .skip(usize::from(offset))
+            .take(rows_height)
+            .enumerate()
+        {
+            Paragraph::new(line).render(line_at(top + i), buf);
+        }
+        let first = height - bottom;
+        for (i, line) in self.bottom.into_iter().take(bottom).enumerate() {
+            Paragraph::new(line).render(line_at(first + i), buf);
+        }
     }
 }
 

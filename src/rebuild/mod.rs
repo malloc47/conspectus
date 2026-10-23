@@ -20,6 +20,9 @@ mod subject;
 pub(crate) mod test_support;
 pub mod worktree;
 
+#[cfg(test)]
+mod script_tests;
+
 use std::ffi::OsString;
 use std::path::PathBuf;
 use std::time::Duration;
@@ -41,6 +44,11 @@ pub struct Options {
     pub session: Option<String>,
     /// End the plan with an attach. Off for `--no-attach`.
     pub attach: bool,
+    /// Plan as if a running entity had stopped: what a rebuild would do
+    /// from what Conspectus knows now. For showing the commands that
+    /// would recreate it; nothing here changes what a real rebuild of a
+    /// running entity does.
+    pub assume_stopped: bool,
 }
 
 /// Where a step that starts inside a rebuilt worktree should start: the
@@ -109,13 +117,117 @@ pub enum Action {
     },
 }
 
+impl Action {
+    /// The command this action runs, program first, exactly as someone
+    /// would type it. The runners build their processes from the same
+    /// argument builders, so a plan can't show something a run doesn't
+    /// do. `None` for a backend this build can't drive by hand.
+    pub fn argv_for_display(&self) -> Option<Vec<OsString>> {
+        use crate::discovery::tmux::commands as tmux;
+        let program = |name: &str, args: Vec<OsString>| {
+            let mut argv = vec![OsString::from(name)];
+            argv.extend(args);
+            Some(argv)
+        };
+        let is_tmux = |backend: &str| backend == crate::discovery::tmux::TMUX_BACKEND;
+        match self {
+            Action::KillSession {
+                backend,
+                socket,
+                name,
+            } if is_tmux(backend) => program(
+                tmux::TMUX_PROGRAM,
+                tmux::kill_session_args(socket.as_deref(), name),
+            ),
+            Action::NewSession {
+                backend,
+                socket,
+                name,
+                cwd,
+                argv,
+                resume,
+                ..
+            } if is_tmux(backend) => {
+                let launch = resume.as_ref().map_or(argv.as_slice(), |r| &r.argv);
+                program(
+                    tmux::TMUX_PROGRAM,
+                    tmux::new_session_args(socket.as_deref(), name, cwd, launch),
+                )
+            }
+            Action::SendKeys {
+                backend,
+                socket,
+                name,
+                argv,
+            } if is_tmux(backend) => {
+                let literal = launch::format_argv_for_send_keys(argv);
+                program(
+                    tmux::TMUX_PROGRAM,
+                    tmux::send_keys_args(socket.as_deref(), name, &literal, true),
+                )
+            }
+            Action::Attach {
+                backend,
+                socket,
+                name,
+            } => {
+                if is_tmux(backend) {
+                    program(
+                        tmux::TMUX_PROGRAM,
+                        tmux::attach_args(socket.as_deref(), name, false),
+                    )
+                } else {
+                    program(backend, vec!["attach".into(), name.into()])
+                }
+            }
+            Action::WorktreeSwitch {
+                repo_root,
+                branch,
+                create,
+                base,
+                ..
+            } => program(
+                "wt",
+                crate::discovery::worktree::switch_args(
+                    &crate::discovery::worktree::WorktreeSwitchRequest {
+                        repo_root: repo_root.clone(),
+                        branch: branch.clone(),
+                        create: *create,
+                        base: base.clone(),
+                    },
+                )
+                .into_iter()
+                .map(OsString::from)
+                .collect(),
+            ),
+            Action::Clone { remote, dest } => program("git", clone::clone_args(remote, dest)),
+            _ => None,
+        }
+    }
+}
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct Step {
     /// What the step does, in a few words.
     pub title: String,
-    /// The command it runs, as the operator would type it.
+    /// The command it runs, quoted so it can be pasted into a shell.
     pub command: String,
     pub action: Action,
+}
+
+impl Step {
+    /// A step whose command line comes from its action.
+    pub fn new(title: impl Into<String>, action: Action) -> Self {
+        let command = action
+            .argv_for_display()
+            .map(|argv| crate::argv::shell_join(&argv))
+            .unwrap_or_default();
+        Self {
+            title: title.into(),
+            command,
+            action,
+        }
+    }
 }
 
 /// A rebuild, planned.
@@ -139,19 +251,45 @@ pub struct MuxTarget {
 }
 
 impl Plan {
-    /// The text `--dry-run` prints and the TUI confirms.
+    /// The text `--dry-run` prints and the TUI shows: each step's title
+    /// with the exact command under it.
     pub fn render(&self) -> String {
         let mut out = format!("rebuild {}\n", self.subject);
         for (i, step) in self.steps.iter().enumerate() {
-            out.push_str(&format!(
-                "  {}. {:<22} {}\n",
-                i + 1,
-                step.title,
-                step.command
-            ));
+            out.push_str(&format!("  {}. {}\n", i + 1, step.title));
+            if !step.command.is_empty() {
+                out.push_str(&format!("       $ {}\n", step.command));
+            }
         }
         for warning in &self.warnings {
             out.push_str(&format!("  note: {warning}\n"));
+        }
+        out
+    }
+
+    /// The commands, one per step, in the order they run.
+    pub fn commands(&self) -> Vec<&str> {
+        self.steps
+            .iter()
+            .map(|step| step.command.as_str())
+            .filter(|command| !command.is_empty())
+            .collect()
+    }
+
+    /// The plan as something to paste into a shell: a `#` comment for
+    /// each note and step title, then the step's command. Nothing runs
+    /// the plan's own bookkeeping (history records, retargeting pins);
+    /// this recreates the thing itself.
+    pub fn script(&self) -> String {
+        let mut out = format!("# rebuild {}\n", self.subject);
+        for warning in &self.warnings {
+            out.push_str(&format!("# note: {warning}\n"));
+        }
+        for step in &self.steps {
+            if step.command.is_empty() {
+                continue;
+            }
+            out.push_str(&format!("# {}\n{}\n", step.title, step.command));
         }
         out
     }

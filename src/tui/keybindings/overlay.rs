@@ -312,6 +312,8 @@ pub enum PagerKey {
     PageUp,
     Top,
     Bottom,
+    /// Copy the modal's text (a value modal only).
+    Copy,
 }
 
 pub const HELP_KEYS: &[KeyRow<PagerKey>] = &[
@@ -339,12 +341,13 @@ pub const HELP_KEYS: &[KeyRow<PagerKey>] = &[
 
 pub const VALUE_MODAL_KEYS: &[KeyRow<PagerKey>] = &[
     alias(ctrl('c'), PagerKey::Abort),
-    alias(key(KeyCode::Esc), PagerKey::Close),
-    alias(ch('q'), PagerKey::Close),
-    alias(ch('o'), PagerKey::Close),
-    alias(ch('j'), PagerKey::Down),
+    shown(ch('y'), PagerKey::Copy, "y", "to copy"),
+    shown(key(KeyCode::Esc), PagerKey::Close, "Esc", "to close"),
+    shown(ch('q'), PagerKey::Close, "q", "to close"),
+    shown(ch('o'), PagerKey::Close, "o", "to close"),
+    shown(ch('j'), PagerKey::Down, "j", "to scroll"),
     alias(key(KeyCode::Down), PagerKey::Down),
-    alias(ch('k'), PagerKey::Up),
+    shown(ch('k'), PagerKey::Up, "k", "to scroll"),
     alias(key(KeyCode::Up), PagerKey::Up),
     alias(key(KeyCode::PageDown), PagerKey::PageDown),
     alias(ch(' '), PagerKey::PageDown),
@@ -485,7 +488,7 @@ pub const PIN_EDIT_KEYS: &[KeyRow<FormKey>] = &[
     shown(key(KeyCode::Left), FormKey::OptionPrev, "←", "option"),
     shown(key(KeyCode::Right), FormKey::OptionNext, "→", "option"),
     shown(ch(' '), FormKey::OptionNext, "Space", "option"),
-    shown(ctrl('r'), FormKey::Inherit, "Ctrl-R", "inherit"),
+    shown(ctrl('r'), FormKey::Inherit, "Ctrl-R", "follow again"),
     shown(key(KeyCode::Enter), FormKey::Submit, "Enter", "save"),
     shown(key(KeyCode::Esc), FormKey::Cancel, "Esc", "cancel"),
 ];

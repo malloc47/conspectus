@@ -18,6 +18,7 @@ use anyhow::{Context, Result};
 use crate::discovery::{DiscoveryContext, DiscoveryProvider, GraphFragment};
 use crate::model::{GraphNode, MuxProbe, MuxProbeStatus, MuxSessionId, MuxSessionNode};
 
+pub mod commands;
 pub mod teardown;
 
 /// Mux-backend identifier stamped on `MuxSessionId` /
@@ -453,6 +454,12 @@ impl SystemTmux {
         &self.binary
     }
 
+    /// A `Command` for the tmux binary with no arguments yet; the
+    /// callers in [`commands`] supply them, socket flag included.
+    fn bare(&self) -> Command {
+        crate::exec::command(crate::exec::Program::Tmux, &self.binary)
+    }
+
     /// Build a `Command` for the tmux binary, prepending `-L
     /// <socket>` when the caller passes a non-default socket per
     /// ADR 0057. `None` and `Some("default")` both yield a bare
@@ -636,24 +643,11 @@ impl MuxBackend for SystemTmux {
         // `-d` so tmux returns immediately rather than attaching;
         // the caller invokes `attach_session` separately so the
         // create-then-attach flow stays observable across both
-        // SystemTmux (real) and FakeTmux (test) runners.
-        let mut command = self.cmd(socket_name);
-        command
-            .arg("new-session")
-            .arg("-d")
-            .arg("-s")
-            .arg(name)
-            .arg("-c")
-            .arg(cwd);
-        for token in argv {
-            command.arg(token);
-        }
-        // ADR 0103: keep the pane if the launched process exits
-        // non-zero, so a harness that fails at startup leaves its
-        // error readable. Chained in the same tmux invocation so the
-        // option is in place before the server reaps a fast-exiting
-        // child. Clean exits still end the session.
-        command.args([";", "set-option", "-t", name, "remain-on-exit", "failed"]);
+        // SystemTmux (real) and FakeTmux (test) runners. The remain-on-exit
+        // option (ADR 0103) is chained in the same invocation so it is in
+        // place before the server reaps a fast-exiting child.
+        let mut command = self.bare();
+        command.args(commands::new_session_args(socket_name, name, cwd, argv));
         let output = command.output();
 
         let output = match output {
@@ -707,11 +701,6 @@ impl MuxBackend for SystemTmux {
         // analogue — it shifts the current client to the target
         // session without starting a nested client.
         let nested = std::env::var_os("TMUX").is_some();
-        let subcommand = if nested {
-            "switch-client"
-        } else {
-            "attach-session"
-        };
 
         // `attach-session` blocks until the operator detaches; we
         // spawn + wait via `status()` so the parent terminal is
@@ -719,8 +708,8 @@ impl MuxBackend for SystemTmux {
         // need to bracket this (e.g. TUI runtime restore + reinit)
         // wrap the call site, not the runner.
         let status = self
-            .cmd(socket_name)
-            .args([subcommand, "-t", name])
+            .bare()
+            .args(commands::attach_args(socket_name, name, nested))
             .status();
 
         let status = match status {
@@ -763,12 +752,15 @@ impl MuxBackend for SystemTmux {
         literal: &str,
         press_enter: bool,
     ) -> Result<TmuxSendKeysOutcome> {
-        let mut command = self.cmd(socket_name);
-        command.args(["send-keys", "-t", target, literal]);
-        if press_enter {
-            command.arg("Enter");
-        }
-        let output = command.output();
+        let output = self
+            .bare()
+            .args(commands::send_keys_args(
+                socket_name,
+                target,
+                literal,
+                press_enter,
+            ))
+            .output();
 
         let output = match output {
             Ok(output) => output,
@@ -805,8 +797,8 @@ impl MuxBackend for SystemTmux {
 
     fn kill_session(&self, socket_name: Option<&str>, target: &str) -> Result<TmuxKillOutcome> {
         let output = self
-            .cmd(socket_name)
-            .args(["kill-session", "-t", target])
+            .bare()
+            .args(commands::kill_session_args(socket_name, target))
             .output();
 
         let output = match output {
@@ -1057,6 +1049,41 @@ type FakeTmuxSendKeysCall = (Option<String>, String, String, bool);
 /// `(socket_name, target)` pair recorded by every
 /// `FakeTmux::kill_session` call.
 type FakeTmuxKillCall = (Option<String>, String);
+
+/// A mux server whose listing a test changes between probes, as a
+/// session starting or dying would. Clones share the listing.
+#[cfg(test)]
+#[derive(Clone, Debug, Default)]
+pub(crate) struct ScriptedTmux {
+    listing: std::sync::Arc<std::sync::Mutex<Option<String>>>,
+}
+
+#[cfg(test)]
+impl ScriptedTmux {
+    /// The server lists `stdout` (tab-separated rows, or empty).
+    pub(crate) fn lists(&self, stdout: &str) {
+        *self.listing.lock().unwrap() = Some(stdout.to_string());
+    }
+
+    /// The server is not running.
+    pub(crate) fn stops(&self) {
+        *self.listing.lock().unwrap() = None;
+    }
+}
+
+#[cfg(test)]
+impl MuxBackend for ScriptedTmux {
+    fn backend_key(&self) -> &'static str {
+        TMUX_BACKEND
+    }
+
+    fn list_sessions(&self, _format: &str) -> Result<TmuxOutcome> {
+        Ok(match self.listing.lock().unwrap().clone() {
+            Some(stdout) => TmuxOutcome::Sessions(stdout),
+            None => TmuxOutcome::Unavailable(UnavailableReason::NoServer),
+        })
+    }
+}
 
 /// Test runner that returns pre-canned outcomes.
 #[doc(hidden)]

@@ -397,7 +397,7 @@ pub(super) fn render_pin_summary(
     let mut text = format!(
         "Pin `{pin_id}` ({} · {})",
         pin.kind.as_str(),
-        pin.status.as_str()
+        pin.status.label_for(pin.kind)
     );
     if let Some(hint) = crate::tui::actions::pin_status_hint(snapshot, pin_id) {
         text.push('\n');

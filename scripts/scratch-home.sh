@@ -36,12 +36,14 @@ CHECKS=(
   live_pin_lifecycle
   rename_lockstep
   rebuild_variants
+  rebuild_plan_script
   reap_and_forget
   mux_pin_flags
   launch_profiles
   migrate_legacy
   migrate_partial_failure
   daemon_envelope
+  refresh_freshness
   worktree_close
   repo_clone
 )
@@ -250,12 +252,12 @@ check_live_pin_lifecycle() {
   run cx pin show demo; ok; has live
   run cx history list --kind mux; ok; has demo; has "◉"
   tmx kill-server
-  run cx pin list; has gone "slot reads gone after its server died"
+  run cx pin list; has stopped "pin reads stopped after its server died"
   run cx history list --gone; has demo; has "◉"
   run cx rebuild demo --dry-run; ok; has demo
   # No tmux server directory at all (like a /tmp cleanup after reboot).
   rm -rf "$TMUX_TMPDIR"/tmux-*
-  run cx pin list; has gone "slot reads gone when the socket dir vanished"
+  run cx pin list; has stopped "pin reads stopped when the socket dir vanished"
 }
 
 check_rename_lockstep() {
@@ -290,6 +292,28 @@ check_rebuild_variants() {
   tmx kill-server
   run cx rebuild rb --session nonexistent --dry-run; has "--session" "--session on a mux with no harness is called out"
   run cx rebuild missing-thing --dry-run; fails "unknown ref"
+}
+
+check_rebuild_plan_script() {
+  fresh
+  start_mux plan-a
+  run cx graph --format json; ok
+  run cx rebuild plan-a --assume-stopped --no-attach; fails "--assume-stopped needs --dry-run"; has "--dry-run"
+  run cx rebuild plan-a --dry-run --no-attach; ok; lacks "new-session" "a real plan of a running mux"
+  run cx rebuild plan-a --dry-run --assume-stopped --no-attach; ok; has "hypothetical"; has "       \$ tmux new-session -d -s plan-a"
+  run cx rebuild plan-a --dry-run --assume-stopped --script --no-attach; ok
+  local script="$OUT"
+  [[ "$script" == *"new-session -d -s plan-a"* ]] || note_fail "the script has the new-session command"
+
+  # While it runs, the script recreates it under another name.
+  local copy="${script//plan-a/plan-copy}"
+  run sh -c "$copy"; ok "the pasted script runs"
+  is_true "the copy started" mux_alive plan-copy
+
+  # After it stops, the script brings the original back.
+  tmx kill-server
+  run sh -c "$script"; ok "the pasted script runs after a stop"
+  is_true "the mux is back" mux_alive plan-a
 }
 
 check_reap_and_forget() {
@@ -430,17 +454,33 @@ check_daemon_envelope() {
   run cx refresh; ok "refresh via daemon"
   run cx table sessions; ok
   start_mux d-b
-  # The daemon probes muxes on its own interval; give it time to notice.
-  for i in $(seq 1 20); do
-    run cx refresh --class mux
-    run cx history list --kind mux
-    [[ "$OUT" == *d-b* ]] && break
-    sleep 1
-  done
+  # One refresh is enough: it re-probes and publishes before it returns.
+  run cx refresh --class mux; ok "single mux refresh"
+  run cx history list --kind mux
+  has d-b "the new mux was recorded after a single refresh"
   kill "$pid" 2>/dev/null; wait "$pid" 2>/dev/null
   after="$(sha256sum "$(PINS)" | cut -d' ' -f1)"
   [[ "$before" == "$after" ]] || note_fail "the daemon rewrote pins.toml"
-  has d-b "the new mux was recorded while the daemon ran"
+}
+
+check_refresh_freshness() {
+  fresh
+  cx serve >"$SCRATCH/serve-fresh.log" 2>&1 &
+  local pid=$!
+  local i
+  for i in $(seq 1 50); do
+    [[ -S "$XDG_RUNTIME_DIR/conspectus/server.sock" ]] && break
+    sleep 0.2
+  done
+  run cx refresh --class mux; ok "prime"
+  start_mux fresh-a
+  run cx refresh --class mux; ok "refresh after start"
+  run cx table mux; has fresh-a "a started mux shows after one refresh"
+  tmx kill-session -t fresh-a
+  run cx refresh --class mux; ok "refresh after kill"
+  run cx graph --format json
+  has '"presence": "gone"' "a killed mux is gone after one refresh"
+  kill "$pid" 2>/dev/null; wait "$pid" 2>/dev/null
 }
 
 check_worktree_close() {

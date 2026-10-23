@@ -274,6 +274,7 @@ fn any_session_a_mux_hosted_can_be_rebuilt_from_the_mux() {
     let options = Options {
         session: Some("a".into()),
         attach: false,
+        ..Default::default()
     };
     let plan = h.plan(&snapshot, &subject, &options).unwrap();
     assert_eq!(titles(&plan), ["new session, resume a"]);

@@ -394,6 +394,27 @@ impl WtRunner for SystemWt {
     }
 }
 
+/// The arguments after `wt` that bring a branch's worktree back:
+/// `-C <repo> switch --no-cd [--create [--base <ref>]] <branch>`. The
+/// backend runs these and a rebuild plan prints them.
+pub fn switch_args(req: &WorktreeSwitchRequest) -> Vec<String> {
+    let mut args = vec![
+        "-C".to_string(),
+        req.repo_root.to_string_lossy().into_owned(),
+        "switch".to_string(),
+        "--no-cd".to_string(),
+    ];
+    if req.create {
+        args.push("--create".to_string());
+        if let Some(base) = &req.base {
+            args.push("--base".to_string());
+            args.push(base.clone());
+        }
+    }
+    args.push(req.branch.clone());
+    args
+}
+
 /// The worktrunk mutation backend (ADR 0092). Shells out to
 /// the `wt` CLI for `create` / `remove` — a category-4
 /// Conspectus-constructed subprocess launch (ADR 0143); the git
@@ -475,17 +496,8 @@ impl WorktreeBackend for WorktrunkBackend {
     }
 
     fn switch(&self, req: &WorktreeSwitchRequest) -> Result<WorktreeMutationOutcome> {
-        // wt -C <repo> switch --no-cd [--create [--base <ref>]] <branch>
-        let repo = req.repo_root.to_string_lossy();
-        let mut args: Vec<&str> = vec!["-C", &repo, "switch", "--no-cd"];
-        if req.create {
-            args.push("--create");
-            if let Some(base) = &req.base {
-                args.push("--base");
-                args.push(base);
-            }
-        }
-        args.push(&req.branch);
+        let args = switch_args(req);
+        let args: Vec<&str> = args.iter().map(String::as_str).collect();
         Self::interpret(self.runner.run(&args))
     }
 

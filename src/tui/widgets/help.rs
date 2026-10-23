@@ -64,7 +64,7 @@ impl HelpOverlayState {
                 self.scroll = u16::MAX;
                 HelpOutcome::Continue
             }
-            None => HelpOutcome::Continue,
+            Some(PagerKey::Copy) | None => HelpOutcome::Continue,
         }
     }
 
@@ -290,7 +290,7 @@ fn keymap_sections() -> Vec<HelpSection> {
             bindings: vec![
                 Binding::new(
                     "p",
-                    "Pin the selected row, or ask to unpin it when it is already pinned; pinned rows carry ◉",
+                    "Pin the selected row, or unpin it when it is already pinned; pinned rows carry ◉",
                 ),
                 Binding::new(
                     ".",
@@ -526,7 +526,7 @@ fn push_mux_state_legend(lines: &mut Vec<Line<'static>>, theme: &Theme) {
 }
 
 /// Legend for the pin marker: filled for something a pin points at,
-/// hollow and dim for a pin with nothing running yet.
+/// hollow and in the ghost style for a pin with nothing running.
 fn push_pin_marker_legend(lines: &mut Vec<Line<'static>>, theme: &Theme) {
     let pin_color = node_kind_style(NodeKind::Pin, theme).color;
     let entries: [(&str, Style, &str, &str); 2] = [
@@ -539,10 +539,10 @@ fn push_pin_marker_legend(lines: &mut Vec<Line<'static>>, theme: &Theme) {
         (
             "◎",
             Style::default()
-                .fg(pin_color)
-                .add_modifier(theme.placeholder),
-            "Unstarted pin",
-            "a pin with nothing running yet; Enter starts it",
+                .fg(theme.ghost)
+                .add_modifier(Modifier::ITALIC),
+            "Pin, not running",
+            "a pin whose mux is stopped or not started yet (status stopped, planned); Enter starts it",
         ),
     ];
     for (glyph, style, name, blurb) in entries {

@@ -5,17 +5,17 @@ expression: all_kinds_frame(width)
 updated 0s ago · 0/1 sessions · 1 mux                                 
 ┌ ▸ sessions · mux · prs · pinned · history ─────────────────────────┐
 │  ▣   mux-live          live        1m   codex      ~/src/conspect… │
-│  ▣   mux-gone          gone        4d   codex      ~/src/conspect…▲│
-│  ▣   mux-unknown       unknown     2h   codex      ~/src/conspect…█│
+│  ▣ ◎ mux-gone          stopped     4d   codex      ~/src/conspect…▲│
+│  ▣ ◎ mux-unknown       unknown     2h   codex      ~/src/conspect…█│
 │  ▣ ◎ mux-planned       planned                                    █│
-│  ▣   mux-missing       missing                                    █│
+│  ▣ ◎ mux-missing       missing                                    █│
 │  ●   session-live      resumable  10m   claude     Fix the ledger…█│
-│  ●   session-missing   missing                                    █│
+│  ● ◎ session-missing   missing                                    █│
 │▶ ◇   worktree-live     live            conspectus                 ║│
-│  ◇   worktree-gone     gone        2d  conspectus · feature/old   ║│
+│  ◇ ◎ worktree-gone     removed     2d  conspectus · feature/old   ║│
 │  ◇ ◎ worktree-planned  planned                                    ║│
 │  ◆   repo-live         live            ~/src/conspectus/.git      ▼│
-│  ◆   repo-gone         gone       10d  ~/src/lost/.git             │
+│  ◆ ◎ repo-gone         removed    10d  ~/src/lost/.git             │
 └────────────────────────────────────────────────────────────────────┘
 ┌   ◉ pin ───────────────────────────────────────────────────────────┐
 │  id            mux-live                                            │

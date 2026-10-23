@@ -69,6 +69,15 @@ impl DiscoveryCaches {
         self.forge.clear();
     }
 
+    /// Drop the cached mux listings, so the next discovery asks the mux
+    /// servers again. An operator's refresh, and a refresh after an
+    /// action that starts or stops a mux, must see the server as it is
+    /// now, not as it was up to a TTL ago.
+    pub fn clear_mux(&self) {
+        self.tmux.clear();
+        self.zellij.clear();
+    }
+
     /// The last mux/harness slice fingerprint, replaced by `current`
     /// when one was observed.
     pub(crate) fn swap_process_tree_fingerprint(&self, current: Option<u64>) -> Option<u64> {
@@ -165,6 +174,10 @@ impl<K: PartialEq, V: Clone> TtlCache<K, V> {
 
     pub(crate) fn set(&self, key: K, value: V) {
         *lock(&self.slot) = Some((key, Instant::now(), value));
+    }
+
+    pub(crate) fn clear(&self) {
+        *lock(&self.slot) = None;
     }
 }
 

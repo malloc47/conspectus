@@ -137,7 +137,7 @@ fn mux_matches_filter(
         pr_branch: _,
         pr_state: _,
         float_tracked_prs_top: _,
-        hide_gone_muxes: _,
+        show_stopped_muxes: _,
         pinned_only: _,
         show_pinned_history: _,
     } = filter;

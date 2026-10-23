@@ -7,7 +7,7 @@ use crate::model::SlotStatus;
 use crate::tui::Effect;
 use crate::tui::actions::{
     Subject, action_subject, attached_mux_of, default_effect, mux_to_rebuild, natural_view,
-    pins_for, retarget_candidates, running_mux_plan, subject_of_row,
+    pins_for, retarget_candidates, running_note, subject_of_row,
 };
 use crate::tui::app::Focus;
 use crate::tui::effect::ExecSpec;
@@ -252,33 +252,30 @@ fn a_session_pin_is_attached_through_the_mux_hosting_it() {
 }
 
 #[test]
-fn a_running_mux_has_a_plan_that_says_so_and_a_gone_one_does_not() {
+fn a_running_entity_gets_a_note_above_its_hypothetical_plan_and_a_stopped_one_does_not() {
     let app = app_in(View::Pinned);
     let snapshot = app.snapshot_handle().expect("data").snapshot();
-    let text = running_mux_plan(snapshot, "conspectus-main").expect("running");
+    let text = running_note(snapshot, "conspectus-main").expect("running");
     assert!(
-        text.contains("running") && text.contains("Enter attaches"),
+        text.contains("running") && text.contains("Enter attaches") && text.contains("stopped"),
         "{text}"
     );
-    assert_eq!(running_mux_plan(snapshot, "config-agent3"), None);
-    assert_eq!(running_mux_plan(snapshot, "ledger-pr"), None);
+    assert_eq!(running_note(snapshot, "config-agent3"), None);
 }
 
 #[test]
-fn showing_the_plan_of_a_running_mux_needs_no_subprocess() {
+fn showing_a_plan_asks_the_engine_for_every_rebuildable_pin_running_or_not() {
     let mut app = app_in(View::Pinned);
-    let effects = app.update(Msg::ShowRebuildPlan("conspectus-main".into()));
-    assert!(effects.is_empty(), "{effects:?}");
-    assert!(app.value_modal().is_some(), "the plan is shown");
-    app.close_value_modal();
-    let effects = app.update(Msg::ShowRebuildPlan("config-agent3".into()));
-    assert!(
-        matches!(
-            effects.as_slice(),
-            [Effect::Exec(ExecSpec::ShowRebuildPlan { .. })]
-        ),
-        "{effects:?}"
-    );
+    for name in ["conspectus-main", "config-agent3"] {
+        let effects = app.update(Msg::ShowRebuildPlan(name.into()));
+        assert!(
+            matches!(
+                effects.as_slice(),
+                [Effect::Exec(ExecSpec::ShowRebuildPlan { .. })]
+            ),
+            "{name}: {effects:?}"
+        );
+    }
 }
 
 #[test]
@@ -463,7 +460,7 @@ fn a_pins_status_decides_what_the_menu_offers_to_rebuild() {
             false,
             true,
         ),
-        ("e44d01cb", PinKind::Session, SlotStatus::Live, false, false),
+        ("e44d01cb", PinKind::Session, SlotStatus::Live, false, true),
         ("ledger-pr", PinKind::Pr, SlotStatus::Live, false, false),
     ];
     assert_eq!(offered, expected);

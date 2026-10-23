@@ -117,7 +117,9 @@ fn a_gone_mux_comes_back_with_its_argv_and_resumes_its_last_session() {
     assert!(
         plan.steps[0]
             .command
-            .ends_with("atelier exec claude --resume e44d01cb --dangerously-skip-permissions"),
+            .ends_with(
+                "atelier exec claude --resume e44d01cb --dangerously-skip-permissions \\; set-option -t work remain-on-exit failed"
+            ),
         "{}",
         plan.steps[0].command
     );
@@ -210,6 +212,7 @@ fn an_explicit_session_overrides_the_most_recent_one() {
     let options = Options {
         session: Some("older".into()),
         attach: false,
+        ..Default::default()
     };
     let plan = harness
         .plan(&snapshot, &subject(&snapshot), &options)
@@ -868,9 +871,9 @@ fn a_profile_wrapper_takes_the_resume_after_the_binary() {
         .unwrap();
 
     assert!(
-        plan.steps[0]
-            .command
-            .ends_with("nix develop -c claude --resume e44d01cb --dangerously-skip-permissions"),
+        plan.steps[0].command.contains(
+            "nix develop -c claude --resume e44d01cb --dangerously-skip-permissions \\; set-option"
+        ),
         "the resume lands after the harness binary, inside the wrapper: {}",
         plan.steps[0].command
     );

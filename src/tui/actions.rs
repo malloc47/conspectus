@@ -566,10 +566,10 @@ pub fn attached_mux_of(
 /// What a rebuild menu offers for an entity.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum RebuildOffer {
-    /// Nothing worth saying: a PR, or a live session or checkout.
+    /// Nothing to rebuild: a PR, or an entity with no plan at all.
     Nothing,
-    /// Only what a plan would say: a running mux is up and attach is the
-    /// action, and a pin that couldn't be checked explains itself.
+    /// Only the plan: the entity is running (the plan is what a rebuild
+    /// would take if it had stopped), or couldn't be checked.
     PlanOnly,
     /// Bring it back, or see what that would run.
     Full,
@@ -587,43 +587,43 @@ fn rebuild_offer(
         return RebuildOffer::Nothing;
     }
     match status {
-        SlotStatus::Live if kind == Some(PinKind::Mux) => RebuildOffer::PlanOnly,
-        SlotStatus::Live => RebuildOffer::Nothing,
-        SlotStatus::Unknown => RebuildOffer::PlanOnly,
+        SlotStatus::Live | SlotStatus::Unknown => RebuildOffer::PlanOnly,
         SlotStatus::Gone | SlotStatus::Missing | SlotStatus::Planned => RebuildOffer::Full,
     }
 }
 
-/// The text a plan for a running mux shows: nothing to rebuild.
-pub fn running_mux_plan(snapshot: &GraphSnapshot, reference: &str) -> Option<String> {
-    let mux = if let Some(pin) = pin_named(snapshot, reference) {
-        if pin.kind != crate::model::PinKind::Mux {
-            return None;
-        }
-        crate::tui::rows::live_pin_target(snapshot, pin)?
+/// The line that tops a rebuild plan for an entity that is running:
+/// what Enter does, and that the plan below is hypothetical. `None`
+/// for an entity that isn't running. `reference` is what the plan was
+/// asked for: a pin name, a history record id, or a node id.
+pub fn running_note(snapshot: &GraphSnapshot, reference: &str) -> Option<String> {
+    use crate::model::{PinKind, SlotStatus};
+    let (kind, live) = if let Some(pin) = pin_named(snapshot, reference) {
+        (pin.kind, pin.status == SlotStatus::Live)
+    } else if let Some(node) = NodeId::parse(reference) {
+        (PinKind::of_node(&node)?, snapshot.is_live(&node))
     } else {
-        let record = snapshot.history.mux(reference)?;
-        crate::history::project::live_mux_for(snapshot, record)?
+        let (_, meta) = snapshot.history.meta(reference)?;
+        let node = NodeId::parse(&meta.key)?;
+        (PinKind::of_node(&node)?, snapshot.is_live(&node))
     };
-    let NodeId::MuxSession(id) = mux else {
+    if !live {
         return None;
-    };
-    let name = snapshot
-        .nodes
-        .iter()
-        .find_map(|node| match node {
-            crate::model::GraphNode::MuxSession(mux) if mux.id == id => {
-                Some(mux.session_name().to_string())
-            }
-            _ => None,
-        })
-        .unwrap_or_else(|| id.native_id.clone());
-    Some(format!(
-        "mux `{name}` is running, so there is nothing to rebuild.\n\
-         Enter attaches to it.\n\
-         If it dies, Enter on its pin or history record starts it again with the \
-         command it was started with."
-    ))
+    }
+    Some(match kind {
+        PinKind::Mux => format!(
+            "`{reference}` is running, so Enter attaches to it. This is what rebuilding it \
+             would take if it had stopped."
+        ),
+        PinKind::Session => format!(
+            "`{reference}` is a live session. This is how it would be resumed into a new \
+             mux if its mux had stopped."
+        ),
+        _ => format!(
+            "`{reference}` exists, so there is nothing to rebuild. This is what rebuilding it \
+             would take if it were gone."
+        ),
+    })
 }
 
 /// The `.` menu for the subject, or `None` when it has no actions. The
@@ -658,7 +658,14 @@ pub fn row_menu_for(app: &App) -> Option<crate::tui::widgets::row_menu::RowMenuS
                 } else {
                     SlotStatus::Gone
                 },
-                subject.record.clone(),
+                // A record names it; failing that, a live node does.
+                subject.record.clone().or_else(|| {
+                    subject
+                        .node
+                        .as_ref()
+                        .filter(|_| live)
+                        .map(ToString::to_string)
+                }),
             )
         };
     if pins.is_empty()
@@ -680,9 +687,14 @@ pub fn row_menu_for(app: &App) -> Option<crate::tui::widgets::row_menu::RowMenuS
             ));
         }
         if offer != RebuildOffer::Nothing {
+            let note = if offer == RebuildOffer::PlanOnly {
+                "the commands that would recreate it, as if it had stopped"
+            } else {
+                "what rebuild would run, without running it"
+            };
             entries.push(RowMenuEntry::new(
                 "Show rebuild plan",
-                "what rebuild would run, without running it",
+                note,
                 Msg::ShowRebuildPlan(reference),
             ));
         }
@@ -721,7 +733,6 @@ fn unpin_entry(name: &str) -> crate::tui::widgets::row_menu::RowMenuEntry {
         "remove the pin; the entity and its history stay",
         crate::tui::Msg::Unpin(name.to_string()),
     )
-    .confirming()
 }
 
 /// The verbs on a pin: edit, rename, retarget, refresh its snapshot,

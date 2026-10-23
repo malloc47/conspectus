@@ -82,7 +82,7 @@ fn the_pinned_view_keeps_its_columns_aligned_across_kinds() {
 }
 
 #[test]
-fn an_unstarted_pin_wears_a_hollow_pin_glyph_and_nothing_else_does() {
+fn a_pin_with_nothing_running_wears_a_hollow_pin_glyph_and_a_running_one_does_not() {
     let mut app = app_in(View::Pinned);
     let frame = frame(&mut app, 200, 30);
     let line_of = |label: &str| {
@@ -94,15 +94,17 @@ fn an_unstarted_pin_wears_a_hollow_pin_glyph_and_nothing_else_does() {
             .take(100)
             .collect::<String>()
     };
-    assert!(line_of("nightly").contains('◎'), "{}", line_of("nightly"));
-    for built in ["conspectus-main", "config-agent3", "e44d01cb"] {
-        assert!(!line_of(built).contains('◎'), "{}", line_of(built));
+    for idle in ["nightly", "config-agent3"] {
+        assert!(line_of(idle).contains('◎'), "{}", line_of(idle));
+        assert!(
+            !line_of(idle).contains("gone"),
+            "a pin isn't gone, its entity is: {}",
+            line_of(idle)
+        );
     }
-    assert!(
-        !line_of("nightly").contains("gone"),
-        "an unbuilt pin isn't gone: {}",
-        line_of("nightly")
-    );
+    for running in ["conspectus-main", "e44d01cb"] {
+        assert!(!line_of(running).contains('◎'), "{}", line_of(running));
+    }
 }
 
 #[test]

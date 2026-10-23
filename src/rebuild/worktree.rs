@@ -19,13 +19,13 @@ use crate::model::{
 };
 use crate::resolve::slots::{ResolvedSlot, resolve_slot};
 
-use super::clone::clone_step;
+use super::clone::{clone_step, clone_step_with};
 use super::{Action, Env, Options, Plan, RebuildError, Step, Subject};
 
 pub fn plan(
     snapshot: &GraphSnapshot,
     subject: &Subject,
-    _options: &Options,
+    options: &Options,
     env: &Env<'_>,
     _now: i64,
 ) -> Result<Plan, RebuildError> {
@@ -44,10 +44,17 @@ pub fn plan(
         warnings: Vec::new(),
         target: None,
     };
-    if resolved.status == SlotStatus::Live {
+    let hypothetical = options.assume_stopped && resolved.status == SlotStatus::Live;
+    if resolved.status == SlotStatus::Live && !hypothetical {
         plan.warnings
             .push(format!("`{root}` exists; there is nothing to rebuild"));
         return Ok(plan);
+    }
+    if hypothetical {
+        plan.subject = format!("worktree `{label}` (exists; planned as if removed)");
+        plan.warnings.push(format!(
+            "hypothetical: `{root}` exists; this is what a rebuild would do if it were gone"
+        ));
     }
     if let Some(location) = resolved.text("location") {
         plan.warnings.push(format!(
@@ -58,7 +65,7 @@ pub fn plan(
         // A primary checkout is its repo, cloned.
         let repo = repo_resolved(snapshot, &resolved);
         plan.steps
-            .push(clone_into(&repo, snapshot, &resolved, &root)?);
+            .push(clone_into(&repo, snapshot, &resolved, &root, hypothetical)?);
         return Ok(plan);
     }
     let steps = switch_steps(snapshot, &resolved, record, env)?;
@@ -93,6 +100,7 @@ fn clone_into(
     snapshot: &GraphSnapshot,
     checkout: &ResolvedSlot,
     root: &str,
+    allow_existing: bool,
 ) -> Result<Step, RebuildError> {
     let record = repo
         .record_id
@@ -107,7 +115,7 @@ fn clone_into(
         source: crate::model::FieldSource::History,
     });
     let _ = checkout;
-    clone_step(&repo, record)
+    clone_step_with(&repo, record, allow_existing)
 }
 
 /// The steps that bring a checkout's worktree back, the clone of its
@@ -201,22 +209,14 @@ pub fn switch_step(
     recorded_root: Option<PathBuf>,
     old_record: Option<String>,
 ) -> Step {
-    let mut command = format!("wt -C {} switch --no-cd", repo_root.display());
-    if create {
-        command.push_str(" --create");
-        if let Some(base) = &base {
-            command.push_str(&format!(" --base {base}"));
-        }
-    }
-    command.push_str(&format!(" {branch}"));
-    Step {
-        title: if create {
-            format!("recreate branch {branch}")
-        } else {
-            format!("rebuild worktree {branch}")
-        },
-        command,
-        action: Action::WorktreeSwitch {
+    let title = if create {
+        format!("recreate branch {branch}")
+    } else {
+        format!("rebuild worktree {branch}")
+    };
+    Step::new(
+        title,
+        Action::WorktreeSwitch {
             key,
             repo_root: repo_root.to_path_buf(),
             repo: repo.to_string(),
@@ -226,7 +226,7 @@ pub fn switch_step(
             recorded_root,
             old_record,
         },
-    }
+    )
 }
 
 /// A directory inside the live repo `repo_key` to run the backend from:

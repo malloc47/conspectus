@@ -109,12 +109,14 @@ fn each_row_says_where_its_value_comes_from() {
     let row = |label: &str| {
         frame
             .lines()
-            .find(|l| l.contains(&format!(" {label} ")))
+            .find(|l| l.contains(&format!("│  {label} ")) || l.contains(&format!("│> {label} ")))
             .unwrap_or_else(|| panic!("no row {label}:\n{frame}"))
             .to_string()
     };
-    assert!(row("cwd").contains("override"), "{}", row("cwd"));
-    assert!(row("harness").contains("history"), "{}", row("harness"));
+    assert!(row("cwd").contains("kept"), "{}", row("cwd"));
+    assert!(row("harness").contains("last seen"), "{}", row("harness"));
+    assert!(row("name").contains("running"), "{}", row("name"));
+    assert!(row("label").contains("saved"), "{}", row("label"));
     assert!(row("argv").contains("default"), "{}", row("argv"));
     assert!(frame.contains("renames the tmux session too"), "{frame}");
 }
@@ -178,7 +180,7 @@ fn inherit_drops_an_override_and_shows_the_inherited_value() {
     let request = form.request().unwrap();
     assert_eq!(request.unset, vec!["cwd".to_string()]);
     assert!(request.set.is_empty());
-    assert!(render(&form).contains("inherits live"), "{}", render(&form));
+    assert!(render(&form).contains("will follow"), "{}", render(&form));
 }
 
 #[test]
@@ -364,4 +366,121 @@ fn escape_closes_without_saving() {
     let mut form = PinEditFormState::new(mux_init());
     type_str(&mut form, "x");
     assert_eq!(form.handle((), key(KeyCode::Esc)), OverlayOutcome::Close);
+}
+
+fn render_at(form: &PinEditFormState, width: u16, height: u16) -> Vec<String> {
+    let area = Rect::new(0, 0, width, height);
+    let mut buf = Buffer::empty(area);
+    PinEditFormWidget::new(form, &Theme::default()).render(area, &mut buf);
+    (0..height)
+        .map(|y| {
+            (0..width)
+                .map(|x| buf[(x, y)].symbol().to_string())
+                .collect()
+        })
+        .collect()
+}
+
+/// The column the row for `label` ends at, and its last word.
+fn row_end(lines: &[String], label: &str) -> (usize, String) {
+    let line = lines
+        .iter()
+        .find(|l| l.contains(&format!("│  {label} ")) || l.contains(&format!("│> {label} ")))
+        .unwrap_or_else(|| panic!("no row {label}"));
+    let inner = line.trim_end().trim_end_matches('│').trim_end();
+    (
+        inner.chars().count(),
+        inner.split_whitespace().last().unwrap_or("").to_string(),
+    )
+}
+
+#[test]
+fn the_source_word_sits_in_the_same_column_on_every_row_whatever_is_selected() {
+    let mut form = PinEditFormState::new(mux_init());
+    let mut seen = Vec::new();
+    for _ in 0..8 {
+        let lines = render_at(&form, 80, 40);
+        let ends: Vec<_> = ["label", "name", "cwd", "harness", "argv"]
+            .iter()
+            .map(|label| row_end(&lines, label).0)
+            .collect();
+        seen.push(ends);
+        form.handle((), key(KeyCode::Down));
+    }
+    assert!(
+        seen.windows(2).all(|pair| pair[0] == pair[1]),
+        "moving the selection moved the right-hand words: {seen:?}"
+    );
+    assert!(
+        seen[0].windows(2).all(|pair| pair[0] == pair[1]),
+        "{seen:?}"
+    );
+}
+
+#[test]
+fn editing_a_path_never_pushes_the_source_word_out_of_the_form() {
+    let mut form = PinEditFormState::new(mux_init());
+    focus_row(&mut form, "cwd");
+    type_str(
+        &mut form,
+        "/a/very/long/directory/name/that/goes/on/and/on/and/on/past/the/edge",
+    );
+    for width in [60, 80, 120] {
+        let lines = render_at(&form, width, 40);
+        let (_, word) = row_end(&lines, "cwd");
+        assert_eq!(
+            word, "keep",
+            "the tag stays whole at {width} columns: {lines:#?}"
+        );
+        let line = lines.iter().find(|l| l.contains(" cwd ")).unwrap();
+        assert!(line.contains("will keep"), "{line}");
+        assert!(line.trim_end().ends_with('│'), "{line}");
+    }
+}
+
+#[test]
+fn a_clean_row_shows_no_stray_marker_after_its_value() {
+    let form = PinEditFormState::new(mux_init());
+    let lines = render_at(&form, 80, 40);
+    let cwd = lines.iter().find(|l| l.contains(" cwd ")).unwrap();
+    let after_value = cwd.split("/override").nth(1).unwrap();
+    let words: Vec<&str> = after_value
+        .trim_end()
+        .trim_end_matches('│')
+        .split_whitespace()
+        .collect();
+    assert!(
+        words.len() <= 2 && words.last() == Some(&"kept"),
+        "only the mark and the source word follow the value: {cwd}"
+    );
+}
+
+#[test]
+fn the_form_explains_what_following_means_without_jargon() {
+    let lines = render_at(&PinEditFormState::new(mux_init()), 80, 40).join("\n");
+    assert!(
+        lines.contains("A blank field follows the running mux"),
+        "{lines}"
+    );
+    for jargon in ["inherit", "slot", "snapshot"] {
+        assert!(
+            !lines.to_lowercase().contains(jargon),
+            "`{jargon}` in:\n{lines}"
+        );
+    }
+}
+
+#[test]
+fn the_focused_row_says_what_it_follows() {
+    let mut form = PinEditFormState::new(mux_init());
+    focus_row(&mut form, "name");
+    let lines = render_at(&form, 100, 40).join("\n");
+    assert!(lines.contains("following the running mux: work"), "{lines}");
+    focus_row(&mut form, "cwd");
+    let lines = render_at(&form, 100, 40).join("\n");
+    assert!(lines.contains("kept with this pin: /override"), "{lines}");
+    assert!(
+        lines.contains("/src/app"),
+        "what Ctrl-R goes back to: {lines}"
+    );
 }

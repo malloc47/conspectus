@@ -447,7 +447,7 @@ fn pin_summary_field(pin: &PinNode) -> HeaderField {
             "{} ({} · {})",
             pin.id.id,
             pin.kind.as_str(),
-            pin.status.as_str()
+            pin.status.label_for(pin.kind)
         ),
     )
 }
@@ -630,7 +630,7 @@ fn pin_fields(
         plain("id", pin.id.id.clone()),
         plain("name", pin.label.clone()),
         plain("kind", pin.kind.as_str().to_string()),
-        plain("status", pin.status.as_str().to_string()),
+        plain("status", pin.status.label_for(pin.kind).to_string()),
     ];
     match (&pin.target_node, &pin.target) {
         (Some(node), _) => fields.push(linked(

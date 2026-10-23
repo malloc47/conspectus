@@ -183,6 +183,7 @@ pub fn attach() -> Options {
     Options {
         session: None,
         attach: true,
+        ..Default::default()
     }
 }
 

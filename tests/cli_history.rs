@@ -385,3 +385,117 @@ fn rebuild_of_an_unknown_ref_says_what_to_pass() {
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(stderr.contains("nothing matches `nope`"), "{stderr}");
 }
+
+#[test]
+fn rebuild_plan_of_a_running_mux_is_a_pasteable_script() {
+    if !tmux_available() {
+        eprintln!("tmux not installed; skipping");
+        return;
+    }
+    let world = World::new();
+    let repo = world.repo.display().to_string();
+    assert!(world.tmux(&[
+        "new-session",
+        "-d",
+        "-s",
+        "script-a",
+        "-c",
+        &repo,
+        "sleep",
+        "600"
+    ]));
+    world.graph(&[]);
+
+    // Without the flag a running mux has nothing to rebuild.
+    let plain = world
+        .conspectus()
+        .args(["rebuild", "script-a", "--dry-run", "--no-attach"])
+        .output()
+        .unwrap();
+    let plain = String::from_utf8_lossy(&plain.stdout);
+    assert!(!plain.contains("new-session"), "{plain}");
+
+    // With it, the plan says what a rebuild would do if it had stopped.
+    let planned = world
+        .conspectus()
+        .args([
+            "rebuild",
+            "script-a",
+            "--dry-run",
+            "--assume-stopped",
+            "--no-attach",
+        ])
+        .output()
+        .unwrap();
+    assert!(
+        planned.status.success(),
+        "{}",
+        String::from_utf8_lossy(&planned.stderr)
+    );
+    let planned = String::from_utf8_lossy(&planned.stdout);
+    assert!(
+        planned.contains("running; planned as if stopped"),
+        "{planned}"
+    );
+    assert!(planned.contains("hypothetical:"), "{planned}");
+    assert!(
+        planned.contains("       $ tmux new-session -d -s script-a"),
+        "{planned}"
+    );
+
+    let script = world
+        .conspectus()
+        .args([
+            "rebuild",
+            "script-a",
+            "--dry-run",
+            "--assume-stopped",
+            "--script",
+            "--no-attach",
+        ])
+        .output()
+        .unwrap();
+    let script = String::from_utf8_lossy(&script.stdout).into_owned();
+    let command = script
+        .lines()
+        .find(|line| !line.starts_with('#'))
+        .expect("a command line");
+    assert_eq!(
+        command,
+        format!(
+            "tmux new-session -d -s script-a -c {repo} sleep 600 \\; set-option -t script-a remain-on-exit failed"
+        ),
+        "{script}"
+    );
+
+    // The script recreates the mux once it has really stopped.
+    assert!(world.tmux(&["kill-server"]));
+    let status = StdCommand::new("sh")
+        .arg("-c")
+        .arg(&script)
+        .env("LC_CTYPE", "C.UTF-8")
+        .env("TMUX_TMPDIR", &world.tmux_tmpdir)
+        .env_remove("TMUX")
+        .status()
+        .unwrap();
+    assert!(status.success());
+    assert!(
+        world.tmux(&["has-session", "-t", "script-a"]),
+        "the pasted script started the mux"
+    );
+}
+
+#[test]
+fn assume_stopped_and_script_need_a_dry_run() {
+    let world = World::new();
+    for flag in ["--assume-stopped", "--script"] {
+        let output = world
+            .conspectus()
+            .args(["rebuild", "anything", flag])
+            .output()
+            .unwrap();
+        assert!(!output.status.success());
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(stderr.contains("add `--dry-run`"), "{flag}: {stderr}");
+    }
+}

@@ -72,10 +72,13 @@ mod actions;
 mod fixtures;
 mod focus;
 mod forms;
+mod freshness;
+mod layout;
 mod lifecycle;
 mod menus;
 mod parity;
 mod rendering;
+mod styling;
 mod text;
 
 use fixtures::*;

@@ -655,7 +655,7 @@ converts them; the loader goes one release later.
 
 Per ADR 0142, a **rebuild** turns a recipe from a slot, a history record,
 or a live node back into a live entity. It is a plan of steps, shown
-before it runs and printed by `conspectus rebuild <ref> --dry-run`;
+before it runs and printed by `conspectus rebuild <ref> --dry-run` (with `--assume-stopped` for a running entity, and `--script` for only the commands, which come from the same argument builders the runners use);
 executors plan their own steps and chain prerequisites. A gone mux gets
 `new-session` with its effective argv and its last session's resume
 spliced after the harness binary (ADR 0098), falling back to a fresh
@@ -898,9 +898,10 @@ The mux view groups by `session` (the default, a flat list), `host`, `repo`,
 or `workspace`. `workspace` is the mux counterpart of the sessions view's
 `graph` shape: one header per workspace a mux is rooted in and the `repo`
 buckets for every other mux, sorted together by header name so neither kind
-comes first, then Ungrouped (ADR 0139). Ghost muxes (ADR 0140) sort below
-the live muxes of their group, dimmed, with a `gone` status and their
-last-seen age; a Controls toggle hides them, and the header counts them
+comes first, then Ungrouped (ADR 0139). Ghost muxes (ADR 0140) that a pin
+points at sort below the live muxes of their group in the ghost style, with
+a `gone` status and their last-seen age; the rest live in History, a
+Controls option lists every stopped mux, and the header counts them all
 separately (ADR 0144).
 
 Two views list rows of mixed kinds in one set of aligned columns,

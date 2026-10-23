@@ -25,6 +25,15 @@ pub(super) struct RebuildArgs {
     /// Print the plan and stop.
     #[arg(long = "dry-run")]
     dry_run: bool,
+    /// With `--dry-run`: plan a running mux, worktree, repo, or session
+    /// as if it had stopped, from what is known now. Shows the commands
+    /// that would recreate it.
+    #[arg(long = "assume-stopped")]
+    assume_stopped: bool,
+    /// With `--dry-run`: print only the commands, as a script you can
+    /// paste into a shell (`#` lines are comments).
+    #[arg(long)]
+    script: bool,
     /// Skip the terminal hand-off; print the attach command instead.
     #[arg(long = "no-attach")]
     no_attach: bool,
@@ -38,6 +47,12 @@ pub(super) struct RebuildArgs {
 
 impl RebuildArgs {
     pub(super) fn run(self) -> Result<()> {
+        if (self.assume_stopped || self.script) && !self.dry_run {
+            return Err(anyhow!(
+                "`--assume-stopped` and `--script` only describe a plan; add `--dry-run`. \
+                 A real rebuild never touches an entity that is running"
+            ));
+        }
         // Rebuild reads harness, mux, git, and process state and never
         // PRs, so it skips the forges (ADR 0135).
         let discovered = discover_for_store_selection_with(
@@ -71,7 +86,10 @@ impl RebuildArgs {
         let attach_here = !self.no_attach && std::io::stdin().is_terminal();
         let options = Options {
             session: self.session,
-            attach: attach_here && !self.dry_run,
+            // A plan shows the attach it would end with; a run only
+            // attaches when there is a terminal to hand over.
+            attach: !self.no_attach && (self.dry_run || attach_here),
+            assume_stopped: self.assume_stopped,
         };
         let plan = plan(
             &snapshot,
@@ -83,7 +101,11 @@ impl RebuildArgs {
         .map_err(describe)?;
 
         if self.dry_run {
-            print!("{}", plan.render());
+            if self.script {
+                print!("{}", plan.script());
+            } else {
+                print!("{}", plan.render());
+            }
             return Ok(());
         }
         for warning in &plan.warnings {

@@ -645,35 +645,77 @@ pub(super) fn run_viewer_launch(
 }
 
 /// Executor branch for `ExecSpec::ShowRebuildPlan`: run
-/// `conspectus rebuild <reference> --dry-run` behind a spinner and show
-/// what it printed in the full-value modal.
+/// `conspectus rebuild <reference> --dry-run --assume-stopped` behind a
+/// spinner (twice: the readable plan, then the same commands as a
+/// script) and show the plan with `y` copying the script. A running
+/// entity gets the plan for the case that it had stopped, since that is
+/// what rebuilding it would take; a line on top says what Enter does.
 pub(super) fn execute_show_rebuild_plan(
     terminal: &mut DefaultTerminal,
     app: &mut App,
     reference: &str,
 ) {
+    let args = |script: bool| {
+        let mut args = vec![
+            "rebuild".to_string(),
+            reference.to_string(),
+            "--dry-run".to_string(),
+            "--assume-stopped".to_string(),
+            "--no-attach".to_string(),
+        ];
+        if script {
+            args.push("--script".to_string());
+        }
+        args
+    };
     let (_, output) = run_conspectus_subprocess(
         terminal,
         app,
         format!("Planning rebuild of {reference}"),
-        vec![
-            "rebuild".to_string(),
-            reference.to_string(),
-            "--dry-run".to_string(),
-        ],
+        args(false),
     );
-    let text = match output {
-        Ok(output) if output.status.success() => String::from_utf8_lossy(&output.stdout)
+    let failed = |reason: String| format!("rebuild of `{reference}` can't be planned: {reason}");
+    let plan = match output {
+        Ok(output) if output.status.success() => Ok(String::from_utf8_lossy(&output.stdout)
             .trim_end()
-            .to_string(),
-        Ok(output) => format!(
-            "rebuild of `{reference}` can't be planned: {}",
-            command_output_excerpt(&output)
-        ),
-        Err(err) => format!("rebuild of `{reference}` failed to spawn: {err}"),
+            .to_string()),
+        Ok(output) => Err(failed(command_output_excerpt(&output))),
+        Err(err) => Err(failed(format!("failed to spawn: {err}"))),
     };
-    app.open_value_modal(crate::tui::widgets::value_modal::ValueModalState::new(
+    let plan = match plan {
+        Ok(plan) => plan,
+        Err(text) => {
+            app.open_value_modal(crate::tui::widgets::value_modal::ValueModalState::new(
+                format!("rebuild plan · {reference}"),
+                text,
+            ));
+            return;
+        }
+    };
+    let (_, script) = run_conspectus_subprocess(
+        terminal,
+        app,
+        format!("Writing the commands for {reference}"),
+        args(true),
+    );
+    let script = match script {
+        Ok(output) if output.status.success() => {
+            String::from_utf8_lossy(&output.stdout).into_owned()
+        }
+        _ => String::new(),
+    };
+    let commands = script
+        .lines()
+        .filter(|line| !line.is_empty() && !line.starts_with('#'))
+        .count();
+    let note = app
+        .snapshot_handle()
+        .and_then(|handle| crate::tui::actions::running_note(handle.snapshot(), reference))
+        .map_or_else(String::new, |note| format!("{note}\n\n"));
+    app.open_value_modal(crate::tui::widgets::value_modal::ValueModalState::plan(
         format!("rebuild plan · {reference}"),
-        text,
+        format!("{note}{plan}"),
+        script,
+        commands,
     ));
 }

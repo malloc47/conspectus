@@ -261,7 +261,7 @@ fn pinning_a_live_mux_survives_its_death_and_rebuilds() {
     // The mux dies; the slot stays and reports it.
     assert!(world.tmux(&["kill-server"]));
     let list = world.ok(&["pin", "list"]);
-    assert!(list.contains("pin-a") && list.contains("gone"), "{list}");
+    assert!(list.contains("pin-a") && list.contains("stopped"), "{list}");
     let history = world.ok(&["history", "list", "--gone"]);
     assert!(
         history.contains("pin-a") && history.contains("◉"),
@@ -269,7 +269,7 @@ fn pinning_a_live_mux_survives_its_death_and_rebuilds() {
     );
 
     let show = world.ok(&["pin", "show", "pin-a"]);
-    assert!(show.contains("gone"), "{show}");
+    assert!(show.contains("stopped"), "{show}");
     let plan = world.ok(&["rebuild", "pin-a", "--dry-run"]);
     assert!(plan.contains("pin-a"), "{plan}");
 

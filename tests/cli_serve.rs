@@ -1018,3 +1018,137 @@ fn serve_logs_startup_line_to_stderr() {
         "expected startup line in stderr; got:\n{stderr}"
     );
 }
+
+/// Kills the private tmux server under `TMUX_TMPDIR` and the daemon
+/// when dropped. The server directory is always the test's own, never
+/// the real one.
+struct Cleanup {
+    tmux_dir: PathBuf,
+    child: std::process::Child,
+}
+
+impl Drop for Cleanup {
+    fn drop(&mut self) {
+        let _ = Command::new("tmux")
+            .env_remove("TMUX")
+            .env("TMUX_TMPDIR", &self.tmux_dir)
+            .arg("kill-server")
+            .output();
+        let _ = self.child.kill();
+        let _ = self.child.wait();
+    }
+}
+
+#[test]
+fn one_mux_refresh_sees_a_started_and_a_killed_tmux_session() {
+    if !Command::new("tmux")
+        .arg("-V")
+        .output()
+        .is_ok_and(|output| output.status.success())
+    {
+        eprintln!("tmux not installed; skipping");
+        return;
+    }
+    let home = tempfile::TempDir::new().expect("home");
+    let data = tempfile::TempDir::new().expect("data");
+    let cwd = tempfile::TempDir::new().expect("cwd");
+    let runtime = tempfile::TempDir::new().expect("runtime");
+    let tmux_dir = tempfile::Builder::new()
+        .prefix("tmux")
+        .tempdir_in("/tmp")
+        .expect("private tmux dir");
+    let private = |cmd: &mut Command| {
+        isolated_serve_env_args(cmd, home.path(), data.path(), runtime.path());
+        cmd.env_remove("CONSPECTUS_DISABLE_TMUX")
+            .env("CONSPECTUS_DISABLE_ZELLIJ", "1")
+            .env("XDG_STATE_HOME", home.path().join("state"))
+            .env("XDG_CONFIG_HOME", home.path().join("config"))
+            .env("XDG_CACHE_HOME", home.path().join("cache"))
+            .env("TMUX_TMPDIR", tmux_dir.path())
+            .env_remove("TMUX")
+            .current_dir(cwd.path());
+    };
+
+    let mut serve = Command::new(conspectus_bin());
+    private(&mut serve);
+    serve
+        .arg("serve")
+        .stdout(Stdio::null())
+        .stderr(Stdio::null());
+    let _cleanup = Cleanup {
+        tmux_dir: tmux_dir.path().to_path_buf(),
+        child: serve.spawn().expect("spawn serve"),
+    };
+    assert!(wait_for_socket(
+        &socket_path_under(runtime.path()),
+        Duration::from_secs(10)
+    ));
+
+    let run = |args: &[&str]| -> String {
+        let mut cmd = Command::new(conspectus_bin());
+        private(&mut cmd);
+        let output = cmd.args(args).output().expect("run conspectus");
+        assert!(
+            output.status.success(),
+            "{args:?}: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        String::from_utf8_lossy(&output.stdout).into_owned()
+    };
+    let tmux = |args: &[&str]| {
+        let status = Command::new("tmux")
+            .env_remove("TMUX")
+            .env("LC_CTYPE", "C.UTF-8")
+            .env("TMUX_TMPDIR", tmux_dir.path())
+            .args(args)
+            .status()
+            .expect("tmux");
+        assert!(status.success(), "tmux {args:?}");
+    };
+    // The graph as one daemon snapshot, and whether it shows the mux as
+    // running: present and not gone or unknown.
+    let graph = || -> serde_json::Value {
+        serde_json::from_str(&run(&["graph", "--format", "json"])).expect("graph json")
+    };
+    let running = |graph: &serde_json::Value| -> bool {
+        let not_running = |node: &serde_json::Value| {
+            graph["node_presence"]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .any(|entry| entry["node_id"]["native_id"] == node["id"]["native_id"])
+        };
+        graph["nodes"].as_array().into_iter().flatten().any(|node| {
+            node["type"] == "mux_session"
+                && node["id"]["native_id"] == "tmux:fresh-a"
+                && !not_running(node)
+        })
+    };
+
+    run(&["refresh", "--class", "mux"]);
+    assert!(!running(&graph()), "nothing runs yet");
+
+    // Started right after a probe, inside the listing's cache lifetime:
+    // one refresh must be enough.
+    tmux(&[
+        "new-session",
+        "-d",
+        "-s",
+        "fresh-a",
+        "-c",
+        "/",
+        "sleep",
+        "600",
+    ]);
+    run(&["refresh", "--class", "mux"]);
+    assert!(running(&graph()), "a single refresh shows the started mux");
+
+    tmux(&["kill-session", "-t", "fresh-a"]);
+    run(&["refresh", "--class", "mux"]);
+    let after = graph();
+    assert!(
+        !running(&after),
+        "a single refresh shows the killed mux gone or unknown: {}",
+        serde_json::to_string_pretty(&after["node_presence"]).unwrap()
+    );
+}

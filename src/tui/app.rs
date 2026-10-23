@@ -1691,7 +1691,8 @@ impl App {
             }
             Msg::TogglePin => {
                 // `p` acts on the entity in view: it unpins what is
-                // already pinned (after a confirm) and pins the rest.
+                // already pinned and pins the rest, each at once. An
+                // entity several pins point at asks which to remove.
                 let pins = self.snapshot_handle().map_or_else(Vec::new, |handle| {
                     crate::tui::actions::pins_for(
                         handle.snapshot(),
@@ -1712,6 +1713,10 @@ impl App {
                             ));
                         }
                     }
+                } else if let [only] = pins.as_slice() {
+                    effects.push(Effect::WriteStore(crate::tui::effect::StoreOp::Unpin {
+                        slot: only.clone(),
+                    }));
                 } else {
                     self.open_pin_menu(pins);
                 }
@@ -1785,22 +1790,9 @@ impl App {
                 ));
             }
             Msg::ShowRebuildPlan(reference) => {
-                // A running mux has nothing to rebuild: say so here
-                // instead of running a plan with no steps.
-                let running = self.snapshot_handle().and_then(|handle| {
-                    crate::tui::actions::running_mux_plan(handle.snapshot(), &reference)
-                });
-                match running {
-                    Some(text) => self.open_value_modal(
-                        crate::tui::widgets::value_modal::ValueModalState::new(
-                            format!("rebuild plan · {reference}"),
-                            text,
-                        ),
-                    ),
-                    None => effects.push(Effect::Exec(
-                        crate::tui::effect::ExecSpec::ShowRebuildPlan { reference },
-                    )),
-                }
+                effects.push(Effect::Exec(
+                    crate::tui::effect::ExecSpec::ShowRebuildPlan { reference },
+                ));
             }
             Msg::RebuildReference(reference) => {
                 effects.push(Effect::Exec(crate::tui::effect::ExecSpec::Rebuild {

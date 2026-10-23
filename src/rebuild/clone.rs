@@ -6,6 +6,7 @@
 //! a path that doesn't exist, from a remote the history record or the
 //! operator's slot names, and nothing else.
 
+use std::ffi::OsString;
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result, bail};
@@ -28,9 +29,7 @@ impl RepoCloner for SystemCloner {
     fn clone_repo(&self, remote: &str, dest: &Path) -> Result<()> {
         check_clone_args(remote, dest)?;
         let output = crate::exec::command(crate::exec::Program::Git, "git")
-            .arg("clone")
-            .arg(remote)
-            .arg(dest)
+            .args(clone_args(remote, dest))
             .output()
             .context("failed to run git")?;
         if output.status.success() {
@@ -42,6 +41,16 @@ impl RepoCloner for SystemCloner {
             String::from_utf8_lossy(&output.stderr).trim()
         )
     }
+}
+
+/// The arguments after `git` that clone `remote` into `dest`. The
+/// cloner runs these and a rebuild plan prints them.
+pub fn clone_args(remote: &str, dest: &Path) -> Vec<OsString> {
+    vec![
+        OsString::from("clone"),
+        OsString::from(remote),
+        dest.as_os_str().to_os_string(),
+    ]
 }
 
 /// What may be cloned where: a remote that can't be read as an option,
@@ -68,7 +77,7 @@ pub fn check_clone_args(remote: &str, dest: &Path) -> Result<()> {
 pub fn plan(
     snapshot: &GraphSnapshot,
     subject: &Subject,
-    _options: &Options,
+    options: &Options,
     _env: &Env<'_>,
     _now: i64,
 ) -> Result<Plan, RebuildError> {
@@ -86,12 +95,21 @@ pub fn plan(
         warnings: Vec::new(),
         target: None::<MuxTarget>,
     };
-    if resolved.status == SlotStatus::Live {
+    let hypothetical = options.assume_stopped && resolved.status == SlotStatus::Live;
+    if resolved.status == SlotStatus::Live && !hypothetical {
         plan.warnings
             .push(format!("`{name}` exists; there is nothing to clone"));
         return Ok(plan);
     }
-    plan.steps.push(clone_step(&resolved, record)?);
+    if hypothetical {
+        plan.subject = format!("repo `{name}` (exists; planned as if removed)");
+        plan.warnings.push(format!(
+            "hypothetical: `{name}` exists, so git would refuse to clone over it; \
+             these are the commands that would recreate it if it were gone"
+        ));
+    }
+    plan.steps
+        .push(clone_step_with(&resolved, record, hypothetical)?);
     Ok(plan)
 }
 
@@ -103,6 +121,16 @@ fn repo_label(common_dir: &str) -> String {
 pub fn clone_step(
     resolved: &ResolvedSlot,
     record: Option<&RepoRecord>,
+) -> Result<Step, RebuildError> {
+    clone_step_with(resolved, record, false)
+}
+
+/// As [`clone_step`]; `allow_existing` skips the check that the
+/// destination is free, for a plan that only shows the commands.
+pub fn clone_step_with(
+    resolved: &ResolvedSlot,
+    record: Option<&RepoRecord>,
+    allow_existing: bool,
 ) -> Result<Step, RebuildError> {
     let remote = resolved
         .text("remote")
@@ -130,15 +158,22 @@ pub fn clone_step(
                     .into(),
             )
         })?;
-    check_clone_args(remote, &dest).map_err(|err| RebuildError::Cannot(err.to_string()))?;
-    Ok(Step {
-        title: "clone the repo".to_string(),
-        command: format!("git clone {remote} {}", dest.display()),
-        action: Action::Clone {
+    if allow_existing {
+        if remote.trim().is_empty() || remote.starts_with('-') {
+            return Err(RebuildError::Cannot(format!(
+                "`{remote}` isn't a remote to clone"
+            )));
+        }
+    } else {
+        check_clone_args(remote, &dest).map_err(|err| RebuildError::Cannot(err.to_string()))?;
+    }
+    Ok(Step::new(
+        "clone the repo",
+        Action::Clone {
             remote: remote.to_string(),
             dest,
         },
-    })
+    ))
 }
 
 #[cfg(test)]

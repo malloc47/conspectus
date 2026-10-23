@@ -52,7 +52,7 @@ impl App {
         self.slot_prompt = Some(prompt);
     }
 
-    /// Open a menu that confirms unpinning each of `slots`.
+    /// Open a menu that unpins whichever of `slots` is chosen.
     pub(crate) fn open_pin_menu(&mut self, slots: Vec<String>) {
         use crate::tui::Msg;
         use crate::tui::widgets::row_menu::{RowMenuEntry, RowMenuState};
@@ -64,7 +64,6 @@ impl App {
                     "remove the pin; the entity and its history stay",
                     Msg::Unpin(slot),
                 )
-                .confirming()
             })
             .collect();
         if !entries.is_empty() {
@@ -434,7 +433,7 @@ impl App {
         Some(crate::tui::widgets::pin_edit::PinEditInit {
             pin: slot.to_string(),
             kind: pin.kind,
-            status: pin.status.as_str().to_string(),
+            status: pin.status.label_for(pin.kind).to_string(),
             live_mux: pin.kind == crate::model::PinKind::Mux && pin.status == SlotStatus::Live,
             effective: pin.effective.clone(),
             overrides: pin.overrides.clone(),
@@ -615,6 +614,20 @@ impl App {
         if matches!(self.modal_stack.last(), Some(crate::tui::Modal::Help(_))) {
             self.modal_stack.pop();
         }
+    }
+
+    /// Pop the top modal, for tests that compare a frame with and
+    /// without it.
+    #[cfg(test)]
+    pub(crate) fn pop_top_modal(&mut self) {
+        self.modal_stack.pop();
+    }
+
+    /// The top of the modal stack, for tests that drive an overlay's own
+    /// key handling and then render it.
+    #[cfg(test)]
+    pub(crate) fn top_modal_mut(&mut self) -> Option<&mut crate::tui::Modal> {
+        self.modal_stack.last_mut()
     }
 
     /// The modal stack (ADR 0085 contract 3). Reserved for

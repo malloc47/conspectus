@@ -583,12 +583,7 @@ fn pin_marker_span(marker: crate::tui::rows::PinMarker, theme: &Theme) -> Span<'
     match marker {
         PinMarker::None => Span::raw("  "),
         PinMarker::Pinned => node_kind_glyph_span(NodeKind::Pin, theme),
-        PinMarker::Unstarted => span!(
-            Style::default()
-                .fg(node_kind_style(NodeKind::Pin, theme).color)
-                .add_modifier(theme.placeholder);
-            "{UNSTARTED_PIN_GLYPH} "
-        ),
+        PinMarker::Unstarted => span!(ghost_style(theme); "{UNSTARTED_PIN_GLYPH} "),
     }
 }
 
@@ -691,11 +686,34 @@ pub(super) fn render_mixed_spans(
         }
     }
     if mixed.tone == MixedTone::Dim {
-        for span in &mut spans {
-            span.style = span.style.add_modifier(theme.placeholder);
-        }
+        ghostify(&mut spans, theme);
     }
     spans
+}
+
+/// The ghost style: the theme's ghost color in italics. Gone entities
+/// and pins that aren't running share it in every view.
+pub(super) fn ghost_style(theme: &Theme) -> Style {
+    Style::default()
+        .fg(theme.ghost)
+        .add_modifier(Modifier::ITALIC)
+}
+
+/// Restyle `spans` as a ghost. Chips keep their background and are
+/// dimmed instead, so an agent still reads as an agent.
+pub(super) fn ghostify(spans: &mut [Span<'static>], theme: &Theme) {
+    for span in spans {
+        let chip = span.style.bg.is_some() || span.style.add_modifier.contains(Modifier::REVERSED);
+        span.style = if chip {
+            span.style
+                .add_modifier(theme.placeholder | Modifier::ITALIC)
+        } else {
+            span.style
+                .fg(theme.ghost)
+                .remove_modifier(Modifier::BOLD)
+                .add_modifier(Modifier::ITALIC)
+        };
+    }
 }
 
 /// The kind glyph of a mixed-kind row; PR glyphs take their state's hue.
@@ -873,6 +891,15 @@ pub(super) fn render_left_row(
         for span in &mut spans {
             span.style = span.style.add_modifier(theme.placeholder);
         }
+    }
+    // A group (or any non-mixed row) standing for an entity that is
+    // gone or unknown wears the ghost style like the mixed rows do.
+    if !matches!(row.kind, RowKind::Mixed(_))
+        && let Some(handle) = app.snapshot_handle()
+        && let Some(node) = crate::tui::rows::row_node(&row.id)
+        && handle.snapshot().presence(node).is_some()
+    {
+        ghostify(&mut spans, theme);
     }
     let mut line = Line::from(spans);
     if is_selected {

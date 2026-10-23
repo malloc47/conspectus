@@ -537,7 +537,7 @@ impl PinListArgs {
                 "{:<width$}  {:<8}  {:<8}  {}{}",
                 pin.id.id,
                 pin.kind.as_str(),
-                pin.status.as_str(),
+                pin.status.label_for(pin.kind),
                 pin.label,
                 if pin.legacy {
                     "  (legacy: run `pin migrate`)"

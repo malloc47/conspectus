@@ -5272,10 +5272,9 @@ fn gone_and_planned_rows_render_dimmed_and_live_rows_do_not() {
                 return false;
             };
             let x = u16::try_from(line[..byte].chars().count()).unwrap();
-            buffer[(x, y)]
-                .style()
-                .add_modifier
-                .contains(Theme::default().placeholder)
+            let style = buffer[(x, y)].style();
+            style.fg == Some(Theme::default().ghost)
+                && style.add_modifier.contains(Modifier::ITALIC)
         })
     };
     assert!(dimmed_row("config-agent3"));
@@ -5467,7 +5466,10 @@ fn the_row_menu_offers_the_record_verbs_and_clean_up() {
     };
     assert!(entry("Forget").confirm, "forget asks twice");
     // The pinned record offers to unpin its pin, also behind a confirm.
-    assert!(entry("Unpin config-agent3").confirm, "unpin asks twice");
+    assert!(
+        !entry("Unpin config-agent3").confirm,
+        "unpin acts at once, like p"
+    );
     assert_eq!(
         entry("Unpin config-agent3").msg,
         Msg::Unpin("config-agent3".into())
@@ -5590,7 +5592,16 @@ fn clean_up_lists_what_has_aged_out_and_nothing_pinned() {
 ///
 /// [`fixture_world`]: crate::tui::rows::pinned::fixture_world
 fn ghost_world() -> GraphSnapshot {
+    ghost_world_with(true)
+}
+
+/// The ghost fixture, with or without its pins. Without them no pin
+/// points at the stopped mux.
+fn ghost_world_with(pinned: bool) -> GraphSnapshot {
     let mut snapshot = crate::tui::rows::pinned::fixture_world();
+    if !pinned {
+        snapshot.pins.clear();
+    }
     snapshot.mux_probes.insert(
         "tmux".to_string(),
         crate::model::MuxProbe {
@@ -5643,17 +5654,29 @@ fn ghost_muxes_sit_below_live_ones_dimmed_with_their_age() {
 }
 
 #[test]
-fn hiding_gone_muxes_drops_the_ghosts_and_keeps_the_count() {
-    let snapshot = ghost_world();
-    let filter = crate::filter::RowFilter {
-        hide_gone_muxes: true,
-        ..Default::default()
-    };
-    let mut app = mux_app_over(&snapshot, filter);
+fn the_mux_view_lists_only_pinned_stopped_muxes_unless_asked_for_all() {
+    // A pin points at the stopped mux: it stays in the Mux view.
+    let pinned = ghost_world();
+    let mut app = mux_app_over(&pinned, crate::filter::RowFilter::default());
+    let frame = pinned_frame(&mut app, 110);
+    assert!(frame.contains("config-agent3"), "{frame}");
+
+    // Nothing pins it: it lives in History, but the header still counts it.
+    let unpinned = ghost_world_with(false);
+    let mut app = mux_app_over(&unpinned, crate::filter::RowFilter::default());
     let frame = pinned_frame(&mut app, 110);
     assert!(!frame.contains("config-agent3"), "{frame}");
     assert!(frame.contains("conspectus-main"), "{frame}");
     assert!(frame.contains("1 gone"), "{frame}");
+
+    // Controls can list every stopped mux.
+    let filter = crate::filter::RowFilter {
+        show_stopped_muxes: true,
+        ..Default::default()
+    };
+    let mut app = mux_app_over(&unpinned, filter);
+    let frame = pinned_frame(&mut app, 110);
+    assert!(frame.contains("config-agent3"), "{frame}");
 }
 
 #[test]
@@ -5812,7 +5835,7 @@ fn pinned_only_keeps_pinned_rows_and_the_groups_above_them() {
 }
 
 #[test]
-fn p_on_an_unpinned_row_pins_it_and_on_a_pinned_row_asks_to_unpin() {
+fn p_on_an_unpinned_row_pins_it_and_on_a_pinned_row_unpins_it_at_once() {
     use crate::tui::Effect;
     use crate::tui::effect::StoreOp;
     let mut app = native_app(View::Mux, RowFilter::default());
@@ -5827,12 +5850,14 @@ fn p_on_an_unpinned_row_pins_it_and_on_a_pinned_row_asks_to_unpin() {
     );
 
     app.set_selection(mux_row("conspectus-main"));
-    assert!(app.update(Msg::TogglePin).is_empty());
-    let menu = app.row_menu().expect("a menu confirms the unpin");
-    assert_eq!(menu.entries().len(), 1);
-    assert_eq!(menu.entries()[0].label, "Unpin conspectus-main");
-    assert!(menu.entries()[0].confirm);
-    assert_eq!(menu.entries()[0].msg, Msg::Unpin("conspectus-main".into()));
+    assert_eq!(
+        app.update(Msg::TogglePin),
+        vec![Effect::WriteStore(StoreOp::Unpin {
+            slot: "conspectus-main".into(),
+        })],
+        "the inverse of p is p, with no modal in between"
+    );
+    assert!(app.row_menu().is_none());
 }
 
 #[test]
@@ -5842,7 +5867,7 @@ fn the_row_menu_of_a_native_row_offers_pin_or_unpin() {
     app.update(Msg::OpenRowMenu);
     let menu = app.row_menu().expect("menu");
     let labels: Vec<&str> = menu.entries().iter().map(|e| e.label.as_str()).collect();
-    assert_eq!(labels, ["Pin"]);
+    assert_eq!(labels, ["Pin", "Show rebuild plan"]);
     assert!(matches!(menu.entries()[0].msg, Msg::PinNode(_)));
     app.close_row_menu();
 
@@ -5905,7 +5930,7 @@ fn the_slot_menu_offers_every_gesture() {
         ],
         "a running mux has nothing to rebuild"
     );
-    assert!(menu.entries()[6].confirm, "unpin asks twice");
+    assert!(!menu.entries()[6].confirm, "unpin acts at once");
     insta::assert_snapshot!("slot_row_menu", trimmed(pinned_frame(&mut app, 100)));
 }
 

@@ -297,7 +297,7 @@ pub enum Msg {
     PinRecord(String),
     /// Row menu → pin a graph node as a slot.
     PinNode(crate::model::NodeId),
-    /// `p` — pin the selected row, or ask to unpin it when a slot
+    /// `p` — pin the selected row, or unpin it at once when a pin
     /// already points at it.
     TogglePin,
     /// Row menu → remove a slot.

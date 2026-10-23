@@ -117,8 +117,8 @@ pub enum ControlsCursor {
     FilterFloatMuxedSessions,
     /// Mux-view-only checkbox: float attached muxes to the top.
     FilterFloatAttachedMuxes,
-    /// Mux-view-only checkbox: hide gone muxes.
-    FilterHideGoneMuxes,
+    /// Mux-view-only checkbox: list every stopped mux, not just pinned ones.
+    FilterShowStoppedMuxes,
     FilterPinnedOnly,
     /// History-view-only checkbox: list only records no pin points at.
     FilterHistoryUnpinnedOnly,
@@ -282,9 +282,9 @@ impl ControlsOverlayState {
                 new_filter.float_attached_muxes_top = !new_filter.float_attached_muxes_top;
                 ControlsOutcome::ApplyAndStay(crate::tui::Msg::SetFilter(new_filter))
             }
-            ControlsCursor::FilterHideGoneMuxes => {
+            ControlsCursor::FilterShowStoppedMuxes => {
                 let mut new_filter = ctx.filter.clone();
-                new_filter.hide_gone_muxes = !new_filter.hide_gone_muxes;
+                new_filter.show_stopped_muxes = !new_filter.show_stopped_muxes;
                 ControlsOutcome::ApplyAndStay(crate::tui::Msg::SetFilter(new_filter))
             }
             ControlsCursor::FilterPinnedOnly => {
@@ -605,7 +605,7 @@ fn flatten_rows(ctx: &ControlsContext<'_>) -> Vec<ControlsCursor> {
     }
     if matches!(ctx.view, View::Mux) {
         rows.push(ControlsCursor::FilterFloatAttachedMuxes);
-        rows.push(ControlsCursor::FilterHideGoneMuxes);
+        rows.push(ControlsCursor::FilterShowStoppedMuxes);
     }
     if matches!(ctx.view, View::Prs) {
         rows.push(ControlsCursor::FilterPrState);
@@ -803,9 +803,13 @@ impl ControlsOverlayWidget<'_> {
                 ),
                 here,
             );
-            let here = cursor == ControlsCursor::FilterHideGoneMuxes;
+            let here = cursor == ControlsCursor::FilterShowStoppedMuxes;
             body.push_row(
-                checkbox_row("Hide gone muxes", self.ctx.filter.hide_gone_muxes, here),
+                checkbox_row(
+                    "Show all stopped muxes",
+                    self.ctx.filter.show_stopped_muxes,
+                    here,
+                ),
                 here,
             );
         }
