@@ -1,9 +1,10 @@
 ---
 id: CSP-692
 title: 'Make the pin, history, and rebuild TUI consistent with the rest of the TUI'
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-10-23 02:27'
+updated_date: '2026-10-23 04:28'
 labels:
   - history-pins
   - tui
@@ -22,6 +23,12 @@ Manual testing of the first pin-slot TUI found about two dozen defects that shar
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
-- [ ] #1 `just check` passes, or `git diff --check` for docs-only changes
-- [ ] #2 Docs and ADRs are updated when behavior, architecture, or workflow change
+- [x] #1 `just check` passes, or `git diff --check` for docs-only changes
+- [x] #2 Docs and ADRs are updated when behavior, architecture, or workflow change
 <!-- DOD:END -->
+
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+Corrected the TUI inconsistencies found in manual testing (CSP-692.01 to .05) and added invariant tests so views, menus, lifecycle, and text stay uniform.
+<!-- SECTION:FINAL_SUMMARY:END -->
