@@ -762,6 +762,10 @@ primitives (ADR 0089).
 
 ## Status Views
 
+The TUI's left panel (columns, glyphs, state words, age rules, and
+example frames per view) is described in
+[tui-columns.md](tui-columns.md), which tests keep in step with the code.
+
 Tabular views are projections chosen by row type, per ADR 0021:
 `conspectus table <rows>`. The `sessions` table is AgentSession-oriented: one
 row per discovered agent session, with mux information shown as a sparse

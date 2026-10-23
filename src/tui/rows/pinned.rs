@@ -153,12 +153,12 @@ fn describe(snapshot: &GraphSnapshot, pin: &PinNode, home: Option<&Path>) -> Des
         .and_then(|id| snapshot.find_node(id));
     let mut pr_state = None;
     let status = match pin.status {
-        SlotStatus::Planned => "planned".to_string(),
-        SlotStatus::Missing => "missing".to_string(),
+        SlotStatus::Planned => super::words::PLANNED.to_string(),
+        SlotStatus::Missing => super::words::MISSING.to_string(),
         // `gone` names an entity; a pin whose entity isn't there reads
         // as stopped (or removed, for things that don't run).
         SlotStatus::Gone => SlotStatus::Gone.label_for(pin.kind).to_string(),
-        SlotStatus::Unknown => "unknown".to_string(),
+        SlotStatus::Unknown => super::words::UNKNOWN.to_string(),
         SlotStatus::Live => match (pin.kind, target) {
             (PinKind::Session, _) => {
                 if pin
@@ -166,28 +166,28 @@ fn describe(snapshot: &GraphSnapshot, pin: &PinNode, home: Option<&Path>) -> Des
                     .as_ref()
                     .is_some_and(|id| !muxes_of_session(snapshot, id).is_empty())
                 {
-                    "in mux".to_string()
+                    super::words::IN_MUX.to_string()
                 } else {
-                    "resumable".to_string()
+                    super::words::RESUMABLE.to_string()
                 }
             }
             (PinKind::Pr, Some(GraphNode::ForgePr(pr))) => {
                 let state = pr.state.clone().unwrap_or_default().to_ascii_lowercase();
                 let draft = pr.is_draft && (state.is_empty() || state == "open");
                 pr_state = Some(if draft {
-                    "draft".to_string()
+                    super::words::PR_DRAFT.to_string()
                 } else {
                     state.clone()
                 });
                 if draft {
-                    "draft".to_string()
+                    super::words::PR_DRAFT.to_string()
                 } else if state.is_empty() {
-                    "open".to_string()
+                    super::words::PR_OPEN.to_string()
                 } else {
                     state
                 }
             }
-            _ => "live".to_string(),
+            _ => super::words::LIVE.to_string(),
         },
     };
     let tone = if pin.status == SlotStatus::Live {
@@ -472,7 +472,12 @@ fn session_row(
     Some(MixedRow {
         node_kind: NodeKind::AgentSession,
         label: label.replace('\n', " "),
-        status: if live { "in mux" } else { "resumable" }.to_string(),
+        status: if live {
+            super::words::IN_MUX
+        } else {
+            super::words::RESUMABLE
+        }
+        .to_string(),
         tone: MixedTone::Normal,
         age: format_recency(now, session.last_active_epoch),
         age_epoch: session.last_active_epoch,
@@ -504,7 +509,7 @@ fn mux_row(
     Some(MixedRow {
         node_kind: NodeKind::MuxSession,
         label: mux.session_name().to_string(),
-        status: "live".to_string(),
+        status: super::words::LIVE.to_string(),
         tone: MixedTone::Normal,
         age: format_recency(now, mux.activity_epoch),
         age_epoch: mux.activity_epoch,

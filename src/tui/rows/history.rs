@@ -211,7 +211,7 @@ fn describe(
             (
                 NodeKind::MuxSession,
                 r.name.clone(),
-                "stopped".to_string(),
+                super::words::STOPPED.to_string(),
                 r.harness
                     .as_deref()
                     .map(|harness| MixedChip::agent(harness_label(harness))),
@@ -231,7 +231,7 @@ fn describe(
             (
                 NodeKind::Checkout,
                 label,
-                "removed".to_string(),
+                super::words::REMOVED.to_string(),
                 None,
                 join_dot([
                     crate::history::recorder::repo_name(r.common_dir()),
@@ -254,7 +254,7 @@ fn describe(
             (
                 NodeKind::Repo,
                 label,
-                "removed".to_string(),
+                super::words::REMOVED.to_string(),
                 None,
                 content,
                 None,
@@ -264,13 +264,13 @@ fn describe(
             let r = &history.pr(&meta.id)?.recipe;
             let state = r.state.clone().unwrap_or_default().to_ascii_lowercase();
             let status = if r.draft && (state.is_empty() || state == "open") {
-                "draft".to_string()
+                super::words::PR_DRAFT.to_string()
             } else if state.is_empty() {
-                "open".to_string()
+                super::words::PR_OPEN.to_string()
             } else {
                 state.clone()
             };
-            let state = if status == "draft" {
+            let state = if status == super::words::PR_DRAFT {
                 status.clone()
             } else {
                 state

@@ -16,10 +16,11 @@ const USER_GUIDES: &[&str] = &[
     "worktrees.md",
     "library-api.md",
     "comparison.md",
+    "tui-columns.md",
 ];
 
 /// Words that name developer artifacts.
-fn artifact_in(text: &str) -> Option<String> {
+pub(super) fn artifact_in(text: &str) -> Option<String> {
     for word in text.split(|c: char| !(c.is_alphanumeric() || c == '-' || c == '.' || c == '/')) {
         let word = word.trim_matches(|c: char| c == '.' || c == '-');
         if word == "ADR" || word.starts_with("ADR-") || word.starts_with("CSP-") {
@@ -40,7 +41,7 @@ fn artifact_in(text: &str) -> Option<String> {
 
 /// Whether `text` uses the storage word. A format placeholder such as
 /// `{slot}` names a variable, not words the operator reads.
-fn says_slot(text: &str) -> bool {
+pub(super) fn says_slot(text: &str) -> bool {
     let mut visible = String::with_capacity(text.len());
     let mut depth = 0usize;
     for ch in text.chars() {

@@ -104,3 +104,8 @@ check: fmt clippy test nextest doc diff-check
 # a git repo) for manual testing; `just scratch smoke` runs the checks.
 scratch *args='shell':
     scripts/scratch-home.sh {{args}}
+
+# Re-render the example frames in docs/tui-columns.md after an intended
+# change to the left panel; edit the document's prose by hand.
+tui-columns:
+    UPDATE_TUI_COLUMNS=1 cargo nextest run --all-features --test tui_columns_doc

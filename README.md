@@ -679,6 +679,7 @@ the work moved from building to hardening.
 | If you want to… | Read |
 | --- | --- |
 | Configure and run it: environment variables, config files, the CLI reference, caches, TUI state | [docs/operations.md](docs/operations.md) |
+| See what each TUI column, glyph, and state word means | [docs/tui-columns.md](docs/tui-columns.md) |
 | Learn pins hands-on | [docs/pins-walkthrough.md](docs/pins-walkthrough.md) |
 | Manage worktrees and streams of work | [docs/worktrees.md](docs/worktrees.md) |
 | Export and explore the graph visually | [docs/graph-visualization.md](docs/graph-visualization.md) |

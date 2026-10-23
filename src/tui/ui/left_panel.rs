@@ -444,7 +444,7 @@ pub(super) fn append_group_summary_spans(
         spans.push(Span::raw("  "));
         spans.push(span!(
             Style::default().fg(theme.warning).add_modifier(Modifier::BOLD);
-            "⚠"
+            "{}", crate::tui::icons::marks::WARNING
         ));
     }
 }
@@ -630,7 +630,7 @@ pub(super) fn age_span(
     now: i64,
     theme: &Theme,
 ) -> Span<'static> {
-    let text = age.unwrap_or("—");
+    let text = age.unwrap_or(crate::tui::icons::marks::NO_VALUE);
     let style = recency_bucket(Some(now), epoch).map_or_else(
         || Style::default().add_modifier(theme.placeholder),
         |bucket| bucket.style(theme),
@@ -1247,7 +1247,7 @@ pub(super) fn pr_tracking_span(pr: &PrRow, theme: &Theme) -> Span<'static> {
         let style = node_kind_style(NodeKind::Branch, theme);
         span!(Style::default().fg(style.color); "{}", style.glyph)
     } else {
-        span!(theme.placeholder; "◌")
+        span!(theme.placeholder; "{}", crate::tui::icons::marks::UNTRACKED)
     }
 }
 
@@ -1369,11 +1369,11 @@ pub(super) fn disclosure_span(row: &crate::tui::rows::Row, app: &App) -> Span<'s
         return Span::raw("  ");
     }
     let glyph = if app.is_expanded(&row.id) {
-        "▼ "
+        crate::tui::icons::marks::EXPANDED
     } else {
-        "▶ "
+        crate::tui::icons::marks::COLLAPSED
     };
-    span!(Style::default().fg(app.theme().disclosure); "{glyph}")
+    span!(Style::default().fg(app.theme().disclosure); "{glyph} ")
 }
 
 pub(super) fn row_indent(depth: u8) -> String {

@@ -140,6 +140,30 @@ pub enum RowKind {
     Mixed(MixedRow),
 }
 
+/// The status words the mixed views (Pinned and History) print. Views
+/// of one kind of entity show state as glyphs instead; these are the
+/// only words, so the reference document can list them all.
+pub mod words {
+    pub const LIVE: &str = "live";
+    pub const IN_MUX: &str = "in mux";
+    pub const RESUMABLE: &str = "resumable";
+    pub const STOPPED: &str = "stopped";
+    pub const REMOVED: &str = "removed";
+    pub const MISSING: &str = "missing";
+    pub const PLANNED: &str = "planned";
+    pub const UNKNOWN: &str = "unknown";
+    pub const PR_OPEN: &str = "open";
+    pub const PR_DRAFT: &str = "draft";
+    pub const PR_MERGED: &str = "merged";
+    pub const PR_CLOSED: &str = "closed";
+
+    /// Every word, in the order the reference lists them.
+    pub const ALL: [&str; 12] = [
+        LIVE, IN_MUX, RESUMABLE, STOPPED, REMOVED, MISSING, PLANNED, UNKNOWN, PR_OPEN, PR_DRAFT,
+        PR_MERGED, PR_CLOSED,
+    ];
+}
+
 /// How a mixed-kind row's status reads: dimmed rows are the ones whose
 /// entity isn't there to act on.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]

@@ -69,6 +69,7 @@ use crate::tui::rows::RowId;
 use crate::tui::ui::{buffer_to_string, render_to_buffer};
 
 mod actions;
+mod docs;
 mod fixtures;
 mod focus;
 mod forms;

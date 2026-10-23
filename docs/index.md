@@ -32,6 +32,12 @@ pre-migration preamble.
 Purpose: maps pre-migration story IDs (`P8-014`, `H-PIN-TUI-011`) to their
 Backlog.md task IDs, with each story's first landing time and commit.
 
+## `docs/tui-columns.md`
+
+Purpose: living reference for the TUI's left panel: every view and row
+kind column by column, the glyphs and state words, age rules, and
+rendered example frames. Tests keep it in step with the code.
+
 ## `docs/operations.md`
 
 Purpose: user-facing runtime reference covering the environment variables

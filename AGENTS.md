@@ -52,6 +52,12 @@ standard checks.
 
 ## Implementation Notes
 
+- `docs/tui-columns.md` is the living reference for the left panel's
+  columns, glyphs, state words, age rules, and row kinds. Any change to
+  those updates that document in the same change. Tests fail when its
+  glyph table, state-word table, view and row-kind headings, or example
+  frames drift from the code; regenerate the frames with `just
+  tui-columns` and edit the prose by hand.
 - Read-only is the default for discovery and orchestration. Writes are
   bounded by the mutation envelope in ADR 0143: user-intent TOML stores
   (including the pin slot store `$XDG_DATA_HOME/conspectus/pins.toml`),

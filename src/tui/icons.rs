@@ -113,6 +113,55 @@ pub mod state {
     ];
 }
 
+/// The other one-cell marks the left panel draws: disclosure, the group
+/// warning, the PR tracking marker, the missing-value dash, and the
+/// spinner that stands in for a state while a refresh is pending.
+pub mod marks {
+    /// A group or row that is expanded.
+    pub const EXPANDED: &str = "▼";
+    /// A group or row that is collapsed.
+    pub const COLLAPSED: &str = "▶";
+    /// A group with a session whose mux link is ambiguous.
+    pub const WARNING: &str = "⚠";
+    /// A pull request with no local branch.
+    pub const UNTRACKED: &str = "◌";
+    /// An age or value that isn't known.
+    pub const NO_VALUE: &str = "—";
+    /// The frames of the pending-refresh spinner.
+    pub const SPINNER: [&str; 8] = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧"];
+}
+
+/// Every glyph the left panel can draw, once each: the kind glyphs, the
+/// state glyphs, and the marks. The reference document lists exactly
+/// these, and a test keeps the two in step.
+pub fn all_glyphs() -> Vec<&'static str> {
+    let mut out: Vec<&'static str> = Vec::new();
+    let mut push = |glyph: &'static str| {
+        if !out.contains(&glyph) {
+            out.push(glyph);
+        }
+    };
+    for kind in NodeKind::ALL {
+        push(kind.default_glyph());
+    }
+    for glyph in state::ALL {
+        push(glyph);
+    }
+    for glyph in [
+        marks::EXPANDED,
+        marks::COLLAPSED,
+        marks::WARNING,
+        marks::UNTRACKED,
+        marks::NO_VALUE,
+    ] {
+        push(glyph);
+    }
+    for glyph in marks::SPINNER {
+        push(glyph);
+    }
+    out
+}
+
 /// Resolved visual identity for one node kind: the glyph string
 /// (default or operator override), the color drawn from the theme,
 /// and the display-cell width of the glyph (always 1; carried so
