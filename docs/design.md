@@ -722,7 +722,7 @@ creation side: `mux launch` with a worktree branch realizes the worktree
 and starts the agent in it, and a mux slot with a `worktree_branch`
 override, or a ghost mux whose worktree is gone, rebuilds the worktree as
 the first step of its plan (ADR 0142). The `N` key opens the mux launch
-form with the worktree toggle on.
+form; the worktree toggle is off until the operator turns it on.
 
 Maintenance rounds out the surface: **prune** delegates to worktrunk's
 `step prune` (remove worktrees already merged into the default branch)
@@ -745,7 +745,7 @@ three creation paths plus rename, attach, and teardown:
 - **Mux launch** (ADR 0096) — a harness in a fresh mux. `conspectus mux
   launch <harness> --name <mux-name> [--cwd <path>]` on the CLI; the `m`
   Mux menu in the TUI opens a launch-spec form (ADR 0097), and `N` opens
-  it with the worktree toggle on. The default argv comes from launch
+  it too (worktree toggle off by default). The default argv comes from launch
   profiles (ADR 0142).
 - **Rebuild** (ADR 0142) — a gone mux, a planned slot, or a mux whose
   agent exited, from its slot or history recipe, as a plan of steps.
@@ -875,7 +875,7 @@ The TUI's view switcher offers sessions, mux, and PRs (`1`–`3`); union and
 forks remain CLI table projections. The PRs view groups by checkout by
 default, so each PR sits with the work checked out for it, and PRs checked out
 nowhere sit under their repo, labelled `no checkout` (ADR 0114, 0130). Each PR
-row carries a marker for whether it has a local branch (`⎇`) or not (dim `◌`);
+row carries a marker for whether it has a local branch (`⌥`) or not (dim `◌`);
 the Controls overlay can show only PRs with or without one and float those
 with one to the top (settable from config), the same overlay filters by PR
 state (open, draft, merged, closed, ADR 0134), and `repo` grouping files every PR

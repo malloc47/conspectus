@@ -45,6 +45,7 @@ use crate::tui::{RunConfig, ui};
 mod executor;
 mod launch;
 mod overlay_keys;
+mod visibility;
 mod worktree_exec;
 
 use executor::*;
@@ -167,6 +168,8 @@ struct LiveMode {
     last_refresh: Instant,
     refresh_interval: Duration,
     forge: ForgeWorker,
+    /// Inside tmux: tells when this pane comes back into view.
+    visibility: Option<visibility::VisibilityWatcher>,
 }
 
 /// The background forge fetch a TUI runs while it has no daemon to do
@@ -277,6 +280,54 @@ impl LiveMode {
             label: label.to_string(),
         });
     }
+
+    /// Start the background refreshes the reducer asked for: the one
+    /// after returning from tmux, and the one after an action changed
+    /// state. Runs after every action and every drain, since a request
+    /// can arrive without a key press (the TUI's pane coming back into
+    /// view).
+    fn start_requested_refreshes(&mut self, app: &mut App) {
+        // Returning from tmux paints the old snapshot right away; the
+        // live classes rescan in the background even if another
+        // worker is already running, since that one predates the
+        // hand-off (ADR 0108).
+        if app.take_handoff_refresh_request() {
+            let generation = self.workers.start_for_handoff();
+            let before = app
+                .snapshot_handle()
+                .map(|handle| live_mux_ids(handle.snapshot()));
+            self.last_refresh = Instant::now();
+            spawn_discovery_worker_settling(
+                app.config(),
+                &self.result_tx,
+                DaemonNudge::for_request(&crate::tui::effect::RefreshRequest::LIVE),
+                generation,
+                before,
+            );
+            app.update(Msg::InFlightStart {
+                kind: crate::tui::app::InFlightKind::Discovery,
+                label: "Discovering".to_string(),
+            });
+        }
+        // An action changed state the views show: reload them the way
+        // `r` does, through the daemon when there is one, so nothing
+        // the daemon already knows (PRs included) is lost.
+        if app.take_refresh_request() {
+            let generation = self.workers.start();
+            let config = store_write_refresh_config(app);
+            self.last_refresh = Instant::now();
+            spawn_discovery_worker(
+                &config,
+                &self.result_tx,
+                DaemonNudge::for_request(&crate::tui::effect::RefreshRequest::LIVE),
+                generation,
+            );
+            app.update(Msg::InFlightStart {
+                kind: crate::tui::app::InFlightKind::Discovery,
+                label: "Discovering".to_string(),
+            });
+        }
+    }
 }
 
 impl LoopMode for LiveMode {
@@ -303,6 +354,18 @@ impl LoopMode for LiveMode {
     fn drain(&mut self, app: &mut App, config: &RunConfig) -> Result<()> {
         while let Ok((source, content)) = self.preview_rx.try_recv() {
             app.update(Msg::SetPreview { source, content });
+        }
+        // The operator came back to this pane (inside tmux an attach
+        // returns as soon as the client is switched away): whatever
+        // they did in the other session is not on screen yet.
+        if let Some(watcher) = &self.visibility {
+            let mut returned = false;
+            while watcher.rx.try_recv().is_ok() {
+                returned = true;
+            }
+            if returned {
+                app.update(Msg::ViewRegained);
+            }
         }
         // Drain completed background discovery results without
         // blocking. A result older than the one on screen is dropped.
@@ -389,6 +452,7 @@ impl LoopMode for LiveMode {
             self.forge.last_started = Some(Instant::now());
             spawn_forge_fetch(app.config(), &self.forge.tx, snapshot);
         }
+        self.start_requested_refreshes(app);
         Ok(())
     }
 
@@ -511,46 +575,7 @@ impl LoopMode for LiveMode {
             Some(Action::CopySessionId) => copy_session_id_action(app),
             None => {}
         }
-        // Returning from tmux paints the old snapshot right away; the
-        // live classes rescan in the background even if another
-        // worker is already running, since that one predates the
-        // hand-off (ADR 0108).
-        if app.take_handoff_refresh_request() {
-            let generation = self.workers.start_for_handoff();
-            let before = app
-                .snapshot_handle()
-                .map(|handle| live_mux_ids(handle.snapshot()));
-            self.last_refresh = Instant::now();
-            spawn_discovery_worker_settling(
-                app.config(),
-                &self.result_tx,
-                DaemonNudge::for_request(&crate::tui::effect::RefreshRequest::LIVE),
-                generation,
-                before,
-            );
-            app.update(Msg::InFlightStart {
-                kind: crate::tui::app::InFlightKind::Discovery,
-                label: "Discovering".to_string(),
-            });
-        }
-        // An action changed state the views show: reload them the way
-        // `r` does, through the daemon when there is one, so nothing
-        // the daemon already knows (PRs included) is lost.
-        if app.take_refresh_request() {
-            let generation = self.workers.start();
-            let config = store_write_refresh_config(app);
-            self.last_refresh = Instant::now();
-            spawn_discovery_worker(
-                &config,
-                &self.result_tx,
-                DaemonNudge::for_request(&crate::tui::effect::RefreshRequest::LIVE),
-                generation,
-            );
-            app.update(Msg::InFlightStart {
-                kind: crate::tui::app::InFlightKind::Discovery,
-                label: "Discovering".to_string(),
-            });
-        }
+        self.start_requested_refreshes(app);
         Ok(())
     }
 
@@ -959,6 +984,7 @@ fn event_loop(terminal: &mut DefaultTerminal, mut config: RunConfig) -> Result<(
         last_refresh: Instant::now(),
         refresh_interval,
         forge: ForgeWorker::new(),
+        visibility: visibility::VisibilityWatcher::start(),
     };
     run_loop(terminal, app, config, mode)
 }

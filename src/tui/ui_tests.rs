@@ -331,7 +331,7 @@ fn header_drops_brand_view_label_and_state_chips_by_default() {
     // (duplicated by the left-panel title strip), made the
     // harness chips opt-in (see the `show_harness_chips`
     // variant below), and collapsed the three-bucket mux chip
-    // section to a single `⚠ N` chip that only renders when
+    // section to a single `▲ N` chip that only renders when
     // N > 0. With the showcase fixture having zero ambiguous
     // rows, the header should now read approximately
     // `updated Ns ago · N/M sessions · M mux` with no chips.
@@ -504,19 +504,19 @@ fn right_panel_title_names_the_selected_node_kind() {
 
 #[test]
 fn focus_marker_prefixes_only_the_active_pane_title() {
-    // Phase 9 refinement: focus is signaled by a `▸ ` glyph on
+    // Phase 9 refinement: focus is signaled by a `► ` glyph on
     // the active pane's title rather than by holistically
     // styling the panel. The inactive pane gets two-space
     // padding so titles align column-wise and content colors
     // stay untouched between focus states. The right-pane label
     // varies by selection kind (Phase 11) so the assertion is
-    // on the *count* of `▸` markers, not on a specific suffix.
+    // on the *count* of `►` markers, not on a specific suffix.
     let area = Rect::new(0, 0, 160, 24);
     let mut app = seeded_app();
     let buffer = render_to_buffer(&mut app, area);
     let text = buffer_to_string(&buffer);
     assert_eq!(
-        text.matches('▸').count(),
+        text.matches('►').count(),
         1,
         "exactly one focus marker should be visible: {text}",
     );
@@ -526,7 +526,7 @@ fn focus_marker_prefixes_only_the_active_pane_title() {
         .nth(1)
         .map_or("", |l| l.split('│').next().unwrap_or(""));
     assert!(
-        left_border.contains('▸'),
+        left_border.contains('►'),
         "marker should sit in the left pane's title when left is focused: \
              left border was `{left_border}` and full header was:\n{header_band}",
     );
@@ -536,7 +536,7 @@ fn focus_marker_prefixes_only_the_active_pane_title() {
     let buffer = render_to_buffer(&mut app, area);
     let text = buffer_to_string(&buffer);
     assert_eq!(
-        text.matches('▸').count(),
+        text.matches('►').count(),
         1,
         "exactly one focus marker should still be visible after CycleFocus: {text}",
     );
@@ -544,7 +544,7 @@ fn focus_marker_prefixes_only_the_active_pane_title() {
     // to the right pane title — its column position shifts past
     // the panel split (well to the right of column 0).
     let header_line = text.lines().nth(1).expect("header line");
-    let marker_col = header_line.find('▸').expect("marker present");
+    let marker_col = header_line.find('►').expect("marker present");
     assert!(
         marker_col > 60,
         "marker should sit in the right pane after CycleFocus (col={marker_col}): {header_line}",
@@ -662,7 +662,7 @@ fn group_rows_carry_session_count_chip_only_when_no_ambiguity() {
     // else when none of their descendants are in the ambiguous
     // candidate-set state. The per-bucket muxed/unmuxed counts
     // from the original Phase 7 chip strip are gone; ambiguity
-    // is surfaced only by the trailing `⚠` glyph (asserted in
+    // is surfaced only by the trailing `▲` glyph (asserted in
     // `group_rows_show_warning_glyph_when_descendant_is_ambiguous`).
     let mut app = seeded_app();
     let area = Rect::new(0, 0, 160, 24);
@@ -677,7 +677,7 @@ fn group_rows_carry_session_count_chip_only_when_no_ambiguity() {
         "group should advertise its agent count: {group_line}",
     );
     assert!(
-        !group_line.contains('◉') && !group_line.contains('◐') && !group_line.contains('⚠'),
+        !group_line.contains('◉') && !group_line.contains('◐') && !group_line.contains('▲'),
         "non-ambiguous group should carry no per-bucket glyphs and no warning: {group_line}",
     );
 }
@@ -729,7 +729,7 @@ fn render_node_field_line_places_kind_chip_before_value() {
 #[test]
 fn group_body_secondary_truncates_mid_string_to_preserve_summary() {
     // The dim canonical path collapses with an inline `…` so the
-    // right-anchored `(N)` count and `⚠` ambiguity glyph stay
+    // right-anchored `(N)` count and `▲` ambiguity glyph stay
     // visible in narrow panes. Before this, long fixture paths
     // pushed the summary chip off the right edge.
     let theme = Theme::default();
@@ -760,7 +760,7 @@ fn group_body_secondary_truncates_mid_string_to_preserve_summary() {
 fn group_rows_show_warning_glyph_when_descendant_is_ambiguous() {
     // ADR 0072: when any descendant session is in the
     // `Ambiguous` candidate-set state, the group row gains a
-    // single `⚠` after the `(N)` count chip. The catalog of
+    // single `▲` after the `(N)` count chip. The catalog of
     // ambiguous muxes lives on the group's detail pane
     // (ADR 0071); the row glyph is just the flag.
     let theme = Theme::default();
@@ -775,7 +775,7 @@ fn group_rows_show_warning_glyph_when_descendant_is_ambiguous() {
     let rendered: String = spans.iter().map(|s| s.content.as_ref()).collect();
 
     assert!(rendered.contains("(2)"), "count chip missing: {rendered}");
-    assert!(rendered.contains('⚠'), "warning glyph missing: {rendered}");
+    assert!(rendered.contains('▲'), "warning glyph missing: {rendered}");
     assert!(
         !rendered.contains('◉') && !rendered.contains('◐') && !rendered.contains('◯'),
         "per-bucket mux glyphs should not appear on the group summary: {rendered}",
@@ -792,7 +792,7 @@ fn group_rows_show_warning_glyph_when_descendant_is_ambiguous() {
     append_group_summary_spans(&mut clean_spans, clean_summary, &theme, 3);
     let clean_rendered: String = clean_spans.iter().map(|s| s.content.as_ref()).collect();
     assert!(
-        !clean_rendered.contains('⚠'),
+        !clean_rendered.contains('▲'),
         "warning should be hidden when no descendant is ambiguous: {clean_rendered}",
     );
 }
@@ -877,7 +877,7 @@ fn kind_chip_span_renders_per_kind_glyph_in_node_kind_color() {
     let cases = [
         (NodeKind::Workspace, "▦", theme.node_workspace),
         (NodeKind::MuxSession, "▣", theme.node_mux_session),
-        (NodeKind::Fork, "⑂", theme.node_fork),
+        (NodeKind::Fork, "⋎", theme.node_fork),
         (NodeKind::Checkout, "◇", theme.node_checkout),
     ];
     for (tag, glyph, expected_color) in cases {
@@ -906,7 +906,7 @@ fn right_panel_title_prefixes_kind_glyph_when_detail_resolves() {
     // The glyph appears in the node-kind color; the label stays
     // bold. The muxed fixture selects an agent-session row on
     // the left, so the right-panel title reads
-    // `▸ ● session ◀ …` (`AgentSession` glyph is preserved at
+    // `► ● session ◄ …` (`AgentSession` glyph is preserved at
     // pill-less surfaces per the §3 amendment).
     let mut app = muxed_app("editor", None);
     let area = Rect::new(0, 0, 120, 24);
@@ -949,7 +949,7 @@ fn related_row_orders_verb_glyph_then_neighbor_label() {
 #[test]
 fn other_link_line_dispatches_per_edge_state() {
     // ADR 0075: Other-zone rows visually distinguish AltOf
-    // (quiet) from Conflict (loud + `⚠`) so an operator
+    // (quiet) from Conflict (loud + `▲`) so an operator
     // skimming the zone reads the resolver state at a glance.
     // Test the three shapes by constructing fake links and
     // rendering directly through `render_other_link_line` — no
@@ -983,7 +983,7 @@ fn other_link_line_dispatches_per_edge_state() {
         evidence: Vec::new(),
     };
 
-    // Conflict: prefix `⚠`, label color = edge_conflict, BOLD.
+    // Conflict: prefix `▲`, label color = edge_conflict, BOLD.
     let conflict_line = render_other_link_line(
         &group,
         &link(EdgeStateLabel::Conflict),
@@ -999,8 +999,8 @@ fn other_link_line_dispatches_per_edge_state() {
         .collect::<Vec<_>>()
         .join("");
     assert!(
-        text.starts_with("⚠ "),
-        "Conflict rows must lead with the `⚠ ` prefix (NO_COLOR-safe signal): `{text}`",
+        text.starts_with("▲ "),
+        "Conflict rows must lead with the `▲ ` prefix (NO_COLOR-safe signal): `{text}`",
     );
     let label_span = conflict_line
         .spans
@@ -1026,7 +1026,7 @@ fn other_link_line_dispatches_per_edge_state() {
         .collect::<Vec<_>>()
         .join("");
     assert!(
-        !alt_text.starts_with("⚠ "),
+        !alt_text.starts_with("▲ "),
         "AltOf rows should not carry the conflict prefix: `{alt_text}`",
     );
     let alt_label = alt_line
@@ -1206,7 +1206,7 @@ fn detail_pane_shows_linked_to_mux_row_and_drills_into_mux() {
         "after drilldown the Node zone should expose the mux fields: {drilled}"
     );
     assert!(
-        drilled.contains("◀"),
+        drilled.contains("◄"),
         "breadcrumb back-hint should surface in the right-pane title: {drilled}"
     );
     // The breadcrumb chain renders each
@@ -1620,7 +1620,7 @@ fn expanded_session_under_mux_matches_standalone_session_detail() {
     // Breadcrumb back-hint surfaces in the right-pane title
     // after a drilldown.
     assert!(
-        drilled.contains("◀"),
+        drilled.contains("◄"),
         "drilldown should add a breadcrumb back-hint to the title: {drilled}"
     );
 }
@@ -1789,7 +1789,7 @@ fn pr_tracking_span_tells_a_local_branch_from_none() {
     assert!(none.style.add_modifier.contains(theme.placeholder));
 
     let some = pr_tracking_span(&tracked, &theme);
-    assert_eq!(some.content, "⎇");
+    assert_eq!(some.content, "⌥");
     assert_eq!(some.style.fg, Some(theme.node_branch));
     assert_eq!(some.width(), none.width());
 }
@@ -1874,7 +1874,7 @@ fn row_kind_glyph_span_dispatches_per_row_kind() {
             .as_deref(),
         Some("▣ "),
     );
-    // Fork rows get `⑂`.
+    // Fork rows get `⋎`.
     let fork = RowKind::Fork(ForkRow {
         fork_label: "alpha".into(),
         provider: "github".into(),
@@ -1884,7 +1884,7 @@ fn row_kind_glyph_span_dispatches_per_row_kind() {
         primary_node: NodeId::Fork(crate::model::ForkId::new("alpha")),
     });
     let fork_glyph = row_kind_glyph_span(&fork, &theme).unwrap();
-    assert_eq!(fork_glyph.content, "⑂ ");
+    assert_eq!(fork_glyph.content, "⋎ ");
     assert_eq!(fork_glyph.style.fg, Some(theme.node_fork));
 }
 
@@ -1914,7 +1914,7 @@ fn session_alias_renders_after_mux_glyph_in_left_row() {
     let spans = render_session_spans(&row, &theme, now, None);
     let rendered: String = spans.iter().map(|span| span.content.as_ref()).collect();
     assert!(
-        rendered.contains("⚬  ingest-refactor"),
+        rendered.contains("∘  ingest-refactor"),
         "alias should render after the mux glyph: {rendered}"
     );
     assert!(
@@ -2099,7 +2099,7 @@ fn mux_session_row_mirrors_session_column_order() {
         "mux row should fit the given width: {rendered:?}"
     );
     assert!(
-        rendered.contains('⚯'),
+        rendered.contains('⊸'),
         "attached glyph should still render: {rendered}"
     );
     assert!(
@@ -2129,7 +2129,7 @@ fn mux_session_row_mirrors_session_column_order() {
     let label_idx = rendered.find("editor").expect("label present");
     let chip_idx = rendered.find("codex").expect("harness chip present");
     let recency_idx = rendered.find("3s").expect("recency present");
-    let glyph_idx = rendered.find('⚯').expect("glyph present");
+    let glyph_idx = rendered.find('⊸').expect("glyph present");
     let preview_idx = rendered
         .find("running cargo test")
         .expect("preview present");
@@ -2648,7 +2648,7 @@ fn status_bar_renders_spinner_chip_for_in_flight_discovery() {
     // Braille-spinner chip + "Discovering" label in the status bar.
     // The reducer stamps `started_at` so we can't assert on the
     // exact glyph frame (elapsed-derived), but every Braille
-    // spinner glyph is in the `⠋⠙⠹⠸⠼⠴⠦⠧` set — grep for the label
+    // spinner glyph is in the `◜◝◞◟` set — grep for the label
     // as the reliable presence check.
     let mut app = seeded_app();
     app.update(Msg::InFlightStart {
@@ -2666,9 +2666,7 @@ fn status_bar_renders_spinner_chip_for_in_flight_discovery() {
     );
     // Spot-check that at least one Braille glyph from the spinner
     // set appears in the buffer.
-    let has_spinner = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧"]
-        .iter()
-        .any(|g| text.contains(g));
+    let has_spinner = ["◜", "◝", "◞", "◟"].iter().any(|g| text.contains(g));
     assert!(
         has_spinner,
         "in-flight chip should render a Braille spinner glyph: {text}"
@@ -3686,7 +3684,7 @@ fn reported_failure_leads_the_rows_preview_until_a_later_success() {
 
     let preview = preview_text_for_selection(&app, 80, 20).to_string();
     assert!(
-        preview.starts_with("✗ pin `ingest` launch failed"),
+        preview.starts_with("× pin `ingest` launch failed"),
         "{preview}"
     );
     assert!(preview.contains("exit status 1"), "{preview}");
@@ -3719,7 +3717,7 @@ fn unseen_failures_keep_a_status_bar_chip_until_the_log_is_opened() {
     // Navigation clears the status message; the chip stays.
     app.update(Msg::SetStatus(None));
     let text = buffer_to_string(&render_to_buffer(&mut app, Rect::new(0, 0, 120, 24)));
-    assert!(text.contains("⚠ 1 · ! messages"), "{text}");
+    assert!(text.contains("▲ 1 · ! messages"), "{text}");
 
     app.open_messages_overlay();
     assert_eq!(app.messages().unseen(), 0);
@@ -3825,7 +3823,7 @@ fn row_awaiting_handoff_dims_and_spins_in_the_attach_cell() {
     let before = render(&app);
     let text: String = before.spans.iter().map(|s| s.content.as_ref()).collect();
     assert!(
-        text.contains('⚯'),
+        text.contains('⊸'),
         "settled row shows the attach glyph: {text}"
     );
 
@@ -3833,7 +3831,7 @@ fn row_awaiting_handoff_dims_and_spins_in_the_attach_cell() {
     let pending = render(&app);
     let text: String = pending.spans.iter().map(|s| s.content.as_ref()).collect();
     assert!(
-        !text.contains('⚯'),
+        !text.contains('⊸'),
         "spinner replaces the attach glyph: {text}"
     );
     assert!(
@@ -3853,7 +3851,7 @@ fn row_awaiting_handoff_dims_and_spins_in_the_attach_cell() {
     let settled = render(&app);
     let text: String = settled.spans.iter().map(|s| s.content.as_ref()).collect();
     assert!(
-        text.contains('⚯'),
+        text.contains('⊸'),
         "settled row shows the attach glyph again: {text}"
     );
 }
@@ -3883,11 +3881,11 @@ fn mux_row_spinner_takes_the_attached_glyph_column() {
         .iter()
         .map(|s| s.content.to_string())
         .collect();
-    let pending: String = render_mux_session_spans(&row, &theme, 0, 100, Some("⠋"))
+    let pending: String = render_mux_session_spans(&row, &theme, 0, 100, Some("◜"))
         .iter()
         .map(|s| s.content.to_string())
         .collect();
-    assert_eq!(settled.replace('⚯', "⠋"), pending);
+    assert_eq!(settled.replace('⊸', "◜"), pending);
 }
 
 /// A transcript of `turns` alternating user and assistant messages,
@@ -4915,7 +4913,7 @@ fn pr_columns_align_to_the_widest_value_in_the_tree() {
     let long_text = pr_text(&render_pr_spans(&long, &theme, align, 80, 0));
     let short_text = pr_text(&render_pr_spans(&short, &theme, align, 80, 0));
 
-    assert_eq!(long_text, "#1234 ◌  120d  ✓  long one");
+    assert_eq!(long_text, "#1234 ◌  120d  ⊕  long one");
     assert_eq!(short_text, "#7    ◌    2h  ○  short one");
     let column = |text: &str, needle: &str| text.find(needle).expect("needle");
     assert_eq!(column(&long_text, "◌"), column(&short_text, "◌"));
@@ -4955,7 +4953,7 @@ fn pr_row_without_a_title_or_age_still_pads_its_columns() {
 
     let text = pr_text(&render_pr_spans(&bare, &theme, align, 80, 0));
 
-    assert_eq!(text, "#2  ◌     —  ✗");
+    assert_eq!(text, "#2  ◌     —  ⊗");
 }
 
 #[test]
@@ -4970,7 +4968,7 @@ fn an_open_draft_shows_the_draft_glyph_and_the_local_branch_leads_the_title() {
 
     let text = pr_text(&render_pr_spans(&pr, &theme, align, 80, 0));
 
-    assert_eq!(text, "#5 ⎇    4h  ◐  feature/login  Add login");
+    assert_eq!(text, "#5 ⌥    4h  ◐  feature/login  Add login");
     // A draft that was already merged keeps its real state.
     let mut merged = pr;
     merged.state = Some("merged".into());
@@ -4982,7 +4980,7 @@ fn an_open_draft_shows_the_draft_glyph_and_the_local_branch_leads_the_title() {
         0,
     ));
     assert!(
-        merged_text.contains('✓') && !merged_text.contains('◐'),
+        merged_text.contains('⊕') && !merged_text.contains('◐'),
         "{merged_text:?}"
     );
 }
@@ -5153,7 +5151,7 @@ fn the_pinned_view_shows_every_kind_in_each_state_it_can_be_in() {
             .filter_map(|line| {
                 // The left pane is the text between the first two borders.
                 let pane: Vec<char> = line.split('│').nth(1)?.chars().collect();
-                if !pane.iter().any(|c| "▣●◇◆⇄⎇▦⑂".contains(*c)) {
+                if !pane.iter().any(|c| "▣●◇◆⇄⌥▦⋎".contains(*c)) {
                     return None;
                 }
                 let label = (0..pane.len()).find(|&i| {
@@ -5552,7 +5550,7 @@ fn clean_up_lists_what_has_aged_out_and_nothing_pinned() {
         frame.contains("ledger-worktree") || frame.contains("conspectus-ledger"),
         "{frame}"
     );
-    assert!(frame.contains("✓"), "all preselected: {frame}");
+    assert!(frame.contains("√"), "all preselected: {frame}");
 
     // With the slots back, their records are protected.
     let snapshot = crate::tui::rows::pinned::fixture_world();
@@ -6002,13 +6000,20 @@ fn reveal_switches_to_the_native_view_and_selects_the_entity() {
 }
 
 #[test]
-fn the_mux_launch_form_opens_with_defaults_and_the_worktree_toggle() {
+fn the_mux_launch_form_opens_with_defaults_and_the_worktree_toggle_off() {
     let mut app = native_app(View::Mux, RowFilter::default());
-    app.update(Msg::OpenMuxLaunchWorktreeForm);
+    app.update(Msg::OpenMuxLaunchForm);
     let Some(crate::tui::Modal::MuxLaunch(form)) = app.modal_stack().last() else {
         panic!("the launch form is on top");
     };
-    assert!(form.spec().worktree_enabled());
+    assert!(
+        !form.spec().worktree_enabled(),
+        "a worktree is something the operator opts into"
+    );
+    assert!(
+        !form.worktree_repo_value().is_empty(),
+        "the repo is seeded so switching the toggle on starts from the launch directory"
+    );
     assert!(form.default_hint().is_some() || form.spec().harness().value().is_empty());
 }
 
@@ -6171,9 +6176,9 @@ fn clean_up_shows_a_deselected_record_unticked() {
     }
     let frame = pinned_frame(&mut app, 100);
     assert!(frame.contains("Clean up: forget these records"), "{frame}");
-    assert!(frame.contains('✓'), "one record stays ticked: {frame}");
+    assert!(frame.contains('√'), "one record stays ticked: {frame}");
     assert!(
-        frame.lines().filter(|l| l.contains('✓')).count() == 1,
+        frame.lines().filter(|l| l.contains('√')).count() == 1,
         "only one record is ticked:\n{frame}"
     );
 }

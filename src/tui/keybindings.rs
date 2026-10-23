@@ -225,8 +225,8 @@ pub const KEYBINDINGS: &[KeyBinding] = &[
     KeyBinding {
         mode: KeyMode::Global,
         key: KeyMatcher::UpperChar('N'),
-        action: || Action::Msg(Box::new(crate::tui::Msg::OpenMuxLaunchWorktreeForm)),
-        help_text: "Launch a harness in a new mux with a worktree",
+        action: || Action::Msg(Box::new(crate::tui::Msg::OpenMuxLaunchForm)),
+        help_text: "Launch a harness in a new mux (the form can add a worktree)",
     },
     KeyBinding {
         mode: KeyMode::Global,

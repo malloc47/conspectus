@@ -163,7 +163,7 @@ fn the_form_shows_the_path_mark_and_its_keys() {
         .collect::<Vec<_>>()
         .join("\n");
     assert!(
-        frame.contains('✓') && frame.contains("↑/↓ move") && frame.contains("Tab complete/next"),
+        frame.contains('√') && frame.contains("↑/↓ move") && frame.contains("Tab complete/next"),
         "{frame}"
     );
 }

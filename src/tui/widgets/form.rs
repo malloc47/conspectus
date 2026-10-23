@@ -250,7 +250,7 @@ pub fn path_row(
 fn path_suffix(omnibox: &PathOmniboxState, focused: bool) -> Suffix {
     let (symbol, style) = match omnibox.validation() {
         PathValidation::Empty => ("?", Style::default().fg(Color::DarkGray)),
-        PathValidation::Exists => ("✓", Style::default().fg(Color::Green)),
+        PathValidation::Exists => ("√", Style::default().fg(Color::Green)),
         PathValidation::Missing => ("!", Style::default().fg(Color::Yellow)),
     };
     let mut spans = vec![Span::raw(" "), Span::styled(symbol, style)];
@@ -275,12 +275,12 @@ fn path_suffix(omnibox: &PathOmniboxState, focused: bool) -> Suffix {
     }
 }
 
-/// The validity mark after a path value: two cells, a space and `✓`
+/// The validity mark after a path value: two cells, a space and `√`
 /// (exists), `!` (missing) or `?` (empty).
 pub fn path_mark(omnibox: &PathOmniboxState) -> Vec<Span<'static>> {
     let (symbol, style) = match omnibox.validation() {
         PathValidation::Empty => ("?", Style::default().fg(Color::DarkGray)),
-        PathValidation::Exists => ("✓", Style::default().fg(Color::Green)),
+        PathValidation::Exists => ("√", Style::default().fg(Color::Green)),
         PathValidation::Missing => ("!", Style::default().fg(Color::Yellow)),
     };
     vec![Span::raw(" "), Span::styled(symbol, style)]
@@ -457,11 +457,14 @@ pub fn note_row(label: &str, value: &str, cols: Cols) -> Line<'static> {
         .saturating_sub(TEXT_GUTTER.chars().count())
         .max(1);
     Line::from(vec![
-        Span::styled(prefix, Style::default().add_modifier(Modifier::DIM)),
+        Span::styled(
+            prefix,
+            Style::default().add_modifier(Modifier::DIM | Modifier::ITALIC),
+        ),
         Span::raw(TEXT_GUTTER),
         Span::styled(
             truncate_chars(value, width),
-            Style::default().add_modifier(Modifier::DIM),
+            Style::default().add_modifier(Modifier::DIM | Modifier::ITALIC),
         ),
     ])
 }

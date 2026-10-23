@@ -740,3 +740,31 @@ fn long_running_scan_roots_prefer_flags_then_config_then_launch_dir() {
         ScanRoots::launch_dir(launch)
     );
 }
+
+#[test]
+fn mux_launch_argv_accepts_tokens_that_start_with_a_hyphen() {
+    for tokens in [
+        vec!["claude", "--dangerously-skip-permissions"],
+        vec![
+            "codex",
+            "--dangerously-bypass-approvals-and-sandbox",
+            "-p",
+            "x",
+        ],
+        vec!["tool", "two words", ""],
+    ] {
+        let mut args = vec![
+            "conspectus",
+            "mux",
+            "launch",
+            "claude-code",
+            "--name",
+            "n",
+            "--no-attach",
+            "--argv",
+        ];
+        args.extend(tokens.iter().copied());
+        let parsed = Cli::try_parse_from(args);
+        assert!(parsed.is_ok(), "{tokens:?}: {:?}", parsed.err());
+    }
+}

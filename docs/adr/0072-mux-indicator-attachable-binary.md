@@ -3,7 +3,7 @@
 ## Status
 
 Accepted. Extended by ADR 0120, which drops `◐` from mux rows too.
-Amended by ADR 0145: the glyph pair is now a link (`⚯` linked, `⚬` not
+Amended by ADR 0145: the glyph pair is now a link (`⊸` linked, `∘` not
 linked); the attachable-binary rule is unchanged.
 
 ## Context
@@ -54,7 +54,7 @@ Three further observations from the rendered showcase:
    distinction — only the row-chip *rendering* collapses.
 2. **Group rows drop the per-bucket count chips and gain a single
    ambiguity warning glyph.** The group summary block becomes:
-   `(N total)` plus `⚠` (theme `mux_ambiguity_warning`, an orange
+   `(N total)` plus `▲` (theme `mux_ambiguity_warning`, an orange
    foreground) when any descendant session is in the
    `Ambiguous` state. No `◉ a ◐ b ◯ c` triplet. No count of
    ambiguous sessions on the group row — the detail pane's
@@ -72,14 +72,14 @@ Three further observations from the rendered showcase:
 ## Consequences
 
 - **Group-by views read cleanly.** A workspace with four ambiguous
-  member sessions renders one `⚠` on the workspace row instead of
+  member sessions renders one `▲` on the workspace row instead of
   four `◐` chips on the children plus a redundant `◐ 4` on the
   group summary.
 - **The row chip carries a single decision-relevant signal.** When
   the operator sees `◉` they know `Enter`/`a` attaches without
   prompting; when they see `◯` they know the answer is either
   "nothing to attach to" or "open the group's detail to choose,"
-  with the group row's `⚠` distinguishing the two cases at a
+  with the group row's `▲` distinguishing the two cases at a
   glance.
 - **The model keeps the three-bucket distinction.** Filter
   matching, status-bar hints ("Enter/a attach preferred · m
@@ -89,12 +89,12 @@ Three further observations from the rendered showcase:
 - **The row visual loses one prior cue.** An operator who relied on
   seeing `◐` on a session row to know "this specific session is in
   an ambiguous set" must now look up at the enclosing group row
-  (single `⚠`) or into the detail pane. The compensation is the
+  (single `▲`) or into the detail pane. The compensation is the
   ADR 0071 group-detail catalog plus the new orange warning glyph;
   the cost is one indirection step for that question.
 - **Snapshot churn.** Sessions / mux / union / prs / forks view
   snapshots all change. The showcase fixture re-renders without
-  the per-session `◐` cluster and with a single `⚠` on the
+  the per-session `◐` cluster and with a single `▲` on the
   `atelier-demo` workspace row.
 - **`MuxIndicator::Ambiguous` variant survives.** No model-layer
   rename, no migration; just two render sites change.
@@ -131,7 +131,7 @@ concern" — generalizes better.
 ### D. Use a warning text chip instead of a glyph
 
 Surface group ambiguity as `(! N ambiguous)` rather than a single
-`⚠`. Rejected: heavier visually, eats right-edge width the
+`▲`. Rejected: heavier visually, eats right-edge width the
 secondary path label often wants, and the count is recoverable
 in the detail pane's catalog. The single warning glyph reads as
 "there is ambiguity here; open the detail pane to learn how
@@ -154,7 +154,7 @@ affordance from the row rendering.
 - Does the ambiguity warning glyph want a count tooltip on hover
   (when a future mouse-aware mode lands), or stay strictly
   visual? Out of scope for V1.
-- Should the `⚠` glyph respect `NO_COLOR` by switching to a
+- Should the `▲` glyph respect `NO_COLOR` by switching to a
   bracketed text marker (`(!)`) instead of an orange-fg glyph?
   Probably yes; track under the broader `NO_COLOR` audit
   alongside the H-VIS workstream rather than this ADR.

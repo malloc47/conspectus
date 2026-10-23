@@ -120,7 +120,7 @@ impl Widget for MuxMenuWidget<'_> {
         ];
         for (idx, entry) in MENU_ENTRIES.iter().enumerate() {
             let focused = idx == self.state.cursor;
-            let marker = if focused { "▸" } else { " " };
+            let marker = if focused { "►" } else { " " };
             let label = format!("{marker} {}", entry.label());
             if focused {
                 lines.push(Line::styled(

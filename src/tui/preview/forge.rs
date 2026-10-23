@@ -132,7 +132,7 @@ pub fn render_pr(json: &str, now: Option<i64>) -> Result<Vec<Line<'static>>, ser
         ]));
         for (name, outcome) in &outcomes {
             match outcome {
-                CheckOutcome::Failed => lines.push(Line::raw(format!("  ✗ {name}"))),
+                CheckOutcome::Failed => lines.push(Line::raw(format!("  × {name}"))),
                 CheckOutcome::Pending => lines.push(Line::from(dim(format!("  … {name}")))),
                 CheckOutcome::Passed | CheckOutcome::Other => {}
             }
@@ -253,7 +253,7 @@ mod tests {
                 "feature/preview → main · updated 1h ago",
                 "",
                 "checks  2 passed · 1 failed · 1 pending",
-                "  ✗ clippy",
+                "  × clippy",
                 "  … docs",
                 "reviews",
                 "  alice  changes requested",

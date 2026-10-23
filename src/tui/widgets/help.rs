@@ -523,7 +523,7 @@ fn push_mux_state_legend(lines: &mut Vec<Line<'static>>, theme: &Theme) {
             "the mux backend didn't report whether a client is attached",
         ),
         (
-            "⚠",
+            "▲",
             bold_warning,
             "Ambiguous mux",
             "sessions with several candidate muxes; the detail pane lists them",

@@ -816,7 +816,7 @@ impl NodeKind {
     /// Display-order ordinal for sorting (ADR 0074 §4: detail-pane
     /// `Related entities` rows sort by kind first). Matches
     /// [`Self::ALL`] order so the visual scan reads
-    /// `▦ ◆ ◇ ● ▣ ⚙ ⎇ ⑂ ⇄` top-to-bottom.
+    /// `▦ ◆ ◇ ● ▣ ◈ ⌥ ⋎ ⇄` top-to-bottom.
     pub fn ordinal(self) -> usize {
         Self::ALL
             .iter()

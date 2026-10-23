@@ -379,9 +379,9 @@ fn the_form_shows_harness_chips_options_the_cwd_mark_and_the_command() {
         "[codex]",
         "[opencode]",
         "[ ] skip permissions",
-        "✓",
+        "√",
         "command",
-        "default: claude",
+        "runs: claude",
         "↑/↓ move",
     ] {
         assert!(frame.contains(expected), "`{expected}` missing:\n{frame}");
@@ -391,7 +391,7 @@ fn the_form_shows_harness_chips_options_the_cwd_mark_and_the_command() {
     let frame = rendered(&state);
     assert!(frame.contains("[x] skip permissions"), "{frame}");
     assert!(
-        frame.contains("override: claude --dangerously-skip-permissions"),
+        frame.contains("runs: claude --dangerously-skip-permissions"),
         "{frame}"
     );
 }

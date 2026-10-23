@@ -9,7 +9,11 @@ sessions included. The 2026-06 amendment that dropped the glyph from
 rows in every view, so a session reads as a session wherever it
 appears. The pill still carries the harness. State glyphs (linked, stopped, pull
 request states, the pin marker) are a separate vocabulary, set by
-[ADR 0145](0145-state-glyphs-and-words-in-the-left-panel.md).
+[ADR 0145](0145-state-glyphs-and-words-in-the-left-panel.md). Amended 2026-10:
+the branch, fork, and runtime-process glyphs `⎇` `⑂` `⚙` become `⌥` `⋎` `◈`,
+because the originals are missing from common monospace fonts (or can take
+emoji presentation) and draw wider than a cell. Every glyph the TUI draws is
+now measured and recorded in `icons::VETTED`.
 
 ## Context
 

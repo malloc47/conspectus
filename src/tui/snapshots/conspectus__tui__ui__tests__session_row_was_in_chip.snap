@@ -2,5 +2,5 @@
 source: src/tui/ui_tests.rs
 expression: "format!(\"{}\\n{}\", gone.trim_end(), titled.trim_end())"
 ---
-abc        codex        2d  ⚬  old-ledger  (mux stopped)  conspectus
-abc        codex        2d  ⚬  Nightly  was in old-ledger  conspectus
+abc        codex        2d  ∘  old-ledger  (mux stopped)  conspectus
+abc        codex        2d  ∘  Nightly  was in old-ledger  conspectus

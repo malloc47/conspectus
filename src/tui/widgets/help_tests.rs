@@ -122,11 +122,11 @@ fn help_body_includes_mux_state_legend() {
         .expect("mux state section header");
     let legend = &texts[header + 1..];
     for (glyph, name) in [
-        ("⚯", "Linked"),
-        ("⚬", "Not linked"),
+        ("⊸", "Linked"),
+        ("∘", "Not linked"),
         ("⊘", "Stopped"),
         ("?", "Unknown"),
-        ("⚠", "Ambiguous mux"),
+        ("▲", "Ambiguous mux"),
     ] {
         assert!(
             legend

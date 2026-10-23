@@ -991,6 +991,30 @@ mod mux_launch_argv {
         let argv_at = plan.iter().position(|a| a == "--argv").unwrap();
         assert!(pin_at < argv_at, "flags precede the argv tokens: {plan:?}");
     }
+
+    #[test]
+    fn a_launch_with_hyphen_tokens_parses_with_the_real_cli() {
+        use crate::tui::widgets::mux_launch::PinChoice;
+        use clap::Parser;
+        for (harness, flag) in [
+            ("claude-code", "--dangerously-skip-permissions"),
+            ("codex", "--dangerously-bypass-approvals-and-sandbox"),
+        ] {
+            let mut req = request(PinChoice::PlanOnly);
+            req.harness = harness.into();
+            req.launch_argv = vec!["tool".into(), flag.into(), "-p".into(), "two words".into()];
+            let argv = mux_launch_argv(&req);
+            assert_eq!(
+                &argv[argv.len() - 4..],
+                ["tool", flag, "-p", "two words"],
+                "the tokens come last, untouched"
+            );
+            let parsed = crate::cli::Cli::try_parse_from(
+                std::iter::once("conspectus".to_string()).chain(argv),
+            );
+            assert!(parsed.is_ok(), "{harness}: {:?}", parsed.err());
+        }
+    }
 }
 
 #[test]
@@ -1606,7 +1630,7 @@ fn p_pins_and_capital_n_launches_with_a_worktree() {
     ));
     assert!(matches!(
         translate(press(KeyCode::Char('N'), KeyModifiers::SHIFT), 24),
-        Some(Action::Msg(msg)) if *msg == Msg::OpenMuxLaunchWorktreeForm
+        Some(Action::Msg(msg)) if *msg == Msg::OpenMuxLaunchForm
     ));
 }
 

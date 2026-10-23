@@ -39,10 +39,12 @@ CHECKS=(
   rebuild_plan_script
   reap_and_forget
   mux_pin_flags
+  launch_skip_permissions
   launch_profiles
   migrate_legacy
   migrate_partial_failure
   daemon_envelope
+  tui_mux_exit_roundtrip
   refresh_freshness
   worktree_close
   repo_clone
@@ -187,6 +189,76 @@ start_mux() { # start_mux NAME [CWD]
 }
 
 mux_alive() { tmx has-session -t "=$1"; }
+
+
+# ------------------------------------------------- driving the real TUI
+#
+# The TUI runs in a pane of a second ("outer") private tmux server that
+# stands in for the operator's terminal; `tui_drive` sends it keys and
+# `tui_screen` reads it. The muxes under test live in the main private
+# server (`tmx`). Two flows: `tui_start outside` runs the TUI directly in
+# the terminal (attach is `attach-session`), `tui_start inside` runs it
+# in a window of the main server with a client attached (attach is
+# `switch-client`).
+
+OUTER_TMPDIR=""
+
+otmx() {
+  [[ -n "$OUTER_TMPDIR" ]] || OUTER_TMPDIR="$SCRATCH/outer-tmux"
+  mkdir -p "$OUTER_TMPDIR"
+  env -u TMUX TMUX_TMPDIR="$OUTER_TMPDIR" tmux -f /dev/null "$@"
+}
+
+tui_command() { # tui_command [extra conspectus tui flags...]
+  # The pane belongs to the outer server, so name the muxes' server.
+  printf 'env TMUX_TMPDIR=%q %q tui --view mux --refresh-interval 30s %s 2>%q; sleep 120' \
+    "$TMUX_TMPDIR" "$CONSPECTUS_BIN" "$*" "$SCRATCH/tui.err"
+}
+
+tui_start() { # tui_start outside|inside
+  local command
+  command="$(tui_command)"
+  if [[ "$1" == inside ]]; then
+    tmx -f /dev/null new-session -d -s ui -x 150 -y 40 "$command"
+    otmx new-session -d -s host -x 150 -y 40 \
+      "env -u TMUX TMUX_TMPDIR=$TMUX_TMPDIR tmux attach -t ui; echo CLIENT-EXITED; sleep 120"
+  else
+    otmx new-session -d -s host -x 150 -y 40 "env -u TMUX $command"
+  fi
+  tui_wait_for '▣' 15 "$1"
+}
+
+tui_stop() {
+  otmx kill-server 2>/dev/null || true
+}
+
+# The operator's terminal, or (inside) the TUI's own window.
+tui_screen() {
+  if [[ "${1:-}" == pane ]]; then tmx capture-pane -p -t ui; else otmx capture-pane -p -t host; fi
+}
+
+tui_drive() { otmx send-keys -t host "$@"; sleep 0.25; }
+
+# tui_wait_for TEXT SECONDS [outside|inside|pane]: poll until the screen shows TEXT.
+tui_wait_for() {
+  local text="$1" limit="$2" where="${3:-outside}" i
+  for ((i = 0; i < limit * 10; i++)); do
+    if [[ "$where" == inside ]]; then
+      [[ "$(tui_screen pane)" == *"$text"* ]] && return 0
+    elif [[ "$where" == pane ]]; then
+      [[ "$(tui_screen pane)" == *"$text"* ]] && return 0
+    else
+      [[ "$(tui_screen)" == *"$text"* ]] && return 0
+    fi
+    sleep 0.1
+  done
+  return 1
+}
+
+# tui_row_state NAME [pane]: print the left-pane row for a mux.
+tui_row() {
+  tui_screen "${2:-}" | sed 's/││.*//' | grep -F "$1" | head -1
+}
 
 # --------------------------------------------------------------- checks
 
@@ -352,6 +424,24 @@ check_mux_pin_flags() {
   is_false "launch --no-launch starts nothing" mux_alive nolaunch
 }
 
+check_launch_skip_permissions() {
+  fresh
+  # Recording stubs shadow the plain ones for this check only.
+  local out="$SCRATCH/args" harness bin flag
+  for pair in "claude-code:claude:--dangerously-skip-permissions" \
+              "codex:codex:--dangerously-bypass-approvals-and-sandbox"; do
+    IFS=: read -r harness bin flag <<<"$pair"
+    printf '#!/bin/sh\nprintf "%%s\\n" "$@" > "%s.%s"\nexec sleep 600\n' "$out" "$bin" >"$SCRATCH/bin/$bin"
+    run cx mux launch "$harness" --name "skip-$bin" --no-attach --argv "$bin" "$flag"
+    ok "mux launch $harness with $flag"
+    local i
+    for i in $(seq 1 50); do [[ -e "$out.$bin" ]] && break; sleep 0.1; done
+    [[ "$(cat "$out.$bin" 2>/dev/null)" == "$flag" ]] || note_fail "$bin did not receive exactly $flag"
+  done
+  # Restore the plain stubs.
+  for bin in claude codex; do printf '#!/bin/sh\nexec sleep 600\n' >"$SCRATCH/bin/$bin"; done
+}
+
 check_launch_profiles() {
   fresh
   mkdir -p "$XDG_CONFIG_HOME/conspectus"
@@ -443,7 +533,7 @@ check_daemon_envelope() {
   run cx pin add d-a; ok
   local before after
   before="$(sha256sum "$(PINS)" | cut -d' ' -f1)"
-  cx serve >"$SCRATCH/serve.log" 2>&1 &
+  "$CONSPECTUS_BIN" serve >"$SCRATCH/serve.log" 2>&1 &
   local pid=$!
   local i
   for i in $(seq 1 50); do
@@ -465,7 +555,7 @@ check_daemon_envelope() {
 
 check_refresh_freshness() {
   fresh
-  cx serve >"$SCRATCH/serve-fresh.log" 2>&1 &
+  "$CONSPECTUS_BIN" serve >"$SCRATCH/serve-fresh.log" 2>&1 &
   local pid=$!
   local i
   for i in $(seq 1 50); do
@@ -481,6 +571,42 @@ check_refresh_freshness() {
   run cx graph --format json
   has '"presence": "gone"' "a killed mux is gone after one refresh"
   kill "$pid" 2>/dev/null; wait "$pid" 2>/dev/null
+}
+
+check_tui_mux_exit_roundtrip() {
+  fresh
+  local flow row limit i
+  for flow in outside inside; do
+    start_mux other
+    tmx -f /dev/null new-session -d -s victim -c "$REPO" -x 120 -y 30
+    run cx pin add victim; ok "pin the victim ($flow)"
+    tui_start "$flow" || { note_fail "the TUI never listed muxes ($flow)"; tui_stop; continue; }
+    [[ "$flow" == inside ]] && tmx set -g detach-on-destroy off
+    local where=""; [[ "$flow" == inside ]] && where=pane
+    # Select the victim (rows are sorted: other, [ui,] victim) and attach.
+    tui_drive 2
+    local downs=1; [[ "$flow" == inside ]] && downs=2
+    for ((i = 0; i < downs; i++)); do tui_drive j; done
+    tui_drive Enter
+    sleep 1.5
+    [[ -n "${DEBUG_TUI:-}" ]] && { echo "--- after Enter ($flow)"; tui_screen $where | head -12 | cut -c1-110; }
+    # Exit the shell in the attached mux; no key press follows.
+    tui_drive exit Enter
+    limit=100
+    for ((i = 0; i < limit; i++)); do
+      row="$(tui_row victim $where)"
+      [[ "$row" == *◎* && "$row" == *⊘* ]] && break
+      sleep 0.1
+    done
+    if ! [[ "$row" == *◎* && "$row" == *⊘* ]]; then
+      OUT="$(tui_screen $where)"; ERR="muxes: $(tmx ls 2>&1 | tr '\n' ';') client: $(otmx capture-pane -p -t host | head -3 | tr '\n' '|')"
+      note_fail "$flow: the exited pinned mux never became a stopped ghost without a refresh"
+    fi
+    tui_stop
+    tmx kill-server 2>/dev/null || true
+    rm -rf "$TMUX_TMPDIR"/tmux-* 2>/dev/null || true
+    fresh
+  done
 }
 
 check_worktree_close() {

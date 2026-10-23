@@ -6,13 +6,13 @@ pub(super) fn draw_header(app: &App, frame: &mut Frame<'_>, area: Rect) {
     // Header shape (ADR 0078):
     //   [updated Ns ago · ] N/M sessions · M mux
     //     [ · <opt-in harness chips>]
-    //     [ · ⚠ N when ambiguous > 0]
+    //     [ · ▲ N when ambiguous > 0]
     //
     // The `Conspectus` brand and `sessions` view-label words moved
     // out — the brand was self-evident inside the TUI and the active
     // view was already in the left-panel title strip with stronger
     // visual weight. The mux-state chip section collapsed to a
-    // single `⚠ N` because ADR 0072 made the per-row chip binary and
+    // single `▲ N` because ADR 0072 made the per-row chip binary and
     // every group row already owns the ambiguity glyph. Per-harness
     // chips became opt-in via `[tui] show_harness_chips`. Freshness
     // promoted to the lead position.
@@ -113,8 +113,8 @@ pub(super) fn append_harness_chips(
     }
 }
 
-/// Render the ambiguity triage chip (`⚠ N`) — only called when N > 0.
-/// Uses ADR 0072's `⚠` vocabulary so
+/// Render the ambiguity triage chip (`▲ N`) — only called when N > 0.
+/// Uses ADR 0072's `▲` vocabulary so
 /// the header signal aligns with the per-group glyph the row tree
 /// already shows.
 pub(super) fn append_ambiguity_chip(
@@ -125,7 +125,7 @@ pub(super) fn append_ambiguity_chip(
     spans.push(Span::raw(SECTION_SEPARATOR));
     spans.push(span!(
         Style::default().fg(theme.warning).add_modifier(Modifier::BOLD);
-        "⚠"
+        "▲"
     ));
     spans.push(span!(" {ambiguous}"));
 }
@@ -237,14 +237,14 @@ pub(super) fn push_unseen_messages_chip(app: &App, theme: &Theme, spans: &mut Ve
     }
     spans.push(span!(
         Style::default().fg(theme.error).add_modifier(Modifier::BOLD);
-        "⚠ {unseen} · ! messages  "
+        "▲ {unseen} · ! messages  "
     ));
 }
 
 /// Braille-dot spinner frames (~120ms per frame at cadence
 /// `SPINNER_FRAME_MS`). Cycles through the eight-position pattern
 /// commonly used by cli.rs / npm / systemd loaders.
-pub(super) const SPINNER_FRAMES: [&str; 8] = crate::tui::icons::marks::SPINNER;
+pub(super) const SPINNER_FRAMES: [&str; 4] = crate::tui::icons::marks::SPINNER;
 
 pub(super) const SPINNER_FRAME_MS: u128 = 120;
 
@@ -464,7 +464,7 @@ pub(super) fn contextual_status_text(app: &App) -> String {
         // explorer cursor, Enter drills or expands a group
         // depending on the cursor position, `e` toggles a group,
         // and Backspace pops the breadcrumb stack.
-        Focus::Right => "j/k cursor · Enter drill/expand · e group · ⌫ back",
+        Focus::Right => "j/k cursor · Enter drill/expand · e group · Backspace back",
     };
     let action_hint = default_action_status_hint(app);
     let refresh_hint = if app.active_view() == crate::tui::View::Prs {

@@ -114,7 +114,7 @@ fn screens() -> Vec<(String, String)> {
         }
         for (name, msg) in [
             ("clean up", Msg::OpenCleanUp),
-            ("launch form", Msg::OpenMuxLaunchWorktreeForm),
+            ("launch form", Msg::OpenMuxLaunchForm),
             ("edit prompt", Msg::OpenSlotEdit("conspectus-main".into())),
             (
                 "rename prompt",

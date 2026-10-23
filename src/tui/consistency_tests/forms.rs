@@ -137,3 +137,54 @@ fn retargeting_offers_the_other_entities_of_the_same_kind() {
         "the unpinned mux `scratch` is a candidate to retarget to:\n{frame}"
     );
 }
+
+fn command_row_cells(form: &MuxLaunchFormState) -> Vec<(char, ratatui::style::Modifier)> {
+    let area = Rect::new(0, 0, 100, 30);
+    let mut buffer = Buffer::empty(area);
+    MuxLaunchFormWidget::new(form, &Theme::default()).render(area, &mut buffer);
+    for y in 0..area.height {
+        let text: String = (0..area.width)
+            .map(|x| buffer[(x, y)].symbol().to_string())
+            .collect();
+        if text.contains("command") {
+            return (0..area.width)
+                .map(|x| {
+                    let cell = &buffer[(x, y)];
+                    (
+                        cell.symbol().chars().next().unwrap_or(' '),
+                        cell.style().add_modifier,
+                    )
+                })
+                .collect();
+        }
+    }
+    panic!("no command row in the form:\n{}", rendered(form));
+}
+
+#[test]
+fn the_launch_forms_command_row_is_read_only_and_never_takes_focus() {
+    use ratatui::style::Modifier;
+    let mut form = launch_form("/tmp");
+    // Walk the whole focus ring both ways with arrows and Tab: the
+    // command row is not a field, so focus never rests on a row that
+    // renders the command.
+    for code in [KeyCode::Down, KeyCode::Tab, KeyCode::Up, KeyCode::BackTab] {
+        for _ in 0..16 {
+            form.handle((), press(code));
+            let cells = command_row_cells(&form);
+            let marker: String = cells.iter().take(2).map(|(c, _)| *c).collect();
+            assert!(
+                !marker.contains('>'),
+                "focus marker on the command row after {code:?}"
+            );
+        }
+    }
+    let cells = command_row_cells(&form);
+    let text: String = cells.iter().map(|(c, _)| *c).collect();
+    assert!(text.contains("(read only)"), "labelled read only: {text}");
+    let styled = cells
+        .iter()
+        .filter(|(c, _)| !c.is_whitespace() && !matches!(c, '│' | '┃' | '|'))
+        .all(|(_, m)| m.contains(Modifier::ITALIC) && m.contains(Modifier::DIM));
+    assert!(styled, "the command row is dim italic, unlike input rows");
+}

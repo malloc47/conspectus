@@ -165,7 +165,15 @@ impl MuxLaunchFormState {
         self
     }
 
-    /// Start with the worktree toggle on (`N`).
+    /// Seed the worktree repo path without turning the toggle on, so
+    /// switching it on later starts from the launch directory.
+    #[must_use]
+    pub fn with_worktree_repo(mut self, repo: impl Into<String>) -> Self {
+        self.worktree_repo = TextInputState::new(WORKTREE_REPO_LABEL, repo.into());
+        self
+    }
+
+    /// Start with the worktree toggle on.
     #[must_use]
     pub fn with_worktree(mut self, repo: impl Into<String>) -> Self {
         self.spec.set_worktree_enabled(true);
@@ -617,18 +625,18 @@ impl MuxLaunchFormState {
     fn command_line(&self, cols: form::Cols) -> Line<'static> {
         let typed = self.spec.launch_argv().value().trim();
         if !typed.is_empty() {
-            return note_row("command", &format!("override: {typed}"), cols);
+            return note_row("command", &format!("(read only) runs: {typed}"), cols);
         }
         if let Some(hint) = self.default_hint() {
-            return note_row("command", &format!("default: {hint}"), cols);
+            return note_row("command", &format!("(read only) runs: {hint}"), cols);
         }
         let default = self.default_argv();
         if default.is_empty() {
-            warning_row("command", "no default for this harness", cols)
+            warning_row("command", "(read only) no default for this harness", cols)
         } else {
             note_row(
                 "command",
-                &format!("default: {}", form::display_argv(&default)),
+                &format!("(read only) runs: {}", form::display_argv(&default)),
                 cols,
             )
         }

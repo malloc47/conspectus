@@ -6,6 +6,10 @@ Accepted. Amends ADR 0072 (the attached/unattached glyph pair changes
 from `◉`/`◯` to a link pair), ADR 0073 (state glyphs get their own
 vocabulary beside the node-kind glyphs), and ADR 0144 (status words in
 the Pinned and History views follow one vocabulary).
+The glyph choices were revised after the first link pair and the merged and
+closed marks drew wider than one cell in a real terminal font; the table below
+is the current set, and every glyph is vetted for width (see ADR 0073's
+2026-10 amendment).
 
 ## Context
 
@@ -34,9 +38,9 @@ behind an empty cell, and the values differ in shape and not only color:
 
 | State | Glyphs |
 |---|---|
-| Link to a mux (session) or client attached (mux) | `⚯` linked, `⚬` not linked |
+| Link to a mux (session) or client attached (mux) | `⊸` linked, `∘` not linked |
 | Mux that stopped, or couldn't be checked | `⊘` stopped, `?` unknown |
-| Pull request | `○` open, `◐` draft, `✓` merged, `✗` closed, `?` unknown |
+| Pull request | `○` open, `◐` draft, `⊕` merged, `⊗` closed, `?` unknown |
 | Pin marker | `◉` pin on a running entity, `◎` pin on one that isn't running |
 
 The pin marker uses the same pair in every view, including live pins in

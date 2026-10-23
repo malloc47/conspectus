@@ -116,7 +116,7 @@ pub struct Row {
     pub id: RowId,
     /// Indentation depth, 0 = top-level.
     pub depth: u8,
-    /// True when the row owns children — drives the `▶`/`▼`
+    /// True when the row owns children — drives the `►`/`▼`
     /// disclosure glyph.
     pub expandable: bool,
     pub kind: RowKind,

@@ -425,7 +425,7 @@ pub(super) fn group_row_label_width(row: &crate::tui::rows::Row) -> usize {
 /// keeping any trailing ambiguity glyph aligned across rows.
 ///
 /// ADR 0072: per-bucket muxed/unmuxed counts at the group level are
-/// gone — the only secondary signal is a single `⚠` (theme `warning`)
+/// gone — the only secondary signal is a single `▲` (theme `warning`)
 /// when at least one descendant session is in the `Ambiguous`
 /// candidate-set state. The ambiguity catalog lives on the group's
 /// detail pane (ADR 0071).
@@ -460,7 +460,7 @@ pub(super) struct GroupAlign {
     pub(super) label_width: usize,
     /// Max body width (label-padded) across visible group rows that
     /// will get a summary chip block. Pads between the body and the
-    /// `(N)` count plus optional `⚠` ambiguity glyph (ADR 0072).
+    /// `(N)` count plus optional `▲` ambiguity glyph (ADR 0072).
     pub(super) body_width: usize,
     /// Max `(N)` count chip width (including parens) across visible
     /// group rows with sessions. Right-pads the count chip so any
@@ -845,7 +845,7 @@ pub(super) fn render_left_row(
     match &row.kind {
         RowKind::Group(group) => {
             // Reserve fixed space on the right for the summary chip
-            // block (`  (N)` plus optional `  ⚠`) so the count and
+            // block (`  (N)` plus optional `  ▲`) so the count and
             // ambiguity glyph stay visible at narrow widths. The dim
             // canonical path absorbs the slack via mid-string
             // truncation in `append_group_body_spans`.

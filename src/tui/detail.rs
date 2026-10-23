@@ -11,7 +11,7 @@
 //!   Sessions without a `title` omit the row rather than render a
 //!   placeholder.
 //! - Mux row carries the candidate count when ambiguous, so the
-//!   renderer can surface "— (2 candidates) ⚠" inline.
+//!   renderer can surface "— (2 candidates) ▲" inline.
 //! - PR row is the immediate-stage label (state, draft).
 //! - Paths render with `~` shortening when a home directory is
 //!   passed in.
@@ -153,7 +153,7 @@ pub struct HeaderField {
     /// True when `value` is a placeholder (e.g. `— (no attach)`),
     /// so the renderer can dim it.
     pub placeholder: bool,
-    /// Optional trailing annotation: `⚠` for ambiguity, `⟳` for an
+    /// Optional trailing annotation: `▲` for ambiguity, `⟳` for an
     /// async-enrichment in-flight, `(preferred)` markers, etc.
     pub annotation: Option<&'static str>,
     /// Node referenced by this field, when the row is a compact
@@ -474,7 +474,7 @@ fn session_mux_field(snapshot: &GraphSnapshot, session: &NodeId) -> HeaderField 
                 format!("{label}  ({n} candidates)"),
                 preferred.and_then(|link| link.target_node_id().cloned()),
             );
-            field.annotation = Some("⚠");
+            field.annotation = Some("▲");
             field
         }
     }
@@ -752,7 +752,7 @@ fn runtime_process_fields(
             Some(session),
         );
         if relation == RelationKind::ProcessCandidatesSession {
-            field.annotation = Some("⚠");
+            field.annotation = Some("▲");
         }
         fields.push(field);
     }
@@ -1167,7 +1167,7 @@ fn session_process_fields(snapshot: &GraphSnapshot, session_id: &NodeId) -> Vec<
             Some(process),
         );
         if relation == RelationKind::ProcessCandidatesSession {
-            field.annotation = Some("⚠");
+            field.annotation = Some("▲");
         }
         fields.push(field);
     }

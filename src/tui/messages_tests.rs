@@ -63,7 +63,7 @@ fn full_text_carries_argv_exit_status_and_both_streams() {
 
     let text = entry.full_text();
 
-    assert!(text.contains("✗ pin `w1` launch failed"), "{text}");
+    assert!(text.contains("× pin `w1` launch failed"), "{text}");
     assert!(text.contains("target: pin w1"), "{text}");
     assert!(text.contains("argv: conspectus pin launch"), "{text}");
     assert!(text.contains("exit: 1"), "{text}");

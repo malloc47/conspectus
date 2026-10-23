@@ -49,7 +49,7 @@ Every row starts with the same cells, left to right:
 | # | Cell | Width | Shows | Condition |
 |---|---|---|---|---|
 | 1 | Indent | 2 cells per level | nothing | Flat Sessions (grouping `none`) has no indent |
-| 2 | Disclosure | 2 cells | `▶` collapsed or `▼` expanded, in cyan | Blank when the row has nothing under it |
+| 2 | Disclosure | 2 cells | `►` collapsed or `▼` expanded, in cyan | Blank when the row has nothing under it |
 | 3 | Kind glyph | 1 cell and a space | what the row is (see [Glyphs](#glyphs)) | Omitted on rows that stand for no entity: the Ungrouped bucket, PR remote and state groups, and the Pinned and History buckets |
 | 4 | Pin marker | 2 cells | `◉` pin on a running entity, `◎` pin on one that isn't | Reserved on every row of the tree once any row in it has a marker, so columns hold still |
 
@@ -75,6 +75,8 @@ record a pin points at, shown only when History lists pinned records.
 Every glyph the left panel can draw. `Style` is the default theme; kind
 glyphs can be overridden in the theme configuration.
 
+Every glyph is one that DejaVu Sans Mono draws at exactly one cell, or one every common font carries. A glyph a terminal's monospace font lacks is borrowed from a wider font and spills over its neighbor, which cuts it in half under a selection highlight, so new glyphs are measured before they are used.
+
 | Glyph | Meaning | Style | Where it appears |
 |---|---|---|---|
 | `▦` | workspace | light blue | Sessions and Mux group headers; Pinned workspace pins |
@@ -84,29 +86,33 @@ glyphs can be overridden in the theme configuration.
 | `▣` | mux | magenta | Mux rows; Pinned and History muxes |
 | `◉` | pin on a running entity | magenta | The pin marker cell, in every view |
 | `◎` | pin on an entity that is stopped, removed, missing, unknown, or not started | ghost | The pin marker cell, in every view |
-| `⚙` | runtime process | process color | Never drawn in the left panel |
-| `⎇` | branch | green | Pinned branch pins; and on a PR row, a pull request whose branch exists locally |
-| `⑂` | fork | light magenta | Fork rows; Pinned fork pins |
+| `◈` | runtime process | process color | Never drawn in the left panel |
+| `⌥` | branch | green | Pinned branch pins; and on a PR row, a pull request whose branch exists locally |
+| `⋎` | fork | light magenta | Fork rows; Pinned fork pins |
 | `⇄` | pull request | by state: open green, draft yellow, merged magenta, closed red | PR rows; Pinned and History PRs |
-| `⚯` | linked: a session with a definitive mux, or a mux with a client attached | green | Session rows, Mux rows, nested sessions |
-| `⚬` | not linked: a session with no definitive mux (none or ambiguous), or a mux with no client | dim | Session rows, Mux rows, nested sessions |
+| `⊸` | linked: a session with a definitive mux, or a mux with a client attached | green | Session rows, Mux rows, nested sessions |
+| `∘` | not linked: a session with no definitive mux (none or ambiguous), or a mux with no client | dim | Session rows, Mux rows, nested sessions |
 | `⊘` | a mux that has stopped | ghost | Stopped mux rows in the Mux view |
 | `?` | can't be checked: a mux whose server didn't answer, or a PR with no state yet | dim | Mux rows, stopped mux rows, PR rows |
 | `○` | an open pull request | green | PR rows |
 | `◐` | a draft pull request (open and marked draft) | yellow | PR rows |
-| `✓` | a merged pull request | magenta | PR rows |
-| `✗` | a closed pull request | red | PR rows |
+| `⊕` | a merged pull request | magenta | PR rows |
+| `⊗` | a closed pull request | red | PR rows |
 | `▼` | an expanded row | cyan | The disclosure cell |
-| `▶` | a collapsed row | cyan | The disclosure cell |
-| `⚠` | at least one session below has an ambiguous mux link | yellow bold | Group headers |
+| `►` | a collapsed row | cyan | The disclosure cell |
+| `▲` | at least one session below has an ambiguous mux link | yellow bold | Group headers |
 | `◌` | a pull request with no local branch | dim | PR rows, in the tracking cell |
 | `—` | an age or value that isn't known | dim | Age cells |
-| `⠋` `⠙` `⠹` `⠸` `⠼` `⠴` `⠦` `⠧` | a refresh is pending for this row | gray | Where the state glyph or word goes |
+| `√` | a path or value that checked out | green | Forms |
+| `×` | a failed check or value | red | Forms and check lists |
+| `•` | an unchecked item | default | Multi-select lists, such as Clean up |
+| `◄` | back | gray | The right pane's breadcrumb |
+| `◜` `◝` `◞` `◟` | a refresh is pending for this row | gray | Where the state glyph or word goes |
 
 The `…` character marks text cut to fit, and `·` separates parts of a
 content string (`repo · branch`). Neither is a state.
 
-Two glyphs have a second life by design. `⎇` is both the branch kind
+Two glyphs have a second life by design. `⌥` is both the branch kind
 and the "tracked locally" mark on a PR row, because both say "this is a
 local branch". `?` means "couldn't be checked" for muxes and PRs alike.
 
@@ -118,8 +124,8 @@ the last column instead.
 | Word | Meaning | Glyph in a single-kind view | Where it appears |
 |---|---|---|---|
 | `live` | the pinned entity is running or present (worktrees, repos, branches, workspaces, forks, and live muxes) | pin marker `◉` | Pinned |
-| `in mux` | a pinned session that is running inside a mux | `⚯` | Pinned, and sessions nested under a mux pin |
-| `resumable` | a pinned session with no mux | `⚬` | Pinned |
+| `in mux` | a pinned session that is running inside a mux | `⊸` | Pinned, and sessions nested under a mux pin |
+| `resumable` | a pinned session with no mux | `∘` | Pinned |
 | `stopped` | a mux that isn't running | `⊘` | Pinned, History |
 | `removed` | a worktree or repo that no longer exists | none (no view lists these alone) | Pinned, History |
 | `missing` | a pin whose session or target can't be found anywhere | none | Pinned |
@@ -127,8 +133,8 @@ the last column instead.
 | `unknown` | the entity couldn't be checked | `?` | Pinned |
 | `open` | an open pull request | `○` | Pinned, History |
 | `draft` | an open pull request marked draft | `◐` | Pinned, History |
-| `merged` | a merged pull request | `✓` | Pinned, History |
-| `closed` | a closed, unmerged pull request | `✗` | Pinned, History |
+| `merged` | a merged pull request | `⊕` | Pinned, History |
+| `closed` | a closed, unmerged pull request | `⊗` | Pinned, History |
 
 In Pinned, the word of a live pull request takes the hue of its state
 glyph (green, yellow, magenta, red); other live words are green. Words of
@@ -181,7 +187,7 @@ Sorting by recency uses these same times.
 - **Counts.** A group header ends with `(N)`: the number of agent
   sessions anywhere beneath it, shown only when N is more than zero.
   Pinned and History buckets have none.
-- **Warning.** `⚠` ends a group header when a session beneath it has an
+- **Warning.** `▲` ends a group header when a session beneath it has an
   ambiguous mux link.
 - **Previews.** The last message of a session (or of the one agent in a
   mux) shows in dim italics at the end of the row, if room remains.
@@ -204,7 +210,7 @@ bucket.
 | 2 | Path | full path with `~`, or members and provider for a workspace | when it differs from the label | dim, cut in the middle to fit |
 | 3 | `(cwd)` | the launch directory | only the group containing where Conspectus was started | cyan |
 | 4 | Count | agent sessions beneath | N > 0 | dim, right-aligned across groups |
-| 5 | `⚠` | ambiguous links beneath | any | yellow bold |
+| 5 | `▲` | ambiguous links beneath | any | yellow bold |
 
 A checkout header adds `(linked · locked · prunable)` for those states.
 
@@ -216,7 +222,7 @@ A checkout header adds `(linked · locked · prunable)` for those states.
 | 2 | Session key | the harness's own id | always | first 8 characters, dim, padded to 8 |
 | 3 | Harness chip | the session's harness | always | 10 cells |
 | 4 | Age | last activity | always | 4 cells |
-| 5 | State | `⚯` linked to a definitive mux, `⚬` not | always | 1 cell; a spinner while a refresh is pending |
+| 5 | State | `⊸` linked to a definitive mux, `∘` not | always | 1 cell; a spinner while a refresh is pending |
 | 6 | Label | alias, title, or mux name (see above) | when one applies | cut at 32 cells |
 | 7 | `was in` chip | the session's last mux | only if that mux is stopped | dim |
 | 8 | Project | repo or directory name | only in flat grouping | padded to 16 |
@@ -224,46 +230,46 @@ A checkout header adds `(linked · locked · prunable)` for those states.
 
 <!-- frame: keys="" width=170 height=30 -->
 ```text
-┌ ▸ sessions · mux · prs · pinned · history ────────────────────────────────────────┐
+┌ ► sessions · mux · prs · pinned · history ────────────────────────────────────────┐
 │▼ ▦   showcase-deck  atelier-repo-a+project  (agent-deck)  (1)                     │
-│    ●   showcase   claude       1m  ⚯  Showcase: agent-deck composite launcher     │
-│▶ ◆   repo-a         ~/atelier-demo/repo-a               (3)                       │
-│▶ ◆   repo-b         ~/atelier-demo/repo-b               (1)                       │
-│▶ ◆   bare-project   ~/checkouts/bare-project            (1)                       │
-│▶ ◆   project        ~/repos/project                     (4)  ⚠                    │
-│▶   Ungrouped                                            (1)                       │
+│    ●   showcase   claude       1m  ⊸  Showcase: agent-deck composite launcher     │
+│► ◆   repo-a         ~/atelier-demo/repo-a               (3)                       │
+│► ◆   repo-b         ~/atelier-demo/repo-b               (1)                       │
+│► ◆   bare-project   ~/checkouts/bare-project            (1)                       │
+│► ◆   project        ~/repos/project                     (4)  ▲                    │
+│►   Ungrouped                                            (1)                       │
 ```
 
 <!-- frame: keys="jjjjjlj" width=170 height=30 -->
 ```text
-┌ ▸ sessions · mux · prs · pinned · history ────────────────────────────────────────┐
+┌ ► sessions · mux · prs · pinned · history ────────────────────────────────────────┐
 │▼ ▦   showcase-deck  atelier-repo-a+project  (agent-deck)  (1)                     │
-│    ●   showcase   claude       1m  ⚯  Showcase: agent-deck composite launcher     │
-│▶ ◆   repo-a         ~/atelier-demo/repo-a               (3)                       │
-│▶ ◆   repo-b         ~/atelier-demo/repo-b               (1)                       │
-│▶ ◆   bare-project   ~/checkouts/bare-project            (1)                       │
-│▼ ◆   project        ~/repos/project                     (4)  ⚠                    │
-│    ●   showcase   claude       1m  ⚬  ambiguous mux candidate A  Showcase: ambigu…│
-│    ●   showcase   claude       1m  ⚬  ambiguous mux candidate B  Showcase: ambigu…│
-│    ●   showcase   claude       1m  ⚬  hook-supersession current sessi…  Showcase:…│
-│    ● ◉ showcase   claude       1h  ⚬  claude-code in project repo  I expanded `no…│
-│▶   Ungrouped                                            (1)                       │
+│    ●   showcase   claude       1m  ⊸  Showcase: agent-deck composite launcher     │
+│► ◆   repo-a         ~/atelier-demo/repo-a               (3)                       │
+│► ◆   repo-b         ~/atelier-demo/repo-b               (1)                       │
+│► ◆   bare-project   ~/checkouts/bare-project            (1)                       │
+│▼ ◆   project        ~/repos/project                     (4)  ▲                    │
+│    ●   showcase   claude       1m  ∘  ambiguous mux candidate A  Showcase: ambigu…│
+│    ●   showcase   claude       1m  ∘  ambiguous mux candidate B  Showcase: ambigu…│
+│    ●   showcase   claude       1m  ∘  hook-supersession current sessi…  Showcase:…│
+│    ● ◉ showcase   claude       1h  ∘  claude-code in project repo  I expanded `no…│
+│►   Ungrouped                                            (1)                       │
 ```
 
 <!-- frame: keys="<C-g><C-g><C-g><C-g><C-g>" width=170 height=30 -->
 ```text
-┌ ▸ sessions · mux · prs · pinned · history ────────────────────────────────────────┐
-│  ●   showcase   claude       1m  ⚬  ambiguous mux candidate A  project            │
-│  ●   showcase   claude       1m  ⚬  ambiguous mux candidate B  project            │
-│  ●   showcase   claude       1m  ⚯  agent-deck composite launcher  showcase-deck-c│
-│  ●   showcase   claude       1m  ⚬  hook-supersession current sessi…  project     │
-│  ● ◉ showcase   claude       1h  ⚬  claude-code in project repo  project          │
-│  ●   showcase   pi           2h  ⚬  repo-a            Showcase: pi in atelier mem…│
-│  ●   showcase   opencode     3h  ⚬  repo-b            Showcase: opencode in ateli…│
-│  ●   showcase   codex       12h  ⚯  bare-work  bare-project      Showcase: codex …│
-│  ●   showcase   codex        2d  ⚬  repo-a            Showcase: codex child forke…│
-│  ●   showcase   codex        3d  ⚬  repo-a            Showcase: codex parent in a…│
-│  ●   showcase   codex        7d  ⚬  orphan            Showcase: orphan session wi…│
+┌ ► sessions · mux · prs · pinned · history ────────────────────────────────────────┐
+│  ●   showcase   claude       1m  ∘  ambiguous mux candidate A  project            │
+│  ●   showcase   claude       1m  ∘  ambiguous mux candidate B  project            │
+│  ●   showcase   claude       1m  ⊸  agent-deck composite launcher  showcase-deck-c│
+│  ●   showcase   claude       1m  ∘  hook-supersession current sessi…  project     │
+│  ● ◉ showcase   claude       1h  ∘  claude-code in project repo  project          │
+│  ●   showcase   pi           2h  ∘  repo-a            Showcase: pi in atelier mem…│
+│  ●   showcase   opencode     3h  ∘  repo-b            Showcase: opencode in ateli…│
+│  ●   showcase   codex       12h  ⊸  bare-work  bare-project      Showcase: codex …│
+│  ●   showcase   codex        2d  ∘  repo-a            Showcase: codex child forke…│
+│  ●   showcase   codex        3d  ∘  repo-a            Showcase: codex parent in a…│
+│  ●   showcase   codex        7d  ∘  orphan            Showcase: orphan session wi…│
 ```
 
 ## Mux view
@@ -290,7 +296,7 @@ sessions are listed beneath a mux.
 | 2 | Name | the mux name without its backend prefix | always | blue; padded to a column of 10 to 30 cells depending on the pane width; long names keep their start and end |
 | 3 | Chip | up to two harness chips (one if narrow) with `+N` for more; else the pane's harness; else a program chip; else ` no agent ` | always | 10 cells each |
 | 4 | Age | the mux's own last activity | always | 4 cells |
-| 5 | State | `⚯` a client is attached, `⚬` none, `?` can't tell | always | 1 cell; a spinner while a refresh is pending |
+| 5 | State | `⊸` a client is attached, `∘` none, `?` can't tell | always | 1 cell; a spinner while a refresh is pending |
 | 6 | Preview | last message of the one agent | only with exactly one visible agent and room left | dim italic |
 
 ### Stopped mux row
@@ -309,21 +315,21 @@ with the running ones, drawn as a ghost.
 
 <!-- frame: keys="2" width=170 height=30 -->
 ```text
-┌ ▸ sessions · mux · prs · pinned · history ────────────────────────────────────────┐
-│  ▣   ambiguous                  claude      15m  ⚬                                │
-│  ▣   bare-work                  codex        2h  ⚬  Showcase: codex resume via /p…│
-│  ▣ ◉ project                    claude       5m  ⚯                                │
-│  ▣   showcase-deck              claude      30m  ⚬  Showcase: agent-deck composit…│
+┌ ► sessions · mux · prs · pinned · history ────────────────────────────────────────┐
+│  ▣   ambiguous                  claude      15m  ∘                                │
+│  ▣   bare-work                  codex        2h  ∘  Showcase: codex resume via /p…│
+│  ▣ ◉ project                    claude       5m  ⊸                                │
+│  ▣   showcase-deck              claude      30m  ∘  Showcase: agent-deck composit…│
 │  ▣ ◎ nightly-refactor           claude       2d  ⊘  ~/repos/project               │
 ```
 
 <!-- frame: keys="2<C-g><C-g>" width=170 height=30 -->
 ```text
-┌ ▸ sessions · mux · prs · pinned · history ────────────────────────────────────────┐
+┌ ► sessions · mux · prs · pinned · history ────────────────────────────────────────┐
 │▼ ◆   bare-project  ~/checkouts/bare-project                                       │
-│    ▣   bare-work                  codex        2h  ⚬  Showcase: codex resume via …│
-│▶ ◆   project       ~/repos/project                                                │
-│▶   Ungrouped                                                                      │
+│    ▣   bare-work                  codex        2h  ∘  Showcase: codex resume via …│
+│► ◆   project       ~/repos/project                                                │
+│►   Ungrouped                                                                      │
 ```
 
 Under a mux with more than one agent attached, each agent is a nested
@@ -346,7 +352,7 @@ Sessions working on a PR's branch are nested beneath it.
 | PRs with no local repo | no glyph; the repo name in bold, the forge name dim |
 | state | no glyph; `Open`, `Draft`, `Merged`, `Closed`, or `Other` |
 
-Each ends with the count of sessions beneath its PRs, and `⚠` when one of
+Each ends with the count of sessions beneath its PRs, and `▲` when one of
 them has an ambiguous mux link.
 
 ### PR row
@@ -355,28 +361,28 @@ them has an ambiguous mux link.
 |---|---|---|---|---|
 | 1 | Prefix | indent, disclosure (only with sessions beneath), `⇄` colored by state, pin marker | always | |
 | 2 | Label | `#N`, or `owner/repo#N` | the short form only inside a group that holds one forge repo | bold, padded across the tree |
-| 3 | Tracking | `⎇` has a local branch, `◌` none | always | 1 cell |
+| 3 | Tracking | `⌥` has a local branch, `◌` none | always | 1 cell |
 | 4 | Age | last update | always | 4 cells |
-| 5 | State | `○` open, `◐` draft, `✓` merged, `✗` closed, `?` no state | always | 1 cell |
+| 5 | State | `○` open, `◐` draft, `⊕` merged, `⊗` closed, `?` no state | always | 1 cell |
 | 6 | Branch | the local branch | only when tracked | dim, cut at 24 |
 | 7 | Title | the PR title | always | gray, takes the rest |
 
 <!-- frame: keys="3" width=170 height=30 -->
 ```text
-┌ ▸ sessions · mux · prs · pinned · history ────────────────────────────────────────┐
-│▼ ◇   conspectus/project  ~/repos/project  (4)  ⚠                                  │
-│  ▶ ⇄   #7 ⎇    2h  ◐  feature/extra  Release notes for 0.3                        │
-│▶ ◆   conspectus/project  ~/repos/project  no checkout                             │
-│▶   project             conspectus/project                                         │
+┌ ► sessions · mux · prs · pinned · history ────────────────────────────────────────┐
+│▼ ◇   conspectus/project  ~/repos/project  (4)  ▲                                  │
+│  ► ⇄   #7 ⌥    2h  ◐  feature/extra  Release notes for 0.3                        │
+│► ◆   conspectus/project  ~/repos/project  no checkout                             │
+│►   project             conspectus/project                                         │
 ```
 
 <!-- frame: keys="3<C-g><C-g>" width=170 height=30 -->
 ```text
-┌ ▸ sessions · mux · prs · pinned · history ────────────────────────────────────────┐
-│▼   Draft   (4)  ⚠                                                                 │
-│    ⇄   conspectus/project#8 ⎇    1d  ◐  main  Pin the toolchain and refresh the l…│
-│  ▶ ⇄   conspectus/project#7 ⎇    2h  ◐  feature/extra  Release notes for 0.3      │
-│▶   Merged                                                                         │
+┌ ► sessions · mux · prs · pinned · history ────────────────────────────────────────┐
+│▼   Draft   (4)  ▲                                                                 │
+│    ⇄   conspectus/project#8 ⌥    1d  ◐  main  Pin the toolchain and refresh the l…│
+│  ► ⇄   conspectus/project#7 ⌥    2h  ◐  feature/extra  Release notes for 0.3      │
+│►   Merged                                                                         │
 ```
 
 ## Pinned view
@@ -418,9 +424,9 @@ or the first 8 characters of its key, its status is `in mux` or
 
 <!-- frame: keys="4" width=170 height=30 -->
 ```text
-┌ ▸ sessions · mux · prs · pinned · history ────────────────────────────────────────┐
+┌ ► sessions · mux · prs · pinned · history ────────────────────────────────────────┐
 │▼ project  ~/repos/project                                                         │
-│  ▶ ▣ ◉ project-main                    live       5m   claude     ~/repos/project │
+│  ► ▣ ◉ project-main                    live       5m   claude     ~/repos/project │
 │    ▣ ◎ nightly                         stopped    2d   claude     ~/repos/project │
 │    ● ◉ parser-session                  in mux     1h   claude     claude-code in …│
 │    ◇ ◎ ledger-worktree                 removed    3d              project · featu…│
@@ -431,9 +437,9 @@ or the first 8 characters of its key, its status is `in mux` or
 
 <!-- frame: keys="4<C-g>" width=170 height=30 -->
 ```text
-┌ ▸ sessions · mux · prs · pinned · history ────────────────────────────────────────┐
+┌ ► sessions · mux · prs · pinned · history ────────────────────────────────────────┐
 │▼ Muxes                                                                            │
-│  ▶ ▣ ◉ project-main                    live       5m   claude     ~/repos/project │
+│  ► ▣ ◉ project-main                    live       5m   claude     ~/repos/project │
 │    ▣ ◎ nightly                         stopped    2d   claude     ~/repos/project │
 │    ▣ ◎ weekly-review                   planned     —   codex      ~/repos/project │
 │▼ Sessions                                                                         │
@@ -446,8 +452,8 @@ or the first 8 characters of its key, its status is `in mux` or
 
 <!-- frame: keys="4<C-g><C-g>" width=170 height=30 -->
 ```text
-┌ ▸ sessions · mux · prs · pinned · history ────────────────────────────────────────┐
-│▶ ▣ ◉ project-main                    live       5m   claude     ~/repos/project   │
+┌ ► sessions · mux · prs · pinned · history ────────────────────────────────────────┐
+│► ▣ ◉ project-main                    live       5m   claude     ~/repos/project   │
 │  ▣ ◎ nightly                         stopped    2d   claude     ~/repos/project   │
 │  ● ◉ parser-session                  in mux     1h   claude     claude-code in pr…│
 │  ◇ ◎ ledger-worktree                 removed    3d              project · feature…│
@@ -481,7 +487,7 @@ Every row is drawn as a ghost, with the same columns as a pin row.
 
 <!-- frame: keys="5" width=170 height=30 -->
 ```text
-┌ ▸ sessions · mux · prs · pinned · history ────────────────────────────────────────┐
+┌ ► sessions · mux · prs · pinned · history ────────────────────────────────────────┐
 │▼ project  ~/repos/project                                                         │
 │    ▣ release-prep   stopped    4d   claude     ~/repos/project                    │
 │    ◇ hotfix/login   removed    5d              project · hotfix/login             │
@@ -492,7 +498,7 @@ Every row is drawn as a ghost, with the same columns as a pin row.
 
 <!-- frame: keys="5<C-g>" width=170 height=30 -->
 ```text
-┌ ▸ sessions · mux · prs · pinned · history ────────────────────────────────────────┐
+┌ ► sessions · mux · prs · pinned · history ────────────────────────────────────────┐
 │▼ Muxes                                                                            │
 │    ▣ release-prep   stopped    4d   claude     ~/repos/project                    │
 │    ▣ bugfix-sprint  stopped    6d   claude     ~/repos/project                    │
@@ -504,7 +510,7 @@ Every row is drawn as a ghost, with the same columns as a pin row.
 
 <!-- frame: keys="5<C-g><C-g>" width=170 height=30 -->
 ```text
-┌ ▸ sessions · mux · prs · pinned · history ────────────────────────────────────────┐
+┌ ► sessions · mux · prs · pinned · history ────────────────────────────────────────┐
 │  ▣ release-prep   stopped    4d   claude     ~/repos/project                      │
 │  ◇ hotfix/login   removed    5d              project · hotfix/login               │
 │  ▣ bugfix-sprint  stopped    6d   claude     ~/repos/project                      │
@@ -529,7 +535,7 @@ tree).
 
 | # | Cell | Source | Style |
 |---|---|---|---|
-| 1 | Prefix | indent, disclosure, `⑂` | |
+| 1 | Prefix | indent, disclosure, `⋎` | |
 | 2 | Label | `provider:name`, or the source key | bold |
 | 3 | Parent | `parent:<label>` | gray |
 | 4 | Scope | where the fork lives (a workspace, say) | dim |

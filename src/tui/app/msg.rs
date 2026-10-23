@@ -116,7 +116,7 @@ pub enum Msg {
     /// Right panel (graph explorer): toggle the visibility of the
     /// link rows' trailing `provenance · confidence · state` meta
     /// line. The default is hidden; the `★` resolver-winner
-    /// marker and `⚠` group-level conflict aggregate stay visible
+    /// marker and `▲` group-level conflict aggregate stay visible
     /// regardless.
     ToggleEdgeMeta,
     /// Right panel (graph explorer): toggle the Expanded Node Detail
@@ -187,6 +187,10 @@ pub enum Msg {
     /// for a background refresh. Repeats before that refresh lands add to
     /// the same pending set.
     HandoffReturned(MuxSessionId),
+    /// The TUI's tmux pane came back into view after the operator was
+    /// in another session. Asks for the same background refresh as a
+    /// returned attach, without marking any row as awaiting it.
+    ViewRegained,
     /// After the next refresh that settles the pending action, move to
     /// the view where `node` now lives and select its row.
     FollowEntity(crate::model::NodeId),
@@ -289,8 +293,6 @@ pub enum Msg {
     /// the modal after seeding defaults from the current selection
     /// (ADR 0096).
     OpenMuxLaunchForm,
-    /// `N` — the same form with the worktree toggle already on.
-    OpenMuxLaunchWorktreeForm,
     /// `.` — open the row action menu for the selected row.
     OpenRowMenu,
     /// Row menu → pin a history record as a slot.

@@ -132,7 +132,7 @@ impl Widget for RowMenuWidget<'_> {
         let mut lines: Vec<Line> = vec![Line::from("")];
         for (idx, entry) in self.state.entries.iter().enumerate() {
             let focused = idx == self.state.cursor;
-            let marker = if focused { "▸" } else { " " };
+            let marker = if focused { "►" } else { " " };
             let armed = self.state.armed == Some(idx);
             let label = if armed {
                 format!("{marker} {} — press Enter again to confirm", entry.label)

@@ -155,9 +155,10 @@ struct MuxLaunchArgs {
     #[arg(long, value_name = "NAME")]
     socket: Option<String>,
     /// Override the harness adapter's default launch argv. Every
-    /// value after `--argv` up to the next flag is treated as a
-    /// launch-argv token.
-    #[arg(long, value_name = "ARG", num_args = 1..)]
+    /// value after `--argv` is a launch-argv token, including ones that
+    /// start with `-` (`--argv claude --dangerously-skip-permissions`),
+    /// so put `--argv` last.
+    #[arg(long, value_name = "ARG", num_args = 1.., allow_hyphen_values = true)]
     argv: Option<Vec<String>>,
     /// Realize the worktree for `<BRANCH>` under `--worktree-repo`
     /// at launch, and use the worktree path as the mux cwd

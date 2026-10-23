@@ -2672,6 +2672,42 @@ fn handoff_return_marks_mux_and_linked_sessions_until_settled() {
 }
 
 #[test]
+fn the_pane_coming_back_into_view_asks_for_a_refresh_without_freezing_rows() {
+    let snap = snapshot_session_with_mux();
+    let tree = build_tree(&snap);
+    let mut app = App::new(RunConfig::defaults());
+    app.update(Msg::SetData {
+        snapshot: SnapshotHandle::from_snapshot(&snap),
+        tree,
+        loaded_at_epoch: 1_700_000_000,
+        initial_selection_hint: None,
+    });
+    let session_row = app
+        .visible_rows()
+        .iter()
+        .find(|row| matches!(row.kind, RowKind::AgentSession(_)))
+        .map(|row| row.kind.clone())
+        .expect("session row");
+
+    app.update(Msg::ViewRegained);
+
+    assert!(
+        app.take_handoff_refresh_request(),
+        "coming back refreshes like returning from an attach"
+    );
+    assert!(
+        !app.take_handoff_refresh_request(),
+        "one refresh per return"
+    );
+    assert!(
+        !app.row_awaits_handoff(&session_row),
+        "no row is known to have changed"
+    );
+    app.update(Msg::HandoffSettled);
+    assert!(app.handoff().is_none());
+}
+
+#[test]
 fn repeated_handoffs_accumulate_until_settled() {
     let mut app = seeded_app(&[("claude-code", "abc", "/p/a")]);
     let first = crate::model::MuxSessionId::new("one");

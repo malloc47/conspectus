@@ -549,7 +549,7 @@ impl Widget for WorktreeMenuWidget<'_> {
                 .iter()
                 .enumerate()
                 .map(|(i, action)| {
-                    let marker = if i == self.state.cursor { "▸ " } else { "  " };
+                    let marker = if i == self.state.cursor { "► " } else { "  " };
                     let style = if i == self.state.cursor {
                         Style::default().add_modifier(Modifier::BOLD)
                     } else {
@@ -567,7 +567,7 @@ impl Widget for WorktreeMenuWidget<'_> {
                 if !self.state.ctx.guard_sessions.is_empty() {
                     lines.push(Line::styled(
                         format!(
-                            "⚠ hosts {} live session(s):",
+                            "▲ hosts {} live session(s):",
                             self.state.ctx.guard_sessions.len()
                         ),
                         Style::default().add_modifier(Modifier::BOLD),
@@ -592,7 +592,7 @@ impl Widget for WorktreeMenuWidget<'_> {
                 if !self.state.ctx.guard_sessions.is_empty() {
                     lines.push(Line::styled(
                         format!(
-                            "⚠ hosts {} live session(s):",
+                            "▲ hosts {} live session(s):",
                             self.state.ctx.guard_sessions.len()
                         ),
                         Style::default().add_modifier(Modifier::BOLD),
@@ -622,7 +622,7 @@ impl Widget for WorktreeMenuWidget<'_> {
                 if !self.state.ctx.guard_sessions.is_empty() {
                     lines.push(Line::styled(
                         format!(
-                            "⚠ ends {} live session(s) (transcripts preserved):",
+                            "▲ ends {} live session(s) (transcripts preserved):",
                             self.state.ctx.guard_sessions.len()
                         ),
                         Style::default().add_modifier(Modifier::BOLD),

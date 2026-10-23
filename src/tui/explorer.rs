@@ -141,7 +141,7 @@ pub struct CoreField {
     /// `true` when [`Self::value`] is a placeholder (`— (unknown)`,
     /// etc.). The renderer dims placeholder rows.
     pub placeholder: bool,
-    /// Optional trailing annotation glyph (`⚠`, `⟳`, …).
+    /// Optional trailing annotation glyph (`▲`, `⟳`, …).
     pub annotation: Option<&'static str>,
     /// Full untruncated value when [`Self::value`] is a truncated
     /// preview. `o` opens it in the full-value modal.

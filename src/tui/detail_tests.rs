@@ -185,7 +185,7 @@ fn mux_pinned_by_a_gone_slot_shows_pin_summary() {
 
 #[test]
 fn sections_emit_mux_section_when_ambiguous_mux_carries_warning() {
-    // A session with ≥2 mux candidates has a `⚠` annotation on
+    // A session with ≥2 mux candidates has a `▲` annotation on
     // its mux field; even though the value reads as a
     // placeholder-ish "— (N candidates)" it is *not* a blank
     // placeholder per ADR 0033's suppression rule and the Mux
@@ -391,7 +391,7 @@ fn ambiguous_mux_annotates_with_warning_and_count() {
         .unwrap();
     assert!(mux.value.contains("tmux:editor"), "value={}", mux.value);
     assert!(mux.value.contains("2 candidates"), "value={}", mux.value);
-    assert_eq!(mux.annotation, Some("⚠"));
+    assert_eq!(mux.annotation, Some("▲"));
 }
 
 #[test]
@@ -659,7 +659,7 @@ fn runtime_process_detail_links_back_to_mux_and_session() {
         .expect("session field");
     assert_eq!(session.value, "codex:abc");
     assert_eq!(session.target, Some(session_id));
-    assert_eq!(session.annotation, Some("⚠"));
+    assert_eq!(session.annotation, Some("▲"));
 }
 
 #[test]

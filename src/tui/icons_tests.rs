@@ -43,9 +43,9 @@ fn default_glyphs_match_adr_0073_slate() {
         (NodeKind::Checkout, "◇"),
         (NodeKind::AgentSession, "●"),
         (NodeKind::MuxSession, "▣"),
-        (NodeKind::RuntimeProcess, "⚙"),
-        (NodeKind::Branch, "⎇"),
-        (NodeKind::Fork, "⑂"),
+        (NodeKind::RuntimeProcess, "◈"),
+        (NodeKind::Branch, "⌥"),
+        (NodeKind::Fork, "⋎"),
         (NodeKind::ForgePr, "⇄"),
     ];
     for (kind, glyph) in expected {
@@ -239,6 +239,101 @@ fn state_glyphs_do_not_reuse_a_node_kind_glyph_except_the_pin_marker() {
         assert!(
             !state::ALL.contains(&glyph),
             "{kind:?}'s glyph `{glyph}` is also a state glyph"
+        );
+    }
+}
+
+fn vetted(glyph: &str) -> bool {
+    VETTED.iter().any(|(g, _)| *g == glyph)
+}
+
+#[test]
+fn all_glyphs_are_vetted() {
+    for glyph in all_glyphs() {
+        assert!(
+            vetted(glyph),
+            "`{glyph}` is drawn by the left panel but is not in icons::VETTED: measure it with \
+             scripts/glyph-widths.py and record the result"
+        );
+    }
+}
+
+#[test]
+fn vetted_glyphs_have_no_width_or_emoji_risk() {
+    let mut seen = std::collections::HashSet::new();
+    for (glyph, note) in VETTED {
+        assert!(seen.insert(*glyph), "`{glyph}` is listed twice in VETTED");
+        assert!(
+            !note.is_empty(),
+            "`{glyph}` needs a note saying how it was vetted"
+        );
+        if let Some(why) = glyph_risk(glyph) {
+            panic!("`{glyph}` is in VETTED but {why}");
+        }
+    }
+}
+
+#[test]
+fn risky_glyphs_are_rejected() {
+    for glyph in [
+        "▶",
+        "◀",
+        "⚠",
+        "⚙",
+        "✔",
+        "😀",
+        "東",
+        "ab",
+        "\u{200D}",
+        "▶\u{FE0F}",
+    ] {
+        assert!(glyph_risk(glyph).is_some(), "`{glyph}` should be rejected");
+    }
+    for glyph in ["▼", "►", "◉", "⊸", "?"] {
+        assert_eq!(glyph_risk(glyph), None, "`{glyph}` should be allowed");
+    }
+}
+
+/// Every non-ASCII character the TUI sources draw, on a line that isn't a
+/// comment, must have been vetted. Test modules and snapshots are skipped.
+#[test]
+fn every_glyph_the_sources_draw_is_vetted() {
+    fn walk(dir: &std::path::Path, found: &mut Vec<(String, char)>) {
+        for entry in std::fs::read_dir(dir).unwrap().flatten() {
+            let path = entry.path();
+            let name = path.file_name().unwrap().to_string_lossy().into_owned();
+            if path.is_dir() {
+                if name == "tests" || name == "snapshots" || name.ends_with("_tests") {
+                    continue;
+                }
+                walk(&path, found);
+            } else if path.extension().is_some_and(|e| e == "rs") && !name.ends_with("_tests.rs") {
+                for line in std::fs::read_to_string(&path).unwrap().lines() {
+                    if line.trim_start().starts_with("//") {
+                        continue;
+                    }
+                    for ch in line.chars().filter(|c| !c.is_ascii()) {
+                        found.push((path.display().to_string(), ch));
+                    }
+                }
+            }
+        }
+    }
+    let mut found = Vec::new();
+    walk(
+        &std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src/tui"),
+        &mut found,
+    );
+    assert!(
+        !found.is_empty(),
+        "the scan found no glyphs, so it is broken"
+    );
+    for (file, ch) in found {
+        assert!(
+            vetted(&ch.to_string()),
+            "`{ch}` (U+{:04X}) is drawn in {file} but is not in icons::VETTED: run \
+             scripts/glyph-widths.py --source and record it",
+            ch as u32
         );
     }
 }

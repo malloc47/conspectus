@@ -846,3 +846,75 @@ fn worktree_close_forgets_unpinned_records_and_keeps_pinned_ones() {
         "the slot still has its record: {show}"
     );
 }
+
+/// A stub harness that records the arguments it was started with.
+fn recording_stub(dir: &std::path::Path, name: &str, out: &std::path::Path) {
+    use std::os::unix::fs::PermissionsExt;
+    let path = dir.join(name);
+    std::fs::write(
+        &path,
+        format!(
+            "#!/bin/sh\nprintf '%s\\n' \"$@\" > '{}'\nexec sleep 600\n",
+            out.display()
+        ),
+    )
+    .unwrap();
+    std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).unwrap();
+}
+
+#[test]
+fn mux_launch_passes_skip_permission_flags_through_to_the_harness() {
+    if !tmux_available() {
+        eprintln!("tmux not installed; skipping");
+        return;
+    }
+    let world = World::new();
+    let bin = world.home.join("bin");
+    std::fs::create_dir_all(&bin).unwrap();
+    for (harness, binary, flag) in [
+        ("claude-code", "claude", "--dangerously-skip-permissions"),
+        (
+            "codex",
+            "codex",
+            "--dangerously-bypass-approvals-and-sandbox",
+        ),
+    ] {
+        let out = world.home.join(format!("{binary}.args"));
+        recording_stub(&bin, binary, &out);
+        let path = format!(
+            "{}:{}",
+            bin.display(),
+            std::env::var("PATH").unwrap_or_default()
+        );
+        let name = format!("skip-{binary}");
+        let output = world
+            .conspectus()
+            .env("PATH", path)
+            .args([
+                "mux",
+                "launch",
+                harness,
+                "--name",
+                &name,
+                "--no-attach",
+                "--argv",
+                binary,
+                flag,
+            ])
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "{harness}: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        for _ in 0..50 {
+            if out.exists() {
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(100));
+        }
+        let recorded = std::fs::read_to_string(&out).unwrap_or_default();
+        assert_eq!(recorded.trim(), flag, "{harness} got exactly the flag");
+    }
+}

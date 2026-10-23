@@ -3,7 +3,7 @@ source: src/tui/ui_tests.rs
 expression: all_kinds_frame(width)
 ---
 updated 0s ago · 0/1 sessions · 1 mux                                                                         
-┌ ▸ sessions · mux · prs · pinned · history ──────────┐┌   ◉ pin ────────────────────────────────────────────┐
+┌ ► sessions · mux · prs · pinned · history ──────────┐┌   ◉ pin ────────────────────────────────────────────┐
 │  ▣ ◉ mux-live          live         1m  ~/src/consp…││  id            mux-live                             │
 │  ▣ ◎ mux-gone          stopped      4d  ~/src/consp…││  name          mux-live                             │
 │  ▣ ◎ mux-unknown       unknown      2h  ~/src/consp…││  kind          mux                                  │
@@ -11,7 +11,7 @@ updated 0s ago · 0/1 sessions · 1 mux
 │  ▣ ◎ mux-missing       missing       —              ││  target        mux_session:tmux:main                │
 │  ● ◉ session-live      resumable   10m  Fix the led…││  name          main                                 │
 │  ● ◎ session-missing   missing       —              ││  cwd           /home/op/src/conspectus              │
-│▶ ◇ ◉ worktree-live     live          —  conspectus  ││  harness       codex                                │
+│► ◇ ◉ worktree-live     live          —  conspectus  ││  harness       codex                                │
 │  ◇ ◎ worktree-gone     removed      2d  conspectus …││  argv          codex                                │
 │  ◇ ◎ worktree-planned  planned       —              ││──────────────────────────── 1 validated  Related ── │
 │  ◆ ◉ repo-live         live          —  ~/src/consp…││  targets                ▣ tmux:main                 │
@@ -19,10 +19,10 @@ updated 0s ago · 0/1 sessions · 1 mux
 │  ⇄ ◉ pr-open           open          —  malloc47/co…││────────────────────────────────────────── Preview ──│
 │  ⇄ ◉ pr-draft          draft         —  malloc47/co…││loading mux preview…                                 │
 │  ⇄ ◉ pr-closed         closed        —  malloc47/co…││                                                     │
-│  ⎇ ◉ branch-live       live          —  conspectus …││                                                     │
-│  ⎇ ◎ branch-missing    missing       —              ││                                                     │
+│  ⌥ ◉ branch-live       live          —  conspectus …││                                                     │
+│  ⌥ ◎ branch-missing    missing       —              ││                                                     │
 │  ▦ ◉ workspace-live    live          —  ~/src       ││                                                     │
-│  ⑂ ◉ fork-live         live          —  atelier · s…││                                                     │
+│  ⋎ ◉ fork-live         live          —  atelier · s…││                                                     │
 │                                                     ││                                                     │
 │                                                     ││                                                     │
 │                                                     ││                                                     │

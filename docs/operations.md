@@ -220,7 +220,11 @@ teardown_grace = "3s"
   state. After a detach the TUI re-probes up to twice more, 150ms apart, if
   the set of running muxes came back exactly as it was before. Timer
   refreshes still reuse the cached listing. Forges are never re-fetched by
-  these refreshes, and their data is kept.
+  these refreshes, and their data is kept. Inside tmux, attaching switches
+  your tmux client to the mux and returns at once, so the TUI also watches
+  whether its own pane is on screen and refreshes the moment you switch
+  back; a mux you exited while away is already a stopped mux when you
+  return.
 - **Forge concurrency:** `[forge] concurrency` (default 4) sets how many
   `gh` calls run at once. Higher fetches faster but can trip a forge's
   rate limits.
@@ -262,7 +266,7 @@ recency_active = "green"
 recency_recent = "yellow"
 recency_cold   = "dim"
 
-# Mux-state glyphs (⚯ linked or attached, ⚬ not linked or no client).
+# Mux-state glyphs (⊸ linked or attached, ∘ not linked or no client).
 mux_attached  = "green"
 mux_unmuxed   = "dim"
 
@@ -276,7 +280,7 @@ command_badge = "black"
 cwd_mark           = "cyan"
 link_id            = "blue"
 secondary_text     = "dark_gray"   # short ids + preview snippets
-disclosure         = "cyan"        # the ▶ / ▼ tree affordance
+disclosure         = "cyan"        # the ► / ▼ tree affordance
 divider            = "dim"
 panel_focus_accent = "cyan"        # the ▸ marker on the active pane title
                                    # and the detail-pane section chip
@@ -851,8 +855,10 @@ the graph as well as the filesystem) and moves on elsewhere, `←`/`→`/`Space`
 choose among the harnesses, options, and toggles, and a line shows the command
 the form will run.
 
-`N` opens the mux launch form with the worktree toggle on, and `m` then
-**Launch harness in new mux…** opens it with the toggle off. An empty `launch
+`N`, or `m` then **Launch harness in new mux…**, opens the mux launch form
+with the worktree toggle off (switch it on to create or reuse a worktree). The
+`command` row shows what will run; it is read only (dim, italic) and never takes
+focus. An empty `launch
 argv` resolves to the harness's default (a project or user `[launch.*]`
 profile, `atelier exec`, or the harness default) and the form shows the
 command and where it came from. The last field, **pin**, can also pin the new
@@ -969,7 +975,7 @@ the record, `y` copies it, `Esc` closes.
 A warning or error also:
 
 - sets the status message to its summary plus `· ! details`;
-- keeps a `⚠ N · ! messages` chip at the start of the status bar until
+- keeps a `▲ N · ! messages` chip at the start of the status bar until
   you open the overlay;
 - leads the Preview of the row it concerns (its pin or mux) until a
   later operation on that row succeeds.

@@ -10,7 +10,7 @@
 //!   detail view-models; the renderer just lays them out.
 //! - Mux glyphs `◉` / `◯` with color carrying the primary signal
 //!   (green attached / dim not attached); mux ambiguity surfaces as
-//!   `⚠` on group rows and the header.
+//!   `▲` on group rows and the header.
 //! - Header reports `updated Ns ago · N agents · M mux`; the
 //!   freshness slot uses [`format_recency`] over
 //!   `App::loaded_at_epoch`.
@@ -308,13 +308,13 @@ fn focus_marker_width(app: &App, focus: Focus) -> usize {
     focus_marker_span(app, focus).content.chars().count()
 }
 
-/// `▸ ` when the given panel has focus, two-space pad otherwise.
+/// `► ` when the given panel has focus, two-space pad otherwise.
 /// Keeps title widths consistent across focus states so the tab
 /// strip and right-pane label sit at the same offset before and
 /// after `Tab`.
 fn focus_marker_span(app: &App, panel: Focus) -> Span<'static> {
     let focused = app.focus() == panel;
-    let glyph = if focused { "▸ " } else { "  " };
+    let glyph = if focused { "► " } else { "  " };
     span!(Style::default().fg(app.theme().panel_focus_accent); "{glyph}")
 }
 

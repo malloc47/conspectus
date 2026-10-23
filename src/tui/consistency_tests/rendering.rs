@@ -281,7 +281,7 @@ fn the_history_controls_offer_an_unpinned_only_filter_that_starts_checked() {
         .find(|line| line.to_lowercase().contains("unpinned only"))
         .unwrap_or_else(|| panic!("no unpinned only filter:\n{frame}"));
     assert!(
-        line.contains("[x]") || line.contains('✓') || line.contains('☑'),
+        line.contains("[x]") || line.contains('√') || line.contains('☑'),
         "{line}"
     );
 }

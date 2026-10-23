@@ -85,7 +85,7 @@ pub struct Theme {
     /// because the `DIM` modifier renders inconsistently across
     /// terminals (no effect in some popular configurations).
     pub secondary_text: Color,
-    /// Color for the ▶ / ▼ disclosure glyphs so the affordance is
+    /// Color for the ► / ▼ disclosure glyphs so the affordance is
     /// distinct from the label text it sits next to. Subtle accent
     /// by default; operators can swap for a dimmer color if the
     /// glyph competes with their group labels.

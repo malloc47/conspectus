@@ -1454,6 +1454,15 @@ impl App {
                 handoff.sessions.extend(sessions);
                 handoff.refresh_requested = true;
             }
+            Msg::ViewRegained => {
+                let handoff = self.handoff.get_or_insert_with(|| PendingHandoff {
+                    muxes: BTreeSet::new(),
+                    sessions: BTreeSet::new(),
+                    started_at: Instant::now(),
+                    refresh_requested: false,
+                });
+                handoff.refresh_requested = true;
+            }
             Msg::FollowEntity(node) => {
                 self.pending_follow = Some(node);
             }
@@ -1825,8 +1834,7 @@ impl App {
                         .with_cwd_candidates(candidates),
                 );
             }
-            Msg::OpenMuxLaunchForm | Msg::OpenMuxLaunchWorktreeForm => {
-                let with_worktree = matches!(msg, Msg::OpenMuxLaunchWorktreeForm);
+            Msg::OpenMuxLaunchForm => {
                 let seeded_cwd = crate::tui::runtime::derive_mux_form_cwd(self)
                     .unwrap_or_else(|| std::env::var("HOME").unwrap_or_else(|_| "/".to_string()));
                 let seeded_mux_name =
@@ -1836,7 +1844,7 @@ impl App {
                 let default_harness = known_harness_keys.first().cloned().unwrap_or_default();
                 let repo = seeded_cwd.clone();
                 let candidates = crate::tui::runtime::known_cwd_candidates(self, Some(&seeded_cwd));
-                let mut form = crate::tui::widgets::mux_launch::MuxLaunchFormState::new(
+                let form = crate::tui::widgets::mux_launch::MuxLaunchFormState::new(
                     default_harness,
                     seeded_cwd,
                     seeded_mux_name,
@@ -1846,10 +1854,8 @@ impl App {
                 .with_defaults(crate::launch_default::LaunchDefaults::new(
                     self.config().launch.clone(),
                 ))
-                .with_cwd_candidates(candidates);
-                if with_worktree {
-                    form = form.with_worktree(repo);
-                }
+                .with_cwd_candidates(candidates)
+                .with_worktree_repo(repo);
                 self.open_mux_launch_form(form);
             }
             Msg::CommitMuxLaunch(request) => {
