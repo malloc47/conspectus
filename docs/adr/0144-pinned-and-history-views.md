@@ -8,6 +8,13 @@ mixed kinds. Removes the Pins groups, placeholder rows, and Pins modal
 of ADR 0057's TUI surface. Part of the history, rebuild, and pin slots
 plan with ADRs 0140, 0141, 0142, and 0143.
 
+Amended (2026-10): a pin with no target yet wears a hollow pin glyph
+(`◎`) in the ghost color, and `gone` describes only an entity that
+existed; the agent or program is the same filled chip other views draw,
+without a dot delimiter; the History view lists unpinned records by
+default, with an **Unpinned only** control to list pinned ones too; the
+interface calls a pin a pin and never by its storage word.
+
 ## Context
 
 Pinned muxes and sessions sit in a Pins group at the top of the

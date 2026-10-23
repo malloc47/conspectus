@@ -310,18 +310,14 @@ fn pin_entries(
             PinSubject::Node(node) => Msg::PinNode(node.clone()),
             PinSubject::Record(id) => Msg::PinRecord(id.clone()),
         };
-        return vec![RowMenuEntry::new(
-            "Pin",
-            "add a slot that points at this (p)",
-            msg,
-        )];
+        return vec![RowMenuEntry::new("Pin", "pin this (p)", msg)];
     }
     slots
         .into_iter()
         .map(|slot| {
             RowMenuEntry::new(
                 format!("Unpin {slot}"),
-                "remove the slot; the entity and its history stay",
+                "remove the pin; the entity and its history stay",
                 Msg::Unpin(slot),
             )
             .confirming()
@@ -433,13 +429,13 @@ fn slot_menu(
             Msg::ShowRebuildPlan(slot.clone()),
         ),
         RowMenuEntry::new(
-            "Edit overrides…",
-            "set or clear a field: name=value",
+            "Edit…",
+            "change the name, cwd, harness, arguments, and more",
             Msg::OpenSlotEdit(slot.clone()),
         ),
         RowMenuEntry::new(
             "Rename…",
-            "change the slot name (a live mux is renamed with it)",
+            "change the pin name (a live mux is renamed with it)",
             Msg::OpenSlotRename(slot.clone()),
         ),
         RowMenuEntry::new(
@@ -449,7 +445,7 @@ fn slot_menu(
         ),
         RowMenuEntry::new(
             "Refresh snapshot",
-            "copy the entity's current recipe into the slot",
+            "copy the entity's current recipe into the pin",
             Msg::RefreshSlot(slot.clone()),
         ),
         RowMenuEntry::new(
@@ -459,12 +455,12 @@ fn slot_menu(
         ),
         RowMenuEntry::new(
             "Unpin",
-            "remove the slot; the entity and its history stay",
+            "remove the pin; the entity and its history stay",
             Msg::Unpin(slot.clone()),
         )
         .confirming(),
     ];
-    Some(RowMenuState::new(format!("slot {slot}"), entries))
+    Some(RowMenuState::new(format!("pin {slot}"), entries))
 }
 
 /// What `Enter` does on a History row or a ghost mux: rebuild the

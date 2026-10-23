@@ -75,7 +75,7 @@ impl Plan {
                 continue;
             }
             out.push_str(&format!(
-                "pin `{}` -> mux slot (mux `{}`, {}, {})\n",
+                "pin `{}` -> mux pin (mux `{}`, {}, {})\n",
                 e.id, e.mux.name, e.harness, e.cwd
             ));
             if let Some(last) = &item.last_session {
@@ -125,7 +125,7 @@ pub fn plan(
         if taken.contains(id.as_str()) {
             plan.skipped.push((
                 id.clone(),
-                "a slot with this name already exists; rename one of them".to_string(),
+                "a pin with this name already exists; rename one of them".to_string(),
             ));
             continue;
         }
@@ -134,7 +134,7 @@ pub fn plan(
             Ok(record) => record,
             Err(err) => {
                 plan.warnings.push(format!(
-                    "pin `{id}`: its last-session file can't be used ({err}); the slot starts without a remembered session"
+                    "pin `{id}`: its last-session file can't be used ({err}); the pin starts without a remembered session"
                 ));
                 None
             }
@@ -376,7 +376,7 @@ fn migrate_one(item: &Item, targets: &Targets<'_>, report: &mut Report) -> Resul
             order: 0,
             legacy: false,
         })
-        .map_err(|err| format!("could not write the slot: {err}"))?;
+        .map_err(|err| format!("could not write the pin: {err}"))?;
 
     if let Some((session, name)) = &item.alias
         && let Some(path) = targets.user_config

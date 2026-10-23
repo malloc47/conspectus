@@ -33,7 +33,7 @@ fn is_age(token: &str) -> bool {
     token == "—"
         || (chars.len() > 1
             && chars[..chars.len() - 1].iter().all(char::is_ascii_digit)
-            && matches!(chars[chars.len() - 1], 's' | 'm' | 'h' | 'd' | 'w'))
+            && matches!(chars[chars.len() - 1], 's' | 'm' | 'h' | 'd' | 'w' | '…'))
 }
 
 /// Column where the label starts and where the age ends, for the left
@@ -57,7 +57,6 @@ fn row_grid(lines: &[String], label: &str) -> (usize, Option<usize>) {
 }
 
 #[test]
-#[ignore = "backlog CSP-692.05: gone muxes use a different column grid than live muxes"]
 fn live_and_gone_mux_rows_share_one_column_grid() {
     let mut app = app_in(View::Mux);
     let lines = left_pane_lines(&frame(&mut app, 220, 24), 220);
@@ -83,7 +82,6 @@ fn the_pinned_view_keeps_its_columns_aligned_across_kinds() {
 }
 
 #[test]
-#[ignore = "backlog CSP-692.05: an unstarted pin has no hollow pin glyph"]
 fn an_unstarted_pin_wears_a_hollow_pin_glyph_and_nothing_else_does() {
     let mut app = app_in(View::Pinned);
     let frame = frame(&mut app, 200, 30);
@@ -142,11 +140,10 @@ fn the_sessions_view_draws_the_agent_name_as_a_chip() {
 }
 
 #[test]
-#[ignore = "backlog CSP-692.05: the Pinned and History views print the agent as plain text before a dot"]
 fn pinned_and_history_rows_draw_the_agent_name_as_the_same_chip() {
     for (view, row) in [
         (View::Pinned, "conspectus-main"),
-        (View::History, "config-agent3"),
+        (View::History, "old-experiment"),
         (View::Mux, "config-agent3"),
     ] {
         let mut app = app_in(view);
@@ -164,7 +161,6 @@ fn pinned_and_history_rows_draw_the_agent_name_as_the_same_chip() {
 }
 
 #[test]
-#[ignore = "backlog CSP-692.05: session rows in the Sessions view omit the agent glyph"]
 fn session_rows_show_the_agent_glyph_in_every_view_that_lists_them() {
     for view in [View::Sessions, View::Pinned] {
         let mut app = app_in(view);
@@ -177,8 +173,9 @@ fn session_rows_show_the_agent_glyph_in_every_view_that_lists_them() {
     }
 }
 
-/// Count of cells in the right half of the frame drawn REVERSED, below
-/// the title bar and above the status line.
+/// Cells of one half of the frame drawn REVERSED. Chips are reversed
+/// too, so a test compares the count with and without focus rather than
+/// expecting zero.
 fn reversed_cells(buffer: &Buffer, left: bool) -> usize {
     let half = buffer.area.width / 2;
     let (from, to) = if left {
@@ -201,32 +198,29 @@ fn reversed_cells(buffer: &Buffer, left: bool) -> usize {
 }
 
 #[test]
-#[ignore = "backlog CSP-692.05: the right pane highlights its cursor row even when it is not focused"]
 fn an_unfocused_pane_shows_no_highlighted_row() {
     let mut app = app_in(View::Mux);
     select(&mut app, "conspectus-main");
     assert_eq!(app.focus(), Focus::Left);
-    let buffer = buffer_of(&mut app, 160, 30);
-    assert!(
-        reversed_cells(&buffer, true) > 0,
-        "the focused pane highlights"
-    );
-    assert_eq!(
-        reversed_cells(&buffer, false),
-        0,
-        "the unfocused right pane must not highlight a row"
-    );
+    let left_focused = buffer_of(&mut app, 160, 30);
 
     app.update(Msg::CycleFocus);
-    let buffer = buffer_of(&mut app, 160, 30);
+    assert_eq!(app.focus(), Focus::Right);
+    let right_focused = buffer_of(&mut app, 160, 30);
+
+    // Each pane draws strictly more reversed cells while it has focus:
+    // the difference is its highlighted row.
     assert!(
-        reversed_cells(&buffer, false) > 0,
-        "the focused pane highlights"
+        reversed_cells(&left_focused, true) > reversed_cells(&right_focused, true),
+        "the left pane highlights its row only while focused"
+    );
+    assert!(
+        reversed_cells(&right_focused, false) > reversed_cells(&left_focused, false),
+        "the right pane highlights its row only while focused"
     );
 }
 
 #[test]
-#[ignore = "backlog CSP-692.05: regrouping keeps the old scroll offset"]
 fn regrouping_a_view_scrolls_back_to_the_top() {
     let world = world_with(40);
     for view in [View::Pinned, View::Mux, View::Sessions] {
@@ -255,7 +249,6 @@ fn regrouping_a_view_scrolls_back_to_the_top() {
 }
 
 #[test]
-#[ignore = "backlog CSP-692.05: the History view cannot hide records that are pinned"]
 fn the_history_view_hides_pinned_records_by_default() {
     let app = app_in(View::History);
     let snapshot = world();
@@ -277,7 +270,6 @@ fn the_history_view_hides_pinned_records_by_default() {
 }
 
 #[test]
-#[ignore = "backlog CSP-692.05: History has no unpinned only filter in Controls"]
 fn the_history_controls_offer_an_unpinned_only_filter_that_starts_checked() {
     let mut app = app_in(View::History);
     app.open_controls_overlay();
@@ -290,4 +282,46 @@ fn the_history_controls_offer_an_unpinned_only_filter_that_starts_checked() {
         line.contains("[x]") || line.contains('✓') || line.contains('☑'),
         "{line}"
     );
+}
+
+#[test]
+fn the_history_empty_state_says_when_pinned_records_are_hidden() {
+    let mut snapshot = world();
+    // Keep only the records a pin points at.
+    let keep: std::collections::BTreeSet<String> = snapshot
+        .history
+        .metas()
+        .filter(|(_, meta)| !crate::tui::rows::history::pinned_by(&snapshot, &meta.id).is_empty())
+        .map(|(_, meta)| meta.id.clone())
+        .collect();
+    snapshot.history.muxes.retain(|r| keep.contains(&r.meta.id));
+    snapshot
+        .history
+        .checkouts
+        .retain(|r| keep.contains(&r.meta.id));
+    snapshot.history.repos.retain(|r| keep.contains(&r.meta.id));
+    snapshot.history.prs.retain(|r| keep.contains(&r.meta.id));
+
+    let mut app = app_over(View::History, &snapshot);
+    let shown = frame(&mut app, 140, 20);
+    assert!(
+        shown.contains("is pinned") && shown.contains("Unpinned only"),
+        "an empty History explains the filter:\n{shown}"
+    );
+}
+
+#[test]
+fn listing_pinned_history_marks_those_records_with_the_filled_pin() {
+    let mut app = app_listing_all(View::History);
+    let shown = frame(&mut app, 200, 30);
+    let line = shown
+        .lines()
+        .find(|line| line.contains("config-agent3"))
+        .unwrap_or_else(|| panic!("no pinned record row:\n{shown}"));
+    assert!(line.chars().take(100).any(|c| c == '◉'), "{line}");
+    let unpinned = shown
+        .lines()
+        .find(|line| line.contains("old-experiment"))
+        .expect("unpinned row");
+    assert!(!unpinned.chars().take(100).any(|c| c == '◉'), "{unpinned}");
 }

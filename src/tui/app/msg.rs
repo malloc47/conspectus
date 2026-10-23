@@ -299,8 +299,10 @@ pub enum Msg {
     TogglePin,
     /// Row menu → remove a slot.
     Unpin(String),
-    /// Slot menu → open the override editor (`field=value`).
+    /// Pin menu → open the pin edit form.
     OpenSlotEdit(String),
+    /// The pin edit form saved: rename the pin and set or drop overrides.
+    CommitPinEdit(crate::tui::widgets::pin_edit::PinEditRequest),
     /// Slot menu → open the rename prompt.
     OpenSlotRename(String),
     /// Slot menu → open the retarget prompt.

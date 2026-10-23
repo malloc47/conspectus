@@ -17,8 +17,8 @@ use crate::tui::HistoryGrouping;
 
 use super::pinned::{join_dot, project_for_path};
 use super::{
-    GroupRow, MixedRow, MixedTone, Row, RowId, RowKind, RowTree, ViewLabel, format_recency,
-    harness_label, shorten_home,
+    GroupRow, MixedChip, MixedGrid, MixedRow, MixedTone, PinMarker, Row, RowId, RowKind, RowTree,
+    ViewLabel, format_recency, harness_label, shorten_home,
 };
 
 pub struct HistoryBuildInputs<'a> {
@@ -26,6 +26,8 @@ pub struct HistoryBuildInputs<'a> {
     pub home: Option<&'a Path>,
     pub now: Option<i64>,
     pub grouping: HistoryGrouping,
+    /// List records a pin points at too.
+    pub show_pinned: bool,
 }
 
 /// The bucket records with no local project fall into.
@@ -92,8 +94,12 @@ pub fn build_history_tree(inputs: HistoryBuildInputs<'_>) -> RowTree {
         home,
         now,
         grouping,
+        show_pinned,
     } = inputs;
     let mut entries = gone_records(snapshot, home);
+    if !show_pinned {
+        entries.retain(|entry| pinned_by(snapshot, &entry.meta.id).is_empty());
+    }
     for entry in &mut entries {
         entry.row.age = format_recency(now, Some(entry.last_seen));
     }
@@ -198,17 +204,17 @@ fn describe(
 ) -> Option<MixedRow> {
     let history = &snapshot.history;
     let path = |p: &str| shorten_home(p, home);
-    let (node_kind, label, status, content, pr_state) = match kind {
+    let (node_kind, label, status, chip, content, pr_state) = match kind {
         HistoryKind::Mux => {
             let r = &history.mux(&meta.id)?.recipe;
             (
                 NodeKind::MuxSession,
                 r.name.clone(),
                 "gone".to_string(),
-                join_dot([
-                    r.harness.as_deref().map(harness_label).unwrap_or_default(),
-                    r.cwd.as_deref().map(path).unwrap_or_default(),
-                ]),
+                r.harness
+                    .as_deref()
+                    .map(|harness| MixedChip::agent(harness_label(harness))),
+                r.cwd.as_deref().map(path).unwrap_or_default(),
                 None,
             )
         }
@@ -225,6 +231,7 @@ fn describe(
                 NodeKind::Checkout,
                 label,
                 "gone".to_string(),
+                None,
                 join_dot([
                     crate::history::recorder::repo_name(r.common_dir()),
                     r.branch.clone().unwrap_or_default(),
@@ -243,7 +250,14 @@ fn describe(
                 || path(r.primary_root.as_deref().unwrap_or(&r.common_dir)),
                 |remote| remote.url.clone(),
             );
-            (NodeKind::Repo, label, "gone".to_string(), content, None)
+            (
+                NodeKind::Repo,
+                label,
+                "gone".to_string(),
+                None,
+                content,
+                None,
+            )
         }
         HistoryKind::Pr => {
             let r = &history.pr(&meta.id)?.recipe;
@@ -259,6 +273,7 @@ fn describe(
                 NodeKind::ForgePr,
                 format!("#{}", r.number),
                 status,
+                None,
                 join_dot([
                     format!("{}/{}", r.owner, r.repo),
                     r.title.clone().unwrap_or_default(),
@@ -273,9 +288,16 @@ fn describe(
         status,
         tone: MixedTone::Dim,
         age: None,
+        chip,
         content: content.replace('\n', " ").trim().to_string(),
         primary_node: node_of(snapshot, kind, &meta.id)?,
         pr_state,
+        marker: if pinned_by(snapshot, &meta.id).is_empty() {
+            PinMarker::None
+        } else {
+            PinMarker::Pinned
+        },
+        grid: MixedGrid::Columns,
     })
 }
 

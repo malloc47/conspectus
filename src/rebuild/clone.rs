@@ -109,7 +109,7 @@ pub fn clone_step(
         .or_else(|| record.and_then(|r| r.recipe.remotes.first().map(|r| r.url.as_str())))
         .ok_or_else(|| {
             RebuildError::Cannot(
-                "no remote is recorded for this repo; set one with `pin edit <slot> --set remote=<url>`"
+                "no remote is recorded for this repo; set one with `pin edit <pin> --set remote=<url>`"
                     .into(),
             )
         })?;
@@ -126,7 +126,7 @@ pub fn clone_step(
         })
         .ok_or_else(|| {
             RebuildError::Cannot(
-                "no path is recorded for this repo; set one with `pin edit <slot> --set path=<dir>`"
+                "no path is recorded for this repo; set one with `pin edit <pin> --set path=<dir>`"
                     .into(),
             )
         })?;

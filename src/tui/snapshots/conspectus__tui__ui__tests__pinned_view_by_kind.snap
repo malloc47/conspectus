@@ -5,16 +5,16 @@ expression: "pinned_frame(&mut app, 120)"
 updated 0s ago · 0/1 sessions · 1 mux                                                                                   
 ┌ ▸ sessions · mux · prs · pinned · history ───────────────┐┌   detail ────────────────────────────────────────────────┐
 │▼ Muxes                                                   ││Select a row to view its detail.                          │
-│  ▶ ▣ conspectus-main         live      2m  claude · ~/sr…││                                                          │
-│    ▣ config-agent3           gone      3d  claude · ~/sr…││                                                          │
-│    ▣ nightly                 planned       claude · ~/sr…││                                                          │
-│    ▣ old-api                 planned       codex · ~/src…││                                                          │
+│  ▶ ▣   conspectus-main         live      2m   claude     ││                                                          │
+│    ▣   config-agent3           gone      3d   claude     ││                                                          │
+│    ▣ ◎ nightly                 planned        claude     ││                                                          │
+│    ▣ ◎ old-api                 planned        codex      ││                                                          │
 │▼ Sessions                                                ││                                                          │
-│    ● e44d01cb                in mux   17m  claude · Fix …││                                                          │
+│    ●   e44d01cb                in mux   17m   claude     ││                                                          │
 │▼ Worktrees                                               ││                                                          │
-│    ◇ ledger-worktree         gone      2d  conspectus · …││                                                          │
+│    ◇   ledger-worktree         gone      2d  conspectus …││                                                          │
 │▼ PRs                                                     ││                                                          │
-│    ⇄ ledger-pr               merged    5h  malloc47/cons…││                                                          │
+│    ⇄   ledger-pr               merged    5h  malloc47/co…││                                                          │
 │                                                          ││                                                          │
 │                                                          ││                                                          │
 │                                                          ││                                                          │

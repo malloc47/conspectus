@@ -137,6 +137,7 @@ fn build(snapshot: &GraphSnapshot, grouping: HistoryGrouping) -> RowTree {
         home: Some(Path::new("/home/op")),
         now: Some(NOW),
         grouping,
+        show_pinned: true,
     })
 }
 
@@ -191,7 +192,8 @@ fn rows_say_what_each_record_was() {
     assert_eq!(mux.status, "gone");
     assert_eq!(mux.tone, MixedTone::Dim);
     assert_eq!(mux.age.as_deref(), Some("10m"));
-    assert_eq!(mux.content, "claude · ~/src/app");
+    assert_eq!(mux.chip, Some(MixedChip::agent("claude")));
+    assert_eq!(mux.content, "~/src/app");
     let checkout = rows[1];
     assert_eq!(checkout.node_kind, NodeKind::Checkout);
     assert_eq!(checkout.content, "app · feature");

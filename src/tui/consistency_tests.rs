@@ -41,7 +41,7 @@
 //! | `v` on a pinned session errors | `resolve_view_session` only knows `AgentSession` and `MuxSession` rows; pin, nested, and mixed rows fall to `UnsupportedRow`. (`actions.rs`) |
 //! | Accelerators ignore the right pane | `pin_subject`, `row_menu_for`, and the view/attach resolvers read `App::selection()` (the left row) and never `explorer().view.focused` or the cursor's link target. |
 //! | Retarget is a free-text box | `Msg::OpenSlotRetarget` opens a single-line prompt; there is no candidate picker. |
-//! | Edit overrides cannot be discovered | `Msg::OpenSlotEdit` opens a prompt for `field=value`; the overridable fields (`PinKind::overridable_fields`) are never shown. |
+//! | Editing a pin cannot be discovered | `Msg::OpenSlotEdit` opens a form that lists every field the pin's kind can override, with the layer each value comes from. |
 //! | Launch form lost up/down focus, cwd completion, harness options | The pin forms that owned those features were removed with the old pin model, and the harness launch-option toggles were deleted as unused. The new mux launch form was written without them. |
 //! | Gone muxes do not align with live ones | Ghost muxes are `RowKind::Mixed` rows drawn by the mixed-kind renderer with its own column widths; live muxes use the mux row renderer. The two never share a grid. (`ui/left_panel.rs`) |
 //! | Unstarted pins have no distinct marker | Planned pins show a status word only; the pin glyph exists only for pinned entities in native views. |

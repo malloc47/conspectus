@@ -65,6 +65,7 @@ pub enum Action {
     CleanUpKey(ratatui::crossterm::event::KeyEvent),
     /// Forward a key event into the open mux-launch form.
     MuxLaunchFormKey(ratatui::crossterm::event::KeyEvent),
+    PinEditFormKey(ratatui::crossterm::event::KeyEvent),
     /// Open the controls overlay (ADR 0031) at its top
     /// section.
     OpenControls,

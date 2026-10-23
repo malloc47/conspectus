@@ -120,6 +120,8 @@ pub enum ControlsCursor {
     /// Mux-view-only checkbox: hide gone muxes.
     FilterHideGoneMuxes,
     FilterPinnedOnly,
+    /// History-view-only checkbox: list only records no pin points at.
+    FilterHistoryUnpinnedOnly,
     /// PRs-view-only row: edits the PR state set (ADR 0134).
     FilterPrState,
     /// PRs-view-only row: cycles the local-branch filter through any,
@@ -290,6 +292,11 @@ impl ControlsOverlayState {
                 new_filter.pinned_only = !new_filter.pinned_only;
                 ControlsOutcome::ApplyAndStay(crate::tui::Msg::SetFilter(new_filter))
             }
+            ControlsCursor::FilterHistoryUnpinnedOnly => {
+                let mut new_filter = ctx.filter.clone();
+                new_filter.show_pinned_history = !new_filter.show_pinned_history;
+                ControlsOutcome::ApplyAndStay(crate::tui::Msg::SetFilter(new_filter))
+            }
             ControlsCursor::FilterPrState => {
                 self.sub_editor = Some(SubEditor::PrState(build_pr_state_editor(ctx.filter)));
                 ControlsOutcome::Continue
@@ -345,7 +352,9 @@ impl ControlsOverlayState {
         ctx: &ControlsContext<'_>,
         event: KeyEvent,
     ) -> ControlsOutcome {
-        let editor = slot.as_mut().expect("dispatch called with empty slot");
+        let editor = slot
+            .as_mut()
+            .expect("dispatch called with no sub-editor open");
         match editor {
             SubEditor::Harness(state) => match state.handle_key(event) {
                 MultiSelectOutcome::Continue => ControlsOutcome::Continue,
@@ -606,6 +615,9 @@ fn flatten_rows(ctx: &ControlsContext<'_>) -> Vec<ControlsCursor> {
     if matches!(ctx.view, View::Sessions | View::Mux | View::Prs) {
         rows.push(ControlsCursor::FilterPinnedOnly);
     }
+    if matches!(ctx.view, View::History) {
+        rows.push(ControlsCursor::FilterHistoryUnpinnedOnly);
+    }
     rows.push(ControlsCursor::FilterClear);
     for idx in 0..SORT_OPTIONS.len() {
         rows.push(ControlsCursor::Sort(idx));
@@ -822,6 +834,13 @@ impl ControlsOverlayWidget<'_> {
             let here = cursor == ControlsCursor::FilterPinnedOnly;
             body.push_row(
                 checkbox_row("Pinned only", self.ctx.filter.pinned_only, here),
+                here,
+            );
+        }
+        if matches!(self.ctx.view, View::History) {
+            let here = cursor == ControlsCursor::FilterHistoryUnpinnedOnly;
+            body.push_row(
+                checkbox_row("Unpinned only", !self.ctx.filter.show_pinned_history, here),
                 here,
             );
         }

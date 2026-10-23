@@ -4,7 +4,10 @@
 
 Accepted. Amended by [ADR 0144](0144-pinned-and-history-views.md): views that
 mix node kinds (Pinned, History) show the kind glyph on every row,
-sessions included.
+sessions included. The 2026-06 amendment that dropped the glyph from
+`AgentSession` rows is reversed (2026-10): the glyph shows on session
+rows in every view, so a session reads as a session wherever it
+appears. The pill still carries the harness.
 
 ## Context
 
@@ -125,7 +128,7 @@ Concretely:
 
 - **Group rows** (`Workspace`, `Repo`, `Checkout`):
   `  ▼ ▦ /path/to/workspace` (disclosure, glyph, label).
-- **`AgentSession` row** (amendment 2026-06): the prefix glyph is
+- **`AgentSession` row** (amendment 2026-06, reversed 2026-10 — see Status): the prefix glyph was
   **suppressed** — the colored harness pill already names the row
   as an agent session, and stacking `●` next to `[claude]` doubled
   the signal in showcase rendering without adding information. The

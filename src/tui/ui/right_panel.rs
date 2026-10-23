@@ -48,7 +48,13 @@ pub(super) fn draw_right_panel(app: &mut App, frame: &mut Frame<'_>, area: Rect)
         let content_width = inner.width.saturating_sub(1).max(1) as usize;
         let ExplorerRender { lines, cursor_line } = {
             let state = app.explorer().expect("checked above");
-            render_explorer_lines(state, content_width, app.theme(), app.edge_meta_visible())
+            render_explorer_lines(
+                state,
+                content_width,
+                app.theme(),
+                app.edge_meta_visible(),
+                app.focus() == Focus::Right,
+            )
         };
         // Account for Paragraph wrap: any logical line whose
         // displayed width exceeds the pane width consumes extra
@@ -297,6 +303,7 @@ pub(super) fn render_explorer_lines(
     width: usize,
     theme: &Theme,
     show_edge_meta: bool,
+    focused: bool,
 ) -> ExplorerRender {
     use crate::tui::explorer::ExplorerRow;
     let mut lines: Vec<Line<'static>> = Vec::new();
@@ -309,8 +316,11 @@ pub(super) fn render_explorer_lines(
         let flat_index = rows
             .iter()
             .position(|row| matches!(row, ExplorerRow::NodeField { index, .. } if *index == idx));
-        let highlight = flat_index == Some(cursor);
-        if highlight {
+        let at_cursor = flat_index == Some(cursor);
+        // The cursor row still drives scrolling when the pane is
+        // unfocused, but only the focused pane draws a highlight.
+        let highlight = at_cursor && focused;
+        if at_cursor {
             cursor_line = Some(lines.len());
         }
         lines.push(render_node_field_line(field, highlight, theme));
@@ -340,7 +350,8 @@ pub(super) fn render_explorer_lines(
     ));
 
     for (row_index, row) in rows.iter().enumerate() {
-        let highlight = row_index == cursor;
+        let at_cursor = row_index == cursor;
+        let highlight = at_cursor && focused;
         let pushed = match row {
             ExplorerRow::NodeField { .. } => false,
             ExplorerRow::ValidatedLink {
@@ -410,7 +421,7 @@ pub(super) fn render_explorer_lines(
                 }
             }
         };
-        if highlight && pushed {
+        if at_cursor && pushed {
             cursor_line = Some(lines.len() - 1);
         }
     }

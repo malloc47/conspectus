@@ -178,7 +178,7 @@ impl Plan {
 
 #[derive(Debug, thiserror::Error)]
 pub enum RebuildError {
-    #[error("nothing matches `{0}`: pass a pin slot name, a history id (h_…), or a node id")]
+    #[error("nothing matches `{0}`: pass a pin name, a history id (h_…), or a node id")]
     NotFound(String),
     #[error("`{input}` matches more than one thing: {candidates}")]
     Ambiguous { input: String, candidates: String },
@@ -213,7 +213,7 @@ pub fn plan(
     // something to bring back.
     if slot.target.is_none() && slot.kind != crate::model::PinKind::Mux {
         return Err(RebuildError::Cannot(format!(
-            "slot `{id}` is planned and has no target yet; point it at a {kind} with \
+            "pin `{id}` is planned and has no target yet; point it at a {kind} with \
              `pin retarget {id} <{kind}>`",
             id = slot.id,
             kind = slot.kind.as_str()

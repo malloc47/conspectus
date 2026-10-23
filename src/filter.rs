@@ -63,6 +63,11 @@ pub struct RowFilter {
     /// tree, so it isn't a predicate over sessions.
     #[serde(skip_serializing_if = "is_false")]
     pub pinned_only: bool,
+    /// History view: list records that a pin points at too. Off (the
+    /// default) shows unpinned records only, since a pinned record is
+    /// already one keypress away in the Pinned view.
+    #[serde(skip_serializing_if = "is_false")]
+    pub show_pinned_history: bool,
     /// PRs view: include only PRs with, or only PRs without, a local
     /// branch (ADR 0129). `None` shows every PR. Unlike the
     /// predicates above it never looks at a PR's attached sessions, so
@@ -96,6 +101,7 @@ impl RowFilter {
             && !self.float_attached_muxes_top
             && !self.hide_gone_muxes
             && !self.pinned_only
+            && !self.show_pinned_history
             && !self.float_tracked_prs_top
     }
 

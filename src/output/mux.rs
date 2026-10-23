@@ -139,6 +139,7 @@ fn mux_matches_filter(
         float_tracked_prs_top: _,
         hide_gone_muxes: _,
         pinned_only: _,
+        show_pinned_history: _,
     } = filter;
     harness.is_none()
         && max_age.is_none()

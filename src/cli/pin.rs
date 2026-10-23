@@ -86,10 +86,10 @@ enum PinCommand {
     /// Retired: use `pin add`.
     #[command(hide = true)]
     Create(Retired),
-    /// Retired: use `conspectus rebuild <slot>`.
+    /// Retired: use `conspectus rebuild <pin>`.
     #[command(hide = true)]
     Launch(Retired),
-    /// Retired: use `conspectus rebuild <slot>`.
+    /// Retired: use `conspectus rebuild <pin>`.
     #[command(hide = true)]
     Attach(Retired),
     /// Retired: slots bind by incarnation; use `pin retarget`.
@@ -115,16 +115,16 @@ impl Retired {
     fn run(self, verb: &str) -> Result<()> {
         let instead = match verb {
             "create" => "`conspectus pin add <mux|node id|h_…>`",
-            "launch" => "`conspectus rebuild <slot>` (or `conspectus mux launch`)",
-            "attach" => "`conspectus rebuild <slot>`",
-            "bind" => "`conspectus pin retarget <slot> <session or history id>`",
+            "launch" => "`conspectus rebuild <pin>` (or `conspectus mux launch`)",
+            "attach" => "`conspectus rebuild <pin>`",
+            "bind" => "`conspectus pin retarget <pin> <session or history id>`",
             "rebind" => {
-                "`conspectus pin retarget <slot> <mux>` (a slot already follows its mux through renames)"
+                "`conspectus pin retarget <pin> <mux>` (a pin already follows its mux through renames)"
             }
             _ => "`conspectus pin add <mux>`",
         };
         bail!(
-            "`conspectus pin {verb}` was retired with the slot model (ADR 0141); use {instead}. \
+            "`conspectus pin {verb}` was retired; use {instead}. \
              Convert existing pins with `conspectus pin migrate`."
         )
     }
@@ -132,7 +132,7 @@ impl Retired {
 
 fn slot_store() -> Result<SlotStore> {
     SlotStore::from_env()
-        .ok_or_else(|| anyhow!("no data home: set $XDG_DATA_HOME or $HOME to store pin slots"))
+        .ok_or_else(|| anyhow!("no data home: set $XDG_DATA_HOME or $HOME to store pins"))
 }
 
 pub(super) fn discover(scan_roots: &[PathBuf]) -> Result<GraphSnapshot> {
@@ -180,7 +180,7 @@ fn pinned_node<'a>(snapshot: &'a GraphSnapshot, id: &str) -> Result<&'a PinNode>
             GraphNode::Pin(pin) if pin.id.id == id => Some(pin),
             _ => None,
         })
-        .ok_or_else(|| anyhow!("no pin slot named `{id}`"))
+        .ok_or_else(|| anyhow!("no pin named `{id}`"))
 }
 
 /// Refuse to write a slot that only exists as an unconverted legacy
@@ -240,7 +240,7 @@ impl PinAddArgs {
             let name = self
                 .name
                 .as_deref()
-                .ok_or_else(|| anyhow!("a planned slot needs `--name`"))?;
+                .ok_or_else(|| anyhow!("a planned pin needs `--name`"))?;
             let kind = self.kind.as_deref().unwrap_or_default();
             let kind = PinKind::parse(kind)
                 .ok_or_else(|| anyhow!("unknown kind `{kind}` ({})", PinKind::names()))?;
@@ -249,7 +249,7 @@ impl PinAddArgs {
                 overrides.insert(field, value);
             }
             pin_ops::pin_planned(&store, name, kind, overrides).map_err(|e| anyhow!("{e}"))?;
-            println!("pinned planned {} slot `{name}`", kind.as_str());
+            println!("pinned planned {} `{name}`", kind.as_str());
             return Ok(());
         }
 
@@ -493,10 +493,10 @@ impl PinRmArgs {
         if !write.changed {
             return Err(missing_slot(
                 &self.name,
-                anyhow!("no pin slot named `{}`", self.name),
+                anyhow!("no pin named `{}`", self.name),
             ));
         }
-        println!("removed slot `{}`", self.name);
+        println!("removed pin `{}`", self.name);
         Ok(())
     }
 }
@@ -528,7 +528,7 @@ impl PinListArgs {
             eprintln!("conspectus: {advice}");
         }
         if pins.is_empty() {
-            println!("no pin slots; `conspectus pin add <target>` makes one");
+            println!("no pins; `conspectus pin add <target>` makes one");
             return Ok(());
         }
         let width = pins.iter().map(|pin| pin.id.id.len()).max().unwrap_or(0);

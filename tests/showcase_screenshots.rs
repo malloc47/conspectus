@@ -129,14 +129,21 @@ fn the_showcase_screens_render_real_previews_with_stable_paths_and_ages() {
     }
     assert!(pinned.contains("gone"), "{pinned}");
 
-    // The History view: gone records, pinned or not.
+    // The History view: gone records no pin points at.
     let history = frame(scratch.path(), "5");
     for row in [
-        "nightly-refactor",
+        "release-prep",
+        "bugfix-sprint",
         "docs-sweep",
-        "feature/ledger",
+        "hotfix/login",
         "spike/cache",
     ] {
         assert!(history.contains(row), "{row}: {history}");
+    }
+    for pinned in ["nightly-refactor", "feature/ledger"] {
+        assert!(
+            !history.contains(pinned),
+            "{pinned} is pinned, so History hides it: {history}"
+        );
     }
 }

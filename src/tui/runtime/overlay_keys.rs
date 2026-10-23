@@ -446,3 +446,31 @@ pub(super) fn handle_viewer_overlay_key(app: &mut App, key: ratatui::crossterm::
     // (or leaves it popped on ViewerEffect::Close).
     dispatch(app, Msg::Viewer(vmsg));
 }
+
+pub(super) fn handle_pin_edit_form_key(
+    terminal: &mut DefaultTerminal,
+    app: &mut App,
+    config: &RunConfig,
+    tmux: &dyn MuxBackend,
+    key: ratatui::crossterm::event::KeyEvent,
+) {
+    use crate::tui::{Overlay, OverlayOutcome};
+    let outcome = match app.pin_edit_form_mut() {
+        Some(state) => state.handle((), key),
+        None => return,
+    };
+    match outcome {
+        OverlayOutcome::Consumed => {}
+        OverlayOutcome::Close => {
+            app.close_pin_edit_form();
+            app.update(Msg::SetStatus(Some("pin edit: cancelled".to_string())));
+        }
+        OverlayOutcome::Commit(msg) => {
+            app.close_pin_edit_form();
+            dispatch_live(terminal, app, config, tmux, *msg);
+        }
+        OverlayOutcome::CommitAndStay(msg) => {
+            dispatch_live(terminal, app, config, tmux, *msg);
+        }
+    }
+}

@@ -94,14 +94,13 @@ fn ages_come_from_activity_when_live_and_last_seen_when_gone() {
 #[test]
 fn content_names_the_harness_and_place_per_kind() {
     let tree = tree(PinnedGrouping::None, Sort::Hierarchy);
-    assert_eq!(
-        mixed(&tree, "conspectus-main").content,
-        "claude · ~/src/conspectus"
-    );
-    assert_eq!(
-        mixed(&tree, "e44d01cb").content,
-        "claude · Fix the ledger merge"
-    );
+    // The agent is a chip of its own, not part of the text after it.
+    let main = mixed(&tree, "conspectus-main");
+    assert_eq!(main.chip, Some(MixedChip::agent("claude")));
+    assert_eq!(main.content, "~/src/conspectus");
+    let session = mixed(&tree, "e44d01cb");
+    assert_eq!(session.chip, Some(MixedChip::agent("claude")));
+    assert_eq!(session.content, "Fix the ledger merge");
     assert_eq!(
         mixed(&tree, "ledger-worktree").content,
         "conspectus · feature/ledger"

@@ -18,9 +18,9 @@ use crate::model::{
 };
 use crate::output::render::{node_short_id_from_display, unique_prefix_len};
 use crate::tui::rows::{
-    AgentSessionRow, GroupRow, MixedRow, MixedTone, MuxSessionRow, Row, RowId, RowKind, RowTree,
-    ViewLabel, format_recency, harness_label, mux_process_harnesses, mux_program,
-    mux_program_harness, shorten_home,
+    AgentSessionRow, GroupRow, MixedChip, MixedGrid, MixedRow, MixedTone, MuxSessionRow, PinMarker,
+    Row, RowId, RowKind, RowTree, ViewLabel, format_recency, harness_label, mux_process_harnesses,
+    mux_program, mux_program_harness, shorten_home,
 };
 use crate::tui::{MuxGrouping, Sort};
 
@@ -656,6 +656,7 @@ fn mux_matches_filter(
         float_tracked_prs_top: _,
         hide_gone_muxes: _,
         pinned_only: _,
+        show_pinned_history: _,
     } = filter;
     harness.is_none()
         && max_age.is_none()
@@ -718,21 +719,18 @@ fn collect_ghosts(
                 NodePresence::Gone { .. } => "gone",
                 NodePresence::Unknown { .. } => "unknown",
             };
-            let harness = snapshot
+            let chip = snapshot
                 .history
                 .muxes
                 .iter()
                 .find(|record| record.recipe.native_id() == mux.id.native_id)
                 .and_then(|record| record.recipe.harness.as_deref())
-                .map(harness_label)
-                .unwrap_or_default();
+                .map(|harness| MixedChip::agent(harness_label(harness)));
             let cwd = mux.cwd.clone();
-            let content = super::pinned::join_dot([
-                harness,
-                cwd.as_deref()
-                    .map(|cwd| shorten_home(cwd, home))
-                    .unwrap_or_default(),
-            ]);
+            let content = cwd
+                .as_deref()
+                .map(|cwd| shorten_home(cwd, home))
+                .unwrap_or_default();
             let last_seen = presence.last_seen();
             let row = MixedRow {
                 node_kind: crate::model::NodeKind::MuxSession,
@@ -740,9 +738,12 @@ fn collect_ghosts(
                 status: status.to_string(),
                 tone: MixedTone::Dim,
                 age: format_recency(now, Some(last_seen)),
+                chip,
                 content,
                 primary_node: id.clone(),
                 pr_state: None,
+                marker: PinMarker::None,
+                grid: MixedGrid::Mux,
             };
             Some(MuxGroup {
                 parent_row: MuxSessionRow {

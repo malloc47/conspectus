@@ -136,6 +136,10 @@ impl HarnessAdapter for CodexAdapter {
         );
     }
 
+    fn launch_options(&self) -> &'static [super::HarnessLaunchOption] {
+        super::CODEX_LAUNCH_OPTIONS
+    }
+
     fn discover(&self, context: &DiscoveryContext) -> Result<GraphFragment> {
         // Delegate the state-root lookup + fragment
         // stamping to the shared envelope so this adapter only

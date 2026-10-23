@@ -15,8 +15,8 @@ use crate::model::{
 use crate::tui::{PinnedGrouping, Sort};
 
 use super::{
-    GroupRow, MixedRow, MixedTone, Row, RowId, RowKind, RowTree, ViewLabel, format_recency,
-    harness_label, pin_nodes, repo_display_path, shorten_home,
+    GroupRow, MixedChip, MixedGrid, MixedRow, MixedTone, PinMarker, Row, RowId, RowKind, RowTree,
+    ViewLabel, format_recency, harness_label, pin_nodes, repo_display_path, shorten_home,
 };
 
 pub struct PinnedBuildInputs<'a> {
@@ -139,6 +139,7 @@ struct Described {
     status: String,
     tone: MixedTone,
     epoch: Option<i64>,
+    chip: Option<MixedChip>,
     content: String,
     pr_state: Option<String>,
 }
@@ -221,11 +222,13 @@ fn describe(snapshot: &GraphSnapshot, pin: &PinNode, home: Option<&Path>) -> Des
             .or_else(recorded),
         SlotStatus::Missing | SlotStatus::Planned => None,
     };
+    let (chip, content) = content_of(pin, home);
     Described {
         status,
         tone,
         epoch,
-        content: content_of(pin, home),
+        chip,
+        content,
         pr_state,
     }
 }
@@ -238,25 +241,28 @@ pub(super) fn join_dot(parts: impl IntoIterator<Item = String>) -> String {
         .join(" · ")
 }
 
-fn content_of(pin: &PinNode, home: Option<&Path>) -> String {
+/// The chip and the text after it for one pin.
+fn content_of(pin: &PinNode, home: Option<&Path>) -> (Option<MixedChip>, String) {
     let text = |name: &str| pin.text(name).unwrap_or_default().to_string();
     let path = |name: &str| {
         pin.text(name)
             .map(|p| shorten_home(p, home))
             .unwrap_or_default()
     };
-    match pin.kind {
+    let content = match pin.kind {
         PinKind::Mux => {
-            let harness = pin.text("harness").map_or_else(
-                || super::pin_program(pin).unwrap_or_default(),
-                harness_label,
-            );
-            join_dot([harness, path("cwd")])
+            let chip = match pin.text("harness") {
+                Some(harness) => Some(MixedChip::agent(harness_label(harness))),
+                None => super::pin_program(pin).map(MixedChip::program),
+            };
+            return (chip, path("cwd").replace('\n', " ").trim().to_string());
         }
-        PinKind::Session => join_dot([
-            pin.text("harness").map(harness_label).unwrap_or_default(),
-            text("title"),
-        ]),
+        PinKind::Session => {
+            let chip = pin
+                .text("harness")
+                .map(|harness| MixedChip::agent(harness_label(harness)));
+            return (chip, text("title").replace('\n', " ").trim().to_string());
+        }
         PinKind::Checkout => {
             let repo = pin
                 .text("repo")
@@ -283,10 +289,8 @@ fn content_of(pin: &PinNode, home: Option<&Path>) -> String {
         PinKind::Pr => join_dot([text("repo"), text("title")]),
         PinKind::Workspace => path("root"),
         PinKind::Fork => join_dot([text("provider"), text("name")]),
-    }
-    .replace('\n', " ")
-    .trim()
-    .to_string()
+    };
+    (None, content.replace('\n', " ").trim().to_string())
 }
 
 /// The project a slot belongs to: the nearest local repo above the
@@ -373,9 +377,16 @@ fn push_slot(
             status: described.status,
             tone: described.tone,
             age: format_recency(now, described.epoch),
+            chip: described.chip,
             content: described.content,
             primary_node: pin_node,
             pr_state: described.pr_state,
+            marker: if pin.status == SlotStatus::Planned {
+                PinMarker::Unstarted
+            } else {
+                PinMarker::None
+            },
+            grid: MixedGrid::Columns,
         }),
     });
     for (offset, child) in children {
@@ -457,12 +468,12 @@ fn session_row(
         status: if live { "in mux" } else { "resumable" }.to_string(),
         tone: MixedTone::Normal,
         age: format_recency(now, session.last_active_epoch),
-        content: join_dot([
-            harness_label(&session.harness_key),
-            session.title.clone().unwrap_or_default().replace('\n', " "),
-        ]),
+        chip: Some(MixedChip::agent(harness_label(&session.harness_key))),
+        content: session.title.clone().unwrap_or_default().replace('\n', " "),
         primary_node: id.clone(),
         pr_state: None,
+        marker: PinMarker::None,
+        grid: MixedGrid::Columns,
     })
 }
 
@@ -481,15 +492,18 @@ fn mux_row(
         status: "live".to_string(),
         tone: MixedTone::Normal,
         age: format_recency(now, mux.activity_epoch),
-        content: join_dot([
-            super::mux_program(mux, None).unwrap_or_default(),
-            mux.cwd
-                .as_deref()
-                .map(|cwd| shorten_home(cwd, home))
-                .unwrap_or_default(),
-        ]),
+        chip: super::mux_program_harness(mux, None, None)
+            .map(MixedChip::agent)
+            .or_else(|| super::mux_program(mux, None).map(MixedChip::program)),
+        content: mux
+            .cwd
+            .as_deref()
+            .map(|cwd| shorten_home(cwd, home))
+            .unwrap_or_default(),
         primary_node: id.clone(),
         pr_state: None,
+        marker: PinMarker::None,
+        grid: MixedGrid::Columns,
     })
 }
 

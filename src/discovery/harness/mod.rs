@@ -42,6 +42,13 @@ pub use codex::CodexAdapter;
 pub use opencode::OpenCodeAdapter;
 pub use pi::PiAdapter;
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct HarnessLaunchOption {
+    pub id: &'static str,
+    pub label: &'static str,
+    pub argv: &'static [&'static str],
+}
+
 /// Runtime attribution surface for a single harness.
 ///
 /// The `cross_link` module iterates registered adapters and
@@ -179,6 +186,21 @@ pub struct AuxAttributionContext<'a> {
     pub caches: &'a crate::discovery::DiscoveryCaches,
 }
 
+const CODEX_SKIP_PERMISSIONS_ARGV: &[&str] = &["--dangerously-bypass-approvals-and-sandbox"];
+const CLAUDE_SKIP_PERMISSIONS_ARGV: &[&str] = &["--dangerously-skip-permissions"];
+
+const CODEX_LAUNCH_OPTIONS: &[HarnessLaunchOption] = &[HarnessLaunchOption {
+    id: "skip-permissions",
+    label: "skip permissions",
+    argv: CODEX_SKIP_PERMISSIONS_ARGV,
+}];
+
+const CLAUDE_CODE_LAUNCH_OPTIONS: &[HarnessLaunchOption] = &[HarnessLaunchOption {
+    id: "skip-permissions",
+    label: "skip permissions",
+    argv: CLAUDE_SKIP_PERMISSIONS_ARGV,
+}];
+
 pub trait HarnessAdapter: Send + Sync {
     /// Stable identifier for this harness. Every production impl
     /// returns a `&'static str` literal (typically the module's
@@ -198,13 +220,23 @@ pub trait HarnessAdapter: Send + Sync {
     }
 
     /// Default argv for spawning a fresh session of this harness when
-    /// nothing more specific applies (a slot override, a recorded argv,
-    /// or a launch profile; ADR 0142). Pure data; no I/O. Each adapter
-    /// returns the bare binary invocation — model selection, prompt
-    /// injection, and other harness-specific flags are the operator's
-    /// to add through overrides or `[launch.<harness>]` profiles.
+    /// nothing more specific applies (a pin override, a recorded argv,
+    /// or a launch profile). Pure data; no I/O. Each adapter returns
+    /// the bare binary invocation: model selection, prompt injection,
+    /// and other harness-specific flags are the operator's to add
+    /// through overrides or `[launch.<harness>]` profiles.
     fn launch_argv(&self) -> Vec<std::ffi::OsString> {
         Vec::new()
+    }
+
+    /// Launch-time options the launch and pin forms offer. Each entry
+    /// is a stable id, a label, and an argv fragment; the forms let the
+    /// operator toggle each on or off, and the resulting argv appends
+    /// every toggled option's fragment to [`Self::launch_argv`].
+    /// Defaults to no options: most adapters ship without any and rely
+    /// on argv overrides for exotic invocations.
+    fn launch_options(&self) -> &'static [HarnessLaunchOption] {
+        &[]
     }
 
     /// Argv for resuming a specific session of this harness (ADR 0058).
@@ -474,6 +506,23 @@ pub fn launch_argv_for(harness_key: &str) -> Vec<std::ffi::OsString> {
         .unwrap_or_default()
 }
 
+pub fn launch_options_for(harness_key: &str) -> &'static [HarnessLaunchOption] {
+    adapter_for(harness_key).map_or(&[], |a| a.launch_options())
+}
+
+pub fn launch_option_for(harness_key: &str, option_id: &str) -> Option<HarnessLaunchOption> {
+    launch_options_for(harness_key)
+        .iter()
+        .copied()
+        .find(|option| option.id == option_id)
+}
+
+/// Registered harness keys in declaration order.
+/// Used by the TUI controls overlay's harness filter menu.
+///
+/// Wrapped in a `LazyLock<Vec<&'static str>>` so the &-of-slice
+/// return type is `'static` (the multi-select widget needs
+/// `&[&'static str]`).
 pub fn harness_keys() -> &'static [&'static str] {
     static KEYS: std::sync::LazyLock<Vec<&'static str>> = std::sync::LazyLock::new(|| {
         REGISTERED_ADAPTERS
@@ -493,6 +542,58 @@ pub fn display_label_for(harness_key: &str) -> String {
         Some(a) => a.display_label().to_string(),
         None => harness_key.to_string(),
     }
+}
+
+pub fn argv_contains_fragment(argv: &[String], fragment: &[&str]) -> bool {
+    if fragment.is_empty() {
+        return false;
+    }
+    argv.windows(fragment.len()).any(|window| {
+        window
+            .iter()
+            .zip(fragment.iter())
+            .all(|(actual, expected)| actual == expected)
+    })
+}
+
+pub fn argv_with_fragment(mut argv: Vec<String>, fragment: &[&str]) -> Vec<String> {
+    if fragment.is_empty() || argv_contains_fragment(&argv, fragment) {
+        return argv;
+    }
+    argv.extend(fragment.iter().map(|arg| (*arg).to_string()));
+    argv
+}
+
+pub fn argv_without_fragment(argv: Vec<String>, fragment: &[&str]) -> Vec<String> {
+    if fragment.is_empty() {
+        return argv;
+    }
+    let mut out = Vec::with_capacity(argv.len());
+    let mut idx = 0;
+    while idx < argv.len() {
+        if idx + fragment.len() <= argv.len()
+            && argv[idx..idx + fragment.len()]
+                .iter()
+                .zip(fragment.iter())
+                .all(|(actual, expected)| actual == expected)
+        {
+            idx += fragment.len();
+        } else {
+            out.push(argv[idx].clone());
+            idx += 1;
+        }
+    }
+    out
+}
+
+pub fn strip_known_launch_option_fragments(argv: Vec<String>) -> Vec<String> {
+    let mut stripped = argv;
+    for adapter in registered_adapters() {
+        for option in adapter.launch_options() {
+            stripped = argv_without_fragment(stripped, option.argv);
+        }
+    }
+    stripped
 }
 
 /// Look up the per-harness resume argv. Sibling of [`launch_argv_for`]
@@ -612,6 +713,20 @@ mod registry_tests {
     }
 
     #[test]
+    fn launch_options_for_carries_permission_overrides() {
+        // codex and claude-code both surface a skip-permissions
+        // option; the others don't.
+        assert_eq!(launch_options_for("codex").len(), 1);
+        assert_eq!(launch_options_for("codex")[0].id, "skip-permissions");
+        assert_eq!(launch_options_for("claude-code").len(), 1);
+        assert_eq!(launch_options_for("claude-code")[0].id, "skip-permissions");
+        assert!(launch_options_for("opencode").is_empty());
+        assert!(launch_options_for("aider").is_empty());
+        assert!(launch_options_for("pi").is_empty());
+        assert!(launch_options_for("never-registered").is_empty());
+    }
+
+    #[test]
     fn resume_argv_for_dispatches_via_registry() {
         let cwd = Path::new("/tmp");
         assert_eq!(
@@ -719,6 +834,21 @@ mod registry_tests {
             );
         }
         assert!(launch_argv_for("never-registered").is_empty());
+    }
+
+    #[test]
+    fn strip_known_launch_option_fragments_walks_every_registered_adapter() {
+        // Given argv that contains a fragment from every adapter
+        // with launch options, `strip_known_launch_option_fragments`
+        // removes all of them.
+        let argv = vec![
+            "claude".to_string(),
+            "--dangerously-skip-permissions".to_string(),
+            "--dangerously-bypass-approvals-and-sandbox".to_string(),
+            "extra".to_string(),
+        ];
+        let stripped = strip_known_launch_option_fragments(argv);
+        assert_eq!(stripped, vec!["claude".to_string(), "extra".to_string()]);
     }
 }
 

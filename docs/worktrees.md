@@ -46,7 +46,7 @@ operations are hidden (TUI) or error clearly (CLI).
 | **Merge back & close** | `worktree merge <branch>` | `w` menu → *Merge back & close* | Squash + rebase + fast-forward the branch into its target, then remove the worktree | yes |
 | **Close down a stream** | `worktree close <branch> --merge\|--discard` | `X`, or `w` menu → *Close down stream* | Compound teardown: end the mux/agent sessions in the worktree, land or discard the branch, remove the worktree, forget its history records | yes |
 | **New stream** (worktree-backed launch) | `mux launch <harness> --name N --worktree-branch <branch>` | `N` (mux launch form, worktree toggle pre-enabled) | Create the branch's worktree if absent and launch the mux + agent in it | yes |
-| **Rebuild a worktree** | `rebuild <slot\|h_…>` | row action menu (`.`) → *Rebuild* | Bring a gone worktree back through `wt switch`, creating a deleted branch from its last head | yes |
+| **Rebuild a worktree** | `rebuild <pin\|h_…>` | row action menu (`.`) → *Rebuild* | Bring a gone worktree back through `wt switch`, creating a deleted branch from its last head | yes |
 | **Prune merged** | `worktree prune` | `w` menu (repo) → *Prune merged worktrees* | Remove worktrees already merged into the default branch (worktrunk `step prune`) | yes |
 | **Reveal** | — | `w` menu → *Reveal checkout / sessions* | Jump the selection to the checkout containing a session, or a worktree's first live session | no |
 
@@ -71,7 +71,7 @@ already on (Space toggles it off for a plain launch).
    never silently lost.
 3. **Removes the worktree** and **forgets the gone history records**
    rooted in it (ADR 0140), so its ghost muxes and checkout don't litter
-   History. Records a pin slot targets are kept.
+   History. Records a pin targets are kept.
 
 Confirmation follows `[worktree] teardown_confirm` (`always` | `live` |
 `never`, default `live` — prompt only when a live session would be
@@ -89,7 +89,7 @@ and nothing is created until the launch runs (ADR 0094).
 
 A pinned worktree-backed mux remembers its branch as the
 `worktree_branch` field of its recipe. If the worktree is later removed,
-`conspectus rebuild <slot>` plans the worktree first (`wt switch`,
+`conspectus rebuild <pin>` plans the worktree first (`wt switch`,
 creating a deleted branch from its last head) and then the mux inside it
 (ADR 0142). `rebuild --dry-run` shows both steps before anything runs.
 

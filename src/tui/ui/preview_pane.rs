@@ -257,7 +257,7 @@ fn sourceless_preview(
         app.snapshot_handle()
             .and_then(|handle| render_pin_summary(handle.snapshot(), pin_id))
             .map_or_else(
-                || Text::raw("pin slot unavailable — try `r` to refresh"),
+                || Text::raw("pin unavailable — try `r` to refresh"),
                 Text::raw,
             )
     };

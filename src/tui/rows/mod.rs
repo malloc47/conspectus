@@ -174,10 +174,65 @@ pub struct MixedRow {
     pub tone: MixedTone,
     /// Age as `format_recency` renders it; empty when unknown.
     pub age: Option<String>,
+    /// The agent or program the entity runs, drawn as the same filled
+    /// chip the other views use.
+    pub chip: Option<MixedChip>,
+    /// What follows the chip: a directory, a title, a repo and branch.
     pub content: String,
     pub primary_node: NodeId,
     /// PR state, which tints the PR glyph.
     pub pr_state: Option<String>,
+    /// The pin marker cell after the kind glyph.
+    pub marker: PinMarker,
+    /// Which column grid draws the row.
+    pub grid: MixedGrid,
+}
+
+/// An agent or program name drawn as a chip.
+#[derive(Clone, Debug, PartialEq)]
+pub struct MixedChip {
+    pub label: String,
+    /// A registered agent harness (its own color) rather than a plain
+    /// program.
+    pub agent: bool,
+}
+
+impl MixedChip {
+    pub fn agent(label: impl Into<String>) -> Self {
+        Self {
+            label: label.into(),
+            agent: true,
+        }
+    }
+
+    pub fn program(label: impl Into<String>) -> Self {
+        Self {
+            label: label.into(),
+            agent: false,
+        }
+    }
+}
+
+/// The pin marker of a mixed-kind row.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum PinMarker {
+    /// Not pinned, or a row whose view marks pins another way.
+    None,
+    /// An entity a pin points at (`◉`).
+    Pinned,
+    /// A pin with no target yet (`◎`).
+    Unstarted,
+}
+
+/// How a mixed-kind row lays out its columns.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum MixedGrid {
+    /// Label, status, age, then chip and content, as in the Pinned and
+    /// History views.
+    Columns,
+    /// The Mux view's grid (name, chip, age, state), so a ghost mux
+    /// lines up with the live ones around it.
+    Mux,
 }
 
 /// A workspace / repo / worktree label row.
@@ -1078,6 +1133,7 @@ fn build_tree_for_view_unfiltered(inputs: TreeInputs<'_>) -> RowTree {
             snapshot,
             home: home.as_deref(),
             now,
+            show_pinned: filter.show_pinned_history,
             grouping: match grouping {
                 crate::tui::Grouping::History(g) => g,
                 _ => crate::tui::HistoryGrouping::Project,

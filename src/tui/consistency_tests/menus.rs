@@ -20,7 +20,7 @@ fn normalized(labels: Vec<String>, pin: &str) -> BTreeSet<String> {
 }
 
 fn labels_in(view: View, row: &str) -> Vec<String> {
-    let mut app = app_in(view);
+    let mut app = app_listing_all(view);
     select(&mut app, row);
     menu_labels(&mut app)
 }

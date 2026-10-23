@@ -74,21 +74,21 @@ are all valid, not errors. Projections never assume things connect.
 [0026](docs/adr/0026-checkout-context-model.md),
 [0047](docs/adr/0047-runtime-process-nodes-candidate.md),
 [0084](docs/adr/0084-first-class-pin-nodes.md),
-[0141](docs/adr/0141-pin-slots.md))
+[0141](docs/adr/0141-pin-pins.md))
 
 ### 2. Evidence first, resolution second
 
 Discovery never decides anything. Every plausible relationship becomes a
 `GraphLink` candidate that records its provenance (declared, strongly
 discovered, discovered, convention, or cached), a confidence level, and how
-fresh it is. A resolver then picks the preferred relationship for each slot
+fresh it is. A resolver then picks the preferred relationship for each pin
 and keeps the losing candidates. Ambiguity and conflicts stay visible as data
 (the `⚠` glyph and `conspectus graph --explain` score breakdowns)
 instead of being silently collapsed.
 ([ADR 0002](docs/adr/0002-graphlink-and-typed-relationships.md),
 [0006](docs/adr/0006-session-mux-link-candidates.md),
 [0041](docs/adr/0041-resolver-stays-in-rust.md),
-[0077](docs/adr/0077-resolver-ambiguous-slot-preservation.md))
+[0077](docs/adr/0077-resolver-ambiguous-pin-preservation.md))
 
 ### 3. Attribution without touching your agents
 
@@ -128,7 +128,7 @@ and safe to version-control.
 A declared link overrides discovered evidence without erasing it. Caches (the
 graph snapshot and the observation sidecars) live under your XDG directories,
 never inside a project tree, so deleting them only costs a rebuild. Pin
-slots are your intent too, but they are personal rather than project-rooted:
+pins are your intent too, but they are personal rather than project-rooted:
 they live in one file, `$XDG_DATA_HOME/conspectus/pins.toml`.
 ([ADR 0012](docs/adr/0012-config-file-layout.md),
 [0014](docs/adr/0014-declared-link-storage-schema.md),
@@ -146,14 +146,14 @@ wasn't there, the worktree path is missing), its row stays, dimmed and marked
 `gone`, instead of vanishing. A failed or impossible check shows `unknown`,
 never `gone`.
 
-A **pin** is a named slot you keep at hand. Pinning something doesn't create
-it or configure anything: it adds a slot to `pins.toml` that points at the
+A **pin** is a named pin you keep at hand. Pinning something doesn't create
+it or configure anything: it adds a pin to `pins.toml` that points at the
 entity, live or gone, and optionally carries overrides (a different argv or
 working directory, say). Each field resolves `overrides > live graph > history
 > snapshot > defaults`, so an unpinned entity and a pinned one look the same
 until you override something.
 
-`conspectus rebuild <slot>` turns a recipe back into a live entity as a plan of
+`conspectus rebuild <pin>` turns a recipe back into a live entity as a plan of
 steps you can read first with `--dry-run`: a gone mux is recreated in tmux and
 its last conversation is resumed, a missing worktree comes back through
 `wt switch`, and a missing clone is cloned from its recorded remote.
@@ -162,7 +162,7 @@ Conspectus doesn't own your tmux server or impose a window layout. It records
 what it saw and rebuilds only when you ask.
 ([ADR 0018](docs/adr/0018-intra-harness-session-lineage.md),
 [0140](docs/adr/0140-history-and-presence.md),
-[0141](docs/adr/0141-pin-slots.md),
+[0141](docs/adr/0141-pin-pins.md),
 [0142](docs/adr/0142-rebuild-plans-and-executors.md))
 
 ### 6. A bounded mutation envelope
@@ -232,7 +232,7 @@ flowchart LR
     F["Forge<br/>GitHub via gh"]
     P["Runtime evidence<br/>process tree · hook sidecars · harness logs"]
   end
-  U["Your intent (TOML)<br/>declared links · aliases · pin slots"]
+  U["Your intent (TOML)<br/>declared links · aliases · pins"]
   S --> C["GraphLink candidates<br/>provenance · confidence · freshness"]
   U --> C
   C --> R["Resolver"]
@@ -340,7 +340,7 @@ conspectus serve                   # keep the graph warm in the background
 - **Menus first, shortcuts second.** `?` lists every key. `f` opens view,
   grouping, filter, and sort controls, and `/` searches. `.` opens the row
   action menu (including Pin / Unpin, `p`), and `m` and `w` open the mux and
-  worktree menus. Views `4` (Pinned) and `5` (History) list pin slots and gone
+  worktree menus. Views `4` (Pinned) and `5` (History) list pins and gone
   entities. Every action can be reached from a
   menu, and the frequent ones also have single-key shortcuts, so you don't
   have to memorize anything to get started.
@@ -352,8 +352,8 @@ conspectus serve                   # keep the graph warm in the background
 | ![The explorer cursor on a session's checkout: the link's evidence above the checkout's git status and files](docs/images/related-preview.png) | ![A repo row: its recent commits and remotes](docs/images/repo-history.png) |
 | **A tmux session's pane** | **A pull request under its checkout** |
 | ![The mux view: live tmux sessions with a pin marker, gone muxes dimmed below them, and the selected mux's related rows and a transcript-style preview on the right](docs/images/mux-pane.png) | ![The PRs view: a draft PR under the checkout of its branch, the sessions working there beneath it, and its checks, reviews, and description in the Preview](docs/images/prs-view.png) |
-| **Pinned slots** | **Gone entities, ready to rebuild** |
-| ![The Pinned view: slots for a live mux, a gone mux, a session, a removed worktree, and a merged PR, grouped by project, each with its status and age](docs/images/pinned-view.png) | ![The History view: gone muxes and worktrees with how long ago they were last seen](docs/images/history-view.png) |
+| **Pinned pins** | **Gone entities, ready to rebuild** |
+| ![The Pinned view: pins for a live mux, a gone mux, a session, a removed worktree, and a merged PR, grouped by project, each with its status and age](docs/images/pinned-view.png) | ![The History view: gone muxes and worktrees with how long ago they were last seen](docs/images/history-view.png) |
 
 ### Scriptable CLI
 
@@ -388,15 +388,15 @@ conspectus pin {list|show|rename|retarget|refresh|move|rm} ...
 conspectus rebuild ingest --dry-run           # print the plan
 conspectus rebuild ingest                     # recreate it, resuming the last session
 conspectus history {list|show|reap|forget} ...
-conspectus pin migrate --dry-run              # convert legacy [[pins.entries]] to slots
+conspectus pin migrate --dry-run              # convert legacy [[pins.entries]] to pins
 ```
 
-A slot is live, gone, unknown, missing (in neither graph nor history, so it
+A pin is live, gone, unknown, missing (in neither graph nor history, so it
 renders from its snapshot), or planned (no target yet; the first rebuild builds
 it). The old `pin create`, `launch`, `attach`, `bind`, `rebind`, and `adopt`
 verbs are retired and fail with a message naming their replacement. The
 [pins walkthrough](docs/pins-walkthrough.md) teaches the lifecycle, and
-[operations](docs/operations.md#pin-slots-history-and-rebuild) is the
+[operations](docs/operations.md#pins-history-and-rebuild) is the
 reference.
 
 ### Launching tmux sessions
@@ -544,7 +544,7 @@ When agents write most of the code, a change can add a subprocess, a socket,
 or a write path that nobody decided to allow. The mutation envelope
 ([ADR 0087](docs/adr/0087-mutation-envelope.md), restated by
 [ADR 0143](docs/adr/0143-mutation-envelope-with-history-pins-and-clone.md)
-for history, pin slots, and rebuild clones) always listed what
+for history, pins, and rebuild clones) always listed what
 Conspectus may write and what it must never do, but for most of the project
 only review enforced it.
 [`docs/capabilities.toml`](docs/capabilities.toml) turns it into an
@@ -625,7 +625,7 @@ category of its own.
   envelope bounded every write
   ([ADR 0087](docs/adr/0087-mutation-envelope.md)), and worktree streams
   followed ([ADR 0092](docs/adr/0092-worktree-backend-seam.md)). Pins
-  were later reworked into slots with history and rebuild (ADRs 0140 to
+  were later reworked into pins with history and rebuild (ADRs 0140 to
   0144). A
   hardening workstream of nearly 300 stories absorbed what came up.
 - **Late September to October:** release readiness for 0.1.0. The docs and
@@ -648,7 +648,7 @@ the work moved from building to hardening.
 | --- | --- |
 | Development window | 2026-05-12 to 2026-10-13 |
 | Commits | 998, of which 798 (80%) have an AI co-author trailer |
-| Architecture decision records | 119 on that date (144 now, after the history, rebuild, and pin-slot ADRs 0140 to 0144), of which 11 were superseded or partially superseded |
+| Architecture decision records | 119 on that date (144 now, after the history, rebuild, and pin-pin ADRs 0140 to 0144), of which 11 were superseded or partially superseded |
 | Backlog stories | 643, of which 533 (83%) are done |
 | Commits that touch the backlog | 470 (47%) |
 | Rust | about 147k lines, over 40% of it tests |
@@ -662,7 +662,7 @@ the work moved from building to hardening.
   without it, attribution falls back to the remaining evidence. macOS is
   untested.
 - **tmux is the primary mux backend.** zellij supports discovery and attach
-  only. Slots and history records on a non-default tmux socket (`tmux -L`)
+  only. Pins and history records on a non-default tmux socket (`tmux -L`)
   rebuild and attach correctly, and discovery probes the sockets they name.
 - **GitHub only.** Forge discovery goes through an authenticated `gh` CLI.
   GitLab is a stub.

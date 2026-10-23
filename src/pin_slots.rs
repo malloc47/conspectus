@@ -98,8 +98,8 @@ impl fmt::Display for SlotError {
                 f,
                 "pins file has schema_version {version}; this binary reads {PINS_SCHEMA_VERSION}"
             ),
-            Self::DuplicateId(id) => write!(f, "a pin slot named `{id}` already exists"),
-            Self::NotFound(id) => write!(f, "no pin slot named `{id}`"),
+            Self::DuplicateId(id) => write!(f, "a pin named `{id}` already exists"),
+            Self::NotFound(id) => write!(f, "no pin named `{id}`"),
             Self::Invalid(message) => write!(f, "{message}"),
         }
     }
@@ -297,7 +297,7 @@ impl SlotStore {
                     let at = anchor(name)?;
                     if at == from {
                         return Err(SlotError::Invalid(
-                            "a slot can't move relative to itself".into(),
+                            "a pin can't move relative to itself".into(),
                         ));
                     }
                     let mut target = if matches!(placement, Placement::Before(_)) {
@@ -435,12 +435,12 @@ pub fn parse_slots(text: &str, path: &Path) -> SlotLoad {
         match slot {
             Ok(slot) if seen.insert(slot.id.clone()) => load.slots.push(slot),
             Ok(slot) => load.problems.push(format!(
-                "{}: slot {index} repeats the id `{}`; skipped",
+                "{}: entry {index} repeats the id `{}`; skipped",
                 path.display(),
                 slot.id
             )),
             Err(message) => load.problems.push(format!(
-                "{}: slot {index}: {message}; skipped",
+                "{}: entry {index}: {message}; skipped",
                 path.display()
             )),
         }
@@ -475,7 +475,7 @@ fn slot_from_raw(raw: RawSlot, order: u32) -> Result<PinSlot, String> {
 pub fn validate_id(id: &str) -> Result<(), SlotError> {
     if id.trim().is_empty() || id != id.trim() || id.contains(['\n', '\r']) {
         return Err(SlotError::Invalid(format!(
-            "`{id}` isn't a usable pin slot name (non-empty, no surrounding spaces or newlines)"
+            "`{id}` isn't a usable pin name (non-empty, no surrounding spaces or newlines)"
         )));
     }
     Ok(())
@@ -489,7 +489,7 @@ pub fn validate_slot(slot: &PinSlot) -> Result<(), SlotError> {
     for (name, value) in &slot.overrides {
         if !slot.kind.allows_override(name) {
             return Err(SlotError::Invalid(format!(
-                "a {} slot has no overridable field `{name}` (allowed: label, {})",
+                "a {} pin has no overridable field `{name}` (allowed: label, {})",
                 slot.kind.as_str(),
                 slot.kind.overridable_fields().join(", ")
             )));

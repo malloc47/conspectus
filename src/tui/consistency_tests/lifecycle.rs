@@ -58,9 +58,13 @@ fn every_store_op() -> Vec<StoreOp> {
             slot: "x".into(),
             new_name: "y".into(),
         },
-        StoreOp::EditSlot {
-            slot: "x".into(),
-            assignment: "cwd=/".into(),
+        StoreOp::SavePin {
+            request: crate::tui::widgets::pin_edit::PinEditRequest {
+                pin: "x".into(),
+                rename: None,
+                set: Vec::new(),
+                unset: Vec::new(),
+            },
         },
         StoreOp::RetargetSlot {
             slot: "x".into(),
@@ -108,7 +112,7 @@ fn attaching_hands_over_the_terminal_freezes_the_row_and_refreshes() {
 #[test]
 #[ignore = "backlog CSP-692.02: a rebuild from the menu does not freeze the row or follow the mux to its view"]
 fn a_rebuild_freezes_the_row_refreshes_and_follows_the_entity() {
-    let mut app = app_in(View::History);
+    let mut app = app_listing_all(View::History);
     let effects = app.update(Msg::RebuildReference("h_agent".into()));
     let [effect] = effects.as_slice() else {
         panic!("{effects:?}")

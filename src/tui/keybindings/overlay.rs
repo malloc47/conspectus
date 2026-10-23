@@ -265,29 +265,14 @@ pub const TEXT_INPUT_KEYS: &[KeyRow<TextInputKey>] = &[
 // `n` new bare mux form. Unbound keys edit the focused field.
 // ---------------------------------------------------------------------
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum NewMuxKey {
-    Abort,
-    SwitchField,
-    Commit,
-    Cancel,
-}
-
-pub const NEW_MUX_KEYS: &[KeyRow<NewMuxKey>] = &[
-    alias(ctrl('c'), NewMuxKey::Abort),
-    shown(
-        key(KeyCode::Tab),
-        NewMuxKey::SwitchField,
-        "Tab",
-        "switch field",
-    ),
-    shown(
-        key(KeyCode::Enter),
-        NewMuxKey::Commit,
-        "Enter",
-        "next/commit",
-    ),
-    shown(key(KeyCode::Esc), NewMuxKey::Cancel, "Esc", "cancel"),
+pub const NEW_MUX_KEYS: &[KeyRow<FormKey>] = &[
+    alias(ctrl('c'), FormKey::Abort),
+    shown(key(KeyCode::Up), FormKey::Up, "↑", "move"),
+    shown(key(KeyCode::Down), FormKey::Down, "↓", "move"),
+    shown(key(KeyCode::Tab), FormKey::Tab, "Tab", "complete/next"),
+    shown(key(KeyCode::BackTab), FormKey::Back, "S-Tab", "back"),
+    shown(key(KeyCode::Enter), FormKey::Submit, "Enter", "next/commit"),
+    shown(key(KeyCode::Esc), FormKey::Cancel, "Esc", "cancel"),
 ];
 
 // ---------------------------------------------------------------------
@@ -457,34 +442,51 @@ pub const CLOSE_DOWN_KEYS: &[KeyRow<CloseDownKey>] = &[
 ];
 
 // ---------------------------------------------------------------------
-// Mux-launch form. Option keys act on the harness and worktree rows;
-// on a text field they edit the text.
+// Multi-field forms: the mux launch form, the new mux form, and the pin
+// edit form. Up and Down always move between fields; Tab completes in a
+// path field and moves on elsewhere. Option keys act on the choice and
+// toggle rows; on a text field they edit the text.
 // ---------------------------------------------------------------------
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FormKey {
     Abort,
     Cancel,
-    NextField,
-    PrevField,
+    Up,
+    Down,
+    Tab,
+    Back,
     Submit,
     OptionPrev,
     OptionNext,
+    /// Drop the focused field's override and inherit its value again.
+    Inherit,
 }
 
 pub const MUX_LAUNCH_KEYS: &[KeyRow<FormKey>] = &[
     alias(ctrl('c'), FormKey::Abort),
-    shown(key(KeyCode::Tab), FormKey::NextField, "Tab", "move"),
-    shown(
-        key(KeyCode::BackTab),
-        FormKey::PrevField,
-        "Shift-Tab",
-        "move",
-    ),
-    shown(key(KeyCode::Left), FormKey::OptionPrev, "←", "toggle"),
-    shown(key(KeyCode::Right), FormKey::OptionNext, "→", "toggle"),
-    alias(ch(' '), FormKey::OptionNext),
+    shown(key(KeyCode::Up), FormKey::Up, "↑", "move"),
+    shown(key(KeyCode::Down), FormKey::Down, "↓", "move"),
+    shown(key(KeyCode::Tab), FormKey::Tab, "Tab", "complete/next"),
+    shown(key(KeyCode::BackTab), FormKey::Back, "S-Tab", "back"),
+    shown(key(KeyCode::Left), FormKey::OptionPrev, "←", "option"),
+    shown(key(KeyCode::Right), FormKey::OptionNext, "→", "option"),
+    shown(ch(' '), FormKey::OptionNext, "Space", "option"),
     shown(key(KeyCode::Enter), FormKey::Submit, "Enter", "launch"),
+    shown(key(KeyCode::Esc), FormKey::Cancel, "Esc", "cancel"),
+];
+
+pub const PIN_EDIT_KEYS: &[KeyRow<FormKey>] = &[
+    alias(ctrl('c'), FormKey::Abort),
+    shown(key(KeyCode::Up), FormKey::Up, "↑", "move"),
+    shown(key(KeyCode::Down), FormKey::Down, "↓", "move"),
+    shown(key(KeyCode::Tab), FormKey::Tab, "Tab", "complete/next"),
+    shown(key(KeyCode::BackTab), FormKey::Back, "S-Tab", "back"),
+    shown(key(KeyCode::Left), FormKey::OptionPrev, "←", "option"),
+    shown(key(KeyCode::Right), FormKey::OptionNext, "→", "option"),
+    shown(ch(' '), FormKey::OptionNext, "Space", "option"),
+    shown(ctrl('r'), FormKey::Inherit, "Ctrl-R", "inherit"),
+    shown(key(KeyCode::Enter), FormKey::Submit, "Enter", "save"),
     shown(key(KeyCode::Esc), FormKey::Cancel, "Esc", "cancel"),
 ];
 

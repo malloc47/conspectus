@@ -38,8 +38,21 @@ fn artifact_in(text: &str) -> Option<String> {
     None
 }
 
+/// Whether `text` uses the storage word. A format placeholder such as
+/// `{slot}` names a variable, not words the operator reads.
 fn says_slot(text: &str) -> bool {
-    text.split(|c: char| !c.is_alphanumeric())
+    let mut visible = String::with_capacity(text.len());
+    let mut depth = 0usize;
+    for ch in text.chars() {
+        match ch {
+            '{' => depth += 1,
+            '}' => depth = depth.saturating_sub(1),
+            _ if depth == 0 => visible.push(ch),
+            _ => {}
+        }
+    }
+    visible
+        .split(|c: char| !c.is_alphanumeric())
         .any(|word| word.eq_ignore_ascii_case("slot") || word.eq_ignore_ascii_case("slots"))
 }
 
@@ -57,6 +70,10 @@ fn the_artifact_detector_finds_what_it_should() {
     assert_eq!(artifact_in("an adrenaline rush, a SQUADRON"), None);
     assert!(says_slot("pin slot `x`") && says_slot("Slots"));
     assert!(!says_slot("slotted into place"));
+    assert!(
+        !says_slot("unpinned `{slot}`"),
+        "placeholders are variables"
+    );
 }
 
 /// Frames of every view with a few rows selected, plus every overlay
@@ -134,7 +151,6 @@ fn composed_text() -> Vec<(String, String)> {
 }
 
 #[test]
-#[ignore = "backlog CSP-692.05: menus and overlays print decision-record numbers"]
 fn no_screen_shows_a_developer_artifact() {
     let mut offenders = Vec::new();
     let screens = screens();
@@ -149,7 +165,6 @@ fn no_screen_shows_a_developer_artifact() {
 }
 
 #[test]
-#[ignore = "backlog CSP-692.05: screens say slot where the operator sees a pin"]
 fn no_screen_calls_a_pin_a_slot() {
     let mut offenders = Vec::new();
     for (name, text) in screens().iter().chain(composed_text().iter()) {
@@ -172,7 +187,6 @@ fn help_of(command: &clap::Command, path: &str, out: &mut Vec<(String, String)>)
 }
 
 #[test]
-#[ignore = "backlog CSP-692.05: the tui help page and others cite decision records"]
 fn no_help_page_shows_a_developer_artifact() {
     let mut pages = Vec::new();
     help_of(&crate::cli::Cli::command(), "conspectus", &mut pages);
@@ -337,21 +351,18 @@ fn literal_offenders(dir: &str, bad: impl Fn(&str) -> Option<String>) -> Vec<Str
 }
 
 #[test]
-#[ignore = "backlog CSP-692.05: the mux menu and an explorer hint cite decision records and backlog items"]
 fn no_string_in_the_tui_names_a_developer_artifact() {
     let offenders = literal_offenders("src/tui", artifact_in);
     assert!(offenders.is_empty(), "{}", offenders.join("\n"));
 }
 
 #[test]
-#[ignore = "backlog CSP-692.05: the retired-verb error and a deprecation warning cite decision records"]
 fn no_string_in_the_cli_names_a_developer_artifact() {
     let offenders = literal_offenders("src/cli", artifact_in);
     assert!(offenders.is_empty(), "{}", offenders.join("\n"));
 }
 
 #[test]
-#[ignore = "backlog CSP-692.05: TUI strings say slot where the operator sees a pin"]
 fn no_string_in_the_tui_calls_a_pin_a_slot() {
     let offenders = literal_offenders("src/tui", |text| says_slot(text).then(|| "slot".into()));
     assert!(offenders.is_empty(), "{}", offenders.join("\n"));

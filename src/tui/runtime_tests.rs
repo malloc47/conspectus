@@ -1607,3 +1607,55 @@ fn p_pins_and_capital_n_launches_with_a_worktree() {
         Some(Action::Msg(msg)) if *msg == Msg::OpenMuxLaunchWorktreeForm
     ));
 }
+
+#[test]
+fn saving_the_pin_edit_form_sets_and_drops_overrides_in_the_store() {
+    use crate::model::{FieldValue, PinKind, SlotFields};
+    use crate::tui::widgets::pin_edit::PinEditRequest;
+    let dir = tempfile::tempdir().unwrap();
+    let store = crate::pin_slots::SlotStore::at(dir.path().join("pins.toml"));
+    crate::pin_ops::pin_planned(
+        &store,
+        "work",
+        PinKind::Mux,
+        SlotFields::from([("cwd".to_string(), FieldValue::Text("/old".into()))]),
+    )
+    .unwrap();
+
+    let request = PinEditRequest {
+        pin: "work".into(),
+        rename: None,
+        set: vec![
+            ("socket".to_string(), FieldValue::Text("s1".into())),
+            (
+                "argv".to_string(),
+                FieldValue::List(vec!["claude".into(), "--x".into()]),
+            ),
+        ],
+        unset: vec!["cwd".to_string()],
+    };
+    assert!(executor::apply_pin_overrides(&store, &request).unwrap());
+
+    let slot = store.load().slots.remove(0);
+    assert_eq!(
+        slot.overrides.get("socket"),
+        Some(&FieldValue::Text("s1".into()))
+    );
+    assert_eq!(
+        slot.overrides.get("argv"),
+        Some(&FieldValue::List(vec!["claude".into(), "--x".into()]))
+    );
+    assert!(
+        !slot.overrides.contains_key("cwd"),
+        "the override was dropped"
+    );
+
+    // Saving the same thing again changes nothing; an empty request is a no-op.
+    assert!(!executor::apply_pin_overrides(&store, &request).unwrap());
+    let none = PinEditRequest {
+        set: Vec::new(),
+        unset: Vec::new(),
+        ..request
+    };
+    assert!(!executor::apply_pin_overrides(&store, &none).unwrap());
+}

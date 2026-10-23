@@ -141,6 +141,10 @@ impl HarnessAdapter for ClaudeCodeAdapter {
         "claude"
     }
 
+    fn launch_options(&self) -> &'static [super::HarnessLaunchOption] {
+        super::CLAUDE_CODE_LAUNCH_OPTIONS
+    }
+
     fn discover(&self, context: &DiscoveryContext) -> Result<GraphFragment> {
         // Delegate to the shared state-root envelope.
         super::discover_with_state_root(context, HARNESS_KEY, |root| {

@@ -268,7 +268,7 @@ impl HistoryForgetArgs {
         let pins = pinned_by(&snapshot, &meta.id, &meta.key);
         if !pins.is_empty() && !self.force {
             bail!(
-                "pin slot(s) {} target this record; `pin rm` them first or pass --force",
+                "pin(s) {} target this record; `pin rm` them first or pass --force",
                 pins.join(", ")
             );
         }

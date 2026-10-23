@@ -13,12 +13,12 @@ That takes three cooperating layers (ADRs 0140–0142):
 - the **graph** is what exists right now, rebuilt every discovery cycle;
 - **history** is everything Conspectus has seen, including what is gone,
   with what it takes to rebuild it;
-- **pin slots** are the entities you chose to keep at hand.
+- **pins** are the entities you chose to keep at hand.
 
 Pinning is deliberately light. It doesn't create anything, configure
-anything, or bind anything: it adds a named slot to
+anything, or bind anything: it adds a named pin to
 `$XDG_DATA_HOME/conspectus/pins.toml` that points at an entity, live or
-gone. `docs/operations.md` ("Pin slots, history, and rebuild") is the
+gone. `docs/operations.md` ("Pins, history, and rebuild") is the
 reference; this walkthrough is the teaching counterpart.
 
 ## The mental model
@@ -45,14 +45,14 @@ session.
    walkthrough --cwd ~/scratch`. Detach (`prefix d`).
 2. Pin it: `conspectus pin add walkthrough` (or launch and pin in one
    step with `mux launch ... --pin`; `--pin --no-launch` writes a planned
-   slot and starts nothing until its first rebuild). The argument is a mux name,
-   a node id, or a history id. A slot named `walkthrough` appears in
+   pin and starts nothing until its first rebuild). The argument is a mux name,
+   a node id, or a history id. A pin named `walkthrough` appears in
    `conspectus pin list` with status `live`. `conspectus pin show
    walkthrough` lists each recipe field and which layer it came from.
 3. Let it die: `tmux kill-session -t walkthrough`. On the next refresh the
    mux is **gone**, and the row is still there, dimmed, with its
    last-seen age. `conspectus history list --gone` shows the record, and
-   `pin list` shows the slot as `gone`. In the TUI the Mux view dims the
+   `pin list` shows the pin as `gone`. In the TUI the Mux view dims the
    ghost, and the Pinned view (`4`) and History view (`5`) list it too.
 4. Read the plan: `conspectus rebuild walkthrough --dry-run`. It prints
    each step: a `tmux new-session` with the recorded argv, with the last
@@ -63,7 +63,7 @@ session.
    If the harness rejects the resume, Conspectus falls back to a fresh
    launch and says so.
 6. Unpin when you're done: `conspectus pin rm walkthrough`. The mux and
-   its history record are untouched; only the slot goes.
+   its history record are untouched; only the pin goes.
 
 ## Changing what a rebuild does
 
@@ -78,14 +78,14 @@ conspectus pin edit walkthrough --unset argv
 Overridable fields depend on the kind (a mux takes `name`, `socket`,
 `cwd`, `harness`, `argv`, and `worktree_branch`); `label` works
 everywhere. `pin refresh walkthrough` copies the current recipe into the
-slot's snapshot so it still renders and rebuilds if history is ever
-lost. `pin retarget walkthrough <other mux>` points the slot at another
+pin's snapshot so it still renders and rebuilds if history is ever
+lost. `pin retarget walkthrough <other mux>` points the pin at another
 entity of the same kind, and `pin move walkthrough --top` reorders the
 Pinned view.
 
-## Planned slots
+## Planned pins
 
-A slot doesn't need a target. A **planned** slot holds a recipe for
+A pin doesn't need a target. A **planned** pin holds a recipe for
 something that doesn't exist yet:
 
 ```sh
@@ -95,7 +95,7 @@ conspectus rebuild ingest
 ```
 
 The first rebuild builds the entity, records it in history, and points the
-slot at the record.
+pin at the record.
 
 ## When more is missing
 
@@ -119,7 +119,7 @@ records rooted in the worktree it removes.
 ## Coming from the earlier pin model
 
 If you have `[[pins.entries]]` in `.conspectus.toml` or your user config,
-they still load as read-only slots after the real ones, with a
+they still load as read-only pins after the real ones, with a
 `LegacyPins` diagnostic. Convert them:
 
 ```sh
@@ -127,7 +127,7 @@ conspectus pin migrate --dry-run     # see each conversion
 conspectus pin migrate
 ```
 
-Each entry becomes a mux slot with the same name, pointing at a history
+Each entry becomes a mux pin with the same name, pointing at a history
 record seeded from its launch settings and from the session it last
 bound. The old `pin create`, `launch`, `attach`, `bind`, `rebind`, and
 `adopt` verbs are retired; they print what to use instead (`pin add`,
@@ -139,17 +139,17 @@ bound. The old `pin create`, `launch`, `attach`, `bind`, `rebind`, and
 - They don't bind sessions to muxes. Session-to-mux attribution stays with
   the general resolver, and a pin no longer renames a session (a session's
   name falls back from alias to title to mux name).
-- They don't write to your project. Slots are personal and live in one
+- They don't write to your project. Pins are personal and live in one
   user-scope file.
 - They don't take over your tmux server or impose a window layout.
 
 ## Further reading
 
 - ADR 0140 — History and presence.
-- ADR 0141 — Pin slots.
+- ADR 0141 — Pins.
 - ADR 0142 — Rebuild plans and executors.
 - ADR 0143 — The mutation envelope (what each command may write).
 - ADR 0144 — The Pinned and History views.
 - ADR 0018 — Intra-harness `parent_session` lineage, which rebuild uses to
   resume the latest session.
-- `docs/operations.md` §"Pin slots, history, and rebuild" — the reference.
+- `docs/operations.md` §"Pins, history, and rebuild" — the reference.

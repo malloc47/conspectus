@@ -83,7 +83,7 @@ fn v_opens_the_viewer_wherever_a_session_is_shown() {
 }
 
 fn enter_in(view: View, label: &str) -> Vec<Effect> {
-    let mut app = app_in(view);
+    let mut app = app_listing_all(view);
     select(&mut app, label);
     enter(&mut app)
 }

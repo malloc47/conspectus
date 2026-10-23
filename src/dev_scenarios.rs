@@ -1046,6 +1046,8 @@ fn add_pins_and_history_to_showcase(world: &mut ScenarioWorld, project: &Path) -
                 mux_record("h_5c0000000001", "project", now - 300, &claude),
                 mux_record("h_5c0000000002", "nightly-refactor", now - 2 * day, &claude),
                 mux_record("h_5c0000000003", "docs-sweep", now - 9 * day, &["codex"]),
+                mux_record("h_5c0000000006", "release-prep", now - 4 * day, &claude),
+                mux_record("h_5c0000000007", "bugfix-sprint", now - 6 * day, &["codex"]),
             ];
             h.checkouts = vec![
                 checkout(
@@ -1059,6 +1061,12 @@ fn add_pins_and_history_to_showcase(world: &mut ScenarioWorld, project: &Path) -
                     path_to_string(&world.root.join("checkouts/spike-cache")),
                     "spike/cache",
                     now - 12 * day,
+                ),
+                checkout(
+                    "h_5c0000000008",
+                    path_to_string(&world.root.join("checkouts/hotfix-login")),
+                    "hotfix/login",
+                    now - 5 * day,
                 ),
             ];
             h.prs = vec![pr_record.clone()];

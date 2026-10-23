@@ -146,8 +146,8 @@ Project values win over user values, which win over built-in
 defaults. Both files are TOML and entirely optional.
 
 The same files also hold user-authored intent: `[declared]` links
-(ADR 0014) and `[[aliases]]` (ADR 0029). Pin slots live in their own
-file (see [Pin slots, history, and rebuild](#pin-slots-history-and-rebuild)).
+(ADR 0014) and `[[aliases]]` (ADR 0029). Pins live in their own
+file (see [Pins, history, and rebuild](#pins-history-and-rebuild)).
 The tables below are the configuration keys.
 
 ```toml
@@ -337,10 +337,10 @@ conspectus alias list
 conspectus pin {add|edit|rename|retarget|refresh|move|rm|list|show|migrate} ...
 conspectus rebuild <REF> [--dry-run] [--no-attach] [--session ID]
 conspectus history {list|show|reap|forget} ...
-conspectus mux new <NAME> [--cwd PATH] [--socket NAME] [--no-attach] [--pin [SLOT] [--no-launch]]
+conspectus mux new <NAME> [--cwd PATH] [--socket NAME] [--no-attach] [--pin [PIN] [--no-launch]]
 conspectus mux launch <HARNESS> --name <NAME> [--cwd PATH] [--argv ARG...]
                                               [--worktree-branch B --worktree-repo PATH]
-                                              [--pin [SLOT] [--no-launch]]
+                                              [--pin [PIN] [--no-launch]]
 conspectus worktree {list|new|rm|merge|close|prune} ...
 conspectus hook {init|status|remove} <claude-code|codex|pi> [--scope {user|project}]
 conspectus hook write <HARNESS>          # invoked by the harness hook itself
@@ -550,14 +550,14 @@ when the target is a live session (mux indicator `Attached` or
 `Ambiguous`) appends an informational advisory that the alias
 overlays the harness title until the session ends.
 
-## Pin slots, history, and rebuild
+## Pins, history, and rebuild
 
 Three layers, kept apart (ADRs 0140–0142):
 
 - the **graph** is what exists now, rebuilt by discovery every cycle;
 - **history** is every rebuildable entity Conspectus has observed,
   gone ones included, with what it takes to rebuild them;
-- **pin slots** are the entities you keep at hand, named and ordered.
+- **pins** are the entities you keep at hand, named and ordered.
 
 ### History
 
@@ -588,7 +588,7 @@ conspectus history forget <h_...> [--force]
 `reap` removes gone records past a per-kind age. The defaults are 14
 days for muxes, 30 for checkouts, and 30 for PRs (counted from when they
 left the listing); repos have no default and go only through `forget`.
-A record a pin slot targets is never reaped, and `forget` refuses one
+A record a pin targets is never reaped, and `forget` refuses one
 unless you pass `--force`. Reaping is always operator-initiated and only
 removes records; it never touches tmux, git, or the filesystem.
 
@@ -617,9 +617,9 @@ argv = ["claude", "--dangerously-skip-permissions"]
 argv = ["nix", "develop", "-c", "codex"]
 ```
 
-### Pin slots
+### Pins
 
-A slot is a table in `$XDG_DATA_HOME/conspectus/pins.toml`:
+A pin is a table in `$XDG_DATA_HOME/conspectus/pins.toml`:
 
 ```toml
 [pins]
@@ -638,17 +638,17 @@ argv = ["claude", "--dangerously-skip-permissions"]
 The kind is `mux`, `session`, `checkout`, `repo`, `branch`, `pr`,
 `workspace`, or `fork`. The target is `history:<id>` (muxes,
 checkouts, repos), a node id (sessions, PRs, branches, workspaces,
-forks), or absent for a **planned** slot that its first rebuild builds.
+forks), or absent for a **planned** pin that its first rebuild builds.
 Each recipe field resolves `overrides > live graph > history > snapshot
 > defaults`; `pin show` prints every field with the layer that supplied
 it. The overridable fields are `name`, `socket`, `cwd`, `harness`,
 `argv`, and `worktree_branch` for a mux, `resume_into` for a session,
 `branch`, `base`, and `location` for a checkout, and `remote` and `path`
-for a repo; `label` works on any slot. Slot order is the order of the
+for a repo; `label` works on any pin. Pin order is the order of the
 tables, and writes preserve comments and unknown keys.
 
-A slot's status is `live`, `gone`, `unknown`, `missing` (the target is in
-neither graph nor history, so the slot renders from its snapshot), or
+A pin's status is `live`, `gone`, `unknown`, `missing` (the target is in
+neither graph nor history, so the pin renders from its snapshot), or
 `planned`.
 
 ```sh
@@ -665,18 +665,18 @@ conspectus pin show <name>
 ```
 
 `KIND` is `mux`, `session`, `checkout` (also spelled `worktree`), `repo`,
-`pr`, `branch`, `workspace`, or `fork`. `pin rename` on a live mux slot also
+`pr`, `branch`, `workspace`, or `fork`. `pin rename` on a live mux pin also
 renames the tmux session and pins the `name` override; `--no-mux` renames
-the slot alone. `FIELD=VALUE` lists (such as `argv`) are split like a shell command
+the pin alone. `FIELD=VALUE` lists (such as `argv`) are split like a shell command
 line. Pinning a live mux, worktree, or repo first records it in
-history so the slot has a stable record to point at. `rm` removes the
-slot and nothing else. `pin add`, `edit`, `rename`, `retarget`,
+history so the pin has a stable record to point at. `rm` removes the
+pin and nothing else. `pin add`, `edit`, `rename`, `retarget`,
 `refresh`, `move`, `rm`, and `migrate` are the only commands that write
 `pins.toml`; the daemon never does, and `graph`, `table`, `node show`,
 `pin list`, and `pin show` leave it alone. The store, like the history
-files, is created with mode 0600 (directories 0700), since slots and
+files, is created with mode 0600 (directories 0700), since pins and
 records can hold launch command lines. A relative `$XDG_DATA_HOME` is
-ignored in favor of `$HOME/.local/share`, so slots never land inside a
+ignored in favor of `$HOME/.local/share`, so pins never land inside a
 project tree.
 
 The `pin create`, `launch`, `attach`, `bind`, `rebind`, and `adopt`
@@ -686,7 +686,7 @@ exit with a message naming the replacement.
 ### Rebuild
 
 ```sh
-conspectus rebuild <slot | h_... | node id | mux name> [--dry-run] [--no-attach] [--session ID]
+conspectus rebuild <pin | h_... | node id | mux name> [--dry-run] [--no-attach] [--session ID]
 ```
 
 A rebuild is a plan of steps. `--dry-run` prints it and stops; a real
@@ -708,7 +708,7 @@ rebuilds the worktree first, which in turn clones a missing repo.
 - A **repo or primary checkout** is cloned from its recorded remote with
   `git clone`, only into a path that doesn't exist.
 
-The launch argv is the first of: the slot's `argv` override, the recorded
+The launch argv is the first of: the pin's `argv` override, the recorded
 argv, the project's `[launch.<harness>]` profile, the user's profile, an
 `atelier exec <harness>` wrapper (when the mux's directory is inside an
 Atelier workspace and `atelier` is on your `PATH`), and the harness
@@ -720,64 +720,87 @@ but not rebuilt.
 
 ### Renames and worktrees
 
-`conspectus rename mux` keeps pin slots that name the renamed mux in
+`conspectus rename mux` keeps pins that name the renamed mux in
 step; it refuses a gone mux. `conspectus worktree close` forgets the
 gone history records rooted in the removed worktree, except records a
-slot targets.
+pin targets.
 
 ### The Pinned view
 
-Key `4` (or `--view pinned`) lists every slot, whatever its kind, in one set
-of columns: `<kind glyph> <slot> <status> <age> <content>`. The slot name is
+Key `4` (or `--view pinned`) lists every pin, whatever its kind, in one set
+of columns: `<kind glyph> <pin> <status> <age> <content>`. The pin name is
 cut at 28 cells, the status is one word (`live`, `gone`, `unknown`,
 `planned`, `missing`, `in mux`, `resumable`, or a PR's state), the age is the
 last activity of a live entity or the time a gone one was last seen, and the
 content is the harness and place, the title, or the remote. Gone, missing,
-planned, and unknown rows are dimmed. Columns pad to the widest value in the
-whole tree, so folding a group doesn't move them.
+planned, and unknown rows are dimmed. The agent or program that runs is a
+filled chip, the same as in the other views, ahead of the text that follows
+it. A pin with nothing running yet (`planned`) wears a hollow pin glyph, `◎`,
+in the dimmed ghost color after its kind glyph; the filled `◉` is for an
+entity a pin points at. `gone` means an entity that existed and is no longer
+running, and never describes an unstarted pin. Columns pad to the widest
+value in the whole tree, so folding a group doesn't move them. Changing the
+grouping scrolls back to the top so every group is visible.
 
-Slots group by `project` (the repo above the slot's cwd or path; the rest go
-under Other), by `kind`, or not at all (`Ctrl-G` cycles), and sort in slot order or,
-with the Recency sort, freshest first. A mux slot expands to the sessions it
-hosts, and a checkout slot to its muxes and their sessions. The detail pane
-shows the slot, its target, and each effective field with the layer that
+Pins group by `project` (the repo above the pin's cwd or path; the rest go
+under Other), by `kind`, or not at all (`Ctrl-G` cycles), and sort in pin order or,
+with the Recency sort, freshest first. A mux pin expands to the sessions it
+hosts, and a checkout pin to its muxes and their sessions. The detail pane
+shows the pin, its target, and each effective field with the layer that
 supplied it (override, live, history, snapshot, or default).
 
-`Enter` attaches a slot whose mux is live (or a session slot whose session is
-in a mux). On a gone, missing, or planned mux, session, worktree, or repo slot,
-it runs `conspectus rebuild <slot> --no-attach` behind a spinner and refreshes;
+`Enter` attaches a pin whose mux is live (or a session pin whose session is
+in a mux). On a gone, missing, or planned mux, session, worktree, or repo pin,
+it runs `conspectus rebuild <pin> --no-attach` behind a spinner and refreshes;
 press `Enter` again to attach. A live session that isn't in a mux is rebuilt
-the same way, which resumes it. A PR slot shows its URL, and the other live
+the same way, which resumes it. A PR pin shows its URL, and the other live
 kinds say there is nothing to launch. While legacy `[[pins.entries]]`
 remain, a line under the rows names `conspectus pin migrate`.
 
-`.` opens the slot menu: **Rebuild**, **Show rebuild plan**, **Edit
-overrides…** (type `field=value`; `field=` clears it), **Rename…** (a live mux
-slot renames its tmux session with it and pins the name, as `pin rename`
+`.` opens the pin menu: **Rebuild**, **Show rebuild plan**, **Edit…** (the
+edit form, below), **Rename…** (a live mux
+pin renames its tmux session with it and pins the name, as `pin rename`
 does), **Retarget…** (type a node id, a history id, or a mux name of the same
 kind), **Refresh snapshot**, **Reveal in its view** (switches to Sessions, Mux,
 or PRs and selects the entity; a gone entity opens in History), and **Unpin** (press `Enter` twice). Each is
-the same write as the `pin` command of that name. Legacy slots refuse edits
+the same write as the `pin` command of that name. Legacy pins refuse edits
 until they are migrated.
 
 ### Pinning from the other views
 
 `p` pins the selected row in any view, and unpins it (after a confirming menu)
-when a slot already points at it; `.` offers the same as **Pin** or **Unpin
-\<slot\>** at the top of every row's menu. A runtime process can't be pinned.
-Pinning a live mux, worktree, or repo records it in history first so the slot
+when a pin already points at it; `.` offers the same as **Pin** or **Unpin
+\<pin\>** at the top of every row's menu. A runtime process can't be pinned.
+Pinning a live mux, worktree, or repo records it in history first so the pin
 has something to point at. The native views mark a pinned row with `◉` after
-its kind glyph and leave it where it sorts; once any slot exists the marker
+its kind glyph and leave it where it sorts; once any pin exists the marker
 cell is reserved on every row so columns hold still. Controls has a **Pinned
 only** checkbox in Sessions, Mux, and PRs that keeps pinned rows and the
 groups above them.
+
+**Edit…** opens a form with one row per field the pin can change: its name
+first (renaming a live mux pin renames its tmux session), then the label and
+the fields its kind can override, the same names `pin edit --set` takes. Each
+row shows the value in effect and where it comes from (`override`, `live`,
+`history`, `snapshot`, or `default`). Typing in a row makes an override;
+`Ctrl-R` drops the row's override so it follows the entity again. Paths
+complete with `Tab`, the harness row lists the known harnesses (`←`/`→` choose
+one), and a harness's launch options, such as skipping permissions, are
+checkboxes under it that add or remove their flags on the `argv` row. `↑`/`↓`
+move between rows, `Enter` saves, and `Esc` cancels.
+
+The launch and new mux forms work the same way: `↑`/`↓` move between fields,
+`Tab` completes a directory in a path field (offering directories from
+the graph as well as the filesystem) and moves on elsewhere, `←`/`→`/`Space`
+choose among the harnesses, options, and toggles, and a line shows the command
+the form will run.
 
 `N` opens the mux launch form with the worktree toggle on, and `m` then
 **Launch harness in new mux…** opens it with the toggle off. An empty `launch
 argv` resolves to the harness's default (a project or user `[launch.*]`
 profile, `atelier exec`, or the harness default) and the form shows the
 command and where it came from. The last field, **pin**, can also pin the new
-mux or, with *pin, don't launch*, write a planned slot and start nothing.
+mux or, with *pin, don't launch*, write a planned pin and start nothing.
 
 ### The History view
 
@@ -788,16 +811,20 @@ probe didn't list, a worktree or repo whose path is missing under an
 existing parent, or a PR that left the listing once the forge has been read.
 Unknown records aren't listed, because an unreadable probe proves nothing.
 Rows group by `project` (the repo above the record's path; a worktree
-belongs to the repo it was made from), by `kind`, or not at all.
+belongs to the repo it was made from), by `kind`, or not at all. A record a
+pin points at is already one keypress away in the Pinned view, so Controls
+has an **Unpinned only** checkbox, checked by default; clear it to list
+pinned records too (they carry `◉`). Revealing a gone pin's entity from the
+Pinned view clears it for you.
 
 `Enter` runs `conspectus rebuild <record id> --no-attach` behind a spinner and
 refreshes. `.` opens the row menu: **Rebuild**, **Pin** (the same as `pin add
-<record id>`; **Unpin \<slot\>** once a slot points at it), **Show rebuild plan** (the output of `rebuild --dry-run` in a
+<record id>`; **Unpin \<pin\>** once a pin points at it), **Show rebuild plan** (the output of `rebuild --dry-run` in a
 scrollable modal), **Forget** (press `Enter` twice; the record leaves history
-and any slot pointing at it falls back to its snapshot), and **Clean up…**.
+and any pin pointing at it falls back to its snapshot), and **Clean up…**.
 
 Clean up lists what `conspectus history reap` would remove: gone records past
-their `[history.reap_after]` age, minus records a slot targets. All are
+their `[history.reap_after]` age, minus records a pin targets. All are
 selected; `Space` deselects, `Enter` forgets exactly the selected ones, and
 `Esc` cancels. With nothing past its age the modal says so. Forgetting and
 cleaning up only remove history records; they never touch tmux, git, or the
@@ -817,8 +844,8 @@ attach and rename refuse with a message that names the fix.
 ### Migrating legacy pins
 
 Pins from earlier builds (`[[pins.entries]]` in `.conspectus.toml` or the
-user config) still load as in-memory slots after the real ones, and a
-`LegacyPins` diagnostic points here. Legacy slots are read-only: every `pin`
+user config) still load as in-memory pins after the real ones, and a
+`LegacyPins` diagnostic points here. Legacy pins are read-only: every `pin`
 write gesture (`edit`, `rename`, `retarget`, `refresh`, `move`, `rm`) and
 `rebuild` ask you to migrate first.
 
@@ -827,9 +854,9 @@ conspectus pin migrate --dry-run
 conspectus pin migrate
 ```
 
-Each entry becomes a mux slot with the same name. Its launch settings seed
+Each entry becomes a mux pin with the same name. Its launch settings seed
 a history record (dated by the old binding sidecar, with the session the
-pin last bound), and the slot carries overrides only for what the record
+pin last bound), and the pin carries overrides only for what the record
 doesn't already say. A display name that would otherwise disappear is kept
 as an alias on the session. The converted entries are then removed from
 their config files with other tables and comments intact; running it

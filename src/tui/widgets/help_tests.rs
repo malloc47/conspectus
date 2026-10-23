@@ -233,7 +233,7 @@ fn body_lines_cover_every_documented_key() {
         "Default action on the selected row",
         "Attach to the selected mux",
         "Copy the selected agent or mux session's full id",
-        "Rename the selected agent session (alias) or mux (tmux + pin slot cascade)",
+        "Rename the selected agent session (alias) or mux (tmux + pin cascade)",
         "Open the selected session's transcript",
         "Refresh discovery now",
         "Resume the selected un-muxed agent session",

@@ -43,8 +43,8 @@ impl MuxMenuChoice {
 
     fn subtitle(self) -> &'static str {
         match self {
-            Self::NewBareMux => "ADR 0095 · shell only, no harness",
-            Self::LaunchHarnessMux => "ADR 0096 · spawn harness; optionally pin it",
+            Self::NewBareMux => "shell only, no harness",
+            Self::LaunchHarnessMux => "spawn harness; optionally pin it",
         }
     }
 }

@@ -135,7 +135,7 @@ fn tmux_available() -> bool {
 fn listing_with_no_slots_points_at_pin_add() {
     let world = World::new();
     let out = world.ok(&["pin", "list"]);
-    assert!(out.contains("no pin slots"), "{out}");
+    assert!(out.contains("no pins"), "{out}");
     assert!(!world.pins_file().exists(), "listing writes nothing");
 }
 
@@ -212,7 +212,7 @@ fn a_planned_slot_round_trips_through_edit_rename_move_and_rm() {
     let list = world.ok(&["pin", "list"]);
     assert!(!list.contains("beta") && list.contains("gamma"), "{list}");
     let stderr = world.fails(&["pin", "rm", "beta"]);
-    assert!(stderr.contains("no pin slot named `beta`"), "{stderr}");
+    assert!(stderr.contains("no pin named `beta`"), "{stderr}");
 }
 
 #[test]
@@ -235,7 +235,7 @@ fn bad_input_is_refused_before_anything_is_written() {
     let stderr = world.fails(&["pin", "add", "no-such-thing"]);
     assert!(stderr.contains("nothing matches"), "{stderr}");
     let stderr = world.fails(&["pin", "edit", "ghost", "--set", "cwd=/x"]);
-    assert!(stderr.contains("no pin slot named `ghost`"), "{stderr}");
+    assert!(stderr.contains("no pin named `ghost`"), "{stderr}");
     assert!(!world.pins_file().exists());
 }
 
@@ -276,7 +276,7 @@ fn pinning_a_live_mux_survives_its_death_and_rebuilds() {
     // A pinned record can't be forgotten by accident.
     let id = history.split_whitespace().next().unwrap().to_string();
     let stderr = world.fails(&["history", "forget", &id]);
-    assert!(stderr.contains("pin slot"), "{stderr}");
+    assert!(stderr.contains("pin(s)"), "{stderr}");
     world.ok(&["history", "forget", &id, "--force"]);
     let list = world.ok(&["pin", "list"]);
     assert!(
@@ -374,7 +374,7 @@ fn migrate_converts_legacy_entries_once() {
     assert!(stderr.contains("pin migrate"), "{stderr}");
 
     let dry = world.ok(&["pin", "migrate", "--dry-run"]);
-    assert!(dry.contains("pin `legacy-api` -> mux slot"), "{dry}");
+    assert!(dry.contains("pin `legacy-api` -> mux pin"), "{dry}");
     assert!(
         std::fs::read_to_string(&config)
             .unwrap()
@@ -721,7 +721,7 @@ fn an_unusable_pins_file_is_reported_not_hidden() {
     let (success, out, stderr) = world.run(&["pin", "list"]);
 
     assert!(success, "{stderr}");
-    assert!(out.contains("no pin slots"), "{out}");
+    assert!(out.contains("no pins"), "{out}");
     assert!(stderr.contains("schema_version is 3, not 2"), "{stderr}");
     assert!(!stderr.contains("Some("), "{stderr}");
     let stderr = world.fails(&["pin", "add", "--planned", "--kind", "mux", "--name", "x"]);

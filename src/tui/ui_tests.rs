@@ -314,7 +314,7 @@ fn render_at_default_size_shows_header_tree_and_detail() {
         "session harness label missing: {text}"
     );
     assert!(
-        text.contains("could you give me a bit more"),
+        text.contains("could you give me a bit"),
         "same-line preview missing: {text}"
     );
     assert!(
@@ -1843,8 +1843,8 @@ fn row_kind_glyph_span_dispatches_per_row_kind() {
         pin_id: None,
     });
     assert!(
-        row_kind_glyph_span(&agent, &theme).is_none(),
-        "row-context AgentSession should defer to the harness pill",
+        row_kind_glyph_span(&agent, &theme).is_some(),
+        "a session wears its kind glyph in every view",
     );
 
     // MuxSession and AgentSessionMuxCandidate both get `▣` since
@@ -5365,6 +5365,7 @@ fn history_app_over(
             home: Some(std::path::Path::new("/home/op")),
             now: Some(1_700_000_000),
             grouping,
+            show_pinned: true,
         },
     );
     app.update(Msg::SetData {
@@ -5853,7 +5854,7 @@ fn the_slot_menu_offers_every_gesture() {
         [
             "Rebuild",
             "Show rebuild plan",
-            "Edit overrides…",
+            "Edit…",
             "Rename…",
             "Retarget…",
             "Refresh snapshot",
@@ -5889,13 +5890,8 @@ fn slot_prompts_commit_to_their_own_store_write() {
     );
 
     app.update(Msg::OpenSlotEdit("conspectus-main".into()));
-    assert_eq!(
-        app.update(Msg::CommitRename("cwd=/tmp".into())),
-        vec![Effect::WriteStore(StoreOp::EditSlot {
-            slot: "conspectus-main".into(),
-            assignment: "cwd=/tmp".into(),
-        })]
-    );
+    assert!(app.pin_edit_form().is_some(), "edit opens the form");
+    app.close_pin_edit_form();
 
     app.update(Msg::OpenSlotRetarget("conspectus-main".into()));
     assert_eq!(
@@ -6126,5 +6122,50 @@ fn clean_up_shows_a_deselected_record_unticked() {
     assert!(
         frame.lines().filter(|l| l.contains('✓')).count() == 1,
         "only one record is ticked:\n{frame}"
+    );
+}
+
+#[test]
+fn opening_edit_builds_the_form_from_the_pin_and_saving_emits_one_store_write() {
+    use crate::tui::Effect;
+    use crate::tui::effect::StoreOp;
+    let mut app = slots_app(crate::tui::PinnedGrouping::None);
+    app.update(Msg::OpenSlotEdit("conspectus-main".into()));
+    let form = app.pin_edit_form().expect("the edit form opens");
+    assert_eq!(form.pin(), "conspectus-main");
+    let labels = form.row_labels();
+    assert_eq!(&labels[..2], ["pin name", "label"]);
+    for field in crate::model::PinKind::Mux.overridable_fields() {
+        assert!(labels.contains(field), "{field} missing from {labels:?}");
+    }
+    assert_eq!(form.name_text(), "conspectus-main");
+
+    let request = crate::tui::widgets::pin_edit::PinEditRequest {
+        pin: "conspectus-main".into(),
+        rename: Some("renamed".into()),
+        set: vec![],
+        unset: vec![],
+    };
+    assert_eq!(
+        app.update(Msg::CommitPinEdit(request.clone())),
+        vec![Effect::WriteStore(StoreOp::SavePin { request })]
+    );
+
+    app.close_pin_edit_form();
+    let effects = app.update(Msg::OpenSlotEdit("no-such-pin".into()));
+    assert!(matches!(effects.as_slice(), [Effect::Toast(_)]));
+    assert!(app.pin_edit_form().is_none());
+}
+
+#[test]
+fn the_edit_form_shows_inherited_values_without_the_pins_overrides() {
+    let mut app = slots_app(crate::tui::PinnedGrouping::None);
+    app.update(Msg::OpenSlotEdit("conspectus-main".into()));
+    let frame = pinned_frame(&mut app, 120);
+    assert!(frame.contains("Edit pin"), "{frame}");
+    assert!(frame.contains("pin name"), "{frame}");
+    assert!(
+        frame.contains("renames the tmux session too"),
+        "a live mux pin:\n{frame}"
     );
 }

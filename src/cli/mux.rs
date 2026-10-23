@@ -68,7 +68,7 @@ struct MuxNewArgs {
     no_attach: bool,
     /// Also pin the mux as a slot. Takes an optional slot name,
     /// defaulting to the mux name.
-    #[arg(long, value_name = "SLOT", num_args = 0..=1, default_missing_value = "")]
+    #[arg(long, value_name = "PIN", num_args = 0..=1, default_missing_value = "")]
     pin: Option<String>,
     /// With `--pin`: write the slot without starting the mux. The first
     /// `conspectus rebuild <slot>` builds it.
@@ -174,7 +174,7 @@ struct MuxLaunchArgs {
     no_attach: bool,
     /// Also pin the mux as a slot. Takes an optional slot name,
     /// defaulting to the mux name.
-    #[arg(long, value_name = "SLOT", num_args = 0..=1, default_missing_value = "")]
+    #[arg(long, value_name = "PIN", num_args = 0..=1, default_missing_value = "")]
     pin: Option<String>,
     /// With `--pin`: write the slot without starting the mux. The first
     /// `conspectus rebuild <slot>` builds it.
@@ -211,9 +211,7 @@ impl MuxLaunchArgs {
             bail!("mux launch requires a non-empty <HARNESS>");
         }
         if self.no_launch && self.worktree_branch.is_some() {
-            bail!(
-                "mux launch: --no-launch can't realize a worktree; rebuild the slot to create it"
-            );
+            bail!("mux launch: --no-launch can't realize a worktree; rebuild the pin to create it");
         }
         // Resolve cwd: prefer worktree realization when --worktree-branch
         // is set; otherwise use --cwd or $PWD.
@@ -355,7 +353,7 @@ struct PinRequest {
 
 /// Validate `--pin` before anything starts: a usable slot name, not
 /// already taken, a slot store to write, and (unless only planning) a
-/// history store to point the slot at.
+/// history store to point the pin at.
 fn pin_request(
     pin: Option<&str>,
     no_launch: bool,
@@ -379,10 +377,10 @@ fn pin_request(
         .iter()
         .any(|existing| existing.id == slot)
     {
-        bail!("--pin: a pin slot named `{slot}` already exists");
+        bail!("--pin: a pin named `{slot}` already exists");
     }
     if !no_launch && history.is_none() {
-        bail!("--pin needs the history store to point the slot at; none is available");
+        bail!("--pin needs the history store to point the pin at; none is available");
     }
     Ok(Some(PinRequest {
         store,

@@ -97,6 +97,7 @@ pub fn draw(app: &mut App, frame: &mut Frame<'_>) {
     draw_row_menu(app, frame, area);
     draw_clean_up(app, frame, area);
     draw_mux_launch_form(app, frame, area);
+    draw_pin_edit_form(app, frame, area);
     draw_value_modal(app, frame, area);
     draw_messages_overlay(app, frame, area);
     draw_toast(app, frame, area);
@@ -136,6 +137,15 @@ fn draw_mux_launch_form(app: &App, frame: &mut Frame<'_>, area: Rect) {
         return;
     };
     frame.render_widget(MuxLaunchFormWidget::new(state, app.theme()), area);
+}
+
+fn draw_pin_edit_form(app: &App, frame: &mut Frame<'_>, area: Rect) {
+    use crate::tui::widgets::pin_edit::PinEditFormWidget;
+
+    let Some(state) = app.pin_edit_form() else {
+        return;
+    };
+    frame.render_widget(PinEditFormWidget::new(state, app.theme()), area);
 }
 
 fn draw_worktree_menu(app: &App, frame: &mut Frame<'_>, area: Rect) {

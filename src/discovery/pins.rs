@@ -65,7 +65,7 @@ pub fn apply_pins(
                 diagnostics.push(Diagnostic::Config {
                     path: path.display().to_string(),
                     message: format!(
-                        "pin `{}` is already a slot (this legacy entry skipped)",
+                        "pin `{}` is already a pin (this legacy entry skipped)",
                         entry.id
                     ),
                 });

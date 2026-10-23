@@ -221,6 +221,68 @@ fn unknown_harness_resume_argv_returns_none() {
 }
 
 #[test]
+fn launch_options_include_skip_permissions_for_codex_and_claude() {
+    let codex = launch_options_for("codex");
+    assert_eq!(codex.len(), 1);
+    assert_eq!(codex[0].id, "skip-permissions");
+    assert_eq!(
+        codex[0].argv,
+        ["--dangerously-bypass-approvals-and-sandbox"]
+    );
+
+    let claude = launch_options_for("claude-code");
+    assert_eq!(claude.len(), 1);
+    assert_eq!(claude[0].id, "skip-permissions");
+    assert_eq!(claude[0].argv, ["--dangerously-skip-permissions"]);
+
+    assert!(launch_options_for("aider").is_empty());
+    assert!(launch_options_for("pi").is_empty());
+}
+
+#[test]
+fn launch_option_fragment_helpers_preserve_manual_tokens() {
+    let argv = vec![
+        "sandbox".to_string(),
+        "run".to_string(),
+        "codex".to_string(),
+    ];
+    let argv = argv_with_fragment(argv, CODEX_SKIP_PERMISSIONS_ARGV);
+    assert_eq!(
+        argv,
+        vec![
+            "sandbox".to_string(),
+            "run".to_string(),
+            "codex".to_string(),
+            "--dangerously-bypass-approvals-and-sandbox".to_string(),
+        ]
+    );
+    assert!(argv_contains_fragment(&argv, CODEX_SKIP_PERMISSIONS_ARGV));
+
+    let stripped = argv_without_fragment(argv, CODEX_SKIP_PERMISSIONS_ARGV);
+    assert_eq!(
+        stripped,
+        vec![
+            "sandbox".to_string(),
+            "run".to_string(),
+            "codex".to_string()
+        ]
+    );
+}
+
+#[test]
+fn strip_known_launch_option_fragments_removes_cross_harness_flags() {
+    let argv = vec![
+        "codex".to_string(),
+        "--dangerously-bypass-approvals-and-sandbox".to_string(),
+        "--dangerously-skip-permissions".to_string(),
+    ];
+    assert_eq!(
+        strip_known_launch_option_fragments(argv),
+        vec!["codex".to_string()]
+    );
+}
+
+#[test]
 fn default_trait_impl_returns_none() {
     // Adapters that don't override get None for free.
     struct NoOpAdapter;

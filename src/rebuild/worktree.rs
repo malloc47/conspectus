@@ -127,7 +127,7 @@ pub fn switch_steps(
     }
     let branch = resolved.text("branch").ok_or_else(|| {
         RebuildError::Cannot(
-            "no branch is recorded for this worktree; set one with `pin edit <slot> --set branch=<name>`"
+            "no branch is recorded for this worktree; set one with `pin edit <pin> --set branch=<name>`"
                 .into(),
         )
     })?;

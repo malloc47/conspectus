@@ -315,7 +315,7 @@ fn applying_slot_updates_changes_the_override_and_reports_failures() {
             .1
             .as_ref()
             .unwrap_err()
-            .contains("no pin slot named `absent`")
+            .contains("no pin named `absent`")
     );
     assert_eq!(
         store.load().slots[0].overrides["name"],

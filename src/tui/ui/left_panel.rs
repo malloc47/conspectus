@@ -252,11 +252,25 @@ pub(super) fn empty_left_panel_text(app: &App) -> String {
     }
     if app.active_view() == crate::tui::View::Pinned {
         return format!(
-            "No pinned slots yet.\nPin something with `{} pin add <target>`.",
+            "No pins yet.\nPin something with `{} pin add <target>`.",
             crate::invocation::invoked_name()
         );
     }
     if app.active_view() == crate::tui::View::History {
+        let pinned_gone = app.snapshot_handle().map_or(0, |handle| {
+            let snapshot = handle.snapshot();
+            crate::tui::rows::history::gone_records(snapshot, None)
+                .iter()
+                .filter(|entry| {
+                    !crate::tui::rows::history::pinned_by(snapshot, &entry.meta.id).is_empty()
+                })
+                .count()
+        });
+        if pinned_gone > 0 && !app.filter().show_pinned_history {
+            return format!(
+                "Every gone record is pinned ({pinned_gone}), so it is in the Pinned view.\nClear `Unpinned only` in Controls (`f`) to list them here."
+            );
+        }
         return "Nothing is gone. Entities Conspectus has seen vanish here.\nPress `.` for the menu (Clean up…)."
             .to_string();
     }
@@ -506,21 +520,37 @@ pub(super) struct MixedAlign {
     label: usize,
     status: usize,
     age: usize,
+    /// Width of the pin marker cell, `0` when no row in the tree has a
+    /// marker. Reserved on every row once any has one, so the columns
+    /// hold still.
+    marker: usize,
 }
 
 impl MixedAlign {
     pub(super) fn of_tree(tree: &crate::tui::rows::RowTree) -> Self {
+        use crate::tui::rows::{MixedGrid, PinMarker};
         let mut align = Self::default();
+        if tree.rows.iter().any(|row| {
+            matches!(&row.kind, RowKind::Mixed(m)
+                if m.grid == MixedGrid::Columns && m.marker != PinMarker::None)
+        }) {
+            align.marker = MARKER_CELL_WIDTH;
+        }
         for row in &tree.rows {
             let RowKind::Mixed(mixed) = &row.kind else {
                 continue;
             };
+            if mixed.grid != MixedGrid::Columns {
+                continue;
+            }
             // The label cell runs from the row's own indent to a common
             // column, so nested rows line their status up with their
             // parents'.
             let label_width =
                 UnicodeWidthStr::width(mixed.label.as_str()).min(MIXED_LABEL_MAX_WIDTH);
-            align.label = align.label.max(mixed_prefix_width(row.depth) + label_width);
+            align.label = align
+                .label
+                .max(mixed_prefix_width(row.depth, align.marker) + label_width);
             align.status = align
                 .status
                 .max(UnicodeWidthStr::width(mixed.status.as_str()).min(MIXED_STATUS_MAX_WIDTH));
@@ -532,16 +562,53 @@ impl MixedAlign {
     }
 }
 
-/// Cells before a mixed-kind row's label: indent, disclosure, and the
-/// kind glyph with its space.
-fn mixed_prefix_width(depth: u8) -> usize {
-    usize::from(depth) * 2 + 4
+/// Width of the pin marker cell: the glyph and its space.
+const MARKER_CELL_WIDTH: usize = 2;
+
+/// The glyph of a pin with nothing running yet, the hollow twin of the
+/// filled pin glyph.
+const UNSTARTED_PIN_GLYPH: &str = "◎";
+
+/// Cells before a mixed-kind row's label: indent, disclosure, the kind
+/// glyph with its space, and the pin marker cell when the tree has one.
+fn mixed_prefix_width(depth: u8, marker: usize) -> usize {
+    usize::from(depth) * 2 + 4 + marker
 }
 
-/// The body of a mixed-kind row after its kind glyph: label, status,
-/// age, then the content, which fills `budget` and is cut with an
-/// ellipsis. Gone, missing, planned, and unknown rows are dimmed whole,
-/// their status word included.
+/// The pin marker cell of a mixed-kind row: filled for an entity a pin
+/// points at, hollow and in the ghost color for a pin with no target
+/// yet.
+fn pin_marker_span(marker: crate::tui::rows::PinMarker, theme: &Theme) -> Span<'static> {
+    use crate::tui::rows::PinMarker;
+    match marker {
+        PinMarker::None => Span::raw("  "),
+        PinMarker::Pinned => node_kind_glyph_span(NodeKind::Pin, theme),
+        PinMarker::Unstarted => span!(
+            Style::default()
+                .fg(node_kind_style(NodeKind::Pin, theme).color)
+                .add_modifier(theme.placeholder);
+            "{UNSTARTED_PIN_GLYPH} "
+        ),
+    }
+}
+
+/// The chip of a mixed-kind row: the agent's color for a registered
+/// harness, the neutral program chip otherwise.
+fn mixed_chip_span(chip: &crate::tui::rows::MixedChip, theme: &Theme) -> Span<'static> {
+    use crate::tui::widgets::badge::{command_badge, harness_badge};
+    if chip.agent {
+        harness_badge(&chip.label, theme)
+    } else {
+        command_badge(&chip.label, theme)
+    }
+}
+
+/// The body of a mixed-kind row after its kind glyph. The Columns grid
+/// is label, status, age, then the chip and content, which fill
+/// `budget` and are cut with an ellipsis. The Mux grid is the Mux
+/// view's own (name, chip, age, state), so a ghost mux lines up with
+/// the live ones. Gone, missing, planned, and unknown rows are dimmed
+/// whole, their status word included.
 pub(super) fn render_mixed_spans(
     mixed: &crate::tui::rows::MixedRow,
     theme: &Theme,
@@ -549,31 +616,75 @@ pub(super) fn render_mixed_spans(
     prefix_width: usize,
     budget: usize,
 ) -> Vec<Span<'static>> {
-    use crate::tui::rows::MixedTone;
+    use crate::tui::rows::{MixedGrid, MixedTone};
     let mut spans: Vec<Span<'static>> = Vec::new();
-    let label = truncate_to_width_strict(&mixed.label, MIXED_LABEL_MAX_WIDTH);
-    let label_cell = align.label.saturating_sub(prefix_width);
-    spans.push(span!(Modifier::BOLD; "{}", pad_to_width(label, label_cell)));
-    let status = truncate_to_width_strict(&mixed.status, MIXED_STATUS_MAX_WIDTH);
     let status_style = match mixed.tone {
         MixedTone::Normal => Style::default().fg(theme.mux_attached),
         MixedTone::Dim => Style::default(),
     };
-    spans.push(span!(status_style; "  {}", pad_to_width(status, align.status)));
-    if align.age > 0 {
-        let age = mixed.age.clone().unwrap_or_default();
+    if mixed.grid == MixedGrid::Mux {
+        // Same columns as `render_mux_session_spans`: the name in the
+        // link color, the chip, the recency right-aligned, then the
+        // state where the attached glyph goes.
+        let label_width = mux_label_column_width(budget);
+        spans.push(span!(
+            Style::default().fg(theme.link_id);
+            "{}",
+            pad_to_width(truncate_to_width_strict(&mixed.label, label_width), label_width)
+        ));
+        spans.push(Span::raw("  "));
+        match &mixed.chip {
+            Some(chip) => spans.push(mixed_chip_span(chip, theme)),
+            None => spans.push(span!(theme.placeholder; " no agent ")),
+        }
+        spans.push(Span::raw("  "));
+        let age = mixed.age.clone().unwrap_or_else(|| "—".to_string());
         spans.push(span!(
             Style::default().fg(theme.secondary_text);
-            "  {:>width$}", age, width = align.age
+            "{:>4}",
+            truncate_to_width_strict(&age, 4)
         ));
-    }
-    let room = budget.saturating_sub(spans_width(&spans));
-    if room > 2 && !mixed.content.is_empty() {
-        let content = truncate_to_width_strict(&mixed.content, room - 2);
-        spans.push(Span::styled(
-            format!("  {content}"),
-            Style::default().fg(theme.secondary_text),
-        ));
+        spans.push(span!(status_style; "  {}", mixed.status));
+        let room = budget.saturating_sub(spans_width(&spans));
+        if room > 4 && !mixed.content.is_empty() {
+            let content = truncate_to_width_strict(&mixed.content, room - 2);
+            spans.push(Span::styled(
+                format!("  {content}"),
+                Style::default()
+                    .fg(theme.secondary_text)
+                    .add_modifier(Modifier::ITALIC),
+            ));
+        }
+    } else {
+        let label = truncate_to_width_strict(&mixed.label, MIXED_LABEL_MAX_WIDTH);
+        let label_cell = align.label.saturating_sub(prefix_width);
+        spans.push(span!(Modifier::BOLD; "{}", pad_to_width(label, label_cell)));
+        let status = truncate_to_width_strict(&mixed.status, MIXED_STATUS_MAX_WIDTH);
+        spans.push(span!(status_style; "  {}", pad_to_width(status, align.status)));
+        if align.age > 0 {
+            let age = mixed.age.clone().unwrap_or_default();
+            spans.push(span!(
+                Style::default().fg(theme.secondary_text);
+                "  {:>width$}", age, width = align.age
+            ));
+        }
+        if let Some(chip) = &mixed.chip {
+            let span = mixed_chip_span(chip, theme);
+            if budget.saturating_sub(spans_width(&spans))
+                > 2 + UnicodeWidthStr::width(span.content.as_ref())
+            {
+                spans.push(Span::raw("  "));
+                spans.push(span);
+            }
+        }
+        let room = budget.saturating_sub(spans_width(&spans));
+        if room > 2 && !mixed.content.is_empty() {
+            let content = truncate_to_width_strict(&mixed.content, room - 2);
+            spans.push(Span::styled(
+                format!("  {content}"),
+                Style::default().fg(theme.secondary_text),
+            ));
+        }
     }
     if mixed.tone == MixedTone::Dim {
         for span in &mut spans {
@@ -659,6 +770,13 @@ pub(super) fn render_left_row(
         } else {
             Span::raw("  ")
         });
+    }
+
+    if let RowKind::Mixed(mixed) = &row.kind
+        && mixed.grid == crate::tui::rows::MixedGrid::Columns
+        && align.mixed.marker > 0
+    {
+        spans.push(pin_marker_span(mixed.marker, theme));
     }
 
     match &row.kind {
@@ -1199,14 +1317,9 @@ pub(super) fn group_node_kind(group: &GroupRow) -> Option<NodeKind> {
 pub(super) fn row_kind_glyph_span(kind: &RowKind, theme: &Theme) -> Option<Span<'static>> {
     let node_kind = match kind {
         RowKind::Group(group) => group_node_kind(group)?,
-        // ADR 0073 amendment (2026-06): AgentSession rows already
-        // carry the colored harness pill as their identity. Stacking
-        // a separate `●` glyph next to it doubled the signal in
-        // practice without adding information. The pill stands alone
-        // in row contexts. `NodeKind::AgentSession`'s glyph + color
-        // remain defined for detail-pane and explorer surfaces
-        // where no pill is rendered.
-        RowKind::AgentSession(_) => return None,
+        // A session wears its kind glyph in every view, so it reads
+        // as a session wherever it appears; the harness pill follows it.
+        RowKind::AgentSession(_) => NodeKind::AgentSession,
         RowKind::AgentSessionMuxCandidate(_) => NodeKind::MuxSession,
         RowKind::MuxSession(_) => NodeKind::MuxSession,
         RowKind::Pr(pr) => return Some(forge_pr_glyph_span(pr, theme)),

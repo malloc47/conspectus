@@ -376,7 +376,7 @@ fn the_dry_run_text_names_each_pin_and_its_file() {
     );
     let rendered = plan(&empty_snapshot(), w.entries(&path), &[], &w.sidecars).render();
 
-    assert!(rendered.contains("pin `api` -> mux slot"), "{rendered}");
+    assert!(rendered.contains("pin `api` -> mux pin"), "{rendered}");
     assert!(rendered.contains("sess-1"), "{rendered}");
     assert!(rendered.contains(&path.display().to_string()), "{rendered}");
 }

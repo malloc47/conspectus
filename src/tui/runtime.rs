@@ -455,6 +455,9 @@ impl LoopMode for LiveMode {
             Some(Action::MuxLaunchFormKey(key)) => {
                 handle_mux_launch_form_key(terminal, app, config, tmux, key);
             }
+            Some(Action::PinEditFormKey(key)) => {
+                handle_pin_edit_form_key(terminal, app, config, tmux, key);
+            }
             Some(Action::RowMenuKey(key)) => handle_row_menu_key(terminal, app, config, tmux, key),
             Some(Action::CleanUpKey(key)) => handle_clean_up_key(terminal, app, config, tmux, key),
             Some(Action::OpenControls) => {
@@ -694,7 +697,8 @@ impl LoopMode for StaticMode {
                 | Action::MuxMenuKey(_)
                 | Action::RowMenuKey(_)
                 | Action::CleanUpKey(_)
-                | Action::MuxLaunchFormKey(_),
+                | Action::MuxLaunchFormKey(_)
+                | Action::PinEditFormKey(_),
             ) => {
                 app.update(Msg::SetStatus(Some(
                     "scenario TUI keeps mutating actions disabled".to_string(),
@@ -799,6 +803,9 @@ fn overlay_key_from_event(app: &App, event: &Event) -> Option<Action> {
     }
     if app.mux_launch_form().is_some() {
         return Some(Action::MuxLaunchFormKey(key));
+    }
+    if app.pin_edit_form().is_some() {
+        return Some(Action::PinEditFormKey(key));
     }
     if app.controls_overlay().is_some() {
         return Some(Action::ControlsOverlayKey(key));
@@ -1388,9 +1395,12 @@ pub(super) fn open_new_mux_form_action(app: &mut App) {
     use crate::tui::widgets::new_mux::NewMuxFormState;
     let seeded_cwd = derive_new_mux_cwd(app).unwrap_or_else(default_new_mux_cwd);
     let seeded_name = derive_new_mux_name(app);
-    app.open_new_mux_form(NewMuxFormState::new(seeded_name, seeded_cwd));
+    let candidates = known_cwd_candidates(app, Some(&seeded_cwd));
+    app.open_new_mux_form(
+        NewMuxFormState::new(seeded_name, seeded_cwd).with_cwd_candidates(candidates),
+    );
     app.update(Msg::SetStatus(Some(
-        "mux: Tab switch field · Enter next/commit · Esc cancel".to_string(),
+        "mux: ↑/↓ move · Tab complete/next · Enter next/commit · Esc cancel".to_string(),
     )));
 }
 
@@ -1399,6 +1409,67 @@ pub(super) fn open_new_mux_form_action(app: &mut App) {
 /// the cwd from the selected row (ADR 0096).
 pub(crate) fn derive_mux_form_cwd(app: &App) -> Option<String> {
     derive_new_mux_cwd(app)
+}
+
+/// Directories the cwd fields offer to complete: the selected row's,
+/// then those of live agent sessions, muxes, processes, checkouts, repos,
+/// and workspaces in the graph, and the cwds of pins.
+pub(crate) fn known_cwd_candidates(
+    app: &App,
+    selected: Option<&str>,
+) -> Vec<crate::tui::widgets::path_omnibox::PathCandidate> {
+    use crate::model::GraphNode;
+    use crate::tui::widgets::path_omnibox::PathCandidate;
+    let mut candidates = Vec::new();
+    let mut push = |path: &str, source: &str, rank: i32| {
+        let path = path.trim();
+        if !path.is_empty() {
+            candidates.push(PathCandidate::new(path, source, rank));
+        }
+    };
+    if let Some(selected) = selected {
+        push(selected, "selected", 1_000);
+    }
+    if let Some(handle) = app.snapshot_handle() {
+        for node in handle.snapshot().live_nodes() {
+            match node {
+                GraphNode::AgentSession(node) => {
+                    if let Some(cwd) = node.cwd.as_deref() {
+                        push(cwd, "agent", 450);
+                    }
+                }
+                GraphNode::MuxSession(node) => {
+                    if let Some(cwd) = node.cwd.as_deref() {
+                        push(cwd, "mux", 440);
+                    }
+                    if let Some(cwd) = node.active_pane_current_path.as_deref() {
+                        push(cwd, "mux", 430);
+                    }
+                }
+                GraphNode::RuntimeProcess(node) => {
+                    if let Some(cwd) = node.cwd.as_deref() {
+                        push(cwd, "process", 400);
+                    }
+                }
+                GraphNode::Checkout(node) => push(&node.root, "checkout", 350),
+                GraphNode::Repo(node) => {
+                    let root = node
+                        .common_dir
+                        .strip_suffix("/.git")
+                        .unwrap_or(&node.common_dir);
+                    push(root, "repo", 320);
+                }
+                GraphNode::Workspace(node) => push(&node.root, "workspace", 300),
+                GraphNode::Pin(node) => {
+                    if let Some(cwd) = node.text("cwd") {
+                        push(cwd, "pin", 500);
+                    }
+                }
+                GraphNode::Branch(_) | GraphNode::Fork(_) | GraphNode::ForgePr(_) => {}
+            }
+        }
+    }
+    candidates
 }
 
 /// Known harness keys from the registered adapters. Used by the

@@ -70,7 +70,7 @@ pub(super) fn execute_store_op(
         StoreOp::PinNode { node } => execute_pin(app, &crate::pin_ops::Pinnable::Node(node)),
         StoreOp::Unpin { slot } => execute_unpin(app, &slot),
         StoreOp::RenameSlot { slot, new_name } => execute_rename_slot(app, tmux, &slot, &new_name),
-        StoreOp::EditSlot { slot, assignment } => execute_edit_slot(app, &slot, &assignment),
+        StoreOp::SavePin { request } => execute_save_pin(app, tmux, &request),
         StoreOp::RetargetSlot { slot, target } => execute_retarget_slot(app, &slot, &target),
         StoreOp::RefreshSlot { slot } => execute_refresh_slot(app, &slot),
         StoreOp::ForgetRecord { record_id } => {
@@ -410,7 +410,7 @@ pub(super) fn execute_view_session(
 fn slot_store_or_report(app: &mut App) -> Option<crate::pin_slots::SlotStore> {
     let store = crate::pin_slots::SlotStore::from_env();
     if store.is_none() {
-        app.report(LogEntry::error("pin: no data home to store slots in"));
+        app.report(LogEntry::error("pin: no data home to store pins in"));
     }
     store
 }
@@ -442,7 +442,7 @@ fn execute_pin(app: &mut App, what: &crate::pin_ops::Pinnable) {
     };
     let history = crate::history::HistoryWriter::from_env(app.config().history.clone());
     let outcome = crate::pin_ops::pin(handle.snapshot(), &store, history.as_ref(), what, None)
-        .map(|slot| format!("pinned as slot `{}`", slot.id))
+        .map(|slot| format!("pinned as `{}`", slot.id))
         .map_err(|err| format!("pin failed: {err}"));
     finish_slot_write(app, outcome);
 }
@@ -455,7 +455,7 @@ fn execute_unpin(app: &mut App, slot: &str) {
     };
     let outcome = match store.remove(slot) {
         Ok(write) if write.changed => Ok(format!("unpinned `{slot}`")),
-        Ok(_) => Err(format!("unpin: no slot named `{slot}`")),
+        Ok(_) => Err(format!("unpin: no pin named `{slot}`")),
         Err(err) => Err(format!("unpin failed: {err}")),
     };
     finish_slot_write(app, outcome);
@@ -516,7 +516,7 @@ fn execute_rename_slot(app: &mut App, tmux: &dyn MuxBackend, slot: &str, new_nam
     }
     let outcome = crate::pin_ops::rename(&store, slot, new_name)
         .map(|_| {
-            let mut parts = vec![format!("renamed slot `{slot}` to `{new_name}`")];
+            let mut parts = vec![format!("renamed pin `{slot}` to `{new_name}`")];
             parts.extend(notes);
             parts.join(" · ")
         })
@@ -524,46 +524,41 @@ fn execute_rename_slot(app: &mut App, tmux: &dyn MuxBackend, slot: &str, new_nam
     finish_slot_write(app, outcome);
 }
 
-/// Executor branch for `StoreOp::EditSlot`: `field=value` sets an
-/// override and `field=` clears it.
-fn execute_edit_slot(app: &mut App, slot: &str, assignment: &str) {
+/// Executor branch for `StoreOp::SavePin`: apply the form's overrides,
+/// then rename (which renames a live mux's session too).
+fn execute_save_pin(
+    app: &mut App,
+    tmux: &dyn MuxBackend,
+    request: &crate::tui::widgets::pin_edit::PinEditRequest,
+) {
     let Some(store) = slot_store_or_report(app) else {
         return;
     };
-    let Some(kind) = store
-        .load()
-        .slots
-        .into_iter()
-        .find(|existing| existing.id == slot)
-        .map(|existing| existing.kind)
-    else {
-        finish_slot_write(app, Err(format!("edit: no slot named `{slot}`")));
-        return;
-    };
-    let outcome = (|| {
-        let (field, value) = assignment
-            .split_once('=')
-            .ok_or_else(|| format!("`{assignment}` isn't field=value"))?;
-        let field = field.trim();
-        let (set, unset) = if value.trim().is_empty() {
-            (Vec::new(), vec![field.to_string()])
-        } else {
-            let parsed =
-                crate::pin_ops::parse_override(kind, assignment).map_err(|err| err.to_string())?;
-            (vec![parsed], Vec::new())
-        };
-        crate::pin_ops::edit(&store, slot, &set, &unset)
-            .map(|changed| {
-                if changed {
-                    format!("edited `{slot}`: {field}")
-                } else {
-                    format!("`{slot}` already had that")
-                }
-            })
-            .map_err(|err| err.to_string())
-    })()
-    .map_err(|why| format!("edit failed: {why}"));
-    finish_slot_write(app, outcome);
+    let slot = request.pin.as_str();
+    match (apply_pin_overrides(&store, request), &request.rename) {
+        (Err(err), _) => finish_slot_write(app, Err(format!("edit failed: {err}"))),
+        (Ok(_), Some(new_name)) => execute_rename_slot(app, tmux, slot, new_name),
+        (Ok(changed), None) => finish_slot_write(
+            app,
+            Ok(if changed {
+                format!("saved `{slot}`")
+            } else {
+                format!("`{slot}` already had that")
+            }),
+        ),
+    }
+}
+
+/// The override half of saving the pin edit form: set and drop the
+/// requested overrides, returning whether anything changed.
+pub(super) fn apply_pin_overrides(
+    store: &crate::pin_slots::SlotStore,
+    request: &crate::tui::widgets::pin_edit::PinEditRequest,
+) -> Result<bool, crate::pin_ops::PinError> {
+    if request.set.is_empty() && request.unset.is_empty() {
+        return Ok(false);
+    }
+    crate::pin_ops::edit(store, &request.pin, &request.set, &request.unset)
 }
 
 /// Executor branch for `StoreOp::RetargetSlot`.

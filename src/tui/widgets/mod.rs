@@ -3,6 +3,7 @@
 pub mod badge;
 pub mod clean_up;
 pub mod controls;
+pub mod form;
 pub mod help;
 pub mod input;
 pub mod launch_spec_form;
@@ -12,6 +13,7 @@ pub mod mux_launch;
 pub mod mux_menu;
 pub mod new_mux;
 pub mod path_omnibox;
+pub mod pin_edit;
 pub mod popup_frame;
 pub mod row_menu;
 pub mod search;

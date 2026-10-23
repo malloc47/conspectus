@@ -1,10 +1,14 @@
 //! Ephemeral harness launch form (ADR 0096).
 //!
+//! Up and Down move between fields. Tab completes a path in the cwd field
+//! and moves on elsewhere. Left, Right, and Space act on the harness,
+//! launch option, worktree, and pin rows.
+//!
 //! Multi-field modal that commits a [`Msg::CommitMuxLaunch`] the
 //! runtime turns into a subprocess re-exec of
 //! `conspectus mux launch <harness>`. On submit the mux and its
 //! attributed harness session appear in discovery next refresh; the
-//! form can also pin the mux (or only plan a pin slot) in the same step.
+//! form can also pin the mux (or only plan a pin) in the same step.
 //!
 //! An empty launch argv resolves to the default for the harness
 //! (profile, `atelier exec`, or the harness default, ADR 0142), shown
@@ -20,27 +24,31 @@
 use ratatui::buffer::Buffer;
 use ratatui::crossterm::event::KeyEvent;
 use ratatui::layout::Rect;
-use ratatui::style::{Modifier, Style};
+use ratatui::macros::line;
+use ratatui::style::Style;
 use ratatui::text::Line;
-use ratatui::widgets::{Block, Borders, Clear, Paragraph, Widget};
+use ratatui::widgets::Widget;
 
 use crate::tui::Msg;
 use crate::tui::modal::{Overlay, OverlayOutcome};
 use crate::tui::theme::Theme;
+use crate::tui::widgets::form::{
+    self, ScrollLinesBody, choice_row, harness_row, input_row, note_row, options_row, path_row,
+    scroll_offset_for_cursor, static_value_row, warning_row, wrap_footer,
+};
 use crate::tui::widgets::input::{InputOutcome, TextInputState};
 use crate::tui::widgets::launch_spec_form::{
     LaunchSpecFormState, LaunchSpecInit, SpecTextField, optional_string, parse_launch_argv,
 };
 use crate::tui::widgets::path_omnibox::PathOmniboxOutcome;
-use crate::tui::widgets::popup_frame;
 
-const HARNESS_LABEL: &str = "Harness";
-const CWD_LABEL: &str = "Cwd";
-const MUX_NAME_LABEL: &str = "Mux name";
-const MUX_SOCKET_LABEL: &str = "Mux socket";
-const LAUNCH_ARGV_LABEL: &str = "Launch argv";
-const WORKTREE_BRANCH_LABEL: &str = "Worktree branch";
-const WORKTREE_REPO_LABEL: &str = "Worktree repo";
+const HARNESS_LABEL: &str = "harness";
+const CWD_LABEL: &str = "cwd";
+const MUX_NAME_LABEL: &str = "mux name";
+const MUX_SOCKET_LABEL: &str = "mux socket";
+const LAUNCH_ARGV_LABEL: &str = "launch argv";
+const WORKTREE_BRANCH_LABEL: &str = "branch";
+const WORKTREE_REPO_LABEL: &str = "repo";
 
 /// Ordered field identifiers for cursor placement. `WorktreeBranch`
 /// and `WorktreeRepo` are only visible when the primitive's
@@ -48,6 +56,9 @@ const WORKTREE_REPO_LABEL: &str = "Worktree repo";
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
 pub enum MuxLaunchField {
     Harness,
+    /// The harness's launch options, such as skipping permissions;
+    /// only visible for harnesses that offer some.
+    LaunchOptions,
     Cwd,
     MuxName,
     MuxSocket,
@@ -63,9 +74,9 @@ pub enum MuxLaunchField {
 pub enum PinChoice {
     #[default]
     Off,
-    /// `--pin`: launch, then add a slot for the new mux.
+    /// `--pin`: launch, then pin the new mux.
     Pin,
-    /// `--pin --no-launch`: add a planned slot and start nothing.
+    /// `--pin --no-launch`: add a planned pin and start nothing.
     PlanOnly,
 }
 
@@ -78,9 +89,9 @@ impl PinChoice {
 
     fn label(self) -> &'static str {
         match self {
-            Self::Off => "[ ] don't pin",
-            Self::Pin => "[x] launch, then pin",
-            Self::PlanOnly => "[x] pin, don't launch (planned slot)",
+            Self::Off => "don't pin",
+            Self::Pin => "launch, then pin",
+            Self::PlanOnly => "pin, don't launch",
         }
     }
 }
@@ -181,6 +192,24 @@ impl MuxLaunchFormState {
         Some(format!("{} — from {}", command.join(" "), source.label()))
     }
 
+    /// Offer these directories when completing the cwd field.
+    #[must_use]
+    pub fn with_cwd_candidates(
+        mut self,
+        candidates: Vec<crate::tui::widgets::path_omnibox::PathCandidate>,
+    ) -> Self {
+        self.spec.set_cwd_candidates(candidates);
+        self
+    }
+
+    fn default_argv(&self) -> Vec<String> {
+        form::default_argv(
+            self.defaults.as_ref(),
+            self.spec.harness().value().trim(),
+            self.spec.cwd().value(),
+        )
+    }
+
     /// Borrow the shared spec (read-only).
     pub fn spec(&self) -> &LaunchSpecFormState {
         &self.spec
@@ -205,14 +234,17 @@ impl MuxLaunchFormState {
     }
 
     fn visible_fields(&self) -> Vec<MuxLaunchField> {
-        let mut fields = vec![
-            MuxLaunchField::Harness,
+        let mut fields = vec![MuxLaunchField::Harness];
+        if !self.spec.launch_options().is_empty() {
+            fields.push(MuxLaunchField::LaunchOptions);
+        }
+        fields.extend([
             MuxLaunchField::Cwd,
             MuxLaunchField::MuxName,
             MuxLaunchField::MuxSocket,
             MuxLaunchField::LaunchArgv,
             MuxLaunchField::WorktreeToggle,
-        ];
+        ]);
         if self.spec.worktree_enabled() {
             fields.push(MuxLaunchField::WorktreeBranch);
             fields.push(MuxLaunchField::WorktreeRepo);
@@ -290,28 +322,56 @@ impl Overlay for MuxLaunchFormState {
         use crate::tui::keybindings::overlay::{FormKey, MUX_LAUNCH_KEYS, resolve};
         let option_delta = match resolve(MUX_LAUNCH_KEYS, key) {
             Some(FormKey::Abort | FormKey::Cancel) => return OverlayOutcome::Close,
-            Some(FormKey::NextField) => {
+            Some(FormKey::Up | FormKey::Back) => {
+                self.advance_focus(-1);
+                return OverlayOutcome::Consumed;
+            }
+            Some(FormKey::Down) => {
                 self.advance_focus(1);
                 return OverlayOutcome::Consumed;
             }
-            Some(FormKey::PrevField) => {
-                self.advance_focus(-1);
+            Some(FormKey::Tab) => {
+                // Tab completes a path in the cwd field, and moves on
+                // when there is nothing to complete.
+                if self.focus == MuxLaunchField::Cwd {
+                    match self.spec.cwd_handle_key(key) {
+                        PathOmniboxOutcome::Completed | PathOmniboxOutcome::Changed => {
+                            self.spec.clear_error();
+                            return OverlayOutcome::Consumed;
+                        }
+                        PathOmniboxOutcome::NoCompletion | PathOmniboxOutcome::Continue => {}
+                    }
+                }
+                self.advance_focus(1);
                 return OverlayOutcome::Consumed;
             }
             Some(FormKey::Submit) => return self.try_commit(),
             Some(FormKey::OptionPrev) => Some(-1),
             Some(FormKey::OptionNext) => Some(1),
-            None => None,
+            Some(FormKey::Inherit) | None => None,
         };
-        // Option keys act on the two non-text-input rows; on a text
+        // Option keys act on the choice and toggle rows; on a text
         // field they fall through and edit the text.
         match self.focus {
             MuxLaunchField::Harness => {
                 if let Some(delta) = option_delta {
-                    self.spec.cycle_harness(delta, HARNESS_LABEL);
+                    let cwd = self.spec.cwd().value().to_string();
+                    let defaults = self.defaults.clone();
+                    self.spec
+                        .cycle_harness_keeping_argv(delta, HARNESS_LABEL, &|harness| {
+                            form::default_argv(defaults.as_ref(), harness, &cwd)
+                        });
                     self.spec.clear_error();
                     return OverlayOutcome::Consumed;
                 }
+            }
+            MuxLaunchField::LaunchOptions => {
+                if let Some(delta) = option_delta {
+                    let default = self.default_argv();
+                    self.spec.toggle_launch_option(&default, delta);
+                    self.spec.clear_error();
+                }
+                return OverlayOutcome::Consumed;
             }
             MuxLaunchField::Pin => {
                 if let Some(delta) = option_delta {
@@ -324,8 +384,8 @@ impl Overlay for MuxLaunchFormState {
                 if option_delta.is_some() {
                     self.spec.toggle_worktree();
                     self.spec.clear_error();
-                    return OverlayOutcome::Consumed;
                 }
+                return OverlayOutcome::Consumed;
             }
             MuxLaunchField::Cwd => {
                 let outcome = self.spec.cwd_handle_key(key);
@@ -353,7 +413,10 @@ impl Overlay for MuxLaunchFormState {
                     .handle_text_key(SpecTextField::WorktreeBranch, key),
             ),
             MuxLaunchField::WorktreeRepo => Some(self.worktree_repo.handle_key(key)),
-            MuxLaunchField::WorktreeToggle | MuxLaunchField::Cwd | MuxLaunchField::Pin => None,
+            MuxLaunchField::LaunchOptions
+            | MuxLaunchField::WorktreeToggle
+            | MuxLaunchField::Cwd
+            | MuxLaunchField::Pin => None,
         };
         match input_outcome {
             Some(InputOutcome::Continue) => {
@@ -382,112 +445,193 @@ impl<'a> MuxLaunchFormWidget<'a> {
 
 impl Widget for MuxLaunchFormWidget<'_> {
     fn render(self, area: Rect, buf: &mut Buffer) {
-        let spec = self.state.spec();
-        let mut lines: Vec<Line> = vec![
-            Line::styled(
-                "Launch harness in new mux",
-                Style::default().add_modifier(Modifier::BOLD),
+        let state = self.state;
+        let spec = state.spec();
+        let modal_width = 76;
+        let inner_width =
+            usize::from(std::cmp::min(modal_width, area.width.saturating_sub(4)).max(44)) - 2;
+        let footer = wrap_footer(
+            &crate::tui::keybindings::overlay::footer(
+                crate::tui::keybindings::overlay::MUX_LAUNCH_KEYS,
             ),
-            Line::from(""),
-            format_field_line(
-                "harness",
-                spec.harness().value(),
-                self.state.focus == MuxLaunchField::Harness,
+            inner_width,
+        );
+        let cols = form::Cols::new(inner_width);
+        let focus = state.focus;
+        let mut lines: Vec<Line<'static>> = Vec::new();
+        let mut cursor_line = 0;
+        let mut row =
+            |lines: &mut Vec<Line<'static>>, field: MuxLaunchField, line: Line<'static>| {
+                if field == focus {
+                    cursor_line = lines.len();
+                }
+                lines.push(line);
+            };
+        row(
+            &mut lines,
+            MuxLaunchField::Harness,
+            harness_row(
+                HARNESS_LABEL,
+                spec.harness(),
+                spec.known_harness_keys(),
+                focus == MuxLaunchField::Harness,
+                cols,
             ),
-            format_field_line(
-                "cwd",
-                spec.cwd().value(),
-                self.state.focus == MuxLaunchField::Cwd,
+        );
+        if !spec.launch_options().is_empty() {
+            let default = state.default_argv();
+            let effective = spec.effective_argv(&default).unwrap_or_default();
+            row(
+                &mut lines,
+                MuxLaunchField::LaunchOptions,
+                options_row(
+                    "options",
+                    spec.launch_options(),
+                    &effective,
+                    focus == MuxLaunchField::LaunchOptions,
+                    cols,
+                ),
+            );
+        }
+        row(
+            &mut lines,
+            MuxLaunchField::Cwd,
+            path_row(CWD_LABEL, spec.cwd(), focus == MuxLaunchField::Cwd, cols),
+        );
+        row(
+            &mut lines,
+            MuxLaunchField::MuxName,
+            input_row(
+                MUX_NAME_LABEL,
+                spec.mux_name(),
+                focus == MuxLaunchField::MuxName,
+                cols,
             ),
-            format_field_line(
-                "mux name",
-                spec.mux_name().value(),
-                self.state.focus == MuxLaunchField::MuxName,
+        );
+        row(
+            &mut lines,
+            MuxLaunchField::MuxSocket,
+            input_row(
+                MUX_SOCKET_LABEL,
+                spec.mux_socket(),
+                focus == MuxLaunchField::MuxSocket,
+                cols,
             ),
-            format_field_line(
-                "mux socket",
-                spec.mux_socket().value(),
-                self.state.focus == MuxLaunchField::MuxSocket,
+        );
+        row(
+            &mut lines,
+            MuxLaunchField::LaunchArgv,
+            input_row(
+                LAUNCH_ARGV_LABEL,
+                spec.launch_argv(),
+                focus == MuxLaunchField::LaunchArgv,
+                cols,
             ),
-            format_field_line(
-                "launch argv",
-                spec.launch_argv().value(),
-                self.state.focus == MuxLaunchField::LaunchArgv,
-            ),
-            hint_line(self.state.default_hint(), self.theme),
-            format_field_line(
+        );
+        lines.push(state.command_line(cols));
+        row(
+            &mut lines,
+            MuxLaunchField::WorktreeToggle,
+            static_value_row(
                 "worktree",
                 if spec.worktree_enabled() {
-                    "[x] realize at launch"
+                    "[x] create or reuse a worktree for the branch"
                 } else {
-                    "[ ] off"
+                    "[ ] no worktree"
                 },
-                self.state.focus == MuxLaunchField::WorktreeToggle,
+                focus == MuxLaunchField::WorktreeToggle,
+                cols,
             ),
-        ];
+        );
         if spec.worktree_enabled() {
-            lines.push(format_field_line(
-                "  branch",
-                spec.worktree_branch().value(),
-                self.state.focus == MuxLaunchField::WorktreeBranch,
-            ));
-            lines.push(format_field_line(
-                "  repo",
-                self.state.worktree_repo.value(),
-                self.state.focus == MuxLaunchField::WorktreeRepo,
-            ));
+            row(
+                &mut lines,
+                MuxLaunchField::WorktreeBranch,
+                input_row(
+                    WORKTREE_BRANCH_LABEL,
+                    spec.worktree_branch(),
+                    focus == MuxLaunchField::WorktreeBranch,
+                    cols,
+                ),
+            );
+            row(
+                &mut lines,
+                MuxLaunchField::WorktreeRepo,
+                input_row(
+                    WORKTREE_REPO_LABEL,
+                    &state.worktree_repo,
+                    focus == MuxLaunchField::WorktreeRepo,
+                    cols,
+                ),
+            );
         }
-        lines.push(format_field_line(
-            "pin",
-            self.state.pin.label(),
-            self.state.focus == MuxLaunchField::Pin,
-        ));
+        row(
+            &mut lines,
+            MuxLaunchField::Pin,
+            choice_row(
+                "pin",
+                &[
+                    (PinChoice::Off.label(), state.pin == PinChoice::Off),
+                    (PinChoice::Pin.label(), state.pin == PinChoice::Pin),
+                    (
+                        PinChoice::PlanOnly.label(),
+                        state.pin == PinChoice::PlanOnly,
+                    ),
+                ],
+                focus == MuxLaunchField::Pin,
+                cols,
+            ),
+        );
         if let Some(err) = spec.error() {
-            lines.push(Line::from(""));
-            lines.push(Line::styled(
+            lines.push(line![""]);
+            lines.push(line![ratatui::text::Span::styled(
                 err.to_string(),
-                Style::default().fg(self.theme.error),
-            ));
+                Style::default().fg(self.theme.error)
+            )]);
         }
-        lines.push(Line::from(""));
-        lines.push(Line::from(crate::tui::keybindings::overlay::footer(
-            crate::tui::keybindings::overlay::MUX_LAUNCH_KEYS,
-        )));
+        lines.push(line![""]);
+        for footer_line in footer {
+            lines.push(footer_line);
+        }
 
-        let height = u16::try_from(lines.len())
-            .unwrap_or(u16::MAX)
-            .saturating_add(2)
-            .clamp(10, area.height);
-        let width = 72_u16.min(area.width);
-        let rect = popup_frame::centered_rect(area, width, height);
-        Clear.render(rect, buf);
-        let block = Block::default()
-            .borders(Borders::ALL)
-            .title(" Mux ▸ Launch harness ")
-            .border_style(Style::default().fg(self.theme.panel_focus_accent));
-        let inner = block.inner(rect);
-        block.render(rect, buf);
-        Paragraph::new(lines).render(inner, buf);
+        let modal = form::modal_rect(area, modal_width, lines.len(), 10);
+        let inner_height = usize::from(modal.height.saturating_sub(2));
+        let body = ScrollLinesBody {
+            scroll_offset: scroll_offset_for_cursor(cursor_line, inner_height, lines.len()),
+            lines,
+            inner_width: usize::from(modal.width.saturating_sub(2)),
+            inner_height,
+        };
+        crate::tui::widgets::popup_frame::themed_popup(
+            body,
+            line![" Launch harness in new mux "],
+            self.theme,
+        )
+        .render(area, buf);
     }
 }
 
-fn hint_line(hint: Option<String>, theme: &Theme) -> Line<'static> {
-    match hint {
-        Some(hint) => Line::styled(
-            format!("    default: {hint}"),
-            Style::default().fg(theme.secondary_text),
-        ),
-        None => Line::from(""),
-    }
-}
-
-fn format_field_line(label: &str, value: &str, focused: bool) -> Line<'static> {
-    let marker = if focused { "▸" } else { " " };
-    let text = format!("{marker} {label}: {value}");
-    if focused {
-        Line::styled(text, Style::default().add_modifier(Modifier::BOLD))
-    } else {
-        Line::from(text)
+impl MuxLaunchFormState {
+    /// The command row: what the form will run, and where an empty
+    /// argv field gets it.
+    fn command_line(&self, cols: form::Cols) -> Line<'static> {
+        let typed = self.spec.launch_argv().value().trim();
+        if !typed.is_empty() {
+            return note_row("command", &format!("override: {typed}"), cols);
+        }
+        if let Some(hint) = self.default_hint() {
+            return note_row("command", &format!("default: {hint}"), cols);
+        }
+        let default = self.default_argv();
+        if default.is_empty() {
+            warning_row("command", "no default for this harness", cols)
+        } else {
+            note_row(
+                "command",
+                &format!("default: {}", form::display_argv(&default)),
+                cols,
+            )
+        }
     }
 }
 

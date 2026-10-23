@@ -236,7 +236,7 @@ fn keymap_sections() -> Vec<HelpSection> {
             bindings: vec![
                 Binding::new(
                     "Enter",
-                    "Default action on the selected row: attach mux/muxed sessions, view un-muxed sessions, rebuild a gone mux, pin slot, or history record, expand groups",
+                    "Default action on the selected row: attach mux/muxed sessions, view un-muxed sessions, rebuild a gone mux, pin, or history record, expand groups",
                 ),
                 Binding::new("a", "Attach to the selected mux"),
                 Binding::new(
@@ -245,7 +245,7 @@ fn keymap_sections() -> Vec<HelpSection> {
                 ),
                 Binding::new(
                     "R",
-                    "Rename the selected agent session (alias) or mux (tmux + pin slot cascade)",
+                    "Rename the selected agent session (alias) or mux (tmux + pin cascade)",
                 ),
                 Binding::new(
                     "w",
@@ -290,11 +290,11 @@ fn keymap_sections() -> Vec<HelpSection> {
             bindings: vec![
                 Binding::new(
                     "p",
-                    "Pin the selected row as a slot, or ask to unpin it when a slot already points at it; pinned rows carry ◉",
+                    "Pin the selected row, or ask to unpin it when it is already pinned; pinned rows carry ◉",
                 ),
                 Binding::new(
                     ".",
-                    "Open the row action menu — pin or unpin; rebuild, forget, or show the rebuild plan for a gone record; edit, rename, retarget, refresh, or reveal a slot in the Pinned view; Clean up… in the History view",
+                    "Open the row action menu — pin or unpin; rebuild, forget, or show the rebuild plan for a gone record; edit, rename, retarget, refresh, or reveal a pin in the Pinned view; Clean up… in the History view",
                 ),
             ],
         },
@@ -415,6 +415,10 @@ fn body_lines_for_width(theme: &Theme, width: Option<usize>) -> Vec<Line<'static
     push_mux_state_legend(&mut lines, theme);
     blank(&mut lines);
 
+    self::section(&mut lines, "Pins");
+    push_pin_marker_legend(&mut lines, theme);
+    blank(&mut lines);
+
     lines.push(line![
         span!(theme.placeholder; "{}", crate::tui::keybindings::overlay::footer(crate::tui::keybindings::overlay::HELP_KEYS))
     ]);
@@ -521,6 +525,36 @@ fn push_mux_state_legend(lines: &mut Vec<Line<'static>>, theme: &Theme) {
     }
 }
 
+/// Legend for the pin marker: filled for something a pin points at,
+/// hollow and dim for a pin with nothing running yet.
+fn push_pin_marker_legend(lines: &mut Vec<Line<'static>>, theme: &Theme) {
+    let pin_color = node_kind_style(NodeKind::Pin, theme).color;
+    let entries: [(&str, Style, &str, &str); 2] = [
+        (
+            "◉",
+            Style::default().fg(pin_color),
+            "Pinned",
+            "a pin points at this row; the Pinned view lists every pin",
+        ),
+        (
+            "◎",
+            Style::default()
+                .fg(pin_color)
+                .add_modifier(theme.placeholder),
+            "Unstarted pin",
+            "a pin with nothing running yet; Enter starts it",
+        ),
+    ];
+    for (glyph, style, name, blurb) in entries {
+        lines.push(line![
+            "  ",
+            span!(style; "{glyph} "),
+            span!(Modifier::BOLD; "{name:<16}"),
+            blurb.to_string(),
+        ]);
+    }
+}
+
 /// Operator-facing display name for a `NodeKind`. Distinct from
 /// `theme_key` (the config-loader handle) and `snake_case` (the
 /// stable string tag in non-TUI outputs) so the legend reads
@@ -549,9 +583,7 @@ fn node_kind_help_blurb(kind: NodeKind) -> &'static str {
         NodeKind::Checkout => "working-tree checkout of a repo",
         NodeKind::AgentSession => "harness session (claude, codex, opencode, …)",
         NodeKind::MuxSession => "tmux / mux backend session",
-        NodeKind::Pin => {
-            "pin slot: a named place pointing at a mux, session, checkout, repo, or PR"
-        }
+        NodeKind::Pin => "pin: a named place pointing at a mux, session, checkout, repo, or PR",
         NodeKind::RuntimeProcess => "live process attached to a mux pane",
         NodeKind::Branch => "git branch reference",
         NodeKind::Fork => "atelier fork (worktree-backed branch family)",

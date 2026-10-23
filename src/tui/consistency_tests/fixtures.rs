@@ -49,6 +49,26 @@ pub(super) fn world_with(extra: usize) -> GraphSnapshot {
     let mut snapshot = crate::tui::rows::pinned::fixture_world();
     snapshot.mux_probes.insert("tmux".to_string(), probe());
     let mut history = std::mem::take(&mut snapshot.history);
+    // A gone mux no pin points at, so History has a row of its own.
+    history.muxes.push(crate::model::MuxRecord {
+        meta: crate::model::RecordMeta {
+            id: "h_old".into(),
+            key: "mux_session:tmux:old-experiment".into(),
+            first_seen: NOW - 400_000,
+            last_seen: NOW - 345_600,
+            origin: Default::default(),
+            display: Default::default(),
+            rebuilt_from: None,
+        },
+        recipe: crate::model::MuxRecipe {
+            backend: "tmux".into(),
+            name: "old-experiment".into(),
+            cwd: Some("/home/op/src/conspectus".into()),
+            harness: Some("claude-code".into()),
+            ..Default::default()
+        },
+        extra: Default::default(),
+    });
     crate::history::project::project_into(&mut snapshot, &mut history, NOW);
     snapshot.history = history;
 
@@ -118,15 +138,20 @@ pub(super) fn world() -> GraphSnapshot {
 }
 
 pub(super) fn app_over(view: View, snapshot: &GraphSnapshot) -> App {
+    app_over_filtered(view, snapshot, RowFilter::default())
+}
+
+pub(super) fn app_over_filtered(view: View, snapshot: &GraphSnapshot, filter: RowFilter) -> App {
     let mut config = RunConfig::defaults();
     config.default_view = view;
     let mut app = App::new(config);
     app.update(Msg::SwitchView(view));
+    app.update(Msg::SetFilter(filter.clone()));
     let tree = crate::tui::rows::build_tree_for_view(crate::tui::rows::TreeInputs {
         snapshot,
         view,
         grouping: Grouping::default_for(view),
-        filter: RowFilter::default(),
+        filter,
         sort: Sort::Hierarchy,
         mux_recency: MuxRecency::default(),
         cwd: None,
@@ -142,6 +167,16 @@ pub(super) fn app_over(view: View, snapshot: &GraphSnapshot) -> App {
 
 pub(super) fn app_in(view: View) -> App {
     app_over(view, &world())
+}
+
+/// Like [`app_in`] but with History listing records a pin points at, so
+/// a test can reach a pinned ghost's History row.
+pub(super) fn app_listing_all(view: View) -> App {
+    let filter = RowFilter {
+        show_pinned_history: true,
+        ..RowFilter::default()
+    };
+    app_over_filtered(view, &world(), filter)
 }
 
 pub(super) fn buffer_of(app: &mut App, width: u16, height: u16) -> ratatui::buffer::Buffer {

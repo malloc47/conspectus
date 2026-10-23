@@ -106,3 +106,64 @@ fn typing_edits_the_focused_field_only() {
     assert_eq!(state.name_value(), "ab");
     assert_eq!(state.cwd_value(), "/t");
 }
+
+#[test]
+fn up_and_down_move_between_name_and_cwd() {
+    let mut state = NewMuxFormState::new("dev", "/home/op/proj");
+    state.handle((), key(KeyCode::Down));
+    assert_eq!(state.focus(), NewMuxField::Cwd);
+    state.handle((), key(KeyCode::Up));
+    assert_eq!(state.focus(), NewMuxField::Name);
+}
+
+#[test]
+fn tab_completes_a_directory_in_the_cwd_field() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::create_dir(dir.path().join("alpha-dir")).unwrap();
+    let mut state = NewMuxFormState::new("dev", format!("{}/alp", dir.path().display()));
+    state.handle((), key(KeyCode::Down));
+    state.handle((), key(KeyCode::Tab));
+    assert_eq!(state.focus(), NewMuxField::Cwd, "completed, so it stayed");
+    assert_eq!(
+        state.cwd_value(),
+        format!("{}/alpha-dir", dir.path().display())
+    );
+}
+
+#[test]
+fn candidates_offer_known_directories() {
+    let mut state = NewMuxFormState::new("dev", "/srv/wor").with_cwd_candidates(vec![
+        crate::tui::widgets::path_omnibox::PathCandidate::new("/srv/work/known", "repo", 300),
+    ]);
+    state.handle((), key(KeyCode::Down));
+    state.handle((), key(KeyCode::Tab));
+    assert_eq!(state.cwd_value(), "/srv/work/known");
+}
+
+#[test]
+fn typing_in_the_cwd_field_edits_the_path() {
+    let mut state = NewMuxFormState::new("dev", "/a");
+    state.handle((), key(KeyCode::Down));
+    state.handle((), key(KeyCode::Char('b')));
+    assert_eq!(state.cwd_value(), "/ab");
+}
+
+#[test]
+fn the_form_shows_the_path_mark_and_its_keys() {
+    let state = NewMuxFormState::new("dev", "/tmp");
+    let area = ratatui::layout::Rect::new(0, 0, 90, 14);
+    let mut buf = ratatui::buffer::Buffer::empty(area);
+    NewMuxFormWidget::new(&state, &crate::tui::Theme::default()).render(area, &mut buf);
+    let frame: String = (0..area.height)
+        .map(|y| {
+            (0..area.width)
+                .map(|x| buf[(x, y)].symbol().to_string())
+                .collect::<String>()
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+    assert!(
+        frame.contains('✓') && frame.contains("↑/↓ move") && frame.contains("Tab complete/next"),
+        "{frame}"
+    );
+}

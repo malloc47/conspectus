@@ -131,9 +131,10 @@ pub enum StoreOp {
     Unpin { slot: String },
     /// Rename a slot, and its mux when it is live (`pin rename`).
     RenameSlot { slot: String, new_name: String },
-    /// Set or clear one override (`pin edit`): `field=value`, or
-    /// `field=` to clear it.
-    EditSlot { slot: String, assignment: String },
+    /// Save the pin edit form: set and drop overrides, then rename.
+    SavePin {
+        request: crate::tui::widgets::pin_edit::PinEditRequest,
+    },
     /// Point a slot at another entity (`pin retarget`).
     RetargetSlot { slot: String, target: String },
     /// Copy the entity's current recipe into the snapshot (`pin refresh`).
@@ -264,7 +265,7 @@ pub fn lifecycle(effect: &Effect) -> Lifecycle {
             | StoreOp::PinNode { .. }
             | StoreOp::Unpin { .. }
             | StoreOp::RenameSlot { .. }
-            | StoreOp::EditSlot { .. }
+            | StoreOp::SavePin { .. }
             | StoreOp::RetargetSlot { .. }
             | StoreOp::RefreshSlot { .. }
             | StoreOp::ForgetRecord { .. }

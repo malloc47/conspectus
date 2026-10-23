@@ -35,28 +35,30 @@ fn rendered(form: &MuxLaunchFormState) -> String {
 }
 
 #[test]
-#[ignore = "backlog CSP-692.04: the launch form moves between fields with Tab only"]
 fn arrow_keys_move_between_the_launch_forms_fields() {
     let mut form = launch_form("/tmp");
     assert_eq!(form.focus(), MuxLaunchField::Harness);
     form.handle((), press(KeyCode::Down));
     assert_eq!(
         form.focus(),
-        MuxLaunchField::Cwd,
-        "Down moves to the next field"
+        MuxLaunchField::LaunchOptions,
+        "Down moves to the next field: the harness's launch options"
     );
+    form.handle((), press(KeyCode::Down));
+    assert_eq!(form.focus(), MuxLaunchField::Cwd);
+    form.handle((), press(KeyCode::Up));
     form.handle((), press(KeyCode::Up));
     assert_eq!(form.focus(), MuxLaunchField::Harness, "Up moves back");
 }
 
 #[test]
-#[ignore = "backlog CSP-692.04: Tab on the launch form's cwd field moves on instead of completing"]
 fn tab_completes_a_directory_in_the_launch_forms_cwd_field() {
     let dir = tempfile::tempdir().expect("tempdir");
     std::fs::create_dir(dir.path().join("alpha-dir")).expect("subdir");
     let typed = format!("{}/alp", dir.path().display());
     let mut form = launch_form(&typed);
-    form.handle((), press(KeyCode::Tab));
+    form.handle((), press(KeyCode::Down));
+    form.handle((), press(KeyCode::Down));
     assert_eq!(
         form.focus(),
         MuxLaunchField::Cwd,
@@ -65,14 +67,13 @@ fn tab_completes_a_directory_in_the_launch_forms_cwd_field() {
     form.handle((), press(KeyCode::Tab));
     assert_eq!(
         form.spec().cwd().value(),
-        format!("{}/alpha-dir/", dir.path().display()),
+        format!("{}/alpha-dir", dir.path().display()),
         "Tab completes the path while the cursor is in the cwd field"
     );
     assert_eq!(form.focus(), MuxLaunchField::Cwd);
 }
 
 #[test]
-#[ignore = "backlog CSP-692.04: the new mux form's cwd field cannot complete a path or be reached with arrows"]
 fn the_new_mux_form_completes_paths_and_moves_with_arrows() {
     let dir = tempfile::tempdir().expect("tempdir");
     std::fs::create_dir(dir.path().join("alpha-dir")).expect("subdir");
@@ -87,12 +88,11 @@ fn the_new_mux_form_completes_paths_and_moves_with_arrows() {
     form.handle((), press(KeyCode::Tab));
     assert_eq!(
         form.cwd_value(),
-        format!("{}/alpha-dir/", dir.path().display())
+        format!("{}/alpha-dir", dir.path().display())
     );
 }
 
 #[test]
-#[ignore = "backlog CSP-692.04: the harness row lists no options and the skip-permissions toggle is gone"]
 fn the_harness_row_lists_its_options_and_the_permission_toggle() {
     let form = launch_form("/tmp");
     let text = rendered(&form).to_lowercase();
@@ -109,7 +109,6 @@ fn the_harness_row_lists_its_options_and_the_permission_toggle() {
 }
 
 #[test]
-#[ignore = "backlog CSP-692.04: editing a pin is a free-text prompt that never lists the fields it can change"]
 fn editing_a_pin_lists_every_field_the_pin_can_change() {
     let mut app = app_in(View::Pinned);
     select(&mut app, "conspectus-main");

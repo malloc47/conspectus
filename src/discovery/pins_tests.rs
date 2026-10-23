@@ -232,7 +232,7 @@ fn a_legacy_entry_named_like_a_slot_is_skipped_with_a_note() {
     assert!(
         snapshot.diagnostics.iter().any(|d| matches!(
             d,
-            Diagnostic::Config { message, .. } if message.contains("already a slot")
+            Diagnostic::Config { message, .. } if message.contains("already a pin")
         )),
         "{:?}",
         snapshot.diagnostics

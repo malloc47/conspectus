@@ -98,7 +98,6 @@ impl ProviderStatus {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) enum SlotPrompt {
     Rename(String),
-    Edit(String),
     Retarget(String),
 }
 
@@ -563,6 +562,17 @@ impl App {
     /// Open a view's tree the way a first load does: the launch
     /// context's group expanded and selected, or else the first group
     /// expanded.
+    /// After a regroup the old scroll offset and selection mean nothing
+    /// in the new layout: open the default groups, select the first
+    /// row, and scroll to the top so every group header is on screen.
+    fn show_top_of_tree(&mut self) {
+        self.expanded = tree::initial_expanded_rows(&self.tree);
+        if let Some(first) = self.visible_rows().first().map(|row| row.id.clone()) {
+            self.set_selection(first);
+        }
+        self.left_scroll = 0;
+    }
+
     fn seed_first_visit(&mut self) {
         self.expanded = tree::initial_expanded_rows(&self.tree);
         let launch = self.tree.rows.iter().find_map(|row| match &row.kind {
@@ -1522,6 +1532,7 @@ impl App {
                     self.force_recency_for_flat_sessions();
                 }
                 self.rebuild_tree_in_place();
+                self.show_top_of_tree();
                 effects.push(Effect::Persist);
             }
             Msg::SetFilter(filter) => {
@@ -1659,16 +1670,19 @@ impl App {
                     slot,
                 }));
             }
-            Msg::OpenSlotEdit(slot) => {
-                self.open_slot_prompt(
-                    SlotPrompt::Edit(slot),
-                    "Override (field=value; field= clears)",
-                    "",
-                );
+            Msg::OpenSlotEdit(slot) => match self.pin_edit_init(&slot) {
+                Some(init) => self
+                    .open_pin_edit_form(crate::tui::widgets::pin_edit::PinEditFormState::new(init)),
+                None => effects.push(Effect::Toast(format!("no pin named `{slot}`"))),
+            },
+            Msg::CommitPinEdit(request) => {
+                effects.push(Effect::WriteStore(crate::tui::effect::StoreOp::SavePin {
+                    request,
+                }));
             }
             Msg::OpenSlotRename(slot) => {
                 let initial = slot.clone();
-                self.open_slot_prompt(SlotPrompt::Rename(slot), "Rename slot", &initial);
+                self.open_slot_prompt(SlotPrompt::Rename(slot), "Rename pin", &initial);
             }
             Msg::OpenSlotRetarget(slot) => {
                 self.open_slot_prompt(
@@ -1732,10 +1746,11 @@ impl App {
             Msg::OpenNewMuxForm => {
                 let seeded_cwd = crate::tui::runtime::derive_mux_form_cwd(self)
                     .unwrap_or_else(|| std::env::var("HOME").unwrap_or_else(|_| "/".to_string()));
-                self.open_new_mux_form(crate::tui::widgets::new_mux::NewMuxFormState::new(
-                    String::new(),
-                    seeded_cwd,
-                ));
+                let candidates = crate::tui::runtime::known_cwd_candidates(self, Some(&seeded_cwd));
+                self.open_new_mux_form(
+                    crate::tui::widgets::new_mux::NewMuxFormState::new(String::new(), seeded_cwd)
+                        .with_cwd_candidates(candidates),
+                );
             }
             Msg::OpenMuxLaunchForm | Msg::OpenMuxLaunchWorktreeForm => {
                 let with_worktree = matches!(msg, Msg::OpenMuxLaunchWorktreeForm);
@@ -1747,6 +1762,7 @@ impl App {
                 let known_mux_names = crate::tui::runtime::known_live_mux_names(self);
                 let default_harness = known_harness_keys.first().cloned().unwrap_or_default();
                 let repo = seeded_cwd.clone();
+                let candidates = crate::tui::runtime::known_cwd_candidates(self, Some(&seeded_cwd));
                 let mut form = crate::tui::widgets::mux_launch::MuxLaunchFormState::new(
                     default_harness,
                     seeded_cwd,
@@ -1756,7 +1772,8 @@ impl App {
                 )
                 .with_defaults(crate::launch_default::LaunchDefaults::new(
                     self.config().launch.clone(),
-                ));
+                ))
+                .with_cwd_candidates(candidates);
                 if with_worktree {
                     form = form.with_worktree(repo);
                 }
@@ -1786,7 +1803,7 @@ impl App {
                 })
             }
             Some(RowId::Pin { pin_id }) => Effect::Toast(format!(
-                "rename the slot with `{} pin rename {pin_id} <new name>`",
+                "rename the pin with `{} pin rename {pin_id} <new name>`",
                 crate::invocation::invoked_name()
             )),
             Some(RowId::MuxSession(NodeId::MuxSession(mux_id))) => {
@@ -1848,10 +1865,6 @@ fn slot_prompt_effect(prompt: SlotPrompt, value: &str) -> super::Effect {
         SlotPrompt::Rename(slot) => StoreOp::RenameSlot {
             slot,
             new_name: value,
-        },
-        SlotPrompt::Edit(slot) => StoreOp::EditSlot {
-            slot,
-            assignment: value,
         },
         SlotPrompt::Retarget(slot) => StoreOp::RetargetSlot {
             slot,

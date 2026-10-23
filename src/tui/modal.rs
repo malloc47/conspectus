@@ -78,6 +78,9 @@ pub enum Modal {
     /// discriminant small — the launch form carries eight
     /// `TextInputState` fields.
     MuxLaunch(Box<crate::tui::widgets::mux_launch::MuxLaunchFormState>),
+    /// The pin edit form: every field a pin can change, with the layer
+    /// each value comes from. Commits [`Msg::CommitPinEdit`].
+    PinEdit(Box<crate::tui::widgets::pin_edit::PinEditFormState>),
     /// `.` row action menu: the verbs for the selected row, each
     /// committing a [`Msg`].
     RowMenu(Box<crate::tui::widgets::row_menu::RowMenuState>),

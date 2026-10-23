@@ -40,7 +40,7 @@ impl fmt::Display for PinError {
             ),
             Self::KindMismatch { slot, target } => write!(
                 f,
-                "this slot is a {} slot; it can't point at a {}",
+                "this pin is a {} pin; it can't point at a {}",
                 slot.as_str(),
                 target.as_str()
             ),
@@ -449,7 +449,7 @@ pub fn parse_override(kind: PinKind, assignment: &str) -> Result<(String, FieldV
     let field = field.trim();
     if !kind.allows_override(field) {
         return Err(PinError::Invalid(format!(
-            "a {} slot has no overridable field `{field}` (allowed: label, {})",
+            "a {} pin has no overridable field `{field}` (allowed: label, {})",
             kind.as_str(),
             kind.overridable_fields().join(", ")
         )));

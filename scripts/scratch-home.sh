@@ -190,7 +190,7 @@ mux_alive() { tmx has-session -t "=$1"; }
 
 check_empty_store() {
   fresh
-  run cx pin list; ok "pin list"; has "no pin slots" "pin list"
+  run cx pin list; ok "pin list"; has "no pins" "pin list"
   is_false "listing must not create pins.toml" test -e "$(PINS)"
   run cx history list; ok "history list"
 }
@@ -225,7 +225,7 @@ check_planned_lifecycle() {
   run cx pin move beta --before nope; fails "move before unknown anchor"
   run cx pin move beta --before beta; fails "move before itself"
   run cx pin rm beta; ok "rm"
-  run cx pin rm beta; fails "rm twice"; has "no pin slot named"
+  run cx pin rm beta; fails "rm twice"; has "no pin named"
   run cx pin show gamma; ok "show"; has gamma
   run cx rebuild gamma --dry-run; fails "planned slot with no cwd"; has "no working directory"
 }
@@ -235,7 +235,7 @@ check_bad_input() {
   run cx pin add --planned --kind bogus --name x; fails; has "unknown kind"
   run cx pin add --planned --kind pr --name x --set argv=a; fails; has "no overridable field"
   run cx pin add nothing-like-this; fails; has "nothing matches"
-  run cx pin edit ghost --set cwd=/x; fails; has "no pin slot named"
+  run cx pin edit ghost --set cwd=/x; fails; has "no pin named"
   run cx pin edit ghost; fails
   is_false "bad input must not write" test -e "$(PINS)"
 }
@@ -307,7 +307,7 @@ check_reap_and_forget() {
   run cx history list --kind mux; has keep-a; lacks drop-b
   local hid
   hid="$(cx history list --kind mux | awk '{print $1; exit}')"
-  run cx history forget "$hid"; fails "forget pinned"; has "pin slot"
+  run cx history forget "$hid"; fails "forget pinned"; has "pin(s)"
   run cx history show "$hid"; ok; has "pinned by"
   run cx history forget "$hid" --force; ok
   run cx pin list; has missing "slot outlives its record"

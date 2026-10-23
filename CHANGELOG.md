@@ -7,8 +7,8 @@ onward (pre-1.0, so minor versions may break).
 
 ## [Unreleased]
 
-Targeted for 0.2.0, after 0.1.0 is tagged. History, rebuild, and pin
-slots (ADRs 0140 to 0144) rework how pinning works.
+Targeted for 0.2.0, after 0.1.0 is tagged. History, rebuild, and pins
+(ADRs 0140 to 0144) rework how pinning works.
 
 ### Added
 
@@ -18,19 +18,19 @@ slots (ADRs 0140 to 0144) rework how pinning works.
   by absence from a scan). `conspectus history list|show|reap|forget`
   inspects and prunes it; `reap` honors `[history.reap_after]` and never
   removes a pinned or Unknown record.
-- **Pin slots.** `conspectus pin
+- **Pins.** `conspectus pin
   add|edit|rename|retarget|refresh|move|rm|list|show|migrate`. A pin is
-  a named slot in `$XDG_DATA_HOME/conspectus/pins.toml` that points at a
+  a named pin in `$XDG_DATA_HOME/conspectus/pins.toml` that points at a
   mux, session, worktree, repo, or PR (live or gone), with overrides
   layered over the live graph, history, and a snapshot. Pinning writes
-  only that file. Renaming a live mux slot renames its tmux session with
+  only that file. Renaming a live mux pin renames its tmux session with
   it, and `mux new|launch --pin [--no-launch]` pins a new mux or plans
   one.
-- **Rebuild.** `conspectus rebuild <slot|h_id|node|mux> [--dry-run]`
+- **Rebuild.** `conspectus rebuild <pin|h_id|node|mux> [--dry-run]`
   brings a gone mux (resuming its last session), session, worktree
   (through worktrunk), or repo (`git clone` into an absent path) back as
   a plan that stops at the first failure. Launch argv comes from the
-  slot, the recorded launch, `[launch.<harness>]` profiles, `atelier
+  pin, the recorded launch, `[launch.<harness>]` profiles, `atelier
   exec`, then the harness default.
 - **Pinned and History views** (`4`, `5`), ghost muxes in the Mux view,
   a `.` row menu with Pin / Unpin (`p`), a `◉` pin marker, a `pinned

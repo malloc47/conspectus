@@ -56,7 +56,7 @@ impl App {
             .map(|slot| {
                 RowMenuEntry::new(
                     format!("Unpin {slot}"),
-                    "remove the slot; the entity and its history stay",
+                    "remove the pin; the entity and its history stay",
                     Msg::Unpin(slot),
                 )
                 .confirming()
@@ -79,7 +79,7 @@ impl App {
                     .find(|pin| pin.id.id == slot)
                     .and_then(|pin| pin.target_node.clone())
             })
-            .ok_or_else(|| format!("slot `{slot}` has no entity to reveal"))?;
+            .ok_or_else(|| format!("pin `{slot}` has no entity to reveal"))?;
         let live = self
             .snapshot_handle()
             .is_none_or(|handle| handle.snapshot().is_live(&node));
@@ -92,7 +92,13 @@ impl App {
             _ => View::Sessions,
         };
         let previous = self.active_view;
+        let previous_filter = self.filter.clone();
         self.switch_to_view(view);
+        // A pin's own target is a pinned record, which History hides
+        // unless asked; revealing it asks.
+        if view == View::History {
+            self.filter.show_pinned_history = true;
+        }
         self.rebuild_tree_in_place();
         // History lists a gone entity by its record rather than by node.
         let record = self.snapshot_handle().and_then(|handle| {
@@ -115,6 +121,7 @@ impl App {
                 || matches!(&row.id, RowId::History { record_id } if Some(record_id) == record.as_ref())
         }) else {
             // Stay where the operator was.
+            self.filter = previous_filter;
             self.switch_to_view(previous);
             self.rebuild_tree_in_place();
             return Err(format!("`{slot}` isn't listed in the {view:?} view"));
@@ -326,6 +333,69 @@ impl App {
             self.modal_stack.last(),
             Some(crate::tui::Modal::MuxLaunch(_))
         ) {
+            self.modal_stack.pop();
+        }
+    }
+
+    /// What the pin edit form needs to know about pin `slot`: its fields
+    /// in effect, what they would be without its overrides, and the
+    /// choices the fields offer. `None` when no such pin is in the graph.
+    pub(crate) fn pin_edit_init(
+        &self,
+        slot: &str,
+    ) -> Option<crate::tui::widgets::pin_edit::PinEditInit> {
+        use crate::model::{GraphNode, SlotStatus};
+        let snapshot = self.snapshot_handle()?.snapshot();
+        let pin = snapshot.nodes.iter().find_map(|node| match node {
+            GraphNode::Pin(pin) if pin.id.id == slot => Some(pin),
+            _ => None,
+        })?;
+        let stored = snapshot.pins.iter().find(|stored| stored.id == slot)?;
+        let mut probe = stored.clone();
+        probe.overrides.clear();
+        let inherited = crate::resolve::slots::resolve_slot(snapshot, &probe).effective;
+        let cwd = pin.text("cwd").map(str::to_string);
+        Some(crate::tui::widgets::pin_edit::PinEditInit {
+            pin: slot.to_string(),
+            kind: pin.kind,
+            status: pin.status.as_str().to_string(),
+            live_mux: pin.kind == crate::model::PinKind::Mux && pin.status == SlotStatus::Live,
+            effective: pin.effective.clone(),
+            overrides: pin.overrides.clone(),
+            inherited,
+            known_pin_names: snapshot.pins.iter().map(|p| p.id.clone()).collect(),
+            known_harness_keys: crate::tui::runtime::known_harness_keys(),
+            cwd_candidates: crate::tui::runtime::known_cwd_candidates(self, cwd.as_deref()),
+            defaults: Some(crate::launch_default::LaunchDefaults::new(
+                self.config().launch.clone(),
+            )),
+        })
+    }
+
+    /// Active pin edit form, if on top of stack.
+    pub fn pin_edit_form(&self) -> Option<&crate::tui::widgets::pin_edit::PinEditFormState> {
+        match self.modal_stack.last()? {
+            crate::tui::Modal::PinEdit(state) => Some(state.as_ref()),
+            _ => None,
+        }
+    }
+
+    pub fn pin_edit_form_mut(
+        &mut self,
+    ) -> Option<&mut crate::tui::widgets::pin_edit::PinEditFormState> {
+        match self.modal_stack.last_mut()? {
+            crate::tui::Modal::PinEdit(state) => Some(state.as_mut()),
+            _ => None,
+        }
+    }
+
+    pub fn open_pin_edit_form(&mut self, state: crate::tui::widgets::pin_edit::PinEditFormState) {
+        self.modal_stack
+            .push(crate::tui::Modal::PinEdit(Box::new(state)));
+    }
+
+    pub fn close_pin_edit_form(&mut self) {
+        if matches!(self.modal_stack.last(), Some(crate::tui::Modal::PinEdit(_))) {
             self.modal_stack.pop();
         }
     }
