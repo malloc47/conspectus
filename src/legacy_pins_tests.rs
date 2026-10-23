@@ -224,3 +224,26 @@ fn round_tripping_through_toml_keeps_entries() {
     let again = parse_pins_document(&to_toml(&document).unwrap()).unwrap();
     assert_eq!(document, again);
 }
+
+#[cfg(unix)]
+#[test]
+fn a_symlinked_file_left_empty_keeps_its_link() {
+    let dir = tempfile::tempdir().unwrap();
+    let real = dir.path().join("dotfiles.toml");
+    let link = dir.path().join(".conspectus.toml");
+    let only_pins = TWO_PINS
+        .split_once("[session]")
+        .map(|(_, rest)| format!("[pins]{}", rest.split_once("[pins]").unwrap().1));
+    fs::write(&real, only_pins.unwrap()).unwrap();
+    std::os::unix::fs::symlink(&real, &link).unwrap();
+
+    assert_eq!(remove_entries(&link, &ids(&["api", "docs"])).unwrap(), 2);
+
+    assert!(
+        fs::symlink_metadata(&link)
+            .unwrap()
+            .file_type()
+            .is_symlink()
+    );
+    assert!(!fs::read_to_string(&real).unwrap().contains("api"));
+}

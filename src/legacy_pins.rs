@@ -421,7 +421,10 @@ pub fn remove_entries(path: &Path, ids: &BTreeSet<String>) -> io::Result<usize> 
     if entries.is_empty() {
         document.as_table_mut().remove("pins");
     }
-    if document.as_table().is_empty() {
+    // A symlinked config belongs to the file it points at (often a
+    // dotfiles checkout): empty it rather than unlink the link.
+    let is_symlink = fs::symlink_metadata(path)?.file_type().is_symlink();
+    if document.as_table().is_empty() && !is_symlink {
         fs::remove_file(path)?;
     } else {
         write_atomic(path, &document.to_string())?;

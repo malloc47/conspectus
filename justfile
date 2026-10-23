@@ -99,3 +99,8 @@ demo:
     cargo run --quiet --features snapshot -- tui --fixture tests/fixtures/showcase.json
 
 check: fmt clippy test nextest doc diff-check
+
+# Drop into a disposable Conspectus home (private tmux, stub harnesses,
+# a git repo) for manual testing; `just scratch smoke` runs the checks.
+scratch *args='shell':
+    scripts/scratch-home.sh {{args}}
