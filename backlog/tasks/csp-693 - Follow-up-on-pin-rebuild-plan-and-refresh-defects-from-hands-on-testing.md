@@ -1,10 +1,10 @@
 ---
 id: CSP-693
 title: 'Follow up on pin, rebuild plan, and refresh defects from hands-on testing'
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-10-23 16:02'
-updated_date: '2026-10-23 16:04'
+updated_date: '2026-10-23 16:59'
 labels:
   - history-pins
   - tui
@@ -23,8 +23,8 @@ Second round of manual testing of the pin, history, and rebuild work found: stop
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
-- [ ] #1 `just check` passes, or `git diff --check` for docs-only changes
-- [ ] #2 Docs and ADRs are updated when behavior, architecture, or workflow change
+- [x] #1 `just check` passes, or `git diff --check` for docs-only changes
+- [x] #2 Docs and ADRs are updated when behavior, architecture, or workflow change
 <!-- DOD:END -->
 
 ## Implementation Notes
@@ -32,3 +32,9 @@ Second round of manual testing of the pin, history, and rebuild work found: stop
 <!-- SECTION:NOTES:BEGIN -->
 Assumptions made without asking: stopped pins read as a hollow glyph plus dim ghost style, with the word stopped on pin rows instead of gone; p unpins immediately; the Mux view hides unpinned stopped muxes by default.
 <!-- SECTION:NOTES:END -->
+
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+Fixed the second round of manual-testing defects (CSP-693.01 to .07) with invariant tests for each pattern.
+<!-- SECTION:FINAL_SUMMARY:END -->
