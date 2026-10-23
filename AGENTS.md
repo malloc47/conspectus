@@ -76,6 +76,24 @@ standard checks.
   ADRs, and help prose spell out `conspectus`. A runtime message that
   suggests a command gets the name from `invocation::invoked_name()`. Don't
   introduce other short names or aliases.
+- User-facing text never cites developer artifacts. Nothing the operator
+  can read (TUI screens, menus, prompts, toasts, status hints, CLI
+  `--help`, error and warning messages, README screenshots) names an ADR
+  number, a backlog ID, or a design, plan, or audit document under
+  `docs/`; those live in comments, commit messages, and `docs/`. Point at
+  an operator guide (`docs/operations.md`) only when the reader needs it.
+  Say "pin" for what the operator selects; "slot" is the storage word and
+  stays in the file format and the CLI's file-level errors.
+  `src/tui/consistency_tests/text.rs` enforces this on rendered screens,
+  help pages, and string literals.
+- A new view, menu, or key reuses the existing action, menu, and
+  lifecycle code instead of reimplementing it: the same gesture does the
+  same thing to the same entity in every view, a menu lists what applies
+  to the entity whichever view opened it, accelerators act on the entity
+  the focused pane shows, every state-changing effect declares its
+  lifecycle in `tui::effect::lifecycle`, and rows share one column grid.
+  `src/tui/consistency_tests/` asserts these across views; extend it when
+  adding a view or an effect.
 - Avoid making Conspectus depend on Atelier command modules directly. Shared
   code should be pure discovery/parsing/model code with a clean boundary.
 - Track implementation work as Backlog.md tasks under `backlog/` (ADR 0109);

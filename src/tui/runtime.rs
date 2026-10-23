@@ -1776,7 +1776,7 @@ fn refresh_after_store_write(app: &mut App, _seed: &RunConfig) {
     refresh_with_config(app, &config);
 }
 
-fn store_write_refresh_config(app: &App) -> RunConfig {
+pub(in crate::tui) fn store_write_refresh_config(app: &App) -> RunConfig {
     let mut config = app.config().clone();
     config.refresh = true;
     config

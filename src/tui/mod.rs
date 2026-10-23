@@ -704,3 +704,6 @@ mod tests {
         }
     }
 }
+
+#[cfg(test)]
+mod consistency_tests;

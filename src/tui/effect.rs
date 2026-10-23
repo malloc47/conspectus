@@ -195,3 +195,87 @@ pub enum StoreOp {
     /// configured mutation backend.
     WorktreePrune { repo_root: String },
 }
+
+/// What the runtime does around an effect so what the operator sees
+/// stays truthful: whether it hands the terminal to a mux, freezes the
+/// acted-on row until fresh data lands, refreshes afterwards, and moves
+/// focus to wherever the entity now lives.
+///
+/// Every state-changing effect declares its lifecycle here, in one
+/// place, so a new effect cannot ship without deciding. The match is
+/// exhaustive on purpose.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Lifecycle {
+    /// The terminal is handed to a mux client.
+    pub attaches: bool,
+    /// The acted-on row is dimmed with a spinner until the refresh
+    /// after the action lands.
+    pub freezes_row: bool,
+    /// A refresh runs once the action finishes.
+    pub refreshes: bool,
+    /// Focus moves to the view where the entity now lives, with its row
+    /// selected.
+    pub follows_entity: bool,
+}
+
+impl Lifecycle {
+    /// An effect that changes nothing the views show.
+    pub const NONE: Self = Self {
+        attaches: false,
+        freezes_row: false,
+        refreshes: false,
+        follows_entity: false,
+    };
+
+    /// A write that the views must catch up with.
+    pub const REFRESHES: Self = Self {
+        refreshes: true,
+        ..Self::NONE
+    };
+}
+
+/// The lifecycle `effect` runs with today.
+pub fn lifecycle(effect: &Effect) -> Lifecycle {
+    match effect {
+        Effect::SpawnRefresh { .. }
+        | Effect::Toast(_)
+        | Effect::Persist
+        | Effect::Quit
+        | Effect::RunMux(_) => Lifecycle::NONE,
+        Effect::Exec(spec) => match spec {
+            ExecSpec::AttachMux(_) => Lifecycle {
+                attaches: true,
+                freezes_row: true,
+                refreshes: true,
+                follows_entity: false,
+            },
+            ExecSpec::Resume(_) | ExecSpec::ViewSession(_) | ExecSpec::ShowRebuildPlan { .. } => {
+                Lifecycle::NONE
+            }
+            ExecSpec::MuxNew { .. } | ExecSpec::MuxLaunch { .. } => Lifecycle {
+                attaches: true,
+                refreshes: true,
+                ..Lifecycle::NONE
+            },
+            ExecSpec::Rebuild { .. } => Lifecycle::REFRESHES,
+        },
+        Effect::WriteStore(op) => match op {
+            StoreOp::PinRecord { .. }
+            | StoreOp::PinNode { .. }
+            | StoreOp::Unpin { .. }
+            | StoreOp::RenameSlot { .. }
+            | StoreOp::EditSlot { .. }
+            | StoreOp::RetargetSlot { .. }
+            | StoreOp::RefreshSlot { .. }
+            | StoreOp::ForgetRecord { .. }
+            | StoreOp::ReapRecords { .. }
+            | StoreOp::CommitAliasRename { .. }
+            | StoreOp::CommitMuxRename { .. }
+            | StoreOp::WorktreeCreate { .. }
+            | StoreOp::WorktreeRemove { .. }
+            | StoreOp::WorktreeMerge { .. }
+            | StoreOp::WorktreeCloseDown { .. }
+            | StoreOp::WorktreePrune { .. } => Lifecycle::REFRESHES,
+        },
+    }
+}
