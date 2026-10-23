@@ -104,7 +104,7 @@ fn a_session_resumes_into_the_ghost_mux_it_last_ran_in_at_its_lineage_head() {
 
     assert!(
         plan.subject
-            .starts_with("session `old` (live) into mux `work` (gone"),
+            .starts_with("session `old` (live) into mux `work` (stopped"),
         "{}",
         plan.subject
     );

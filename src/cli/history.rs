@@ -72,10 +72,13 @@ fn store() -> Result<HistoryStore> {
 }
 
 fn presence_label(snapshot: &GraphSnapshot, id: &str) -> &'static str {
+    let Some((kind, _)) = snapshot.history.meta(id) else {
+        return "live";
+    };
     snapshot
         .history
         .presence_of(id)
-        .map_or("live", NodePresence::label)
+        .map_or("live", |presence| presence.label_for(kind.node_kind()))
 }
 
 /// The slots whose target is this record, by name.
@@ -144,7 +147,14 @@ impl HistoryListArgs {
                 if pins.is_empty() {
                     String::new()
                 } else {
-                    format!("  ◉ {}", pins.join(", "))
+                    // The filled pin marks a running entity, the hollow
+                    // one a stopped or removed one, as in the TUI.
+                    let marker = if snapshot.history.presence_of(&meta.id).is_none() {
+                        crate::tui::icons::state::PIN_RUNNING
+                    } else {
+                        crate::tui::icons::state::PIN_STOPPED
+                    };
+                    format!("  {marker} {}", pins.join(", "))
                 },
             );
         }

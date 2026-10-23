@@ -496,7 +496,7 @@ fn node_labels(node: &GraphNode) -> (String, String) {
         ),
         GraphNode::Pin(n) => (
             format!("pin:{}", truncate(&n.label, 24)),
-            format!("{} · {}", n.kind.as_str(), n.status.as_str()),
+            format!("{} · {}", n.kind.as_str(), n.status.label_for(n.kind)),
         ),
         GraphNode::Fork(n) => {
             let name = n

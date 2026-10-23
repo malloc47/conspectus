@@ -15,6 +15,12 @@ without a dot delimiter; the History view lists unpinned records by
 default, with an **Unpinned only** control to list pinned ones too; the
 interface calls a pin a pin and never by its storage word.
 
+Amended by ADR 0145: status words are `stopped`, `removed`, `missing`,
+and `planned` (never `gone`); the pin marker is filled (`◉`) for a pin on
+a running entity and hollow (`◎`) otherwise, for live pins and History
+records too; the age is the same axis as the native views; the chip
+column is one width so the content aligns.
+
 ## Context
 
 Pinned muxes and sessions sit in a Pins group at the top of the

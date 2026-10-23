@@ -39,7 +39,10 @@ pub fn plan(
         .file_name()
         .map_or_else(|| root.clone(), |name| name.to_string_lossy().into_owned());
     let mut plan = Plan {
-        subject: format!("worktree `{label}` ({})", resolved.status.as_str()),
+        subject: format!(
+            "worktree `{label}` ({})",
+            resolved.status.label_for(crate::model::PinKind::Checkout)
+        ),
         steps: Vec::new(),
         warnings: Vec::new(),
         target: None,

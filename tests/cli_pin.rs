@@ -264,7 +264,7 @@ fn pinning_a_live_mux_survives_its_death_and_rebuilds() {
     assert!(list.contains("pin-a") && list.contains("stopped"), "{list}");
     let history = world.ok(&["history", "list", "--gone"]);
     assert!(
-        history.contains("pin-a") && history.contains("◉"),
+        history.contains("pin-a") && history.contains("◎"),
         "{history}"
     );
 

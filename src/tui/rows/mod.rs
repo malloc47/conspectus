@@ -43,14 +43,6 @@ pub enum RowId {
     /// back to `node show`.
     Group(NodeId),
     AgentSession(NodeId),
-    /// A candidate-mux child row under an ambiguous agent session.
-    /// Keyed on `(parent_session, candidate_mux)` so the row is
-    /// distinct from any other agent session that happens to be a
-    /// candidate for the same mux.
-    AgentSessionMuxCandidate {
-        agent: NodeId,
-        mux: NodeId,
-    },
     MuxSession(NodeId),
     Pr(NodeId),
     Fork(NodeId),
@@ -140,15 +132,9 @@ pub struct Row {
 pub enum RowKind {
     Group(GroupRow),
     AgentSession(AgentSessionRow),
-    AgentSessionMuxCandidate(MuxCandidateRow),
     MuxSession(MuxSessionRow),
     Pr(PrRow),
     Fork(ForkRow),
-    /// Repo row emitted by the workspaces view for
-    /// member rows under each workspace. Styled like the agent /
-    /// mux rows so it scans as the same visual rhythm rather than
-    /// as a bare group header.
-    Repo(RepoRow),
     /// A row of any kind in the Pinned and History views, drawn in the
     /// shared mixed-kind columns.
     Mixed(MixedRow),
@@ -172,8 +158,14 @@ pub struct MixedRow {
     pub label: String,
     pub status: String,
     pub tone: MixedTone,
-    /// Age as `format_recency` renders it; empty when unknown.
+    /// Age as `format_recency` renders it; `None` when unknown.
     pub age: Option<String>,
+    /// The instant behind [`Self::age`], which picks the age's recency
+    /// color the way the other views do.
+    pub age_epoch: Option<i64>,
+    /// The state glyph of a row in the Mux grid, where the Mux view
+    /// draws a glyph rather than a word.
+    pub state: Option<EntityState>,
     /// The agent or program the entity runs, drawn as the same filled
     /// chip the other views use.
     pub chip: Option<MixedChip>,
@@ -213,15 +205,33 @@ impl MixedChip {
     }
 }
 
-/// The pin marker of a mixed-kind row.
+/// The pin marker of a row: a pair of glyphs, filled when the pinned
+/// entity is running and hollow when it isn't, so the marker answers
+/// "is this pinned" and "is the pin's target up" the same way in every
+/// view.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum PinMarker {
-    /// Not pinned, or a row whose view marks pins another way.
+    /// Not pinned.
     None,
-    /// An entity a pin points at (`◉`).
-    Pinned,
-    /// A pin with no target yet (`◎`).
-    Unstarted,
+    /// A pin on an entity that is running (`◉`).
+    Running,
+    /// A pin on an entity that is stopped, removed, missing, or not
+    /// started yet (`◎`, in the ghost color).
+    Stopped,
+}
+
+/// The state a primary-entity row draws as a glyph: sessions and
+/// muxes link or don't, and a mux can also be stopped or unchecked.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum EntityState {
+    /// Linked to a definitive mux, or a client is attached.
+    Linked,
+    /// No definitive mux, or no client attached.
+    Unlinked,
+    /// A mux that has stopped.
+    Stopped,
+    /// A mux that couldn't be checked.
+    Unknown,
 }
 
 /// How a mixed-kind row lays out its columns.
@@ -374,17 +384,6 @@ pub enum MuxIndicator {
     Unmuxed,
 }
 
-#[derive(Clone, Debug, PartialEq)]
-pub struct MuxCandidateRow {
-    pub mux: MuxSessionId,
-    /// Display label for the candidate mux, e.g. `tmux:editor`.
-    pub mux_label: String,
-    /// True when this candidate is the resolver-preferred one for
-    /// the parent agent session.
-    pub is_preferred: bool,
-    pub primary_node: NodeId,
-}
-
 /// A mux-session row in the mux or union view.
 #[derive(Clone, Debug, PartialEq)]
 pub struct MuxSessionRow {
@@ -445,6 +444,8 @@ pub struct PrRow {
     /// The PR title on one line, when the forge listing gave one.
     pub title: Option<String>,
     pub updated_recency: Option<String>,
+    /// The instant behind [`Self::updated_recency`], for its color.
+    pub updated_epoch: Option<i64>,
     pub url: Option<String>,
     pub primary_node: NodeId,
 }
@@ -457,31 +458,6 @@ pub struct ForkRow {
     pub scope: Option<String>,
     pub parent_label: Option<String>,
     pub child_count: usize,
-    pub primary_node: NodeId,
-}
-
-/// A workspace member row in the workspaces view. Carries
-/// the short id + display label + canonical path the renderer needs
-/// to render the row with the same visual rhythm as
-/// [`AgentSessionRow`] and [`MuxSessionRow`] rather than as a bare
-/// group header.
-#[derive(Clone, Debug, PartialEq)]
-pub struct RepoRow {
-    pub short_id: String,
-    /// Workspace-visible name for the member — atelier's
-    /// `[[repos]].name`, agent-deck's symlink leaf, generic
-    /// discovery's child name. Same string as the membership link's
-    /// `logical_path` basename.
-    pub display_name: String,
-    /// Operator-recognizable filesystem path for the repo. Prefer the
-    /// first non-agent-deck `source_paths` entry (the canonical
-    /// checkout), falling back to the git `common_dir`. `None` only
-    /// for snapshot shapes that have neither.
-    pub canonical_path: Option<String>,
-    /// Git `common_dir` (the `.git` path). Kept on the row so the
-    /// renderer can fall back when `canonical_path` is absent and so
-    /// `node show` and the detail pane have a stable handle.
-    pub common_dir: String,
     pub primary_node: NodeId,
 }
 
@@ -780,6 +756,26 @@ pub(crate) fn pin_nodes(snapshot: &crate::model::GraphSnapshot) -> Vec<&crate::m
         .collect();
     pins.sort_by_key(|pin| pin.order);
     pins
+}
+
+/// The pin marker each pinned entity wears: filled while the entity is
+/// running, hollow once it is stopped or gone.
+pub(crate) fn pinned_node_markers(
+    snapshot: &crate::model::GraphSnapshot,
+) -> std::collections::BTreeMap<NodeId, PinMarker> {
+    pin_nodes(snapshot)
+        .into_iter()
+        .filter_map(|pin| pin.target_node.clone())
+        .map(|node| {
+            let marker =
+                if snapshot.find_node(&node).is_some() && snapshot.presence(&node).is_none() {
+                    PinMarker::Running
+                } else {
+                    PinMarker::Stopped
+                };
+            (node, marker)
+        })
+        .collect()
 }
 
 /// The entities pin slots point at, whatever their status.

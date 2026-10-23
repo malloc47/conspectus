@@ -46,8 +46,8 @@ use crate::tui::detail::{HeaderField, NodeDetail, SectionKind};
 use crate::tui::icons::{NodeKind, node_kind_style};
 use crate::tui::preview::PreviewContent;
 use crate::tui::rows::{
-    AgentSessionRow, GroupRow, MuxCandidateRow, MuxIndicator, MuxSessionRow, PrRow, RowId, RowKind,
-    format_recency, recency_bucket,
+    AgentSessionRow, GroupRow, MuxIndicator, MuxSessionRow, PrRow, RowId, RowKind, format_recency,
+    recency_bucket,
 };
 
 mod detail_header;
@@ -261,7 +261,9 @@ fn draw_controls_overlay(app: &App, frame: &mut Frame<'_>, area: Rect) {
 
 #[cfg(not(test))]
 fn current_unix_epoch_for_render() -> i64 {
-    crate::discovery::current_epoch()
+    // The clock the row builders age against, so an age's text and its
+    // recency color agree; snapshot mode freezes it.
+    crate::tui::rows::tree_current_unix_epoch()
 }
 
 /// Test override: a fixed clock so snapshot tests stay

@@ -34,7 +34,7 @@ pub use msg::Msg;
 #[derive(Clone)]
 pub struct SnapshotHandle(
     Rc<crate::model::GraphSnapshot>,
-    Rc<std::cell::OnceCell<BTreeSet<NodeId>>>,
+    Rc<std::cell::OnceCell<std::collections::BTreeMap<NodeId, crate::tui::rows::PinMarker>>>,
 );
 
 impl SnapshotHandle {
@@ -47,11 +47,13 @@ impl SnapshotHandle {
         Self(Rc::new(snapshot.clone()), Rc::default())
     }
 
-    /// The entities pin slots point at, live or gone (ADR 0141); the
-    /// native views mark their rows.
-    pub(crate) fn pinned_nodes(&self) -> &BTreeSet<NodeId> {
+    /// The entities pin slots point at, live or gone, with the marker
+    /// each wears; the native views mark their rows with it.
+    pub(crate) fn pinned_nodes(
+        &self,
+    ) -> &std::collections::BTreeMap<NodeId, crate::tui::rows::PinMarker> {
         self.1
-            .get_or_init(|| crate::tui::rows::pinned_node_set(&self.0))
+            .get_or_init(|| crate::tui::rows::pinned_node_markers(&self.0))
     }
 
     pub(crate) fn snapshot(&self) -> &crate::model::GraphSnapshot {
@@ -1014,7 +1016,6 @@ impl App {
         match row {
             RowKind::MuxSession(mux) => handoff.muxes.contains(&mux.mux),
             RowKind::AgentSession(session) => handoff.sessions.contains(&session.session),
-            RowKind::AgentSessionMuxCandidate(candidate) => handoff.muxes.contains(&candidate.mux),
             _ => false,
         }
     }

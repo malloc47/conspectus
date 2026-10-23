@@ -5,14 +5,14 @@ expression: "pinned_frame(&mut app, 120)"
 updated 0s ago · 0/1 sessions · 1 mux                                                                                   
 ┌ ▸ sessions · mux · prs · pinned · history ───────────────┐┌   detail ────────────────────────────────────────────────┐
 │▼ conspectus  ~/src/conspectus                            ││Select a row to view its detail.                          │
-│  ▶ ▣   conspectus-main         live      2m   claude     ││                                                          │
-│    ●   e44d01cb                in mux   17m   claude     ││                                                          │
-│    ◇ ◎ ledger-worktree         removed   2d  conspectus …││                                                          │
-│    ▣ ◎ nightly                 planned        claude     ││                                                          │
+│  ▶ ▣ ◉ conspectus-main         live       2m  ~/src/cons…││                                                          │
+│    ● ◉ e44d01cb                in mux    17m  Fix the le…││                                                          │
+│    ◇ ◎ ledger-worktree         removed    2d  conspectus…││                                                          │
+│    ▣ ◎ nightly                 planned     —  ~/src/cons…││                                                          │
 │▼ Other                                                   ││                                                          │
-│    ▣ ◎ config-agent3           stopped   3d   claude     ││                                                          │
-│    ⇄   ledger-pr               merged    5h  malloc47/co…││                                                          │
-│    ▣ ◎ old-api                 planned        codex      ││                                                          │
+│    ▣ ◎ config-agent3           stopped    3d  ~/src/conf…││                                                          │
+│    ⇄ ◉ ledger-pr               merged     5h  malloc47/c…││                                                          │
+│    ▣ ◎ old-api                 planned     —  ~/src/api  ││                                                          │
 │                                                          ││                                                          │
 │                                                          ││                                                          │
 │                                                          ││                                                          │

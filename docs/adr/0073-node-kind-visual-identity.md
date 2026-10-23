@@ -7,7 +7,9 @@ mix node kinds (Pinned, History) show the kind glyph on every row,
 sessions included. The 2026-06 amendment that dropped the glyph from
 `AgentSession` rows is reversed (2026-10): the glyph shows on session
 rows in every view, so a session reads as a session wherever it
-appears. The pill still carries the harness.
+appears. The pill still carries the harness. State glyphs (linked, stopped, pull
+request states, the pin marker) are a separate vocabulary, set by
+[ADR 0145](0145-state-glyphs-and-words-in-the-left-panel.md).
 
 ## Context
 

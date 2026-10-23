@@ -56,13 +56,61 @@ impl NodeKind {
             NodeKind::Checkout => "◇",
             NodeKind::AgentSession => "●",
             NodeKind::MuxSession => "▣",
-            NodeKind::Pin => "◉",
+            NodeKind::Pin => state::PIN_RUNNING,
             NodeKind::RuntimeProcess => "⚙",
             NodeKind::Branch => "⎇",
             NodeKind::Fork => "⑂",
             NodeKind::ForgePr => "⇄",
         }
     }
+}
+
+/// State glyphs: the one-cell marks a row uses for a state that has two
+/// or more values, in views of a single primary entity (sessions, muxes,
+/// pull requests). Every state is drawn as a pair or set of distinct
+/// shapes, so no state hides behind the absence of a glyph and none
+/// relies on color alone. Mixed views (Pinned, History) spell the same
+/// states as words instead.
+pub mod state {
+    /// A session linked to a definitive mux, or a mux with a client
+    /// attached. Drawn in the attached color.
+    pub const LINKED: &str = "⚯";
+    /// A session with no definitive mux (none or ambiguous), or a mux
+    /// with no client attached. Drawn dim.
+    pub const UNLINKED: &str = "⚬";
+    /// A mux that has stopped running. Drawn in the ghost color.
+    pub const STOPPED: &str = "⊘";
+    /// A state that couldn't be checked: a mux whose server didn't
+    /// answer, or a pull request with no state yet.
+    pub const UNKNOWN: &str = "?";
+    /// An open pull request.
+    pub const PR_OPEN: &str = "○";
+    /// An open pull request still marked draft.
+    pub const PR_DRAFT: &str = "◐";
+    /// A merged pull request.
+    pub const PR_MERGED: &str = "✓";
+    /// A closed, unmerged pull request.
+    pub const PR_CLOSED: &str = "✗";
+    /// A pin on an entity that is running: the filled pin glyph.
+    pub const PIN_RUNNING: &str = "◉";
+    /// A pin on an entity that is stopped, removed, missing, or not
+    /// started yet: the hollow twin of [`PIN_RUNNING`], drawn in the
+    /// ghost color.
+    pub const PIN_STOPPED: &str = "◎";
+
+    /// Every state glyph, for tests that check width and uniqueness.
+    pub const ALL: [&str; 10] = [
+        LINKED,
+        UNLINKED,
+        STOPPED,
+        UNKNOWN,
+        PR_OPEN,
+        PR_DRAFT,
+        PR_MERGED,
+        PR_CLOSED,
+        PIN_RUNNING,
+        PIN_STOPPED,
+    ];
 }
 
 /// Resolved visual identity for one node kind: the glyph string

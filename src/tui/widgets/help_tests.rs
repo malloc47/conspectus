@@ -118,12 +118,13 @@ fn help_body_includes_mux_state_legend() {
     let texts: Vec<String> = body_lines(&theme).iter().map(line_text).collect();
     let header = texts
         .iter()
-        .position(|t| t == "Mux state")
+        .position(|t| t == "Link and mux state")
         .expect("mux state section header");
     let legend = &texts[header + 1..];
     for (glyph, name) in [
-        ("◉", "Attached"),
-        ("◯", "Not attached"),
+        ("⚯", "Linked"),
+        ("⚬", "Not linked"),
+        ("⊘", "Stopped"),
         ("?", "Unknown"),
         ("⚠", "Ambiguous mux"),
     ] {
@@ -135,9 +136,14 @@ fn help_body_includes_mux_state_legend() {
             legend.join("\n"),
         );
     }
+    // The half-filled circle once meant ambiguity and now marks a draft
+    // pull request; the legend may only use it for that.
     assert!(
-        texts.iter().all(|t| !t.contains('◐')),
-        "the retired ambiguity glyph must not reappear in help",
+        texts
+            .iter()
+            .filter(|t| t.contains('◐'))
+            .all(|t| t.contains("Draft")),
+        "◐ may only appear on the draft pull request row",
     );
 }
 

@@ -44,7 +44,8 @@ pub(super) fn open_rename_overlay(app: &mut App) {
         }
         NodeId::MuxSession(_) => {
             app.update(Msg::SetStatus(Some(
-                "rename: that mux is gone; rebuild it first (Enter, or . for the menu)".to_string(),
+                "rename: that mux is stopped; rebuild it first (Enter, or . for the menu)"
+                    .to_string(),
             )));
             return;
         }

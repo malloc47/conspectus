@@ -4,25 +4,25 @@ expression: all_kinds_frame(width)
 ---
 updated 0s ago · 0/1 sessions · 1 mux                                                                         
 ┌ ▸ sessions · mux · prs · pinned · history ──────────┐┌   ◉ pin ────────────────────────────────────────────┐
-│  ▣   mux-live          live        1m   codex      …││  id            mux-live                             │
-│  ▣ ◎ mux-gone          stopped     4d   codex      …││  name          mux-live                             │
-│  ▣ ◎ mux-unknown       unknown     2h   codex      …││  kind          mux                                  │
-│  ▣ ◎ mux-planned       planned                      ││  status        live                                 │
-│  ▣ ◎ mux-missing       missing                      ││  target        mux_session:tmux:main                │
-│  ●   session-live      resumable  10m   claude     …││  name          main                                 │
-│  ● ◎ session-missing   missing                      ││  cwd           /home/op/src/conspectus              │
-│▶ ◇   worktree-live     live            conspectus   ││  harness       codex                                │
-│  ◇ ◎ worktree-gone     removed     2d  conspectus ·…││  argv          codex                                │
-│  ◇ ◎ worktree-planned  planned                      ││──────────────────────────── 1 validated  Related ── │
-│  ◆   repo-live         live            ~/src/conspe…││  targets                ▣ tmux:main                 │
-│  ◆ ◎ repo-gone         removed    10d  ~/src/lost/.…││                                                     │
-│  ⇄   pr-open           open            malloc47/con…││────────────────────────────────────────── Preview ──│
-│  ⇄   pr-draft          draft           malloc47/con…││loading mux preview…                                 │
-│  ⇄   pr-closed         closed          malloc47/con…││                                                     │
-│  ⎇   branch-live       live            conspectus ·…││                                                     │
-│  ⎇ ◎ branch-missing    missing                      ││                                                     │
-│  ▦   workspace-live    live            ~/src        ││                                                     │
-│  ⑂   fork-live         live            atelier · sp…││                                                     │
+│  ▣ ◉ mux-live          live         1m  ~/src/consp…││  id            mux-live                             │
+│  ▣ ◎ mux-gone          stopped      4d  ~/src/consp…││  name          mux-live                             │
+│  ▣ ◎ mux-unknown       unknown      2h  ~/src/consp…││  kind          mux                                  │
+│  ▣ ◎ mux-planned       planned       —              ││  status        live                                 │
+│  ▣ ◎ mux-missing       missing       —              ││  target        mux_session:tmux:main                │
+│  ● ◉ session-live      resumable   10m  Fix the led…││  name          main                                 │
+│  ● ◎ session-missing   missing       —              ││  cwd           /home/op/src/conspectus              │
+│▶ ◇ ◉ worktree-live     live          —  conspectus  ││  harness       codex                                │
+│  ◇ ◎ worktree-gone     removed      2d  conspectus …││  argv          codex                                │
+│  ◇ ◎ worktree-planned  planned       —              ││──────────────────────────── 1 validated  Related ── │
+│  ◆ ◉ repo-live         live          —  ~/src/consp…││  targets                ▣ tmux:main                 │
+│  ◆ ◎ repo-gone         removed     10d  ~/src/lost/…││                                                     │
+│  ⇄ ◉ pr-open           open          —  malloc47/co…││────────────────────────────────────────── Preview ──│
+│  ⇄ ◉ pr-draft          draft         —  malloc47/co…││loading mux preview…                                 │
+│  ⇄ ◉ pr-closed         closed        —  malloc47/co…││                                                     │
+│  ⎇ ◉ branch-live       live          —  conspectus …││                                                     │
+│  ⎇ ◎ branch-missing    missing       —              ││                                                     │
+│  ▦ ◉ workspace-live    live          —  ~/src       ││                                                     │
+│  ⑂ ◉ fork-live         live          —  atelier · s…││                                                     │
 │                                                     ││                                                     │
 │                                                     ││                                                     │
 │                                                     ││                                                     │

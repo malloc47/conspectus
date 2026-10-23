@@ -293,7 +293,7 @@ fn retargeting_offers_the_other_entities_of_the_pins_kind_with_what_tells_them_a
         .iter()
         .find(|item| item.value == "h_agent")
         .expect("a gone mux record is a candidate");
-    assert!(gone.detail.starts_with("gone"), "{gone:?}");
+    assert!(gone.detail.starts_with("stopped"), "{gone:?}");
     let live = items
         .iter()
         .find(|item| item.label.contains("scratch"))

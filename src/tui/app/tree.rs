@@ -264,16 +264,14 @@ impl App {
 
 /// Does `row` represent `target` in the left-pane tree?
 /// Group rows match when their `primary_node` (when set) equals
-/// `target`; mux candidate rows match their parent mux's node id.
+/// `target`.
 pub(super) fn row_matches(row: &crate::tui::rows::Row, target: &NodeId) -> bool {
     match &row.kind {
         RowKind::Group(group) => group.primary_node.as_ref() == Some(target),
         RowKind::AgentSession(s) => &s.primary_node == target,
-        RowKind::AgentSessionMuxCandidate(c) => &c.primary_node == target,
         RowKind::MuxSession(m) => &m.primary_node == target,
         RowKind::Pr(p) => &p.primary_node == target,
         RowKind::Fork(f) => &f.primary_node == target,
-        RowKind::Repo(r) => &r.primary_node == target,
         RowKind::Mixed(m) => &m.primary_node == target,
     }
 }

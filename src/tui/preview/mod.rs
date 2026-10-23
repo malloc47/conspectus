@@ -499,8 +499,7 @@ fn selection_source(app: &App) -> Option<PreviewSource> {
                 Some(PreviewSource::Transcript(session.session.clone()))
             }
         }
-        (RowKind::AgentSessionMuxCandidate(_), _)
-        | (_, RowId::Group(NodeId::MuxSession(_)) | RowId::MuxSession(NodeId::MuxSession(_))) => {
+        (_, RowId::Group(NodeId::MuxSession(_)) | RowId::MuxSession(NodeId::MuxSession(_))) => {
             pane()
         }
         // Any other row previews the node the right pane shows for it.

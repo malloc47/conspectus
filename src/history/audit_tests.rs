@@ -134,7 +134,7 @@ fn node_show_says_a_node_is_gone() {
         &NodeId::MuxSession(MuxSessionId::new("tmux:ghost")),
         false,
     );
-    assert!(text.contains("presence: gone (last seen"), "{text}");
+    assert!(text.contains("presence: stopped (last seen"), "{text}");
     let live = crate::output::node_show::render_node_show(
         &snapshot,
         &NodeId::MuxSession(MuxSessionId::new("tmux:live")),
@@ -153,7 +153,7 @@ fn graph_exports_draw_gone_nodes_dashed() {
         .lines()
         .find(|line| line.contains("ghost") && line.contains("shape="))
         .expect("ghost node line");
-    assert!(ghost_line.contains("dashed") && ghost_line.contains("tooltip=\"gone\""));
+    assert!(ghost_line.contains("dashed") && ghost_line.contains("tooltip=\"stopped\""));
     let live_line = dot
         .lines()
         .find(|line| line.contains("tmux:live") && line.contains("shape="))

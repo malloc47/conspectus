@@ -58,7 +58,7 @@ fn a_gone_repo_is_cloned_from_its_first_recorded_remote_to_its_path() {
     let snapshot = repo_snapshot(&dest, Some("git@github.com:me/old.git"));
     let h = Harness::new(FakeTmux::with_sessions(""));
     let plan = plan_for(&snapshot, &h).unwrap();
-    assert_eq!(plan.subject, "repo `old` (gone)");
+    assert_eq!(plan.subject, "repo `old` (removed)");
     assert_eq!(titles(&plan), ["clone the repo"]);
     assert_eq!(
         plan.steps[0].command,

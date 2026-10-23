@@ -281,7 +281,7 @@ fn sourceless_preview(
                 pin_summary(pin_id)
             }
         }
-        (RowKind::AgentSession(_) | RowKind::AgentSessionMuxCandidate(_), _)
+        (RowKind::AgentSession(_), _)
         | (_, RowId::Group(NodeId::MuxSession(_)) | RowId::MuxSession(NodeId::MuxSession(_))) => {
             disabled_or("no mux target for this row")
         }

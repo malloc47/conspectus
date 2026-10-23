@@ -253,7 +253,7 @@ check_live_pin_lifecycle() {
   run cx history list --kind mux; ok; has demo; has "◉"
   tmx kill-server
   run cx pin list; has stopped "pin reads stopped after its server died"
-  run cx history list --gone; has demo; has "◉"
+  run cx history list --gone; has demo; has "◎"
   run cx rebuild demo --dry-run; ok; has demo
   # No tmux server directory at all (like a /tmp cleanup after reboot).
   rm -rf "$TMUX_TMPDIR"/tmux-*

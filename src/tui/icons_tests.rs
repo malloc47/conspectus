@@ -214,3 +214,31 @@ fn from_node_id_covers_every_variant() {
         assert_eq!(NodeKind::from(&id), expected, "mismatch for {id}");
     }
 }
+
+#[test]
+fn state_glyphs_are_one_cell_wide_and_all_different() {
+    let mut seen = std::collections::BTreeSet::new();
+    for glyph in state::ALL {
+        assert_eq!(
+            UnicodeWidthStr::width(glyph),
+            1,
+            "`{glyph}` must be one cell wide"
+        );
+        assert!(seen.insert(glyph), "`{glyph}` is used for two states");
+    }
+}
+
+#[test]
+fn state_glyphs_do_not_reuse_a_node_kind_glyph_except_the_pin_marker() {
+    for kind in NodeKind::ALL {
+        let glyph = kind.default_glyph();
+        if glyph == state::PIN_RUNNING {
+            assert_eq!(kind, NodeKind::Pin);
+            continue;
+        }
+        assert!(
+            !state::ALL.contains(&glyph),
+            "{kind:?}'s glyph `{glyph}` is also a state glyph"
+        );
+    }
+}

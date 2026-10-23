@@ -1654,7 +1654,6 @@ fn derive_new_mux_cwd(app: &App) -> Option<String> {
             .primary_node
             .as_ref()
             .and_then(|node| cwd_for_node(snapshot, node)),
-        RowKind::Repo(r) => cwd_for_node(snapshot, &r.primary_node),
         RowKind::MuxSession(mux) => snapshot.live_nodes().find_map(|n| match n {
             GraphNode::MuxSession(m) if m.id == mux.mux => {
                 m.active_pane_current_path.clone().or_else(|| m.cwd.clone())

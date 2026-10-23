@@ -233,10 +233,10 @@ fn describe(
     let state = match (resolved.status, record) {
         (SlotStatus::Gone | SlotStatus::Unknown, Some(record)) => format!(
             "{}, last seen {} ago",
-            resolved.status.as_str(),
+            resolved.status.label_for(crate::model::PinKind::Mux),
             format_relative_age(record.meta.last_seen, now)
         ),
-        (status, _) => status.as_str().to_string(),
+        (status, _) => status.label_for(crate::model::PinKind::Mux).to_string(),
     };
     format!("mux `{name}` ({state})")
 }

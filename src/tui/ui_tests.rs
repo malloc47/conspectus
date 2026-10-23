@@ -314,7 +314,7 @@ fn render_at_default_size_shows_header_tree_and_detail() {
         "session harness label missing: {text}"
     );
     assert!(
-        text.contains("could you give me a bit"),
+        text.contains("could you give me a"),
         "same-line preview missing: {text}"
     );
     assert!(
@@ -1706,6 +1706,7 @@ fn forge_pr_glyph_span_picks_color_from_pr_state() {
         tracked: false,
         title: None,
         updated_recency: None,
+        updated_epoch: None,
         url: None,
         primary_node: NodeId::ForgePr(crate::model::ForgePrId::new(
             "github",
@@ -1767,6 +1768,7 @@ fn pr_tracking_span_tells_a_local_branch_from_none() {
         tracked: false,
         title: None,
         updated_recency: None,
+        updated_epoch: None,
         url: None,
         primary_node: NodeId::ForgePr(crate::model::ForgePrId::new(
             "github",
@@ -1794,7 +1796,7 @@ fn pr_tracking_span_tells_a_local_branch_from_none() {
 
 #[test]
 fn row_kind_glyph_span_dispatches_per_row_kind() {
-    use crate::tui::rows::{ForkRow, GroupRow, MuxCandidateRow, RepoRow};
+    use crate::tui::rows::{ForkRow, GroupRow};
     let theme = Theme::default();
 
     // Group rows derive their kind from `primary_node`; synthetic
@@ -1847,8 +1849,7 @@ fn row_kind_glyph_span_dispatches_per_row_kind() {
         "a session wears its kind glyph in every view",
     );
 
-    // MuxSession and AgentSessionMuxCandidate both get `▣` since
-    // a candidate row points at a mux.
+    // A mux row gets `▣`.
     let mux = RowKind::MuxSession(crate::tui::rows::MuxSessionRow {
         mux: MuxSessionId::new("project"),
         backend: "tmux".into(),
@@ -1873,19 +1874,6 @@ fn row_kind_glyph_span_dispatches_per_row_kind() {
             .as_deref(),
         Some("▣ "),
     );
-    let candidate = RowKind::AgentSessionMuxCandidate(MuxCandidateRow {
-        mux: MuxSessionId::new("project"),
-        mux_label: "tmux:project".into(),
-        is_preferred: true,
-        primary_node: NodeId::MuxSession(MuxSessionId::new("project")),
-    });
-    assert_eq!(
-        row_kind_glyph_span(&candidate, &theme)
-            .map(|s| s.content.to_string())
-            .as_deref(),
-        Some("▣ "),
-    );
-
     // Fork rows get `⑂`.
     let fork = RowKind::Fork(ForkRow {
         fork_label: "alpha".into(),
@@ -1898,21 +1886,6 @@ fn row_kind_glyph_span_dispatches_per_row_kind() {
     let fork_glyph = row_kind_glyph_span(&fork, &theme).unwrap();
     assert_eq!(fork_glyph.content, "⑂ ");
     assert_eq!(fork_glyph.style.fg, Some(theme.node_fork));
-
-    // Repo rows get `◆`.
-    let repo = RowKind::Repo(RepoRow {
-        short_id: "abc".into(),
-        display_name: "repo-a".into(),
-        canonical_path: None,
-        common_dir: "/x/.git".into(),
-        primary_node: NodeId::Repo(RepoId::new("/x/.git")),
-    });
-    assert_eq!(
-        row_kind_glyph_span(&repo, &theme)
-            .map(|s| s.content.to_string())
-            .as_deref(),
-        Some("◆ "),
-    );
 }
 
 #[test]
@@ -1941,7 +1914,7 @@ fn session_alias_renders_after_mux_glyph_in_left_row() {
     let spans = render_session_spans(&row, &theme, now, None);
     let rendered: String = spans.iter().map(|span| span.content.as_ref()).collect();
     assert!(
-        rendered.contains("◯  ingest-refactor"),
+        rendered.contains("⚬  ingest-refactor"),
         "alias should render after the mux glyph: {rendered}"
     );
     assert!(
@@ -2002,8 +1975,11 @@ fn a_session_last_hosted_by_a_gone_mux_carries_a_was_in_chip() {
     titled.alias = Some("Nightly".into());
     let titled = text(&titled);
 
-    insta::assert_snapshot!("session_row_was_in_chip", format!("{gone}\n{titled}"));
-    assert!(gone.contains("old-ledger  (mux gone)"), "{gone}");
+    insta::assert_snapshot!(
+        "session_row_was_in_chip",
+        format!("{}\n{}", gone.trim_end(), titled.trim_end())
+    );
+    assert!(gone.contains("old-ledger  (mux stopped)"), "{gone}");
     assert!(titled.contains("Nightly  was in old-ledger"), "{titled}");
     assert!(!live.contains("was in"), "a live mux needs no chip: {live}");
     assert!(
@@ -2123,7 +2099,7 @@ fn mux_session_row_mirrors_session_column_order() {
         "mux row should fit the given width: {rendered:?}"
     );
     assert!(
-        rendered.contains('◉'),
+        rendered.contains('⚯'),
         "attached glyph should still render: {rendered}"
     );
     assert!(
@@ -2153,7 +2129,7 @@ fn mux_session_row_mirrors_session_column_order() {
     let label_idx = rendered.find("editor").expect("label present");
     let chip_idx = rendered.find("codex").expect("harness chip present");
     let recency_idx = rendered.find("3s").expect("recency present");
-    let glyph_idx = rendered.find('◉').expect("glyph present");
+    let glyph_idx = rendered.find('⚯').expect("glyph present");
     let preview_idx = rendered
         .find("running cargo test")
         .expect("preview present");
@@ -3849,7 +3825,7 @@ fn row_awaiting_handoff_dims_and_spins_in_the_attach_cell() {
     let before = render(&app);
     let text: String = before.spans.iter().map(|s| s.content.as_ref()).collect();
     assert!(
-        text.contains('◉'),
+        text.contains('⚯'),
         "settled row shows the attach glyph: {text}"
     );
 
@@ -3857,7 +3833,7 @@ fn row_awaiting_handoff_dims_and_spins_in_the_attach_cell() {
     let pending = render(&app);
     let text: String = pending.spans.iter().map(|s| s.content.as_ref()).collect();
     assert!(
-        !text.contains('◉'),
+        !text.contains('⚯'),
         "spinner replaces the attach glyph: {text}"
     );
     assert!(
@@ -3877,7 +3853,7 @@ fn row_awaiting_handoff_dims_and_spins_in_the_attach_cell() {
     let settled = render(&app);
     let text: String = settled.spans.iter().map(|s| s.content.as_ref()).collect();
     assert!(
-        text.contains('◉'),
+        text.contains('⚯'),
         "settled row shows the attach glyph again: {text}"
     );
 }
@@ -3911,7 +3887,7 @@ fn mux_row_spinner_takes_the_attached_glyph_column() {
         .iter()
         .map(|s| s.content.to_string())
         .collect();
-    assert_eq!(settled.replace('◉', "⠋"), pending);
+    assert_eq!(settled.replace('⚯', "⠋"), pending);
 }
 
 /// A transcript of `turns` alternating user and assistant messages,
@@ -4894,6 +4870,7 @@ fn pr_row_for_layout(label: &str, state: &str, age: Option<&str>) -> crate::tui:
         tracked: false,
         title: None,
         updated_recency: age.map(str::to_string),
+        updated_epoch: None,
         url: None,
         primary_node: NodeId::ForgePr(crate::model::ForgePrId::new(
             "github",
@@ -4926,8 +4903,8 @@ fn pr_tree(rows: Vec<crate::tui::rows::PrRow>) -> crate::tui::rows::RowTree {
 
 #[test]
 fn pr_columns_align_to_the_widest_value_in_the_tree() {
-    // ADR 0131: number, state, and age pad to the widest value across
-    // the tree, so rows from different groups line up.
+    // The number pads to the widest across the tree, so rows from
+    // different groups line up; age and state have fixed cells.
     let theme = Theme::default();
     let mut long = pr_row_for_layout("#1234", "merged", Some("120d"));
     long.title = Some("long one".into());
@@ -4935,11 +4912,11 @@ fn pr_columns_align_to_the_widest_value_in_the_tree() {
     short.title = Some("short one".into());
     let align = PrAlign::of_tree(&pr_tree(vec![long.clone(), short.clone()]));
 
-    let long_text = pr_text(&render_pr_spans(&long, &theme, align, 80));
-    let short_text = pr_text(&render_pr_spans(&short, &theme, align, 80));
+    let long_text = pr_text(&render_pr_spans(&long, &theme, align, 80, 0));
+    let short_text = pr_text(&render_pr_spans(&short, &theme, align, 80, 0));
 
-    assert_eq!(long_text, "#1234 ◌  merged  120d  long one");
-    assert_eq!(short_text, "#7    ◌  open      2h  short one");
+    assert_eq!(long_text, "#1234 ◌  120d  ✓  long one");
+    assert_eq!(short_text, "#7    ◌    2h  ○  short one");
     let column = |text: &str, needle: &str| text.find(needle).expect("needle");
     assert_eq!(column(&long_text, "◌"), column(&short_text, "◌"));
     assert_eq!(
@@ -4956,7 +4933,7 @@ fn pr_title_takes_the_remaining_width_and_is_cut_with_an_ellipsis() {
     pr.title = Some("A rather long pull request title".into());
     let align = PrAlign::of_tree(&pr_tree(vec![pr.clone()]));
 
-    let spans = render_pr_spans(&pr, &theme, align, 30);
+    let spans = render_pr_spans(&pr, &theme, align, 30, 0);
     let text = pr_text(&spans);
 
     assert!(text.ends_with('…'), "{text:?}");
@@ -4965,8 +4942,8 @@ fn pr_title_takes_the_remaining_width_and_is_cut_with_an_ellipsis() {
     assert_eq!(title.style.fg, Some(theme.secondary_text));
 
     // No room for even a sliver of title: it is left out, not wrapped.
-    let tight = pr_text(&render_pr_spans(&pr, &theme, align, 16));
-    assert_eq!(tight, "#9 ◌  open  1d");
+    let tight = pr_text(&render_pr_spans(&pr, &theme, align, 14, 0));
+    assert_eq!(tight, "#9 ◌    1d  ○");
 }
 
 #[test]
@@ -4976,13 +4953,13 @@ fn pr_row_without_a_title_or_age_still_pads_its_columns() {
     let bare = pr_row_for_layout("#2", "closed", None);
     let align = PrAlign::of_tree(&pr_tree(vec![aged, bare.clone()]));
 
-    let text = pr_text(&render_pr_spans(&bare, &theme, align, 80));
+    let text = pr_text(&render_pr_spans(&bare, &theme, align, 80, 0));
 
-    assert_eq!(text, "#2  ◌  closed    ");
+    assert_eq!(text, "#2  ◌     —  ✗");
 }
 
 #[test]
-fn an_open_draft_reads_draft_and_the_local_branch_leads_the_title() {
+fn an_open_draft_shows_the_draft_glyph_and_the_local_branch_leads_the_title() {
     let theme = Theme::default();
     let mut pr = pr_row_for_layout("#5", "open", Some("4h"));
     pr.is_draft = true;
@@ -4991,20 +4968,22 @@ fn an_open_draft_reads_draft_and_the_local_branch_leads_the_title() {
     pr.title = Some("Add login".into());
     let align = PrAlign::of_tree(&pr_tree(vec![pr.clone()]));
 
-    let text = pr_text(&render_pr_spans(&pr, &theme, align, 80));
+    let text = pr_text(&render_pr_spans(&pr, &theme, align, 80, 0));
 
-    assert_eq!(text, "#5 ⎇  draft  4h  feature/login  Add login");
+    assert_eq!(text, "#5 ⎇    4h  ◐  feature/login  Add login");
     // A draft that was already merged keeps its real state.
     let mut merged = pr;
     merged.state = Some("merged".into());
+    let merged_text = pr_text(&render_pr_spans(
+        &merged,
+        &theme,
+        PrAlign::of_tree(&pr_tree(vec![merged.clone()])),
+        80,
+        0,
+    ));
     assert!(
-        pr_text(&render_pr_spans(
-            &merged,
-            &theme,
-            PrAlign::of_tree(&pr_tree(vec![merged.clone()])),
-            80
-        ))
-        .contains("merged")
+        merged_text.contains('✓') && !merged_text.contains('◐'),
+        "{merged_text:?}"
     );
 }
 
@@ -5017,7 +4996,7 @@ fn a_long_local_branch_is_capped_so_it_cannot_crowd_out_the_title() {
     pr.title = Some("Title".into());
     let align = PrAlign::of_tree(&pr_tree(vec![pr.clone()]));
 
-    let text = pr_text(&render_pr_spans(&pr, &theme, align, 100));
+    let text = pr_text(&render_pr_spans(&pr, &theme, align, 100, 0));
 
     assert!(text.contains(&format!("{}…", "a".repeat(23))), "{text:?}");
     assert!(text.ends_with("  Title"), "{text:?}");
@@ -5204,12 +5183,12 @@ fn status_columns(frame: &str) -> Vec<usize> {
     frame
         .lines()
         .filter(|line| {
-            ["live", "gone", "planned", "merged", "in mux"]
+            ["live", "stopped", "planned", "merged", "in mux"]
                 .iter()
                 .any(|status| line.contains(&format!(" {status} ")))
         })
         .filter_map(|line| {
-            ["planned", "merged", "in mux", "live", "gone"]
+            ["planned", "merged", "in mux", "live", "stopped"]
                 .iter()
                 .filter_map(|status| line.find(&format!("  {status}")))
                 .min()
@@ -5402,7 +5381,7 @@ fn an_empty_history_view_points_at_the_menu() {
         RunConfig::defaults(),
     );
     let frame = pinned_frame(&mut app, 100);
-    assert!(frame.contains("Nothing is gone"), "{frame}");
+    assert!(frame.contains("Nothing has stopped"), "{frame}");
     assert!(frame.contains("Clean up"), "{frame}");
 }
 
@@ -5646,9 +5625,9 @@ fn ghost_muxes_sit_below_live_ones_dimmed_with_their_age() {
     let live = frame.find("conspectus-main").expect("live mux");
     let ghost = frame.find("config-agent3").expect("ghost mux");
     assert!(live < ghost, "{frame}");
-    assert!(frame.contains("gone"), "{frame}");
+    assert!(frame.contains('⊘'), "{frame}");
     assert!(
-        frame.contains("· 1 gone"),
+        frame.contains("· 1 stopped"),
         "the header counts ghosts: {frame}"
     );
 }
@@ -5667,7 +5646,7 @@ fn the_mux_view_lists_only_pinned_stopped_muxes_unless_asked_for_all() {
     let frame = pinned_frame(&mut app, 110);
     assert!(!frame.contains("config-agent3"), "{frame}");
     assert!(frame.contains("conspectus-main"), "{frame}");
-    assert!(frame.contains("1 gone"), "{frame}");
+    assert!(frame.contains("1 stopped"), "{frame}");
 
     // Controls can list every stopped mux.
     let filter = crate::filter::RowFilter {
@@ -6088,7 +6067,7 @@ fn a_pinned_ghost_mux_keeps_the_pin_marker_and_its_column() {
         .lines()
         .find(|line| line.contains("conspectus-main"))
         .expect("live row");
-    assert!(ghost_line.contains('◉'), "{ghost_line}");
+    assert!(ghost_line.contains('◎'), "{ghost_line}");
     let column = |line: &str, needle: &str| line.find(needle).map(|i| line[..i].chars().count());
     assert_eq!(
         column(ghost_line, "config-agent3"),
@@ -6242,4 +6221,121 @@ fn the_edit_form_shows_inherited_values_without_the_pins_overrides() {
         frame.contains("renames the tmux session too"),
         "a live mux pin:\n{frame}"
     );
+}
+
+#[test]
+fn every_value_of_a_state_has_its_own_glyph() {
+    use crate::tui::icons::state;
+    use crate::tui::rows::{EntityState, MixedGrid, MixedRow, MixedTone, PinMarker};
+    let theme = Theme::default();
+    let text = |span: &ratatui::text::Span<'_>| span.content.to_string();
+
+    // Sessions: linked to a mux or not. Ambiguity shares the unlinked
+    // glyph; the enclosing group row carries the warning.
+    let indicators = [
+        MuxIndicator::Attached,
+        MuxIndicator::Unmuxed,
+        MuxIndicator::Ambiguous { candidate_count: 2 },
+    ];
+    for indicator in indicators {
+        // Exhaustive: a new indicator must be classified here.
+        match indicator {
+            MuxIndicator::Attached | MuxIndicator::Unmuxed | MuxIndicator::Ambiguous { .. } => {}
+        }
+    }
+    assert_eq!(
+        text(&mux_indicator_span(indicators[0], &theme)),
+        state::LINKED
+    );
+    assert_eq!(
+        text(&mux_indicator_span(indicators[1], &theme)),
+        state::UNLINKED
+    );
+    assert_eq!(
+        text(&mux_indicator_span(indicators[2], &theme)),
+        state::UNLINKED
+    );
+
+    // Mux rows: every entity state draws its own glyph.
+    let mux_row = |entity: EntityState| MixedRow {
+        node_kind: crate::model::NodeKind::MuxSession,
+        label: "m".into(),
+        status: String::new(),
+        tone: MixedTone::Normal,
+        age: None,
+        age_epoch: None,
+        state: Some(entity),
+        chip: None,
+        content: String::new(),
+        primary_node: NodeId::MuxSession(MuxSessionId::new("m")),
+        pr_state: None,
+        marker: PinMarker::None,
+        grid: MixedGrid::Mux,
+    };
+    let mut drawn = Vec::new();
+    for entity in [
+        EntityState::Linked,
+        EntityState::Unlinked,
+        EntityState::Stopped,
+        EntityState::Unknown,
+    ] {
+        match entity {
+            EntityState::Linked
+            | EntityState::Unlinked
+            | EntityState::Stopped
+            | EntityState::Unknown => {}
+        }
+        let spans = render_mixed_spans(
+            &mux_row(entity),
+            &theme,
+            MixedAlign::default(),
+            4,
+            80,
+            0,
+            None,
+        );
+        drawn.push(spans.last().map(text).expect("a state cell"));
+    }
+    assert_eq!(
+        drawn,
+        [
+            state::LINKED,
+            state::UNLINKED,
+            state::STOPPED,
+            state::UNKNOWN
+        ]
+    );
+
+    // Pull requests: one shape per state.
+    let mut pr_glyphs = Vec::new();
+    for (state_name, draft) in [
+        (Some("open"), false),
+        (Some("open"), true),
+        (Some("merged"), false),
+        (Some("closed"), false),
+        (None, false),
+    ] {
+        let mut pr = pr_row_for_layout("#1", "open", None);
+        pr.state = state_name.map(str::to_string);
+        pr.is_draft = draft;
+        pr_glyphs.push(text(&pr_state_span(&pr, &theme)));
+    }
+    assert_eq!(
+        pr_glyphs,
+        [
+            state::PR_OPEN,
+            state::PR_DRAFT,
+            state::PR_MERGED,
+            state::PR_CLOSED,
+            state::UNKNOWN
+        ]
+    );
+
+    // The pin marker: filled, hollow, and an empty cell, all two cells wide.
+    let markers = [PinMarker::None, PinMarker::Running, PinMarker::Stopped];
+    let drawn: Vec<String> = markers
+        .iter()
+        .map(|marker| text(&pin_marker_span(*marker, &theme)))
+        .collect();
+    assert_eq!(drawn, ["  ", "◉ ", "◎ "]);
 }

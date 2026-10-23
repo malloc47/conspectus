@@ -32,8 +32,8 @@ that process.
 
 <sub>The sessions view on the built-in showcase world (`just screenshots`
 renders these images). Sessions are grouped under the workspace and repo they
-belong to; `◉` marks a session running in a tmux session you can attach to,
-and `◯` one that isn't. The right pane shows the selected session's fields,
+belong to; `⚯` marks a session linked to a tmux session you can attach to,
+and `⚬` one that isn't. The right pane shows the selected session's fields,
 its relationships, and its conversation in the Preview. The `project` group is
 flagged (`⚠`, drawn as a box by the screenshot font) because two sessions
 could own one tmux session, so Conspectus lists both under "Other" instead of

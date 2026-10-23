@@ -116,7 +116,9 @@ impl Widget for CleanUpWidget<'_> {
         let lines = vec![
             Line::from(""),
             Line::from("Nothing to clean up."),
-            Line::from("Gone records are kept until they pass their `[history.reap_after]`"),
+            Line::from(
+                "Stopped and removed records are kept until they pass their `[history.reap_after]`",
+            ),
             Line::from("age, and records a pin targets are never listed."),
             Line::from(""),
             Line::from("Esc/Enter close"),

@@ -189,7 +189,7 @@ fn rows_say_what_each_record_was() {
         .collect();
     let mux = rows[0];
     assert_eq!(mux.node_kind, NodeKind::MuxSession);
-    assert_eq!(mux.status, "gone");
+    assert_eq!(mux.status, "stopped");
     assert_eq!(mux.tone, MixedTone::Dim);
     assert_eq!(mux.age.as_deref(), Some("10m"));
     assert_eq!(mux.chip, Some(MixedChip::agent("claude")));

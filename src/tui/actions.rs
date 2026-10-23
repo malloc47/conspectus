@@ -188,7 +188,6 @@ pub fn subject_of_row(app: &App, id: &RowId) -> Subject {
             record: Some(record_id.clone()),
             pin: None,
         },
-        RowId::AgentSessionMuxCandidate { mux, .. } => subject_of_node(app, mux),
         other => crate::tui::rows::row_node(other)
             .map(|node| subject_of_node(app, node))
             .unwrap_or_default(),
@@ -489,8 +488,11 @@ pub fn retarget_candidates(
                 .label_of(&meta.id)
                 .unwrap_or_else(|| meta.display.label.clone());
             let detail = match &meta.display.context {
-                Some(context) => format!("gone · {context}"),
-                None => "gone".to_string(),
+                Some(context) => format!(
+                    "{} · {context}",
+                    crate::model::gone_word(history_kind.node_kind())
+                ),
+                None => crate::model::gone_word(history_kind.node_kind()).to_string(),
             };
             items.push(PickerItem {
                 label,
@@ -904,7 +906,8 @@ pub fn pin_status_hint(snapshot: &GraphSnapshot, pin_id: &str) -> Option<String>
             )),
         },
         crate::model::SlotStatus::Gone => Some(format!(
-            "pin `{pin_id}` is gone · Enter runs `{rebuild}` to bring it back"
+            "pin `{pin_id}` is {} · Enter runs `{rebuild}` to bring it back",
+            crate::model::SlotStatus::Gone.label_for(pin.kind)
         )),
         crate::model::SlotStatus::Unknown => Some(format!(
             "pin `{pin_id}`: couldn't check whether its target exists"

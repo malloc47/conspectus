@@ -1565,7 +1565,7 @@ fn pin_core(p: &PinNode, home: Option<&Path>) -> Vec<CoreField> {
         CoreField::plain("id", p.id.id.clone()),
         CoreField::text("name", p.label.clone()),
         CoreField::glossary("kind", p.kind.as_str()),
-        CoreField::glossary("status", p.status.as_str()),
+        CoreField::glossary("status", p.status.label_for(p.kind)),
     ];
     if let Some(target) = &p.target_node {
         fields.push(

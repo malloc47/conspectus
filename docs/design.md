@@ -909,7 +909,7 @@ Two views list rows of mixed kinds in one set of aligned columns,
 every pin slot in slot order, grouped by project, and **History** lists
 the history records whose entity a check found gone (an Unknown record
 proves nothing, so it isn't listed), newest first, with a Clean up modal
-for reaping. Native views mark pinned rows with `◉` instead of floating
+for reaping. Native views mark pinned rows with `◉` (`◎` when the pinned entity isn't running) instead of floating
 them, and Controls offers a `pinned only` filter. A row action menu (`.`)
 lists what applies to the entity in view, including Pin / Unpin (`p`): the same
 entries for the same entity in every view, hiding those with nothing to say.

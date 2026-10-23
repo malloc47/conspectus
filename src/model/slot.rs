@@ -335,7 +335,7 @@ impl SlotStatus {
     pub fn as_str(self) -> &'static str {
         match self {
             SlotStatus::Live => "live",
-            SlotStatus::Gone => "gone",
+            SlotStatus::Gone => "gone", // serialized name; users read `label_for`
             SlotStatus::Unknown => "unknown",
             SlotStatus::Missing => "missing",
             SlotStatus::Planned => "planned",

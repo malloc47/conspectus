@@ -102,6 +102,7 @@ pub fn build_history_tree(inputs: HistoryBuildInputs<'_>) -> RowTree {
     }
     for entry in &mut entries {
         entry.row.age = format_recency(now, Some(entry.last_seen));
+        entry.row.age_epoch = Some(entry.last_seen);
     }
     let mut tree = RowTree {
         rows: Vec::new(),
@@ -210,7 +211,7 @@ fn describe(
             (
                 NodeKind::MuxSession,
                 r.name.clone(),
-                "gone".to_string(),
+                "stopped".to_string(),
                 r.harness
                     .as_deref()
                     .map(|harness| MixedChip::agent(harness_label(harness))),
@@ -230,7 +231,7 @@ fn describe(
             (
                 NodeKind::Checkout,
                 label,
-                "gone".to_string(),
+                "removed".to_string(),
                 None,
                 join_dot([
                     crate::history::recorder::repo_name(r.common_dir()),
@@ -253,7 +254,7 @@ fn describe(
             (
                 NodeKind::Repo,
                 label,
-                "gone".to_string(),
+                "removed".to_string(),
                 None,
                 content,
                 None,
@@ -268,6 +269,11 @@ fn describe(
                 "open".to_string()
             } else {
                 state.clone()
+            };
+            let state = if status == "draft" {
+                status.clone()
+            } else {
+                state
             };
             (
                 NodeKind::ForgePr,
@@ -288,6 +294,8 @@ fn describe(
         status,
         tone: MixedTone::Dim,
         age: None,
+        age_epoch: None,
+        state: None,
         chip,
         content: content.replace('\n', " ").trim().to_string(),
         primary_node: node_of(snapshot, kind, &meta.id)?,
@@ -295,7 +303,8 @@ fn describe(
         marker: if pinned_by(snapshot, &meta.id).is_empty() {
             PinMarker::None
         } else {
-            PinMarker::Pinned
+            // A record is an entity that stopped or was removed.
+            PinMarker::Stopped
         },
         grid: MixedGrid::Columns,
     })

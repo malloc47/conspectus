@@ -3,6 +3,8 @@
 ## Status
 
 Accepted. Extended by ADR 0120, which drops `◐` from mux rows too.
+Amended by ADR 0145: the glyph pair is now a link (`⚯` linked, `⚬` not
+linked); the attachable-binary rule is unchanged.
 
 ## Context
 

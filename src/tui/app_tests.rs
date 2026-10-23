@@ -616,12 +616,6 @@ fn scenario_ambiguous_mux_session_is_leaf_after_adr_0071() {
         !session_row.expandable,
         "ambiguous session row stops being expandable after ADR 0071",
     );
-    assert!(
-        !app.visible_rows()
-            .iter()
-            .any(|row| matches!(row.kind, RowKind::AgentSessionMuxCandidate(_))),
-        "no candidate child rows after ADR 0071",
-    );
 }
 
 #[test]

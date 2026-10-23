@@ -173,8 +173,13 @@ fn describe(snapshot: &GraphSnapshot, pin: &PinNode, home: Option<&Path>) -> Des
             }
             (PinKind::Pr, Some(GraphNode::ForgePr(pr))) => {
                 let state = pr.state.clone().unwrap_or_default().to_ascii_lowercase();
-                pr_state = Some(state.clone());
-                if pr.is_draft && (state.is_empty() || state == "open") {
+                let draft = pr.is_draft && (state.is_empty() || state == "open");
+                pr_state = Some(if draft {
+                    "draft".to_string()
+                } else {
+                    state.clone()
+                });
+                if draft {
                     "draft".to_string()
                 } else if state.is_empty() {
                     "open".to_string()
@@ -376,14 +381,16 @@ fn push_slot(
             status: described.status,
             tone: described.tone,
             age: format_recency(now, described.epoch),
+            age_epoch: described.epoch,
+            state: None,
             chip: described.chip,
             content: described.content,
             primary_node: pin_node,
             pr_state: described.pr_state,
             marker: if pin.status == SlotStatus::Live {
-                PinMarker::None
+                PinMarker::Running
             } else {
-                PinMarker::Unstarted
+                PinMarker::Stopped
             },
             grid: MixedGrid::Columns,
         }),
@@ -447,6 +454,7 @@ fn session_row(
     snapshot: &GraphSnapshot,
     id: &NodeId,
     mux_live: bool,
+    home: Option<&Path>,
     now: Option<i64>,
 ) -> Option<MixedRow> {
     let Some(GraphNode::AgentSession(session)) = snapshot.find_node(id) else {
@@ -467,8 +475,16 @@ fn session_row(
         status: if live { "in mux" } else { "resumable" }.to_string(),
         tone: MixedTone::Normal,
         age: format_recency(now, session.last_active_epoch),
+        age_epoch: session.last_active_epoch,
+        state: None,
         chip: Some(MixedChip::agent(harness_label(&session.harness_key))),
-        content: session.title.clone().unwrap_or_default().replace('\n', " "),
+        // The label already carries the title, so the content says where
+        // the session ran.
+        content: session
+            .cwd
+            .as_deref()
+            .map(|cwd| shorten_home(cwd, home))
+            .unwrap_or_default(),
         primary_node: id.clone(),
         pr_state: None,
         marker: PinMarker::None,
@@ -491,6 +507,8 @@ fn mux_row(
         status: "live".to_string(),
         tone: MixedTone::Normal,
         age: format_recency(now, mux.activity_epoch),
+        age_epoch: mux.activity_epoch,
+        state: None,
         chip: super::mux_program_harness(mux, None, None)
             .map(MixedChip::agent)
             .or_else(|| super::mux_program(mux, None).map(MixedChip::program)),
@@ -518,7 +536,7 @@ fn children_of(snapshot: &GraphSnapshot, pin: &PinNode, now: Option<i64>) -> Vec
         PinKind::Mux => {
             let mux_live = pin.status == SlotStatus::Live;
             for id in sessions_of_mux(snapshot, target) {
-                out.extend(session_row(snapshot, &id, mux_live, now).map(|row| (1, row)));
+                out.extend(session_row(snapshot, &id, mux_live, home, now).map(|row| (1, row)));
             }
         }
         PinKind::Checkout if pin.status == SlotStatus::Live => {
@@ -544,7 +562,9 @@ fn children_of(snapshot: &GraphSnapshot, pin: &PinNode, now: Option<i64>) -> Vec
             for (_, id) in muxes {
                 out.extend(mux_row(snapshot, &id, home, now).map(|row| (1, row)));
                 for session in sessions_of_mux(snapshot, &id) {
-                    out.extend(session_row(snapshot, &session, true, now).map(|row| (2, row)));
+                    out.extend(
+                        session_row(snapshot, &session, true, home, now).map(|row| (2, row)),
+                    );
                 }
             }
         }

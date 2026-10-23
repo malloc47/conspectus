@@ -515,10 +515,34 @@ impl NodePresence {
         matches!(self, NodePresence::Gone { .. })
     }
 
-    pub fn label(self) -> &'static str {
+    /// The word users read for this presence of an entity of `kind`:
+    /// a mux that isn't running is `stopped`, and anything else that
+    /// vanished is `removed`.
+    pub fn label_for(self, kind: crate::model::NodeKind) -> &'static str {
         match self {
-            NodePresence::Gone { .. } => "gone",
+            NodePresence::Gone { .. } => gone_word(kind),
             NodePresence::Unknown { .. } => "unknown",
+        }
+    }
+}
+
+/// What users call an entity of `kind` that existed and is no longer
+/// there: a mux has `stopped`, anything else was `removed`.
+pub fn gone_word(kind: crate::model::NodeKind) -> &'static str {
+    match kind {
+        crate::model::NodeKind::MuxSession => "stopped",
+        _ => "removed",
+    }
+}
+
+impl HistoryKind {
+    /// The graph node kind a record of this kind stands for.
+    pub fn node_kind(self) -> crate::model::NodeKind {
+        match self {
+            HistoryKind::Mux => crate::model::NodeKind::MuxSession,
+            HistoryKind::Checkout => crate::model::NodeKind::Checkout,
+            HistoryKind::Repo => crate::model::NodeKind::Repo,
+            HistoryKind::Pr => crate::model::NodeKind::ForgePr,
         }
     }
 }

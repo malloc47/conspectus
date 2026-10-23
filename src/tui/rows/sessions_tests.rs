@@ -1513,13 +1513,6 @@ fn two_mux_links_with_distinct_provenance_resolve_to_one_attached_mux() {
         _ => unreachable!(),
     }
     assert!(!session_row.expandable);
-    assert!(
-        !tree
-            .rows
-            .iter()
-            .any(|r| matches!(r.kind, RowKind::AgentSessionMuxCandidate(_))),
-        "no candidate child rows when the resolver has a single winner",
-    );
 }
 
 #[test]
@@ -1568,12 +1561,6 @@ fn duplicate_mux_target_links_do_not_make_session_ambiguous() {
         _ => unreachable!(),
     }
     assert!(!session_row.expandable);
-    assert!(
-        !tree
-            .rows
-            .iter()
-            .any(|row| matches!(row.kind, RowKind::AgentSessionMuxCandidate(_)))
-    );
 }
 
 #[test]

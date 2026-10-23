@@ -70,7 +70,7 @@ pub fn plan(
     plan.subject = format!(
         "session `{}` ({}) into {}",
         short(&id.session_key),
-        resolved.status.as_str(),
+        resolved.status.label_for(crate::model::PinKind::Session),
         plan.subject
     );
     Ok(plan)

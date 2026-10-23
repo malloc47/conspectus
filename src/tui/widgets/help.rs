@@ -236,7 +236,7 @@ fn keymap_sections() -> Vec<HelpSection> {
             bindings: vec![
                 Binding::new(
                     "Enter",
-                    "Default action on the selected row: attach mux/muxed sessions, view un-muxed sessions, rebuild a gone mux, pin, or history record, expand groups",
+                    "Default action on the selected row: attach mux/muxed sessions, view un-muxed sessions, rebuild a stopped mux, pin, or history record, expand groups",
                 ),
                 Binding::new("a", "Attach to the selected mux"),
                 Binding::new(
@@ -290,11 +290,11 @@ fn keymap_sections() -> Vec<HelpSection> {
             bindings: vec![
                 Binding::new(
                     "p",
-                    "Pin the selected row, or unpin it when it is already pinned; pinned rows carry ◉",
+                    "Pin the selected row, or unpin it when it is already pinned; pinned rows carry ◉ (◎ when the pinned entity isn't running)",
                 ),
                 Binding::new(
                     ".",
-                    "Open the row action menu — pin or unpin; rebuild, forget, or show the rebuild plan for a gone record; edit, rename, retarget, refresh, or reveal a pin in the Pinned view; Clean up… in the History view",
+                    "Open the row action menu — pin or unpin; rebuild, forget, or show the rebuild plan for a history record; edit, rename, retarget, refresh, or reveal a pin in the Pinned view; Clean up… in the History view",
                 ),
             ],
         },
@@ -411,8 +411,12 @@ fn body_lines_for_width(theme: &Theme, width: Option<usize>) -> Vec<Line<'static
     push_icon_legend(&mut lines, theme);
     blank(&mut lines);
 
-    self::section(&mut lines, "Mux state");
+    self::section(&mut lines, "Link and mux state");
     push_mux_state_legend(&mut lines, theme);
+    blank(&mut lines);
+
+    self::section(&mut lines, "Pull request state");
+    push_pr_state_legend(&mut lines, theme);
     blank(&mut lines);
 
     self::section(&mut lines, "Pins");
@@ -486,27 +490,37 @@ fn push_icon_legend(lines: &mut Vec<Line<'static>>, theme: &Theme) {
 /// answer a different question on a session row than on a mux row, so
 /// the blurb names both where they differ.
 fn push_mux_state_legend(lines: &mut Vec<Line<'static>>, theme: &Theme) {
+    use crate::tui::icons::state;
     let bold_warning = Style::default()
         .fg(theme.warning)
         .add_modifier(Modifier::BOLD);
-    let entries: [(&str, Style, &str, &str); 4] = [
+    let ghost = Style::default()
+        .fg(theme.ghost)
+        .add_modifier(Modifier::ITALIC);
+    let entries: [(&str, Style, &str, &str); 5] = [
         (
-            "◉",
+            state::LINKED,
             Style::default().fg(theme.mux_attached),
-            "Attached",
+            "Linked",
             "session: one mux, Enter/a attaches · mux: client attached",
         ),
         (
-            "◯",
+            state::UNLINKED,
             Style::default().add_modifier(theme.mux_unmuxed),
-            "Not attached",
+            "Not linked",
             "session: no mux, or several candidates · mux: no client",
         ),
         (
-            "?",
+            state::STOPPED,
+            ghost,
+            "Stopped",
+            "a mux that is no longer running; Enter starts it again",
+        ),
+        (
+            state::UNKNOWN,
             Style::default().add_modifier(theme.placeholder),
             "Unknown",
-            "mux backend didn't report whether a client is attached",
+            "the mux backend didn't report whether a client is attached",
         ),
         (
             "⚠",
@@ -525,24 +539,34 @@ fn push_mux_state_legend(lines: &mut Vec<Line<'static>>, theme: &Theme) {
     }
 }
 
-/// Legend for the pin marker: filled for something a pin points at,
-/// hollow and in the ghost style for a pin with nothing running.
-fn push_pin_marker_legend(lines: &mut Vec<Line<'static>>, theme: &Theme) {
-    let pin_color = node_kind_style(NodeKind::Pin, theme).color;
-    let entries: [(&str, Style, &str, &str); 2] = [
+/// Legend for the pull request state glyphs. The Pinned and History
+/// views spell the same states as words instead.
+fn push_pr_state_legend(lines: &mut Vec<Line<'static>>, theme: &Theme) {
+    use crate::tui::icons::state;
+    let entries: [(&str, Style, &str, &str); 4] = [
         (
-            "◉",
-            Style::default().fg(pin_color),
-            "Pinned",
-            "a pin points at this row; the Pinned view lists every pin",
+            state::PR_OPEN,
+            Style::default().fg(theme.pr_open),
+            "Open",
+            "ready for review",
         ),
         (
-            "◎",
-            Style::default()
-                .fg(theme.ghost)
-                .add_modifier(Modifier::ITALIC),
-            "Pin, not running",
-            "a pin whose mux is stopped or not started yet (status stopped, planned); Enter starts it",
+            state::PR_DRAFT,
+            Style::default().fg(theme.pr_draft),
+            "Draft",
+            "open, but marked as a draft",
+        ),
+        (
+            state::PR_MERGED,
+            Style::default().fg(theme.pr_merged),
+            "Merged",
+            "landed on its base branch",
+        ),
+        (
+            state::PR_CLOSED,
+            Style::default().fg(theme.pr_closed),
+            "Closed",
+            "closed without merging",
         ),
     ];
     for (glyph, style, name, blurb) in entries {
@@ -550,6 +574,37 @@ fn push_pin_marker_legend(lines: &mut Vec<Line<'static>>, theme: &Theme) {
             "  ",
             span!(style; "{glyph} "),
             span!(Modifier::BOLD; "{name:<16}"),
+            blurb.to_string(),
+        ]);
+    }
+}
+
+/// Legend for the pin marker: filled for something a pin points at,
+/// hollow and in the ghost style for a pin with nothing running.
+fn push_pin_marker_legend(lines: &mut Vec<Line<'static>>, theme: &Theme) {
+    use crate::tui::icons::state;
+    let pin_color = node_kind_style(NodeKind::Pin, theme).color;
+    let entries: [(&str, Style, &str, &str); 2] = [
+        (
+            state::PIN_RUNNING,
+            Style::default().fg(pin_color),
+            "Pinned",
+            "a pin points at this row and it is running; the Pinned view lists every pin",
+        ),
+        (
+            state::PIN_STOPPED,
+            Style::default()
+                .fg(theme.ghost)
+                .add_modifier(Modifier::ITALIC),
+            "Pinned, not running",
+            "the pinned entity is stopped, removed, missing, or not started yet; Enter starts it",
+        ),
+    ];
+    for (glyph, style, name, blurb) in entries {
+        lines.push(line![
+            "  ",
+            span!(style; "{glyph} "),
+            span!(Modifier::BOLD; "{name:<20}"),
             blurb.to_string(),
         ]);
     }

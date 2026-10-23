@@ -19,7 +19,6 @@ impl App {
         let raw_target = match selection {
             RowId::Group(node) => Some(node.clone()),
             RowId::AgentSession(node) => Some(node.clone()),
-            RowId::AgentSessionMuxCandidate { mux, .. } => Some(mux.clone()),
             RowId::MuxSession(node) => Some(node.clone()),
             RowId::Pr(node) => Some(node.clone()),
             RowId::Fork(node) => Some(node.clone()),

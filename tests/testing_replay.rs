@@ -1,11 +1,11 @@
 mod support;
 
-use std::collections::{BTreeSet, HashMap};
+use std::collections::HashMap;
 
 use conspectus::hook::{HookRecord, HookTmuxRecord, SCHEMA_VERSION};
-use conspectus::model::{GraphLink, GraphSnapshot, LinkState, NodeId, RelationKind};
+use conspectus::model::{GraphLink, GraphSnapshot, LinkState, RelationKind};
 use conspectus::resolve::resolve_snapshot;
-use conspectus::tui::rows::{MuxIndicator, RowId, RowKind};
+use conspectus::tui::rows::{MuxIndicator, RowKind};
 use support::replay::{ReplayWorld, TmuxReplayRow};
 
 #[test]
@@ -388,7 +388,7 @@ fn invariant_ambiguous_mux_session_renders_as_leaf_after_adr_0071() {
     // ADR 0071 retired the per-session candidate subtree. The
     // ambiguous session still flashes its `◐` chip with the
     // correct candidate count, but the row no longer expands and
-    // no `AgentSessionMuxCandidate` rows are emitted — the muxes
+    // no per-candidate child rows are emitted — the muxes
     // surface on the shared-ancestor group detail instead.
     //
     // The tree row builder now consumes resolver winners
@@ -436,25 +436,6 @@ fn invariant_ambiguous_mux_session_renders_as_leaf_after_adr_0071() {
     assert_eq!(
         session_rows[0].mux_state,
         MuxIndicator::Ambiguous { candidate_count: 2 }
-    );
-
-    let candidate_rows: BTreeSet<NodeId> = result
-        .sessions
-        .rows
-        .iter()
-        .filter_map(|row| match &row.id {
-            RowId::AgentSessionMuxCandidate { agent, mux }
-                if agent == &session_rows[0].primary_node =>
-            {
-                Some(mux.clone())
-            }
-            _ => None,
-        })
-        .collect();
-    assert!(
-        candidate_rows.is_empty(),
-        "no candidate child rows after ADR 0071: {:#?}",
-        result.sessions.rows
     );
 }
 

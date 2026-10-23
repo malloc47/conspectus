@@ -171,7 +171,7 @@ pub fn render_graph_dot(snapshot: &GraphSnapshot, opts: DotOptions) -> Result<St
             let presence = snapshot.presence(&id).map_or(String::new(), |presence| {
                 format!(
                     ", style=\"filled,rounded,dashed\", fontcolor=\"#757575\", tooltip=\"{}\"",
-                    presence.label()
+                    presence.label_for(crate::model::NodeKind::from(&id))
                 )
             });
             writeln!(

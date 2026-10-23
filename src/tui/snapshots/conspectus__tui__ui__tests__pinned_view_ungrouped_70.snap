@@ -4,13 +4,13 @@ expression: "pinned_frame(&mut app, width)"
 ---
 updated 0s ago · 0/1 sessions · 1 mux                                 
 ┌ ▸ sessions · mux · prs · pinned · history ─────────────────────────┐
-│▶ ▣   conspectus-main         live      2m   claude     ~/src/consp…│
-│  ▣ ◎ config-agent3           stopped   3d   claude     ~/src/config│
-│  ●   e44d01cb                in mux   17m   claude     Fix the led…│
-│  ◇ ◎ ledger-worktree         removed   2d  conspectus · feature/le…│
-│  ⇄   ledger-pr               merged    5h  malloc47/conspectus · L…│
-│  ▣ ◎ nightly                 planned        claude     ~/src/consp…│
-│  ▣ ◎ old-api                 planned        codex      ~/src/api   │
+│▶ ▣ ◉ conspectus-main         live       2m   claude     ~/src/cons…│
+│  ▣ ◎ config-agent3           stopped    3d   claude     ~/src/conf…│
+│  ● ◉ e44d01cb                in mux    17m   claude     Fix the le…│
+│  ◇ ◎ ledger-worktree         removed    2d              conspectus…│
+│  ⇄ ◉ ledger-pr               merged     5h              malloc47/c…│
+│  ▣ ◎ nightly                 planned     —   claude     ~/src/cons…│
+│  ▣ ◎ old-api                 planned     —   codex      ~/src/api  │
 │1 legacy pin is still read from config files (old-api); run         │
 │`conspectus pin migrate` to convert it                              │
 └────────────────────────────────────────────────────────────────────┘

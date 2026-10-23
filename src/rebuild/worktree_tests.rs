@@ -103,7 +103,7 @@ fn a_gone_worktree_whose_branch_exists_is_switched_to() {
     let h = harness(&w, "wt-feature");
     let plan = plan_for(&h, &w).unwrap();
 
-    assert_eq!(plan.subject, "worktree `wt-feature` (gone)");
+    assert_eq!(plan.subject, "worktree `wt-feature` (removed)");
     assert_eq!(titles(&plan), ["rebuild worktree feature/x"]);
     assert!(
         plan.steps[0].command.ends_with("switch --no-cd feature/x"),

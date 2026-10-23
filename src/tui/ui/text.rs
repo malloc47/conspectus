@@ -2,22 +2,9 @@
 
 use super::*;
 
+/// Cut `text` to at most `width` cells, ending in `…` when it was cut.
 pub(super) fn truncate_to_width(text: &str, width: usize) -> String {
-    if width == 0 {
-        return String::new();
-    }
-    let mut out = String::with_capacity(width);
-    let mut budget = width;
-    for ch in text.chars() {
-        let ch_w = unicode_width::UnicodeWidthChar::width(ch).unwrap_or(0);
-        if ch_w > budget {
-            out.push('…');
-            return out;
-        }
-        out.push(ch);
-        budget -= ch_w;
-    }
-    out
+    truncate_to_width_strict(text, width)
 }
 
 pub(super) fn truncate_to_width_strict(text: &str, width: usize) -> String {
@@ -183,10 +170,17 @@ pub(super) fn compact_path_secondary(path: &str) -> String {
     }
     let label = compact_path_label(path);
     if label == path {
-        String::new()
-    } else {
-        path.to_string()
+        return String::new();
     }
+    // A checkout's `(linked)`-style marker already ends its label, so the
+    // path after it doesn't repeat it.
+    if let Some(index) = path.rfind(" (")
+        && path.ends_with(')')
+        && label.ends_with(&path[index..])
+    {
+        return path[..index].to_string();
+    }
+    path.to_string()
 }
 
 pub(super) fn compact_mux_label(label: &str) -> String {

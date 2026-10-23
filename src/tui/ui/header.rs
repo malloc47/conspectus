@@ -26,7 +26,7 @@ pub(super) fn draw_header(app: &App, frame: &mut Frame<'_>, area: Rect) {
     // colors and stay independent of the prefix style.
     let gone = gone_mux_count(app.snapshot_handle());
     let gone_cell = if gone > 0 {
-        format!(" · {gone} gone")
+        format!(" · {gone} stopped")
     } else {
         String::new()
     };

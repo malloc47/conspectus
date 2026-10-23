@@ -5,10 +5,10 @@ expression: "pr_frame(&mut app, 1, None)"
 updated 0s ago · 0 sessions · 0 mux                                                                                               
 ┌ ▸ sessions · mux · prs · pinned · history ────────────────────┐┌   ⇄ pr ───────────────────────────────────────────────────────┐
 │▼ project  conspectus/project                                  ││  id            c87274dd104b0494                               │
-│    ⇄ #4 ◌  draft                                              ││  pr            conspectus/project#1 (OPEN)                    │
-│    ⇄ #3 ◌  MERGED                                             ││  draft         false                                          │
-│    ⇄ #2 ◌  CLOSED                                             ││  head          feature/1                                      │
-│    ⇄ #1 ◌  OPEN                                               ││  updated       —                                              │
+│    ⇄ #4 ◌     —  ◐                                            ││  pr            conspectus/project#1 (OPEN)                    │
+│    ⇄ #3 ◌     —  ✓                                            ││  draft         false                                          │
+│    ⇄ #2 ◌     —  ✗                                            ││  head          feature/1                                      │
+│    ⇄ #1 ◌     —  ○                                            ││  updated       —                                              │
 │                                                               ││  url           https://github.com/conspectus/project/pull/1   │
 │                                                               ││                                                               │
 │                                                               ││──────────────────────────────────────────────────── Preview ──│

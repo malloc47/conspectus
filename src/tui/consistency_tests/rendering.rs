@@ -313,17 +313,18 @@ fn the_history_empty_state_says_when_pinned_records_are_hidden() {
 }
 
 #[test]
-fn listing_pinned_history_marks_those_records_with_the_filled_pin() {
+fn listing_pinned_history_marks_those_records_with_the_hollow_pin() {
     let mut app = app_listing_all(View::History);
     let shown = frame(&mut app, 200, 30);
     let line = shown
         .lines()
         .find(|line| line.contains("config-agent3"))
         .unwrap_or_else(|| panic!("no pinned record row:\n{shown}"));
-    assert!(line.chars().take(100).any(|c| c == '◉'), "{line}");
+    // Every history record is stopped or removed, so its pin is hollow.
+    assert!(line.chars().take(100).any(|c| c == '◎'), "{line}");
     let unpinned = shown
         .lines()
         .find(|line| line.contains("old-experiment"))
         .expect("unpinned row");
-    assert!(!unpinned.chars().take(100).any(|c| c == '◉'), "{unpinned}");
+    assert!(!unpinned.chars().take(100).any(|c| c == '◎'), "{unpinned}");
 }

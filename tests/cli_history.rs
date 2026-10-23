@@ -333,7 +333,7 @@ fn rebuild_brings_a_killed_mux_back_with_its_recorded_command() {
         "{}",
         String::from_utf8_lossy(&dry.stderr)
     );
-    assert!(plan.contains("mux `reb-a` (gone"), "{plan}");
+    assert!(plan.contains("mux `reb-a` (stopped"), "{plan}");
     assert!(plan.contains("new-session -d -s reb-a"), "{plan}");
     assert!(plan.contains("sleep 600"), "{plan}");
     assert!(

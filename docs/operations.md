@@ -262,7 +262,7 @@ recency_active = "green"
 recency_recent = "yellow"
 recency_cold   = "dim"
 
-# Mux-state glyphs (◉ attached, ◯ not attached or no definitive mux).
+# Mux-state glyphs (⚯ linked or attached, ⚬ not linked or no client).
 mux_attached  = "green"
 mux_unmuxed   = "dim"
 
@@ -766,9 +766,12 @@ planned, and unknown rows wear the ghost style (the theme's `ghost` color, in it
 filled chip, the same as in the other views, ahead of the text that follows
 it. A pin with nothing running (`planned`, `stopped`, `removed`, `missing`, or
 `unknown`) wears a hollow pin glyph, `◎`, in the ghost color after its kind
-glyph; the filled `◉` is for an entity a pin points at. `gone` means an
-entity that existed and is no longer there, and labels it in History and the
-Mux view, never a pin. Columns pad to the widest
+glyph; the filled `◉` is for a pin on an entity that is running, and every
+row that has a pin wears one of the two, in the same place in every view.
+A mux that stopped reads `stopped` and a worktree or repo that vanished reads
+`removed`; the word `gone` isn't used in the interface. Views of one kind of
+thing (Sessions, Mux, PRs) show state as a glyph only; Pinned and History
+mix kinds, so they spell it as a word. Columns pad to the widest
 value in the whole tree, so folding a group doesn't move them. Changing the
 grouping scrolls back to the top so every group is visible.
 
@@ -819,8 +822,8 @@ related session or mux the cursor is on, or the pane's own entity); `Tab` back
 to the left pane and they act on the selected row again. `Enter` in the right
 pane still drills into the link under the cursor. A runtime process can't be pinned.
 Pinning a live mux, worktree, or repo records it in history first so the pin
-has something to point at. The native views mark a pinned row with `◉` after
-its kind glyph and leave it where it sorts; once any pin exists the marker
+has something to point at. The native views mark a pinned row with `◉` (or
+`◎` when the pinned entity isn't running) after its kind glyph and leave it where it sorts; once any pin exists the marker
 cell is reserved on every row so columns hold still. Controls has a **Pinned
 only** checkbox in Sessions, Mux, and PRs that keeps pinned rows and the
 groups above them.
@@ -867,7 +870,7 @@ Rows group by `project` (the repo above the record's path; a worktree
 belongs to the repo it was made from), by `kind`, or not at all. A record a
 pin points at is already one keypress away in the Pinned view, so Controls
 has an **Unpinned only** checkbox, checked by default; clear it to list
-pinned records too (they carry `◉`). Revealing a gone pin's entity from the
+pinned records too (they carry `◎`). Revealing a gone pin's entity from the
 Pinned view clears it for you.
 
 `Enter` on a mux record runs `conspectus rebuild` behind a spinner, attaches to

@@ -145,9 +145,9 @@ Runtime architecture, controls, theming, detail pane, and visual language.
 | [0064](0064-hybrid-sessions-graph-grouping.md) | Hybrid Workspace+Repo Grouping In Sessions/Graph | Accepted |
 | [0065](0065-sessions-workspace-grouping-replaces-workspaces-view.md) | Workspace Grouping In Sessions Replaces The Workspaces View | Accepted |
 | [0071](0071-ambiguous-mux-scope-and-detail.md) | Ambiguous Mux Surface Moves From Session Row To Group Detail | Accepted |
-| [0072](0072-mux-indicator-attachable-binary.md) | Mux Indicator Becomes Attachable-Binary; Group Rows Own The Ambiguity Glyph | Accepted |
+| [0072](0072-mux-indicator-attachable-binary.md) | Mux Indicator Becomes Attachable-Binary; Group Rows Own The Ambiguity Glyph | Accepted (amended by 0145) |
 | [0120](0120-mux-rows-drop-the-ambiguity-glyph.md) | Mux Rows Drop The Ambiguity Glyph | Accepted |
-| [0073](0073-node-kind-visual-identity.md) | Per-Node-Kind Visual Identity (Glyph + Color) | Accepted (amended by 0144) |
+| [0073](0073-node-kind-visual-identity.md) | Per-Node-Kind Visual Identity (Glyph + Color) | Accepted (amended by 0144, 0145) |
 | [0074](0074-detail-pane-related-entities-flatten.md) | Detail-Pane Related-Entities Flatten | Accepted |
 | [0075](0075-edge-state-visual-language.md) | Edge-State Visual Language In The Detail-Pane Other Zone | Accepted |
 | [0076](0076-scrollbar-widget-choice.md) | Scrollbar Widget Choice For Scrolled Panes | Accepted |
@@ -166,7 +166,8 @@ Runtime architecture, controls, theming, detail pane, and visual language.
 | [0119](0119-compass-rose-logo.md) | The Compass-Rose Logo | Accepted |
 | [0123](0123-overlay-keymap-tables.md) | Overlay Keymap Tables | Accepted |
 | [0139](0139-mux-workspace-or-repo-grouping.md) | Workspace-Or-Repo Grouping In The Mux View | Accepted (amended) |
-| [0144](0144-pinned-and-history-views.md) | Pinned And History Views | Accepted |
+| [0144](0144-pinned-and-history-views.md) | Pinned And History Views | Accepted (amended by 0145) |
+| [0145](0145-state-glyphs-and-words-in-the-left-panel.md) | State Glyphs And Words In The Left Panel | Accepted |
 
 ## Transcript viewer
 

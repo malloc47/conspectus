@@ -90,7 +90,10 @@ pub fn plan(
         .text("common_dir")
         .map_or_else(|| subject.slot.id.clone(), repo_label);
     let mut plan = Plan {
-        subject: format!("repo `{name}` ({})", resolved.status.as_str()),
+        subject: format!(
+            "repo `{name}` ({})",
+            resolved.status.label_for(crate::model::PinKind::Repo)
+        ),
         steps: Vec::new(),
         warnings: Vec::new(),
         target: None::<MuxTarget>,

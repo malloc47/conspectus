@@ -18,9 +18,9 @@ use crate::model::{
 };
 use crate::output::render::{node_short_id_from_display, unique_prefix_len};
 use crate::tui::rows::{
-    AgentSessionRow, GroupRow, MixedChip, MixedGrid, MixedRow, MixedTone, MuxSessionRow, PinMarker,
-    Row, RowId, RowKind, RowTree, ViewLabel, format_recency, harness_label, mux_process_harnesses,
-    mux_program, mux_program_harness, shorten_home,
+    AgentSessionRow, EntityState, GroupRow, MixedChip, MixedGrid, MixedRow, MixedTone,
+    MuxSessionRow, PinMarker, Row, RowId, RowKind, RowTree, ViewLabel, format_recency,
+    harness_label, mux_process_harnesses, mux_program, mux_program_harness, shorten_home,
 };
 use crate::tui::{MuxGrouping, Sort};
 
@@ -132,11 +132,9 @@ pub fn build_mux_tree(inputs: MuxBuildInputs<'_>) -> RowTree {
             continue;
         }
 
-        let latest_agent_epoch = visible_attached
-            .iter()
-            .filter_map(|agent| agent.last_active_epoch)
-            .max();
-        let activity_epoch = latest_epoch(mux.node.activity_epoch, latest_agent_epoch);
+        // A mux's age is its own last activity, the same instant the
+        // Pinned view shows for a pinned mux. Its agents carry theirs.
+        let activity_epoch = mux.node.activity_epoch;
         let node_id = NodeId::MuxSession(mux.id.clone());
         let single_session_preview = if visible_attached.len() == 1 {
             visible_attached[0]
@@ -499,9 +497,8 @@ fn rooted_in_workspaces(snapshot: &GraphSnapshot) -> HashMap<NodeId, &WorkspaceI
 }
 
 /// Recency ordering key for a mux row under the chosen basis.
-/// Activity blends in attached-agent activity (its
-/// `activity_epoch` is already the blended value); created and
-/// last-attached read the raw session-lifecycle epochs. A missing
+/// Activity is the mux's own last activity; created and
+/// last-attached read the session-lifecycle epochs. A missing
 /// signal sorts oldest (`None` < `Some`), so sessions lacking the
 /// chosen epoch fall to the bottom of the recency order deterministically.
 fn recency_key(row: &MuxSessionRow, basis: crate::tui::MuxRecency) -> Option<i64> {
@@ -619,14 +616,6 @@ impl<'a> PathIndex<'a> {
     }
 }
 
-fn latest_epoch(left: Option<i64>, right: Option<i64>) -> Option<i64> {
-    match (left, right) {
-        (Some(left), Some(right)) => Some(left.max(right)),
-        (Some(value), None) | (None, Some(value)) => Some(value),
-        (None, None) => None,
-    }
-}
-
 fn agent_labels(agents: &[AttachedAgent]) -> Vec<String> {
     let mut labels: Vec<String> = agents
         .iter()
@@ -718,9 +707,9 @@ fn collect_ghosts(
             };
             let id = NodeId::MuxSession(mux.id.clone());
             let presence = snapshot.presence(&id)?;
-            let status = match presence {
-                NodePresence::Gone { .. } => "gone",
-                NodePresence::Unknown { .. } => "unknown",
+            let (status, state) = match presence {
+                NodePresence::Gone { .. } => ("stopped", EntityState::Stopped),
+                NodePresence::Unknown { .. } => ("unknown", EntityState::Unknown),
             };
             let chip = snapshot
                 .history
@@ -741,6 +730,8 @@ fn collect_ghosts(
                 status: status.to_string(),
                 tone: MixedTone::Dim,
                 age: format_recency(now, Some(last_seen)),
+                age_epoch: Some(last_seen),
+                state: Some(state),
                 chip,
                 content,
                 primary_node: id.clone(),

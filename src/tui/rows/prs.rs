@@ -213,6 +213,7 @@ pub fn build_prs_tree(inputs: PrsBuildInputs<'_>) -> RowTree {
                 tracked: branch.is_some(),
                 title: pr.node.title.clone(),
                 updated_recency: format_recency(now, pr.node.updated_epoch),
+                updated_epoch: pr.node.updated_epoch,
                 url: pr.node.url.clone(),
                 primary_node: node_id,
             }),

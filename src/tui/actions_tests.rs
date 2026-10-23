@@ -453,7 +453,7 @@ fn pin_status_hint_is_silent_for_a_live_slot() {
 fn pin_status_hint_points_a_gone_slot_at_rebuild() {
     let snapshot = pin_snapshot(crate::model::SlotStatus::Gone, None);
     let hint = pin_status_hint(&snapshot, "ingest").expect("status hint produced");
-    assert!(hint.contains("is gone"), "hint: {hint}");
+    assert!(hint.contains("is stopped"), "hint: {hint}");
     assert!(hint.contains("rebuild ingest"), "hint: {hint}");
 }
 

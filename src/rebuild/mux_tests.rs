@@ -110,7 +110,7 @@ fn a_gone_mux_comes_back_with_its_argv_and_resumes_its_last_session() {
         .plan(&snapshot, &subject(&snapshot), &attach())
         .unwrap();
 
-    assert_eq!(plan.subject, "mux `work` (gone, last seen 1d ago)");
+    assert_eq!(plan.subject, "mux `work` (stopped, last seen 1d ago)");
     assert_eq!(titles(&plan), ["new session, resume e44d01cb", "attach"]);
     // The resume lands after the binary, inside the wrapper and ahead of
     // the options (ADR 0098), and the plan shows exactly what will run.

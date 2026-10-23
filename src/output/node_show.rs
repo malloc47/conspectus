@@ -221,7 +221,7 @@ fn write_node_summary(
         let _ = writeln!(
             out,
             "  presence: {} (last seen {} ago)",
-            presence.label(),
+            presence.label_for(crate::model::NodeKind::from(id)),
             crate::output::render::format_relative_age(
                 presence.last_seen(),
                 crate::discovery::current_epoch()

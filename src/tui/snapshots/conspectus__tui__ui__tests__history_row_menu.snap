@@ -4,8 +4,8 @@ expression: "trimmed(pinned_frame(&mut app, 100))"
 ---
 updated 0s ago┌ mux config-agent3 ───────────────────────────────────────────────────┐
 ┌ ▸ sessions ·│                                                                      │─────────────┐
-│  ◇ ◉ conspec│▸ Rebuild                                                             │             │
-│  ▣ ◉ config-│     bring it back without attaching (Enter also attaches)            │             │
+│  ◇ ◎ conspec│▸ Rebuild                                                             │             │
+│  ▣ ◎ config-│     bring it back without attaching (Enter also attaches)            │             │
 │             │  Show rebuild plan                                                   │             │
 │             │     what rebuild would run, without running it                       │             │
 │             │  Edit…                                                               │             │
