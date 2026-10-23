@@ -822,7 +822,7 @@ fn theme_sections(theme: &Theme) -> Vec<ThemeSection> {
                 (
                     "panel_focus_accent",
                     ThemeSample::Color(theme.panel_focus_accent),
-                    "▸ focus arrow + popup-frame border",
+                    "► focus arrow + popup-frame border",
                 ),
             ],
         },
@@ -852,7 +852,7 @@ fn theme_sections(theme: &Theme) -> Vec<ThemeSection> {
                 (
                     "disclosure",
                     ThemeSample::Color(theme.disclosure),
-                    "▶ ▼ expand/collapse glyphs",
+                    "► ▼ expand/collapse glyphs",
                 ),
                 (
                     "divider",
@@ -862,7 +862,7 @@ fn theme_sections(theme: &Theme) -> Vec<ThemeSection> {
                 (
                     "warning",
                     ThemeSample::Color(theme.warning),
-                    "⚠ ambiguity glyph + stale-cache message",
+                    "▲ ambiguity glyph + stale-cache message",
                 ),
                 (
                     "error",
@@ -940,14 +940,14 @@ fn theme_sections(theme: &Theme) -> Vec<ThemeSection> {
                 (
                     "node_runtime_process",
                     ThemeSample::Color(theme.node_runtime_process),
-                    "⚙ glyph",
+                    "◈ glyph",
                 ),
                 (
                     "node_branch",
                     ThemeSample::Color(theme.node_branch),
-                    "⎇ glyph",
+                    "⌥ glyph",
                 ),
-                ("node_fork", ThemeSample::Color(theme.node_fork), "⑂ glyph"),
+                ("node_fork", ThemeSample::Color(theme.node_fork), "⋎ glyph"),
             ],
         },
         ThemeSection {
@@ -961,7 +961,7 @@ fn theme_sections(theme: &Theme) -> Vec<ThemeSection> {
                 (
                     "edge_conflict",
                     ThemeSample::Color(theme.edge_conflict),
-                    "Conflict rows with the ⚠ prefix",
+                    "Conflict rows with the ▲ prefix",
                 ),
             ],
         },
