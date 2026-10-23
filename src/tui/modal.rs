@@ -87,6 +87,8 @@ pub enum Modal {
     /// The History view's Clean up modal: reap candidates the
     /// operator can deselect before confirming (ADR 0140).
     CleanUp(Box<crate::tui::widgets::clean_up::CleanUpState>),
+    /// A pick-one list with type-to-filter: where a pin points next.
+    Picker(Box<crate::tui::widgets::picker::PickerState>),
 }
 
 /// What an overlay wants the runtime to do after a single key

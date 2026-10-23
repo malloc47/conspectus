@@ -13,6 +13,7 @@ pub mod mux_launch;
 pub mod mux_menu;
 pub mod new_mux;
 pub mod path_omnibox;
+pub mod picker;
 pub mod pin_edit;
 pub mod popup_frame;
 pub mod row_menu;

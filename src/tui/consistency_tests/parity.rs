@@ -77,7 +77,6 @@ fn v_opens_the_viewer_on_a_native_session_row() {
 }
 
 #[test]
-#[ignore = "backlog CSP-692.03: v errors on pinned and nested session rows"]
 fn v_opens_the_viewer_wherever_a_session_is_shown() {
     assert_all_view_the_session(viewer_outcomes(false));
 }
@@ -112,7 +111,6 @@ fn enter_on_a_pinned_session_in_a_mux_attaches_like_its_native_row() {
 }
 
 #[test]
-#[ignore = "backlog CSP-692.03: Enter on a live pinned session outside a mux tries to rebuild it as a mux"]
 fn enter_on_a_pinned_session_outside_a_mux_opens_the_viewer() {
     let effects = enter_in(View::Pinned, "solo");
     assert!(
@@ -143,7 +141,6 @@ fn enter_on_an_unstarted_mux_is_a_rebuild_in_every_view() {
 }
 
 #[test]
-#[ignore = "backlog CSP-692.02: Enter on a gone mux rebuilds without attaching"]
 fn enter_on_an_unstarted_mux_starts_it_and_attaches() {
     for (view, label) in unstarted_mux_rows() {
         let effects = enter_in(view, label);

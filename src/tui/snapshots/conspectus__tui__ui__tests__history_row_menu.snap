@@ -1,28 +1,28 @@
 ---
 source: src/tui/ui_tests.rs
-expression: "pinned_frame(&mut app, 100)"
+expression: "trimmed(pinned_frame(&mut app, 100))"
 ---
-updated 0s ago · 0/1 sessions · 1 mux                                                               
-┌ ▸ sessions · mux · prs · pinned · history ─────┐┌   detail ──────────────────────────────────────┐
-│  ◇ ◉ conspectus-ledger  gone  2d  conspectus ·…││Select a row to view its detail.                │
-│  ▣ ◉ config-agent3      gone  3d   claude     …││                                                │
-│             ┌ mux config-agent3 ───────────────────────────────────────────────────┐             │
-│             │                                                                      │             │
-│             │▸ Rebuild                                                             │             │
-│             │     bring it back (conspectus rebuild)                               │             │
-│             │  Unpin config-agent3                                                 │             │
-│             │     remove the pin; the entity and its history stay                  │             │
+updated 0s ago┌ mux config-agent3 ───────────────────────────────────────────────────┐
+┌ ▸ sessions ·│                                                                      │─────────────┐
+│  ◇ ◉ conspec│▸ Rebuild                                                             │             │
+│  ▣ ◉ config-│     bring it back without attaching (Enter also attaches)            │             │
 │             │  Show rebuild plan                                                   │             │
 │             │     what rebuild would run, without running it                       │             │
+│             │  Edit…                                                               │             │
+│             │     change the name, cwd, harness, arguments, and more               │             │
+│             │  Rename…                                                             │             │
+│             │     change the pin name (a live mux is renamed with it)              │             │
+│             │  Retarget…                                                           │             │
+│             │     point it at another entity of the same kind                      │             │
+│             │  Refresh snapshot                                                    │             │
+│             │     copy the entity's current recipe into the pin                    │             │
+│             │  Reveal in its view                                                  │             │
+│             │     jump to the entity in Sessions, Mux, PRs, or History             │             │
+│             │  Unpin config-agent3                                                 │             │
+│             │     remove the pin; the entity and its history stay                  │             │
 │             │  Forget                                                              │             │
 │             │     remove the record; config-agent3 would lose its target           │             │
 │             │  Clean up…                                                           │             │
 │             │     forget gone records past their reap age                          │             │
-│             │                                                                      │             │
-│             │↑/↓ move · Enter pick · Esc close                                     │             │
-│             └──────────────────────────────────────────────────────────────────────┘             │
-│                                                ││                                                │
-│                                                ││                                                │
-│                                                ││                                                │
-└────────────────────────────────────────────────┘└────────────────────────────────────────────────┘
-[left] group:none · filter:all · sort:hierarchy · Enter rebuild · . menu (pin, forget, plan, clean u
+└─────────────│                                                                      │─────────────┘
+[left] group:n└──────────────────────────────────────────────────────────────────────┘ plan, clean u

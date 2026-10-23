@@ -90,9 +90,10 @@ pub enum ExecSpec {
     /// for one (`--pin`).
     MuxLaunch { request: MuxLaunchRequest },
     /// Run `conspectus rebuild <reference> --no-attach` behind a
-    /// spinner and refresh, so a gone slot comes back without leaving
-    /// the TUI.
-    Rebuild { reference: String },
+    /// spinner, then refresh, so a gone pin or record comes back
+    /// without leaving the TUI. With `attach`, the rebuilt mux is
+    /// attached to as soon as it is up, as a launch always did.
+    Rebuild { reference: String, attach: bool },
     /// Run `conspectus rebuild <reference> --dry-run` behind a spinner
     /// and show the plan it prints.
     ShowRebuildPlan { reference: String },
@@ -256,9 +257,18 @@ pub fn lifecycle(effect: &Effect) -> Lifecycle {
             ExecSpec::MuxNew { .. } | ExecSpec::MuxLaunch { .. } => Lifecycle {
                 attaches: true,
                 refreshes: true,
+                follows_entity: true,
                 ..Lifecycle::NONE
             },
-            ExecSpec::Rebuild { .. } => Lifecycle::REFRESHES,
+            // The entity leaves History or the Pinned view's gone rows
+            // and shows up live elsewhere, so the row freezes while it
+            // comes back and focus follows it.
+            ExecSpec::Rebuild { attach, .. } => Lifecycle {
+                attaches: *attach,
+                freezes_row: true,
+                refreshes: true,
+                follows_entity: true,
+            },
         },
         Effect::WriteStore(op) => match op {
             StoreOp::PinRecord { .. }

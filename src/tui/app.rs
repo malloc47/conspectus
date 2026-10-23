@@ -98,7 +98,6 @@ impl ProviderStatus {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) enum SlotPrompt {
     Rename(String),
-    Retarget(String),
 }
 
 /// Top-level state. Owns the resolved run configuration plus the
@@ -174,6 +173,12 @@ pub struct App {
     /// (ADR 0108). Cleared when a refresh spawned after the hand-off
     /// lands.
     handoff: Option<PendingHandoff>,
+    /// An action that changed state asked for a background refresh; the
+    /// runtime takes the request on its next pass.
+    refresh_requested: bool,
+    /// The entity the last action acted on, to select once the refresh
+    /// after it lands (it may have moved to another view).
+    pending_follow: Option<NodeId>,
     /// Loaded previews keyed by source: pane captures and
     /// transcripts (ADR 0112 §5). The renderer reads this for the
     /// right-panel Preview zone.
@@ -213,6 +218,9 @@ pub struct App {
     /// What the text prompt on top of the stack edits, when it edits a
     /// pin slot rather than the selected row's name.
     slot_prompt: Option<SlotPrompt>,
+    /// The entity the open rename prompt renames, fixed when it opened
+    /// so a later focus change can't redirect the commit.
+    rename_node: Option<NodeId>,
     /// Active transient toast. The
     /// `ratatui_comfy_toaster::ToastEngine` owns the per-toast
     /// lifetime + bordered rendering; the runtime calls
@@ -489,12 +497,15 @@ impl App {
             refresh_failure: None,
             in_flight_ops: Vec::new(),
             handoff: None,
+            refresh_requested: false,
+            pending_follow: None,
             preview_store: PreviewStore::new(),
             left_scroll: 0,
             explorer_scroll: 0,
             last_visible_index: None,
             modal_stack: Vec::new(),
             slot_prompt: None,
+            rename_node: None,
             toast: crate::tui::widgets::toast::ToastEngineHolder(
                 crate::tui::widgets::toast::engine(),
             ),
@@ -625,13 +636,11 @@ impl App {
     /// receive. Returns `None` when the selection is anything other
     /// than an agent session or mux session row.
     pub fn selected_session_id(&self) -> Option<(String, String)> {
-        match self.selection.as_ref()? {
-            RowId::AgentSession(node @ NodeId::AgentSession(_)) => {
+        match crate::tui::actions::action_subject(self).node? {
+            node @ NodeId::AgentSession(_) => {
                 Some(("copied: agent_session id".to_string(), node.to_string()))
             }
-            RowId::MuxSession(node @ NodeId::MuxSession(_)) => {
-                Some(("copied: mux id".to_string(), node.to_string()))
-            }
+            node @ NodeId::MuxSession(_) => Some(("copied: mux id".to_string(), node.to_string())),
             _ => None,
         }
     }
@@ -995,6 +1004,9 @@ impl App {
     }
 
     /// Whether `row` shows values from before the pending hand-off.
+    /// Any row that stands for an affected mux or session counts,
+    /// whichever renderer draws it: a pin, a History record, a ghost
+    /// mux, and the entities nested under a pin included.
     pub fn row_awaits_handoff(&self, row: &RowKind) -> bool {
         let Some(handoff) = &self.handoff else {
             return false;
@@ -1002,25 +1014,43 @@ impl App {
         match row {
             RowKind::MuxSession(mux) => handoff.muxes.contains(&mux.mux),
             RowKind::AgentSession(session) => handoff.sessions.contains(&session.session),
+            RowKind::AgentSessionMuxCandidate(candidate) => handoff.muxes.contains(&candidate.mux),
+            _ => false,
+        }
+    }
+
+    /// Whether `row` is frozen until the refresh after an action lands,
+    /// whichever renderer draws it.
+    pub fn row_is_frozen(&self, row: &crate::tui::rows::Row) -> bool {
+        self.row_awaits_handoff(&row.kind) || self.row_id_awaits_handoff(&row.id)
+    }
+
+    /// Whether the row with `id` awaits the hand-off, judged by the
+    /// entity it stands for.
+    pub fn row_id_awaits_handoff(&self, id: &RowId) -> bool {
+        let Some(handoff) = &self.handoff else {
+            return false;
+        };
+        let Some(node) = crate::tui::actions::subject_of_row(self, id).node else {
+            return false;
+        };
+        match node {
+            NodeId::MuxSession(mux) => handoff.muxes.contains(&mux),
+            NodeId::AgentSession(session) => handoff.sessions.contains(&session),
             _ => false,
         }
     }
 
     /// Whether the selected left-pane row still shows values from
-    /// before the pending hand-off (ADR 0132). Besides the rows
-    /// [`Self::row_awaits_handoff`] dims, a mux-candidate child row of
-    /// the hand-off's mux counts: its mux may be gone too.
+    /// before the pending hand-off (ADR 0132).
     pub fn selected_row_awaits_handoff(&self) -> bool {
-        let (Some(handoff), Some(selection)) = (&self.handoff, &self.selection) else {
+        let (Some(_), Some(selection)) = (&self.handoff, &self.selection) else {
             return false;
         };
         let Some(row) = self.tree.rows.iter().find(|row| &row.id == selection) else {
             return false;
         };
-        match &row.kind {
-            RowKind::AgentSessionMuxCandidate(candidate) => handoff.muxes.contains(&candidate.mux),
-            kind => self.row_awaits_handoff(kind),
-        }
+        self.row_is_frozen(row)
     }
 
     /// Agent sessions the loaded snapshot links to `mux`.
@@ -1038,6 +1068,25 @@ impl App {
         self.handoff
             .as_mut()
             .is_some_and(|handoff| std::mem::take(&mut handoff.refresh_requested))
+    }
+
+    /// Whether a hand-off refresh is already waiting to be spawned.
+    pub fn handoff_refresh_pending(&self) -> bool {
+        self.handoff
+            .as_ref()
+            .is_some_and(|handoff| handoff.refresh_requested)
+    }
+
+    /// Take the request for a background refresh that a state-changing
+    /// action left. Returns `true` once per request.
+    pub fn take_refresh_request(&mut self) -> bool {
+        std::mem::take(&mut self.refresh_requested)
+    }
+
+    /// Ask the runtime to refresh in the background: the action that
+    /// just ran changed something the views show.
+    pub fn request_refresh(&mut self) {
+        self.refresh_requested = true;
     }
 
     /// Look up a cached mux preview. Returns `None` if the mux
@@ -1256,6 +1305,7 @@ impl App {
                 initial_selection_hint,
             } => {
                 self.set_data(snapshot, tree, loaded_at_epoch, initial_selection_hint);
+                self.apply_pending_follow();
             }
             Msg::SetTree(tree) => {
                 self.set_tree(tree);
@@ -1403,8 +1453,12 @@ impl App {
                 handoff.sessions.extend(sessions);
                 handoff.refresh_requested = true;
             }
+            Msg::FollowEntity(node) => {
+                self.pending_follow = Some(node);
+            }
             Msg::HandoffSettled => {
                 self.handoff = None;
+                self.apply_pending_follow();
             }
             Msg::LaunchStarted(mux) => {
                 let sessions = self.sessions_linked_to(&mux);
@@ -1456,11 +1510,7 @@ impl App {
                     effects.push(Effect::Toast(HANDOFF_PENDING_HINT.to_string()));
                     return effects;
                 }
-                if let Some(effect) = crate::tui::actions::history_primary_effect(self) {
-                    effects.push(effect);
-                    return effects;
-                }
-                if let Some(effect) = crate::tui::actions::pinned_primary_effect(self) {
+                if let Some(effect) = crate::tui::actions::default_effect(self) {
                     effects.push(effect);
                     return effects;
                 }
@@ -1477,18 +1527,15 @@ impl App {
                     effects.push(Effect::Toast(HANDOFF_PENDING_HINT.to_string()));
                     return effects;
                 }
-                let Some(selection) = self.selection.clone() else {
+                let subject = crate::tui::actions::action_subject(self);
+                if subject == crate::tui::actions::Subject::default() {
                     effects.push(Effect::Toast("resume: nothing selected".to_string()));
                     return effects;
+                }
+                let Some(crate::model::NodeId::AgentSession(session_id)) = subject.node else {
+                    effects.push(Effect::Toast("resume: select an agent session".to_string()));
+                    return effects;
                 };
-                let session_id =
-                    if let RowId::AgentSession(crate::model::NodeId::AgentSession(id)) = &selection
-                    {
-                        id.clone()
-                    } else {
-                        effects.push(Effect::Toast("resume: select an agent session".to_string()));
-                        return effects;
-                    };
                 let Some(handle) = self.snapshot_handle() else {
                     effects.push(Effect::Toast("resume: no snapshot loaded".to_string()));
                     return effects;
@@ -1642,29 +1689,33 @@ impl App {
                     node,
                 }));
             }
-            Msg::TogglePin => match crate::tui::actions::pin_subject(self) {
-                Err(why) => effects.push(Effect::Toast(format!("pin: {why}"))),
-                Ok(subject) => {
-                    let slots = self.snapshot_handle().map_or_else(Vec::new, |handle| {
-                        crate::tui::actions::slots_pinning(handle.snapshot(), &subject)
-                    });
-                    if let Some(RowId::Pin { pin_id }) = self.selection().cloned() {
-                        // On a slot row `p` asks to unpin that slot.
-                        self.open_pin_menu(vec![pin_id]);
-                    } else if slots.is_empty() {
-                        effects.push(Effect::WriteStore(match subject {
-                            crate::tui::actions::PinSubject::Node(node) => {
-                                crate::tui::effect::StoreOp::PinNode { node }
-                            }
-                            crate::tui::actions::PinSubject::Record(record_id) => {
-                                crate::tui::effect::StoreOp::PinRecord { record_id }
-                            }
-                        }));
-                    } else {
-                        self.open_pin_menu(slots);
+            Msg::TogglePin => {
+                // `p` acts on the entity in view: it unpins what is
+                // already pinned (after a confirm) and pins the rest.
+                let pins = self.snapshot_handle().map_or_else(Vec::new, |handle| {
+                    crate::tui::actions::pins_for(
+                        handle.snapshot(),
+                        &crate::tui::actions::action_subject(self),
+                    )
+                });
+                if pins.is_empty() {
+                    match crate::tui::actions::pin_subject(self) {
+                        Err(why) => effects.push(Effect::Toast(format!("pin: {why}"))),
+                        Ok(crate::tui::actions::PinSubject::Node(node)) => {
+                            effects.push(Effect::WriteStore(
+                                crate::tui::effect::StoreOp::PinNode { node },
+                            ));
+                        }
+                        Ok(crate::tui::actions::PinSubject::Record(record_id)) => {
+                            effects.push(Effect::WriteStore(
+                                crate::tui::effect::StoreOp::PinRecord { record_id },
+                            ));
+                        }
                     }
+                } else {
+                    self.open_pin_menu(pins);
                 }
-            },
+            }
             Msg::Unpin(slot) => {
                 effects.push(Effect::WriteStore(crate::tui::effect::StoreOp::Unpin {
                     slot,
@@ -1684,12 +1735,27 @@ impl App {
                 let initial = slot.clone();
                 self.open_slot_prompt(SlotPrompt::Rename(slot), "Rename pin", &initial);
             }
-            Msg::OpenSlotRetarget(slot) => {
-                self.open_slot_prompt(
-                    SlotPrompt::Retarget(slot),
-                    "Retarget (node id, h_… record, or mux name)",
-                    "",
-                );
+            Msg::OpenSlotRetarget(pin) => {
+                let candidates = self
+                    .snapshot_handle()
+                    .map(|handle| crate::tui::actions::retarget_candidates(handle.snapshot(), &pin))
+                    .unwrap_or_default();
+                if candidates.is_empty() {
+                    effects.push(Effect::Toast(format!(
+                        "pin `{pin}`: there is nothing else of its kind to point it at"
+                    )));
+                } else {
+                    self.open_picker(crate::tui::widgets::picker::PickerState::new(
+                        format!("Retarget {pin}"),
+                        crate::tui::widgets::picker::PickerPurpose::Retarget { pin },
+                        candidates,
+                    ));
+                }
+            }
+            Msg::CommitRetarget { pin, target } => {
+                effects.push(Effect::WriteStore(
+                    crate::tui::effect::StoreOp::RetargetSlot { slot: pin, target },
+                ));
             }
             Msg::RefreshSlot(slot) => {
                 effects.push(Effect::WriteStore(
@@ -1719,13 +1785,27 @@ impl App {
                 ));
             }
             Msg::ShowRebuildPlan(reference) => {
-                effects.push(Effect::Exec(
-                    crate::tui::effect::ExecSpec::ShowRebuildPlan { reference },
-                ));
+                // A running mux has nothing to rebuild: say so here
+                // instead of running a plan with no steps.
+                let running = self.snapshot_handle().and_then(|handle| {
+                    crate::tui::actions::running_mux_plan(handle.snapshot(), &reference)
+                });
+                match running {
+                    Some(text) => self.open_value_modal(
+                        crate::tui::widgets::value_modal::ValueModalState::new(
+                            format!("rebuild plan · {reference}"),
+                            text,
+                        ),
+                    ),
+                    None => effects.push(Effect::Exec(
+                        crate::tui::effect::ExecSpec::ShowRebuildPlan { reference },
+                    )),
+                }
             }
             Msg::RebuildReference(reference) => {
                 effects.push(Effect::Exec(crate::tui::effect::ExecSpec::Rebuild {
                     reference,
+                    attach: false,
                 }));
             }
             Msg::OpenCleanUp => {
@@ -1791,9 +1871,16 @@ impl App {
     /// The effect that commits the rename overlay's value for the
     /// current selection: an alias or mux rename, or a toast
     /// explaining why nothing can be renamed.
-    fn rename_commit_effect(&self, value: &str) -> super::Effect {
+    fn rename_commit_effect(&mut self, value: &str) -> super::Effect {
         use super::Effect;
-        match self.selection.clone() {
+        let renamed = self.rename_node.take();
+        let target = match renamed {
+            Some(NodeId::AgentSession(id)) => Some(RowId::AgentSession(NodeId::AgentSession(id))),
+            Some(NodeId::MuxSession(id)) => Some(RowId::MuxSession(NodeId::MuxSession(id))),
+            Some(_) => None,
+            None => self.selection.clone(),
+        };
+        match target {
             Some(RowId::AgentSession(NodeId::AgentSession(id))) => {
                 let trimmed = value.trim().to_string();
                 let new_display_name = (!trimmed.is_empty()).then_some(trimmed);
@@ -1865,10 +1952,6 @@ fn slot_prompt_effect(prompt: SlotPrompt, value: &str) -> super::Effect {
         SlotPrompt::Rename(slot) => StoreOp::RenameSlot {
             slot,
             new_name: value,
-        },
-        SlotPrompt::Retarget(slot) => StoreOp::RetargetSlot {
-            slot,
-            target: value,
         },
     })
 }

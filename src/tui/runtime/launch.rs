@@ -1,6 +1,7 @@
 //! Subprocess launches: mux new / launch, tmux attach, and the external viewer.
 
 use super::*;
+use crate::model::NodeId;
 use crate::tui::messages::{CommandRecord, LogEntry, LogTarget};
 
 /// Run `conspectus <args>` and capture its full output, both for the
@@ -121,6 +122,7 @@ pub(super) fn execute_mux_new(
     app: &mut App,
     name: &str,
     cwd: &str,
+    policy: crate::tui::effect::Lifecycle,
 ) {
     let args = mux_new_argv(name, cwd);
     let (record, output) =
@@ -130,7 +132,6 @@ pub(super) fn execute_mux_new(
     let launch = summarize_mux_new_output(name, output);
     let entry = launch_entry(&launch, record, LogTarget::Mux(mux.clone()));
     if !launch.success {
-        refresh_after_launch_with_spinner(terminal, app);
         app.report(entry);
         return;
     }
@@ -141,6 +142,10 @@ pub(super) fn execute_mux_new(
         backend: "tmux".to_string(),
         native_id: name.to_string(),
     };
+    // Once the refresh after the attach lands, select the new mux.
+    if policy.follows_entity {
+        app.update(Msg::FollowEntity(NodeId::MuxSession(mux.clone())));
+    }
     let outcome = run_tmux_attach(terminal, &attach_target);
     app.update(Msg::HandoffReturned(mux.clone()));
     app.report(attach_return_entry(
@@ -187,8 +192,9 @@ pub(super) fn summarize_mux_new_output(
 }
 
 /// Argv the TUI passes when re-execing into `conspectus rebuild`. The
-/// subprocess never attaches; the operator presses `Enter` again to
-/// attach once the refresh shows the rebuilt row.
+/// subprocess never attaches: when the operator asked to attach, the
+/// TUI does it once the mux is up, so the terminal hand-off is the
+/// TUI's.
 pub(super) fn rebuild_argv(reference: &str) -> Vec<String> {
     vec![
         "rebuild".to_string(),
@@ -197,10 +203,36 @@ pub(super) fn rebuild_argv(reference: &str) -> Vec<String> {
     ]
 }
 
+/// The mux a rebuild of `reference` brings back, when the pin or
+/// record names one: what to freeze while it comes back, follow
+/// afterwards, and attach to.
+pub(super) fn rebuild_mux_target(
+    app: &App,
+    reference: &str,
+) -> Option<(AttachTarget, Option<String>)> {
+    let snapshot = app.snapshot_handle()?.snapshot();
+    crate::tui::actions::mux_to_rebuild(snapshot, reference)
+}
+
 /// Executor branch for `ExecSpec::Rebuild`: behind a spinner, re-exec
-/// into `conspectus rebuild <reference> --no-attach`, log the outcome
-/// with the command record, and refresh.
-pub(super) fn execute_rebuild(terminal: &mut DefaultTerminal, app: &mut App, reference: &str) {
+/// into `conspectus rebuild <reference> --no-attach` and log the
+/// outcome with the command record. The mux it brings back is frozen
+/// while it does, selected afterwards wherever it now lives, and with
+/// `attach` attached to, as a launch always did. The refresh comes from
+/// the hand-off the attach (or the finished rebuild) leaves behind.
+pub(super) fn execute_rebuild(
+    terminal: &mut DefaultTerminal,
+    app: &mut App,
+    reference: &str,
+    policy: crate::tui::effect::Lifecycle,
+) {
+    let attach = policy.attaches;
+    let known = rebuild_mux_target(app, reference);
+    if policy.freezes_row
+        && let Some((target, _)) = &known
+    {
+        app.update(Msg::LaunchStarted(target.mux.clone()));
+    }
     let (record, output) = run_conspectus_subprocess(
         terminal,
         app,
@@ -231,9 +263,59 @@ pub(super) fn execute_rebuild(terminal: &mut DefaultTerminal, app: &mut App, ref
             message: format!("rebuild of `{reference}` failed to spawn: {err}"),
         },
     };
-    let entry = launch_entry(&launch, record, LogTarget::Pin(reference.to_string()));
-    refresh_after_launch_with_spinner(terminal, app);
+    let log_target = LogTarget::Pin(reference.to_string());
+    let entry = launch_entry(&launch, record, log_target.clone());
+    if !launch.success {
+        if policy.freezes_row
+            && let Some((target, _)) = &known
+        {
+            app.update(Msg::LaunchAborted(target.mux.clone()));
+        }
+        app.report(entry);
+        return;
+    }
     app.report(entry);
+
+    // A session comes back inside a mux that is only known once the
+    // graph has been reloaded, so look it up after a refresh.
+    let target = match known {
+        Some(target) => Some(target),
+        None if attach => {
+            refresh_after_launch_with_spinner(terminal, app);
+            rebuild_mux_target(app, reference).or_else(|| {
+                let snapshot = app.snapshot_handle()?.snapshot();
+                crate::tui::actions::attached_mux_of(snapshot, reference)
+            })
+        }
+        None => None,
+    };
+    let Some((attach_target, socket)) = target else {
+        if attach {
+            app.post_toast(format!(
+                "`{reference}` came back, but there is no mux to attach to"
+            ));
+        }
+        return;
+    };
+    if policy.follows_entity {
+        app.update(Msg::FollowEntity(NodeId::MuxSession(
+            attach_target.mux.clone(),
+        )));
+    }
+    if !attach {
+        // Keeps the row dimmed until the refresh lands.
+        app.update(Msg::HandoffReturned(attach_target.mux.clone()));
+        return;
+    }
+    let outcome = run_mux_attach(terminal, &attach_target, socket.as_deref());
+    app.update(Msg::HandoffReturned(attach_target.mux.clone()));
+    app.report(attach_return_entry(
+        &format!("`{reference}`"),
+        outcome,
+        log_target,
+        &attach_target,
+        socket.as_deref(),
+    ));
 }
 
 /// Argv the TUI passes when re-execing into
@@ -292,6 +374,7 @@ pub(super) fn execute_mux_launch(
     terminal: &mut DefaultTerminal,
     app: &mut App,
     request: crate::tui::widgets::mux_launch::MuxLaunchRequest,
+    policy: crate::tui::effect::Lifecycle,
 ) {
     let name = request.name.clone();
     let args = mux_launch_argv(&request);
@@ -302,7 +385,6 @@ pub(super) fn execute_mux_launch(
     let launch = summarize_mux_launch_output(&name, output);
     let entry = launch_entry(&launch, record, LogTarget::Mux(mux.clone()));
     if !launch.success {
-        refresh_after_launch_with_spinner(terminal, app);
         app.report(entry);
         return;
     }
@@ -313,6 +395,9 @@ pub(super) fn execute_mux_launch(
         backend: "tmux".to_string(),
         native_id: name.clone(),
     };
+    if policy.follows_entity {
+        app.update(Msg::FollowEntity(NodeId::MuxSession(mux.clone())));
+    }
     let outcome =
         run_tmux_attach_with_socket(terminal, &attach_target, request.mux_socket.as_deref());
     app.update(Msg::HandoffReturned(mux.clone()));

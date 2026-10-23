@@ -34,6 +34,11 @@ impl App {
         ));
     }
 
+    /// Fix the entity the open rename prompt renames.
+    pub(crate) fn set_rename_node(&mut self, node: NodeId) {
+        self.rename_node = Some(node);
+    }
+
     /// Open the text prompt that edits a pin slot.
     pub(crate) fn open_slot_prompt(
         &mut self,
@@ -67,10 +72,9 @@ impl App {
         }
     }
 
-    /// Switch to the native view of the entity slot `slot` points at
-    /// and select its row.
+    /// Switch to the native view of the entity pin `slot` points at and
+    /// select its row.
     pub(crate) fn reveal_slot(&mut self, slot: &str) -> Result<(), String> {
-        use crate::tui::View;
         let node = self
             .snapshot_handle()
             .and_then(|handle| {
@@ -80,54 +84,75 @@ impl App {
                     .and_then(|pin| pin.target_node.clone())
             })
             .ok_or_else(|| format!("pin `{slot}` has no entity to reveal"))?;
-        let live = self
-            .snapshot_handle()
-            .is_none_or(|handle| handle.snapshot().is_live(&node));
-        // A gone entity is listed only where history is: the Mux view
-        // keeps its ghosts, and everything else is in History.
-        let view = match node {
-            NodeId::MuxSession(_) => View::Mux,
-            NodeId::ForgePr(_) if live => View::Prs,
-            _ if !live => View::History,
-            _ => View::Sessions,
-        };
-        let previous = self.active_view;
-        let previous_filter = self.filter.clone();
-        self.switch_to_view(view);
-        // A pin's own target is a pinned record, which History hides
-        // unless asked; revealing it asks.
-        if view == View::History {
-            self.filter.show_pinned_history = true;
-        }
-        self.rebuild_tree_in_place();
-        // History lists a gone entity by its record rather than by node.
         let record = self.snapshot_handle().and_then(|handle| {
-            let snapshot = handle.snapshot();
-            crate::tui::rows::pin_nodes(snapshot)
+            crate::tui::rows::pin_nodes(handle.snapshot())
                 .into_iter()
                 .find(|pin| pin.id.id == slot)
                 .and_then(|pin| pin.target.as_deref())
                 .and_then(|target| target.strip_prefix(crate::model::PinSlot::HISTORY_PREFIX))
                 .map(str::to_string)
-                .or_else(|| {
-                    snapshot
-                        .history
-                        .by_key(&node.to_string())
-                        .map(|(_, meta)| meta.id.clone())
-                })
         });
+        self.reveal_node(&node, record)
+            .map_err(|why| format!("`{slot}` {why}"))
+    }
+
+    /// Switch to the view that lists `node` and select its row. A gone
+    /// entity is listed only where history is: the Mux view keeps its
+    /// ghosts, and everything else is in History. On failure the
+    /// operator stays where they were.
+    pub(crate) fn reveal_node(
+        &mut self,
+        node: &NodeId,
+        record_hint: Option<String>,
+    ) -> Result<(), String> {
+        let Some(handle) = self.snapshot_handle() else {
+            return Err("isn't listed: nothing is loaded yet".to_string());
+        };
+        let snapshot = handle.snapshot();
+        let view = crate::tui::actions::natural_view(snapshot, node);
+        // History lists a gone entity by its record rather than by node.
+        let record = record_hint
+            .or_else(|| {
+                snapshot
+                    .history
+                    .by_key(&node.to_string())
+                    .map(|(_, meta)| meta.id.clone())
+            })
+            .or_else(|| match node {
+                NodeId::MuxSession(mux) => snapshot
+                    .history
+                    .muxes
+                    .iter()
+                    .find(|record| record.recipe.native_id() == mux.native_id)
+                    .map(|record| record.meta.id.clone()),
+                _ => None,
+            });
+        let previous = self.active_view;
+        let previous_filter = self.filter.clone();
+        self.switch_to_view(view);
+        // A pin's own target is a pinned record, which History hides
+        // unless asked; revealing it asks.
+        if view == crate::tui::View::History {
+            self.filter.show_pinned_history = true;
+        }
+        self.rebuild_tree_in_place();
         let Some(index) = self.tree.rows.iter().position(|row| {
-            crate::tui::rows::row_node(&row.id) == Some(&node)
+            crate::tui::rows::row_node(&row.id) == Some(node)
                 || matches!(&row.id, RowId::History { record_id } if Some(record_id) == record.as_ref())
         }) else {
             // Stay where the operator was.
             self.filter = previous_filter;
             self.switch_to_view(previous);
             self.rebuild_tree_in_place();
-            return Err(format!("`{slot}` isn't listed in the {view:?} view"));
+            return Err(format!("isn't listed in the {view:?} view"));
         };
-        let depth = self.tree.rows[index].depth;
-        let mut wanted = depth;
+        self.expand_to_and_select(index);
+        Ok(())
+    }
+
+    /// Expand the ancestors of the row at `index` and select it.
+    fn expand_to_and_select(&mut self, index: usize) {
+        let mut wanted = self.tree.rows[index].depth;
         let ancestors: Vec<RowId> = self.tree.rows[..index]
             .iter()
             .rev()
@@ -143,7 +168,58 @@ impl App {
         self.expanded.extend(ancestors);
         let id = self.tree.rows[index].id.clone();
         self.set_selection(id);
-        Ok(())
+    }
+
+    /// Select the entity the last action acted on, now that the refresh
+    /// after it has landed. Stays in the current view when the entity
+    /// is still listed there; otherwise moves to the view where it now
+    /// lives, and tells the operator when it can't be found.
+    pub(crate) fn apply_pending_follow(&mut self) {
+        if self.handoff.is_some() {
+            return;
+        }
+        let Some(node) = self.pending_follow.take() else {
+            return;
+        };
+        if let Some(index) = self
+            .tree
+            .rows
+            .iter()
+            .position(|row| crate::tui::rows::row_node(&row.id) == Some(&node))
+        {
+            self.expand_to_and_select(index);
+            return;
+        }
+        if let Err(why) = self.reveal_node(&node, None) {
+            self.post_toast(format!("couldn't find the entity: it {why}"));
+        }
+    }
+
+    /// The open picker, if it is on top of the stack.
+    pub fn picker(&self) -> Option<&crate::tui::widgets::picker::PickerState> {
+        match self.modal_stack.last()? {
+            crate::tui::Modal::Picker(state) => Some(state.as_ref()),
+            _ => None,
+        }
+    }
+
+    /// Mutable access for the runtime's per-key forwarding.
+    pub fn picker_mut(&mut self) -> Option<&mut crate::tui::widgets::picker::PickerState> {
+        match self.modal_stack.last_mut()? {
+            crate::tui::Modal::Picker(state) => Some(state.as_mut()),
+            _ => None,
+        }
+    }
+
+    pub fn open_picker(&mut self, state: crate::tui::widgets::picker::PickerState) {
+        self.modal_stack
+            .push(crate::tui::Modal::Picker(Box::new(state)));
+    }
+
+    pub fn close_picker(&mut self) {
+        if matches!(self.modal_stack.last(), Some(crate::tui::Modal::Picker(_))) {
+            self.modal_stack.pop();
+        }
     }
 
     /// Pop the rename overlay if it's on top; no-op otherwise.

@@ -127,7 +127,6 @@ fn editing_a_pin_lists_every_field_the_pin_can_change() {
 }
 
 #[test]
-#[ignore = "backlog CSP-692.03: retargeting asks for free text instead of offering the candidates"]
 fn retargeting_offers_the_other_entities_of_the_same_kind() {
     let mut app = app_in(View::Pinned);
     select(&mut app, "conspectus-main");

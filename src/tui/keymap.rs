@@ -63,6 +63,7 @@ pub enum Action {
     RowMenuKey(ratatui::crossterm::event::KeyEvent),
     /// Forward a key event into the open Clean up modal.
     CleanUpKey(ratatui::crossterm::event::KeyEvent),
+    PickerKey(ratatui::crossterm::event::KeyEvent),
     /// Forward a key event into the open mux-launch form.
     MuxLaunchFormKey(ratatui::crossterm::event::KeyEvent),
     PinEditFormKey(ratatui::crossterm::event::KeyEvent),
@@ -288,6 +289,26 @@ pub fn selected_default_action(app: &App) -> SelectedDefault {
     ) || crate::tui::actions::selected_record(app).is_some()
     {
         return SelectedDefault::Attach;
+    }
+    // An entity listed under a pin acts like its own row: a mux
+    // attaches, a session attaches when it is in a mux and opens in the
+    // viewer when it is not.
+    if let crate::tui::rows::RowId::Nested { node, .. } = &row.id {
+        return match node {
+            crate::model::NodeId::MuxSession(_) => SelectedDefault::Attach,
+            crate::model::NodeId::AgentSession(_) => {
+                let in_a_mux = app.snapshot_handle().is_some_and(|handle| {
+                    crate::tui::actions::preferred_mux_for_session(handle.snapshot(), node)
+                        .is_some()
+                });
+                if in_a_mux {
+                    SelectedDefault::Attach
+                } else {
+                    SelectedDefault::View
+                }
+            }
+            _ => SelectedDefault::ToggleExpand,
+        };
     }
     match &row.kind {
         RowKind::Group(_) => SelectedDefault::ToggleExpand,

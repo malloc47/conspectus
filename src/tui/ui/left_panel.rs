@@ -615,9 +615,13 @@ pub(super) fn render_mixed_spans(
     align: MixedAlign,
     prefix_width: usize,
     budget: usize,
+    handoff_spinner: Option<&'static str>,
 ) -> Vec<Span<'static>> {
     use crate::tui::rows::{MixedGrid, MixedTone};
     let mut spans: Vec<Span<'static>> = Vec::new();
+    // A row awaiting the refresh after an action shows a spinner where
+    // its status word goes.
+    let status_word = handoff_spinner.map_or(mixed.status.as_str(), |glyph| glyph);
     let status_style = match mixed.tone {
         MixedTone::Normal => Style::default().fg(theme.mux_attached),
         MixedTone::Dim => Style::default(),
@@ -644,7 +648,7 @@ pub(super) fn render_mixed_spans(
             "{:>4}",
             truncate_to_width_strict(&age, 4)
         ));
-        spans.push(span!(status_style; "  {}", mixed.status));
+        spans.push(span!(status_style; "  {}", status_word));
         let room = budget.saturating_sub(spans_width(&spans));
         if room > 4 && !mixed.content.is_empty() {
             let content = truncate_to_width_strict(&mixed.content, room - 2);
@@ -659,7 +663,7 @@ pub(super) fn render_mixed_spans(
         let label = truncate_to_width_strict(&mixed.label, MIXED_LABEL_MAX_WIDTH);
         let label_cell = align.label.saturating_sub(prefix_width);
         spans.push(span!(Modifier::BOLD; "{}", pad_to_width(label, label_cell)));
-        let status = truncate_to_width_strict(&mixed.status, MIXED_STATUS_MAX_WIDTH);
+        let status = truncate_to_width_strict(status_word, MIXED_STATUS_MAX_WIDTH);
         spans.push(span!(status_style; "  {}", pad_to_width(status, align.status)));
         if align.age > 0 {
             let age = mixed.age.clone().unwrap_or_default();
@@ -735,7 +739,7 @@ pub(super) fn render_left_row(
     // background refresh lands (ADR 0108).
     let handoff_spinner = app
         .handoff()
-        .filter(|_| app.row_awaits_handoff(&row.kind))
+        .filter(|_| app.row_is_frozen(row))
         .map(|handoff| spinner_glyph(handoff.started_at));
     let mut spans: Vec<Span<'static>> = Vec::new();
     let flat_sessions = matches!(
@@ -860,6 +864,7 @@ pub(super) fn render_left_row(
                 align.mixed,
                 prefix_width,
                 budget,
+                handoff_spinner,
             ));
         }
     }

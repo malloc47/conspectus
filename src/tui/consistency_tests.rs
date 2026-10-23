@@ -68,6 +68,7 @@ use crate::tui::app::{App, Msg, SnapshotHandle};
 use crate::tui::rows::RowId;
 use crate::tui::ui::{buffer_to_string, render_to_buffer};
 
+mod actions;
 mod fixtures;
 mod focus;
 mod forms;
@@ -121,5 +122,6 @@ fn all_ignored_tests_are_owned() {
             );
         }
     }
-    assert!(owned > 0, "the suite documents its open defects");
+    // Once every defect is fixed no test is parked, which is the goal.
+    let _ = owned;
 }

@@ -45,7 +45,6 @@ fn with_the_left_pane_focused_accelerators_act_on_the_selected_row() {
 }
 
 #[test]
-#[ignore = "backlog CSP-692.03: p and . ignore the entity shown in the right pane"]
 fn with_the_right_pane_focused_p_acts_on_the_shown_entity() {
     let mut app = mux_app();
     let session = focus_right_on_a_linked_session(&mut app);
@@ -58,7 +57,6 @@ fn with_the_right_pane_focused_p_acts_on_the_shown_entity() {
 }
 
 #[test]
-#[ignore = "backlog CSP-692.03: p and . ignore the entity shown in the right pane"]
 fn with_the_right_pane_focused_the_menu_is_for_the_shown_entity() {
     let mut app = mux_app();
     let session = focus_right_on_a_linked_session(&mut app);

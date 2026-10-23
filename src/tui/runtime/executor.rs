@@ -7,6 +7,13 @@ use crate::tui::messages::{LogEntry, LogTarget};
 /// [`execute_effects`] and [`execute_effects_live`] so the two
 /// executors stay in lockstep for the non-`Exec` variants.
 pub(super) fn execute_pure_effect(app: &mut App, effect: Effect) {
+    // These need a live terminal, mux backend, or store. Static and
+    // snapshot modes never offer a gesture that emits them; if one
+    // arrives anyway, say so instead of dropping it silently.
+    if !pure_executor_runs(&effect) {
+        app.post_toast("that isn't available in this mode");
+        return;
+    }
     match effect {
         Effect::Quit => {
             // `Msg::Quit` already set `App::should_quit`; the event
@@ -27,27 +34,8 @@ pub(super) fn execute_pure_effect(app: &mut App, effect: Effect) {
                 refresh(app, &cfg);
             }
         }
-        Effect::Exec(_) => {
-            // Exec effects need a live terminal; the pure executor
-            // silently drops them. Static and snapshot modes gate
-            // their translators upstream so `AttachSelected` /
-            // `ResumeSelected` never fire there — this branch is a
-            // safety net rather than a code path exercised in
-            // practice.
-        }
-        Effect::RunMux(_) => {
-            // Mux ops need a live `MuxBackend`; the pure executor
-            // silently drops them. Same rationale as `Effect::Exec`
-            // above — no static-mode path emits `RunMux` today, so
-            // this branch is a safety net.
-        }
-        Effect::WriteStore(_) => {
-            // Some `WriteStore` variants (`CommitAliasRename`,
-            // `CommitMuxRename`) chain a tmux rename through the
-            // executor, so all store writes flow through
-            // `execute_effects_live` where the `MuxBackend`
-            // reference lives. The pure executor drops them the
-            // same way it drops `RunMux` / `Exec`.
+        Effect::Exec(_) | Effect::RunMux(_) | Effect::WriteStore(_) => {
+            unreachable!("the live executor runs these")
         }
     }
 }
@@ -180,8 +168,6 @@ pub(super) fn execute_commit_alias_rename(
     if let Some(mux_rename) = &plan.mux_native_rename
         && let Err(reason) = rename_mux_via_backend(tmux, mux_rename)
     {
-        let config = app.config().clone();
-        refresh_after_mux_handoff(app, &config);
         app.report(
             LogEntry::warning(format!("alias updated, {reason}"))
                 .with_target(LogTarget::Mux(mux_rename.mux.clone())),
@@ -190,8 +176,6 @@ pub(super) fn execute_commit_alias_rename(
     }
 
     let advisory = live_session_advisory(app, &session_id);
-    let config = app.config().clone();
-    refresh_after_mux_handoff(app, &config);
     let final_status = match advisory {
         Some(suffix) => format!("{alias_status} · {suffix}"),
         None => alias_status,
@@ -285,8 +269,6 @@ pub(super) fn execute_commit_mux_rename(
         parts.push(format!("pin update failed: {failure}"));
     }
 
-    let config = app.config().clone();
-    refresh_after_mux_handoff(app, &config);
     let summary = parts.join(" · ");
     let entry = if !renamed {
         LogEntry::error(summary)
@@ -327,6 +309,7 @@ pub(super) fn execute_exec_spec(
     app: &mut App,
     config: &RunConfig,
     spec: crate::tui::effect::ExecSpec,
+    policy: crate::tui::effect::Lifecycle,
 ) {
     use crate::tui::effect::ExecSpec;
     match spec {
@@ -358,13 +341,13 @@ pub(super) fn execute_exec_spec(
             execute_view_session(terminal, app, config, session_id);
         }
         ExecSpec::MuxNew { name, cwd } => {
-            execute_mux_new(terminal, app, &name, &cwd);
+            execute_mux_new(terminal, app, &name, &cwd, policy);
         }
         ExecSpec::MuxLaunch { request } => {
-            execute_mux_launch(terminal, app, request);
+            execute_mux_launch(terminal, app, request, policy);
         }
-        ExecSpec::Rebuild { reference } => {
-            execute_rebuild(terminal, app, &reference);
+        ExecSpec::Rebuild { reference, .. } => {
+            execute_rebuild(terminal, app, &reference, policy);
         }
         ExecSpec::ShowRebuildPlan { reference } => {
             execute_show_rebuild_plan(terminal, app, &reference);
@@ -419,11 +402,7 @@ fn slot_store_or_report(app: &mut App) -> Option<crate::pin_slots::SlotStore> {
 /// markers and the Pinned view catch up, and log either way.
 fn finish_slot_write(app: &mut App, outcome: Result<String, String>) {
     let entry = match outcome {
-        Ok(summary) => {
-            let config = app.config().clone();
-            refresh_after_store_write(app, &config);
-            LogEntry::info(summary)
-        }
+        Ok(summary) => LogEntry::info(summary),
         Err(message) => LogEntry::error(message),
     };
     app.report(entry);
@@ -610,14 +589,10 @@ fn execute_reap_records(app: &mut App, ids: std::collections::BTreeSet<String>) 
         return;
     };
     let entry = match crate::history::reap::reap(&store, &ids) {
-        Ok(removed) => {
-            let config = app.config().clone();
-            refresh_after_store_write(app, &config);
-            LogEntry::info(format!(
-                "forgot {removed} history record{}",
-                if removed == 1 { "" } else { "s" }
-            ))
-        }
+        Ok(removed) => LogEntry::info(format!(
+            "forgot {removed} history record{}",
+            if removed == 1 { "" } else { "s" }
+        )),
         Err(err) => LogEntry::error(format!("history: could not forget records: {err}")),
     };
     app.report(entry);

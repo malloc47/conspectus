@@ -749,28 +749,43 @@ hosts, and a checkout pin to its muxes and their sessions. The detail pane
 shows the pin, its target, and each effective field with the layer that
 supplied it (override, live, history, snapshot, or default).
 
-`Enter` attaches a pin whose mux is live (or a session pin whose session is
-in a mux). On a gone, missing, or planned mux, session, worktree, or repo pin,
-it runs `conspectus rebuild <pin> --no-attach` behind a spinner and refreshes;
-press `Enter` again to attach. A live session that isn't in a mux is rebuilt
-the same way, which resumes it. A PR pin shows its URL, and the other live
-kinds say there is nothing to launch. While legacy `[[pins.entries]]`
-remain, a line under the rows names `conspectus pin migrate`.
+`Enter` does what it does on the entity itself. A pin whose mux is live
+attaches; a pin on a session opens the session viewer when the session isn't
+in a mux, exactly as in the Sessions view, and attaches when it is. On a gone,
+missing, or planned mux or session pin, `Enter` starts it and attaches, as a
+launch always did: it runs `conspectus rebuild <pin>` behind a spinner (the
+row dims and spins while it comes back), attaches, and when you return the
+row is selected in the Mux view where the mux now lives. A gone worktree or
+repo pin is rebuilt and you stay where you are. A PR pin shows its URL, and
+the other live kinds say there is nothing to rebuild. While legacy
+`[[pins.entries]]` remain, a line under the rows names `conspectus pin
+migrate`.
 
-`.` opens the pin menu: **Rebuild**, **Show rebuild plan**, **Edit…** (the
-edit form, below), **Rename…** (a live mux
-pin renames its tmux session with it and pins the name, as `pin rename`
-does), **Retarget…** (type a node id, a history id, or a mux name of the same
-kind), **Refresh snapshot**, **Reveal in its view** (switches to Sessions, Mux,
-or PRs and selects the entity; a gone entity opens in History), and **Unpin** (press `Enter` twice). Each is
-the same write as the `pin` command of that name. Legacy pins refuse edits
-until they are migrated.
+`.` opens the pin menu, the same one every view offers for a pinned entity:
+**Rebuild** (start it without attaching; only where there is something to
+bring back), **Show rebuild plan** (for a running mux it says so and that
+`Enter` attaches; it isn't offered for PRs, sessions, or a live worktree),
+**Edit…** (the edit form, below), **Rename…** (a live mux pin renames its tmux
+session with it and pins the name, as `pin rename` does), **Retarget…** (a
+searchable list of the other entities of the same kind, running or gone; type
+to filter, `Enter` picks), **Refresh snapshot**, **Reveal in its view**
+(switches to Sessions, Mux, or PRs and selects the entity; a gone entity
+opens in History), and **Unpin** (press `Enter` twice). Each is the same write
+as the `pin` command of that name. Legacy pins refuse edits until they are
+migrated.
 
 ### Pinning from the other views
 
-`p` pins the selected row in any view, and unpins it (after a confirming menu)
-when a pin already points at it; `.` offers the same as **Pin** or **Unpin
-\<pin\>** at the top of every row's menu. A runtime process can't be pinned.
+`p` pins the selected row in any view with one keypress, and unpins it (after
+a confirming menu) when a pin already points at it. `.` opens the menu for the
+row: **Pin** for an unpinned entity, and for a pinned one every pin verb above,
+whichever view you are in.
+
+Accelerators act on what you are looking at. With the right pane focused,
+`p`, `.`, `v`, `a`, `R`, `w`, and `X` act on the entity shown there (the
+related session or mux the cursor is on, or the pane's own entity); `Tab` back
+to the left pane and they act on the selected row again. `Enter` in the right
+pane still drills into the link under the cursor. A runtime process can't be pinned.
 Pinning a live mux, worktree, or repo records it in history first so the pin
 has something to point at. The native views mark a pinned row with `◉` after
 its kind glyph and leave it where it sorts; once any pin exists the marker
@@ -817,10 +832,12 @@ has an **Unpinned only** checkbox, checked by default; clear it to list
 pinned records too (they carry `◉`). Revealing a gone pin's entity from the
 Pinned view clears it for you.
 
-`Enter` runs `conspectus rebuild <record id> --no-attach` behind a spinner and
-refreshes. `.` opens the row menu: **Rebuild**, **Pin** (the same as `pin add
-<record id>`; **Unpin \<pin\>** once a pin points at it), **Show rebuild plan** (the output of `rebuild --dry-run` in a
-scrollable modal), **Forget** (press `Enter` twice; the record leaves history
+`Enter` on a mux record runs `conspectus rebuild` behind a spinner, attaches to
+the mux, and on return selects it in the Mux view (a gone worktree or repo is
+rebuilt and focus moves to where it now lives). `.` opens the row menu:
+**Pin** (the same as `pin add <record id>`; the full pin menu once a pin points
+at it), **Rebuild** (without attaching), **Show rebuild plan** (the output of
+`rebuild --dry-run` in a scrollable modal), **Forget** (press `Enter` twice; the record leaves history
 and any pin pointing at it falls back to its snapshot), and **Clean up…**.
 
 Clean up lists what `conspectus history reap` would remove: gone records past

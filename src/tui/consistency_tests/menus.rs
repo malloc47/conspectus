@@ -26,7 +26,6 @@ fn labels_in(view: View, row: &str) -> Vec<String> {
 }
 
 #[test]
-#[ignore = "backlog CSP-692.03: the Mux view's menu for a pinned mux offers only Unpin"]
 fn a_pinned_mux_has_the_same_menu_in_the_mux_and_pinned_views() {
     let native = normalized(labels_in(View::Mux, "conspectus-main"), "conspectus-main");
     let pinned = normalized(
@@ -41,7 +40,6 @@ fn a_pinned_mux_has_the_same_menu_in_the_mux_and_pinned_views() {
 }
 
 #[test]
-#[ignore = "backlog CSP-692.03: the Sessions view's menu for a pinned session offers only Unpin"]
 fn a_pinned_session_has_the_same_menu_in_the_sessions_and_pinned_views() {
     let native = normalized(labels_in(View::Sessions, "e44d01cb"), "e44d01cb");
     let pinned = normalized(labels_in(View::Pinned, "e44d01cb"), "e44d01cb");
@@ -95,7 +93,6 @@ fn pins() -> Vec<(String, PinKind, crate::model::SlotStatus)> {
 }
 
 #[test]
-#[ignore = "backlog CSP-692.03: rebuild entries are offered for pins with nothing to rebuild"]
 fn entries_that_have_nothing_to_say_are_hidden() {
     use crate::model::SlotStatus;
     let mut offered_plan_for_live = Vec::new();
@@ -109,7 +106,12 @@ fn entries_that_have_nothing_to_say_are_hidden() {
         {
             offered_rebuild_for_pr.push(name.clone());
         }
-        if status == SlotStatus::Live && labels.iter().any(|l| l == "Show rebuild plan") {
+        // A running mux's plan says it is running and Enter attaches;
+        // every other live entity has no plan to show.
+        if status == SlotStatus::Live
+            && kind != PinKind::Mux
+            && labels.iter().any(|l| l == "Show rebuild plan")
+        {
             offered_plan_for_live.push(name);
         }
     }
@@ -117,6 +119,19 @@ fn entries_that_have_nothing_to_say_are_hidden() {
         offered_plan_for_live.is_empty(),
         "a live entity has no plan to show: {offered_plan_for_live:?}"
     );
+    for (name, kind, status) in pins() {
+        if kind == PinKind::Mux && status == SlotStatus::Live {
+            let labels = labels_in(View::Pinned, &name);
+            assert!(
+                labels.iter().any(|l| l == "Show rebuild plan"),
+                "a running mux's plan says it is running: {labels:?}"
+            );
+            assert!(
+                !labels.iter().any(|l| l == "Rebuild"),
+                "a running mux isn't rebuilt: {labels:?}"
+            );
+        }
+    }
     assert!(
         offered_rebuild_for_pr.is_empty(),
         "a PR can't be rebuilt: {offered_rebuild_for_pr:?}"

@@ -8,31 +8,36 @@ use crate::tui::effect::{ExecSpec, StoreOp, lifecycle};
 use crate::tui::keybindings::KEYBINDINGS;
 use crate::tui::keymap::Action;
 
-/// Effects only the live-loop executor runs. The executor used for
-/// plain messages silently drops them.
-fn needs_the_live_executor(effect: &Effect) -> bool {
-    matches!(
-        effect,
-        Effect::WriteStore(_) | Effect::Exec(_) | Effect::RunMux(_)
-    )
-}
-
+/// Every key bound to a message runs on an executor that can run what
+/// the message emits: the plain executor cannot do store writes,
+/// launches, or mux ops, so a key whose message emits one must be routed
+/// to the live executor, and anything the plain executor is handed
+/// anyway is reported to the operator rather than dropped.
 #[test]
-#[ignore = "backlog CSP-692.02: p pins nothing because key-bound messages run on the executor that drops store writes"]
-fn keys_that_carry_a_message_never_emit_effects_that_executor_drops() {
+fn every_key_runs_on_an_executor_that_can_run_what_it_emits() {
+    use crate::tui::runtime::{ExecutorKind, live_executor_for, pure_executor_runs};
     let mut checked = 0;
-    let mut dropped = Vec::new();
+    let mut live_only = 0;
     for binding in KEYBINDINGS {
-        let Action::Msg(msg) = (binding.action)() else {
+        let action = (binding.action)();
+        let Action::Msg(msg) = &action else {
             continue;
         };
         let mut app = app_in(View::Mux);
         select(&mut app, "scratch");
-        let described = format!("{:?}", binding.key);
-        let effects = app.update(*msg);
+        let effects = app.update((**msg).clone());
         checked += 1;
-        if effects.iter().any(needs_the_live_executor) {
-            dropped.push(format!("{described}: {effects:?}"));
+        for effect in effects {
+            if pure_executor_runs(&effect) {
+                continue;
+            }
+            live_only += 1;
+            assert_eq!(
+                live_executor_for(&action),
+                ExecutorKind::Live,
+                "{:?} emits {effect:?}, which only the live executor can run",
+                binding.key
+            );
         }
     }
     assert!(
@@ -40,9 +45,22 @@ fn keys_that_carry_a_message_never_emit_effects_that_executor_drops() {
         "the key table has message bindings: {checked}"
     );
     assert!(
-        dropped.is_empty(),
-        "these keys emit effects the plain executor drops:\n{}",
-        dropped.join("\n")
+        live_only > 0,
+        "`p` and `.`-style keys do emit live-only effects"
+    );
+}
+
+#[test]
+fn the_plain_executor_says_so_when_handed_what_it_cannot_run() {
+    let mut app = app_in(View::Mux);
+    let node = NodeId::MuxSession(MuxSessionId::new("tmux:scratch"));
+    crate::tui::runtime::execute_effects(
+        &mut app,
+        vec![Effect::WriteStore(StoreOp::PinNode { node })],
+    );
+    assert!(
+        app.toast().has_toast(),
+        "dropping a gesture silently looks like it did nothing"
     );
 }
 
@@ -110,7 +128,6 @@ fn attaching_hands_over_the_terminal_freezes_the_row_and_refreshes() {
 }
 
 #[test]
-#[ignore = "backlog CSP-692.02: a rebuild from the menu does not freeze the row or follow the mux to its view"]
 fn a_rebuild_freezes_the_row_refreshes_and_follows_the_entity() {
     let mut app = app_listing_all(View::History);
     let effects = app.update(Msg::RebuildReference("h_agent".into()));
@@ -125,7 +142,6 @@ fn a_rebuild_freezes_the_row_refreshes_and_follows_the_entity() {
 }
 
 #[test]
-#[ignore = "backlog CSP-692.02: a launch does not follow the new mux to its row"]
 fn launching_attaches_refreshes_and_selects_the_new_mux() {
     let effect = Effect::Exec(ExecSpec::MuxNew {
         name: "fresh".into(),
@@ -155,7 +171,6 @@ fn rows_standing_for_mux(app: &App, name: &str) -> Vec<RowId> {
 }
 
 #[test]
-#[ignore = "backlog CSP-692.02: rows of the mixed-kind renderer never freeze after an attach"]
 fn returning_from_an_attach_freezes_every_row_that_shows_the_mux() {
     let mux = MuxSessionId::new("tmux:conspectus-main");
     let mut frozen_rows = 0;
@@ -174,7 +189,7 @@ fn returning_from_an_attach_freezes_every_row_that_shows_the_mux() {
                 .find(|row| row.id == id)
                 .expect("row");
             assert!(
-                app.row_awaits_handoff(&row.kind),
+                app.row_is_frozen(row),
                 "{}: the row must dim with a spinner until the refresh lands",
                 describe(view, &id)
             );
@@ -185,7 +200,6 @@ fn returning_from_an_attach_freezes_every_row_that_shows_the_mux() {
 }
 
 #[test]
-#[ignore = "backlog CSP-692.02: a store write refreshes locally with cached-only forge data, which empties the PR list"]
 fn a_store_write_refresh_keeps_the_pr_list() {
     let mut config = RunConfig::defaults();
     config.forge_fetch = crate::discovery::forge::ForgeFetch::CachedOnly;
@@ -198,4 +212,41 @@ fn a_store_write_refresh_keeps_the_pr_list() {
         !(bypasses_the_daemon && reads_only_a_cold_cache),
         "a forced local rebuild with a cached-only forge policy drops every PR the daemon had"
     );
+}
+
+#[test]
+fn an_effect_that_refreshes_asks_for_it_unless_a_handoff_refresh_is_on_its_way() {
+    use crate::tui::runtime::wants_refresh_request;
+    let write = Effect::WriteStore(StoreOp::Unpin { slot: "x".into() });
+    let toast = Effect::Toast("hi".into());
+    let mut app = app_in(View::Mux);
+    assert!(wants_refresh_request(&lifecycle(&write), &app));
+    assert!(!wants_refresh_request(&lifecycle(&toast), &app));
+    // Returning from a mux already requests the refresh that settles it.
+    app.update(Msg::HandoffReturned(MuxSessionId::new("tmux:scratch")));
+    assert!(app.handoff_refresh_pending());
+    assert!(!wants_refresh_request(&lifecycle(&write), &app));
+}
+
+#[test]
+fn a_refresh_request_is_taken_once() {
+    let mut app = app_in(View::Mux);
+    assert!(!app.take_refresh_request());
+    app.request_refresh();
+    app.request_refresh();
+    assert!(app.take_refresh_request());
+    assert!(!app.take_refresh_request());
+}
+
+#[test]
+fn a_rebuild_declares_that_it_attaches_only_when_asked_to() {
+    let rebuild = |attach| {
+        lifecycle(&Effect::Exec(ExecSpec::Rebuild {
+            reference: "x".into(),
+            attach,
+        }))
+    };
+    assert!(rebuild(true).attaches && rebuild(true).follows_entity);
+    assert!(!rebuild(false).attaches && rebuild(false).follows_entity);
+    assert!(rebuild(false).freezes_row && rebuild(false).refreshes);
 }

@@ -1,28 +1,28 @@
 ---
 source: src/tui/ui_tests.rs
-expression: "pinned_frame(&mut app, 100)"
+expression: "trimmed(pinned_frame(&mut app, 100))"
 ---
-updated 0s ago · 0/1 sessions · 1 mux                                                               
-┌ ▸ sessions ·┌ pin conspectus-main ─────────────────────────────────────────────────┐─────────────┐
-│▶ ▣   conspec│                                                                      │             │
-│  ▣   config-│▸ Rebuild                                                             │             │
-│  ●   e44d01c│     bring it back, or attach if it is up (conspectus rebuild)        │             │
-│  ◇   ledger-│  Show rebuild plan                                                   │             │
-│  ⇄   ledger-│     what rebuild would run, without running it                       │nspectus-main│
-│  ▣ ◎ nightly│  Edit…                                                               │             │
-│  ▣ ◎ old-api│     change the name, cwd, harness, arguments, and more               │ctus         │
-│             │  Rename…                                                             │             │
+updated 0s ago · 0/1 sessions · 1 mux
+┌ ▸ sessions · mux · prs · pinned · history ─────┐┌   ◉ pin ───────────────────────────────────────┐
+│▶ ▣   conspec┌ pin conspectus-main ─────────────────────────────────────────────────┐             │
+│  ▣   config-│                                                                      │             │
+│  ●   e44d01c│▸ Show rebuild plan                                                   │             │
+│  ◇   ledger-│     what rebuild would run, without running it                       │             │
+│  ⇄   ledger-│  Edit…                                                               │nspectus-main│
+│  ▣ ◎ nightly│     change the name, cwd, harness, arguments, and more               │             │
+│  ▣ ◎ old-api│  Rename…                                                             │ctus         │
 │             │     change the pin name (a live mux is renamed with it)              │             │
-│             │  Retarget…                                                           │  Related ── │
-│             │     point it at another entity of the same kind                      │spectus-main │
-│             │  Refresh snapshot                                                    │             │
+│             │  Retarget…                                                           │             │
+│             │     point it at another entity of the same kind                      │  Related ── │
+│             │  Refresh snapshot                                                    │spectus-main │
 │             │     copy the entity's current recipe into the pin                    │             │
-│             │  Reveal in its view                                                  │── Preview ──│
-│             │     jump to the entity in Sessions, Mux, or PRs                      │             │
-│             │  Unpin                                                               │             │
+│             │  Reveal in its view                                                  │             │
+│             │     jump to the entity in Sessions, Mux, PRs, or History             │── Preview ──│
+│             │  Unpin conspectus-main                                               │             │
 │             │     remove the pin; the entity and its history stay                  │             │
-│1 legacy pin │                                                                      │             │
-│(old-api); ru│↑/↓ move · Enter pick · Esc close                                     │             │
-│convert it   └──────────────────────────────────────────────────────────────────────┘             │
+│             │                                                                      │             │
+│1 legacy pin │↑/↓ move · Enter pick · Esc close                                     │             │
+│(old-api); ru└──────────────────────────────────────────────────────────────────────┘             │
+│convert it                                      ││                                                │
 └────────────────────────────────────────────────┘└────────────────────────────────────────────────┘
 [left] group:none · filter:all · sort:hierarchy · Enter/a attach tmux:conspectus-main · j/k move · h

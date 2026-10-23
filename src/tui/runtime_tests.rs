@@ -65,16 +65,18 @@ fn translate_lowercase_r_still_refreshes() {
 }
 
 #[test]
-fn store_write_refresh_config_forces_local_discovery() {
+fn a_refresh_after_an_action_reads_the_daemons_snapshot() {
     let mut config = RunConfig::defaults();
-    config.refresh = false;
+    config.refresh = true;
     config.no_cache = true;
     config.default_view = View::Mux;
     let app = App::new(config);
 
     let refresh_config = store_write_refresh_config(&app);
 
-    assert!(refresh_config.refresh);
+    // Forcing a local rebuild would bypass the daemon and with it every
+    // PR the daemon had fetched.
+    assert!(!refresh_config.refresh);
     assert!(refresh_config.no_cache);
     assert_eq!(refresh_config.default_view, View::Mux);
 }

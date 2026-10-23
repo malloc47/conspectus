@@ -5296,7 +5296,8 @@ fn enter_on_a_gone_slot_rebuilds_it_and_on_a_live_mux_slot_attaches() {
     assert_eq!(
         effects,
         vec![Effect::Exec(ExecSpec::Rebuild {
-            reference: "config-agent3".into()
+            reference: "config-agent3".into(),
+            attach: true,
         })]
     );
 
@@ -5306,7 +5307,8 @@ fn enter_on_a_gone_slot_rebuilds_it_and_on_a_live_mux_slot_attaches() {
     assert_eq!(
         app.update(Msg::AttachSelected),
         vec![Effect::Exec(ExecSpec::Rebuild {
-            reference: "nightly".into()
+            reference: "nightly".into(),
+            attach: true,
         })],
         "a planned slot builds on its first rebuild"
     );
@@ -5406,7 +5408,7 @@ fn an_empty_history_view_points_at_the_menu() {
 }
 
 #[test]
-fn enter_on_a_history_row_rebuilds_its_record() {
+fn enter_on_a_history_row_rebuilds_it_the_way_its_pin_says_and_attaches() {
     use crate::tui::Effect;
     use crate::tui::effect::ExecSpec;
     let mut app = history_app(crate::tui::HistoryGrouping::None);
@@ -5416,9 +5418,21 @@ fn enter_on_a_history_row_rebuilds_its_record() {
     assert_eq!(
         app.update(Msg::AttachSelected),
         vec![Effect::Exec(ExecSpec::Rebuild {
-            reference: "h_agent".into()
-        })]
+            reference: "config-agent3".into(),
+            attach: true,
+        })],
+        "the record is pinned, so the pin's overrides apply"
     );
+}
+
+/// A frame with the padding after each line removed, so a snapshot of a
+/// frame that changes often stays free of trailing whitespace.
+fn trimmed(frame: String) -> String {
+    frame
+        .lines()
+        .map(str::trim_end)
+        .collect::<Vec<_>>()
+        .join("\n")
 }
 
 #[test]
@@ -5434,17 +5448,31 @@ fn the_row_menu_offers_the_record_verbs_and_clean_up() {
         labels,
         [
             "Rebuild",
-            "Unpin config-agent3",
             "Show rebuild plan",
+            "Edit…",
+            "Rename…",
+            "Retarget…",
+            "Refresh snapshot",
+            "Reveal in its view",
+            "Unpin config-agent3",
             "Forget",
             "Clean up…"
         ]
     );
-    assert!(menu.entries()[3].confirm, "forget asks twice");
-    // The pinned record offers to unpin its slot, also behind a confirm.
-    assert!(menu.entries()[1].confirm, "unpin asks twice");
-    assert_eq!(menu.entries()[1].msg, Msg::Unpin("config-agent3".into()));
-    insta::assert_snapshot!("history_row_menu", pinned_frame(&mut app, 100));
+    let entry = |label: &str| {
+        menu.entries()
+            .iter()
+            .find(|entry| entry.label == label)
+            .unwrap_or_else(|| panic!("no `{label}` entry"))
+    };
+    assert!(entry("Forget").confirm, "forget asks twice");
+    // The pinned record offers to unpin its pin, also behind a confirm.
+    assert!(entry("Unpin config-agent3").confirm, "unpin asks twice");
+    assert_eq!(
+        entry("Unpin config-agent3").msg,
+        Msg::Unpin("config-agent3".into())
+    );
+    insta::assert_snapshot!("history_row_menu", trimmed(pinned_frame(&mut app, 100)));
 }
 
 #[test]
@@ -5505,7 +5533,8 @@ fn row_menu_messages_become_the_matching_effects() {
     assert_eq!(
         app.update(Msg::RebuildReference("h_agent".into())),
         vec![Effect::Exec(ExecSpec::Rebuild {
-            reference: "h_agent".into()
+            reference: "h_agent".into(),
+            attach: false,
         })]
     );
 }
@@ -5648,11 +5677,12 @@ fn actions_on_a_ghost_mux_rebuild_or_refuse_instead_of_erroring() {
     let ghost = NodeId::MuxSession(crate::model::MuxSessionId::new("tmux:config-agent3"));
     app.set_selection(RowId::MuxSession(ghost));
 
-    // Enter rebuilds the record the ghost came from.
+    // Enter brings the ghost back the way its pin says, and attaches.
     assert_eq!(
         app.update(Msg::AttachSelected),
         vec![Effect::Exec(ExecSpec::Rebuild {
-            reference: "h_agent".into()
+            reference: "config-agent3".into(),
+            attach: true,
         })]
     );
     // The menu is the same one History offers.
@@ -5660,7 +5690,7 @@ fn actions_on_a_ghost_mux_rebuild_or_refuse_instead_of_erroring() {
     let menu = app.row_menu().expect("menu");
     assert_eq!(
         menu.entries()[0].msg,
-        Msg::RebuildReference("h_agent".into())
+        Msg::RebuildReference("config-agent3".into())
     );
     // Attach refuses by name, never reaching tmux.
     let reason = crate::tui::actions::resolve_attach_target(&app).unwrap_err();
@@ -5825,7 +5855,20 @@ fn the_row_menu_of_a_native_row_offers_pin_or_unpin() {
         .iter()
         .map(|e| e.label.clone())
         .collect();
-    assert_eq!(labels, ["Unpin conspectus-main"]);
+    // The same verbs the Pinned view offers for it: the menu depends
+    // on the entity, not on the view. A running mux has nothing to
+    // rebuild, so only its plan (which says so) is offered.
+    assert_eq!(
+        labels,
+        [
+            "Show rebuild plan",
+            "Edit…",
+            "Rename…",
+            "Retarget…",
+            "Refresh snapshot",
+            "Unpin conspectus-main"
+        ]
+    );
 }
 
 #[test]
@@ -5852,18 +5895,18 @@ fn the_slot_menu_offers_every_gesture() {
     assert_eq!(
         labels,
         [
-            "Rebuild",
             "Show rebuild plan",
             "Edit…",
             "Rename…",
             "Retarget…",
             "Refresh snapshot",
             "Reveal in its view",
-            "Unpin"
-        ]
+            "Unpin conspectus-main"
+        ],
+        "a running mux has nothing to rebuild"
     );
-    assert!(menu.entries()[7].confirm, "unpin asks twice");
-    insta::assert_snapshot!("slot_row_menu", pinned_frame(&mut app, 100));
+    assert!(menu.entries()[6].confirm, "unpin asks twice");
+    insta::assert_snapshot!("slot_row_menu", trimmed(pinned_frame(&mut app, 100)));
 }
 
 #[test]
@@ -5894,13 +5937,19 @@ fn slot_prompts_commit_to_their_own_store_write() {
     app.close_pin_edit_form();
 
     app.update(Msg::OpenSlotRetarget("conspectus-main".into()));
+    assert!(app.picker().is_some(), "retarget offers candidates");
+    app.close_picker();
     assert_eq!(
-        app.update(Msg::CommitRename("other".into())),
+        app.update(Msg::CommitRetarget {
+            pin: "conspectus-main".into(),
+            target: "other".into(),
+        }),
         vec![Effect::WriteStore(StoreOp::RetargetSlot {
             slot: "conspectus-main".into(),
             target: "other".into(),
         })]
     );
+    app.update(Msg::OpenSlotRename("conspectus-main".into()));
     assert!(matches!(
         app.update(Msg::CommitRename("   ".into())).as_slice(),
         [Effect::Toast(_)]

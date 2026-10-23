@@ -1208,7 +1208,7 @@ pub fn short_node_label(node: &GraphNode) -> String {
     }
 }
 
-fn title_line(snapshot: &GraphSnapshot, node: &GraphNode) -> String {
+pub(crate) fn title_line(snapshot: &GraphSnapshot, node: &GraphNode) -> String {
     match node {
         GraphNode::AgentSession(s) => {
             let alias = snapshot

@@ -187,6 +187,9 @@ pub enum Msg {
     /// for a background refresh. Repeats before that refresh lands add to
     /// the same pending set.
     HandoffReturned(MuxSessionId),
+    /// After the next refresh that settles the pending action, move to
+    /// the view where `node` now lives and select its row.
+    FollowEntity(crate::model::NodeId),
     /// A refresh spawned after the last hand-off landed (or failed);
     /// the pending rows show current values again.
     HandoffSettled,
@@ -307,6 +310,12 @@ pub enum Msg {
     OpenSlotRename(String),
     /// Slot menu → open the retarget prompt.
     OpenSlotRetarget(String),
+    /// Retarget picker → point the pin at the chosen entity (a node id
+    /// or a history record id).
+    CommitRetarget {
+        pin: String,
+        target: String,
+    },
     /// Slot menu → copy the entity's current recipe into the slot.
     RefreshSlot(String),
     /// Slot menu → switch to the entity's native view and select it.

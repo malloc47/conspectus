@@ -96,6 +96,7 @@ pub fn draw(app: &mut App, frame: &mut Frame<'_>) {
     draw_mux_menu(app, frame, area);
     draw_row_menu(app, frame, area);
     draw_clean_up(app, frame, area);
+    draw_picker(app, frame, area);
     draw_mux_launch_form(app, frame, area);
     draw_pin_edit_form(app, frame, area);
     draw_value_modal(app, frame, area);
@@ -119,6 +120,15 @@ fn draw_row_menu(app: &App, frame: &mut Frame<'_>, area: Rect) {
         return;
     };
     frame.render_widget(RowMenuWidget::new(state, app.theme()), area);
+}
+
+fn draw_picker(app: &App, frame: &mut Frame<'_>, area: Rect) {
+    use crate::tui::widgets::picker::PickerWidget;
+
+    let Some(state) = app.picker() else {
+        return;
+    };
+    frame.render_widget(PickerWidget::new(state, app.theme()), area);
 }
 
 fn draw_clean_up(app: &App, frame: &mut Frame<'_>, area: Rect) {

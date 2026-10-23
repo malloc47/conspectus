@@ -910,7 +910,9 @@ the history records whose entity a check found gone (an Unknown record
 proves nothing, so it isn't listed), newest first, with a Clean up modal
 for reaping. Native views mark pinned rows with `◉` instead of floating
 them, and Controls offers a `pinned only` filter. A row action menu (`.`)
-lists what applies to the selected row, including Pin / Unpin (`p`).
+lists what applies to the entity in view, including Pin / Unpin (`p`): the same
+entries for the same entity in every view, hiding those with nothing to say.
+Accelerators act on the entity shown in the right pane while it has focus.
 
 Every capability in this surface is reachable through a navigable
 **Controls overlay** (sections for view, grouping, filters, sort).
@@ -1219,8 +1221,12 @@ redraws right away, with the returned mux's rows and its linked
 sessions' rows dimmed and spinning until the refresh lands (ADR 0108).
 A launch (rebuild, `mux new`, `mux launch`) keeps the TUI drawn
 with a spinner chip through its subprocess (ADR 0127), then attaches
-without refreshing first; the attach's return refreshes. A launch that
-ends without an attach refreshes before reporting (ADR 0133). The pin and
+without refreshing first; the attach's return refreshes (ADR 0133). Every
+state-changing gesture (pin, edit, retarget, forget, rebuild, launch) ends
+the same way: the acted-on row dims and spins while a rebuild or launch runs,
+a refresh reloads the views through the daemon like `r` (so no view loses
+data), and when the entity moved to another view, such as a History record
+that came back as a live mux, focus follows it and selects its row. The pin and
 rebuild commands discover without the forges, which they never read (ADR
 0135); a PR slot takes its state from history.
 Operation outcomes the TUI produces go to an in-memory message log

@@ -6,21 +6,33 @@ use super::*;
 /// rename overlay. Agent sessions use alias > harness title > empty;
 /// pin rows use the pin display name.
 pub(super) fn open_rename_overlay(app: &mut App) {
-    use crate::tui::rows::{RowId, RowKind};
-    let Some(selection) = app.selection().cloned() else {
-        app.update(Msg::SetStatus(Some("rename: nothing selected".to_string())));
+    use crate::model::NodeId;
+    let subject = crate::tui::actions::action_subject(app);
+    if let Some(pin) = subject.pin {
+        // A pin has its own prompt, which renames a live mux with it.
+        app.update(Msg::OpenSlotRename(pin));
+        return;
+    }
+    let Some(node) = subject.node else {
+        app.update(Msg::SetStatus(Some(
+            "rename: select an agent session or mux first".to_string(),
+        )));
         return;
     };
-    let row = app.tree().rows.iter().find(|row| row.id == selection);
-    let (title, initial) = match (selection, row.map(|row| &row.kind)) {
-        (
-            RowId::AgentSession(crate::model::NodeId::AgentSession(_)),
-            Some(RowKind::AgentSession(session_row)),
-        ) => (
-            " rename session ",
-            session_row.display_label().unwrap_or("").to_string(),
-        ),
-        (RowId::MuxSession(_), Some(RowKind::MuxSession(mux))) => {
+    let Some(handle) = app.snapshot_handle().cloned() else {
+        return;
+    };
+    let snapshot = handle.snapshot();
+    let (title, initial) = match &node {
+        NodeId::AgentSession(id) => {
+            let alias = snapshot.aliases.get(&node).map(str::to_string);
+            let title = snapshot.nodes.iter().find_map(|n| match n {
+                crate::model::GraphNode::AgentSession(s) if &s.id == id => s.title.clone(),
+                _ => None,
+            });
+            (" rename session ", alias.or(title).unwrap_or_default())
+        }
+        NodeId::MuxSession(mux) if snapshot.is_live(&node) => {
             // Seed with the bare tmux name (post-`<socket>:` prefix
             // when a non-default socket is in play) so the operator
             // types what tmux itself will show.
@@ -30,7 +42,7 @@ pub(super) fn open_rename_overlay(app: &mut App) {
                 .map_or(mux.native_id.as_str(), |(_, name)| name);
             (" rename mux ", bare.to_string())
         }
-        (RowId::MuxSession(_), Some(RowKind::Mixed(_))) => {
+        NodeId::MuxSession(_) => {
             app.update(Msg::SetStatus(Some(
                 "rename: that mux is gone; rebuild it first (Enter, or . for the menu)".to_string(),
             )));
@@ -38,13 +50,14 @@ pub(super) fn open_rename_overlay(app: &mut App) {
         }
         _ => {
             app.update(Msg::SetStatus(Some(
-                "rename: select an agent session or mux row first".to_string(),
+                "rename: select an agent session or mux first".to_string(),
             )));
             return;
         }
     };
     let state = crate::tui::widgets::input::TextInputState::new(title, initial);
     app.open_rename_overlay(state);
+    app.set_rename_node(node);
     app.update(Msg::SetStatus(Some(format!(
         "rename: {}",
         crate::tui::keybindings::overlay::footer(crate::tui::keybindings::overlay::TEXT_INPUT_KEYS)
@@ -221,6 +234,33 @@ pub(super) fn handle_clean_up_key(
         OverlayOutcome::Close => app.close_clean_up(),
         OverlayOutcome::Commit(msg) => {
             app.close_clean_up();
+            dispatch_live(terminal, app, config, tmux, *msg);
+        }
+        OverlayOutcome::CommitAndStay(msg) => {
+            dispatch_live(terminal, app, config, tmux, *msg);
+        }
+    }
+}
+
+/// Forward a key to the picker. Choosing an item pops it and
+/// dispatches what the item commits.
+pub(super) fn handle_picker_key(
+    terminal: &mut DefaultTerminal,
+    app: &mut App,
+    config: &RunConfig,
+    tmux: &dyn MuxBackend,
+    key: ratatui::crossterm::event::KeyEvent,
+) {
+    use crate::tui::{Overlay, OverlayOutcome};
+    let outcome = match app.picker_mut() {
+        Some(state) => state.handle((), key),
+        None => return,
+    };
+    match outcome {
+        OverlayOutcome::Consumed => {}
+        OverlayOutcome::Close => app.close_picker(),
+        OverlayOutcome::Commit(msg) => {
+            app.close_picker();
             dispatch_live(terminal, app, config, tmux, *msg);
         }
         OverlayOutcome::CommitAndStay(msg) => {
