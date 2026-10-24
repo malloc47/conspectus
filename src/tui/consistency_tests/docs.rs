@@ -135,6 +135,7 @@ fn view_heading(view: View) -> &'static str {
         View::Forks => "Forks view",
         View::Pinned => "Pinned view",
         View::History => "History view",
+        View::Search => "Search view",
     }
 }
 

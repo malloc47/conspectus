@@ -7,7 +7,7 @@ use super::*;
 pub(super) const NOW: i64 = 1_700_000_000;
 
 /// Every view the operator can switch to.
-pub(super) const ALL_VIEWS: [View; 7] = [
+pub(super) const ALL_VIEWS: [View; 8] = [
     View::Sessions,
     View::Mux,
     View::Union,
@@ -15,6 +15,7 @@ pub(super) const ALL_VIEWS: [View; 7] = [
     View::Forks,
     View::Pinned,
     View::History,
+    View::Search,
 ];
 
 /// The views that list the entities themselves (and their pins).

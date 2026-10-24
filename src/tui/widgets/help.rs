@@ -343,6 +343,7 @@ fn keymap_sections() -> Vec<HelpSection> {
                     "Switch directly to the sessions / mux / PRs / pinned view",
                 ),
                 Binding::new("5", "Switch directly to the history view"),
+                Binding::new("6", "Switch directly to the search view"),
                 Binding::new("] / [", "Cycle to next / previous view"),
             ],
         },

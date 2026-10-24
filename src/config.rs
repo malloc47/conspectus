@@ -342,6 +342,7 @@ pub struct TuiViewsConfig {
     pub forks: TuiViewConfig,
     pub pinned: TuiViewConfig,
     pub history: TuiViewConfig,
+    pub search: TuiViewConfig,
 }
 
 impl TuiViewsConfig {
@@ -355,6 +356,7 @@ impl TuiViewsConfig {
             View::Forks => &self.forks,
             View::Pinned => &self.pinned,
             View::History => &self.history,
+            View::Search => &self.search,
         }
     }
 }
@@ -1623,6 +1625,7 @@ fn view_config_key(view: View) -> &'static str {
         View::Forks => "forks",
         View::Pinned => "pinned",
         View::History => "history",
+        View::Search => "search",
     }
 }
 
@@ -1712,6 +1715,7 @@ fn parse_view_name(raw: &str) -> Option<crate::tui::View> {
         "forks" => Some(View::Forks),
         "pinned" => Some(View::Pinned),
         "history" => Some(View::History),
+        "search" => Some(View::Search),
         _ => None,
     }
 }

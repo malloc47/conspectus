@@ -446,6 +446,7 @@ pub(super) fn view_label(view: View) -> &'static str {
         View::Forks => "forks",
         View::Pinned => "pinned",
         View::History => "history",
+        View::Search => "search",
     }
 }
 

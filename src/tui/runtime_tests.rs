@@ -175,7 +175,7 @@ fn translate_ctrl_g_cycles_grouping() {
 
 #[test]
 fn translate_digits_switch_views_directly() {
-    // Sessions, Mux, PRs, Pinned, and History are surfaced in the UI; the
+    // Sessions, Mux, PRs, Pinned, History, and Search are surfaced in the UI; the
     // hidden Union and Forks views have no digit accelerators.
     let cases = [
         ('1', View::Sessions),
@@ -183,6 +183,7 @@ fn translate_digits_switch_views_directly() {
         ('3', View::Prs),
         ('4', View::Pinned),
         ('5', View::History),
+        ('6', View::Search),
     ];
     for (ch, view) in cases {
         assert_eq!(
@@ -191,7 +192,7 @@ fn translate_digits_switch_views_directly() {
             "char {ch}"
         );
     }
-    for ch in ['6', '7'] {
+    for ch in ['7', '8'] {
         assert_eq!(
             translate(press(KeyCode::Char(ch), KeyModifiers::NONE), 24),
             None,
@@ -214,10 +215,11 @@ fn translate_brackets_cycle_views() {
 
 #[test]
 fn cycle_view_wraps_in_both_directions() {
-    // VIEW_OPTIONS is [Sessions, Mux, Prs, Pinned, History], so the
-    // cycle wraps across those five.
-    assert_eq!(cycle_view(View::Sessions, -1), View::History);
-    assert_eq!(cycle_view(View::History, 1), View::Sessions);
+    // VIEW_OPTIONS is [Sessions, Mux, Prs, Pinned, History, Search], so
+    // the cycle wraps across those six.
+    assert_eq!(cycle_view(View::Sessions, -1), View::Search);
+    assert_eq!(cycle_view(View::Search, 1), View::Sessions);
+    assert_eq!(cycle_view(View::History, 1), View::Search);
     assert_eq!(cycle_view(View::Prs, 1), View::Pinned);
     assert_eq!(cycle_view(View::Pinned, 1), View::History);
     assert_eq!(cycle_view(View::Sessions, 1), View::Mux);

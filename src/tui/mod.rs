@@ -225,6 +225,8 @@ pub enum View {
     Pinned,
     /// Gone entities Conspectus remembers (ADR 0140).
     History,
+    /// Sessions that match the content search (ADR 0147).
+    Search,
 }
 
 /// Row sort within each group.
@@ -454,6 +456,18 @@ pub enum HistoryGrouping {
     None,
 }
 
+/// Top-level grouping in the Search view (ADR 0147).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SearchGrouping {
+    /// One ranked list.
+    None,
+    /// Under the project (repo) the session worked in.
+    Project,
+    /// By harness.
+    Harness,
+}
+
 /// Per-view grouping dispatch. Each variant wraps the per-view
 /// grouping enum so a single [`Grouping`] value can be persisted in
 /// [`crate::tui::app::App`], passed through the CLI surface, or
@@ -474,6 +488,7 @@ pub enum Grouping {
     Forks(ForksGrouping),
     Pinned(PinnedGrouping),
     History(HistoryGrouping),
+    Search(SearchGrouping),
 }
 
 impl Grouping {
@@ -487,6 +502,7 @@ impl Grouping {
             Self::Forks(_) => View::Forks,
             Self::Pinned(_) => View::Pinned,
             Self::History(_) => View::History,
+            Self::Search(_) => View::Search,
         }
     }
 
@@ -502,6 +518,7 @@ impl Grouping {
             View::Forks => Self::Forks(ForksGrouping::Provider),
             View::Pinned => Self::Pinned(PinnedGrouping::Project),
             View::History => Self::History(HistoryGrouping::Project),
+            View::Search => Self::Search(SearchGrouping::None),
         }
     }
 
@@ -532,7 +549,9 @@ impl Grouping {
             Self::Pinned(PinnedGrouping::None) => "none",
             Self::History(HistoryGrouping::Project) => "project",
             Self::History(HistoryGrouping::Kind) => "kind",
-            Self::History(HistoryGrouping::None) => "none",
+            Self::History(HistoryGrouping::None) | Self::Search(SearchGrouping::None) => "none",
+            Self::Search(SearchGrouping::Project) => "project",
+            Self::Search(SearchGrouping::Harness) => "harness",
         }
     }
 
@@ -590,6 +609,11 @@ impl Grouping {
                 Self::History(HistoryGrouping::Project),
                 Self::History(HistoryGrouping::Kind),
                 Self::History(HistoryGrouping::None),
+            ],
+            View::Search => &[
+                Self::Search(SearchGrouping::None),
+                Self::Search(SearchGrouping::Project),
+                Self::Search(SearchGrouping::Harness),
             ],
         }
     }
@@ -657,6 +681,7 @@ mod tests {
             View::Forks,
             View::Pinned,
             View::History,
+            View::Search,
         ] {
             for option in Grouping::values_for(view) {
                 let parsed = Grouping::parse_for(view, option.as_str());
@@ -708,6 +733,7 @@ mod tests {
             View::Forks,
             View::Pinned,
             View::History,
+            View::Search,
         ] {
             assert_eq!(Grouping::default_for(view).view(), view);
         }

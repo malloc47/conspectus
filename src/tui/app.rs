@@ -501,7 +501,7 @@ impl App {
         let grouping = match active_view {
             View::Sessions => super::Grouping::Sessions(config.sessions_grouping),
             View::Mux => super::Grouping::Mux(config.mux_grouping),
-            View::Union | View::Prs | View::Forks | View::Pinned | View::History => {
+            View::Union | View::Prs | View::Forks | View::Pinned | View::History | View::Search => {
                 super::Grouping::default_for(active_view)
             }
         };

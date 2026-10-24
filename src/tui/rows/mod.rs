@@ -28,6 +28,7 @@ pub mod history;
 pub mod mux;
 pub mod pinned;
 pub mod prs;
+pub mod search;
 pub mod sessions;
 pub mod union;
 
@@ -96,6 +97,7 @@ pub enum ViewLabel {
     Forks,
     Pinned,
     History,
+    Search,
 }
 
 impl From<View> for ViewLabel {
@@ -108,6 +110,7 @@ impl From<View> for ViewLabel {
             View::Forks => Self::Forks,
             View::Pinned => Self::Pinned,
             View::History => Self::History,
+            View::Search => Self::Search,
         }
     }
 }
@@ -1186,6 +1189,14 @@ fn build_tree_for_view_unfiltered(inputs: TreeInputs<'_>) -> RowTree {
             grouping: match grouping {
                 crate::tui::Grouping::History(g) => g,
                 _ => crate::tui::HistoryGrouping::Project,
+            },
+        }),
+        View::Search => search::build_search_tree(search::SearchBuildInputs {
+            snapshot,
+            home: home.as_deref(),
+            grouping: match grouping {
+                crate::tui::Grouping::Search(g) => g,
+                _ => crate::tui::SearchGrouping::None,
             },
         }),
         View::Pinned => pinned::build_pinned_tree(pinned::PinnedBuildInputs {

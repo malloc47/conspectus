@@ -238,7 +238,7 @@ The text lives only in memory. Pinned and History ignore the filter and say so.
 
 <!-- frame: keys="" width=170 height=30 -->
 ```text
-┌ ► sessions · mux · prs · pinned · history ────────────────────────────────────────┐
+┌ ► sessions · mux · prs · pinned · history · search ───────────────────────────────┐
 │▼ ▦   showcase-deck  atelier-repo-a+project  (agent-deck)  (1)                     │
 │    ●   showcase   claude       1m  ⊸  Showcase: agent-deck composite launcher     │
 │▶ ◆   repo-a         ~/atelier-demo/repo-a               (3)                       │
@@ -250,7 +250,7 @@ The text lives only in memory. Pinned and History ignore the filter and say so.
 
 <!-- frame: keys="jjjjjlj" width=170 height=30 -->
 ```text
-┌ ► sessions · mux · prs · pinned · history ────────────────────────────────────────┐
+┌ ► sessions · mux · prs · pinned · history · search ───────────────────────────────┐
 │▼ ▦   showcase-deck  atelier-repo-a+project  (agent-deck)  (1)                     │
 │    ●   showcase   claude       1m  ⊸  Showcase: agent-deck composite launcher     │
 │▶ ◆   repo-a         ~/atelier-demo/repo-a               (3)                       │
@@ -266,7 +266,7 @@ The text lives only in memory. Pinned and History ignore the filter and say so.
 
 <!-- frame: keys="<C-g><C-g><C-g><C-g><C-g>" width=170 height=30 -->
 ```text
-┌ ► sessions · mux · prs · pinned · history ────────────────────────────────────────┐
+┌ ► sessions · mux · prs · pinned · history · search ───────────────────────────────┐
 │  ●   showcase   claude       1m  ∘  ambiguous mux candidate A  project            │
 │  ●   showcase   claude       1m  ∘  ambiguous mux candidate B  project            │
 │  ●   showcase   claude       1m  ⊸  agent-deck composite launcher  showcase-deck-c│
@@ -323,7 +323,7 @@ with the running ones, drawn as a ghost.
 
 <!-- frame: keys="2" width=170 height=30 -->
 ```text
-┌ ► sessions · mux · prs · pinned · history ────────────────────────────────────────┐
+┌ ► sessions · mux · prs · pinned · history · search ───────────────────────────────┐
 │  ▣   ambiguous                  claude      15m  ∘                                │
 │  ▣   bare-work                  codex        2h  ∘  Showcase: codex resume via /p…│
 │  ▣ ◉ project                    claude       5m  ⊸                                │
@@ -333,7 +333,7 @@ with the running ones, drawn as a ghost.
 
 <!-- frame: keys="2<C-g><C-g>" width=170 height=30 -->
 ```text
-┌ ► sessions · mux · prs · pinned · history ────────────────────────────────────────┐
+┌ ► sessions · mux · prs · pinned · history · search ───────────────────────────────┐
 │▼ ◆   bare-project  ~/checkouts/bare-project                                       │
 │    ▣   bare-work                  codex        2h  ∘  Showcase: codex resume via …│
 │▶ ◆   project       ~/repos/project                                                │
@@ -377,7 +377,7 @@ them has an ambiguous mux link.
 
 <!-- frame: keys="3" width=170 height=30 -->
 ```text
-┌ ► sessions · mux · prs · pinned · history ────────────────────────────────────────┐
+┌ ► sessions · mux · prs · pinned · history · search ───────────────────────────────┐
 │▼ ◇   conspectus/project  ~/repos/project  (4)  ▲                                  │
 │  ▶ ⇄   #7 ⌥    2h  ◐  feature/extra  Release notes for 0.3                        │
 │▶ ◆   conspectus/project  ~/repos/project  no checkout                             │
@@ -386,7 +386,7 @@ them has an ambiguous mux link.
 
 <!-- frame: keys="3<C-g><C-g>" width=170 height=30 -->
 ```text
-┌ ► sessions · mux · prs · pinned · history ────────────────────────────────────────┐
+┌ ► sessions · mux · prs · pinned · history · search ───────────────────────────────┐
 │▼   Draft   (4)  ▲                                                                 │
 │    ⇄   conspectus/project#8 ⌥    1d  ◐  main  Pin the toolchain and refresh the l…│
 │  ▶ ⇄   conspectus/project#7 ⌥    2h  ◐  feature/extra  Release notes for 0.3      │
@@ -432,7 +432,7 @@ or the first 8 characters of its key, its status is `in mux` or
 
 <!-- frame: keys="4" width=170 height=30 -->
 ```text
-┌ ► sessions · mux · prs · pinned · history ────────────────────────────────────────┐
+┌ ► sessions · mux · prs · pinned · history · search ───────────────────────────────┐
 │▼ project  ~/repos/project                                                         │
 │  ▶ ▣ ◉ project-main                    live       5m   claude     ~/repos/project │
 │    ▣ ◎ nightly                         stopped    2d   claude     ~/repos/project │
@@ -445,7 +445,7 @@ or the first 8 characters of its key, its status is `in mux` or
 
 <!-- frame: keys="4<C-g>" width=170 height=30 -->
 ```text
-┌ ► sessions · mux · prs · pinned · history ────────────────────────────────────────┐
+┌ ► sessions · mux · prs · pinned · history · search ───────────────────────────────┐
 │▼ Muxes                                                                            │
 │  ▶ ▣ ◉ project-main                    live       5m   claude     ~/repos/project │
 │    ▣ ◎ nightly                         stopped    2d   claude     ~/repos/project │
@@ -460,7 +460,7 @@ or the first 8 characters of its key, its status is `in mux` or
 
 <!-- frame: keys="4<C-g><C-g>" width=170 height=30 -->
 ```text
-┌ ► sessions · mux · prs · pinned · history ────────────────────────────────────────┐
+┌ ► sessions · mux · prs · pinned · history · search ───────────────────────────────┐
 │▶ ▣ ◉ project-main                    live       5m   claude     ~/repos/project   │
 │  ▣ ◎ nightly                         stopped    2d   claude     ~/repos/project   │
 │  ● ◉ parser-session                  in mux     1h   claude     claude-code in pr…│
@@ -495,7 +495,7 @@ Every row is drawn as a ghost, with the same columns as a pin row.
 
 <!-- frame: keys="5" width=170 height=30 -->
 ```text
-┌ ► sessions · mux · prs · pinned · history ────────────────────────────────────────┐
+┌ ► sessions · mux · prs · pinned · history · search ───────────────────────────────┐
 │▼ project  ~/repos/project                                                         │
 │    ▣ release-prep   stopped    4d   claude     ~/repos/project                    │
 │    ◇ hotfix/login   removed    5d              project · hotfix/login             │
@@ -506,7 +506,7 @@ Every row is drawn as a ghost, with the same columns as a pin row.
 
 <!-- frame: keys="5<C-g>" width=170 height=30 -->
 ```text
-┌ ► sessions · mux · prs · pinned · history ────────────────────────────────────────┐
+┌ ► sessions · mux · prs · pinned · history · search ───────────────────────────────┐
 │▼ Muxes                                                                            │
 │    ▣ release-prep   stopped    4d   claude     ~/repos/project                    │
 │    ▣ bugfix-sprint  stopped    6d   claude     ~/repos/project                    │
@@ -518,13 +518,19 @@ Every row is drawn as a ghost, with the same columns as a pin row.
 
 <!-- frame: keys="5<C-g><C-g>" width=170 height=30 -->
 ```text
-┌ ► sessions · mux · prs · pinned · history ────────────────────────────────────────┐
+┌ ► sessions · mux · prs · pinned · history · search ───────────────────────────────┐
 │  ▣ release-prep   stopped    4d   claude     ~/repos/project                      │
 │  ◇ hotfix/login   removed    5d              project · hotfix/login               │
 │  ▣ bugfix-sprint  stopped    6d   claude     ~/repos/project                      │
 │  ▣ docs-sweep     stopped    9d   claude     ~/repos/project                      │
 │  ◇ spike/cache    removed   12d              project · spike/cache                │
 ```
+
+## Search view
+
+Reached with `6`. It lists the sessions that match the content search
+(see the Content paragraph under the Sessions view). Groupings: **none**
+(default, one ranked list), **project**, and **harness**.
 
 ## Union view
 
