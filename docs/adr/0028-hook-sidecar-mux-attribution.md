@@ -2,7 +2,8 @@
 
 ## Status
 
-Accepted
+Accepted. Refined by ADR 0146: the spool is the durable hook record
+with or without a daemon, and a daemon ingest writes it too.
 
 ## Context
 

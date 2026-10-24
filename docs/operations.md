@@ -66,11 +66,12 @@ name. Pi sessions Conspectus can't see or match:
 Hook sidecar records are optional, local observations written by
 harness hooks through `conspectus hook write`. They refine
 session-to-mux attribution when a harness can report the current
-session id without terminal input. With `conspectus serve` running,
-the hook writer sends observations to the daemon, which updates the
-in-memory graph and persists the result through `graph.bin`. When no
-daemon snapshot is available, Conspectus writes a minimal latest-only
-spool at `hooks-latest.json` under:
+session id without terminal input. Each observation lands in a
+minimal latest-only spool at `hooks-latest.json`, which every refresh
+replays. With `conspectus serve` running, the hook writer sends the
+observation to the daemon, which writes it to the spool and updates the
+graph at once; with no daemon, the hook writer writes the spool itself.
+The spool lives under:
 
 1. `$CONSPECTUS_HOOK_SIDECAR_STATE`, when set.
 2. `$XDG_STATE_HOME/conspectus/hooks`.

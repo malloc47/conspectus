@@ -389,10 +389,11 @@ The sane default is:
 - read home-global agent-specific state/config directories for supported
   harnesses
 - read mux sessions from the configured mux backend
-- read fresh daemonless harness hook spool records from the user's Conspectus
-  state directory when present, using them as current-session evidence rather
-  than durable user intent; when the daemon is available, hook evidence is
-  ingested directly into the in-memory graph and persisted via `graph.bin`
+- read fresh harness hook spool records from the user's Conspectus state
+  directory when present, using them as current-session evidence rather than
+  durable user intent; when the daemon is available, it writes each hook
+  observation to the spool and ingests it into the in-memory graph at once
+  (ADR 0146)
 - read read-only harness state and log databases when the harness maintains
   them, using stable indexed fields to discover sessions and to derive live
   mux attribution; for Codex this is the `state_*.sqlite` threads/lineage
@@ -1332,10 +1333,12 @@ migration helper and harmless if it fails.
   user-scope store (ADR 0141). Rebuilds are plans of steps shown before
   they run (ADR 0142). The mutation envelope is ADR 0143.
 - Hook sidecar records are local rebuildable observations written through
-  `conspectus hook write`. When the daemon is available, hook evidence is
-  ingested into `SnapshotState` and persisted through `graph.bin`. When no
-  daemon snapshot is available, the hook writer stores only the latest record
-  per mux in `hooks-latest.json` under `$XDG_STATE_HOME/conspectus/hooks` or
+  `conspectus hook write`. The spool, which holds only the latest record per
+  mux in `hooks-latest.json`, is the durable hook record and every refresh
+  replays it (ADR 0146). When the daemon is available, it writes the spool
+  root its discovery reads and ingests the record into `SnapshotState`; when
+  no daemon snapshot is available, the hook writer writes the spool under
+  `$XDG_STATE_HOME/conspectus/hooks` or
   `$HOME/.local/state/conspectus/hooks`, with
   `$CONSPECTUS_HOOK_SIDECAR_STATE` as an override.
 
