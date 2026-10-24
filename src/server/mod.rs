@@ -636,9 +636,15 @@ fn dispatch(request: &Request, ctx: &DispatchCtx) -> Response {
 }
 
 /// `hook_ingest` command handler. This is the daemon-owned fast path for
-/// hook observations: mutate the live graph, re-resolve, and persist through
-/// `publish_snapshot` so `graph.bin` remains the only Conspectus-owned graph
-/// persistence artifact.
+/// hook observations: record the observation in the hook spool, mutate the
+/// live graph, re-resolve, and publish.
+///
+/// The spool write is what makes the observation last. Every refresh evicts
+/// the hook-sidecar pass and replays it from the spool, so a record that
+/// only reached the live graph would vanish on the next cycle. The record
+/// goes to the spool root this daemon's discovery reads, which may differ
+/// from the one the hook process would have picked from its own
+/// environment (ADR 0146).
 fn handle_hook_ingest(request: &Request, ctx: &DispatchCtx) -> Response {
     let record = match request.args.get("record").cloned() {
         Some(value) => match serde_json::from_value::<HookRecord>(value) {
@@ -683,6 +689,19 @@ fn handle_hook_ingest(request: &Request, ctx: &DispatchCtx) -> Response {
             }),
         };
     };
+    if let Some(root) = (ctx.discovery)(ForgeFetch::CachedOnly).hook_sidecar_root
+        && let Err(err) = crate::hook::HookStore::new(&root).write_record(&record)
+    {
+        return Response {
+            id: request.id.clone(),
+            result: "error",
+            data: None,
+            error: Some(ErrorBody {
+                code: "hook_spool_write_failed".to_string(),
+                message: format!("{err:#}"),
+            }),
+        };
+    }
     hook_sidecar::apply_hook_records(
         &mut snapshot,
         vec![record],

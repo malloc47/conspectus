@@ -47,6 +47,14 @@ Targeted for 0.2.0, after 0.1.0 is tagged. History, rebuild, and pins
   and removes the old tables. The Pins modal and the `B`, `b`, `A`, and
   `L` keys are gone.
 
+### Fixed
+
+- **Harness hooks work while `conspectus serve` runs.** The daemon
+  applied each hook observation to its live graph only, and the next
+  refresh, a few seconds later, dropped it. It now records the
+  observation in `hooks-latest.json` first, so hook attribution lasts
+  across refreshes and daemon restarts.
+
 ## [0.1.0] - not yet released
 
 The first public release, 0.1.0. Conspectus builds one evidence-backed

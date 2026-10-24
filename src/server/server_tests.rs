@@ -1,7 +1,7 @@
 use super::*;
 use crate::hook::{HookRecord, HookTmuxRecord, SCHEMA_VERSION};
 use crate::model::{
-    AgentSessionId, AgentSessionNode, GraphNode, MuxSessionId, MuxSessionNode, RelationKind,
+    AgentSessionId, AgentSessionNode, GraphNode, MuxSessionId, MuxSessionNode, NodeId, RelationKind,
 };
 use std::time::Duration;
 
@@ -109,6 +109,124 @@ fn hook_ingest_updates_snapshot_state_and_published_bytes() {
         link.relation == RelationKind::LinkedToMux
             && link.source_metadata.adapter == crate::discovery::providers::HOOK_SIDECAR
     }));
+}
+
+fn hook_record(session_key: &str, mux: &str) -> HookRecord {
+    HookRecord {
+        schema_version: SCHEMA_VERSION,
+        harness_key: "claude-code".to_string(),
+        session_key: session_key.to_string(),
+        cwd: Some("/work".to_string()),
+        pid: None,
+        ppid: None,
+        tmux: Some(HookTmuxRecord {
+            session_name: Some(mux.to_string()),
+            native_id: None,
+            pane_id: Some("%1".to_string()),
+            socket_path: None,
+        }),
+        transcript_path: None,
+        hook_event_name: Some("SessionStart".to_string()),
+        observed_epoch: crate::discovery::current_epoch(),
+        harness_version: None,
+        background_harness: false,
+    }
+}
+
+fn hook_ingest_request(record: &HookRecord) -> Request {
+    Request {
+        command: "hook_ingest".to_string(),
+        args: serde_json::json!({ "record": record }),
+        id: "test-hook".to_string(),
+    }
+}
+
+/// Whether the daemon's live graph ties `session_key` to a mux through a
+/// hook record.
+fn hook_attributes(ctx: &DispatchCtx, session_key: &str) -> bool {
+    let snapshot = load_snapshot_state(&ctx.snapshot_state).expect("snapshot");
+    snapshot.candidate_links.iter().any(|link| {
+        link.relation == RelationKind::LinkedToMux
+            && link.source_metadata.adapter == crate::discovery::providers::HOOK_SIDECAR
+            && matches!(
+                &link.source,
+                NodeId::AgentSession(id) if id.session_key == session_key
+            )
+    })
+}
+
+#[test]
+fn an_ingested_hook_record_outlives_later_refreshes() {
+    let temp = tempfile::tempdir().unwrap();
+    let server = crate::discovery::tmux::ScriptedTmux::default();
+    server.lists(ALPHA_ROW);
+    let ctx = mux_ctx_with_hooks(temp.path(), server, Some(temp.path().join("hooks")));
+    assert!(response_is_ok(&handle_refresh(
+        &refresh_request("mux"),
+        &ctx
+    )));
+
+    let response = handle_hook_ingest(&hook_ingest_request(&hook_record("current", "alpha")), &ctx);
+    assert!(response_is_ok(&response), "{:?}", response.error);
+    assert!(hook_attributes(&ctx, "current"));
+
+    for _ in 0..2 {
+        assert!(response_is_ok(&handle_refresh(
+            &refresh_request("mux"),
+            &ctx
+        )));
+    }
+    assert!(
+        hook_attributes(&ctx, "current"),
+        "a refresh replays the hook spool, which must hold the ingested record"
+    );
+}
+
+#[test]
+fn an_ingested_hook_record_survives_a_daemon_restart() {
+    let temp = tempfile::tempdir().unwrap();
+    let hooks = temp.path().join("hooks");
+    let server = crate::discovery::tmux::ScriptedTmux::default();
+    server.lists(ALPHA_ROW);
+    let ctx = mux_ctx_with_hooks(temp.path(), server.clone(), Some(hooks.clone()));
+    assert!(response_is_ok(&handle_refresh(
+        &refresh_request("mux"),
+        &ctx
+    )));
+    assert!(response_is_ok(&handle_hook_ingest(
+        &hook_ingest_request(&hook_record("current", "alpha")),
+        &ctx
+    )));
+
+    let restarted = mux_ctx_with_hooks(temp.path(), server, Some(hooks));
+    assert!(response_is_ok(&handle_refresh(
+        &refresh_request("mux"),
+        &restarted
+    )));
+    assert!(hook_attributes(&restarted, "current"));
+}
+
+#[test]
+fn a_failed_spool_write_refuses_the_ingest_and_leaves_the_graph_alone() {
+    let temp = tempfile::tempdir().unwrap();
+    // A file where the spool directory should be, so the write fails.
+    let hooks = temp.path().join("hooks");
+    std::fs::write(&hooks, "").unwrap();
+    let server = crate::discovery::tmux::ScriptedTmux::default();
+    server.lists(ALPHA_ROW);
+    let ctx = mux_ctx_with_hooks(temp.path(), server, Some(hooks));
+    assert!(response_is_ok(&handle_refresh(
+        &refresh_request("mux"),
+        &ctx
+    )));
+
+    let response = handle_hook_ingest(&hook_ingest_request(&hook_record("current", "alpha")), &ctx);
+
+    assert_eq!(
+        response.error.as_ref().map(|error| error.code.as_str()),
+        Some("hook_spool_write_failed")
+    );
+    assert!(!hook_attributes(&ctx, "current"));
 }
 
 fn agent_session(session_key: &str) -> GraphNode {
@@ -487,6 +605,16 @@ fn a_refresh_whose_fetch_a_shutdown_cut_short_does_not_publish() {
 /// A daemon context whose discovery runs only the mux provider, against
 /// `server`, with the daemon's own caches.
 fn mux_ctx(temp: &Path, server: crate::discovery::tmux::ScriptedTmux) -> DispatchCtx {
+    mux_ctx_with_hooks(temp, server, None)
+}
+
+/// [`mux_ctx`] whose discovery also replays the hook spool at
+/// `hook_root`, as the daemon's does.
+fn mux_ctx_with_hooks(
+    temp: &Path,
+    server: crate::discovery::tmux::ScriptedTmux,
+    hook_root: Option<PathBuf>,
+) -> DispatchCtx {
     let caches: Arc<DiscoveryCaches> = Arc::default();
     let factory_caches = Arc::clone(&caches);
     DispatchCtx {
@@ -500,10 +628,14 @@ fn mux_ctx(temp: &Path, server: crate::discovery::tmux::ScriptedTmux) -> Dispatc
         discovery_caches: caches,
         forge_fetch_lock: Arc::default(),
         discovery: Arc::new(move |fetch| {
-            LocalDiscoveryConfig::empty()
+            let config = LocalDiscoveryConfig::empty()
                 .with_caches(Arc::clone(&factory_caches))
                 .with_tmux_runner(server.clone())
-                .with_forge_fetch(fetch)
+                .with_forge_fetch(fetch);
+            match &hook_root {
+                Some(root) => config.with_hook_sidecar_root(root),
+                None => config,
+            }
         }),
         shutdown: Arc::default(),
         history: None,
