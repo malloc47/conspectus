@@ -75,8 +75,11 @@ pub enum ExecSpec {
     /// picks native (parse transcript on disk into `ViewerState` +
     /// `App::open_viewer_modal`) vs external fallback (spawn
     /// `claude-history` etc.); both paths read the filesystem so the
-    /// reducer never touches them.
-    ViewSession(AgentSessionId),
+    /// reducer never touches them. With a [`ViewerOpen`] the viewer
+    /// lands on that search result with the query highlighted.
+    ///
+    /// [`ViewerOpen`]: crate::viewer::state::ViewerOpen
+    ViewSession(AgentSessionId, Option<crate::viewer::state::ViewerOpen>),
     /// Suspend the alt screen, re-exec into
     /// `conspectus mux new <name> --cwd <cwd> --no-attach`, refresh
     /// so the row tree picks up the new session, then attach.
@@ -295,7 +298,7 @@ pub fn lifecycle(effect: &Effect) -> Lifecycle {
                 refreshes: true,
                 follows_entity: false,
             },
-            ExecSpec::Resume(_) | ExecSpec::ViewSession(_) | ExecSpec::ShowRebuildPlan { .. } => {
+            ExecSpec::Resume(_) | ExecSpec::ViewSession(..) | ExecSpec::ShowRebuildPlan { .. } => {
                 Lifecycle::NONE
             }
             ExecSpec::MuxNew { .. } | ExecSpec::MuxLaunch { .. } => Lifecycle {

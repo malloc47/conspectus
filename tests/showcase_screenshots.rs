@@ -150,3 +150,31 @@ fn the_showcase_screens_render_real_previews_with_stable_paths_and_ages() {
         );
     }
 }
+
+#[test]
+fn the_viewer_finds_text_and_shows_the_position() {
+    let scratch = tempfile::tempdir().expect("scratch");
+    conspectus(scratch.path())
+        .args(["dev", "scenario", "materialize", "showcase"])
+        .arg(scratch.path().join("world"))
+        .assert()
+        .success();
+
+    // Open the selected session's transcript, then `/feature` and Enter.
+    let found = frame(scratch.path(), "jjjjjljjjjv/feature<Enter>");
+    assert!(found.contains("find \"feature\" 1/"), "{found}");
+
+    // The prompt is open until Enter: its text and the key hint show.
+    let typing = frame(scratch.path(), "jjjjjljjjjv/feat");
+    let last = typing
+        .lines()
+        .rev()
+        .find(|l| !l.trim().is_empty())
+        .unwrap_or("");
+    assert!(last.contains("/feat"), "{typing}");
+    assert!(last.contains("Enter find"), "{typing}");
+
+    // A query that is not there says so.
+    let none = frame(scratch.path(), "jjjjjljjjjv/zebra<Enter>");
+    assert!(none.contains("find \"zebra\" no match"), "{none}");
+}

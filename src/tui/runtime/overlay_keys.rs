@@ -493,6 +493,20 @@ pub(in crate::tui) fn handle_viewer_overlay_key(
     if app.viewer_modal().is_none() {
         return;
     }
+    // While the find prompt is open it owns the keys: bound keys edit
+    // or leave it, and anything else types.
+    if app
+        .viewer_modal()
+        .is_some_and(|state| state.find.prompt.is_some())
+    {
+        use crate::tui::keybindings::overlay::{VIEWER_FIND_KEYS, resolve, typed_char};
+        let fmsg = resolve(VIEWER_FIND_KEYS, key)
+            .or_else(|| typed_char(key).map(crate::viewer::find::ViewerFindMsg::Insert));
+        if let Some(fmsg) = fmsg {
+            dispatch(app, Msg::ViewerFind(fmsg));
+        }
+        return;
+    }
     let vmsg = crate::tui::keybindings::overlay::resolve(
         crate::tui::keybindings::overlay::VIEWER_KEYS,
         key,

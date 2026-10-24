@@ -16,8 +16,11 @@ fn position(msg: ViewerMsg) -> usize {
         ViewerMsg::ToggleThinking => 9,
         ViewerMsg::ToggleAborted => 10,
         ViewerMsg::ToggleHidden => 11,
-        ViewerMsg::ToggleHelp => 12,
-        ViewerMsg::Close => 13,
+        ViewerMsg::FindOpen => 12,
+        ViewerMsg::FindNext => 13,
+        ViewerMsg::FindPrev => 14,
+        ViewerMsg::ToggleHelp => 15,
+        ViewerMsg::Close => 16,
     }
 }
 

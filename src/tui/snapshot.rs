@@ -215,7 +215,7 @@ fn drive_keys(
 fn open_viewer(app: &mut App, rebase: Option<(&std::path::Path, &std::path::Path)>) {
     use crate::tui::effect::{Effect, ExecSpec};
     for effect in app.update(Msg::ViewSelected) {
-        let Effect::Exec(ExecSpec::ViewSession(mut id)) = effect else {
+        let Effect::Exec(ExecSpec::ViewSession(mut id, open)) = effect else {
             runtime::execute_effects(app, vec![effect]);
             continue;
         };
@@ -224,7 +224,7 @@ fn open_viewer(app: &mut App, rebase: Option<(&std::path::Path, &std::path::Path
         {
             id.state_scope = to.join(rest).display().to_string();
         }
-        match crate::tui::viewer_bridge::build_viewer_state(&id) {
+        match crate::tui::viewer_bridge::build_viewer_state_at(&id, open.as_ref()) {
             Some(state) => app.open_viewer_modal(state),
             None => eprintln!("conspectus: snapshot mode found no transcript to view"),
         }

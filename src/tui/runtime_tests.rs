@@ -1782,3 +1782,83 @@ mod settle {
         assert_eq!(calls.into_inner(), 1);
     }
 }
+
+mod viewer_find_prompt {
+    use super::*;
+    use crate::viewer::model::{TranscriptDocument, TranscriptTurn, TurnKind, TurnRole};
+    use crate::viewer::state::ViewerState;
+    use ratatui::crossterm::event::KeyEvent;
+
+    fn key(code: KeyCode, mods: KeyModifiers) -> KeyEvent {
+        KeyEvent::new(code, mods)
+    }
+
+    fn app_with_viewer() -> App {
+        let mut document = TranscriptDocument::default();
+        for body in ["alpha beta", "gamma needle", "delta"] {
+            document.turns.push(TranscriptTurn {
+                role: TurnRole::User,
+                kind: TurnKind::Message,
+                body: body.to_string(),
+                timestamp: None,
+                aborted: false,
+                hidden: false,
+            });
+        }
+        let mut app = App::new(RunConfig::defaults());
+        app.open_viewer_modal(ViewerState::new(document));
+        app
+    }
+
+    fn type_text(app: &mut App, text: &str) {
+        for c in text.chars() {
+            handle_viewer_overlay_key(app, key(KeyCode::Char(c), KeyModifiers::NONE));
+        }
+    }
+
+    #[test]
+    fn slash_opens_the_prompt_and_every_key_types_into_it() {
+        let mut app = app_with_viewer();
+        handle_viewer_overlay_key(&mut app, key(KeyCode::Char('/'), KeyModifiers::NONE));
+        // `n`, `q`, and Space are viewer keys, but the prompt owns them now.
+        type_text(&mut app, "n q");
+        let prompt = app.viewer_modal().and_then(|s| s.find.prompt.as_ref());
+        assert_eq!(prompt.map(|p| p.text.as_str()), Some("n q"));
+        assert!(app.viewer_modal().is_some(), "q did not close the viewer");
+    }
+
+    #[test]
+    fn enter_runs_the_find_and_n_steps_afterwards() {
+        let mut app = app_with_viewer();
+        handle_viewer_overlay_key(&mut app, key(KeyCode::Char('/'), KeyModifiers::NONE));
+        type_text(&mut app, "a");
+        handle_viewer_overlay_key(&mut app, key(KeyCode::Enter, KeyModifiers::NONE));
+        let state = app.viewer_modal().expect("viewer");
+        assert_eq!(state.find.matches, [0, 1, 2]);
+        assert!(state.find.prompt.is_none());
+        handle_viewer_overlay_key(&mut app, key(KeyCode::Char('n'), KeyModifiers::NONE));
+        assert_eq!(app.viewer_modal().and_then(|s| s.find.current), Some(1));
+        handle_viewer_overlay_key(&mut app, key(KeyCode::Char('N'), KeyModifiers::SHIFT));
+        assert_eq!(app.viewer_modal().and_then(|s| s.find.current), Some(0));
+    }
+
+    #[test]
+    fn escape_leaves_the_prompt_without_closing_the_viewer() {
+        let mut app = app_with_viewer();
+        handle_viewer_overlay_key(&mut app, key(KeyCode::Char('/'), KeyModifiers::NONE));
+        type_text(&mut app, "x");
+        handle_viewer_overlay_key(&mut app, key(KeyCode::Esc, KeyModifiers::NONE));
+        assert!(app.viewer_modal().is_some_and(|s| s.find.prompt.is_none()));
+        handle_viewer_overlay_key(&mut app, key(KeyCode::Esc, KeyModifiers::NONE));
+        assert!(app.viewer_modal().is_none(), "a second Esc closes it");
+    }
+
+    #[test]
+    fn control_chords_do_not_type() {
+        let mut app = app_with_viewer();
+        handle_viewer_overlay_key(&mut app, key(KeyCode::Char('/'), KeyModifiers::NONE));
+        handle_viewer_overlay_key(&mut app, key(KeyCode::Char('a'), KeyModifiers::CONTROL));
+        let prompt = app.viewer_modal().and_then(|s| s.find.prompt.as_ref());
+        assert_eq!(prompt.map(|p| p.text.as_str()), Some(""));
+    }
+}

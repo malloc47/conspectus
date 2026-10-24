@@ -854,7 +854,7 @@ pub fn default_effect(app: &App) -> Option<crate::tui::Effect> {
                     None
                 } else {
                     viewer_session_for(snapshot, node)
-                        .map(|session| Effect::Exec(ExecSpec::ViewSession(session)))
+                        .map(|session| Effect::Exec(ExecSpec::ViewSession(session, None)))
                 }
             }
             (SlotStatus::Live, PinKind::Pr) => Some(Effect::Toast(match pin.text("url") {

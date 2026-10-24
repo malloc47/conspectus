@@ -547,6 +547,7 @@ pub const OMNIBOX_KEYS: &[KeyRow<OmniboxKey>] = &[alias(key(KeyCode::Tab), Omnib
 // all aliases; the keys still resolve here.
 // ---------------------------------------------------------------------
 
+use crate::viewer::find::ViewerFindMsg;
 use crate::viewer::input::ViewerMsg;
 
 pub const VIEWER_KEYS: &[KeyRow<ViewerMsg>] = &[
@@ -570,8 +571,41 @@ pub const VIEWER_KEYS: &[KeyRow<ViewerMsg>] = &[
     alias(KeyMatcher::UpperChar('T'), ViewerMsg::ToggleThinking),
     alias(KeyMatcher::UpperChar('I'), ViewerMsg::ToggleAborted),
     alias(KeyMatcher::UpperChar('H'), ViewerMsg::ToggleHidden),
+    alias(ch('/'), ViewerMsg::FindOpen),
+    alias(ch('n'), ViewerMsg::FindNext),
+    alias(KeyMatcher::UpperChar('N'), ViewerMsg::FindPrev),
     alias(ch('?'), ViewerMsg::ToggleHelp),
 ];
+
+/// The find prompt inside the viewer. Keys no row binds type into the
+/// prompt (see [`typed_char`]).
+pub const VIEWER_FIND_KEYS: &[KeyRow<ViewerFindMsg>] = &[
+    alias(ctrl('c'), ViewerFindMsg::Cancel),
+    shown(key(KeyCode::Enter), ViewerFindMsg::Confirm, "Enter", "find"),
+    shown(key(KeyCode::Esc), ViewerFindMsg::Cancel, "Esc", "cancel"),
+    alias(key(KeyCode::Backspace), ViewerFindMsg::Backspace),
+    alias(key(KeyCode::Delete), ViewerFindMsg::Delete),
+    alias(key(KeyCode::Left), ViewerFindMsg::Left),
+    alias(key(KeyCode::Right), ViewerFindMsg::Right),
+    alias(key(KeyCode::Home), ViewerFindMsg::Home),
+    alias(key(KeyCode::End), ViewerFindMsg::End),
+    alias(ctrl('u'), ViewerFindMsg::ClearLine),
+];
+
+/// The character a key types into a text prompt, if it types one:
+/// a plain or shifted character with no Control or Alt.
+pub fn typed_char(event: KeyEvent) -> Option<char> {
+    match event.code {
+        KeyCode::Char(c)
+            if !event
+                .modifiers
+                .intersects(KeyModifiers::CONTROL | KeyModifiers::ALT) =>
+        {
+            Some(c)
+        }
+        _ => None,
+    }
+}
 
 // ---------------------------------------------------------------------
 // The modal key convention. One set of meanings for Esc, Enter, and
@@ -669,6 +703,7 @@ pub const MODAL_CONVENTION: &[ModalConvention] = &[
         SpaceMeans::Pages,
         "a pager: Space pages down",
     ),
+    conv("ViewerFind", EnterMeans::Submits, SpaceMeans::Types, ""),
     conv("WorktreeMenu", EnterMeans::Activates, SpaceMeans::Types, ""),
     conv("NewMux", EnterMeans::Submits, SpaceMeans::Types, ""),
     conv("MuxMenu", EnterMeans::Activates, SpaceMeans::Types, ""),

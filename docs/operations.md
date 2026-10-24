@@ -1027,6 +1027,33 @@ page is open the movement keys (`j`/`k`, `PgDn`/`PgUp`, `g`/`G`, `Ctrl-D`/
 `Ctrl-U`) scroll it rather than the transcript, `?`, `Esc`, or `q` close
 it, and the toggles wait until it is closed.
 
+### Finding text in a transcript
+
+Inside the transcript viewer, `/` opens a find prompt in the footer.
+Type a query and press `Enter` to jump to the first match at or below the
+top of the screen; `Esc` leaves the prompt and keeps an earlier find, and
+the prompt supports `Backspace`, `Delete`, `←`/`→`, `Home`/`End`, and
+`Ctrl-U` (delete to the start). `n` and `N` step to the next and previous
+match and wrap at either end, saying so in the footer. The footer shows
+`find "query" i/N` (or `no match`), and each match is highlighted: the
+current one reversed, the others underlined. `Esc` clears the find before
+it closes the viewer.
+
+Find is a case-insensitive substring match on what the viewer is
+showing: messages always, and tool output, thinking, aborted, and hidden
+turns only while their toggles (`t`, `T`, `I`, `H`) show them. When a
+query matches only in turns the toggles hide, the footer says how many
+(`no match · 2 in hidden turns`); turning the toggle on brings them into
+the match count. A match the line wrapping splits across two lines still
+counts but is not highlighted.
+
+A search result opens the viewer on its matching turn with the query
+active. If that turn is hidden, the viewer shows it (full tool output,
+thinking, aborted, or hidden turns, as needed) and says what it turned on
+in the footer for one key press. If the transcript changed since the
+search, the viewer looks near the remembered turn, then anywhere, for the
+match, and says when it is no longer there.
+
 ## TUI messages
 
 Every operation the TUI runs (rebuild, mux new/launch, attach,

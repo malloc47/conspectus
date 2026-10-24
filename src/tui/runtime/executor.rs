@@ -341,8 +341,8 @@ pub(super) fn execute_exec_spec(
                 let _ = app.update(Msg::SetStatus(Some(resume_disabled_reason(other))));
             }
         },
-        ExecSpec::ViewSession(session_id) => {
-            execute_view_session(terminal, app, config, session_id);
+        ExecSpec::ViewSession(session_id, open) => {
+            execute_view_session(terminal, app, config, session_id, open.as_ref());
         }
         ExecSpec::MuxNew { name, cwd } => {
             execute_mux_new(terminal, app, &name, &cwd, policy);
@@ -369,8 +369,9 @@ pub(super) fn execute_view_session(
     app: &mut App,
     config: &RunConfig,
     session_id: crate::model::AgentSessionId,
+    open: Option<&crate::viewer::state::ViewerOpen>,
 ) {
-    if let Some(state) = crate::tui::viewer_bridge::build_viewer_state(&session_id) {
+    if let Some(state) = crate::tui::viewer_bridge::build_viewer_state_at(&session_id, open) {
         let label = format!("{}:{}", session_id.harness_key, session_id.session_key);
         app.open_viewer_modal(state);
         let _ = app.update(Msg::SetStatus(Some(format!("viewing {label}"))));

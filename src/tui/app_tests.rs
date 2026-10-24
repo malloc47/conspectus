@@ -2227,6 +2227,52 @@ mod modal_stack {
     }
 
     #[test]
+    fn viewer_find_msgs_edit_the_prompt_and_run_the_find() {
+        use crate::viewer::find::ViewerFindMsg;
+        use crate::viewer::input::ViewerMsg;
+        use crate::viewer::model::{TranscriptDocument, TranscriptTurn, TurnKind, TurnRole};
+        use crate::viewer::state::ViewerState;
+        let mut document = TranscriptDocument::default();
+        document.turns.push(TranscriptTurn {
+            role: TurnRole::User,
+            kind: TurnKind::Message,
+            body: "find the needle".to_string(),
+            timestamp: None,
+            aborted: false,
+            hidden: false,
+        });
+        let mut app = App::new(RunConfig::defaults());
+        app.open_viewer_modal(ViewerState::new(document));
+        app.update(Msg::Viewer(ViewerMsg::FindOpen));
+        for c in "needle".chars() {
+            assert!(
+                app.update(Msg::ViewerFind(ViewerFindMsg::Insert(c)))
+                    .is_empty()
+            );
+        }
+        let state = app.viewer_modal().expect("viewer");
+        assert_eq!(
+            state.find.prompt.as_ref().map(|p| p.text.as_str()),
+            Some("needle")
+        );
+        app.update(Msg::ViewerFind(ViewerFindMsg::Confirm));
+        let state = app.viewer_modal().expect("viewer stays open");
+        assert!(state.find.prompt.is_none());
+        assert_eq!(state.find.matches, [0]);
+    }
+
+    #[test]
+    fn viewer_find_msg_without_a_viewer_on_top_is_a_no_op() {
+        use crate::viewer::find::ViewerFindMsg;
+        let mut app = App::new(RunConfig::defaults());
+        assert!(
+            app.update(Msg::ViewerFind(ViewerFindMsg::Confirm))
+                .is_empty()
+        );
+        assert!(app.modal_stack().is_empty());
+    }
+
+    #[test]
     fn viewer_msg_without_open_viewer_is_a_no_op() {
         use crate::viewer::input::ViewerMsg;
         let mut app = App::new(RunConfig::defaults());
@@ -2371,7 +2417,7 @@ mod reducer_effects {
         let effects = app.update(Msg::ViewSelected);
         assert_eq!(effects.len(), 1);
         match &effects[0] {
-            Effect::Exec(ExecSpec::ViewSession(session_id)) => {
+            Effect::Exec(ExecSpec::ViewSession(session_id, _)) => {
                 assert_eq!(session_id.harness_key, "codex");
             }
             other => panic!("expected Exec(ViewSession), got {other:?}"),

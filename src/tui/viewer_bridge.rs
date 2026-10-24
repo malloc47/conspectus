@@ -20,9 +20,10 @@
 
 use crate::discovery::harness::registered_adapters;
 use crate::model::AgentSessionId;
+use crate::tui::keybindings::overlay::VIEWER_FIND_KEYS;
 use crate::viewer::model::{SessionLocator, TranscriptDocument};
 use crate::viewer::parser::ParseError;
-use crate::viewer::state::ViewerState;
+use crate::viewer::state::{ViewerOpen, ViewerState};
 
 /// Map a graph-flavored [`AgentSessionId`] to a viewer-flavored
 /// `SessionLocator`, or `None` when the harness key has no
@@ -38,13 +39,28 @@ pub fn locator_for_session(session: &AgentSessionId) -> Option<SessionLocator> {
 /// document so the widget can always render a coherent banner
 /// instead of bubbling the error up.
 pub fn build_viewer_state(session: &AgentSessionId) -> Option<ViewerState> {
+    build_viewer_state_at(session, None)
+}
+
+/// [`build_viewer_state`], landed on a search result when `open` is
+/// given: the viewer highlights the query and shows the matched turn,
+/// switching on whatever hides it.
+pub fn build_viewer_state_at(
+    session: &AgentSessionId,
+    open: Option<&ViewerOpen>,
+) -> Option<ViewerState> {
     let adapter = registered_adapters().find(|a| a.harness_key() == session.harness_key)?;
     let locator = adapter.transcript_source(session)?;
     let document = adapter
         .transcript_parser()
         .and_then(|parser| parser.read(&locator).ok())
         .unwrap_or_else(|| TranscriptDocument::unavailable(&locator));
-    Some(ViewerState::new(document))
+    let mut state = ViewerState::new(document);
+    state.find_hint = crate::tui::keybindings::overlay::footer(VIEWER_FIND_KEYS);
+    if let Some(open) = open {
+        state.open_at(open);
+    }
+    Some(state)
 }
 
 /// Why a session's transcript has nothing to show.

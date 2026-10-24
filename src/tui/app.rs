@@ -1531,6 +1531,16 @@ impl App {
                     }
                 }
             }
+            Msg::ViewerFind(fmsg) => {
+                if !matches!(self.modal_stack.last(), Some(crate::tui::Modal::Viewer(_))) {
+                    return effects;
+                }
+                let Some(crate::tui::Modal::Viewer(state)) = self.modal_stack.pop() else {
+                    unreachable!("checked above");
+                };
+                let (next, _) = crate::viewer::find::reduce_find(state, fmsg);
+                self.modal_stack.push(crate::tui::Modal::Viewer(next));
+            }
             Msg::AttachSelected => {
                 use crate::tui::effect::ExecSpec;
                 if self.selected_row_awaits_handoff() {
@@ -1582,7 +1592,7 @@ impl App {
                 use crate::tui::effect::ExecSpec;
                 match crate::tui::actions::resolve_view_session(self) {
                     Ok(session_id) => {
-                        effects.push(Effect::Exec(ExecSpec::ViewSession(session_id)));
+                        effects.push(Effect::Exec(ExecSpec::ViewSession(session_id, None)));
                     }
                     Err(reason) => effects.push(Effect::Toast(
                         crate::tui::viewer::viewer_disabled_reason(&reason),

@@ -214,6 +214,8 @@ pub enum Msg {
     /// on `ViewerEffect::Close`. No-op when the top of the modal
     /// stack isn't the viewer.
     Viewer(crate::viewer::input::ViewerMsg),
+    /// A key of the viewer's find prompt.
+    ViewerFind(crate::viewer::find::ViewerFindMsg),
     /// Attach to the currently selected row's mux session
     /// (ADR 0085 contract 2). The reducer resolves the target via
     /// `resolve_attach_target(&self)` and emits either

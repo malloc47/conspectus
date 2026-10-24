@@ -19,7 +19,7 @@ pub struct HelpEntry {
 
 impl ViewerMsg {
     /// Every message, in the order the help page lists them.
-    pub const ALL: [ViewerMsg; 14] = [
+    pub const ALL: [ViewerMsg; 17] = [
         ViewerMsg::ScrollDown,
         ViewerMsg::ScrollUp,
         ViewerMsg::PageDown,
@@ -32,6 +32,9 @@ impl ViewerMsg {
         ViewerMsg::ToggleThinking,
         ViewerMsg::ToggleAborted,
         ViewerMsg::ToggleHidden,
+        ViewerMsg::FindOpen,
+        ViewerMsg::FindNext,
+        ViewerMsg::FindPrev,
         ViewerMsg::ToggleHelp,
         ViewerMsg::Close,
     ];
@@ -60,8 +63,15 @@ impl ViewerMsg {
                 "Showing more or less",
                 "Show or hide records the harness's own UI never showed",
             ),
+            ViewerMsg::FindOpen => (
+                "Finding",
+                "Find text in the transcript (Esc clears the find). A result opened from a search \
+                 shows the tool output, thinking, or aborted turns it matched",
+            ),
+            ViewerMsg::FindNext => ("Finding", "Go to the next match, wrapping at the end"),
+            ViewerMsg::FindPrev => ("Finding", "Go to the previous match, wrapping at the start"),
             ViewerMsg::ToggleHelp => ("Viewer", "Show or hide this help"),
-            ViewerMsg::Close => ("Viewer", "Close help, then close the viewer"),
+            ViewerMsg::Close => ("Viewer", "Close help, then the find, then the viewer"),
         };
         HelpEntry {
             section,

@@ -117,7 +117,7 @@ fn v_and_attach_follow_the_right_pane_too() {
     };
     assert_eq!(
         app.update(Msg::ViewSelected),
-        vec![Effect::Exec(ExecSpec::ViewSession(session))]
+        vec![Effect::Exec(ExecSpec::ViewSession(session, None))]
     );
     // The session runs in the mux, so attach reaches that mux.
     let target = crate::tui::actions::resolve_attach_target(&app).expect("attachable");

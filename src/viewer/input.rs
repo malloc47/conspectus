@@ -33,6 +33,12 @@ pub enum ViewerMsg {
     /// Show / hide turns the parser tagged as hidden by the harness's
     /// own UI. Bound to capital-`H`; off by default (ADR 0122).
     ToggleHidden,
+    /// Open the find prompt (`/`).
+    FindOpen,
+    /// Go to the next match of the active find (`n`).
+    FindNext,
+    /// Go to the previous match of the active find (`N`).
+    FindPrev,
     ToggleHelp,
     Close,
 }
@@ -49,6 +55,9 @@ pub enum ViewerEffect {
 /// Apply one message to the state. Returns the new state and the
 /// effect for the runtime.
 pub fn reduce(mut state: ViewerState, msg: ViewerMsg) -> (ViewerState, ViewerEffect) {
+    // A note from the last key (a toggle that was switched on to show a
+    // match, a wrap-around) is shown for one key.
+    state.find.note = None;
     // Any explicit nav clears the "open at end" sticky flag. The
     // exception is `JumpToEnd`, which sets it back.
     if !matches!(msg, ViewerMsg::JumpToEnd) {
@@ -108,22 +117,29 @@ pub fn reduce(mut state: ViewerState, msg: ViewerMsg) -> (ViewerState, ViewerEff
             // cached body lines so the widget recomposes.
             state.scroll_offset = state.scroll_offset.min(state.max_scroll());
             state.invalidate_render_cache();
+            state.refresh_find();
         }
         ViewerMsg::ToggleThinking => {
             state.show_thinking = !state.show_thinking;
             state.scroll_offset = state.scroll_offset.min(state.max_scroll());
             state.invalidate_render_cache();
+            state.refresh_find();
         }
         ViewerMsg::ToggleAborted => {
             state.show_aborted = !state.show_aborted;
             state.scroll_offset = state.scroll_offset.min(state.max_scroll());
             state.invalidate_render_cache();
+            state.refresh_find();
         }
         ViewerMsg::ToggleHidden => {
             state.show_hidden = !state.show_hidden;
             state.scroll_offset = state.scroll_offset.min(state.max_scroll());
             state.invalidate_render_cache();
+            state.refresh_find();
         }
+        ViewerMsg::FindOpen => state.open_find_prompt(),
+        ViewerMsg::FindNext => state.step_find(true),
+        ViewerMsg::FindPrev => state.step_find(false),
         ViewerMsg::ToggleHelp => {
             state.show_help = !state.show_help;
             state.help_scroll = 0;
@@ -133,6 +149,11 @@ pub fn reduce(mut state: ViewerState, msg: ViewerMsg) -> (ViewerState, ViewerEff
             // dismiss the modal when the body is showing.
             if state.show_help {
                 state.show_help = false;
+                return (state, ViewerEffect::None);
+            }
+            // Likewise an active find clears before the viewer closes.
+            if state.find.is_active() {
+                state.find.clear();
                 return (state, ViewerEffect::None);
             }
             return (state, ViewerEffect::Close);
