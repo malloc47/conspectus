@@ -1,9 +1,10 @@
 ---
 id: CSP-339
 title: Substring search inside the viewer
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-06-02 18:59'
+updated_date: '2026-10-24 04:47'
 labels:
   - h-viewer-native
 milestone: m-11
@@ -25,3 +26,15 @@ ordinal: 214000
 <!-- SECTION:DESCRIPTION:END -->
 
 Legacy ID: `H-VIEWER-NATIVE-007`
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+Superseded by CSP-616.05 (find inside the viewer), which also adds open-at-match and reuses the shared matcher.
+<!-- SECTION:NOTES:END -->
+
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+Closed as a duplicate of CSP-616.05; no separate work.
+<!-- SECTION:FINAL_SUMMARY:END -->

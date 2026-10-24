@@ -4,6 +4,7 @@ title: Search session contents across all sessions
 status: To Do
 assignee: []
 created_date: '2026-10-17 03:02'
+updated_date: '2026-10-24 04:47'
 labels:
   - h-search
 milestone: m-11
@@ -40,3 +41,9 @@ Measured 2026-10-16 on the operator's machine: about 320 MB of transcripts (26 C
 - [ ] #1 `just check` passes, or `git diff --check` for docs-only changes
 - [ ] #2 Docs and ADRs are updated when behavior, architecture, or workflow change
 <!-- DOD:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+New operator requirement (2026-10-23): search must work both as a dedicated search view and as a filter on the session list. Added CSP-616.10 (content filter) and CSP-616.11 (Search view). CSP-703 is a prerequisite of CSP-616.05. CSP-616.07 to .09 (persistent index) stay deferred behind the latency/corpus thresholds, except .07 which records the decision.
+<!-- SECTION:NOTES:END -->
