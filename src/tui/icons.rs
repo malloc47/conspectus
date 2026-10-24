@@ -120,7 +120,7 @@ pub mod marks {
     /// A group or row that is expanded.
     pub const EXPANDED: &str = "▼";
     /// A group or row that is collapsed.
-    pub const COLLAPSED: &str = "►";
+    pub const COLLAPSED: &str = "▶";
     /// A group with a session whose mux link is ambiguous.
     pub const WARNING: &str = "▲";
     /// A pull request with no local branch.
@@ -138,7 +138,7 @@ pub mod marks {
     /// The mark for "go back" in the right pane's breadcrumb.
     pub const BACK: &str = "◄";
     /// The frames of the pending-refresh spinner.
-    pub const SPINNER: [&str; 4] = ["◜", "◝", "◞", "◟"];
+    pub const SPINNER: [&str; 8] = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧"];
 }
 
 /// Every glyph the left panel can draw, once each: the kind glyphs, the
@@ -318,6 +318,38 @@ mod tests;
 /// in Western locales, two in some CJK ones, as every Geometric Shapes
 /// glyph is. Wide and emoji-presentation glyphs are not allowed at all.
 pub const VETTED: &[(&str, &str)] = &[
+    (
+        "⠋",
+        "Braille Patterns; kept by operator preference; some fonts draw it past one cell",
+    ),
+    (
+        "⠙",
+        "Braille Patterns; kept by operator preference; some fonts draw it past one cell",
+    ),
+    (
+        "⠹",
+        "Braille Patterns; kept by operator preference; some fonts draw it past one cell",
+    ),
+    (
+        "⠸",
+        "Braille Patterns; kept by operator preference; some fonts draw it past one cell",
+    ),
+    (
+        "⠼",
+        "Braille Patterns; kept by operator preference; some fonts draw it past one cell",
+    ),
+    (
+        "⠴",
+        "Braille Patterns; kept by operator preference; some fonts draw it past one cell",
+    ),
+    (
+        "⠦",
+        "Braille Patterns; kept by operator preference; some fonts draw it past one cell",
+    ),
+    (
+        "⠧",
+        "Braille Patterns; kept by operator preference; some fonts draw it past one cell",
+    ),
     ("▦", "Geometric Shapes; DejaVu Sans Mono 1.00; ambiguous"),
     ("◆", "Geometric Shapes; DejaVu Sans Mono 1.00; ambiguous"),
     ("◇", "Geometric Shapes; DejaVu Sans Mono 1.00; ambiguous"),
@@ -355,6 +387,10 @@ pub const VETTED: &[(&str, &str)] = &[
         "WGL4; DejaVu Sans Mono and Liberation Mono 1.00; ambiguous",
     ),
     (
+        "▶",
+        "Geometric Shapes; kept by operator preference; a terminal with an emoji font may draw it wide",
+    ),
+    (
         "◄",
         "WGL4; DejaVu Sans Mono and Liberation Mono 1.00; ambiguous",
     ),
@@ -372,10 +408,6 @@ pub const VETTED: &[(&str, &str)] = &[
         "Mathematical Operators; DejaVu Sans Mono and Liberation Mono 1.00",
     ),
     ("×", "Latin-1; every font"),
-    ("◜", "Geometric Shapes; DejaVu Sans Mono 1.00"),
-    ("◝", "Geometric Shapes; DejaVu Sans Mono 1.00"),
-    ("◞", "Geometric Shapes; DejaVu Sans Mono 1.00"),
-    ("◟", "Geometric Shapes; DejaVu Sans Mono 1.00"),
     // Punctuation, arrows, and line drawing the interface text uses.
     ("·", "Latin-1; every font; ambiguous"),
     ("•", "WGL4; every font; ambiguous"),
@@ -466,6 +498,8 @@ pub fn glyph_risk(glyph: &str) -> Option<&'static str> {
         0x1F000..=0x1FFFF => Some("emoji block"),
         // Text-presentation characters that terminals commonly draw as
         // color emoji, wide, when an emoji font is installed.
+        // The collapsed-tree arrow stays `▶` by operator preference.
+        0x25B6 => None,
         _ if EMOJI_CAPABLE.contains(&cp) => Some("can take emoji presentation"),
         _ => None,
     }

@@ -280,7 +280,7 @@ command_badge = "black"
 cwd_mark           = "cyan"
 link_id            = "blue"
 secondary_text     = "dark_gray"   # short ids + preview snippets
-disclosure         = "cyan"        # the ► / ▼ tree affordance
+disclosure         = "cyan"        # the ▶ / ▼ tree affordance
 divider            = "dim"
 panel_focus_accent = "cyan"        # the ▸ marker on the active pane title
                                    # and the detail-pane section chip

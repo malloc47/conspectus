@@ -11,7 +11,7 @@ updated 0s ago · 0/1 sessions · 1 mux
 │  ▣ ◎ mux-missing       missing       —                            █│
 │  ● ◉ session-live      resumable   10m   claude     Fix the ledge…█│
 │  ● ◎ session-missing   missing       —                            █│
-│► ◇ ◉ worktree-live     live          —              conspectus    ║│
+│▶ ◇ ◉ worktree-live     live          —              conspectus    ║│
 │  ◇ ◎ worktree-gone     removed      2d              conspectus · …║│
 │  ◇ ◎ worktree-planned  planned       —                            ║│
 │  ◆ ◉ repo-live         live          —              ~/src/conspec…▼│

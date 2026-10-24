@@ -276,7 +276,6 @@ fn vetted_glyphs_have_no_width_or_emoji_risk() {
 #[test]
 fn risky_glyphs_are_rejected() {
     for glyph in [
-        "▶",
         "◀",
         "⚠",
         "⚙",
@@ -289,7 +288,7 @@ fn risky_glyphs_are_rejected() {
     ] {
         assert!(glyph_risk(glyph).is_some(), "`{glyph}` should be rejected");
     }
-    for glyph in ["▼", "►", "◉", "⊸", "?"] {
+    for glyph in ["▼", "▶", "◉", "⊸", "?"] {
         assert_eq!(glyph_risk(glyph), None, "`{glyph}` should be allowed");
     }
 }

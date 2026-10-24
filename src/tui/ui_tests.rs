@@ -2648,7 +2648,7 @@ fn status_bar_renders_spinner_chip_for_in_flight_discovery() {
     // Braille-spinner chip + "Discovering" label in the status bar.
     // The reducer stamps `started_at` so we can't assert on the
     // exact glyph frame (elapsed-derived), but every Braille
-    // spinner glyph is in the `◜◝◞◟` set — grep for the label
+    // spinner glyph is in the braille spinner set — grep for the label
     // as the reliable presence check.
     let mut app = seeded_app();
     app.update(Msg::InFlightStart {
@@ -2666,7 +2666,9 @@ fn status_bar_renders_spinner_chip_for_in_flight_discovery() {
     );
     // Spot-check that at least one Braille glyph from the spinner
     // set appears in the buffer.
-    let has_spinner = ["◜", "◝", "◞", "◟"].iter().any(|g| text.contains(g));
+    let has_spinner = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧"]
+        .iter()
+        .any(|g| text.contains(g));
     assert!(
         has_spinner,
         "in-flight chip should render a Braille spinner glyph: {text}"
@@ -3881,11 +3883,11 @@ fn mux_row_spinner_takes_the_attached_glyph_column() {
         .iter()
         .map(|s| s.content.to_string())
         .collect();
-    let pending: String = render_mux_session_spans(&row, &theme, 0, 100, Some("◜"))
+    let pending: String = render_mux_session_spans(&row, &theme, 0, 100, Some("⠋"))
         .iter()
         .map(|s| s.content.to_string())
         .collect();
-    assert_eq!(settled.replace('⊸', "◜"), pending);
+    assert_eq!(settled.replace('⊸', "⠋"), pending);
 }
 
 /// A transcript of `turns` alternating user and assistant messages,

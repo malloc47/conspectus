@@ -654,7 +654,7 @@ pub(super) fn render_other_header_line(
     highlight: bool,
     theme: &Theme,
 ) -> Line<'static> {
-    let glyph = if expanded { "▼" } else { "►" };
+    let glyph = if expanded { "▼" } else { "▶" };
     let mut suffix = format!("({other_count}");
     if ambiguous_count > 0 {
         suffix.push_str(&format!(" · {ambiguous_count} ▲"));

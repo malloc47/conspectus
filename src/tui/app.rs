@@ -181,6 +181,9 @@ pub struct App {
     /// The entity the last action acted on, to select once the refresh
     /// after it lands (it may have moved to another view).
     pending_follow: Option<NodeId>,
+    /// The row that was selected when the action started: if it is still
+    /// listed once the refresh lands, the operator stays on it.
+    pending_follow_row: Option<RowId>,
     /// Loaded previews keyed by source: pane captures and
     /// transcripts (ADR 0112 §5). The renderer reads this for the
     /// right-panel Preview zone.
@@ -501,6 +504,7 @@ impl App {
             handoff: None,
             refresh_requested: false,
             pending_follow: None,
+            pending_follow_row: None,
             preview_store: PreviewStore::new(),
             left_scroll: 0,
             explorer_scroll: 0,
@@ -1465,6 +1469,7 @@ impl App {
             }
             Msg::FollowEntity(node) => {
                 self.pending_follow = Some(node);
+                self.pending_follow_row = self.selection.clone();
             }
             Msg::HandoffSettled => {
                 self.handoff = None;

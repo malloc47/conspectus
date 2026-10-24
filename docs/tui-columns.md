@@ -49,7 +49,7 @@ Every row starts with the same cells, left to right:
 | # | Cell | Width | Shows | Condition |
 |---|---|---|---|---|
 | 1 | Indent | 2 cells per level | nothing | Flat Sessions (grouping `none`) has no indent |
-| 2 | Disclosure | 2 cells | `►` collapsed or `▼` expanded, in cyan | Blank when the row has nothing under it |
+| 2 | Disclosure | 2 cells | `▶` collapsed or `▼` expanded, in cyan | Blank when the row has nothing under it |
 | 3 | Kind glyph | 1 cell and a space | what the row is (see [Glyphs](#glyphs)) | Omitted on rows that stand for no entity: the Ungrouped bucket, PR remote and state groups, and the Pinned and History buckets |
 | 4 | Pin marker | 2 cells | `◉` pin on a running entity, `◎` pin on one that isn't | Reserved on every row of the tree once any row in it has a marker, so columns hold still |
 
@@ -99,7 +99,8 @@ Every glyph is one that DejaVu Sans Mono draws at exactly one cell, or one every
 | `⊕` | a merged pull request | magenta | PR rows |
 | `⊗` | a closed pull request | red | PR rows |
 | `▼` | an expanded row | cyan | The disclosure cell |
-| `►` | a collapsed row | cyan | The disclosure cell |
+| `▶` | a collapsed row | cyan | The disclosure cell |
+| `►` | the focused pane, or a menu cursor | cyan | Left of the tab bar and menu rows |
 | `▲` | at least one session below has an ambiguous mux link | yellow bold | Group headers |
 | `◌` | a pull request with no local branch | dim | PR rows, in the tracking cell |
 | `—` | an age or value that isn't known | dim | Age cells |
@@ -107,7 +108,7 @@ Every glyph is one that DejaVu Sans Mono draws at exactly one cell, or one every
 | `×` | a failed check or value | red | Forms and check lists |
 | `•` | an unchecked item | default | Multi-select lists, such as Clean up |
 | `◄` | back | gray | The right pane's breadcrumb |
-| `◜` `◝` `◞` `◟` | a refresh is pending for this row | gray | Where the state glyph or word goes |
+| `⠋` `⠙` `⠹` `⠸` `⠼` `⠴` `⠦` `⠧` | a refresh is pending for this row | gray | Where the state glyph or word goes |
 
 The `…` character marks text cut to fit, and `·` separates parts of a
 content string (`repo · branch`). Neither is a state.
@@ -233,11 +234,11 @@ A checkout header adds `(linked · locked · prunable)` for those states.
 ┌ ► sessions · mux · prs · pinned · history ────────────────────────────────────────┐
 │▼ ▦   showcase-deck  atelier-repo-a+project  (agent-deck)  (1)                     │
 │    ●   showcase   claude       1m  ⊸  Showcase: agent-deck composite launcher     │
-│► ◆   repo-a         ~/atelier-demo/repo-a               (3)                       │
-│► ◆   repo-b         ~/atelier-demo/repo-b               (1)                       │
-│► ◆   bare-project   ~/checkouts/bare-project            (1)                       │
-│► ◆   project        ~/repos/project                     (4)  ▲                    │
-│►   Ungrouped                                            (1)                       │
+│▶ ◆   repo-a         ~/atelier-demo/repo-a               (3)                       │
+│▶ ◆   repo-b         ~/atelier-demo/repo-b               (1)                       │
+│▶ ◆   bare-project   ~/checkouts/bare-project            (1)                       │
+│▶ ◆   project        ~/repos/project                     (4)  ▲                    │
+│▶   Ungrouped                                            (1)                       │
 ```
 
 <!-- frame: keys="jjjjjlj" width=170 height=30 -->
@@ -245,15 +246,15 @@ A checkout header adds `(linked · locked · prunable)` for those states.
 ┌ ► sessions · mux · prs · pinned · history ────────────────────────────────────────┐
 │▼ ▦   showcase-deck  atelier-repo-a+project  (agent-deck)  (1)                     │
 │    ●   showcase   claude       1m  ⊸  Showcase: agent-deck composite launcher     │
-│► ◆   repo-a         ~/atelier-demo/repo-a               (3)                       │
-│► ◆   repo-b         ~/atelier-demo/repo-b               (1)                       │
-│► ◆   bare-project   ~/checkouts/bare-project            (1)                       │
+│▶ ◆   repo-a         ~/atelier-demo/repo-a               (3)                       │
+│▶ ◆   repo-b         ~/atelier-demo/repo-b               (1)                       │
+│▶ ◆   bare-project   ~/checkouts/bare-project            (1)                       │
 │▼ ◆   project        ~/repos/project                     (4)  ▲                    │
 │    ●   showcase   claude       1m  ∘  ambiguous mux candidate A  Showcase: ambigu…│
 │    ●   showcase   claude       1m  ∘  ambiguous mux candidate B  Showcase: ambigu…│
 │    ●   showcase   claude       1m  ∘  hook-supersession current sessi…  Showcase:…│
 │    ● ◉ showcase   claude       1h  ∘  claude-code in project repo  I expanded `no…│
-│►   Ungrouped                                            (1)                       │
+│▶   Ungrouped                                            (1)                       │
 ```
 
 <!-- frame: keys="<C-g><C-g><C-g><C-g><C-g>" width=170 height=30 -->
@@ -328,8 +329,8 @@ with the running ones, drawn as a ghost.
 ┌ ► sessions · mux · prs · pinned · history ────────────────────────────────────────┐
 │▼ ◆   bare-project  ~/checkouts/bare-project                                       │
 │    ▣   bare-work                  codex        2h  ∘  Showcase: codex resume via …│
-│► ◆   project       ~/repos/project                                                │
-│►   Ungrouped                                                                      │
+│▶ ◆   project       ~/repos/project                                                │
+│▶   Ungrouped                                                                      │
 ```
 
 Under a mux with more than one agent attached, each agent is a nested
@@ -371,9 +372,9 @@ them has an ambiguous mux link.
 ```text
 ┌ ► sessions · mux · prs · pinned · history ────────────────────────────────────────┐
 │▼ ◇   conspectus/project  ~/repos/project  (4)  ▲                                  │
-│  ► ⇄   #7 ⌥    2h  ◐  feature/extra  Release notes for 0.3                        │
-│► ◆   conspectus/project  ~/repos/project  no checkout                             │
-│►   project             conspectus/project                                         │
+│  ▶ ⇄   #7 ⌥    2h  ◐  feature/extra  Release notes for 0.3                        │
+│▶ ◆   conspectus/project  ~/repos/project  no checkout                             │
+│▶   project             conspectus/project                                         │
 ```
 
 <!-- frame: keys="3<C-g><C-g>" width=170 height=30 -->
@@ -381,8 +382,8 @@ them has an ambiguous mux link.
 ┌ ► sessions · mux · prs · pinned · history ────────────────────────────────────────┐
 │▼   Draft   (4)  ▲                                                                 │
 │    ⇄   conspectus/project#8 ⌥    1d  ◐  main  Pin the toolchain and refresh the l…│
-│  ► ⇄   conspectus/project#7 ⌥    2h  ◐  feature/extra  Release notes for 0.3      │
-│►   Merged                                                                         │
+│  ▶ ⇄   conspectus/project#7 ⌥    2h  ◐  feature/extra  Release notes for 0.3      │
+│▶   Merged                                                                         │
 ```
 
 ## Pinned view
@@ -426,7 +427,7 @@ or the first 8 characters of its key, its status is `in mux` or
 ```text
 ┌ ► sessions · mux · prs · pinned · history ────────────────────────────────────────┐
 │▼ project  ~/repos/project                                                         │
-│  ► ▣ ◉ project-main                    live       5m   claude     ~/repos/project │
+│  ▶ ▣ ◉ project-main                    live       5m   claude     ~/repos/project │
 │    ▣ ◎ nightly                         stopped    2d   claude     ~/repos/project │
 │    ● ◉ parser-session                  in mux     1h   claude     claude-code in …│
 │    ◇ ◎ ledger-worktree                 removed    3d              project · featu…│
@@ -439,7 +440,7 @@ or the first 8 characters of its key, its status is `in mux` or
 ```text
 ┌ ► sessions · mux · prs · pinned · history ────────────────────────────────────────┐
 │▼ Muxes                                                                            │
-│  ► ▣ ◉ project-main                    live       5m   claude     ~/repos/project │
+│  ▶ ▣ ◉ project-main                    live       5m   claude     ~/repos/project │
 │    ▣ ◎ nightly                         stopped    2d   claude     ~/repos/project │
 │    ▣ ◎ weekly-review                   planned     —   codex      ~/repos/project │
 │▼ Sessions                                                                         │
@@ -453,7 +454,7 @@ or the first 8 characters of its key, its status is `in mux` or
 <!-- frame: keys="4<C-g><C-g>" width=170 height=30 -->
 ```text
 ┌ ► sessions · mux · prs · pinned · history ────────────────────────────────────────┐
-│► ▣ ◉ project-main                    live       5m   claude     ~/repos/project   │
+│▶ ▣ ◉ project-main                    live       5m   claude     ~/repos/project   │
 │  ▣ ◎ nightly                         stopped    2d   claude     ~/repos/project   │
 │  ● ◉ parser-session                  in mux     1h   claude     claude-code in pr…│
 │  ◇ ◎ ledger-worktree                 removed    3d              project · feature…│

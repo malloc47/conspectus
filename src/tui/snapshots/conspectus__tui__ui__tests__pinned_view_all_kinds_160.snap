@@ -11,7 +11,7 @@ updated 0s ago · 0/1 sessions · 1 mux
 │  ▣ ◎ mux-missing       missing       —                                       ││  target        mux_session:tmux:main                                         │
 │  ● ◉ session-live      resumable   10m   claude     Fix the ledger merge     ││  name          main                                                          │
 │  ● ◎ session-missing   missing       —                                       ││  cwd           /home/op/src/conspectus                                       │
-│► ◇ ◉ worktree-live     live          —              conspectus               ││  harness       codex                                                         │
+│▶ ◇ ◉ worktree-live     live          —              conspectus               ││  harness       codex                                                         │
 │  ◇ ◎ worktree-gone     removed      2d              conspectus · feature/old ││  argv          codex                                                         │
 │  ◇ ◎ worktree-planned  planned       —                                       ││───────────────────────────────────────────────────── 1 validated  Related ── │
 │  ◆ ◉ repo-live         live          —              ~/src/conspectus/.git    ││  targets                ▣ tmux:main                                          │

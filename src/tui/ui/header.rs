@@ -244,7 +244,7 @@ pub(super) fn push_unseen_messages_chip(app: &App, theme: &Theme, spans: &mut Ve
 /// Braille-dot spinner frames (~120ms per frame at cadence
 /// `SPINNER_FRAME_MS`). Cycles through the eight-position pattern
 /// commonly used by cli.rs / npm / systemd loaders.
-pub(super) const SPINNER_FRAMES: [&str; 4] = crate::tui::icons::marks::SPINNER;
+pub(super) const SPINNER_FRAMES: [&str; 8] = crate::tui::icons::marks::SPINNER;
 
 pub(super) const SPINNER_FRAME_MS: u128 = 120;
 

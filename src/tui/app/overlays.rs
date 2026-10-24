@@ -169,9 +169,17 @@ impl App {
         self.set_selection(id);
     }
 
+    /// Test hook: the row the action started on has disappeared from the
+    /// refreshed tree, as a History record does once it is a live mux.
+    #[cfg(test)]
+    pub(crate) fn forget_follow_row(&mut self) {
+        self.pending_follow_row = None;
+    }
+
     /// Select the entity the last action acted on, now that the refresh
-    /// after it has landed. Stays in the current view when the entity
-    /// is still listed there; otherwise moves to the view where it now
+    /// after it has landed. Stays on the selected row when it is still
+    /// listed, then in the current view when the entity is listed there;
+    /// otherwise moves to the view where it now
     /// lives, and tells the operator when it can't be found.
     pub(crate) fn apply_pending_follow(&mut self) {
         if self.handoff.is_some() {
@@ -180,6 +188,15 @@ impl App {
         let Some(node) = self.pending_follow.take() else {
             return;
         };
+        // Stay where the operator was while their row is still listed:
+        // starting a pin leaves it in the Pinned view, and only a row that
+        // disappears sends them to where the entity went.
+        if let Some(row) = self.pending_follow_row.take()
+            && let Some(index) = self.tree.rows.iter().position(|r| r.id == row)
+        {
+            self.expand_to_and_select(index);
+            return;
+        }
         if let Some(index) = self
             .tree
             .rows

@@ -336,6 +336,8 @@ fn retargeting_a_pin_with_nothing_else_to_point_at_says_so() {
 fn following_an_entity_from_history_lands_on_its_row_in_the_view_it_lives_in() {
     let mut app = app_listing_all(View::History);
     app.update(Msg::FollowEntity(mux("scratch")));
+    // The record is a live mux now, so its History row is gone.
+    app.forget_follow_row();
     app.update(Msg::HandoffSettled);
     assert_eq!(app.active_view(), View::Mux);
     assert_eq!(
@@ -349,6 +351,7 @@ fn following_waits_for_the_hand_off_to_settle() {
     let mut app = app_listing_all(View::History);
     app.update(Msg::HandoffReturned(MuxSessionId::new("tmux:scratch")));
     app.update(Msg::FollowEntity(mux("scratch")));
+    app.forget_follow_row();
     assert_eq!(app.active_view(), View::History, "still on stale data");
     app.update(Msg::HandoffSettled);
     assert_eq!(app.active_view(), View::Mux);
@@ -357,7 +360,7 @@ fn following_waits_for_the_hand_off_to_settle() {
 #[test]
 fn an_entity_still_listed_where_the_operator_is_is_selected_in_place() {
     let mut app = app_in(View::Mux);
-    select(&mut app, "conspectus-main");
+    select(&mut app, "scratch");
     app.update(Msg::FollowEntity(mux("scratch")));
     app.update(Msg::HandoffSettled);
     assert_eq!(app.active_view(), View::Mux);
@@ -371,9 +374,22 @@ fn an_entity_still_listed_where_the_operator_is_is_selected_in_place() {
 fn an_entity_that_cannot_be_found_leaves_the_operator_in_place_with_a_note() {
     let mut app = app_in(View::Pinned);
     app.update(Msg::FollowEntity(mux("never-existed")));
+    app.forget_follow_row();
     app.update(Msg::HandoffSettled);
     assert_eq!(app.active_view(), View::Pinned);
     assert!(app.toast().has_toast(), "the operator is told");
+}
+
+#[test]
+fn starting_a_pin_from_the_pinned_view_leaves_the_operator_on_its_row() {
+    let mut app = app_in(View::Pinned);
+    let before = app.selection().cloned();
+    assert!(before.is_some(), "a pin row is selected");
+    // The pin's mux is the entity acted on; its pin row stays listed.
+    app.update(Msg::FollowEntity(mux("scratch")));
+    app.update(Msg::HandoffSettled);
+    assert_eq!(app.active_view(), View::Pinned, "no jump to the Mux view");
+    assert_eq!(app.selection().cloned(), before);
 }
 
 #[test]
