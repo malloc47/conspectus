@@ -215,3 +215,49 @@ fn a_content_query_narrows_the_showcase_sessions_and_marks_their_hits() {
         "{none}"
     );
 }
+
+/// The `/` overlay searches contents after Tab, streams the matches,
+/// and keeps the query as the filter or opens the Search view.
+#[test]
+fn the_search_overlay_searches_contents_and_promotes_the_query() {
+    let scratch = tempfile::tempdir().expect("scratch");
+    conspectus(scratch.path())
+        .args(["dev", "scenario", "materialize", "showcase"])
+        .arg(scratch.path().join("world"))
+        .assert()
+        .success();
+
+    // Rows scope is what `/` always was: Tab is the only way across.
+    let rows = frame(scratch.path(), "/");
+    assert!(rows.contains("/ search ("), "{rows}");
+    assert!(!rows.contains("search contents"), "{rows}");
+
+    let contents = frame(scratch.path(), "/<Tab>release summary");
+    assert!(
+        contents.contains("search contents (1 results)"),
+        "{contents}"
+    );
+    assert!(contents.contains("2 hits"), "{contents}");
+    assert!(contents.contains("Ctrl-F filter lists"), "{contents}");
+    assert!(contents.contains("sessions searched"), "{contents}");
+
+    // Esc leaves everything as it was: no filter, no chip.
+    let closed = frame(scratch.path(), "/<Tab>release summary<Esc>");
+    assert!(!closed.contains("find:"), "{closed}");
+    assert!(closed.contains("11 sessions"), "{closed}");
+
+    // Ctrl-F keeps the query as the filter on the lists.
+    let filtered = frame(scratch.path(), "/<Tab>release summary<C-f>");
+    assert!(
+        filtered.contains("find:\"release summary\" 1 found"),
+        "{filtered}"
+    );
+    assert!(filtered.contains("1/11 sessions"), "{filtered}");
+    assert!(!filtered.contains("search contents"), "closes the overlay");
+
+    // Ctrl-O keeps it and opens the Search view.
+    let view = frame(scratch.path(), "/<Tab>release summary<C-o>");
+    assert!(view.contains("find:\"release summary\""), "{view}");
+    assert!(view.contains("2 hits"), "{view}");
+    assert!(view.contains("search"), "{view}");
+}

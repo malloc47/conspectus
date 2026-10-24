@@ -364,6 +364,32 @@ pub enum Msg {
         text: String,
         kinds: crate::viewer::search::ContentKinds,
     },
+    /// Search while the `/` overlay is open: the scan runs and its
+    /// results feed the overlay, but the session lists are not narrowed
+    /// until [`Msg::ApplyContentSearch`].
+    PreviewContentSearch {
+        text: String,
+        kinds: crate::viewer::search::ContentKinds,
+        group: crate::viewer::search::Grouping,
+    },
+    /// Keep this search as the filter on the session lists, and with
+    /// `show_results` open the Search view on it. The previewed scan is
+    /// reused when it is for the same query.
+    ApplyContentSearch {
+        text: String,
+        kinds: crate::viewer::search::ContentKinds,
+        group: crate::viewer::search::Grouping,
+        show_results: bool,
+    },
+    /// Drop the previewed search and bring back the filter it replaced,
+    /// if there was one.
+    DiscardContentPreview,
+    /// Open the viewer on a session at the turn a content search found.
+    OpenContentHit {
+        session: crate::model::AgentSessionId,
+        text: String,
+        turn_index: usize,
+    },
     /// Stop the content search and show every session again.
     ClearContentSearch,
     /// Read every transcript again for the active content search, as an

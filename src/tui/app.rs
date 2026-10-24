@@ -189,6 +189,11 @@ pub struct App {
     /// The content search the session lists are filtered by, held in
     /// memory only.
     content: Option<content::ContentSearch>,
+    /// The applied search the `/` overlay's preview replaced, kept so
+    /// closing the overlay can bring it back.
+    content_stash: Option<content::ContentSearch>,
+    /// What the `/` overlay was last set to, for the next time it opens.
+    search_memory: Option<content::SearchMemory>,
     /// A scan the reducer wants started; the runtime takes it.
     scan_request: Option<content::ScanRequest>,
     detail_request: Option<content::DetailRequest>,
@@ -536,6 +541,8 @@ impl App {
             pending_follow: None,
             pending_follow_row: None,
             content: None,
+            content_stash: None,
+            search_memory: None,
             scan_request: None,
             detail_request: None,
             search_auto_expanded: BTreeSet::new(),
@@ -1660,6 +1667,10 @@ impl App {
                 effects.push(Effect::Persist);
             }
             Msg::StartContentSearch { .. }
+            | Msg::PreviewContentSearch { .. }
+            | Msg::ApplyContentSearch { .. }
+            | Msg::DiscardContentPreview
+            | Msg::OpenContentHit { .. }
             | Msg::ClearContentSearch
             | Msg::RescanContent
             | Msg::SetContentGroup(_)

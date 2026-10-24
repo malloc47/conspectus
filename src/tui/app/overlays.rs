@@ -567,30 +567,61 @@ impl App {
         }
     }
 
-    /// What `/` opens: the Content prompt in the Search view, the fuzzy
-    /// search overlay elsewhere. Returns the status hint to show.
-    pub fn open_search_entry(&mut self) -> &'static str {
+    /// What `/` opens: the Content prompt in the Search view, the search
+    /// overlay elsewhere. Returns the status hint to show.
+    pub fn open_search_entry(&mut self) -> String {
+        use crate::tui::keybindings::overlay::{SEARCH_KEYS, footer};
         if self.active_view() == crate::tui::View::Search {
             let ctx = self.controls_context();
             self.modal_stack.push(crate::tui::Modal::Controls(
                 crate::tui::widgets::controls::ControlsOverlayState::new_at_content(&ctx),
             ));
-            return "search contents: type a query · Enter search · Esc cancel";
+            return "search contents: type a query · Enter search · Esc cancel".to_string();
         }
         self.open_search_overlay();
-        "search: type to filter · Enter pick · Esc close"
+        format!(
+            "search: type to filter · Enter pick · Esc close · {}",
+            footer(SEARCH_KEYS)
+        )
     }
 
-    /// Push a fresh search overlay onto the modal stack.
+    /// Push a search overlay onto the modal stack: in the contents scope
+    /// with the query filled in when a search is active, as the operator
+    /// last left it otherwise, and on the rows with `[search]` defaults
+    /// the first time.
     pub fn open_search_overlay(&mut self) {
-        self.modal_stack.push(crate::tui::Modal::Search(
-            crate::tui::widgets::search::SearchOverlayState::new(),
-        ));
+        use crate::tui::widgets::search::{SearchOverlayState, SearchScope};
+        let enabled = self.config.live_preview_enabled;
+        let state = match (self.content(), self.search_memory) {
+            (Some(content), _) => SearchOverlayState::configured(
+                SearchScope::Contents,
+                content.group,
+                content.kinds,
+                enabled,
+                &content.text,
+            ),
+            (None, Some(memory)) => SearchOverlayState::configured(
+                memory.scope,
+                memory.group,
+                memory.kinds,
+                enabled,
+                "",
+            ),
+            (None, None) => SearchOverlayState::configured(
+                SearchScope::Rows,
+                self.config.search.group,
+                self.config.search.kinds,
+                enabled,
+                "",
+            ),
+        };
+        self.modal_stack.push(crate::tui::Modal::Search(state));
     }
 
     /// Pop the search overlay if it's on top; no-op otherwise.
     pub fn close_search_overlay(&mut self) {
         if matches!(self.modal_stack.last(), Some(crate::tui::Modal::Search(_))) {
+            self.remember_search_overlay();
             self.modal_stack.pop();
         }
     }

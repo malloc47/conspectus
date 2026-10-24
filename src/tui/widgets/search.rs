@@ -8,6 +8,8 @@
 //! [`SearchItem`]s, which have already had filters applied
 //! upstream.
 
+use std::time::{Duration, Instant};
+
 use ratatui::buffer::Buffer;
 use ratatui::crossterm::event::KeyEvent;
 use ratatui::layout::Rect;
@@ -23,6 +25,62 @@ use crate::tui::icons::{NodeKind, node_kind_style};
 use crate::tui::rows::RowId;
 use crate::tui::search::{SearchItem, SearchMatch, rank, snippet_around};
 use crate::tui::widgets::input::TextInputState;
+use crate::viewer::search::{ContentKinds, Grouping};
+
+/// How long the query rests before a contents scan starts, so typing a
+/// word does not start a scan per letter.
+pub const DEBOUNCE: Duration = Duration::from_millis(200);
+
+/// What the overlay searches.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum SearchScope {
+    /// The rows of the current view, as `/` always has.
+    #[default]
+    Rows,
+    /// What was said in the sessions.
+    Contents,
+}
+
+/// One result in the contents scope.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ContentRow {
+    pub session: crate::model::AgentSessionId,
+    pub label: String,
+    /// The harness's name, drawn as a chip.
+    pub harness: String,
+    /// Matching turns in the session.
+    pub hits: usize,
+    /// Per-message results say which turn this row is.
+    pub turn: Option<String>,
+    pub snippet: String,
+    /// Byte range of the match inside `snippet`.
+    pub highlight: Option<std::ops::Range<usize>>,
+    pub turn_index: usize,
+}
+
+/// What the host tells the widget about the running contents scan.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct ContentView {
+    pub rows: Vec<ContentRow>,
+    pub scanned: usize,
+    pub total: usize,
+    pub skipped: usize,
+    pub done: bool,
+    /// Set when contents search cannot run, and why.
+    pub unavailable: Option<&'static str>,
+}
+
+/// What the overlay wants the host to do about the contents scan.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum DueSearch {
+    Preview {
+        text: String,
+        kinds: ContentKinds,
+        group: Grouping,
+    },
+    /// Stop previewing.
+    Clear,
+}
 
 /// Pure state for the search overlay. Holds the query text input,
 /// the latest match list (recomputed by the host whenever the
@@ -32,6 +90,17 @@ pub struct SearchOverlayState {
     input: TextInputState,
     matches: Vec<SearchMatch>,
     cursor: usize,
+    scope: SearchScope,
+    group: Grouping,
+    kinds: ContentKinds,
+    /// Whether the contents scope can run (live preview is on).
+    contents_enabled: bool,
+    /// Results in the contents scope, set by the host before a key.
+    content_len: usize,
+    /// When the query or options last changed and a scan is owed.
+    edited_at: Option<Instant>,
+    /// Why the contents scope could not be chosen, shown once.
+    notice: Option<&'static str>,
 }
 
 impl SearchOverlayState {
@@ -40,7 +109,91 @@ impl SearchOverlayState {
             input: TextInputState::new(" search ", String::new()),
             matches: Vec::new(),
             cursor: 0,
+            scope: SearchScope::Rows,
+            group: Grouping::default(),
+            kinds: ContentKinds::default(),
+            contents_enabled: true,
+            content_len: 0,
+            edited_at: None,
+            notice: None,
         }
+    }
+
+    /// An overlay set up the way the operator left it, or with a search
+    /// already active: `query` fills the field, and a non-empty one in
+    /// the contents scope is searched at once.
+    pub fn configured(
+        scope: SearchScope,
+        group: Grouping,
+        kinds: ContentKinds,
+        contents_enabled: bool,
+        query: &str,
+    ) -> Self {
+        let mut state = Self::new();
+        state.input = TextInputState::new(" search ", query.to_string());
+        state.group = group;
+        state.kinds = kinds;
+        state.contents_enabled = contents_enabled;
+        if scope == SearchScope::Contents && contents_enabled {
+            state.scope = SearchScope::Contents;
+        }
+        state
+    }
+
+    pub fn scope(&self) -> SearchScope {
+        self.scope
+    }
+
+    pub fn group(&self) -> Grouping {
+        self.group
+    }
+
+    pub fn kinds(&self) -> ContentKinds {
+        self.kinds
+    }
+
+    pub fn notice(&self) -> Option<&'static str> {
+        self.notice
+    }
+
+    /// The host reports how many contents results there are, so the
+    /// cursor can move among them.
+    pub fn set_content_len(&mut self, len: usize) {
+        self.content_len = len;
+        if self.cursor >= len {
+            self.cursor = 0;
+        }
+    }
+
+    /// Owe a contents scan for the current query, as soon as the host
+    /// asks (`force`) or after the debounce.
+    pub fn mark_edited(&mut self, at: Instant) {
+        self.edited_at = Some(at);
+    }
+
+    /// The scan the overlay is owed once the query has rested, if any.
+    /// `Clear` says to stop previewing (rows scope, or an empty query).
+    pub fn take_due_search(&mut self, now: Instant, force: bool) -> Option<DueSearch> {
+        let at = self.edited_at?;
+        if !force && now.duration_since(at) < DEBOUNCE {
+            return None;
+        }
+        self.edited_at = None;
+        let text = self.input.value().trim().to_string();
+        if self.scope == SearchScope::Contents && !text.is_empty() {
+            Some(DueSearch::Preview {
+                text,
+                kinds: self.kinds,
+                group: self.group,
+            })
+        } else {
+            Some(DueSearch::Clear)
+        }
+    }
+
+    /// The query as the contents scan will see it.
+    pub fn content_text(&self) -> String {
+        self.input.value().trim().to_string()
     }
 
     /// Current query text (post-edit, pre-rank).
@@ -63,7 +216,8 @@ impl SearchOverlayState {
     /// end of the new result list.
     pub fn refresh_matches(&mut self, items: &[SearchItem<'_>]) {
         self.matches = rank(self.input.value(), items);
-        if self.cursor >= self.matches.len() {
+        // The cursor belongs to the contents results in that scope.
+        if self.scope == SearchScope::Rows && self.cursor >= self.matches.len() {
             self.cursor = 0;
         }
     }
@@ -85,6 +239,13 @@ pub enum SearchOutcome {
     Continue,
     Cancel,
     Confirm(Box<RowId>),
+    /// Contents scope: open the result under the cursor.
+    OpenHit(usize),
+    /// Contents scope: keep the query as the filter on the lists, and
+    /// with `show_results` open the Search view on it.
+    Promote {
+        show_results: bool,
+    },
 }
 
 impl SearchOverlayState {
@@ -100,9 +261,23 @@ impl SearchOverlayState {
     ///   query is the common case; result-list navigation uses
     ///   arrow keys + ctrl-N/P instead.
     pub fn handle_key(&mut self, event: KeyEvent) -> SearchOutcome {
-        use crate::tui::keybindings::overlay::{SEARCH_KEYS, SearchKey, resolve};
-        match resolve(SEARCH_KEYS, event) {
+        use crate::tui::keybindings::overlay::{
+            SEARCH_CONTENT_KEYS, SEARCH_KEYS, SearchKey, resolve,
+        };
+        let table = match self.scope {
+            SearchScope::Rows => SEARCH_KEYS,
+            SearchScope::Contents => SEARCH_CONTENT_KEYS,
+        };
+        let contents = self.scope == SearchScope::Contents;
+        match resolve(table, event) {
             Some(SearchKey::Abort | SearchKey::Cancel) => SearchOutcome::Cancel,
+            Some(SearchKey::Pick) if contents => {
+                if self.content_len == 0 {
+                    SearchOutcome::Cancel
+                } else {
+                    SearchOutcome::OpenHit(self.cursor)
+                }
+            }
             Some(SearchKey::Pick) => match self.matches.get(self.cursor) {
                 Some(m) => SearchOutcome::Confirm(Box::new(m.id.clone())),
                 None => SearchOutcome::Cancel,
@@ -115,23 +290,84 @@ impl SearchOverlayState {
                 self.move_cursor(-1);
                 SearchOutcome::Continue
             }
+            Some(SearchKey::Scope) => {
+                self.toggle_scope();
+                SearchOutcome::Continue
+            }
+            Some(SearchKey::Group) => {
+                self.group = match self.group {
+                    Grouping::Session => Grouping::Message,
+                    Grouping::Message => Grouping::Session,
+                };
+                self.cursor = 0;
+                self.edited_at = Some(Instant::now());
+                SearchOutcome::Continue
+            }
+            Some(SearchKey::Tools) => {
+                self.kinds.tools = !self.kinds.tools;
+                self.edited_at = Some(Instant::now());
+                SearchOutcome::Continue
+            }
+            Some(SearchKey::Thinking) => {
+                self.kinds.thinking = !self.kinds.thinking;
+                self.edited_at = Some(Instant::now());
+                SearchOutcome::Continue
+            }
+            Some(SearchKey::ApplyFilter) => self.promote(false),
+            Some(SearchKey::ApplyView) => self.promote(true),
             None => {
                 // Let the text-input primitive handle the key. We
                 // ignore its outcome here because Enter/Esc are
                 // intercepted above; everything else is "still
                 // editing the query."
+                let before = self.input.value().to_string();
                 let _ = self.input.handle_key(event);
+                if contents && self.input.value() != before {
+                    self.cursor = 0;
+                    self.edited_at = Some(Instant::now());
+                }
                 SearchOutcome::Continue
             }
         }
     }
 
+    fn promote(&self, show_results: bool) -> SearchOutcome {
+        if self.content_text().is_empty() {
+            SearchOutcome::Continue
+        } else {
+            SearchOutcome::Promote { show_results }
+        }
+    }
+
+    fn toggle_scope(&mut self) {
+        self.cursor = 0;
+        match self.scope {
+            SearchScope::Contents => {
+                self.scope = SearchScope::Rows;
+                // Stop the scan the contents scope was running.
+                self.edited_at = Some(Instant::now());
+            }
+            SearchScope::Rows if self.contents_enabled => {
+                self.scope = SearchScope::Contents;
+                self.notice = None;
+                self.edited_at = Some(Instant::now());
+            }
+            SearchScope::Rows => {
+                self.notice = Some("Content search is off while live preview is disabled");
+            }
+        }
+    }
+
     fn move_cursor(&mut self, delta: i32) {
-        if self.matches.is_empty() {
+        let len = match self.scope {
+            SearchScope::Rows => self.matches.len(),
+            SearchScope::Contents => self.content_len,
+        };
+        if len == 0 {
             self.cursor = 0;
             return;
         }
-        self.cursor = crate::tui::cursor::wrap_step(self.cursor, self.matches.len(), delta);
+        self.cursor = crate::tui::cursor::wrap_step(self.cursor, len, delta);
     }
 }
 
@@ -142,6 +378,7 @@ pub struct SearchOverlayWidget<'a> {
     state: &'a SearchOverlayState,
     items: &'a [SearchItem<'a>],
     theme: &'a Theme,
+    content: Option<&'a ContentView>,
 }
 
 impl<'a> SearchOverlayWidget<'a> {
@@ -154,7 +391,15 @@ impl<'a> SearchOverlayWidget<'a> {
             state,
             items,
             theme,
+            content: None,
         }
+    }
+
+    /// What the contents scope shows; ignored in the rows scope.
+    #[must_use]
+    pub fn with_content(mut self, content: &'a ContentView) -> Self {
+        self.content = Some(content);
+        self
     }
 }
 
@@ -164,13 +409,21 @@ impl Widget for SearchOverlayWidget<'_> {
         // wrapper reports the same cap dims `centered_modal_rect`
         // produces so auto-sizing reproduces the legacy rect.
         let modal = centered_modal_rect(area);
-        let title = line![format!(
-            " / search ({} matches) ",
-            self.state.matches().len()
-        )];
+        let contents = self.state.scope() == SearchScope::Contents;
+        let title = match (contents, self.content) {
+            (true, Some(view)) => {
+                line![format!(" / search contents ({} results) ", view.rows.len())]
+            }
+            (true, None) => line![" / search contents "],
+            (false, _) => line![format!(
+                " / search ({} matches) ",
+                self.state.matches().len()
+            )],
+        };
         let body = SearchBody {
             state: self.state,
             items: self.items,
+            content: self.content,
             theme: self.theme,
             inner_width: modal.width.saturating_sub(2) as usize,
             inner_height: modal.height.saturating_sub(2) as usize,
@@ -187,6 +440,7 @@ impl Widget for SearchOverlayWidget<'_> {
 struct SearchBody<'a> {
     state: &'a SearchOverlayState,
     items: &'a [SearchItem<'a>],
+    content: Option<&'a ContentView>,
     theme: &'a Theme,
     inner_width: usize,
     inner_height: usize,
@@ -220,6 +474,11 @@ impl Widget for SearchBody<'_> {
             height: 1,
         };
         Paragraph::new(query_line).render(query_area, buf);
+
+        if self.state.scope() == SearchScope::Contents {
+            self.render_contents(area, buf);
+            return;
+        }
 
         // Divider + ranked list.
         let list_area = Rect {
@@ -271,6 +530,173 @@ impl Widget for SearchBody<'_> {
         }
         Paragraph::new(lines).render(list_area, buf);
     }
+}
+
+impl SearchBody<'_> {
+    /// The contents scope: scan status, results, and the key hints.
+    fn render_contents(&self, area: Rect, buf: &mut Buffer) {
+        use crate::tui::keybindings::overlay::{SEARCH_CONTENT_KEYS, footer};
+        use crate::tui::widgets::popup_frame::{ellipsize, wrapped_lines};
+
+        let width = area.width as usize;
+        let empty = ContentView::default();
+        let view = self.content.unwrap_or(&empty);
+
+        // Footer: the generated key hints, wrapped, at the bottom.
+        let hints = wrapped_lines(&footer(SEARCH_CONTENT_KEYS), 0, width);
+        let hint_rows = hints
+            .len()
+            .min(3)
+            .min(area.height.saturating_sub(3) as usize);
+        let hint_top = area.y + area.height - u16::try_from(hint_rows).unwrap_or(0);
+        for (i, text) in hints.iter().take(hint_rows).enumerate() {
+            let rect = Rect {
+                x: area.x,
+                y: hint_top + u16::try_from(i).unwrap_or(0),
+                width: area.width,
+                height: 1,
+            };
+            Paragraph::new(line![span!(self.theme.placeholder; "{text}")]).render(rect, buf);
+        }
+
+        // Status row: what is searched and how far the scan has got.
+        let status = ellipsize(&self.status_text(view), width);
+        let status_rect = Rect {
+            x: area.x,
+            y: area.y.saturating_add(1),
+            width: area.width,
+            height: 1,
+        };
+        Paragraph::new(line![span!(self.theme.placeholder; "{status}")]).render(status_rect, buf);
+
+        let list_top = area.y.saturating_add(2);
+        let list_height = hint_top.saturating_sub(list_top) as usize;
+        let list_area = Rect {
+            x: area.x,
+            y: list_top,
+            width: area.width,
+            height: u16::try_from(list_height).unwrap_or(0),
+        };
+        if view.rows.is_empty() {
+            let label = if let Some(reason) = view.unavailable {
+                reason
+            } else if self.state.content_text().is_empty() {
+                "(type to search what was said)"
+            } else if view.done {
+                "(no sessions match)"
+            } else {
+                "(searching…)"
+            };
+            let label = ellipsize(label, width);
+            Paragraph::new(line![span!(self.theme.placeholder; "{label}")]).render(list_area, buf);
+            return;
+        }
+        let scroll = compute_scroll(self.state.cursor(), list_height, view.rows.len());
+        let lines: Vec<Line<'static>> = (scroll..(scroll + list_height).min(view.rows.len()))
+            .map(|idx| {
+                content_row_line(
+                    &view.rows[idx],
+                    idx == self.state.cursor(),
+                    width,
+                    self.theme,
+                )
+            })
+            .collect();
+        Paragraph::new(lines).render(list_area, buf);
+    }
+
+    fn status_text(&self, view: &ContentView) -> String {
+        if let Some(notice) = self.state.notice() {
+            return notice.to_string();
+        }
+        let group = match self.state.group() {
+            Grouping::Session => "by session",
+            Grouping::Message => "by message",
+        };
+        let kinds = self.state.kinds();
+        let mut what = vec!["messages"];
+        if kinds.tools {
+            what.push("tools");
+        }
+        if kinds.thinking {
+            what.push("thinking");
+        }
+        let mut text = format!("{group} · {}", what.join(" + "));
+        if view.total > 0 {
+            if view.done {
+                text.push_str(&format!(" · {} sessions searched", view.total));
+            } else {
+                text.push_str(&format!(" · {}/{} sessions", view.scanned, view.total));
+            }
+            if view.skipped > 0 {
+                text.push_str(&format!(" · {} skipped", view.skipped));
+            }
+        }
+        text
+    }
+}
+
+/// One contents result: cursor mark, harness chip, label, hit count,
+/// and the snippet with the match marked.
+fn content_row_line(
+    row: &ContentRow,
+    is_cursor: bool,
+    width: usize,
+    theme: &Theme,
+) -> Line<'static> {
+    use crate::tui::widgets::badge::harness_badge;
+    use crate::tui::widgets::popup_frame::ellipsize;
+
+    let mark = if is_cursor {
+        Modifier::REVERSED
+    } else {
+        Modifier::empty()
+    };
+    let plain = Style::default().add_modifier(mark);
+    let dim = if is_cursor {
+        plain
+    } else {
+        Style::default().add_modifier(theme.placeholder)
+    };
+    let mut spans: Vec<Span<'static>> = vec![
+        span!(plain; "{}", if is_cursor { "> " } else { "  " }),
+        harness_badge(&row.harness, theme),
+        span!(plain; " "),
+    ];
+    let label = ellipsize(&row.label, 22);
+    let mut used = 2 + 10 + 1 + label.chars().count();
+    spans.push(span!(plain; "{label}"));
+    let tag = match &row.turn {
+        Some(turn) => turn.clone(),
+        None => format!(
+            "{} {}",
+            row.hits,
+            if row.hits == 1 { "hit" } else { "hits" }
+        ),
+    };
+    spans.push(span!(dim; "  {tag}"));
+    used += 2 + tag.chars().count();
+    spans.push(span!(dim; "  "));
+    used += 2;
+    let budget = width.saturating_sub(used).max(8);
+    let snippet = crate::tui::search::snippet_around(
+        &row.snippet,
+        row.highlight.clone().unwrap_or(0..0),
+        budget,
+    );
+    match snippet.highlight.clone() {
+        Some(range) => {
+            let match_style = Style::default()
+                .fg(theme.warning)
+                .add_modifier(Modifier::BOLD)
+                .add_modifier(mark);
+            spans.push(span!(dim; "{}", &snippet.text[..range.start]));
+            spans.push(span!(match_style; "{}", &snippet.text[range.clone()]));
+            spans.push(span!(dim; "{}", &snippet.text[range.end..]));
+        }
+        None => spans.push(span!(dim; "{}", snippet.text)),
+    }
+    Line::from(spans)
 }
 
 /// Render a single match row with prefix, label, and a snippet of
@@ -423,12 +849,15 @@ fn compute_scroll(cursor: usize, visible_rows: usize, total: usize) -> usize {
 /// keystroke.
 pub struct SearchContext<'a> {
     pub items: &'a [SearchItem<'a>],
+    /// The contents results, in the order the overlay lists them.
+    pub content: &'a [ContentRow],
 }
 
 impl crate::tui::Overlay for SearchOverlayState {
     type Ctx<'a> = SearchContext<'a>;
 
     fn handle(&mut self, ctx: SearchContext<'_>, key: KeyEvent) -> crate::tui::OverlayOutcome {
+        self.set_content_len(ctx.content.len());
         let outcome = self.handle_key(key);
         self.refresh_matches(ctx.items);
         match outcome {
@@ -437,6 +866,24 @@ impl crate::tui::Overlay for SearchOverlayState {
             SearchOutcome::Confirm(id) => {
                 crate::tui::OverlayOutcome::Commit(Box::new(crate::tui::Msg::SelectRow(id)))
             }
+            SearchOutcome::OpenHit(index) => match ctx.content.get(index) {
+                Some(row) => {
+                    crate::tui::OverlayOutcome::Commit(Box::new(crate::tui::Msg::OpenContentHit {
+                        session: row.session.clone(),
+                        text: self.content_text(),
+                        turn_index: row.turn_index,
+                    }))
+                }
+                None => crate::tui::OverlayOutcome::Close,
+            },
+            SearchOutcome::Promote { show_results } => {
+                crate::tui::OverlayOutcome::Commit(Box::new(crate::tui::Msg::ApplyContentSearch {
+                    text: self.content_text(),
+                    kinds: self.kinds,
+                    group: self.group,
+                    show_results,
+                }))
+            }
         }
     }
 }
@@ -444,3 +891,7 @@ impl crate::tui::Overlay for SearchOverlayState {
 #[cfg(test)]
 #[path = "search_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "search_content_tests.rs"]
+mod content_tests;

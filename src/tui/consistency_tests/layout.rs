@@ -60,6 +60,14 @@ pub(super) fn builders() -> Vec<(&'static str, View, Open)> {
             open_pinned(app, Msg::OpenSlotRename("conspectus-main".into()));
         }),
         ("Search", View::Pinned, |app| app.open_search_overlay()),
+        // The same overlay on its contents scope, with a search running.
+        ("Search", View::Pinned, |app| {
+            app.update(Msg::StartContentSearch {
+                text: "needle".into(),
+                kinds: crate::viewer::search::ContentKinds::default(),
+            });
+            app.open_search_overlay();
+        }),
         ("ValueModal", View::Pinned, |app| {
             app.open_value_modal(crate::tui::widgets::value_modal::ValueModalState::new(
                 "cwd",

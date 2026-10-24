@@ -323,8 +323,32 @@ pub enum SearchKey {
     Pick,
     Down,
     Up,
+    /// Switch between searching the rows and searching contents.
+    Scope,
+    /// Contents scope: one result per session, or per message.
+    Group,
+    /// Contents scope: include tool calls and output.
+    Tools,
+    /// Contents scope: include thinking.
+    Thinking,
+    /// Contents scope: keep the query as the filter on the lists.
+    ApplyFilter,
+    /// Contents scope: keep the query and open the Search view.
+    ApplyView,
 }
 
+/// The picker shares the list-and-query keys but has no scopes.
+pub const PICKER_KEYS: &[KeyRow<SearchKey>] = &[
+    alias(ctrl('c'), SearchKey::Abort),
+    alias(key(KeyCode::Esc), SearchKey::Cancel),
+    alias(key(KeyCode::Enter), SearchKey::Pick),
+    alias(key(KeyCode::Down), SearchKey::Down),
+    alias(key(KeyCode::Up), SearchKey::Up),
+    alias(ctrl('n'), SearchKey::Down),
+    alias(ctrl('p'), SearchKey::Up),
+];
+
+/// `/` searching the rows.
 pub const SEARCH_KEYS: &[KeyRow<SearchKey>] = &[
     alias(ctrl('c'), SearchKey::Abort),
     alias(key(KeyCode::Esc), SearchKey::Cancel),
@@ -333,6 +357,34 @@ pub const SEARCH_KEYS: &[KeyRow<SearchKey>] = &[
     alias(key(KeyCode::Up), SearchKey::Up),
     alias(ctrl('n'), SearchKey::Down),
     alias(ctrl('p'), SearchKey::Up),
+    shown(
+        key(KeyCode::Tab),
+        SearchKey::Scope,
+        "Tab",
+        "search contents",
+    ),
+];
+
+/// `/` searching what was said in the sessions.
+pub const SEARCH_CONTENT_KEYS: &[KeyRow<SearchKey>] = &[
+    alias(ctrl('c'), SearchKey::Abort),
+    alias(key(KeyCode::Esc), SearchKey::Cancel),
+    alias(key(KeyCode::Enter), SearchKey::Pick),
+    alias(key(KeyCode::Down), SearchKey::Down),
+    alias(key(KeyCode::Up), SearchKey::Up),
+    alias(ctrl('n'), SearchKey::Down),
+    alias(ctrl('p'), SearchKey::Up),
+    shown(key(KeyCode::Tab), SearchKey::Scope, "Tab", "search rows"),
+    shown(ctrl('g'), SearchKey::Group, "Ctrl-G", "group"),
+    shown(ctrl('t'), SearchKey::Tools, "Ctrl-T", "tools"),
+    shown(ctrl('y'), SearchKey::Thinking, "Ctrl-Y", "thinking"),
+    shown(ctrl('f'), SearchKey::ApplyFilter, "Ctrl-F", "filter lists"),
+    shown(
+        ctrl('o'),
+        SearchKey::ApplyView,
+        "Ctrl-O",
+        "open Search view",
+    ),
 ];
 
 // ---------------------------------------------------------------------

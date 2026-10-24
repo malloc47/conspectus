@@ -209,6 +209,7 @@ fn drive_keys(
             apply_action(app, config, action, rebase);
             // Overlay keys can start a search; finish it before the
             // next key so the frame is deterministic.
+            app.search_overlay_tick(std::time::Instant::now(), true);
             runtime::run_pending_content_scans(app, rebase);
         }
     }

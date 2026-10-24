@@ -142,6 +142,8 @@ fn every_overlay_table_labels_its_keys_truthfully() {
         ("text input", mislabeled(TEXT_INPUT_KEYS)),
         ("new mux", mislabeled(NEW_MUX_KEYS)),
         ("search", mislabeled(SEARCH_KEYS)),
+        ("search contents", mislabeled(SEARCH_CONTENT_KEYS)),
+        ("picker", mislabeled(PICKER_KEYS)),
         ("help", mislabeled(HELP_KEYS)),
         ("value modal", mislabeled(VALUE_MODAL_KEYS)),
         ("messages", mislabeled(MESSAGES_KEYS)),

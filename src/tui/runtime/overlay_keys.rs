@@ -410,12 +410,23 @@ pub(in crate::tui) fn handle_search_overlay_key(
     key: ratatui::crossterm::event::KeyEvent,
 ) {
     use crate::tui::search::items_from_rows;
-    use crate::tui::widgets::search::SearchContext;
+    use crate::tui::widgets::search::{SearchContext, SearchScope};
     use crate::tui::{Overlay, OverlayOutcome};
     // The items own their strings, so building them ends the borrow
     // of `app` before the overlay state is borrowed mutably.
     let items = items_from_rows(app.visible_rows());
-    let ctx = SearchContext { items: &items };
+    let contents = if app
+        .search_overlay()
+        .is_some_and(|state| state.scope() == SearchScope::Contents)
+    {
+        app.content_view().rows
+    } else {
+        Vec::new()
+    };
+    let ctx = SearchContext {
+        items: &items,
+        content: &contents,
+    };
     let outcome = match app.search_overlay_mut() {
         Some(state) => state.handle(ctx, key),
         None => return,
@@ -424,9 +435,14 @@ pub(in crate::tui) fn handle_search_overlay_key(
         OverlayOutcome::Consumed => {}
         OverlayOutcome::Close => {
             app.close_search_overlay();
+            dispatch(app, Msg::DiscardContentPreview);
         }
         OverlayOutcome::Commit(msg) => {
             app.close_search_overlay();
+            // Keeping the search is the only way out that keeps it.
+            if !matches!(*msg, Msg::ApplyContentSearch { .. }) {
+                dispatch(app, Msg::DiscardContentPreview);
+            }
             dispatch(app, *msg);
         }
         OverlayOutcome::CommitAndStay(msg) => {

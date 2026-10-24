@@ -52,6 +52,10 @@ pub struct ContentSearch {
     pub status: ContentStatus,
     /// How the Search view lists the results.
     pub group: Grouping,
+    /// Whether the search narrows the session lists. A search the `/`
+    /// overlay is previewing runs and fills the overlay, but waits to be
+    /// applied.
+    pub applied: bool,
     hits: Arc<ContentHitMap>,
     /// The matching turns of each session, read on demand for the
     /// per-message grouping.
@@ -104,14 +108,20 @@ pub struct DetailRequest {
 }
 
 impl App {
-    /// The active content search, if any.
+    /// The active content search, if any. A search that is only a
+    /// preview in the `/` overlay is not active.
     pub fn content(&self) -> Option<&ContentSearch> {
-        self.content.as_ref()
+        self.content.as_ref().filter(|content| content.applied)
+    }
+
+    /// The search the `/` overlay is previewing, if any.
+    pub fn content_preview(&self) -> Option<&ContentSearch> {
+        self.content.as_ref().filter(|content| !content.applied)
     }
 
     /// The row predicate for the active search, for tree building.
     pub fn content_filter(&self) -> Option<ContentFilter> {
-        self.content.as_ref().map(ContentSearch::filter)
+        self.content().map(ContentSearch::filter)
     }
 
     /// The generation of the scan whose results are wanted now; `None`
@@ -233,6 +243,45 @@ impl App {
         }
     }
 
+    /// Start a scan for `text`. Returns the reason it did not start.
+    fn begin_content(
+        &mut self,
+        text: String,
+        kinds: ContentKinds,
+        group: Grouping,
+        applied: bool,
+    ) -> Option<String> {
+        if !self.config.live_preview_enabled {
+            let note = "Content search is off while live preview is disabled";
+            self.status_message = Some(note.to_string());
+            return Some(note.to_string());
+        }
+        self.content = Some(ContentSearch {
+            text,
+            kinds,
+            generation: 0,
+            status: ContentStatus::Running(Progress::default()),
+            group,
+            applied,
+            hits: Arc::new(ContentHitMap::default()),
+            details: Arc::new(ContentDetailMap::default()),
+            staging: None,
+            scanned: BTreeSet::new(),
+        });
+        let sessions = self.snapshot_sessions();
+        if sessions.is_empty() && self.handle.is_none() {
+            // No snapshot yet: the first refresh starts the scan.
+            self.content_generation += 1;
+            if let Some(content) = self.content.as_mut() {
+                content.generation = self.content_generation;
+            }
+        } else {
+            self.queue_scan(sessions);
+        }
+        self.start_search_spinner();
+        None
+    }
+
     pub(super) fn reduce_content(&mut self, msg: Msg) -> Vec<Effect> {
         let mut effects = Vec::new();
         match msg {
@@ -241,35 +290,88 @@ impl App {
                 if text.is_empty() {
                     return self.reduce_content(Msg::ClearContentSearch);
                 }
-                if !self.config.live_preview_enabled {
-                    let note = "Content search is off while live preview is disabled";
-                    self.status_message = Some(note.to_string());
-                    effects.push(Effect::Toast(note.to_string()));
+                if let Some(note) = self.begin_content(text, kinds, self.config.search.group, true)
+                {
+                    effects.push(Effect::Toast(note));
                     return effects;
                 }
-                self.content = Some(ContentSearch {
-                    text,
-                    kinds,
-                    generation: 0,
-                    status: ContentStatus::Running(Progress::default()),
-                    group: self.config.search.group,
-                    hits: Arc::new(ContentHitMap::default()),
-                    details: Arc::new(ContentDetailMap::default()),
-                    staging: None,
-                    scanned: BTreeSet::new(),
-                });
-                let sessions = self.snapshot_sessions();
-                if sessions.is_empty() && self.handle.is_none() {
-                    // No snapshot yet: the first refresh starts the scan.
-                    self.content_generation += 1;
-                    if let Some(content) = self.content.as_mut() {
-                        content.generation = self.content_generation;
-                    }
-                } else {
-                    self.queue_scan(sessions);
-                }
-                self.start_search_spinner();
+                self.content_stash = None;
                 self.rebuild_tree_in_place();
+            }
+            Msg::PreviewContentSearch { text, kinds, group } => {
+                let text = text.trim().to_string();
+                if text.is_empty() {
+                    return self.reduce_content(Msg::DiscardContentPreview);
+                }
+                let displaced = self
+                    .content
+                    .take_if(|content| content.applied)
+                    .or_else(|| self.content_stash.take());
+                if let Some(note) = self.begin_content(text, kinds, group, false) {
+                    // Nothing started: the search that was active stays.
+                    self.content = displaced;
+                    effects.push(Effect::Toast(note));
+                } else {
+                    self.content_stash = displaced;
+                }
+            }
+            Msg::ApplyContentSearch {
+                text,
+                kinds,
+                group,
+                show_results,
+            } => {
+                let text = text.trim().to_string();
+                let same = self.content.as_ref().is_some_and(|content| {
+                    content.text == text && content.kinds == kinds && content.group == group
+                });
+                if same {
+                    if let Some(content) = self.content.as_mut() {
+                        content.applied = true;
+                    }
+                    self.content_stash = None;
+                    self.rebuild_tree_in_place();
+                } else if let Some(note) = self.begin_content(text, kinds, group, true) {
+                    effects.push(Effect::Toast(note));
+                    return effects;
+                } else {
+                    self.content_stash = None;
+                    self.rebuild_tree_in_place();
+                }
+                if show_results {
+                    effects.extend(self.update(Msg::SwitchView(View::Search)));
+                }
+            }
+            Msg::DiscardContentPreview => {
+                if self
+                    .content
+                    .as_ref()
+                    .is_some_and(|content| !content.applied)
+                {
+                    let stash = self.content_stash.take();
+                    self.clear_content();
+                    if let Some(stash) = stash {
+                        let done = stash.status.is_done();
+                        self.content = Some(stash);
+                        if !done {
+                            return self.reduce_content(Msg::RescanContent);
+                        }
+                    }
+                    self.rebuild_tree_in_place();
+                }
+            }
+            Msg::OpenContentHit {
+                session,
+                text,
+                turn_index,
+            } => {
+                effects.push(Effect::Exec(crate::tui::effect::ExecSpec::ViewSession(
+                    session,
+                    Some(crate::viewer::state::ViewerOpen {
+                        query: text,
+                        turn_index,
+                    }),
+                )));
             }
             Msg::ClearContentSearch => {
                 self.clear_content();
@@ -375,6 +477,7 @@ impl App {
 
     /// Drop the content search and stop its scan.
     fn clear_content(&mut self) {
+        self.content_stash = None;
         if self.content.take().is_some() {
             // A new generation makes the runtime cancel whatever it runs.
             self.content_generation += 1;
@@ -413,6 +516,153 @@ impl App {
     }
 }
 
+/// What the `/` overlay was left set to, for the next time it opens.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct SearchMemory {
+    pub scope: crate::tui::widgets::search::SearchScope,
+    pub group: Grouping,
+    pub kinds: ContentKinds,
+}
+
+/// The most results the overlay lists.
+pub const OVERLAY_RESULTS: usize = 50;
+
+impl App {
+    /// What the contents scope of the `/` overlay shows: the best
+    /// matches of the running search (or, with the per-message
+    /// grouping, its matching turns), ranked as the Search view ranks.
+    pub fn content_view(&self) -> crate::tui::widgets::search::ContentView {
+        use crate::tui::widgets::search::ContentView;
+        let mut view = ContentView::default();
+        if !self.config.live_preview_enabled {
+            view.unavailable = Some("Content search is off while live preview is disabled");
+            return view;
+        }
+        let Some(content) = &self.content else {
+            return view;
+        };
+        let progress = content.status.progress();
+        view.scanned = progress.scanned;
+        view.total = progress.total;
+        view.skipped = progress.skipped;
+        view.done = content.status.is_done();
+        let Some(handle) = &self.handle else {
+            return view;
+        };
+        let snapshot = handle.snapshot();
+        let mut found: Vec<(AgentSessionId, &crate::viewer::search::SessionHits)> = self
+            .snapshot_sessions()
+            .into_iter()
+            .filter_map(|session| {
+                let hits = content
+                    .hits
+                    .get(&session.harness_key, &session.session_key)?;
+                Some((session, hits))
+            })
+            .collect();
+        found.sort_by(|a, b| {
+            crate::viewer::search::cmp_sessions(a.1, b.1).then_with(|| {
+                (&a.0.harness_key, &a.0.session_key).cmp(&(&b.0.harness_key, &b.0.session_key))
+            })
+        });
+        for (session, hits) in found {
+            if view.rows.len() >= OVERLAY_RESULTS {
+                break;
+            }
+            let node = NodeId::AgentSession(session.clone());
+            let alias = snapshot.aliases.get(&node);
+            let (title, mux_host) = match snapshot.find_node(&node) {
+                Some(crate::model::GraphNode::AgentSession(s)) => {
+                    (s.title.clone(), snapshot.mux_host_of(&node))
+                }
+                _ => (None, None),
+            };
+            let label = crate::aliases::session_display_name(
+                alias,
+                title.as_deref(),
+                mux_host.as_ref().map(|host| host.name.as_str()),
+            )
+            .map_or_else(
+                || session.session_key.chars().take(8).collect(),
+                str::to_string,
+            );
+            let details = (content.group == Grouping::Message)
+                .then(|| {
+                    content
+                        .details
+                        .get(&session.harness_key, &session.session_key)
+                })
+                .flatten();
+            let row_for = |hit: &crate::viewer::search::Hit, turn: Option<String>| {
+                crate::tui::widgets::search::ContentRow {
+                    session: session.clone(),
+                    label: label.clone(),
+                    harness: crate::tui::rows::harness_label(&session.harness_key),
+                    hits: hits.count,
+                    turn,
+                    snippet: hit.snippet.clone(),
+                    highlight: Some(hit.highlight.clone()),
+                    turn_index: hit.turn_index,
+                }
+            };
+            match details {
+                Some(details) => {
+                    let mut ordered: Vec<&crate::viewer::search::Hit> = details.iter().collect();
+                    ordered.sort_by(|a, b| crate::viewer::search::cmp_hits(a, b));
+                    for hit in ordered {
+                        if view.rows.len() >= OVERLAY_RESULTS {
+                            break;
+                        }
+                        let turn = format!(
+                            "turn {} · {}",
+                            hit.turn_index + 1,
+                            crate::tui::rows::search::kind_word(hit.kind)
+                        );
+                        view.rows.push(row_for(hit, Some(turn)));
+                    }
+                }
+                None => view.rows.push(row_for(&hits.best, None)),
+            }
+        }
+        view
+    }
+
+    /// Start (or stop) the scan the overlay owes once its query has
+    /// rested. With `force` the debounce is skipped. Called every loop
+    /// pass, and after each key where there is no loop.
+    pub fn search_overlay_tick(&mut self, now: Instant, force: bool) {
+        use crate::tui::widgets::search::DueSearch;
+        let Some(state) = self.search_overlay_mut() else {
+            return;
+        };
+        let Some(due) = state.take_due_search(now, force) else {
+            return;
+        };
+        let msg = match due {
+            DueSearch::Preview { text, kinds, group } => {
+                Msg::PreviewContentSearch { text, kinds, group }
+            }
+            DueSearch::Clear => Msg::DiscardContentPreview,
+        };
+        let _ = self.update(msg);
+    }
+
+    /// Remember how the overlay was set, as it closes.
+    pub(crate) fn remember_search_overlay(&mut self) {
+        if let Some(state) = self.search_overlay() {
+            self.search_memory = Some(SearchMemory {
+                scope: state.scope(),
+                group: state.group(),
+                kinds: state.kinds(),
+            });
+        }
+    }
+}
+
 #[cfg(test)]
 #[path = "content_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "content_preview_tests.rs"]
+mod preview_tests;

@@ -694,3 +694,114 @@ fn undo_brings_back_a_pin_removed_with_p() {
         screen.contains("nothing to undo")
     });
 }
+
+/// Two Claude Code sessions in the home the TUI reads: the first mentions
+/// "quokka" twice in messages, the second only chats.
+fn write_search_sessions(world: &World) {
+    let dir = world.root.join("home/.claude/projects/-home-user-project");
+    fs::create_dir_all(&dir).expect("transcript dir");
+    let record = |key: &str, kind: &str, uuid: &str, parent: &str, time: &str, body: &str| {
+        format!(
+            r#"{{"cwd":"/home/user/project","sessionId":"{key}","type":"{kind}","uuid":"{uuid}","parentUuid":{parent},"timestamp":"{time}","message":{{"role":"{kind}","content":[{{"type":"text","text":"{body}"}}]}}}}"#
+        )
+    };
+    let alpha = "aaaaaaaa-0000-0000-0000-000000000001";
+    let beta = "bbbbbbbb-0000-0000-0000-000000000002";
+    let first = [
+        record(
+            alpha,
+            "user",
+            "a1",
+            "null",
+            "2026-10-01T10:00:00.000Z",
+            "We chose the quokka design",
+        ),
+        record(
+            alpha,
+            "assistant",
+            "a2",
+            "\"a1\"",
+            "2026-10-01T10:00:05.000Z",
+            "The Quokka layout is noted.",
+        ),
+    ];
+    let second = [
+        record(
+            beta,
+            "user",
+            "b1",
+            "null",
+            "2026-10-02T09:00:00.000Z",
+            "Unrelated chatter",
+        ),
+        record(
+            beta,
+            "assistant",
+            "b2",
+            "\"b1\"",
+            "2026-10-02T09:00:03.000Z",
+            "Nothing to see",
+        ),
+    ];
+    fs::write(dir.join(format!("{alpha}.jsonl")), first.join("\n") + "\n").unwrap();
+    fs::write(dir.join(format!("{beta}.jsonl")), second.join("\n") + "\n").unwrap();
+}
+
+/// `/`, Tab, a query: the overlay streams the match; Ctrl-F keeps it as
+/// the filter, which narrows the list and shows in the header; `F`
+/// clears it.
+#[test]
+fn the_search_overlay_filters_the_session_list_and_f_clears_it() {
+    needs_tmux!();
+    let world = World::new();
+    write_search_sessions(&world);
+    world.new_mux("anchor", false);
+    world.start_tui_outside();
+    wait_screen(&world, "both sessions", |screen| {
+        screen.contains("2 sessions")
+    });
+
+    // The TUI opens on the muxes; the content filter is for the sessions.
+    world.keys(&["1"]);
+    world.keys(&["/", "Tab"]);
+    wait_screen(&world, "the contents scope", |screen| {
+        screen.contains("/ search contents")
+    });
+    world.keys(&["quokka"]);
+    wait_screen(&world, "the streamed result", |screen| {
+        screen.contains("/ search contents (1 results)") && screen.contains("2 hits")
+    });
+
+    world.keys(&["C-f"]);
+    wait_screen(&world, "the list narrowed with the find chip", |screen| {
+        screen.contains("1/2 sessions") && !screen.contains("/ search contents")
+    });
+
+    world.keys(&["F"]);
+    wait_screen(&world, "the filter cleared", |screen| {
+        screen.contains("2 sessions") && !screen.contains("1/2 sessions")
+    });
+}
+
+/// Esc in the contents scope cancels the scan and leaves no filter.
+#[test]
+fn escaping_the_contents_scope_leaves_the_lists_whole() {
+    needs_tmux!();
+    let world = World::new();
+    write_search_sessions(&world);
+    world.new_mux("anchor", false);
+    world.start_tui_outside();
+    wait_screen(&world, "both sessions", |screen| {
+        screen.contains("2 sessions")
+    });
+
+    world.keys(&["1", "/", "Tab", "quokka"]);
+    wait_screen(&world, "the result", |screen| screen.contains("2 hits"));
+    world.keys(&["Escape"]);
+    wait_screen(&world, "the overlay closed", |screen| {
+        !screen.contains("/ search contents")
+    });
+    let screen = world.screen();
+    assert!(!screen.contains("find:"), "{screen}");
+    assert!(screen.contains("2 sessions"), "{screen}");
+}

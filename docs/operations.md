@@ -514,6 +514,35 @@ its whitespace collapsed. `searched.skipped` counts sessions whose
 transcript could not be read; `without_parser` counts sessions of
 harnesses that cannot be searched yet.
 
+### Searching contents from `/`
+
+`/` opens the search overlay on the rows of the current view, as it always
+has. `Tab` switches it to the contents of the sessions (and back), and the
+overlay remembers how you left it for the rest of the session. In the
+contents scope the overlay shows the query, a status line (grouping, the
+kinds searched, and how many sessions are scanned, with the skipped
+count), the best results so far, and the keys it understands:
+
+- Type to search. The scan starts when the query has rested for about
+  200 ms and restarts, abandoning the previous scan, whenever the query
+  or an option changes. Results arrive while it runs.
+- `Ctrl-G` groups results per session or per message, `Ctrl-T` includes
+  tool calls and output, and `Ctrl-Y` includes thinking. The starting
+  values come from `[search]` in the config.
+- `Up`/`Down` (or `Ctrl-P`/`Ctrl-N`) move through the results, and `Enter`
+  opens the viewer at the highlighted match, with the query already
+  searched.
+- `Ctrl-F` keeps the query as the filter on the Sessions, Mux, and PRs
+  lists and closes the overlay; `F` clears it. `Ctrl-O` does the same and
+  also opens the Search view.
+- `Esc` closes the overlay and stops the scan. The lists are left as they
+  were; if a content filter was active when the overlay opened, it is
+  restored.
+
+Opening `/` while a content filter is active starts in the contents scope
+with that query filled in. Content search is off under `--no-live-preview`;
+the contents scope then says why and cannot be chosen.
+
 ## Paging
 
 `conspectus table <ROWS>`, `conspectus columns <ROWS>`, and

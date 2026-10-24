@@ -133,6 +133,8 @@ fn run_loop(
     let mut shown: Option<PreviewSource> = None;
     let mut force_preview = false;
     while !app.should_quit() {
+        // A contents query that has rested starts its scan.
+        app.search_overlay_tick(Instant::now(), false);
         mode.drain(&mut app, &config)?;
         shown = refresh_preview_if_needed(&mut app, &config, &mut mode, shown, force_preview);
         draw_frame(&mut app, terminal)?;
@@ -563,7 +565,7 @@ impl LoopMode for LiveMode {
             }
             Some(Action::OpenSearch) => {
                 let hint = app.open_search_entry();
-                app.update(Msg::SetStatus(Some(hint.to_string())));
+                app.update(Msg::SetStatus(Some(hint)));
             }
             Some(Action::SearchOverlayKey(key)) => handle_search_overlay_key(app, key),
             Some(Action::OpenHelp) => {
@@ -662,7 +664,7 @@ impl LoopMode for StaticMode {
             Some(Action::ViewerOverlayKey(key)) => handle_viewer_overlay_key(app, key),
             Some(Action::OpenSearch) => {
                 let hint = app.open_search_entry();
-                app.update(Msg::SetStatus(Some(hint.to_string())));
+                app.update(Msg::SetStatus(Some(hint)));
             }
             Some(Action::SearchOverlayKey(key)) => handle_search_overlay_key(app, key),
             Some(Action::OpenControls) => {

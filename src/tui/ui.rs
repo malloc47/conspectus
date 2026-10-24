@@ -233,7 +233,12 @@ fn draw_search_overlay(app: &App, frame: &mut Frame<'_>, area: Rect) {
     // the search overlay's label lookup never lags behind a
     // refresh. Building them copies a few strings per row.
     let items = items_from_rows(app.visible_rows());
-    let widget = SearchOverlayWidget::new(state, &items, app.theme());
+    let view = (state.scope() == crate::tui::widgets::search::SearchScope::Contents)
+        .then(|| app.content_view());
+    let mut widget = SearchOverlayWidget::new(state, &items, app.theme());
+    if let Some(view) = &view {
+        widget = widget.with_content(view);
+    }
     frame.render_widget(widget, area);
 }
 

@@ -356,10 +356,16 @@ fn keymap_sections() -> Vec<HelpSection> {
         },
         HelpSection {
             title: "Search",
-            bindings: vec![Binding::new(
-                "/",
-                "Open the search overlay (ranks within the active filter set)",
-            )],
+            bindings: vec![
+                Binding::new(
+                    "/",
+                    "Open the search overlay (ranks within the active filter set)",
+                ),
+                Binding::new(
+                    "/ then Tab",
+                    "Search what was said in every session instead; Ctrl-F keeps the query as a filter on the lists, Ctrl-O also opens the Search view",
+                ),
+            ],
         },
         HelpSection {
             title: "Navigation",
