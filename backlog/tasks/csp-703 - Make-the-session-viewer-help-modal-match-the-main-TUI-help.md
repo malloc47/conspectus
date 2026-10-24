@@ -1,9 +1,10 @@
 ---
 id: CSP-703
 title: Make the session viewer help modal match the main TUI help
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-10-24 03:21'
+updated_date: '2026-10-24 05:21'
 labels:
   - tui
 milestone: m-23
@@ -27,17 +28,23 @@ The viewer has its own `Theme` (`src/viewer/theme.rs`) and is `pub(crate)`, so s
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 The viewer help modal uses the same frame as the main TUI help: border, title style, padding, and how it centers and sizes against the terminal
-- [ ] #2 Key and description columns look the same in both: same key color and weight, same alignment, same key notation (for example `Ctrl-D`), and descriptions that wrap to the modal width
-- [ ] #3 The viewer help groups its keys under section headings in the same style as the main help, and shows the same kind of footer saying how to scroll and close it
-- [ ] #4 The viewer help scrolls when it does not fit a short terminal, the same way the main help does, and keys that close or scroll it match the main help where they do not clash with viewer keys
-- [ ] #5 The viewer help rows come from, or are checked against, `VIEWER_KEYS`, so a key added to the viewer cannot be left out of its help
-- [ ] #6 A test in `src/tui/consistency_tests/` asserts that the two help modals share the same frame and column styling, so they cannot drift apart again
-- [ ] #7 Checked with `conspectus tui --snapshot` for both modals at a normal and a narrow width, and existing viewer and help snapshot tests are updated
+- [x] #1 The viewer help modal uses the same frame as the main TUI help: border, title style, padding, and how it centers and sizes against the terminal
+- [x] #2 Key and description columns look the same in both: same key color and weight, same alignment, same key notation (for example `Ctrl-D`), and descriptions that wrap to the modal width
+- [x] #3 The viewer help groups its keys under section headings in the same style as the main help, and shows the same kind of footer saying how to scroll and close it
+- [x] #4 The viewer help scrolls when it does not fit a short terminal, the same way the main help does, and keys that close or scroll it match the main help where they do not clash with viewer keys
+- [x] #5 The viewer help rows come from, or are checked against, `VIEWER_KEYS`, so a key added to the viewer cannot be left out of its help
+- [x] #6 A test in `src/tui/consistency_tests/` asserts that the two help modals share the same frame and column styling, so they cannot drift apart again
+- [x] #7 Checked with `conspectus tui --snapshot` for both modals at a normal and a narrow width, and existing viewer and help snapshot tests are updated
 <!-- AC:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
-- [ ] #1 `just check` passes, or `git diff --check` for docs-only changes
-- [ ] #2 Docs and ADRs are updated when behavior, architecture, or workflow change
+- [x] #1 `just check` passes, or `git diff --check` for docs-only changes
+- [x] #2 Docs and ADRs are updated when behavior, architecture, or workflow change
 <!-- DOD:END -->
+
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+The viewer help now shares the main help's frame, wrapping, scrolling, and footer; rows are generated from the key table with one description per message; tests and snapshots cover content and styling parity.
+<!-- SECTION:FINAL_SUMMARY:END -->
