@@ -108,9 +108,11 @@ fn a_remembered_contents_scope_is_ignored_when_contents_search_is_off() {
 #[test]
 fn typing_waits_for_the_debounce_then_asks_for_one_scan_with_the_latest_text() {
     let mut state = contents_overlay("");
+    // Asked about from before the first keystroke, so a stalled test
+    // thread cannot make the first answer late.
+    let before = Instant::now();
     type_text(&mut state, "quo");
-    let now = Instant::now();
-    assert_eq!(state.take_due_search(now, false), None, "still resting");
+    assert_eq!(state.take_due_search(before, false), None, "still resting");
     type_text(&mut state, "kka");
     // Measured from after the last keystroke, so a slow machine cannot
     // push the edit past the instant being asked about.

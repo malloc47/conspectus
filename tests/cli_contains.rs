@@ -199,3 +199,18 @@ fn contains_is_accepted_by_the_other_tables_and_leaves_them_alone() {
             .success();
     }
 }
+
+/// Scenario worlds have no transcripts, so the scenario viewer says so
+/// instead of quietly ignoring the flag.
+#[cfg(debug_assertions)]
+#[test]
+fn the_scenario_viewer_refuses_contains() {
+    let temp = tempfile::tempdir().unwrap();
+    let home = temp.path().join("home");
+    fs::create_dir_all(&home).unwrap();
+    conspectus(&home, temp.path())
+        .args(["dev", "scenario", "tui", "exact-match", "--contains", "x"])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("`--contains` isn't available"));
+}

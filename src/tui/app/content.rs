@@ -28,6 +28,10 @@ pub const CONTENT_OFF_NOTICE: &str = "Content search is off while live preview i
 /// The best-ranked sessions get them first; the rest are not read.
 pub const MAX_DETAIL_SESSIONS: usize = 100;
 
+/// How many sessions the Search view opens by itself, so the first
+/// screen shows matches without reading every matching transcript.
+pub const AUTO_EXPAND_SESSIONS: usize = 10;
+
 /// Add two scans' counters, for an incremental scan that continues a
 /// finished one.
 fn add_progress(a: Progress, b: Progress) -> Progress {
@@ -230,21 +234,38 @@ impl App {
         self.detail_request.take()
     }
 
-    /// Ask for the matching turns of every session found so far, when
-    /// the per-message grouping needs them and the scan has finished.
-    fn queue_details(&mut self) {
+    /// Ask for the matching turns of the sessions the operator has open,
+    /// when the per-message grouping needs them and the scan has
+    /// finished. Closed sessions are read when they are opened.
+    pub(super) fn queue_details(&mut self) {
         let Some(content) = &self.content else {
             return;
         };
         if content.group != Grouping::Message || !content.status.is_done() {
             return;
         }
+        let open: std::collections::BTreeSet<(String, String)> = self
+            .tree
+            .rows
+            .iter()
+            .filter(|row| self.expanded.contains(&row.id))
+            .filter_map(|row| match &row.kind {
+                crate::tui::rows::RowKind::AgentSession(session) => Some((
+                    session.session.harness_key.clone(),
+                    session.session.session_key.clone(),
+                )),
+                _ => None,
+            })
+            .collect();
         // The best-ranked matches get their turns read first, and no
         // more than the cap are ever held.
         let room = MAX_DETAIL_SESSIONS.saturating_sub(content.details.len());
         let mut ranked: Vec<(AgentSessionId, &crate::viewer::search::SessionHits)> = self
             .snapshot_sessions()
             .into_iter()
+            .filter(|session| {
+                open.contains(&(session.harness_key.clone(), session.session_key.clone()))
+            })
             .filter_map(|session| {
                 let hits = content
                     .hits
@@ -593,11 +614,30 @@ impl App {
         if self.active_view != View::Search {
             return;
         }
+        let is_session = |row: &crate::tui::rows::Row| {
+            matches!(row.kind, crate::tui::rows::RowKind::AgentSession(_))
+        };
+        let mut open_sessions = self
+            .tree
+            .rows
+            .iter()
+            .filter(|row| row.expandable && is_session(row) && self.expanded.contains(&row.id))
+            .count();
         for row in &self.tree.rows {
-            if row.expandable && self.search_auto_expanded.insert(row.id.clone()) {
-                self.expanded.insert(row.id.clone());
+            if !row.expandable || !self.search_auto_expanded.insert(row.id.clone()) {
+                continue;
             }
+            if is_session(row) {
+                // Only the first few open by themselves; the rest are
+                // read when the operator opens them.
+                if open_sessions >= AUTO_EXPAND_SESSIONS {
+                    continue;
+                }
+                open_sessions += 1;
+            }
+            self.expanded.insert(row.id.clone());
         }
+        self.queue_details();
     }
 
     /// Drop the content search and stop its scan.

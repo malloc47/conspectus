@@ -70,6 +70,7 @@ use crate::tui::ui::{buffer_to_string, render_to_buffer};
 
 mod actions;
 mod content_filter;
+mod content_interactions;
 mod docs;
 mod fixtures;
 mod focus;

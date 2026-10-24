@@ -16,8 +16,28 @@ fn turn(index: usize) -> Hit {
     }
 }
 
+/// Per-message results live in the Search view, where the sessions the
+/// operator has open are the ones whose turns get read.
 fn group_by_message(app: &mut App) {
+    app.update(Msg::SwitchView(View::Search));
     app.update(Msg::SetContentGroup(Grouping::Message));
+}
+
+/// Open every session row the way an operator walking the list would.
+fn open_every_session(app: &mut App) {
+    let rows: Vec<RowId> = app
+        .tree()
+        .rows
+        .iter()
+        .filter(|row| row.expandable && matches!(row.kind, RowKind::AgentSession(_)))
+        .map(|row| row.id.clone())
+        .collect();
+    for id in rows {
+        app.set_selection(id);
+        if !app.expanded.contains(app.selection().unwrap()) {
+            app.update(Msg::ExpandRow);
+        }
+    }
 }
 
 #[test]
@@ -203,6 +223,12 @@ fn only_the_best_ranked_sessions_have_their_turns_read_and_never_more_than_the_c
 
     group_by_message(&mut app);
 
+    // Only the sessions that opened by themselves are read at first.
+    let first = app.take_detail_request().expect("details are requested");
+    assert_eq!(first.sessions.len(), AUTO_EXPAND_SESSIONS);
+
+    // Opening the rest asks for the best-ranked, up to the cap.
+    open_every_session(&mut app);
     let request = app.take_detail_request().expect("details are requested");
     assert_eq!(request.sessions.len(), MAX_DETAIL_SESSIONS);
     let wanted: BTreeSet<&str> = request
@@ -295,4 +321,51 @@ fn the_overlay_view_is_rebuilt_only_when_what_it_shows_changes() {
 fn progress_counters_add_up() {
     let sum = add_progress(progress(1, 2), progress(3, 4));
     assert_eq!(sum, progress(4, 6));
+}
+
+#[test]
+fn a_session_past_the_first_few_is_read_when_it_is_opened_not_before() {
+    let keys: Vec<String> = (0..AUTO_EXPAND_SESSIONS + 2)
+        .map(|i| format!("s{i:02}"))
+        .collect();
+    let refs: Vec<&str> = keys.iter().map(String::as_str).collect();
+    let mut app = app_with(&refs);
+    start(&mut app, "needle");
+    let batch = keys
+        .iter()
+        .enumerate()
+        .map(|(i, k)| (key(k), hits(i + 1)))
+        .collect();
+    deliver(&mut app, batch, true);
+    group_by_message(&mut app);
+
+    let first = app.take_detail_request().expect("the open ones are read");
+    assert_eq!(first.sessions.len(), AUTO_EXPAND_SESSIONS);
+    let generation = app.content_generation().unwrap();
+    let batch = first
+        .sessions
+        .iter()
+        .map(|s| (key(&s.session_key), vec![turn(0)]))
+        .collect();
+    app.update(Msg::ContentDetails { generation, batch });
+    assert!(
+        app.take_detail_request().is_none(),
+        "closed sessions are not read"
+    );
+
+    // Every session row can be opened, read or not.
+    let closed: Vec<RowId> = app
+        .tree()
+        .rows
+        .iter()
+        .filter(|row| row.expandable && !app.expanded.contains(&row.id))
+        .filter(|row| matches!(row.kind, RowKind::AgentSession(_)))
+        .map(|row| row.id.clone())
+        .collect();
+    assert_eq!(closed.len(), 2);
+    app.set_selection(closed[0].clone());
+    app.update(Msg::ExpandRow);
+
+    let next = app.take_detail_request().expect("opening reads it");
+    assert_eq!(next.sessions.len(), 1);
 }

@@ -115,8 +115,9 @@ enough to scan on demand.
     synthesizes (placeholders for sealed reasoning, metadata notes,
     branch-summary headings, joined blocks), which is not in the file
     bytes, so those searches parse every file. Files are read in
-    bounded chunks, so a large transcript is never held twice. opencode keeps its sessions in SQLite, so its candidates
-    come from a query using `instr(lower(...), ?)` (SQLite `lower` is
+    bounded chunks, so a large transcript is never held twice. opencode
+    keeps its sessions in SQLite, so its candidates come from a query
+    using `instr(lower(...), ?)` (SQLite `lower` is
     ASCII only, which agrees with the matcher), read through a
     read-only, `query_only` connection.
 14. **Unreadable input.** A malformed, unreadable, or parserless
@@ -128,8 +129,10 @@ enough to scan on demand.
     - **`/` overlay.** `Tab` switches scope between rows and contents.
       Rows scope is unchanged. In contents scope the overlay shows a
       bounded live preview with progress; Enter opens the viewer at the
-      hit, one key applies the query as the filter, another opens the
-      Search view, and Esc cancels the scan.
+      hit, `Ctrl-F` applies the query as the filter, `Ctrl-O` applies it
+      and opens the Search view, `Ctrl-R` switches between one result per
+      session and one per matching turn, `Ctrl-T` and `Ctrl-Y` include
+      tool and thinking content, and Esc cancels the scan.
     - **Search view.** A sixth view, key `6`, listing matching sessions
       ranked, with a hit chip and a highlighted snippet, and hit rows
       when grouped per message. Enter, `v`, and the `.` menu act on the

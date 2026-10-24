@@ -13,9 +13,11 @@ use std::time::{Duration, Instant};
 use std::sync::mpsc::{self, Receiver, TryRecvError};
 use std::thread::JoinHandle;
 
+use std::sync::Arc;
+
 use crate::content_search::{
-    CancelToken, Polled, Progress, ScanEvent, ScanHandle, ScanOptions, SessionKey, hits_for,
-    plan_sessions, scan, scan_blocking,
+    CancelToken, Polled, Progress, ScanEvent, ScanHandle, ScanOptions, ScanSession, SessionKey,
+    hits_for, plan_sessions, scan, scan_blocking,
 };
 use crate::tui::app::{App, DetailRequest, Msg, ScanRequest};
 use crate::viewer::search::{ContentQuery, Hit, SessionHits};
@@ -48,11 +50,17 @@ impl EventSource for ScanHandle {
     }
 }
 
+/// Reads the matching turns of one session. Tests substitute a reader
+/// they can hold still; the live loop uses [`hits_for`].
+pub(super) type DetailReader = Arc<dyn Fn(&ScanSession, &ContentQuery) -> Vec<Hit> + Send + Sync>;
+
 /// The scan the live loop is running, if any.
 #[derive(Default)]
 pub(super) struct ContentDriver {
     pub(super) active: Option<Active>,
     pub(super) details: Option<DetailActive>,
+    /// Replaces [`hits_for`] for the detail reads; `None` outside tests.
+    pub(super) detail_reader: Option<DetailReader>,
 }
 
 /// The read of matching turns for the per-message grouping.
@@ -152,7 +160,7 @@ impl ContentDriver {
         if self.details.is_none()
             && let Some(request) = app.take_detail_request()
         {
-            self.details = Some(start_details(request));
+            self.details = Some(start_details(request, self.detail_reader.clone()));
         }
         let Some(active) = &mut self.details else {
             return;
@@ -184,7 +192,7 @@ impl ContentDriver {
     }
 }
 
-fn start_details(request: DetailRequest) -> DetailActive {
+fn start_details(request: DetailRequest, reader: Option<DetailReader>) -> DetailActive {
     let (sender, events) = mpsc::channel();
     let cancel = CancelToken::new();
     let token = cancel.clone();
@@ -195,7 +203,10 @@ fn start_details(request: DetailRequest) -> DetailActive {
             if token.is_cancelled() {
                 return;
             }
-            let hits = hits_for(session, &query);
+            let hits = match &reader {
+                Some(read) => read(session, &query),
+                None => hits_for(session, &query),
+            };
             let key = session.key.clone();
             if sender.send((key, hits)).is_err() {
                 return;

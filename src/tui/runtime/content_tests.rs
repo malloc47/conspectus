@@ -79,6 +79,7 @@ fn driver_running(source: Script, generation: u64) -> ContentDriver {
             done: false,
         }),
         details: None,
+        detail_reader: None,
     }
 }
 
@@ -220,13 +221,24 @@ fn a_new_request_replaces_a_finished_scan() {
 
     driver.pump(&mut app);
 
-    assert!(driver.active.is_some(), "the requested scan started");
+    // A scan this small can finish inside the first pump, so "started"
+    // is either still running or already delivered.
+    assert!(
+        driver.active.is_some()
+            || app
+                .content()
+                .is_some_and(crate::tui::app::ContentSearch::status_is_done),
+        "the requested scan started"
+    );
     assert!(app.take_scan_request().is_none(), "the request was taken");
 }
 
 fn detail_app(root: &std::path::Path) -> (App, u64) {
     let ids = [id(&root.display().to_string(), "a")];
     let mut app = app_with(&ids);
+    // Per-message results are read for the sessions open in the Search
+    // view.
+    app.update(Msg::SwitchView(crate::tui::View::Search));
     let generation = search(&mut app, "needle");
     app.update(Msg::SetContentGroup(
         crate::viewer::search::Grouping::Message,
@@ -247,34 +259,62 @@ fn detail_app(root: &std::path::Path) -> (App, u64) {
     (app, generation)
 }
 
+/// A reader that reports the thread it runs on, then waits until the
+/// test lets it go, so the test decides when a read is in flight.
+struct Gate {
+    reader: DetailReader,
+    started: std::sync::mpsc::Receiver<std::thread::ThreadId>,
+    release: std::sync::mpsc::Sender<()>,
+}
+
+fn gated_reader() -> Gate {
+    let (started_tx, started) = std::sync::mpsc::channel();
+    let (release, release_rx) = std::sync::mpsc::channel::<()>();
+    let started_tx = std::sync::Mutex::new(started_tx);
+    let release_rx = std::sync::Mutex::new(release_rx);
+    let reader: DetailReader = Arc::new(move |_session, _query| {
+        let _ = started_tx.lock().unwrap().send(std::thread::current().id());
+        let _ = release_rx.lock().unwrap().recv();
+        Vec::new()
+    });
+    Gate {
+        reader,
+        started,
+        release,
+    }
+}
+
 #[test]
 fn matching_turns_are_read_on_another_thread_and_delivered() {
     let dir = tempfile::tempdir().unwrap();
     let (mut app, generation) = detail_app(dir.path());
-    let mut driver = ContentDriver::default();
+    let gate = gated_reader();
+    let mut driver = ContentDriver {
+        detail_reader: Some(gate.reader.clone()),
+        ..ContentDriver::default()
+    };
 
     driver.pump(&mut app);
 
-    // A read this small can finish inside the first pump.
-    if let Some(active) = driver.details.as_ref() {
-        assert_eq!(active.generation, generation);
-        let worker = active.thread.as_ref().expect("it has its own thread");
-        assert_ne!(
-            worker.thread().id(),
-            std::thread::current().id(),
-            "the read is not on the UI thread"
-        );
-    }
-    // The session has no transcript, so its read ends with no turns;
-    // the app still hears about it.
-    let deadline = Instant::now() + Duration::from_secs(10);
-    while driver.details.is_some() && Instant::now() < deadline {
-        std::thread::sleep(Duration::from_millis(20));
-        if let Some(active) = &mut driver.details {
-            active.last_flush = Instant::now() - FLUSH_EVERY * 2;
-        }
-        driver.pump(&mut app);
-    }
+    // The reader is held, so the read is certainly in flight.
+    let active = driver.details.as_ref().expect("a read started");
+    assert_eq!(active.generation, generation);
+    let reader_thread = gate
+        .started
+        .recv_timeout(Duration::from_secs(10))
+        .expect("the reader ran");
+    assert_ne!(
+        reader_thread,
+        std::thread::current().id(),
+        "the read is not on the UI thread"
+    );
+
+    // Let it finish; once its thread has ended the channel is complete.
+    gate.release.send(()).unwrap();
+    let worker = driver.details.as_mut().unwrap().thread.take().unwrap();
+    worker.join().unwrap();
+    driver.details.as_mut().unwrap().last_flush = Instant::now() - FLUSH_EVERY * 2;
+    driver.pump(&mut app);
     assert!(driver.details.is_none(), "the read ended");
 }
 
@@ -282,8 +322,15 @@ fn matching_turns_are_read_on_another_thread_and_delivered() {
 fn a_new_search_stops_the_turn_reads_of_the_old_one() {
     let dir = tempfile::tempdir().unwrap();
     let (mut app, _) = detail_app(dir.path());
-    let mut driver = ContentDriver::default();
+    let gate = gated_reader();
+    let mut driver = ContentDriver {
+        detail_reader: Some(gate.reader.clone()),
+        ..ContentDriver::default()
+    };
     driver.pump(&mut app);
+    gate.started
+        .recv_timeout(Duration::from_secs(10))
+        .expect("the reader ran");
     let cancel = driver
         .details
         .as_ref()
@@ -296,6 +343,7 @@ fn a_new_search_stops_the_turn_reads_of_the_old_one() {
 
     assert!(driver.details.is_none());
     assert!(cancel.is_cancelled(), "the old read was told to stop");
+    gate.release.send(()).unwrap();
 }
 
 fn claude_transcript(root: &std::path::Path, key: &str, body: &str) {

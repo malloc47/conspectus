@@ -87,6 +87,9 @@ pub fn build_search_tree(inputs: SearchBuildInputs<'_>) -> RowTree {
         .map(|row| {
             let (harness, key) = session_key(&row);
             let hits = content.hits.get(&harness, &key).cloned();
+            let detail_pending = content.group == Grouping::Message
+                && hits.is_some()
+                && content.details.get(&harness, &key).is_none();
             let children = if content.group == Grouping::Message {
                 content
                     .details
@@ -100,6 +103,7 @@ pub fn build_search_tree(inputs: SearchBuildInputs<'_>) -> RowTree {
                 row,
                 hits,
                 children,
+                detail_pending,
             }
         })
         .collect();
@@ -157,14 +161,21 @@ struct Entry {
     row: Row,
     hits: Option<SessionHits>,
     children: Vec<Row>,
+    /// The session matched but its turns have not been read yet.
+    detail_pending: bool,
 }
 
 fn push_entry(tree: &mut RowTree, entry: Entry, depth: u8) {
     let Entry {
-        mut row, children, ..
+        mut row,
+        children,
+        detail_pending,
+        ..
     } = entry;
     row.depth = depth;
-    row.expandable = !children.is_empty();
+    // A session whose turns are not read yet can still be opened: they
+    // are read then.
+    row.expandable = !children.is_empty() || detail_pending;
     tree.rows.push(row);
     for mut child in children {
         child.depth = depth.saturating_add(1);

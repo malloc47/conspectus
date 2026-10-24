@@ -1430,8 +1430,14 @@ impl App {
             Msg::End => {
                 self.move_selection_to(usize::MAX);
             }
-            Msg::ToggleExpand => self.toggle_expand_selected(),
-            Msg::ExpandRow => self.expand_selected(),
+            Msg::ToggleExpand => {
+                self.toggle_expand_selected();
+                self.queue_details();
+            }
+            Msg::ExpandRow => {
+                self.expand_selected();
+                self.queue_details();
+            }
             Msg::CollapseRow => self.collapse_selected(),
             Msg::ToggleLinkedDetails => self.toggle_linked_details(),
             Msg::ExplorerNavDown => self.explorer_move_cursor(1),
