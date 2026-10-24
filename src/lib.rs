@@ -9,6 +9,7 @@
 
 pub mod aliases;
 pub mod api;
+pub mod argv;
 #[doc(hidden)]
 pub mod cli;
 pub mod config;
@@ -22,15 +23,21 @@ pub mod discovery;
 pub mod exec;
 #[doc(hidden)]
 pub mod filter;
+pub mod history;
 #[doc(hidden)]
 pub mod hook;
 #[doc(hidden)]
 pub mod invocation;
+pub mod launch_default;
+pub(crate) mod legacy_bindings;
+pub(crate) mod legacy_pins;
+pub(crate) mod legacy_registry;
 pub mod model;
 pub mod output;
-pub(crate) mod pin_bindings;
-pub(crate) mod pin_store_registry;
-pub(crate) mod pins;
+pub mod pin_migrate;
+pub mod pin_ops;
+pub mod pin_slots;
+pub mod rebuild;
 pub mod rename;
 pub mod resolve;
 pub(crate) mod server;

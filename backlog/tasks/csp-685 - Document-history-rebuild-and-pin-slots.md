@@ -1,9 +1,10 @@
 ---
 id: CSP-685
 title: 'Document history, rebuild, and pin slots'
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-10-22 01:11'
+updated_date: '2026-10-22 18:13'
 labels:
   - history-pins
 milestone: m-23
@@ -36,12 +37,18 @@ The operations guide, the pins walkthrough, the README, and the showcase and dev
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 Operator docs describe history, rebuild, pin slots, the Pinned and History views, migration, and reaping, and no longer describe pin launch or adopt
-- [ ] #2 The showcase scenario includes pinned, planned, and gone entities of several kinds
+- [x] #1 Operator docs describe history, rebuild, pin slots, the Pinned and History views, migration, and reaping, and no longer describe pin launch or adopt
+- [x] #2 The showcase scenario includes pinned, planned, and gone entities of several kinds
 <!-- AC:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
-- [ ] #1 `just check` passes, or `git diff --check` for docs-only changes
-- [ ] #2 Docs and ADRs are updated when behavior, architecture, or workflow change
+- [x] #1 `just check` passes, or `git diff --check` for docs-only changes
+- [x] #2 Docs and ADRs are updated when behavior, architecture, or workflow change
 <!-- DOD:END -->
+
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+Rewrote operations.md, the pins walkthrough, README, worktrees, comparison, library-api, and related docs around slots, history, rebuild, and migration; added pins, gone entities, and a planned slot to the showcase world and fixture with scenario and screenshot tests; regenerated the README screenshots including new Pinned and History images; and recorded the change in the changelog and amendment notes on the affected ADRs.
+<!-- SECTION:FINAL_SUMMARY:END -->

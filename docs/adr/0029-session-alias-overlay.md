@@ -4,6 +4,12 @@
 
 Accepted
 
+Amended by [ADR 0141](0141-pin-slots.md): precedence is now `alias > title >
+mux name > id-suffix`. The mux name is that of the mux hosting the session, or
+of the gone mux that last hosted it, and blank titles count as missing. Pin
+slots no longer alias the session they point at, so an untitled session reads
+as the name of its mux.
+
 ## Context
 
 Today every name that surfaces for an agent session originates with the harness:

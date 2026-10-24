@@ -1,9 +1,9 @@
 use super::*;
 use crate::config::{ConfigLoader, PROJECT_CONFIG_FILENAME, USER_CONFIG_RELATIVE};
-use crate::model::{AgentSessionId, AgentSessionNode};
+use crate::model::{FieldValue, PinKind, PinSlot, SlotFields};
 use tempfile::TempDir;
 
-fn project_pin_toml(id: &str, mux_name: &str) -> String {
+fn legacy_toml(id: &str, mux_name: &str) -> String {
     format!(
         r#"
 [pins]
@@ -19,373 +19,369 @@ mux = {{ backend = "tmux", name = "{mux_name}" }}
     )
 }
 
-fn user_pin_toml(id: &str, mux_name: &str, socket: Option<&str>) -> String {
-    let mux_table = match socket {
-        None => format!(r#"{{ backend = "tmux", name = "{mux_name}" }}"#),
-        Some(socket_name) => {
-            format!(r#"{{ backend = "tmux", name = "{mux_name}", socket_name = "{socket_name}" }}"#)
-        }
-    };
-    format!(
-        r#"
-[pins]
-schema_version = 1
-
-[[pins.entries]]
-id = "{id}"
-display_name = "{id}"
-harness = "codex"
-cwd = "/home/me/scratch"
-mux = {mux_table}
-"#,
-    )
+struct Fixture {
+    _tmp: TempDir,
+    home: PathBuf,
+    xdg: PathBuf,
+    root: PathBuf,
 }
 
-fn loader_with(home: &Path, xdg_config: &Path) -> ConfigLoader {
-    ConfigLoader::new()
-        .with_home(home.to_path_buf())
-        .with_xdg_config_home(xdg_config.to_path_buf())
-}
-
-fn context_at(roots: &[&Path]) -> DiscoveryContext {
-    DiscoveryContext::from_roots(roots.iter().map(|p| p.to_path_buf())).expect("ctx")
-}
-
-#[test]
-fn empty_when_no_config_files_exist() {
+fn fixture() -> Fixture {
     let tmp = TempDir::new().expect("tmp");
     let home = tmp.path().join("home");
     let xdg = tmp.path().join("xdg");
     let root = tmp.path().join("project");
     fs::create_dir_all(&root).expect("mkdir root");
-    let loader = loader_with(&home, &xdg);
-    let context = context_at(&[&root]);
+    Fixture {
+        home,
+        xdg,
+        root,
+        _tmp: tmp,
+    }
+}
 
+impl Fixture {
+    fn loader(&self) -> ConfigLoader {
+        ConfigLoader::new()
+            .with_home(self.home.clone())
+            .with_xdg_config_home(self.xdg.clone())
+    }
+
+    fn context(&self) -> DiscoveryContext {
+        DiscoveryContext::from_roots([self.root.clone()]).expect("ctx")
+    }
+
+    fn write_project(&self, text: &str) {
+        fs::write(self.root.join(PROJECT_CONFIG_FILENAME), text).expect("write project config");
+    }
+
+    fn write_user(&self, text: &str) {
+        let path = self.xdg.join(USER_CONFIG_RELATIVE);
+        fs::create_dir_all(path.parent().unwrap()).expect("mkdir user config");
+        fs::write(path, text).expect("write user config");
+    }
+}
+
+fn slot(id: &str, order: u32) -> PinSlot {
+    PinSlot {
+        id: id.into(),
+        kind: PinKind::Mux,
+        target: None,
+        pinned_at: None,
+        overrides: SlotFields::from([("name".to_string(), FieldValue::Text(id.into()))]),
+        snapshot: SlotFields::new(),
+        order,
+        legacy: false,
+    }
+}
+
+fn legacy_diagnostics(snapshot: &GraphSnapshot) -> Vec<(u32, Vec<String>)> {
+    snapshot
+        .diagnostics
+        .iter()
+        .filter_map(|d| match d {
+            Diagnostic::LegacyPins { count, ids } => Some((*count, ids.clone())),
+            _ => None,
+        })
+        .collect()
+}
+
+#[test]
+fn nothing_loads_without_a_store_or_legacy_config() {
+    let fx = fixture();
+    let loader = fx.loader();
     let mut snapshot = GraphSnapshot::empty();
-    apply_pins(&mut snapshot, &context, &loader, &[]);
+
+    apply_pins(
+        &mut snapshot,
+        &fx.context(),
+        &PinSources {
+            slots: None,
+            legacy_loader: Some(&loader),
+            legacy_registry_stores: &[],
+        },
+    );
 
     assert!(snapshot.pins.is_empty());
     assert!(snapshot.diagnostics.is_empty());
 }
 
 #[test]
-fn loads_registry_recorded_pin_store_outside_every_scan_root() {
-    // A pin lives in a repo that is neither a scan root
-    // nor referenced by any discovered node cwd. Without the registry
-    // it would be invisible; recording its store path keeps it loading.
-    let tmp = TempDir::new().expect("tmp");
-    let home = tmp.path().join("home");
-    let xdg = tmp.path().join("xdg");
-    let scan_root = tmp.path().join("scan");
-    let outside_repo = tmp.path().join("elsewhere/repo");
-    fs::create_dir_all(&scan_root).expect("mkdir scan");
-    fs::create_dir_all(&outside_repo).expect("mkdir outside");
-    let store = outside_repo.join(PROJECT_CONFIG_FILENAME);
-    fs::write(&store, project_pin_toml("ingest", "ingest")).expect("write outside config");
+fn slots_load_in_file_order() {
+    let fx = fixture();
+    let store = SlotStore::at(fx.root.join("pins.toml"));
+    store.add(slot("second", 0)).unwrap();
+    store.add(slot("first", 0)).unwrap();
+    let mut snapshot = GraphSnapshot::empty();
 
-    let loader = loader_with(&home, &xdg);
-    // The context only knows about `scan_root`, which holds no config.
-    let context = context_at(&[&scan_root]);
-
-    // Baseline: without the registry the pin is invisible.
-    let mut baseline = GraphSnapshot::empty();
-    apply_pins(&mut baseline, &context, &loader, &[]);
-    assert!(
-        baseline.pins.is_empty(),
-        "pin outside the scan root should be invisible without the registry",
+    apply_pins(
+        &mut snapshot,
+        &fx.context(),
+        &PinSources {
+            slots: Some(&store),
+            legacy_loader: None,
+            legacy_registry_stores: &[],
+        },
     );
 
-    // With the store recorded in the registry it loads as a local pin.
+    let ids: Vec<_> = snapshot.pins.iter().map(|p| p.id.as_str()).collect();
+    assert_eq!(ids, ["second", "first"]);
+    assert!(snapshot.pins.iter().all(|p| !p.legacy));
+    assert!(legacy_diagnostics(&snapshot).is_empty());
+}
+
+#[test]
+fn a_bad_slot_is_reported_and_the_rest_still_load() {
+    let fx = fixture();
+    let path = fx.root.join("pins.toml");
+    fs::write(
+        &path,
+        r#"
+[pins]
+schema_version = 2
+
+[[pins.slots]]
+id = "good"
+kind = "mux"
+
+[[pins.slots]]
+id = "bad"
+kind = "nonsense"
+"#,
+    )
+    .unwrap();
+    let store = SlotStore::at(&path);
+    let mut snapshot = GraphSnapshot::empty();
+
+    apply_pins(
+        &mut snapshot,
+        &fx.context(),
+        &PinSources {
+            slots: Some(&store),
+            legacy_loader: None,
+            legacy_registry_stores: &[],
+        },
+    );
+
+    assert_eq!(snapshot.pins.len(), 1);
+    assert_eq!(snapshot.pins[0].id, "good");
+    assert!(
+        snapshot
+            .diagnostics
+            .iter()
+            .any(|d| matches!(d, Diagnostic::Config { path: p, .. } if p.ends_with("pins.toml"))),
+        "{:?}",
+        snapshot.diagnostics
+    );
+}
+
+#[test]
+fn project_and_user_legacy_entries_load_after_the_real_slots_with_one_diagnostic() {
+    let fx = fixture();
+    fx.write_project(&legacy_toml("proj", "proj"));
+    fx.write_user(&legacy_toml("usr", "usr"));
+    let store = SlotStore::at(fx.root.join("pins.toml"));
+    store.add(slot("real", 0)).unwrap();
+    let loader = fx.loader();
+    let mut snapshot = GraphSnapshot::empty();
+
+    apply_pins(
+        &mut snapshot,
+        &fx.context(),
+        &PinSources {
+            slots: Some(&store),
+            legacy_loader: Some(&loader),
+            legacy_registry_stores: &[],
+        },
+    );
+
+    let ids: Vec<_> = snapshot
+        .pins
+        .iter()
+        .map(|p| (p.id.as_str(), p.legacy))
+        .collect();
+    assert_eq!(ids, [("real", false), ("proj", true), ("usr", true)]);
+    assert_eq!(
+        legacy_diagnostics(&snapshot),
+        [(2, vec!["proj".to_string(), "usr".to_string()])]
+    );
+}
+
+#[test]
+fn a_legacy_entry_named_like_a_slot_is_skipped_with_a_note() {
+    let fx = fixture();
+    fx.write_project(&legacy_toml("dup", "dup"));
+    let store = SlotStore::at(fx.root.join("pins.toml"));
+    store.add(slot("dup", 0)).unwrap();
+    let loader = fx.loader();
+    let mut snapshot = GraphSnapshot::empty();
+
+    apply_pins(
+        &mut snapshot,
+        &fx.context(),
+        &PinSources {
+            slots: Some(&store),
+            legacy_loader: Some(&loader),
+            legacy_registry_stores: &[],
+        },
+    );
+
+    assert_eq!(snapshot.pins.len(), 1);
+    assert!(!snapshot.pins[0].legacy);
+    assert!(legacy_diagnostics(&snapshot).is_empty());
+    assert!(
+        snapshot.diagnostics.iter().any(|d| matches!(
+            d,
+            Diagnostic::Config { message, .. } if message.contains("already a pin")
+        )),
+        "{:?}",
+        snapshot.diagnostics
+    );
+}
+
+#[test]
+fn a_project_entry_shadows_a_user_entry_with_the_same_id() {
+    let fx = fixture();
+    fx.write_project(&legacy_toml("same", "from-project"));
+    fx.write_user(&legacy_toml("same", "from-user"));
+    let loader = fx.loader();
+    let mut snapshot = GraphSnapshot::empty();
+
+    apply_pins(
+        &mut snapshot,
+        &fx.context(),
+        &PinSources {
+            slots: None,
+            legacy_loader: Some(&loader),
+            legacy_registry_stores: &[],
+        },
+    );
+
+    assert_eq!(snapshot.pins.len(), 1);
+    assert_eq!(
+        snapshot.pins[0].overrides.get("name"),
+        Some(&FieldValue::Text("from-project".into()))
+    );
+    assert!(
+        snapshot.diagnostics.iter().any(|d| matches!(
+            d,
+            Diagnostic::Config { message, .. } if message.contains("shadowed")
+        )),
+        "{:?}",
+        snapshot.diagnostics
+    );
+}
+
+#[test]
+fn a_registry_store_outside_every_scan_root_still_loads() {
+    let fx = fixture();
+    let outside = fx.root.parent().unwrap().join("elsewhere/repo");
+    fs::create_dir_all(&outside).unwrap();
+    let store_path = outside.join(PROJECT_CONFIG_FILENAME);
+    fs::write(&store_path, legacy_toml("ingest", "ingest")).unwrap();
+    let loader = fx.loader();
+
+    let mut baseline = GraphSnapshot::empty();
+    apply_pins(
+        &mut baseline,
+        &fx.context(),
+        &PinSources {
+            slots: None,
+            legacy_loader: Some(&loader),
+            legacy_registry_stores: &[],
+        },
+    );
+    assert!(baseline.pins.is_empty(), "invisible without the registry");
+
     let mut snapshot = GraphSnapshot::empty();
     apply_pins(
         &mut snapshot,
-        &context,
-        &loader,
-        std::slice::from_ref(&store),
+        &fx.context(),
+        &PinSources {
+            slots: None,
+            legacy_loader: Some(&loader),
+            legacy_registry_stores: std::slice::from_ref(&store_path),
+        },
     );
     assert_eq!(snapshot.pins.len(), 1);
     assert_eq!(snapshot.pins[0].id, "ingest");
-    assert_eq!(snapshot.pins[0].provenance, Provenance::LocalPin);
-    assert!(snapshot.diagnostics.is_empty());
 }
 
 #[test]
-fn registry_store_that_no_longer_exists_is_skipped() {
-    // A stale registry entry (repo since deleted) must not error or
-    // synthesize a phantom pin.
-    let tmp = TempDir::new().expect("tmp");
-    let home = tmp.path().join("home");
-    let xdg = tmp.path().join("xdg");
-    let scan_root = tmp.path().join("scan");
-    fs::create_dir_all(&scan_root).expect("mkdir scan");
-    let missing = tmp.path().join("gone/repo").join(PROJECT_CONFIG_FILENAME);
-
-    let loader = loader_with(&home, &xdg);
-    let context = context_at(&[&scan_root]);
-
+fn a_registry_store_that_no_longer_exists_is_skipped_quietly() {
+    let fx = fixture();
+    let gone = fx.root.join("deleted/.conspectus.toml");
+    let loader = fx.loader();
     let mut snapshot = GraphSnapshot::empty();
-    apply_pins(&mut snapshot, &context, &loader, &[missing]);
+
+    apply_pins(
+        &mut snapshot,
+        &fx.context(),
+        &PinSources {
+            slots: None,
+            legacy_loader: Some(&loader),
+            legacy_registry_stores: std::slice::from_ref(&gone),
+        },
+    );
+
     assert!(snapshot.pins.is_empty());
     assert!(snapshot.diagnostics.is_empty());
 }
 
 #[test]
-fn registry_store_already_covered_by_scan_root_is_not_double_loaded() {
-    // When a registry entry names the same store a scan root already
-    // locates, the pin loads exactly once (no same-id shadow diagnostic).
-    let tmp = TempDir::new().expect("tmp");
-    let home = tmp.path().join("home");
-    let xdg = tmp.path().join("xdg");
-    let root = tmp.path().join("project");
-    fs::create_dir_all(&root).expect("mkdir root");
-    let store = root.join(PROJECT_CONFIG_FILENAME);
-    fs::write(&store, project_pin_toml("ingest", "ingest")).expect("write project config");
-
-    let loader = loader_with(&home, &xdg);
-    let context = context_at(&[&root]);
-
+fn a_malformed_legacy_file_is_a_diagnostic_not_a_failure() {
+    let fx = fixture();
+    fx.write_project("[pins\nbroken");
+    let loader = fx.loader();
     let mut snapshot = GraphSnapshot::empty();
-    apply_pins(&mut snapshot, &context, &loader, &[store]);
-    assert_eq!(snapshot.pins.len(), 1, "no double load");
+
+    apply_pins(
+        &mut snapshot,
+        &fx.context(),
+        &PinSources {
+            slots: None,
+            legacy_loader: Some(&loader),
+            legacy_registry_stores: &[],
+        },
+    );
+
+    assert!(snapshot.pins.is_empty());
     assert!(
-        snapshot.diagnostics.is_empty(),
-        "no spurious shadow diagnostic: {:?}",
-        snapshot.diagnostics,
+        snapshot.diagnostics.iter().any(|d| matches!(
+            d,
+            Diagnostic::Config { message, .. } if message.contains("failed to parse pins")
+        )),
+        "{:?}",
+        snapshot.diagnostics
     );
 }
 
 #[test]
-fn loads_project_pin_as_local_pin() {
-    let tmp = TempDir::new().expect("tmp");
-    let home = tmp.path().join("home");
-    let xdg = tmp.path().join("xdg");
-    let root = tmp.path().join("project");
-    fs::create_dir_all(&root).expect("mkdir root");
-    fs::write(
-        root.join(PROJECT_CONFIG_FILENAME),
-        project_pin_toml("ingest", "ingest"),
-    )
-    .expect("write project config");
-
-    let loader = loader_with(&home, &xdg);
-    let context = context_at(&[&root]);
-
+fn loading_never_writes_a_file() {
+    let fx = fixture();
+    fx.write_project(&legacy_toml("a", "a"));
+    let before = fs::read_to_string(fx.root.join(PROJECT_CONFIG_FILENAME)).unwrap();
+    let store = SlotStore::at(fx.root.join("data/pins.toml"));
+    let loader = fx.loader();
     let mut snapshot = GraphSnapshot::empty();
-    apply_pins(&mut snapshot, &context, &loader, &[]);
+
+    apply_pins(
+        &mut snapshot,
+        &fx.context(),
+        &PinSources {
+            slots: Some(&store),
+            legacy_loader: Some(&loader),
+            legacy_registry_stores: &[],
+        },
+    );
 
     assert_eq!(snapshot.pins.len(), 1);
-    let pin = &snapshot.pins[0];
-    assert_eq!(pin.id, "ingest");
-    assert_eq!(pin.harness, "codex");
-    assert_eq!(pin.mux.native_id(), "tmux:ingest");
-    assert_eq!(pin.provenance, Provenance::LocalPin);
-    assert!(snapshot.diagnostics.is_empty());
-}
-
-#[test]
-fn loads_project_pin_from_observed_session_cwd_outside_scan_root() {
-    let tmp = TempDir::new().expect("tmp");
-    let home = tmp.path().join("home");
-    let xdg = tmp.path().join("xdg");
-    let scan_root = tmp.path().join("scan");
-    let project = tmp.path().join("project");
-    let nested = project.join("subdir");
-    fs::create_dir_all(&scan_root).expect("mkdir scan root");
-    fs::create_dir_all(&nested).expect("mkdir nested project dir");
-    fs::write(
-        project.join(PROJECT_CONFIG_FILENAME),
-        project_pin_toml("observed", "observed"),
-    )
-    .expect("write project config");
-
-    let loader = loader_with(&home, &xdg);
-    let context = context_at(&[&scan_root]);
-
-    let mut snapshot = GraphSnapshot::empty();
-    snapshot.nodes.push(GraphNode::AgentSession(
-        AgentSessionNode::new(
-            AgentSessionId::new("codex", "/state", "s1"),
-            "codex".to_string(),
-        )
-        .with_cwd(nested.to_string_lossy().into_owned()),
-    ));
-
-    apply_pins(&mut snapshot, &context, &loader, &[]);
-
-    assert_eq!(snapshot.pins.len(), 1);
-    assert_eq!(snapshot.pins[0].id, "observed");
-    assert_eq!(snapshot.pins[0].provenance, Provenance::LocalPin);
-    assert!(snapshot.diagnostics.is_empty());
-}
-
-#[test]
-fn loads_user_pin_as_global_pin() {
-    let tmp = TempDir::new().expect("tmp");
-    let home = tmp.path().join("home");
-    let xdg = tmp.path().join("xdg");
-    let user_dir = xdg.join("conspectus");
-    fs::create_dir_all(&user_dir).expect("mkdir user");
-    fs::write(
-        user_dir.join("config.toml"),
-        user_pin_toml("global-ingest", "ingest", None),
-    )
-    .expect("write user config");
-    let root = tmp.path().join("project");
-    fs::create_dir_all(&root).expect("mkdir root");
-
-    let loader = loader_with(&home, &xdg);
-    let context = context_at(&[&root]);
-
-    let mut snapshot = GraphSnapshot::empty();
-    apply_pins(&mut snapshot, &context, &loader, &[]);
-
-    assert_eq!(snapshot.pins.len(), 1);
-    let pin = &snapshot.pins[0];
-    assert_eq!(pin.id, "global-ingest");
-    assert_eq!(pin.provenance, Provenance::GlobalPin);
-}
-
-#[test]
-fn local_pin_shadows_same_id_user_pin() {
-    let tmp = TempDir::new().expect("tmp");
-    let home = tmp.path().join("home");
-    let xdg = tmp.path().join("xdg");
-    let user_dir = xdg.join("conspectus");
-    fs::create_dir_all(&user_dir).expect("mkdir user");
-    fs::write(
-        user_dir.join("config.toml"),
-        user_pin_toml("ingest", "global-mux", None),
-    )
-    .expect("write user config");
-    let root = tmp.path().join("project");
-    fs::create_dir_all(&root).expect("mkdir root");
-    fs::write(
-        root.join(PROJECT_CONFIG_FILENAME),
-        project_pin_toml("ingest", "project-mux"),
-    )
-    .expect("write project config");
-
-    let loader = loader_with(&home, &xdg);
-    let context = context_at(&[&root]);
-
-    let mut snapshot = GraphSnapshot::empty();
-    apply_pins(&mut snapshot, &context, &loader, &[]);
-
-    assert_eq!(snapshot.pins.len(), 1);
-    let pin = &snapshot.pins[0];
-    assert_eq!(pin.provenance, Provenance::LocalPin);
-    assert_eq!(pin.mux.name, "project-mux");
-
-    let shadow = snapshot
-        .diagnostics
-        .iter()
-        .find_map(|d| match d {
-            Diagnostic::Config { message, .. } if message.contains("shadowed") => {
-                Some(message.clone())
-            }
-            _ => None,
-        })
-        .expect("shadow diagnostic");
-    assert!(shadow.contains("ingest"));
-}
-
-#[test]
-fn non_default_socket_round_trips_into_native_id() {
-    let tmp = TempDir::new().expect("tmp");
-    let home = tmp.path().join("home");
-    let xdg = tmp.path().join("xdg");
-    let user_dir = xdg.join("conspectus");
-    fs::create_dir_all(&user_dir).expect("mkdir user");
-    fs::write(
-        user_dir.join("config.toml"),
-        user_pin_toml("scratch", "ingest", Some("scratch")),
-    )
-    .expect("write user config");
-    let root = tmp.path().join("project");
-    fs::create_dir_all(&root).expect("mkdir root");
-
-    let loader = loader_with(&home, &xdg);
-    let context = context_at(&[&root]);
-
-    let mut snapshot = GraphSnapshot::empty();
-    apply_pins(&mut snapshot, &context, &loader, &[]);
-
-    let pin = snapshot.pins.first().expect("pin present");
-    assert_eq!(pin.mux.socket_name.as_deref(), Some("scratch"));
-    assert_eq!(pin.mux.native_id(), "tmux:scratch:ingest");
-}
-
-#[test]
-fn malformed_config_emits_diagnostic_and_does_not_block_other_stores() {
-    let tmp = TempDir::new().expect("tmp");
-    let home = tmp.path().join("home");
-    let xdg = tmp.path().join("xdg");
-    let user_dir = xdg.join("conspectus");
-    fs::create_dir_all(&user_dir).expect("mkdir user");
-    fs::write(
-        user_dir.join("config.toml"),
-        "this is = not valid toml = at all",
-    )
-    .expect("write malformed user config");
-
-    let root = tmp.path().join("project");
-    fs::create_dir_all(&root).expect("mkdir root");
-    fs::write(
-        root.join(PROJECT_CONFIG_FILENAME),
-        project_pin_toml("survivor", "survivor"),
-    )
-    .expect("write good project config");
-
-    let loader = loader_with(&home, &xdg);
-    let context = context_at(&[&root]);
-
-    let mut snapshot = GraphSnapshot::empty();
-    apply_pins(&mut snapshot, &context, &loader, &[]);
-
-    assert_eq!(snapshot.pins.len(), 1, "good project pin still loads");
-    let pin = &snapshot.pins[0];
-    assert_eq!(pin.id, "survivor");
-
-    let parse_message = snapshot
-        .diagnostics
-        .iter()
-        .find_map(|d| match d {
-            Diagnostic::Config { message, .. } if message.contains("failed to parse pins") => {
-                Some(message.clone())
-            }
-            _ => None,
-        })
-        .expect("parse diagnostic");
-    assert!(parse_message.contains("failed to parse pins"));
-}
-
-#[test]
-fn duplicate_project_root_is_only_scanned_once() {
-    let tmp = TempDir::new().expect("tmp");
-    let home = tmp.path().join("home");
-    let xdg = tmp.path().join("xdg");
-    let root = tmp.path().join("project");
-    fs::create_dir_all(&root).expect("mkdir root");
-    fs::write(
-        root.join(PROJECT_CONFIG_FILENAME),
-        project_pin_toml("one", "one"),
-    )
-    .expect("write project config");
-
-    let loader = loader_with(&home, &xdg);
-    // Pass the same root twice.
-    let context = context_at(&[&root, &root]);
-
-    let mut snapshot = GraphSnapshot::empty();
-    apply_pins(&mut snapshot, &context, &loader, &[]);
-
-    assert_eq!(snapshot.pins.len(), 1);
-}
-
-#[test]
-fn xdg_relative_constant_matches_loader_layout() {
-    // Sanity check: our test setup writes to the same path the
-    // loader will read from. Lifts the magic strings out of
-    // individual tests.
-    assert!(USER_CONFIG_RELATIVE.ends_with("config.toml"));
+    assert_eq!(
+        fs::read_to_string(fx.root.join(PROJECT_CONFIG_FILENAME)).unwrap(),
+        before
+    );
+    assert!(
+        !fx.root.join("data").exists(),
+        "the store file isn't created by a read"
+    );
 }

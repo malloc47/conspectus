@@ -19,7 +19,7 @@ pub enum Program {
     /// `gh`: GitHub pull requests, the only network access (ADR 0011).
     Gh,
     /// `tmux`: session discovery and pane capture, plus the session
-    /// lifecycle the operator starts (ADR 0087).
+    /// lifecycle the operator starts (ADR 0143).
     Tmux,
     /// `zellij`: session discovery and attach.
     Zellij,

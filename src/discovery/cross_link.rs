@@ -99,8 +99,7 @@ fn infer_with_readers(
         })
         .collect();
     let mux_sessions: Vec<&MuxSessionNode> = snapshot
-        .nodes
-        .iter()
+        .live_nodes()
         .filter_map(|node| match node {
             GraphNode::MuxSession(mux) => Some(mux),
             _ => None,
@@ -1298,8 +1297,7 @@ pub fn active_harness_pids_per_mux(
     process_snapshot: &dyn ProcessSnapshot,
 ) -> BTreeMap<crate::model::MuxSessionId, Vec<(String, i64)>> {
     let muxes: Vec<&MuxSessionNode> = snapshot
-        .nodes
-        .iter()
+        .live_nodes()
         .filter_map(|node| match node {
             GraphNode::MuxSession(mux) => Some(mux),
             _ => None,

@@ -1,6 +1,9 @@
 # Provider Extensibility Assessment
 
-Status: draft assessment, 2026-07-01. Companion to `docs/design.md` and the
+Status: draft assessment, 2026-07-01. Its pin findings describe the model
+superseded by ADR 0141 (pin slots, `rebuild`, and history replaced
+`resolve/pins.rs`, `pin_bindings`, and the pin launch paths); read them as
+historical. Companion to `docs/design.md` and the
 `H-REF-*` / `H-FUTURE-*` / `H-AGENTMUX-*` backlog sections. This document
 inventories how hardcoded each provider entity family is today, measures the
 gap between "implement one interface" and "the new provider flows through
@@ -153,7 +156,7 @@ impersonation, not a backend.
   `AttachDisabled::UnsupportedBackend` with the operator-facing message
   "only tmux" (:442); the CLI builds `tmux [-L sock] attach-session -t`
   argv strings and exec-replaces (`cli.rs`, `format_attach_command`).
-- **Pins (ADR 0057/0058):** `PinMux.backend` is validated to literal
+- **Pins (ADR 0057/0058, superseded by ADR 0141):** `PinMux.backend` is validated to literal
   `"tmux"` (`src/pins.rs:260, 326`); `socket_name` is tmux-specific schema;
   pin launch/relaunch call `TmuxRunner::new_session` / `send_keys`
   (`cli.rs:5063-5105`); `resolve/pins.rs` reconstructs `tmux:<socket>:<name>`

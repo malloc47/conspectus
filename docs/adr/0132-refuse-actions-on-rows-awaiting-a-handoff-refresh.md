@@ -3,7 +3,8 @@
 ## Status
 
 Accepted. Amends ADR 0108 (item 2, which left the rest of the UI live,
-including attaching again).
+including attaching again). Amended by ADR 0142: where this ADR says
+"pin launch", read `rebuild` (and `mux launch`).
 
 ## Context
 

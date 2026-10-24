@@ -110,7 +110,7 @@ pub fn resolve_node_id(input: &str, snapshot: &GraphSnapshot) -> Result<NodeId, 
                     matches.insert(NodeId::MuxSession(mux.id.clone()));
                 }
             }
-            GraphNode::Pin(pin) if pin.id.id == trimmed || pin.display_name == trimmed => {
+            GraphNode::Pin(pin) if pin.id.id == trimmed || pin.label == trimmed => {
                 matches.insert(NodeId::Pin(pin.id.clone()));
             }
             _ => {}
@@ -166,7 +166,7 @@ fn node_reference_label(snapshot: &GraphSnapshot, id: &NodeId) -> String {
             format!("{}:{}", agent.harness_key, agent.id.session_key)
         }
         (NodeId::MuxSession(_), GraphNode::MuxSession(mux)) => mux.display_label(),
-        (NodeId::Pin(_), GraphNode::Pin(pin)) => format!("pin:{}", pin.display_name),
+        (NodeId::Pin(_), GraphNode::Pin(pin)) => format!("pin:{}", pin.label),
         (NodeId::RuntimeProcess(_), GraphNode::RuntimeProcess(proc)) => {
             match (proc.pid, proc.command.as_deref()) {
                 (Some(pid), Some(command)) => format!("pid {pid}: {command}"),
@@ -217,6 +217,17 @@ fn write_node_summary(
         crate::model::NodeKind::from(id).snake_case()
     );
     let _ = writeln!(out, "  id:   {display}");
+    if let Some(presence) = snapshot.presence(id) {
+        let _ = writeln!(
+            out,
+            "  presence: {} (last seen {} ago)",
+            presence.label_for(crate::model::NodeKind::from(id)),
+            crate::output::render::format_relative_age(
+                presence.last_seen(),
+                crate::discovery::current_epoch()
+            )
+        );
+    }
 
     match (id, find_node(snapshot, id)) {
         (NodeId::Repo(_), Some(GraphNode::Repo(repo))) => {
@@ -436,32 +447,31 @@ fn write_mux_summary(out: &mut String, mux: &MuxSessionNode) {
 }
 
 fn write_pin_summary(out: &mut String, pin: &PinNode) {
-    let _ = writeln!(out, "  name:     {}", pin.display_name);
-    let _ = writeln!(out, "  harness:  {}", pin.harness);
-    let _ = writeln!(out, "  cwd:      {}", pin.cwd);
-    let _ = writeln!(out, "  mux:      {}", pin.mux.native_id());
-    let _ = writeln!(out, "  store:    {}", pin.store_path);
-    let _ = writeln!(out, "  source:   {}", pin.provenance.snake_case());
-    if let Some(argv) = &pin.launch_argv {
-        let _ = writeln!(out, "  launch:   {}", argv.join(" "));
+    let _ = writeln!(out, "  label:    {}", pin.label);
+    let _ = writeln!(out, "  kind:     {}", pin.kind.as_str());
+    let _ = writeln!(out, "  status:   {}", pin.status.label_for(pin.kind));
+    let _ = writeln!(
+        out,
+        "  target:   {}",
+        pin.target
+            .as_deref()
+            .unwrap_or("(planned: built on first rebuild)")
+    );
+    if pin.legacy {
+        let _ = writeln!(
+            out,
+            "  source:   legacy [[pins.entries]] (run `pin migrate`)"
+        );
     }
-    if let Some(reason) = &pin.reason {
-        let _ = writeln!(out, "  reason:   {reason}");
+    for field in &pin.effective {
+        let _ = writeln!(
+            out,
+            "  {:<9} {}  ({})",
+            format!("{}:", field.name),
+            field.value.display(),
+            field.source.as_str()
+        );
     }
-    let binding = match &pin.binding {
-        Some(crate::model::PinBinding::Bound { mux, session }) => {
-            format!(
-                "bound to {} via {}:{}",
-                mux.native_id, session.harness_key, session.session_key
-            )
-        }
-        Some(crate::model::PinBinding::StaleMux { mux }) => {
-            format!("stale mux {}", mux.native_id)
-        }
-        Some(crate::model::PinBinding::Unbound) => "unbound".to_string(),
-        None => "unresolved".to_string(),
-    };
-    let _ = writeln!(out, "  binding:  {binding}");
 }
 
 fn write_runtime_process_summary(out: &mut String, proc: &RuntimeProcessNode) {

@@ -61,6 +61,12 @@ pub struct OrchestratorDescriptor {
     /// its own constructor here; the discovery driver never
     /// names an orchestrator directly.
     pub build: fn(PathBuf) -> Box<dyn DiscoveryProvider>,
+    /// The operator-facing name ("agent-deck").
+    pub display_name: &'static str,
+    /// Prefix the orchestrator gives the mux sessions it creates.
+    /// History records those muxes but refuses to rebuild them,
+    /// because the orchestrator owns their lifecycle (ADR 0142).
+    pub mux_name_prefix: Option<&'static str>,
 }
 
 impl OrchestratorDescriptor {
@@ -88,18 +94,29 @@ impl OrchestratorDescriptor {
 /// config table parser, and env-var walk pick it up
 /// automatically.
 ///
-/// Order is stable (registration order); pin adapters slot
-/// into this array in the order H-AGENTMUX-* decides.
+/// Order is stable (registration order).
 pub const REGISTRY: &[OrchestratorDescriptor] = &[OrchestratorDescriptor {
     key: crate::discovery::providers::AGENT_DECK,
     env_root_var: "CONSPECTUS_AGENT_DECK_ROOT",
     env_disable_var: "CONSPECTUS_DISABLE_AGENT_DECK",
     home_relative_default: Some(".agent-deck/multi-repo-worktrees"),
     build: build_agent_deck,
+    display_name: "agent-deck",
+    mux_name_prefix: Some("agentdeck_"),
 }];
 
 fn build_agent_deck(root: PathBuf) -> Box<dyn DiscoveryProvider> {
     Box::new(agent_deck::AgentDeckDiscovery::new(root))
+}
+
+/// The orchestrator that owns a mux session named `session_name`,
+/// by the name prefix it gives the sessions it creates.
+pub fn owner_of_mux(session_name: &str) -> Option<&'static OrchestratorDescriptor> {
+    REGISTRY.iter().find(|descriptor| {
+        descriptor
+            .mux_name_prefix
+            .is_some_and(|prefix| session_name.starts_with(prefix))
+    })
 }
 
 /// Find a descriptor by orchestrator key. Returns `None` for

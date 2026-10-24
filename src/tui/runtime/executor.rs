@@ -1,12 +1,21 @@
 //! Effect executor: runs the effects the reducer emits (ADR 0085 contract 2).
 
 use super::*;
+use crate::tui::keybindings::UNDO_KEY;
 use crate::tui::messages::{LogEntry, LogTarget};
+use crate::tui::undo::Undo;
 
 /// Run one pure (no-terminal) effect. Shared between
 /// [`execute_effects`] and [`execute_effects_live`] so the two
 /// executors stay in lockstep for the non-`Exec` variants.
 pub(super) fn execute_pure_effect(app: &mut App, effect: Effect) {
+    // These need a live terminal, mux backend, or store. Static and
+    // snapshot modes never offer a gesture that emits them; if one
+    // arrives anyway, say so instead of dropping it silently.
+    if !pure_executor_runs(&effect) {
+        app.post_toast("that isn't available in this mode");
+        return;
+    }
     match effect {
         Effect::Quit => {
             // `Msg::Quit` already set `App::should_quit`; the event
@@ -27,27 +36,8 @@ pub(super) fn execute_pure_effect(app: &mut App, effect: Effect) {
                 refresh(app, &cfg);
             }
         }
-        Effect::Exec(_) => {
-            // Exec effects need a live terminal; the pure executor
-            // silently drops them. Static and snapshot modes gate
-            // their translators upstream so `AttachSelected` /
-            // `ResumeSelected` never fire there — this branch is a
-            // safety net rather than a code path exercised in
-            // practice.
-        }
-        Effect::RunMux(_) => {
-            // Mux ops need a live `MuxBackend`; the pure executor
-            // silently drops them. Same rationale as `Effect::Exec`
-            // above — no static-mode path emits `RunMux` today, so
-            // this branch is a safety net.
-        }
-        Effect::WriteStore(_) => {
-            // Some `WriteStore` variants (`PinCreate`,
-            // `CommitAliasRename`) chain a tmux rename through the
-            // executor, so all store writes flow through
-            // `execute_effects_live` where the `MuxBackend`
-            // reference lives. The pure executor drops them the
-            // same way it drops `RunMux` / `Exec`.
+        Effect::Exec(_) | Effect::RunMux(_) | Effect::WriteStore(_) => {
+            unreachable!("the live executor runs these")
         }
     }
 }
@@ -64,10 +54,21 @@ pub(super) fn execute_store_op(
 ) {
     use crate::tui::effect::StoreOp;
     match op {
-        StoreOp::PinCreate(request) => execute_pin_create(app, tmux, request),
-        StoreOp::PinEdit(request) => execute_pin_edit(app, request),
-        StoreOp::PinRemove(request) => execute_pin_remove(app, request),
-        StoreOp::PinBind(request) => execute_pin_bind(app, request),
+        StoreOp::PinRecord { record_id } => {
+            execute_pin(app, &crate::pin_ops::Pinnable::Record(record_id));
+        }
+        StoreOp::PinNode { node } => execute_pin(app, &crate::pin_ops::Pinnable::Node(node)),
+        StoreOp::Unpin { slot } => execute_unpin(app, &slot),
+        StoreOp::RemovePin { id } => execute_remove_pin(app, &id),
+        StoreOp::RestorePin { slot, index } => execute_restore_pin(app, &slot, index),
+        StoreOp::RenameSlot { slot, new_name } => execute_rename_slot(app, tmux, &slot, &new_name),
+        StoreOp::SavePin { request } => execute_save_pin(app, tmux, &request),
+        StoreOp::RetargetSlot { slot, target } => execute_retarget_slot(app, &slot, &target),
+        StoreOp::RefreshSlot { slot } => execute_refresh_slot(app, &slot),
+        StoreOp::ForgetRecord { record_id } => {
+            execute_reap_records(app, std::iter::once(record_id).collect());
+        }
+        StoreOp::ReapRecords { ids } => execute_reap_records(app, ids.into_iter().collect()),
         StoreOp::CommitAliasRename {
             session_id,
             new_display_name,
@@ -171,8 +172,6 @@ pub(super) fn execute_commit_alias_rename(
     if let Some(mux_rename) = &plan.mux_native_rename
         && let Err(reason) = rename_mux_via_backend(tmux, mux_rename)
     {
-        let config = app.config().clone();
-        refresh_after_mux_handoff(app, &config);
         app.report(
             LogEntry::warning(format!("alias updated, {reason}"))
                 .with_target(LogTarget::Mux(mux_rename.mux.clone())),
@@ -181,8 +180,6 @@ pub(super) fn execute_commit_alias_rename(
     }
 
     let advisory = live_session_advisory(app, &session_id);
-    let config = app.config().clone();
-    refresh_after_mux_handoff(app, &config);
     let final_status = match advisory {
         Some(suffix) => format!("{alias_status} · {suffix}"),
         None => alias_status,
@@ -212,10 +209,9 @@ pub(super) fn rename_mux_via_backend(
 }
 
 /// Executor branch for `StoreOp::CommitMuxRename`. Graph-aware
-/// cascade: `plan_mux_rename` finds pins whose `mux.name` matches
-/// the mux's current bare native id (and socket), and this executor
-/// rewrites each of those pin store TOMLs before firing the tmux
-/// `rename-session` so pin bindings survive the rename.
+/// cascade: `plan_mux_rename` finds pin slots that name the mux, and
+/// this executor updates each slot's name override before firing the
+/// tmux `rename-session` so the slots keep pointing at the mux.
 pub(super) fn execute_commit_mux_rename(
     app: &mut App,
     tmux: &dyn MuxBackend,
@@ -241,21 +237,19 @@ pub(super) fn execute_commit_mux_rename(
         }
     };
 
-    // Rewrite each affected pin store first. If any write fails we
-    // still attempt the tmux rename — the pin store update is
-    // idempotent on the next run and the operator is more likely to
-    // want the tmux rename effective than to want it reverted.
+    // Update each affected pin slot's name override first. If a write
+    // fails we still attempt the tmux rename: the update is idempotent
+    // on the next run and the operator is more likely to want the
+    // rename than to want it reverted.
     let mut pin_updates_written = 0usize;
     let mut pin_update_failures = Vec::new();
-    for update in &plan.pin_mux_name_updates {
-        match rewrite_pin_mux_name(update) {
-            Ok(changed) => {
-                if changed {
-                    pin_updates_written += 1;
-                }
-            }
-            Err(err) => {
-                pin_update_failures.push(format!("{}: {err}", update.pin_id));
+    if let Some(store) = crate::pin_slots::SlotStore::from_env() {
+        for (slot, result) in crate::rename::apply_pin_slot_updates(&store, &plan.pin_slot_updates)
+        {
+            match result {
+                Ok(true) => pin_updates_written += 1,
+                Ok(false) => {}
+                Err(err) => pin_update_failures.push(format!("{slot}: {err}")),
             }
         }
     }
@@ -279,8 +273,6 @@ pub(super) fn execute_commit_mux_rename(
         parts.push(format!("pin update failed: {failure}"));
     }
 
-    let config = app.config().clone();
-    refresh_after_mux_handoff(app, &config);
     let summary = parts.join(" · ");
     let entry = if !renamed {
         LogEntry::error(summary)
@@ -290,29 +282,6 @@ pub(super) fn execute_commit_mux_rename(
         LogEntry::warning(summary)
     };
     app.report(entry.with_target(LogTarget::Mux(mux_id)));
-}
-
-/// Load the pin entry by id, rewrite its `mux.name`, and write it
-/// back through `upsert_pin_entry`. Returns `Ok(true)` when the
-/// store actually changed; `Ok(false)` when the pin was already
-/// pointing at the new name (idempotent). Errors from either half
-/// bubble up as `String`s so the caller can list them in the
-/// aggregate status message.
-pub(super) fn rewrite_pin_mux_name(
-    update: &crate::rename::PinMuxNameUpdate,
-) -> Result<bool, String> {
-    let store_paths = [std::path::PathBuf::from(&update.store_path)];
-    let loaded = crate::pins::load_pin_entry_by_id(&store_paths, &update.pin_id)
-        .map_err(|err| err.to_string())?
-        .ok_or_else(|| format!("pin `{}` not found in store", update.pin_id))?;
-    let (_path, mut entry) = loaded;
-    if entry.mux.name == update.new_mux_name {
-        return Ok(false);
-    }
-    entry.mux.name = update.new_mux_name.clone();
-    let outcome =
-        crate::pins::upsert_pin_entry(&update.store_path, entry).map_err(|err| err.to_string())?;
-    Ok(outcome.changed)
 }
 
 /// Dispatch a [`MuxOp`] against the executor's `MuxBackend`. The
@@ -344,6 +313,7 @@ pub(super) fn execute_exec_spec(
     app: &mut App,
     config: &RunConfig,
     spec: crate::tui::effect::ExecSpec,
+    policy: crate::tui::effect::Lifecycle,
 ) {
     use crate::tui::effect::ExecSpec;
     match spec {
@@ -374,17 +344,17 @@ pub(super) fn execute_exec_spec(
         ExecSpec::ViewSession(session_id) => {
             execute_view_session(terminal, app, config, session_id);
         }
-        ExecSpec::LaunchPin {
-            pin_id,
-            attach_target,
-        } => {
-            execute_launch_pin(terminal, app, &pin_id, attach_target.as_ref());
-        }
         ExecSpec::MuxNew { name, cwd } => {
-            execute_mux_new(terminal, app, &name, &cwd);
+            execute_mux_new(terminal, app, &name, &cwd, policy);
         }
         ExecSpec::MuxLaunch { request } => {
-            execute_mux_launch(terminal, app, request);
+            execute_mux_launch(terminal, app, request, policy);
+        }
+        ExecSpec::Rebuild { reference, .. } => {
+            execute_rebuild(terminal, app, &reference, policy);
+        }
+        ExecSpec::ShowRebuildPlan { reference } => {
+            execute_show_rebuild_plan(terminal, app, &reference);
         }
     }
 }
@@ -421,3 +391,334 @@ pub(super) fn execute_view_session(
         }
     }
 }
+
+/// The slot store, or an error entry in the log when there is no data
+/// home to keep one in.
+fn slot_store_or_report(app: &mut App) -> Option<crate::pin_slots::SlotStore> {
+    let store = crate::pin_slots::SlotStore::from_env();
+    if store.is_none() {
+        app.report(LogEntry::error("pin: no data home to store pins in"));
+    }
+    store
+}
+
+/// Record the outcome of a slot write: refresh the tree on success so
+/// markers and the Pinned view catch up, and log either way.
+fn finish_slot_write(app: &mut App, outcome: Result<String, String>) {
+    let entry = match outcome {
+        Ok(summary) => LogEntry::info(summary),
+        Err(message) => LogEntry::error(message),
+    };
+    app.report(entry);
+}
+
+/// Executor branch for `StoreOp::PinRecord` and `PinNode`: add a slot
+/// that points at the entity (the same gesture as `conspectus pin
+/// add`). A live mux, worktree, or repo with no history record gets one
+/// first, so the history writer comes along.
+fn execute_pin(app: &mut App, what: &crate::pin_ops::Pinnable) {
+    let Some(store) = slot_store_or_report(app) else {
+        return;
+    };
+    let Some(handle) = app.snapshot_handle().cloned() else {
+        return;
+    };
+    let history = crate::history::HistoryWriter::from_env(app.config().history.clone());
+    let (outcome, undo) = pin_with(&store, handle.snapshot(), history.as_ref(), what);
+    if let Some(undo) = undo {
+        app.update(Msg::UndoRecorded(undo));
+    }
+    finish_slot_write(app, outcome);
+}
+
+/// Pin `what` in `store`; on success the summary and the undo that
+/// removes the new pin.
+pub(super) fn pin_with(
+    store: &crate::pin_slots::SlotStore,
+    snapshot: &crate::model::GraphSnapshot,
+    history: Option<&crate::history::HistoryWriter>,
+    what: &crate::pin_ops::Pinnable,
+) -> (Result<String, String>, Option<Undo>) {
+    match crate::pin_ops::pin(snapshot, store, history, what, None) {
+        Ok(slot) => (
+            Ok(format!("pinned as `{}` · {UNDO_KEY} to undo", slot.id)),
+            Some(Undo::Unpin { id: slot.id }),
+        ),
+        Err(err) => (Err(format!("pin failed: {err}")), None),
+    }
+}
+
+/// Executor branch for `StoreOp::Unpin`: remove the slot. The entity
+/// and its history record stay (the record becomes reapable again).
+fn execute_unpin(app: &mut App, slot: &str) {
+    let Some(store) = slot_store_or_report(app) else {
+        return;
+    };
+    let entity = app.snapshot_handle().and_then(|handle| {
+        crate::tui::rows::pin_nodes(handle.snapshot())
+            .into_iter()
+            .find(|pin| pin.id.id == slot)
+            .and_then(|pin| pin.target_node.clone())
+    });
+    let (outcome, undo) = unpin_with(&store, slot, entity);
+    if let Some(undo) = undo {
+        app.update(Msg::UndoRecorded(undo));
+    }
+    finish_slot_write(app, outcome);
+}
+
+/// Remove pin `slot` from `store`; on success the summary and the undo
+/// that puts it back whole, in its old place in the order.
+pub(super) fn unpin_with(
+    store: &crate::pin_slots::SlotStore,
+    slot: &str,
+    entity: Option<crate::model::NodeId>,
+) -> (Result<String, String>, Option<Undo>) {
+    let before = store
+        .load()
+        .slots
+        .into_iter()
+        .find(|existing| existing.id == slot);
+    let overrides = before
+        .as_ref()
+        .map_or(0, |existing| existing.overrides.len());
+    match store.remove(slot) {
+        Ok(write) if write.changed => {
+            let undo = before.map(|removed| Undo::RestorePin {
+                index: usize::try_from(removed.order).unwrap_or(usize::MAX),
+                slot: Box::new(removed),
+                entity,
+            });
+            let summary = match overrides {
+                0 => format!("unpinned `{slot}` · {UNDO_KEY} to undo"),
+                1 => format!("unpinned `{slot}` (its 1 override was removed) · {UNDO_KEY} to undo"),
+                n => format!(
+                    "unpinned `{slot}` (its {n} overrides were removed) · {UNDO_KEY} to undo"
+                ),
+            };
+            (Ok(summary), undo)
+        }
+        Ok(_) => (Err(format!("unpin: no pin named `{slot}`")), None),
+        Err(err) => (Err(format!("unpin failed: {err}")), None),
+    }
+}
+
+/// Executor branch for `StoreOp::RemovePin`, the undo of a pin.
+fn execute_remove_pin(app: &mut App, id: &str) {
+    let Some(store) = slot_store_or_report(app) else {
+        return;
+    };
+    finish_slot_write(app, remove_pin_with(&store, id));
+}
+
+/// Remove the pin an undo is reversing.
+pub(super) fn remove_pin_with(
+    store: &crate::pin_slots::SlotStore,
+    id: &str,
+) -> Result<String, String> {
+    match store.remove(id) {
+        Ok(write) if write.changed => Ok(format!("removed pin `{id}`")),
+        Ok(_) => Err(format!("undo: pin `{id}` is already gone")),
+        Err(err) => Err(format!("undo failed: {err}")),
+    }
+}
+
+/// Executor branch for `StoreOp::RestorePin`, the undo of an unpin.
+fn execute_restore_pin(app: &mut App, slot: &crate::model::PinSlot, index: usize) {
+    let Some(store) = slot_store_or_report(app) else {
+        return;
+    };
+    let taken_by_a_legacy_pin = app.snapshot_handle().is_some_and(|handle| {
+        handle
+            .snapshot()
+            .pins
+            .iter()
+            .any(|pin| pin.legacy && pin.id == slot.id)
+    });
+    finish_slot_write(
+        app,
+        restore_pin_with(&store, slot, index, taken_by_a_legacy_pin),
+    );
+}
+
+/// Put an unpinned pin back, whole, in its old place. A name taken
+/// since refuses (the entry is dropped, not retried), and a pin whose
+/// history record was reaped meanwhile comes back showing as missing.
+pub(super) fn restore_pin_with(
+    store: &crate::pin_slots::SlotStore,
+    slot: &crate::model::PinSlot,
+    index: usize,
+    taken_by_a_legacy_pin: bool,
+) -> Result<String, String> {
+    let exists = || format!("undo: a pin named `{}` exists now", slot.id);
+    if taken_by_a_legacy_pin {
+        return Err(exists());
+    }
+    match store.restore(slot, index) {
+        Ok(_) => Ok(format!("restored pin `{}`", slot.id)),
+        Err(crate::pin_slots::SlotError::DuplicateId(_)) => Err(exists()),
+        Err(err) => Err(format!("undo failed: {err}")),
+    }
+}
+
+/// Executor branch for `StoreOp::RenameSlot`: rename the slot, and a
+/// live mux slot's tmux session with it, pinning the name override
+/// (ADR 0029 lockstep, as `pin rename`).
+fn execute_rename_slot(app: &mut App, tmux: &dyn MuxBackend, slot: &str, new_name: &str) {
+    let Some(store) = slot_store_or_report(app) else {
+        return;
+    };
+    let Some(handle) = app.snapshot_handle().cloned() else {
+        return;
+    };
+    let snapshot = handle.snapshot();
+    let mut notes = Vec::new();
+    let live_mux = crate::tui::rows::pin_nodes(snapshot)
+        .into_iter()
+        .find(|pin| pin.id.id == slot)
+        .and_then(
+            |pin| match (pin.kind, pin.status, pin.target_node.as_ref()) {
+                (
+                    crate::model::PinKind::Mux,
+                    crate::model::SlotStatus::Live,
+                    Some(crate::model::NodeId::MuxSession(mux)),
+                ) => Some(mux.clone()),
+                _ => None,
+            },
+        );
+    if let Some(mux) = live_mux {
+        match crate::rename::plan_mux_rename(snapshot, &mux, new_name.to_string()) {
+            Ok(plan) => {
+                for (slot, result) in
+                    crate::rename::apply_pin_slot_updates(&store, &plan.pin_slot_updates)
+                {
+                    if let Err(err) = result {
+                        notes.push(format!("pin update failed: {slot}: {err}"));
+                    }
+                }
+                match rename_mux_via_backend(tmux, &plan.mux_rename) {
+                    Ok(()) => notes.push(format!("renamed the mux to `{new_name}`")),
+                    Err(reason) => {
+                        finish_slot_write(app, Err(format!("rename failed: {reason}")));
+                        return;
+                    }
+                }
+                let name = (
+                    "name".to_string(),
+                    crate::model::FieldValue::Text(new_name.to_string()),
+                );
+                if let Err(err) = crate::pin_ops::edit(&store, slot, &[name], &[]) {
+                    notes.push(format!("name override not set: {err}"));
+                }
+            }
+            Err(err) => notes.push(format!("the mux keeps its name: {err}")),
+        }
+    }
+    let outcome = crate::pin_ops::rename(&store, slot, new_name)
+        .map(|_| {
+            let mut parts = vec![format!("renamed pin `{slot}` to `{new_name}`")];
+            parts.extend(notes);
+            parts.join(" · ")
+        })
+        .map_err(|err| format!("rename failed: {err}"));
+    finish_slot_write(app, outcome);
+}
+
+/// Executor branch for `StoreOp::SavePin`: apply the form's overrides,
+/// then rename (which renames a live mux's session too).
+fn execute_save_pin(
+    app: &mut App,
+    tmux: &dyn MuxBackend,
+    request: &crate::tui::widgets::pin_edit::PinEditRequest,
+) {
+    let Some(store) = slot_store_or_report(app) else {
+        return;
+    };
+    let slot = request.pin.as_str();
+    match (apply_pin_overrides(&store, request), &request.rename) {
+        (Err(err), _) => finish_slot_write(app, Err(format!("edit failed: {err}"))),
+        (Ok(_), Some(new_name)) => execute_rename_slot(app, tmux, slot, new_name),
+        (Ok(changed), None) => finish_slot_write(
+            app,
+            Ok(if changed {
+                format!("saved `{slot}`")
+            } else {
+                format!("`{slot}` already had that")
+            }),
+        ),
+    }
+}
+
+/// The override half of saving the pin edit form: set and drop the
+/// requested overrides, returning whether anything changed.
+pub(super) fn apply_pin_overrides(
+    store: &crate::pin_slots::SlotStore,
+    request: &crate::tui::widgets::pin_edit::PinEditRequest,
+) -> Result<bool, crate::pin_ops::PinError> {
+    if request.set.is_empty() && request.unset.is_empty() {
+        return Ok(false);
+    }
+    crate::pin_ops::edit(store, &request.pin, &request.set, &request.unset)
+}
+
+/// Executor branch for `StoreOp::RetargetSlot`.
+fn execute_retarget_slot(app: &mut App, slot: &str, target: &str) {
+    let Some(store) = slot_store_or_report(app) else {
+        return;
+    };
+    let Some(handle) = app.snapshot_handle().cloned() else {
+        return;
+    };
+    let history = crate::history::HistoryWriter::from_env(app.config().history.clone());
+    let outcome = crate::pin_ops::find_pinnable(handle.snapshot(), target)
+        .and_then(|what| {
+            crate::pin_ops::retarget(handle.snapshot(), &store, history.as_ref(), slot, &what)
+        })
+        .map(|_| format!("`{slot}` now points at `{target}`"))
+        .map_err(|err| format!("retarget failed: {err}"));
+    finish_slot_write(app, outcome);
+}
+
+/// Executor branch for `StoreOp::RefreshSlot`.
+fn execute_refresh_slot(app: &mut App, slot: &str) {
+    let Some(store) = slot_store_or_report(app) else {
+        return;
+    };
+    let Some(handle) = app.snapshot_handle().cloned() else {
+        return;
+    };
+    let outcome = crate::pin_ops::refresh_snapshot(handle.snapshot(), &store, slot)
+        .map(|changed| {
+            if changed {
+                format!("refreshed the snapshot of `{slot}`")
+            } else {
+                format!("the snapshot of `{slot}` was already current")
+            }
+        })
+        .map_err(|err| format!("refresh failed: {err}"));
+    finish_slot_write(app, outcome);
+}
+
+/// Executor branch for `StoreOp::ForgetRecord` and `ReapRecords`:
+/// remove history records. Only records go; nothing touches tmux, git,
+/// or the filesystem (ADR 0140).
+fn execute_reap_records(app: &mut App, ids: std::collections::BTreeSet<String>) {
+    let Some(store) = crate::history::HistoryStore::from_env() else {
+        app.report(LogEntry::error(
+            "history: no state home to read records from",
+        ));
+        return;
+    };
+    let entry = match crate::history::reap::reap(&store, &ids) {
+        Ok(removed) => LogEntry::info(format!(
+            "forgot {removed} history record{}",
+            if removed == 1 { "" } else { "s" }
+        )),
+        Err(err) => LogEntry::error(format!("history: could not forget records: {err}")),
+    };
+    app.report(entry);
+}
+
+#[cfg(test)]
+#[path = "executor_undo_tests.rs"]
+mod undo_tests;

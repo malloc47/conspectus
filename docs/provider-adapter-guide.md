@@ -47,8 +47,8 @@ up your adapter without further edits.
   (defaults to `harness_key`; override when the key is longer
   than the display budget).
 - `launch_argv() -> Vec<OsString>` — default spawn argv.
-- `launch_options() -> &'static [HarnessLaunchOption]` — pin
-  editor toggle set.
+- `launch_options() -> &'static [HarnessLaunchOption]` — launch form
+  toggle set.
 - `resume_argv(session_id, cwd) -> Option<Vec<OsString>>` —
   single-command resume.
 - `hook_record_from_payload(payload, ...) -> Result<HookRecord>`
@@ -108,10 +108,11 @@ Tier 2 for any transcript-payload access).
 - `capture_pane(namespace, target)` — preview capture.
 - `rename_session(namespace, target, new_name)` — mux
   rename lockstep.
-- `new_session(namespace, name, cwd, argv)` — pin launch.
+- `new_session(namespace, name, cwd, argv)` — `mux launch` and
+  rebuild (ADR 0142).
 - `attach_session(namespace, name)` — attach dispatch.
 - `send_keys(namespace, target, literal, press_enter)` —
-  pin-launch send-keys exception.
+  the narrow agent-exited rebuild exception (ADR 0028, ADR 0143).
 - `current_session_context() -> Option<MuxSessionContext>` —
   hook-writer probe.
 
@@ -139,8 +140,8 @@ acceptance test for the CSP-480 seam. `SystemZellij` implements
 human-formatted output. Zero edits outside the new module +
 three registration entries.
 
-**What the registry provides for free:** pin `mux.backend`
-validation (`pins.rs` consults `KNOWN_MUX_BACKENDS`), attach
+**What the registry provides for free:** `mux.backend`
+validation for pin slots and history records (`KNOWN_MUX_BACKENDS`), attach
 target dispatch (`tui/actions.rs::resolve_attach_target`),
 capability-outcome gating (callers check the outcome variant,
 not the backend name), warm-start freshness classification
@@ -284,7 +285,7 @@ If you're adding a new adapter, read in this order:
 1. **This guide** — the end-to-end checklist above.
 2. **The family's ADR** —
    ADR 0088 (provider descriptor registry) for cross-family
-   context; ADR 0087 (mutation envelope) for what mutations
+   context; ADR 0143 (mutation envelope) for what mutations
    your adapter can perform; the family-specific ADR
    (ADR 0089 for mux, ADR 0060 for orchestrator, no dedicated
    forge ADR yet).

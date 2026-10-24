@@ -7,16 +7,14 @@ use crate::model::{
     LinkEndpoint, LinkState, MatchKind, NodeId, Provenance, RelationKind, ResolutionExplanation,
     ResolvedRelationship, RuntimeProcessRole, ScoreAxis, SourceMetadata,
 };
-pub mod pins;
+pub mod slots;
 
 pub fn resolve_snapshot(mut snapshot: GraphSnapshot) -> GraphSnapshot {
     let process_links = derive_process_mux_links(&snapshot);
     append_unique_links(&mut snapshot.candidate_links, process_links);
-    // Pin binding runs before link resolution so the synthesized
-    // pin-derived `LinkedToMux` candidates participate in resolver
-    // ranking. The pin pass emits its own diagnostics, which we
-    // merge in after `resolve_links` reassigns `snapshot.diagnostics`.
-    let pin_diagnostics = pins::apply_pin_bindings(&mut snapshot);
+    // Pin slots become nodes, and their `pin_targets` links join the
+    // candidates, before link resolution (ADR 0141).
+    slots::apply_slots(&mut snapshot);
     // Demote `LinkedToMux` candidates whose source
     // session is materially stale compared to a fresher candidate
     // for the same mux, before bucketing kicks in.
@@ -33,9 +31,7 @@ pub fn resolve_snapshot(mut snapshot: GraphSnapshot) -> GraphSnapshot {
         .cloned()
         .collect();
     snapshot.diagnostics = output.diagnostics;
-    snapshot.diagnostics.extend(pin_diagnostics);
     snapshot.diagnostics.extend(discovered);
-    snapshot.sync_pin_nodes();
     snapshot.canonicalize();
     snapshot
 }
@@ -229,10 +225,7 @@ fn demote_stale_source_mux_candidates(snapshot: &mut GraphSnapshot) {
 fn is_declared_or_pin(provenance: Provenance) -> bool {
     matches!(
         provenance,
-        Provenance::LocalDeclared
-            | Provenance::GlobalDeclared
-            | Provenance::LocalPin
-            | Provenance::GlobalPin
+        Provenance::LocalDeclared | Provenance::GlobalDeclared | Provenance::GlobalPin
     )
 }
 
@@ -818,7 +811,6 @@ enum ProvenanceTier {
     StrongDiscovered = 3,
     GlobalPin = 4,
     GlobalDeclared = 5,
-    LocalPin = 6,
     LocalDeclared = 7,
 }
 
@@ -831,7 +823,6 @@ impl ProvenanceTier {
             Self::StrongDiscovered => "strong_discovered",
             Self::GlobalPin => "global_pin",
             Self::GlobalDeclared => "global_declared",
-            Self::LocalPin => "local_pin",
             Self::LocalDeclared => "local_declared",
         }
     }
@@ -839,7 +830,6 @@ impl ProvenanceTier {
     fn from_provenance(provenance: Provenance) -> Self {
         match provenance {
             Provenance::LocalDeclared => Self::LocalDeclared,
-            Provenance::LocalPin => Self::LocalPin,
             Provenance::GlobalDeclared => Self::GlobalDeclared,
             Provenance::GlobalPin => Self::GlobalPin,
             Provenance::StrongDiscovered => Self::StrongDiscovered,

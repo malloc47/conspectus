@@ -3,12 +3,12 @@ source: src/tui/ui_tests.rs
 expression: "pr_frame(&mut app, 4, Some(fetched_pr(\"OPEN\", true, \"[]\", \"\")))"
 ---
 updated 0s ago · 0 sessions · 0 mux                                                                                               
-┌ ▸ sessions · mux · prs ───────────────────────────────────────┐┌   ⇄ pr ───────────────────────────────────────────────────────┐
+┌ ► sessions · mux · prs · pinned · history ────────────────────┐┌   ⇄ pr ───────────────────────────────────────────────────────┐
 │▼ project  conspectus/project                                  ││  id            c87271dd104aff7b                               │
-│    ⇄ #4 ◌  draft                                              ││  pr            conspectus/project#4 (OPEN)                    │
-│    ⇄ #3 ◌  MERGED                                             ││  draft         true                                           │
-│    ⇄ #2 ◌  CLOSED                                             ││  head          feature/4                                      │
-│    ⇄ #1 ◌  OPEN                                               ││  updated       —                                              │
+│    ⇄ #4 ◌     —  ◐                                            ││  pr            conspectus/project#4 (OPEN)                    │
+│    ⇄ #3 ◌     —  ⊕                                            ││  draft         true                                           │
+│    ⇄ #2 ◌     —  ⊗                                            ││  head          feature/4                                      │
+│    ⇄ #1 ◌     —  ○                                            ││  updated       —                                              │
 │                                                               ││  url           https://github.com/conspectus/project/pull/4   │
 │                                                               ││                                                               │
 │                                                               ││──────────────────────────────────────────────────── Preview ──│

@@ -64,7 +64,7 @@ impl HelpOverlayState {
                 self.scroll = u16::MAX;
                 HelpOutcome::Continue
             }
-            None => HelpOutcome::Continue,
+            Some(PagerKey::Copy) | None => HelpOutcome::Continue,
         }
     }
 
@@ -225,11 +225,7 @@ fn keymap_sections() -> Vec<HelpSection> {
             bindings: vec![
                 Binding::new(
                     "f",
-                    "Open the controls overlay (view / grouping / filters / sort / preview wrap)",
-                ),
-                Binding::new(
-                    "p",
-                    "Open the pins overlay (create / edit / remove / bind / rebind / adopt)",
+                    "Open the controls overlay (view / grouping / filters / sort / preview wrap); Space selects or toggles, Enter applies and closes, Esc closes",
                 ),
                 Binding::new("!", crate::tui::keybindings::MESSAGES_HELP),
                 Binding::new("?", "This help"),
@@ -240,7 +236,7 @@ fn keymap_sections() -> Vec<HelpSection> {
             bindings: vec![
                 Binding::new(
                     "Enter",
-                    "Default action on the selected row: attach mux/muxed sessions, view un-muxed sessions, expand groups",
+                    "Default action on the selected row: attach mux/muxed sessions, view un-muxed sessions, rebuild a stopped mux, pin, or history record, expand groups",
                 ),
                 Binding::new("a", "Attach to the selected mux"),
                 Binding::new(
@@ -249,7 +245,7 @@ fn keymap_sections() -> Vec<HelpSection> {
                 ),
                 Binding::new(
                     "R",
-                    "Rename the selected agent session (alias), mux (tmux + pin cascade), or pin's display name",
+                    "Rename the selected agent session (alias) or mux (tmux + pin cascade)",
                 ),
                 Binding::new(
                     "w",
@@ -257,7 +253,7 @@ fn keymap_sections() -> Vec<HelpSection> {
                 ),
                 Binding::new(
                     "X",
-                    "Close down the selected stream: merge or discard the branch, end its sessions, remove the worktree, drop its pins",
+                    "Close down the selected stream: merge or discard the branch, end its sessions, remove the worktree, forget its history",
                 ),
                 Binding::new(
                     "v",
@@ -277,49 +273,43 @@ fn keymap_sections() -> Vec<HelpSection> {
             bindings: vec![
                 Binding::new(
                     "n",
-                    "Create a bare tmux session (no pin, no agent, no worktree) — shell in the selected cwd",
+                    "Create a bare tmux session (no agent, no worktree) — shell in the selected cwd",
+                ),
+                Binding::new(
+                    "N",
+                    "Launch a harness in a new mux (the form can also create a worktree for it)",
                 ),
                 Binding::new(
                     "m",
-                    "Open the Mux action menu — pick between new bare session and launching a harness in a fresh mux with no pin",
+                    "Open the Mux action menu — pick between new bare session and launching a harness in a fresh mux",
                 ),
             ],
         },
         HelpSection {
-            title: "Pins",
+            title: "Row actions",
             bindings: vec![
-                Binding::new("p", "Open the pins overlay (menu listing every action)"),
                 Binding::new(
-                    "N",
-                    "New stream — opens the create form (worktree toggle pre-enabled) seeded from the current selection; Space toggles the worktree off for a plain pin",
+                    "p",
+                    "Pin the selected row, or unpin it when it is already pinned; pinned rows carry ◉ (◎ when the pinned entity isn't running)",
                 ),
                 Binding::new(
-                    "L",
-                    "Launch the selected pin (same code path as Enter on an unbound pin row)",
+                    crate::tui::keybindings::UNDO_KEY.to_string(),
+                    "Undo the last pin or unpin, as far back as this session goes; a removed pin comes back with its overrides and its place in the order",
                 ),
                 Binding::new(
-                    "R",
-                    "Rename the selected pin's display name (same key as session rename)",
+                    ".",
+                    "Open the row action menu — pin or unpin; rebuild, forget, or show the rebuild plan for a history record; edit, rename, retarget, refresh, or reveal a pin in the Pinned view; Clean up… in the History view",
                 ),
-                Binding::new(
-                    "B",
-                    "Rebind the selected pin's mux target (mux name + optional socket)",
-                ),
-                Binding::new(
-                    "b",
-                    "Bind picker for the selected PinAmbiguous row (status hint otherwise)",
-                ),
-                Binding::new("A", "Adopt the selected live mux row as a new pin"),
-                Binding::new("Delete", "Remove the selected pin (two-press confirmation)"),
             ],
         },
         HelpSection {
             title: "View switching",
             bindings: vec![
                 Binding::new(
-                    "1 / 2 / 3",
-                    "Switch directly to the sessions / mux / PRs view",
+                    "1 / 2 / 3 / 4",
+                    "Switch directly to the sessions / mux / PRs / pinned view",
                 ),
+                Binding::new("5", "Switch directly to the history view"),
                 Binding::new("] / [", "Cycle to next / previous view"),
             ],
         },
@@ -349,7 +339,7 @@ fn keymap_sections() -> Vec<HelpSection> {
                 Binding::new("g / G", "First / last row"),
                 Binding::new(
                     "Enter",
-                    "Left tree: row-kind default action (attach / view / expand); right pane: drill or expand a group",
+                    "Left tree: row-kind default action (attach / view / rebuild / expand); right pane: drill or expand a group",
                 ),
                 Binding::new("Tab", "Cycle focus between left tree and right panel"),
                 Binding::new("J / K", "Scroll the right-panel preview"),
@@ -422,17 +412,67 @@ fn body_lines_for_width(theme: &Theme, width: Option<usize>) -> Vec<Line<'static
     }
 
     self::section(&mut lines, "Node kind icons");
-    push_icon_legend(&mut lines, theme);
+    push_icon_legend(&mut lines, theme, width);
     blank(&mut lines);
 
-    self::section(&mut lines, "Mux state");
-    push_mux_state_legend(&mut lines, theme);
+    self::section(&mut lines, "Link and mux state");
+    push_mux_state_legend(&mut lines, theme, width);
     blank(&mut lines);
 
-    lines.push(line![
-        span!(theme.placeholder; "{}", crate::tui::keybindings::overlay::footer(crate::tui::keybindings::overlay::HELP_KEYS))
-    ]);
+    self::section(&mut lines, "Pull request state");
+    push_pr_state_legend(&mut lines, theme, width);
+    blank(&mut lines);
+
+    self::section(&mut lines, "Pins");
+    push_pin_marker_legend(&mut lines, theme, width);
+    blank(&mut lines);
+
+    let footer =
+        crate::tui::keybindings::overlay::footer(crate::tui::keybindings::overlay::HELP_KEYS);
+    match width.filter(|w| *w > 8) {
+        Some(w) => {
+            let budget = u16::try_from(w).unwrap_or(u16::MAX);
+            for chunk in crate::viewer::render::word_wrap(&footer, budget) {
+                lines.push(line![span!(theme.placeholder; "{}", chunk.trim_end())]);
+            }
+        }
+        None => lines.push(line![span!(theme.placeholder; "{footer}")]),
+    }
     lines
+}
+
+/// Cells before the blurb in a legend row: two of indent, the glyph and
+/// its space, and a 16-cell name column.
+const LEGEND_LEAD_WIDTH: usize = 2 + 2 + 16;
+/// The same for the pin legend, whose names are longer.
+const PIN_LEGEND_LEAD_WIDTH: usize = 2 + 2 + 20;
+
+/// Push one legend row: `lead` spans after a two-cell indent, then the
+/// blurb, wrapped under a hanging indent that lines up with it when
+/// `width` is known so no text runs past the modal edge.
+fn legend_entry(
+    lines: &mut Vec<Line<'static>>,
+    lead: Vec<ratatui::text::Span<'static>>,
+    lead_width: usize,
+    blurb: &str,
+    width: Option<usize>,
+) {
+    let mut first = vec![ratatui::text::Span::raw("  ")];
+    first.extend(lead);
+    let Some(width) = width.filter(|w| *w > lead_width + 8) else {
+        first.push(ratatui::text::Span::raw(blurb.to_string()));
+        lines.push(Line::from(first));
+        return;
+    };
+    let budget = u16::try_from(width - lead_width).unwrap_or(u16::MAX);
+    let mut chunks = crate::viewer::render::word_wrap(blurb, budget).into_iter();
+    first.push(ratatui::text::Span::raw(
+        chunks.next().unwrap_or_default().trim_end().to_string(),
+    ));
+    lines.push(Line::from(first));
+    for chunk in chunks {
+        lines.push(line![" ".repeat(lead_width), chunk.trim_end().to_string()]);
+    }
 }
 
 /// Width of the `  <key:<14>` column that precedes each description.
@@ -470,7 +510,7 @@ fn binding_lines(
 /// pressing `?` instead of reading the docs. Mirrors ADR 0073's
 /// canonical display order (`NodeKind::ALL`) so the icon column
 /// down-reads the same sequence the row tree and detail pane use.
-fn push_icon_legend(lines: &mut Vec<Line<'static>>, theme: &Theme) {
+fn push_icon_legend(lines: &mut Vec<Line<'static>>, theme: &Theme, width: Option<usize>) {
     for kind in NodeKind::ALL {
         let style = node_kind_style(kind, theme);
         // ForgePr's slate color is `Color::Reset`; mirror the
@@ -482,12 +522,16 @@ fn push_icon_legend(lines: &mut Vec<Line<'static>>, theme: &Theme) {
         } else {
             style.color
         };
-        lines.push(line![
-            "  ",
-            span!(Style::default().fg(color); "{} ", style.glyph),
-            span!(Modifier::BOLD; "{:<16}", node_kind_display_name(kind)),
-            node_kind_help_blurb(kind).to_string(),
-        ]);
+        legend_entry(
+            lines,
+            vec![
+                span!(Style::default().fg(color); "{} ", style.glyph),
+                span!(Modifier::BOLD; "{:<16}", node_kind_display_name(kind)),
+            ],
+            LEGEND_LEAD_WIDTH,
+            node_kind_help_blurb(kind),
+            width,
+        );
     }
 }
 
@@ -495,49 +539,136 @@ fn push_icon_legend(lines: &mut Vec<Line<'static>>, theme: &Theme) {
 /// ambiguity warning on group rows and the header. The same glyph can
 /// answer a different question on a session row than on a mux row, so
 /// the blurb names both where they differ.
-fn push_mux_state_legend(lines: &mut Vec<Line<'static>>, theme: &Theme) {
+fn push_mux_state_legend(lines: &mut Vec<Line<'static>>, theme: &Theme, width: Option<usize>) {
+    use crate::tui::icons::state;
     let bold_warning = Style::default()
         .fg(theme.warning)
         .add_modifier(Modifier::BOLD);
+    let ghost = Style::default()
+        .fg(theme.ghost)
+        .add_modifier(Modifier::ITALIC);
     let entries: [(&str, Style, &str, &str); 5] = [
         (
-            "◉",
+            state::LINKED,
             Style::default().fg(theme.mux_attached),
-            "Attached",
+            "Linked",
             "session: one mux, Enter/a attaches · mux: client attached",
         ),
         (
-            "◯",
+            state::UNLINKED,
             Style::default().add_modifier(theme.mux_unmuxed),
-            "Not attached",
+            "Not linked",
             "session: no mux, or several candidates · mux: no client",
         ),
         (
-            "◌",
-            Style::default().fg(theme.pin_placeholder),
-            "Pin placeholder",
-            "pinned mux session that isn't running",
+            state::STOPPED,
+            ghost,
+            "Stopped",
+            "a mux that is no longer running; Enter starts it again",
         ),
         (
-            "?",
+            state::UNKNOWN,
             Style::default().add_modifier(theme.placeholder),
             "Unknown",
-            "mux backend didn't report whether a client is attached",
+            "the mux backend didn't report whether a client is attached",
         ),
         (
-            "⚠",
+            "▲",
             bold_warning,
             "Ambiguous mux",
             "sessions with several candidate muxes; the detail pane lists them",
         ),
     ];
     for (glyph, style, name, blurb) in entries {
-        lines.push(line![
-            "  ",
-            span!(style; "{glyph} "),
-            span!(Modifier::BOLD; "{name:<16}"),
-            blurb.to_string(),
-        ]);
+        legend_entry(
+            lines,
+            vec![
+                span!(style; "{glyph} "),
+                span!(Modifier::BOLD; "{name:<16}"),
+            ],
+            LEGEND_LEAD_WIDTH,
+            blurb,
+            width,
+        );
+    }
+}
+
+/// Legend for the pull request state glyphs. The Pinned and History
+/// views spell the same states as words instead.
+fn push_pr_state_legend(lines: &mut Vec<Line<'static>>, theme: &Theme, width: Option<usize>) {
+    use crate::tui::icons::state;
+    let entries: [(&str, Style, &str, &str); 4] = [
+        (
+            state::PR_OPEN,
+            Style::default().fg(theme.pr_open),
+            "Open",
+            "ready for review",
+        ),
+        (
+            state::PR_DRAFT,
+            Style::default().fg(theme.pr_draft),
+            "Draft",
+            "open, but marked as a draft",
+        ),
+        (
+            state::PR_MERGED,
+            Style::default().fg(theme.pr_merged),
+            "Merged",
+            "landed on its base branch",
+        ),
+        (
+            state::PR_CLOSED,
+            Style::default().fg(theme.pr_closed),
+            "Closed",
+            "closed without merging",
+        ),
+    ];
+    for (glyph, style, name, blurb) in entries {
+        legend_entry(
+            lines,
+            vec![
+                span!(style; "{glyph} "),
+                span!(Modifier::BOLD; "{name:<16}"),
+            ],
+            LEGEND_LEAD_WIDTH,
+            blurb,
+            width,
+        );
+    }
+}
+
+/// Legend for the pin marker: filled for something a pin points at,
+/// hollow and in the ghost style for a pin with nothing running.
+fn push_pin_marker_legend(lines: &mut Vec<Line<'static>>, theme: &Theme, width: Option<usize>) {
+    use crate::tui::icons::state;
+    let pin_color = node_kind_style(NodeKind::Pin, theme).color;
+    let entries: [(&str, Style, &str, &str); 2] = [
+        (
+            state::PIN_RUNNING,
+            Style::default().fg(pin_color),
+            "Pinned",
+            "a pin points at this row and it is running; the Pinned view lists every pin",
+        ),
+        (
+            state::PIN_STOPPED,
+            Style::default()
+                .fg(theme.ghost)
+                .add_modifier(Modifier::ITALIC),
+            "Pinned, not running",
+            "the pinned entity is stopped, removed, missing, or not started yet; Enter starts it",
+        ),
+    ];
+    for (glyph, style, name, blurb) in entries {
+        legend_entry(
+            lines,
+            vec![
+                span!(style; "{glyph} "),
+                span!(Modifier::BOLD; "{name:<20}"),
+            ],
+            PIN_LEGEND_LEAD_WIDTH,
+            blurb,
+            width,
+        );
     }
 }
 
@@ -569,7 +700,7 @@ fn node_kind_help_blurb(kind: NodeKind) -> &'static str {
         NodeKind::Checkout => "working-tree checkout of a repo",
         NodeKind::AgentSession => "harness session (claude, codex, opencode, …)",
         NodeKind::MuxSession => "tmux / mux backend session",
-        NodeKind::Pin => "declared pinned session intent",
+        NodeKind::Pin => "pin: a named place pointing at a mux, session, checkout, repo, or PR",
         NodeKind::RuntimeProcess => "live process attached to a mux pane",
         NodeKind::Branch => "git branch reference",
         NodeKind::Fork => "atelier fork (worktree-backed branch family)",

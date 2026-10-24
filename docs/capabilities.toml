@@ -1,6 +1,6 @@
 # What Conspectus may run, connect to, signal, and write (ADR 0117).
 #
-# This file is the enforced form of the mutation envelope (ADR 0087).
+# This file is the enforced form of the mutation envelope (ADR 0143).
 # Two tests check the code against it:
 #
 # - `tests/capabilities_static.rs` reads the source and `Cargo.lock`:
@@ -31,7 +31,7 @@
 # (`tmux a ; b`); each subcommand must match on its own.
 
 [programs.git]
-adr = ["0011", "0092", "0112"]
+adr = ["0011", "0092", "0112", "0142", "0143"]
 names = ["git"]
 globals = { "-C" = 1, "-c" = 1, "--no-optional-locks" = 0 }
 read = [
@@ -47,6 +47,9 @@ read = [
     "rev-list ...",
     "show ...",
 ]
+# A rebuild clones a gone repo into a path that doesn't exist (ADR 0142,
+# ADR 0143 category 6). Nothing else here changes a repository.
+act = ["clone * *"]
 # The scenario builder creates repos of its own under a scratch
 # directory; it never touches a repo it didn't create.
 dev = [
@@ -69,7 +72,7 @@ network = true
 read = ["pr list ...", "pr view ...", "auth status ..."]
 
 [programs.tmux]
-adr = ["0006", "0057", "0087", "0093", "0108"]
+adr = ["0006", "0057", "0143", "0093", "0108"]
 names = ["tmux"]
 globals = { "-L" = 1 }
 chain = ";"
@@ -102,12 +105,12 @@ globals = { "-C" = 1 }
 act = ["switch ...", "remove ...", "merge ...", "step prune ..."]
 
 [programs.harness]
-adr = ["0058", "0087", "0121"]
+adr = ["0058", "0143", "0121"]
 names = ["claude", "codex", "opencode", "pi"]
 act = ["--resume *", "exec --resume *", "--session *"]
 
 [programs.claude-history]
-adr = ["0052", "0087"]
+adr = ["0052", "0143"]
 names = ["claude-history"]
 act = ["*"]
 
@@ -119,10 +122,10 @@ env = "PAGER"
 read = ["..."]
 
 [programs.conspectus]
-adr = ["0057", "0087", "0105"]
+adr = ["0141", "0142", "0143", "0105"]
 # The running binary, whatever its file name.
 self = true
-act = ["pin launch ...", "mux new ...", "mux launch ..."]
+act = ["rebuild ...", "mux new ...", "mux launch ..."]
 
 # Sockets. Conspectus opens no network sockets of its own; `gh` is the
 # only program that reaches the network. Paths use the same variables
@@ -148,24 +151,32 @@ act = ["SIGTERM", "SIGKILL", "0"]
 # `$SCRATCH` is the directory the dev scenario builder was given.
 # Creating the missing parents of an allowed path is allowed too.
 [writes]
-adr = ["0012", "0014", "0028", "0057", "0058", "0083", "0087", "0121"]
+adr = ["0012", "0014", "0028", "0057", "0058", "0083", "0143", "0121"]
 # Terminals and the null device, in every context.
 always = ["/dev/null", "/dev/tty", "/dev/pts/*"]
 # Rebuildable caches and observations.
 read = [
     "$STATE/conspectus/**",
     "$CACHE/conspectus/**",
-    "$DATA/conspectus/**",
+    "$DATA/conspectus/graph.bin",
+    "$DATA/conspectus/graph.bin.tmp.*",
     "$RUNTIME/conspectus/**",
 ]
 # User-intent TOML stores, each written through a sibling temporary
 # file (`.<name>.tmp-<pid>-<attempt>`) renamed into place.
+# The pin slot store is one of them: the daemon and every read command
+# leave it alone (ADR 0141, ADR 0143 category 1).
 act = [
     "$CONFIG/conspectus/**",
+    "$DATA/conspectus/pins.toml",
+    "$DATA/conspectus/pins.toml.lock",
+    "$DATA/conspectus/.pins.toml.tmp-*",
     "$PROJECT/.conspectus.toml",
     "$PROJECT/..conspectus.toml.tmp-*",
+    # The destination of a rebuild's `git clone` (ADR 0142).
+    "$CLONE/**",
 ]
-# Hook installation into harness configuration: ADR 0087 category 5,
+# Hook installation into harness configuration: ADR 0143 category 5,
 # from ADR 0028. Pi's hook is one Conspectus-owned extension file that
 # `hook remove pi` deletes (ADR 0121).
 # `--scope project` writes the same files under the project,

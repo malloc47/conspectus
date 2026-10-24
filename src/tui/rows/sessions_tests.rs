@@ -28,6 +28,7 @@ fn worktree(repo_common: &str, root: &str) -> GraphNode {
         git_dir: None,
         current_branch: None,
         worktree: None,
+        head_commit: None,
     })
 }
 
@@ -1512,13 +1513,6 @@ fn two_mux_links_with_distinct_provenance_resolve_to_one_attached_mux() {
         _ => unreachable!(),
     }
     assert!(!session_row.expandable);
-    assert!(
-        !tree
-            .rows
-            .iter()
-            .any(|r| matches!(r.kind, RowKind::AgentSessionMuxCandidate(_))),
-        "no candidate child rows when the resolver has a single winner",
-    );
 }
 
 #[test]
@@ -1567,12 +1561,6 @@ fn duplicate_mux_target_links_do_not_make_session_ambiguous() {
         _ => unreachable!(),
     }
     assert!(!session_row.expandable);
-    assert!(
-        !tree
-            .rows
-            .iter()
-            .any(|row| matches!(row.kind, RowKind::AgentSessionMuxCandidate(_)))
-    );
 }
 
 #[test]
@@ -2130,6 +2118,7 @@ fn checkout_node(repo_common_dir: &str, root: &str) -> GraphNode {
         git_dir: None,
         current_branch: None,
         worktree: None,
+        head_commit: None,
     })
 }
 
@@ -2295,31 +2284,30 @@ fn repo_grouping_keeps_regular_lineage_sessions_flat_by_location() {
     );
 }
 
-// ---- ADR 0057 pin row integration ---------------
+// ---- pin slot row integration ---------------
 
-fn pin_candidate(
+/// A slot named `id` of `kind`. `target` is a node id (or `None` for a
+/// planned slot); `fields` become overrides.
+fn slot(
     id: &str,
-    harness: &str,
-    cwd: &str,
-    mux_name: &str,
-    provenance: Provenance,
-    binding: Option<PinBinding>,
-) -> crate::model::PinCandidate {
-    crate::model::PinCandidate {
+    kind: crate::model::PinKind,
+    target: Option<NodeId>,
+    order: u32,
+    fields: &[(&str, &str)],
+) -> crate::model::PinSlot {
+    use crate::model::{FieldValue, PinSlot, SlotFields};
+    PinSlot {
         id: id.to_string(),
-        display_name: id.to_string(),
-        harness: harness.to_string(),
-        cwd: cwd.to_string(),
-        mux: crate::model::PinMuxRef {
-            backend: "tmux".to_string(),
-            name: mux_name.to_string(),
-            socket_name: None,
-        },
-        launch_argv: None,
-        reason: None,
-        provenance,
-        store_path: "/tmp/conspectus.toml".to_string(),
-        binding,
+        kind,
+        target: target.map(|node| node.to_string()),
+        pinned_at: None,
+        overrides: fields
+            .iter()
+            .map(|(name, value)| ((*name).to_string(), FieldValue::Text((*value).to_string())))
+            .collect::<SlotFields>(),
+        snapshot: SlotFields::new(),
+        order,
+        legacy: false,
     }
 }
 
@@ -2334,10 +2322,13 @@ fn build_tree(snapshot: &GraphSnapshot) -> RowTree {
     })
 }
 
+fn session_id(key: &str) -> NodeId {
+    NodeId::AgentSession(AgentSessionId::new("codex", "/state", key))
+}
+
 #[test]
-fn none_grouping_floats_bound_pinned_session_rows_to_top() {
-    let session_id = AgentSessionId::new("codex", "/state", "older");
-    let mux_id = MuxSessionId::new("tmux:older");
+fn none_grouping_keeps_pinned_session_rows_where_they_sort() {
+    use crate::model::PinKind;
     let mut snapshot = GraphSnapshot::empty();
     snapshot.nodes.push(agent_session_with_activity(
         "codex",
@@ -2353,17 +2344,14 @@ fn none_grouping_floats_bound_pinned_session_rows_to_top() {
         Some("/home/op/work/repo"),
         200,
     ));
-    snapshot.pins.push(pin_candidate(
+    snapshot.pins.push(slot(
         "older-pin",
-        "codex",
-        "/home/op/work/repo",
-        "older",
-        Provenance::LocalPin,
-        Some(PinBinding::Bound {
-            mux: mux_id,
-            session: session_id,
-        }),
+        PinKind::Session,
+        Some(session_id("older")),
+        0,
+        &[],
     ));
+    let snapshot = resolve_snapshot(snapshot);
 
     let tree = build(SessionsBuildInputs {
         snapshot: &snapshot,
@@ -2383,439 +2371,96 @@ fn none_grouping_floats_bound_pinned_session_rows_to_top() {
         })
         .collect();
     assert_eq!(sessions.len(), 2, "{:#?}", tree.rows);
-    assert_eq!(sessions[0].session.session_key, "older");
-    assert_eq!(sessions[0].pin_id.as_deref(), Some("older-pin"));
-    assert_eq!(sessions[1].session.session_key, "newer");
+    // Pinning doesn't float a row: the newer session still leads.
+    assert_eq!(sessions[0].session.session_key, "newer");
+    assert_eq!(sessions[1].session.session_key, "older");
+    assert_eq!(sessions[1].pin_id.as_deref(), Some("older-pin"));
 }
 
 #[test]
-fn unbound_pin_emits_synthetic_pins_group_and_placeholder_session_row() {
+fn slots_add_no_rows_of_their_own_to_the_sessions_view() {
+    use crate::model::{PinKind, SlotStatus};
+    // Planned, dangling, and live slots live in the Pinned view; the
+    // Sessions view lists sessions only.
     let mut snapshot = GraphSnapshot::empty();
-    snapshot.pins.push(pin_candidate(
-        "ingest",
-        "codex",
-        "/home/op/work/repo",
-        "ingest",
-        Provenance::LocalPin,
-        Some(PinBinding::Unbound),
-    ));
-
-    let tree = build_tree(&snapshot);
-
-    // Synthetic group + the one pin row.
-    let pin_group_idx = tree
-        .rows
-        .iter()
-        .position(|row| matches!(&row.id, RowId::Synthetic(tag) if *tag == "pins"))
-        .expect("pins group emitted");
-    assert!(matches!(&tree.rows[pin_group_idx].kind, RowKind::Group(_)));
-
-    let pin_row = tree
-        .rows
-        .iter()
-        .find(|row| matches!(&row.id, RowId::Pin { pin_id } if pin_id == "ingest"))
-        .expect("pin row emitted");
-    match &pin_row.kind {
-        RowKind::AgentSession(row) => {
-            assert_eq!(row.session.session_key, "ingest");
-            assert_eq!(row.harness_label, "codex");
-            assert_eq!(row.cwd_display.as_deref(), Some("~/work/repo"));
-            assert_eq!(row.preview.as_deref(), Some("~/work/repo"));
-            assert_eq!(row.title, None);
-            assert_eq!(row.alias.as_deref(), Some("ingest"));
-            assert_eq!(row.pin_id.as_deref(), Some("ingest"));
-            assert!(matches!(&row.primary_node, NodeId::Pin(pin) if pin.id == "ingest"));
-        }
-        other => panic!("expected placeholder AgentSession row, got {other:?}"),
-    }
-    assert_eq!(pin_row.depth, 1);
-}
-
-#[test]
-fn unbound_pin_placeholder_also_emits_in_matching_repo_bucket() {
-    // When a pin's cwd lives under a known checkout, the
-    // placeholder row should appear under the project bucket in
-    // addition to the synthetic Pins group at top — mirroring how
-    // bound pinned sessions show up in both contexts. The pin's
-    // cwd here matches the repo's checkout root.
-    let mut snapshot = GraphSnapshot {
-        nodes: vec![
-            repo("/home/op/work/repo/.git"),
-            worktree("/home/op/work/repo/.git", "/home/op/work/repo"),
-        ],
-        ..GraphSnapshot::empty()
-    };
-    snapshot.pins.push(pin_candidate(
-        "ingest",
-        "codex",
-        "/home/op/work/repo",
-        "ingest",
-        Provenance::LocalPin,
-        Some(PinBinding::Unbound),
-    ));
-
-    let tree = build_tree(&snapshot);
-
-    let pin_rows: Vec<_> = tree
-        .rows
-        .iter()
-        .enumerate()
-        .filter(|(_, row)| matches!(&row.id, RowId::Pin { pin_id } if pin_id == "ingest"))
-        .collect();
-    assert_eq!(
-        pin_rows.len(),
-        2,
-        "placeholder should appear in both Pins group and repo bucket: {:#?}",
-        tree.rows,
-    );
-
-    let pin_group_idx = tree
-        .rows
-        .iter()
-        .position(|row| matches!(&row.id, RowId::Synthetic(tag) if *tag == "pins"))
-        .expect("Pins group emitted");
-    let repo_group_idx = tree
-        .rows
-        .iter()
-        .position(|row| matches!(&row.id, RowId::Group(NodeId::Repo(_))))
-        .expect("repo group emitted");
-    assert!(
-        pin_group_idx < repo_group_idx,
-        "Pins group should precede the repo bucket: pins={pin_group_idx} repo={repo_group_idx}",
-    );
-
-    let (first_idx, _) = pin_rows[0];
-    let (second_idx, _) = pin_rows[1];
-    assert!(
-        first_idx > pin_group_idx && first_idx < repo_group_idx,
-        "first placeholder belongs to the Pins group: idx={first_idx}",
-    );
-    assert!(
-        second_idx > repo_group_idx,
-        "second placeholder belongs to the repo bucket: idx={second_idx}",
-    );
-}
-
-#[test]
-fn unbound_pin_placeholder_seeds_empty_repo_bucket() {
-    // A pin whose cwd maps to a known checkout, but that
-    // checkout has no live sessions, should still cause the
-    // project header to render so the operator sees the pin
-    // alongside its declared cwd. Without the pre-seed, the
-    // bucket map would be empty for that key and no header
-    // would emit.
-    let mut snapshot = GraphSnapshot {
-        nodes: vec![
-            repo("/home/op/work/repo/.git"),
-            worktree("/home/op/work/repo/.git", "/home/op/work/repo"),
-        ],
-        ..GraphSnapshot::empty()
-    };
-    snapshot.pins.push(pin_candidate(
-        "ingest",
-        "codex",
-        "/home/op/work/repo",
-        "ingest",
-        Provenance::LocalPin,
-        Some(PinBinding::Unbound),
-    ));
-
-    let tree = build_tree(&snapshot);
-    let repo_group = tree
-        .rows
-        .iter()
-        .find(|row| matches!(&row.id, RowId::Group(NodeId::Repo(_))));
-    assert!(
-        repo_group.is_some(),
-        "repo bucket header should emit even with no sessions: {:#?}",
-        tree.rows,
-    );
-}
-
-#[test]
-fn unbound_pin_with_unknown_cwd_appears_only_in_pins_group() {
-    // No checkout covers the pin's cwd, so the bucket lookup
-    // returns None and the placeholder only surfaces in the
-    // synthetic Pins group — same as before this slice.
-    let mut snapshot = GraphSnapshot::empty();
-    snapshot.pins.push(pin_candidate(
-        "ingest",
-        "codex",
-        "/elsewhere/no-checkout",
-        "ingest",
-        Provenance::LocalPin,
-        Some(PinBinding::Unbound),
-    ));
-
-    let tree = build_tree(&snapshot);
-    let pin_rows = tree
-        .rows
-        .iter()
-        .filter(|row| matches!(&row.id, RowId::Pin { pin_id } if pin_id == "ingest"))
-        .count();
-    assert_eq!(pin_rows, 1, "{:#?}", tree.rows);
-}
-
-#[test]
-fn stale_mux_pin_emits_placeholder_session_row() {
-    let mut snapshot = GraphSnapshot::empty();
-    snapshot.pins.push(pin_candidate(
-        "ingest",
-        "codex",
-        "/home/op/work/repo",
-        "ingest",
-        Provenance::LocalPin,
-        Some(PinBinding::StaleMux {
-            mux: MuxSessionId::new("tmux:ingest"),
-        }),
-    ));
-
-    let tree = build_tree(&snapshot);
-    let row = tree
-        .rows
-        .iter()
-        .find_map(|r| match &r.kind {
-            RowKind::AgentSession(session) if session.pin_id.as_deref() == Some("ingest") => {
-                Some(session.clone())
-            }
-            _ => None,
-        })
-        .expect("placeholder session row");
-    assert_eq!(row.preview.as_deref(), Some("~/work/repo"));
-    assert_eq!(row.title, None);
-    assert!(matches!(&row.primary_node, NodeId::Pin(pin) if pin.id == "ingest"));
-}
-
-#[test]
-fn bound_pin_appears_in_pins_group_and_marks_agent_session_row() {
-    // The resolver synthesizes a LinkedToMux candidate when a pin
-    // binds; we mimic that here by:
-    // - adding the session and mux nodes
-    // - adding a LinkedToMux candidate (the discovered one)
-    // - declaring the pin with `binding = Bound`
-    // Bound pins appear as agent-session rows in BOTH the
-    // synthetic "Pins" group (top of view) AND the regular
-    // project group so the operator sees the same session shape
-    // in both contexts.
-    let session_id = AgentSessionId::new("codex", "/state", "alpha");
-    let mux_id = MuxSessionId::new("tmux:ingest");
-    let mut snapshot = GraphSnapshot {
-        nodes: vec![
-            repo("/home/op/work/repo/.git"),
-            worktree("/home/op/work/repo/.git", "/home/op/work/repo"),
-            agent_session(
-                "codex",
-                "/state",
-                "alpha",
-                Some("/home/op/work/repo"),
-                None,
-                None,
-            ),
-            mux_node("tmux", "tmux:ingest"),
-        ],
-        ..GraphSnapshot::empty()
-    };
-    snapshot.candidate_links.push(linked_to_mux(
-        &NodeId::AgentSession(session_id.clone()),
-        &NodeId::MuxSession(mux_id.clone()),
-        Provenance::StrongDiscovered,
-        "discovered",
-    ));
-    snapshot.pins.push(pin_candidate(
-        "ingest",
-        "codex",
-        "/home/op/work/repo",
-        "ingest",
-        Provenance::LocalPin,
-        Some(PinBinding::Bound {
-            mux: mux_id,
-            session: session_id.clone(),
-        }),
-    ));
-
-    let tree = build_tree(&snapshot);
-
-    // Bound pin appears in the synthetic Pins group as the
-    // realized session row, not as a pin config row.
-    let pin_group_idx = tree
-        .rows
-        .iter()
-        .position(|r| matches!(&r.id, RowId::Synthetic(tag) if *tag == "pins"))
-        .expect("Pins group present");
-    let pinned_session_row = tree
-        .rows
-        .iter()
-        .skip(pin_group_idx + 1)
-        .take_while(|r| r.depth > 0)
-        .find_map(|r| match &r.kind {
-            RowKind::AgentSession(s) if s.session == session_id => Some(s.clone()),
-            _ => None,
-        })
-        .expect("session row in synthetic Pins group");
-    assert_eq!(pinned_session_row.pin_id.as_deref(), Some("ingest"));
-
-    // The Pins group must come BEFORE the regular session
-    // groups so it's the first thing the operator sees.
-    let first_non_pin_group_idx = tree.rows.iter().position(|r| {
-        matches!(&r.id, RowId::Synthetic(tag) if *tag == "pins" || *tag == "ungrouped")
-            .then_some(false)
-            .unwrap_or(
-                matches!(&r.kind, RowKind::Group(_))
-                    && !matches!(&r.id, RowId::Synthetic(tag) if *tag == "pins"),
-            )
-    });
-    if let Some(idx) = first_non_pin_group_idx {
-        assert!(
-            pin_group_idx < idx,
-            "Pins group should precede other groups (Pins at {pin_group_idx}, first other at {idx})",
-        );
-    }
-
-    // The natural agent-session row still carries the pin
-    // marker so the operator sees the pin in-place too.
-    let session_row = tree
-        .rows
-        .iter()
-        .skip(pin_group_idx + 2)
-        .find_map(|r| match &r.kind {
-            RowKind::AgentSession(s) if s.session == session_id => Some(s.clone()),
-            _ => None,
-        })
-        .expect("agent session row emitted");
-    assert_eq!(session_row.pin_id.as_deref(), Some("ingest"));
-}
-
-#[test]
-fn mixed_pin_states_all_emit_in_synthetic_group() {
-    // All declared pins surface in the Pins group regardless
-    // of binding state. Bound pins use their existing session
-    // row shape; unbound pins use placeholder session rows
-    // because no live session exists yet.
-    let session_id = AgentSessionId::new("codex", "/state", "alpha");
-    let mux_id = MuxSessionId::new("tmux:bound");
-    let mut snapshot = GraphSnapshot {
-        nodes: vec![
-            repo("/home/op/work/repo/.git"),
-            worktree("/home/op/work/repo/.git", "/home/op/work/repo"),
-            agent_session(
-                "codex",
-                "/state",
-                "alpha",
-                Some("/home/op/work/repo"),
-                None,
-                None,
-            ),
-            mux_node("tmux", "tmux:bound"),
-        ],
-        ..GraphSnapshot::empty()
-    };
-    snapshot.candidate_links.push(linked_to_mux(
-        &NodeId::AgentSession(session_id.clone()),
-        &NodeId::MuxSession(mux_id.clone()),
-        Provenance::StrongDiscovered,
-        "discovered",
-    ));
     snapshot.pins.extend([
-        pin_candidate(
-            "bound-one",
-            "codex",
-            "/home/op/work/repo",
-            "bound",
-            Provenance::LocalPin,
-            Some(PinBinding::Bound {
-                mux: mux_id,
-                session: session_id,
-            }),
+        slot(
+            "planned",
+            PinKind::Mux,
+            None,
+            0,
+            &[("harness", "codex"), ("cwd", "/home/op/work/repo")],
         ),
-        pin_candidate(
-            "free-one",
-            "codex",
-            "/home/op/other",
-            "free-one",
-            Provenance::LocalPin,
-            Some(PinBinding::Unbound),
-        ),
-        pin_candidate(
-            "free-two",
-            "claude-code",
-            "/home/op/another",
-            "free-two",
-            Provenance::GlobalPin,
-            Some(PinBinding::Unbound),
+        slot(
+            "dangling",
+            PinKind::Session,
+            Some(session_id("ghost")),
+            1,
+            &[("harness", "codex")],
         ),
     ]);
-
-    let tree = build_tree(&snapshot);
-
-    let pins_group_idx = tree
-        .rows
+    let resolved = resolve_snapshot(snapshot);
+    let statuses: Vec<_> = resolved
+        .nodes
         .iter()
-        .position(|r| matches!(&r.id, RowId::Synthetic(tag) if *tag == "pins"))
-        .expect("Pins group present");
-    let pins_group_rows: Vec<_> = tree
-        .rows
-        .iter()
-        .skip(pins_group_idx + 1)
-        .take_while(|r| r.depth > 0)
-        .filter_map(|r| match &r.kind {
-            RowKind::AgentSession(s) => s.pin_id.as_deref(),
+        .filter_map(|node| match node {
+            GraphNode::Pin(pin) => Some(pin.status),
             _ => None,
         })
         .collect();
-    assert_eq!(pins_group_rows, vec!["bound-one", "free-one", "free-two"]);
+    assert!(statuses.contains(&SlotStatus::Planned) && statuses.contains(&SlotStatus::Missing));
+    assert_eq!(statuses.len(), 2);
 
-    let bound_marker = tree.rows.iter().any(|row| {
-        matches!(
-            &row.kind,
-            RowKind::AgentSession(s) if s.pin_id.as_deref() == Some("bound-one")
-        )
-    });
-    assert!(bound_marker, "bound pin marker missing from session row");
+    let tree = build_tree(&resolved);
+
+    assert!(tree.rows.is_empty(), "{:#?}", tree.rows);
 }
 
 #[test]
-fn resolver_drives_pin_rows_end_to_end() {
-    // Smoke test that wires discovery + resolver together: an
-    // unbound pin (no matching mux in the snapshot) should
-    // surface as a placeholder `RowKind::AgentSession` after
-    // `resolve_snapshot` runs.
-    let mut snapshot = GraphSnapshot::empty();
-    snapshot.pins.push(pin_candidate(
+fn a_pinned_session_keeps_its_one_row_and_its_pin_marker() {
+    use crate::model::PinKind;
+    let alpha = AgentSessionId::new("codex", "/state", "alpha");
+    let mut snapshot = GraphSnapshot {
+        nodes: vec![
+            repo("/home/op/work/repo/.git"),
+            worktree("/home/op/work/repo/.git", "/home/op/work/repo"),
+            agent_session(
+                "codex",
+                "/state",
+                "alpha",
+                Some("/home/op/work/repo"),
+                None,
+                None,
+            ),
+        ],
+        ..GraphSnapshot::empty()
+    };
+    snapshot.pins.push(slot(
         "ingest",
-        "codex",
-        "/home/op/work/repo",
-        "missing-mux",
-        Provenance::LocalPin,
-        None,
+        PinKind::Session,
+        Some(session_id("alpha")),
+        0,
+        &[],
     ));
+    let snapshot = resolve_snapshot(snapshot);
 
-    let resolved = resolve_snapshot(snapshot);
-    // Sanity: the resolver populated the binding to Unbound.
-    assert!(matches!(
-        resolved.pins[0].binding,
-        Some(PinBinding::Unbound)
-    ));
+    let tree = build_tree(&snapshot);
 
-    let tree = build(SessionsBuildInputs {
-        snapshot: &resolved,
-        grouping: SessionsGrouping::Graph,
-        home: Some(home().as_path()),
-        now: None,
-        cwd: None,
-        filter: RowFilter::default(),
-    });
-    let has_pin_row = tree.rows.iter().any(|r| {
-        matches!(
-            &r.kind,
-            RowKind::AgentSession(session)
-                if session.pin_id.as_deref() == Some("ingest")
-                    && matches!(&session.primary_node, NodeId::Pin(_))
-        )
-    });
+    let rows: Vec<_> = tree
+        .rows
+        .iter()
+        .filter_map(|r| match &r.kind {
+            RowKind::AgentSession(s) if s.session == alpha => Some(s.pin_id.clone()),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(rows, vec![Some("ingest".to_string())], "{:#?}", tree.rows);
     assert!(
-        has_pin_row,
-        "expected a pin row after resolver run: {:#?}",
-        tree.rows
+        !tree
+            .rows
+            .iter()
+            .any(|r| matches!(r.id, RowId::Synthetic("pins") | RowId::Pin { .. })),
+        "no Pins group or slot rows in the Sessions view"
     );
 }
 
@@ -3111,4 +2756,169 @@ fn repo_groups_do_not_depend_on_which_checkout_was_probed_first() {
         repo_labels,
         vec!["~/src/drw/developer", "~/src/oss/conspectus"]
     );
+}
+
+fn build_graph(snapshot: &GraphSnapshot) -> RowTree {
+    build(SessionsBuildInputs {
+        snapshot,
+        grouping: SessionsGrouping::Graph,
+        home: Some(home().as_path()),
+        now: None,
+        cwd: None,
+        filter: RowFilter::default(),
+    })
+}
+
+fn history_mux(id: &str, name: &str, hosted: &[(&str, i64)]) -> crate::model::MuxRecord {
+    crate::model::MuxRecord {
+        meta: crate::model::RecordMeta {
+            id: id.into(),
+            key: format!("mux_session:tmux:{name}"),
+            first_seen: 1,
+            last_seen: 100,
+            origin: Default::default(),
+            display: Default::default(),
+            rebuilt_from: None,
+        },
+        recipe: crate::model::MuxRecipe {
+            backend: "tmux".into(),
+            name: name.into(),
+            hosted: hosted
+                .iter()
+                .map(|(session, last_seen)| crate::model::HostedSession {
+                    harness: "codex".into(),
+                    session_id: (*session).into(),
+                    first_seen: 1,
+                    last_seen: *last_seen,
+                })
+                .collect(),
+            ..Default::default()
+        },
+        extra: Default::default(),
+    }
+}
+
+fn untitled_world() -> GraphSnapshot {
+    let mut snapshot = GraphSnapshot::empty();
+    snapshot.nodes.push(repo("/home/op/src/proj"));
+    snapshot
+        .nodes
+        .push(worktree("/home/op/src/proj", "/home/op/src/proj"));
+    snapshot.nodes.push(agent_session(
+        "codex",
+        "/state",
+        "abc",
+        Some("/home/op/src/proj"),
+        None,
+        None,
+    ));
+    snapshot
+}
+
+#[test]
+fn an_untitled_session_is_named_after_its_live_mux() {
+    let mut snapshot = untitled_world();
+    let session = NodeId::AgentSession(AgentSessionId::new("codex", "/state", "abc"));
+    let mux = NodeId::MuxSession(MuxSessionId::new("ledger"));
+    snapshot.nodes.push(mux_node("tmux", "ledger"));
+    snapshot
+        .candidate_links
+        .push(linked_to_mux(&session, &mux, Provenance::Discovered, "a"));
+    let snapshot = resolve_snapshot(snapshot);
+
+    let tree = build_graph(&snapshot);
+    let (_, row) = first_session_row(&tree);
+
+    assert_eq!(row.tree_label(), Some("ledger"));
+    assert_eq!(row.display_label(), Some("ledger"));
+    assert_eq!(row.gone_mux_name(), None, "a live mux needs no chip");
+}
+
+#[test]
+fn alias_and_title_beat_the_mux_name() {
+    let mut snapshot = untitled_world();
+    let session = NodeId::AgentSession(AgentSessionId::new("codex", "/state", "abc"));
+    let mux = NodeId::MuxSession(MuxSessionId::new("ledger"));
+    snapshot.nodes.push(mux_node("tmux", "ledger"));
+    snapshot
+        .candidate_links
+        .push(linked_to_mux(&session, &mux, Provenance::Discovered, "a"));
+    if let GraphNode::AgentSession(node) = &mut snapshot.nodes[2] {
+        node.title = Some("Fix the parser".into());
+    }
+    let mut titled = resolve_snapshot(snapshot);
+
+    let tree = build_graph(&titled);
+    let (_, row) = first_session_row(&tree);
+    assert_eq!(row.display_label(), Some("Fix the parser"));
+    assert_eq!(
+        row.tree_label(),
+        None,
+        "a lone titled session keeps its short id"
+    );
+
+    titled.aliases.insert(session, "Nightly".to_string());
+    let tree = build_graph(&titled);
+    let (_, row) = first_session_row(&tree);
+    assert_eq!(row.display_label(), Some("Nightly"));
+    assert_eq!(row.tree_label(), Some("Nightly"));
+}
+
+#[test]
+fn a_blank_title_counts_as_missing() {
+    let mut snapshot = untitled_world();
+    let session = NodeId::AgentSession(AgentSessionId::new("codex", "/state", "abc"));
+    let mux = NodeId::MuxSession(MuxSessionId::new("ledger"));
+    snapshot.nodes.push(mux_node("tmux", "ledger"));
+    snapshot
+        .candidate_links
+        .push(linked_to_mux(&session, &mux, Provenance::Discovered, "a"));
+    if let GraphNode::AgentSession(node) = &mut snapshot.nodes[2] {
+        node.title = Some("   ".into());
+    }
+    let snapshot = resolve_snapshot(snapshot);
+
+    let tree = build_graph(&snapshot);
+    let (_, row) = first_session_row(&tree);
+
+    assert_eq!(row.display_label(), Some("ledger"));
+    assert_eq!(row.tree_label(), Some("ledger"));
+}
+
+#[test]
+fn a_session_last_hosted_by_a_gone_mux_names_it_in_a_chip() {
+    let mut snapshot = untitled_world();
+    snapshot.history.muxes = vec![
+        history_mux("h_old", "old-ledger", &[("abc", 50)]),
+        history_mux("h_older", "older-ledger", &[("abc", 10)]),
+    ];
+    for id in ["h_old", "h_older"] {
+        snapshot.history.presence.insert(
+            id.into(),
+            crate::model::NodePresence::Gone { last_seen: 100 },
+        );
+    }
+    let snapshot = resolve_snapshot(snapshot);
+
+    let tree = build_graph(&snapshot);
+    let (_, row) = first_session_row(&tree);
+
+    assert_eq!(
+        row.gone_mux_name(),
+        Some("old-ledger"),
+        "the most recent host"
+    );
+    assert_eq!(row.display_label(), Some("old-ledger"));
+}
+
+#[test]
+fn a_session_with_no_known_mux_has_no_name_to_fall_back_on() {
+    let snapshot = resolve_snapshot(untitled_world());
+
+    let tree = build_graph(&snapshot);
+    let (_, row) = first_session_row(&tree);
+
+    assert_eq!(row.display_label(), None);
+    assert_eq!(row.tree_label(), None);
+    assert_eq!(row.gone_mux_name(), None);
 }

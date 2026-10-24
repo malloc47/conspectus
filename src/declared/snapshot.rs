@@ -120,10 +120,15 @@ fn endpoint_project_root(endpoint: &DeclaredEndpoint, snapshot: &GraphSnapshot) 
             node_cwd(&id, snapshot).and_then(|cwd| nearest_known_root(Path::new(&cwd), snapshot))
         }
         DeclaredEndpoint::Pin { id } => snapshot
-            .pins
+            .nodes
             .iter()
-            .find(|pin| pin.id == *id)
-            .and_then(|pin| nearest_known_root(Path::new(&pin.cwd), snapshot)),
+            .find_map(|node| match node {
+                GraphNode::Pin(pin) if pin.id.id == *id => {
+                    pin.text("cwd").or_else(|| pin.text("root"))
+                }
+                _ => None,
+            })
+            .and_then(|cwd| nearest_known_root(Path::new(cwd), snapshot)),
         DeclaredEndpoint::RuntimeProcess { observation_key } => {
             let id = NodeId::RuntimeProcess(crate::model::RuntimeProcessId::new(
                 observation_key.clone(),

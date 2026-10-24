@@ -19,47 +19,31 @@ impl App {
         let raw_target = match selection {
             RowId::Group(node) => Some(node.clone()),
             RowId::AgentSession(node) => Some(node.clone()),
-            RowId::AgentSessionMuxCandidate { mux, .. } => Some(mux.clone()),
             RowId::MuxSession(node) => Some(node.clone()),
             RowId::Pr(node) => Some(node.clone()),
             RowId::Fork(node) => Some(node.clone()),
             RowId::Pin { pin_id } => Some(NodeId::Pin(PinId::new(pin_id.clone()))),
-            RowId::Remote(_) | RowId::Synthetic(_) => None,
+            RowId::Nested { node, .. } => Some(node.clone()),
+            RowId::History { record_id } => {
+                snapshot.history.meta(record_id).and_then(|(kind, _)| {
+                    crate::tui::rows::history::node_of(snapshot, kind, record_id)
+                })
+            }
+            RowId::Remote(_) | RowId::Bucket(_) | RowId::Synthetic(_) => None,
         };
         let Some(raw_target) = raw_target else {
             self.explorer = None;
             return;
         };
-        // Placeholder pin rows route through here whether they live in
-        // the sessions view (`RowId::Pin`) or the mux view (`RowId::
-        // MuxSession(NodeId::Pin(...))`). Either way the raw target is a
-        // Pin node; redirect to a view-aligned upgrade (last_session in
-        // the sessions view, bound / stale mux in the mux view) when one
-        // is known, and fall back to the Pin itself otherwise.
-        let target = match &raw_target {
-            NodeId::Pin(pin) => placeholder_detail_target(snapshot, &pin.id, self.active_view),
-            _ => raw_target,
-        };
+        let target = raw_target;
         let home = home_for_config(&self.config);
-        // When the placeholder fell back to the Pin node (no view-aligned
-        // session or mux known), strip the candidate-link summaries so the
-        // right pane reflects the operator-facing reality: the mux isn't
-        // running and the session has not been created yet. Resolved /
-        // diagnostic surfaces stay so the operator can still see why the
-        // pin is in this state.
-        let strip_pin_relationships = matches!(&target, NodeId::Pin(_));
-        let mut detail = build_node_detail(DetailInputs {
+        let detail = build_node_detail(DetailInputs {
             snapshot,
             target: &target,
             home: home.as_deref(),
         });
-        if strip_pin_relationships && let Some(detail) = detail.as_mut() {
-            detail.outgoing_links.clear();
-            detail.incoming_links.clear();
-            detail.resolved.clear();
-        }
         self.detail = detail;
-        self.recompute_explorer_for(target, home.as_deref(), strip_pin_relationships);
+        self.recompute_explorer_for(target, home.as_deref(), false);
     }
 
     pub(super) fn recompute_explorer_for(
@@ -228,7 +212,7 @@ impl App {
             }
             ExplorerRow::OtherUnresolved { .. } => {
                 self.status_message =
-                    Some("explorer: unresolved evidence — `o` opens detail (CSP-318)".to_string());
+                    Some("explorer: unresolved evidence — `o` opens detail".to_string());
             }
             ExplorerRow::NodeField { .. } => {
                 self.status_message = None;

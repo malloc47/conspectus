@@ -1,9 +1,10 @@
 ---
 id: CSP-673
 title: Rebuild sessions by resuming them into a mux
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-10-22 01:11'
+updated_date: '2026-10-22 15:06'
 labels:
   - history-pins
 milestone: m-23
@@ -29,13 +30,19 @@ A session slot is a bookmark on a conversation; rebuilding it means resuming it.
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 Rebuilding a session resumes its lineage head in its last mux, rebuilt if needed, or in a new mux when that one is busy
-- [ ] #2 Any hosted session in a mux's history can be rebuilt
-- [ ] #3 CSP-170 is closed as covered
+- [x] #1 Rebuilding a session resumes its lineage head in its last mux, rebuilt if needed, or in a new mux when that one is busy
+- [x] #2 Any hosted session in a mux's history can be rebuilt
+- [x] #3 CSP-170 is closed as covered
 <!-- AC:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
-- [ ] #1 `just check` passes, or `git diff --check` for docs-only changes
-- [ ] #2 Docs and ADRs are updated when behavior, architecture, or workflow change
+- [x] #1 `just check` passes, or `git diff --check` for docs-only changes
+- [x] #2 Docs and ADRs are updated when behavior, architecture, or workflow change
 <!-- DOD:END -->
+
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+Session rebuild resumes the lineage head into its last mux (rebuilt first if gone) or a new mux when that one is busy, and any hosted session in a mux's history can be rebuilt (`rebuild/session.rs`, `session_tests.rs`). This covers CSP-170 (resume an un-muxed session into a mux), which is closed with it.
+<!-- SECTION:FINAL_SUMMARY:END -->

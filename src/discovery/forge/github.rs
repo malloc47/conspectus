@@ -162,6 +162,7 @@ pub fn fragment_for_repo(
         candidate_links,
         diagnostics: Vec::new(),
         node_provenance: BTreeMap::new(),
+        mux_probes: Default::default(),
     }
 }
 
@@ -801,6 +802,7 @@ impl<R: GhRunner + 'static> super::ForgeAdapter for GitHubForgeProvider<R> {
             candidate_links: merged.candidate_links,
             diagnostics: merged.diagnostics.into_iter().chain(diagnostics).collect(),
             node_provenance: merged.node_provenance,
+            mux_probes: Default::default(),
         })
     }
 

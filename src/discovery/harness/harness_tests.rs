@@ -42,6 +42,7 @@ impl HarnessAdapter for StateAwareAdapter {
             candidate_links: Vec::new(),
             diagnostics: Vec::new(),
             node_provenance: BTreeMap::new(),
+            mux_probes: Default::default(),
         })
     }
 }
@@ -126,6 +127,7 @@ fn harness_discovery_merges_fragments_deterministically() {
                 candidate_links: Vec::new(),
                 diagnostics: Vec::new(),
                 node_provenance: BTreeMap::new(),
+                mux_probes: Default::default(),
             },
         })
         .with_adapter(StaticAdapter {
@@ -135,6 +137,7 @@ fn harness_discovery_merges_fragments_deterministically() {
                 candidate_links: Vec::new(),
                 diagnostics: Vec::new(),
                 node_provenance: BTreeMap::new(),
+                mux_probes: Default::default(),
             },
         })
         .discover(&DiscoveryContext::default())

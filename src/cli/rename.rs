@@ -173,9 +173,8 @@ impl RenameMuxArgs {
             ),
         };
 
-        // H-RENAME-MUX: graph-aware cascade — rewrite any pin whose
-        // `mux.name` matches the current mux native id + socket so
-        // pin bindings survive the tmux rename.
+        // Graph-aware cascade: a slot that overrides the mux name
+        // follows the rename.
         let plan = match plan_mux_rename(&snapshot, &mux_id, new_name) {
             Ok(plan) => plan,
             Err(err) => bail!("mux rename planning failed: {err}"),
@@ -184,30 +183,19 @@ impl RenameMuxArgs {
     }
 }
 
-/// Execute a [`MuxRenamePlan`]: rewrite each affected pin store,
-/// then chain the tmux `rename-session` so the live tmux name
-/// tracks the pin's declared intent.
-fn execute_mux_rename_plan(plan: &MuxRenamePlan, tmux: &dyn MuxBackend) -> Result<()> {
-    for update in &plan.pin_mux_name_updates {
-        let store_paths = [PathBuf::from(&update.store_path)];
-        let loaded = crate::pins::load_pin_entry_by_id(&store_paths, &update.pin_id)
-            .map_err(|err| anyhow!("read pin store `{}`: {err}", update.store_path))?
-            .ok_or_else(|| {
-                anyhow!(
-                    "pin `{}` not found in store `{}`",
-                    update.pin_id,
-                    update.store_path
-                )
-            })?;
-        let (_path, mut entry) = loaded;
-        if entry.mux.name != update.new_mux_name {
-            entry.mux.name = update.new_mux_name.clone();
-            crate::pins::upsert_pin_entry(&update.store_path, entry)
-                .map_err(|err| anyhow!("write pin store `{}`: {err}", update.store_path))?;
-            println!(
-                "cascaded to pin `{}` (mux.name in `{}`)",
-                update.pin_id, update.store_path
-            );
+/// Execute a [`MuxRenamePlan`]: update each affected pin slot's name
+/// override, then chain the tmux `rename-session`.
+pub(super) fn execute_mux_rename_plan(plan: &MuxRenamePlan, tmux: &dyn MuxBackend) -> Result<()> {
+    if !plan.pin_slot_updates.is_empty()
+        && let Some(store) = crate::pin_slots::SlotStore::from_env()
+    {
+        for (slot, result) in crate::rename::apply_pin_slot_updates(&store, &plan.pin_slot_updates)
+        {
+            match result {
+                Ok(true) => println!("cascaded to pin `{slot}` (its name override)"),
+                Ok(false) => {}
+                Err(err) => eprintln!("conspectus: could not update pin `{slot}`: {err}"),
+            }
         }
     }
     run_mux_rename(&plan.mux_rename, tmux)

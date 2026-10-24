@@ -1,16 +1,15 @@
 //! Shared launch-spec form primitive (ADR 0097).
 //!
-//! Container for the fields that pin-create and mux-launch share:
+//! Container for the fields the mux-launch form uses:
 //! harness, cwd (with autocomplete), mux name + socket, launch argv
 //! override, worktree toggle + branch, plus known-harness and known-
 //! live-mux collections used for autocomplete + collision detection.
 //!
-//! Wrappers ([`crate::tui::widgets::pins::PinCreateState`],
-//! [`crate::tui::widgets::mux_launch::MuxLaunchFormState`]) hold this
-//! by composition, own their own cursor sequence + rendering, and
-//! decide which of the primitive's fields are visible in their layout.
-//! Neither wrapper reads or writes the shared fields except through
-//! this struct's accessors.
+//! Wrappers ([`crate::tui::widgets::mux_launch::MuxLaunchFormState`])
+//! hold this by composition, own their own cursor sequence +
+//! rendering, and decide which of the primitive's fields are visible
+//! in their layout. A wrapper reads or writes the shared fields only
+//! through this struct's accessors.
 //!
 //! No cursor lives here. No Msg dispatch lives here. The primitive is
 //! pure state + a handful of validation helpers that both wrappers
@@ -18,12 +17,17 @@
 
 use ratatui::crossterm::event::KeyEvent;
 
+use crate::discovery::harness::{
+    HarnessLaunchOption, argv_contains_fragment, argv_with_fragment, argv_without_fragment,
+    launch_options_for, strip_known_launch_option_fragments,
+};
+use crate::tui::widgets::form::display_argv;
 use crate::tui::widgets::input::{InputOutcome, TextInputState};
 use crate::tui::widgets::path_omnibox::{PathCandidate, PathOmniboxOutcome, PathOmniboxState};
 
-/// Owned state for the launch-spec form's shared fields. Both
-/// `PinCreateState` and `MuxLaunchFormState` embed this exactly once
-/// and route every read/write of a shared field through the accessors.
+/// Owned state for the launch-spec form's shared fields.
+/// `MuxLaunchFormState` embeds this exactly once and routes every
+/// read/write of a shared field through the accessors.
 #[derive(Debug, Clone)]
 pub struct LaunchSpecFormState {
     harness: TextInputState,
@@ -144,16 +148,14 @@ impl LaunchSpecFormState {
         self.harness = TextInputState::new(title.into(), value);
     }
 
-    /// Replace the mux-name field wholesale — the pin-create adopt
-    /// flow re-derives this from the current mode / id, so the
-    /// wholesale-replace shape matches the existing behavior.
+    /// Replace the mux-name field wholesale.
     pub fn set_mux_name(&mut self, title: impl Into<String>, value: impl Into<String>) {
         self.mux_name = TextInputState::new(title.into(), value);
     }
 
-    /// Replace the launch-argv field wholesale (harness cycling in
-    /// pin-create rebuilds this when the previous value matched the
-    /// old harness's default).
+    /// Replace the launch-argv field wholesale (harness cycling
+    /// rebuilds this when the previous value matched the old
+    /// harness's default).
     pub fn set_launch_argv(&mut self, title: impl Into<String>, value: impl Into<String>) {
         self.launch_argv = TextInputState::new(title.into(), value);
     }
@@ -212,9 +214,105 @@ impl LaunchSpecFormState {
         Some(next)
     }
 
+    // -- harness launch options -------------------------------------
+
+    /// The launch options (such as skipping permissions) the chosen
+    /// harness offers.
+    pub fn launch_options(&self) -> &'static [HarnessLaunchOption] {
+        launch_options_for(self.harness.value().trim())
+    }
+
+    /// The argv the form would launch with: the typed override, or
+    /// `default` when the field is empty.
+    pub fn effective_argv(&self, default: &[String]) -> Result<Vec<String>, String> {
+        let typed = parse_launch_argv(self.launch_argv.value().trim(), "launch")?;
+        Ok(if typed.is_empty() {
+            default.to_vec()
+        } else {
+            typed
+        })
+    }
+
+    /// Whether `option`'s flags are in the effective argv.
+    pub fn launch_option_selected(&self, option: HarnessLaunchOption, default: &[String]) -> bool {
+        self.effective_argv(default)
+            .is_ok_and(|argv| argv_contains_fragment(&argv, option.argv))
+    }
+
+    /// Replace the launch-argv field with `argv`, leaving it empty when
+    /// that is just the default so the default keeps following the
+    /// harness.
+    pub fn set_effective_argv(&mut self, argv: &[String], default: &[String]) {
+        let title = self.launch_argv.title().to_string();
+        let value = if argv.is_empty() || argv == default {
+            String::new()
+        } else {
+            display_argv(argv)
+        };
+        self.launch_argv = TextInputState::new(title, value);
+    }
+
+    /// Flip a launch option. `delta` steps through the options when
+    /// there are several; with one option it just toggles it.
+    pub fn toggle_launch_option(&mut self, default: &[String], delta: i32) {
+        let options = self.launch_options();
+        if options.is_empty() {
+            return;
+        }
+        let Ok(argv) = self.effective_argv(default) else {
+            return;
+        };
+        let selected: Vec<usize> = options
+            .iter()
+            .enumerate()
+            .filter(|(_, option)| argv_contains_fragment(&argv, option.argv))
+            .map(|(idx, _)| idx)
+            .collect();
+        let idx = match (selected.as_slice(), delta) {
+            ([only], -1 | 1) if options.len() > 1 => {
+                crate::tui::cursor::wrap_step(*only, options.len(), delta)
+            }
+            ([first, ..], _) => *first,
+            ([], _) => 0,
+        };
+        let option = options[idx];
+        let next = if argv_contains_fragment(&argv, option.argv) {
+            argv_without_fragment(argv, option.argv)
+        } else {
+            argv_with_fragment(argv, option.argv)
+        };
+        self.set_effective_argv(&next, default);
+    }
+
+    /// Cycle the harness like [`Self::cycle_harness`], carrying a typed
+    /// argv across: the old harness's launch option flags come off, and
+    /// an argv that was only the old default is cleared.
+    pub fn cycle_harness_keeping_argv(
+        &mut self,
+        delta: i32,
+        harness_label: &str,
+        default_for: &dyn Fn(&str) -> Vec<String>,
+    ) {
+        if self.known_harness_keys.is_empty() {
+            return;
+        }
+        let old_default = default_for(self.harness.value().trim());
+        let typed = parse_launch_argv(self.launch_argv.value().trim(), "launch").ok();
+        self.cycle_harness(delta, harness_label);
+        let Some(typed) = typed.filter(|argv| !argv.is_empty()) else {
+            return;
+        };
+        let stripped = strip_known_launch_option_fragments(typed);
+        let new_default = default_for(self.harness.value().trim());
+        if stripped == old_default {
+            self.set_effective_argv(&[], &new_default);
+        } else {
+            self.set_effective_argv(&stripped, &new_default);
+        }
+    }
+
     /// `true` when the currently-typed mux name matches any known
-    /// live mux (used by pin-create's adopt trigger and mux-launch's
-    /// hard-error collision check).
+    /// live mux (used by mux-launch's hard-error collision check).
     pub fn mux_name_collides_with_known(&self) -> bool {
         let name = self.mux_name.value().trim();
         if name.is_empty() {
@@ -224,7 +322,7 @@ impl LaunchSpecFormState {
     }
 
     /// The known-mux entry whose native name matches the typed mux
-    /// name, if any. Used by pin-create's adopt provenance.
+    /// name, if any.
     pub fn matching_known_mux_name(&self) -> Option<&str> {
         let name = self.mux_name.value().trim();
         if name.is_empty() {
@@ -355,95 +453,5 @@ pub fn parse_launch_argv(raw: &str, error_prefix: &str) -> Result<Vec<String>, S
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    fn state() -> LaunchSpecFormState {
-        LaunchSpecFormState::new(LaunchSpecInit {
-            harness_label: "Harness",
-            harness_value: "codex".to_string(),
-            cwd_label: "Cwd",
-            cwd_value: "/tmp".to_string(),
-            mux_name_label: "Mux name",
-            mux_name_value: "adhoc".to_string(),
-            mux_socket_label: "Mux socket",
-            launch_argv_label: "Launch argv",
-            worktree_branch_label: "Worktree branch",
-            worktree_branch_value: String::new(),
-            known_harness_keys: vec!["codex".to_string(), "claude-code".to_string()],
-            known_mux_names: vec!["existing".to_string()],
-        })
-    }
-
-    #[test]
-    fn cycle_harness_advances_and_wraps() {
-        let mut s = state();
-        assert_eq!(s.harness().value(), "codex");
-        let next = s.cycle_harness(1, "Harness").expect("cycled");
-        assert_eq!(next, "claude-code");
-        assert_eq!(s.harness().value(), "claude-code");
-        // Wrap around from last back to first.
-        let next = s.cycle_harness(1, "Harness").expect("cycled");
-        assert_eq!(next, "codex");
-    }
-
-    #[test]
-    fn cycle_harness_returns_none_when_known_set_is_empty() {
-        let mut s = LaunchSpecFormState::new(LaunchSpecInit {
-            harness_label: "Harness",
-            harness_value: "codex".to_string(),
-            cwd_label: "Cwd",
-            cwd_value: "/tmp".to_string(),
-            mux_name_label: "Mux name",
-            mux_name_value: "adhoc".to_string(),
-            mux_socket_label: "Mux socket",
-            launch_argv_label: "Launch argv",
-            worktree_branch_label: "Worktree branch",
-            worktree_branch_value: String::new(),
-            known_harness_keys: Vec::new(),
-            known_mux_names: Vec::new(),
-        });
-        assert!(s.cycle_harness(1, "Harness").is_none());
-        assert_eq!(s.harness().value(), "codex");
-    }
-
-    #[test]
-    fn mux_name_collides_flags_known_names() {
-        let mut s = state();
-        s.set_mux_name("Mux name", "existing");
-        assert!(s.mux_name_collides_with_known());
-        assert_eq!(s.matching_known_mux_name(), Some("existing"));
-    }
-
-    #[test]
-    fn toggle_worktree_flips_the_flag() {
-        let mut s = state();
-        assert!(!s.worktree_enabled());
-        assert!(s.toggle_worktree());
-        assert!(s.worktree_enabled());
-        assert!(!s.toggle_worktree());
-    }
-
-    #[test]
-    fn parse_launch_argv_handles_single_quotes() {
-        let out = parse_launch_argv("codex --model 'gpt-5 pro'", "test").expect("parse");
-        assert_eq!(out, vec!["codex", "--model", "gpt-5 pro"]);
-    }
-
-    #[test]
-    fn parse_launch_argv_rejects_unclosed_quote() {
-        let err = parse_launch_argv("codex --flag 'oops", "test").expect_err("unclosed");
-        assert!(err.contains("unclosed"));
-    }
-
-    #[test]
-    fn parse_launch_argv_empty_input_is_empty_vec() {
-        assert!(parse_launch_argv("", "test").unwrap().is_empty());
-    }
-
-    #[test]
-    fn optional_string_trims_and_filters_empty() {
-        assert!(optional_string("  ").is_none());
-        assert_eq!(optional_string(" foo ").as_deref(), Some("foo"));
-    }
-}
+#[path = "launch_spec_form_tests.rs"]
+mod tests;

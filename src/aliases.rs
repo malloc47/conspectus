@@ -207,6 +207,22 @@ pub fn resolve_display_label<'a>(
     harness_title
 }
 
+/// The name a session goes by, strongest first: its alias, its
+/// harness title, then the name of the mux that hosts or last hosted
+/// it (ADR 0029, amended by ADR 0141). Blank values count as absent.
+/// `None` leaves the caller to show a short id suffix.
+pub fn session_display_name<'a>(
+    alias: Option<&'a str>,
+    title: Option<&'a str>,
+    mux_name: Option<&'a str>,
+) -> Option<&'a str> {
+    [alias, title, mux_name]
+        .into_iter()
+        .flatten()
+        .map(str::trim)
+        .find(|name| !name.is_empty())
+}
+
 /// Convert a [`NodeId`] back into the [`DeclaredEndpoint`] encoding
 /// used as the alias node key. Mirrors
 /// [`declared_endpoint_from_node_id`] so callers don't reach across

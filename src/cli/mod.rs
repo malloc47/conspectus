@@ -39,6 +39,8 @@ impl Cli {
             Command::Alias(args) => args.run(),
             Command::Pin(args) => args.run(),
             Command::Mux(args) => args.run(),
+            Command::Rebuild(args) => args.run(),
+            Command::History(args) => args.run(),
             Command::Worktree(args) => args.run(),
             Command::Serve(args) => args.run(),
             Command::Refresh(args) => args.run(),
@@ -73,11 +75,18 @@ enum Command {
     Rename(RenameArgs),
     /// Inspect operator-authored session aliases.
     Alias(AliasArgs),
-    /// Author, launch, or inspect session pins. See `docs/pins-walkthrough.md`.
+    /// Manage pin slots: named places for muxes, sessions, checkouts,
+    /// repos, and PRs. See `docs/pins-walkthrough.md`.
     Pin(Box<PinArgs>),
-    /// Start a tmux session: a bare shell (`new`) or a harness with no
-    /// pin (`launch`).
+    /// Start a tmux session: a bare shell (`new`) or a harness
+    /// (`launch`). `--pin` also pins it, or plans a slot with
+    /// `--no-launch`.
     Mux(MuxArgs),
+    /// Bring a mux, session, worktree, or repo back from a pin slot, a
+    /// history record, or a node. `--dry-run` prints the plan.
+    Rebuild(RebuildArgs),
+    /// List, inspect, and prune the entities Conspectus has observed.
+    History(HistoryArgs),
     /// List, create, and tear down git worktrees. `list` is read-only;
     /// new / rm / merge / close / prune delegate to the configured
     /// mutation backend (worktrunk). See `docs/worktrees.md`.
@@ -175,15 +184,38 @@ pub(super) fn warm_start_discover_and_resolve(
     }
     let discovery_config = crate::discovery::LocalDiscoveryConfig::from_env()
         .with_forge_concurrency(config.forge.concurrency);
+    let fresh_since = crate::discovery::current_epoch();
     let snapshot = crate::discovery::discover_local_warm_with(
         roots,
         discovery_config,
         crate::model::GraphSnapshot::empty(),
         &config.server.intervals,
     )?;
-    let snapshot = crate::resolve::resolve_snapshot(snapshot);
+    let mut snapshot = crate::resolve::resolve_snapshot(snapshot);
+    if !no_cache {
+        record_history(&mut snapshot, fresh_since, config);
+    }
     cache_resolved_snapshot(&snapshot, no_cache);
     Ok(snapshot)
+}
+
+/// Record what this run's discovery observed in history (ADR 0140),
+/// where `graph.bin` is written. Best-effort, like the `graph.bin`
+/// write: a failure warns and the command carries on.
+pub(super) fn record_history(
+    snapshot: &mut crate::model::GraphSnapshot,
+    fresh_since: i64,
+    config: &crate::config::Config,
+) {
+    let Some(writer) = crate::history::HistoryWriter::from_env(config.history.clone()) else {
+        return;
+    };
+    if let Err(err) = writer.record(snapshot, fresh_since) {
+        eprintln!(
+            "conspectus: warning: failed to record history in {}: {err}",
+            writer.store.dir().display()
+        );
+    }
 }
 
 /// Best-effort daemon-snapshot fetch. Returns `Some` only when
@@ -421,6 +453,8 @@ pub(super) enum ViewFlag {
     Sessions,
     Mux,
     Prs,
+    Pinned,
+    History,
     // Hidden from the TUI's view switcher; still accepted
     // so existing scripts and configs keep working.
     #[value(hide = true)]
@@ -575,6 +609,8 @@ pub(super) fn view_from_flag(flag: ViewFlag) -> crate::tui::View {
         ViewFlag::Union => crate::tui::View::Union,
         ViewFlag::Prs => crate::tui::View::Prs,
         ViewFlag::Forks => crate::tui::View::Forks,
+        ViewFlag::Pinned => crate::tui::View::Pinned,
+        ViewFlag::History => crate::tui::View::History,
     }
 }
 
@@ -592,7 +628,9 @@ pub(super) fn apply_grouping_to_tui_config(
         }
         crate::tui::Grouping::Union(_)
         | crate::tui::Grouping::Prs(_)
-        | crate::tui::Grouping::Forks(_) => {}
+        | crate::tui::Grouping::Forks(_)
+        | crate::tui::Grouping::Pinned(_)
+        | crate::tui::Grouping::History(_) => {}
     }
 }
 
@@ -637,8 +675,15 @@ pub(super) fn resolve_alias_store(
 mod pin;
 use pin::PinArgs;
 
+// ADR 0140: `conspectus history`.
+mod history;
+use history::HistoryArgs;
+
+// ADR 0142: `conspectus rebuild`.
+mod rebuild;
+use rebuild::RebuildArgs;
+
 // ADR 0103: confirm a resumed harness survived its first moments.
-mod launch_watch;
 
 // ADR 0095, ADR 0096: `conspectus mux new` / `mux launch`.
 mod mux;
@@ -705,7 +750,6 @@ pub(super) fn store_label(store: DeclaredStoreFlag) -> &'static str {
 pub(super) fn provenance_label(provenance: Provenance) -> &'static str {
     match provenance {
         Provenance::LocalDeclared => "local_declared",
-        Provenance::LocalPin => "local_pin",
         Provenance::GlobalDeclared => "global_declared",
         Provenance::GlobalPin => "global_pin",
         Provenance::StrongDiscovered => "strong_discovered",

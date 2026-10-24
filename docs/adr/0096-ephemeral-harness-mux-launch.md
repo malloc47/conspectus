@@ -2,7 +2,10 @@
 
 ## Status
 
-Accepted
+Accepted. Amended by [ADR 0142](0142-rebuild-plans-and-executors.md): the
+launched mux is recorded in history with its argv, `--pin` and `--pin
+--no-launch` replace `pin adopt` and `pin create`, and the default argv
+comes from launch profiles.
 
 ## Context
 
@@ -393,6 +396,8 @@ Ephemeral launch reuses the existing pin-launch executor plumbing:
   this shape.
 - ADR 0087 (mutation envelope) — categories 3 + 4 cover the
   mutations this ADR performs.
+- ADR 0143 (mutation envelope) — supersedes ADR 0087, keeping its
+  category and prohibition numbers.
 - ADR 0089 (mux backend trait) — the `new_session` primitive.
 - ADR 0092 (worktree backend seam) — realization backend when
   `--worktree-branch` is set.

@@ -65,11 +65,13 @@ pub struct Theme {
     pub cwd_mark: Color,
     pub link_id: Color,
     pub placeholder: Modifier,
-    /// Foreground color for the placeholder-pin glyph (`◌`) that
-    /// stands in for the attached-state glyph on unbound-pin rows.
-    /// Default is a bright yellow so the dotted circle reads as a
-    /// distinct affordance against the solid `◉` / `◯` glyphs without
-    /// being mistaken for the dim `mux_unmuxed` state.
+    /// Foreground of ghost rows: entities that are gone or pins that
+    /// aren't running. A concrete color, because `placeholder`'s DIM
+    /// does nothing in some terminals; ghost rows are italic as well.
+    pub ghost: Color,
+    /// No longer drawn: pin slots have their own view and no
+    /// placeholder rows. The key stays so existing theme files keep
+    /// loading.
     pub pin_placeholder: Color,
     /// Background of the pane-command chip a mux row shows when no
     /// agent is linked (`npm`, `zsh`, …). One color for every
@@ -83,7 +85,7 @@ pub struct Theme {
     /// because the `DIM` modifier renders inconsistently across
     /// terminals (no effect in some popular configurations).
     pub secondary_text: Color,
-    /// Color for the ▶ / ▼ disclosure glyphs so the affordance is
+    /// Color for the ► / ▼ disclosure glyphs so the affordance is
     /// distinct from the label text it sits next to. Subtle accent
     /// by default; operators can swap for a dimmer color if the
     /// glyph competes with their group labels.
@@ -222,6 +224,7 @@ impl Default for Theme {
             cwd_mark: Color::Cyan,
             link_id: Color::Blue,
             placeholder: Modifier::DIM,
+            ghost: Color::DarkGray,
             pin_placeholder: Color::LightYellow,
             command_badge: Color::Black,
             secondary_text: Color::DarkGray,
@@ -391,6 +394,10 @@ impl Theme {
                 kind: Modifier,
             },
             ThemeKey {
+                name: "ghost",
+                kind: Color,
+            },
+            ThemeKey {
                 name: "pin_placeholder",
                 kind: Color,
             },
@@ -515,6 +522,7 @@ impl Theme {
             "panel_focus_accent" => self.panel_focus_accent = color,
             "cwd_mark" => self.cwd_mark = color,
             "link_id" => self.link_id = color,
+            "ghost" => self.ghost = color,
             "pin_placeholder" => self.pin_placeholder = color,
             "command_badge" => self.command_badge = color,
             "secondary_text" => self.secondary_text = color,

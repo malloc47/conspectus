@@ -65,7 +65,8 @@ expression: fixture.normalize(&graph)
       },
       "worktree": {
         "kind": "primary"
-      }
+      },
+      "head_commit": "<redacted>"
     },
     {
       "type": "checkout",
@@ -85,7 +86,8 @@ expression: fixture.normalize(&graph)
       },
       "worktree": {
         "kind": "primary"
-      }
+      },
+      "head_commit": "<redacted>"
     },
     {
       "type": "workspace",

@@ -12,26 +12,19 @@ use std::fmt;
 use std::rc::Rc;
 use std::time::Instant;
 
-use crate::model::{
-    AgentSessionId, Diagnostic, GraphNode, GraphSnapshot, MuxSessionId, NodeId, PinBinding, PinId,
-};
+use crate::model::{AgentSessionId, GraphSnapshot, MuxSessionId, NodeId, PinId};
 use crate::tui::detail::{DetailInputs, NodeDetail, build_node_detail};
 use crate::tui::explorer::{
     BreadcrumbHop, ExplorerInputs, ExplorerRow, ExplorerRowKey, NodeView, build_node_view,
 };
 use crate::tui::preview::{PreviewContent, PreviewEntry, PreviewSource, PreviewStore};
 use crate::tui::rows::{Row, RowId, RowKind, RowTree};
-use crate::tui::widgets::controls::harness_options;
-use crate::tui::widgets::path_omnibox::PathCandidate;
-use crate::tui::widgets::pins::{
-    PinBindOption, PinCreateDefaults, PinCreateMode, PinMutationTarget,
-};
 use crate::tui::{RunConfig, View};
 
+mod controls;
 mod explorer_nav;
 mod msg;
 mod overlays;
-mod pins;
 mod tree;
 
 pub use msg::Msg;
@@ -39,16 +32,28 @@ pub use msg::Msg;
 /// Cheap-to-clone, reference-counted handle to the App's resolved
 /// [`GraphSnapshot`]. Read consumers borrow it via [`Self::snapshot`].
 #[derive(Clone)]
-pub struct SnapshotHandle(Rc<crate::model::GraphSnapshot>);
+pub struct SnapshotHandle(
+    Rc<crate::model::GraphSnapshot>,
+    Rc<std::cell::OnceCell<std::collections::BTreeMap<NodeId, crate::tui::rows::PinMarker>>>,
+);
 
 impl SnapshotHandle {
     pub(crate) fn new(snapshot: crate::model::GraphSnapshot) -> Self {
-        Self(Rc::new(snapshot))
+        Self(Rc::new(snapshot), Rc::default())
     }
 
     #[cfg(test)]
     pub(crate) fn from_snapshot(snapshot: &crate::model::GraphSnapshot) -> Self {
-        Self(Rc::new(snapshot.clone()))
+        Self(Rc::new(snapshot.clone()), Rc::default())
+    }
+
+    /// The entities pin slots point at, live or gone, with the marker
+    /// each wears; the native views mark their rows with it.
+    pub(crate) fn pinned_nodes(
+        &self,
+    ) -> &std::collections::BTreeMap<NodeId, crate::tui::rows::PinMarker> {
+        self.1
+            .get_or_init(|| crate::tui::rows::pinned_node_markers(&self.0))
     }
 
     pub(crate) fn snapshot(&self) -> &crate::model::GraphSnapshot {
@@ -89,6 +94,12 @@ impl ProviderStatus {
             || self.forge_disabled
             || !self.forge_available.unwrap_or(true)
     }
+}
+
+/// The slot a text prompt is editing, and how.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) enum SlotPrompt {
+    Rename(String),
 }
 
 /// Top-level state. Owns the resolved run configuration plus the
@@ -164,6 +175,19 @@ pub struct App {
     /// (ADR 0108). Cleared when a refresh spawned after the hand-off
     /// lands.
     handoff: Option<PendingHandoff>,
+    /// An action that changed state asked for a background refresh; the
+    /// runtime takes the request on its next pass.
+    refresh_requested: bool,
+    /// The entity the last action acted on, to select once the refresh
+    /// after it lands (it may have moved to another view).
+    pending_follow: Option<NodeId>,
+    /// The row that was selected when the action started: if it is still
+    /// listed once the refresh lands, the operator stays on it.
+    pending_follow_row: Option<RowId>,
+    /// What an undo asked to select once its refresh lands.
+    pending_restore_focus: Option<crate::tui::undo::RestoreFocus>,
+    /// Operations the undo key can still reverse.
+    undo: crate::tui::undo::UndoStack,
     /// Loaded previews keyed by source: pane captures and
     /// transcripts (ADR 0112 §5). The renderer reads this for the
     /// right-panel Preview zone.
@@ -192,9 +216,6 @@ pub struct App {
     /// later duplicate snaps the cursor back to the row after the
     /// first one.
     last_visible_index: Option<usize>,
-    /// Pin id waiting for a second `Delete` press. This gives pin
-    /// removal a confirmation step without a full modal.
-    pending_pin_remove: Option<String>,
     /// Open overlays as a stack (ADR 0085 contract 3). Input routes
     /// to the top entry first, `draw` renders bottom-to-top, and
     /// commit / close outcomes pop the top. Grows one variant per
@@ -203,6 +224,12 @@ pub struct App {
     /// that haven't migrated yet; each wave deletes one field and
     /// moves the state to a `Modal` variant.
     modal_stack: Vec<crate::tui::Modal>,
+    /// What the text prompt on top of the stack edits, when it edits a
+    /// pin slot rather than the selected row's name.
+    slot_prompt: Option<SlotPrompt>,
+    /// The entity the open rename prompt renames, fixed when it opened
+    /// so a later focus change can't redirect the commit.
+    rename_node: Option<NodeId>,
     /// Active transient toast. The
     /// `ratatui_comfy_toaster::ToastEngine` owns the per-toast
     /// lifetime + bordered rendering; the runtime calls
@@ -312,7 +339,7 @@ pub enum InFlightKind {
     /// A launch is starting a tmux session: the `--no-attach`
     /// subprocess, and the refresh when the launch ends without an
     /// attach.
-    /// Emitted by pin launch, `mux new`, and `mux launch`.
+    /// Emitted by `rebuild`, `mux new`, and `mux launch`.
     Launch,
 }
 
@@ -452,7 +479,9 @@ impl App {
         let grouping = match active_view {
             View::Sessions => super::Grouping::Sessions(config.sessions_grouping),
             View::Mux => super::Grouping::Mux(config.mux_grouping),
-            View::Union | View::Prs | View::Forks => super::Grouping::default_for(active_view),
+            View::Union | View::Prs | View::Forks | View::Pinned | View::History => {
+                super::Grouping::default_for(active_view)
+            }
         };
         let edge_meta_visible = config.show_edge_meta;
         Self {
@@ -477,12 +506,18 @@ impl App {
             refresh_failure: None,
             in_flight_ops: Vec::new(),
             handoff: None,
+            refresh_requested: false,
+            pending_follow: None,
+            pending_follow_row: None,
+            pending_restore_focus: None,
+            undo: crate::tui::undo::UndoStack::default(),
             preview_store: PreviewStore::new(),
             left_scroll: 0,
             explorer_scroll: 0,
             last_visible_index: None,
-            pending_pin_remove: None,
             modal_stack: Vec::new(),
+            slot_prompt: None,
+            rename_node: None,
             toast: crate::tui::widgets::toast::ToastEngineHolder(
                 crate::tui::widgets::toast::engine(),
             ),
@@ -550,6 +585,17 @@ impl App {
     /// Open a view's tree the way a first load does: the launch
     /// context's group expanded and selected, or else the first group
     /// expanded.
+    /// After a regroup the old scroll offset and selection mean nothing
+    /// in the new layout: open the default groups, select the first
+    /// row, and scroll to the top so every group header is on screen.
+    fn show_top_of_tree(&mut self) {
+        self.expanded = tree::initial_expanded_rows(&self.tree);
+        if let Some(first) = self.visible_rows().first().map(|row| row.id.clone()) {
+            self.set_selection(first);
+        }
+        self.left_scroll = 0;
+    }
+
     fn seed_first_visit(&mut self) {
         self.expanded = tree::initial_expanded_rows(&self.tree);
         let launch = self.tree.rows.iter().find_map(|row| match &row.kind {
@@ -602,13 +648,11 @@ impl App {
     /// receive. Returns `None` when the selection is anything other
     /// than an agent session or mux session row.
     pub fn selected_session_id(&self) -> Option<(String, String)> {
-        match self.selection.as_ref()? {
-            RowId::AgentSession(node @ NodeId::AgentSession(_)) => {
+        match crate::tui::actions::action_subject(self).node? {
+            node @ NodeId::AgentSession(_) => {
                 Some(("copied: agent_session id".to_string(), node.to_string()))
             }
-            RowId::MuxSession(node @ NodeId::MuxSession(_)) => {
-                Some(("copied: mux id".to_string(), node.to_string()))
-            }
+            node @ NodeId::MuxSession(_) => Some(("copied: mux id".to_string(), node.to_string())),
             _ => None,
         }
     }
@@ -673,21 +717,6 @@ impl App {
         self.selection = Some(id);
         self.status_message = None;
         self.recompute_detail();
-    }
-
-    /// Returns true when the active selection is a live mux row.
-    /// Used by the `A` (adopt) direct shortcut, which is scoped to
-    /// mux rows because the rest of the flow seeds pin defaults from
-    /// the mux's name / cwd.
-    pub fn selection_is_live_mux(&self) -> bool {
-        let Some(selection) = self.selection.as_ref() else {
-            return false;
-        };
-        self.tree
-            .rows
-            .iter()
-            .find(|row| &row.id == selection)
-            .is_some_and(|row| matches!(row.kind, RowKind::MuxSession(_)))
     }
 
     /// Active row filter for the visible view.
@@ -964,6 +993,11 @@ impl App {
         self.update(Msg::Report(Box::new(entry)));
     }
 
+    /// The operations the undo key can still reverse.
+    pub fn undo_stack(&self) -> &crate::tui::undo::UndoStack {
+        &self.undo
+    }
+
     /// Current provider availability status used for right-side
     /// status-bar chips.
     pub fn provider_status(&self) -> &ProviderStatus {
@@ -987,6 +1021,9 @@ impl App {
     }
 
     /// Whether `row` shows values from before the pending hand-off.
+    /// Any row that stands for an affected mux or session counts,
+    /// whichever renderer draws it: a pin, a History record, a ghost
+    /// mux, and the entities nested under a pin included.
     pub fn row_awaits_handoff(&self, row: &RowKind) -> bool {
         let Some(handoff) = &self.handoff else {
             return false;
@@ -998,21 +1035,38 @@ impl App {
         }
     }
 
+    /// Whether `row` is frozen until the refresh after an action lands,
+    /// whichever renderer draws it.
+    pub fn row_is_frozen(&self, row: &crate::tui::rows::Row) -> bool {
+        self.row_awaits_handoff(&row.kind) || self.row_id_awaits_handoff(&row.id)
+    }
+
+    /// Whether the row with `id` awaits the hand-off, judged by the
+    /// entity it stands for.
+    pub fn row_id_awaits_handoff(&self, id: &RowId) -> bool {
+        let Some(handoff) = &self.handoff else {
+            return false;
+        };
+        let Some(node) = crate::tui::actions::subject_of_row(self, id).node else {
+            return false;
+        };
+        match node {
+            NodeId::MuxSession(mux) => handoff.muxes.contains(&mux),
+            NodeId::AgentSession(session) => handoff.sessions.contains(&session),
+            _ => false,
+        }
+    }
+
     /// Whether the selected left-pane row still shows values from
-    /// before the pending hand-off (ADR 0132). Besides the rows
-    /// [`Self::row_awaits_handoff`] dims, a mux-candidate child row of
-    /// the hand-off's mux counts: its mux may be gone too.
+    /// before the pending hand-off (ADR 0132).
     pub fn selected_row_awaits_handoff(&self) -> bool {
-        let (Some(handoff), Some(selection)) = (&self.handoff, &self.selection) else {
+        let (Some(_), Some(selection)) = (&self.handoff, &self.selection) else {
             return false;
         };
         let Some(row) = self.tree.rows.iter().find(|row| &row.id == selection) else {
             return false;
         };
-        match &row.kind {
-            RowKind::AgentSessionMuxCandidate(candidate) => handoff.muxes.contains(&candidate.mux),
-            kind => self.row_awaits_handoff(kind),
-        }
+        self.row_is_frozen(row)
     }
 
     /// Agent sessions the loaded snapshot links to `mux`.
@@ -1030,6 +1084,25 @@ impl App {
         self.handoff
             .as_mut()
             .is_some_and(|handoff| std::mem::take(&mut handoff.refresh_requested))
+    }
+
+    /// Whether a hand-off refresh is already waiting to be spawned.
+    pub fn handoff_refresh_pending(&self) -> bool {
+        self.handoff
+            .as_ref()
+            .is_some_and(|handoff| handoff.refresh_requested)
+    }
+
+    /// Take the request for a background refresh that a state-changing
+    /// action left. Returns `true` once per request.
+    pub fn take_refresh_request(&mut self) -> bool {
+        std::mem::take(&mut self.refresh_requested)
+    }
+
+    /// Ask the runtime to refresh in the background: the action that
+    /// just ran changed something the views show.
+    pub fn request_refresh(&mut self) {
+        self.refresh_requested = true;
     }
 
     /// Look up a cached mux preview. Returns `None` if the mux
@@ -1247,31 +1320,26 @@ impl App {
                 loaded_at_epoch,
                 initial_selection_hint,
             } => {
-                self.pending_pin_remove = None;
                 self.set_data(snapshot, tree, loaded_at_epoch, initial_selection_hint);
+                self.apply_pending_follow();
+                self.apply_restore_focus();
             }
             Msg::SetTree(tree) => {
-                self.pending_pin_remove = None;
                 self.set_tree(tree);
             }
             Msg::SelectRow(id) => {
-                self.pending_pin_remove = None;
                 self.set_selection(*id);
             }
             Msg::NavDown => {
-                self.pending_pin_remove = None;
                 self.move_selection(1);
             }
             Msg::NavUp => {
-                self.pending_pin_remove = None;
                 self.move_selection(-1);
             }
             Msg::PageDown(viewport) => {
-                self.pending_pin_remove = None;
                 self.move_selection(i32::from(viewport.max(1)));
             }
             Msg::PageUp(viewport) => {
-                self.pending_pin_remove = None;
                 self.move_selection(-i32::from(viewport.max(1)));
             }
             Msg::LeftViewportChanged { viewport_height } => {
@@ -1306,11 +1374,9 @@ impl App {
                 self.adjust_explorer_scroll(cursor_first_row, cursor_last_row, viewport_height);
             }
             Msg::Home => {
-                self.pending_pin_remove = None;
                 self.move_selection_to(0);
             }
             Msg::End => {
-                self.pending_pin_remove = None;
                 self.move_selection_to(usize::MAX);
             }
             Msg::ToggleExpand => self.toggle_expand_selected(),
@@ -1404,8 +1470,22 @@ impl App {
                 handoff.sessions.extend(sessions);
                 handoff.refresh_requested = true;
             }
+            Msg::ViewRegained => {
+                let handoff = self.handoff.get_or_insert_with(|| PendingHandoff {
+                    muxes: BTreeSet::new(),
+                    sessions: BTreeSet::new(),
+                    started_at: Instant::now(),
+                    refresh_requested: false,
+                });
+                handoff.refresh_requested = true;
+            }
+            Msg::FollowEntity(node) => {
+                self.pending_follow = Some(node);
+                self.pending_follow_row = self.selection.clone();
+            }
             Msg::HandoffSettled => {
                 self.handoff = None;
+                self.apply_pending_follow();
             }
             Msg::LaunchStarted(mux) => {
                 let sessions = self.sessions_linked_to(&mux);
@@ -1457,6 +1537,10 @@ impl App {
                     effects.push(Effect::Toast(HANDOFF_PENDING_HINT.to_string()));
                     return effects;
                 }
+                if let Some(effect) = crate::tui::actions::default_effect(self) {
+                    effects.push(effect);
+                    return effects;
+                }
                 match crate::tui::actions::resolve_attach_target(self) {
                     Ok(target) => effects.push(Effect::Exec(ExecSpec::AttachMux(target))),
                     Err(reason) => effects.push(Effect::Toast(
@@ -1470,18 +1554,15 @@ impl App {
                     effects.push(Effect::Toast(HANDOFF_PENDING_HINT.to_string()));
                     return effects;
                 }
-                let Some(selection) = self.selection.clone() else {
+                let subject = crate::tui::actions::action_subject(self);
+                if subject == crate::tui::actions::Subject::default() {
                     effects.push(Effect::Toast("resume: nothing selected".to_string()));
                     return effects;
+                }
+                let Some(crate::model::NodeId::AgentSession(session_id)) = subject.node else {
+                    effects.push(Effect::Toast("resume: select an agent session".to_string()));
+                    return effects;
                 };
-                let session_id =
-                    if let RowId::AgentSession(crate::model::NodeId::AgentSession(id)) = &selection
-                    {
-                        id.clone()
-                    } else {
-                        effects.push(Effect::Toast("resume: select an agent session".to_string()));
-                        return effects;
-                    };
                 let Some(handle) = self.snapshot_handle() else {
                     effects.push(Effect::Toast("resume: no snapshot loaded".to_string()));
                     return effects;
@@ -1508,59 +1589,6 @@ impl App {
                     )),
                 }
             }
-            Msg::LaunchSelectedPin => {
-                use crate::tui::effect::ExecSpec;
-                if self.selected_row_awaits_handoff() {
-                    effects.push(Effect::Toast(HANDOFF_PENDING_HINT.to_string()));
-                    return effects;
-                }
-                match crate::tui::actions::resolve_launch_pin(self) {
-                    Ok((pin_id, attach_target)) => {
-                        effects.push(Effect::Exec(ExecSpec::LaunchPin {
-                            pin_id,
-                            attach_target,
-                        }));
-                    }
-                    Err(reason) => effects.push(Effect::Toast(
-                        crate::tui::actions::pin_launch_disabled_reason(&reason),
-                    )),
-                }
-            }
-            Msg::LaunchPinById(pin_id) => {
-                use crate::tui::effect::ExecSpec;
-                let attach_target =
-                    crate::tui::actions::pin_launch_target_from_snapshot(self, &pin_id);
-                effects.push(Effect::Exec(ExecSpec::LaunchPin {
-                    pin_id,
-                    attach_target,
-                }));
-            }
-            Msg::PinRemove(request) => {
-                effects.push(Effect::WriteStore(crate::tui::effect::StoreOp::PinRemove(
-                    request,
-                )));
-            }
-            Msg::PinBind(request) => {
-                if self.handle.is_none() {
-                    effects.push(Effect::Toast(
-                        "pin bind failed: no graph loaded yet".to_string(),
-                    ));
-                } else {
-                    effects.push(Effect::WriteStore(crate::tui::effect::StoreOp::PinBind(
-                        request,
-                    )));
-                }
-            }
-            Msg::PinCreate(request) => {
-                effects.push(Effect::WriteStore(crate::tui::effect::StoreOp::PinCreate(
-                    request,
-                )));
-            }
-            Msg::PinEdit(request) => {
-                effects.push(Effect::WriteStore(crate::tui::effect::StoreOp::PinEdit(
-                    request,
-                )));
-            }
             Msg::SwitchView(view) => {
                 let before = self.active_view;
                 let first_visit = self.switch_to_view(view);
@@ -1578,6 +1606,7 @@ impl App {
                     self.force_recency_for_flat_sessions();
                 }
                 self.rebuild_tree_in_place();
+                self.show_top_of_tree();
                 effects.push(Effect::Persist);
             }
             Msg::SetFilter(filter) => {
@@ -1618,7 +1647,13 @@ impl App {
                 self.preview_scroll = 0;
                 effects.push(Effect::Persist);
             }
-            Msg::CommitRename(value) => effects.push(self.rename_commit_effect(&value)),
+            Msg::CommitRename(value) => {
+                let effect = match self.slot_prompt.take() {
+                    Some(prompt) => slot_prompt_effect(prompt, &value),
+                    None => self.rename_commit_effect(&value),
+                };
+                effects.push(effect);
+            }
             Msg::CommitWorktreeCreate { repo_root, branch } => {
                 effects.push(Effect::WriteStore(
                     crate::tui::effect::StoreOp::WorktreeCreate { repo_root, branch },
@@ -1672,13 +1707,157 @@ impl App {
                     cwd,
                 }));
             }
+            Msg::OpenRowMenu => match crate::tui::actions::row_menu_for(self) {
+                Some(menu) => self.open_row_menu(menu),
+                None => effects.push(Effect::Toast("no row actions here yet".to_string())),
+            },
+            Msg::PinNode(node) => {
+                effects.push(Effect::WriteStore(crate::tui::effect::StoreOp::PinNode {
+                    node,
+                }));
+            }
+            Msg::Undo => match self.undo.pop() {
+                None => effects.push(Effect::Toast("nothing to undo".to_string())),
+                Some(entry) => {
+                    self.pending_restore_focus = entry.focus(self.active_view() == View::Pinned);
+                    effects.push(Effect::WriteStore(entry.into_op()));
+                }
+            },
+            Msg::UndoRecorded(entry) => self.undo.push(entry),
+            Msg::TogglePin => {
+                // `p` acts on the entity in view: it unpins what is
+                // already pinned and pins the rest, each at once. An
+                // entity several pins point at asks which to remove.
+                let pins = self.snapshot_handle().map_or_else(Vec::new, |handle| {
+                    crate::tui::actions::pins_for(
+                        handle.snapshot(),
+                        &crate::tui::actions::action_subject(self),
+                    )
+                });
+                if pins.is_empty() {
+                    match crate::tui::actions::pin_subject(self) {
+                        Err(why) => effects.push(Effect::Toast(format!("pin: {why}"))),
+                        Ok(crate::tui::actions::PinSubject::Node(node)) => {
+                            effects.push(Effect::WriteStore(
+                                crate::tui::effect::StoreOp::PinNode { node },
+                            ));
+                        }
+                        Ok(crate::tui::actions::PinSubject::Record(record_id)) => {
+                            effects.push(Effect::WriteStore(
+                                crate::tui::effect::StoreOp::PinRecord { record_id },
+                            ));
+                        }
+                    }
+                } else if let [only] = pins.as_slice() {
+                    effects.push(Effect::WriteStore(crate::tui::effect::StoreOp::Unpin {
+                        slot: only.clone(),
+                    }));
+                } else {
+                    self.open_pin_menu(pins);
+                }
+            }
+            Msg::Unpin(slot) => {
+                effects.push(Effect::WriteStore(crate::tui::effect::StoreOp::Unpin {
+                    slot,
+                }));
+            }
+            Msg::OpenSlotEdit(slot) => match self.pin_edit_init(&slot) {
+                Some(init) => self
+                    .open_pin_edit_form(crate::tui::widgets::pin_edit::PinEditFormState::new(init)),
+                None => effects.push(Effect::Toast(format!("no pin named `{slot}`"))),
+            },
+            Msg::CommitPinEdit(request) => {
+                effects.push(Effect::WriteStore(crate::tui::effect::StoreOp::SavePin {
+                    request,
+                }));
+            }
+            Msg::OpenSlotRename(slot) => {
+                let initial = slot.clone();
+                self.open_slot_prompt(SlotPrompt::Rename(slot), "Rename pin", &initial);
+            }
+            Msg::OpenSlotRetarget(pin) => {
+                let candidates = self
+                    .snapshot_handle()
+                    .map(|handle| crate::tui::actions::retarget_candidates(handle.snapshot(), &pin))
+                    .unwrap_or_default();
+                if candidates.is_empty() {
+                    effects.push(Effect::Toast(format!(
+                        "pin `{pin}`: there is nothing else of its kind to point it at"
+                    )));
+                } else {
+                    self.open_picker(crate::tui::widgets::picker::PickerState::new(
+                        format!("Retarget {pin}"),
+                        crate::tui::widgets::picker::PickerPurpose::Retarget { pin },
+                        candidates,
+                    ));
+                }
+            }
+            Msg::CommitRetarget { pin, target } => {
+                effects.push(Effect::WriteStore(
+                    crate::tui::effect::StoreOp::RetargetSlot { slot: pin, target },
+                ));
+            }
+            Msg::RefreshSlot(slot) => {
+                effects.push(Effect::WriteStore(
+                    crate::tui::effect::StoreOp::RefreshSlot { slot },
+                ));
+            }
+            Msg::RevealSlot(slot) => {
+                if let Err(why) = self.reveal_slot(&slot) {
+                    effects.push(Effect::Toast(why));
+                } else {
+                    effects.push(Effect::Persist);
+                }
+            }
+            Msg::PinRecord(record_id) => {
+                effects.push(Effect::WriteStore(crate::tui::effect::StoreOp::PinRecord {
+                    record_id,
+                }));
+            }
+            Msg::ForgetRecord(record_id) => {
+                effects.push(Effect::WriteStore(
+                    crate::tui::effect::StoreOp::ForgetRecord { record_id },
+                ));
+            }
+            Msg::ReapRecords(ids) => {
+                effects.push(Effect::WriteStore(
+                    crate::tui::effect::StoreOp::ReapRecords { ids },
+                ));
+            }
+            Msg::ShowRebuildPlan(reference) => {
+                effects.push(Effect::Exec(
+                    crate::tui::effect::ExecSpec::ShowRebuildPlan { reference },
+                ));
+            }
+            Msg::RebuildReference(reference) => {
+                effects.push(Effect::Exec(crate::tui::effect::ExecSpec::Rebuild {
+                    reference,
+                    attach: false,
+                }));
+            }
+            Msg::OpenCleanUp => {
+                if let Some(handle) = self.snapshot_handle() {
+                    let now = crate::tui::rows::tree_current_unix_epoch();
+                    let candidates = crate::history::reap::candidates(
+                        handle.snapshot(),
+                        &self.config().history,
+                        now,
+                        None,
+                        None,
+                    );
+                    self.open_clean_up(crate::tui::widgets::clean_up::CleanUpState::new(
+                        candidates, now,
+                    ));
+                }
+            }
             Msg::OpenNewMuxForm => {
                 let seeded_cwd = crate::tui::runtime::derive_mux_form_cwd(self)
                     .unwrap_or_else(|| std::env::var("HOME").unwrap_or_else(|_| "/".to_string()));
-                self.open_new_mux_form(crate::tui::widgets::new_mux::NewMuxFormState::new(
-                    String::new(),
-                    seeded_cwd,
-                ));
+                let candidates = crate::tui::runtime::known_cwd_candidates(self, Some(&seeded_cwd));
+                self.open_new_mux_form(
+                    crate::tui::widgets::new_mux::NewMuxFormState::new(String::new(), seeded_cwd)
+                        .with_cwd_candidates(candidates),
+                );
             }
             Msg::OpenMuxLaunchForm => {
                 let seeded_cwd = crate::tui::runtime::derive_mux_form_cwd(self)
@@ -1688,15 +1867,21 @@ impl App {
                 let known_harness_keys = crate::tui::runtime::known_harness_keys();
                 let known_mux_names = crate::tui::runtime::known_live_mux_names(self);
                 let default_harness = known_harness_keys.first().cloned().unwrap_or_default();
-                self.open_mux_launch_form(
-                    crate::tui::widgets::mux_launch::MuxLaunchFormState::new(
-                        default_harness,
-                        seeded_cwd,
-                        seeded_mux_name,
-                        known_harness_keys,
-                        known_mux_names,
-                    ),
-                );
+                let repo = seeded_cwd.clone();
+                let candidates = crate::tui::runtime::known_cwd_candidates(self, Some(&seeded_cwd));
+                let form = crate::tui::widgets::mux_launch::MuxLaunchFormState::new(
+                    default_harness,
+                    seeded_cwd,
+                    seeded_mux_name,
+                    known_harness_keys,
+                    known_mux_names,
+                )
+                .with_defaults(crate::launch_default::LaunchDefaults::new(
+                    self.config().launch.clone(),
+                ))
+                .with_cwd_candidates(candidates)
+                .with_worktree_repo(repo);
+                self.open_mux_launch_form(form);
             }
             Msg::CommitMuxLaunch(request) => {
                 effects.push(Effect::Exec(crate::tui::effect::ExecSpec::MuxLaunch {
@@ -1708,11 +1893,18 @@ impl App {
     }
 
     /// The effect that commits the rename overlay's value for the
-    /// current selection: an alias, pin, or mux rename, or a toast
+    /// current selection: an alias or mux rename, or a toast
     /// explaining why nothing can be renamed.
-    fn rename_commit_effect(&self, value: &str) -> super::Effect {
+    fn rename_commit_effect(&mut self, value: &str) -> super::Effect {
         use super::Effect;
-        match self.selection.clone() {
+        let renamed = self.rename_node.take();
+        let target = match renamed {
+            Some(NodeId::AgentSession(id)) => Some(RowId::AgentSession(NodeId::AgentSession(id))),
+            Some(NodeId::MuxSession(id)) => Some(RowId::MuxSession(NodeId::MuxSession(id))),
+            Some(_) => None,
+            None => self.selection.clone(),
+        };
+        match target {
             Some(RowId::AgentSession(NodeId::AgentSession(id))) => {
                 let trimmed = value.trim().to_string();
                 let new_display_name = (!trimmed.is_empty()).then_some(trimmed);
@@ -1721,31 +1913,10 @@ impl App {
                     new_display_name,
                 })
             }
-            Some(RowId::Pin { pin_id }) => {
-                let display = value.trim();
-                if display.is_empty() {
-                    return Effect::Toast("pin rename: display name cannot be empty".to_string());
-                }
-                let Some(target) = self.pins_context().pin_target else {
-                    return Effect::Toast(format!(
-                        "pin rename: no editable pin `{pin_id}` in current selection"
-                    ));
-                };
-                Effect::WriteStore(crate::tui::effect::StoreOp::PinEdit(
-                    crate::tui::widgets::pins::PinEditRequest {
-                        original_id: target.id.clone(),
-                        id: target.id,
-                        display_name: display.to_string(),
-                        harness: target.harness,
-                        cwd: target.cwd,
-                        mux_name: target.mux_name,
-                        mux_backend: target.mux_backend,
-                        mux_socket: target.mux_socket,
-                        launch_argv: target.launch_argv,
-                        store_path: target.store_path,
-                    },
-                ))
-            }
+            Some(RowId::Pin { pin_id }) => Effect::Toast(format!(
+                "rename the pin with `{} pin rename {pin_id} <new name>`",
+                crate::invocation::invoked_name()
+            )),
             Some(RowId::MuxSession(NodeId::MuxSession(mux_id))) => {
                 let new_name = value.trim().to_string();
                 if new_name.is_empty() {
@@ -1758,56 +1929,6 @@ impl App {
             }
             _ => Effect::Toast("rename: lost selection before commit".to_string()),
         }
-    }
-}
-
-/// Pick the detail-pane target for a placeholder pin row given the
-/// active view. View-aligned: the sessions view upgrades to the
-/// pin's `last_session` when one is recorded *and* the corresponding
-/// agent-session node is in the snapshot; the mux view upgrades to
-/// the bound / stale-mux target when the pin has one. Otherwise the
-/// pin node itself is the detail target so the operator sees a sparse
-/// "no live entity" surface rather than a mismatched session/mux view.
-fn placeholder_detail_target(snapshot: &GraphSnapshot, pin_id: &str, view: View) -> NodeId {
-    let pin_node = || NodeId::Pin(PinId::new(pin_id.to_string()));
-    let Some(pin) = snapshot.pins.iter().find(|p| p.id == pin_id) else {
-        return pin_node();
-    };
-    match view {
-        View::Mux => match &pin.binding {
-            Some(PinBinding::Bound { mux, .. } | PinBinding::StaleMux { mux }) => {
-                NodeId::MuxSession(mux.clone())
-            }
-            _ => pin_node(),
-        },
-        View::Sessions => {
-            if let Some(PinBinding::Bound { session, .. }) = &pin.binding {
-                return NodeId::AgentSession(session.clone());
-            }
-            let last_session_key = snapshot.diagnostics.iter().find_map(|d| match d {
-                Diagnostic::PinUnbound {
-                    pin_id: id,
-                    last_session: Some(last),
-                    ..
-                } if id == pin_id => Some(last.session_id.as_str()),
-                _ => None,
-            });
-            if let Some(session_key) = last_session_key {
-                let upgraded = snapshot.nodes.iter().find_map(|n| match n {
-                    GraphNode::AgentSession(s)
-                        if s.id.harness_key == pin.harness && s.id.session_key == session_key =>
-                    {
-                        Some(NodeId::AgentSession(s.id.clone()))
-                    }
-                    _ => None,
-                });
-                if let Some(upgraded) = upgraded {
-                    return upgraded;
-                }
-            }
-            pin_node()
-        }
-        View::Union | View::Prs | View::Forks => pin_node(),
     }
 }
 
@@ -1842,3 +1963,19 @@ fn sessions_linked_to_mux(snapshot: &GraphSnapshot, mux: &MuxSessionId) -> Vec<A
 #[cfg(test)]
 #[path = "app_tests.rs"]
 mod tests;
+
+/// The store write that commits a slot prompt's text.
+fn slot_prompt_effect(prompt: SlotPrompt, value: &str) -> super::Effect {
+    use super::Effect;
+    use crate::tui::effect::StoreOp;
+    let value = value.trim().to_string();
+    if value.is_empty() {
+        return Effect::Toast("pin: nothing entered".to_string());
+    }
+    Effect::WriteStore(match prompt {
+        SlotPrompt::Rename(slot) => StoreOp::RenameSlot {
+            slot,
+            new_name: value,
+        },
+    })
+}

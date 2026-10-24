@@ -58,8 +58,15 @@ pub enum RelationKind {
     MuxContainsProcess,
     ProcessIdentifiesSession,
     ProcessCandidatesSession,
-    PinTargetsMux,
-    PinRealizedBySession,
+    /// From a pin slot to what it points at, live or gone (ADR 0141).
+    /// The two relations it replaced still read, so a declared link
+    /// written for them keeps its file loadable.
+    #[serde(alias = "pin_targets_mux", alias = "pin_realized_by_session")]
+    PinTargets,
+    /// From a gone mux to the session it hosted last (ADR 0140).
+    MuxLastHosted,
+    /// From a rebuilt checkout to the one it replaced (ADR 0140).
+    RebuiltFrom,
 }
 
 impl RelationKind {
@@ -87,8 +94,9 @@ impl RelationKind {
             Self::MuxContainsProcess => "mux_contains_process",
             Self::ProcessIdentifiesSession => "process_identifies_session",
             Self::ProcessCandidatesSession => "process_candidates_session",
-            Self::PinTargetsMux => "pin_targets_mux",
-            Self::PinRealizedBySession => "pin_realized_by_session",
+            Self::PinTargets => "pin_targets",
+            Self::MuxLastHosted => "mux_last_hosted",
+            Self::RebuiltFrom => "rebuilt_from",
         }
     }
 
@@ -121,8 +129,9 @@ impl RelationKind {
             "mux_contains_process" => Ok(Self::MuxContainsProcess),
             "process_identifies_session" => Ok(Self::ProcessIdentifiesSession),
             "process_candidates_session" => Ok(Self::ProcessCandidatesSession),
-            "pin_targets_mux" => Ok(Self::PinTargetsMux),
-            "pin_realized_by_session" => Ok(Self::PinRealizedBySession),
+            "pin_targets" | "pin_targets_mux" | "pin_realized_by_session" => Ok(Self::PinTargets),
+            "mux_last_hosted" => Ok(Self::MuxLastHosted),
+            "rebuilt_from" => Ok(Self::RebuiltFrom),
             _ => Err(format!(
                 "invalid relation `{raw}`; expected a declared relation such as linked_to_mux"
             )),
@@ -147,7 +156,6 @@ impl RelationKind {
 #[serde(rename_all = "snake_case")]
 pub enum Provenance {
     LocalDeclared,
-    LocalPin,
     GlobalDeclared,
     GlobalPin,
     StrongDiscovered,
@@ -161,17 +169,11 @@ impl Provenance {
     /// Higher wins.
     ///
     /// The local/global axis dominates the explicit/auto axis: a
-    /// project-local pin beats a global declared link because project
-    /// context is more specific than user-wide intent. Within a
-    /// scope, explicit declared links (operator typed `conspectus
-    /// declared create` or `pin bind`) beat pin auto-attribution, so
-    /// `pin bind --to <session>` lands as `LocalDeclared` and
-    /// authoritatively overrides the pin's `LocalPin` evidence per
-    /// ADR 0057 §Resolver Binding Semantics step 5.
+    /// project-local declared link beats a global one because project
+    /// context is more specific than user-wide intent.
     pub fn precedence(self) -> u8 {
         match self {
             Self::LocalDeclared => 7,
-            Self::LocalPin => 6,
             Self::GlobalDeclared => 5,
             Self::GlobalPin => 4,
             Self::StrongDiscovered => 3,
@@ -184,7 +186,6 @@ impl Provenance {
     pub fn snake_case(self) -> &'static str {
         match self {
             Self::LocalDeclared => "local_declared",
-            Self::LocalPin => "local_pin",
             Self::GlobalDeclared => "global_declared",
             Self::GlobalPin => "global_pin",
             Self::StrongDiscovered => "strong_discovered",

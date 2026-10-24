@@ -35,6 +35,7 @@ pub mod search;
 pub mod snapshot;
 pub mod theme;
 mod ui;
+pub mod undo;
 pub mod viewer;
 pub mod viewer_bridge;
 pub mod widgets;
@@ -151,6 +152,15 @@ pub struct RunConfig {
     pub forge_fetch: crate::discovery::forge::ForgeFetch,
     /// `[forge] concurrency` (ADR 0136).
     pub forge_concurrency: usize,
+    /// `[history]` (ADR 0140): ignore globs and reap thresholds.
+    pub history: crate::config::HistoryConfig,
+    /// `[launch.<harness>]` profiles (ADR 0142): the default argv a mux
+    /// launch starts from.
+    pub launch: crate::config::LaunchConfig,
+    /// Whether this TUI's own discovery records history. Off under
+    /// `--no-cache`, in snapshot and fixture modes, and for the dev
+    /// scenario builder (ADR 0140).
+    pub record_history: bool,
 }
 
 impl RunConfig {
@@ -185,6 +195,9 @@ impl RunConfig {
             discovery_caches: std::sync::Arc::default(),
             forge_fetch: crate::discovery::forge::ForgeFetch::default(),
             forge_concurrency: crate::discovery::forge::DEFAULT_FORGE_CONCURRENCY,
+            history: crate::config::HistoryConfig::default(),
+            launch: crate::config::LaunchConfig::default(),
+            record_history: false,
         }
     }
 }
@@ -200,6 +213,10 @@ pub enum View {
     Union,
     Prs,
     Forks,
+    /// Pin slots, whatever their kind (ADR 0141).
+    Pinned,
+    /// Gone entities Conspectus remembers (ADR 0140).
+    History,
 }
 
 /// Row sort within each group.
@@ -405,6 +422,30 @@ pub enum ForksGrouping {
     Parent,
 }
 
+/// Top-level grouping in the Pinned view (ADR 0141).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PinnedGrouping {
+    /// Under the project (repo) the slot's target or cwd belongs to.
+    Project,
+    /// By slot kind.
+    Kind,
+    /// One flat list.
+    None,
+}
+
+/// Top-level grouping in the History view (ADR 0140).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum HistoryGrouping {
+    /// Under the project (repo) the record's path belongs to.
+    Project,
+    /// By record kind.
+    Kind,
+    /// One flat list.
+    None,
+}
+
 /// Per-view grouping dispatch. Each variant wraps the per-view
 /// grouping enum so a single [`Grouping`] value can be persisted in
 /// [`crate::tui::app::App`], passed through the CLI surface, or
@@ -423,6 +464,8 @@ pub enum Grouping {
     Union(UnionGrouping),
     Prs(PrsGrouping),
     Forks(ForksGrouping),
+    Pinned(PinnedGrouping),
+    History(HistoryGrouping),
 }
 
 impl Grouping {
@@ -434,6 +477,8 @@ impl Grouping {
             Self::Union(_) => View::Union,
             Self::Prs(_) => View::Prs,
             Self::Forks(_) => View::Forks,
+            Self::Pinned(_) => View::Pinned,
+            Self::History(_) => View::History,
         }
     }
 
@@ -447,6 +492,8 @@ impl Grouping {
             View::Union => Self::Union(UnionGrouping::Kind),
             View::Prs => Self::Prs(PrsGrouping::Checkout),
             View::Forks => Self::Forks(ForksGrouping::Provider),
+            View::Pinned => Self::Pinned(PinnedGrouping::Project),
+            View::History => Self::History(HistoryGrouping::Project),
         }
     }
 
@@ -472,6 +519,12 @@ impl Grouping {
             Self::Prs(PrsGrouping::State) => "state",
             Self::Forks(ForksGrouping::Provider) => "provider",
             Self::Forks(ForksGrouping::Parent) => "parent",
+            Self::Pinned(PinnedGrouping::Project) => "project",
+            Self::Pinned(PinnedGrouping::Kind) => "kind",
+            Self::Pinned(PinnedGrouping::None) => "none",
+            Self::History(HistoryGrouping::Project) => "project",
+            Self::History(HistoryGrouping::Kind) => "kind",
+            Self::History(HistoryGrouping::None) => "none",
         }
     }
 
@@ -519,6 +572,16 @@ impl Grouping {
             View::Forks => &[
                 Self::Forks(ForksGrouping::Provider),
                 Self::Forks(ForksGrouping::Parent),
+            ],
+            View::Pinned => &[
+                Self::Pinned(PinnedGrouping::Project),
+                Self::Pinned(PinnedGrouping::Kind),
+                Self::Pinned(PinnedGrouping::None),
+            ],
+            View::History => &[
+                Self::History(HistoryGrouping::Project),
+                Self::History(HistoryGrouping::Kind),
+                Self::History(HistoryGrouping::None),
             ],
         }
     }
@@ -584,6 +647,8 @@ mod tests {
             View::Union,
             View::Prs,
             View::Forks,
+            View::Pinned,
+            View::History,
         ] {
             for option in Grouping::values_for(view) {
                 let parsed = Grouping::parse_for(view, option.as_str());
@@ -633,8 +698,13 @@ mod tests {
             View::Union,
             View::Prs,
             View::Forks,
+            View::Pinned,
+            View::History,
         ] {
             assert_eq!(Grouping::default_for(view).view(), view);
         }
     }
 }
+
+#[cfg(test)]
+mod consistency_tests;

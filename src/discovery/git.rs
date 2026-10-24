@@ -104,6 +104,7 @@ impl GitProbe {
         let worktree_root = self.required(root, &["rev-parse", "--show-toplevel"])?;
         let git_dir = self.required(root, &["rev-parse", "--path-format=absolute", "--git-dir"])?;
         let branch_ref = self.optional(root, &["symbolic-ref", "--quiet", "HEAD"])?;
+        let head = self.optional(root, &["rev-parse", "--verify", "--quiet", "HEAD"])?;
         let upstream = self.optional(
             root,
             &[
@@ -121,6 +122,7 @@ impl GitProbe {
             worktree_root: PathBuf::from(worktree_root),
             git_dir: PathBuf::from(git_dir),
             branch_ref,
+            head,
             upstream,
             remotes,
             local_branches,
@@ -296,6 +298,7 @@ fn sibling_worktree_fragment(
                 prunable: record.prunable.clone(),
             });
         checkout.current_branch = current_branch;
+        checkout.head_commit.clone_from(&record.head);
         nodes.push(GraphNode::Checkout(checkout));
         candidate_links.push(git_link(
             NodeId::Checkout(checkout_id),
@@ -313,6 +316,7 @@ fn sibling_worktree_fragment(
         candidate_links,
         diagnostics: Vec::new(),
         node_provenance: BTreeMap::new(),
+        mux_probes: Default::default(),
     })
 }
 
@@ -322,6 +326,8 @@ pub struct GitProbeResult {
     pub worktree_root: PathBuf,
     pub git_dir: PathBuf,
     pub branch_ref: Option<String>,
+    /// The commit HEAD points at; `None` in a repo with no commits.
+    pub head: Option<String>,
     pub upstream: Option<String>,
     pub remotes: Vec<GitRemote>,
     pub local_branches: Vec<String>,
@@ -381,6 +387,7 @@ pub fn fragment_from_probe(probe: &GitProbeResult) -> GraphFragment {
         candidate_links,
         diagnostics: Vec::new(),
         node_provenance: BTreeMap::new(),
+        mux_probes: Default::default(),
     }
 }
 
@@ -416,6 +423,7 @@ fn checkout_node(checkout_id: CheckoutId, probe: &GitProbeResult) -> CheckoutNod
         } else {
             WorktreeMeta::primary()
         }),
+        head_commit: probe.head.clone(),
     }
 }
 
@@ -482,8 +490,11 @@ fn is_expected_absence(args: &[&str], code: Option<i32>) -> bool {
                     "@{upstream}"
                 ],
             Some(128)
-        ) | (["symbolic-ref", "--quiet", "HEAD"], Some(1))
-            | (["remote"], Some(_))
+        ) | (
+            // A repo with no commits has no HEAD commit yet.
+            ["symbolic-ref", "--quiet", "HEAD"] | ["rev-parse", "--verify", "--quiet", "HEAD"],
+            Some(1)
+        ) | (["remote"], Some(_))
     )
 }
 

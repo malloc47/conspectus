@@ -2,7 +2,9 @@
 
 ## Status
 
-Accepted. Amends ADR 0107 (a Related row's evidence becomes a header
+Accepted. Amended by ADR 0144: a `Pin` slot has no binding, so its
+preview is its target's preview (see that ADR); the Bound/Unbound row
+below is historical. Amends ADR 0107 (a Related row's evidence becomes a header
 above the neighbor's own preview). Supersedes the Preview rules in
 `docs/tui-sessions-mockup.md` and the recent-turns transcript plan
 (`CSP-207`–`CSP-210`, `CSP-213`–`CSP-215`), which predates the native

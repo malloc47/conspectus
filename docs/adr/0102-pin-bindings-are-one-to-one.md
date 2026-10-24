@@ -2,7 +2,12 @@
 
 ## Status
 
-Accepted. Amends ADR 0057 (binding pass, `PinStaleMux` launch) and
+Superseded by [ADR 0140](0140-history-and-presence.md). Pin slots point at
+their targets explicitly, so there is no binding pass; the previous
+binding's stickiness moved to every mux as a `Cached` `linked_to_mux`
+fallback.
+
+Originally amended ADR 0057 (binding pass, `PinStaleMux` launch) and
 ADR 0084 (`pin_realized_by_session`).
 
 ## Context

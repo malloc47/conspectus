@@ -7,9 +7,6 @@
 //! accelerators (`v`, `1`–`5`, `]`/`[`, `f`, `F`, `G`) reach the
 //! same outcomes for muscle-memory operators.
 //!
-//! Pin CRUD lives in its own [`pins`](super::pins) overlay, opened
-//! with `p` or the direct shortcuts (`N`/`B`/`A`/`b`/`R`/`Delete`).
-//!
 //! ## Architecture
 //!
 //! The overlay holds **only** what is unique to its UI: a cursor
@@ -72,7 +69,13 @@ pub const MUX_STATE_OPTIONS: &[MuxStateKey] = &[
 /// strip, and the `[` / `]` view-cycle accelerator, so trimming it here
 /// hides those views everywhere without touching the `View` enum or the
 /// `conspectus table union|forks` CLI projections.
-pub const VIEW_OPTIONS: &[View] = &[View::Sessions, View::Mux, View::Prs];
+pub const VIEW_OPTIONS: &[View] = &[
+    View::Sessions,
+    View::Mux,
+    View::Prs,
+    View::Pinned,
+    View::History,
+];
 
 /// Sort options surfaced in the Sort section, in stable order.
 pub const SORT_OPTIONS: &[Sort] = &[Sort::Hierarchy, Sort::Recency];
@@ -114,6 +117,11 @@ pub enum ControlsCursor {
     FilterFloatMuxedSessions,
     /// Mux-view-only checkbox: float attached muxes to the top.
     FilterFloatAttachedMuxes,
+    /// Mux-view-only checkbox: list every stopped mux, not just pinned ones.
+    FilterShowStoppedMuxes,
+    FilterPinnedOnly,
+    /// History-view-only checkbox: list only records no pin points at.
+    FilterHistoryUnpinnedOnly,
     /// PRs-view-only row: edits the PR state set (ADR 0134).
     FilterPrState,
     /// PRs-view-only row: cycles the local-branch filter through any,
@@ -206,9 +214,9 @@ impl ControlsOverlayState {
     /// caller should apply (or [`ControlsOutcome::Continue`] for
     /// in-overlay navigation that didn't change anything).
     pub fn handle_key(&mut self, ctx: &ControlsContext<'_>, event: KeyEvent) -> ControlsOutcome {
-        use crate::tui::keybindings::overlay::{MENU_KEYS, MenuKey, resolve};
-        let action = resolve(MENU_KEYS, event);
-        if action == Some(MenuKey::Abort) {
+        use crate::tui::keybindings::overlay::{CONTROLS_KEYS, ControlsKey, resolve};
+        let action = resolve(CONTROLS_KEYS, event);
+        if action == Some(ControlsKey::Abort) {
             return ControlsOutcome::Close;
         }
 
@@ -221,17 +229,52 @@ impl ControlsOverlayState {
         }
 
         match action {
-            Some(MenuKey::Abort | MenuKey::Close) => ControlsOutcome::Close,
-            Some(MenuKey::Up) => {
+            Some(ControlsKey::Abort | ControlsKey::Close) => ControlsOutcome::Close,
+            Some(ControlsKey::Up) => {
                 self.cursor = move_cursor(self.cursor, ctx, -1);
                 ControlsOutcome::Continue
             }
-            Some(MenuKey::Down) => {
+            Some(ControlsKey::Down) => {
                 self.cursor = move_cursor(self.cursor, ctx, 1);
                 ControlsOutcome::Continue
             }
-            Some(MenuKey::Pick) => self.activate(ctx),
+            Some(ControlsKey::Toggle) => self.activate(ctx),
+            Some(ControlsKey::Done) => self.done(ctx),
             None => ControlsOutcome::Continue,
+        }
+    }
+
+    /// Enter: apply the focused choice and close; open an editor row's
+    /// editor or press a button; otherwise (checkboxes and cycles, which
+    /// Space changes and which are already applied) just close.
+    fn done(&mut self, ctx: &ControlsContext<'_>) -> ControlsOutcome {
+        let is_choice = matches!(
+            self.cursor,
+            ControlsCursor::View(_)
+                | ControlsCursor::Grouping(_)
+                | ControlsCursor::Sort(_)
+                | ControlsCursor::MuxRecency(_)
+                | ControlsCursor::PreviewWrap(_)
+                | ControlsCursor::SessionPreview(_)
+        );
+        // A button presses, and an editor row opens its editor, on Enter
+        // as on Space.
+        if matches!(
+            self.cursor,
+            ControlsCursor::FilterClear
+                | ControlsCursor::FilterHarness
+                | ControlsCursor::FilterMaxAge
+                | ControlsCursor::FilterMuxState
+                | ControlsCursor::FilterPrState
+        ) {
+            return self.activate(ctx);
+        }
+        if !is_choice {
+            return ControlsOutcome::Close;
+        }
+        match self.activate(ctx) {
+            ControlsOutcome::ApplyAndStay(msg) => ControlsOutcome::ApplyAndClose(msg),
+            _ => ControlsOutcome::Close,
         }
     }
 
@@ -240,11 +283,9 @@ impl ControlsOverlayState {
             ControlsCursor::View(idx) => {
                 let view = VIEW_OPTIONS[idx];
                 if view == ctx.view {
-                    // No-op view switch; close so the operator sees
-                    // the cancel feedback rather than a stuck overlay.
-                    ControlsOutcome::Close
+                    ControlsOutcome::Continue
                 } else {
-                    ControlsOutcome::ApplyAndClose(crate::tui::Msg::SwitchView(view))
+                    ControlsOutcome::ApplyAndStay(crate::tui::Msg::SwitchView(view))
                 }
             }
             ControlsCursor::Grouping(idx) => {
@@ -272,6 +313,21 @@ impl ControlsOverlayState {
             ControlsCursor::FilterFloatAttachedMuxes => {
                 let mut new_filter = ctx.filter.clone();
                 new_filter.float_attached_muxes_top = !new_filter.float_attached_muxes_top;
+                ControlsOutcome::ApplyAndStay(crate::tui::Msg::SetFilter(new_filter))
+            }
+            ControlsCursor::FilterShowStoppedMuxes => {
+                let mut new_filter = ctx.filter.clone();
+                new_filter.show_stopped_muxes = !new_filter.show_stopped_muxes;
+                ControlsOutcome::ApplyAndStay(crate::tui::Msg::SetFilter(new_filter))
+            }
+            ControlsCursor::FilterPinnedOnly => {
+                let mut new_filter = ctx.filter.clone();
+                new_filter.pinned_only = !new_filter.pinned_only;
+                ControlsOutcome::ApplyAndStay(crate::tui::Msg::SetFilter(new_filter))
+            }
+            ControlsCursor::FilterHistoryUnpinnedOnly => {
+                let mut new_filter = ctx.filter.clone();
+                new_filter.show_pinned_history = !new_filter.show_pinned_history;
                 ControlsOutcome::ApplyAndStay(crate::tui::Msg::SetFilter(new_filter))
             }
             ControlsCursor::FilterPrState => {
@@ -329,7 +385,9 @@ impl ControlsOverlayState {
         ctx: &ControlsContext<'_>,
         event: KeyEvent,
     ) -> ControlsOutcome {
-        let editor = slot.as_mut().expect("dispatch called with empty slot");
+        let editor = slot
+            .as_mut()
+            .expect("dispatch called with no sub-editor open");
         match editor {
             SubEditor::Harness(state) => match state.handle_key(event) {
                 MultiSelectOutcome::Continue => ControlsOutcome::Continue,
@@ -580,11 +638,18 @@ fn flatten_rows(ctx: &ControlsContext<'_>) -> Vec<ControlsCursor> {
     }
     if matches!(ctx.view, View::Mux) {
         rows.push(ControlsCursor::FilterFloatAttachedMuxes);
+        rows.push(ControlsCursor::FilterShowStoppedMuxes);
     }
     if matches!(ctx.view, View::Prs) {
         rows.push(ControlsCursor::FilterPrState);
         rows.push(ControlsCursor::FilterPrBranch);
         rows.push(ControlsCursor::FilterFloatTrackedPrs);
+    }
+    if matches!(ctx.view, View::Sessions | View::Mux | View::Prs) {
+        rows.push(ControlsCursor::FilterPinnedOnly);
+    }
+    if matches!(ctx.view, View::History) {
+        rows.push(ControlsCursor::FilterHistoryUnpinnedOnly);
     }
     rows.push(ControlsCursor::FilterClear);
     for idx in 0..SORT_OPTIONS.len() {
@@ -636,9 +701,16 @@ impl Widget for ControlsOverlayWidget<'_> {
         // produces so auto-sizing reproduces the legacy rect.
         let mut lines = self.body_lines();
         lines.push(Line::default());
-        lines.push(Line::from(
-            span!(Modifier::DIM; "{}", crate::tui::keybindings::overlay::footer(crate::tui::keybindings::overlay::MENU_KEYS)),
-        ));
+        // The footer wraps to the modal's inner width (one column is the
+        // scrollbar's) so no hint runs past the frame.
+        let footer_width =
+            usize::from(centered_modal_rect_for_content(area, 0).width).saturating_sub(3);
+        let footer = crate::tui::keybindings::overlay::footer(
+            crate::tui::keybindings::overlay::CONTROLS_KEYS,
+        );
+        for chunk in crate::tui::widgets::popup_frame::wrapped_lines(&footer, 0, footer_width) {
+            lines.push(Line::from(span!(Modifier::DIM; "{chunk}")));
+        }
         let modal = centered_modal_rect_for_content(area, lines.len());
         let inner_height = modal.height.saturating_sub(2) as usize;
         let scroll_offset =
@@ -771,6 +843,15 @@ impl ControlsOverlayWidget<'_> {
                 ),
                 here,
             );
+            let here = cursor == ControlsCursor::FilterShowStoppedMuxes;
+            body.push_row(
+                checkbox_row(
+                    "Show all stopped muxes",
+                    self.ctx.filter.show_stopped_muxes,
+                    here,
+                ),
+                here,
+            );
         }
         if matches!(self.ctx.view, View::Prs) {
             let here = cursor == ControlsCursor::FilterPrState;
@@ -790,6 +871,20 @@ impl ControlsOverlayWidget<'_> {
                     self.ctx.filter.float_tracked_prs_top,
                     here,
                 ),
+                here,
+            );
+        }
+        if matches!(self.ctx.view, View::Sessions | View::Mux | View::Prs) {
+            let here = cursor == ControlsCursor::FilterPinnedOnly;
+            body.push_row(
+                checkbox_row("Pinned only", self.ctx.filter.pinned_only, here),
+                here,
+            );
+        }
+        if matches!(self.ctx.view, View::History) {
+            let here = cursor == ControlsCursor::FilterHistoryUnpinnedOnly;
+            body.push_row(
+                checkbox_row("Unpinned only", !self.ctx.filter.show_pinned_history, here),
                 here,
             );
         }
@@ -940,7 +1035,7 @@ fn filter_row(name: &str, value: String, cursored: bool) -> Line<'static> {
     line![span!(style; "{marker}{name:9} {value}  [ Edit ]")]
 }
 
-/// A filter row whose value Enter steps to the next choice rather
+/// A filter row whose value Space steps to the next choice rather
 /// than opening an editor.
 fn cycle_row(name: &str, value: String, cursored: bool) -> Line<'static> {
     let marker = if cursored { "> " } else { "  " };
@@ -1013,6 +1108,8 @@ fn view_label(view: View) -> &'static str {
         View::Union => "Union",
         View::Prs => "PRs",
         View::Forks => "Forks",
+        View::Pinned => "Pinned",
+        View::History => "History",
     }
 }
 
@@ -1043,10 +1140,14 @@ fn max_controls_content_lines() -> usize {
         .iter()
         .map(|view| {
             let filter_rows = match *view {
-                View::Sessions | View::Mux => 5,
+                // The pinned-only checkbox closes each native view's
+                // filters.
+                View::Sessions => 6,
+                // Mux adds the hide-gone-muxes checkbox.
+                View::Mux => 7,
                 // The state row, the local-branch row, and the float
                 // checkbox.
-                View::Prs => 7,
+                View::Prs => 8,
                 _ => 4,
             };
             // Mux view appends a "Recency by" section: blank + header

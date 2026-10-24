@@ -264,31 +264,22 @@ impl App {
 
 /// Does `row` represent `target` in the left-pane tree?
 /// Group rows match when their `primary_node` (when set) equals
-/// `target`; mux candidate rows match their parent mux's node id.
+/// `target`.
 pub(super) fn row_matches(row: &crate::tui::rows::Row, target: &NodeId) -> bool {
     match &row.kind {
         RowKind::Group(group) => group.primary_node.as_ref() == Some(target),
         RowKind::AgentSession(s) => &s.primary_node == target,
-        RowKind::AgentSessionMuxCandidate(c) => &c.primary_node == target,
         RowKind::MuxSession(m) => &m.primary_node == target,
         RowKind::Pr(p) => &p.primary_node == target,
         RowKind::Fork(f) => &f.primary_node == target,
-        RowKind::Repo(r) => &r.primary_node == target,
-    }
-}
-
-pub(super) fn row_pin_id(row: &crate::tui::rows::Row) -> Option<&str> {
-    match &row.kind {
-        RowKind::AgentSession(session) => session.pin_id.as_deref(),
-        RowKind::MuxSession(mux) => mux.pin_id.as_deref(),
-        _ => None,
+        RowKind::Mixed(m) => &m.primary_node == target,
     }
 }
 
 pub(super) fn initial_expanded_rows(tree: &RowTree) -> BTreeSet<RowId> {
     let mut expanded = BTreeSet::new();
     for row in &tree.rows {
-        if matches!(row.id, RowId::Synthetic("pins")) {
+        if matches!(row.id, RowId::Bucket(_)) {
             add_expandable_group(&mut expanded, row);
         }
     }

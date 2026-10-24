@@ -5,7 +5,9 @@
 Accepted. Amends ADR 0087 category 3 (mux lifecycle), ADR 0057
 (pin launch), ADR 0058 (resume fallback) and ADR 0096 (mux launch).
 Amended by ADR 0133: only a resume is watched; a fresh launch returns
-as soon as its session exists.
+as soon as its session exists. Its category 3 operations carry over
+unchanged into ADR 0143, which supersedes ADR 0087, and into the rebuild
+executors of ADR 0142.
 
 ## Context
 

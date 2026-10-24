@@ -1,9 +1,10 @@
 ---
 id: CSP-680
 title: Add the History view and Clean up modal
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-10-22 01:11'
+updated_date: '2026-10-22 18:12'
 labels:
   - history-pins
 milestone: m-23
@@ -31,12 +32,18 @@ The operator wants to rebuild anything observed without having pinned it. The Hi
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 Every gone history record is listed and can be rebuilt, pinned, or forgotten from the view
-- [ ] #2 The Clean up modal reaps only the candidates left selected and never pinned or Unknown records
+- [x] #1 Every gone history record is listed and can be rebuilt, pinned, or forgotten from the view
+- [x] #2 The Clean up modal reaps only the candidates left selected and never pinned or Unknown records
 <!-- AC:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
-- [ ] #1 `just check` passes, or `git diff --check` for docs-only changes
-- [ ] #2 Docs and ADRs are updated when behavior, architecture, or workflow change
+- [x] #1 `just check` passes, or `git diff --check` for docs-only changes
+- [x] #2 Docs and ADRs are updated when behavior, architecture, or workflow change
 <!-- DOD:END -->
+
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+Added the History view (key 5, --view history) and the Clean up modal. Rows can be rebuilt, pinned, or forgotten from the view or its row menu; Clean up lists reap candidates, preselected, and removes exactly the selection, never pinned or Unknown records. Covered by history_tests, clean_up_tests, row_menu_tests, and ui snapshots.
+<!-- SECTION:FINAL_SUMMARY:END -->

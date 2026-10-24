@@ -8,12 +8,9 @@
 //! reducer never emits an effect nobody can execute.
 
 use crate::model::{AgentSessionId, MuxSessionId};
-use crate::tui::actions::{AttachTarget, PinLaunchTarget};
+use crate::tui::actions::AttachTarget;
 use crate::tui::resume::ResumeTarget;
 use crate::tui::widgets::mux_launch::MuxLaunchRequest;
-use crate::tui::widgets::pins::{
-    PinBindRequest, PinCreateRequest, PinEditRequest, PinRemoveRequest,
-};
 
 /// A side effect the reducer wants the runtime to schedule.
 #[derive(Debug, Clone, PartialEq)]
@@ -81,27 +78,25 @@ pub enum ExecSpec {
     /// reducer never touches them.
     ViewSession(AgentSessionId),
     /// Suspend the alt screen, re-exec into
-    /// `conspectus pin launch <id> --no-attach`, refresh so the row
-    /// tree reflects the just-created session, then attach to the
-    /// resulting tmux session when `attach_target` is available. The
-    /// executor owns the full sequence; the reducer never sees the
-    /// intermediate states.
-    LaunchPin {
-        pin_id: String,
-        attach_target: Option<PinLaunchTarget>,
-    },
-    /// Suspend the alt screen, re-exec into
     /// `conspectus mux new <name> --cwd <cwd> --no-attach`, refresh
     /// so the row tree picks up the new session, then attach.
-    /// Mirrors [`ExecSpec::LaunchPin`] but with no pin lookup —
-    /// the operator supplied the fields via the form (ADR 0095).
+    /// The operator supplied the fields via the form (ADR 0095).
     MuxNew { name: String, cwd: String },
     /// Suspend the alt screen, re-exec into
     /// `conspectus mux launch <harness> --name <name> …
     /// --no-attach`, refresh so the row tree picks up the new mux
     /// and its attributed harness session, then attach
-    /// (ADR 0096). No pin is written.
+    /// (ADR 0096). A pin slot is written only when the form asked
+    /// for one (`--pin`).
     MuxLaunch { request: MuxLaunchRequest },
+    /// Run `conspectus rebuild <reference> --no-attach` behind a
+    /// spinner, then refresh, so a gone pin or record comes back
+    /// without leaving the TUI. With `attach`, the rebuilt mux is
+    /// attached to as soon as it is up, as a launch always did.
+    Rebuild { reference: String, attach: bool },
+    /// Run `conspectus rebuild <reference> --dry-run` behind a spinner
+    /// and show the plan it prints.
+    ShowRebuildPlan { reference: String },
 }
 
 /// A mux backend op the executor should run. The reducer emits this
@@ -129,21 +124,33 @@ pub enum MuxOp {
 /// summary status.
 #[derive(Debug, Clone, PartialEq)]
 pub enum StoreOp {
-    /// Write a new pin entry to its TOML store (ADR 0057). When
-    /// `request.adopt_source_mux_name` is `Some`, the executor
-    /// chains a tmux rename after the write so the just-adopted
-    /// mux session takes the pin's declared name — see
-    /// [`crate::tui::effect::MuxOp`]'s roadmap in the
-    /// backlog.
-    PinCreate(PinCreateRequest),
-    /// Update an existing pin entry (id / display name / harness /
-    /// cwd / mux / launch argv).
-    PinEdit(PinEditRequest),
-    /// Remove a pin entry from its TOML store (ADR 0057).
-    PinRemove(PinRemoveRequest),
-    /// Write a pin-binding declaration linking a pin to an
-    /// existing agent session (ADR 0057 / ADR 0058).
-    PinBind(PinBindRequest),
+    /// Pin a history record as a slot (`pin add <record id>`).
+    PinRecord { record_id: String },
+    /// Pin a graph node as a slot (`pin add <node id>`).
+    PinNode { node: crate::model::NodeId },
+    /// Remove a slot (`pin rm`).
+    Unpin { slot: String },
+    /// Rename a slot, and its mux when it is live (`pin rename`).
+    RenameSlot { slot: String, new_name: String },
+    /// Save the pin edit form: set and drop overrides, then rename.
+    SavePin {
+        request: crate::tui::widgets::pin_edit::PinEditRequest,
+    },
+    /// Point a slot at another entity (`pin retarget`).
+    RetargetSlot { slot: String, target: String },
+    /// Copy the entity's current recipe into the snapshot (`pin refresh`).
+    RefreshSlot { slot: String },
+    /// Undo of a pin: remove the pin with this name.
+    RemovePin { id: String },
+    /// Undo of an unpin: put the pin back at its old place in the order.
+    RestorePin {
+        slot: crate::model::PinSlot,
+        index: usize,
+    },
+    /// Remove one history record.
+    ForgetRecord { record_id: String },
+    /// Remove these history records (the Clean up modal).
+    ReapRecords { ids: Vec<String> },
     /// Commit the rename-overlay's confirm on an agent-session
     /// row (ADR 0029). The executor plans the rename against the
     /// held snapshot, writes the alias entry (or removes it when
@@ -186,7 +193,8 @@ pub enum StoreOp {
     /// executor rebuilds the close-down plan from the held snapshot,
     /// terminates the worktree's mux sessions (graceful->hard),
     /// merges (`discard == false`) or removes (`discard == true`) the
-    /// worktree, and drops its pins.
+    /// worktree, and forgets its history records (except ones a pin
+    /// slot targets).
     WorktreeCloseDown {
         repo_root: String,
         branch: String,
@@ -195,4 +203,173 @@ pub enum StoreOp {
     /// Prune worktrees merged into the default branch via the
     /// configured mutation backend.
     WorktreePrune { repo_root: String },
+}
+
+/// What the runtime does around an effect so what the operator sees
+/// stays truthful: whether it hands the terminal to a mux, freezes the
+/// acted-on row until fresh data lands, refreshes afterwards, and moves
+/// focus to wherever the entity now lives.
+///
+/// Every state-changing effect declares its lifecycle here, in one
+/// place, so a new effect cannot ship without deciding. The match is
+/// exhaustive on purpose.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Lifecycle {
+    /// The terminal is handed to a mux client.
+    pub attaches: bool,
+    /// The acted-on row is dimmed with a spinner until the refresh
+    /// after the action lands.
+    pub freezes_row: bool,
+    /// A refresh runs once the action finishes.
+    pub refreshes: bool,
+    /// Focus moves to the view where the entity now lives, with its row
+    /// selected.
+    pub follows_entity: bool,
+}
+
+impl Lifecycle {
+    /// An effect that changes nothing the views show.
+    pub const NONE: Self = Self {
+        attaches: false,
+        freezes_row: false,
+        refreshes: false,
+        follows_entity: false,
+    };
+
+    /// A write that the views must catch up with.
+    pub const REFRESHES: Self = Self {
+        refreshes: true,
+        ..Self::NONE
+    };
+}
+
+/// What a refresh rescans before the screen is rebuilt. The rescan is
+/// forced: the mux listing is asked of the server again and a running
+/// daemon is told to re-probe, because the point of the refresh is to
+/// see what the action just did, not what was cached a few seconds ago.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct RefreshRequest {
+    /// Provider classes to re-probe, in order.
+    pub classes: &'static [&'static str],
+}
+
+impl RefreshRequest {
+    /// The classes whose state changes while the operator works in a
+    /// mux: sessions appear, die, and get renamed, and harnesses start
+    /// new transcripts.
+    pub const LIVE: Self = Self {
+        classes: &["mux", "harness"],
+    };
+
+    /// [`Self::LIVE`] plus the forges, whose listings are otherwise
+    /// reused for the forge interval.
+    pub const LIVE_AND_FORGE: Self = Self {
+        classes: &["mux", "harness", "forge"],
+    };
+
+    /// Whether the mux listing must be asked of the server again.
+    pub fn rescans_mux(&self) -> bool {
+        self.classes.contains(&"mux")
+    }
+}
+
+impl Lifecycle {
+    /// The rescan the refresh after this effect runs, if it refreshes.
+    pub fn refresh_request(&self) -> Option<RefreshRequest> {
+        self.refreshes.then_some(RefreshRequest::LIVE)
+    }
+}
+
+/// The lifecycle `effect` runs with today.
+pub fn lifecycle(effect: &Effect) -> Lifecycle {
+    match effect {
+        Effect::SpawnRefresh { .. }
+        | Effect::Toast(_)
+        | Effect::Persist
+        | Effect::Quit
+        | Effect::RunMux(_) => Lifecycle::NONE,
+        Effect::Exec(spec) => match spec {
+            ExecSpec::AttachMux(_) => Lifecycle {
+                attaches: true,
+                freezes_row: true,
+                refreshes: true,
+                follows_entity: false,
+            },
+            ExecSpec::Resume(_) | ExecSpec::ViewSession(_) | ExecSpec::ShowRebuildPlan { .. } => {
+                Lifecycle::NONE
+            }
+            ExecSpec::MuxNew { .. } | ExecSpec::MuxLaunch { .. } => Lifecycle {
+                attaches: true,
+                refreshes: true,
+                follows_entity: true,
+                ..Lifecycle::NONE
+            },
+            // The entity leaves History or the Pinned view's gone rows
+            // and shows up live elsewhere, so the row freezes while it
+            // comes back and focus follows it.
+            ExecSpec::Rebuild { attach, .. } => Lifecycle {
+                attaches: *attach,
+                freezes_row: true,
+                refreshes: true,
+                follows_entity: true,
+            },
+        },
+        Effect::WriteStore(op) => match op {
+            StoreOp::PinRecord { .. }
+            | StoreOp::PinNode { .. }
+            | StoreOp::Unpin { .. }
+            | StoreOp::RemovePin { .. }
+            | StoreOp::RestorePin { .. }
+            | StoreOp::RenameSlot { .. }
+            | StoreOp::SavePin { .. }
+            | StoreOp::RetargetSlot { .. }
+            | StoreOp::RefreshSlot { .. }
+            | StoreOp::ForgetRecord { .. }
+            | StoreOp::ReapRecords { .. }
+            | StoreOp::CommitAliasRename { .. }
+            | StoreOp::CommitMuxRename { .. }
+            | StoreOp::WorktreeCreate { .. }
+            | StoreOp::WorktreeRemove { .. }
+            | StoreOp::WorktreeMerge { .. }
+            | StoreOp::WorktreeCloseDown { .. }
+            | StoreOp::WorktreePrune { .. } => Lifecycle::REFRESHES,
+        },
+    }
+}
+
+/// Whether a store write can be undone, and why not when it can't.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum UndoClass {
+    /// The executor records the inverse the named [`crate::tui::undo::Undo`] carries.
+    Undoable(&'static str),
+    /// There is no inverse to record, for this reason.
+    NotUndoable(&'static str),
+}
+
+/// Classify every store write for undo. The match has no wildcard arm:
+/// a new [`StoreOp`] fails to compile until it says whether it can be
+/// reversed.
+pub fn undo_class(op: &StoreOp) -> UndoClass {
+    use UndoClass::{NotUndoable, Undoable};
+    match op {
+        StoreOp::PinRecord { .. } | StoreOp::PinNode { .. } => Undoable("Undo::Unpin"),
+        StoreOp::Unpin { .. } => Undoable("Undo::RestorePin"),
+        StoreOp::RemovePin { .. } | StoreOp::RestorePin { .. } => {
+            NotUndoable("it is an undo, and undoing it again would only flip the pin back")
+        }
+        StoreOp::RenameSlot { .. } => NotUndoable("renaming also renames a live tmux session"),
+        StoreOp::SavePin { .. } => NotUndoable("the edit form can rename and change many fields"),
+        StoreOp::RetargetSlot { .. } => NotUndoable("not yet recorded"),
+        StoreOp::RefreshSlot { .. } => NotUndoable("not yet recorded"),
+        StoreOp::ForgetRecord { .. } | StoreOp::ReapRecords { .. } => {
+            NotUndoable("forgotten history records are not kept")
+        }
+        StoreOp::CommitAliasRename { .. } => NotUndoable("not yet recorded"),
+        StoreOp::CommitMuxRename { .. } => NotUndoable("it renames a live tmux session"),
+        StoreOp::WorktreeCreate { .. }
+        | StoreOp::WorktreeRemove { .. }
+        | StoreOp::WorktreeMerge { .. }
+        | StoreOp::WorktreeCloseDown { .. }
+        | StoreOp::WorktreePrune { .. } => NotUndoable("it changes git state outside Conspectus"),
+    }
 }

@@ -23,7 +23,9 @@ use crate::model::{AgentSessionId, MuxSessionId, NodeId};
 use crate::tui::View;
 
 pub mod forks;
+pub mod history;
 pub mod mux;
+pub mod pinned;
 pub mod prs;
 pub mod sessions;
 pub mod union;
@@ -41,26 +43,29 @@ pub enum RowId {
     /// back to `node show`.
     Group(NodeId),
     AgentSession(NodeId),
-    /// A candidate-mux child row under an ambiguous agent session.
-    /// Keyed on `(parent_session, candidate_mux)` so the row is
-    /// distinct from any other agent session that happens to be a
-    /// candidate for the same mux.
-    AgentSessionMuxCandidate {
-        agent: NodeId,
-        mux: NodeId,
-    },
     MuxSession(NodeId),
     Pr(NodeId),
     Fork(NodeId),
-    /// An unbound session pin row (ADR 0057). Keyed on the pin id
-    /// so the row is stable across refreshes even as the pin's
-    /// binding state changes — once a pin binds, the same logical
-    /// entry switches from a placeholder row to a
-    /// [`RowKind::AgentSession`] row whose `pin_id` field carries
-    /// the pin marker.
+    /// A record row in the History view (ADR 0140), keyed on the
+    /// record's stable id.
+    History {
+        record_id: String,
+    },
+    /// A slot row in the Pinned view (ADR 0141), keyed on the slot
+    /// name so it is stable while the slot's target changes state.
     Pin {
         pin_id: String,
     },
+    /// An entity listed under a slot in the Pinned view: the sessions
+    /// of a mux slot, the muxes of a checkout slot. Keyed on the slot
+    /// as well, so the same entity under two slots gets two rows.
+    Nested {
+        pin_id: String,
+        node: NodeId,
+    },
+    /// A named bucket of a view that groups by something other than a
+    /// node: the project or kind buckets of the Pinned view.
+    Bucket(String),
     /// A PRs-view group for a forge repo (`owner/repo`) when no local
     /// repo is known for its PRs (ADR 0129).
     Remote(String),
@@ -88,6 +93,8 @@ pub enum ViewLabel {
     Union,
     Prs,
     Forks,
+    Pinned,
+    History,
 }
 
 impl From<View> for ViewLabel {
@@ -98,6 +105,8 @@ impl From<View> for ViewLabel {
             View::Union => Self::Union,
             View::Prs => Self::Prs,
             View::Forks => Self::Forks,
+            View::Pinned => Self::Pinned,
+            View::History => Self::History,
         }
     }
 }
@@ -107,7 +116,7 @@ pub struct Row {
     pub id: RowId,
     /// Indentation depth, 0 = top-level.
     pub depth: u8,
-    /// True when the row owns children — drives the `▶`/`▼`
+    /// True when the row owns children — drives the `►`/`▼`
     /// disclosure glyph.
     pub expandable: bool,
     pub kind: RowKind,
@@ -123,15 +132,141 @@ pub struct Row {
 pub enum RowKind {
     Group(GroupRow),
     AgentSession(AgentSessionRow),
-    AgentSessionMuxCandidate(MuxCandidateRow),
     MuxSession(MuxSessionRow),
     Pr(PrRow),
     Fork(ForkRow),
-    /// Repo row emitted by the workspaces view for
-    /// member rows under each workspace. Styled like the agent /
-    /// mux rows so it scans as the same visual rhythm rather than
-    /// as a bare group header.
-    Repo(RepoRow),
+    /// A row of any kind in the Pinned and History views, drawn in the
+    /// shared mixed-kind columns.
+    Mixed(MixedRow),
+}
+
+/// The status words the mixed views (Pinned and History) print. Views
+/// of one kind of entity show state as glyphs instead; these are the
+/// only words, so the reference document can list them all.
+pub mod words {
+    pub const LIVE: &str = "live";
+    pub const IN_MUX: &str = "in mux";
+    pub const RESUMABLE: &str = "resumable";
+    pub const STOPPED: &str = "stopped";
+    pub const REMOVED: &str = "removed";
+    pub const MISSING: &str = "missing";
+    pub const PLANNED: &str = "planned";
+    pub const UNKNOWN: &str = "unknown";
+    pub const PR_OPEN: &str = "open";
+    pub const PR_DRAFT: &str = "draft";
+    pub const PR_MERGED: &str = "merged";
+    pub const PR_CLOSED: &str = "closed";
+
+    /// Every word, in the order the reference lists them.
+    pub const ALL: [&str; 12] = [
+        LIVE, IN_MUX, RESUMABLE, STOPPED, REMOVED, MISSING, PLANNED, UNKNOWN, PR_OPEN, PR_DRAFT,
+        PR_MERGED, PR_CLOSED,
+    ];
+}
+
+/// How a mixed-kind row's status reads: dimmed rows are the ones whose
+/// entity isn't there to act on.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum MixedTone {
+    Normal,
+    /// Gone, missing, planned, or unknown.
+    Dim,
+}
+
+/// One row in `<kind> <label> <status> <age> <content>` (ADR 0141).
+/// The kind glyph shows for every kind, sessions included, because it
+/// is the only kind signal in a list of mixed kinds.
+#[derive(Clone, Debug, PartialEq)]
+pub struct MixedRow {
+    pub node_kind: crate::model::NodeKind,
+    pub label: String,
+    pub status: String,
+    pub tone: MixedTone,
+    /// Age as `format_recency` renders it; `None` when unknown.
+    pub age: Option<String>,
+    /// The instant behind [`Self::age`], which picks the age's recency
+    /// color the way the other views do.
+    pub age_epoch: Option<i64>,
+    /// The state glyph of a row in the Mux grid, where the Mux view
+    /// draws a glyph rather than a word.
+    pub state: Option<EntityState>,
+    /// The agent or program the entity runs, drawn as the same filled
+    /// chip the other views use.
+    pub chip: Option<MixedChip>,
+    /// What follows the chip: a directory, a title, a repo and branch.
+    pub content: String,
+    pub primary_node: NodeId,
+    /// PR state, which tints the PR glyph.
+    pub pr_state: Option<String>,
+    /// The pin marker cell after the kind glyph.
+    pub marker: PinMarker,
+    /// Which column grid draws the row.
+    pub grid: MixedGrid,
+}
+
+/// An agent or program name drawn as a chip.
+#[derive(Clone, Debug, PartialEq)]
+pub struct MixedChip {
+    pub label: String,
+    /// A registered agent harness (its own color) rather than a plain
+    /// program.
+    pub agent: bool,
+}
+
+impl MixedChip {
+    pub fn agent(label: impl Into<String>) -> Self {
+        Self {
+            label: label.into(),
+            agent: true,
+        }
+    }
+
+    pub fn program(label: impl Into<String>) -> Self {
+        Self {
+            label: label.into(),
+            agent: false,
+        }
+    }
+}
+
+/// The pin marker of a row: a pair of glyphs, filled when the pinned
+/// entity is running and hollow when it isn't, so the marker answers
+/// "is this pinned" and "is the pin's target up" the same way in every
+/// view.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum PinMarker {
+    /// Not pinned.
+    None,
+    /// A pin on an entity that is running (`◉`).
+    Running,
+    /// A pin on an entity that is stopped, removed, missing, or not
+    /// started yet (`◎`, in the ghost color).
+    Stopped,
+}
+
+/// The state a primary-entity row draws as a glyph: sessions and
+/// muxes link or don't, and a mux can also be stopped or unchecked.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum EntityState {
+    /// Linked to a definitive mux, or a client is attached.
+    Linked,
+    /// No definitive mux, or no client attached.
+    Unlinked,
+    /// A mux that has stopped.
+    Stopped,
+    /// A mux that couldn't be checked.
+    Unknown,
+}
+
+/// How a mixed-kind row lays out its columns.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum MixedGrid {
+    /// Label, status, age, then chip and content, as in the Pinned and
+    /// History views.
+    Columns,
+    /// The Mux view's grid (name, chip, age, state), so a ghost mux
+    /// lines up with the live ones around it.
+    Mux,
 }
 
 /// A workspace / repo / worktree label row.
@@ -197,23 +332,27 @@ pub struct AgentSessionRow {
     /// search index, and status hints continue to read
     /// [`Self::display_label`] / [`Self::title`] unconditionally.
     pub title_disambiguates: bool,
+    /// The mux hosting this session, or the one that hosted it last
+    /// when that mux is gone. Untitled sessions are named after it,
+    /// and a gone one shows as a `was in` chip.
+    pub mux_host: Option<crate::model::MuxHost>,
     pub primary_node: NodeId,
-    /// Pin id when this agent-session row is the live realization of
-    /// a [`crate::model::PinCandidate`] (ADR 0057). Renderers add a
-    /// pin glyph so the operator can distinguish pin-bound sessions
-    /// at a glance; the rest of the row shape stays identical to a
-    /// non-pinned session — the alias overlay already injected the
-    /// pin's `display_name` via [`crate::resolve::pins`].
+    /// Pin slot name when this row is the live session a slot points
+    /// at. Renderers add a pin glyph.
     pub pin_id: Option<String>,
 }
 
 impl AgentSessionRow {
-    /// Apply ADR 0029's `alias > title > id-suffix` precedence and
+    /// Apply the `alias > title > mux name > id-suffix` precedence and
     /// return the strongest display label available for this row.
-    /// Falls back to `None` when neither alias nor title is set so
+    /// Falls back to `None` when none of the first three is set so
     /// callers can render the short-id suffix instead.
     pub fn display_label(&self) -> Option<&str> {
-        self.alias.as_deref().or(self.title.as_deref())
+        crate::aliases::session_display_name(
+            self.alias.as_deref(),
+            self.title.as_deref(),
+            self.mux_host.as_ref().map(|host| host.name.as_str()),
+        )
     }
 
     /// Display label for the left-tree row body. Alias wins
@@ -230,7 +369,26 @@ impl AgentSessionRow {
         if self.title_disambiguates {
             return self.title.as_deref().filter(|s| !s.is_empty());
         }
+        // An untitled session is named after its mux; a titled one
+        // that doesn't need disambiguating keeps its short id.
+        if self.title.as_deref().is_none_or(|t| t.trim().is_empty()) {
+            return self
+                .mux_host
+                .as_ref()
+                .map(|host| host.name.as_str())
+                .filter(|name| !name.is_empty());
+        }
         None
+    }
+
+    /// The name of the gone mux this session last ran in, for the
+    /// `was in` chip. `None` while the mux exists, since the live mux
+    /// already shows in the row.
+    pub fn gone_mux_name(&self) -> Option<&str> {
+        self.mux_host
+            .as_ref()
+            .filter(|host| !host.live)
+            .map(|host| host.name.as_str())
     }
 }
 
@@ -248,17 +406,6 @@ pub enum MuxIndicator {
     Ambiguous { candidate_count: usize },
     /// `◯`. No mux link at all.
     Unmuxed,
-}
-
-#[derive(Clone, Debug, PartialEq)]
-pub struct MuxCandidateRow {
-    pub mux: MuxSessionId,
-    /// Display label for the candidate mux, e.g. `tmux:editor`.
-    pub mux_label: String,
-    /// True when this candidate is the resolver-preferred one for
-    /// the parent agent session.
-    pub is_preferred: bool,
-    pub primary_node: NodeId,
 }
 
 /// A mux-session row in the mux or union view.
@@ -297,10 +444,8 @@ pub struct MuxSessionRow {
     /// muxes expose sessions as child rows where each preview is shown
     /// individually.
     pub single_session_preview: Option<String>,
-    /// `Some(pin_id)` when this mux is the bound mux of a declared
-    /// session pin (ADR 0057). Renderers paint a pin glyph next to
-    /// the mux label so the operator can spot pin-linked muxes from
-    /// any view.
+    /// `Some(slot id)` when a pin slot points at this mux (ADR 0141).
+    /// Renderers mark it so pinned muxes stand out in any view.
     pub pin_id: Option<String>,
     pub primary_node: NodeId,
 }
@@ -323,6 +468,8 @@ pub struct PrRow {
     /// The PR title on one line, when the forge listing gave one.
     pub title: Option<String>,
     pub updated_recency: Option<String>,
+    /// The instant behind [`Self::updated_recency`], for its color.
+    pub updated_epoch: Option<i64>,
     pub url: Option<String>,
     pub primary_node: NodeId,
 }
@@ -335,31 +482,6 @@ pub struct ForkRow {
     pub scope: Option<String>,
     pub parent_label: Option<String>,
     pub child_count: usize,
-    pub primary_node: NodeId,
-}
-
-/// A workspace member row in the workspaces view. Carries
-/// the short id + display label + canonical path the renderer needs
-/// to render the row with the same visual rhythm as
-/// [`AgentSessionRow`] and [`MuxSessionRow`] rather than as a bare
-/// group header.
-#[derive(Clone, Debug, PartialEq)]
-pub struct RepoRow {
-    pub short_id: String,
-    /// Workspace-visible name for the member — atelier's
-    /// `[[repos]].name`, agent-deck's symlink leaf, generic
-    /// discovery's child name. Same string as the membership link's
-    /// `logical_path` basename.
-    pub display_name: String,
-    /// Operator-recognizable filesystem path for the repo. Prefer the
-    /// first non-agent-deck `source_paths` entry (the canonical
-    /// checkout), falling back to the git `common_dir`. `None` only
-    /// for snapshot shapes that have neither.
-    pub canonical_path: Option<String>,
-    /// Git `common_dir` (the `.git` path). Kept on the row so the
-    /// renderer can fall back when `canonical_path` is absent and so
-    /// `node show` and the detail pane have a stable handle.
-    pub common_dir: String,
     pub primary_node: NodeId,
 }
 
@@ -531,12 +653,12 @@ fn workspace_member_names(
 /// The program a mux runs, by basename, for rows with no linked agent
 /// to label them. Prefers what the active pane runs now
 /// (`#{pane_current_command}`), then the program the pane was started
-/// with, then the launch program of the pin bound to the mux, so a
-/// freshly launched pin keeps its label even if the backend hasn't
+/// with, then the launch program of the slot pinning the mux, so a
+/// freshly launched mux keeps its label even if the backend hasn't
 /// reported the pane yet. `None` when nothing names a program.
 pub(crate) fn mux_program(
     mux: &crate::model::MuxSessionNode,
-    pin: Option<&crate::model::PinCandidate>,
+    pin: Option<&crate::model::PinNode>,
 ) -> Option<String> {
     let start_program = mux
         .active_pane_start_command
@@ -601,7 +723,7 @@ pub(crate) fn mux_process_harnesses(
 /// harness exits reads as the shell.
 pub(crate) fn mux_program_harness(
     mux: &crate::model::MuxSessionNode,
-    pin: Option<&crate::model::PinCandidate>,
+    pin: Option<&crate::model::PinNode>,
     observed_harness: Option<&str>,
 ) -> Option<String> {
     use crate::discovery::harness::adapter_in_command;
@@ -622,9 +744,9 @@ pub(crate) fn mux_program_harness(
             adapter_in_command([current])
         }
         (_, Some(start)) => adapter_in_command(start.split_whitespace()),
-        (_, None) => pin.and_then(|pin| match &pin.launch_argv {
-            Some(argv) => adapter_in_command(argv.iter().map(String::as_str)),
-            None => pin_program(pin)
+        (_, None) => pin.and_then(|pin| match pin.list("argv") {
+            Some(argv) if !argv.is_empty() => adapter_in_command(argv.iter().map(String::as_str)),
+            _ => pin_program(pin)
                 .as_deref()
                 .and_then(|program| adapter_in_command([program])),
         }),
@@ -632,17 +754,109 @@ pub(crate) fn mux_program_harness(
     adapter.map(|adapter| adapter.display_label().to_string())
 }
 
-/// The program a pin launches: its `launch.argv` override, else the
-/// harness's default argv, else the harness key itself.
-pub(crate) fn pin_program(pin: &crate::model::PinCandidate) -> Option<String> {
-    if let Some(program) = pin.launch_argv.as_ref().and_then(|argv| argv.first()) {
+/// The program a mux slot launches: the first token of its `argv`,
+/// else the harness's default argv, else the harness key itself.
+pub(crate) fn pin_program(pin: &crate::model::PinNode) -> Option<String> {
+    if let Some(program) = pin.list("argv").and_then(|argv| argv.first()) {
         return program_name(program);
     }
-    let default_argv = crate::discovery::harness::launch_argv_for(&pin.harness);
+    let harness = pin.text("harness")?;
+    let default_argv = crate::discovery::harness::launch_argv_for(harness);
     match default_argv.first() {
         Some(program) => program_name(&program.to_string_lossy()),
-        None => program_name(&pin.harness),
+        None => program_name(harness),
     }
+}
+
+/// Every slot in the snapshot, in `pins.toml` order.
+pub(crate) fn pin_nodes(snapshot: &crate::model::GraphSnapshot) -> Vec<&crate::model::PinNode> {
+    let mut pins: Vec<&crate::model::PinNode> = snapshot
+        .nodes
+        .iter()
+        .filter_map(|node| match node {
+            crate::model::GraphNode::Pin(pin) => Some(pin),
+            _ => None,
+        })
+        .collect();
+    pins.sort_by_key(|pin| pin.order);
+    pins
+}
+
+/// The pin marker each pinned entity wears: filled while the entity is
+/// running, hollow once it is stopped or gone.
+pub(crate) fn pinned_node_markers(
+    snapshot: &crate::model::GraphSnapshot,
+) -> std::collections::BTreeMap<NodeId, PinMarker> {
+    pin_nodes(snapshot)
+        .into_iter()
+        .filter_map(|pin| pin.target_node.clone())
+        .map(|node| {
+            let marker =
+                if snapshot.find_node(&node).is_some() && snapshot.presence(&node).is_none() {
+                    PinMarker::Running
+                } else {
+                    PinMarker::Stopped
+                };
+            (node, marker)
+        })
+        .collect()
+}
+
+/// The entities pin slots point at, whatever their status.
+pub(crate) fn pinned_node_set(
+    snapshot: &crate::model::GraphSnapshot,
+) -> std::collections::BTreeSet<NodeId> {
+    pin_nodes(snapshot)
+        .into_iter()
+        .filter_map(|pin| pin.target_node.clone())
+        .collect()
+}
+
+/// The graph node a row stands for, when it stands for one.
+pub(crate) fn row_node(id: &RowId) -> Option<&NodeId> {
+    match id {
+        RowId::Group(node)
+        | RowId::AgentSession(node)
+        | RowId::MuxSession(node)
+        | RowId::Pr(node)
+        | RowId::Fork(node)
+        | RowId::Nested { node, .. } => Some(node),
+        _ => None,
+    }
+}
+
+/// Keep the rows of pinned entities and the groups above them
+/// (`pinned only`). The tree is depth-first, so a row stays when it or
+/// a descendant is pinned.
+fn retain_pinned_rows(tree: &mut RowTree, pinned: &std::collections::BTreeSet<NodeId>) {
+    let rows = std::mem::take(&mut tree.rows);
+    let keep: Vec<bool> = (0..rows.len())
+        .map(|index| {
+            let depth = rows[index].depth;
+            rows[index..]
+                .iter()
+                .enumerate()
+                .take_while(|(offset, row)| *offset == 0 || row.depth > depth)
+                .any(|(_, row)| row_node(&row.id).is_some_and(|node| pinned.contains(node)))
+        })
+        .collect();
+    tree.rows = rows
+        .into_iter()
+        .zip(keep)
+        .filter_map(|(row, keep)| keep.then_some(row))
+        .collect();
+}
+
+/// The node a slot points at when it is live in the graph.
+pub(crate) fn live_pin_target(
+    snapshot: &crate::model::GraphSnapshot,
+    pin: &crate::model::PinNode,
+) -> Option<NodeId> {
+    if pin.status != crate::model::SlotStatus::Live {
+        return None;
+    }
+    let id = pin.target_node.clone()?;
+    snapshot.find_node(&id).is_some().then_some(id)
 }
 
 fn program_name(command: &str) -> Option<String> {
@@ -756,6 +970,7 @@ pub(crate) fn agent_row(
             title: agent.node.title.clone(),
             alias: agent.alias.clone(),
             title_disambiguates: false,
+            mux_host: None,
             primary_node: node_id,
         }),
     }
@@ -862,6 +1077,17 @@ impl<'a> TreeInputs<'a> {
 /// [`crate::tui::RunConfig`] at startup, and post-first-load
 /// projection changes pull it from `App` state.
 pub(crate) fn build_tree_for_view(inputs: TreeInputs<'_>) -> RowTree {
+    let pinned_only =
+        inputs.filter.pinned_only && matches!(inputs.view, View::Sessions | View::Mux | View::Prs);
+    let pinned = pinned_only.then(|| pinned_node_set(inputs.snapshot));
+    let mut tree = build_tree_for_view_unfiltered(inputs);
+    if let Some(pinned) = pinned {
+        retain_pinned_rows(&mut tree, &pinned);
+    }
+    tree
+}
+
+fn build_tree_for_view_unfiltered(inputs: TreeInputs<'_>) -> RowTree {
     let home = tree_home_dir();
     let now = Some(tree_current_unix_epoch());
     let TreeInputs {
@@ -923,6 +1149,26 @@ pub(crate) fn build_tree_for_view(inputs: TreeInputs<'_>) -> RowTree {
             snapshot,
             home: home.as_deref(),
         }),
+        View::History => history::build_history_tree(history::HistoryBuildInputs {
+            snapshot,
+            home: home.as_deref(),
+            now,
+            show_pinned: filter.show_pinned_history,
+            grouping: match grouping {
+                crate::tui::Grouping::History(g) => g,
+                _ => crate::tui::HistoryGrouping::Project,
+            },
+        }),
+        View::Pinned => pinned::build_pinned_tree(pinned::PinnedBuildInputs {
+            snapshot,
+            home: home.as_deref(),
+            now,
+            grouping: match grouping {
+                crate::tui::Grouping::Pinned(g) => g,
+                _ => crate::tui::PinnedGrouping::Project,
+            },
+            sort,
+        }),
     }
 }
 
@@ -934,16 +1180,16 @@ fn tree_home_dir() -> Option<std::path::PathBuf> {
 /// node explorer) use for relative ages.
 /// A fixed time snapshot mode renders against (ADR 0113). Unset, the
 /// TUI reads the clock.
-static PINNED_NOW: std::sync::OnceLock<i64> = std::sync::OnceLock::new();
+static FROZEN_NOW: std::sync::OnceLock<i64> = std::sync::OnceLock::new();
 
 /// Render ages against `epoch` for the rest of the process.
 #[cfg(feature = "snapshot")]
-pub(crate) fn pin_clock(epoch: i64) {
-    let _ = PINNED_NOW.set(epoch);
+pub(crate) fn freeze_clock(epoch: i64) {
+    let _ = FROZEN_NOW.set(epoch);
 }
 
 pub(crate) fn tree_current_unix_epoch() -> i64 {
-    PINNED_NOW
+    FROZEN_NOW
         .get()
         .copied()
         .unwrap_or_else(crate::discovery::current_epoch)

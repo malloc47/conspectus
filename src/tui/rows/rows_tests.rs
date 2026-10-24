@@ -114,23 +114,33 @@ fn recency_bucket_is_none_when_either_side_missing() {
     assert_eq!(recency_bucket(Some(100), None), None);
 }
 
-fn program_test_pin(harness: &str, launch_argv: Option<&[&str]>) -> crate::model::PinCandidate {
-    use crate::model::{PinCandidate, PinMuxRef, Provenance};
-    PinCandidate {
-        id: "p".to_string(),
-        display_name: "p".to_string(),
-        harness: harness.to_string(),
-        cwd: "/p".to_string(),
-        mux: PinMuxRef {
-            backend: "tmux".to_string(),
-            name: "x".to_string(),
-            socket_name: None,
-        },
-        launch_argv: launch_argv.map(|argv| argv.iter().map(ToString::to_string).collect()),
-        reason: None,
-        provenance: Provenance::LocalPin,
-        store_path: "/p/.conspectus.toml".to_string(),
-        binding: None,
+fn program_test_pin(harness: &str, launch_argv: Option<&[&str]>) -> crate::model::PinNode {
+    use crate::model::{FieldSource, FieldValue, PinId, PinKind, PinNode, RecipeField, SlotStatus};
+    let mut effective = vec![RecipeField {
+        name: "harness".to_string(),
+        value: FieldValue::Text(harness.to_string()),
+        source: FieldSource::Override,
+    }];
+    if let Some(argv) = launch_argv {
+        effective.push(RecipeField {
+            name: "argv".to_string(),
+            value: FieldValue::List(argv.iter().map(ToString::to_string).collect()),
+            source: FieldSource::Override,
+        });
+    }
+    PinNode {
+        id: PinId::new("p"),
+        kind: PinKind::Mux,
+        label: "p".to_string(),
+        target: None,
+        target_node: None,
+        status: SlotStatus::Planned,
+        overrides: Default::default(),
+        snapshot: Default::default(),
+        effective,
+        order: 0,
+        legacy: false,
+        pinned_at: None,
     }
 }
 
@@ -235,7 +245,7 @@ fn mux_program_harness_prefers_the_observed_process_harness() {
 }
 
 #[test]
-fn mux_program_harness_falls_back_to_the_pin_launch_argv() {
+fn mux_program_harness_falls_back_to_the_slots_argv() {
     use crate::model::{MuxSessionId, MuxSessionNode};
     let bare = MuxSessionNode::new(MuxSessionId::new("tmux:x"), "tmux", "x");
     let atelier_pin = program_test_pin(

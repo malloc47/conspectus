@@ -2,7 +2,6 @@ use super::hook::{
     ensure_claude_hook, harness_binaries, has_claude_hook, remove_claude_hook,
     resolve_harness_pid_with,
 };
-use super::pin::{format_epoch_iso8601, resolve_resume_argv_with_cache};
 use super::tui::parse_tui_duration;
 use super::*;
 use std::time::Duration;
@@ -492,12 +491,12 @@ fn filter_args_grouping_none_when_flag_omitted() {
     assert!(args.to_grouping(View::Sessions).expect("parse").is_none());
 }
 
-// ---- Pin launch helpers --------------------------
+// ---- Launch helpers --------------------------
 
 #[test]
 fn format_attach_command_uses_bare_tmux_for_default_socket() {
     assert_eq!(
-        super::pin::format_attach_command(None, "ingest"),
+        crate::rebuild::launch::format_attach_command(None, "ingest"),
         "tmux attach-session -t ingest"
     );
 }
@@ -505,7 +504,7 @@ fn format_attach_command_uses_bare_tmux_for_default_socket() {
 #[test]
 fn format_attach_command_threads_socket_via_dash_l() {
     assert_eq!(
-        super::pin::format_attach_command(Some("scratch"), "ingest"),
+        crate::rebuild::launch::format_attach_command(Some("scratch"), "ingest"),
         "tmux -L scratch attach-session -t ingest"
     );
 }
@@ -518,8 +517,8 @@ fn format_argv_for_send_keys_quotes_whitespace_tokens() {
         std::ffi::OsString::from("hello world"),
     ];
     assert_eq!(
-        super::pin::format_argv_for_send_keys(&argv),
-        "codex --prompt \"hello world\""
+        crate::rebuild::launch::format_argv_for_send_keys(&argv),
+        "codex --prompt 'hello world'"
     );
 }
 
@@ -530,318 +529,9 @@ fn format_argv_for_send_keys_leaves_bare_tokens_unquoted() {
         std::ffi::OsString::from("--model=opus"),
     ];
     assert_eq!(
-        super::pin::format_argv_for_send_keys(&argv),
+        crate::rebuild::launch::format_argv_for_send_keys(&argv),
         "codex --model=opus"
     );
-}
-
-// ----- ISO 8601 formatting for pin show -----
-
-#[test]
-fn format_epoch_iso8601_renders_known_unix_dates() {
-    // 2024-01-01T00:00:00Z = 1704067200
-    assert_eq!(format_epoch_iso8601(1_704_067_200), "2024-01-01T00:00:00Z");
-    // 2026-06-05T12:34:56Z (mid-day timestamp)
-    // Computed: days_from_1970 = 20609, secs = 20609*86400 + 12*3600+34*60+56
-    // = 1780_624_096
-    assert_eq!(format_epoch_iso8601(1_780_662_896), "2026-06-05T12:34:56Z");
-    // Epoch zero.
-    assert_eq!(format_epoch_iso8601(0), "1970-01-01T00:00:00Z");
-}
-
-#[test]
-fn format_epoch_iso8601_clamps_negative_epochs_to_zero() {
-    // Defensive — sidecars shouldn't carry negative epochs, but
-    // we shouldn't panic if they do.
-    assert_eq!(format_epoch_iso8601(-1), "1970-01-01T00:00:00Z");
-}
-
-// ----- Launch-time resume resolver -----
-
-mod resume_resolver {
-    use crate::model::{
-        AgentSessionId, AgentSessionNode, Confidence, Freshness, GraphLink, GraphNode,
-        GraphSnapshot, LinkEndpoint, LinkState, NodeId, PinCandidate, PinMuxRef, Provenance,
-        RelationKind, SourceMetadata,
-    };
-    use crate::pin_bindings::{
-        PinBindingRecord, PinBindingsCache, read as read_sidecar, write as write_sidecar,
-    };
-    use std::path::Path;
-    use tempfile::tempdir;
-
-    fn make_pin(harness: &str) -> PinCandidate {
-        PinCandidate {
-            id: "ingest".to_string(),
-            display_name: "Ingest".to_string(),
-            harness: harness.to_string(),
-            cwd: "/p".to_string(),
-            mux: PinMuxRef {
-                backend: "tmux".to_string(),
-                name: "ingest".to_string(),
-                socket_name: None,
-            },
-            launch_argv: None,
-            reason: None,
-            provenance: Provenance::LocalPin,
-            store_path: "/p/.conspectus.toml".to_string(),
-            binding: None,
-        }
-    }
-
-    fn make_session(harness: &str, key: &str) -> AgentSessionNode {
-        AgentSessionNode::new(
-            AgentSessionId::new(harness, "/state", key),
-            harness.to_string(),
-        )
-    }
-
-    fn parent_link(snap: &mut GraphSnapshot, harness: &str, child: &str, parent: &str) {
-        snap.candidate_links.push(GraphLink {
-            id: format!("{child}-parent-{parent}"),
-            source: NodeId::AgentSession(AgentSessionId::new(harness, "/state", child)),
-            target: LinkEndpoint::Node {
-                id: NodeId::AgentSession(AgentSessionId::new(harness, "/state", parent)),
-            },
-            relation: RelationKind::ParentSession,
-            provenance: Provenance::StrongDiscovered,
-            confidence: Confidence::High,
-            freshness: Freshness::Fresh,
-            source_metadata: SourceMetadata::default(),
-            state: LinkState::Active,
-        });
-    }
-
-    /// Resolve against the harness's default launch argv — the
-    /// shape an unconfigured pin launches with.
-    fn resume_with_default_argv(
-        snap: &GraphSnapshot,
-        pin: &PinCandidate,
-        cache: &PinBindingsCache,
-    ) -> Option<Vec<std::ffi::OsString>> {
-        let base = crate::discovery::harness::launch_argv_for(&pin.harness);
-        super::resolve_resume_argv_with_cache(snap, pin, Path::new("/p"), &base, cache)
-    }
-
-    fn seed_sidecar(cache: &PinBindingsCache, session_key: &str, harness: &str) {
-        let record = PinBindingRecord::new(
-            "ingest",
-            "ingest",
-            None,
-            session_key,
-            harness,
-            1_738_742_400,
-        );
-        write_sidecar(cache, &record).expect("seed sidecar");
-    }
-
-    #[test]
-    fn no_sidecar_returns_none() {
-        let temp = tempdir().unwrap();
-        let cache = PinBindingsCache::new().with_xdg_cache_home(temp.path());
-        let snap = GraphSnapshot::empty();
-        let pin = make_pin("codex");
-        assert!(resume_with_default_argv(&snap, &pin, &cache).is_none());
-    }
-
-    #[test]
-    fn sidecar_with_recorded_session_in_snapshot_splices_resume_argv() {
-        let temp = tempdir().unwrap();
-        let cache = PinBindingsCache::new().with_xdg_cache_home(temp.path());
-        seed_sidecar(&cache, "session-a", "codex");
-
-        let mut snap = GraphSnapshot::empty();
-        snap.nodes
-            .push(GraphNode::AgentSession(make_session("codex", "session-a")));
-        let pin = make_pin("codex");
-
-        let argv = resume_with_default_argv(&snap, &pin, &cache).expect("resume argv produced");
-        // codex resume_argv: ["codex",
-        // "exec", "--resume", "session-a"].
-        assert_eq!(
-            argv,
-            vec![
-                std::ffi::OsString::from("codex"),
-                std::ffi::OsString::from("exec"),
-                std::ffi::OsString::from("--resume"),
-                std::ffi::OsString::from("session-a"),
-            ]
-        );
-    }
-
-    #[test]
-    fn lineage_walks_forward_to_head_before_resume() {
-        // a -> b -> c. Sidecar recorded `a`; we expect resume to
-        // target `c`.
-        let temp = tempdir().unwrap();
-        let cache = PinBindingsCache::new().with_xdg_cache_home(temp.path());
-        seed_sidecar(&cache, "a", "codex");
-
-        let mut snap = GraphSnapshot::empty();
-        for key in ["a", "b", "c"] {
-            snap.nodes
-                .push(GraphNode::AgentSession(make_session("codex", key)));
-        }
-        parent_link(&mut snap, "codex", "b", "a");
-        parent_link(&mut snap, "codex", "c", "b");
-
-        let pin = make_pin("codex");
-        let argv = resume_with_default_argv(&snap, &pin, &cache).expect("resume argv");
-        assert!(argv.contains(&std::ffi::OsString::from("c")));
-        assert!(!argv.contains(&std::ffi::OsString::from("a")));
-    }
-
-    #[test]
-    fn fork_in_lineage_returns_none_and_keeps_sidecar() {
-        let temp = tempdir().unwrap();
-        let cache = PinBindingsCache::new().with_xdg_cache_home(temp.path());
-        seed_sidecar(&cache, "a", "codex");
-
-        let mut snap = GraphSnapshot::empty();
-        for key in ["a", "b", "c"] {
-            snap.nodes
-                .push(GraphNode::AgentSession(make_session("codex", key)));
-        }
-        parent_link(&mut snap, "codex", "b", "a");
-        parent_link(&mut snap, "codex", "c", "a");
-
-        let pin = make_pin("codex");
-        let outcome = resume_with_default_argv(&snap, &pin, &cache);
-        assert!(outcome.is_none(), "fork should fall back to default argv");
-        // Sidecar is NOT deleted on fork — the data isn't stale,
-        // just ambiguous.
-        assert!(read_sidecar(&cache, "ingest").unwrap().is_some());
-    }
-
-    #[test]
-    fn missing_session_deletes_sidecar() {
-        // ADR 0058 Q7: recorded session not on disk → delete the
-        // sidecar before falling back.
-        let temp = tempdir().unwrap();
-        let cache = PinBindingsCache::new().with_xdg_cache_home(temp.path());
-        seed_sidecar(&cache, "gone", "codex");
-        let snap = GraphSnapshot::empty();
-        let pin = make_pin("codex");
-
-        let outcome = resume_with_default_argv(&snap, &pin, &cache);
-        assert!(outcome.is_none());
-        assert!(
-            read_sidecar(&cache, "ingest").unwrap().is_none(),
-            "stale sidecar should be deleted per ADR 0058 Q7",
-        );
-    }
-
-    #[test]
-    fn harness_without_resume_returns_none() {
-        // aider has no resume CLI.
-        let temp = tempdir().unwrap();
-        let cache = PinBindingsCache::new().with_xdg_cache_home(temp.path());
-        seed_sidecar(&cache, "session-a", "aider");
-
-        let mut snap = GraphSnapshot::empty();
-        snap.nodes
-            .push(GraphNode::AgentSession(make_session("aider", "session-a")));
-        let pin = make_pin("aider");
-
-        let outcome = resume_with_default_argv(&snap, &pin, &cache);
-        assert!(outcome.is_none());
-        // Sidecar is not deleted — the session exists, just
-        // can't be resumed via CLI.
-        assert!(read_sidecar(&cache, "ingest").unwrap().is_some());
-    }
-
-    #[test]
-    fn claude_code_returns_claude_resume_argv() {
-        let temp = tempdir().unwrap();
-        let cache = PinBindingsCache::new().with_xdg_cache_home(temp.path());
-        seed_sidecar(&cache, "session-c", "claude-code");
-
-        let mut snap = GraphSnapshot::empty();
-        snap.nodes.push(GraphNode::AgentSession(make_session(
-            "claude-code",
-            "session-c",
-        )));
-        let pin = make_pin("claude-code");
-
-        let argv = resume_with_default_argv(&snap, &pin, &cache).expect("claude resume argv");
-        assert_eq!(
-            argv,
-            vec![
-                std::ffi::OsString::from("claude"),
-                std::ffi::OsString::from("--resume"),
-                std::ffi::OsString::from("session-c"),
-            ]
-        );
-    }
-
-    #[test]
-    fn custom_launch_argv_keeps_wrapper_and_options_on_resume() {
-        // ADR 0098: a pin launched via `atelier exec claude
-        // --dangerously-skip-permissions` must resume with the same
-        // wrapper and options, not a bare `claude --resume`.
-        let temp = tempdir().unwrap();
-        let cache = PinBindingsCache::new().with_xdg_cache_home(temp.path());
-        seed_sidecar(&cache, "session-c", "claude-code");
-
-        let mut snap = GraphSnapshot::empty();
-        snap.nodes.push(GraphNode::AgentSession(make_session(
-            "claude-code",
-            "session-c",
-        )));
-        let pin = make_pin("claude-code");
-        let base: Vec<std::ffi::OsString> = [
-            "atelier",
-            "exec",
-            "claude",
-            "--dangerously-skip-permissions",
-        ]
-        .into_iter()
-        .map(std::ffi::OsString::from)
-        .collect();
-
-        let argv =
-            super::resolve_resume_argv_with_cache(&snap, &pin, Path::new("/p"), &base, &cache)
-                .expect("spliced resume argv");
-        let argv: Vec<_> = argv
-            .iter()
-            .map(|s| s.to_string_lossy().into_owned())
-            .collect();
-        assert_eq!(
-            argv,
-            [
-                "atelier",
-                "exec",
-                "claude",
-                "--resume",
-                "session-c",
-                "--dangerously-skip-permissions",
-            ]
-        );
-    }
-
-    #[test]
-    fn launch_argv_without_harness_binary_launches_fresh_and_keeps_sidecar() {
-        let temp = tempdir().unwrap();
-        let cache = PinBindingsCache::new().with_xdg_cache_home(temp.path());
-        seed_sidecar(&cache, "session-c", "claude-code");
-
-        let mut snap = GraphSnapshot::empty();
-        snap.nodes.push(GraphNode::AgentSession(make_session(
-            "claude-code",
-            "session-c",
-        )));
-        let pin = make_pin("claude-code");
-        let base = vec![std::ffi::OsString::from("./start-agent.sh")];
-
-        let outcome =
-            super::resolve_resume_argv_with_cache(&snap, &pin, Path::new("/p"), &base, &cache);
-        assert!(
-            outcome.is_none(),
-            "unspliceable argv falls back to fresh launch"
-        );
-        // The session is still valid; only this argv can't carry it.
-        assert!(read_sidecar(&cache, "ingest").unwrap().is_some());
-    }
 }
 
 mod help_text {
@@ -957,13 +647,7 @@ mod help_text {
     #[test]
     fn write_commands_do_not_offer_store_all() {
         let root = Cli::command();
-        for path in [
-            &["pin", "create"][..],
-            &["pin", "adopt"],
-            &["pin", "bind"],
-            &["declared", "create"],
-            &["rename", "session"],
-        ] {
+        for path in [&["declared", "create"][..], &["rename", "session"]] {
             let cmd = path.iter().fold(&root, |cmd, name| {
                 cmd.find_subcommand(name).expect("subcommand exists")
             });
@@ -1055,4 +739,32 @@ fn long_running_scan_roots_prefer_flags_then_config_then_launch_dir() {
         long_running_scan_roots(Vec::new(), &config, launch.clone()),
         ScanRoots::launch_dir(launch)
     );
+}
+
+#[test]
+fn mux_launch_argv_accepts_tokens_that_start_with_a_hyphen() {
+    for tokens in [
+        vec!["claude", "--dangerously-skip-permissions"],
+        vec![
+            "codex",
+            "--dangerously-bypass-approvals-and-sandbox",
+            "-p",
+            "x",
+        ],
+        vec!["tool", "two words", ""],
+    ] {
+        let mut args = vec![
+            "conspectus",
+            "mux",
+            "launch",
+            "claude-code",
+            "--name",
+            "n",
+            "--no-attach",
+            "--argv",
+        ];
+        args.extend(tokens.iter().copied());
+        let parsed = Cli::try_parse_from(args);
+        assert!(parsed.is_ok(), "{tokens:?}: {:?}", parsed.err());
+    }
 }

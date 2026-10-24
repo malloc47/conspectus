@@ -1,11 +1,9 @@
-use super::pins::split_trailing_number;
-use super::tree::row_pin_id;
 use super::*;
 use crate::dev_scenarios;
 use crate::filter::RowFilter;
 use crate::model::{
-    AgentSessionId, AgentSessionNode, CheckoutId, CheckoutNode, GraphNode, GraphSnapshot,
-    PinBinding, PinCandidate, PinMuxRef, Provenance, RepoId, RepoNode, WorkspaceId,
+    AgentSessionId, AgentSessionNode, CheckoutId, CheckoutNode, FieldValue, GraphNode,
+    GraphSnapshot, PinKind, PinSlot, Provenance, RepoId, RepoNode, SlotFields, WorkspaceId,
 };
 use crate::resolve::resolve_snapshot;
 use crate::tui::SessionsGrouping;
@@ -24,6 +22,7 @@ fn make_snapshot_with(sessions: &[(&str, &str, &str)]) -> GraphSnapshot {
             git_dir: None,
             current_branch: None,
             worktree: None,
+            head_commit: None,
         }));
         snap.nodes.push(GraphNode::AgentSession(
             AgentSessionNode::new(
@@ -89,196 +88,6 @@ fn select_session(app: &mut App, session_key: &str) -> RowId {
     id
 }
 
-#[test]
-fn pins_context_seeds_pin_create_defaults_from_selected_session() {
-    let mut app = seeded_app(&[("codex", "Session One", "/p/project")]);
-    select_session(&mut app, "Session One");
-
-    let defaults = app.pins_context().pin_create_defaults;
-    assert_eq!(defaults.id, "session-one");
-    assert_eq!(defaults.display_name, "Session One");
-    assert_eq!(defaults.harness, "codex");
-    assert_eq!(defaults.cwd, "/p/project");
-    assert_eq!(defaults.mux_name, "session-one");
-}
-
-#[test]
-fn pin_create_defaults_cap_long_selected_session_titles() {
-    let long_title =
-        "Investigate the customer workspace regression with the unusually verbose summary";
-    let mut app = seeded_app(&[("codex", long_title, "/p/project")]);
-    select_session(&mut app, long_title);
-
-    let defaults = app.pins_context().pin_create_defaults;
-    assert!(defaults.display_name.chars().count() <= 48);
-    assert_eq!(
-        defaults.display_name,
-        "Investigate the customer workspace regression"
-    );
-    assert_eq!(defaults.id, "investigate-the-customer-workspace-regression");
-    assert_eq!(defaults.mux_name, defaults.id);
-}
-
-#[test]
-fn pins_context_seeds_pin_create_cwd_from_selected_group() {
-    let mut app = seeded_app(&[("codex", "a", "/p/proja")]);
-    let group_id = app
-        .visible_rows()
-        .iter()
-        .find_map(|row| match &row.kind {
-            RowKind::Group(group) if group.primary_node.is_some() => Some(row.id.clone()),
-            _ => None,
-        })
-        .expect("group row with primary node");
-    app.set_selection(group_id);
-
-    let defaults = app.pins_context().pin_create_defaults;
-    assert_eq!(defaults.cwd, "/p/proja");
-    assert_eq!(defaults.id, "");
-    assert_eq!(defaults.harness, "");
-}
-
-#[test]
-fn pins_context_seeds_pin_create_cwd_from_selected_mux_absolute() {
-    // Regression: the MuxSession branch of `pin_create_defaults`
-    // used to seed `cwd` from `MuxSessionRow.cwd_display`, which
-    // tilde-shortens the path. The pin write path then rejected
-    // it via `Path::is_absolute`. The form must instead carry
-    // the raw absolute cwd off the mux node.
-    let mut snap = snapshot_session_with_mux();
-    for node in &mut snap.nodes {
-        if let crate::model::GraphNode::MuxSession(mux) = node {
-            mux.cwd = Some("/p/proj".to_string());
-        }
-    }
-    let tree = crate::tui::rows::mux::build_mux_tree(crate::tui::rows::mux::MuxBuildInputs {
-        snapshot: &snap,
-        home: None,
-        now: None,
-        filter: crate::tui::RowFilter::default(),
-        grouping: crate::tui::MuxGrouping::Session,
-        sort: crate::tui::Sort::Hierarchy,
-        mux_recency: crate::tui::MuxRecency::default(),
-    });
-    let mut app = App::new(RunConfig::defaults());
-    app.update(Msg::SetData {
-        snapshot: SnapshotHandle::from_snapshot(&snap),
-        tree,
-        loaded_at_epoch: 1_700_000_000,
-        initial_selection_hint: None,
-    });
-    let mux_row_id = app
-        .visible_rows()
-        .iter()
-        .find_map(|row| match &row.kind {
-            RowKind::MuxSession(_) => Some(row.id.clone()),
-            _ => None,
-        })
-        .expect("mux row in tree");
-    app.set_selection(mux_row_id);
-
-    let defaults = app.pins_context().pin_create_defaults;
-    assert_eq!(defaults.cwd, "/p/proj");
-    assert_eq!(defaults.mode, PinCreateMode::NewVariation);
-    assert_eq!(defaults.mux_name, "work-2");
-    assert_eq!(defaults.display_name, "work-2");
-    assert!(
-        std::path::Path::new(&defaults.cwd).is_absolute(),
-        "pin create cwd must be absolute: {:?}",
-        defaults.cwd,
-    );
-}
-
-#[test]
-fn split_trailing_number_handles_common_shapes() {
-    // No trailing digit.
-    assert_eq!(split_trailing_number("worker"), None);
-    // Single trailing digit with a `-` separator.
-    assert_eq!(
-        split_trailing_number("worker-1"),
-        Some(("worker-".to_string(), 1)),
-    );
-    // Multi-digit tail, no separator.
-    assert_eq!(
-        split_trailing_number("worker42"),
-        Some(("worker".to_string(), 42)),
-    );
-    // Digits-only base is still walkable; empty stem is allowed.
-    assert_eq!(split_trailing_number("42"), Some((String::new(), 42)));
-    // Interior digits with a trailing non-digit stay `None`.
-    assert_eq!(split_trailing_number("v1-alpha"), None);
-    // Empty input.
-    assert_eq!(split_trailing_number(""), None);
-}
-
-fn snapshot_with_numbered_pin_and_mux(name: &str) -> GraphSnapshot {
-    // Session `abc` → tmux mux `<name>` bound to pin `<name>` in
-    // `/p/proj`. Mirrors the shape `snapshot_session_with_mux`
-    // produces but with a caller-chosen mux/pin name so tests can
-    // exercise the numbered-suffix code paths without editing the
-    // shared fixture.
-    let mut snap = GraphSnapshot::empty();
-    let repo_id = RepoId::new("/p/proj");
-    snap.nodes
-        .push(GraphNode::Repo(RepoNode::new(repo_id.clone())));
-    snap.nodes.push(GraphNode::Checkout(CheckoutNode {
-        id: CheckoutId::new(repo_id, "/p/proj".to_string()),
-        root: "/p/proj".to_string(),
-        git_dir: None,
-        current_branch: None,
-        worktree: None,
-    }));
-    snap.nodes.push(GraphNode::AgentSession(
-        AgentSessionNode::new(
-            AgentSessionId::new("claude-code", "/state", "abc"),
-            "claude-code".to_string(),
-        )
-        .with_cwd("/p/proj".to_string())
-        .with_last_active_epoch(1_700_000_000),
-    ));
-    snap.nodes.push(GraphNode::MuxSession(
-        MuxSessionNode::new(
-            crate::model::MuxSessionId::new(name),
-            "tmux".to_string(),
-            name.to_string(),
-        )
-        .with_client_attached(true)
-        .with_activity_epoch(1_700_000_000)
-        .with_created_epoch(1_700_000_000)
-        .with_cwd("/p/proj".to_string()),
-    ));
-    let session_id = NodeId::AgentSession(AgentSessionId::new("claude-code", "/state", "abc"));
-    let mux_id = NodeId::MuxSession(crate::model::MuxSessionId::new(name));
-    snap.candidate_links.push(crate::model::GraphLink {
-        id: "l1".to_string(),
-        source: session_id,
-        target: LinkEndpoint::Node { id: mux_id },
-        relation: RelationKind::LinkedToMux,
-        provenance: crate::model::Provenance::StrongDiscovered,
-        confidence: crate::model::Confidence::High,
-        freshness: crate::model::Freshness::Fresh,
-        source_metadata: SourceMetadata::default(),
-        state: LinkState::Active,
-    });
-    snap.pins.push(PinCandidate {
-        id: name.to_string(),
-        display_name: name.to_string(),
-        harness: "claude-code".to_string(),
-        cwd: "/p/proj".to_string(),
-        mux: PinMuxRef {
-            backend: "tmux".to_string(),
-            name: name.to_string(),
-            socket_name: None,
-        },
-        launch_argv: None,
-        reason: None,
-        provenance: Provenance::LocalPin,
-        store_path: "/p/proj/.conspectus.toml".to_string(),
-        binding: None,
-    });
-    resolve_snapshot(snap)
-}
-
 fn app_with_mux_selected(snap: GraphSnapshot, mux_name: &str) -> App {
     let tree = crate::tui::rows::mux::build_mux_tree(crate::tui::rows::mux::MuxBuildInputs {
         snapshot: &snap,
@@ -308,616 +117,47 @@ fn app_with_mux_selected(snap: GraphSnapshot, mux_name: &str) -> App {
     app
 }
 
-#[test]
-fn pin_create_defaults_bumps_trailing_number_from_pinned_mux_row() {
-    // Selecting a pinned mux whose name ends in a
-    // number should suggest the next integer in the series across
-    // id, display_name, and mux_name — not `worker-1-2`.
-    let snap = snapshot_with_numbered_pin_and_mux("worker-1");
-    let app = app_with_mux_selected(snap, "worker-1");
-
-    let defaults = app.pins_context().pin_create_defaults;
-    assert_eq!(defaults.mode, PinCreateMode::NewVariation);
-    assert_eq!(defaults.id, "worker-2");
-    assert_eq!(defaults.display_name, "worker-2");
-    assert_eq!(defaults.mux_name, "worker-2");
-    assert_eq!(defaults.cwd, "/p/proj");
+/// A slot named `id` of `kind` pointing at `target`, which may be a
+/// node id or `None` for a planned slot.
+fn slot(id: &str, kind: PinKind, target: Option<NodeId>) -> PinSlot {
+    PinSlot {
+        id: id.to_string(),
+        kind,
+        target: target.map(|node| node.to_string()),
+        pinned_at: None,
+        overrides: SlotFields::new(),
+        snapshot: SlotFields::from([("label".to_string(), FieldValue::Text(id.to_string()))]),
+        order: 0,
+        legacy: false,
+    }
 }
 
-#[test]
-fn pin_create_defaults_skips_taken_numbers_in_series() {
-    // Existing pins occupy `worker-1` and `worker-2`; the next
-    // suggestion should skip to `worker-3`.
-    let mut snap = snapshot_with_numbered_pin_and_mux("worker-1");
-    snap.pins.push(PinCandidate {
-        id: "worker-2".to_string(),
-        display_name: "worker-2".to_string(),
-        harness: "claude-code".to_string(),
-        cwd: "/p/proj".to_string(),
-        mux: PinMuxRef {
-            backend: "tmux".to_string(),
-            name: "worker-2".to_string(),
-            socket_name: None,
-        },
-        launch_argv: None,
-        reason: None,
-        provenance: Provenance::LocalPin,
-        store_path: "/p/proj/.conspectus.toml".to_string(),
-        binding: None,
-    });
-    let snap = resolve_snapshot(snap);
-    let app = app_with_mux_selected(snap, "worker-1");
-
-    let defaults = app.pins_context().pin_create_defaults;
-    assert_eq!(defaults.id, "worker-3");
-    assert_eq!(defaults.display_name, "worker-3");
-    assert_eq!(defaults.mux_name, "worker-3");
+fn session_node_id(key: &str) -> NodeId {
+    NodeId::AgentSession(AgentSessionId::new("codex", "/state", key))
 }
 
-#[test]
-fn pin_create_defaults_fills_gap_in_numbered_series() {
-    // Pins `worker-1` and `worker-3` exist but `worker-2` is free.
-    // The first available integer above the selected base wins.
-    let mut snap = snapshot_with_numbered_pin_and_mux("worker-1");
-    snap.pins.push(PinCandidate {
-        id: "worker-3".to_string(),
-        display_name: "worker-3".to_string(),
-        harness: "claude-code".to_string(),
-        cwd: "/p/proj".to_string(),
-        mux: PinMuxRef {
-            backend: "tmux".to_string(),
-            name: "worker-3".to_string(),
-            socket_name: None,
-        },
-        launch_argv: None,
-        reason: None,
-        provenance: Provenance::LocalPin,
-        store_path: "/p/proj/.conspectus.toml".to_string(),
-        binding: None,
-    });
-    let snap = resolve_snapshot(snap);
-    let app = app_with_mux_selected(snap, "worker-1");
-
-    let defaults = app.pins_context().pin_create_defaults;
-    assert_eq!(defaults.id, "worker-2");
-    assert_eq!(defaults.mux_name, "worker-2");
-    assert_eq!(defaults.display_name, "worker-2");
-}
-
-#[test]
-fn pin_create_defaults_bumps_trailing_number_from_agent_session_bound_to_pin() {
-    // When the selected agent-session row is bound to a numbered
-    // pin (its alias overlay carries `worker-1`), pin create must
-    // suggest `worker-2` — id, mux, and display name in lockstep.
-    let snap = snapshot_with_numbered_pin_and_mux("worker-1");
-    let tree = build_tree(&snap);
+fn app_for(snap: &GraphSnapshot) -> App {
+    let tree = build_tree(snap);
     let mut app = App::new(RunConfig::defaults());
     app.update(Msg::SetData {
-        snapshot: SnapshotHandle::from_snapshot(&snap),
+        snapshot: SnapshotHandle::from_snapshot(snap),
         tree,
         loaded_at_epoch: 1_700_000_000,
         initial_selection_hint: None,
     });
-    let session_row_id = app
-        .visible_rows()
-        .iter()
-        .find_map(|row| match &row.kind {
-            RowKind::AgentSession(session) if session.pin_id.as_deref() == Some("worker-1") => {
-                Some(row.id.clone())
-            }
-            _ => None,
-        })
-        .expect("session row bound to worker-1 pin");
-    app.set_selection(session_row_id);
-
-    let defaults = app.pins_context().pin_create_defaults;
-    assert_eq!(defaults.id, "worker-2");
-    assert_eq!(defaults.display_name, "worker-2");
-    assert_eq!(defaults.mux_name, "worker-2");
-    assert_eq!(defaults.harness, "claude-code");
-    assert_eq!(defaults.cwd, "/p/proj");
+    app
 }
 
 #[test]
-fn pin_adopt_defaults_preserve_selected_live_mux_name() {
-    let snap = snapshot_session_with_mux();
-    let tree = crate::tui::rows::mux::build_mux_tree(crate::tui::rows::mux::MuxBuildInputs {
-        snapshot: &snap,
-        home: None,
-        now: None,
-        filter: crate::tui::RowFilter::default(),
-        grouping: crate::tui::MuxGrouping::Session,
-        sort: crate::tui::Sort::Hierarchy,
-        mux_recency: crate::tui::MuxRecency::default(),
-    });
-    let mut app = App::new(RunConfig::defaults());
-    app.update(Msg::SetData {
-        snapshot: SnapshotHandle::from_snapshot(&snap),
-        tree,
-        loaded_at_epoch: 1_700_000_000,
-        initial_selection_hint: None,
-    });
-    let mux_row_id = app
-        .visible_rows()
-        .iter()
-        .find_map(|row| match &row.kind {
-            RowKind::MuxSession(_) => Some(row.id.clone()),
-            _ => None,
-        })
-        .expect("mux row in tree");
-    app.set_selection(mux_row_id);
-
-    let defaults = app.pin_adopt_defaults();
-    assert_eq!(defaults.mode, PinCreateMode::AdoptSelected);
-    assert_eq!(defaults.id, "work");
-    assert_eq!(defaults.display_name, "work");
-    assert_eq!(defaults.mux_name, "work");
-}
-
-#[test]
-fn pins_context_exposes_known_live_mux_names() {
-    let snap = snapshot_session_with_mux();
-    let tree = build_tree(&snap);
-    let mut app = App::new(RunConfig::defaults());
-    app.update(Msg::SetData {
-        snapshot: SnapshotHandle::from_snapshot(&snap),
-        tree,
-        loaded_at_epoch: 1_700_000_000,
-        initial_selection_hint: None,
-    });
-
-    let ctx = app.pins_context();
-    assert_eq!(ctx.known_mux_names, vec!["work".to_string()]);
-}
-
-#[test]
-fn pins_context_does_not_offer_adopt_for_already_pinned_mux() {
-    let mut snap = snapshot_session_with_mux();
-    snap.pins.push(PinCandidate {
-        id: "work-pin".to_string(),
-        display_name: "Work".to_string(),
-        harness: "claude-code".to_string(),
-        cwd: "/p/proj".to_string(),
-        mux: PinMuxRef {
-            backend: "tmux".to_string(),
-            name: "work".to_string(),
-            socket_name: None,
-        },
-        launch_argv: None,
-        reason: None,
-        provenance: Provenance::LocalPin,
-        store_path: "/p/proj/.conspectus.toml".to_string(),
-        binding: Some(PinBinding::StaleMux {
-            mux: crate::model::MuxSessionId::new("work"),
-        }),
-    });
-    let tree = crate::tui::rows::mux::build_mux_tree(crate::tui::rows::mux::MuxBuildInputs {
-        snapshot: &snap,
-        home: None,
-        now: None,
-        filter: crate::tui::RowFilter::default(),
-        grouping: crate::tui::MuxGrouping::Repo,
-        sort: crate::tui::Sort::Hierarchy,
-        mux_recency: crate::tui::MuxRecency::default(),
-    });
-    let mut app = App::new(RunConfig {
-        default_view: View::Mux,
-        mux_grouping: crate::tui::MuxGrouping::Repo,
-        ..RunConfig::defaults()
-    });
-    app.update(Msg::SetData {
-        snapshot: SnapshotHandle::from_snapshot(&snap),
-        tree,
-        loaded_at_epoch: 1_700_000_000,
-        initial_selection_hint: None,
-    });
-    let mux_row_id = app
-        .visible_rows()
-        .iter()
-        .find_map(|row| match &row.kind {
-            RowKind::MuxSession(mux) if mux.native_id == "work" => Some(row.id.clone()),
-            _ => None,
-        })
-        .expect("pinned mux row");
-    app.set_selection(mux_row_id);
-
-    let ctx = app.pins_context();
-    assert_eq!(ctx.selected_pin_id.as_deref(), Some("work-pin"));
-    assert_eq!(ctx.known_pin_ids, vec!["work-pin".to_string()]);
-    assert_eq!(ctx.known_pin_mux_names, vec!["work".to_string()]);
-    assert_eq!(ctx.pin_adopt_defaults, None);
-}
-
-#[test]
-fn pins_context_exposes_registered_and_discovered_harness_keys() {
-    let snap = make_snapshot_with(&[("custom-harness", "s1", "/workspace/project")]);
-    let tree = build_tree(&snap);
-    let mut app = App::new(RunConfig::defaults());
-    app.update(Msg::SetData {
-        snapshot: SnapshotHandle::from_snapshot(&snap),
-        tree,
-        loaded_at_epoch: 1_700_000_000,
-        initial_selection_hint: None,
-    });
-
-    let ctx = app.pins_context();
-    assert!(ctx.known_harness_keys.contains(&"codex".to_string()));
-    assert!(
-        ctx.known_harness_keys
-            .contains(&"custom-harness".to_string())
-    );
-}
-
-#[test]
-fn infer_harness_for_mux_picks_first_active_linked_to_mux_source() {
-    // Reuses the session+mux+LinkedToMux fixture defined below in
-    // the explorer test block: one claude-code AgentSession linked
-    // to a `tmux:work` MuxSession via an Active LinkedToMux
-    // candidate. The inference walk should land on
-    // `claude-code` as the harness seed.
-    let snap = snapshot_session_with_mux();
-    let tree = build_tree(&snap);
-    let mut app = App::new(RunConfig::defaults());
-    app.update(Msg::SetData {
-        snapshot: SnapshotHandle::from_snapshot(&snap),
-        tree,
-        loaded_at_epoch: 1_700_000_000,
-        initial_selection_hint: None,
-    });
-    let mux_id = crate::model::MuxSessionId::new("work");
-    assert_eq!(
-        app.infer_harness_for_mux(&mux_id).as_deref(),
-        Some("claude-code"),
-    );
-}
-
-#[test]
-fn infer_harness_for_mux_returns_none_without_attribution() {
-    // Empty graph → no candidate links → no inference. Confirms the
-    // method is safe to call from `pin_create_defaults` regardless
-    // of selection state.
-    let app = App::new(RunConfig::defaults());
-    let mux_id = crate::model::MuxSessionId::new("nowhere");
-    assert!(app.infer_harness_for_mux(&mux_id).is_none());
-}
-
-#[test]
-fn pins_context_seeds_pin_mutation_target_from_selected_pin_row() {
-    let mut snap = GraphSnapshot::empty();
-    snap.pins.push(PinCandidate {
-        id: "ingest".to_string(),
-        display_name: "Ingest".to_string(),
-        harness: "codex".to_string(),
-        cwd: "/p/project".to_string(),
-        mux: PinMuxRef {
-            backend: "tmux".to_string(),
-            name: "ingest".to_string(),
-            socket_name: None,
-        },
-        launch_argv: None,
-        reason: None,
-        provenance: Provenance::LocalPin,
-        store_path: "/p/project/.conspectus.toml".to_string(),
-        binding: None,
-    });
-    let snap = resolve_snapshot(snap);
-    let tree = build_tree(&snap);
-    let mut app = App::new(RunConfig::defaults());
-    app.update(Msg::SetData {
-        snapshot: SnapshotHandle::from_snapshot(&snap),
-        tree,
-        loaded_at_epoch: 1_700_000_000,
-        initial_selection_hint: None,
-    });
-    let pin_row_id = app
-        .visible_rows()
-        .iter()
-        .find_map(|row| match &row.kind {
-            RowKind::AgentSession(session) if session.pin_id.as_deref() == Some("ingest") => {
-                Some(row.id.clone())
-            }
-            _ => None,
-        })
-        .expect("placeholder pin row");
-    app.set_selection(pin_row_id);
-
-    let target = app.pins_context().pin_target.expect("pin mutation target");
-    assert_eq!(target.id, "ingest");
-    assert_eq!(target.display_name, "Ingest");
-    assert_eq!(target.harness, "codex");
-    assert_eq!(target.cwd, "/p/project");
-    assert_eq!(target.mux_name, "ingest");
-    assert_eq!(target.mux_socket, None);
-    assert_eq!(target.launch_argv, Vec::<String>::new());
-    assert_eq!(target.store_path, "/p/project/.conspectus.toml");
-}
-
-#[test]
-fn pins_context_seeds_pin_mutation_target_from_selected_pinned_mux_row() {
-    // Regression: selecting a live mux row that
-    // backs a pin (mux view) must resolve the same pin target the
-    // corresponding session-row selection resolves. Before the fix
-    // `pin_mutation_target` only matched Pin + AgentSession rows, so
-    // rename/delete on a pinned mux row toasted "no editable pin in
-    // current selection" even though `selected_pin_id` returned the id.
-    let mut snap = snapshot_session_with_mux();
-    snap.pins.push(PinCandidate {
-        id: "work-pin".to_string(),
-        display_name: "Work".to_string(),
-        harness: "claude-code".to_string(),
-        cwd: "/p/proj".to_string(),
-        mux: PinMuxRef {
-            backend: "tmux".to_string(),
-            name: "work".to_string(),
-            socket_name: None,
-        },
-        launch_argv: None,
-        reason: None,
-        provenance: Provenance::LocalPin,
-        store_path: "/p/proj/.conspectus.toml".to_string(),
-        binding: Some(PinBinding::StaleMux {
-            mux: crate::model::MuxSessionId::new("work"),
-        }),
-    });
-    let tree = crate::tui::rows::mux::build_mux_tree(crate::tui::rows::mux::MuxBuildInputs {
-        snapshot: &snap,
-        home: None,
-        now: None,
-        filter: crate::tui::RowFilter::default(),
-        grouping: crate::tui::MuxGrouping::Repo,
-        sort: crate::tui::Sort::Hierarchy,
-        mux_recency: crate::tui::MuxRecency::default(),
-    });
-    let mut app = App::new(RunConfig {
-        default_view: View::Mux,
-        mux_grouping: crate::tui::MuxGrouping::Repo,
-        ..RunConfig::defaults()
-    });
-    app.update(Msg::SetData {
-        snapshot: SnapshotHandle::from_snapshot(&snap),
-        tree,
-        loaded_at_epoch: 1_700_000_000,
-        initial_selection_hint: None,
-    });
-    let mux_row_id = app
-        .visible_rows()
-        .iter()
-        .find_map(|row| match &row.kind {
-            RowKind::MuxSession(mux) if mux.native_id == "work" => Some(row.id.clone()),
-            _ => None,
-        })
-        .expect("pinned mux row");
-    app.set_selection(mux_row_id);
-
-    let ctx = app.pins_context();
-    assert_eq!(ctx.selected_pin_id.as_deref(), Some("work-pin"));
-    let target = ctx.pin_target.expect("pin mutation target from mux row");
-    assert_eq!(target.id, "work-pin");
-    assert_eq!(target.display_name, "Work");
-    assert_eq!(target.harness, "claude-code");
-    assert_eq!(target.cwd, "/p/proj");
-    assert_eq!(target.mux_name, "work");
-    assert_eq!(target.mux_socket, None);
-    assert_eq!(target.store_path, "/p/proj/.conspectus.toml");
-}
-
-fn pin_only_snapshot(binding: Option<PinBinding>) -> GraphSnapshot {
-    let mut snap = GraphSnapshot::empty();
-    snap.pins.push(PinCandidate {
-        id: "ingest".to_string(),
-        display_name: "Ingest".to_string(),
-        harness: "codex".to_string(),
-        cwd: "/p/project".to_string(),
-        mux: PinMuxRef {
-            backend: "tmux".to_string(),
-            name: "ingest".to_string(),
-            socket_name: None,
-        },
-        launch_argv: None,
-        reason: None,
-        provenance: Provenance::LocalPin,
-        store_path: "/p/project/.conspectus.toml".to_string(),
-        binding,
-    });
-    snap.sync_pin_nodes();
-    snap
-}
-
-#[test]
-fn placeholder_detail_target_falls_back_to_pin_when_no_view_aligned_entity() {
-    let snap = pin_only_snapshot(Some(PinBinding::Unbound));
-    assert_eq!(
-        placeholder_detail_target(&snap, "ingest", View::Sessions),
-        NodeId::Pin(PinId::new("ingest")),
-    );
-    assert_eq!(
-        placeholder_detail_target(&snap, "ingest", View::Mux),
-        NodeId::Pin(PinId::new("ingest")),
-    );
-}
-
-#[test]
-fn placeholder_detail_target_upgrades_to_mux_for_stale_mux_in_mux_view() {
-    let mux_id = MuxSessionId::new("tmux:ingest");
-    let snap = pin_only_snapshot(Some(PinBinding::StaleMux {
-        mux: mux_id.clone(),
-    }));
-    assert_eq!(
-        placeholder_detail_target(&snap, "ingest", View::Mux),
-        NodeId::MuxSession(mux_id),
-    );
-    // Sessions view stays on the pin: the stale mux is not a session.
-    assert_eq!(
-        placeholder_detail_target(&snap, "ingest", View::Sessions),
-        NodeId::Pin(PinId::new("ingest")),
-    );
-}
-
-#[test]
-fn placeholder_detail_target_upgrades_to_last_session_in_sessions_view() {
-    let mut snap = pin_only_snapshot(Some(PinBinding::Unbound));
-    let session_id = AgentSessionId::new("codex", "/state", "alpha");
-    snap.nodes.push(GraphNode::AgentSession(
-        AgentSessionNode::new(session_id.clone(), "codex".to_string())
-            .with_cwd("/p/project".to_string()),
-    ));
-    snap.diagnostics.push(crate::model::Diagnostic::PinUnbound {
-        pin_id: "ingest".to_string(),
-        expected_mux_native_id: "tmux:ingest".to_string(),
-        last_session: Some(crate::model::PinLastSession {
-            session_id: "alpha".to_string(),
-            observed_epoch: 1_700_000_000,
-        }),
-    });
-    assert_eq!(
-        placeholder_detail_target(&snap, "ingest", View::Sessions),
-        NodeId::AgentSession(session_id),
-    );
-    // Mux view stays on the pin: a known session is not a mux.
-    assert_eq!(
-        placeholder_detail_target(&snap, "ingest", View::Mux),
-        NodeId::Pin(PinId::new("ingest")),
-    );
-}
-
-#[test]
-fn placeholder_detail_target_falls_back_to_pin_when_last_session_not_in_snapshot() {
-    let mut snap = pin_only_snapshot(Some(PinBinding::Unbound));
-    snap.diagnostics.push(crate::model::Diagnostic::PinUnbound {
-        pin_id: "ingest".to_string(),
-        expected_mux_native_id: "tmux:ingest".to_string(),
-        last_session: Some(crate::model::PinLastSession {
-            session_id: "ghost".to_string(),
-            observed_epoch: 1_700_000_000,
-        }),
-    });
-    assert_eq!(
-        placeholder_detail_target(&snap, "ingest", View::Sessions),
-        NodeId::Pin(PinId::new("ingest")),
-    );
-}
-
-#[test]
-fn placeholder_pin_detail_strips_candidate_link_summaries() {
-    // sync_pin_nodes synthesizes a LinkedToMux candidate from the
-    // pin to its expected mux; on the Pin-fallback path the
-    // detail/explorer surfaces are expected to elide that
-    // candidate so the right pane reads as "nothing live yet".
-    let snap = pin_only_snapshot(Some(PinBinding::Unbound));
-    let snap = resolve_snapshot(snap);
-    let tree = build_tree(&snap);
-    let mut app = App::new(RunConfig::defaults());
-    app.update(Msg::SetData {
-        snapshot: SnapshotHandle::from_snapshot(&snap),
-        tree,
-        loaded_at_epoch: 1_700_000_000,
-        initial_selection_hint: None,
-    });
-    let pin_row_id = app
-        .visible_rows()
-        .iter()
-        .find_map(|row| match &row.kind {
-            RowKind::AgentSession(session) if session.pin_id.as_deref() == Some("ingest") => {
-                Some(row.id.clone())
-            }
-            _ => None,
-        })
-        .expect("placeholder pin row");
-    app.set_selection(pin_row_id);
-    let detail = app.detail().expect("detail computed for pin placeholder");
-    assert_eq!(detail.kind, crate::model::NodeKind::Pin);
-    assert!(
-        detail.outgoing_links.is_empty(),
-        "pin fallback should not list outgoing candidate links: {:?}",
-        detail.outgoing_links,
-    );
-    assert!(
-        detail.incoming_links.is_empty(),
-        "pin fallback should not list incoming candidate links: {:?}",
-        detail.incoming_links,
-    );
-    assert!(
-        detail.resolved.is_empty(),
-        "pin fallback should not list resolved relationships: {:?}",
-        detail.resolved,
-    );
-    let explorer = app.explorer().expect("explorer view present");
-    assert!(
-        explorer.view.relationships.groups.is_empty(),
-        "explorer Related zone should be empty for pin fallback",
-    );
-}
-
-#[test]
-fn set_data_keeps_pins_group_expanded_by_default() {
-    let mut snap = GraphSnapshot::empty();
-    snap.pins.push(PinCandidate {
-        id: "ingest".to_string(),
-        display_name: "Ingest".to_string(),
-        harness: "codex".to_string(),
-        cwd: "/p/project".to_string(),
-        mux: PinMuxRef {
-            backend: "tmux".to_string(),
-            name: "ingest".to_string(),
-            socket_name: None,
-        },
-        launch_argv: None,
-        reason: None,
-        provenance: Provenance::LocalPin,
-        store_path: "/p/project/.conspectus.toml".to_string(),
-        binding: None,
-    });
-    let snap = resolve_snapshot(snap);
-    let tree = build_tree(&snap);
-    let mut app = App::new(RunConfig::defaults());
-    app.update(Msg::SetData {
-        snapshot: SnapshotHandle::from_snapshot(&snap),
-        tree,
-        loaded_at_epoch: 1_700_000_000,
-        initial_selection_hint: None,
-    });
-
-    assert!(app.expanded.contains(&RowId::Synthetic("pins")));
-    assert!(
-        app.visible_rows()
-            .iter()
-            .any(|row| matches!(row.id, RowId::Pin { .. })),
-        "pin child should be visible without manually expanding Pins"
-    );
-}
-
-#[test]
-fn selected_bound_pin_row_shows_realizing_session_detail() {
-    let session_id = AgentSessionId::new("codex", "/state", "alpha");
+fn selected_pinned_session_row_shows_the_session_detail() {
     let mut snap = make_snapshot_with(&[("codex", "alpha", "/p/project")]);
-    snap.pins.push(PinCandidate {
-        id: "ingest".to_string(),
-        display_name: "Ingest".to_string(),
-        harness: "codex".to_string(),
-        cwd: "/p/project".to_string(),
-        mux: PinMuxRef {
-            backend: "tmux".to_string(),
-            name: "ingest".to_string(),
-            socket_name: None,
-        },
-        launch_argv: None,
-        reason: None,
-        provenance: Provenance::LocalPin,
-        store_path: "/p/project/.conspectus.toml".to_string(),
-        binding: Some(crate::model::PinBinding::Bound {
-            mux: crate::model::MuxSessionId::new("tmux:ingest"),
-            session: session_id,
-        }),
-    });
-    snap.sync_pin_nodes();
-    let tree = build_tree(&snap);
-    let mut app = App::new(RunConfig::defaults());
-    app.update(Msg::SetData {
-        snapshot: SnapshotHandle::from_snapshot(&snap),
-        tree,
-        loaded_at_epoch: 1_700_000_000,
-        initial_selection_hint: None,
-    });
+    snap.pins.push(slot(
+        "ingest",
+        PinKind::Session,
+        Some(session_node_id("alpha")),
+    ));
+    let snap = resolve_snapshot(snap);
+    let mut app = app_for(&snap);
     let row_id = app
         .visible_rows()
         .iter()
@@ -927,121 +167,19 @@ fn selected_bound_pin_row_shows_realizing_session_detail() {
             }
             _ => None,
         })
-        .expect("bound pin should render as a session row");
+        .expect("a pinned session should render as a session row");
     app.set_selection(row_id);
 
     let detail = app
         .detail()
-        .expect("bound pin session row should resolve detail");
+        .expect("pinned session row should resolve detail");
     assert_eq!(detail.kind, crate::model::NodeKind::AgentSession);
     assert!(
         detail
             .header_fields
             .iter()
-            .any(|field| { field.label == "harness" && field.value.contains("codex") })
+            .any(|field| { field.label == "pin" && field.value.contains("ingest") })
     );
-}
-
-#[test]
-fn select_pin_after_mutation_expands_pins_and_selects_session_row() {
-    let session_id = AgentSessionId::new("codex", "/state", "alpha");
-    let mut snap = make_snapshot_with(&[("codex", "alpha", "/p/project")]);
-    snap.pins.push(PinCandidate {
-        id: "ingest".to_string(),
-        display_name: "Ingest".to_string(),
-        harness: "codex".to_string(),
-        cwd: "/p/project".to_string(),
-        mux: PinMuxRef {
-            backend: "tmux".to_string(),
-            name: "ingest".to_string(),
-            socket_name: None,
-        },
-        launch_argv: None,
-        reason: None,
-        provenance: Provenance::LocalPin,
-        store_path: "/p/project/.conspectus.toml".to_string(),
-        binding: Some(PinBinding::Bound {
-            mux: crate::model::MuxSessionId::new("tmux:ingest"),
-            session: session_id.clone(),
-        }),
-    });
-    let tree = build_tree(&snap);
-    let mut app = App::new(RunConfig::defaults());
-    app.update(Msg::SetData {
-        snapshot: SnapshotHandle::from_snapshot(&snap),
-        tree,
-        loaded_at_epoch: 1_700_000_000,
-        initial_selection_hint: None,
-    });
-    app.expanded.remove(&RowId::Synthetic("pins"));
-
-    assert!(app.select_pin_after_mutation("ingest"));
-    assert!(app.expanded.contains(&RowId::Synthetic("pins")));
-    let selected = app.selection().expect("selection");
-    assert!(matches!(selected, RowId::AgentSession(NodeId::AgentSession(id)) if id == &session_id));
-    let first_visible_pin_row = app
-        .visible_rows()
-        .into_iter()
-        .find(|row| row_pin_id(row) == Some("ingest"))
-        .expect("visible pinned row");
-    assert_eq!(&first_visible_pin_row.id, selected);
-}
-
-#[test]
-fn select_pin_after_mutation_selects_mux_row_in_mux_pins_group() {
-    let mut snap = snapshot_session_with_mux();
-    snap.pins.push(PinCandidate {
-        id: "work-pin".to_string(),
-        display_name: "Work".to_string(),
-        harness: "claude-code".to_string(),
-        cwd: "/p/proj".to_string(),
-        mux: PinMuxRef {
-            backend: "tmux".to_string(),
-            name: "work".to_string(),
-            socket_name: None,
-        },
-        launch_argv: None,
-        reason: None,
-        provenance: Provenance::LocalPin,
-        store_path: "/p/proj/.conspectus.toml".to_string(),
-        binding: Some(PinBinding::StaleMux {
-            mux: crate::model::MuxSessionId::new("work"),
-        }),
-    });
-    let tree = crate::tui::rows::mux::build_mux_tree(crate::tui::rows::mux::MuxBuildInputs {
-        snapshot: &snap,
-        home: None,
-        now: None,
-        filter: crate::tui::RowFilter::default(),
-        grouping: crate::tui::MuxGrouping::Repo,
-        sort: crate::tui::Sort::Hierarchy,
-        mux_recency: crate::tui::MuxRecency::default(),
-    });
-    let mut app = App::new(RunConfig {
-        default_view: View::Mux,
-        mux_grouping: crate::tui::MuxGrouping::Repo,
-        ..RunConfig::defaults()
-    });
-    app.update(Msg::SetData {
-        snapshot: SnapshotHandle::from_snapshot(&snap),
-        tree,
-        loaded_at_epoch: 1_700_000_000,
-        initial_selection_hint: None,
-    });
-    app.expanded.remove(&RowId::Synthetic("pins"));
-
-    assert!(app.select_pin_after_mutation("work-pin"));
-    assert!(app.expanded.contains(&RowId::Synthetic("pins")));
-    assert!(matches!(
-        app.selection(),
-        Some(RowId::MuxSession(NodeId::MuxSession(id))) if id.native_id == "work"
-    ));
-    let first_visible_pin_row = app
-        .visible_rows()
-        .into_iter()
-        .find(|row| row_pin_id(row) == Some("work-pin"))
-        .expect("visible pinned mux row");
-    assert_eq!(Some(&first_visible_pin_row.id), app.selection());
 }
 
 #[test]
@@ -1478,12 +616,6 @@ fn scenario_ambiguous_mux_session_is_leaf_after_adr_0071() {
         !session_row.expandable,
         "ambiguous session row stops being expandable after ADR 0071",
     );
-    assert!(
-        !app.visible_rows()
-            .iter()
-            .any(|row| matches!(row.kind, RowKind::AgentSessionMuxCandidate(_))),
-        "no candidate child rows after ADR 0071",
-    );
 }
 
 #[test]
@@ -1709,6 +841,7 @@ fn snapshot_session_with_mux() -> GraphSnapshot {
         git_dir: None,
         current_branch: None,
         worktree: None,
+        head_commit: None,
     }));
     snap.nodes.push(GraphNode::AgentSession(
         AgentSessionNode::new(
@@ -2380,6 +1513,7 @@ fn open_value_modal_when_cursor_has_a_long_value() {
             git_dir: None,
             current_branch: None,
             worktree: None,
+            head_commit: None,
         }));
         snap.nodes.push(GraphNode::AgentSession(
             AgentSessionNode::new(
@@ -2930,57 +2064,29 @@ mod modal_stack {
         assert!(app.help_overlay().is_some());
     }
 
-    // Pins overlay on the same stack.
-    #[test]
-    fn open_pins_pushes_modal_pins_onto_stack() {
-        let mut app = App::new(RunConfig::defaults());
-        app.open_pins_overlay();
-        assert_eq!(app.modal_stack().len(), 1);
-        assert!(matches!(app.modal_stack().first(), Some(Modal::Pins(_))));
-        assert!(app.pins_overlay().is_some());
-    }
-
-    #[test]
-    fn set_pins_overlay_pushes_preconfigured_state() {
-        use crate::tui::widgets::pins::PinsOverlayState;
-        let mut app = App::new(RunConfig::defaults());
-        app.set_pins_overlay(PinsOverlayState::new());
-        assert_eq!(app.modal_stack().len(), 1);
-        assert!(matches!(app.modal_stack().first(), Some(Modal::Pins(_))));
-    }
-
-    #[test]
-    fn close_pins_pops_when_top_is_pins() {
-        let mut app = App::new(RunConfig::defaults());
-        app.open_pins_overlay();
-        app.close_pins_overlay();
-        assert!(app.modal_stack().is_empty());
-        assert!(app.pins_overlay().is_none());
-    }
-
     #[test]
     fn triple_stack_orders_correctly_and_pops_lifo() {
-        // Controls at bottom, Pins in middle, Help on top.
+        // Controls at bottom, Search in middle, Help on top.
         // Peek accessors report the exact top variant only;
         // popping in reverse order reveals each in turn.
         let mut app = App::new(RunConfig::defaults());
         app.open_controls_overlay();
-        app.open_pins_overlay();
+        app.open_search_overlay();
         app.open_help_overlay();
         assert_eq!(app.modal_stack().len(), 3);
         assert!(app.help_overlay().is_some());
-        assert!(app.pins_overlay().is_none());
+        assert!(app.search_overlay().is_none());
         assert!(app.controls_overlay().is_none());
 
         app.close_help_overlay();
         assert_eq!(app.modal_stack().len(), 2);
         assert!(app.help_overlay().is_none());
-        assert!(app.pins_overlay().is_some());
+        assert!(app.search_overlay().is_some());
         assert!(app.controls_overlay().is_none());
 
-        app.close_pins_overlay();
+        app.close_search_overlay();
         assert_eq!(app.modal_stack().len(), 1);
-        assert!(app.pins_overlay().is_none());
+        assert!(app.search_overlay().is_none());
         assert!(app.controls_overlay().is_some());
 
         app.close_controls_overlay();
@@ -3051,19 +2157,18 @@ mod modal_stack {
     }
 
     #[test]
-    fn five_wide_stack_orders_and_pops_lifo() {
-        // Bottom to top: Controls, Pins, Search, Rename, Help.
+    fn four_wide_stack_orders_and_pops_lifo() {
+        // Bottom to top: Controls, Search, Rename, Help.
         // (ValueModal covered separately since it exercises
         // the Overlay trait path.) Peek accessors report the
         // exact top variant only; pop reveals each in turn.
         use crate::tui::widgets::input::TextInputState;
         let mut app = App::new(RunConfig::defaults());
         app.open_controls_overlay();
-        app.open_pins_overlay();
         app.open_search_overlay();
         app.open_rename_overlay(TextInputState::new("rename", ""));
         app.open_help_overlay();
-        assert_eq!(app.modal_stack().len(), 5);
+        assert_eq!(app.modal_stack().len(), 4);
         assert!(app.help_overlay().is_some());
         assert!(app.rename_overlay().is_none());
 
@@ -3074,9 +2179,6 @@ mod modal_stack {
         assert!(app.search_overlay().is_some());
 
         app.close_search_overlay();
-        assert!(app.pins_overlay().is_some());
-
-        app.close_pins_overlay();
         assert!(app.controls_overlay().is_some());
 
         app.close_controls_overlay();
@@ -3274,120 +2376,6 @@ mod reducer_effects {
             }
             other => panic!("expected Exec(ViewSession), got {other:?}"),
         }
-    }
-
-    #[test]
-    fn launch_selected_pin_with_no_selection_emits_toast() {
-        let mut app = App::new(RunConfig::defaults());
-        let effects = app.update(Msg::LaunchSelectedPin);
-        assert_eq!(
-            effects,
-            vec![Effect::Toast("launch: nothing selected".to_string())]
-        );
-    }
-
-    #[test]
-    fn launch_selected_pin_on_non_pin_row_emits_toast() {
-        // A plain agent-session row with no pin_id — nothing to
-        // launch. The reducer surfaces the operator-facing hint
-        // instead of firing Exec.
-        let mut app = seeded_app(&[("codex", "Session One", "/p/project")]);
-        select_session(&mut app, "Session One");
-        let effects = app.update(Msg::LaunchSelectedPin);
-        assert_eq!(
-            effects,
-            vec![Effect::Toast(
-                "launch: select a pin or placeholder row".to_string(),
-            )]
-        );
-    }
-
-    #[test]
-    fn pin_remove_msg_emits_write_store_effect() {
-        use crate::tui::effect::StoreOp;
-        let mut app = App::new(RunConfig::defaults());
-        let request = crate::tui::widgets::pins::PinRemoveRequest {
-            id: "work".to_string(),
-            display_name: "work".to_string(),
-            store_path: "/tmp/.conspectus.toml".to_string(),
-        };
-        let effects = app.update(Msg::PinRemove(request.clone()));
-        assert_eq!(
-            effects,
-            vec![Effect::WriteStore(StoreOp::PinRemove(request))]
-        );
-    }
-
-    #[test]
-    fn pin_bind_without_snapshot_emits_toast() {
-        let mut app = App::new(RunConfig::defaults());
-        let request = crate::tui::widgets::pins::PinBindRequest {
-            pin_id: "work".to_string(),
-            session_key: "abc".to_string(),
-        };
-        let effects = app.update(Msg::PinBind(request));
-        assert_eq!(
-            effects,
-            vec![Effect::Toast(
-                "pin bind failed: no graph loaded yet".to_string()
-            )]
-        );
-    }
-
-    #[test]
-    fn pin_bind_with_snapshot_emits_write_store_effect() {
-        use crate::tui::effect::StoreOp;
-        let mut app = seeded_app(&[("codex", "Session One", "/p/project")]);
-        let request = crate::tui::widgets::pins::PinBindRequest {
-            pin_id: "work".to_string(),
-            session_key: "abc".to_string(),
-        };
-        let effects = app.update(Msg::PinBind(request.clone()));
-        assert_eq!(effects, vec![Effect::WriteStore(StoreOp::PinBind(request))]);
-    }
-
-    #[test]
-    fn pin_create_msg_emits_write_store_effect() {
-        use crate::tui::effect::StoreOp;
-        let mut app = App::new(RunConfig::defaults());
-        let request = crate::tui::widgets::pins::PinCreateRequest {
-            id: "work".to_string(),
-            display_name: "work".to_string(),
-            harness: "codex".to_string(),
-            cwd: "/p/project".to_string(),
-            mux_name: "work".to_string(),
-            mux_backend: "tmux".to_string(),
-            mux_socket: None,
-            adopt_source_mux_name: None,
-            launch_argv: Vec::new(),
-            worktree_branch: None,
-            store: crate::tui::widgets::pins::PinCreateStore::Auto,
-        };
-        let effects = app.update(Msg::PinCreate(request.clone()));
-        assert_eq!(
-            effects,
-            vec![Effect::WriteStore(StoreOp::PinCreate(request))]
-        );
-    }
-
-    #[test]
-    fn pin_edit_msg_emits_write_store_effect() {
-        use crate::tui::effect::StoreOp;
-        let mut app = App::new(RunConfig::defaults());
-        let request = crate::tui::widgets::pins::PinEditRequest {
-            original_id: "work".to_string(),
-            id: "work-2".to_string(),
-            display_name: "Work Two".to_string(),
-            harness: "codex".to_string(),
-            cwd: "/p/project".to_string(),
-            mux_name: "work-2".to_string(),
-            mux_backend: "tmux".to_string(),
-            mux_socket: None,
-            launch_argv: Vec::new(),
-            store_path: "/tmp/.conspectus.toml".to_string(),
-        };
-        let effects = app.update(Msg::PinEdit(request.clone()));
-        assert_eq!(effects, vec![Effect::WriteStore(StoreOp::PinEdit(request))]);
     }
 
     #[test]
@@ -3611,20 +2599,6 @@ mod reducer_effects {
         assert!(app.in_flight_ops().is_empty());
         assert!(effects.is_empty());
     }
-
-    #[test]
-    fn launch_pin_by_id_without_snapshot_emits_exec_with_no_attach_target() {
-        use crate::tui::effect::ExecSpec;
-        let mut app = App::new(RunConfig::defaults());
-        let effects = app.update(Msg::LaunchPinById("work".to_string()));
-        assert_eq!(
-            effects,
-            vec![Effect::Exec(ExecSpec::LaunchPin {
-                pin_id: "work".to_string(),
-                attach_target: None,
-            })]
-        );
-    }
 }
 
 #[test]
@@ -3698,6 +2672,42 @@ fn handoff_return_marks_mux_and_linked_sessions_until_settled() {
 }
 
 #[test]
+fn the_pane_coming_back_into_view_asks_for_a_refresh_without_freezing_rows() {
+    let snap = snapshot_session_with_mux();
+    let tree = build_tree(&snap);
+    let mut app = App::new(RunConfig::defaults());
+    app.update(Msg::SetData {
+        snapshot: SnapshotHandle::from_snapshot(&snap),
+        tree,
+        loaded_at_epoch: 1_700_000_000,
+        initial_selection_hint: None,
+    });
+    let session_row = app
+        .visible_rows()
+        .iter()
+        .find(|row| matches!(row.kind, RowKind::AgentSession(_)))
+        .map(|row| row.kind.clone())
+        .expect("session row");
+
+    app.update(Msg::ViewRegained);
+
+    assert!(
+        app.take_handoff_refresh_request(),
+        "coming back refreshes like returning from an attach"
+    );
+    assert!(
+        !app.take_handoff_refresh_request(),
+        "one refresh per return"
+    );
+    assert!(
+        !app.row_awaits_handoff(&session_row),
+        "no row is known to have changed"
+    );
+    app.update(Msg::HandoffSettled);
+    assert!(app.handoff().is_none());
+}
+
+#[test]
 fn repeated_handoffs_accumulate_until_settled() {
     let mut app = seeded_app(&[("claude-code", "abc", "/p/a")]);
     let first = crate::model::MuxSessionId::new("one");
@@ -3725,44 +2735,6 @@ fn repeated_handoffs_accumulate_until_settled() {
         app.take_handoff_refresh_request(),
         "the second return asks again"
     );
-}
-
-#[test]
-fn pin_adopt_defaults_take_the_selected_muxs_backend() {
-    let mut snap = snapshot_session_with_mux();
-    for node in &mut snap.nodes {
-        if let crate::model::GraphNode::MuxSession(mux) = node {
-            mux.backend = "zellij".to_string();
-        }
-    }
-    let tree = crate::tui::rows::mux::build_mux_tree(crate::tui::rows::mux::MuxBuildInputs {
-        snapshot: &snap,
-        home: None,
-        now: None,
-        filter: crate::tui::RowFilter::default(),
-        grouping: crate::tui::MuxGrouping::Session,
-        sort: crate::tui::Sort::Hierarchy,
-        mux_recency: crate::tui::MuxRecency::default(),
-    });
-    let mut app = App::new(RunConfig::defaults());
-    app.update(Msg::SetData {
-        snapshot: SnapshotHandle::from_snapshot(&snap),
-        tree,
-        loaded_at_epoch: 1_700_000_000,
-        initial_selection_hint: None,
-    });
-    let mux_row_id = app
-        .visible_rows()
-        .iter()
-        .find_map(|row| match &row.kind {
-            RowKind::MuxSession(_) => Some(row.id.clone()),
-            _ => None,
-        })
-        .expect("mux row in tree");
-    app.set_selection(mux_row_id);
-
-    assert_eq!(app.pin_adopt_defaults().mux_backend, "zellij");
-    assert_eq!(app.pin_create_defaults().mux_backend, "tmux");
 }
 
 #[test]
@@ -3841,11 +2813,7 @@ fn actions_on_a_row_awaiting_the_handoff_refresh_are_refused_until_it_settles() 
     let toast = vec![crate::tui::Effect::Toast(
         crate::tui::app::HANDOFF_PENDING_HINT.to_string(),
     )];
-    for msg in [
-        Msg::AttachSelected,
-        Msg::ResumeSelected,
-        Msg::LaunchSelectedPin,
-    ] {
+    for msg in [Msg::AttachSelected, Msg::ResumeSelected] {
         assert_eq!(app.update(msg), toast);
     }
 

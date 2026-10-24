@@ -41,6 +41,8 @@ fn mux_with_command_created(
         activity_epoch: Some(1_700_000_000),
         created_epoch,
         last_attached_epoch: None,
+        socket: None,
+        backend_session_id: None,
     })
 }
 
@@ -898,6 +900,8 @@ fn opencode_hook_record_demotes_stale_launch_argv_for_same_mux() {
         activity_epoch: Some(1_700_000_000),
         created_epoch: None,
         last_attached_epoch: None,
+        socket: None,
+        backend_session_id: None,
     });
 
     let stale_argv_link = {
@@ -1013,6 +1017,8 @@ fn opencode_pane(native_id: &str, pane_pid: i64) -> GraphNode {
         activity_epoch: None,
         created_epoch: None,
         last_attached_epoch: None,
+        socket: None,
+        backend_session_id: None,
     })
 }
 

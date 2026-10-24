@@ -190,56 +190,38 @@ pub enum Diagnostic {
         selected_link_id: String,
         competing_link_ids: Vec<String>,
     },
-    /// ADR 0057. No live mux matches the pin's `mux.native_id()`.
-    /// Per ADR 0058 Q5, `last_session` carries the most recent
-    /// recorded binding when the pin-bindings sidecar (ADR 0058) has
-    /// one — so the launch path can advertise "Enter to resume X"
-    /// instead of a generic "Enter to launch" when continuity is
-    /// available. `None` means the sidecar was absent, unreadable,
-    /// or the resolver ran without consulting one (the default in
-    /// scenario TUIs).
-    PinUnbound {
-        pin_id: String,
-        expected_mux_native_id: String,
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        last_session: Option<PinLastSession>,
-    },
-    /// ADR 0057. Mux exists but no harness session matching
-    /// `pin.harness` is attributed to it. Under ADR 0102 a session
-    /// realizes at most one pin, so evidence for a session that a
-    /// stronger-evidenced pin already claimed doesn't count here;
-    /// `claimed_elsewhere` lists those sessions and the pins that
-    /// took them, so the operator can see why the mux reads stale.
-    PinStaleMux {
-        pin_id: String,
-        mux: MuxSessionId,
-        #[serde(default, skip_serializing_if = "Vec::is_empty")]
-        claimed_elsewhere: Vec<PinSessionClaim>,
-    },
-    /// ADR 0057. Multiple harness sessions are attributed to the
-    /// bound mux for this pin's harness. The resolver picks
-    /// `chosen` per its existing ranking; `competing` lists the
-    /// runners-up so the operator can override with
-    /// `conspectus pin bind --to <session-id>`.
-    PinAmbiguous {
-        pin_id: String,
-        chosen: AgentSessionId,
-        competing: Vec<AgentSessionId>,
-    },
-    /// ADR 0057. Bound session's first-observed cwd diverges from
-    /// the pin's declared cwd. Binding still holds; this is advisory.
-    PinDrift {
-        pin_id: String,
-        declared_cwd: String,
-        observed_cwd: String,
+    /// ADR 0141. Legacy `[[pins.entries]]` are still loaded as
+    /// in-memory pin slots; `conspectus pin migrate` writes them to
+    /// `pins.toml` and removes the old tables.
+    LegacyPins {
+        count: u32,
+        ids: Vec<String>,
     },
 }
 
 impl Diagnostic {
+    /// The operator-facing line for a diagnostic that tells them what
+    /// to do next, if it is one.
+    pub fn advice(&self) -> Option<String> {
+        match self {
+            Self::LegacyPins { count, ids } => Some(format!(
+                "{count} legacy pin{} still read from config files ({}); \
+                 run `conspectus pin migrate` to convert {}",
+                if *count == 1 { " is" } else { "s are" },
+                ids.join(", "),
+                if *count == 1 { "it" } else { "them" },
+            )),
+            _ => None,
+        }
+    }
+
     /// Whether discovery, rather than resolution, produced this
     /// diagnostic. Resolution regenerates its own each run and keeps
     /// these.
     pub fn is_from_discovery(&self) -> bool {
-        matches!(self, Self::Config { .. } | Self::ProviderUnavailable { .. })
+        matches!(
+            self,
+            Self::Config { .. } | Self::ProviderUnavailable { .. } | Self::LegacyPins { .. }
+        )
     }
 }

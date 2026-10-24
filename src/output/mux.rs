@@ -137,6 +137,9 @@ fn mux_matches_filter(
         pr_branch: _,
         pr_state: _,
         float_tracked_prs_top: _,
+        show_stopped_muxes: _,
+        pinned_only: _,
+        show_pinned_history: _,
     } = filter;
     harness.is_none()
         && max_age.is_none()
@@ -199,8 +202,7 @@ fn cell(key: &str, ctx: &CellCtx<'_>) -> String {
 
 fn collect_mux_rows(snapshot: &GraphSnapshot) -> Vec<MuxRow<'_>> {
     let mut rows: Vec<MuxRow<'_>> = snapshot
-        .nodes
-        .iter()
+        .live_nodes()
         .filter_map(|node| match node {
             GraphNode::MuxSession(mux) => Some(MuxRow {
                 node_id_display: NodeId::MuxSession(mux.id.clone()).to_string(),

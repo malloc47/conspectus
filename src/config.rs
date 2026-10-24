@@ -49,6 +49,76 @@ pub struct Config {
     pub server: ServerConfig,
     pub worktree: WorktreeConfig,
     pub forge: ForgeConfig,
+    pub history: HistoryConfig,
+    pub launch: LaunchConfig,
+}
+
+/// Which config file a launch profile came from.
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+pub enum ProfileOrigin {
+    User,
+    Project,
+}
+
+/// One `[launch.<harness>]` profile (ADR 0142).
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct LaunchProfile {
+    pub argv: Vec<String>,
+    pub origin: ProfileOrigin,
+}
+
+/// Settings under `[launch.<harness>]`: how to start each harness when
+/// no slot override or recorded argv says otherwise (ADR 0142). A
+/// project's profile replaces the user's for the same harness.
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+pub struct LaunchConfig {
+    pub profiles: BTreeMap<String, LaunchProfile>,
+}
+
+/// Settings under `[history]` (ADR 0140).
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct HistoryConfig {
+    /// `[history.ignore]`: globs per kind (`mux` on the mux name,
+    /// `checkout` and `repo` on the path, `pr` on `owner/repo#number`).
+    /// Matching entities are never recorded. Lists from the user and
+    /// project files add up.
+    pub ignore: BTreeMap<crate::model::HistoryKind, Vec<String>>,
+    /// `[history.reap_after]`: how long a gone record of each kind
+    /// waits before `history reap` removes it. `None` means only
+    /// `history forget` removes it.
+    pub reap_after: BTreeMap<crate::model::HistoryKind, Option<Duration>>,
+}
+
+impl Default for HistoryConfig {
+    fn default() -> Self {
+        use crate::model::HistoryKind;
+        const DAY: u64 = 86_400;
+        Self {
+            ignore: BTreeMap::new(),
+            reap_after: BTreeMap::from([
+                (HistoryKind::Mux, Some(Duration::from_secs(14 * DAY))),
+                (HistoryKind::Checkout, Some(Duration::from_secs(30 * DAY))),
+                (HistoryKind::Pr, Some(Duration::from_secs(30 * DAY))),
+                (HistoryKind::Repo, None),
+            ]),
+        }
+    }
+}
+
+impl HistoryConfig {
+    /// Whether `label` matches one of `kind`'s ignore globs.
+    pub fn ignores(&self, kind: crate::model::HistoryKind, label: &str) -> bool {
+        self.ignore.get(&kind).is_some_and(|globs| {
+            globs
+                .iter()
+                .any(|glob| crate::history::glob_matches(glob, label))
+        })
+    }
+
+    /// The reap threshold for `kind`.
+    pub fn reap_after(&self, kind: crate::model::HistoryKind) -> Option<Duration> {
+        self.reap_after.get(&kind).copied().flatten()
+    }
 }
 
 /// Settings under `[forge]` (ADR 0136).
@@ -258,6 +328,8 @@ pub struct TuiViewsConfig {
     pub union: TuiViewConfig,
     pub prs: TuiViewConfig,
     pub forks: TuiViewConfig,
+    pub pinned: TuiViewConfig,
+    pub history: TuiViewConfig,
 }
 
 impl TuiViewsConfig {
@@ -269,6 +341,8 @@ impl TuiViewsConfig {
             View::Union => &self.union,
             View::Prs => &self.prs,
             View::Forks => &self.forks,
+            View::Pinned => &self.pinned,
+            View::History => &self.history,
         }
     }
 }
@@ -367,6 +441,12 @@ struct ConfigFile {
     /// `[forge]` table (ADR 0136).
     #[serde(default)]
     forge: Option<ForgeFile>,
+    /// `[history]` table (ADR 0140).
+    #[serde(default)]
+    history: Option<HistoryFile>,
+    /// `[launch.<harness>]` tables (ADR 0142).
+    #[serde(default)]
+    launch: Option<BTreeMap<String, LaunchFile>>,
     /// Legacy `[session]` key from before ADR 0021. Its presence
     /// triggers a diagnostic so users discover the schema migrated;
     /// its contents are not read.
@@ -382,6 +462,20 @@ struct WorktreeFile {
     teardown_confirm: Option<String>,
     #[serde(default)]
     teardown_grace: Option<String>,
+}
+
+#[derive(Clone, Debug, Default, Deserialize)]
+struct LaunchFile {
+    #[serde(default)]
+    argv: Option<Vec<String>>,
+}
+
+#[derive(Clone, Debug, Default, Deserialize)]
+struct HistoryFile {
+    #[serde(default)]
+    ignore: Option<BTreeMap<String, Vec<String>>>,
+    #[serde(default)]
+    reap_after: Option<BTreeMap<String, String>>,
 }
 
 #[derive(Clone, Debug, Default, Deserialize)]
@@ -640,6 +734,7 @@ impl ConfigLoader {
             merge_from_file(
                 &mut config,
                 &path,
+                ProfileOrigin::User,
                 self.home.as_deref(),
                 &mut outcome.diagnostics,
             );
@@ -650,6 +745,7 @@ impl ConfigLoader {
             merge_from_file(
                 &mut config,
                 &path,
+                ProfileOrigin::Project,
                 self.home.as_deref(),
                 &mut outcome.diagnostics,
             );
@@ -670,6 +766,7 @@ pub fn load_from_cwd() -> LoadOutcome {
 fn merge_from_file(
     config: &mut Config,
     path: &Path,
+    origin: ProfileOrigin,
     home: Option<&Path>,
     diagnostics: &mut Vec<ConfigDiagnostic>,
 ) {
@@ -721,6 +818,85 @@ fn merge_from_file(
     }
     if let Some(worktree) = parsed.worktree {
         merge_worktree(&mut config.worktree, worktree, path, diagnostics);
+    }
+    if let Some(history) = parsed.history {
+        merge_history(&mut config.history, history, path, diagnostics);
+    }
+    if let Some(launch) = parsed.launch {
+        merge_launch(&mut config.launch, launch, origin, path, diagnostics);
+    }
+}
+
+fn merge_launch(
+    config: &mut LaunchConfig,
+    file: BTreeMap<String, LaunchFile>,
+    origin: ProfileOrigin,
+    path: &Path,
+    diagnostics: &mut Vec<ConfigDiagnostic>,
+) {
+    for (harness, profile) in file {
+        if crate::discovery::harness::launch_argv_for(&harness).is_empty() {
+            diagnostics.push(ConfigDiagnostic {
+                path: path.to_path_buf(),
+                message: format!("`[launch.{harness}]` names no known harness; ignored"),
+            });
+            continue;
+        }
+        match profile.argv {
+            Some(argv) if argv.first().is_some_and(|program| !program.is_empty()) => {
+                config
+                    .profiles
+                    .insert(harness, LaunchProfile { argv, origin });
+            }
+            _ => diagnostics.push(ConfigDiagnostic {
+                path: path.to_path_buf(),
+                message: format!("`[launch.{harness}]` needs a non-empty `argv`; ignored"),
+            }),
+        }
+    }
+}
+
+fn merge_history(
+    config: &mut HistoryConfig,
+    file: HistoryFile,
+    path: &Path,
+    diagnostics: &mut Vec<ConfigDiagnostic>,
+) {
+    use crate::model::HistoryKind;
+    for (key, globs) in file.ignore.unwrap_or_default() {
+        match HistoryKind::parse(&key) {
+            Some(kind) => config.ignore.entry(kind).or_default().extend(globs),
+            None => diagnostics.push(ConfigDiagnostic {
+                path: path.to_path_buf(),
+                message: format!(
+                    "unknown `[history.ignore]` kind `{key}`; expected mux, checkout, repo, or pr"
+                ),
+            }),
+        }
+    }
+    for (key, raw) in file.reap_after.unwrap_or_default() {
+        let Some(kind) = HistoryKind::parse(&key) else {
+            diagnostics.push(ConfigDiagnostic {
+                path: path.to_path_buf(),
+                message: format!(
+                    "unknown `[history.reap_after]` kind `{key}`; expected mux, checkout, repo, or pr"
+                ),
+            });
+            continue;
+        };
+        if raw.trim() == "never" {
+            config.reap_after.insert(kind, None);
+            continue;
+        }
+        match parse_duration_short(&raw) {
+            Ok(after) => {
+                config.reap_after.insert(kind, Some(after));
+            }
+            Err(message) => diagnostics.push(ConfigDiagnostic {
+                path: path.to_path_buf(),
+                message: format!("invalid `[history.reap_after] {key}` value `{raw}`: {message}"),
+            }),
+        }
     }
 }
 
@@ -839,7 +1015,7 @@ fn set_server_interval(
 }
 
 /// Parse a short-form duration string of the shape
-/// `<non-negative-integer><ms|s|m|h>`. Shared with the CLI
+/// `<non-negative-integer><ms|s|m|h|d>`. Shared with the CLI
 /// `--refresh-interval` flag (which calls through its own
 /// historical `parse_tui_duration` wrapper) and the
 /// `worktree close --grace` override; the format is the same so
@@ -851,7 +1027,7 @@ pub fn parse_duration_short(input: &str) -> Result<Duration, String> {
     }
     let split = trimmed
         .find(|c: char| !c.is_ascii_digit())
-        .ok_or_else(|| "missing unit (expected ms/s/m/h)".to_string())?;
+        .ok_or_else(|| "missing unit (expected ms/s/m/h/d)".to_string())?;
     let (num_str, suffix) = trimmed.split_at(split);
     let value: u64 = num_str
         .parse()
@@ -861,7 +1037,8 @@ pub fn parse_duration_short(input: &str) -> Result<Duration, String> {
         "s" => Duration::from_secs(value),
         "m" => Duration::from_secs(value.saturating_mul(60)),
         "h" => Duration::from_secs(value.saturating_mul(3600)),
-        other => return Err(format!("unknown unit `{other}` (expected ms/s/m/h)")),
+        "d" => Duration::from_secs(value.saturating_mul(86_400)),
+        other => return Err(format!("unknown unit `{other}` (expected ms/s/m/h/d)")),
     };
     Ok(dur)
 }
@@ -1357,6 +1534,8 @@ fn view_config_key(view: View) -> &'static str {
         View::Union => "union",
         View::Prs => "prs",
         View::Forks => "forks",
+        View::Pinned => "pinned",
+        View::History => "history",
     }
 }
 
@@ -1444,6 +1623,8 @@ fn parse_view_name(raw: &str) -> Option<crate::tui::View> {
         "union" => Some(View::Union),
         "prs" => Some(View::Prs),
         "forks" => Some(View::Forks),
+        "pinned" => Some(View::Pinned),
+        "history" => Some(View::History),
         _ => None,
     }
 }

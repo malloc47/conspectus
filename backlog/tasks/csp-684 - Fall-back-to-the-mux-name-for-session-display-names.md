@@ -1,9 +1,10 @@
 ---
 id: CSP-684
 title: Fall back to the mux name for session display names
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-10-22 01:11'
+updated_date: '2026-10-22 18:13'
 labels:
   - history-pins
 milestone: m-23
@@ -29,11 +30,17 @@ Today a pin's `display_name` aliases its bound session everywhere. Slot ids now 
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 An untitled session shows its live or last-hosting mux's name, and aliases and titles still take precedence
+- [x] #1 An untitled session shows its live or last-hosting mux's name, and aliases and titles still take precedence
 <!-- AC:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
-- [ ] #1 `just check` passes, or `git diff --check` for docs-only changes
-- [ ] #2 Docs and ADRs are updated when behavior, architecture, or workflow change
+- [x] #1 `just check` passes, or `git diff --check` for docs-only changes
+- [x] #2 Docs and ADRs are updated when behavior, architecture, or workflow change
 <!-- DOD:END -->
+
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+Session display names follow alias, then title, then the live or last-hosting mux name, then the id suffix, through one shared function used by the TUI rows, the Pinned view, and table sessions; ADR 0029 carries an amendment note. Covered by aliases_tests, sessions_tests, and table_tests.
+<!-- SECTION:FINAL_SUMMARY:END -->

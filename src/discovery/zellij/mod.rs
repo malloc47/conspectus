@@ -7,7 +7,7 @@
 //! `discovery::providers::REGISTRY`,
 //! `discovery::tmux::KNOWN_MUX_BACKENDS`, and
 //! `LocalDiscoveryConfig::from_env`. Every downstream consumer
-//! (pin validation, attach dispatch, TUI badge rendering,
+//! (slot validation, attach dispatch, TUI badge rendering,
 //! provenance stamping) already routes by `backend_key`.
 //!
 //! Zellij's `list-sessions` output differs from tmux's — it's a
@@ -35,7 +35,7 @@ use anyhow::{Context, Result};
 use crate::discovery::providers;
 use crate::discovery::tmux::{MuxBackend, TmuxAttachOutcome, TmuxOutcome, UnavailableReason};
 use crate::discovery::{DiscoveryContext, DiscoveryProvider, GraphFragment};
-use crate::model::{GraphNode, MuxSessionId, MuxSessionNode};
+use crate::model::{GraphNode, MuxProbe, MuxProbeStatus, MuxSessionId, MuxSessionNode};
 
 /// Backend identifier — matches the `backend_key()` this
 /// backend returns. Aliased to
@@ -234,23 +234,28 @@ impl<R: MuxBackend + 'static> DiscoveryProvider for ZellijDiscovery<R> {
         // pass tmux's format anyway so a mixed backend list that
         // reuses this call surface stays uniform.
         let outcome = self.runner.list_sessions("")?;
-        let stdout = match outcome {
-            TmuxOutcome::Sessions(s) => s,
-            TmuxOutcome::Unavailable(_) => return Ok(GraphFragment::empty()),
-            TmuxOutcome::Failed { .. } => {
-                // Degrade to an empty fragment when zellij
-                // returned a non-zero status. The `Diagnostic`
-                // enum today has no free-form info variant, so
-                // failure telemetry stays out of the graph and
-                // relies on stderr for surfacing. Matches how
-                // the tmux path handles unexpected errors when
-                // the shape is otherwise recoverable.
-                return Ok(GraphFragment::empty());
+        let epoch = crate::discovery::current_epoch();
+        let (stdout, status) = match outcome {
+            TmuxOutcome::Sessions(s) => (s, MuxProbeStatus::Listed),
+            TmuxOutcome::Unavailable(UnavailableReason::NoServer) => {
+                (String::new(), MuxProbeStatus::NoServer)
+            }
+            TmuxOutcome::Unavailable(UnavailableReason::BinaryNotFound) => {
+                (String::new(), MuxProbeStatus::Unavailable)
+            }
+            // A failed listing leaves zellij's muxes unknown, not gone
+            // (ADR 0140); its stderr reaches the operator.
+            TmuxOutcome::Failed { message, .. } => {
+                (String::new(), MuxProbeStatus::Failed { message })
             }
         };
 
         let mut fragment = GraphFragment::empty();
+        let mut exited = Vec::new();
         for row in parse_zellij_sessions(&stdout) {
+            if row.exited {
+                exited.push(row.name.clone());
+            }
             // MuxSessionId is constructed via `new(&str)` with
             // the `<backend>:<name>` prefixed form (matches the
             // tmux side; see `MuxSessionNode.native_id` docstring
@@ -269,15 +274,21 @@ impl<R: MuxBackend + 'static> DiscoveryProvider for ZellijDiscovery<R> {
                 activity_epoch: None,
                 created_epoch: None,
                 last_attached_epoch: None,
+                socket: None,
+                backend_session_id: None,
             };
             fragment.nodes.push(GraphNode::MuxSession(node));
         }
-
-        crate::discovery::stamp_fragment(
-            &mut fragment,
-            ZELLIJ_BACKEND,
-            crate::discovery::current_epoch(),
+        fragment.mux_probes.insert(
+            ZELLIJ_BACKEND.to_string(),
+            MuxProbe {
+                status,
+                epoch,
+                exited,
+            },
         );
+
+        crate::discovery::stamp_fragment(&mut fragment, ZELLIJ_BACKEND, epoch);
         context.caches().zellij.set((), fragment.clone());
         Ok(fragment)
     }
@@ -327,5 +338,38 @@ exited-session [Created 24h ago] (EXITED - attach to resurrect)
     #[test]
     fn backend_key_is_zellij() {
         assert_eq!(SystemZellij::new().backend_key(), "zellij");
+    }
+
+    struct CannedZellij(TmuxOutcome);
+
+    impl MuxBackend for CannedZellij {
+        fn backend_key(&self) -> &'static str {
+            ZELLIJ_BACKEND
+        }
+        fn list_sessions(&self, _format: &str) -> Result<TmuxOutcome> {
+            Ok(self.0.clone())
+        }
+    }
+
+    #[test]
+    fn zellij_reports_its_probe_and_exited_sessions() {
+        let listed = ZellijDiscovery::with_runner(CannedZellij(TmuxOutcome::Sessions(
+            "live [Created 1m ago]\nold [Created 2d ago] (EXITED - attach to resurrect)\n".into(),
+        )))
+        .discover(&DiscoveryContext::default())
+        .unwrap();
+        let probe = &listed.mux_probes[ZELLIJ_BACKEND];
+        assert_eq!(probe.status, MuxProbeStatus::Listed);
+        assert_eq!(probe.exited, vec!["old".to_string()]);
+
+        let missing = ZellijDiscovery::with_runner(CannedZellij(TmuxOutcome::Unavailable(
+            UnavailableReason::BinaryNotFound,
+        )))
+        .discover(&DiscoveryContext::default())
+        .unwrap();
+        assert_eq!(
+            missing.mux_probes[ZELLIJ_BACKEND].status,
+            MuxProbeStatus::Unavailable
+        );
     }
 }

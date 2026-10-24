@@ -66,6 +66,8 @@ fn mux(native: &str, cwd: Option<&str>) -> GraphNode {
         activity_epoch: None,
         created_epoch: None,
         last_attached_epoch: None,
+        socket: None,
+        backend_session_id: None,
     })
 }
 
@@ -84,6 +86,8 @@ fn mux_with_active_command(native: &str, cwd: Option<&str>, command: &str) -> Gr
         activity_epoch: None,
         created_epoch: None,
         last_attached_epoch: None,
+        socket: None,
+        backend_session_id: None,
     })
 }
 
@@ -102,6 +106,8 @@ fn mux_with_active_process(native: &str, cwd: Option<&str>, command: &str, pid: 
         activity_epoch: None,
         created_epoch: None,
         last_attached_epoch: None,
+        socket: None,
+        backend_session_id: None,
     })
 }
 
@@ -152,6 +158,7 @@ fn worktree(repo_common_dir: &str, root: &str) -> GraphNode {
         git_dir: None,
         current_branch: None,
         worktree: None,
+        head_commit: None,
     })
 }
 
@@ -1987,7 +1994,7 @@ fn opencode_shared_service_child_is_not_a_pane_agent() {
                     .is_some_and(|target| target.to_string().contains("pid:101"))),
         "the shared service must not emit process links"
     );
-    assert!(crate::resolve::pins::mux_hosts_harness(
+    assert!(mux_hosts_harness(
         &snapshot,
         &MuxSessionId::new("tmux:editor"),
         "opencode"
@@ -2012,11 +2019,30 @@ fn pane_running_only_an_opencode_server_does_not_host_the_harness() {
 
     infer_with_process_snapshot(&mut snapshot, &processes);
 
-    assert!(!crate::resolve::pins::mux_hosts_harness(
+    assert!(!mux_hosts_harness(
         &snapshot,
         &MuxSessionId::new("tmux:server"),
         "opencode"
     ));
+}
+
+/// Whether an active `MuxContainsProcess` link ties `mux` to a
+/// process of `harness`.
+fn mux_hosts_harness(snapshot: &GraphSnapshot, mux: &MuxSessionId, harness: &str) -> bool {
+    let mux_node = NodeId::MuxSession(mux.clone());
+    snapshot.nodes.iter().any(|node| match node {
+        GraphNode::RuntimeProcess(process) => {
+            process.harness_key.as_deref() == Some(harness)
+                && snapshot.candidate_links.iter().any(|link| {
+                    link.relation == RelationKind::MuxContainsProcess
+                        && matches!(link.state, LinkState::Active)
+                        && link.source == mux_node
+                        && link.target_node_id()
+                            == Some(&NodeId::RuntimeProcess(process.id.clone()))
+                })
+        }
+        _ => false,
+    })
 }
 
 fn rooted_in_targets(snapshot: &GraphSnapshot, native: &str) -> Vec<NodeId> {
@@ -2136,4 +2162,27 @@ fn mux_rooting_ignores_canonical_checkouts_and_the_active_pane_path() {
         rooted_in_targets(&snapshot, "pathless"),
         vec![workspace_id("/home/op/atelier-ws")]
     );
+}
+
+#[test]
+fn the_process_walk_skips_gone_muxes() {
+    let mut live = mux("live", None);
+    let mut ghost = mux("ghost", None);
+    for node in [&mut live, &mut ghost] {
+        if let GraphNode::MuxSession(m) = node {
+            m.active_pane_pid = Some(10);
+        }
+    }
+    let ghost_id = ghost.id();
+    let mut snapshot = GraphSnapshot {
+        nodes: vec![live, ghost],
+        ..GraphSnapshot::empty()
+    };
+    snapshot
+        .node_presence
+        .insert(ghost_id, crate::model::NodePresence::Gone { last_seen: 1 });
+    let processes = FakeProcessSnapshot::new([process(11, Some(10), "claude", Some("/p"))]);
+    let pids = active_harness_pids_per_mux(&snapshot, &processes);
+    assert!(pids.contains_key(&MuxSessionId::new("tmux:live")));
+    assert!(!pids.contains_key(&MuxSessionId::new("tmux:ghost")));
 }

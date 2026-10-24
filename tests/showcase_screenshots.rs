@@ -103,7 +103,7 @@ fn the_showcase_screens_render_real_previews_with_stable_paths_and_ages() {
     );
 
     let prs = frame(scratch.path(), "3jl");
-    assert!(prs.contains("#7 ⎇  draft"), "{prs}");
+    assert!(prs.contains("#7 ⌥    2h  ◐"), "{prs}");
     assert!(prs.contains("Release notes for 0.3"), "{prs}");
     assert!(
         prs.contains("checks  2 passed · 1 failed · 1 pending"),
@@ -115,4 +115,38 @@ fn the_showcase_screens_render_real_previews_with_stable_paths_and_ages() {
         mux.contains("Bash(gh pr create --draft --base main)"),
         "{mux}"
     );
+
+    // The Pinned view: slots of several kinds, live and gone.
+    let pinned = frame(scratch.path(), "4");
+    for row in [
+        "project-main",
+        "nightly",
+        "parser-session",
+        "ledger-worktree",
+        "ledger-pr",
+    ] {
+        assert!(pinned.contains(row), "{row}: {pinned}");
+    }
+    assert!(
+        pinned.contains("stopped") && pinned.contains("removed"),
+        "{pinned}"
+    );
+
+    // The History view: gone records no pin points at.
+    let history = frame(scratch.path(), "5");
+    for row in [
+        "release-prep",
+        "bugfix-sprint",
+        "docs-sweep",
+        "hotfix/login",
+        "spike/cache",
+    ] {
+        assert!(history.contains(row), "{row}: {history}");
+    }
+    for pinned in ["nightly-refactor", "feature/ledger"] {
+        assert!(
+            !history.contains(pinned),
+            "{pinned} is pinned, so History hides it: {history}"
+        );
+    }
 }

@@ -167,9 +167,16 @@ pub fn render_graph_dot(snapshot: &GraphSnapshot, opts: DotOptions) -> Result<St
         for node in members {
             let id = node.id();
             let style = node_style(node);
+            // A gone or unknown node (ADR 0140) draws dashed and grey.
+            let presence = snapshot.presence(&id).map_or(String::new(), |presence| {
+                format!(
+                    ", style=\"filled,rounded,dashed\", fontcolor=\"#757575\", tooltip=\"{}\"",
+                    presence.label_for(crate::model::NodeKind::from(&id))
+                )
+            });
             writeln!(
                 out,
-                "    {dot_id} [label={label}, shape={shape}, fillcolor=\"{fill}\"{extra}];",
+                "    {dot_id} [label={label}, shape={shape}, fillcolor=\"{fill}\"{extra}{presence}];",
                 dot_id = node_dot_id(&id),
                 label = dot_quote(&node_label(node)),
                 shape = style.shape,
@@ -390,7 +397,7 @@ fn node_label(node: &GraphNode) -> String {
         GraphNode::Pin(n) => {
             format!(
                 "pin:{}\\n{}",
-                truncate(&n.display_name, 24),
+                truncate(&n.label, 24),
                 short_id(&n.id.to_string()),
             )
         }
@@ -469,10 +476,7 @@ fn edge_style(link: &GraphLink, is_resolved: bool, is_unresolved_target: bool) -
     };
 
     let penwidth = match link.provenance {
-        Provenance::LocalDeclared
-        | Provenance::GlobalDeclared
-        | Provenance::LocalPin
-        | Provenance::GlobalPin => 2.5,
+        Provenance::LocalDeclared | Provenance::GlobalDeclared | Provenance::GlobalPin => 2.5,
         Provenance::StrongDiscovered => 1.6,
         Provenance::Discovered => 1.0,
         Provenance::Convention => 0.8,
@@ -511,7 +515,7 @@ fn edge_label(link: &GraphLink, is_resolved: bool) -> String {
 fn provenance_color(p: Provenance) -> &'static str {
     match p {
         Provenance::LocalDeclared | Provenance::GlobalDeclared => "#1565c0",
-        Provenance::LocalPin | Provenance::GlobalPin => "#6a1b9a",
+        Provenance::GlobalPin => "#6a1b9a",
         Provenance::StrongDiscovered => "#212121",
         Provenance::Discovered => "#424242",
         Provenance::Convention => "#757575",
@@ -534,8 +538,7 @@ fn relation_arrowhead(rel: &RelationKind) -> &'static str {
         | RelationKind::RootedIn
         | RelationKind::RootedAtPath
         | RelationKind::BranchHasForgePr
-        | RelationKind::PinTargetsMux
-        | RelationKind::PinRealizedBySession => "vee",
+        | RelationKind::PinTargets => "vee",
         // Lineage / parent-child: normal arrow.
         RelationKind::ParentFork
         | RelationKind::ParentSession
@@ -543,7 +546,10 @@ fn relation_arrowhead(rel: &RelationKind) -> &'static str {
         | RelationKind::ForksWorkspace
         | RelationKind::ForksRepo
         | RelationKind::CreatedCheckout
-        | RelationKind::CreatedBranch => "normal",
+        | RelationKind::CreatedBranch
+        | RelationKind::RebuiltFrom => "normal",
+        // History: the session a gone mux last hosted.
+        RelationKind::MuxLastHosted => "odot",
         // Runtime-process attribution: dot heads to read as "observes".
         RelationKind::ProcessIdentifiesSession | RelationKind::ProcessCandidatesSession => "dot",
     }

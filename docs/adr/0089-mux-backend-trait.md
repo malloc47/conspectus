@@ -318,6 +318,8 @@ backend calls; today the wrapper is a clean seam.
 - ADR 0087 (mutation envelope) — pin-launch send-keys and
   new-session stay within envelope category 3 (mux lifecycle,
   operator-initiated). No new mutations licensed by this ADR.
+- ADR 0143 (mutation envelope) — supersedes ADR 0087, keeping its
+  category and prohibition numbers.
 - ADR 0088 (provider descriptor registry) — the same
   registration convention (unique key, static registry) applies
   here. A future consolidation could unify both under one

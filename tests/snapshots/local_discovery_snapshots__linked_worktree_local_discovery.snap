@@ -32,7 +32,8 @@ expression: normalized
       },
       "worktree": {
         "kind": "linked"
-      }
+      },
+      "head_commit": "<redacted>"
     },
     {
       "type": "branch",

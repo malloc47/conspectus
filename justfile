@@ -85,6 +85,10 @@ screenshots:
     shot mux-pane "2jj"
     # The PRs view: a PR under its checkout, with its sessions and preview.
     shot prs-view "3jl"
+    # The Pinned view: slots of several kinds, live and gone.
+    shot pinned-view "4"
+    # The History view: gone entities, ready to rebuild.
+    shot history-view "5"
 
 # Needs the dev-only `snapshot` feature (fixture mode). There is no live
 # discovery, so nothing on the demo machine leaks into the view; press `r`
@@ -95,3 +99,13 @@ demo:
     cargo run --quiet --features snapshot -- tui --fixture tests/fixtures/showcase.json
 
 check: fmt clippy test nextest doc diff-check
+
+# Drop into a disposable Conspectus home (private tmux, stub harnesses,
+# a git repo) for manual testing; `just scratch smoke` runs the checks.
+scratch *args='shell':
+    scripts/scratch-home.sh {{args}}
+
+# Re-render the example frames in docs/tui-columns.md after an intended
+# change to the left panel; edit the document's prose by hand.
+tui-columns:
+    UPDATE_TUI_COLUMNS=1 cargo nextest run --all-features --test tui_columns_doc

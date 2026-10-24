@@ -71,6 +71,12 @@ impl PathOmniboxState {
         self.input.cursor()
     }
 
+    /// Replace the text, keeping the known candidates.
+    pub fn set_value(&mut self, value: impl Into<String>) {
+        self.input = TextInputState::new(self.title.clone(), value);
+        self.selected = 0;
+    }
+
     pub fn set_known_candidates(&mut self, candidates: Vec<PathCandidate>) {
         self.known = normalize_known_candidates(candidates);
         self.selected = self

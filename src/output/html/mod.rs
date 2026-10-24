@@ -495,8 +495,8 @@ fn node_labels(node: &GraphNode) -> (String, String) {
             "mux session".to_string(),
         ),
         GraphNode::Pin(n) => (
-            format!("pin:{}", truncate(&n.display_name, 24)),
-            format!("{} · {}", n.harness, n.mux.native_id()),
+            format!("pin:{}", truncate(&n.label, 24)),
+            format!("{} · {}", n.kind.as_str(), n.status.label_for(n.kind)),
         ),
         GraphNode::Fork(n) => {
             let name = n

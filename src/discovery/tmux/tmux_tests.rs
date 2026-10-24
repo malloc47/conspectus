@@ -59,6 +59,12 @@ fn no_server_stderr_maps_to_unavailable() {
     assert!(looks_like_no_server(
         "error connecting to /tmp/tmux-1000/default (No sessions)"
     ));
+    assert!(looks_like_no_server(
+        "error connecting to /tmp/tmux-1000/default (No such file or directory)"
+    ));
+    assert!(!looks_like_no_server(
+        "error connecting to /tmp/tmux-1000/default (Permission denied)"
+    ));
     assert!(!looks_like_no_server("permission denied"));
 }
 
@@ -97,6 +103,7 @@ fn parser_extracts_name_path_activity_and_created_epoch() {
             active_pane_current_path: None,
             active_pane_start_command: None,
             client_attached: None,
+            session_id: None,
         }]
     );
 }
@@ -625,4 +632,218 @@ fn capture_output_splits_the_pane_width_from_the_text() {
             width: None,
         }
     );
+}
+
+#[test]
+fn parser_extracts_the_tmux_session_id_from_the_last_field() {
+    let line = "alpha\t/work\t1\t2\tzsh\t42\t/work\tzsh\t1\t/dev/pts/1\t3\t$7";
+    let rows = parse_list_sessions(line);
+    assert_eq!(rows[0].session_id.as_deref(), Some("$7"));
+    assert_eq!(rows[0].last_attached_epoch, Some(3));
+
+    let older = "alpha\t/work\t1\t2\tzsh\t42\t/work\tzsh\t1\t/dev/pts/1\t3";
+    assert_eq!(parse_list_sessions(older)[0].session_id, None);
+}
+
+/// A runner that answers per socket, recording which ones were asked.
+struct SocketRunner {
+    answers: BTreeMap<Option<String>, TmuxOutcome>,
+    asked: std::sync::Mutex<Vec<Option<String>>>,
+}
+
+impl SocketRunner {
+    fn new(answers: Vec<(Option<&str>, TmuxOutcome)>) -> Self {
+        Self {
+            answers: answers
+                .into_iter()
+                .map(|(socket, outcome)| (socket.map(str::to_string), outcome))
+                .collect(),
+            asked: Default::default(),
+        }
+    }
+}
+
+impl MuxBackend for SocketRunner {
+    fn backend_key(&self) -> &'static str {
+        TMUX_BACKEND
+    }
+
+    fn list_sessions(&self, format: &str) -> Result<TmuxOutcome> {
+        self.list_sessions_on(None, format)
+    }
+
+    fn list_sessions_on(&self, socket: Option<&str>, _format: &str) -> Result<TmuxOutcome> {
+        let socket = socket.map(str::to_string);
+        self.asked.lock().unwrap().push(socket.clone());
+        Ok(self
+            .answers
+            .get(&socket)
+            .cloned()
+            .unwrap_or(TmuxOutcome::Unavailable(UnavailableReason::NoServer)))
+    }
+}
+
+fn probes(fragment: &GraphFragment) -> BTreeMap<String, MuxProbeStatus> {
+    fragment
+        .mux_probes
+        .iter()
+        .map(|(key, probe)| (key.clone(), probe.status.clone()))
+        .collect()
+}
+
+#[test]
+fn each_probed_server_reports_listed_no_server_or_failure() {
+    let runner = SocketRunner::new(vec![
+        (None, TmuxOutcome::Sessions("main\t/w\t1\t1\n".into())),
+        (
+            Some("work"),
+            TmuxOutcome::Unavailable(UnavailableReason::NoServer),
+        ),
+        (
+            Some("broken"),
+            TmuxOutcome::Failed {
+                code: Some(1),
+                message: "boom".into(),
+            },
+        ),
+    ]);
+    let discovery = TmuxDiscovery::with_runner(runner);
+    let context =
+        DiscoveryContext::default().with_mux_sockets(["work".to_string(), "broken".to_string()]);
+    let fragment = discovery.discover(&context).unwrap();
+
+    let statuses = probes(&fragment);
+    assert_eq!(statuses["tmux"], MuxProbeStatus::Listed);
+    assert_eq!(statuses["tmux:work"], MuxProbeStatus::NoServer);
+    assert_eq!(
+        statuses["tmux:broken"],
+        MuxProbeStatus::Failed {
+            message: "boom".into()
+        }
+    );
+    assert!(statuses["tmux:work"].succeeded());
+    assert!(!statuses["tmux:broken"].succeeded());
+}
+
+#[test]
+fn a_missing_tmux_binary_is_unavailable_not_a_success() {
+    let discovery =
+        TmuxDiscovery::with_runner(FakeTmux::unavailable(UnavailableReason::BinaryNotFound));
+    let fragment = discovery.discover(&DiscoveryContext::default()).unwrap();
+    let statuses = probes(&fragment);
+    assert_eq!(statuses["tmux"], MuxProbeStatus::Unavailable);
+    assert!(!statuses["tmux"].succeeded());
+}
+
+#[test]
+fn no_server_running_is_an_empty_success() {
+    let discovery = TmuxDiscovery::with_runner(FakeTmux::unavailable(UnavailableReason::NoServer));
+    let fragment = discovery.discover(&DiscoveryContext::default()).unwrap();
+    assert!(fragment.nodes.is_empty());
+    assert_eq!(probes(&fragment)["tmux"], MuxProbeStatus::NoServer);
+    assert!(probes(&fragment)["tmux"].succeeded());
+}
+
+#[test]
+fn a_socket_history_names_is_probed_and_its_sessions_namespaced() {
+    let runner = SocketRunner::new(vec![
+        (None, TmuxOutcome::Sessions("main\t/w\t1\t1\n".into())),
+        (
+            Some("scratch"),
+            TmuxOutcome::Sessions("main\t/s\t1\t1\tzsh\t9\t/s\tzsh\t0\t\t\t$4\n".into()),
+        ),
+    ]);
+    let discovery = TmuxDiscovery::with_runner(runner);
+    let context = DiscoveryContext::default()
+        .with_mux_sockets(["scratch".to_string(), "default".to_string()]);
+    let fragment = discovery.discover(&context).unwrap();
+
+    let asked = discovery_asked(&discovery);
+    assert_eq!(asked, vec![None, Some("scratch".to_string())]);
+
+    let muxes: Vec<_> = fragment
+        .nodes
+        .iter()
+        .filter_map(|node| match node {
+            GraphNode::MuxSession(mux) => Some(mux),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(muxes.len(), 2, "same name on two servers, two muxes");
+    let scratch = muxes
+        .iter()
+        .find(|mux| mux.socket.as_deref() == Some("scratch"))
+        .unwrap();
+    assert_eq!(scratch.id.native_id, "tmux:scratch:main");
+    assert_eq!(scratch.qualified_name(), "tmux:scratch:main");
+    assert_eq!(scratch.session_name(), "main");
+    assert_eq!(scratch.backend_session_id.as_deref(), Some("$4"));
+    let default = muxes.iter().find(|mux| mux.socket.is_none()).unwrap();
+    assert_eq!(default.session_name(), "main");
+}
+
+fn discovery_asked(discovery: &TmuxDiscovery<SocketRunner>) -> Vec<Option<String>> {
+    discovery.runner.asked.lock().unwrap().clone()
+}
+
+#[test]
+fn a_backend_without_named_servers_fails_a_socket_probe() {
+    let runner = FakeTmux::with_sessions("");
+    let outcome = runner
+        .list_sessions_on(Some("scratch"), TMUX_LIST_FORMAT)
+        .unwrap();
+    assert!(matches!(outcome, TmuxOutcome::Failed { .. }));
+    assert!(matches!(
+        runner
+            .list_sessions_on(Some("default"), TMUX_LIST_FORMAT)
+            .unwrap(),
+        TmuxOutcome::Sessions(_)
+    ));
+}
+
+fn mux_names(fragment: &GraphFragment) -> Vec<String> {
+    fragment
+        .nodes
+        .iter()
+        .filter_map(|node| match node {
+            GraphNode::MuxSession(mux) => Some(mux.session_name().to_string()),
+            _ => None,
+        })
+        .collect()
+}
+
+const ALPHA: &str = "alpha\t/work\t1\t1\n";
+
+#[test]
+fn a_cached_listing_hides_a_started_mux_until_the_mux_cache_is_cleared() {
+    let server = ScriptedTmux::default();
+    server.lists("");
+    let discovery = TmuxDiscovery::with_runner(server.clone());
+    let context = DiscoveryContext::default();
+    assert!(mux_names(&discovery.discover(&context).unwrap()).is_empty());
+
+    server.lists(ALPHA);
+    // Within the cache lifetime the old listing is served: the hazard a
+    // forced refresh must get past.
+    assert!(mux_names(&discovery.discover(&context).unwrap()).is_empty());
+
+    context.caches().clear_mux();
+    assert_eq!(mux_names(&discovery.discover(&context).unwrap()), ["alpha"]);
+}
+
+#[test]
+fn a_cached_listing_hides_a_killed_mux_until_the_mux_cache_is_cleared() {
+    let server = ScriptedTmux::default();
+    server.lists(ALPHA);
+    let discovery = TmuxDiscovery::with_runner(server.clone());
+    let context = DiscoveryContext::default();
+    assert_eq!(mux_names(&discovery.discover(&context).unwrap()), ["alpha"]);
+
+    server.stops();
+    assert_eq!(mux_names(&discovery.discover(&context).unwrap()), ["alpha"]);
+
+    context.caches().clear_mux();
+    let fragment = discovery.discover(&context).unwrap();
+    assert!(mux_names(&fragment).is_empty());
+    assert_eq!(probes(&fragment)["tmux"], MuxProbeStatus::NoServer);
 }

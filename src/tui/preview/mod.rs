@@ -386,10 +386,18 @@ pub fn value_source(app: &App, value: &FieldValue) -> Option<PreviewSource> {
 ///   how far it is ahead and behind;
 /// - a runtime process shows its process tree;
 /// - a pull request shows its title, state, checks, reviews, and body;
-/// - a pin shows its bound session's preview, or, with no session but
-///   a live mux, that mux's pane;
+/// - a pin slot shows the preview of what it points at while that is
+///   live;
+/// - a gone node has none, and the renderer shows its fields;
 /// - a fork has none, and the renderer shows its fields.
 pub fn node_source(app: &App, node: &NodeId) -> Option<PreviewSource> {
+    // A gone node has no pane, repository, or directory to read
+    // (ADR 0140); its fields are all the preview has.
+    if let Some(handle) = app.snapshot_handle()
+        && !handle.snapshot().is_live(node)
+    {
+        return None;
+    }
     match node {
         NodeId::AgentSession(session) => {
             let pane = (app.session_preview() == crate::tui::SessionPreview::Pane)
@@ -408,19 +416,13 @@ pub fn node_source(app: &App, node: &NodeId) -> Option<PreviewSource> {
             (!hosts_this_tui(app, mux)).then(|| PreviewSource::Pane(mux.clone()))
         }
         NodeId::Pin(pin) => {
-            // The pin sidecar is the source of truth for bindings; pin
-            // nodes are projected from it.
+            // A slot previews what it points at while that is live.
             let snapshot = app.snapshot_handle()?.snapshot();
-            let candidate = snapshot.pins.iter().find(|p| p.id == pin.id)?;
-            match candidate.binding.as_ref()? {
-                crate::model::PinBinding::Bound { session, .. } => {
-                    node_source(app, &NodeId::AgentSession(session.clone()))
-                }
-                crate::model::PinBinding::StaleMux { mux } => {
-                    node_source(app, &NodeId::MuxSession(mux.clone()))
-                }
-                crate::model::PinBinding::Unbound => None,
-            }
+            let slot = crate::tui::rows::pin_nodes(snapshot)
+                .into_iter()
+                .find(|p| p.id == *pin)?;
+            let target = crate::tui::rows::live_pin_target(snapshot, slot)?;
+            node_source(app, &target)
         }
         NodeId::Workspace(_)
         | NodeId::Checkout(_)
@@ -473,7 +475,7 @@ fn hosts_this_tui(app: &App, mux: &MuxSessionId) -> bool {
 ///
 /// - an agent session row resolves as its node does ([`node_source`]),
 ///   keeping its row's tmux state;
-/// - a mux row, a mux candidate, and a pin placeholder whose mux is
+/// - a mux row, a mux candidate, and a pin slot row whose mux is
 ///   live show the pane;
 /// - any other row resolves as the node the right pane shows for it;
 ///   without a source, the renderer decides what to say.
@@ -497,8 +499,7 @@ fn selection_source(app: &App) -> Option<PreviewSource> {
                 Some(PreviewSource::Transcript(session.session.clone()))
             }
         }
-        (RowKind::AgentSessionMuxCandidate(_), _)
-        | (_, RowId::Group(NodeId::MuxSession(_)) | RowId::MuxSession(NodeId::MuxSession(_))) => {
+        (_, RowId::Group(NodeId::MuxSession(_)) | RowId::MuxSession(NodeId::MuxSession(_))) => {
             pane()
         }
         // Any other row previews the node the right pane shows for it.
@@ -520,10 +521,10 @@ fn graph_node<'a>(app: &'a App, id: &NodeId) -> Option<&'a GraphNode> {
 /// The name tmux knows a mux session by (`editor`, not the graph id
 /// `tmux:editor`), from the snapshot's mux node.
 pub fn pane_native_id(app: &App, mux: &MuxSessionId) -> Option<String> {
+    // A gone mux has no pane to capture (ADR 0140).
     app.snapshot_handle()?
         .snapshot()
-        .nodes
-        .iter()
+        .live_nodes()
         .find_map(|node| match node {
             GraphNode::MuxSession(node) if &node.id == mux => Some(node.native_id.clone()),
             _ => None,

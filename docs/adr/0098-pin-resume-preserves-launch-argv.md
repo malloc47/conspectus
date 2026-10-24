@@ -2,7 +2,9 @@
 
 ## Status
 
-Accepted
+Accepted. Amended by [ADR 0142](0142-rebuild-plans-and-executors.md): the
+splice applies to any rebuild's effective argv, and resume tokens
+already in a recorded argv are replaced.
 
 Amends ADR 0058 (pin session continuity), step 4 of the launch
 decision.

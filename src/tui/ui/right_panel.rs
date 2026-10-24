@@ -48,7 +48,13 @@ pub(super) fn draw_right_panel(app: &mut App, frame: &mut Frame<'_>, area: Rect)
         let content_width = inner.width.saturating_sub(1).max(1) as usize;
         let ExplorerRender { lines, cursor_line } = {
             let state = app.explorer().expect("checked above");
-            render_explorer_lines(state, content_width, app.theme(), app.edge_meta_visible())
+            render_explorer_lines(
+                state,
+                content_width,
+                app.theme(),
+                app.edge_meta_visible(),
+                app.focus() == Focus::Right,
+            )
         };
         // Account for Paragraph wrap: any logical line whose
         // displayed width exceeds the pane width consumes extra
@@ -218,7 +224,7 @@ pub(super) fn right_panel_title(app: &App, width: usize) -> Line<'static> {
     // Render the full drilldown chain in short `kind:tag`
     // form so the operator can see depth at a glance, with elision
     // (`first … last`) when the chain exceeds the title's available
-    // width. The breadcrumb glyph `◀` plus the trailing depth marker
+    // width. The breadcrumb glyph `◄` plus the trailing depth marker
     // anchor the chain so even an elided rendering still conveys
     // where the explorer is.
     if let Some(state) = app.explorer()
@@ -226,7 +232,7 @@ pub(super) fn right_panel_title(app: &App, width: usize) -> Line<'static> {
     {
         // Budget for the chain itself: total title width minus the
         // fixed-cost spans we already pushed (focus marker + label +
-        // " ◀ " prefix + " · depth N" suffix + the leading/trailing
+        // " ◄ " prefix + " · depth N" suffix + the leading/trailing
         // padding spaces).
         let depth_suffix = format!(" · depth {}", state.breadcrumb.len());
         // ADR 0073 §3 prefix glyph: `<glyph> ` between the focus
@@ -237,7 +243,7 @@ pub(super) fn right_panel_title(app: &App, width: usize) -> Line<'static> {
             + focus_marker_width(app, Focus::Right)
             + kind_glyph_width
             + label.chars().count()
-            + " ◀ ".chars().count()
+            + " ◄ ".chars().count()
             + depth_suffix.chars().count()
             + 1;
         let available = width.saturating_sub(fixed_width);
@@ -246,11 +252,11 @@ pub(super) fn right_panel_title(app: &App, width: usize) -> Line<'static> {
             app.theme(),
             available.max(8),
         ) {
-            // The leading ` ◀ ` and trailing `depth N` chrome stays
+            // The leading ` ◄ ` and trailing `depth N` chrome stays
             // in `secondary_text`; the chain itself carries its own
             // per-hop styling (kind glyph in kind color, tag in
             // secondary_text) so the spans are pushed verbatim.
-            spans.push(span!(Style::default().fg(app.theme().secondary_text); " ◀ "));
+            spans.push(span!(Style::default().fg(app.theme().secondary_text); " ◄ "));
             spans.extend(chain.spans);
             spans.push(span!(Style::default().fg(app.theme().secondary_text); "{depth_suffix}"));
         }
@@ -297,6 +303,7 @@ pub(super) fn render_explorer_lines(
     width: usize,
     theme: &Theme,
     show_edge_meta: bool,
+    focused: bool,
 ) -> ExplorerRender {
     use crate::tui::explorer::ExplorerRow;
     let mut lines: Vec<Line<'static>> = Vec::new();
@@ -309,8 +316,11 @@ pub(super) fn render_explorer_lines(
         let flat_index = rows
             .iter()
             .position(|row| matches!(row, ExplorerRow::NodeField { index, .. } if *index == idx));
-        let highlight = flat_index == Some(cursor);
-        if highlight {
+        let at_cursor = flat_index == Some(cursor);
+        // The cursor row still drives scrolling when the pane is
+        // unfocused, but only the focused pane draws a highlight.
+        let highlight = at_cursor && focused;
+        if at_cursor {
             cursor_line = Some(lines.len());
         }
         lines.push(render_node_field_line(field, highlight, theme));
@@ -325,7 +335,7 @@ pub(super) fn render_explorer_lines(
     if counts.other > 0 {
         summary.push_str(&format!(" · {} other", counts.other));
         if counts.ambiguous > 0 {
-            summary.push_str(&format!(" · {} ⚠", counts.ambiguous));
+            summary.push_str(&format!(" · {} ▲", counts.ambiguous));
         }
         if counts.unresolved > 0 {
             summary.push_str(&format!(" · {} —", counts.unresolved));
@@ -340,7 +350,8 @@ pub(super) fn render_explorer_lines(
     ));
 
     for (row_index, row) in rows.iter().enumerate() {
-        let highlight = row_index == cursor;
+        let at_cursor = row_index == cursor;
+        let highlight = at_cursor && focused;
         let pushed = match row {
             ExplorerRow::NodeField { .. } => false,
             ExplorerRow::ValidatedLink {
@@ -410,7 +421,7 @@ pub(super) fn render_explorer_lines(
                 }
             }
         };
-        if highlight && pushed {
+        if at_cursor && pushed {
             cursor_line = Some(lines.len() - 1);
         }
     }
@@ -520,10 +531,10 @@ pub(super) fn render_validated_link_line(
 /// - `AltOf(_)` → 6-space indent, no prefix glyph, label in
 ///   `theme.edge_alt_of`. Quiet — these are candidates the
 ///   resolver considered but didn't pick.
-/// - `Conflict` → `⚠ ` prefix in `theme.edge_conflict`, label in
-///   `theme.edge_conflict` + BOLD. The `⚠` is the cross-mode
+/// - `Conflict` → `▲ ` prefix in `theme.edge_conflict`, label in
+///   `theme.edge_conflict` + BOLD. The `▲` is the cross-mode
 ///   anchor (survives `NO_COLOR`); it also lines up vocabulary
-///   with the Other header's `K ⚠` summary count.
+///   with the Other header's `K ▲` summary count.
 /// - `Resolves` is unreachable here — Resolves rows live in the
 ///   validated zone — but the renderer falls back to AltOf styling
 ///   defensively in case a future change routes one through.
@@ -541,7 +552,7 @@ pub(super) fn render_other_link_line(
             let conflict_style = Style::default()
                 .fg(theme.edge_conflict)
                 .add_modifier(Modifier::BOLD);
-            let prefix = span!(conflict_style; "⚠ ");
+            let prefix = span!(conflict_style; "▲ ");
             ("    ", Some(prefix), conflict_style)
         }
         EdgeStateLabel::AltOf(_) | EdgeStateLabel::Resolves => {
@@ -633,7 +644,7 @@ pub(super) fn render_related_row(
     Line::from(spans)
 }
 
-/// `▶ Other (N · K ⚠ · L —)` / `▼ Other (N · K ⚠ · L —)` row that
+/// `► Other (N · K ▲ · L —)` / `▼ Other (N · K ▲ · L —)` row that
 /// gates the alternates / conflicts / unresolved zone (ADR 0074 §3).
 pub(super) fn render_other_header_line(
     expanded: bool,
@@ -646,7 +657,7 @@ pub(super) fn render_other_header_line(
     let glyph = if expanded { "▼" } else { "▶" };
     let mut suffix = format!("({other_count}");
     if ambiguous_count > 0 {
-        suffix.push_str(&format!(" · {ambiguous_count} ⚠"));
+        suffix.push_str(&format!(" · {ambiguous_count} ▲"));
     }
     if unresolved_count > 0 {
         suffix.push_str(&format!(" · {unresolved_count} —"));

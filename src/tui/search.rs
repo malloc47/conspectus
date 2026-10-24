@@ -212,11 +212,6 @@ pub fn items_from_rows<'r>(rows: impl IntoIterator<Item = &'r Row>) -> Vec<Searc
                 label: Cow::Owned(group.display_path.clone()),
                 haystack: Cow::Owned(group.display_path.clone()),
             },
-            RowKind::AgentSessionMuxCandidate(candidate) => SearchItem {
-                id: row.id.clone(),
-                label: Cow::Owned(candidate.mux_label.clone()),
-                haystack: Cow::Owned(candidate.mux_label.clone()),
-            },
             RowKind::MuxSession(mux) => SearchItem {
                 id: row.id.clone(),
                 label: Cow::Owned(format!("mux:{}", mux.native_id)),
@@ -232,15 +227,13 @@ pub fn items_from_rows<'r>(rows: impl IntoIterator<Item = &'r Row>) -> Vec<Searc
                 label: Cow::Owned(fork.fork_label.clone()),
                 haystack: Cow::Owned(fork.fork_label.clone()),
             },
-            RowKind::Repo(repo) => SearchItem {
+            RowKind::Mixed(mixed) => SearchItem {
                 id: row.id.clone(),
-                label: Cow::Owned(format!("repo:{}", repo.display_name)),
-                haystack: Cow::Owned(match &repo.canonical_path {
-                    Some(path) => {
-                        format!("repo {} {} {}", repo.display_name, path, repo.common_dir)
-                    }
-                    None => format!("repo {} {}", repo.display_name, repo.common_dir),
-                }),
+                label: Cow::Owned(mixed.label.clone()),
+                haystack: Cow::Owned(format!(
+                    "{} {} {}",
+                    mixed.label, mixed.status, mixed.content
+                )),
             },
         })
         .collect()

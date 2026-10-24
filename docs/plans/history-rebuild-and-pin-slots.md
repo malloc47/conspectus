@@ -1,9 +1,10 @@
 # History, rebuild, and pin slots
 
-Status: accepted plan (operator review 2026-10-19 and 2026-10-21).
-Milestone m-23 (CSP-656..CSP-691) tracks the work. The decision tickets
-turn this plan into ADRs, after which the ADRs, not this document, are
-authoritative.
+Status: accepted plan (operator review 2026-10-19 and 2026-10-21), now
+carried by ADRs 0140 (history and presence), 0141 (pin slots), 0142
+(rebuild plans and executors), 0143 (the mutation envelope), and 0144
+(the Pinned and History views). The ADRs, not this document, are
+authoritative. Milestone m-23 (CSP-656..CSP-691) tracks the work.
 
 The first revision (2026-10-16) proposed a mux-only ledger and pins as
 lightweight references. Operator review on 2026-10-19 widened it:
@@ -53,7 +54,7 @@ top of the Sessions and Mux views go away.
    and the edits the operator made. It doesn't depend on history to
    exist (see Pin slots).
 2. **History is browsable without pinning**, through a History view,
-   with ghost muxes also shown inline in the Mux view.
+   with pinned ghost muxes also shown inline in the Mux view.
 3. **Rebuild scope for this milestone:** mux plus session resume,
    worktree, mux on a gone worktree, and repo clone.
 4. **Pins live in `$XDG_DATA_HOME/conspectus/pins.toml`**, user scope
@@ -505,9 +506,10 @@ Pinned · by project
 
 ### Mux view
 
-Ghost muxes sort below live muxes in each group, dimmed, with the
-`gone` status and their last-seen age. A Controls toggle hides them.
-The header reads `11 mux · 4 gone`.
+Ghost muxes that a pin points at sort below live muxes in each group,
+in the ghost style, with the `gone` status and their last-seen age.
+Unpinned ones live in History; a Controls option lists them all. The
+header reads `11 mux · 4 gone`.
 
 ### Removed
 
@@ -527,7 +529,7 @@ The header reads `11 mux · 4 gone`.
 | `history list [--kind <k>] [--gone]`, `history show <ref>` | New |
 | `history reap`, `history forget <ref>` | New |
 | `rebuild <ref> [--dry-run] [--no-attach]` | New. `<ref>` is a slot id, a history id, or a node reference |
-| `pin add <ref> [--id <id>]` | New. Replaces `pin create` and `pin adopt` |
+| `pin add <ref> [--name <id>]` | New. Replaces `pin create` and `pin adopt` |
 | `pin edit <id> --set <field>=<value> / --unset <field>` | New |
 | `pin rename <id> <new-id>` | Kept, with lockstep for mux slots |
 | `pin retarget <id> <ref>` | New. Replaces `pin rebind` |

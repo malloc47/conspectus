@@ -26,7 +26,7 @@ use crate::tui::Theme;
 /// `theme.harness_color(label)` and is `theme.badge_width + 2` cells,
 /// so every chip has the same footprint and the columns after it stay
 /// aligned. At the default width every registered harness label fits;
-/// anything longer (a pin's custom launcher, say) is cut with `…`.
+/// anything longer (a custom launcher, say) is cut with `…`.
 pub fn harness_badge(label: &str, theme: &Theme) -> Span<'static> {
     let style = Style::default()
         .fg(theme.harness_color(label))

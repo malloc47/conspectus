@@ -6,11 +6,10 @@
 //! stories per `docs/implementation/phase-08-interactive-tui.md`.
 
 use crate::model::{
-    AgentSessionId, Diagnostic, GraphLink, GraphSnapshot, MuxSessionId, MuxSessionNode, NodeId,
-    PinBinding, PinLastSession, PinSessionClaim, RelationKind,
+    AgentSessionId, GraphLink, GraphSnapshot, MuxSessionId, MuxSessionNode, NodeId, RelationKind,
 };
 use crate::tui::app::App;
-use crate::tui::rows::{RowId, RowKind};
+use crate::tui::rows::RowId;
 use crate::tui::viewer::ViewerDisabled;
 
 /// Resolved target for an attach action.
@@ -37,53 +36,6 @@ impl AttachTarget {
     /// `tmux:editor`, matching what the backend itself lists.
     pub fn label(&self) -> String {
         format!("{}:{}", self.backend, self.native_id)
-    }
-}
-
-/// Pin diagnostic attached to the currently selected row. Mirrors
-/// ADR 0057's resolver diagnostics but keeps only the fields needed
-/// by the TUI.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum PinDiagnosticView {
-    Unbound {
-        pin_id: String,
-        expected_mux_native_id: String,
-        /// Optional last-recorded session from the pin-bindings
-        /// sidecar (ADR 0058). When present, the launch path can
-        /// advertise a "resume `<id>`" affordance instead of a plain
-        /// "launch" hint.
-        last_session: Option<PinLastSession>,
-    },
-    StaleMux {
-        pin_id: String,
-        mux: MuxSessionId,
-        /// Sessions this mux had evidence for that other pins bound
-        /// first (ADR 0102).
-        claimed_elsewhere: Vec<PinSessionClaim>,
-        /// The pane already runs the pin's harness, so `Enter`
-        /// attaches rather than relaunching into it.
-        harness_running: bool,
-    },
-    Ambiguous {
-        pin_id: String,
-        chosen: AgentSessionId,
-        competing: Vec<AgentSessionId>,
-    },
-    Drift {
-        pin_id: String,
-        declared_cwd: String,
-        observed_cwd: String,
-    },
-}
-
-impl PinDiagnosticView {
-    pub fn pin_id(&self) -> &str {
-        match self {
-            Self::Unbound { pin_id, .. }
-            | Self::StaleMux { pin_id, .. }
-            | Self::Ambiguous { pin_id, .. }
-            | Self::Drift { pin_id, .. } => pin_id,
-        }
     }
 }
 
@@ -114,9 +66,219 @@ pub enum AttachDisabled {
     /// doesn't have a sensible default pick. The renderer surfaces
     /// the count as a status hint pointing at the detail section.
     AmbiguousGroupMuxes(usize),
+    /// The mux is only in history (ADR 0140); rebuilding it, not
+    /// attaching, brings it back.
+    MuxGone(String),
 }
 
-/// Decide whether the current selection is attachable. Pure: works
+/// What an action acts on: the entity the operator is looking at,
+/// whichever view or pane shows it. Every accelerator and menu resolves
+/// its subject here, so a gesture means the same thing wherever it is
+/// pressed.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct Subject {
+    /// The graph node the subject is, live or gone. For a pin, the node
+    /// it points at.
+    pub node: Option<NodeId>,
+    /// The history record behind the subject, when it has one.
+    pub record: Option<String>,
+    /// The pin, when the subject is a pin itself (a Pinned-view row, or
+    /// a pin shown in the right pane).
+    pub pin: Option<String>,
+}
+
+/// The subject of an action: the entity shown in the right pane while
+/// it has focus, else the selected left-pane row.
+pub fn action_subject(app: &App) -> Subject {
+    if app.focus() == crate::tui::app::Focus::Right
+        && let Some(node) = right_pane_node(app)
+    {
+        return subject_of_node(app, &node);
+    }
+    app.selection()
+        .map(|id| subject_of_row(app, id))
+        .unwrap_or_default()
+}
+
+/// The entity the right pane shows: the link the cursor is on, else the
+/// node the pane is focused on.
+fn right_pane_node(app: &App) -> Option<NodeId> {
+    let state = app.explorer()?;
+    state
+        .selected_row()
+        .and_then(|row| state.view.drill_target(&row))
+        .or_else(|| Some(state.view.focused.clone()))
+}
+
+fn pin_named<'a>(snapshot: &'a GraphSnapshot, name: &str) -> Option<&'a crate::model::PinNode> {
+    crate::tui::rows::pin_nodes(snapshot)
+        .into_iter()
+        .find(|pin| pin.id.id == name)
+}
+
+/// The history record a gone node stands for.
+fn record_of_gone_node(snapshot: &GraphSnapshot, node: &NodeId) -> Option<String> {
+    if snapshot.is_live(node) {
+        return None;
+    }
+    if let NodeId::MuxSession(mux) = node {
+        return snapshot
+            .history
+            .muxes
+            .iter()
+            .find(|record| record.recipe.native_id() == mux.native_id)
+            .map(|record| record.meta.id.clone());
+    }
+    snapshot
+        .history
+        .by_key(&node.to_string())
+        .map(|(_, meta)| meta.id.clone())
+}
+
+/// The subject for a graph node. A pin node is the pin itself.
+pub fn subject_of_node(app: &App, node: &NodeId) -> Subject {
+    let Some(handle) = app.snapshot_handle() else {
+        return Subject {
+            node: Some(node.clone()),
+            ..Subject::default()
+        };
+    };
+    let snapshot = handle.snapshot();
+    if let NodeId::Pin(pin) = node {
+        return subject_of_pin(snapshot, &pin.id);
+    }
+    Subject {
+        node: Some(node.clone()),
+        record: record_of_gone_node(snapshot, node),
+        pin: None,
+    }
+}
+
+fn subject_of_pin(snapshot: &GraphSnapshot, name: &str) -> Subject {
+    let pin = pin_named(snapshot, name);
+    let node = pin.and_then(|pin| pin.target_node.clone());
+    let record = pin
+        .and_then(|pin| pin.target.as_deref())
+        .and_then(|target| target.strip_prefix(crate::model::PinSlot::HISTORY_PREFIX))
+        .map(str::to_string)
+        .or_else(|| {
+            node.as_ref()
+                .and_then(|node| record_of_gone_node(snapshot, node))
+        });
+    Subject {
+        node,
+        record,
+        pin: Some(name.to_string()),
+    }
+}
+
+/// The subject for a left-pane row.
+pub fn subject_of_row(app: &App, id: &RowId) -> Subject {
+    let Some(handle) = app.snapshot_handle() else {
+        return Subject::default();
+    };
+    let snapshot = handle.snapshot();
+    match id {
+        RowId::Pin { pin_id } => subject_of_pin(snapshot, pin_id),
+        RowId::History { record_id } => Subject {
+            node: snapshot
+                .history
+                .meta(record_id)
+                .and_then(|(_, meta)| NodeId::parse(&meta.key)),
+            record: Some(record_id.clone()),
+            pin: None,
+        },
+        other => crate::tui::rows::row_node(other)
+            .map(|node| subject_of_node(app, node))
+            .unwrap_or_default(),
+    }
+}
+
+/// The pin kind of the subject's entity.
+fn subject_kind(snapshot: &GraphSnapshot, subject: &Subject) -> Option<crate::model::PinKind> {
+    use crate::model::{HistoryKind, PinKind};
+    if let Some(pin) = subject
+        .pin
+        .as_deref()
+        .and_then(|name| pin_named(snapshot, name))
+    {
+        return Some(pin.kind);
+    }
+    if let Some(node) = &subject.node
+        && let Some(kind) = PinKind::of_node(node)
+    {
+        return Some(kind);
+    }
+    let (kind, _) = snapshot.history.meta(subject.record.as_deref()?)?;
+    Some(match kind {
+        HistoryKind::Mux => PinKind::Mux,
+        HistoryKind::Checkout => PinKind::Checkout,
+        HistoryKind::Repo => PinKind::Repo,
+        HistoryKind::Pr => PinKind::Pr,
+    })
+}
+
+/// The names of the pins that point at the subject, the subject's own
+/// pin first.
+pub fn pins_for(snapshot: &GraphSnapshot, subject: &Subject) -> Vec<String> {
+    let mut names: Vec<String> = subject.pin.iter().cloned().collect();
+    let history_target = subject
+        .record
+        .as_deref()
+        .map(crate::model::PinSlot::history_target);
+    for pin in crate::tui::rows::pin_nodes(snapshot) {
+        let points_here = subject
+            .node
+            .as_ref()
+            .is_some_and(|node| pin.target_node.as_ref() == Some(node))
+            || (history_target.is_some() && pin.target == history_target);
+        if points_here && !names.contains(&pin.id.id) {
+            names.push(pin.id.id.clone());
+        }
+    }
+    names
+}
+
+/// The attach target an entity resolves to. Decides, for the subject
+/// the operator is acting on, which mux to attach to; the checks that
+/// follow (is it running, is it this very session) are the same for
+/// every entity.
+fn mux_for_subject(
+    snapshot: &GraphSnapshot,
+    subject: &Subject,
+) -> Result<MuxSessionId, AttachDisabled> {
+    if let Some(pin) = &subject.pin {
+        // A pin attaches to the live mux it points at, or to the mux
+        // hosting the live session it points at.
+        return pin_live_mux(snapshot, pin).ok_or_else(|| match pin_status_hint(snapshot, pin) {
+            Some(_) => AttachDisabled::MuxGone(pin.clone()),
+            None => AttachDisabled::UnmuxedSession,
+        });
+    }
+    let Some(node) = &subject.node else {
+        return Err(AttachDisabled::UnsupportedRow);
+    };
+    match node {
+        NodeId::MuxSession(id) => Ok(id.clone()),
+        session @ NodeId::AgentSession(_) => {
+            preferred_mux_for_session(snapshot, session).ok_or(AttachDisabled::UnmuxedSession)
+        }
+        // `a` on a workspace, repo, or checkout attaches to the single
+        // ambiguous mux scoped to that group, if any.
+        group @ (NodeId::Workspace(_) | NodeId::Repo(_) | NodeId::Checkout(_)) => {
+            let muxes = crate::tui::detail::ambiguous_muxes_for_group(snapshot, group);
+            match muxes.as_slice() {
+                [] => Err(AttachDisabled::UnmuxedSession),
+                [NodeId::MuxSession(id)] => Ok(id.clone()),
+                [_] => Err(AttachDisabled::UnsupportedRow),
+                many => Err(AttachDisabled::AmbiguousGroupMuxes(many.len())),
+            }
+        }
+        _ => Err(AttachDisabled::UnsupportedRow),
+    }
+}
+
+/// Decide whether the current subject is attachable. Pure: works
 /// against [`App`] state, does not touch the terminal or the
 /// network.
 pub fn resolve_attach_target(app: &App) -> Result<AttachTarget, AttachDisabled> {
@@ -124,64 +286,11 @@ pub fn resolve_attach_target(app: &App) -> Result<AttachTarget, AttachDisabled> 
         return Err(AttachDisabled::NoSelection);
     };
     let snapshot = handle.snapshot();
-    let Some(selection) = app.selection() else {
+    let subject = action_subject(app);
+    if subject == Subject::default() {
         return Err(AttachDisabled::NoSelection);
-    };
-    let row = app
-        .tree()
-        .rows
-        .iter()
-        .find(|r| &r.id == selection)
-        .ok_or(AttachDisabled::NoSelection)?;
-
-    let mux_id = match (&row.kind, selection) {
-        // A pin placeholder row stands in for a pin with no realized
-        // session. When its mux is live anyway (a stale mux, or a
-        // pin whose process isn't an agent harness), that mux is the
-        // row's target.
-        (_, RowId::Pin { pin_id }) => match pin_live_mux(snapshot, pin_id) {
-            Some(id) => id,
-            None => return Err(AttachDisabled::UnmuxedSession),
-        },
-        (RowKind::AgentSessionMuxCandidate(candidate), _) => candidate.mux.clone(),
-        (RowKind::AgentSession(session), _) => {
-            let session_node = NodeId::AgentSession(session.session.clone());
-            match preferred_mux_for_session(snapshot, &session_node) {
-                Some(id) => id,
-                None => return Err(AttachDisabled::UnmuxedSession),
-            }
-        }
-        (RowKind::Group(group), RowId::Group(NodeId::MuxSession(id))) => {
-            // The sessions view doesn't have mux group rows in v1,
-            // but other views will; honor a mux node id directly.
-            let _ = group;
-            id.clone()
-        }
-        (RowKind::MuxSession(mux), RowId::MuxSession(NodeId::MuxSession(id))) => {
-            let _ = mux;
-            id.clone()
-        }
-        // ADR 0071: `a` on a workspace/repo/checkout row attaches
-        // to the single ambiguous mux scoped to that group, if any.
-        // Zero → UnmuxedSession (no attach possible). Multiple →
-        // AmbiguousGroupMuxes so the status bar points the operator
-        // at the detail section.
-        (
-            RowKind::Group(_),
-            RowId::Group(node @ (NodeId::Workspace(_) | NodeId::Repo(_) | NodeId::Checkout(_))),
-        ) => {
-            let muxes = crate::tui::detail::ambiguous_muxes_for_group(snapshot, node);
-            match muxes.len() {
-                0 => return Err(AttachDisabled::UnmuxedSession),
-                1 => match &muxes[0] {
-                    NodeId::MuxSession(id) => id.clone(),
-                    _ => return Err(AttachDisabled::UnsupportedRow),
-                },
-                n => return Err(AttachDisabled::AmbiguousGroupMuxes(n)),
-            }
-        }
-        _ => return Err(AttachDisabled::UnsupportedRow),
-    };
+    }
+    let mux_id = mux_for_subject(snapshot, &subject)?;
 
     let mux_node = snapshot
         .nodes
@@ -191,6 +300,9 @@ pub fn resolve_attach_target(app: &App) -> Result<AttachTarget, AttachDisabled> 
             _ => None,
         })
         .ok_or(AttachDisabled::MuxNodeMissing)?;
+    if !snapshot.is_live(&NodeId::MuxSession(mux_node.id.clone())) {
+        return Err(AttachDisabled::MuxGone(mux_node.session_name().to_string()));
+    }
 
     let target = AttachTarget {
         mux: mux_node.id.clone(),
@@ -216,216 +328,597 @@ pub fn resolve_attach_target(app: &App) -> Result<AttachTarget, AttachDisabled> 
     Ok(target)
 }
 
-/// Resolve the viewer target for the current selection. Mirrors
-/// [`resolve_attach_target`] so `Enter` and the `v`
-/// accelerator can pick the right session id whether the cursor
-/// sits on an agent session row or a mux row.
+/// The session `v` opens for `node`: the session itself, or the
+/// resolver-preferred session linked to a mux.
+fn viewer_session_for(snapshot: &GraphSnapshot, node: &NodeId) -> Option<AgentSessionId> {
+    match node {
+        NodeId::AgentSession(id) => Some(id.clone()),
+        mux @ NodeId::MuxSession(_) => preferred_session_for_mux(snapshot, mux),
+        _ => None,
+    }
+}
+
+/// Resolve the viewer target for the current subject. Mirrors
+/// [`resolve_attach_target`] so `Enter` and the `v` accelerator can
+/// pick the right session id whether the subject is an agent session, a
+/// mux, or a pin on either, in any view or in the right pane.
 ///
-/// For agent session rows the selection's session id wins directly.
-/// For mux rows we walk active `LinkedToMux` candidates and pick the
-/// resolver-preferred linked session (highest provenance precedence,
-/// breaking ties on confidence then link id). Mux rows with no
-/// linked sessions report [`ViewerDisabled::UnsupportedRow`] — the
-/// caller surfaces a one-line status bar reason.
+/// For agent sessions the session id wins directly. For muxes we walk
+/// active `LinkedToMux` candidates and pick the resolver-preferred
+/// linked session (highest provenance precedence, breaking ties on
+/// confidence then link id). Subjects with no session report
+/// [`ViewerDisabled::UnsupportedRow`] — the caller surfaces a one-line
+/// status bar reason.
 pub fn resolve_view_session(app: &App) -> Result<AgentSessionId, ViewerDisabled> {
-    let Some(selection) = app.selection() else {
+    let subject = action_subject(app);
+    if subject == Subject::default() {
         return Err(ViewerDisabled::NoSelection);
-    };
-    let row = app
-        .tree()
-        .rows
-        .iter()
-        .find(|r| &r.id == selection)
-        .ok_or(ViewerDisabled::NoSelection)?;
-    match &row.kind {
-        RowKind::AgentSession(session) => Ok(session.session.clone()),
-        RowKind::MuxSession(mux_row) => {
-            let handle = app
-                .snapshot_handle()
-                .ok_or(ViewerDisabled::UnsupportedRow)?;
-            let snapshot = handle.snapshot();
-            let mux_node_id = NodeId::MuxSession(mux_row.mux.clone());
-            preferred_session_for_mux(snapshot, &mux_node_id).ok_or(ViewerDisabled::UnsupportedRow)
-        }
-        _ => Err(ViewerDisabled::UnsupportedRow),
     }
+    let handle = app
+        .snapshot_handle()
+        .ok_or(ViewerDisabled::UnsupportedRow)?;
+    subject
+        .node
+        .as_ref()
+        .and_then(|node| viewer_session_for(handle.snapshot(), node))
+        .ok_or(ViewerDisabled::UnsupportedRow)
 }
 
-/// Diagnostics for the selected pin-bearing row. Unbound/stale pin
-/// rows carry the pin id directly; bound pin rows surface as regular
-/// agent-session rows with `pin_id` set.
-/// The live mux pin `pin_id` is bound to, if any.
+/// The live mux the pin `pin_id` points at, if any.
 pub fn pin_live_mux(snapshot: &GraphSnapshot, pin_id: &str) -> Option<MuxSessionId> {
-    let pin = snapshot.pins.iter().find(|pin| pin.id == pin_id)?;
-    match pin.binding.as_ref()? {
-        PinBinding::StaleMux { mux } | PinBinding::Bound { mux, .. } => Some(mux.clone()),
-        PinBinding::Unbound => None,
+    let pin = pin_named(snapshot, pin_id)?;
+    match crate::tui::rows::live_pin_target(snapshot, pin)? {
+        NodeId::MuxSession(id) => Some(id),
+        session @ NodeId::AgentSession(_) => preferred_mux_for_session(snapshot, &session),
+        _ => None,
     }
 }
 
-pub fn selected_pin_diagnostics(app: &App) -> Vec<PinDiagnosticView> {
-    let Some(selection) = app.selection() else {
+/// The history record behind the selected left-pane row, when it has
+/// one: a History row, or a ghost mux in the Mux view.
+pub fn selected_record(app: &App) -> Option<String> {
+    let id = app.selection()?;
+    matches!(
+        id,
+        RowId::History { .. } | RowId::MuxSession(_) | RowId::Nested { .. }
+    )
+    .then(|| subject_of_row(app, id).record)
+    .flatten()
+}
+
+/// What the subject can be pinned as.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum PinSubject {
+    /// A node in the graph (live, or a ghost without a record).
+    Node(NodeId),
+    /// A history record, by id.
+    Record(String),
+}
+
+/// The entity a pin could point at, or the reason it can't be pinned.
+pub fn pin_subject(app: &App) -> Result<PinSubject, String> {
+    if app.selection().is_none() && app.focus() == crate::tui::app::Focus::Left {
+        return Err("nothing is selected".to_string());
+    }
+    let subject = action_subject(app);
+    if let Some(record) = subject.record {
+        return Ok(PinSubject::Record(record));
+    }
+    let node = subject.node.ok_or("this row can't be pinned")?;
+    match crate::model::PinKind::of_node(&node) {
+        Some(_) => Ok(PinSubject::Node(node)),
+        None => Err("a runtime process is ephemeral and can't be pinned".to_string()),
+    }
+}
+
+/// The pins that already point at `subject`.
+pub fn slots_pinning(snapshot: &GraphSnapshot, subject: &PinSubject) -> Vec<String> {
+    let subject = match subject {
+        PinSubject::Record(id) => Subject {
+            record: Some(id.clone()),
+            ..Subject::default()
+        },
+        PinSubject::Node(node) => Subject {
+            node: Some(node.clone()),
+            ..Subject::default()
+        },
+    };
+    pins_for(snapshot, &subject)
+}
+
+/// The view an entity lives in: the one that lists it, where a gone
+/// entity is only listed in History.
+pub fn natural_view(snapshot: &GraphSnapshot, node: &NodeId) -> crate::tui::View {
+    use crate::tui::View;
+    let live = snapshot.is_live(node);
+    match node {
+        NodeId::MuxSession(_) => View::Mux,
+        NodeId::ForgePr(_) if live => View::Prs,
+        _ if !live => View::History,
+        _ => View::Sessions,
+    }
+}
+
+/// The entities pin `name` could point at instead: the other live
+/// entities of its kind, then the gone records of that kind, each with
+/// what the operator needs to tell them apart.
+pub fn retarget_candidates(
+    snapshot: &GraphSnapshot,
+    name: &str,
+) -> Vec<crate::tui::widgets::picker::PickerItem> {
+    use crate::model::{HistoryKind, PinKind};
+    use crate::tui::widgets::picker::PickerItem;
+    let Some(pin) = pin_named(snapshot, name) else {
         return Vec::new();
     };
-    let Some(row) = app.tree().rows.iter().find(|r| &r.id == selection) else {
-        return Vec::new();
-    };
-    let pin_id = match &row.kind {
-        RowKind::AgentSession(session) => session.pin_id.as_deref(),
-        RowKind::MuxSession(mux) => mux.pin_id.as_deref(),
+    let current = pin.target_node.clone();
+    let current_record = pin
+        .target
+        .as_deref()
+        .and_then(|target| target.strip_prefix(crate::model::PinSlot::HISTORY_PREFIX));
+    let mut items = Vec::new();
+    for node in snapshot.live_nodes() {
+        let id = node.id();
+        if PinKind::of_node(&id) != Some(pin.kind) || Some(&id) == current.as_ref() {
+            continue;
+        }
+        items.push(PickerItem {
+            label: crate::tui::explorer::title_line(snapshot, node),
+            detail: "running".to_string(),
+            value: id.to_string(),
+        });
+    }
+    let history_kind = match pin.kind {
+        PinKind::Mux => Some(HistoryKind::Mux),
+        PinKind::Checkout => Some(HistoryKind::Checkout),
+        PinKind::Repo => Some(HistoryKind::Repo),
         _ => None,
     };
-    let Some(pin_id) = pin_id else {
-        return Vec::new();
-    };
-    let Some(handle) = app.snapshot_handle() else {
-        return Vec::new();
-    };
-    pin_diagnostics_for_id(handle.snapshot(), pin_id)
-}
-
-pub fn pin_diagnostics_for_id(snapshot: &GraphSnapshot, pin_id: &str) -> Vec<PinDiagnosticView> {
-    snapshot
-        .diagnostics
-        .iter()
-        .filter_map(|diagnostic| match diagnostic {
-            Diagnostic::PinUnbound {
-                pin_id: id,
-                expected_mux_native_id,
-                last_session,
-            } if id == pin_id => Some(PinDiagnosticView::Unbound {
-                pin_id: id.clone(),
-                expected_mux_native_id: expected_mux_native_id.clone(),
-                last_session: last_session.clone(),
-            }),
-            Diagnostic::PinStaleMux {
-                pin_id: id,
-                mux,
-                claimed_elsewhere,
-            } if id == pin_id => Some(PinDiagnosticView::StaleMux {
-                pin_id: id.clone(),
-                mux: mux.clone(),
-                claimed_elsewhere: claimed_elsewhere.clone(),
-                harness_running: snapshot.pins.iter().find(|pin| pin.id == *id).is_some_and(
-                    |pin| crate::resolve::pins::mux_hosts_harness(snapshot, mux, &pin.harness),
+    if let Some(history_kind) = history_kind {
+        for (kind, meta) in snapshot.history.metas() {
+            if kind != history_kind || Some(meta.id.as_str()) == current_record {
+                continue;
+            }
+            // A record whose entity is running is already offered above.
+            if snapshot.history.presence_of(&meta.id).is_none() {
+                continue;
+            }
+            let label = snapshot
+                .history
+                .label_of(&meta.id)
+                .unwrap_or_else(|| meta.display.label.clone());
+            let detail = match &meta.display.context {
+                Some(context) => format!(
+                    "{} · {context}",
+                    crate::model::gone_word(history_kind.node_kind())
                 ),
-            }),
-            Diagnostic::PinAmbiguous {
-                pin_id: id,
-                chosen,
-                competing,
-            } if id == pin_id => Some(PinDiagnosticView::Ambiguous {
-                pin_id: id.clone(),
-                chosen: chosen.clone(),
-                competing: competing.clone(),
-            }),
-            Diagnostic::PinDrift {
-                pin_id: id,
-                declared_cwd,
-                observed_cwd,
-            } if id == pin_id => Some(PinDiagnosticView::Drift {
-                pin_id: id.clone(),
-                declared_cwd: declared_cwd.clone(),
-                observed_cwd: observed_cwd.clone(),
-            }),
-            _ => None,
-        })
-        .collect()
+                None => crate::model::gone_word(history_kind.node_kind()).to_string(),
+            };
+            items.push(PickerItem {
+                label,
+                detail,
+                value: meta.id.clone(),
+            });
+        }
+    }
+    items
 }
 
-/// What `Enter` does on a `StaleMux` pin: relaunch the harness into
-/// the idle pane, or just attach when the harness is already running
-/// there.
-pub fn stale_mux_enter_hint(harness_running: bool) -> &'static str {
-    if harness_running {
-        "Enter attach (harness running, session not identified)"
+/// The mux that rebuilding `reference` (a pin name or a history record
+/// id) brings back, when it names one: where to attach once it is up,
+/// and its tmux socket. Read from the pin's effective recipe or the
+/// record, so it is known before anything has been rebuilt.
+pub fn mux_to_rebuild(
+    snapshot: &GraphSnapshot,
+    reference: &str,
+) -> Option<(AttachTarget, Option<String>)> {
+    let recipe = if let Some(pin) = pin_named(snapshot, reference) {
+        if pin.kind != crate::model::PinKind::Mux {
+            return None;
+        }
+        crate::model::MuxRecipe {
+            backend: crate::discovery::tmux::TMUX_BACKEND.to_string(),
+            socket: pin.text("socket").map(str::to_string),
+            name: pin.text("name")?.to_string(),
+            ..Default::default()
+        }
     } else {
-        "Enter relaunch"
+        snapshot.history.mux(reference)?.recipe.clone()
+    };
+    let socket = crate::model::effective_socket(recipe.socket.as_deref()).map(str::to_string);
+    Some((
+        AttachTarget {
+            mux: MuxSessionId::new(recipe.native_id()),
+            backend: recipe.backend.clone(),
+            native_id: recipe.name,
+        },
+        socket,
+    ))
+}
+
+/// The live mux `reference` (a pin name or history record id) is in
+/// now: the pin's mux, or the mux hosting the pin's session.
+pub fn attached_mux_of(
+    snapshot: &GraphSnapshot,
+    reference: &str,
+) -> Option<(AttachTarget, Option<String>)> {
+    let id = if pin_named(snapshot, reference).is_some() {
+        pin_live_mux(snapshot, reference)?
+    } else {
+        let record = snapshot.history.mux(reference)?;
+        match crate::history::project::live_mux_for(snapshot, record)? {
+            NodeId::MuxSession(id) => id,
+            _ => return None,
+        }
+    };
+    let mux = snapshot.nodes.iter().find_map(|node| match node {
+        crate::model::GraphNode::MuxSession(mux) if mux.id == id => Some(mux),
+        _ => None,
+    })?;
+    Some((
+        AttachTarget {
+            mux: mux.id.clone(),
+            backend: mux.backend.clone(),
+            native_id: mux.native_id.clone(),
+        },
+        mux.socket.clone().filter(|socket| socket != "default"),
+    ))
+}
+
+/// What a rebuild menu offers for an entity.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum RebuildOffer {
+    /// Nothing to rebuild: a PR, or an entity with no plan at all.
+    Nothing,
+    /// Only the plan: the entity is running (the plan is what a rebuild
+    /// would take if it had stopped), or couldn't be checked.
+    PlanOnly,
+    /// Bring it back, or see what that would run.
+    Full,
+}
+
+fn rebuild_offer(
+    kind: Option<crate::model::PinKind>,
+    status: crate::model::SlotStatus,
+) -> RebuildOffer {
+    use crate::model::{PinKind, SlotStatus};
+    if !matches!(
+        kind,
+        Some(PinKind::Mux | PinKind::Session | PinKind::Checkout | PinKind::Repo)
+    ) {
+        return RebuildOffer::Nothing;
+    }
+    match status {
+        SlotStatus::Live | SlotStatus::Unknown => RebuildOffer::PlanOnly,
+        SlotStatus::Gone | SlotStatus::Missing | SlotStatus::Planned => RebuildOffer::Full,
     }
 }
 
-pub fn pin_status_hint(diagnostics: &[PinDiagnosticView]) -> Option<String> {
-    diagnostics
-        .iter()
-        .find_map(|diagnostic| match diagnostic {
-            PinDiagnosticView::Ambiguous {
-                pin_id,
-                chosen,
-                competing,
-            } => Some(format!(
-                "pin `{pin_id}` ambiguous: chosen {} · {} competing · b bind",
-                session_label(chosen),
-                competing.len()
-            )),
-            _ => None,
-        })
-        .or_else(|| {
-            diagnostics.iter().find_map(|diagnostic| match diagnostic {
-                PinDiagnosticView::Drift {
-                    pin_id,
-                    declared_cwd,
-                    observed_cwd,
-                } => Some(format!(
-                    "pin `{pin_id}` cwd drift: declared {declared_cwd} · observed {observed_cwd}"
-                )),
-                _ => None,
-            })
-        })
-        .or_else(|| {
-            diagnostics.iter().find_map(|diagnostic| match diagnostic {
-                PinDiagnosticView::StaleMux {
-                    pin_id,
-                    mux,
-                    harness_running,
-                    ..
-                } => Some(format!(
-                    "pin `{pin_id}` stale mux {}: {}",
-                    mux.native_id,
-                    stale_mux_enter_hint(*harness_running)
-                )),
-                PinDiagnosticView::Unbound {
-                    pin_id,
-                    expected_mux_native_id,
-                    last_session,
-                } => Some(match last_session {
-                    Some(last) => format!(
-                        "pin `{pin_id}` unbound: expected {expected_mux_native_id} · \
-                         Enter resume `{}`",
-                        last.session_id
-                    ),
-                    None => format!(
-                        "pin `{pin_id}` unbound: expected {expected_mux_native_id} · Enter launch"
-                    ),
-                }),
-                _ => None,
-            })
-        })
-}
-
-pub fn pin_bind_hint(diagnostics: &[PinDiagnosticView]) -> Option<String> {
-    diagnostics.iter().find_map(|diagnostic| {
-        let PinDiagnosticView::Ambiguous {
-            pin_id,
-            chosen,
-            competing,
-        } = diagnostic
-        else {
-            return None;
-        };
-        let candidates = std::iter::once(chosen)
-            .chain(competing.iter())
-            .map(session_label)
-            .collect::<Vec<_>>()
-            .join(", ");
-        Some(format!(
-            "pin bind `{pin_id}`: choose one of [{candidates}] with `{} pin bind {pin_id} --to <session-id>`",
-            crate::invocation::invoked_name()
-        ))
+/// The line that tops a rebuild plan for an entity that is running:
+/// what Enter does, and that the plan below is hypothetical. `None`
+/// for an entity that isn't running. `reference` is what the plan was
+/// asked for: a pin name, a history record id, or a node id.
+pub fn running_note(snapshot: &GraphSnapshot, reference: &str) -> Option<String> {
+    use crate::model::{PinKind, SlotStatus};
+    let (kind, live) = if let Some(pin) = pin_named(snapshot, reference) {
+        (pin.kind, pin.status == SlotStatus::Live)
+    } else if let Some(node) = NodeId::parse(reference) {
+        (PinKind::of_node(&node)?, snapshot.is_live(&node))
+    } else {
+        let (_, meta) = snapshot.history.meta(reference)?;
+        let node = NodeId::parse(&meta.key)?;
+        (PinKind::of_node(&node)?, snapshot.is_live(&node))
+    };
+    if !live {
+        return None;
+    }
+    Some(match kind {
+        PinKind::Mux => format!(
+            "`{reference}` is running, so Enter attaches to it. This is what rebuilding it \
+             would take if it had stopped."
+        ),
+        PinKind::Session => format!(
+            "`{reference}` is a live session. This is how it would be resumed into a new \
+             mux if its mux had stopped."
+        ),
+        _ => format!(
+            "`{reference}` exists, so there is nothing to rebuild. This is what rebuilding it \
+             would take if it were gone."
+        ),
     })
 }
 
-fn session_label(id: &AgentSessionId) -> String {
-    format!("{}:{}", id.harness_key, id.session_key)
+/// The `.` menu for the subject, or `None` when it has no actions. The
+/// entries depend on the entity and whether a pin points at it, never on
+/// the view that opened the menu, so the same entity offers the same
+/// verbs everywhere. The History view always has a menu: even with
+/// nothing selected it offers Clean up.
+pub fn row_menu_for(app: &App) -> Option<crate::tui::widgets::row_menu::RowMenuState> {
+    use crate::model::SlotStatus;
+    use crate::tui::Msg;
+    use crate::tui::widgets::row_menu::{RowMenuEntry, RowMenuState};
+    let snapshot = app.snapshot_handle()?.snapshot();
+    let in_history = app.active_view() == crate::tui::View::History;
+    let subject = action_subject(app);
+    let pins = pins_for(snapshot, &subject);
+    let kind = subject_kind(snapshot, &subject);
+    let mut entries = Vec::new();
+
+    // What a rebuild would do depends on the pin's status, or on the
+    // entity being gone when only a record is left.
+    let (status, reference) =
+        if let Some(pin) = pins.first().and_then(|name| pin_named(snapshot, name)) {
+            (pin.status, Some(pin.id.id.clone()))
+        } else {
+            let live = subject
+                .node
+                .as_ref()
+                .is_some_and(|node| snapshot.is_live(node));
+            (
+                if live {
+                    SlotStatus::Live
+                } else {
+                    SlotStatus::Gone
+                },
+                // A record names it; failing that, a live node does.
+                subject.record.clone().or_else(|| {
+                    subject
+                        .node
+                        .as_ref()
+                        .filter(|_| live)
+                        .map(ToString::to_string)
+                }),
+            )
+        };
+    if pins.is_empty()
+        && let Ok(pinnable) = pin_subject(app)
+    {
+        let msg = match pinnable {
+            PinSubject::Node(node) => Msg::PinNode(node),
+            PinSubject::Record(id) => Msg::PinRecord(id),
+        };
+        entries.push(RowMenuEntry::new("Pin", "pin this (p)", msg));
+    }
+    if let Some(reference) = reference {
+        let offer = rebuild_offer(kind, status);
+        if offer == RebuildOffer::Full {
+            entries.push(RowMenuEntry::new(
+                "Rebuild",
+                "bring it back without attaching (Enter also attaches)",
+                Msg::RebuildReference(reference.clone()),
+            ));
+        }
+        if offer != RebuildOffer::Nothing {
+            let note = if offer == RebuildOffer::PlanOnly {
+                "the commands that would recreate it, as if it had stopped"
+            } else {
+                "what rebuild would run, without running it"
+            };
+            entries.push(RowMenuEntry::new(
+                "Show rebuild plan",
+                note,
+                Msg::ShowRebuildPlan(reference),
+            ));
+        }
+    }
+    if let Some(name) = pins.first() {
+        pin_management_entries(snapshot, &subject, name, app.active_view(), &mut entries);
+        for extra in pins.iter().skip(1) {
+            entries.push(unpin_entry(extra));
+        }
+    }
+    if let Some(id) = subject.record.clone().filter(|_| subject.pin.is_none()) {
+        let note = if pins.is_empty() {
+            "remove the record from history".to_string()
+        } else {
+            format!(
+                "remove the record; {} would lose its target",
+                pins.join(", ")
+            )
+        };
+        entries.push(RowMenuEntry::new("Forget", note, Msg::ForgetRecord(id)).confirming());
+    }
+    if in_history {
+        entries.push(RowMenuEntry::new(
+            "Clean up…",
+            "forget gone records past their reap age",
+            Msg::OpenCleanUp,
+        ));
+    }
+    let title = menu_title(app, &subject, &pins);
+    (!entries.is_empty()).then(|| RowMenuState::new(title, entries))
+}
+
+fn unpin_entry(name: &str) -> crate::tui::widgets::row_menu::RowMenuEntry {
+    crate::tui::widgets::row_menu::RowMenuEntry::new(
+        format!("Unpin {name}"),
+        "remove the pin; the entity and its history stay",
+        crate::tui::Msg::Unpin(name.to_string()),
+    )
+}
+
+/// The verbs on a pin: edit, rename, retarget, refresh its snapshot,
+/// reveal its entity, unpin.
+fn pin_management_entries(
+    snapshot: &GraphSnapshot,
+    subject: &Subject,
+    name: &str,
+    current_view: crate::tui::View,
+    entries: &mut Vec<crate::tui::widgets::row_menu::RowMenuEntry>,
+) {
+    use crate::tui::Msg;
+    use crate::tui::widgets::row_menu::RowMenuEntry;
+    entries.push(RowMenuEntry::new(
+        "Edit…",
+        "change the name, cwd, harness, arguments, and more",
+        Msg::OpenSlotEdit(name.to_string()),
+    ));
+    entries.push(RowMenuEntry::new(
+        "Rename…",
+        "change the pin name (a live mux is renamed with it)",
+        Msg::OpenSlotRename(name.to_string()),
+    ));
+    entries.push(RowMenuEntry::new(
+        "Retarget…",
+        "point it at another entity of the same kind",
+        Msg::OpenSlotRetarget(name.to_string()),
+    ));
+    entries.push(RowMenuEntry::new(
+        "Refresh snapshot",
+        "copy the entity's current recipe into the pin",
+        Msg::RefreshSlot(name.to_string()),
+    ));
+    let elsewhere = subject
+        .node
+        .as_ref()
+        .is_some_and(|node| natural_view(snapshot, node) != current_view);
+    if elsewhere {
+        entries.push(RowMenuEntry::new(
+            "Reveal in its view",
+            "jump to the entity in Sessions, Mux, PRs, or History",
+            Msg::RevealSlot(name.to_string()),
+        ));
+    }
+    entries.push(unpin_entry(name));
+}
+
+fn menu_title(app: &App, subject: &Subject, pins: &[String]) -> String {
+    let Some(handle) = app.snapshot_handle() else {
+        return "Actions".to_string();
+    };
+    let snapshot = handle.snapshot();
+    if let Some(name) = &subject.pin {
+        return format!("pin {name}");
+    }
+    if let Some(id) = &subject.record
+        && let Some((kind, meta)) = snapshot.history.meta(id)
+    {
+        let label = snapshot
+            .history
+            .label_of(id)
+            .unwrap_or_else(|| meta.display.label.clone());
+        return format!("{} {label}", kind.as_str());
+    }
+    match &subject.node {
+        Some(NodeId::MuxSession(mux)) => format!("mux {}", mux.native_id),
+        Some(NodeId::AgentSession(session)) => {
+            format!(
+                "session {}",
+                session.session_key.chars().take(8).collect::<String>()
+            )
+        }
+        Some(NodeId::ForgePr(pr)) => format!("PR #{}", pr.number),
+        _ => pins
+            .first()
+            .map_or_else(|| "Actions".to_string(), |name| format!("pin {name}")),
+    }
+}
+
+/// What `Enter` does on a pin, a History record, or a ghost mux, where
+/// attaching isn't the answer. `None` means the subject attaches (or is
+/// viewed) like any native row.
+///
+/// A gone mux or session comes back and is attached, the way a launch
+/// always attached; a gone worktree or repo comes back and the
+/// operator stays put.
+pub fn default_effect(app: &App) -> Option<crate::tui::Effect> {
+    use crate::model::{PinKind, SlotStatus};
+    use crate::tui::Effect;
+    use crate::tui::effect::ExecSpec;
+    let snapshot = app.snapshot_handle()?.snapshot();
+    let subject = action_subject(app);
+    let rebuild = |reference: String, kind: PinKind| {
+        Some(Effect::Exec(ExecSpec::Rebuild {
+            reference,
+            attach: matches!(kind, PinKind::Mux | PinKind::Session),
+        }))
+    };
+    // An entity a pin points at comes back the way the pin says (its
+    // overrides included), from whichever view Enter was pressed in.
+    let pin_name = subject
+        .pin
+        .clone()
+        .or_else(|| pins_for(snapshot, &subject).into_iter().next());
+    if let Some(name) = &pin_name {
+        let pin = pin_named(snapshot, name)?;
+        return match (pin.status, pin.kind) {
+            (SlotStatus::Unknown, _) => Some(Effect::Toast(format!(
+                "pin `{name}`: couldn't check whether its target exists; refresh and try again"
+            ))),
+            (SlotStatus::Live, PinKind::Mux) => None,
+            (SlotStatus::Live, PinKind::Session) => {
+                // A session in a mux attaches; one outside any mux is
+                // opened in the viewer, as in the Sessions view.
+                let node = pin.target_node.as_ref()?;
+                if preferred_mux_for_session(snapshot, node).is_some() {
+                    None
+                } else {
+                    viewer_session_for(snapshot, node)
+                        .map(|session| Effect::Exec(ExecSpec::ViewSession(session)))
+                }
+            }
+            (SlotStatus::Live, PinKind::Pr) => Some(Effect::Toast(match pin.text("url") {
+                Some(url) => format!("pin `{name}`: {url}"),
+                None => format!("pin `{name}`: this PR has no URL on record"),
+            })),
+            (SlotStatus::Live, kind) => Some(Effect::Toast(format!(
+                "pin `{name}` is a live {}; nothing to rebuild",
+                kind.as_str()
+            ))),
+            (
+                SlotStatus::Gone | SlotStatus::Missing | SlotStatus::Planned,
+                kind @ (PinKind::Mux | PinKind::Session | PinKind::Checkout | PinKind::Repo),
+            ) => rebuild(name.clone(), kind),
+            (_, kind) => Some(Effect::Toast(format!(
+                "pin `{name}`: a {} can't be rebuilt",
+                kind.as_str()
+            ))),
+        };
+    }
+    let kind = subject_kind(snapshot, &subject);
+    let record = subject.record?;
+    match kind {
+        Some(kind @ (PinKind::Mux | PinKind::Checkout | PinKind::Repo)) => rebuild(record, kind),
+        _ => Some(Effect::Toast(
+            "a PR record can't be rebuilt; it only remembers the PR".to_string(),
+        )),
+    }
+}
+
+/// One-line status for the slot `pin_id` when it needs the operator's
+/// attention: the target is gone, unchecked, unresolved, or not built
+/// yet. `None` for a live slot.
+pub fn pin_status_hint(snapshot: &GraphSnapshot, pin_id: &str) -> Option<String> {
+    let pin = crate::tui::rows::pin_nodes(snapshot)
+        .into_iter()
+        .find(|pin| pin.id.id == pin_id)?;
+    let name = crate::invocation::invoked_name();
+    let rebuild = format!("{name} rebuild {pin_id}");
+    match pin.status {
+        crate::model::SlotStatus::Live => match pin.kind {
+            crate::model::PinKind::Mux | crate::model::PinKind::Session => None,
+            crate::model::PinKind::Pr => {
+                Some(format!("pin `{pin_id}` is a live PR · Enter shows its URL"))
+            }
+            kind => Some(format!(
+                "pin `{pin_id}` is a live {} · nothing to rebuild",
+                kind.as_str()
+            )),
+        },
+        crate::model::SlotStatus::Gone => Some(format!(
+            "pin `{pin_id}` is {} · Enter runs `{rebuild}` to bring it back",
+            crate::model::SlotStatus::Gone.label_for(pin.kind)
+        )),
+        crate::model::SlotStatus::Unknown => Some(format!(
+            "pin `{pin_id}`: couldn't check whether its target exists"
+        )),
+        crate::model::SlotStatus::Missing => Some(format!(
+            "pin `{pin_id}`: target not found · `{name} pin retarget {pin_id} <target>`, or Enter runs `{rebuild}`"
+        )),
+        crate::model::SlotStatus::Planned => Some(format!(
+            "pin `{pin_id}` isn't built yet · Enter runs `{rebuild}`"
+        )),
+    }
 }
 
 /// Inverse of [`preferred_mux_for_session`]: find the resolver-
@@ -464,28 +957,7 @@ pub(crate) fn preferred_mux_for_session(
     snapshot: &GraphSnapshot,
     session: &NodeId,
 ) -> Option<MuxSessionId> {
-    let mut candidates: Vec<&GraphLink> = snapshot
-        .candidate_links
-        .iter()
-        .filter(|link| {
-            link.source == *session
-                && link.relation == RelationKind::LinkedToMux
-                && matches!(link.state, crate::model::LinkState::Active)
-        })
-        .collect();
-    candidates.sort_by(|left, right| {
-        right
-            .provenance
-            .precedence()
-            .cmp(&left.provenance.precedence())
-            .then_with(|| right.confidence.cmp(&left.confidence))
-            .then_with(|| left.id.cmp(&right.id))
-    });
-    let chosen = candidates.into_iter().next()?;
-    match chosen.target_node_id()? {
-        NodeId::MuxSession(id) => Some(id.clone()),
-        _ => None,
-    }
+    snapshot.preferred_mux_for(session)
 }
 
 /// Human-readable reason text for [`AttachDisabled`]. The runtime
@@ -510,7 +982,13 @@ pub fn attach_disabled_reason(reason: &AttachDisabled) -> String {
             format!("attach: refusing to attach current tmux session `{name}`")
         }
         AttachDisabled::AmbiguousGroupMuxes(n) => {
-            format!("attach: {n} ambiguous muxes here — pick one in detail, or `b` to bind",)
+            format!("attach: {n} ambiguous muxes here — pick one in the detail pane")
+        }
+        AttachDisabled::MuxGone(name) => {
+            format!(
+                "attach: `{name}` isn't running · `{} rebuild {name}` brings it back",
+                crate::invocation::invoked_name()
+            )
         }
     }
 }
@@ -525,74 +1003,6 @@ pub fn lookup_mux_node<'a>(
         crate::model::GraphNode::MuxSession(mux) if mux.id == target.mux => Some(mux),
         _ => None,
     })
-}
-
-/// Resolved tmux launch target for a pin (ADR 0057). Carries the
-/// pin's declared mux name and optional socket so the executor can
-/// attach to the session once `conspectus pin launch <id>`
-/// finishes. `None` when the pin has no attachable target yet
-/// (e.g. the launch synthesized a mux the operator asked us to
-/// leave detached).
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct PinLaunchTarget {
-    /// The pin's declared mux. Attach goes through `mux.backend` only.
-    pub mux: crate::model::PinMuxRef,
-}
-
-/// Reasons `Msg::LaunchSelectedPin` refuses to fire in the reducer.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum PinLaunchDisabled {
-    /// No selection to derive a pin from.
-    NoSelection,
-    /// The selected row is not a pin, a pin-bound session, or a
-    /// pin-bound mux — nothing to launch.
-    NotAPinRow,
-}
-
-/// Format `PinLaunchDisabled` as an operator-facing status hint.
-pub fn pin_launch_disabled_reason(reason: &PinLaunchDisabled) -> String {
-    match reason {
-        PinLaunchDisabled::NoSelection => "launch: nothing selected".to_string(),
-        PinLaunchDisabled::NotAPinRow => "launch: select a pin or placeholder row".to_string(),
-    }
-}
-
-/// Look up a pin's launch target from the loaded snapshot. Public
-/// so both the reducer (via `resolve_launch_pin`) and the Pins-
-/// overlay dispatch (which already has the `pin_id` in hand from
-/// the modal) can share the same lookup.
-pub fn pin_launch_target_from_snapshot(app: &App, pin_id: &str) -> Option<PinLaunchTarget> {
-    app.snapshot_handle()?
-        .snapshot()
-        .pins
-        .iter()
-        .find(|pin| pin.id == pin_id)
-        .map(|pin| PinLaunchTarget {
-            mux: pin.mux.clone(),
-        })
-}
-
-/// Resolve the launch-pin action against `App` state. Pure. Returns
-/// the pin id plus its optional attach target on success. The
-/// executor is the only code that runs the launch subprocess.
-pub fn resolve_launch_pin(
-    app: &App,
-) -> Result<(String, Option<PinLaunchTarget>), PinLaunchDisabled> {
-    let selection = app.selection().ok_or(PinLaunchDisabled::NoSelection)?;
-    let row = app
-        .tree()
-        .rows
-        .iter()
-        .find(|row| &row.id == selection)
-        .ok_or(PinLaunchDisabled::NoSelection)?;
-    let pin_id = match &row.kind {
-        RowKind::AgentSession(session) => session.pin_id.as_deref(),
-        RowKind::MuxSession(mux) => mux.pin_id.as_deref(),
-        _ => None,
-    };
-    let pin_id = pin_id.ok_or(PinLaunchDisabled::NotAPinRow)?.to_string();
-    let target = pin_launch_target_from_snapshot(app, &pin_id);
-    Ok((pin_id, target))
 }
 
 #[cfg(test)]

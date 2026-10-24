@@ -93,3 +93,35 @@ impl Widget for LinesBody {
         Paragraph::new(self.lines).render(area, buf);
     }
 }
+
+/// Wrap `text` into lines of at most `width` cells, each prefixed with
+/// `indent` spaces, so a modal's prose never runs past its frame.
+pub fn wrapped_lines(text: &str, indent: usize, width: usize) -> Vec<String> {
+    let budget = u16::try_from(width.saturating_sub(indent).max(1)).unwrap_or(u16::MAX);
+    crate::viewer::render::word_wrap(text, budget)
+        .into_iter()
+        .map(|chunk| format!("{}{}", " ".repeat(indent), chunk.trim_end()))
+        .collect()
+}
+
+/// Cut `text` to at most `width` cells, ending in `…` when it was cut:
+/// the deliberate form of truncation for a label that must stay on one
+/// line.
+pub fn ellipsize(text: &str, width: usize) -> String {
+    use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
+    if UnicodeWidthStr::width(text) <= width {
+        return text.to_string();
+    }
+    let mut out = String::new();
+    let mut used = 0;
+    for ch in text.chars() {
+        let w = UnicodeWidthChar::width(ch).unwrap_or(0);
+        if used + w + 1 > width {
+            break;
+        }
+        out.push(ch);
+        used += w;
+    }
+    out.push('…');
+    out
+}

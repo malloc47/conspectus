@@ -358,11 +358,11 @@ fn search_row_node_kind(id: &RowId) -> Option<NodeKind> {
         RowId::Group(node_id) | RowId::AgentSession(node_id) | RowId::MuxSession(node_id) => {
             Some(NodeKind::from(node_id))
         }
-        RowId::AgentSessionMuxCandidate { .. } => Some(NodeKind::MuxSession),
         RowId::Pr(_) => Some(NodeKind::ForgePr),
         RowId::Fork(_) => Some(NodeKind::Fork),
         RowId::Pin { .. } => Some(NodeKind::Pin),
-        RowId::Remote(_) | RowId::Synthetic(_) => None,
+        RowId::Nested { node, .. } => Some(NodeKind::from(node)),
+        RowId::History { .. } | RowId::Remote(_) | RowId::Bucket(_) | RowId::Synthetic(_) => None,
     }
 }
 

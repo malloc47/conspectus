@@ -2,7 +2,10 @@
 
 ## Status
 
-Accepted. Amended 2026-10-01 (`CSP-565`): the boundary is now
+Accepted. Amended by ADR 0141: `pins`, `pin_bindings`, and
+`pin_store_registry` became the read-only `legacy_pins`, `legacy_bindings`,
+and `legacy_registry` readers, with `pin_slots`, `pin_ops`, and
+`pin_migrate` added. Amended 2026-10-01 (`CSP-565`): the boundary is now
 enforced with visibility; see the amendment at the end.
 
 ## Context

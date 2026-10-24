@@ -529,3 +529,61 @@ fn git_backend_prune_is_unsupported() {
         WorktreeMutationOutcome::Unsupported,
     );
 }
+
+#[test]
+fn worktrunk_switch_goes_to_an_existing_branch_without_creating() {
+    let fake = std::sync::Arc::new(FakeWt::ok());
+    let backend = WorktrunkBackend::with_runner(Box::new(fake.clone()));
+    backend
+        .switch(&WorktreeSwitchRequest {
+            repo_root: PathBuf::from("/src/app"),
+            branch: "feature/x".to_string(),
+            create: false,
+            base: Some("ignored".to_string()),
+        })
+        .expect("switch runs");
+    assert_eq!(
+        fake.calls.lock().unwrap()[0],
+        vec!["-C", "/src/app", "switch", "--no-cd", "feature/x"],
+    );
+}
+
+#[test]
+fn worktrunk_switch_creates_a_deleted_branch_from_its_last_head() {
+    let fake = std::sync::Arc::new(FakeWt::ok());
+    let backend = WorktrunkBackend::with_runner(Box::new(fake.clone()));
+    backend
+        .switch(&WorktreeSwitchRequest {
+            repo_root: PathBuf::from("/src/app"),
+            branch: "feature/x".to_string(),
+            create: true,
+            base: Some("4630e1e".to_string()),
+        })
+        .expect("switch runs");
+    assert_eq!(
+        fake.calls.lock().unwrap()[0],
+        vec![
+            "-C",
+            "/src/app",
+            "switch",
+            "--no-cd",
+            "--create",
+            "--base",
+            "4630e1e",
+            "feature/x",
+        ],
+    );
+}
+
+#[test]
+fn the_git_backend_cannot_switch() {
+    let outcome = SystemGitWorktree::new()
+        .switch(&WorktreeSwitchRequest {
+            repo_root: PathBuf::from("/src/app"),
+            branch: "x".to_string(),
+            create: false,
+            base: None,
+        })
+        .unwrap();
+    assert_eq!(outcome, WorktreeMutationOutcome::Unsupported);
+}

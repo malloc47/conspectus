@@ -10,8 +10,8 @@
 //!
 //! Every `Modal` variant implements [`Overlay`]. The trait carries
 //! an associated `Ctx<'a>` type so overlays that need live App
-//! state (Controls read view/grouping/filter/sort; Pins read a
-//! `PinsContext`; Search reads the current row items) can declare
+//! state (Controls read view/grouping/filter/sort; Search reads the
+//! current row items) can declare
 //! it in one place instead of via a specialized runtime handler.
 //! Context-free overlays (Help / ValueModal / Viewer / Rename) set
 //! `type Ctx<'a> = ()`. The runtime's stack dispatcher matches per
@@ -37,11 +37,6 @@ pub enum Modal {
     /// event so view / grouping / filter / sort surface fresh
     /// values as the operator toggles them.
     Controls(crate::tui::widgets::controls::ControlsOverlayState),
-    /// Pins overlay (ADR 0057). Reads a
-    /// [`crate::tui::widgets::pins::PinsContext`] on every event
-    /// so the "adopt selected mux" flow sees the current
-    /// selection.
-    Pins(crate::tui::widgets::pins::PinsOverlayState),
     /// Rename overlay (ADR 0029 / ADR 0030). Wraps the generic
     /// text-input widget with a [`Msg::CommitRename`] mapper so
     /// the trait's uniform `Commit(Msg)` outcome carries the
@@ -77,12 +72,23 @@ pub enum Modal {
     /// mux-specific verbs; each entry commits a Msg that opens the
     /// corresponding target overlay.
     MuxMenu(crate::tui::widgets::mux_menu::MuxMenuState),
-    /// Mux-launch form — ephemeral harness in a fresh mux, no pin
+    /// Mux-launch form — harness in a fresh mux
     /// (ADR 0096). Commits
     /// [`Msg::CommitMuxLaunch`]. Boxed to keep the `Modal` enum
     /// discriminant small — the launch form carries eight
     /// `TextInputState` fields.
     MuxLaunch(Box<crate::tui::widgets::mux_launch::MuxLaunchFormState>),
+    /// The pin edit form: every field a pin can change, with the layer
+    /// each value comes from. Commits [`Msg::CommitPinEdit`].
+    PinEdit(Box<crate::tui::widgets::pin_edit::PinEditFormState>),
+    /// `.` row action menu: the verbs for the selected row, each
+    /// committing a [`Msg`].
+    RowMenu(Box<crate::tui::widgets::row_menu::RowMenuState>),
+    /// The History view's Clean up modal: reap candidates the
+    /// operator can deselect before confirming (ADR 0140).
+    CleanUp(Box<crate::tui::widgets::clean_up::CleanUpState>),
+    /// A pick-one list with type-to-filter: where a pin points next.
+    Picker(Box<crate::tui::widgets::picker::PickerState>),
 }
 
 /// What an overlay wants the runtime to do after a single key
@@ -104,8 +110,7 @@ pub enum OverlayOutcome {
     /// Overlay committed a value but wants to stay open. The
     /// runtime dispatches the [`Msg`] and leaves the overlay on
     /// the stack. Used by Controls (`ApplyAndStay`, e.g. toggling
-    /// a filter chip without closing the overlay) and Pins
-    /// (`ApplyAndStay`, e.g. arming a Delete confirmation).
+    /// a filter chip without closing the overlay).
     CommitAndStay(Box<Msg>),
     /// Operator asked to close (Esc / Ctrl-C / dedicated key).
     /// The runtime pops the overlay; no follow-up dispatch.
@@ -122,14 +127,14 @@ pub enum OverlayOutcome {
 /// The `Ctx<'a>` associated type carries any live App state the
 /// widget needs to see on every event. Widgets that need no
 /// context set `type Ctx<'a> = ()`; widgets that need borrowed
-/// App data (Controls, Pins, Search) declare a lifetime-carrying
+/// App data (Controls, Search) declare a lifetime-carrying
 /// context type and the dispatcher builds a fresh borrow per
 /// event.
 pub trait Overlay {
     /// Live App context the widget consumes on every event. `()`
     /// for context-free widgets (Help, ValueModal, Viewer,
     /// Rename); a lifetime-parameterized reference type for
-    /// Controls / Pins / Search.
+    /// Controls / Search.
     type Ctx<'a>;
 
     /// Handle one key event against fresh `ctx`.

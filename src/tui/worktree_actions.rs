@@ -37,8 +37,8 @@ pub enum WorktreeAction {
     /// Remove the selected worktree (mutation, guarded).
     RemoveWorktree,
     /// Close down a whole stream of work: land or discard the branch,
-    /// terminate its sessions, remove the worktree, drop its pins
-    /// (compound mutation; ADR 0093).
+    /// terminate its sessions, remove the worktree, forget its history
+    /// records (compound mutation; ADR 0093).
     CloseDownWorktree,
     /// Prune worktrees already merged into the repo's default branch
     /// (repo-level mutation).

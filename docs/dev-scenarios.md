@@ -323,3 +323,23 @@ reducer/action test in `src/tui/app.rs` or `src/tui/actions.rs` using
 - Keep names stable once tests or documentation reference them.
 - Prefer structured assertions over large terminal snapshots unless the
   layout itself is the risk being tested.
+
+## Scratch home
+
+`scripts/scratch-home.sh` (or `just scratch`) builds a disposable home for
+exercising the write paths the static scenarios disable: pinning,
+rebuilding, migration, reaping, and the daemon.
+
+```sh
+just scratch                      # interactive subshell in a scratch home
+just scratch smoke                # run every automated check
+just scratch smoke migrate_legacy # run one
+just scratch list                 # list the checks
+```
+
+Each run gets a fresh `$HOME` and `XDG_*` tree, a git repo with a remote,
+stub `codex` and `claude` binaries, and a private tmux server
+(`TMUX_TMPDIR` under the scratch dir, `$TMUX` unset), so it never touches
+your real configuration or tmux server. `KEEP=1` keeps the directory and
+`VERBOSE=1` prints every command's output. Add a check by writing
+`check_<name>` in the script and listing it in `CHECKS`.

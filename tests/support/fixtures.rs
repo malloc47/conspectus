@@ -40,6 +40,8 @@ pub fn mux_only_graph() -> GraphSnapshot {
             activity_epoch: None,
             created_epoch: None,
             last_attached_epoch: None,
+            socket: None,
+            backend_session_id: None,
         })],
         ..GraphSnapshot::empty()
     })
@@ -389,5 +391,7 @@ fn mux_node(id: &str, native_id: &str) -> GraphNode {
         activity_epoch: None,
         created_epoch: None,
         last_attached_epoch: None,
+        socket: None,
+        backend_session_id: None,
     })
 }

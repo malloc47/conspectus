@@ -7,3 +7,7 @@ src/output/html/assets/cose-base.js       -text linguist-vendored whitespace=-tr
 src/output/html/assets/cytoscape-fcose.js -text linguist-vendored whitespace=-trailing-space,-space-before-tab,-tab-in-indent,-blank-at-eof,-blank-at-eol
 src/output/html/assets/layout-base.js     -text linguist-vendored whitespace=-trailing-space,-space-before-tab,-tab-in-indent,-blank-at-eof,-blank-at-eol
 src/output/html/assets/cytoscape-dagre.js -text linguist-vendored whitespace=-trailing-space,-space-before-tab,-tab-in-indent,-blank-at-eof,-blank-at-eol
+
+# Insta snapshots hold rendered terminal frames verbatim, including the
+# padding to the frame width, so trailing spaces are content.
+*.snap whitespace=-trailing-space

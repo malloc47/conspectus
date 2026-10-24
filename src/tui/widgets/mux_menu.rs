@@ -37,14 +37,14 @@ impl MuxMenuChoice {
     fn label(self) -> &'static str {
         match self {
             Self::NewBareMux => "New tmux session (bare shell)",
-            Self::LaunchHarnessMux => "Launch harness in new mux… (no pin)",
+            Self::LaunchHarnessMux => "Launch harness in new mux…",
         }
     }
 
     fn subtitle(self) -> &'static str {
         match self {
-            Self::NewBareMux => "ADR 0095 · shell only, no harness, no pin",
-            Self::LaunchHarnessMux => "ADR 0096 · spawn harness, no pin persistence",
+            Self::NewBareMux => "shell only, no harness",
+            Self::LaunchHarnessMux => "spawn harness; optionally pin it",
         }
     }
 }
@@ -120,7 +120,7 @@ impl Widget for MuxMenuWidget<'_> {
         ];
         for (idx, entry) in MENU_ENTRIES.iter().enumerate() {
             let focused = idx == self.state.cursor;
-            let marker = if focused { "▸" } else { " " };
+            let marker = if focused { "►" } else { " " };
             let label = format!("{marker} {}", entry.label());
             if focused {
                 lines.push(Line::styled(

@@ -1,9 +1,11 @@
 ---
 id: CSP-658
 title: Record the rebuild plans and executors decision
-status: To Do
-assignee: []
+status: Done
+assignee:
+  - '@claude'
 created_date: '2026-10-22 01:10'
+updated_date: '2026-10-22 02:34'
 labels:
   - history-pins
 milestone: m-23
@@ -33,13 +35,26 @@ Rebuilding is what turns history and pin slots back into live entities. Today it
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 A new ADR records the plan model, each executor's steps and envelope category, prerequisite chaining, argv precedence including launch profiles, and the worktree location rule
-- [ ] #2 The ADR supersedes ADR 0094 and amends ADR 0093 (teardown leaves a ghost), ADR 0095, and ADR 0096 (adopting as a pin goes away)
-- [ ] #3 The ADR states that the worktree location rule is provisional pending the location investigation ticket
+- [x] #1 A new ADR records the plan model, each executor's steps and envelope category, prerequisite chaining, argv precedence including launch profiles, and the worktree location rule
+- [x] #2 The ADR supersedes ADR 0094 and amends ADR 0093 (teardown leaves a ghost), ADR 0095, and ADR 0096 (adopting as a pin goes away)
+- [x] #3 The ADR states that the worktree location rule is provisional pending the location investigation ticket
 <!-- AC:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
-- [ ] #1 `just check` passes, or `git diff --check` for docs-only changes
-- [ ] #2 Docs and ADRs are updated when behavior, architecture, or workflow change
+- [x] #1 `just check` passes, or `git diff --check` for docs-only changes
+- [x] #2 Docs and ADRs are updated when behavior, architecture, or workflow change
 <!-- DOD:END -->
+
+## Implementation Plan
+
+<!-- SECTION:PLAN:BEGIN -->
+1. Write ADR 0142 from the plan's Rebuild section.
+2. Index it and put status lines on ADRs 0093, 0094, 0095, 0096, and 0098.
+<!-- SECTION:PLAN:END -->
+
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+Recorded ADR 0142 (rebuild plans and executors): plans shown before running and printed by `--dry-run`, executors for mux (gone, agent running, agent exited, dead pane, zellij), session, worktree, and repo clone with their envelope categories, prerequisite chaining, argv precedence including launch profiles and the `atelier exec` layer, the provisional worktree location rule pending `CSP-688`, history writes at launch, and the TUI flow. Supersedes ADR 0094; amends 0093, 0095, 0096, and 0098. Verified with `git diff --check`.
+<!-- SECTION:FINAL_SUMMARY:END -->

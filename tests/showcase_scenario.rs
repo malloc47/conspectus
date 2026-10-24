@@ -129,6 +129,36 @@ fn assert_layer_coverage(snapshot: &GraphSnapshot) {
         "showcase missing `parent_session` lineage link",
     );
 
+    // Pin slots of several kinds, live and gone, and gone history
+    // records behind them (Pinned and History views).
+    let pins: BTreeSet<(&str, &str)> = snapshot
+        .nodes
+        .iter()
+        .filter_map(|node| match node {
+            GraphNode::Pin(pin) => Some((pin.kind.as_str(), pin.status.as_str())),
+            _ => None,
+        })
+        .collect();
+    for expected in [
+        ("mux", "live"),
+        ("mux", "gone"),
+        ("session", "live"),
+        ("checkout", "gone"),
+        ("pr", "live"),
+    ] {
+        assert!(
+            pins.contains(&expected),
+            "showcase missing pin slot {expected:?}; have: {pins:?}",
+        );
+    }
+    let gone = snapshot
+        .history
+        .presence
+        .values()
+        .filter(|presence| presence.is_gone())
+        .count();
+    assert!(gone >= 4, "showcase has {gone} gone history records");
+
     // Resolver actually produced output.
     assert!(
         !snapshot.resolved_relationships.is_empty(),

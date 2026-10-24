@@ -1,9 +1,10 @@
 ---
 id: CSP-670
 title: Replace the pin CLI with slot commands
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-10-22 01:11'
+updated_date: '2026-10-22 15:05'
 labels:
   - history-pins
 milestone: m-23
@@ -30,14 +31,20 @@ The pin CLI is built around declaring and launching muxes (`create`, `launch`, `
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 Every slot gesture from the ADR is available from the CLI, including ordering with `pin move`
-- [ ] #2 Renaming a live mux slot renames its tmux session in lockstep
-- [ ] #3 Each retired `pin` verb fails with a message naming its replacement
-- [ ] #4 `mux new` and `mux launch` can pin the result, or create a planned slot without launching
+- [x] #1 Every slot gesture from the ADR is available from the CLI, including ordering with `pin move`
+- [x] #2 Renaming a live mux slot renames its tmux session in lockstep
+- [x] #3 Each retired `pin` verb fails with a message naming its replacement
+- [x] #4 `mux new` and `mux launch` can pin the result, or create a planned slot without launching
 <!-- AC:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
-- [ ] #1 `just check` passes, or `git diff --check` for docs-only changes
-- [ ] #2 Docs and ADRs are updated when behavior, architecture, or workflow change
+- [x] #1 `just check` passes, or `git diff --check` for docs-only changes
+- [x] #2 Docs and ADRs are updated when behavior, architecture, or workflow change
 <!-- DOD:END -->
+
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+Replaced the pin CLI with `pin add|edit|rename|retarget|refresh|move|rm|list|show|migrate`. `pin rename` renames a live mux slot's tmux session in lockstep and pins the name override (`--no-mux` opts out). The retired verbs (create, launch, attach, bind, rebind, adopt) fail naming their replacement. `mux new` and `mux launch` take `--pin [SLOT] [--no-launch]`; `--no-launch` writes a planned slot and starts nothing. Verified by `tests/cli_pin.rs` (real tmux), `pin_ops_tests`, and the capability trace's pin and mux scenarios.
+<!-- SECTION:FINAL_SUMMARY:END -->

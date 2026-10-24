@@ -2,9 +2,13 @@
 
 ## Status
 
-Accepted (amended). Amended 2026-10-12: hook installation the operator
-starts is sanctioned category 5, which prohibition 1 excludes, and ADR
-0117 enforces the envelope through a capability manifest.
+Superseded by [ADR 0143](0143-mutation-envelope-with-history-pins-and-clone.md),
+which keeps every category and prohibition under the same numbers and
+adds the history store, `pins.toml`, the daemon's category 2 rule, and a
+narrow `git clone` carve-out. Before that, amended 2026-10-12: hook
+installation the operator starts is sanctioned category 5, which
+prohibition 1 excludes, and ADR 0117 enforces the envelope through a
+capability manifest.
 
 ## Context
 

@@ -148,12 +148,8 @@ fn every_overlay_table_labels_its_keys_truthfully() {
         ("confirm", mislabeled(CONFIRM_KEYS)),
         ("close-down", mislabeled(CLOSE_DOWN_KEYS)),
         ("mux launch", mislabeled(MUX_LAUNCH_KEYS)),
-        ("omnibox", mislabeled(OMNIBOX_KEYS)),
-        ("pin create", mislabeled(PIN_CREATE_KEYS)),
         ("pin edit", mislabeled(PIN_EDIT_KEYS)),
-        ("pin bind", mislabeled(PIN_BIND_KEYS)),
-        ("pin rebind", mislabeled(PIN_REBIND_KEYS)),
-        ("pin remove", mislabeled(PIN_REMOVE_KEYS)),
+        ("omnibox", mislabeled(OMNIBOX_KEYS)),
     ];
     for (name, wrong) in tables {
         assert!(
@@ -173,7 +169,7 @@ fn generated_footers_keep_the_established_wording() {
     assert_eq!(footer(TEXT_INPUT_KEYS), "Enter confirm · Esc cancel");
     assert_eq!(
         footer(NEW_MUX_KEYS),
-        "Tab switch field · Enter next/commit · Esc cancel"
+        "↑/↓ move · Tab complete/next · S-Tab back · Enter next/commit · Esc cancel"
     );
     assert_eq!(
         footer(MESSAGES_KEYS),
@@ -190,25 +186,12 @@ fn generated_footers_keep_the_established_wording() {
     );
     assert_eq!(
         footer(MUX_LAUNCH_KEYS),
-        "Tab/Shift-Tab move · ←/→ toggle · Enter launch · Esc cancel"
-    );
-    assert_eq!(
-        footer(PIN_CREATE_KEYS),
-        "↑/↓/Tab move · S-Tab back · ←/→/Space option · Enter create · Esc cancel"
+        "↑/↓ move · Tab complete/next · S-Tab back · ←/→/Space option · Enter launch · Esc cancel"
     );
     assert_eq!(
         footer(PIN_EDIT_KEYS),
-        "↑/↓/Tab move · S-Tab back · ←/→/Space option · Enter save · Esc cancel"
+        "↑/↓ move · Tab complete/next · S-Tab back · ←/→/Space option · Ctrl-R follow again · Enter save · Esc cancel"
     );
-    assert_eq!(
-        footer(PIN_BIND_KEYS),
-        "Up/Down choose · Enter bind · Esc cancel"
-    );
-    assert_eq!(
-        footer(PIN_REBIND_KEYS),
-        "Up/Down field · type to edit · Enter save · Esc cancel"
-    );
-    assert_eq!(footer(PIN_REMOVE_KEYS), "Enter remove · Esc cancel");
 }
 
 #[test]

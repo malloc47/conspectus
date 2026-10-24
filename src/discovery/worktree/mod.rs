@@ -3,11 +3,11 @@
 //! Mirrors the mux-backend / forge-adapter registries: a
 //! [`WorktreeBackend`] trait with a required read-only [`list`] plus a
 //! [`capabilities`] report, and swappable implementations. This module
-//! ships the always-available, ADR-0087-clean **git** backend, which
+//! ships the always-available, ADR-0143-clean **git** backend, which
 //! enumerates a repo's worktrees via `git worktree list --porcelain`
 //! and never mutates git state, plus the **worktrunk** mutation
 //! backend, which shells out to the `wt` CLI for
-//! `create` / `remove` — a category-4 subprocess launch (ADR 0087),
+//! `create` / `remove` — a category-4 subprocess launch (ADR 0143),
 //! so the git mutation happens inside worktrunk, not Conspectus.
 //!
 //! [`list`]: WorktreeBackend::list
@@ -160,6 +160,20 @@ pub struct WorktreeCreateRequest {
     pub base: Option<String>,
 }
 
+/// Operator request to bring a branch's worktree back (a rebuild,
+/// ADR 0142): switch to the branch's existing worktree or check the
+/// branch out into a new one, or create the branch first.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct WorktreeSwitchRequest {
+    /// A path inside the repo the worktree belongs to.
+    pub repo_root: PathBuf,
+    pub branch: String,
+    /// Create the branch, because it no longer exists, from `base`.
+    pub create: bool,
+    /// The commit or ref to create the branch from. Only with `create`.
+    pub base: Option<String>,
+}
+
 /// Operator request to remove a worktree.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct WorktreeRemoveRequest {
@@ -218,7 +232,7 @@ pub enum WorktreeMutationOutcome {
 /// read-only; `create` / `remove` are mutation, default to
 /// `Unsupported` (the read-only git backend), and are implemented by
 /// the external `worktrunk` backend as a category-4
-/// subprocess launch (ADR 0087). [`WorktreeCaps`] advertises which a
+/// subprocess launch (ADR 0143). [`WorktreeCaps`] advertises which a
 /// given backend supports.
 pub trait WorktreeBackend: Send + Sync {
     /// Stable key identifying this backend (`git`, `worktrunk`).
@@ -238,6 +252,12 @@ pub trait WorktreeBackend: Send + Sync {
     /// *launch* the backend; an operation that ran and failed is a
     /// [`WorktreeMutationOutcome::Failed`].
     fn create(&self, _req: &WorktreeCreateRequest) -> Result<WorktreeMutationOutcome> {
+        Ok(WorktreeMutationOutcome::Unsupported)
+    }
+
+    /// Bring a branch's worktree back, creating the branch when asked.
+    /// Defaults to [`WorktreeMutationOutcome::Unsupported`].
+    fn switch(&self, _req: &WorktreeSwitchRequest) -> Result<WorktreeMutationOutcome> {
         Ok(WorktreeMutationOutcome::Unsupported)
     }
 
@@ -264,7 +284,7 @@ pub trait WorktreeBackend: Send + Sync {
 
 /// The built-in thin git backend: `git worktree list --porcelain`.
 /// Read/list only — `capabilities` reports no mutation, and there is
-/// no `create` / `remove` path here (ADR 0087 prohibition 6 stays
+/// no `create` / `remove` path here (ADR 0143 prohibition 6 stays
 /// intact for the built-in backend).
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct SystemGitWorktree {
@@ -374,9 +394,30 @@ impl WtRunner for SystemWt {
     }
 }
 
+/// The arguments after `wt` that bring a branch's worktree back:
+/// `-C <repo> switch --no-cd [--create [--base <ref>]] <branch>`. The
+/// backend runs these and a rebuild plan prints them.
+pub fn switch_args(req: &WorktreeSwitchRequest) -> Vec<String> {
+    let mut args = vec![
+        "-C".to_string(),
+        req.repo_root.to_string_lossy().into_owned(),
+        "switch".to_string(),
+        "--no-cd".to_string(),
+    ];
+    if req.create {
+        args.push("--create".to_string());
+        if let Some(base) = &req.base {
+            args.push("--base".to_string());
+            args.push(base.clone());
+        }
+    }
+    args.push(req.branch.clone());
+    args
+}
+
 /// The worktrunk mutation backend (ADR 0092). Shells out to
 /// the `wt` CLI for `create` / `remove` — a category-4
-/// Conspectus-constructed subprocess launch (ADR 0087); the git
+/// Conspectus-constructed subprocess launch (ADR 0143); the git
 /// mutation happens inside worktrunk, the dedicated tool, so
 /// prohibition 6 stays intact. `list` delegates to the git porcelain
 /// path (worktrunk worktrees are ordinary git worktrees).
@@ -451,6 +492,12 @@ impl WorktreeBackend for WorktrunkBackend {
             args.push(base);
         }
         args.push(&req.branch);
+        Self::interpret(self.runner.run(&args))
+    }
+
+    fn switch(&self, req: &WorktreeSwitchRequest) -> Result<WorktreeMutationOutcome> {
+        let args = switch_args(req);
+        let args: Vec<&str> = args.iter().map(String::as_str).collect();
         Self::interpret(self.runner.run(&args))
     }
 

@@ -1,9 +1,10 @@
 ---
 id: CSP-170
 title: Implement resume un-muxed agent session into mux
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-05-19 03:51'
+updated_date: '2026-10-22 15:06'
 labels:
   - p8
 milestone: m-13
@@ -31,11 +32,10 @@ ordinal: 397000
   differ materially by harness.
 <!-- SECTION:DESCRIPTION:END -->
 
+Legacy ID: `P8-011`
+
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Outcome (2026-09-30, `CSP-538`): still open. `S` resumes an un-muxed
-session in a new terminal; resuming it into a mux remains to do.
+Covered by CSP-673 (rebuild a session by resuming its lineage head into its last mux or a new one); no separate work remains.
 <!-- SECTION:FINAL_SUMMARY:END -->
-
-Legacy ID: `P8-011`

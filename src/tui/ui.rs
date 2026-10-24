@@ -10,7 +10,7 @@
 //!   detail view-models; the renderer just lays them out.
 //! - Mux glyphs `◉` / `◯` with color carrying the primary signal
 //!   (green attached / dim not attached); mux ambiguity surfaces as
-//!   `⚠` on group rows and the header.
+//!   `▲` on group rows and the header.
 //! - Header reports `updated Ns ago · N agents · M mux`; the
 //!   freshness slot uses [`format_recency`] over
 //!   `App::loaded_at_epoch`.
@@ -46,8 +46,8 @@ use crate::tui::detail::{HeaderField, NodeDetail, SectionKind};
 use crate::tui::icons::{NodeKind, node_kind_style};
 use crate::tui::preview::PreviewContent;
 use crate::tui::rows::{
-    AgentSessionRow, GroupRow, MuxCandidateRow, MuxIndicator, MuxSessionRow, PrRow, RowId, RowKind,
-    format_recency, recency_bucket,
+    AgentSessionRow, GroupRow, MuxIndicator, MuxSessionRow, PrRow, RowId, RowKind, format_recency,
+    recency_bucket,
 };
 
 mod detail_header;
@@ -88,14 +88,17 @@ pub fn draw(app: &mut App, frame: &mut Frame<'_>) {
     draw_body(app, frame, layout[1]);
     draw_status_bar(app, frame, layout[2]);
     draw_controls_overlay(app, frame, area);
-    draw_pins_overlay(app, frame, area);
     draw_search_overlay(app, frame, area);
     draw_help_overlay(app, frame, area);
     draw_rename_overlay(app, frame, area);
     draw_worktree_menu(app, frame, area);
     draw_new_mux_form(app, frame, area);
     draw_mux_menu(app, frame, area);
+    draw_row_menu(app, frame, area);
+    draw_clean_up(app, frame, area);
+    draw_picker(app, frame, area);
     draw_mux_launch_form(app, frame, area);
+    draw_pin_edit_form(app, frame, area);
     draw_value_modal(app, frame, area);
     draw_messages_overlay(app, frame, area);
     draw_toast(app, frame, area);
@@ -110,6 +113,33 @@ fn draw_mux_menu(app: &App, frame: &mut Frame<'_>, area: Rect) {
     frame.render_widget(MuxMenuWidget::new(state, app.theme()), area);
 }
 
+fn draw_row_menu(app: &App, frame: &mut Frame<'_>, area: Rect) {
+    use crate::tui::widgets::row_menu::RowMenuWidget;
+
+    let Some(state) = app.row_menu() else {
+        return;
+    };
+    frame.render_widget(RowMenuWidget::new(state, app.theme()), area);
+}
+
+fn draw_picker(app: &App, frame: &mut Frame<'_>, area: Rect) {
+    use crate::tui::widgets::picker::PickerWidget;
+
+    let Some(state) = app.picker() else {
+        return;
+    };
+    frame.render_widget(PickerWidget::new(state, app.theme()), area);
+}
+
+fn draw_clean_up(app: &App, frame: &mut Frame<'_>, area: Rect) {
+    use crate::tui::widgets::clean_up::CleanUpWidget;
+
+    let Some(state) = app.clean_up() else {
+        return;
+    };
+    frame.render_widget(CleanUpWidget::new(state, app.theme()), area);
+}
+
 fn draw_mux_launch_form(app: &App, frame: &mut Frame<'_>, area: Rect) {
     use crate::tui::widgets::mux_launch::MuxLaunchFormWidget;
 
@@ -117,6 +147,15 @@ fn draw_mux_launch_form(app: &App, frame: &mut Frame<'_>, area: Rect) {
         return;
     };
     frame.render_widget(MuxLaunchFormWidget::new(state, app.theme()), area);
+}
+
+fn draw_pin_edit_form(app: &App, frame: &mut Frame<'_>, area: Rect) {
+    use crate::tui::widgets::pin_edit::PinEditFormWidget;
+
+    let Some(state) = app.pin_edit_form() else {
+        return;
+    };
+    frame.render_widget(PinEditFormWidget::new(state, app.theme()), area);
 }
 
 fn draw_worktree_menu(app: &App, frame: &mut Frame<'_>, area: Rect) {
@@ -218,21 +257,13 @@ fn draw_controls_overlay(app: &App, frame: &mut Frame<'_>, area: Rect) {
     frame.render_widget(widget, area);
 }
 
-fn draw_pins_overlay(app: &App, frame: &mut Frame<'_>, area: Rect) {
-    use crate::tui::widgets::pins::PinsOverlayWidget;
-
-    let Some(state) = app.pins_overlay() else {
-        return;
-    };
-    let widget = PinsOverlayWidget::new(state, app.theme());
-    frame.render_widget(widget, area);
-}
-
 // Render clock: wall time in production, a settable clock in tests.
 
 #[cfg(not(test))]
 fn current_unix_epoch_for_render() -> i64 {
-    crate::discovery::current_epoch()
+    // The clock the row builders age against, so an age's text and its
+    // recency color agree; snapshot mode freezes it.
+    crate::tui::rows::tree_current_unix_epoch()
 }
 
 /// Test override: a fixed clock so snapshot tests stay
@@ -277,13 +308,13 @@ fn focus_marker_width(app: &App, focus: Focus) -> usize {
     focus_marker_span(app, focus).content.chars().count()
 }
 
-/// `▸ ` when the given panel has focus, two-space pad otherwise.
+/// `► ` when the given panel has focus, two-space pad otherwise.
 /// Keeps title widths consistent across focus states so the tab
 /// strip and right-pane label sit at the same offset before and
 /// after `Tab`.
 fn focus_marker_span(app: &App, panel: Focus) -> Span<'static> {
     let focused = app.focus() == panel;
-    let glyph = if focused { "▸ " } else { "  " };
+    let glyph = if focused { "► " } else { "  " };
     span!(Style::default().fg(app.theme().panel_focus_accent); "{glyph}")
 }
 

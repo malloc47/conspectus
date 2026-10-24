@@ -82,6 +82,7 @@ fn add_repo_and_worktree(snapshot: &mut GraphSnapshot, common_dir: &str) {
         git_dir: None,
         current_branch: None,
         worktree: None,
+        head_commit: None,
     }));
 }
 
@@ -426,59 +427,66 @@ fn view_on_unattached_mux_row_reports_unsupported() {
     );
 }
 
-// ----- Pin status hint branches on last_session -----
+// ----- Pin slot status hints and attach -----
 
-#[test]
-fn pin_status_hint_unbound_without_last_session_advertises_launch() {
-    let diagnostic = PinDiagnosticView::Unbound {
-        pin_id: "ingest".to_string(),
-        expected_mux_native_id: "tmux:ingest".to_string(),
-        last_session: None,
-    };
-    let hint = pin_status_hint(&[diagnostic]).expect("status hint produced");
-    assert!(hint.contains("Enter launch"), "hint: {hint}");
-    assert!(!hint.contains("resume"), "hint: {hint}");
-}
-
-#[test]
-fn pin_status_hint_unbound_with_last_session_advertises_resume() {
-    let diagnostic = PinDiagnosticView::Unbound {
-        pin_id: "ingest".to_string(),
-        expected_mux_native_id: "tmux:ingest".to_string(),
-        last_session: Some(PinLastSession {
-            session_id: "session-a".to_string(),
-            observed_epoch: 1,
-        }),
-    };
-    let hint = pin_status_hint(&[diagnostic]).expect("status hint produced");
-    assert!(hint.contains("Enter resume"), "hint: {hint}");
-    assert!(hint.contains("session-a"), "hint: {hint}");
-}
-
-#[test]
-fn pin_launch_target_carries_the_pins_mux_backend() {
+fn pin_snapshot(status: crate::model::SlotStatus, target: Option<NodeId>) -> GraphSnapshot {
     let mut snapshot = GraphSnapshot::empty();
-    snapshot.pins.push(crate::model::PinCandidate {
-        id: "zp".to_string(),
-        display_name: "zp".to_string(),
-        harness: "codex".to_string(),
-        cwd: "/home/op/src/x".to_string(),
-        mux: crate::model::PinMuxRef {
-            backend: "zellij".to_string(),
-            name: "zp".to_string(),
-            socket_name: None,
-        },
-        launch_argv: None,
-        reason: None,
-        provenance: Provenance::LocalPin,
-        store_path: "/home/op/src/x/.conspectus.toml".to_string(),
-        binding: None,
-    });
-    let app = build_app(snapshot);
+    snapshot
+        .nodes
+        .push(GraphNode::Pin(crate::model::PinNode::for_test(
+            "ingest",
+            crate::model::PinKind::Mux,
+            target,
+            status,
+            &[("name", "ingest")],
+        )));
+    snapshot
+}
 
-    let target = pin_launch_target_from_snapshot(&app, "zp").expect("pin target");
-    assert_eq!(target.mux.backend, "zellij");
-    assert_eq!(target.mux.name, "zp");
+#[test]
+fn pin_status_hint_is_silent_for_a_live_slot() {
+    let snapshot = pin_snapshot(crate::model::SlotStatus::Live, None);
+    assert_eq!(pin_status_hint(&snapshot, "ingest"), None);
+}
+
+#[test]
+fn pin_status_hint_points_a_gone_slot_at_rebuild() {
+    let snapshot = pin_snapshot(crate::model::SlotStatus::Gone, None);
+    let hint = pin_status_hint(&snapshot, "ingest").expect("status hint produced");
+    assert!(hint.contains("is stopped"), "hint: {hint}");
+    assert!(hint.contains("rebuild ingest"), "hint: {hint}");
+}
+
+#[test]
+fn pin_status_hint_names_each_unhealthy_status() {
+    use crate::model::SlotStatus;
+    for (status, needle) in [
+        (SlotStatus::Unknown, "couldn't check"),
+        (SlotStatus::Missing, "target not found"),
+        (SlotStatus::Planned, "isn't built yet"),
+    ] {
+        let snapshot = pin_snapshot(status, None);
+        let hint = pin_status_hint(&snapshot, "ingest").expect("status hint produced");
+        assert!(hint.contains(needle), "{status:?}: {hint}");
+    }
+    assert_eq!(
+        pin_status_hint(&pin_snapshot(crate::model::SlotStatus::Gone, None), "other"),
+        None
+    );
+}
+
+#[test]
+fn pin_live_mux_follows_a_live_slot_to_its_mux() {
+    let mux = mux_node_id("tmux", "ingest");
+    let mut snapshot = pin_snapshot(crate::model::SlotStatus::Live, Some(mux.clone()));
+    assert_eq!(pin_live_mux(&snapshot, "ingest"), None, "mux not in graph");
+    snapshot.nodes.push(mux_node("tmux", "ingest"));
+    assert_eq!(
+        pin_live_mux(&snapshot, "ingest"),
+        Some(MuxSessionId::new("tmux:ingest"))
+    );
+    let gone = pin_snapshot(crate::model::SlotStatus::Gone, Some(mux));
+    assert_eq!(pin_live_mux(&gone, "ingest"), None);
 }
 
 #[test]
@@ -489,4 +497,44 @@ fn attach_target_label_is_backend_and_native_name() {
         native_id: "notes".to_string(),
     };
     assert_eq!(target.label(), "zellij:notes");
+}
+
+#[test]
+fn attach_refuses_a_mux_that_is_only_in_history() {
+    let mut snapshot = GraphSnapshot::empty();
+    snapshot.nodes.push(mux_node("tmux", "editor"));
+    let snapshot = resolve_snapshot(snapshot);
+    let tree = crate::tui::rows::mux::build_mux_tree(crate::tui::rows::mux::MuxBuildInputs {
+        snapshot: &snapshot,
+        home: None,
+        now: None,
+        filter: RowFilter::default(),
+        grouping: crate::tui::MuxGrouping::Session,
+        sort: crate::tui::Sort::Hierarchy,
+        mux_recency: crate::tui::MuxRecency::default(),
+    });
+    // The same row, now that history says the mux is gone.
+    let mut gone = snapshot;
+    gone.node_presence.insert(
+        NodeId::MuxSession(MuxSessionId::new("tmux:editor")),
+        crate::model::NodePresence::Gone { last_seen: 1 },
+    );
+    let mut cfg = RunConfig::defaults();
+    cfg.default_view = View::Mux;
+    let mut app = App::new(cfg);
+    app.update(Msg::SetData {
+        snapshot: SnapshotHandle::new(gone),
+        tree,
+        loaded_at_epoch: 1_700_000_000,
+        initial_selection_hint: None,
+    });
+
+    assert_eq!(
+        resolve_attach_target(&app),
+        Err(AttachDisabled::MuxGone("editor".to_string()))
+    );
+    assert_eq!(
+        attach_disabled_reason(&AttachDisabled::MuxGone("editor".into())),
+        "attach: `editor` isn't running · `conspectus rebuild editor` brings it back"
+    );
 }

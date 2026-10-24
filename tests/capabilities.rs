@@ -950,11 +950,29 @@ fn the_built_binary_stays_inside_the_capability_manifest() {
     let vars = world.vars(None);
     let project = &world.project;
 
+    // A pin slot already on disk: no read command or the daemon may
+    // rewrite the store (ADR 0143 category 1).
+    let pins = world.root.join("xdg/data/conspectus/pins.toml");
+    fs::create_dir_all(pins.parent().expect("data dir")).expect("data dir");
+    fs::write(
+        &pins,
+        "[pins]\nschema_version = 2\n\n[[pins.slots]]\nid = \"seeded\"\nkind = \"mux\"\n",
+    )
+    .expect("seed pins.toml");
+
     // Read-only commands: discovery, tables, exports, the TUI.
     let mut reads = vec![
         world.run(&strace, "graph", &["graph", "--format", "json"], project),
         world.run(&strace, "table", &["table", "sessions"], project),
         world.run(&strace, "node", &["columns", "sessions"], project),
+        world.run(&strace, "pin-list", &["pin", "list"], project),
+        world.run(&strace, "history-list", &["history", "list"], project),
+        world.run(
+            &strace,
+            "history-reap-dry-run",
+            &["history", "reap", "--dry-run"],
+            project,
+        ),
     ];
     if cfg!(feature = "snapshot") {
         // The TUI opens on the project's repo row, which previews its
@@ -987,6 +1005,13 @@ fn the_built_binary_stays_inside_the_capability_manifest() {
         project,
     );
 
+    assert!(
+        fs::read_to_string(&pins)
+            .expect("pins.toml")
+            .contains("seeded"),
+        "read commands left the slot store alone"
+    );
+
     // The daemon, with clients asking it for a snapshot and a forge
     // refresh.
     let (serve, serve_dir) = world.spawn(&strace, "serve", &["serve"], project);
@@ -1013,6 +1038,11 @@ fn the_built_binary_stays_inside_the_capability_manifest() {
         "`conspectus serve` failed: {}",
         String::from_utf8_lossy(&output.stderr)
     );
+    assert_eq!(
+        fs::read_to_string(&pins).expect("pins.toml"),
+        "[pins]\nschema_version = 2\n\n[[pins.slots]]\nid = \"seeded\"\nkind = \"mux\"\n",
+        "the daemon left the slot store byte for byte alone"
+    );
     let mut daemon = clients;
     daemon.push(serve_dir);
     record(
@@ -1031,11 +1061,39 @@ fn the_built_binary_stays_inside_the_capability_manifest() {
     let acts = vec![
         world.run(
             &strace,
-            "pin-create",
-            &["pin", "create", "demo", "--harness", "codex", "--cwd", &cwd],
+            "pin-add",
+            &[
+                "pin",
+                "add",
+                "--planned",
+                "--kind",
+                "mux",
+                "--name",
+                "demo",
+                "--set",
+                &format!("cwd={cwd}"),
+            ],
             project,
         ),
-        world.run(&strace, "pin-rm", &["pin", "rm", "demo"], project),
+        world.run(
+            &strace,
+            "pin-edit",
+            &["pin", "edit", "demo", "--set", "harness=codex"],
+            project,
+        ),
+        world.run(
+            &strace,
+            "pin-rename",
+            &["pin", "rename", "demo", "demo2"],
+            project,
+        ),
+        world.run(&strace, "pin-rm", &["pin", "rm", "demo2"], project),
+        world.run(
+            &strace,
+            "mux-new-pinned",
+            &["mux", "new", "later", "--pin", "--no-launch"],
+            project,
+        ),
         world.run(
             &strace,
             "mux-new",
@@ -1057,6 +1115,98 @@ fn the_built_binary_stays_inside_the_capability_manifest() {
             pager: None,
         },
         &acts,
+        project,
+    );
+
+    // Rebuilds (ADR 0142): a gone mux comes back through tmux, and a
+    // gone repo is cloned into a path that doesn't exist.
+    let clone_dest = world.root.join("clone-dest");
+    let clone_source = world.root.join("clone-source");
+    fs::create_dir_all(&clone_source).expect("clone source");
+    for args in [
+        &["init", "--quiet", "--initial-branch", "main"][..],
+        &[
+            "-c",
+            "user.name=t",
+            "-c",
+            "user.email=t@t",
+            "commit",
+            "--quiet",
+            "--allow-empty",
+            "-m",
+            "init",
+        ][..],
+    ] {
+        let status = Command::new("git")
+            .args(args)
+            .current_dir(&clone_source)
+            .status()
+            .expect("git");
+        assert!(status.success());
+    }
+    let history_dir = world.root.join("xdg/state/conspectus/history");
+    fs::create_dir_all(&history_dir).expect("history dir");
+    let history_record = |id: &str, key: &str, recipe: serde_json::Value| {
+        serde_json::json!({
+            "id": id, "key": key, "first_seen": 100, "last_seen": 200,
+            "origin": "observed", "display": {"label": id}, "recipe": recipe,
+        })
+    };
+    let write_history = |file: &str, records: Vec<serde_json::Value>| {
+        let body = serde_json::json!({"schema_version": 1, "records": records});
+        fs::write(history_dir.join(file), body.to_string()).expect("history file");
+    };
+    write_history(
+        "repos.json",
+        vec![history_record(
+            "h_clone",
+            &format!("repo:{}/.git", clone_dest.display()),
+            serde_json::json!({
+                "common_dir": format!("{}/.git", clone_dest.display()),
+                "remotes": [{"name": "origin", "url": clone_source.display().to_string()}],
+                "primary_root": clone_dest.display().to_string(),
+            }),
+        )],
+    );
+    write_history(
+        "muxes.json",
+        vec![history_record(
+            "h_mux",
+            "mux_session:tmux:rebuilt",
+            serde_json::json!({
+                "backend": "tmux", "name": "rebuilt",
+                "cwd": project.display().to_string(),
+                "argv": ["sleep", "600"],
+            }),
+        )],
+    );
+    let rebuilds = vec![
+        world.run(
+            &strace,
+            "rebuild-mux",
+            &["rebuild", "h_mux", "--no-attach"],
+            project,
+        ),
+        world.run(
+            &strace,
+            "rebuild-clone",
+            &["rebuild", "h_clone", "--no-attach"],
+            project,
+        ),
+    ];
+    assert!(clone_dest.join(".git").is_dir(), "the repo was cloned");
+    let mut clone_vars = world.vars(None);
+    clone_vars
+        .0
+        .insert("CLONE", vec![clone_dest.to_string_lossy().into_owned()]);
+    record(
+        &Scenario {
+            name: "rebuilds",
+            contexts: &["read", "act"],
+            vars: &clone_vars,
+            pager: None,
+        },
+        &rebuilds,
         project,
     );
 

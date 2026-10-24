@@ -14,18 +14,17 @@ use std::process::Output;
 use std::sync::mpsc;
 use std::time::{Duration, Instant};
 
-use anyhow::{Result, bail};
+use anyhow::Result;
 use ratatui::DefaultTerminal;
 use ratatui::crossterm::event::{self, Event, KeyEventKind};
 use ratatui::layout::Rect;
 
 use crate::discovery::tmux::{MuxBackend, SystemTmux};
 use crate::model::MuxSessionId;
-use crate::pins::{PinEntry, PinLaunch, PinMux, PinStoreKind, PinWriteOutcome};
 use crate::resolve::resolve_snapshot;
 #[cfg(test)]
 use crate::tui::View;
-use crate::tui::actions::{AttachTarget, PinLaunchTarget};
+use crate::tui::actions::AttachTarget;
 use crate::tui::app::{App, Msg, SnapshotHandle};
 use crate::tui::effect::Effect;
 use crate::tui::keybindings::overlay as overlay_keymap;
@@ -34,7 +33,6 @@ use crate::tui::preview::{
     preview_source,
 };
 use crate::tui::resume::{ResumeTarget, launch_resume, resume_disabled_reason};
-use crate::tui::rows::RowId;
 use crate::tui::rows::RowTree;
 use crate::tui::viewer::{
     LaunchPlan, PathBinaryProbe, ViewerTarget, resolve_viewer_target, viewer_disabled_reason,
@@ -47,13 +45,12 @@ use crate::tui::{RunConfig, ui};
 mod executor;
 mod launch;
 mod overlay_keys;
-mod pin_store;
+mod visibility;
 mod worktree_exec;
 
 use executor::*;
 use launch::*;
 use overlay_keys::*;
-use pin_store::*;
 use worktree_exec::*;
 
 pub(super) use overlay_keys::{
@@ -171,6 +168,8 @@ struct LiveMode {
     last_refresh: Instant,
     refresh_interval: Duration,
     forge: ForgeWorker,
+    /// Inside tmux: tells when this pane comes back into view.
+    visibility: Option<visibility::VisibilityWatcher>,
 }
 
 /// The background forge fetch a TUI runs while it has no daemon to do
@@ -281,6 +280,54 @@ impl LiveMode {
             label: label.to_string(),
         });
     }
+
+    /// Start the background refreshes the reducer asked for: the one
+    /// after returning from tmux, and the one after an action changed
+    /// state. Runs after every action and every drain, since a request
+    /// can arrive without a key press (the TUI's pane coming back into
+    /// view).
+    fn start_requested_refreshes(&mut self, app: &mut App) {
+        // Returning from tmux paints the old snapshot right away; the
+        // live classes rescan in the background even if another
+        // worker is already running, since that one predates the
+        // hand-off (ADR 0108).
+        if app.take_handoff_refresh_request() {
+            let generation = self.workers.start_for_handoff();
+            let before = app
+                .snapshot_handle()
+                .map(|handle| live_mux_ids(handle.snapshot()));
+            self.last_refresh = Instant::now();
+            spawn_discovery_worker_settling(
+                app.config(),
+                &self.result_tx,
+                DaemonNudge::for_request(&crate::tui::effect::RefreshRequest::LIVE),
+                generation,
+                before,
+            );
+            app.update(Msg::InFlightStart {
+                kind: crate::tui::app::InFlightKind::Discovery,
+                label: "Discovering".to_string(),
+            });
+        }
+        // An action changed state the views show: reload them the way
+        // `r` does, through the daemon when there is one, so nothing
+        // the daemon already knows (PRs included) is lost.
+        if app.take_refresh_request() {
+            let generation = self.workers.start();
+            let config = store_write_refresh_config(app);
+            self.last_refresh = Instant::now();
+            spawn_discovery_worker(
+                &config,
+                &self.result_tx,
+                DaemonNudge::for_request(&crate::tui::effect::RefreshRequest::LIVE),
+                generation,
+            );
+            app.update(Msg::InFlightStart {
+                kind: crate::tui::app::InFlightKind::Discovery,
+                label: "Discovering".to_string(),
+            });
+        }
+    }
 }
 
 impl LoopMode for LiveMode {
@@ -307,6 +354,18 @@ impl LoopMode for LiveMode {
     fn drain(&mut self, app: &mut App, config: &RunConfig) -> Result<()> {
         while let Ok((source, content)) = self.preview_rx.try_recv() {
             app.update(Msg::SetPreview { source, content });
+        }
+        // The operator came back to this pane (inside tmux an attach
+        // returns as soon as the client is switched away): whatever
+        // they did in the other session is not on screen yet.
+        if let Some(watcher) = &self.visibility {
+            let mut returned = false;
+            while watcher.rx.try_recv().is_ok() {
+                returned = true;
+            }
+            if returned {
+                app.update(Msg::ViewRegained);
+            }
         }
         // Drain completed background discovery results without
         // blocking. A result older than the one on screen is dropped.
@@ -393,6 +452,7 @@ impl LoopMode for LiveMode {
             self.forge.last_started = Some(Instant::now());
             spawn_forge_fetch(app.config(), &self.forge.tx, snapshot);
         }
+        self.start_requested_refreshes(app);
         Ok(())
     }
 
@@ -413,7 +473,12 @@ impl LoopMode for LiveMode {
             return Ok(());
         }
         match action {
-            Some(Action::Msg(msg)) => dispatch(app, *msg),
+            // Key-bound messages emit effects (pinning, rebuilding,
+            // launching) that only the live executor can run.
+            Some(Action::Msg(msg)) => match live_executor_for(&Action::Msg(msg.clone())) {
+                ExecutorKind::Live => dispatch_live(terminal, app, config, tmux, *msg),
+                ExecutorKind::Pure => dispatch(app, *msg),
+            },
             Some(Action::Refresh) => {
                 if self.workers.idle() {
                     // An explicit refresh asks for current state, not
@@ -459,34 +524,20 @@ impl LoopMode for LiveMode {
             Some(Action::MuxLaunchFormKey(key)) => {
                 handle_mux_launch_form_key(terminal, app, config, tmux, key);
             }
-            Some(Action::RemovePin) => remove_pin_action(terminal, app, config, tmux),
-            Some(Action::PinBindHint) => pin_bind_hint_action(app),
-            Some(Action::OpenPinCreate) => open_pin_create_action(app),
-            Some(Action::OpenPinRebind) => open_pin_rebind_action(app),
-            Some(Action::OpenPinAdopt) => open_pin_adopt_action(app),
-            Some(Action::LaunchPin) => {
-                dispatch_live(terminal, app, config, tmux, Msg::LaunchSelectedPin);
+            Some(Action::PinEditFormKey(key)) => {
+                handle_pin_edit_form_key(terminal, app, config, tmux, key);
             }
+            Some(Action::RowMenuKey(key)) => handle_row_menu_key(terminal, app, config, tmux, key),
+            Some(Action::CleanUpKey(key)) => handle_clean_up_key(terminal, app, config, tmux, key),
+            Some(Action::PickerKey(key)) => handle_picker_key(terminal, app, config, tmux, key),
             Some(Action::OpenControls) => {
                 app.open_controls_overlay();
                 app.update(Msg::SetStatus(Some(format!(
                     "controls: {}",
-                    overlay_keymap::footer(overlay_keymap::MENU_KEYS)
+                    overlay_keymap::footer(overlay_keymap::CONTROLS_KEYS)
                 ))));
             }
             Some(Action::ControlsOverlayKey(key)) => handle_controls_overlay_key(app, key),
-            Some(Action::OpenPins) => {
-                app.open_pins_overlay();
-                app.update(Msg::SetStatus(Some(format!(
-                    "pins: {}",
-                    overlay_keymap::footer(overlay_keymap::MENU_KEYS)
-                ))));
-            }
-            Some(Action::PinsOverlayKey(key)) => {
-                route_pins_overlay_key(app, key, |app, msg| {
-                    dispatch_live(terminal, app, config, tmux, msg);
-                });
-            }
             Some(Action::SwitchView(view)) => dispatch(app, Msg::SwitchView(view)),
             Some(Action::CycleView(delta)) => {
                 let next = cycle_view(app.active_view(), delta);
@@ -524,14 +575,7 @@ impl LoopMode for LiveMode {
             Some(Action::CopySessionId) => copy_session_id_action(app),
             None => {}
         }
-        // Returning from tmux paints the old snapshot right away; the
-        // live classes rescan in the background even if another
-        // worker is already running, since that one predates the
-        // hand-off (ADR 0108).
-        if app.take_handoff_refresh_request() {
-            let generation = self.workers.start_for_handoff();
-            self.spawn_discovery(app, DaemonNudge::LiveClasses, generation);
-        }
+        self.start_requested_refreshes(app);
         Ok(())
     }
 
@@ -621,20 +665,10 @@ impl LoopMode for StaticMode {
                 app.open_controls_overlay();
                 app.update(Msg::SetStatus(Some(format!(
                     "controls: {}",
-                    overlay_keymap::footer(overlay_keymap::MENU_KEYS)
+                    overlay_keymap::footer(overlay_keymap::CONTROLS_KEYS)
                 ))));
             }
             Some(Action::ControlsOverlayKey(key)) => handle_controls_overlay_key(app, key),
-            Some(Action::OpenPins) => {
-                app.open_pins_overlay();
-                app.update(Msg::SetStatus(Some(format!(
-                    "pins: {}",
-                    overlay_keymap::footer(overlay_keymap::MENU_KEYS)
-                ))));
-            }
-            Some(Action::PinsOverlayKey(key)) => {
-                route_pins_overlay_key(app, key, static_apply_pins_msg);
-            }
             Some(Action::SwitchView(view)) => dispatch(app, Msg::SwitchView(view)),
             Some(Action::CycleView(delta)) => {
                 let next = cycle_view(app.active_view(), delta);
@@ -699,9 +733,6 @@ impl LoopMode for StaticMode {
                     SelectedDefault::View => {
                         Msg::SetStatus(Some("scenario TUI is static; view is disabled".to_string()))
                     }
-                    SelectedDefault::LaunchPin => Msg::SetStatus(Some(
-                        "scenario TUI is static; pin launch is disabled".to_string(),
-                    )),
                 };
                 dispatch(app, msg);
             }
@@ -727,24 +758,14 @@ impl LoopMode for StaticMode {
                 | Action::NewMuxFormKey(_)
                 | Action::OpenMuxMenu
                 | Action::MuxMenuKey(_)
-                | Action::MuxLaunchFormKey(_),
+                | Action::RowMenuKey(_)
+                | Action::CleanUpKey(_)
+                | Action::PickerKey(_)
+                | Action::MuxLaunchFormKey(_)
+                | Action::PinEditFormKey(_),
             ) => {
                 app.update(Msg::SetStatus(Some(
                     "scenario TUI keeps mutating actions disabled".to_string(),
-                )));
-            }
-            Some(Action::RemovePin) => {
-                app.update(Msg::SetStatus(Some(
-                    "scenario TUI keeps mutating actions disabled".to_string(),
-                )));
-            }
-            Some(Action::PinBindHint) => pin_bind_hint_action(app),
-            Some(Action::OpenPinCreate) => open_pin_create_action(app),
-            Some(Action::OpenPinRebind) => open_pin_rebind_action(app),
-            Some(Action::OpenPinAdopt) => open_pin_adopt_action(app),
-            Some(Action::LaunchPin) => {
-                app.update(Msg::SetStatus(Some(
-                    "scenario TUI is static; pin launch is disabled".to_string(),
                 )));
             }
             Some(Action::ExplorerEnter) => explorer_enter_action(app),
@@ -838,14 +859,23 @@ fn overlay_key_from_event(app: &App, event: &Event) -> Option<Action> {
     if app.mux_menu().is_some() {
         return Some(Action::MuxMenuKey(key));
     }
+    if app.row_menu().is_some() {
+        return Some(Action::RowMenuKey(key));
+    }
+    if app.clean_up().is_some() {
+        return Some(Action::CleanUpKey(key));
+    }
+    if app.picker().is_some() {
+        return Some(Action::PickerKey(key));
+    }
     if app.mux_launch_form().is_some() {
         return Some(Action::MuxLaunchFormKey(key));
     }
+    if app.pin_edit_form().is_some() {
+        return Some(Action::PinEditFormKey(key));
+    }
     if app.controls_overlay().is_some() {
         return Some(Action::ControlsOverlayKey(key));
-    }
-    if app.pins_overlay().is_some() {
-        return Some(Action::PinsOverlayKey(key));
     }
     if app.search_overlay().is_some() {
         return Some(Action::SearchOverlayKey(key));
@@ -954,6 +984,7 @@ fn event_loop(terminal: &mut DefaultTerminal, mut config: RunConfig) -> Result<(
         last_refresh: Instant::now(),
         refresh_interval,
         forge: ForgeWorker::new(),
+        visibility: visibility::VisibilityWatcher::start(),
     };
     run_loop(terminal, app, config, mode)
 }
@@ -985,28 +1016,6 @@ fn static_event_loop(
 }
 
 #[cfg(any(test, debug_assertions, feature = "snapshot"))]
-fn static_apply_pins_msg(app: &mut App, msg: Msg) {
-    // Scenario TUI keeps every mutating pin action off. Anything
-    // that would write TOML or spawn a subprocess gets replaced
-    // with a status hint; harmless status/placeholder Msgs pass
-    // through to the reducer.
-    match msg {
-        Msg::PinCreate(_)
-        | Msg::PinEdit(_)
-        | Msg::PinBind(_)
-        | Msg::PinRemove(_)
-        | Msg::LaunchPinById(_) => {
-            app.update(Msg::SetStatus(Some(
-                "scenario TUI keeps mutating actions disabled".to_string(),
-            )));
-        }
-        other => {
-            app.update(other);
-        }
-    }
-}
-
-#[cfg(any(test, debug_assertions, feature = "snapshot"))]
 fn set_static_data(app: &mut App, config: &RunConfig, snapshot: &crate::model::GraphSnapshot) {
     let tree = crate::tui::rows::build_tree_for_view(crate::tui::rows::TreeInputs::from_app(
         snapshot, app,
@@ -1024,7 +1033,7 @@ fn set_static_data(app: &mut App, config: &RunConfig, snapshot: &crate::model::G
 
 /// Whether a refresh first asks a running daemon to rescan.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-enum DaemonNudge {
+pub(in crate::tui) enum DaemonNudge {
     /// Take the daemon's snapshot as it is (timer refreshes).
     None,
     /// Rescan the mux and harness classes first; see
@@ -1036,12 +1045,27 @@ enum DaemonNudge {
 }
 
 impl DaemonNudge {
+    /// The nudge that carries out `request`.
+    pub(in crate::tui) fn for_request(request: &crate::tui::effect::RefreshRequest) -> Self {
+        if request.classes.contains(&"forge") {
+            Self::LiveAndForge
+        } else {
+            Self::LiveClasses
+        }
+    }
+
+    /// Whether the refresh must ask the mux server again instead of
+    /// reusing a cached listing.
+    pub(in crate::tui) fn rescans_mux(self) -> bool {
+        self.classes().contains(&"mux")
+    }
+
     /// The daemon classes to rescan before taking its snapshot.
-    fn classes(self) -> &'static [&'static str] {
+    pub(in crate::tui) fn classes(self) -> &'static [&'static str] {
         match self {
             Self::None => &[],
-            Self::LiveClasses => &LIVE_CLASSES,
-            Self::LiveAndForge => &HARD_REFRESH_CLASSES,
+            Self::LiveClasses => crate::tui::effect::RefreshRequest::LIVE.classes,
+            Self::LiveAndForge => crate::tui::effect::RefreshRequest::LIVE_AND_FORGE.classes,
         }
     }
 }
@@ -1055,21 +1079,44 @@ fn spawn_discovery_worker(
     nudge: DaemonNudge,
     generation: u64,
 ) {
+    spawn_discovery_worker_settling(config, tx, nudge, generation, None);
+}
+
+/// [`spawn_discovery_worker`] for the refresh after a mux hand-off.
+/// `before` is the live mux set the screen showed before the hand-off;
+/// a result that equals it is probed again a moment later (see
+/// [`SETTLE_TRIES`]), since the hand-off nearly always changes it.
+fn spawn_discovery_worker_settling(
+    config: &RunConfig,
+    tx: &mpsc::Sender<DiscoveryResult>,
+    nudge: DaemonNudge,
+    generation: u64,
+    before: Option<std::collections::BTreeSet<crate::model::NodeId>>,
+) {
     let mut config = config.clone();
     config.forge_fetch = worker_forge_fetch(nudge, config.forge_fetch);
     let tx = tx.clone();
     std::thread::spawn(move || {
         let mut warning = None;
-        if let Err(message) = nudge_daemon(nudge.classes()) {
-            // The daemon's snapshot may be stale; rebuild locally so
-            // the operator still sees current state.
-            config.refresh = true;
-            warning = Some(message);
-        }
-        let (snapshot, from_daemon) = match discover_and_resolve_sourced(&config) {
-            Ok((snapshot, from_daemon)) => (Ok(snapshot), from_daemon),
-            Err(err) => (Err(err), false),
-        };
+        let (snapshot, from_daemon) = probe_until_changed(
+            before.as_ref(),
+            SETTLE_TRIES,
+            SETTLE_DELAY,
+            std::thread::sleep,
+            || {
+                prepare_rescan(&config, nudge);
+                if let Err(message) = nudge_daemon(nudge.classes()) {
+                    // The daemon's snapshot may be stale; rebuild
+                    // locally so the operator still sees current state.
+                    config.refresh = true;
+                    warning = Some(message);
+                }
+                match discover_and_resolve_sourced(&config) {
+                    Ok((snapshot, from_daemon)) => (Ok(snapshot), from_daemon),
+                    Err(err) => (Err(err), false),
+                }
+            },
+        );
         let _ = tx.send(DiscoveryResult {
             generation,
             snapshot,
@@ -1077,6 +1124,58 @@ fn spawn_discovery_worker(
             from_daemon,
         });
     });
+}
+
+/// What a refresh does before it asks anyone for a snapshot. The
+/// refresh exists to see what the action just did, so a mux listing
+/// cached a few seconds ago is not good enough, here or in a daemonless
+/// rebuild.
+pub(in crate::tui) fn prepare_rescan(config: &RunConfig, nudge: DaemonNudge) {
+    if nudge.rescans_mux() {
+        config.discovery_caches.clear_mux();
+    }
+}
+
+/// Run `probe` and, while its snapshot's live mux set still equals
+/// `before` (nothing changed across a hand-off, which is almost never
+/// true), wait `delay` and probe again, at most `tries` more times.
+/// Returns the last probe's result.
+fn probe_until_changed<T>(
+    before: Option<&std::collections::BTreeSet<crate::model::NodeId>>,
+    tries: u32,
+    delay: Duration,
+    mut sleep: impl FnMut(Duration),
+    mut probe: impl FnMut() -> (Result<crate::model::GraphSnapshot>, T),
+) -> (Result<crate::model::GraphSnapshot>, T) {
+    let mut retried = 0;
+    loop {
+        let (snapshot, extra) = probe();
+        let unchanged = match (before, &snapshot) {
+            (Some(before), Ok(snapshot)) => live_mux_ids(snapshot) == *before,
+            _ => false,
+        };
+        if unchanged && retried < tries {
+            retried += 1;
+            sleep(delay);
+            continue;
+        }
+        return (snapshot, extra);
+    }
+}
+
+/// The muxes `snapshot` shows as running.
+fn live_mux_ids(
+    snapshot: &crate::model::GraphSnapshot,
+) -> std::collections::BTreeSet<crate::model::NodeId> {
+    snapshot
+        .live_nodes()
+        .filter_map(|node| match node {
+            crate::model::GraphNode::MuxSession(mux) => {
+                Some(crate::model::NodeId::MuxSession(mux.id.clone()))
+            }
+            _ => None,
+        })
+        .collect()
 }
 
 /// The forge fetch policy for a refresh worker. Ctrl-R is the operator
@@ -1111,22 +1210,21 @@ fn spawn_forge_fetch(
     });
 }
 
-/// Provider classes whose state changes while the operator works in
-/// tmux: sessions appear, die, get renamed, and harnesses start new
-/// transcripts. Both rescan in well under a second.
-const LIVE_CLASSES: [&str; 2] = ["mux", "harness"];
-
-/// What a hard refresh rescans: the live classes, and the forges,
-/// whose listings are otherwise reused for the forge interval.
-const HARD_REFRESH_CLASSES: [&str; 3] = ["mux", "harness", "forge"];
+/// How many times a refresh after a mux hand-off re-probes when the
+/// mux set came back exactly as it was before the hand-off, and how
+/// long it waits between tries. A session that ended, or a server that
+/// was killed, can still answer a listing for a moment; both probes
+/// rescan in well under a second.
+const SETTLE_TRIES: u32 = 2;
+const SETTLE_DELAY: Duration = Duration::from_millis(150);
 
 /// Ask a running `conspectus serve` daemon to rescan
-/// [`LIVE_CLASSES`] now. The daemon otherwise serves its last tick,
+/// the live classes now. The daemon otherwise serves its last tick,
 /// which after a tmux hand-off still shows the world from before it.
 /// No daemon is not an error (the caller's refresh runs discovery
 /// itself); a daemon that fails the refresh is.
 pub(super) fn nudge_daemon_live_classes() -> Result<(), String> {
-    nudge_daemon(&LIVE_CLASSES)
+    nudge_daemon(crate::tui::effect::RefreshRequest::LIVE.classes)
 }
 
 /// Ask a running daemon to rescan `classes` now, as
@@ -1152,17 +1250,6 @@ fn nudge_daemon(classes: &[&str]) -> Result<(), String> {
     Ok(())
 }
 
-/// Blocking refresh after Conspectus changed a tmux session (rename):
-/// nudge the daemon, then reload. Without the nudge the reload
-/// returns the daemon's pre-hand-off snapshot. Returns from an attach
-/// refresh in the background instead (`Msg::HandoffReturned`, ADR
-/// 0108), and launches that end without an attach refresh through
-/// [`refresh_after_launch_with_spinner`] (ADR 0127, ADR 0133).
-pub(super) fn refresh_after_mux_handoff(app: &mut App, _seed: &RunConfig) {
-    let fetched = fetch_after_mux_handoff(app.config().clone());
-    apply_handoff_refresh(app, fetched);
-}
-
 /// What a nudged reload produced, ready to apply on the UI thread.
 struct HandoffRefresh {
     snapshot: Result<crate::model::GraphSnapshot>,
@@ -1174,6 +1261,7 @@ struct HandoffRefresh {
 /// Nudge the daemon, then load a snapshot. Touches no UI state, so it
 /// can run on a worker thread.
 fn fetch_after_mux_handoff(mut config: RunConfig) -> HandoffRefresh {
+    prepare_rescan(&config, DaemonNudge::LiveClasses);
     let warning = nudge_daemon_live_classes().err();
     if warning.is_some() {
         config.refresh = true;
@@ -1301,13 +1389,21 @@ fn discover_and_resolve_sourced(config: &RunConfig) -> Result<(crate::model::Gra
         .with_caches(std::sync::Arc::clone(&config.discovery_caches))
         .with_forge_fetch(config.forge_fetch)
         .with_forge_concurrency(config.forge_concurrency);
+    let fresh_since = crate::discovery::current_epoch();
     let snapshot = crate::discovery::discover_local_warm_with(
         roots,
         discovery_config,
         crate::model::GraphSnapshot::empty(),
         &config.intervals,
     )?;
-    let snapshot = resolve_snapshot(snapshot);
+    let mut snapshot = resolve_snapshot(snapshot);
+    if config.record_history
+        && let Some(writer) = crate::history::HistoryWriter::from_env(config.history.clone())
+    {
+        // Like the `graph.bin` write below, a failure stays quiet in a
+        // live session; the next one-shot command reports it.
+        let _ = writer.record(&mut snapshot, fresh_since);
+    }
     if !config.no_cache {
         let path = crate::snapshot::graph_bin_path();
         if let Err(err) = crate::snapshot::write_atomic(&path, &snapshot) {
@@ -1346,7 +1442,7 @@ fn try_daemon_snapshot() -> Option<crate::model::GraphSnapshot> {
 /// open it, or post a status when there is nothing to offer.
 pub(super) fn open_worktree_menu_action(app: &mut App) {
     use crate::tui::widgets::worktree_menu::{WorktreeMenuState, context_for_node};
-    let Some(node) = app.selection().and_then(selection_node_id) else {
+    let Some(node) = crate::tui::actions::action_subject(app).node else {
         app.update(Msg::SetStatus(Some(
             "worktree: nothing selected".to_string(),
         )));
@@ -1380,7 +1476,7 @@ pub(super) fn open_worktree_menu_action(app: &mut App) {
 /// merge/discard choice for the selected node.
 pub(super) fn open_worktree_close_down_action(app: &mut App) {
     use crate::tui::widgets::worktree_menu::{WorktreeMenuState, context_for_node};
-    let Some(node) = app.selection().and_then(selection_node_id) else {
+    let Some(node) = crate::tui::actions::action_subject(app).node else {
         app.update(Msg::SetStatus(Some(
             "worktree: nothing selected".to_string(),
         )));
@@ -1410,20 +1506,6 @@ pub(super) fn open_worktree_close_down_action(app: &mut App) {
     }
 }
 
-/// Extract the underlying node id from a selected row, for node-context
-/// actions like the worktree menu.
-fn selection_node_id(row: &crate::tui::rows::RowId) -> Option<crate::model::NodeId> {
-    use crate::tui::rows::RowId;
-    match row {
-        RowId::Group(id)
-        | RowId::AgentSession(id)
-        | RowId::MuxSession(id)
-        | RowId::Pr(id)
-        | RowId::Fork(id) => Some(id.clone()),
-        _ => None,
-    }
-}
-
 /// Whether a worktree mutation backend is available (config selection +
 /// `wt` on PATH). Governs whether the menu offers mutating actions.
 fn worktree_mutation_available() -> bool {
@@ -1446,9 +1528,12 @@ pub(super) fn open_new_mux_form_action(app: &mut App) {
     use crate::tui::widgets::new_mux::NewMuxFormState;
     let seeded_cwd = derive_new_mux_cwd(app).unwrap_or_else(default_new_mux_cwd);
     let seeded_name = derive_new_mux_name(app);
-    app.open_new_mux_form(NewMuxFormState::new(seeded_name, seeded_cwd));
+    let candidates = known_cwd_candidates(app, Some(&seeded_cwd));
+    app.open_new_mux_form(
+        NewMuxFormState::new(seeded_name, seeded_cwd).with_cwd_candidates(candidates),
+    );
     app.update(Msg::SetStatus(Some(
-        "mux: Tab switch field · Enter next/commit · Esc cancel".to_string(),
+        "mux: ↑/↓ move · Tab complete/next · Enter next/commit · Esc cancel".to_string(),
     )));
 }
 
@@ -1457,6 +1542,67 @@ pub(super) fn open_new_mux_form_action(app: &mut App) {
 /// the cwd from the selected row (ADR 0096).
 pub(crate) fn derive_mux_form_cwd(app: &App) -> Option<String> {
     derive_new_mux_cwd(app)
+}
+
+/// Directories the cwd fields offer to complete: the selected row's,
+/// then those of live agent sessions, muxes, processes, checkouts, repos,
+/// and workspaces in the graph, and the cwds of pins.
+pub(crate) fn known_cwd_candidates(
+    app: &App,
+    selected: Option<&str>,
+) -> Vec<crate::tui::widgets::path_omnibox::PathCandidate> {
+    use crate::model::GraphNode;
+    use crate::tui::widgets::path_omnibox::PathCandidate;
+    let mut candidates = Vec::new();
+    let mut push = |path: &str, source: &str, rank: i32| {
+        let path = path.trim();
+        if !path.is_empty() {
+            candidates.push(PathCandidate::new(path, source, rank));
+        }
+    };
+    if let Some(selected) = selected {
+        push(selected, "selected", 1_000);
+    }
+    if let Some(handle) = app.snapshot_handle() {
+        for node in handle.snapshot().live_nodes() {
+            match node {
+                GraphNode::AgentSession(node) => {
+                    if let Some(cwd) = node.cwd.as_deref() {
+                        push(cwd, "agent", 450);
+                    }
+                }
+                GraphNode::MuxSession(node) => {
+                    if let Some(cwd) = node.cwd.as_deref() {
+                        push(cwd, "mux", 440);
+                    }
+                    if let Some(cwd) = node.active_pane_current_path.as_deref() {
+                        push(cwd, "mux", 430);
+                    }
+                }
+                GraphNode::RuntimeProcess(node) => {
+                    if let Some(cwd) = node.cwd.as_deref() {
+                        push(cwd, "process", 400);
+                    }
+                }
+                GraphNode::Checkout(node) => push(&node.root, "checkout", 350),
+                GraphNode::Repo(node) => {
+                    let root = node
+                        .common_dir
+                        .strip_suffix("/.git")
+                        .unwrap_or(&node.common_dir);
+                    push(root, "repo", 320);
+                }
+                GraphNode::Workspace(node) => push(&node.root, "workspace", 300),
+                GraphNode::Pin(node) => {
+                    if let Some(cwd) = node.text("cwd") {
+                        push(cwd, "pin", 500);
+                    }
+                }
+                GraphNode::Branch(_) | GraphNode::Fork(_) | GraphNode::ForgePr(_) => {}
+            }
+        }
+    }
+    candidates
 }
 
 /// Known harness keys from the registered adapters. Used by the
@@ -1482,8 +1628,7 @@ pub(crate) fn known_live_mux_names(app: &App) -> Vec<String> {
     };
     let mut names: Vec<String> = db
         .snapshot()
-        .nodes
-        .iter()
+        .live_nodes()
         .filter_map(|n| match n {
             GraphNode::MuxSession(m) => Some(strip_tmux_prefix(&m.native_id)),
             _ => None,
@@ -1519,6 +1664,13 @@ pub(crate) fn derive_mux_launch_name(app: &App) -> Option<String> {
 fn derive_new_mux_cwd(app: &App) -> Option<String> {
     use crate::model::GraphNode;
     use crate::tui::rows::RowKind;
+    // What the operator is looking at decides where the new mux
+    // starts: the entity in the right pane while it has focus.
+    if let Some(node) = crate::tui::actions::action_subject(app).node
+        && let Some(cwd) = cwd_for_node(app.snapshot_handle()?.snapshot(), &node)
+    {
+        return Some(cwd);
+    }
     let selection = app.selection()?.clone();
     let rows = app.visible_rows();
     let row = rows.iter().find(|row| row.id == selection)?;
@@ -1528,14 +1680,13 @@ fn derive_new_mux_cwd(app: &App) -> Option<String> {
             .primary_node
             .as_ref()
             .and_then(|node| cwd_for_node(snapshot, node)),
-        RowKind::Repo(r) => cwd_for_node(snapshot, &r.primary_node),
-        RowKind::MuxSession(mux) => snapshot.nodes.iter().find_map(|n| match n {
+        RowKind::MuxSession(mux) => snapshot.live_nodes().find_map(|n| match n {
             GraphNode::MuxSession(m) if m.id == mux.mux => {
                 m.active_pane_current_path.clone().or_else(|| m.cwd.clone())
             }
             _ => None,
         }),
-        RowKind::AgentSession(session) => snapshot.nodes.iter().find_map(|n| match n {
+        RowKind::AgentSession(session) => snapshot.live_nodes().find_map(|n| match n {
             GraphNode::AgentSession(s) if s.id == session.session => s.cwd.clone(),
             _ => None,
         }),
@@ -1548,7 +1699,9 @@ fn cwd_for_node(
     node: &crate::model::NodeId,
 ) -> Option<String> {
     use crate::model::{GraphNode, NodeId};
-    snapshot.nodes.iter().find_map(|n| match (node, n) {
+    // A gone node's directory may no longer exist, so it can't seed a
+    // new mux's working directory.
+    snapshot.live_nodes().find_map(|n| match (node, n) {
         (NodeId::Checkout(id), GraphNode::Checkout(c)) if &c.id == id => Some(c.root.clone()),
         // The path the repo's header shows, so a mux opened from it
         // starts there rather than in whichever checkout was probed first.
@@ -1583,118 +1736,6 @@ pub(super) fn open_mux_menu_action(app: &mut App) {
     app.open_mux_menu(MuxMenuState::new());
     app.update(Msg::SetStatus(Some(
         "mux: ↑/↓ move · Enter pick · Esc close".to_string(),
-    )));
-}
-
-fn remove_pin_action(
-    terminal: &mut DefaultTerminal,
-    app: &mut App,
-    config: &RunConfig,
-    tmux: &dyn MuxBackend,
-) {
-    let Some(selection) = app.selection().cloned() else {
-        app.update(Msg::SetStatus(Some(
-            "pin remove: nothing selected".to_string(),
-        )));
-        return;
-    };
-    let RowId::Pin { pin_id } = selection else {
-        app.set_pending_pin_remove(None);
-        app.update(Msg::SetStatus(Some(
-            "pin remove: select an unbound pin row".to_string(),
-        )));
-        return;
-    };
-    if app.pending_pin_remove() != Some(pin_id.as_str()) {
-        app.set_pending_pin_remove(Some(pin_id.clone()));
-        app.update(Msg::SetStatus(Some(format!(
-            "pin remove: press Delete again to remove `{pin_id}`"
-        ))));
-        return;
-    }
-    app.set_pending_pin_remove(None);
-    let Some(target) = app.pins_context().pin_target else {
-        app.update(Msg::SetStatus(Some(format!(
-            "pin remove: no editable pin `{pin_id}` in current selection"
-        ))));
-        return;
-    };
-    dispatch_live(
-        terminal,
-        app,
-        config,
-        tmux,
-        Msg::PinRemove(crate::tui::widgets::pins::PinRemoveRequest {
-            id: target.id,
-            display_name: target.display_name,
-            store_path: target.store_path,
-        }),
-    );
-}
-
-fn pin_bind_hint_action(app: &mut App) {
-    // Selection has competing PinAmbiguous candidates → open the
-    // picker directly. Otherwise fall back to the existing hint
-    // surface so the operator gets a single-line nudge instead of a
-    // silent press.
-    let options = app.pins_context().pin_bind_options;
-    if let Some(state) = crate::tui::widgets::pins::PinsOverlayState::open_with_bind(options) {
-        app.set_pins_overlay(state);
-        app.update(Msg::SetStatus(Some(
-            "pins: bind ↑/↓ pick · Enter confirm · Esc cancel".to_string(),
-        )));
-        return;
-    }
-    let diagnostics = crate::tui::actions::selected_pin_diagnostics(app);
-    let status = match crate::tui::actions::pin_bind_hint(&diagnostics) {
-        Some(message) => message,
-        None => "pin bind: select a pin-bound row with a PinAmbiguous diagnostic".to_string(),
-    };
-    dispatch(app, Msg::SetStatus(Some(status)));
-}
-
-fn open_pin_create_action(app: &mut App) {
-    // `N` is the new-stream entry (ADR 0094): open the create form with
-    // the worktree toggle pre-enabled. Plain pin creation stays one
-    // keystroke away via the `p` pins menu.
-    let ctx = app.pins_context();
-    let state = crate::tui::widgets::pins::PinsOverlayState::open_with_new_stream_context(&ctx);
-    app.set_pins_overlay(state);
-    app.update(Msg::SetStatus(Some(
-        "pins: new stream · Space toggles worktree · Enter create · Esc cancel".to_string(),
-    )));
-}
-
-fn open_pin_rebind_action(app: &mut App) {
-    let Some(target) = app.pins_context().pin_target else {
-        app.update(Msg::SetStatus(Some(
-            "pin rebind: select a pin row first".to_string(),
-        )));
-        return;
-    };
-    let state = crate::tui::widgets::pins::PinsOverlayState::open_with_rebind(target);
-    app.set_pins_overlay(state);
-    app.update(Msg::SetStatus(Some(
-        "pins: rebind mux · Enter save · Esc cancel".to_string(),
-    )));
-}
-
-fn open_pin_adopt_action(app: &mut App) {
-    // Adopt only makes sense from a live mux row: pin defaults are
-    // seeded from the mux's name, observed cwd, and current
-    // attribution. Refuse on any other selection so the operator
-    // doesn't have to type those fields from scratch.
-    let ctx = app.pins_context();
-    if ctx.pin_adopt_defaults.is_none() {
-        app.update(Msg::SetStatus(Some(
-            "pin adopt: select a live mux row first".to_string(),
-        )));
-        return;
-    }
-    let state = crate::tui::widgets::pins::PinsOverlayState::open_with_adopt_context(&ctx);
-    app.set_pins_overlay(state);
-    app.update(Msg::SetStatus(Some(
-        "pins: new pin · adopt enabled · Enter create · Esc cancel".to_string(),
     )));
 }
 
@@ -1892,6 +1933,11 @@ pub(super) fn execute_effects(app: &mut App, effects: Vec<Effect>) {
 /// [`MuxBackend`] reference). This is the sole code in the TUI
 /// that touches `&mut Terminal`, `std::process`, or `MuxBackend`
 /// for reducer-emitted effects.
+///
+/// What happens around each effect comes from
+/// [`crate::tui::effect::lifecycle`]: an effect that changes state the
+/// views show ends with a refresh, unless a hand-off refresh is already
+/// on its way (an attach, a launch, a rebuild of a known mux).
 pub(super) fn execute_effects_live(
     terminal: &mut DefaultTerminal,
     app: &mut App,
@@ -1900,12 +1946,53 @@ pub(super) fn execute_effects_live(
     effects: Vec<Effect>,
 ) {
     for effect in effects {
+        let policy = crate::tui::effect::lifecycle(&effect);
         match effect {
-            Effect::Exec(spec) => execute_exec_spec(terminal, app, config, spec),
+            Effect::Exec(spec) => execute_exec_spec(terminal, app, config, spec, policy),
             Effect::RunMux(op) => execute_mux_op(app, tmux, op),
             Effect::WriteStore(op) => execute_store_op(app, tmux, op),
             other => execute_pure_effect(app, other),
         }
+        if wants_refresh_request(&policy, app) {
+            app.request_refresh();
+        }
+    }
+}
+
+/// Whether an effect with `policy` still needs a refresh asked for: it
+/// changes what the views show, and no hand-off refresh (an attach, or
+/// a rebuild of a known mux) is already on its way.
+pub(in crate::tui) fn wants_refresh_request(
+    policy: &crate::tui::effect::Lifecycle,
+    app: &App,
+) -> bool {
+    policy.refreshes && !app.handoff_refresh_pending()
+}
+
+/// Which executor runs the effects a key-bound action emits.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(in crate::tui) enum ExecutorKind {
+    /// Handles every effect.
+    Live,
+    /// Handles only the effects that need no terminal; anything else is
+    /// reported as unavailable.
+    Pure,
+}
+
+/// The executor the live loop runs `action`'s message through.
+pub(in crate::tui) fn live_executor_for(action: &Action) -> ExecutorKind {
+    match action {
+        Action::Msg(_) => ExecutorKind::Live,
+        _ => ExecutorKind::Pure,
+    }
+}
+
+/// Whether the pure executor can run `effect`; the rest need a live
+/// terminal, mux backend, or store.
+pub(in crate::tui) fn pure_executor_runs(effect: &Effect) -> bool {
+    match effect {
+        Effect::Exec(_) | Effect::RunMux(_) | Effect::WriteStore(_) => false,
+        Effect::SpawnRefresh { .. } | Effect::Toast(_) | Effect::Persist | Effect::Quit => true,
     }
 }
 
@@ -1933,21 +2020,14 @@ pub(super) fn dispatch_live(
     execute_effects_live(terminal, app, config, tmux, effects);
 }
 
-/// Refresh immediately after a pin mutation.
-///
-/// Pin writes update `.conspectus.toml` synchronously, but the
-/// regular refresh path may short-circuit through a running daemon.
-/// Force the local discovery branch here so the row tree reflects
-/// the just-written pin store without waiting for the daemon's next
-/// tick.
-fn refresh_after_pin_mutation(app: &mut App, _seed: &RunConfig) {
-    let config = pin_mutation_refresh_config(app);
-    refresh_with_config(app, &config);
-}
-
-fn pin_mutation_refresh_config(app: &App) -> RunConfig {
+/// The configuration a refresh after a state-changing action runs
+/// with: the one `r` uses. After the live classes are nudged it takes
+/// the daemon's snapshot, which still has every PR it fetched; forcing
+/// a local rebuild instead would read only this process's forge cache
+/// and empty the PR list.
+pub(in crate::tui) fn store_write_refresh_config(app: &App) -> RunConfig {
     let mut config = app.config().clone();
-    config.refresh = true;
+    config.refresh = false;
     config
 }
 
@@ -2089,12 +2169,7 @@ pub(super) use crate::tui::keymap::cycle_view;
 fn acts_on_selected_row(action: &Action) -> bool {
     matches!(
         action,
-        Action::OpenRename
-            | Action::OpenWorktreeMenu
-            | Action::OpenWorktreeCloseDown
-            | Action::RemovePin
-            | Action::OpenPinRebind
-            | Action::OpenPinAdopt
+        Action::OpenRename | Action::OpenWorktreeMenu | Action::OpenWorktreeCloseDown
     )
 }
 
@@ -2108,9 +2183,6 @@ fn default_action(
         SelectedDefault::ToggleExpand => dispatch(app, Msg::ToggleExpand),
         SelectedDefault::Attach => dispatch_live(terminal, app, config, tmux, Msg::AttachSelected),
         SelectedDefault::View => dispatch_live(terminal, app, config, tmux, Msg::ViewSelected),
-        SelectedDefault::LaunchPin => {
-            dispatch_live(terminal, app, config, tmux, Msg::LaunchSelectedPin);
-        }
     }
 }
 

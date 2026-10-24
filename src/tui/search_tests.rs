@@ -22,6 +22,7 @@ fn agent_row(harness: &str, key: &str, alias: Option<&str>, preview: &str) -> Ro
             title: None,
             alias: alias.map(str::to_string),
             title_disambiguates: false,
+            mux_host: None,
             primary_node: primary,
             pin_id: None,
         }),

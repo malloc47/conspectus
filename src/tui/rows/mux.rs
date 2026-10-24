@@ -13,14 +13,14 @@ use crate::filter::{MuxStateKey, RowFilter, SessionMatchInputs};
 use crate::model::workspace_paths::WorkspacePaths;
 use crate::model::{
     AgentSessionId, AgentSessionNode, CheckoutId, GraphNode, GraphSnapshot, LinkEndpoint,
-    LinkState, MuxSessionId, MuxSessionNode, NodeId, PinBinding, PinCandidate, PinId, RelationKind,
-    RepoId, WorkspaceId, path_is_ancestor_of,
+    LinkState, MuxSessionId, MuxSessionNode, NodeId, PinKind, PinNode, RelationKind, RepoId,
+    WorkspaceId, path_is_ancestor_of,
 };
 use crate::output::render::{node_short_id_from_display, unique_prefix_len};
 use crate::tui::rows::{
-    AgentSessionRow, GroupRow, MuxSessionRow, Row, RowId, RowKind, RowTree, ViewLabel,
-    format_recency, harness_label, mux_process_harnesses, mux_program, mux_program_harness,
-    shorten_home,
+    AgentSessionRow, EntityState, GroupRow, MixedChip, MixedGrid, MixedRow, MixedTone,
+    MuxSessionRow, PinMarker, Row, RowId, RowKind, RowTree, ViewLabel, format_recency,
+    harness_label, mux_process_harnesses, mux_program, mux_program_harness, shorten_home,
 };
 use crate::tui::{MuxGrouping, Sort};
 
@@ -71,16 +71,16 @@ pub fn build_mux_tree(inputs: MuxBuildInputs<'_>) -> RowTree {
 
     let muxes = collect_muxes(snapshot);
     let attachments = collect_attached_agents(snapshot);
-    let pins: Vec<&PinCandidate> = snapshot.pins.iter().collect();
+    let pins: Vec<&PinNode> = super::pin_nodes(snapshot)
+        .into_iter()
+        .filter(|pin| pin.kind == PinKind::Mux)
+        .collect();
     let process_harnesses = mux_process_harnesses(snapshot);
 
-    let mut pin_by_mux: HashMap<NodeId, &PinCandidate> = HashMap::new();
+    let mut pin_by_mux: HashMap<NodeId, &PinNode> = HashMap::new();
     for pin in &pins {
-        match &pin.binding {
-            Some(PinBinding::Bound { mux, .. } | PinBinding::StaleMux { mux }) => {
-                pin_by_mux.insert(NodeId::MuxSession(mux.clone()), pin);
-            }
-            Some(PinBinding::Unbound) | None => {}
+        if let Some(mux @ NodeId::MuxSession(_)) = super::live_pin_target(snapshot, pin) {
+            pin_by_mux.insert(mux, pin);
         }
     }
 
@@ -109,6 +109,17 @@ pub fn build_mux_tree(inputs: MuxBuildInputs<'_>) -> RowTree {
     // adjacent and the optional float-top sort can move them as a
     // unit.
     let mut groups: Vec<MuxGroup> = Vec::new();
+    // Ghosts are muxes history remembers whose session is gone; a
+    // narrowing filter can't match them. Only the ones a pin points at
+    // show unless Controls asks for every stopped mux.
+    if !inputs.filter.has_narrowing_predicates() {
+        let pinned = super::pinned_node_set(snapshot);
+        for ghost in collect_ghosts(snapshot, inputs.home, now) {
+            if inputs.filter.show_stopped_muxes || pinned.contains(&ghost.parent_node_id) {
+                groups.push(ghost);
+            }
+        }
+    }
     for mux in &muxes {
         let attached = attachments.get(&mux.node_id).cloned().unwrap_or_default();
         let visible_attached: Vec<AttachedAgent> = attached
@@ -121,11 +132,9 @@ pub fn build_mux_tree(inputs: MuxBuildInputs<'_>) -> RowTree {
             continue;
         }
 
-        let latest_agent_epoch = visible_attached
-            .iter()
-            .filter_map(|agent| agent.last_active_epoch)
-            .max();
-        let activity_epoch = latest_epoch(mux.node.activity_epoch, latest_agent_epoch);
+        // A mux's age is its own last activity, the same instant the
+        // Pinned view shows for a pinned mux. Its agents carry theirs.
+        let activity_epoch = mux.node.activity_epoch;
         let node_id = NodeId::MuxSession(mux.id.clone());
         let single_session_preview = if visible_attached.len() == 1 {
             visible_attached[0]
@@ -157,7 +166,7 @@ pub fn build_mux_tree(inputs: MuxBuildInputs<'_>) -> RowTree {
                 process_harnesses.get(&node_id).map(String::as_str),
             ),
             single_session_preview,
-            pin_id: pin_by_mux.get(&node_id).map(|pin| pin.id.clone()),
+            pin_id: pin_by_mux.get(&node_id).map(|pin| pin.id.id.clone()),
             primary_node: node_id.clone(),
         };
 
@@ -173,14 +182,8 @@ pub fn build_mux_tree(inputs: MuxBuildInputs<'_>) -> RowTree {
             children,
             attached_count,
             cwd,
+            ghost: None,
         });
-    }
-
-    for pin in pins
-        .iter()
-        .filter(|pin| matches!(pin.binding, Some(PinBinding::Unbound) | None))
-    {
-        groups.push(placeholder_mux_group_for_pin(pin, inputs.home));
     }
 
     match inputs.grouping {
@@ -188,102 +191,16 @@ pub fn build_mux_tree(inputs: MuxBuildInputs<'_>) -> RowTree {
             emit_flat(&mut tree, groups, &inputs, &short_ids, now);
         }
         MuxGrouping::Repo => {
-            // Pins group sits above the repo-grouped muxes so
-            // the operator sees the deck's pinned work first.
-            emit_pins_group_for_mux(&mut tree, &pins, &groups, &short_ids, inputs.home, now);
-
             let path_index = PathIndex::from_snapshot(snapshot);
             emit_repo_grouped(&mut tree, groups, &inputs, &short_ids, &path_index, now);
         }
         MuxGrouping::Workspace => {
-            emit_pins_group_for_mux(&mut tree, &pins, &groups, &short_ids, inputs.home, now);
-
             let path_index = PathIndex::from_snapshot(snapshot);
             emit_workspace_grouped(&mut tree, groups, &inputs, &short_ids, &path_index, now);
         }
     }
 
     tree
-}
-
-fn emit_pins_group_for_mux(
-    tree: &mut RowTree,
-    pins: &[&PinCandidate],
-    groups: &[MuxGroup],
-    short_ids: &HashMap<&str, String>,
-    home: Option<&Path>,
-    now: Option<i64>,
-) {
-    if pins.is_empty() {
-        return;
-    }
-
-    tree.rows.push(Row {
-        id: RowId::Synthetic("pins"),
-        depth: 0,
-        expandable: true,
-        kind: RowKind::Group(GroupRow {
-            display_path: "Pins".to_string(),
-            primary_node: None,
-            is_launch_context: false,
-        }),
-    });
-
-    let group_by_mux: HashMap<NodeId, &MuxGroup> = groups
-        .iter()
-        .map(|group| (group.parent_node_id.clone(), group))
-        .collect();
-    let mut emitted_muxes: HashSet<NodeId> = HashSet::new();
-
-    for pin in pins {
-        let bound_mux = match &pin.binding {
-            Some(PinBinding::Bound { mux, .. } | PinBinding::StaleMux { mux }) => {
-                Some(NodeId::MuxSession(mux.clone()))
-            }
-            Some(PinBinding::Unbound) | None => None,
-        };
-        if let Some(mux_id) = bound_mux
-            && emitted_muxes.insert(mux_id.clone())
-            && let Some(group) = group_by_mux.get(&mux_id)
-        {
-            (*group).clone().push_into(tree, 1, short_ids, home, now);
-            continue;
-        }
-
-        placeholder_mux_group_for_pin(pin, home).push_into(tree, 1, short_ids, home, now);
-    }
-}
-
-fn placeholder_mux_group_for_pin(pin: &PinCandidate, home: Option<&Path>) -> MuxGroup {
-    let pin_node = NodeId::Pin(PinId::new(pin.id.clone()));
-    let native_id = pin.mux.socket_name.as_ref().map_or_else(
-        || pin.mux.name.clone(),
-        |socket| format!("{socket}:{}", pin.mux.name),
-    );
-    MuxGroup {
-        parent_row: MuxSessionRow {
-            mux: MuxSessionId::new(pin.mux.native_id()),
-            backend: pin.mux.backend.clone(),
-            native_id,
-            client_attached: None,
-            cwd_display: Some(shorten_home(&pin.cwd, home)),
-            attached_count: 0,
-            recency: None,
-            activity_epoch: None,
-            created_epoch: None,
-            last_attached_epoch: None,
-            agent_labels: vec![harness_label(&pin.harness)],
-            program: None,
-            program_harness: None,
-            single_session_preview: Some(shorten_home(&pin.cwd, home)),
-            pin_id: Some(pin.id.clone()),
-            primary_node: pin_node.clone(),
-        },
-        parent_node_id: pin_node,
-        children: Vec::new(),
-        attached_count: 0,
-        cwd: Some(pin.cwd.clone()),
-    }
 }
 
 /// Per-mux work product collected by the build loop.
@@ -294,6 +211,14 @@ struct MuxGroup {
     children: Vec<AttachedAgent>,
     attached_count: usize,
     cwd: Option<String>,
+    /// Set for a gone mux, which renders as a dimmed mixed-kind row.
+    ghost: Option<Ghost>,
+}
+
+#[derive(Clone, Debug)]
+struct Ghost {
+    row: MixedRow,
+    last_seen: i64,
 }
 
 impl MuxGroup {
@@ -311,7 +236,17 @@ impl MuxGroup {
             children,
             attached_count,
             cwd: _,
+            ghost,
         } = self;
+        if let Some(ghost) = ghost {
+            tree.rows.push(Row {
+                id: RowId::MuxSession(parent_node_id),
+                depth,
+                expandable: false,
+                kind: RowKind::Mixed(ghost.row),
+            });
+            return;
+        }
         tree.rows.push(Row {
             id: RowId::MuxSession(parent_node_id),
             depth,
@@ -433,8 +368,8 @@ fn push_ungrouped(
 /// Workspace headers for the muxes rooted in a workspace and repo
 /// headers for every other mux, as one list in name order, then
 /// Ungrouped (ADR 0139). A mux's workspace is its resolved `rooted_in`
-/// target. An unbound pin placeholder has no mux in the graph, so its
-/// cwd goes through the same path index discovery roots muxes with.
+/// target; a mux with none is rooted by its cwd through the same path
+/// index discovery uses.
 fn emit_workspace_grouped(
     tree: &mut RowTree,
     groups: Vec<MuxGroup>,
@@ -562,9 +497,8 @@ fn rooted_in_workspaces(snapshot: &GraphSnapshot) -> HashMap<NodeId, &WorkspaceI
 }
 
 /// Recency ordering key for a mux row under the chosen basis.
-/// Activity blends in attached-agent activity (its
-/// `activity_epoch` is already the blended value); created and
-/// last-attached read the raw session-lifecycle epochs. A missing
+/// Activity is the mux's own last activity; created and
+/// last-attached read the session-lifecycle epochs. A missing
 /// signal sorts oldest (`None` < `Some`), so sessions lacking the
 /// chosen epoch fall to the bottom of the recency order deterministically.
 fn recency_key(row: &MuxSessionRow, basis: crate::tui::MuxRecency) -> Option<i64> {
@@ -577,10 +511,17 @@ fn recency_key(row: &MuxSessionRow, basis: crate::tui::MuxRecency) -> Option<i64
 
 fn sort_mux_groups(groups: &mut [MuxGroup], inputs: &MuxBuildInputs<'_>) {
     groups.sort_by(|left, right| {
-        let pinned = usize::from(left.parent_row.pin_id.is_none())
-            .cmp(&usize::from(right.parent_row.pin_id.is_none()));
-        if pinned != std::cmp::Ordering::Equal {
-            return pinned;
+        // Ghosts sit below the live muxes, most recently seen first.
+        match (&left.ghost, &right.ghost) {
+            (Some(l), Some(r)) => {
+                return r
+                    .last_seen
+                    .cmp(&l.last_seen)
+                    .then_with(|| left.parent_node_id.cmp(&right.parent_node_id));
+            }
+            (Some(_), None) => return std::cmp::Ordering::Greater,
+            (None, Some(_)) => return std::cmp::Ordering::Less,
+            (None, None) => {}
         }
         let left_float = usize::from(left.attached_count == 0);
         let right_float = usize::from(right.attached_count == 0);
@@ -675,14 +616,6 @@ impl<'a> PathIndex<'a> {
     }
 }
 
-fn latest_epoch(left: Option<i64>, right: Option<i64>) -> Option<i64> {
-    match (left, right) {
-        (Some(left), Some(right)) => Some(left.max(right)),
-        (Some(value), None) | (None, Some(value)) => Some(value),
-        (None, None) => None,
-    }
-}
-
 fn agent_labels(agents: &[AttachedAgent]) -> Vec<String> {
     let mut labels: Vec<String> = agents
         .iter()
@@ -713,6 +646,9 @@ fn mux_matches_filter(
         pr_branch: _,
         pr_state: _,
         float_tracked_prs_top: _,
+        show_stopped_muxes: _,
+        pinned_only: _,
+        show_pinned_history: _,
     } = filter;
     harness.is_none()
         && max_age.is_none()
@@ -740,8 +676,7 @@ fn agent_matches_filter(agent: &AttachedAgent, now: Option<i64>, filter: &RowFil
 
 fn collect_muxes(snapshot: &GraphSnapshot) -> Vec<MuxData<'_>> {
     let mut rows: Vec<MuxData<'_>> = snapshot
-        .nodes
-        .iter()
+        .live_nodes()
         .filter_map(|node| match node {
             GraphNode::MuxSession(mux) => Some(MuxData {
                 node_id: NodeId::MuxSession(mux.id.clone()).to_string(),
@@ -753,6 +688,84 @@ fn collect_muxes(snapshot: &GraphSnapshot) -> Vec<MuxData<'_>> {
         .collect();
     rows.sort_by(|a, b| a.node_id.cmp(&b.node_id));
     rows
+}
+
+/// The muxes the graph keeps as ghosts: nodes history projected for a
+/// session that is gone, or whose check couldn't run.
+fn collect_ghosts(
+    snapshot: &GraphSnapshot,
+    home: Option<&Path>,
+    now: Option<i64>,
+) -> Vec<MuxGroup> {
+    use crate::model::NodePresence;
+    snapshot
+        .nodes
+        .iter()
+        .filter_map(|node| {
+            let GraphNode::MuxSession(mux) = node else {
+                return None;
+            };
+            let id = NodeId::MuxSession(mux.id.clone());
+            let presence = snapshot.presence(&id)?;
+            let (status, state) = match presence {
+                NodePresence::Gone { .. } => ("stopped", EntityState::Stopped),
+                NodePresence::Unknown { .. } => ("unknown", EntityState::Unknown),
+            };
+            let chip = snapshot
+                .history
+                .muxes
+                .iter()
+                .find(|record| record.recipe.native_id() == mux.id.native_id)
+                .and_then(|record| record.recipe.harness.as_deref())
+                .map(|harness| MixedChip::agent(harness_label(harness)));
+            let cwd = mux.cwd.clone();
+            let content = cwd
+                .as_deref()
+                .map(|cwd| shorten_home(cwd, home))
+                .unwrap_or_default();
+            let last_seen = presence.last_seen();
+            let row = MixedRow {
+                node_kind: crate::model::NodeKind::MuxSession,
+                label: mux.session_name().to_string(),
+                status: status.to_string(),
+                tone: MixedTone::Dim,
+                age: format_recency(now, Some(last_seen)),
+                age_epoch: Some(last_seen),
+                state: Some(state),
+                chip,
+                content,
+                primary_node: id.clone(),
+                pr_state: None,
+                marker: PinMarker::None,
+                grid: MixedGrid::Mux,
+            };
+            Some(MuxGroup {
+                parent_row: MuxSessionRow {
+                    mux: mux.id.clone(),
+                    backend: mux.backend.clone(),
+                    native_id: mux.native_id.clone(),
+                    client_attached: None,
+                    cwd_display: cwd.as_deref().map(|cwd| shorten_home(cwd, home)),
+                    attached_count: 0,
+                    recency: None,
+                    activity_epoch: None,
+                    created_epoch: mux.created_epoch,
+                    last_attached_epoch: None,
+                    agent_labels: Vec::new(),
+                    program: None,
+                    program_harness: None,
+                    single_session_preview: None,
+                    pin_id: None,
+                    primary_node: id.clone(),
+                },
+                parent_node_id: id,
+                children: Vec::new(),
+                attached_count: 0,
+                cwd,
+                ghost: Some(Ghost { row, last_seen }),
+            })
+        })
+        .collect()
 }
 
 /// Attached agents filter through the resolver. Only
@@ -867,6 +880,7 @@ fn agent_row(
             title: agent.title.clone(),
             alias: agent.alias.clone(),
             title_disambiguates: false,
+            mux_host: None,
             primary_node: node_id,
         }),
     }

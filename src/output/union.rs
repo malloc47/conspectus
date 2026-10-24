@@ -37,7 +37,7 @@ struct UnionRow<'a> {
     kind: UnionKind,
     agent: Option<&'a AgentSessionNode>,
     mux: Option<&'a MuxSessionNode>,
-    alias_display_name: Option<String>,
+    display_name: Option<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -164,12 +164,7 @@ fn cell(key: &str, ctx: &CellCtx<'_>) -> String {
             .agent
             .and_then(|a| a.last_message_preview.clone())
             .unwrap_or_else(dash),
-        ("title", UnionKind::Agent) => ctx
-            .row
-            .alias_display_name
-            .clone()
-            .or_else(|| ctx.row.agent.and_then(|a| a.title.clone()))
-            .unwrap_or_else(dash),
+        ("title", UnionKind::Agent) => ctx.row.display_name.clone().unwrap_or_else(dash),
         _ => dash(),
     }
 }
@@ -185,16 +180,20 @@ fn collect_union_rows(snapshot: &GraphSnapshot) -> Vec<UnionRow<'_>> {
         .filter_map(|node| match node {
             GraphNode::AgentSession(agent) => {
                 let display = NodeId::AgentSession(agent.id.clone()).to_string();
-                let alias = snapshot
-                    .aliases
-                    .get(&NodeId::AgentSession(agent.id.clone()))
-                    .map(std::string::ToString::to_string);
+                let node_id = NodeId::AgentSession(agent.id.clone());
+                let mux = snapshot.mux_host_of(&node_id);
+                let display_name = crate::aliases::session_display_name(
+                    snapshot.aliases.get(&node_id),
+                    agent.title.as_deref(),
+                    mux.as_ref().map(|host| host.name.as_str()),
+                )
+                .map(str::to_string);
                 Some(UnionRow {
                     node_id_display: display,
                     kind: UnionKind::Agent,
                     agent: Some(agent),
                     mux: None,
-                    alias_display_name: alias,
+                    display_name,
                 })
             }
             _ => None,
@@ -203,15 +202,14 @@ fn collect_union_rows(snapshot: &GraphSnapshot) -> Vec<UnionRow<'_>> {
     agents.sort_by(|a, b| a.node_id_display.cmp(&b.node_id_display));
 
     let mut muxes: Vec<UnionRow<'_>> = snapshot
-        .nodes
-        .iter()
+        .live_nodes()
         .filter_map(|node| match node {
             GraphNode::MuxSession(mux) => Some(UnionRow {
                 node_id_display: NodeId::MuxSession(mux.id.clone()).to_string(),
                 kind: UnionKind::Mux,
                 agent: None,
                 mux: Some(mux),
-                alias_display_name: None,
+                display_name: None,
             }),
             _ => None,
         })
@@ -235,8 +233,7 @@ fn collect_preferred_mux_per_agent(snapshot: &GraphSnapshot) -> HashMap<SessionK
         })
         .collect();
     let mux_lookup: HashMap<NodeId, &MuxSessionNode> = snapshot
-        .nodes
-        .iter()
+        .live_nodes()
         .filter_map(|node| match node {
             GraphNode::MuxSession(mux) => Some((NodeId::MuxSession(mux.id.clone()), mux)),
             _ => None,

@@ -116,7 +116,7 @@ pub enum Msg {
     /// Right panel (graph explorer): toggle the visibility of the
     /// link rows' trailing `provenance · confidence · state` meta
     /// line. The default is hidden; the `★` resolver-winner
-    /// marker and `⚠` group-level conflict aggregate stay visible
+    /// marker and `▲` group-level conflict aggregate stay visible
     /// regardless.
     ToggleEdgeMeta,
     /// Right panel (graph explorer): toggle the Expanded Node Detail
@@ -187,10 +187,17 @@ pub enum Msg {
     /// for a background refresh. Repeats before that refresh lands add to
     /// the same pending set.
     HandoffReturned(MuxSessionId),
+    /// The TUI's tmux pane came back into view after the operator was
+    /// in another session. Asks for the same background refresh as a
+    /// returned attach, without marking any row as awaiting it.
+    ViewRegained,
+    /// After the next refresh that settles the pending action, move to
+    /// the view where `node` now lives and select its row.
+    FollowEntity(crate::model::NodeId),
     /// A refresh spawned after the last hand-off landed (or failed);
     /// the pending rows show current values again.
     HandoffSettled,
-    /// A pin launch is starting `mux` (ADR 0127). Marks the mux row
+    /// A launch is starting `mux` (ADR 0127). Marks the mux row
     /// and its linked sessions with the hand-off's dim-and-spinner
     /// treatment so the row being acted on shows progress. Unlike
     /// [`Msg::HandoffReturned`] it asks for no refresh: the attach
@@ -227,41 +234,9 @@ pub enum Msg {
     /// (and the accompanying filesystem read) happens in the
     /// executor, not here.
     ViewSelected,
-    /// Launch the pin backing the current selection (ADR 0085
-    /// contract 2). The reducer resolves the pin id + optional
-    /// attach target via `resolve_launch_pin` and emits either
-    /// `Effect::Exec(ExecSpec::LaunchPin { pin_id, attach_target })`
-    /// or `Effect::Toast(reason)`.
-    LaunchSelectedPin,
-    /// Launch a specific pin by id (ADR 0057 / ADR 0058). Used by
-    /// the Pins overlay's launch entry, which already knows the
-    /// pin id and doesn't need selection-based resolution. The
-    /// reducer looks up the optional attach target from the held
-    /// snapshot and emits
-    /// `Effect::Exec(ExecSpec::LaunchPin { pin_id, attach_target })`.
-    LaunchPinById(String),
-    /// Remove a pin declaration from its TOML store (ADR 0057).
-    /// Carries the already-resolved `PinRemoveRequest`; the
-    /// reducer emits `Effect::WriteStore(StoreOp::PinRemove(...))`
-    /// and the executor performs the write.
-    PinRemove(crate::tui::widgets::pins::PinRemoveRequest),
-    /// Write a pin-binding declaration linking a pin to an existing
-    /// agent session (ADR 0057 / ADR 0058). The reducer checks that
-    /// a graph snapshot is loaded (needed for the target lookup at
-    /// executor time) and emits either
-    /// `Effect::WriteStore(StoreOp::PinBind(...))` or
-    /// `Effect::Toast(reason)`.
-    PinBind(crate::tui::widgets::pins::PinBindRequest),
-    /// Write a new pin entry (ADR 0057). When the request carries
-    /// an `adopt_source_mux_name`, the executor chains a tmux
-    /// rename after the write to promote the adopted mux to the
-    /// pin's declared name.
-    PinCreate(crate::tui::widgets::pins::PinCreateRequest),
-    /// Update an existing pin entry (ADR 0057).
-    PinEdit(crate::tui::widgets::pins::PinEditRequest),
     /// Confirm the rename overlay's typed value (ADR 0029).
-    /// Reducer resolves the selected row and emits either a pin
-    /// edit, an agent-session alias rename, or a "lost selection"
+    /// Reducer resolves the selected row and emits either a mux
+    /// rename, an agent-session alias rename, or a "lost selection"
     /// toast. The alias-rename branch also chains an optional
     /// native mux rename inside the executor per lockstep.
     CommitRename(String),
@@ -305,7 +280,7 @@ pub enum Msg {
     /// Commit the bare tmux `new-session` form (ADR 0095). Reducer emits `Effect::Exec(ExecSpec::MuxNew)` so
     /// the runtime re-execs into `conspectus mux new` with the same
     /// UX (alt-screen suspend → subprocess → refresh → attach) as
-    /// pin launch.
+    /// `mux launch`.
     CommitMuxNew {
         name: String,
         cwd: String,
@@ -318,10 +293,55 @@ pub enum Msg {
     /// the modal after seeding defaults from the current selection
     /// (ADR 0096).
     OpenMuxLaunchForm,
+    /// `.` — open the row action menu for the selected row.
+    OpenRowMenu,
+    /// Row menu → pin a history record as a slot.
+    PinRecord(String),
+    /// Row menu → pin a graph node as a slot.
+    PinNode(crate::model::NodeId),
+    /// `p` — pin the selected row, or unpin it at once when a pin
+    /// already points at it.
+    TogglePin,
+    /// Row menu → remove a slot.
+    Unpin(String),
+    /// The undo key: reverse the newest recorded operation.
+    Undo,
+    /// The executor finished an operation that can be undone.
+    UndoRecorded(crate::tui::undo::Undo),
+    /// Pin menu → open the pin edit form.
+    OpenSlotEdit(String),
+    /// The pin edit form saved: rename the pin and set or drop overrides.
+    CommitPinEdit(crate::tui::widgets::pin_edit::PinEditRequest),
+    /// Slot menu → open the rename prompt.
+    OpenSlotRename(String),
+    /// Slot menu → open the retarget prompt.
+    OpenSlotRetarget(String),
+    /// Retarget picker → point the pin at the chosen entity (a node id
+    /// or a history record id).
+    CommitRetarget {
+        pin: String,
+        target: String,
+    },
+    /// Slot menu → copy the entity's current recipe into the slot.
+    RefreshSlot(String),
+    /// Slot menu → switch to the entity's native view and select it.
+    RevealSlot(String),
+    /// Row menu → run `conspectus rebuild <reference> --dry-run` and
+    /// show the plan.
+    ShowRebuildPlan(String),
+    /// Row menu → run `conspectus rebuild <reference>`.
+    RebuildReference(String),
+    /// Row menu → remove one history record.
+    ForgetRecord(String),
+    /// Row menu → open the Clean up modal.
+    OpenCleanUp,
+    /// Clean up modal → remove exactly these history records.
+    ReapRecords(Vec<String>),
     /// Commit the mux-launch form (ADR 0096).
     /// Reducer emits `Effect::Exec(ExecSpec::MuxLaunch)` so the
     /// runtime re-execs into `conspectus mux launch <harness> …`,
-    /// refreshes discovery, then attaches. No pin write; no sidecar.
+    /// refreshes discovery, then attaches. A pin slot is written only when the form asked for
+    /// one.
     CommitMuxLaunch(crate::tui::widgets::mux_launch::MuxLaunchRequest),
     /// Switch the active row-tree view (ADR 0031). Reducer saves
     /// the current view's per-view slot, loads the target's slot

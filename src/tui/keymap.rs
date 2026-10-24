@@ -59,39 +59,19 @@ pub enum Action {
     OpenMuxMenu,
     /// Forward a key event into the open Mux action menu.
     MuxMenuKey(ratatui::crossterm::event::KeyEvent),
+    /// Forward a key event into the open row action menu.
+    RowMenuKey(ratatui::crossterm::event::KeyEvent),
+    /// Forward a key event into the open Clean up modal.
+    CleanUpKey(ratatui::crossterm::event::KeyEvent),
+    PickerKey(ratatui::crossterm::event::KeyEvent),
     /// Forward a key event into the open mux-launch form.
     MuxLaunchFormKey(ratatui::crossterm::event::KeyEvent),
-    /// `Delete` on an unbound/stale pin row. First press arms a
-    /// confirmation; second press shells out to `conspectus pin rm`.
-    RemovePin,
-    /// `b` on a selected ambiguous pin-bound row. Opens the bind
-    /// picker when the resolver flagged competing `PinAmbiguous`
-    /// candidates; otherwise surfaces a status hint.
-    PinBindHint,
-    /// `N` opens the pin create form seeded from the current
-    /// selection. Direct counterpart to `Pins > create` on `p`.
-    OpenPinCreate,
-    /// `B` opens the mux-only rebind form for the selected pin.
-    /// Refuses with a status hint when no pin row is selected.
-    OpenPinRebind,
-    /// `A` opens the create form with adopt selected for a live mux
-    /// row. Refuses with a status hint on any other row kind.
-    OpenPinAdopt,
-    /// `L` launches the selected pin via `conspectus pin launch
-    /// <id>`. Sibling of `Enter` on a pin placeholder row; refuses
-    /// with a status hint when no pin row is selected.
-    LaunchPin,
+    PinEditFormKey(ratatui::crossterm::event::KeyEvent),
     /// Open the controls overlay (ADR 0031) at its top
     /// section.
     OpenControls,
     /// Forward a key event into the open controls overlay.
     ControlsOverlayKey(ratatui::crossterm::event::KeyEvent),
-    /// Open the pins overlay (ADR 0057) at the top of the action
-    /// menu. Sibling of `OpenControls`; kept separate so view/filter
-    /// and pin CRUD stay one-key-each on `f` and `p`.
-    OpenPins,
-    /// Forward a key event into the open pins overlay.
-    PinsOverlayKey(ratatui::crossterm::event::KeyEvent),
     /// Switch to a specific view (1–5 accelerators).
     SwitchView(View),
     /// Cycle to the next (delta > 0) or previous (delta < 0) view
@@ -242,7 +222,7 @@ pub fn translate(event: Event, viewport_height: u16) -> Option<Action> {
     match event {
         Event::Key(key) if key.kind == KeyEventKind::Press => match (key.modifiers, key.code) {
             // All single-char parametric guards
-            // (r/a/b/v/f/p/[/]//?/l/h/e) + arrow / nav keys
+            // (r/a/v/f/p/[/]//?/l/h/e) + arrow / nav keys
             // (j/k/Down/Up/Right/Left/Enter/Backspace/Home/End/g/G)
             // migrated to `keybindings::KEYBINDINGS` via
             // `KeyMatcher::AnyModExceptCtrl` and `KeyMatcher::AnyMod`.
@@ -287,9 +267,6 @@ pub enum SelectedDefault {
     Attach,
     /// Un-muxed agent session — `Enter` opens the transcript viewer.
     View,
-    /// Unbound / stale-mux pin row — `Enter` shells out to
-    /// `conspectus pin launch <id>` per ADR 0057.
-    LaunchPin,
 }
 
 /// Classify what `Enter` on the left pane should do for the
@@ -304,32 +281,47 @@ pub fn selected_default_action(app: &App) -> SelectedDefault {
     let Some(row) = app.tree().rows.iter().find(|r| &r.id == selection) else {
         return SelectedDefault::ToggleExpand;
     };
-    if pin_placeholder_row(row) {
-        return SelectedDefault::LaunchPin;
+    // A slot row attaches to its mux when live; the attach resolver
+    // explains otherwise.
+    if matches!(
+        row.id,
+        crate::tui::rows::RowId::Pin { .. } | crate::tui::rows::RowId::History { .. }
+    ) || crate::tui::actions::selected_record(app).is_some()
+    {
+        return SelectedDefault::Attach;
+    }
+    // An entity listed under a pin acts like its own row: a mux
+    // attaches, a session attaches when it is in a mux and opens in the
+    // viewer when it is not.
+    if let crate::tui::rows::RowId::Nested { node, .. } = &row.id {
+        return match node {
+            crate::model::NodeId::MuxSession(_) => SelectedDefault::Attach,
+            crate::model::NodeId::AgentSession(_) => {
+                let in_a_mux = app.snapshot_handle().is_some_and(|handle| {
+                    crate::tui::actions::preferred_mux_for_session(handle.snapshot(), node)
+                        .is_some()
+                });
+                if in_a_mux {
+                    SelectedDefault::Attach
+                } else {
+                    SelectedDefault::View
+                }
+            }
+            _ => SelectedDefault::ToggleExpand,
+        };
     }
     match &row.kind {
         RowKind::Group(_) => SelectedDefault::ToggleExpand,
-        RowKind::MuxSession(_) | RowKind::AgentSessionMuxCandidate(_) => SelectedDefault::Attach,
+        RowKind::MuxSession(_) => SelectedDefault::Attach,
         RowKind::AgentSession(session) => match session.mux_state {
             MuxIndicator::Unmuxed => SelectedDefault::View,
             MuxIndicator::Attached | MuxIndicator::Ambiguous { .. } => SelectedDefault::Attach,
         },
-        // PR / Fork / Repo rows: no muxable target and no viewer;
+        // PR / Fork rows: no muxable target and no viewer;
         // fall back to toggle so expandable parents still behave.
-        RowKind::Pr(_) | RowKind::Fork(_) | RowKind::Repo(_) => SelectedDefault::ToggleExpand,
-    }
-}
-
-fn pin_placeholder_row(row: &crate::tui::rows::Row) -> bool {
-    use crate::model::NodeId;
-    matches!(
-        &row.kind,
-        crate::tui::rows::RowKind::AgentSession(_) | crate::tui::rows::RowKind::MuxSession(_)
-    ) && match &row.kind {
-        crate::tui::rows::RowKind::AgentSession(session) => {
-            matches!(&session.primary_node, NodeId::Pin(_))
-        }
-        crate::tui::rows::RowKind::MuxSession(mux) => matches!(&mux.primary_node, NodeId::Pin(_)),
-        _ => false,
+        RowKind::Pr(_) | RowKind::Fork(_) => SelectedDefault::ToggleExpand,
+        // Nested rows act on their own entity: attach a mux, view a
+        // session.
+        RowKind::Mixed(_) => SelectedDefault::ToggleExpand,
     }
 }

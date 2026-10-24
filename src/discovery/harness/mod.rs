@@ -220,23 +220,21 @@ pub trait HarnessAdapter: Send + Sync {
     }
 
     /// Default argv for spawning a fresh session of this harness when
-    /// no per-pin `launch.argv` override is supplied (ADR 0057
-    /// §Launch). Pure data; no I/O. Each adapter returns the bare
-    /// binary invocation — model selection, prompt injection, and
-    /// other harness-specific flags are intentionally out of v1 scope
-    /// per ADR 0057 §Deferred. Operators who need richer launch
-    /// commands use `pin.launch.argv` (a per-pin override).
+    /// nothing more specific applies (a pin override, a recorded argv,
+    /// or a launch profile). Pure data; no I/O. Each adapter returns
+    /// the bare binary invocation: model selection, prompt injection,
+    /// and other harness-specific flags are the operator's to add
+    /// through overrides or `[launch.<harness>]` profiles.
     fn launch_argv(&self) -> Vec<std::ffi::OsString> {
         Vec::new()
     }
 
-    /// Launch-time options surfaced in the pin-create form.
-    /// Each entry is a stable-id + label + argv
-    /// fragment; the pin editor lets the operator toggle each on
-    /// or off, and the resulting argv appends every toggled
-    /// option's fragment to [`Self::launch_argv`]. Defaults to
-    /// no options — most adapters ship without any and rely on
-    /// per-pin `launch.argv` overrides for exotic invocations.
+    /// Launch-time options the launch and pin forms offer. Each entry
+    /// is a stable id, a label, and an argv fragment; the forms let the
+    /// operator toggle each on or off, and the resulting argv appends
+    /// every toggled option's fragment to [`Self::launch_argv`].
+    /// Defaults to no options: most adapters ship without any and rely
+    /// on argv overrides for exotic invocations.
     fn launch_options(&self) -> &'static [HarnessLaunchOption] {
         &[]
     }
@@ -500,7 +498,7 @@ pub fn adapter_in_command<'a>(
 }
 
 /// Look up the per-harness default launch argv. Convenience for the
-/// CLI launch path so it can resolve `pin.harness` → argv without
+/// launch paths so they can resolve a harness key to its argv without
 /// re-instantiating an adapter or walking the discovery registry.
 pub fn launch_argv_for(harness_key: &str) -> Vec<std::ffi::OsString> {
     adapter_for(harness_key)
@@ -599,7 +597,7 @@ pub fn strip_known_launch_option_fragments(argv: Vec<String>) -> Vec<String> {
 }
 
 /// Look up the per-harness resume argv. Sibling of [`launch_argv_for`]
-/// for resuming a pinned session. Returns `None` when the
+/// for resuming a session. Returns `None` when the
 /// harness key is unknown or the adapter does not expose a resume
 /// command (currently only `aider`, which tracks chat history
 /// per-cwd rather than per-session).

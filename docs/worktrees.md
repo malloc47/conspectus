@@ -17,7 +17,7 @@ concrete editable working tree of a repo, ADR 0026), distinguished from
 a plain clone by source metadata: linked vs primary, the branch it
 checks out, and its locked / prunable status. Discovery always surfaces
 worktrees read-only. **Mutation is delegated**: Conspectus never runs
-`git worktree add/remove` itself (ADR 0087 keeps "never mutate git
+`git worktree add/remove` itself (ADR 0143 keeps "never mutate git
 state" absolute). Instead it drives an external, mutation-capable
 backend — [`worktrunk`](https://github.com/max-sixty/worktrunk) (`wt`)
 — as a subprocess. No backend ⇒ listing still works, but the mutating
@@ -27,7 +27,7 @@ operations are hidden (TUI) or error clearly (CLI).
 
 - **Read-only listing** needs nothing but `git`.
 - **Everything that mutates** (new / rm / merge / close / prune, and
-  realizing a worktree-backed pin at launch) needs a mutation backend.
+  creating the worktree for a worktree-backed `mux launch`, and rebuilding a gone worktree) needs a mutation backend.
   Install `worktrunk` and it is autodetected on `PATH`, or pin it
   explicitly:
 
@@ -44,15 +44,16 @@ operations are hidden (TUI) or error clearly (CLI).
 | **New** | `worktree new <branch>` | `w` menu → *New worktree* | Create a worktree + branch. Does **not** launch anything | yes |
 | **Remove** | `worktree rm <branch>` | `w` menu → *Remove worktree* | Remove a worktree. Refuses if a live session is rooted in it (unless `--force`) | yes |
 | **Merge back & close** | `worktree merge <branch>` | `w` menu → *Merge back & close* | Squash + rebase + fast-forward the branch into its target, then remove the worktree | yes |
-| **Close down a stream** | `worktree close <branch> --merge\|--discard` | `X`, or `w` menu → *Close down stream* | Compound teardown: end the mux/agent sessions in the worktree, land or discard the branch, remove the worktree, drop its pins | yes |
-| **New stream** (worktree-backed pin) | `pin new … --worktree <branch>` | `N` (create form, worktree toggle pre-enabled) | Declare a pin whose worktree is created and entered **at launch**, alongside the mux + agent | at launch |
+| **Close down a stream** | `worktree close <branch> --merge\|--discard` | `X`, or `w` menu → *Close down stream* | Compound teardown: end the mux/agent sessions in the worktree, land or discard the branch, remove the worktree, forget its history records | yes |
+| **New stream** (worktree-backed launch) | `mux launch <harness> --name N --worktree-branch <branch>` | `N` (mux launch form, worktree toggle pre-enabled) | Create the branch's worktree if absent and launch the mux + agent in it | yes |
+| **Rebuild a worktree** | `rebuild <pin\|h_…>` | row action menu (`.`) → *Rebuild* | Bring a gone worktree back through `wt switch`, creating a deleted branch from its last head | yes |
 | **Prune merged** | `worktree prune` | `w` menu (repo) → *Prune merged worktrees* | Remove worktrees already merged into the default branch (worktrunk `step prune`) | yes |
 | **Reveal** | — | `w` menu → *Reveal checkout / sessions* | Jump the selection to the checkout containing a session, or a worktree's first live session | no |
 
 TUI entry points: **`w`** opens the context-sensitive worktree action
 menu for the selected repo / worktree / mux; **`X`** jumps straight to
-close-down; **`N`** opens the pin create form with the worktree toggle
-already on (Space toggles it off for a plain pin).
+close-down; **`N`** opens the mux launch form with the worktree toggle
+already on (Space toggles it off for a plain launch).
 
 ## Two concepts worth understanding
 
@@ -68,7 +69,9 @@ already on (Space toggles it off for a plain pin).
 2. **Lands or discards the branch** — `--merge` merges it back,
    `--discard` drops it. The choice is required, so uncommitted work is
    never silently lost.
-3. **Removes the worktree** and **drops the pins** declared inside it.
+3. **Removes the worktree** and **forgets the gone history records**
+   rooted in it (ADR 0140), so its ghost muxes and checkout don't litter
+   History. Records a pin targets are kept.
 
 Confirmation follows `[worktree] teardown_confirm` (`always` | `live` |
 `never`, default `live` — prompt only when a live session would be
@@ -76,28 +79,19 @@ ended). `teardown_grace` (default `3s`) is the graceful window; `0s`
 skips straight to the hard kill. CLI flags `--yes` and `--grace <dur>`
 override per-invocation.
 
-### New-stream: worktree-backed pins
+### New-stream: worktree-backed launches and rebuilds
 
-A pin is a *declaration*; it becomes real (mux + agent) only when
-launched. A **worktree-backed pin** adds a `[worktree] branch` to that
-declaration — its `cwd` is the repo anchor, and the branch's worktree is
-**created (from the repo default) and entered at launch time**, next to
-the mux and agent. Nothing is created when you merely write the pin, so
-a cancelled or never-launched pin never leaves an orphaned worktree
-(ADR 0094). Realization is idempotent: an existing worktree for the
-branch is reused.
+`mux launch --worktree-branch <branch>` (with `--worktree-repo <path>`
+when the working directory isn't inside the repo) creates the branch's
+worktree if it is absent and launches the mux and agent in it.
+Realization is idempotent: an existing worktree for the branch is reused,
+and nothing is created until the launch runs (ADR 0094).
 
-```toml
-[[pins.entries]]
-id = "feature-x"
-cwd = "/home/me/src/app"     # the repo anchor
-harness = "codex"
-[pins.entries.mux]
-backend = "tmux"
-name = "feature-x"
-[pins.entries.worktree]
-branch = "feature-x"         # realized at launch
-```
+A pinned worktree-backed mux remembers its branch as the
+`worktree_branch` field of its recipe. If the worktree is later removed,
+`conspectus rebuild <pin>` plans the worktree first (`wt switch`,
+creating a deleted branch from its last head) and then the mux inside it
+(ADR 0142). `rebuild --dry-run` shows both steps before anything runs.
 
 ## Config keys
 
@@ -130,5 +124,6 @@ All under `[worktree]`:
   mutation is delegated, `Checkout`-not-new-node modeling).
 - **ADR 0093** — operator-initiated mux teardown (the graceful→hard
   `kill-session` that powers close-down).
-- **ADR 0094** — worktree-backed pins realized at launch (new-stream).
+- **ADR 0094** — worktree-backed launches realized at launch (new-stream).
+- **ADR 0142** — rebuild plans, including worktree prerequisites.
 - **`docs/design.md` §Worktree Management** — the north-star framing.

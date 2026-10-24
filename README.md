@@ -18,8 +18,8 @@ into a single provider-neutral graph.
 
 On top of that graph you get a keyboard-driven TUI, scriptable tables, and
 JSON, Graphviz, and HTML exports. Conspectus can also take a small set of
-explicitly bounded actions: pin a session, launch or attach it in tmux, and
-open or close down a worktree.
+explicitly bounded actions: pin an entity, rebuild it after it dies, attach to
+it in tmux, and open or close down a worktree.
 
 It is a Rust CLI and library. It is developed on Linux and is pre-release
 (`0.1.0`, no tagged release yet); see [Status and limits](#status-and-limits).
@@ -32,10 +32,10 @@ that process.
 
 <sub>The sessions view on the built-in showcase world (`just screenshots`
 renders these images). Sessions are grouped under the workspace and repo they
-belong to; `◉` marks a session running in a tmux session you can attach to,
-and `◯` one that isn't. The right pane shows the selected session's fields,
+belong to; `⊸` marks a session linked to a tmux session you can attach to,
+and `∘` one that isn't. The right pane shows the selected session's fields,
 its relationships, and its conversation in the Preview. The `project` group is
-flagged (`⚠`, drawn as a box by the screenshot font) because two sessions
+flagged (`▲`, drawn as a box by the screenshot font) because two sessions
 could own one tmux session, so Conspectus lists both under "Other" instead of
 guessing.</sub>
 
@@ -65,7 +65,7 @@ you don't have to change how you launch your agents.
 
 Conspectus has ten node kinds: agent session, mux (terminal multiplexer)
 session, repo, checkout (a plain clone or a linked worktree), branch,
-workspace, fork, forge PR, pin, and runtime process. Twenty-two typed
+workspace, fork, forge PR, pin, and runtime process. Twenty-three typed
 relation kinds connect them. The graph is sparse by default: an orphan agent
 session, a tmux session with no agent, and a branch with a PR but no session
 are all valid, not errors. Projections never assume things connect.
@@ -73,21 +73,22 @@ are all valid, not errors. Projections never assume things connect.
 [0003](docs/adr/0003-polymorphic-fork-node.md),
 [0026](docs/adr/0026-checkout-context-model.md),
 [0047](docs/adr/0047-runtime-process-nodes-candidate.md),
-[0084](docs/adr/0084-first-class-pin-nodes.md))
+[0084](docs/adr/0084-first-class-pin-nodes.md),
+[0141](docs/adr/0141-pin-pins.md))
 
 ### 2. Evidence first, resolution second
 
 Discovery never decides anything. Every plausible relationship becomes a
 `GraphLink` candidate that records its provenance (declared, strongly
 discovered, discovered, convention, or cached), a confidence level, and how
-fresh it is. A resolver then picks the preferred relationship for each slot
+fresh it is. A resolver then picks the preferred relationship for each pin
 and keeps the losing candidates. Ambiguity and conflicts stay visible as data
-(the `⚠` glyph and `conspectus graph --explain` score breakdowns)
+(the `▲` glyph and `conspectus graph --explain` score breakdowns)
 instead of being silently collapsed.
 ([ADR 0002](docs/adr/0002-graphlink-and-typed-relationships.md),
 [0006](docs/adr/0006-session-mux-link-candidates.md),
 [0041](docs/adr/0041-resolver-stays-in-rust.md),
-[0077](docs/adr/0077-resolver-ambiguous-slot-preservation.md))
+[0077](docs/adr/0077-resolver-ambiguous-pin-preservation.md))
 
 ### 3. Attribution without touching your agents
 
@@ -119,37 +120,50 @@ home directory.
 
 ### 4. Your intent lives in reviewable TOML; everything else is a rebuildable cache
 
-Declared links, session aliases, and pins are small TOML entries in a
+Declared links and session aliases are small TOML entries in a
 `.conspectus.toml` file next to the project. Relationships that don't belong
 to any one project go in your user config instead. Both are easy to review
 and safe to version-control.
 
 A declared link overrides discovered evidence without erasing it. Caches (the
 graph snapshot and the observation sidecars) live under your XDG directories,
-never inside a project tree, so deleting them only costs a rebuild.
+never inside a project tree, so deleting them only costs a rebuild. Pin
+pins are your intent too, but they are personal rather than project-rooted:
+they live in one file, `$XDG_DATA_HOME/conspectus/pins.toml`.
 ([ADR 0012](docs/adr/0012-config-file-layout.md),
 [0014](docs/adr/0014-declared-link-storage-schema.md),
 [0029](docs/adr/0029-session-alias-overlay.md),
 [0083](docs/adr/0083-zero-copy-snapshot-format.md))
 
-### 5. Pins: sessions that outlive their processes
+### 5. History and pins: work that outlives its processes
 
-Harness session ids change with every `/compact`, `/resume`, and restart, but
-the way you think about your work ("the Codex session for the ingest
-refactor") doesn't. A **pin** declares that logical session as a harness,
-working directory, display name, and tmux session name. It stays on the
-dashboard whether or not anything is running.
+Harness session ids change with every `/compact`, `/resume`, and restart, and
+tmux sessions, worktrees, and clones come and go. Conspectus records every
+rebuildable entity it observes (muxes, checkouts, repos, PRs) in a history
+store under `$XDG_STATE_HOME`, with what it takes to rebuild each one. When a
+targeted check finds the entity gone (the tmux server answered and the session
+wasn't there, the worktree path is missing), its row stays, dimmed and marked
+`gone`, instead of vanishing. A failed or impossible check shows `unknown`,
+never `gone`.
 
-When a matching tmux session is live, the pin binds to it through the
-attribution pipeline above. When the tmux session dies, `Enter` relaunches
-it. Conspectus follows the session's compaction and resume chain to the
-latest session and resumes that conversation instead of starting a new one.
+A **pin** is a named pin you keep at hand. Pinning something doesn't create
+it or configure anything: it adds a pin to `pins.toml` that points at the
+entity, live or gone, and optionally carries overrides (a different argv or
+working directory, say). Each field resolves `overrides > live graph > history
+> snapshot > defaults`, so an unpinned entity and a pinned one look the same
+until you override something.
 
-Conspectus doesn't own your tmux server or impose a window layout. It
-records what you intend and reconciles it with what is actually running.
+`conspectus rebuild <pin>` turns a recipe back into a live entity as a plan of
+steps you can read first with `--dry-run`: a gone mux is recreated in tmux and
+its last conversation is resumed, a missing worktree comes back through
+`wt switch`, and a missing clone is cloned from its recorded remote.
+
+Conspectus doesn't own your tmux server or impose a window layout. It records
+what it saw and rebuilds only when you ask.
 ([ADR 0018](docs/adr/0018-intra-harness-session-lineage.md),
-[0057](docs/adr/0057-session-pins.md),
-[0058](docs/adr/0058-pin-session-continuity.md))
+[0140](docs/adr/0140-history-and-presence.md),
+[0141](docs/adr/0141-pin-pins.md),
+[0142](docs/adr/0142-rebuild-plans-and-executors.md))
 
 ### 6. A bounded mutation envelope
 
@@ -182,7 +196,7 @@ subcommand, socket, signal, and write path Conspectus may use. One test reads
 the source against it, and another runs the built binary under `strace` and
 fails on anything the manifest doesn't allow.
 ([ADR 0086](docs/adr/0086-payload-privacy-tenet.md),
-[0087](docs/adr/0087-mutation-envelope.md),
+[0143](docs/adr/0143-mutation-envelope-with-history-pins-and-clone.md),
 [0092](docs/adr/0092-worktree-backend-seam.md),
 [0093](docs/adr/0093-operator-initiated-mux-teardown.md),
 [0117](docs/adr/0117-capability-manifest-and-traced-backstop.md))
@@ -298,7 +312,7 @@ conspectus serve                   # keep the graph warm in the background
 
 ### Interactive TUI
 
-- **Views.** `1`, `2`, and `3` switch between the Sessions, Mux, and PRs
+- **Views.** `1` to `5` switch between the Sessions, Mux, PRs, Pinned, and History
   views. The Sessions view groups sessions by graph topology by default:
   workspace, then repo, then checkout, with resumed and forked sessions
   nested under their parents. It can also group by workspace, repo,
@@ -318,14 +332,16 @@ conspectus serve                   # keep the graph warm in the background
   commit shows its stat), and onto a relationship shows the evidence for the
   link above the neighbor's own preview.
 - **Actions.** `Enter` does the obvious thing for the selected row: attach
-  to the tmux session, launch the pin, or open the transcript. `v` opens a
+  to the tmux session, rebuild a gone pinned row, or open the transcript. `v` opens a
   built-in transcript viewer for Claude Code, Codex, opencode, and Pi.
 - **Refresh.** The graph refreshes in the background, and `r` rescans now.
   `Ctrl-R` is a hard refresh that also asks GitHub again instead of waiting
   for the hourly forge refresh.
 - **Menus first, shortcuts second.** `?` lists every key. `f` opens view,
-  grouping, filter, and sort controls, and `/` searches. `p`, `m`, and `w`
-  open the pin, mux, and worktree menus. Every action can be reached from a
+  grouping, filter, and sort controls, and `/` searches. `.` opens the row
+  action menu (including Pin / Unpin, `p`), and `m` and `w` open the mux and
+  worktree menus. Views `4` (Pinned) and `5` (History) list pins and gone
+  entities. Every action can be reached from a
   menu, and the frequent ones also have single-key shortcuts, so you don't
   have to memorize anything to get started.
 - **Theming** through `[tui.theme]`
@@ -335,7 +351,9 @@ conspectus serve                   # keep the graph warm in the background
 |---|---|
 | ![The explorer cursor on a session's checkout: the link's evidence above the checkout's git status and files](docs/images/related-preview.png) | ![A repo row: its recent commits and remotes](docs/images/repo-history.png) |
 | **A tmux session's pane** | **A pull request under its checkout** |
-| ![The mux view: tmux sessions on the left, the selected one's live pane on the right](docs/images/mux-pane.png) | ![The PRs view: a draft PR under the checkout of its branch, the sessions working there beneath it, and its checks, reviews, and description in the Preview](docs/images/prs-view.png) |
+| ![The mux view: live tmux sessions with a pin marker, gone muxes dimmed below them, and the selected mux's related rows and a transcript-style preview on the right](docs/images/mux-pane.png) | ![The PRs view: a draft PR under the checkout of its branch, the sessions working there beneath it, and its checks, reviews, and description in the Preview](docs/images/prs-view.png) |
+| **Pinned pins** | **Gone entities, ready to rebuild** |
+| ![The Pinned view: pins for a live mux, a gone mux, a session, a removed worktree, and a merged PR, grouped by project, each with its status and age](docs/images/pinned-view.png) | ![The History view: gone muxes and worktrees with how long ago they were last seen](docs/images/history-view.png) |
 
 ### Scriptable CLI
 
@@ -360,36 +378,41 @@ conspectus rename mux <id> <new-name>
 conspectus alias list
 ```
 
-### Session pins
+### Pins, history, and rebuild
 
 ```sh
-conspectus pin create ingest --harness codex --cwd ~/work/ingest
-conspectus pin launch ingest          # attach, relaunch, or resume, depending on state
-conspectus pin adopt ingest ingest    # turn an already-running tmux session into a pin
-conspectus pin {list|show|attach|rename|rm|bind|rebind} ...
+conspectus pin add ingest                     # pin a mux by name, node id, or history id (h_...)
+conspectus pin add --planned --kind mux --name later --set cwd=~/work/ingest
+conspectus pin edit ingest --set argv="codex --model o3"
+conspectus pin {list|show|rename|retarget|refresh|move|rm} ...
+conspectus rebuild ingest --dry-run           # print the plan
+conspectus rebuild ingest                     # recreate it, resuming the last session
+conspectus history {list|show|reap|forget} ...
+conspectus pin migrate --dry-run              # convert legacy [[pins.entries]] to pins
 ```
 
-A pin is in one of four states: `bound` (live and attributed), `unbound`
-(no tmux session yet, or it died), stale (the tmux session is alive but the
-agent has exited), or ambiguous (several sessions claim it). Each state has
-a matching recovery action. The
+A pin is live, gone, unknown, missing (in neither graph nor history, so it
+renders from its snapshot), or planned (no target yet; the first rebuild builds
+it). The old `pin create`, `launch`, `attach`, `bind`, `rebind`, and `adopt`
+verbs are retired and fail with a message naming their replacement. The
 [pins walkthrough](docs/pins-walkthrough.md) teaches the lifecycle, and
-[operations](docs/operations.md#session-pins) is the reference.
+[operations](docs/operations.md#pins-history-and-rebuild) is the
+reference.
 
 ### Launching tmux sessions
 
 ```sh
-conspectus mux new scratch --cwd ~/work/ingest               # bare shell, nothing persisted
-conspectus mux launch codex --name spike --cwd ~/work/ingest  # agent in a new tmux session, no pin
+conspectus mux new scratch --cwd ~/work/ingest               # bare shell
+conspectus mux launch codex --name spike --cwd ~/work/ingest  # agent in a new tmux session
 ```
 
 ### Worktree streams
 
 ```sh
 conspectus worktree list                                     # read-only; always available
-conspectus pin create feat-x --harness claude-code \
-    --cwd ~/work/repo --worktree feat-x                      # worktree created when the pin launches
-conspectus worktree close feat-x --merge                     # stop sessions, merge, remove worktree, drop pins
+conspectus mux launch claude-code --name feat-x --cwd ~/work/repo \
+    --worktree-branch feat-x                                 # worktree created at launch
+conspectus worktree close feat-x --merge                     # stop sessions, merge, remove worktree, forget its history
 conspectus worktree {new|rm|merge|prune} ...
 ```
 
@@ -460,7 +483,7 @@ adapters and metadata rather than in the shape of the graph. The design
 document stays short enough to plan from, and the detailed reasoning lives in
 ADRs.
 
-### `docs/adr/`: 119 architecture decision records
+### `docs/adr/`: 144 architecture decision records
 
 Every significant decision gets an ADR, whether it's a model change, a new
 dependency, a new write path, a workflow tool, or a UI convention. Each ADR
@@ -519,7 +542,9 @@ daily use.
 
 When agents write most of the code, a change can add a subprocess, a socket,
 or a write path that nobody decided to allow. The mutation envelope
-([ADR 0087](docs/adr/0087-mutation-envelope.md)) always listed what
+([ADR 0087](docs/adr/0087-mutation-envelope.md), restated by
+[ADR 0143](docs/adr/0143-mutation-envelope-with-history-pins-and-clone.md)
+for history, pins, and rebuild clones) always listed what
 Conspectus may write and what it must never do, but for most of the project
 only review enforced it.
 [`docs/capabilities.toml`](docs/capabilities.toml) turns it into an
@@ -599,7 +624,9 @@ category of its own.
   ([ADR 0084](docs/adr/0084-first-class-pin-nodes.md)), the mutation
   envelope bounded every write
   ([ADR 0087](docs/adr/0087-mutation-envelope.md)), and worktree streams
-  followed ([ADR 0092](docs/adr/0092-worktree-backend-seam.md)). A
+  followed ([ADR 0092](docs/adr/0092-worktree-backend-seam.md)). Pins
+  were later reworked into pins with history and rebuild (ADRs 0140 to
+  0144). A
   hardening workstream of nearly 300 stories absorbed what came up.
 - **Late September to October:** release readiness for 0.1.0. The docs and
   `--help` were checked against the binary, the screenshots added, and the
@@ -621,7 +648,7 @@ the work moved from building to hardening.
 | --- | --- |
 | Development window | 2026-05-12 to 2026-10-13 |
 | Commits | 998, of which 798 (80%) have an AI co-author trailer |
-| Architecture decision records | 119, of which 11 are superseded or partially superseded |
+| Architecture decision records | 119 on that date (144 now, after the history, rebuild, and pin-pin ADRs 0140 to 0144), of which 11 were superseded or partially superseded |
 | Backlog stories | 643, of which 533 (83%) are done |
 | Commits that touch the backlog | 470 (47%) |
 | Rust | about 147k lines, over 40% of it tests |
@@ -635,8 +662,8 @@ the work moved from building to hardening.
   without it, attribution falls back to the remaining evidence. macOS is
   untested.
 - **tmux is the primary mux backend.** zellij supports discovery and attach
-  only. Pins on a non-default tmux socket (`tmux -L`) launch and attach
-  correctly, but discovery doesn't list those sockets yet.
+  only. Pins and history records on a non-default tmux socket (`tmux -L`)
+  rebuild and attach correctly, and discovery probes the sockets they name.
 - **GitHub only.** Forge discovery goes through an authenticated `gh` CLI.
   GitLab is a stub.
 - **Worktree mutation needs worktrunk.** Without `wt` on your `PATH`,
@@ -652,6 +679,7 @@ the work moved from building to hardening.
 | If you want to… | Read |
 | --- | --- |
 | Configure and run it: environment variables, config files, the CLI reference, caches, TUI state | [docs/operations.md](docs/operations.md) |
+| See what each TUI column, glyph, and state word means | [docs/tui-columns.md](docs/tui-columns.md) |
 | Learn pins hands-on | [docs/pins-walkthrough.md](docs/pins-walkthrough.md) |
 | Manage worktrees and streams of work | [docs/worktrees.md](docs/worktrees.md) |
 | Export and explore the graph visually | [docs/graph-visualization.md](docs/graph-visualization.md) |

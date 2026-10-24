@@ -158,6 +158,9 @@ pub struct DiscoveryContext {
     forge_fetch: forge::ForgeFetch,
     forge_concurrency: Option<usize>,
     forge_cancel: Option<Arc<std::sync::atomic::AtomicBool>>,
+    /// Named mux servers to probe besides the default one (tmux `-L`
+    /// sockets): those history records and pin slots name (ADR 0140).
+    mux_sockets: BTreeSet<String>,
 }
 
 impl DiscoveryContext {
@@ -209,6 +212,22 @@ impl DiscoveryContext {
     pub fn with_caches(mut self, caches: Arc<DiscoveryCaches>) -> Self {
         self.caches = caches;
         self
+    }
+
+    /// Also probe these named mux servers. The default server and its
+    /// spellings (`default`, empty) are dropped.
+    pub fn with_mux_sockets(mut self, sockets: impl IntoIterator<Item = String>) -> Self {
+        self.mux_sockets.extend(
+            sockets
+                .into_iter()
+                .filter(|socket| crate::model::effective_socket(Some(socket)).is_some()),
+        );
+        self
+    }
+
+    /// The named mux servers to probe besides the default one.
+    pub fn mux_sockets(&self) -> impl Iterator<Item = &str> {
+        self.mux_sockets.iter().map(String::as_str)
     }
 
     /// Reuse forge listings younger than `max_age` instead of asking
@@ -285,6 +304,9 @@ pub struct GraphFragment {
     /// folds the per-fragment map into [`GraphSnapshot::node_provenance`]
     /// at snapshot-assembly time. See [`crate::model::NodeProvenance`].
     pub node_provenance: BTreeMap<NodeId, NodeProvenance>,
+    /// Mux probe statuses keyed by [`crate::model::probe_key`] (ADR
+    /// 0140), from the mux providers.
+    pub mux_probes: BTreeMap<String, crate::model::MuxProbe>,
 }
 
 impl GraphFragment {
@@ -309,6 +331,7 @@ impl From<GraphSnapshot> for GraphFragment {
             candidate_links: snapshot.candidate_links,
             diagnostics: snapshot.diagnostics,
             node_provenance: snapshot.node_provenance,
+            mux_probes: snapshot.mux_probes,
         }
     }
 }
@@ -524,6 +547,21 @@ pub fn discover_local_warm_with(
         context = context.with_harness_state_root(key.clone(), root.clone());
     }
 
+    // History names the mux sockets worth probing besides the default
+    // one, and its records become the gone nodes below (ADR 0140).
+    let history = config
+        .history
+        .as_ref()
+        .map(crate::history::HistoryStore::load);
+    if let Some(load) = &history {
+        context = context.with_mux_sockets(
+            load.history
+                .muxes
+                .iter()
+                .filter_map(|record| record.recipe.socket.clone()),
+        );
+    }
+
     let now = current_epoch();
     let gate = cache::compute_freshness_gate(&prior, intervals, now);
     let mut prior = prior;
@@ -690,6 +728,9 @@ pub fn discover_local_warm_with(
     }
 
     apply_mutators(&mut snapshot, &config, &context, run_process_tree);
+    if let Some(load) = history {
+        crate::history::project::project(&mut snapshot, load, current_epoch());
+    }
     Ok(snapshot)
 }
 
@@ -899,17 +940,25 @@ fn apply_mutators(
     if let Some(loader) = &config.declared_config_loader {
         declared::apply_declared_links(snapshot, context, loader);
         aliases::apply_aliases(snapshot, context, loader);
-        // Fold in any project pin stores recorded by the registry
-        // sidecar so pins registered outside the scan
-        // root stay visible. Read fresh each cycle so a pin created
-        // during a live session appears on the next refresh.
-        let registry_stores = config
-            .pin_store_registry
-            .as_ref()
-            .map(super::pin_store_registry::PinStoreRegistry::read)
-            .unwrap_or_default();
-        pins::apply_pins(snapshot, context, loader, &registry_stores);
     }
+    // Pin slots (ADR 0141), read fresh each cycle so a slot added in
+    // another process shows up on the next refresh. Legacy entries
+    // load too until `pin migrate` converts them, found through the
+    // config loader and the old store registry.
+    let registry_stores = config
+        .legacy_pin_registry
+        .as_ref()
+        .map(crate::legacy_registry::PinStoreRegistry::read)
+        .unwrap_or_default();
+    pins::apply_pins(
+        snapshot,
+        context,
+        &pins::PinSources {
+            slots: config.pin_slots.as_ref(),
+            legacy_loader: config.declared_config_loader.as_ref(),
+            legacy_registry_stores: &registry_stores,
+        },
+    );
 }
 
 /// Configuration that controls which providers run during local discovery.
@@ -947,12 +996,12 @@ pub struct LocalDiscoveryConfig {
     /// [`Self::without_orchestrator`].
     pub orchestrator_roots: BTreeMap<String, PathBuf>,
     pub declared_config_loader: Option<ConfigLoader>,
-    /// Resolver for the pin-store registry sidecar (ADR 0090). When present, each discovery cycle reads the
-    /// registered project `.conspectus.toml` store paths and folds them
-    /// into the pin loader's search set so pins registered in repos
-    /// outside the scan root stay visible. `None` disables the registry
-    /// (tests and headless fixtures that don't want state-home I/O).
-    pub pin_store_registry: Option<crate::pin_store_registry::PinStoreRegistry>,
+    /// Where the pin slots live (ADR 0141). `None` loads none (tests,
+    /// headless fixtures, and the dev scenario builder).
+    pub pin_slots: Option<crate::pin_slots::SlotStore>,
+    /// The old store registry (ADR 0090), read until `pin migrate` has
+    /// converted every legacy entry. `None` skips it.
+    pub legacy_pin_registry: Option<crate::legacy_registry::PinStoreRegistry>,
     /// Read-only worktree backend used by git discovery to enumerate a
     /// repo's worktrees (ADR 0092). `None` disables worktree
     /// enumeration (tests / headless fixtures); `from_env` installs the
@@ -978,6 +1027,11 @@ pub struct LocalDiscoveryConfig {
     pub forge_concurrency: usize,
     /// Set to stop forge fetches early (ADR 0137).
     pub forge_cancel: Option<Arc<std::sync::atomic::AtomicBool>>,
+    /// The history store discovery reads each cycle (ADR 0140): its
+    /// mux records name the sockets to probe, and its records project
+    /// gone entities into the graph. `None` reads no history (tests
+    /// and the dev scenario builder).
+    pub history: Option<crate::history::HistoryStore>,
 }
 
 impl LocalDiscoveryConfig {
@@ -1061,9 +1115,10 @@ impl LocalDiscoveryConfig {
             hook_sidecar_root: hook_sidecar::default_sidecar_root(),
             orchestrator_roots,
             declared_config_loader: Some(ConfigLoader::from_env()),
-            pin_store_registry: Some(crate::pin_store_registry::PinStoreRegistry::from_env()),
+            pin_slots: crate::pin_slots::SlotStore::from_env(),
+            legacy_pin_registry: Some(crate::legacy_registry::PinStoreRegistry::from_env()),
             // Enumerate worktrees via the thin git backend
-            // unless explicitly disabled. Read-only; ADR 0087 clean.
+            // unless explicitly disabled. Read-only; ADR 0143 clean.
             worktree_backend: (env::var_os("CONSPECTUS_DISABLE_WORKTREE").is_none()).then(|| {
                 Box::new(worktree::SystemGitWorktree::new()) as Box<dyn worktree::WorktreeBackend>
             }),
@@ -1072,6 +1127,7 @@ impl LocalDiscoveryConfig {
             forge_fetch: forge::ForgeFetch::default(),
             forge_concurrency: forge::DEFAULT_FORGE_CONCURRENCY,
             forge_cancel: None,
+            history: crate::history::HistoryStore::from_env(),
         }
     }
 
@@ -1085,13 +1141,21 @@ impl LocalDiscoveryConfig {
             orchestrator_roots: BTreeMap::new(),
             worktree_backend: None,
             declared_config_loader: None,
-            pin_store_registry: None,
+            pin_slots: None,
+            legacy_pin_registry: None,
             disabled_aux_harnesses: BTreeSet::new(),
             caches: Arc::default(),
             forge_fetch: forge::ForgeFetch::default(),
             forge_concurrency: forge::DEFAULT_FORGE_CONCURRENCY,
             forge_cancel: None,
+            history: None,
         }
+    }
+
+    /// Read history from `store` (ADR 0140).
+    pub fn with_history(mut self, store: crate::history::HistoryStore) -> Self {
+        self.history = Some(store);
+        self
     }
 
     /// Ask the forges for missing or expired listings, or build PRs
@@ -1132,7 +1196,7 @@ impl LocalDiscoveryConfig {
     /// Push a mux backend onto the registry (ADR 0089).
     /// Backends can be added in any order; discovery iterates them
     /// in registration order and picks the first one whose
-    /// [`tmux::MuxBackend::backend_key`] matches a pin or session's
+    /// [`tmux::MuxBackend::backend_key`] matches a mux session's
     /// `backend` field.
     pub fn with_mux_backend(mut self, backend: impl tmux::MuxBackend + 'static) -> Self {
         self.mux_backends.push(Box::new(backend));
@@ -1156,7 +1220,7 @@ impl LocalDiscoveryConfig {
 
     /// Find the first registered backend whose `backend_key()`
     /// matches `key`. Used by CLI + TUI dispatch to
-    /// resolve a pin's / mux session's `backend` field to a
+    /// resolve a mux session's `backend` field to a
     /// concrete runner.
     pub fn mux_backend_by_key(&self, key: &str) -> Option<&dyn tmux::MuxBackend> {
         self.mux_backends
@@ -1300,6 +1364,7 @@ pub fn merge_fragments(fragments: impl IntoIterator<Item = GraphFragment>) -> Gr
     // a downstream mutator (cross_link, hook_sidecar, …) revisits
     // the node id.
     let mut node_provenance: BTreeMap<NodeId, NodeProvenance> = BTreeMap::new();
+    let mut mux_probes: BTreeMap<String, crate::model::MuxProbe> = BTreeMap::new();
 
     for fragment in fragments {
         for node in fragment.nodes {
@@ -1314,6 +1379,10 @@ pub fn merge_fragments(fragments: impl IntoIterator<Item = GraphFragment>) -> Gr
             node_provenance.entry(id).or_insert(prov);
         }
 
+        for (key, probe) in fragment.mux_probes {
+            mux_probes.entry(key).or_insert(probe);
+        }
+
         diagnostics.extend(fragment.diagnostics);
     }
 
@@ -1325,6 +1394,9 @@ pub fn merge_fragments(fragments: impl IntoIterator<Item = GraphFragment>) -> Gr
         aliases: crate::aliases::AliasOverlay::new(),
         pins: Vec::new(),
         node_provenance,
+        node_presence: BTreeMap::new(),
+        mux_probes,
+        history: Default::default(),
     };
     snapshot.canonicalize();
     snapshot
@@ -1342,8 +1414,8 @@ pub fn merge_fragments(fragments: impl IntoIterator<Item = GraphFragment>) -> Gr
 /// semantics the warm-start path wants. `resolved_relationships`,
 /// `pins`, and `aliases` from the prior snapshot are intentionally
 /// dropped: the resolver re-runs on the merged candidate set, and
-/// pins / aliases reload from their on-disk configs alongside the
-/// fresh discovery pass. Per-provider freshness is handled before
+/// pin slots / aliases reload from disk alongside the fresh
+/// discovery pass. Per-provider freshness is handled before
 /// this merge: [`discover_local_warm_with`] evicts stale slices from
 /// `prior` first.
 pub fn merge_with_prior(fresh: GraphSnapshot, prior: GraphSnapshot) -> GraphSnapshot {
@@ -1358,7 +1430,7 @@ pub fn merge_with_prior(fresh: GraphSnapshot, prior: GraphSnapshot) -> GraphSnap
 fn observed_cwd_git_fragment(snapshot: &GraphSnapshot, caches: &DiscoveryCaches) -> GraphFragment {
     let mut roots = BTreeSet::new();
 
-    for node in &snapshot.nodes {
+    for node in snapshot.live_nodes() {
         match node {
             GraphNode::AgentSession(session) => {
                 if let Some(cwd) = &session.cwd {

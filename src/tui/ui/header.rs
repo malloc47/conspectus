@@ -6,13 +6,13 @@ pub(super) fn draw_header(app: &App, frame: &mut Frame<'_>, area: Rect) {
     // Header shape (ADR 0078):
     //   [updated Ns ago · ] N/M sessions · M mux
     //     [ · <opt-in harness chips>]
-    //     [ · ⚠ N when ambiguous > 0]
+    //     [ · ▲ N when ambiguous > 0]
     //
     // The `Conspectus` brand and `sessions` view-label words moved
     // out — the brand was self-evident inside the TUI and the active
     // view was already in the left-panel title strip with stronger
     // visual weight. The mux-state chip section collapsed to a
-    // single `⚠ N` because ADR 0072 made the per-row chip binary and
+    // single `▲ N` because ADR 0072 made the per-row chip binary and
     // every group row already owns the ambiguity glyph. Per-harness
     // chips became opt-in via `[tui] show_harness_chips`. Freshness
     // promoted to the lead position.
@@ -24,7 +24,13 @@ pub(super) fn draw_header(app: &App, frame: &mut Frame<'_>, area: Rect) {
 
     // Identity prefix renders bold; chips after it carry their own
     // colors and stay independent of the prefix style.
-    let prefix = format!("{freshness}{session_cell} sessions · {mux_total} mux");
+    let gone = gone_mux_count(app.snapshot_handle());
+    let gone_cell = if gone > 0 {
+        format!(" · {gone} stopped")
+    } else {
+        String::new()
+    };
+    let prefix = format!("{freshness}{session_cell} sessions · {mux_total} mux{gone_cell}");
     let mut spans: Vec<Span<'static>> = vec![span!(Modifier::BOLD; "{prefix}")];
 
     // Counts walk the visible row tree, matching the count rule.
@@ -107,8 +113,8 @@ pub(super) fn append_harness_chips(
     }
 }
 
-/// Render the ambiguity triage chip (`⚠ N`) — only called when N > 0.
-/// Uses ADR 0072's `⚠` vocabulary so
+/// Render the ambiguity triage chip (`▲ N`) — only called when N > 0.
+/// Uses ADR 0072's `▲` vocabulary so
 /// the header signal aligns with the per-group glyph the row tree
 /// already shows.
 pub(super) fn append_ambiguity_chip(
@@ -119,7 +125,7 @@ pub(super) fn append_ambiguity_chip(
     spans.push(Span::raw(SECTION_SEPARATOR));
     spans.push(span!(
         Style::default().fg(theme.warning).add_modifier(Modifier::BOLD);
-        "⚠"
+        "▲"
     ));
     spans.push(span!(" {ambiguous}"));
 }
@@ -231,14 +237,14 @@ pub(super) fn push_unseen_messages_chip(app: &App, theme: &Theme, spans: &mut Ve
     }
     spans.push(span!(
         Style::default().fg(theme.error).add_modifier(Modifier::BOLD);
-        "⚠ {unseen} · ! messages  "
+        "▲ {unseen} · ! messages  "
     ));
 }
 
 /// Braille-dot spinner frames (~120ms per frame at cadence
 /// `SPINNER_FRAME_MS`). Cycles through the eight-position pattern
 /// commonly used by cli.rs / npm / systemd loaders.
-pub(super) const SPINNER_FRAMES: [&str; 8] = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧"];
+pub(super) const SPINNER_FRAMES: [&str; 8] = crate::tui::icons::marks::SPINNER;
 
 pub(super) const SPINNER_FRAME_MS: u128 = 120;
 
@@ -408,7 +414,28 @@ pub(super) fn view_label(view: View) -> &'static str {
         View::Union => "union",
         View::Prs => "prs",
         View::Forks => "forks",
+        View::Pinned => "pinned",
+        View::History => "history",
     }
+}
+
+/// Muxes whose session a successful probe found gone (ADR 0140).
+pub(super) fn gone_mux_count(handle: Option<&SnapshotHandle>) -> usize {
+    use crate::model::GraphNode;
+    let Some(handle) = handle else {
+        return 0;
+    };
+    let snapshot = handle.snapshot();
+    snapshot
+        .nodes
+        .iter()
+        .filter(|node| matches!(node, GraphNode::MuxSession(_)))
+        .filter(|node| {
+            snapshot
+                .presence(&node.id())
+                .is_some_and(crate::model::NodePresence::is_gone)
+        })
+        .count()
 }
 
 pub(super) fn snapshot_counts(handle: Option<&SnapshotHandle>) -> (usize, usize) {
@@ -422,9 +449,9 @@ pub(super) fn snapshot_counts(handle: Option<&SnapshotHandle>) -> (usize, usize)
         .iter()
         .filter(|node| matches!(node, GraphNode::AgentSession(_)))
         .count();
+    // Gone muxes are history, not muxes that exist (ADR 0140).
     let mux = snapshot
-        .nodes
-        .iter()
+        .live_nodes()
         .filter(|node| matches!(node, GraphNode::MuxSession(_)))
         .count();
     (agents, mux)
@@ -437,7 +464,7 @@ pub(super) fn contextual_status_text(app: &App) -> String {
         // explorer cursor, Enter drills or expands a group
         // depending on the cursor position, `e` toggles a group,
         // and Backspace pops the breadcrumb stack.
-        Focus::Right => "j/k cursor · Enter drill/expand · e group · ⌫ back",
+        Focus::Right => "j/k cursor · Enter drill/expand · e group · Backspace back",
     };
     let action_hint = default_action_status_hint(app);
     let refresh_hint = if app.active_view() == crate::tui::View::Prs {
@@ -465,34 +492,20 @@ pub(super) fn default_action_status_hint(app: &App) -> String {
     if matches!(row.kind, RowKind::Group(_)) {
         return "Enter/l expand · h collapse".to_string();
     }
-    let selected_pin_id = match &row.kind {
-        RowKind::AgentSession(session) => session.pin_id.as_deref(),
-        RowKind::MuxSession(mux) => mux.pin_id.as_deref(),
+    if crate::tui::actions::selected_record(app).is_some() {
+        return "Enter rebuild · . menu (pin, forget, plan, clean up)".to_string();
+    }
+    let selected_pin_id = match (&row.id, &row.kind) {
+        (RowId::Pin { pin_id }, _) => Some(pin_id.as_str()),
+        (_, RowKind::AgentSession(session)) => session.pin_id.as_deref(),
+        (_, RowKind::MuxSession(mux)) => mux.pin_id.as_deref(),
         _ => None,
     };
-    if selected_pin_id.is_some() {
-        let diagnostics = crate::tui::actions::selected_pin_diagnostics(app);
-        if let Some(hint) = crate::tui::actions::pin_status_hint(&diagnostics) {
-            if !hint.contains(" b bind") {
-                return format!("{hint} · b bind");
-            }
-            return hint;
-        }
-        if pin_placeholder_row_kind(&row.kind) {
-            let pin_id = selected_pin_id.unwrap_or("pin");
-            let pin = app
-                .snapshot_handle()
-                .and_then(|db| db.snapshot().pins.iter().find(|pin| pin.id == pin_id));
-            let display = pin.map_or(pin_id, |pin| pin.display_name.as_str());
-            let launch_hint = match pin.and_then(|p| p.binding.as_ref()) {
-                Some(crate::model::PinBinding::StaleMux { mux }) => format!(
-                    "Enter to relaunch `{display}` in existing mux `{}`",
-                    mux.native_id
-                ),
-                _ => format!("Enter to launch `{display}`"),
-            };
-            return format!("{launch_hint} · b bind · Del remove");
-        }
+    if let Some(pin_id) = selected_pin_id
+        && let Some(handle) = app.snapshot_handle()
+        && let Some(hint) = crate::tui::actions::pin_status_hint(handle.snapshot(), pin_id)
+    {
+        return hint;
     }
     match resolve_attach_target(app) {
         Ok(target) => {
@@ -528,14 +541,6 @@ pub(super) fn default_action_status_hint(app: &App) -> String {
             }
             attach_disabled_reason(&reason)
         }
-    }
-}
-
-pub(super) fn pin_placeholder_row_kind(kind: &RowKind) -> bool {
-    match kind {
-        RowKind::AgentSession(session) => row_primary_node_is_pin(&session.primary_node),
-        RowKind::MuxSession(mux) => row_primary_node_is_pin(&mux.primary_node),
-        _ => false,
     }
 }
 

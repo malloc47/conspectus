@@ -1219,7 +1219,6 @@ pub fn strip_branch_prefix(refname: &str) -> &str {
 pub fn provenance_precedence(tag: &str) -> u8 {
     match tag {
         "local_declared" => 7,
-        "local_pin" => 6,
         "global_declared" => 5,
         "global_pin" => 4,
         "strong_discovered" => 3,
@@ -1262,7 +1261,6 @@ pub fn pick_strongest<T>(
 pub fn provenance_code_from_tag(tag: &str) -> &'static str {
     match tag {
         "local_declared" => "LD",
-        "local_pin" => "LP",
         "global_declared" => "GD",
         "global_pin" => "GP",
         "strong_discovered" => "SD",
@@ -1313,8 +1311,7 @@ mod tests {
     }
 
     #[test]
-    fn tag_indicator_renders_pin_provenance_codes() {
-        assert_eq!(indicator_from_tags("local_pin", "high", false), "LP/H");
+    fn tag_indicator_renders_the_global_pin_provenance_code() {
         assert_eq!(indicator_from_tags("global_pin", "medium", true), "GP/M*");
     }
 
@@ -1327,7 +1324,7 @@ mod tests {
             id: String,
         }
 
-        assert!(provenance_precedence("local_pin") > provenance_precedence("global_declared"));
+        assert!(provenance_precedence("local_declared") > provenance_precedence("global_pin"));
         assert!(provenance_precedence("global_pin") > provenance_precedence("strong_discovered"));
 
         let selected = pick_strongest(
@@ -1338,7 +1335,7 @@ mod tests {
                     id: "discovered".to_string(),
                 },
                 Candidate {
-                    provenance: "local_pin".to_string(),
+                    provenance: "global_pin".to_string(),
                     confidence: "high".to_string(),
                     id: "pin".to_string(),
                 },

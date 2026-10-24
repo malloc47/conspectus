@@ -2,7 +2,10 @@
 
 ## Status
 
-Accepted
+Accepted. Amended by [ADR 0141](0141-pin-slots.md): `PinNode` is a pin slot's
+graph identity and carries its kind, target, overrides, and effective
+recipe; `pin_targets` replaces `pin_targets_mux`, and
+`pin_realized_by_session` is removed.
 
 ## Context
 

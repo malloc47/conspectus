@@ -16,8 +16,9 @@ use std::time::Duration;
 use anyhow::{Context, Result};
 
 use crate::discovery::{DiscoveryContext, DiscoveryProvider, GraphFragment};
-use crate::model::{GraphNode, MuxSessionId, MuxSessionNode};
+use crate::model::{GraphNode, MuxProbe, MuxProbeStatus, MuxSessionId, MuxSessionNode};
 
+pub mod commands;
 pub mod teardown;
 
 /// Mux-backend identifier stamped on `MuxSessionId` /
@@ -29,22 +30,22 @@ pub mod teardown;
 pub const TMUX_BACKEND: &str = crate::discovery::providers::TMUX;
 
 /// Compile-time list of mux backend keys this build supports.
-/// Pin parsing and attach-target resolution
+/// Slot validation and attach-target resolution
 /// consult this instead of comparing to the literal `"tmux"`
 /// string so a new backend is one array entry away. Runtime capability checks (does this backend
 /// *actually* support attach / rename / etc.) come from the
 /// [`MuxBackend`] impl's outcome returns.
 pub const KNOWN_MUX_BACKENDS: &[&str] = &[
     TMUX_BACKEND,
-    // Zellij backend. Added here so pin validation
-    // and attach dispatch accept `mux.backend = "zellij"`
-    // without touching `pins.rs` / `tui/actions.rs`.
+    // Zellij backend. Added here so slot validation and attach
+    // dispatch accept it without touching their own code.
     crate::discovery::providers::ZELLIJ,
 ];
 
 /// Format string used with `tmux list-sessions -F`. Fields are tab-separated so
-/// session roots can safely contain spaces.
-pub const TMUX_LIST_FORMAT: &str = "#{session_name}\t#{session_path}\t#{session_activity}\t#{session_created}\t#{pane_current_command}\t#{pane_pid}\t#{pane_current_path}\t#{pane_start_command}\t#{session_attached}\t#{session_attached_list}\t#{session_last_attached}";
+/// session roots can safely contain spaces. `#{session_id}` comes last, so rows
+/// recorded before it was added still parse.
+pub const TMUX_LIST_FORMAT: &str = "#{session_name}\t#{session_path}\t#{session_activity}\t#{session_created}\t#{pane_current_command}\t#{pane_pid}\t#{pane_current_path}\t#{pane_start_command}\t#{session_attached}\t#{session_attached_list}\t#{session_last_attached}\t#{session_id}";
 
 /// Backend-neutral mux abstraction (ADR 0089).
 ///
@@ -55,8 +56,8 @@ pub const TMUX_LIST_FORMAT: &str = "#{session_name}\t#{session_path}\t#{session_
 /// gate on the outcome instead of naming a specific
 /// backend.
 ///
-/// `backend_key` is the string every consumer keys off. Pin
-/// entries carry `mux.backend = "<backend_key>"` per ADR 0057;
+/// `backend_key` is the string every consumer keys off. History
+/// records carry it as their `backend` (ADR 0140);
 /// discovery stamps `MuxSessionNode.backend` with the same
 /// string. Two backends must never share a key.
 ///
@@ -65,8 +66,8 @@ pub const TMUX_LIST_FORMAT: &str = "#{session_name}\t#{session_path}\t#{session_
 /// (`Sessions`, `NoTarget`, `NameCollision`, `Unavailable`,
 /// `Failed`, `Unsupported`) are backend-neutral.
 pub trait MuxBackend: Send + Sync {
-    /// Backend identity. Stamped on pin entries
-    /// (`mux.backend`) and `MuxSessionNode.backend`. Every
+    /// Backend identity. Stamped on history records
+    /// and `MuxSessionNode.backend`. Every
     /// implementor returns a `&'static` literal.
     fn backend_key(&self) -> &'static str;
 
@@ -81,6 +82,25 @@ pub trait MuxBackend: Send + Sync {
     }
 
     fn list_sessions(&self, format: &str) -> Result<TmuxOutcome>;
+
+    /// List the sessions of server `socket_name` (`tmux -L
+    /// <socket_name>`); `None` and `Some("default")` list the default
+    /// server through [`Self::list_sessions`]. History names the
+    /// sockets worth probing (ADR 0140). A backend without separate
+    /// servers reports a failure for a named one, which leaves that
+    /// socket's muxes unknown rather than gone.
+    fn list_sessions_on(&self, socket_name: Option<&str>, format: &str) -> Result<TmuxOutcome> {
+        match effective_socket(socket_name) {
+            None => self.list_sessions(format),
+            Some(socket) => Ok(TmuxOutcome::Failed {
+                code: None,
+                message: format!(
+                    "the `{}` backend has no server named `{socket}`",
+                    self.backend_key()
+                ),
+            }),
+        }
+    }
 
     /// Capture the visible content of pane `target` (e.g. a session
     /// name like `editor`, or a fuller `session:window.pane`
@@ -111,8 +131,8 @@ pub trait MuxBackend: Send + Sync {
     }
 
     /// Spawn a detached tmux session named `name` rooted at `cwd`
-    /// running `argv`. Used by `conspectus pin launch` (ADR 0057)
-    /// when no matching mux exists yet. Default returns
+    /// running `argv`. Used by `conspectus rebuild`, `mux new`, and
+    /// `mux launch` when no matching mux exists yet. Default returns
     /// [`TmuxNewSessionOutcome::Unsupported`].
     fn new_session(
         &self,
@@ -135,8 +155,8 @@ pub trait MuxBackend: Send + Sync {
     }
 
     /// Send `literal` to pane `target`, optionally followed by an
-    /// `Enter` key (ADR 0057 §Launch §`PinStaleMux`). Used by the
-    /// stale-mux relaunch path so the harness command lands inside
+    /// `Enter` key (ADR 0142). Used by the rebuild path for a live mux
+    /// whose agent exited so the harness command lands inside
     /// the existing pane without recreating the mux. Default returns
     /// [`TmuxSendKeysOutcome::Unsupported`].
     fn send_keys(
@@ -154,7 +174,7 @@ pub trait MuxBackend: Send + Sync {
     /// (category 3, destructive). `socket_name` selects the tmux
     /// server when set. This ends the session and its child
     /// processes (the agent); it does **not** delete the harness's
-    /// session record or transcript (ADR 0087 prohibition 1) and it
+    /// session record or transcript (ADR 0143 prohibition 1) and it
     /// is **not** terminal injection (ADR 0028) — no characters enter
     /// the pane's stdin. The graceful `SIGTERM` + grace-poll is the
     /// orchestrator's job; this primitive is the terminal kill.
@@ -434,6 +454,12 @@ impl SystemTmux {
         &self.binary
     }
 
+    /// A `Command` for the tmux binary with no arguments yet; the
+    /// callers in [`commands`] supply them, socket flag included.
+    fn bare(&self) -> Command {
+        crate::exec::command(crate::exec::Program::Tmux, &self.binary)
+    }
+
     /// Build a `Command` for the tmux binary, prepending `-L
     /// <socket>` when the caller passes a non-default socket per
     /// ADR 0057. `None` and `Some("default")` both yield a bare
@@ -449,7 +475,7 @@ impl SystemTmux {
 }
 
 /// Collapse `None` and `Some("default")` to `None` so the caller's
-/// `pin.mux.socket_name` slot maps directly to the `-L` switch
+/// socket name maps directly to the `-L` switch
 /// without sentinel handling everywhere.
 fn effective_socket(socket_name: Option<&str>) -> Option<&str> {
     match socket_name {
@@ -468,7 +494,12 @@ impl MuxBackend for SystemTmux {
     }
 
     fn list_sessions(&self, format: &str) -> Result<TmuxOutcome> {
-        let output = crate::exec::command(crate::exec::Program::Tmux, &self.binary)
+        self.list_sessions_on(None, format)
+    }
+
+    fn list_sessions_on(&self, socket_name: Option<&str>, format: &str) -> Result<TmuxOutcome> {
+        let output = self
+            .cmd(socket_name)
             .args(["list-sessions", "-F", format])
             .output();
 
@@ -612,24 +643,11 @@ impl MuxBackend for SystemTmux {
         // `-d` so tmux returns immediately rather than attaching;
         // the caller invokes `attach_session` separately so the
         // create-then-attach flow stays observable across both
-        // SystemTmux (real) and FakeTmux (test) runners.
-        let mut command = self.cmd(socket_name);
-        command
-            .arg("new-session")
-            .arg("-d")
-            .arg("-s")
-            .arg(name)
-            .arg("-c")
-            .arg(cwd);
-        for token in argv {
-            command.arg(token);
-        }
-        // ADR 0103: keep the pane if the launched process exits
-        // non-zero, so a harness that fails at startup leaves its
-        // error readable. Chained in the same tmux invocation so the
-        // option is in place before the server reaps a fast-exiting
-        // child. Clean exits still end the session.
-        command.args([";", "set-option", "-t", name, "remain-on-exit", "failed"]);
+        // SystemTmux (real) and FakeTmux (test) runners. The remain-on-exit
+        // option (ADR 0103) is chained in the same invocation so it is in
+        // place before the server reaps a fast-exiting child.
+        let mut command = self.bare();
+        command.args(commands::new_session_args(socket_name, name, cwd, argv));
         let output = command.output();
 
         let output = match output {
@@ -683,11 +701,6 @@ impl MuxBackend for SystemTmux {
         // analogue — it shifts the current client to the target
         // session without starting a nested client.
         let nested = std::env::var_os("TMUX").is_some();
-        let subcommand = if nested {
-            "switch-client"
-        } else {
-            "attach-session"
-        };
 
         // `attach-session` blocks until the operator detaches; we
         // spawn + wait via `status()` so the parent terminal is
@@ -695,8 +708,8 @@ impl MuxBackend for SystemTmux {
         // need to bracket this (e.g. TUI runtime restore + reinit)
         // wrap the call site, not the runner.
         let status = self
-            .cmd(socket_name)
-            .args([subcommand, "-t", name])
+            .bare()
+            .args(commands::attach_args(socket_name, name, nested))
             .status();
 
         let status = match status {
@@ -739,12 +752,15 @@ impl MuxBackend for SystemTmux {
         literal: &str,
         press_enter: bool,
     ) -> Result<TmuxSendKeysOutcome> {
-        let mut command = self.cmd(socket_name);
-        command.args(["send-keys", "-t", target, literal]);
-        if press_enter {
-            command.arg("Enter");
-        }
-        let output = command.output();
+        let output = self
+            .bare()
+            .args(commands::send_keys_args(
+                socket_name,
+                target,
+                literal,
+                press_enter,
+            ))
+            .output();
 
         let output = match output {
             Ok(output) => output,
@@ -781,8 +797,8 @@ impl MuxBackend for SystemTmux {
 
     fn kill_session(&self, socket_name: Option<&str>, target: &str) -> Result<TmuxKillOutcome> {
         let output = self
-            .cmd(socket_name)
-            .args(["kill-session", "-t", target])
+            .bare()
+            .args(commands::kill_session_args(socket_name, target))
             .output();
 
         let output = match output {
@@ -902,7 +918,10 @@ fn display_message_value(binary: &Path, format: &str) -> Option<String> {
 
 fn looks_like_no_server(stderr: &str) -> bool {
     let lower = stderr.to_ascii_lowercase();
-    lower.contains("no server running") || lower.contains("no sessions")
+    lower.contains("no server running")
+        || lower.contains("no sessions")
+        // The socket directory is gone, as after /tmp is cleaned.
+        || (lower.contains("error connecting to") && lower.contains("no such file or directory"))
 }
 
 /// Parse `#{pane_dead} #{pane_dead_status}` output.
@@ -1030,6 +1049,41 @@ type FakeTmuxSendKeysCall = (Option<String>, String, String, bool);
 /// `(socket_name, target)` pair recorded by every
 /// `FakeTmux::kill_session` call.
 type FakeTmuxKillCall = (Option<String>, String);
+
+/// A mux server whose listing a test changes between probes, as a
+/// session starting or dying would. Clones share the listing.
+#[cfg(test)]
+#[derive(Clone, Debug, Default)]
+pub(crate) struct ScriptedTmux {
+    listing: std::sync::Arc<std::sync::Mutex<Option<String>>>,
+}
+
+#[cfg(test)]
+impl ScriptedTmux {
+    /// The server lists `stdout` (tab-separated rows, or empty).
+    pub(crate) fn lists(&self, stdout: &str) {
+        *self.listing.lock().unwrap() = Some(stdout.to_string());
+    }
+
+    /// The server is not running.
+    pub(crate) fn stops(&self) {
+        *self.listing.lock().unwrap() = None;
+    }
+}
+
+#[cfg(test)]
+impl MuxBackend for ScriptedTmux {
+    fn backend_key(&self) -> &'static str {
+        TMUX_BACKEND
+    }
+
+    fn list_sessions(&self, _format: &str) -> Result<TmuxOutcome> {
+        Ok(match self.listing.lock().unwrap().clone() {
+            Some(stdout) => TmuxOutcome::Sessions(stdout),
+            None => TmuxOutcome::Unavailable(UnavailableReason::NoServer),
+        })
+    }
+}
 
 /// Test runner that returns pre-canned outcomes.
 #[doc(hidden)]
@@ -1360,6 +1414,10 @@ impl MuxBackend for Box<dyn MuxBackend> {
         (**self).list_sessions(format)
     }
 
+    fn list_sessions_on(&self, socket_name: Option<&str>, format: &str) -> Result<TmuxOutcome> {
+        (**self).list_sessions_on(socket_name, format)
+    }
+
     fn capture_pane(&self, socket_name: Option<&str>, target: &str) -> Result<TmuxCaptureOutcome> {
         (**self).capture_pane(socket_name, target)
     }
@@ -1421,6 +1479,8 @@ pub struct TmuxSessionRow {
     pub active_pane_start_command: Option<String>,
     pub client_attached: Option<bool>,
     pub last_attached_epoch: Option<i64>,
+    /// tmux's `#{session_id}` (`$3`).
+    pub session_id: Option<String>,
 }
 
 pub fn parse_list_sessions(stdout: &str) -> Vec<TmuxSessionRow> {
@@ -1449,6 +1509,7 @@ fn parse_session_line(line: &str) -> Option<TmuxSessionRow> {
     let attached_list = optional_string(fields.next());
     let client_attached = interactive_client_attached(attached_count, attached_list.as_deref());
     let last_attached_epoch = optional_epoch(fields.next());
+    let session_id = optional_string(fields.next());
 
     Some(TmuxSessionRow {
         name,
@@ -1461,6 +1522,7 @@ fn parse_session_line(line: &str) -> Option<TmuxSessionRow> {
         active_pane_start_command,
         client_attached,
         last_attached_epoch,
+        session_id,
     })
 }
 
@@ -1526,7 +1588,14 @@ impl<R: MuxBackend> TmuxDiscovery<R> {
     }
 
     pub fn rows(&self) -> Result<TmuxDiscoveryRows> {
-        let outcome = self.runner.list_sessions(TMUX_LIST_FORMAT)?;
+        self.rows_on(None)
+    }
+
+    /// The rows of server `socket_name`, or of the default server.
+    pub fn rows_on(&self, socket_name: Option<&str>) -> Result<TmuxDiscoveryRows> {
+        let outcome = self
+            .runner
+            .list_sessions_on(socket_name, TMUX_LIST_FORMAT)?;
         Ok(match outcome {
             TmuxOutcome::Sessions(stdout) => TmuxDiscoveryRows {
                 rows: parse_list_sessions(&stdout),
@@ -1572,24 +1641,36 @@ impl<R: MuxBackend + 'static> DiscoveryProvider for TmuxDiscovery<R> {
             return Ok(cached);
         }
 
-        let outcome = self.rows()?;
-        let mut nodes = Vec::with_capacity(outcome.rows.len());
-
-        for row in &outcome.rows {
-            nodes.push(GraphNode::MuxSession(MuxSessionNode {
-                id: MuxSessionId::new(format!("{TMUX_BACKEND}:{}", row.name)),
-                backend: TMUX_BACKEND.to_string(),
-                native_id: row.name.clone(),
-                cwd: row.path.clone(),
-                active_pane_command: row.active_pane_command.clone(),
-                active_pane_pid: row.active_pane_pid,
-                active_pane_current_path: row.active_pane_current_path.clone(),
-                active_pane_start_command: row.active_pane_start_command.clone(),
-                client_attached: row.client_attached,
-                activity_epoch: row.activity_epoch,
-                created_epoch: row.created_epoch,
-                last_attached_epoch: row.last_attached_epoch,
-            }));
+        // The default server, plus every server history or a pin slot
+        // names (ADR 0140). Each probe's status is kept, so a mux is
+        // gone only when a successful probe of its server left it out.
+        let epoch = crate::discovery::current_epoch();
+        let mut nodes = Vec::new();
+        let mut mux_probes = BTreeMap::new();
+        let sockets = std::iter::once(None).chain(context.mux_sockets().map(Some));
+        for socket in sockets {
+            let outcome = self.rows_on(socket)?;
+            for row in &outcome.rows {
+                nodes.push(GraphNode::MuxSession(node_for_row(row, socket)));
+            }
+            let status = match &outcome.status {
+                TmuxStatus::Available => MuxProbeStatus::Listed,
+                TmuxStatus::Unavailable(UnavailableReason::NoServer) => MuxProbeStatus::NoServer,
+                TmuxStatus::Unavailable(UnavailableReason::BinaryNotFound) => {
+                    MuxProbeStatus::Unavailable
+                }
+                TmuxStatus::Failed { message, .. } => MuxProbeStatus::Failed {
+                    message: message.clone(),
+                },
+            };
+            mux_probes.insert(
+                crate::model::probe_key(TMUX_BACKEND, socket),
+                MuxProbe {
+                    status,
+                    epoch,
+                    exited: Vec::new(),
+                },
+            );
         }
 
         let mut fragment = GraphFragment {
@@ -1597,14 +1678,37 @@ impl<R: MuxBackend + 'static> DiscoveryProvider for TmuxDiscovery<R> {
             candidate_links: Vec::new(),
             diagnostics: Vec::new(),
             node_provenance: BTreeMap::new(),
+            mux_probes,
         };
-        crate::discovery::stamp_fragment(
-            &mut fragment,
-            TMUX_BACKEND,
-            crate::discovery::current_epoch(),
-        );
+        crate::discovery::stamp_fragment(&mut fragment, TMUX_BACKEND, epoch);
         context.caches().tmux.set((), fragment.clone());
         Ok(fragment)
+    }
+}
+
+/// The node for one listed session. A session on a named server gets
+/// a `<socket>:` prefix on its native id, so `tmux:<socket>:<name>`
+/// can't collide with a default-server session of the same name.
+fn node_for_row(row: &TmuxSessionRow, socket: Option<&str>) -> MuxSessionNode {
+    let native_id = match socket {
+        Some(socket) => format!("{socket}:{}", row.name),
+        None => row.name.clone(),
+    };
+    MuxSessionNode {
+        id: MuxSessionId::new(format!("{TMUX_BACKEND}:{native_id}")),
+        backend: TMUX_BACKEND.to_string(),
+        native_id,
+        cwd: row.path.clone(),
+        active_pane_command: row.active_pane_command.clone(),
+        active_pane_pid: row.active_pane_pid,
+        active_pane_current_path: row.active_pane_current_path.clone(),
+        active_pane_start_command: row.active_pane_start_command.clone(),
+        client_attached: row.client_attached,
+        activity_epoch: row.activity_epoch,
+        created_epoch: row.created_epoch,
+        last_attached_epoch: row.last_attached_epoch,
+        socket: socket.map(str::to_string),
+        backend_session_id: row.session_id.clone(),
     }
 }
 

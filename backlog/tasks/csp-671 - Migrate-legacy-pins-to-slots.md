@@ -1,9 +1,10 @@
 ---
 id: CSP-671
 title: Migrate legacy pins to slots
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-10-22 01:11'
+updated_date: '2026-10-22 15:05'
 labels:
   - history-pins
 milestone: m-23
@@ -31,13 +32,19 @@ Existing `[[pins.entries]]` (15 in the operator's setup, most with custom launch
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 Every legacy pin becomes a slot with the same id and equivalent effective recipe, and keeps its resumable last session
-- [ ] #2 `--dry-run` changes nothing, and a second run is a no-op
-- [ ] #3 Before migration, legacy pins still appear as slots, and a diagnostic names the command
+- [x] #1 Every legacy pin becomes a slot with the same id and equivalent effective recipe, and keeps its resumable last session
+- [x] #2 `--dry-run` changes nothing, and a second run is a no-op
+- [x] #3 Before migration, legacy pins still appear as slots, and a diagnostic names the command
 <!-- AC:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
-- [ ] #1 `just check` passes, or `git diff --check` for docs-only changes
-- [ ] #2 Docs and ADRs are updated when behavior, architecture, or workflow change
+- [x] #1 `just check` passes, or `git diff --check` for docs-only changes
+- [x] #2 Docs and ADRs are updated when behavior, architecture, or workflow change
 <!-- DOD:END -->
+
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+Added `conspectus pin migrate [--dry-run]` (`src/pin_migrate.rs`): each legacy entry becomes a mux slot with the same id that points at a history record seeded from its launch settings and last-bound session, overrides only for what the record lacks, a display name kept as an alias when it would vanish, and the converted tables removed from their files with other tables and comments intact. Until then, legacy pins load as read-only slots, `pin list` flags them, and `Diagnostic::advice` names `conspectus pin migrate`. Verified by `pin_migrate_tests`, `legacy_pins_tests`, `discovery/pins_tests`, and `tests/cli_pin.rs`.
+<!-- SECTION:FINAL_SUMMARY:END -->

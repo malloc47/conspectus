@@ -80,7 +80,7 @@ pub(super) struct TuiArgs {
     /// Dev-only: render one TUI frame to stdout with ANSI styling
     /// preserved and exit, instead of starting the interactive event
     /// loop. Lets agents iterate on renderer changes without a
-    /// manual screenshot loop (ADR 0067). Combine with
+    /// manual screenshot loop. Combine with
     /// `--snapshot-width/--snapshot-height` to size the frame,
     /// `--snapshot-keys` to drive the UI into a non-default state
     /// before the snapshot, and `--snapshot-pane` to slice the
@@ -118,15 +118,14 @@ pub(super) struct TuiArgs {
     snapshot_pane: SnapshotPaneFlag,
 
     /// Read the input `GraphSnapshot` from this JSON file instead
-    /// of running live discovery (ADR 0068). Useful when iterating
+    /// of running live discovery. Useful when iterating
     /// on a renderer fix against a stable world.
     #[cfg(feature = "snapshot")]
     #[arg(long = "snapshot-fixture", value_name = "PATH")]
     snapshot_fixture: Option<PathBuf>,
 
     /// After the input snapshot is produced (live or fixture-
-    /// loaded) and resolved, write it to this JSON file (ADR
-    /// 0068). Pair with `--snapshot-fixture` for a round-trip, or
+    /// loaded) and resolved, write it to this JSON file. Pair with `--snapshot-fixture` for a round-trip, or
     /// use alone to capture the current operator's world into a
     /// reusable fixture.
     #[cfg(feature = "snapshot")]
@@ -151,7 +150,7 @@ pub(super) struct TuiArgs {
     snapshot_now: Option<i64>,
 
     /// Launch the interactive TUI against a fixture JSON instead
-    /// of running live discovery (ADR 0069). Bypasses scan-root
+    /// of running live discovery. Bypasses scan-root
     /// discovery entirely; the `r` accelerator re-reads the
     /// fixture from disk so the operator can edit the file and
     /// cycle in the new state. Mutually exclusive with
@@ -257,11 +256,27 @@ pub(super) fn view_flag_label(view: crate::tui::View) -> &'static str {
         crate::tui::View::Union => "union",
         crate::tui::View::Prs => "prs",
         crate::tui::View::Forks => "forks",
+        crate::tui::View::Pinned => "pinned",
+        crate::tui::View::History => "history",
     }
 }
 
 impl TuiArgs {
+    /// Whether `--snapshot` asked for one rendered frame instead of
+    /// the live TUI. Snapshot mode never records history (ADR 0140).
+    fn snapshot_requested(&self) -> bool {
+        #[cfg(feature = "snapshot")]
+        {
+            self.snapshot
+        }
+        #[cfg(not(feature = "snapshot"))]
+        {
+            false
+        }
+    }
+
     pub(super) fn run(self) -> Result<()> {
+        let record_history = !self.no_cache && !self.snapshot_requested();
         let refresh_interval = parse_tui_duration(&self.refresh_interval).map_err(|err| {
             anyhow!(
                 "invalid --refresh-interval `{}`: {err}",
@@ -337,7 +352,7 @@ impl TuiArgs {
         if let Some(legacy) = self.sessions_grouping {
             eprintln!(
                 "conspectus: warning: --sessions-grouping is deprecated; \
-                 use --grouping instead (ADR 0031)"
+                 use --grouping instead"
             );
             if view != crate::tui::View::Sessions {
                 eprintln!(
@@ -423,6 +438,9 @@ impl TuiArgs {
             discovery_caches: std::sync::Arc::default(),
             forge_fetch: crate::discovery::forge::ForgeFetch::default(),
             forge_concurrency: outcome.config.forge.concurrency,
+            history: outcome.config.history,
+            launch: outcome.config.launch,
+            record_history,
         };
 
         #[cfg(feature = "snapshot")]

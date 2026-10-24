@@ -118,7 +118,7 @@ pub const CODEX_LOG: &str = "codex_log";
 /// (`discovery::hook_sidecar::apply_hook_sidecars`).
 pub const HOOK_SIDECAR: &str = "hook_sidecar";
 
-/// Operator-authored declared link / alias / pin overlay
+/// Operator-authored declared link / alias overlay
 /// (`discovery::declared::apply_declared_links` + peers).
 pub const DECLARED: &str = "declared";
 

@@ -1,181 +1,8 @@
-//! Subprocess launches: pin launch, mux new / launch, tmux attach, and the external viewer.
+//! Subprocess launches: mux new / launch, tmux attach, and the external viewer.
 
 use super::*;
+use crate::model::NodeId;
 use crate::tui::messages::{CommandRecord, LogEntry, LogTarget};
-
-/// Handle `Enter` on a pin row (ADR 0057). Suspends
-/// the TUI, re-execs into `conspectus pin launch <id>` as a
-/// subprocess so the launch logic stays in `cli::PinLaunchArgs`
-/// without re-implementing it across the runtime, waits for the
-/// nested process to exit (typically when the operator detaches
-/// from tmux), then re-enters the alt screen and refreshes the
-/// row tree.
-/// Look up the pin's `cwd` from the loaded snapshot so
-/// [`execute_launch_pin`] can pass it as `--scan-root` on the
-/// subprocess. Returns `None` when no snapshot is loaded yet or
-/// the pin id isn't present — the subprocess still runs, it just
-/// falls back to its inherited-CWD discovery (matching pre-fix
-/// behavior on the honest miss).
-pub(super) fn resolve_pin_scan_root(app: &App, pin_id: &str) -> Option<String> {
-    app.snapshot_handle()
-        .and_then(|db| db.snapshot().pins.iter().find(|p| p.id == pin_id).cloned())
-        .map(|p| p.cwd)
-}
-
-/// Build the argv the TUI passes when re-execing into
-/// `conspectus pin launch`. When `scan_root` is present it becomes
-/// a `--scan-root <path>` pair so the subprocess discovers pins
-/// from the pin's project root instead of the TUI's inherited
-/// CWD. Split out from [`execute_launch_pin`] so the argv shape
-/// is unit-testable without running the actual subprocess.
-pub(super) fn pin_launch_argv(pin_id: &str, scan_root: Option<&str>) -> Vec<String> {
-    let mut args = vec![
-        "pin".to_string(),
-        "launch".to_string(),
-        pin_id.to_string(),
-        "--no-attach".to_string(),
-    ];
-    if let Some(root) = scan_root {
-        args.push("--scan-root".to_string());
-        args.push(root.to_string());
-    }
-    args
-}
-
-/// Executor branch for `ExecSpec::LaunchPin`: re-exec into
-/// `conspectus pin launch <id> --no-attach` behind a spinner, then
-/// attach to the resulting tmux session when the pin has an
-/// attachable target. The attach goes first so the operator sees the
-/// harness's first output; the refresh runs in the background once it
-/// returns (ADR 0133). Also called directly from the Pins overlay's
-/// `PinsAction::LaunchPin` path (which has the pin id in hand from
-/// the modal and bypasses the reducer until Phase D lands).
-pub(super) fn execute_launch_pin(
-    terminal: &mut DefaultTerminal,
-    app: &mut App,
-    pin_id: &str,
-    target: Option<&PinLaunchTarget>,
-) {
-    // The pin's mux row shows the hand-off's dim-and-spinner mark for
-    // the whole launch (ADR 0127). The attach's own
-    // `HandoffReturned` keeps it until the refresh lands; a launch
-    // that never reaches the attach drops it.
-    let launching = target.map(|target| MuxSessionId::new(target.mux.native_id()));
-    if let Some(mux) = &launching {
-        app.update(Msg::LaunchStarted(mux.clone()));
-    }
-    let attached = launch_pin_steps(terminal, app, pin_id, target);
-    if let Some(mux) = launching
-        && !attached
-    {
-        app.update(Msg::LaunchAborted(mux));
-    }
-}
-
-/// The launch itself. Returns whether the attach ran.
-fn launch_pin_steps(
-    terminal: &mut DefaultTerminal,
-    app: &mut App,
-    pin_id: &str,
-    target: Option<&PinLaunchTarget>,
-) -> bool {
-    // Pass the pin's own `cwd` as `--scan-root` on the subprocess
-    // so `conspectus pin launch` discovers from the pin's project
-    // root, not the TUI's inherited CWD. Without this, launching a
-    // pin from a TUI started in a directory that isn't the pin's
-    // project root fails with "no pin `<id>` in any discovered
-    // store" — the subprocess re-discovers using its own CWD, and
-    // project-scoped pin stores (`.conspectus.toml`) don't live
-    // outside their project. User-scoped pins are unaffected
-    // either way; passing the extra scan-root is safe there too.
-    let pin_scan_root = resolve_pin_scan_root(app, pin_id);
-    let args = pin_launch_argv(pin_id, pin_scan_root.as_deref());
-    let (record, output) =
-        run_conspectus_subprocess(terminal, app, format!("Launching {pin_id}"), args);
-
-    // A launch that ends without an attach may still have changed
-    // state (a dead session removed, a worktree created), so those
-    // paths refresh before reporting. An attach refreshes in the
-    // background when it returns.
-    let log_target = LogTarget::Pin(pin_id.to_string());
-    let launch = summarize_pin_launch_output(pin_id, output);
-    let entry = launch_entry(&launch, record, log_target.clone());
-    if !launch.success {
-        refresh_after_launch_with_spinner(terminal, app);
-        app.report(entry);
-        return false;
-    }
-    app.report(entry);
-
-    let target =
-        match after_pin_launch(pin_id, target, log_target.clone(), tmux_session_unavailable) {
-            AfterPinLaunch::Attach(target) => target,
-            AfterPinLaunch::Stop(entry) => {
-                refresh_after_launch_with_spinner(terminal, app);
-                app.report(entry);
-                return false;
-            }
-        };
-
-    let mux = &target.mux;
-    let attach_target = AttachTarget {
-        mux: MuxSessionId::new(mux.native_id()),
-        backend: mux.backend.clone(),
-        native_id: mux.name.clone(),
-    };
-    let outcome = run_mux_attach(terminal, &attach_target, mux.socket_name.as_deref());
-    app.update(Msg::HandoffReturned(attach_target.mux.clone()));
-    app.report(attach_return_entry(
-        &format!("pin `{pin_id}`"),
-        outcome,
-        log_target,
-        &attach_target,
-        mux.socket_name.as_deref(),
-    ));
-    true
-}
-
-/// What a pin launch whose subprocess succeeded does next.
-#[derive(Debug)]
-pub(super) enum AfterPinLaunch<'a> {
-    /// Attach to the pin's session right away, so the operator sees
-    /// the harness's first output; the refresh waits for the attach to
-    /// return (ADR 0133).
-    Attach(&'a PinLaunchTarget),
-    /// The launch ends without an attach; refresh, then report `entry`.
-    Stop(LogEntry),
-}
-
-/// Decide whether a launched pin can be attached. `session_unavailable`
-/// checks a tmux target directly, so this needs no refreshed snapshot.
-pub(super) fn after_pin_launch<'a>(
-    pin_id: &str,
-    target: Option<&'a PinLaunchTarget>,
-    log_target: LogTarget,
-    session_unavailable: impl Fn(&PinLaunchTarget) -> Option<String>,
-) -> AfterPinLaunch<'a> {
-    let Some(target) = target else {
-        return AfterPinLaunch::Stop(
-            LogEntry::warning(format!(
-                "pin `{pin_id}` launched; attach target unavailable"
-            ))
-            .with_target(log_target),
-        );
-    };
-    let mux = &target.mux;
-    if mux.backend == crate::discovery::tmux::TMUX_BACKEND
-        && let Some(reason) = session_unavailable(target)
-    {
-        return AfterPinLaunch::Stop(
-            LogEntry::error(format!(
-                "pin `{pin_id}` launched but tmux session `{}` is not attachable: {reason}",
-                mux.name
-            ))
-            .with_target(log_target),
-        );
-    }
-    AfterPinLaunch::Attach(target)
-}
 
 /// Run `conspectus <args>` and capture its full output, both for the
 /// caller's summary and as the command record of the message log entry
@@ -217,7 +44,7 @@ fn run_conspectus_subprocess(
 /// wrote to stderr (a resume that fell back to a fresh launch, a
 /// cleared sidecar) is a warning, so the note isn't lost.
 pub(super) fn launch_entry(
-    summary: &PinLaunchSummary,
+    summary: &LaunchSummary,
     record: CommandRecord,
     target: LogTarget,
 ) -> LogEntry {
@@ -265,43 +92,9 @@ pub(super) fn attach_return_entry(
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(super) struct PinLaunchSummary {
+pub(super) struct LaunchSummary {
     pub(super) success: bool,
     pub(super) message: String,
-}
-
-pub(super) fn summarize_pin_launch_output(
-    pin_id: &str,
-    output: std::io::Result<Output>,
-) -> PinLaunchSummary {
-    match output {
-        Ok(output) if output.status.success() => {
-            let detail = command_output_excerpt(&output);
-            PinLaunchSummary {
-                success: true,
-                message: if detail.is_empty() {
-                    format!("pin `{pin_id}` launched")
-                } else {
-                    format!("pin `{pin_id}` launched: {detail}")
-                },
-            }
-        }
-        Ok(output) => {
-            let detail = command_output_excerpt(&output);
-            PinLaunchSummary {
-                success: false,
-                message: if detail.is_empty() {
-                    format!("pin `{pin_id}` launch exited with {}", output.status)
-                } else {
-                    format!("pin `{pin_id}` launch failed: {detail}")
-                },
-            }
-        }
-        Err(err) => PinLaunchSummary {
-            success: false,
-            message: format!("pin `{pin_id}` launch failed to spawn: {err}"),
-        },
-    }
 }
 
 /// Argv the TUI passes when re-execing into `conspectus mux new`
@@ -323,13 +116,13 @@ pub(super) fn mux_new_argv(name: &str, cwd: &str) -> Vec<String> {
 /// Executor branch for `ExecSpec::MuxNew`: behind a spinner,
 /// re-exec into `conspectus mux new <name> --cwd <cwd> --no-attach`,
 /// then attach to the resulting tmux session on success (refreshing
-/// after the attach returns, ADR 0133). Mirrors `execute_launch_pin` but without the pin lookup
-/// or the store-write path.
+/// after the attach returns, ADR 0133). No store write.
 pub(super) fn execute_mux_new(
     terminal: &mut DefaultTerminal,
     app: &mut App,
     name: &str,
     cwd: &str,
+    policy: crate::tui::effect::Lifecycle,
 ) {
     let args = mux_new_argv(name, cwd);
     let (record, output) =
@@ -339,7 +132,6 @@ pub(super) fn execute_mux_new(
     let launch = summarize_mux_new_output(name, output);
     let entry = launch_entry(&launch, record, LogTarget::Mux(mux.clone()));
     if !launch.success {
-        refresh_after_launch_with_spinner(terminal, app);
         app.report(entry);
         return;
     }
@@ -350,6 +142,10 @@ pub(super) fn execute_mux_new(
         backend: "tmux".to_string(),
         native_id: name.to_string(),
     };
+    // Once the refresh after the attach lands, select the new mux.
+    if policy.follows_entity {
+        app.update(Msg::FollowEntity(NodeId::MuxSession(mux.clone())));
+    }
     let outcome = run_tmux_attach(terminal, &attach_target);
     app.update(Msg::HandoffReturned(mux.clone()));
     app.report(attach_return_entry(
@@ -364,11 +160,11 @@ pub(super) fn execute_mux_new(
 pub(super) fn summarize_mux_new_output(
     name: &str,
     output: std::io::Result<Output>,
-) -> PinLaunchSummary {
+) -> LaunchSummary {
     match output {
         Ok(output) if output.status.success() => {
             let detail = command_output_excerpt(&output);
-            PinLaunchSummary {
+            LaunchSummary {
                 success: true,
                 message: if detail.is_empty() {
                     format!("mux `{name}` created")
@@ -379,7 +175,7 @@ pub(super) fn summarize_mux_new_output(
         }
         Ok(output) => {
             let detail = command_output_excerpt(&output);
-            PinLaunchSummary {
+            LaunchSummary {
                 success: false,
                 message: if detail.is_empty() {
                     format!("mux `{name}` create exited with {}", output.status)
@@ -388,11 +184,138 @@ pub(super) fn summarize_mux_new_output(
                 },
             }
         }
-        Err(err) => PinLaunchSummary {
+        Err(err) => LaunchSummary {
             success: false,
             message: format!("mux `{name}` create failed to spawn: {err}"),
         },
     }
+}
+
+/// Argv the TUI passes when re-execing into `conspectus rebuild`. The
+/// subprocess never attaches: when the operator asked to attach, the
+/// TUI does it once the mux is up, so the terminal hand-off is the
+/// TUI's.
+pub(super) fn rebuild_argv(reference: &str) -> Vec<String> {
+    vec![
+        "rebuild".to_string(),
+        reference.to_string(),
+        "--no-attach".to_string(),
+    ]
+}
+
+/// The mux a rebuild of `reference` brings back, when the pin or
+/// record names one: what to freeze while it comes back, follow
+/// afterwards, and attach to.
+pub(super) fn rebuild_mux_target(
+    app: &App,
+    reference: &str,
+) -> Option<(AttachTarget, Option<String>)> {
+    let snapshot = app.snapshot_handle()?.snapshot();
+    crate::tui::actions::mux_to_rebuild(snapshot, reference)
+}
+
+/// Executor branch for `ExecSpec::Rebuild`: behind a spinner, re-exec
+/// into `conspectus rebuild <reference> --no-attach` and log the
+/// outcome with the command record. The mux it brings back is frozen
+/// while it does, selected afterwards wherever it now lives, and with
+/// `attach` attached to, as a launch always did. The refresh comes from
+/// the hand-off the attach (or the finished rebuild) leaves behind.
+pub(super) fn execute_rebuild(
+    terminal: &mut DefaultTerminal,
+    app: &mut App,
+    reference: &str,
+    policy: crate::tui::effect::Lifecycle,
+) {
+    let attach = policy.attaches;
+    let known = rebuild_mux_target(app, reference);
+    if policy.freezes_row
+        && let Some((target, _)) = &known
+    {
+        app.update(Msg::LaunchStarted(target.mux.clone()));
+    }
+    let (record, output) = run_conspectus_subprocess(
+        terminal,
+        app,
+        format!("Rebuilding {reference}"),
+        rebuild_argv(reference),
+    );
+    let launch = match output {
+        Ok(output) if output.status.success() => {
+            let detail = command_output_excerpt(&output);
+            LaunchSummary {
+                success: true,
+                message: if detail.is_empty() {
+                    format!("rebuilt `{reference}`")
+                } else {
+                    format!("rebuilt `{reference}`: {detail}")
+                },
+            }
+        }
+        Ok(output) => LaunchSummary {
+            success: false,
+            message: format!(
+                "rebuild of `{reference}` failed: {}",
+                command_output_excerpt(&output)
+            ),
+        },
+        Err(err) => LaunchSummary {
+            success: false,
+            message: format!("rebuild of `{reference}` failed to spawn: {err}"),
+        },
+    };
+    let log_target = LogTarget::Pin(reference.to_string());
+    let entry = launch_entry(&launch, record, log_target.clone());
+    if !launch.success {
+        if policy.freezes_row
+            && let Some((target, _)) = &known
+        {
+            app.update(Msg::LaunchAborted(target.mux.clone()));
+        }
+        app.report(entry);
+        return;
+    }
+    app.report(entry);
+
+    // A session comes back inside a mux that is only known once the
+    // graph has been reloaded, so look it up after a refresh.
+    let target = match known {
+        Some(target) => Some(target),
+        None if attach => {
+            refresh_after_launch_with_spinner(terminal, app);
+            rebuild_mux_target(app, reference).or_else(|| {
+                let snapshot = app.snapshot_handle()?.snapshot();
+                crate::tui::actions::attached_mux_of(snapshot, reference)
+            })
+        }
+        None => None,
+    };
+    let Some((attach_target, socket)) = target else {
+        if attach {
+            app.post_toast(format!(
+                "`{reference}` came back, but there is no mux to attach to"
+            ));
+        }
+        return;
+    };
+    if policy.follows_entity {
+        app.update(Msg::FollowEntity(NodeId::MuxSession(
+            attach_target.mux.clone(),
+        )));
+    }
+    if !attach {
+        // Keeps the row dimmed until the refresh lands.
+        app.update(Msg::HandoffReturned(attach_target.mux.clone()));
+        return;
+    }
+    let outcome = run_mux_attach(terminal, &attach_target, socket.as_deref());
+    app.update(Msg::HandoffReturned(attach_target.mux.clone()));
+    app.report(attach_return_entry(
+        &format!("`{reference}`"),
+        outcome,
+        log_target,
+        &attach_target,
+        socket.as_deref(),
+    ));
 }
 
 /// Argv the TUI passes when re-execing into
@@ -426,6 +349,14 @@ pub(super) fn mux_launch_argv(
         args.push("--worktree-repo".to_string());
         args.push(repo.to_string());
     }
+    match request.pin {
+        crate::tui::widgets::mux_launch::PinChoice::Off => {}
+        crate::tui::widgets::mux_launch::PinChoice::Pin => args.push("--pin".to_string()),
+        crate::tui::widgets::mux_launch::PinChoice::PlanOnly => {
+            args.push("--pin".to_string());
+            args.push("--no-launch".to_string());
+        }
+    }
     if !request.launch_argv.is_empty() {
         args.push("--argv".to_string());
         for arg in &request.launch_argv {
@@ -438,12 +369,12 @@ pub(super) fn mux_launch_argv(
 /// Executor branch for `ExecSpec::MuxLaunch`: behind a spinner,
 /// re-exec into `conspectus mux launch …`, then attach. The row tree
 /// picks up the fresh mux and its harness session from the refresh
-/// that runs after the attach returns (ADR 0133). Mirrors [`execute_launch_pin`] and
-/// [`execute_mux_new`] but with the mux-launch argv shape.
+/// that runs after the attach returns (ADR 0133). Mirrors [`execute_mux_new`] but with the mux-launch argv shape.
 pub(super) fn execute_mux_launch(
     terminal: &mut DefaultTerminal,
     app: &mut App,
     request: crate::tui::widgets::mux_launch::MuxLaunchRequest,
+    policy: crate::tui::effect::Lifecycle,
 ) {
     let name = request.name.clone();
     let args = mux_launch_argv(&request);
@@ -454,7 +385,6 @@ pub(super) fn execute_mux_launch(
     let launch = summarize_mux_launch_output(&name, output);
     let entry = launch_entry(&launch, record, LogTarget::Mux(mux.clone()));
     if !launch.success {
-        refresh_after_launch_with_spinner(terminal, app);
         app.report(entry);
         return;
     }
@@ -465,6 +395,9 @@ pub(super) fn execute_mux_launch(
         backend: "tmux".to_string(),
         native_id: name.clone(),
     };
+    if policy.follows_entity {
+        app.update(Msg::FollowEntity(NodeId::MuxSession(mux.clone())));
+    }
     let outcome =
         run_tmux_attach_with_socket(terminal, &attach_target, request.mux_socket.as_deref());
     app.update(Msg::HandoffReturned(mux.clone()));
@@ -480,11 +413,11 @@ pub(super) fn execute_mux_launch(
 pub(super) fn summarize_mux_launch_output(
     name: &str,
     output: std::io::Result<Output>,
-) -> PinLaunchSummary {
+) -> LaunchSummary {
     match output {
         Ok(output) if output.status.success() => {
             let detail = command_output_excerpt(&output);
-            PinLaunchSummary {
+            LaunchSummary {
                 success: true,
                 message: if detail.is_empty() {
                     format!("mux `{name}` launched")
@@ -495,7 +428,7 @@ pub(super) fn summarize_mux_launch_output(
         }
         Ok(output) => {
             let detail = command_output_excerpt(&output);
-            PinLaunchSummary {
+            LaunchSummary {
                 success: false,
                 message: if detail.is_empty() {
                     format!("mux `{name}` launch exited with {}", output.status)
@@ -504,7 +437,7 @@ pub(super) fn summarize_mux_launch_output(
                 },
             }
         }
-        Err(err) => PinLaunchSummary {
+        Err(err) => LaunchSummary {
             success: false,
             message: format!("mux `{name}` launch failed to spawn: {err}"),
         },
@@ -525,28 +458,6 @@ pub(super) fn command_output_excerpt(output: &Output) -> String {
         .chars()
         .take(180)
         .collect()
-}
-
-pub(super) fn tmux_session_unavailable(target: &PinLaunchTarget) -> Option<String> {
-    let mut command = crate::exec::command(crate::exec::Program::Tmux, "tmux");
-    if let Some(socket) = target.mux.effective_socket() {
-        command.args(["-L", socket]);
-    }
-    let output = command
-        .args(["has-session", "-t", target.mux.name.as_str()])
-        .output();
-    match output {
-        Ok(output) if output.status.success() => None,
-        Ok(output) => {
-            let detail = command_output_excerpt(&output);
-            Some(if detail.is_empty() {
-                format!("tmux has-session exited with {}", output.status)
-            } else {
-                detail
-            })
-        }
-        Err(err) => Some(format!("could not run tmux has-session: {err}")),
-    }
 }
 
 /// Outcome of a single attach attempt. Errors carry a
@@ -731,4 +642,80 @@ pub(super) fn run_viewer_launch(
     *terminal = ratatui::init();
     let _ = terminal.clear();
     outcome
+}
+
+/// Executor branch for `ExecSpec::ShowRebuildPlan`: run
+/// `conspectus rebuild <reference> --dry-run --assume-stopped` behind a
+/// spinner (twice: the readable plan, then the same commands as a
+/// script) and show the plan with `y` copying the script. A running
+/// entity gets the plan for the case that it had stopped, since that is
+/// what rebuilding it would take; a line on top says what Enter does.
+pub(super) fn execute_show_rebuild_plan(
+    terminal: &mut DefaultTerminal,
+    app: &mut App,
+    reference: &str,
+) {
+    let args = |script: bool| {
+        let mut args = vec![
+            "rebuild".to_string(),
+            reference.to_string(),
+            "--dry-run".to_string(),
+            "--assume-stopped".to_string(),
+            "--no-attach".to_string(),
+        ];
+        if script {
+            args.push("--script".to_string());
+        }
+        args
+    };
+    let (_, output) = run_conspectus_subprocess(
+        terminal,
+        app,
+        format!("Planning rebuild of {reference}"),
+        args(false),
+    );
+    let failed = |reason: String| format!("rebuild of `{reference}` can't be planned: {reason}");
+    let plan = match output {
+        Ok(output) if output.status.success() => Ok(String::from_utf8_lossy(&output.stdout)
+            .trim_end()
+            .to_string()),
+        Ok(output) => Err(failed(command_output_excerpt(&output))),
+        Err(err) => Err(failed(format!("failed to spawn: {err}"))),
+    };
+    let plan = match plan {
+        Ok(plan) => plan,
+        Err(text) => {
+            app.open_value_modal(crate::tui::widgets::value_modal::ValueModalState::new(
+                format!("rebuild plan · {reference}"),
+                text,
+            ));
+            return;
+        }
+    };
+    let (_, script) = run_conspectus_subprocess(
+        terminal,
+        app,
+        format!("Writing the commands for {reference}"),
+        args(true),
+    );
+    let script = match script {
+        Ok(output) if output.status.success() => {
+            String::from_utf8_lossy(&output.stdout).into_owned()
+        }
+        _ => String::new(),
+    };
+    let commands = script
+        .lines()
+        .filter(|line| !line.is_empty() && !line.starts_with('#'))
+        .count();
+    let note = app
+        .snapshot_handle()
+        .and_then(|handle| crate::tui::actions::running_note(handle.snapshot(), reference))
+        .map_or_else(String::new, |note| format!("{note}\n\n"));
+    app.open_value_modal(crate::tui::widgets::value_modal::ValueModalState::plan(
+        format!("rebuild plan · {reference}"),
+        format!("{note}{plan}"),
+        script,
+        commands,
+    ));
 }

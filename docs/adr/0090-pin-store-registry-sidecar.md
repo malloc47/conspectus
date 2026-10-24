@@ -2,7 +2,9 @@
 
 ## Status
 
-Accepted
+Superseded by [ADR 0141](0141-pin-slots.md). Pin slots live in one
+user-scope store, so no registry is needed. The legacy loader still
+reads `pin-stores.json` until `pin migrate` has run.
 
 ## Context
 

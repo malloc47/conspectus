@@ -73,6 +73,7 @@ fn hook_ingest_updates_snapshot_state_and_published_bytes() {
         forge_fetch_lock: Arc::default(),
         discovery: Arc::new(|_| LocalDiscoveryConfig::empty()),
         shutdown: Arc::default(),
+        history: None,
     };
     let record = HookRecord {
         schema_version: SCHEMA_VERSION,
@@ -299,6 +300,7 @@ fn forge_ctx_with(temp: &Path, gh: SlowGh, shutdown: Arc<AtomicBool>) -> Dispatc
             git_dir: None,
             current_branch: None,
             worktree: None,
+            head_commit: None,
         })],
         ..GraphSnapshot::empty()
     };
@@ -325,6 +327,7 @@ fn forge_ctx_with(temp: &Path, gh: SlowGh, shutdown: Arc<AtomicBool>) -> Dispatc
                 .with_forge_cancel(Arc::clone(&factory_shutdown))
         }),
         shutdown,
+        history: None,
     }
 }
 
@@ -394,7 +397,7 @@ fn routine_cycles_never_ask_a_forge() {
         ProviderClass::Harness,
         ProviderClass::Git,
     ] {
-        try_class_cycle(class, &ctx).expect("cycle");
+        try_class_cycle(class, &ctx, crate::discovery::current_epoch()).expect("cycle");
         assert_eq!(
             handle_refresh(&refresh_request(class.name()), &ctx).result,
             "ok"
@@ -479,4 +482,125 @@ fn a_refresh_whose_fetch_a_shutdown_cut_short_does_not_publish() {
         Some("shutting_down")
     );
     assert!(!has_prs(&ctx));
+}
+
+/// A daemon context whose discovery runs only the mux provider, against
+/// `server`, with the daemon's own caches.
+fn mux_ctx(temp: &Path, server: crate::discovery::tmux::ScriptedTmux) -> DispatchCtx {
+    let caches: Arc<DiscoveryCaches> = Arc::default();
+    let factory_caches = Arc::clone(&caches);
+    DispatchCtx {
+        scan_roots: Arc::new(crate::cwd::ScanRoots::explicit(vec![temp.to_path_buf()])),
+        intervals: Arc::new(ServerIntervals::default()),
+        writer_lock: Arc::new(Mutex::new(())),
+        state: Arc::new(Mutex::new(SchedulerState::default())),
+        snapshot_bytes: Arc::new(Mutex::new(None)),
+        snapshot_state: Arc::new(Mutex::new(Some(GraphSnapshot::empty()))),
+        snapshot_path: Arc::new(temp.join("graph.bin")),
+        discovery_caches: caches,
+        forge_fetch_lock: Arc::default(),
+        discovery: Arc::new(move |fetch| {
+            LocalDiscoveryConfig::empty()
+                .with_caches(Arc::clone(&factory_caches))
+                .with_tmux_runner(server.clone())
+                .with_forge_fetch(fetch)
+        }),
+        shutdown: Arc::default(),
+        history: None,
+    }
+}
+
+/// The running muxes the daemon would serve right now, from both the
+/// in-memory state and the published bytes.
+fn served_muxes(ctx: &DispatchCtx) -> (Vec<String>, Vec<String>) {
+    fn names(snapshot: &GraphSnapshot) -> Vec<String> {
+        snapshot
+            .live_nodes()
+            .filter_map(|node| match node {
+                GraphNode::MuxSession(mux) => Some(mux.session_name().to_string()),
+                _ => None,
+            })
+            .collect()
+    }
+    let state = load_snapshot_state(&ctx.snapshot_state).map(|s| names(&s));
+    let bytes = ctx
+        .snapshot_bytes
+        .lock()
+        .unwrap()
+        .clone()
+        .map(|bytes| names(&snapshot::from_bytes(&bytes).expect("published bytes")));
+    (state.unwrap_or_default(), bytes.unwrap_or_default())
+}
+
+const ALPHA_ROW: &str = "alpha\t/work\t1\t1\n";
+
+fn response_is_ok(response: &Response) -> bool {
+    response.result == "ok"
+}
+
+#[test]
+fn a_mux_refresh_sees_a_started_mux_on_its_first_call_and_has_published_it_when_it_returns() {
+    let temp = tempfile::tempdir().unwrap();
+    let server = crate::discovery::tmux::ScriptedTmux::default();
+    server.lists("");
+    let ctx = mux_ctx(temp.path(), server.clone());
+    assert!(response_is_ok(&handle_refresh(
+        &refresh_request("mux"),
+        &ctx
+    )));
+    assert_eq!(served_muxes(&ctx), (vec![], vec![]));
+
+    // A mux starts right after the last probe, inside the listing's
+    // cache lifetime.
+    server.lists(ALPHA_ROW);
+    assert!(response_is_ok(&handle_refresh(
+        &refresh_request("mux"),
+        &ctx
+    )));
+
+    assert_eq!(
+        served_muxes(&ctx),
+        (vec!["alpha".to_string()], vec!["alpha".to_string()]),
+        "the snapshot a client reads right after the reply has the mux"
+    );
+}
+
+#[test]
+fn a_mux_refresh_sees_a_killed_mux_on_its_first_call() {
+    let temp = tempfile::tempdir().unwrap();
+    let server = crate::discovery::tmux::ScriptedTmux::default();
+    server.lists(ALPHA_ROW);
+    let ctx = mux_ctx(temp.path(), server.clone());
+    assert!(response_is_ok(&handle_refresh(
+        &refresh_request("mux"),
+        &ctx
+    )));
+    assert_eq!(served_muxes(&ctx).0, ["alpha"]);
+
+    server.stops();
+    assert!(response_is_ok(&handle_refresh(
+        &refresh_request("mux"),
+        &ctx
+    )));
+
+    assert_eq!(served_muxes(&ctx), (vec![], vec![]));
+}
+
+#[test]
+fn a_full_refresh_also_asks_the_mux_server_again() {
+    let temp = tempfile::tempdir().unwrap();
+    let server = crate::discovery::tmux::ScriptedTmux::default();
+    server.lists("");
+    let ctx = mux_ctx(temp.path(), server.clone());
+    let full = Request {
+        command: "refresh".to_string(),
+        args: serde_json::json!({}),
+        id: "t".to_string(),
+    };
+    assert!(response_is_ok(&handle_refresh(&full, &ctx)));
+
+    server.lists(ALPHA_ROW);
+    assert!(response_is_ok(&handle_refresh(&full, &ctx)));
+
+    assert_eq!(served_muxes(&ctx).0, ["alpha"]);
 }

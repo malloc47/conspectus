@@ -2,8 +2,8 @@
 //!
 //! A minimal two-field modal — name + cwd — that commits a
 //! [`Msg::CommitMuxNew`] the runtime turns into a subprocess re-exec of
-//! `conspectus mux new`. Modeled on the worktree menu's branch-input
-//! sub-mode but with two fields and `Tab` focus cycling.
+//! `conspectus mux new`. Up and Down move between the fields; Tab
+//! completes a directory in the cwd field.
 //!
 //! Menu-first principle: attach
 //! (`a` / `Enter`) and rename (`R`) are already mux-relevant but
@@ -17,15 +17,18 @@
 use ratatui::buffer::Buffer;
 use ratatui::crossterm::event::KeyEvent;
 use ratatui::layout::Rect;
-use ratatui::style::{Modifier, Style};
+use ratatui::macros::line;
 use ratatui::text::Line;
-use ratatui::widgets::{Block, Borders, Clear, Paragraph, Widget};
+use ratatui::widgets::Widget;
 
 use crate::tui::Msg;
 use crate::tui::modal::{Overlay, OverlayOutcome};
 use crate::tui::theme::Theme;
+use crate::tui::widgets::form::{
+    self, ScrollLinesBody, input_row, path_row, scroll_offset_for_cursor, wrap_footer,
+};
 use crate::tui::widgets::input::{InputOutcome, TextInputState};
-use crate::tui::widgets::popup_frame;
+use crate::tui::widgets::path_omnibox::{PathCandidate, PathOmniboxOutcome, PathOmniboxState};
 
 /// Which field currently holds the cursor.
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
@@ -49,7 +52,7 @@ impl NewMuxField {
 #[derive(Debug, Clone)]
 pub struct NewMuxFormState {
     name: TextInputState,
-    cwd: TextInputState,
+    cwd: PathOmniboxState,
     focus: NewMuxField,
 }
 
@@ -60,10 +63,17 @@ impl NewMuxFormState {
     /// good as-is.
     pub fn new(name: impl Into<String>, cwd: impl Into<String>) -> Self {
         Self {
-            name: TextInputState::new("Session name", name),
-            cwd: TextInputState::new("Cwd", cwd),
+            name: TextInputState::new("name", name),
+            cwd: PathOmniboxState::new("cwd", cwd),
             focus: NewMuxField::Name,
         }
+    }
+
+    /// Offer these directories when completing the cwd field.
+    #[must_use]
+    pub fn with_cwd_candidates(mut self, candidates: Vec<PathCandidate>) -> Self {
+        self.cwd.set_known_candidates(candidates);
+        self
     }
 
     pub fn name_value(&self) -> &str {
@@ -78,16 +88,8 @@ impl NewMuxFormState {
         self.focus
     }
 
-    fn active_input_mut(&mut self) -> &mut TextInputState {
-        match self.focus {
-            NewMuxField::Name => &mut self.name,
-            NewMuxField::Cwd => &mut self.cwd,
-        }
-    }
-
     /// Try to commit. `Enter` on the name field advances focus to cwd
-    /// rather than committing (mirrors two-field forms in the pins
-    /// overlay); `Enter` on cwd commits when both fields are non-empty.
+    /// rather than committing (mirrors other two-field forms); `Enter` on cwd commits when both fields are non-empty.
     /// Empty-field commit stays on that field with no side effect.
     fn try_commit(&mut self) -> OverlayOutcome {
         match self.focus {
@@ -118,30 +120,45 @@ impl Overlay for NewMuxFormState {
     type Ctx<'a> = ();
 
     fn handle(&mut self, _ctx: (), key: KeyEvent) -> OverlayOutcome {
-        // Global chords first (Tab / Esc / Ctrl-C) so they can't be
-        // stolen by the line editor.
-        use crate::tui::keybindings::overlay::{NEW_MUX_KEYS, NewMuxKey, resolve};
+        // Global chords first so the line editor can't steal them.
+        use crate::tui::keybindings::overlay::{FormKey, NEW_MUX_KEYS, resolve};
         match resolve(NEW_MUX_KEYS, key) {
-            Some(NewMuxKey::Abort | NewMuxKey::Cancel) => return OverlayOutcome::Close,
-            Some(NewMuxKey::SwitchField) => {
+            Some(FormKey::Abort | FormKey::Cancel) => return OverlayOutcome::Close,
+            Some(FormKey::Up | FormKey::Down | FormKey::Back) => {
                 self.focus = self.focus.toggle();
                 return OverlayOutcome::Consumed;
             }
-            Some(NewMuxKey::Commit) => return self.try_commit(),
-            None => {}
+            Some(FormKey::Tab) => {
+                if self.focus == NewMuxField::Cwd
+                    && matches!(
+                        self.cwd.handle_key(key),
+                        PathOmniboxOutcome::Completed | PathOmniboxOutcome::Changed
+                    )
+                {
+                    return OverlayOutcome::Consumed;
+                }
+                self.focus = self.focus.toggle();
+                return OverlayOutcome::Consumed;
+            }
+            Some(FormKey::Submit) => return self.try_commit(),
+            Some(FormKey::OptionPrev | FormKey::OptionNext | FormKey::Inherit) | None => {}
         }
-        match self.active_input_mut().handle_key(key) {
-            InputOutcome::Continue => OverlayOutcome::Consumed,
-            InputOutcome::Cancel => OverlayOutcome::Close,
-            // TextInputState's own Enter handling is unreachable here
-            // because we intercepted Enter above; kept for safety.
-            InputOutcome::Confirm(_) => self.try_commit(),
+        match self.focus {
+            NewMuxField::Cwd => {
+                self.cwd.handle_key(key);
+                OverlayOutcome::Consumed
+            }
+            NewMuxField::Name => match self.name.handle_key(key) {
+                InputOutcome::Continue => OverlayOutcome::Consumed,
+                InputOutcome::Cancel => OverlayOutcome::Close,
+                // Enter is intercepted above; kept for safety.
+                InputOutcome::Confirm(_) => self.try_commit(),
+            },
         }
     }
 }
 
-/// Bordered popup rendering — a title line, then a compact two-line
-/// stack of `label: value` rows with the focused field highlighted.
+/// Bordered popup rendering: the name and cwd rows and a key hint.
 pub struct NewMuxFormWidget<'a> {
     state: &'a NewMuxFormState,
     theme: &'a Theme,
@@ -155,50 +172,41 @@ impl<'a> NewMuxFormWidget<'a> {
 
 impl Widget for NewMuxFormWidget<'_> {
     fn render(self, area: Rect, buf: &mut Buffer) {
+        let modal_width = 76;
+        let inner_width =
+            usize::from(std::cmp::min(modal_width, area.width.saturating_sub(4)).max(44)) - 2;
+        let cols = form::Cols::new(inner_width);
         let name_focused = self.state.focus == NewMuxField::Name;
         let cwd_focused = self.state.focus == NewMuxField::Cwd;
-
-        let name_line = format_field_line("name", self.state.name.value(), name_focused);
-        let cwd_line = format_field_line("cwd", self.state.cwd.value(), cwd_focused);
-
-        let lines: Vec<Line> = vec![
-            Line::styled(
-                "New tmux session",
-                Style::default().add_modifier(Modifier::BOLD),
-            ),
-            Line::from(""),
-            name_line,
-            cwd_line,
-            Line::from(""),
-            Line::from(crate::tui::keybindings::overlay::footer(
-                crate::tui::keybindings::overlay::NEW_MUX_KEYS,
-            )),
+        let mut lines: Vec<Line<'static>> = vec![
+            input_row("name", &self.state.name, name_focused, cols),
+            path_row("cwd", &self.state.cwd, cwd_focused, cols),
+            line![""],
         ];
-
-        let height = u16::try_from(lines.len())
-            .unwrap_or(u16::MAX)
-            .saturating_add(2)
-            .clamp(6, area.height);
-        let width = 60_u16.min(area.width);
-        let rect = popup_frame::centered_rect(area, width, height);
-        Clear.render(rect, buf);
-        let block = Block::default()
-            .borders(Borders::ALL)
-            .title(" Mux ")
-            .border_style(Style::default().fg(self.theme.panel_focus_accent));
-        let inner = block.inner(rect);
-        block.render(rect, buf);
-        Paragraph::new(lines).render(inner, buf);
-    }
-}
-
-fn format_field_line(label: &str, value: &str, focused: bool) -> Line<'static> {
-    let marker = if focused { "▸" } else { " " };
-    let text = format!("{marker} {label}: {value}");
-    if focused {
-        Line::styled(text, Style::default().add_modifier(Modifier::BOLD))
-    } else {
-        Line::from(text)
+        lines.extend(wrap_footer(
+            &crate::tui::keybindings::overlay::footer(
+                crate::tui::keybindings::overlay::NEW_MUX_KEYS,
+            ),
+            inner_width,
+        ));
+        let modal = form::modal_rect(area, modal_width, lines.len(), 6);
+        let inner_height = usize::from(modal.height.saturating_sub(2));
+        let body = ScrollLinesBody {
+            scroll_offset: scroll_offset_for_cursor(
+                usize::from(cwd_focused),
+                inner_height,
+                lines.len(),
+            ),
+            lines,
+            inner_width: usize::from(modal.width.saturating_sub(2)),
+            inner_height,
+        };
+        crate::tui::widgets::popup_frame::themed_popup(
+            body,
+            line![" New tmux session "],
+            self.theme,
+        )
+        .render(area, buf);
     }
 }
 

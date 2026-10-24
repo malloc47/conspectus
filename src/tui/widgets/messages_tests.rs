@@ -81,7 +81,7 @@ fn renders_list_and_selected_detail() {
         .collect();
     assert!(text.contains("Messages · 2"), "{text}");
     assert!(
-        text.contains("✗   0s ago  pin `w1` launch failed"),
+        text.contains("×   0s ago  pin `w1` launch failed"),
         "{text}"
     );
     assert!(text.contains("attached tmux:w2"), "{text}");

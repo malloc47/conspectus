@@ -172,23 +172,46 @@ fn active_mux_candidates(snapshot: &GraphSnapshot, session: &NodeId) -> Vec<MuxS
 }
 
 /// Graph-aware plan for renaming a mux session. Beyond the tmux
-/// native-name change, this cascades to any pin whose `mux.name`
-/// matches the current native id + socket so pin bindings survive
-/// the rename.
+/// native-name change, this cascades to any pin slot that overrides
+/// the mux's name so the slot keeps following it.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct MuxRenamePlan {
     pub mux_rename: MuxNativeRename,
-    pub pin_mux_name_updates: Vec<PinMuxNameUpdate>,
+    pub pin_slot_updates: Vec<PinSlotNameUpdate>,
 }
 
-/// A single pin whose `mux.name` must be rewritten to track a mux
-/// native-name change. `store_path` names the TOML file the executor
-/// writes; `pin_id` narrows the entry inside that file.
+/// A pin slot whose `name` override must follow a mux rename (ADR
+/// 0141): the slot points at the mux by history record, which follows
+/// the rename on its own, but an override would otherwise rebuild the
+/// mux under its old name.
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub struct PinMuxNameUpdate {
-    pub pin_id: String,
-    pub store_path: String,
-    pub new_mux_name: String,
+pub struct PinSlotNameUpdate {
+    pub slot_id: String,
+    pub new_name: String,
+}
+
+/// Write each update to the slot store. Returns, per update, whether
+/// the slot changed or why it couldn't.
+pub fn apply_pin_slot_updates(
+    store: &crate::pin_slots::SlotStore,
+    updates: &[PinSlotNameUpdate],
+) -> Vec<(String, Result<bool, String>)> {
+    updates
+        .iter()
+        .map(|update| {
+            let result = store
+                .update(&update.slot_id, |slot| {
+                    slot.overrides.insert(
+                        "name".to_string(),
+                        crate::model::FieldValue::Text(update.new_name.clone()),
+                    );
+                    Ok(())
+                })
+                .map(|write| write.changed)
+                .map_err(|err| err.to_string());
+            (update.slot_id.clone(), result)
+        })
+        .collect()
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -203,6 +226,9 @@ pub enum MuxRenamePlanError {
     /// snapshot. Distinguishes "mux vanished mid-session" from other
     /// failures.
     MuxNotFound,
+    /// The mux is only in history (ADR 0140): there is no session to
+    /// rename until it is rebuilt.
+    MuxGone,
 }
 
 impl std::fmt::Display for MuxRenamePlanError {
@@ -211,6 +237,7 @@ impl std::fmt::Display for MuxRenamePlanError {
             Self::EmptyName => write!(f, "mux rename requires a non-empty name"),
             Self::NoOp => write!(f, "mux rename: new name matches current name"),
             Self::MuxNotFound => write!(f, "mux not present in the discovered snapshot"),
+            Self::MuxGone => write!(f, "the mux is gone; rebuild it before renaming"),
         }
     }
 }
@@ -220,13 +247,11 @@ impl std::error::Error for MuxRenamePlanError {}
 /// Build a [`MuxRenamePlan`] for `mux_id` with `new_name`.
 ///
 /// `new_name` is the bare tmux session name — no `tmux:` prefix, no
-/// `<socket>:` prefix. Callers who want to change the socket use the
-/// separate pin-rebind form, not this plan.
+/// `<socket>:` prefix. A socket can't be changed by a rename.
 ///
-/// Every pin whose `mux.name` matches the mux's current bare name
-/// (and whose `mux.socket_name` matches the mux's socket) picks up a
-/// [`PinMuxNameUpdate`] so the executor rewrites the pin store in
-/// lockstep with the tmux rename.
+/// Every pin slot that targets this mux and overrides its `name` with
+/// the current bare name picks up a [`PinSlotNameUpdate`] so the
+/// executor rewrites `pins.toml` in lockstep with the tmux rename.
 pub fn plan_mux_rename(
     snapshot: &GraphSnapshot,
     mux_id: &MuxSessionId,
@@ -237,43 +262,48 @@ pub fn plan_mux_rename(
     }
 
     let mux = mux_node(snapshot, mux_id).ok_or(MuxRenamePlanError::MuxNotFound)?;
+    if !snapshot.is_live(&crate::model::NodeId::MuxSession(mux_id.clone())) {
+        return Err(MuxRenamePlanError::MuxGone);
+    }
 
     // `MuxSessionNode.native_id` drops the backend prefix (e.g.
     // `editor` for a default-socket tmux session, `scratch:editor`
     // for a non-default socket). Split off the leading `<socket>:`
     // if present so we compare against the bare tmux name — which
-    // is what `PinMux.name` stores.
-    let (mux_socket, bare_current) = split_socket_and_name(&mux.native_id);
+    // is what a slot's `name` override holds.
+    let (_mux_socket, bare_current) = split_socket_and_name(&mux.native_id);
 
     if bare_current == new_name {
         return Err(MuxRenamePlanError::NoOp);
     }
 
-    let mut pin_mux_name_updates = Vec::new();
-    for pin in &snapshot.pins {
-        if pin.mux.backend != mux.backend {
-            continue;
-        }
-        if pin.mux.name != bare_current {
-            continue;
-        }
-        // Socket comparison: pin's `socket_name` may be `None` /
-        // `Some("default")` (both resolve to default) or an explicit
-        // non-default name. Match against the mux's parsed socket.
-        let pin_socket_effective = pin.mux.effective_socket();
-        if pin_socket_effective != mux_socket {
-            continue;
-        }
-        pin_mux_name_updates.push(PinMuxNameUpdate {
-            pin_id: pin.id.clone(),
-            store_path: pin.store_path.clone(),
-            new_mux_name: new_name.clone(),
-        });
-    }
+    let mux_node_id = crate::model::NodeId::MuxSession(mux_id.clone());
+    let pin_slot_updates = snapshot
+        .nodes
+        .iter()
+        .filter_map(|node| match node {
+            crate::model::GraphNode::Pin(pin)
+                if pin.kind == crate::model::PinKind::Mux
+                    && !pin.legacy
+                    && pin.target_node.as_ref() == Some(&mux_node_id)
+                    && pin
+                        .overrides
+                        .get("name")
+                        .and_then(crate::model::FieldValue::as_text)
+                        == Some(bare_current) =>
+            {
+                Some(PinSlotNameUpdate {
+                    slot_id: pin.id.id.clone(),
+                    new_name: new_name.clone(),
+                })
+            }
+            _ => None,
+        })
+        .collect();
 
     Ok(MuxRenamePlan {
         mux_rename: MuxNativeRename::for_node(mux, new_name),
-        pin_mux_name_updates,
+        pin_slot_updates,
     })
 }
 
@@ -290,8 +320,8 @@ fn mux_node<'a>(
 /// Split a `MuxSessionNode.native_id` like `scratch:editor` into
 /// `(Some("scratch"), "editor")`, or `editor` into `(None, "editor")`.
 /// The bare tmux name is the second element — what
-/// `PinMux.name` stores and what the operator types in the rename
-/// modal.
+/// a slot's `name` override holds and what the operator types in the
+/// rename modal.
 fn split_socket_and_name(native_id: &str) -> (Option<&str>, &str) {
     match native_id.split_once(':') {
         Some((socket, name)) => (Some(socket), name),

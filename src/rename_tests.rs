@@ -200,25 +200,26 @@ fn empty_display_name_is_rejected() {
 
 // --- H-RENAME-MUX: graph-aware mux rename tests -----------------
 
-use crate::model::PinCandidate;
+use crate::model::{FieldValue, PinId, PinKind, PinNode, SlotFields, SlotStatus};
 
-fn pin_bound_to(pin_id: &str, mux_name: &str, socket: Option<&str>) -> PinCandidate {
-    PinCandidate {
-        id: pin_id.to_string(),
-        display_name: pin_id.to_string(),
-        harness: "codex".to_string(),
-        cwd: "/workspace".to_string(),
-        mux: crate::model::PinMuxRef {
-            backend: "tmux".to_string(),
-            name: mux_name.to_string(),
-            socket_name: socket.map(str::to_string),
-        },
-        launch_argv: None,
-        reason: None,
-        provenance: crate::model::Provenance::LocalPin,
-        store_path: format!("/workspace/.conspectus.toml.{pin_id}"),
-        binding: None,
-    }
+/// A mux slot pointing at `mux_id` with a `name` override.
+fn pin_slot_for(slot_id: &str, mux_id: &MuxSessionId, name: Option<&str>) -> GraphNode {
+    GraphNode::Pin(PinNode {
+        id: PinId::new(slot_id),
+        kind: PinKind::Mux,
+        label: slot_id.to_string(),
+        target: Some("history:h_1".to_string()),
+        target_node: Some(crate::model::NodeId::MuxSession(mux_id.clone())),
+        status: SlotStatus::Live,
+        overrides: name
+            .map(|name| SlotFields::from([("name".to_string(), FieldValue::Text(name.into()))]))
+            .unwrap_or_default(),
+        snapshot: SlotFields::new(),
+        effective: Vec::new(),
+        order: 0,
+        legacy: false,
+        pinned_at: None,
+    })
 }
 
 #[test]
@@ -232,57 +233,99 @@ fn plan_mux_rename_with_no_pins_writes_only_the_mux() {
 
     assert_eq!(plan.mux_rename.mux, mux_id);
     assert_eq!(plan.mux_rename.new_name, "workshop");
-    assert!(plan.pin_mux_name_updates.is_empty());
+    assert!(plan.pin_slot_updates.is_empty());
 }
 
 #[test]
-fn plan_mux_rename_cascades_to_matching_pin() {
+fn plan_mux_rename_updates_the_name_override_of_slots_pointing_at_the_mux() {
     let mut snapshot = GraphSnapshot::empty();
     let m = mux("editor");
     let mux_id = m.id.clone();
     snapshot.nodes.push(GraphNode::MuxSession(m));
-    snapshot.pins.push(pin_bound_to("ingest", "editor", None));
+    snapshot
+        .nodes
+        .push(pin_slot_for("ingest-a", &mux_id, Some("editor")));
+    snapshot
+        .nodes
+        .push(pin_slot_for("ingest-b", &mux_id, Some("editor")));
+    // No name override: the record follows the rename by itself.
+    snapshot.nodes.push(pin_slot_for("plain", &mux_id, None));
+    // Another name: not this mux's.
+    snapshot
+        .nodes
+        .push(pin_slot_for("other", &mux_id, Some("elsewhere")));
 
     let plan = plan_mux_rename(&snapshot, &mux_id, "workshop".to_string()).expect("plan");
-
-    assert_eq!(plan.pin_mux_name_updates.len(), 1);
-    let update = &plan.pin_mux_name_updates[0];
-    assert_eq!(update.pin_id, "ingest");
-    assert_eq!(update.new_mux_name, "workshop");
-    assert_eq!(update.store_path, "/workspace/.conspectus.toml.ingest");
-}
-
-#[test]
-fn plan_mux_rename_ignores_pins_pointed_at_a_different_mux() {
-    let mut snapshot = GraphSnapshot::empty();
-    let m = mux("editor");
-    let mux_id = m.id.clone();
-    snapshot.nodes.push(GraphNode::MuxSession(m));
-    snapshot.pins.push(pin_bound_to("other", "workshop", None));
-
-    let plan = plan_mux_rename(&snapshot, &mux_id, "workshop".to_string()).expect("plan");
-    assert!(plan.pin_mux_name_updates.is_empty());
-}
-
-#[test]
-fn plan_mux_rename_cascades_to_every_matching_pin() {
-    // ADR 0057 discourages multiple pins on the same mux but the
-    // plan handles it gracefully — every pin whose mux triple
-    // matches picks up an update entry.
-    let mut snapshot = GraphSnapshot::empty();
-    let m = mux("editor");
-    let mux_id = m.id.clone();
-    snapshot.nodes.push(GraphNode::MuxSession(m));
-    snapshot.pins.push(pin_bound_to("ingest-a", "editor", None));
-    snapshot.pins.push(pin_bound_to("ingest-b", "editor", None));
-
-    let plan = plan_mux_rename(&snapshot, &mux_id, "workshop".to_string()).expect("plan");
-    let ids: Vec<_> = plan
-        .pin_mux_name_updates
+    let updates: Vec<_> = plan
+        .pin_slot_updates
         .iter()
-        .map(|u| u.pin_id.clone())
+        .map(|u| (u.slot_id.as_str(), u.new_name.as_str()))
         .collect();
-    assert_eq!(ids, vec!["ingest-a".to_string(), "ingest-b".to_string()]);
+    assert_eq!(
+        updates,
+        [("ingest-a", "workshop"), ("ingest-b", "workshop")]
+    );
+}
+
+#[test]
+fn plan_mux_rename_ignores_slots_pointing_at_a_different_mux() {
+    let mut snapshot = GraphSnapshot::empty();
+    let m = mux("editor");
+    let mux_id = m.id.clone();
+    let other = MuxSessionId::new("tmux:other");
+    snapshot.nodes.push(GraphNode::MuxSession(m));
+    snapshot
+        .nodes
+        .push(pin_slot_for("theirs", &other, Some("editor")));
+
+    let plan = plan_mux_rename(&snapshot, &mux_id, "workshop".to_string()).expect("plan");
+    assert!(plan.pin_slot_updates.is_empty());
+}
+
+#[test]
+fn applying_slot_updates_changes_the_override_and_reports_failures() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = crate::pin_slots::SlotStore::at(dir.path().join("pins.toml"));
+    store
+        .add(crate::model::PinSlot {
+            id: "ingest".into(),
+            kind: PinKind::Mux,
+            target: None,
+            pinned_at: None,
+            overrides: SlotFields::from([("name".to_string(), FieldValue::Text("editor".into()))]),
+            snapshot: SlotFields::new(),
+            order: 0,
+            legacy: false,
+        })
+        .unwrap();
+    let updates = [
+        PinSlotNameUpdate {
+            slot_id: "ingest".into(),
+            new_name: "workshop".into(),
+        },
+        PinSlotNameUpdate {
+            slot_id: "absent".into(),
+            new_name: "workshop".into(),
+        },
+    ];
+    let results = apply_pin_slot_updates(&store, &updates);
+    assert_eq!(results[0], ("ingest".to_string(), Ok(true)));
+    assert!(
+        results[1]
+            .1
+            .as_ref()
+            .unwrap_err()
+            .contains("no pin named `absent`")
+    );
+    assert_eq!(
+        store.load().slots[0].overrides["name"],
+        FieldValue::Text("workshop".into())
+    );
+    // Again: nothing left to change.
+    assert_eq!(
+        apply_pin_slot_updates(&store, &updates[..1])[0].1,
+        Ok(false)
+    );
 }
 
 #[test]
@@ -316,26 +359,6 @@ fn plan_mux_rename_rejects_missing_mux() {
     let err =
         plan_mux_rename(&snapshot, &ghost, "workshop".to_string()).expect_err("expected not-found");
     assert_eq!(err, MuxRenamePlanError::MuxNotFound);
-}
-
-#[test]
-fn plan_mux_rename_socket_mismatch_skips_pin() {
-    // Pin declares socket="scratch"; mux is a default-socket
-    // (parsed socket = None). The socket-effective comparison
-    // guards against cross-socket cascade.
-    let mut snapshot = GraphSnapshot::empty();
-    let m = mux("editor");
-    let mux_id = m.id.clone();
-    snapshot.nodes.push(GraphNode::MuxSession(m));
-    snapshot
-        .pins
-        .push(pin_bound_to("ingest", "editor", Some("scratch")));
-
-    let plan = plan_mux_rename(&snapshot, &mux_id, "workshop".to_string()).expect("plan");
-    assert!(
-        plan.pin_mux_name_updates.is_empty(),
-        "pin on a different socket must not cascade"
-    );
 }
 
 /// A mux node shaped the way discovery emits it: the id carries the

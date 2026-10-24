@@ -76,6 +76,9 @@ pub fn context_for_node(
     can_mutate: bool,
 ) -> WorktreeMenuContext {
     let index = SnapshotIndex::new(snapshot);
+    // A gone repo or worktree has nothing to change until it is
+    // rebuilt (ADR 0140, ADR 0142).
+    let can_mutate = can_mutate && index.is_live(node);
     match node {
         NodeId::Repo(repo_id) => WorktreeMenuContext {
             context: WorktreeContext::Repo,
@@ -161,8 +164,7 @@ fn worktree_checkout_containing<'a>(
 ) -> Option<&'a CheckoutNode> {
     let p = Path::new(path);
     snapshot
-        .nodes
-        .iter()
+        .live_nodes()
         .filter_map(|n| match n {
             GraphNode::Checkout(c)
                 if c.worktree.is_some() && path_is_ancestor_of(Path::new(&c.root), p) =>
@@ -190,7 +192,7 @@ fn checkout_short_branch(checkout: &CheckoutNode) -> Option<String> {
 /// the operator lands on the attachable row.
 fn first_session_row_in(snapshot: &GraphSnapshot, worktree_path: &str) -> Option<RowId> {
     let root = Path::new(worktree_path);
-    let mux = snapshot.nodes.iter().find_map(|n| match n {
+    let mux = snapshot.live_nodes().find_map(|n| match n {
         GraphNode::MuxSession(m) => {
             let cwd = m.active_pane_current_path.as_deref().or(m.cwd.as_deref());
             cwd.filter(|c| path_is_ancestor_of(root, Path::new(c)))
@@ -199,7 +201,7 @@ fn first_session_row_in(snapshot: &GraphSnapshot, worktree_path: &str) -> Option
         _ => None,
     });
     mux.or_else(|| {
-        snapshot.nodes.iter().find_map(|n| match n {
+        snapshot.live_nodes().find_map(|n| match n {
             GraphNode::AgentSession(s) => s
                 .cwd
                 .as_deref()
@@ -214,7 +216,7 @@ fn first_session_row_in(snapshot: &GraphSnapshot, worktree_path: &str) -> Option
 /// first), used as the `-C` path when creating from a repo node.
 fn primary_worktree_root(snapshot: &GraphSnapshot, repo: &RepoId) -> Option<String> {
     let mut fallback = None;
-    for node in &snapshot.nodes {
+    for node in snapshot.live_nodes() {
         if let GraphNode::Checkout(c) = node
             && &c.id.repo == repo
         {
@@ -232,7 +234,7 @@ fn primary_worktree_root(snapshot: &GraphSnapshot, repo: &RepoId) -> Option<Stri
 fn live_sessions_in_worktree(snapshot: &GraphSnapshot, worktree_path: &str) -> Vec<String> {
     let root = Path::new(worktree_path);
     let mut out = Vec::new();
-    for node in &snapshot.nodes {
+    for node in snapshot.live_nodes() {
         match node {
             GraphNode::AgentSession(s) => {
                 if let Some(cwd) = &s.cwd
@@ -547,7 +549,7 @@ impl Widget for WorktreeMenuWidget<'_> {
                 .iter()
                 .enumerate()
                 .map(|(i, action)| {
-                    let marker = if i == self.state.cursor { "▸ " } else { "  " };
+                    let marker = if i == self.state.cursor { "► " } else { "  " };
                     let style = if i == self.state.cursor {
                         Style::default().add_modifier(Modifier::BOLD)
                     } else {
@@ -565,7 +567,7 @@ impl Widget for WorktreeMenuWidget<'_> {
                 if !self.state.ctx.guard_sessions.is_empty() {
                     lines.push(Line::styled(
                         format!(
-                            "⚠ hosts {} live session(s):",
+                            "▲ hosts {} live session(s):",
                             self.state.ctx.guard_sessions.len()
                         ),
                         Style::default().add_modifier(Modifier::BOLD),
@@ -590,7 +592,7 @@ impl Widget for WorktreeMenuWidget<'_> {
                 if !self.state.ctx.guard_sessions.is_empty() {
                     lines.push(Line::styled(
                         format!(
-                            "⚠ hosts {} live session(s):",
+                            "▲ hosts {} live session(s):",
                             self.state.ctx.guard_sessions.len()
                         ),
                         Style::default().add_modifier(Modifier::BOLD),
@@ -612,13 +614,15 @@ impl Widget for WorktreeMenuWidget<'_> {
                         format!("Close down stream `{branch}`"),
                         Style::default().add_modifier(Modifier::BOLD),
                     ),
-                    Line::from("Ends its sessions, removes the worktree, drops its pins."),
+                    Line::from(
+                        "Ends its sessions, removes the worktree, forgets its history records.",
+                    ),
                     Line::from(""),
                 ];
                 if !self.state.ctx.guard_sessions.is_empty() {
                     lines.push(Line::styled(
                         format!(
-                            "⚠ ends {} live session(s) (transcripts preserved):",
+                            "▲ ends {} live session(s) (transcripts preserved):",
                             self.state.ctx.guard_sessions.len()
                         ),
                         Style::default().add_modifier(Modifier::BOLD),

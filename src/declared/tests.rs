@@ -263,6 +263,7 @@ fn store_selection_reuses_existing_workspace_config_for_nested_worktree() {
                 git_dir: None,
                 current_branch: None,
                 worktree: None,
+                head_commit: None,
             }),
         ],
         ..GraphSnapshot::empty()
@@ -326,6 +327,7 @@ fn store_selection_uses_session_cwd_when_it_sits_under_known_worktree() {
                 git_dir: None,
                 current_branch: None,
                 worktree: None,
+                head_commit: None,
             }),
             GraphNode::AgentSession(
                 AgentSessionNode::new(
@@ -370,6 +372,7 @@ fn store_selection_uses_mux_cwd_when_it_sits_under_known_worktree() {
                 git_dir: None,
                 current_branch: None,
                 worktree: None,
+                head_commit: None,
             }),
             GraphNode::MuxSession(
                 MuxSessionNode::new(
@@ -767,4 +770,107 @@ fn declared_endpoint_parse_compact_reports_missing_required_field() {
         err.contains("missing endpoint field `common_dir`"),
         "expected required-field error, got {err:?}"
     );
+}
+
+#[test]
+fn links_written_for_the_removed_pin_relations_still_load_beside_valid_ones() {
+    let document = parse_declared_document(
+        r#"
+            [declared]
+            schema_version = 1
+
+            [[declared.links]]
+            id = "old-binding"
+            relation = "pin_realized_by_session"
+            state = "active"
+            source = { type = "pin", id = "alpha" }
+            target = { type = "repo", common_dir = "/repo/.git" }
+
+            [[declared.links]]
+            id = "old-mux"
+            relation = "pin_targets_mux"
+            state = "active"
+            source = { type = "pin", id = "alpha" }
+            target = { type = "repo", common_dir = "/repo/.git" }
+
+            [[declared.links]]
+            id = "fine"
+            relation = "belongs_to_repo"
+            state = "active"
+            source = { type = "checkout", repo_common_dir = "/repo/.git", root = "/repo" }
+            target = { type = "repo", common_dir = "/repo/.git" }
+            "#,
+    )
+    .expect("the file still parses");
+
+    let links = document.declared.expect("declared").links;
+    assert_eq!(links.len(), 3);
+    assert_eq!(links[0].relation, RelationKind::PinTargets);
+    assert_eq!(links[1].relation, RelationKind::PinTargets);
+    assert_eq!(links[2].relation, RelationKind::BelongsToRepo);
+}
+
+#[cfg(unix)]
+mod atomic_writes {
+    use std::fs;
+    use std::os::unix::fs::{MetadataExt, PermissionsExt, symlink};
+
+    use crate::declared::{write_atomic, write_private_atomic};
+
+    #[test]
+    fn a_symlinked_file_is_written_through_and_stays_a_link() {
+        let dir = tempfile::tempdir().unwrap();
+        let real = dir.path().join("dotfiles/config.toml");
+        fs::create_dir_all(real.parent().unwrap()).unwrap();
+        fs::write(&real, "old").unwrap();
+        let link = dir.path().join("config.toml");
+        symlink(&real, &link).unwrap();
+
+        write_atomic(&link, "new").unwrap();
+
+        assert!(
+            fs::symlink_metadata(&link)
+                .unwrap()
+                .file_type()
+                .is_symlink()
+        );
+        assert_eq!(fs::read_to_string(&real).unwrap(), "new");
+    }
+
+    #[test]
+    fn an_existing_files_mode_survives() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("c.toml");
+        fs::write(&path, "old").unwrap();
+        fs::set_permissions(&path, fs::Permissions::from_mode(0o600)).unwrap();
+
+        write_atomic(&path, "new").unwrap();
+
+        assert_eq!(fs::metadata(&path).unwrap().mode() & 0o777, 0o600);
+        assert_eq!(fs::read_to_string(&path).unwrap(), "new");
+    }
+
+    #[test]
+    fn a_read_only_file_is_refused_and_left_alone() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("c.toml");
+        fs::write(&path, "old").unwrap();
+        fs::set_permissions(&path, fs::Permissions::from_mode(0o444)).unwrap();
+
+        let err = write_atomic(&path, "new").unwrap_err();
+
+        assert_eq!(err.kind(), std::io::ErrorKind::PermissionDenied);
+        assert!(err.to_string().contains("read-only"), "{err}");
+        assert_eq!(fs::read_to_string(&path).unwrap(), "old");
+    }
+
+    #[test]
+    fn private_files_are_created_owner_only() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("p.json");
+
+        write_private_atomic(&path, "x").unwrap();
+
+        assert_eq!(fs::metadata(&path).unwrap().mode() & 0o777, 0o600);
+    }
 }

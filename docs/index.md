@@ -32,6 +32,12 @@ pre-migration preamble.
 Purpose: maps pre-migration story IDs (`P8-014`, `H-PIN-TUI-011`) to their
 Backlog.md task IDs, with each story's first landing time and commit.
 
+## `docs/tui-columns.md`
+
+Purpose: living reference for the TUI's left panel: every view and row
+kind column by column, the glyphs and state words, age rules, and
+rendered example frames. Tests keep it in step with the code.
+
 ## `docs/operations.md`
 
 Purpose: user-facing runtime reference covering the environment variables
@@ -40,12 +46,12 @@ config-file precedence, and the current CLI surface.
 
 ## `docs/pins-walkthrough.md`
 
-Purpose: teaching-style walkthrough for session pins covering the "why"
-behind pinning, the four binding states, the lifecycle at a glance, the
-commonly confused command pairs, the TUI controls for each pin
-operation (create, launch, rename, remove, bind, rebind, adopt), the
-mux-death continuity flow, and a dry-run script. Pairs with the
-reference-style §"Session pins" in `docs/operations.md`.
+Purpose: teaching-style walkthrough of history, pin slots, and rebuild
+covering the three layers, presence (live / gone / unknown), pinning,
+editing overrides, rebuilding a gone mux, planned slots, reaping, and
+migrating legacy pins, with a dry-run script. Pairs with the
+reference-style §"Pin slots, history, and rebuild" in
+`docs/operations.md`.
 
 ## `docs/worktrees.md`
 
@@ -53,7 +59,7 @@ Purpose: operator entrypoint answering "what worktree operations does
 Conspectus support?" — the model (a worktree is a `Checkout`; mutation
 is delegated to worktrunk), setup, an at-a-glance capability table
 (list / new / rm / merge / close-down / new-stream / prune / reveal)
-across CLI and TUI, the close-down and worktree-backed-pin concepts,
+across CLI and TUI, the close-down and worktree-backed launch and rebuild concepts,
 `[worktree]` config keys, and guardrails. Points to ADR 0092 / 0093 /
 0094 for rationale.
 

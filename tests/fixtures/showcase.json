@@ -68,7 +68,8 @@
       },
       "worktree": {
         "kind": "primary"
-      }
+      },
+      "head_commit": "e52b2ef5898932bf522e12d94833fd8d32569ba4"
     },
     {
       "type": "checkout",
@@ -88,7 +89,8 @@
       },
       "worktree": {
         "kind": "primary"
-      }
+      },
+      "head_commit": "e52b2ef5898932bf522e12d94833fd8d32569ba4"
     },
     {
       "type": "checkout",
@@ -108,7 +110,68 @@
       },
       "worktree": {
         "kind": "linked"
-      }
+      },
+      "head_commit": "0217db82875a0340b7f92a33bb4272a59b6b991f"
+    },
+    {
+      "type": "checkout",
+      "id": {
+        "repo": {
+          "common_dir": "/fixture/repos/project/.git"
+        },
+        "root": "/fixture/checkouts/hotfix-login"
+      },
+      "root": "/fixture/checkouts/hotfix-login",
+      "current_branch": {
+        "repo": {
+          "common_dir": "/fixture/repos/project/.git"
+        },
+        "refname": "refs/heads/hotfix/login"
+      },
+      "worktree": {
+        "kind": "linked"
+      },
+      "head_commit": "5c0ffee5c0ffee5c0ffee5c0ffee5c0ffee5c0ff"
+    },
+    {
+      "type": "checkout",
+      "id": {
+        "repo": {
+          "common_dir": "/fixture/repos/project/.git"
+        },
+        "root": "/fixture/checkouts/ledger-worktree"
+      },
+      "root": "/fixture/checkouts/ledger-worktree",
+      "current_branch": {
+        "repo": {
+          "common_dir": "/fixture/repos/project/.git"
+        },
+        "refname": "refs/heads/feature/ledger"
+      },
+      "worktree": {
+        "kind": "linked"
+      },
+      "head_commit": "5c0ffee5c0ffee5c0ffee5c0ffee5c0ffee5c0ff"
+    },
+    {
+      "type": "checkout",
+      "id": {
+        "repo": {
+          "common_dir": "/fixture/repos/project/.git"
+        },
+        "root": "/fixture/checkouts/spike-cache"
+      },
+      "root": "/fixture/checkouts/spike-cache",
+      "current_branch": {
+        "repo": {
+          "common_dir": "/fixture/repos/project/.git"
+        },
+        "refname": "refs/heads/spike/cache"
+      },
+      "worktree": {
+        "kind": "linked"
+      },
+      "head_commit": "5c0ffee5c0ffee5c0ffee5c0ffee5c0ffee5c0ff"
     },
     {
       "type": "checkout",
@@ -128,7 +191,8 @@
       },
       "worktree": {
         "kind": "primary"
-      }
+      },
+      "head_commit": "2163a8c5995960da173e98be00b93cd024a8b9e9"
     },
     {
       "type": "checkout",
@@ -338,6 +402,42 @@
     {
       "type": "mux_session",
       "id": {
+        "native_id": "tmux:bugfix-sprint"
+      },
+      "backend": "tmux",
+      "native_id": "bugfix-sprint",
+      "cwd": "/fixture/repos/project",
+      "active_pane_start_command": "codex",
+      "created_epoch": 1788177600,
+      "backend_session_id": "$bugfix-sprint"
+    },
+    {
+      "type": "mux_session",
+      "id": {
+        "native_id": "tmux:docs-sweep"
+      },
+      "backend": "tmux",
+      "native_id": "docs-sweep",
+      "cwd": "/fixture/repos/project",
+      "active_pane_start_command": "codex",
+      "created_epoch": 1788177600,
+      "backend_session_id": "$docs-sweep"
+    },
+    {
+      "type": "mux_session",
+      "id": {
+        "native_id": "tmux:nightly-refactor"
+      },
+      "backend": "tmux",
+      "native_id": "nightly-refactor",
+      "cwd": "/fixture/repos/project",
+      "active_pane_start_command": "claude --dangerously-skip-permissions",
+      "created_epoch": 1788177600,
+      "backend_session_id": "$nightly-refactor"
+    },
+    {
+      "type": "mux_session",
+      "id": {
         "native_id": "tmux:project"
       },
       "backend": "tmux",
@@ -354,6 +454,18 @@
     {
       "type": "mux_session",
       "id": {
+        "native_id": "tmux:release-prep"
+      },
+      "backend": "tmux",
+      "native_id": "release-prep",
+      "cwd": "/fixture/repos/project",
+      "active_pane_start_command": "claude --dangerously-skip-permissions",
+      "created_epoch": 1788177600,
+      "backend_session_id": "$release-prep"
+    },
+    {
+      "type": "mux_session",
+      "id": {
         "native_id": "tmux:showcase-deck"
       },
       "backend": "tmux",
@@ -366,6 +478,273 @@
       "client_attached": false,
       "activity_epoch": 1790767800,
       "last_attached_epoch": 1790766900
+    },
+    {
+      "type": "pin",
+      "id": {
+        "id": "ledger-pr"
+      },
+      "kind": "pr",
+      "label": "#5 Ledger store and merge",
+      "target": "forge_pr:github:github.com/conspectus/project#5",
+      "target_node": {
+        "type": "forge_pr",
+        "provider": "github",
+        "host": "github.com",
+        "owner": "conspectus",
+        "repo": "project",
+        "number": 5
+      },
+      "status": "live",
+      "snapshot": {
+        "label": "#5 Ledger store and merge"
+      },
+      "effective": [
+        {
+          "name": "label",
+          "value": "#5 Ledger store and merge",
+          "source": "snapshot"
+        }
+      ],
+      "order": 4,
+      "pinned_at": "2026-09-20T09:00:00Z"
+    },
+    {
+      "type": "pin",
+      "id": {
+        "id": "ledger-worktree"
+      },
+      "kind": "checkout",
+      "label": "feature/ledger",
+      "target": "history:h_5c0000000004",
+      "target_node": {
+        "type": "checkout",
+        "repo": {
+          "common_dir": "/fixture/repos/project/.git"
+        },
+        "root": "/fixture/checkouts/ledger-worktree"
+      },
+      "status": "gone",
+      "snapshot": {
+        "label": "feature/ledger"
+      },
+      "effective": [
+        {
+          "name": "label",
+          "value": "feature/ledger",
+          "source": "snapshot"
+        },
+        {
+          "name": "repo",
+          "value": "repo:/fixture/repos/project/.git",
+          "source": "history"
+        },
+        {
+          "name": "root",
+          "value": "/fixture/checkouts/ledger-worktree",
+          "source": "history"
+        },
+        {
+          "name": "branch",
+          "value": "feature/ledger",
+          "source": "history"
+        },
+        {
+          "name": "head",
+          "value": "5c0ffee5c0ffee5c0ffee5c0ffee5c0ffee5c0ff",
+          "source": "history"
+        }
+      ],
+      "order": 3,
+      "pinned_at": "2026-09-20T09:00:00Z"
+    },
+    {
+      "type": "pin",
+      "id": {
+        "id": "nightly"
+      },
+      "kind": "mux",
+      "label": "nightly-refactor",
+      "target": "history:h_5c0000000002",
+      "target_node": {
+        "type": "mux_session",
+        "native_id": "tmux:nightly-refactor"
+      },
+      "status": "gone",
+      "snapshot": {
+        "label": "nightly-refactor"
+      },
+      "effective": [
+        {
+          "name": "label",
+          "value": "nightly-refactor",
+          "source": "snapshot"
+        },
+        {
+          "name": "name",
+          "value": "nightly-refactor",
+          "source": "history"
+        },
+        {
+          "name": "cwd",
+          "value": "/fixture/repos/project",
+          "source": "history"
+        },
+        {
+          "name": "harness",
+          "value": "claude-code",
+          "source": "history"
+        },
+        {
+          "name": "argv",
+          "value": [
+            "claude",
+            "--dangerously-skip-permissions"
+          ],
+          "source": "history"
+        }
+      ],
+      "order": 1,
+      "pinned_at": "2026-09-20T09:00:00Z"
+    },
+    {
+      "type": "pin",
+      "id": {
+        "id": "parser-session"
+      },
+      "kind": "session",
+      "label": "claude-code in project repo",
+      "target": "agent_session:claude-code:/fixture/harness/claude:showcase-claude",
+      "target_node": {
+        "type": "agent_session",
+        "harness_key": "claude-code",
+        "state_scope": "/fixture/harness/claude",
+        "session_key": "showcase-claude"
+      },
+      "status": "live",
+      "snapshot": {
+        "label": "claude-code in project repo"
+      },
+      "effective": [
+        {
+          "name": "label",
+          "value": "claude-code in project repo",
+          "source": "snapshot"
+        },
+        {
+          "name": "harness",
+          "value": "claude-code",
+          "source": "live"
+        },
+        {
+          "name": "session_id",
+          "value": "showcase-claude",
+          "source": "live"
+        },
+        {
+          "name": "title",
+          "value": "claude-code in project repo",
+          "source": "live"
+        }
+      ],
+      "order": 2,
+      "pinned_at": "2026-09-20T09:00:00Z"
+    },
+    {
+      "type": "pin",
+      "id": {
+        "id": "project-main"
+      },
+      "kind": "mux",
+      "label": "project",
+      "target": "history:h_5c0000000001",
+      "target_node": {
+        "type": "mux_session",
+        "native_id": "tmux:project"
+      },
+      "status": "live",
+      "snapshot": {
+        "label": "project"
+      },
+      "effective": [
+        {
+          "name": "label",
+          "value": "project",
+          "source": "snapshot"
+        },
+        {
+          "name": "name",
+          "value": "project",
+          "source": "live"
+        },
+        {
+          "name": "cwd",
+          "value": "/fixture/repos/project",
+          "source": "live"
+        },
+        {
+          "name": "harness",
+          "value": "claude-code",
+          "source": "live"
+        },
+        {
+          "name": "argv",
+          "value": [
+            "claude",
+            "--dangerously-skip-permissions"
+          ],
+          "source": "history"
+        }
+      ],
+      "order": 0,
+      "pinned_at": "2026-09-20T09:00:00Z"
+    },
+    {
+      "type": "pin",
+      "id": {
+        "id": "weekly-review"
+      },
+      "kind": "mux",
+      "label": "weekly-review",
+      "status": "planned",
+      "overrides": {
+        "cwd": "/fixture/repos/project",
+        "harness": "codex",
+        "name": "weekly-review"
+      },
+      "snapshot": {
+        "label": "weekly-review"
+      },
+      "effective": [
+        {
+          "name": "label",
+          "value": "weekly-review",
+          "source": "snapshot"
+        },
+        {
+          "name": "name",
+          "value": "weekly-review",
+          "source": "override"
+        },
+        {
+          "name": "cwd",
+          "value": "/fixture/repos/project",
+          "source": "override"
+        },
+        {
+          "name": "harness",
+          "value": "codex",
+          "source": "override"
+        },
+        {
+          "name": "argv",
+          "value": [
+            "codex"
+          ],
+          "source": "default"
+        }
+      ],
+      "order": 5
     },
     {
       "type": "branch",
@@ -458,6 +837,23 @@
         "host": "github.com",
         "owner": "conspectus",
         "repo": "project",
+        "number": 5
+      },
+      "provider": "github",
+      "host": "github.com",
+      "owner": "conspectus",
+      "repo": "project",
+      "number": 5,
+      "state": "merged",
+      "title": "Ledger store and merge"
+    },
+    {
+      "type": "forge_pr",
+      "id": {
+        "provider": "github",
+        "host": "github.com",
+        "owner": "conspectus",
+        "repo": "project",
         "number": 7
       },
       "provider": "github",
@@ -520,7 +916,7 @@
           "logical_path": "/fixture/.agent-deck/multi-repo-worktrees/showcase-deck-c0debeef/atelier-repo-a",
           "member_path_kind": "symlink"
         },
-        "freshness_epoch": 1792262318
+        "freshness_epoch": 1792725916
       },
       "state": {
         "state": "active"
@@ -551,7 +947,7 @@
           "logical_path": "/fixture/.agent-deck/multi-repo-worktrees/showcase-deck-c0debeef/project",
           "member_path_kind": "symlink"
         },
-        "freshness_epoch": 1792262318
+        "freshness_epoch": 1792725916
       },
       "state": {
         "state": "active"
@@ -595,7 +991,7 @@
           "lineage_fidelity": "native",
           "lineage_kind": "fork"
         },
-        "freshness_epoch": 1792262318
+        "freshness_epoch": 1792725916
       },
       "state": {
         "state": "active"
@@ -632,7 +1028,7 @@
           "link": false,
           "repo_name": "repo-a"
         },
-        "freshness_epoch": 1792262318
+        "freshness_epoch": 1792725916
       },
       "state": {
         "state": "active"
@@ -669,7 +1065,7 @@
           "link": false,
           "repo_name": "repo-a"
         },
-        "freshness_epoch": 1792262318
+        "freshness_epoch": 1792725916
       },
       "state": {
         "state": "active"
@@ -703,7 +1099,7 @@
           "link": false,
           "repo_name": "repo-a"
         },
-        "freshness_epoch": 1792262318
+        "freshness_epoch": 1792725916
       },
       "state": {
         "state": "active"
@@ -734,7 +1130,7 @@
           "fork_mode": "worktree",
           "fork_name": "alpha"
         },
-        "freshness_epoch": 1792262318
+        "freshness_epoch": 1792725916
       },
       "state": {
         "state": "active"
@@ -778,7 +1174,7 @@
           "lineage_fidelity": "native",
           "lineage_kind": "fork"
         },
-        "freshness_epoch": 1792262318
+        "freshness_epoch": 1792725916
       },
       "state": {
         "state": "active"
@@ -814,7 +1210,7 @@
           "fork_mode": "worktree",
           "fork_name": "alpha"
         },
-        "freshness_epoch": 1792262318
+        "freshness_epoch": 1792725916
       },
       "state": {
         "state": "active"
@@ -847,7 +1243,7 @@
           "provider_source_path": "/fixture/atelier-demo/repo-a",
           "repo_name": "repo-a"
         },
-        "freshness_epoch": 1792262318
+        "freshness_epoch": 1792725916
       },
       "state": {
         "state": "active"
@@ -880,7 +1276,7 @@
           "provider_source_path": "/fixture/atelier-demo/repo-b",
           "repo_name": "repo-b"
         },
-        "freshness_epoch": 1792262318
+        "freshness_epoch": 1792725916
       },
       "state": {
         "state": "active"
@@ -915,7 +1311,7 @@
           "lineage_kind": "fork",
           "parent_native_id": "showcase-codex-parent"
         },
-        "freshness_epoch": 1792262318
+        "freshness_epoch": 1792725916
       },
       "state": {
         "state": "active"
@@ -949,7 +1345,7 @@
         "fields": {
           "checkout_root": "/fixture/repos/project"
         },
-        "freshness_epoch": 1792262318
+        "freshness_epoch": 1792725916
       },
       "state": {
         "state": "active"
@@ -981,7 +1377,7 @@
           "match_kind": "exact_cwd_match",
           "mux_activity_epoch": 1790768700
         },
-        "freshness_epoch": 1792262318
+        "freshness_epoch": 1792725916
       },
       "state": {
         "state": "active"
@@ -1013,7 +1409,7 @@
           "match_kind": "exact_cwd_match",
           "mux_activity_epoch": 1790769300
         },
-        "freshness_epoch": 1792262318
+        "freshness_epoch": 1792725916
       },
       "state": {
         "state": "active"
@@ -1047,7 +1443,7 @@
         "fields": {
           "checkout_root": "/fixture/repos/project"
         },
-        "freshness_epoch": 1792262318
+        "freshness_epoch": 1792725916
       },
       "state": {
         "state": "active"
@@ -1079,7 +1475,7 @@
           "match_kind": "exact_cwd_match",
           "mux_activity_epoch": 1790768700
         },
-        "freshness_epoch": 1792262318
+        "freshness_epoch": 1792725916
       },
       "state": {
         "state": "active"
@@ -1111,7 +1507,7 @@
           "match_kind": "exact_cwd_match",
           "mux_activity_epoch": 1790769300
         },
-        "freshness_epoch": 1792262318
+        "freshness_epoch": 1792725916
       },
       "state": {
         "state": "active"
@@ -1145,7 +1541,7 @@
         "fields": {
           "checkout_root": "/fixture/repos/project"
         },
-        "freshness_epoch": 1792262318
+        "freshness_epoch": 1792725916
       },
       "state": {
         "state": "active"
@@ -1177,7 +1573,7 @@
           "match_kind": "exact_cwd_match",
           "mux_activity_epoch": 1790768700
         },
-        "freshness_epoch": 1792262318
+        "freshness_epoch": 1792725916
       },
       "state": {
         "state": "active"
@@ -1209,7 +1605,7 @@
           "match_kind": "exact_cwd_match",
           "mux_activity_epoch": 1790769300
         },
-        "freshness_epoch": 1792262318
+        "freshness_epoch": 1792725916
       },
       "state": {
         "state": "active"
@@ -1240,7 +1636,7 @@
         "fields": {
           "workspace_member_root": "/fixture/.agent-deck/multi-repo-worktrees/showcase-deck-c0debeef"
         },
-        "freshness_epoch": 1792262318
+        "freshness_epoch": 1792725916
       },
       "state": {
         "state": "active"
@@ -1272,7 +1668,7 @@
           "match_kind": "exact_cwd_match",
           "mux_activity_epoch": 1790767800
         },
-        "freshness_epoch": 1792262318
+        "freshness_epoch": 1792725916
       },
       "state": {
         "state": "active"
@@ -1306,7 +1702,7 @@
         "fields": {
           "checkout_root": "/fixture/repos/project"
         },
-        "freshness_epoch": 1792262318
+        "freshness_epoch": 1792725916
       },
       "state": {
         "state": "active"
@@ -1338,7 +1734,7 @@
           "match_kind": "exact_cwd_match",
           "mux_activity_epoch": 1790768700
         },
-        "freshness_epoch": 1792262318
+        "freshness_epoch": 1792725916
       },
       "state": {
         "state": "active"
@@ -1370,7 +1766,7 @@
           "match_kind": "exact_cwd_match",
           "mux_activity_epoch": 1790769300
         },
-        "freshness_epoch": 1792262318
+        "freshness_epoch": 1792725916
       },
       "state": {
         "state": "active"
@@ -1404,7 +1800,7 @@
         "fields": {
           "checkout_root": "/fixture/checkouts/bare-project"
         },
-        "freshness_epoch": 1792262318
+        "freshness_epoch": 1792725916
       },
       "state": {
         "state": "active"
@@ -1436,7 +1832,7 @@
           "match_kind": "exact_cwd_match",
           "mux_activity_epoch": 1790762400
         },
-        "freshness_epoch": 1792262318
+        "freshness_epoch": 1792725916
       },
       "state": {
         "state": "active"
@@ -1467,7 +1863,7 @@
         "fields": {
           "fork_root": "/fixture/atelier-demo/.atelier/forks/alpha"
         },
-        "freshness_epoch": 1792262318
+        "freshness_epoch": 1792725916
       },
       "state": {
         "state": "active"
@@ -1498,7 +1894,7 @@
         "fields": {
           "workspace_member_root": "/fixture/atelier-demo"
         },
-        "freshness_epoch": 1792262318
+        "freshness_epoch": 1792725916
       },
       "state": {
         "state": "active"
@@ -1532,7 +1928,7 @@
         "fields": {
           "checkout_root": "/fixture/atelier-demo/repo-a"
         },
-        "freshness_epoch": 1792262318
+        "freshness_epoch": 1792725916
       },
       "state": {
         "state": "active"
@@ -1563,7 +1959,7 @@
         "fields": {
           "workspace_member_root": "/fixture/atelier-demo/repo-a"
         },
-        "freshness_epoch": 1792262318
+        "freshness_epoch": 1792725916
       },
       "state": {
         "state": "active"
@@ -1597,7 +1993,7 @@
         "fields": {
           "checkout_root": "/fixture/atelier-demo/repo-b"
         },
-        "freshness_epoch": 1792262318
+        "freshness_epoch": 1792725916
       },
       "state": {
         "state": "active"
@@ -1628,7 +2024,7 @@
         "fields": {
           "workspace_member_root": "/fixture/atelier-demo/repo-b"
         },
-        "freshness_epoch": 1792262318
+        "freshness_epoch": 1792725916
       },
       "state": {
         "state": "active"
@@ -1662,7 +2058,7 @@
         "fields": {
           "checkout_root": "/fixture/atelier-demo/repo-a"
         },
-        "freshness_epoch": 1792262318
+        "freshness_epoch": 1792725916
       },
       "state": {
         "state": "active"
@@ -1693,7 +2089,36 @@
         "fields": {
           "workspace_member_root": "/fixture/atelier-demo/repo-a"
         },
-        "freshness_epoch": 1792262318
+        "freshness_epoch": 1792725916
+      },
+      "state": {
+        "state": "active"
+      }
+    },
+    {
+      "id": "cross_link:mux_session:tmux:showcase-deck:rooted_in:workspace:/fixture/.agent-deck/multi-repo-worktrees/showcase-deck-c0debeef:session_path_within_workspace",
+      "source": {
+        "type": "mux_session",
+        "native_id": "tmux:showcase-deck"
+      },
+      "target": {
+        "kind": "node",
+        "id": {
+          "type": "workspace",
+          "root": "/fixture/.agent-deck/multi-repo-worktrees/showcase-deck-c0debeef"
+        }
+      },
+      "relation": "rooted_in",
+      "provenance": "discovered",
+      "confidence": "high",
+      "freshness": "fresh",
+      "source_metadata": {
+        "adapter": "cross_link",
+        "evidence": "mux session path within workspace member",
+        "fields": {
+          "workspace_member_root": "/fixture/.agent-deck/multi-repo-worktrees/showcase-deck-c0debeef"
+        },
+        "freshness_epoch": 1792725916
       },
       "state": {
         "state": "active"
@@ -1722,7 +2147,7 @@
       "source_metadata": {
         "adapter": "git",
         "evidence": "git common dir",
-        "freshness_epoch": 1792262318
+        "freshness_epoch": 1792725916
       },
       "state": {
         "state": "active"
@@ -1754,7 +2179,7 @@
       "source_metadata": {
         "adapter": "git",
         "evidence": "symbolic HEAD",
-        "freshness_epoch": 1792262318
+        "freshness_epoch": 1792725916
       },
       "state": {
         "state": "active"
@@ -1783,7 +2208,7 @@
       "source_metadata": {
         "adapter": "git",
         "evidence": "git common dir",
-        "freshness_epoch": 1792262318
+        "freshness_epoch": 1792725916
       },
       "state": {
         "state": "active"
@@ -1815,7 +2240,7 @@
       "source_metadata": {
         "adapter": "git",
         "evidence": "symbolic HEAD",
-        "freshness_epoch": 1792262318
+        "freshness_epoch": 1792725916
       },
       "state": {
         "state": "active"
@@ -1844,7 +2269,7 @@
       "source_metadata": {
         "adapter": "git",
         "evidence": "git common dir",
-        "freshness_epoch": 1792262318
+        "freshness_epoch": 1792725916
       },
       "state": {
         "state": "active"
@@ -1876,7 +2301,7 @@
       "source_metadata": {
         "adapter": "git",
         "evidence": "symbolic HEAD",
-        "freshness_epoch": 1792262318
+        "freshness_epoch": 1792725916
       },
       "state": {
         "state": "active"
@@ -1905,7 +2330,7 @@
       "source_metadata": {
         "adapter": "git",
         "evidence": "git common dir",
-        "freshness_epoch": 1792262318
+        "freshness_epoch": 1792725916
       },
       "state": {
         "state": "active"
@@ -1937,7 +2362,7 @@
       "source_metadata": {
         "adapter": "git",
         "evidence": "symbolic HEAD",
-        "freshness_epoch": 1792262318
+        "freshness_epoch": 1792725916
       },
       "state": {
         "state": "active"
@@ -1976,7 +2401,7 @@
           "state": "open",
           "updated_epoch": 1790762400
         },
-        "freshness_epoch": 1792262318
+        "freshness_epoch": 1792725916
       },
       "state": {
         "state": "active"
@@ -2015,7 +2440,94 @@
           "state": "open",
           "updated_epoch": 1790683200
         },
-        "freshness_epoch": 1792262318
+        "freshness_epoch": 1792725916
+      },
+      "state": {
+        "state": "active"
+      }
+    },
+    {
+      "id": "history:h_5c0000000004:belongs-to-repo",
+      "source": {
+        "type": "checkout",
+        "repo": {
+          "common_dir": "/fixture/repos/project/.git"
+        },
+        "root": "/fixture/checkouts/ledger-worktree"
+      },
+      "target": {
+        "kind": "node",
+        "id": {
+          "type": "repo",
+          "common_dir": "/fixture/repos/project/.git"
+        }
+      },
+      "relation": "belongs_to_repo",
+      "provenance": "cached",
+      "confidence": "low",
+      "freshness": "unknown",
+      "source_metadata": {
+        "adapter": "history",
+        "evidence": "recorded checkout of this repo",
+        "freshness_epoch": 1792725916
+      },
+      "state": {
+        "state": "active"
+      }
+    },
+    {
+      "id": "history:h_5c0000000005:belongs-to-repo",
+      "source": {
+        "type": "checkout",
+        "repo": {
+          "common_dir": "/fixture/repos/project/.git"
+        },
+        "root": "/fixture/checkouts/spike-cache"
+      },
+      "target": {
+        "kind": "node",
+        "id": {
+          "type": "repo",
+          "common_dir": "/fixture/repos/project/.git"
+        }
+      },
+      "relation": "belongs_to_repo",
+      "provenance": "cached",
+      "confidence": "low",
+      "freshness": "unknown",
+      "source_metadata": {
+        "adapter": "history",
+        "evidence": "recorded checkout of this repo",
+        "freshness_epoch": 1792725916
+      },
+      "state": {
+        "state": "active"
+      }
+    },
+    {
+      "id": "history:h_5c0000000008:belongs-to-repo",
+      "source": {
+        "type": "checkout",
+        "repo": {
+          "common_dir": "/fixture/repos/project/.git"
+        },
+        "root": "/fixture/checkouts/hotfix-login"
+      },
+      "target": {
+        "kind": "node",
+        "id": {
+          "type": "repo",
+          "common_dir": "/fixture/repos/project/.git"
+        }
+      },
+      "relation": "belongs_to_repo",
+      "provenance": "cached",
+      "confidence": "low",
+      "freshness": "unknown",
+      "source_metadata": {
+        "adapter": "history",
+        "evidence": "recorded checkout of this repo",
+        "freshness_epoch": 1792725916
       },
       "state": {
         "state": "active"
@@ -2053,11 +2565,140 @@
             "session_name": "project"
           }
         },
-        "freshness_epoch": 1792262319
+        "freshness_epoch": 1792725916
       },
       "state": {
         "state": "ignored",
         "reason": "hook record pid 1101 is no longer active"
+      }
+    },
+    {
+      "id": "pin:ledger-pr:targets",
+      "source": {
+        "type": "pin",
+        "id": "ledger-pr"
+      },
+      "target": {
+        "kind": "node",
+        "id": {
+          "type": "forge_pr",
+          "provider": "github",
+          "host": "github.com",
+          "owner": "conspectus",
+          "repo": "project",
+          "number": 5
+        }
+      },
+      "relation": "pin_targets",
+      "provenance": "global_pin",
+      "confidence": "high",
+      "freshness": "fresh",
+      "source_metadata": {
+        "adapter": "pins"
+      },
+      "state": {
+        "state": "active"
+      }
+    },
+    {
+      "id": "pin:ledger-worktree:targets",
+      "source": {
+        "type": "pin",
+        "id": "ledger-worktree"
+      },
+      "target": {
+        "kind": "node",
+        "id": {
+          "type": "checkout",
+          "repo": {
+            "common_dir": "/fixture/repos/project/.git"
+          },
+          "root": "/fixture/checkouts/ledger-worktree"
+        }
+      },
+      "relation": "pin_targets",
+      "provenance": "global_pin",
+      "confidence": "high",
+      "freshness": "fresh",
+      "source_metadata": {
+        "adapter": "pins"
+      },
+      "state": {
+        "state": "active"
+      }
+    },
+    {
+      "id": "pin:nightly:targets",
+      "source": {
+        "type": "pin",
+        "id": "nightly"
+      },
+      "target": {
+        "kind": "node",
+        "id": {
+          "type": "mux_session",
+          "native_id": "tmux:nightly-refactor"
+        }
+      },
+      "relation": "pin_targets",
+      "provenance": "global_pin",
+      "confidence": "high",
+      "freshness": "fresh",
+      "source_metadata": {
+        "adapter": "pins"
+      },
+      "state": {
+        "state": "active"
+      }
+    },
+    {
+      "id": "pin:parser-session:targets",
+      "source": {
+        "type": "pin",
+        "id": "parser-session"
+      },
+      "target": {
+        "kind": "node",
+        "id": {
+          "type": "agent_session",
+          "harness_key": "claude-code",
+          "state_scope": "/fixture/harness/claude",
+          "session_key": "showcase-claude"
+        }
+      },
+      "relation": "pin_targets",
+      "provenance": "global_pin",
+      "confidence": "high",
+      "freshness": "fresh",
+      "source_metadata": {
+        "adapter": "pins"
+      },
+      "state": {
+        "state": "active"
+      }
+    },
+    {
+      "id": "pin:project-main:targets",
+      "source": {
+        "type": "pin",
+        "id": "project-main"
+      },
+      "target": {
+        "kind": "node",
+        "id": {
+          "type": "mux_session",
+          "native_id": "tmux:project"
+        }
+      },
+      "relation": "pin_targets",
+      "provenance": "global_pin",
+      "confidence": "high",
+      "freshness": "fresh",
+      "source_metadata": {
+        "adapter": "pins"
+      },
+      "state": {
+        "state": "active"
       }
     }
   ],
@@ -2160,6 +2801,51 @@
       },
       "relation": "checked_out_branch",
       "selected_link_id": "git:checkout:repo:/fixture/checkouts/bare-project:checked_out_branch:branch:repo:/fixture/repos/bare-project.git@refs/heads/feature/bare"
+    },
+    {
+      "source": {
+        "type": "checkout",
+        "repo": {
+          "common_dir": "/fixture/repos/project/.git"
+        },
+        "root": "/fixture/checkouts/hotfix-login"
+      },
+      "target": {
+        "type": "repo",
+        "common_dir": "/fixture/repos/project/.git"
+      },
+      "relation": "belongs_to_repo",
+      "selected_link_id": "history:h_5c0000000008:belongs-to-repo"
+    },
+    {
+      "source": {
+        "type": "checkout",
+        "repo": {
+          "common_dir": "/fixture/repos/project/.git"
+        },
+        "root": "/fixture/checkouts/ledger-worktree"
+      },
+      "target": {
+        "type": "repo",
+        "common_dir": "/fixture/repos/project/.git"
+      },
+      "relation": "belongs_to_repo",
+      "selected_link_id": "history:h_5c0000000004:belongs-to-repo"
+    },
+    {
+      "source": {
+        "type": "checkout",
+        "repo": {
+          "common_dir": "/fixture/repos/project/.git"
+        },
+        "root": "/fixture/checkouts/spike-cache"
+      },
+      "target": {
+        "type": "repo",
+        "common_dir": "/fixture/repos/project/.git"
+      },
+      "relation": "belongs_to_repo",
+      "selected_link_id": "history:h_5c0000000005:belongs-to-repo"
     },
     {
       "source": {
@@ -2576,6 +3262,87 @@
     },
     {
       "source": {
+        "type": "mux_session",
+        "native_id": "tmux:showcase-deck"
+      },
+      "target": {
+        "type": "workspace",
+        "root": "/fixture/.agent-deck/multi-repo-worktrees/showcase-deck-c0debeef"
+      },
+      "relation": "rooted_in",
+      "selected_link_id": "cross_link:mux_session:tmux:showcase-deck:rooted_in:workspace:/fixture/.agent-deck/multi-repo-worktrees/showcase-deck-c0debeef:session_path_within_workspace"
+    },
+    {
+      "source": {
+        "type": "pin",
+        "id": "ledger-pr"
+      },
+      "target": {
+        "type": "forge_pr",
+        "provider": "github",
+        "host": "github.com",
+        "owner": "conspectus",
+        "repo": "project",
+        "number": 5
+      },
+      "relation": "pin_targets",
+      "selected_link_id": "pin:ledger-pr:targets"
+    },
+    {
+      "source": {
+        "type": "pin",
+        "id": "ledger-worktree"
+      },
+      "target": {
+        "type": "checkout",
+        "repo": {
+          "common_dir": "/fixture/repos/project/.git"
+        },
+        "root": "/fixture/checkouts/ledger-worktree"
+      },
+      "relation": "pin_targets",
+      "selected_link_id": "pin:ledger-worktree:targets"
+    },
+    {
+      "source": {
+        "type": "pin",
+        "id": "nightly"
+      },
+      "target": {
+        "type": "mux_session",
+        "native_id": "tmux:nightly-refactor"
+      },
+      "relation": "pin_targets",
+      "selected_link_id": "pin:nightly:targets"
+    },
+    {
+      "source": {
+        "type": "pin",
+        "id": "parser-session"
+      },
+      "target": {
+        "type": "agent_session",
+        "harness_key": "claude-code",
+        "state_scope": "/fixture/harness/claude",
+        "session_key": "showcase-claude"
+      },
+      "relation": "pin_targets",
+      "selected_link_id": "pin:parser-session:targets"
+    },
+    {
+      "source": {
+        "type": "pin",
+        "id": "project-main"
+      },
+      "target": {
+        "type": "mux_session",
+        "native_id": "tmux:project"
+      },
+      "relation": "pin_targets",
+      "selected_link_id": "pin:project-main:targets"
+    },
+    {
+      "source": {
         "type": "fork",
         "provider_source_key": "atelier:alpha"
       },
@@ -2788,6 +3555,71 @@
       ]
     }
   ],
+  "pins": [
+    {
+      "id": "project-main",
+      "kind": "mux",
+      "target": "history:h_5c0000000001",
+      "pinned_at": "2026-09-20T09:00:00Z",
+      "snapshot": {
+        "label": "project"
+      },
+      "order": 0
+    },
+    {
+      "id": "nightly",
+      "kind": "mux",
+      "target": "history:h_5c0000000002",
+      "pinned_at": "2026-09-20T09:00:00Z",
+      "snapshot": {
+        "label": "nightly-refactor"
+      },
+      "order": 1
+    },
+    {
+      "id": "parser-session",
+      "kind": "session",
+      "target": "agent_session:claude-code:/fixture/harness/claude:showcase-claude",
+      "pinned_at": "2026-09-20T09:00:00Z",
+      "snapshot": {
+        "label": "claude-code in project repo"
+      },
+      "order": 2
+    },
+    {
+      "id": "ledger-worktree",
+      "kind": "checkout",
+      "target": "history:h_5c0000000004",
+      "pinned_at": "2026-09-20T09:00:00Z",
+      "snapshot": {
+        "label": "feature/ledger"
+      },
+      "order": 3
+    },
+    {
+      "id": "ledger-pr",
+      "kind": "pr",
+      "target": "forge_pr:github:github.com/conspectus/project#5",
+      "pinned_at": "2026-09-20T09:00:00Z",
+      "snapshot": {
+        "label": "#5 Ledger store and merge"
+      },
+      "order": 4
+    },
+    {
+      "id": "weekly-review",
+      "kind": "mux",
+      "overrides": {
+        "cwd": "/fixture/repos/project",
+        "harness": "codex",
+        "name": "weekly-review"
+      },
+      "snapshot": {
+        "label": "weekly-review"
+      },
+      "order": 5
+    }
+  ],
   "node_provenance": [
     {
       "node_id": {
@@ -2795,7 +3627,7 @@
         "common_dir": "/fixture/atelier-demo/repo-a/.git"
       },
       "provider": "atelier",
-      "freshness_epoch": 1792262318
+      "freshness_epoch": 1792725916
     },
     {
       "node_id": {
@@ -2803,7 +3635,7 @@
         "common_dir": "/fixture/atelier-demo/repo-b/.git"
       },
       "provider": "atelier",
-      "freshness_epoch": 1792262318
+      "freshness_epoch": 1792725916
     },
     {
       "node_id": {
@@ -2811,7 +3643,7 @@
         "common_dir": "/fixture/repos/bare-project.git"
       },
       "provider": "git::cwd",
-      "freshness_epoch": 1792262318
+      "freshness_epoch": 1792725916
     },
     {
       "node_id": {
@@ -2819,7 +3651,7 @@
         "common_dir": "/fixture/repos/project/.git"
       },
       "provider": "agent_deck",
-      "freshness_epoch": 1792262318
+      "freshness_epoch": 1792725916
     },
     {
       "node_id": {
@@ -2827,7 +3659,7 @@
         "common_dir": "repo-a"
       },
       "provider": "atelier",
-      "freshness_epoch": 1792262318
+      "freshness_epoch": 1792725916
     },
     {
       "node_id": {
@@ -2838,7 +3670,7 @@
         "root": "/fixture/atelier-demo/repo-a"
       },
       "provider": "atelier",
-      "freshness_epoch": 1792262318
+      "freshness_epoch": 1792725916
     },
     {
       "node_id": {
@@ -2849,7 +3681,7 @@
         "root": "/fixture/atelier-demo/repo-b"
       },
       "provider": "atelier",
-      "freshness_epoch": 1792262318
+      "freshness_epoch": 1792725916
     },
     {
       "node_id": {
@@ -2860,7 +3692,40 @@
         "root": "/fixture/checkouts/bare-project"
       },
       "provider": "git::cwd",
-      "freshness_epoch": 1792262318
+      "freshness_epoch": 1792725916
+    },
+    {
+      "node_id": {
+        "type": "checkout",
+        "repo": {
+          "common_dir": "/fixture/repos/project/.git"
+        },
+        "root": "/fixture/checkouts/hotfix-login"
+      },
+      "provider": "history",
+      "freshness_epoch": 1792725916
+    },
+    {
+      "node_id": {
+        "type": "checkout",
+        "repo": {
+          "common_dir": "/fixture/repos/project/.git"
+        },
+        "root": "/fixture/checkouts/ledger-worktree"
+      },
+      "provider": "history",
+      "freshness_epoch": 1792725916
+    },
+    {
+      "node_id": {
+        "type": "checkout",
+        "repo": {
+          "common_dir": "/fixture/repos/project/.git"
+        },
+        "root": "/fixture/checkouts/spike-cache"
+      },
+      "provider": "history",
+      "freshness_epoch": 1792725916
     },
     {
       "node_id": {
@@ -2871,7 +3736,7 @@
         "root": "/fixture/repos/project"
       },
       "provider": "agent_deck",
-      "freshness_epoch": 1792262318
+      "freshness_epoch": 1792725916
     },
     {
       "node_id": {
@@ -2882,7 +3747,7 @@
         "root": ".atelier/forks/alpha/repo-a"
       },
       "provider": "atelier",
-      "freshness_epoch": 1792262318
+      "freshness_epoch": 1792725916
     },
     {
       "node_id": {
@@ -2890,7 +3755,7 @@
         "root": "/fixture/.agent-deck/multi-repo-worktrees/showcase-deck-c0debeef"
       },
       "provider": "agent_deck",
-      "freshness_epoch": 1792262318
+      "freshness_epoch": 1792725916
     },
     {
       "node_id": {
@@ -2898,7 +3763,7 @@
         "root": "/fixture/atelier-demo"
       },
       "provider": "atelier",
-      "freshness_epoch": 1792262318
+      "freshness_epoch": 1792725916
     },
     {
       "node_id": {
@@ -2908,7 +3773,7 @@
         "session_key": "showcase-claude"
       },
       "provider": "claude-code",
-      "freshness_epoch": 1792262318
+      "freshness_epoch": 1792725916
     },
     {
       "node_id": {
@@ -2918,7 +3783,7 @@
         "session_key": "showcase-claude-ambig-a"
       },
       "provider": "claude-code",
-      "freshness_epoch": 1792262318
+      "freshness_epoch": 1792725916
     },
     {
       "node_id": {
@@ -2928,7 +3793,7 @@
         "session_key": "showcase-claude-ambig-b"
       },
       "provider": "claude-code",
-      "freshness_epoch": 1792262318
+      "freshness_epoch": 1792725916
     },
     {
       "node_id": {
@@ -2938,7 +3803,7 @@
         "session_key": "showcase-deck-launcher"
       },
       "provider": "claude-code",
-      "freshness_epoch": 1792262318
+      "freshness_epoch": 1792725916
     },
     {
       "node_id": {
@@ -2948,7 +3813,7 @@
         "session_key": "showcase-hook-current"
       },
       "provider": "claude-code",
-      "freshness_epoch": 1792262318
+      "freshness_epoch": 1792725916
     },
     {
       "node_id": {
@@ -2958,7 +3823,7 @@
         "session_key": "showcase-bare-codex"
       },
       "provider": "codex",
-      "freshness_epoch": 1792262318
+      "freshness_epoch": 1792725916
     },
     {
       "node_id": {
@@ -2968,7 +3833,7 @@
         "session_key": "showcase-codex-child"
       },
       "provider": "codex",
-      "freshness_epoch": 1792262318
+      "freshness_epoch": 1792725916
     },
     {
       "node_id": {
@@ -2978,7 +3843,7 @@
         "session_key": "showcase-codex-parent"
       },
       "provider": "codex",
-      "freshness_epoch": 1792262318
+      "freshness_epoch": 1792725916
     },
     {
       "node_id": {
@@ -2988,7 +3853,7 @@
         "session_key": "showcase-orphan"
       },
       "provider": "codex",
-      "freshness_epoch": 1792262318
+      "freshness_epoch": 1792725916
     },
     {
       "node_id": {
@@ -2998,7 +3863,7 @@
         "session_key": "showcase-opencode"
       },
       "provider": "opencode",
-      "freshness_epoch": 1792262318
+      "freshness_epoch": 1792725916
     },
     {
       "node_id": {
@@ -3008,7 +3873,7 @@
         "session_key": "showcase-pi"
       },
       "provider": "pi",
-      "freshness_epoch": 1792262318
+      "freshness_epoch": 1792725916
     },
     {
       "node_id": {
@@ -3016,7 +3881,7 @@
         "native_id": "tmux:ambiguous"
       },
       "provider": "tmux",
-      "freshness_epoch": 1792262318
+      "freshness_epoch": 1792725916
     },
     {
       "node_id": {
@@ -3024,7 +3889,31 @@
         "native_id": "tmux:bare-work"
       },
       "provider": "tmux",
-      "freshness_epoch": 1792262318
+      "freshness_epoch": 1792725916
+    },
+    {
+      "node_id": {
+        "type": "mux_session",
+        "native_id": "tmux:bugfix-sprint"
+      },
+      "provider": "history",
+      "freshness_epoch": 1792725916
+    },
+    {
+      "node_id": {
+        "type": "mux_session",
+        "native_id": "tmux:docs-sweep"
+      },
+      "provider": "history",
+      "freshness_epoch": 1792725916
+    },
+    {
+      "node_id": {
+        "type": "mux_session",
+        "native_id": "tmux:nightly-refactor"
+      },
+      "provider": "history",
+      "freshness_epoch": 1792725916
     },
     {
       "node_id": {
@@ -3032,7 +3921,15 @@
         "native_id": "tmux:project"
       },
       "provider": "tmux",
-      "freshness_epoch": 1792262318
+      "freshness_epoch": 1792725916
+    },
+    {
+      "node_id": {
+        "type": "mux_session",
+        "native_id": "tmux:release-prep"
+      },
+      "provider": "history",
+      "freshness_epoch": 1792725916
     },
     {
       "node_id": {
@@ -3040,7 +3937,49 @@
         "native_id": "tmux:showcase-deck"
       },
       "provider": "tmux",
-      "freshness_epoch": 1792262318
+      "freshness_epoch": 1792725916
+    },
+    {
+      "node_id": {
+        "type": "pin",
+        "id": "ledger-pr"
+      },
+      "provider": "pins"
+    },
+    {
+      "node_id": {
+        "type": "pin",
+        "id": "ledger-worktree"
+      },
+      "provider": "pins"
+    },
+    {
+      "node_id": {
+        "type": "pin",
+        "id": "nightly"
+      },
+      "provider": "pins"
+    },
+    {
+      "node_id": {
+        "type": "pin",
+        "id": "parser-session"
+      },
+      "provider": "pins"
+    },
+    {
+      "node_id": {
+        "type": "pin",
+        "id": "project-main"
+      },
+      "provider": "pins"
+    },
+    {
+      "node_id": {
+        "type": "pin",
+        "id": "weekly-review"
+      },
+      "provider": "pins"
     },
     {
       "node_id": {
@@ -3051,7 +3990,7 @@
         "refname": "refs/heads/main"
       },
       "provider": "atelier",
-      "freshness_epoch": 1792262318
+      "freshness_epoch": 1792725916
     },
     {
       "node_id": {
@@ -3062,7 +4001,7 @@
         "refname": "refs/heads/main"
       },
       "provider": "atelier",
-      "freshness_epoch": 1792262318
+      "freshness_epoch": 1792725916
     },
     {
       "node_id": {
@@ -3073,7 +4012,7 @@
         "refname": "refs/heads/feature/bare"
       },
       "provider": "git::cwd",
-      "freshness_epoch": 1792262318
+      "freshness_epoch": 1792725916
     },
     {
       "node_id": {
@@ -3084,7 +4023,7 @@
         "refname": "refs/heads/main"
       },
       "provider": "git::cwd",
-      "freshness_epoch": 1792262318
+      "freshness_epoch": 1792725916
     },
     {
       "node_id": {
@@ -3095,7 +4034,7 @@
         "refname": "refs/heads/feature/extra"
       },
       "provider": "agent_deck",
-      "freshness_epoch": 1792262318
+      "freshness_epoch": 1792725916
     },
     {
       "node_id": {
@@ -3106,7 +4045,7 @@
         "refname": "refs/heads/main"
       },
       "provider": "agent_deck",
-      "freshness_epoch": 1792262318
+      "freshness_epoch": 1792725916
     },
     {
       "node_id": {
@@ -3117,7 +4056,7 @@
         "refname": "fork/alpha/repo-a"
       },
       "provider": "atelier",
-      "freshness_epoch": 1792262318
+      "freshness_epoch": 1792725916
     },
     {
       "node_id": {
@@ -3125,7 +4064,19 @@
         "provider_source_key": "atelier:alpha"
       },
       "provider": "atelier",
-      "freshness_epoch": 1792262318
+      "freshness_epoch": 1792725916
+    },
+    {
+      "node_id": {
+        "type": "forge_pr",
+        "provider": "github",
+        "host": "github.com",
+        "owner": "conspectus",
+        "repo": "project",
+        "number": 5
+      },
+      "provider": "history",
+      "freshness_epoch": 1790337600
     },
     {
       "node_id": {
@@ -3137,7 +4088,7 @@
         "number": 7
       },
       "provider": "github",
-      "freshness_epoch": 1792262318
+      "freshness_epoch": 1792725916
     },
     {
       "node_id": {
@@ -3149,7 +4100,315 @@
         "number": 8
       },
       "provider": "github",
-      "freshness_epoch": 1792262318
+      "freshness_epoch": 1792725916
     }
-  ]
+  ],
+  "node_presence": [
+    {
+      "node_id": {
+        "type": "checkout",
+        "repo": {
+          "common_dir": "/fixture/repos/project/.git"
+        },
+        "root": "/fixture/checkouts/hotfix-login"
+      },
+      "presence": "gone",
+      "last_seen": 1790337600
+    },
+    {
+      "node_id": {
+        "type": "checkout",
+        "repo": {
+          "common_dir": "/fixture/repos/project/.git"
+        },
+        "root": "/fixture/checkouts/ledger-worktree"
+      },
+      "presence": "gone",
+      "last_seen": 1790510400
+    },
+    {
+      "node_id": {
+        "type": "checkout",
+        "repo": {
+          "common_dir": "/fixture/repos/project/.git"
+        },
+        "root": "/fixture/checkouts/spike-cache"
+      },
+      "presence": "gone",
+      "last_seen": 1789732800
+    },
+    {
+      "node_id": {
+        "type": "mux_session",
+        "native_id": "tmux:bugfix-sprint"
+      },
+      "presence": "gone",
+      "last_seen": 1790251200
+    },
+    {
+      "node_id": {
+        "type": "mux_session",
+        "native_id": "tmux:docs-sweep"
+      },
+      "presence": "gone",
+      "last_seen": 1789992000
+    },
+    {
+      "node_id": {
+        "type": "mux_session",
+        "native_id": "tmux:nightly-refactor"
+      },
+      "presence": "gone",
+      "last_seen": 1790596800
+    },
+    {
+      "node_id": {
+        "type": "mux_session",
+        "native_id": "tmux:release-prep"
+      },
+      "presence": "gone",
+      "last_seen": 1790424000
+    }
+  ],
+  "history": {
+    "muxes": [
+      {
+        "id": "h_5c0000000001",
+        "key": "mux_session:tmux:project",
+        "first_seen": 1788177600,
+        "last_seen": 1790769300,
+        "origin": "observed",
+        "display": {
+          "label": "project",
+          "context": "claude · ~/repos/project"
+        },
+        "recipe": {
+          "backend": "tmux",
+          "name": "project",
+          "cwd": "/fixture/repos/project",
+          "incarnation": {
+            "session_id": "$project",
+            "created": 1788177600
+          },
+          "argv": [
+            "claude",
+            "--dangerously-skip-permissions"
+          ],
+          "argv_source": "conspectus",
+          "harness": "claude-code"
+        }
+      },
+      {
+        "id": "h_5c0000000002",
+        "key": "mux_session:tmux:nightly-refactor",
+        "first_seen": 1788177600,
+        "last_seen": 1790596800,
+        "origin": "observed",
+        "display": {
+          "label": "nightly-refactor",
+          "context": "claude · ~/repos/project"
+        },
+        "recipe": {
+          "backend": "tmux",
+          "name": "nightly-refactor",
+          "cwd": "/fixture/repos/project",
+          "incarnation": {
+            "session_id": "$nightly-refactor",
+            "created": 1788177600
+          },
+          "argv": [
+            "claude",
+            "--dangerously-skip-permissions"
+          ],
+          "argv_source": "conspectus",
+          "harness": "claude-code"
+        }
+      },
+      {
+        "id": "h_5c0000000003",
+        "key": "mux_session:tmux:docs-sweep",
+        "first_seen": 1788177600,
+        "last_seen": 1789992000,
+        "origin": "observed",
+        "display": {
+          "label": "docs-sweep",
+          "context": "claude · ~/repos/project"
+        },
+        "recipe": {
+          "backend": "tmux",
+          "name": "docs-sweep",
+          "cwd": "/fixture/repos/project",
+          "incarnation": {
+            "session_id": "$docs-sweep",
+            "created": 1788177600
+          },
+          "argv": [
+            "codex"
+          ],
+          "argv_source": "conspectus",
+          "harness": "claude-code"
+        }
+      },
+      {
+        "id": "h_5c0000000006",
+        "key": "mux_session:tmux:release-prep",
+        "first_seen": 1788177600,
+        "last_seen": 1790424000,
+        "origin": "observed",
+        "display": {
+          "label": "release-prep",
+          "context": "claude · ~/repos/project"
+        },
+        "recipe": {
+          "backend": "tmux",
+          "name": "release-prep",
+          "cwd": "/fixture/repos/project",
+          "incarnation": {
+            "session_id": "$release-prep",
+            "created": 1788177600
+          },
+          "argv": [
+            "claude",
+            "--dangerously-skip-permissions"
+          ],
+          "argv_source": "conspectus",
+          "harness": "claude-code"
+        }
+      },
+      {
+        "id": "h_5c0000000007",
+        "key": "mux_session:tmux:bugfix-sprint",
+        "first_seen": 1788177600,
+        "last_seen": 1790251200,
+        "origin": "observed",
+        "display": {
+          "label": "bugfix-sprint",
+          "context": "claude · ~/repos/project"
+        },
+        "recipe": {
+          "backend": "tmux",
+          "name": "bugfix-sprint",
+          "cwd": "/fixture/repos/project",
+          "incarnation": {
+            "session_id": "$bugfix-sprint",
+            "created": 1788177600
+          },
+          "argv": [
+            "codex"
+          ],
+          "argv_source": "conspectus",
+          "harness": "claude-code"
+        }
+      }
+    ],
+    "checkouts": [
+      {
+        "id": "h_5c0000000004",
+        "key": "checkout:repo:/fixture/checkouts/ledger-worktree",
+        "first_seen": 1787313600,
+        "last_seen": 1790510400,
+        "origin": "observed",
+        "display": {
+          "label": "feature/ledger",
+          "context": "project · feature/ledger"
+        },
+        "recipe": {
+          "repo": "repo:/fixture/repos/project/.git",
+          "root": "/fixture/checkouts/ledger-worktree",
+          "linked": true,
+          "branch": "feature/ledger",
+          "head": "5c0ffee5c0ffee5c0ffee5c0ffee5c0ffee5c0ff"
+        }
+      },
+      {
+        "id": "h_5c0000000005",
+        "key": "checkout:repo:/fixture/checkouts/spike-cache",
+        "first_seen": 1787313600,
+        "last_seen": 1789732800,
+        "origin": "observed",
+        "display": {
+          "label": "spike/cache",
+          "context": "project · spike/cache"
+        },
+        "recipe": {
+          "repo": "repo:/fixture/repos/project/.git",
+          "root": "/fixture/checkouts/spike-cache",
+          "linked": true,
+          "branch": "spike/cache",
+          "head": "5c0ffee5c0ffee5c0ffee5c0ffee5c0ffee5c0ff"
+        }
+      },
+      {
+        "id": "h_5c0000000008",
+        "key": "checkout:repo:/fixture/checkouts/hotfix-login",
+        "first_seen": 1787313600,
+        "last_seen": 1790337600,
+        "origin": "observed",
+        "display": {
+          "label": "hotfix/login",
+          "context": "project · hotfix/login"
+        },
+        "recipe": {
+          "repo": "repo:/fixture/repos/project/.git",
+          "root": "/fixture/checkouts/hotfix-login",
+          "linked": true,
+          "branch": "hotfix/login",
+          "head": "5c0ffee5c0ffee5c0ffee5c0ffee5c0ffee5c0ff"
+        }
+      }
+    ],
+    "prs": [
+      {
+        "id": "h_5c0000000007",
+        "key": "forge_pr:github:github.com/conspectus/project#5",
+        "first_seen": 1789041600,
+        "last_seen": 1790337600,
+        "origin": "observed",
+        "display": {
+          "label": "#5 Ledger store and merge",
+          "context": "conspectus/project · merged"
+        },
+        "recipe": {
+          "provider": "github",
+          "host": "github.com",
+          "owner": "conspectus",
+          "repo": "project",
+          "number": 5,
+          "title": "Ledger store and merge",
+          "state": "merged",
+          "draft": false
+        }
+      }
+    ],
+    "presence": {
+      "h_5c0000000002": {
+        "presence": "gone",
+        "last_seen": 1790596800
+      },
+      "h_5c0000000003": {
+        "presence": "gone",
+        "last_seen": 1789992000
+      },
+      "h_5c0000000004": {
+        "presence": "gone",
+        "last_seen": 1790510400
+      },
+      "h_5c0000000005": {
+        "presence": "gone",
+        "last_seen": 1789732800
+      },
+      "h_5c0000000006": {
+        "presence": "gone",
+        "last_seen": 1790424000
+      },
+      "h_5c0000000007": {
+        "presence": "gone",
+        "last_seen": 1790251200
+      },
+      "h_5c0000000008": {
+        "presence": "gone",
+        "last_seen": 1790337600
+      }
+    }
+  }
 }

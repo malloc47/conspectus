@@ -12,18 +12,20 @@ pub mod workspace_paths;
 use rkyv_adapters::MetadataAsJson;
 
 mod graph;
+mod history;
 mod ids;
 mod link;
 mod node;
-mod pin;
 mod resolution;
+mod slot;
 
 pub use graph::*;
+pub use history::*;
 pub use ids::*;
 pub use link::*;
 pub use node::*;
-pub use pin::*;
 pub use resolution::*;
+pub use slot::*;
 
 pub type Metadata = BTreeMap<String, Value>;
 

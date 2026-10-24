@@ -126,13 +126,16 @@ Likely atelier features to move or delegate over time:
 Start read-only, but design the data model and storage layout for quick follow-up
 commands that let users add or remove links manually. Read-only is still the
 default for discovery and orchestration; the sanctioned write surface today is
-bounded by the mutation envelope in ADR 0087 (user-intent TOML stores,
-rebuildable observation sidecars, operator-initiated mux lifecycle,
-Conspectus-owned subprocess launches, and operator-initiated harness hook
-installation) with an explicit prohibition list covering harness-native
-state beyond that hook entry, terminal input into live agent panes,
-payload persistence, shared/system locations, background mutation, git
-mutation, and hook bypass. `docs/capabilities.toml` lists every program,
+bounded by the mutation envelope in ADR 0143, which superseded ADR 0087
+with the same numbering (user-intent TOML stores including the pin slot
+store, rebuildable observations including the history store,
+operator-initiated mux lifecycle, Conspectus-owned subprocess launches,
+operator-initiated harness hook installation, and `git clone` into an
+absent path during a rebuild) with an explicit prohibition list covering
+harness-native state beyond that hook entry, terminal input into live
+agent panes, payload persistence, shared/system locations, background
+mutation (the daemon writes category 2 observations only), git mutation
+beyond that clone, and hook bypass. `docs/capabilities.toml` lists every program,
 subcommand, socket, signal, and write path the envelope allows, and tests
 check the source and a traced run of the built binary against it (ADR 0117).
 
@@ -225,6 +228,14 @@ erDiagram
     BRANCH ||--o{ FORGE_PR : may_have
     CHECKOUT }o--o| FORGE_PR : may_reference
 
+    PIN }o--o| MUX_SESSION : pin_targets
+    PIN }o--o| AGENT_SESSION : pin_targets
+    PIN }o--o| CHECKOUT : pin_targets
+    PIN }o--o| REPO : pin_targets
+    PIN }o--o| FORGE_PR : pin_targets
+    MUX_SESSION }o--o| AGENT_SESSION : mux_last_hosted
+    CHECKOUT }o--o| CHECKOUT : rebuilt_from
+
     GRAPH_LINK }o--|| LINK_SOURCE : has
     GRAPH_LINK }o--|| LINK_TARGET : has
     GRAPH_LINK }o--|| LINK_PROVENANCE : has
@@ -279,6 +290,13 @@ Entity notes:
   intent.
 - `ForgePr` is a forge pull request record. GitHub is the only v1 provider, but
   the entity should not encode GitHub-specific assumptions into the graph shape.
+- `Pin` is an operator-authored slot (ADR 0141): a named, ordered reference to
+  any rebuildable entity, live or gone, with overrides that win over what the
+  graph and history say. It links to its target through `pin_targets`.
+- Any node can be **gone** (ADR 0140): a history record whose targeted check
+  failed projects as a node with Gone presence and no live-only relations. A
+  ghost mux links to the session it last hosted (`mux_last_hosted`), and a
+  rebuilt checkout to the one it replaced (`rebuilt_from`).
 - `GraphLink` is the canonical candidate/evidence edge record used for
   discovery, conventions, caches, declared state, diagnostics, and
   machine-readable graph output. It captures source, target or unresolved
@@ -503,6 +521,9 @@ Local and global state locations:
   file when that provider owns a private metadata directory
 - global config: `$XDG_CONFIG_HOME/conspectus/config.toml`
 - global cache/index: `$XDG_DATA_HOME/conspectus/`
+- pin slots: `$XDG_DATA_HOME/conspectus/pins.toml` (operator intent,
+  user scope only; ADR 0141)
+- history: `$XDG_STATE_HOME/conspectus/history/` (observation; ADR 0140)
 
 Local declared-link files should be created only on demand, when the first
 manual link/ignore/override command needs to persist user intent. Read-only
@@ -516,6 +537,16 @@ there is a clear migration story back to portable project-local state.
 
 Do not make session portability part of this refactor, but avoid storage choices
 that would make portable session IDs or version-controlled session state harder.
+
+Conspectus keeps three layers (ADR 0140): the **graph** (what exists now,
+rebuilt by discovery every cycle and cached in `graph.bin`), **history**
+(what Conspectus has observed, gone entities included, with what it takes
+to rebuild them), and **pin slots** (what the operator keeps at hand, ADR
+0141). History is the last-seen index this section allows as global
+state. It is not kept in `graph.bin`, because that file is thrown away on
+every format bump and a gone entity can't be rediscovered. The payload
+rule (ADR 0086) applies to all of it, with one recorded exception: a
+mux's launch argv is kept verbatim.
 
 ## Manual Link Commands
 
@@ -538,7 +569,8 @@ Conspectus-owned overlay on top of the adapter-populated `title` field.
 Aliases live in a sibling `[[aliases]]` TOML table in the same local/global
 config files as declared links, follow the same store-selection and
 provenance rules, and are applied at projection time with precedence
-`alias > title > id-suffix`. The harness-native title is never mutated; the
+`alias > title > mux name > id-suffix` (the mux hosting the session, or
+the gone one that last hosted it; ADR 0029 as amended). The harness-native title is never mutated; the
 alias-only model works uniformly across every harness, including those with
 no writeable title field. Renaming a muxed agent session also renames the
 tmux session in lockstep by default. ADR 0029 captures the schema, mux
@@ -546,116 +578,99 @@ node-id stability rule, and lockstep contract. ADR 0030 settles the shared
 TUI text-input primitive used by the rename overlay (and reused by the
 search overlay and inline mux-picker).
 
-## Session Pins
+## History And Presence
 
-Per ADR 0057, Conspectus supports user-authored **Session Pins** as
-the surface that replaces agent-deck's "new" workflow. The
-[operations guide](operations.md#session-pins) documents the command
-and TUI surface in detail. A pin is a
-declared `(harness, cwd, display_name, mux)` tuple that
+Per ADR 0140, Conspectus records every rebuildable entity it observes,
+pinned or not, in per-kind JSON files under
+`$XDG_STATE_HOME/conspectus/history/` (`muxes.json`, `checkouts.json`,
+`repos.json`, `prs.json`, and a `history.lock`). A record has a stable
+random id, the graph key it last matched, first and last seen times, an
+origin (`observed`, `launched`, `migrated`), a display label for when the
+entity is gone, and a recipe: a mux's backend, socket, name, cwd,
+incarnation, launch argv and its source, harness, and the ten sessions it
+hosted most recently; a checkout's repo, root, branch, head, and upstream;
+a repo's common dir, remotes, primary checkout, and default branch; a PR's
+listing snapshot.
 
-- persists in a sibling `[[pins.entries]]` TOML table alongside
-  `[declared]` (ADR 0014) and `[aliases]` (ADR 0029), in the same
-  local/global config files. Local pin stores are aggregated from the
-  startup scan roots and from observed graph CWD/root paths so project
-  pins remain visible regardless of the operator's launch directory,
-- renders as a first-class row in the sessions and mux views whether or
-  not a live session currently realizes it,
-- binds 1:1 at resolve time on the **mux native name**
-  (`pin.mux.name`, optionally namespaced by an explicit `mux.socket_name`
-  for tmux's `-L <name>` server isolation): the resolver looks up
-  the live `MuxSession` with that `(socket, name)` pair, then
-  identifies the harness session via the existing mux-to-agent-
-  session attribution pipeline (ADR 0006 / ADR 0028 / ADR 0046 /
-  ADR 0047 / ADR 0048). Intra-harness lineage (ADR 0018) carries
-  the binding through `/compact` / `/resume` transparently. Cwd is
-  a launch parameter and a drift sanity check, not the
-  discriminator — at realistic densities (the dev tree has 47+
-  historical sessions at one cwd) cwd alone is too weak to
-  attribute uniquely. Per ADR 0102 a session realizes at most one
-  pin: sessions are assigned across pins by the resolver's session ↔
-  mux evidence order, a pin's previous binding is kept only as the
-  weakest fallback candidate, and a pin that loses its only session
-  reads `PinStaleMux` naming the pin that holds it.
-- launches a fresh `tmux [-L <socket>] new-session -s <mux.name>
-  -c <cwd> <argv>` via the `TmuxRunner` mutation surface, then hands
-  the terminal off through the existing CSP-169 exec-replace path.
-  When the mux exists but the harness has exited (`PinStaleMux`),
-  launch injects the command into the existing pane via
-  `tmux send-keys` rather than recreating the mux. When pane-process
-  evidence shows the harness still running there, launch attaches
-  without typing anything (ADR 0102, ADR 0028). Sessions Conspectus
-  creates keep a pane that exits non-zero, so a harness that dies
-  shows its own output on attach. A resume is watched briefly, and
-  one the harness rejects falls back to a fresh launch; a fresh launch
-  attaches at once so its first output is visible (ADR 0103,
-  ADR 0133). Non-default tmux
-  sockets (`mux.socket_name = "<name>"`) launch and attach correctly in
-  v1; discovery-side enumeration of non-default sockets is a
-  deferred follow-up, so until that lands, non-default-socket pins
-  render as `PinUnbound` even when their tmux session is live.
+**Presence** is a sparse `node_presence` map next to `node_provenance`:
+Live (the default), Gone, or Unknown. Absence from a scan never means
+gone. Gone takes a targeted negative check: a successful probe of the
+mux's backend and socket that didn't list it ("no server running" counts,
+so after a reboot every mux is gone), or a checkout or repo path that is
+missing under an existing parent. A failed or skipped probe, or a missing
+parent (an unmounted drive), is Unknown. PRs are never gone. Muxes match
+records by incarnation (tmux's session id and creation time), so an
+outside rename follows the record, then by key, so a recreated name gets
+its record back.
 
-Per-harness default launch argv lives on `HarnessAdapter::launch_argv`.
-The pin's `display_name` doubles as the bound agent session's alias
-overlay (ADR 0029 precedence) and as the initial tmux session name;
-renames apply the ADR 0029 lockstep contract. The binding is *not*
-persisted as resolver-canonical state — it is recomputed every
-discovery pass from live evidence plus the pin declaration, mirroring
-how ADR 0005 unresolved-endpoint evidence resolves opportunistically.
-Per ADR 0058, the most recent fresh binding *is* recorded to a
-per-pin sidecar under `$XDG_CACHE_HOME/conspectus/pin-bindings/` so
-that a subsequent `pin launch` after the mux dies can splice
-`HarnessAdapter::resume_argv(<session>, <cwd>)` into the launch
-instead of starting a fresh session. The sidecar is a rebuildable
-cache, not authoritative state; the resolver never reads it. The
-resolver emits four pin-specific diagnostics — `PinUnbound`
-(optionally carrying a `last_session` hint when the sidecar has
-one), `PinStaleMux`, `PinAmbiguous`, `PinDrift` — each mapped to a
-specific TUI affordance and CLI escape hatch (`pin bind`, `pin
-rebind`, `pin adopt`); ambiguity overrides reuse the ADR 0014
-declared-link surface rather than introducing a new persisted binding
-type.
+The daemon writes history for the classes each cycle probed fresh;
+in-process discovery writes where it writes `graph.bin`; launch and
+rebuild paths write the record of what they created, with its argv.
+Writers take an advisory lock, re-read, merge only their own
+observations, and write atomically; the merge is commutative, so any
+number of writers agree. Only fresh probes move `last_seen`, at most
+every ten minutes for an unchanged record. `--no-cache`, fixture and
+snapshot modes, and the dev scenario builder never write it.
+`[history.ignore]` globs keep entities out, and `conspectus history
+reap` removes gone records past per-kind thresholds, never pinned or
+Unknown ones; reaping is operator-initiated only.
 
-Per ADR 0084, pins also project into the graph as first-class
-`PinNode`s with stable `pin:<id>` node ids. The TOML entry remains the
-source of truth and `GraphSnapshot::pins` remains the CRUD sidecar, but
-each resolved snapshot rebuilds a pin node carrying declaration fields,
-store lineage (`provenance`, `store_path`), and the current binding.
-Pin-specific candidate links connect the node to its intended mux
-(`pin_targets_mux`, unresolved when the mux is absent) and to the
-realizing agent session when bound (`pin_realized_by_session`). TUI pin
-rows select the pin node itself; bound/stale detail fields link onward
-to the related session or mux rather than pretending the pin row is that
-entity.
+History projects into the graph: gone records become nodes with Gone or
+Unknown presence and no live-only relations, a ghost mux links to the
+session it last hosted (`mux_last_hosted`), a rebuilt checkout links to
+the one it replaced (`rebuilt_from`), and each live mux's most recent
+hosted session holds its attribution as a `Cached` `linked_to_mux`
+fallback when current evidence drifts. Code that acts on a node checks
+presence first, so nothing attaches to, counts, or renames a ghost.
 
-Pinned work should also project into session- and mux-shaped surfaces
-before the first launch. An unbound pin represents an intended mux and
-an intended next agent session even when neither live entity exists yet;
-TUI session and mux views should therefore be able to show placeholder
-session/mux rows introduced by the pin while retaining the separate
-`PinNode` as the authored declaration and source of launch/store
-lineage. Once the mux or session is observed, those placeholders should
-resolve to the real graph nodes without changing the user's row-level
-mental model.
+## Pin Slots
 
-Pins declare the *next* logical session; the H-AGENTMUX adapter
-workstream extracts evidence from *existing* agent-mux orchestrators
-(agent-deck, dmux, workmux, agent-of-empires). The two surfaces are
-complementary — adopting pins does not block, replace, or require
-the H-AGENTMUX adapters.
+Per ADR 0141, a **pin slot** is a named, ordered, editable place the
+operator keeps at hand, stored in one user-scope file,
+`$XDG_DATA_HOME/conspectus/pins.toml` (`[pins] schema_version = 2`,
+`[[pins.slots]]`, in slot order). A slot has a kind (anything rebuildable
+except runtime processes), a target (a history record for muxes,
+checkouts, and repos, a node id for sessions, PRs, branches, workspaces,
+and forks, or none for a planned slot), operator overrides, and a
+snapshot of the recipe taken by operator gestures so the slot survives a
+lost history. Each recipe field resolves `overrides > live graph >
+history > snapshot > defaults`. The daemon never writes `pins.toml`.
 
-CLI surface: `conspectus pin create|list|show|rename|rm|launch|attach|bind|rebind|adopt`.
-TUI surface: pin rows appear in the sessions and mux row trees;
-`Enter` launches when unbound and attaches when bound; `R` renames
-with lockstep; `N` / `B` / `b` / `A` / `Delete` are direct shortcuts
-for create / rebind / bind / adopt / remove, and `p` opens a
-dedicated Pins management modal (separate from the ADR 0031 Controls
-overlay) that surfaces every action with selection-aware defaults.
-ADR 0057 records the schema, mux-anchored binding rules, diagnostics,
-read-only invariants, and the deferred questions (Windows/non-tmux
-launch, multi-harness pins, pre-launch hooks, env overrides,
-atelier-fork auto-suggestion). ADR 0058 records the continuity
-sidecar and per-harness `resume_argv` story.
+`PinNode` (ADR 0084) stays the slot's graph identity, `pin:<id>`, and
+carries the kind, target, overrides, status, and effective recipe with
+each field's source; `pin_targets` links it to its target, live or gone.
+There is no binding pass: a slot's target is explicit, and session-to-mux
+attribution stays with the general resolver. A pin no longer aliases a
+session; session names fall back `alias > title > mux name >
+id-suffix`.
+
+Gestures: pin, edit, rename (a live mux slot renames its mux in lockstep,
+ADR 0029), retarget, refresh snapshot, move, unpin. CLI: `conspectus pin
+add|edit|rename|retarget|refresh|move|rm|list|show|migrate`, and `mux new`
+/ `mux launch --pin [--no-launch]`. Legacy `[[pins.entries]]` load as
+in-memory slots with a `LegacyPins` diagnostic until `pin migrate`
+converts them; the loader goes one release later.
+
+## Rebuild
+
+Per ADR 0142, a **rebuild** turns a recipe from a slot, a history record,
+or a live node back into a live entity. It is a plan of steps, shown
+before it runs and printed by `conspectus rebuild <ref> --dry-run` (with `--assume-stopped` for a running entity, and `--script` for only the commands, which come from the same argument builders the runners use);
+executors plan their own steps and chain prerequisites. A gone mux gets
+`new-session` with its effective argv and its last session's resume
+spliced after the harness binary (ADR 0098), falling back to a fresh
+launch when the resume is rejected (ADR 0103); a live mux whose agent
+exited gets the built argv typed into its pane only when no harness is
+running there (ADR 0028, ADR 0102); a session resumes in the mux that
+last hosted it, or a new one when that mux is busy; a linked worktree
+comes back through `wt switch` (creating a deleted branch from its last
+head); a repo or primary checkout is cloned from its recorded remote. A
+mux whose worktree is gone rebuilds the worktree first, which replaces
+worktree-backed pins (ADR 0094). The effective argv comes from the slot's
+override, the recorded argv, the project and then user launch profile
+(`[launch.<harness>] argv`), a discovered `atelier exec` wrapper, and
+finally `HarnessAdapter::launch_argv`. Orchestrator-owned muxes are shown
+but not rebuilt. `rebuild --pinned`, which would rebuild every gone pinned slot, is planned (backlog `CSP-686`); today each slot is rebuilt by name.
 
 ## Worktree Management
 
@@ -675,11 +690,11 @@ Management flows through a **pluggable worktree backend seam**
   this via `git worktree list --porcelain` (a read command).
 - **`create` / `remove` are mutation and delegated.** Conspectus
   never runs `git worktree add/remove` itself — ADR 0087 prohibition 6
-  (never mutate git state) stays absolute. Instead, mutation-capable
+  (never mutate git state, restated in ADR 0143) stays absolute. Instead, mutation-capable
   backends are external dedicated tools; the v1 rich backend is
   [`worktrunk`](https://github.com/max-sixty/worktrunk), which
   Conspectus invokes as a Conspectus-owned subprocess launch
-  (ADR 0087 category 4). The built-in `git` backend deliberately stops
+  (ADR 0087 category 4, ADR 0143). The built-in `git` backend deliberately stops
   at read/list.
 
 Backend selection mirrors the mux-backend / forge-adapter registries
@@ -701,13 +716,13 @@ branch and tears the worktree down. **Close-down** is the compound
 inverse of creation: it terminates the mux/agent sessions rooted in the
 worktree (a two-phase graceful-`SIGTERM`→hard `kill-session` sanctioned
 by ADR 0093), lands or discards the branch, removes the worktree, and
-drops the pins declared there — one gesture on the CLI (`worktree
-close`) and the TUI (`X` / menu). **New-stream** is the creation side:
-a pin may be *worktree-backed* (`[worktree] branch`), and its worktree
-is realized at launch — created from the repo default and entered
-alongside the mux + agent — rather than at pin-write time, keeping the
-declaration pure (ADR 0094). The `N` key opens the create form with the
-worktree toggle pre-enabled.
+forgets the gone history records rooted there — one gesture on the CLI
+(`worktree close`) and the TUI (`X` / menu). **New-stream** is the
+creation side: `mux launch` with a worktree branch realizes the worktree
+and starts the agent in it, and a mux slot with a `worktree_branch`
+override, or a ghost mux whose worktree is gone, rebuilds the worktree as
+the first step of its plan (ADR 0142). The `N` key opens the mux launch
+form; the worktree toggle is off until the operator turns it on.
 
 Maintenance rounds out the surface: **prune** delegates to worktrunk's
 `step prune` (remove worktrees already merged into the default branch)
@@ -721,49 +736,35 @@ read-only graph navigation, no backend.
 
 ## Mux Lifecycle
 
-Conspectus's operator-initiated mux mutations (ADR 0087 category 3) are
-four separate creation flavors plus rename, attach, and teardown:
+Conspectus's operator-initiated mux mutations (ADR 0143 category 3) are
+three creation paths plus rename, attach, and teardown:
 
-- **Bare mux** (ADR 0095) — a plain tmux session with no pin, no
-  agent, no worktree. `conspectus mux new <name> [--cwd <path>]` on
-  the CLI; lowercase `n` in the TUI opens a create form. The
-  operator gets a shell in the requested cwd; nothing is persisted
-  and no argv is injected (ADR 0028). The bare session appears in
-  discovery on the next refresh and can later be adopted as a pin
-  (`pin adopt`) if the operator wants durable declaration.
-- **Mux launch** (ADR 0096) — an ephemeral harness session in a
-  fresh mux, no pin persistence. `conspectus mux launch <harness>
-  --name <mux-name> [--cwd <path>]` on the CLI; the `m`-keyed Mux
-  action menu in the TUI opens a parameterized launch-spec form
-  (ADR 0097) for it. The mux and its harness session appear in
-  discovery next refresh; `pin adopt` remains the after-the-fact
-  persistence path when the operator changes their mind.
-- **Pin launch** (ADRs 0057 / 0058) — a `pin launch` (or `Enter` on
-  an unbound pin row) starts a tmux session running the pin's
-  harness argv, spliced with `resume_argv` when a continuity
-  sidecar applies. Resume tokens are inserted after the harness
-  binary inside the pin's argv, so wrappers and launch options
-  survive (ADR 0098). Distinguished from mux launch by durable
-  `[[pins.entries]]` persistence, alias overlay, and resume
-  continuity.
-- **Worktree stream** (ADR 0094) — a worktree-backed pin realizes
-  its branch's worktree at launch and then runs the pin-launch
-  path inside the fresh worktree cwd. The `N` TUI shortcut opens
-  the pin create form with the worktree toggle pre-enabled. Mux
-  launch (ADR 0096) also exposes the worktree toggle, materializing
-  the worktree without writing a pin.
+- **Bare mux** (ADR 0095) — a plain tmux session with no agent.
+  `conspectus mux new <name> [--cwd <path>]` on the CLI; `n` in the TUI.
+  No argv is injected (ADR 0028).
+- **Mux launch** (ADR 0096) — a harness in a fresh mux. `conspectus mux
+  launch <harness> --name <mux-name> [--cwd <path>]` on the CLI; the `m`
+  Mux menu in the TUI opens a launch-spec form (ADR 0097), and `N` opens
+  it too (worktree toggle off by default). The default argv comes from launch
+  profiles (ADR 0142).
+- **Rebuild** (ADR 0142) — a gone mux, a planned slot, or a mux whose
+  agent exited, from its slot or history recipe, as a plan of steps.
 
-Rename (ADR 0029, with pin-lockstep), attach (via `MuxBackend`), and
-teardown (ADR 0093, two-phase graceful → hard `kill-session`) round
-out the surface. All flavors share the `MuxBackend::new_session`
-/ `attach_session` / `kill_session` primitives (ADR 0089) — the
-distinctions are in what the caller passes as argv and whether a pin
-or worktree wraps the call. The pin-create and mux-launch TUI forms
-share a launch-spec form primitive (ADR 0097) with per-caller
-wrappers that fix mode at open time; no in-flow toggle switches
-between persistence shapes.
+Every mux Conspectus creates, and every mux it observes, is recorded in
+history (ADR 0140), so any of them can be rebuilt after it dies. `--pin`
+on `mux new` and `mux launch` pins the result in the same gesture, and
+`--pin --no-launch` writes a planned slot. Rename (ADR 0029, with
+lockstep for a live mux slot), attach (via `MuxBackend`), and teardown
+(ADR 0093, two-phase graceful → hard `kill-session`) round out the
+surface; a torn-down mux stays in history as a ghost. All paths share
+the `MuxBackend::new_session` / `attach_session` / `kill_session`
+primitives (ADR 0089).
 
 ## Status Views
+
+The TUI's left panel (columns, glyphs, state words, age rules, and
+example frames per view) is described in
+[tui-columns.md](tui-columns.md), which tests keep in step with the code.
 
 Tabular views are projections chosen by row type, per ADR 0021:
 `conspectus table <rows>`. The `sessions` table is AgentSession-oriented: one
@@ -874,7 +875,7 @@ The TUI's view switcher offers sessions, mux, and PRs (`1`–`3`); union and
 forks remain CLI table projections. The PRs view groups by checkout by
 default, so each PR sits with the work checked out for it, and PRs checked out
 nowhere sit under their repo, labelled `no checkout` (ADR 0114, 0130). Each PR
-row carries a marker for whether it has a local branch (`⎇`) or not (dim `◌`);
+row carries a marker for whether it has a local branch (`⌥`) or not (dim `◌`);
 the Controls overlay can show only PRs with or without one and float those
 with one to the top (settable from config), the same overlay filters by PR
 state (open, draft, merged, closed, ADR 0134), and `repo` grouping files every PR
@@ -899,10 +900,26 @@ without group rows.
 
 The mux view groups by `session` (the default, a flat list), `host`, `repo`,
 or `workspace`. `workspace` is the mux counterpart of the sessions view's
-`graph` shape: after the Pins group, one header per workspace a mux (or an
-unbound pin placeholder) is rooted in and the `repo` buckets for every other
-mux, sorted together by header name so neither kind comes first, then
-Ungrouped (ADR 0139).
+`graph` shape: one header per workspace a mux is rooted in and the `repo`
+buckets for every other mux, sorted together by header name so neither kind
+comes first, then Ungrouped (ADR 0139). Ghost muxes (ADR 0140) that a pin
+points at sort below the live muxes of their group in the ghost style, with
+a `gone` status and their last-seen age; the rest live in History, a
+Controls option lists every stopped mux, and the header counts them all
+separately (ADR 0144).
+
+Two views list rows of mixed kinds in one set of aligned columns,
+`<kind> <label> <status> <age> <content>` (ADR 0144): **Pinned** lists
+every pin slot in slot order, grouped by project, and **History** lists
+the history records whose entity a check found gone (an Unknown record
+proves nothing, so it isn't listed), newest first, with a Clean up modal
+for reaping. Native views mark pinned rows with `◉` (`◎` when the pinned entity isn't running) instead of floating
+them, and Controls offers a `pinned only` filter. A row action menu (`.`)
+lists what applies to the entity in view, including Pin / Unpin (`p`): the same
+entries for the same entity in every view, hiding those with nothing to say.
+Accelerators act on the entity shown in the right pane while it has focus.
+An undo key (`u`) reverses the last pin or unpin, restoring a removed pin whole
+and in place; every store write declares whether it is undoable.
 
 Every capability in this surface is reachable through a navigable
 **Controls overlay** (sections for view, grouping, filters, sort).
@@ -949,8 +966,8 @@ Each node kind defines its preview (ADR 0112): a session shows its
 transcript through the native viewer (ADR 0052), a mux session its live
 pane capture, a checkout `git status` above a listing, a repo recent
 commits and remotes, a branch recent commits and ahead/behind, a PR its
-body and checks, a process its process tree, and a pin its session's
-transcript or its diagnostics. Sessions in tmux show the transcript by
+body and checks, a process its process tree, and a pin slot its target's
+preview, or its snapshot when the target is gone. Sessions in tmux show the transcript by
 default; the controls overlay switches them to the live pane, and
 `[tui] session_preview` sets the starting choice. Previews read only,
 load off the UI thread, and are cached in memory; `--no-live-preview`
@@ -1203,17 +1220,22 @@ The one-shot CLI's resolution chain (CSP-445 + CSP-448.01):
 `--refresh` bypasses (1) so the operator-typed "ignore the
 daemon, rebuild from disk" semantic is preserved.
 The TUI follows the same chain. After it hands the terminal to tmux or
-changes a tmux session (attach, pin launch, mux new/launch, rename),
+changes a tmux session (attach, rebuild, mux new/launch, rename),
 and on `r`, it first asks the daemon to rescan the `mux` and `harness`
 classes, so it never shows the daemon's pre-hand-off tick (ADR 0104).
 After an attach returns, that refresh runs in the background: the TUI
 redraws right away, with the returned mux's rows and its linked
 sessions' rows dimmed and spinning until the refresh lands (ADR 0108).
-A launch (pin launch, `mux new`, `mux launch`) keeps the TUI drawn
+A launch (rebuild, `mux new`, `mux launch`) keeps the TUI drawn
 with a spinner chip through its subprocess (ADR 0127), then attaches
-without refreshing first; the attach's return refreshes. A launch that
-ends without an attach refreshes before reporting (ADR 0133). The pin
-commands discover without the forges, which they never read (ADR 0135).
+without refreshing first; the attach's return refreshes (ADR 0133). Every
+state-changing gesture (pin, edit, retarget, forget, rebuild, launch) ends
+the same way: the acted-on row dims and spins while a rebuild or launch runs,
+a refresh reloads the views through the daemon like `r` (so no view loses
+data), and when the entity moved to another view, such as a History record
+that came back as a live mux, focus follows it and selects its row. The pin and
+rebuild commands discover without the forges, which they never read (ADR
+0135); a PR slot takes its state from history.
 Operation outcomes the TUI produces go to an in-memory message log
 (`!`) with full subprocess output; unseen failures stay flagged in the
 status bar and lead the affected row's Preview (ADR 0105).
@@ -1221,7 +1243,7 @@ status bar and lead the affected row's Preview (ADR 0105).
 (2).
 
 Daemonless one-shot CLI mutations (`conspectus declared
-create`, `pin create`, alias renames, …) write TOML files
+create`, `pin add`, alias renames, …) write TOML files
 directly per their existing ADRs; the next daemon cycle picks
 the change up. The CLI does not take a writer lock or
 coordinate with the daemon for these mutations — there is no
@@ -1285,6 +1307,8 @@ migration helper and harmless if it fails.
 - Global paths:
   - config: `$XDG_CONFIG_HOME/conspectus/config.toml`
   - cache/index: `$XDG_DATA_HOME/conspectus/`
+  - pin slots: `$XDG_DATA_HOME/conspectus/pins.toml`
+  - history: `$XDG_STATE_HOME/conspectus/history/`
 - Local declared-link files are write-on-demand only.
 - Declared links win over discovered links; conflicts are displayed, not fatal.
 - Durable declared state should be TOML; cache/index internals may use another
@@ -1302,6 +1326,11 @@ migration helper and harmless if it fails.
   `$XDG_DATA_HOME/conspectus/graph.bin` (ADRs 0082 and 0083). Partial
   eviction operates at provider granularity using node/link provenance and
   per-provider freshness timestamps.
+- History records every observed mux, checkout, repo, and PR, gone ones
+  included, with presence decided by targeted checks rather than scan
+  absence (ADR 0140). Pin slots are ordered, editable references in one
+  user-scope store (ADR 0141). Rebuilds are plans of steps shown before
+  they run (ADR 0142). The mutation envelope is ADR 0143.
 - Hook sidecar records are local rebuildable observations written through
   `conspectus hook write`. When the daemon is available, hook evidence is
   ingested into `SnapshotState` and persisted through `graph.bin`. When no

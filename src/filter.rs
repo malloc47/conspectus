@@ -53,6 +53,22 @@ pub struct RowFilter {
     /// within-group sort order is preserved.
     #[serde(skip_serializing_if = "is_false")]
     pub float_attached_muxes_top: bool,
+    /// Mux view: list every stopped mux history keeps, below the
+    /// running ones. Off (the default) lists only the stopped muxes a
+    /// pin points at; the rest live in the History view. Like the
+    /// ordering toggles it isn't a narrowing predicate over sessions.
+    #[serde(skip_serializing_if = "is_false")]
+    pub show_stopped_muxes: bool,
+    /// Native views: keep only rows for pinned entities, and the
+    /// groups that lead to them (ADR 0141). Applied to the finished
+    /// tree, so it isn't a predicate over sessions.
+    #[serde(skip_serializing_if = "is_false")]
+    pub pinned_only: bool,
+    /// History view: list records that a pin points at too. Off (the
+    /// default) shows unpinned records only, since a pinned record is
+    /// already one keypress away in the Pinned view.
+    #[serde(skip_serializing_if = "is_false")]
+    pub show_pinned_history: bool,
     /// PRs view: include only PRs with, or only PRs without, a local
     /// branch (ADR 0129). `None` shows every PR. Unlike the
     /// predicates above it never looks at a PR's attached sessions, so
@@ -84,6 +100,9 @@ impl RowFilter {
             && self.pr_state.is_none()
             && !self.float_muxed_sessions_top
             && !self.float_attached_muxes_top
+            && !self.show_stopped_muxes
+            && !self.pinned_only
+            && !self.show_pinned_history
             && !self.float_tracked_prs_top
     }
 

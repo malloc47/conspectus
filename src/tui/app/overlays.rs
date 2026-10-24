@@ -28,9 +28,231 @@ impl App {
     /// overlay's Confirm(String) maps to Msg::CommitRename via
     /// the uniform Overlay trait.
     pub fn open_rename_overlay(&mut self, state: crate::tui::widgets::input::TextInputState) {
+        self.slot_prompt = None;
         self.modal_stack.push(crate::tui::Modal::Rename(
             crate::tui::RenameOverlayState::new(state),
         ));
+    }
+
+    /// Fix the entity the open rename prompt renames.
+    pub(crate) fn set_rename_node(&mut self, node: NodeId) {
+        self.rename_node = Some(node);
+    }
+
+    /// Open the text prompt that edits a pin slot.
+    pub(crate) fn open_slot_prompt(
+        &mut self,
+        prompt: super::SlotPrompt,
+        title: &str,
+        initial: &str,
+    ) {
+        self.open_rename_overlay(crate::tui::widgets::input::TextInputState::new(
+            title, initial,
+        ));
+        self.slot_prompt = Some(prompt);
+    }
+
+    /// Open a menu that unpins whichever of `slots` is chosen.
+    pub(crate) fn open_pin_menu(&mut self, slots: Vec<String>) {
+        use crate::tui::Msg;
+        use crate::tui::widgets::row_menu::{RowMenuEntry, RowMenuState};
+        let entries: Vec<RowMenuEntry> = slots
+            .into_iter()
+            .map(|slot| {
+                RowMenuEntry::new(
+                    format!("Unpin {slot}"),
+                    "remove the pin; the entity and its history stay",
+                    Msg::Unpin(slot),
+                )
+            })
+            .collect();
+        if !entries.is_empty() {
+            self.open_row_menu(RowMenuState::new("Pinned", entries));
+        }
+    }
+
+    /// Switch to the native view of the entity pin `slot` points at and
+    /// select its row.
+    pub(crate) fn reveal_slot(&mut self, slot: &str) -> Result<(), String> {
+        let node = self
+            .snapshot_handle()
+            .and_then(|handle| {
+                crate::tui::rows::pin_nodes(handle.snapshot())
+                    .into_iter()
+                    .find(|pin| pin.id.id == slot)
+                    .and_then(|pin| pin.target_node.clone())
+            })
+            .ok_or_else(|| format!("pin `{slot}` has no entity to reveal"))?;
+        let record = self.snapshot_handle().and_then(|handle| {
+            crate::tui::rows::pin_nodes(handle.snapshot())
+                .into_iter()
+                .find(|pin| pin.id.id == slot)
+                .and_then(|pin| pin.target.as_deref())
+                .and_then(|target| target.strip_prefix(crate::model::PinSlot::HISTORY_PREFIX))
+                .map(str::to_string)
+        });
+        self.reveal_node(&node, record)
+            .map_err(|why| format!("`{slot}` {why}"))
+    }
+
+    /// Switch to the view that lists `node` and select its row. A gone
+    /// entity is listed only where history is: the Mux view keeps its
+    /// ghosts, and everything else is in History. On failure the
+    /// operator stays where they were.
+    pub(crate) fn reveal_node(
+        &mut self,
+        node: &NodeId,
+        record_hint: Option<String>,
+    ) -> Result<(), String> {
+        let Some(handle) = self.snapshot_handle() else {
+            return Err("isn't listed: nothing is loaded yet".to_string());
+        };
+        let snapshot = handle.snapshot();
+        let view = crate::tui::actions::natural_view(snapshot, node);
+        // History lists a gone entity by its record rather than by node.
+        let record = record_hint
+            .or_else(|| {
+                snapshot
+                    .history
+                    .by_key(&node.to_string())
+                    .map(|(_, meta)| meta.id.clone())
+            })
+            .or_else(|| match node {
+                NodeId::MuxSession(mux) => snapshot
+                    .history
+                    .muxes
+                    .iter()
+                    .find(|record| record.recipe.native_id() == mux.native_id)
+                    .map(|record| record.meta.id.clone()),
+                _ => None,
+            });
+        let previous = self.active_view;
+        let previous_filter = self.filter.clone();
+        self.switch_to_view(view);
+        // A pin's own target is a pinned record, which History hides
+        // unless asked; revealing it asks.
+        if view == crate::tui::View::History {
+            self.filter.show_pinned_history = true;
+        }
+        self.rebuild_tree_in_place();
+        let Some(index) = self.tree.rows.iter().position(|row| {
+            crate::tui::rows::row_node(&row.id) == Some(node)
+                || matches!(&row.id, RowId::History { record_id } if Some(record_id) == record.as_ref())
+        }) else {
+            // Stay where the operator was.
+            self.filter = previous_filter;
+            self.switch_to_view(previous);
+            self.rebuild_tree_in_place();
+            return Err(format!("isn't listed in the {view:?} view"));
+        };
+        self.expand_to_and_select(index);
+        Ok(())
+    }
+
+    /// Expand the ancestors of the row at `index` and select it.
+    fn expand_to_and_select(&mut self, index: usize) {
+        let mut wanted = self.tree.rows[index].depth;
+        let ancestors: Vec<RowId> = self.tree.rows[..index]
+            .iter()
+            .rev()
+            .filter(|row| {
+                let keep = row.depth < wanted;
+                if keep {
+                    wanted = row.depth;
+                }
+                keep
+            })
+            .map(|row| row.id.clone())
+            .collect();
+        self.expanded.extend(ancestors);
+        let id = self.tree.rows[index].id.clone();
+        self.set_selection(id);
+    }
+
+    /// Select what an undo restored, now that its refresh has landed.
+    /// It never leaves the view: a row that isn't listed here is left
+    /// alone.
+    pub(crate) fn apply_restore_focus(&mut self) {
+        use crate::tui::undo::RestoreFocus;
+        let Some(focus) = self.pending_restore_focus.take() else {
+            return;
+        };
+        let index = self.tree.rows.iter().position(|row| match &focus {
+            RestoreFocus::Row(id) => &row.id == id,
+            RestoreFocus::Node(node) => crate::tui::rows::row_node(&row.id) == Some(node),
+        });
+        if let Some(index) = index {
+            self.expand_to_and_select(index);
+        }
+    }
+
+    /// Test hook: the row the action started on has disappeared from the
+    /// refreshed tree, as a History record does once it is a live mux.
+    #[cfg(test)]
+    pub(crate) fn forget_follow_row(&mut self) {
+        self.pending_follow_row = None;
+    }
+
+    /// Select the entity the last action acted on, now that the refresh
+    /// after it has landed. Stays on the selected row when it is still
+    /// listed, then in the current view when the entity is listed there;
+    /// otherwise moves to the view where it now
+    /// lives, and tells the operator when it can't be found.
+    pub(crate) fn apply_pending_follow(&mut self) {
+        if self.handoff.is_some() {
+            return;
+        }
+        let Some(node) = self.pending_follow.take() else {
+            return;
+        };
+        // Stay where the operator was while their row is still listed:
+        // starting a pin leaves it in the Pinned view, and only a row that
+        // disappears sends them to where the entity went.
+        if let Some(row) = self.pending_follow_row.take()
+            && let Some(index) = self.tree.rows.iter().position(|r| r.id == row)
+        {
+            self.expand_to_and_select(index);
+            return;
+        }
+        if let Some(index) = self
+            .tree
+            .rows
+            .iter()
+            .position(|row| crate::tui::rows::row_node(&row.id) == Some(&node))
+        {
+            self.expand_to_and_select(index);
+            return;
+        }
+        if let Err(why) = self.reveal_node(&node, None) {
+            self.post_toast(format!("couldn't find the entity: it {why}"));
+        }
+    }
+
+    /// The open picker, if it is on top of the stack.
+    pub fn picker(&self) -> Option<&crate::tui::widgets::picker::PickerState> {
+        match self.modal_stack.last()? {
+            crate::tui::Modal::Picker(state) => Some(state.as_ref()),
+            _ => None,
+        }
+    }
+
+    /// Mutable access for the runtime's per-key forwarding.
+    pub fn picker_mut(&mut self) -> Option<&mut crate::tui::widgets::picker::PickerState> {
+        match self.modal_stack.last_mut()? {
+            crate::tui::Modal::Picker(state) => Some(state.as_mut()),
+            _ => None,
+        }
+    }
+
+    pub fn open_picker(&mut self, state: crate::tui::widgets::picker::PickerState) {
+        self.modal_stack
+            .push(crate::tui::Modal::Picker(Box::new(state)));
+    }
+
+    pub fn close_picker(&mut self) {
+        if matches!(self.modal_stack.last(), Some(crate::tui::Modal::Picker(_))) {
+            self.modal_stack.pop();
+        }
     }
 
     /// Pop the rename overlay if it's on top; no-op otherwise.
@@ -132,6 +354,64 @@ impl App {
         }
     }
 
+    /// Open the full-value modal on `state`.
+    pub fn open_value_modal(&mut self, state: crate::tui::widgets::value_modal::ValueModalState) {
+        self.modal_stack.push(crate::tui::Modal::ValueModal(state));
+        self.status_message = None;
+    }
+
+    /// Active row action menu, if on top of stack.
+    pub fn row_menu(&self) -> Option<&crate::tui::widgets::row_menu::RowMenuState> {
+        match self.modal_stack.last()? {
+            crate::tui::Modal::RowMenu(state) => Some(state.as_ref()),
+            _ => None,
+        }
+    }
+
+    pub fn row_menu_mut(&mut self) -> Option<&mut crate::tui::widgets::row_menu::RowMenuState> {
+        match self.modal_stack.last_mut()? {
+            crate::tui::Modal::RowMenu(state) => Some(state.as_mut()),
+            _ => None,
+        }
+    }
+
+    pub fn open_row_menu(&mut self, state: crate::tui::widgets::row_menu::RowMenuState) {
+        self.modal_stack
+            .push(crate::tui::Modal::RowMenu(Box::new(state)));
+    }
+
+    pub fn close_row_menu(&mut self) {
+        if matches!(self.modal_stack.last(), Some(crate::tui::Modal::RowMenu(_))) {
+            self.modal_stack.pop();
+        }
+    }
+
+    /// Active Clean up modal, if on top of stack.
+    pub fn clean_up(&self) -> Option<&crate::tui::widgets::clean_up::CleanUpState> {
+        match self.modal_stack.last()? {
+            crate::tui::Modal::CleanUp(state) => Some(state.as_ref()),
+            _ => None,
+        }
+    }
+
+    pub fn clean_up_mut(&mut self) -> Option<&mut crate::tui::widgets::clean_up::CleanUpState> {
+        match self.modal_stack.last_mut()? {
+            crate::tui::Modal::CleanUp(state) => Some(state.as_mut()),
+            _ => None,
+        }
+    }
+
+    pub fn open_clean_up(&mut self, state: crate::tui::widgets::clean_up::CleanUpState) {
+        self.modal_stack
+            .push(crate::tui::Modal::CleanUp(Box::new(state)));
+    }
+
+    pub fn close_clean_up(&mut self) {
+        if matches!(self.modal_stack.last(), Some(crate::tui::Modal::CleanUp(_))) {
+            self.modal_stack.pop();
+        }
+    }
+
     /// Active mux-launch form, if on top of stack.
     pub fn mux_launch_form(&self) -> Option<&crate::tui::widgets::mux_launch::MuxLaunchFormState> {
         match self.modal_stack.last()? {
@@ -166,12 +446,67 @@ impl App {
         }
     }
 
-    pub fn pending_pin_remove(&self) -> Option<&str> {
-        self.pending_pin_remove.as_deref()
+    /// What the pin edit form needs to know about pin `slot`: its fields
+    /// in effect, what they would be without its overrides, and the
+    /// choices the fields offer. `None` when no such pin is in the graph.
+    pub(crate) fn pin_edit_init(
+        &self,
+        slot: &str,
+    ) -> Option<crate::tui::widgets::pin_edit::PinEditInit> {
+        use crate::model::{GraphNode, SlotStatus};
+        let snapshot = self.snapshot_handle()?.snapshot();
+        let pin = snapshot.nodes.iter().find_map(|node| match node {
+            GraphNode::Pin(pin) if pin.id.id == slot => Some(pin),
+            _ => None,
+        })?;
+        let stored = snapshot.pins.iter().find(|stored| stored.id == slot)?;
+        let mut probe = stored.clone();
+        probe.overrides.clear();
+        let inherited = crate::resolve::slots::resolve_slot(snapshot, &probe).effective;
+        let cwd = pin.text("cwd").map(str::to_string);
+        Some(crate::tui::widgets::pin_edit::PinEditInit {
+            pin: slot.to_string(),
+            kind: pin.kind,
+            status: pin.status.label_for(pin.kind).to_string(),
+            live_mux: pin.kind == crate::model::PinKind::Mux && pin.status == SlotStatus::Live,
+            effective: pin.effective.clone(),
+            overrides: pin.overrides.clone(),
+            inherited,
+            known_pin_names: snapshot.pins.iter().map(|p| p.id.clone()).collect(),
+            known_harness_keys: crate::tui::runtime::known_harness_keys(),
+            cwd_candidates: crate::tui::runtime::known_cwd_candidates(self, cwd.as_deref()),
+            defaults: Some(crate::launch_default::LaunchDefaults::new(
+                self.config().launch.clone(),
+            )),
+        })
     }
 
-    pub fn set_pending_pin_remove(&mut self, pin_id: Option<String>) {
-        self.pending_pin_remove = pin_id;
+    /// Active pin edit form, if on top of stack.
+    pub fn pin_edit_form(&self) -> Option<&crate::tui::widgets::pin_edit::PinEditFormState> {
+        match self.modal_stack.last()? {
+            crate::tui::Modal::PinEdit(state) => Some(state.as_ref()),
+            _ => None,
+        }
+    }
+
+    pub fn pin_edit_form_mut(
+        &mut self,
+    ) -> Option<&mut crate::tui::widgets::pin_edit::PinEditFormState> {
+        match self.modal_stack.last_mut()? {
+            crate::tui::Modal::PinEdit(state) => Some(state.as_mut()),
+            _ => None,
+        }
+    }
+
+    pub fn open_pin_edit_form(&mut self, state: crate::tui::widgets::pin_edit::PinEditFormState) {
+        self.modal_stack
+            .push(crate::tui::Modal::PinEdit(Box::new(state)));
+    }
+
+    pub fn close_pin_edit_form(&mut self) {
+        if matches!(self.modal_stack.last(), Some(crate::tui::Modal::PinEdit(_))) {
+            self.modal_stack.pop();
+        }
     }
 
     /// Active controls-overlay state (ADR 0031), if any.
@@ -210,61 +545,6 @@ impl App {
             Some(crate::tui::Modal::Controls(_))
         ) {
             self.modal_stack.pop();
-        }
-    }
-
-    /// Active pins-overlay state (ADR 0057), if any. Lives on the
-    /// modal stack (ADR 0085 contract 3); this accessor peeks the
-    /// top entry.
-    pub fn pins_overlay(&self) -> Option<&crate::tui::widgets::pins::PinsOverlayState> {
-        match self.modal_stack.last()? {
-            crate::tui::Modal::Pins(state) => Some(state),
-            _ => None,
-        }
-    }
-
-    pub fn pins_overlay_mut(&mut self) -> Option<&mut crate::tui::widgets::pins::PinsOverlayState> {
-        match self.modal_stack.last_mut()? {
-            crate::tui::Modal::Pins(state) => Some(state),
-            _ => None,
-        }
-    }
-
-    /// Push a fresh pins overlay onto the modal stack at the top
-    /// of the action list.
-    pub fn open_pins_overlay(&mut self) {
-        self.modal_stack.push(crate::tui::Modal::Pins(
-            crate::tui::widgets::pins::PinsOverlayState::new(),
-        ));
-    }
-
-    /// Push a pre-configured pins overlay state — used by direct
-    /// shortcuts (`N`/`B`/`A`/`b`) that skip the menu and open a
-    /// sub-editor directly.
-    pub fn set_pins_overlay(&mut self, state: crate::tui::widgets::pins::PinsOverlayState) {
-        self.modal_stack.push(crate::tui::Modal::Pins(state));
-    }
-
-    /// Pop the pins overlay if it's on top; no-op otherwise.
-    pub fn close_pins_overlay(&mut self) {
-        if matches!(self.modal_stack.last(), Some(crate::tui::Modal::Pins(_))) {
-            self.modal_stack.pop();
-        }
-    }
-
-    /// Snapshot of the live pin state the pins overlay renders against.
-    pub fn pins_context(&self) -> crate::tui::widgets::pins::PinsContext {
-        crate::tui::widgets::pins::PinsContext {
-            pin_create_defaults: self.pin_create_defaults(),
-            pin_adopt_defaults: self.pin_adopt_defaults_if_available(),
-            known_cwd_candidates: self.known_pin_cwd_candidates(),
-            known_harness_keys: self.known_harness_keys().into_iter().collect(),
-            known_mux_names: self.used_mux_names().into_iter().collect(),
-            known_pin_ids: self.used_pin_ids().into_iter().collect(),
-            known_pin_mux_names: self.used_pin_mux_names().into_iter().collect(),
-            selected_pin_id: self.selected_pin_id(),
-            pin_target: self.pin_mutation_target(),
-            pin_bind_options: self.pin_bind_options(),
         }
     }
 
@@ -368,6 +648,20 @@ impl App {
         if matches!(self.modal_stack.last(), Some(crate::tui::Modal::Help(_))) {
             self.modal_stack.pop();
         }
+    }
+
+    /// Pop the top modal, for tests that compare a frame with and
+    /// without it.
+    #[cfg(test)]
+    pub(crate) fn pop_top_modal(&mut self) {
+        self.modal_stack.pop();
+    }
+
+    /// The top of the modal stack, for tests that drive an overlay's own
+    /// key handling and then render it.
+    #[cfg(test)]
+    pub(crate) fn top_modal_mut(&mut self) -> Option<&mut crate::tui::Modal> {
+        self.modal_stack.last_mut()
     }
 
     /// The modal stack (ADR 0085 contract 3). Reserved for

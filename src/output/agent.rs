@@ -33,7 +33,8 @@ fn session_key_of(agent: &AgentSessionId) -> SessionKey {
 #[derive(Debug, Clone)]
 struct SessionRow<'a> {
     agent: &'a AgentSessionNode,
-    alias_display_name: Option<String>,
+    /// Alias, then title, then the hosting or last-hosting mux's name.
+    display_name: Option<String>,
     /// Display-form `NodeId` of the deepest checkout whose root
     /// contains the session's cwd. `None` when the session has no
     /// cwd or no matching checkout.
@@ -192,12 +193,7 @@ fn cell(key: &str, ctx: &CellCtx<'_>) -> String {
         "fork" => ctx.fork.map_or_else(dash, |f| f.label.clone()),
         "declared" => ctx.declared.map_or_else(dash, |d| d.state_label.clone()),
         "preview" => agent.last_message_preview.clone().unwrap_or_else(dash),
-        "title" => ctx
-            .row
-            .alias_display_name
-            .clone()
-            .or_else(|| agent.title.clone())
-            .unwrap_or_else(dash),
+        "title" => ctx.row.display_name.clone().unwrap_or_else(dash),
         "activity" => agent
             .last_active_epoch
             .map_or_else(dash, |epoch| format_relative_age(epoch, current_epoch())),
@@ -251,15 +247,19 @@ fn collect_session_rows(snapshot: &GraphSnapshot) -> Vec<SessionRow<'_>> {
         .iter()
         .filter_map(|node| match node {
             GraphNode::AgentSession(agent) => {
-                let alias = snapshot
-                    .aliases
-                    .get(&NodeId::AgentSession(agent.id.clone()))
-                    .map(std::string::ToString::to_string);
+                let node_id = NodeId::AgentSession(agent.id.clone());
+                let mux = snapshot.mux_host_of(&node_id);
+                let display_name = crate::aliases::session_display_name(
+                    snapshot.aliases.get(&node_id),
+                    agent.title.as_deref(),
+                    mux.as_ref().map(|host| host.name.as_str()),
+                )
+                .map(str::to_string);
                 let (checkout_node_id, checkout_root, repo_common_dir) =
                     deepest_checkout_for(&checkouts, agent.cwd.as_deref());
                 Some(SessionRow {
                     agent,
-                    alias_display_name: alias,
+                    display_name,
                     checkout_node_id,
                     checkout_root,
                     repo_common_dir,
@@ -356,8 +356,7 @@ fn collect_branch_lookup(snapshot: &GraphSnapshot) -> HashMap<NodeId, String> {
 /// `*` marker).
 fn collect_mux_lookup(snapshot: &GraphSnapshot) -> HashMap<SessionKey, MuxInfo> {
     let mux_lookup: HashMap<NodeId, &MuxSessionNode> = snapshot
-        .nodes
-        .iter()
+        .live_nodes()
         .filter_map(|node| match node {
             GraphNode::MuxSession(mux) => Some((NodeId::MuxSession(mux.id.clone()), mux)),
             _ => None,

@@ -303,3 +303,7 @@ The recheck also found two correctness bugs from the mux-backend migration:
 fails for every live tmux session (reproduced; `CSP-617`), and zellij pins
 pass validation but both launch paths still launch and attach through tmux
 (from code reading; `CSP-618`).
+
+> Superseded by ADR 0141: `pin adopt`, the pin launch paths, and
+> `widgets/pins.rs` named above were removed with the old pin model, so
+> findings that cite them are historical.

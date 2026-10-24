@@ -56,6 +56,7 @@ fn sparse_world() -> GraphSnapshot {
         git_dir: None,
         current_branch: Some(branch.clone()),
         worktree: None,
+        head_commit: None,
     }));
     snapshot.nodes.push(GraphNode::Branch(BranchNode {
         id: branch.clone(),

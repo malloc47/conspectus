@@ -1,7 +1,7 @@
 //! Which workspace a path sits in.
 //!
 //! Discovery associates agent sessions and roots muxes in workspaces
-//! by path, and the TUI places pin placeholders the same way, so the
+//! by path, and the TUI places pinned rows the same way, so the
 //! index lives here where both can share it.
 
 use std::collections::{BTreeSet, HashMap};

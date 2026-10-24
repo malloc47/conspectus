@@ -29,7 +29,11 @@ fn every_keybindings_entry_appears_in_help_sections() {
     // least one of those forms is present.
     fn equivalent_forms(label: &str) -> Vec<String> {
         match label {
-            "1" | "2" | "3" | "4" | "5" => vec![label.to_string(), "1 – 5".to_string()],
+            "1" | "2" | "3" | "4" | "5" => vec![
+                label.to_string(),
+                "1 – 5".to_string(),
+                "1 / 2 / 3 / 4".to_string(),
+            ],
             "Ctrl-c" => vec!["Ctrl-C".to_string()],
             "Ctrl-g" => vec!["Ctrl-G".to_string()],
             "Ctrl-r" => vec!["Ctrl-R".to_string()],
@@ -114,15 +118,15 @@ fn help_body_includes_mux_state_legend() {
     let texts: Vec<String> = body_lines(&theme).iter().map(line_text).collect();
     let header = texts
         .iter()
-        .position(|t| t == "Mux state")
+        .position(|t| t == "Link and mux state")
         .expect("mux state section header");
     let legend = &texts[header + 1..];
     for (glyph, name) in [
-        ("◉", "Attached"),
-        ("◯", "Not attached"),
-        ("◌", "Pin placeholder"),
+        ("⊸", "Linked"),
+        ("∘", "Not linked"),
+        ("⊘", "Stopped"),
         ("?", "Unknown"),
-        ("⚠", "Ambiguous mux"),
+        ("▲", "Ambiguous mux"),
     ] {
         assert!(
             legend
@@ -132,9 +136,14 @@ fn help_body_includes_mux_state_legend() {
             legend.join("\n"),
         );
     }
+    // The half-filled circle once meant ambiguity and now marks a draft
+    // pull request; the legend may only use it for that.
     assert!(
-        texts.iter().all(|t| !t.contains('◐')),
-        "the retired ambiguity glyph must not reappear in help",
+        texts
+            .iter()
+            .filter(|t| t.contains('◐'))
+            .all(|t| t.contains("Draft")),
+        "◐ may only appear on the draft pull request row",
     );
 }
 
@@ -199,8 +208,6 @@ fn body_lines_cover_every_documented_key() {
         "v ",
         "r ",
         "S ",
-        "b ",
-        "Delete ",
         "q / Ctrl-C",
         "1 / 2 / 3",
         "] / [",
@@ -232,19 +239,12 @@ fn body_lines_cover_every_documented_key() {
         "Default action on the selected row",
         "Attach to the selected mux",
         "Copy the selected agent or mux session's full id",
-        "Rename the selected agent session (alias), mux (tmux + pin cascade), or pin's display name",
+        "Rename the selected agent session (alias) or mux (tmux + pin cascade)",
         "Open the selected session's transcript",
         "Refresh discovery now",
         "Resume the selected un-muxed agent session",
         "Quit",
-        "Open the pins overlay (menu listing every action)",
-        "New stream — opens the create form",
-        "Launch the selected pin",
-        "Rebind the selected pin's mux target",
-        "Bind picker for the selected PinAmbiguous row",
-        "Adopt the selected live mux row as a new pin",
-        "Remove the selected pin (two-press confirmation)",
-        "Switch directly to the sessions / mux / PRs view",
+        "Switch directly to the sessions / mux / PRs / pinned view",
         "Cycle to next / previous view",
         "Clear all active filters",
         "Cycle grouping forward",
@@ -320,4 +320,87 @@ fn jumping_to_the_end_shows_the_last_lines_not_blank_space() {
         rendered.contains("to close"),
         "end of keymap should be visible after G:\n{rendered}"
     );
+}
+
+/// Widths the help modal is checked at, as terminal widths.
+const TERMINAL_WIDTHS: [u16; 4] = [60, 80, 120, 160];
+
+/// The cells the help body's text gets at a terminal width: the modal's
+/// inner width, less the scrollbar column.
+fn text_width_at(terminal_width: u16) -> usize {
+    let modal = help_modal_rect(Rect::new(0, 0, terminal_width, 40));
+    usize::from(modal.width.saturating_sub(2)).saturating_sub(1)
+}
+
+fn words(lines: &[Line<'_>]) -> Vec<String> {
+    lines
+        .iter()
+        .flat_map(|line| {
+            line_text(line)
+                .split_whitespace()
+                .map(str::to_string)
+                .collect::<Vec<_>>()
+        })
+        .collect()
+}
+
+#[test]
+fn no_help_line_is_wider_than_the_modal_at_any_width() {
+    let theme = Theme::default();
+    for terminal in TERMINAL_WIDTHS {
+        let width = text_width_at(terminal);
+        for line in body_lines_for_width(&theme, Some(width)) {
+            let text = line_text(&line);
+            assert!(
+                unicode_width::UnicodeWidthStr::width(text.as_str()) <= width,
+                "at {terminal} columns a help line is {} cells in a {width}-cell body: {text:?}",
+                unicode_width::UnicodeWidthStr::width(text.as_str())
+            );
+        }
+    }
+}
+
+#[test]
+fn every_word_of_every_help_page_survives_wrapping() {
+    let theme = Theme::default();
+    let source = words(&body_lines_for_width(&theme, None));
+    assert!(source.len() > 200, "the help page has its text");
+    for terminal in TERMINAL_WIDTHS {
+        let wrapped = words(&body_lines_for_width(&theme, Some(text_width_at(terminal))));
+        assert_eq!(
+            wrapped, source,
+            "at {terminal} columns wrapping lost, split, or reordered words"
+        );
+    }
+}
+
+#[test]
+fn the_rendered_help_modal_shows_every_word_as_you_scroll() {
+    let theme = Theme::default();
+    let source = words(&body_lines_for_width(&theme, None));
+    for terminal in TERMINAL_WIDTHS {
+        let area = Rect::new(0, 0, terminal, 24);
+        let mut seen = std::collections::BTreeSet::new();
+        let mut state = HelpOverlayState::new();
+        for _ in 0..80 {
+            let mut buf = Buffer::empty(area);
+            HelpOverlayWidget::new(&state, &theme).render(area, &mut buf);
+            // The text columns only: inside the frame, left of the
+            // scrollbar.
+            let modal = help_modal_rect(area);
+            for y in modal.y + 1..modal.y + modal.height - 1 {
+                let row: String = (modal.x + 1..modal.x + modal.width - 2)
+                    .map(|x| buf[(x, y)].symbol().to_string())
+                    .collect();
+                seen.extend(row.split_whitespace().map(str::to_string));
+            }
+            state.handle_key(key(KeyCode::PageDown));
+        }
+        let missing: Vec<&String> = source.iter().filter(|word| !seen.contains(*word)).collect();
+        assert!(
+            missing.is_empty(),
+            "at {terminal} columns these words never appear whole: {:?}",
+            &missing[..missing.len().min(12)]
+        );
+    }
 }

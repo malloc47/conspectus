@@ -23,9 +23,9 @@ pub enum LogLevel {
 impl LogLevel {
     pub fn glyph(self) -> &'static str {
         match self {
-            Self::Info => "✓",
-            Self::Warning => "⚠",
-            Self::Error => "✗",
+            Self::Info => "√",
+            Self::Warning => "▲",
+            Self::Error => "×",
         }
     }
 

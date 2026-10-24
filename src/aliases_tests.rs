@@ -310,3 +310,30 @@ fn config_loader_remains_a_dependency_marker() {
         "codex", "/state", "alpha",
     )));
 }
+
+#[test]
+fn session_display_name_runs_alias_title_mux_in_order() {
+    assert_eq!(
+        session_display_name(Some("alias"), Some("title"), Some("mux")),
+        Some("alias")
+    );
+    assert_eq!(
+        session_display_name(None, Some("title"), Some("mux")),
+        Some("title")
+    );
+    assert_eq!(session_display_name(None, None, Some("mux")), Some("mux"));
+    assert_eq!(session_display_name(None, None, None), None);
+}
+
+#[test]
+fn session_display_name_treats_blank_values_as_missing() {
+    assert_eq!(
+        session_display_name(Some("  "), Some(""), Some("mux")),
+        Some("mux")
+    );
+    assert_eq!(session_display_name(Some(" "), Some("\n"), Some(" ")), None);
+    assert_eq!(
+        session_display_name(None, Some("  padded  "), Some("mux")),
+        Some("padded")
+    );
+}

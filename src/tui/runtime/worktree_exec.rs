@@ -37,8 +37,6 @@ pub(super) fn execute_worktree_create(app: &mut App, repo_root: String, branch: 
     });
     let entry = match result {
         Ok(WorktreeMutationOutcome::Succeeded { .. }) => {
-            let config = app.config().clone();
-            refresh_after_pin_mutation(app, &config);
             LogEntry::info(format!("created worktree for branch `{branch}`"))
         }
         Ok(WorktreeMutationOutcome::Unsupported) => {
@@ -73,8 +71,6 @@ pub(super) fn execute_worktree_remove(
     });
     let entry = match result {
         Ok(WorktreeMutationOutcome::Succeeded { .. }) => {
-            let config = app.config().clone();
-            refresh_after_pin_mutation(app, &config);
             LogEntry::info(format!("removed worktree for branch `{branch}`"))
         }
         Ok(WorktreeMutationOutcome::Unsupported) => {
@@ -103,8 +99,6 @@ pub(super) fn execute_worktree_merge(app: &mut App, worktree_root: String, targe
     });
     let entry = match result {
         Ok(WorktreeMutationOutcome::Succeeded { .. }) => {
-            let config = app.config().clone();
-            refresh_after_pin_mutation(app, &config);
             LogEntry::info("merged worktree back and removed it")
         }
         Ok(WorktreeMutationOutcome::Unsupported) => {
@@ -132,11 +126,7 @@ pub(super) fn execute_worktree_prune(app: &mut App, repo_root: String) {
         dry_run: false,
     });
     let entry = match result {
-        Ok(WorktreeMutationOutcome::Succeeded { .. }) => {
-            let config = app.config().clone();
-            refresh_after_pin_mutation(app, &config);
-            LogEntry::info("pruned merged worktrees")
-        }
+        Ok(WorktreeMutationOutcome::Succeeded { .. }) => LogEntry::info("pruned merged worktrees"),
         Ok(WorktreeMutationOutcome::Unsupported) => {
             LogEntry::warning("worktree: backend cannot prune")
         }
@@ -197,22 +187,21 @@ pub(super) fn execute_worktree_close_down(
         tmux,
         &SystemSignaller,
         grace,
+        crate::history::HistoryStore::from_env().as_ref(),
     );
 
     let entry = match result {
         Ok(report) => match &report.worktree {
             WorktreeMutationOutcome::Succeeded { .. } => {
-                let config = app.config().clone();
-                refresh_after_pin_mutation(app, &config);
                 let verb = if report.landed {
                     "merged & closed"
                 } else {
                     "closed"
                 };
                 LogEntry::info(format!(
-                    "{verb} `{branch}` — ended {} session(s), dropped {} pin(s)",
+                    "{verb} `{branch}` — ended {} session(s), forgot {} history record(s)",
                     report.teardowns.len(),
-                    report.dropped_pins.len(),
+                    report.forgotten_records,
                 ))
             }
             WorktreeMutationOutcome::Unsupported => LogEntry::warning(format!(

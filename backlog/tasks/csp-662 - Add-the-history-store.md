@@ -1,9 +1,11 @@
 ---
 id: CSP-662
 title: Add the history store
-status: To Do
-assignee: []
+status: Done
+assignee:
+  - '@claude'
 created_date: '2026-10-22 01:10'
+updated_date: '2026-10-22 12:45'
 labels:
   - history-pins
 milestone: m-23
@@ -29,14 +31,27 @@ History is the layer that lets any observed mux, worktree, or repo be rebuilt wi
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 Records persist per kind under `$XDG_STATE_HOME/conspectus/history/` with stable ids and a schema version, and unknown fields survive a rewrite
-- [ ] #2 Concurrent writers never lose each other's observations, and a reaped record comes back only when a writer freshly observes the entity
-- [ ] #3 Read-only modes and fixture runs never create or modify the history directory
-- [ ] #4 No new crate dependency is added
+- [x] #1 Records persist per kind under `$XDG_STATE_HOME/conspectus/history/` with stable ids and a schema version, and unknown fields survive a rewrite
+- [x] #2 Concurrent writers never lose each other's observations, and a reaped record comes back only when a writer freshly observes the entity
+- [x] #3 Read-only modes and fixture runs never create or modify the history directory
+- [x] #4 No new crate dependency is added
 <!-- AC:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
-- [ ] #1 `just check` passes, or `git diff --check` for docs-only changes
-- [ ] #2 Docs and ADRs are updated when behavior, architecture, or workflow change
+- [x] #1 `just check` passes, or `git diff --check` for docs-only changes
+- [x] #2 Docs and ADRs are updated when behavior, architecture, or workflow change
 <!-- DOD:END -->
+
+## Implementation Plan
+
+<!-- SECTION:PLAN:BEGIN -->
+1. history::store (lock, load, atomic write) and history::merge (commutative merge) over model::history record types.
+2. Unit tests for order independence, reap-vs-stale-writer, cadence, unknown fields; a threaded concurrent-writers test.
+<!-- SECTION:PLAN:END -->
+
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+Added `src/history/` (store and merge) and `src/model/history.rs`. Per-kind JSON files under `$XDG_STATE_HOME/conspectus/history/` carry stable `h_` ids, a schema version, and unknown fields that round-trip; writers take an exclusive `File::lock` on `history.lock`, re-read, merge only their own observations, and write atomically. Files from a newer schema or with a malformed record are left untouched. Verified by 17 unit tests (order independence, a stale copy can't undo a reap, 10-minute cadence, rename/rebirth matching, 8 threads x 10 writes keep all 80 records, lock blocking), and by 8 simultaneous CLI processes against one store leaving valid files with no duplicates. `--no-cache` and `tui --snapshot` create no history directory (`tests/cli_history.rs`). No new dependency; `just check` equivalents (fmt, clippy -D warnings, nextest 2639 tests) pass.
+<!-- SECTION:FINAL_SUMMARY:END -->

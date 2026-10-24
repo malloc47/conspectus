@@ -96,9 +96,26 @@ struct RawState {
 /// a restart.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 struct ViewStateRaw {
-    #[serde(default, skip_serializing_if = "RowFilter::is_empty")]
+    #[serde(
+        default,
+        skip_serializing_if = "RowFilter::is_empty",
+        deserialize_with = "lenient"
+    )]
     filter: RowFilter,
+    #[serde(default, deserialize_with = "lenient")]
     grouping: Option<Grouping>,
+}
+
+/// Deserialize a field that a different build may have written in a
+/// shape this one doesn't know, falling back to the default so one bad
+/// value costs that setting and not the whole state file.
+fn lenient<'de, D, T>(deserializer: D) -> Result<T, D::Error>
+where
+    D: serde::Deserializer<'de>,
+    T: serde::de::DeserializeOwned + Default,
+{
+    let value = serde_json::Value::deserialize(deserializer)?;
+    Ok(serde_json::from_value(value).unwrap_or_default())
 }
 
 /// Snapshot of the full TUI state suitable for serialisation.
@@ -123,7 +140,7 @@ pub struct PersistedViewSlot {
 }
 
 /// Resolver for the `tui-state.json` file path. Mirrors the
-/// pin-binding cache resolver so the env contract is uniform across
+/// other state-file resolvers so the env contract is uniform across
 /// state-file consumers.
 #[derive(Clone, Debug, Default)]
 pub struct TuiStateCache {
@@ -336,6 +353,8 @@ fn view_to_snake_case(view: View) -> &'static str {
         View::Union => "union",
         View::Prs => "prs",
         View::Forks => "forks",
+        View::Pinned => "pinned",
+        View::History => "history",
     }
 }
 
@@ -346,6 +365,8 @@ fn view_from_snake_case(value: &str) -> Option<View> {
         "union" => Some(View::Union),
         "prs" => Some(View::Prs),
         "forks" => Some(View::Forks),
+        "pinned" => Some(View::Pinned),
+        "history" => Some(View::History),
         _ => None,
     }
 }

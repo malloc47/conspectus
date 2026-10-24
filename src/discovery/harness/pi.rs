@@ -241,6 +241,7 @@ fn discover_state(state_root: &Path, caches: &DiscoveryCaches) -> GraphFragment 
         candidate_links,
         diagnostics: Vec::new(),
         node_provenance: BTreeMap::new(),
+        mux_probes: Default::default(),
     }
 }
 

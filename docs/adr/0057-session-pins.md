@@ -2,7 +2,11 @@
 
 ## Status
 
-Accepted
+Superseded by [ADR 0140](0140-history-and-presence.md) (resolver binding and
+launch continuity) and [ADR 0141](0141-pin-slots.md) (storage schema, store
+selection, CLI, and TUI). Pins are now editable slots over a history of
+observed entities; rebuilding replaces `pin launch` ([ADR
+0142](0142-rebuild-plans-and-executors.md)).
 
 ## Context
 

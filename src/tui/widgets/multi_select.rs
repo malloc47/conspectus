@@ -282,7 +282,9 @@ impl<T: AsRef<str>> Widget for MultiSelectBody<'_, T> {
         // Title is rendered by the popup frame; pass an empty title
         // to the upstream widget so it doesn't re-stamp a second
         // one inside the inner area.
-        let mut widget = CheeseMultiSelect::new("", &options);
+        let mut widget = CheeseMultiSelect::new("", &options)
+            .checked_indicator(crate::tui::icons::marks::OK)
+            .unchecked_indicator(crate::tui::icons::marks::BULLET);
         if let Some(theme) = self.theme {
             widget = widget.styles(cheese_styles_from_theme(theme));
         }

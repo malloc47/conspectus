@@ -206,6 +206,43 @@ pub const MENU_KEYS: &[KeyRow<MenuKey>] = &[
 ];
 
 // ---------------------------------------------------------------------
+// Controls: a panel whose changes apply as they are made. Space acts on
+// the focused row (selects a choice, toggles a checkbox, opens an
+// editor); Enter applies the focused choice and closes; Esc closes with
+// everything already applied kept.
+// ---------------------------------------------------------------------
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ControlsKey {
+    Abort,
+    Up,
+    Down,
+    /// Select the focused choice, toggle the focused checkbox, or open
+    /// the focused row's editor.
+    Toggle,
+    /// Apply the focused choice (if it is one) and close.
+    Done,
+    Close,
+}
+
+pub const CONTROLS_KEYS: &[KeyRow<ControlsKey>] = &[
+    alias(ctrl('c'), ControlsKey::Abort),
+    shown(key(KeyCode::Up), ControlsKey::Up, "↑", "move"),
+    alias(ch('k'), ControlsKey::Up),
+    shown(key(KeyCode::Down), ControlsKey::Down, "↓", "move"),
+    alias(ch('j'), ControlsKey::Down),
+    shown(ch(' '), ControlsKey::Toggle, "Space", "select/toggle"),
+    shown(
+        key(KeyCode::Enter),
+        ControlsKey::Done,
+        "Enter",
+        "apply & close",
+    ),
+    shown(key(KeyCode::Esc), ControlsKey::Close, "Esc", "close"),
+    KeyRow::Note("changes apply as you make them"),
+];
+
+// ---------------------------------------------------------------------
 // Multi-select sub-editor (Controls filters).
 // ---------------------------------------------------------------------
 
@@ -265,29 +302,14 @@ pub const TEXT_INPUT_KEYS: &[KeyRow<TextInputKey>] = &[
 // `n` new bare mux form. Unbound keys edit the focused field.
 // ---------------------------------------------------------------------
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum NewMuxKey {
-    Abort,
-    SwitchField,
-    Commit,
-    Cancel,
-}
-
-pub const NEW_MUX_KEYS: &[KeyRow<NewMuxKey>] = &[
-    alias(ctrl('c'), NewMuxKey::Abort),
-    shown(
-        key(KeyCode::Tab),
-        NewMuxKey::SwitchField,
-        "Tab",
-        "switch field",
-    ),
-    shown(
-        key(KeyCode::Enter),
-        NewMuxKey::Commit,
-        "Enter",
-        "next/commit",
-    ),
-    shown(key(KeyCode::Esc), NewMuxKey::Cancel, "Esc", "cancel"),
+pub const NEW_MUX_KEYS: &[KeyRow<FormKey>] = &[
+    alias(ctrl('c'), FormKey::Abort),
+    shown(key(KeyCode::Up), FormKey::Up, "↑", "move"),
+    shown(key(KeyCode::Down), FormKey::Down, "↓", "move"),
+    shown(key(KeyCode::Tab), FormKey::Tab, "Tab", "complete/next"),
+    shown(key(KeyCode::BackTab), FormKey::Back, "S-Tab", "back"),
+    shown(key(KeyCode::Enter), FormKey::Submit, "Enter", "next/commit"),
+    shown(key(KeyCode::Esc), FormKey::Cancel, "Esc", "cancel"),
 ];
 
 // ---------------------------------------------------------------------
@@ -327,6 +349,8 @@ pub enum PagerKey {
     PageUp,
     Top,
     Bottom,
+    /// Copy the modal's text (a value modal only).
+    Copy,
 }
 
 pub const HELP_KEYS: &[KeyRow<PagerKey>] = &[
@@ -354,12 +378,13 @@ pub const HELP_KEYS: &[KeyRow<PagerKey>] = &[
 
 pub const VALUE_MODAL_KEYS: &[KeyRow<PagerKey>] = &[
     alias(ctrl('c'), PagerKey::Abort),
-    alias(key(KeyCode::Esc), PagerKey::Close),
-    alias(ch('q'), PagerKey::Close),
-    alias(ch('o'), PagerKey::Close),
-    alias(ch('j'), PagerKey::Down),
+    shown(ch('y'), PagerKey::Copy, "y", "to copy"),
+    shown(key(KeyCode::Esc), PagerKey::Close, "Esc", "to close"),
+    shown(ch('q'), PagerKey::Close, "q", "to close"),
+    shown(ch('o'), PagerKey::Close, "o", "to close"),
+    shown(ch('j'), PagerKey::Down, "j", "to scroll"),
     alias(key(KeyCode::Down), PagerKey::Down),
-    alias(ch('k'), PagerKey::Up),
+    shown(ch('k'), PagerKey::Up, "k", "to scroll"),
     alias(key(KeyCode::Up), PagerKey::Up),
     alias(key(KeyCode::PageDown), PagerKey::PageDown),
     alias(ch(' '), PagerKey::PageDown),
@@ -457,34 +482,51 @@ pub const CLOSE_DOWN_KEYS: &[KeyRow<CloseDownKey>] = &[
 ];
 
 // ---------------------------------------------------------------------
-// Mux-launch form. Option keys act on the harness and worktree rows;
-// on a text field they edit the text.
+// Multi-field forms: the mux launch form, the new mux form, and the pin
+// edit form. Up and Down always move between fields; Tab completes in a
+// path field and moves on elsewhere. Option keys act on the choice and
+// toggle rows; on a text field they edit the text.
 // ---------------------------------------------------------------------
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FormKey {
     Abort,
     Cancel,
-    NextField,
-    PrevField,
+    Up,
+    Down,
+    Tab,
+    Back,
     Submit,
     OptionPrev,
     OptionNext,
+    /// Drop the focused field's override and inherit its value again.
+    Inherit,
 }
 
 pub const MUX_LAUNCH_KEYS: &[KeyRow<FormKey>] = &[
     alias(ctrl('c'), FormKey::Abort),
-    shown(key(KeyCode::Tab), FormKey::NextField, "Tab", "move"),
-    shown(
-        key(KeyCode::BackTab),
-        FormKey::PrevField,
-        "Shift-Tab",
-        "move",
-    ),
-    shown(key(KeyCode::Left), FormKey::OptionPrev, "←", "toggle"),
-    shown(key(KeyCode::Right), FormKey::OptionNext, "→", "toggle"),
-    alias(ch(' '), FormKey::OptionNext),
+    shown(key(KeyCode::Up), FormKey::Up, "↑", "move"),
+    shown(key(KeyCode::Down), FormKey::Down, "↓", "move"),
+    shown(key(KeyCode::Tab), FormKey::Tab, "Tab", "complete/next"),
+    shown(key(KeyCode::BackTab), FormKey::Back, "S-Tab", "back"),
+    shown(key(KeyCode::Left), FormKey::OptionPrev, "←", "option"),
+    shown(key(KeyCode::Right), FormKey::OptionNext, "→", "option"),
+    shown(ch(' '), FormKey::OptionNext, "Space", "option"),
     shown(key(KeyCode::Enter), FormKey::Submit, "Enter", "launch"),
+    shown(key(KeyCode::Esc), FormKey::Cancel, "Esc", "cancel"),
+];
+
+pub const PIN_EDIT_KEYS: &[KeyRow<FormKey>] = &[
+    alias(ctrl('c'), FormKey::Abort),
+    shown(key(KeyCode::Up), FormKey::Up, "↑", "move"),
+    shown(key(KeyCode::Down), FormKey::Down, "↓", "move"),
+    shown(key(KeyCode::Tab), FormKey::Tab, "Tab", "complete/next"),
+    shown(key(KeyCode::BackTab), FormKey::Back, "S-Tab", "back"),
+    shown(key(KeyCode::Left), FormKey::OptionPrev, "←", "option"),
+    shown(key(KeyCode::Right), FormKey::OptionNext, "→", "option"),
+    shown(ch(' '), FormKey::OptionNext, "Space", "option"),
+    shown(ctrl('r'), FormKey::Inherit, "Ctrl-R", "follow again"),
+    shown(key(KeyCode::Enter), FormKey::Submit, "Enter", "save"),
     shown(key(KeyCode::Esc), FormKey::Cancel, "Esc", "cancel"),
 ];
 
@@ -498,92 +540,6 @@ pub enum OmniboxKey {
 }
 
 pub const OMNIBOX_KEYS: &[KeyRow<OmniboxKey>] = &[alias(key(KeyCode::Tab), OmniboxKey::Complete)];
-
-// ---------------------------------------------------------------------
-// Pin create and edit forms. Tab is its own action because on the cwd
-// field it completes the path; option keys act on option fields and
-// edit the text on text fields.
-// ---------------------------------------------------------------------
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum PinFormKey {
-    Abort,
-    Cancel,
-    Submit,
-    Up,
-    Down,
-    Tab,
-    Back,
-    OptionPrev,
-    OptionNext,
-}
-
-pub const PIN_CREATE_KEYS: &[KeyRow<PinFormKey>] = &[
-    alias(ctrl('c'), PinFormKey::Abort),
-    shown(key(KeyCode::Up), PinFormKey::Up, "↑", "move"),
-    shown(key(KeyCode::Down), PinFormKey::Down, "↓", "move"),
-    shown(key(KeyCode::Tab), PinFormKey::Tab, "Tab", "move"),
-    shown(key(KeyCode::BackTab), PinFormKey::Back, "S-Tab", "back"),
-    shown(key(KeyCode::Left), PinFormKey::OptionPrev, "←", "option"),
-    shown(key(KeyCode::Right), PinFormKey::OptionNext, "→", "option"),
-    shown(ch(' '), PinFormKey::OptionNext, "Space", "option"),
-    shown(key(KeyCode::Enter), PinFormKey::Submit, "Enter", "create"),
-    shown(key(KeyCode::Esc), PinFormKey::Cancel, "Esc", "cancel"),
-];
-
-pub const PIN_EDIT_KEYS: &[KeyRow<PinFormKey>] = &[
-    alias(ctrl('c'), PinFormKey::Abort),
-    shown(key(KeyCode::Up), PinFormKey::Up, "↑", "move"),
-    shown(key(KeyCode::Down), PinFormKey::Down, "↓", "move"),
-    shown(key(KeyCode::Tab), PinFormKey::Tab, "Tab", "move"),
-    shown(key(KeyCode::BackTab), PinFormKey::Back, "S-Tab", "back"),
-    shown(key(KeyCode::Left), PinFormKey::OptionPrev, "←", "option"),
-    shown(key(KeyCode::Right), PinFormKey::OptionNext, "→", "option"),
-    shown(ch(' '), PinFormKey::OptionNext, "Space", "option"),
-    shown(key(KeyCode::Enter), PinFormKey::Submit, "Enter", "save"),
-    shown(key(KeyCode::Esc), PinFormKey::Cancel, "Esc", "cancel"),
-];
-
-// ---------------------------------------------------------------------
-// Pin bind chooser and rebind form: a short list of options or fields.
-// ---------------------------------------------------------------------
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum FieldListKey {
-    Abort,
-    Cancel,
-    Submit,
-    Up,
-    Down,
-}
-
-pub const PIN_BIND_KEYS: &[KeyRow<FieldListKey>] = &[
-    alias(ctrl('c'), FieldListKey::Abort),
-    shown(key(KeyCode::Up), FieldListKey::Up, "Up", "choose"),
-    shown(key(KeyCode::Down), FieldListKey::Down, "Down", "choose"),
-    alias(key(KeyCode::Tab), FieldListKey::Down),
-    alias(key(KeyCode::BackTab), FieldListKey::Up),
-    shown(key(KeyCode::Enter), FieldListKey::Submit, "Enter", "bind"),
-    shown(key(KeyCode::Esc), FieldListKey::Cancel, "Esc", "cancel"),
-];
-
-pub const PIN_REBIND_KEYS: &[KeyRow<FieldListKey>] = &[
-    alias(ctrl('c'), FieldListKey::Abort),
-    shown(key(KeyCode::Up), FieldListKey::Up, "Up", "field"),
-    shown(key(KeyCode::Down), FieldListKey::Down, "Down", "field"),
-    alias(key(KeyCode::Tab), FieldListKey::Down),
-    alias(key(KeyCode::BackTab), FieldListKey::Up),
-    KeyRow::Note("type to edit"),
-    shown(key(KeyCode::Enter), FieldListKey::Submit, "Enter", "save"),
-    shown(key(KeyCode::Esc), FieldListKey::Cancel, "Esc", "cancel"),
-];
-
-/// Pin remove confirmation.
-pub const PIN_REMOVE_KEYS: &[KeyRow<ConfirmKey>] = &[
-    alias(ctrl('c'), ConfirmKey::Abort),
-    shown(key(KeyCode::Enter), ConfirmKey::Yes, "Enter", "remove"),
-    shown(key(KeyCode::Esc), ConfirmKey::No, "Esc", "cancel"),
-];
 
 // ---------------------------------------------------------------------
 // Transcript viewer. The viewer draws its own footer from its toggle
@@ -615,6 +571,112 @@ pub const VIEWER_KEYS: &[KeyRow<ViewerMsg>] = &[
     alias(KeyMatcher::UpperChar('I'), ViewerMsg::ToggleAborted),
     alias(KeyMatcher::UpperChar('H'), ViewerMsg::ToggleHidden),
     alias(ch('?'), ViewerMsg::ToggleHelp),
+];
+
+// ---------------------------------------------------------------------
+// The modal key convention. One set of meanings for Esc, Enter, and
+// Space across every modal; a modal that departs from it says why here,
+// and a consistency test checks each modal's real key tables against
+// this table.
+//
+//   Esc    leaves the modal without applying anything that is still
+//          pending. (Controls applies as you go, so what it already
+//          applied stays.)
+//   Enter  applies or submits the modal's primary action; in a list it
+//          activates the focused item.
+//   Space  changes the focused item: toggles a checkbox, steps an
+//          option, selects a choice. In a text field it types a space.
+// ---------------------------------------------------------------------
+
+/// What Enter does in a modal.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum EnterMeans {
+    /// Applies or submits the whole modal.
+    Submits,
+    /// Activates the focused item (a menu entry, a search hit, a choice).
+    Activates,
+    /// Does nothing special: a viewer.
+    Nothing,
+}
+
+/// What Space does in a modal.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SpaceMeans {
+    /// Toggles, steps, or selects the focused item.
+    Toggles,
+    /// Pages down, as in any pager.
+    Pages,
+    /// Not bound: it types into the focused text field, or does nothing
+    /// in a modal with none.
+    Types,
+}
+
+/// One modal's row of the convention.
+#[derive(Debug, Clone, Copy)]
+pub struct ModalConvention {
+    pub modal: &'static str,
+    pub enter: EnterMeans,
+    pub space: SpaceMeans,
+    /// Why the modal departs from the convention, if it does.
+    pub exception: &'static str,
+}
+
+const fn conv(
+    modal: &'static str,
+    enter: EnterMeans,
+    space: SpaceMeans,
+    exception: &'static str,
+) -> ModalConvention {
+    ModalConvention {
+        modal,
+        enter,
+        space,
+        exception,
+    }
+}
+
+/// Every modal against the convention. Esc leaves every one of them.
+pub const MODAL_CONVENTION: &[ModalConvention] = &[
+    conv(
+        "Help",
+        EnterMeans::Nothing,
+        SpaceMeans::Pages,
+        "a pager: Space pages down",
+    ),
+    conv(
+        "Controls",
+        EnterMeans::Activates,
+        SpaceMeans::Toggles,
+        "changes apply as they are made, so Esc keeps them",
+    ),
+    conv("Rename", EnterMeans::Submits, SpaceMeans::Types, ""),
+    conv("Search", EnterMeans::Activates, SpaceMeans::Types, ""),
+    conv(
+        "ValueModal",
+        EnterMeans::Nothing,
+        SpaceMeans::Pages,
+        "a pager: Space pages down",
+    ),
+    conv(
+        "Messages",
+        EnterMeans::Nothing,
+        SpaceMeans::Pages,
+        "a pager: Space pages the detail",
+    ),
+    conv(
+        "Viewer",
+        EnterMeans::Nothing,
+        SpaceMeans::Pages,
+        "a pager: Space pages down",
+    ),
+    conv("WorktreeMenu", EnterMeans::Activates, SpaceMeans::Types, ""),
+    conv("NewMux", EnterMeans::Submits, SpaceMeans::Types, ""),
+    conv("MuxMenu", EnterMeans::Activates, SpaceMeans::Types, ""),
+    conv("MuxLaunch", EnterMeans::Submits, SpaceMeans::Toggles, ""),
+    conv("PinEdit", EnterMeans::Submits, SpaceMeans::Toggles, ""),
+    conv("RowMenu", EnterMeans::Activates, SpaceMeans::Types, ""),
+    conv("CleanUp", EnterMeans::Submits, SpaceMeans::Toggles, ""),
+    conv("Picker", EnterMeans::Activates, SpaceMeans::Types, ""),
 ];
 
 #[cfg(test)]

@@ -3,7 +3,7 @@
 //! `worktree list` renders the git worktrees discovery found
 //! (read-only). `worktree new` / `rm` delegate to the configured
 //! mutation backend (worktrunk) — a category-4 subprocess launch
-//! (ADR 0087); `rm` refuses to remove a worktree hosting a live
+//! (ADR 0143); `rm` refuses to remove a worktree hosting a live
 //! agent/mux session unless `--force`.
 
 use std::collections::BTreeMap;
@@ -48,7 +48,8 @@ enum WorktreeCommand {
     Merge(WorktreeMergeArgs),
     /// Close down a stream of work: optionally merge or
     /// discard the branch, terminate the mux/agent sessions rooted in
-    /// the worktree, remove the worktree, and drop pins rooted there.
+    /// the worktree, remove the worktree, and forget its gone history
+    /// records, except ones a pin slot targets.
     Close(WorktreeCloseArgs),
     /// Prune worktrees already merged into the repo's default branch
     /// (delegates to `wt step prune`). Distinct from git's
@@ -342,12 +343,6 @@ impl WorktreeCloseArgs {
                     summary.push_str(&format!("\n  - {label}"));
                 }
             }
-            if !plan.pins.is_empty() {
-                summary.push_str("\nDrops these pins:");
-                for pin in &plan.pins {
-                    summary.push_str(&format!("\n  - {}", pin.display_name));
-                }
-            }
             if !confirm_prompt(&summary)? {
                 println!("aborted");
                 return Ok(());
@@ -355,6 +350,7 @@ impl WorktreeCloseArgs {
         }
 
         let backend = mutation_backend()?;
+        let history_store = crate::history::HistoryStore::from_env();
         let report = execute_close_down(
             &plan,
             self.discard,
@@ -363,6 +359,7 @@ impl WorktreeCloseArgs {
             &SystemTmux::new(),
             &SystemSignaller,
             grace,
+            history_store.as_ref(),
         )?;
 
         render_close_down_report(&plan, &report)
@@ -485,11 +482,14 @@ fn render_close_down_report(plan: &CloseDownPlan, report: &CloseDownReport) -> R
         }
     }
 
-    for name in &report.dropped_pins {
-        println!("dropped pin `{name}`");
+    if report.forgotten_records > 0 {
+        println!(
+            "forgot {} history record(s) rooted in the worktree",
+            report.forgotten_records
+        );
     }
-    for (name, err) in &report.pin_errors {
-        eprintln!("warning: could not drop pin `{name}`: {err}");
+    if let Some(err) = &report.history_error {
+        eprintln!("warning: could not forget the worktree's history: {err}");
     }
     Ok(())
 }
@@ -501,7 +501,7 @@ fn code_suffix(code: Option<i32>) -> String {
 /// Path of the worktree checking out `branch` (short name), from the
 /// discovered graph. `None` when no enumerated worktree matches.
 fn worktree_path_for_branch(snapshot: &GraphSnapshot, branch: &str) -> Option<String> {
-    for node in &snapshot.nodes {
+    for node in snapshot.live_nodes() {
         let GraphNode::Checkout(checkout) = node else {
             continue;
         };
@@ -523,7 +523,7 @@ fn worktree_path_for_branch(snapshot: &GraphSnapshot, branch: &str) -> Option<St
 fn live_sessions_in_worktree(snapshot: &GraphSnapshot, worktree_path: &str) -> Vec<String> {
     let root = Path::new(worktree_path);
     let mut sessions = Vec::new();
-    for node in &snapshot.nodes {
+    for node in snapshot.live_nodes() {
         match node {
             GraphNode::AgentSession(session) => {
                 if let Some(cwd) = &session.cwd
@@ -580,7 +580,7 @@ struct WorktreeRow {
 /// from git worktree enumeration) are included.
 fn collect_worktrees(snapshot: &GraphSnapshot) -> BTreeMap<RepoId, Vec<WorktreeRow>> {
     let mut by_repo: BTreeMap<RepoId, Vec<WorktreeRow>> = BTreeMap::new();
-    for node in &snapshot.nodes {
+    for node in snapshot.live_nodes() {
         let GraphNode::Checkout(checkout) = node else {
             continue;
         };

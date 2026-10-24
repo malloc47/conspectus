@@ -1,9 +1,10 @@
 ---
 id: CSP-668
 title: Add the pin slot store and model
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-10-22 01:11'
+updated_date: '2026-10-22 15:05'
 labels:
   - history-pins
 milestone: m-23
@@ -30,15 +31,21 @@ Pins become editable slots that can point at any rebuildable entity, live or gon
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 Slots of every pinnable kind persist in `pins.toml` with their order, and operator comments survive a write
-- [ ] #2 Each effective recipe field comes from the highest-precedence source that has it, with tests per kind
-- [ ] #3 A slot can be planned (no target), dangling, or pointed at a gone entity, and renders in each case
-- [ ] #4 The pin binding pass and the `Pin*` diagnostics are gone, and `PinNode` connects to its target through `pin_targets`
-- [ ] #5 Background processes never write `pins.toml`
+- [x] #1 Slots of every pinnable kind persist in `pins.toml` with their order, and operator comments survive a write
+- [x] #2 Each effective recipe field comes from the highest-precedence source that has it, with tests per kind
+- [x] #3 A slot can be planned (no target), dangling, or pointed at a gone entity, and renders in each case
+- [x] #4 The pin binding pass and the `Pin*` diagnostics are gone, and `PinNode` connects to its target through `pin_targets`
+- [x] #5 Background processes never write `pins.toml`
 <!-- AC:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
-- [ ] #1 `just check` passes, or `git diff --check` for docs-only changes
-- [ ] #2 Docs and ADRs are updated when behavior, architecture, or workflow change
+- [x] #1 `just check` passes, or `git diff --check` for docs-only changes
+- [x] #2 Docs and ADRs are updated when behavior, architecture, or workflow change
 <!-- DOD:END -->
+
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+Added the slot store (`src/pin_slots.rs`, `toml_edit` round trip, comments and unknown keys survive), the slot model and per-field resolver (`src/model/slot.rs`, `src/resolve/slots.rs`), and `apply_slots`, which builds a `PinNode` plus a `pin_targets` link per slot. The binding pass, `Pin*` diagnostics, `pin_realized_by_session`, and the sidecar writers are gone. The traced capability test seeds `pins.toml`, runs the daemon and read commands, and the manifest allows writes to it only in the act context. Verified with the full nextest run (2496 tests), clippy, fmt, and the strace capability trace.
+<!-- SECTION:FINAL_SUMMARY:END -->

@@ -34,6 +34,7 @@ fn agent_row(key: &str, alias: Option<&str>) -> Row {
             title: None,
             alias: alias.map(str::to_string),
             title_disambiguates: false,
+            mux_host: None,
             primary_node: primary,
             pin_id: None,
         }),

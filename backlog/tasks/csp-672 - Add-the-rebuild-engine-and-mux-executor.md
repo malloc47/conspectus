@@ -1,9 +1,10 @@
 ---
 id: CSP-672
 title: Add the rebuild engine and mux executor
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-10-22 01:11'
+updated_date: '2026-10-22 15:05'
 labels:
   - history-pins
 milestone: m-23
@@ -33,14 +34,20 @@ Rebuilding replaces `pin launch` and generalizes it: anything in history or a sl
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 `rebuild` accepts a slot, history record, or node, and `--dry-run` prints the plan without running it
-- [ ] #2 A ghost mux rebuilds with its name, cwd, effective argv, and last session resumed, falling back to a fresh launch when the resume is rejected
-- [ ] #3 A live mux whose harness exited relaunches without ever typing into a running harness
-- [ ] #4 Orchestrator-owned muxes refuse to rebuild with a message naming the owner
+- [x] #1 `rebuild` accepts a slot, history record, or node, and `--dry-run` prints the plan without running it
+- [x] #2 A ghost mux rebuilds with its name, cwd, effective argv, and last session resumed, falling back to a fresh launch when the resume is rejected
+- [x] #3 A live mux whose harness exited relaunches without ever typing into a running harness
+- [x] #4 Orchestrator-owned muxes refuse to rebuild with a message naming the owner
 <!-- AC:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
-- [ ] #1 `just check` passes, or `git diff --check` for docs-only changes
-- [ ] #2 Docs and ADRs are updated when behavior, architecture, or workflow change
+- [x] #1 `just check` passes, or `git diff --check` for docs-only changes
+- [x] #2 Docs and ADRs are updated when behavior, architecture, or workflow change
 <!-- DOD:END -->
+
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+Rebuild engine (`src/rebuild/`) and `conspectus rebuild <slot|h_id|node|mux name> [--dry-run] [--no-attach] [--session]`: a Plan of Steps that stops at the first failure. A ghost mux returns with its name, cwd, effective argv, and last session resumed, falling back to a fresh launch when the resume is rejected; a live mux whose agent exited gets Conspectus-built argv typed in only then; orchestrator-owned muxes refuse naming the owner. The old pin launch code moved to `rebuild::launch`. Verified by the 67 rebuild unit tests and `tests/cli_history.rs` (real tmux rebuild).
+<!-- SECTION:FINAL_SUMMARY:END -->

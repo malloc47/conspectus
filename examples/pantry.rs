@@ -35,9 +35,6 @@ use conspectus::tui::theme::StyleSpec;
 use conspectus::tui::widgets::help::{HelpOverlayState, HelpOverlayWidget};
 use conspectus::tui::widgets::input::{TextInputState, TextInputWidget};
 use conspectus::tui::widgets::multi_select::{MultiSelectState, MultiSelectWidget};
-use conspectus::tui::widgets::pins::{
-    PinBindOption, PinCreateDefaults, PinMutationTarget, PinsOverlayState, PinsOverlayWidget,
-};
 use conspectus::tui::widgets::search::{SearchOverlayState, SearchOverlayWidget};
 use conspectus::tui::widgets::value_modal::{ValueModalState, ValueModalWidget};
 use conspectus::tui::{Grouping, SessionsGrouping, Sort, Theme, View};
@@ -417,24 +414,6 @@ impl Ingredient for TextInputVariant {
     }
 }
 
-/// Selects which `PinsOverlayState` constructor to use. Each maps
-/// 1:1 to a public `open_with_*` entry point on the in-tree
-/// overlay, so the variant set covers every pin sub-editor surface.
-enum PinsVariant {
-    /// The discoverable action menu (create / launch / rename / …).
-    Menu,
-    /// The Create form, seeded with the operator's last selection.
-    Create(PinCreateDefaults),
-    /// The Edit form for an existing pin.
-    Edit(PinMutationTarget),
-    /// The Rebind form (mux name + socket only) for an existing pin.
-    Rebind(PinMutationTarget),
-    /// The Bind picker shown after a PinAmbiguous diagnostic.
-    Bind(Vec<PinBindOption>),
-    /// The Remove confirmation prompt.
-    Remove(PinMutationTarget),
-}
-
 /// One row in the theme harness — pairs a `[tui.theme]` key name
 /// with its rendered sample. Color rows render a `███` block in
 /// the key's color; Modifier rows render a label with the modifier
@@ -539,49 +518,6 @@ impl Ingredient for ThemeHarnessIngredient {
         }
 
         Paragraph::new(lines).render(area, buf);
-    }
-}
-
-/// Configuration for one pins-overlay preview variant.
-struct PinsIngredient {
-    variant: PinsVariant,
-    variant_name: &'static str,
-    description_text: &'static str,
-}
-
-impl Ingredient for PinsIngredient {
-    fn group(&self) -> &str {
-        "Pins"
-    }
-
-    fn name(&self) -> &str {
-        self.variant_name
-    }
-
-    fn source(&self) -> &str {
-        "conspectus::tui::widgets::pins"
-    }
-
-    fn description(&self) -> &str {
-        self.description_text
-    }
-
-    fn render(&self, area: Rect, buf: &mut Buffer) {
-        let theme = Theme::default();
-        let state = match &self.variant {
-            PinsVariant::Menu => PinsOverlayState::new(),
-            PinsVariant::Create(defaults) => PinsOverlayState::open_with_create(defaults.clone()),
-            PinsVariant::Edit(target) => PinsOverlayState::open_with_edit(target.clone()),
-            PinsVariant::Rebind(target) => PinsOverlayState::open_with_rebind(target.clone()),
-            PinsVariant::Bind(options) => {
-                // `open_with_bind` returns Option (None on empty);
-                // every Bind variant must supply at least one option.
-                PinsOverlayState::open_with_bind(options.clone())
-                    .expect("Bind variant must supply at least one option")
-            }
-            PinsVariant::Remove(target) => PinsOverlayState::open_with_remove(target.clone()),
-        };
-        PinsOverlayWidget::new(&state, &theme).render(area, buf);
     }
 }
 
@@ -724,7 +660,7 @@ fn main() -> std::io::Result<()> {
             scroll: 20,
             variant_name: "Scrolled mid (line 20)",
             description_text:
-                "Mid-scroll view — around the Pins (ADR 0057) section in the default keymap.",
+                "Mid-scroll view — partway down the default keymap.",
         }),
         Box::new(HelpVariant {
             scroll: 50,
@@ -788,60 +724,6 @@ fn main() -> std::io::Result<()> {
             variant_name: "Long value (cursor at end)",
             description_text:
                 "Value longer than the modal's inner width — exercises the `visible_window` truncation around the cursor.",
-        }),
-        Box::new(PinsIngredient {
-            variant: PinsVariant::Menu,
-            variant_name: "Menu (discoverable actions)",
-            description_text:
-                "The default `p` open: cursor on `create`, every action listed below — the surface every operator sees first.",
-        }),
-        Box::new(PinsIngredient {
-            variant: PinsVariant::Create(PinCreateDefaults {
-                id: "ingest-refactor".to_string(),
-                display_name: "Ingest refactor".to_string(),
-                harness: "codex".to_string(),
-                cwd: "/home/user/work/ingest".to_string(),
-                mux_name: "ingest-refactor".to_string(),
-                ..PinCreateDefaults::default()
-            }),
-            variant_name: "Create form (seeded)",
-            description_text:
-                "Create form opened with every text field pre-filled from the operator's last selection — the common `N` shortcut path.",
-        }),
-        Box::new(PinsIngredient {
-            variant: PinsVariant::Edit(pins_mock_target()),
-            variant_name: "Edit form (existing pin)",
-            description_text:
-                "Edit form for an existing pin — full parity with the create form: cwd omnibox, harness cycling, launch options, then the Advanced identity block for id / display / mux fields.",
-        }),
-        Box::new(PinsIngredient {
-            variant: PinsVariant::Rebind(pins_mock_target()),
-            variant_name: "Rebind form (mux only)",
-            description_text:
-                "Mux-only rebind form invoked from the `B` direct shortcut after an external tmux rename.",
-        }),
-        Box::new(PinsIngredient {
-            variant: PinsVariant::Bind(vec![
-                PinBindOption {
-                    pin_id: "ingest-refactor".to_string(),
-                    session_key: "codex:project:01J9X4T8N3GHJ8FNYK1S0E4VZ2".to_string(),
-                    label: "codex:01J9X4T8N3GHJ8FNYK1S0E4VZ2 · /home/user/work/ingest".to_string(),
-                },
-                PinBindOption {
-                    pin_id: "ingest-refactor".to_string(),
-                    session_key: "codex:project:01J9X5RT4V8H1H8YP9X7VVRK0M".to_string(),
-                    label: "codex:01J9X5RT4V8H1H8YP9X7VVRK0M · /home/user/work/ingest".to_string(),
-                },
-            ]),
-            variant_name: "Bind picker (PinAmbiguous)",
-            description_text:
-                "Bind picker shown when two candidate sessions are attributed to the same mux — the PinAmbiguous resolution path.",
-        }),
-        Box::new(PinsIngredient {
-            variant: PinsVariant::Remove(pins_mock_target()),
-            variant_name: "Remove confirmation",
-            description_text:
-                "Two-press remove confirmation showing the pin's id / display / store before destruction.",
         }),
         Box::new(ThemeHarnessIngredient),
     ];
@@ -940,7 +822,7 @@ fn theme_sections(theme: &Theme) -> Vec<ThemeSection> {
                 (
                     "panel_focus_accent",
                     ThemeSample::Color(theme.panel_focus_accent),
-                    "▸ focus arrow + popup-frame border",
+                    "► focus arrow + popup-frame border",
                 ),
             ],
         },
@@ -970,7 +852,7 @@ fn theme_sections(theme: &Theme) -> Vec<ThemeSection> {
                 (
                     "disclosure",
                     ThemeSample::Color(theme.disclosure),
-                    "▶ ▼ expand/collapse glyphs",
+                    "► ▼ expand/collapse glyphs",
                 ),
                 (
                     "divider",
@@ -980,7 +862,7 @@ fn theme_sections(theme: &Theme) -> Vec<ThemeSection> {
                 (
                     "warning",
                     ThemeSample::Color(theme.warning),
-                    "⚠ ambiguity glyph + stale-cache message",
+                    "▲ ambiguity glyph + stale-cache message",
                 ),
                 (
                     "error",
@@ -1058,14 +940,14 @@ fn theme_sections(theme: &Theme) -> Vec<ThemeSection> {
                 (
                     "node_runtime_process",
                     ThemeSample::Color(theme.node_runtime_process),
-                    "⚙ glyph",
+                    "◈ glyph",
                 ),
                 (
                     "node_branch",
                     ThemeSample::Color(theme.node_branch),
-                    "⎇ glyph",
+                    "⌥ glyph",
                 ),
-                ("node_fork", ThemeSample::Color(theme.node_fork), "⑂ glyph"),
+                ("node_fork", ThemeSample::Color(theme.node_fork), "⋎ glyph"),
             ],
         },
         ThemeSection {
@@ -1079,27 +961,11 @@ fn theme_sections(theme: &Theme) -> Vec<ThemeSection> {
                 (
                     "edge_conflict",
                     ThemeSample::Color(theme.edge_conflict),
-                    "Conflict rows with the ⚠ prefix",
+                    "Conflict rows with the ▲ prefix",
                 ),
             ],
         },
     ]
-}
-
-/// Owned mutation target shared by the Edit / Rebind / Remove pin
-/// variants so they all reference the same fictional pin.
-fn pins_mock_target() -> PinMutationTarget {
-    PinMutationTarget {
-        id: "ingest-refactor".to_string(),
-        display_name: "Ingest refactor".to_string(),
-        harness: "codex".to_string(),
-        cwd: "/home/user/work/ingest".to_string(),
-        mux_name: "ingest-refactor".to_string(),
-        mux_backend: "tmux".to_string(),
-        mux_socket: None,
-        launch_argv: vec!["codex".to_string()],
-        store_path: "/home/user/work/ingest/.conspectus.toml".to_string(),
-    }
 }
 
 /// Synthetic item corpus shared across every search variant. Each
@@ -1145,8 +1011,8 @@ fn search_mock_items() -> Vec<SearchMockItem> {
             "pr_92",
         ),
         (
-            "Pin: ingest-refactor (unbound)",
-            "pin ingest refactor unbound codex",
+            "Pin: ingest-refactor (gone)",
+            "pin ingest refactor gone mux codex",
             "pin_ingest",
         ),
     ]
