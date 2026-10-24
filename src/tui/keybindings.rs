@@ -53,6 +53,9 @@ pub enum KeyMode {
     Global,
 }
 
+/// The undo key. Toasts that offer an undo name it from here.
+pub const UNDO_KEY: char = 'u';
+
 /// Key-matching predicate. A tuple of `(modifiers, code)`
 /// with modifier flexibility because most single-char
 /// bindings accept both `SHIFT + <upper>` and plain
@@ -248,6 +251,12 @@ pub const KEYBINDINGS: &[KeyBinding] = &[
         key: KeyMatcher::AnyModExceptCtrl('p'),
         action: || Action::Msg(Box::new(crate::tui::Msg::TogglePin)),
         help_text: "Pin the selected row, or unpin it when it already is",
+    },
+    KeyBinding {
+        mode: KeyMode::Global,
+        key: KeyMatcher::AnyModExceptCtrl(UNDO_KEY),
+        action: || Action::Msg(Box::new(crate::tui::Msg::Undo)),
+        help_text: "Undo the last pin or unpin",
     },
     KeyBinding {
         mode: KeyMode::Global,

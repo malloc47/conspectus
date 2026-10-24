@@ -35,6 +35,7 @@ pub mod search;
 pub mod snapshot;
 pub mod theme;
 mod ui;
+pub mod undo;
 pub mod viewer;
 pub mod viewer_bridge;
 pub mod widgets;

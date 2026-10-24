@@ -809,14 +809,14 @@ session with it and pins the name, as `pin rename` does), **Retarget…** (a
 searchable list of the other entities of the same kind, running or gone; type
 to filter, `Enter` picks), **Refresh snapshot**, **Reveal in its view**
 (switches to Sessions, Mux, or PRs and selects the entity; a gone entity
-opens in History), and **Unpin** (press `Enter` twice). Each is the same write
+opens in History), and **Unpin**. Each is the same write
 as the `pin` command of that name. Legacy pins refuse edits until they are
 migrated.
 
 ### Pinning from the other views
 
-`p` pins the selected row in any view with one keypress, and unpins it (after
-a confirming menu) when a pin already points at it. `.` opens the menu for the
+`p` pins the selected row in any view with one keypress, and unpins it at
+once when a pin already points at it (`u` undoes either; see below). `.` opens the menu for the
 row: **Pin** for an unpinned entity, and for a pinned one every pin verb above,
 whichever view you are in.
 
@@ -913,6 +913,23 @@ filter (harness, max age, mux state) leaves ghosts out because they can't
 match.
 `Enter` on a ghost rebuilds it, `.` opens the same menu as in History, and
 attach and rename refuse with a message that names the fix.
+
+### Undo
+
+`u` undoes the last pin or unpin. Unpinning removes a pin together with its
+overrides and saved values, and can make its row leave the Pinned view, so the
+toast ends with `u to undo`. Undo puts a removed pin back exactly as it was,
+with its name, overrides, saved values, and its place in the pin order, and
+moves the cursor to its row (the Pinned row in that view, the entity's row
+elsewhere) without changing the view. Undoing a pin removes it again.
+
+Undo steps back through the pins and unpins of this session, newest first, up to
+20 of them, and says `nothing to undo` when the list is empty. It is not kept
+between sessions. If a new pin has taken the removed pin's name, the restore is
+refused and says so; a pin whose history record was reaped in the meantime
+still comes back, showing as missing. Other actions (rename, retarget, edit,
+forget, worktree changes) are not undoable yet; each store write declares
+whether it has an inverse, so a new one has to decide.
 
 ### Migrating legacy pins
 

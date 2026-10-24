@@ -27,7 +27,7 @@ fn label_wears_ghost_style(app: &mut App, label: &str, width: u16) -> bool {
     panic!("no row for {label} in:\n{}", buffer_to_string(&buffer));
 }
 
-fn all_stopped_muxes() -> RowFilter {
+pub(super) fn all_stopped_muxes() -> RowFilter {
     RowFilter {
         show_stopped_muxes: true,
         show_pinned_history: true,

@@ -140,6 +140,13 @@ pub enum StoreOp {
     RetargetSlot { slot: String, target: String },
     /// Copy the entity's current recipe into the snapshot (`pin refresh`).
     RefreshSlot { slot: String },
+    /// Undo of a pin: remove the pin with this name.
+    RemovePin { id: String },
+    /// Undo of an unpin: put the pin back at its old place in the order.
+    RestorePin {
+        slot: crate::model::PinSlot,
+        index: usize,
+    },
     /// Remove one history record.
     ForgetRecord { record_id: String },
     /// Remove these history records (the Clean up modal).
@@ -311,6 +318,8 @@ pub fn lifecycle(effect: &Effect) -> Lifecycle {
             StoreOp::PinRecord { .. }
             | StoreOp::PinNode { .. }
             | StoreOp::Unpin { .. }
+            | StoreOp::RemovePin { .. }
+            | StoreOp::RestorePin { .. }
             | StoreOp::RenameSlot { .. }
             | StoreOp::SavePin { .. }
             | StoreOp::RetargetSlot { .. }
@@ -325,5 +334,42 @@ pub fn lifecycle(effect: &Effect) -> Lifecycle {
             | StoreOp::WorktreeCloseDown { .. }
             | StoreOp::WorktreePrune { .. } => Lifecycle::REFRESHES,
         },
+    }
+}
+
+/// Whether a store write can be undone, and why not when it can't.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum UndoClass {
+    /// The executor records the inverse the named [`crate::tui::undo::Undo`] carries.
+    Undoable(&'static str),
+    /// There is no inverse to record, for this reason.
+    NotUndoable(&'static str),
+}
+
+/// Classify every store write for undo. The match has no wildcard arm:
+/// a new [`StoreOp`] fails to compile until it says whether it can be
+/// reversed.
+pub fn undo_class(op: &StoreOp) -> UndoClass {
+    use UndoClass::{NotUndoable, Undoable};
+    match op {
+        StoreOp::PinRecord { .. } | StoreOp::PinNode { .. } => Undoable("Undo::Unpin"),
+        StoreOp::Unpin { .. } => Undoable("Undo::RestorePin"),
+        StoreOp::RemovePin { .. } | StoreOp::RestorePin { .. } => {
+            NotUndoable("it is an undo, and undoing it again would only flip the pin back")
+        }
+        StoreOp::RenameSlot { .. } => NotUndoable("renaming also renames a live tmux session"),
+        StoreOp::SavePin { .. } => NotUndoable("the edit form can rename and change many fields"),
+        StoreOp::RetargetSlot { .. } => NotUndoable("not yet recorded"),
+        StoreOp::RefreshSlot { .. } => NotUndoable("not yet recorded"),
+        StoreOp::ForgetRecord { .. } | StoreOp::ReapRecords { .. } => {
+            NotUndoable("forgotten history records are not kept")
+        }
+        StoreOp::CommitAliasRename { .. } => NotUndoable("not yet recorded"),
+        StoreOp::CommitMuxRename { .. } => NotUndoable("it renames a live tmux session"),
+        StoreOp::WorktreeCreate { .. }
+        | StoreOp::WorktreeRemove { .. }
+        | StoreOp::WorktreeMerge { .. }
+        | StoreOp::WorktreeCloseDown { .. }
+        | StoreOp::WorktreePrune { .. } => NotUndoable("it changes git state outside Conspectus"),
     }
 }

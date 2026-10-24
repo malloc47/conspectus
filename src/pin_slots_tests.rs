@@ -345,3 +345,60 @@ fn a_malformed_file_is_reported_as_malformed_not_as_schema_zero() {
     assert!(!err.contains("schema_version 0"), "{err}");
     assert_eq!(std::fs::read_to_string(&path).unwrap(), "[pins\nbroken");
 }
+
+#[test]
+fn a_removed_slot_comes_back_whole_at_its_old_place() {
+    let (_dir, store) = store();
+    for id in ["a", "b", "c"] {
+        store.add(mux_slot(id)).unwrap();
+    }
+    let removed = store.load().slots.remove(1);
+    assert_eq!(removed.id, "b");
+    store.remove("b").unwrap();
+    assert_eq!(ids(&store), ["a", "c"]);
+
+    store
+        .restore(&removed, usize::try_from(removed.order).unwrap())
+        .unwrap();
+
+    assert_eq!(ids(&store), ["a", "b", "c"]);
+    let back = store.load().slots.remove(1);
+    assert_eq!(back, removed, "every field and the position survive");
+}
+
+#[test]
+fn restoring_past_the_end_appends() {
+    let (_dir, store) = store();
+    store.add(mux_slot("a")).unwrap();
+    store.restore(&mux_slot("z"), 40).unwrap();
+    assert_eq!(ids(&store), ["a", "z"]);
+}
+
+#[test]
+fn restoring_keeps_comments_on_the_other_slots() {
+    let (_dir, store) = store();
+    store.add(mux_slot("a")).unwrap();
+    store.add(mux_slot("c")).unwrap();
+    let path = store.path().to_path_buf();
+    let text = fs::read_to_string(&path).unwrap();
+    fs::write(
+        &path,
+        text.replacen("[[pins.slots]]", "# my notes\n[[pins.slots]]", 1),
+    )
+    .unwrap();
+
+    store.restore(&mux_slot("b"), 1).unwrap();
+
+    let after = fs::read_to_string(&path).unwrap();
+    assert!(after.contains("# my notes"), "{after}");
+    assert_eq!(ids(&store), ["a", "b", "c"]);
+}
+
+#[test]
+fn restoring_refuses_a_name_that_was_taken_meanwhile() {
+    let (_dir, store) = store();
+    store.add(mux_slot("a")).unwrap();
+    let err = store.restore(&mux_slot("a"), 0).unwrap_err();
+    assert!(matches!(err, SlotError::DuplicateId(_)), "{err}");
+    assert_eq!(ids(&store), ["a"]);
+}

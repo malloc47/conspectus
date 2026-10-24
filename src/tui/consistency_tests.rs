@@ -83,6 +83,7 @@ mod rendering;
 mod state;
 mod styling;
 mod text;
+mod undo;
 
 use fixtures::*;
 

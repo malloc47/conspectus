@@ -650,3 +650,47 @@ fn launching_from_the_form_and_detaching_at_once_shows_the_new_mux_running() {
         sleep(Duration::from_millis(100));
     }
 }
+
+/// Pin with `p`, unpin with `p`, and bring the pin back with the undo
+/// key, reading the screen and the pin store each time.
+#[test]
+fn undo_brings_back_a_pin_removed_with_p() {
+    needs_tmux!();
+    let world = World::new();
+    world.new_mux("other", false);
+    world.new_mux("victim", false);
+    world.start_tui_outside();
+    world.select_mux(|| world.screen(), "victim");
+    let pins = |world: &World| {
+        let out = world.conspectus(&["pin", "list"]);
+        String::from_utf8_lossy(&out.stdout).into_owned()
+    };
+    let marked =
+        |screen: &str| row(screen, "victim").is_some_and(|line| left_pane(line).contains('◉'));
+
+    world.keys(&["p"]);
+    wait_screen(&world, "the pin marker to appear", |screen| marked(screen));
+    assert!(pins(&world).contains("victim"), "{}", pins(&world));
+
+    world.keys(&["p"]);
+    wait_screen(&world, "the pin marker to go", |screen| !marked(screen));
+    assert!(pins(&world).contains("no pin"), "{}", pins(&world));
+
+    world.keys(&["u"]);
+    wait_screen(&world, "the pin marker to return after undo", |screen| {
+        marked(screen)
+    });
+    assert!(pins(&world).contains("victim"), "{}", pins(&world));
+
+    // Nothing more to undo once the pin and its removal are both undone.
+    world.keys(&["u"]);
+    wait_screen(
+        &world,
+        "the pin to be removed by the second undo",
+        |screen| !marked(screen),
+    );
+    world.keys(&["u"]);
+    wait_screen(&world, "the empty-stack message", |screen| {
+        screen.contains("nothing to undo")
+    });
+}

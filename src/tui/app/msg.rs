@@ -304,6 +304,10 @@ pub enum Msg {
     TogglePin,
     /// Row menu → remove a slot.
     Unpin(String),
+    /// The undo key: reverse the newest recorded operation.
+    Undo,
+    /// The executor finished an operation that can be undone.
+    UndoRecorded(crate::tui::undo::Undo),
     /// Pin menu → open the pin edit form.
     OpenSlotEdit(String),
     /// The pin edit form saved: rename the pin and set or drop overrides.

@@ -1,7 +1,9 @@
 //! Effect executor: runs the effects the reducer emits (ADR 0085 contract 2).
 
 use super::*;
+use crate::tui::keybindings::UNDO_KEY;
 use crate::tui::messages::{LogEntry, LogTarget};
+use crate::tui::undo::Undo;
 
 /// Run one pure (no-terminal) effect. Shared between
 /// [`execute_effects`] and [`execute_effects_live`] so the two
@@ -57,6 +59,8 @@ pub(super) fn execute_store_op(
         }
         StoreOp::PinNode { node } => execute_pin(app, &crate::pin_ops::Pinnable::Node(node)),
         StoreOp::Unpin { slot } => execute_unpin(app, &slot),
+        StoreOp::RemovePin { id } => execute_remove_pin(app, &id),
+        StoreOp::RestorePin { slot, index } => execute_restore_pin(app, &slot, index),
         StoreOp::RenameSlot { slot, new_name } => execute_rename_slot(app, tmux, &slot, &new_name),
         StoreOp::SavePin { request } => execute_save_pin(app, tmux, &request),
         StoreOp::RetargetSlot { slot, target } => execute_retarget_slot(app, &slot, &target),
@@ -420,10 +424,28 @@ fn execute_pin(app: &mut App, what: &crate::pin_ops::Pinnable) {
         return;
     };
     let history = crate::history::HistoryWriter::from_env(app.config().history.clone());
-    let outcome = crate::pin_ops::pin(handle.snapshot(), &store, history.as_ref(), what, None)
-        .map(|slot| format!("pinned as `{}`", slot.id))
-        .map_err(|err| format!("pin failed: {err}"));
+    let (outcome, undo) = pin_with(&store, handle.snapshot(), history.as_ref(), what);
+    if let Some(undo) = undo {
+        app.update(Msg::UndoRecorded(undo));
+    }
     finish_slot_write(app, outcome);
+}
+
+/// Pin `what` in `store`; on success the summary and the undo that
+/// removes the new pin.
+pub(super) fn pin_with(
+    store: &crate::pin_slots::SlotStore,
+    snapshot: &crate::model::GraphSnapshot,
+    history: Option<&crate::history::HistoryWriter>,
+    what: &crate::pin_ops::Pinnable,
+) -> (Result<String, String>, Option<Undo>) {
+    match crate::pin_ops::pin(snapshot, store, history, what, None) {
+        Ok(slot) => (
+            Ok(format!("pinned as `{}` · {UNDO_KEY} to undo", slot.id)),
+            Some(Undo::Unpin { id: slot.id }),
+        ),
+        Err(err) => (Err(format!("pin failed: {err}")), None),
+    }
 }
 
 /// Executor branch for `StoreOp::Unpin`: remove the slot. The entity
@@ -432,22 +454,111 @@ fn execute_unpin(app: &mut App, slot: &str) {
     let Some(store) = slot_store_or_report(app) else {
         return;
     };
-    let overrides = store
+    let entity = app.snapshot_handle().and_then(|handle| {
+        crate::tui::rows::pin_nodes(handle.snapshot())
+            .into_iter()
+            .find(|pin| pin.id.id == slot)
+            .and_then(|pin| pin.target_node.clone())
+    });
+    let (outcome, undo) = unpin_with(&store, slot, entity);
+    if let Some(undo) = undo {
+        app.update(Msg::UndoRecorded(undo));
+    }
+    finish_slot_write(app, outcome);
+}
+
+/// Remove pin `slot` from `store`; on success the summary and the undo
+/// that puts it back whole, in its old place in the order.
+pub(super) fn unpin_with(
+    store: &crate::pin_slots::SlotStore,
+    slot: &str,
+    entity: Option<crate::model::NodeId>,
+) -> (Result<String, String>, Option<Undo>) {
+    let before = store
         .load()
         .slots
-        .iter()
-        .find(|existing| existing.id == slot)
+        .into_iter()
+        .find(|existing| existing.id == slot);
+    let overrides = before
+        .as_ref()
         .map_or(0, |existing| existing.overrides.len());
-    let outcome = match store.remove(slot) {
-        Ok(write) if write.changed => Ok(match overrides {
-            0 => format!("unpinned `{slot}`"),
-            1 => format!("unpinned `{slot}` (its 1 override was removed)"),
-            n => format!("unpinned `{slot}` (its {n} overrides were removed)"),
-        }),
-        Ok(_) => Err(format!("unpin: no pin named `{slot}`")),
-        Err(err) => Err(format!("unpin failed: {err}")),
+    match store.remove(slot) {
+        Ok(write) if write.changed => {
+            let undo = before.map(|removed| Undo::RestorePin {
+                index: usize::try_from(removed.order).unwrap_or(usize::MAX),
+                slot: Box::new(removed),
+                entity,
+            });
+            let summary = match overrides {
+                0 => format!("unpinned `{slot}` · {UNDO_KEY} to undo"),
+                1 => format!("unpinned `{slot}` (its 1 override was removed) · {UNDO_KEY} to undo"),
+                n => format!(
+                    "unpinned `{slot}` (its {n} overrides were removed) · {UNDO_KEY} to undo"
+                ),
+            };
+            (Ok(summary), undo)
+        }
+        Ok(_) => (Err(format!("unpin: no pin named `{slot}`")), None),
+        Err(err) => (Err(format!("unpin failed: {err}")), None),
+    }
+}
+
+/// Executor branch for `StoreOp::RemovePin`, the undo of a pin.
+fn execute_remove_pin(app: &mut App, id: &str) {
+    let Some(store) = slot_store_or_report(app) else {
+        return;
     };
-    finish_slot_write(app, outcome);
+    finish_slot_write(app, remove_pin_with(&store, id));
+}
+
+/// Remove the pin an undo is reversing.
+pub(super) fn remove_pin_with(
+    store: &crate::pin_slots::SlotStore,
+    id: &str,
+) -> Result<String, String> {
+    match store.remove(id) {
+        Ok(write) if write.changed => Ok(format!("removed pin `{id}`")),
+        Ok(_) => Err(format!("undo: pin `{id}` is already gone")),
+        Err(err) => Err(format!("undo failed: {err}")),
+    }
+}
+
+/// Executor branch for `StoreOp::RestorePin`, the undo of an unpin.
+fn execute_restore_pin(app: &mut App, slot: &crate::model::PinSlot, index: usize) {
+    let Some(store) = slot_store_or_report(app) else {
+        return;
+    };
+    let taken_by_a_legacy_pin = app.snapshot_handle().is_some_and(|handle| {
+        handle
+            .snapshot()
+            .pins
+            .iter()
+            .any(|pin| pin.legacy && pin.id == slot.id)
+    });
+    finish_slot_write(
+        app,
+        restore_pin_with(&store, slot, index, taken_by_a_legacy_pin),
+    );
+}
+
+/// Put an unpinned pin back, whole, in its old place. A name taken
+/// since refuses (the entry is dropped, not retried), and a pin whose
+/// history record was reaped meanwhile comes back showing as missing.
+pub(super) fn restore_pin_with(
+    store: &crate::pin_slots::SlotStore,
+    slot: &crate::model::PinSlot,
+    index: usize,
+    taken_by_a_legacy_pin: bool,
+) -> Result<String, String> {
+    let exists = || format!("undo: a pin named `{}` exists now", slot.id);
+    if taken_by_a_legacy_pin {
+        return Err(exists());
+    }
+    match store.restore(slot, index) {
+        Ok(_) => Ok(format!("restored pin `{}`", slot.id)),
+        Err(crate::pin_slots::SlotError::DuplicateId(_)) => Err(exists()),
+        Err(err) => Err(format!("undo failed: {err}")),
+    }
 }
 
 /// Executor branch for `StoreOp::RenameSlot`: rename the slot, and a
@@ -607,3 +718,7 @@ fn execute_reap_records(app: &mut App, ids: std::collections::BTreeSet<String>) 
     };
     app.report(entry);
 }
+
+#[cfg(test)]
+#[path = "executor_undo_tests.rs"]
+mod undo_tests;

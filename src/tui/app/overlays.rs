@@ -169,6 +169,23 @@ impl App {
         self.set_selection(id);
     }
 
+    /// Select what an undo restored, now that its refresh has landed.
+    /// It never leaves the view: a row that isn't listed here is left
+    /// alone.
+    pub(crate) fn apply_restore_focus(&mut self) {
+        use crate::tui::undo::RestoreFocus;
+        let Some(focus) = self.pending_restore_focus.take() else {
+            return;
+        };
+        let index = self.tree.rows.iter().position(|row| match &focus {
+            RestoreFocus::Row(id) => &row.id == id,
+            RestoreFocus::Node(node) => crate::tui::rows::row_node(&row.id) == Some(node),
+        });
+        if let Some(index) = index {
+            self.expand_to_and_select(index);
+        }
+    }
+
     /// Test hook: the row the action started on has disappeared from the
     /// refreshed tree, as a History record does once it is a live mux.
     #[cfg(test)]

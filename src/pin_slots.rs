@@ -201,6 +201,38 @@ impl SlotStore {
         })
     }
 
+    /// Put a removed slot back at `index` in the order (counting every
+    /// table in the file, as [`PinSlot::order`] does), or at the end when
+    /// the file is shorter now. Refuses when the id has been taken since.
+    /// The other slots keep their comments and formatting.
+    pub fn restore(&self, slot: &PinSlot, index: usize) -> Result<SlotWrite, SlotError> {
+        validate_slot(slot)?;
+        self.edit(|doc, load| {
+            if load.slots.iter().any(|existing| existing.id == slot.id)
+                || find_index(slots_of(doc), &slot.id).is_some()
+            {
+                return Err(SlotError::DuplicateId(slot.id.clone()));
+            }
+            let tables = ensure_slots(doc);
+            let mut order: Vec<Table> = (0..tables.len())
+                .filter_map(|i| tables.get(i).cloned())
+                .collect();
+            let mut table = Table::new();
+            apply_slot(&mut table, slot);
+            order.insert(index.min(order.len()), table);
+            // A parsed table renders at its stored position, so hand
+            // every slot a fresh, increasing one (see `move_slot`).
+            let mut next = order.iter().filter_map(Table::position).min().unwrap_or(1);
+            let mut rebuilt = ArrayOfTables::new();
+            for mut table in order {
+                assign_positions(&mut table, &mut next);
+                rebuilt.push(table);
+            }
+            *tables = rebuilt;
+            Ok(true)
+        })
+    }
+
     /// Change a slot in place. `change` sees the slot as loaded and
     /// returns whether it changed anything; the id can't change here
     /// (use [`Self::rename`]).

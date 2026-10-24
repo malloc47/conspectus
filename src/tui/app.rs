@@ -184,6 +184,10 @@ pub struct App {
     /// The row that was selected when the action started: if it is still
     /// listed once the refresh lands, the operator stays on it.
     pending_follow_row: Option<RowId>,
+    /// What an undo asked to select once its refresh lands.
+    pending_restore_focus: Option<crate::tui::undo::RestoreFocus>,
+    /// Operations the undo key can still reverse.
+    undo: crate::tui::undo::UndoStack,
     /// Loaded previews keyed by source: pane captures and
     /// transcripts (ADR 0112 §5). The renderer reads this for the
     /// right-panel Preview zone.
@@ -505,6 +509,8 @@ impl App {
             refresh_requested: false,
             pending_follow: None,
             pending_follow_row: None,
+            pending_restore_focus: None,
+            undo: crate::tui::undo::UndoStack::default(),
             preview_store: PreviewStore::new(),
             left_scroll: 0,
             explorer_scroll: 0,
@@ -987,6 +993,11 @@ impl App {
         self.update(Msg::Report(Box::new(entry)));
     }
 
+    /// The operations the undo key can still reverse.
+    pub fn undo_stack(&self) -> &crate::tui::undo::UndoStack {
+        &self.undo
+    }
+
     /// Current provider availability status used for right-side
     /// status-bar chips.
     pub fn provider_status(&self) -> &ProviderStatus {
@@ -1311,6 +1322,7 @@ impl App {
             } => {
                 self.set_data(snapshot, tree, loaded_at_epoch, initial_selection_hint);
                 self.apply_pending_follow();
+                self.apply_restore_focus();
             }
             Msg::SetTree(tree) => {
                 self.set_tree(tree);
@@ -1704,6 +1716,14 @@ impl App {
                     node,
                 }));
             }
+            Msg::Undo => match self.undo.pop() {
+                None => effects.push(Effect::Toast("nothing to undo".to_string())),
+                Some(entry) => {
+                    self.pending_restore_focus = entry.focus(self.active_view() == View::Pinned);
+                    effects.push(Effect::WriteStore(entry.into_op()));
+                }
+            },
+            Msg::UndoRecorded(entry) => self.undo.push(entry),
             Msg::TogglePin => {
                 // `p` acts on the entity in view: it unpins what is
                 // already pinned and pins the rest, each at once. An

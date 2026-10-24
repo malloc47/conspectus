@@ -918,6 +918,8 @@ them, and Controls offers a `pinned only` filter. A row action menu (`.`)
 lists what applies to the entity in view, including Pin / Unpin (`p`): the same
 entries for the same entity in every view, hiding those with nothing to say.
 Accelerators act on the entity shown in the right pane while it has focus.
+An undo key (`u`) reverses the last pin or unpin, restoring a removed pin whole
+and in place; every store write declares whether it is undoable.
 
 Every capability in this surface is reachable through a navigable
 **Controls overlay** (sections for view, grouping, filters, sort).

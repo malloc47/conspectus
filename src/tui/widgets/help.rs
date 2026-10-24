@@ -277,7 +277,7 @@ fn keymap_sections() -> Vec<HelpSection> {
                 ),
                 Binding::new(
                     "N",
-                    "Launch a harness in a new mux with a worktree: the launch form opens with the worktree toggle on",
+                    "Launch a harness in a new mux (the form can also create a worktree for it)",
                 ),
                 Binding::new(
                     "m",
@@ -291,6 +291,10 @@ fn keymap_sections() -> Vec<HelpSection> {
                 Binding::new(
                     "p",
                     "Pin the selected row, or unpin it when it is already pinned; pinned rows carry ◉ (◎ when the pinned entity isn't running)",
+                ),
+                Binding::new(
+                    crate::tui::keybindings::UNDO_KEY.to_string(),
+                    "Undo the last pin or unpin, as far back as this session goes; a removed pin comes back with its overrides and its place in the order",
                 ),
                 Binding::new(
                     ".",
