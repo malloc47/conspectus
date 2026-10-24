@@ -206,6 +206,43 @@ pub const MENU_KEYS: &[KeyRow<MenuKey>] = &[
 ];
 
 // ---------------------------------------------------------------------
+// Controls: a panel whose changes apply as they are made. Space acts on
+// the focused row (selects a choice, toggles a checkbox, opens an
+// editor); Enter applies the focused choice and closes; Esc closes with
+// everything already applied kept.
+// ---------------------------------------------------------------------
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ControlsKey {
+    Abort,
+    Up,
+    Down,
+    /// Select the focused choice, toggle the focused checkbox, or open
+    /// the focused row's editor.
+    Toggle,
+    /// Apply the focused choice (if it is one) and close.
+    Done,
+    Close,
+}
+
+pub const CONTROLS_KEYS: &[KeyRow<ControlsKey>] = &[
+    alias(ctrl('c'), ControlsKey::Abort),
+    shown(key(KeyCode::Up), ControlsKey::Up, "↑", "move"),
+    alias(ch('k'), ControlsKey::Up),
+    shown(key(KeyCode::Down), ControlsKey::Down, "↓", "move"),
+    alias(ch('j'), ControlsKey::Down),
+    shown(ch(' '), ControlsKey::Toggle, "Space", "select/toggle"),
+    shown(
+        key(KeyCode::Enter),
+        ControlsKey::Done,
+        "Enter",
+        "apply & close",
+    ),
+    shown(key(KeyCode::Esc), ControlsKey::Close, "Esc", "close"),
+    KeyRow::Note("changes apply as you make them"),
+];
+
+// ---------------------------------------------------------------------
 // Multi-select sub-editor (Controls filters).
 // ---------------------------------------------------------------------
 
@@ -534,6 +571,112 @@ pub const VIEWER_KEYS: &[KeyRow<ViewerMsg>] = &[
     alias(KeyMatcher::UpperChar('I'), ViewerMsg::ToggleAborted),
     alias(KeyMatcher::UpperChar('H'), ViewerMsg::ToggleHidden),
     alias(ch('?'), ViewerMsg::ToggleHelp),
+];
+
+// ---------------------------------------------------------------------
+// The modal key convention. One set of meanings for Esc, Enter, and
+// Space across every modal; a modal that departs from it says why here,
+// and a consistency test checks each modal's real key tables against
+// this table.
+//
+//   Esc    leaves the modal without applying anything that is still
+//          pending. (Controls applies as you go, so what it already
+//          applied stays.)
+//   Enter  applies or submits the modal's primary action; in a list it
+//          activates the focused item.
+//   Space  changes the focused item: toggles a checkbox, steps an
+//          option, selects a choice. In a text field it types a space.
+// ---------------------------------------------------------------------
+
+/// What Enter does in a modal.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum EnterMeans {
+    /// Applies or submits the whole modal.
+    Submits,
+    /// Activates the focused item (a menu entry, a search hit, a choice).
+    Activates,
+    /// Does nothing special: a viewer.
+    Nothing,
+}
+
+/// What Space does in a modal.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SpaceMeans {
+    /// Toggles, steps, or selects the focused item.
+    Toggles,
+    /// Pages down, as in any pager.
+    Pages,
+    /// Not bound: it types into the focused text field, or does nothing
+    /// in a modal with none.
+    Types,
+}
+
+/// One modal's row of the convention.
+#[derive(Debug, Clone, Copy)]
+pub struct ModalConvention {
+    pub modal: &'static str,
+    pub enter: EnterMeans,
+    pub space: SpaceMeans,
+    /// Why the modal departs from the convention, if it does.
+    pub exception: &'static str,
+}
+
+const fn conv(
+    modal: &'static str,
+    enter: EnterMeans,
+    space: SpaceMeans,
+    exception: &'static str,
+) -> ModalConvention {
+    ModalConvention {
+        modal,
+        enter,
+        space,
+        exception,
+    }
+}
+
+/// Every modal against the convention. Esc leaves every one of them.
+pub const MODAL_CONVENTION: &[ModalConvention] = &[
+    conv(
+        "Help",
+        EnterMeans::Nothing,
+        SpaceMeans::Pages,
+        "a pager: Space pages down",
+    ),
+    conv(
+        "Controls",
+        EnterMeans::Activates,
+        SpaceMeans::Toggles,
+        "changes apply as they are made, so Esc keeps them",
+    ),
+    conv("Rename", EnterMeans::Submits, SpaceMeans::Types, ""),
+    conv("Search", EnterMeans::Activates, SpaceMeans::Types, ""),
+    conv(
+        "ValueModal",
+        EnterMeans::Nothing,
+        SpaceMeans::Pages,
+        "a pager: Space pages down",
+    ),
+    conv(
+        "Messages",
+        EnterMeans::Nothing,
+        SpaceMeans::Pages,
+        "a pager: Space pages the detail",
+    ),
+    conv(
+        "Viewer",
+        EnterMeans::Nothing,
+        SpaceMeans::Pages,
+        "a pager: Space pages down",
+    ),
+    conv("WorktreeMenu", EnterMeans::Activates, SpaceMeans::Types, ""),
+    conv("NewMux", EnterMeans::Submits, SpaceMeans::Types, ""),
+    conv("MuxMenu", EnterMeans::Activates, SpaceMeans::Types, ""),
+    conv("MuxLaunch", EnterMeans::Submits, SpaceMeans::Toggles, ""),
+    conv("PinEdit", EnterMeans::Submits, SpaceMeans::Toggles, ""),
+    conv("RowMenu", EnterMeans::Activates, SpaceMeans::Types, ""),
+    conv("CleanUp", EnterMeans::Submits, SpaceMeans::Toggles, ""),
+    conv("Picker", EnterMeans::Activates, SpaceMeans::Types, ""),
 ];
 
 #[cfg(test)]

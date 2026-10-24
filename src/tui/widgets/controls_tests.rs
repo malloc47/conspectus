@@ -92,7 +92,7 @@ fn enter_on_different_view_switches_and_closes() {
 }
 
 #[test]
-fn enter_on_grouping_applies_and_stays_open() {
+fn space_on_grouping_applies_and_stays_open() {
     let filter = RowFilter::default();
     let ctx = ctx_with(
         View::Sessions,
@@ -108,11 +108,75 @@ fn enter_on_grouping_applies_and_stays_open() {
     // Land on the second grouping row (Graph).
     state.handle_key(&ctx, key(KeyCode::Down));
     assert_eq!(state.cursor(), ControlsCursor::Grouping(1));
-    let outcome = state.handle_key(&ctx, key(KeyCode::Enter));
+    let outcome = state.handle_key(&ctx, key(KeyCode::Char(' ')));
     let expected = Grouping::values_for(View::Sessions)[1];
     assert_eq!(
         outcome,
         ControlsOutcome::ApplyAndStay(crate::tui::Msg::SetGrouping(expected))
+    );
+}
+
+#[test]
+fn enter_on_grouping_applies_and_closes() {
+    let filter = RowFilter::default();
+    let ctx = ctx_with(
+        View::Sessions,
+        Grouping::default_for(View::Sessions),
+        &filter,
+        Sort::Hierarchy,
+    );
+    let mut state = ControlsOverlayState::new(&ctx);
+    for _ in 0..=VIEW_OPTIONS.len() {
+        state.handle_key(&ctx, key(KeyCode::Down));
+    }
+    assert_eq!(state.cursor(), ControlsCursor::Grouping(1));
+    let outcome = state.handle_key(&ctx, key(KeyCode::Enter));
+    let expected = Grouping::values_for(View::Sessions)[1];
+    assert_eq!(
+        outcome,
+        ControlsOutcome::ApplyAndClose(crate::tui::Msg::SetGrouping(expected))
+    );
+}
+
+#[test]
+fn space_on_a_view_switches_and_stays_open() {
+    let filter = RowFilter::default();
+    let ctx = ctx_with(
+        View::Sessions,
+        Grouping::default_for(View::Sessions),
+        &filter,
+        Sort::Hierarchy,
+    );
+    let mut state = ControlsOverlayState::new(&ctx);
+    state.handle_key(&ctx, key(KeyCode::Down));
+    let outcome = state.handle_key(&ctx, key(KeyCode::Char(' ')));
+    assert_eq!(
+        outcome,
+        ControlsOutcome::ApplyAndStay(crate::tui::Msg::SwitchView(View::Mux))
+    );
+}
+
+#[test]
+fn enter_on_a_checkbox_closes_and_leaves_it_alone() {
+    let filter = RowFilter::default();
+    let ctx = ctx_with(
+        View::Sessions,
+        Grouping::default_for(View::Sessions),
+        &filter,
+        Sort::Hierarchy,
+    );
+    let mut state = ControlsOverlayState::new(&ctx);
+    // Walk to the first float-muxed-sessions checkbox.
+    for _ in 0..200 {
+        if state.cursor() == ControlsCursor::FilterFloatMuxedSessions {
+            break;
+        }
+        state.handle_key(&ctx, key(KeyCode::Down));
+    }
+    assert_eq!(state.cursor(), ControlsCursor::FilterFloatMuxedSessions);
+    assert_eq!(
+        state.handle_key(&ctx, key(KeyCode::Enter)),
+        ControlsOutcome::Close
     );
 }
 
@@ -300,7 +364,7 @@ fn float_muxed_checkbox_only_appears_on_sessions_view() {
 }
 
 #[test]
-fn enter_on_float_muxed_sessions_toggles_bool() {
+fn space_on_float_muxed_sessions_toggles_bool() {
     let filter = RowFilter::default();
     let ctx = ctx_with(
         View::Sessions,
@@ -313,7 +377,7 @@ fn enter_on_float_muxed_sessions_toggles_bool() {
         state.handle_key(&ctx, key(KeyCode::Down));
     }
     assert_eq!(state.cursor(), ControlsCursor::FilterFloatMuxedSessions);
-    let outcome = state.handle_key(&ctx, key(KeyCode::Enter));
+    let outcome = state.handle_key(&ctx, key(KeyCode::Char(' ')));
     match outcome {
         ControlsOutcome::ApplyAndStay(crate::tui::Msg::SetFilter(f)) => {
             assert!(f.float_muxed_sessions_top);
@@ -324,7 +388,7 @@ fn enter_on_float_muxed_sessions_toggles_bool() {
 }
 
 #[test]
-fn enter_on_float_attached_muxes_toggles_bool() {
+fn space_on_float_attached_muxes_toggles_bool() {
     let filter = RowFilter {
         float_attached_muxes_top: true,
         ..RowFilter::default()
@@ -340,7 +404,7 @@ fn enter_on_float_attached_muxes_toggles_bool() {
         state.handle_key(&ctx, key(KeyCode::Down));
     }
     assert_eq!(state.cursor(), ControlsCursor::FilterFloatAttachedMuxes);
-    let outcome = state.handle_key(&ctx, key(KeyCode::Enter));
+    let outcome = state.handle_key(&ctx, key(KeyCode::Char(' ')));
     match outcome {
         ControlsOutcome::ApplyAndStay(crate::tui::Msg::SetFilter(f)) => {
             assert!(!f.float_attached_muxes_top, "Enter toggles bool off");
@@ -457,7 +521,7 @@ fn preview_wrap_section_lists_every_mode_and_applies_the_pick() {
             sub_editor: None,
         };
         assert_eq!(
-            state.handle_key(&ctx, key(KeyCode::Enter)),
+            state.handle_key(&ctx, key(KeyCode::Char(' '))),
             ControlsOutcome::ApplyAndStay(crate::tui::Msg::SetPreviewWrap(
                 crate::tui::PreviewWrap::ALL[2]
             ))
@@ -495,7 +559,7 @@ fn session_preview_section_closes_the_overlay_and_applies_the_pick() {
             sub_editor: None,
         };
         assert_eq!(
-            state.handle_key(&ctx, key(KeyCode::Enter)),
+            state.handle_key(&ctx, key(KeyCode::Char(' '))),
             ControlsOutcome::ApplyAndStay(crate::tui::Msg::SetSessionPreview(
                 crate::tui::SessionPreview::Pane
             ))
@@ -600,7 +664,7 @@ fn prs_ctx(filter: &RowFilter) -> ControlsContext<'_> {
 }
 
 #[test]
-fn enter_on_local_branch_row_cycles_any_tracked_untracked() {
+fn space_on_local_branch_row_cycles_any_tracked_untracked() {
     use crate::filter::PrBranchFilter;
 
     let mut filter = RowFilter::default();
@@ -612,7 +676,7 @@ fn enter_on_local_branch_row_cycles_any_tracked_untracked() {
             state.handle_key(&ctx, key(KeyCode::Down));
         }
         assert_eq!(state.cursor(), ControlsCursor::FilterPrBranch);
-        match state.handle_key(&ctx, key(KeyCode::Enter)) {
+        match state.handle_key(&ctx, key(KeyCode::Char(' '))) {
             ControlsOutcome::ApplyAndStay(crate::tui::Msg::SetFilter(next)) => {
                 seen.push(next.pr_branch);
                 filter = next;
@@ -631,7 +695,7 @@ fn enter_on_local_branch_row_cycles_any_tracked_untracked() {
 }
 
 #[test]
-fn enter_on_float_tracked_prs_toggles_bool() {
+fn space_on_float_tracked_prs_toggles_bool() {
     let filter = RowFilter::default();
     let ctx = prs_ctx(&filter);
     let mut state = ControlsOverlayState::new_at_filters(&ctx);
@@ -639,7 +703,7 @@ fn enter_on_float_tracked_prs_toggles_bool() {
         state.handle_key(&ctx, key(KeyCode::Down));
     }
     assert_eq!(state.cursor(), ControlsCursor::FilterFloatTrackedPrs);
-    match state.handle_key(&ctx, key(KeyCode::Enter)) {
+    match state.handle_key(&ctx, key(KeyCode::Char(' '))) {
         ControlsOutcome::ApplyAndStay(crate::tui::Msg::SetFilter(next)) => {
             assert!(next.float_tracked_prs_top);
             assert_eq!(next.pr_branch, None);

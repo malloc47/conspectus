@@ -214,9 +214,9 @@ impl ControlsOverlayState {
     /// caller should apply (or [`ControlsOutcome::Continue`] for
     /// in-overlay navigation that didn't change anything).
     pub fn handle_key(&mut self, ctx: &ControlsContext<'_>, event: KeyEvent) -> ControlsOutcome {
-        use crate::tui::keybindings::overlay::{MENU_KEYS, MenuKey, resolve};
-        let action = resolve(MENU_KEYS, event);
-        if action == Some(MenuKey::Abort) {
+        use crate::tui::keybindings::overlay::{CONTROLS_KEYS, ControlsKey, resolve};
+        let action = resolve(CONTROLS_KEYS, event);
+        if action == Some(ControlsKey::Abort) {
             return ControlsOutcome::Close;
         }
 
@@ -229,17 +229,52 @@ impl ControlsOverlayState {
         }
 
         match action {
-            Some(MenuKey::Abort | MenuKey::Close) => ControlsOutcome::Close,
-            Some(MenuKey::Up) => {
+            Some(ControlsKey::Abort | ControlsKey::Close) => ControlsOutcome::Close,
+            Some(ControlsKey::Up) => {
                 self.cursor = move_cursor(self.cursor, ctx, -1);
                 ControlsOutcome::Continue
             }
-            Some(MenuKey::Down) => {
+            Some(ControlsKey::Down) => {
                 self.cursor = move_cursor(self.cursor, ctx, 1);
                 ControlsOutcome::Continue
             }
-            Some(MenuKey::Pick) => self.activate(ctx),
+            Some(ControlsKey::Toggle) => self.activate(ctx),
+            Some(ControlsKey::Done) => self.done(ctx),
             None => ControlsOutcome::Continue,
+        }
+    }
+
+    /// Enter: apply the focused choice and close; open an editor row's
+    /// editor or press a button; otherwise (checkboxes and cycles, which
+    /// Space changes and which are already applied) just close.
+    fn done(&mut self, ctx: &ControlsContext<'_>) -> ControlsOutcome {
+        let is_choice = matches!(
+            self.cursor,
+            ControlsCursor::View(_)
+                | ControlsCursor::Grouping(_)
+                | ControlsCursor::Sort(_)
+                | ControlsCursor::MuxRecency(_)
+                | ControlsCursor::PreviewWrap(_)
+                | ControlsCursor::SessionPreview(_)
+        );
+        // A button presses, and an editor row opens its editor, on Enter
+        // as on Space.
+        if matches!(
+            self.cursor,
+            ControlsCursor::FilterClear
+                | ControlsCursor::FilterHarness
+                | ControlsCursor::FilterMaxAge
+                | ControlsCursor::FilterMuxState
+                | ControlsCursor::FilterPrState
+        ) {
+            return self.activate(ctx);
+        }
+        if !is_choice {
+            return ControlsOutcome::Close;
+        }
+        match self.activate(ctx) {
+            ControlsOutcome::ApplyAndStay(msg) => ControlsOutcome::ApplyAndClose(msg),
+            _ => ControlsOutcome::Close,
         }
     }
 
@@ -248,11 +283,9 @@ impl ControlsOverlayState {
             ControlsCursor::View(idx) => {
                 let view = VIEW_OPTIONS[idx];
                 if view == ctx.view {
-                    // No-op view switch; close so the operator sees
-                    // the cancel feedback rather than a stuck overlay.
-                    ControlsOutcome::Close
+                    ControlsOutcome::Continue
                 } else {
-                    ControlsOutcome::ApplyAndClose(crate::tui::Msg::SwitchView(view))
+                    ControlsOutcome::ApplyAndStay(crate::tui::Msg::SwitchView(view))
                 }
             }
             ControlsCursor::Grouping(idx) => {
@@ -668,9 +701,16 @@ impl Widget for ControlsOverlayWidget<'_> {
         // produces so auto-sizing reproduces the legacy rect.
         let mut lines = self.body_lines();
         lines.push(Line::default());
-        lines.push(Line::from(
-            span!(Modifier::DIM; "{}", crate::tui::keybindings::overlay::footer(crate::tui::keybindings::overlay::MENU_KEYS)),
-        ));
+        // The footer wraps to the modal's inner width (one column is the
+        // scrollbar's) so no hint runs past the frame.
+        let footer_width =
+            usize::from(centered_modal_rect_for_content(area, 0).width).saturating_sub(3);
+        let footer = crate::tui::keybindings::overlay::footer(
+            crate::tui::keybindings::overlay::CONTROLS_KEYS,
+        );
+        for chunk in crate::tui::widgets::popup_frame::wrapped_lines(&footer, 0, footer_width) {
+            lines.push(Line::from(span!(Modifier::DIM; "{chunk}")));
+        }
         let modal = centered_modal_rect_for_content(area, lines.len());
         let inner_height = modal.height.saturating_sub(2) as usize;
         let scroll_offset =
@@ -995,7 +1035,7 @@ fn filter_row(name: &str, value: String, cursored: bool) -> Line<'static> {
     line![span!(style; "{marker}{name:9} {value}  [ Edit ]")]
 }
 
-/// A filter row whose value Enter steps to the next choice rather
+/// A filter row whose value Space steps to the next choice rather
 /// than opening an editor.
 fn cycle_row(name: &str, value: String, cursored: bool) -> Line<'static> {
     let marker = if cursored { "> " } else { "  " };

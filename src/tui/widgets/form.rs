@@ -469,6 +469,35 @@ pub fn note_row(label: &str, value: &str, cols: Cols) -> Line<'static> {
     ])
 }
 
+/// A line derived from the fields above it, such as the command the form
+/// will run. It sits two cells in with a dim `└` lead-in, in dim italic,
+/// and carries no focus marker, so it reads as output and not as another
+/// input. The value starts in the same column as the field values.
+pub fn derived_row(label: &str, value: &str, warn: bool, cols: Cols) -> Line<'static> {
+    let dim = Style::default().add_modifier(Modifier::DIM | Modifier::ITALIC);
+    let lead = format!(
+        "  └ {label:width$}{VALUE_GAP}",
+        width = cols.label.saturating_sub(2)
+    );
+    let width = cols
+        .inner
+        .saturating_sub(lead.chars().count())
+        .saturating_sub(TEXT_GUTTER.chars().count())
+        .max(1);
+    let value_style = if warn {
+        Style::default()
+            .fg(Color::Yellow)
+            .add_modifier(Modifier::ITALIC)
+    } else {
+        dim
+    };
+    Line::from(vec![
+        Span::styled(lead, dim),
+        Span::raw(TEXT_GUTTER),
+        Span::styled(truncate_chars(value, width), value_style),
+    ])
+}
+
 pub fn warning_row(label: &str, value: &str, cols: Cols) -> Line<'static> {
     let inner_width = cols.inner;
     let (prefix, _) = prefix(label, false, cols.label);

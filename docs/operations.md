@@ -857,8 +857,13 @@ the form will run.
 
 `N`, or `m` then **Launch harness in new mux…**, opens the mux launch form
 with the worktree toggle off (switch it on to create or reuse a worktree). The
-`command` row shows what will run; it is read only (dim, italic) and never takes
-focus. An empty `launch
+mux name is the first field. A **socket** checkbox to the right of the name
+reveals a **mux socket** field beneath it, for a tmux server other than the
+default; `Tab` reaches the checkbox right after the name and `Space` (or `←`/`→`)
+toggles it. With it off the launch uses the default server, and the socket text
+you typed is kept if you switch it back on. The `command` row shows what will
+run; it is derived output, drawn dim and italic and indented under a `└`, and
+never takes focus. An empty `launch
 argv` resolves to the harness's default (a project or user `[launch.*]`
 profile, `atelier exec`, or the harness default) and the form shows the
 command and where it came from. The last field, **pin**, can also pin the new
@@ -960,6 +965,26 @@ Conspectus has three persistent cache surfaces:
 Future caches (PR fetches, transcript indices, etc.) land
 under the same `$XDG_*_HOME/conspectus/` roots rather than
 inside `.conspectus.toml` or the project config directory.
+
+## Keys in dialogs
+
+Every dialog uses the same three keys the same way:
+
+| Key | Does |
+|---|---|
+| `Esc` | Leaves the dialog without applying what is still pending. |
+| `Enter` | Applies or submits the dialog's main action; in a list it activates the focused item. |
+| `Space` | Changes the focused item: toggles a checkbox, steps an option, selects a choice. In a text field it types a space. |
+
+The controls dialog (`f`) applies each change as you make it, so `Esc`
+closes it and keeps what you already changed. In it `Space` selects the
+focused choice, toggles a checkbox, steps a cycle, or opens a filter's
+editor; `Enter` applies the focused choice and closes (on a filter row it
+opens the editor, and on a checkbox it just closes). Scrolling dialogs
+(help, the full-value viewer, messages, the transcript viewer) use
+`Space` to page down, as pagers do. Help and the other long dialogs wrap
+their text to the dialog's width, and menus cut a label that cannot fit
+with an ellipsis, so no word is clipped at the edge.
 
 ## TUI messages
 

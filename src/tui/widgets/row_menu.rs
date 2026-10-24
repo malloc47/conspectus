@@ -129,6 +129,9 @@ impl<'a> RowMenuWidget<'a> {
 
 impl Widget for RowMenuWidget<'_> {
     fn render(self, area: Rect, buf: &mut Buffer) {
+        // Text is fitted to the frame's inner width: labels are cut with an
+        // ellipsis, explanations and the footer wrap.
+        let inner_width = usize::from(72_u16.min(area.width).saturating_sub(2));
         let mut lines: Vec<Line> = vec![Line::from("")];
         for (idx, entry) in self.state.entries.iter().enumerate() {
             let focused = idx == self.state.cursor;
@@ -148,13 +151,20 @@ impl Widget for RowMenuWidget<'_> {
             } else {
                 Style::default()
             };
-            lines.push(Line::styled(label, style));
-            lines.push(Line::from(format!("     {}", entry.subtitle)));
+            lines.push(Line::styled(
+                popup_frame::ellipsize(&label, inner_width),
+                style,
+            ));
+            for chunk in popup_frame::wrapped_lines(&entry.subtitle, 5, inner_width) {
+                lines.push(Line::from(chunk));
+            }
         }
         lines.push(Line::from(""));
-        lines.push(Line::from(crate::tui::keybindings::overlay::footer(
-            crate::tui::keybindings::overlay::MENU_KEYS,
-        )));
+        let footer =
+            crate::tui::keybindings::overlay::footer(crate::tui::keybindings::overlay::MENU_KEYS);
+        for chunk in popup_frame::wrapped_lines(&footer, 0, inner_width) {
+            lines.push(Line::from(chunk));
+        }
 
         let height = u16::try_from(lines.len())
             .unwrap_or(u16::MAX)

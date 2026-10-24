@@ -74,6 +74,7 @@ mod fixtures;
 mod focus;
 mod forms;
 mod freshness;
+mod keys;
 mod layout;
 mod lifecycle;
 mod menus;

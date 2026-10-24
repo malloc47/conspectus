@@ -308,7 +308,7 @@ fn build_body_lines<'a>(
                 match segment {
                     crate::viewer::table::BodySegment::Markdown(src) => {
                         let text = tui_markdown::from_str(src);
-                        for line in text.lines {
+                        for line in join_orphan_list_markers(text.lines) {
                             wrap_styled_line(line, content_width, &mut out);
                         }
                     }
@@ -333,6 +333,44 @@ fn build_body_lines<'a>(
             render_tool_body(turn, theme, content_width, tool_detail)
         }
     }
+}
+
+/// Put a list marker back on the line of its item's text.
+///
+/// For a loose list (items separated by blank lines, which agents
+/// often write) the Markdown renderer emits the `1. ` marker as a line
+/// of its own and the item's paragraph on the next. Join the two so the
+/// number sits beside its text, as it does in a tight list.
+fn join_orphan_list_markers(lines: Vec<Line<'_>>) -> Vec<Line<'_>> {
+    let mut out: Vec<Line<'_>> = Vec::with_capacity(lines.len());
+    let mut iter = lines.into_iter().peekable();
+    while let Some(line) = iter.next() {
+        if is_bare_list_marker(&line)
+            && let Some(next) = iter.next_if(|next| !next.spans.is_empty())
+        {
+            let mut joined = line;
+            joined.spans.extend(next.spans);
+            out.push(joined);
+        } else {
+            out.push(line);
+        }
+    }
+    out
+}
+
+/// A line holding only a list marker such as `1. `, `2) `, or `- `.
+fn is_bare_list_marker(line: &Line<'_>) -> bool {
+    let [span] = line.spans.as_slice() else {
+        return false;
+    };
+    let text = span.content.trim_start();
+    let Some(marker) = text.strip_suffix(' ') else {
+        return false;
+    };
+    matches!(marker, "-" | "*" | "+")
+        || marker
+            .strip_suffix(['.', ')'])
+            .is_some_and(|n| !n.is_empty() && n.chars().all(|c| c.is_ascii_digit()))
 }
 
 /// Render a tool turn's body according to the detail level.

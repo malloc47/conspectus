@@ -225,7 +225,7 @@ fn keymap_sections() -> Vec<HelpSection> {
             bindings: vec![
                 Binding::new(
                     "f",
-                    "Open the controls overlay (view / grouping / filters / sort / preview wrap)",
+                    "Open the controls overlay (view / grouping / filters / sort / preview wrap); Space selects or toggles, Enter applies and closes, Esc closes",
                 ),
                 Binding::new("!", crate::tui::keybindings::MESSAGES_HELP),
                 Binding::new("?", "This help"),
@@ -408,25 +408,67 @@ fn body_lines_for_width(theme: &Theme, width: Option<usize>) -> Vec<Line<'static
     }
 
     self::section(&mut lines, "Node kind icons");
-    push_icon_legend(&mut lines, theme);
+    push_icon_legend(&mut lines, theme, width);
     blank(&mut lines);
 
     self::section(&mut lines, "Link and mux state");
-    push_mux_state_legend(&mut lines, theme);
+    push_mux_state_legend(&mut lines, theme, width);
     blank(&mut lines);
 
     self::section(&mut lines, "Pull request state");
-    push_pr_state_legend(&mut lines, theme);
+    push_pr_state_legend(&mut lines, theme, width);
     blank(&mut lines);
 
     self::section(&mut lines, "Pins");
-    push_pin_marker_legend(&mut lines, theme);
+    push_pin_marker_legend(&mut lines, theme, width);
     blank(&mut lines);
 
-    lines.push(line![
-        span!(theme.placeholder; "{}", crate::tui::keybindings::overlay::footer(crate::tui::keybindings::overlay::HELP_KEYS))
-    ]);
+    let footer =
+        crate::tui::keybindings::overlay::footer(crate::tui::keybindings::overlay::HELP_KEYS);
+    match width.filter(|w| *w > 8) {
+        Some(w) => {
+            let budget = u16::try_from(w).unwrap_or(u16::MAX);
+            for chunk in crate::viewer::render::word_wrap(&footer, budget) {
+                lines.push(line![span!(theme.placeholder; "{}", chunk.trim_end())]);
+            }
+        }
+        None => lines.push(line![span!(theme.placeholder; "{footer}")]),
+    }
     lines
+}
+
+/// Cells before the blurb in a legend row: two of indent, the glyph and
+/// its space, and a 16-cell name column.
+const LEGEND_LEAD_WIDTH: usize = 2 + 2 + 16;
+/// The same for the pin legend, whose names are longer.
+const PIN_LEGEND_LEAD_WIDTH: usize = 2 + 2 + 20;
+
+/// Push one legend row: `lead` spans after a two-cell indent, then the
+/// blurb, wrapped under a hanging indent that lines up with it when
+/// `width` is known so no text runs past the modal edge.
+fn legend_entry(
+    lines: &mut Vec<Line<'static>>,
+    lead: Vec<ratatui::text::Span<'static>>,
+    lead_width: usize,
+    blurb: &str,
+    width: Option<usize>,
+) {
+    let mut first = vec![ratatui::text::Span::raw("  ")];
+    first.extend(lead);
+    let Some(width) = width.filter(|w| *w > lead_width + 8) else {
+        first.push(ratatui::text::Span::raw(blurb.to_string()));
+        lines.push(Line::from(first));
+        return;
+    };
+    let budget = u16::try_from(width - lead_width).unwrap_or(u16::MAX);
+    let mut chunks = crate::viewer::render::word_wrap(blurb, budget).into_iter();
+    first.push(ratatui::text::Span::raw(
+        chunks.next().unwrap_or_default().trim_end().to_string(),
+    ));
+    lines.push(Line::from(first));
+    for chunk in chunks {
+        lines.push(line![" ".repeat(lead_width), chunk.trim_end().to_string()]);
+    }
 }
 
 /// Width of the `  <key:<14>` column that precedes each description.
@@ -464,7 +506,7 @@ fn binding_lines(
 /// pressing `?` instead of reading the docs. Mirrors ADR 0073's
 /// canonical display order (`NodeKind::ALL`) so the icon column
 /// down-reads the same sequence the row tree and detail pane use.
-fn push_icon_legend(lines: &mut Vec<Line<'static>>, theme: &Theme) {
+fn push_icon_legend(lines: &mut Vec<Line<'static>>, theme: &Theme, width: Option<usize>) {
     for kind in NodeKind::ALL {
         let style = node_kind_style(kind, theme);
         // ForgePr's slate color is `Color::Reset`; mirror the
@@ -476,12 +518,16 @@ fn push_icon_legend(lines: &mut Vec<Line<'static>>, theme: &Theme) {
         } else {
             style.color
         };
-        lines.push(line![
-            "  ",
-            span!(Style::default().fg(color); "{} ", style.glyph),
-            span!(Modifier::BOLD; "{:<16}", node_kind_display_name(kind)),
-            node_kind_help_blurb(kind).to_string(),
-        ]);
+        legend_entry(
+            lines,
+            vec![
+                span!(Style::default().fg(color); "{} ", style.glyph),
+                span!(Modifier::BOLD; "{:<16}", node_kind_display_name(kind)),
+            ],
+            LEGEND_LEAD_WIDTH,
+            node_kind_help_blurb(kind),
+            width,
+        );
     }
 }
 
@@ -489,7 +535,7 @@ fn push_icon_legend(lines: &mut Vec<Line<'static>>, theme: &Theme) {
 /// ambiguity warning on group rows and the header. The same glyph can
 /// answer a different question on a session row than on a mux row, so
 /// the blurb names both where they differ.
-fn push_mux_state_legend(lines: &mut Vec<Line<'static>>, theme: &Theme) {
+fn push_mux_state_legend(lines: &mut Vec<Line<'static>>, theme: &Theme, width: Option<usize>) {
     use crate::tui::icons::state;
     let bold_warning = Style::default()
         .fg(theme.warning)
@@ -530,18 +576,22 @@ fn push_mux_state_legend(lines: &mut Vec<Line<'static>>, theme: &Theme) {
         ),
     ];
     for (glyph, style, name, blurb) in entries {
-        lines.push(line![
-            "  ",
-            span!(style; "{glyph} "),
-            span!(Modifier::BOLD; "{name:<16}"),
-            blurb.to_string(),
-        ]);
+        legend_entry(
+            lines,
+            vec![
+                span!(style; "{glyph} "),
+                span!(Modifier::BOLD; "{name:<16}"),
+            ],
+            LEGEND_LEAD_WIDTH,
+            blurb,
+            width,
+        );
     }
 }
 
 /// Legend for the pull request state glyphs. The Pinned and History
 /// views spell the same states as words instead.
-fn push_pr_state_legend(lines: &mut Vec<Line<'static>>, theme: &Theme) {
+fn push_pr_state_legend(lines: &mut Vec<Line<'static>>, theme: &Theme, width: Option<usize>) {
     use crate::tui::icons::state;
     let entries: [(&str, Style, &str, &str); 4] = [
         (
@@ -570,18 +620,22 @@ fn push_pr_state_legend(lines: &mut Vec<Line<'static>>, theme: &Theme) {
         ),
     ];
     for (glyph, style, name, blurb) in entries {
-        lines.push(line![
-            "  ",
-            span!(style; "{glyph} "),
-            span!(Modifier::BOLD; "{name:<16}"),
-            blurb.to_string(),
-        ]);
+        legend_entry(
+            lines,
+            vec![
+                span!(style; "{glyph} "),
+                span!(Modifier::BOLD; "{name:<16}"),
+            ],
+            LEGEND_LEAD_WIDTH,
+            blurb,
+            width,
+        );
     }
 }
 
 /// Legend for the pin marker: filled for something a pin points at,
 /// hollow and in the ghost style for a pin with nothing running.
-fn push_pin_marker_legend(lines: &mut Vec<Line<'static>>, theme: &Theme) {
+fn push_pin_marker_legend(lines: &mut Vec<Line<'static>>, theme: &Theme, width: Option<usize>) {
     use crate::tui::icons::state;
     let pin_color = node_kind_style(NodeKind::Pin, theme).color;
     let entries: [(&str, Style, &str, &str); 2] = [
@@ -601,12 +655,16 @@ fn push_pin_marker_legend(lines: &mut Vec<Line<'static>>, theme: &Theme) {
         ),
     ];
     for (glyph, style, name, blurb) in entries {
-        lines.push(line![
-            "  ",
-            span!(style; "{glyph} "),
-            span!(Modifier::BOLD; "{name:<20}"),
-            blurb.to_string(),
-        ]);
+        legend_entry(
+            lines,
+            vec![
+                span!(style; "{glyph} "),
+                span!(Modifier::BOLD; "{name:<20}"),
+            ],
+            PIN_LEGEND_LEAD_WIDTH,
+            blurb,
+            width,
+        );
     }
 }
 

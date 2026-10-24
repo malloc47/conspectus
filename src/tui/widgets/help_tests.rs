@@ -321,3 +321,86 @@ fn jumping_to_the_end_shows_the_last_lines_not_blank_space() {
         "end of keymap should be visible after G:\n{rendered}"
     );
 }
+
+/// Widths the help modal is checked at, as terminal widths.
+const TERMINAL_WIDTHS: [u16; 4] = [60, 80, 120, 160];
+
+/// The cells the help body's text gets at a terminal width: the modal's
+/// inner width, less the scrollbar column.
+fn text_width_at(terminal_width: u16) -> usize {
+    let modal = help_modal_rect(Rect::new(0, 0, terminal_width, 40));
+    usize::from(modal.width.saturating_sub(2)).saturating_sub(1)
+}
+
+fn words(lines: &[Line<'_>]) -> Vec<String> {
+    lines
+        .iter()
+        .flat_map(|line| {
+            line_text(line)
+                .split_whitespace()
+                .map(str::to_string)
+                .collect::<Vec<_>>()
+        })
+        .collect()
+}
+
+#[test]
+fn no_help_line_is_wider_than_the_modal_at_any_width() {
+    let theme = Theme::default();
+    for terminal in TERMINAL_WIDTHS {
+        let width = text_width_at(terminal);
+        for line in body_lines_for_width(&theme, Some(width)) {
+            let text = line_text(&line);
+            assert!(
+                unicode_width::UnicodeWidthStr::width(text.as_str()) <= width,
+                "at {terminal} columns a help line is {} cells in a {width}-cell body: {text:?}",
+                unicode_width::UnicodeWidthStr::width(text.as_str())
+            );
+        }
+    }
+}
+
+#[test]
+fn every_word_of_every_help_page_survives_wrapping() {
+    let theme = Theme::default();
+    let source = words(&body_lines_for_width(&theme, None));
+    assert!(source.len() > 200, "the help page has its text");
+    for terminal in TERMINAL_WIDTHS {
+        let wrapped = words(&body_lines_for_width(&theme, Some(text_width_at(terminal))));
+        assert_eq!(
+            wrapped, source,
+            "at {terminal} columns wrapping lost, split, or reordered words"
+        );
+    }
+}
+
+#[test]
+fn the_rendered_help_modal_shows_every_word_as_you_scroll() {
+    let theme = Theme::default();
+    let source = words(&body_lines_for_width(&theme, None));
+    for terminal in TERMINAL_WIDTHS {
+        let area = Rect::new(0, 0, terminal, 24);
+        let mut seen = std::collections::BTreeSet::new();
+        let mut state = HelpOverlayState::new();
+        for _ in 0..80 {
+            let mut buf = Buffer::empty(area);
+            HelpOverlayWidget::new(&state, &theme).render(area, &mut buf);
+            // The text columns only: inside the frame, left of the
+            // scrollbar.
+            let modal = help_modal_rect(area);
+            for y in modal.y + 1..modal.y + modal.height - 1 {
+                let row: String = (modal.x + 1..modal.x + modal.width - 2)
+                    .map(|x| buf[(x, y)].symbol().to_string())
+                    .collect();
+                seen.extend(row.split_whitespace().map(str::to_string));
+            }
+            state.handle_key(key(KeyCode::PageDown));
+        }
+        let missing: Vec<&String> = source.iter().filter(|word| !seen.contains(*word)).collect();
+        assert!(
+            missing.is_empty(),
+            "at {terminal} columns these words never appear whole: {:?}",
+            &missing[..missing.len().min(12)]
+        );
+    }
+}

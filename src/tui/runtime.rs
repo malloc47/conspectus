@@ -534,7 +534,7 @@ impl LoopMode for LiveMode {
                 app.open_controls_overlay();
                 app.update(Msg::SetStatus(Some(format!(
                     "controls: {}",
-                    overlay_keymap::footer(overlay_keymap::MENU_KEYS)
+                    overlay_keymap::footer(overlay_keymap::CONTROLS_KEYS)
                 ))));
             }
             Some(Action::ControlsOverlayKey(key)) => handle_controls_overlay_key(app, key),
@@ -665,7 +665,7 @@ impl LoopMode for StaticMode {
                 app.open_controls_overlay();
                 app.update(Msg::SetStatus(Some(format!(
                     "controls: {}",
-                    overlay_keymap::footer(overlay_keymap::MENU_KEYS)
+                    overlay_keymap::footer(overlay_keymap::CONTROLS_KEYS)
                 ))));
             }
             Some(Action::ControlsOverlayKey(key)) => handle_controls_overlay_key(app, key),

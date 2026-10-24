@@ -16,11 +16,11 @@ use crate::tui::modal::Overlay;
 const WIDTHS: [u16; 4] = [60, 80, 120, 160];
 const HEIGHTS: [u16; 2] = [20, 40];
 
-type Open = fn(&mut App);
+pub(super) type Open = fn(&mut App);
 
 /// The name of a modal, from an exhaustive match: a new variant does not
 /// compile until it is named here.
-fn name_of(modal: &Modal) -> &'static str {
+pub(super) fn name_of(modal: &Modal) -> &'static str {
     match modal {
         Modal::Help(_) => "Help",
         Modal::Controls(_) => "Controls",
@@ -52,7 +52,7 @@ fn open_pinned(app: &mut App, message: Msg) {
 }
 
 /// Every modal that can be built, by name.
-fn builders() -> Vec<(&'static str, View, Open)> {
+pub(super) fn builders() -> Vec<(&'static str, View, Open)> {
     vec![
         ("Help", View::Pinned, |app| app.open_help_overlay()),
         ("Controls", View::Pinned, |app| app.open_controls_overlay()),
@@ -170,7 +170,7 @@ fn framed_and_bare(view: View, open: Open, width: u16, height: u16) -> (Buffer, 
     (with, without)
 }
 
-fn app_with(view: View, open: Open) -> App {
+pub(super) fn app_with(view: View, open: Open) -> App {
     let mut app = app_in(view);
     open(&mut app);
     app
@@ -372,5 +372,65 @@ fn moving_the_selection_in_a_modal_moves_no_text() {
             compared.contains(&name),
             "{name}: no selection movement was compared"
         );
+    }
+}
+
+/// The text of each row inside the modal's frame, frame excluded.
+fn inner_rows(buf: &Buffer, rect: (u16, u16, u16, u16)) -> Vec<String> {
+    let (x0, y0, x1, y1) = rect;
+    ((y0 + 1)..y1)
+        .map(|y| ((x0 + 1)..x1).map(|x| symbol(buf, x, y)).collect())
+        .collect()
+}
+
+fn tokens_of(rows: &[String]) -> std::collections::BTreeSet<String> {
+    rows.iter()
+        .flat_map(|row| row.split_whitespace().map(str::to_string))
+        .collect()
+}
+
+#[test]
+fn no_word_in_a_modal_is_cut_off_at_its_edge() {
+    // The same modal drawn on a very wide screen shows every word whole.
+    // A word that touches the narrow modal's right edge and is only the
+    // start of a longer word there was clipped; a deliberate cut ends in
+    // an ellipsis.
+    for (name, view, open) in builders() {
+        let (wide, wide_bare) = framed_and_bare(view, open, 240, 40);
+        let Some(wide_rect) = modal_rect(&wide, &wide_bare) else {
+            continue;
+        };
+        let wide_tokens = tokens_of(&inner_rows(&wide, wide_rect));
+        for width in WIDTHS {
+            for height in HEIGHTS {
+                let (with, without) = framed_and_bare(view, open, width, height);
+                let Some(rect) = modal_rect(&with, &without) else {
+                    continue;
+                };
+                for (index, row) in inner_rows(&with, rect).iter().enumerate() {
+                    // The last text column: the inner column before the
+                    // right frame, or before a scrollbar column.
+                    let Some(last) = row.split_whitespace().last() else {
+                        continue;
+                    };
+                    let touches_edge = row.chars().count() <= row.trim_end().chars().count() + 1;
+                    if !touches_edge || last.ends_with('…') || wide_tokens.contains(last) {
+                        continue;
+                    }
+                    // A word longer than the modal has to be broken
+                    // somewhere; that is wrapping, not clipping.
+                    let inner = usize::from(rect.2 - rect.0 - 1);
+                    let clipped = wide_tokens.iter().any(|full| {
+                        full.len() > last.len() && full.len() <= inner && full.starts_with(last)
+                    });
+                    assert!(
+                        !clipped,
+                        "{}: row {index} ends in {last:?}, the start of a longer word, at the modal's edge\n{}",
+                        describe_size(name, width, height),
+                        buffer_to_string(&with)
+                    );
+                }
+            }
+        }
     }
 }

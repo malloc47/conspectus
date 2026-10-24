@@ -37,6 +37,8 @@ fn rendered(form: &MuxLaunchFormState) -> String {
 #[test]
 fn arrow_keys_move_between_the_launch_forms_fields() {
     let mut form = launch_form("/tmp");
+    assert_eq!(form.focus(), MuxLaunchField::MuxName, "the name is first");
+    form.handle((), press(KeyCode::Down));
     assert_eq!(form.focus(), MuxLaunchField::Harness);
     form.handle((), press(KeyCode::Down));
     assert_eq!(
@@ -48,7 +50,8 @@ fn arrow_keys_move_between_the_launch_forms_fields() {
     assert_eq!(form.focus(), MuxLaunchField::Cwd);
     form.handle((), press(KeyCode::Up));
     form.handle((), press(KeyCode::Up));
-    assert_eq!(form.focus(), MuxLaunchField::Harness, "Up moves back");
+    form.handle((), press(KeyCode::Up));
+    assert_eq!(form.focus(), MuxLaunchField::MuxName, "Up moves back");
 }
 
 #[test]
@@ -57,6 +60,7 @@ fn tab_completes_a_directory_in_the_launch_forms_cwd_field() {
     std::fs::create_dir(dir.path().join("alpha-dir")).expect("subdir");
     let typed = format!("{}/alp", dir.path().display());
     let mut form = launch_form(&typed);
+    form.handle((), press(KeyCode::Down));
     form.handle((), press(KeyCode::Down));
     form.handle((), press(KeyCode::Down));
     assert_eq!(
@@ -181,7 +185,20 @@ fn the_launch_forms_command_row_is_read_only_and_never_takes_focus() {
     }
     let cells = command_row_cells(&form);
     let text: String = cells.iter().map(|(c, _)| *c).collect();
-    assert!(text.contains("(read only)"), "labelled read only: {text}");
+    assert!(!text.contains("read only"), "no words spent on it: {text}");
+    assert!(text.contains("└ command"), "led in by a dim corner: {text}");
+    // Two cells deeper than the field labels, with its value in the
+    // same column as theirs.
+    let column = |needle: &str| {
+        let frame = rendered(&form);
+        let line = frame.lines().find(|l| l.contains(needle)).expect("row");
+        line.find(needle).map(|byte| line[..byte].chars().count())
+    };
+    assert_eq!(
+        column("command").map(|c| c - 2),
+        column("harness  "),
+        "the command label sits two cells inside the field labels"
+    );
     let styled = cells
         .iter()
         .filter(|(c, _)| !c.is_whitespace() && !matches!(c, '│' | '┃' | '|'))

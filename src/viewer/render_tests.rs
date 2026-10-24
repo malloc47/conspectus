@@ -309,3 +309,35 @@ fn empty_body_still_renders_the_chip() {
         flat_text(&out)[0]
     );
 }
+
+#[test]
+fn a_loose_list_keeps_each_number_beside_its_text() {
+    // Items separated by blank lines make the Markdown renderer put the
+    // marker on a line of its own; the viewer joins them back.
+    let body = "1. first item\n\n2. second item\n\n3. third item";
+    let t = turn(TurnRole::Assistant, TurnKind::Message, body);
+    let out = render_turn(&t, &Theme::default(), 60, ToolDetail::Full, 8);
+    let texts = flat_text(&out);
+    for (n, word) in [(1, "first"), (2, "second"), (3, "third")] {
+        assert!(
+            texts
+                .iter()
+                .any(|l| l.contains(&format!("{n}. {word} item"))),
+            "item {n} should read `{n}. {word} item` on one line: {texts:#?}"
+        );
+    }
+    assert!(
+        !texts.iter().any(|l| l.trim_end().ends_with("1.")),
+        "no marker is left alone: {texts:#?}"
+    );
+}
+
+#[test]
+fn a_loose_bullet_list_keeps_each_bullet_beside_its_text() {
+    let body = "- alpha\n\n- beta";
+    let t = turn(TurnRole::Assistant, TurnKind::Message, body);
+    let out = render_turn(&t, &Theme::default(), 60, ToolDetail::Full, 8);
+    let texts = flat_text(&out);
+    assert!(texts.iter().any(|l| l.contains("- alpha")), "{texts:#?}");
+    assert!(texts.iter().any(|l| l.contains("- beta")), "{texts:#?}");
+}

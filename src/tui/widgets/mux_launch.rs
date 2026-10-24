@@ -1,7 +1,9 @@
 //! Ephemeral harness launch form (ADR 0096).
 //!
-//! Up and Down move between fields. Tab completes a path in the cwd field
-//! and moves on elsewhere. Left, Right, and Space act on the harness,
+//! Up and Down move between rows; the mux name comes first, with a
+//! checkbox on its row that reveals the mux socket field. Tab visits every
+//! stop, the checkbox included, completes a path in the cwd field, and
+//! moves on elsewhere. Left, Right, and Space act on the harness,
 //! launch option, worktree, and pin rows.
 //!
 //! Multi-field modal that commits a [`Msg::CommitMuxLaunch`] the
@@ -33,8 +35,8 @@ use crate::tui::Msg;
 use crate::tui::modal::{Overlay, OverlayOutcome};
 use crate::tui::theme::Theme;
 use crate::tui::widgets::form::{
-    self, ScrollLinesBody, choice_row, harness_row, input_row, note_row, options_row, path_row,
-    scroll_offset_for_cursor, static_value_row, warning_row, wrap_footer,
+    self, ScrollLinesBody, choice_row, derived_row, harness_row, input_row, options_row, path_row,
+    scroll_offset_for_cursor, static_value_row, wrap_footer,
 };
 use crate::tui::widgets::input::{InputOutcome, TextInputState};
 use crate::tui::widgets::launch_spec_form::{
@@ -61,6 +63,8 @@ pub enum MuxLaunchField {
     LaunchOptions,
     Cwd,
     MuxName,
+    /// The checkbox on the name row that reveals the socket field.
+    MuxSocketToggle,
     MuxSocket,
     LaunchArgv,
     WorktreeToggle,
@@ -119,6 +123,9 @@ pub struct MuxLaunchFormState {
     worktree_repo: TextInputState,
     focus: MuxLaunchField,
     pin: PinChoice,
+    /// Whether the mux socket field is shown and used. Off means the
+    /// default tmux server; the typed socket is kept while it is off.
+    socket_enabled: bool,
     /// Where an empty launch argv comes from, so the form can show the
     /// command it will run (ADR 0142).
     defaults: Option<crate::launch_default::LaunchDefaults>,
@@ -126,8 +133,7 @@ pub struct MuxLaunchFormState {
 
 impl MuxLaunchFormState {
     /// New form with pre-populated defaults. Focus starts on the
-    /// harness field so the operator types the harness key
-    /// immediately.
+    /// mux name, the first field.
     pub fn new(
         harness: impl Into<String>,
         cwd: impl Into<String>,
@@ -152,8 +158,9 @@ impl MuxLaunchFormState {
         Self {
             spec,
             worktree_repo: TextInputState::new(WORKTREE_REPO_LABEL, String::new()),
-            focus: MuxLaunchField::Harness,
+            focus: MuxLaunchField::MuxName,
             pin: PinChoice::Off,
+            socket_enabled: false,
             defaults: None,
         }
     }
@@ -241,15 +248,19 @@ impl MuxLaunchFormState {
         self.worktree_repo.value()
     }
 
+    /// The rows, top to bottom. The socket checkbox shares the name row,
+    /// so it is not a row of its own.
     fn visible_fields(&self) -> Vec<MuxLaunchField> {
-        let mut fields = vec![MuxLaunchField::Harness];
+        let mut fields = vec![MuxLaunchField::MuxName];
+        if self.socket_enabled {
+            fields.push(MuxLaunchField::MuxSocket);
+        }
+        fields.push(MuxLaunchField::Harness);
         if !self.spec.launch_options().is_empty() {
             fields.push(MuxLaunchField::LaunchOptions);
         }
         fields.extend([
             MuxLaunchField::Cwd,
-            MuxLaunchField::MuxName,
-            MuxLaunchField::MuxSocket,
             MuxLaunchField::LaunchArgv,
             MuxLaunchField::WorktreeToggle,
         ]);
@@ -261,10 +272,26 @@ impl MuxLaunchFormState {
         fields
     }
 
-    fn advance_focus(&mut self, delta: i32) {
+    /// Up and Down: move between rows. On the socket checkbox, the row
+    /// is the name row.
+    fn advance_row(&mut self, delta: i32) {
         let fields = self.visible_fields();
-        let idx = fields.iter().position(|f| *f == self.focus).unwrap_or(0);
+        let at = if self.focus == MuxLaunchField::MuxSocketToggle {
+            MuxLaunchField::MuxName
+        } else {
+            self.focus
+        };
+        let idx = fields.iter().position(|f| *f == at).unwrap_or(0);
         self.focus = fields[crate::tui::cursor::wrap_step(idx, fields.len(), delta)];
+    }
+
+    /// Tab and Shift-Tab: every stop, the socket checkbox included
+    /// (right after the name).
+    fn advance_stop(&mut self, delta: i32) {
+        let mut stops = self.visible_fields();
+        stops.insert(1, MuxLaunchField::MuxSocketToggle);
+        let idx = stops.iter().position(|f| *f == self.focus).unwrap_or(0);
+        self.focus = stops[crate::tui::cursor::wrap_step(idx, stops.len(), delta)];
     }
 
     fn try_commit(&mut self) -> OverlayOutcome {
@@ -295,7 +322,11 @@ impl MuxLaunchFormState {
         if cwd.is_empty() {
             return Err("mux launch: cwd is required".to_string());
         }
-        let mux_socket = optional_string(self.spec.mux_socket().value());
+        let mux_socket = if self.socket_enabled {
+            optional_string(self.spec.mux_socket().value())
+        } else {
+            None
+        };
         let launch_argv = parse_launch_argv(self.spec.launch_argv().value().trim(), "mux launch")?;
         let (worktree_branch, worktree_repo) = if self.spec.worktree_enabled() {
             let branch = self.spec.worktree_branch().value().trim().to_string();
@@ -330,12 +361,16 @@ impl Overlay for MuxLaunchFormState {
         use crate::tui::keybindings::overlay::{FormKey, MUX_LAUNCH_KEYS, resolve};
         let option_delta = match resolve(MUX_LAUNCH_KEYS, key) {
             Some(FormKey::Abort | FormKey::Cancel) => return OverlayOutcome::Close,
-            Some(FormKey::Up | FormKey::Back) => {
-                self.advance_focus(-1);
+            Some(FormKey::Up) => {
+                self.advance_row(-1);
+                return OverlayOutcome::Consumed;
+            }
+            Some(FormKey::Back) => {
+                self.advance_stop(-1);
                 return OverlayOutcome::Consumed;
             }
             Some(FormKey::Down) => {
-                self.advance_focus(1);
+                self.advance_row(1);
                 return OverlayOutcome::Consumed;
             }
             Some(FormKey::Tab) => {
@@ -350,7 +385,7 @@ impl Overlay for MuxLaunchFormState {
                         PathOmniboxOutcome::NoCompletion | PathOmniboxOutcome::Continue => {}
                     }
                 }
-                self.advance_focus(1);
+                self.advance_stop(1);
                 return OverlayOutcome::Consumed;
             }
             Some(FormKey::Submit) => return self.try_commit(),
@@ -384,6 +419,13 @@ impl Overlay for MuxLaunchFormState {
             MuxLaunchField::Pin => {
                 if let Some(delta) = option_delta {
                     self.pin = self.pin.cycled(delta);
+                    self.spec.clear_error();
+                }
+                return OverlayOutcome::Consumed;
+            }
+            MuxLaunchField::MuxSocketToggle => {
+                if option_delta.is_some() {
+                    self.socket_enabled = !self.socket_enabled;
                     self.spec.clear_error();
                 }
                 return OverlayOutcome::Consumed;
@@ -422,6 +464,7 @@ impl Overlay for MuxLaunchFormState {
             ),
             MuxLaunchField::WorktreeRepo => Some(self.worktree_repo.handle_key(key)),
             MuxLaunchField::LaunchOptions
+            | MuxLaunchField::MuxSocketToggle
             | MuxLaunchField::WorktreeToggle
             | MuxLaunchField::Cwd
             | MuxLaunchField::Pin => None,
@@ -468,13 +511,29 @@ impl Widget for MuxLaunchFormWidget<'_> {
         let focus = state.focus;
         let mut lines: Vec<Line<'static>> = Vec::new();
         let mut cursor_line = 0;
-        let mut row =
-            |lines: &mut Vec<Line<'static>>, field: MuxLaunchField, line: Line<'static>| {
-                if field == focus {
-                    cursor_line = lines.len();
-                }
-                lines.push(line);
-            };
+        let mut row = |lines: &mut Vec<Line<'static>>,
+                       field: MuxLaunchField,
+                       line: Line<'static>| {
+            if field == focus
+                || (field == MuxLaunchField::MuxName && focus == MuxLaunchField::MuxSocketToggle)
+            {
+                cursor_line = lines.len();
+            }
+            lines.push(line);
+        };
+        row(&mut lines, MuxLaunchField::MuxName, state.name_line(cols));
+        if state.socket_enabled {
+            row(
+                &mut lines,
+                MuxLaunchField::MuxSocket,
+                input_row(
+                    MUX_SOCKET_LABEL,
+                    spec.mux_socket(),
+                    focus == MuxLaunchField::MuxSocket,
+                    cols,
+                ),
+            );
+        }
         row(
             &mut lines,
             MuxLaunchField::Harness,
@@ -505,26 +564,6 @@ impl Widget for MuxLaunchFormWidget<'_> {
             &mut lines,
             MuxLaunchField::Cwd,
             path_row(CWD_LABEL, spec.cwd(), focus == MuxLaunchField::Cwd, cols),
-        );
-        row(
-            &mut lines,
-            MuxLaunchField::MuxName,
-            input_row(
-                MUX_NAME_LABEL,
-                spec.mux_name(),
-                focus == MuxLaunchField::MuxName,
-                cols,
-            ),
-        );
-        row(
-            &mut lines,
-            MuxLaunchField::MuxSocket,
-            input_row(
-                MUX_SOCKET_LABEL,
-                spec.mux_socket(),
-                focus == MuxLaunchField::MuxSocket,
-                cols,
-            ),
         );
         row(
             &mut lines,
@@ -620,25 +659,55 @@ impl Widget for MuxLaunchFormWidget<'_> {
 }
 
 impl MuxLaunchFormState {
+    /// The name row: the name field with the socket checkbox to its
+    /// right. The checkbox takes the same cells checked or not, and the
+    /// row carries the focus marker when either part has focus.
+    fn name_line(&self, cols: form::Cols) -> Line<'static> {
+        use ratatui::style::Modifier;
+        use ratatui::text::Span;
+        let name_focused = self.focus == MuxLaunchField::MuxName;
+        let toggle_focused = self.focus == MuxLaunchField::MuxSocketToggle;
+        let text = form::checkbox("socket", self.socket_enabled);
+        let suffix = form::Suffix {
+            width: text.chars().count() + 2,
+            spans: vec![
+                Span::raw("  "),
+                Span::styled(text, form::entry_style(toggle_focused)),
+            ],
+        };
+        let mut line = form::value_row(
+            MUX_NAME_LABEL,
+            self.spec.mux_name().value(),
+            self.spec.mux_name().cursor(),
+            name_focused,
+            cols,
+            Some(suffix),
+        );
+        if toggle_focused
+            && let Some(first) = line.spans.first_mut()
+            && let Some(rest) = first.content.strip_prefix("  ")
+        {
+            first.content = format!("> {rest}").into();
+            first.style = first.style.add_modifier(Modifier::BOLD);
+        }
+        line
+    }
+
     /// The command row: what the form will run, and where an empty
-    /// argv field gets it.
+    /// argv field gets it. Drawn as derived output, not as a field.
     fn command_line(&self, cols: form::Cols) -> Line<'static> {
         let typed = self.spec.launch_argv().value().trim();
         if !typed.is_empty() {
-            return note_row("command", &format!("(read only) runs: {typed}"), cols);
+            return derived_row("command", typed, false, cols);
         }
         if let Some(hint) = self.default_hint() {
-            return note_row("command", &format!("(read only) runs: {hint}"), cols);
+            return derived_row("command", &hint, false, cols);
         }
         let default = self.default_argv();
         if default.is_empty() {
-            warning_row("command", "(read only) no default for this harness", cols)
+            derived_row("command", "no default for this harness", true, cols)
         } else {
-            note_row(
-                "command",
-                &format!("(read only) runs: {}", form::display_argv(&default)),
-                cols,
-            )
+            derived_row("command", &form::display_argv(&default), false, cols)
         }
     }
 }
