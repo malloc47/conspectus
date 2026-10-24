@@ -281,6 +281,7 @@ fn session_matches_filter(
 
     let match_inputs = SessionMatchInputs {
         harness_key: &session.harness_key,
+        session_key: &session.id.session_key,
         now_epoch: now,
         last_active_epoch: session.last_active_epoch,
         mux_state,
@@ -949,6 +950,7 @@ fn emit_session_row(
             mux_host: ctx.data.snapshot.mux_host_of(&entry.id),
             primary_node: entry.id.clone(),
             pin_id: ctx.data.pin_id_by_bound_session.get(&entry.id).cloned(),
+            content_hit: None,
         }),
     });
 

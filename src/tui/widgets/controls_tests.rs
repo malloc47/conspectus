@@ -20,6 +20,8 @@ fn ctx_with(view: View, grouping: Grouping, filter: &RowFilter, sort: Sort) -> C
         mux_recency: crate::tui::MuxRecency::default(),
         preview_wrap: crate::tui::PreviewWrap::default(),
         session_preview: crate::tui::SessionPreview::default(),
+        content: None,
+        search_kinds: crate::viewer::search::ContentKinds::default(),
     }
 }
 
@@ -296,9 +298,9 @@ fn clear_all_with_empty_filter_is_silent_noop() {
         Sort::Hierarchy,
     );
     let mut state = ControlsOverlayState::new_at_filters(&ctx);
-    // Step past the three predicate rows, the sessions-only float
+    // Step past the four predicate rows, the sessions-only float
     // checkbox, and pinned only to land on FilterClear.
-    for _ in 0..5 {
+    for _ in 0..6 {
         state.handle_key(&ctx, key(KeyCode::Down));
     }
     assert_eq!(state.cursor(), ControlsCursor::FilterClear);
@@ -319,14 +321,14 @@ fn clear_all_with_active_filter_emits_empty_filter() {
         Sort::Hierarchy,
     );
     let mut state = ControlsOverlayState::new_at_filters(&ctx);
-    for _ in 0..5 {
+    for _ in 0..6 {
         state.handle_key(&ctx, key(KeyCode::Down));
     }
     assert_eq!(state.cursor(), ControlsCursor::FilterClear);
     let outcome = state.handle_key(&ctx, key(KeyCode::Enter));
     assert_eq!(
         outcome,
-        ControlsOutcome::ApplyAndStay(crate::tui::Msg::SetFilter(RowFilter::default()))
+        ControlsOutcome::ApplyAndStay(crate::tui::Msg::ClearFilters)
     );
 }
 
@@ -373,7 +375,7 @@ fn space_on_float_muxed_sessions_toggles_bool() {
         Sort::Hierarchy,
     );
     let mut state = ControlsOverlayState::new_at_filters(&ctx);
-    for _ in 0..3 {
+    for _ in 0..4 {
         state.handle_key(&ctx, key(KeyCode::Down));
     }
     assert_eq!(state.cursor(), ControlsCursor::FilterFloatMuxedSessions);
@@ -400,7 +402,7 @@ fn space_on_float_attached_muxes_toggles_bool() {
         Sort::Hierarchy,
     );
     let mut state = ControlsOverlayState::new_at_filters(&ctx);
-    for _ in 0..3 {
+    for _ in 0..4 {
         state.handle_key(&ctx, key(KeyCode::Down));
     }
     assert_eq!(state.cursor(), ControlsCursor::FilterFloatAttachedMuxes);
@@ -672,7 +674,7 @@ fn space_on_local_branch_row_cycles_any_tracked_untracked() {
     for _ in 0..3 {
         let ctx = prs_ctx(&filter);
         let mut state = ControlsOverlayState::new_at_filters(&ctx);
-        for _ in 0..4 {
+        for _ in 0..5 {
             state.handle_key(&ctx, key(KeyCode::Down));
         }
         assert_eq!(state.cursor(), ControlsCursor::FilterPrBranch);
@@ -699,7 +701,7 @@ fn space_on_float_tracked_prs_toggles_bool() {
     let filter = RowFilter::default();
     let ctx = prs_ctx(&filter);
     let mut state = ControlsOverlayState::new_at_filters(&ctx);
-    for _ in 0..5 {
+    for _ in 0..6 {
         state.handle_key(&ctx, key(KeyCode::Down));
     }
     assert_eq!(state.cursor(), ControlsCursor::FilterFloatTrackedPrs);
@@ -721,13 +723,13 @@ fn clear_all_resets_the_pr_settings() {
     };
     let ctx = prs_ctx(&filter);
     let mut state = ControlsOverlayState::new_at_filters(&ctx);
-    for _ in 0..7 {
+    for _ in 0..8 {
         state.handle_key(&ctx, key(KeyCode::Down));
     }
     assert_eq!(state.cursor(), ControlsCursor::FilterClear);
     assert_eq!(
         state.handle_key(&ctx, key(KeyCode::Enter)),
-        ControlsOutcome::ApplyAndStay(crate::tui::Msg::SetFilter(RowFilter::default()))
+        ControlsOutcome::ApplyAndStay(crate::tui::Msg::ClearFilters)
     );
 }
 
@@ -753,7 +755,7 @@ fn pr_state_sub_editor_commits_the_chosen_states() {
     let filter = RowFilter::default();
     let ctx = prs_ctx(&filter);
     let mut state = ControlsOverlayState::new_at_filters(&ctx);
-    for _ in 0..3 {
+    for _ in 0..4 {
         state.handle_key(&ctx, key(KeyCode::Down));
     }
     assert_eq!(state.cursor(), ControlsCursor::FilterPrState);
@@ -791,7 +793,7 @@ fn pr_state_sub_editor_opens_with_the_current_states_selected_and_clears_when_em
     };
     let ctx = prs_ctx(&filter);
     let mut state = ControlsOverlayState::new_at_filters(&ctx);
-    for _ in 0..3 {
+    for _ in 0..4 {
         state.handle_key(&ctx, key(KeyCode::Down));
     }
     state.handle_key(&ctx, key(KeyCode::Enter));
@@ -803,4 +805,108 @@ fn pr_state_sub_editor_opens_with_the_current_states_selected_and_clears_when_em
         }
         other => panic!("unexpected outcome: {other:?}"),
     }
+}
+
+fn content_ctx<'a>(filter: &'a RowFilter, text: Option<&'a str>) -> ControlsContext<'a> {
+    ControlsContext {
+        content: text.map(|text| {
+            (
+                text,
+                crate::tui::ContentStatus::Done(crate::content_search::Progress::default()),
+                0,
+            )
+        }),
+        ..ctx_with(
+            View::Sessions,
+            Grouping::default_for(View::Sessions),
+            filter,
+            Sort::Hierarchy,
+        )
+    }
+}
+
+fn on_content_row(ctx: &ControlsContext<'_>) -> ControlsOverlayState {
+    let mut state = ControlsOverlayState::new_at_filters(ctx);
+    for _ in 0..3 {
+        state.handle_key(ctx, key(KeyCode::Down));
+    }
+    assert_eq!(state.cursor(), ControlsCursor::FilterContent);
+    state
+}
+
+#[test]
+fn the_content_row_opens_an_editor_and_starts_a_search_on_enter() {
+    let filter = RowFilter::default();
+    let ctx = content_ctx(&filter, None);
+    let mut state = on_content_row(&ctx);
+    assert_eq!(
+        state.handle_key(&ctx, key(KeyCode::Enter)),
+        ControlsOutcome::Continue,
+        "Enter opens the editor"
+    );
+    assert!(state.sub_editor.is_some());
+    for ch in " needle ".chars() {
+        state.handle_key(&ctx, key(KeyCode::Char(ch)));
+    }
+    assert_eq!(
+        state.handle_key(&ctx, key(KeyCode::Enter)),
+        ControlsOutcome::ApplyAndStay(crate::tui::Msg::StartContentSearch {
+            text: "needle".into(),
+            kinds: crate::viewer::search::ContentKinds::default(),
+        })
+    );
+    assert!(!state.sub_editor.is_some());
+}
+
+#[test]
+fn space_opens_the_content_editor_too() {
+    let filter = RowFilter::default();
+    let ctx = content_ctx(&filter, None);
+    let mut state = on_content_row(&ctx);
+    state.handle_key(&ctx, key(KeyCode::Char(' ')));
+    assert!(state.sub_editor.is_some());
+}
+
+#[test]
+fn the_content_editor_starts_with_the_active_query_and_empty_text_clears_it() {
+    let filter = RowFilter::default();
+    let ctx = content_ctx(&filter, Some("needle"));
+    let mut state = on_content_row(&ctx);
+    state.handle_key(&ctx, key(KeyCode::Enter));
+    for _ in 0.."needle".len() {
+        state.handle_key(&ctx, key(KeyCode::Backspace));
+    }
+    assert_eq!(
+        state.handle_key(&ctx, key(KeyCode::Enter)),
+        ControlsOutcome::ApplyAndStay(crate::tui::Msg::ClearContentSearch)
+    );
+}
+
+#[test]
+fn escape_in_the_content_editor_keeps_the_search_as_it_was() {
+    let filter = RowFilter::default();
+    let ctx = content_ctx(&filter, Some("needle"));
+    let mut state = on_content_row(&ctx);
+    state.handle_key(&ctx, key(KeyCode::Enter));
+    state.handle_key(&ctx, key(KeyCode::Char('x')));
+    assert_eq!(
+        state.handle_key(&ctx, key(KeyCode::Esc)),
+        ControlsOutcome::Continue
+    );
+    assert!(!state.sub_editor.is_some());
+}
+
+#[test]
+fn clear_all_has_something_to_clear_when_only_a_search_is_active() {
+    let filter = RowFilter::default();
+    let ctx = content_ctx(&filter, Some("needle"));
+    let mut state = ControlsOverlayState::new_at_filters(&ctx);
+    for _ in 0..6 {
+        state.handle_key(&ctx, key(KeyCode::Down));
+    }
+    assert_eq!(state.cursor(), ControlsCursor::FilterClear);
+    assert_eq!(
+        state.handle_key(&ctx, key(KeyCode::Enter)),
+        ControlsOutcome::ApplyAndStay(crate::tui::Msg::ClearFilters)
+    );
 }

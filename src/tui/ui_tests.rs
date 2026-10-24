@@ -1663,6 +1663,7 @@ fn session_harness_span_renders_as_filled_badge() {
         mux_host: None,
         primary_node: NodeId::AgentSession(AgentSessionId::new("codex", "/state", "abc")),
         pin_id: None,
+        content_hit: None,
     };
     let spans = render_session_spans(&row, &theme, now, None);
     let badge = spans
@@ -1843,6 +1844,7 @@ fn row_kind_glyph_span_dispatches_per_row_kind() {
         mux_host: None,
         primary_node: NodeId::AgentSession(AgentSessionId::new("claude", "/state", "abc")),
         pin_id: None,
+        content_hit: None,
     });
     assert!(
         row_kind_glyph_span(&agent, &theme).is_some(),
@@ -1867,6 +1869,7 @@ fn row_kind_glyph_span_dispatches_per_row_kind() {
         single_session_preview: None,
         pin_id: None,
         primary_node: NodeId::MuxSession(MuxSessionId::new("project")),
+        content_hit: None,
     });
     assert_eq!(
         row_kind_glyph_span(&mux, &theme)
@@ -1909,6 +1912,7 @@ fn session_alias_renders_after_mux_glyph_in_left_row() {
         mux_host: None,
         primary_node: NodeId::AgentSession(AgentSessionId::new("codex", "/state", "abc")),
         pin_id: None,
+        content_hit: None,
     };
 
     let spans = render_session_spans(&row, &theme, now, None);
@@ -1950,6 +1954,7 @@ fn a_session_last_hosted_by_a_gone_mux_carries_a_was_in_chip() {
         mux_host: host,
         primary_node: NodeId::AgentSession(AgentSessionId::new("codex", "/state", "abc")),
         pin_id: None,
+        content_hit: None,
     };
     let text = |row: &AgentSessionRow| -> String {
         render_session_spans(row, &theme, now, None)
@@ -2011,6 +2016,7 @@ fn session_id_is_strictly_truncated_in_left_row() {
         mux_host: None,
         primary_node: NodeId::AgentSession(AgentSessionId::new("opencode", "/state", long_id)),
         pin_id: None,
+        content_hit: None,
     };
 
     let spans = render_session_spans(&row, &theme, now, None);
@@ -2049,6 +2055,7 @@ fn session_display_label_is_truncated_in_left_row() {
         mux_host: None,
         primary_node: NodeId::AgentSession(AgentSessionId::new("codex", "/state", "abc")),
         pin_id: None,
+        content_hit: None,
     };
 
     let spans = render_session_spans(&row, &theme, now, None);
@@ -2089,6 +2096,7 @@ fn mux_session_row_mirrors_session_column_order() {
         single_session_preview: Some("running cargo test".into()),
         pin_id: None,
         primary_node: NodeId::MuxSession(MuxSessionId::new("tmux:editor")),
+        content_hit: None,
     };
 
     let spans = render_mux_session_spans(&row, &theme, now, 100, None);
@@ -2160,6 +2168,7 @@ fn session_project_column_renders_before_inline_preview() {
         mux_host: None,
         primary_node: NodeId::AgentSession(AgentSessionId::new("codex", "/state", "abc")),
         pin_id: None,
+        content_hit: None,
     };
 
     let mut spans = render_session_spans(&row, &theme, now, None);
@@ -2212,6 +2221,7 @@ fn session_recency_span_picks_bucket_style_from_theme() {
         mux_host: None,
         primary_node: NodeId::AgentSession(AgentSessionId::new("codex", "/state", "abc")),
         pin_id: None,
+        content_hit: None,
     };
 
     let fresh = make_row(Some("1m"), Some(now - 60));
@@ -3755,6 +3765,7 @@ fn agentless_mux_row(pane_command: Option<&str>) -> MuxSessionRow {
         single_session_preview: None,
         pin_id: None,
         primary_node: NodeId::MuxSession(MuxSessionId::new("tmux:build")),
+        content_hit: None,
     }
 }
 
@@ -3878,6 +3889,7 @@ fn mux_row_spinner_takes_the_attached_glyph_column() {
         single_session_preview: None,
         pin_id: None,
         primary_node: NodeId::MuxSession(MuxSessionId::new("tmux:editor")),
+        content_hit: None,
     };
     let settled: String = render_mux_session_spans(&row, &theme, 0, 100, None)
         .iter()

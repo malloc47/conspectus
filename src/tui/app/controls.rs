@@ -15,6 +15,11 @@ impl App {
             mux_recency: self.mux_recency,
             preview_wrap: self.preview_wrap,
             session_preview: self.session_preview,
+            content: self
+                .content
+                .as_ref()
+                .map(|content| (content.text.as_str(), content.status, content.hits().len())),
+            search_kinds: self.config.search.kinds,
         }
     }
 }

@@ -40,6 +40,7 @@ impl Cli {
             Command::Pin(args) => args.run(),
             Command::Mux(args) => args.run(),
             Command::Rebuild(args) => args.run(),
+            Command::Search(args) => args.run(),
             Command::History(args) => args.run(),
             Command::Worktree(args) => args.run(),
             Command::Serve(args) => args.run(),
@@ -85,6 +86,18 @@ enum Command {
     /// Bring a mux, session, worktree, or repo back from a pin slot, a
     /// history record, or a node. `--dry-run` prints the plan.
     Rebuild(RebuildArgs),
+    /// Find sessions by what was said in them.
+    ///
+    /// Searches the text of every session's transcript, reading it on
+    /// demand in this process. Matching is a case-insensitive substring
+    /// of the query (ASCII letters fold; other text must match exactly).
+    /// By default only user and assistant messages are searched; `--tools`
+    /// and `--thinking` add tool calls and output, and thinking blocks.
+    /// Nothing is stored.
+    ///
+    /// Exit status: 0 when at least one session matched, 1 when none did,
+    /// 2 on an error.
+    Search(SearchArgs),
     /// List, inspect, and prune the entities Conspectus has observed.
     History(HistoryArgs),
     /// List, create, and tear down git worktrees. `list` is read-only;
@@ -503,6 +516,11 @@ pub(super) struct FilterArgs {
     /// `merged`, `closed`.
     #[arg(long = "pr-state", value_name = "STATE", value_delimiter = ',')]
     pr_state: Vec<String>,
+    /// Keep only sessions whose transcripts contain this text
+    /// (case-insensitive). Reads every session's transcript on demand;
+    /// the text is matched in memory and never stored.
+    #[arg(long = "contains", value_name = "TEXT")]
+    contains: Option<String>,
     /// Grouping for the view or row type. Valid values differ per
     /// view; an invalid value errors with the list of valid ones.
     #[arg(long = "grouping", value_name = "VALUE")]
@@ -510,6 +528,55 @@ pub(super) struct FilterArgs {
 }
 
 impl FilterArgs {
+    /// Scenario worlds hold recorded graphs, not transcripts to read, so
+    /// they refuse `--contains` rather than ignore it.
+    pub(super) fn reject_contains(&self, command: &str) -> Result<()> {
+        if self.contains.is_some() {
+            bail!(
+                "`--contains` isn't available in {command}: scenario worlds have no transcripts to search"
+            );
+        }
+        Ok(())
+    }
+
+    /// The content predicate for `--contains`: scan every session in
+    /// `snapshot` for the text with the `[search]` defaults and keep the
+    /// matches. `None` without the flag.
+    pub(super) fn content_filter(
+        &self,
+        snapshot: &crate::model::GraphSnapshot,
+        search: &crate::config::SearchConfig,
+    ) -> Option<crate::filter::ContentFilter> {
+        let text = self.contains.as_deref()?.trim();
+        if text.is_empty() {
+            return None;
+        }
+        let ids: Vec<_> = snapshot
+            .live_nodes()
+            .filter_map(|node| match node {
+                crate::model::GraphNode::AgentSession(session) => Some(&session.id),
+                _ => None,
+            })
+            .collect();
+        let plan = crate::content_search::plan_sessions(ids);
+        let query = crate::viewer::search::ContentQuery::new(text, search.kinds);
+        let summary = crate::content_search::scan_blocking(
+            &plan.sessions,
+            &query,
+            crate::content_search::ScanOptions::default(),
+            &crate::content_search::CancelToken::new(),
+        );
+        let mut hits = crate::filter::ContentHitMap::default();
+        for (key, session_hits) in summary.results {
+            hits.insert(key.harness_key, key.session_key, session_hits);
+        }
+        Some(crate::filter::ContentFilter {
+            text: text.to_string(),
+            hits: std::sync::Arc::new(hits),
+            complete: true,
+        })
+    }
+
     /// Convert the raw flag values into a [`crate::filter::RowFilter`].
     /// Returns an error when a value fails to parse (max-age
     /// duration, mux-state spelling).
@@ -682,6 +749,10 @@ use history::HistoryArgs;
 // ADR 0142: `conspectus rebuild`.
 mod rebuild;
 use rebuild::RebuildArgs;
+
+// `conspectus search`: find sessions by transcript contents.
+mod search;
+use search::SearchArgs;
 
 // ADR 0103: confirm a resumed harness survived its first moments.
 

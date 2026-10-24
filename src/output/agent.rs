@@ -218,6 +218,7 @@ fn row_matches(
     let candidate_count = mux_lookup.get(&row.key()).map_or(0, |m| m.candidate_count);
     let inputs = SessionMatchInputs {
         harness_key: &row.agent.harness_key,
+        session_key: &row.agent.id.session_key,
         now_epoch: options.now_epoch,
         last_active_epoch: row.agent.last_active_epoch,
         mux_state: MuxStateKey::from_candidate_count(candidate_count),

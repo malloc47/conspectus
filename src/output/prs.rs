@@ -120,6 +120,7 @@ fn attached_agents_for_roots(
             let candidate_count = candidate_counts.get(&agent.node_id).copied().unwrap_or(0);
             let matches = options.filter.matches_session(&SessionMatchInputs {
                 harness_key: &agent.node.harness_key,
+                session_key: &agent.node.id.session_key,
                 now_epoch: options.now_epoch,
                 last_active_epoch: agent.node.last_active_epoch,
                 mux_state: MuxStateKey::from_candidate_count(candidate_count),

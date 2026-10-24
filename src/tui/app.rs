@@ -21,12 +21,14 @@ use crate::tui::preview::{PreviewContent, PreviewEntry, PreviewSource, PreviewSt
 use crate::tui::rows::{Row, RowId, RowKind, RowTree};
 use crate::tui::{RunConfig, View};
 
+mod content;
 mod controls;
 mod explorer_nav;
 mod msg;
 mod overlays;
 mod tree;
 
+pub use content::{ContentSearch, ContentStatus, ScanRequest};
 pub use msg::Msg;
 
 /// Cheap-to-clone, reference-counted handle to the App's resolved
@@ -184,6 +186,14 @@ pub struct App {
     /// The row that was selected when the action started: if it is still
     /// listed once the refresh lands, the operator stays on it.
     pending_follow_row: Option<RowId>,
+    /// The content search the session lists are filtered by, held in
+    /// memory only.
+    content: Option<content::ContentSearch>,
+    /// A scan the reducer wants started; the runtime takes it.
+    scan_request: Option<content::ScanRequest>,
+    /// Source of scan generations, so results of a scan the operator
+    /// replaced or cleared are recognized and dropped.
+    content_generation: u64,
     /// What an undo asked to select once its refresh lands.
     pending_restore_focus: Option<crate::tui::undo::RestoreFocus>,
     /// Operations the undo key can still reverse.
@@ -341,6 +351,8 @@ pub enum InFlightKind {
     /// attach.
     /// Emitted by `rebuild`, `mux new`, and `mux launch`.
     Launch,
+    /// A content search is reading transcripts.
+    Search,
 }
 
 /// One in-flight async operation the status bar surfaces with a
@@ -466,6 +478,16 @@ impl ExplorerState {
 impl App {
     /// Build a fresh app at the start of the run.
     pub fn new(config: RunConfig) -> Self {
+        let initial_contains = config.initial_contains.clone();
+        let kinds = config.search.kinds;
+        let mut app = Self::build(config);
+        if let Some(text) = initial_contains {
+            app.reduce_content(Msg::StartContentSearch { text, kinds });
+        }
+        app
+    }
+
+    fn build(config: RunConfig) -> Self {
         let mut config = config;
         if matches!(config.sessions_grouping, super::SessionsGrouping::None) {
             config.default_sort = super::Sort::Recency;
@@ -509,6 +531,9 @@ impl App {
             refresh_requested: false,
             pending_follow: None,
             pending_follow_row: None,
+            content: None,
+            scan_request: None,
+            content_generation: 0,
             pending_restore_focus: None,
             undo: crate::tui::undo::UndoStack::default(),
             preview_store: PreviewStore::new(),
@@ -1321,6 +1346,7 @@ impl App {
                 initial_selection_hint,
             } => {
                 self.set_data(snapshot, tree, loaded_at_epoch, initial_selection_hint);
+                self.scan_new_sessions();
                 self.apply_pending_follow();
                 self.apply_restore_focus();
             }
@@ -1619,6 +1645,11 @@ impl App {
                 self.show_top_of_tree();
                 effects.push(Effect::Persist);
             }
+            Msg::StartContentSearch { .. }
+            | Msg::ClearContentSearch
+            | Msg::RescanContent
+            | Msg::ClearFilters
+            | Msg::ContentHits { .. } => return self.reduce_content(msg),
             Msg::SetFilter(filter) => {
                 self.filter = filter;
                 self.rebuild_tree_in_place();
@@ -1954,7 +1985,10 @@ fn home_for_config(_config: &RunConfig) -> Option<std::path::PathBuf> {
 /// Agent sessions with an active `LinkedToMux` candidate pointing at
 /// `mux`. Any candidate counts, not just the preferred one: the
 /// hand-off may have changed which session the resolver prefers.
-fn sessions_linked_to_mux(snapshot: &GraphSnapshot, mux: &MuxSessionId) -> Vec<AgentSessionId> {
+pub(in crate::tui) fn sessions_linked_to_mux(
+    snapshot: &GraphSnapshot,
+    mux: &MuxSessionId,
+) -> Vec<AgentSessionId> {
     snapshot
         .candidate_links
         .iter()

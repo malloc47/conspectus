@@ -22,6 +22,7 @@ use std::path::Path;
 use crate::model::{AgentSessionId, MuxSessionId, NodeId};
 use crate::tui::View;
 
+pub(crate) mod content;
 pub mod forks;
 pub mod history;
 pub mod mux;
@@ -340,6 +341,18 @@ pub struct AgentSessionRow {
     /// Pin slot name when this row is the live session a slot points
     /// at. Renderers add a pin glyph.
     pub pin_id: Option<String>,
+    /// What the active content search found in this session.
+    pub content_hit: Option<ContentHitCell>,
+}
+
+/// A session's result in the active content search: how many turns
+/// matched and the best snippet, with the match to highlight.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ContentHitCell {
+    pub count: u32,
+    pub snippet: String,
+    /// Byte range of the match inside `snippet`.
+    pub highlight: std::ops::Range<usize>,
 }
 
 impl AgentSessionRow {
@@ -448,6 +461,9 @@ pub struct MuxSessionRow {
     /// Renderers mark it so pinned muxes stand out in any view.
     pub pin_id: Option<String>,
     pub primary_node: NodeId,
+    /// What the active content search found in the mux's one attached
+    /// session; unset for muxes with none or several.
+    pub content_hit: Option<ContentHitCell>,
 }
 
 /// A PR row in the prs view.
@@ -972,6 +988,7 @@ pub(crate) fn agent_row(
             title_disambiguates: false,
             mux_host: None,
             primary_node: node_id,
+            content_hit: None,
         }),
     }
 }
@@ -1003,6 +1020,7 @@ pub(crate) fn session_matches_filter(
     let candidate_count = candidate_counts.get(&agent.node_id).copied().unwrap_or(0);
     filter.matches_session(&SessionMatchInputs {
         harness_key: &agent.id.harness_key,
+        session_key: &agent.id.session_key,
         now_epoch: now,
         last_active_epoch: agent.node.last_active_epoch,
         mux_state: MuxStateKey::from_candidate_count(candidate_count),
@@ -1064,7 +1082,13 @@ impl<'a> TreeInputs<'a> {
             snapshot,
             view: app.active_view(),
             grouping: app.grouping(),
-            filter: app.filter().clone(),
+            filter: {
+                // The content search belongs to the whole app, not to a
+                // view's saved filter, so it joins here.
+                let mut filter = app.filter().clone();
+                filter.content = app.content_filter();
+                filter
+            },
             sort: app.sort(),
             mux_recency: app.mux_recency(),
             cwd: app.config().cwd.as_deref(),
@@ -1080,7 +1104,12 @@ pub(crate) fn build_tree_for_view(inputs: TreeInputs<'_>) -> RowTree {
     let pinned_only =
         inputs.filter.pinned_only && matches!(inputs.view, View::Sessions | View::Mux | View::Prs);
     let pinned = pinned_only.then(|| pinned_node_set(inputs.snapshot));
+    let content = inputs.filter.content.clone();
+    let snapshot = inputs.snapshot;
     let mut tree = build_tree_for_view_unfiltered(inputs);
+    if let Some(content) = &content {
+        content::annotate(&mut tree, snapshot, content);
+    }
     if let Some(pinned) = pinned {
         retain_pinned_rows(&mut tree, &pinned);
     }

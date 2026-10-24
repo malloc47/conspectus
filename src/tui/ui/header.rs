@@ -326,12 +326,42 @@ pub(super) fn render_view_state_chips(app: &App) -> String {
     } else {
         filter
     };
-    format!(
+    let mut chips = format!(
         "group:{} · filter:{} · sort:{}",
         app.grouping().as_str(),
         filter,
         sort_chip_label(app.sort())
-    )
+    );
+    if let Some(find) = render_find_chip(app) {
+        chips.push_str(" · ");
+        chips.push_str(&find);
+    }
+    chips
+}
+
+/// The content search as a chip: its text, then how far the scan has
+/// got, or how many sessions it found once it is done.
+pub(super) fn render_find_chip(app: &App) -> Option<String> {
+    let content = app.content()?;
+    let text = if content.text.chars().count() > 24 {
+        let head: String = content.text.chars().take(23).collect();
+        format!("{head}…")
+    } else {
+        content.text.clone()
+    };
+    if matches!(
+        app.active_view(),
+        crate::tui::View::Pinned | crate::tui::View::History
+    ) {
+        return Some(format!("find:\"{text}\" not applied here"));
+    }
+    let progress = match content.status {
+        crate::tui::ContentStatus::Running(progress) => {
+            format!("{}/{}", progress.scanned, progress.total)
+        }
+        crate::tui::ContentStatus::Done(_) => format!("{} found", content.hits().len()),
+    };
+    Some(format!("find:\"{text}\" {progress}"))
 }
 
 pub(super) fn sort_chip_label(sort: crate::tui::Sort) -> &'static str {

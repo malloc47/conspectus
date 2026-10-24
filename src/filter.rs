@@ -15,9 +15,52 @@
 //! caller assembles for each row. The caller owns the cost of looking
 //! up mux state, recency, etc., so the predicate stays pure.
 
+use std::collections::BTreeMap;
+use std::sync::Arc;
 use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
+
+use crate::viewer::search::SessionHits;
+
+/// The sessions a content search matched, by harness and session key.
+/// Held in memory only (the payload tenet): it is never serialized.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct ContentHitMap(BTreeMap<String, BTreeMap<String, SessionHits>>);
+
+impl ContentHitMap {
+    pub fn get(&self, harness_key: &str, session_key: &str) -> Option<&SessionHits> {
+        self.0.get(harness_key)?.get(session_key)
+    }
+
+    pub fn insert(&mut self, harness_key: String, session_key: String, hits: SessionHits) {
+        self.0
+            .entry(harness_key)
+            .or_default()
+            .insert(session_key, hits);
+    }
+
+    pub fn len(&self) -> usize {
+        self.0.values().map(BTreeMap::len).sum()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.0.is_empty()
+    }
+}
+
+/// The content query as the row predicate sees it: which sessions
+/// matched so far. App-wide and never persisted, unlike the structured
+/// filters around it (the one exception to their per-view, saved model).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ContentFilter {
+    /// The query text, for chips and empty states.
+    pub text: String,
+    /// Sessions that matched, streamed in while the scan runs.
+    pub hits: Arc<ContentHitMap>,
+    /// The scan finished; until then a missing session may still match.
+    pub complete: bool,
+}
 
 /// Set of independent dimension constraints. Each `None` field means
 /// "no constraint on this dimension"; multiple fields AND together at
@@ -85,6 +128,10 @@ pub struct RowFilter {
     /// preserved.
     #[serde(skip_serializing_if = "is_false")]
     pub float_tracked_prs_top: bool,
+    /// Keep only sessions whose transcripts match the content query.
+    /// Held by the app, injected when a tree is built, and never saved.
+    #[serde(skip)]
+    pub content: Option<ContentFilter>,
 }
 
 impl RowFilter {
@@ -110,7 +157,10 @@ impl RowFilter {
     /// from [`Self::is_empty`] in that ordering toggles do not count
     /// — they re-order rows but never drop them.
     pub fn has_narrowing_predicates(&self) -> bool {
-        self.harness.is_some() || self.max_age.is_some() || self.mux_state.is_some()
+        self.harness.is_some()
+            || self.max_age.is_some()
+            || self.mux_state.is_some()
+            || self.content.is_some()
     }
 
     /// Evaluate the filter against an agent session's per-row data.
@@ -128,6 +178,14 @@ impl RowFilter {
         }
         if let Some(mux_state) = &self.mux_state
             && !mux_state.matches(inputs.mux_state)
+        {
+            return false;
+        }
+        if let Some(content) = &self.content
+            && content
+                .hits
+                .get(inputs.harness_key, inputs.session_key)
+                .is_none()
         {
             return false;
         }
@@ -387,6 +445,8 @@ impl MuxStateKey {
 #[derive(Clone, Copy, Debug)]
 pub struct SessionMatchInputs<'a> {
     pub harness_key: &'a str,
+    /// The harness's own key for the session, for the content filter.
+    pub session_key: &'a str,
     /// Wall-clock epoch (Unix seconds) used as the recency anchor.
     /// `None` disables age-based filtering for the row (the predicate
     /// treats absent `now` as "no constraint can be evaluated" and

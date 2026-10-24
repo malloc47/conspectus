@@ -42,6 +42,7 @@ use crate::tui::{RunConfig, ui};
 /// Result of a completed background discovery run. The worker returns
 /// only the resolved snapshot; the main thread builds the row tree from
 /// the app's current view config.
+mod content;
 mod executor;
 mod launch;
 mod overlay_keys;
@@ -170,6 +171,8 @@ struct LiveMode {
     forge: ForgeWorker,
     /// Inside tmux: tells when this pane comes back into view.
     visibility: Option<visibility::VisibilityWatcher>,
+    /// Runs the content search scans the reducer asks for.
+    content: content::ContentDriver,
 }
 
 /// The background forge fetch a TUI runs while it has no daemon to do
@@ -352,6 +355,7 @@ impl LoopMode for LiveMode {
     }
 
     fn drain(&mut self, app: &mut App, config: &RunConfig) -> Result<()> {
+        self.content.pump(app);
         while let Ok((source, content)) = self.preview_rx.try_recv() {
             app.update(Msg::SetPreview { source, content });
         }
@@ -480,6 +484,7 @@ impl LoopMode for LiveMode {
                 ExecutorKind::Pure => dispatch(app, *msg),
             },
             Some(Action::Refresh) => {
+                app.update(Msg::RescanContent);
                 if self.workers.idle() {
                     // An explicit refresh asks for current state, not
                     // the daemon's last tick.
@@ -492,6 +497,7 @@ impl LoopMode for LiveMode {
                 // asked for the forges now, and the newer generation
                 // wins when results land.
                 app.update(Msg::ForgeRefreshRequested);
+                app.update(Msg::RescanContent);
                 app.config().discovery_caches.clear_forge();
                 let generation = self.workers.start();
                 self.spawn_discovery(app, DaemonNudge::LiveAndForge, generation);
@@ -552,7 +558,7 @@ impl LoopMode for LiveMode {
                 dispatch(app, Msg::SetGrouping(next));
             }
             Some(Action::ClearFilters) => {
-                dispatch(app, Msg::SetFilter(crate::filter::RowFilter::default()));
+                dispatch(app, Msg::ClearFilters);
                 app.update(Msg::SetStatus(Some("filters cleared".to_string())));
             }
             Some(Action::OpenSearch) => {
@@ -632,9 +638,11 @@ impl LoopMode for StaticMode {
         Ok(())
     }
 
-    fn drain(&mut self, _app: &mut App, _config: &RunConfig) -> Result<()> {
+    fn drain(&mut self, app: &mut App, _config: &RunConfig) -> Result<()> {
         // Scenario mode has no async event sources: no discovery
-        // worker to poll and no refresh timer to arm.
+        // worker to poll and no refresh timer to arm. A requested
+        // content search runs to completion here.
+        content::run_blocking(app, None);
         Ok(())
     }
 
@@ -745,7 +753,7 @@ impl LoopMode for StaticMode {
                 dispatch(app, Msg::SetGrouping(next));
             }
             Some(Action::ClearFilters) => {
-                dispatch(app, Msg::SetFilter(crate::filter::RowFilter::default()));
+                dispatch(app, Msg::ClearFilters);
                 app.update(Msg::SetStatus(Some("filters cleared".to_string())));
             }
             Some(
@@ -993,6 +1001,7 @@ fn event_loop(terminal: &mut DefaultTerminal, mut config: RunConfig) -> Result<(
         refresh_interval,
         forge: ForgeWorker::new(),
         visibility: visibility::VisibilityWatcher::start(),
+        content: content::ContentDriver::default(),
     };
     run_loop(terminal, app, config, mode)
 }
@@ -2002,6 +2011,17 @@ pub(in crate::tui) fn pure_executor_runs(effect: &Effect) -> bool {
         Effect::Exec(_) | Effect::RunMux(_) | Effect::WriteStore(_) => false,
         Effect::SpawnRefresh { .. } | Effect::Toast(_) | Effect::Persist | Effect::Quit => true,
     }
+}
+
+/// Run any content search scan the app asked for to completion on this
+/// thread. Snapshot mode calls it between keys so a search is finished
+/// before the next one.
+#[cfg(any(test, feature = "snapshot"))]
+pub(super) fn run_pending_content_scans(
+    app: &mut App,
+    rebase: Option<(&std::path::Path, &std::path::Path)>,
+) {
+    content::run_blocking(app, rebase);
 }
 
 /// Bridge helper: dispatch a `Msg` through the reducer and run any

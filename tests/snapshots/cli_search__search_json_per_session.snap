@@ -1,0 +1,33 @@
+---
+source: tests/cli_search.rs
+expression: stdout_of(cmd)
+---
+{
+  "group": "session",
+  "kinds": [
+    "messages"
+  ],
+  "query": "quokka",
+  "results": [
+    {
+      "harness": "claude-code",
+      "hits": 2,
+      "label": null,
+      "latest": "2026-10-01T10:00:05Z",
+      "session": "aaaaaaaa-0000-0000-0000-000000000001",
+      "snippet": {
+        "highlight": [
+          13,
+          19
+        ],
+        "text": "We chose the quokka design"
+      }
+    }
+  ],
+  "searched": {
+    "sessions": 2,
+    "skipped": 0,
+    "total": 2,
+    "without_parser": 0
+  }
+}

@@ -128,6 +128,7 @@ pub fn build_union_tree(inputs: UnionBuildInputs<'_>) -> RowTree {
                         single_session_preview: None,
                         pin_id: slot_by_target_mux.get(&mux.node.native_id).cloned(),
                         primary_node: node_id,
+                        content_hit: None,
                     }),
                 });
             }

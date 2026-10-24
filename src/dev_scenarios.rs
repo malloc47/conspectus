@@ -264,6 +264,8 @@ impl ScenarioWorld {
             refresh_interval: Duration::from_secs(24 * 60 * 60),
             mux_preview_interval: Duration::from_secs(24 * 60 * 60),
             live_preview_enabled: false,
+            search: crate::config::SearchConfig::default(),
+            initial_contains: None,
             color,
             current_tmux_session: None,
             theme: crate::tui::Theme::default(),

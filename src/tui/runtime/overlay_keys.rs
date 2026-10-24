@@ -453,6 +453,10 @@ pub(in crate::tui) fn handle_controls_overlay_key(
     let mux_recency = app.mux_recency();
     let preview_wrap = app.preview_wrap();
     let session_preview = app.session_preview();
+    let content_snapshot = app
+        .content()
+        .map(|content| (content.text.clone(), content.status, content.hits().len()));
+    let search_kinds = app.config().search.kinds;
     let ctx = ControlsContext {
         view,
         grouping,
@@ -461,6 +465,10 @@ pub(in crate::tui) fn handle_controls_overlay_key(
         mux_recency,
         preview_wrap,
         session_preview,
+        content: content_snapshot
+            .as_ref()
+            .map(|(text, status, found)| (text.as_str(), *status, *found)),
+        search_kinds,
     };
     let outcome = match app.controls_overlay_mut() {
         Some(state) => state.handle(&ctx, key),

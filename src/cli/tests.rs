@@ -374,6 +374,7 @@ fn filter_args_with(
         mux_state: mux_state.into_iter().map(String::from).collect(),
         pr_branch: None,
         pr_state: Vec::new(),
+        contains: None,
         grouping: grouping.map(String::from),
     }
 }

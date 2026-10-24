@@ -245,6 +245,23 @@ pub(super) fn empty_left_panel_text(app: &App) -> String {
     if app.snapshot_handle().is_none() {
         return "Loading discovery…".to_string();
     }
+    if let Some(content) = app.content()
+        && !matches!(
+            app.active_view(),
+            crate::tui::View::Pinned | crate::tui::View::History
+        )
+    {
+        return match content.status {
+            crate::tui::ContentStatus::Running(_) => format!(
+                "Searching for \"{}\"…\nSessions that match appear as they are found. Press `F` to clear.",
+                content.text
+            ),
+            crate::tui::ContentStatus::Done(_) => format!(
+                "No sessions match \"{}\".\nPress `F` to clear filters, `f` to edit.",
+                content.text
+            ),
+        };
+    }
     if !app.filter().is_empty() {
         // Filtered-zero case: a snapshot is loaded but the
         // active filter dropped every session. Distinguish from
@@ -1042,6 +1059,10 @@ pub(super) fn append_session_preview(
     width: usize,
     theme: &Theme,
 ) {
+    if let Some(hit) = &session.content_hit {
+        append_content_hit(spans, hit, width, theme);
+        return;
+    }
     let Some(preview) = session.preview.as_deref().filter(|p| !p.is_empty()) else {
         return;
     };
@@ -1178,6 +1199,10 @@ pub(super) fn append_mux_single_session_preview(
     theme: &Theme,
     width: usize,
 ) {
+    if let Some(hit) = &mux.content_hit {
+        append_content_hit(spans, hit, width, theme);
+        return;
+    }
     let Some(preview) = mux
         .single_session_preview
         .as_deref()
@@ -1195,6 +1220,55 @@ pub(super) fn append_mux_single_session_preview(
         "{}",
         truncate_to_width(preview, width - used - 2)
     ));
+}
+
+/// What a content search found in a row's session, in the slot a
+/// message preview would take: a dim `3 hits` chip, then the best
+/// snippet with the match picked out.
+fn append_content_hit(
+    spans: &mut Vec<Span<'static>>,
+    hit: &crate::tui::rows::ContentHitCell,
+    width: usize,
+    theme: &Theme,
+) {
+    let chip = if hit.count == 1 {
+        "1 hit".to_string()
+    } else {
+        format!("{} hits", hit.count)
+    };
+    let dim = Style::default()
+        .fg(theme.secondary_text)
+        .add_modifier(theme.placeholder);
+    spans.push(span!(dim; "  {chip}"));
+    let used = spans_width(spans);
+    if width <= used + 8 {
+        return;
+    }
+    let mut budget = width - used - 2;
+    spans.push(Span::raw("  "));
+    let text = hit.snippet.as_str();
+    let (start, end) = (
+        hit.highlight.start.min(text.len()),
+        hit.highlight.end.min(text.len()),
+    );
+    let (before, mid, after) =
+        if text.is_char_boundary(start) && text.is_char_boundary(end) && start <= end {
+            (&text[..start], &text[start..end], &text[end..])
+        } else {
+            (text, "", "")
+        };
+    let plain = Style::default()
+        .fg(theme.secondary_text)
+        .add_modifier(Modifier::ITALIC);
+    let marked = Style::default().add_modifier(Modifier::BOLD | Modifier::UNDERLINED);
+    for (piece, style) in [(before, plain), (mid, marked), (after, plain)] {
+        if piece.is_empty() || budget == 0 {
+            continue;
+        }
+        let shown = truncate_to_width(piece, budget);
+        budget = budget.saturating_sub(UnicodeWidthStr::width(shown.as_str()));
+        spans.push(Span::styled(shown, style));
+    }
 }
 
 pub(super) fn spans_width(spans: &[Span<'_>]) -> usize {

@@ -136,6 +136,8 @@ pub fn run(config: RunConfig, snap: SnapshotConfig) -> Result<()> {
         .fixture_root
         .as_deref()
         .map(|root| (std::path::Path::new(FIXTURE_PATH_ROOT), root));
+    // A `--contains` query scans before the first key.
+    runtime::run_pending_content_scans(&mut app, rebase);
     drive_keys(
         &mut app,
         &config,
@@ -205,6 +207,9 @@ fn drive_keys(
     for key in keys {
         if let Some(action) = runtime::action_for_event(app, Event::Key(key), viewport_height) {
             apply_action(app, config, action, rebase);
+            // Overlay keys can start a search; finish it before the
+            // next key so the frame is deterministic.
+            runtime::run_pending_content_scans(app, rebase);
         }
     }
 }
@@ -257,7 +262,7 @@ fn apply_action(
             dispatch(app, Msg::SetGrouping(next));
         }
         Action::ClearFilters => {
-            dispatch(app, Msg::SetFilter(crate::filter::RowFilter::default()));
+            dispatch(app, Msg::ClearFilters);
         }
         Action::OpenControls => app.open_controls_overlay(),
         Action::OpenSearch => app.open_search_overlay(),

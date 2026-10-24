@@ -28,6 +28,10 @@ fn conspectus(scratch: &Path) -> Command {
 }
 
 fn frame(scratch: &Path, keys: &str) -> String {
+    frame_with(scratch, keys, &[])
+}
+
+fn frame_with(scratch: &Path, keys: &str, extra: &[&str]) -> String {
     let output = conspectus(scratch)
         .args(["tui", "--snapshot", "--snapshot-fixture"])
         .arg(concat!(
@@ -46,6 +50,7 @@ fn frame(scratch: &Path, keys: &str) -> String {
             "--snapshot-keys",
             keys,
         ])
+        .args(extra)
         .output()
         .expect("run snapshot");
     assert!(
@@ -177,4 +182,36 @@ fn the_viewer_finds_text_and_shows_the_position() {
     // A query that is not there says so.
     let none = frame(scratch.path(), "jjjjjljjjjv/zebra<Enter>");
     assert!(none.contains("find \"zebra\" no match"), "{none}");
+}
+
+/// A content query narrows the session list to the sessions whose
+/// transcripts mention it, shows how many hits each has with the best
+/// snippet, and says what it is looking for in the header.
+#[test]
+fn a_content_query_narrows_the_showcase_sessions_and_marks_their_hits() {
+    let scratch = tempfile::tempdir().expect("scratch");
+    conspectus(scratch.path())
+        .args(["dev", "scenario", "materialize", "showcase"])
+        .arg(scratch.path().join("world"))
+        .assert()
+        .success();
+
+    let plain = frame(scratch.path(), "");
+    let filtered = frame_with(scratch.path(), "l", &["--contains", "release summary"]);
+
+    assert!(
+        filtered.contains("find:\"release summary\" 1 found"),
+        "{filtered}"
+    );
+    assert!(filtered.contains("2 hits"), "{filtered}");
+    assert!(filtered.contains("1/11 sessions"), "{filtered}");
+    assert!(filtered.contains("Expand the notes into"), "{filtered}");
+    assert!(plain.contains("11 sessions"), "{plain}");
+
+    // A query nothing matches says so.
+    let none = frame_with(scratch.path(), "", &["--contains", "zzz-no-such-text"]);
+    assert!(
+        none.contains("No sessions match \"zzz-no-such-text\""),
+        "{none}"
+    );
 }

@@ -357,6 +357,31 @@ pub enum Msg {
     /// Update the active row filter (ADR 0031). Reducer
     /// mutates the projection state and re-derives the tree.
     SetFilter(crate::filter::RowFilter),
+    /// Search every session's transcript for this text and narrow the
+    /// session lists to the sessions that match. The result stays in
+    /// memory only.
+    StartContentSearch {
+        text: String,
+        kinds: crate::viewer::search::ContentKinds,
+    },
+    /// Stop the content search and show every session again.
+    ClearContentSearch,
+    /// Read every transcript again for the active content search, as an
+    /// explicit refresh asks.
+    RescanContent,
+    /// Clear every filter, the content search included.
+    ClearFilters,
+    /// Results of the running scan, stamped with the scan they belong
+    /// to. Stale ones are dropped.
+    ContentHits {
+        generation: u64,
+        batch: Vec<(
+            crate::content_search::SessionKey,
+            crate::viewer::search::SessionHits,
+        )>,
+        progress: crate::content_search::Progress,
+        done: bool,
+    },
     /// Update the global sort (ADR 0031). Reducer mutates the
     /// projection state and re-derives the tree; the flat-
     /// sessions grouping forces recency regardless of the

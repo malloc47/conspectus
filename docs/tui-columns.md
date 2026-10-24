@@ -229,6 +229,13 @@ A checkout header adds `(linked · locked · prunable)` for those states.
 | 8 | Project | repo or directory name | only in flat grouping | padded to 16 |
 | 9 | Preview | last message | only if at least 8 cells remain | dim italic |
 
+While a content filter is active (`--contains TEXT`, or the Content row in
+Controls), the rows are the sessions whose transcripts mention the text, and
+each one carries a dim `N hits` chip between the state cell and the label.
+The header count reads `matching/total sessions` and the footer shows
+`find:"TEXT"` with the number found, plus `searching n/m` while the scan runs.
+The text lives only in memory. Pinned and History ignore the filter and say so.
+
 <!-- frame: keys="" width=170 height=30 -->
 ```text
 ┌ ► sessions · mux · prs · pinned · history ────────────────────────────────────────┐

@@ -99,6 +99,10 @@ pub struct ControlsContext<'a> {
     /// What the Preview shows for agent sessions in tmux, marked
     /// active in the Session preview section (ADR 0112).
     pub session_preview: crate::tui::SessionPreview,
+    /// The active content search: its text and how far its scan has got.
+    pub content: Option<(&'a str, crate::tui::ContentStatus, usize)>,
+    /// Which kinds of turn a new content search reads (`[search]`).
+    pub search_kinds: crate::viewer::search::ContentKinds,
 }
 
 /// One landable row in the controls overlay's flat list.
@@ -113,6 +117,8 @@ pub enum ControlsCursor {
     FilterHarness,
     FilterMaxAge,
     FilterMuxState,
+    /// Edits the content query that narrows the session lists.
+    FilterContent,
     /// Sessions-view-only checkbox: float muxed sessions to the top.
     FilterFloatMuxedSessions,
     /// Mux-view-only checkbox: float attached muxes to the top.
@@ -148,6 +154,8 @@ pub enum ControlsCursor {
 pub enum SubEditor {
     Harness(MultiSelectState),
     MaxAge(TextInputState),
+    /// The content query text.
+    Content(TextInputState),
     MuxState(MultiSelectState),
     PrState(MultiSelectState),
 }
@@ -265,6 +273,7 @@ impl ControlsOverlayState {
                 | ControlsCursor::FilterHarness
                 | ControlsCursor::FilterMaxAge
                 | ControlsCursor::FilterMuxState
+                | ControlsCursor::FilterContent
                 | ControlsCursor::FilterPrState
         ) {
             return self.activate(ctx);
@@ -303,6 +312,14 @@ impl ControlsOverlayState {
             }
             ControlsCursor::FilterMuxState => {
                 self.sub_editor = Some(SubEditor::MuxState(build_mux_state_editor(ctx.filter)));
+                ControlsOutcome::Continue
+            }
+            ControlsCursor::FilterContent => {
+                let initial = ctx.content.map(|(text, ..)| text).unwrap_or_default();
+                self.sub_editor = Some(SubEditor::Content(TextInputState::new(
+                    " contains ",
+                    initial.to_string(),
+                )));
                 ControlsOutcome::Continue
             }
             ControlsCursor::FilterFloatMuxedSessions => {
@@ -345,11 +362,11 @@ impl ControlsOverlayState {
                 ControlsOutcome::ApplyAndStay(crate::tui::Msg::SetFilter(new_filter))
             }
             ControlsCursor::FilterClear => {
-                if ctx.filter.is_empty() {
+                if ctx.filter.is_empty() && ctx.content.is_none() {
                     // Nothing to clear; keep the overlay open silently.
                     ControlsOutcome::Continue
                 } else {
-                    ControlsOutcome::ApplyAndStay(crate::tui::Msg::SetFilter(RowFilter::default()))
+                    ControlsOutcome::ApplyAndStay(crate::tui::Msg::ClearFilters)
                 }
             }
             ControlsCursor::Sort(idx) => {
@@ -426,6 +443,25 @@ impl ControlsOverlayState {
                     let new_filter =
                         with_pr_state(ctx.filter.clone(), indices_to_pr_states(&indices));
                     ControlsOutcome::ApplyAndStay(crate::tui::Msg::SetFilter(new_filter))
+                }
+            },
+            SubEditor::Content(state) => match state.handle_key(event) {
+                InputOutcome::Continue => ControlsOutcome::Continue,
+                InputOutcome::Cancel => {
+                    *slot = None;
+                    ControlsOutcome::Continue
+                }
+                InputOutcome::Confirm(value) => {
+                    *slot = None;
+                    let text = value.trim().to_string();
+                    if text.is_empty() {
+                        ControlsOutcome::ApplyAndStay(crate::tui::Msg::ClearContentSearch)
+                    } else {
+                        ControlsOutcome::ApplyAndStay(crate::tui::Msg::StartContentSearch {
+                            text,
+                            kinds: ctx.search_kinds,
+                        })
+                    }
                 }
             },
             SubEditor::MaxAge(state) => match state.handle_key(event) {
@@ -622,7 +658,7 @@ fn move_cursor(cursor: ControlsCursor, ctx: &ControlsContext<'_>, delta: i32) ->
 /// All actionable rows in display order. Section headers are
 /// implicit (they live in the renderer) so the cursor only needs to
 /// know about the rows it can land on.
-fn flatten_rows(ctx: &ControlsContext<'_>) -> Vec<ControlsCursor> {
+pub(crate) fn flatten_rows(ctx: &ControlsContext<'_>) -> Vec<ControlsCursor> {
     let mut rows: Vec<ControlsCursor> = Vec::new();
     for idx in 0..VIEW_OPTIONS.len() {
         rows.push(ControlsCursor::View(idx));
@@ -633,6 +669,9 @@ fn flatten_rows(ctx: &ControlsContext<'_>) -> Vec<ControlsCursor> {
     rows.push(ControlsCursor::FilterHarness);
     rows.push(ControlsCursor::FilterMaxAge);
     rows.push(ControlsCursor::FilterMuxState);
+    if matches!(ctx.view, View::Sessions | View::Mux | View::Prs) {
+        rows.push(ControlsCursor::FilterContent);
+    }
     if matches!(ctx.view, View::Sessions) {
         rows.push(ControlsCursor::FilterFloatMuxedSessions);
     }
@@ -760,7 +799,7 @@ fn render_sub_editor(editor: &SubEditor, area: Rect, buf: &mut Buffer, theme: &T
                 .theme(theme)
                 .render(area, buf);
         }
-        SubEditor::MaxAge(state) => {
+        SubEditor::MaxAge(state) | SubEditor::Content(state) => {
             use crate::tui::widgets::input::TextInputWidget;
             TextInputWidget::new(state).theme(theme).render(area, buf);
         }
@@ -822,6 +861,13 @@ impl ControlsOverlayWidget<'_> {
             filter_row("mux state", mux_state_value(self.ctx.filter), here),
             here,
         );
+        if matches!(self.ctx.view, View::Sessions | View::Mux | View::Prs) {
+            let here = cursor == ControlsCursor::FilterContent;
+            body.push_row(
+                filter_row("contains", content_value(self.ctx.content), here),
+                here,
+            );
+        }
         if matches!(self.ctx.view, View::Sessions) {
             let here = cursor == ControlsCursor::FilterFloatMuxedSessions;
             body.push_row(
@@ -1084,6 +1130,19 @@ fn harness_value(filter: &RowFilter) -> String {
     }
 }
 
+/// How the Content row reads: the query and where its scan is.
+fn content_value(content: Option<(&str, crate::tui::ContentStatus, usize)>) -> String {
+    match content {
+        None => "—".to_string(),
+        Some((text, crate::tui::ContentStatus::Running(progress), _)) => {
+            format!("\"{text}\" {}/{}", progress.scanned, progress.total)
+        }
+        Some((text, crate::tui::ContentStatus::Done(_), found)) => {
+            format!("\"{text}\" {found} found")
+        }
+    }
+}
+
 fn max_age_value(filter: &RowFilter) -> String {
     filter
         .max_age
@@ -1140,14 +1199,14 @@ fn max_controls_content_lines() -> usize {
         .iter()
         .map(|view| {
             let filter_rows = match *view {
-                // The pinned-only checkbox closes each native view's
-                // filters.
-                View::Sessions => 6,
+                // The content row and the pinned-only checkbox join each
+                // native view's filters.
+                View::Sessions => 7,
                 // Mux adds the hide-gone-muxes checkbox.
-                View::Mux => 7,
+                View::Mux => 8,
                 // The state row, the local-branch row, and the float
                 // checkbox.
-                View::Prs => 8,
+                View::Prs => 9,
                 _ => 4,
             };
             // Mux view appends a "Recency by" section: blank + header

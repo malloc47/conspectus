@@ -388,6 +388,7 @@ conspectus pin {list|show|rename|retarget|refresh|move|rm} ...
 conspectus rebuild ingest --dry-run           # print the plan
 conspectus rebuild ingest                     # recreate it, resuming the last session
 conspectus history {list|show|reap|forget} ...
+conspectus search "retry budget"              # which session did I discuss this in?
 conspectus pin migrate --dry-run              # convert legacy [[pins.entries]] to pins
 ```
 

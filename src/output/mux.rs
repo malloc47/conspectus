@@ -111,6 +111,7 @@ fn agent_matches_filter(
     let candidate_count = ambiguity.get(&agent.session_key).copied().unwrap_or(0);
     filter.matches_session(&SessionMatchInputs {
         harness_key: &agent.session_key.0,
+        session_key: &agent.session_key.1,
         now_epoch: options.now_epoch,
         last_active_epoch: agent.last_active_epoch,
         mux_state: MuxStateKey::from_candidate_count(candidate_count),
@@ -137,12 +138,14 @@ fn mux_matches_filter(
         pr_branch: _,
         pr_state: _,
         float_tracked_prs_top: _,
+        content,
         show_stopped_muxes: _,
         pinned_only: _,
         show_pinned_history: _,
     } = filter;
     harness.is_none()
         && max_age.is_none()
+        && content.is_none()
         && mux_state
             .as_ref()
             .is_some_and(|mux_state| mux_state.values().contains(&MuxStateKey::Unmuxed))

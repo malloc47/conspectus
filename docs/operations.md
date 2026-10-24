@@ -345,6 +345,7 @@ conspectus columns {sessions|mux|union|prs|forks}
 conspectus tui [--view {sessions|mux|prs|pinned}] [--grouping VALUE] [--sort {hierarchy|recency}]
                [--harness H]... [--max-age D] [--mux-state S]...
                [--scan-root PATH]... [--refresh-interval D] [--no-live-preview]
+               [--contains TEXT]
 conspectus declared {list|create|remove|confirm|ignore|override} ...
 conspectus rename session <id> [NAME] [--clear] [--no-mux]
 conspectus rename mux <id> <NAME>
@@ -352,6 +353,8 @@ conspectus alias list
 conspectus pin {add|edit|rename|retarget|refresh|move|rm|list|show|migrate} ...
 conspectus rebuild <REF> [--dry-run] [--no-attach] [--session ID]
 conspectus history {list|show|reap|forget} ...
+conspectus search <QUERY> [--group {session|message}] [--tools] [--thinking] [--harness H]...
+                         [--limit N] [--format {table|json}]
 conspectus mux new <NAME> [--cwd PATH] [--socket NAME] [--no-attach] [--pin [PIN] [--no-launch]]
 conspectus mux launch <HARNESS> --name <NAME> [--cwd PATH] [--argv ARG...]
                                               [--worktree-branch B --worktree-repo PATH]
@@ -437,6 +440,79 @@ fit alongside in a typical terminal. Opt in with `--columns
 which keeps the cell scannable when several agents share a mux. On
 the `union` row-type the preview shows for agent rows only; mux
 rows render `—`.
+
+## Searching session contents
+
+`conspectus search <QUERY>` finds sessions by what was said in them. It
+reads every session's transcript on demand, in the command's own process
+(the daemon is not asked), and keeps nothing: results exist only while
+the command runs. The session list comes from the same discovery as
+`conspectus table` and honors `--scan-root`, `--no-cache`, and
+`--refresh`.
+
+Matching is one case-insensitive substring of the trimmed query. ASCII
+letters fold; other text must match exactly (`CAFÉ` does not match
+`Café`). By default only user and assistant messages (and compaction
+summaries) are searched; `--tools` adds tool calls and output, and
+`--thinking` adds the model's thinking blocks. Aborted and hidden turns
+are left out. The `[search]` section of the config sets the default
+grouping and kinds.
+
+```sh
+conspectus search "retry budget"                 # one row per session, most hits first
+conspectus search "retry budget" --group message # one row per matching message
+conspectus search deadlock --tools --harness claude-code --limit 5
+conspectus search deadlock --format json | jq '.results[].session'
+```
+
+Flags:
+
+- `--group session|message`: one result per session (ranked by hit count,
+  then latest hit) or per matching message (newest first within a session).
+- `--tools`, `--thinking`: also search tool calls and output, or thinking.
+- `--harness H` (repeatable), `--max-age DURATION`, `--mux-state STATE`:
+  narrow the sessions searched, with the same meaning as on `table`.
+- `--limit N`: stop after N results.
+- `--format table|json`; `--width N` and `--color auto|always|never`
+  shape the table (the match is bold on a terminal).
+- `--verbose`: report how many sessions were searched and skipped on
+  stderr even when stderr is not a terminal.
+
+**Exit status** follows `grep`: `0` when at least one session matched,
+`1` when none did, `2` on an error (an empty query, an unreadable
+config value, discovery failing). Errors are printed to stderr and never
+use status 1, so scripts can tell "nothing found" from "it broke".
+
+**JSON.** `--format json` prints one document:
+
+```json
+{
+  "query": "retry budget",
+  "group": "session",
+  "kinds": ["messages"],
+  "searched": { "sessions": 77, "total": 77, "skipped": 0, "without_parser": 3 },
+  "results": [
+    {
+      "harness": "claude-code",
+      "session": "aaaaaaaa-0000-0000-0000-000000000001",
+      "label": "Retry budget design",
+      "hits": 4,
+      "latest": "2026-10-01T10:00:05Z",
+      "snippet": { "text": "We settled on a retry budget of 3", "highlight": [22, 34] }
+    }
+  ]
+}
+```
+
+With `--group message` each result instead carries `turn` (the turn's
+index), `role` (`user`, `assistant`, `system`), `kind` (`message`,
+`compaction_summary`, `tool_use`, `tool_result`, `thinking`), `time`, and
+its own `snippet`, and has no `hits` or `latest`. `label` is the session's
+alias, title, or hosting mux name, or `null`. `snippet.highlight` is the
+byte range of the match inside `snippet.text`, which is capped and has
+its whitespace collapsed. `searched.skipped` counts sessions whose
+transcript could not be read; `without_parser` counts sessions of
+harnesses that cannot be searched yet.
 
 ## Paging
 
@@ -846,6 +922,14 @@ has something to point at. The native views mark a pinned row with `◉` (or
 cell is reserved on every row so columns hold still. Controls has a **Pinned
 only** checkbox in Sessions, Mux, and PRs that keeps pinned rows and the
 groups above them.
+
+**Content** in Controls (or `--contains TEXT` on `tui` and the list commands)
+narrows the Sessions, Mux, and Union views to sessions whose transcripts
+mention the text. The scan runs in this process on background threads,
+streams matches as it goes, and restarts when the text changes; a refresh
+scans only sessions that appeared since. The text is never saved, written to
+a snapshot, or sent to the daemon. `--no-live-preview` turns it off.
+Clearing filters in Controls clears it too.
 
 **Edit…** opens a form with one row per field the pin can change: its name
 first (renaming a live mux pin renames its tmux session), then the label and

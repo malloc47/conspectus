@@ -41,7 +41,7 @@ pub mod viewer_bridge;
 pub mod widgets;
 pub mod worktree_actions;
 
-pub use app::{App, Msg};
+pub use app::{App, ContentSearch, ContentStatus, Msg};
 pub use effect::Effect;
 pub use modal::{Modal, Overlay, OverlayOutcome, RenameOverlayState};
 #[cfg(feature = "snapshot")]
@@ -91,6 +91,12 @@ pub struct RunConfig {
     /// When false, suppress live extras (mux pane capture +
     /// transcript-tail reads). Graph-resident previews still render.
     pub live_preview_enabled: bool,
+    /// `[search]`: the default grouping and content kinds for a content
+    /// search.
+    pub search: crate::config::SearchConfig,
+    /// A content query given on the command line (`--contains`): the
+    /// TUI starts with it applied as a filter.
+    pub initial_contains: Option<String>,
     /// Whether color is enabled, resolved per ADR 0022.
     pub color: bool,
     /// tmux session that hosts this TUI, when known. Used to
@@ -180,6 +186,8 @@ impl RunConfig {
             refresh_interval: Duration::from_secs(30),
             mux_preview_interval: Duration::from_secs(2),
             live_preview_enabled: true,
+            search: crate::config::SearchConfig::default(),
+            initial_contains: None,
             color: true,
             current_tmux_session: None,
             theme: Theme::default(),
