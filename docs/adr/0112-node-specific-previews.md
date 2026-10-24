@@ -2,7 +2,8 @@
 
 ## Status
 
-Accepted. Amended by ADR 0144: a `Pin` slot has no binding, so its
+Accepted. See ADR 0147 for content search, which reads transcripts on
+the same in-memory footing and honors `--no-live-preview`. Amended by ADR 0144: a `Pin` slot has no binding, so its
 preview is its target's preview (see that ADR); the Bound/Unbound row
 below is historical. Amends ADR 0107 (a Related row's evidence becomes a header
 above the neighbor's own preview). Supersedes the Preview rules in

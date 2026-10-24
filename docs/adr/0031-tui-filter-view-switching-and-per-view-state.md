@@ -2,7 +2,10 @@
 
 ## Status
 
-Accepted
+Accepted. Amended by [ADR 0147](0147-session-content-search.md): one
+content predicate (a text match on session transcripts) is a filter held
+app-wide and never persisted, the single exception to the per-view,
+saved, structural-only filters below.
 
 ## Context
 

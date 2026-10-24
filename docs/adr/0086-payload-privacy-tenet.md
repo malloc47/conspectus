@@ -112,6 +112,11 @@ Sanctioned Tier 2 readers today:
 - The **native transcript viewer** and its per-harness parsers
   (ADR 0052) — opt-in modal, entire transcript, no persistence
   beyond the modal's lifetime.
+- The **session content search** (ADR 0147): the `/` contents scope,
+  the Search view, the content filter, the viewer's find, and
+  `conspectus search`. Hits and capped snippets live in memory for the
+  process lifetime and are never written, stored in the graph, or sent
+  to the daemon.
 - Any future preview-style column or transcript surface on the
   same footing.
 

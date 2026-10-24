@@ -464,7 +464,12 @@ view's preview column and the native transcript viewer (Tier 2,
 ADR 0013 / ADR 0023 / ADR 0052) read payload but cap and
 normalize it and only surface it under an operator gesture;
 hook sidecars and rebuildable state records (Tier 3, ADR 0028)
-stay payload-free.
+stay payload-free. Session content search (ADR 0147) is a Tier 2
+reader: hits and capped snippets live in memory for the process
+lifetime and are never written to disk, stored in the graph or
+`graph.bin`, or sent to the daemon; the scan runs in the TUI or CLI
+process, and a persistent index stays deferred behind recorded latency
+and corpus-size thresholds.
 
 Additive discovery:
 
@@ -861,9 +866,13 @@ Interactive and static views share a single `RowFilter` predicate type
 so the same narrowing is reproducible at the CLI and in the TUI. v1
 filter dimensions are `harness` (set membership), `max-age` (recency
 window against `last_active_epoch`), and `mux-state` (attached /
-ambiguous / unmuxed). Free-text "contains" filtering is intentionally
-deferred to the `/` fuzzy search overlay; structured filters narrow by
-structure, `/` ranks within the filtered set.
+ambiguous / unmuxed). Free-text "contains" filtering on session
+metadata is intentionally deferred to the `/` fuzzy search overlay;
+structured filters narrow by structure, `/` ranks within the filtered
+set. The one exception is the content filter (ADR 0147): a query on
+what was said in a session's transcript, held app-wide in memory, never
+persisted, that narrows Sessions, Mux, and PRs through a single
+predicate on `RowFilter` and composes with the other filters.
 
 In the TUI, filter / grouping / selection / expanded-set / left-scroll
 state is **per view**. Sort order is **global**. Switching views and
