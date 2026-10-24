@@ -21,10 +21,12 @@
 //! The `tests::dep_surface_matches_doc_manifest` test asserts the
 //! two agree at compile time; diverging them is a review blocker.
 
+pub mod help;
 pub mod input;
 pub mod model;
 pub mod parser;
 pub mod render;
+pub mod search;
 pub mod state;
 pub mod table;
 pub mod theme;

@@ -111,32 +111,65 @@ impl<'a> HelpOverlayWidget<'a> {
 
 impl Widget for HelpOverlayWidget<'_> {
     fn render(self, area: Rect, buf: &mut Buffer) {
-        // The centered-bordered-modal shell — clear,
-        // border, title — is owned by `tui_popup::Popup` via
-        // `crate::tui::widgets::popup_frame::themed_popup`. The body
-        // wrapper reports the same cap dimensions
-        // `centered_modal_rect` computed before, so the popup's
-        // auto-sizing reproduces the in-tree rect.
-        let modal = help_modal_rect(area);
-        let body = HelpBody {
-            state: self.state,
-            theme: self.theme,
-            inner_width: modal.width.saturating_sub(2) as usize,
-            inner_height: modal.height.saturating_sub(2) as usize,
-        };
-        let popup =
-            crate::tui::widgets::popup_frame::themed_popup(body, line![" Help "], self.theme);
-        popup.render(area, buf);
+        let theme = self.theme;
+        render_help_page(area, buf, theme, self.state.scroll as usize, &|width| {
+            body_lines_for_width(theme, Some(width))
+        });
     }
 }
 
+/// Draw a help page: the shared popup frame with the ` Help ` title,
+/// the page's lines scrolled to `scroll` and wrapped to the modal's
+/// width, and a scrollbar when the page overflows. The keymap help and
+/// the transcript viewer's help both draw through here, so the two
+/// modals share one frame, size, and scroll behavior.
+pub(super) fn render_help_page(
+    area: Rect,
+    buf: &mut Buffer,
+    theme: &Theme,
+    scroll: usize,
+    lines_for: &dyn Fn(usize) -> Vec<Line<'static>>,
+) {
+    // The centered-bordered-modal shell — clear, border, title — is
+    // owned by `tui_popup::Popup` via
+    // `crate::tui::widgets::popup_frame::themed_popup`. The body
+    // wrapper reports the same cap dimensions `help_modal_rect`
+    // computes, so the popup's auto-sizing reproduces that rect.
+    let modal = help_modal_rect(area);
+    let body = HelpBody {
+        scroll,
+        lines_for,
+        inner_width: modal.width.saturating_sub(2) as usize,
+        inner_height: modal.height.saturating_sub(2) as usize,
+    };
+    let popup = crate::tui::widgets::popup_frame::themed_popup(body, line![" Help "], theme);
+    popup.render(area, buf);
+}
+
+/// How far a help page can scroll in a modal drawn into `area`.
+pub(super) fn help_max_scroll(
+    area: Rect,
+    lines_for: &dyn Fn(usize) -> Vec<Line<'static>>,
+) -> usize {
+    let modal = help_modal_rect(area);
+    let (width, height) = (
+        modal.width.saturating_sub(2) as usize,
+        modal.height.saturating_sub(2) as usize,
+    );
+    let full = lines_for(width);
+    if full.len() <= height || width <= 1 {
+        return 0;
+    }
+    // The scrollbar takes a column once the page overflows.
+    lines_for(width - 1).len().saturating_sub(height)
+}
+
 /// Body wrapper for `tui_popup::Popup`. Reports the inner width /
-/// height the in-tree `centered_modal_rect` cap produces so the
-/// popup's auto-sizing reproduces the legacy rect. `Widget::render`
-/// delegates to the same `Paragraph` the prior in-tree render built.
+/// height the in-tree `help_modal_rect` cap produces so the popup's
+/// auto-sizing reproduces that rect.
 struct HelpBody<'a> {
-    state: &'a HelpOverlayState,
-    theme: &'a Theme,
+    scroll: usize,
+    lines_for: &'a dyn Fn(usize) -> Vec<Line<'static>>,
     inner_width: usize,
     inner_height: usize,
 }
@@ -154,8 +187,8 @@ impl KnownSize for HelpBody<'_> {
 impl Widget for HelpBody<'_> {
     fn render(self, area: Rect, buf: &mut Buffer) {
         // Reserve the rightmost column for the scrollbar only when the
-        // keymap overflows, so short keymaps keep the full width.
-        let full = body_lines_for_width(self.theme, Some(area.width as usize));
+        // page overflows, so short pages keep the full width.
+        let full = (self.lines_for)(area.width as usize);
         let overflows = full.len() > area.height as usize && area.width > 1;
         let text_width = if overflows {
             area.width - 1
@@ -163,14 +196,14 @@ impl Widget for HelpBody<'_> {
             area.width
         };
         let lines = if overflows {
-            body_lines_for_width(self.theme, Some(text_width as usize))
+            (self.lines_for)(text_width as usize)
         } else {
             full
         };
         let content_len = lines.len();
         let viewport = area.height as usize;
         let max_scroll = content_len.saturating_sub(viewport);
-        let scroll = (self.state.scroll as usize).min(max_scroll);
+        let scroll = self.scroll.min(max_scroll);
         let text_area = Rect {
             width: text_width,
             ..area
@@ -427,6 +460,13 @@ fn body_lines_for_width(theme: &Theme, width: Option<usize>) -> Vec<Line<'static
     push_pin_marker_legend(&mut lines, theme, width);
     blank(&mut lines);
 
+    push_footer(&mut lines, theme, width);
+    lines
+}
+
+/// The closing line of a help page, generated from the key table that
+/// scrolls and closes it, wrapped to `width` when known.
+pub(super) fn push_footer(lines: &mut Vec<Line<'static>>, theme: &Theme, width: Option<usize>) {
     let footer =
         crate::tui::keybindings::overlay::footer(crate::tui::keybindings::overlay::HELP_KEYS);
     match width.filter(|w| *w > 8) {
@@ -438,7 +478,18 @@ fn body_lines_for_width(theme: &Theme, width: Option<usize>) -> Vec<Line<'static
         }
         None => lines.push(line![span!(theme.placeholder; "{footer}")]),
     }
+}
+
+/// The footer as plain text lines at `width`, for tests that compare the
+/// two help pages.
+#[cfg(test)]
+pub(crate) fn footer_lines_for_test(theme: &Theme, width: usize) -> Vec<String> {
+    let mut lines = Vec::new();
+    push_footer(&mut lines, theme, Some(width));
     lines
+        .iter()
+        .map(|l| l.spans.iter().map(|s| s.content.as_ref()).collect())
+        .collect()
 }
 
 /// Cells before the blurb in a legend row: two of indent, the glyph and
@@ -482,12 +533,28 @@ const KEY_COLUMN_WIDTH: usize = 16;
 /// description under a hanging indent when `width` is too narrow. The
 /// key column inherits `theme.panel_focus_accent` so operators scan
 /// the keymap by accent color.
-fn binding_lines(
+pub(super) fn binding_lines(
     key: &str,
     description: &str,
     theme: &Theme,
     width: Option<usize>,
 ) -> Vec<Line<'static>> {
+    // A key label wider than its column gets a line to itself, with the
+    // description wrapped beneath on the hanging indent.
+    if unicode_width::UnicodeWidthStr::width(key) > KEY_COLUMN_WIDTH - 2 {
+        let key_line = line![span!(Style::default().fg(theme.panel_focus_accent); "  {key}")];
+        let mut out = vec![key_line];
+        let budget = width.map_or(u16::MAX, |w| {
+            u16::try_from(w.saturating_sub(KEY_COLUMN_WIDTH)).unwrap_or(u16::MAX)
+        });
+        for chunk in crate::viewer::render::word_wrap(description, budget.max(8)) {
+            out.push(line![
+                " ".repeat(KEY_COLUMN_WIDTH),
+                chunk.trim_end().to_string()
+            ]);
+        }
+        return out;
+    }
     let key_span = span!(Style::default().fg(theme.panel_focus_accent); "  {key:<14}");
     let Some(width) = width.filter(|w| *w > KEY_COLUMN_WIDTH + 8) else {
         return vec![line![key_span, description.to_string()]];
@@ -708,18 +775,18 @@ fn node_kind_help_blurb(kind: NodeKind) -> &'static str {
     }
 }
 
-fn section(lines: &mut Vec<Line<'static>>, title: &str) {
+pub(super) fn section(lines: &mut Vec<Line<'static>>, title: &str) {
     lines.push(line![span!(Modifier::BOLD; "{title}")]);
 }
 
-fn blank(lines: &mut Vec<Line<'static>>) {
+pub(super) fn blank(lines: &mut Vec<Line<'static>>) {
     lines.push(line![""]);
 }
 
 /// Help-overlay modal: as tall as the terminal allows (less a small
 /// margin) so more of the keymap is visible at once, and up to 100
 /// columns wide so long descriptions wrap less.
-fn help_modal_rect(area: Rect) -> Rect {
+pub(crate) fn help_modal_rect(area: Rect) -> Rect {
     let width = std::cmp::min(100, area.width.saturating_sub(4)).max(40);
     let height = area.height.saturating_sub(4).max(10);
     super::popup_frame::centered_rect(area, width, height)

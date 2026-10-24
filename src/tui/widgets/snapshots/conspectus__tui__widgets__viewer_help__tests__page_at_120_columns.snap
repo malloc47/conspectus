@@ -1,0 +1,32 @@
+---
+source: src/tui/widgets/viewer_help_tests.rs
+expression: "render_text(120, 30, 0)"
+---
+
+
+          ┌ Help ────────────────────────────────────────────────────────────────────────────────────────────┐
+          │Moving                                                                                            │
+          │  j / ↓         Scroll one line down                                                              │
+          │  k / ↑         Scroll one line up                                                                │
+          │  PgDn / Space  Page down                                                                         │
+          │  PgUp          Page up                                                                           │
+          │  Ctrl-D        Half a page down                                                                  │
+          │  Ctrl-U        Half a page up                                                                    │
+          │  g / Home      Jump to the start of the transcript                                               │
+          │  G / End       Jump to the end (where the viewer opens)                                          │
+          │                                                                                                  │
+          │Showing more or less                                                                              │
+          │  t             Cycle tool detail: hidden, summary, truncated, full                               │
+          │  T             Show or hide thinking turns                                                       │
+          │  I             Show or hide aborted and interrupted turns                                        │
+          │  H             Show or hide records the harness's own UI never showed                            │
+          │                                                                                                  │
+          │Viewer                                                                                            │
+          │  ?             Show or hide this help                                                            │
+          │  Esc / q / Ctrl-C                                                                                │
+          │                Close help, then close the viewer                                                 │
+          │                                                                                                  │
+          │j/k/PgDn/PgUp to scroll · Esc/q/? to close                                                        │
+          │                                                                                                  │
+          │                                                                                                  │
+          └──────────────────────────────────────────────────────────────────────────────────────────────────┘

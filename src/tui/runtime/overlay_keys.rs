@@ -486,7 +486,10 @@ pub(in crate::tui) fn handle_controls_overlay_key(
 /// `app` — unless the reducer's effect was `Close`, in which case
 /// dismiss the modal. Keys that don't map are dropped silently
 /// (the modal owns every keystroke while open).
-pub(super) fn handle_viewer_overlay_key(app: &mut App, key: ratatui::crossterm::event::KeyEvent) {
+pub(in crate::tui) fn handle_viewer_overlay_key(
+    app: &mut App,
+    key: ratatui::crossterm::event::KeyEvent,
+) {
     if app.viewer_modal().is_none() {
         return;
     }

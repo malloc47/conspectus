@@ -51,6 +51,7 @@ pub struct Config {
     pub forge: ForgeConfig,
     pub history: HistoryConfig,
     pub launch: LaunchConfig,
+    pub search: SearchConfig,
 }
 
 /// Which config file a launch profile came from.
@@ -73,6 +74,17 @@ pub struct LaunchProfile {
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct LaunchConfig {
     pub profiles: BTreeMap<String, LaunchProfile>,
+}
+
+/// Settings under `[search]` (ADR 0147): how content search groups its
+/// results and which kinds of turn it reads by default.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub struct SearchConfig {
+    /// `group`: one result per session (the default) or per message.
+    pub group: crate::viewer::search::Grouping,
+    /// `kinds`: messages by default, with tool calls and output, and
+    /// thinking, as opt-ins.
+    pub kinds: crate::viewer::search::ContentKinds,
 }
 
 /// Settings under `[history]` (ADR 0140).
@@ -444,6 +456,9 @@ struct ConfigFile {
     /// `[history]` table (ADR 0140).
     #[serde(default)]
     history: Option<HistoryFile>,
+    /// `[search]` table (ADR 0147).
+    #[serde(default)]
+    search: Option<SearchFile>,
     /// `[launch.<harness>]` tables (ADR 0142).
     #[serde(default)]
     launch: Option<BTreeMap<String, LaunchFile>>,
@@ -468,6 +483,16 @@ struct WorktreeFile {
 struct LaunchFile {
     #[serde(default)]
     argv: Option<Vec<String>>,
+}
+
+#[derive(Clone, Debug, Default, Deserialize)]
+struct SearchFile {
+    /// Read as a raw value so a wrong type is a diagnostic, not a
+    /// failure of the whole file.
+    #[serde(default)]
+    group: Option<toml::Value>,
+    #[serde(default)]
+    kinds: Option<toml::Value>,
 }
 
 #[derive(Clone, Debug, Default, Deserialize)]
@@ -822,6 +847,9 @@ fn merge_from_file(
     if let Some(history) = parsed.history {
         merge_history(&mut config.history, history, path, diagnostics);
     }
+    if let Some(search) = parsed.search {
+        merge_search(&mut config.search, search, path, diagnostics);
+    }
     if let Some(launch) = parsed.launch {
         merge_launch(&mut config.launch, launch, origin, path, diagnostics);
     }
@@ -853,6 +881,65 @@ fn merge_launch(
                 message: format!("`[launch.{harness}]` needs a non-empty `argv`; ignored"),
             }),
         }
+    }
+}
+
+/// Merge a `[search]` table. Each key is independent: a bad value is
+/// diagnosed and leaves the earlier value (the default, or the user
+/// file's) in place.
+fn merge_search(
+    config: &mut SearchConfig,
+    file: SearchFile,
+    path: &Path,
+    diagnostics: &mut Vec<ConfigDiagnostic>,
+) {
+    use crate::viewer::search::{ContentKinds, Grouping};
+    let mut diagnose = |message: String| {
+        diagnostics.push(ConfigDiagnostic {
+            path: path.to_path_buf(),
+            message,
+        });
+    };
+    if let Some(value) = file.group {
+        match value.as_str().and_then(Grouping::parse) {
+            Some(group) => config.group = group,
+            None => diagnose(format!(
+                "invalid `[search] group` value {value}; expected \"session\" or \"message\""
+            )),
+        }
+    }
+    let Some(value) = file.kinds else {
+        return;
+    };
+    let Some(items) = value.as_array() else {
+        diagnose(format!(
+            "invalid `[search] kinds` value {value}; expected a list of \"messages\", \"tools\", \"thinking\""
+        ));
+        return;
+    };
+    let mut kinds = ContentKinds {
+        messages: false,
+        ..ContentKinds::default()
+    };
+    let mut known = false;
+    for item in items {
+        match item.as_str() {
+            Some("messages") => kinds.messages = true,
+            Some("tools") => kinds.tools = true,
+            Some("thinking") => kinds.thinking = true,
+            _ => {
+                diagnose(format!(
+                    "unknown `[search] kinds` entry {item}; expected \"messages\", \"tools\", or \"thinking\""
+                ));
+                continue;
+            }
+        }
+        known = true;
+    }
+    if known {
+        config.kinds = kinds;
+    } else {
+        diagnose("`[search] kinds` names no kind to search; keeping the previous setting".into());
     }
 }
 

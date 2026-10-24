@@ -620,6 +620,20 @@ pr = "30d"
 repo = "never"
 ```
 
+Content search reads transcripts on demand and keeps nothing on disk.
+`[search]` sets what it reads and how it groups results. A project's
+`.conspectus.toml` overrides the user config key by key:
+
+```toml
+[search]
+group = "session"           # or "message": one result per matching turn
+kinds = ["messages"]        # add "tools" and/or "thinking" to search those too
+```
+
+`kinds` lists what is searched, so `kinds = ["tools"]` searches tool
+calls and output only. Aborted turns and turns the harness never showed
+are not searched.
+
 Launch profiles say how to start a harness when nothing more specific
 does. A project's `.conspectus.toml` replaces the user config's profile
 for the same harness, and a wrapper prefix is fine:
@@ -1003,6 +1017,15 @@ opens the editor, and on a checkbox it just closes). Scrolling dialogs
 `Space` to page down, as pagers do. Help and the other long dialogs wrap
 their text to the dialog's width, and menus cut a label that cannot fit
 with an ellipsis, so no word is clipped at the edge.
+
+Inside the transcript viewer, `?` opens a help page drawn like the main
+help: the same frame and size, section headings, an accent-colored key
+column, descriptions that wrap, a scrollbar, and a footer naming the keys
+that scroll and close it. Its rows are generated from the viewer's key
+table, so a key added to the viewer is listed automatically. While the
+page is open the movement keys (`j`/`k`, `PgDn`/`PgUp`, `g`/`G`, `Ctrl-D`/
+`Ctrl-U`) scroll it rather than the transcript, `?`, `Esc`, or `q` close
+it, and the toggles wait until it is closed.
 
 ## TUI messages
 

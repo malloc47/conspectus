@@ -105,6 +105,9 @@ pub struct ViewerState {
     /// over the body listing every viewer keybinding. Toggled by
     /// `?`; closed by `?` or `Esc`.
     pub show_help: bool,
+    /// First visible line of the help page while it is open; the help
+    /// widget clamps it to what the page can scroll.
+    pub help_scroll: usize,
     /// Viewport height (in cells / lines) last seen during draw.
     /// Used by the reducer to compute page/half-page deltas.
     pub viewport_height: u16,
@@ -131,6 +134,7 @@ impl ViewerState {
             show_aborted: false,
             show_hidden: false,
             show_help: false,
+            help_scroll: 0,
             viewport_height: 0,
             total_lines: 0,
             rendered: None,

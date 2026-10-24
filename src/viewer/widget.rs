@@ -58,9 +58,6 @@ pub fn draw(state: &mut ViewerState, theme: &Theme, frame: &mut Frame<'_>, area:
     draw_body(state, theme, frame, chunks[2]);
     draw_separator(theme, frame, chunks[3]);
     draw_footer(state, theme, frame, chunks[4]);
-    if state.show_help {
-        draw_help_overlay(theme, frame, area);
-    }
 }
 
 fn draw_header(document: &TranscriptDocument, theme: &Theme, frame: &mut Frame<'_>, area: Rect) {
@@ -455,89 +452,6 @@ fn abort_chip_label(showing: bool) -> String {
 fn hidden_chip_label(showing: bool) -> String {
     let state_label = if showing { "show" } else { "hide" };
     format!("hidden·{state_label} (H)")
-}
-
-fn draw_help_overlay(theme: &Theme, frame: &mut Frame<'_>, area: Rect) {
-    use ratatui::widgets::{Block, Borders, Clear};
-    // Build the body content first so we can size the panel
-    // exactly to fit it.
-    let entries: &[(&str, &str)] = &[
-        ("q / Esc / Ctrl-C", "Close viewer"),
-        ("j / Down", "Scroll one line down"),
-        ("k / Up", "Scroll one line up"),
-        ("Space / PgDn", "Page down"),
-        ("PgUp", "Page up"),
-        ("Ctrl-D / Ctrl-U", "Half-page down / up"),
-        ("g / Home", "Jump to start of transcript"),
-        ("G / End", "Jump to end (open default)"),
-        ("t", "Cycle tool detail (off → sum → trunc → all)"),
-        ("T", "Toggle thinking turns"),
-        ("I", "Toggle aborted/interrupted turns"),
-        ("H", "Toggle records the harness UI hid"),
-        ("?", "Toggle this help panel"),
-    ];
-
-    // Pick the longest key cell so columns align.
-    let key_col_width = entries
-        .iter()
-        .map(|(k, _)| unicode_width::UnicodeWidthStr::width(*k))
-        .max()
-        .unwrap_or(0);
-    let desc_col_width = entries
-        .iter()
-        .map(|(_, d)| unicode_width::UnicodeWidthStr::width(*d))
-        .max()
-        .unwrap_or(0);
-    let inner_width = u16::try_from(key_col_width + 3 + desc_col_width).unwrap_or(u16::MAX);
-    // +4 for the two borders + two cells of inner padding.
-    let panel_width = inner_width
-        .saturating_add(4)
-        .min(area.width.saturating_sub(2));
-    // +2 for the top + bottom borders, +1 for a title line.
-    let panel_height = (entries.len() as u16 + 3).min(area.height.saturating_sub(2));
-
-    let panel_x = area.x + area.width.saturating_sub(panel_width) / 2;
-    let panel_y = area.y + area.height.saturating_sub(panel_height) / 2;
-    let panel_area = Rect::new(panel_x, panel_y, panel_width, panel_height);
-
-    let lines: Vec<Line<'_>> = entries
-        .iter()
-        .map(|(key, desc)| {
-            let key_pad = key_col_width.saturating_sub(unicode_width::UnicodeWidthStr::width(*key));
-            Line::from(vec![
-                Span::raw(" "),
-                Span::styled(
-                    format!("{}{} ", " ".repeat(key_pad), key),
-                    Style::new()
-                        // Use the codex color via the
-                        // registry-aware lookup. This is a
-                        // semantic reuse — the viewer help sheet
-                        // paints its key column in the same cyan
-                        // as codex identity chips.
-                        .fg(theme.harness_color("codex"))
-                        .add_modifier(Modifier::BOLD),
-                ),
-                Span::raw("  "),
-                Span::styled((*desc).to_string(), Style::new()),
-            ])
-        })
-        .collect();
-
-    let title_line = Line::from(Span::styled(
-        " viewer keybindings ",
-        Style::new()
-            .fg(theme.success)
-            .add_modifier(Modifier::BOLD)
-            .add_modifier(theme.badge),
-    ));
-
-    frame.render_widget(Clear, panel_area);
-    let block = Block::default()
-        .borders(Borders::ALL)
-        .border_style(Style::new().fg(theme.success))
-        .title(title_line);
-    let paragraph = Paragraph::new(lines).block(block);
-    frame.render_widget(paragraph, panel_area);
 }
 
 /// Compute the inner gutter chip-label width from the widest

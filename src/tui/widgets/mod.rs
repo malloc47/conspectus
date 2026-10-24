@@ -20,4 +20,5 @@ pub mod row_menu;
 pub mod search;
 pub mod toast;
 pub mod value_modal;
+pub mod viewer_help;
 pub mod worktree_menu;

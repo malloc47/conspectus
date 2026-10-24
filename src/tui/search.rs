@@ -1,5 +1,6 @@
 //! Ranking for the `/` in-view search overlay. Per ADR 0024 the
-//! matcher is hand-rolled: a case-insensitive substring match.
+//! matcher is hand-rolled: a case-insensitive (ASCII) substring match,
+//! shared with content search through [`crate::viewer::search`].
 //!
 //! Per ADR 0031 the `/` overlay ranks within the **active filter
 //! set**, not the full snapshot. The runtime extracts
@@ -9,6 +10,10 @@
 use std::borrow::Cow;
 
 use crate::tui::rows::{Row, RowId, RowKind};
+
+// The matching and snippet helpers are shared with content search so
+// `/` and the transcript search agree on what a match is.
+pub use crate::viewer::search::{MatchSnippet, find_ci, snippet_around};
 
 /// One searchable row's haystack plus the [`RowId`] the renderer
 /// needs to highlight or commit. `label` is the operator-facing
@@ -43,151 +48,19 @@ pub fn rank(query: &str, items: &[SearchItem<'_>]) -> Vec<SearchMatch> {
     if q.is_empty() {
         return Vec::new();
     }
-    let needle = q.to_ascii_lowercase();
     let mut matches: Vec<SearchMatch> = items
         .iter()
         .filter_map(|item| {
-            let haystack_lc = item.haystack.to_ascii_lowercase();
-            let start = haystack_lc.find(&needle)?;
+            let start = find_ci(&item.haystack, q)?;
             Some(SearchMatch {
                 id: item.id.clone(),
                 score: -(start as i64),
-                matched_range: Some(start..start + needle.len()),
+                matched_range: Some(start..start + q.len()),
             })
         })
         .collect();
     matches.sort_by_key(|m| std::cmp::Reverse(m.score));
     matches
-}
-
-/// A windowed view of the haystack around a matched range, sized
-/// so it fits in the overlay's result list while keeping the match
-/// itself visible. The snippet is built by [`snippet_around`] and
-/// consumed by the search renderer to show context next to each
-/// match (rather than just the row label).
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct MatchSnippet {
-    /// The display text, with `…` markers on truncated sides.
-    pub text: String,
-    /// Byte range inside `text` to highlight (typically rendered
-    /// bold). `None` when the source range was empty or fell
-    /// outside the haystack.
-    pub highlight: Option<std::ops::Range<usize>>,
-}
-
-/// Build a [`MatchSnippet`] for `haystack` centered on `byte_range`,
-/// constrained to at most `max_chars` characters total. The result
-/// always contains the matched span; truncation happens on either
-/// side with a `…` marker. Operates in `char`s so multi-byte UTF-8
-/// stays valid.
-///
-/// `byte_range` is the byte range produced by [`rank`]
-/// against the same haystack. An empty / out-of-range range yields
-/// a snippet without a highlight.
-pub fn snippet_around(
-    haystack: &str,
-    byte_range: std::ops::Range<usize>,
-    max_chars: usize,
-) -> MatchSnippet {
-    let total_chars = haystack.chars().count();
-    if total_chars <= max_chars {
-        let highlight = valid_byte_range(haystack, byte_range);
-        return MatchSnippet {
-            text: haystack.to_string(),
-            highlight,
-        };
-    }
-
-    // Locate the matched span's char indices. When the byte range
-    // is empty or outside the haystack, fall back to a head-anchored
-    // snippet without a highlight.
-    let Some((match_start_char, match_len_chars)) = chars_for_byte_range(haystack, &byte_range)
-    else {
-        let chars: Vec<char> = haystack.chars().take(max_chars.saturating_sub(1)).collect();
-        let mut text: String = chars.iter().collect();
-        text.push('…');
-        return MatchSnippet {
-            text,
-            highlight: None,
-        };
-    };
-
-    // Budget for context on either side, after accounting for the
-    // matched span and the two ellipsis markers (only used when we
-    // actually truncate).
-    let context = max_chars
-        .saturating_sub(match_len_chars)
-        .saturating_sub(2 /* room for two `…` */);
-    let before_budget = context / 2;
-    let after_budget = context - before_budget;
-
-    let chars: Vec<char> = haystack.chars().collect();
-    let mut window_start = match_start_char.saturating_sub(before_budget);
-    let mut window_end = (match_start_char + match_len_chars + after_budget).min(total_chars);
-
-    // If one side was unbounded, spend the leftover budget on the
-    // other side so the visible width stays close to `max_chars`.
-    if window_start == 0 && match_start_char < before_budget {
-        let slack = before_budget - match_start_char;
-        window_end = (window_end + slack).min(total_chars);
-    }
-    if window_end == total_chars {
-        let used_after = window_end - (match_start_char + match_len_chars);
-        if used_after < after_budget {
-            let slack = after_budget - used_after;
-            window_start = window_start.saturating_sub(slack);
-        }
-    }
-
-    let needs_leading = window_start > 0;
-    let needs_trailing = window_end < total_chars;
-
-    let mut text = String::new();
-    if needs_leading {
-        text.push('…');
-    }
-    let pre: String = chars[window_start..match_start_char].iter().collect();
-    text.push_str(&pre);
-    let highlight_start = text.len();
-    let matched: String = chars[match_start_char..match_start_char + match_len_chars]
-        .iter()
-        .collect();
-    text.push_str(&matched);
-    let highlight_end = text.len();
-    let post: String = chars[match_start_char + match_len_chars..window_end]
-        .iter()
-        .collect();
-    text.push_str(&post);
-    if needs_trailing {
-        text.push('…');
-    }
-
-    MatchSnippet {
-        text,
-        highlight: Some(highlight_start..highlight_end),
-    }
-}
-
-fn chars_for_byte_range(
-    haystack: &str,
-    byte_range: &std::ops::Range<usize>,
-) -> Option<(usize, usize)> {
-    if byte_range.is_empty() || byte_range.end > haystack.len() {
-        return None;
-    }
-    let start_char = haystack[..byte_range.start].chars().count();
-    let len_chars = haystack[byte_range.clone()].chars().count();
-    Some((start_char, len_chars))
-}
-
-fn valid_byte_range(
-    haystack: &str,
-    range: std::ops::Range<usize>,
-) -> Option<std::ops::Range<usize>> {
-    if range.is_empty() || range.end > haystack.len() {
-        return None;
-    }
-    Some(range)
 }
 
 /// Build the per-row search inputs from [`Row`]s. The

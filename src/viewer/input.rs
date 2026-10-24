@@ -55,6 +55,13 @@ pub fn reduce(mut state: ViewerState, msg: ViewerMsg) -> (ViewerState, ViewerEff
         state.stick_to_end = false;
     }
 
+    // While the help page is up it owns the movement keys, scrolling the
+    // page rather than the transcript, and the toggles wait.
+    if state.show_help && !matches!(msg, ViewerMsg::ToggleHelp | ViewerMsg::Close) {
+        scroll_help(&mut state, msg);
+        return (state, ViewerEffect::None);
+    }
+
     match msg {
         ViewerMsg::ScrollUp => {
             state.scroll_offset = state.scroll_offset.saturating_sub(1);
@@ -119,6 +126,7 @@ pub fn reduce(mut state: ViewerState, msg: ViewerMsg) -> (ViewerState, ViewerEff
         }
         ViewerMsg::ToggleHelp => {
             state.show_help = !state.show_help;
+            state.help_scroll = 0;
         }
         ViewerMsg::Close => {
             // Close the help overlay first when it's up; only
@@ -131,6 +139,23 @@ pub fn reduce(mut state: ViewerState, msg: ViewerMsg) -> (ViewerState, ViewerEff
         }
     }
     (state, ViewerEffect::None)
+}
+
+/// Move the help page for a movement message; other messages do nothing
+/// while the help covers the transcript.
+fn scroll_help(state: &mut ViewerState, msg: ViewerMsg) {
+    let page = usize::from(state.viewport_height.max(2));
+    state.help_scroll = match msg {
+        ViewerMsg::ScrollUp => state.help_scroll.saturating_sub(1),
+        ViewerMsg::ScrollDown => state.help_scroll.saturating_add(1),
+        ViewerMsg::PageUp => state.help_scroll.saturating_sub(page),
+        ViewerMsg::PageDown => state.help_scroll.saturating_add(page),
+        ViewerMsg::HalfPageUp => state.help_scroll.saturating_sub(page / 2),
+        ViewerMsg::HalfPageDown => state.help_scroll.saturating_add(page / 2),
+        ViewerMsg::JumpToStart => 0,
+        ViewerMsg::JumpToEnd => usize::MAX,
+        _ => state.help_scroll,
+    };
 }
 
 #[cfg(test)]

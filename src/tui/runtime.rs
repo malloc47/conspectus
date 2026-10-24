@@ -55,7 +55,7 @@ use worktree_exec::*;
 
 pub(super) use overlay_keys::{
     handle_controls_overlay_key, handle_help_overlay_key, handle_messages_overlay_key,
-    handle_search_overlay_key,
+    handle_search_overlay_key, handle_viewer_overlay_key,
 };
 
 /// What a background discovery worker sends back. `warning` carries a
@@ -799,18 +799,26 @@ impl LoopMode for StaticMode {
 fn draw_frame(app: &mut App, terminal: &mut DefaultTerminal) -> Result<()> {
     let size = terminal.size()?;
     app.prepare_toast_for_render(Rect::new(0, 0, size.width, size.height));
-    terminal.draw(|frame| {
-        let area = frame.area();
-        if app.viewer_modal().is_some() {
-            let theme = app.theme().clone();
-            if let Some(state) = app.viewer_modal_mut() {
-                crate::viewer::widget::draw(state, &theme, frame, area);
-            }
-        } else {
-            ui::draw(app, frame);
-        }
-    })?;
+    terminal.draw(|frame| draw_screen(app, frame))?;
     Ok(())
+}
+
+/// Draw the whole screen: the full-screen transcript viewer (with its
+/// help page over it when open) while one is up, the row tree and panes
+/// otherwise. The interactive loops and `--snapshot` share it.
+pub(super) fn draw_screen(app: &mut App, frame: &mut ratatui::Frame<'_>) {
+    let area = frame.area();
+    if app.viewer_modal().is_some() {
+        let theme = app.theme().clone();
+        if let Some(state) = app.viewer_modal_mut() {
+            crate::viewer::widget::draw(state, &theme, frame, area);
+            if state.show_help {
+                crate::tui::widgets::viewer_help::draw(state, &theme, frame, area);
+            }
+        }
+    } else {
+        ui::draw(app, frame);
+    }
 }
 
 /// Route a crossterm event through the modal stack (ADR 0085
