@@ -16,11 +16,6 @@
 //! The viewer boundary applies (see [`crate::viewer`]): this module
 //! imports nothing from the TUI, the graph model, or discovery.
 
-// The scanner and the viewer's find use the rest of this API as they
-// land (backlog `CSP-616.03`, `CSP-616.05`); until then only `/` and the
-// config use part of it.
-#![allow(dead_code)]
-
 use std::cmp::Ordering;
 use std::ops::Range;
 
@@ -442,6 +437,9 @@ fn kind_priority(kind: TurnKind) -> u8 {
 
 /// Order sessions for per-session results: more hits first, then the
 /// more recent latest hit, a session with no timestamp last.
+// Used by the Search view and the CLI as they land (backlog `CSP-616.11`
+// and backlog `CSP-616.04`).
+#[allow(dead_code)]
 pub fn cmp_sessions(a: &SessionHits, b: &SessionHits) -> Ordering {
     b.count
         .cmp(&a.count)
@@ -449,16 +447,23 @@ pub fn cmp_sessions(a: &SessionHits, b: &SessionHits) -> Ordering {
 }
 
 /// Order sessions by their latest hit, newest first.
+// Used by the Search view and the CLI as they land (backlog `CSP-616.11`
+// and backlog `CSP-616.04`).
+#[allow(dead_code)]
 pub fn cmp_sessions_by_recency(a: &SessionHits, b: &SessionHits) -> Ordering {
     cmp_latest_first(a.latest, b.latest).then_with(|| b.count.cmp(&a.count))
 }
 
 /// Order per-message hits: newest first, a hit with no timestamp last,
 /// ties in turn order.
+// Used by the Search view and the CLI as they land (backlog `CSP-616.11`
+// and backlog `CSP-616.04`).
+#[allow(dead_code)]
 pub fn cmp_hits(a: &Hit, b: &Hit) -> Ordering {
     cmp_latest_first(a.timestamp, b.timestamp).then_with(|| a.turn_index.cmp(&b.turn_index))
 }
 
+#[allow(dead_code)]
 fn cmp_latest_first(a: Option<DateTime<Utc>>, b: Option<DateTime<Utc>>) -> Ordering {
     match (a, b) {
         (Some(a), Some(b)) => b.cmp(&a),

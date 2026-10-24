@@ -43,13 +43,15 @@
 //! - Timestamps are epoch-ms; converted to `DateTime<Utc>` via
 //!   `chrono::DateTime::from_timestamp_millis`.
 
-use std::path::Path;
+use std::cell::RefCell;
+use std::collections::{HashMap, HashSet};
+use std::path::{Path, PathBuf};
 
 use chrono::{DateTime, Utc};
 use rusqlite::{Connection, OpenFlags, params};
 use serde::Deserialize;
 
-use super::{HarnessParser, ParseError, ParseResult};
+use super::{HarnessParser, ParseError, ParseResult, TranscriptIndex, TranscriptSource};
 use crate::viewer::model::{
     SessionLocator, TranscriptDocument, TranscriptMeta, TranscriptTurn, TurnKind, TurnRole,
 };
@@ -73,24 +75,115 @@ impl HarnessParser for OpenCodeParser {
         }
         parse_db(db_path, session_id, locator)
     }
+
+    fn index(&self, state_root: &Path) -> Box<dyn TranscriptIndex> {
+        Box::new(DbIndex(state_root.to_path_buf()))
+    }
+
+    fn read_source(&self, source: &TranscriptSource, locator: &SessionLocator) -> ParseResult {
+        match source {
+            TranscriptSource::Sqlite { db, session } => {
+                with_worker_connection(db, |conn| parse_conn(conn, session, locator))
+            }
+            TranscriptSource::File(_) => Err(ParseError::NotFound),
+        }
+    }
+
+    fn candidates(&self, state_root: &Path, runs: &[String]) -> Option<HashSet<String>> {
+        with_worker_connection(state_root, |conn| Ok(candidate_sessions(conn, runs)))
+            .ok()
+            .flatten()
+    }
 }
 
-fn parse_db(db_path: &Path, session_id: &str, locator: &SessionLocator) -> ParseResult {
-    let conn = Connection::open_with_flags(
+/// Every session is in the one database the locator names.
+struct DbIndex(PathBuf);
+
+impl TranscriptIndex for DbIndex {
+    fn locate(&self, session_key: &str) -> Option<TranscriptSource> {
+        self.0.exists().then(|| TranscriptSource::Sqlite {
+            db: self.0.clone(),
+            session: session_key.to_string(),
+        })
+    }
+}
+
+thread_local! {
+    /// One read-only connection per database per worker thread, so a scan
+    /// opens the database once per worker instead of once per session.
+    static CONNECTIONS: RefCell<HashMap<PathBuf, Connection>> = RefCell::new(HashMap::new());
+}
+
+/// Run `f` on this thread's read-only connection to `db`, opening it (with
+/// `query_only` on) the first time.
+fn with_worker_connection<T>(
+    db: &Path,
+    f: impl FnOnce(&Connection) -> Result<T, ParseError>,
+) -> Result<T, ParseError> {
+    CONNECTIONS.with(|cell| {
+        let mut connections = cell.borrow_mut();
+        if !connections.contains_key(db) {
+            let conn = open_read_only(db)?;
+            conn.execute_batch("PRAGMA query_only = ON;")
+                .map_err(|err| ParseError::Io(err.to_string()))?;
+            connections.insert(db.to_path_buf(), conn);
+        }
+        f(&connections[db])
+    })
+}
+
+fn open_read_only(db_path: &Path) -> Result<Connection, ParseError> {
+    Connection::open_with_flags(
         db_path,
         OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NO_MUTEX,
     )
-    .map_err(|err| ParseError::Io(err.to_string()))?;
+    .map_err(|err| ParseError::Io(err.to_string()))
+}
 
-    let (cwd, turns) = if let Some(cwd) = v2::session_cwd(&conn, session_id) {
-        let turns = v2::read_turns(&conn, session_id)
+/// Session ids whose stored JSON contains every run (compared
+/// case-insensitively in ASCII, as SQLite's `lower` folds). A table the
+/// database lacks (1.x has `part`, 2.x has `session_message`) contributes
+/// nothing; any other failure gives up on narrowing.
+fn candidate_sessions(conn: &Connection, runs: &[String]) -> Option<HashSet<String>> {
+    let mut result: Option<HashSet<String>> = None;
+    for run in runs {
+        let mut found = HashSet::new();
+        for table in ["part", "message", "session_message"] {
+            let sql =
+                format!("SELECT DISTINCT session_id FROM {table} WHERE instr(lower(data), ?1) > 0");
+            let mut stmt = match conn.prepare(&sql) {
+                Ok(stmt) => stmt,
+                Err(err) if err.to_string().contains("no such table") => continue,
+                Err(_) => return None,
+            };
+            let rows = stmt.query_map(params![run], |row| row.get::<_, String>(0));
+            for id in rows.ok()?.flatten() {
+                found.insert(id);
+            }
+        }
+        result = Some(match result {
+            Some(previous) => previous.intersection(&found).cloned().collect(),
+            None => found,
+        });
+    }
+    result
+}
+
+fn parse_db(db_path: &Path, session_id: &str, locator: &SessionLocator) -> ParseResult {
+    let conn = open_read_only(db_path)?;
+    parse_conn(&conn, session_id, locator)
+}
+
+fn parse_conn(conn: &Connection, session_id: &str, locator: &SessionLocator) -> ParseResult {
+    let (cwd, turns) = if let Some(cwd) = v2::session_cwd(conn, session_id) {
+        let turns = v2::read_turns(conn, session_id)
             .map_err(|err| ParseError::Malformed(err.to_string()))?;
         (cwd, turns)
     } else {
         let cwd =
-            read_session_cwd(&conn, session_id).map_err(|err| ParseError::Io(err.to_string()))?;
+            read_session_cwd(conn, session_id).map_err(|err| ParseError::Io(err.to_string()))?;
         let turns =
-            read_turns(&conn, session_id).map_err(|err| ParseError::Malformed(err.to_string()))?;
+            read_turns(conn, session_id).map_err(|err| ParseError::Malformed(err.to_string()))?;
         (cwd, turns)
     };
 

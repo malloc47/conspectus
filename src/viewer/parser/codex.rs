@@ -51,7 +51,7 @@ use std::path::{Path, PathBuf};
 use chrono::{DateTime, Utc};
 use serde::Deserialize;
 
-use super::{HarnessParser, ParseError, ParseResult};
+use super::{HarnessParser, MapIndex, ParseError, ParseResult, TranscriptIndex, TranscriptSource};
 use crate::viewer::model::{
     SessionLocator, TranscriptDocument, TranscriptMeta, TranscriptTurn, TurnKind, TurnRole,
 };
@@ -67,6 +67,63 @@ impl HarnessParser for CodexParser {
         let file_path = find_rollout_file(state_root, session_key).ok_or(ParseError::NotFound)?;
         parse_file(&file_path, locator)
     }
+
+    fn index(&self, state_root: &Path) -> Box<dyn TranscriptIndex> {
+        // A rollout is `rollout-<timestamp>-<session_key>.jsonl` and the
+        // key may itself contain hyphens, so every suffix that follows a
+        // hyphen is a candidate key; `find_rollout_file` matches the same
+        // way (`ends_with("-<key>.jsonl")`).
+        let mut files = std::collections::HashMap::new();
+        for path in rollout_files(state_root) {
+            let Some(stem) = path
+                .file_name()
+                .and_then(|n| n.to_str())
+                .and_then(|n| n.strip_suffix(".jsonl"))
+            else {
+                continue;
+            };
+            for (i, _) in stem.match_indices('-') {
+                files
+                    .entry(stem[i + 1..].to_string())
+                    .or_insert_with(|| TranscriptSource::File(path.clone()));
+            }
+        }
+        Box::new(MapIndex(files))
+    }
+
+    fn read_source(&self, source: &TranscriptSource, locator: &SessionLocator) -> ParseResult {
+        match source {
+            TranscriptSource::File(path) => parse_file(path, locator),
+            TranscriptSource::Sqlite { .. } => Err(ParseError::NotFound),
+        }
+    }
+}
+
+/// Every `.jsonl` file under `<state_root>/sessions/<y>/<m>/<d>/`.
+fn rollout_files(state_root: &Path) -> Vec<PathBuf> {
+    let mut out = Vec::new();
+    let mut level = vec![state_root.join("sessions")];
+    for depth in 0..4 {
+        let mut next = Vec::new();
+        for dir in &level {
+            let Ok(entries) = std::fs::read_dir(dir) else {
+                continue;
+            };
+            for entry in entries.flatten() {
+                let path = entry.path();
+                if depth < 3 && path.is_dir() {
+                    next.push(path);
+                } else if depth == 3
+                    && path.is_file()
+                    && path.extension().is_some_and(|ext| ext == "jsonl")
+                {
+                    out.push(path);
+                }
+            }
+        }
+        level = next;
+    }
+    out
 }
 
 /// Walk `<state_root>/sessions/<year>/<month>/<day>/` looking for

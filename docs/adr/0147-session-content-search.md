@@ -211,3 +211,24 @@ enough to scan on demand.
   an explicit refresh rescans.
 - **Which ADR number if another ADR lands first?** The number is taken
   at merge; the later branch renumbers.
+
+## Measured
+
+The scanner (`src/content_search`) was timed on a synthetic corpus of 200
+sessions and 315 MB (two thirds Claude Code, one third Codex, one session
+in 40 at 24 MB, tool results mixed in) on an 8-CPU Linux machine, with the
+files on tmpfs, so the page cache was warm and a cold disk would be slower.
+Eight workers, release build, whole scan to completion:
+
+| Query | Prefilter | Time | Sessions matched |
+|---|---|---|---|
+| a phrase in 2 sessions | on | 130 ms | 2 |
+| the same phrase | off (every file parsed) | 509 ms | 2 |
+| a phrase in none | on | 139 ms | 0 |
+| two common words | on (every file is a candidate) | 416 ms | 200 |
+
+The prefilter skips about three quarters of the work for a selective query
+and costs nothing when every file is a candidate. Both ends are well inside
+the latency budget (results start within 300 ms and finish within 2 s), so
+a persistent index is not yet justified. Rerun with
+`CONSPECTUS_SCAN_BENCH_MB=300 cargo test --release scan_benchmark -- --ignored --nocapture`.

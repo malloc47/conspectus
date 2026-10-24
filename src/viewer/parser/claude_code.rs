@@ -46,7 +46,7 @@ use std::path::{Path, PathBuf};
 use chrono::{DateTime, Utc};
 use serde::Deserialize;
 
-use super::{HarnessParser, ParseError, ParseResult};
+use super::{HarnessParser, MapIndex, ParseError, ParseResult, TranscriptIndex, TranscriptSource};
 use crate::viewer::model::{
     SessionLocator, TranscriptDocument, TranscriptMeta, TranscriptTurn, TurnKind, TurnRole,
 };
@@ -62,6 +62,37 @@ impl HarnessParser for ClaudeCodeParser {
         let session_key = locator.session_key.as_str();
         let file_path = find_session_file(state_root, session_key).ok_or(ParseError::NotFound)?;
         parse_file(&file_path, locator)
+    }
+
+    fn index(&self, state_root: &Path) -> Box<dyn TranscriptIndex> {
+        let mut files = std::collections::HashMap::new();
+        if let Ok(projects) = std::fs::read_dir(state_root.join("projects")) {
+            for project in projects.flatten() {
+                let Ok(children) = std::fs::read_dir(project.path()) else {
+                    continue;
+                };
+                for child in children.flatten() {
+                    let path = child.path();
+                    let is_jsonl = path.extension().is_some_and(|ext| ext == "jsonl");
+                    if let Some(stem) = path.file_stem().and_then(|s| s.to_str())
+                        && is_jsonl
+                        && path.is_file()
+                    {
+                        files
+                            .entry(stem.to_string())
+                            .or_insert(TranscriptSource::File(path));
+                    }
+                }
+            }
+        }
+        Box::new(MapIndex(files))
+    }
+
+    fn read_source(&self, source: &TranscriptSource, locator: &SessionLocator) -> ParseResult {
+        match source {
+            TranscriptSource::File(path) => parse_file(path, locator),
+            TranscriptSource::Sqlite { .. } => Err(ParseError::NotFound),
+        }
     }
 }
 

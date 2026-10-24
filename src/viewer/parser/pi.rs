@@ -37,7 +37,10 @@ use chrono::{DateTime, Utc};
 use serde::Deserialize;
 use serde_json::Value;
 
-use super::{HarnessParser, ParseError, ParseResult};
+use super::{
+    HarnessParser, MapIndex, ParseError, ParseResult, SingleFileIndex, TranscriptIndex,
+    TranscriptSource,
+};
 use crate::viewer::model::{
     SessionLocator, TranscriptDocument, TranscriptMeta, TranscriptTurn, TurnKind, TurnRole,
 };
@@ -49,6 +52,39 @@ impl HarnessParser for PiParser {
         let path = find_session_file(&locator.state_root, &locator.session_key)
             .ok_or(ParseError::NotFound)?;
         parse_file(&path, locator)
+    }
+
+    fn index(&self, state_root: &Path) -> Box<dyn TranscriptIndex> {
+        if state_root.is_file() {
+            return Box::new(SingleFileIndex(state_root.to_path_buf()));
+        }
+        // A file named `<ts>_<key>.jsonl` wins; the header id covers a
+        // file whose name and header disagree. Both are indexed in one
+        // pass, names first, so lookups agree with `find_session_file`.
+        let files = session_files(state_root);
+        let mut by_key = std::collections::HashMap::new();
+        for path in &files {
+            if let Some(key) = file_name_session_key(path) {
+                by_key
+                    .entry(key.to_string())
+                    .or_insert_with(|| TranscriptSource::File(path.clone()));
+            }
+        }
+        for path in &files {
+            if let Some(id) = header_id(path) {
+                by_key
+                    .entry(id)
+                    .or_insert_with(|| TranscriptSource::File(path.clone()));
+            }
+        }
+        Box::new(MapIndex(by_key))
+    }
+
+    fn read_source(&self, source: &TranscriptSource, locator: &SessionLocator) -> ParseResult {
+        match source {
+            TranscriptSource::File(path) => parse_file(path, locator),
+            TranscriptSource::Sqlite { .. } => Err(ParseError::NotFound),
+        }
     }
 }
 
