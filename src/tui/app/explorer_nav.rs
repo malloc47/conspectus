@@ -24,6 +24,7 @@ impl App {
             RowId::Fork(node) => Some(node.clone()),
             RowId::Pin { pin_id } => Some(NodeId::Pin(PinId::new(pin_id.clone()))),
             RowId::Nested { node, .. } => Some(node.clone()),
+            RowId::Hit { session, .. } => Some(session.clone()),
             RowId::History { record_id } => {
                 snapshot.history.meta(record_id).and_then(|(kind, _)| {
                     crate::tui::rows::history::node_of(snapshot, kind, record_id)

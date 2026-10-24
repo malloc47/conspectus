@@ -65,6 +65,11 @@ pub enum RowId {
         pin_id: String,
         node: NodeId,
     },
+    /// One matching turn under a session in the Search view (ADR 0147).
+    Hit {
+        session: NodeId,
+        turn: usize,
+    },
     /// A named bucket of a view that groups by something other than a
     /// node: the project or kind buckets of the Pinned view.
     Bucket(String),
@@ -142,6 +147,27 @@ pub enum RowKind {
     /// A row of any kind in the Pinned and History views, drawn in the
     /// shared mixed-kind columns.
     Mixed(MixedRow),
+    /// One matching turn of a session in the Search view's per-message
+    /// grouping.
+    Hit(HitRow),
+}
+
+/// A matching turn under its session in the Search view.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct HitRow {
+    pub session: AgentSessionId,
+    /// Index of the turn in the transcript, as the viewer opens it.
+    pub turn_index: usize,
+    /// Who said it (`you`, `assistant`, `system`).
+    pub role: &'static str,
+    /// What kind of turn it is (`message`, `tool`, `thinking`, …).
+    pub kind: &'static str,
+    /// When it was said, as an age; a dash when the turn has no time.
+    pub age: String,
+    /// The window of text around the match.
+    pub snippet: String,
+    /// Byte range of the match inside `snippet`.
+    pub highlight: std::ops::Range<usize>,
 }
 
 /// The status words the mixed views (Pinned and History) print. Views
@@ -1194,6 +1220,10 @@ fn build_tree_for_view_unfiltered(inputs: TreeInputs<'_>) -> RowTree {
         View::Search => search::build_search_tree(search::SearchBuildInputs {
             snapshot,
             home: home.as_deref(),
+            now,
+            cwd,
+            filter,
+            sort,
             grouping: match grouping {
                 crate::tui::Grouping::Search(g) => g,
                 _ => crate::tui::SearchGrouping::None,

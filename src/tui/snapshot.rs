@@ -265,7 +265,9 @@ fn apply_action(
             dispatch(app, Msg::ClearFilters);
         }
         Action::OpenControls => app.open_controls_overlay(),
-        Action::OpenSearch => app.open_search_overlay(),
+        Action::OpenSearch => {
+            app.open_search_entry();
+        }
         Action::OpenHelp => app.open_help_overlay(),
         Action::OpenMessages => app.open_messages_overlay(),
         Action::MessagesOverlayKey(key) => handle_messages_overlay_key(app, key),

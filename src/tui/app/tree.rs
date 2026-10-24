@@ -22,6 +22,7 @@ impl App {
         }
         self.handle = Some(snapshot);
         self.tree = tree;
+        self.auto_expand_search_rows();
 
         let visible = self.visible_rows_owned();
         if visible.is_empty() {
@@ -78,6 +79,7 @@ impl App {
             self,
         ));
         self.set_tree(tree);
+        self.auto_expand_search_rows();
     }
 
     pub(super) fn set_tree(&mut self, tree: RowTree) {
@@ -273,6 +275,7 @@ pub(super) fn row_matches(row: &crate::tui::rows::Row, target: &NodeId) -> bool 
         RowKind::Pr(p) => &p.primary_node == target,
         RowKind::Fork(f) => &f.primary_node == target,
         RowKind::Mixed(m) => &m.primary_node == target,
+        RowKind::Hit(_) => false,
     }
 }
 

@@ -469,6 +469,9 @@ pub(in crate::tui) fn handle_controls_overlay_key(
             .as_ref()
             .map(|(text, status, found)| (text.as_str(), *status, *found)),
         search_kinds,
+        content_group: app
+            .content()
+            .map_or_else(|| app.config().search.group, |content| content.group),
     };
     let outcome = match app.controls_overlay_mut() {
         Some(state) => state.handle(&ctx, key),

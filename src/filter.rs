@@ -21,7 +21,7 @@ use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
 
-use crate::viewer::search::SessionHits;
+use crate::viewer::search::{Grouping, Hit, SessionHits};
 
 /// The sessions a content search matched, by harness and session key.
 /// Held in memory only (the payload tenet): it is never serialized.
@@ -49,6 +49,32 @@ impl ContentHitMap {
     }
 }
 
+/// Every matching turn of the sessions a content search found, by
+/// harness and session key. Read on demand for the Search view's
+/// per-message grouping, and held in memory only like [`ContentHitMap`].
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct ContentDetailMap(BTreeMap<String, BTreeMap<String, Arc<Vec<Hit>>>>);
+
+impl ContentDetailMap {
+    pub fn get(&self, harness_key: &str, session_key: &str) -> Option<&[Hit]> {
+        self.0
+            .get(harness_key)?
+            .get(session_key)
+            .map(|hits| hits.as_slice())
+    }
+
+    pub fn insert(&mut self, harness_key: String, session_key: String, hits: Vec<Hit>) {
+        self.0
+            .entry(harness_key)
+            .or_default()
+            .insert(session_key, Arc::new(hits));
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.0.is_empty()
+    }
+}
+
 /// The content query as the row predicate sees it: which sessions
 /// matched so far. App-wide and never persisted, unlike the structured
 /// filters around it (the one exception to their per-view, saved model).
@@ -60,6 +86,12 @@ pub struct ContentFilter {
     pub hits: Arc<ContentHitMap>,
     /// The scan finished; until then a missing session may still match.
     pub complete: bool,
+    /// How the Search view lists results: one row per session, or a row
+    /// per matching turn under each session.
+    pub group: Grouping,
+    /// The matching turns of each session, once read (per-message
+    /// grouping only).
+    pub details: Arc<ContentDetailMap>,
 }
 
 /// Set of independent dimension constraints. Each `None` field means

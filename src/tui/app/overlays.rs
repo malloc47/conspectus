@@ -567,6 +567,20 @@ impl App {
         }
     }
 
+    /// What `/` opens: the Content prompt in the Search view, the fuzzy
+    /// search overlay elsewhere. Returns the status hint to show.
+    pub fn open_search_entry(&mut self) -> &'static str {
+        if self.active_view() == crate::tui::View::Search {
+            let ctx = self.controls_context();
+            self.modal_stack.push(crate::tui::Modal::Controls(
+                crate::tui::widgets::controls::ControlsOverlayState::new_at_content(&ctx),
+            ));
+            return "search contents: type a query · Enter search · Esc cancel";
+        }
+        self.open_search_overlay();
+        "search: type to filter · Enter pick · Esc close"
+    }
+
     /// Push a fresh search overlay onto the modal stack.
     pub fn open_search_overlay(&mut self) {
         self.modal_stack.push(crate::tui::Modal::Search(

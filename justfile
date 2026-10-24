@@ -89,6 +89,8 @@ screenshots:
     shot pinned-view "4"
     # The History view: gone entities, ready to rebuild.
     shot history-view "5"
+    # The Search view: sessions that mention a word, ranked, with the match.
+    shot search-view "6/the<Enter>"
 
 # Needs the dev-only `snapshot` feature (fixture mode). There is no live
 # discovery, so nothing on the demo machine leaks into the view; press `r`

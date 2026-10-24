@@ -10,12 +10,15 @@
 use std::path::Path;
 use std::time::{Duration, Instant};
 
+use std::sync::mpsc::{self, Receiver, TryRecvError};
+use std::thread::JoinHandle;
+
 use crate::content_search::{
-    CancelToken, Progress, ScanEvent, ScanHandle, ScanOptions, SessionKey, plan_sessions, scan,
-    scan_blocking,
+    CancelToken, Progress, ScanEvent, ScanHandle, ScanOptions, SessionKey, hits_for, plan_sessions,
+    scan, scan_blocking,
 };
-use crate::tui::app::{App, Msg, ScanRequest};
-use crate::viewer::search::{ContentQuery, SessionHits};
+use crate::tui::app::{App, DetailRequest, Msg, ScanRequest};
+use crate::viewer::search::{ContentQuery, Hit, SessionHits};
 
 /// The longest results wait before they reach the screen.
 const FLUSH_EVERY: Duration = Duration::from_millis(150);
@@ -24,6 +27,25 @@ const FLUSH_EVERY: Duration = Duration::from_millis(150);
 #[derive(Default)]
 pub(super) struct ContentDriver {
     active: Option<Active>,
+    details: Option<DetailActive>,
+}
+
+/// The read of matching turns for the per-message grouping.
+struct DetailActive {
+    generation: u64,
+    cancel: CancelToken,
+    events: Receiver<(SessionKey, Vec<Hit>)>,
+    last_flush: Instant,
+    batch: Vec<(SessionKey, Vec<Hit>)>,
+    thread: Option<JoinHandle<()>>,
+}
+
+impl Drop for DetailActive {
+    fn drop(&mut self) {
+        self.cancel.cancel();
+        // The thread notices the token at its next session; leave it.
+        drop(self.thread.take());
+    }
 }
 
 struct Active {
@@ -39,6 +61,7 @@ impl ContentDriver {
     /// Start a requested scan, stop one the app no longer wants, and
     /// deliver what the running one has found.
     pub(super) fn pump(&mut self, app: &mut App) {
+        self.pump_details(app);
         if let Some(active) = &self.active
             && app.content_generation() != Some(active.generation)
         {
@@ -83,6 +106,78 @@ impl ContentDriver {
                 self.active = None;
             }
         }
+    }
+}
+
+impl ContentDriver {
+    /// Read the matching turns of the sessions a finished scan found,
+    /// off the UI thread, and hand them over in batches.
+    fn pump_details(&mut self, app: &mut App) {
+        if let Some(active) = &self.details
+            && app.content_generation() != Some(active.generation)
+        {
+            self.details = None;
+        }
+        if self.details.is_none()
+            && let Some(request) = app.take_detail_request()
+        {
+            self.details = Some(start_details(request));
+        }
+        let Some(active) = &mut self.details else {
+            return;
+        };
+        let mut finished = false;
+        loop {
+            match active.events.try_recv() {
+                Ok(item) => active.batch.push(item),
+                Err(TryRecvError::Empty) => break,
+                Err(TryRecvError::Disconnected) => {
+                    finished = true;
+                    break;
+                }
+            }
+        }
+        if finished || active.last_flush.elapsed() >= FLUSH_EVERY {
+            active.last_flush = Instant::now();
+            let batch = std::mem::take(&mut active.batch);
+            if !batch.is_empty() {
+                app.update(Msg::ContentDetails {
+                    generation: active.generation,
+                    batch,
+                });
+            }
+        }
+        if finished {
+            self.details = None;
+        }
+    }
+}
+
+fn start_details(request: DetailRequest) -> DetailActive {
+    let (sender, events) = mpsc::channel();
+    let cancel = CancelToken::new();
+    let token = cancel.clone();
+    let thread = std::thread::spawn(move || {
+        let plan = plan_sessions(&request.sessions);
+        let query = ContentQuery::new(request.text.clone(), request.kinds);
+        for session in &plan.sessions {
+            if token.is_cancelled() {
+                return;
+            }
+            let hits = hits_for(session, &query);
+            let key = session.key.clone();
+            if sender.send((key, hits)).is_err() {
+                return;
+            }
+        }
+    });
+    DetailActive {
+        generation: request.generation,
+        cancel,
+        events,
+        last_flush: Instant::now(),
+        batch: Vec::new(),
+        thread: Some(thread),
     }
 }
 
@@ -138,6 +233,31 @@ pub(in crate::tui) fn run_blocking(app: &mut App, rebase: Option<(&Path, &Path)>
             batch: summary.results,
             progress: summary.progress,
             done: true,
+        });
+        run_details_blocking(app, rebase);
+    }
+    run_details_blocking(app, rebase);
+}
+
+fn run_details_blocking(app: &mut App, rebase: Option<(&Path, &Path)>) {
+    while let Some(mut details) = app.take_detail_request() {
+        if let Some((from, to)) = rebase {
+            for id in &mut details.sessions {
+                if let Ok(rest) = Path::new(&id.state_scope).strip_prefix(from) {
+                    id.state_scope = to.join(rest).display().to_string();
+                }
+            }
+        }
+        let plan = plan_sessions(&details.sessions);
+        let query = ContentQuery::new(details.text.clone(), details.kinds);
+        let batch = plan
+            .sessions
+            .iter()
+            .map(|session| (session.key.clone(), hits_for(session, &query)))
+            .collect();
+        app.update(Msg::ContentDetails {
+            generation: details.generation,
+            batch,
         });
     }
 }

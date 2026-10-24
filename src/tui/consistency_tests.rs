@@ -82,6 +82,7 @@ mod lifecycle;
 mod menus;
 mod parity;
 mod rendering;
+mod search_view;
 mod state;
 mod styling;
 mod text;

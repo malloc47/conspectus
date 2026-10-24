@@ -183,6 +183,7 @@ impl Ingredient for ControlsVariant {
             session_preview: conspectus::tui::SessionPreview::default(),
             content: None,
             search_kinds: Default::default(),
+            content_group: Default::default(),
         };
         let mut state = match self.open_state {
             ControlsOpenState::Closed => ControlsOverlayState::new(&ctx),

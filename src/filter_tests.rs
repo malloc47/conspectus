@@ -348,6 +348,8 @@ fn content_filter(matched: &[(&str, &str)]) -> ContentFilter {
         text: "x".into(),
         hits: Arc::new(hits),
         complete: true,
+        group: crate::viewer::search::Grouping::Session,
+        details: Arc::default(),
     }
 }
 

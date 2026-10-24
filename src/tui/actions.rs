@@ -188,6 +188,7 @@ pub fn subject_of_row(app: &App, id: &RowId) -> Subject {
             record: Some(record_id.clone()),
             pin: None,
         },
+        RowId::Hit { session, .. } => subject_of_node(app, session),
         other => crate::tui::rows::row_node(other)
             .map(|node| subject_of_node(app, node))
             .unwrap_or_default(),
@@ -349,6 +350,34 @@ fn viewer_session_for(snapshot: &GraphSnapshot, node: &NodeId) -> Option<AgentSe
 /// confidence then link id). Subjects with no session report
 /// [`ViewerDisabled::UnsupportedRow`] — the caller surfaces a one-line
 /// status bar reason.
+/// Where the viewer opens for the selected row of the Search view: the
+/// session's best hit, or the hit row's own turn. `None` outside the
+/// Search view, with the right pane focused, or without an active
+/// search.
+pub fn viewer_open_target(app: &App) -> Option<(AgentSessionId, crate::viewer::state::ViewerOpen)> {
+    if app.active_view() != crate::tui::View::Search || app.focus() != crate::tui::app::Focus::Left
+    {
+        return None;
+    }
+    let content = app.content()?;
+    let (node, turn_index) = match app.selection()? {
+        RowId::Hit { session, turn } => (session, *turn),
+        RowId::AgentSession(node @ NodeId::AgentSession(id)) => {
+            let hits = content.hits().get(&id.harness_key, &id.session_key)?;
+            (node, hits.best.turn_index)
+        }
+        _ => return None,
+    };
+    let session = viewer_session_for(app.snapshot_handle()?.snapshot(), node)?;
+    Some((
+        session,
+        crate::viewer::state::ViewerOpen {
+            query: content.text.clone(),
+            turn_index,
+        },
+    ))
+}
+
 pub fn resolve_view_session(app: &App) -> Result<AgentSessionId, ViewerDisabled> {
     let subject = action_subject(app);
     if subject == Subject::default() {

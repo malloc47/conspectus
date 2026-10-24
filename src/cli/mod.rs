@@ -575,6 +575,8 @@ impl FilterArgs {
             text: text.to_string(),
             hits: std::sync::Arc::new(hits),
             complete: true,
+            group: crate::viewer::search::Grouping::Session,
+            details: std::sync::Arc::default(),
         })
     }
 

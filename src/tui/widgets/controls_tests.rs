@@ -22,6 +22,7 @@ fn ctx_with(view: View, grouping: Grouping, filter: &RowFilter, sort: Sort) -> C
         session_preview: crate::tui::SessionPreview::default(),
         content: None,
         search_kinds: crate::viewer::search::ContentKinds::default(),
+        content_group: crate::viewer::search::Grouping::Session,
     }
 }
 
@@ -459,6 +460,7 @@ fn selected_last_sort_row_scrolls_into_short_controls_body() {
     let state = ControlsOverlayState {
         cursor: ControlsCursor::Sort(1),
         sub_editor: None,
+        prompt_only: false,
     };
     let theme = Theme::default();
     let widget = ControlsOverlayWidget::new(&state, ctx, &theme);
@@ -521,6 +523,7 @@ fn preview_wrap_section_lists_every_mode_and_applies_the_pick() {
         let mut state = ControlsOverlayState {
             cursor: ControlsCursor::PreviewWrap(2),
             sub_editor: None,
+            prompt_only: false,
         };
         assert_eq!(
             state.handle_key(&ctx, key(KeyCode::Char(' '))),
@@ -559,6 +562,7 @@ fn session_preview_section_closes_the_overlay_and_applies_the_pick() {
         let mut state = ControlsOverlayState {
             cursor: ControlsCursor::SessionPreview(1),
             sub_editor: None,
+            prompt_only: false,
         };
         assert_eq!(
             state.handle_key(&ctx, key(KeyCode::Char(' '))),
@@ -584,6 +588,7 @@ fn cursor_line_index_points_at_the_cursored_row_in_every_section() {
             let state = ControlsOverlayState {
                 cursor: row,
                 sub_editor: None,
+                prompt_only: false,
             };
             let widget = ControlsOverlayWidget::new(&state, ctx.clone(), &theme);
             let lines = widget.body_lines();

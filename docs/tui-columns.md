@@ -528,9 +528,67 @@ Every row is drawn as a ghost, with the same columns as a pin row.
 
 ## Search view
 
-Reached with `6`. It lists the sessions that match the content search
-(see the Content paragraph under the Sessions view). Groupings: **none**
-(default, one ranked list), **project**, and **harness**.
+Reached with `6`; `/` there opens a prompt for the query. It lists the
+sessions that match the content search (the same query that narrows the
+Sessions, Mux, and PRs views; see the Content paragraph under the Sessions
+view). With no query it says to press `/`; while the scan runs it says how
+far it has got; it is off when live preview is disabled.
+
+Groupings (`Ctrl-G` cycles): **none** (default, one ranked list),
+**project**, and **harness**. Sessions are ranked by the number of
+matching turns, then by the latest match; the Recency sort puts the
+latest match first. Controls has a `results` row that switches between
+**one row per session** and **a row per matching turn** (the default
+comes from the `[search]` setting).
+
+Buckets look like the Pinned view's. `Enter` and `v` open the viewer at
+the best match (or at the matching turn on a hit row); every other action
+works on the session, as in the Sessions view.
+
+### Session row
+
+The Sessions view's session row, taken from its flat layout, with the
+`N hits` chip and the best snippet where a message preview would go. The age is the
+session's last activity, as everywhere else, not the time of the match.
+
+<!-- frame: keys="6/the<Enter>" width=130 height=20 -->
+```text
+┌ ► sessions · mux · prs · pinned · history · search ───────────┐
+│  ● showcase   claude       1h  ∘  project           2 hits    │
+│  ● showcase   pi           2h  ∘  repo-a            2 hits    │
+```
+
+<!-- frame: keys="6/the<Enter><C-g>" width=130 height=20 -->
+```text
+┌ ► sessions · mux · prs · pinned · history · search ───────────┐
+│▼ project  (1)  ▲                                              │
+│    ● showcase   claude       1h  ∘  project           2 hits  │
+│▼ repo-a   (1)                                                 │
+│    ● showcase   pi           2h  ∘  repo-a            2 hits  │
+```
+
+### Hit row
+
+Under a session when results are listed per turn. It has no kind glyph.
+
+| # | Cell | Source | Condition | Style |
+|---|---|---|---|---|
+| 1 | Turn | `turn N`, counting from 1 | always | dim |
+| 2 | Role | `you`, `assistant`, or `system` | always | dim |
+| 3 | Kind | `message`, `summary`, `tool call`, `tool output`, or `thinking` | always | dim |
+| 4 | Age | time since the turn was written, or a dash | always | dim |
+| 5 | Snippet | the text around the match, the match bold and underlined | when room remains | dim italic |
+
+<!-- frame: keys="6/the<Enter>f<Down><Down><Down><Down><Down><Down><Down><Down><Space><Esc>" width=150 height=20 -->
+```text
+┌ ► sessions · mux · prs · pinned · history · search ─────────────────────┐
+│▼ ● showcase   claude       1h  ∘  project           2 hits  Expand the …│
+│    turn 3     you        message   107d  Expand the notes into a releas…│
+│    turn 4     assistant  message   107d  I expanded `notes.md` into a r…│
+│▼ ● showcase   pi           2h  ∘  repo-a            2 hits  Which tests…│
+│    turn 1     you        message   107d  Which tests cover the fork ind…│
+│    turn 2     assistant  message   107d  `fork_index_tests.rs` covers i…│
+```
 
 ## Union view
 

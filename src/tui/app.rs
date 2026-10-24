@@ -28,7 +28,7 @@ mod msg;
 mod overlays;
 mod tree;
 
-pub use content::{ContentSearch, ContentStatus, ScanRequest};
+pub use content::{ContentSearch, ContentStatus, DetailRequest, ScanRequest};
 pub use msg::Msg;
 
 /// Cheap-to-clone, reference-counted handle to the App's resolved
@@ -191,6 +191,10 @@ pub struct App {
     content: Option<content::ContentSearch>,
     /// A scan the reducer wants started; the runtime takes it.
     scan_request: Option<content::ScanRequest>,
+    detail_request: Option<content::DetailRequest>,
+    /// Search-view rows already opened once, so a rebuild opens new
+    /// buckets and sessions but does not undo a collapse.
+    search_auto_expanded: BTreeSet<RowId>,
     /// Source of scan generations, so results of a scan the operator
     /// replaced or cleared are recognized and dropped.
     content_generation: u64,
@@ -533,6 +537,8 @@ impl App {
             pending_follow_row: None,
             content: None,
             scan_request: None,
+            detail_request: None,
+            search_auto_expanded: BTreeSet::new(),
             content_generation: 0,
             pending_restore_focus: None,
             undo: crate::tui::undo::UndoStack::default(),
@@ -1573,6 +1579,10 @@ impl App {
                     effects.push(Effect::Toast(HANDOFF_PENDING_HINT.to_string()));
                     return effects;
                 }
+                if let Some((session, open)) = crate::tui::actions::viewer_open_target(self) {
+                    effects.push(Effect::Exec(ExecSpec::ViewSession(session, Some(open))));
+                    return effects;
+                }
                 if let Some(effect) = crate::tui::actions::default_effect(self) {
                     effects.push(effect);
                     return effects;
@@ -1616,6 +1626,10 @@ impl App {
             }
             Msg::ViewSelected => {
                 use crate::tui::effect::ExecSpec;
+                if let Some((session, open)) = crate::tui::actions::viewer_open_target(self) {
+                    effects.push(Effect::Exec(ExecSpec::ViewSession(session, Some(open))));
+                    return effects;
+                }
                 match crate::tui::actions::resolve_view_session(self) {
                     Ok(session_id) => {
                         effects.push(Effect::Exec(ExecSpec::ViewSession(session_id, None)));
@@ -1648,6 +1662,8 @@ impl App {
             Msg::StartContentSearch { .. }
             | Msg::ClearContentSearch
             | Msg::RescanContent
+            | Msg::SetContentGroup(_)
+            | Msg::ContentDetails { .. }
             | Msg::ClearFilters
             | Msg::ContentHits { .. } => return self.reduce_content(msg),
             Msg::SetFilter(filter) => {

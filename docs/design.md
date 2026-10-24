@@ -881,8 +881,11 @@ grouping enum (`SessionsGrouping`, `MuxGrouping`, `UnionGrouping`,
 `PrsGrouping`, `ForksGrouping`) and the same `Grouping` dispatch type
 backs config, CLI flags, and TUI controls.
 
-The TUI's view switcher offers sessions, mux, and PRs (`1`–`3`); union and
-forks remain CLI table projections. The PRs view groups by checkout by
+The TUI's view switcher offers sessions, mux, PRs, pinned, history, and
+search (`1`–`6`); union and forks remain CLI table projections. The Search
+view (`6`) lists the sessions the content search found, ranked, one row per
+session or a row per matching turn, and opens the viewer at the match (ADR
+0147). The PRs view groups by checkout by
 default, so each PR sits with the work checked out for it, and PRs checked out
 nowhere sit under their repo, labelled `no checkout` (ADR 0114, 0130). Each PR
 row carries a marker for whether it has a local branch (`⌥`) or not (dim `◌`);

@@ -369,6 +369,17 @@ pub enum Msg {
     /// Read every transcript again for the active content search, as an
     /// explicit refresh asks.
     RescanContent,
+    /// Show the content search results per session or per message.
+    SetContentGroup(crate::viewer::search::Grouping),
+    /// The matching turns of some sessions, read for the per-message
+    /// grouping; stale ones are dropped like [`Msg::ContentHits`].
+    ContentDetails {
+        generation: u64,
+        batch: Vec<(
+            crate::content_search::SessionKey,
+            Vec<crate::viewer::search::Hit>,
+        )>,
+    },
     /// Clear every filter, the content search included.
     ClearFilters,
     /// Results of the running scan, stamped with the scan they belong

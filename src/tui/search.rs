@@ -100,6 +100,11 @@ pub fn items_from_rows<'r>(rows: impl IntoIterator<Item = &'r Row>) -> Vec<Searc
                 label: Cow::Owned(fork.fork_label.clone()),
                 haystack: Cow::Owned(fork.fork_label.clone()),
             },
+            RowKind::Hit(hit) => SearchItem {
+                id: row.id.clone(),
+                label: Cow::Owned(hit.snippet.clone()),
+                haystack: Cow::Owned(hit.snippet.clone()),
+            },
             RowKind::Mixed(mixed) => SearchItem {
                 id: row.id.clone(),
                 label: Cow::Owned(mixed.label.clone()),

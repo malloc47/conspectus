@@ -342,7 +342,7 @@ conspectus node show <id> [--scan-root PATH]...
 conspectus columns {sessions|mux|union|prs|forks}
                    [--pager | --no-pager]
                    [--color {auto|always|never}]
-conspectus tui [--view {sessions|mux|prs|pinned}] [--grouping VALUE] [--sort {hierarchy|recency}]
+conspectus tui [--view {sessions|mux|prs|pinned|history|search}] [--grouping VALUE] [--sort {hierarchy|recency}]
                [--harness H]... [--max-age D] [--mux-state S]...
                [--scan-root PATH]... [--refresh-interval D] [--no-live-preview]
                [--contains TEXT]
@@ -967,6 +967,24 @@ argv` resolves to the harness's default (a project or user `[launch.*]`
 profile, `atelier exec`, or the harness default) and the form shows the
 command and where it came from. The last field, **pin**, can also pin the new
 mux or, with *pin, don't launch*, write a planned pin and start nothing.
+
+### The Search view
+
+Key `6` (or `--view search`) lists the sessions that match a content search,
+ranked by how many turns matched and then by the latest match (the
+Recency sort puts the latest match first). `/` in this view asks for the
+query; the same query also narrows the Sessions, Mux, and PRs views (`f`
+shows it as `contains`, `F` clears it). Groupings (`Ctrl-G`): none,
+project, harness. The Controls `results` row switches between one row per
+session and a row per matching turn, listed under each session; `[search]
+group` in the config sets the default.
+
+`Enter` and `v` open the viewer at the best match of a session, or at
+the matching turn of a hit row, with the query already searched, so `n` and
+`N` step to the others. Every other key, `p` and `.` included, acts on the
+session. Like all content search, the query and its results stay in
+memory and are never saved; the view is off under `--no-live-preview`, and
+a restart never opens on it.
 
 ### The History view
 

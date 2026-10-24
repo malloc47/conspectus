@@ -14,9 +14,9 @@ use std::sync::Arc;
 
 use super::*;
 use crate::content_search::{Progress, SessionKey};
-use crate::filter::{ContentFilter, ContentHitMap};
+use crate::filter::{ContentDetailMap, ContentFilter, ContentHitMap};
 use crate::tui::Effect;
-use crate::viewer::search::ContentKinds;
+use crate::viewer::search::{ContentKinds, Grouping};
 
 /// How far the scan behind the active query has got.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -50,7 +50,12 @@ pub struct ContentSearch {
     /// with an older one are dropped.
     pub generation: u64,
     pub status: ContentStatus,
+    /// How the Search view lists the results.
+    pub group: Grouping,
     hits: Arc<ContentHitMap>,
+    /// The matching turns of each session, read on demand for the
+    /// per-message grouping.
+    details: Arc<ContentDetailMap>,
     /// A full rescan collects here and replaces `hits` when it ends, so
     /// the list does not empty and refill while it runs.
     staging: Option<ContentHitMap>,
@@ -71,6 +76,8 @@ impl ContentSearch {
             text: self.text.clone(),
             hits: Arc::clone(&self.hits),
             complete: self.status.is_done(),
+            group: self.group,
+            details: Arc::clone(&self.details),
         }
     }
 }
@@ -82,6 +89,17 @@ pub struct ScanRequest {
     pub text: String,
     pub kinds: ContentKinds,
     /// The sessions to read.
+    pub sessions: Vec<AgentSessionId>,
+}
+
+/// The matching turns to read for the Search view's per-message
+/// grouping, left for the runtime.
+#[derive(Clone, Debug, PartialEq)]
+pub struct DetailRequest {
+    pub generation: u64,
+    pub text: String,
+    pub kinds: ContentKinds,
+    /// The sessions that matched.
     pub sessions: Vec<AgentSessionId>,
 }
 
@@ -101,6 +119,45 @@ impl App {
     /// should stop it.
     pub fn content_generation(&self) -> Option<u64> {
         self.content.as_ref().map(|content| content.generation)
+    }
+
+    /// Take the detail read the reducer asked for. Returns it once.
+    pub fn take_detail_request(&mut self) -> Option<DetailRequest> {
+        self.detail_request.take()
+    }
+
+    /// Ask for the matching turns of every session found so far, when
+    /// the per-message grouping needs them and the scan has finished.
+    fn queue_details(&mut self) {
+        let Some(content) = &self.content else {
+            return;
+        };
+        if content.group != Grouping::Message || !content.status.is_done() {
+            return;
+        }
+        let sessions: Vec<AgentSessionId> = self
+            .snapshot_sessions()
+            .into_iter()
+            .filter(|session| {
+                content
+                    .hits
+                    .get(&session.harness_key, &session.session_key)
+                    .is_some()
+                    && content
+                        .details
+                        .get(&session.harness_key, &session.session_key)
+                        .is_none()
+            })
+            .collect();
+        if sessions.is_empty() {
+            return;
+        }
+        self.detail_request = Some(DetailRequest {
+            generation: content.generation,
+            text: content.text.clone(),
+            kinds: content.kinds,
+            sessions,
+        });
     }
 
     /// Take the scan the reducer asked for. Returns it once.
@@ -195,7 +252,9 @@ impl App {
                     kinds,
                     generation: 0,
                     status: ContentStatus::Running(Progress::default()),
+                    group: self.config.search.group,
                     hits: Arc::new(ContentHitMap::default()),
+                    details: Arc::new(ContentDetailMap::default()),
                     staging: None,
                     scanned: BTreeSet::new(),
                 });
@@ -221,6 +280,26 @@ impl App {
                 self.clear_content();
                 self.rebuild_tree_in_place();
                 effects.push(Effect::Persist);
+            }
+            Msg::SetContentGroup(group) => {
+                if let Some(content) = self.content.as_mut() {
+                    content.group = group;
+                }
+                self.queue_details();
+                self.rebuild_tree_in_place();
+            }
+            Msg::ContentDetails { generation, batch } => {
+                let Some(content) = self.content.as_mut() else {
+                    return effects;
+                };
+                if content.generation != generation {
+                    return effects;
+                }
+                let details = Arc::make_mut(&mut content.details);
+                for (key, hits) in batch {
+                    details.insert(key.harness_key, key.session_key, hits);
+                }
+                self.rebuild_tree_in_place();
             }
             Msg::RescanContent => {
                 let sessions = self.snapshot_sessions();
@@ -267,6 +346,7 @@ impl App {
                 if done {
                     self.update_in_flight(InFlightKind::Search, None);
                     self.scan_new_sessions();
+                    self.queue_details();
                 } else {
                     let label = format!("Searching {}/{}", progress.scanned, progress.total);
                     self.update_in_flight(InFlightKind::Search, Some(label));
@@ -280,6 +360,19 @@ impl App {
         effects
     }
 
+    /// Open the Search view's buckets and sessions the first time they
+    /// appear, so results show their matches without a keypress.
+    pub(super) fn auto_expand_search_rows(&mut self) {
+        if self.active_view != View::Search {
+            return;
+        }
+        for row in &self.tree.rows {
+            if row.expandable && self.search_auto_expanded.insert(row.id.clone()) {
+                self.expanded.insert(row.id.clone());
+            }
+        }
+    }
+
     /// Drop the content search and stop its scan.
     fn clear_content(&mut self) {
         if self.content.take().is_some() {
@@ -287,6 +380,7 @@ impl App {
             self.content_generation += 1;
         }
         self.scan_request = None;
+        self.detail_request = None;
         self.update_in_flight(InFlightKind::Search, None);
     }
 

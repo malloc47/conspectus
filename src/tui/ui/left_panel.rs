@@ -245,6 +245,14 @@ pub(super) fn empty_left_panel_text(app: &App) -> String {
     if app.snapshot_handle().is_none() {
         return "Loading discovery…".to_string();
     }
+    if app.active_view() == crate::tui::View::Search {
+        if !app.config().live_preview_enabled {
+            return "Content search is off while live preview is disabled.".to_string();
+        }
+        if app.content().is_none() {
+            return "Press `/` to search session contents.".to_string();
+        }
+    }
     if let Some(content) = app.content()
         && !matches!(
             app.active_view(),
@@ -925,6 +933,10 @@ pub(super) fn render_left_row(
             }
             spans.push(span!(theme.placeholder; "  ({})", fork.child_count));
         }
+        RowKind::Hit(hit) => {
+            let budget = width.saturating_sub(spans_width(&spans));
+            spans.extend(render_hit_spans(hit, theme, budget));
+        }
         RowKind::Mixed(mixed) => {
             let prefix_width = spans_width(&spans);
             let budget = width.saturating_sub(prefix_width);
@@ -1244,12 +1256,50 @@ fn append_content_hit(
     if width <= used + 8 {
         return;
     }
-    let mut budget = width - used - 2;
     spans.push(Span::raw("  "));
-    let text = hit.snippet.as_str();
+    append_snippet(spans, &hit.snippet, &hit.highlight, width - used - 2, theme);
+}
+
+/// The columns of a matching turn under its session: who said it, what
+/// kind of turn it is, when, and the snippet with the match picked out.
+fn render_hit_spans(
+    hit: &crate::tui::rows::HitRow,
+    theme: &Theme,
+    budget: usize,
+) -> Vec<Span<'static>> {
+    let secondary = Style::default().fg(theme.secondary_text);
+    let mut spans = vec![
+        span!(secondary; "turn {:<4}", hit.turn_index + 1),
+        span!(secondary; "  {:<9}", hit.role),
+        span!(theme.placeholder; "  {:<8}", hit.kind),
+        span!(secondary; "  {:>4}", hit.age),
+    ];
+    let used = spans_width(&spans);
+    if budget > used + 8 {
+        spans.push(Span::raw("  "));
+        append_snippet(
+            &mut spans,
+            &hit.snippet,
+            &hit.highlight,
+            budget - used - 2,
+            theme,
+        );
+    }
+    spans
+}
+
+/// `text` in the preview style with the byte range `highlight` picked
+/// out, cut to `budget` cells.
+fn append_snippet(
+    spans: &mut Vec<Span<'static>>,
+    text: &str,
+    highlight: &std::ops::Range<usize>,
+    mut budget: usize,
+    theme: &Theme,
+) {
     let (start, end) = (
-        hit.highlight.start.min(text.len()),
-        hit.highlight.end.min(text.len()),
+        highlight.start.min(text.len()),
+        highlight.end.min(text.len()),
     );
     let (before, mid, after) =
         if text.is_char_boundary(start) && text.is_char_boundary(end) && start <= end {
@@ -1418,6 +1468,8 @@ pub(super) fn row_kind_glyph_span(kind: &RowKind, theme: &Theme) -> Option<Span<
         RowKind::Pr(pr) => return Some(forge_pr_glyph_span(pr, theme)),
         RowKind::Fork(_) => NodeKind::Fork,
         RowKind::Mixed(mixed) => return Some(mixed_glyph_span(mixed, theme)),
+        // A matching turn is drawn under its session without a glyph.
+        RowKind::Hit(_) => return None,
     };
     Some(node_kind_glyph_span(node_kind, theme))
 }

@@ -523,6 +523,9 @@ pub(super) fn default_action_status_hint(app: &App) -> String {
     if matches!(row.kind, RowKind::Group(_)) {
         return "Enter/l expand · h collapse".to_string();
     }
+    if crate::tui::actions::viewer_open_target(app).is_some() {
+        return "Enter/v open at the match · . menu".to_string();
+    }
     if crate::tui::actions::selected_record(app).is_some() {
         return "Enter rebuild · . menu (pin, forget, plan, clean up)".to_string();
     }

@@ -354,6 +354,8 @@ conspectus serve                   # keep the graph warm in the background
 | ![The mux view: live tmux sessions with a pin marker, gone muxes dimmed below them, and the selected mux's related rows and a transcript-style preview on the right](docs/images/mux-pane.png) | ![The PRs view: a draft PR under the checkout of its branch, the sessions working there beneath it, and its checks, reviews, and description in the Preview](docs/images/prs-view.png) |
 | **Pinned pins** | **Gone entities, ready to rebuild** |
 | ![The Pinned view: pins for a live mux, a gone mux, a session, a removed worktree, and a merged PR, grouped by project, each with its status and age](docs/images/pinned-view.png) | ![The History view: gone muxes and worktrees with how long ago they were last seen](docs/images/history-view.png) |
+| **Find a session by what was said in it** | |
+| ![The Search view: sessions that mention a word, ranked by the number of matching turns, each with its best snippet and the match picked out](docs/images/search-view.png) | |
 
 ### Scriptable CLI
 

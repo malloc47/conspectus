@@ -562,10 +562,8 @@ impl LoopMode for LiveMode {
                 app.update(Msg::SetStatus(Some("filters cleared".to_string())));
             }
             Some(Action::OpenSearch) => {
-                app.open_search_overlay();
-                app.update(Msg::SetStatus(Some(
-                    "search: type to filter · Enter pick · Esc close".to_string(),
-                )));
+                let hint = app.open_search_entry();
+                app.update(Msg::SetStatus(Some(hint.to_string())));
             }
             Some(Action::SearchOverlayKey(key)) => handle_search_overlay_key(app, key),
             Some(Action::OpenHelp) => {
@@ -663,10 +661,8 @@ impl LoopMode for StaticMode {
             Some(Action::ValueModalKey(key)) => handle_value_modal_key(app, key),
             Some(Action::ViewerOverlayKey(key)) => handle_viewer_overlay_key(app, key),
             Some(Action::OpenSearch) => {
-                app.open_search_overlay();
-                app.update(Msg::SetStatus(Some(
-                    "search: type to filter · Enter pick · Esc close".to_string(),
-                )));
+                let hint = app.open_search_entry();
+                app.update(Msg::SetStatus(Some(hint.to_string())));
             }
             Some(Action::SearchOverlayKey(key)) => handle_search_overlay_key(app, key),
             Some(Action::OpenControls) => {

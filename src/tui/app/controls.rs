@@ -20,6 +20,10 @@ impl App {
                 .as_ref()
                 .map(|content| (content.text.as_str(), content.status, content.hits().len())),
             search_kinds: self.config.search.kinds,
+            content_group: self
+                .content
+                .as_ref()
+                .map_or(self.config.search.group, |content| content.group),
         }
     }
 }
