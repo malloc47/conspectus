@@ -5,6 +5,8 @@
 Accepted. Amends ADR 0031 (a content query is a text predicate, held
 app-wide and never persisted) and ADR 0086 (Tier 2 gains this reader).
 Builds on ADR 0112 (in-memory transcript previews, `--no-live-preview`).
+The persistent index it defers is decided in ADR 0148, which is built only
+when a threshold below is crossed or the operator asks.
 
 ## Context
 
@@ -157,9 +159,9 @@ enough to scan on demand.
 ### Revisiting a persistent index
 
 19. **Not now.** A persistent full-text index would store payload on
-    disk, which ADR 0086 and ADR 0087 forbid. Revisit it, with its own
-    ADR amending both, when the on-demand scan misses its latency
-    budget or the corpus passes a size threshold: results start within
+    disk, which ADR 0086 and ADR 0087 forbid. ADR 0148 decides the
+    index, amending both, and builds it only when the on-demand scan
+    misses its latency budget or the corpus passes a size threshold: results start within
     300 ms and finish within 2 s on the operator's corpus, and the index
     work starts when the corpus exceeds 2 GB of transcripts or the 95th
     percentile finish time exceeds 5 s. The result source stays behind

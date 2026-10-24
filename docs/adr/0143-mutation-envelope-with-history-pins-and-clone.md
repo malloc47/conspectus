@@ -5,6 +5,8 @@
 Accepted. Supersedes ADR 0087 and its 2026-10-12 amendment. Keeps every
 category and prohibition ADR 0087 numbered, under the same numbers, so
 "ADR 0087 category 3" in an older ADR reads the same against this one.
+Amended by [ADR 0148](0148-opt-in-transcript-search-index.md): prohibition 3
+gains one carve-out for the opt-in transcript search index.
 
 ## Context
 
@@ -136,8 +138,12 @@ Conspectus **never**:
    pane whose harness has exited, and only after pane-process evidence
    says no harness is running there.
 
-3. **Persists payload content.** Sidecars, history, and snapshots stay
-   Tier 3 (ADR 0086): attribution and observation, not conversation.
+3. **Persists payload content**, except the opt-in transcript search
+   index (ADR 0148): text derived from harness transcripts, written only
+   by operator-initiated commands, never by the daemon, owner-readable
+   only, and removable with one command. Sidecars, history, and
+   snapshots stay Tier 3 (ADR 0086): attribution and observation, not
+   conversation.
    ADR 0140 records a mux's launch argv verbatim, including any prompt
    a harness argv carries; that is the only payload-adjacent field, and
    it is the command the operator ran, not anything a harness wrote.

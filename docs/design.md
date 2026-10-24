@@ -133,7 +133,8 @@ operator-initiated mux lifecycle, Conspectus-owned subprocess launches,
 operator-initiated harness hook installation, and `git clone` into an
 absent path during a rebuild) with an explicit prohibition list covering
 harness-native state beyond that hook entry, terminal input into live
-agent panes, payload persistence, shared/system locations, background
+agent panes, payload persistence (except the opt-in transcript search
+index, ADR 0148), shared/system locations, background
 mutation (the daemon writes category 2 observations only), git mutation
 beyond that clone, and hook bypass. `docs/capabilities.toml` lists every program,
 subcommand, socket, signal, and write path the envelope allows, and tests
@@ -469,7 +470,10 @@ reader: hits and capped snippets live in memory for the process
 lifetime and are never written to disk, stored in the graph or
 `graph.bin`, or sent to the daemon; the scan runs in the TUI or CLI
 process, and a persistent index stays deferred behind recorded latency
-and corpus-size thresholds.
+and corpus-size thresholds. ADR 0148 decides that index (SQLite FTS5 in
+the bundled SQLite, opt-in, operator-built, never daemon-built, in
+`$XDG_CACHE_HOME`, owner-readable, wipeable, with the scan as the
+authoritative fallback) and permits payload persistence nowhere else.
 
 Additive discovery:
 
