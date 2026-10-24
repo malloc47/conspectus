@@ -13,22 +13,6 @@ expression: stdout_of(cmd)
       "harness": "claude-code",
       "kind": "message",
       "label": null,
-      "role": "assistant",
-      "session": "aaaaaaaa-0000-0000-0000-000000000001",
-      "snippet": {
-        "highlight": [
-          4,
-          10
-        ],
-        "text": "The Quokka layout is noted."
-      },
-      "time": "2026-10-01T10:00:05Z",
-      "turn": 1
-    },
-    {
-      "harness": "claude-code",
-      "kind": "message",
-      "label": null,
       "role": "user",
       "session": "aaaaaaaa-0000-0000-0000-000000000001",
       "snippet": {
@@ -39,7 +23,23 @@ expression: stdout_of(cmd)
         "text": "We chose the quokka design"
       },
       "time": "2026-10-01T10:00:00Z",
-      "turn": 0
+      "turn": 1
+    },
+    {
+      "harness": "claude-code",
+      "kind": "message",
+      "label": null,
+      "role": "assistant",
+      "session": "aaaaaaaa-0000-0000-0000-000000000001",
+      "snippet": {
+        "highlight": [
+          4,
+          10
+        ],
+        "text": "The Quokka layout is noted."
+      },
+      "time": "2026-10-01T10:00:05Z",
+      "turn": 2
     }
   ],
   "searched": {
@@ -47,5 +47,6 @@ expression: stdout_of(cmd)
     "skipped": 0,
     "total": 2,
     "without_parser": 0
-  }
+  },
+  "truncated": []
 }

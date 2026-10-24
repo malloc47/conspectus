@@ -126,51 +126,16 @@ fn rollout_files(state_root: &Path) -> Vec<PathBuf> {
     out
 }
 
-/// Walk `<state_root>/sessions/<year>/<month>/<day>/` looking for
-/// a rollout file whose basename ends with `-<session_key>.jsonl`.
-/// Std-only — no `walkdir` dep.
+/// The rollout file whose basename ends with `-<session_key>.jsonl`. It
+/// walks the same files, in the same order, as the index, so a lookup
+/// and an index entry agree on which file a key names.
 fn find_rollout_file(state_root: &Path, session_key: &str) -> Option<PathBuf> {
-    let sessions = state_root.join("sessions");
     let suffix = format!("-{session_key}.jsonl");
-    for year_entry in std::fs::read_dir(&sessions).ok()?.flatten() {
-        let year = year_entry.path();
-        if !year.is_dir() {
-            continue;
-        }
-        let Ok(month_iter) = std::fs::read_dir(&year) else {
-            continue;
-        };
-        for month_entry in month_iter.flatten() {
-            let month = month_entry.path();
-            if !month.is_dir() {
-                continue;
-            }
-            let Ok(day_iter) = std::fs::read_dir(&month) else {
-                continue;
-            };
-            for day_entry in day_iter.flatten() {
-                let day = day_entry.path();
-                if !day.is_dir() {
-                    continue;
-                }
-                let Ok(file_iter) = std::fs::read_dir(&day) else {
-                    continue;
-                };
-                for file_entry in file_iter.flatten() {
-                    let path = file_entry.path();
-                    if path.is_file()
-                        && path
-                            .file_name()
-                            .and_then(|n| n.to_str())
-                            .is_some_and(|n| n.ends_with(&suffix))
-                    {
-                        return Some(path);
-                    }
-                }
-            }
-        }
-    }
-    None
+    rollout_files(state_root).into_iter().find(|path| {
+        path.file_name()
+            .and_then(|n| n.to_str())
+            .is_some_and(|n| n.ends_with(&suffix))
+    })
 }
 
 fn parse_file(path: &Path, locator: &SessionLocator) -> ParseResult {

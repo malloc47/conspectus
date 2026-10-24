@@ -56,7 +56,7 @@ use worktree_exec::*;
 
 pub(super) use overlay_keys::{
     handle_controls_overlay_key, handle_help_overlay_key, handle_messages_overlay_key,
-    handle_search_overlay_key, handle_viewer_overlay_key,
+    handle_search_overlay_key, handle_search_overlay_key_with, handle_viewer_overlay_key,
 };
 
 /// What a background discovery worker sends back. `warning` carries a
@@ -567,7 +567,12 @@ impl LoopMode for LiveMode {
                 let hint = app.open_search_entry();
                 app.update(Msg::SetStatus(Some(hint)));
             }
-            Some(Action::SearchOverlayKey(key)) => handle_search_overlay_key(app, key),
+            Some(Action::SearchOverlayKey(key)) => {
+                // A hit that opens the viewer needs the live executor.
+                handle_search_overlay_key_with(app, key, &mut |app, msg| {
+                    dispatch_live(terminal, app, config, tmux, msg);
+                });
+            }
             Some(Action::OpenHelp) => {
                 app.open_help_overlay();
             }
@@ -2014,7 +2019,7 @@ pub(in crate::tui) fn pure_executor_runs(effect: &Effect) -> bool {
 /// Run any content search scan the app asked for to completion on this
 /// thread. Snapshot mode calls it between keys so a search is finished
 /// before the next one.
-#[cfg(any(test, feature = "snapshot"))]
+#[cfg(feature = "snapshot")]
 pub(super) fn run_pending_content_scans(
     app: &mut App,
     rebase: Option<(&std::path::Path, &std::path::Path)>,

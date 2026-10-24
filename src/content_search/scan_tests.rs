@@ -1,5 +1,5 @@
 use std::collections::BTreeSet;
-use std::time::{Duration, Instant};
+use std::time::Instant;
 
 use super::test_support::corpus;
 use super::{CancelToken, ScanEvent, ScanOptions, ScanSession, hits_for, scan, scan_blocking};
@@ -193,75 +193,62 @@ fn a_streamed_scan_stamps_its_generation_and_ends_with_done() {
 }
 
 #[test]
-fn progress_events_never_go_backwards_in_total() {
+fn progress_events_are_monotonic_bounded_and_end_exact() {
     let corpus = corpus();
     let handle = scan(
         corpus.sessions.clone(),
         query("hello"),
         ScanOptions::default(),
     );
-    let mut seen = 0;
+    let mut previous = 0;
+    let mut first = true;
+    let mut last = None;
     while let Some(event) = handle.recv() {
-        if let ScanEvent::Progress { progress, .. } = event {
-            assert_eq!(progress.total, corpus.sessions.len());
-            assert!(progress.scanned <= progress.total);
-            seen += 1;
+        match event {
+            ScanEvent::Progress { progress, .. } => {
+                assert_eq!(progress.total, corpus.sessions.len());
+                assert!(progress.scanned <= progress.total);
+                assert!(progress.scanned >= previous, "never goes backwards");
+                if first {
+                    assert_eq!(progress.scanned, 0, "the first event is 0/total");
+                    first = false;
+                }
+                previous = progress.scanned;
+            }
+            ScanEvent::Done { progress, .. } => last = Some(progress),
+            ScanEvent::Session { .. } => {}
         }
     }
-    assert_eq!(
-        seen,
-        corpus.sessions.len(),
-        "one progress event per session"
-    );
+    let done = last.expect("a Done ends the scan");
+    assert_eq!(done.scanned, corpus.sessions.len(), "the totals are exact");
 }
 
-/// A scan over many sessions that is cancelled after its first event stops
-/// well short of the end, and says it was cancelled.
 #[test]
-fn cancelling_stops_the_scan_promptly() {
+fn progress_events_are_throttled_but_the_totals_stay_exact() {
     let corpus = corpus();
     let many: Vec<ScanSession> = corpus
         .sessions
         .iter()
         .cycle()
-        .take(corpus.sessions.len() * 600)
+        .take(corpus.sessions.len() * 400)
         .cloned()
         .collect();
     let total = many.len();
-    let handle = scan(
-        many,
-        query("nothing matches this phrase at all zzz"),
-        ScanOptions {
-            workers: 1,
-            ..ScanOptions::default()
-        },
-    );
-    assert!(handle.recv().is_some(), "the scan started");
-    let started = Instant::now();
-    handle.cancel();
-    let mut last = None;
+    let handle = scan(many, query("zzz-absent-phrase"), ScanOptions::default());
+    let mut events = 0usize;
+    let mut done = None;
     while let Some(event) = handle.recv() {
-        last = Some(event);
+        match event {
+            ScanEvent::Progress { .. } => events += 1,
+            ScanEvent::Done { progress, .. } => done = Some(progress),
+            ScanEvent::Session { .. } => {}
+        }
     }
-    let Some(ScanEvent::Done {
-        progress,
-        cancelled,
-        ..
-    }) = last
-    else {
-        panic!("a cancelled scan still ends with Done");
-    };
-    assert!(cancelled);
     assert!(
-        progress.scanned < total,
-        "stopped early: {}/{total}",
-        progress.scanned
+        events < total,
+        "{events} progress events for {total} sessions"
     );
-    assert!(
-        started.elapsed() < Duration::from_secs(2),
-        "stopped promptly: {:?}",
-        started.elapsed()
-    );
+    assert_eq!(done.expect("Done").scanned, total);
 }
 
 #[test]

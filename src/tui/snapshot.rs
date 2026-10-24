@@ -45,8 +45,7 @@ use crate::tui::RunConfig;
 use crate::tui::app::App;
 use crate::tui::runtime::{
     self, Action, cycle_view, dispatch, handle_controls_overlay_key, handle_help_overlay_key,
-    handle_messages_overlay_key, handle_search_overlay_key, handle_viewer_overlay_key, refresh,
-    refresh_from_snapshot,
+    handle_messages_overlay_key, handle_viewer_overlay_key, refresh, refresh_from_snapshot,
 };
 
 /// Tunables for one snapshot pass. Filled from `--snapshot-*` flags
@@ -219,8 +218,20 @@ fn drive_keys(
 /// transcript from the scenario world when a fixture root rebases the
 /// paths. A session with nothing to show leaves a note on stderr.
 fn open_viewer(app: &mut App, rebase: Option<(&std::path::Path, &std::path::Path)>) {
+    let effects = app.update(Msg::ViewSelected);
+    run_effects_opening_viewers(app, effects, rebase);
+}
+
+/// Run effects the snapshot-safe way: a request to view a session opens
+/// the viewer from the scenario world; everything else goes through the
+/// pure executor.
+fn run_effects_opening_viewers(
+    app: &mut App,
+    effects: Vec<crate::tui::effect::Effect>,
+    rebase: Option<(&std::path::Path, &std::path::Path)>,
+) {
     use crate::tui::effect::{Effect, ExecSpec};
-    for effect in app.update(Msg::ViewSelected) {
+    for effect in effects {
         let Effect::Exec(ExecSpec::ViewSession(mut id, open)) = effect else {
             runtime::execute_effects(app, vec![effect]);
             continue;
@@ -275,7 +286,14 @@ fn apply_action(
         Action::OpenWorktreeMenu => runtime::open_worktree_menu_action(app),
         Action::OpenWorktreeCloseDown => runtime::open_worktree_close_down_action(app),
         Action::ControlsOverlayKey(key) => handle_controls_overlay_key(app, key),
-        Action::SearchOverlayKey(key) => handle_search_overlay_key(app, key),
+        Action::SearchOverlayKey(key) => {
+            // A hit that opens the viewer needs the same effect handling
+            // as `v`.
+            runtime::handle_search_overlay_key_with(app, key, &mut |app, msg| {
+                let effects = app.update(msg);
+                run_effects_opening_viewers(app, effects, rebase);
+            });
+        }
         Action::HelpOverlayKey(key) => handle_help_overlay_key(app, key),
         Action::View => open_viewer(app, rebase),
         Action::ViewerOverlayKey(key) => handle_viewer_overlay_key(app, key),

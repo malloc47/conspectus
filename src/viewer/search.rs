@@ -95,8 +95,12 @@ impl ContentKinds {
             return false;
         }
         match turn.kind {
+            // System notes are searched only as hidden turns, so asking
+            // for hidden turns finds what the viewer then shows.
             TurnKind::Message => {
-                self.messages && matches!(turn.role, TurnRole::User | TurnRole::Assistant)
+                self.messages
+                    && (matches!(turn.role, TurnRole::User | TurnRole::Assistant)
+                        || (turn.role == TurnRole::System && turn.hidden))
             }
             TurnKind::CompactionSummary => self.messages,
             TurnKind::ToolUse | TurnKind::ToolResult => self.tools,
@@ -165,6 +169,27 @@ pub fn find_ci(haystack: &str, needle: &str) -> Option<usize> {
     })
 }
 
+/// The indexes of the turns in `doc` that match `query`, in turn order.
+///
+/// Cheaper than [`match_document`] when the caller needs only which
+/// turns match: no snippet is built. A turn is in scope per
+/// [`ContentKinds::includes`].
+pub fn matching_turns<'a>(
+    doc: &'a TranscriptDocument,
+    query: &'a ContentQuery,
+) -> impl Iterator<Item = usize> + 'a {
+    let needle = query.needle();
+    doc.turns
+        .iter()
+        .enumerate()
+        .filter(move |(_, turn)| {
+            needle.is_some_and(|needle| {
+                query.kinds.includes(turn) && find_ci(&turn.body, needle).is_some()
+            })
+        })
+        .map(|(index, _)| index)
+}
+
 /// The hits in `doc` for `query`, in turn order.
 pub fn match_document(doc: &TranscriptDocument, query: &ContentQuery) -> Vec<Hit> {
     let Some(needle) = query.needle() else {
@@ -181,7 +206,7 @@ pub fn match_document(doc: &TranscriptDocument, query: &ContentQuery) -> Vec<Hit
 /// The hit in one turn, if its body contains `needle`.
 pub fn match_turn(turn_index: usize, turn: &TranscriptTurn, needle: &str) -> Option<Hit> {
     let start = find_ci(&turn.body, needle)?;
-    let (snippet, highlight) = snippet_for(&turn.body, start..start + needle.len(), needle);
+    let (snippet, highlight) = snippet_for(&turn.body, start..start + needle.len());
     Some(Hit {
         turn_index,
         role: turn.role,
@@ -290,7 +315,7 @@ pub fn snippet_around(haystack: &str, byte_range: Range<usize>, max_chars: usize
 }
 
 fn chars_for_byte_range(haystack: &str, byte_range: &Range<usize>) -> Option<(usize, usize)> {
-    if byte_range.is_empty() || byte_range.end > haystack.len() {
+    if !is_valid_range(haystack, byte_range) {
         return None;
     }
     let start_char = haystack[..byte_range.start].chars().count();
@@ -299,26 +324,58 @@ fn chars_for_byte_range(haystack: &str, byte_range: &Range<usize>) -> Option<(us
 }
 
 fn valid_byte_range(haystack: &str, range: Range<usize>) -> Option<Range<usize>> {
-    if range.is_empty() || range.end > haystack.len() {
-        return None;
-    }
-    Some(range)
+    is_valid_range(haystack, &range).then_some(range)
+}
+
+/// Whether `range` is non-empty, inside `haystack`, and on character
+/// boundaries at both ends.
+fn is_valid_range(haystack: &str, range: &Range<usize>) -> bool {
+    !range.is_empty()
+        && range.start < range.end
+        && range.end <= haystack.len()
+        && haystack.is_char_boundary(range.start)
+        && haystack.is_char_boundary(range.end)
 }
 
 /// The capped, normalized snippet for a match at `range` in `body`, and
 /// the highlight inside it.
 ///
-/// Only a bounded window of raw text around the match is normalized, so
-/// a match deep in a very large body stays cheap.
-fn snippet_for(body: &str, range: Range<usize>, needle: &str) -> (String, Range<usize>) {
-    let start = char_boundary_back(body, range.start, SNIPPET_WINDOW_CHARS);
+/// The match is located in the raw body, and the highlight follows that
+/// same occurrence through normalization, so the snippet shows the match
+/// the viewer will open. Only a bounded window of raw text around the
+/// match is normalized, so a match deep in a very large body stays
+/// cheap, and the window never starts inside an escape sequence.
+fn snippet_for(body: &str, range: Range<usize>) -> (String, Range<usize>) {
+    let mut start = char_boundary_back(body, range.start, SNIPPET_WINDOW_CHARS);
+    start = before_escape(body, start);
     let end = char_boundary_forward(body, range.end, SNIPPET_WINDOW_CHARS);
-    let window = normalize(&body[start..end]);
-    let needle = normalize(needle);
-    let found = find_ci(&window, &needle).map(|at| at..at + needle.len());
-    let snippet = snippet_around(&window, found.unwrap_or(0..0), SNIPPET_MAX_CHARS);
+    let (window, tracked) =
+        normalize_tracking(&body[start..end], range.start - start..range.end - start);
+    let snippet = snippet_around(&window, tracked, SNIPPET_MAX_CHARS);
     let highlight = snippet.highlight.unwrap_or(0..0);
     (snippet.text, highlight)
+}
+
+/// `index`, or the start of the escape sequence that `index` falls
+/// inside, so a window cut there doesn't leave the tail of a sequence
+/// (such as `[31m`) visible as text.
+fn before_escape(text: &str, index: usize) -> usize {
+    const LOOKBACK: usize = 64;
+    if index == 0 {
+        return 0;
+    }
+    let mut from = index.saturating_sub(LOOKBACK);
+    while !text.is_char_boundary(from) {
+        from += 1;
+    }
+    let Some(esc) = text[from..index].rfind('\u{1b}').map(|at| from + at) else {
+        return index;
+    };
+    let mut chars = text[esc..].char_indices().peekable();
+    chars.next();
+    skip_escape(&mut chars);
+    let after = chars.peek().map_or(text.len(), |(at, _)| esc + at);
+    if after > index { esc } else { index }
 }
 
 /// `index` moved back by up to `chars` characters, on a boundary.
@@ -340,12 +397,17 @@ fn char_boundary_forward(text: &str, index: usize, chars: usize) -> usize {
 
 /// Collapse runs of whitespace to one space, trim the ends, and drop
 /// control characters and terminal escape sequences, so a snippet is one
-/// line of plain text.
-pub fn normalize(text: &str) -> String {
+/// line of plain text. Also maps the byte range `track` of the input to
+/// the byte range of the normalized text it became: the range covers the
+/// characters of `track` that survive, and is empty when none do (a match
+/// made only of control characters or whitespace).
+fn normalize_tracking(text: &str, track: Range<usize>) -> (String, Range<usize>) {
     let mut out = String::with_capacity(text.len().min(SNIPPET_WINDOW_CHARS * 2));
     let mut pending_space = false;
-    let mut chars = text.chars().peekable();
-    while let Some(c) = chars.next() {
+    let mut mapped_start: Option<usize> = None;
+    let mut mapped_end = 0usize;
+    let mut chars = text.char_indices().peekable();
+    while let Some((at, c)) = chars.next() {
         if c == '\u{1b}' {
             skip_escape(&mut chars);
             continue;
@@ -357,23 +419,31 @@ pub fn normalize(text: &str) -> String {
         if c.is_control() {
             continue;
         }
+        let in_track = track.contains(&at);
         if pending_space && !out.is_empty() {
             out.push(' ');
         }
         pending_space = false;
+        if in_track && mapped_start.is_none() {
+            mapped_start = Some(out.len());
+        }
         out.push(c);
+        if in_track {
+            mapped_end = out.len();
+        }
     }
-    out
+    let range = mapped_start.map_or(0..0, |start| start..mapped_end);
+    (out, range)
 }
 
 /// Consume the rest of a terminal escape sequence after `ESC`: a CSI
 /// (`[` ... final byte), an OSC (`]` ... `BEL` or `ESC \`), or a
 /// two-character escape.
-fn skip_escape(chars: &mut std::iter::Peekable<std::str::Chars<'_>>) {
-    match chars.peek().copied() {
+fn skip_escape(chars: &mut std::iter::Peekable<std::str::CharIndices<'_>>) {
+    match chars.peek().map(|(_, c)| *c) {
         Some('[') => {
             chars.next();
-            for c in chars.by_ref() {
+            for (_, c) in chars.by_ref() {
                 if ('\u{40}'..='\u{7e}').contains(&c) {
                     break;
                 }
@@ -381,12 +451,12 @@ fn skip_escape(chars: &mut std::iter::Peekable<std::str::Chars<'_>>) {
         }
         Some(']') => {
             chars.next();
-            while let Some(c) = chars.next() {
+            while let Some((_, c)) = chars.next() {
                 if c == '\u{7}' {
                     break;
                 }
                 if c == '\u{1b}' {
-                    if chars.peek() == Some(&'\\') {
+                    if chars.peek().map(|(_, c)| *c) == Some('\\') {
                         chars.next();
                     }
                     break;
@@ -413,6 +483,34 @@ pub struct SessionHits {
 }
 
 impl SessionHits {
+    /// Summarize one document's matches without building a snippet for
+    /// every hit: counts the matching turns, keeps the latest time, and
+    /// builds the snippet only for the best hit. `None` when nothing
+    /// matches. Agrees with [`SessionHits::from_hits`] over
+    /// [`match_document`].
+    pub fn from_document(doc: &TranscriptDocument, query: &ContentQuery) -> Option<Self> {
+        let needle = query.needle()?;
+        let mut count = 0usize;
+        let mut best: Option<(u8, usize)> = None;
+        let mut latest: Option<DateTime<Utc>> = None;
+        for index in matching_turns(doc, query) {
+            let turn = &doc.turns[index];
+            count += 1;
+            let rank = (kind_priority(turn.kind), index);
+            if best.is_none_or(|current| rank < current) {
+                best = Some(rank);
+            }
+            latest = latest.max(turn.timestamp);
+        }
+        let (_, best_index) = best?;
+        let best = match_turn(best_index, &doc.turns[best_index], needle)?;
+        Some(Self {
+            count,
+            best,
+            latest,
+        })
+    }
+
     /// Aggregate `hits` from one document. `None` when there are none.
     pub fn from_hits(hits: &[Hit]) -> Option<Self> {
         let best = hits

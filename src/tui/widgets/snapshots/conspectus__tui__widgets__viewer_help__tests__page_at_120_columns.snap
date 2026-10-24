@@ -22,11 +22,11 @@ expression: "render_text(120, 30, 0)"
           │  H             Show or hide records the harness's own UI never showed                           █│
           │                                                                                                 █│
           │Finding                                                                                          █│
-          │  /             Find text in the transcript (Esc clears the find). A result opened from a search █│
-          │                shows the tool output, thinking, or aborted turns it matched                     █│
-          │  n             Go to the next match, wrapping at the end                                        ║│
-          │  N             Go to the previous match, wrapping at the start                                  ║│
+          │  /             Find in transcript; a match in hidden content turns that content on              █│
+          │  n             Next match, wrapping at the end                                                  █│
+          │  N             Previous match, wrapping at the start                                            ║│
           │                                                                                                 ║│
           │Viewer                                                                                           ▼│
           │  ?             Show or hide this help                                                            │
+          │j/k/PgDn/PgUp to scroll · Esc/q/? to close                                                        │
           └──────────────────────────────────────────────────────────────────────────────────────────────────┘

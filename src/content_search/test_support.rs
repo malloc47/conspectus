@@ -7,6 +7,7 @@
 use std::fs;
 use std::io::Write;
 use std::path::Path;
+use std::sync::atomic::{AtomicUsize, Ordering};
 
 use rusqlite::{Connection, params};
 use serde_json::{Value, json};
@@ -16,6 +17,7 @@ use crate::viewer::parser::claude_code::ClaudeCodeParser;
 use crate::viewer::parser::codex::CodexParser;
 use crate::viewer::parser::opencode::OpenCodeParser;
 use crate::viewer::parser::pi::PiParser;
+use crate::viewer::parser::{HarnessParser, ParseResult, TranscriptIndex, TranscriptSource};
 
 use super::{ScanSession, SessionKey};
 
@@ -55,7 +57,7 @@ pub fn escape_everything(value: &Value) -> String {
     out
 }
 
-fn write_lines(path: &Path, lines: &[String]) {
+pub fn write_lines(path: &Path, lines: &[String]) {
     fs::create_dir_all(path.parent().expect("parent")).expect("mkdir");
     let mut file = fs::File::create(path).expect("create");
     for line in lines {
@@ -71,7 +73,7 @@ fn locator(harness: &str, key: &str, root: &Path) -> SessionLocator {
     }
 }
 
-fn session(
+pub fn session(
     harness: &str,
     key: &str,
     root: &Path,
@@ -97,7 +99,7 @@ fn encode(value: &Value, plain: bool) -> String {
     }
 }
 
-fn claude_lines(bodies: &[&str], plain: bool) -> Vec<String> {
+pub fn claude_lines(bodies: &[&str], plain: bool) -> Vec<String> {
     let mut lines = Vec::new();
     for (i, body) in bodies.iter().enumerate() {
         let (kind, role) = if i.is_multiple_of(2) {
@@ -360,4 +362,186 @@ impl Words {
         }
         out
     }
+}
+
+/// A parser that wraps another to count reads, run a hook when a read
+/// starts, and optionally panic, so tests can observe and steer a scan.
+pub struct StubParser {
+    inner: &'static dyn HarnessParser,
+    reads: AtomicUsize,
+    on_read: Option<Box<dyn Fn() + Send + Sync>>,
+    /// Panic when asked to read this session key.
+    panic_on_session: Option<String>,
+    /// Panic when asked for the index, which happens outside any one
+    /// session's read.
+    panic_in_index: bool,
+}
+
+impl StubParser {
+    pub fn wrapping(inner: &'static dyn HarnessParser) -> Self {
+        Self {
+            inner,
+            reads: AtomicUsize::new(0),
+            on_read: None,
+            panic_on_session: None,
+            panic_in_index: false,
+        }
+    }
+
+    pub fn on_read(mut self, hook: impl Fn() + Send + Sync + 'static) -> Self {
+        self.on_read = Some(Box::new(hook));
+        self
+    }
+
+    pub fn panicking_on(mut self, session_key: &str) -> Self {
+        self.panic_on_session = Some(session_key.to_string());
+        self
+    }
+
+    pub fn panicking_in_index(mut self) -> Self {
+        self.panic_in_index = true;
+        self
+    }
+
+    /// Leak into a `'static` reference, as sessions need.
+    pub fn leak(self) -> &'static Self {
+        Box::leak(Box::new(self))
+    }
+
+    /// Transcripts read so far through `read_source`.
+    pub fn reads(&self) -> usize {
+        self.reads.load(Ordering::SeqCst)
+    }
+}
+
+impl HarnessParser for StubParser {
+    fn read(&self, locator: &SessionLocator) -> ParseResult {
+        self.inner.read(locator)
+    }
+
+    fn index(&self, state_root: &Path) -> Box<dyn TranscriptIndex> {
+        assert!(!self.panic_in_index, "index exploded");
+        self.inner.index(state_root)
+    }
+
+    fn read_source(&self, source: &TranscriptSource, locator: &SessionLocator) -> ParseResult {
+        self.reads.fetch_add(1, Ordering::SeqCst);
+        if let Some(hook) = &self.on_read {
+            hook();
+        }
+        assert!(
+            self.panic_on_session.as_deref() != Some(locator.session_key.as_str()),
+            "parser exploded on {}",
+            locator.session_key
+        );
+        self.inner.read_source(source, locator)
+    }
+
+    fn candidates(
+        &self,
+        state_root: &Path,
+        runs: &[String],
+        cancelled: &(dyn Fn() -> bool + Sync),
+    ) -> Option<std::collections::HashSet<String>> {
+        self.inner.candidates(state_root, runs, cancelled)
+    }
+}
+
+/// `sessions` with their parser swapped for `parser`.
+pub fn with_parser(
+    sessions: &[ScanSession],
+    parser: &'static dyn HarnessParser,
+) -> Vec<ScanSession> {
+    sessions
+        .iter()
+        .map(|session| ScanSession {
+            parser,
+            ..session.clone()
+        })
+        .collect()
+}
+
+/// Sessions whose transcripts hold text the parsers synthesize rather
+/// than read from the file (placeholders for sealed reasoning, metadata
+/// notes, a branch-summary heading), a message split across blocks, and
+/// one whose ASCII letters are spelled as `\u00XX` escapes. The byte
+/// prefilter has to treat all of these as possible matches.
+pub fn synthesized_corpus() -> Corpus {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let root = dir.path();
+    let mut sessions = Vec::new();
+
+    let claude = root.join("claude");
+    let sealed = [
+        json!({"type":"user","uuid":"a","parentUuid":null,"timestamp":"2026-06-01T10:00:00Z",
+            "message":{"role":"user","content":"start the work"}}),
+        json!({"type":"assistant","uuid":"b","parentUuid":"a","timestamp":"2026-06-01T10:01:00Z",
+            "message":{"role":"assistant","content":[
+                {"type":"thinking","thinking":"","signature":"sig"},
+                {"type":"text","text":"all done"}]}}),
+    ];
+    write_lines(
+        &claude.join("projects/p1/claude-sealed.jsonl"),
+        &sealed.iter().map(ToString::to_string).collect::<Vec<_>>(),
+    );
+    sessions.push(session(
+        "claude-code",
+        "claude-sealed",
+        &claude,
+        &ClaudeCodeParser,
+    ));
+
+    // "needle" with two of its `e`s written as \u0065, valid JSON that a byte
+    // comparison against the plain word would miss.
+    let escaped = json!({"type":"user","uuid":"a","parentUuid":null,
+        "timestamp":"2026-06-01T10:00:00Z",
+        "message":{"role":"user","content":"ne\u{1}dl\u{1}"}})
+    .to_string()
+    .replace("\\u0001", "\\u0065");
+    write_lines(&claude.join("projects/p1/claude-ascii.jsonl"), &[escaped]);
+    sessions.push(session(
+        "claude-code",
+        "claude-ascii",
+        &claude,
+        &ClaudeCodeParser,
+    ));
+
+    let codex = root.join("codex");
+    let lines = [
+        json!({"type":"session_meta","timestamp":"2026-05-12T13:18:53Z","payload":{"id":"x","cwd":"/p"}}),
+        json!({"type":"response_item","timestamp":"2026-05-12T13:19:00Z",
+            "payload":{"type":"reasoning","summary":[],"encrypted_content":"abc"}}),
+        json!({"type":"response_item","timestamp":"2026-05-12T13:20:00Z",
+            "payload":{"type":"message","role":"assistant","content":[
+                {"type":"output_text","text":"first block of text"},
+                {"type":"output_text","text":"second block of text"}]}}),
+    ];
+    write_lines(
+        &codex
+            .join("sessions/2026/05/12")
+            .join("rollout-2026-05-12T13-18-53-codex-sealed.jsonl"),
+        &lines.iter().map(ToString::to_string).collect::<Vec<_>>(),
+    );
+    sessions.push(session("codex", "codex-sealed", &codex, &CodexParser));
+
+    let pi = root.join("pi");
+    let entries = [
+        json!({"type":"session","version":3,"id":"pi-meta","cwd":"/work"}),
+        json!({"type":"message","id":"m0","parentId":null,"timestamp":"2026-05-12T13:20:00Z",
+            "message":{"role":"user","content":"hello pi"}}),
+        json!({"type":"model_change","id":"m1","parentId":"m0","timestamp":"2026-05-12T13:21:00Z",
+            "provider":"acme","modelId":"turbo-9"}),
+        json!({"type":"label","id":"m2","parentId":"m1","timestamp":"2026-05-12T13:22:00Z",
+            "label":"checkpoint","targetId":"m0"}),
+        json!({"type":"branch_summary","id":"m3","parentId":"m2","timestamp":"2026-05-12T13:23:00Z",
+            "summary":"explored the cache layer"}),
+    ];
+    write_lines(
+        &pi.join("--work--")
+            .join("2026-05-12T13-18-53-000Z_pi-meta.jsonl"),
+        &entries.iter().map(ToString::to_string).collect::<Vec<_>>(),
+    );
+    sessions.push(session("pi", "pi-meta", &pi, &PiParser));
+
+    Corpus { dir, sessions }
 }

@@ -69,6 +69,10 @@ pub struct Theme {
     /// aren't running. A concrete color, because `placeholder`'s DIM
     /// does nothing in some terminals; ghost rows are italic as well.
     pub ghost: Color,
+    /// Foreground of the text a search matched, drawn bold and
+    /// underlined wherever a match is picked out of a snippet, so one
+    /// look means "this is what you searched for".
+    pub match_highlight: Color,
     /// No longer drawn: pin slots have their own view and no
     /// placeholder rows. The key stays so existing theme files keep
     /// loading.
@@ -225,6 +229,7 @@ impl Default for Theme {
             link_id: Color::Blue,
             placeholder: Modifier::DIM,
             ghost: Color::DarkGray,
+            match_highlight: Color::Yellow,
             pin_placeholder: Color::LightYellow,
             command_badge: Color::Black,
             secondary_text: Color::DarkGray,
@@ -260,6 +265,15 @@ impl Default for Theme {
 }
 
 impl Theme {
+    /// The style of matched text in a search snippet: the same on every
+    /// surface, a foreground color rather than a background so it reads
+    /// on a selected (reversed) row too.
+    pub fn match_style(&self) -> Style {
+        Style::default()
+            .fg(self.match_highlight)
+            .add_modifier(Modifier::BOLD | Modifier::UNDERLINED)
+    }
+
     /// Color associated with a harness. Accepts either the
     /// canonical harness key (`claude-code`) or the display label
     /// (`claude`) — both resolve to the same entry in
@@ -398,6 +412,10 @@ impl Theme {
                 kind: Color,
             },
             ThemeKey {
+                name: "match_highlight",
+                kind: Color,
+            },
+            ThemeKey {
                 name: "pin_placeholder",
                 kind: Color,
             },
@@ -523,6 +541,7 @@ impl Theme {
             "cwd_mark" => self.cwd_mark = color,
             "link_id" => self.link_id = color,
             "ghost" => self.ghost = color,
+            "match_highlight" => self.match_highlight = color,
             "pin_placeholder" => self.pin_placeholder = color,
             "command_badge" => self.command_badge = color,
             "secondary_text" => self.secondary_text = color,

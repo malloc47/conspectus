@@ -147,8 +147,13 @@ fn pinned_and_history_rows_draw_the_agent_name_as_the_same_chip() {
         (View::Pinned, "conspectus-main"),
         (View::History, "old-experiment"),
         (View::Mux, "config-agent3"),
+        (View::Search, "solo0000"),
     ] {
-        let mut app = app_in(view);
+        let mut app = if view == View::Search {
+            searched(view, RowFilter::default())
+        } else {
+            app_in(view)
+        };
         let buffer = buffer_of(&mut app, 200, 30);
         assert_eq!(
             token_is_a_chip(&buffer, row, "claude"),

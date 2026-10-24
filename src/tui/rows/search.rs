@@ -44,6 +44,17 @@ pub fn kind_word(kind: TurnKind) -> &'static str {
     }
 }
 
+/// The word a speaker has in a hit row, as in the transcript viewer's
+/// gutter.
+pub fn role_word(role: crate::viewer::model::TurnRole) -> &'static str {
+    use crate::viewer::model::TurnRole;
+    match role {
+        TurnRole::User => "you",
+        TurnRole::Assistant => "ai",
+        TurnRole::System => "system",
+    }
+}
+
 pub fn build_search_tree(inputs: SearchBuildInputs<'_>) -> RowTree {
     let SearchBuildInputs {
         snapshot,
@@ -194,7 +205,7 @@ fn hit_rows(session_row: &Row, details: &[Hit], now: Option<i64>) -> Vec<Row> {
             kind: RowKind::Hit(HitRow {
                 session: session.session.clone(),
                 turn_index: hit.turn_index,
-                role: hit.role.header_label(),
+                role: role_word(hit.role),
                 kind: kind_word(hit.kind),
                 age: hit
                     .timestamp

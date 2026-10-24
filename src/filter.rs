@@ -73,6 +73,21 @@ impl ContentDetailMap {
     pub fn is_empty(&self) -> bool {
         self.0.is_empty()
     }
+
+    /// How many sessions have their matching turns read.
+    pub fn len(&self) -> usize {
+        self.0.values().map(BTreeMap::len).sum()
+    }
+
+    /// Forget a session's matching turns, so they are read again.
+    pub fn remove(&mut self, harness_key: &str, session_key: &str) {
+        if let Some(sessions) = self.0.get_mut(harness_key) {
+            sessions.remove(session_key);
+            if sessions.is_empty() {
+                self.0.remove(harness_key);
+            }
+        }
+    }
 }
 
 /// The content query as the row predicate sees it: which sessions

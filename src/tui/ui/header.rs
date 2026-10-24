@@ -198,30 +198,29 @@ pub(super) fn draw_status_bar(app: &App, frame: &mut Frame<'_>, area: Rect) {
 
     let stale = app.refresh_failure().is_some();
 
-    let hints = contextual_status_text(app);
     let scope = match app.focus() {
         Focus::Left => "[left]",
         Focus::Right => "[right]",
     };
-    let settings = render_view_state_chips(app);
 
     let mut spans = Vec::new();
     push_unseen_messages_chip(app, theme, &mut spans);
     push_in_flight_chips(app, theme, &mut spans);
-    spans.extend([
-        span!(theme.placeholder; "{scope} "),
-        span!(Style::default().fg(theme.cwd_mark); "{settings}"),
-        span!(theme.placeholder; " · {hints}"),
-    ]);
-
+    spans.push(span!(theme.placeholder; "{scope} "));
     if stale {
+        // Reserved up front so the stale mark is never the thing that
+        // gets pushed off the end.
         spans.push(span!(
             Style::default().fg(theme.warning).add_modifier(Modifier::BOLD);
-            "  stale"
+            "stale  "
         ));
     }
-
-    push_provider_chips(app, theme, &mut spans);
+    let mut provider_spans = Vec::new();
+    push_provider_chips(app, theme, &mut provider_spans);
+    let reserved = spans_cells(&spans) + spans_cells(&provider_spans);
+    let room = usize::from(area.width).saturating_sub(reserved);
+    spans.extend(fit_status_segments(app, theme, room));
+    spans.extend(provider_spans);
 
     let widget = Paragraph::new(Line::from(spans));
     frame.render_widget(widget, area);
@@ -282,13 +281,9 @@ pub(super) fn push_in_flight_chips(app: &App, theme: &Theme, spans: &mut Vec<Spa
 /// `App::provider_status`.
 pub(super) fn push_provider_chips(app: &App, theme: &Theme, spans: &mut Vec<Span<'static>>) {
     let status = app.provider_status();
-    let mut leading_space = false;
 
     let mut push_chip = |label: &str, style: Style| {
-        if !leading_space {
-            spans.push(Span::raw("  "));
-            leading_space = true;
-        }
+        spans.push(Span::raw("  "));
         spans.push(span!(style; "{label}"));
     };
 
@@ -316,27 +311,26 @@ pub(super) fn push_provider_chips(app: &App, theme: &Theme, spans: &mut Vec<Span
     }
 }
 
-/// Render the active view state in a compact, always-visible form
-/// so grouping / filtering / sorting are discoverable without
-/// opening the controls overlay.
-pub(super) fn render_view_state_chips(app: &App) -> String {
+/// The active view state in a compact, always-visible form so grouping,
+/// filtering, and sorting are discoverable without opening the controls
+/// overlay, as separately droppable pieces, each with the priority it
+/// keeps when the bar is too narrow for all of them (1 stays longest).
+fn view_state_segments(app: &App) -> Vec<(u8, String)> {
     let filter = render_filter_chips(app.filter());
     let filter = if filter.is_empty() {
         "all".to_string()
     } else {
         filter
     };
-    let mut chips = format!(
-        "group:{} · filter:{} · sort:{}",
-        app.grouping().as_str(),
-        filter,
-        sort_chip_label(app.sort())
-    );
+    let mut segments = vec![
+        (5, format!("group:{}", app.grouping().as_str())),
+        (3, format!("filter:{filter}")),
+        (6, format!("sort:{}", sort_chip_label(app.sort()))),
+    ];
     if let Some(find) = render_find_chip(app) {
-        chips.push_str(" · ");
-        chips.push_str(&find);
+        segments.push((1, find));
     }
-    chips
+    segments
 }
 
 /// The content search as a chip: its text, then how far the scan has
@@ -355,12 +349,7 @@ pub(super) fn render_find_chip(app: &App) -> Option<String> {
     ) {
         return Some(format!("find:\"{text}\" not applied here"));
     }
-    let progress = match content.status {
-        crate::tui::ContentStatus::Running(progress) => {
-            format!("{}/{}", progress.scanned, progress.total)
-        }
-        crate::tui::ContentStatus::Done(_) => format!("{} found", content.hits().len()),
-    };
+    let progress = content.status_note(std::time::Instant::now());
     Some(format!("find:\"{text}\" {progress}"))
 }
 
@@ -488,7 +477,9 @@ pub(super) fn snapshot_counts(handle: Option<&SnapshotHandle>) -> (usize, usize)
     (agents, mux)
 }
 
-pub(super) fn contextual_status_text(app: &App) -> String {
+/// The key hints as separately droppable pieces with the priority each
+/// keeps on a narrow bar.
+fn contextual_status_segments(app: &App) -> Vec<(u8, String)> {
     let focus_hint = match app.focus() {
         Focus::Left => "j/k move · h/l fold · Enter default",
         // With the right pane focused, j/k drive the graph
@@ -497,13 +488,100 @@ pub(super) fn contextual_status_text(app: &App) -> String {
         // and Backspace pops the breadcrumb stack.
         Focus::Right => "j/k cursor · Enter drill/expand · e group · Backspace back",
     };
-    let action_hint = default_action_status_hint(app);
     let refresh_hint = if app.active_view() == crate::tui::View::Prs {
         "r refresh · ^R forges"
     } else {
         "r refresh"
     };
-    format!("{action_hint} · {focus_hint} · Tab focus · {refresh_hint} · q quit")
+    vec![
+        (4, default_action_status_hint(app)),
+        // With the right pane focused its own keys matter more than the
+        // action hint, which describes the left pane's row.
+        (
+            if app.focus() == Focus::Right { 3 } else { 7 },
+            focus_hint.to_string(),
+        ),
+        (8, "Tab focus".to_string()),
+        (9, refresh_hint.to_string()),
+        (2, "q quit".to_string()),
+    ]
+}
+
+/// The status bar's settings chips and key hints, fitted to `room`
+/// cells: pieces drop in order of priority (the least important first),
+/// a `…` marks that some were dropped, and nothing is cut mid-word.
+fn fit_status_segments(app: &App, theme: &Theme, room: usize) -> Vec<Span<'static>> {
+    #[derive(Clone)]
+    struct Piece {
+        order: usize,
+        priority: u8,
+        text: String,
+        settings: bool,
+    }
+    let mut pieces: Vec<Piece> = Vec::new();
+    for (priority, text) in view_state_segments(app) {
+        pieces.push(Piece {
+            order: pieces.len(),
+            priority,
+            text,
+            settings: true,
+        });
+    }
+    for (priority, text) in contextual_status_segments(app) {
+        pieces.push(Piece {
+            order: pieces.len(),
+            priority,
+            text,
+            settings: false,
+        });
+    }
+    let width = |kept: &[&Piece]| -> usize {
+        kept.iter()
+            .map(|piece| UnicodeWidthStr::width(piece.text.as_str()))
+            .sum::<usize>()
+            + 3 * kept.len().saturating_sub(1)
+    };
+    let choose = |room: usize| -> Vec<Piece> {
+        let mut by_priority: Vec<&Piece> = pieces.iter().collect();
+        by_priority.sort_by_key(|piece| (piece.priority, piece.order));
+        let mut kept: Vec<&Piece> = Vec::new();
+        for piece in by_priority {
+            let mut trial = kept.clone();
+            trial.push(piece);
+            if width(&trial) <= room {
+                kept = trial;
+            }
+        }
+        kept.sort_by_key(|piece| piece.order);
+        kept.into_iter().cloned().collect()
+    };
+    let mut kept = choose(room);
+    let dropped = kept.len() < pieces.len();
+    if dropped {
+        kept = choose(room.saturating_sub(2));
+    }
+    let mut spans: Vec<Span<'static>> = Vec::new();
+    for (index, piece) in kept.iter().enumerate() {
+        if index > 0 {
+            spans.push(span!(theme.placeholder; " · "));
+        }
+        if piece.settings {
+            spans.push(span!(Style::default().fg(theme.cwd_mark); "{}", piece.text));
+        } else {
+            spans.push(span!(theme.placeholder; "{}", piece.text));
+        }
+    }
+    if dropped {
+        spans.push(span!(theme.placeholder; " …"));
+    }
+    spans
+}
+
+fn spans_cells(spans: &[Span<'_>]) -> usize {
+    spans
+        .iter()
+        .map(|span| UnicodeWidthStr::width(span.content.as_ref()))
+        .sum()
 }
 
 /// Status-bar action hint that advertises `Enter` as the primary

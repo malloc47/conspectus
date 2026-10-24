@@ -25,4 +25,4 @@ updated 0s ago · 0/1 sessions · 1 mux
 │                                                     ││                                                     │
 │                                                     ││                                                     │
 └─────────────────────────────────────────────────────┘└─────────────────────────────────────────────────────┘
-[left] group:none · filter:all · sort:hierarchy · Enter rebuild · . menu (pin, forget, plan, clean up) · j/k m
+[left] group:none · filter:all · Enter rebuild · . menu (pin, forget, plan, clean up) · Tab focus · q quit …

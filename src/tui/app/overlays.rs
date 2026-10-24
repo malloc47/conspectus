@@ -567,22 +567,26 @@ impl App {
         }
     }
 
-    /// What `/` opens: the Content prompt in the Search view, the search
-    /// overlay elsewhere. Returns the status hint to show.
+    /// What `/` opens: the search overlay, in the contents scope in the
+    /// Search view (the query filled in when one is active). Returns
+    /// the status hint to show.
     pub fn open_search_entry(&mut self) -> String {
-        use crate::tui::keybindings::overlay::{SEARCH_KEYS, footer};
-        if self.active_view() == crate::tui::View::Search {
-            let ctx = self.controls_context();
-            self.modal_stack.push(crate::tui::Modal::Controls(
-                crate::tui::widgets::controls::ControlsOverlayState::new_at_content(&ctx),
-            ));
-            return "search contents: type a query · Enter search · Esc cancel".to_string();
+        use crate::tui::keybindings::overlay::{SEARCH_CONTENT_KEYS, SEARCH_KEYS, footer};
+        let in_search_view = self.active_view() == crate::tui::View::Search;
+        if in_search_view && !self.config.live_preview_enabled {
+            return crate::tui::widgets::search::CONTENT_SEARCH_OFF.to_string();
         }
         self.open_search_overlay();
-        format!(
-            "search: type to filter · Enter pick · Esc close · {}",
-            footer(SEARCH_KEYS)
-        )
+        if in_search_view {
+            if let Some(crate::tui::Modal::Search(state)) = self.modal_stack.last_mut() {
+                state.start_in_contents();
+            }
+            return format!(
+                "search contents: type a query · {}",
+                footer(SEARCH_CONTENT_KEYS)
+            );
+        }
+        format!("search: type to filter · {}", footer(SEARCH_KEYS))
     }
 
     /// Push a search overlay onto the modal stack: in the contents scope

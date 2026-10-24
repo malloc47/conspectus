@@ -233,7 +233,8 @@ While a content filter is active (`--contains TEXT`, or the Content row in
 Controls), the rows are the sessions whose transcripts mention the text, and
 each one carries a dim `N hits` chip between the state cell and the label.
 The header count reads `matching/total sessions` and the footer shows
-`find:"TEXT"` with the number found, plus `searching n/m` while the scan runs.
+`find:"TEXT"` with `searching n/m` while the scan runs and `N sessions`
+(plus `· M skipped`) once it is done.
 The text lives only in memory. Pinned and History ignore the filter and say so.
 
 <!-- frame: keys="" width=170 height=30 -->
@@ -551,20 +552,20 @@ The Sessions view's session row, taken from its flat layout, with the
 `N hits` chip and the best snippet where a message preview would go. The age is the
 session's last activity, as everywhere else, not the time of the match.
 
-<!-- frame: keys="6/the<Enter>" width=130 height=20 -->
+<!-- frame: keys="6/the<C-f>" width=130 height=20 -->
 ```text
 ┌ ► sessions · mux · prs · pinned · history · search ───────────┐
-│  ● showcase   claude       1h  ∘  project           2 hits    │
-│  ● showcase   pi           2h  ∘  repo-a            2 hits    │
+│  ● ◉ showcase   claude       1h  ∘  project           2 hits  │
+│  ●   showcase   pi           2h  ∘  repo-a            2 hits  │
 ```
 
-<!-- frame: keys="6/the<Enter><C-g>" width=130 height=20 -->
+<!-- frame: keys="6/the<C-f><C-g>" width=130 height=20 -->
 ```text
 ┌ ► sessions · mux · prs · pinned · history · search ───────────┐
-│▼ project  (1)  ▲                                              │
-│    ● showcase   claude       1h  ∘  project           2 hits  │
-│▼ repo-a   (1)                                                 │
-│    ● showcase   pi           2h  ∘  repo-a            2 hits  │
+│▼   project  (1)  ▲                                            │
+│    ● ◉ showcase   claude       1h  ∘  project           2 hits│
+│▼   repo-a   (1)                                               │
+│    ●   showcase   pi           2h  ∘  repo-a            2 hits│
 ```
 
 ### Hit row
@@ -574,20 +575,20 @@ Under a session when results are listed per turn. It has no kind glyph.
 | # | Cell | Source | Condition | Style |
 |---|---|---|---|---|
 | 1 | Turn | `turn N`, counting from 1 | always | dim |
-| 2 | Role | `you`, `assistant`, or `system` | always | dim |
-| 3 | Kind | `message`, `summary`, `tool call`, `tool output`, or `thinking` | always | dim |
+| 2 | Role | `you`, `ai`, or `system`, as in the transcript viewer's gutter | always | dim, padded to 6 |
+| 3 | Kind | `message`, `summary`, `tool call`, `tool output`, or `thinking` | always | dim, padded to 11 so the age and snippet line up |
 | 4 | Age | time since the turn was written, or a dash | always | dim |
-| 5 | Snippet | the text around the match, the match bold and underlined | when room remains | dim italic |
+| 5 | Snippet | the text around the match, cropped so the match stays on screen and cut on word boundaries; the match in the theme's match style (bold, underlined) | when room remains | dim italic |
 
-<!-- frame: keys="6/the<Enter>f<Down><Down><Down><Down><Down><Down><Down><Down><Space><Esc>" width=150 height=20 -->
+<!-- frame: keys="6/the<C-f>f<Up><Space><Esc>" width=150 height=20 -->
 ```text
 ┌ ► sessions · mux · prs · pinned · history · search ─────────────────────┐
-│▼ ● showcase   claude       1h  ∘  project           2 hits  Expand the …│
-│    turn 3     you        message   107d  Expand the notes into a releas…│
-│    turn 4     assistant  message   107d  I expanded `notes.md` into a r…│
-│▼ ● showcase   pi           2h  ∘  repo-a            2 hits  Which tests…│
-│    turn 1     you        message   107d  Which tests cover the fork ind…│
-│    turn 2     assistant  message   107d  `fork_index_tests.rs` covers i…│
+│▼ project  ~/repos/project                                               │
+│    ▣ release-prep   stopped    4d   claude     ~/repos/project          │
+│    ◇ hotfix/login   removed    5d              project · hotfix/login   │
+│    ▣ bugfix-sprint  stopped    6d   claude     ~/repos/project          │
+│    ▣ docs-sweep     stopped    9d   claude     ~/repos/project          │
+│    ◇ spike/cache    removed   12d              project · spike/cache    │
 ```
 
 ## Union view

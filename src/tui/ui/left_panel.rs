@@ -247,7 +247,7 @@ pub(super) fn empty_left_panel_text(app: &App) -> String {
     }
     if app.active_view() == crate::tui::View::Search {
         if !app.config().live_preview_enabled {
-            return "Content search is off while live preview is disabled.".to_string();
+            return format!("{}.", crate::tui::widgets::search::CONTENT_SEARCH_OFF);
         }
         if app.content().is_none() {
             return "Press `/` to search session contents.".to_string();
@@ -265,7 +265,7 @@ pub(super) fn empty_left_panel_text(app: &App) -> String {
                 content.text
             ),
             crate::tui::ContentStatus::Done(_) => format!(
-                "No sessions match \"{}\".\nPress `F` to clear filters, `f` to edit.",
+                "No sessions match \"{}\".\nPress `/` to search again, `F` to clear.",
                 content.text
             ),
         };
@@ -497,7 +497,7 @@ pub(super) struct GroupAlign {
     /// Column widths for the mixed-kind rows of the Pinned and History
     /// views.
     pub(super) mixed: MixedAlign,
-    /// Whether the Sessions, Mux, and PRs rows reserve the pin marker
+    /// Whether the Sessions, Mux, PRs, and Search rows reserve the pin marker
     /// cell: once any row in the tree is pinned, every row holds its
     /// place so the columns don't move.
     pub(super) native_marker: bool,
@@ -508,7 +508,10 @@ pub(super) struct GroupAlign {
 fn native_marker_reserved(app: &App) -> bool {
     if !matches!(
         app.active_view(),
-        crate::tui::View::Sessions | crate::tui::View::Mux | crate::tui::View::Prs
+        crate::tui::View::Sessions
+            | crate::tui::View::Mux
+            | crate::tui::View::Prs
+            | crate::tui::View::Search
     ) {
         return false;
     }
@@ -1270,8 +1273,8 @@ fn render_hit_spans(
     let secondary = Style::default().fg(theme.secondary_text);
     let mut spans = vec![
         span!(secondary; "turn {:<4}", hit.turn_index + 1),
-        span!(secondary; "  {:<9}", hit.role),
-        span!(theme.placeholder; "  {:<8}", hit.kind),
+        span!(secondary; "  {:<6}", hit.role),
+        span!(theme.placeholder; "  {:<11}", hit.kind),
         span!(secondary; "  {:>4}", hit.age),
     ];
     let used = spans_width(&spans);
@@ -1289,35 +1292,31 @@ fn render_hit_spans(
 }
 
 /// `text` in the preview style with the byte range `highlight` picked
-/// out, cut to `budget` cells.
+/// out in the theme's match style, cropped around the match to `budget`
+/// cells so the match is always on screen.
 fn append_snippet(
     spans: &mut Vec<Span<'static>>,
     text: &str,
     highlight: &std::ops::Range<usize>,
-    mut budget: usize,
+    budget: usize,
     theme: &Theme,
 ) {
-    let (start, end) = (
-        highlight.start.min(text.len()),
-        highlight.end.min(text.len()),
-    );
-    let (before, mid, after) =
-        if text.is_char_boundary(start) && text.is_char_boundary(end) && start <= end {
-            (&text[..start], &text[start..end], &text[end..])
-        } else {
-            (text, "", "")
-        };
+    let fitted = crate::tui::widgets::snippet::fit(text, highlight, budget);
     let plain = Style::default()
         .fg(theme.secondary_text)
         .add_modifier(Modifier::ITALIC);
-    let marked = Style::default().add_modifier(Modifier::BOLD | Modifier::UNDERLINED);
-    for (piece, style) in [(before, plain), (mid, marked), (after, plain)] {
-        if piece.is_empty() || budget == 0 {
-            continue;
+    let (before, mid, after) = match fitted.highlight.clone() {
+        Some(range) => (
+            &fitted.text[..range.start],
+            &fitted.text[range.clone()],
+            &fitted.text[range.end..],
+        ),
+        None => (fitted.text.as_str(), "", ""),
+    };
+    for (piece, style) in [(before, plain), (mid, theme.match_style()), (after, plain)] {
+        if !piece.is_empty() {
+            spans.push(Span::styled(piece.to_string(), style));
         }
-        let shown = truncate_to_width(piece, budget);
-        budget = budget.saturating_sub(UnicodeWidthStr::width(shown.as_str()));
-        spans.push(Span::styled(shown, style));
     }
 }
 

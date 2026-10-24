@@ -4,7 +4,8 @@
 //! wrapping splits across two lines is not painted, and a match in
 //! Markdown source whose markers are stripped on screen (`**bold**`) is
 //! painted only when the visible text contains it. The match the viewer
-//! is on is drawn reversed; the others are underlined.
+//! is on is drawn reversed; the others use the theme's match style, the
+//! same as a match in any other snippet.
 
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
@@ -42,9 +43,7 @@ pub fn highlight_matches(
         let style = if current == Some(start.turn_index) {
             Style::new().add_modifier(Modifier::REVERSED | Modifier::BOLD)
         } else {
-            Style::new()
-                .fg(theme.warning)
-                .add_modifier(Modifier::UNDERLINED)
+            theme.match_style()
         };
         *line = paint(line, cache.leader, &find.query, style);
     }

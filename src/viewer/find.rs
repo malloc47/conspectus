@@ -15,7 +15,7 @@
 
 use crate::viewer::input::ViewerEffect;
 use crate::viewer::model::TurnKind;
-use crate::viewer::search::{ContentKinds, ContentQuery, find_ci, match_document};
+use crate::viewer::search::{ContentKinds, ContentQuery, find_ci, matching_turns};
 use crate::viewer::state::{ToolDetail, ViewerOpen, ViewerState};
 
 /// How far from the remembered turn to look for a match when the
@@ -198,12 +198,10 @@ impl ViewerState {
         self.find.matches = if query.is_empty() {
             Vec::new()
         } else {
-            match_document(
+            matching_turns(
                 &self.document,
                 &ContentQuery::new(query.clone(), self.find_kinds()),
             )
-            .into_iter()
-            .map(|hit| hit.turn_index)
             .collect()
         };
         let everything = ContentKinds {
@@ -216,8 +214,8 @@ impl ViewerState {
         self.find.hidden_matches = if query.is_empty() {
             0
         } else {
-            match_document(&self.document, &ContentQuery::new(query, everything))
-                .len()
+            matching_turns(&self.document, &ContentQuery::new(query, everything))
+                .count()
                 .saturating_sub(self.find.matches.len())
         };
         let from = match prefer {

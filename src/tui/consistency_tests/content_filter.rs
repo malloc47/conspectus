@@ -320,13 +320,16 @@ fn the_header_shows_the_query_and_the_scan_and_rows_show_their_hits() {
     start(&mut app, "needle");
     finish_with(&mut app, &[&matched], false);
     let running = frame(&mut app, 170, 30);
-    assert!(running.contains("find:\"needle\" 1/1"), "{running}");
+    assert!(
+        running.contains("find:\"needle\" searching 1/1"),
+        "{running}"
+    );
     assert!(running.contains("2 hits"), "{running}");
     assert!(running.contains("mentions the needle"), "{running}");
 
     finish_with(&mut app, &[], true);
     let done = frame(&mut app, 170, 30);
-    assert!(done.contains("find:\"needle\" 1 found"), "{done}");
+    assert!(done.contains("find:\"needle\" 1 session"), "{done}");
 }
 
 #[test]

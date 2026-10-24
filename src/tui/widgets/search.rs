@@ -31,6 +31,9 @@ use crate::viewer::search::{ContentKinds, Grouping};
 /// word does not start a scan per letter.
 pub const DEBOUNCE: Duration = Duration::from_millis(200);
 
+/// Why contents search cannot be chosen when live preview is off.
+pub const CONTENT_SEARCH_OFF: &str = "Content search is off while live preview is disabled";
+
 /// What the overlay searches.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum SearchScope {
@@ -154,6 +157,14 @@ impl SearchOverlayState {
 
     pub fn notice(&self) -> Option<&'static str> {
         self.notice
+    }
+
+    /// Switch to the contents scope if it is available and not already
+    /// chosen, as the Search view's `/` does.
+    pub fn start_in_contents(&mut self) {
+        if self.scope == SearchScope::Rows && self.contents_enabled {
+            self.toggle_scope();
+        }
     }
 
     /// The host reports how many contents results there are, so the
@@ -294,7 +305,7 @@ impl SearchOverlayState {
                 self.toggle_scope();
                 SearchOutcome::Continue
             }
-            Some(SearchKey::Group) => {
+            Some(SearchKey::Results) => {
                 self.group = match self.group {
                     Grouping::Session => Grouping::Message,
                     Grouping::Message => Grouping::Session,
@@ -353,7 +364,7 @@ impl SearchOverlayState {
                 self.edited_at = Some(Instant::now());
             }
             SearchScope::Rows => {
-                self.notice = Some("Content search is off while live preview is disabled");
+                self.notice = Some(CONTENT_SEARCH_OFF);
             }
         }
     }
@@ -412,13 +423,20 @@ impl Widget for SearchOverlayWidget<'_> {
         let contents = self.state.scope() == SearchScope::Contents;
         let title = match (contents, self.content) {
             (true, Some(view)) => {
-                line![format!(" / search contents ({} results) ", view.rows.len())]
+                let n = view.rows.len();
+                line![format!(
+                    " / search contents ({n} {}) ",
+                    if n == 1 { "result" } else { "results" }
+                )]
             }
             (true, None) => line![" / search contents "],
-            (false, _) => line![format!(
-                " / search ({} matches) ",
-                self.state.matches().len()
-            )],
+            (false, _) => {
+                let n = self.state.matches().len();
+                line![format!(
+                    " / search ({n} {}) ",
+                    if n == 1 { "match" } else { "matches" }
+                )]
+            }
         };
         let body = SearchBody {
             state: self.state,
@@ -480,12 +498,37 @@ impl Widget for SearchBody<'_> {
             return;
         }
 
-        // Divider + ranked list.
+        // Footer hints at the bottom, then the notice (if Tab was refused)
+        // under the query, then the ranked list.
+        let hint_rows = self.render_footer(
+            area,
+            buf,
+            &crate::tui::keybindings::overlay::footer(
+                crate::tui::keybindings::overlay::SEARCH_KEYS,
+            ),
+        );
+        let notice_rows = u16::from(self.state.notice().is_some());
+        if let Some(notice) = self.state.notice() {
+            let rect = Rect {
+                x: area.x,
+                y: area.y.saturating_add(1),
+                width: area.width,
+                height: 1,
+            };
+            let text = crate::tui::widgets::popup_frame::ellipsize(notice, area.width as usize);
+            Paragraph::new(line![
+                span!(Style::default().fg(self.theme.warning); "{text}")
+            ])
+            .render(rect, buf);
+        }
         let list_area = Rect {
             x: area.x,
-            y: area.y.saturating_add(1),
+            y: area.y.saturating_add(1 + notice_rows),
             width: area.width,
-            height: area.height.saturating_sub(1),
+            height: area
+                .height
+                .saturating_sub(1 + notice_rows)
+                .saturating_sub(hint_rows),
         };
         if self.state.matches().is_empty() {
             let label = if self.state.query().is_empty() {
@@ -536,28 +579,14 @@ impl SearchBody<'_> {
     /// The contents scope: scan status, results, and the key hints.
     fn render_contents(&self, area: Rect, buf: &mut Buffer) {
         use crate::tui::keybindings::overlay::{SEARCH_CONTENT_KEYS, footer};
-        use crate::tui::widgets::popup_frame::{ellipsize, wrapped_lines};
+        use crate::tui::widgets::popup_frame::ellipsize;
 
         let width = area.width as usize;
         let empty = ContentView::default();
         let view = self.content.unwrap_or(&empty);
 
-        // Footer: the generated key hints, wrapped, at the bottom.
-        let hints = wrapped_lines(&footer(SEARCH_CONTENT_KEYS), 0, width);
-        let hint_rows = hints
-            .len()
-            .min(3)
-            .min(area.height.saturating_sub(3) as usize);
-        let hint_top = area.y + area.height - u16::try_from(hint_rows).unwrap_or(0);
-        for (i, text) in hints.iter().take(hint_rows).enumerate() {
-            let rect = Rect {
-                x: area.x,
-                y: hint_top + u16::try_from(i).unwrap_or(0),
-                width: area.width,
-                height: 1,
-            };
-            Paragraph::new(line![span!(self.theme.placeholder; "{text}")]).render(rect, buf);
-        }
+        let hint_rows = self.render_footer(area, buf, &footer(SEARCH_CONTENT_KEYS));
+        let hint_top = area.y + area.height - hint_rows;
 
         // Status row: what is searched and how far the scan has got.
         let status = ellipsize(&self.status_text(view), width);
@@ -605,13 +634,35 @@ impl SearchBody<'_> {
         Paragraph::new(lines).render(list_area, buf);
     }
 
+    /// The key hints, wrapped to the modal and drawn on its last rows.
+    /// Returns how many rows they took.
+    fn render_footer(&self, area: Rect, buf: &mut Buffer, hints: &str) -> u16 {
+        let lines = crate::tui::widgets::popup_frame::wrapped_lines(hints, 0, area.width as usize);
+        let rows = lines
+            .len()
+            .min(4)
+            .min(area.height.saturating_sub(3) as usize);
+        let rows = u16::try_from(rows).unwrap_or(0);
+        let top = area.y + area.height - rows;
+        for (i, text) in lines.iter().take(usize::from(rows)).enumerate() {
+            let rect = Rect {
+                x: area.x,
+                y: top + u16::try_from(i).unwrap_or(0),
+                width: area.width,
+                height: 1,
+            };
+            Paragraph::new(line![span!(self.theme.placeholder; "{text}")]).render(rect, buf);
+        }
+        rows
+    }
+
     fn status_text(&self, view: &ContentView) -> String {
         if let Some(notice) = self.state.notice() {
             return notice.to_string();
         }
         let group = match self.state.group() {
-            Grouping::Session => "by session",
-            Grouping::Message => "by message",
+            Grouping::Session => "results by session",
+            Grouping::Message => "results by message",
         };
         let kinds = self.state.kinds();
         let mut what = vec!["messages"];
@@ -624,7 +675,15 @@ impl SearchBody<'_> {
         let mut text = format!("{group} · {}", what.join(" + "));
         if view.total > 0 {
             if view.done {
-                text.push_str(&format!(" · {} sessions searched", view.total));
+                text.push_str(&format!(
+                    " · {} {} searched",
+                    view.total,
+                    if view.total == 1 {
+                        "session"
+                    } else {
+                        "sessions"
+                    }
+                ));
             } else {
                 text.push_str(&format!(" · {}/{} sessions", view.scanned, view.total));
             }
@@ -679,17 +738,14 @@ fn content_row_line(
     spans.push(span!(dim; "  "));
     used += 2;
     let budget = width.saturating_sub(used).max(8);
-    let snippet = crate::tui::search::snippet_around(
+    let snippet = crate::tui::widgets::snippet::fit(
         &row.snippet,
-        row.highlight.clone().unwrap_or(0..0),
+        &row.highlight.clone().unwrap_or(0..0),
         budget,
     );
     match snippet.highlight.clone() {
         Some(range) => {
-            let match_style = Style::default()
-                .fg(theme.warning)
-                .add_modifier(Modifier::BOLD)
-                .add_modifier(mark);
+            let match_style = theme.match_style().add_modifier(mark);
             spans.push(span!(dim; "{}", &snippet.text[..range.start]));
             spans.push(span!(match_style; "{}", &snippet.text[range.clone()]));
             spans.push(span!(dim; "{}", &snippet.text[range.end..]));
@@ -753,12 +809,7 @@ fn build_match_line(
         // The matched portion always renders bold + yellow so it
         // pops on both cursor and non-cursor rows; pre/post context
         // dims only when the row isn't the cursor.
-        let match_style = span_style(
-            false,
-            Style::default()
-                .fg(theme.warning)
-                .add_modifier(Modifier::BOLD),
-        );
+        let match_style = span_style(false, theme.match_style());
         if let Some(range) = snippet.highlight.clone() {
             let pre = snippet.text[..range.start].to_string();
             let mid = snippet.text[range.clone()].to_string();

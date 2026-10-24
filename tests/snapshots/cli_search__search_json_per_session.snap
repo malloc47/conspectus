@@ -29,5 +29,6 @@ expression: stdout_of(cmd)
     "skipped": 0,
     "total": 2,
     "without_parser": 0
-  }
+  },
+  "truncated": []
 }

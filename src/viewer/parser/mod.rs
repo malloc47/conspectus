@@ -50,13 +50,16 @@ pub trait HarnessParser: Send + Sync {
     /// sessions in a database rather than a file each. `None` means the
     /// parser can't narrow, so every session is a candidate. The answer
     /// may include sessions that don't match, but never omits one that
-    /// does.
+    /// does: any failure, or a database that lacks the expected tables,
+    /// is `None`, never an empty set. `cancelled` is polled between
+    /// queries so a long selection can be abandoned.
     fn candidates(
         &self,
         state_root: &Path,
         runs: &[String],
+        cancelled: &(dyn Fn() -> bool + Sync),
     ) -> Option<std::collections::HashSet<String>> {
-        let _ = (state_root, runs);
+        let _ = (state_root, runs, cancelled);
         None
     }
 }

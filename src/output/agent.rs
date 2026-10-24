@@ -226,6 +226,27 @@ fn row_matches(
     options.filter.matches_session(&inputs)
 }
 
+/// The `(harness key, session key)` of every session that passes
+/// `options.filter`, the same predicate the sessions table applies, so a
+/// command that needs only the matching sessions agrees with the table.
+pub fn sessions_passing_filter(
+    snapshot: &GraphSnapshot,
+    options: &RenderOptions,
+) -> std::collections::BTreeSet<(String, String)> {
+    let sessions = collect_session_rows(snapshot);
+    let mux_lookup = collect_mux_lookup(snapshot);
+    sessions
+        .iter()
+        .filter(|row| row_matches(options, row, &mux_lookup))
+        .map(|row| {
+            (
+                row.agent.harness_key.clone(),
+                row.agent.id.session_key.clone(),
+            )
+        })
+        .collect()
+}
+
 // -----------------------------------------------------------------------------
 // In-memory collectors
 // -----------------------------------------------------------------------------

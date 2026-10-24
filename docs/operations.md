@@ -282,6 +282,7 @@ cwd_mark           = "cyan"
 link_id            = "blue"
 secondary_text     = "dark_gray"   # short ids + preview snippets
 disclosure         = "cyan"        # the ▶ / ▼ tree affordance
+match_highlight    = "yellow"      # text a search matched (bold, underlined)
 divider            = "dim"
 panel_focus_accent = "cyan"        # the ▸ marker on the active pane title
                                    # and the detail-pane section chip
@@ -472,11 +473,27 @@ Flags:
 - `--tools`, `--thinking`: also search tool calls and output, or thinking.
 - `--harness H` (repeatable), `--max-age DURATION`, `--mux-state STATE`:
   narrow the sessions searched, with the same meaning as on `table`.
-- `--limit N`: stop after N results.
+- `--limit N`: stop after N results (at least 1).
 - `--format table|json`; `--width N` and `--color auto|always|never`
   shape the table (the match is bold on a terminal).
-- `--verbose`: report how many sessions were searched and skipped on
-  stderr even when stderr is not a terminal.
+- `--verbose`: report how many sessions were searched on stderr even
+  when stderr is not a terminal, how many were skipped because their
+  transcript could not be read, and how many belong to a harness with no
+  transcript parser (and so were not searched).
+
+**Table.** `--group session` prints `SESSION`, `HARNESS`, `HITS`,
+`LATEST` (how long ago the newest hit was) and `SNIPPET`; `--group
+message` prints `SESSION`, `HARNESS`, `TURN`, `ROLE`, `KIND`, `TIME` (how
+long ago that turn was written) and `SNIPPET`. An unnamed session shows
+the first eight characters of its id. Turns count from 1, as in the
+viewer; roles read `you` and `ai`, and kinds read `message`, `tool
+call`, `tool output`, and so on, as in the TUI. Per-message rows run in
+turn order within a session. The snippet is cut around the match, on
+word boundaries where it can, to fit `--width`. When nothing matches, the
+table is empty and stderr says `No sessions match "<query>"`.
+
+A session with more matching messages than a search keeps (the newest
+are kept) is reported on stderr, and under `truncated` in the JSON.
 
 **Exit status** follows `grep`: `0` when at least one session matched,
 `1` when none did, `2` on an error (an empty query, an unreadable
@@ -491,6 +508,7 @@ use status 1, so scripts can tell "nothing found" from "it broke".
   "group": "session",
   "kinds": ["messages"],
   "searched": { "sessions": 77, "total": 77, "skipped": 0, "without_parser": 3 },
+  "truncated": [],
   "results": [
     {
       "harness": "claude-code",
@@ -505,12 +523,14 @@ use status 1, so scripts can tell "nothing found" from "it broke".
 ```
 
 With `--group message` each result instead carries `turn` (the turn's
-index), `role` (`user`, `assistant`, `system`), `kind` (`message`,
+position, counting from 1), `role` (`user`, `assistant`, `system`), `kind` (`message`,
 `compaction_summary`, `tool_use`, `tool_result`, `thinking`), `time`, and
 its own `snippet`, and has no `hits` or `latest`. `label` is the session's
 alias, title, or hosting mux name, or `null`. `snippet.highlight` is the
-byte range of the match inside `snippet.text`, which is capped and has
-its whitespace collapsed. `searched.skipped` counts sessions whose
+byte range (not characters) of the match inside `snippet.text`, which is
+capped and has its whitespace collapsed. `truncated` lists the sessions
+(`harness`, `session`, `matches`, `shown`) whose per-message results were
+capped. `searched.skipped` counts sessions whose
 transcript could not be read; `without_parser` counts sessions of
 harnesses that cannot be searched yet.
 
@@ -521,14 +541,20 @@ has. `Tab` switches it to the contents of the sessions (and back), and the
 overlay remembers how you left it for the rest of the session. In the
 contents scope the overlay shows the query, a status line (grouping, the
 kinds searched, and how many sessions are scanned, with the skipped
-count), the best results so far, and the keys it understands:
+count), the best results so far, and a footer naming the keys it
+understands (the rows scope has the same kind of footer, with `Tab search
+contents`). Each snippet is cropped around the match, on word
+boundaries, so the match is always on screen, and the match is picked out
+in one style everywhere: bold, underlined, in the theme's `match_highlight`
+color. The keys:
 
 - Type to search. The scan starts when the query has rested for about
   200 ms and restarts, abandoning the previous scan, whenever the query
   or an option changes. Results arrive while it runs.
-- `Ctrl-G` groups results per session or per message, `Ctrl-T` includes
-  tool calls and output, and `Ctrl-Y` includes thinking. The starting
-  values come from `[search]` in the config.
+- `Ctrl-R` lists one result per session or one per matching turn
+  (the status line reads `results by session` or `results by message`),
+  `Ctrl-T` includes tool calls and output, and `Ctrl-Y` includes
+  thinking. The starting values come from `[search]` in the config.
 - `Up`/`Down` (or `Ctrl-P`/`Ctrl-N`) move through the results, and `Enter`
   opens the viewer at the highlighted match, with the query already
   searched.
@@ -540,8 +566,9 @@ count), the best results so far, and the keys it understands:
   restored.
 
 Opening `/` while a content filter is active starts in the contents scope
-with that query filled in. Content search is off under `--no-live-preview`;
-the contents scope then says why and cannot be chosen.
+with that query filled in, and `/` in the Search view always opens it in the
+contents scope. Content search is off under `--no-live-preview`; `Tab`
+then says why and the contents scope cannot be chosen.
 
 ## Paging
 
@@ -1001,12 +1028,15 @@ mux or, with *pin, don't launch*, write a planned pin and start nothing.
 
 Key `6` (or `--view search`) lists the sessions that match a content search,
 ranked by how many turns matched and then by the latest match (the
-Recency sort puts the latest match first). `/` in this view asks for the
-query; the same query also narrows the Sessions, Mux, and PRs views (`f`
-shows it as `contains`, `F` clears it). Groupings (`Ctrl-G`): none,
-project, harness. The Controls `results` row switches between one row per
-session and a row per matching turn, listed under each session; `[search]
-group` in the config sets the default.
+Recency sort puts the latest match first). `/` in this view opens the
+search overlay in its contents scope with the current query filled in; the
+same query also narrows the Sessions, Mux, and PRs views (`f` shows it as
+`contains`, `F` clears it). Groupings (`Ctrl-G`): none, project, harness.
+The Controls `Results` section switches between one row per session and one
+row per matching turn, listed under each session (`Ctrl-R` in the overlay
+does the same); `[search] group` in the config sets the default. Selecting a
+hit row shows its turn (speaker, kind, age, and the matching text) above the
+session's detail.
 
 `Enter` and `v` open the viewer at the best match of a session, or at
 the matching turn of a hit row, with the query already searched, so `n` and
@@ -1166,8 +1196,9 @@ top of the screen; `Esc` leaves the prompt and keeps an earlier find, and
 the prompt supports `Backspace`, `Delete`, `←`/`→`, `Home`/`End`, and
 `Ctrl-U` (delete to the start). `n` and `N` step to the next and previous
 match and wrap at either end, saying so in the footer. The footer shows
-`find "query" i/N` (or `no match`), and each match is highlighted: the
-current one reversed, the others underlined. `Esc` clears the find before
+`find "query" i/N` (or `no match`; the header's `find:"query"` chip uses the
+same wording), and each match is highlighted: the current one reversed, the
+others in the shared match style (bold, underlined). `Esc` clears the find before
 it closes the viewer.
 
 Find is a case-insensitive substring match on what the viewer is

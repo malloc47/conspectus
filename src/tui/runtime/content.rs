@@ -14,24 +14,49 @@ use std::sync::mpsc::{self, Receiver, TryRecvError};
 use std::thread::JoinHandle;
 
 use crate::content_search::{
-    CancelToken, Progress, ScanEvent, ScanHandle, ScanOptions, SessionKey, hits_for, plan_sessions,
-    scan, scan_blocking,
+    CancelToken, Polled, Progress, ScanEvent, ScanHandle, ScanOptions, SessionKey, hits_for,
+    plan_sessions, scan, scan_blocking,
 };
 use crate::tui::app::{App, DetailRequest, Msg, ScanRequest};
 use crate::viewer::search::{ContentQuery, Hit, SessionHits};
 
 /// The longest results wait before they reach the screen.
-const FLUSH_EVERY: Duration = Duration::from_millis(150);
+pub(super) const FLUSH_EVERY: Duration = Duration::from_millis(150);
+
+/// What a running scan has to say.
+pub(super) enum Poll {
+    Event(ScanEvent),
+    /// Nothing yet; the scan is still running.
+    Empty,
+    /// The scan's threads are gone and nothing more will come.
+    Disconnected,
+}
+
+/// Where a scan's events come from: the real handle, or a stand-in in
+/// tests.
+pub(super) trait EventSource {
+    fn poll(&mut self) -> Poll;
+}
+
+impl EventSource for ScanHandle {
+    fn poll(&mut self) -> Poll {
+        match ScanHandle::poll(self) {
+            Polled::Event(event) => Poll::Event(event),
+            Polled::Empty => Poll::Empty,
+            Polled::Ended => Poll::Disconnected,
+        }
+    }
+}
 
 /// The scan the live loop is running, if any.
 #[derive(Default)]
 pub(super) struct ContentDriver {
-    active: Option<Active>,
-    details: Option<DetailActive>,
+    pub(super) active: Option<Active>,
+    pub(super) details: Option<DetailActive>,
 }
 
 /// The read of matching turns for the per-message grouping.
-struct DetailActive {
+pub(super) struct DetailActive {
     generation: u64,
     cancel: CancelToken,
     events: Receiver<(SessionKey, Vec<Hit>)>,
@@ -48,9 +73,9 @@ impl Drop for DetailActive {
     }
 }
 
-struct Active {
+pub(super) struct Active {
     generation: u64,
-    handle: ScanHandle,
+    handle: Box<dyn EventSource + Send>,
     last_flush: Instant,
     batch: Vec<(SessionKey, SessionHits)>,
     progress: Progress,
@@ -77,16 +102,22 @@ impl ContentDriver {
         let Some(active) = &mut self.active else {
             return;
         };
-        while let Some(event) = active.handle.try_recv() {
-            if event.generation() != active.generation {
-                continue;
-            }
-            match event {
-                ScanEvent::Progress { progress, .. } => active.progress = progress,
-                ScanEvent::Session { key, hits, .. } => active.batch.push((key, hits)),
-                ScanEvent::Done { progress, .. } => {
+        loop {
+            match active.handle.poll() {
+                Poll::Event(event) if event.generation() != active.generation => {}
+                Poll::Event(ScanEvent::Progress { progress, .. }) => active.progress = progress,
+                Poll::Event(ScanEvent::Session { key, hits, .. }) => active.batch.push((key, hits)),
+                Poll::Event(ScanEvent::Done { progress, .. }) => {
                     active.progress = progress;
                     active.done = true;
+                }
+                Poll::Empty => break,
+                // A scan whose threads died without saying so (a parser
+                // panicked) is over: finish what it found instead of
+                // searching forever.
+                Poll::Disconnected => {
+                    active.done = true;
+                    break;
                 }
             }
         }
@@ -194,7 +225,7 @@ fn start(request: &ScanRequest) -> Active {
     );
     Active {
         generation: request.generation,
-        handle,
+        handle: Box::new(handle),
         last_flush: Instant::now(),
         batch: Vec::new(),
         progress: Progress::default(),
@@ -261,3 +292,7 @@ fn run_details_blocking(app: &mut App, rebase: Option<(&Path, &Path)>) {
         });
     }
 }
+
+#[cfg(test)]
+#[path = "content_tests.rs"]
+mod tests;

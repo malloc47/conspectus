@@ -506,16 +506,30 @@ fn draw_find_prompt(
     // Cells for the text and the cursor after the leading `/`.
     let room = width.saturating_sub(1 + hint_cells).max(4);
     let chars: Vec<char> = prompt.text.chars().collect();
-    let start = (prompt.cursor + 1).saturating_sub(room);
-    let end = (start + room - 1).min(chars.len());
-    let before: String = chars[start..prompt.cursor.min(chars.len())]
-        .iter()
-        .collect();
-    let at: String = chars
-        .get(prompt.cursor)
-        .map_or_else(|| " ".to_string(), ToString::to_string);
-    let after_from = (prompt.cursor + 1).min(chars.len());
-    let after: String = chars[after_from..end.max(after_from)].iter().collect();
+    let cells = |c: char| unicode_width::UnicodeWidthChar::width(c).unwrap_or(0);
+    let cursor = prompt.cursor.min(chars.len());
+    let at_char = chars.get(cursor).copied();
+    let at_cells = at_char.map_or(1, |c| cells(c).max(1));
+    // Scroll so the cursor cell stays visible: drop text from the left
+    // until what precedes the cursor and the cursor itself fit, counting
+    // display cells (a CJK character is two) rather than characters.
+    let mut start = 0usize;
+    let mut before_cells: usize = chars[..cursor].iter().map(|&c| cells(c)).sum();
+    while start < cursor && before_cells + at_cells > room {
+        before_cells -= cells(chars[start]);
+        start += 1;
+    }
+    let before: String = chars[start..cursor].iter().collect();
+    let at: String = at_char.map_or_else(|| " ".to_string(), |c| c.to_string());
+    let mut after = String::new();
+    let mut used = before_cells + at_cells;
+    for &c in chars.iter().skip(cursor + 1) {
+        if used + cells(c) > room {
+            break;
+        }
+        used += cells(c);
+        after.push(c);
+    }
     let line = Line::from(vec![
         Span::styled("/", Style::new().add_modifier(Modifier::BOLD)),
         Span::raw(before),

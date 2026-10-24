@@ -6,21 +6,21 @@ use crate::viewer::model::{TurnKind, TurnRole};
 use crate::viewer::search::Hit;
 use crate::viewer::search::SessionHits;
 
-fn session(key: &str) -> GraphNode {
+pub(super) fn session(key: &str) -> GraphNode {
     GraphNode::AgentSession(AgentSessionNode::new(
         AgentSessionId::new("claude-code", "/state", key),
         "claude-code",
     ))
 }
 
-fn snapshot_of(keys: &[&str]) -> GraphSnapshot {
+pub(super) fn snapshot_of(keys: &[&str]) -> GraphSnapshot {
     GraphSnapshot {
         nodes: keys.iter().map(|key| session(key)).collect(),
         ..GraphSnapshot::empty()
     }
 }
 
-fn load(app: &mut App, keys: &[&str]) {
+pub(super) fn load(app: &mut App, keys: &[&str]) {
     let snapshot = snapshot_of(keys);
     let tree = crate::tui::rows::build_tree_for_view(crate::tui::rows::TreeInputs::from_app(
         &snapshot, app,
@@ -33,20 +33,20 @@ fn load(app: &mut App, keys: &[&str]) {
     });
 }
 
-fn app_with(keys: &[&str]) -> App {
+pub(super) fn app_with(keys: &[&str]) -> App {
     let mut app = App::new(RunConfig::defaults());
     load(&mut app, keys);
     app
 }
 
-fn key(session: &str) -> SessionKey {
+pub(super) fn key(session: &str) -> SessionKey {
     SessionKey {
         harness_key: "claude-code".into(),
         session_key: session.into(),
     }
 }
 
-fn hits(count: usize) -> SessionHits {
+pub(super) fn hits(count: usize) -> SessionHits {
     let best = Hit {
         turn_index: 0,
         role: TurnRole::Assistant,
@@ -62,14 +62,14 @@ fn hits(count: usize) -> SessionHits {
     }
 }
 
-fn start(app: &mut App, text: &str) {
+pub(super) fn start(app: &mut App, text: &str) {
     app.update(Msg::StartContentSearch {
         text: text.into(),
         kinds: ContentKinds::default(),
     });
 }
 
-fn progress(scanned: usize, total: usize) -> Progress {
+pub(super) fn progress(scanned: usize, total: usize) -> Progress {
     Progress {
         scanned,
         total,
@@ -77,7 +77,7 @@ fn progress(scanned: usize, total: usize) -> Progress {
     }
 }
 
-fn deliver(app: &mut App, batch: Vec<(SessionKey, SessionHits)>, done: bool) {
+pub(super) fn deliver(app: &mut App, batch: Vec<(SessionKey, SessionHits)>, done: bool) {
     let generation = app.content_generation().expect("a search is active");
     app.update(Msg::ContentHits {
         generation,
@@ -87,7 +87,7 @@ fn deliver(app: &mut App, batch: Vec<(SessionKey, SessionHits)>, done: bool) {
     });
 }
 
-fn listed_sessions(app: &App) -> Vec<String> {
+pub(super) fn listed_sessions(app: &App) -> Vec<String> {
     app.tree()
         .rows
         .iter()
@@ -247,8 +247,14 @@ fn a_search_is_refused_while_live_preview_is_off() {
 
     assert!(app.content().is_none());
     assert!(app.take_scan_request().is_none());
-    assert!(matches!(effects.as_slice(), [Effect::Toast(_)]));
-    assert!(app.status_message().is_some());
+    assert!(
+        matches!(effects.as_slice(), [Effect::Toast(text)] if text == CONTENT_OFF_NOTICE),
+        "the refusal is said once, as a toast: {effects:?}"
+    );
+    assert!(
+        app.status_message().is_none(),
+        "not also in the status line"
+    );
 }
 
 #[test]

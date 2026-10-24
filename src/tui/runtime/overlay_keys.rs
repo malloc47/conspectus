@@ -405,9 +405,24 @@ pub(in crate::tui) fn handle_help_overlay_key(
 /// Dispatch a key into the open search overlay, refresh its match
 /// list from the visible row tree using the configured backend,
 /// and act on its outcome (Confirm picks a row, Cancel closes).
+///
+/// Messages the overlay sends run through the pure executor, which is
+/// right where there is no terminal; the live loop uses
+/// [`handle_search_overlay_key_with`] so a hit that opens the viewer
+/// can run its effect.
 pub(in crate::tui) fn handle_search_overlay_key(
     app: &mut App,
     key: ratatui::crossterm::event::KeyEvent,
+) {
+    handle_search_overlay_key_with(app, key, &mut |app, msg| dispatch(app, msg));
+}
+
+/// [`handle_search_overlay_key`] with the executor the caller chooses
+/// for the messages the overlay sends.
+pub(in crate::tui) fn handle_search_overlay_key_with(
+    app: &mut App,
+    key: ratatui::crossterm::event::KeyEvent,
+    send: &mut dyn FnMut(&mut App, Msg),
 ) {
     use crate::tui::search::items_from_rows;
     use crate::tui::widgets::search::{SearchContext, SearchScope};
@@ -435,18 +450,18 @@ pub(in crate::tui) fn handle_search_overlay_key(
         OverlayOutcome::Consumed => {}
         OverlayOutcome::Close => {
             app.close_search_overlay();
-            dispatch(app, Msg::DiscardContentPreview);
+            send(app, Msg::DiscardContentPreview);
         }
         OverlayOutcome::Commit(msg) => {
             app.close_search_overlay();
             // Keeping the search is the only way out that keeps it.
             if !matches!(*msg, Msg::ApplyContentSearch { .. }) {
-                dispatch(app, Msg::DiscardContentPreview);
+                send(app, Msg::DiscardContentPreview);
             }
-            dispatch(app, *msg);
+            send(app, *msg);
         }
         OverlayOutcome::CommitAndStay(msg) => {
-            dispatch(app, *msg);
+            send(app, *msg);
         }
     }
 }

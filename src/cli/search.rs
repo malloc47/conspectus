@@ -22,15 +22,13 @@ use serde_json::{Value, json};
 
 use crate::config;
 use crate::content_search::{
-    CancelToken, Progress, ScanOptions, ScanSession, SessionKey, hits_for, plan_sessions,
-    scan_blocking,
+    CancelToken, Progress, ScanOptions, ScanSession, SessionKey, plan_sessions, scan_blocking,
+    session_detail,
 };
 use crate::model::{GraphNode, GraphSnapshot, NodeId};
 use crate::output::render::{display_width, format_relative_age, truncate_to_width};
 use crate::viewer::model::{TurnKind, TurnRole};
-use crate::viewer::search::{
-    ContentKinds, ContentQuery, Grouping, Hit, SessionHits, cmp_hits, cmp_sessions,
-};
+use crate::viewer::search::{ContentKinds, ContentQuery, Grouping, Hit, SessionHits, cmp_sessions};
 
 use super::{ColorFlag, FilterArgs, resolve_color_from_env, warm_start_discover_and_resolve};
 
@@ -89,7 +87,7 @@ pub(super) struct SearchArgs {
     #[arg(long = "mux-state", value_name = "STATE", value_delimiter = ',')]
     mux_state: Vec<String>,
     /// Print at most this many results.
-    #[arg(long, value_name = "N")]
+    #[arg(long, value_name = "N", value_parser = parse_limit)]
     limit: Option<usize>,
     /// Output format.
     #[arg(long, value_enum, default_value_t = FormatFlag::Table)]
@@ -126,6 +124,15 @@ struct Found {
     progress: Progress,
     parserless: usize,
     rows: Vec<Row>,
+    /// Sessions with more matching messages than were fetched.
+    truncated: Vec<Truncated>,
+}
+
+/// A session whose per-message results were capped.
+struct Truncated {
+    info: SessionInfo,
+    matches: usize,
+    shown: usize,
 }
 
 /// One printed result.
@@ -220,7 +227,8 @@ impl SearchArgs {
 
         if self.verbose || io::stderr().is_terminal() {
             eprintln!(
-                "searched {} of {} sessions ({} skipped, {} without a transcript parser)",
+                "searched {} of {} sessions; skipped {} whose transcript could not be read; \
+                 {} more belong to a harness with no transcript parser and were not searched",
                 found.progress.scanned,
                 found.progress.total,
                 found.progress.skipped,
@@ -229,6 +237,17 @@ impl SearchArgs {
         }
 
         let matched = !found.rows.is_empty();
+        for capped in &found.truncated {
+            eprintln!(
+                "conspectus: note: {} has {} matching messages; showing the newest {}",
+                capped.info.label.as_deref().unwrap_or(&capped.info.session),
+                capped.matches,
+                capped.shown
+            );
+        }
+        if !matched && matches!(self.format, FormatFlag::Table) {
+            eprintln!("No sessions match \"{}\"", self.query.trim());
+        }
         let mut out = io::stdout().lock();
         let text = match self.format {
             FormatFlag::Json => render_json(&self.query, &found)?,
@@ -276,6 +295,7 @@ impl SearchArgs {
 
         let limit = self.limit.unwrap_or(usize::MAX);
         let mut rows = Vec::new();
+        let mut truncated = Vec::new();
         for (key, hits) in ranked {
             if rows.len() >= limit {
                 break;
@@ -289,9 +309,17 @@ impl SearchArgs {
                     let Some(session) = by_key.get(&key) else {
                         continue;
                     };
-                    let mut all = hits_for(session, query);
-                    all.sort_by(cmp_hits);
-                    for hit in all {
+                    let detail = session_detail(session, query);
+                    if detail.truncated() {
+                        truncated.push(Truncated {
+                            info: info.clone(),
+                            matches: detail.total,
+                            shown: detail.hits.len(),
+                        });
+                    }
+                    // Turn order, as the viewer and the Search view list
+                    // a session's messages.
+                    for hit in detail.hits {
                         if rows.len() >= limit {
                             break;
                         }
@@ -309,50 +337,44 @@ impl SearchArgs {
             progress: summary.progress,
             parserless: 0,
             rows,
+            truncated,
         }
     }
 }
 
-/// The sessions the table projection would show under `filter`, as
-/// `harness:key` labels, or `None` when nothing narrows. Going through
-/// the table keeps the filter flags identical to `conspectus table
-/// sessions`.
+/// The `(harness, session)` pairs that pass `filter`, or `None` when
+/// nothing narrows. The sessions table applies the same predicate, so the
+/// filter flags mean the same here as in `conspectus table sessions`.
 fn allowed_sessions(
     snapshot: &GraphSnapshot,
     filter: &crate::filter::RowFilter,
-) -> Option<BTreeSet<String>> {
+) -> Option<BTreeSet<(String, String)>> {
     if !filter.has_narrowing_predicates() {
         return None;
     }
     let options = crate::output::render::RenderOptions::wide()
         .with_filter(filter.clone())
         .with_now_epoch(Some(crate::discovery::current_epoch()));
-    let rows = crate::output::agent::build_agent_rows_from_snapshot(snapshot, &["agent"], &options);
-    Some(
-        rows.into_iter()
-            .skip(1)
-            .filter_map(|row| row.into_iter().next())
-            .collect(),
-    )
+    Some(crate::output::agent::sessions_passing_filter(
+        snapshot, &options,
+    ))
 }
 
 /// Every agent session in the snapshot that passes the filter, with its
 /// display label.
 fn session_infos(
     snapshot: &GraphSnapshot,
-    allowed: Option<&BTreeSet<String>>,
+    allowed: Option<&BTreeSet<(String, String)>>,
 ) -> Vec<(crate::model::AgentSessionId, SessionInfo)> {
     let mut out = Vec::new();
     for node in &snapshot.nodes {
         let GraphNode::AgentSession(agent) = node else {
             continue;
         };
-        let label = format!(
-            "{}:{}",
-            agent.harness_key,
-            crate::output::table::agent_session_key_for_label(&agent.id.session_key)
-        );
-        if allowed.is_some_and(|set| !set.contains(&label)) {
+        let passes = |set: &BTreeSet<(String, String)>| {
+            set.contains(&(agent.harness_key.clone(), agent.id.session_key.clone()))
+        };
+        if allowed.is_some_and(|set| !passes(set)) {
             continue;
         }
         let node_id = NodeId::AgentSession(agent.id.clone());
@@ -412,6 +434,35 @@ fn role_name(role: TurnRole) -> &'static str {
     }
 }
 
+/// `--limit` must be a positive count: zero would print nothing and exit
+/// as if the query had no matches.
+fn parse_limit(raw: &str) -> Result<usize, String> {
+    match raw.parse::<usize>() {
+        Ok(0) => Err("must be at least 1".to_string()),
+        Ok(n) => Ok(n),
+        Err(err) => Err(err.to_string()),
+    }
+}
+
+/// The words the TUI uses for a role and a kind of turn.
+fn role_word(role: TurnRole) -> &'static str {
+    match role {
+        TurnRole::User => "you",
+        TurnRole::Assistant => "ai",
+        TurnRole::System => "system",
+    }
+}
+
+fn kind_word(kind: TurnKind) -> &'static str {
+    match kind {
+        TurnKind::Message => "message",
+        TurnKind::CompactionSummary => "compaction summary",
+        TurnKind::ToolUse => "tool call",
+        TurnKind::ToolResult => "tool output",
+        TurnKind::Thinking => "thinking",
+    }
+}
+
 fn turn_kind_name(kind: TurnKind) -> &'static str {
     match kind {
         TurnKind::Message => "message",
@@ -453,7 +504,7 @@ fn render_json(query: &str, found: &Found) -> Result<String> {
                 "harness": info.harness,
                 "session": info.session,
                 "label": info.label,
-                "turn": hit.turn_index,
+                "turn": hit.turn_index + 1,
                 "role": role_name(hit.role),
                 "kind": turn_kind_name(hit.kind),
                 "time": rfc3339(hit.timestamp),
@@ -471,6 +522,16 @@ fn render_json(query: &str, found: &Found) -> Result<String> {
             "skipped": found.progress.skipped,
             "without_parser": found.parserless,
         },
+        "truncated": found
+            .truncated
+            .iter()
+            .map(|capped| json!({
+                "harness": capped.info.harness,
+                "session": capped.info.session,
+                "matches": capped.matches,
+                "shown": capped.shown,
+            }))
+            .collect::<Vec<_>>(),
         "results": results,
     });
     let mut text = serde_json::to_string_pretty(&document)?;
@@ -493,10 +554,12 @@ fn build_table(found: &Found, now: i64) -> Table {
             |t| format_relative_age(t.timestamp(), now),
         )
     };
+    // The session's name, or the first eight characters of its key, as
+    // the TUI shows an unnamed session.
     let name = |info: &SessionInfo| {
         info.label
             .clone()
-            .unwrap_or_else(|| crate::output::table::agent_session_key_for_label(&info.session))
+            .unwrap_or_else(|| info.session.chars().take(8).collect())
     };
     match found.group {
         Grouping::Session => {
@@ -530,9 +593,9 @@ fn build_table(found: &Found, now: i64) -> Table {
                 cells.push(vec![
                     name(info),
                     info.harness.clone(),
-                    format!("#{}", hit.turn_index),
-                    role_name(hit.role).to_string(),
-                    turn_kind_name(hit.kind).replace('_', " "),
+                    format!("#{}", hit.turn_index + 1),
+                    role_word(hit.role).to_string(),
+                    kind_word(hit.kind).to_string(),
                     age(hit.timestamp),
                 ]);
                 snippets.push((hit.snippet.clone(), hit.highlight.clone()));
@@ -588,34 +651,122 @@ fn pad(text: &str, width: usize) -> String {
     format!("{text}{}", " ".repeat(gap))
 }
 
-/// The snippet cut to `budget` columns (when set), with the match in
-/// bold when `color` is on and the match survived the cut.
+/// The snippet cut to `budget` columns (when set) around the match, on
+/// word boundaries where it can, with the match in bold when `color` is
+/// on.
 fn fit_snippet(
     snippet: &str,
     highlight: &std::ops::Range<usize>,
     budget: Option<usize>,
     color: bool,
 ) -> String {
-    let fitted = budget.map_or_else(|| snippet.to_string(), |b| truncate_to_width(snippet, b));
-    if !color || highlight.is_empty() {
-        return fitted;
-    }
-    let kept = fitted.strip_suffix('…').unwrap_or(&fitted);
-    let intact = kept.len() >= highlight.end
-        && kept.is_char_boundary(highlight.start)
-        && kept.is_char_boundary(highlight.end)
-        && snippet.starts_with(kept);
-    if !intact {
-        return fitted;
+    let (text, range) = match budget {
+        Some(budget) => crop_around(snippet, highlight, budget),
+        None => (snippet.to_string(), highlight.clone()),
+    };
+    if !color || range.is_empty() || range.end > text.len() {
+        return text;
     }
     let bold = Style::new().effects(Effects::BOLD);
     format!(
-        "{}{bold}{}{Reset}{}{}",
-        &kept[..highlight.start],
-        &kept[highlight.start..highlight.end],
-        &kept[highlight.end..],
-        &fitted[kept.len()..],
+        "{}{bold}{}{Reset}{}",
+        &text[..range.start],
+        &text[range.clone()],
+        &text[range.end..],
     )
+}
+
+/// `snippet` cropped to at most `budget` display columns, keeping
+/// `highlight` (a byte range) visible, with `…` on a cut side. Context is
+/// spread to both sides of the match and each cut moves to the nearest
+/// space that doesn't lose the match. Returns the text and where the
+/// highlight is in it. A match wider than the budget is itself cut.
+fn crop_around(
+    snippet: &str,
+    highlight: &std::ops::Range<usize>,
+    budget: usize,
+) -> (String, std::ops::Range<usize>) {
+    if display_width(snippet) <= budget {
+        return (snippet.to_string(), highlight.clone());
+    }
+    let chars: Vec<(usize, char)> = snippet.char_indices().collect();
+    let width = |c: char| unicode_width::UnicodeWidthChar::width(c).unwrap_or(0);
+    let valid = !highlight.is_empty()
+        && highlight.end <= snippet.len()
+        && snippet.is_char_boundary(highlight.start)
+        && snippet.is_char_boundary(highlight.end);
+    if !valid {
+        return (truncate_to_width(snippet, budget), 0..0);
+    }
+    let first = chars.partition_point(|&(at, _)| at < highlight.start);
+    let last = chars.partition_point(|&(at, _)| at < highlight.end);
+    let marker = 1;
+    let mut left = first;
+    let mut right = last;
+    let mut used: usize = chars[first..last].iter().map(|&(_, c)| width(c)).sum();
+    // The cells a candidate window costs: its text plus a marker on each
+    // side that is cut.
+    let cost = |used: usize, left: usize, right: usize| {
+        used + marker * (usize::from(left > 0) + usize::from(right < chars.len()))
+    };
+    if cost(used, left, right) > budget {
+        // The match alone fills the line: cut it to fit.
+        let room = budget.saturating_sub(marker * (usize::from(first > 0) + 1));
+        let mut cut = first;
+        let mut cells = 0;
+        while cut < last && cells + width(chars[cut].1) <= room {
+            cells += width(chars[cut].1);
+            cut += 1;
+        }
+        let text: String = chars[first..cut].iter().map(|&(_, c)| c).collect();
+        let head = if first > 0 { "…" } else { "" };
+        let tail = if cut < chars.len() { "…" } else { "" };
+        let end = head.len() + text.len();
+        return (format!("{head}{text}{tail}"), head.len()..end);
+    }
+    // Grow outward one character at a time, alternating sides.
+    let mut grow_left = true;
+    loop {
+        let can_left = left > 0 && cost(used + width(chars[left - 1].1), left - 1, right) <= budget;
+        let can_right =
+            right < chars.len() && cost(used + width(chars[right].1), left, right + 1) <= budget;
+        if !can_left && !can_right {
+            break;
+        }
+        if (grow_left && can_left) || !can_right {
+            left -= 1;
+            used += width(chars[left].1);
+        } else {
+            used += width(chars[right].1);
+            right += 1;
+        }
+        grow_left = !grow_left;
+    }
+    // Move each cut to a word edge when that keeps the match.
+    if left > 0 {
+        let mut edge = left;
+        while edge < first && chars[edge - 1].1 != ' ' {
+            edge += 1;
+        }
+        if edge < first || chars[edge - 1].1 == ' ' {
+            left = edge;
+        }
+    }
+    if right < chars.len() {
+        let mut edge = right;
+        while edge > last && chars[edge].1 != ' ' {
+            edge -= 1;
+        }
+        if edge > last || chars[edge].1 == ' ' {
+            right = edge;
+        }
+    }
+    let head = if left > 0 { "…" } else { "" };
+    let tail = if right < chars.len() { "…" } else { "" };
+    let body: String = chars[left..right].iter().map(|&(_, c)| c).collect();
+    let start = head.len() + chars[first].0 - chars[left].0;
+    let end = start + (highlight.end - highlight.start);
+    (format!("{head}{body}{tail}"), start..end)
 }
 
 #[cfg(test)]

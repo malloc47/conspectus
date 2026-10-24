@@ -108,3 +108,47 @@ fn wide_and_combining_text_keeps_its_columns() {
     let buffer = render_to_buffer(&mut state, &Theme::default(), 80, 12);
     assert_eq!(styled(&buffer, Modifier::REVERSED), ["needle"]);
 }
+
+#[test]
+fn the_role_words_in_a_turn_header_are_not_matches() {
+    // Turn 1's chip says `ai`; no body contains it.
+    let mut doc = document();
+    doc.turns[0].body = "you spoke".into();
+    let mut state = ViewerState::new(doc);
+    state.find.query = "ai".to_string();
+    state.find.matches = vec![1];
+    state.find.current = Some(0);
+    let buffer = render_to_buffer(&mut state, &Theme::default(), 80, 12);
+    let painted: Vec<_> = [Modifier::REVERSED, Modifier::UNDERLINED]
+        .iter()
+        .flat_map(|modifier| styled(&buffer, *modifier))
+        .collect();
+    assert!(painted.is_empty(), "{painted:?}");
+}
+
+#[test]
+fn a_match_split_across_a_wrap_is_found_but_not_painted() {
+    // The wrap breaks at the space inside the query, so neither line
+    // holds the whole match: the turn still counts as a match for
+    // navigation, but no cell is highlighted.
+    let mut doc = document();
+    doc.turns[0].body = "aaaaaaaaaaaaaaaaaaaaaaaa two words tail".into();
+    let mut state = ViewerState::new(doc);
+    state.find.query = "two words".to_string();
+    state.find.matches = vec![0];
+    state.find.current = Some(0);
+    let buffer = render_to_buffer(&mut state, &Theme::default(), 40, 12);
+    let mut screen = String::new();
+    // The status line quotes the query, so read the body rows only.
+    for y in 0..buffer.area.height.saturating_sub(2) {
+        for x in 0..buffer.area.width {
+            screen.push_str(buffer[(x, y)].symbol());
+        }
+        screen.push('\n');
+    }
+    assert!(
+        !screen.contains("two words"),
+        "the query must straddle a wrap for this test to mean anything:\n{screen}"
+    );
+    assert!(styled(&buffer, Modifier::REVERSED).is_empty());
+}

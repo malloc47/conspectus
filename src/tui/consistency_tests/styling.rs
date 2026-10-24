@@ -109,8 +109,18 @@ fn no_pin_row_is_labelled_gone() {
 
 #[test]
 fn p_has_an_immediate_inverse_on_the_same_key_in_every_view() {
-    for view in [View::Sessions, View::Mux, View::Prs, View::Pinned] {
-        let mut app = app_over_filtered(view, &world(), all_stopped_muxes());
+    for view in [
+        View::Sessions,
+        View::Mux,
+        View::Prs,
+        View::Pinned,
+        View::Search,
+    ] {
+        let mut app = if view == View::Search {
+            searched(view, all_stopped_muxes())
+        } else {
+            app_over_filtered(view, &world(), all_stopped_muxes())
+        };
         let ids: Vec<RowId> = app.tree().rows.iter().map(|row| row.id.clone()).collect();
         let mut unpinned = 0;
         let mut pinned = 0;
@@ -137,7 +147,9 @@ fn p_has_an_immediate_inverse_on_the_same_key_in_every_view() {
             pinned > 0,
             "{view:?}: no pinned row was found to test the inverse on"
         );
-        if view != View::Pinned {
+        // Pinned lists only pins, and the Search view's one match here is
+        // the pinned session, so neither has an unpinned row.
+        if !matches!(view, View::Pinned | View::Search) {
             assert!(unpinned > 0, "{view:?}: no unpinned row was found");
         }
     }

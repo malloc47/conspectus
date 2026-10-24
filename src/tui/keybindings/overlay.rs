@@ -325,8 +325,8 @@ pub enum SearchKey {
     Up,
     /// Switch between searching the rows and searching contents.
     Scope,
-    /// Contents scope: one result per session, or per message.
-    Group,
+    /// Contents scope: one result per session, or per matching turn.
+    Results,
     /// Contents scope: include tool calls and output.
     Tools,
     /// Contents scope: include thinking.
@@ -351,12 +351,12 @@ pub const PICKER_KEYS: &[KeyRow<SearchKey>] = &[
 /// `/` searching the rows.
 pub const SEARCH_KEYS: &[KeyRow<SearchKey>] = &[
     alias(ctrl('c'), SearchKey::Abort),
-    alias(key(KeyCode::Esc), SearchKey::Cancel),
-    alias(key(KeyCode::Enter), SearchKey::Pick),
-    alias(key(KeyCode::Down), SearchKey::Down),
-    alias(key(KeyCode::Up), SearchKey::Up),
+    shown(key(KeyCode::Up), SearchKey::Up, "↑", "move"),
+    shown(key(KeyCode::Down), SearchKey::Down, "↓", "move"),
     alias(ctrl('n'), SearchKey::Down),
     alias(ctrl('p'), SearchKey::Up),
+    shown(key(KeyCode::Enter), SearchKey::Pick, "Enter", "pick"),
+    shown(key(KeyCode::Esc), SearchKey::Cancel, "Esc", "close"),
     shown(
         key(KeyCode::Tab),
         SearchKey::Scope,
@@ -368,14 +368,14 @@ pub const SEARCH_KEYS: &[KeyRow<SearchKey>] = &[
 /// `/` searching what was said in the sessions.
 pub const SEARCH_CONTENT_KEYS: &[KeyRow<SearchKey>] = &[
     alias(ctrl('c'), SearchKey::Abort),
-    alias(key(KeyCode::Esc), SearchKey::Cancel),
-    alias(key(KeyCode::Enter), SearchKey::Pick),
-    alias(key(KeyCode::Down), SearchKey::Down),
-    alias(key(KeyCode::Up), SearchKey::Up),
+    shown(key(KeyCode::Up), SearchKey::Up, "↑", "move"),
+    shown(key(KeyCode::Down), SearchKey::Down, "↓", "move"),
     alias(ctrl('n'), SearchKey::Down),
     alias(ctrl('p'), SearchKey::Up),
+    shown(key(KeyCode::Enter), SearchKey::Pick, "Enter", "open hit"),
+    shown(key(KeyCode::Esc), SearchKey::Cancel, "Esc", "close"),
     shown(key(KeyCode::Tab), SearchKey::Scope, "Tab", "search rows"),
-    shown(ctrl('g'), SearchKey::Group, "Ctrl-G", "group"),
+    shown(ctrl('r'), SearchKey::Results, "Ctrl-R", "results"),
     shown(ctrl('t'), SearchKey::Tools, "Ctrl-T", "tools"),
     shown(ctrl('y'), SearchKey::Thinking, "Ctrl-Y", "thinking"),
     shown(ctrl('f'), SearchKey::ApplyFilter, "Ctrl-F", "filter lists"),

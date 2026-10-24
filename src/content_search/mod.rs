@@ -14,7 +14,9 @@
 //!   [`ScanEvent`]s; [`scan::scan_blocking`] runs it to completion on the
 //!   calling thread for the CLI and for snapshot mode.
 //! - [`prefilter`] skips transcripts that can't match without parsing
-//!   them.
+//!   them. It is used only when the query searches text that is stored
+//!   verbatim in the file: messages, not tool, thinking, hidden, or
+//!   aborted content.
 
 pub mod plan;
 pub mod prefilter;
@@ -25,7 +27,10 @@ use crate::viewer::parser::HarnessParser;
 use crate::viewer::search::SessionHits;
 
 pub use plan::{Plan, plan_sessions};
-pub use scan::{CancelToken, ScanHandle, ScanSummary, hits_for, scan, scan_blocking};
+pub use scan::{
+    CancelToken, Polled, ScanHandle, ScanSummary, SessionDetail, hits_for, scan, scan_blocking,
+    session_detail,
+};
 
 /// Per-session cap on hits materialized by [`hits_for`]. The count in
 /// [`SessionHits`] is always the true number of matching turns.
@@ -113,6 +118,14 @@ impl ScanEvent {
 #[cfg(test)]
 #[path = "prefilter_tests.rs"]
 mod prefilter_tests;
+
+#[cfg(test)]
+#[path = "scan_opencode_tests.rs"]
+mod scan_opencode_tests;
+
+#[cfg(test)]
+#[path = "scan_robustness_tests.rs"]
+mod scan_robustness_tests;
 
 #[cfg(test)]
 #[path = "scan_tests.rs"]

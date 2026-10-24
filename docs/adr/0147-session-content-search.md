@@ -107,7 +107,15 @@ enough to scan on demand.
     (quotes, backslashes, control characters, `/`, non-ASCII) break a
     run, and whitespace never anchors a run because a newline can sit
     where the query has a space. With no safe run, the file is fully
-    parsed. opencode keeps its sessions in SQLite, so its candidates
+    parsed. A file that spells any ASCII character as a `\u00XX`
+    escape is fully parsed too, since the bytes no longer match the
+    text. The prefilter applies only when the search covers the
+    verbatim content kinds (messages and compaction summaries): tool
+    calls, thinking, hidden, and aborted turns include text a parser
+    synthesizes (placeholders for sealed reasoning, metadata notes,
+    branch-summary headings, joined blocks), which is not in the file
+    bytes, so those searches parse every file. Files are read in
+    bounded chunks, so a large transcript is never held twice. opencode keeps its sessions in SQLite, so its candidates
     come from a query using `instr(lower(...), ?)` (SQLite `lower` is
     ASCII only, which agrees with the matcher), read through a
     read-only, `query_only` connection.

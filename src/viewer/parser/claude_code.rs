@@ -66,22 +66,20 @@ impl HarnessParser for ClaudeCodeParser {
 
     fn index(&self, state_root: &Path) -> Box<dyn TranscriptIndex> {
         let mut files = std::collections::HashMap::new();
-        if let Ok(projects) = std::fs::read_dir(state_root.join("projects")) {
-            for project in projects.flatten() {
-                let Ok(children) = std::fs::read_dir(project.path()) else {
-                    continue;
-                };
-                for child in children.flatten() {
-                    let path = child.path();
-                    let is_jsonl = path.extension().is_some_and(|ext| ext == "jsonl");
-                    if let Some(stem) = path.file_stem().and_then(|s| s.to_str())
-                        && is_jsonl
-                        && path.is_file()
-                    {
-                        files
-                            .entry(stem.to_string())
-                            .or_insert(TranscriptSource::File(path));
-                    }
+        for project in project_dirs(state_root) {
+            let Ok(children) = std::fs::read_dir(project) else {
+                continue;
+            };
+            for child in children.flatten() {
+                let path = child.path();
+                let is_jsonl = path.extension().is_some_and(|ext| ext == "jsonl");
+                if let Some(stem) = path.file_stem().and_then(|s| s.to_str())
+                    && is_jsonl
+                    && path.is_file()
+                {
+                    files
+                        .entry(stem.to_string())
+                        .or_insert(TranscriptSource::File(path));
                 }
             }
         }
@@ -96,24 +94,25 @@ impl HarnessParser for ClaudeCodeParser {
     }
 }
 
-/// Walk `<state_root>/projects/*/` looking for `<session_key>.jsonl`.
-/// Claude Code stores one project subdir per cwd; the session UUID
-/// is the file stem. Std-only — no `glob` dependency.
+/// The project directories under `<state_root>/projects/`, in the order
+/// both the index and `find_session_file` visit them. Claude Code stores
+/// one per cwd.
+fn project_dirs(state_root: &Path) -> impl Iterator<Item = PathBuf> {
+    std::fs::read_dir(state_root.join("projects"))
+        .into_iter()
+        .flatten()
+        .flatten()
+        .map(|entry| entry.path())
+        .filter(|path| path.is_dir())
+}
+
+/// Look for `<session_key>.jsonl` in each project directory; the session
+/// UUID is the file stem.
 fn find_session_file(state_root: &Path, session_key: &str) -> Option<PathBuf> {
-    let projects = state_root.join("projects");
-    let entries = std::fs::read_dir(&projects).ok()?;
     let needle = format!("{session_key}.jsonl");
-    for entry in entries.flatten() {
-        let project_dir = entry.path();
-        if !project_dir.is_dir() {
-            continue;
-        }
-        let candidate = project_dir.join(&needle);
-        if candidate.is_file() {
-            return Some(candidate);
-        }
-    }
-    None
+    project_dirs(state_root)
+        .map(|dir| dir.join(&needle))
+        .find(|candidate| candidate.is_file())
 }
 
 fn parse_file(path: &Path, locator: &SessionLocator) -> ParseResult {

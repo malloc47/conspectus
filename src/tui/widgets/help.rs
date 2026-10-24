@@ -146,7 +146,8 @@ pub(super) fn render_help_page(
     popup.render(area, buf);
 }
 
-/// How far a help page can scroll in a modal drawn into `area`.
+/// How far a help page can scroll in a modal drawn into `area`. The
+/// footer is pinned, so only the lines above it scroll.
 pub(super) fn help_max_scroll(
     area: Rect,
     lines_for: &dyn Fn(usize) -> Vec<Line<'static>>,
@@ -156,12 +157,67 @@ pub(super) fn help_max_scroll(
         modal.width.saturating_sub(2) as usize,
         modal.height.saturating_sub(2) as usize,
     );
-    let full = lines_for(width);
-    if full.len() <= height || width <= 1 {
-        return 0;
+    let page = page_layout(lines_for, width, height);
+    page.body.len().saturating_sub(page.body_height)
+}
+
+/// A help page split into the lines that scroll and the footer that
+/// stays on the modal's last rows.
+struct PageLayout {
+    body: Vec<Line<'static>>,
+    footer: Vec<Line<'static>>,
+    /// Rows the scrolling part has.
+    body_height: usize,
+    /// Columns the text has (one fewer when a scrollbar is drawn).
+    text_width: usize,
+    overflows: bool,
+}
+
+/// Rows the footer takes at `width`.
+fn footer_rows(width: usize) -> usize {
+    if width <= 8 {
+        return 1;
+    }
+    let footer =
+        crate::tui::keybindings::overlay::footer(crate::tui::keybindings::overlay::HELP_KEYS);
+    crate::viewer::render::word_wrap(&footer, u16::try_from(width).unwrap_or(u16::MAX))
+        .len()
+        .max(1)
+}
+
+fn page_layout(
+    lines_for: &dyn Fn(usize) -> Vec<Line<'static>>,
+    width: usize,
+    height: usize,
+) -> PageLayout {
+    let split = |lines: Vec<Line<'static>>, text_width: usize| {
+        let keep = footer_rows(text_width).min(height.saturating_sub(1));
+        let at = lines.len().saturating_sub(keep);
+        let mut body = lines;
+        let footer = body.split_off(at);
+        (body, footer)
+    };
+    let (body, footer) = split(lines_for(width), width);
+    let body_height = height.saturating_sub(footer.len());
+    if body.len() <= body_height || width <= 1 {
+        return PageLayout {
+            body,
+            footer,
+            body_height,
+            text_width: width,
+            overflows: false,
+        };
     }
     // The scrollbar takes a column once the page overflows.
-    lines_for(width - 1).len().saturating_sub(height)
+    let (body, footer) = split(lines_for(width - 1), width - 1);
+    let body_height = height.saturating_sub(footer.len());
+    PageLayout {
+        body,
+        footer,
+        body_height,
+        text_width: width - 1,
+        overflows: true,
+    }
 }
 
 /// Body wrapper for `tui_popup::Popup`. Reports the inner width /
@@ -186,40 +242,37 @@ impl KnownSize for HelpBody<'_> {
 
 impl Widget for HelpBody<'_> {
     fn render(self, area: Rect, buf: &mut Buffer) {
-        // Reserve the rightmost column for the scrollbar only when the
-        // page overflows, so short pages keep the full width.
-        let full = (self.lines_for)(area.width as usize);
-        let overflows = full.len() > area.height as usize && area.width > 1;
-        let text_width = if overflows {
-            area.width - 1
-        } else {
-            area.width
-        };
-        let lines = if overflows {
-            (self.lines_for)(text_width as usize)
-        } else {
-            full
-        };
-        let content_len = lines.len();
-        let viewport = area.height as usize;
-        let max_scroll = content_len.saturating_sub(viewport);
+        let page = page_layout(self.lines_for, area.width as usize, area.height as usize);
+        let text_width = u16::try_from(page.text_width).unwrap_or(area.width);
+        let body_height = u16::try_from(page.body_height).unwrap_or(area.height);
+        let max_scroll = page.body.len().saturating_sub(page.body_height);
         let scroll = self.scroll.min(max_scroll);
-        let text_area = Rect {
+        let body_area = Rect {
             width: text_width,
+            height: body_height,
             ..area
         };
-        Paragraph::new(lines)
+        Paragraph::new(page.body)
             .scroll((u16::try_from(scroll).unwrap_or(u16::MAX), 0))
-            .render(text_area, buf);
-        if overflows {
+            .render(body_area, buf);
+        // The footer stays on the last rows whatever the scroll.
+        let footer_area = Rect {
+            x: area.x,
+            y: area.y + body_height,
+            width: text_width,
+            height: area.height.saturating_sub(body_height),
+        };
+        Paragraph::new(page.footer).render(footer_area, buf);
+        if page.overflows {
             let bar_area = Rect {
                 x: area.x + area.width - 1,
                 width: 1,
+                height: body_height,
                 ..area
             };
             let mut bar_state = ScrollbarState::new(max_scroll + 1)
                 .position(scroll)
-                .viewport_content_length(viewport);
+                .viewport_content_length(page.body_height);
             let scrollbar = Scrollbar::new(ScrollbarOrientation::VerticalRight)
                 .style(Style::default().remove_modifier(Modifier::REVERSED));
             ratatui::widgets::StatefulWidget::render(
@@ -290,7 +343,7 @@ fn keymap_sections() -> Vec<HelpSection> {
                 ),
                 Binding::new(
                     "v",
-                    "Open the selected session's transcript (or the mux row's linked session); q/Esc close, j/k or PgDn/PgUp scroll, g/G start/end, t cycle tool detail, T thinking",
+                    "Open the selected session's transcript (or the mux row's linked session); q/Esc close, j/k or PgDn/PgUp scroll, g/G start/end, t cycle tool detail, T thinking, / find then n/N step through matches, ? lists every key",
                 ),
                 Binding::new("r", "Refresh discovery now"),
                 Binding::new("Ctrl-R", crate::tui::keybindings::HARD_REFRESH_HELP),
@@ -343,7 +396,7 @@ fn keymap_sections() -> Vec<HelpSection> {
                     "Switch directly to the sessions / mux / PRs / pinned view",
                 ),
                 Binding::new("5", "Switch directly to the history view"),
-                Binding::new("6", "Switch directly to the search view"),
+                Binding::new("6", "Switch directly to the Search view"),
                 Binding::new("] / [", "Cycle to next / previous view"),
             ],
         },
@@ -359,11 +412,11 @@ fn keymap_sections() -> Vec<HelpSection> {
             bindings: vec![
                 Binding::new(
                     "/",
-                    "Open the search overlay (ranks within the active filter set)",
+                    "Open the search overlay (ranks within the active filter set); in the Search view it opens on what was said",
                 ),
                 Binding::new(
                     "/ then Tab",
-                    "Search what was said in every session instead; Ctrl-F keeps the query as a filter on the lists, Ctrl-O also opens the Search view",
+                    "Search what was said in every session instead; Ctrl-R lists one result per session or per matching turn, Ctrl-F keeps the query as a filter on the lists, Ctrl-O also opens the Search view",
                 ),
             ],
         },

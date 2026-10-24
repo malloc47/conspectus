@@ -25,4 +25,4 @@ updated 0s ago · 0/1 sessions · 1 mux
 │(old-api); ru└──────────────────────────────────────────────────────────────────────┘             │
 │convert it                                      ││                                                │
 └────────────────────────────────────────────────┘└────────────────────────────────────────────────┘
-[left] group:none · filter:all · sort:hierarchy · Enter/a attach tmux:conspectus-main · j/k move · h
+[left] group:none · filter:all · sort:hierarchy · Enter/a attach tmux:conspectus-main · q quit …

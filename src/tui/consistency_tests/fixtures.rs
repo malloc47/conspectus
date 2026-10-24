@@ -166,6 +166,47 @@ pub(super) fn app_over_filtered(view: View, snapshot: &GraphSnapshot, filter: Ro
     app
 }
 
+/// `view` over the shared world with a content search applied that
+/// matches the loose pinned session, the way the Search view and the
+/// lists need one to have anything to show.
+pub(super) fn searched(view: View, filter: RowFilter) -> App {
+    let mut app = app_over_filtered(view, &world(), filter);
+    app.update(Msg::StartContentSearch {
+        text: "needle".into(),
+        kinds: crate::viewer::search::ContentKinds::default(),
+    });
+    let generation = app.content_generation().expect("a search is active");
+    let best = crate::viewer::search::Hit {
+        turn_index: 0,
+        role: crate::viewer::model::TurnRole::Assistant,
+        kind: crate::viewer::model::TurnKind::Message,
+        timestamp: None,
+        snippet: "mentions the needle".into(),
+        highlight: 13..19,
+    };
+    app.update(Msg::ContentHits {
+        generation,
+        batch: vec![(
+            crate::content_search::SessionKey {
+                harness_key: "claude-code".into(),
+                session_key: "solo000001".into(),
+            },
+            crate::viewer::search::SessionHits {
+                count: 2,
+                best,
+                latest: None,
+            },
+        )],
+        progress: crate::content_search::Progress {
+            scanned: 1,
+            total: 1,
+            skipped: 0,
+        },
+        done: true,
+    });
+    app
+}
+
 pub(super) fn app_in(view: View) -> App {
     app_over(view, &world())
 }

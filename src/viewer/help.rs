@@ -65,11 +65,10 @@ impl ViewerMsg {
             ),
             ViewerMsg::FindOpen => (
                 "Finding",
-                "Find text in the transcript (Esc clears the find). A result opened from a search \
-                 shows the tool output, thinking, or aborted turns it matched",
+                "Find in transcript; a match in hidden content turns that content on",
             ),
-            ViewerMsg::FindNext => ("Finding", "Go to the next match, wrapping at the end"),
-            ViewerMsg::FindPrev => ("Finding", "Go to the previous match, wrapping at the start"),
+            ViewerMsg::FindNext => ("Finding", "Next match, wrapping at the end"),
+            ViewerMsg::FindPrev => ("Finding", "Previous match, wrapping at the start"),
             ViewerMsg::ToggleHelp => ("Viewer", "Show or hide this help"),
             ViewerMsg::Close => ("Viewer", "Close help, then the find, then the viewer"),
         };

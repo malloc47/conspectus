@@ -170,6 +170,168 @@ fn no_match_exits_one_with_nothing_on_stdout() {
 }
 
 #[test]
+fn no_match_in_table_mode_says_so_on_stderr_only() {
+    let world = world();
+    world
+        .search()
+        .arg("zebra")
+        .assert()
+        .code(1)
+        .stdout(predicate::str::is_empty())
+        .stderr(predicate::str::contains("No sessions match \"zebra\""));
+}
+
+#[test]
+fn no_match_in_json_is_an_empty_document_with_exit_one() {
+    let world = world();
+    let mut cmd = world.search();
+    cmd.args(["zebra", "--format", "json"]);
+    let output = cmd.output().unwrap();
+    assert_eq!(output.status.code(), Some(1));
+    let value: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(value["results"], serde_json::json!([]));
+    assert_eq!(value["truncated"], serde_json::json!([]));
+    assert!(
+        !String::from_utf8_lossy(&output.stderr).contains("No sessions match"),
+        "the note is for table mode"
+    );
+}
+
+#[test]
+fn per_message_rows_run_in_turn_order_with_one_based_turns() {
+    let world = world();
+    let out = stdout_of({
+        let mut cmd = world.search();
+        cmd.args(["quokka", "--group", "message", "--color", "never"]);
+        cmd
+    });
+    let lines: Vec<&str> = out.lines().collect();
+    assert_eq!(lines.len(), 3, "{out}");
+    assert!(
+        lines[1].contains("#1") && lines[1].contains(" you "),
+        "{out}"
+    );
+    assert!(
+        lines[2].contains("#2") && lines[2].contains(" ai "),
+        "{out}"
+    );
+}
+
+#[test]
+fn tool_rows_use_the_tui_vocabulary() {
+    let world = world();
+    let out = stdout_of({
+        let mut cmd = world.search();
+        cmd.args(["marsupial", "--tools", "--group", "message"]);
+        cmd
+    });
+    assert!(out.contains("tool call"), "{out}");
+}
+
+#[test]
+fn thinking_is_searched_only_when_asked() {
+    let world = world();
+    let dir = world.claude.join("projects/-home-user-project");
+    let key = "cccccccc-0000-0000-0000-000000000003";
+    let line = record(
+        key,
+        "assistant",
+        "c1",
+        "null",
+        "2026-10-03T09:00:00.000Z",
+        r#"[{"type":"thinking","thinking":"pondering the axolotl question"}]"#,
+    );
+    fs::write(dir.join(format!("{key}.jsonl")), line + "\n").unwrap();
+    world.search().arg("axolotl").assert().code(1);
+    world
+        .search()
+        .args(["axolotl", "--thinking"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("axolotl"));
+}
+
+#[test]
+fn mux_state_narrows_by_the_derived_state() {
+    let world = world();
+    world
+        .search()
+        .args(["quokka", "--mux-state", "unmuxed"])
+        .assert()
+        .success();
+    world
+        .search()
+        .args(["quokka", "--mux-state", "attached"])
+        .assert()
+        .code(1);
+}
+
+#[test]
+fn a_matching_harness_and_age_keep_the_results() {
+    let world = world();
+    world
+        .search()
+        .args(["quokka", "--harness", "claude-code", "--max-age", "36500d"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("quokka"));
+}
+
+#[test]
+fn a_zero_limit_is_an_error() {
+    let world = world();
+    world
+        .search()
+        .args(["quokka", "--limit", "0"])
+        .assert()
+        .code(2);
+}
+
+#[test]
+fn verbose_reports_what_was_searched_and_what_was_not() {
+    let world = world();
+    world
+        .search()
+        .args(["quokka", "--verbose"])
+        .assert()
+        .success()
+        .stderr(predicate::str::contains("searched 2 of 2 sessions"))
+        .stderr(predicate::str::contains("no transcript parser"));
+}
+
+#[test]
+fn config_sets_the_grouping_and_a_bad_value_is_reported() {
+    let world = world();
+    let config = world.home.join(".config/conspectus");
+    fs::create_dir_all(&config).unwrap();
+    fs::write(
+        config.join("config.toml"),
+        "[search]\ngroup = \"message\"\n",
+    )
+    .unwrap();
+    let out = stdout_of({
+        let mut cmd = world.search();
+        cmd.args(["quokka", "--format", "json"]);
+        cmd
+    });
+    let value: serde_json::Value = serde_json::from_str(&out).unwrap();
+    assert_eq!(value["group"], "message");
+
+    fs::write(config.join("config.toml"), "[search]\ngroup = \"turn\"\n").unwrap();
+    let mut cmd = world.search();
+    cmd.args(["quokka", "--format", "json"]);
+    let output = cmd.output().unwrap();
+    assert!(output.status.success());
+    let value: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(value["group"], "session", "a bad value keeps the default");
+    assert!(
+        String::from_utf8_lossy(&output.stderr).contains("invalid `[search] group` value `turn`"),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
+
+#[test]
 fn errors_exit_two() {
     let world = world();
     world

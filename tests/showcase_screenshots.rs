@@ -200,12 +200,12 @@ fn a_content_query_narrows_the_showcase_sessions_and_marks_their_hits() {
     let filtered = frame_with(scratch.path(), "l", &["--contains", "release summary"]);
 
     assert!(
-        filtered.contains("find:\"release summary\" 1 found"),
+        filtered.contains("find:\"release summary\" 1 session"),
         "{filtered}"
     );
     assert!(filtered.contains("2 hits"), "{filtered}");
     assert!(filtered.contains("1/11 sessions"), "{filtered}");
-    assert!(filtered.contains("Expand the notes into"), "{filtered}");
+    assert!(filtered.contains("a release summary and"), "{filtered}");
     assert!(plain.contains("11 sessions"), "{plain}");
 
     // A query nothing matches says so.
@@ -230,11 +230,12 @@ fn the_search_overlay_searches_contents_and_promotes_the_query() {
     // Rows scope is what `/` always was: Tab is the only way across.
     let rows = frame(scratch.path(), "/");
     assert!(rows.contains("/ search ("), "{rows}");
-    assert!(!rows.contains("search contents"), "{rows}");
+    assert!(!rows.contains("/ search contents"), "{rows}");
+    assert!(rows.contains("Tab search contents"), "{rows}");
 
     let contents = frame(scratch.path(), "/<Tab>release summary");
     assert!(
-        contents.contains("search contents (1 results)"),
+        contents.contains("search contents (1 result)"),
         "{contents}"
     );
     assert!(contents.contains("2 hits"), "{contents}");
@@ -249,7 +250,7 @@ fn the_search_overlay_searches_contents_and_promotes_the_query() {
     // Ctrl-F keeps the query as the filter on the lists.
     let filtered = frame(scratch.path(), "/<Tab>release summary<C-f>");
     assert!(
-        filtered.contains("find:\"release summary\" 1 found"),
+        filtered.contains("find:\"release summary\" 1 session"),
         "{filtered}"
     );
     assert!(filtered.contains("1/11 sessions"), "{filtered}");
@@ -260,4 +261,23 @@ fn the_search_overlay_searches_contents_and_promotes_the_query() {
     assert!(view.contains("find:\"release summary\""), "{view}");
     assert!(view.contains("2 hits"), "{view}");
     assert!(view.contains("search"), "{view}");
+}
+
+/// Enter on a contents result opens the viewer on the matching turn with
+/// the query already searched.
+#[test]
+fn enter_on_a_contents_result_opens_the_viewer_at_the_match() {
+    let scratch = tempfile::tempdir().expect("scratch");
+    conspectus(scratch.path())
+        .args(["dev", "scenario", "materialize", "showcase"])
+        .arg(scratch.path().join("world"))
+        .assert()
+        .success();
+
+    let opened = frame(scratch.path(), "/<Tab>release summary<Enter>");
+    assert!(
+        opened.contains("find \"release summary\" 1/"),
+        "the viewer is open with the query active:\n{opened}"
+    );
+    assert!(opened.contains("release summary"), "{opened}");
 }

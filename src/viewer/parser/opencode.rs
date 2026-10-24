@@ -89,10 +89,17 @@ impl HarnessParser for OpenCodeParser {
         }
     }
 
-    fn candidates(&self, state_root: &Path, runs: &[String]) -> Option<HashSet<String>> {
-        with_worker_connection(state_root, |conn| Ok(candidate_sessions(conn, runs)))
-            .ok()
-            .flatten()
+    fn candidates(
+        &self,
+        state_root: &Path,
+        runs: &[String],
+        cancelled: &(dyn Fn() -> bool + Sync),
+    ) -> Option<HashSet<String>> {
+        with_worker_connection(state_root, |conn| {
+            Ok(candidate_sessions(conn, runs, cancelled))
+        })
+        .ok()
+        .flatten()
     }
 }
 
@@ -132,6 +139,16 @@ fn with_worker_connection<T>(
     })
 }
 
+/// Whether a write through the worker connection to `db` is refused, as
+/// ADR 0143 requires of readers.
+#[cfg(test)]
+pub(crate) fn worker_connection_refuses_writes(db: &Path) -> bool {
+    with_worker_connection(db, |conn| {
+        Ok(conn.execute_batch("CREATE TABLE intruder (a)").is_err())
+    })
+    .unwrap_or(false)
+}
+
 fn open_read_only(db_path: &Path) -> Result<Connection, ParseError> {
     Connection::open_with_flags(
         db_path,
@@ -140,33 +157,50 @@ fn open_read_only(db_path: &Path) -> Result<Connection, ParseError> {
     .map_err(|err| ParseError::Io(err.to_string()))
 }
 
-/// Session ids whose stored JSON contains every run (compared
-/// case-insensitively in ASCII, as SQLite's `lower` folds). A table the
-/// database lacks (1.x has `part`, 2.x has `session_message`) contributes
-/// nothing; any other failure gives up on narrowing.
-fn candidate_sessions(conn: &Connection, runs: &[String]) -> Option<HashSet<String>> {
-    let mut result: Option<HashSet<String>> = None;
-    for run in runs {
-        let mut found = HashSet::new();
-        for table in ["part", "message", "session_message"] {
-            let sql =
-                format!("SELECT DISTINCT session_id FROM {table} WHERE instr(lower(data), ?1) > 0");
-            let mut stmt = match conn.prepare(&sql) {
-                Ok(stmt) => stmt,
-                Err(err) if err.to_string().contains("no such table") => continue,
-                Err(_) => return None,
-            };
-            let rows = stmt.query_map(params![run], |row| row.get::<_, String>(0));
-            for id in rows.ok()?.flatten() {
-                found.insert(id);
-            }
-        }
-        result = Some(match result {
-            Some(previous) => previous.intersection(&found).cloned().collect(),
-            None => found,
-        });
+/// Session ids with a stored row whose JSON contains every run (compared
+/// case-insensitively in ASCII, as SQLite's `lower` folds), one query per
+/// table. A table the database lacks (1.x has `part`, 2.x has
+/// `session_message`) contributes nothing.
+///
+/// `None`, meaning "can't narrow, scan everything", for every failure: a
+/// query or row error (such as a busy database), none of the tables
+/// existing, or cancellation. An error never becomes an empty candidate
+/// set, because that would rule out sessions that match.
+fn candidate_sessions(
+    conn: &Connection,
+    runs: &[String],
+    cancelled: &(dyn Fn() -> bool + Sync),
+) -> Option<HashSet<String>> {
+    if runs.is_empty() {
+        return None;
     }
-    result
+    let conditions = (1..=runs.len())
+        .map(|n| format!("instr(lower(data), ?{n}) > 0"))
+        .collect::<Vec<_>>()
+        .join(" AND ");
+    let mut found = HashSet::new();
+    let mut any_table = false;
+    for table in ["part", "message", "session_message"] {
+        if cancelled() {
+            return None;
+        }
+        let sql = format!("SELECT DISTINCT session_id FROM {table} WHERE {conditions}");
+        let mut stmt = match conn.prepare(&sql) {
+            Ok(stmt) => stmt,
+            Err(err) if err.to_string().contains("no such table") => continue,
+            Err(_) => return None,
+        };
+        any_table = true;
+        let rows = stmt
+            .query_map(rusqlite::params_from_iter(runs.iter()), |row| {
+                row.get::<_, String>(0)
+            })
+            .ok()?;
+        for id in rows {
+            found.insert(id.ok()?);
+        }
+    }
+    any_table.then_some(found)
 }
 
 fn parse_db(db_path: &Path, session_id: &str, locator: &SessionLocator) -> ParseResult {

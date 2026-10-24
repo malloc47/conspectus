@@ -339,17 +339,6 @@ fn viewer_session_for(snapshot: &GraphSnapshot, node: &NodeId) -> Option<AgentSe
     }
 }
 
-/// Resolve the viewer target for the current subject. Mirrors
-/// [`resolve_attach_target`] so `Enter` and the `v` accelerator can
-/// pick the right session id whether the subject is an agent session, a
-/// mux, or a pin on either, in any view or in the right pane.
-///
-/// For agent sessions the session id wins directly. For muxes we walk
-/// active `LinkedToMux` candidates and pick the resolver-preferred
-/// linked session (highest provenance precedence, breaking ties on
-/// confidence then link id). Subjects with no session report
-/// [`ViewerDisabled::UnsupportedRow`] — the caller surfaces a one-line
-/// status bar reason.
 /// Where the viewer opens for the selected row of the Search view: the
 /// session's best hit, or the hit row's own turn. `None` outside the
 /// Search view, with the right pane focused, or without an active
@@ -378,6 +367,17 @@ pub fn viewer_open_target(app: &App) -> Option<(AgentSessionId, crate::viewer::s
     ))
 }
 
+/// Resolve the viewer target for the current subject. Mirrors
+/// [`resolve_attach_target`] so `Enter` and the `v` accelerator can
+/// pick the right session id whether the subject is an agent session, a
+/// mux, or a pin on either, in any view or in the right pane.
+///
+/// For agent sessions the session id wins directly. For muxes we walk
+/// active `LinkedToMux` candidates and pick the resolver-preferred
+/// linked session (highest provenance precedence, breaking ties on
+/// confidence then link id). Subjects with no session report
+/// [`ViewerDisabled::UnsupportedRow`] — the caller surfaces a one-line
+/// status bar reason.
 pub fn resolve_view_session(app: &App) -> Result<AgentSessionId, ViewerDisabled> {
     let subject = action_subject(app);
     if subject == Subject::default() {

@@ -290,26 +290,171 @@ fn a_match_inside_an_escape_free_span_survives_surrounding_escapes() {
     assert_eq!(&hits[0].snippet[hits[0].highlight.clone()], "needle");
 }
 
-#[test]
-fn highlight_ranges_are_valid_utf8_boundaries_for_multibyte_text() {
-    let body = format!(
-        "{} Ünïcödé 😀 needle ✓ {}",
-        "日本語 ".repeat(90),
-        "テキスト ".repeat(90)
-    );
-    let d = doc(vec![turn(TurnRole::User, TurnKind::Message, &body)]);
+/// A deterministic generator, so the sweep below is reproducible.
+struct Lcg(u64);
 
-    for text in ["needle", "ÜNÏCÖDÉ".to_lowercase().as_str(), "😀 needle ✓"] {
-        let hits = match_document(&d, &query(text));
-        let Some(h) = hits.first() else {
-            // Non-ASCII is exact, so a lowercased accent legitimately misses.
-            assert_eq!(text, "ünïcödé");
-            continue;
-        };
-        assert!(h.snippet.is_char_boundary(h.highlight.start));
-        assert!(h.snippet.is_char_boundary(h.highlight.end));
-        assert!(!h.snippet[h.highlight.clone()].is_empty());
+impl Lcg {
+    fn next(&mut self, bound: usize) -> usize {
+        self.0 = self
+            .0
+            .wrapping_mul(6_364_136_223_846_793_005)
+            .wrapping_add(1_442_695_040_888_963_407);
+        ((self.0 >> 33) as usize) % bound
     }
+}
+
+#[test]
+fn snippets_and_highlights_hold_their_invariants_over_generated_text() {
+    // One to four bytes per character, whitespace the snippet collapses,
+    // and an escape sequence that must never be cut or shown.
+    const FILLER: [&str; 11] = [
+        "a",
+        "Z",
+        "é",
+        "日",
+        "😀",
+        " ",
+        "\n",
+        "\t",
+        "\u{1b}[31m",
+        "\u{1b}[0m",
+        "word ",
+    ];
+    // What a query is made of: no whitespace, so the snippet's collapsing
+    // of it can't change the match.
+    const NEEDLE: [&str; 6] = ["n", "Q", "ñ", "日", "😀", "x"];
+    let mut rng = Lcg(0x5eed);
+    for case in 0..2000 {
+        let mut body = String::new();
+        let before = rng.next(400);
+        let after = rng.next(400);
+        for _ in 0..before {
+            body.push_str(FILLER[rng.next(FILLER.len())]);
+        }
+        let needle: String = (0..1 + rng.next(4))
+            .map(|_| NEEDLE[rng.next(NEEDLE.len())])
+            .collect();
+        body.push_str(&needle);
+        for _ in 0..after {
+            body.push_str(FILLER[rng.next(FILLER.len())]);
+        }
+        let turn = turn(TurnRole::User, TurnKind::Message, &body);
+        let hit = match_turn(0, &turn, &needle)
+            .unwrap_or_else(|| panic!("case {case}: the needle is in the body"));
+        let (snippet, range) = (&hit.snippet, hit.highlight.clone());
+        assert!(
+            snippet.is_char_boundary(range.start) && snippet.is_char_boundary(range.end),
+            "case {case}: {snippet:?} {range:?}"
+        );
+        assert!(
+            snippet.chars().count() <= SNIPPET_MAX_CHARS + 2,
+            "case {case}: {} chars",
+            snippet.chars().count()
+        );
+        assert!(
+            !snippet.contains('\u{1b}') && !snippet.contains('['),
+            "case {case}: a cut escape or control survived: {snippet:?}"
+        );
+        assert!(
+            !snippet.contains(['\n', '\t']),
+            "case {case}: whitespace isn't collapsed: {snippet:?}"
+        );
+        // The highlight is a match, though not always the first in the
+        // body (a different one can sit in the window), so it names the
+        // needle by value.
+        assert!(
+            snippet[range.clone()].eq_ignore_ascii_case(&needle),
+            "case {case}: {:?} is not {needle:?} in {snippet:?}",
+            &snippet[range]
+        );
+    }
+}
+
+#[test]
+fn the_highlight_is_the_match_the_viewer_opens_on() {
+    // The viewer opens on the first matching turn and jumps to the first
+    // match in it; the snippet's highlight is that match, not a later
+    // one the window happened to show.
+    let body = format!(
+        "{} needle one {} needle two",
+        "pad ".repeat(60),
+        "pad ".repeat(60)
+    );
+    let hit = match_turn(0, &turn(TurnRole::User, TurnKind::Message, &body), "needle").unwrap();
+    assert!(hit.snippet.contains("needle one"), "{}", hit.snippet);
+    assert_eq!(
+        &hit.snippet[hit.highlight.clone()],
+        "needle",
+        "{}",
+        hit.snippet
+    );
+    let after_highlight = &hit.snippet[hit.highlight.end..];
+    assert!(
+        after_highlight.trim_start().starts_with("one"),
+        "{after_highlight}"
+    );
+}
+
+#[test]
+fn matching_turns_agrees_with_the_hits_without_building_snippets() {
+    let d = doc(vec![
+        turn(TurnRole::User, TurnKind::Message, "a needle"),
+        turn(TurnRole::Assistant, TurnKind::ToolUse, "needle in a tool"),
+        turn(TurnRole::Assistant, TurnKind::Message, "nothing"),
+        turn(TurnRole::Assistant, TurnKind::Message, "NEEDLE again"),
+    ]);
+    let q = query("needle");
+    let from_hits: Vec<_> = match_document(&d, &q)
+        .iter()
+        .map(|h| h.turn_index)
+        .collect();
+    assert_eq!(matching_turns(&d, &q).collect::<Vec<_>>(), from_hits);
+    assert_eq!(from_hits, [0, 3], "the tool call is out of scope");
+    assert_eq!(matching_turns(&d, &query("  ")).count(), 0);
+}
+
+#[test]
+fn a_session_summary_built_from_a_document_matches_one_built_from_its_hits() {
+    let d = doc(vec![
+        turn(TurnRole::User, TurnKind::Message, "needle one"),
+        turn(TurnRole::Assistant, TurnKind::Message, "needle two"),
+    ]);
+    let q = query("needle");
+    let direct = SessionHits::from_document(&d, &q).unwrap();
+    let via_hits = SessionHits::from_hits(&match_document(&d, &q)).unwrap();
+    assert_eq!(direct.count, via_hits.count);
+    assert_eq!(direct.best, via_hits.best);
+    assert!(SessionHits::from_document(&d, &query("absent")).is_none());
+}
+
+#[test]
+fn hidden_system_messages_match_only_when_hidden_text_is_asked_for() {
+    let mut note = turn(TurnRole::System, TurnKind::Message, "model: acme/turbo-9");
+    note.hidden = true;
+    let d = doc(vec![note]);
+    assert!(match_document(&d, &query("turbo")).is_empty());
+    let kinds = ContentKinds {
+        hidden: true,
+        ..ContentKinds::default()
+    };
+    assert_eq!(
+        match_document(&d, &ContentQuery::new("turbo", kinds)).len(),
+        1
+    );
+}
+
+#[test]
+fn ranges_that_are_not_on_boundaries_or_outside_the_text_yield_no_highlight() {
+    let text = "naïve 日本語";
+    let inside_char = 3..4; // splits the two bytes of `ï`
+    for range in [inside_char, 0..0, 5..500, 40..41] {
+        let snippet = snippet_around(text, range.clone(), 100);
+        assert_eq!(snippet.highlight, None, "{range:?}");
+        let cut = snippet_around(&text.repeat(30), range.clone(), 20);
+        assert_eq!(cut.highlight, None, "{range:?}");
+    }
+    let ok = snippet_around(text, 0..1, 100);
+    assert_eq!(ok.highlight, Some(0..1));
 }
 
 #[test]

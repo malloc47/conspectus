@@ -6,9 +6,9 @@ expression: text
 
                ┌ / search contents (2 results) ─────────────────────────────────────┐
                │/quokka                                                             │
-               │by message · messages · 34 sessions searched · 2 skipped            │
-               │>  claude    session aaaa1111  turn 4 · message  …the quokka design…│
-               │   claude    session aaaa1111  turn 8 · tool output  …e quokka desi…│
+               │results by message · messages · 34 sessions searched · 2 skipped    │
+               │>  claude    session aaaa1111  turn 4 · message  …quokka design…    │
+               │   claude    session aaaa1111  turn 8 · tool output  …quokka desig… │
                │                                                                    │
                │                                                                    │
                │                                                                    │
@@ -20,7 +20,7 @@ expression: text
                │                                                                    │
                │                                                                    │
                │                                                                    │
-               │                                                                    │
-               │Tab search rows · Ctrl-G group · Ctrl-T tools · Ctrl-Y thinking ·   │
-               │Ctrl-F filter lists · Ctrl-O open Search view                       │
+               │↑/↓ move · Enter open hit · Esc close · Tab search rows · Ctrl-R    │
+               │results · Ctrl-T tools · Ctrl-Y thinking · Ctrl-F filter lists ·    │
+               │Ctrl-O open Search view                                             │
                └────────────────────────────────────────────────────────────────────┘

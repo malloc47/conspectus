@@ -30,6 +30,7 @@ fn found(group: Grouping, rows: Vec<Row>) -> Found {
         },
         parserless: 2,
         rows,
+        truncated: Vec::new(),
     }
 }
 
@@ -73,6 +74,7 @@ fn the_session_table_aligns_columns_and_ends_with_the_snippet() {
         lines[2].contains("abc123"),
         "an unlabelled session shows its id: {text}"
     );
+    assert!(lines[0].contains("LATEST"), "{text}");
     let snippet_col = lines[0].find("SNIPPET").unwrap();
     assert_eq!(lines[1].find("found").unwrap(), snippet_col, "{text}");
     assert_eq!(lines[2].find("another").unwrap(), snippet_col, "{text}");
@@ -98,9 +100,12 @@ fn the_message_table_shows_turn_role_kind_and_time() {
         assert!(header.contains(column), "{header}");
     }
     let row = text.lines().nth(1).unwrap();
-    assert!(row.contains("#7"), "{row}");
-    assert!(row.contains("assistant"), "{row}");
-    assert!(row.contains("tool result"), "{row}");
+    assert!(
+        row.contains("#8"),
+        "turns count from 1 like the viewer: {row}"
+    );
+    assert!(row.contains(" ai "), "{row}");
+    assert!(row.contains("tool output"), "{row}");
 }
 
 #[test]
@@ -128,16 +133,20 @@ fn a_width_cuts_only_the_snippet_and_never_below_a_floor() {
 }
 
 #[test]
-fn color_bolds_the_match_only_when_it_survives_the_cut() {
+fn color_bolds_the_match_and_a_cut_keeps_it_in_view() {
     let text = "the quick brown needle jumps";
     let range = 16..22;
     let plain = fit_snippet(text, &range, None, false);
     assert_eq!(plain, text);
     let bold = fit_snippet(text, &range, None, true);
     assert!(bold.contains("\x1b[1mneedle\x1b[0m"), "{bold:?}");
+    // The cut keeps the match in view, so it is still bold.
     let cut = fit_snippet(text, &range, Some(12), true);
-    assert!(!cut.contains('\x1b'), "the match was cut off: {cut:?}");
-    assert!(cut.ends_with('…'));
+    assert!(cut.contains("\x1b[1mneedle\x1b[0m"), "{cut:?}");
+    assert!(cut.starts_with('…') && cut.ends_with('…'), "{cut:?}");
+    // A match wider than the line is cut to what fits.
+    let (wide, _) = crop_around(text, &range, 4);
+    assert!(display_width(&wide) <= 4, "{wide:?}");
     let empty = fit_snippet(text, &(0..0), None, true);
     assert_eq!(empty, text);
 }
@@ -174,7 +183,7 @@ fn json_per_message_rows_carry_the_turn() {
     );
     let value: Value = serde_json::from_str(&render_json("needle", &f).unwrap()).unwrap();
     let result = &value["results"][0];
-    assert_eq!(result["turn"], 3);
+    assert_eq!(result["turn"], 4, "1-based");
     assert_eq!(result["role"], "assistant");
     assert_eq!(result["kind"], "message");
     assert_eq!(result["label"], Value::Null);
@@ -186,4 +195,81 @@ fn the_width_flag_wins_and_a_pipe_is_unbounded() {
     assert_eq!(table_width(Some(90), false), Some(90));
     assert_eq!(table_width(Some(90), true), Some(90));
     assert_eq!(table_width(None, false), None);
+}
+
+#[test]
+fn an_unnamed_session_shows_eight_characters_of_its_key() {
+    let mut f = found(
+        Grouping::Session,
+        vec![session_row(None, 1, "a needle", 2..8)],
+    );
+    if let Row::Session { info, .. } = &mut f.rows[0] {
+        info.session = "0123456789abcdef".into();
+    }
+    let text = render_table(&f, None, false, NOW);
+    assert!(text.contains("01234567"), "{text}");
+    assert!(!text.contains("012345678"), "{text}");
+}
+
+#[test]
+fn a_cropped_snippet_keeps_the_match_and_cuts_on_word_edges() {
+    let text = "alpha beta gamma delta needle epsilon zeta eta theta iota kappa";
+    let start = text.find("needle").unwrap();
+    let range = start..start + 6;
+    for budget in [14, 20, 30, 40] {
+        let (cropped, hl) = crop_around(text, &range, budget);
+        assert!(display_width(&cropped) <= budget, "{budget}: {cropped}");
+        assert_eq!(&cropped[hl], "needle", "{budget}: {cropped}");
+    }
+    let (cropped, _) = crop_around(text, &range, 30);
+    assert!(
+        cropped.starts_with('…') && cropped.ends_with('…'),
+        "{cropped}"
+    );
+    let inner = cropped.trim_matches('…');
+    assert!(!inner.starts_with(' '), "{cropped}");
+    let bold = fit_snippet(text, &range, Some(30), true);
+    assert!(bold.contains("\x1b[1mneedle\x1b[0m"), "{bold:?}");
+}
+
+#[test]
+fn a_wide_character_snippet_is_cropped_by_cells_without_splitting() {
+    let text = "日本語のテキスト needle もっと日本語のテキスト";
+    let start = text.find("needle").unwrap();
+    let (cropped, hl) = crop_around(text, &(start..start + 6), 24);
+    assert!(display_width(&cropped) <= 24, "{cropped}");
+    assert_eq!(&cropped[hl], "needle");
+}
+
+#[test]
+fn a_match_wider_than_the_budget_is_itself_cut() {
+    let text = format!("{} tail", "n".repeat(50));
+    let (cropped, _) = crop_around(&text, &(0..50), 10);
+    assert!(display_width(&cropped) <= 10, "{cropped}");
+}
+
+#[test]
+fn json_lists_truncated_sessions() {
+    let mut f = found(
+        Grouping::Message,
+        vec![Row::Message {
+            info: info(None),
+            hit: hit(0, "x needle", 2..8),
+        }],
+    );
+    f.truncated.push(Truncated {
+        info: info(None),
+        matches: 900,
+        shown: 500,
+    });
+    let value: Value = serde_json::from_str(&render_json("needle", &f).unwrap()).unwrap();
+    assert_eq!(value["truncated"][0]["matches"], 900);
+    assert_eq!(value["truncated"][0]["shown"], 500);
+}
+
+#[test]
+fn a_zero_limit_is_refused() {
+    assert!(parse_limit("0").is_err());
+    assert_eq!(parse_limit("3"), Ok(3));
+    assert!(parse_limit("x").is_err());
 }

@@ -48,6 +48,7 @@ CHECKS=(
   refresh_freshness
   worktree_close
   repo_clone
+  content_search
 )
 
 # ---------------------------------------------------------------- setup
@@ -635,6 +636,31 @@ check_repo_clone() {
   run cx rebuild cloned-repo; ok "clone"
   is_true "repo is back" test -d "$clone/.git"
   run cx rebuild cloned-repo --dry-run; has "nothing to" "live repo"
+}
+
+check_content_search() {
+  fresh
+  # A Claude transcript the search can read; discovery finds it through
+  # the harness's state-root override.
+  local state="$SCRATCH/claude" key="aaaaaaaa-0000-0000-0000-000000000001"
+  local dir="$state/projects/-scratch-app"
+  mkdir -p "$dir"
+  {
+    printf '{"cwd":"%s","sessionId":"%s","type":"user","uuid":"u1","parentUuid":null,' "$REPO" "$key"
+    printf '"timestamp":"2026-10-01T10:00:00.000Z","message":{"role":"user","content":[{"type":"text","text":"We chose the quokka design"}]}}\n'
+    printf '{"cwd":"%s","sessionId":"%s","type":"assistant","uuid":"a1","parentUuid":"u1",' "$REPO" "$key"
+    printf '"timestamp":"2026-10-01T10:00:05.000Z","message":{"role":"assistant","content":[{"type":"text","text":"Noted."}]}}\n'
+  } >"$dir/$key.jsonl"
+  export CONSPECTUS_CLAUDE_CODE_STATE="$state"
+  run cx search quokka --color never --no-cache; ok "search"; has quokka; has "claude-code"
+  run cx search QUOKKA --format json --no-cache; ok "json"; has '"hits"'; has '"results"'
+  run cx search zebra --no-cache; fails "no match exits 1"; has 'No sessions match "zebra"'
+  [[ $RC -eq 1 ]] || note_fail "no match should exit 1, got $RC"
+  run cx search "  " --no-cache; [[ $RC -eq 2 ]] || note_fail "empty query should exit 2, got $RC"
+  run cx table sessions --wide --no-pager --no-cache --contains quokka; ok "--contains"; has "${key: -8}"
+  run cx table sessions --wide --no-pager --no-cache --contains zebra; ok; lacks "${key: -8}" "non-matching session"
+  is_false "transcript text stays out of the caches" grep -rIli quokka "$XDG_CACHE_HOME" "$XDG_STATE_HOME" "$XDG_DATA_HOME"
+  unset CONSPECTUS_CLAUDE_CODE_STATE
 }
 
 # ------------------------------------------------------------- drivers

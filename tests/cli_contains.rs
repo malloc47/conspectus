@@ -177,3 +177,25 @@ fn contains_does_not_write_the_text_anywhere() {
         "the query or transcript text was written: {leaked:?}"
     );
 }
+
+#[test]
+fn contains_is_accepted_by_the_other_tables_and_leaves_them_alone() {
+    let temp = tempfile::tempdir().unwrap();
+    let home = temp.path().join("home");
+    let claude = temp.path().join("claude");
+    fs::create_dir_all(&home).unwrap();
+    write_session(&claude, "aaaaaaaa-0000-0000-0000-000000000001", "quokka");
+    for table in ["mux", "prs"] {
+        conspectus(&home, &claude)
+            .args([
+                "table",
+                table,
+                "--wide",
+                "--no-pager",
+                "--contains",
+                "quokka",
+            ])
+            .assert()
+            .success();
+    }
+}

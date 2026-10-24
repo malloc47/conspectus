@@ -9,14 +9,34 @@
 //! leaves a [`ScanRequest`] for the runtime, which streams results back
 //! as [`Msg::ContentHits`].
 
+use std::cell::RefCell;
 use std::collections::BTreeSet;
 use std::sync::Arc;
+use std::time::Instant;
 
 use super::*;
 use crate::content_search::{Progress, SessionKey};
 use crate::filter::{ContentDetailMap, ContentFilter, ContentHitMap};
 use crate::tui::Effect;
 use crate::viewer::search::{ContentKinds, Grouping};
+
+/// What the interface says when a content search cannot start because
+/// live preview is off. One text for every place that explains it.
+pub const CONTENT_OFF_NOTICE: &str = "Content search is off while live preview is disabled";
+
+/// The most sessions whose matching turns are held in memory at once.
+/// The best-ranked sessions get them first; the rest are not read.
+pub const MAX_DETAIL_SESSIONS: usize = 100;
+
+/// Add two scans' counters, for an incremental scan that continues a
+/// finished one.
+fn add_progress(a: Progress, b: Progress) -> Progress {
+    Progress {
+        scanned: a.scanned + b.scanned,
+        total: a.total + b.total,
+        skipped: a.skipped + b.skipped,
+    }
+}
 
 /// How far the scan behind the active query has got.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -66,12 +86,76 @@ pub struct ContentSearch {
     /// Sessions already handed to a scan, so a refresh scans only the
     /// ones that appeared since.
     scanned: BTreeSet<SessionKey>,
+    /// Counters of the scans already finished, which a continuing scan
+    /// adds to so the totals cover every session searched.
+    carried: Progress,
+    /// When the last scan finished, for the "scanned 2m ago" note.
+    finished_at: Option<Instant>,
+    /// The overlay's view of the results, rebuilt only when its inputs
+    /// change.
+    view_cache: RefCell<Option<(ViewKey, crate::tui::widgets::search::ContentView)>>,
+}
+
+/// What the cached overlay view was built from.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(super) struct ViewKey {
+    generation: u64,
+    hits: usize,
+    details: usize,
+    progress: Progress,
+    done: bool,
+    group: Grouping,
+    snapshot: usize,
 }
 
 impl ContentSearch {
     /// Sessions that matched so far.
     pub fn hits(&self) -> &ContentHitMap {
         &self.hits
+    }
+
+    /// Whether every session has been looked at.
+    pub fn status_is_done(&self) -> bool {
+        self.status.is_done()
+    }
+
+    /// When the last scan finished; `None` while one is running.
+    pub fn finished_at(&self) -> Option<Instant> {
+        self.finished_at
+    }
+
+    /// The scan's counters: sessions looked at, to look at, and skipped,
+    /// across every scan the search has run.
+    pub fn progress(&self) -> Progress {
+        self.status.progress()
+    }
+
+    /// How the search is going, for the find chip and the Search view:
+    /// `searching 34/77` while reading, then `3 sessions`, with
+    /// `· N skipped` when sessions could not be read and
+    /// `· scanned 2m ago` once it is done.
+    pub fn status_note(&self, now: Instant) -> String {
+        let progress = self.progress();
+        let mut note = match self.status {
+            ContentStatus::Running(_) => {
+                format!("searching {}/{}", progress.scanned, progress.total)
+            }
+            ContentStatus::Done(_) => {
+                let found = self.hits.len();
+                format!(
+                    "{found} {}",
+                    if found == 1 { "session" } else { "sessions" }
+                )
+            }
+        };
+        if progress.skipped > 0 {
+            note.push_str(&format!(" · {} skipped", progress.skipped));
+        }
+        if let Some(finished) = self.finished_at {
+            let age = now.saturating_duration_since(finished).as_secs();
+            note.push_str(&format!(" · scanned {}", age_label(age)));
+        }
+        note
     }
 
     /// The row predicate for this search.
@@ -83,6 +167,16 @@ impl ContentSearch {
             group: self.group,
             details: Arc::clone(&self.details),
         }
+    }
+}
+
+/// `just now`, or `2m ago`, `1h ago`.
+fn age_label(secs: u64) -> String {
+    match secs {
+        0..=4 => "just now".to_string(),
+        5..=59 => format!("{secs}s ago"),
+        60..=3599 => format!("{}m ago", secs / 60),
+        _ => format!("{}h ago", secs / 3600),
     }
 }
 
@@ -145,19 +239,28 @@ impl App {
         if content.group != Grouping::Message || !content.status.is_done() {
             return;
         }
-        let sessions: Vec<AgentSessionId> = self
+        // The best-ranked matches get their turns read first, and no
+        // more than the cap are ever held.
+        let room = MAX_DETAIL_SESSIONS.saturating_sub(content.details.len());
+        let mut ranked: Vec<(AgentSessionId, &crate::viewer::search::SessionHits)> = self
             .snapshot_sessions()
             .into_iter()
-            .filter(|session| {
-                content
+            .filter_map(|session| {
+                let hits = content
                     .hits
+                    .get(&session.harness_key, &session.session_key)?;
+                content
+                    .details
                     .get(&session.harness_key, &session.session_key)
-                    .is_some()
-                    && content
-                        .details
-                        .get(&session.harness_key, &session.session_key)
-                        .is_none()
+                    .is_none()
+                    .then_some((session, hits))
             })
+            .collect();
+        ranked.sort_by(|a, b| crate::viewer::search::cmp_sessions(a.1, b.1));
+        let sessions: Vec<AgentSessionId> = ranked
+            .into_iter()
+            .take(room)
+            .map(|(session, _)| session)
             .collect();
         if sessions.is_empty() {
             return;
@@ -203,11 +306,15 @@ impl App {
                 session_key: session.session_key.clone(),
             });
         }
-        content.status = ContentStatus::Running(Progress {
-            scanned: 0,
-            total: sessions.len(),
-            skipped: 0,
-        });
+        content.finished_at = None;
+        content.status = ContentStatus::Running(add_progress(
+            content.carried,
+            Progress {
+                scanned: 0,
+                total: sessions.len(),
+                skipped: 0,
+            },
+        ));
         self.scan_request = Some(ScanRequest {
             generation: content.generation,
             text: content.text.clone(),
@@ -239,6 +346,9 @@ impl App {
             })
             .collect();
         if !new.is_empty() {
+            if let Some(content) = self.content.as_mut() {
+                content.carried = content.status.progress();
+            }
             self.queue_scan(new);
         }
     }
@@ -252,10 +362,9 @@ impl App {
         applied: bool,
     ) -> Option<String> {
         if !self.config.live_preview_enabled {
-            let note = "Content search is off while live preview is disabled";
-            self.status_message = Some(note.to_string());
-            return Some(note.to_string());
+            return Some(CONTENT_OFF_NOTICE.to_string());
         }
+        self.search_auto_expanded.clear();
         self.content = Some(ContentSearch {
             text,
             kinds,
@@ -267,6 +376,9 @@ impl App {
             details: Arc::new(ContentDetailMap::default()),
             staging: None,
             scanned: BTreeSet::new(),
+            carried: Progress::default(),
+            finished_at: None,
+            view_cache: RefCell::new(None),
         });
         let sessions = self.snapshot_sessions();
         if sessions.is_empty() && self.handle.is_none() {
@@ -401,13 +513,20 @@ impl App {
                 for (key, hits) in batch {
                     details.insert(key.harness_key, key.session_key, hits);
                 }
-                self.rebuild_tree_in_place();
+                if content.applied {
+                    self.rebuild_tree_in_place();
+                }
             }
             Msg::RescanContent => {
-                let sessions = self.snapshot_sessions();
-                if let Some(content) = self.content.as_mut() {
-                    content.scanned.clear();
-                    content.staging = Some(ContentHitMap::default());
+                if self.content.is_some() {
+                    let sessions = self.snapshot_sessions();
+                    if let Some(content) = self.content.as_mut() {
+                        content.scanned.clear();
+                        content.carried = Progress::default();
+                        content.staging = Some(ContentHitMap::default());
+                        // Turns read for the old results are read again.
+                        content.details = Arc::new(ContentDetailMap::default());
+                    }
                     self.queue_scan(sessions);
                     self.start_search_spinner();
                 }
@@ -425,11 +544,15 @@ impl App {
                     return effects;
                 }
                 let changed = !batch.is_empty() || done;
+                let progress = add_progress(content.carried, progress);
                 for (key, hits) in batch {
                     let SessionKey {
                         harness_key,
                         session_key,
                     } = key;
+                    // The turns read for an earlier result may no longer
+                    // be the matching ones.
+                    Arc::make_mut(&mut content.details).remove(&harness_key, &session_key);
                     match content.staging.as_mut() {
                         Some(staging) => staging.insert(harness_key, session_key, hits),
                         None => {
@@ -442,6 +565,7 @@ impl App {
                         content.hits = Arc::new(staging);
                     }
                     content.status = ContentStatus::Done(progress);
+                    content.finished_at = Some(Instant::now());
                 } else {
                     content.status = ContentStatus::Running(progress);
                 }
@@ -453,7 +577,8 @@ impl App {
                     let label = format!("Searching {}/{}", progress.scanned, progress.total);
                     self.update_in_flight(InFlightKind::Search, Some(label));
                 }
-                if changed {
+                // A preview in the overlay does not change the lists.
+                if changed && self.content.as_ref().is_some_and(|c| c.applied) {
                     self.rebuild_tree_in_place();
                 }
             }
@@ -478,6 +603,7 @@ impl App {
     /// Drop the content search and stop its scan.
     fn clear_content(&mut self) {
         self.content_stash = None;
+        self.search_auto_expanded.clear();
         if self.content.take().is_some() {
             // A new generation makes the runtime cancel whatever it runs.
             self.content_generation += 1;
@@ -535,12 +661,41 @@ impl App {
         use crate::tui::widgets::search::ContentView;
         let mut view = ContentView::default();
         if !self.config.live_preview_enabled {
-            view.unavailable = Some("Content search is off while live preview is disabled");
+            view.unavailable = Some(CONTENT_OFF_NOTICE);
             return view;
         }
         let Some(content) = &self.content else {
             return view;
         };
+        let key = ViewKey {
+            generation: content.generation,
+            hits: content.hits.len(),
+            details: content.details.len(),
+            progress: content.status.progress(),
+            done: content.status.is_done(),
+            group: content.group,
+            snapshot: self
+                .handle
+                .as_ref()
+                .map_or(0, |handle| std::ptr::from_ref(handle.snapshot()) as usize),
+        };
+        if let Some((cached, view)) = &*content.view_cache.borrow()
+            && *cached == key
+        {
+            return view.clone();
+        }
+        let view = self.build_content_view(content, view);
+        *content.view_cache.borrow_mut() = Some((key, view.clone()));
+        view
+    }
+
+    /// Rank and describe the matches for the overlay. Costly (it walks
+    /// every session), so [`App::content_view`] caches it.
+    fn build_content_view(
+        &self,
+        content: &ContentSearch,
+        mut view: crate::tui::widgets::search::ContentView,
+    ) -> crate::tui::widgets::search::ContentView {
         let progress = content.status.progress();
         view.scanned = progress.scanned;
         view.total = progress.total;
@@ -666,3 +821,7 @@ mod tests;
 #[cfg(test)]
 #[path = "content_preview_tests.rs"]
 mod preview_tests;
+
+#[cfg(test)]
+#[path = "content_state_tests.rs"]
+mod state_tests;

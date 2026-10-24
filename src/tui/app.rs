@@ -200,6 +200,10 @@ pub struct App {
     /// Search-view rows already opened once, so a rebuild opens new
     /// buckets and sessions but does not undo a collapse.
     search_auto_expanded: BTreeSet<RowId>,
+    /// How many times the tree was rebuilt in place, for tests that
+    /// check a change rebuilds only when it must.
+    #[cfg(test)]
+    pub(super) tree_rebuilds: usize,
     /// Source of scan generations, so results of a scan the operator
     /// replaced or cleared are recognized and dropped.
     content_generation: u64,
@@ -491,7 +495,13 @@ impl App {
         let kinds = config.search.kinds;
         let mut app = Self::build(config);
         if let Some(text) = initial_contains {
-            app.reduce_content(Msg::StartContentSearch { text, kinds });
+            // A search that cannot start (live preview off) says so
+            // instead of leaving the lists quietly unfiltered.
+            for effect in app.reduce_content(Msg::StartContentSearch { text, kinds }) {
+                if let crate::tui::Effect::Toast(note) = effect {
+                    app.post_toast(note);
+                }
+            }
         }
         app
     }
@@ -546,6 +556,8 @@ impl App {
             scan_request: None,
             detail_request: None,
             search_auto_expanded: BTreeSet::new(),
+            #[cfg(test)]
+            tree_rebuilds: 0,
             content_generation: 0,
             pending_restore_focus: None,
             undo: crate::tui::undo::UndoStack::default(),

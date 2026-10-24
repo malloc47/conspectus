@@ -71,6 +71,10 @@ impl App {
     /// next Msg::SetData will build the tree against the up-to-date
     /// projection state.
     pub(super) fn rebuild_tree_in_place(&mut self) {
+        #[cfg(test)]
+        {
+            self.tree_rebuilds += 1;
+        }
         let Some(db) = self.handle.as_ref() else {
             return;
         };

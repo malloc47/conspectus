@@ -112,7 +112,9 @@ fn typing_waits_for_the_debounce_then_asks_for_one_scan_with_the_latest_text() {
     let now = Instant::now();
     assert_eq!(state.take_due_search(now, false), None, "still resting");
     type_text(&mut state, "kka");
-    let later = now + DEBOUNCE + Duration::from_millis(5);
+    // Measured from after the last keystroke, so a slow machine cannot
+    // push the edit past the instant being asked about.
+    let later = Instant::now() + DEBOUNCE + Duration::from_millis(5);
     let due = state.take_due_search(later, false);
     assert_eq!(
         due,
@@ -159,7 +161,7 @@ fn leaving_the_contents_scope_stops_the_preview() {
 #[test]
 fn grouping_and_kinds_change_inside_the_overlay_and_restart_the_scan() {
     let mut state = contents_overlay("quokka");
-    state.handle_key(ctrl('g'));
+    state.handle_key(ctrl('r'));
     assert_eq!(state.group(), Grouping::Message);
     state.handle_key(ctrl('t'));
     state.handle_key(ctrl('y'));
@@ -177,7 +179,7 @@ fn grouping_and_kinds_change_inside_the_overlay_and_restart_the_scan() {
             group: Grouping::Message,
         })
     );
-    state.handle_key(ctrl('g'));
+    state.handle_key(ctrl('r'));
     assert_eq!(state.group(), Grouping::Session);
 }
 
@@ -271,10 +273,10 @@ fn escape_closes_in_either_scope() {
 
 #[test]
 fn the_rows_scope_does_not_bind_the_contents_keys() {
-    // Ctrl-F and Ctrl-G are text-editing keys in the rows scope; the
+    // Ctrl-F and Ctrl-R are text-editing keys in the rows scope; the
     // contents keys apply only after Tab.
     let mut state = SearchOverlayState::new();
-    state.handle_key(ctrl('g'));
+    state.handle_key(ctrl('r'));
     state.handle_key(ctrl('t'));
     assert_eq!(state.group(), Grouping::Session);
     assert!(!state.kinds().tools);
@@ -343,7 +345,7 @@ fn the_contents_scope_shows_progress_results_and_the_generated_key_hints() {
 #[test]
 fn the_per_message_grouping_lists_one_row_per_turn() {
     let mut state = contents_overlay("quokka");
-    state.handle_key(ctrl('g'));
+    state.handle_key(ctrl('r'));
     let mut first = row("aaaa1111", 3);
     first.turn = Some("turn 4 · message".into());
     let mut second = row("aaaa1111", 7);

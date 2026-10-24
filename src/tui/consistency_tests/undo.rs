@@ -158,8 +158,18 @@ fn the_undo_writes_refresh_like_every_other_pin_write() {
 /// cursor returns to its row.
 #[test]
 fn unpinning_in_each_view_and_undoing_returns_to_the_restored_row() {
-    for view in [View::Sessions, View::Mux, View::Prs, View::Pinned] {
-        let mut app = app_over_filtered(view, &world(), all_stopped_muxes());
+    for view in [
+        View::Sessions,
+        View::Mux,
+        View::Prs,
+        View::Pinned,
+        View::Search,
+    ] {
+        let mut app = if view == View::Search {
+            searched(view, all_stopped_muxes())
+        } else {
+            app_over_filtered(view, &world(), all_stopped_muxes())
+        };
         let ids: Vec<RowId> = app.tree().rows.iter().map(|row| row.id.clone()).collect();
         let mut tried = 0;
         for id in ids {

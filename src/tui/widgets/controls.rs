@@ -189,9 +189,6 @@ pub enum ControlsOutcome {
 pub struct ControlsOverlayState {
     cursor: ControlsCursor,
     sub_editor: Option<SubEditor>,
-    /// Opened only to take a Content query: leaving the editor leaves
-    /// the overlay, so the Search view's `/` is one prompt.
-    prompt_only: bool,
 }
 
 impl ControlsOverlayState {
@@ -205,7 +202,6 @@ impl ControlsOverlayState {
         Self {
             cursor: ControlsCursor::View(active_view_idx),
             sub_editor: None,
-            prompt_only: false,
         }
     }
 
@@ -216,21 +212,6 @@ impl ControlsOverlayState {
         Self {
             cursor: ControlsCursor::FilterHarness,
             sub_editor: None,
-            prompt_only: false,
-        }
-    }
-
-    /// Open with the Content editor already taking input, prefilled with
-    /// the active query. The Search view's `/` uses it.
-    pub fn new_at_content(ctx: &ControlsContext<'_>) -> Self {
-        let initial = ctx.content.map(|(text, ..)| text).unwrap_or_default();
-        Self {
-            cursor: ControlsCursor::FilterContent,
-            sub_editor: Some(SubEditor::Content(TextInputState::new(
-                " contains ",
-                initial.to_string(),
-            ))),
-            prompt_only: true,
         }
     }
 
@@ -258,12 +239,6 @@ impl ControlsOverlayState {
         // commit/cancel without taking a second mutable borrow.
         if self.sub_editor.is_some() {
             let outcome = Self::dispatch_sub_editor(&mut self.sub_editor, ctx, event);
-            if self.prompt_only && self.sub_editor.is_none() {
-                return match outcome {
-                    ControlsOutcome::ApplyAndStay(msg) => ControlsOutcome::ApplyAndClose(msg),
-                    _ => ControlsOutcome::Close,
-                };
-            }
             return outcome;
         }
 
@@ -705,6 +680,9 @@ pub(crate) fn flatten_rows(ctx: &ControlsContext<'_>) -> Vec<ControlsCursor> {
     for idx in 0..Grouping::values_for(ctx.view).len() {
         rows.push(ControlsCursor::Grouping(idx));
     }
+    if matches!(ctx.view, View::Search) {
+        rows.push(ControlsCursor::ContentGroup);
+    }
     rows.push(ControlsCursor::FilterHarness);
     rows.push(ControlsCursor::FilterMaxAge);
     rows.push(ControlsCursor::FilterMuxState);
@@ -713,9 +691,6 @@ pub(crate) fn flatten_rows(ctx: &ControlsContext<'_>) -> Vec<ControlsCursor> {
         View::Sessions | View::Mux | View::Prs | View::Search
     ) {
         rows.push(ControlsCursor::FilterContent);
-    }
-    if matches!(ctx.view, View::Search) {
-        rows.push(ControlsCursor::ContentGroup);
     }
     if matches!(ctx.view, View::Sessions) {
         rows.push(ControlsCursor::FilterFloatMuxedSessions);
@@ -887,6 +862,17 @@ impl ControlsOverlayWidget<'_> {
         }
         body.push(line![""]);
 
+        if matches!(self.ctx.view, View::Search) {
+            body.push(section_header("Results"));
+            let here = cursor == ControlsCursor::ContentGroup;
+            let value = match self.ctx.content_group {
+                crate::viewer::search::Grouping::Session => "one row per session",
+                crate::viewer::search::Grouping::Message => "one row per matching turn",
+            };
+            body.push_row(cycle_row("listed as", value.to_string(), here), here);
+            body.push(line![""]);
+        }
+
         body.push(section_header(&format!(
             "Filters ({})",
             view_label(self.ctx.view)
@@ -915,14 +901,6 @@ impl ControlsOverlayWidget<'_> {
                 filter_row("contains", content_value(self.ctx.content), here),
                 here,
             );
-        }
-        if matches!(self.ctx.view, View::Search) {
-            let here = cursor == ControlsCursor::ContentGroup;
-            let value = match self.ctx.content_group {
-                crate::viewer::search::Grouping::Session => "one row per session",
-                crate::viewer::search::Grouping::Message => "a row per matching turn",
-            };
-            body.push_row(cycle_row("results", value.to_string(), here), here);
         }
         if matches!(self.ctx.view, View::Sessions) {
             let here = cursor == ControlsCursor::FilterFloatMuxedSessions;
@@ -1134,7 +1112,7 @@ fn filter_row(name: &str, value: String, cursored: bool) -> Line<'static> {
     } else {
         Style::default()
     };
-    line![span!(style; "{marker}{name:9} {value}  [ Edit ]")]
+    line![span!(style; "{marker}{name:12} {value}  [ Edit ]")]
 }
 
 /// A filter row whose value Space steps to the next choice rather
@@ -1191,10 +1169,16 @@ fn content_value(content: Option<(&str, crate::tui::ContentStatus, usize)>) -> S
     match content {
         None => "—".to_string(),
         Some((text, crate::tui::ContentStatus::Running(progress), _)) => {
-            format!("\"{text}\" {}/{}", progress.scanned, progress.total)
+            format!(
+                "\"{text}\" searching {}/{}",
+                progress.scanned, progress.total
+            )
         }
         Some((text, crate::tui::ContentStatus::Done(_), found)) => {
-            format!("\"{text}\" {found} found")
+            format!(
+                "\"{text}\" {found} {}",
+                if found == 1 { "session" } else { "sessions" }
+            )
         }
     }
 }

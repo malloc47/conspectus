@@ -1500,7 +1500,7 @@ fn invalid_search_values_are_diagnosed_without_dropping_the_rest() {
     assert!(search.kinds.tools, "the valid entries still apply");
     assert_eq!(diagnostics.len(), 2, "{diagnostics:?}");
     assert!(diagnostics.iter().any(|m| m.contains("`[search] group`")));
-    assert!(diagnostics.iter().any(|m| m.contains("\"audio\"")));
+    assert!(diagnostics.iter().any(|m| m.contains("`audio`")));
 }
 
 #[test]
@@ -1531,4 +1531,31 @@ fn search_diagnostics_do_not_cite_developer_artifacts() {
             "{message}"
         );
     }
+}
+
+#[test]
+fn search_diagnostics_use_the_neighbouring_format() {
+    let (_, diagnostics) = load_search(Some("[search]\ngroup = \"turn\"\n"), None);
+    assert_eq!(
+        diagnostics,
+        ["invalid `[search] group` value `turn`; expected session or message"]
+    );
+}
+
+#[test]
+fn an_unknown_search_key_is_diagnosed() {
+    use crate::viewer::search::Grouping;
+    let (search, diagnostics) = load_search(
+        Some("[search]\ngroupp = \"message\"\ngroup = \"message\"\n"),
+        None,
+    );
+    assert_eq!(
+        search.group,
+        Grouping::Message,
+        "the valid key still applies"
+    );
+    assert_eq!(
+        diagnostics,
+        ["unknown `[search]` key `groupp`; expected group or kinds"]
+    );
 }

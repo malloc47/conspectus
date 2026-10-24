@@ -495,6 +495,9 @@ struct SearchFile {
     group: Option<toml::Value>,
     #[serde(default)]
     kinds: Option<toml::Value>,
+    /// Keys the schema doesn't name, so a typo is diagnosed.
+    #[serde(flatten)]
+    unknown: BTreeMap<String, toml::Value>,
 }
 
 #[derive(Clone, Debug, Default, Deserialize)]
@@ -902,11 +905,22 @@ fn merge_search(
             message,
         });
     };
+    // A string shows bare inside the backticks, as in the other tables.
+    let shown = |value: &toml::Value| match value.as_str() {
+        Some(text) => text.to_string(),
+        None => value.to_string(),
+    };
+    for key in file.unknown.keys() {
+        diagnose(format!(
+            "unknown `[search]` key `{key}`; expected group or kinds"
+        ));
+    }
     if let Some(value) = file.group {
         match value.as_str().and_then(Grouping::parse) {
             Some(group) => config.group = group,
             None => diagnose(format!(
-                "invalid `[search] group` value {value}; expected \"session\" or \"message\""
+                "invalid `[search] group` value `{}`; expected session or message",
+                shown(&value)
             )),
         }
     }
@@ -915,7 +929,8 @@ fn merge_search(
     };
     let Some(items) = value.as_array() else {
         diagnose(format!(
-            "invalid `[search] kinds` value {value}; expected a list of \"messages\", \"tools\", \"thinking\""
+            "invalid `[search] kinds` value `{}`; expected a list of messages, tools, or thinking",
+            shown(&value)
         ));
         return;
     };
@@ -931,7 +946,8 @@ fn merge_search(
             Some("thinking") => kinds.thinking = true,
             _ => {
                 diagnose(format!(
-                    "unknown `[search] kinds` entry {item}; expected \"messages\", \"tools\", or \"thinking\""
+                    "invalid `[search] kinds` entry `{}`; expected messages, tools, or thinking",
+                    shown(item)
                 ));
                 continue;
             }
