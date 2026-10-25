@@ -306,10 +306,7 @@ impl SearchOverlayState {
                 SearchOutcome::Continue
             }
             Some(SearchKey::Results) => {
-                self.group = match self.group {
-                    Grouping::Session => Grouping::Message,
-                    Grouping::Message => Grouping::Session,
-                };
+                self.group = self.group.next();
                 self.cursor = 0;
                 self.edited_at = Some(Instant::now());
                 SearchOutcome::Continue
@@ -660,10 +657,7 @@ impl SearchBody<'_> {
         if let Some(notice) = self.state.notice() {
             return notice.to_string();
         }
-        let group = match self.state.group() {
-            Grouping::Session => "results by session",
-            Grouping::Message => "results by message",
-        };
+        let group = crate::tui::app::grouping_overlay_label(self.state.group());
         let kinds = self.state.kinds();
         let mut what = vec!["messages"];
         if kinds.tools {
@@ -672,7 +666,7 @@ impl SearchBody<'_> {
         if kinds.thinking {
             what.push("thinking");
         }
-        let mut text = format!("{group} · {}", what.join(" + "));
+        let mut text = format!("results {group} · {}", what.join(" + "));
         if view.total > 0 {
             if view.done {
                 text.push_str(&format!(

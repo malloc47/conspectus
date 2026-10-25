@@ -28,7 +28,9 @@ use crate::content_search::{
 use crate::model::{GraphNode, GraphSnapshot, NodeId};
 use crate::output::render::{display_width, format_relative_age, truncate_to_width};
 use crate::viewer::model::{TurnKind, TurnRole};
-use crate::viewer::search::{ContentKinds, ContentQuery, Grouping, Hit, SessionHits, cmp_sessions};
+use crate::viewer::search::{
+    ContentKinds, ContentQuery, Grouping, Hit, SessionHits, cmp_hits_across_sessions, cmp_sessions,
+};
 
 use super::{ColorFlag, FilterArgs, resolve_color_from_env, warm_start_discover_and_resolve};
 
@@ -41,8 +43,11 @@ const MIN_SNIPPET_WIDTH: usize = 20;
 enum GroupFlag {
     /// One result per session, ranked by hit count.
     Session,
-    /// One result per matching message.
+    /// One result per matching message, in session order.
     Message,
+    /// Every matching message across all sessions as one list, newest
+    /// first.
+    Flat,
 }
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq, ValueEnum)]
@@ -66,8 +71,9 @@ pub(super) struct SearchArgs {
     /// Text to find in session transcripts.
     #[arg(value_name = "QUERY")]
     query: String,
-    /// One result per session (the default from `[search]` config) or
-    /// one per matching message.
+    /// One result per session (the default from `[search]` config), one
+    /// per matching message in session order, or every matching message
+    /// as one list across sessions, newest first (`flat`).
     #[arg(long, value_enum)]
     group: Option<GroupFlag>,
     /// Also search tool calls and tool output.
@@ -126,6 +132,15 @@ struct Found {
     rows: Vec<Row>,
     /// Sessions with more matching messages than were fetched.
     truncated: Vec<Truncated>,
+    /// The flat list cut to `--limit`: how many rows are shown of how
+    /// many matched.
+    limited: Option<Limited>,
+}
+
+/// A flat list that `--limit` cut short.
+struct Limited {
+    shown: usize,
+    total: usize,
 }
 
 /// A session whose per-message results were capped.
@@ -193,6 +208,7 @@ impl SearchArgs {
         let group = match self.group {
             Some(GroupFlag::Session) => Grouping::Session,
             Some(GroupFlag::Message) => Grouping::Message,
+            Some(GroupFlag::Flat) => Grouping::Flat,
             None => defaults.group,
         };
         let mut kinds = defaults.kinds;
@@ -243,6 +259,12 @@ impl SearchArgs {
                 capped.info.label.as_deref().unwrap_or(&capped.info.session),
                 capped.matches,
                 capped.shown
+            );
+        }
+        if let Some(limit) = &found.limited {
+            eprintln!(
+                "conspectus: note: showing the newest {} of {} matching messages",
+                limit.shown, limit.total
             );
         }
         if !matched && matches!(self.format, FormatFlag::Table) {
@@ -296,6 +318,53 @@ impl SearchArgs {
         let limit = self.limit.unwrap_or(usize::MAX);
         let mut rows = Vec::new();
         let mut truncated = Vec::new();
+        let mut limited = None;
+        if group == Grouping::Flat {
+            // Every matching message of every matching session, then one
+            // order across all of them.
+            let mut all: Vec<(SessionKey, SessionInfo, Hit)> = Vec::new();
+            for (key, _) in ranked {
+                let (Some(info), Some(session)) = (info_for.get(&key), by_key.get(&key)) else {
+                    continue;
+                };
+                let detail = session_detail(session, query);
+                if detail.truncated() {
+                    truncated.push(Truncated {
+                        info: (*info).clone(),
+                        matches: detail.total,
+                        shown: detail.hits.len(),
+                    });
+                }
+                all.extend(
+                    detail
+                        .hits
+                        .into_iter()
+                        .map(|hit| (key.clone(), (*info).clone(), hit)),
+                );
+            }
+            all.sort_by(|a, b| cmp_hits_across_sessions((&a.0, &a.2), (&b.0, &b.2)));
+            let total = all.len();
+            if total > limit {
+                limited = Some(Limited {
+                    shown: limit,
+                    total,
+                });
+            }
+            rows.extend(
+                all.into_iter()
+                    .take(limit)
+                    .map(|(_, info, hit)| Row::Message { info, hit }),
+            );
+            return Found {
+                group,
+                kinds: query.kinds,
+                progress: summary.progress,
+                parserless: 0,
+                rows,
+                truncated,
+                limited,
+            };
+        }
         for (key, hits) in ranked {
             if rows.len() >= limit {
                 break;
@@ -305,6 +374,7 @@ impl SearchArgs {
             };
             match group {
                 Grouping::Session => rows.push(Row::Session { info, hits }),
+                Grouping::Flat => {}
                 Grouping::Message => {
                     let Some(session) = by_key.get(&key) else {
                         continue;
@@ -338,6 +408,7 @@ impl SearchArgs {
             parserless: 0,
             rows,
             truncated,
+            limited,
         }
     }
 }
@@ -512,7 +583,7 @@ fn render_json(query: &str, found: &Found) -> Result<String> {
             }),
         })
         .collect();
-    let document = json!({
+    let mut document = json!({
         "query": query.trim(),
         "group": found.group.as_str(),
         "kinds": kind_names(&found.kinds),
@@ -534,6 +605,12 @@ fn render_json(query: &str, found: &Found) -> Result<String> {
             .collect::<Vec<_>>(),
         "results": results,
     });
+    if let (Some(limit), Some(object)) = (&found.limited, document.as_object_mut()) {
+        object.insert(
+            "limited".into(),
+            json!({"shown": limit.shown, "total": limit.total}),
+        );
+    }
     let mut text = serde_json::to_string_pretty(&document)?;
     text.push('\n');
     Ok(text)
@@ -583,7 +660,7 @@ fn build_table(found: &Found, now: i64) -> Table {
                 snippets,
             }
         }
-        Grouping::Message => {
+        Grouping::Message | Grouping::Flat => {
             let mut cells = Vec::new();
             let mut snippets = Vec::new();
             for row in &found.rows {

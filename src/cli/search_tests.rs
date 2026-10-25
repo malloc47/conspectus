@@ -31,6 +31,7 @@ fn found(group: Grouping, rows: Vec<Row>) -> Found {
         parserless: 2,
         rows,
         truncated: Vec::new(),
+        limited: None,
     }
 }
 
@@ -272,4 +273,68 @@ fn a_zero_limit_is_refused() {
     assert!(parse_limit("0").is_err());
     assert_eq!(parse_limit("3"), Ok(3));
     assert!(parse_limit("x").is_err());
+}
+
+#[test]
+fn the_flat_table_uses_the_message_columns_in_the_given_order() {
+    let newer = Hit {
+        timestamp: DateTime::from_timestamp(1_700_000_100, 0),
+        ..hit(2, "newer needle", 6..12)
+    };
+    let older = hit(9, "older needle", 6..12);
+    let other = SessionInfo {
+        session: "zzz999".into(),
+        ..info(Some("Other"))
+    };
+    let f = found(
+        Grouping::Flat,
+        vec![
+            Row::Message {
+                info: other,
+                hit: newer,
+            },
+            Row::Message {
+                info: info(Some("Fix the parser")),
+                hit: older,
+            },
+        ],
+    );
+    let text = render_table(&f, None, false, NOW);
+    let header = text.lines().next().unwrap();
+    for column in ["SESSION", "TURN", "ROLE", "KIND", "TIME", "SNIPPET"] {
+        assert!(header.contains(column), "{header}");
+    }
+    let lines: Vec<&str> = text.lines().collect();
+    assert!(
+        lines[1].contains("Other") && lines[1].contains("#3"),
+        "{text}"
+    );
+    assert!(
+        lines[2].contains("Fix the parser") && lines[2].contains("#10"),
+        "rows keep the order they were given, which is newest first: {text}"
+    );
+}
+
+#[test]
+fn json_flat_names_the_group_and_reports_a_limit() {
+    let mut f = found(
+        Grouping::Flat,
+        vec![Row::Message {
+            info: info(None),
+            hit: hit(0, "x needle", 2..8),
+        }],
+    );
+    f.limited = Some(Limited { shown: 1, total: 5 });
+    let value: Value = serde_json::from_str(&render_json("needle", &f).unwrap()).unwrap();
+    assert_eq!(value["group"], "flat");
+    assert_eq!(value["limited"]["shown"], 1);
+    assert_eq!(value["limited"]["total"], 5);
+    assert_eq!(value["results"][0]["turn"], 1);
+}
+
+#[test]
+fn json_has_no_limit_when_nothing_was_cut() {
+    let f = found(Grouping::Flat, Vec::new());
+    let value: Value = serde_json::from_str(&render_json("needle", &f).unwrap()).unwrap();
+    assert_eq!(value["limited"], Value::Null);
 }

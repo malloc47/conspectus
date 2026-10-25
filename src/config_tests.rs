@@ -1538,7 +1538,7 @@ fn search_diagnostics_use_the_neighbouring_format() {
     let (_, diagnostics) = load_search(Some("[search]\ngroup = \"turn\"\n"), None);
     assert_eq!(
         diagnostics,
-        ["invalid `[search] group` value `turn`; expected session or message"]
+        ["invalid `[search] group` value `turn`; expected session, message, or flat"]
     );
 }
 
@@ -1558,4 +1558,30 @@ fn an_unknown_search_key_is_diagnosed() {
         diagnostics,
         ["unknown `[search]` key `groupp`; expected group or kinds"]
     );
+}
+
+#[test]
+fn search_group_accepts_flat_and_names_it_in_the_diagnostic() {
+    use crate::viewer::search::Grouping as SearchGrouping;
+    let temp = TempDir::new().expect("temp dir");
+    let project = temp.path().join("project");
+    fs::create_dir(&project).expect("create project dir");
+    let loader = ConfigLoader::new().with_home(temp.path());
+
+    write_file(
+        &project.join(PROJECT_CONFIG_FILENAME),
+        "[search]\ngroup = \"flat\"\n",
+    );
+    let outcome = loader.load_from(&project);
+    assert!(outcome.diagnostics.is_empty(), "{:?}", outcome.diagnostics);
+    assert_eq!(outcome.config.search.group, SearchGrouping::Flat);
+
+    write_file(
+        &project.join(PROJECT_CONFIG_FILENAME),
+        "[search]\ngroup = \"sideways\"\n",
+    );
+    let outcome = loader.load_from(&project);
+    assert_eq!(outcome.config.search.group, SearchGrouping::Session);
+    let message = format!("{:?}", outcome.diagnostics);
+    assert!(message.contains("session, message, or flat"), "{message}");
 }

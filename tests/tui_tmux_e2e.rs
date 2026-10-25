@@ -887,6 +887,34 @@ fn the_search_view_lists_hits_and_enter_opens_the_viewer_at_one() {
     });
 }
 
+/// The flat mode lists the matching messages with no session row above
+/// them, and Enter on one opens the viewer at that message.
+#[test]
+fn the_flat_search_view_lists_messages_and_enter_opens_the_viewer() {
+    needs_tmux!();
+    let world = World::new();
+    write_search_sessions(&world);
+    world.new_mux("anchor", false);
+    world.start_tui_outside();
+    wait_screen(&world, "both sessions", |screen| {
+        screen.contains("2 sessions")
+    });
+
+    world.keys(&["1", "/", "Tab", "quokka"]);
+    wait_screen(&world, "the streamed result", |screen| {
+        screen.contains("2 hits")
+    });
+    world.keys(&["C-r", "C-r", "C-o"]);
+    wait_screen(&world, "the flat Search view", |screen| {
+        screen.contains("turn 1") && screen.contains("turn 2")
+    });
+    // The cursor starts on a message, not on a session.
+    world.keys(&["Enter"]);
+    wait_screen(&world, "the viewer on a match", |screen| {
+        screen.contains("find \"quokka\"")
+    });
+}
+
 /// `F` and quitting while a scan may still be reading must not hang.
 #[test]
 fn quitting_with_a_content_search_running_exits_promptly() {

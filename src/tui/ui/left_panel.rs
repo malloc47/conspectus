@@ -264,6 +264,15 @@ pub(super) fn empty_left_panel_text(app: &App) -> String {
                 "Searching for \"{}\"…\nSessions that match appear as they are found. Press `F` to clear.",
                 content.text
             ),
+            crate::tui::ContentStatus::Done(_)
+                if content.group == crate::viewer::search::Grouping::Flat
+                    && !content.hits().is_empty() =>
+            {
+                format!(
+                    "Reading the messages that match \"{}\"…\nPress `F` to clear.",
+                    content.text
+                )
+            }
             crate::tui::ContentStatus::Done(_) => format!(
                 "No sessions match \"{}\".\nPress `/` to search again, `F` to clear.",
                 content.text
@@ -1263,6 +1272,9 @@ fn append_content_hit(
     append_snippet(spans, &hit.snippet, &hit.highlight, width - used - 2, theme);
 }
 
+/// How many cells a flat row gives the session's name.
+const FLAT_LABEL_WIDTH: usize = 12;
+
 /// The columns of a matching turn under its session: who said it, what
 /// kind of turn it is, when, and the snippet with the match picked out.
 fn render_hit_spans(
@@ -1271,12 +1283,26 @@ fn render_hit_spans(
     budget: usize,
 ) -> Vec<Span<'static>> {
     let secondary = Style::default().fg(theme.secondary_text);
-    let mut spans = vec![
+    let mut spans = Vec::new();
+    if let Some(origin) = &hit.origin {
+        // A flat row names its session: the harness chip and the name,
+        // padded so the columns after them line up down the list.
+        spans.push(crate::tui::widgets::badge::harness_badge(
+            &origin.harness_label,
+            theme,
+        ));
+        let name = pad_to_width(
+            truncate_to_width_strict(&origin.label, FLAT_LABEL_WIDTH),
+            FLAT_LABEL_WIDTH,
+        );
+        spans.push(span!(Modifier::BOLD; " {name}  "));
+    }
+    spans.extend([
         span!(secondary; "turn {:<4}", hit.turn_index + 1),
         span!(secondary; "  {:<6}", hit.role),
         span!(theme.placeholder; "  {:<11}", hit.kind),
         span!(secondary; "  {:>4}", hit.age),
-    ];
+    ]);
     let used = spans_width(&spans);
     if budget > used + 8 {
         spans.push(Span::raw("  "));

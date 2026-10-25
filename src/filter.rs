@@ -47,6 +47,24 @@ impl ContentHitMap {
     pub fn is_empty(&self) -> bool {
         self.0.is_empty()
     }
+
+    /// How many matching messages the matched sessions hold in all.
+    pub fn total_hits(&self) -> usize {
+        self.0
+            .values()
+            .flat_map(BTreeMap::values)
+            .map(|hits| hits.count)
+            .sum()
+    }
+
+    /// Every matched session with its summary, by harness then session.
+    pub fn iter(&self) -> impl Iterator<Item = (&str, &str, &SessionHits)> {
+        self.0.iter().flat_map(|(harness, sessions)| {
+            sessions
+                .iter()
+                .map(move |(session, hits)| (harness.as_str(), session.as_str(), hits))
+        })
+    }
 }
 
 /// Every matching turn of the sessions a content search found, by
@@ -79,6 +97,15 @@ impl ContentDetailMap {
         self.0.values().map(BTreeMap::len).sum()
     }
 
+    /// How many matching messages are held, across every session.
+    pub fn total_hits(&self) -> usize {
+        self.0
+            .values()
+            .flat_map(BTreeMap::values)
+            .map(|hits| hits.len())
+            .sum()
+    }
+
     /// Forget a session's matching turns, so they are read again.
     pub fn remove(&mut self, harness_key: &str, session_key: &str) {
         if let Some(sessions) = self.0.get_mut(harness_key) {
@@ -101,11 +128,12 @@ pub struct ContentFilter {
     pub hits: Arc<ContentHitMap>,
     /// The scan finished; until then a missing session may still match.
     pub complete: bool,
-    /// How the Search view lists results: one row per session, or a row
-    /// per matching turn under each session.
+    /// How the Search view lists results: one row per session, a row per
+    /// matching turn under each session, or every matching turn in one
+    /// flat list.
     pub group: Grouping,
-    /// The matching turns of each session, once read (per-message
-    /// grouping only).
+    /// The matching turns of each session, once read (the per-message
+    /// groupings only).
     pub details: Arc<ContentDetailMap>,
 }
 

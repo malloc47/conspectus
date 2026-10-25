@@ -24,6 +24,24 @@ use crate::viewer::search::{ContentKinds, Grouping};
 /// live preview is off. One text for every place that explains it.
 pub const CONTENT_OFF_NOTICE: &str = "Content search is off while live preview is disabled";
 
+/// How the Search view lists results, in the Controls overlay.
+pub fn grouping_description(group: Grouping) -> &'static str {
+    match group {
+        Grouping::Session => "one row per session",
+        Grouping::Message => "messages under their session",
+        Grouping::Flat => "every message, newest first",
+    }
+}
+
+/// How the `/` overlay says what its results are.
+pub fn grouping_overlay_label(group: Grouping) -> &'static str {
+    match group {
+        Grouping::Session => "by session",
+        Grouping::Message => "by message",
+        Grouping::Flat => "by message, flat",
+    }
+}
+
 /// The most sessions whose matching turns are held in memory at once.
 /// The best-ranked sessions get them first; the rest are not read.
 pub const MAX_DETAIL_SESSIONS: usize = 100;
@@ -61,6 +79,15 @@ impl ContentStatus {
     pub fn is_done(&self) -> bool {
         matches!(self, Self::Done(_))
     }
+}
+
+/// How far the flat listing's messages have been read.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum FlatCoverage {
+    /// Matching turns are still being read.
+    Reading,
+    /// Everything that will be read is in; the rest is not shown.
+    Partial { shown: usize, total: usize },
 }
 
 /// The active content query and what it has found so far.
@@ -152,6 +179,14 @@ impl ContentSearch {
                 )
             }
         };
+        if let Some(coverage) = self.flat_coverage() {
+            note.push_str(&match coverage {
+                FlatCoverage::Reading => " · reading messages".to_string(),
+                FlatCoverage::Partial { shown, total } => {
+                    format!(" · showing {shown} of {total} messages")
+                }
+            });
+        }
         if progress.skipped > 0 {
             note.push_str(&format!(" · {} skipped", progress.skipped));
         }
@@ -160,6 +195,28 @@ impl ContentSearch {
             note.push_str(&format!(" · scanned {}", age_label(age)));
         }
         note
+    }
+
+    /// How much of the flat listing has been read: `None` outside the
+    /// flat grouping, while the scan runs, or once every matching
+    /// message is held. The flat listing reads the turns of the sessions
+    /// with the newest matches, up to [`MAX_DETAIL_SESSIONS`], so a large
+    /// result set shows only the newest part of it.
+    pub fn flat_coverage(&self) -> Option<FlatCoverage> {
+        if self.group != Grouping::Flat || !self.status.is_done() {
+            return None;
+        }
+        let total = self.hits.total_hits();
+        let shown = self.details.total_hits();
+        if shown >= total {
+            return None;
+        }
+        let reachable = self.hits.len().min(MAX_DETAIL_SESSIONS);
+        if self.details.len() < reachable {
+            Some(FlatCoverage::Reading)
+        } else {
+            Some(FlatCoverage::Partial { shown, total })
+        }
     }
 
     /// The row predicate for this search.
@@ -234,16 +291,19 @@ impl App {
         self.detail_request.take()
     }
 
-    /// Ask for the matching turns of the sessions the operator has open,
-    /// when the per-message grouping needs them and the scan has
-    /// finished. Closed sessions are read when they are opened.
+    /// Ask for the matching turns the per-message groupings need, once
+    /// the scan has finished. Under the nested grouping that is the
+    /// sessions the operator has open (closed ones are read when they
+    /// are opened); under the flat grouping it is every matching
+    /// session, the ones with the newest matches first.
     pub(super) fn queue_details(&mut self) {
         let Some(content) = &self.content else {
             return;
         };
-        if content.group != Grouping::Message || !content.status.is_done() {
+        if !content.group.lists_messages() || !content.status.is_done() {
             return;
         }
+        let flat = content.group == Grouping::Flat;
         let open: std::collections::BTreeSet<(String, String)> = self
             .tree
             .rows
@@ -264,7 +324,7 @@ impl App {
             .snapshot_sessions()
             .into_iter()
             .filter(|session| {
-                open.contains(&(session.harness_key.clone(), session.session_key.clone()))
+                flat || open.contains(&(session.harness_key.clone(), session.session_key.clone()))
             })
             .filter_map(|session| {
                 let hits = content
@@ -277,7 +337,11 @@ impl App {
                     .then_some((session, hits))
             })
             .collect();
-        ranked.sort_by(|a, b| crate::viewer::search::cmp_sessions(a.1, b.1));
+        if flat {
+            ranked.sort_by(|a, b| crate::viewer::search::cmp_sessions_by_recency(a.1, b.1));
+        } else {
+            ranked.sort_by(|a, b| crate::viewer::search::cmp_sessions(a.1, b.1));
+        }
         let sessions: Vec<AgentSessionId> = ranked
             .into_iter()
             .take(room)
@@ -534,6 +598,19 @@ impl App {
                 for (key, hits) in batch {
                     details.insert(key.harness_key, key.session_key, hits);
                 }
+                // A request still waiting for the reader need not ask
+                // for turns that have just arrived.
+                if let Some(request) = self.detail_request.as_mut() {
+                    request.sessions.retain(|session| {
+                        content
+                            .details
+                            .get(&session.harness_key, &session.session_key)
+                            .is_none()
+                    });
+                    if request.sessions.is_empty() {
+                        self.detail_request = None;
+                    }
+                }
                 if content.applied {
                     self.rebuild_tree_in_place();
                 }
@@ -682,6 +759,28 @@ impl App {
     }
 }
 
+/// A session's name as the lists show it: alias, title, hosting mux
+/// name, then the start of its key.
+fn session_label(snapshot: &crate::model::GraphSnapshot, session: &AgentSessionId) -> String {
+    let node = NodeId::AgentSession(session.clone());
+    let alias = snapshot.aliases.get(&node);
+    let (title, mux_host) = match snapshot.find_node(&node) {
+        Some(crate::model::GraphNode::AgentSession(s)) => {
+            (s.title.clone(), snapshot.mux_host_of(&node))
+        }
+        _ => (None, None),
+    };
+    crate::aliases::session_display_name(
+        alias,
+        title.as_deref(),
+        mux_host.as_ref().map(|host| host.name.as_str()),
+    )
+    .map_or_else(
+        || session.session_key.chars().take(8).collect(),
+        str::to_string,
+    )
+}
+
 /// What the `/` overlay was left set to, for the next time it opens.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct SearchMemory {
@@ -760,27 +859,51 @@ impl App {
                 (&a.0.harness_key, &a.0.session_key).cmp(&(&b.0.harness_key, &b.0.session_key))
             })
         });
+        if content.group == Grouping::Flat && !content.details.is_empty() {
+            // Every message of the sessions read so far, as one list.
+            let mut all: Vec<(&AgentSessionId, &crate::viewer::search::Hit)> = Vec::new();
+            for (session, _) in &found {
+                for hit in content
+                    .details
+                    .get(&session.harness_key, &session.session_key)
+                    .unwrap_or_default()
+                {
+                    all.push((session, hit));
+                }
+            }
+            all.sort_by(|a, b| {
+                crate::viewer::search::cmp_hits_across_sessions(
+                    (&(&a.0.harness_key, &a.0.session_key), a.1),
+                    (&(&b.0.harness_key, &b.0.session_key), b.1),
+                )
+            });
+            for (session, hit) in all.into_iter().take(OVERLAY_RESULTS) {
+                let hits = content
+                    .hits
+                    .get(&session.harness_key, &session.session_key)
+                    .map_or(0, |hits| hits.count);
+                view.rows.push(crate::tui::widgets::search::ContentRow {
+                    session: session.clone(),
+                    label: session_label(snapshot, session),
+                    harness: crate::tui::rows::harness_label(&session.harness_key),
+                    hits,
+                    turn: Some(format!(
+                        "turn {} · {}",
+                        hit.turn_index + 1,
+                        crate::tui::rows::search::kind_word(hit.kind)
+                    )),
+                    snippet: hit.snippet.clone(),
+                    highlight: Some(hit.highlight.clone()),
+                    turn_index: hit.turn_index,
+                });
+            }
+            return view;
+        }
         for (session, hits) in found {
             if view.rows.len() >= OVERLAY_RESULTS {
                 break;
             }
-            let node = NodeId::AgentSession(session.clone());
-            let alias = snapshot.aliases.get(&node);
-            let (title, mux_host) = match snapshot.find_node(&node) {
-                Some(crate::model::GraphNode::AgentSession(s)) => {
-                    (s.title.clone(), snapshot.mux_host_of(&node))
-                }
-                _ => (None, None),
-            };
-            let label = crate::aliases::session_display_name(
-                alias,
-                title.as_deref(),
-                mux_host.as_ref().map(|host| host.name.as_str()),
-            )
-            .map_or_else(
-                || session.session_key.chars().take(8).collect(),
-                str::to_string,
-            );
+            let label = session_label(snapshot, &session);
             let details = (content.group == Grouping::Message)
                 .then(|| {
                     content

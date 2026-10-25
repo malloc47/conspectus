@@ -10,7 +10,7 @@ use crate::tui::rows::RowKind;
 use crate::viewer::model::{TurnKind, TurnRole};
 use crate::viewer::search::{ContentKinds, Grouping as ContentGroup, Hit, SessionHits};
 
-fn hit(turn: usize, epoch: Option<i64>) -> Hit {
+pub(super) fn hit(turn: usize, epoch: Option<i64>) -> Hit {
     Hit {
         turn_index: turn,
         role: TurnRole::User,
@@ -21,7 +21,7 @@ fn hit(turn: usize, epoch: Option<i64>) -> Hit {
     }
 }
 
-fn summary(count: usize, best_turn: usize, latest: i64) -> SessionHits {
+pub(super) fn summary(count: usize, best_turn: usize, latest: i64) -> SessionHits {
     SessionHits {
         count,
         best: hit(best_turn, Some(latest)),
@@ -29,14 +29,14 @@ fn summary(count: usize, best_turn: usize, latest: i64) -> SessionHits {
     }
 }
 
-fn key_of(id: &AgentSessionId) -> SessionKey {
+pub(super) fn key_of(id: &AgentSessionId) -> SessionKey {
     SessionKey {
         harness_key: id.harness_key.clone(),
         session_key: id.session_key.clone(),
     }
 }
 
-fn sessions(snapshot: &GraphSnapshot) -> Vec<AgentSessionId> {
+pub(super) fn sessions(snapshot: &GraphSnapshot) -> Vec<AgentSessionId> {
     let mut ids: Vec<AgentSessionId> = snapshot
         .nodes
         .iter()
@@ -50,7 +50,7 @@ fn sessions(snapshot: &GraphSnapshot) -> Vec<AgentSessionId> {
 }
 
 /// An app on the Search view with a finished search that found `found`.
-fn searched(found: &[(&AgentSessionId, SessionHits)]) -> App {
+pub(super) fn searched(found: &[(&AgentSessionId, SessionHits)]) -> App {
     let snapshot = world();
     let mut app = app_over(View::Search, &snapshot);
     app.update(Msg::StartContentSearch {
@@ -88,7 +88,7 @@ fn session_rows(app: &App) -> Vec<String> {
         .collect()
 }
 
-fn two() -> (AgentSessionId, AgentSessionId) {
+pub(super) fn two() -> (AgentSessionId, AgentSessionId) {
     let ids = sessions(&world());
     (ids[0].clone(), ids[1].clone())
 }
@@ -192,7 +192,7 @@ fn details_from_an_older_search_are_dropped() {
     );
 }
 
-fn view_effect(
+pub(super) fn view_effect(
     effects: &[crate::tui::Effect],
 ) -> Option<(AgentSessionId, Option<(String, usize)>)> {
     effects.iter().find_map(|effect| match effect {

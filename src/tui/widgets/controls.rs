@@ -329,11 +329,7 @@ impl ControlsOverlayState {
                 ControlsOutcome::Continue
             }
             ControlsCursor::ContentGroup => {
-                use crate::viewer::search::Grouping;
-                let next = match ctx.content_group {
-                    Grouping::Session => Grouping::Message,
-                    Grouping::Message => Grouping::Session,
-                };
+                let next = ctx.content_group.next();
                 ControlsOutcome::ApplyAndStay(crate::tui::Msg::SetContentGroup(next))
             }
             ControlsCursor::FilterFloatMuxedSessions => {
@@ -865,10 +861,7 @@ impl ControlsOverlayWidget<'_> {
         if matches!(self.ctx.view, View::Search) {
             body.push(section_header("Results"));
             let here = cursor == ControlsCursor::ContentGroup;
-            let value = match self.ctx.content_group {
-                crate::viewer::search::Grouping::Session => "one row per session",
-                crate::viewer::search::Grouping::Message => "one row per matching turn",
-            };
+            let value = crate::tui::app::grouping_description(self.ctx.content_group);
             body.push_row(cycle_row("listed as", value.to_string(), here), here);
             body.push(line![""]);
         }

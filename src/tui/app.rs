@@ -28,7 +28,12 @@ mod msg;
 mod overlays;
 mod tree;
 
-pub use content::{ContentSearch, ContentStatus, DetailRequest, ScanRequest};
+#[cfg(test)]
+pub(crate) use content::MAX_DETAIL_SESSIONS;
+pub use content::{
+    ContentSearch, ContentStatus, DetailRequest, ScanRequest, grouping_description,
+    grouping_overlay_label,
+};
 pub use msg::Msg;
 
 /// Cheap-to-clone, reference-counted handle to the App's resolved

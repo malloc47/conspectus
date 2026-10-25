@@ -182,7 +182,9 @@ fn grouping_and_kinds_change_inside_the_overlay_and_restart_the_scan() {
         })
     );
     state.handle_key(ctrl('r'));
-    assert_eq!(state.group(), Grouping::Session);
+    assert_eq!(state.group(), Grouping::Flat, "the third mode follows");
+    state.handle_key(ctrl('r'));
+    assert_eq!(state.group(), Grouping::Session, "and the cycle wraps");
 }
 
 #[test]
@@ -360,6 +362,24 @@ fn the_per_message_grouping_lists_one_row_per_turn() {
     );
     assert!(text.contains("34 sessions searched"), "{text}");
     insta::assert_snapshot!("search_overlay_contents_by_message", text);
+}
+
+#[test]
+fn the_flat_grouping_names_the_session_of_every_message() {
+    let mut state = contents_overlay("quokka");
+    state.handle_key(ctrl('r'));
+    state.handle_key(ctrl('r'));
+    let mut first = row("aaaa1111", 3);
+    first.turn = Some("turn 4 · message".into());
+    let mut second = row("bbbb2222", 1);
+    second.turn = Some("turn 2 · message".into());
+    let text = render(&state, &view(vec![first, second], true), 100, 24);
+    assert!(text.contains("by message, flat"), "{text}");
+    assert!(
+        text.contains("session aaaa1111") && text.contains("session bbbb2222"),
+        "{text}"
+    );
+    insta::assert_snapshot!("search_overlay_contents_flat", text);
 }
 
 #[test]

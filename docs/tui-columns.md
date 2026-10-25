@@ -571,6 +571,9 @@ session's last activity, as everywhere else, not the time of the match.
 ### Hit row
 
 Under a session when results are listed per turn. It has no kind glyph.
+In the flat listing there is no session row above, so the hit row is
+prefixed with an origin: the harness badge and the session's label
+(truncated, padded to 12), then the cells below.
 
 | # | Cell | Source | Condition | Style |
 |---|---|---|---|---|
@@ -579,6 +582,15 @@ Under a session when results are listed per turn. It has no kind glyph.
 | 3 | Kind | `message`, `summary`, `tool call`, `tool output`, or `thinking` | always | dim, padded to 11 so the age and snippet line up |
 | 4 | Age | time since the turn was written, or a dash | always | dim |
 | 5 | Snippet | the text around the match, cropped so the match stays on screen and cut on word boundaries; the match in the theme's match style (bold, underlined) | when room remains | dim italic |
+
+<!-- frame: keys="6/the<C-r><C-r><C-f>" width=130 height=20 -->
+```text
+┌ ► sessions · mux · prs · pinned · history · search ───────────┐
+│   claude    claude-code…  turn 3     you     message      107d│
+│   claude    claude-code…  turn 4     ai      message      107d│
+│   pi        pi in ateli…  turn 1     you     message      107d│
+│   pi        pi in ateli…  turn 2     ai      message      107d│
+```
 
 <!-- frame: keys="6/the<C-f>f<Up><Space><Esc>" width=150 height=20 -->
 ```text

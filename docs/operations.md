@@ -354,7 +354,7 @@ conspectus alias list
 conspectus pin {add|edit|rename|retarget|refresh|move|rm|list|show|migrate} ...
 conspectus rebuild <REF> [--dry-run] [--no-attach] [--session ID]
 conspectus history {list|show|reap|forget} ...
-conspectus search <QUERY> [--group {session|message}] [--tools] [--thinking] [--harness H]...
+conspectus search <QUERY> [--group {session|message|flat}] [--tools] [--thinking] [--harness H]...
                          [--limit N] [--format {table|json}]
 conspectus mux new <NAME> [--cwd PATH] [--socket NAME] [--no-attach] [--pin [PIN] [--no-launch]]
 conspectus mux launch <HARNESS> --name <NAME> [--cwd PATH] [--argv ARG...]
@@ -462,14 +462,17 @@ grouping and kinds.
 ```sh
 conspectus search "retry budget"                 # one row per session, most hits first
 conspectus search "retry budget" --group message # one row per matching message
+conspectus search "retry budget" --group flat    # matching messages, newest first
 conspectus search deadlock --tools --harness claude-code --limit 5
 conspectus search deadlock --format json | jq '.results[].session'
 ```
 
 Flags:
 
-- `--group session|message`: one result per session (ranked by hit count,
-  then latest hit) or per matching message (newest first within a session).
+- `--group session|message|flat`: one result per session (ranked by hit
+  count, then latest hit), per matching message in turn order within each
+  session, or per matching message across all sessions, newest first,
+  with no session grouping.
 - `--tools`, `--thinking`: also search tool calls and output, or thinking.
 - `--harness H` (repeatable), `--max-age DURATION`, `--mux-state STATE`:
   narrow the sessions searched, with the same meaning as on `table`.
@@ -483,17 +486,21 @@ Flags:
 
 **Table.** `--group session` prints `SESSION`, `HARNESS`, `HITS`,
 `LATEST` (how long ago the newest hit was) and `SNIPPET`; `--group
-message` prints `SESSION`, `HARNESS`, `TURN`, `ROLE`, `KIND`, `TIME` (how
+message` and `--group flat` print `SESSION`, `HARNESS`, `TURN`, `ROLE`, `KIND`, `TIME` (how
 long ago that turn was written) and `SNIPPET`. An unnamed session shows
 the first eight characters of its id. Turns count from 1, as in the
 viewer; roles read `you` and `ai`, and kinds read `message`, `tool
 call`, `tool output`, and so on, as in the TUI. Per-message rows run in
-turn order within a session. The snippet is cut around the match, on
+turn order within a session (`flat` rows run newest first across all
+sessions, so the `SESSION` column says where each one lives). The snippet is cut around the match, on
 word boundaries where it can, to fit `--width`. When nothing matches, the
 table is empty and stderr says `No sessions match "<query>"`.
 
 A session with more matching messages than a search keeps (the newest
-are kept) is reported on stderr, and under `truncated` in the JSON.
+are kept) is reported on stderr, and under `truncated` in the JSON. With
+`--group flat`, `--limit` keeps the newest messages overall; when it cut
+some, stderr says `showing the newest N of M matching messages` and the
+JSON gains `limited` (`shown`, `total`). `limited` is absent otherwise.
 
 **Exit status** follows `grep`: `0` when at least one session matched,
 `1` when none did, `2` on an error (an empty query, an unreadable
@@ -522,7 +529,7 @@ use status 1, so scripts can tell "nothing found" from "it broke".
 }
 ```
 
-With `--group message` each result instead carries `turn` (the turn's
+With `--group message` or `--group flat` each result instead carries `turn` (the turn's
 position, counting from 1), `role` (`user`, `assistant`, `system`), `kind` (`message`,
 `compaction_summary`, `tool_use`, `tool_result`, `thinking`), `time`, and
 its own `snippet`, and has no `hits` or `latest`. `label` is the session's
@@ -551,8 +558,10 @@ color. The keys:
 - Type to search. The scan starts when the query has rested for about
   200 ms and restarts, abandoning the previous scan, whenever the query
   or an option changes. Results arrive while it runs.
-- `Ctrl-R` lists one result per session or one per matching turn
-  (the status line reads `results by session` or `results by message`),
+- `Ctrl-R` cycles the results through one per session, one per matching
+  turn under its session, and one per matching turn with the newest
+  first across all sessions (the status line reads `results by session`,
+  `results by message`, or `results by message, flat`),
   `Ctrl-T` includes tool calls and output, and `Ctrl-Y` includes
   thinking. The starting values come from `[search]` in the config.
 - `Up`/`Down` (or `Ctrl-P`/`Ctrl-N`) move through the results, and `Enter`
@@ -758,7 +767,7 @@ Content search reads transcripts on demand and keeps nothing on disk.
 
 ```toml
 [search]
-group = "session"           # or "message": one result per matching turn
+group = "session"           # or "message" (a row per matching turn under its session) or "flat" (turns only, newest first)
 kinds = ["messages"]        # add "tools" and/or "thinking" to search those too
 ```
 
@@ -1032,9 +1041,13 @@ Recency sort puts the latest match first). `/` in this view opens the
 search overlay in its contents scope with the current query filled in; the
 same query also narrows the Sessions, Mux, and PRs views (`f` shows it as
 `contains`, `F` clears it). Groupings (`Ctrl-G`): none, project, harness.
-The Controls `Results` section switches between one row per session and one
-row per matching turn, listed under each session (`Ctrl-R` in the overlay
-does the same); `[search] group` in the config sets the default. Selecting a
+The Controls `Results` section cycles between one row per session, one row
+per matching turn listed under each session, and a flat list of matching
+turns, newest first, each naming its session (`Ctrl-R` in the overlay does
+the same); `[search] group` in the config sets the default. The flat list
+reads the matching sessions' transcripts to find the turns, newest matches
+first and at most 100 sessions; the find chip says `reading messages` while
+it loads and `showing N of M messages` if that cap left some out. Selecting a
 hit row shows its turn (speaker, kind, age, and the matching text) above the
 session's detail.
 

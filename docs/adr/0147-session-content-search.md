@@ -130,8 +130,9 @@ enough to scan on demand.
       Rows scope is unchanged. In contents scope the overlay shows a
       bounded live preview with progress; Enter opens the viewer at the
       hit, `Ctrl-F` applies the query as the filter, `Ctrl-O` applies it
-      and opens the Search view, `Ctrl-R` switches between one result per
-      session and one per matching turn, `Ctrl-T` and `Ctrl-Y` include
+      and opens the Search view, `Ctrl-R` cycles one result per
+      session, one per matching turn under its session, and one per
+      matching turn across all sessions (flat), `Ctrl-T` and `Ctrl-Y` include
       tool and thinking content, and Esc cancels the scan.
     - **Search view.** A sixth view, key `6`, listing matching sessions
       ranked, with a hit chip and a highlighted snippet, and hit rows
@@ -159,7 +160,8 @@ enough to scan on demand.
 ### The command line
 
 18. **`conspectus search <query>`.** Per-session results by default,
-    per-message with `--group message`; flags opt into tool and thinking
+    per-message with `--group message`, or per-message across sessions
+    with `--group flat`; flags opt into tool and thinking
     content and narrow by harness; defaults come from `[search]`. It
     defines `--format table|json` itself (`table` has no format flag),
     with a documented JSON shape. Exit status follows grep: 0 for a
@@ -178,6 +180,21 @@ enough to scan on demand.
     percentile finish time exceeds 5 s. The result source stays behind
     one seam so an index can replace the scan without changing the
     surfaces.
+
+## Amendment: flat per-message results
+
+A third grouping, `flat`, lists matching messages across all sessions,
+newest first, with no session rows. `session` stays the default, and
+`message` keeps its meaning (turns under their sessions). Flat rows name
+their session (harness badge and label) because nothing groups them. Both
+sorts order flat rows by message time, since relevance has no meaning
+across individual messages; ties fall back to session key, then turn.
+Memory stays bounded by reading the turns of at most 100 matching
+sessions, those with the newest matches first, with the existing
+per-session cap of 500; the TUI reports the shortfall on the find chip,
+and the CLI reports `--limit` cuts on stderr and as `limited` in JSON.
+Flat requests details for every matching session, whatever other
+structured filters apply (accepted for now).
 
 ## Consequences
 

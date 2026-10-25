@@ -139,6 +139,44 @@ fn json_per_message_lists_each_matching_turn() {
 }
 
 #[test]
+fn json_flat_lists_matching_messages_without_session_grouping() {
+    let world = world();
+    let mut cmd = world.search();
+    cmd.args(["quokka", "--format", "json", "--group", "flat"]);
+    insta::assert_snapshot!("search_json_flat", stdout_of(cmd));
+}
+
+#[test]
+fn a_limit_on_flat_results_is_noted_on_stderr_and_in_json() {
+    let world = world();
+    let output = {
+        let mut cmd = world.search();
+        cmd.args([
+            "quokka", "--group", "flat", "--limit", "1", "--color", "never",
+        ]);
+        cmd.output().unwrap()
+    };
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert_eq!(stdout.lines().count(), 2, "header plus one row: {stdout}");
+    assert!(
+        String::from_utf8_lossy(&output.stderr).contains("showing the newest 1 of"),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let out = stdout_of({
+        let mut cmd = world.search();
+        cmd.args([
+            "quokka", "--group", "flat", "--limit", "1", "--format", "json",
+        ]);
+        cmd
+    });
+    let value: serde_json::Value = serde_json::from_str(&out).unwrap();
+    assert_eq!(value["limited"]["shown"], 1);
+    assert!(value["limited"]["total"].as_u64().unwrap() > 1, "{out}");
+}
+
+#[test]
 fn the_table_has_a_header_one_row_per_session_and_exit_zero() {
     let world = world();
     let out = stdout_of({

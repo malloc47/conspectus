@@ -152,10 +152,23 @@ pub enum RowKind {
     Hit(HitRow),
 }
 
-/// A matching turn under its session in the Search view.
+/// The session a hit row belongs to, named on the row itself when the
+/// Search view lists messages with no session row above them.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct HitOrigin {
+    /// The session's name, or the start of its key when it has none.
+    pub label: String,
+    /// The harness, for the chip.
+    pub harness_label: String,
+}
+
+/// A matching turn in the Search view: under its session row, or on its
+/// own in the flat listing.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct HitRow {
     pub session: AgentSessionId,
+    /// The session's name and harness, set only for a flat row.
+    pub origin: Option<HitOrigin>,
     /// Index of the turn in the transcript, as the viewer opens it.
     pub turn_index: usize,
     /// Who said it (`you`, `assistant`, `system`).

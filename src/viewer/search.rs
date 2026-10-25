@@ -31,13 +31,18 @@ pub const SNIPPET_MAX_CHARS: usize = 160;
 /// doesn't normalize the whole body.
 const SNIPPET_WINDOW_CHARS: usize = SNIPPET_MAX_CHARS * 4;
 
-/// How hits are presented: one result per session, or one per matching
-/// turn.
+/// How hits are presented.
+///
+/// - `Session`: one result per session.
+/// - `Message`: one result per matching turn, listed under its session.
+/// - `Flat`: one result per matching turn across every session, with no
+///   session grouping, newest first.
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub enum Grouping {
     #[default]
     Session,
     Message,
+    Flat,
 }
 
 impl Grouping {
@@ -45,6 +50,7 @@ impl Grouping {
         match raw.trim() {
             "session" => Some(Self::Session),
             "message" => Some(Self::Message),
+            "flat" => Some(Self::Flat),
             _ => None,
         }
     }
@@ -53,7 +59,26 @@ impl Grouping {
         match self {
             Self::Session => "session",
             Self::Message => "message",
+            Self::Flat => "flat",
         }
+    }
+
+    /// Every mode, in the order the results key cycles through them.
+    pub const ALL: [Grouping; 3] = [Self::Session, Self::Message, Self::Flat];
+
+    /// The next mode in [`Grouping::ALL`], wrapping around.
+    pub fn next(self) -> Self {
+        match self {
+            Self::Session => Self::Message,
+            Self::Message => Self::Flat,
+            Self::Flat => Self::Session,
+        }
+    }
+
+    /// Whether results are listed per matching turn, which means the
+    /// turns of each matching session have to be read.
+    pub fn lists_messages(self) -> bool {
+        !matches!(self, Self::Session)
     }
 }
 
@@ -550,6 +575,15 @@ pub fn cmp_sessions_by_recency(a: &SessionHits, b: &SessionHits) -> Ordering {
 /// ties in turn order.
 pub fn cmp_hits(a: &Hit, b: &Hit) -> Ordering {
     cmp_latest_first(a.timestamp, b.timestamp).then_with(|| a.turn_index.cmp(&b.turn_index))
+}
+
+/// Order hits from different sessions into one list for the flat
+/// results: newest first, a hit with no timestamp last, ties by session
+/// and then turn order.
+pub fn cmp_hits_across_sessions<K: Ord>(a: (&K, &Hit), b: (&K, &Hit)) -> Ordering {
+    cmp_latest_first(a.1.timestamp, b.1.timestamp)
+        .then_with(|| a.0.cmp(b.0))
+        .then_with(|| a.1.turn_index.cmp(&b.1.turn_index))
 }
 
 fn cmp_latest_first(a: Option<DateTime<Utc>>, b: Option<DateTime<Utc>>) -> Ordering {

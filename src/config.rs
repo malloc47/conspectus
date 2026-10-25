@@ -80,7 +80,8 @@ pub struct LaunchConfig {
 /// results and which kinds of turn it reads by default.
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub struct SearchConfig {
-    /// `group`: one result per session (the default) or per message.
+    /// `group`: one result per session (the default), per message under
+    /// its session, or every message as one flat list.
     pub group: crate::viewer::search::Grouping,
     /// `kinds`: messages by default, with tool calls and output, and
     /// thinking, as opt-ins.
@@ -919,7 +920,7 @@ fn merge_search(
         match value.as_str().and_then(Grouping::parse) {
             Some(group) => config.group = group,
             None => diagnose(format!(
-                "invalid `[search] group` value `{}`; expected session or message",
+                "invalid `[search] group` value `{}`; expected session, message, or flat",
                 shown(&value)
             )),
         }

@@ -4,7 +4,9 @@
 //! Session rows are the Sessions view's own rows (so every action, pin
 //! marker, age, and chip is shared) taken from its flat layout and put in
 //! the order the search ranks them. In the per-message grouping each
-//! session also lists its matching turns beneath it.
+//! session also lists its matching turns beneath it. In the flat
+//! listing there are no session rows at all: every matching turn is a
+//! row of its own, newest first, naming its session.
 
 use std::cmp::Ordering;
 use std::path::Path;
@@ -14,11 +16,12 @@ use crate::model::GraphSnapshot;
 use crate::tui::{SearchGrouping, SessionsGrouping, Sort};
 use crate::viewer::model::TurnKind;
 use crate::viewer::search::{
-    Grouping, Hit, SessionHits, cmp_hits, cmp_sessions, cmp_sessions_by_recency,
+    Grouping, Hit, SessionHits, cmp_hits, cmp_hits_across_sessions, cmp_sessions,
+    cmp_sessions_by_recency,
 };
 
 use super::sessions::{SessionsBuildInputs, build_sessions_tree};
-use super::{GroupRow, HitRow, Row, RowId, RowKind, RowTree, ViewLabel, format_recency};
+use super::{GroupRow, HitOrigin, HitRow, Row, RowId, RowKind, RowTree, ViewLabel, format_recency};
 
 pub struct SearchBuildInputs<'a> {
     pub snapshot: &'a GraphSnapshot,
@@ -120,6 +123,10 @@ pub fn build_search_tree(inputs: SearchBuildInputs<'_>) -> RowTree {
         order.then_with(|| session_key(&a.row).cmp(&session_key(&b.row)))
     });
 
+    if content.group == Grouping::Flat {
+        return build_flat(tree, &entries, &content.details, grouping, now);
+    }
+
     match grouping {
         SearchGrouping::None => {
             for entry in entries {
@@ -154,6 +161,88 @@ pub fn build_search_tree(inputs: SearchBuildInputs<'_>) -> RowTree {
         }
     }
     tree
+}
+
+/// The flat listing: every matching turn of every session whose turns
+/// have been read, newest first. Sorting is by the turn's own time in
+/// both sorts (relevance has no meaning across sessions' individual
+/// messages); ties fall to the session and then the turn order. Under
+/// the project and harness groupings the turns sit under bucket headers
+/// ordered by their newest turn.
+fn build_flat(
+    mut tree: RowTree,
+    entries: &[Entry],
+    details: &crate::filter::ContentDetailMap,
+    grouping: SearchGrouping,
+    now: Option<i64>,
+) -> RowTree {
+    let mut all: Vec<((String, String), usize, &Hit)> = Vec::new();
+    for (index, entry) in entries.iter().enumerate() {
+        if entry.hits.is_none() {
+            continue;
+        }
+        let key = session_key(&entry.row);
+        for hit in details.get(&key.0, &key.1).unwrap_or_default() {
+            all.push((key.clone(), index, hit));
+        }
+    }
+    all.sort_by(|a, b| cmp_hits_across_sessions((&a.0, a.2), (&b.0, b.2)));
+
+    let mut buckets: Vec<(String, Vec<Row>)> = Vec::new();
+    for (_, index, hit) in all {
+        let Some(row) = flat_hit_row(&entries[index].row, hit, now) else {
+            continue;
+        };
+        let label = match grouping {
+            SearchGrouping::None => String::new(),
+            _ => bucket_label(&entries[index].row, grouping),
+        };
+        match buckets.iter_mut().find(|(name, _)| *name == label) {
+            Some((_, rows)) => rows.push(row),
+            None => buckets.push((label, vec![row])),
+        }
+    }
+    for (label, rows) in buckets {
+        let depth = if matches!(grouping, SearchGrouping::None) {
+            0
+        } else {
+            tree.rows.push(Row {
+                id: RowId::Bucket(label.clone()),
+                depth: 0,
+                expandable: true,
+                kind: RowKind::Group(GroupRow {
+                    display_path: label,
+                    primary_node: None,
+                    is_launch_context: false,
+                }),
+            });
+            1
+        };
+        for mut row in rows {
+            row.depth = depth;
+            tree.rows.push(row);
+        }
+    }
+    tree
+}
+
+/// A flat row for one matching turn: the turn's columns plus the session
+/// it came from.
+fn flat_hit_row(session_row: &Row, hit: &Hit, now: Option<i64>) -> Option<Row> {
+    let RowKind::AgentSession(session) = &session_row.kind else {
+        return None;
+    };
+    let mut row = hit_rows(session_row, std::slice::from_ref(hit), now).pop()?;
+    if let RowKind::Hit(hit_row) = &mut row.kind {
+        hit_row.origin = Some(HitOrigin {
+            label: session.display_label().map_or_else(
+                || session.session.session_key.chars().take(8).collect(),
+                str::to_string,
+            ),
+            harness_label: session.harness_label.clone(),
+        });
+    }
+    Some(row)
 }
 
 /// A session row with what the search found in it.
@@ -215,6 +304,7 @@ fn hit_rows(session_row: &Row, details: &[Hit], now: Option<i64>) -> Vec<Row> {
             expandable: false,
             kind: RowKind::Hit(HitRow {
                 session: session.session.clone(),
+                origin: None,
                 turn_index: hit.turn_index,
                 role: role_word(hit.role),
                 kind: kind_word(hit.kind),

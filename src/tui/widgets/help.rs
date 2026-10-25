@@ -416,7 +416,7 @@ fn keymap_sections() -> Vec<HelpSection> {
                 ),
                 Binding::new(
                     "/ then Tab",
-                    "Search what was said in every session instead; Ctrl-R lists one result per session or per matching turn, Ctrl-F keeps the query as a filter on the lists, Ctrl-O also opens the Search view",
+                    "Search what was said in every session instead; Ctrl-R cycles results per session, per matching turn, and flat (turns only, newest first), Ctrl-F keeps the query as a filter on the lists, Ctrl-O also opens the Search view",
                 ),
             ],
         },

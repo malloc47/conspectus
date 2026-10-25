@@ -1,0 +1,26 @@
+---
+source: src/tui/widgets/search_content_tests.rs
+expression: text
+---
+
+
+               ┌ / search contents (2 results) ─────────────────────────────────────┐
+               │/quokka                                                             │
+               │results by message, flat · messages · 34 sessions searched · 2 skip…│
+               │>  claude    session aaaa1111  turn 4 · message  …quokka design…    │
+               │   claude    session bbbb2222  turn 2 · message  …quokka design…    │
+               │                                                                    │
+               │                                                                    │
+               │                                                                    │
+               │                                                                    │
+               │                                                                    │
+               │                                                                    │
+               │                                                                    │
+               │                                                                    │
+               │                                                                    │
+               │                                                                    │
+               │                                                                    │
+               │↑/↓ move · Enter open hit · Esc close · Tab search rows · Ctrl-R    │
+               │results · Ctrl-T tools · Ctrl-Y thinking · Ctrl-F filter lists ·    │
+               │Ctrl-O open Search view                                             │
+               └────────────────────────────────────────────────────────────────────┘
