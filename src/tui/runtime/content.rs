@@ -7,6 +7,7 @@
 //! with no event loop of their own (snapshots, tests) scan to completion
 //! on the calling thread.
 
+#[cfg(any(test, debug_assertions, feature = "snapshot"))]
 use std::path::Path;
 use std::time::{Duration, Instant};
 
@@ -15,9 +16,11 @@ use std::thread::JoinHandle;
 
 use std::sync::Arc;
 
+#[cfg(any(test, debug_assertions, feature = "snapshot"))]
+use crate::content_search::scan_blocking;
 use crate::content_search::{
     CancelToken, Polled, Progress, ScanEvent, ScanHandle, ScanOptions, ScanSession, SessionKey,
-    hits_for, plan_sessions, scan, scan_blocking,
+    hits_for, plan_sessions, scan,
 };
 use crate::tui::app::{App, DetailRequest, Msg, ScanRequest};
 use crate::viewer::search::{ContentQuery, Hit, SessionHits};
@@ -250,6 +253,7 @@ fn start(request: &ScanRequest) -> Active {
 /// `rebase` maps a scenario world's recorded state paths (the first
 /// path) onto where the world was written (the second), as the viewer
 /// does when snapshot mode opens a transcript.
+#[cfg(any(test, debug_assertions, feature = "snapshot"))]
 pub(in crate::tui) fn run_blocking(app: &mut App, rebase: Option<(&Path, &Path)>) {
     while let Some(mut request) = app.take_scan_request() {
         if let Some((from, to)) = rebase {
@@ -281,6 +285,7 @@ pub(in crate::tui) fn run_blocking(app: &mut App, rebase: Option<(&Path, &Path)>
     run_details_blocking(app, rebase);
 }
 
+#[cfg(any(test, debug_assertions, feature = "snapshot"))]
 fn run_details_blocking(app: &mut App, rebase: Option<(&Path, &Path)>) {
     while let Some(mut details) = app.take_detail_request() {
         if let Some((from, to)) = rebase {

@@ -410,6 +410,7 @@ pub(in crate::tui) fn handle_help_overlay_key(
 /// right where there is no terminal; the live loop uses
 /// [`handle_search_overlay_key_with`] so a hit that opens the viewer
 /// can run its effect.
+#[cfg(any(test, debug_assertions, feature = "snapshot"))]
 pub(in crate::tui) fn handle_search_overlay_key(
     app: &mut App,
     key: ratatui::crossterm::event::KeyEvent,

@@ -54,9 +54,11 @@ use launch::*;
 use overlay_keys::*;
 use worktree_exec::*;
 
+#[cfg(any(test, debug_assertions, feature = "snapshot"))]
+pub(super) use overlay_keys::handle_search_overlay_key;
 pub(super) use overlay_keys::{
     handle_controls_overlay_key, handle_help_overlay_key, handle_messages_overlay_key,
-    handle_search_overlay_key, handle_search_overlay_key_with, handle_viewer_overlay_key,
+    handle_search_overlay_key_with, handle_viewer_overlay_key,
 };
 
 /// What a background discovery worker sends back. `warning` carries a

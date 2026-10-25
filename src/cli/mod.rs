@@ -531,6 +531,7 @@ pub(super) struct FilterArgs {
 impl FilterArgs {
     /// Scenario worlds hold recorded graphs, not transcripts to read, so
     /// they refuse `--contains` rather than ignore it.
+    #[cfg(debug_assertions)]
     pub(super) fn reject_contains(&self, command: &str) -> Result<()> {
         if self.contains.is_some() {
             bail!(
