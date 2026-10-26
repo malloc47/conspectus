@@ -13,6 +13,7 @@ pub(crate) mod forge;
 mod git;
 mod path;
 mod process;
+pub(crate) mod search;
 mod value;
 
 use std::collections::{BTreeMap, BTreeSet};

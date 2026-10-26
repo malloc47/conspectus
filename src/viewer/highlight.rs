@@ -51,7 +51,12 @@ pub fn highlight_matches(
 
 /// `line` with every case-insensitive occurrence of `needle` after the
 /// first `leader` columns patched with `style`.
-fn paint(line: &Line<'static>, leader: usize, needle: &str, style: Style) -> Line<'static> {
+pub(crate) fn paint(
+    line: &Line<'static>,
+    leader: usize,
+    needle: &str,
+    style: Style,
+) -> Line<'static> {
     let chars: Vec<(char, Style)> = line
         .spans
         .iter()

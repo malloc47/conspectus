@@ -2,6 +2,7 @@
 
 use super::*;
 use crate::tui::preview::{PreviewSource, PreviewSubject, node_source, preview_subject};
+use crate::viewer::state::ViewerState;
 
 /// A Preview body, and where its window sits when it scrolls itself.
 pub(super) struct PreviewView {
@@ -322,27 +323,51 @@ fn transcript_view(app: &App, source: &PreviewSource, width: u16, height: usize)
         _ => return PreviewView::text("transcript unavailable"),
     };
     let content_width = width.saturating_sub(1).max(1);
+    let search = crate::tui::preview::search::preview_search(app);
     // Draw warms the cache first (`App::prepare_preview`); callers
     // that skip it, like tests, compose a copy.
-    let lines: std::borrow::Cow<'_, [Line<'static>]> =
-        if let Some(lines) = crate::viewer::widget::cached_body_lines(state, content_width) {
-            std::borrow::Cow::Borrowed(lines)
+    let composed;
+    let state: &ViewerState =
+        if crate::viewer::widget::cached_body_lines(state, content_width).is_some() {
+            state
         } else {
-            let mut state = state.as_ref().clone();
-            std::borrow::Cow::Owned(
-                crate::viewer::widget::body_lines(&mut state, app.theme(), content_width).to_vec(),
-            )
+            let mut copy = state.as_ref().clone();
+            crate::tui::preview::search::apply(&mut copy, search.as_ref());
+            crate::viewer::widget::body_lines(&mut copy, app.theme(), content_width);
+            composed = copy;
+            &composed
         };
+    let Some(cache) = state.rendered.as_ref() else {
+        return PreviewView::text("no turns yet");
+    };
+    let lines = &cache.lines;
     if lines.is_empty() {
         return PreviewView::text("no turns yet");
     }
     let total = lines.len();
     let height = height.max(1);
     let bottom_top = total.saturating_sub(height);
-    let top = bottom_top.saturating_sub(app.preview_scroll() as usize);
+    let top = match crate::tui::preview::search::match_top(state) {
+        // Opened on a search match: the offset counts rows down from it.
+        Some(anchor) if search.as_ref().is_some_and(|s| s.turn.is_some()) => {
+            let moved = (anchor as i64).saturating_add(i64::from(app.preview_match_offset()));
+            usize::try_from(moved.max(0)).unwrap_or(0).min(bottom_top)
+        }
+        _ => bottom_top.saturating_sub(app.preview_scroll() as usize),
+    };
     let end = (top + height).min(total);
+    let mut window = lines[top..end].to_vec();
+    if search.is_some() {
+        crate::viewer::highlight::highlight_matches(
+            &mut window,
+            top,
+            cache,
+            &state.find,
+            app.theme(),
+        );
+    }
     PreviewView {
-        text: Text::from(lines[top..end].to_vec()),
+        text: Text::from(window),
         window: Some(PreviewWindow { total, top }),
     }
 }
@@ -369,8 +394,17 @@ pub(super) fn format_preview_for_mux(
                 if rows.is_empty() {
                     return Text::raw("(empty pane)");
                 }
-                let start = rows.len().saturating_sub(height.max(1));
-                Text::from(rows[start..].to_vec())
+                if let Some(search) = crate::tui::preview::search::preview_search(app) {
+                    crate::tui::preview::search::mark_rows(
+                        rows,
+                        &search.query,
+                        app.theme().match_style(),
+                        height,
+                    )
+                } else {
+                    let start = rows.len().saturating_sub(height.max(1));
+                    Text::from(rows[start..].to_vec())
+                }
             }
             PreviewContent::NoTarget => Text::raw("tmux target not found — try `r` to refresh"),
             PreviewContent::Unavailable(reason) => Text::raw(format!("tmux unavailable: {reason}")),

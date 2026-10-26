@@ -158,6 +158,9 @@ pub struct App {
     /// Vertical scroll offset for the right-panel preview, in
     /// rendered rows.
     preview_scroll: u16,
+    /// Rows a scrolled Preview sits below the search match it opened
+    /// on; negative is above it.
+    preview_match_offset: i32,
     /// Unix-epoch seconds at which the current snapshot was
     /// loaded. `None` before the first `SetData`. The renderer
     /// turns this into the header's `updated Ns ago` indicator.
@@ -553,6 +556,7 @@ impl App {
             edge_meta_visible,
             explorer_back_armed: false,
             preview_scroll: 0,
+            preview_match_offset: 0,
             loaded_at_epoch: None,
             status_message: None,
             messages: crate::tui::messages::MessageLog::default(),
@@ -1028,6 +1032,19 @@ impl App {
         self.preview_scroll
     }
 
+    /// Rows the Preview has been scrolled from the search match it
+    /// opened on.
+    pub fn preview_match_offset(&self) -> i32 {
+        self.preview_match_offset
+    }
+
+    /// Return the Preview to its anchor: the top, a transcript's newest
+    /// turns, or the search match it opens on.
+    fn reset_preview_scroll(&mut self) {
+        self.preview_scroll = 0;
+        self.preview_match_offset = 0;
+    }
+
     /// Latest graph snapshot, if loaded. Mostly useful to other modules
     /// that compute view-models against the same data.
     pub(crate) fn snapshot_handle(&self) -> Option<&SnapshotHandle> {
@@ -1192,13 +1209,23 @@ impl App {
             return;
         };
         let theme = self.theme().clone();
+        let search = crate::tui::preview::search::preview_search(self);
         if let Some(PreviewEntry {
             content: PreviewContent::Transcript(state),
             ..
         }) = self.preview_store.get_mut(&source)
         {
+            crate::tui::preview::search::apply(state, search.as_ref());
             crate::viewer::widget::body_lines(state, &theme, width);
         }
+    }
+
+    /// Whether the Preview is positioned on a search match, so scrolling
+    /// moves relative to it instead of the newest turns.
+    fn preview_follows_match(&self) -> bool {
+        self.preview_is_bottom_anchored()
+            && crate::tui::preview::search::preview_search(self)
+                .is_some_and(|search| search.turn.is_some())
     }
 
     /// Whether the Preview zone shows a transcript, which sits
@@ -1341,7 +1368,7 @@ impl App {
         if self.preview_focus() != focus {
             // A different row's preview starts at its anchor: the top,
             // or a transcript's newest turns.
-            self.preview_scroll = 0;
+            self.reset_preview_scroll();
         }
         effects
     }
@@ -1472,6 +1499,9 @@ impl App {
                     Focus::Left => Focus::Right,
                     Focus::Right => Focus::Left,
                 };
+            }
+            Msg::ScrollPreviewBy(delta) if self.preview_follows_match() => {
+                self.preview_match_offset = self.preview_match_offset.saturating_add(delta);
             }
             Msg::ScrollPreviewBy(delta) => {
                 // A transcript's offset counts up from its newest
@@ -1757,12 +1787,12 @@ impl App {
             }
             Msg::SetPreviewWrap(wrap) => {
                 self.preview_wrap = wrap;
-                self.preview_scroll = 0;
+                self.reset_preview_scroll();
                 effects.push(Effect::Persist);
             }
             Msg::SetSessionPreview(choice) => {
                 self.session_preview = choice;
-                self.preview_scroll = 0;
+                self.reset_preview_scroll();
                 effects.push(Effect::Persist);
             }
             Msg::CommitRename(value) => {
