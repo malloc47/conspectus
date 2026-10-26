@@ -1,9 +1,10 @@
 ---
 id: CSP-706
 title: Refine the two-level search from hands-on testing
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-10-26 22:10'
+updated_date: '2026-10-26 23:32'
 labels:
   - h-search
   - tui
@@ -22,6 +23,12 @@ Hands-on testing of CSP-705 found a cursor bug in quick select, and asked for: c
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
-- [ ] #1 `just check` passes, or `git diff --check` for docs-only changes
-- [ ] #2 Docs and ADRs are updated when behavior, architecture, or workflow change
+- [x] #1 `just check` passes, or `git diff --check` for docs-only changes
+- [x] #2 Docs and ADRs are updated when behavior, architecture, or workflow change
 <!-- DOD:END -->
+
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+Fixed the quick select cursor, q in the viewer, default All scope, history dedup, deferred search commit, granularity tabs, the options pane, and preview highlighting.
+<!-- SECTION:FINAL_SUMMARY:END -->
