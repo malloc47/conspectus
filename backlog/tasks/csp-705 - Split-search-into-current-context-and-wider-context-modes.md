@@ -1,9 +1,10 @@
 ---
 id: CSP-705
 title: Split search into current-context and wider-context modes
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-10-26 13:48'
+updated_date: '2026-10-26 17:05'
 labels:
   - h-search
   - tui
@@ -22,6 +23,12 @@ Operator redesign of search (2026-10-26). / becomes a quick selector over the cu
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
-- [ ] #1 `just check` passes, or `git diff --check` for docs-only changes
-- [ ] #2 Docs and ADRs are updated when behavior, architecture, or workflow change
+- [x] #1 `just check` passes, or `git diff --check` for docs-only changes
+- [x] #2 Docs and ADRs are updated when behavior, architecture, or workflow change
 <!-- DOD:END -->
+
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+Search is now two-level: / is a wide quick select over the current context with an All scope that opens entities by the nearest route, and Ctrl+/ searches session and mux-pane content with deduplication, kept in a ten-entry history in the Search view. Recorded in ADR 0149.
+<!-- SECTION:FINAL_SUMMARY:END -->
