@@ -375,6 +375,7 @@ pub enum Msg {
         text: String,
         kinds: crate::viewer::search::ContentKinds,
         group: crate::viewer::search::Grouping,
+        reach: crate::tui::widgets::search::Reach,
     },
     /// Keep this search as the filter on the session lists, and with
     /// `show_results` open the Search view on it. The previewed scan is
@@ -383,11 +384,44 @@ pub enum Msg {
         text: String,
         kinds: crate::viewer::search::ContentKinds,
         group: crate::viewer::search::Grouping,
+        reach: crate::tui::widgets::search::Reach,
         show_results: bool,
     },
+    /// Keep the previewed search as the newest one in the Search view and
+    /// open the view on it, without narrowing the lists. A scan still
+    /// running keeps streaming into the view.
+    KeepContentSearch {
+        text: String,
+        kinds: crate::viewer::search::ContentKinds,
+        group: crate::viewer::search::Grouping,
+        reach: crate::tui::widgets::search::Reach,
+    },
+    /// Show an older (negative) or newer (positive) remembered search in
+    /// the Search view. It is not scanned again.
+    PageSearchHistory(isize),
+    /// Show the remembered search at this position, oldest first.
+    ShowSearchHistory(usize),
+    /// List the remembered searches in a picker.
+    OpenSearchHistory,
+    /// Open the contents search modal (what `s` does).
+    OpenContentSearchModal,
+    /// Keep the search the Search view shows as the filter on the lists.
+    ApplySearchEntry,
     /// Drop the previewed search and bring back the filter it replaced,
     /// if there was one.
     DiscardContentPreview,
+    /// Open a mux pane's scrollback at a line a content search found.
+    OpenPaneHit {
+        pane: crate::content_search::PaneRef,
+        line: usize,
+        text: String,
+        /// Select the pane's mux in the Mux view first, as a hit chosen in
+        /// the modal does; a row of the Search view stays where it is.
+        reveal: bool,
+    },
+    /// Open the scrollback of the pane the selected Search-view row names,
+    /// on the line it found.
+    OpenSelectedPane,
     /// Open the viewer on a session at the turn a content search found.
     OpenContentHit {
         session: crate::model::AgentSessionId,
@@ -410,8 +444,23 @@ pub enum Msg {
             Vec<crate::viewer::search::Hit>,
         )>,
     },
+    /// The matching turns of some sessions for a remembered search that is
+    /// not the running one; stale ones are dropped.
+    HistoryDetails {
+        serial: u64,
+        batch: Vec<(
+            crate::content_search::SessionKey,
+            Vec<crate::viewer::search::Hit>,
+        )>,
+    },
     /// Clear every filter, the content search included.
     ClearFilters,
+    /// Mux panes the running scan found, stamped like
+    /// [`Msg::ContentHits`] and sent just before them.
+    ContentPanes {
+        generation: u64,
+        batch: Vec<crate::content_search::PaneHits>,
+    },
     /// Results of the running scan, stamped with the scan they belong
     /// to. Stale ones are dropped.
     ContentHits {

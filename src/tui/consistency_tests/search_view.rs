@@ -274,12 +274,21 @@ fn a_hit_row_pins_and_menus_as_its_session() {
 }
 
 #[test]
-fn clearing_the_filters_empties_the_view() {
+fn clearing_the_filters_keeps_the_search_in_the_view() {
     let (a, _) = two();
     let mut app = searched(&[(&a, summary(2, 4, 1_000))]);
-    assert!(!app.tree().rows.is_empty());
+    let listed = app.tree().rows.len();
+    assert!(listed > 0);
     app.update(Msg::ClearFilters);
-    assert!(app.tree().rows.is_empty());
+    assert!(
+        app.content().is_none(),
+        "nothing filters the lists any more"
+    );
+    assert_eq!(
+        app.tree().rows.len(),
+        listed,
+        "the remembered search is still shown"
+    );
 }
 
 #[test]

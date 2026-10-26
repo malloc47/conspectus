@@ -901,6 +901,34 @@ pub fn recorded_pr_view(root: &Path, owner: &str, repo: &str, number: u64) -> Op
     .ok()
 }
 
+/// A mux backend that lists, and answers scrollback reads for, the panes a
+/// scenario world rooted at `root` recorded: one pane per recorded
+/// capture, named for its mux session. Content search reads through it in
+/// snapshot mode in place of tmux.
+pub fn recorded_pane_backend(root: &Path) -> crate::discovery::tmux::FakeTmux {
+    use crate::discovery::tmux::{FakeTmux, TmuxCaptureOutcome, TmuxOutcome};
+    let mut names: Vec<String> = fs::read_dir(root.join(PANE_CAPTURES_DIR))
+        .into_iter()
+        .flatten()
+        .flatten()
+        .filter_map(|entry| {
+            let path = entry.path();
+            (path.extension()? == "txt").then(|| path.file_stem()?.to_str().map(str::to_string))?
+        })
+        .collect();
+    names.sort();
+    let mut listing = String::new();
+    let mut backend = FakeTmux::with_sessions("");
+    for (index, name) in names.iter().enumerate() {
+        let pane = format!("%{}", index + 1);
+        listing.push_str(&format!("{name}\t{pane}\t0\t0\tzsh\n"));
+        if let Some(text) = recorded_pane(root, name) {
+            backend = backend.with_history(pane, TmuxCaptureOutcome::captured(text));
+        }
+    }
+    backend.with_panes(None, TmuxOutcome::Sessions(listing))
+}
+
 /// The pane capture a scenario world rooted at `root` recorded for the
 /// mux session `native_id`, if any.
 pub fn recorded_pane(root: &Path, native_id: &str) -> Option<String> {

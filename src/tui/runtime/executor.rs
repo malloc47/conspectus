@@ -344,6 +344,15 @@ pub(super) fn execute_exec_spec(
         ExecSpec::ViewSession(session_id, open) => {
             execute_view_session(terminal, app, config, session_id, open.as_ref());
         }
+        ExecSpec::PaneScrollback { pane, line, text } => {
+            open_pane_scrollback(
+                app,
+                &crate::discovery::tmux::SystemTmux::new(),
+                &pane,
+                line,
+                &text,
+            );
+        }
         ExecSpec::MuxNew { name, cwd } => {
             execute_mux_new(terminal, app, &name, &cwd, policy);
         }
@@ -355,6 +364,41 @@ pub(super) fn execute_exec_spec(
         }
         ExecSpec::ShowRebuildPlan { reference } => {
             execute_show_rebuild_plan(terminal, app, &reference);
+        }
+    }
+}
+
+/// Executor branch for `ExecSpec::PaneScrollback`: capture the pane's
+/// scrollback now and open it in the pager on the line the search found.
+pub(super) fn open_pane_scrollback(
+    app: &mut App,
+    tmux: &dyn MuxBackend,
+    pane: &crate::content_search::PaneRef,
+    line: usize,
+    text: &str,
+) {
+    use crate::discovery::tmux::TmuxCaptureOutcome;
+    let label = format!(
+        "{} {}.{} scrollback",
+        pane.mux.session, pane.window_index, pane.pane_index
+    );
+    match tmux.pane_history(pane.mux.socket.as_deref(), &pane.pane_id) {
+        Ok(TmuxCaptureOutcome::Captured(capture)) => {
+            let scrollback = crate::content_search::panes::scrollback_lines(&capture.text);
+            app.open_value_modal(
+                crate::tui::widgets::value_modal::ValueModalState::scrollback(
+                    label,
+                    &scrollback.lines,
+                    line,
+                    text,
+                ),
+            );
+        }
+        _ => {
+            let _ = app.update(Msg::SetStatus(Some(format!(
+                "{} {}.{} could not be read now",
+                pane.mux.session, pane.window_index, pane.pane_index
+            ))));
         }
     }
 }

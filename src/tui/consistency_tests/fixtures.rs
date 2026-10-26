@@ -263,6 +263,7 @@ pub(super) fn enter(app: &mut App) -> Vec<crate::tui::Effect> {
         crate::tui::keymap::SelectedDefault::ToggleExpand => app.update(Msg::ToggleExpand),
         crate::tui::keymap::SelectedDefault::Attach => app.update(Msg::AttachSelected),
         crate::tui::keymap::SelectedDefault::View => app.update(Msg::ViewSelected),
+        crate::tui::keymap::SelectedDefault::Scrollback => app.update(Msg::OpenSelectedPane),
     }
 }
 

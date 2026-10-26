@@ -1523,6 +1523,45 @@ fn wrong_types_and_empty_kind_lists_are_diagnosed() {
 }
 
 #[test]
+fn search_history_defaults_to_ten_and_accepts_a_count() {
+    let (search, diagnostics) = load_search(None, None);
+    assert_eq!(search.history, 10);
+    assert!(diagnostics.is_empty(), "{diagnostics:?}");
+    let (search, diagnostics) = load_search(Some("[search]\nhistory = 3\n"), None);
+    assert_eq!(search.history, 3);
+    assert!(diagnostics.is_empty(), "{diagnostics:?}");
+    let (search, _) = load_search(Some("[search]\nhistory = 0\n"), None);
+    assert_eq!(search.history, 0, "zero keeps only the displayed search");
+}
+
+#[test]
+fn project_search_history_overrides_the_user_one() {
+    let (search, _) = load_search(
+        Some("[search]\nhistory = 20\n"),
+        Some("[search]\nhistory = 4\n"),
+    );
+    assert_eq!(search.history, 4);
+}
+
+#[test]
+fn invalid_search_history_is_diagnosed_and_keeps_the_previous_count() {
+    for text in [
+        "[search]\nhistory = -1\n",
+        "[search]\nhistory = 51\n",
+        "[search]\nhistory = \"many\"\n",
+        "[search]\nhistory = 2.5\n",
+    ] {
+        let (search, diagnostics) = load_search(Some(text), None);
+        assert_eq!(search.history, 10, "{text}");
+        assert_eq!(diagnostics.len(), 1, "{text}: {diagnostics:?}");
+        assert!(
+            diagnostics[0].contains("`[search] history`"),
+            "{diagnostics:?}"
+        );
+    }
+}
+
+#[test]
 fn search_diagnostics_do_not_cite_developer_artifacts() {
     let (_, diagnostics) = load_search(Some("[search]\ngroup = \"x\"\nkinds = [\"y\"]\n"), None);
     for message in diagnostics {
@@ -1556,7 +1595,7 @@ fn an_unknown_search_key_is_diagnosed() {
     );
     assert_eq!(
         diagnostics,
-        ["unknown `[search]` key `groupp`; expected group or kinds"]
+        ["unknown `[search]` key `groupp`; expected group, kinds, or history"]
     );
 }
 

@@ -86,21 +86,47 @@ pub fn modal_size(width: u16, height: u16) -> (u16, u16) {
     (fit(width, MODAL_WIDTH), fit(height, MODAL_HEIGHT))
 }
 
+/// What a content result opens.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum ContentTarget {
+    /// A session's transcript, at the turn the search found.
+    Session {
+        session: crate::model::AgentSessionId,
+        turn_index: usize,
+    },
+    /// A mux pane's scrollback, at the line the search found.
+    Pane {
+        pane: crate::content_search::PaneRef,
+        line: usize,
+    },
+}
+
+impl ContentTarget {
+    /// The word a result row carries for where it was found.
+    pub fn source_word(&self) -> &'static str {
+        match self {
+            Self::Session { .. } => "session",
+            Self::Pane { .. } => "pane",
+        }
+    }
+}
+
 /// One result in the contents scope.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ContentRow {
-    pub session: crate::model::AgentSessionId,
+    pub target: ContentTarget,
     pub label: String,
-    /// The harness's name, drawn as a chip.
-    pub harness: String,
-    /// Matching turns in the session.
+    /// The harness's name drawn as a chip, or the command a pane runs.
+    pub chip: String,
+    /// Matches in the session or pane.
     pub hits: usize,
-    /// Per-message results say which turn this row is.
+    /// Per-message results say which turn or line this row is.
     pub turn: Option<String>,
+    /// How long ago the session was last active, or the pane was read.
+    pub age: String,
     pub snippet: String,
     /// Byte range of the match inside `snippet`.
     pub highlight: Option<std::ops::Range<usize>>,
-    pub turn_index: usize,
 }
 
 /// What the host tells the widget about the running contents scan.
@@ -111,6 +137,10 @@ pub struct ContentView {
     pub total: usize,
     pub skipped: usize,
     pub done: bool,
+    /// The scan reads pane scrollback as well as transcripts.
+    pub with_panes: bool,
+    /// The current context lists no sessions or muxes to search.
+    pub empty_scope: bool,
     /// Set when contents search cannot run, and why.
     pub unavailable: Option<&'static str>,
 }
@@ -122,6 +152,7 @@ pub enum DueSearch {
         text: String,
         kinds: ContentKinds,
         group: Grouping,
+        reach: Reach,
     },
     /// Stop previewing.
     Clear,
@@ -188,6 +219,13 @@ impl SearchOverlayState {
             state.mode = SearchMode::Content;
         }
         state
+    }
+
+    /// Open on `reach` instead of the current context.
+    #[must_use]
+    pub fn with_reach(mut self, reach: Reach) -> Self {
+        self.reach = reach;
+        self
     }
 
     pub fn mode(&self) -> SearchMode {
@@ -260,6 +298,7 @@ impl SearchOverlayState {
                 text,
                 kinds: self.kinds,
                 group: self.group,
+                reach: self.reach,
             })
         } else {
             Some(DueSearch::Clear)
@@ -339,11 +378,10 @@ pub enum SearchOutcome {
     OpenEntity(Box<NodeId>),
     /// Content mode: open the result under the cursor.
     OpenHit(usize),
-    /// Contents scope: keep the query as the filter on the lists, and
-    /// with `show_results` open the Search view on it.
-    Promote {
-        show_results: bool,
-    },
+    /// Content mode: keep the query as the filter on the lists.
+    ApplyFilter,
+    /// Content mode: keep the search in the Search view and go there.
+    Keep,
 }
 
 impl SearchOverlayState {
@@ -398,9 +436,10 @@ impl SearchOverlayState {
                 SearchOutcome::Continue
             }
             Some(SearchKey::Scope) => {
-                if !contents {
-                    self.cursor = 0;
-                    self.reach = self.reach.other();
+                self.cursor = 0;
+                self.reach = self.reach.other();
+                if contents {
+                    self.edited_at = Some(Instant::now());
                 }
                 SearchOutcome::Continue
             }
@@ -420,8 +459,8 @@ impl SearchOverlayState {
                 self.edited_at = Some(Instant::now());
                 SearchOutcome::Continue
             }
-            Some(SearchKey::ApplyFilter) => self.promote(false),
-            Some(SearchKey::ApplyView) => self.promote(true),
+            Some(SearchKey::ApplyFilter) => self.promote(SearchOutcome::ApplyFilter),
+            Some(SearchKey::Keep) => self.promote(SearchOutcome::Keep),
             None => {
                 // Let the text-input primitive handle the key. We
                 // ignore its outcome here because Enter/Esc are
@@ -438,11 +477,12 @@ impl SearchOverlayState {
         }
     }
 
-    fn promote(&self, show_results: bool) -> SearchOutcome {
+    /// `outcome` for a query worth keeping; nothing for an empty one.
+    fn promote(&self, outcome: SearchOutcome) -> SearchOutcome {
         if self.content_text().is_empty() {
             SearchOutcome::Continue
         } else {
-            SearchOutcome::Promote { show_results }
+            outcome
         }
     }
 
@@ -530,14 +570,20 @@ impl Widget for SearchOverlayWidget<'_> {
         // auto-sizing reproduces it.
         let modal = centered_modal_rect(area);
         let title = match (self.state.mode(), self.content) {
-            (SearchMode::Content, Some(view)) => {
-                let n = view.rows.len();
-                line![format!(
-                    " / search contents ({n} {}) ",
-                    if n == 1 { "result" } else { "results" }
-                )]
+            (SearchMode::Content, view) => {
+                let mut spans = vec![Span::raw(" / search contents  ")];
+                spans.extend(reach_segments(self.state.reach(), self.theme));
+                if let Some(view) = view {
+                    let n = view.rows.len();
+                    spans.push(Span::raw(format!(
+                        "  ({n} {}) ",
+                        if n == 1 { "result" } else { "results" }
+                    )));
+                } else {
+                    spans.push(Span::raw(" "));
+                }
+                Line::from(spans)
             }
-            (SearchMode::Content, None) => line![" / search contents "],
             (SearchMode::Quick, _) => {
                 let n = match self.state.reach() {
                     Reach::Current => self.state.matches().len(),
@@ -833,8 +879,12 @@ impl SearchBody<'_> {
         if view.rows.is_empty() {
             let label = if let Some(reason) = view.unavailable {
                 reason
+            } else if view.empty_scope {
+                "(this view lists no sessions or muxes; Tab searches all of them)"
             } else if self.state.content_text().is_empty() {
                 "(type to search what was said)"
+            } else if view.done && view.with_panes {
+                "(no sessions or panes match)"
             } else if view.done {
                 "(no sessions match)"
             } else {
@@ -845,12 +895,14 @@ impl SearchBody<'_> {
             return;
         }
         let scroll = compute_scroll(self.state.cursor(), list_height, view.rows.len());
+        // Leave a blank cell before the frame.
+        let columns = content_columns(width.saturating_sub(1));
         let lines: Vec<Line<'static>> = (scroll..(scroll + list_height).min(view.rows.len()))
             .map(|idx| {
                 content_row_line(
                     &view.rows[idx],
                     idx == self.state.cursor(),
-                    width,
+                    columns,
                     self.theme,
                 )
             })
@@ -892,18 +944,17 @@ impl SearchBody<'_> {
         }
         let mut text = format!("results {group} · {}", what.join(" + "));
         if view.total > 0 {
-            if view.done {
-                text.push_str(&format!(
-                    " · {} {} searched",
-                    view.total,
-                    if view.total == 1 {
-                        "session"
-                    } else {
-                        "sessions"
-                    }
-                ));
+            let noun = if view.with_panes {
+                "sessions and panes"
+            } else if view.total == 1 {
+                "session"
             } else {
-                text.push_str(&format!(" · {}/{} sessions", view.scanned, view.total));
+                "sessions"
+            };
+            if view.done {
+                text.push_str(&format!(" · {} {noun} searched", view.total));
+            } else {
+                text.push_str(&format!(" · {}/{} {noun}", view.scanned, view.total));
             }
             if view.skipped > 0 {
                 text.push_str(&format!(" · {} skipped", view.skipped));
@@ -913,12 +964,81 @@ impl SearchBody<'_> {
     }
 }
 
-/// One contents result: cursor mark, harness chip, label, hit count,
-/// and the snippet with the match marked.
+/// The widths of a content result's cells.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct ContentColumns {
+    /// The row's width.
+    pub inner: usize,
+    /// `session` or `pane`; 0 when dropped.
+    pub source: usize,
+    /// The harness chip or pane command; 0 when dropped.
+    pub chip: usize,
+    pub label: usize,
+    /// The hit count or turn; at least a few cells.
+    pub tag: usize,
+    /// The age; 0 when dropped.
+    pub age: usize,
+}
+
+/// The source word's width: the longer of `session` and `pane`.
+const SOURCE_WIDTH: usize = 7;
+/// The harness chip's width.
+const CHIP_WIDTH: usize = 10;
+/// A snippet narrower than this is not worth showing, so cells give way
+/// to it.
+const MIN_SNIPPET: usize = 20;
+
+impl ContentColumns {
+    /// Cells the snippet gets: what is left after the other cells, their
+    /// two-cell cursor mark, and the gaps between them.
+    fn snippet(&self) -> usize {
+        let cells = [self.source, self.chip, self.age];
+        let gaps: usize = cells.iter().filter(|cell| **cell > 0).count();
+        // mark, label, tag, and one gap after each cell.
+        self.inner
+            .saturating_sub(2 + cells.iter().sum::<usize>() + gaps + self.label + self.tag + 2 + 2)
+    }
+}
+
+/// Split a content result `inner` cells wide: the label takes a fifth of
+/// the width (12 to 32 cells) and the snippet the rest. When the snippet
+/// would be narrower than [`MIN_SNIPPET`] the chip, then the source word,
+/// then the age give up their cells, then the label shrinks.
+pub(crate) fn content_columns(inner: usize) -> ContentColumns {
+    let mut columns = ContentColumns {
+        inner,
+        source: SOURCE_WIDTH,
+        chip: CHIP_WIDTH,
+        label: (inner / 5).clamp(12, 32),
+        tag: match inner {
+            100.. => 22,
+            78.. => 20,
+            _ => 14,
+        },
+        age: 4,
+    };
+    if columns.snippet() < MIN_SNIPPET {
+        columns.chip = 0;
+    }
+    if columns.snippet() < MIN_SNIPPET {
+        columns.source = 0;
+    }
+    if columns.snippet() < MIN_SNIPPET {
+        columns.age = 0;
+    }
+    while columns.snippet() < MIN_SNIPPET && columns.label > 8 {
+        columns.label -= 1;
+    }
+    columns
+}
+
+/// One contents result: cursor mark, where it was found, harness chip or
+/// pane command, label, hit count or position, age, and the snippet with
+/// the match marked.
 fn content_row_line(
     row: &ContentRow,
     is_cursor: bool,
-    width: usize,
+    columns: ContentColumns,
     theme: &Theme,
 ) -> Line<'static> {
     use crate::tui::widgets::badge::harness_badge;
@@ -935,14 +1055,28 @@ fn content_row_line(
     } else {
         Style::default().add_modifier(theme.placeholder)
     };
-    let mut spans: Vec<Span<'static>> = vec![
-        span!(plain; "{}", if is_cursor { "> " } else { "  " }),
-        harness_badge(&row.harness, theme),
-        span!(plain; " "),
-    ];
-    let label = ellipsize(&row.label, 22);
-    let mut used = 2 + 10 + 1 + label.chars().count();
-    spans.push(span!(plain; "{label}"));
+    let pad = |text: &str, width: usize| {
+        let text = ellipsize(text, width);
+        let gap = width.saturating_sub(cells(&text));
+        format!("{text}{}", " ".repeat(gap))
+    };
+    let mut spans: Vec<Span<'static>> =
+        vec![span!(plain; "{}", if is_cursor { "> " } else { "  " })];
+    if columns.source > 0 {
+        spans.push(span!(dim; "{} ", pad(row.target.source_word(), columns.source)));
+    }
+    if columns.chip > 0 {
+        match row.target {
+            ContentTarget::Session { .. } => {
+                spans.push(harness_badge(&row.chip, theme));
+                spans.push(span!(plain; " "));
+            }
+            ContentTarget::Pane { .. } => {
+                spans.push(span!(dim; "{} ", pad(&row.chip, columns.chip)));
+            }
+        }
+    }
+    spans.push(span!(plain; "{}  ", pad(&row.label, columns.label)));
     let tag = match &row.turn {
         Some(turn) => turn.clone(),
         None => format!(
@@ -951,11 +1085,12 @@ fn content_row_line(
             if row.hits == 1 { "hit" } else { "hits" }
         ),
     };
-    spans.push(span!(dim; "  {tag}"));
-    used += 2 + tag.chars().count();
-    spans.push(span!(dim; "  "));
-    used += 2;
-    let budget = width.saturating_sub(used).max(8);
+    spans.push(span!(dim; "{}  ", pad(&tag, columns.tag)));
+    if columns.age > 0 {
+        spans
+            .push(span!(dim; "{:>width$} ", ellipsize(&row.age, columns.age), width = columns.age));
+    }
+    let budget = columns.snippet().max(8);
     let snippet = crate::tui::widgets::snippet::fit(
         &row.snippet,
         &row.highlight.clone().unwrap_or(0..0),
@@ -1054,6 +1189,7 @@ fn search_row_node_kind(id: &RowId) -> Option<NodeKind> {
             Some(NodeKind::from(node_id))
         }
         RowId::Hit { session, .. } => Some(NodeKind::from(session)),
+        RowId::Pane { mux, .. } | RowId::PaneHit { mux, .. } => Some(NodeKind::from(mux)),
         RowId::Pr(_) => Some(NodeKind::ForgePr),
         RowId::Fork(_) => Some(NodeKind::Fork),
         RowId::Pin { .. } => Some(NodeKind::Pin),
@@ -1155,20 +1291,42 @@ impl crate::tui::Overlay for SearchOverlayState {
             }
             SearchOutcome::OpenHit(index) => match ctx.content.get(index) {
                 Some(row) => {
-                    crate::tui::OverlayOutcome::Commit(Box::new(crate::tui::Msg::OpenContentHit {
-                        session: row.session.clone(),
-                        text: self.content_text(),
-                        turn_index: row.turn_index,
-                    }))
+                    let text = self.content_text();
+                    let msg = match &row.target {
+                        ContentTarget::Session {
+                            session,
+                            turn_index,
+                        } => crate::tui::Msg::OpenContentHit {
+                            session: session.clone(),
+                            text,
+                            turn_index: *turn_index,
+                        },
+                        ContentTarget::Pane { pane, line } => crate::tui::Msg::OpenPaneHit {
+                            pane: pane.clone(),
+                            line: *line,
+                            text,
+                            reveal: true,
+                        },
+                    };
+                    crate::tui::OverlayOutcome::Commit(Box::new(msg))
                 }
                 None => crate::tui::OverlayOutcome::Close,
             },
-            SearchOutcome::Promote { show_results } => {
+            SearchOutcome::ApplyFilter => {
                 crate::tui::OverlayOutcome::Commit(Box::new(crate::tui::Msg::ApplyContentSearch {
                     text: self.content_text(),
                     kinds: self.kinds,
                     group: self.group,
-                    show_results,
+                    reach: self.reach,
+                    show_results: false,
+                }))
+            }
+            SearchOutcome::Keep => {
+                crate::tui::OverlayOutcome::Commit(Box::new(crate::tui::Msg::KeepContentSearch {
+                    text: self.content_text(),
+                    kinds: self.kinds,
+                    group: self.group,
+                    reach: self.reach,
                 }))
             }
         }

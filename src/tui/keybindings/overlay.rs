@@ -333,8 +333,8 @@ pub enum SearchKey {
     Thinking,
     /// Contents scope: keep the query as the filter on the lists.
     ApplyFilter,
-    /// Contents scope: keep the query and open the Search view.
-    ApplyView,
+    /// Contents scope: keep the search and open the Search view on it.
+    Keep,
 }
 
 /// The picker shares the list-and-query keys but has no scopes.
@@ -349,7 +349,7 @@ pub const PICKER_KEYS: &[KeyRow<SearchKey>] = &[
 ];
 
 /// `/` quick select. Tab and Shift-Tab both switch the reach, which is
-/// only ever one of two.
+/// only ever one of two (and the same in the contents modal).
 pub const SEARCH_KEYS: &[KeyRow<SearchKey>] = &[
     alias(ctrl('c'), SearchKey::Abort),
     shown(key(KeyCode::Up), SearchKey::Up, "↑", "move"),
@@ -362,7 +362,7 @@ pub const SEARCH_KEYS: &[KeyRow<SearchKey>] = &[
     alias(key(KeyCode::BackTab), SearchKey::Scope),
 ];
 
-/// Searching what was said in the sessions.
+/// Searching what was said in the sessions and in mux scrollback.
 pub const SEARCH_CONTENT_KEYS: &[KeyRow<SearchKey>] = &[
     alias(ctrl('c'), SearchKey::Abort),
     shown(key(KeyCode::Up), SearchKey::Up, "↑", "move"),
@@ -371,16 +371,13 @@ pub const SEARCH_CONTENT_KEYS: &[KeyRow<SearchKey>] = &[
     alias(ctrl('p'), SearchKey::Up),
     shown(key(KeyCode::Enter), SearchKey::Pick, "Enter", "open hit"),
     shown(key(KeyCode::Esc), SearchKey::Cancel, "Esc", "close"),
+    shown(key(KeyCode::Tab), SearchKey::Scope, "Tab", "current/all"),
+    alias(key(KeyCode::BackTab), SearchKey::Scope),
     shown(ctrl('r'), SearchKey::Results, "Ctrl-R", "results"),
     shown(ctrl('t'), SearchKey::Tools, "Ctrl-T", "tools"),
     shown(ctrl('y'), SearchKey::Thinking, "Ctrl-Y", "thinking"),
     shown(ctrl('f'), SearchKey::ApplyFilter, "Ctrl-F", "filter lists"),
-    shown(
-        ctrl('o'),
-        SearchKey::ApplyView,
-        "Ctrl-O",
-        "open Search view",
-    ),
+    shown(ctrl('s'), SearchKey::Keep, "Ctrl-S", "Search view"),
 ];
 
 // ---------------------------------------------------------------------

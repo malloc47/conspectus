@@ -350,6 +350,7 @@ fn content_filter(matched: &[(&str, &str)]) -> ContentFilter {
         complete: true,
         group: crate::viewer::search::Grouping::Session,
         details: Arc::default(),
+        panes: Arc::default(),
     }
 }
 

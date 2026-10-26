@@ -11,17 +11,18 @@
 use std::cmp::Ordering;
 use std::path::Path;
 
+use crate::content_search::{MAX_PANE_HITS_PER_ENTRY, PaneHits};
 use crate::filter::RowFilter;
-use crate::model::GraphSnapshot;
+use crate::model::{GraphSnapshot, MuxSessionId, NodeId};
 use crate::tui::{SearchGrouping, SessionsGrouping, Sort};
 use crate::viewer::model::TurnKind;
-use crate::viewer::search::{
-    Grouping, Hit, SessionHits, cmp_hits, cmp_hits_across_sessions, cmp_sessions,
-    cmp_sessions_by_recency,
-};
+use crate::viewer::search::{Grouping, Hit, SessionHits, cmp_hits, cmp_hits_across_sessions};
 
 use super::sessions::{SessionsBuildInputs, build_sessions_tree};
-use super::{GroupRow, HitOrigin, HitRow, Row, RowId, RowKind, RowTree, ViewLabel, format_recency};
+use super::{
+    GroupRow, HitOrigin, HitRow, PaneHitRow, PaneRow, Row, RowId, RowKind, RowTree, ViewLabel,
+    format_recency,
+};
 
 pub struct SearchBuildInputs<'a> {
     pub snapshot: &'a GraphSnapshot,
@@ -35,6 +36,10 @@ pub struct SearchBuildInputs<'a> {
 
 /// The bucket sessions with no known project fall into.
 pub const OTHER_BUCKET: &str = "Other";
+
+/// The bucket mux panes fall into under the project and harness
+/// groupings, which a pane has neither of.
+pub const PANES_BUCKET: &str = "Mux panes";
 
 /// The word a turn kind has in a hit row.
 pub fn kind_word(kind: TurnKind) -> &'static str {
@@ -83,7 +88,7 @@ pub fn build_search_tree(inputs: SearchBuildInputs<'_>) -> RowTree {
         cwd,
         filter,
     });
-    let mut entries: Vec<Entry> = flat
+    let mut items: Vec<Item> = flat
         .rows
         .into_iter()
         .filter(|row| matches!(row.kind, RowKind::AgentSession(_)))
@@ -102,45 +107,57 @@ pub fn build_search_tree(inputs: SearchBuildInputs<'_>) -> RowTree {
             } else {
                 Vec::new()
             };
-            Entry {
+            Item::Session(Entry {
                 row,
                 hits,
                 children,
                 detail_pending,
-            }
+            })
         })
         .collect();
-    entries.sort_by(|a, b| {
-        let order = match (&a.hits, &b.hits) {
+    items.extend(content.panes.iter().map(|pane| {
+        let children = if content.group == Grouping::Message {
+            pane_hit_rows(pane, now, false)
+        } else {
+            Vec::new()
+        };
+        Item::Pane(PaneEntry {
+            row: pane_row(pane, now),
+            hits: pane.clone(),
+            children,
+        })
+    }));
+    items.sort_by(|a, b| {
+        let order = match (a.rank(), b.rank()) {
             (Some(a), Some(b)) => match sort {
-                Sort::Hierarchy => cmp_sessions(a, b),
-                Sort::Recency => cmp_sessions_by_recency(a, b),
+                Sort::Hierarchy => a.cmp_relevance(&b),
+                Sort::Recency => a.cmp_recency(&b),
             },
             (Some(_), None) => Ordering::Less,
             (None, Some(_)) => Ordering::Greater,
             (None, None) => Ordering::Equal,
         };
-        order.then_with(|| session_key(&a.row).cmp(&session_key(&b.row)))
+        order.then_with(|| a.identity().cmp(&b.identity()))
     });
 
     if content.group == Grouping::Flat {
-        return build_flat(tree, &entries, &content.details, grouping, now);
+        return build_flat(tree, &items, &content.details, grouping, now);
     }
 
     match grouping {
         SearchGrouping::None => {
-            for entry in entries {
-                push_entry(&mut tree, entry, 0);
+            for item in items {
+                push_item(&mut tree, item, 0);
             }
         }
         SearchGrouping::Project | SearchGrouping::Harness => {
-            // Buckets appear in the order of their best-ranked session.
-            let mut buckets: Vec<(String, Vec<Entry>)> = Vec::new();
-            for entry in entries {
-                let label = bucket_label(&entry.row, grouping);
+            // Buckets appear in the order of their best-ranked result.
+            let mut buckets: Vec<(String, Vec<Item>)> = Vec::new();
+            for item in items {
+                let label = item.bucket(grouping);
                 match buckets.iter_mut().find(|(name, _)| *name == label) {
-                    Some((_, members)) => members.push(entry),
-                    None => buckets.push((label, vec![entry])),
+                    Some((_, members)) => members.push(item),
+                    None => buckets.push((label, vec![item])),
                 }
             }
             for (label, members) in buckets {
@@ -154,8 +171,8 @@ pub fn build_search_tree(inputs: SearchBuildInputs<'_>) -> RowTree {
                         is_launch_context: false,
                     }),
                 });
-                for entry in members {
-                    push_entry(&mut tree, entry, 1);
+                for item in members {
+                    push_item(&mut tree, item, 1);
                 }
             }
         }
@@ -164,20 +181,25 @@ pub fn build_search_tree(inputs: SearchBuildInputs<'_>) -> RowTree {
 }
 
 /// The flat listing: every matching turn of every session whose turns
-/// have been read, newest first. Sorting is by the turn's own time in
-/// both sorts (relevance has no meaning across sessions' individual
-/// messages); ties fall to the session and then the turn order. Under
-/// the project and harness groupings the turns sit under bucket headers
-/// ordered by their newest turn.
+/// have been read, and every matching line of every pane, newest first.
+/// Sorting is by the turn's own time in both sorts (relevance has no
+/// meaning across sessions' individual messages), and a pane's lines by
+/// the time its scrollback was read; ties fall to the session and then the
+/// turn order, and to sessions before panes. Under the project and
+/// harness groupings the rows sit under bucket headers ordered by their
+/// newest row.
 fn build_flat(
     mut tree: RowTree,
-    entries: &[Entry],
+    items: &[Item],
     details: &crate::filter::ContentDetailMap,
     grouping: SearchGrouping,
     now: Option<i64>,
 ) -> RowTree {
     let mut all: Vec<((String, String), usize, &Hit)> = Vec::new();
-    for (index, entry) in entries.iter().enumerate() {
+    for (index, item) in items.iter().enumerate() {
+        let Item::Session(entry) = item else {
+            continue;
+        };
         if entry.hits.is_none() {
             continue;
         }
@@ -188,14 +210,37 @@ fn build_flat(
     }
     all.sort_by(|a, b| cmp_hits_across_sessions((&a.0, a.2), (&b.0, b.2)));
 
-    let mut buckets: Vec<(String, Vec<Row>)> = Vec::new();
+    // Each row with its time and the item it came from. Sessions' turns
+    // keep their sorted order; a pane's lines go in as a block before the
+    // first row older than the capture.
+    let mut placed: Vec<(Option<i64>, usize, Row)> = Vec::new();
     for (_, index, hit) in all {
-        let Some(row) = flat_hit_row(&entries[index].row, hit, now) else {
+        let Item::Session(entry) = &items[index] else {
             continue;
         };
+        let Some(row) = flat_hit_row(&entry.row, hit, now) else {
+            continue;
+        };
+        placed.push((hit.timestamp.map(|t| t.timestamp()), index, row));
+    }
+    for (index, item) in items.iter().enumerate() {
+        let Item::Pane(entry) = item else {
+            continue;
+        };
+        let time = Some(entry.hits.captured_at);
+        let at = placed
+            .iter()
+            .position(|(other, ..)| *other < time)
+            .unwrap_or(placed.len());
+        let rows = pane_hit_rows(&entry.hits, now, true);
+        placed.splice(at..at, rows.into_iter().map(|row| (time, index, row)));
+    }
+
+    let mut buckets: Vec<(String, Vec<Row>)> = Vec::new();
+    for (_, index, row) in placed {
         let label = match grouping {
             SearchGrouping::None => String::new(),
-            _ => bucket_label(&entries[index].row, grouping),
+            _ => items[index].bucket(grouping),
         };
         match buckets.iter_mut().find(|(name, _)| *name == label) {
             Some((_, rows)) => rows.push(row),
@@ -254,6 +299,99 @@ struct Entry {
     detail_pending: bool,
 }
 
+/// A pane row with its matching lines.
+struct PaneEntry {
+    row: Row,
+    hits: PaneHits,
+    children: Vec<Row>,
+}
+
+/// One ranked result of the Search view: a session or a pane.
+enum Item {
+    Session(Entry),
+    Pane(PaneEntry),
+}
+
+/// What results are ranked by, whichever source they come from.
+struct Rank {
+    count: usize,
+    time: Option<i64>,
+    pane: bool,
+}
+
+impl Rank {
+    /// More matches first, then the newer, then sessions before panes.
+    fn cmp_relevance(&self, other: &Self) -> Ordering {
+        other
+            .count
+            .cmp(&self.count)
+            .then_with(|| other.time.cmp(&self.time))
+            .then_with(|| self.pane.cmp(&other.pane))
+    }
+
+    /// The newer first, then more matches, then sessions before panes.
+    fn cmp_recency(&self, other: &Self) -> Ordering {
+        other
+            .time
+            .cmp(&self.time)
+            .then_with(|| other.count.cmp(&self.count))
+            .then_with(|| self.pane.cmp(&other.pane))
+    }
+}
+
+impl Item {
+    fn rank(&self) -> Option<Rank> {
+        match self {
+            Self::Session(entry) => entry.hits.as_ref().map(|hits| Rank {
+                count: hits.count,
+                time: hits.latest.map(|t| t.timestamp()),
+                pane: false,
+            }),
+            Self::Pane(entry) => Some(Rank {
+                count: entry.hits.count,
+                time: Some(entry.hits.captured_at),
+                pane: true,
+            }),
+        }
+    }
+
+    /// A tie-breaking key: the session's, or the pane's mux and id.
+    fn identity(&self) -> (String, String) {
+        match self {
+            Self::Session(entry) => session_key(&entry.row),
+            Self::Pane(entry) => (
+                entry.hits.pane.mux.native_id(),
+                entry.hits.pane.pane_id.clone(),
+            ),
+        }
+    }
+
+    fn bucket(&self, grouping: SearchGrouping) -> String {
+        match self {
+            Self::Session(entry) => bucket_label(&entry.row, grouping),
+            Self::Pane(_) => PANES_BUCKET.to_string(),
+        }
+    }
+}
+
+fn push_item(tree: &mut RowTree, item: Item, depth: u8) {
+    match item {
+        Item::Session(entry) => push_entry(tree, entry, depth),
+        Item::Pane(entry) => {
+            let PaneEntry {
+                mut row, children, ..
+            } = entry;
+            row.depth = depth;
+            row.expandable = !children.is_empty();
+            tree.rows.push(row);
+            for mut child in children {
+                child.depth = depth.saturating_add(1);
+                tree.rows.push(child);
+            }
+        }
+    }
+}
+
 fn push_entry(tree: &mut RowTree, entry: Entry, depth: u8) {
     let Entry {
         mut row,
@@ -284,6 +422,73 @@ fn bucket_label(row: &Row, grouping: SearchGrouping) -> String {
             .filter(|project| !project.is_empty())
             .unwrap_or_else(|| OTHER_BUCKET.to_string()),
     }
+}
+
+/// The node of a pane's mux in the graph.
+fn mux_node(pane: &PaneHits) -> NodeId {
+    NodeId::MuxSession(MuxSessionId::new(pane.pane.mux.native_id()))
+}
+
+/// How long ago a pane's scrollback was read.
+fn pane_age(pane: &PaneHits, now: Option<i64>) -> String {
+    format_recency(now, Some(pane.captured_at))
+        .unwrap_or_else(|| crate::tui::icons::marks::NO_VALUE.to_string())
+}
+
+/// A pane's row: where a session row would be.
+fn pane_row(pane: &PaneHits, now: Option<i64>) -> Row {
+    let newest = pane.hits.last();
+    Row {
+        id: RowId::Pane {
+            mux: mux_node(pane),
+            pane: pane.pane.pane_id.clone(),
+        },
+        depth: 0,
+        expandable: false,
+        kind: RowKind::Pane(PaneRow {
+            pane: pane.pane.clone(),
+            mux_label: pane.pane.mux.session.clone(),
+            location: format!("{}.{}", pane.pane.window_index, pane.pane.pane_index),
+            command: pane.pane.command.clone(),
+            count: pane.count,
+            deduplicated: pane.deduplicated,
+            age: pane_age(pane, now),
+            line: newest.map_or(1, |hit| hit.line),
+            snippet: newest.map(|hit| hit.snippet.clone()).unwrap_or_default(),
+            highlight: newest.map_or(0..0, |hit| hit.highlight.clone()),
+        }),
+    }
+}
+
+/// The rows for a pane's kept matching lines, the lowest in the
+/// scrollback (the newest) first. A flat row names its pane.
+fn pane_hit_rows(pane: &PaneHits, now: Option<i64>, flat: bool) -> Vec<Row> {
+    debug_assert!(pane.hits.len() <= MAX_PANE_HITS_PER_ENTRY);
+    let origin = format!(
+        "{} {}.{}",
+        pane.pane.mux.session, pane.pane.window_index, pane.pane.pane_index
+    );
+    pane.hits
+        .iter()
+        .rev()
+        .map(|hit| Row {
+            id: RowId::PaneHit {
+                mux: mux_node(pane),
+                pane: pane.pane.pane_id.clone(),
+                line: hit.line,
+            },
+            depth: 0,
+            expandable: false,
+            kind: RowKind::PaneHit(PaneHitRow {
+                pane: pane.pane.clone(),
+                origin: flat.then(|| origin.clone()),
+                line: hit.line,
+                age: pane_age(pane, now),
+                snippet: hit.snippet.clone(),
+                highlight: hit.highlight.clone(),
+            }),
+        })
+        .collect()
 }
 
 /// The rows for a session's matching turns, newest first.

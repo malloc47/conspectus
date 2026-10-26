@@ -23,6 +23,7 @@ fn ctx_with(view: View, grouping: Grouping, filter: &RowFilter, sort: Sort) -> C
         content: None,
         search_kinds: crate::viewer::search::ContentKinds::default(),
         content_group: crate::viewer::search::Grouping::Session,
+        search_history: None,
     }
 }
 

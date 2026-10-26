@@ -195,6 +195,9 @@ pub struct PaneSource {
     attribution: Attribution,
     /// Epoch seconds recorded as the capture time of every hit.
     captured_at: i64,
+    /// Search only the panes of these muxes (graph ids); `None` searches
+    /// every pane on the listed servers.
+    only: Option<BTreeSet<String>>,
 }
 
 impl PaneSource {
@@ -208,7 +211,15 @@ impl PaneSource {
             sockets,
             attribution,
             captured_at: crate::discovery::current_epoch(),
+            only: None,
         }
+    }
+
+    /// Search only the panes of the muxes with these graph ids.
+    #[must_use]
+    pub fn only_muxes(mut self, muxes: BTreeSet<String>) -> Self {
+        self.only = Some(muxes);
+        self
     }
 
     /// Fix the capture time, for tests.
@@ -233,6 +244,9 @@ impl PaneSource {
                 Ok(TmuxOutcome::Unavailable(_)) => {}
                 Ok(TmuxOutcome::Failed { .. }) | Err(_) => failed += 1,
             }
+        }
+        if let Some(only) = &self.only {
+            panes.retain(|listed| only.contains(&listed.pane.mux.native_id()));
         }
         (panes, failed)
     }

@@ -21,9 +21,9 @@ impl App {
                 .map(|content| (content.text.as_str(), content.status, content.hits().len())),
             search_kinds: self.config.search.kinds,
             content_group: self
-                .content
-                .as_ref()
-                .map_or(self.config.search.group, |content| content.group),
+                .viewed_search()
+                .map_or(self.config.search.group, |viewed| viewed.group),
+            search_history: self.search_history.position(),
         }
     }
 }

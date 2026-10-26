@@ -169,7 +169,7 @@ fn a_departure_from_the_convention_gives_its_reason() {
 }
 
 #[test]
-fn quick_select_switches_reach_with_tab_and_shift_tab_and_content_mode_has_no_tab() {
+fn both_search_modals_switch_reach_with_tab_and_shift_tab() {
     use crate::tui::keybindings::overlay::{SearchKey, footer};
     assert_eq!(
         resolve(SEARCH_KEYS, press(KeyCode::Tab)),
@@ -182,7 +182,19 @@ fn quick_select_switches_reach_with_tab_and_shift_tab_and_content_mode_has_no_ta
         ),
         Some(SearchKey::Scope)
     );
-    assert_eq!(resolve(SEARCH_CONTENT_KEYS, press(KeyCode::Tab)), None);
+    // The contents modal switches the same way and offers the same words.
+    assert_eq!(
+        resolve(SEARCH_CONTENT_KEYS, press(KeyCode::Tab)),
+        Some(SearchKey::Scope)
+    );
+    assert_eq!(
+        resolve(
+            SEARCH_CONTENT_KEYS,
+            KeyEvent::new(KeyCode::BackTab, KeyModifiers::SHIFT)
+        ),
+        Some(SearchKey::Scope)
+    );
+    assert!(footer(SEARCH_CONTENT_KEYS).contains("Tab current/all"));
     // The hints are generated from the table, in the operator's words.
     let hints = footer(SEARCH_KEYS);
     for expected in ["Tab current/all", "Enter pick", "Esc close", "↑/↓ move"] {

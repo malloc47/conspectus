@@ -578,6 +578,7 @@ impl FilterArgs {
             complete: true,
             group: crate::viewer::search::Grouping::Session,
             details: std::sync::Arc::default(),
+            panes: std::sync::Arc::default(),
         })
     }
 

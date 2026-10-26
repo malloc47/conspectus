@@ -269,6 +269,8 @@ pub enum SelectedDefault {
     Attach,
     /// Un-muxed agent session — `Enter` opens the transcript viewer.
     View,
+    /// Pane row of the Search view — `Enter` opens its scrollback.
+    Scrollback,
 }
 
 /// Classify what `Enter` on the left pane should do for the
@@ -327,5 +329,7 @@ pub fn selected_default_action(app: &App) -> SelectedDefault {
         RowKind::Mixed(_) => SelectedDefault::ToggleExpand,
         // A matching turn opens the viewer at that turn.
         RowKind::Hit(_) => SelectedDefault::View,
+        // A matching pane line opens the scrollback at that line.
+        RowKind::Pane(_) | RowKind::PaneHit(_) => SelectedDefault::Scrollback,
     }
 }

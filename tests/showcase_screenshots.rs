@@ -237,18 +237,30 @@ fn the_search_overlay_searches_contents_and_promotes_the_query() {
     assert!(wide.contains("Current [ All ]"), "{wide}");
 
     let contents = frame(scratch.path(), "srelease summary");
-    assert!(
-        contents.contains("search contents (1 result)"),
-        "{contents}"
-    );
+    assert!(contents.contains("search contents"), "{contents}");
+    assert!(contents.contains("[ Current ] All"), "{contents}");
+    assert!(contents.contains("(1 result)"), "{contents}");
     assert!(contents.contains("2 hits"), "{contents}");
-    assert!(contents.contains("Ctrl-F filter lists"), "{contents}");
+    // The footer wraps, so look for the keys rather than whole phrases.
+    assert!(contents.contains("Ctrl-F filter"), "{contents}");
+    assert!(contents.contains("Ctrl-S Search"), "{contents}");
     assert!(contents.contains("sessions searched"), "{contents}");
 
-    // Esc leaves everything as it was: no filter, no chip.
+    // Ctrl-/ opens it too, as the three keys terminals send for it.
+    for open in ["<C-/>", "<C-7>", "<C-_>"] {
+        let opened = frame(scratch.path(), open);
+        assert!(opened.contains("/ search contents"), "{open}: {opened}");
+    }
+
+    // Esc leaves the lists as they were: no filter, no chip. The search
+    // is still kept in the Search view.
     let closed = frame(scratch.path(), "srelease summary<Esc>");
     assert!(!closed.contains("find:"), "{closed}");
     assert!(closed.contains("11 sessions"), "{closed}");
+    let kept = frame(scratch.path(), "srelease summary<Esc>6");
+    assert!(kept.contains("search 1/1 \"release summary\""), "{kept}");
+    assert!(kept.contains("2 hits"), "{kept}");
+    assert!(!kept.contains("filtering"), "{kept}");
 
     // Ctrl-F keeps the query as the filter on the lists.
     let filtered = frame(scratch.path(), "srelease summary<C-f>");
@@ -259,11 +271,70 @@ fn the_search_overlay_searches_contents_and_promotes_the_query() {
     assert!(filtered.contains("1/11 sessions"), "{filtered}");
     assert!(!filtered.contains("search contents"), "closes the overlay");
 
-    // Ctrl-O keeps it and opens the Search view.
-    let view = frame(scratch.path(), "srelease summary<C-o>");
-    assert!(view.contains("find:\"release summary\""), "{view}");
+    // Ctrl-S keeps it in the Search view, without filtering the lists.
+    let view = frame(scratch.path(), "srelease summary<C-s>");
+    assert!(view.contains("search 1/1 \"release summary\""), "{view}");
     assert!(view.contains("2 hits"), "{view}");
-    assert!(view.contains("search"), "{view}");
+    assert!(!view.contains("find:"), "{view}");
+    assert!(
+        !view.contains("search contents"),
+        "closes the modal: {view}"
+    );
+
+    // Ctrl-F in the Search view then filters the lists by what it shows.
+    let applied = frame(scratch.path(), "srelease summary<C-s><C-f>");
+    assert!(applied.contains("filtering"), "{applied}");
+    let sessions = frame(scratch.path(), "srelease summary<C-s><C-f>1");
+    assert!(sessions.contains("1/11 sessions"), "{sessions}");
+}
+
+/// Content search reads mux scrollback as well as transcripts, and Tab
+/// switches between the muxes the view lists and all of them.
+#[test]
+fn content_search_reads_pane_scrollback_and_tab_widens_it() {
+    let scratch = tempfile::tempdir().expect("scratch");
+    conspectus(scratch.path())
+        .args(["dev", "scenario", "materialize", "showcase"])
+        .arg(scratch.path().join("world"))
+        .assert()
+        .success();
+
+    // The Sessions view lists no muxes, so its panes are not searched.
+    let sessions = frame(scratch.path(), "<C-/>feature");
+    assert!(!sessions.contains("project 0.0"), "{sessions}");
+
+    // The Mux view lists the muxes; the `project` pane has the text.
+    let mux = frame(scratch.path(), "2<C-/>feature");
+    assert!(mux.contains("[ Current ] All"), "{mux}");
+    assert!(
+        mux.lines()
+            .any(|l| l.contains("pane") && l.contains("project 0.0")),
+        "{mux}"
+    );
+    assert!(
+        !mux.lines()
+            .any(|l| l.contains("session") && l.contains("claude-code in project")),
+        "the Mux view lists no sessions: {mux}"
+    );
+
+    // All reads the sessions too.
+    let all = frame(scratch.path(), "2<C-/>feature<Tab>");
+    assert!(all.contains("Current [ All ]"), "{all}");
+    assert!(
+        all.lines()
+            .any(|l| l.contains("session") && l.contains("claude-code in project")),
+        "{all}"
+    );
+    assert!(all.contains("sessions and panes searched"), "{all}");
+
+    // The Search view lists the pane as a row of its own.
+    let view = frame(scratch.path(), "2<C-/>feature<Tab><C-s>");
+    assert!(view.contains("search 1/1 \"feature\""), "{view}");
+    assert!(
+        view.lines()
+            .any(|l| l.contains("project") && l.contains("0.0") && l.contains("zsh")),
+        "{view}"
+    );
 }
 
 /// Enter on a contents result opens the viewer on the matching turn with

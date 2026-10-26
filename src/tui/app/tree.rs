@@ -279,7 +279,7 @@ pub(super) fn row_matches(row: &crate::tui::rows::Row, target: &NodeId) -> bool 
         RowKind::Pr(p) => &p.primary_node == target,
         RowKind::Fork(f) => &f.primary_node == target,
         RowKind::Mixed(m) => &m.primary_node == target,
-        RowKind::Hit(_) => false,
+        RowKind::Hit(_) | RowKind::Pane(_) | RowKind::PaneHit(_) => false,
     }
 }
 

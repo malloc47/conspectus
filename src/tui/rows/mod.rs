@@ -70,6 +70,18 @@ pub enum RowId {
         session: NodeId,
         turn: usize,
     },
+    /// A mux pane whose scrollback matched, in the Search view (ADR 0149):
+    /// the mux's node and the pane's server-wide id.
+    Pane {
+        mux: NodeId,
+        pane: String,
+    },
+    /// One matching line of a pane's scrollback.
+    PaneHit {
+        mux: NodeId,
+        pane: String,
+        line: usize,
+    },
     /// A named bucket of a view that groups by something other than a
     /// node: the project or kind buckets of the Pinned view.
     Bucket(String),
@@ -150,6 +162,51 @@ pub enum RowKind {
     /// One matching turn of a session in the Search view's per-message
     /// grouping.
     Hit(HitRow),
+    /// A mux pane whose scrollback matched, in the Search view.
+    Pane(PaneRow),
+    /// One matching line of a pane's scrollback.
+    PaneHit(PaneHitRow),
+}
+
+/// A mux pane whose scrollback matched the search, drawn where a session
+/// row would be.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct PaneRow {
+    pub pane: crate::content_search::PaneRef,
+    /// The mux's name.
+    pub mux_label: String,
+    /// `window.pane`, such as `0.1`.
+    pub location: String,
+    /// What the pane was running when it was listed.
+    pub command: Option<String>,
+    /// Matching lines after deduplication.
+    pub count: usize,
+    /// Lines left out because the pane's session already says them.
+    pub deduplicated: usize,
+    /// How long ago the scrollback was read.
+    pub age: String,
+    /// The newest matching line's position in the scrollback, from 1.
+    pub line: usize,
+    /// The newest matching line, cropped around the match.
+    pub snippet: String,
+    /// Byte range of the match inside `snippet`.
+    pub highlight: std::ops::Range<usize>,
+}
+
+/// A matching line of a pane's scrollback: under its pane row, or on its
+/// own in the flat listing.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct PaneHitRow {
+    pub pane: crate::content_search::PaneRef,
+    /// The mux's name and the pane's `window.pane`, set only for a flat
+    /// row.
+    pub origin: Option<String>,
+    /// The line's position in the scrollback, from 1.
+    pub line: usize,
+    /// How long ago the scrollback was read.
+    pub age: String,
+    pub snippet: String,
+    pub highlight: std::ops::Range<usize>,
 }
 
 /// The session a hit row belongs to, named on the row itself when the
@@ -878,7 +935,8 @@ pub(crate) fn row_node(id: &RowId) -> Option<&NodeId> {
         | RowId::MuxSession(node)
         | RowId::Pr(node)
         | RowId::Fork(node)
-        | RowId::Nested { node, .. } => Some(node),
+        | RowId::Nested { node, .. }
+        | RowId::Pane { mux: node, .. } => Some(node),
         _ => None,
     }
 }
@@ -1126,9 +1184,15 @@ impl<'a> TreeInputs<'a> {
             grouping: app.grouping(),
             filter: {
                 // The content search belongs to the whole app, not to a
-                // view's saved filter, so it joins here.
+                // view's saved filter, so it joins here. The Search view
+                // lists the search it is showing, which may not be the one
+                // filtering the lists.
                 let mut filter = app.filter().clone();
-                filter.content = app.content_filter();
+                filter.content = if app.active_view() == View::Search {
+                    app.viewed_content_filter()
+                } else {
+                    app.content_filter()
+                };
                 filter
             },
             sort: app.sort(),

@@ -1,8 +1,9 @@
 //! Runs the content search scans the reducer asks for.
 //!
 //! The reducer leaves a [`ScanRequest`] on the app; the live loop starts
-//! it on worker threads and folds what comes back into
-//! [`Msg::ContentHits`] at most every [`FLUSH_EVERY`], so a scan that
+//! it on worker threads (session transcripts, and mux pane scrollback when
+//! the request asks) and folds what comes back into [`Msg::ContentPanes`]
+//! and [`Msg::ContentHits`] at most every [`FLUSH_EVERY`], so a scan that
 //! finds many sessions does not rebuild the tree for each one. Modes
 //! with no event loop of their own (snapshots, tests) scan to completion
 //! on the calling thread.
@@ -17,12 +18,14 @@ use std::thread::JoinHandle;
 use std::sync::Arc;
 
 #[cfg(any(test, debug_assertions, feature = "snapshot"))]
-use crate::content_search::scan_blocking;
+use crate::content_search::search_blocking;
 use crate::content_search::{
-    CancelToken, Polled, Progress, ScanEvent, ScanHandle, ScanOptions, ScanSession, SessionKey,
-    hits_for, plan_sessions, scan,
+    Attribution, CancelToken, ContentEvent, ContentHandle, ContentPolled, ContentResult,
+    ContentSource, PaneHits, PaneSource, Progress, ScanOptions, ScanSession, SessionKey,
+    SessionSource, attribute_panes, hits_for, plan_sessions, search, sockets_in,
 };
-use crate::tui::app::{App, DetailRequest, Msg, ScanRequest};
+use crate::discovery::tmux::MuxBackend;
+use crate::tui::app::{App, DetailRequest, Msg, PaneScope, ScanRequest};
 use crate::viewer::search::{ContentQuery, Hit, SessionHits};
 
 /// The longest results wait before they reach the screen.
@@ -30,7 +33,7 @@ pub(super) const FLUSH_EVERY: Duration = Duration::from_millis(150);
 
 /// What a running scan has to say.
 pub(super) enum Poll {
-    Event(ScanEvent),
+    Event(Box<ContentEvent>),
     /// Nothing yet; the scan is still running.
     Empty,
     /// The scan's threads are gone and nothing more will come.
@@ -43,12 +46,12 @@ pub(super) trait EventSource {
     fn poll(&mut self) -> Poll;
 }
 
-impl EventSource for ScanHandle {
+impl EventSource for ContentHandle {
     fn poll(&mut self) -> Poll {
-        match ScanHandle::poll(self) {
-            Polled::Event(event) => Poll::Event(event),
-            Polled::Empty => Poll::Empty,
-            Polled::Ended => Poll::Disconnected,
+        match ContentHandle::poll(self) {
+            ContentPolled::Event(event) => Poll::Event(event),
+            ContentPolled::Empty => Poll::Empty,
+            ContentPolled::Ended => Poll::Disconnected,
         }
     }
 }
@@ -64,11 +67,16 @@ pub(super) struct ContentDriver {
     pub(super) details: Option<DetailActive>,
     /// Replaces [`hits_for`] for the detail reads; `None` outside tests.
     pub(super) detail_reader: Option<DetailReader>,
+    /// Reads the scrollback of mux panes; without one a request for panes
+    /// searches the sessions only.
+    pub(super) pane_backend: Option<Arc<dyn MuxBackend>>,
 }
 
 /// The read of matching turns for the per-message grouping.
 pub(super) struct DetailActive {
     generation: u64,
+    /// Set when the turns are for a remembered search.
+    serial: Option<u64>,
     cancel: CancelToken,
     events: Receiver<(SessionKey, Vec<Hit>)>,
     last_flush: Instant,
@@ -89,11 +97,40 @@ pub(super) struct Active {
     handle: Box<dyn EventSource + Send>,
     last_flush: Instant,
     batch: Vec<(SessionKey, SessionHits)>,
+    pane_batch: Vec<PaneHits>,
     progress: Progress,
     done: bool,
 }
 
+/// What a scan of mux panes needs from the app: the servers to ask and
+/// the sessions each mux hosts, for deduplication.
+fn pane_source(
+    app: &App,
+    backend: &Arc<dyn MuxBackend>,
+    scope: &PaneScope,
+) -> Option<Box<dyn ContentSource>> {
+    let handle = app.snapshot_handle()?;
+    let snapshot = handle.snapshot();
+    let attribution: Attribution = attribute_panes(snapshot);
+    // Ages are drawn against the same clock as the rows, which snapshot
+    // mode freezes.
+    let source = PaneSource::new(Arc::clone(backend), sockets_in(snapshot), attribution)
+        .at(crate::tui::rows::tree_current_unix_epoch());
+    Some(Box::new(match &scope.muxes {
+        Some(muxes) => source.only_muxes(muxes.clone()),
+        None => source,
+    }))
+}
+
 impl ContentDriver {
+    /// A driver that reads pane scrollback through tmux.
+    pub(super) fn live() -> Self {
+        Self {
+            pane_backend: Some(Arc::new(crate::discovery::tmux::SystemTmux::new())),
+            ..Self::default()
+        }
+    }
+
     /// Start a requested scan, stop one the app no longer wants, and
     /// deliver what the running one has found.
     pub(super) fn pump(&mut self, app: &mut App) {
@@ -108,7 +145,12 @@ impl ContentDriver {
         if self.active.is_none()
             && let Some(request) = app.take_scan_request()
         {
-            self.active = Some(start(&request));
+            let panes = request
+                .panes
+                .as_ref()
+                .zip(self.pane_backend.as_ref())
+                .and_then(|(scope, backend)| pane_source(app, backend, scope));
+            self.active = Some(start(&request, panes));
         }
         let Some(active) = &mut self.active else {
             return;
@@ -116,12 +158,17 @@ impl ContentDriver {
         loop {
             match active.handle.poll() {
                 Poll::Event(event) if event.generation() != active.generation => {}
-                Poll::Event(ScanEvent::Progress { progress, .. }) => active.progress = progress,
-                Poll::Event(ScanEvent::Session { key, hits, .. }) => active.batch.push((key, hits)),
-                Poll::Event(ScanEvent::Done { progress, .. }) => {
-                    active.progress = progress;
-                    active.done = true;
-                }
+                Poll::Event(event) => match *event {
+                    ContentEvent::Progress { progress, .. } => active.progress = progress,
+                    ContentEvent::Result { result, .. } => match result {
+                        ContentResult::Session { key, hits } => active.batch.push((key, hits)),
+                        ContentResult::Pane(pane) => active.pane_batch.push(pane),
+                    },
+                    ContentEvent::Done { progress, .. } => {
+                        active.progress = progress;
+                        active.done = true;
+                    }
+                },
                 Poll::Empty => break,
                 // A scan whose threads died without saying so (a parser
                 // panicked) is over: finish what it found instead of
@@ -135,7 +182,14 @@ impl ContentDriver {
         if active.done || active.last_flush.elapsed() >= FLUSH_EVERY {
             active.last_flush = Instant::now();
             let batch = std::mem::take(&mut active.batch);
+            let panes = std::mem::take(&mut active.pane_batch);
             let (generation, progress, done) = (active.generation, active.progress, active.done);
+            if !panes.is_empty() {
+                app.update(Msg::ContentPanes {
+                    generation,
+                    batch: panes,
+                });
+            }
             if done || !batch.is_empty() || progress.scanned > 0 {
                 app.update(Msg::ContentHits {
                     generation,
@@ -156,7 +210,7 @@ impl ContentDriver {
     /// off the UI thread, and hand them over in batches.
     fn pump_details(&mut self, app: &mut App) {
         if let Some(active) = &self.details
-            && app.content_generation() != Some(active.generation)
+            && app.detail_target() != Some((active.generation, active.serial))
         {
             self.details = None;
         }
@@ -183,9 +237,12 @@ impl ContentDriver {
             active.last_flush = Instant::now();
             let batch = std::mem::take(&mut active.batch);
             if !batch.is_empty() {
-                app.update(Msg::ContentDetails {
-                    generation: active.generation,
-                    batch,
+                app.update(match active.serial {
+                    Some(serial) => Msg::HistoryDetails { serial, batch },
+                    None => Msg::ContentDetails {
+                        generation: active.generation,
+                        batch,
+                    },
                 });
             }
         }
@@ -218,6 +275,7 @@ fn start_details(request: DetailRequest, reader: Option<DetailReader>) -> Detail
     });
     DetailActive {
         generation: request.generation,
+        serial: request.serial,
         cancel,
         events,
         last_flush: Instant::now(),
@@ -226,11 +284,14 @@ fn start_details(request: DetailRequest, reader: Option<DetailReader>) -> Detail
     }
 }
 
-fn start(request: &ScanRequest) -> Active {
+fn start(request: &ScanRequest, panes: Option<Box<dyn ContentSource>>) -> Active {
     let plan = plan_sessions(&request.sessions);
     let query = ContentQuery::new(request.text.clone(), request.kinds);
-    let handle = scan(
-        plan.sessions,
+    let mut sources: Vec<Box<dyn ContentSource>> =
+        vec![Box::new(SessionSource::new(plan.sessions))];
+    sources.extend(panes);
+    let handle = search(
+        sources,
         query,
         ScanOptions {
             generation: request.generation,
@@ -242,6 +303,7 @@ fn start(request: &ScanRequest) -> Active {
         handle: Box::new(handle),
         last_flush: Instant::now(),
         batch: Vec::new(),
+        pane_batch: Vec::new(),
         progress: Progress::default(),
         done: false,
     }
@@ -255,6 +317,17 @@ fn start(request: &ScanRequest) -> Active {
 /// does when snapshot mode opens a transcript.
 #[cfg(any(test, debug_assertions, feature = "snapshot"))]
 pub(in crate::tui) fn run_blocking(app: &mut App, rebase: Option<(&Path, &Path)>) {
+    run_blocking_with(app, rebase, None);
+}
+
+/// [`run_blocking`] reading pane scrollback through `panes`; without a
+/// backend a request for panes searches the sessions only.
+#[cfg(any(test, debug_assertions, feature = "snapshot"))]
+pub(in crate::tui) fn run_blocking_with(
+    app: &mut App,
+    rebase: Option<(&Path, &Path)>,
+    panes: Option<&Arc<dyn MuxBackend>>,
+) {
     while let Some(mut request) = app.take_scan_request() {
         if let Some((from, to)) = rebase {
             for id in &mut request.sessions {
@@ -265,18 +338,41 @@ pub(in crate::tui) fn run_blocking(app: &mut App, rebase: Option<(&Path, &Path)>
         }
         let plan = plan_sessions(&request.sessions);
         let query = ContentQuery::new(request.text.clone(), request.kinds);
-        let summary = scan_blocking(
-            &plan.sessions,
-            &query,
+        let mut sources: Vec<Box<dyn ContentSource>> =
+            vec![Box::new(SessionSource::new(plan.sessions))];
+        sources.extend(
+            request
+                .panes
+                .as_ref()
+                .zip(panes)
+                .and_then(|(scope, backend)| pane_source(app, backend, scope)),
+        );
+        let summary = search_blocking(
+            sources,
+            query,
             ScanOptions {
                 generation: request.generation,
                 ..ScanOptions::default()
             },
             &CancelToken::new(),
         );
+        let mut sessions = Vec::new();
+        let mut found_panes = Vec::new();
+        for result in summary.results {
+            match result {
+                ContentResult::Session { key, hits } => sessions.push((key, hits)),
+                ContentResult::Pane(pane) => found_panes.push(pane),
+            }
+        }
+        if !found_panes.is_empty() {
+            app.update(Msg::ContentPanes {
+                generation: request.generation,
+                batch: found_panes,
+            });
+        }
         app.update(Msg::ContentHits {
             generation: request.generation,
-            batch: summary.results,
+            batch: sessions,
             progress: summary.progress,
             done: true,
         });
@@ -302,9 +398,12 @@ fn run_details_blocking(app: &mut App, rebase: Option<(&Path, &Path)>) {
             .iter()
             .map(|session| (session.key.clone(), hits_for(session, &query)))
             .collect();
-        app.update(Msg::ContentDetails {
-            generation: details.generation,
-            batch,
+        app.update(match details.serial {
+            Some(serial) => Msg::HistoryDetails { serial, batch },
+            None => Msg::ContentDetails {
+                generation: details.generation,
+                batch,
+            },
         });
     }
 }

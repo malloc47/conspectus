@@ -189,6 +189,7 @@ pub fn subject_of_row(app: &App, id: &RowId) -> Subject {
             pin: None,
         },
         RowId::Hit { session, .. } => subject_of_node(app, session),
+        RowId::PaneHit { mux, .. } => subject_of_node(app, mux),
         other => crate::tui::rows::row_node(other)
             .map(|node| subject_of_node(app, node))
             .unwrap_or_default(),
@@ -341,14 +342,14 @@ fn viewer_session_for(snapshot: &GraphSnapshot, node: &NodeId) -> Option<AgentSe
 
 /// Where the viewer opens for the selected row of the Search view: the
 /// session's best hit, or the hit row's own turn. `None` outside the
-/// Search view, with the right pane focused, or without an active
-/// search.
+/// Search view, with the right pane focused, or without a search to
+/// show.
 pub fn viewer_open_target(app: &App) -> Option<(AgentSessionId, crate::viewer::state::ViewerOpen)> {
     if app.active_view() != crate::tui::View::Search || app.focus() != crate::tui::app::Focus::Left
     {
         return None;
     }
-    let content = app.content()?;
+    let content = app.viewed_search()?;
     let (node, turn_index) = match app.selection()? {
         RowId::Hit { session, turn } => (session, *turn),
         RowId::AgentSession(node @ NodeId::AgentSession(id)) => {

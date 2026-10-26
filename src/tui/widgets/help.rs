@@ -416,11 +416,19 @@ fn keymap_sections() -> Vec<HelpSection> {
                 ),
                 Binding::new(
                     "/ then Tab",
-                    "Find anything, whichever view it lives in; the word at the right says whether Enter selects it here, follows its relationships in the right pane, or switches views",
+                    "Find anything, whichever view it lives in (Tab again goes back to this view); the word at the right says whether Enter selects it here, follows its relationships in the right pane, or switches views",
                 ),
                 Binding::new(
-                    "s",
-                    "Search what was said in every session; Ctrl-R cycles results per session, per matching turn, and flat (turns only, newest first), Ctrl-F keeps the query as a filter on the lists, Ctrl-O also opens the Search view",
+                    "Ctrl-/ (or Ctrl-_ / Ctrl-7) / s",
+                    "Search contents: what was said in the sessions and what is in mux scrollback, in this view's sessions and muxes (Tab searches all of them). Ctrl-R cycles results per session, per matching turn, and flat (newest first); Ctrl-T and Ctrl-Y add tool and thinking content; Ctrl-S keeps the search in the Search view and goes there; Ctrl-F keeps the query as a filter on the lists. `s` works in every terminal",
+                ),
+                Binding::new(
+                    "< / >",
+                    "Search view: show the previous (older) or next (newer) remembered search without searching again; Controls lists them",
+                ),
+                Binding::new(
+                    "Ctrl-F",
+                    "Search view: keep the search shown as the filter on the lists (paging does not change the filter; F clears it)",
                 ),
             ],
         },

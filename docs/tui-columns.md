@@ -529,22 +529,43 @@ Every row is drawn as a ghost, with the same columns as a pin row.
 
 ## Search view
 
-Reached with `6`; `s` there opens a prompt for the query. It lists the
-sessions that match the content search (the same query that narrows the
-Sessions, Mux, and PRs views; see the Content paragraph under the Sessions
-view). With no query it says to press `s`; while the scan runs it says how
-far it has got; it is off when live preview is disabled.
+Reached with `6`. It shows one of the content searches the process
+remembers (the last ten; `[search] history` sets how many): the sessions,
+and the mux panes, that matched a query typed in the contents modal
+(`Ctrl-/`, or `s` where a terminal does not send it). Every search is
+kept there as soon as it starts, newest last, so a new search does not
+lose the one before it, and the view streams the results in while the
+scan runs. Nothing is saved to disk; a restart forgets them.
+
+The first line says which search is shown: its place among the remembered
+ones, the query, whether it read the current view's sessions and muxes or
+all of them, what it found, how long ago it ended, and `stopped` when it
+was cut short. When more than one is remembered the right end names the
+paging keys, `<` for an older search and `>` for a newer one; paging
+shows what each search found without scanning again. Controls has a
+`searches` row that lists them all. `filtering` ends the line when the
+search shown is the one narrowing the Sessions, Mux, and PRs lists
+(`Ctrl-F` makes it so; see the Content paragraph under the Sessions view),
+and paging does not change which search that is. `F` clears the filter
+and keeps every search.
+
+With no search yet it says to press `s`. It is off when live preview is
+disabled.
 
 Groupings (`Ctrl-G` cycles): **none** (default, one ranked list),
-**project**, and **harness**. Sessions are ranked by the number of
-matching turns, then by the latest match; the Recency sort puts the
-latest match first. Controls has a `results` row that switches between
-**one row per session** and **a row per matching turn** (the default
-comes from the `[search]` setting).
+**project**, and **harness**; panes, which belong to neither, sit under
+**Mux panes**. Sessions and panes are ranked together by the number of
+matches, then by the latest (a pane's latest is the time its scrollback
+was read); the Recency sort puts the latest first. Controls has a
+`results` row that switches between **one row per session or pane**,
+**a row per match listed under its session or pane**, and **every match
+in one list** (the default comes from the `[search]` setting).
 
 Buckets look like the Pinned view's. `Enter` and `v` open the viewer at
-the best match (or at the matching turn on a hit row); every other action
-works on the session, as in the Sessions view.
+the best match (or at the matching turn on a hit row); on a pane row or a
+pane line `Enter` opens the pane's scrollback at that line. Every other
+action works on the session, or on the pane's mux, as in the Sessions and
+Mux views.
 
 ### Session row
 
@@ -555,6 +576,8 @@ session's last activity, as everywhere else, not the time of the match.
 <!-- frame: keys="6sthe<C-f>" width=130 height=20 -->
 ```text
 ┌ ► sessions · mux · prs · pinned · history · search ───────────┐
+│search 1/1 "the" · All · 2 sessions · 1 pane · 4 s… · filtering│
+│  ▣ ◉ project           0.0    zsh         0s  2 hits  …they…  │
 │  ● ◉ showcase   claude       1h  ∘  project           2 hits  │
 │  ●   showcase   pi           2h  ∘  repo-a            2 hits  │
 ```
@@ -562,9 +585,12 @@ session's last activity, as everywhere else, not the time of the match.
 <!-- frame: keys="6sthe<C-f><C-g>" width=130 height=20 -->
 ```text
 ┌ ► sessions · mux · prs · pinned · history · search ───────────┐
-│▼   project  (1)  ▲                                            │
+│search 1/1 "the" · All · 2 sessions · 1 pane · 4 s… · filtering│
+│▼   Mux panes                                                  │
+│    ▣ ◉ project           0.0    zsh         0s  2 hits        │
+│▼   project    (1)  ▲                                          │
 │    ● ◉ showcase   claude       1h  ∘  project           2 hits│
-│▼   repo-a   (1)                                               │
+│▼   repo-a     (1)                                             │
 │    ●   showcase   pi           2h  ∘  repo-a            2 hits│
 ```
 
@@ -586,6 +612,9 @@ prefixed with an origin: the harness badge and the session's label
 <!-- frame: keys="6sthe<C-r><C-r><C-f>" width=130 height=20 -->
 ```text
 ┌ ► sessions · mux · prs · pinned · history · search ───────────┐
+│search 1/1 "the" · All · 2 sessions · 1 pane · 4 s… · filtering│
+│  project 0.0       line 17       0s  ready once they pass.    │
+│  project 0.0       line 6        0s  …Expand the notes into a…│
 │   claude    claude-code…  turn 3     you     message      107d│
 │   claude    claude-code…  turn 4     ai      message      107d│
 │   pi        pi in ateli…  turn 1     you     message      107d│
@@ -601,6 +630,70 @@ prefixed with an origin: the harness badge and the session's label
 │    ▣ bugfix-sprint  stopped    6d   claude     ~/repos/project          │
 │    ▣ docs-sweep     stopped    9d   claude     ~/repos/project          │
 │    ◇ spike/cache    removed   12d              project · spike/cache    │
+```
+
+### Pane row
+
+A mux pane whose scrollback matched, where a session row would be. A mux
+and its panes are one entity, so the row wears the mux glyph and acts on
+the mux (`a` attaches). Hits the pane's own session already contains are
+left out, so a pane that mirrors an agent does not repeat it.
+
+| # | Cell | Source | Condition | Style |
+|---|---|---|---|---|
+| 1 | Prefix | indent, disclosure | always | |
+| 2 | Kind | the mux glyph `▣` | always | mux color |
+| 3 | Mux | the mux's name, padded to 16 | always | bold |
+| 4 | Place | `window.pane`, such as `0.1` | always | dim, padded to 5 |
+| 5 | Command | what the pane was running | when it is known | dim, padded to 8 |
+| 6 | Age | time since the scrollback was read | always | dim, right-aligned |
+| 7 | Hits | `N hits` | always | dim |
+| 8 | Snippet | the newest matching line, cropped around the match | when room remains | dim italic, match in the match style |
+
+<!-- frame: keys="2<C-/>feature<Tab><C-s>" width=130 height=12 -->
+```text
+┌ ► sessions · mux · prs · pinned · history · search ───────────┐
+│search 1/1 "feature" · All · 1 session · 1 pane · 4 skipped · …│
+│  ▣ ◉ project           0.0    zsh         0s  4 hits  feature…│
+│  ● ◉ showcase   claude       1h  ∘  project           4 hits  │
+```
+
+### Pane hit row
+
+Under a pane when results are listed per match, or on its own in the flat
+list. It has no kind glyph. The flat list prefixes it with the mux's name
+and the pane's place, padded to 16.
+
+| # | Cell | Source | Condition | Style |
+|---|---|---|---|---|
+| 1 | Line | `line N`, counting from 1 in the scrollback, newest (lowest) first | always | dim, padded to 5 |
+| 2 | Age | time since the scrollback was read | always | dim, right-aligned |
+| 3 | Snippet | the line, cropped around the match | when room remains | dim italic, match in the match style |
+
+<!-- frame: keys="2<C-/>feature<Tab><C-r><C-s>" width=130 height=14 -->
+```text
+┌ ► sessions · mux · prs · pinned · history · search ───────────┐
+│search 1/1 "feature" · All · 1 session · 1 pane · 4 skipped · …│
+│▼ ▣ ◉ project           0.0    zsh         0s  4 hits  featur… │
+│      line 16       0s  from feature/extra into main. Checks… ▲│
+│      line 7        0s  feature/extra.                        █│
+│      line 3        0s  …commit, feature notes, which adds…   █│
+│      line 1        0s  …What's on feature/extra that isn't…  █│
+│▼ ● ◉ showcase   claude       1h  ∘  project           4 hits █│
+│      turn 1     you     message      107d  …on feature/extra…█│
+│      turn 2     ai      message      107d  …feature…         ▼│
+│      turn 3     you     message      107d  …feature/extra.    │
+```
+
+### Paging
+
+<!-- frame: keys="6sthe<C-s>s<Backspace><Backspace><Backspace>release<C-s><<>" width=130 height=8 -->
+```text
+┌ ► sessions · mux · prs · pinned · history · search ───────────┐
+│search 1/2 "the" · All · 2 sessions · 1 pane · 4 skipped · sca…│
+│  ▣ ◉ project           0.0    zsh         0s  2 hits  …they…  │
+│  ● ◉ showcase   claude       1h  ∘  project           2 hits  │
+│  ●   showcase   pi           2h  ∘  repo-a            2 hits  │
 ```
 
 ## Union view

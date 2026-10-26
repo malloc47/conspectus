@@ -48,6 +48,31 @@ impl ContentHitMap {
         self.0.is_empty()
     }
 
+    /// Drop the snippet text of all but the `keep` best-ranked sessions,
+    /// whose counts stay. Bounds what a search with many matches holds.
+    pub fn keep_snippets(&mut self, keep: usize) {
+        if self.len() <= keep {
+            return;
+        }
+        let mut ranked: Vec<(&str, &str, &SessionHits)> = self.iter().collect();
+        ranked.sort_by(|a, b| crate::viewer::search::cmp_sessions(a.2, b.2));
+        let blank: Vec<(String, String)> = ranked
+            .into_iter()
+            .skip(keep)
+            .map(|(harness, session, _)| (harness.to_string(), session.to_string()))
+            .collect();
+        for (harness, session) in blank {
+            if let Some(hits) = self
+                .0
+                .get_mut(&harness)
+                .and_then(|sessions| sessions.get_mut(&session))
+            {
+                hits.best.snippet.clear();
+                hits.best.highlight = 0..0;
+            }
+        }
+    }
+
     /// How many matching messages the matched sessions hold in all.
     pub fn total_hits(&self) -> usize {
         self.0
@@ -135,6 +160,9 @@ pub struct ContentFilter {
     /// The matching turns of each session, once read (the per-message
     /// groupings only).
     pub details: Arc<ContentDetailMap>,
+    /// Mux panes whose scrollback matched, when the search read them
+    /// (ADR 0149). Empty for a search that read only sessions.
+    pub panes: Arc<Vec<crate::content_search::PaneHits>>,
 }
 
 /// Set of independent dimension constraints. Each `None` field means

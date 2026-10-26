@@ -476,7 +476,10 @@ pub(in crate::tui) fn handle_search_overlay_key_with(
         OverlayOutcome::Commit(msg) => {
             app.close_search_overlay();
             // Keeping the search is the only way out that keeps it.
-            if !matches!(*msg, Msg::ApplyContentSearch { .. }) {
+            if !matches!(
+                *msg,
+                Msg::ApplyContentSearch { .. } | Msg::KeepContentSearch { .. }
+            ) {
                 send(app, Msg::DiscardContentPreview);
             }
             send(app, *msg);
@@ -522,8 +525,9 @@ pub(in crate::tui) fn handle_controls_overlay_key(
             .map(|(text, status, found)| (text.as_str(), *status, *found)),
         search_kinds,
         content_group: app
-            .content()
-            .map_or_else(|| app.config().search.group, |content| content.group),
+            .viewed_search()
+            .map_or_else(|| app.config().search.group, |viewed| viewed.group),
+        search_history: app.search_history().position(),
     };
     let outcome = match app.controls_overlay_mut() {
         Some(state) => state.handle(&ctx, key),

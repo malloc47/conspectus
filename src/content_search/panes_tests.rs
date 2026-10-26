@@ -268,3 +268,22 @@ fn an_empty_query_searches_nothing() {
 
     assert!(tmux.pane_calls().listed.is_empty());
 }
+
+#[test]
+fn a_source_limited_to_some_muxes_skips_the_others_panes() {
+    let only = std::collections::BTreeSet::from([mux("play")]);
+    let limited = PaneSource::new(Arc::new(fake()), vec![None], Attribution::new())
+        .at(1_000)
+        .only_muxes(only);
+    let found = run(&limited, "retry budget");
+    assert!(found.panes.is_empty(), "the `work` panes are not searched");
+    assert_eq!(found.progress.total, 1, "only the one pane of `play`");
+
+    let only = std::collections::BTreeSet::from([mux("work")]);
+    let limited = PaneSource::new(Arc::new(fake()), vec![None], Attribution::new())
+        .at(1_000)
+        .only_muxes(only);
+    let found = run(&limited, "retry budget");
+    assert_eq!(found.panes.len(), 2);
+    assert_eq!(found.progress.total, 2);
+}

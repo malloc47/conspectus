@@ -78,7 +78,7 @@ pub struct LaunchConfig {
 
 /// Settings under `[search]` (ADR 0147): how content search groups its
 /// results and which kinds of turn it reads by default.
-#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct SearchConfig {
     /// `group`: one result per session (the default), per message under
     /// its session, or every message as one flat list.
@@ -86,6 +86,25 @@ pub struct SearchConfig {
     /// `kinds`: messages by default, with tool calls and output, and
     /// thinking, as opt-ins.
     pub kinds: crate::viewer::search::ContentKinds,
+    /// `history`: how many content searches the Search view remembers
+    /// (ADR 0149). 0 keeps only the one it is showing.
+    pub history: usize,
+}
+
+/// The searches remembered when `[search] history` is not set.
+pub const DEFAULT_SEARCH_HISTORY: usize = 10;
+
+/// The most searches `[search] history` can ask the Search view to keep.
+pub const MAX_SEARCH_HISTORY: usize = 50;
+
+impl Default for SearchConfig {
+    fn default() -> Self {
+        Self {
+            group: crate::viewer::search::Grouping::default(),
+            kinds: crate::viewer::search::ContentKinds::default(),
+            history: DEFAULT_SEARCH_HISTORY,
+        }
+    }
 }
 
 /// Settings under `[history]` (ADR 0140).
@@ -496,6 +515,8 @@ struct SearchFile {
     group: Option<toml::Value>,
     #[serde(default)]
     kinds: Option<toml::Value>,
+    #[serde(default)]
+    history: Option<toml::Value>,
     /// Keys the schema doesn't name, so a typo is diagnosed.
     #[serde(flatten)]
     unknown: BTreeMap<String, toml::Value>,
@@ -913,7 +934,7 @@ fn merge_search(
     };
     for key in file.unknown.keys() {
         diagnose(format!(
-            "unknown `[search]` key `{key}`; expected group or kinds"
+            "unknown `[search]` key `{key}`; expected group, kinds, or history"
         ));
     }
     if let Some(value) = file.group {
@@ -921,6 +942,19 @@ fn merge_search(
             Some(group) => config.group = group,
             None => diagnose(format!(
                 "invalid `[search] group` value `{}`; expected session, message, or flat",
+                shown(&value)
+            )),
+        }
+    }
+    if let Some(value) = file.history {
+        match value
+            .as_integer()
+            .and_then(|count| usize::try_from(count).ok())
+            .filter(|count| *count <= MAX_SEARCH_HISTORY)
+        {
+            Some(count) => config.history = count,
+            None => diagnose(format!(
+                "invalid `[search] history` value `{}`; expected a whole number from 0 to {MAX_SEARCH_HISTORY}",
                 shown(&value)
             )),
         }

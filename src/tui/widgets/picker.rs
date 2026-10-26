@@ -37,6 +37,9 @@ pub struct PickerItem {
 pub enum PickerPurpose {
     /// Point `pin` at the chosen entity.
     Retarget { pin: String },
+    /// Show the chosen remembered search in the Search view; each item's
+    /// value is its position, oldest first.
+    SearchHistory,
 }
 
 #[derive(Debug, Clone)]
@@ -61,6 +64,15 @@ impl PickerState {
             visible,
             cursor: 0,
         }
+    }
+
+    /// Start with the cursor on the item whose value is `value`.
+    #[must_use]
+    pub fn at_value(mut self, value: &str) -> Self {
+        if let Some(position) = self.items.iter().position(|item| item.value == value) {
+            self.cursor = position;
+        }
+        self
     }
 
     pub fn title(&self) -> &str {
@@ -115,6 +127,9 @@ impl PickerState {
                 pin: pin.clone(),
                 target: item.value.clone(),
             },
+            PickerPurpose::SearchHistory => {
+                Msg::ShowSearchHistory(item.value.parse().unwrap_or_default())
+            }
         }
     }
 }

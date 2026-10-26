@@ -14,10 +14,12 @@ use std::collections::BTreeSet;
 use std::sync::Arc;
 use std::time::Instant;
 
+use super::content_history::SearchHistory;
 use super::*;
-use crate::content_search::{Progress, SessionKey};
+use crate::content_search::{PaneHits, Progress, SessionKey};
 use crate::filter::{ContentDetailMap, ContentFilter, ContentHitMap};
 use crate::tui::Effect;
+use crate::tui::widgets::search::Reach;
 use crate::viewer::search::{ContentKinds, Grouping};
 
 /// What the interface says when a content search cannot start because
@@ -90,9 +92,21 @@ pub enum FlatCoverage {
     Partial { shown: usize, total: usize },
 }
 
+/// What a scope-limited search reads: the sessions and muxes the view it
+/// started in listed.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct Scope {
+    pub sessions: BTreeSet<SessionKey>,
+    /// Graph ids of the muxes whose panes are searched.
+    pub muxes: BTreeSet<String>,
+}
+
 /// The active content query and what it has found so far.
 #[derive(Clone, Debug)]
 pub struct ContentSearch {
+    /// Tells this search apart from every other the process has run, so
+    /// its remembered copy can be found again.
+    pub serial: u64,
     /// The query text as typed, trimmed.
     pub text: String,
     /// Which kinds of turn are searched.
@@ -107,6 +121,17 @@ pub struct ContentSearch {
     /// overlay is previewing runs and fills the overlay, but waits to be
     /// applied.
     pub applied: bool,
+    /// Whether it read only what the view it started in listed, or every
+    /// session and mux.
+    pub reach: Reach,
+    /// Whether it reads mux pane scrollback as well as transcripts.
+    pub with_panes: bool,
+    /// The modal closed with the search still running and the Search view
+    /// kept it: it finishes in the background and then lets go.
+    pub detached: bool,
+    /// When the search started, for the age in the Search view.
+    pub started_at: Instant,
+    scope: Option<Scope>,
     hits: Arc<ContentHitMap>,
     /// The matching turns of each session, read on demand for the
     /// per-message grouping.
@@ -114,6 +139,9 @@ pub struct ContentSearch {
     /// A full rescan collects here and replaces `hits` when it ends, so
     /// the list does not empty and refill while it runs.
     staging: Option<ContentHitMap>,
+    /// Mux panes whose scrollback matched.
+    panes: Arc<Vec<PaneHits>>,
+    pane_staging: Option<Vec<PaneHits>>,
     /// Sessions already handed to a scan, so a refresh scans only the
     /// ones that appeared since.
     scanned: BTreeSet<SessionKey>,
@@ -137,12 +165,45 @@ pub(super) struct ViewKey {
     done: bool,
     group: Grouping,
     snapshot: usize,
+    panes: usize,
+    reach: Reach,
 }
 
 impl ContentSearch {
     /// Sessions that matched so far.
     pub fn hits(&self) -> &ContentHitMap {
         &self.hits
+    }
+
+    /// Mux panes whose scrollback matched so far.
+    pub fn panes(&self) -> &[PaneHits] {
+        &self.panes
+    }
+
+    /// Snippets this search keeps: one per matching session and every
+    /// kept pane line.
+    pub fn snippets(&self) -> usize {
+        self.hits.len() + self.panes.iter().map(|pane| pane.hits.len()).sum::<usize>()
+    }
+
+    /// Hold no more snippets than one remembered search may: the
+    /// lowest-ranked sessions keep their counts but lose their text.
+    pub(super) fn keep_snippets_within_limit(&mut self) {
+        let pane_snippets: usize = self.panes.iter().map(|pane| pane.hits.len()).sum();
+        let room = super::content_history::MAX_SNIPPETS_PER_ENTRY.saturating_sub(pane_snippets);
+        if self.hits.len() > room {
+            Arc::make_mut(&mut self.hits).keep_snippets(room);
+        }
+    }
+
+    /// A copy for the remembered searches: the results are shared, the
+    /// overlay's cache is not.
+    pub(super) fn for_history(&self) -> Self {
+        let mut copy = self.clone();
+        copy.view_cache = RefCell::new(None);
+        copy.staging = None;
+        copy.pane_staging = None;
+        copy
     }
 
     /// Whether every session has been looked at.
@@ -173,10 +234,18 @@ impl ContentSearch {
             }
             ContentStatus::Done(_) => {
                 let found = self.hits.len();
-                format!(
+                let mut note = format!(
                     "{found} {}",
                     if found == 1 { "session" } else { "sessions" }
-                )
+                );
+                if self.with_panes {
+                    let panes = self.panes.len();
+                    note.push_str(&format!(
+                        " · {panes} {}",
+                        if panes == 1 { "pane" } else { "panes" }
+                    ));
+                }
+                note
             }
         };
         if let Some(coverage) = self.flat_coverage() {
@@ -227,6 +296,7 @@ impl ContentSearch {
             complete: self.status.is_done(),
             group: self.group,
             details: Arc::clone(&self.details),
+            panes: Arc::clone(&self.panes),
         }
     }
 }
@@ -241,6 +311,13 @@ fn age_label(secs: u64) -> String {
     }
 }
 
+/// The mux panes a scan reads.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct PaneScope {
+    /// Graph ids of the muxes to read; `None` reads every pane.
+    pub muxes: Option<BTreeSet<String>>,
+}
+
 /// What to scan, left for the runtime by the reducer.
 #[derive(Clone, Debug, PartialEq)]
 pub struct ScanRequest {
@@ -249,6 +326,8 @@ pub struct ScanRequest {
     pub kinds: ContentKinds,
     /// The sessions to read.
     pub sessions: Vec<AgentSessionId>,
+    /// Also read these panes' scrollback.
+    pub panes: Option<PaneScope>,
 }
 
 /// The matching turns to read for the Search view's per-message
@@ -256,10 +335,36 @@ pub struct ScanRequest {
 #[derive(Clone, Debug, PartialEq)]
 pub struct DetailRequest {
     pub generation: u64,
+    /// Set when the turns are for a remembered search rather than the
+    /// running one.
+    pub serial: Option<u64>,
     pub text: String,
     pub kinds: ContentKinds,
     /// The sessions that matched.
     pub sessions: Vec<AgentSessionId>,
+}
+
+/// How a search begins.
+pub(super) struct Launch {
+    pub text: String,
+    pub kinds: ContentKinds,
+    pub group: Grouping,
+    /// Narrows the session lists as soon as it starts.
+    pub applied: bool,
+    pub reach: Reach,
+    /// Reads pane scrollback as well as transcripts.
+    pub with_panes: bool,
+    /// Started from the open modal; typing more replaces it.
+    pub draft: bool,
+}
+
+/// Whose matching turns are being read.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum DetailSubject {
+    /// The running search (the filter, or what the modal previews).
+    Live,
+    /// The remembered search the Search view shows.
+    Entry,
 }
 
 impl App {
@@ -279,11 +384,85 @@ impl App {
         self.content().map(ContentSearch::filter)
     }
 
+    /// The searches the Search view remembers.
+    pub fn search_history(&self) -> &SearchHistory {
+        &self.search_history
+    }
+
+    /// The search the Search view shows, whether or not it filters the
+    /// lists.
+    ///
+    /// The running search is read directly while it is the one shown, so
+    /// what it has just found is already there.
+    pub fn viewed_search(&self) -> Option<&ContentSearch> {
+        let entry = self.search_history.viewed()?;
+        match &self.content {
+            Some(live) if live.serial == entry.search.serial => Some(live),
+            _ => Some(&entry.search),
+        }
+    }
+
+    /// The row predicate the Search view is built from.
+    pub fn viewed_content_filter(&self) -> Option<ContentFilter> {
+        self.viewed_search().map(ContentSearch::filter)
+    }
+
+    /// Whether the search the Search view shows is the one filtering the
+    /// lists.
+    pub fn viewed_is_filter(&self) -> bool {
+        match (self.content(), self.viewed_search()) {
+            (Some(filter), Some(viewed)) => filter.serial == viewed.serial,
+            _ => false,
+        }
+    }
+
+    /// Whether the running search is the one the Search view shows, so
+    /// what it finds should redraw the view.
+    fn live_search_is_viewed(&self) -> bool {
+        self.active_view == View::Search
+            && match (&self.content, self.viewed_search()) {
+                (Some(live), Some(viewed)) => live.serial == viewed.serial,
+                _ => false,
+            }
+    }
+
     /// The generation of the scan whose results are wanted now; `None`
     /// when no search is active. A runtime holding a different one
     /// should stop it.
     pub fn content_generation(&self) -> Option<u64> {
         self.content.as_ref().map(|content| content.generation)
+    }
+
+    /// Whose turns the runtime should be reading, as the search's
+    /// generation and, for a remembered search, its serial; `None` when
+    /// none are wanted. A runtime reading others should stop.
+    pub fn detail_target(&self) -> Option<(u64, Option<u64>)> {
+        match self.detail_subject()? {
+            DetailSubject::Live => self.content.as_ref().map(|c| (c.generation, None)),
+            DetailSubject::Entry => self
+                .viewed_search()
+                .map(|viewed| (viewed.generation, Some(viewed.serial))),
+        }
+    }
+
+    /// Which search the matching turns are read for: the Search view's
+    /// remembered one when it is showing one the running search is not,
+    /// otherwise the running search.
+    fn detail_subject(&self) -> Option<DetailSubject> {
+        let showing_other = self.active_view == View::Search
+            && self.search_overlay().is_none()
+            && self.viewed_search().is_some_and(|viewed| {
+                self.content
+                    .as_ref()
+                    .is_none_or(|live| live.serial != viewed.serial)
+            });
+        if showing_other {
+            Some(DetailSubject::Entry)
+        } else if self.content.is_some() {
+            Some(DetailSubject::Live)
+        } else {
+            None
+        }
     }
 
     /// Take the detail read the reducer asked for. Returns it once.
@@ -297,7 +476,14 @@ impl App {
     /// are opened); under the flat grouping it is every matching
     /// session, the ones with the newest matches first.
     pub(super) fn queue_details(&mut self) {
-        let Some(content) = &self.content else {
+        let Some(subject) = self.detail_subject() else {
+            return;
+        };
+        let target = match subject {
+            DetailSubject::Live => self.content.as_ref(),
+            DetailSubject::Entry => self.viewed_search(),
+        };
+        let Some(content) = target else {
             return;
         };
         if !content.group.lists_messages() || !content.status.is_done() {
@@ -350,12 +536,14 @@ impl App {
         if sessions.is_empty() {
             return;
         }
-        self.detail_request = Some(DetailRequest {
+        let request = DetailRequest {
             generation: content.generation,
+            serial: (subject == DetailSubject::Entry).then_some(content.serial),
             text: content.text.clone(),
             kinds: content.kinds,
             sessions,
-        });
+        };
+        self.detail_request = Some(request);
     }
 
     /// Take the scan the reducer asked for. Returns it once.
@@ -378,8 +566,59 @@ impl App {
             .collect()
     }
 
-    /// Start a full scan of the held snapshot for the active query.
-    fn queue_scan(&mut self, sessions: Vec<AgentSessionId>) {
+    /// The sessions a search with this `scope` reads: all of them, or
+    /// those the scope names.
+    fn scan_sessions(&self, scope: Option<&Scope>) -> Vec<AgentSessionId> {
+        let sessions = self.snapshot_sessions();
+        match scope {
+            None => sessions,
+            Some(scope) => sessions
+                .into_iter()
+                .filter(|session| {
+                    scope.sessions.contains(&SessionKey {
+                        harness_key: session.harness_key.clone(),
+                        session_key: session.session_key.clone(),
+                    })
+                })
+                .collect(),
+        }
+    }
+
+    /// The sessions and muxes the active view lists, after its filters,
+    /// folded rows included: what a search on the current context reads.
+    /// The Search view lists a search's results, which are no place to
+    /// look for something else, so its context is the one the search it
+    /// shows was made in; `None` reads everything.
+    pub(crate) fn current_scope(&self) -> Option<Scope> {
+        if self.active_view == View::Search {
+            return self.viewed_search().and_then(|viewed| viewed.scope.clone());
+        }
+        let mut scope = Scope::default();
+        for row in &self.tree.rows {
+            let node = crate::tui::rows::row_node(&row.id).or(match &row.kind {
+                RowKind::Mixed(mixed) => Some(&mixed.primary_node),
+                _ => None,
+            });
+            match node {
+                Some(NodeId::AgentSession(id)) => {
+                    scope.sessions.insert(SessionKey {
+                        harness_key: id.harness_key.clone(),
+                        session_key: id.session_key.clone(),
+                    });
+                }
+                Some(NodeId::MuxSession(id)) => {
+                    scope.muxes.insert(id.native_id.clone());
+                }
+                _ => {}
+            }
+        }
+        Some(scope)
+    }
+
+    /// Start a scan of the held snapshot for the active query. A `fresh`
+    /// scan also reads the panes the search wants; one that only picks up
+    /// sessions that appeared since does not.
+    fn queue_scan(&mut self, sessions: Vec<AgentSessionId>, fresh: bool) {
         let Some(content) = self.content.as_mut() else {
             return;
         };
@@ -400,21 +639,31 @@ impl App {
                 skipped: 0,
             },
         ));
+        let panes = (fresh && content.with_panes)
+            .then(|| PaneScope {
+                muxes: content.scope.as_ref().map(|scope| scope.muxes.clone()),
+            })
+            .filter(|panes| panes.muxes.as_ref().is_none_or(|muxes| !muxes.is_empty()));
         self.scan_request = Some(ScanRequest {
             generation: content.generation,
             text: content.text.clone(),
             kinds: content.kinds,
             sessions,
+            panes,
         });
     }
 
     /// After a refresh landed: scan the sessions that appeared since the
     /// last scan was planned. A scan still reading checks again when it
-    /// ends, except one that was waiting for the first snapshot.
+    /// ends, except one that was waiting for the first snapshot. A search
+    /// limited to the view it started in does not grow.
     pub(super) fn scan_new_sessions(&mut self) {
         let Some(content) = &self.content else {
             return;
         };
+        if content.scope.is_some() {
+            return;
+        }
         let waiting_for_snapshot =
             content.scanned.is_empty() && self.scan_request.is_none() && !content.status.is_done();
         if matches!(content.status, ContentStatus::Running(_)) && !waiting_for_snapshot {
@@ -434,49 +683,111 @@ impl App {
             if let Some(content) = self.content.as_mut() {
                 content.carried = content.status.progress();
             }
-            self.queue_scan(new);
+            self.queue_scan(new, waiting_for_snapshot);
         }
     }
 
-    /// Start a scan for `text`. Returns the reason it did not start.
-    fn begin_content(
-        &mut self,
-        text: String,
-        kinds: ContentKinds,
-        group: Grouping,
-        applied: bool,
-    ) -> Option<String> {
+    /// Start a scan for `launch.text` and remember it as the newest
+    /// search. Returns the reason it did not start.
+    fn begin_content(&mut self, launch: Launch) -> Option<String> {
         if !self.config.live_preview_enabled {
             return Some(CONTENT_OFF_NOTICE.to_string());
         }
         self.search_auto_expanded.clear();
-        self.content = Some(ContentSearch {
-            text,
-            kinds,
+        self.content_serial += 1;
+        let scope = if launch.reach == Reach::Current {
+            self.current_scope()
+        } else {
+            None
+        };
+        // A search limited to a view that lists no muxes has no panes to
+        // read.
+        let with_panes =
+            launch.with_panes && scope.as_ref().is_none_or(|scope| !scope.muxes.is_empty());
+        let previous = self.content.replace(ContentSearch {
+            serial: self.content_serial,
+            text: launch.text,
+            kinds: launch.kinds,
             generation: 0,
             status: ContentStatus::Running(Progress::default()),
-            group,
-            applied,
+            group: launch.group,
+            applied: launch.applied,
+            reach: launch.reach,
+            with_panes,
+            detached: false,
+            started_at: Instant::now(),
+            scope: scope.clone(),
             hits: Arc::new(ContentHitMap::default()),
             details: Arc::new(ContentDetailMap::default()),
             staging: None,
+            panes: Arc::new(Vec::new()),
+            pane_staging: None,
             scanned: BTreeSet::new(),
             carried: Progress::default(),
             finished_at: None,
             view_cache: RefCell::new(None),
         });
-        let sessions = self.snapshot_sessions();
-        if sessions.is_empty() && self.handle.is_none() {
+        // A search this one replaces is cut short.
+        if let Some(old) = previous {
+            self.stop_entry(old.serial);
+        }
+        let sessions = self.scan_sessions(scope.as_ref());
+        if scope.is_none() && sessions.is_empty() && self.handle.is_none() {
             // No snapshot yet: the first refresh starts the scan.
             self.content_generation += 1;
             if let Some(content) = self.content.as_mut() {
                 content.generation = self.content_generation;
             }
         } else {
-            self.queue_scan(sessions);
+            self.queue_scan(sessions, true);
         }
+        self.record_search(launch.draft);
         self.start_search_spinner();
         None
+    }
+
+    /// Remember the running search as the newest one.
+    fn record_search(&mut self, draft: bool) {
+        let Some(content) = &self.content else {
+            return;
+        };
+        let copy = content.for_history();
+        let keep = self.config.search.history;
+        self.search_history.record(copy, draft, keep);
+    }
+
+    /// Copy the running search into its remembered entry.
+    fn sync_history(&mut self) {
+        if let Some(content) = &self.content
+            && self.search_history.by_serial(content.serial).is_some()
+        {
+            self.search_history.update(content.for_history());
+        }
+    }
+
+    /// Mark the entry as cut short when its scan was still running: what
+    /// it found is all it will find.
+    fn stop_entry(&mut self, serial: u64) {
+        if let Some(entry) = self.search_history.by_serial_mut(serial)
+            && !entry.search.status.is_done()
+        {
+            entry.stopped = true;
+            let progress = entry.search.status.progress();
+            entry.search.status = ContentStatus::Done(progress);
+        }
+    }
+
+    /// Keep the entry for good: typing more in the modal no longer
+    /// replaces it.
+    fn keep_entry(&mut self, serial: u64) {
+        if let Some(entry) = self.search_history.by_serial_mut(serial) {
+            entry.draft = false;
+        }
+    }
+
+    /// The open modal's drafts become kept searches.
+    pub(crate) fn finalize_search_drafts(&mut self) {
+        self.search_history.keep_drafts();
     }
 
     pub(super) fn reduce_content(&mut self, msg: Msg) -> Vec<Effect> {
@@ -487,15 +798,28 @@ impl App {
                 if text.is_empty() {
                     return self.reduce_content(Msg::ClearContentSearch);
                 }
-                if let Some(note) = self.begin_content(text, kinds, self.config.search.group, true)
-                {
+                let group = self.config.search.group;
+                if let Some(note) = self.begin_content(Launch {
+                    text,
+                    kinds,
+                    group,
+                    applied: true,
+                    reach: Reach::All,
+                    with_panes: false,
+                    draft: false,
+                }) {
                     effects.push(Effect::Toast(note));
                     return effects;
                 }
                 self.content_stash = None;
                 self.rebuild_tree_in_place();
             }
-            Msg::PreviewContentSearch { text, kinds, group } => {
+            Msg::PreviewContentSearch {
+                text,
+                kinds,
+                group,
+                reach,
+            } => {
                 let text = text.trim().to_string();
                 if text.is_empty() {
                     return self.reduce_content(Msg::DiscardContentPreview);
@@ -504,7 +828,15 @@ impl App {
                     .content
                     .take_if(|content| content.applied)
                     .or_else(|| self.content_stash.take());
-                if let Some(note) = self.begin_content(text, kinds, group, false) {
+                if let Some(note) = self.begin_content(Launch {
+                    text,
+                    kinds,
+                    group,
+                    applied: false,
+                    reach,
+                    with_panes: true,
+                    draft: true,
+                }) {
                     // Nothing started: the search that was active stays.
                     self.content = displaced;
                     effects.push(Effect::Toast(note));
@@ -516,19 +848,34 @@ impl App {
                 text,
                 kinds,
                 group,
+                reach,
                 show_results,
             } => {
                 let text = text.trim().to_string();
                 let same = self.content.as_ref().is_some_and(|content| {
-                    content.text == text && content.kinds == kinds && content.group == group
+                    content.text == text
+                        && content.kinds == kinds
+                        && content.group == group
+                        && content.reach == reach
                 });
                 if same {
                     if let Some(content) = self.content.as_mut() {
                         content.applied = true;
+                        content.detached = false;
+                        let serial = content.serial;
+                        self.keep_entry(serial);
                     }
                     self.content_stash = None;
                     self.rebuild_tree_in_place();
-                } else if let Some(note) = self.begin_content(text, kinds, group, true) {
+                } else if let Some(note) = self.begin_content(Launch {
+                    text,
+                    kinds,
+                    group,
+                    applied: true,
+                    reach,
+                    with_panes: true,
+                    draft: false,
+                }) {
                     effects.push(Effect::Toast(note));
                     return effects;
                 } else {
@@ -539,12 +886,68 @@ impl App {
                     effects.extend(self.update(Msg::SwitchView(View::Search)));
                 }
             }
+            Msg::KeepContentSearch {
+                text,
+                kinds,
+                group,
+                reach,
+            } => {
+                let text = text.trim().to_string();
+                let same = self.content.as_ref().is_some_and(|content| {
+                    content.text == text
+                        && content.kinds == kinds
+                        && content.group == group
+                        && content.reach == reach
+                });
+                // The modal opened on a remembered search and left alone: it
+                // is kept as it is, and not searched again.
+                let shown = self.viewed_search().is_some_and(|viewed| {
+                    viewed.text == text
+                        && viewed.kinds == kinds
+                        && viewed.group == group
+                        && viewed.reach == reach
+                });
+                if !same && shown {
+                    return self.update(Msg::SwitchView(View::Search));
+                }
+                if !same {
+                    effects.extend(self.reduce_content(Msg::PreviewContentSearch {
+                        text,
+                        kinds,
+                        group,
+                        reach,
+                    }));
+                }
+                let Some(content) = self.content.as_mut() else {
+                    return effects;
+                };
+                let (serial, done, applied) =
+                    (content.serial, content.status.is_done(), content.applied);
+                self.keep_entry(serial);
+                if !applied {
+                    // The scan goes on without the modal and lets go of
+                    // the engine when it ends.
+                    if done {
+                        self.release_preview();
+                    } else if let Some(content) = self.content.as_mut() {
+                        content.detached = true;
+                    }
+                }
+                effects.extend(self.update(Msg::SwitchView(View::Search)));
+            }
             Msg::DiscardContentPreview => {
                 if self
                     .content
                     .as_ref()
-                    .is_some_and(|content| !content.applied)
+                    .is_some_and(|content| !content.applied && !content.detached)
                 {
+                    // Emptying the query inside the modal abandons the
+                    // draft; closing the modal keeps what was found.
+                    if self.search_overlay().is_some()
+                        && let Some(serial) = self.content.as_ref().map(|c| c.serial)
+                    {
+                        self.search_history.remove_draft(serial);
+                    }
                     let stash = self.content_stash.take();
                     self.clear_content();
                     if let Some(stash) = stash {
@@ -556,6 +959,46 @@ impl App {
                     }
                     self.rebuild_tree_in_place();
                 }
+            }
+            Msg::OpenPaneHit {
+                pane,
+                line,
+                text,
+                reveal,
+            } => {
+                if reveal {
+                    let mux =
+                        NodeId::MuxSession(crate::model::MuxSessionId::new(pane.mux.native_id()));
+                    if let Err(why) = self.reveal_node(&mux, None) {
+                        self.status_message = Some(format!("{} {why}", pane.mux.session));
+                    }
+                }
+                effects.push(Effect::Exec(crate::tui::effect::ExecSpec::PaneScrollback {
+                    pane,
+                    line,
+                    text,
+                }));
+            }
+            Msg::OpenSelectedPane => {
+                let selected = self
+                    .selection
+                    .as_ref()
+                    .and_then(|id| self.tree.rows.iter().find(|row| &row.id == id));
+                let (pane, line) = match selected.map(|row| &row.kind) {
+                    Some(RowKind::Pane(row)) => (row.pane.clone(), row.line),
+                    Some(RowKind::PaneHit(row)) => (row.pane.clone(), row.line),
+                    _ => return effects,
+                };
+                let text = self
+                    .viewed_search()
+                    .map(|viewed| viewed.text.clone())
+                    .unwrap_or_default();
+                effects.extend(self.reduce_content(Msg::OpenPaneHit {
+                    pane,
+                    line,
+                    text,
+                    reveal: false,
+                }));
             }
             Msg::OpenContentHit {
                 session,
@@ -581,11 +1024,109 @@ impl App {
                 effects.push(Effect::Persist);
             }
             Msg::SetContentGroup(group) => {
-                if let Some(content) = self.content.as_mut() {
+                let viewed = self.viewed_search().map(|viewed| viewed.serial);
+                if let Some(content) = self.content.as_mut()
+                    && (viewed.is_none() || viewed == Some(content.serial))
+                {
                     content.group = group;
+                }
+                if let Some(entry) = self.search_history.viewed_mut() {
+                    entry.search.group = group;
                 }
                 self.queue_details();
                 self.rebuild_tree_in_place();
+            }
+            Msg::PageSearchHistory(_) | Msg::ShowSearchHistory(_)
+                if self.active_view != View::Search =>
+            {
+                // Only the Search view shows a remembered search.
+            }
+            Msg::PageSearchHistory(delta) => {
+                let left = self.viewed_search().map(|viewed| viewed.serial);
+                if self.search_history.page(delta) {
+                    self.after_history_move(left);
+                }
+            }
+            Msg::ShowSearchHistory(index) => {
+                let left = self.viewed_search().map(|viewed| viewed.serial);
+                if self.search_history.show(index) {
+                    self.after_history_move(left);
+                }
+            }
+            Msg::OpenContentSearchModal => {
+                let hint = self.open_content_search_entry();
+                self.status_message = Some(hint);
+            }
+            Msg::OpenSearchHistory => {
+                if self.search_history.is_empty() {
+                    effects.push(Effect::Toast("No searches yet".to_string()));
+                    return effects;
+                }
+                let now = Instant::now();
+                let viewed = self
+                    .search_history
+                    .position()
+                    .map(|(position, _)| position - 1);
+                let items: Vec<crate::tui::widgets::picker::PickerItem> = self
+                    .search_history
+                    .entries()
+                    .iter()
+                    .enumerate()
+                    .rev()
+                    .map(|(index, entry)| crate::tui::widgets::picker::PickerItem {
+                        label: format!("\"{}\"", entry.search.text),
+                        detail: entry.describe(now),
+                        value: index.to_string(),
+                    })
+                    .collect();
+                let mut picker = crate::tui::widgets::picker::PickerState::new(
+                    "Searches",
+                    crate::tui::widgets::picker::PickerPurpose::SearchHistory,
+                    items,
+                );
+                if let Some(viewed) = viewed {
+                    picker = picker.at_value(&viewed.to_string());
+                }
+                self.open_picker(picker);
+            }
+            Msg::ApplySearchEntry if self.active_view != View::Search => {
+                effects.push(Effect::Toast(
+                    "Ctrl-F filters by the search the Search view shows (6)".to_string(),
+                ));
+            }
+            Msg::ApplySearchEntry => {
+                let Some(viewed) = self.viewed_search().cloned() else {
+                    effects.push(Effect::Toast("No search to filter by".to_string()));
+                    return effects;
+                };
+                if self.viewed_is_filter() {
+                    return effects;
+                }
+                if let Some(live) = self.content.as_mut()
+                    && live.serial == viewed.serial
+                {
+                    live.applied = true;
+                    live.detached = false;
+                } else {
+                    if let Some(old) = self.content.take() {
+                        self.stop_entry(old.serial);
+                    }
+                    self.content_generation += 1;
+                    let mut filter = viewed;
+                    filter.applied = true;
+                    filter.detached = false;
+                    filter.generation = self.content_generation;
+                    self.content = Some(filter);
+                }
+                self.content_stash = None;
+                self.scan_new_sessions();
+                self.rebuild_tree_in_place();
+                if let Some(content) = self.content() {
+                    effects.push(Effect::Toast(format!(
+                        "Filtering the lists by \"{}\"",
+                        content.text
+                    )));
+                }
             }
             Msg::ContentDetails { generation, batch } => {
                 let Some(content) = self.content.as_mut() else {
@@ -611,22 +1152,68 @@ impl App {
                         self.detail_request = None;
                     }
                 }
-                if content.applied {
+                if content.applied || self.live_search_is_viewed() {
+                    self.rebuild_tree_in_place();
+                }
+            }
+            Msg::HistoryDetails { serial, batch } => {
+                let Some(entry) = self.search_history.by_serial_mut(serial) else {
+                    return effects;
+                };
+                let details = Arc::make_mut(&mut entry.search.details);
+                for (key, hits) in batch {
+                    details.insert(key.harness_key, key.session_key, hits);
+                }
+                let entry = &entry.search;
+                if let Some(request) = self.detail_request.as_mut()
+                    && request.serial == Some(serial)
+                {
+                    request.sessions.retain(|session| {
+                        entry
+                            .details
+                            .get(&session.harness_key, &session.session_key)
+                            .is_none()
+                    });
+                    if request.sessions.is_empty() {
+                        self.detail_request = None;
+                    }
+                }
+                if self.viewed_search().is_some_and(|v| v.serial == serial)
+                    && self.active_view == View::Search
+                {
                     self.rebuild_tree_in_place();
                 }
             }
             Msg::RescanContent => {
                 if self.content.is_some() {
-                    let sessions = self.snapshot_sessions();
+                    let scope = self.content.as_ref().and_then(|c| c.scope.clone());
+                    let sessions = self.scan_sessions(scope.as_ref());
                     if let Some(content) = self.content.as_mut() {
                         content.scanned.clear();
                         content.carried = Progress::default();
                         content.staging = Some(ContentHitMap::default());
+                        content.pane_staging = Some(Vec::new());
                         // Turns read for the old results are read again.
                         content.details = Arc::new(ContentDetailMap::default());
                     }
-                    self.queue_scan(sessions);
+                    self.queue_scan(sessions, true);
                     self.start_search_spinner();
+                }
+            }
+            Msg::ContentPanes { generation, batch } => {
+                let Some(content) = self.content.as_mut() else {
+                    return effects;
+                };
+                if content.generation != generation {
+                    return effects;
+                }
+                let changed = !batch.is_empty();
+                match content.pane_staging.as_mut() {
+                    Some(staging) => staging.extend(batch),
+                    None => Arc::make_mut(&mut content.panes).extend(batch),
+                }
+                if changed && (content.applied || self.live_search_is_viewed()) {
+                    self.rebuild_tree_in_place();
                 }
             }
             Msg::ContentHits {
@@ -662,11 +1249,16 @@ impl App {
                     if let Some(staging) = content.staging.take() {
                         content.hits = Arc::new(staging);
                     }
+                    if let Some(staging) = content.pane_staging.take() {
+                        content.panes = Arc::new(staging);
+                    }
+                    content.keep_snippets_within_limit();
                     content.status = ContentStatus::Done(progress);
                     content.finished_at = Some(Instant::now());
                 } else {
                     content.status = ContentStatus::Running(progress);
                 }
+                let (applied, detached) = (content.applied, content.detached);
                 if done {
                     self.update_in_flight(InFlightKind::Search, None);
                     self.scan_new_sessions();
@@ -676,13 +1268,52 @@ impl App {
                     self.update_in_flight(InFlightKind::Search, Some(label));
                 }
                 // A preview in the overlay does not change the lists.
-                if changed && self.content.as_ref().is_some_and(|c| c.applied) {
+                if changed && (applied || self.live_search_is_viewed()) {
                     self.rebuild_tree_in_place();
+                }
+                if done && detached && !applied {
+                    self.sync_history();
+                    self.release_preview();
                 }
             }
             _ => {}
         }
+        self.sync_history();
         effects
+    }
+
+    /// A preview that the Search view kept has finished: let go of it and
+    /// bring back the filter it displaced.
+    fn release_preview(&mut self) {
+        let stash = self.content_stash.take();
+        self.content = None;
+        self.update_in_flight(InFlightKind::Search, None);
+        if let Some(stash) = stash {
+            let done = stash.status.is_done();
+            self.content = Some(stash);
+            if !done {
+                let _ = self.reduce_content(Msg::RescanContent);
+            }
+        }
+        self.queue_details();
+        self.rebuild_tree_in_place();
+    }
+
+    /// The Search view moved to another remembered search.
+    fn after_history_move(&mut self, left: Option<u64>) {
+        // The search left behind keeps its summary but not the per-message
+        // turns read for it; they are read again if it comes back.
+        let live = self.content.as_ref().map(|content| content.serial);
+        if let Some(serial) = left.filter(|serial| Some(*serial) != live)
+            && let Some(entry) = self.search_history.by_serial_mut(serial)
+        {
+            entry.search.details = Arc::default();
+        }
+        self.search_auto_expanded.clear();
+        self.detail_request = None;
+        self.rebuild_tree_in_place();
+        self.queue_details();
+        self.show_top_of_tree();
     }
 
     /// Open the Search view's buckets and sessions the first time they
@@ -717,11 +1348,13 @@ impl App {
         self.queue_details();
     }
 
-    /// Drop the content search and stop its scan.
+    /// Drop the content search and stop its scan. The remembered copy of
+    /// it stays in the Search view.
     fn clear_content(&mut self) {
         self.content_stash = None;
         self.search_auto_expanded.clear();
-        if self.content.take().is_some() {
+        if let Some(old) = self.content.take() {
+            self.stop_entry(old.serial);
             // A new generation makes the runtime cancel whatever it runs.
             self.content_generation += 1;
         }
@@ -791,6 +1424,24 @@ pub struct SearchMemory {
 /// The most results the overlay lists.
 pub const OVERLAY_RESULTS: usize = 50;
 
+/// A session or pane and the rows it contributes to the modal, ranked
+/// together.
+struct Unit {
+    count: usize,
+    time: Option<i64>,
+    pane: bool,
+    origin: String,
+    rows: Vec<crate::tui::widgets::search::ContentRow>,
+}
+
+/// A flat-listing row with what orders it: time, origin, position.
+type FlatRow = (
+    Option<i64>,
+    (String, String),
+    usize,
+    crate::tui::widgets::search::ContentRow,
+);
+
 impl App {
     /// What the contents scope of the `/` overlay shows: the best
     /// matches of the running search (or, with the per-message
@@ -802,16 +1453,18 @@ impl App {
             view.unavailable = Some(CONTENT_OFF_NOTICE);
             return view;
         }
-        let Some(content) = &self.content else {
+        let Some(content) = self.modal_content() else {
             return view;
         };
         let key = ViewKey {
             generation: content.generation,
             hits: content.hits.len(),
             details: content.details.len(),
+            panes: content.panes.len(),
             progress: content.status.progress(),
             done: content.status.is_done(),
             group: content.group,
+            reach: content.reach,
             snapshot: self
                 .handle
                 .as_ref()
@@ -827,6 +1480,23 @@ impl App {
         view
     }
 
+    /// The search whose results the contents modal lists: the one it is
+    /// previewing, or else the search whose query it was opened with (the
+    /// one the Search view shows, or the one filtering the lists).
+    fn modal_content(&self) -> Option<&ContentSearch> {
+        let live = self.content.as_ref();
+        if live.is_some_and(|content| !content.applied) {
+            return live;
+        }
+        let query = self
+            .search_overlay()
+            .map(crate::tui::widgets::search::SearchOverlayState::content_text)
+            .unwrap_or_default();
+        self.viewed_search()
+            .filter(|viewed| !query.is_empty() && viewed.text == query)
+            .or(live)
+    }
+
     /// Rank and describe the matches for the overlay. Costly (it walks
     /// every session), so [`App::content_view`] caches it.
     fn build_content_view(
@@ -834,16 +1504,40 @@ impl App {
         content: &ContentSearch,
         mut view: crate::tui::widgets::search::ContentView,
     ) -> crate::tui::widgets::search::ContentView {
+        use crate::tui::widgets::search::{ContentRow, ContentTarget};
+        use crate::viewer::search::{Hit, cmp_hits};
+
         let progress = content.status.progress();
         view.scanned = progress.scanned;
         view.total = progress.total;
         view.skipped = progress.skipped;
         view.done = content.status.is_done();
+        view.with_panes = content.with_panes;
+        view.empty_scope = content
+            .scope
+            .as_ref()
+            .is_some_and(|scope| scope.sessions.is_empty() && scope.muxes.is_empty());
         let Some(handle) = &self.handle else {
             return view;
         };
         let snapshot = handle.snapshot();
-        let mut found: Vec<(AgentSessionId, &crate::viewer::search::SessionHits)> = self
+        let now = Some(crate::tui::rows::tree_current_unix_epoch());
+        let age = |time: Option<i64>| {
+            crate::tui::rows::format_recency(now, time)
+                .unwrap_or_else(|| crate::tui::icons::marks::NO_VALUE.to_string())
+        };
+        let turn_tag = |hit: &Hit| {
+            format!(
+                "turn {} · {}",
+                hit.turn_index + 1,
+                crate::tui::rows::search::kind_word(hit.kind)
+            )
+        };
+
+        // Sessions and panes are ranked together: more matches, then the
+        // newer, then sessions before panes.
+        let mut units: Vec<Unit> = Vec::new();
+        let mut session_hits: Vec<(AgentSessionId, &crate::viewer::search::SessionHits)> = self
             .snapshot_sessions()
             .into_iter()
             .filter_map(|session| {
@@ -853,92 +1547,147 @@ impl App {
                 Some((session, hits))
             })
             .collect();
-        found.sort_by(|a, b| {
+        session_hits.sort_by(|a, b| {
             crate::viewer::search::cmp_sessions(a.1, b.1).then_with(|| {
                 (&a.0.harness_key, &a.0.session_key).cmp(&(&b.0.harness_key, &b.0.session_key))
             })
         });
-        if content.group == Grouping::Flat && !content.details.is_empty() {
-            // Every message of the sessions read so far, as one list.
-            let mut all: Vec<(&AgentSessionId, &crate::viewer::search::Hit)> = Vec::new();
-            for (session, _) in &found {
-                for hit in content
-                    .details
-                    .get(&session.harness_key, &session.session_key)
-                    .unwrap_or_default()
-                {
-                    all.push((session, hit));
-                }
-            }
-            all.sort_by(|a, b| {
-                crate::viewer::search::cmp_hits_across_sessions(
-                    (&(&a.0.harness_key, &a.0.session_key), a.1),
-                    (&(&b.0.harness_key, &b.0.session_key), b.1),
-                )
-            });
-            for (session, hit) in all.into_iter().take(OVERLAY_RESULTS) {
-                let hits = content
-                    .hits
-                    .get(&session.harness_key, &session.session_key)
-                    .map_or(0, |hits| hits.count);
-                view.rows.push(crate::tui::widgets::search::ContentRow {
-                    session: session.clone(),
-                    label: session_label(snapshot, session),
-                    harness: crate::tui::rows::harness_label(&session.harness_key),
-                    hits,
-                    turn: Some(format!(
-                        "turn {} · {}",
-                        hit.turn_index + 1,
-                        crate::tui::rows::search::kind_word(hit.kind)
-                    )),
-                    snippet: hit.snippet.clone(),
-                    highlight: Some(hit.highlight.clone()),
-                    turn_index: hit.turn_index,
-                });
-            }
-            return view;
-        }
-        for (session, hits) in found {
-            if view.rows.len() >= OVERLAY_RESULTS {
-                break;
-            }
+        let flat_ready = content.group == Grouping::Flat && !content.details.is_empty();
+        let mut flat_rows: Vec<FlatRow> = Vec::new();
+        for (session, hits) in session_hits {
             let label = session_label(snapshot, &session);
-            let details = (content.group == Grouping::Message)
+            let chip = crate::tui::rows::harness_label(&session.harness_key);
+            let latest = hits.latest.map(|time| time.timestamp());
+            let row_for = |hit: &Hit, turn: Option<String>| ContentRow {
+                target: ContentTarget::Session {
+                    session: session.clone(),
+                    turn_index: hit.turn_index,
+                },
+                label: label.clone(),
+                chip: chip.clone(),
+                hits: hits.count,
+                turn,
+                age: age(hit.timestamp.map(|time| time.timestamp()).or(latest)),
+                snippet: hit.snippet.clone(),
+                highlight: Some(hit.highlight.clone()),
+            };
+            let details = (content.group.lists_messages())
                 .then(|| {
                     content
                         .details
                         .get(&session.harness_key, &session.session_key)
                 })
                 .flatten();
-            let row_for = |hit: &crate::viewer::search::Hit, turn: Option<String>| {
-                crate::tui::widgets::search::ContentRow {
-                    session: session.clone(),
-                    label: label.clone(),
-                    harness: crate::tui::rows::harness_label(&session.harness_key),
-                    hits: hits.count,
-                    turn,
-                    snippet: hit.snippet.clone(),
-                    highlight: Some(hit.highlight.clone()),
-                    turn_index: hit.turn_index,
+            if flat_ready {
+                for hit in details.unwrap_or_default() {
+                    flat_rows.push((
+                        hit.timestamp.map(|time| time.timestamp()),
+                        (session.harness_key.clone(), session.session_key.clone()),
+                        hit.turn_index,
+                        row_for(hit, Some(turn_tag(hit))),
+                    ));
                 }
+                continue;
+            }
+            let rows = match details {
+                Some(details) if content.group == Grouping::Message => {
+                    let mut ordered: Vec<&Hit> = details.iter().collect();
+                    ordered.sort_by(|a, b| cmp_hits(a, b));
+                    ordered
+                        .into_iter()
+                        .map(|hit| row_for(hit, Some(turn_tag(hit))))
+                        .collect()
+                }
+                _ => vec![row_for(&hits.best, None)],
             };
-            match details {
-                Some(details) => {
-                    let mut ordered: Vec<&crate::viewer::search::Hit> = details.iter().collect();
-                    ordered.sort_by(|a, b| crate::viewer::search::cmp_hits(a, b));
-                    for hit in ordered {
-                        if view.rows.len() >= OVERLAY_RESULTS {
-                            break;
-                        }
-                        let turn = format!(
-                            "turn {} · {}",
-                            hit.turn_index + 1,
-                            crate::tui::rows::search::kind_word(hit.kind)
-                        );
-                        view.rows.push(row_for(hit, Some(turn)));
-                    }
+            units.push(Unit {
+                count: hits.count,
+                time: latest,
+                pane: false,
+                origin: format!("{}\0{}", session.harness_key, session.session_key),
+                rows,
+            });
+        }
+        for pane in content.panes.iter() {
+            let label = format!(
+                "{} {}.{}",
+                pane.pane.mux.session, pane.pane.window_index, pane.pane.pane_index
+            );
+            let chip = pane.pane.command.clone().unwrap_or_default();
+            let captured = Some(pane.captured_at);
+            let row_for = |hit: &crate::content_search::PaneHit, tag: Option<String>| ContentRow {
+                target: ContentTarget::Pane {
+                    pane: pane.pane.clone(),
+                    line: hit.line,
+                },
+                label: label.clone(),
+                chip: chip.clone(),
+                hits: pane.count,
+                turn: tag,
+                age: age(captured),
+                snippet: hit.snippet.clone(),
+                highlight: Some(hit.highlight.clone()),
+            };
+            let newest = pane.hits.last();
+            if content.group == Grouping::Flat {
+                for hit in pane.hits.iter().rev() {
+                    flat_rows.push((
+                        captured,
+                        (pane.pane.mux.native_id(), pane.pane.pane_id.clone()),
+                        usize::MAX - hit.line,
+                        row_for(hit, Some(format!("line {}", hit.line))),
+                    ));
                 }
-                None => view.rows.push(row_for(&hits.best, None)),
+                continue;
+            }
+            let rows = if content.group == Grouping::Message {
+                pane.hits
+                    .iter()
+                    .rev()
+                    .map(|hit| row_for(hit, Some(format!("line {}", hit.line))))
+                    .collect()
+            } else {
+                newest.map(|hit| row_for(hit, None)).into_iter().collect()
+            };
+            units.push(Unit {
+                count: pane.count,
+                time: captured,
+                pane: true,
+                origin: format!("{}\0{}", pane.pane.mux.native_id(), pane.pane.pane_id),
+                rows,
+            });
+        }
+        if flat_ready || content.group == Grouping::Flat && !flat_rows.is_empty() {
+            // Every message and scrollback line, newest first.
+            flat_rows.sort_by(|a, b| {
+                b.0.cmp(&a.0)
+                    .then_with(|| {
+                        (matches!(a.3.target, ContentTarget::Pane { .. }))
+                            .cmp(&matches!(b.3.target, ContentTarget::Pane { .. }))
+                    })
+                    .then_with(|| a.1.cmp(&b.1))
+                    .then_with(|| a.2.cmp(&b.2))
+            });
+            view.rows = flat_rows
+                .into_iter()
+                .map(|(_, _, _, row)| row)
+                .take(OVERLAY_RESULTS)
+                .collect();
+            return view;
+        }
+        units.sort_by(|a, b| {
+            b.count
+                .cmp(&a.count)
+                .then_with(|| b.time.cmp(&a.time))
+                .then_with(|| a.pane.cmp(&b.pane))
+                .then_with(|| a.origin.cmp(&b.origin))
+        });
+        for unit in units {
+            for row in unit.rows {
+                if view.rows.len() >= OVERLAY_RESULTS {
+                    return view;
+                }
+                view.rows.push(row);
             }
         }
         view
@@ -956,9 +1705,17 @@ impl App {
             return;
         };
         let msg = match due {
-            DueSearch::Preview { text, kinds, group } => {
-                Msg::PreviewContentSearch { text, kinds, group }
-            }
+            DueSearch::Preview {
+                text,
+                kinds,
+                group,
+                reach,
+            } => Msg::PreviewContentSearch {
+                text,
+                kinds,
+                group,
+                reach,
+            },
             DueSearch::Clear => Msg::DiscardContentPreview,
         };
         let _ = self.update(msg);
@@ -982,6 +1739,10 @@ mod tests;
 #[cfg(test)]
 #[path = "content_preview_tests.rs"]
 mod preview_tests;
+
+#[cfg(test)]
+#[path = "content_history_tests.rs"]
+mod history_tests;
 
 #[cfg(test)]
 #[path = "content_state_tests.rs"]

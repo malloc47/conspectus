@@ -613,38 +613,54 @@ will do:
 The keys are on the modal's last row: `Up`/`Down` (or `Ctrl-P`/`Ctrl-N`)
 move, `Enter` picks, `Tab` switches Current and All, `Esc` closes.
 
-### Searching contents with `s`
+### Searching contents with `Ctrl-/`
 
-`s` opens the search overlay on what was said in the sessions. The overlay
-shows the query, a status line (grouping, the kinds searched, and how many
-sessions are scanned, with the skipped count), the best results so far, and
-a footer naming the keys it understands. Each snippet is cropped around the
-match, on word boundaries, so the match is always on screen, and the match
-is picked out in one style everywhere: bold, underlined, in the theme's
-`match_highlight` color. The keys:
+`Ctrl-/` opens the contents modal: it searches what was said in the
+sessions and what is in mux pane scrollback. Terminals send that key as
+one of three keys; Conspectus accepts all of them (`Ctrl-/`, `Ctrl-7`,
+`Ctrl-_`), and `s` works in every terminal. The modal uses most of the
+terminal's width (85%, between 60 and 200 columns). The top border shows
+`[ Current ] All`; `Tab` (or `Shift-Tab`) switches. *Current* is the
+sessions and muxes the view you are in lists, folded rows included (the
+Search view's current context is the one its shown search was made in);
+*All* is every session and live mux. It opens on Current. The modal shows
+the query, a status line (grouping, the kinds searched, how many places are
+scanned, the skipped count), the best results so far, and a footer naming
+the keys it understands. Each row says where the match is (`session` or
+`pane`), and each snippet is cropped around the match, on word boundaries,
+with the match picked out in the theme's `match_highlight` color. The keys:
 
 - Type to search. The scan starts when the query has rested for about
-  200 ms and restarts, abandoning the previous scan, whenever the query
-  or an option changes. Results arrive while it runs.
-- `Ctrl-R` cycles the results through one per session, one per matching
-  turn under its session, and one per matching turn with the newest
-  first across all sessions (the status line reads `results by session`,
-  `results by message`, or `results by message, flat`),
-  `Ctrl-T` includes tool calls and output, and `Ctrl-Y` includes
-  thinking. The starting values come from `[search]` in the config.
-- `Up`/`Down` (or `Ctrl-P`/`Ctrl-N`) move through the results, and `Enter`
-  opens the viewer at the highlighted match, with the query already
-  searched.
-- `Ctrl-F` keeps the query as the filter on the Sessions, Mux, and PRs
-  lists and closes the overlay; `F` clears it. `Ctrl-O` does the same and
-  also opens the Search view.
-- `Esc` closes the overlay and stops the scan. The lists are left as they
-  were; if a content filter was active when the overlay opened, it is
-  restored.
+  200 ms and restarts whenever the query, the reach, or an option changes.
+  Results arrive while it runs.
+- `Ctrl-R` cycles the results through one per session or pane, one per
+  match under its session or pane, and one per match with the newest first
+  (`results by session`, `results by message`, `results by message, flat`),
+  `Ctrl-T` includes tool calls and output, and `Ctrl-Y` includes thinking.
+  They apply to sessions; the starting values come from `[search]`.
+- `Up`/`Down` (or `Ctrl-P`/`Ctrl-N`) move through the results. `Enter`
+  opens a session hit in the viewer at the match, with the query already
+  searched, or a pane hit in a scrollback pager on a fresh capture, at the
+  line, with the match picked out (the pane's mux is selected in the Mux
+  view first).
+- `Ctrl-S` keeps the search and opens the Search view on it (a scan still
+  running goes on there). `Ctrl-F` keeps the query as the filter on the
+  Sessions, Mux, and PRs lists and closes the modal; `F` clears it.
+  `Ctrl-O` no longer does anything here.
+- `Esc` closes the modal and stops a running scan. The lists are left as
+  they were; if a content filter was active when the modal opened, it is
+  restored. The search stays in the Search view.
 
-Pressing `s` while a content filter is active opens with that query filled
-in, and `s` in the Search view opens the same overlay. Content search is
-off under `--no-live-preview`; `s` then says why and does not open.
+A pane that runs an agent shows what the agent's own session already
+contains only once: the pane lines found in the transcripts of the
+sessions attached to its mux are left out. Panes with no such session, such
+as a shell or a build, keep all their matches. Reading scrollback reads
+the last 5,000 lines (2 MiB) of each pane, in memory only.
+
+`s` and `Ctrl-/` from the Search view open on the search it shows, with its
+results listed; the first change searches again as a new search.
+Content search is off under `--no-live-preview`; the keys then say why and
+do not open the modal.
 
 ## Paging
 
@@ -836,6 +852,7 @@ Content search reads transcripts on demand and keeps nothing on disk.
 [search]
 group = "session"           # or "message" (a row per matching turn under its session) or "flat" (turns only, newest first)
 kinds = ["messages"]        # add "tools" and/or "thinking" to search those too
+history = 10                # content searches the Search view remembers (0 keeps only the one it shows)
 ```
 
 `kinds` lists what is searched, so `kinds = ["tools"]` searches tool
@@ -1102,26 +1119,37 @@ mux or, with *pin, don't launch*, write a planned pin and start nothing.
 
 ### The Search view
 
-Key `6` (or `--view search`) lists the sessions that match a content search,
-ranked by how many turns matched and then by the latest match (the
-Recency sort puts the latest match first). `/` in this view opens the
-search overlay in its contents scope with the current query filled in; the
-same query also narrows the Sessions, Mux, and PRs views (`f` shows it as
-`contains`, `F` clears it). Groupings (`Ctrl-G`): none, project, harness.
-The Controls `Results` section cycles between one row per session, one row
-per matching turn listed under each session, and a flat list of matching
-turns, newest first, each naming its session (`Ctrl-R` in the overlay does
-the same); `[search] group` in the config sets the default. The flat list
-reads the matching sessions' transcripts to find the turns, newest matches
-first and at most 100 sessions; the find chip says `reading messages` while
-it loads and `showing N of M messages` if that cap left some out. Selecting a
-hit row shows its turn (speaker, kind, age, and the matching text) above the
-session's detail.
+Key `6` (or `--view search`) shows one of the content searches the process
+remembers (the last ten; `[search] history` sets how many, 0 keeping only
+the one shown). Every search from the contents modal is kept there as soon
+as it starts and streams in while it runs, so a new search does not lose
+the one before it. Nothing is saved to disk. The first line reads
+`search 2/5 "query" · Current · 3 sessions · 1 pane · scanned 12m ago`;
+`<` shows the previous (older) search and `>` the next, without scanning
+again, and Controls has a `searches` row that lists them. `Ctrl-F` keeps
+the search shown as the filter on the Sessions, Mux, and PRs lists (the
+line then ends in `filtering`; paging does not change the filter, and `F`
+clears it without forgetting any search). `s` and `Ctrl-/` open the modal
+on the search shown; `/` is quick select over the rows.
 
-`Enter` and `v` open the viewer at the best match of a session, or at
-the matching turn of a hit row, with the query already searched, so `n` and
-`N` step to the others. Every other key, `p` and `.` included, acts on the
-session. Like all content search, the query and its results stay in
+The sessions and panes are ranked together by how many matches they hold
+and then by the latest (a pane's latest is when its scrollback was read;
+the Recency sort puts the latest first). Groupings (`Ctrl-G`): none,
+project, harness (panes sit under **Mux panes**). The Controls `Results`
+section cycles one row per session or pane, a row per match listed under
+each, and a flat list of matches, newest first (`Ctrl-R` in the modal does
+the same); `[search] group` sets the default. The flat list reads the
+matching sessions' transcripts to find the turns, newest matches first and
+at most 100 sessions; the find chip says `reading messages` while it loads
+and `showing N of M messages` if that cap left some out. Per-message
+turns are read again when a search is shown, not kept with it. Selecting a
+hit row shows its turn above the session's detail.
+
+`Enter` and `v` open the viewer at the best match of a session, or at the
+matching turn of a hit row, with the query already searched, so `n` and
+`N` step to the others; `Enter` on a pane row or pane line opens the
+scrollback. Every other key, `p` and `.` included, acts on the session, or
+on the pane's mux. Like all content search, queries and results stay in
 memory and are never saved; the view is off under `--no-live-preview`, and
 a restart never opens on it.
 

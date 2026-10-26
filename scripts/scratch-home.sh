@@ -653,6 +653,9 @@ check_content_search() {
   } >"$dir/$key.jsonl"
   export CONSPECTUS_CLAUDE_CODE_STATE="$state"
   run cx search quokka --color never --no-cache; ok "search"; has quokka; has "claude-code"
+  # Reading panes as well still finds the session; with no tmux server
+  # there are simply no panes to read.
+  run cx search quokka --source all --color never --no-cache; ok "search --source all"; has quokka
   run cx search QUOKKA --format json --no-cache; ok "json"; has '"hits"'; has '"results"'
   run cx search zebra --no-cache; fails "no match exits 1"; has 'No sessions match "zebra"'
   [[ $RC -eq 1 ]] || note_fail "no match should exit 1, got $RC"

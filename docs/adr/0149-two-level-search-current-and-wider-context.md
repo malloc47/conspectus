@@ -359,3 +359,35 @@ Facts established while writing this decision:
    `history-limit` of 2,000; is more worth the memory?
 6. **Kitty keyboard protocol.** Worth a separate decision if more chords
    need it.
+
+## Implementation Notes
+
+Where the build settled details the decision left open, or departed from
+its wording:
+
+- **Opening the modal does not scan.** Opened from the Search view (or
+  with a content filter active) the modal is prefilled and lists the
+  results of the search it was filled from; the first change (typing,
+  `Tab`, `Ctrl-R/T/Y`) starts a new search. Rerunning is therefore a
+  change to the query or options, not `Enter`, which opens the hit under
+  the cursor. A rescan on open would have replaced the remembered search
+  it was opened on.
+- **Current in the Search view** is the scope the shown search was made in
+  (or everything, if it read everything), not the Search view's own rows,
+  which are results and no place to look for something else. The Search
+  view with no search opens the modal on All.
+- **One row per pane**, not per mux: a mux with several panes that match
+  lists a row for each, wearing the mux glyph and acting on the mux.
+- **Drafts.** Searches started from an open modal replace one another as
+  the query is typed and are kept when the modal closes; emptying the
+  query discards the draft. `Ctrl-S` on an unchanged remembered search
+  just shows it.
+- **Stopped searches.** A search cut short (modal closed, or cleared while
+  running) stays in the history marked `stopped`.
+- **Snippet caps** are enforced when a scan ends: the lowest-ranked
+  sessions beyond 2,000 per entry keep their counts but lose their text;
+  the oldest entries go while all together exceed 20,000.
+- **Controls** gained a `contents` row (opens the modal) and, in the Search
+  view, a `searches` row (lists the remembered searches in a picker).
+- Filter flows that do not use the modal (`f` → contains, `--contains`)
+  read sessions only and are remembered like any search.

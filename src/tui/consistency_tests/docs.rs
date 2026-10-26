@@ -150,6 +150,8 @@ fn row_kind_headings(kind: &RowKind) -> &'static [&'static str] {
         RowKind::Fork(_) => &["Fork row"],
         RowKind::Mixed(_) => &["Pin row", "History row"],
         RowKind::Hit(_) => &["Hit row"],
+        RowKind::Pane(_) => &["Pane row"],
+        RowKind::PaneHit(_) => &["Pane hit row"],
     }
 }
 

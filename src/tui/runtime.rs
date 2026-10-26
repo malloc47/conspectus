@@ -754,6 +754,9 @@ impl LoopMode for StaticMode {
                     SelectedDefault::View => {
                         Msg::SetStatus(Some("scenario TUI is static; view is disabled".to_string()))
                     }
+                    SelectedDefault::Scrollback => Msg::SetStatus(Some(
+                        "scenario TUI is static; scrollback is disabled".to_string(),
+                    )),
                 };
                 dispatch(app, msg);
             }
@@ -1014,7 +1017,7 @@ fn event_loop(terminal: &mut DefaultTerminal, mut config: RunConfig) -> Result<(
         refresh_interval,
         forge: ForgeWorker::new(),
         visibility: visibility::VisibilityWatcher::start(),
-        content: content::ContentDriver::default(),
+        content: content::ContentDriver::live(),
     };
     run_loop(terminal, app, config, mode)
 }
@@ -1978,6 +1981,9 @@ pub(super) fn execute_effects_live(
     for effect in effects {
         let policy = crate::tui::effect::lifecycle(&effect);
         match effect {
+            Effect::Exec(crate::tui::effect::ExecSpec::PaneScrollback { pane, line, text }) => {
+                open_pane_scrollback(app, tmux, &pane, line, &text);
+            }
             Effect::Exec(spec) => execute_exec_spec(terminal, app, config, spec, policy),
             Effect::RunMux(op) => execute_mux_op(app, tmux, op),
             Effect::WriteStore(op) => execute_store_op(app, tmux, op),
@@ -2034,7 +2040,13 @@ pub(super) fn run_pending_content_scans(
     app: &mut App,
     rebase: Option<(&std::path::Path, &std::path::Path)>,
 ) {
-    content::run_blocking(app, rebase);
+    // A materialized scenario answers pane searches from the captures it
+    // recorded instead of running tmux.
+    let panes: Option<std::sync::Arc<dyn MuxBackend>> = rebase.map(|(_, root)| {
+        std::sync::Arc::new(crate::dev_scenarios::recorded_pane_backend(root))
+            as std::sync::Arc<dyn MuxBackend>
+    });
+    content::run_blocking_with(app, rebase, panes.as_ref());
 }
 
 /// Bridge helper: dispatch a `Msg` through the reducer and run any
@@ -2224,6 +2236,9 @@ fn default_action(
         SelectedDefault::ToggleExpand => dispatch(app, Msg::ToggleExpand),
         SelectedDefault::Attach => dispatch_live(terminal, app, config, tmux, Msg::AttachSelected),
         SelectedDefault::View => dispatch_live(terminal, app, config, tmux, Msg::ViewSelected),
+        SelectedDefault::Scrollback => {
+            dispatch_live(terminal, app, config, tmux, Msg::OpenSelectedPane);
+        }
     }
 }
 

@@ -614,12 +614,27 @@ impl App {
         self.modal_stack.push(crate::tui::Modal::Search(state));
     }
 
-    /// Push a content-search overlay onto the modal stack, with the query
-    /// filled in when a search is active.
+    /// Push a content-search overlay onto the modal stack. From the Search
+    /// view it opens on the search the view shows (query, options, and
+    /// reach) with its results listed; changing anything searches again as
+    /// a new search. Elsewhere it fills the query in from the search
+    /// filtering the lists, if any.
     pub fn open_content_search_overlay(&mut self) {
         use crate::tui::widgets::search::{SearchMode, SearchOverlayState};
         let enabled = self.config.live_preview_enabled;
-        let state = if let Some(content) = self.content() {
+        let shown = (self.active_view == crate::tui::View::Search)
+            .then(|| self.viewed_search())
+            .flatten();
+        let state = if let Some(shown) = shown {
+            SearchOverlayState::configured(
+                SearchMode::Content,
+                shown.group,
+                shown.kinds,
+                enabled,
+                &shown.text,
+            )
+            .with_reach(shown.reach)
+        } else if let Some(content) = self.content() {
             SearchOverlayState::configured(
                 SearchMode::Content,
                 content.group,
@@ -627,9 +642,18 @@ impl App {
                 enabled,
                 &content.text,
             )
+            .with_reach(content.reach)
         } else {
             let (group, kinds) = self.search_options();
+            // The Search view with nothing in it has no context of its own
+            // to search, so it opens on everything.
+            let reach = if self.active_view == crate::tui::View::Search {
+                crate::tui::widgets::search::Reach::All
+            } else {
+                crate::tui::widgets::search::Reach::Current
+            };
             SearchOverlayState::configured(SearchMode::Content, group, kinds, enabled, "")
+                .with_reach(reach)
         };
         self.modal_stack.push(crate::tui::Modal::Search(state));
     }
@@ -653,6 +677,7 @@ impl App {
         if matches!(self.modal_stack.last(), Some(crate::tui::Modal::Search(_))) {
             self.remember_search_overlay();
             self.modal_stack.pop();
+            self.finalize_search_drafts();
         }
     }
 

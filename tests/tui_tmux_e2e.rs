@@ -843,7 +843,10 @@ fn the_search_overlay_filters_the_session_list_and_f_clears_it() {
     });
     world.keys(&["quokka"]);
     wait_screen(&world, "the streamed result", |screen| {
-        screen.contains("/ search contents (1 result)") && screen.contains("2 hits")
+        screen.contains("/ search contents")
+            && screen.contains("[ Current ] All")
+            && screen.contains("(1 result)")
+            && screen.contains("2 hits")
     });
 
     world.keys(&["C-f"]);
@@ -933,7 +936,7 @@ fn the_search_view_lists_hits_and_enter_opens_the_viewer_at_one() {
     wait_screen(&world, "the streamed result", |screen| {
         screen.contains("2 hits")
     });
-    world.keys(&["C-r", "C-o"]);
+    world.keys(&["C-r", "C-s"]);
     wait_screen(&world, "the Search view with a row per turn", |screen| {
         screen.contains("turn 1") && screen.contains("turn 2")
     });
@@ -961,7 +964,7 @@ fn the_flat_search_view_lists_messages_and_enter_opens_the_viewer() {
     wait_screen(&world, "the streamed result", |screen| {
         screen.contains("2 hits")
     });
-    world.keys(&["C-r", "C-r", "C-o"]);
+    world.keys(&["C-r", "C-r", "C-s"]);
     wait_screen(&world, "the flat Search view", |screen| {
         screen.contains("turn 1") && screen.contains("turn 2")
     });
@@ -969,6 +972,129 @@ fn the_flat_search_view_lists_messages_and_enter_opens_the_viewer() {
     world.keys(&["Enter"]);
     wait_screen(&world, "the viewer on a match", |screen| {
         screen.contains("find \"quokka\"")
+    });
+}
+
+/// Ctrl-/ reaches the TUI through a real terminal as whichever key the
+/// terminal sends for it (tmux sends the byte 0x1F for both names), and
+/// opens the contents modal on the current view.
+#[test]
+fn ctrl_slash_opens_the_contents_modal_through_a_real_terminal() {
+    needs_tmux!();
+    let world = World::new();
+    write_search_sessions(&world);
+    world.new_mux("anchor", false);
+    world.start_tui_outside();
+    wait_screen(&world, "both sessions", |screen| {
+        screen.contains("2 sessions")
+    });
+    for key in ["C-/", "C-_"] {
+        world.keys(&["1", key]);
+        wait_screen(&world, "the contents modal", |screen| {
+            screen.contains("/ search contents") && screen.contains("[ Current ] All")
+        });
+        world.keys(&["Escape"]);
+        wait_screen(&world, "the modal closed", |screen| {
+            !screen.contains("/ search contents")
+        });
+    }
+}
+
+/// Ctrl-S is not swallowed as terminal flow control: it keeps the search
+/// and opens the Search view, and `<` and `>` then page between the
+/// searches without scanning again.
+#[test]
+fn ctrl_s_keeps_the_search_and_the_search_view_pages_between_searches() {
+    needs_tmux!();
+    let world = World::new();
+    write_search_sessions(&world);
+    world.new_mux("anchor", false);
+    world.start_tui_outside();
+    wait_screen(&world, "both sessions", |screen| {
+        screen.contains("2 sessions")
+    });
+
+    world.keys(&["1", "s", "quokka"]);
+    wait_screen(&world, "the streamed result", |screen| {
+        screen.contains("2 hits")
+    });
+    world.keys(&["C-s"]);
+    wait_screen(&world, "the Search view on the first search", |screen| {
+        screen.contains("search 1/1 \"quokka\"") && screen.contains("2 hits")
+    });
+
+    // A second search from the Search view, over everything.
+    world.keys(&["s"]);
+    wait_screen(&world, "the modal, filled in", |screen| {
+        screen.contains("/quokka")
+    });
+    world.keys(&["BSpace", "BSpace", "BSpace", "BSpace", "BSpace", "BSpace"]);
+    world.keys(&["chatter"]);
+    wait_screen(&world, "the second search's result", |screen| {
+        screen.contains("/chatter") && screen.contains("1 hit")
+    });
+    world.keys(&["C-s"]);
+    wait_screen(&world, "the Search view on the second search", |screen| {
+        screen.contains("search 2/2 \"chatter\"")
+    });
+
+    world.keys(&["<"]);
+    wait_screen(&world, "the first search again", |screen| {
+        screen.contains("search 1/2 \"quokka\"") && screen.contains("2 hits")
+    });
+    world.keys(&[">"]);
+    wait_screen(&world, "the second search again", |screen| {
+        screen.contains("search 2/2 \"chatter\"")
+    });
+}
+
+/// Content search reads what a pane shows. The Mux view's current
+/// context holds the shell's mux, Enter on its row opens the scrollback
+/// at the line, and the Search view lists the pane as a row.
+#[test]
+fn content_search_finds_text_in_a_panes_scrollback() {
+    needs_tmux!();
+    let world = World::new();
+    write_search_sessions(&world);
+    world.new_mux("anchor", false);
+    world.new_mux("shell", true);
+    assert!(
+        world
+            .inner(&[
+                "send-keys",
+                "-t",
+                "shell",
+                "echo zanzibar-in-the-pane",
+                "Enter"
+            ])
+            .status
+            .success()
+    );
+    world.start_tui_outside();
+    wait_screen(&world, "the muxes", |screen| row(screen, "shell").is_some());
+
+    world.keys(&["C-/", "zanzibar"]);
+    wait_screen(&world, "the pane's match", |screen| {
+        screen.contains("/ search contents")
+            && screen
+                .lines()
+                .any(|line| line.contains("pane") && line.contains("shell 0.0"))
+    });
+    world.keys(&["Enter"]);
+    wait_screen(&world, "the scrollback pager at the line", |screen| {
+        screen.contains("shell 0.0 scrollback") && screen.contains("zanzibar-in-the-pane")
+    });
+    world.keys(&["Escape"]);
+    wait_screen(&world, "the pager closed", |screen| {
+        !screen.contains("shell 0.0 scrollback")
+    });
+
+    world.keys(&["C-/", "zanzibar", "C-s"]);
+    wait_screen(&world, "the pane as a row of the Search view", |screen| {
+        screen.contains("search 1/1 \"zanzibar\"")
+            && screen
+                .lines()
+                .any(|line| line.contains("shell") && line.contains("0.0") && line.contains("hit"))
     });
 }
 
@@ -1021,9 +1147,9 @@ fn a_tui_content_search_writes_no_transcript_text_to_disk() {
     wait_screen(&world, "the streamed result", |screen| {
         screen.contains("2 hits")
     });
-    world.keys(&["C-o"]);
+    world.keys(&["C-s"]);
     wait_screen(&world, "the Search view", |screen| {
-        screen.contains("search") && screen.contains("2 hits")
+        screen.contains("search 1/1") && screen.contains("2 hits")
     });
     world.keys(&["F"]);
     // Let any pending write land.

@@ -3,7 +3,7 @@ use std::fs;
 use std::time::{Duration, Instant};
 
 use super::*;
-use crate::content_search::Progress;
+use crate::content_search::{ContentEvent, ContentResult, Progress};
 use crate::model::{AgentSessionId, AgentSessionNode, GraphNode, GraphSnapshot};
 use crate::tui::app::SnapshotHandle;
 use crate::tui::{ContentStatus, RunConfig};
@@ -16,9 +16,12 @@ struct Script {
 }
 
 impl Script {
-    fn of(events: Vec<ScanEvent>) -> Self {
+    fn of(events: Vec<ContentEvent>) -> Self {
         Self {
-            events: events.into_iter().map(Poll::Event).collect(),
+            events: events
+                .into_iter()
+                .map(|e| Poll::Event(Box::new(e)))
+                .collect(),
             hangs_up: false,
         }
     }
@@ -75,38 +78,42 @@ fn driver_running(source: Script, generation: u64) -> ContentDriver {
             handle: Box::new(source),
             last_flush: Instant::now(),
             batch: Vec::new(),
+            pane_batch: Vec::new(),
             progress: Progress::default(),
             done: false,
         }),
         details: None,
         detail_reader: None,
+        pane_backend: None,
     }
 }
 
-fn session_event(generation: u64, key: &str) -> ScanEvent {
-    ScanEvent::Session {
+fn session_event(generation: u64, key: &str) -> ContentEvent {
+    ContentEvent::Result {
         generation,
-        key: SessionKey {
-            harness_key: "claude-code".into(),
-            session_key: key.into(),
-        },
-        hits: crate::viewer::search::SessionHits {
-            count: 1,
-            best: crate::viewer::search::Hit {
-                turn_index: 0,
-                role: crate::viewer::model::TurnRole::User,
-                kind: crate::viewer::model::TurnKind::Message,
-                timestamp: None,
-                snippet: "a needle".into(),
-                highlight: 2..8,
+        result: ContentResult::Session {
+            key: SessionKey {
+                harness_key: "claude-code".into(),
+                session_key: key.into(),
             },
-            latest: None,
+            hits: crate::viewer::search::SessionHits {
+                count: 1,
+                best: crate::viewer::search::Hit {
+                    turn_index: 0,
+                    role: crate::viewer::model::TurnRole::User,
+                    kind: crate::viewer::model::TurnKind::Message,
+                    timestamp: None,
+                    snippet: "a needle".into(),
+                    highlight: 2..8,
+                },
+                latest: None,
+            },
         },
     }
 }
 
-fn done_event(generation: u64) -> ScanEvent {
-    ScanEvent::Done {
+fn done_event(generation: u64) -> ContentEvent {
+    ContentEvent::Done {
         generation,
         progress: Progress {
             scanned: 1,
@@ -246,7 +253,10 @@ fn detail_app(root: &std::path::Path) -> (App, u64) {
     app.update(Msg::ContentHits {
         generation,
         batch: vec![match session_event(generation, "a") {
-            ScanEvent::Session { key, hits, .. } => (key, hits),
+            ContentEvent::Result {
+                result: ContentResult::Session { key, hits },
+                ..
+            } => (key, hits),
             _ => unreachable!(),
         }],
         progress: Progress {
@@ -341,8 +351,16 @@ fn a_new_search_stops_the_turn_reads_of_the_old_one() {
     app.update(Msg::ClearContentSearch);
     driver.pump(&mut app);
 
-    assert!(driver.details.is_none());
     assert!(cancel.is_cancelled(), "the old read was told to stop");
+    // The Search view still shows the cleared search, so its turns are
+    // read again, as a remembered search's.
+    assert!(
+        driver
+            .details
+            .as_ref()
+            .is_none_or(|details| details.serial.is_some()),
+        "the read of the running search is not kept"
+    );
     gate.release.send(()).unwrap();
 }
 

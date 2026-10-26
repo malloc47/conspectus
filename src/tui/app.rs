@@ -22,6 +22,7 @@ use crate::tui::rows::{Row, RowId, RowKind, RowTree};
 use crate::tui::{RunConfig, View};
 
 mod content;
+mod content_history;
 mod controls;
 mod explorer_nav;
 mod msg;
@@ -32,7 +33,7 @@ mod tree;
 #[cfg(test)]
 pub(crate) use content::MAX_DETAIL_SESSIONS;
 pub use content::{
-    ContentSearch, ContentStatus, DetailRequest, ScanRequest, grouping_description,
+    ContentSearch, ContentStatus, DetailRequest, PaneScope, ScanRequest, grouping_description,
     grouping_overlay_label,
 };
 pub use msg::Msg;
@@ -200,6 +201,10 @@ pub struct App {
     /// The applied search the `/` overlay's preview replaced, kept so
     /// closing the overlay can bring it back.
     content_stash: Option<content::ContentSearch>,
+    /// The content searches the Search view remembers (ADR 0149).
+    search_history: content_history::SearchHistory,
+    /// Numbers each search started, so its remembered copy can be found.
+    content_serial: u64,
     /// What the `/` overlay was last set to, for the next time it opens.
     search_memory: Option<content::SearchMemory>,
     /// A scan the reducer wants started; the runtime takes it.
@@ -560,6 +565,8 @@ impl App {
             pending_follow_row: None,
             content: None,
             content_stash: None,
+            search_history: content_history::SearchHistory::default(),
+            content_serial: 0,
             search_memory: None,
             scan_request: None,
             detail_request: None,
@@ -1681,6 +1688,10 @@ impl App {
                 self.rebuild_tree_in_place();
                 if first_visit {
                     self.seed_first_visit();
+                    // Seeding starts the view from its defaults; a Search
+                    // view that opens on results opens its rows again.
+                    self.search_auto_expanded.clear();
+                    self.auto_expand_search_rows();
                 }
                 if self.active_view != before {
                     effects.push(Effect::Persist);
@@ -1699,6 +1710,16 @@ impl App {
             | Msg::PreviewContentSearch { .. }
             | Msg::ApplyContentSearch { .. }
             | Msg::DiscardContentPreview
+            | Msg::KeepContentSearch { .. }
+            | Msg::PageSearchHistory(_)
+            | Msg::ShowSearchHistory(_)
+            | Msg::OpenSearchHistory
+            | Msg::OpenContentSearchModal
+            | Msg::ApplySearchEntry
+            | Msg::OpenPaneHit { .. }
+            | Msg::OpenSelectedPane
+            | Msg::HistoryDetails { .. }
+            | Msg::ContentPanes { .. }
             | Msg::OpenContentHit { .. }
             | Msg::ClearContentSearch
             | Msg::RescanContent

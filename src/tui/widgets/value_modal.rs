@@ -40,6 +40,19 @@ pub struct ValueModalState {
     pub copy: Option<ValueCopy>,
     /// Draw lines that show a command (`$ …`) in the accent style.
     pub highlight_commands: bool,
+    /// A scrollback: the lines of `value` are numbered, kept at their own
+    /// length (cut at the modal's edge instead of wrapped), and the text
+    /// it finds is picked out.
+    pub scrollback: Option<ScrollbackView>,
+}
+
+/// How a pane's scrollback is drawn in the pager.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ScrollbackView {
+    /// The text the match highlight looks for (ASCII case-insensitive).
+    pub find: String,
+    /// The line (from 0) the pager opened on.
+    pub anchor: usize,
 }
 
 /// Text a value modal copies to the clipboard, and how to describe it
@@ -59,7 +72,30 @@ impl ValueModalState {
             scroll: 0,
             copy: None,
             highlight_commands: false,
+            scrollback: None,
         }
+    }
+
+    /// A pane's scrollback, opened on the line nearest `line` (from 1)
+    /// that holds `find`, with that text picked out. The scrollback may
+    /// have moved since the search read it, so the match is looked for
+    /// rather than the line number trusted.
+    pub fn scrollback(label: impl Into<String>, lines: &[String], line: usize, find: &str) -> Self {
+        let wanted = line.saturating_sub(1).min(lines.len().saturating_sub(1));
+        let anchor = lines
+            .iter()
+            .enumerate()
+            .filter(|(_, text)| crate::viewer::search::find_ci(text, find).is_some())
+            .min_by_key(|(index, _)| index.abs_diff(wanted))
+            .map_or(wanted, |(index, _)| index);
+        let mut state = Self::new(label, lines.join("\n"));
+        // Two lines of context above the match.
+        state.scroll = u16::try_from(anchor.saturating_sub(2)).unwrap_or(u16::MAX);
+        state.scrollback = Some(ScrollbackView {
+            find: find.to_string(),
+            anchor,
+        });
+        state
     }
 
     /// A rebuild plan: the plan text with its commands highlighted, and
@@ -205,7 +241,9 @@ impl Widget for ValueModalBody<'_> {
         use ratatui::layout::{Constraint, Layout};
         let [text_area, footer_area] =
             Layout::vertical([Constraint::Min(1), Constraint::Length(1)]).areas(area);
-        let text: ratatui::text::Text = if self.state.highlight_commands {
+        let text: ratatui::text::Text = if let Some(view) = &self.state.scrollback {
+            scrollback_text(&self.state.value, view, self.theme)
+        } else if self.state.highlight_commands {
             let command_style = Style::default().fg(self.theme.panel_focus_accent);
             self.state
                 .value
@@ -221,10 +259,13 @@ impl Widget for ValueModalBody<'_> {
         } else {
             ratatui::text::Text::raw(self.state.value.clone())
         };
-        Paragraph::new(text)
-            .wrap(Wrap { trim: false })
-            .scroll((self.state.scroll, 0))
-            .render(text_area, buf);
+        let body = Paragraph::new(text).scroll((self.state.scroll, 0));
+        // A scrollback keeps its lines as the terminal had them.
+        if self.state.scrollback.is_some() {
+            body.render(text_area, buf);
+        } else {
+            body.wrap(Wrap { trim: false }).render(text_area, buf);
+        }
         let hint = crate::tui::keybindings::overlay::footer(
             crate::tui::keybindings::overlay::VALUE_MODAL_KEYS,
         );
@@ -232,6 +273,45 @@ impl Widget for ValueModalBody<'_> {
             .style(Style::default().fg(self.theme.secondary_text))
             .render(footer_area, buf);
     }
+}
+
+/// The scrollback's lines with a number beside each, and the text being
+/// looked for in the theme's match style.
+fn scrollback_text(
+    value: &str,
+    view: &ScrollbackView,
+    theme: &Theme,
+) -> ratatui::text::Text<'static> {
+    use ratatui::text::{Line, Span};
+    let gutter = Style::default().fg(theme.secondary_text);
+    let anchored = Style::default()
+        .fg(theme.panel_focus_accent)
+        .add_modifier(Modifier::BOLD);
+    let lines: Vec<Line<'static>> = value
+        .lines()
+        .enumerate()
+        .map(|(index, text)| {
+            let number = if index == view.anchor {
+                anchored
+            } else {
+                gutter
+            };
+            let mut spans = vec![Span::styled(format!("{:>5} ", index + 1), number)];
+            let mut rest = text;
+            while let Some(start) = crate::viewer::search::find_ci(rest, &view.find) {
+                let end = start + view.find.len();
+                spans.push(Span::raw(rest[..start].to_string()));
+                spans.push(Span::styled(
+                    rest[start..end].to_string(),
+                    theme.match_style(),
+                ));
+                rest = &rest[end..];
+            }
+            spans.push(Span::raw(rest.to_string()));
+            Line::from(spans)
+        })
+        .collect();
+    ratatui::text::Text::from(lines)
 }
 
 #[cfg(test)]

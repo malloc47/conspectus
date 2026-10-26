@@ -106,6 +106,9 @@ pub struct ControlsContext<'a> {
     pub search_kinds: crate::viewer::search::ContentKinds,
     /// How content search results are listed (Search view).
     pub content_group: crate::viewer::search::Grouping,
+    /// Which remembered search the Search view shows, and how many there
+    /// are.
+    pub search_history: Option<(usize, usize)>,
 }
 
 /// One landable row in the controls overlay's flat list.
@@ -124,6 +127,11 @@ pub enum ControlsCursor {
     FilterContent,
     /// Search-view-only: list results per session or per message.
     ContentGroup,
+    /// Search-view-only: pick among the remembered searches.
+    SearchHistory,
+    /// Open the contents search modal, for terminals that do not send
+    /// Ctrl-/ and operators who have not learned `s`.
+    SearchContents,
     /// Sessions-view-only checkbox: float muxed sessions to the top.
     FilterFloatMuxedSessions,
     /// Mux-view-only checkbox: float attached muxes to the top.
@@ -281,6 +289,8 @@ impl ControlsOverlayState {
                 | ControlsCursor::FilterMuxState
                 | ControlsCursor::FilterContent
                 | ControlsCursor::FilterPrState
+                | ControlsCursor::SearchHistory
+                | ControlsCursor::SearchContents
         ) {
             return self.activate(ctx);
         }
@@ -331,6 +341,12 @@ impl ControlsOverlayState {
             ControlsCursor::ContentGroup => {
                 let next = ctx.content_group.next();
                 ControlsOutcome::ApplyAndStay(crate::tui::Msg::SetContentGroup(next))
+            }
+            ControlsCursor::SearchHistory => {
+                ControlsOutcome::ApplyAndClose(crate::tui::Msg::OpenSearchHistory)
+            }
+            ControlsCursor::SearchContents => {
+                ControlsOutcome::ApplyAndClose(crate::tui::Msg::OpenContentSearchModal)
             }
             ControlsCursor::FilterFloatMuxedSessions => {
                 let mut new_filter = ctx.filter.clone();
@@ -678,7 +694,9 @@ pub(crate) fn flatten_rows(ctx: &ControlsContext<'_>) -> Vec<ControlsCursor> {
     }
     if matches!(ctx.view, View::Search) {
         rows.push(ControlsCursor::ContentGroup);
+        rows.push(ControlsCursor::SearchHistory);
     }
+    rows.push(ControlsCursor::SearchContents);
     rows.push(ControlsCursor::FilterHarness);
     rows.push(ControlsCursor::FilterMaxAge);
     rows.push(ControlsCursor::FilterMuxState);
@@ -863,8 +881,22 @@ impl ControlsOverlayWidget<'_> {
             let here = cursor == ControlsCursor::ContentGroup;
             let value = crate::tui::app::grouping_description(self.ctx.content_group);
             body.push_row(cycle_row("listed as", value.to_string(), here), here);
+            let here = cursor == ControlsCursor::SearchHistory;
+            let value = match self.ctx.search_history {
+                Some((position, total)) => format!("{position} of {total}"),
+                None => "none yet".to_string(),
+            };
+            body.push_row(filter_row("searches", value, here), here);
             body.push(line![""]);
         }
+
+        body.push(section_header("Search"));
+        let here = cursor == ControlsCursor::SearchContents;
+        body.push_row(
+            filter_row("contents", "Enter searches".to_string(), here),
+            here,
+        );
+        body.push(line![""]);
 
         body.push(section_header(&format!(
             "Filters ({})",
@@ -1259,6 +1291,8 @@ fn max_controls_content_lines() -> usize {
                 + 1
                 + 1
                 + Grouping::values_for(*view).len()
+                // The Search section: header, the contents row, blank.
+                + 3
                 + 1
                 + 1
                 + filter_rows

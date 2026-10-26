@@ -38,14 +38,43 @@ fn contents_overlay(query: &str) -> SearchOverlayState {
 
 fn row(key: &str, turn: usize) -> ContentRow {
     ContentRow {
-        session: AgentSessionId::new("claude-code", "/state", key),
+        target: ContentTarget::Session {
+            session: AgentSessionId::new("claude-code", "/state", key),
+            turn_index: turn,
+        },
         label: format!("session {key}"),
-        harness: "claude".into(),
+        chip: "claude".into(),
         hits: 3,
         turn: None,
+        age: "1h".into(),
         snippet: "we chose the quokka design for it".into(),
         highlight: Some(14..20),
-        turn_index: turn,
+    }
+}
+
+fn pane_row(line: usize) -> ContentRow {
+    ContentRow {
+        target: ContentTarget::Pane {
+            pane: crate::content_search::PaneRef {
+                mux: crate::content_search::MuxRef {
+                    backend: "tmux".into(),
+                    socket: None,
+                    session: "work".into(),
+                },
+                pane_id: "%3".into(),
+                window_index: "0".into(),
+                pane_index: "1".into(),
+                command: Some("zsh".into()),
+            },
+            line,
+        },
+        label: "work 0.1".into(),
+        chip: "zsh".into(),
+        hits: 2,
+        turn: None,
+        age: "2m".into(),
+        snippet: "error: the quokka crashed".into(),
+        highlight: Some(11..17),
     }
 }
 
@@ -67,12 +96,41 @@ fn handle(
 }
 
 #[test]
-fn tab_does_nothing_in_content_mode() {
+fn tab_switches_between_current_and_all_and_asks_for_a_new_scan() {
     let mut state = contents_overlay("quokka");
+    assert_eq!(
+        state.reach(),
+        Reach::Current,
+        "it opens on the current view"
+    );
     state.handle_key(plain(KeyCode::Tab));
-    state.handle_key(press(KeyCode::BackTab, KeyModifiers::SHIFT));
+    assert_eq!(state.reach(), Reach::All);
     assert_eq!(state.mode(), SearchMode::Content);
     assert_eq!(state.query(), "quokka", "Tab is not typed into the query");
+    let due = state.take_due_search(Instant::now(), true);
+    assert!(
+        matches!(
+            due,
+            Some(DueSearch::Preview {
+                reach: Reach::All,
+                ..
+            })
+        ),
+        "{due:?}"
+    );
+    state.handle_key(press(KeyCode::BackTab, KeyModifiers::SHIFT));
+    assert_eq!(state.reach(), Reach::Current, "Shift-Tab goes back");
+}
+
+#[test]
+fn an_overlay_can_open_on_the_wider_reach_without_searching() {
+    let mut state = contents_overlay("quokka").with_reach(Reach::All);
+    assert_eq!(state.reach(), Reach::All);
+    assert_eq!(
+        state.take_due_search(Instant::now(), true),
+        None,
+        "opening is not an edit"
+    );
 }
 
 #[test]
@@ -106,6 +164,7 @@ fn typing_waits_for_the_debounce_then_asks_for_one_scan_with_the_latest_text() {
             text: "quokka".into(),
             kinds: ContentKinds::default(),
             group: Grouping::Session,
+            reach: Reach::Current,
         })
     );
     assert_eq!(state.take_due_search(later, false), None, "asked once");
@@ -150,6 +209,7 @@ fn grouping_and_kinds_change_inside_the_overlay_and_restart_the_scan() {
                 ..ContentKinds::default()
             },
             group: Grouping::Message,
+            reach: Reach::Current,
         })
     );
     state.handle_key(ctrl('r'));
@@ -201,23 +261,65 @@ fn the_cursor_wraps_over_the_contents_results() {
 }
 
 #[test]
-fn the_promote_keys_keep_the_query_as_the_filter_or_open_the_view() {
+fn ctrl_f_keeps_the_query_as_the_filter_and_ctrl_s_keeps_it_in_the_search_view() {
     use crate::tui::{Msg, OverlayOutcome};
-    for (key, show) in [(ctrl('f'), false), (ctrl('o'), true)] {
-        let mut state = contents_overlay("quokka");
-        let outcome = handle(&mut state, &[], key);
-        let OverlayOutcome::Commit(msg) = outcome else {
-            panic!("{outcome:?}");
-        };
-        let Msg::ApplyContentSearch {
-            text, show_results, ..
-        } = *msg
-        else {
-            panic!("not an apply");
-        };
-        assert_eq!(text, "quokka");
-        assert_eq!(show_results, show);
-    }
+    let mut state = contents_overlay("quokka");
+    let OverlayOutcome::Commit(msg) = handle(&mut state, &[], ctrl('f')) else {
+        panic!("Ctrl-F does not commit");
+    };
+    let Msg::ApplyContentSearch {
+        text,
+        show_results,
+        reach,
+        ..
+    } = *msg
+    else {
+        panic!("not an apply");
+    };
+    assert_eq!(
+        (text.as_str(), show_results, reach),
+        ("quokka", false, Reach::Current)
+    );
+
+    let mut state = contents_overlay("quokka").with_reach(Reach::All);
+    let OverlayOutcome::Commit(msg) = handle(&mut state, &[], ctrl('s')) else {
+        panic!("Ctrl-S does not commit");
+    };
+    let Msg::KeepContentSearch { text, reach, .. } = *msg else {
+        panic!("not a keep");
+    };
+    assert_eq!((text.as_str(), reach), ("quokka", Reach::All));
+}
+
+#[test]
+fn ctrl_o_no_longer_opens_the_search_view() {
+    let mut state = contents_overlay("quokka");
+    assert!(matches!(
+        handle(&mut state, &[], ctrl('o')),
+        crate::tui::OverlayOutcome::Consumed
+    ));
+}
+
+#[test]
+fn enter_on_a_pane_row_opens_its_scrollback_after_revealing_the_mux() {
+    use crate::tui::{Msg, OverlayOutcome};
+    let mut state = contents_overlay("quokka");
+    let rows = [row("a", 3), pane_row(120)];
+    handle(&mut state, &rows, plain(KeyCode::Down));
+    let OverlayOutcome::Commit(msg) = handle(&mut state, &rows, plain(KeyCode::Enter)) else {
+        panic!("Enter does not commit");
+    };
+    let Msg::OpenPaneHit {
+        pane,
+        line,
+        text,
+        reveal,
+    } = *msg
+    else {
+        panic!("not a pane hit");
+    };
+    assert_eq!(pane.pane_id, "%3");
+    assert_eq!((line, text.as_str(), reveal), (120, "quokka", true));
 }
 
 #[test]
@@ -288,6 +390,8 @@ fn view(rows: Vec<ContentRow>, done: bool) -> ContentView {
         total: if done { 34 } else { 77 },
         skipped: 2,
         done,
+        with_panes: false,
+        empty_scope: false,
         unavailable: None,
     }
 }
@@ -301,7 +405,9 @@ fn the_contents_scope_shows_progress_results_and_the_generated_key_hints() {
         100,
         24,
     );
-    assert!(text.contains("search contents (2 results)"), "{text}");
+    assert!(text.contains("search contents"), "{text}");
+    assert!(text.contains("[ Current ] All"), "{text}");
+    assert!(text.contains("(2 results)"), "{text}");
     assert!(text.contains("/quokka"), "{text}");
     assert!(
         text.contains("34/77 sessions") && text.contains("2 skipped"),
@@ -311,12 +417,10 @@ fn the_contents_scope_shows_progress_results_and_the_generated_key_hints() {
         text.contains("3 hits") && text.contains("session aaaa1111"),
         "{text}"
     );
-    assert!(
-        !text.contains("Tab"),
-        "Tab does nothing in content mode: {text}"
-    );
+    assert!(text.contains("Tab current/all"), "{text}");
     assert!(text.contains("Ctrl-F filter lists"), "{text}");
-    assert!(text.contains("Ctrl-O open Search view"), "{text}");
+    assert!(text.contains("Ctrl-S Search view"), "{text}");
+    assert!(!text.contains("Ctrl-O"), "{text}");
     insta::assert_snapshot!("search_overlay_contents_by_session", text);
 }
 
@@ -381,6 +485,112 @@ fn nothing_is_cut_off_at_narrow_widths() {
         let text = render(&state, &view(vec![row("aaaa1111", 3)], false), width, 20);
         for line in text.lines() {
             assert!(line.chars().count() <= width as usize, "{width}: {line}");
+        }
+    }
+}
+
+#[test]
+fn a_pane_row_carries_the_source_word_the_command_and_the_line() {
+    let state = contents_overlay("quokka");
+    let mut pane = pane_row(120);
+    pane.turn = Some("line 120".into());
+    let text = render(&state, &view(vec![row("aaaa1111", 3), pane], true), 160, 24);
+    let session_line = text
+        .lines()
+        .find(|l| l.contains("session aaaa1111"))
+        .unwrap();
+    assert!(session_line.contains("session  claude"), "{session_line}");
+    let pane_line = text.lines().find(|l| l.contains("work 0.1")).unwrap();
+    assert!(
+        pane_line.contains("pane    zsh") && pane_line.contains("line 120"),
+        "{pane_line}"
+    );
+    assert!(
+        pane_line.contains("error: the quokka crashed"),
+        "{pane_line}"
+    );
+}
+
+#[test]
+fn the_columns_give_way_to_the_snippet_in_the_documented_order() {
+    // Wide: every cell. Narrower: the chip goes first, then the source
+    // word, then the age; the label shrinks last. The snippet keeps at
+    // least 20 cells whenever any cell can give way.
+    let wide = content_columns(200);
+    assert!(wide.source > 0 && wide.chip > 0 && wide.age > 0);
+    assert_eq!(wide.label, 32, "the label stops growing");
+    let mid = content_columns(83);
+    assert_eq!((mid.chip, mid.source > 0, mid.age > 0), (0, true, true));
+    let narrow = content_columns(60);
+    assert_eq!((narrow.chip, narrow.source), (0, 0));
+    let tiny = content_columns(40);
+    assert_eq!((tiny.chip, tiny.source, tiny.age), (0, 0, 0));
+    for inner in [40, 60, 83, 120, 200] {
+        let columns = content_columns(inner);
+        assert!(
+            columns.snippet() >= MIN_SNIPPET || columns.label <= 8,
+            "{inner}: {columns:?}"
+        );
+    }
+}
+
+#[test]
+fn the_tab_identifier_shows_the_chosen_reach() {
+    let mut state = contents_overlay("quokka");
+    let text = render(&state, &view(vec![row("aaaa1111", 3)], true), 100, 20);
+    assert!(text.contains("[ Current ] All"), "{text}");
+    state.handle_key(plain(KeyCode::Tab));
+    let text = render(&state, &view(vec![row("aaaa1111", 3)], true), 100, 20);
+    assert!(text.contains("Current [ All ]"), "{text}");
+}
+
+#[test]
+fn an_empty_current_context_says_so_and_points_at_tab() {
+    let state = contents_overlay("quokka");
+    let empty = ContentView {
+        empty_scope: true,
+        done: true,
+        ..ContentView::default()
+    };
+    let text = render(&state, &empty, 100, 20);
+    assert!(text.contains("lists no sessions or muxes"), "{text}");
+    assert!(text.contains("Tab"), "{text}");
+}
+
+#[test]
+fn a_search_that_read_panes_counts_them_and_says_no_panes_match() {
+    let state = contents_overlay("quokka");
+    let mut searched = view(vec![row("aaaa1111", 3)], true);
+    searched.with_panes = true;
+    let text = render(&state, &searched, 120, 20);
+    assert!(text.contains("34 sessions and panes searched"), "{text}");
+    let mut none = view(Vec::new(), true);
+    none.with_panes = true;
+    let text = render(&state, &none, 120, 20);
+    assert!(text.contains("no sessions or panes match"), "{text}");
+}
+
+#[test]
+fn the_modal_scales_to_a_wide_terminal_without_clipping() {
+    let state = contents_overlay("quokka");
+    let rows = vec![row("aaaa1111", 3), pane_row(40)];
+    for width in [60u16, 100, 160, 220, 260] {
+        let text = render(&state, &view(rows.clone(), true), width, 30);
+        let widest = text
+            .lines()
+            .map(|l| l.trim().chars().count())
+            .max()
+            .unwrap_or(0);
+        let expected = usize::from(modal_size(width, 30).0);
+        assert!(
+            (expected..=expected + 1).contains(&widest),
+            "{width}: the modal is {widest} cells wide, the rule gives {expected}"
+        );
+        for line in text.lines() {
+            assert!(
+                line.chars().count() <= usize::from(width),
+                "{width}: {line}"
+            );
         }
     }
 }

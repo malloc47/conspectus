@@ -157,6 +157,7 @@ fn a_preview_batch_does_not_rebuild_the_lists_but_an_applied_one_does() {
         text: "needle".into(),
         kinds: ContentKinds::default(),
         group: Grouping::Session,
+        reach: crate::tui::widgets::search::Reach::All,
     });
     let before = app.tree_rebuilds;
     deliver(&mut app, vec![(key("a"), hits(1))], false);
@@ -183,6 +184,7 @@ fn details_for_a_preview_do_not_rebuild_the_lists() {
         text: "needle".into(),
         kinds: ContentKinds::default(),
         group: Grouping::Message,
+        reach: crate::tui::widgets::search::Reach::All,
     });
     deliver(&mut app, vec![(key("a"), hits(1))], true);
     let before = app.tree_rebuilds;
@@ -300,6 +302,7 @@ fn the_overlay_view_is_rebuilt_only_when_what_it_shows_changes() {
         text: "needle".into(),
         kinds: ContentKinds::default(),
         group: Grouping::Session,
+        reach: crate::tui::widgets::search::Reach::All,
     });
     deliver(&mut app, vec![(key("a"), hits(1))], false);
 

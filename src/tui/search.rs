@@ -105,6 +105,21 @@ pub fn items_from_rows<'r>(rows: impl IntoIterator<Item = &'r Row>) -> Vec<Searc
                 label: Cow::Owned(hit.snippet.clone()),
                 haystack: Cow::Owned(hit.snippet.clone()),
             },
+            RowKind::Pane(pane) => SearchItem {
+                id: row.id.clone(),
+                label: Cow::Owned(format!("{} {}", pane.mux_label, pane.location)),
+                haystack: Cow::Owned(format!(
+                    "{} {} {}",
+                    pane.mux_label,
+                    pane.command.as_deref().unwrap_or_default(),
+                    pane.snippet
+                )),
+            },
+            RowKind::PaneHit(hit) => SearchItem {
+                id: row.id.clone(),
+                label: Cow::Owned(hit.snippet.clone()),
+                haystack: Cow::Owned(hit.snippet.clone()),
+            },
             RowKind::Mixed(mixed) => SearchItem {
                 id: row.id.clone(),
                 label: Cow::Owned(mixed.label.clone()),

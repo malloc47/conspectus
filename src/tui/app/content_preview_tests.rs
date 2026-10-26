@@ -62,6 +62,7 @@ fn preview(app: &mut App, text: &str) -> Vec<Effect> {
         text: text.into(),
         kinds: ContentKinds::default(),
         group: Grouping::Session,
+        reach: crate::tui::widgets::search::Reach::All,
     })
 }
 
@@ -105,6 +106,7 @@ fn applying_the_preview_keeps_its_results_and_narrows_the_lists() {
         kinds: ContentKinds::default(),
         group: Grouping::Session,
         show_results: false,
+        reach: crate::tui::widgets::search::Reach::All,
     });
     assert_eq!(app.content().map(|c| c.text.as_str()), Some("needle"));
     assert_eq!(app.content_generation(), generation, "no second scan");
@@ -121,6 +123,7 @@ fn applying_a_different_query_starts_it_as_a_new_search() {
         kinds: ContentKinds::default(),
         group: Grouping::Session,
         show_results: false,
+        reach: crate::tui::widgets::search::Reach::All,
     });
     assert_eq!(app.content().map(|c| c.text.as_str()), Some("other"));
     assert_ne!(app.content_generation(), before);
@@ -135,6 +138,7 @@ fn applying_with_show_results_opens_the_search_view() {
         kinds: ContentKinds::default(),
         group: Grouping::Session,
         show_results: true,
+        reach: crate::tui::widgets::search::Reach::All,
     });
     assert_eq!(app.active_view(), View::Search);
     assert!(app.content().is_some());
@@ -238,7 +242,7 @@ fn the_overlay_lists_results_ranked_by_hits_with_the_session_name() {
     let view = app.content_view();
     let labels: Vec<_> = view.rows.iter().map(|row| row.label.as_str()).collect();
     assert_eq!(labels, ["beta", "alpha"], "more hits first");
-    assert_eq!(view.rows[0].harness, "claude");
+    assert_eq!(view.rows[0].chip, "claude");
     assert!(view.done && view.total == 2);
 }
 
@@ -249,6 +253,7 @@ fn the_per_message_grouping_lists_a_row_per_matching_turn() {
         text: "needle".into(),
         kinds: ContentKinds::default(),
         group: Grouping::Message,
+        reach: crate::tui::widgets::search::Reach::All,
     });
     finish(&mut app, &[("a", 2)]);
     let generation = app.content_generation().expect("scan");
