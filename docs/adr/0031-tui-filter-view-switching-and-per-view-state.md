@@ -5,7 +5,10 @@
 Accepted. Amended by [ADR 0147](0147-session-content-search.md): one
 content predicate (a text match on session transcripts) is a filter held
 app-wide and never persisted, the single exception to the per-view,
-saved, structural-only filters below.
+saved, structural-only filters below. Amended by
+[ADR 0149](0149-two-level-search-current-and-wider-context.md): `/` is quick
+select over the current context (the rows after these filters), and `Tab`
+widens it to every entity.
 
 ## Context
 

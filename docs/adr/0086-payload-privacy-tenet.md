@@ -7,7 +7,10 @@ record may carry a mux's launch argv verbatim, prompts included. That
 is the one Tier 3 field that can carry payload. Amended by
 [ADR 0148](0148-opt-in-transcript-search-index.md): transcript text may
 be persisted in one place, the opt-in search index, written only by
-operator-initiated commands and never by the daemon.
+operator-initiated commands and never by the daemon. Amended by
+[ADR 0149](0149-two-level-search-current-and-wider-context.md): mux pane
+scrollback joins transcripts as a Tier 2 content source for content search,
+read under the same gesture, held in memory only, and never persisted.
 
 ## Context
 

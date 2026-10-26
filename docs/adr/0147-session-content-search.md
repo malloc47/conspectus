@@ -6,7 +6,13 @@ Accepted. Amends ADR 0031 (a content query is a text predicate, held
 app-wide and never persisted) and ADR 0086 (Tier 2 gains this reader).
 Builds on ADR 0112 (in-memory transcript previews, `--no-live-preview`).
 The persistent index it defers is decided in ADR 0148, which is built only
-when a threshold below is crossed or the operator asks.
+when a threshold below is crossed or the operator asks. Amended by ADR 0149
+(2026-10-26): content search moves out of `/` to `Ctrl+/` with its own
+modal and gains mux scrollback as a source, `Ctrl-O` is replaced by
+`Ctrl-S`, and the Search view lists the displayed entry of a remembered
+search history instead of the active filter's matches. Item 15's `/`
+bullet and the Search view bullet are superseded; the rest of this ADR
+stands.
 
 ## Context
 
@@ -180,6 +186,21 @@ enough to scan on demand.
     percentile finish time exceeds 5 s. The result source stays behind
     one seam so an index can replace the scan without changing the
     surfaces.
+
+## Amendment: superseded by ADR 0149
+
+ADR 0149 separates the two questions `/` was answering. `/` is quick
+select over the current context, with `Tab` widening it to every entity;
+`Ctrl+/` (with `Ctrl+_` and `Ctrl+7` as the encodings legacy terminals
+send, and plain `s` as the guaranteed key) opens content search with
+current and all scopes. In item 15, the `/` overlay bullet (a `Tab` switch
+to a contents scope, and the `Ctrl-O` key) and the Search view bullet (a
+view of the active query's matches) are replaced:
+the content modal keeps `Ctrl-F` (apply as filter), `Ctrl-R`, `Ctrl-T`,
+and `Ctrl-Y`; `Ctrl-S` keeps the search and jumps to the Search view; and
+the Search view displays one of the last ten searches, paged without
+rescanning. The content filter, its clearing, rescan policy, command line,
+and payload rules in this ADR are unchanged.
 
 ## Amendment: flat per-message results
 
