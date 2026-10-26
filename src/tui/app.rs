@@ -26,6 +26,7 @@ mod controls;
 mod explorer_nav;
 mod msg;
 mod overlays;
+mod search_open;
 mod tree;
 
 #[cfg(test)]
@@ -35,6 +36,8 @@ pub use content::{
     grouping_overlay_label,
 };
 pub use msg::Msg;
+#[cfg(test)]
+pub(crate) use search_open::OpenPlan;
 
 /// Cheap-to-clone, reference-counted handle to the App's resolved
 /// [`GraphSnapshot`]. Read consumers borrow it via [`Self::snapshot`].
@@ -1384,7 +1387,10 @@ impl App {
                 self.set_tree(tree);
             }
             Msg::SelectRow(id) => {
-                self.set_selection(*id);
+                self.select_row_expanding(*id);
+            }
+            Msg::OpenEntity(node) => {
+                self.open_entity(&node);
             }
             Msg::NavDown => {
                 self.move_selection(1);

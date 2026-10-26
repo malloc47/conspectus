@@ -4,23 +4,23 @@ expression: text
 ---
 
 
-               ┌ / search contents (2 results) ─────────────────────────────────────┐
-               │/quokka                                                             │
-               │results by session · messages · 34/77 sessions · 2 skipped          │
-               │>  claude    session aaaa1111  3 hits  …the quokka design for it    │
-               │   claude    session bbbb2222  3 hits  …the quokka design for it    │
-               │                                                                    │
-               │                                                                    │
-               │                                                                    │
-               │                                                                    │
-               │                                                                    │
-               │                                                                    │
-               │                                                                    │
-               │                                                                    │
-               │                                                                    │
-               │                                                                    │
-               │                                                                    │
-               │↑/↓ move · Enter open hit · Esc close · Tab search rows · Ctrl-R    │
-               │results · Ctrl-T tools · Ctrl-Y thinking · Ctrl-F filter lists ·    │
-               │Ctrl-O open Search view                                             │
-               └────────────────────────────────────────────────────────────────────┘
+
+        ┌ / search contents (2 results) ────────────────────────────────────────────────────┐
+        │/quokka                                                                            │
+        │results by session · messages · 34/77 sessions · 2 skipped                         │
+        │>  claude    session aaaa1111  3 hits  we chose the quokka design for it           │
+        │   claude    session bbbb2222  3 hits  we chose the quokka design for it           │
+        │                                                                                   │
+        │                                                                                   │
+        │                                                                                   │
+        │                                                                                   │
+        │                                                                                   │
+        │                                                                                   │
+        │                                                                                   │
+        │                                                                                   │
+        │                                                                                   │
+        │                                                                                   │
+        │                                                                                   │
+        │↑/↓ move · Enter open hit · Esc close · Ctrl-R results · Ctrl-T tools · Ctrl-Y     │
+        │thinking · Ctrl-F filter lists · Ctrl-O open Search view                           │
+        └───────────────────────────────────────────────────────────────────────────────────┘

@@ -323,7 +323,7 @@ pub enum SearchKey {
     Pick,
     Down,
     Up,
-    /// Switch between searching the rows and searching contents.
+    /// Quick select: switch between the current view and everything.
     Scope,
     /// Contents scope: one result per session, or per matching turn.
     Results,
@@ -348,7 +348,8 @@ pub const PICKER_KEYS: &[KeyRow<SearchKey>] = &[
     alias(ctrl('p'), SearchKey::Up),
 ];
 
-/// `/` searching the rows.
+/// `/` quick select. Tab and Shift-Tab both switch the reach, which is
+/// only ever one of two.
 pub const SEARCH_KEYS: &[KeyRow<SearchKey>] = &[
     alias(ctrl('c'), SearchKey::Abort),
     shown(key(KeyCode::Up), SearchKey::Up, "↑", "move"),
@@ -357,15 +358,11 @@ pub const SEARCH_KEYS: &[KeyRow<SearchKey>] = &[
     alias(ctrl('p'), SearchKey::Up),
     shown(key(KeyCode::Enter), SearchKey::Pick, "Enter", "pick"),
     shown(key(KeyCode::Esc), SearchKey::Cancel, "Esc", "close"),
-    shown(
-        key(KeyCode::Tab),
-        SearchKey::Scope,
-        "Tab",
-        "search contents",
-    ),
+    shown(key(KeyCode::Tab), SearchKey::Scope, "Tab", "current/all"),
+    alias(key(KeyCode::BackTab), SearchKey::Scope),
 ];
 
-/// `/` searching what was said in the sessions.
+/// Searching what was said in the sessions.
 pub const SEARCH_CONTENT_KEYS: &[KeyRow<SearchKey>] = &[
     alias(ctrl('c'), SearchKey::Abort),
     shown(key(KeyCode::Up), SearchKey::Up, "↑", "move"),
@@ -374,7 +371,6 @@ pub const SEARCH_CONTENT_KEYS: &[KeyRow<SearchKey>] = &[
     alias(ctrl('p'), SearchKey::Up),
     shown(key(KeyCode::Enter), SearchKey::Pick, "Enter", "open hit"),
     shown(key(KeyCode::Esc), SearchKey::Cancel, "Esc", "close"),
-    shown(key(KeyCode::Tab), SearchKey::Scope, "Tab", "search rows"),
     shown(ctrl('r'), SearchKey::Results, "Ctrl-R", "results"),
     shown(ctrl('t'), SearchKey::Tools, "Ctrl-T", "tools"),
     shown(ctrl('y'), SearchKey::Thinking, "Ctrl-Y", "thinking"),

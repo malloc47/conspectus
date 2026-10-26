@@ -529,10 +529,10 @@ Every row is drawn as a ghost, with the same columns as a pin row.
 
 ## Search view
 
-Reached with `6`; `/` there opens a prompt for the query. It lists the
+Reached with `6`; `s` there opens a prompt for the query. It lists the
 sessions that match the content search (the same query that narrows the
 Sessions, Mux, and PRs views; see the Content paragraph under the Sessions
-view). With no query it says to press `/`; while the scan runs it says how
+view). With no query it says to press `s`; while the scan runs it says how
 far it has got; it is off when live preview is disabled.
 
 Groupings (`Ctrl-G` cycles): **none** (default, one ranked list),
@@ -552,14 +552,14 @@ The Sessions view's session row, taken from its flat layout, with the
 `N hits` chip and the best snippet where a message preview would go. The age is the
 session's last activity, as everywhere else, not the time of the match.
 
-<!-- frame: keys="6/the<C-f>" width=130 height=20 -->
+<!-- frame: keys="6sthe<C-f>" width=130 height=20 -->
 ```text
 ┌ ► sessions · mux · prs · pinned · history · search ───────────┐
 │  ● ◉ showcase   claude       1h  ∘  project           2 hits  │
 │  ●   showcase   pi           2h  ∘  repo-a            2 hits  │
 ```
 
-<!-- frame: keys="6/the<C-f><C-g>" width=130 height=20 -->
+<!-- frame: keys="6sthe<C-f><C-g>" width=130 height=20 -->
 ```text
 ┌ ► sessions · mux · prs · pinned · history · search ───────────┐
 │▼   project  (1)  ▲                                            │
@@ -583,7 +583,7 @@ prefixed with an origin: the harness badge and the session's label
 | 4 | Age | time since the turn was written, or a dash | always | dim |
 | 5 | Snippet | the text around the match, cropped so the match stays on screen and cut on word boundaries; the match in the theme's match style (bold, underlined) | when room remains | dim italic |
 
-<!-- frame: keys="6/the<C-r><C-r><C-f>" width=130 height=20 -->
+<!-- frame: keys="6sthe<C-r><C-r><C-f>" width=130 height=20 -->
 ```text
 ┌ ► sessions · mux · prs · pinned · history · search ───────────┐
 │   claude    claude-code…  turn 3     you     message      107d│
@@ -592,7 +592,7 @@ prefixed with an origin: the harness badge and the session's label
 │   pi        pi in ateli…  turn 2     ai      message      107d│
 ```
 
-<!-- frame: keys="6/the<C-f>f<Up><Space><Esc>" width=150 height=20 -->
+<!-- frame: keys="6sthe<C-f>f<Up><Space><Esc>" width=150 height=20 -->
 ```text
 ┌ ► sessions · mux · prs · pinned · history · search ─────────────────────┐
 │▼ project  ~/repos/project                                               │

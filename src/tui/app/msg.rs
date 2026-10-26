@@ -40,6 +40,10 @@ pub enum Msg {
     /// direct `App::set_selection` call inside a specialized runtime
     /// handler.
     SelectRow(Box<RowId>),
+    /// Open a quick-select result: select its row, follow its
+    /// relationships in the right pane, or switch to the view that lists
+    /// it, whichever its outcome word promised.
+    OpenEntity(NodeId),
     /// Left panel: move selection down/up one visible row.
     NavDown,
     NavUp,

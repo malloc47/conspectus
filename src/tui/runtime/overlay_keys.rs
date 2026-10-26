@@ -426,22 +426,42 @@ pub(in crate::tui) fn handle_search_overlay_key_with(
     send: &mut dyn FnMut(&mut App, Msg),
 ) {
     use crate::tui::search::items_from_rows;
-    use crate::tui::widgets::search::{SearchContext, SearchScope};
+    use crate::tui::search_entities::EntityIndex;
+    use crate::tui::widgets::search::{Reach, SearchContext, SearchMode};
     use crate::tui::{Overlay, OverlayOutcome};
     // The items own their strings, so building them ends the borrow
-    // of `app` before the overlay state is borrowed mutably.
-    let items = items_from_rows(app.visible_rows());
+    // of `app` before the overlay state is borrowed mutably. Quick
+    // select ranks every row of the view, collapsed ones included.
+    let items = if app.search_overlay().is_some_and(|state| {
+        state.mode() == SearchMode::Quick && state.reach() == Reach::Current
+            || state.widens_with(key)
+    }) {
+        items_from_rows(&app.tree().rows)
+    } else {
+        Vec::new()
+    };
     let contents = if app
         .search_overlay()
-        .is_some_and(|state| state.scope() == SearchScope::Contents)
+        .is_some_and(|state| state.mode() == SearchMode::Content)
     {
         app.content_view().rows
     } else {
         Vec::new()
     };
+    // Widening for the first time needs every entity indexed.
+    let entities = if app
+        .search_overlay()
+        .is_some_and(|state| state.widens_with(key))
+    {
+        app.snapshot_handle()
+            .map(|handle| EntityIndex::build(handle.snapshot(), app.config().live_preview_enabled))
+    } else {
+        None
+    };
     let ctx = SearchContext {
         items: &items,
         content: &contents,
+        entities,
     };
     let outcome = match app.search_overlay_mut() {
         Some(state) => state.handle(ctx, key),

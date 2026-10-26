@@ -84,6 +84,8 @@ pub enum Action {
     ClearFilters,
     /// Open the `/` search overlay.
     OpenSearch,
+    /// `s` — search what was said in the sessions.
+    OpenContentSearch,
     /// Forward a key event into the open search overlay.
     SearchOverlayKey(ratatui::crossterm::event::KeyEvent),
     /// Open the `?` help overlay.

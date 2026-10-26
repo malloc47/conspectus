@@ -412,11 +412,15 @@ fn keymap_sections() -> Vec<HelpSection> {
             bindings: vec![
                 Binding::new(
                     "/",
-                    "Open the search overlay (ranks within the active filter set); in the Search view it opens on what was said",
+                    "Quick select: find a row of this view by name (rows under collapsed groups too); Enter selects it",
                 ),
                 Binding::new(
                     "/ then Tab",
-                    "Search what was said in every session instead; Ctrl-R cycles results per session, per matching turn, and flat (turns only, newest first), Ctrl-F keeps the query as a filter on the lists, Ctrl-O also opens the Search view",
+                    "Find anything, whichever view it lives in; the word at the right says whether Enter selects it here, follows its relationships in the right pane, or switches views",
+                ),
+                Binding::new(
+                    "s",
+                    "Search what was said in every session; Ctrl-R cycles results per session, per matching turn, and flat (turns only, newest first), Ctrl-F keeps the query as a filter on the lists, Ctrl-O also opens the Search view",
                 ),
             ],
         },

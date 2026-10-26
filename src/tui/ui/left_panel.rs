@@ -250,7 +250,7 @@ pub(super) fn empty_left_panel_text(app: &App) -> String {
             return format!("{}.", crate::tui::widgets::search::CONTENT_SEARCH_OFF);
         }
         if app.content().is_none() {
-            return "Press `/` to search session contents.".to_string();
+            return "Press `s` to search session contents.".to_string();
         }
     }
     if let Some(content) = app.content()
@@ -274,7 +274,7 @@ pub(super) fn empty_left_panel_text(app: &App) -> String {
                 )
             }
             crate::tui::ContentStatus::Done(_) => format!(
-                "No sessions match \"{}\".\nPress `/` to search again, `F` to clear.",
+                "No sessions match \"{}\".\nPress `s` to search again, `F` to clear.",
                 content.text
             ),
         };

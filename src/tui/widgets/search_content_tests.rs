@@ -28,7 +28,7 @@ fn type_text(state: &mut SearchOverlayState, text: &str) {
 
 fn contents_overlay(query: &str) -> SearchOverlayState {
     SearchOverlayState::configured(
-        SearchScope::Contents,
+        SearchMode::Content,
         Grouping::Session,
         ContentKinds::default(),
         true,
@@ -53,6 +53,7 @@ fn ctx<'a>(content: &'a [ContentRow]) -> SearchContext<'a> {
     SearchContext {
         items: &[],
         content,
+        entities: None,
     }
 }
 
@@ -66,43 +67,24 @@ fn handle(
 }
 
 #[test]
-fn tab_switches_between_the_scopes_and_back() {
-    let mut state = SearchOverlayState::new();
-    assert_eq!(state.scope(), SearchScope::Rows);
+fn tab_does_nothing_in_content_mode() {
+    let mut state = contents_overlay("quokka");
     state.handle_key(plain(KeyCode::Tab));
-    assert_eq!(state.scope(), SearchScope::Contents);
-    state.handle_key(plain(KeyCode::Tab));
-    assert_eq!(state.scope(), SearchScope::Rows);
-}
-
-#[test]
-fn without_live_preview_the_contents_scope_cannot_be_chosen() {
-    let mut state = SearchOverlayState::configured(
-        SearchScope::Rows,
-        Grouping::Session,
-        ContentKinds::default(),
-        false,
-        "",
-    );
-    state.handle_key(plain(KeyCode::Tab));
-    assert_eq!(state.scope(), SearchScope::Rows);
-    assert!(
-        state
-            .notice()
-            .is_some_and(|note| note.contains("live preview"))
-    );
+    state.handle_key(press(KeyCode::BackTab, KeyModifiers::SHIFT));
+    assert_eq!(state.mode(), SearchMode::Content);
+    assert_eq!(state.query(), "quokka", "Tab is not typed into the query");
 }
 
 #[test]
 fn a_remembered_contents_scope_is_ignored_when_contents_search_is_off() {
     let state = SearchOverlayState::configured(
-        SearchScope::Contents,
+        SearchMode::Content,
         Grouping::Session,
         ContentKinds::default(),
         false,
         "",
     );
-    assert_eq!(state.scope(), SearchScope::Rows);
+    assert_eq!(state.mode(), SearchMode::Quick);
 }
 
 #[test]
@@ -143,17 +125,6 @@ fn forcing_skips_the_debounce() {
 fn an_empty_query_stops_the_preview() {
     let mut state = contents_overlay("a");
     state.handle_key(plain(KeyCode::Backspace));
-    assert_eq!(
-        state.take_due_search(Instant::now(), true),
-        Some(DueSearch::Clear)
-    );
-}
-
-#[test]
-fn leaving_the_contents_scope_stops_the_preview() {
-    let mut state = contents_overlay("quokka");
-    state.handle_key(plain(KeyCode::Tab));
-    assert_eq!(state.scope(), SearchScope::Rows);
     assert_eq!(
         state.take_due_search(Instant::now(), true),
         Some(DueSearch::Clear)
@@ -260,7 +231,7 @@ fn promoting_an_empty_query_does_nothing() {
 
 #[test]
 fn escape_closes_in_either_scope() {
-    for scope in [SearchScope::Rows, SearchScope::Contents] {
+    for scope in [SearchMode::Quick, SearchMode::Content] {
         let mut state = SearchOverlayState::configured(
             scope,
             Grouping::Session,
@@ -277,14 +248,14 @@ fn escape_closes_in_either_scope() {
 
 #[test]
 fn the_rows_scope_does_not_bind_the_contents_keys() {
-    // Ctrl-F and Ctrl-R are text-editing keys in the rows scope; the
-    // contents keys apply only after Tab.
+    // Ctrl-F and Ctrl-R are text-editing keys in quick select; the
+    // contents keys apply only in content mode.
     let mut state = SearchOverlayState::new();
     state.handle_key(ctrl('r'));
     state.handle_key(ctrl('t'));
     assert_eq!(state.group(), Grouping::Session);
     assert!(!state.kinds().tools);
-    assert_eq!(state.scope(), SearchScope::Rows);
+    assert_eq!(state.mode(), SearchMode::Quick);
     assert!(matches!(
         handle(&mut state, &[], ctrl('f')),
         crate::tui::OverlayOutcome::Consumed
@@ -340,7 +311,10 @@ fn the_contents_scope_shows_progress_results_and_the_generated_key_hints() {
         text.contains("3 hits") && text.contains("session aaaa1111"),
         "{text}"
     );
-    assert!(text.contains("Tab search rows"), "{text}");
+    assert!(
+        !text.contains("Tab"),
+        "Tab does nothing in content mode: {text}"
+    );
     assert!(text.contains("Ctrl-F filter lists"), "{text}");
     assert!(text.contains("Ctrl-O open Search view"), "{text}");
     insta::assert_snapshot!("search_overlay_contents_by_session", text);

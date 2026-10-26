@@ -331,7 +331,13 @@ pub const KEYBINDINGS: &[KeyBinding] = &[
         mode: KeyMode::Global,
         key: KeyMatcher::AnyModExceptCtrl('/'),
         action: || Action::OpenSearch,
-        help_text: "Open the in-view search overlay",
+        help_text: "Quick select: find a row in this view, or Tab to find anything",
+    },
+    KeyBinding {
+        mode: KeyMode::Global,
+        key: KeyMatcher::AnyModExceptCtrl('s'),
+        action: || Action::OpenContentSearch,
+        help_text: "Search what was said in the sessions",
     },
     KeyBinding {
         mode: KeyMode::Global,

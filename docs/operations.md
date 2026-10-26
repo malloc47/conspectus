@@ -354,7 +354,8 @@ conspectus alias list
 conspectus pin {add|edit|rename|retarget|refresh|move|rm|list|show|migrate} ...
 conspectus rebuild <REF> [--dry-run] [--no-attach] [--session ID]
 conspectus history {list|show|reap|forget} ...
-conspectus search <QUERY> [--group {session|message|flat}] [--tools] [--thinking] [--harness H]...
+conspectus search <QUERY> [--source {sessions|panes|all}] [--group {session|message|flat}]
+                         [--tools] [--thinking] [--harness H]...
                          [--limit N] [--format {table|json}]
 conspectus mux new <NAME> [--cwd PATH] [--socket NAME] [--no-attach] [--pin [PIN] [--no-launch]]
 conspectus mux launch <HARNESS> --name <NAME> [--cwd PATH] [--argv ARG...]
@@ -469,6 +470,9 @@ conspectus search deadlock --format json | jq '.results[].session'
 
 Flags:
 
+- `--source sessions|panes|all`: search session transcripts (the
+  default), the scrollback of live tmux panes, or both. See
+  [Searching pane scrollback](#searching-pane-scrollback).
 - `--group session|message|flat`: one result per session (ranked by hit
   count, then latest hit), per matching message in turn order within each
   session, or per matching message across all sessions, newest first,
@@ -518,6 +522,7 @@ use status 1, so scripts can tell "nothing found" from "it broke".
   "truncated": [],
   "results": [
     {
+      "source": "session",
       "harness": "claude-code",
       "session": "aaaaaaaa-0000-0000-0000-000000000001",
       "label": "Retry budget design",
@@ -541,19 +546,82 @@ capped. `searched.skipped` counts sessions whose
 transcript could not be read; `without_parser` counts sessions of
 harnesses that cannot be searched yet.
 
-### Searching contents from `/`
+### Searching pane scrollback
 
-`/` opens the search overlay on the rows of the current view, as it always
-has. `Tab` switches it to the contents of the sessions (and back), and the
-overlay remembers how you left it for the rest of the session. In the
-contents scope the overlay shows the query, a status line (grouping, the
-kinds searched, and how many sessions are scanned, with the skipped
-count), the best results so far, and a footer naming the keys it
-understands (the rows scope has the same kind of footer, with `Tab search
-contents`). Each snippet is cropped around the match, on word
-boundaries, so the match is always on screen, and the match is picked out
-in one style everywhere: bold, underlined, in the theme's `match_highlight`
-color. The keys:
+`--source panes` (or `all`) also searches what is on screen and in
+scrollback in every pane of every tmux server Conspectus knows: the
+default server and each named socket a known mux lives on. Each pane's
+last 5,000 lines are read with `tmux capture-pane`, joined where tmux
+soft-wrapped them, with terminal escapes removed and trailing blank lines
+dropped. Nothing is kept; the command reads panes read-only. With
+`CONSPECTUS_DISABLE_TMUX` set no panes are searched.
+
+A pane that hosts an agent shows that agent's session, so the same
+sentence would otherwise be reported twice. A pane line is left out when
+its text (case folded, whitespace collapsed, box-drawing characters
+removed) is contained in the text of any turn of the session attributed to
+that pane's mux that matches the query, of any kind, so text the session
+search withholds by default (tool output) is not reported through the pane
+either. A line shorter than 12 characters is compared joined with its
+neighbors. `--verbose` reports how many lines were left out.
+
+Pane results are listed after session results. `--group session` gives one
+row per pane (`PANE`, `COMMAND`, `HITS`, `CAPTURED`, `SNIPPET`), showing
+its newest match; `--group message` and `flat` give one row per matching
+line, with `LINE` in place of `HITS`. A pane has no message times, so
+`CAPTURED` is when the pane was read. In JSON, every result carries
+`"source": "session"` or `"pane"`; pane results have `backend`, `socket`,
+`mux`, `window`, `pane`, `pane_id`, `command`, `hits`, `line`, `captured`,
+and `snippet`, and `searched.panes` reports `scanned`, `total`, `skipped`,
+and `deduplicated`. A pane that cannot be read counts as skipped.
+
+### Quick select with `/`
+
+`/` opens quick select, a wide modal (about 85% of the terminal, up to 200
+columns) for jumping to something by name. Its title carries a tab
+identifier, `[ Current ] All` or `Current [ All ]`; `Tab` and `Shift-Tab`
+switch between the two, and the modal always opens on Current.
+
+- **Current** ranks every row of the active view after filters, rows under
+  collapsed groups included. `Enter` selects the row in the left pane and
+  expands the groups above it.
+- **All** ranks everything Conspectus knows by a name you would
+  recognize, whichever view it lives in: sessions (alias, title, id,
+  directory, and the last message when live preview is on), muxes (name,
+  directory, running command), repos, checkouts and worktrees (path,
+  branch, remote), pull requests (number, title, branch), pins, workspaces,
+  forks, and the gone entities history remembers. Matches in the name rank
+  above matches in other fields; ties go to sessions, muxes, pins,
+  checkouts, repos, pull requests, then history, and the most recent first.
+
+Each result in All shows its kind glyph, name, a dim context (path, branch,
+or what a pin points at), and a word at the right edge saying what `Enter`
+will do:
+
+- `here`: the current view lists it. It is selected in the left pane and
+  focus stays where it is.
+- `via <kind>` or `3 hops`: it is related to what the right pane is on
+  (the selected row, or wherever you have drilled to) within three hops of
+  relationships Conspectus has settled on. Focus moves to the right pane,
+  which drills along the shortest path and leaves the cursor on the
+  result, so `Backspace` retraces the way. `via mux` names the first
+  neighbor on the path.
+- `in <View> view`: otherwise the view that lists it is shown and the row
+  selected. If it is not listed there (a filter hides it, say), you stay
+  where you were and a message says so.
+
+The keys are on the modal's last row: `Up`/`Down` (or `Ctrl-P`/`Ctrl-N`)
+move, `Enter` picks, `Tab` switches Current and All, `Esc` closes.
+
+### Searching contents with `s`
+
+`s` opens the search overlay on what was said in the sessions. The overlay
+shows the query, a status line (grouping, the kinds searched, and how many
+sessions are scanned, with the skipped count), the best results so far, and
+a footer naming the keys it understands. Each snippet is cropped around the
+match, on word boundaries, so the match is always on screen, and the match
+is picked out in one style everywhere: bold, underlined, in the theme's
+`match_highlight` color. The keys:
 
 - Type to search. The scan starts when the query has rested for about
   200 ms and restarts, abandoning the previous scan, whenever the query
@@ -574,10 +642,9 @@ color. The keys:
   were; if a content filter was active when the overlay opened, it is
   restored.
 
-Opening `/` while a content filter is active starts in the contents scope
-with that query filled in, and `/` in the Search view always opens it in the
-contents scope. Content search is off under `--no-live-preview`; `Tab`
-then says why and the contents scope cannot be chosen.
+Pressing `s` while a content filter is active opens with that query filled
+in, and `s` in the Search view opens the same overlay. Content search is
+off under `--no-live-preview`; `s` then says why and does not open.
 
 ## Paging
 

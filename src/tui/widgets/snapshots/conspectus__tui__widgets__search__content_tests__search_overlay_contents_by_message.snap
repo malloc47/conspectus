@@ -4,23 +4,23 @@ expression: text
 ---
 
 
-               ┌ / search contents (2 results) ─────────────────────────────────────┐
-               │/quokka                                                             │
-               │results by message · messages · 34 sessions searched · 2 skipped    │
-               │>  claude    session aaaa1111  turn 4 · message  …quokka design…    │
-               │   claude    session aaaa1111  turn 8 · tool output  …quokka desig… │
-               │                                                                    │
-               │                                                                    │
-               │                                                                    │
-               │                                                                    │
-               │                                                                    │
-               │                                                                    │
-               │                                                                    │
-               │                                                                    │
-               │                                                                    │
-               │                                                                    │
-               │                                                                    │
-               │↑/↓ move · Enter open hit · Esc close · Tab search rows · Ctrl-R    │
-               │results · Ctrl-T tools · Ctrl-Y thinking · Ctrl-F filter lists ·    │
-               │Ctrl-O open Search view                                             │
-               └────────────────────────────────────────────────────────────────────┘
+
+        ┌ / search contents (2 results) ────────────────────────────────────────────────────┐
+        │/quokka                                                                            │
+        │results by message · messages · 34 sessions searched · 2 skipped                   │
+        │>  claude    session aaaa1111  turn 4 · message  we chose the quokka design for it │
+        │   claude    session aaaa1111  turn 8 · tool output  …the quokka design for it     │
+        │                                                                                   │
+        │                                                                                   │
+        │                                                                                   │
+        │                                                                                   │
+        │                                                                                   │
+        │                                                                                   │
+        │                                                                                   │
+        │                                                                                   │
+        │                                                                                   │
+        │                                                                                   │
+        │                                                                                   │
+        │↑/↓ move · Enter open hit · Esc close · Ctrl-R results · Ctrl-T tools · Ctrl-Y     │
+        │thinking · Ctrl-F filter lists · Ctrl-O open Search view                           │
+        └───────────────────────────────────────────────────────────────────────────────────┘

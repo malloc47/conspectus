@@ -1193,7 +1193,7 @@ fn mux_state_value(filter: &RowFilter) -> String {
     }
 }
 
-fn view_label(view: View) -> &'static str {
+pub(crate) fn view_label(view: View) -> &'static str {
     match view {
         View::Sessions => "Sessions",
         View::Mux => "Mux",

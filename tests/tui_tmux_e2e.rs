@@ -764,7 +764,64 @@ fn write_search_sessions(world: &World) {
     fs::write(dir.join(format!("{beta}.jsonl")), second.join("\n") + "\n").unwrap();
 }
 
-/// `/`, Tab, a query: the overlay streams the match; Ctrl-F keeps it as
+/// `/`, a query, Enter: quick select picks a row of the current view and
+/// the right pane follows it.
+#[test]
+fn quick_select_picks_a_row_of_the_current_view() {
+    needs_tmux!();
+    let world = World::new();
+    write_search_sessions(&world);
+    world.new_mux("anchor", false);
+    world.start_tui_outside();
+    wait_screen(&world, "both sessions", |screen| {
+        screen.contains("2 sessions")
+    });
+
+    world.keys(&["1", "/"]);
+    wait_screen(&world, "quick select on Current", |screen| {
+        screen.contains("/ quick select") && screen.contains("[ Current ] All")
+    });
+    world.keys(&["bbbbbbbb"]);
+    wait_screen(&world, "the match", |screen| screen.contains("(1)"));
+    world.keys(&["Enter"]);
+    wait_screen(
+        &world,
+        "the overlay closed on the picked session",
+        |screen| {
+            !screen.contains("quick select")
+                && screen.contains("bbbbbbbb-0000-0000-0000-000000000002")
+        },
+    );
+}
+
+/// `/`, Tab, a name, Enter: the wider reach finds a mux while the
+/// Sessions view is showing, and opening it switches to the Mux view.
+#[test]
+fn quick_select_widened_with_tab_opens_an_entity_from_another_view() {
+    needs_tmux!();
+    let world = World::new();
+    write_search_sessions(&world);
+    world.new_mux("anchor", false);
+    world.start_tui_outside();
+    wait_screen(&world, "both sessions", |screen| {
+        screen.contains("2 sessions")
+    });
+
+    world.keys(&["1", "/", "Tab"]);
+    wait_screen(&world, "quick select on All", |screen| {
+        screen.contains("Current [ All ]")
+    });
+    world.keys(&["anchor"]);
+    wait_screen(&world, "the mux with its outcome word", |screen| {
+        screen.contains("anchor") && screen.contains("in Mux view")
+    });
+    world.keys(&["Enter"]);
+    wait_screen(&world, "the Mux view listing it", |screen| {
+        !screen.contains("quick select") && row(screen, "anchor").is_some()
+    });
+}
+
+/// `s`, a query: the overlay streams the match; Ctrl-F keeps it as
 /// the filter, which narrows the list and shows in the header; `F`
 /// clears it.
 #[test]
@@ -780,7 +837,7 @@ fn the_search_overlay_filters_the_session_list_and_f_clears_it() {
 
     // The TUI opens on the muxes; the content filter is for the sessions.
     world.keys(&["1"]);
-    world.keys(&["/", "Tab"]);
+    world.keys(&["s"]);
     wait_screen(&world, "the contents scope", |screen| {
         screen.contains("/ search contents")
     });
@@ -812,7 +869,7 @@ fn escaping_the_contents_scope_leaves_the_lists_whole() {
         screen.contains("2 sessions")
     });
 
-    world.keys(&["1", "/", "Tab", "quokka"]);
+    world.keys(&["1", "s", "quokka"]);
     wait_screen(&world, "the result", |screen| screen.contains("2 hits"));
     world.keys(&["Escape"]);
     wait_screen(&world, "the overlay closed", |screen| {
@@ -823,7 +880,7 @@ fn escaping_the_contents_scope_leaves_the_lists_whole() {
     assert!(screen.contains("2 sessions"), "{screen}");
 }
 
-/// `/`, Tab, a query, Enter: the viewer opens on the match, `n` steps to
+/// `s`, a query, Enter: the viewer opens on the match, `n` steps to
 /// the next one, and `q` returns to the lists.
 #[test]
 fn a_search_result_opens_the_viewer_on_its_match_and_n_steps_through() {
@@ -836,7 +893,7 @@ fn a_search_result_opens_the_viewer_on_its_match_and_n_steps_through() {
         screen.contains("2 sessions")
     });
 
-    world.keys(&["1", "/", "Tab", "quokka"]);
+    world.keys(&["1", "s", "quokka"]);
     wait_screen(&world, "the streamed result", |screen| {
         screen.contains("2 hits")
     });
@@ -872,7 +929,7 @@ fn the_search_view_lists_hits_and_enter_opens_the_viewer_at_one() {
         screen.contains("2 sessions")
     });
 
-    world.keys(&["1", "/", "Tab", "quokka"]);
+    world.keys(&["1", "s", "quokka"]);
     wait_screen(&world, "the streamed result", |screen| {
         screen.contains("2 hits")
     });
@@ -900,7 +957,7 @@ fn the_flat_search_view_lists_messages_and_enter_opens_the_viewer() {
         screen.contains("2 sessions")
     });
 
-    world.keys(&["1", "/", "Tab", "quokka"]);
+    world.keys(&["1", "s", "quokka"]);
     wait_screen(&world, "the streamed result", |screen| {
         screen.contains("2 hits")
     });
@@ -960,7 +1017,7 @@ fn a_tui_content_search_writes_no_transcript_text_to_disk() {
     wait_screen(&world, "both sessions", |screen| {
         screen.contains("2 sessions")
     });
-    world.keys(&["1", "/", "Tab", "quokka"]);
+    world.keys(&["1", "s", "quokka"]);
     wait_screen(&world, "the streamed result", |screen| {
         screen.contains("2 hits")
     });

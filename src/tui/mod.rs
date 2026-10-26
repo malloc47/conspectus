@@ -27,10 +27,12 @@ pub mod messages;
 pub mod modal;
 pub mod preview;
 pub mod preview_wrap;
+pub mod relation_path;
 pub mod resume;
 pub mod rows;
 mod runtime;
 pub mod search;
+pub mod search_entities;
 #[cfg(feature = "snapshot")]
 pub mod snapshot;
 pub mod theme;

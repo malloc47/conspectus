@@ -462,6 +462,8 @@ pub fn natural_view(snapshot: &GraphSnapshot, node: &NodeId) -> crate::tui::View
     let live = snapshot.is_live(node);
     match node {
         NodeId::MuxSession(_) => View::Mux,
+        NodeId::Pin(_) => View::Pinned,
+        NodeId::Fork(_) if live => View::Forks,
         NodeId::ForgePr(_) if live => View::Prs,
         _ if !live => View::History,
         _ => View::Sessions,

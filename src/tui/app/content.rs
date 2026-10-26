@@ -781,10 +781,9 @@ fn session_label(snapshot: &crate::model::GraphSnapshot, session: &AgentSessionI
     )
 }
 
-/// What the `/` overlay was left set to, for the next time it opens.
+/// What the search overlay was left set to, for the next time it opens.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct SearchMemory {
-    pub scope: crate::tui::widgets::search::SearchScope,
     pub group: Grouping,
     pub kinds: ContentKinds,
 }
@@ -969,7 +968,6 @@ impl App {
     pub(crate) fn remember_search_overlay(&mut self) {
         if let Some(state) = self.search_overlay() {
             self.search_memory = Some(SearchMemory {
-                scope: state.scope(),
                 group: state.group(),
                 kinds: state.kinds(),
             });

@@ -84,6 +84,7 @@ mod menus;
 mod parity;
 mod rendering;
 mod search_flat;
+mod search_quick;
 mod search_view;
 mod state;
 mod styling;

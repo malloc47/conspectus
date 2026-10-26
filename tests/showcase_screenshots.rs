@@ -216,8 +216,8 @@ fn a_content_query_narrows_the_showcase_sessions_and_marks_their_hits() {
     );
 }
 
-/// The `/` overlay searches contents after Tab, streams the matches,
-/// and keeps the query as the filter or opens the Search view.
+/// `s` searches contents, streams the matches, and keeps the query as
+/// the filter or opens the Search view; `/` is quick select.
 #[test]
 fn the_search_overlay_searches_contents_and_promotes_the_query() {
     let scratch = tempfile::tempdir().expect("scratch");
@@ -227,13 +227,16 @@ fn the_search_overlay_searches_contents_and_promotes_the_query() {
         .assert()
         .success();
 
-    // Rows scope is what `/` always was: Tab is the only way across.
-    let rows = frame(scratch.path(), "/");
-    assert!(rows.contains("/ search ("), "{rows}");
-    assert!(!rows.contains("/ search contents"), "{rows}");
-    assert!(rows.contains("Tab search contents"), "{rows}");
+    // `/` is quick select on the current view; Tab widens it to everything.
+    let quick = frame(scratch.path(), "/");
+    assert!(quick.contains("/ quick select"), "{quick}");
+    assert!(quick.contains("[ Current ] All"), "{quick}");
+    assert!(!quick.contains("/ search contents"), "{quick}");
+    assert!(quick.contains("Tab current/all"), "{quick}");
+    let wide = frame(scratch.path(), "/<Tab>");
+    assert!(wide.contains("Current [ All ]"), "{wide}");
 
-    let contents = frame(scratch.path(), "/<Tab>release summary");
+    let contents = frame(scratch.path(), "srelease summary");
     assert!(
         contents.contains("search contents (1 result)"),
         "{contents}"
@@ -243,12 +246,12 @@ fn the_search_overlay_searches_contents_and_promotes_the_query() {
     assert!(contents.contains("sessions searched"), "{contents}");
 
     // Esc leaves everything as it was: no filter, no chip.
-    let closed = frame(scratch.path(), "/<Tab>release summary<Esc>");
+    let closed = frame(scratch.path(), "srelease summary<Esc>");
     assert!(!closed.contains("find:"), "{closed}");
     assert!(closed.contains("11 sessions"), "{closed}");
 
     // Ctrl-F keeps the query as the filter on the lists.
-    let filtered = frame(scratch.path(), "/<Tab>release summary<C-f>");
+    let filtered = frame(scratch.path(), "srelease summary<C-f>");
     assert!(
         filtered.contains("find:\"release summary\" 1 session"),
         "{filtered}"
@@ -257,7 +260,7 @@ fn the_search_overlay_searches_contents_and_promotes_the_query() {
     assert!(!filtered.contains("search contents"), "closes the overlay");
 
     // Ctrl-O keeps it and opens the Search view.
-    let view = frame(scratch.path(), "/<Tab>release summary<C-o>");
+    let view = frame(scratch.path(), "srelease summary<C-o>");
     assert!(view.contains("find:\"release summary\""), "{view}");
     assert!(view.contains("2 hits"), "{view}");
     assert!(view.contains("search"), "{view}");
@@ -274,7 +277,7 @@ fn enter_on_a_contents_result_opens_the_viewer_at_the_match() {
         .assert()
         .success();
 
-    let opened = frame(scratch.path(), "/<Tab>release summary<Enter>");
+    let opened = frame(scratch.path(), "srelease summary<Enter>");
     assert!(
         opened.contains("find \"release summary\" 1/"),
         "the viewer is open with the query active:\n{opened}"

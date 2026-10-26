@@ -569,6 +569,10 @@ impl LoopMode for LiveMode {
                 let hint = app.open_search_entry();
                 app.update(Msg::SetStatus(Some(hint)));
             }
+            Some(Action::OpenContentSearch) => {
+                let hint = app.open_content_search_entry();
+                app.update(Msg::SetStatus(Some(hint)));
+            }
             Some(Action::SearchOverlayKey(key)) => {
                 // A hit that opens the viewer needs the live executor.
                 handle_search_overlay_key_with(app, key, &mut |app, msg| {
@@ -671,6 +675,10 @@ impl LoopMode for StaticMode {
             Some(Action::ViewerOverlayKey(key)) => handle_viewer_overlay_key(app, key),
             Some(Action::OpenSearch) => {
                 let hint = app.open_search_entry();
+                app.update(Msg::SetStatus(Some(hint)));
+            }
+            Some(Action::OpenContentSearch) => {
+                let hint = app.open_content_search_entry();
                 app.update(Msg::SetStatus(Some(hint)));
             }
             Some(Action::SearchOverlayKey(key)) => handle_search_overlay_key(app, key),

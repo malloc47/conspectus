@@ -240,7 +240,7 @@ fn the_overlay_in_the_contents_scope_redraws_at_every_size() {
         text: "needle".into(),
         kinds: ContentKinds::default(),
     });
-    app.open_search_overlay();
+    app.open_content_search_overlay();
     for (width, height) in [(60, 20), (160, 40), (80, 24), (60, 20)] {
         let buffer = buffer_of(&mut app, width, height);
         let text = crate::tui::ui::buffer_to_string(&buffer);

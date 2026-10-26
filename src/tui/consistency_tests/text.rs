@@ -101,6 +101,12 @@ fn screens() -> Vec<(String, String)> {
             ("controls", App::open_controls_overlay),
             ("messages", App::open_messages_overlay),
             ("search", App::open_search_overlay),
+            ("search contents", App::open_content_search_overlay),
+            ("search everything", |app: &mut App| {
+                app.open_search_overlay();
+                super::layout::search_key(app, ratatui::crossterm::event::KeyCode::Tab);
+                super::layout::type_into_search(app, "con");
+            }),
         ] {
             let mut app = app_in(view);
             open(&mut app);

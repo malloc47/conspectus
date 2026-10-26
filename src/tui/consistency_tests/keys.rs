@@ -167,3 +167,33 @@ fn a_departure_from_the_convention_gives_its_reason() {
         );
     }
 }
+
+#[test]
+fn quick_select_switches_reach_with_tab_and_shift_tab_and_content_mode_has_no_tab() {
+    use crate::tui::keybindings::overlay::{SearchKey, footer};
+    assert_eq!(
+        resolve(SEARCH_KEYS, press(KeyCode::Tab)),
+        Some(SearchKey::Scope)
+    );
+    assert_eq!(
+        resolve(
+            SEARCH_KEYS,
+            KeyEvent::new(KeyCode::BackTab, KeyModifiers::SHIFT)
+        ),
+        Some(SearchKey::Scope)
+    );
+    assert_eq!(resolve(SEARCH_CONTENT_KEYS, press(KeyCode::Tab)), None);
+    // The hints are generated from the table, in the operator's words.
+    let hints = footer(SEARCH_KEYS);
+    for expected in ["Tab current/all", "Enter pick", "Esc close", "↑/↓ move"] {
+        assert!(
+            hints.contains(expected),
+            "{expected:?} missing from {hints:?}"
+        );
+    }
+    assert!(!hints.contains("contents"), "{hints}");
+    // The list moves with Ctrl-N and Ctrl-P as well as the arrows.
+    let ctrl = |c| KeyEvent::new(KeyCode::Char(c), KeyModifiers::CONTROL);
+    assert_eq!(resolve(SEARCH_KEYS, ctrl('n')), Some(SearchKey::Down));
+    assert_eq!(resolve(SEARCH_KEYS, ctrl('p')), Some(SearchKey::Up));
+}

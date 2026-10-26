@@ -1,6 +1,6 @@
 use super::*;
 use crate::model::{AgentSessionNode, GraphNode};
-use crate::tui::widgets::search::{SearchOverlayState, SearchScope};
+use crate::tui::widgets::search::{Reach, SearchMode, SearchOverlayState};
 use crate::viewer::model::{TurnKind, TurnRole};
 use crate::viewer::search::{Hit, SessionHits};
 
@@ -265,7 +265,20 @@ fn the_per_message_grouping_lists_a_row_per_matching_turn() {
 }
 
 #[test]
-fn the_overlay_opens_on_the_contents_with_the_query_when_a_search_is_active() {
+fn content_search_opens_on_the_contents_with_the_query_when_a_search_is_active() {
+    let mut app = app_with(&[("a", "alpha")]);
+    app.update(Msg::StartContentSearch {
+        text: "needle".into(),
+        kinds: ContentKinds::default(),
+    });
+    app.open_content_search_overlay();
+    let state = app.search_overlay().expect("open");
+    assert_eq!(state.mode(), SearchMode::Content);
+    assert_eq!(state.query(), "needle");
+}
+
+#[test]
+fn quick_select_opens_empty_on_the_current_reach_even_when_a_search_is_active() {
     let mut app = app_with(&[("a", "alpha")]);
     app.update(Msg::StartContentSearch {
         text: "needle".into(),
@@ -273,26 +286,36 @@ fn the_overlay_opens_on_the_contents_with_the_query_when_a_search_is_active() {
     });
     app.open_search_overlay();
     let state = app.search_overlay().expect("open");
-    assert_eq!(state.scope(), SearchScope::Contents);
-    assert_eq!(state.query(), "needle");
+    assert_eq!(state.mode(), SearchMode::Quick);
+    assert_eq!(state.reach(), Reach::Current);
+    assert_eq!(state.query(), "");
 }
 
 #[test]
-fn the_overlay_remembers_how_it_was_left() {
+fn quick_select_reopens_on_current_whatever_it_was_left_on() {
     let mut app = app_with(&[("a", "alpha")]);
     app.open_search_overlay();
-    assert_eq!(
-        app.search_overlay().map(SearchOverlayState::scope),
-        Some(SearchScope::Rows)
-    );
     app.search_overlay_mut()
         .expect("open")
         .handle_key(crossterm_key(ratatui::crossterm::event::KeyCode::Tab));
+    assert_eq!(
+        app.search_overlay().map(SearchOverlayState::reach),
+        Some(Reach::All)
+    );
     app.close_search_overlay();
     app.open_search_overlay();
     let state = app.search_overlay().expect("open");
-    assert_eq!(state.scope(), SearchScope::Contents);
+    assert_eq!(state.reach(), Reach::Current);
     assert_eq!(state.query(), "", "the query is not remembered");
+}
+
+#[test]
+fn content_search_is_refused_while_live_preview_is_off() {
+    let mut app = app_with(&[("a", "alpha")]);
+    app.config_mut().live_preview_enabled = false;
+    let hint = app.open_content_search_entry();
+    assert!(hint.contains("live preview"), "{hint}");
+    assert!(app.search_overlay().is_none());
 }
 
 fn crossterm_key(code: ratatui::crossterm::event::KeyCode) -> ratatui::crossterm::event::KeyEvent {
@@ -303,9 +326,7 @@ fn crossterm_key(code: ratatui::crossterm::event::KeyCode) -> ratatui::crossterm
 fn the_tick_starts_the_preview_once_the_query_has_rested() {
     use std::time::Duration;
     let mut app = app_with(&[("a", "alpha")]);
-    app.open_search_overlay();
-    let overlay = app.search_overlay_mut().expect("open");
-    overlay.handle_key(crossterm_key(ratatui::crossterm::event::KeyCode::Tab));
+    app.open_content_search_overlay();
     for c in "needle".chars() {
         app.search_overlay_mut()
             .expect("open")
