@@ -634,11 +634,16 @@ with the match picked out in the theme's `match_highlight` color. The keys:
 - Type to search. The scan starts when the query has rested for about
   200 ms and restarts whenever the query, the reach, or an option changes.
   Results arrive while it runs.
-- `Ctrl-R` cycles the results through one per session or pane, one per
-  match under its session or pane, and one per match with the newest first
-  (`results by session`, `results by message`, `results by message, flat`),
-  `Ctrl-T` includes tool calls and output, and `Ctrl-Y` includes thinking.
-  They apply to sessions; the starting values come from `[search]`.
+- The title shows two choices. `Tab` switches the reach between
+  **Current** and **All**; `Ctrl-L` switches the granularity between
+  **Sessions** (one row per session or pane) and **Messages** (every match,
+  newest first). Changing the granularity lists the same matches another
+  way and never searches again; the starting value comes from `[search]`.
+- `Ctrl-O` opens the search options in the modal: whether tool calls and
+  output, thinking, and pane scrollback are searched (`Space` or `Enter`
+  flips one, `Esc` goes back to the results). Changing one searches again.
+  The tool and thinking options apply to sessions; the starting values
+  come from `[search]`.
 - `Up`/`Down` (or `Ctrl-P`/`Ctrl-N`) move through the results. `Enter`
   opens a session hit in the viewer at the match, with the query already
   searched, or a pane hit in a scrollback pager on a fresh capture, at the
@@ -647,10 +652,15 @@ with the match picked out in the theme's `match_highlight` color. The keys:
 - `Ctrl-S` keeps the search and opens the Search view on it (a scan still
   running goes on there). `Ctrl-F` keeps the query as the filter on the
   Sessions, Mux, and PRs lists and closes the modal; `F` clears it.
-  `Ctrl-O` no longer does anything here.
 - `Esc` closes the modal and stops a running scan. The lists are left as
   they were; if a content filter was active when the modal opened, it is
-  restored. The search stays in the Search view.
+  restored. The Search view does not change while the modal is open: the
+  search typed in the modal joins the remembered searches when the modal
+  exits (by `Esc`, `Ctrl-S`, `Ctrl-F`, or `Enter` on a hit), as the newest
+  one, marked `stopped` if its scan had not ended. A search that never
+  started, or whose query was emptied, is not remembered, and neither is a
+  repeat of one already remembered (the same text, kinds, scope, and pane
+  setting), which takes that one's place instead.
 
 A pane that runs an agent shows what the agent's own session already
 contains only once: the pane lines found in the transcripts of the
@@ -851,7 +861,7 @@ Content search reads transcripts on demand and keeps nothing on disk.
 
 ```toml
 [search]
-group = "session"           # or "message" (a row per matching turn under its session) or "flat" (turns only, newest first)
+group = "session"           # the TUI's granularity: "session" lists sessions; "message" or "flat" lists the matching messages, newest first (`conspectus search --group` still tells the three apart)
 kinds = ["messages"]        # add "tools" and/or "thinking" to search those too
 history = 10                # content searches the Search view remembers (0 keeps only the one it shows)
 ```
@@ -1136,10 +1146,12 @@ on the search shown; `/` is quick select over the rows.
 The sessions and panes are ranked together by how many matches they hold
 and then by the latest (a pane's latest is when its scrollback was read;
 the Recency sort puts the latest first). Groupings (`Ctrl-G`): none,
-project, harness (panes sit under **Mux panes**). The Controls `Results`
-section cycles one row per session or pane, a row per match listed under
-each, and a flat list of matches, newest first (`Ctrl-R` in the modal does
-the same); `[search] group` sets the default. The flat list reads the
+project, harness (panes sit under **Mux panes**). `Ctrl-L`, or the Controls
+`Results` section's `listed as` row, switches between **Sessions** (one row
+per session or pane) and **Messages** (a flat list of matches, newest
+first); `Ctrl-O`, or the Controls `options` row, opens the search options
+(the modal's `Ctrl-O`). `[search] group` sets the default granularity
+(`session` for Sessions; `message` and `flat` for Messages). The Messages list reads the
 matching sessions' transcripts to find the turns, newest matches first and
 at most 100 sessions; the find chip says `reading messages` while it loads
 and `showing N of M messages` if that cap left some out. Per-message

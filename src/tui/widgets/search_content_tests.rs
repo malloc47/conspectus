@@ -191,13 +191,17 @@ fn an_empty_query_stops_the_preview() {
 }
 
 #[test]
-fn grouping_and_kinds_change_inside_the_overlay_and_restart_the_scan() {
+fn the_options_pane_changes_what_is_searched_and_restarts_the_scan() {
     let mut state = contents_overlay("quokka");
-    state.handle_key(ctrl('r'));
-    assert_eq!(state.group(), Grouping::Message);
-    state.handle_key(ctrl('t'));
-    state.handle_key(ctrl('y'));
+    state.handle_key(ctrl('o'));
+    assert_eq!(state.options_cursor(), Some(0));
+    state.handle_key(plain(KeyCode::Char(' ')));
+    state.handle_key(plain(KeyCode::Down));
+    state.handle_key(plain(KeyCode::Enter));
+    state.handle_key(plain(KeyCode::Down));
+    state.handle_key(plain(KeyCode::Char(' ')));
     assert!(state.kinds().tools && state.kinds().thinking);
+    assert!(!state.panes());
     let due = state.take_due_search(Instant::now(), true);
     assert_eq!(
         due,
@@ -208,14 +212,49 @@ fn grouping_and_kinds_change_inside_the_overlay_and_restart_the_scan() {
                 thinking: true,
                 ..ContentKinds::default()
             },
-            group: Grouping::Message,
+            group: Grouping::Session,
             reach: Reach::Current,
         })
     );
-    state.handle_key(ctrl('r'));
-    assert_eq!(state.group(), Grouping::Flat, "the third mode follows");
-    state.handle_key(ctrl('r'));
-    assert_eq!(state.group(), Grouping::Session, "and the cycle wraps");
+    // Esc goes back to the results, not out of the modal.
+    assert!(matches!(
+        state.handle_key(plain(KeyCode::Esc)),
+        SearchOutcome::Continue
+    ));
+    assert_eq!(state.options_cursor(), None);
+    assert!(matches!(
+        state.handle_key(plain(KeyCode::Esc)),
+        SearchOutcome::Cancel
+    ));
+}
+
+#[test]
+fn the_granularity_key_lists_the_same_matches_another_way_without_a_new_scan() {
+    let mut state = contents_overlay("quokka");
+    assert!(matches!(
+        state.handle_key(ctrl('l')),
+        SearchOutcome::Regroup(Grouping::Flat)
+    ));
+    assert_eq!(state.group(), Grouping::Flat);
+    assert_eq!(
+        state.take_due_search(Instant::now(), true),
+        None,
+        "no scan is owed"
+    );
+    assert!(matches!(
+        state.handle_key(ctrl('l')),
+        SearchOutcome::Regroup(Grouping::Session)
+    ));
+}
+
+#[test]
+fn the_retired_result_and_kind_keys_edit_the_query_like_any_other() {
+    let mut state = contents_overlay("quokka");
+    for c in ['r', 't', 'y'] {
+        state.handle_key(ctrl(c));
+    }
+    assert_eq!(state.group(), Grouping::Session);
+    assert!(!state.kinds().tools && !state.kinds().thinking);
 }
 
 #[test]
@@ -350,11 +389,11 @@ fn escape_closes_in_either_scope() {
 
 #[test]
 fn the_rows_scope_does_not_bind_the_contents_keys() {
-    // Ctrl-F and Ctrl-R are text-editing keys in quick select; the
-    // contents keys apply only in content mode.
+    // Ctrl-F is a text-editing key in quick select; the contents keys
+    // apply only in content mode.
     let mut state = SearchOverlayState::new();
-    state.handle_key(ctrl('r'));
-    state.handle_key(ctrl('t'));
+    state.handle_key(ctrl('l'));
+    state.handle_key(ctrl('o'));
     assert_eq!(state.group(), Grouping::Session);
     assert!(!state.kinds().tools);
     assert_eq!(state.mode(), SearchMode::Quick);
@@ -407,7 +446,8 @@ fn the_contents_scope_shows_progress_results_and_the_generated_key_hints() {
     );
     assert!(text.contains("search contents"), "{text}");
     assert!(text.contains("[ Current ] All"), "{text}");
-    assert!(text.contains("(2 results)"), "{text}");
+    assert!(text.contains("[ Sessions ] Messages"), "{text}");
+    assert!(text.contains("2 results"), "{text}");
     assert!(text.contains("/quokka"), "{text}");
     assert!(
         text.contains("34/77 sessions") && text.contains("2 skipped"),
@@ -420,39 +460,24 @@ fn the_contents_scope_shows_progress_results_and_the_generated_key_hints() {
     assert!(text.contains("Tab current/all"), "{text}");
     assert!(text.contains("Ctrl-F filter lists"), "{text}");
     assert!(text.contains("Ctrl-S Search view"), "{text}");
-    assert!(!text.contains("Ctrl-O"), "{text}");
+    assert!(text.contains("Ctrl-L sessions/messages"), "{text}");
+    assert!(text.contains("Ctrl-O options"), "{text}");
+    for retired in ["Ctrl-R", "Ctrl-T", "Ctrl-Y", "thinking ·"] {
+        assert!(!text.contains(retired), "{retired}: {text}");
+    }
     insta::assert_snapshot!("search_overlay_contents_by_session", text);
 }
 
 #[test]
-fn the_per_message_grouping_lists_one_row_per_turn() {
+fn the_messages_granularity_names_the_session_of_every_message() {
     let mut state = contents_overlay("quokka");
-    state.handle_key(ctrl('r'));
-    let mut first = row("aaaa1111", 3);
-    first.turn = Some("turn 4 · message".into());
-    let mut second = row("aaaa1111", 7);
-    second.turn = Some("turn 8 · tool output".into());
-    let text = render(&state, &view(vec![first, second], true), 100, 24);
-    assert!(text.contains("by message"), "{text}");
-    assert!(
-        text.contains("turn 4 · message") && text.contains("turn 8 · tool output"),
-        "{text}"
-    );
-    assert!(text.contains("34 sessions searched"), "{text}");
-    insta::assert_snapshot!("search_overlay_contents_by_message", text);
-}
-
-#[test]
-fn the_flat_grouping_names_the_session_of_every_message() {
-    let mut state = contents_overlay("quokka");
-    state.handle_key(ctrl('r'));
-    state.handle_key(ctrl('r'));
+    state.handle_key(ctrl('l'));
     let mut first = row("aaaa1111", 3);
     first.turn = Some("turn 4 · message".into());
     let mut second = row("bbbb2222", 1);
     second.turn = Some("turn 2 · message".into());
     let text = render(&state, &view(vec![first, second], true), 100, 24);
-    assert!(text.contains("by message, flat"), "{text}");
+    assert!(text.contains("Sessions [ Messages ]"), "{text}");
     assert!(
         text.contains("session aaaa1111") && text.contains("session bbbb2222"),
         "{text}"
@@ -593,4 +618,39 @@ fn the_modal_scales_to_a_wide_terminal_without_clipping() {
             );
         }
     }
+}
+
+fn header(width: u16) -> String {
+    let state = contents_overlay("quokka");
+    let text = render(&state, &view(vec![row("aaaa1111", 3)], true), width, 24);
+    assert!(
+        text.contains("[ Current ] All  [ Sessions ] Messages"),
+        "{width}: {text}"
+    );
+    text.lines()
+        .filter(|line| !line.trim().is_empty())
+        .take(3)
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+#[test]
+fn the_header_shows_both_choices_at_every_width() {
+    insta::assert_snapshot!("search_overlay_contents_header_80", header(80));
+    insta::assert_snapshot!("search_overlay_contents_header_160", header(160));
+    insta::assert_snapshot!("search_overlay_contents_header_220", header(220));
+}
+
+#[test]
+fn the_options_pane_lists_what_a_search_looks_in() {
+    let mut state = contents_overlay("quokka");
+    state.handle_key(ctrl('o'));
+    state.handle_key(plain(KeyCode::Char(' ')));
+    let text = render(&state, &view(vec![row("aaaa1111", 3)], true), 100, 14);
+    assert!(text.contains("[x] Tool calls and output"), "{text}");
+    assert!(text.contains("[ ] Thinking"), "{text}");
+    assert!(text.contains("[x] Pane scrollback"), "{text}");
+    assert!(text.contains("Esc back"), "{text}");
+    assert!(!text.contains("session aaaa1111"), "the results give way");
+    insta::assert_snapshot!("search_overlay_options_pane", text);
 }

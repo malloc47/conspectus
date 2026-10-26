@@ -133,7 +133,7 @@ fn searches_that_differ_in_kinds_or_scope_are_distinct_entries() {
     start_with(&mut app, "same", tools);
     assert_eq!(app.search_history().len(), 2, "kinds differ");
     preview(&mut app, "same", Reach::Current);
-    app.finalize_search_drafts();
+    app.commit_modal_search();
     assert_eq!(app.search_history().len(), 3, "scope differs");
     start(&mut app, "same");
     assert_eq!(app.search_history().len(), 3, "the All search is the first");
@@ -172,7 +172,7 @@ fn typing_a_prefix_of_an_earlier_search_in_the_modal_keeps_that_search() {
     start(&mut app, "ne");
     preview(&mut app, "ne", Reach::All);
     preview(&mut app, "need", Reach::All);
-    app.finalize_search_drafts();
+    app.commit_modal_search();
     assert_eq!(texts(&app), ["ne", "need"]);
 }
 
@@ -181,8 +181,9 @@ fn closing_the_modal_on_a_search_equal_to_an_earlier_one_keeps_one_entry() {
     let mut app = app_with(&["a"]);
     start(&mut app, "ne");
     start(&mut app, "other");
+    app.open_content_search_overlay();
     preview(&mut app, "ne", Reach::All);
-    app.finalize_search_drafts();
+    app.commit_modal_search();
     assert_eq!(texts(&app), ["other", "ne"]);
     assert_eq!(app.viewed_search().unwrap().text, "ne");
 }
@@ -203,15 +204,91 @@ fn a_content_search_opens_on_all_unless_it_opens_onto_a_search() {
 }
 
 #[test]
-fn typing_in_the_modal_replaces_its_draft_and_closing_keeps_it() {
+fn typing_in_the_modal_remembers_one_search_when_it_closes() {
     let mut app = app_with(&["a"]);
     preview(&mut app, "ne", Reach::All);
     preview(&mut app, "need", Reach::All);
     preview(&mut app, "needle", Reach::All);
-    assert_eq!(texts(&app), ["needle"], "one entry for the modal session");
-    app.finalize_search_drafts();
+    assert!(texts(&app).is_empty(), "nothing is remembered while typing");
+    app.commit_modal_search();
+    assert_eq!(texts(&app), ["needle"]);
     preview(&mut app, "other", Reach::All);
-    assert_eq!(texts(&app), ["needle", "other"], "a kept search stays");
+    app.commit_modal_search();
+    assert_eq!(texts(&app), ["needle", "other"]);
+}
+
+#[test]
+fn the_search_view_stays_put_while_the_modal_types_and_takes_the_search_on_exit() {
+    let mut app = app_with(&["a", "b"]);
+    start(&mut app, "first");
+    app.take_scan_request();
+    finish_scan(&mut app, &["a"]);
+    app.update(Msg::SwitchView(View::Search));
+    app.open_content_search_overlay();
+    preview(&mut app, "sec", Reach::All);
+    preview(&mut app, "second", Reach::All);
+    app.take_scan_request();
+    finish_scan(&mut app, &["a", "b"]);
+    assert_eq!(texts(&app), ["first"], "nothing is remembered yet");
+    assert_eq!(app.viewed_search().unwrap().text, "first");
+    app.close_search_overlay();
+    assert_eq!(texts(&app), ["first", "second"]);
+    assert_eq!(app.viewed_search().unwrap().text, "second");
+    assert!(!app.search_history().viewed().unwrap().stopped);
+}
+
+#[test]
+fn leaving_the_modal_mid_scan_remembers_the_search_as_stopped() {
+    let mut app = app_with(&["a"]);
+    app.open_content_search_overlay();
+    preview(&mut app, "needle", Reach::All);
+    app.close_search_overlay();
+    app.update(Msg::DiscardContentPreview);
+    assert_eq!(texts(&app), ["needle"]);
+    assert!(app.search_history().viewed().unwrap().stopped);
+}
+
+#[test]
+fn a_modal_that_never_searched_remembers_nothing() {
+    let mut app = app_with(&["a"]);
+    app.open_content_search_overlay();
+    app.close_search_overlay();
+    app.update(Msg::DiscardContentPreview);
+    assert!(app.search_history().is_empty());
+}
+
+#[test]
+fn applying_or_keeping_from_the_modal_remembers_the_search() {
+    let mut app = app_with(&["a"]);
+    app.open_content_search_overlay();
+    app.update(Msg::KeepContentSearch {
+        text: "kept".into(),
+        kinds: ContentKinds::default(),
+        group: Grouping::Session,
+        reach: Reach::All,
+    });
+    assert_eq!(texts(&app), ["kept"]);
+    app.open_content_search_overlay();
+    app.update(Msg::ApplyContentSearch {
+        text: "applied".into(),
+        kinds: ContentKinds::default(),
+        group: Grouping::Session,
+        reach: Reach::All,
+        show_results: false,
+    });
+    assert_eq!(texts(&app), ["kept", "applied"]);
+}
+
+#[test]
+fn a_repeat_of_an_earlier_search_on_exit_moves_it_to_the_newest_end() {
+    let mut app = app_with(&["a"]);
+    start(&mut app, "one");
+    start(&mut app, "two");
+    app.open_content_search_overlay();
+    preview(&mut app, "one", Reach::All);
+    assert_eq!(texts(&app), ["one", "two"]);
+    app.close_search_overlay();
+    assert_eq!(texts(&app), ["two", "one"]);
 }
 
 #[test]
@@ -227,6 +304,7 @@ fn emptying_the_query_inside_the_modal_abandons_the_draft() {
 fn closing_the_modal_mid_scan_keeps_a_stopped_entry() {
     let mut app = app_with(&["a"]);
     preview(&mut app, "needle", Reach::All);
+    app.commit_modal_search();
     app.update(Msg::DiscardContentPreview);
     let entry = app.search_history().viewed().unwrap();
     assert!(entry.stopped);
@@ -362,7 +440,7 @@ fn keeping_a_running_search_lets_it_finish_in_the_background() {
     finish_scan(&mut app, &["a"]);
     preview(&mut app, "new", Reach::All);
     app.take_scan_request();
-    app.finalize_search_drafts();
+    app.commit_modal_search();
     app.update(Msg::KeepContentSearch {
         text: "new".into(),
         kinds: ContentKinds::default(),
@@ -401,7 +479,7 @@ fn panes_arrive_with_a_search_and_become_rows_of_the_search_view() {
         generation,
         batch: vec![pane("work", "%3", 2)],
     });
-    app.finalize_search_drafts();
+    app.commit_modal_search();
     finish_scan(&mut app, &[]);
     app.update(Msg::KeepContentSearch {
         text: "needle".into(),
@@ -443,6 +521,7 @@ fn current_reach_reads_only_what_the_view_lists_and_skips_panes_without_muxes() 
     let request = app.take_scan_request().unwrap();
     assert_eq!(request.sessions.len(), 2);
     assert!(request.panes.is_none(), "no muxes listed, no panes read");
+    app.commit_modal_search();
     assert!(!app.viewed_search().unwrap().with_panes);
 }
 
@@ -452,7 +531,7 @@ fn a_current_search_made_in_the_search_view_keeps_the_scope_of_the_search_shown(
     preview(&mut app, "one", Reach::Current);
     app.take_scan_request();
     finish_scan(&mut app, &["a"]);
-    app.finalize_search_drafts();
+    app.commit_modal_search();
     app.update(Msg::SwitchView(View::Search));
     preview(&mut app, "two", Reach::Current);
     let request = app.take_scan_request().unwrap();
@@ -559,4 +638,63 @@ fn load_keeps_working_with_a_remembered_search() {
     });
     load(&mut app, &["a", "b"]);
     assert_eq!(app.search_history().len(), 1);
+}
+
+#[test]
+fn searches_with_and_without_pane_scrollback_are_distinct_entries() {
+    let mut app = app_with(&["a"]);
+    app.open_content_search_overlay();
+    preview(&mut app, "needle", Reach::All);
+    app.close_search_overlay();
+    app.open_content_search_overlay();
+    app.search_overlay_mut().unwrap().with_panes_off();
+    preview(&mut app, "needle", Reach::All);
+    app.close_search_overlay();
+    let panes: Vec<_> = app
+        .search_history()
+        .entries()
+        .iter()
+        .map(|entry| entry.search.with_panes)
+        .collect();
+    assert_eq!(panes, [true, false]);
+}
+
+#[test]
+fn the_granularity_changed_in_the_modal_does_not_change_the_search_view_or_start_a_scan() {
+    let mut app = app_with(&["a"]);
+    start(&mut app, "first");
+    app.take_scan_request();
+    finish_scan(&mut app, &["a"]);
+    app.update(Msg::SwitchView(View::Search));
+    app.open_content_search_overlay();
+    preview(&mut app, "second", Reach::All);
+    app.take_scan_request();
+    app.update(Msg::SetContentGroup(Grouping::Flat));
+    assert_eq!(app.viewed_search().unwrap().group, Grouping::Session);
+    assert!(app.take_scan_request().is_none(), "no scan for a regroup");
+    app.close_search_overlay();
+    assert_eq!(app.viewed_search().unwrap().group, Grouping::Flat);
+}
+
+#[test]
+fn the_search_view_toggles_granularity_on_the_shown_search_without_scanning() {
+    let mut app = app_with(&["a"]);
+    start(&mut app, "first");
+    app.take_scan_request();
+    finish_scan(&mut app, &["a"]);
+    app.update(Msg::SwitchView(View::Search));
+    app.update(Msg::ToggleSearchGranularity);
+    assert_eq!(app.viewed_search().unwrap().group, Grouping::Flat);
+    app.update(Msg::ToggleSearchGranularity);
+    assert_eq!(app.viewed_search().unwrap().group, Grouping::Session);
+    assert!(app.take_scan_request().is_none());
+    assert_eq!(app.search_history().len(), 1, "not a new search");
+}
+
+#[test]
+fn the_options_open_the_modal_with_the_pane_showing() {
+    let mut app = app_with(&["a"]);
+    app.update(Msg::OpenSearchOptions);
+    let state = app.search_overlay().expect("the modal is open");
+    assert_eq!(state.options_cursor(), Some(0));
 }

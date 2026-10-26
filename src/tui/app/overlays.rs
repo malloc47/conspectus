@@ -634,6 +634,7 @@ impl App {
                 &shown.text,
             )
             .with_reach(shown.reach)
+            .with_panes(shown.with_panes)
         } else if let Some(content) = self.content() {
             SearchOverlayState::configured(
                 SearchMode::Content,
@@ -643,12 +644,14 @@ impl App {
                 &content.text,
             )
             .with_reach(content.reach)
+            .with_panes(content.with_panes)
         } else {
             let (group, kinds) = self.search_options();
             // A fresh content search reads everything; `Current` is one
             // keypress away.
             SearchOverlayState::configured(SearchMode::Content, group, kinds, enabled, "")
                 .with_reach(crate::tui::widgets::search::Reach::All)
+                .with_panes(self.search_memory.is_none_or(|memory| memory.panes))
         };
         self.modal_stack.push(crate::tui::Modal::Search(state));
     }
@@ -663,7 +666,10 @@ impl App {
     ) {
         match self.search_memory {
             Some(memory) => (memory.group, memory.kinds),
-            None => (self.config.search.group, self.config.search.kinds),
+            None => (
+                self.config.search.group.granularity(),
+                self.config.search.kinds,
+            ),
         }
     }
 
@@ -672,7 +678,7 @@ impl App {
         if matches!(self.modal_stack.last(), Some(crate::tui::Modal::Search(_))) {
             self.remember_search_overlay();
             self.modal_stack.pop();
-            self.finalize_search_drafts();
+            self.commit_modal_search();
         }
     }
 

@@ -182,6 +182,37 @@ const fn alias<A>(key: KeyMatcher, action: A) -> KeyRow<A> {
     }
 }
 
+/// What the search options pane binds. Space and Enter both flip the
+/// option under the cursor.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SearchOptionKey {
+    Abort,
+    Back,
+    Down,
+    Up,
+    Toggle,
+}
+
+/// The pane behind `Ctrl-O` in the contents modal: what a search looks in.
+pub const SEARCH_OPTION_KEYS: &[KeyRow<SearchOptionKey>] = &[
+    alias(ctrl('c'), SearchOptionKey::Abort),
+    shown(key(KeyCode::Up), SearchOptionKey::Up, "↑", "move"),
+    shown(key(KeyCode::Down), SearchOptionKey::Down, "↓", "move"),
+    alias(ctrl('n'), SearchOptionKey::Down),
+    alias(ctrl('p'), SearchOptionKey::Up),
+    alias(key(KeyCode::Char('k')), SearchOptionKey::Up),
+    alias(key(KeyCode::Char('j')), SearchOptionKey::Down),
+    shown(
+        key(KeyCode::Char(' ')),
+        SearchOptionKey::Toggle,
+        "Space",
+        "toggle",
+    ),
+    alias(key(KeyCode::Enter), SearchOptionKey::Toggle),
+    shown(key(KeyCode::Esc), SearchOptionKey::Back, "Esc", "back"),
+    alias(ctrl('o'), SearchOptionKey::Back),
+];
+
 // ---------------------------------------------------------------------
 // Menus: Controls, the pins menu, the mux menu.
 // ---------------------------------------------------------------------
@@ -325,12 +356,10 @@ pub enum SearchKey {
     Up,
     /// Quick select: switch between the current view and everything.
     Scope,
-    /// Contents scope: one result per session, or per matching turn.
-    Results,
-    /// Contents scope: include tool calls and output.
-    Tools,
-    /// Contents scope: include thinking.
-    Thinking,
+    /// Contents scope: list sessions, or the matching messages.
+    Granularity,
+    /// Contents scope: open the search options.
+    Options,
     /// Contents scope: keep the query as the filter on the lists.
     ApplyFilter,
     /// Contents scope: keep the search and open the Search view on it.
@@ -373,9 +402,13 @@ pub const SEARCH_CONTENT_KEYS: &[KeyRow<SearchKey>] = &[
     shown(key(KeyCode::Esc), SearchKey::Cancel, "Esc", "close"),
     shown(key(KeyCode::Tab), SearchKey::Scope, "Tab", "current/all"),
     alias(key(KeyCode::BackTab), SearchKey::Scope),
-    shown(ctrl('r'), SearchKey::Results, "Ctrl-R", "results"),
-    shown(ctrl('t'), SearchKey::Tools, "Ctrl-T", "tools"),
-    shown(ctrl('y'), SearchKey::Thinking, "Ctrl-Y", "thinking"),
+    shown(
+        ctrl('l'),
+        SearchKey::Granularity,
+        "Ctrl-L",
+        "sessions/messages",
+    ),
+    shown(ctrl('o'), SearchKey::Options, "Ctrl-O", "options"),
     shown(ctrl('f'), SearchKey::ApplyFilter, "Ctrl-F", "filter lists"),
     shown(ctrl('s'), SearchKey::Keep, "Ctrl-S", "Search view"),
 ];

@@ -173,6 +173,10 @@ pub struct SearchOverlayState {
     entity_matches: Vec<EntityMatch>,
     group: Grouping,
     kinds: ContentKinds,
+    /// Whether the search reads pane scrollback as well as transcripts.
+    panes: bool,
+    /// The options pane is open, with its cursor on this option.
+    options: Option<usize>,
     /// Whether the contents scope can run (live preview is on).
     contents_enabled: bool,
     /// Results in the contents scope, set by the host before a key.
@@ -193,6 +197,8 @@ impl SearchOverlayState {
             entity_matches: Vec::new(),
             group: Grouping::default(),
             kinds: ContentKinds::default(),
+            panes: true,
+            options: None,
             contents_enabled: true,
             content_len: 0,
             edited_at: None,
@@ -212,7 +218,7 @@ impl SearchOverlayState {
     ) -> Self {
         let mut state = Self::new();
         state.input = TextInputState::new(" search ", query.to_string());
-        state.group = group;
+        state.group = group.granularity();
         state.kinds = kinds;
         state.contents_enabled = contents_enabled;
         if mode == SearchMode::Content && contents_enabled {
@@ -226,6 +232,36 @@ impl SearchOverlayState {
     pub fn with_reach(mut self, reach: Reach) -> Self {
         self.reach = reach;
         self
+    }
+
+    /// Open with the pane scrollback option set as given.
+    #[must_use]
+    pub fn with_panes(mut self, panes: bool) -> Self {
+        self.panes = panes;
+        self
+    }
+
+    /// Turn off pane scrollback, as the options pane would.
+    #[cfg(test)]
+    pub fn with_panes_off(&mut self) {
+        self.panes = false;
+    }
+
+    /// Open with the options pane showing.
+    #[must_use]
+    pub fn with_options_open(mut self) -> Self {
+        self.options = Some(0);
+        self
+    }
+
+    /// Whether pane scrollback is searched.
+    pub fn panes(&self) -> bool {
+        self.panes
+    }
+
+    /// The options pane's cursor, when the pane is open.
+    pub fn options_cursor(&self) -> Option<usize> {
+        self.options
     }
 
     pub fn mode(&self) -> SearchMode {
@@ -385,7 +421,12 @@ pub enum SearchOutcome {
     ApplyFilter,
     /// Content mode: keep the search in the Search view and go there.
     Keep,
+    /// Content mode: list the same results at another granularity.
+    Regroup(Grouping),
 }
+
+/// The options the pane lists, in order.
+pub const SEARCH_OPTIONS: [&str; 3] = ["Tool calls and output", "Thinking", "Pane scrollback"];
 
 impl SearchOverlayState {
     /// Dispatch a crossterm key event.
@@ -408,6 +449,9 @@ impl SearchOverlayState {
             SearchMode::Content => SEARCH_CONTENT_KEYS,
         };
         let contents = self.mode == SearchMode::Content;
+        if contents && self.options.is_some() {
+            return self.handle_options_key(event);
+        }
         match resolve(table, event) {
             Some(SearchKey::Abort | SearchKey::Cancel) => SearchOutcome::Cancel,
             Some(SearchKey::Pick) if contents => {
@@ -446,20 +490,17 @@ impl SearchOverlayState {
                 }
                 SearchOutcome::Continue
             }
-            Some(SearchKey::Results) => {
-                self.group = self.group.next();
+            Some(SearchKey::Granularity) => {
+                // Listing the same matches another way is not a new search.
+                self.group = match self.group.granularity() {
+                    Grouping::Session => Grouping::Flat,
+                    _ => Grouping::Session,
+                };
                 self.cursor = 0;
-                self.edited_at = Some(Instant::now());
-                SearchOutcome::Continue
+                SearchOutcome::Regroup(self.group)
             }
-            Some(SearchKey::Tools) => {
-                self.kinds.tools = !self.kinds.tools;
-                self.edited_at = Some(Instant::now());
-                SearchOutcome::Continue
-            }
-            Some(SearchKey::Thinking) => {
-                self.kinds.thinking = !self.kinds.thinking;
-                self.edited_at = Some(Instant::now());
+            Some(SearchKey::Options) => {
+                self.options = Some(0);
                 SearchOutcome::Continue
             }
             Some(SearchKey::ApplyFilter) => self.promote(SearchOutcome::ApplyFilter),
@@ -478,6 +519,33 @@ impl SearchOverlayState {
                 SearchOutcome::Continue
             }
         }
+    }
+
+    /// A key while the options pane is open.
+    fn handle_options_key(&mut self, event: KeyEvent) -> SearchOutcome {
+        use crate::tui::keybindings::overlay::{SEARCH_OPTION_KEYS, SearchOptionKey, resolve};
+        let at = self.options.unwrap_or(0);
+        match resolve(SEARCH_OPTION_KEYS, event) {
+            Some(SearchOptionKey::Abort) => return SearchOutcome::Cancel,
+            Some(SearchOptionKey::Back) => self.options = None,
+            Some(SearchOptionKey::Down) => {
+                self.options = Some(crate::tui::cursor::wrap_step(at, SEARCH_OPTIONS.len(), 1));
+            }
+            Some(SearchOptionKey::Up) => {
+                self.options = Some(crate::tui::cursor::wrap_step(at, SEARCH_OPTIONS.len(), -1));
+            }
+            Some(SearchOptionKey::Toggle) => {
+                match at {
+                    0 => self.kinds.tools = !self.kinds.tools,
+                    1 => self.kinds.thinking = !self.kinds.thinking,
+                    _ => self.panes = !self.panes,
+                }
+                self.cursor = 0;
+                self.edited_at = Some(Instant::now());
+            }
+            None => {}
+        }
+        SearchOutcome::Continue
     }
 
     /// `outcome` for a query worth keeping; nothing for an empty one.
@@ -546,18 +614,31 @@ impl<'a> SearchOverlayWidget<'a> {
 /// The reach choices as a title segment: the chosen one in brackets, so
 /// the title is as wide whichever is chosen.
 fn reach_segments(reach: Reach, theme: &Theme) -> Vec<Span<'static>> {
+    choice_segments(
+        [
+            (reach == Reach::Current, "Current"),
+            (reach == Reach::All, "All"),
+        ],
+        theme,
+    )
+}
+
+/// The granularity choices as a title segment, the same way.
+fn granularity_segments(group: Grouping, theme: &Theme) -> Vec<Span<'static>> {
+    let sessions = group.granularity() == Grouping::Session;
+    choice_segments([(sessions, "Sessions"), (!sessions, "Messages")], theme)
+}
+
+fn choice_segments(choices: [(bool, &'static str); 2], theme: &Theme) -> Vec<Span<'static>> {
     let chosen = Style::default()
         .fg(theme.panel_focus_accent)
         .add_modifier(Modifier::BOLD | Modifier::REVERSED);
     let mut spans = Vec::new();
-    for (i, (which, word)) in [(Reach::Current, "Current"), (Reach::All, "All")]
-        .into_iter()
-        .enumerate()
-    {
+    for (i, (on, word)) in choices.into_iter().enumerate() {
         if i > 0 {
             spans.push(Span::raw(" "));
         }
-        if which == reach {
+        if on {
             spans.push(Span::styled(format!("[ {word} ]"), chosen));
         } else {
             spans.push(Span::raw(word));
@@ -573,18 +654,12 @@ impl Widget for SearchOverlayWidget<'_> {
         // auto-sizing reproduces it.
         let modal = centered_modal_rect(area);
         let title = match (self.state.mode(), self.content) {
-            (SearchMode::Content, view) => {
+            (SearchMode::Content, _) => {
                 let mut spans = vec![Span::raw(" / search contents  ")];
                 spans.extend(reach_segments(self.state.reach(), self.theme));
-                if let Some(view) = view {
-                    let n = view.rows.len();
-                    spans.push(Span::raw(format!(
-                        "  ({n} {}) ",
-                        if n == 1 { "result" } else { "results" }
-                    )));
-                } else {
-                    spans.push(Span::raw(" "));
-                }
+                spans.push(Span::raw("  "));
+                spans.extend(granularity_segments(self.state.group(), self.theme));
+                spans.push(Span::raw(" "));
                 Line::from(spans)
             }
             (SearchMode::Quick, _) => {
@@ -858,7 +933,12 @@ impl SearchBody<'_> {
         let empty = ContentView::default();
         let view = self.content.unwrap_or(&empty);
 
-        let hint_rows = self.render_footer(area, buf, &footer(SEARCH_CONTENT_KEYS));
+        let options = self.state.options_cursor();
+        let hints = match options {
+            Some(_) => footer(crate::tui::keybindings::overlay::SEARCH_OPTION_KEYS),
+            None => footer(SEARCH_CONTENT_KEYS),
+        };
+        let hint_rows = self.render_footer(area, buf, &hints);
         let hint_top = area.y + area.height - hint_rows;
 
         // Status row: what is searched and how far the scan has got.
@@ -879,6 +959,10 @@ impl SearchBody<'_> {
             width: area.width,
             height: u16::try_from(list_height).unwrap_or(0),
         };
+        if let Some(at) = options {
+            self.render_options(list_area, buf, at);
+            return;
+        }
         if view.rows.is_empty() {
             let label = if let Some(reason) = view.unavailable {
                 reason
@@ -913,6 +997,32 @@ impl SearchBody<'_> {
         Paragraph::new(lines).render(list_area, buf);
     }
 
+    /// The options pane: what a search looks in. Changing one searches
+    /// again.
+    fn render_options(&self, area: Rect, buf: &mut Buffer, at: usize) {
+        let kinds = self.state.kinds();
+        let on = [kinds.tools, kinds.thinking, self.state.panes()];
+        let lines: Vec<Line<'static>> = SEARCH_OPTIONS
+            .iter()
+            .zip(on)
+            .enumerate()
+            .map(|(i, (name, on))| {
+                let mark = if i == at { "> " } else { "  " };
+                let boxed = if on { "[x]" } else { "[ ]" };
+                let text = format!("{mark}{boxed} {name}");
+                if i == at {
+                    Line::from(Span::styled(
+                        text,
+                        Style::default().add_modifier(Modifier::REVERSED),
+                    ))
+                } else {
+                    Line::from(text)
+                }
+            })
+            .collect();
+        Paragraph::new(lines).render(area, buf);
+    }
+
     /// The key hints, wrapped to the modal and drawn on its last rows.
     /// Returns how many rows they took.
     fn render_footer(&self, area: Rect, buf: &mut Buffer, hints: &str) -> u16 {
@@ -936,7 +1046,6 @@ impl SearchBody<'_> {
     }
 
     fn status_text(&self, view: &ContentView) -> String {
-        let group = crate::tui::app::grouping_overlay_label(self.state.group());
         let kinds = self.state.kinds();
         let mut what = vec!["messages"];
         if kinds.tools {
@@ -945,7 +1054,12 @@ impl SearchBody<'_> {
         if kinds.thinking {
             what.push("thinking");
         }
-        let mut text = format!("results {group} · {}", what.join(" + "));
+        let n = view.rows.len();
+        let mut text = format!(
+            "{n} {} · {}",
+            if n == 1 { "result" } else { "results" },
+            what.join(" + ")
+        );
         if view.total > 0 {
             let noun = if view.with_panes {
                 "sessions and panes"
@@ -1324,6 +1438,9 @@ impl crate::tui::Overlay for SearchOverlayState {
                     show_results: false,
                 }))
             }
+            SearchOutcome::Regroup(group) => crate::tui::OverlayOutcome::CommitAndStay(Box::new(
+                crate::tui::Msg::SetContentGroup(group),
+            )),
             SearchOutcome::Keep => {
                 crate::tui::OverlayOutcome::Commit(Box::new(crate::tui::Msg::KeepContentSearch {
                     text: self.content_text(),

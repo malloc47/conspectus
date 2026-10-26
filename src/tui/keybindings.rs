@@ -393,6 +393,24 @@ pub const KEYBINDINGS: &[KeyBinding] = &[
     },
     KeyBinding {
         mode: KeyMode::Global,
+        key: KeyMatcher::Exact {
+            modifiers: KeyModifiers::CONTROL,
+            code: KeyCode::Char('l'),
+        },
+        action: || Action::Msg(Box::new(crate::tui::Msg::ToggleSearchGranularity)),
+        help_text: "Search view: list sessions, or the matching messages",
+    },
+    KeyBinding {
+        mode: KeyMode::Global,
+        key: KeyMatcher::Exact {
+            modifiers: KeyModifiers::CONTROL,
+            code: KeyCode::Char('o'),
+        },
+        action: || Action::Msg(Box::new(crate::tui::Msg::OpenSearchOptions)),
+        help_text: "Search view: choose what a search looks in (tools, thinking, panes)",
+    },
+    KeyBinding {
+        mode: KeyMode::Global,
         key: KeyMatcher::AnyModExceptCtrl('?'),
         action: || Action::OpenHelp,
         help_text: "Show the help overlay",

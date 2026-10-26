@@ -901,7 +901,11 @@ entities, deduplicating pane text that a session transcript already shows.
 The Search view (`6`) always holds the last content search and the last ten
 besides, paged with `<` and `>` without rescanning, and opens the viewer at
 a session hit (ADR 0147) or a scrollback pager at a pane hit; `Ctrl+S`
-jumps to it from the modal. Both modals use up to 85% of the terminal
+jumps to it from the modal. The view stays as it was while the modal is
+open, and the modal's search joins the history only when it exits.
+`Ctrl+L` lists a search's sessions or its messages, in the modal and in
+the view, without searching again; `Ctrl+O` opens the options (tool calls,
+thinking, pane scrollback) that decide what a search looks in. Both modals use up to 85% of the terminal
 width. The PRs view groups by checkout by
 default, so each PR sits with the work checked out for it, and PRs checked out
 nowhere sit under their repo, labelled `no checkout` (ADR 0114, 0130). Each PR

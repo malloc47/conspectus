@@ -1,0 +1,17 @@
+---
+source: src/tui/widgets/search_content_tests.rs
+expression: text
+---
+
+        ┌ / search contents  [ Current ] All  [ Sessions ] Messages ────────────────────────┐
+        │/quokka                                                                            │
+        │1 result · messages + tools · 34 sessions searched · 2 skipped                     │
+        │> [x] Tool calls and output                                                        │
+        │  [ ] Thinking                                                                     │
+        │  [x] Pane scrollback                                                              │
+        │                                                                                   │
+        │                                                                                   │
+        │                                                                                   │
+        │                                                                                   │
+        │↑/↓ move · Space toggle · Esc back                                                 │
+        └───────────────────────────────────────────────────────────────────────────────────┘

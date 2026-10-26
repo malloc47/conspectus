@@ -875,7 +875,7 @@ fn the_search_overlay_filters_the_session_list_and_f_clears_it() {
     wait_screen(&world, "the streamed result", |screen| {
         screen.contains("/ search contents")
             && screen.contains("Current [ All ]")
-            && screen.contains("(1 result)")
+            && screen.contains("1 result")
             && screen.contains("2 hits")
     });
 
@@ -993,12 +993,12 @@ fn the_search_view_lists_hits_and_enter_opens_the_viewer_at_one() {
     wait_screen(&world, "the streamed result", |screen| {
         screen.contains("2 hits")
     });
-    world.keys(&["C-r", "C-s"]);
-    wait_screen(&world, "the Search view with a row per turn", |screen| {
-        screen.contains("turn 1") && screen.contains("turn 2")
+    world.keys(&["C-s"]);
+    wait_screen(&world, "the Search view with a row per session", |screen| {
+        screen.contains("2 hits") && !screen.contains("turn 1")
     });
-    // The cursor is on the session; step to its first hit and open it.
-    world.keys(&["j", "Enter"]);
+    // The cursor is on the session: Enter opens its first hit.
+    world.keys(&["Enter"]);
     wait_screen(&world, "the viewer on a match", |screen| {
         screen.contains("find \"quokka\"")
     });
@@ -1021,7 +1021,7 @@ fn the_flat_search_view_lists_messages_and_enter_opens_the_viewer() {
     wait_screen(&world, "the streamed result", |screen| {
         screen.contains("2 hits")
     });
-    world.keys(&["C-r", "C-r", "C-s"]);
+    world.keys(&["C-l", "C-s"]);
     wait_screen(&world, "the flat Search view", |screen| {
         screen.contains("turn 1") && screen.contains("turn 2")
     });
@@ -1029,6 +1029,116 @@ fn the_flat_search_view_lists_messages_and_enter_opens_the_viewer() {
     world.keys(&["Enter"]);
     wait_screen(&world, "the viewer on a match", |screen| {
         screen.contains("find \"quokka\"")
+    });
+}
+
+/// The Search view keeps showing its search while the modal types a
+/// new one; the new search joins the history when the modal closes.
+#[test]
+fn the_search_view_stays_fixed_while_the_modal_types_and_takes_the_search_on_exit() {
+    needs_tmux!();
+    let world = World::new();
+    write_search_sessions(&world);
+    world.new_mux("anchor", false);
+    world.start_tui_outside();
+    wait_screen(&world, "both sessions", |screen| {
+        screen.contains("2 sessions")
+    });
+
+    world.keys(&["1", "s", "quokka"]);
+    wait_screen(&world, "the streamed result", |screen| {
+        screen.contains("2 hits")
+    });
+    world.keys(&["C-s"]);
+    wait_screen(&world, "the Search view", |screen| {
+        screen.contains("search 1/1 \"quokka\"")
+    });
+
+    world.keys(&[
+        "s", "BSpace", "BSpace", "BSpace", "BSpace", "BSpace", "BSpace",
+    ]);
+    world.keys(&["chatter"]);
+    wait_screen(&world, "the new search's result in the modal", |screen| {
+        screen.contains("/ search contents") && screen.contains("1 result")
+    });
+    let screen = world.screen();
+    assert!(
+        screen.contains("search 1/1 \"quokka\"") && !screen.contains("search 2/2"),
+        "the view moved while the modal was open:\n{screen}"
+    );
+
+    world.keys(&["Escape"]);
+    wait_screen(&world, "the new search in the view", |screen| {
+        screen.contains("search 2/2 \"chatter\"") && !screen.contains("/ search contents")
+    });
+}
+
+/// `Ctrl-L` in the Search view lists the shown search's messages, and
+/// again its sessions, without searching again.
+#[test]
+fn the_search_view_switches_between_sessions_and_messages() {
+    needs_tmux!();
+    let world = World::new();
+    write_search_sessions(&world);
+    world.new_mux("anchor", false);
+    world.start_tui_outside();
+    wait_screen(&world, "both sessions", |screen| {
+        screen.contains("2 sessions")
+    });
+
+    world.keys(&["1", "s", "quokka"]);
+    wait_screen(&world, "the streamed result", |screen| {
+        screen.contains("2 hits")
+    });
+    world.keys(&["C-s"]);
+    wait_screen(&world, "a row per session", |screen| {
+        screen.contains("search 1/1") && screen.contains("2 hits") && !screen.contains("turn 1")
+    });
+    world.keys(&["C-l"]);
+    wait_screen(&world, "a row per message", |screen| {
+        screen.contains("turn 1") && screen.contains("turn 2")
+    });
+    world.keys(&["C-l"]);
+    wait_screen(&world, "a row per session again", |screen| {
+        screen.contains("2 hits") && !screen.contains("turn 1")
+    });
+    assert!(
+        world.screen().contains("search 1/1"),
+        "switching is not a new search"
+    );
+}
+
+/// What a search looks in lives behind `Ctrl-O`, not the key list.
+#[test]
+fn the_search_options_pane_opens_and_goes_back() {
+    needs_tmux!();
+    let world = World::new();
+    write_search_sessions(&world);
+    world.new_mux("anchor", false);
+    world.start_tui_outside();
+    wait_screen(&world, "both sessions", |screen| {
+        screen.contains("2 sessions")
+    });
+
+    world.keys(&["1", "s"]);
+    wait_screen(&world, "the modal", |screen| {
+        screen.contains("/ search contents") && screen.contains("Ctrl-O options")
+    });
+    assert!(
+        !world.screen().contains("Ctrl-T") && !world.screen().contains("Ctrl-Y"),
+        "the option keys are retired"
+    );
+    world.keys(&["C-o"]);
+    wait_screen(&world, "the options pane", |screen| {
+        screen.contains("[ ] Tool calls and output") && screen.contains("[x] Pane scrollback")
+    });
+    world.keys(&["Space"]);
+    wait_screen(&world, "tool calls on", |screen| {
+        screen.contains("[x] Tool calls and output")
+    });
+    world.keys(&["Escape"]);
+    wait_screen(&world, "back at the results", |screen| {
+        screen.contains("/ search contents") && !screen.contains("Pane scrollback")
     });
 }
 

@@ -43,10 +43,10 @@ fn the_operations_guide_documents_the_search_command_and_its_exit_codes() {
 fn the_overlay_keys_the_guide_names_are_the_ones_in_the_key_table() {
     let guide = doc("docs/operations.md");
     let table = doc("src/tui/keybindings/overlay.rs");
-    for key in ["Ctrl-F", "Ctrl-O", "Ctrl-R", "Ctrl-T", "Ctrl-Y"] {
+    for key in ["Ctrl-F", "Ctrl-L", "Ctrl-O", "Ctrl-S"] {
         assert!(guide.contains(key), "the guide should name {key}");
     }
-    for key in ['f', 'o', 'r', 't', 'y'] {
+    for key in ['f', 'l', 'o', 's'] {
         assert!(
             table.contains(&format!("Char('{key}')")) || table.contains(&format!("'{key}'")),
             "the overlay key table binds Ctrl-{key}"

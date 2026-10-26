@@ -405,6 +405,10 @@ pub enum Msg {
     OpenSearchHistory,
     /// Open the contents search modal (what `s` does).
     OpenContentSearchModal,
+    /// Open the contents search modal with its options pane showing.
+    OpenSearchOptions,
+    /// Flip the Search view between listing sessions and messages.
+    ToggleSearchGranularity,
     /// Keep the search the Search view shows as the filter on the lists.
     ApplySearchEntry,
     /// Drop the previewed search and bring back the filter it replaced,

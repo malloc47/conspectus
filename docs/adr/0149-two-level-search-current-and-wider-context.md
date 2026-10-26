@@ -368,7 +368,7 @@ its wording:
 - **Opening the modal does not scan.** Opened from the Search view (or
   with a content filter active) the modal is prefilled and lists the
   results of the search it was filled from; the first change (typing,
-  `Tab`, `Ctrl-R/T/Y`) starts a new search. Rerunning is therefore a
+  `Tab`, a search option) starts a new search. Rerunning is therefore a
   change to the query or options, not `Enter`, which opens the hit under
   the cursor. A rescan on open would have replaced the remembered search
   it was opened on.
@@ -386,16 +386,30 @@ its wording:
   one already remembered (same trimmed text, kinds, and scope; layout is
   not part of it) takes that entry's place as the newest, shown entry
   instead of adding another, wherever the old one sat, and the new scan
-  refreshes its results and age. Drafts are the exception while the modal
-  is open (typing a prefix of an earlier search must not erase it); the
-  twin is dropped when the draft is kept. Because a repeat adds nothing,
-  it never pushes the oldest entry out.
+  refreshes its results and age. Whether pane scrollback was read is part
+  of the identity. Because a repeat adds nothing, it never pushes the
+  oldest entry out.
 - **One row per pane**, not per mux: a mux with several panes that match
   lists a row for each, wearing the mux glyph and acting on the mux.
-- **Drafts.** Searches started from an open modal replace one another as
-  the query is typed and are kept when the modal closes; emptying the
-  query discards the draft. `Ctrl-S` on an unchanged remembered search
-  just shows it.
+- **The Search view stays fixed while the modal is open.** The search the
+  modal is typing is the modal's own; it becomes the newest remembered
+  search only when the modal exits (`Esc`, `Ctrl-S`, `Ctrl-F`, or opening
+  a hit), through the same dedup. A search that never started, or whose
+  query was emptied, is not remembered. `Ctrl-S` on an unchanged
+  remembered search just shows it. (This replaces the earlier draft
+  entries that the view showed as they were typed.)
+- **Two granularities, and the options behind a modal.** The layout cycle
+  (`Ctrl-R`) is gone. The modal's title carries a second choice,
+  **Sessions** or **Messages**, switched with `Ctrl-L` (and in the Search
+  view with `Ctrl-L` too, since `m` and `o` are taken); Messages is the
+  flat newest-first list. The nested per-message layout is no longer
+  reachable in the TUI (`[search] group = "message"` means Messages; the
+  CLI still has `--group message`). Changing the granularity regroups the
+  shown matches and never scans again, and is not part of a search's
+  identity. Tool calls, thinking, and pane scrollback are options in a
+  pane behind `Ctrl-O` (also in the Search view and Controls), instead of
+  `Ctrl-T` and `Ctrl-Y` in the key list; pane scrollback is new as an
+  option and, like the other two, starts a new search when changed.
 - **Stopped searches.** A search cut short (modal closed, or cleared while
   running) stays in the history marked `stopped`.
 - **Snippet caps** are enforced when a scan ends: the lowest-ranked

@@ -239,7 +239,7 @@ fn the_search_overlay_searches_contents_and_promotes_the_query() {
     let contents = frame(scratch.path(), "srelease summary");
     assert!(contents.contains("search contents"), "{contents}");
     assert!(contents.contains("Current [ All ]"), "{contents}");
-    assert!(contents.contains("(2 results)"), "{contents}");
+    assert!(contents.contains("2 results"), "{contents}");
     assert!(contents.contains("2 hits"), "{contents}");
     // The footer wraps, so look for the keys rather than whole phrases.
     assert!(contents.contains("Ctrl-F filter"), "{contents}");
@@ -251,7 +251,7 @@ fn the_search_overlay_searches_contents_and_promotes_the_query() {
     // Tab narrows it to the view, which lists no muxes.
     let narrow = frame(scratch.path(), "srelease summary<Tab>");
     assert!(narrow.contains("[ Current ] All"), "{narrow}");
-    assert!(narrow.contains("(1 result)"), "{narrow}");
+    assert!(narrow.contains("1 result"), "{narrow}");
     assert!(narrow.contains("sessions searched"), "{narrow}");
 
     // Ctrl-/ opens it too, as the three keys terminals send for it.

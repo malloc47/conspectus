@@ -556,10 +556,13 @@ Groupings (`Ctrl-G` cycles): **none** (default, one ranked list),
 **project**, and **harness**; panes, which belong to neither, sit under
 **Mux panes**. Sessions and panes are ranked together by the number of
 matches, then by the latest (a pane's latest is the time its scrollback
-was read); the Recency sort puts the latest first. Controls has a
-`results` row that switches between **one row per session or pane**,
-**a row per match listed under its session or pane**, and **every match
-in one list** (the default comes from the `[search]` setting).
+was read); the Recency sort puts the latest first. `Ctrl-L`, or the
+`listed as` row in Controls, switches between **Sessions** (one row per
+session or pane) and **Messages** (every match in one list, newest first;
+the default comes from the `[search]` setting). Switching lists the same
+matches another way and never searches again. `Ctrl-O` opens the search
+options: whether tool calls and output, thinking, and pane scrollback are
+searched.
 
 Buckets look like the Pinned view's. `Enter` and `v` open the viewer at
 the best match (or at the matching turn on a hit row); on a pane row or a
@@ -596,9 +599,8 @@ session's last activity, as everywhere else, not the time of the match.
 
 ### Hit row
 
-Under a session when results are listed per turn. It has no kind glyph.
-In the flat listing there is no session row above, so the hit row is
-prefixed with an origin: the harness badge and the session's label
+A match in the Messages listing. It has no kind glyph. There is no
+session row above it, so the hit row is prefixed with an origin: the harness badge and the session's label
 (truncated, padded to 12), then the cells below.
 
 | # | Cell | Source | Condition | Style |
@@ -609,7 +611,7 @@ prefixed with an origin: the harness badge and the session's label
 | 4 | Age | time since the turn was written, or a dash | always | dim |
 | 5 | Snippet | the text around the match, cropped so the match stays on screen and cut on word boundaries; the match in the theme's match style (bold, underlined) | when room remains | dim italic |
 
-<!-- frame: keys="6sthe<C-r><C-r><C-f>" width=130 height=20 -->
+<!-- frame: keys="6sthe<C-l><C-f>" width=130 height=20 -->
 ```text
 ┌ ► sessions · mux · prs · pinned · history · search ───────────┐
 │search 1/1 "the" · All · 2 sessions · 1 pane · 4 s… · filtering│
@@ -660,9 +662,8 @@ left out, so a pane that mirrors an agent does not repeat it.
 
 ### Pane hit row
 
-Under a pane when results are listed per match, or on its own in the flat
-list. It has no kind glyph. The flat list prefixes it with the mux's name
-and the pane's place, padded to 16.
+A pane's match in the Messages listing. It has no kind glyph. It is
+prefixed with the mux's name and the pane's place, padded to 16.
 
 | # | Cell | Source | Condition | Style |
 |---|---|---|---|---|
@@ -670,19 +671,18 @@ and the pane's place, padded to 16.
 | 2 | Age | time since the scrollback was read | always | dim, right-aligned |
 | 3 | Snippet | the line, cropped around the match | when room remains | dim italic, match in the match style |
 
-<!-- frame: keys="2<C-/>feature<C-r><C-s>" width=130 height=14 -->
+<!-- frame: keys="2<C-/>feature<C-l><C-s>" width=130 height=14 -->
 ```text
 ┌ ► sessions · mux · prs · pinned · history · search ───────────┐
 │search 1/1 "feature" · All · 1 session · 1 pane · 4 skipped · …│
-│▼ ▣ ◉ project           0.0    zsh         0s  4 hits  featur… │
-│      line 16       0s  from feature/extra into main. Checks… ▲│
-│      line 7        0s  feature/extra.                        █│
-│      line 3        0s  …commit, feature notes, which adds…   █│
-│      line 1        0s  …What's on feature/extra that isn't…  █│
-│▼ ● ◉ showcase   claude       1h  ∘  project           4 hits █│
-│      turn 1     you     message      107d  …on feature/extra…█│
-│      turn 2     ai      message      107d  …feature…         ▼│
-│      turn 3     you     message      107d  …feature/extra.    │
+│  project 0.0       line 16       0s  from feature/extra into… │
+│  project 0.0       line 7        0s  feature/extra.           │
+│  project 0.0       line 3        0s  …feature notes,…         │
+│  project 0.0       line 1        0s  …on feature/extra that…  │
+│   claude    claude-code…  turn 1     you     message      107d│
+│   claude    claude-code…  turn 2     ai      message      107d│
+│   claude    claude-code…  turn 3     you     message      107d│
+│   claude    claude-code…  turn 4     ai      message      107d│
 ```
 
 ### Paging

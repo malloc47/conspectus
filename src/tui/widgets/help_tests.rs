@@ -38,6 +38,8 @@ fn every_keybindings_entry_appears_in_help_sections() {
             "Ctrl-g" => vec!["Ctrl-G".to_string()],
             "Ctrl-f" => vec!["Ctrl-F".to_string()],
             "Ctrl-r" => vec!["Ctrl-R".to_string()],
+            "Ctrl-l" => vec!["Ctrl-L".to_string()],
+            "Ctrl-o" => vec!["Ctrl-O".to_string()],
             "Down" | "Up" => vec!["↓".to_string(), "↑".to_string()],
             "Right" | "Left" => vec!["→".to_string(), "←".to_string()],
             "Home" | "End" => vec!["g".to_string(), "G".to_string()],

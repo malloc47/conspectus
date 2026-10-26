@@ -34,7 +34,6 @@ mod tree;
 pub(crate) use content::MAX_DETAIL_SESSIONS;
 pub use content::{
     ContentSearch, ContentStatus, DetailRequest, PaneScope, ScanRequest, grouping_description,
-    grouping_overlay_label,
 };
 pub use msg::Msg;
 #[cfg(test)]
@@ -1745,6 +1744,8 @@ impl App {
             | Msg::ShowSearchHistory(_)
             | Msg::OpenSearchHistory
             | Msg::OpenContentSearchModal
+            | Msg::OpenSearchOptions
+            | Msg::ToggleSearchGranularity
             | Msg::ApplySearchEntry
             | Msg::OpenPaneHit { .. }
             | Msg::OpenSelectedPane

@@ -132,6 +132,8 @@ pub enum ControlsCursor {
     /// Open the contents search modal, for terminals that do not send
     /// Ctrl-/ and operators who have not learned `s`.
     SearchContents,
+    /// Open the contents search options: what a search looks in.
+    SearchOptions,
     /// Sessions-view-only checkbox: float muxed sessions to the top.
     FilterFloatMuxedSessions,
     /// Mux-view-only checkbox: float attached muxes to the top.
@@ -291,6 +293,7 @@ impl ControlsOverlayState {
                 | ControlsCursor::FilterPrState
                 | ControlsCursor::SearchHistory
                 | ControlsCursor::SearchContents
+                | ControlsCursor::SearchOptions
         ) {
             return self.activate(ctx);
         }
@@ -339,11 +342,18 @@ impl ControlsOverlayState {
                 ControlsOutcome::Continue
             }
             ControlsCursor::ContentGroup => {
-                let next = ctx.content_group.next();
+                use crate::viewer::search::Grouping as Content;
+                let next = match ctx.content_group.granularity() {
+                    Content::Session => Content::Flat,
+                    _ => Content::Session,
+                };
                 ControlsOutcome::ApplyAndStay(crate::tui::Msg::SetContentGroup(next))
             }
             ControlsCursor::SearchHistory => {
                 ControlsOutcome::ApplyAndClose(crate::tui::Msg::OpenSearchHistory)
+            }
+            ControlsCursor::SearchOptions => {
+                ControlsOutcome::ApplyAndClose(crate::tui::Msg::OpenSearchOptions)
             }
             ControlsCursor::SearchContents => {
                 ControlsOutcome::ApplyAndClose(crate::tui::Msg::OpenContentSearchModal)
@@ -697,6 +707,7 @@ pub(crate) fn flatten_rows(ctx: &ControlsContext<'_>) -> Vec<ControlsCursor> {
         rows.push(ControlsCursor::SearchHistory);
     }
     rows.push(ControlsCursor::SearchContents);
+    rows.push(ControlsCursor::SearchOptions);
     rows.push(ControlsCursor::FilterHarness);
     rows.push(ControlsCursor::FilterMaxAge);
     rows.push(ControlsCursor::FilterMuxState);
@@ -896,6 +907,8 @@ impl ControlsOverlayWidget<'_> {
             filter_row("contents", "Enter searches".to_string(), here),
             here,
         );
+        let here = cursor == ControlsCursor::SearchOptions;
+        body.push_row(filter_row("options", "Enter opens".to_string(), here), here);
         body.push(line![""]);
 
         body.push(section_header(&format!(
@@ -1291,8 +1304,9 @@ fn max_controls_content_lines() -> usize {
                 + 1
                 + 1
                 + Grouping::values_for(*view).len()
-                // The Search section: header, the contents row, blank.
-                + 3
+                // The Search section: header, the contents and options
+                // rows, blank.
+                + 4
                 + 1
                 + 1
                 + filter_rows

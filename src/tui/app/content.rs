@@ -29,18 +29,8 @@ pub const CONTENT_OFF_NOTICE: &str = "Content search is off while live preview i
 /// How the Search view lists results, in the Controls overlay.
 pub fn grouping_description(group: Grouping) -> &'static str {
     match group {
-        Grouping::Session => "one row per session",
-        Grouping::Message => "messages under their session",
-        Grouping::Flat => "every message, newest first",
-    }
-}
-
-/// How the `/` overlay says what its results are.
-pub fn grouping_overlay_label(group: Grouping) -> &'static str {
-    match group {
-        Grouping::Session => "by session",
-        Grouping::Message => "by message",
-        Grouping::Flat => "by message, flat",
+        Grouping::Session => "Sessions",
+        Grouping::Message | Grouping::Flat => "Messages",
     }
 }
 
@@ -741,19 +731,23 @@ impl App {
         } else {
             self.queue_scan(sessions, true);
         }
-        self.record_search(launch.draft);
+        // A search typed in the modal is remembered when the modal exits,
+        // so the Search view stays put meanwhile.
+        if !launch.draft {
+            self.record_search();
+        }
         self.start_search_spinner();
         None
     }
 
     /// Remember the running search as the newest one.
-    fn record_search(&mut self, draft: bool) {
+    fn record_search(&mut self) {
         let Some(content) = &self.content else {
             return;
         };
         let copy = content.for_history();
         let keep = self.config.search.history;
-        self.search_history.record(copy, draft, keep);
+        self.search_history.record(copy, keep);
     }
 
     /// Copy the running search into its remembered entry.
@@ -777,15 +771,40 @@ impl App {
         }
     }
 
-    /// Keep the entry for good: typing more in the modal no longer
-    /// replaces it.
+    /// Whether a search made from the modal reads pane scrollback: as the
+    /// open modal has it, or as it was last left.
+    fn modal_panes(&self) -> bool {
+        self.search_overlay()
+            .map(crate::tui::widgets::search::SearchOverlayState::panes)
+            .or_else(|| self.search_memory.map(|memory| memory.panes))
+            .unwrap_or(true)
+    }
+
+    /// Keep the entry for good, remembering the running search first when
+    /// it is the one typed in the modal and not yet remembered.
     fn keep_entry(&mut self, serial: u64) {
+        if self.search_history.by_serial(serial).is_none()
+            && self
+                .content
+                .as_ref()
+                .is_some_and(|content| content.serial == serial)
+        {
+            self.record_search();
+        }
         self.search_history.keep(serial);
     }
 
-    /// The open modal's drafts become kept searches.
-    pub(crate) fn finalize_search_drafts(&mut self) {
-        self.search_history.keep_drafts();
+    /// The modal exits: the search it was running becomes the newest
+    /// remembered one, unless it never had a query.
+    pub(crate) fn commit_modal_search(&mut self) {
+        let serial = self
+            .content
+            .as_ref()
+            .filter(|content| !content.applied && !content.detached)
+            .map(|content| content.serial);
+        if let Some(serial) = serial {
+            self.keep_entry(serial);
+        }
     }
 
     pub(super) fn reduce_content(&mut self, msg: Msg) -> Vec<Effect> {
@@ -832,7 +851,7 @@ impl App {
                     group,
                     applied: false,
                     reach,
-                    with_panes: true,
+                    with_panes: self.modal_panes(),
                     draft: true,
                 }) {
                     // Nothing started: the search that was active stays.
@@ -871,7 +890,7 @@ impl App {
                     group,
                     applied: true,
                     reach,
-                    with_panes: true,
+                    with_panes: self.modal_panes(),
                     draft: false,
                 }) {
                     effects.push(Effect::Toast(note));
@@ -939,13 +958,6 @@ impl App {
                     .as_ref()
                     .is_some_and(|content| !content.applied && !content.detached)
                 {
-                    // Emptying the query inside the modal abandons the
-                    // draft; closing the modal keeps what was found.
-                    if self.search_overlay().is_some()
-                        && let Some(serial) = self.content.as_ref().map(|c| c.serial)
-                    {
-                        self.search_history.remove_draft(serial);
-                    }
                     let stash = self.content_stash.take();
                     self.clear_content();
                     if let Some(stash) = stash {
@@ -1023,12 +1035,18 @@ impl App {
             }
             Msg::SetContentGroup(group) => {
                 let viewed = self.viewed_search().map(|viewed| viewed.serial);
+                // A search being typed in the modal is not the Search
+                // view's until the modal exits: leave the view alone.
+                let typing = self.search_overlay().is_some()
+                    && self.content.as_ref().is_some_and(|content| {
+                        !content.applied && !content.detached && viewed != Some(content.serial)
+                    });
                 if let Some(content) = self.content.as_mut()
-                    && (viewed.is_none() || viewed == Some(content.serial))
+                    && (typing || viewed.is_none() || viewed == Some(content.serial))
                 {
                     content.group = group;
                 }
-                if let Some(entry) = self.search_history.viewed_mut() {
+                if !typing && let Some(entry) = self.search_history.viewed_mut() {
                     entry.search.group = group;
                 }
                 self.queue_details();
@@ -1050,6 +1068,29 @@ impl App {
                 if self.search_history.show(index) {
                     self.after_history_move(left);
                 }
+            }
+            Msg::OpenSearchOptions => {
+                if !self.config.live_preview_enabled {
+                    effects.push(Effect::Toast(CONTENT_OFF_NOTICE.to_string()));
+                    return effects;
+                }
+                self.open_content_search_overlay();
+                if let Some(state) = self.search_overlay_mut() {
+                    *state = state.clone().with_options_open();
+                }
+            }
+            Msg::ToggleSearchGranularity if self.active_view != View::Search => {
+                // Only the Search view lists a search's results.
+            }
+            Msg::ToggleSearchGranularity => {
+                let next = match self
+                    .viewed_search()
+                    .map(|viewed| viewed.group.granularity())
+                {
+                    Some(Grouping::Session) => Grouping::Flat,
+                    _ => Grouping::Session,
+                };
+                return self.reduce_content(Msg::SetContentGroup(next));
             }
             Msg::OpenContentSearchModal => {
                 let hint = self.open_content_search_entry();
@@ -1417,6 +1458,7 @@ fn session_label(snapshot: &crate::model::GraphSnapshot, session: &AgentSessionI
 pub struct SearchMemory {
     pub group: Grouping,
     pub kinds: ContentKinds,
+    pub panes: bool,
 }
 
 /// The most results the overlay lists.
@@ -1725,6 +1767,7 @@ impl App {
             self.search_memory = Some(SearchMemory {
                 group: state.group(),
                 kinds: state.kinds(),
+                panes: state.panes(),
             });
         }
     }

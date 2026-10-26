@@ -420,11 +420,19 @@ fn keymap_sections() -> Vec<HelpSection> {
                 ),
                 Binding::new(
                     "Ctrl-/ (or Ctrl-_ / Ctrl-7) / s",
-                    "Search contents: what was said in the sessions and what is in mux scrollback, in this view's sessions and muxes (Tab searches all of them). Ctrl-R cycles results per session, per matching turn, and flat (newest first); Ctrl-T and Ctrl-Y add tool and thinking content; Ctrl-S keeps the search in the Search view and goes there; Ctrl-F keeps the query as a filter on the lists. `s` works in every terminal",
+                    "Search contents: what was said in the sessions and what is in mux scrollback, in this view's sessions and muxes (Tab searches all of them). Ctrl-L switches between listing sessions and listing messages; Ctrl-O opens the options (tool calls, thinking, pane scrollback); Ctrl-S keeps the search in the Search view and goes there; Ctrl-F keeps the query as a filter on the lists. `s` works in every terminal",
                 ),
                 Binding::new(
                     "< / >",
                     "Search view: show the previous (older) or next (newer) remembered search without searching again; Controls lists them",
+                ),
+                Binding::new(
+                    "Ctrl-L",
+                    "Search view: list sessions or messages (the same matches, no new scan)",
+                ),
+                Binding::new(
+                    "Ctrl-O",
+                    "Search view: choose what a search looks in (tool calls, thinking, pane scrollback)",
                 ),
                 Binding::new(
                     "Ctrl-F",

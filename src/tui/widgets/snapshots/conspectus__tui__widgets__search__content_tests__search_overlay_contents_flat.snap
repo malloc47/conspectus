@@ -5,9 +5,9 @@ expression: text
 
 
 
-        ┌ / search contents  [ Current ] All  (2 results) ──────────────────────────────────┐
+        ┌ / search contents  [ Current ] All  Sessions [ Messages ] ────────────────────────┐
         │/quokka                                                                            │
-        │results by message, flat · messages · 34 sessions searched · 2 skipped             │
+        │2 results · messages · 34 sessions searched · 2 skipped                            │
         │> session session aaaa1111  turn 4 · message        1h …the quokka design for it   │
         │  session session bbbb2222  turn 2 · message        1h …the quokka design for it   │
         │                                                                                   │
@@ -21,6 +21,6 @@ expression: text
         │                                                                                   │
         │                                                                                   │
         │                                                                                   │
-        │↑/↓ move · Enter open hit · Esc close · Tab current/all · Ctrl-R results · Ctrl-T  │
-        │tools · Ctrl-Y thinking · Ctrl-F filter lists · Ctrl-S Search view                 │
+        │↑/↓ move · Enter open hit · Esc close · Tab current/all · Ctrl-L sessions/messages │
+        │· Ctrl-O options · Ctrl-F filter lists · Ctrl-S Search view                        │
         └───────────────────────────────────────────────────────────────────────────────────┘

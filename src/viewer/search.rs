@@ -75,6 +75,15 @@ impl Grouping {
         }
     }
 
+    /// The way the TUI lists matches: per session, or per message. The
+    /// per-message modes are the one flat list there.
+    pub fn granularity(self) -> Self {
+        match self {
+            Self::Session => Self::Session,
+            Self::Message | Self::Flat => Self::Flat,
+        }
+    }
+
     /// Whether results are listed per matching turn, which means the
     /// turns of each matching session have to be read.
     pub fn lists_messages(self) -> bool {
