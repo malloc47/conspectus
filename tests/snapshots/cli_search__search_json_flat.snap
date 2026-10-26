@@ -22,6 +22,7 @@ expression: stdout_of(cmd)
         ],
         "text": "The Quokka layout is noted."
       },
+      "source": "session",
       "time": "2026-10-01T10:00:05Z",
       "turn": 2
     },
@@ -38,6 +39,7 @@ expression: stdout_of(cmd)
         ],
         "text": "We chose the quokka design"
       },
+      "source": "session",
       "time": "2026-10-01T10:00:00Z",
       "turn": 1
     }

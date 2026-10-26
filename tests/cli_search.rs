@@ -459,3 +459,47 @@ fn searching_never_writes_transcript_text_to_disk() {
         "transcript text reached disk: {leaked:?}"
     );
 }
+
+#[test]
+fn the_default_source_is_sessions_and_json_rows_say_so() {
+    let world = world();
+    let mut cmd = world.search();
+    cmd.args(["quokka", "--format", "json"]);
+    let json: serde_json::Value = serde_json::from_str(&stdout_of(cmd)).unwrap();
+
+    assert!(
+        json["results"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|row| row["source"] == "session")
+    );
+    assert!(json["searched"].get("panes").is_none());
+}
+
+#[test]
+fn panes_only_with_no_tmux_finds_nothing_and_exits_one() {
+    let world = world();
+    let mut cmd = world.search();
+    cmd.args(["quokka", "--source", "panes"]);
+    let output = cmd.output().unwrap();
+
+    assert_eq!(output.status.code(), Some(1));
+    assert!(output.stdout.is_empty());
+    assert!(
+        String::from_utf8_lossy(&output.stderr).contains("No panes match"),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
+
+#[test]
+fn an_unknown_source_is_a_usage_error() {
+    let world = world();
+    let mut cmd = world.search();
+    cmd.args(["quokka", "--source", "nowhere"]);
+    let output = cmd.output().unwrap();
+
+    assert_eq!(output.status.code(), Some(2));
+    assert!(String::from_utf8_lossy(&output.stderr).contains("--source"));
+}

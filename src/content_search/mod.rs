@@ -18,18 +18,31 @@
 //!   verbatim in the file: messages, not tool, thinking, hidden, or
 //!   aborted content.
 
+pub mod dedup;
+pub mod panes;
 pub mod plan;
 pub mod prefilter;
 pub mod scan;
+pub mod source;
+pub mod unified;
 
 use crate::viewer::model::SessionLocator;
 use crate::viewer::parser::HarnessParser;
 use crate::viewer::search::SessionHits;
 
+pub use panes::{Attribution, PaneSource, attribute_panes, sockets_in};
 pub use plan::{Plan, plan_sessions};
 pub use scan::{
     CancelToken, Polled, ScanHandle, ScanSummary, SessionDetail, hits_for, scan, scan_blocking,
     session_detail,
+};
+pub use source::{
+    ContentResult, ContentSource, MAX_PANE_HITS_PER_ENTRY, MuxRef, PaneHit, PaneHits, PaneRef,
+    SourceEvent, SourceKind, cmp_results, cmp_results_by_recency,
+};
+pub use unified::{
+    ContentEvent, ContentHandle, ContentPolled, ContentSummary, SessionSource, search,
+    search_blocking,
 };
 
 /// Per-session cap on hits materialized by [`hits_for`]. The count in
@@ -114,6 +127,18 @@ impl ScanEvent {
         }
     }
 }
+
+#[cfg(test)]
+#[path = "dedup_tests.rs"]
+mod dedup_tests;
+
+#[cfg(test)]
+#[path = "panes_tests.rs"]
+mod panes_tests;
+
+#[cfg(test)]
+#[path = "unified_tests.rs"]
+mod unified_tests;
 
 #[cfg(test)]
 #[path = "prefilter_tests.rs"]

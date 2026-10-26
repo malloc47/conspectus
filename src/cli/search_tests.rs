@@ -28,6 +28,7 @@ fn found(group: Grouping, rows: Vec<Row>) -> Found {
             total: 4,
             skipped: 1,
         },
+        pane_progress: None,
         parserless: 2,
         rows,
         truncated: Vec::new(),
@@ -337,4 +338,83 @@ fn json_has_no_limit_when_nothing_was_cut() {
     let f = found(Grouping::Flat, Vec::new());
     let value: Value = serde_json::from_str(&render_json("needle", &f).unwrap()).unwrap();
     assert_eq!(value["limited"], Value::Null);
+}
+
+fn pane_row(command: Option<&str>, line: usize, count: usize) -> Row {
+    use crate::content_search::{MuxRef, PaneHit, PaneRef};
+    Row::Pane {
+        pane: Box::new(PaneRef {
+            mux: MuxRef {
+                backend: "tmux".into(),
+                socket: None,
+                session: "work".into(),
+            },
+            pane_id: "%4".into(),
+            window_index: "1".into(),
+            pane_index: "0".into(),
+            command: command.map(str::to_string),
+        }),
+        count,
+        captured_at: 1_700_000_000,
+        hit: PaneHit {
+            line,
+            snippet: "error: retry budget gone".into(),
+            highlight: 7..19,
+        },
+    }
+}
+
+#[test]
+fn pane_rows_get_a_table_of_their_own_after_the_sessions() {
+    let rows = vec![
+        session_row(Some("fix parser"), 3, "x retry y", 2..7),
+        pane_row(Some("zsh"), 12, 2),
+    ];
+    let text = render_table(&found(Grouping::Session, rows), None, false, 1_700_000_100);
+
+    let (sessions, panes) = text
+        .split_once("\n\n")
+        .expect("a blank line between tables");
+    assert!(sessions.starts_with("SESSION"), "{text}");
+    assert!(panes.starts_with("PANE"), "{text}");
+    assert!(panes.contains("work:1.0"), "{text}");
+    assert!(panes.contains("zsh"), "{text}");
+    assert!(panes.contains("error: retry budget gone"), "{text}");
+}
+
+#[test]
+fn only_panes_means_only_the_pane_table() {
+    let text = render_table(
+        &found(Grouping::Message, vec![pane_row(None, 12, 2)]),
+        None,
+        false,
+        1_700_000_100,
+    );
+
+    assert!(text.starts_with("PANE"), "{text}");
+    assert!(text.contains("LINE"), "{text}");
+    assert!(text.contains("L12"), "{text}");
+}
+
+#[test]
+fn pane_json_rows_name_their_source_and_location() {
+    let mut f = found(Grouping::Session, vec![pane_row(Some("zsh"), 12, 2)]);
+    f.pane_progress = Some(PaneProgress {
+        progress: Progress {
+            scanned: 3,
+            total: 3,
+            skipped: 0,
+        },
+        deduplicated: 5,
+    });
+    let json: serde_json::Value = serde_json::from_str(&render_json("retry", &f).unwrap()).unwrap();
+
+    let row = &json["results"][0];
+    assert_eq!(row["source"], "pane");
+    assert_eq!(row["mux"], "work");
+    assert_eq!(row["pane_id"], "%4");
+    assert_eq!(row["line"], 12);
+    assert_eq!(row["hits"], 2);
+    assert_eq!(row["snippet"]["highlight"], serde_json::json!([7, 19]));
+    assert_eq!(json["searched"]["panes"]["deduplicated"], 5);
 }

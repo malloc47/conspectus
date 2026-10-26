@@ -21,7 +21,8 @@ expression: stdout_of(cmd)
           19
         ],
         "text": "We chose the quokka design"
-      }
+      },
+      "source": "session"
     }
   ],
   "searched": {

@@ -432,7 +432,7 @@ fn group_key(session: &ScanSession) -> GroupKey {
     )
 }
 
-fn worker_count(requested: usize) -> usize {
+pub(super) fn worker_count(requested: usize) -> usize {
     if requested > 0 {
         return requested;
     }

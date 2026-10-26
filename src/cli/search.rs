@@ -22,8 +22,9 @@ use serde_json::{Value, json};
 
 use crate::config;
 use crate::content_search::{
-    CancelToken, Progress, ScanOptions, ScanSession, SessionKey, plan_sessions, scan_blocking,
-    session_detail,
+    Attribution, CancelToken, ContentResult, PaneHit, PaneHits, PaneRef, PaneSource, Progress,
+    ScanOptions, ScanSession, SessionKey, attribute_panes, plan_sessions, scan_blocking,
+    search_blocking, session_detail, sockets_in,
 };
 use crate::model::{GraphNode, GraphSnapshot, NodeId};
 use crate::output::render::{display_width, format_relative_age, truncate_to_width};
@@ -48,6 +49,26 @@ enum GroupFlag {
     /// Every matching message across all sessions as one list, newest
     /// first.
     Flat,
+}
+
+#[derive(Copy, Clone, Debug, Eq, PartialEq, ValueEnum)]
+enum SourceFlag {
+    /// Agent session transcripts.
+    Sessions,
+    /// The scrollback of live mux panes.
+    Panes,
+    /// Both. Pane lines that a hosted session already says are dropped.
+    All,
+}
+
+impl SourceFlag {
+    fn sessions(self) -> bool {
+        !matches!(self, Self::Panes)
+    }
+
+    fn panes(self) -> bool {
+        !matches!(self, Self::Sessions)
+    }
 }
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq, ValueEnum)]
@@ -76,6 +97,10 @@ pub(super) struct SearchArgs {
     /// as one list across sessions, newest first (`flat`).
     #[arg(long, value_enum)]
     group: Option<GroupFlag>,
+    /// What to search: session transcripts, the scrollback of live mux
+    /// panes, or both.
+    #[arg(long, value_enum, default_value_t = SourceFlag::Sessions)]
+    source: SourceFlag,
     /// Also search tool calls and tool output.
     #[arg(long)]
     tools: bool,
@@ -128,6 +153,8 @@ struct Found {
     group: Grouping,
     kinds: ContentKinds,
     progress: Progress,
+    /// Set when panes were searched.
+    pane_progress: Option<PaneProgress>,
     parserless: usize,
     rows: Vec<Row>,
     /// Sessions with more matching messages than were fetched.
@@ -135,6 +162,13 @@ struct Found {
     /// The flat list cut to `--limit`: how many rows are shown of how
     /// many matched.
     limited: Option<Limited>,
+}
+
+/// What the pane search covered.
+struct PaneProgress {
+    progress: Progress,
+    /// Matching lines dropped because a hosted session says the same.
+    deduplicated: usize,
 }
 
 /// A flat list that `--limit` cut short.
@@ -159,6 +193,14 @@ enum Row {
     Message {
         info: SessionInfo,
         hit: Hit,
+    },
+    /// A pane: with `hit` its newest match (one row per pane), or one
+    /// row per matching line.
+    Pane {
+        pane: Box<PaneRef>,
+        count: usize,
+        captured_at: i64,
+        hit: PaneHit,
     },
 }
 
@@ -235,13 +277,41 @@ impl SearchArgs {
         let allowed = allowed_sessions(&snapshot, &filter);
         let infos = session_infos(&snapshot, allowed.as_ref());
         let plan = plan_sessions(infos.iter().map(|(id, _)| id));
-        let found = self.search(&infos, &plan.sessions, &query, group);
-        let found = Found {
-            parserless: plan.parserless,
-            ..found
+        let mut found = if self.source.sessions() {
+            let found = self.search(&infos, &plan.sessions, &query, group);
+            Found {
+                parserless: plan.parserless,
+                ..found
+            }
+        } else {
+            Found {
+                group,
+                kinds: query.kinds,
+                progress: Progress::default(),
+                pane_progress: None,
+                parserless: 0,
+                rows: Vec::new(),
+                truncated: Vec::new(),
+                limited: None,
+            }
         };
+        if self.source.panes() {
+            self.search_panes(&snapshot, &query, group, &mut found);
+        }
 
-        if self.verbose || io::stderr().is_terminal() {
+        if let Some(panes) = &found.pane_progress
+            && (self.verbose || io::stderr().is_terminal())
+        {
+            eprintln!(
+                "searched {} of {} panes; skipped {} whose scrollback could not be read; \
+                 left out {} lines a session already says",
+                panes.progress.scanned,
+                panes.progress.total,
+                panes.progress.skipped,
+                panes.deduplicated
+            );
+        }
+        if self.source.sessions() && (self.verbose || io::stderr().is_terminal()) {
             eprintln!(
                 "searched {} of {} sessions; skipped {} whose transcript could not be read; \
                  {} more belong to a harness with no transcript parser and were not searched",
@@ -268,7 +338,12 @@ impl SearchArgs {
             );
         }
         if !matched && matches!(self.format, FormatFlag::Table) {
-            eprintln!("No sessions match \"{}\"", self.query.trim());
+            let what = if self.source.panes() && !self.source.sessions() {
+                "panes"
+            } else {
+                "sessions"
+            };
+            eprintln!("No {what} match \"{}\"", self.query.trim());
         }
         let mut out = io::stdout().lock();
         let text = match self.format {
@@ -359,6 +434,7 @@ impl SearchArgs {
                 group,
                 kinds: query.kinds,
                 progress: summary.progress,
+                pane_progress: None,
                 parserless: 0,
                 rows,
                 truncated,
@@ -405,11 +481,85 @@ impl SearchArgs {
             group,
             kinds: query.kinds,
             progress: summary.progress,
+            pane_progress: None,
             parserless: 0,
             rows,
             truncated,
             limited,
         }
+    }
+}
+
+impl SearchArgs {
+    /// Search live panes and append their rows after the session rows.
+    fn search_panes(
+        &self,
+        snapshot: &GraphSnapshot,
+        query: &ContentQuery,
+        group: Grouping,
+        found: &mut Found,
+    ) {
+        // The same switch discovery honors: no tmux, no panes.
+        if std::env::var_os("CONSPECTUS_DISABLE_TMUX").is_some() {
+            found.pane_progress = Some(PaneProgress {
+                progress: Progress::default(),
+                deduplicated: 0,
+            });
+            return;
+        }
+        let backend: std::sync::Arc<dyn crate::discovery::tmux::MuxBackend> =
+            std::sync::Arc::new(crate::discovery::tmux::SystemTmux::new());
+        let attribution: Attribution = attribute_panes(snapshot);
+        let source = PaneSource::new(backend, sockets_in(snapshot), attribution);
+        let summary = search_blocking(
+            vec![Box::new(source)],
+            query.clone(),
+            ScanOptions::default(),
+            &CancelToken::new(),
+        );
+        let mut deduplicated = 0;
+        let mut panes: Vec<PaneHits> = Vec::new();
+        for result in summary.results {
+            if let ContentResult::Pane(pane) = result {
+                deduplicated += pane.deduplicated;
+                panes.push(pane);
+            }
+        }
+        let limit = self.limit.unwrap_or(usize::MAX);
+        for pane in panes {
+            match group {
+                Grouping::Session => {
+                    if found.rows.len() >= limit {
+                        break;
+                    }
+                    if let Some(hit) = pane.hits.last().cloned() {
+                        found.rows.push(Row::Pane {
+                            pane: Box::new(pane.pane.clone()),
+                            count: pane.count,
+                            captured_at: pane.captured_at,
+                            hit,
+                        });
+                    }
+                }
+                Grouping::Message | Grouping::Flat => {
+                    for hit in pane.hits {
+                        if found.rows.len() >= limit {
+                            break;
+                        }
+                        found.rows.push(Row::Pane {
+                            pane: Box::new(pane.pane.clone()),
+                            count: pane.count,
+                            captured_at: pane.captured_at,
+                            hit,
+                        });
+                    }
+                }
+            }
+        }
+        found.pane_progress = Some(PaneProgress {
+            progress: summary.progress,
+            deduplicated,
+        });
     }
 }
 
@@ -564,6 +714,7 @@ fn render_json(query: &str, found: &Found) -> Result<String> {
         .iter()
         .map(|row| match row {
             Row::Session { info, hits } => json!({
+                "source": "session",
                 "harness": info.harness,
                 "session": info.session,
                 "label": info.label,
@@ -572,6 +723,7 @@ fn render_json(query: &str, found: &Found) -> Result<String> {
                 "snippet": snippet_json(&hits.best),
             }),
             Row::Message { info, hit } => json!({
+                "source": "session",
                 "harness": info.harness,
                 "session": info.session,
                 "label": info.label,
@@ -580,6 +732,28 @@ fn render_json(query: &str, found: &Found) -> Result<String> {
                 "kind": turn_kind_name(hit.kind),
                 "time": rfc3339(hit.timestamp),
                 "snippet": snippet_json(hit),
+            }),
+            Row::Pane {
+                pane,
+                count,
+                captured_at,
+                hit,
+            } => json!({
+                "source": "pane",
+                "backend": pane.mux.backend,
+                "socket": pane.mux.socket,
+                "mux": pane.mux.session,
+                "window": pane.window_index,
+                "pane": pane.pane_index,
+                "pane_id": pane.pane_id,
+                "command": pane.command,
+                "hits": count,
+                "line": hit.line,
+                "captured": rfc3339(chrono::DateTime::from_timestamp(*captured_at, 0)),
+                "snippet": {
+                    "text": hit.snippet,
+                    "highlight": [hit.highlight.start, hit.highlight.end],
+                },
             }),
         })
         .collect();
@@ -605,6 +779,20 @@ fn render_json(query: &str, found: &Found) -> Result<String> {
             .collect::<Vec<_>>(),
         "results": results,
     });
+    if let (Some(panes), Some(searched)) = (
+        &found.pane_progress,
+        document.get_mut("searched").and_then(Value::as_object_mut),
+    ) {
+        searched.insert(
+            "panes".into(),
+            json!({
+                "scanned": panes.progress.scanned,
+                "total": panes.progress.total,
+                "skipped": panes.progress.skipped,
+                "deduplicated": panes.deduplicated,
+            }),
+        );
+    }
     if let (Some(limit), Some(object)) = (&found.limited, document.as_object_mut()) {
         object.insert(
             "limited".into(),
@@ -689,12 +877,67 @@ fn build_table(found: &Found, now: i64) -> Table {
 }
 
 /// An aligned table; `width` fits the snippet column, and `color` bolds
-/// the match inside it.
+/// the match inside it. Pane rows follow in a table of their own.
 fn render_table(found: &Found, width: Option<usize>, color: bool, now: i64) -> String {
-    if found.rows.is_empty() {
-        return String::new();
+    let mut out = String::new();
+    if found
+        .rows
+        .iter()
+        .any(|row| !matches!(row, Row::Pane { .. }))
+    {
+        out.push_str(&render_grid(&build_table(found, now), width, color));
     }
-    let table = build_table(found, now);
+    let panes = build_pane_table(found, now);
+    if !panes.cells.is_empty() {
+        if !out.is_empty() {
+            out.push('\n');
+        }
+        out.push_str(&render_grid(&panes, width, color));
+    }
+    out
+}
+
+fn build_pane_table(found: &Found, now: i64) -> Table {
+    let mut cells = Vec::new();
+    let mut snippets = Vec::new();
+    for row in &found.rows {
+        let Row::Pane {
+            pane,
+            count,
+            captured_at,
+            hit,
+        } = row
+        else {
+            continue;
+        };
+        let target = format!(
+            "{}:{}.{}",
+            pane.mux.session, pane.window_index, pane.pane_index
+        );
+        let hits = match found.group {
+            Grouping::Session => count.to_string(),
+            Grouping::Message | Grouping::Flat => format!("L{}", hit.line),
+        };
+        cells.push(vec![
+            target,
+            pane.command.clone().unwrap_or_default(),
+            hits,
+            format_relative_age(*captured_at, now),
+        ]);
+        snippets.push((hit.snippet.clone(), hit.highlight.clone()));
+    }
+    let hits_header = match found.group {
+        Grouping::Session => "HITS",
+        Grouping::Message | Grouping::Flat => "LINE",
+    };
+    Table {
+        header: vec!["PANE", "COMMAND", hits_header, "CAPTURED", "SNIPPET"],
+        cells,
+        snippets,
+    }
+}
+
+fn render_grid(table: &Table, width: Option<usize>, color: bool) -> String {
     let columns = table.header.len() - 1;
     let mut widths: Vec<usize> = table.header[..columns].iter().map(|h| h.len()).collect();
     for row in &table.cells {
