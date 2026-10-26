@@ -650,7 +650,7 @@ left out, so a pane that mirrors an agent does not repeat it.
 | 7 | Hits | `N hits` | always | dim |
 | 8 | Snippet | the newest matching line, cropped around the match | when room remains | dim italic, match in the match style |
 
-<!-- frame: keys="2<C-/>feature<Tab><C-s>" width=130 height=12 -->
+<!-- frame: keys="2<C-/>feature<C-s>" width=130 height=12 -->
 ```text
 ┌ ► sessions · mux · prs · pinned · history · search ───────────┐
 │search 1/1 "feature" · All · 1 session · 1 pane · 4 skipped · …│
@@ -670,7 +670,7 @@ and the pane's place, padded to 16.
 | 2 | Age | time since the scrollback was read | always | dim, right-aligned |
 | 3 | Snippet | the line, cropped around the match | when room remains | dim italic, match in the match style |
 
-<!-- frame: keys="2<C-/>feature<Tab><C-r><C-s>" width=130 height=14 -->
+<!-- frame: keys="2<C-/>feature<C-r><C-s>" width=130 height=14 -->
 ```text
 ┌ ► sessions · mux · prs · pinned · history · search ───────────┐
 │search 1/1 "feature" · All · 1 session · 1 pane · 4 skipped · …│

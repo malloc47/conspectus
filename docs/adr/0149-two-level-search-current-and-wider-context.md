@@ -376,6 +376,20 @@ its wording:
   (or everything, if it read everything), not the Search view's own rows,
   which are results and no place to look for something else. The Search
   view with no search opens the modal on All.
+- **Content search opens on All.** Operator preference departs from the
+  decision's "opens on `Current` every time" for the contents modal
+  (`Ctrl+/`, `s`, the Search view's `s`): a fresh content search reads
+  everything, and `Tab` narrows it to the view. Quick select (`/`) still
+  opens on `Current`. A modal opened onto an existing search keeps that
+  search's scope.
+- **A repeated search is not a new entry.** A content search that equals
+  one already remembered (same trimmed text, kinds, and scope; layout is
+  not part of it) takes that entry's place as the newest, shown entry
+  instead of adding another, wherever the old one sat, and the new scan
+  refreshes its results and age. Drafts are the exception while the modal
+  is open (typing a prefix of an earlier search must not erase it); the
+  twin is dropped when the draft is kept. Because a repeat adds nothing,
+  it never pushes the oldest entry out.
 - **One row per pane**, not per mux: a mux with several panes that match
   lists a row for each, wearing the mux glyph and acting on the mux.
 - **Drafts.** Searches started from an open modal replace one another as

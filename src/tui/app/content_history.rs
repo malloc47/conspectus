@@ -132,19 +132,19 @@ impl SearchHistory {
         }
     }
 
-    /// Add `search` as the newest entry and show it. A draft or an
-    /// identical search (same text, kinds, and scope) at the newest end
-    /// is replaced instead; older entries beyond `keep` are dropped, and so
-    /// are the oldest ones while the snippets kept exceed
-    /// [`MAX_SNIPPETS_TOTAL`].
+    /// Add `search` as the newest entry and show it. A draft at the newest
+    /// end is replaced. A search that is not a draft and equals one
+    /// already remembered (same text, kinds, and scope, wherever it sits)
+    /// takes that entry's place at the newest end instead of adding
+    /// another. Older entries beyond `keep` are dropped, and so are the
+    /// oldest ones while the snippets kept exceed [`MAX_SNIPPETS_TOTAL`].
     pub fn record(&mut self, search: ContentSearch, draft: bool, keep: usize) {
-        if self.entries.last().is_some_and(|newest| {
-            newest.draft
-                || (newest.search.text == search.text
-                    && newest.search.kinds == search.kinds
-                    && newest.search.reach == search.reach)
-        }) {
+        if self.entries.last().is_some_and(|newest| newest.draft) {
             self.entries.pop();
+        }
+        if !draft {
+            self.entries
+                .retain(|entry| !same_search(&entry.search, &search));
         }
         self.entries.push(HistoryEntry {
             search,
@@ -168,11 +168,54 @@ impl SearchHistory {
         }
     }
 
-    /// Searches started from a modal that has now closed are kept.
+    /// Searches started from a modal that has now closed are kept, and
+    /// each replaces any older entry for the same search.
     pub fn keep_drafts(&mut self) {
+        let kept: Vec<u64> = self
+            .entries
+            .iter()
+            .filter(|entry| entry.draft)
+            .map(|entry| entry.search.serial)
+            .collect();
         for entry in &mut self.entries {
             entry.draft = false;
         }
+        for serial in kept {
+            self.drop_older_twins(serial);
+        }
+    }
+
+    /// The entry with this serial is kept for good: no draft any more, and
+    /// it replaces older entries for the same search.
+    pub fn keep(&mut self, serial: u64) {
+        if let Some(entry) = self.by_serial_mut(serial) {
+            entry.draft = false;
+            self.drop_older_twins(serial);
+        }
+    }
+
+    /// Remove the other entries that are the same search as the one with
+    /// this serial (drafts excepted: they are still being typed) and keep
+    /// showing what was shown, or the survivor if that went.
+    fn drop_older_twins(&mut self, serial: u64) {
+        let Some(survivor) = self.by_serial(serial).map(|e| e.search.clone()) else {
+            return;
+        };
+        let shown = self.viewed().map(|entry| entry.search.serial);
+        self.entries.retain(|entry| {
+            entry.search.serial == serial || entry.draft || !same_search(&entry.search, &survivor)
+        });
+        let follow = shown.unwrap_or(serial);
+        self.viewed = self
+            .entries
+            .iter()
+            .position(|entry| entry.search.serial == follow)
+            .or_else(|| {
+                self.entries
+                    .iter()
+                    .position(|entry| entry.search.serial == serial)
+            })
+            .unwrap_or(0);
     }
 
     /// Forget the draft with this serial (its query was emptied).
@@ -202,4 +245,11 @@ impl SearchHistory {
             self.viewed = self.viewed.saturating_sub(drop);
         }
     }
+}
+
+/// Whether two searches are the same one: the query text (trimmed), the
+/// kinds searched, and the scope. How results are laid out is not part
+/// of it.
+fn same_search(a: &ContentSearch, b: &ContentSearch) -> bool {
+    a.text.trim() == b.text.trim() && a.kinds == b.kinds && a.reach == b.reach
 }

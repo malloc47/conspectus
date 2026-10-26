@@ -203,9 +203,9 @@ fn viewer_keys_resolve_as_the_old_match_did() {
     let shift = KeyModifiers::SHIFT;
     let ctrl_mod = KeyModifiers::CONTROL;
     let cases = [
-        (ctrl_mod, KeyCode::Char('c'), Some(V::Close)),
+        (ctrl_mod, KeyCode::Char('c'), Some(V::Quit)),
         (none, KeyCode::Esc, Some(V::Close)),
-        (none, KeyCode::Char('q'), Some(V::Close)),
+        (none, KeyCode::Char('q'), Some(V::Quit)),
         (none, KeyCode::Char('j'), Some(V::ScrollDown)),
         (none, KeyCode::Down, Some(V::ScrollDown)),
         (none, KeyCode::Char('k'), Some(V::ScrollUp)),

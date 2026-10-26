@@ -645,15 +645,10 @@ impl App {
             .with_reach(content.reach)
         } else {
             let (group, kinds) = self.search_options();
-            // The Search view with nothing in it has no context of its own
-            // to search, so it opens on everything.
-            let reach = if self.active_view == crate::tui::View::Search {
-                crate::tui::widgets::search::Reach::All
-            } else {
-                crate::tui::widgets::search::Reach::Current
-            };
+            // A fresh content search reads everything; `Current` is one
+            // keypress away.
             SearchOverlayState::configured(SearchMode::Content, group, kinds, enabled, "")
-                .with_reach(reach)
+                .with_reach(crate::tui::widgets::search::Reach::All)
         };
         self.modal_stack.push(crate::tui::Modal::Search(state));
     }

@@ -596,11 +596,11 @@ use crate::viewer::find::ViewerFindMsg;
 use crate::viewer::input::ViewerMsg;
 
 pub const VIEWER_KEYS: &[KeyRow<ViewerMsg>] = &[
-    alias(ctrl('c'), ViewerMsg::Close),
+    alias(ctrl('c'), ViewerMsg::Quit),
     alias(ctrl('d'), ViewerMsg::HalfPageDown),
     alias(ctrl('u'), ViewerMsg::HalfPageUp),
     alias(key(KeyCode::Esc), ViewerMsg::Close),
-    alias(ch('q'), ViewerMsg::Close),
+    alias(ch('q'), ViewerMsg::Quit),
     alias(ch('j'), ViewerMsg::ScrollDown),
     alias(key(KeyCode::Down), ViewerMsg::ScrollDown),
     alias(ch('k'), ViewerMsg::ScrollUp),

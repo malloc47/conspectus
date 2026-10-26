@@ -273,7 +273,10 @@ impl SearchOverlayState {
     /// cursor can move among them.
     pub fn set_content_len(&mut self, len: usize) {
         self.content_len = len;
-        if self.cursor >= len {
+        // The cursor belongs to the contents results only in content
+        // mode; quick select keeps its own and the host passes no
+        // contents then, which must not send it back to the top.
+        if self.mode == SearchMode::Content && self.cursor >= len {
             self.cursor = 0;
         }
     }

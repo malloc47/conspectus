@@ -794,6 +794,36 @@ fn quick_select_picks_a_row_of_the_current_view() {
     );
 }
 
+/// `/`, a query, then Down five times: the cursor follows every press
+/// instead of stopping after the first.
+#[test]
+fn quick_select_cursor_follows_repeated_arrow_keys() {
+    needs_tmux!();
+    let world = World::new();
+    for n in 1..=7 {
+        world.new_mux(&format!("pager-{n}"), false);
+    }
+    world.start_tui_outside();
+    wait_screen(&world, "the muxes", |screen| screen.contains("7 mux"));
+
+    world.keys(&["2", "/"]);
+    wait_screen(&world, "quick select", |screen| {
+        screen.contains("/ quick select")
+    });
+    world.keys(&["pager"]);
+    wait_screen(&world, "all seven matches", |screen| screen.contains("(7)"));
+    world.keys(&["Down", "Down", "Down", "Down", "Down"]);
+    wait_screen(&world, "the marker on the sixth match", |screen| {
+        screen
+            .lines()
+            .any(|line| line.contains("> ") && line.contains("mux:pager-"))
+            && screen
+                .lines()
+                .filter(|line| line.contains("> ") && line.contains("mux:pager-"))
+                .all(|line| !line.contains("mux:pager-1 ") && !line.contains("mux:pager-2 "))
+    });
+}
+
 /// `/`, Tab, a name, Enter: the wider reach finds a mux while the
 /// Sessions view is showing, and opening it switches to the Mux view.
 #[test]
@@ -844,7 +874,7 @@ fn the_search_overlay_filters_the_session_list_and_f_clears_it() {
     world.keys(&["quokka"]);
     wait_screen(&world, "the streamed result", |screen| {
         screen.contains("/ search contents")
-            && screen.contains("[ Current ] All")
+            && screen.contains("Current [ All ]")
             && screen.contains("(1 result)")
             && screen.contains("2 hits")
     });
@@ -881,6 +911,33 @@ fn escaping_the_contents_scope_leaves_the_lists_whole() {
     let screen = world.screen();
     assert!(!screen.contains("find:"), "{screen}");
     assert!(screen.contains("2 sessions"), "{screen}");
+}
+
+/// `s`, a query, Enter, then `q`: the viewer closes at once, with the
+/// find still active (only `Esc` steps back through the find first).
+#[test]
+fn q_leaves_a_viewer_opened_from_a_search_at_once() {
+    needs_tmux!();
+    let world = World::new();
+    write_search_sessions(&world);
+    world.new_mux("anchor", false);
+    world.start_tui_outside();
+    wait_screen(&world, "both sessions", |screen| {
+        screen.contains("2 sessions")
+    });
+
+    world.keys(&["1", "s", "quokka"]);
+    wait_screen(&world, "the streamed result", |screen| {
+        screen.contains("2 hits")
+    });
+    world.keys(&["Enter"]);
+    wait_screen(&world, "the viewer with its find", |screen| {
+        screen.contains("find \"quokka\" 1/2")
+    });
+    world.keys(&["q"]);
+    wait_screen(&world, "back at the lists after one q", |screen| {
+        !screen.contains("find \"quokka\"") && screen.contains("2 sessions")
+    });
 }
 
 /// `s`, a query, Enter: the viewer opens on the match, `n` steps to
@@ -991,7 +1048,7 @@ fn ctrl_slash_opens_the_contents_modal_through_a_real_terminal() {
     for key in ["C-/", "C-_"] {
         world.keys(&["1", key]);
         wait_screen(&world, "the contents modal", |screen| {
-            screen.contains("/ search contents") && screen.contains("[ Current ] All")
+            screen.contains("/ search contents") && screen.contains("Current [ All ]")
         });
         world.keys(&["Escape"]);
         wait_screen(&world, "the modal closed", |screen| {

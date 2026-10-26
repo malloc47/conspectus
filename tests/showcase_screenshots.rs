@@ -238,13 +238,21 @@ fn the_search_overlay_searches_contents_and_promotes_the_query() {
 
     let contents = frame(scratch.path(), "srelease summary");
     assert!(contents.contains("search contents"), "{contents}");
-    assert!(contents.contains("[ Current ] All"), "{contents}");
-    assert!(contents.contains("(1 result)"), "{contents}");
+    assert!(contents.contains("Current [ All ]"), "{contents}");
+    assert!(contents.contains("(2 results)"), "{contents}");
     assert!(contents.contains("2 hits"), "{contents}");
     // The footer wraps, so look for the keys rather than whole phrases.
     assert!(contents.contains("Ctrl-F filter"), "{contents}");
     assert!(contents.contains("Ctrl-S Search"), "{contents}");
-    assert!(contents.contains("sessions searched"), "{contents}");
+    assert!(
+        contents.contains("sessions and panes searched"),
+        "{contents}"
+    );
+    // Tab narrows it to the view, which lists no muxes.
+    let narrow = frame(scratch.path(), "srelease summary<Tab>");
+    assert!(narrow.contains("[ Current ] All"), "{narrow}");
+    assert!(narrow.contains("(1 result)"), "{narrow}");
+    assert!(narrow.contains("sessions searched"), "{narrow}");
 
     // Ctrl-/ opens it too, as the three keys terminals send for it.
     for open in ["<C-/>", "<C-7>", "<C-_>"] {
@@ -299,12 +307,15 @@ fn content_search_reads_pane_scrollback_and_tab_widens_it() {
         .assert()
         .success();
 
-    // The Sessions view lists no muxes, so its panes are not searched.
-    let sessions = frame(scratch.path(), "<C-/>feature");
+    // A content search opens on All; Tab narrows it to the view. The
+    // Sessions view lists no muxes, so its panes are not searched.
+    let all_open = frame(scratch.path(), "<C-/>feature");
+    assert!(all_open.contains("Current [ All ]"), "{all_open}");
+    let sessions = frame(scratch.path(), "<C-/>feature<Tab>");
     assert!(!sessions.contains("project 0.0"), "{sessions}");
 
     // The Mux view lists the muxes; the `project` pane has the text.
-    let mux = frame(scratch.path(), "2<C-/>feature");
+    let mux = frame(scratch.path(), "2<C-/>feature<Tab>");
     assert!(mux.contains("[ Current ] All"), "{mux}");
     assert!(
         mux.lines()
@@ -318,7 +329,7 @@ fn content_search_reads_pane_scrollback_and_tab_widens_it() {
     );
 
     // All reads the sessions too.
-    let all = frame(scratch.path(), "2<C-/>feature<Tab>");
+    let all = frame(scratch.path(), "2<C-/>feature");
     assert!(all.contains("Current [ All ]"), "{all}");
     assert!(
         all.lines()
@@ -328,7 +339,7 @@ fn content_search_reads_pane_scrollback_and_tab_widens_it() {
     assert!(all.contains("sessions and panes searched"), "{all}");
 
     // The Search view lists the pane as a row of its own.
-    let view = frame(scratch.path(), "2<C-/>feature<Tab><C-s>");
+    let view = frame(scratch.path(), "2<C-/>feature<C-s>");
     assert!(view.contains("search 1/1 \"feature\""), "{view}");
     assert!(
         view.lines()
@@ -348,7 +359,7 @@ fn enter_on_a_contents_result_opens_the_viewer_at_the_match() {
         .assert()
         .success();
 
-    let opened = frame(scratch.path(), "srelease summary<Enter>");
+    let opened = frame(scratch.path(), "srelease summary<Tab><Enter>");
     assert!(
         opened.contains("find \"release summary\" 1/"),
         "the viewer is open with the query active:\n{opened}"

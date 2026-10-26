@@ -620,10 +620,11 @@ sessions and what is in mux pane scrollback. Terminals send that key as
 one of three keys; Conspectus accepts all of them (`Ctrl-/`, `Ctrl-7`,
 `Ctrl-_`), and `s` works in every terminal. The modal uses most of the
 terminal's width (85%, between 60 and 200 columns). The top border shows
-`[ Current ] All`; `Tab` (or `Shift-Tab`) switches. *Current* is the
+`Current [ All ]`; `Tab` (or `Shift-Tab`) switches. *Current* is the
 sessions and muxes the view you are in lists, folded rows included (the
 Search view's current context is the one its shown search was made in);
-*All* is every session and live mux. It opens on Current. The modal shows
+*All* is every session and live mux. It opens on All, so a fresh search
+reads everything; `Tab` narrows it to the view. The modal shows
 the query, a status line (grouping, the kinds searched, how many places are
 scanned, the skipped count), the best results so far, and a footer naming
 the keys it understands. Each row says where the match is (`session` or
@@ -1145,6 +1146,14 @@ and `showing N of M messages` if that cap left some out. Per-message
 turns are read again when a search is shown, not kept with it. Selecting a
 hit row shows its turn above the session's detail.
 
+The right pane's Preview marks the search too. A session row's transcript
+preview highlights the query and opens at the session's best match; a hit
+row opens at its own turn, and scrolling moves from there. A pane's preview
+highlights the query in the capture and scrolls back to the newest match
+when none is in the bottom rows. The same marks show under a `Ctrl-F`
+filter on the Sessions and Mux lists. They come from the search on display
+(so `<` and `>` move them), are never saved, and go with the search.
+
 `Enter` and `v` open the viewer at the best match of a session, or at the
 matching turn of a hit row, with the query already searched, so `n` and
 `N` step to the others; `Enter` on a pane row or pane line opens the
@@ -1307,7 +1316,9 @@ match and wrap at either end, saying so in the footer. The footer shows
 `find "query" i/N` (or `no match`; the header's `find:"query"` chip uses the
 same wording), and each match is highlighted: the current one reversed, the
 others in the shared match style (bold, underlined). `Esc` clears the find before
-it closes the viewer.
+it closes the viewer, one step back at a time; `q` (and `Ctrl-C`) leave the
+viewer at once, find or not, except that with the help page open they close
+only the help.
 
 Find is a case-insensitive substring match on what the viewer is
 showing: messages always, and tool output, thinking, aborted, and hidden

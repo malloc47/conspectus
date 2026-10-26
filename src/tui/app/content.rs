@@ -780,9 +780,7 @@ impl App {
     /// Keep the entry for good: typing more in the modal no longer
     /// replaces it.
     fn keep_entry(&mut self, serial: u64) {
-        if let Some(entry) = self.search_history.by_serial_mut(serial) {
-            entry.draft = false;
-        }
+        self.search_history.keep(serial);
     }
 
     /// The open modal's drafts become kept searches.

@@ -168,7 +168,13 @@ fn the_keys_the_footer_names_do_what_it_says_in_the_viewer() {
             PagerKey::Close if code == ratatui::crossterm::event::KeyCode::Char('?') => {
                 ViewerMsg::ToggleHelp
             }
-            PagerKey::Abort | PagerKey::Close => ViewerMsg::Close,
+            // Esc steps back; `q` and Ctrl-C leave at once.
+            PagerKey::Abort | PagerKey::Close
+                if code == ratatui::crossterm::event::KeyCode::Esc =>
+            {
+                ViewerMsg::Close
+            }
+            PagerKey::Abort | PagerKey::Close => ViewerMsg::Quit,
             PagerKey::Copy => continue,
         };
         expect(event, viewer);

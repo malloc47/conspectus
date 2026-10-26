@@ -40,7 +40,11 @@ pub enum ViewerMsg {
     /// Go to the previous match of the active find (`N`).
     FindPrev,
     ToggleHelp,
+    /// Step back: close the help, then clear the find, then leave (`Esc`).
     Close,
+    /// Leave the viewer at once, whatever is open on it (`q`, `Ctrl-C`);
+    /// with the help up it closes the help only.
+    Quit,
 }
 
 /// What the runtime should do after applying the reducer.
@@ -66,7 +70,12 @@ pub fn reduce(mut state: ViewerState, msg: ViewerMsg) -> (ViewerState, ViewerEff
 
     // While the help page is up it owns the movement keys, scrolling the
     // page rather than the transcript, and the toggles wait.
-    if state.show_help && !matches!(msg, ViewerMsg::ToggleHelp | ViewerMsg::Close) {
+    if state.show_help
+        && !matches!(
+            msg,
+            ViewerMsg::ToggleHelp | ViewerMsg::Close | ViewerMsg::Quit
+        )
+    {
         scroll_help(&mut state, msg);
         return (state, ViewerEffect::None);
     }
@@ -154,6 +163,14 @@ pub fn reduce(mut state: ViewerState, msg: ViewerMsg) -> (ViewerState, ViewerEff
             // Likewise an active find clears before the viewer closes.
             if state.find.is_active() {
                 state.find.clear();
+                return (state, ViewerEffect::None);
+            }
+            return (state, ViewerEffect::Close);
+        }
+        ViewerMsg::Quit => {
+            // Only the help page stands between `q` and leaving.
+            if state.show_help {
+                state.show_help = false;
                 return (state, ViewerEffect::None);
             }
             return (state, ViewerEffect::Close);

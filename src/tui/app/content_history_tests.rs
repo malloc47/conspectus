@@ -77,6 +77,131 @@ fn an_identical_search_updates_the_newest_entry_instead_of_adding() {
     assert_eq!(texts(&app), ["same"]);
 }
 
+fn start(app: &mut App, text: &str) {
+    start_with(app, text, ContentKinds::default());
+}
+
+fn start_with(app: &mut App, text: &str, kinds: ContentKinds) {
+    app.update(Msg::StartContentSearch {
+        text: text.into(),
+        kinds,
+    });
+}
+
+#[test]
+fn a_repeat_of_an_older_search_moves_it_to_the_newest_place_and_shows_it() {
+    let mut app = app_with(&["a"]);
+    for text in ["one", "two", "three"] {
+        start(&mut app, text);
+    }
+    start(&mut app, "  one ");
+    assert_eq!(texts(&app), ["two", "three", "one"]);
+    assert_eq!(app.search_history().position(), Some((3, 3)));
+    assert_eq!(app.viewed_search().unwrap().text, "one");
+}
+
+#[test]
+fn a_repeat_rescans_and_refreshes_the_entry() {
+    let mut app = app_with(&["a", "b"]);
+    start(&mut app, "one");
+    app.take_scan_request();
+    finish_scan(&mut app, &["a"]);
+    start(&mut app, "two");
+    start(&mut app, "one");
+    let entry = app.search_history().viewed().unwrap();
+    assert!(!entry.search.status_is_done(), "it is scanning again");
+    app.take_scan_request();
+    finish_scan(&mut app, &["a", "b"]);
+    assert_eq!(texts(&app), ["two", "one"]);
+    assert!(
+        app.search_history()
+            .viewed()
+            .unwrap()
+            .search
+            .status_is_done()
+    );
+}
+
+#[test]
+fn searches_that_differ_in_kinds_or_scope_are_distinct_entries() {
+    let mut app = app_with(&["a"]);
+    let tools = ContentKinds {
+        tools: true,
+        ..ContentKinds::default()
+    };
+    start(&mut app, "same");
+    start_with(&mut app, "same", tools);
+    assert_eq!(app.search_history().len(), 2, "kinds differ");
+    preview(&mut app, "same", Reach::Current);
+    app.finalize_search_drafts();
+    assert_eq!(app.search_history().len(), 3, "scope differs");
+    start(&mut app, "same");
+    assert_eq!(app.search_history().len(), 3, "the All search is the first");
+    let reaches: Vec<_> = app
+        .search_history()
+        .entries()
+        .iter()
+        .map(|entry| (entry.search.kinds.tools, entry.search.reach))
+        .collect();
+    assert_eq!(
+        reaches,
+        [
+            (true, Reach::All),
+            (false, Reach::Current),
+            (false, Reach::All)
+        ]
+    );
+}
+
+#[test]
+fn a_repeat_does_not_push_the_oldest_search_out() {
+    let mut config = RunConfig::defaults();
+    config.search.history = 3;
+    let mut app = App::new(config);
+    for text in ["a", "b", "c", "a"] {
+        start(&mut app, text);
+    }
+    assert_eq!(texts(&app), ["b", "c", "a"], "nothing was evicted");
+    start(&mut app, "d");
+    assert_eq!(texts(&app), ["c", "a", "d"]);
+}
+
+#[test]
+fn typing_a_prefix_of_an_earlier_search_in_the_modal_keeps_that_search() {
+    let mut app = app_with(&["a"]);
+    start(&mut app, "ne");
+    preview(&mut app, "ne", Reach::All);
+    preview(&mut app, "need", Reach::All);
+    app.finalize_search_drafts();
+    assert_eq!(texts(&app), ["ne", "need"]);
+}
+
+#[test]
+fn closing_the_modal_on_a_search_equal_to_an_earlier_one_keeps_one_entry() {
+    let mut app = app_with(&["a"]);
+    start(&mut app, "ne");
+    start(&mut app, "other");
+    preview(&mut app, "ne", Reach::All);
+    app.finalize_search_drafts();
+    assert_eq!(texts(&app), ["other", "ne"]);
+    assert_eq!(app.viewed_search().unwrap().text, "ne");
+}
+
+#[test]
+fn a_content_search_opens_on_all_unless_it_opens_onto_a_search() {
+    use crate::tui::Modal;
+    let reach = |app: &App| match app.modal_stack().last() {
+        Some(Modal::Search(state)) => state.reach(),
+        _ => panic!("no search modal"),
+    };
+    let mut app = app_with(&["a"]);
+    app.open_content_search_overlay();
+    assert_eq!(reach(&app), Reach::All);
+    let mut quick = app_with(&["a"]);
+    quick.open_search_overlay();
+    assert_eq!(reach(&quick), Reach::Current, "quick select is unchanged");
+}
+
 #[test]
 fn typing_in_the_modal_replaces_its_draft_and_closing_keeps_it() {
     let mut app = app_with(&["a"]);

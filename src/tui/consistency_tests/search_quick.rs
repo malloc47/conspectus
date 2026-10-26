@@ -329,3 +329,116 @@ fn shift_tab_widens_too() {
         Some(crate::tui::widgets::search::Reach::All)
     );
 }
+
+/// 30 muxes named `alpha-NN`, so a query matches more rows than one
+/// screen of the modal shows.
+fn many_muxes() -> GraphSnapshot {
+    let nodes = (0..30)
+        .map(|n| {
+            let name = format!("alpha-{n:02}");
+            let mut mux = crate::model::MuxSessionNode::new(
+                crate::model::MuxSessionId::new(format!("tmux:{name}")),
+                "tmux",
+                name,
+            );
+            mux.cwd = Some("/home/op/src/alpha".into());
+            GraphNode::MuxSession(mux)
+        })
+        .collect();
+    GraphSnapshot {
+        nodes,
+        ..GraphSnapshot::empty()
+    }
+}
+
+fn cursor(app: &App) -> usize {
+    app.search_overlay().expect("the overlay is open").cursor()
+}
+
+fn ctrl(app: &mut App, c: char) {
+    crate::tui::runtime::handle_search_overlay_key(
+        app,
+        KeyEvent::new(KeyCode::Char(c), KeyModifiers::CONTROL),
+    );
+}
+
+/// Step the cursor down 8 and back up 8, with every key the table binds
+/// for it, and expect it to follow each press.
+fn walk_the_cursor(app: &mut App) {
+    for expected in 1..=8 {
+        search_key(app, KeyCode::Down);
+        assert_eq!(cursor(app), expected, "Down #{expected}");
+    }
+    for expected in (0..8).rev() {
+        search_key(app, KeyCode::Up);
+        assert_eq!(cursor(app), expected, "Up to {expected}");
+    }
+    for expected in 1..=5 {
+        ctrl(app, 'n');
+        assert_eq!(cursor(app), expected, "Ctrl-N #{expected}");
+    }
+    for expected in (0..5).rev() {
+        ctrl(app, 'p');
+        assert_eq!(cursor(app), expected, "Ctrl-P to {expected}");
+    }
+}
+
+#[test]
+fn the_cursor_follows_every_arrow_key_in_current_scope() {
+    let mut app = app_over(View::Mux, &many_muxes());
+    app.open_search_overlay();
+    type_into_search(&mut app, "alpha");
+    walk_the_cursor(&mut app);
+}
+
+#[test]
+fn the_cursor_follows_every_arrow_key_in_all_scope() {
+    let mut app = app_over(View::Mux, &many_muxes());
+    app.open_search_overlay();
+    search_key(&mut app, KeyCode::Tab);
+    type_into_search(&mut app, "alpha");
+    walk_the_cursor(&mut app);
+}
+
+#[test]
+fn the_cursor_survives_typing_after_moving() {
+    let mut app = app_over(View::Mux, &many_muxes());
+    app.open_search_overlay();
+    type_into_search(&mut app, "alpha");
+    for _ in 0..4 {
+        search_key(&mut app, KeyCode::Down);
+    }
+    assert_eq!(cursor(&app), 4);
+    // A longer query keeps the 30 matches, so the cursor stays put.
+    type_into_search(&mut app, "-");
+    assert_eq!(
+        cursor(&app),
+        4,
+        "typing a matching character keeps the cursor"
+    );
+}
+
+#[test]
+fn the_highlighted_row_scrolls_into_view_past_the_first_screen() {
+    for reach_all in [false, true] {
+        let mut app = app_over(View::Mux, &many_muxes());
+        app.open_search_overlay();
+        if reach_all {
+            search_key(&mut app, KeyCode::Tab);
+        }
+        type_into_search(&mut app, "alpha");
+        for _ in 0..25 {
+            search_key(&mut app, KeyCode::Down);
+        }
+        assert_eq!(cursor(&app), 25);
+        let shown = frame(&mut app, 120, 24);
+        let marked = shown
+            .lines()
+            .find(|line| line.contains("│> "))
+            .unwrap_or_else(|| panic!("a marked row in:\n{shown}"));
+        assert!(
+            marked.contains("alpha-25"),
+            "the marker sits on the cursor's row (all={reach_all}): {marked}"
+        );
+    }
+}

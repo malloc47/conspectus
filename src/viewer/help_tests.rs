@@ -21,6 +21,7 @@ fn position(msg: ViewerMsg) -> usize {
         ViewerMsg::FindPrev => 14,
         ViewerMsg::ToggleHelp => 15,
         ViewerMsg::Close => 16,
+        ViewerMsg::Quit => 17,
     }
 }
 

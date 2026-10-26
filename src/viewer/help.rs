@@ -19,7 +19,7 @@ pub struct HelpEntry {
 
 impl ViewerMsg {
     /// Every message, in the order the help page lists them.
-    pub const ALL: [ViewerMsg; 17] = [
+    pub const ALL: [ViewerMsg; 18] = [
         ViewerMsg::ScrollDown,
         ViewerMsg::ScrollUp,
         ViewerMsg::PageDown,
@@ -37,6 +37,7 @@ impl ViewerMsg {
         ViewerMsg::FindPrev,
         ViewerMsg::ToggleHelp,
         ViewerMsg::Close,
+        ViewerMsg::Quit,
     ];
 
     /// Where this message is listed in the help, and what it does.
@@ -70,7 +71,14 @@ impl ViewerMsg {
             ViewerMsg::FindNext => ("Finding", "Next match, wrapping at the end"),
             ViewerMsg::FindPrev => ("Finding", "Previous match, wrapping at the start"),
             ViewerMsg::ToggleHelp => ("Viewer", "Show or hide this help"),
-            ViewerMsg::Close => ("Viewer", "Close help, then the find, then the viewer"),
+            ViewerMsg::Close => (
+                "Viewer",
+                "Step back: close help, then the find, then the viewer",
+            ),
+            ViewerMsg::Quit => (
+                "Viewer",
+                "Leave the viewer at once, even with a find active",
+            ),
         };
         HelpEntry {
             section,
