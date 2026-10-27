@@ -270,7 +270,7 @@ fn the_per_message_grouping_lists_a_row_per_matching_turn() {
 }
 
 #[test]
-fn content_search_opens_on_the_contents_with_the_query_when_a_search_is_active() {
+fn content_search_opens_clean_even_when_a_search_is_active() {
     let mut app = app_with(&[("a", "alpha")]);
     app.update(Msg::StartContentSearch {
         text: "needle".into(),
@@ -279,7 +279,7 @@ fn content_search_opens_on_the_contents_with_the_query_when_a_search_is_active()
     app.open_content_search_overlay();
     let state = app.search_overlay().expect("open");
     assert_eq!(state.mode(), SearchMode::Content);
-    assert_eq!(state.query(), "needle");
+    assert_eq!(state.query(), "");
 }
 
 #[test]

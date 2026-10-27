@@ -1021,7 +1021,7 @@ fn the_flat_search_view_lists_messages_and_enter_opens_the_viewer() {
     wait_screen(&world, "the streamed result", |screen| {
         screen.contains("2 hits")
     });
-    world.keys(&["C-l", "C-s"]);
+    world.keys(&["BTab", "C-s"]);
     wait_screen(&world, "the flat Search view", |screen| {
         screen.contains("turn 1") && screen.contains("turn 2")
     });
@@ -1190,15 +1190,12 @@ fn ctrl_s_keeps_the_search_and_the_search_view_pages_between_searches() {
         screen.contains("search 1/1 \"quokka\"") && screen.contains("2 hits")
     });
 
-    // A second search from the Search view, over everything.
-    world.keys(&["s"]);
-    wait_screen(&world, "the modal, filled in", |screen| {
-        screen.contains("/quokka")
-    });
-    world.keys(&["BSpace", "BSpace", "BSpace", "BSpace", "BSpace", "BSpace"]);
-    world.keys(&["chatter"]);
+    // A second search starts from a clean slate, not from the first.
+    world.keys(&["s", "chatter"]);
     wait_screen(&world, "the second search's result", |screen| {
-        screen.contains("/chatter") && screen.contains("1 hit")
+        screen.contains("/chatter")
+            && !screen.contains("/quokkachatter")
+            && screen.contains("1 hit")
     });
     world.keys(&["C-s"]);
     wait_screen(&world, "the Search view on the second search", |screen| {
@@ -1212,6 +1209,31 @@ fn ctrl_s_keeps_the_search_and_the_search_view_pages_between_searches() {
     world.keys(&[">"]);
     wait_screen(&world, "the second search again", |screen| {
         screen.contains("search 2/2 \"chatter\"")
+    });
+
+    // Reopening starts empty; Ctrl-R brings the earlier strings back,
+    // newest first, and Shift-Tab switches to messages.
+    world.keys(&["s"]);
+    wait_screen(&world, "the empty modal", |screen| {
+        screen.contains("search contents")
+            && !screen.contains("/chatter")
+            && !screen.contains("/quokka")
+    });
+    world.keys(&["C-r"]);
+    wait_screen(&world, "the newest string", |screen| {
+        screen.contains("/chatter")
+    });
+    world.keys(&["C-r"]);
+    wait_screen(&world, "the older string", |screen| {
+        screen.contains("/quokka")
+    });
+    world.keys(&["BTab"]);
+    wait_screen(&world, "the messages tab", |screen| {
+        screen.contains("Sessions [ Messages ]")
+    });
+    world.keys(&["Escape"]);
+    wait_screen(&world, "the Search view without a new entry", |screen| {
+        screen.contains("search 2/2")
     });
 }
 

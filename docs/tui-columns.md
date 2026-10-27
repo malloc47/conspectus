@@ -611,7 +611,7 @@ session row above it, so the hit row is prefixed with an origin: the harness bad
 | 4 | Age | time since the turn was written, or a dash | always | dim |
 | 5 | Snippet | the text around the match, cropped so the match stays on screen and cut on word boundaries; the match in the theme's match style (bold, underlined) | when room remains | dim italic |
 
-<!-- frame: keys="6sthe<C-l><C-f>" width=130 height=20 -->
+<!-- frame: keys="6sthe<BackTab><C-f>" width=130 height=20 -->
 ```text
 ┌ ► sessions · mux · prs · pinned · history · search ───────────┐
 │search 1/1 "the" · All · 2 sessions · 1 pane · 4 s… · filtering│
@@ -671,7 +671,7 @@ prefixed with the mux's name and the pane's place, padded to 16.
 | 2 | Age | time since the scrollback was read | always | dim, right-aligned |
 | 3 | Snippet | the line, cropped around the match | when room remains | dim italic, match in the match style |
 
-<!-- frame: keys="2<C-/>feature<C-l><C-s>" width=130 height=14 -->
+<!-- frame: keys="2<C-/>feature<BackTab><C-s>" width=130 height=14 -->
 ```text
 ┌ ► sessions · mux · prs · pinned · history · search ───────────┐
 │search 1/1 "feature" · All · 1 session · 1 pane · 4 skipped · …│

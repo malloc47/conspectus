@@ -364,6 +364,11 @@ pub enum SearchKey {
     ApplyFilter,
     /// Contents scope: keep the search and open the Search view on it.
     Keep,
+    /// Contents scope: fill the field from the previous search string.
+    PrevQuery,
+    /// Contents scope: fill the field from the next search string, or
+    /// empty it past the newest.
+    NextQuery,
 }
 
 /// The picker shares the list-and-query keys but has no scopes.
@@ -401,13 +406,14 @@ pub const SEARCH_CONTENT_KEYS: &[KeyRow<SearchKey>] = &[
     shown(key(KeyCode::Enter), SearchKey::Pick, "Enter", "open hit"),
     shown(key(KeyCode::Esc), SearchKey::Cancel, "Esc", "close"),
     shown(key(KeyCode::Tab), SearchKey::Scope, "Tab", "current/all"),
-    alias(key(KeyCode::BackTab), SearchKey::Scope),
     shown(
-        ctrl('l'),
+        key(KeyCode::BackTab),
         SearchKey::Granularity,
-        "Ctrl-L",
+        "S-Tab",
         "sessions/messages",
     ),
+    shown(ctrl('r'), SearchKey::PrevQuery, "Ctrl-R", "earlier search"),
+    alias(ctrl('t'), SearchKey::NextQuery),
     shown(ctrl('o'), SearchKey::Options, "Ctrl-O", "options"),
     shown(ctrl('f'), SearchKey::ApplyFilter, "Ctrl-F", "filter lists"),
     shown(ctrl('s'), SearchKey::Keep, "Ctrl-S", "Search view"),

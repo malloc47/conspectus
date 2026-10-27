@@ -169,7 +169,8 @@ fn a_departure_from_the_convention_gives_its_reason() {
 }
 
 #[test]
-fn both_search_modals_switch_reach_with_tab_and_shift_tab() {
+fn both_search_modals_switch_reach_with_tab_and_the_contents_one_cycles_granularity_with_shift_tab()
+{
     use crate::tui::keybindings::overlay::{SearchKey, footer};
     assert_eq!(
         resolve(SEARCH_KEYS, press(KeyCode::Tab)),
@@ -192,9 +193,12 @@ fn both_search_modals_switch_reach_with_tab_and_shift_tab() {
             SEARCH_CONTENT_KEYS,
             KeyEvent::new(KeyCode::BackTab, KeyModifiers::SHIFT)
         ),
-        Some(SearchKey::Scope)
+        Some(SearchKey::Granularity),
+        "in the contents modal Shift-Tab cycles sessions/messages instead"
     );
     assert!(footer(SEARCH_CONTENT_KEYS).contains("Tab current/all"));
+    assert!(footer(SEARCH_CONTENT_KEYS).contains("S-Tab sessions/messages"));
+    assert!(footer(SEARCH_CONTENT_KEYS).contains("Ctrl-R earlier search"));
     // The hints are generated from the table, in the operator's words.
     let hints = footer(SEARCH_KEYS);
     for expected in ["Tab current/all", "Enter pick", "Esc close", "↑/↓ move"] {

@@ -183,6 +183,19 @@ pub struct SearchOverlayState {
     content_len: usize,
     /// When the query or options last changed and a scan is owed.
     edited_at: Option<Instant>,
+    /// Earlier searches, newest first, for paging back through.
+    past: Vec<PastSearch>,
+    /// The earlier search the field shows; `None` for the operator's own.
+    past_at: Option<usize>,
+}
+
+/// An earlier content search the field can be filled from.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct PastSearch {
+    pub text: String,
+    pub reach: Reach,
+    pub kinds: ContentKinds,
+    pub panes: bool,
 }
 
 impl SearchOverlayState {
@@ -202,6 +215,8 @@ impl SearchOverlayState {
             contents_enabled: true,
             content_len: 0,
             edited_at: None,
+            past: Vec::new(),
+            past_at: None,
         }
     }
 
@@ -231,6 +246,13 @@ impl SearchOverlayState {
     #[must_use]
     pub fn with_reach(mut self, reach: Reach) -> Self {
         self.reach = reach;
+        self
+    }
+
+    /// Open with `past` (newest first) available to page back through.
+    #[must_use]
+    pub fn with_past(mut self, past: Vec<PastSearch>) -> Self {
+        self.past = past;
         self
     }
 
@@ -505,6 +527,8 @@ impl SearchOverlayState {
             }
             Some(SearchKey::ApplyFilter) => self.promote(SearchOutcome::ApplyFilter),
             Some(SearchKey::Keep) => self.promote(SearchOutcome::Keep),
+            Some(SearchKey::PrevQuery) => self.page_past(1),
+            Some(SearchKey::NextQuery) => self.page_past(-1),
             None => {
                 // Let the text-input primitive handle the key. We
                 // ignore its outcome here because Enter/Esc are
@@ -545,6 +569,39 @@ impl SearchOverlayState {
             }
             None => {}
         }
+        SearchOutcome::Continue
+    }
+
+    /// Fill the field from the earlier search `delta` places back (negative
+    /// is newer; past the newest the field empties). It stops at the
+    /// oldest, and a changed field is searched like any edit.
+    fn page_past(&mut self, delta: isize) -> SearchOutcome {
+        let next = match self.past_at {
+            None if delta > 0 => 0,
+            None => return SearchOutcome::Continue,
+            Some(at) => match at.checked_add_signed(delta) {
+                Some(next) if next < self.past.len() => next,
+                Some(_) => return SearchOutcome::Continue,
+                None => {
+                    self.past_at = None;
+                    return self.fill_query(String::new());
+                }
+            },
+        };
+        let Some(past) = self.past.get(next).cloned() else {
+            return SearchOutcome::Continue;
+        };
+        self.past_at = Some(next);
+        self.reach = past.reach;
+        self.kinds = past.kinds;
+        self.panes = past.panes;
+        self.fill_query(past.text)
+    }
+
+    fn fill_query(&mut self, text: String) -> SearchOutcome {
+        self.input = TextInputState::new(" search ", text);
+        self.cursor = 0;
+        self.edited_at = Some(Instant::now());
         SearchOutcome::Continue
     }
 

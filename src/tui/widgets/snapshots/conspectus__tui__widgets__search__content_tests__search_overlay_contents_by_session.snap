@@ -21,6 +21,6 @@ expression: text
         │                                                                                   │
         │                                                                                   │
         │                                                                                   │
-        │↑/↓ move · Enter open hit · Esc close · Tab current/all · Ctrl-L sessions/messages │
-        │· Ctrl-O options · Ctrl-F filter lists · Ctrl-S Search view                        │
+        │↑/↓ move · Enter open hit · Esc close · Tab current/all · S-Tab sessions/messages  │
+        │· Ctrl-R earlier search · Ctrl-O options · Ctrl-F filter lists · Ctrl-S Search view│
         └───────────────────────────────────────────────────────────────────────────────────┘

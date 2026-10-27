@@ -182,6 +182,7 @@ fn closing_the_modal_on_a_search_equal_to_an_earlier_one_keeps_one_entry() {
     start(&mut app, "ne");
     start(&mut app, "other");
     app.open_content_search_overlay();
+    app.search_overlay_mut().unwrap().with_panes_off();
     preview(&mut app, "ne", Reach::All);
     app.commit_modal_search();
     assert_eq!(texts(&app), ["other", "ne"]);
@@ -285,6 +286,7 @@ fn a_repeat_of_an_earlier_search_on_exit_moves_it_to_the_newest_end() {
     start(&mut app, "one");
     start(&mut app, "two");
     app.open_content_search_overlay();
+    app.search_overlay_mut().unwrap().with_panes_off();
     preview(&mut app, "one", Reach::All);
     assert_eq!(texts(&app), ["one", "two"]);
     app.close_search_overlay();
@@ -697,4 +699,74 @@ fn the_options_open_the_modal_with_the_pane_showing() {
     app.update(Msg::OpenSearchOptions);
     let state = app.search_overlay().expect("the modal is open");
     assert_eq!(state.options_cursor(), Some(0));
+}
+
+#[test]
+fn a_blank_search_is_never_remembered() {
+    let mut app = app_with(&["a"]);
+    start(&mut app, "one");
+    app.open_content_search_overlay();
+    preview(&mut app, "   ", Reach::All);
+    app.close_search_overlay();
+    assert_eq!(texts(&app), ["one"]);
+
+    let mut blank = app.search_history().newest().unwrap().search.clone();
+    blank.text = "  ".into();
+    blank.serial = 99;
+    app.search_history.record(blank, 10);
+    assert_eq!(texts(&app), ["one"]);
+}
+
+#[test]
+fn content_search_always_opens_with_an_empty_query_on_all() {
+    let mut app = app_with(&["a"]);
+    start(&mut app, "one");
+    app.open_content_search_overlay();
+    let overlay = app.search_overlay().unwrap();
+    assert_eq!(overlay.query(), "");
+    assert_eq!(overlay.reach(), Reach::All);
+}
+
+#[test]
+fn earlier_search_strings_page_back_and_forward_from_an_empty_field() {
+    use crate::tui::widgets::search::SearchOutcome;
+    use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+    let ctrl = |c| KeyEvent::new(KeyCode::Char(c), KeyModifiers::CONTROL);
+    let mut app = app_with(&["a"]);
+    start(&mut app, "one");
+    start(&mut app, "two");
+    app.open_content_search_overlay();
+    let overlay = app.search_overlay_mut().unwrap();
+    assert_eq!(overlay.handle_key(ctrl('t')), SearchOutcome::Continue);
+    assert_eq!(overlay.query(), "", "nothing is newer than the empty field");
+    overlay.handle_key(ctrl('r'));
+    assert_eq!(overlay.query(), "two");
+    overlay.handle_key(ctrl('r'));
+    assert_eq!(overlay.query(), "one");
+    overlay.handle_key(ctrl('r'));
+    assert_eq!(overlay.query(), "one", "no wrap past the oldest");
+    overlay.handle_key(ctrl('t'));
+    assert_eq!(overlay.query(), "two");
+    overlay.handle_key(ctrl('t'));
+    assert_eq!(overlay.query(), "");
+}
+
+#[test]
+fn shift_tab_switches_granularity_and_tab_switches_reach() {
+    use crate::tui::widgets::search::SearchOutcome;
+    use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+    let mut app = app_with(&["a"]);
+    app.open_content_search_overlay();
+    let overlay = app.search_overlay_mut().unwrap();
+    let back = KeyEvent::new(KeyCode::BackTab, KeyModifiers::SHIFT);
+    assert!(matches!(
+        overlay.handle_key(back),
+        SearchOutcome::Regroup(Grouping::Flat)
+    ));
+    assert!(matches!(
+        overlay.handle_key(back),
+        SearchOutcome::Regroup(Grouping::Session)
+    ));
+    overlay.handle_key(KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE));
+    assert_eq!(overlay.reach(), Reach::Current);
 }

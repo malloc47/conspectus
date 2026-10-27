@@ -400,8 +400,8 @@ its wording:
   entries that the view showed as they were typed.)
 - **Two granularities, and the options behind a modal.** The layout cycle
   (`Ctrl-R`) is gone. The modal's title carries a second choice,
-  **Sessions** or **Messages**, switched with `Ctrl-L` (and in the Search
-  view with `Ctrl-L` too, since `m` and `o` are taken); Messages is the
+  **Sessions** or **Messages**, switched with `Shift-Tab` in the modal (and in
+  the Search view with `Ctrl-L`, since `m` and `o` are taken); Messages is the
   flat newest-first list. The nested per-message layout is no longer
   reachable in the TUI (`[search] group = "message"` means Messages; the
   CLI still has `--group message`). Changing the granularity regroups the
@@ -419,3 +419,14 @@ its wording:
   view, a `searches` row (lists the remembered searches in a picker).
 - Filter flows that do not use the modal (`f` → contains, `--contains`)
   read sessions only and are remembered like any search.
+- **Clean slate, string paging, Shift-Tab (CSP-707).** `Ctrl-/` and `s`
+  always open the contents modal with an empty query on All, whatever
+  search the view shows or the lists filter by. `Ctrl-R` pages back through
+  the remembered search strings (newest first, restoring each entry's
+  reach and options and searching again) and `Ctrl-T` pages forward, to
+  the empty field past the newest; only the older key is in the footer. The
+  paging list is a snapshot taken when the modal opens. No path records an
+  entry whose query is blank. In the contents modal `Shift-Tab` cycles
+  Sessions and Messages and `Ctrl-L` is no longer bound there; `Tab` alone
+  switches Current and All. Quick select keeps `Tab`/`Shift-Tab` for the
+  reach.

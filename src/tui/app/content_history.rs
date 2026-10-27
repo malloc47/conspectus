@@ -135,6 +135,9 @@ impl SearchHistory {
     /// another. Older entries beyond `keep` are dropped, and so are the
     /// oldest ones while the snippets kept exceed [`MAX_SNIPPETS_TOTAL`].
     pub fn record(&mut self, search: ContentSearch, keep: usize) {
+        if search.text.trim().is_empty() {
+            return;
+        }
         self.entries
             .retain(|entry| !same_search(&entry.search, &search));
         self.entries.push(HistoryEntry {
@@ -161,6 +164,12 @@ impl SearchHistory {
     /// The entry with this serial is kept for good: it replaces older
     /// entries for the same search.
     pub fn keep(&mut self, serial: u64) {
+        if self
+            .by_serial(serial)
+            .is_none_or(|entry| entry.search.text.trim().is_empty())
+        {
+            return;
+        }
         self.drop_older_twins(serial);
     }
 

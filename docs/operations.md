@@ -620,11 +620,12 @@ sessions and what is in mux pane scrollback. Terminals send that key as
 one of three keys; Conspectus accepts all of them (`Ctrl-/`, `Ctrl-7`,
 `Ctrl-_`), and `s` works in every terminal. The modal uses most of the
 terminal's width (85%, between 60 and 200 columns). The top border shows
-`Current [ All ]`; `Tab` (or `Shift-Tab`) switches. *Current* is the
+`Current [ All ]`; `Tab` switches. *Current* is the
 sessions and muxes the view you are in lists, folded rows included (the
 Search view's current context is the one its shown search was made in);
 *All* is every session and live mux. It opens on All, so a fresh search
-reads everything; `Tab` narrows it to the view. The modal shows
+reads everything; `Tab` narrows it to the view. It always opens with an
+empty query; `Ctrl-R` brings back earlier search strings. The modal shows
 the query, a status line (grouping, the kinds searched, how many places are
 scanned, the skipped count), the best results so far, and a footer naming
 the keys it understands. Each row says where the match is (`session` or
@@ -635,10 +636,16 @@ with the match picked out in the theme's `match_highlight` color. The keys:
   200 ms and restarts whenever the query, the reach, or an option changes.
   Results arrive while it runs.
 - The title shows two choices. `Tab` switches the reach between
-  **Current** and **All**; `Ctrl-L` switches the granularity between
+  **Current** and **All**; `Shift-Tab` switches the granularity between
   **Sessions** (one row per session or pane) and **Messages** (every match,
   newest first). Changing the granularity lists the same matches another
   way and never searches again; the starting value comes from `[search]`.
+- `Ctrl-R` fills the field from the previous search string (newest
+  first, each with the reach and options it ran with) and searches it;
+  press it again for the one before, and `Ctrl-T` goes forward again, back
+  to the empty field. Paging stops at the oldest string and never records
+  a search by itself: the one you land on joins the history on exit like
+  any other, replacing its twin. A blank query is never remembered.
 - `Ctrl-O` opens the search options in the modal: whether tool calls and
   output, thinking, and pane scrollback are searched (`Space` or `Enter`
   flips one, `Esc` goes back to the results). Changing one searches again.

@@ -614,45 +614,29 @@ impl App {
         self.modal_stack.push(crate::tui::Modal::Search(state));
     }
 
-    /// Push a content-search overlay onto the modal stack. From the Search
-    /// view it opens on the search the view shows (query, options, and
-    /// reach) with its results listed; changing anything searches again as
-    /// a new search. Elsewhere it fills the query in from the search
-    /// filtering the lists, if any.
+    /// Push a content-search overlay onto the modal stack. It always opens
+    /// with an empty query on the wider reach; earlier search strings are
+    /// a key away, newest first.
     pub fn open_content_search_overlay(&mut self) {
-        use crate::tui::widgets::search::{SearchMode, SearchOverlayState};
+        use crate::tui::widgets::search::{PastSearch, Reach, SearchMode, SearchOverlayState};
         let enabled = self.config.live_preview_enabled;
-        let shown = (self.active_view == crate::tui::View::Search)
-            .then(|| self.viewed_search())
-            .flatten();
-        let state = if let Some(shown) = shown {
-            SearchOverlayState::configured(
-                SearchMode::Content,
-                shown.group,
-                shown.kinds,
-                enabled,
-                &shown.text,
-            )
-            .with_reach(shown.reach)
-            .with_panes(shown.with_panes)
-        } else if let Some(content) = self.content() {
-            SearchOverlayState::configured(
-                SearchMode::Content,
-                content.group,
-                content.kinds,
-                enabled,
-                &content.text,
-            )
-            .with_reach(content.reach)
-            .with_panes(content.with_panes)
-        } else {
-            let (group, kinds) = self.search_options();
-            // A fresh content search reads everything; `Current` is one
-            // keypress away.
-            SearchOverlayState::configured(SearchMode::Content, group, kinds, enabled, "")
-                .with_reach(crate::tui::widgets::search::Reach::All)
-                .with_panes(self.search_memory.is_none_or(|memory| memory.panes))
-        };
+        let (group, kinds) = self.search_options();
+        let past = self
+            .search_history
+            .entries()
+            .iter()
+            .rev()
+            .map(|entry| PastSearch {
+                text: entry.search.text.clone(),
+                reach: entry.search.reach,
+                kinds: entry.search.kinds,
+                panes: entry.search.with_panes,
+            })
+            .collect();
+        let state = SearchOverlayState::configured(SearchMode::Content, group, kinds, enabled, "")
+            .with_reach(Reach::All)
+            .with_panes(self.search_memory.is_none_or(|memory| memory.panes))
+            .with_past(past);
         self.modal_stack.push(crate::tui::Modal::Search(state));
     }
 
