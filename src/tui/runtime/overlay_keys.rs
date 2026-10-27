@@ -553,6 +553,23 @@ pub(in crate::tui) fn handle_controls_overlay_key(
 /// `app` — unless the reducer's effect was `Close`, in which case
 /// dismiss the modal. Keys that don't map are dropped silently
 /// (the modal owns every keystroke while open).
+/// One key into the pane scrollback viewer. Says what to dispatch when
+/// the key asked for something only the live loop can run (attaching).
+pub(in crate::tui) fn handle_pane_viewer_key(
+    app: &mut App,
+    key: ratatui::crossterm::event::KeyEvent,
+) -> Option<Msg> {
+    use crate::tui::widgets::pane_viewer::PaneViewerOutcome;
+    match app.pane_viewer_mut()?.handle_key(key) {
+        PaneViewerOutcome::Continue => None,
+        PaneViewerOutcome::Close => {
+            app.close_pane_viewer();
+            None
+        }
+        PaneViewerOutcome::Attach => Some(Msg::AttachPane),
+    }
+}
+
 pub(in crate::tui) fn handle_viewer_overlay_key(
     app: &mut App,
     key: ratatui::crossterm::event::KeyEvent,

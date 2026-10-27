@@ -6014,6 +6014,78 @@ fn reveal_switches_to_the_native_view_and_selects_the_entity() {
 }
 
 #[test]
+fn backspace_on_the_left_pane_returns_to_where_a_reveal_started() {
+    let mut app = slots_app(crate::tui::PinnedGrouping::None);
+    app.update(Msg::SwitchView(View::Pinned));
+    app.set_selection(RowId::Pin {
+        pin_id: "conspectus-main".into(),
+    });
+    let before = app.selection().cloned();
+
+    app.update(Msg::RevealSelected);
+    assert_eq!(app.active_view(), View::Mux);
+    assert!(app.can_nav_back());
+
+    app.update(Msg::ExplorerBack);
+    assert_eq!(app.active_view(), View::Pinned);
+    assert_eq!(app.selection().cloned(), before);
+    assert!(!app.can_nav_back());
+}
+
+#[test]
+fn backspace_on_the_right_pane_leaves_the_back_stack_alone() {
+    let mut app = slots_app(crate::tui::PinnedGrouping::None);
+    app.update(Msg::SwitchView(View::Pinned));
+    app.set_selection(RowId::Pin {
+        pin_id: "conspectus-main".into(),
+    });
+    app.update(Msg::RevealSelected);
+
+    app.update(Msg::CycleFocus);
+    app.update(Msg::ExplorerBack);
+
+    assert_eq!(app.active_view(), View::Mux);
+    assert!(app.can_nav_back());
+}
+
+#[test]
+fn the_back_stack_keeps_only_the_newest_twenty_jumps() {
+    let mut app = slots_app(crate::tui::PinnedGrouping::None);
+    for n in 0..30 {
+        app.push_nav(crate::tui::app::NavEntry {
+            view: View::Sessions,
+            selection: Some(RowId::Bucket(format!("b{n}"))),
+        });
+    }
+    let mut popped = 0;
+    while app.can_nav_back() {
+        app.update(Msg::ExplorerBack);
+        popped += 1;
+    }
+    assert_eq!(popped, 20);
+}
+
+#[test]
+fn going_back_to_a_row_that_vanished_says_so() {
+    use crate::tui::Effect;
+    let mut app = slots_app(crate::tui::PinnedGrouping::None);
+    app.push_nav(crate::tui::app::NavEntry {
+        view: View::Pinned,
+        selection: Some(RowId::Pin {
+            pin_id: "no-longer-there".into(),
+        }),
+    });
+    let effects = app.update(Msg::ExplorerBack);
+    assert!(
+        effects
+            .iter()
+            .any(|e| matches!(e, Effect::Toast(t) if t == "that row is gone")),
+        "{effects:?}"
+    );
+    assert_eq!(app.active_view(), View::Pinned);
+}
+
+#[test]
 fn the_mux_launch_form_opens_with_defaults_and_the_worktree_toggle_off() {
     let mut app = native_app(View::Mux, RowFilter::default());
     app.update(Msg::OpenMuxLaunchForm);

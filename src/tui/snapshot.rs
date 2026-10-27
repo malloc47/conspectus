@@ -45,7 +45,8 @@ use crate::tui::RunConfig;
 use crate::tui::app::App;
 use crate::tui::runtime::{
     self, Action, cycle_view, dispatch, handle_controls_overlay_key, handle_help_overlay_key,
-    handle_messages_overlay_key, handle_viewer_overlay_key, refresh, refresh_from_snapshot,
+    handle_messages_overlay_key, handle_pane_viewer_key, handle_viewer_overlay_key, refresh,
+    refresh_from_snapshot,
 };
 
 /// Tunables for one snapshot pass. Filled from `--snapshot-*` flags
@@ -300,6 +301,9 @@ fn apply_action(
         Action::HelpOverlayKey(key) => handle_help_overlay_key(app, key),
         Action::View => open_viewer(app, rebase),
         Action::ViewerOverlayKey(key) => handle_viewer_overlay_key(app, key),
+        Action::PaneViewerKey(key) => {
+            handle_pane_viewer_key(app, key);
+        }
         Action::Refresh => runtime::refresh(app, config),
         Action::HardRefresh => {
             app.update(crate::tui::Msg::ForgeRefreshRequested);
@@ -323,6 +327,7 @@ fn action_label(action: &Action) -> &'static str {
         Action::Attach => "Attach",
         Action::Resume => "Resume",
         Action::DefaultAction => "DefaultAction",
+        Action::PaneViewerKey(_) => "PaneViewerKey",
         Action::OpenRename => "OpenRename",
         Action::RenameOverlayKey(_) => "RenameOverlayKey",
         Action::OpenValueModal => "OpenValueModal",

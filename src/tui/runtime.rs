@@ -58,7 +58,7 @@ use worktree_exec::*;
 pub(super) use overlay_keys::handle_search_overlay_key;
 pub(super) use overlay_keys::{
     handle_controls_overlay_key, handle_help_overlay_key, handle_messages_overlay_key,
-    handle_search_overlay_key_with, handle_viewer_overlay_key,
+    handle_pane_viewer_key, handle_search_overlay_key_with, handle_viewer_overlay_key,
 };
 
 /// What a background discovery worker sends back. `warning` carries a
@@ -588,6 +588,11 @@ impl LoopMode for LiveMode {
             Some(Action::OpenValueModal) => app.open_value_modal_for_cursor(),
             Some(Action::ValueModalKey(key)) => handle_value_modal_key(app, key),
             Some(Action::ViewerOverlayKey(key)) => handle_viewer_overlay_key(app, key),
+            Some(Action::PaneViewerKey(key)) => {
+                if let Some(msg) = handle_pane_viewer_key(app, key) {
+                    dispatch_live(terminal, app, config, tmux, msg);
+                }
+            }
             Some(Action::ExplorerEnter) => explorer_enter_action(app),
             Some(Action::CopySessionId) => copy_session_id_action(app),
             None => {}
@@ -673,6 +678,11 @@ impl LoopMode for StaticMode {
             Some(Action::OpenValueModal) => app.open_value_modal_for_cursor(),
             Some(Action::ValueModalKey(key)) => handle_value_modal_key(app, key),
             Some(Action::ViewerOverlayKey(key)) => handle_viewer_overlay_key(app, key),
+            Some(Action::PaneViewerKey(key)) => {
+                if let Some(msg) = handle_pane_viewer_key(app, key) {
+                    dispatch(app, msg);
+                }
+            }
             Some(Action::OpenSearch) => {
                 let hint = app.open_search_entry();
                 app.update(Msg::SetStatus(Some(hint)));
@@ -840,6 +850,11 @@ pub(super) fn draw_screen(app: &mut App, frame: &mut ratatui::Frame<'_>) {
                 crate::tui::widgets::viewer_help::draw(state, &theme, frame, area);
             }
         }
+    } else if app.pane_viewer().is_some() {
+        let theme = app.theme().clone();
+        if let Some(state) = app.pane_viewer_mut() {
+            crate::tui::widgets::pane_viewer::draw(state, &theme, frame, area);
+        }
     } else {
         ui::draw(app, frame);
     }
@@ -872,6 +887,9 @@ fn overlay_key_from_event(app: &App, event: &Event) -> Option<Action> {
     };
     if app.viewer_modal().is_some() {
         return Some(Action::ViewerOverlayKey(key));
+    }
+    if app.pane_viewer().is_some() {
+        return Some(Action::PaneViewerKey(key));
     }
     if app.value_modal().is_some() {
         return Some(Action::ValueModalKey(key));

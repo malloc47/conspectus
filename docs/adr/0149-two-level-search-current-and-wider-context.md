@@ -430,3 +430,18 @@ its wording:
   Sessions and Messages and `Ctrl-L` is no longer bound there; `Tab` alone
   switches Current and All. Quick select keeps `Tab`/`Shift-Tab` for the
   reach.
+- **Reveal and back (CSP-709).** `Shift+Enter` in the Search, History, and
+  Pinned views runs the pin menu's "Reveal in its view" for the row's
+  session, mux, or PR. Terminals mostly send it as `Enter`, and the kitty
+  keyboard protocol stays off (see Alternatives), so `Alt+Enter` and a plain
+  `O` do the same. Every cross-view jump records the view and selected row
+  it left in a back list of at most 20 entries; `Backspace` with the left
+  pane focused pops it, and the right pane keeps popping the explorer
+  breadcrumb. A follow-up the operator did not ask for (selecting an entity
+  after an action moved it) records nothing.
+- **Full-screen pane viewer (CSP-708).** A pane hit opens a viewer that
+  fills the screen and shares the session viewer's frame, key conventions,
+  find prompt, and generated help page, instead of the small pager. `a`
+  attaches to the pane's mux and closes the viewer; a stopped or gone mux,
+  or the session Conspectus runs inside, refuses with a footer note and
+  keeps the viewer open.

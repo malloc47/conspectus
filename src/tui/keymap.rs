@@ -113,6 +113,8 @@ pub enum Action {
     View,
     /// Forward a key event into the open viewer modal.
     ViewerOverlayKey(ratatui::crossterm::event::KeyEvent),
+    /// Forward a key event into the open pane scrollback viewer.
+    PaneViewerKey(ratatui::crossterm::event::KeyEvent),
     /// `Enter` on the left pane. The dispatcher resolves
     /// the selected row's default action: attach a mux row, view an
     /// un-muxed session, or expand/collapse a group row. Right-pane

@@ -293,12 +293,23 @@ pub fn resolve_attach_target(app: &App) -> Result<AttachTarget, AttachDisabled> 
         return Err(AttachDisabled::NoSelection);
     }
     let mux_id = mux_for_subject(snapshot, &subject)?;
+    attach_target_for_mux(app, &mux_id)
+}
 
+/// The attach target for the mux `mux_id`, or why it can't be attached.
+pub fn attach_target_for_mux(
+    app: &App,
+    mux_id: &MuxSessionId,
+) -> Result<AttachTarget, AttachDisabled> {
+    let Some(handle) = app.snapshot_handle() else {
+        return Err(AttachDisabled::NoSelection);
+    };
+    let snapshot = handle.snapshot();
     let mux_node = snapshot
         .nodes
         .iter()
         .find_map(|node| match node {
-            crate::model::GraphNode::MuxSession(mux) if mux.id == mux_id => Some(mux),
+            crate::model::GraphNode::MuxSession(mux) if &mux.id == mux_id => Some(mux),
             _ => None,
         })
         .ok_or(AttachDisabled::MuxNodeMissing)?;

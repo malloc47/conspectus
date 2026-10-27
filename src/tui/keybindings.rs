@@ -464,6 +464,32 @@ pub const KEYBINDINGS: &[KeyBinding] = &[
         action: || Action::Msg(Box::new(crate::tui::Msg::CollapseRow)),
         help_text: "Collapse the selected row (Left arrow)",
     },
+    // Shift+Enter needs a terminal that reports it (kitty protocol);
+    // Alt+Enter arrives everywhere.
+    KeyBinding {
+        mode: KeyMode::Global,
+        key: KeyMatcher::Exact {
+            modifiers: KeyModifiers::SHIFT,
+            code: KeyCode::Enter,
+        },
+        action: || Action::Msg(Box::new(crate::tui::Msg::RevealSelected)),
+        help_text: "Reveal the row's entity in its own view (Backspace returns)",
+    },
+    KeyBinding {
+        mode: KeyMode::Global,
+        key: KeyMatcher::Exact {
+            modifiers: KeyModifiers::ALT,
+            code: KeyCode::Enter,
+        },
+        action: || Action::Msg(Box::new(crate::tui::Msg::RevealSelected)),
+        help_text: "Reveal the row's entity in its own view (Backspace returns)",
+    },
+    KeyBinding {
+        mode: KeyMode::Global,
+        key: KeyMatcher::UpperChar('O'),
+        action: || Action::Msg(Box::new(crate::tui::Msg::RevealSelected)),
+        help_text: "Reveal the row's entity in its own view (Backspace returns)",
+    },
     KeyBinding {
         mode: KeyMode::Global,
         key: KeyMatcher::AnyMod(KeyCode::Enter),

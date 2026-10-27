@@ -369,7 +369,8 @@ pub(super) fn execute_exec_spec(
 }
 
 /// Executor branch for `ExecSpec::PaneScrollback`: capture the pane's
-/// scrollback now and open it in the pager on the line the search found.
+/// scrollback now and open it in the full-screen pane viewer on the line
+/// the search found.
 pub(super) fn open_pane_scrollback(
     app: &mut App,
     tmux: &dyn MuxBackend,
@@ -378,21 +379,15 @@ pub(super) fn open_pane_scrollback(
     text: &str,
 ) {
     use crate::discovery::tmux::TmuxCaptureOutcome;
-    let label = format!(
-        "{} {}.{} scrollback",
-        pane.mux.session, pane.window_index, pane.pane_index
-    );
     match tmux.pane_history(pane.mux.socket.as_deref(), &pane.pane_id) {
         Ok(TmuxCaptureOutcome::Captured(capture)) => {
             let scrollback = crate::content_search::panes::scrollback_lines(&capture.text);
-            app.open_value_modal(
-                crate::tui::widgets::value_modal::ValueModalState::scrollback(
-                    label,
-                    &scrollback.lines,
-                    line,
-                    text,
-                ),
-            );
+            app.open_pane_viewer(crate::tui::widgets::pane_viewer::PaneViewerState::open(
+                pane.clone(),
+                scrollback.lines,
+                line,
+                text,
+            ));
         }
         _ => {
             let _ = app.update(Msg::SetStatus(Some(format!(

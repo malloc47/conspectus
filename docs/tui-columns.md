@@ -566,7 +566,9 @@ searched.
 
 Buckets look like the Pinned view's. `Enter` and `v` open the viewer at
 the best match (or at the matching turn on a hit row); on a pane row or a
-pane line `Enter` opens the pane's scrollback at that line. Every other
+pane line `Enter` opens the pane's scrollback at that line in the
+full-screen pane viewer. `Shift-Enter`/`Alt-Enter` reveals a session, mux, or PR
+row in its own view, and `Backspace` on the left pane goes back. Every other
 action works on the session, or on the pane's mux, as in the Sessions and
 Mux views.
 

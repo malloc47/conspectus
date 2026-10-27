@@ -631,8 +631,33 @@ pub const OMNIBOX_KEYS: &[KeyRow<OmniboxKey>] = &[alias(key(KeyCode::Tab), Omnib
 // all aliases; the keys still resolve here.
 // ---------------------------------------------------------------------
 
+use crate::tui::widgets::pane_viewer::PaneViewerMsg;
 use crate::viewer::find::ViewerFindMsg;
 use crate::viewer::input::ViewerMsg;
+
+pub const PANE_VIEWER_KEYS: &[KeyRow<PaneViewerMsg>] = &[
+    alias(ctrl('c'), PaneViewerMsg::Quit),
+    alias(ctrl('d'), PaneViewerMsg::HalfPageDown),
+    alias(ctrl('u'), PaneViewerMsg::HalfPageUp),
+    alias(key(KeyCode::Esc), PaneViewerMsg::Close),
+    alias(ch('q'), PaneViewerMsg::Quit),
+    alias(ch('j'), PaneViewerMsg::ScrollDown),
+    alias(key(KeyCode::Down), PaneViewerMsg::ScrollDown),
+    alias(ch('k'), PaneViewerMsg::ScrollUp),
+    alias(key(KeyCode::Up), PaneViewerMsg::ScrollUp),
+    alias(key(KeyCode::PageDown), PaneViewerMsg::PageDown),
+    alias(ch(' '), PaneViewerMsg::PageDown),
+    alias(key(KeyCode::PageUp), PaneViewerMsg::PageUp),
+    alias(ch('g'), PaneViewerMsg::JumpToStart),
+    alias(key(KeyCode::Home), PaneViewerMsg::JumpToStart),
+    alias(KeyMatcher::UpperChar('G'), PaneViewerMsg::JumpToEnd),
+    alias(key(KeyCode::End), PaneViewerMsg::JumpToEnd),
+    alias(ch('/'), PaneViewerMsg::FindOpen),
+    alias(ch('n'), PaneViewerMsg::FindNext),
+    alias(KeyMatcher::UpperChar('N'), PaneViewerMsg::FindPrev),
+    alias(ch('a'), PaneViewerMsg::Attach),
+    alias(ch('?'), PaneViewerMsg::ToggleHelp),
+];
 
 pub const VIEWER_KEYS: &[KeyRow<ViewerMsg>] = &[
     alias(ctrl('c'), ViewerMsg::Quit),
@@ -783,6 +808,12 @@ pub const MODAL_CONVENTION: &[ModalConvention] = &[
     ),
     conv(
         "Viewer",
+        EnterMeans::Nothing,
+        SpaceMeans::Pages,
+        "a pager: Space pages down",
+    ),
+    conv(
+        "PaneViewer",
         EnterMeans::Nothing,
         SpaceMeans::Pages,
         "a pager: Space pages down",

@@ -1004,6 +1004,39 @@ fn the_search_view_lists_hits_and_enter_opens_the_viewer_at_one() {
     });
 }
 
+/// Alt+Enter on a Search-view session reveals it in the Sessions view,
+/// and Backspace on the left pane returns to the Search view.
+#[test]
+fn alt_enter_reveals_a_search_result_and_backspace_returns() {
+    needs_tmux!();
+    let world = World::new();
+    write_search_sessions(&world);
+    world.new_mux("anchor", false);
+    world.start_tui_outside();
+    wait_screen(&world, "both sessions", |screen| {
+        screen.contains("2 sessions")
+    });
+
+    world.keys(&["1", "s", "quokka"]);
+    wait_screen(&world, "the streamed result", |screen| {
+        screen.contains("2 hits")
+    });
+    world.keys(&["C-s"]);
+    wait_screen(&world, "the Search view", |screen| {
+        screen.contains("2 hits") && !screen.contains("turn 1")
+    });
+
+    world.keys(&["M-Enter"]);
+    wait_screen(&world, "the Sessions view with a way back", |screen| {
+        !screen.contains("2 hits") && screen.contains("Backspace back")
+    });
+
+    world.keys(&["BSpace"]);
+    wait_screen(&world, "the Search view again", |screen| {
+        screen.contains("2 hits") && !screen.contains("Backspace back")
+    });
+}
+
 /// The flat mode lists the matching messages with no session row above
 /// them, and Enter on one opens the viewer at that message.
 #[test]
@@ -1273,7 +1306,8 @@ fn content_search_finds_text_in_a_panes_scrollback() {
     wait_screen(&world, "the scrollback pager at the line", |screen| {
         screen.contains("shell 0.0 scrollback") && screen.contains("zanzibar-in-the-pane")
     });
-    world.keys(&["Escape"]);
+    // `q` leaves the viewer at once, find or no find.
+    world.keys(&["q"]);
     wait_screen(&world, "the pager closed", |screen| {
         !screen.contains("shell 0.0 scrollback")
     });
@@ -1284,6 +1318,55 @@ fn content_search_finds_text_in_a_panes_scrollback() {
             && screen
                 .lines()
                 .any(|line| line.contains("shell") && line.contains("0.0") && line.contains("hit"))
+    });
+}
+
+/// The pane viewer is full screen and `a` in it attaches to the pane's
+/// mux: exiting the shell there ends the mux.
+#[test]
+fn the_pane_viewer_is_full_screen_and_a_attaches() {
+    needs_tmux!();
+    let world = World::new();
+    write_search_sessions(&world);
+    world.new_mux("anchor", false);
+    world.new_mux("shell", true);
+    assert!(
+        world
+            .inner(&[
+                "send-keys",
+                "-t",
+                "shell",
+                "echo zanzibar-in-the-pane",
+                "Enter"
+            ])
+            .status
+            .success()
+    );
+    world.start_tui_outside();
+    wait_screen(&world, "the muxes", |screen| row(screen, "shell").is_some());
+
+    world.keys(&["C-/", "zanzibar"]);
+    wait_screen(&world, "the pane's match", |screen| {
+        screen
+            .lines()
+            .any(|line| line.contains("pane") && line.contains("shell 0.0"))
+    });
+    world.keys(&["Enter"]);
+    wait_screen(
+        &world,
+        "the full-screen viewer with an attach chip",
+        |screen| {
+            screen.contains("shell 0.0 scrollback")
+                && screen.contains("(a) attach")
+                && !screen.contains("search contents")
+        },
+    );
+
+    world.keys(&["a"]);
+    sleep(Duration::from_millis(1500));
+    world.keys(&["exit", "Enter"]);
+    wait_until("the attached mux ends", Duration::from_secs(10), || {
+        !world.mux_alive("shell")
     });
 }
 

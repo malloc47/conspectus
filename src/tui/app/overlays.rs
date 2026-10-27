@@ -104,6 +104,61 @@ impl App {
         node: &NodeId,
         record_hint: Option<String>,
     ) -> Result<(), String> {
+        let origin = self.nav_origin();
+        self.reveal_node_quiet(node, record_hint)?;
+        self.push_nav(origin);
+        Ok(())
+    }
+
+    /// Where the operator stands now, as a place Backspace can return to.
+    pub(crate) fn nav_origin(&self) -> NavEntry {
+        NavEntry {
+            view: self.active_view,
+            selection: self.selection.clone(),
+        }
+    }
+
+    /// Remember `origin` as the place Backspace returns to, unless the
+    /// operator is still standing on it. The oldest entries fall off
+    /// past the limit.
+    pub(crate) fn push_nav(&mut self, origin: NavEntry) {
+        if origin == self.nav_origin() || self.nav_back.last() == Some(&origin) {
+            return;
+        }
+        self.nav_back.push(origin);
+        if self.nav_back.len() > NAV_BACK_LIMIT {
+            self.nav_back.remove(0);
+        }
+    }
+
+    /// Whether Backspace on the left pane has somewhere to go back to.
+    pub fn can_nav_back(&self) -> bool {
+        !self.nav_back.is_empty()
+    }
+
+    /// Return to the view and row the last jump left, saying so when the
+    /// row is gone.
+    pub(crate) fn nav_pop(&mut self) -> Option<String> {
+        let entry = self.nav_back.pop()?;
+        self.switch_to_view(entry.view);
+        self.rebuild_tree_in_place();
+        match entry.selection {
+            Some(id) if self.tree.rows.iter().any(|row| row.id == id) => {
+                self.select_row_expanding(id);
+                None
+            }
+            Some(_) => Some("that row is gone".to_string()),
+            None => None,
+        }
+    }
+
+    /// [`Self::reveal_node`] without a way back, for follow-ups the
+    /// operator didn't ask to jump to.
+    pub(crate) fn reveal_node_quiet(
+        &mut self,
+        node: &NodeId,
+        record_hint: Option<String>,
+    ) -> Result<(), String> {
         let Some(handle) = self.snapshot_handle() else {
             return Err("isn't listed: nothing is loaded yet".to_string());
         };
@@ -233,7 +288,7 @@ impl App {
             self.expand_to_and_select(index);
             return;
         }
-        if let Err(why) = self.reveal_node(&node, None) {
+        if let Err(why) = self.reveal_node_quiet(&node, None) {
             self.post_toast(format!("couldn't find the entity: it {why}"));
         }
     }
@@ -811,6 +866,37 @@ impl App {
     /// pass ownership here.
     pub fn open_viewer_modal(&mut self, state: crate::viewer::state::ViewerState) {
         self.modal_stack.push(crate::tui::Modal::Viewer(state));
+    }
+
+    /// The pane scrollback viewer, when it is on top.
+    pub fn pane_viewer(&self) -> Option<&crate::tui::widgets::pane_viewer::PaneViewerState> {
+        match self.modal_stack.last()? {
+            crate::tui::Modal::PaneViewer(state) => Some(state),
+            _ => None,
+        }
+    }
+
+    pub fn pane_viewer_mut(
+        &mut self,
+    ) -> Option<&mut crate::tui::widgets::pane_viewer::PaneViewerState> {
+        match self.modal_stack.last_mut()? {
+            crate::tui::Modal::PaneViewer(state) => Some(state),
+            _ => None,
+        }
+    }
+
+    pub fn open_pane_viewer(&mut self, state: crate::tui::widgets::pane_viewer::PaneViewerState) {
+        self.modal_stack
+            .push(crate::tui::Modal::PaneViewer(Box::new(state)));
+    }
+
+    pub fn close_pane_viewer(&mut self) {
+        if matches!(
+            self.modal_stack.last(),
+            Some(crate::tui::Modal::PaneViewer(_))
+        ) {
+            self.modal_stack.pop();
+        }
     }
 
     /// Pop the viewer modal if it's on top; no-op otherwise.

@@ -546,6 +546,24 @@ capped. `searched.skipped` counts sessions whose
 transcript could not be read; `without_parser` counts sessions of
 harnesses that cannot be searched yet.
 
+### Revealing a row and going back
+
+In the Search, History, and Pinned views, `Shift+Enter` (also `Alt+Enter`,
+and `O` where a terminal cannot tell Shift+Enter from Enter) does what
+**Reveal in its view** does for a pin: it switches to the view where the
+row's session, mux, or PR lives (Sessions, Mux, or PRs; History for one
+that is gone) and selects it. `Backspace` with the left pane focused then
+goes back to the view and row you left. The back list holds the last 20
+jumps: reveals, opening a search result in another view, and `.` menu
+reveals; the status bar shows `Backspace back` while it is not empty. A
+row that has since disappeared says `that row is gone`. With the right
+pane focused `Backspace` still pops the explorer's breadcrumb.
+
+Most terminals send `Shift+Enter` as plain `Enter`; Conspectus does not
+turn on the kitty keyboard protocol, so it sees `Shift+Enter` only from a
+terminal configured to report it. `Alt+Enter` works in every common
+terminal.
+
 ### Searching pane scrollback
 
 `--source panes` (or `all`) also searches what is on screen and in
@@ -653,9 +671,13 @@ with the match picked out in the theme's `match_highlight` color. The keys:
   come from `[search]`.
 - `Up`/`Down` (or `Ctrl-P`/`Ctrl-N`) move through the results. `Enter`
   opens a session hit in the viewer at the match, with the query already
-  searched, or a pane hit in a scrollback pager on a fresh capture, at the
-  line, with the match picked out (the pane's mux is selected in the Mux
-  view first).
+  searched, or a pane hit in the full-screen pane viewer on a fresh capture,
+  at the line, with the match picked out (the pane's mux is selected in the
+  Mux view first). The pane viewer has the session viewer's keys (`j`/`k`,
+  `PgUp`/`PgDn`, `g`/`G`, `Ctrl-D`/`Ctrl-U`, `/` with `n`/`N`, `?` for help,
+  `Esc` stepping back from help and find, `q` leaving at once) and `a`,
+  which attaches to the pane's mux. A stopped or gone mux refuses with a
+  note in the footer, and attaching closes the viewer.
 - `Ctrl-S` keeps the search and opens the Search view on it (a scan still
   running goes on there). `Ctrl-F` keeps the query as the filter on the
   Sessions, Mux, and PRs lists and closes the modal; `F` clears it.

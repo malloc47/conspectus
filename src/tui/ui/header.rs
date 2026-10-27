@@ -493,7 +493,7 @@ fn contextual_status_segments(app: &App) -> Vec<(u8, String)> {
     } else {
         "r refresh"
     };
-    vec![
+    let mut segments = vec![
         (4, default_action_status_hint(app)),
         // With the right pane focused its own keys matter more than the
         // action hint, which describes the left pane's row.
@@ -504,7 +504,11 @@ fn contextual_status_segments(app: &App) -> Vec<(u8, String)> {
         (8, "Tab focus".to_string()),
         (9, refresh_hint.to_string()),
         (2, "q quit".to_string()),
-    ]
+    ];
+    if app.focus() == Focus::Left && app.can_nav_back() {
+        segments.push((1, "Backspace back".to_string()));
+    }
+    segments
 }
 
 /// The status bar's settings chips and key hints, fitted to `room`

@@ -489,7 +489,7 @@ fn find_chip_text(state: &ViewerState) -> Option<String> {
 /// Draw the find prompt over the footer: `/` and the text with a block
 /// cursor, then the key hint. A long query scrolls so the cursor stays
 /// in view.
-fn draw_find_prompt(
+pub(crate) fn draw_find_prompt(
     prompt: &crate::viewer::find::FindPrompt,
     hint: &str,
     theme: &Theme,

@@ -40,6 +40,7 @@ pub(super) fn name_of(modal: &Modal) -> &'static str {
         Modal::ValueModal(_) => "ValueModal",
         Modal::Messages(_) => "Messages",
         Modal::Viewer(_) => "Viewer",
+        Modal::PaneViewer(_) => "PaneViewer",
         Modal::WorktreeMenu(_) => "WorktreeMenu",
         Modal::NewMux(_) => "NewMux",
         Modal::MuxMenu(_) => "MuxMenu",
@@ -52,10 +53,16 @@ pub(super) fn name_of(modal: &Modal) -> &'static str {
 }
 
 /// Modals the layout checks can't build here, and why.
-const SKIPPED: &[(&str, &str)] = &[(
-    "Viewer",
-    "the full-screen transcript viewer needs a session transcript on disk; its own tests cover its layout",
-)];
+const SKIPPED: &[(&str, &str)] = &[
+    (
+        "Viewer",
+        "the full-screen transcript viewer needs a session transcript on disk; its own tests cover its layout",
+    ),
+    (
+        "PaneViewer",
+        "the full-screen pane viewer fills the screen rather than framing a modal; its own tests cover its layout",
+    ),
+];
 
 fn open_pinned(app: &mut App, message: Msg) {
     select(app, "conspectus-main");
@@ -175,7 +182,11 @@ fn press(modal: &mut Modal, code: KeyCode) -> bool {
         Modal::Picker(state) => {
             state.handle((), key);
         }
-        Modal::Controls(_) | Modal::Search(_) | Modal::Messages(_) | Modal::Viewer(_) => {
+        Modal::Controls(_)
+        | Modal::Search(_)
+        | Modal::Messages(_)
+        | Modal::Viewer(_)
+        | Modal::PaneViewer(_) => {
             return false;
         }
     }

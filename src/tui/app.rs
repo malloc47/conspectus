@@ -194,6 +194,9 @@ pub struct App {
     /// The entity the last action acted on, to select once the refresh
     /// after it lands (it may have moved to another view).
     pending_follow: Option<NodeId>,
+    /// Where the operator was before each jump to another view, newest
+    /// last; Backspace on the left pane walks it back.
+    nav_back: Vec<NavEntry>,
     /// The row that was selected when the action started: if it is still
     /// listed once the refresh lands, the operator stays on it.
     pending_follow_row: Option<RowId>,
@@ -358,6 +361,17 @@ pub enum Focus {
     Left,
     Right,
 }
+
+/// A place Backspace can return to: the view and the row that was
+/// selected in it before a jump elsewhere.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct NavEntry {
+    pub(crate) view: View,
+    pub(crate) selection: Option<RowId>,
+}
+
+/// How many jumps Backspace remembers.
+const NAV_BACK_LIMIT: usize = 20;
 
 /// Discriminant for an async operation the TUI wants to signal to
 /// the operator. Grows with each new async
@@ -565,6 +579,7 @@ impl App {
             handoff: None,
             refresh_requested: false,
             pending_follow: None,
+            nav_back: Vec::new(),
             pending_follow_row: None,
             content: None,
             content_stash: None,
@@ -1492,6 +1507,12 @@ impl App {
             Msg::ExplorerToggleGroup => self.explorer_toggle_group(),
             Msg::ExplorerToggleFullDetail => self.explorer_toggle_full_detail(),
             Msg::ToggleEdgeMeta => self.toggle_edge_meta(),
+            Msg::ExplorerBack if self.focus == Focus::Left && self.can_nav_back() => {
+                if let Some(why) = self.nav_pop() {
+                    effects.push(Effect::Toast(why));
+                }
+                effects.push(Effect::Persist);
+            }
             Msg::ExplorerBack => self.explorer_back(),
             Msg::CycleFocus => {
                 self.focus = match self.focus {
@@ -1956,6 +1977,40 @@ impl App {
                     effects.push(Effect::Toast(why));
                 } else {
                     effects.push(Effect::Persist);
+                }
+            }
+            Msg::AttachPane => {
+                let Some(viewer) = self.pane_viewer() else {
+                    return effects;
+                };
+                let mux = crate::model::MuxSessionId::new(viewer.pane.mux.native_id());
+                match crate::tui::actions::attach_target_for_mux(self, &mux) {
+                    Ok(target) => {
+                        self.close_pane_viewer();
+                        effects.push(Effect::Exec(crate::tui::effect::ExecSpec::AttachMux(
+                            target,
+                        )));
+                    }
+                    Err(reason) => {
+                        if let Some(viewer) = self.pane_viewer_mut() {
+                            viewer.note =
+                                Some(crate::tui::actions::attach_disabled_reason(&reason));
+                        }
+                    }
+                }
+            }
+            Msg::RevealSelected => {
+                let subject = crate::tui::actions::action_subject(self);
+                let result = match (&subject.pin, &subject.node) {
+                    (Some(pin), _) => self.reveal_slot(pin),
+                    (None, Some(node)) => self
+                        .reveal_node(node, subject.record.clone())
+                        .map_err(|why| format!("that row {why}")),
+                    (None, None) => Err("nothing to reveal on this row".to_string()),
+                };
+                match result {
+                    Ok(()) => effects.push(Effect::Persist),
+                    Err(why) => effects.push(Effect::Toast(why)),
                 }
             }
             Msg::PinRecord(record_id) => {

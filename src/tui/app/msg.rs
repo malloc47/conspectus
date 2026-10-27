@@ -332,6 +332,12 @@ pub enum Msg {
     RefreshSlot(String),
     /// Slot menu → switch to the entity's native view and select it.
     RevealSlot(String),
+    /// `Shift+Enter` / `Alt+Enter` → switch to the selected row's entity
+    /// in its native view and select it; Backspace returns.
+    RevealSelected,
+    /// Pane viewer → attach to the mux the pane belongs to. A stopped or
+    /// gone mux is refused with a note in the viewer.
+    AttachPane,
     /// Row menu → run `conspectus rebuild <reference> --dry-run` and
     /// show the plan.
     ShowRebuildPlan(String),

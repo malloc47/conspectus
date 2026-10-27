@@ -454,6 +454,10 @@ fn keymap_sections() -> Vec<HelpSection> {
                     "Enter",
                     "Left tree: row-kind default action (attach / view / rebuild / expand); right pane: drill or expand a group",
                 ),
+                Binding::new(
+                    "Shift-Enter / Alt-Enter / O",
+                    "Reveal the row's entity in its own view (Sessions, Mux, PRs, History); Backspace on the left tree returns. Shift-Enter needs a terminal that reports it",
+                ),
                 Binding::new("Tab", "Cycle focus between left tree and right panel"),
                 Binding::new("J / K", "Scroll the right-panel preview"),
             ],

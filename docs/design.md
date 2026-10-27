@@ -900,7 +900,8 @@ mux scrollback, with `Tab` switching the current view's entities and all
 entities, deduplicating pane text that a session transcript already shows.
 The Search view (`6`) always holds the last content search and the last ten
 besides, paged with `<` and `>` without rescanning, and opens the viewer at
-a session hit (ADR 0147) or a scrollback pager at a pane hit; `Ctrl+S`
+a session hit (ADR 0147) or the full-screen pane viewer (with `a` to
+attach) at a pane hit; `Ctrl+S`
 jumps to it from the modal. The view stays as it was while the modal is
 open, and the modal's search joins the history only when it exits.
 `Shift+Tab` in the modal (and `Ctrl+L` in the view) lists a search's

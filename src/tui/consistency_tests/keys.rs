@@ -10,9 +10,9 @@ use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use super::layout::{app_with, builders, name_of};
 use crate::tui::keybindings::overlay::{
     CLOSE_DOWN_KEYS, CONFIRM_KEYS, CONTROLS_KEYS, EnterMeans, HELP_KEYS, KeyRow, MENU_KEYS,
-    MESSAGES_KEYS, MODAL_CONVENTION, MULTI_SELECT_KEYS, MUX_LAUNCH_KEYS, NEW_MUX_KEYS, PICKER_KEYS,
-    PIN_EDIT_KEYS, SEARCH_CONTENT_KEYS, SEARCH_KEYS, SpaceMeans, TEXT_INPUT_KEYS, VALUE_MODAL_KEYS,
-    VIEWER_FIND_KEYS, VIEWER_KEYS, resolve,
+    MESSAGES_KEYS, MODAL_CONVENTION, MULTI_SELECT_KEYS, MUX_LAUNCH_KEYS, NEW_MUX_KEYS,
+    PANE_VIEWER_KEYS, PICKER_KEYS, PIN_EDIT_KEYS, SEARCH_CONTENT_KEYS, SEARCH_KEYS, SpaceMeans,
+    TEXT_INPUT_KEYS, VALUE_MODAL_KEYS, VIEWER_FIND_KEYS, VIEWER_KEYS, resolve,
 };
 
 /// What a table makes of a key, by the name of the action it binds.
@@ -33,6 +33,7 @@ fn tables(modal: &str) -> Vec<Probe> {
         "ValueModal" => vec![table(VALUE_MODAL_KEYS)],
         "Messages" => vec![table(MESSAGES_KEYS)],
         "Viewer" => vec![table(VIEWER_KEYS)],
+        "PaneViewer" => vec![table(PANE_VIEWER_KEYS)],
         "ViewerFind" => vec![table(VIEWER_FIND_KEYS)],
         "WorktreeMenu" => vec![
             table(MENU_KEYS),
@@ -73,6 +74,7 @@ fn every_modal_has_a_row_in_the_convention() {
     // The transcript viewer needs a transcript on disk to build, and its
     // find prompt is a mode of the viewer rather than a modal of its own.
     named.push("Viewer");
+    named.push("PaneViewer");
     named.push("ViewerFind");
     for name in &named {
         assert!(

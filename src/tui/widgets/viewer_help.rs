@@ -69,7 +69,7 @@ pub fn sections_for(table: &[KeyRow<ViewerMsg>]) -> Vec<ViewerHelpSection> {
 
 /// The same key notation as the keymap help: arrows as arrows, `Ctrl-D`
 /// for control chords.
-fn key_notation(key: &crate::tui::keybindings::KeyMatcher) -> String {
+pub(super) fn key_notation(key: &crate::tui::keybindings::KeyMatcher) -> String {
     match crate::tui::keybindings::key_label(key).as_str() {
         "Up" => "↑".to_string(),
         "Down" => "↓".to_string(),
