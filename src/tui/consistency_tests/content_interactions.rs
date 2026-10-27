@@ -315,3 +315,36 @@ fn the_controls_content_row_refuses_with_the_shared_notice_when_live_preview_is_
     assert!(app.content().is_none(), "no search starts");
     assert!(app.toast().has_toast(), "the shared notice is shown");
 }
+
+#[test]
+fn the_current_scope_reads_sessions_under_collapsed_groups() {
+    let world = world();
+    let mut app = app_over(View::Sessions, &world);
+    super::search_quick::collapse_groups(&mut app);
+    let visible = app.visible_rows().len();
+    assert!(
+        app.tree().rows.len() > visible,
+        "the world has rows hidden under collapsed groups"
+    );
+
+    let scope = app.current_scope().expect("a view has a scope");
+
+    let listed: Vec<_> = session_ids(&world)
+        .into_iter()
+        .filter(|id| {
+            app.tree().rows.iter().any(|row| {
+                crate::tui::rows::row_node(&row.id) == Some(&NodeId::AgentSession(id.clone()))
+            })
+        })
+        .collect();
+    assert!(!listed.is_empty());
+    for id in listed {
+        assert!(
+            scope.sessions.contains(&SessionKey {
+                harness_key: id.harness_key.clone(),
+                session_key: id.session_key.clone(),
+            }),
+            "{id:?} is in scope"
+        );
+    }
+}

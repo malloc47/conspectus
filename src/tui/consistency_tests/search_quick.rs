@@ -241,7 +241,7 @@ fn the_search_start_is_where_the_right_pane_is_focused() {
 }
 
 /// Collapse every group so only the top rows show.
-fn collapse_groups(app: &mut App) {
+pub(super) fn collapse_groups(app: &mut App) {
     let groups: Vec<RowId> = app
         .tree()
         .rows
@@ -441,4 +441,43 @@ fn the_highlighted_row_scrolls_into_view_past_the_first_screen() {
             "the marker sits on the cursor's row (all={reach_all}): {marked}"
         );
     }
+}
+
+/// Quick select on the current view finds and selects any row the view
+/// lists, whatever its kind.
+fn quick_select_picks_every_row_of(view: View) {
+    let mut app = app_listing_all(view);
+    let rows: Vec<_> = app
+        .tree()
+        .rows
+        .iter()
+        .filter(|row| !matches!(row.kind, crate::tui::rows::RowKind::Group(_)))
+        .map(|row| row.id.clone())
+        .collect();
+    assert!(!rows.is_empty(), "the {view:?} world lists rows");
+    for id in rows {
+        let row = app.tree().rows.iter().find(|row| row.id == id).unwrap();
+        let label = items_label(row);
+        app.open_search_overlay();
+        type_into_search(&mut app, &label);
+        search_key(&mut app, KeyCode::Enter);
+        assert!(app.search_overlay().is_none(), "Enter closes the overlay");
+        assert!(
+            app.selection().is_some_and(|sel| {
+                let picked = app.tree().rows.iter().find(|r| r.id == *sel).unwrap();
+                items_label(picked) == label
+            }),
+            "{view:?}: `{label}` is selected"
+        );
+    }
+}
+
+#[test]
+fn quick_select_picks_rows_of_the_pinned_view() {
+    quick_select_picks_every_row_of(View::Pinned);
+}
+
+#[test]
+fn quick_select_picks_rows_of_the_history_view() {
+    quick_select_picks_every_row_of(View::History);
 }

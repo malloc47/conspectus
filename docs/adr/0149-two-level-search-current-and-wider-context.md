@@ -340,25 +340,21 @@ Facts established while writing this decision:
 - *How wide is the modal?* 85% of the terminal, between 60 and 200 columns.
 - *Does the CLI get panes?* Later, as `--source`, defaulting to sessions.
 
-## Open Questions For The Operator
+## Open Questions Resolved By The Operator
 
-1. **Persist query text (not results) across restarts?** Recommended: no in
-   this version, because ADR 0147 keeps query state out of saved state and
-   a recalled query would need a rescan to show anything. The alternative is
-   an opt-in `[search] remember_queries = true` that stores query strings
-   (never snippets) in the TUI state file so the history picker survives
-   restarts.
-2. **Is `s` the right guaranteed key** for content search, or would `\`
-   (htop's filter key) or `&` (less's filter key) feel more familiar?
-3. **Should Current include rows under collapsed groups?** This ADR says
-   yes, a change from today.
-4. **Should Current content scope in Pinned and History include the
-   sessions and muxes behind the pins and records,** not only the rows
-   themselves? This ADR says only the rows' own entities, plus nested ones.
-5. **Scrollback depth.** 5,000 lines per pane exceeds tmux's default
-   `history-limit` of 2,000; is more worth the memory?
-6. **Kitty keyboard protocol.** Worth a separate decision if more chords
-   need it.
+1. **Persisting query text across restarts?** No. Search history stays in
+   memory; no `remember_queries` option is added.
+2. **Guaranteed key for content search?** `s` stays.
+3. **Rows under collapsed groups in Current?** Yes. Current reads and
+   selects them, expanding the groups above a picked row.
+4. **Pinned and History in Current and All?** Quick select on Current
+   picks any row of the Pinned or History view when it is the current
+   view. All does not separate pinned from remembered entities: they are
+   one set of entities, told apart only by their glyphs. Content scope in
+   those views stays the rows' own entities plus nested ones.
+5. **Scrollback depth?** 5,000 lines per pane is kept.
+6. **Kitty keyboard protocol?** Not adopted for now; `Alt+Enter`, `O` and
+   `s` remain the portable keys.
 
 ## Implementation Notes
 
