@@ -1418,3 +1418,209 @@ fn load_without_anchor_skips_the_project_walk_and_keeps_user_config() {
     assert!(unanchored.project_path.is_none());
     assert_eq!(unanchored.config.tui.narrow_layout_threshold, 90);
 }
+
+fn load_search(user: Option<&str>, project: Option<&str>) -> (SearchConfig, Vec<String>) {
+    let temp = TempDir::new().expect("temp dir");
+    let xdg = temp.path().join("xdg");
+    if let Some(text) = user {
+        write_file(&xdg.join(USER_CONFIG_RELATIVE), text);
+    }
+    let project_dir = temp.path().join("project");
+    fs::create_dir_all(&project_dir).expect("project dir");
+    if let Some(text) = project {
+        write_file(&project_dir.join(PROJECT_CONFIG_FILENAME), text);
+    }
+    let loader = ConfigLoader::new()
+        .with_home(temp.path())
+        .with_xdg_config_home(&xdg);
+    let outcome = loader.load_from(&project_dir);
+    let messages = outcome
+        .diagnostics
+        .iter()
+        .map(|d| d.message.clone())
+        .collect();
+    (outcome.config.search, messages)
+}
+
+#[test]
+fn search_defaults_to_per_session_messages_only() {
+    use crate::viewer::search::{ContentKinds, Grouping};
+    let (search, diagnostics) = load_search(None, None);
+    assert_eq!(search.group, Grouping::Session);
+    assert_eq!(search.kinds, ContentKinds::default());
+    assert!(diagnostics.is_empty(), "{diagnostics:?}");
+}
+
+#[test]
+fn search_section_sets_the_grouping_and_kinds() {
+    use crate::viewer::search::Grouping;
+    let (search, diagnostics) = load_search(
+        Some("[search]\ngroup = \"message\"\nkinds = [\"messages\", \"tools\", \"thinking\"]\n"),
+        None,
+    );
+    assert_eq!(search.group, Grouping::Message);
+    assert!(search.kinds.messages && search.kinds.tools && search.kinds.thinking);
+    assert!(!search.kinds.aborted && !search.kinds.hidden);
+    assert!(diagnostics.is_empty(), "{diagnostics:?}");
+}
+
+#[test]
+fn kinds_replace_the_default_rather_than_adding_to_it() {
+    let (search, _) = load_search(Some("[search]\nkinds = [\"tools\"]\n"), None);
+    assert!(search.kinds.tools);
+    assert!(!search.kinds.messages, "only what is listed is searched");
+}
+
+#[test]
+fn project_search_settings_override_the_user_ones_per_key() {
+    use crate::viewer::search::Grouping;
+    let (search, _) = load_search(
+        Some("[search]\ngroup = \"message\"\nkinds = [\"messages\", \"thinking\"]\n"),
+        Some("[search]\ngroup = \"session\"\n"),
+    );
+    assert_eq!(search.group, Grouping::Session, "project wins for group");
+    assert!(
+        search.kinds.thinking,
+        "kinds fall through from the user file"
+    );
+}
+
+#[test]
+fn invalid_search_values_are_diagnosed_without_dropping_the_rest() {
+    use crate::viewer::search::Grouping;
+    let (search, diagnostics) = load_search(
+        Some("[search]\ngroup = \"turn\"\nkinds = [\"messages\", \"tools\", \"audio\"]\n"),
+        None,
+    );
+    assert_eq!(
+        search.group,
+        Grouping::Session,
+        "bad group keeps the default"
+    );
+    assert!(search.kinds.tools, "the valid entries still apply");
+    assert_eq!(diagnostics.len(), 2, "{diagnostics:?}");
+    assert!(diagnostics.iter().any(|m| m.contains("`[search] group`")));
+    assert!(diagnostics.iter().any(|m| m.contains("`audio`")));
+}
+
+#[test]
+fn wrong_types_and_empty_kind_lists_are_diagnosed() {
+    use crate::viewer::search::ContentKinds;
+    for text in [
+        "[search]\ngroup = 3\n",
+        "[search]\nkinds = \"messages\"\n",
+        "[search]\nkinds = []\n",
+        "[search]\nkinds = [\"nope\"]\n",
+    ] {
+        let (search, diagnostics) = load_search(Some(text), None);
+        assert_eq!(
+            diagnostics.len(),
+            if text.contains("nope") { 2 } else { 1 },
+            "{text}: {diagnostics:?}"
+        );
+        assert_eq!(search.kinds, ContentKinds::default(), "{text}");
+    }
+}
+
+#[test]
+fn search_history_defaults_to_ten_and_accepts_a_count() {
+    let (search, diagnostics) = load_search(None, None);
+    assert_eq!(search.history, 10);
+    assert!(diagnostics.is_empty(), "{diagnostics:?}");
+    let (search, diagnostics) = load_search(Some("[search]\nhistory = 3\n"), None);
+    assert_eq!(search.history, 3);
+    assert!(diagnostics.is_empty(), "{diagnostics:?}");
+    let (search, _) = load_search(Some("[search]\nhistory = 0\n"), None);
+    assert_eq!(search.history, 0, "zero keeps only the displayed search");
+}
+
+#[test]
+fn project_search_history_overrides_the_user_one() {
+    let (search, _) = load_search(
+        Some("[search]\nhistory = 20\n"),
+        Some("[search]\nhistory = 4\n"),
+    );
+    assert_eq!(search.history, 4);
+}
+
+#[test]
+fn invalid_search_history_is_diagnosed_and_keeps_the_previous_count() {
+    for text in [
+        "[search]\nhistory = -1\n",
+        "[search]\nhistory = 51\n",
+        "[search]\nhistory = \"many\"\n",
+        "[search]\nhistory = 2.5\n",
+    ] {
+        let (search, diagnostics) = load_search(Some(text), None);
+        assert_eq!(search.history, 10, "{text}");
+        assert_eq!(diagnostics.len(), 1, "{text}: {diagnostics:?}");
+        assert!(
+            diagnostics[0].contains("`[search] history`"),
+            "{diagnostics:?}"
+        );
+    }
+}
+
+#[test]
+fn search_diagnostics_do_not_cite_developer_artifacts() {
+    let (_, diagnostics) = load_search(Some("[search]\ngroup = \"x\"\nkinds = [\"y\"]\n"), None);
+    for message in diagnostics {
+        assert!(
+            !message.contains("ADR") && !message.contains("CSP-"),
+            "{message}"
+        );
+    }
+}
+
+#[test]
+fn search_diagnostics_use_the_neighbouring_format() {
+    let (_, diagnostics) = load_search(Some("[search]\ngroup = \"turn\"\n"), None);
+    assert_eq!(
+        diagnostics,
+        ["invalid `[search] group` value `turn`; expected session, message, or flat"]
+    );
+}
+
+#[test]
+fn an_unknown_search_key_is_diagnosed() {
+    use crate::viewer::search::Grouping;
+    let (search, diagnostics) = load_search(
+        Some("[search]\ngroupp = \"message\"\ngroup = \"message\"\n"),
+        None,
+    );
+    assert_eq!(
+        search.group,
+        Grouping::Message,
+        "the valid key still applies"
+    );
+    assert_eq!(
+        diagnostics,
+        ["unknown `[search]` key `groupp`; expected group, kinds, or history"]
+    );
+}
+
+#[test]
+fn search_group_accepts_flat_and_names_it_in_the_diagnostic() {
+    use crate::viewer::search::Grouping as SearchGrouping;
+    let temp = TempDir::new().expect("temp dir");
+    let project = temp.path().join("project");
+    fs::create_dir(&project).expect("create project dir");
+    let loader = ConfigLoader::new().with_home(temp.path());
+
+    write_file(
+        &project.join(PROJECT_CONFIG_FILENAME),
+        "[search]\ngroup = \"flat\"\n",
+    );
+    let outcome = loader.load_from(&project);
+    assert!(outcome.diagnostics.is_empty(), "{:?}", outcome.diagnostics);
+    assert_eq!(outcome.config.search.group, SearchGrouping::Flat);
+
+    write_file(
+        &project.join(PROJECT_CONFIG_FILENAME),
+        "[search]\ngroup = \"sideways\"\n",
+    );
+    let outcome = loader.load_from(&project);
+    assert_eq!(outcome.config.search.group, SearchGrouping::Session);
+    let message = format!("{:?}", outcome.diagnostics);
+    assert!(message.contains("session, message, or flat"), "{message}");
+}

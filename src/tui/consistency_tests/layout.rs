@@ -13,10 +13,21 @@ use super::*;
 use crate::tui::Modal;
 use crate::tui::modal::Overlay;
 
-const WIDTHS: [u16; 4] = [60, 80, 120, 160];
+const WIDTHS: [u16; 5] = [60, 80, 120, 160, 220];
 const HEIGHTS: [u16; 2] = [20, 40];
 
 pub(super) type Open = fn(&mut App);
+
+/// One key into the open search overlay, through the runtime's handler.
+pub(super) fn search_key(app: &mut App, code: KeyCode) {
+    crate::tui::runtime::handle_search_overlay_key(app, KeyEvent::new(code, KeyModifiers::NONE));
+}
+
+pub(super) fn type_into_search(app: &mut App, text: &str) {
+    for c in text.chars() {
+        search_key(app, KeyCode::Char(c));
+    }
+}
 
 /// The name of a modal, from an exhaustive match: a new variant does not
 /// compile until it is named here.
@@ -29,6 +40,7 @@ pub(super) fn name_of(modal: &Modal) -> &'static str {
         Modal::ValueModal(_) => "ValueModal",
         Modal::Messages(_) => "Messages",
         Modal::Viewer(_) => "Viewer",
+        Modal::PaneViewer(_) => "PaneViewer",
         Modal::WorktreeMenu(_) => "WorktreeMenu",
         Modal::NewMux(_) => "NewMux",
         Modal::MuxMenu(_) => "MuxMenu",
@@ -41,10 +53,16 @@ pub(super) fn name_of(modal: &Modal) -> &'static str {
 }
 
 /// Modals the layout checks can't build here, and why.
-const SKIPPED: &[(&str, &str)] = &[(
-    "Viewer",
-    "the full-screen transcript viewer needs a session transcript on disk; its own tests cover its layout",
-)];
+const SKIPPED: &[(&str, &str)] = &[
+    (
+        "Viewer",
+        "the full-screen transcript viewer needs a session transcript on disk; its own tests cover its layout",
+    ),
+    (
+        "PaneViewer",
+        "the full-screen pane viewer fills the screen rather than framing a modal; its own tests cover its layout",
+    ),
+];
 
 fn open_pinned(app: &mut App, message: Msg) {
     select(app, "conspectus-main");
@@ -60,6 +78,20 @@ pub(super) fn builders() -> Vec<(&'static str, View, Open)> {
             open_pinned(app, Msg::OpenSlotRename("conspectus-main".into()));
         }),
         ("Search", View::Pinned, |app| app.open_search_overlay()),
+        // The same overlay in content mode, with a search running.
+        ("Search", View::Pinned, |app| {
+            app.update(Msg::StartContentSearch {
+                text: "needle".into(),
+                kinds: crate::viewer::search::ContentKinds::default(),
+            });
+            app.open_content_search_overlay();
+        }),
+        // Quick select on the wider reach, with a query that matches.
+        ("Search", View::Pinned, |app| {
+            app.open_search_overlay();
+            type_into_search(app, "con");
+            search_key(app, KeyCode::Tab);
+        }),
         ("ValueModal", View::Pinned, |app| {
             app.open_value_modal(crate::tui::widgets::value_modal::ValueModalState::new(
                 "cwd",
@@ -150,7 +182,11 @@ fn press(modal: &mut Modal, code: KeyCode) -> bool {
         Modal::Picker(state) => {
             state.handle((), key);
         }
-        Modal::Controls(_) | Modal::Search(_) | Modal::Messages(_) | Modal::Viewer(_) => {
+        Modal::Controls(_)
+        | Modal::Search(_)
+        | Modal::Messages(_)
+        | Modal::Viewer(_)
+        | Modal::PaneViewer(_) => {
             return false;
         }
     }
@@ -432,5 +468,67 @@ fn no_word_in_a_modal_is_cut_off_at_its_edge() {
                 }
             }
         }
+    }
+}
+
+#[test]
+fn the_search_modal_is_wide_and_follows_the_sizing_rule_at_every_size() {
+    use crate::tui::widgets::search::modal_size;
+    let mut checked = 0;
+    for (name, view, open) in builders() {
+        if name != "Search" {
+            continue;
+        }
+        for width in WIDTHS {
+            for height in HEIGHTS {
+                let (with, without) = framed_and_bare(view, open, width, height);
+                let label = describe_size(name, width, height);
+                let (x0, y0, x1, y1) =
+                    modal_rect(&with, &without).unwrap_or_else(|| panic!("{label}: no frame"));
+                assert_eq!(
+                    (x1 - x0 + 1, y1 - y0 + 1),
+                    modal_size(width, height),
+                    "{label}: the frame is not the size the rule gives"
+                );
+                checked += 1;
+            }
+        }
+    }
+    assert!(checked >= 3 * WIDTHS.len() * HEIGHTS.len(), "{checked}");
+    // The wide terminal gets a wide modal: 85% of it, up to 200 cells.
+    assert_eq!(modal_size(220, 50).0, 187);
+    assert_eq!(modal_size(300, 50).0, 200);
+}
+
+#[test]
+fn the_quick_select_title_shows_both_reaches_and_does_not_shift_when_toggled() {
+    let mut app = app_with(View::Pinned, App::open_search_overlay);
+    for width in WIDTHS {
+        let top_border = |app: &mut App| -> (String, String) {
+            let text = buffer_to_string(&buffer_of(app, width, 40));
+            let line = text
+                .lines()
+                .find(|line| line.contains('┌') && line.contains("quick select"))
+                .unwrap_or_else(|| panic!("{width}: no title\n{text}"))
+                .to_string();
+            // The modal's own corner, not the panels behind it.
+            let start = line.find("┌ / quick").unwrap();
+            let end = start + line[start..].find('┐').unwrap();
+            (line.clone(), line[start..end + '┐'.len_utf8()].to_string())
+        };
+        let (current_line, current) = top_border(&mut app);
+        assert!(
+            current.contains("[ Current ] All"),
+            "{width}: {current_line}"
+        );
+        search_key(&mut app, KeyCode::Tab);
+        let (all_line, all) = top_border(&mut app);
+        assert!(all.contains("Current [ All ]"), "{width}: {all_line}");
+        assert_eq!(
+            current.chars().count(),
+            all.chars().count(),
+            "{width}: the frame changed width with the reach"
+        );
+        search_key(&mut app, KeyCode::Tab);
     }
 }

@@ -37,6 +37,21 @@ pub(super) fn draw_left_panel(app: &mut App, frame: &mut Frame<'_>, area: Rect) 
         _ => inner,
     };
 
+    // The Search view says which remembered search it shows on its first
+    // line.
+    let inner = match search_header(app, inner.width.into()) {
+        Some(header) if inner.height > 3 => {
+            let header_area = Rect { height: 1, ..inner };
+            frame.render_widget(Paragraph::new(header), header_area);
+            Rect {
+                y: inner.y + 1,
+                height: inner.height - 1,
+                ..inner
+            }
+        }
+        _ => inner,
+    };
+
     let visible = app.visible_rows();
     if visible.is_empty() {
         let placeholder = empty_left_panel_text(app);
@@ -241,9 +256,125 @@ pub(super) fn pinned_banner(app: &App) -> Option<String> {
         .find_map(crate::model::Diagnostic::advice)
 }
 
+/// The Search view's first line: which remembered search is shown, where
+/// it sits among them, what it searched and found, and the keys that page
+/// through the others. `None` outside the Search view or without a search.
+pub(super) fn search_header(app: &App, width: usize) -> Option<Line<'static>> {
+    use crate::tui::widgets::search::Reach;
+    if app.active_view() != crate::tui::View::Search {
+        return None;
+    }
+    let (position, total) = app.search_history().position()?;
+    let entry = app.search_history().viewed()?;
+    let search = &entry.search;
+    let theme = app.theme();
+    let query = if search.text.chars().count() > 28 {
+        let head: String = search.text.chars().take(27).collect();
+        format!("{head}…")
+    } else {
+        search.text.clone()
+    };
+    let reach = match search.reach {
+        Reach::Current => "Current",
+        Reach::All => "All",
+    };
+    let mut note = search.status_note(std::time::Instant::now());
+    if entry.stopped {
+        note.push_str(" · stopped");
+    }
+    let dim = Style::default().add_modifier(theme.placeholder);
+    let filtering = if app.viewed_is_filter() {
+        " · filtering"
+    } else {
+        ""
+    };
+    let lead = format!("search {position}/{total} \"{query}\"");
+    // What follows the query gives way when the pane is narrow.
+    let room = width
+        .saturating_sub(UnicodeWidthStr::width(lead.as_str()) + UnicodeWidthStr::width(filtering));
+    let detail = truncate_to_width(&format!(" · {reach} · {note}"), room);
+    let mut spans = vec![
+        span!(Style::default().fg(theme.panel_focus_accent).add_modifier(Modifier::BOLD);
+            "search {position}/{total}"),
+        span!(Modifier::BOLD; " \"{query}\""),
+        span!(dim; "{detail}"),
+    ];
+    if !filtering.is_empty() {
+        spans.push(span!(Style::default().fg(theme.panel_focus_accent); "{filtering}"));
+    }
+    if total > 1 {
+        let hint = "< older  > newer";
+        let used = spans_width(&spans);
+        let gap = width.saturating_sub(used + UnicodeWidthStr::width(hint));
+        if gap >= 2 {
+            spans.push(Span::raw(" ".repeat(gap)));
+            spans.push(span!(dim; "{hint}"));
+        }
+    }
+    Some(Line::from(spans))
+}
+
 pub(super) fn empty_left_panel_text(app: &App) -> String {
     if app.snapshot_handle().is_none() {
         return "Loading discovery…".to_string();
+    }
+    if app.active_view() == crate::tui::View::Search {
+        if !app.config().live_preview_enabled {
+            return format!("{}.", crate::tui::widgets::search::CONTENT_SEARCH_OFF);
+        }
+        if app.viewed_search().is_none() {
+            return "Press `s` (or Ctrl-/) to search the contents of sessions and mux panes."
+                .to_string();
+        }
+    }
+    let shown = if app.active_view() == crate::tui::View::Search {
+        app.viewed_search()
+    } else {
+        app.content()
+    };
+    if let Some(content) = shown
+        && !matches!(
+            app.active_view(),
+            crate::tui::View::Pinned | crate::tui::View::History
+        )
+    {
+        if app.active_view() == crate::tui::View::Search {
+            return match content.status {
+                crate::tui::ContentStatus::Running(_) => format!(
+                    "Searching for \"{}\"…\nMatches appear as they are found.",
+                    content.text
+                ),
+                crate::tui::ContentStatus::Done(_)
+                    if content.group == crate::viewer::search::Grouping::Flat
+                        && !content.hits().is_empty() =>
+                {
+                    format!("Reading the messages that match \"{}\"…", content.text)
+                }
+                crate::tui::ContentStatus::Done(_) => format!(
+                    "Nothing matches \"{}\".\nPress `s` to search again, `<` for an earlier search.",
+                    content.text
+                ),
+            };
+        }
+        return match content.status {
+            crate::tui::ContentStatus::Running(_) => format!(
+                "Searching for \"{}\"…\nSessions that match appear as they are found. Press `F` to clear.",
+                content.text
+            ),
+            crate::tui::ContentStatus::Done(_)
+                if content.group == crate::viewer::search::Grouping::Flat
+                    && !content.hits().is_empty() =>
+            {
+                format!(
+                    "Reading the messages that match \"{}\"…\nPress `F` to clear.",
+                    content.text
+                )
+            }
+            crate::tui::ContentStatus::Done(_) => format!(
+                "No sessions match \"{}\".\nPress `s` to search again, `F` to clear.",
+                content.text
+            ),
+        };
     }
     if !app.filter().is_empty() {
         // Filtered-zero case: a snapshot is loaded but the
@@ -472,7 +603,7 @@ pub(super) struct GroupAlign {
     /// Column widths for the mixed-kind rows of the Pinned and History
     /// views.
     pub(super) mixed: MixedAlign,
-    /// Whether the Sessions, Mux, and PRs rows reserve the pin marker
+    /// Whether the Sessions, Mux, PRs, and Search rows reserve the pin marker
     /// cell: once any row in the tree is pinned, every row holds its
     /// place so the columns don't move.
     pub(super) native_marker: bool,
@@ -483,7 +614,10 @@ pub(super) struct GroupAlign {
 fn native_marker_reserved(app: &App) -> bool {
     if !matches!(
         app.active_view(),
-        crate::tui::View::Sessions | crate::tui::View::Mux | crate::tui::View::Prs
+        crate::tui::View::Sessions
+            | crate::tui::View::Mux
+            | crate::tui::View::Prs
+            | crate::tui::View::Search
     ) {
         return false;
     }
@@ -908,6 +1042,18 @@ pub(super) fn render_left_row(
             }
             spans.push(span!(theme.placeholder; "  ({})", fork.child_count));
         }
+        RowKind::Hit(hit) => {
+            let budget = width.saturating_sub(spans_width(&spans));
+            spans.extend(render_hit_spans(hit, theme, budget));
+        }
+        RowKind::Pane(pane) => {
+            let budget = width.saturating_sub(spans_width(&spans));
+            spans.extend(render_pane_spans(pane, theme, budget));
+        }
+        RowKind::PaneHit(hit) => {
+            let budget = width.saturating_sub(spans_width(&spans));
+            spans.extend(render_pane_hit_spans(hit, theme, budget));
+        }
         RowKind::Mixed(mixed) => {
             let prefix_width = spans_width(&spans);
             let budget = width.saturating_sub(prefix_width);
@@ -1042,6 +1188,10 @@ pub(super) fn append_session_preview(
     width: usize,
     theme: &Theme,
 ) {
+    if let Some(hit) = &session.content_hit {
+        append_content_hit(spans, hit, width, theme);
+        return;
+    }
     let Some(preview) = session.preview.as_deref().filter(|p| !p.is_empty()) else {
         return;
     };
@@ -1178,6 +1328,10 @@ pub(super) fn append_mux_single_session_preview(
     theme: &Theme,
     width: usize,
 ) {
+    if let Some(hit) = &mux.content_hit {
+        append_content_hit(spans, hit, width, theme);
+        return;
+    }
     let Some(preview) = mux
         .single_session_preview
         .as_deref()
@@ -1195,6 +1349,177 @@ pub(super) fn append_mux_single_session_preview(
         "{}",
         truncate_to_width(preview, width - used - 2)
     ));
+}
+
+/// What a content search found in a row's session, in the slot a
+/// message preview would take: a dim `3 hits` chip, then the best
+/// snippet with the match picked out.
+fn append_content_hit(
+    spans: &mut Vec<Span<'static>>,
+    hit: &crate::tui::rows::ContentHitCell,
+    width: usize,
+    theme: &Theme,
+) {
+    let chip = if hit.count == 1 {
+        "1 hit".to_string()
+    } else {
+        format!("{} hits", hit.count)
+    };
+    let dim = Style::default()
+        .fg(theme.secondary_text)
+        .add_modifier(theme.placeholder);
+    spans.push(span!(dim; "  {chip}"));
+    let used = spans_width(spans);
+    if width <= used + 8 {
+        return;
+    }
+    spans.push(Span::raw("  "));
+    append_snippet(spans, &hit.snippet, &hit.highlight, width - used - 2, theme);
+}
+
+/// How many cells a flat row gives the session's name.
+const FLAT_LABEL_WIDTH: usize = 12;
+
+/// The columns of a matching turn under its session: who said it, what
+/// kind of turn it is, when, and the snippet with the match picked out.
+fn render_hit_spans(
+    hit: &crate::tui::rows::HitRow,
+    theme: &Theme,
+    budget: usize,
+) -> Vec<Span<'static>> {
+    let secondary = Style::default().fg(theme.secondary_text);
+    let mut spans = Vec::new();
+    if let Some(origin) = &hit.origin {
+        // A flat row names its session: the harness chip and the name,
+        // padded so the columns after them line up down the list.
+        spans.push(crate::tui::widgets::badge::harness_badge(
+            &origin.harness_label,
+            theme,
+        ));
+        let name = pad_to_width(
+            truncate_to_width_strict(&origin.label, FLAT_LABEL_WIDTH),
+            FLAT_LABEL_WIDTH,
+        );
+        spans.push(span!(Modifier::BOLD; " {name}  "));
+    }
+    spans.extend([
+        span!(secondary; "turn {:<4}", hit.turn_index + 1),
+        span!(secondary; "  {:<6}", hit.role),
+        span!(theme.placeholder; "  {:<11}", hit.kind),
+        span!(secondary; "  {:>4}", hit.age),
+    ]);
+    let used = spans_width(&spans);
+    if budget > used + 8 {
+        spans.push(Span::raw("  "));
+        append_snippet(
+            &mut spans,
+            &hit.snippet,
+            &hit.highlight,
+            budget - used - 2,
+            theme,
+        );
+    }
+    spans
+}
+
+/// How many cells a pane row gives the mux's name.
+const PANE_LABEL_WIDTH: usize = 16;
+
+/// A pane whose scrollback matched, where a session row would be: the
+/// mux's name, the pane's place in it, what it runs, how long ago it was
+/// read, then the hit count and the newest matching line.
+fn render_pane_spans(
+    pane: &crate::tui::rows::PaneRow,
+    theme: &Theme,
+    budget: usize,
+) -> Vec<Span<'static>> {
+    let secondary = Style::default().fg(theme.secondary_text);
+    let name = pad_to_width(
+        truncate_to_width_strict(&pane.mux_label, PANE_LABEL_WIDTH),
+        PANE_LABEL_WIDTH,
+    );
+    let command = pad_to_width(
+        truncate_to_width_strict(pane.command.as_deref().unwrap_or(""), 8),
+        8,
+    );
+    let mut spans = vec![
+        span!(Modifier::BOLD; "{name}"),
+        span!(secondary; "  {:<5}", pane.location),
+        span!(theme.placeholder; "  {command}"),
+        span!(secondary; "  {:>4}", pane.age),
+    ];
+    let cell = crate::tui::rows::ContentHitCell {
+        count: u32::try_from(pane.count).unwrap_or(u32::MAX),
+        snippet: pane.snippet.clone(),
+        highlight: pane.highlight.clone(),
+    };
+    append_content_hit(&mut spans, &cell, budget, theme);
+    spans
+}
+
+/// A matching line of a pane's scrollback: its line number, how long ago
+/// the scrollback was read, and the line with the match picked out. In
+/// the flat listing it is prefixed with the mux's name and the pane's
+/// place, padded so the cells after line up.
+fn render_pane_hit_spans(
+    hit: &crate::tui::rows::PaneHitRow,
+    theme: &Theme,
+    budget: usize,
+) -> Vec<Span<'static>> {
+    let secondary = Style::default().fg(theme.secondary_text);
+    let mut spans = Vec::new();
+    if let Some(origin) = &hit.origin {
+        let name = pad_to_width(
+            truncate_to_width_strict(origin, PANE_LABEL_WIDTH),
+            PANE_LABEL_WIDTH,
+        );
+        spans.push(span!(Modifier::BOLD; "{name}  "));
+    }
+    spans.extend([
+        span!(secondary; "line {:<5}", hit.line),
+        span!(secondary; "  {:>4}", hit.age),
+    ]);
+    let used = spans_width(&spans);
+    if budget > used + 8 {
+        spans.push(Span::raw("  "));
+        append_snippet(
+            &mut spans,
+            &hit.snippet,
+            &hit.highlight,
+            budget - used - 2,
+            theme,
+        );
+    }
+    spans
+}
+
+/// `text` in the preview style with the byte range `highlight` picked
+/// out in the theme's match style, cropped around the match to `budget`
+/// cells so the match is always on screen.
+fn append_snippet(
+    spans: &mut Vec<Span<'static>>,
+    text: &str,
+    highlight: &std::ops::Range<usize>,
+    budget: usize,
+    theme: &Theme,
+) {
+    let fitted = crate::tui::widgets::snippet::fit(text, highlight, budget);
+    let plain = Style::default()
+        .fg(theme.secondary_text)
+        .add_modifier(Modifier::ITALIC);
+    let (before, mid, after) = match fitted.highlight.clone() {
+        Some(range) => (
+            &fitted.text[..range.start],
+            &fitted.text[range.clone()],
+            &fitted.text[range.end..],
+        ),
+        None => (fitted.text.as_str(), "", ""),
+    };
+    for (piece, style) in [(before, plain), (mid, theme.match_style()), (after, plain)] {
+        if !piece.is_empty() {
+            spans.push(Span::styled(piece.to_string(), style));
+        }
+    }
 }
 
 pub(super) fn spans_width(spans: &[Span<'_>]) -> usize {
@@ -1344,6 +1669,10 @@ pub(super) fn row_kind_glyph_span(kind: &RowKind, theme: &Theme) -> Option<Span<
         RowKind::Pr(pr) => return Some(forge_pr_glyph_span(pr, theme)),
         RowKind::Fork(_) => NodeKind::Fork,
         RowKind::Mixed(mixed) => return Some(mixed_glyph_span(mixed, theme)),
+        // A matching turn is drawn under its session without a glyph.
+        RowKind::Hit(_) | RowKind::PaneHit(_) => return None,
+        // A pane is a part of a mux and wears its glyph.
+        RowKind::Pane(_) => NodeKind::MuxSession,
     };
     Some(node_kind_glyph_span(node_kind, theme))
 }

@@ -51,7 +51,7 @@ use std::path::{Path, PathBuf};
 use chrono::{DateTime, Utc};
 use serde::Deserialize;
 
-use super::{HarnessParser, ParseError, ParseResult};
+use super::{HarnessParser, MapIndex, ParseError, ParseResult, TranscriptIndex, TranscriptSource};
 use crate::viewer::model::{
     SessionLocator, TranscriptDocument, TranscriptMeta, TranscriptTurn, TurnKind, TurnRole,
 };
@@ -67,53 +67,75 @@ impl HarnessParser for CodexParser {
         let file_path = find_rollout_file(state_root, session_key).ok_or(ParseError::NotFound)?;
         parse_file(&file_path, locator)
     }
-}
 
-/// Walk `<state_root>/sessions/<year>/<month>/<day>/` looking for
-/// a rollout file whose basename ends with `-<session_key>.jsonl`.
-/// Std-only — no `walkdir` dep.
-fn find_rollout_file(state_root: &Path, session_key: &str) -> Option<PathBuf> {
-    let sessions = state_root.join("sessions");
-    let suffix = format!("-{session_key}.jsonl");
-    for year_entry in std::fs::read_dir(&sessions).ok()?.flatten() {
-        let year = year_entry.path();
-        if !year.is_dir() {
-            continue;
-        }
-        let Ok(month_iter) = std::fs::read_dir(&year) else {
-            continue;
-        };
-        for month_entry in month_iter.flatten() {
-            let month = month_entry.path();
-            if !month.is_dir() {
-                continue;
-            }
-            let Ok(day_iter) = std::fs::read_dir(&month) else {
+    fn index(&self, state_root: &Path) -> Box<dyn TranscriptIndex> {
+        // A rollout is `rollout-<timestamp>-<session_key>.jsonl` and the
+        // key may itself contain hyphens, so every suffix that follows a
+        // hyphen is a candidate key; `find_rollout_file` matches the same
+        // way (`ends_with("-<key>.jsonl")`).
+        let mut files = std::collections::HashMap::new();
+        for path in rollout_files(state_root) {
+            let Some(stem) = path
+                .file_name()
+                .and_then(|n| n.to_str())
+                .and_then(|n| n.strip_suffix(".jsonl"))
+            else {
                 continue;
             };
-            for day_entry in day_iter.flatten() {
-                let day = day_entry.path();
-                if !day.is_dir() {
-                    continue;
-                }
-                let Ok(file_iter) = std::fs::read_dir(&day) else {
-                    continue;
-                };
-                for file_entry in file_iter.flatten() {
-                    let path = file_entry.path();
-                    if path.is_file()
-                        && path
-                            .file_name()
-                            .and_then(|n| n.to_str())
-                            .is_some_and(|n| n.ends_with(&suffix))
-                    {
-                        return Some(path);
-                    }
+            for (i, _) in stem.match_indices('-') {
+                files
+                    .entry(stem[i + 1..].to_string())
+                    .or_insert_with(|| TranscriptSource::File(path.clone()));
+            }
+        }
+        Box::new(MapIndex(files))
+    }
+
+    fn read_source(&self, source: &TranscriptSource, locator: &SessionLocator) -> ParseResult {
+        match source {
+            TranscriptSource::File(path) => parse_file(path, locator),
+            TranscriptSource::Sqlite { .. } => Err(ParseError::NotFound),
+        }
+    }
+}
+
+/// Every `.jsonl` file under `<state_root>/sessions/<y>/<m>/<d>/`.
+fn rollout_files(state_root: &Path) -> Vec<PathBuf> {
+    let mut out = Vec::new();
+    let mut level = vec![state_root.join("sessions")];
+    for depth in 0..4 {
+        let mut next = Vec::new();
+        for dir in &level {
+            let Ok(entries) = std::fs::read_dir(dir) else {
+                continue;
+            };
+            for entry in entries.flatten() {
+                let path = entry.path();
+                if depth < 3 && path.is_dir() {
+                    next.push(path);
+                } else if depth == 3
+                    && path.is_file()
+                    && path.extension().is_some_and(|ext| ext == "jsonl")
+                {
+                    out.push(path);
                 }
             }
         }
+        level = next;
     }
-    None
+    out
+}
+
+/// The rollout file whose basename ends with `-<session_key>.jsonl`. It
+/// walks the same files, in the same order, as the index, so a lookup
+/// and an index entry agree on which file a key names.
+fn find_rollout_file(state_root: &Path, session_key: &str) -> Option<PathBuf> {
+    let suffix = format!("-{session_key}.jsonl");
+    rollout_files(state_root).into_iter().find(|path| {
+        path.file_name()
+            .and_then(|n| n.to_str())
+            .is_some_and(|n| n.ends_with(&suffix))
+    })
 }
 
 fn parse_file(path: &Path, locator: &SessionLocator) -> ParseResult {

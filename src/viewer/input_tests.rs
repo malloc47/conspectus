@@ -161,3 +161,43 @@ fn close_dismisses_help_overlay_first_then_modal() {
     let (_s, eff) = reduce(s, ViewerMsg::Close);
     assert_eq!(eff, ViewerEffect::Close);
 }
+
+#[test]
+fn movement_keys_scroll_the_help_page_while_it_is_open() {
+    let mut s = state_with(100, 24, 5);
+    s.viewport_height = 10;
+    let (s, _) = reduce(s, ViewerMsg::ToggleHelp);
+    assert_eq!(s.help_scroll, 0);
+    let before = s.scroll_offset;
+    let (s, _) = reduce(s, ViewerMsg::ScrollDown);
+    assert_eq!(s.help_scroll, 1);
+    let (s, _) = reduce(s, ViewerMsg::PageDown);
+    assert_eq!(s.help_scroll, 11);
+    let (s, _) = reduce(s, ViewerMsg::HalfPageUp);
+    assert_eq!(s.help_scroll, 6);
+    let (s, _) = reduce(s, ViewerMsg::JumpToEnd);
+    assert_eq!(s.help_scroll, usize::MAX);
+    let (s, _) = reduce(s, ViewerMsg::JumpToStart);
+    assert_eq!(s.help_scroll, 0);
+    assert_eq!(s.scroll_offset, before, "the transcript did not move");
+}
+
+#[test]
+fn toggles_wait_while_the_help_page_is_open() {
+    let mut s = state_with(100, 24, 0);
+    s.show_help = true;
+    let thinking = s.show_thinking;
+    let (s, _) = reduce(s, ViewerMsg::ToggleThinking);
+    assert_eq!(s.show_thinking, thinking);
+}
+
+#[test]
+fn reopening_the_help_starts_at_the_top() {
+    let mut s = state_with(100, 24, 0);
+    s.show_help = true;
+    s.help_scroll = 9;
+    let (s, _) = reduce(s, ViewerMsg::ToggleHelp);
+    let (s, _) = reduce(s, ViewerMsg::ToggleHelp);
+    assert!(s.show_help);
+    assert_eq!(s.help_scroll, 0);
+}

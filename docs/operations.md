@@ -282,6 +282,7 @@ cwd_mark           = "cyan"
 link_id            = "blue"
 secondary_text     = "dark_gray"   # short ids + preview snippets
 disclosure         = "cyan"        # the ▶ / ▼ tree affordance
+match_highlight    = "yellow"      # text a search matched (bold, underlined)
 divider            = "dim"
 panel_focus_accent = "cyan"        # the ▸ marker on the active pane title
                                    # and the detail-pane section chip
@@ -342,9 +343,10 @@ conspectus node show <id> [--scan-root PATH]...
 conspectus columns {sessions|mux|union|prs|forks}
                    [--pager | --no-pager]
                    [--color {auto|always|never}]
-conspectus tui [--view {sessions|mux|prs|pinned}] [--grouping VALUE] [--sort {hierarchy|recency}]
+conspectus tui [--view {sessions|mux|prs|pinned|history|search}] [--grouping VALUE] [--sort {hierarchy|recency}]
                [--harness H]... [--max-age D] [--mux-state S]...
                [--scan-root PATH]... [--refresh-interval D] [--no-live-preview]
+               [--contains TEXT]
 conspectus declared {list|create|remove|confirm|ignore|override} ...
 conspectus rename session <id> [NAME] [--clear] [--no-mux]
 conspectus rename mux <id> <NAME>
@@ -352,6 +354,9 @@ conspectus alias list
 conspectus pin {add|edit|rename|retarget|refresh|move|rm|list|show|migrate} ...
 conspectus rebuild <REF> [--dry-run] [--no-attach] [--session ID]
 conspectus history {list|show|reap|forget} ...
+conspectus search <QUERY> [--source {sessions|panes|all}] [--group {session|message|flat}]
+                         [--tools] [--thinking] [--harness H]...
+                         [--limit N] [--format {table|json}]
 conspectus mux new <NAME> [--cwd PATH] [--socket NAME] [--no-attach] [--pin [PIN] [--no-launch]]
 conspectus mux launch <HARNESS> --name <NAME> [--cwd PATH] [--argv ARG...]
                                               [--worktree-branch B --worktree-repo PATH]
@@ -437,6 +442,265 @@ fit alongside in a typical terminal. Opt in with `--columns
 which keeps the cell scannable when several agents share a mux. On
 the `union` row-type the preview shows for agent rows only; mux
 rows render `—`.
+
+## Searching session contents
+
+`conspectus search <QUERY>` finds sessions by what was said in them. It
+reads every session's transcript on demand, in the command's own process
+(the daemon is not asked), and keeps nothing: results exist only while
+the command runs. The session list comes from the same discovery as
+`conspectus table` and honors `--scan-root`, `--no-cache`, and
+`--refresh`.
+
+Matching is one case-insensitive substring of the trimmed query. ASCII
+letters fold; other text must match exactly (`CAFÉ` does not match
+`Café`). By default only user and assistant messages (and compaction
+summaries) are searched; `--tools` adds tool calls and output, and
+`--thinking` adds the model's thinking blocks. Aborted and hidden turns
+are left out. The `[search]` section of the config sets the default
+grouping and kinds.
+
+```sh
+conspectus search "retry budget"                 # one row per session, most hits first
+conspectus search "retry budget" --group message # one row per matching message
+conspectus search "retry budget" --group flat    # matching messages, newest first
+conspectus search deadlock --tools --harness claude-code --limit 5
+conspectus search deadlock --format json | jq '.results[].session'
+```
+
+Flags:
+
+- `--source sessions|panes|all`: search session transcripts (the
+  default), the scrollback of live tmux panes, or both. See
+  [Searching pane scrollback](#searching-pane-scrollback).
+- `--group session|message|flat`: one result per session (ranked by hit
+  count, then latest hit), per matching message in turn order within each
+  session, or per matching message across all sessions, newest first,
+  with no session grouping.
+- `--tools`, `--thinking`: also search tool calls and output, or thinking.
+- `--harness H` (repeatable), `--max-age DURATION`, `--mux-state STATE`:
+  narrow the sessions searched, with the same meaning as on `table`.
+- `--limit N`: stop after N results (at least 1).
+- `--format table|json`; `--width N` and `--color auto|always|never`
+  shape the table (the match is bold on a terminal).
+- `--verbose`: report how many sessions were searched on stderr even
+  when stderr is not a terminal, how many were skipped because their
+  transcript could not be read, and how many belong to a harness with no
+  transcript parser (and so were not searched).
+
+**Table.** `--group session` prints `SESSION`, `HARNESS`, `HITS`,
+`LATEST` (how long ago the newest hit was) and `SNIPPET`; `--group
+message` and `--group flat` print `SESSION`, `HARNESS`, `TURN`, `ROLE`, `KIND`, `TIME` (how
+long ago that turn was written) and `SNIPPET`. An unnamed session shows
+the first eight characters of its id. Turns count from 1, as in the
+viewer; roles read `you` and `ai`, and kinds read `message`, `tool
+call`, `tool output`, and so on, as in the TUI. Per-message rows run in
+turn order within a session (`flat` rows run newest first across all
+sessions, so the `SESSION` column says where each one lives). The snippet is cut around the match, on
+word boundaries where it can, to fit `--width`. When nothing matches, the
+table is empty and stderr says `No sessions match "<query>"`.
+
+A session with more matching messages than a search keeps (the newest
+are kept) is reported on stderr, and under `truncated` in the JSON. With
+`--group flat`, `--limit` keeps the newest messages overall; when it cut
+some, stderr says `showing the newest N of M matching messages` and the
+JSON gains `limited` (`shown`, `total`). `limited` is absent otherwise.
+
+**Exit status** follows `grep`: `0` when at least one session matched,
+`1` when none did, `2` on an error (an empty query, an unreadable
+config value, discovery failing). Errors are printed to stderr and never
+use status 1, so scripts can tell "nothing found" from "it broke".
+
+**JSON.** `--format json` prints one document:
+
+```json
+{
+  "query": "retry budget",
+  "group": "session",
+  "kinds": ["messages"],
+  "searched": { "sessions": 77, "total": 77, "skipped": 0, "without_parser": 3 },
+  "truncated": [],
+  "results": [
+    {
+      "source": "session",
+      "harness": "claude-code",
+      "session": "aaaaaaaa-0000-0000-0000-000000000001",
+      "label": "Retry budget design",
+      "hits": 4,
+      "latest": "2026-10-01T10:00:05Z",
+      "snippet": { "text": "We settled on a retry budget of 3", "highlight": [22, 34] }
+    }
+  ]
+}
+```
+
+With `--group message` or `--group flat` each result instead carries `turn` (the turn's
+position, counting from 1), `role` (`user`, `assistant`, `system`), `kind` (`message`,
+`compaction_summary`, `tool_use`, `tool_result`, `thinking`), `time`, and
+its own `snippet`, and has no `hits` or `latest`. `label` is the session's
+alias, title, or hosting mux name, or `null`. `snippet.highlight` is the
+byte range (not characters) of the match inside `snippet.text`, which is
+capped and has its whitespace collapsed. `truncated` lists the sessions
+(`harness`, `session`, `matches`, `shown`) whose per-message results were
+capped. `searched.skipped` counts sessions whose
+transcript could not be read; `without_parser` counts sessions of
+harnesses that cannot be searched yet.
+
+### Revealing a row and going back
+
+In the Search, History, and Pinned views, `Shift+Enter` (also `Alt+Enter`,
+and `O` where a terminal cannot tell Shift+Enter from Enter) does what
+**Reveal in its view** does for a pin: it switches to the view where the
+row's session, mux, or PR lives (Sessions, Mux, or PRs; History for one
+that is gone) and selects it. `Backspace` with the left pane focused then
+goes back to the view and row you left. The back list holds the last 20
+jumps: reveals, opening a search result in another view, and `.` menu
+reveals; the status bar shows `Backspace back` while it is not empty. A
+row that has since disappeared says `that row is gone`. With the right
+pane focused `Backspace` still pops the explorer's breadcrumb.
+
+Most terminals send `Shift+Enter` as plain `Enter`; Conspectus does not
+turn on the kitty keyboard protocol, so it sees `Shift+Enter` only from a
+terminal configured to report it. `Alt+Enter` works in every common
+terminal.
+
+### Searching pane scrollback
+
+`--source panes` (or `all`) also searches what is on screen and in
+scrollback in every pane of every tmux server Conspectus knows: the
+default server and each named socket a known mux lives on. Each pane's
+last 5,000 lines are read with `tmux capture-pane`, joined where tmux
+soft-wrapped them, with terminal escapes removed and trailing blank lines
+dropped. Nothing is kept; the command reads panes read-only. With
+`CONSPECTUS_DISABLE_TMUX` set no panes are searched.
+
+A pane that hosts an agent shows that agent's session, so the same
+sentence would otherwise be reported twice. A pane line is left out when
+its text (case folded, whitespace collapsed, box-drawing characters
+removed) is contained in the text of any turn of the session attributed to
+that pane's mux that matches the query, of any kind, so text the session
+search withholds by default (tool output) is not reported through the pane
+either. A line shorter than 12 characters is compared joined with its
+neighbors. `--verbose` reports how many lines were left out.
+
+Pane results are listed after session results. `--group session` gives one
+row per pane (`PANE`, `COMMAND`, `HITS`, `CAPTURED`, `SNIPPET`), showing
+its newest match; `--group message` and `flat` give one row per matching
+line, with `LINE` in place of `HITS`. A pane has no message times, so
+`CAPTURED` is when the pane was read. In JSON, every result carries
+`"source": "session"` or `"pane"`; pane results have `backend`, `socket`,
+`mux`, `window`, `pane`, `pane_id`, `command`, `hits`, `line`, `captured`,
+and `snippet`, and `searched.panes` reports `scanned`, `total`, `skipped`,
+and `deduplicated`. A pane that cannot be read counts as skipped.
+
+### Quick select with `/`
+
+`/` opens quick select, a wide modal (about 85% of the terminal, up to 200
+columns) for jumping to something by name. Its title carries a tab
+identifier, `[ Current ] All` or `Current [ All ]`; `Tab` and `Shift-Tab`
+switch between the two, and the modal always opens on Current.
+
+- **Current** ranks every row of the active view after filters, rows under
+  collapsed groups included. `Enter` selects the row in the left pane and
+  expands the groups above it.
+- **All** ranks everything Conspectus knows by a name you would
+  recognize, whichever view it lives in: sessions (alias, title, id,
+  directory, and the last message when live preview is on), muxes (name,
+  directory, running command), repos, checkouts and worktrees (path,
+  branch, remote), pull requests (number, title, branch), pins, workspaces,
+  forks, and the gone entities history remembers. Matches in the name rank
+  above matches in other fields; ties go to sessions, muxes, pins,
+  checkouts, repos, pull requests, then history, and the most recent first.
+
+Each result in All shows its kind glyph, name, a dim context (path, branch,
+or what a pin points at), and a word at the right edge saying what `Enter`
+will do:
+
+- `here`: the current view lists it. It is selected in the left pane and
+  focus stays where it is.
+- `via <kind>` or `3 hops`: it is related to what the right pane is on
+  (the selected row, or wherever you have drilled to) within three hops of
+  relationships Conspectus has settled on. Focus moves to the right pane,
+  which drills along the shortest path and leaves the cursor on the
+  result, so `Backspace` retraces the way. `via mux` names the first
+  neighbor on the path.
+- `in <View> view`: otherwise the view that lists it is shown and the row
+  selected. If it is not listed there (a filter hides it, say), you stay
+  where you were and a message says so.
+
+The keys are on the modal's last row: `Up`/`Down` (or `Ctrl-P`/`Ctrl-N`)
+move, `Enter` picks, `Tab` switches Current and All, `Esc` closes.
+
+### Searching contents with `Ctrl-/`
+
+`Ctrl-/` opens the contents modal: it searches what was said in the
+sessions and what is in mux pane scrollback. Terminals send that key as
+one of three keys; Conspectus accepts all of them (`Ctrl-/`, `Ctrl-7`,
+`Ctrl-_`), and `s` works in every terminal. The modal uses most of the
+terminal's width (85%, between 60 and 200 columns). The top border shows
+`Current [ All ]`; `Tab` switches. *Current* is the
+sessions and muxes the view you are in lists, folded rows included (the
+Search view's current context is the one its shown search was made in);
+*All* is every session and live mux. It opens on All, so a fresh search
+reads everything; `Tab` narrows it to the view. It always opens with an
+empty query; `Ctrl-R` brings back earlier search strings. The modal shows
+the query, a status line (grouping, the kinds searched, how many places are
+scanned, the skipped count), the best results so far, and a footer naming
+the keys it understands. Each row says where the match is (`session` or
+`pane`), and each snippet is cropped around the match, on word boundaries,
+with the match picked out in the theme's `match_highlight` color. The keys:
+
+- Type to search. The scan starts when the query has rested for about
+  200 ms and restarts whenever the query, the reach, or an option changes.
+  Results arrive while it runs.
+- The title shows two choices. `Tab` switches the reach between
+  **Current** and **All**; `Shift-Tab` switches the granularity between
+  **Sessions** (one row per session or pane) and **Messages** (every match,
+  newest first). Changing the granularity lists the same matches another
+  way and never searches again; the starting value comes from `[search]`.
+- `Ctrl-R` fills the field from the previous search string (newest
+  first, each with the reach and options it ran with) and searches it;
+  press it again for the one before, and `Ctrl-T` goes forward again, back
+  to the empty field. Paging stops at the oldest string and never records
+  a search by itself: the one you land on joins the history on exit like
+  any other, replacing its twin. A blank query is never remembered.
+- `Ctrl-O` opens the search options in the modal: whether tool calls and
+  output, thinking, and pane scrollback are searched (`Space` or `Enter`
+  flips one, `Esc` goes back to the results). Changing one searches again.
+  The tool and thinking options apply to sessions; the starting values
+  come from `[search]`.
+- `Up`/`Down` (or `Ctrl-P`/`Ctrl-N`) move through the results. `Enter`
+  opens a session hit in the viewer at the match, with the query already
+  searched, or a pane hit in the full-screen pane viewer on a fresh capture,
+  at the line, with the match picked out (the pane's mux is selected in the
+  Mux view first). The pane viewer has the session viewer's keys (`j`/`k`,
+  `PgUp`/`PgDn`, `g`/`G`, `Ctrl-D`/`Ctrl-U`, `/` with `n`/`N`, `?` for help,
+  `Esc` stepping back from help and find, `q` leaving at once) and `a`,
+  which attaches to the pane's mux. A stopped or gone mux refuses with a
+  note in the footer, and attaching closes the viewer.
+- `Ctrl-S` keeps the search and opens the Search view on it (a scan still
+  running goes on there). `Ctrl-F` keeps the query as the filter on the
+  Sessions, Mux, and PRs lists and closes the modal; `F` clears it.
+- `Esc` closes the modal and stops a running scan. The lists are left as
+  they were; if a content filter was active when the modal opened, it is
+  restored. The Search view does not change while the modal is open: the
+  search typed in the modal joins the remembered searches when the modal
+  exits (by `Esc`, `Ctrl-S`, `Ctrl-F`, or `Enter` on a hit), as the newest
+  one, marked `stopped` if its scan had not ended. A search that never
+  started, or whose query was emptied, is not remembered, and neither is a
+  repeat of one already remembered (the same text, kinds, scope, and pane
+  setting), which takes that one's place instead.
+
+A pane that runs an agent shows what the agent's own session already
+contains only once: the pane lines found in the transcripts of the
+sessions attached to its mux are left out. Panes with no such session, such
+as a shell or a build, keep all their matches. Reading scrollback reads
+the last 5,000 lines (2 MiB) of each pane, in memory only.
+
+`s` and `Ctrl-/` from the Search view open on the search it shows, with its
+results listed; the first change searches again as a new search.
+Content search is off under `--no-live-preview`; the keys then say why and
+do not open the modal.
 
 ## Paging
 
@@ -619,6 +883,21 @@ checkout = "30d"
 pr = "30d"
 repo = "never"
 ```
+
+Content search reads transcripts on demand and keeps nothing on disk.
+`[search]` sets what it reads and how it groups results. A project's
+`.conspectus.toml` overrides the user config key by key:
+
+```toml
+[search]
+group = "session"           # the TUI's granularity: "session" lists sessions; "message" or "flat" lists the matching messages, newest first (`conspectus search --group` still tells the three apart)
+kinds = ["messages"]        # add "tools" and/or "thinking" to search those too
+history = 10                # content searches the Search view remembers (0 keeps only the one it shows)
+```
+
+`kinds` lists what is searched, so `kinds = ["tools"]` searches tool
+calls and output only. Aborted turns and turns the harness never showed
+are not searched.
 
 Launch profiles say how to start a harness when nothing more specific
 does. A project's `.conspectus.toml` replaces the user config's profile
@@ -833,6 +1112,14 @@ cell is reserved on every row so columns hold still. Controls has a **Pinned
 only** checkbox in Sessions, Mux, and PRs that keeps pinned rows and the
 groups above them.
 
+**Content** in Controls (or `--contains TEXT` on `tui` and the list commands)
+narrows the Sessions, Mux, and Union views to sessions whose transcripts
+mention the text. The scan runs in this process on background threads,
+streams matches as it goes, and restarts when the text changes; a refresh
+scans only sessions that appeared since. The text is never saved, written to
+a snapshot, or sent to the daemon. `--no-live-preview` turns it off.
+Clearing filters in Controls clears it too.
+
 **Edit…** opens a form with one row per field the pin can change: its name
 first (renaming a live mux pin renames its tmux session), then the label and
 the fields its kind can change, the same names `pin edit --set` takes. A
@@ -869,6 +1156,52 @@ argv` resolves to the harness's default (a project or user `[launch.*]`
 profile, `atelier exec`, or the harness default) and the form shows the
 command and where it came from. The last field, **pin**, can also pin the new
 mux or, with *pin, don't launch*, write a planned pin and start nothing.
+
+### The Search view
+
+Key `6` (or `--view search`) shows one of the content searches the process
+remembers (the last ten; `[search] history` sets how many, 0 keeping only
+the one shown). Every search from the contents modal is kept there as soon
+as it starts and streams in while it runs, so a new search does not lose
+the one before it. Nothing is saved to disk. The first line reads
+`search 2/5 "query" · Current · 3 sessions · 1 pane · scanned 12m ago`;
+`<` shows the previous (older) search and `>` the next, without scanning
+again, and Controls has a `searches` row that lists them. `Ctrl-F` keeps
+the search shown as the filter on the Sessions, Mux, and PRs lists (the
+line then ends in `filtering`; paging does not change the filter, and `F`
+clears it without forgetting any search). `s` and `Ctrl-/` open the modal
+on the search shown; `/` is quick select over the rows.
+
+The sessions and panes are ranked together by how many matches they hold
+and then by the latest (a pane's latest is when its scrollback was read;
+the Recency sort puts the latest first). Groupings (`Ctrl-G`): none,
+project, harness (panes sit under **Mux panes**). `Ctrl-L`, or the Controls
+`Results` section's `listed as` row, switches between **Sessions** (one row
+per session or pane) and **Messages** (a flat list of matches, newest
+first); `Ctrl-O`, or the Controls `options` row, opens the search options
+(the modal's `Ctrl-O`). `[search] group` sets the default granularity
+(`session` for Sessions; `message` and `flat` for Messages). The Messages list reads the
+matching sessions' transcripts to find the turns, newest matches first and
+at most 100 sessions; the find chip says `reading messages` while it loads
+and `showing N of M messages` if that cap left some out. Per-message
+turns are read again when a search is shown, not kept with it. Selecting a
+hit row shows its turn above the session's detail.
+
+The right pane's Preview marks the search too. A session row's transcript
+preview highlights the query and opens at the session's best match; a hit
+row opens at its own turn, and scrolling moves from there. A pane's preview
+highlights the query in the capture and scrolls back to the newest match
+when none is in the bottom rows. The same marks show under a `Ctrl-F`
+filter on the Sessions and Mux lists. They come from the search on display
+(so `<` and `>` move them), are never saved, and go with the search.
+
+`Enter` and `v` open the viewer at the best match of a session, or at the
+matching turn of a hit row, with the query already searched, so `n` and
+`N` step to the others; `Enter` on a pane row or pane line opens the
+scrollback. Every other key, `p` and `.` included, acts on the session, or
+on the pane's mux. Like all content search, queries and results stay in
+memory and are never saved; the view is off under `--no-live-preview`, and
+a restart never opens on it.
 
 ### The History view
 
@@ -1003,6 +1336,45 @@ opens the editor, and on a checkbox it just closes). Scrolling dialogs
 `Space` to page down, as pagers do. Help and the other long dialogs wrap
 their text to the dialog's width, and menus cut a label that cannot fit
 with an ellipsis, so no word is clipped at the edge.
+
+Inside the transcript viewer, `?` opens a help page drawn like the main
+help: the same frame and size, section headings, an accent-colored key
+column, descriptions that wrap, a scrollbar, and a footer naming the keys
+that scroll and close it. Its rows are generated from the viewer's key
+table, so a key added to the viewer is listed automatically. While the
+page is open the movement keys (`j`/`k`, `PgDn`/`PgUp`, `g`/`G`, `Ctrl-D`/
+`Ctrl-U`) scroll it rather than the transcript, `?`, `Esc`, or `q` close
+it, and the toggles wait until it is closed.
+
+### Finding text in a transcript
+
+Inside the transcript viewer, `/` opens a find prompt in the footer.
+Type a query and press `Enter` to jump to the first match at or below the
+top of the screen; `Esc` leaves the prompt and keeps an earlier find, and
+the prompt supports `Backspace`, `Delete`, `←`/`→`, `Home`/`End`, and
+`Ctrl-U` (delete to the start). `n` and `N` step to the next and previous
+match and wrap at either end, saying so in the footer. The footer shows
+`find "query" i/N` (or `no match`; the header's `find:"query"` chip uses the
+same wording), and each match is highlighted: the current one reversed, the
+others in the shared match style (bold, underlined). `Esc` clears the find before
+it closes the viewer, one step back at a time; `q` (and `Ctrl-C`) leave the
+viewer at once, find or not, except that with the help page open they close
+only the help.
+
+Find is a case-insensitive substring match on what the viewer is
+showing: messages always, and tool output, thinking, aborted, and hidden
+turns only while their toggles (`t`, `T`, `I`, `H`) show them. When a
+query matches only in turns the toggles hide, the footer says how many
+(`no match · 2 in hidden turns`); turning the toggle on brings them into
+the match count. A match the line wrapping splits across two lines still
+counts but is not highlighted.
+
+A search result opens the viewer on its matching turn with the query
+active. If that turn is hidden, the viewer shows it (full tool output,
+thinking, aborted, or hidden turns, as needed) and says what it turned on
+in the footer for one key press. If the transcript changed since the
+search, the viewer looks near the remembered turn, then anywhere, for the
+match, and says when it is no longer there.
 
 ## TUI messages
 

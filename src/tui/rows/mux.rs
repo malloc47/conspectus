@@ -168,6 +168,7 @@ pub fn build_mux_tree(inputs: MuxBuildInputs<'_>) -> RowTree {
             single_session_preview,
             pin_id: pin_by_mux.get(&node_id).map(|pin| pin.id.id.clone()),
             primary_node: node_id.clone(),
+            content_hit: None,
         };
 
         let children: Vec<AttachedAgent> = if attached_count > 1 {
@@ -646,12 +647,14 @@ fn mux_matches_filter(
         pr_branch: _,
         pr_state: _,
         float_tracked_prs_top: _,
+        content,
         show_stopped_muxes: _,
         pinned_only: _,
         show_pinned_history: _,
     } = filter;
     harness.is_none()
         && max_age.is_none()
+        && content.is_none()
         && mux_state
             .as_ref()
             .is_some_and(|mux_state| mux_state.values().contains(&MuxStateKey::Unmuxed))
@@ -664,6 +667,7 @@ fn agent_matches_filter(agent: &AttachedAgent, now: Option<i64>, filter: &RowFil
     }
     filter.matches_session(&SessionMatchInputs {
         harness_key: &agent.harness_key,
+        session_key: &agent.id.session_key,
         now_epoch: now,
         last_active_epoch: agent.last_active_epoch,
         mux_state: MuxStateKey::from_candidate_count(agent.candidate_count),
@@ -757,6 +761,7 @@ fn collect_ghosts(
                     single_session_preview: None,
                     pin_id: None,
                     primary_node: id.clone(),
+                    content_hit: None,
                 },
                 parent_node_id: id,
                 children: Vec::new(),
@@ -882,6 +887,7 @@ fn agent_row(
             title_disambiguates: false,
             mux_host: None,
             primary_node: node_id,
+            content_hit: None,
         }),
     }
 }

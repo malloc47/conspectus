@@ -37,6 +37,9 @@ pub struct PickerItem {
 pub enum PickerPurpose {
     /// Point `pin` at the chosen entity.
     Retarget { pin: String },
+    /// Show the chosen remembered search in the Search view; each item's
+    /// value is its position, oldest first.
+    SearchHistory,
 }
 
 #[derive(Debug, Clone)]
@@ -61,6 +64,15 @@ impl PickerState {
             visible,
             cursor: 0,
         }
+    }
+
+    /// Start with the cursor on the item whose value is `value`.
+    #[must_use]
+    pub fn at_value(mut self, value: &str) -> Self {
+        if let Some(position) = self.items.iter().position(|item| item.value == value) {
+            self.cursor = position;
+        }
+        self
     }
 
     pub fn title(&self) -> &str {
@@ -115,6 +127,9 @@ impl PickerState {
                 pin: pin.clone(),
                 target: item.value.clone(),
             },
+            PickerPurpose::SearchHistory => {
+                Msg::ShowSearchHistory(item.value.parse().unwrap_or_default())
+            }
         }
     }
 }
@@ -123,8 +138,8 @@ impl Overlay for PickerState {
     type Ctx<'a> = ();
 
     fn handle(&mut self, _ctx: (), key: KeyEvent) -> OverlayOutcome {
-        use crate::tui::keybindings::overlay::{SEARCH_KEYS, SearchKey, resolve};
-        match resolve(SEARCH_KEYS, key) {
+        use crate::tui::keybindings::overlay::{PICKER_KEYS, SearchKey, resolve};
+        match resolve(PICKER_KEYS, key) {
             Some(SearchKey::Abort | SearchKey::Cancel) => OverlayOutcome::Close,
             Some(SearchKey::Pick) => match self.current() {
                 Some(item) => OverlayOutcome::Commit(Box::new(self.commit(item))),
@@ -138,7 +153,8 @@ impl Overlay for PickerState {
                 self.cursor = crate::tui::cursor::wrap_step(self.cursor, self.visible.len(), -1);
                 OverlayOutcome::Consumed
             }
-            None => {
+            // The picker has no scopes; its table binds none of these.
+            Some(_) | None => {
                 let _ = self.query.handle_key(key);
                 self.refilter();
                 OverlayOutcome::Consumed

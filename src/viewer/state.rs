@@ -13,6 +13,7 @@
 
 use ratatui::text::Line;
 
+use crate::viewer::find::FindState;
 use crate::viewer::model::TranscriptDocument;
 
 /// How tool-use / tool-result turns are rendered.
@@ -61,6 +62,19 @@ impl ToolDetail {
     }
 }
 
+/// Where one turn begins in the composed body lines.
+///
+/// A run of tool turns shown as one summary line (tool detail
+/// `Summary`) gives every turn in the run the same start, flagged
+/// `collapsed`: the line is a count of calls, not the turn's text, so
+/// nothing in it is highlighted.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct TurnStart {
+    pub turn_index: usize,
+    pub line: usize,
+    pub collapsed: bool,
+}
+
 /// Cached body-line composition. Lifetime-erased so it can live on
 /// the state across draws.
 #[derive(Clone, Debug)]
@@ -71,6 +85,21 @@ pub struct RenderCache {
     pub show_aborted: bool,
     pub show_hidden: bool,
     pub lines: Vec<Line<'static>>,
+    /// Where each shown turn begins in `lines`, in order.
+    pub turn_starts: Vec<TurnStart>,
+    /// Display columns the gutter (chip and separator) takes at the
+    /// start of every line; find highlights only what follows it.
+    pub leader: usize,
+}
+
+/// Where to land when the viewer opens from a search result: the
+/// query that found the session and the turn it matched. If the
+/// transcript has changed since, the viewer looks near that turn for the
+/// match and says so when it can't find one.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ViewerOpen {
+    pub query: String,
+    pub turn_index: usize,
 }
 
 /// Everything the viewer needs to render itself.
@@ -105,6 +134,9 @@ pub struct ViewerState {
     /// over the body listing every viewer keybinding. Toggled by
     /// `?`; closed by `?` or `Esc`.
     pub show_help: bool,
+    /// First visible line of the help page while it is open; the help
+    /// widget clamps it to what the page can scroll.
+    pub help_scroll: usize,
     /// Viewport height (in cells / lines) last seen during draw.
     /// Used by the reducer to compute page/half-page deltas.
     pub viewport_height: u16,
@@ -116,6 +148,12 @@ pub struct ViewerState {
     /// it whenever a flag that affects layout changes (`tool_detail`,
     /// `show_thinking`).
     pub rendered: Option<RenderCache>,
+    /// Find-in-transcript state: the prompt, the active query, and its
+    /// matches.
+    pub find: FindState,
+    /// Footer hint for the find prompt, generated from the prompt's key
+    /// table by whoever opens the viewer. Empty shows no hint.
+    pub find_hint: String,
 }
 
 impl ViewerState {
@@ -131,9 +169,12 @@ impl ViewerState {
             show_aborted: false,
             show_hidden: false,
             show_help: false,
+            help_scroll: 0,
             viewport_height: 0,
             total_lines: 0,
             rendered: None,
+            find: FindState::default(),
+            find_hint: String::new(),
         }
     }
 

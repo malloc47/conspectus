@@ -1,0 +1,26 @@
+---
+source: src/tui/widgets/search_quick_tests.rs
+expression: "render_with(&wide_state(\"quokka\"), &[], 80, 24)"
+---
+
+
+
+      ┌ / quick select  Current [ All ]  (7) ────────────────────────────┐
+      │/quokka                                                           │
+      │> ● Quokka parser rewr…  /home/op/src/quokka                 here │
+      │  ▣ quokka-dev           /home/op/src/quokka             via repo │
+      │  ◉ quokka-daily                                           3 hops │
+      │  ◇ quokka-wt            quokka-login · /home/…   in History view │
+      │  ◆ quokka               /home/op/src/quokka      in History view │
+      │  ▣ quokka-old                                    in History view │
+      │  ⇄ acme/quokka#7        Add the quokka login …       in PRs view │
+      │                                                                  │
+      │                                                                  │
+      │                                                                  │
+      │                                                                  │
+      │                                                                  │
+      │                                                                  │
+      │                                                                  │
+      │                                                                  │
+      │↑/↓ move · Enter pick · Esc close · Tab current/all               │
+      └──────────────────────────────────────────────────────────────────┘

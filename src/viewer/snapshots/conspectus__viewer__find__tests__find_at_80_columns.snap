@@ -1,0 +1,16 @@
+---
+source: src/viewer/find_tests.rs
+expression: "draw(&mut state, 80, 12)"
+---
+ claude-code:find · /p · 12 turns                                               
+────────────────────────────────────────────────────────────────────────────────
+                                                                                
+  ai  │ turn 5 has the Needle in it                                             
+                                                                                
+ you  │ turn 6 is plain                                                         
+                                                                                
+  ai  │ turn 7 is plain                                                         
+                                                                                
+ you  │ turn 8 is plain                                                         
+────────────────────────────────────────────────────────────────────────────────
+[ 10/24 ] · find "needle" 2/3 · tools·off   (t) · think·off (T) · (q) close

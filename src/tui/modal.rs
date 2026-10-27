@@ -59,6 +59,10 @@ pub enum Modal {
     /// effect pops the modal; every other effect leaves it on
     /// the stack.
     Viewer(crate::viewer::state::ViewerState),
+    /// Full-screen viewer over a mux pane's scrollback, opened from a
+    /// pane search result. Mirrors the transcript viewer's keys, plus
+    /// `a` to attach. Boxed to keep the `Modal` discriminant small.
+    PaneViewer(Box<crate::tui::widgets::pane_viewer::PaneViewerState>),
     /// `w` worktree action menu. Context-free — it
     /// captures the selected node's worktree facts + guard at open
     /// time and drives an internal list → branch-input / confirm

@@ -1663,6 +1663,7 @@ fn session_harness_span_renders_as_filled_badge() {
         mux_host: None,
         primary_node: NodeId::AgentSession(AgentSessionId::new("codex", "/state", "abc")),
         pin_id: None,
+        content_hit: None,
     };
     let spans = render_session_spans(&row, &theme, now, None);
     let badge = spans
@@ -1843,6 +1844,7 @@ fn row_kind_glyph_span_dispatches_per_row_kind() {
         mux_host: None,
         primary_node: NodeId::AgentSession(AgentSessionId::new("claude", "/state", "abc")),
         pin_id: None,
+        content_hit: None,
     });
     assert!(
         row_kind_glyph_span(&agent, &theme).is_some(),
@@ -1867,6 +1869,7 @@ fn row_kind_glyph_span_dispatches_per_row_kind() {
         single_session_preview: None,
         pin_id: None,
         primary_node: NodeId::MuxSession(MuxSessionId::new("project")),
+        content_hit: None,
     });
     assert_eq!(
         row_kind_glyph_span(&mux, &theme)
@@ -1909,6 +1912,7 @@ fn session_alias_renders_after_mux_glyph_in_left_row() {
         mux_host: None,
         primary_node: NodeId::AgentSession(AgentSessionId::new("codex", "/state", "abc")),
         pin_id: None,
+        content_hit: None,
     };
 
     let spans = render_session_spans(&row, &theme, now, None);
@@ -1950,6 +1954,7 @@ fn a_session_last_hosted_by_a_gone_mux_carries_a_was_in_chip() {
         mux_host: host,
         primary_node: NodeId::AgentSession(AgentSessionId::new("codex", "/state", "abc")),
         pin_id: None,
+        content_hit: None,
     };
     let text = |row: &AgentSessionRow| -> String {
         render_session_spans(row, &theme, now, None)
@@ -2011,6 +2016,7 @@ fn session_id_is_strictly_truncated_in_left_row() {
         mux_host: None,
         primary_node: NodeId::AgentSession(AgentSessionId::new("opencode", "/state", long_id)),
         pin_id: None,
+        content_hit: None,
     };
 
     let spans = render_session_spans(&row, &theme, now, None);
@@ -2049,6 +2055,7 @@ fn session_display_label_is_truncated_in_left_row() {
         mux_host: None,
         primary_node: NodeId::AgentSession(AgentSessionId::new("codex", "/state", "abc")),
         pin_id: None,
+        content_hit: None,
     };
 
     let spans = render_session_spans(&row, &theme, now, None);
@@ -2089,6 +2096,7 @@ fn mux_session_row_mirrors_session_column_order() {
         single_session_preview: Some("running cargo test".into()),
         pin_id: None,
         primary_node: NodeId::MuxSession(MuxSessionId::new("tmux:editor")),
+        content_hit: None,
     };
 
     let spans = render_mux_session_spans(&row, &theme, now, 100, None);
@@ -2160,6 +2168,7 @@ fn session_project_column_renders_before_inline_preview() {
         mux_host: None,
         primary_node: NodeId::AgentSession(AgentSessionId::new("codex", "/state", "abc")),
         pin_id: None,
+        content_hit: None,
     };
 
     let mut spans = render_session_spans(&row, &theme, now, None);
@@ -2212,6 +2221,7 @@ fn session_recency_span_picks_bucket_style_from_theme() {
         mux_host: None,
         primary_node: NodeId::AgentSession(AgentSessionId::new("codex", "/state", "abc")),
         pin_id: None,
+        content_hit: None,
     };
 
     let fresh = make_row(Some("1m"), Some(now - 60));
@@ -3755,6 +3765,7 @@ fn agentless_mux_row(pane_command: Option<&str>) -> MuxSessionRow {
         single_session_preview: None,
         pin_id: None,
         primary_node: NodeId::MuxSession(MuxSessionId::new("tmux:build")),
+        content_hit: None,
     }
 }
 
@@ -3878,6 +3889,7 @@ fn mux_row_spinner_takes_the_attached_glyph_column() {
         single_session_preview: None,
         pin_id: None,
         primary_node: NodeId::MuxSession(MuxSessionId::new("tmux:editor")),
+        content_hit: None,
     };
     let settled: String = render_mux_session_spans(&row, &theme, 0, 100, None)
         .iter()
@@ -5999,6 +6011,78 @@ fn reveal_switches_to_the_native_view_and_selects_the_entity() {
         matches!(effects.as_slice(), [crate::tui::Effect::Toast(_)]),
         "a planned slot has no entity: {effects:?}"
     );
+}
+
+#[test]
+fn backspace_on_the_left_pane_returns_to_where_a_reveal_started() {
+    let mut app = slots_app(crate::tui::PinnedGrouping::None);
+    app.update(Msg::SwitchView(View::Pinned));
+    app.set_selection(RowId::Pin {
+        pin_id: "conspectus-main".into(),
+    });
+    let before = app.selection().cloned();
+
+    app.update(Msg::RevealSelected);
+    assert_eq!(app.active_view(), View::Mux);
+    assert!(app.can_nav_back());
+
+    app.update(Msg::ExplorerBack);
+    assert_eq!(app.active_view(), View::Pinned);
+    assert_eq!(app.selection().cloned(), before);
+    assert!(!app.can_nav_back());
+}
+
+#[test]
+fn backspace_on_the_right_pane_leaves_the_back_stack_alone() {
+    let mut app = slots_app(crate::tui::PinnedGrouping::None);
+    app.update(Msg::SwitchView(View::Pinned));
+    app.set_selection(RowId::Pin {
+        pin_id: "conspectus-main".into(),
+    });
+    app.update(Msg::RevealSelected);
+
+    app.update(Msg::CycleFocus);
+    app.update(Msg::ExplorerBack);
+
+    assert_eq!(app.active_view(), View::Mux);
+    assert!(app.can_nav_back());
+}
+
+#[test]
+fn the_back_stack_keeps_only_the_newest_twenty_jumps() {
+    let mut app = slots_app(crate::tui::PinnedGrouping::None);
+    for n in 0..30 {
+        app.push_nav(crate::tui::app::NavEntry {
+            view: View::Sessions,
+            selection: Some(RowId::Bucket(format!("b{n}"))),
+        });
+    }
+    let mut popped = 0;
+    while app.can_nav_back() {
+        app.update(Msg::ExplorerBack);
+        popped += 1;
+    }
+    assert_eq!(popped, 20);
+}
+
+#[test]
+fn going_back_to_a_row_that_vanished_says_so() {
+    use crate::tui::Effect;
+    let mut app = slots_app(crate::tui::PinnedGrouping::None);
+    app.push_nav(crate::tui::app::NavEntry {
+        view: View::Pinned,
+        selection: Some(RowId::Pin {
+            pin_id: "no-longer-there".into(),
+        }),
+    });
+    let effects = app.update(Msg::ExplorerBack);
+    assert!(
+        effects
+            .iter()
+            .any(|e| matches!(e, Effect::Toast(t) if t == "that row is gone")),
+        "{effects:?}"
+    );
+    assert_eq!(app.active_view(), View::Pinned);
 }
 
 #[test]

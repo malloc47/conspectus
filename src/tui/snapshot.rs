@@ -41,12 +41,13 @@ use ratatui::style::{Color, Modifier, Style};
 
 use crate::model::GraphSnapshot;
 use crate::tui::Msg;
+use crate::tui::RunConfig;
 use crate::tui::app::App;
 use crate::tui::runtime::{
     self, Action, cycle_view, dispatch, handle_controls_overlay_key, handle_help_overlay_key,
-    handle_messages_overlay_key, handle_search_overlay_key, refresh, refresh_from_snapshot,
+    handle_messages_overlay_key, handle_pane_viewer_key, handle_viewer_overlay_key, refresh,
+    refresh_from_snapshot,
 };
-use crate::tui::{RunConfig, ui};
 
 /// Tunables for one snapshot pass. Filled from `--snapshot-*` flags
 /// on the `tui` subcommand.
@@ -131,7 +132,19 @@ pub fn run(config: RunConfig, snap: SnapshotConfig) -> Result<()> {
     }
 
     let keys = parse_key_script(&snap.keys)?;
-    drive_keys(&mut app, &config, keys, snap.height.saturating_sub(2));
+    let rebase = snap
+        .fixture_root
+        .as_deref()
+        .map(|root| (std::path::Path::new(FIXTURE_PATH_ROOT), root));
+    // A `--contains` query scans before the first key.
+    runtime::run_pending_content_scans(&mut app, rebase);
+    drive_keys(
+        &mut app,
+        &config,
+        keys,
+        snap.height.saturating_sub(2),
+        rebase,
+    );
     // One frame, no event loop: read the selection's preview now
     // rather than showing it loading.
     let fixture_root = snap
@@ -147,7 +160,7 @@ pub fn run(config: RunConfig, snap: SnapshotConfig) -> Result<()> {
     // Rect::default() and any toast queued by `--snapshot-keys`
     // never paints.
     app.prepare_toast_for_render(Rect::new(0, 0, snap.width, snap.height));
-    terminal.draw(|frame| ui::draw(&mut app, frame))?;
+    terminal.draw(|frame| runtime::draw_screen(&mut app, frame))?;
     let buffer = terminal.backend().buffer();
 
     let area = Rect::new(0, 0, snap.width, snap.height);
@@ -184,10 +197,54 @@ fn write_fixture(path: &std::path::Path, snapshot: &GraphSnapshot) -> Result<()>
 
 /// Dispatch the key prelude one key at a time, resolving each through
 /// the same overlay / keymap / focus pipeline as the interactive loop.
-fn drive_keys(app: &mut App, config: &RunConfig, keys: Vec<KeyEvent>, viewport_height: u16) {
+fn drive_keys(
+    app: &mut App,
+    config: &RunConfig,
+    keys: Vec<KeyEvent>,
+    viewport_height: u16,
+    rebase: Option<(&std::path::Path, &std::path::Path)>,
+) {
     for key in keys {
         if let Some(action) = runtime::action_for_event(app, Event::Key(key), viewport_height) {
-            apply_action(app, config, action);
+            apply_action(app, config, action, rebase);
+            // Overlay keys can start a search; finish it before the
+            // next key so the frame is deterministic.
+            app.search_overlay_tick(std::time::Instant::now(), true);
+            runtime::run_pending_content_scans(app, rebase);
+        }
+    }
+}
+
+/// Open the transcript viewer for the selected session, reading the
+/// transcript from the scenario world when a fixture root rebases the
+/// paths. A session with nothing to show leaves a note on stderr.
+fn open_viewer(app: &mut App, rebase: Option<(&std::path::Path, &std::path::Path)>) {
+    let effects = app.update(Msg::ViewSelected);
+    run_effects_opening_viewers(app, effects, rebase);
+}
+
+/// Run effects the snapshot-safe way: a request to view a session opens
+/// the viewer from the scenario world; everything else goes through the
+/// pure executor.
+fn run_effects_opening_viewers(
+    app: &mut App,
+    effects: Vec<crate::tui::effect::Effect>,
+    rebase: Option<(&std::path::Path, &std::path::Path)>,
+) {
+    use crate::tui::effect::{Effect, ExecSpec};
+    for effect in effects {
+        let Effect::Exec(ExecSpec::ViewSession(mut id, open)) = effect else {
+            runtime::execute_effects(app, vec![effect]);
+            continue;
+        };
+        if let Some((from, to)) = rebase
+            && let Ok(rest) = std::path::Path::new(&id.state_scope).strip_prefix(from)
+        {
+            id.state_scope = to.join(rest).display().to_string();
+        }
+        match crate::tui::viewer_bridge::build_viewer_state_at(&id, open.as_ref()) {
+            Some(state) => app.open_viewer_modal(state),
+            None => eprintln!("conspectus: snapshot mode found no transcript to view"),
         }
     }
 }
@@ -196,8 +253,12 @@ fn drive_keys(app: &mut App, config: &RunConfig, keys: Vec<KeyEvent>, viewport_h
 /// that would spawn a process, take over the terminal, or otherwise
 /// reach outside the snapshot are skipped with a stderr note so the
 /// agent knows the key was a no-op rather than silently dropped.
-fn apply_action(app: &mut App, config: &RunConfig, action: Action) {
-    let _ = config;
+fn apply_action(
+    app: &mut App,
+    config: &RunConfig,
+    action: Action,
+    rebase: Option<(&std::path::Path, &std::path::Path)>,
+) {
     match action {
         Action::Msg(msg) => dispatch(app, *msg),
         Action::SwitchView(view) => dispatch(app, Msg::SwitchView(view)),
@@ -214,18 +275,35 @@ fn apply_action(app: &mut App, config: &RunConfig, action: Action) {
             dispatch(app, Msg::SetGrouping(next));
         }
         Action::ClearFilters => {
-            dispatch(app, Msg::SetFilter(crate::filter::RowFilter::default()));
+            dispatch(app, Msg::ClearFilters);
         }
         Action::OpenControls => app.open_controls_overlay(),
-        Action::OpenSearch => app.open_search_overlay(),
+        Action::OpenSearch => {
+            app.open_search_entry();
+        }
+        Action::OpenContentSearch => {
+            app.open_content_search_entry();
+        }
         Action::OpenHelp => app.open_help_overlay(),
         Action::OpenMessages => app.open_messages_overlay(),
         Action::MessagesOverlayKey(key) => handle_messages_overlay_key(app, key),
         Action::OpenWorktreeMenu => runtime::open_worktree_menu_action(app),
         Action::OpenWorktreeCloseDown => runtime::open_worktree_close_down_action(app),
         Action::ControlsOverlayKey(key) => handle_controls_overlay_key(app, key),
-        Action::SearchOverlayKey(key) => handle_search_overlay_key(app, key),
+        Action::SearchOverlayKey(key) => {
+            // A hit that opens the viewer needs the same effect handling
+            // as `v`.
+            runtime::handle_search_overlay_key_with(app, key, &mut |app, msg| {
+                let effects = app.update(msg);
+                run_effects_opening_viewers(app, effects, rebase);
+            });
+        }
         Action::HelpOverlayKey(key) => handle_help_overlay_key(app, key),
+        Action::View => open_viewer(app, rebase),
+        Action::ViewerOverlayKey(key) => handle_viewer_overlay_key(app, key),
+        Action::PaneViewerKey(key) => {
+            handle_pane_viewer_key(app, key);
+        }
         Action::Refresh => runtime::refresh(app, config),
         Action::HardRefresh => {
             app.update(crate::tui::Msg::ForgeRefreshRequested);
@@ -248,13 +326,12 @@ fn action_label(action: &Action) -> &'static str {
     match action {
         Action::Attach => "Attach",
         Action::Resume => "Resume",
-        Action::View => "View",
         Action::DefaultAction => "DefaultAction",
+        Action::PaneViewerKey(_) => "PaneViewerKey",
         Action::OpenRename => "OpenRename",
         Action::RenameOverlayKey(_) => "RenameOverlayKey",
         Action::OpenValueModal => "OpenValueModal",
         Action::ValueModalKey(_) => "ValueModalKey",
-        Action::ViewerOverlayKey(_) => "ViewerOverlayKey",
         _ => "<other>",
     }
 }

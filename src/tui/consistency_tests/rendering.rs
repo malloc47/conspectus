@@ -127,7 +127,7 @@ fn token_is_a_chip(buffer: &Buffer, row_label: &str, needle: &str) -> Option<boo
     let (y, line) = text
         .lines()
         .enumerate()
-        .find(|(_, line)| line.contains(row_label))?;
+        .find(|(_, line)| line.contains(row_label) && line.contains(needle))?;
     let x = line.chars().collect::<String>().find(needle)?;
     let x = line[..x].chars().count();
     let cell = &buffer[(u16::try_from(x).ok()?, u16::try_from(y).ok()?)];
@@ -147,8 +147,13 @@ fn pinned_and_history_rows_draw_the_agent_name_as_the_same_chip() {
         (View::Pinned, "conspectus-main"),
         (View::History, "old-experiment"),
         (View::Mux, "config-agent3"),
+        (View::Search, "solo0000"),
     ] {
-        let mut app = app_in(view);
+        let mut app = if view == View::Search {
+            searched(view, RowFilter::default())
+        } else {
+            app_in(view)
+        };
         let buffer = buffer_of(&mut app, 200, 30);
         assert_eq!(
             token_is_a_chip(&buffer, row, "claude"),
@@ -157,7 +162,10 @@ fn pinned_and_history_rows_draw_the_agent_name_as_the_same_chip() {
             buffer_to_string(&buffer)
         );
         let text = buffer_to_string(&buffer);
-        let line = text.lines().find(|l| l.contains(row)).expect("row");
+        let line = text
+            .lines()
+            .find(|l| l.contains(row) && l.contains("claude"))
+            .expect("row");
         assert!(!line.contains(" · "), "{view:?}: no dot delimiter: {line}");
     }
 }

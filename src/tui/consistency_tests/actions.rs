@@ -117,7 +117,7 @@ fn v_and_attach_follow_the_right_pane_too() {
     };
     assert_eq!(
         app.update(Msg::ViewSelected),
-        vec![Effect::Exec(ExecSpec::ViewSession(session))]
+        vec![Effect::Exec(ExecSpec::ViewSession(session, None))]
     );
     // The session runs in the mux, so attach reaches that mux.
     let target = crate::tui::actions::resolve_attach_target(&app).expect("attachable");
@@ -417,6 +417,10 @@ fn natural_views_follow_the_kind_and_whether_it_is_running() {
     assert_eq!(natural_view(snapshot, &pr), View::Prs);
     let session = NodeId::AgentSession(AgentSessionId::new("claude-code", "/state", "solo000001"));
     assert_eq!(natural_view(snapshot, &session), View::Sessions);
+    let pin = NodeId::Pin(crate::model::PinId::new("solo"));
+    assert_eq!(natural_view(snapshot, &pin), View::Pinned);
+    let fork = NodeId::Fork(crate::model::ForkId::new("agent-deck:one"));
+    assert_eq!(natural_view(snapshot, &fork), View::Forks);
 }
 
 #[test]

@@ -84,6 +84,8 @@ pub enum Action {
     ClearFilters,
     /// Open the `/` search overlay.
     OpenSearch,
+    /// `s` — search what was said in the sessions.
+    OpenContentSearch,
     /// Forward a key event into the open search overlay.
     SearchOverlayKey(ratatui::crossterm::event::KeyEvent),
     /// Open the `?` help overlay.
@@ -111,6 +113,8 @@ pub enum Action {
     View,
     /// Forward a key event into the open viewer modal.
     ViewerOverlayKey(ratatui::crossterm::event::KeyEvent),
+    /// Forward a key event into the open pane scrollback viewer.
+    PaneViewerKey(ratatui::crossterm::event::KeyEvent),
     /// `Enter` on the left pane. The dispatcher resolves
     /// the selected row's default action: attach a mux row, view an
     /// un-muxed session, or expand/collapse a group row. Right-pane
@@ -267,6 +271,8 @@ pub enum SelectedDefault {
     Attach,
     /// Un-muxed agent session — `Enter` opens the transcript viewer.
     View,
+    /// Pane row of the Search view — `Enter` opens its scrollback.
+    Scrollback,
 }
 
 /// Classify what `Enter` on the left pane should do for the
@@ -323,5 +329,9 @@ pub fn selected_default_action(app: &App) -> SelectedDefault {
         // Nested rows act on their own entity: attach a mux, view a
         // session.
         RowKind::Mixed(_) => SelectedDefault::ToggleExpand,
+        // A matching turn opens the viewer at that turn.
+        RowKind::Hit(_) => SelectedDefault::View,
+        // A matching pane line opens the scrollback at that line.
+        RowKind::Pane(_) | RowKind::PaneHit(_) => SelectedDefault::Scrollback,
     }
 }

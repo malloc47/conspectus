@@ -22,11 +22,13 @@ use std::path::Path;
 use crate::model::{AgentSessionId, MuxSessionId, NodeId};
 use crate::tui::View;
 
+pub(crate) mod content;
 pub mod forks;
 pub mod history;
 pub mod mux;
 pub mod pinned;
 pub mod prs;
+pub mod search;
 pub mod sessions;
 pub mod union;
 
@@ -63,6 +65,23 @@ pub enum RowId {
         pin_id: String,
         node: NodeId,
     },
+    /// One matching turn under a session in the Search view (ADR 0147).
+    Hit {
+        session: NodeId,
+        turn: usize,
+    },
+    /// A mux pane whose scrollback matched, in the Search view (ADR 0149):
+    /// the mux's node and the pane's server-wide id.
+    Pane {
+        mux: NodeId,
+        pane: String,
+    },
+    /// One matching line of a pane's scrollback.
+    PaneHit {
+        mux: NodeId,
+        pane: String,
+        line: usize,
+    },
     /// A named bucket of a view that groups by something other than a
     /// node: the project or kind buckets of the Pinned view.
     Bucket(String),
@@ -95,6 +114,7 @@ pub enum ViewLabel {
     Forks,
     Pinned,
     History,
+    Search,
 }
 
 impl From<View> for ViewLabel {
@@ -107,6 +127,7 @@ impl From<View> for ViewLabel {
             View::Forks => Self::Forks,
             View::Pinned => Self::Pinned,
             View::History => Self::History,
+            View::Search => Self::Search,
         }
     }
 }
@@ -138,6 +159,85 @@ pub enum RowKind {
     /// A row of any kind in the Pinned and History views, drawn in the
     /// shared mixed-kind columns.
     Mixed(MixedRow),
+    /// One matching turn of a session in the Search view's per-message
+    /// grouping.
+    Hit(HitRow),
+    /// A mux pane whose scrollback matched, in the Search view.
+    Pane(PaneRow),
+    /// One matching line of a pane's scrollback.
+    PaneHit(PaneHitRow),
+}
+
+/// A mux pane whose scrollback matched the search, drawn where a session
+/// row would be.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct PaneRow {
+    pub pane: crate::content_search::PaneRef,
+    /// The mux's name.
+    pub mux_label: String,
+    /// `window.pane`, such as `0.1`.
+    pub location: String,
+    /// What the pane was running when it was listed.
+    pub command: Option<String>,
+    /// Matching lines after deduplication.
+    pub count: usize,
+    /// Lines left out because the pane's session already says them.
+    pub deduplicated: usize,
+    /// How long ago the scrollback was read.
+    pub age: String,
+    /// The newest matching line's position in the scrollback, from 1.
+    pub line: usize,
+    /// The newest matching line, cropped around the match.
+    pub snippet: String,
+    /// Byte range of the match inside `snippet`.
+    pub highlight: std::ops::Range<usize>,
+}
+
+/// A matching line of a pane's scrollback: under its pane row, or on its
+/// own in the flat listing.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct PaneHitRow {
+    pub pane: crate::content_search::PaneRef,
+    /// The mux's name and the pane's `window.pane`, set only for a flat
+    /// row.
+    pub origin: Option<String>,
+    /// The line's position in the scrollback, from 1.
+    pub line: usize,
+    /// How long ago the scrollback was read.
+    pub age: String,
+    pub snippet: String,
+    pub highlight: std::ops::Range<usize>,
+}
+
+/// The session a hit row belongs to, named on the row itself when the
+/// Search view lists messages with no session row above them.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct HitOrigin {
+    /// The session's name, or the start of its key when it has none.
+    pub label: String,
+    /// The harness, for the chip.
+    pub harness_label: String,
+}
+
+/// A matching turn in the Search view: under its session row, or on its
+/// own in the flat listing.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct HitRow {
+    pub session: AgentSessionId,
+    /// The session's name and harness, set only for a flat row.
+    pub origin: Option<HitOrigin>,
+    /// Index of the turn in the transcript, as the viewer opens it.
+    pub turn_index: usize,
+    /// Who said it (`you`, `assistant`, `system`).
+    pub role: &'static str,
+    /// What kind of turn it is (`message`, `tool`, `thinking`, …).
+    pub kind: &'static str,
+    /// When it was said, as an age; a dash when the turn has no time.
+    pub age: String,
+    /// The window of text around the match.
+    pub snippet: String,
+    /// Byte range of the match inside `snippet`.
+    pub highlight: std::ops::Range<usize>,
 }
 
 /// The status words the mixed views (Pinned and History) print. Views
@@ -340,6 +440,18 @@ pub struct AgentSessionRow {
     /// Pin slot name when this row is the live session a slot points
     /// at. Renderers add a pin glyph.
     pub pin_id: Option<String>,
+    /// What the active content search found in this session.
+    pub content_hit: Option<ContentHitCell>,
+}
+
+/// A session's result in the active content search: how many turns
+/// matched and the best snippet, with the match to highlight.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ContentHitCell {
+    pub count: u32,
+    pub snippet: String,
+    /// Byte range of the match inside `snippet`.
+    pub highlight: std::ops::Range<usize>,
 }
 
 impl AgentSessionRow {
@@ -448,6 +560,9 @@ pub struct MuxSessionRow {
     /// Renderers mark it so pinned muxes stand out in any view.
     pub pin_id: Option<String>,
     pub primary_node: NodeId,
+    /// What the active content search found in the mux's one attached
+    /// session; unset for muxes with none or several.
+    pub content_hit: Option<ContentHitCell>,
 }
 
 /// A PR row in the prs view.
@@ -820,7 +935,8 @@ pub(crate) fn row_node(id: &RowId) -> Option<&NodeId> {
         | RowId::MuxSession(node)
         | RowId::Pr(node)
         | RowId::Fork(node)
-        | RowId::Nested { node, .. } => Some(node),
+        | RowId::Nested { node, .. }
+        | RowId::Pane { mux: node, .. } => Some(node),
         _ => None,
     }
 }
@@ -972,6 +1088,7 @@ pub(crate) fn agent_row(
             title_disambiguates: false,
             mux_host: None,
             primary_node: node_id,
+            content_hit: None,
         }),
     }
 }
@@ -1003,6 +1120,7 @@ pub(crate) fn session_matches_filter(
     let candidate_count = candidate_counts.get(&agent.node_id).copied().unwrap_or(0);
     filter.matches_session(&SessionMatchInputs {
         harness_key: &agent.id.harness_key,
+        session_key: &agent.id.session_key,
         now_epoch: now,
         last_active_epoch: agent.node.last_active_epoch,
         mux_state: MuxStateKey::from_candidate_count(candidate_count),
@@ -1064,7 +1182,19 @@ impl<'a> TreeInputs<'a> {
             snapshot,
             view: app.active_view(),
             grouping: app.grouping(),
-            filter: app.filter().clone(),
+            filter: {
+                // The content search belongs to the whole app, not to a
+                // view's saved filter, so it joins here. The Search view
+                // lists the search it is showing, which may not be the one
+                // filtering the lists.
+                let mut filter = app.filter().clone();
+                filter.content = if app.active_view() == View::Search {
+                    app.viewed_content_filter()
+                } else {
+                    app.content_filter()
+                };
+                filter
+            },
             sort: app.sort(),
             mux_recency: app.mux_recency(),
             cwd: app.config().cwd.as_deref(),
@@ -1080,7 +1210,12 @@ pub(crate) fn build_tree_for_view(inputs: TreeInputs<'_>) -> RowTree {
     let pinned_only =
         inputs.filter.pinned_only && matches!(inputs.view, View::Sessions | View::Mux | View::Prs);
     let pinned = pinned_only.then(|| pinned_node_set(inputs.snapshot));
+    let content = inputs.filter.content.clone();
+    let snapshot = inputs.snapshot;
     let mut tree = build_tree_for_view_unfiltered(inputs);
+    if let Some(content) = &content {
+        content::annotate(&mut tree, snapshot, content);
+    }
     if let Some(pinned) = pinned {
         retain_pinned_rows(&mut tree, &pinned);
     }
@@ -1157,6 +1292,18 @@ fn build_tree_for_view_unfiltered(inputs: TreeInputs<'_>) -> RowTree {
             grouping: match grouping {
                 crate::tui::Grouping::History(g) => g,
                 _ => crate::tui::HistoryGrouping::Project,
+            },
+        }),
+        View::Search => search::build_search_tree(search::SearchBuildInputs {
+            snapshot,
+            home: home.as_deref(),
+            now,
+            cwd,
+            filter,
+            sort,
+            grouping: match grouping {
+                crate::tui::Grouping::Search(g) => g,
+                _ => crate::tui::SearchGrouping::None,
             },
         }),
         View::Pinned => pinned::build_pinned_tree(pinned::PinnedBuildInputs {

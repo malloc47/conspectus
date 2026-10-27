@@ -70,7 +70,9 @@ standard checks.
   absent path during a rebuild. The daemon writes category 2
   observations only. Conspectus never mutates harness-native state
   beyond that hook entry, injects terminal input into live agent panes
-  (ADR 0028 absolute), persists payload (ADR 0086), writes shared/system
+  (ADR 0028 absolute), persists payload (ADR 0086; the one exception is the opt-in
+  transcript search index of ADR 0148, built only by operator-initiated
+  commands and never by the daemon), writes shared/system
   locations, performs background mutation, mutates git state beyond that
   clone, or bypasses hooks. Any new write path must cite ADR 0143 and
   land inside one of its sanctioned categories.

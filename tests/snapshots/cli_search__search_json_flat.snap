@@ -1,0 +1,54 @@
+---
+source: tests/cli_search.rs
+expression: stdout_of(cmd)
+---
+{
+  "group": "flat",
+  "kinds": [
+    "messages"
+  ],
+  "query": "quokka",
+  "results": [
+    {
+      "harness": "claude-code",
+      "kind": "message",
+      "label": null,
+      "role": "assistant",
+      "session": "aaaaaaaa-0000-0000-0000-000000000001",
+      "snippet": {
+        "highlight": [
+          4,
+          10
+        ],
+        "text": "The Quokka layout is noted."
+      },
+      "source": "session",
+      "time": "2026-10-01T10:00:05Z",
+      "turn": 2
+    },
+    {
+      "harness": "claude-code",
+      "kind": "message",
+      "label": null,
+      "role": "user",
+      "session": "aaaaaaaa-0000-0000-0000-000000000001",
+      "snippet": {
+        "highlight": [
+          13,
+          19
+        ],
+        "text": "We chose the quokka design"
+      },
+      "source": "session",
+      "time": "2026-10-01T10:00:00Z",
+      "turn": 1
+    }
+  ],
+  "searched": {
+    "sessions": 2,
+    "skipped": 0,
+    "total": 2,
+    "without_parser": 0
+  },
+  "truncated": []
+}

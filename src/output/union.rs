@@ -115,6 +115,7 @@ fn agent_matches_filter(
         .map_or(0, |m| m.candidate_count);
     options.filter.matches_session(&SessionMatchInputs {
         harness_key: &agent.harness_key,
+        session_key: &agent.id.session_key,
         now_epoch: options.now_epoch,
         last_active_epoch: agent.last_active_epoch,
         mux_state: MuxStateKey::from_candidate_count(candidate_count),

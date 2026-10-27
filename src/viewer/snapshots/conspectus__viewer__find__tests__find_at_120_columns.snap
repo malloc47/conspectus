@@ -1,0 +1,16 @@
+---
+source: src/viewer/find_tests.rs
+expression: "draw(&mut state, 120, 12)"
+---
+ claude-code:find · /p · 14 turns                                                                                       
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+       ai  │ turn 9 has the Needle in it                                                                                
+                                                                                                                        
+      you  │ turn 10 is plain                                                                                           
+                                                                                                                        
+       ai  │ turn 11 is plain                                                                                           
+                                                                                                                        
+ ↳ result  │ output: a needle in tool output                                                                            
+                                                                                                                        
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+[ 19/26 ] · find "needle" 4/4 · showing full tool output · tools·all   (t) · think·off (T) · (q) close

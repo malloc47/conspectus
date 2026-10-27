@@ -60,7 +60,7 @@ fn assert_all_view_the_session(outcomes: Vec<(String, AgentSessionId, Vec<Effect
     let wrong: Vec<String> = outcomes
         .into_iter()
         .filter(|(_, session, effects)| {
-            *effects != vec![Effect::Exec(ExecSpec::ViewSession(session.clone()))]
+            *effects != vec![Effect::Exec(ExecSpec::ViewSession(session.clone(), None))]
         })
         .map(|(row, _, effects)| format!("{row}: {effects:?}"))
         .collect();
@@ -96,7 +96,10 @@ fn enter_on_a_native_session_attaches_or_views_by_whether_it_is_in_a_mux() {
     );
     let outside = enter_in(View::Sessions, "solo0000");
     assert!(
-        matches!(outside.as_slice(), [Effect::Exec(ExecSpec::ViewSession(_))]),
+        matches!(
+            outside.as_slice(),
+            [Effect::Exec(ExecSpec::ViewSession(..))]
+        ),
         "{outside:?}"
     );
 }
@@ -114,7 +117,10 @@ fn enter_on_a_pinned_session_in_a_mux_attaches_like_its_native_row() {
 fn enter_on_a_pinned_session_outside_a_mux_opens_the_viewer() {
     let effects = enter_in(View::Pinned, "solo");
     assert!(
-        matches!(effects.as_slice(), [Effect::Exec(ExecSpec::ViewSession(_))]),
+        matches!(
+            effects.as_slice(),
+            [Effect::Exec(ExecSpec::ViewSession(..))]
+        ),
         "{effects:?}"
     );
 }

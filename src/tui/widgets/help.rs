@@ -111,32 +111,121 @@ impl<'a> HelpOverlayWidget<'a> {
 
 impl Widget for HelpOverlayWidget<'_> {
     fn render(self, area: Rect, buf: &mut Buffer) {
-        // The centered-bordered-modal shell — clear,
-        // border, title — is owned by `tui_popup::Popup` via
-        // `crate::tui::widgets::popup_frame::themed_popup`. The body
-        // wrapper reports the same cap dimensions
-        // `centered_modal_rect` computed before, so the popup's
-        // auto-sizing reproduces the in-tree rect.
-        let modal = help_modal_rect(area);
-        let body = HelpBody {
-            state: self.state,
-            theme: self.theme,
-            inner_width: modal.width.saturating_sub(2) as usize,
-            inner_height: modal.height.saturating_sub(2) as usize,
+        let theme = self.theme;
+        render_help_page(area, buf, theme, self.state.scroll as usize, &|width| {
+            body_lines_for_width(theme, Some(width))
+        });
+    }
+}
+
+/// Draw a help page: the shared popup frame with the ` Help ` title,
+/// the page's lines scrolled to `scroll` and wrapped to the modal's
+/// width, and a scrollbar when the page overflows. The keymap help and
+/// the transcript viewer's help both draw through here, so the two
+/// modals share one frame, size, and scroll behavior.
+pub(super) fn render_help_page(
+    area: Rect,
+    buf: &mut Buffer,
+    theme: &Theme,
+    scroll: usize,
+    lines_for: &dyn Fn(usize) -> Vec<Line<'static>>,
+) {
+    // The centered-bordered-modal shell — clear, border, title — is
+    // owned by `tui_popup::Popup` via
+    // `crate::tui::widgets::popup_frame::themed_popup`. The body
+    // wrapper reports the same cap dimensions `help_modal_rect`
+    // computes, so the popup's auto-sizing reproduces that rect.
+    let modal = help_modal_rect(area);
+    let body = HelpBody {
+        scroll,
+        lines_for,
+        inner_width: modal.width.saturating_sub(2) as usize,
+        inner_height: modal.height.saturating_sub(2) as usize,
+    };
+    let popup = crate::tui::widgets::popup_frame::themed_popup(body, line![" Help "], theme);
+    popup.render(area, buf);
+}
+
+/// How far a help page can scroll in a modal drawn into `area`. The
+/// footer is pinned, so only the lines above it scroll.
+pub(super) fn help_max_scroll(
+    area: Rect,
+    lines_for: &dyn Fn(usize) -> Vec<Line<'static>>,
+) -> usize {
+    let modal = help_modal_rect(area);
+    let (width, height) = (
+        modal.width.saturating_sub(2) as usize,
+        modal.height.saturating_sub(2) as usize,
+    );
+    let page = page_layout(lines_for, width, height);
+    page.body.len().saturating_sub(page.body_height)
+}
+
+/// A help page split into the lines that scroll and the footer that
+/// stays on the modal's last rows.
+struct PageLayout {
+    body: Vec<Line<'static>>,
+    footer: Vec<Line<'static>>,
+    /// Rows the scrolling part has.
+    body_height: usize,
+    /// Columns the text has (one fewer when a scrollbar is drawn).
+    text_width: usize,
+    overflows: bool,
+}
+
+/// Rows the footer takes at `width`.
+fn footer_rows(width: usize) -> usize {
+    if width <= 8 {
+        return 1;
+    }
+    let footer =
+        crate::tui::keybindings::overlay::footer(crate::tui::keybindings::overlay::HELP_KEYS);
+    crate::viewer::render::word_wrap(&footer, u16::try_from(width).unwrap_or(u16::MAX))
+        .len()
+        .max(1)
+}
+
+fn page_layout(
+    lines_for: &dyn Fn(usize) -> Vec<Line<'static>>,
+    width: usize,
+    height: usize,
+) -> PageLayout {
+    let split = |lines: Vec<Line<'static>>, text_width: usize| {
+        let keep = footer_rows(text_width).min(height.saturating_sub(1));
+        let at = lines.len().saturating_sub(keep);
+        let mut body = lines;
+        let footer = body.split_off(at);
+        (body, footer)
+    };
+    let (body, footer) = split(lines_for(width), width);
+    let body_height = height.saturating_sub(footer.len());
+    if body.len() <= body_height || width <= 1 {
+        return PageLayout {
+            body,
+            footer,
+            body_height,
+            text_width: width,
+            overflows: false,
         };
-        let popup =
-            crate::tui::widgets::popup_frame::themed_popup(body, line![" Help "], self.theme);
-        popup.render(area, buf);
+    }
+    // The scrollbar takes a column once the page overflows.
+    let (body, footer) = split(lines_for(width - 1), width - 1);
+    let body_height = height.saturating_sub(footer.len());
+    PageLayout {
+        body,
+        footer,
+        body_height,
+        text_width: width - 1,
+        overflows: true,
     }
 }
 
 /// Body wrapper for `tui_popup::Popup`. Reports the inner width /
-/// height the in-tree `centered_modal_rect` cap produces so the
-/// popup's auto-sizing reproduces the legacy rect. `Widget::render`
-/// delegates to the same `Paragraph` the prior in-tree render built.
+/// height the in-tree `help_modal_rect` cap produces so the popup's
+/// auto-sizing reproduces that rect.
 struct HelpBody<'a> {
-    state: &'a HelpOverlayState,
-    theme: &'a Theme,
+    scroll: usize,
+    lines_for: &'a dyn Fn(usize) -> Vec<Line<'static>>,
     inner_width: usize,
     inner_height: usize,
 }
@@ -153,40 +242,37 @@ impl KnownSize for HelpBody<'_> {
 
 impl Widget for HelpBody<'_> {
     fn render(self, area: Rect, buf: &mut Buffer) {
-        // Reserve the rightmost column for the scrollbar only when the
-        // keymap overflows, so short keymaps keep the full width.
-        let full = body_lines_for_width(self.theme, Some(area.width as usize));
-        let overflows = full.len() > area.height as usize && area.width > 1;
-        let text_width = if overflows {
-            area.width - 1
-        } else {
-            area.width
-        };
-        let lines = if overflows {
-            body_lines_for_width(self.theme, Some(text_width as usize))
-        } else {
-            full
-        };
-        let content_len = lines.len();
-        let viewport = area.height as usize;
-        let max_scroll = content_len.saturating_sub(viewport);
-        let scroll = (self.state.scroll as usize).min(max_scroll);
-        let text_area = Rect {
+        let page = page_layout(self.lines_for, area.width as usize, area.height as usize);
+        let text_width = u16::try_from(page.text_width).unwrap_or(area.width);
+        let body_height = u16::try_from(page.body_height).unwrap_or(area.height);
+        let max_scroll = page.body.len().saturating_sub(page.body_height);
+        let scroll = self.scroll.min(max_scroll);
+        let body_area = Rect {
             width: text_width,
+            height: body_height,
             ..area
         };
-        Paragraph::new(lines)
+        Paragraph::new(page.body)
             .scroll((u16::try_from(scroll).unwrap_or(u16::MAX), 0))
-            .render(text_area, buf);
-        if overflows {
+            .render(body_area, buf);
+        // The footer stays on the last rows whatever the scroll.
+        let footer_area = Rect {
+            x: area.x,
+            y: area.y + body_height,
+            width: text_width,
+            height: area.height.saturating_sub(body_height),
+        };
+        Paragraph::new(page.footer).render(footer_area, buf);
+        if page.overflows {
             let bar_area = Rect {
                 x: area.x + area.width - 1,
                 width: 1,
+                height: body_height,
                 ..area
             };
             let mut bar_state = ScrollbarState::new(max_scroll + 1)
                 .position(scroll)
-                .viewport_content_length(viewport);
+                .viewport_content_length(page.body_height);
             let scrollbar = Scrollbar::new(ScrollbarOrientation::VerticalRight)
                 .style(Style::default().remove_modifier(Modifier::REVERSED));
             ratatui::widgets::StatefulWidget::render(
@@ -257,7 +343,7 @@ fn keymap_sections() -> Vec<HelpSection> {
                 ),
                 Binding::new(
                     "v",
-                    "Open the selected session's transcript (or the mux row's linked session); q/Esc close, j/k or PgDn/PgUp scroll, g/G start/end, t cycle tool detail, T thinking",
+                    "Open the selected session's transcript (or the mux row's linked session); q/Esc close, j/k or PgDn/PgUp scroll, g/G start/end, t cycle tool detail, T thinking, / find then n/N step through matches, ? lists every key",
                 ),
                 Binding::new("r", "Refresh discovery now"),
                 Binding::new("Ctrl-R", crate::tui::keybindings::HARD_REFRESH_HELP),
@@ -310,6 +396,7 @@ fn keymap_sections() -> Vec<HelpSection> {
                     "Switch directly to the sessions / mux / PRs / pinned view",
                 ),
                 Binding::new("5", "Switch directly to the history view"),
+                Binding::new("6", "Switch directly to the Search view"),
                 Binding::new("] / [", "Cycle to next / previous view"),
             ],
         },
@@ -322,10 +409,36 @@ fn keymap_sections() -> Vec<HelpSection> {
         },
         HelpSection {
             title: "Search",
-            bindings: vec![Binding::new(
-                "/",
-                "Open the search overlay (ranks within the active filter set)",
-            )],
+            bindings: vec![
+                Binding::new(
+                    "/",
+                    "Quick select: find a row of this view by name (rows under collapsed groups too); Enter selects it",
+                ),
+                Binding::new(
+                    "/ then Tab",
+                    "Find anything, whichever view it lives in (Tab again goes back to this view); the word at the right says whether Enter selects it here, follows its relationships in the right pane, or switches views",
+                ),
+                Binding::new(
+                    "Ctrl-/ (or Ctrl-_ / Ctrl-7) / s",
+                    "Search contents: what was said in the sessions and what is in mux scrollback, in this view's sessions and muxes (Tab searches all of them). Ctrl-L switches between listing sessions and listing messages; Ctrl-O opens the options (tool calls, thinking, pane scrollback); Ctrl-S keeps the search in the Search view and goes there; Ctrl-F keeps the query as a filter on the lists. `s` works in every terminal",
+                ),
+                Binding::new(
+                    "< / >",
+                    "Search view: show the previous (older) or next (newer) remembered search without searching again; Controls lists them",
+                ),
+                Binding::new(
+                    "Ctrl-L",
+                    "Search view: list sessions or messages (the same matches, no new scan)",
+                ),
+                Binding::new(
+                    "Ctrl-O",
+                    "Search view: choose what a search looks in (tool calls, thinking, pane scrollback)",
+                ),
+                Binding::new(
+                    "Ctrl-F",
+                    "Search view: keep the search shown as the filter on the lists (paging does not change the filter; F clears it)",
+                ),
+            ],
         },
         HelpSection {
             title: "Navigation",
@@ -340,6 +453,10 @@ fn keymap_sections() -> Vec<HelpSection> {
                 Binding::new(
                     "Enter",
                     "Left tree: row-kind default action (attach / view / rebuild / expand); right pane: drill or expand a group",
+                ),
+                Binding::new(
+                    "Shift-Enter / Alt-Enter / O",
+                    "Reveal the row's entity in its own view (Sessions, Mux, PRs, History); Backspace on the left tree returns. Shift-Enter needs a terminal that reports it",
                 ),
                 Binding::new("Tab", "Cycle focus between left tree and right panel"),
                 Binding::new("J / K", "Scroll the right-panel preview"),
@@ -427,6 +544,13 @@ fn body_lines_for_width(theme: &Theme, width: Option<usize>) -> Vec<Line<'static
     push_pin_marker_legend(&mut lines, theme, width);
     blank(&mut lines);
 
+    push_footer(&mut lines, theme, width);
+    lines
+}
+
+/// The closing line of a help page, generated from the key table that
+/// scrolls and closes it, wrapped to `width` when known.
+pub(super) fn push_footer(lines: &mut Vec<Line<'static>>, theme: &Theme, width: Option<usize>) {
     let footer =
         crate::tui::keybindings::overlay::footer(crate::tui::keybindings::overlay::HELP_KEYS);
     match width.filter(|w| *w > 8) {
@@ -438,7 +562,18 @@ fn body_lines_for_width(theme: &Theme, width: Option<usize>) -> Vec<Line<'static
         }
         None => lines.push(line![span!(theme.placeholder; "{footer}")]),
     }
+}
+
+/// The footer as plain text lines at `width`, for tests that compare the
+/// two help pages.
+#[cfg(test)]
+pub(crate) fn footer_lines_for_test(theme: &Theme, width: usize) -> Vec<String> {
+    let mut lines = Vec::new();
+    push_footer(&mut lines, theme, Some(width));
     lines
+        .iter()
+        .map(|l| l.spans.iter().map(|s| s.content.as_ref()).collect())
+        .collect()
 }
 
 /// Cells before the blurb in a legend row: two of indent, the glyph and
@@ -482,12 +617,28 @@ const KEY_COLUMN_WIDTH: usize = 16;
 /// description under a hanging indent when `width` is too narrow. The
 /// key column inherits `theme.panel_focus_accent` so operators scan
 /// the keymap by accent color.
-fn binding_lines(
+pub(super) fn binding_lines(
     key: &str,
     description: &str,
     theme: &Theme,
     width: Option<usize>,
 ) -> Vec<Line<'static>> {
+    // A key label wider than its column gets a line to itself, with the
+    // description wrapped beneath on the hanging indent.
+    if unicode_width::UnicodeWidthStr::width(key) > KEY_COLUMN_WIDTH - 2 {
+        let key_line = line![span!(Style::default().fg(theme.panel_focus_accent); "  {key}")];
+        let mut out = vec![key_line];
+        let budget = width.map_or(u16::MAX, |w| {
+            u16::try_from(w.saturating_sub(KEY_COLUMN_WIDTH)).unwrap_or(u16::MAX)
+        });
+        for chunk in crate::viewer::render::word_wrap(description, budget.max(8)) {
+            out.push(line![
+                " ".repeat(KEY_COLUMN_WIDTH),
+                chunk.trim_end().to_string()
+            ]);
+        }
+        return out;
+    }
     let key_span = span!(Style::default().fg(theme.panel_focus_accent); "  {key:<14}");
     let Some(width) = width.filter(|w| *w > KEY_COLUMN_WIDTH + 8) else {
         return vec![line![key_span, description.to_string()]];
@@ -708,18 +859,18 @@ fn node_kind_help_blurb(kind: NodeKind) -> &'static str {
     }
 }
 
-fn section(lines: &mut Vec<Line<'static>>, title: &str) {
+pub(super) fn section(lines: &mut Vec<Line<'static>>, title: &str) {
     lines.push(line![span!(Modifier::BOLD; "{title}")]);
 }
 
-fn blank(lines: &mut Vec<Line<'static>>) {
+pub(super) fn blank(lines: &mut Vec<Line<'static>>) {
     lines.push(line![""]);
 }
 
 /// Help-overlay modal: as tall as the terminal allows (less a small
 /// margin) so more of the keymap is visible at once, and up to 100
 /// columns wide so long descriptions wrap less.
-fn help_modal_rect(area: Rect) -> Rect {
+pub(crate) fn help_modal_rect(area: Rect) -> Rect {
     let width = std::cmp::min(100, area.width.saturating_sub(4)).max(40);
     let height = area.height.saturating_sub(4).max(10);
     super::popup_frame::centered_rect(area, width, height)

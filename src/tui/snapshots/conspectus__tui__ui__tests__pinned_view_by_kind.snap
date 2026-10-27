@@ -3,7 +3,7 @@ source: src/tui/ui_tests.rs
 expression: "pinned_frame(&mut app, 120)"
 ---
 updated 0s ago · 0/1 sessions · 1 mux                                                                                   
-┌ ► sessions · mux · prs · pinned · history ───────────────┐┌   detail ────────────────────────────────────────────────┐
+┌ ► sessions · mux · prs · pinned · history · search ──────┐┌   detail ────────────────────────────────────────────────┐
 │▼ Muxes                                                   ││Select a row to view its detail.                          │
 │  ▶ ▣ ◉ conspectus-main         live       2m  ~/src/cons…││                                                          │
 │    ▣ ◎ config-agent3           stopped    3d  ~/src/conf…││                                                          │
@@ -25,4 +25,4 @@ updated 0s ago · 0/1 sessions · 1 mux
 │1 legacy pin is still read from config files (old-api);   ││                                                          │
 │run `conspectus pin migrate` to convert it                ││                                                          │
 └──────────────────────────────────────────────────────────┘└──────────────────────────────────────────────────────────┘
-[left] group:kind · filter:all · sort:hierarchy · Enter/l expand · h collapse · j/k move · h/l fold · Enter default · Ta
+[left] group:kind · filter:all · sort:hierarchy · Enter/l expand · h collapse · Tab focus · r refresh · q quit …

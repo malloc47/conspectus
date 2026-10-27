@@ -1,9 +1,10 @@
 ---
 id: CSP-616
 title: Search session contents across all sessions
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-10-17 03:02'
+updated_date: '2026-10-24 11:44'
 labels:
   - h-search
 milestone: m-11
@@ -29,14 +30,28 @@ Measured 2026-10-16 on the operator's machine: about 320 MB of transcripts (26 C
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 An operator can find every session that mentions a phrase from the TUI and from the CLI
-- [ ] #2 Opening a result lands on the matching turn in the transcript viewer
-- [ ] #3 Grouping (per session or per message) and searched content kinds are configurable, defaulting to per session and messages only
-- [ ] #4 No transcript content is persisted or sent through the daemon (ADR 0086)
+- [x] #1 An operator can find every session that mentions a phrase from the TUI and from the CLI
+- [x] #2 Opening a result lands on the matching turn in the transcript viewer
+- [x] #3 Grouping (per session or per message) and searched content kinds are configurable, defaulting to per session and messages only
+- [x] #4 No transcript content is persisted or sent through the daemon (ADR 0086)
 <!-- AC:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
-- [ ] #1 `just check` passes, or `git diff --check` for docs-only changes
-- [ ] #2 Docs and ADRs are updated when behavior, architecture, or workflow change
+- [x] #1 `just check` passes, or `git diff --check` for docs-only changes
+- [x] #2 Docs and ADRs are updated when behavior, architecture, or workflow change
 <!-- DOD:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+New operator requirement (2026-10-23): search must work both as a dedicated search view and as a filter on the session list. Added CSP-616.10 (content filter) and CSP-616.11 (Search view). CSP-703 is a prerequisite of CSP-616.05. CSP-616.07 to .09 (persistent index) stay deferred behind the latency/corpus thresholds, except .07 which records the decision.
+
+Shipped on branch session-viewer-search: ADR 0147 and 0148, shared matcher, [search] config, scanner with locate seam, viewer find, app-wide content filter, Search view, / overlay contents scope, and conspectus search. CSP-616.08 and .09 (the persistent index build and use) stay deferred behind the thresholds in ADR 0147.
+<!-- SECTION:NOTES:END -->
+
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+Content search works as a dedicated Search view, as an app-wide in-memory filter on the session lists, from the / overlay, inside the viewer, and from the CLI, with nothing persisted or sent to the daemon. Verified by the full suite (3210 tests, three clean runs), the traced capability test, real-tmux end-to-end tests, and three review passes whose findings were fixed.
+<!-- SECTION:FINAL_SUMMARY:END -->

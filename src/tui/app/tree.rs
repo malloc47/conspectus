@@ -22,6 +22,7 @@ impl App {
         }
         self.handle = Some(snapshot);
         self.tree = tree;
+        self.auto_expand_search_rows();
 
         let visible = self.visible_rows_owned();
         if visible.is_empty() {
@@ -70,6 +71,10 @@ impl App {
     /// next Msg::SetData will build the tree against the up-to-date
     /// projection state.
     pub(super) fn rebuild_tree_in_place(&mut self) {
+        #[cfg(test)]
+        {
+            self.tree_rebuilds += 1;
+        }
         let Some(db) = self.handle.as_ref() else {
             return;
         };
@@ -78,6 +83,7 @@ impl App {
             self,
         ));
         self.set_tree(tree);
+        self.auto_expand_search_rows();
     }
 
     pub(super) fn set_tree(&mut self, tree: RowTree) {
@@ -273,6 +279,7 @@ pub(super) fn row_matches(row: &crate::tui::rows::Row, target: &NodeId) -> bool 
         RowKind::Pr(p) => &p.primary_node == target,
         RowKind::Fork(f) => &f.primary_node == target,
         RowKind::Mixed(m) => &m.primary_node == target,
+        RowKind::Hit(_) | RowKind::Pane(_) | RowKind::PaneHit(_) => false,
     }
 }
 

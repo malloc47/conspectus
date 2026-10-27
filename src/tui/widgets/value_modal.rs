@@ -222,8 +222,8 @@ impl Widget for ValueModalBody<'_> {
             ratatui::text::Text::raw(self.state.value.clone())
         };
         Paragraph::new(text)
-            .wrap(Wrap { trim: false })
             .scroll((self.state.scroll, 0))
+            .wrap(Wrap { trim: false })
             .render(text_area, buf);
         let hint = crate::tui::keybindings::overlay::footer(
             crate::tui::keybindings::overlay::VALUE_MODAL_KEYS,

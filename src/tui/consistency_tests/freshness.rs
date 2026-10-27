@@ -37,11 +37,10 @@ fn every_sampled_effect() -> Vec<Effect> {
         Effect::Exec(ExecSpec::ShowRebuildPlan {
             reference: "h_main".into(),
         }),
-        Effect::Exec(ExecSpec::ViewSession(crate::model::AgentSessionId::new(
-            "claude-code",
-            "global",
-            "s1",
-        ))),
+        Effect::Exec(ExecSpec::ViewSession(
+            crate::model::AgentSessionId::new("claude-code", "global", "s1"),
+            None,
+        )),
         Effect::Toast("x".into()),
         Effect::Persist,
     ]);

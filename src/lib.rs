@@ -13,6 +13,7 @@ pub mod argv;
 #[doc(hidden)]
 pub mod cli;
 pub mod config;
+pub mod content_search;
 #[doc(hidden)]
 pub mod cwd;
 pub mod declared;

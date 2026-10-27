@@ -318,20 +318,17 @@ fn footer_shows_position_and_toggle_state() {
 }
 
 #[test]
-fn help_overlay_renders_keybindings_panel_when_show_help_is_set() {
+fn the_viewer_leaves_drawing_its_help_to_the_host() {
+    // The help page is drawn by the TUI with the main help's frame
+    // (`tui::widgets::viewer_help`); the viewer itself draws only the
+    // transcript, so an open help flag changes nothing here.
     let theme = Theme::default();
-    let mut state = ViewerState::new(sample_document());
-    state.show_help = true;
-    let buf = render_to_buffer(&mut state, &theme, 70, 18);
-    let s = buffer_to_string(&buf);
-    assert!(
-        s.contains("viewer keybindings"),
-        "panel title visible:\n{s}"
-    );
-    assert!(s.contains("q / Esc / Ctrl-C"), "close binding visible");
-    assert!(s.contains("Toggle this help panel"), "? binding listed");
-    assert!(s.contains("Jump to end"), "G/End binding listed");
-    insta::assert_snapshot!(snapshot_string(&buf));
+    let mut closed = ViewerState::new(sample_document());
+    let mut open = ViewerState::new(sample_document());
+    open.show_help = true;
+    let without = snapshot_string(&render_to_buffer(&mut closed, &theme, 70, 18));
+    let with = snapshot_string(&render_to_buffer(&mut open, &theme, 70, 18));
+    assert_eq!(with, without);
 }
 
 #[test]

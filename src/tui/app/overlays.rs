@@ -104,6 +104,61 @@ impl App {
         node: &NodeId,
         record_hint: Option<String>,
     ) -> Result<(), String> {
+        let origin = self.nav_origin();
+        self.reveal_node_quiet(node, record_hint)?;
+        self.push_nav(origin);
+        Ok(())
+    }
+
+    /// Where the operator stands now, as a place Backspace can return to.
+    pub(crate) fn nav_origin(&self) -> NavEntry {
+        NavEntry {
+            view: self.active_view,
+            selection: self.selection.clone(),
+        }
+    }
+
+    /// Remember `origin` as the place Backspace returns to, unless the
+    /// operator is still standing on it. The oldest entries fall off
+    /// past the limit.
+    pub(crate) fn push_nav(&mut self, origin: NavEntry) {
+        if origin == self.nav_origin() || self.nav_back.last() == Some(&origin) {
+            return;
+        }
+        self.nav_back.push(origin);
+        if self.nav_back.len() > NAV_BACK_LIMIT {
+            self.nav_back.remove(0);
+        }
+    }
+
+    /// Whether Backspace on the left pane has somewhere to go back to.
+    pub fn can_nav_back(&self) -> bool {
+        !self.nav_back.is_empty()
+    }
+
+    /// Return to the view and row the last jump left, saying so when the
+    /// row is gone.
+    pub(crate) fn nav_pop(&mut self) -> Option<String> {
+        let entry = self.nav_back.pop()?;
+        self.switch_to_view(entry.view);
+        self.rebuild_tree_in_place();
+        match entry.selection {
+            Some(id) if self.tree.rows.iter().any(|row| row.id == id) => {
+                self.select_row_expanding(id);
+                None
+            }
+            Some(_) => Some("that row is gone".to_string()),
+            None => None,
+        }
+    }
+
+    /// [`Self::reveal_node`] without a way back, for follow-ups the
+    /// operator didn't ask to jump to.
+    pub(crate) fn reveal_node_quiet(
+        &mut self,
+        node: &NodeId,
+        record_hint: Option<String>,
+    ) -> Result<(), String> {
         let Some(handle) = self.snapshot_handle() else {
             return Err("isn't listed: nothing is loaded yet".to_string());
         };
@@ -149,8 +204,18 @@ impl App {
         Ok(())
     }
 
+    /// Select a row, expanding the groups above it when it sits under
+    /// collapsed ones.
+    pub(super) fn select_row_expanding(&mut self, id: RowId) {
+        if self.visible_rows().iter().any(|row| row.id == id) {
+            self.set_selection(id);
+        } else if let Some(index) = self.tree.rows.iter().position(|row| row.id == id) {
+            self.expand_to_and_select(index);
+        }
+    }
+
     /// Expand the ancestors of the row at `index` and select it.
-    fn expand_to_and_select(&mut self, index: usize) {
+    pub(super) fn expand_to_and_select(&mut self, index: usize) {
         let mut wanted = self.tree.rows[index].depth;
         let ancestors: Vec<RowId> = self.tree.rows[..index]
             .iter()
@@ -223,7 +288,7 @@ impl App {
             self.expand_to_and_select(index);
             return;
         }
-        if let Err(why) = self.reveal_node(&node, None) {
+        if let Err(why) = self.reveal_node_quiet(&node, None) {
             self.post_toast(format!("couldn't find the entity: it {why}"));
         }
     }
@@ -567,17 +632,92 @@ impl App {
         }
     }
 
-    /// Push a fresh search overlay onto the modal stack.
+    /// What `/` opens: quick select, on the current view's rows. Returns
+    /// the status hint to show.
+    pub fn open_search_entry(&mut self) -> String {
+        use crate::tui::keybindings::overlay::{SEARCH_KEYS, footer};
+        self.open_search_overlay();
+        format!("quick select: type to find · {}", footer(SEARCH_KEYS))
+    }
+
+    /// What `s` opens: content search, with the query filled in when a
+    /// search is active. Returns the status hint to show.
+    pub fn open_content_search_entry(&mut self) -> String {
+        use crate::tui::keybindings::overlay::{SEARCH_CONTENT_KEYS, footer};
+        if !self.config.live_preview_enabled {
+            return crate::tui::widgets::search::CONTENT_SEARCH_OFF.to_string();
+        }
+        self.open_content_search_overlay();
+        format!(
+            "search contents: type a query · {}",
+            footer(SEARCH_CONTENT_KEYS)
+        )
+    }
+
+    /// Push a quick-select overlay onto the modal stack, on the current
+    /// reach, with the content options as the operator last left them.
     pub fn open_search_overlay(&mut self) {
-        self.modal_stack.push(crate::tui::Modal::Search(
-            crate::tui::widgets::search::SearchOverlayState::new(),
-        ));
+        use crate::tui::widgets::search::{SearchMode, SearchOverlayState};
+        let (group, kinds) = self.search_options();
+        let state = SearchOverlayState::configured(
+            SearchMode::Quick,
+            group,
+            kinds,
+            self.config.live_preview_enabled,
+            "",
+        );
+        self.modal_stack.push(crate::tui::Modal::Search(state));
+    }
+
+    /// Push a content-search overlay onto the modal stack. It always opens
+    /// with an empty query on the wider reach; earlier search strings are
+    /// a key away, newest first.
+    pub fn open_content_search_overlay(&mut self) {
+        use crate::tui::widgets::search::{PastSearch, Reach, SearchMode, SearchOverlayState};
+        let enabled = self.config.live_preview_enabled;
+        let (group, kinds) = self.search_options();
+        let past = self
+            .search_history
+            .entries()
+            .iter()
+            .rev()
+            .map(|entry| PastSearch {
+                text: entry.search.text.clone(),
+                reach: entry.search.reach,
+                kinds: entry.search.kinds,
+                panes: entry.search.with_panes,
+            })
+            .collect();
+        let state = SearchOverlayState::configured(SearchMode::Content, group, kinds, enabled, "")
+            .with_reach(Reach::All)
+            .with_panes(self.search_memory.is_none_or(|memory| memory.panes))
+            .with_past(past);
+        self.modal_stack.push(crate::tui::Modal::Search(state));
+    }
+
+    /// The content grouping and kinds the overlay opens with: as it was
+    /// last left, or the `[search]` defaults the first time.
+    fn search_options(
+        &self,
+    ) -> (
+        crate::viewer::search::Grouping,
+        crate::viewer::search::ContentKinds,
+    ) {
+        match self.search_memory {
+            Some(memory) => (memory.group, memory.kinds),
+            None => (
+                self.config.search.group.granularity(),
+                self.config.search.kinds,
+            ),
+        }
     }
 
     /// Pop the search overlay if it's on top; no-op otherwise.
     pub fn close_search_overlay(&mut self) {
         if matches!(self.modal_stack.last(), Some(crate::tui::Modal::Search(_))) {
+            self.remember_search_overlay();
             self.modal_stack.pop();
+            self.commit_modal_search();
         }
     }
 
@@ -726,6 +866,37 @@ impl App {
     /// pass ownership here.
     pub fn open_viewer_modal(&mut self, state: crate::viewer::state::ViewerState) {
         self.modal_stack.push(crate::tui::Modal::Viewer(state));
+    }
+
+    /// The pane scrollback viewer, when it is on top.
+    pub fn pane_viewer(&self) -> Option<&crate::tui::widgets::pane_viewer::PaneViewerState> {
+        match self.modal_stack.last()? {
+            crate::tui::Modal::PaneViewer(state) => Some(state),
+            _ => None,
+        }
+    }
+
+    pub fn pane_viewer_mut(
+        &mut self,
+    ) -> Option<&mut crate::tui::widgets::pane_viewer::PaneViewerState> {
+        match self.modal_stack.last_mut()? {
+            crate::tui::Modal::PaneViewer(state) => Some(state),
+            _ => None,
+        }
+    }
+
+    pub fn open_pane_viewer(&mut self, state: crate::tui::widgets::pane_viewer::PaneViewerState) {
+        self.modal_stack
+            .push(crate::tui::Modal::PaneViewer(Box::new(state)));
+    }
+
+    pub fn close_pane_viewer(&mut self) {
+        if matches!(
+            self.modal_stack.last(),
+            Some(crate::tui::Modal::PaneViewer(_))
+        ) {
+            self.modal_stack.pop();
+        }
     }
 
     /// Pop the viewer modal if it's on top; no-op otherwise.

@@ -175,7 +175,7 @@ fn translate_ctrl_g_cycles_grouping() {
 
 #[test]
 fn translate_digits_switch_views_directly() {
-    // Sessions, Mux, PRs, Pinned, and History are surfaced in the UI; the
+    // Sessions, Mux, PRs, Pinned, History, and Search are surfaced in the UI; the
     // hidden Union and Forks views have no digit accelerators.
     let cases = [
         ('1', View::Sessions),
@@ -183,6 +183,7 @@ fn translate_digits_switch_views_directly() {
         ('3', View::Prs),
         ('4', View::Pinned),
         ('5', View::History),
+        ('6', View::Search),
     ];
     for (ch, view) in cases {
         assert_eq!(
@@ -191,7 +192,7 @@ fn translate_digits_switch_views_directly() {
             "char {ch}"
         );
     }
-    for ch in ['6', '7'] {
+    for ch in ['7', '8'] {
         assert_eq!(
             translate(press(KeyCode::Char(ch), KeyModifiers::NONE), 24),
             None,
@@ -214,10 +215,11 @@ fn translate_brackets_cycle_views() {
 
 #[test]
 fn cycle_view_wraps_in_both_directions() {
-    // VIEW_OPTIONS is [Sessions, Mux, Prs, Pinned, History], so the
-    // cycle wraps across those five.
-    assert_eq!(cycle_view(View::Sessions, -1), View::History);
-    assert_eq!(cycle_view(View::History, 1), View::Sessions);
+    // VIEW_OPTIONS is [Sessions, Mux, Prs, Pinned, History, Search], so
+    // the cycle wraps across those six.
+    assert_eq!(cycle_view(View::Sessions, -1), View::Search);
+    assert_eq!(cycle_view(View::Search, 1), View::Sessions);
+    assert_eq!(cycle_view(View::History, 1), View::Search);
     assert_eq!(cycle_view(View::Prs, 1), View::Pinned);
     assert_eq!(cycle_view(View::Pinned, 1), View::History);
     assert_eq!(cycle_view(View::Sessions, 1), View::Mux);
@@ -1780,5 +1782,85 @@ mod settle {
         );
         assert!(result.is_err());
         assert_eq!(calls.into_inner(), 1);
+    }
+}
+
+mod viewer_find_prompt {
+    use super::*;
+    use crate::viewer::model::{TranscriptDocument, TranscriptTurn, TurnKind, TurnRole};
+    use crate::viewer::state::ViewerState;
+    use ratatui::crossterm::event::KeyEvent;
+
+    fn key(code: KeyCode, mods: KeyModifiers) -> KeyEvent {
+        KeyEvent::new(code, mods)
+    }
+
+    fn app_with_viewer() -> App {
+        let mut document = TranscriptDocument::default();
+        for body in ["alpha beta", "gamma needle", "delta"] {
+            document.turns.push(TranscriptTurn {
+                role: TurnRole::User,
+                kind: TurnKind::Message,
+                body: body.to_string(),
+                timestamp: None,
+                aborted: false,
+                hidden: false,
+            });
+        }
+        let mut app = App::new(RunConfig::defaults());
+        app.open_viewer_modal(ViewerState::new(document));
+        app
+    }
+
+    fn type_text(app: &mut App, text: &str) {
+        for c in text.chars() {
+            handle_viewer_overlay_key(app, key(KeyCode::Char(c), KeyModifiers::NONE));
+        }
+    }
+
+    #[test]
+    fn slash_opens_the_prompt_and_every_key_types_into_it() {
+        let mut app = app_with_viewer();
+        handle_viewer_overlay_key(&mut app, key(KeyCode::Char('/'), KeyModifiers::NONE));
+        // `n`, `q`, and Space are viewer keys, but the prompt owns them now.
+        type_text(&mut app, "n q");
+        let prompt = app.viewer_modal().and_then(|s| s.find.prompt.as_ref());
+        assert_eq!(prompt.map(|p| p.text.as_str()), Some("n q"));
+        assert!(app.viewer_modal().is_some(), "q did not close the viewer");
+    }
+
+    #[test]
+    fn enter_runs_the_find_and_n_steps_afterwards() {
+        let mut app = app_with_viewer();
+        handle_viewer_overlay_key(&mut app, key(KeyCode::Char('/'), KeyModifiers::NONE));
+        type_text(&mut app, "a");
+        handle_viewer_overlay_key(&mut app, key(KeyCode::Enter, KeyModifiers::NONE));
+        let state = app.viewer_modal().expect("viewer");
+        assert_eq!(state.find.matches, [0, 1, 2]);
+        assert!(state.find.prompt.is_none());
+        handle_viewer_overlay_key(&mut app, key(KeyCode::Char('n'), KeyModifiers::NONE));
+        assert_eq!(app.viewer_modal().and_then(|s| s.find.current), Some(1));
+        handle_viewer_overlay_key(&mut app, key(KeyCode::Char('N'), KeyModifiers::SHIFT));
+        assert_eq!(app.viewer_modal().and_then(|s| s.find.current), Some(0));
+    }
+
+    #[test]
+    fn escape_leaves_the_prompt_without_closing_the_viewer() {
+        let mut app = app_with_viewer();
+        handle_viewer_overlay_key(&mut app, key(KeyCode::Char('/'), KeyModifiers::NONE));
+        type_text(&mut app, "x");
+        handle_viewer_overlay_key(&mut app, key(KeyCode::Esc, KeyModifiers::NONE));
+        assert!(app.viewer_modal().is_some_and(|s| s.find.prompt.is_none()));
+        handle_viewer_overlay_key(&mut app, key(KeyCode::Esc, KeyModifiers::NONE));
+        assert!(app.viewer_modal().is_none(), "a second Esc closes it");
+    }
+
+    #[test]
+    fn control_chords_do_not_type() {
+        let mut app = app_with_viewer();
+        handle_viewer_overlay_key(&mut app, key(KeyCode::Char('/'), KeyModifiers::NONE));
+        handle_viewer_overlay_key(&mut app, key(KeyCode::Char('a'), KeyModifiers::CONTROL));
+        let prompt = app.viewer_modal().and_then(|s| s.find.prompt.as_ref());
+        assert_eq!(prompt.map(|p| p.text.as_str()), Some(""));
     }
 }

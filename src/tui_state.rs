@@ -207,7 +207,13 @@ pub fn read_last_view(cache: &TuiStateCache) -> Option<View> {
     let path = cache.path()?;
     let text = fs::read_to_string(&path).ok()?;
     let raw: RawState = serde_json::from_str(&text).ok()?;
-    raw.last_view.as_deref().and_then(view_from_snake_case)
+    restorable(raw.last_view.as_deref().and_then(view_from_snake_case))
+}
+
+/// The view to reopen on: every view but Search, which shows the
+/// results of a query that lives only in memory.
+fn restorable(view: Option<View>) -> Option<View> {
+    view.filter(|view| *view != View::Search)
 }
 
 /// Best-effort read of the full TUI state from disk. Returns `None`
@@ -250,7 +256,7 @@ pub fn read_tui_state(cache: &TuiStateCache) -> Option<PersistedState> {
         }
     }
     Some(PersistedState {
-        last_view: raw.last_view.as_deref().and_then(view_from_snake_case),
+        last_view: restorable(raw.last_view.as_deref().and_then(view_from_snake_case)),
         sort,
         mux_recency,
         preview_wrap,
@@ -355,6 +361,7 @@ fn view_to_snake_case(view: View) -> &'static str {
         View::Forks => "forks",
         View::Pinned => "pinned",
         View::History => "history",
+        View::Search => "search",
     }
 }
 
@@ -367,6 +374,7 @@ fn view_from_snake_case(value: &str) -> Option<View> {
         "forks" => Some(View::Forks),
         "pinned" => Some(View::Pinned),
         "history" => Some(View::History),
+        "search" => Some(View::Search),
         _ => None,
     }
 }

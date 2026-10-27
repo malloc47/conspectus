@@ -199,8 +199,13 @@ impl World {
     }
 
     fn tui_command(&self, keep_tmux: bool) -> String {
+        self.tui_command_with(keep_tmux, "")
+    }
+
+    /// The TUI's command line with `extra` flags after the usual ones.
+    fn tui_command_with(&self, keep_tmux: bool, extra: &str) -> String {
         format!(
-            "{} {} tui --view mux --refresh-interval 30s 2>{}; sleep 120",
+            "{} {} tui --view mux --refresh-interval 30s {extra} 2>{}; sleep 120",
             self.shell_env_prefix(keep_tmux),
             env!("CARGO_BIN_EXE_conspectus"),
             self.root.join("tui.err").display()
@@ -209,7 +214,21 @@ impl World {
 
     /// Outside-tmux flow: the TUI runs directly in the operator's terminal.
     fn start_tui_outside(&self) {
-        let command = self.tui_command(false);
+        self.start_tui_outside_with("");
+    }
+
+    /// Like [`World::start_tui_outside`] with extra `tui` flags.
+    fn start_tui_outside_with(&self, extra: &str) {
+        let command = self.tui_command_with(false, extra);
+        // A content filter can leave the Mux view with no rows, so wait
+        // for the tab strip rather than a mux.
+        let up = |screen: &str| {
+            if extra.is_empty() {
+                screen.contains('▣')
+            } else {
+                screen.contains("sessions · mux")
+            }
+        };
         assert!(
             self.outer(&[
                 "new-session",
@@ -225,9 +244,7 @@ impl World {
             .status
             .success()
         );
-        wait_until("the TUI to list muxes", CONVERGE, || {
-            self.screen().contains('▣')
-        });
+        wait_until("the TUI to list muxes", CONVERGE, || up(&self.screen()));
     }
 
     /// Inside-tmux flow: the TUI runs in session `ui` of the inner server
@@ -693,4 +710,746 @@ fn undo_brings_back_a_pin_removed_with_p() {
     wait_screen(&world, "the empty-stack message", |screen| {
         screen.contains("nothing to undo")
     });
+}
+
+/// Two Claude Code sessions in the home the TUI reads: the first mentions
+/// "quokka" twice in messages, the second only chats.
+fn write_search_sessions(world: &World) {
+    let dir = world.root.join("home/.claude/projects/-home-user-project");
+    fs::create_dir_all(&dir).expect("transcript dir");
+    let record = |key: &str, kind: &str, uuid: &str, parent: &str, time: &str, body: &str| {
+        format!(
+            r#"{{"cwd":"/home/user/project","sessionId":"{key}","type":"{kind}","uuid":"{uuid}","parentUuid":{parent},"timestamp":"{time}","message":{{"role":"{kind}","content":[{{"type":"text","text":"{body}"}}]}}}}"#
+        )
+    };
+    let alpha = "aaaaaaaa-0000-0000-0000-000000000001";
+    let beta = "bbbbbbbb-0000-0000-0000-000000000002";
+    let first = [
+        record(
+            alpha,
+            "user",
+            "a1",
+            "null",
+            "2026-10-01T10:00:00.000Z",
+            "We chose the quokka design",
+        ),
+        record(
+            alpha,
+            "assistant",
+            "a2",
+            "\"a1\"",
+            "2026-10-01T10:00:05.000Z",
+            "The Quokka layout is noted.",
+        ),
+    ];
+    let second = [
+        record(
+            beta,
+            "user",
+            "b1",
+            "null",
+            "2026-10-02T09:00:00.000Z",
+            "Unrelated chatter",
+        ),
+        record(
+            beta,
+            "assistant",
+            "b2",
+            "\"b1\"",
+            "2026-10-02T09:00:03.000Z",
+            "Nothing to see",
+        ),
+    ];
+    fs::write(dir.join(format!("{alpha}.jsonl")), first.join("\n") + "\n").unwrap();
+    fs::write(dir.join(format!("{beta}.jsonl")), second.join("\n") + "\n").unwrap();
+}
+
+/// `/`, a query, Enter: quick select picks a row of the current view and
+/// the right pane follows it.
+#[test]
+fn quick_select_picks_a_row_of_the_current_view() {
+    needs_tmux!();
+    let world = World::new();
+    write_search_sessions(&world);
+    world.new_mux("anchor", false);
+    world.start_tui_outside();
+    wait_screen(&world, "both sessions", |screen| {
+        screen.contains("2 sessions")
+    });
+
+    world.keys(&["1", "/"]);
+    wait_screen(&world, "quick select on Current", |screen| {
+        screen.contains("/ quick select") && screen.contains("[ Current ] All")
+    });
+    world.keys(&["bbbbbbbb"]);
+    wait_screen(&world, "the match", |screen| screen.contains("(1)"));
+    world.keys(&["Enter"]);
+    wait_screen(
+        &world,
+        "the overlay closed on the picked session",
+        |screen| {
+            !screen.contains("quick select")
+                && screen.contains("bbbbbbbb-0000-0000-0000-000000000002")
+        },
+    );
+}
+
+/// `/`, a query, then Down five times: the cursor follows every press
+/// instead of stopping after the first.
+#[test]
+fn quick_select_cursor_follows_repeated_arrow_keys() {
+    needs_tmux!();
+    let world = World::new();
+    for n in 1..=7 {
+        world.new_mux(&format!("pager-{n}"), false);
+    }
+    world.start_tui_outside();
+    wait_screen(&world, "the muxes", |screen| screen.contains("7 mux"));
+
+    world.keys(&["2", "/"]);
+    wait_screen(&world, "quick select", |screen| {
+        screen.contains("/ quick select")
+    });
+    world.keys(&["pager"]);
+    wait_screen(&world, "all seven matches", |screen| screen.contains("(7)"));
+    world.keys(&["Down", "Down", "Down", "Down", "Down"]);
+    wait_screen(&world, "the marker on the sixth match", |screen| {
+        screen
+            .lines()
+            .any(|line| line.contains("> ") && line.contains("mux:pager-"))
+            && screen
+                .lines()
+                .filter(|line| line.contains("> ") && line.contains("mux:pager-"))
+                .all(|line| !line.contains("mux:pager-1 ") && !line.contains("mux:pager-2 "))
+    });
+}
+
+/// `/`, Tab, a name, Enter: the wider reach finds a mux while the
+/// Sessions view is showing, and opening it switches to the Mux view.
+#[test]
+fn quick_select_widened_with_tab_opens_an_entity_from_another_view() {
+    needs_tmux!();
+    let world = World::new();
+    write_search_sessions(&world);
+    world.new_mux("anchor", false);
+    world.start_tui_outside();
+    wait_screen(&world, "both sessions", |screen| {
+        screen.contains("2 sessions")
+    });
+
+    world.keys(&["1", "/", "Tab"]);
+    wait_screen(&world, "quick select on All", |screen| {
+        screen.contains("Current [ All ]")
+    });
+    world.keys(&["anchor"]);
+    wait_screen(&world, "the mux with its outcome word", |screen| {
+        screen.contains("anchor") && screen.contains("in Mux view")
+    });
+    world.keys(&["Enter"]);
+    wait_screen(&world, "the Mux view listing it", |screen| {
+        !screen.contains("quick select") && row(screen, "anchor").is_some()
+    });
+}
+
+/// `s`, a query: the overlay streams the match; Ctrl-F keeps it as
+/// the filter, which narrows the list and shows in the header; `F`
+/// clears it.
+#[test]
+fn the_search_overlay_filters_the_session_list_and_f_clears_it() {
+    needs_tmux!();
+    let world = World::new();
+    write_search_sessions(&world);
+    world.new_mux("anchor", false);
+    world.start_tui_outside();
+    wait_screen(&world, "both sessions", |screen| {
+        screen.contains("2 sessions")
+    });
+
+    // The TUI opens on the muxes; the content filter is for the sessions.
+    world.keys(&["1"]);
+    world.keys(&["s"]);
+    wait_screen(&world, "the contents scope", |screen| {
+        screen.contains("/ search contents")
+    });
+    world.keys(&["quokka"]);
+    wait_screen(&world, "the streamed result", |screen| {
+        screen.contains("/ search contents")
+            && screen.contains("Current [ All ]")
+            && screen.contains("1 result")
+            && screen.contains("2 hits")
+    });
+
+    world.keys(&["C-f"]);
+    wait_screen(&world, "the list narrowed with the find chip", |screen| {
+        screen.contains("1/2 sessions") && !screen.contains("/ search contents")
+    });
+
+    world.keys(&["F"]);
+    wait_screen(&world, "the filter cleared", |screen| {
+        screen.contains("2 sessions") && !screen.contains("1/2 sessions")
+    });
+}
+
+/// Esc in the contents scope cancels the scan and leaves no filter.
+#[test]
+fn escaping_the_contents_scope_leaves_the_lists_whole() {
+    needs_tmux!();
+    let world = World::new();
+    write_search_sessions(&world);
+    world.new_mux("anchor", false);
+    world.start_tui_outside();
+    wait_screen(&world, "both sessions", |screen| {
+        screen.contains("2 sessions")
+    });
+
+    world.keys(&["1", "s", "quokka"]);
+    wait_screen(&world, "the result", |screen| screen.contains("2 hits"));
+    world.keys(&["Escape"]);
+    wait_screen(&world, "the overlay closed", |screen| {
+        !screen.contains("/ search contents")
+    });
+    let screen = world.screen();
+    assert!(!screen.contains("find:"), "{screen}");
+    assert!(screen.contains("2 sessions"), "{screen}");
+}
+
+/// `s`, a query, Enter, then `q`: the viewer closes at once, with the
+/// find still active (only `Esc` steps back through the find first).
+#[test]
+fn q_leaves_a_viewer_opened_from_a_search_at_once() {
+    needs_tmux!();
+    let world = World::new();
+    write_search_sessions(&world);
+    world.new_mux("anchor", false);
+    world.start_tui_outside();
+    wait_screen(&world, "both sessions", |screen| {
+        screen.contains("2 sessions")
+    });
+
+    world.keys(&["1", "s", "quokka"]);
+    wait_screen(&world, "the streamed result", |screen| {
+        screen.contains("2 hits")
+    });
+    world.keys(&["Enter"]);
+    wait_screen(&world, "the viewer with its find", |screen| {
+        screen.contains("find \"quokka\" 1/2")
+    });
+    world.keys(&["q"]);
+    wait_screen(&world, "back at the lists after one q", |screen| {
+        !screen.contains("find \"quokka\"") && screen.contains("2 sessions")
+    });
+}
+
+/// `s`, a query, Enter: the viewer opens on the match, `n` steps to
+/// the next one, and `q` returns to the lists.
+#[test]
+fn a_search_result_opens_the_viewer_on_its_match_and_n_steps_through() {
+    needs_tmux!();
+    let world = World::new();
+    write_search_sessions(&world);
+    world.new_mux("anchor", false);
+    world.start_tui_outside();
+    wait_screen(&world, "both sessions", |screen| {
+        screen.contains("2 sessions")
+    });
+
+    world.keys(&["1", "s", "quokka"]);
+    wait_screen(&world, "the streamed result", |screen| {
+        screen.contains("2 hits")
+    });
+    world.keys(&["Enter"]);
+    wait_screen(&world, "the viewer on the first match", |screen| {
+        screen.contains("find \"quokka\" 1/2")
+    });
+    world.keys(&["n"]);
+    wait_screen(&world, "the second match", |screen| {
+        screen.contains("find \"quokka\" 2/2")
+    });
+    // The first Esc clears the find; the next leaves the viewer.
+    world.keys(&["Escape"]);
+    wait_screen(&world, "the find cleared", |screen| {
+        !screen.contains("find \"quokka\"")
+    });
+    world.keys(&["q"]);
+    wait_screen(&world, "back at the lists", |screen| {
+        screen.contains("2 sessions") && !screen.contains("claude-code:aaaaaaaa")
+    });
+}
+
+/// Promoting a per-message query into the Search view lists a row per
+/// matching turn, and Enter on one opens the viewer at that turn.
+#[test]
+fn the_search_view_lists_hits_and_enter_opens_the_viewer_at_one() {
+    needs_tmux!();
+    let world = World::new();
+    write_search_sessions(&world);
+    world.new_mux("anchor", false);
+    world.start_tui_outside();
+    wait_screen(&world, "both sessions", |screen| {
+        screen.contains("2 sessions")
+    });
+
+    world.keys(&["1", "s", "quokka"]);
+    wait_screen(&world, "the streamed result", |screen| {
+        screen.contains("2 hits")
+    });
+    world.keys(&["C-s"]);
+    wait_screen(&world, "the Search view with a row per session", |screen| {
+        screen.contains("2 hits") && !screen.contains("turn 1")
+    });
+    // The cursor is on the session: Enter opens its first hit.
+    world.keys(&["Enter"]);
+    wait_screen(&world, "the viewer on a match", |screen| {
+        screen.contains("find \"quokka\"")
+    });
+}
+
+/// Alt+Enter on a Search-view session reveals it in the Sessions view,
+/// and Backspace on the left pane returns to the Search view.
+#[test]
+fn alt_enter_reveals_a_search_result_and_backspace_returns() {
+    needs_tmux!();
+    let world = World::new();
+    write_search_sessions(&world);
+    world.new_mux("anchor", false);
+    world.start_tui_outside();
+    wait_screen(&world, "both sessions", |screen| {
+        screen.contains("2 sessions")
+    });
+
+    world.keys(&["1", "s", "quokka"]);
+    wait_screen(&world, "the streamed result", |screen| {
+        screen.contains("2 hits")
+    });
+    world.keys(&["C-s"]);
+    wait_screen(&world, "the Search view", |screen| {
+        screen.contains("2 hits") && !screen.contains("turn 1")
+    });
+
+    world.keys(&["M-Enter"]);
+    wait_screen(&world, "the Sessions view with a way back", |screen| {
+        !screen.contains("2 hits") && screen.contains("Backspace back")
+    });
+
+    world.keys(&["BSpace"]);
+    wait_screen(&world, "the Search view again", |screen| {
+        screen.contains("2 hits") && !screen.contains("Backspace back")
+    });
+}
+
+/// The flat mode lists the matching messages with no session row above
+/// them, and Enter on one opens the viewer at that message.
+#[test]
+fn the_flat_search_view_lists_messages_and_enter_opens_the_viewer() {
+    needs_tmux!();
+    let world = World::new();
+    write_search_sessions(&world);
+    world.new_mux("anchor", false);
+    world.start_tui_outside();
+    wait_screen(&world, "both sessions", |screen| {
+        screen.contains("2 sessions")
+    });
+
+    world.keys(&["1", "s", "quokka"]);
+    wait_screen(&world, "the streamed result", |screen| {
+        screen.contains("2 hits")
+    });
+    world.keys(&["BTab", "C-s"]);
+    wait_screen(&world, "the flat Search view", |screen| {
+        screen.contains("turn 1") && screen.contains("turn 2")
+    });
+    // The cursor starts on a message, not on a session.
+    world.keys(&["Enter"]);
+    wait_screen(&world, "the viewer on a match", |screen| {
+        screen.contains("find \"quokka\"")
+    });
+}
+
+/// The Search view keeps showing its search while the modal types a
+/// new one; the new search joins the history when the modal closes.
+#[test]
+fn the_search_view_stays_fixed_while_the_modal_types_and_takes_the_search_on_exit() {
+    needs_tmux!();
+    let world = World::new();
+    write_search_sessions(&world);
+    world.new_mux("anchor", false);
+    world.start_tui_outside();
+    wait_screen(&world, "both sessions", |screen| {
+        screen.contains("2 sessions")
+    });
+
+    world.keys(&["1", "s", "quokka"]);
+    wait_screen(&world, "the streamed result", |screen| {
+        screen.contains("2 hits")
+    });
+    world.keys(&["C-s"]);
+    wait_screen(&world, "the Search view", |screen| {
+        screen.contains("search 1/1 \"quokka\"")
+    });
+
+    world.keys(&[
+        "s", "BSpace", "BSpace", "BSpace", "BSpace", "BSpace", "BSpace",
+    ]);
+    world.keys(&["chatter"]);
+    wait_screen(&world, "the new search's result in the modal", |screen| {
+        screen.contains("/ search contents") && screen.contains("1 result")
+    });
+    let screen = world.screen();
+    assert!(
+        screen.contains("search 1/1 \"quokka\"") && !screen.contains("search 2/2"),
+        "the view moved while the modal was open:\n{screen}"
+    );
+
+    world.keys(&["Escape"]);
+    wait_screen(&world, "the new search in the view", |screen| {
+        screen.contains("search 2/2 \"chatter\"") && !screen.contains("/ search contents")
+    });
+}
+
+/// `Ctrl-L` in the Search view lists the shown search's messages, and
+/// again its sessions, without searching again.
+#[test]
+fn the_search_view_switches_between_sessions_and_messages() {
+    needs_tmux!();
+    let world = World::new();
+    write_search_sessions(&world);
+    world.new_mux("anchor", false);
+    world.start_tui_outside();
+    wait_screen(&world, "both sessions", |screen| {
+        screen.contains("2 sessions")
+    });
+
+    world.keys(&["1", "s", "quokka"]);
+    wait_screen(&world, "the streamed result", |screen| {
+        screen.contains("2 hits")
+    });
+    world.keys(&["C-s"]);
+    wait_screen(&world, "a row per session", |screen| {
+        screen.contains("search 1/1") && screen.contains("2 hits") && !screen.contains("turn 1")
+    });
+    world.keys(&["C-l"]);
+    wait_screen(&world, "a row per message", |screen| {
+        screen.contains("turn 1") && screen.contains("turn 2")
+    });
+    world.keys(&["C-l"]);
+    wait_screen(&world, "a row per session again", |screen| {
+        screen.contains("2 hits") && !screen.contains("turn 1")
+    });
+    assert!(
+        world.screen().contains("search 1/1"),
+        "switching is not a new search"
+    );
+}
+
+/// What a search looks in lives behind `Ctrl-O`, not the key list.
+#[test]
+fn the_search_options_pane_opens_and_goes_back() {
+    needs_tmux!();
+    let world = World::new();
+    write_search_sessions(&world);
+    world.new_mux("anchor", false);
+    world.start_tui_outside();
+    wait_screen(&world, "both sessions", |screen| {
+        screen.contains("2 sessions")
+    });
+
+    world.keys(&["1", "s"]);
+    wait_screen(&world, "the modal", |screen| {
+        screen.contains("/ search contents") && screen.contains("Ctrl-O options")
+    });
+    assert!(
+        !world.screen().contains("Ctrl-T") && !world.screen().contains("Ctrl-Y"),
+        "the option keys are retired"
+    );
+    world.keys(&["C-o"]);
+    wait_screen(&world, "the options pane", |screen| {
+        screen.contains("[ ] Tool calls and output") && screen.contains("[x] Pane scrollback")
+    });
+    world.keys(&["Space"]);
+    wait_screen(&world, "tool calls on", |screen| {
+        screen.contains("[x] Tool calls and output")
+    });
+    world.keys(&["Escape"]);
+    wait_screen(&world, "back at the results", |screen| {
+        screen.contains("/ search contents") && !screen.contains("Pane scrollback")
+    });
+}
+
+/// Ctrl-/ reaches the TUI through a real terminal as whichever key the
+/// terminal sends for it (tmux sends the byte 0x1F for both names), and
+/// opens the contents modal on the current view.
+#[test]
+fn ctrl_slash_opens_the_contents_modal_through_a_real_terminal() {
+    needs_tmux!();
+    let world = World::new();
+    write_search_sessions(&world);
+    world.new_mux("anchor", false);
+    world.start_tui_outside();
+    wait_screen(&world, "both sessions", |screen| {
+        screen.contains("2 sessions")
+    });
+    for key in ["C-/", "C-_"] {
+        world.keys(&["1", key]);
+        wait_screen(&world, "the contents modal", |screen| {
+            screen.contains("/ search contents") && screen.contains("Current [ All ]")
+        });
+        world.keys(&["Escape"]);
+        wait_screen(&world, "the modal closed", |screen| {
+            !screen.contains("/ search contents")
+        });
+    }
+}
+
+/// Ctrl-S is not swallowed as terminal flow control: it keeps the search
+/// and opens the Search view, and `<` and `>` then page between the
+/// searches without scanning again.
+#[test]
+fn ctrl_s_keeps_the_search_and_the_search_view_pages_between_searches() {
+    needs_tmux!();
+    let world = World::new();
+    write_search_sessions(&world);
+    world.new_mux("anchor", false);
+    world.start_tui_outside();
+    wait_screen(&world, "both sessions", |screen| {
+        screen.contains("2 sessions")
+    });
+
+    world.keys(&["1", "s", "quokka"]);
+    wait_screen(&world, "the streamed result", |screen| {
+        screen.contains("2 hits")
+    });
+    world.keys(&["C-s"]);
+    wait_screen(&world, "the Search view on the first search", |screen| {
+        screen.contains("search 1/1 \"quokka\"") && screen.contains("2 hits")
+    });
+
+    // A second search starts from a clean slate, not from the first.
+    world.keys(&["s", "chatter"]);
+    wait_screen(&world, "the second search's result", |screen| {
+        screen.contains("/chatter")
+            && !screen.contains("/quokkachatter")
+            && screen.contains("1 hit")
+    });
+    world.keys(&["C-s"]);
+    wait_screen(&world, "the Search view on the second search", |screen| {
+        screen.contains("search 2/2 \"chatter\"")
+    });
+
+    world.keys(&["<"]);
+    wait_screen(&world, "the first search again", |screen| {
+        screen.contains("search 1/2 \"quokka\"") && screen.contains("2 hits")
+    });
+    world.keys(&[">"]);
+    wait_screen(&world, "the second search again", |screen| {
+        screen.contains("search 2/2 \"chatter\"")
+    });
+
+    // Reopening starts empty; Ctrl-R brings the earlier strings back,
+    // newest first, and Shift-Tab switches to messages.
+    world.keys(&["s"]);
+    wait_screen(&world, "the empty modal", |screen| {
+        screen.contains("search contents")
+            && !screen.contains("/chatter")
+            && !screen.contains("/quokka")
+    });
+    world.keys(&["C-r"]);
+    wait_screen(&world, "the newest string", |screen| {
+        screen.contains("/chatter")
+    });
+    world.keys(&["C-r"]);
+    wait_screen(&world, "the older string", |screen| {
+        screen.contains("/quokka")
+    });
+    world.keys(&["BTab"]);
+    wait_screen(&world, "the messages tab", |screen| {
+        screen.contains("Sessions [ Messages ]")
+    });
+    world.keys(&["Escape"]);
+    wait_screen(&world, "the Search view without a new entry", |screen| {
+        screen.contains("search 2/2")
+    });
+}
+
+/// Content search reads what a pane shows. The Mux view's current
+/// context holds the shell's mux, Enter on its row opens the scrollback
+/// at the line, and the Search view lists the pane as a row.
+#[test]
+fn content_search_finds_text_in_a_panes_scrollback() {
+    needs_tmux!();
+    let world = World::new();
+    write_search_sessions(&world);
+    world.new_mux("anchor", false);
+    world.new_mux("shell", true);
+    assert!(
+        world
+            .inner(&[
+                "send-keys",
+                "-t",
+                "shell",
+                "echo zanzibar-in-the-pane",
+                "Enter"
+            ])
+            .status
+            .success()
+    );
+    world.start_tui_outside();
+    wait_screen(&world, "the muxes", |screen| row(screen, "shell").is_some());
+
+    world.keys(&["C-/", "zanzibar"]);
+    wait_screen(&world, "the pane's match", |screen| {
+        screen.contains("/ search contents")
+            && screen
+                .lines()
+                .any(|line| line.contains("pane") && line.contains("shell 0.0"))
+    });
+    world.keys(&["Enter"]);
+    wait_screen(&world, "the scrollback pager at the line", |screen| {
+        screen.contains("shell 0.0 scrollback") && screen.contains("zanzibar-in-the-pane")
+    });
+    // `q` leaves the viewer at once, find or no find.
+    world.keys(&["q"]);
+    wait_screen(&world, "the pager closed", |screen| {
+        !screen.contains("shell 0.0 scrollback")
+    });
+
+    world.keys(&["C-/", "zanzibar", "C-s"]);
+    wait_screen(&world, "the pane as a row of the Search view", |screen| {
+        screen.contains("search 1/1 \"zanzibar\"")
+            && screen
+                .lines()
+                .any(|line| line.contains("shell") && line.contains("0.0") && line.contains("hit"))
+    });
+}
+
+/// The pane viewer is full screen and `a` in it attaches to the pane's
+/// mux: exiting the shell there ends the mux.
+#[test]
+fn the_pane_viewer_is_full_screen_and_a_attaches() {
+    needs_tmux!();
+    let world = World::new();
+    write_search_sessions(&world);
+    world.new_mux("anchor", false);
+    world.new_mux("shell", true);
+    assert!(
+        world
+            .inner(&[
+                "send-keys",
+                "-t",
+                "shell",
+                "echo zanzibar-in-the-pane",
+                "Enter"
+            ])
+            .status
+            .success()
+    );
+    world.start_tui_outside();
+    wait_screen(&world, "the muxes", |screen| row(screen, "shell").is_some());
+
+    world.keys(&["C-/", "zanzibar"]);
+    wait_screen(&world, "the pane's match", |screen| {
+        screen
+            .lines()
+            .any(|line| line.contains("pane") && line.contains("shell 0.0"))
+    });
+    world.keys(&["Enter"]);
+    wait_screen(
+        &world,
+        "the full-screen viewer with an attach chip",
+        |screen| {
+            screen.contains("shell 0.0 scrollback")
+                && screen.contains("(a) attach")
+                && !screen.contains("search contents")
+        },
+    );
+
+    world.keys(&["a"]);
+    sleep(Duration::from_millis(1500));
+    world.keys(&["exit", "Enter"]);
+    wait_until("the attached mux ends", Duration::from_secs(10), || {
+        !world.mux_alive("shell")
+    });
+}
+
+/// `F` and quitting while a scan may still be reading must not hang.
+#[test]
+fn quitting_with_a_content_search_running_exits_promptly() {
+    needs_tmux!();
+    let world = World::new();
+    write_search_sessions(&world);
+    world.new_mux("anchor", false);
+    world.start_tui_outside_with("--contains quokka");
+    // Quit at once, while the startup scan may still be running.
+    world.keys(&["q"]);
+    wait_until("the TUI to exit", Duration::from_secs(5), || {
+        !world.screen().contains("sessions · mux")
+    });
+}
+
+/// With live preview off the content filter is refused, and says why.
+#[test]
+fn live_preview_off_refuses_a_startup_content_filter() {
+    needs_tmux!();
+    let world = World::new();
+    write_search_sessions(&world);
+    world.new_mux("anchor", false);
+    world.start_tui_outside_with("--no-live-preview --contains quokka");
+    wait_screen(&world, "the refusal", |screen| {
+        screen.contains("live preview")
+    });
+    let screen = world.screen();
+    assert!(
+        !screen.contains("find:\""),
+        "no filter is applied: {screen}"
+    );
+}
+
+/// The whole overlay flow leaves no transcript text in the directories
+/// Conspectus writes to (the transcripts themselves live under HOME).
+#[test]
+fn a_tui_content_search_writes_no_transcript_text_to_disk() {
+    needs_tmux!();
+    let world = World::new();
+    write_search_sessions(&world);
+    world.new_mux("anchor", false);
+    world.start_tui_outside();
+    wait_screen(&world, "both sessions", |screen| {
+        screen.contains("2 sessions")
+    });
+    world.keys(&["1", "s", "quokka"]);
+    wait_screen(&world, "the streamed result", |screen| {
+        screen.contains("2 hits")
+    });
+    world.keys(&["C-s"]);
+    wait_screen(&world, "the Search view", |screen| {
+        screen.contains("search 1/1") && screen.contains("2 hits")
+    });
+    world.keys(&["F"]);
+    // Let any pending write land.
+    sleep(Duration::from_secs(1));
+
+    // The first message is only ever in the transcript and in search
+    // snippets: discovery's own preview shows the last message.
+    let needle = "chose the quokka";
+    for dir in ["xdg/s", "xdg/k", "xdg/d", "xdg/c"] {
+        let mut stack = vec![world.root.join(dir)];
+        while let Some(path) = stack.pop() {
+            let Ok(entries) = fs::read_dir(&path) else {
+                continue;
+            };
+            for entry in entries.flatten() {
+                let path = entry.path();
+                if path.is_dir() {
+                    stack.push(path);
+                } else if let Ok(bytes) = fs::read(&path) {
+                    assert!(
+                        !bytes
+                            .windows(needle.len())
+                            .any(|window| window == needle.as_bytes()),
+                        "search text reached {}",
+                        path.display()
+                    );
+                }
+            }
+        }
+    }
 }

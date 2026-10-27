@@ -60,10 +60,10 @@ Where user-authored intent lives, what Conspectus may write, and what it must ne
 | [0012](0012-config-file-layout.md) | Conspectus Configuration File Layout | Accepted |
 | [0014](0014-declared-link-storage-schema.md) | Declared Link Storage Schema | Accepted |
 | [0029](0029-session-alias-overlay.md) | Session Alias Overlay | Accepted |
-| [0086](0086-payload-privacy-tenet.md) | Payload Privacy Tenet | Accepted (amended by 0140) |
+| [0086](0086-payload-privacy-tenet.md) | Payload Privacy Tenet | Accepted (amended by 0140, 0147, 0148, 0149) |
 | [0087](0087-mutation-envelope.md) | Mutation Envelope | Superseded by 0143 |
 | [0090](0090-pin-store-registry-sidecar.md) | Pin-Store Registry Sidecar | Superseded by 0141 |
-| [0143](0143-mutation-envelope-with-history-pins-and-clone.md) | Mutation Envelope With History, Pin Slots, And Clone | Accepted |
+| [0143](0143-mutation-envelope-with-history-pins-and-clone.md) | Mutation Envelope With History, Pin Slots, And Clone | Accepted (amended by 0148) |
 
 ## History, pins, mux lifecycle, and worktrees
 
@@ -111,6 +111,9 @@ The continuous server, the snapshot format, and the SQLite arc that was built an
 | [0104](0104-tui-rescans-live-classes-after-tmux-handoffs.md) | The TUI Rescans Live Classes After Tmux Hand-Offs | Accepted |
 | [0108](0108-handoff-refreshes-run-in-the-background.md) | Hand-Off Refreshes Run In The Background | Accepted |
 | [0146](0146-the-hook-spool-is-the-durable-hook-record.md) | The Hook Spool Is The Durable Hook Record | Accepted |
+| [0147](0147-session-content-search.md) | Session Content Search | Accepted (amended by 0149) |
+| [0148](0148-opt-in-transcript-search-index.md) | Opt-In Transcript Search Index | Accepted (decided, not built) |
+| [0149](0149-two-level-search-current-and-wider-context.md) | Two-Level Search: Current Context And Wider Context | Accepted |
 
 ## CLI output and exports
 
@@ -133,7 +136,7 @@ Runtime architecture, controls, theming, detail pane, and visual language.
 | [0024](0024-tui-runtime-and-architecture.md) | TUI Runtime, App Architecture, And Dependency Policy | Accepted |
 | [0025](0025-tui-preview-ansi-rendering-dependency.md) | TUI Preview ANSI Rendering Dependency | Accepted |
 | [0030](0030-tui-text-input-primitive.md) | TUI Text-Input Primitive | Accepted |
-| [0031](0031-tui-filter-view-switching-and-per-view-state.md) | TUI Filter, View Switching, And Per-View State | Accepted |
+| [0031](0031-tui-filter-view-switching-and-per-view-state.md) | TUI Filter, View Switching, And Per-View State | Accepted (amended by 0147, 0149) |
 | [0032](0032-tui-theme-config.md) | TUI Theme Configuration | Accepted |
 | [0033](0033-tui-detail-pane-sections.md) | TUI Detail-Pane Section Model | Accepted |
 | [0034](0034-repo-row-display-path-preference.md) | Repo Row Display Path Preference | Accepted (amended) |
@@ -157,7 +160,7 @@ Runtime architecture, controls, theming, detail pane, and visual language.
 | [0105](0105-tui-message-log.md) | TUI Message Log For Operation Outcomes | Accepted |
 | [0106](0106-preview-pane-wrap-modes.md) | Preview Pane Wrap Modes | Accepted |
 | [0107](0107-related-view-neighbor-granularity.md) | Related View At Neighbor Granularity | Accepted (amended) |
-| [0112](0112-node-specific-previews.md) | Node-Specific Previews | Accepted |
+| [0112](0112-node-specific-previews.md) | Node-Specific Previews | Accepted (see 0147) |
 | [0113](0113-readme-screenshots.md) | README Screenshots From The Showcase Fixture | Accepted |
 | [0114](0114-prs-view-grouped-by-checkout.md) | A PRs View Grouped By Checkout | Accepted |
 | [0115](0115-forge-discovery-over-discovered-repos.md) | Forge Discovery Over Every Discovered Repo | Accepted |

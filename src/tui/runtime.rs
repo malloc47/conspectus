@@ -42,6 +42,7 @@ use crate::tui::{RunConfig, ui};
 /// Result of a completed background discovery run. The worker returns
 /// only the resolved snapshot; the main thread builds the row tree from
 /// the app's current view config.
+mod content;
 mod executor;
 mod launch;
 mod overlay_keys;
@@ -53,9 +54,11 @@ use launch::*;
 use overlay_keys::*;
 use worktree_exec::*;
 
+#[cfg(any(test, debug_assertions, feature = "snapshot"))]
+pub(super) use overlay_keys::handle_search_overlay_key;
 pub(super) use overlay_keys::{
     handle_controls_overlay_key, handle_help_overlay_key, handle_messages_overlay_key,
-    handle_search_overlay_key,
+    handle_pane_viewer_key, handle_search_overlay_key_with, handle_viewer_overlay_key,
 };
 
 /// What a background discovery worker sends back. `warning` carries a
@@ -132,6 +135,8 @@ fn run_loop(
     let mut shown: Option<PreviewSource> = None;
     let mut force_preview = false;
     while !app.should_quit() {
+        // A contents query that has rested starts its scan.
+        app.search_overlay_tick(Instant::now(), false);
         mode.drain(&mut app, &config)?;
         shown = refresh_preview_if_needed(&mut app, &config, &mut mode, shown, force_preview);
         draw_frame(&mut app, terminal)?;
@@ -170,6 +175,8 @@ struct LiveMode {
     forge: ForgeWorker,
     /// Inside tmux: tells when this pane comes back into view.
     visibility: Option<visibility::VisibilityWatcher>,
+    /// Runs the content search scans the reducer asks for.
+    content: content::ContentDriver,
 }
 
 /// The background forge fetch a TUI runs while it has no daemon to do
@@ -352,6 +359,7 @@ impl LoopMode for LiveMode {
     }
 
     fn drain(&mut self, app: &mut App, config: &RunConfig) -> Result<()> {
+        self.content.pump(app);
         while let Ok((source, content)) = self.preview_rx.try_recv() {
             app.update(Msg::SetPreview { source, content });
         }
@@ -480,6 +488,7 @@ impl LoopMode for LiveMode {
                 ExecutorKind::Pure => dispatch(app, *msg),
             },
             Some(Action::Refresh) => {
+                app.update(Msg::RescanContent);
                 if self.workers.idle() {
                     // An explicit refresh asks for current state, not
                     // the daemon's last tick.
@@ -492,6 +501,7 @@ impl LoopMode for LiveMode {
                 // asked for the forges now, and the newer generation
                 // wins when results land.
                 app.update(Msg::ForgeRefreshRequested);
+                app.update(Msg::RescanContent);
                 app.config().discovery_caches.clear_forge();
                 let generation = self.workers.start();
                 self.spawn_discovery(app, DaemonNudge::LiveAndForge, generation);
@@ -552,16 +562,23 @@ impl LoopMode for LiveMode {
                 dispatch(app, Msg::SetGrouping(next));
             }
             Some(Action::ClearFilters) => {
-                dispatch(app, Msg::SetFilter(crate::filter::RowFilter::default()));
+                dispatch(app, Msg::ClearFilters);
                 app.update(Msg::SetStatus(Some("filters cleared".to_string())));
             }
             Some(Action::OpenSearch) => {
-                app.open_search_overlay();
-                app.update(Msg::SetStatus(Some(
-                    "search: type to filter · Enter pick · Esc close".to_string(),
-                )));
+                let hint = app.open_search_entry();
+                app.update(Msg::SetStatus(Some(hint)));
             }
-            Some(Action::SearchOverlayKey(key)) => handle_search_overlay_key(app, key),
+            Some(Action::OpenContentSearch) => {
+                let hint = app.open_content_search_entry();
+                app.update(Msg::SetStatus(Some(hint)));
+            }
+            Some(Action::SearchOverlayKey(key)) => {
+                // A hit that opens the viewer needs the live executor.
+                handle_search_overlay_key_with(app, key, &mut |app, msg| {
+                    dispatch_live(terminal, app, config, tmux, msg);
+                });
+            }
             Some(Action::OpenHelp) => {
                 app.open_help_overlay();
             }
@@ -571,6 +588,11 @@ impl LoopMode for LiveMode {
             Some(Action::OpenValueModal) => app.open_value_modal_for_cursor(),
             Some(Action::ValueModalKey(key)) => handle_value_modal_key(app, key),
             Some(Action::ViewerOverlayKey(key)) => handle_viewer_overlay_key(app, key),
+            Some(Action::PaneViewerKey(key)) => {
+                if let Some(msg) = handle_pane_viewer_key(app, key) {
+                    dispatch_live(terminal, app, config, tmux, msg);
+                }
+            }
             Some(Action::ExplorerEnter) => explorer_enter_action(app),
             Some(Action::CopySessionId) => copy_session_id_action(app),
             None => {}
@@ -632,9 +654,11 @@ impl LoopMode for StaticMode {
         Ok(())
     }
 
-    fn drain(&mut self, _app: &mut App, _config: &RunConfig) -> Result<()> {
+    fn drain(&mut self, app: &mut App, _config: &RunConfig) -> Result<()> {
         // Scenario mode has no async event sources: no discovery
-        // worker to poll and no refresh timer to arm.
+        // worker to poll and no refresh timer to arm. A requested
+        // content search runs to completion here.
+        content::run_blocking(app, None);
         Ok(())
     }
 
@@ -654,11 +678,18 @@ impl LoopMode for StaticMode {
             Some(Action::OpenValueModal) => app.open_value_modal_for_cursor(),
             Some(Action::ValueModalKey(key)) => handle_value_modal_key(app, key),
             Some(Action::ViewerOverlayKey(key)) => handle_viewer_overlay_key(app, key),
+            Some(Action::PaneViewerKey(key)) => {
+                if let Some(msg) = handle_pane_viewer_key(app, key) {
+                    dispatch(app, msg);
+                }
+            }
             Some(Action::OpenSearch) => {
-                app.open_search_overlay();
-                app.update(Msg::SetStatus(Some(
-                    "search: type to filter · Enter pick · Esc close".to_string(),
-                )));
+                let hint = app.open_search_entry();
+                app.update(Msg::SetStatus(Some(hint)));
+            }
+            Some(Action::OpenContentSearch) => {
+                let hint = app.open_content_search_entry();
+                app.update(Msg::SetStatus(Some(hint)));
             }
             Some(Action::SearchOverlayKey(key)) => handle_search_overlay_key(app, key),
             Some(Action::OpenControls) => {
@@ -733,6 +764,9 @@ impl LoopMode for StaticMode {
                     SelectedDefault::View => {
                         Msg::SetStatus(Some("scenario TUI is static; view is disabled".to_string()))
                     }
+                    SelectedDefault::Scrollback => Msg::SetStatus(Some(
+                        "scenario TUI is static; scrollback is disabled".to_string(),
+                    )),
                 };
                 dispatch(app, msg);
             }
@@ -745,7 +779,7 @@ impl LoopMode for StaticMode {
                 dispatch(app, Msg::SetGrouping(next));
             }
             Some(Action::ClearFilters) => {
-                dispatch(app, Msg::SetFilter(crate::filter::RowFilter::default()));
+                dispatch(app, Msg::ClearFilters);
                 app.update(Msg::SetStatus(Some("filters cleared".to_string())));
             }
             Some(
@@ -799,18 +833,31 @@ impl LoopMode for StaticMode {
 fn draw_frame(app: &mut App, terminal: &mut DefaultTerminal) -> Result<()> {
     let size = terminal.size()?;
     app.prepare_toast_for_render(Rect::new(0, 0, size.width, size.height));
-    terminal.draw(|frame| {
-        let area = frame.area();
-        if app.viewer_modal().is_some() {
-            let theme = app.theme().clone();
-            if let Some(state) = app.viewer_modal_mut() {
-                crate::viewer::widget::draw(state, &theme, frame, area);
-            }
-        } else {
-            ui::draw(app, frame);
-        }
-    })?;
+    terminal.draw(|frame| draw_screen(app, frame))?;
     Ok(())
+}
+
+/// Draw the whole screen: the full-screen transcript viewer (with its
+/// help page over it when open) while one is up, the row tree and panes
+/// otherwise. The interactive loops and `--snapshot` share it.
+pub(super) fn draw_screen(app: &mut App, frame: &mut ratatui::Frame<'_>) {
+    let area = frame.area();
+    if app.viewer_modal().is_some() {
+        let theme = app.theme().clone();
+        if let Some(state) = app.viewer_modal_mut() {
+            crate::viewer::widget::draw(state, &theme, frame, area);
+            if state.show_help {
+                crate::tui::widgets::viewer_help::draw(state, &theme, frame, area);
+            }
+        }
+    } else if app.pane_viewer().is_some() {
+        let theme = app.theme().clone();
+        if let Some(state) = app.pane_viewer_mut() {
+            crate::tui::widgets::pane_viewer::draw(state, &theme, frame, area);
+        }
+    } else {
+        ui::draw(app, frame);
+    }
 }
 
 /// Route a crossterm event through the modal stack (ADR 0085
@@ -840,6 +887,9 @@ fn overlay_key_from_event(app: &App, event: &Event) -> Option<Action> {
     };
     if app.viewer_modal().is_some() {
         return Some(Action::ViewerOverlayKey(key));
+    }
+    if app.pane_viewer().is_some() {
+        return Some(Action::PaneViewerKey(key));
     }
     if app.value_modal().is_some() {
         return Some(Action::ValueModalKey(key));
@@ -985,6 +1035,7 @@ fn event_loop(terminal: &mut DefaultTerminal, mut config: RunConfig) -> Result<(
         refresh_interval,
         forge: ForgeWorker::new(),
         visibility: visibility::VisibilityWatcher::start(),
+        content: content::ContentDriver::live(),
     };
     run_loop(terminal, app, config, mode)
 }
@@ -1948,6 +1999,9 @@ pub(super) fn execute_effects_live(
     for effect in effects {
         let policy = crate::tui::effect::lifecycle(&effect);
         match effect {
+            Effect::Exec(crate::tui::effect::ExecSpec::PaneScrollback { pane, line, text }) => {
+                open_pane_scrollback(app, tmux, &pane, line, &text);
+            }
             Effect::Exec(spec) => execute_exec_spec(terminal, app, config, spec, policy),
             Effect::RunMux(op) => execute_mux_op(app, tmux, op),
             Effect::WriteStore(op) => execute_store_op(app, tmux, op),
@@ -1994,6 +2048,23 @@ pub(in crate::tui) fn pure_executor_runs(effect: &Effect) -> bool {
         Effect::Exec(_) | Effect::RunMux(_) | Effect::WriteStore(_) => false,
         Effect::SpawnRefresh { .. } | Effect::Toast(_) | Effect::Persist | Effect::Quit => true,
     }
+}
+
+/// Run any content search scan the app asked for to completion on this
+/// thread. Snapshot mode calls it between keys so a search is finished
+/// before the next one.
+#[cfg(feature = "snapshot")]
+pub(super) fn run_pending_content_scans(
+    app: &mut App,
+    rebase: Option<(&std::path::Path, &std::path::Path)>,
+) {
+    // A materialized scenario answers pane searches from the captures it
+    // recorded instead of running tmux.
+    let panes: Option<std::sync::Arc<dyn MuxBackend>> = rebase.map(|(_, root)| {
+        std::sync::Arc::new(crate::dev_scenarios::recorded_pane_backend(root))
+            as std::sync::Arc<dyn MuxBackend>
+    });
+    content::run_blocking_with(app, rebase, panes.as_ref());
 }
 
 /// Bridge helper: dispatch a `Msg` through the reducer and run any
@@ -2183,6 +2254,9 @@ fn default_action(
         SelectedDefault::ToggleExpand => dispatch(app, Msg::ToggleExpand),
         SelectedDefault::Attach => dispatch_live(terminal, app, config, tmux, Msg::AttachSelected),
         SelectedDefault::View => dispatch_live(terminal, app, config, tmux, Msg::ViewSelected),
+        SelectedDefault::Scrollback => {
+            dispatch_live(terminal, app, config, tmux, Msg::OpenSelectedPane);
+        }
     }
 }
 

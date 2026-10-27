@@ -8,7 +8,9 @@ adds the history store, `pins.toml`, the daemon's category 2 rule, and a
 narrow `git clone` carve-out. Before that, amended 2026-10-12: hook
 installation the operator starts is sanctioned category 5, which
 prohibition 1 excludes, and ADR 0117 enforces the envelope through a
-capability manifest.
+capability manifest. Its payload prohibition (prohibition 3) now has one
+carve-out, the opt-in transcript search index of
+[ADR 0148](0148-opt-in-transcript-search-index.md).
 
 ## Context
 

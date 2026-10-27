@@ -405,17 +405,64 @@ pub(in crate::tui) fn handle_help_overlay_key(
 /// Dispatch a key into the open search overlay, refresh its match
 /// list from the visible row tree using the configured backend,
 /// and act on its outcome (Confirm picks a row, Cancel closes).
+///
+/// Messages the overlay sends run through the pure executor, which is
+/// right where there is no terminal; the live loop uses
+/// [`handle_search_overlay_key_with`] so a hit that opens the viewer
+/// can run its effect.
+#[cfg(any(test, debug_assertions, feature = "snapshot"))]
 pub(in crate::tui) fn handle_search_overlay_key(
     app: &mut App,
     key: ratatui::crossterm::event::KeyEvent,
 ) {
+    handle_search_overlay_key_with(app, key, &mut |app, msg| dispatch(app, msg));
+}
+
+/// [`handle_search_overlay_key`] with the executor the caller chooses
+/// for the messages the overlay sends.
+pub(in crate::tui) fn handle_search_overlay_key_with(
+    app: &mut App,
+    key: ratatui::crossterm::event::KeyEvent,
+    send: &mut dyn FnMut(&mut App, Msg),
+) {
     use crate::tui::search::items_from_rows;
-    use crate::tui::widgets::search::SearchContext;
+    use crate::tui::search_entities::EntityIndex;
+    use crate::tui::widgets::search::{Reach, SearchContext, SearchMode};
     use crate::tui::{Overlay, OverlayOutcome};
     // The items own their strings, so building them ends the borrow
-    // of `app` before the overlay state is borrowed mutably.
-    let items = items_from_rows(app.visible_rows());
-    let ctx = SearchContext { items: &items };
+    // of `app` before the overlay state is borrowed mutably. Quick
+    // select ranks every row of the view, collapsed ones included.
+    let items = if app.search_overlay().is_some_and(|state| {
+        state.mode() == SearchMode::Quick && state.reach() == Reach::Current
+            || state.widens_with(key)
+    }) {
+        items_from_rows(&app.tree().rows)
+    } else {
+        Vec::new()
+    };
+    let contents = if app
+        .search_overlay()
+        .is_some_and(|state| state.mode() == SearchMode::Content)
+    {
+        app.content_view().rows
+    } else {
+        Vec::new()
+    };
+    // Widening for the first time needs every entity indexed.
+    let entities = if app
+        .search_overlay()
+        .is_some_and(|state| state.widens_with(key))
+    {
+        app.snapshot_handle()
+            .map(|handle| EntityIndex::build(handle.snapshot(), app.config().live_preview_enabled))
+    } else {
+        None
+    };
+    let ctx = SearchContext {
+        items: &items,
+        content: &contents,
+        entities,
+    };
     let outcome = match app.search_overlay_mut() {
         Some(state) => state.handle(ctx, key),
         None => return,
@@ -424,13 +471,21 @@ pub(in crate::tui) fn handle_search_overlay_key(
         OverlayOutcome::Consumed => {}
         OverlayOutcome::Close => {
             app.close_search_overlay();
+            send(app, Msg::DiscardContentPreview);
         }
         OverlayOutcome::Commit(msg) => {
             app.close_search_overlay();
-            dispatch(app, *msg);
+            // Keeping the search is the only way out that keeps it.
+            if !matches!(
+                *msg,
+                Msg::ApplyContentSearch { .. } | Msg::KeepContentSearch { .. }
+            ) {
+                send(app, Msg::DiscardContentPreview);
+            }
+            send(app, *msg);
         }
         OverlayOutcome::CommitAndStay(msg) => {
-            dispatch(app, *msg);
+            send(app, *msg);
         }
     }
 }
@@ -453,6 +508,10 @@ pub(in crate::tui) fn handle_controls_overlay_key(
     let mux_recency = app.mux_recency();
     let preview_wrap = app.preview_wrap();
     let session_preview = app.session_preview();
+    let content_snapshot = app
+        .content()
+        .map(|content| (content.text.clone(), content.status, content.hits().len()));
+    let search_kinds = app.config().search.kinds;
     let ctx = ControlsContext {
         view,
         grouping,
@@ -461,6 +520,14 @@ pub(in crate::tui) fn handle_controls_overlay_key(
         mux_recency,
         preview_wrap,
         session_preview,
+        content: content_snapshot
+            .as_ref()
+            .map(|(text, status, found)| (text.as_str(), *status, *found)),
+        search_kinds,
+        content_group: app
+            .viewed_search()
+            .map_or_else(|| app.config().search.group, |viewed| viewed.group),
+        search_history: app.search_history().position(),
     };
     let outcome = match app.controls_overlay_mut() {
         Some(state) => state.handle(&ctx, key),
@@ -486,8 +553,42 @@ pub(in crate::tui) fn handle_controls_overlay_key(
 /// `app` — unless the reducer's effect was `Close`, in which case
 /// dismiss the modal. Keys that don't map are dropped silently
 /// (the modal owns every keystroke while open).
-pub(super) fn handle_viewer_overlay_key(app: &mut App, key: ratatui::crossterm::event::KeyEvent) {
+/// One key into the pane scrollback viewer. Says what to dispatch when
+/// the key asked for something only the live loop can run (attaching).
+pub(in crate::tui) fn handle_pane_viewer_key(
+    app: &mut App,
+    key: ratatui::crossterm::event::KeyEvent,
+) -> Option<Msg> {
+    use crate::tui::widgets::pane_viewer::PaneViewerOutcome;
+    match app.pane_viewer_mut()?.handle_key(key) {
+        PaneViewerOutcome::Continue => None,
+        PaneViewerOutcome::Close => {
+            app.close_pane_viewer();
+            None
+        }
+        PaneViewerOutcome::Attach => Some(Msg::AttachPane),
+    }
+}
+
+pub(in crate::tui) fn handle_viewer_overlay_key(
+    app: &mut App,
+    key: ratatui::crossterm::event::KeyEvent,
+) {
     if app.viewer_modal().is_none() {
+        return;
+    }
+    // While the find prompt is open it owns the keys: bound keys edit
+    // or leave it, and anything else types.
+    if app
+        .viewer_modal()
+        .is_some_and(|state| state.find.prompt.is_some())
+    {
+        use crate::tui::keybindings::overlay::{VIEWER_FIND_KEYS, resolve, typed_char};
+        let fmsg = resolve(VIEWER_FIND_KEYS, key)
+            .or_else(|| typed_char(key).map(crate::viewer::find::ViewerFindMsg::Insert));
+        if let Some(fmsg) = fmsg {
+            dispatch(app, Msg::ViewerFind(fmsg));
+        }
         return;
     }
     let vmsg = crate::tui::keybindings::overlay::resolve(

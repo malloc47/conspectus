@@ -33,8 +33,18 @@ fn is_age(word: &str) -> bool {
 }
 
 fn lines_of(view: View) -> Vec<String> {
-    let mut app = app_listing_all(view);
+    let mut app = listing(view);
     left_pane_lines(&frame(&mut app, 220, 40), 220)
+}
+
+/// The view over the shared world, with a search applied where the view
+/// shows nothing without one.
+fn listing(view: View) -> App {
+    if view == View::Search {
+        searched(view, RowFilter::default())
+    } else {
+        app_listing_all(view)
+    }
 }
 
 /// The row mentioning `label`, or a panic naming the frame.
@@ -112,8 +122,9 @@ fn nothing_the_operator_reads_says_gone() {
         View::Prs,
         View::Pinned,
         View::History,
+        View::Search,
     ] {
-        let mut app = app_listing_all(view);
+        let mut app = listing(view);
         let shown = frame(&mut app, 220, 40);
         for line in shown.lines() {
             let lower = line.to_lowercase();
@@ -138,6 +149,8 @@ fn the_pin_marker_is_the_same_pair_in_every_view() {
         (View::Pinned, "config-agent3", false),
         (View::Pinned, "nightly", false),
         (View::History, "config-agent3", false),
+        // The Search view lists sessions only, so only a running pin.
+        (View::Search, "solo0000", true),
     ];
     for (view, label, running) in cases {
         let lines = lines_of(view);

@@ -224,16 +224,32 @@ fn draw_help_overlay(app: &App, frame: &mut Frame<'_>, area: Rect) {
 
 fn draw_search_overlay(app: &App, frame: &mut Frame<'_>, area: Rect) {
     use crate::tui::search::items_from_rows;
-    use crate::tui::widgets::search::SearchOverlayWidget;
+    use crate::tui::widgets::search::{Reach, SearchMode, SearchOverlayWidget};
 
     let Some(state) = app.search_overlay() else {
         return;
     };
-    // Recompute items from the live visible row tree each frame so
-    // the search overlay's label lookup never lags behind a
-    // refresh. Building them copies a few strings per row.
-    let items = items_from_rows(app.visible_rows());
-    let widget = SearchOverlayWidget::new(state, &items, app.theme());
+    // Recompute items from the live row tree each frame so the
+    // overlay's label lookup never lags behind a refresh. Building
+    // them copies a few strings per row, so only the scope that lists
+    // rows pays for it.
+    let rows_scope = state.mode() == SearchMode::Quick && state.reach() == Reach::Current;
+    let items = if rows_scope {
+        items_from_rows(&app.tree().rows)
+    } else {
+        Vec::new()
+    };
+    let view = (state.mode() == SearchMode::Content).then(|| app.content_view());
+    // Outcome words for the wider reach: one walk out from the focus,
+    // then a lookup per row the list actually draws.
+    let reach = (state.reach() == Reach::All && state.mode() == SearchMode::Quick)
+        .then(|| app.search_reachability())
+        .flatten();
+    let outcome = |node: &crate::model::NodeId| app.open_plan(reach.as_ref(), node).word();
+    let mut widget = SearchOverlayWidget::new(state, &items, app.theme()).with_outcomes(&outcome);
+    if let Some(view) = &view {
+        widget = widget.with_content(view);
+    }
     frame.render_widget(widget, area);
 }
 

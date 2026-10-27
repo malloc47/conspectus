@@ -117,6 +117,28 @@ pub trait MuxBackend: Send + Sync {
         Ok(TmuxCaptureOutcome::Unsupported)
     }
 
+    /// List every pane on server `socket_name` (`list-panes -a -F
+    /// <format>`), for content search (ADR 0149). Default reports that
+    /// the backend cannot, which callers count as "no panes to search".
+    fn list_panes_on(&self, _socket_name: Option<&str>, _format: &str) -> Result<TmuxOutcome> {
+        Ok(TmuxOutcome::Failed {
+            code: None,
+            message: format!("the `{}` backend cannot list panes", self.backend_key()),
+        })
+    }
+
+    /// Capture the scrollback of pane `target` (a pane id such as `%3`)
+    /// as plain text: up to [`PANE_HISTORY_LINES`] lines, wrapped lines
+    /// joined, no color escapes. Default returns
+    /// [`TmuxCaptureOutcome::Unsupported`].
+    fn pane_history(
+        &self,
+        _socket_name: Option<&str>,
+        _target: &str,
+    ) -> Result<TmuxCaptureOutcome> {
+        Ok(TmuxCaptureOutcome::Unsupported)
+    }
+
     /// Rename tmux session `target` to `new_name`. `socket_name`
     /// selects the tmux server when set. Default returns
     /// [`TmuxRenameOutcome::Unsupported`] so runners that only model
@@ -586,6 +608,74 @@ impl MuxBackend for SystemTmux {
         })
     }
 
+    fn list_panes_on(&self, socket_name: Option<&str>, format: &str) -> Result<TmuxOutcome> {
+        let output = self
+            .cmd(socket_name)
+            .args(["list-panes", "-a", "-F", format])
+            .output();
+        let output = match output {
+            Ok(output) => output,
+            Err(err) if err.kind() == io::ErrorKind::NotFound => {
+                return Ok(TmuxOutcome::Unavailable(UnavailableReason::BinaryNotFound));
+            }
+            Err(err) => {
+                return Err(err).with_context(|| {
+                    format!("failed to spawn tmux binary at {}", self.binary.display())
+                });
+            }
+        };
+        if output.status.success() {
+            return Ok(TmuxOutcome::Sessions(
+                String::from_utf8_lossy(&output.stdout).into_owned(),
+            ));
+        }
+        let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+        if looks_like_no_server(&stderr) {
+            return Ok(TmuxOutcome::Unavailable(UnavailableReason::NoServer));
+        }
+        Ok(TmuxOutcome::Failed {
+            code: output.status.code(),
+            message: stderr,
+        })
+    }
+
+    fn pane_history(&self, socket_name: Option<&str>, target: &str) -> Result<TmuxCaptureOutcome> {
+        let start = format!("-{PANE_HISTORY_LINES}");
+        let output = self
+            .cmd(socket_name)
+            .args(["capture-pane", "-p", "-J", "-S", &start, "-t", target])
+            .output();
+        let output = match output {
+            Ok(output) => output,
+            Err(err) if err.kind() == io::ErrorKind::NotFound => {
+                return Ok(TmuxCaptureOutcome::Unavailable(
+                    UnavailableReason::BinaryNotFound,
+                ));
+            }
+            Err(err) => {
+                return Err(err).with_context(|| {
+                    format!("failed to spawn tmux binary at {}", self.binary.display())
+                });
+            }
+        };
+        if output.status.success() {
+            return Ok(TmuxCaptureOutcome::captured(
+                String::from_utf8_lossy(&output.stdout).into_owned(),
+            ));
+        }
+        let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+        if looks_like_no_server(&stderr) {
+            return Ok(TmuxCaptureOutcome::Unavailable(UnavailableReason::NoServer));
+        }
+        if looks_like_no_target(&stderr) {
+            return Ok(TmuxCaptureOutcome::NoTarget);
+        }
+        Ok(TmuxCaptureOutcome::Failed {
+            code: output.status.code(),
+            message: stderr,
+        })
+    }
+
     fn rename_session(
         &self,
         socket_name: Option<&str>,
@@ -957,6 +1047,9 @@ fn parse_capture_output(stdout: &str) -> PaneCapture {
     }
 }
 
+/// Lines of scrollback [`MuxBackend::pane_history`] asks tmux for.
+pub const PANE_HISTORY_LINES: usize = 5000;
+
 /// Lines of a dead pane's output [`dead_pane_output`] keeps.
 pub const DEAD_PANE_LINES: usize = 20;
 
@@ -1126,6 +1219,23 @@ pub struct FakeTmux {
     /// back. An empty or missing script answers
     /// [`TmuxPaneStatus::Unsupported`].
     pane_statuses: FakeTmuxPaneScript,
+    /// Per-socket canned `list-panes` answers, keyed by the socket name
+    /// (the empty string is the default server). A missing socket
+    /// answers that the backend cannot list panes.
+    panes: std::collections::BTreeMap<String, TmuxOutcome>,
+    /// Per-target canned scrollback captures. A missing target answers
+    /// [`TmuxCaptureOutcome::NoTarget`].
+    histories: std::collections::BTreeMap<String, TmuxCaptureOutcome>,
+    /// Every `list_panes_on` socket and every `pane_history`
+    /// (socket, target) the fake was asked for.
+    pane_calls: std::sync::Arc<std::sync::Mutex<FakeTmuxPaneCalls>>,
+}
+
+/// What a [`FakeTmux`] was asked about panes.
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+pub struct FakeTmuxPaneCalls {
+    pub listed: Vec<Option<String>>,
+    pub captured: Vec<(Option<String>, String)>,
 }
 
 type FakeTmuxPaneScript = std::sync::Arc<
@@ -1149,6 +1259,9 @@ impl PartialEq for FakeTmux {
             && self.kill_outcomes == other.kill_outcomes
             && *self.kill_calls.lock().unwrap() == *other.kill_calls.lock().unwrap()
             && *self.pane_statuses.lock().unwrap() == *other.pane_statuses.lock().unwrap()
+            && self.panes == other.panes
+            && self.histories == other.histories
+            && *self.pane_calls.lock().unwrap() == *other.pane_calls.lock().unwrap()
     }
 }
 
@@ -1170,6 +1283,9 @@ impl FakeTmux {
             kill_outcomes: std::collections::BTreeMap::new(),
             kill_calls: std::sync::Arc::new(std::sync::Mutex::new(Vec::new())),
             pane_statuses: std::sync::Arc::default(),
+            panes: std::collections::BTreeMap::new(),
+            histories: std::collections::BTreeMap::new(),
+            pane_calls: std::sync::Arc::default(),
         }
     }
 
@@ -1192,6 +1308,25 @@ impl FakeTmux {
             message: message.into(),
         };
         tmux
+    }
+
+    /// Register the `list-panes -a` answer for server `socket` (`None`
+    /// is the default server).
+    pub fn with_panes(mut self, socket: Option<&str>, outcome: TmuxOutcome) -> Self {
+        self.panes
+            .insert(socket.unwrap_or_default().to_string(), outcome);
+        self
+    }
+
+    /// Register a canned scrollback capture for pane `target`.
+    pub fn with_history(mut self, target: impl Into<String>, capture: TmuxCaptureOutcome) -> Self {
+        self.histories.insert(target.into(), capture);
+        self
+    }
+
+    /// The pane listings and scrollback captures asked for so far.
+    pub fn pane_calls(&self) -> FakeTmuxPaneCalls {
+        self.pane_calls.lock().unwrap().clone()
     }
 
     /// Register a canned capture-pane response for `target`.
@@ -1308,6 +1443,31 @@ impl MuxBackend for FakeTmux {
             .unwrap_or(TmuxCaptureOutcome::Unsupported))
     }
 
+    fn list_panes_on(&self, socket_name: Option<&str>, _format: &str) -> Result<TmuxOutcome> {
+        let socket = effective_socket(socket_name).map(str::to_string);
+        self.pane_calls.lock().unwrap().listed.push(socket.clone());
+        Ok(self
+            .panes
+            .get(socket.as_deref().unwrap_or_default())
+            .cloned()
+            .unwrap_or_else(|| TmuxOutcome::Failed {
+                code: None,
+                message: "the fake cannot list panes".to_string(),
+            }))
+    }
+
+    fn pane_history(&self, socket_name: Option<&str>, target: &str) -> Result<TmuxCaptureOutcome> {
+        self.pane_calls.lock().unwrap().captured.push((
+            effective_socket(socket_name).map(str::to_string),
+            target.to_string(),
+        ));
+        Ok(self
+            .histories
+            .get(target)
+            .cloned()
+            .unwrap_or(TmuxCaptureOutcome::NoTarget))
+    }
+
     fn rename_session(
         &self,
         socket_name: Option<&str>,
@@ -1420,6 +1580,14 @@ impl MuxBackend for Box<dyn MuxBackend> {
 
     fn capture_pane(&self, socket_name: Option<&str>, target: &str) -> Result<TmuxCaptureOutcome> {
         (**self).capture_pane(socket_name, target)
+    }
+
+    fn list_panes_on(&self, socket_name: Option<&str>, format: &str) -> Result<TmuxOutcome> {
+        (**self).list_panes_on(socket_name, format)
+    }
+
+    fn pane_history(&self, socket_name: Option<&str>, target: &str) -> Result<TmuxCaptureOutcome> {
+        (**self).pane_history(socket_name, target)
     }
 
     fn rename_session(

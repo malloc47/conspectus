@@ -4,7 +4,13 @@
 
 Accepted. Amended by [ADR 0140](0140-history-and-presence.md): a history
 record may carry a mux's launch argv verbatim, prompts included. That
-is the one Tier 3 field that can carry payload.
+is the one Tier 3 field that can carry payload. Amended by
+[ADR 0148](0148-opt-in-transcript-search-index.md): transcript text may
+be persisted in one place, the opt-in search index, written only by
+operator-initiated commands and never by the daemon. Amended by
+[ADR 0149](0149-two-level-search-current-and-wider-context.md): mux pane
+scrollback joins transcripts as a Tier 2 content source for content search,
+read under the same gesture, held in memory only, and never persisted.
 
 ## Context
 
@@ -112,6 +118,11 @@ Sanctioned Tier 2 readers today:
 - The **native transcript viewer** and its per-harness parsers
   (ADR 0052) — opt-in modal, entire transcript, no persistence
   beyond the modal's lifetime.
+- The **session content search** (ADR 0147): the `/` contents scope,
+  the Search view, the content filter, the viewer's find, and
+  `conspectus search`. Hits and capped snippets live in memory for the
+  process lifetime and are never written, stored in the graph, or sent
+  to the daemon.
 - Any future preview-style column or transcript surface on the
   same footing.
 

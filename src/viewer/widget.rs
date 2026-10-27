@@ -30,13 +30,14 @@ use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Paragraph, Wrap};
 
+use crate::viewer::highlight::highlight_matches;
 use crate::viewer::model::{TranscriptDocument, TurnKind};
 use crate::viewer::render::{
     ToolCategory, aggregate_tool_phrase, categorize_tool_name, chip_label, chip_label_width,
     into_owned_line, leader_width, render_aggregated_tool_summary, render_turn,
     tool_name_from_body,
 };
-use crate::viewer::state::{RenderCache, ToolDetail, ViewerState};
+use crate::viewer::state::{RenderCache, ToolDetail, TurnStart, ViewerState};
 use crate::viewer::theme::Theme;
 
 /// Draw the transcript viewer onto `area`. Mutates `state` to
@@ -58,9 +59,6 @@ pub fn draw(state: &mut ViewerState, theme: &Theme, frame: &mut Frame<'_>, area:
     draw_body(state, theme, frame, chunks[2]);
     draw_separator(theme, frame, chunks[3]);
     draw_footer(state, theme, frame, chunks[4]);
-    if state.show_help {
-        draw_help_overlay(theme, frame, area);
-    }
 }
 
 fn draw_header(document: &TranscriptDocument, theme: &Theme, frame: &mut Frame<'_>, area: Rect) {
@@ -149,10 +147,18 @@ fn draw_body(state: &mut ViewerState, theme: &Theme, frame: &mut Frame<'_>, area
         return;
     }
 
+    let total = body_lines(state, theme, area.width).len();
+    // A find that asked to scroll to a turn lands on its first line, one
+    // line down so the turn's neighbor above shows.
+    if let Some(turn) = state.find.pending_scroll.take()
+        && let Some(cache) = state.rendered.as_ref()
+        && let Some(start) = cache.turn_starts.iter().find(|s| s.turn_index == turn)
+    {
+        state.scroll_offset = start.line.saturating_sub(1);
+        state.stick_to_end = false;
+    }
     let stick_to_end = state.stick_to_end;
     let requested_offset = state.scroll_offset;
-    let lines = body_lines(state, theme, area.width);
-    let total = lines.len();
     let viewport_height = area.height;
     let max_offset = total.saturating_sub(viewport_height as usize);
     let scroll_offset = if stick_to_end {
@@ -166,8 +172,10 @@ fn draw_body(state: &mut ViewerState, theme: &Theme, frame: &mut Frame<'_>, area
     // `Paragraph::scroll`, whose offset is a u16) keeps transcripts
     // longer than 65,535 lines scrollable and clones only what is shown.
     let visible_end = total.min(scroll_offset + viewport_height as usize);
-    let paragraph = Paragraph::new(lines[scroll_offset..visible_end].to_vec());
-    frame.render_widget(paragraph, area);
+    let cache = state.rendered.as_ref().expect("composed above");
+    let mut visible = cache.lines[scroll_offset..visible_end].to_vec();
+    highlight_matches(&mut visible, scroll_offset, cache, &state.find, theme);
+    frame.render_widget(Paragraph::new(visible), area);
 
     state.viewport_height = viewport_height;
     state.total_lines = total;
@@ -193,11 +201,17 @@ pub fn body_lines<'s>(
     let content_width = width.saturating_sub(leader_width(gutter_inner_width));
 
     if !cache_is_current(state, content_width) {
-        let owned: Vec<Line<'static>> =
-            build_body_lines(state, theme, content_width, gutter_inner_width)
-                .into_iter()
-                .map(into_owned_line)
-                .collect();
+        let mut turn_starts = Vec::new();
+        let owned: Vec<Line<'static>> = build_body_lines(
+            state,
+            theme,
+            content_width,
+            gutter_inner_width,
+            &mut turn_starts,
+        )
+        .into_iter()
+        .map(into_owned_line)
+        .collect();
         state.rendered = Some(RenderCache {
             content_width,
             tool_detail: state.tool_detail,
@@ -205,6 +219,8 @@ pub fn body_lines<'s>(
             show_aborted: state.show_aborted,
             show_hidden: state.show_hidden,
             lines: owned,
+            turn_starts,
+            leader: usize::from(leader_width(gutter_inner_width)),
         });
     }
     &state.rendered.as_ref().expect("just populated").lines
@@ -236,6 +252,10 @@ fn cache_is_current(state: &ViewerState, content_width: u16) -> bool {
 }
 
 fn draw_footer(state: &ViewerState, theme: &Theme, frame: &mut Frame<'_>, area: Rect) {
+    if let Some(prompt) = &state.find.prompt {
+        draw_find_prompt(prompt, &state.find_hint, theme, frame, area);
+        return;
+    }
     let position = format!(
         "[ {}/{} ]",
         state
@@ -279,6 +299,12 @@ fn draw_footer(state: &ViewerState, theme: &Theme, frame: &mut Frame<'_>, area: 
     let has_hidden = state.document.turns.iter().any(|turn| turn.hidden);
 
     let tools_on = state.tool_detail.is_visible();
+    let find_text = find_chip_text(state);
+    let find_style = if state.find.is_active() && state.find.matches.is_empty() {
+        Style::new().fg(theme.warning).add_modifier(Modifier::BOLD)
+    } else {
+        on_style
+    };
     let mut spans: Vec<Span<'_>> = vec![
         Span::styled(position, chip_style),
         pipe.clone(),
@@ -314,7 +340,12 @@ fn draw_footer(state: &ViewerState, theme: &Theme, frame: &mut Frame<'_>, area: 
         ));
         spans.push(pipe.clone());
     }
+    if let Some(text) = &find_text {
+        spans.splice(2..2, [Span::styled(text.clone(), find_style), pipe.clone()]);
+    }
     spans.extend([
+        Span::styled("(/) find", off_style),
+        pipe.clone(),
         Span::styled(help_chip, off_style),
         pipe.clone(),
         Span::styled(scroll_hint, off_style),
@@ -379,7 +410,11 @@ fn draw_footer(state: &ViewerState, theme: &Theme, frame: &mut Frame<'_>, area: 
             },
         );
         let close_span = Span::styled(format!(" · {close_chip}"), off_style);
-        let base = [position_span, tools_span, think_span];
+        let mut base = vec![position_span];
+        if let Some(text) = &find_text {
+            base.push(Span::styled(format!(" · {text}"), find_style));
+        }
+        base.extend([tools_span, think_span]);
         let mut tiers: Vec<Vec<Span<'_>>> = Vec::new();
         if has_hidden {
             tiers.push(
@@ -422,6 +457,94 @@ fn draw_footer(state: &ViewerState, theme: &Theme, frame: &mut Frame<'_>, area: 
     frame.render_widget(Paragraph::new(line), area);
 }
 
+/// The longest query shown in the footer chip before it is cut.
+const FIND_CHIP_QUERY_CELLS: usize = 16;
+
+/// The find chip: the query with its position among the matches, or
+/// `no match` (and how many matches the hidden turns hold), then the
+/// one-key note if there is one. With no active find, just the note.
+fn find_chip_text(state: &ViewerState) -> Option<String> {
+    let find = &state.find;
+    if !find.is_active() {
+        return find.note.clone();
+    }
+    let mut query: String = find.query.chars().take(FIND_CHIP_QUERY_CELLS).collect();
+    if find.query.chars().count() > FIND_CHIP_QUERY_CELLS {
+        query.push('…');
+    }
+    let mut text = match find.current {
+        Some(index) => format!("find \"{query}\" {}/{}", index + 1, find.matches.len()),
+        None => format!("find \"{query}\" no match"),
+    };
+    if find.matches.is_empty() && find.hidden_matches > 0 {
+        text.push_str(&format!(" · {} in hidden turns", find.hidden_matches));
+    }
+    if let Some(note) = &find.note {
+        text.push_str(" · ");
+        text.push_str(note);
+    }
+    Some(text)
+}
+
+/// Draw the find prompt over the footer: `/` and the text with a block
+/// cursor, then the key hint. A long query scrolls so the cursor stays
+/// in view.
+pub(crate) fn draw_find_prompt(
+    prompt: &crate::viewer::find::FindPrompt,
+    hint: &str,
+    theme: &Theme,
+    frame: &mut Frame<'_>,
+    area: Rect,
+) {
+    let hint_text = if hint.is_empty() {
+        String::new()
+    } else {
+        format!("   {hint}")
+    };
+    let hint_cells = unicode_width::UnicodeWidthStr::width(hint_text.as_str());
+    let width = area.width as usize;
+    // Cells for the text and the cursor after the leading `/`.
+    let room = width.saturating_sub(1 + hint_cells).max(4);
+    let chars: Vec<char> = prompt.text.chars().collect();
+    let cells = |c: char| unicode_width::UnicodeWidthChar::width(c).unwrap_or(0);
+    let cursor = prompt.cursor.min(chars.len());
+    let at_char = chars.get(cursor).copied();
+    let at_cells = at_char.map_or(1, |c| cells(c).max(1));
+    // Scroll so the cursor cell stays visible: drop text from the left
+    // until what precedes the cursor and the cursor itself fit, counting
+    // display cells (a CJK character is two) rather than characters.
+    let mut start = 0usize;
+    let mut before_cells: usize = chars[..cursor].iter().map(|&c| cells(c)).sum();
+    while start < cursor && before_cells + at_cells > room {
+        before_cells -= cells(chars[start]);
+        start += 1;
+    }
+    let before: String = chars[start..cursor].iter().collect();
+    let at: String = at_char.map_or_else(|| " ".to_string(), |c| c.to_string());
+    let mut after = String::new();
+    let mut used = before_cells + at_cells;
+    for &c in chars.iter().skip(cursor + 1) {
+        if used + cells(c) > room {
+            break;
+        }
+        used += cells(c);
+        after.push(c);
+    }
+    let line = Line::from(vec![
+        Span::styled("/", Style::new().add_modifier(Modifier::BOLD)),
+        Span::raw(before),
+        Span::styled(at, Style::new().add_modifier(Modifier::REVERSED)),
+        Span::raw(after),
+        Span::styled(
+            hint_text,
+            Style::new()
+                .fg(theme.secondary_text)
+                .add_modifier(Modifier::DIM),
+        ),
+    ]);
+    frame.render_widget(Paragraph::new(line), area);
+}
+
 /// `tools·sum (t)` / `tools·off (t)` style chip. Carries the
 /// current ToolDetail value so the operator sees both the level
 /// and the cycle key together.
@@ -457,89 +580,6 @@ fn hidden_chip_label(showing: bool) -> String {
     format!("hidden·{state_label} (H)")
 }
 
-fn draw_help_overlay(theme: &Theme, frame: &mut Frame<'_>, area: Rect) {
-    use ratatui::widgets::{Block, Borders, Clear};
-    // Build the body content first so we can size the panel
-    // exactly to fit it.
-    let entries: &[(&str, &str)] = &[
-        ("q / Esc / Ctrl-C", "Close viewer"),
-        ("j / Down", "Scroll one line down"),
-        ("k / Up", "Scroll one line up"),
-        ("Space / PgDn", "Page down"),
-        ("PgUp", "Page up"),
-        ("Ctrl-D / Ctrl-U", "Half-page down / up"),
-        ("g / Home", "Jump to start of transcript"),
-        ("G / End", "Jump to end (open default)"),
-        ("t", "Cycle tool detail (off → sum → trunc → all)"),
-        ("T", "Toggle thinking turns"),
-        ("I", "Toggle aborted/interrupted turns"),
-        ("H", "Toggle records the harness UI hid"),
-        ("?", "Toggle this help panel"),
-    ];
-
-    // Pick the longest key cell so columns align.
-    let key_col_width = entries
-        .iter()
-        .map(|(k, _)| unicode_width::UnicodeWidthStr::width(*k))
-        .max()
-        .unwrap_or(0);
-    let desc_col_width = entries
-        .iter()
-        .map(|(_, d)| unicode_width::UnicodeWidthStr::width(*d))
-        .max()
-        .unwrap_or(0);
-    let inner_width = u16::try_from(key_col_width + 3 + desc_col_width).unwrap_or(u16::MAX);
-    // +4 for the two borders + two cells of inner padding.
-    let panel_width = inner_width
-        .saturating_add(4)
-        .min(area.width.saturating_sub(2));
-    // +2 for the top + bottom borders, +1 for a title line.
-    let panel_height = (entries.len() as u16 + 3).min(area.height.saturating_sub(2));
-
-    let panel_x = area.x + area.width.saturating_sub(panel_width) / 2;
-    let panel_y = area.y + area.height.saturating_sub(panel_height) / 2;
-    let panel_area = Rect::new(panel_x, panel_y, panel_width, panel_height);
-
-    let lines: Vec<Line<'_>> = entries
-        .iter()
-        .map(|(key, desc)| {
-            let key_pad = key_col_width.saturating_sub(unicode_width::UnicodeWidthStr::width(*key));
-            Line::from(vec![
-                Span::raw(" "),
-                Span::styled(
-                    format!("{}{} ", " ".repeat(key_pad), key),
-                    Style::new()
-                        // Use the codex color via the
-                        // registry-aware lookup. This is a
-                        // semantic reuse — the viewer help sheet
-                        // paints its key column in the same cyan
-                        // as codex identity chips.
-                        .fg(theme.harness_color("codex"))
-                        .add_modifier(Modifier::BOLD),
-                ),
-                Span::raw("  "),
-                Span::styled((*desc).to_string(), Style::new()),
-            ])
-        })
-        .collect();
-
-    let title_line = Line::from(Span::styled(
-        " viewer keybindings ",
-        Style::new()
-            .fg(theme.success)
-            .add_modifier(Modifier::BOLD)
-            .add_modifier(theme.badge),
-    ));
-
-    frame.render_widget(Clear, panel_area);
-    let block = Block::default()
-        .borders(Borders::ALL)
-        .border_style(Style::new().fg(theme.success))
-        .title(title_line);
-    let paragraph = Paragraph::new(lines).block(block);
-    frame.render_widget(paragraph, panel_area);
-}
-
 /// Compute the inner gutter chip-label width from the widest
 /// label among visible turns. This allows the gutter to shrink
 /// when wider labels (e.g. `thinking`) are toggled off.
@@ -567,6 +607,7 @@ fn build_body_lines<'a>(
     theme: &Theme,
     content_width: u16,
     gutter_inner_width: usize,
+    turn_starts: &mut Vec<TurnStart>,
 ) -> Vec<Line<'a>> {
     let mut lines: Vec<Line<'a>> = Vec::new();
     let turns = &state.document.turns;
@@ -581,6 +622,15 @@ fn build_body_lines<'a>(
         // emit one aggregated line for the whole run.
         if state.tool_detail == ToolDetail::Summary && is_tool_kind(turn.kind) {
             let (counts, run_len) = collect_tool_run(&turns[i..], state);
+            for offset in 0..run_len.max(1) {
+                if passes_turn_filters(&turns[i + offset], state) {
+                    turn_starts.push(TurnStart {
+                        turn_index: i + offset,
+                        line: lines.len(),
+                        collapsed: true,
+                    });
+                }
+            }
             if !counts.is_empty() {
                 let phrase = aggregate_tool_phrase(&counts);
                 let owned: Vec<Line<'static>> = render_aggregated_tool_summary(
@@ -594,6 +644,11 @@ fn build_body_lines<'a>(
             i += run_len.max(1);
             continue;
         }
+        turn_starts.push(TurnStart {
+            turn_index: i,
+            line: lines.len(),
+            collapsed: false,
+        });
         lines.extend(render_turn(
             turn,
             theme,

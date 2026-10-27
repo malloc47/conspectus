@@ -1,0 +1,26 @@
+---
+source: src/tui/widgets/search_content_tests.rs
+expression: text
+---
+
+
+
+        ┌ / search contents  [ Current ] All  [ Sessions ] Messages ────────────────────────┐
+        │/quokka                                                                            │
+        │2 results · messages · 34/77 sessions · 2 skipped                                  │
+        │> session session aaaa1111  3 hits                  1h …the quokka design for it   │
+        │  session session bbbb2222  3 hits                  1h …the quokka design for it   │
+        │                                                                                   │
+        │                                                                                   │
+        │                                                                                   │
+        │                                                                                   │
+        │                                                                                   │
+        │                                                                                   │
+        │                                                                                   │
+        │                                                                                   │
+        │                                                                                   │
+        │                                                                                   │
+        │                                                                                   │
+        │↑/↓ move · Enter open hit · Esc close · Tab current/all · S-Tab sessions/messages  │
+        │· Ctrl-R earlier search · Ctrl-O options · Ctrl-F filter lists · Ctrl-S Search view│
+        └───────────────────────────────────────────────────────────────────────────────────┘

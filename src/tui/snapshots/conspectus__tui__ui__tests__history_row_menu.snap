@@ -25,4 +25,4 @@ updated 0s ago┌ mux config-agent3 ──────────────�
 │             │  Clean up…                                                           │             │
 │             │     forget gone records past their reap age                          │             │
 └─────────────│                                                                      │─────────────┘
-[left] group:n└──────────────────────────────────────────────────────────────────────┘ plan, clean u
+[left] group:n└──────────────────────────────────────────────────────────────────────┘· q quit …

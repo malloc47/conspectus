@@ -42,7 +42,8 @@ rendered example frames. Tests keep it in step with the code.
 
 Purpose: user-facing runtime reference covering the environment variables
 that gate discovery providers, the harness state-root overrides, the
-config-file precedence, and the current CLI surface.
+config-file precedence, the current CLI surface, and session content search
+(`conspectus search`).
 
 ## `docs/pins-walkthrough.md`
 

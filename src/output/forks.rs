@@ -34,6 +34,7 @@ struct ChildAgent {
     /// Display-form `NodeId` of the child agent.
     node_id: String,
     harness_key: String,
+    session_key: String,
     last_active_epoch: Option<i64>,
 }
 
@@ -131,6 +132,7 @@ fn visible_child_count(
             let candidate_count = candidate_counts.get(&child.node_id).copied().unwrap_or(0);
             options.filter.matches_session(&SessionMatchInputs {
                 harness_key: &child.harness_key,
+                session_key: &child.session_key,
                 now_epoch: options.now_epoch,
                 last_active_epoch: child.last_active_epoch,
                 mux_state: MuxStateKey::from_candidate_count(candidate_count),
@@ -274,6 +276,7 @@ fn collect_resolved_child_agents_per_fork(
             .push(ChildAgent {
                 node_id: target_display,
                 harness_key: agent.harness_key.clone(),
+                session_key: agent.id.session_key.clone(),
                 last_active_epoch: agent.last_active_epoch,
             });
     }

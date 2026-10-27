@@ -135,6 +135,7 @@ fn view_heading(view: View) -> &'static str {
         View::Forks => "Forks view",
         View::Pinned => "Pinned view",
         View::History => "History view",
+        View::Search => "Search view",
     }
 }
 
@@ -148,6 +149,9 @@ fn row_kind_headings(kind: &RowKind) -> &'static [&'static str] {
         RowKind::Pr(_) => &["PR row"],
         RowKind::Fork(_) => &["Fork row"],
         RowKind::Mixed(_) => &["Pin row", "History row"],
+        RowKind::Hit(_) => &["Hit row"],
+        RowKind::Pane(_) => &["Pane row"],
+        RowKind::PaneHit(_) => &["Pane hit row"],
     }
 }
 
@@ -171,6 +175,7 @@ fn every_view_and_row_kind_has_a_heading() {
         "Fork row",
         "Pin row",
         "History row",
+        "Hit row",
         "Stopped mux row",
         "Nested row",
     ]);

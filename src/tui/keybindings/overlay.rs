@@ -182,6 +182,37 @@ const fn alias<A>(key: KeyMatcher, action: A) -> KeyRow<A> {
     }
 }
 
+/// What the search options pane binds. Space and Enter both flip the
+/// option under the cursor.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SearchOptionKey {
+    Abort,
+    Back,
+    Down,
+    Up,
+    Toggle,
+}
+
+/// The pane behind `Ctrl-O` in the contents modal: what a search looks in.
+pub const SEARCH_OPTION_KEYS: &[KeyRow<SearchOptionKey>] = &[
+    alias(ctrl('c'), SearchOptionKey::Abort),
+    shown(key(KeyCode::Up), SearchOptionKey::Up, "↑", "move"),
+    shown(key(KeyCode::Down), SearchOptionKey::Down, "↓", "move"),
+    alias(ctrl('n'), SearchOptionKey::Down),
+    alias(ctrl('p'), SearchOptionKey::Up),
+    alias(key(KeyCode::Char('k')), SearchOptionKey::Up),
+    alias(key(KeyCode::Char('j')), SearchOptionKey::Down),
+    shown(
+        key(KeyCode::Char(' ')),
+        SearchOptionKey::Toggle,
+        "Space",
+        "toggle",
+    ),
+    alias(key(KeyCode::Enter), SearchOptionKey::Toggle),
+    shown(key(KeyCode::Esc), SearchOptionKey::Back, "Esc", "back"),
+    alias(ctrl('o'), SearchOptionKey::Back),
+];
+
 // ---------------------------------------------------------------------
 // Menus: Controls, the pins menu, the mux menu.
 // ---------------------------------------------------------------------
@@ -323,9 +354,25 @@ pub enum SearchKey {
     Pick,
     Down,
     Up,
+    /// Quick select: switch between the current view and everything.
+    Scope,
+    /// Contents scope: list sessions, or the matching messages.
+    Granularity,
+    /// Contents scope: open the search options.
+    Options,
+    /// Contents scope: keep the query as the filter on the lists.
+    ApplyFilter,
+    /// Contents scope: keep the search and open the Search view on it.
+    Keep,
+    /// Contents scope: fill the field from the previous search string.
+    PrevQuery,
+    /// Contents scope: fill the field from the next search string, or
+    /// empty it past the newest.
+    NextQuery,
 }
 
-pub const SEARCH_KEYS: &[KeyRow<SearchKey>] = &[
+/// The picker shares the list-and-query keys but has no scopes.
+pub const PICKER_KEYS: &[KeyRow<SearchKey>] = &[
     alias(ctrl('c'), SearchKey::Abort),
     alias(key(KeyCode::Esc), SearchKey::Cancel),
     alias(key(KeyCode::Enter), SearchKey::Pick),
@@ -333,6 +380,43 @@ pub const SEARCH_KEYS: &[KeyRow<SearchKey>] = &[
     alias(key(KeyCode::Up), SearchKey::Up),
     alias(ctrl('n'), SearchKey::Down),
     alias(ctrl('p'), SearchKey::Up),
+];
+
+/// `/` quick select. Tab and Shift-Tab both switch the reach, which is
+/// only ever one of two (and the same in the contents modal).
+pub const SEARCH_KEYS: &[KeyRow<SearchKey>] = &[
+    alias(ctrl('c'), SearchKey::Abort),
+    shown(key(KeyCode::Up), SearchKey::Up, "↑", "move"),
+    shown(key(KeyCode::Down), SearchKey::Down, "↓", "move"),
+    alias(ctrl('n'), SearchKey::Down),
+    alias(ctrl('p'), SearchKey::Up),
+    shown(key(KeyCode::Enter), SearchKey::Pick, "Enter", "pick"),
+    shown(key(KeyCode::Esc), SearchKey::Cancel, "Esc", "close"),
+    shown(key(KeyCode::Tab), SearchKey::Scope, "Tab", "current/all"),
+    alias(key(KeyCode::BackTab), SearchKey::Scope),
+];
+
+/// Searching what was said in the sessions and in mux scrollback.
+pub const SEARCH_CONTENT_KEYS: &[KeyRow<SearchKey>] = &[
+    alias(ctrl('c'), SearchKey::Abort),
+    shown(key(KeyCode::Up), SearchKey::Up, "↑", "move"),
+    shown(key(KeyCode::Down), SearchKey::Down, "↓", "move"),
+    alias(ctrl('n'), SearchKey::Down),
+    alias(ctrl('p'), SearchKey::Up),
+    shown(key(KeyCode::Enter), SearchKey::Pick, "Enter", "open hit"),
+    shown(key(KeyCode::Esc), SearchKey::Cancel, "Esc", "close"),
+    shown(key(KeyCode::Tab), SearchKey::Scope, "Tab", "current/all"),
+    shown(
+        key(KeyCode::BackTab),
+        SearchKey::Granularity,
+        "S-Tab",
+        "sessions/messages",
+    ),
+    shown(ctrl('r'), SearchKey::PrevQuery, "Ctrl-R", "earlier search"),
+    alias(ctrl('t'), SearchKey::NextQuery),
+    shown(ctrl('o'), SearchKey::Options, "Ctrl-O", "options"),
+    shown(ctrl('f'), SearchKey::ApplyFilter, "Ctrl-F", "filter lists"),
+    shown(ctrl('s'), SearchKey::Keep, "Ctrl-S", "Search view"),
 ];
 
 // ---------------------------------------------------------------------
@@ -547,14 +631,40 @@ pub const OMNIBOX_KEYS: &[KeyRow<OmniboxKey>] = &[alias(key(KeyCode::Tab), Omnib
 // all aliases; the keys still resolve here.
 // ---------------------------------------------------------------------
 
+use crate::tui::widgets::pane_viewer::PaneViewerMsg;
+use crate::viewer::find::ViewerFindMsg;
 use crate::viewer::input::ViewerMsg;
 
+pub const PANE_VIEWER_KEYS: &[KeyRow<PaneViewerMsg>] = &[
+    alias(ctrl('c'), PaneViewerMsg::Quit),
+    alias(ctrl('d'), PaneViewerMsg::HalfPageDown),
+    alias(ctrl('u'), PaneViewerMsg::HalfPageUp),
+    alias(key(KeyCode::Esc), PaneViewerMsg::Close),
+    alias(ch('q'), PaneViewerMsg::Quit),
+    alias(ch('j'), PaneViewerMsg::ScrollDown),
+    alias(key(KeyCode::Down), PaneViewerMsg::ScrollDown),
+    alias(ch('k'), PaneViewerMsg::ScrollUp),
+    alias(key(KeyCode::Up), PaneViewerMsg::ScrollUp),
+    alias(key(KeyCode::PageDown), PaneViewerMsg::PageDown),
+    alias(ch(' '), PaneViewerMsg::PageDown),
+    alias(key(KeyCode::PageUp), PaneViewerMsg::PageUp),
+    alias(ch('g'), PaneViewerMsg::JumpToStart),
+    alias(key(KeyCode::Home), PaneViewerMsg::JumpToStart),
+    alias(KeyMatcher::UpperChar('G'), PaneViewerMsg::JumpToEnd),
+    alias(key(KeyCode::End), PaneViewerMsg::JumpToEnd),
+    alias(ch('/'), PaneViewerMsg::FindOpen),
+    alias(ch('n'), PaneViewerMsg::FindNext),
+    alias(KeyMatcher::UpperChar('N'), PaneViewerMsg::FindPrev),
+    alias(ch('a'), PaneViewerMsg::Attach),
+    alias(ch('?'), PaneViewerMsg::ToggleHelp),
+];
+
 pub const VIEWER_KEYS: &[KeyRow<ViewerMsg>] = &[
-    alias(ctrl('c'), ViewerMsg::Close),
+    alias(ctrl('c'), ViewerMsg::Quit),
     alias(ctrl('d'), ViewerMsg::HalfPageDown),
     alias(ctrl('u'), ViewerMsg::HalfPageUp),
     alias(key(KeyCode::Esc), ViewerMsg::Close),
-    alias(ch('q'), ViewerMsg::Close),
+    alias(ch('q'), ViewerMsg::Quit),
     alias(ch('j'), ViewerMsg::ScrollDown),
     alias(key(KeyCode::Down), ViewerMsg::ScrollDown),
     alias(ch('k'), ViewerMsg::ScrollUp),
@@ -570,8 +680,41 @@ pub const VIEWER_KEYS: &[KeyRow<ViewerMsg>] = &[
     alias(KeyMatcher::UpperChar('T'), ViewerMsg::ToggleThinking),
     alias(KeyMatcher::UpperChar('I'), ViewerMsg::ToggleAborted),
     alias(KeyMatcher::UpperChar('H'), ViewerMsg::ToggleHidden),
+    alias(ch('/'), ViewerMsg::FindOpen),
+    alias(ch('n'), ViewerMsg::FindNext),
+    alias(KeyMatcher::UpperChar('N'), ViewerMsg::FindPrev),
     alias(ch('?'), ViewerMsg::ToggleHelp),
 ];
+
+/// The find prompt inside the viewer. Keys no row binds type into the
+/// prompt (see [`typed_char`]).
+pub const VIEWER_FIND_KEYS: &[KeyRow<ViewerFindMsg>] = &[
+    alias(ctrl('c'), ViewerFindMsg::Cancel),
+    shown(key(KeyCode::Enter), ViewerFindMsg::Confirm, "Enter", "find"),
+    shown(key(KeyCode::Esc), ViewerFindMsg::Cancel, "Esc", "cancel"),
+    alias(key(KeyCode::Backspace), ViewerFindMsg::Backspace),
+    alias(key(KeyCode::Delete), ViewerFindMsg::Delete),
+    alias(key(KeyCode::Left), ViewerFindMsg::Left),
+    alias(key(KeyCode::Right), ViewerFindMsg::Right),
+    alias(key(KeyCode::Home), ViewerFindMsg::Home),
+    alias(key(KeyCode::End), ViewerFindMsg::End),
+    alias(ctrl('u'), ViewerFindMsg::ClearLine),
+];
+
+/// The character a key types into a text prompt, if it types one:
+/// a plain or shifted character with no Control or Alt.
+pub fn typed_char(event: KeyEvent) -> Option<char> {
+    match event.code {
+        KeyCode::Char(c)
+            if !event
+                .modifiers
+                .intersects(KeyModifiers::CONTROL | KeyModifiers::ALT) =>
+        {
+            Some(c)
+        }
+        _ => None,
+    }
+}
 
 // ---------------------------------------------------------------------
 // The modal key convention. One set of meanings for Esc, Enter, and
@@ -669,6 +812,13 @@ pub const MODAL_CONVENTION: &[ModalConvention] = &[
         SpaceMeans::Pages,
         "a pager: Space pages down",
     ),
+    conv(
+        "PaneViewer",
+        EnterMeans::Nothing,
+        SpaceMeans::Pages,
+        "a pager: Space pages down",
+    ),
+    conv("ViewerFind", EnterMeans::Submits, SpaceMeans::Types, ""),
     conv("WorktreeMenu", EnterMeans::Activates, SpaceMeans::Types, ""),
     conv("NewMux", EnterMeans::Submits, SpaceMeans::Types, ""),
     conv("MuxMenu", EnterMeans::Activates, SpaceMeans::Types, ""),

@@ -72,7 +72,7 @@ network = true
 read = ["pr list ...", "pr view ...", "auth status ..."]
 
 [programs.tmux]
-adr = ["0006", "0057", "0143", "0093", "0108"]
+adr = ["0006", "0057", "0143", "0093", "0108", "0149"]
 names = ["tmux"]
 globals = { "-L" = 1 }
 chain = ";"
@@ -81,6 +81,7 @@ read = [
     "display-message ...",
     "capture-pane ...",
     "has-session ...",
+    "list-panes ...",
 ]
 act = [
     "new-session ...",

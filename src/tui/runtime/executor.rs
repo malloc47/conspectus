@@ -341,8 +341,17 @@ pub(super) fn execute_exec_spec(
                 let _ = app.update(Msg::SetStatus(Some(resume_disabled_reason(other))));
             }
         },
-        ExecSpec::ViewSession(session_id) => {
-            execute_view_session(terminal, app, config, session_id);
+        ExecSpec::ViewSession(session_id, open) => {
+            execute_view_session(terminal, app, config, session_id, open.as_ref());
+        }
+        ExecSpec::PaneScrollback { pane, line, text } => {
+            open_pane_scrollback(
+                app,
+                &crate::discovery::tmux::SystemTmux::new(),
+                &pane,
+                line,
+                &text,
+            );
         }
         ExecSpec::MuxNew { name, cwd } => {
             execute_mux_new(terminal, app, &name, &cwd, policy);
@@ -359,6 +368,36 @@ pub(super) fn execute_exec_spec(
     }
 }
 
+/// Executor branch for `ExecSpec::PaneScrollback`: capture the pane's
+/// scrollback now and open it in the full-screen pane viewer on the line
+/// the search found.
+pub(super) fn open_pane_scrollback(
+    app: &mut App,
+    tmux: &dyn MuxBackend,
+    pane: &crate::content_search::PaneRef,
+    line: usize,
+    text: &str,
+) {
+    use crate::discovery::tmux::TmuxCaptureOutcome;
+    match tmux.pane_history(pane.mux.socket.as_deref(), &pane.pane_id) {
+        Ok(TmuxCaptureOutcome::Captured(capture)) => {
+            let scrollback = crate::content_search::panes::scrollback_lines(&capture.text);
+            app.open_pane_viewer(crate::tui::widgets::pane_viewer::PaneViewerState::open(
+                pane.clone(),
+                scrollback.lines,
+                line,
+                text,
+            ));
+        }
+        _ => {
+            let _ = app.update(Msg::SetStatus(Some(format!(
+                "{} {}.{} could not be read now",
+                pane.mux.session, pane.window_index, pane.pane_index
+            ))));
+        }
+    }
+}
+
 /// Executor branch for `ExecSpec::ViewSession`. Tries the native
 /// viewer first (ADR 0052) — its filesystem read + parser call
 /// keep the reducer pure. Falls through to the external-launch
@@ -369,8 +408,9 @@ pub(super) fn execute_view_session(
     app: &mut App,
     config: &RunConfig,
     session_id: crate::model::AgentSessionId,
+    open: Option<&crate::viewer::state::ViewerOpen>,
 ) {
-    if let Some(state) = crate::tui::viewer_bridge::build_viewer_state(&session_id) {
+    if let Some(state) = crate::tui::viewer_bridge::build_viewer_state_at(&session_id, open) {
         let label = format!("{}:{}", session_id.harness_key, session_id.session_key);
         app.open_viewer_modal(state);
         let _ = app.update(Msg::SetStatus(Some(format!("viewing {label}"))));

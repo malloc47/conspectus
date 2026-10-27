@@ -216,6 +216,7 @@ impl DevScenarioTuiArgs {
     fn run(self) -> Result<()> {
         let world = crate::dev_scenarios::materialize(&self.name)?;
         let view = view_from_flag(self.view);
+        self.filter_args.reject_contains("dev scenario tui")?;
         let filter = self.filter_args.to_row_filter()?;
         let grouping = self
             .filter_args

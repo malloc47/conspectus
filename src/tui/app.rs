@@ -21,13 +21,23 @@ use crate::tui::preview::{PreviewContent, PreviewEntry, PreviewSource, PreviewSt
 use crate::tui::rows::{Row, RowId, RowKind, RowTree};
 use crate::tui::{RunConfig, View};
 
+mod content;
+mod content_history;
 mod controls;
 mod explorer_nav;
 mod msg;
 mod overlays;
+mod search_open;
 mod tree;
 
+#[cfg(test)]
+pub(crate) use content::MAX_DETAIL_SESSIONS;
+pub use content::{
+    ContentSearch, ContentStatus, DetailRequest, PaneScope, ScanRequest, grouping_description,
+};
 pub use msg::Msg;
+#[cfg(test)]
+pub(crate) use search_open::OpenPlan;
 
 /// Cheap-to-clone, reference-counted handle to the App's resolved
 /// [`GraphSnapshot`]. Read consumers borrow it via [`Self::snapshot`].
@@ -147,6 +157,9 @@ pub struct App {
     /// Vertical scroll offset for the right-panel preview, in
     /// rendered rows.
     preview_scroll: u16,
+    /// Rows a scrolled Preview sits below the search match it opened
+    /// on; negative is above it.
+    preview_match_offset: i32,
     /// Unix-epoch seconds at which the current snapshot was
     /// loaded. `None` before the first `SetData`. The renderer
     /// turns this into the header's `updated Ns ago` indicator.
@@ -181,9 +194,37 @@ pub struct App {
     /// The entity the last action acted on, to select once the refresh
     /// after it lands (it may have moved to another view).
     pending_follow: Option<NodeId>,
+    /// Where the operator was before each jump to another view, newest
+    /// last; Backspace on the left pane walks it back.
+    nav_back: Vec<NavEntry>,
     /// The row that was selected when the action started: if it is still
     /// listed once the refresh lands, the operator stays on it.
     pending_follow_row: Option<RowId>,
+    /// The content search the session lists are filtered by, held in
+    /// memory only.
+    content: Option<content::ContentSearch>,
+    /// The applied search the `/` overlay's preview replaced, kept so
+    /// closing the overlay can bring it back.
+    content_stash: Option<content::ContentSearch>,
+    /// The content searches the Search view remembers (ADR 0149).
+    search_history: content_history::SearchHistory,
+    /// Numbers each search started, so its remembered copy can be found.
+    content_serial: u64,
+    /// What the `/` overlay was last set to, for the next time it opens.
+    search_memory: Option<content::SearchMemory>,
+    /// A scan the reducer wants started; the runtime takes it.
+    scan_request: Option<content::ScanRequest>,
+    detail_request: Option<content::DetailRequest>,
+    /// Search-view rows already opened once, so a rebuild opens new
+    /// buckets and sessions but does not undo a collapse.
+    search_auto_expanded: BTreeSet<RowId>,
+    /// How many times the tree was rebuilt in place, for tests that
+    /// check a change rebuilds only when it must.
+    #[cfg(test)]
+    pub(super) tree_rebuilds: usize,
+    /// Source of scan generations, so results of a scan the operator
+    /// replaced or cleared are recognized and dropped.
+    content_generation: u64,
     /// What an undo asked to select once its refresh lands.
     pending_restore_focus: Option<crate::tui::undo::RestoreFocus>,
     /// Operations the undo key can still reverse.
@@ -321,6 +362,17 @@ pub enum Focus {
     Right,
 }
 
+/// A place Backspace can return to: the view and the row that was
+/// selected in it before a jump elsewhere.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct NavEntry {
+    pub(crate) view: View,
+    pub(crate) selection: Option<RowId>,
+}
+
+/// How many jumps Backspace remembers.
+const NAV_BACK_LIMIT: usize = 20;
+
 /// Discriminant for an async operation the TUI wants to signal to
 /// the operator. Grows with each new async
 /// surface — forge-metadata fetches, transcript loads, agent-deck
@@ -341,6 +393,8 @@ pub enum InFlightKind {
     /// attach.
     /// Emitted by `rebuild`, `mux new`, and `mux launch`.
     Launch,
+    /// A content search is reading transcripts.
+    Search,
 }
 
 /// One in-flight async operation the status bar surfaces with a
@@ -466,6 +520,22 @@ impl ExplorerState {
 impl App {
     /// Build a fresh app at the start of the run.
     pub fn new(config: RunConfig) -> Self {
+        let initial_contains = config.initial_contains.clone();
+        let kinds = config.search.kinds;
+        let mut app = Self::build(config);
+        if let Some(text) = initial_contains {
+            // A search that cannot start (live preview off) says so
+            // instead of leaving the lists quietly unfiltered.
+            for effect in app.reduce_content(Msg::StartContentSearch { text, kinds }) {
+                if let crate::tui::Effect::Toast(note) = effect {
+                    app.post_toast(note);
+                }
+            }
+        }
+        app
+    }
+
+    fn build(config: RunConfig) -> Self {
         let mut config = config;
         if matches!(config.sessions_grouping, super::SessionsGrouping::None) {
             config.default_sort = super::Sort::Recency;
@@ -479,7 +549,7 @@ impl App {
         let grouping = match active_view {
             View::Sessions => super::Grouping::Sessions(config.sessions_grouping),
             View::Mux => super::Grouping::Mux(config.mux_grouping),
-            View::Union | View::Prs | View::Forks | View::Pinned | View::History => {
+            View::Union | View::Prs | View::Forks | View::Pinned | View::History | View::Search => {
                 super::Grouping::default_for(active_view)
             }
         };
@@ -499,6 +569,7 @@ impl App {
             edge_meta_visible,
             explorer_back_armed: false,
             preview_scroll: 0,
+            preview_match_offset: 0,
             loaded_at_epoch: None,
             status_message: None,
             messages: crate::tui::messages::MessageLog::default(),
@@ -508,7 +579,19 @@ impl App {
             handoff: None,
             refresh_requested: false,
             pending_follow: None,
+            nav_back: Vec::new(),
             pending_follow_row: None,
+            content: None,
+            content_stash: None,
+            search_history: content_history::SearchHistory::default(),
+            content_serial: 0,
+            search_memory: None,
+            scan_request: None,
+            detail_request: None,
+            search_auto_expanded: BTreeSet::new(),
+            #[cfg(test)]
+            tree_rebuilds: 0,
+            content_generation: 0,
             pending_restore_focus: None,
             undo: crate::tui::undo::UndoStack::default(),
             preview_store: PreviewStore::new(),
@@ -963,6 +1046,19 @@ impl App {
         self.preview_scroll
     }
 
+    /// Rows the Preview has been scrolled from the search match it
+    /// opened on.
+    pub fn preview_match_offset(&self) -> i32 {
+        self.preview_match_offset
+    }
+
+    /// Return the Preview to its anchor: the top, a transcript's newest
+    /// turns, or the search match it opens on.
+    fn reset_preview_scroll(&mut self) {
+        self.preview_scroll = 0;
+        self.preview_match_offset = 0;
+    }
+
     /// Latest graph snapshot, if loaded. Mostly useful to other modules
     /// that compute view-models against the same data.
     pub(crate) fn snapshot_handle(&self) -> Option<&SnapshotHandle> {
@@ -1127,13 +1223,23 @@ impl App {
             return;
         };
         let theme = self.theme().clone();
+        let search = crate::tui::preview::search::preview_search(self);
         if let Some(PreviewEntry {
             content: PreviewContent::Transcript(state),
             ..
         }) = self.preview_store.get_mut(&source)
         {
+            crate::tui::preview::search::apply(state, search.as_ref());
             crate::viewer::widget::body_lines(state, &theme, width);
         }
+    }
+
+    /// Whether the Preview is positioned on a search match, so scrolling
+    /// moves relative to it instead of the newest turns.
+    fn preview_follows_match(&self) -> bool {
+        self.preview_is_bottom_anchored()
+            && crate::tui::preview::search::preview_search(self)
+                .is_some_and(|search| search.turn.is_some())
     }
 
     /// Whether the Preview zone shows a transcript, which sits
@@ -1276,7 +1382,7 @@ impl App {
         if self.preview_focus() != focus {
             // A different row's preview starts at its anchor: the top,
             // or a transcript's newest turns.
-            self.preview_scroll = 0;
+            self.reset_preview_scroll();
         }
         effects
     }
@@ -1321,6 +1427,7 @@ impl App {
                 initial_selection_hint,
             } => {
                 self.set_data(snapshot, tree, loaded_at_epoch, initial_selection_hint);
+                self.scan_new_sessions();
                 self.apply_pending_follow();
                 self.apply_restore_focus();
             }
@@ -1328,7 +1435,10 @@ impl App {
                 self.set_tree(tree);
             }
             Msg::SelectRow(id) => {
-                self.set_selection(*id);
+                self.select_row_expanding(*id);
+            }
+            Msg::OpenEntity(node) => {
+                self.open_entity(&node);
             }
             Msg::NavDown => {
                 self.move_selection(1);
@@ -1379,8 +1489,14 @@ impl App {
             Msg::End => {
                 self.move_selection_to(usize::MAX);
             }
-            Msg::ToggleExpand => self.toggle_expand_selected(),
-            Msg::ExpandRow => self.expand_selected(),
+            Msg::ToggleExpand => {
+                self.toggle_expand_selected();
+                self.queue_details();
+            }
+            Msg::ExpandRow => {
+                self.expand_selected();
+                self.queue_details();
+            }
             Msg::CollapseRow => self.collapse_selected(),
             Msg::ToggleLinkedDetails => self.toggle_linked_details(),
             Msg::ExplorerNavDown => self.explorer_move_cursor(1),
@@ -1391,12 +1507,21 @@ impl App {
             Msg::ExplorerToggleGroup => self.explorer_toggle_group(),
             Msg::ExplorerToggleFullDetail => self.explorer_toggle_full_detail(),
             Msg::ToggleEdgeMeta => self.toggle_edge_meta(),
+            Msg::ExplorerBack if self.focus == Focus::Left && self.can_nav_back() => {
+                if let Some(why) = self.nav_pop() {
+                    effects.push(Effect::Toast(why));
+                }
+                effects.push(Effect::Persist);
+            }
             Msg::ExplorerBack => self.explorer_back(),
             Msg::CycleFocus => {
                 self.focus = match self.focus {
                     Focus::Left => Focus::Right,
                     Focus::Right => Focus::Left,
                 };
+            }
+            Msg::ScrollPreviewBy(delta) if self.preview_follows_match() => {
+                self.preview_match_offset = self.preview_match_offset.saturating_add(delta);
             }
             Msg::ScrollPreviewBy(delta) => {
                 // A transcript's offset counts up from its newest
@@ -1531,10 +1656,24 @@ impl App {
                     }
                 }
             }
+            Msg::ViewerFind(fmsg) => {
+                if !matches!(self.modal_stack.last(), Some(crate::tui::Modal::Viewer(_))) {
+                    return effects;
+                }
+                let Some(crate::tui::Modal::Viewer(state)) = self.modal_stack.pop() else {
+                    unreachable!("checked above");
+                };
+                let (next, _) = crate::viewer::find::reduce_find(state, fmsg);
+                self.modal_stack.push(crate::tui::Modal::Viewer(next));
+            }
             Msg::AttachSelected => {
                 use crate::tui::effect::ExecSpec;
                 if self.selected_row_awaits_handoff() {
                     effects.push(Effect::Toast(HANDOFF_PENDING_HINT.to_string()));
+                    return effects;
+                }
+                if let Some((session, open)) = crate::tui::actions::viewer_open_target(self) {
+                    effects.push(Effect::Exec(ExecSpec::ViewSession(session, Some(open))));
                     return effects;
                 }
                 if let Some(effect) = crate::tui::actions::default_effect(self) {
@@ -1580,9 +1719,13 @@ impl App {
             }
             Msg::ViewSelected => {
                 use crate::tui::effect::ExecSpec;
+                if let Some((session, open)) = crate::tui::actions::viewer_open_target(self) {
+                    effects.push(Effect::Exec(ExecSpec::ViewSession(session, Some(open))));
+                    return effects;
+                }
                 match crate::tui::actions::resolve_view_session(self) {
                     Ok(session_id) => {
-                        effects.push(Effect::Exec(ExecSpec::ViewSession(session_id)));
+                        effects.push(Effect::Exec(ExecSpec::ViewSession(session_id, None)));
                     }
                     Err(reason) => effects.push(Effect::Toast(
                         crate::tui::viewer::viewer_disabled_reason(&reason),
@@ -1595,6 +1738,10 @@ impl App {
                 self.rebuild_tree_in_place();
                 if first_visit {
                     self.seed_first_visit();
+                    // Seeding starts the view from its defaults; a Search
+                    // view that opens on results opens its rows again.
+                    self.search_auto_expanded.clear();
+                    self.auto_expand_search_rows();
                 }
                 if self.active_view != before {
                     effects.push(Effect::Persist);
@@ -1609,6 +1756,29 @@ impl App {
                 self.show_top_of_tree();
                 effects.push(Effect::Persist);
             }
+            Msg::StartContentSearch { .. }
+            | Msg::PreviewContentSearch { .. }
+            | Msg::ApplyContentSearch { .. }
+            | Msg::DiscardContentPreview
+            | Msg::KeepContentSearch { .. }
+            | Msg::PageSearchHistory(_)
+            | Msg::ShowSearchHistory(_)
+            | Msg::OpenSearchHistory
+            | Msg::OpenContentSearchModal
+            | Msg::OpenSearchOptions
+            | Msg::ToggleSearchGranularity
+            | Msg::ApplySearchEntry
+            | Msg::OpenPaneHit { .. }
+            | Msg::OpenSelectedPane
+            | Msg::HistoryDetails { .. }
+            | Msg::ContentPanes { .. }
+            | Msg::OpenContentHit { .. }
+            | Msg::ClearContentSearch
+            | Msg::RescanContent
+            | Msg::SetContentGroup(_)
+            | Msg::ContentDetails { .. }
+            | Msg::ClearFilters
+            | Msg::ContentHits { .. } => return self.reduce_content(msg),
             Msg::SetFilter(filter) => {
                 self.filter = filter;
                 self.rebuild_tree_in_place();
@@ -1639,12 +1809,12 @@ impl App {
             }
             Msg::SetPreviewWrap(wrap) => {
                 self.preview_wrap = wrap;
-                self.preview_scroll = 0;
+                self.reset_preview_scroll();
                 effects.push(Effect::Persist);
             }
             Msg::SetSessionPreview(choice) => {
                 self.session_preview = choice;
-                self.preview_scroll = 0;
+                self.reset_preview_scroll();
                 effects.push(Effect::Persist);
             }
             Msg::CommitRename(value) => {
@@ -1809,6 +1979,40 @@ impl App {
                     effects.push(Effect::Persist);
                 }
             }
+            Msg::AttachPane => {
+                let Some(viewer) = self.pane_viewer() else {
+                    return effects;
+                };
+                let mux = crate::model::MuxSessionId::new(viewer.pane.mux.native_id());
+                match crate::tui::actions::attach_target_for_mux(self, &mux) {
+                    Ok(target) => {
+                        self.close_pane_viewer();
+                        effects.push(Effect::Exec(crate::tui::effect::ExecSpec::AttachMux(
+                            target,
+                        )));
+                    }
+                    Err(reason) => {
+                        if let Some(viewer) = self.pane_viewer_mut() {
+                            viewer.note =
+                                Some(crate::tui::actions::attach_disabled_reason(&reason));
+                        }
+                    }
+                }
+            }
+            Msg::RevealSelected => {
+                let subject = crate::tui::actions::action_subject(self);
+                let result = match (&subject.pin, &subject.node) {
+                    (Some(pin), _) => self.reveal_slot(pin),
+                    (None, Some(node)) => self
+                        .reveal_node(node, subject.record.clone())
+                        .map_err(|why| format!("that row {why}")),
+                    (None, None) => Err("nothing to reveal on this row".to_string()),
+                };
+                match result {
+                    Ok(()) => effects.push(Effect::Persist),
+                    Err(why) => effects.push(Effect::Toast(why)),
+                }
+            }
             Msg::PinRecord(record_id) => {
                 effects.push(Effect::WriteStore(crate::tui::effect::StoreOp::PinRecord {
                     record_id,
@@ -1944,7 +2148,10 @@ fn home_for_config(_config: &RunConfig) -> Option<std::path::PathBuf> {
 /// Agent sessions with an active `LinkedToMux` candidate pointing at
 /// `mux`. Any candidate counts, not just the preferred one: the
 /// hand-off may have changed which session the resolver prefers.
-fn sessions_linked_to_mux(snapshot: &GraphSnapshot, mux: &MuxSessionId) -> Vec<AgentSessionId> {
+pub(in crate::tui) fn sessions_linked_to_mux(
+    snapshot: &GraphSnapshot,
+    mux: &MuxSessionId,
+) -> Vec<AgentSessionId> {
     snapshot
         .candidate_links
         .iter()

@@ -7,6 +7,7 @@ fn inputs<'a>(
 ) -> SessionMatchInputs<'a> {
     SessionMatchInputs {
         harness_key: harness,
+        session_key: "session",
         now_epoch: Some(1_000_000),
         last_active_epoch: last_active,
         mux_state: mux,
@@ -60,6 +61,7 @@ fn max_age_filter_at_boundary() {
     // Exactly at the boundary admits the row.
     let just_in = SessionMatchInputs {
         harness_key: "claude-code",
+        session_key: "session",
         now_epoch: Some(1_000_000),
         last_active_epoch: Some(1_000_000 - week.as_secs() as i64),
         mux_state: MuxStateKey::Attached,
@@ -81,6 +83,7 @@ fn max_age_admits_when_timestamps_missing() {
     };
     let no_last = SessionMatchInputs {
         harness_key: "claude-code",
+        session_key: "session",
         now_epoch: Some(1_000_000),
         last_active_epoch: None,
         mux_state: MuxStateKey::Attached,
@@ -102,6 +105,7 @@ fn max_age_admits_on_clock_skew() {
     };
     let future = SessionMatchInputs {
         harness_key: "claude-code",
+        session_key: "session",
         now_epoch: Some(1_000),
         last_active_epoch: Some(2_000),
         mux_state: MuxStateKey::Attached,
@@ -161,6 +165,7 @@ fn intersection_of_all_dimensions() {
     };
     let good = SessionMatchInputs {
         harness_key: "claude-code",
+        session_key: "session",
         now_epoch: Some(1_000),
         last_active_epoch: Some(970),
         mux_state: MuxStateKey::Unmuxed,
@@ -169,6 +174,7 @@ fn intersection_of_all_dimensions() {
     // Wrong harness.
     assert!(!filter.matches_session(&SessionMatchInputs {
         harness_key: "codex",
+        session_key: "session",
         ..good
     }));
     // Too old.
@@ -314,4 +320,99 @@ fn pr_state_clears_with_the_filter_but_does_not_narrow_by_session() {
         serde_json::from_str::<RowFilter>(&json).expect("read"),
         filter
     );
+}
+
+fn content_filter(matched: &[(&str, &str)]) -> ContentFilter {
+    use crate::viewer::model::{TurnKind, TurnRole};
+    use crate::viewer::search::{Hit, SessionHits};
+    let mut hits = ContentHitMap::default();
+    for (harness, session) in matched {
+        hits.insert(
+            (*harness).to_string(),
+            (*session).to_string(),
+            SessionHits {
+                count: 1,
+                best: Hit {
+                    turn_index: 0,
+                    role: TurnRole::User,
+                    kind: TurnKind::Message,
+                    timestamp: None,
+                    snippet: "x".into(),
+                    highlight: 0..1,
+                },
+                latest: None,
+            },
+        );
+    }
+    ContentFilter {
+        text: "x".into(),
+        hits: Arc::new(hits),
+        complete: true,
+        group: crate::viewer::search::Grouping::Session,
+        details: Arc::default(),
+        panes: Arc::default(),
+    }
+}
+
+#[test]
+fn a_content_filter_admits_only_the_sessions_that_matched() {
+    let filter = RowFilter {
+        content: Some(content_filter(&[("claude-code", "found")])),
+        ..RowFilter::default()
+    };
+    let mut hit = inputs("claude-code", MuxStateKey::Unmuxed, Some(1));
+    hit.session_key = "found";
+    let mut miss = inputs("claude-code", MuxStateKey::Unmuxed, Some(1));
+    miss.session_key = "other";
+    assert!(filter.matches_session(&hit));
+    assert!(!filter.matches_session(&miss));
+}
+
+#[test]
+fn a_content_match_is_per_harness_not_just_per_session_key() {
+    let filter = RowFilter {
+        content: Some(content_filter(&[("claude-code", "shared-key")])),
+        ..RowFilter::default()
+    };
+    let mut other_harness = inputs("codex", MuxStateKey::Unmuxed, Some(1));
+    other_harness.session_key = "shared-key";
+    assert!(!filter.matches_session(&other_harness));
+}
+
+#[test]
+fn a_content_filter_counts_as_a_narrowing_predicate_and_as_something_to_clear() {
+    let filter = RowFilter {
+        content: Some(content_filter(&[])),
+        ..RowFilter::default()
+    };
+    assert!(filter.has_narrowing_predicates());
+    assert!(!filter.is_empty());
+}
+
+#[test]
+fn a_content_filter_composes_with_the_other_predicates() {
+    let filter = RowFilter {
+        harness: Some(HarnessFilter::from_values(["codex"])),
+        content: Some(content_filter(&[("claude-code", "found")])),
+        ..RowFilter::default()
+    };
+    let mut hit = inputs("claude-code", MuxStateKey::Unmuxed, Some(1));
+    hit.session_key = "found";
+    assert!(
+        !filter.matches_session(&hit),
+        "a match in the wrong harness still fails the harness filter"
+    );
+}
+
+#[test]
+fn a_content_filter_is_never_serialized() {
+    let filter = RowFilter {
+        content: Some(content_filter(&[("claude-code", "found")])),
+        ..RowFilter::default()
+    };
+    let json = serde_json::to_string(&filter).unwrap();
+    assert_eq!(json, serde_json::to_string(&RowFilter::default()).unwrap());
+    assert!(!json.contains("found"));
+    let back: RowFilter = serde_json::from_str(&json).unwrap();
+    assert!(back.content.is_none());
 }

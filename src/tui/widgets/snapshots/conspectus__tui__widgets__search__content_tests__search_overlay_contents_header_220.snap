@@ -1,0 +1,7 @@
+---
+source: src/tui/widgets/search_content_tests.rs
+expression: header(220)
+---
+                 ┌ / search contents  [ Current ] All  [ Sessions ] Messages ──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┐
+                 │/quokka                                                                                                                                                                                  │
+                 │1 result · messages · 34 sessions searched · 2 skipped                                                                                                                                   │

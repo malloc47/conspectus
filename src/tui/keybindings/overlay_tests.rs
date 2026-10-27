@@ -142,6 +142,8 @@ fn every_overlay_table_labels_its_keys_truthfully() {
         ("text input", mislabeled(TEXT_INPUT_KEYS)),
         ("new mux", mislabeled(NEW_MUX_KEYS)),
         ("search", mislabeled(SEARCH_KEYS)),
+        ("search contents", mislabeled(SEARCH_CONTENT_KEYS)),
+        ("picker", mislabeled(PICKER_KEYS)),
         ("help", mislabeled(HELP_KEYS)),
         ("value modal", mislabeled(VALUE_MODAL_KEYS)),
         ("messages", mislabeled(MESSAGES_KEYS)),
@@ -201,9 +203,9 @@ fn viewer_keys_resolve_as_the_old_match_did() {
     let shift = KeyModifiers::SHIFT;
     let ctrl_mod = KeyModifiers::CONTROL;
     let cases = [
-        (ctrl_mod, KeyCode::Char('c'), Some(V::Close)),
+        (ctrl_mod, KeyCode::Char('c'), Some(V::Quit)),
         (none, KeyCode::Esc, Some(V::Close)),
-        (none, KeyCode::Char('q'), Some(V::Close)),
+        (none, KeyCode::Char('q'), Some(V::Quit)),
         (none, KeyCode::Char('j'), Some(V::ScrollDown)),
         (none, KeyCode::Down, Some(V::ScrollDown)),
         (none, KeyCode::Char('k'), Some(V::ScrollUp)),
@@ -225,6 +227,10 @@ fn viewer_keys_resolve_as_the_old_match_did() {
         (shift, KeyCode::Char('I'), Some(V::ToggleAborted)),
         (shift, KeyCode::Char('H'), Some(V::ToggleHidden)),
         (none, KeyCode::Char('?'), Some(V::ToggleHelp)),
+        (none, KeyCode::Char('/'), Some(V::FindOpen)),
+        (none, KeyCode::Char('n'), Some(V::FindNext)),
+        (shift, KeyCode::Char('N'), Some(V::FindPrev)),
+        (none, KeyCode::Char('N'), Some(V::FindPrev)),
         (none, KeyCode::Char('x'), None),
     ];
     for (modifiers, code, expected) in cases {
@@ -234,4 +240,56 @@ fn viewer_keys_resolve_as_the_old_match_did() {
             "{modifiers:?} {code:?}"
         );
     }
+}
+
+#[test]
+fn find_prompt_keys_edit_confirm_and_leave() {
+    use crate::viewer::find::ViewerFindMsg as F;
+    let none = KeyModifiers::NONE;
+    let ctrl_mod = KeyModifiers::CONTROL;
+    let cases = [
+        (none, KeyCode::Enter, Some(F::Confirm)),
+        (none, KeyCode::Esc, Some(F::Cancel)),
+        (ctrl_mod, KeyCode::Char('c'), Some(F::Cancel)),
+        (none, KeyCode::Backspace, Some(F::Backspace)),
+        (none, KeyCode::Delete, Some(F::Delete)),
+        (none, KeyCode::Left, Some(F::Left)),
+        (none, KeyCode::Right, Some(F::Right)),
+        (none, KeyCode::Home, Some(F::Home)),
+        (none, KeyCode::End, Some(F::End)),
+        (ctrl_mod, KeyCode::Char('u'), Some(F::ClearLine)),
+        // Everything else types: Space included.
+        (none, KeyCode::Char(' '), None),
+        (none, KeyCode::Char('n'), None),
+    ];
+    for (modifiers, code, expected) in cases {
+        assert_eq!(
+            resolve(VIEWER_FIND_KEYS, press(modifiers, code)),
+            expected,
+            "{modifiers:?} {code:?}"
+        );
+    }
+    assert_eq!(footer(VIEWER_FIND_KEYS), "Enter find · Esc cancel");
+    assert!(mislabeled(VIEWER_FIND_KEYS).is_empty());
+}
+
+#[test]
+fn typed_chars_are_plain_and_shifted_characters_only() {
+    let none = KeyModifiers::NONE;
+    assert_eq!(typed_char(press(none, KeyCode::Char('a'))), Some('a'));
+    assert_eq!(
+        typed_char(press(KeyModifiers::SHIFT, KeyCode::Char('A'))),
+        Some('A')
+    );
+    assert_eq!(typed_char(press(none, KeyCode::Char(' '))), Some(' '));
+    assert_eq!(typed_char(press(none, KeyCode::Char('é'))), Some('é'));
+    assert_eq!(
+        typed_char(press(KeyModifiers::CONTROL, KeyCode::Char('a'))),
+        None
+    );
+    assert_eq!(
+        typed_char(press(KeyModifiers::ALT, KeyCode::Char('a'))),
+        None
+    );
+    assert_eq!(typed_char(press(none, KeyCode::Enter)), None);
 }

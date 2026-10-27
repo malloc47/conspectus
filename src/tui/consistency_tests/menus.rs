@@ -51,6 +51,16 @@ fn a_pinned_session_has_the_same_menu_in_the_sessions_and_pinned_views() {
 }
 
 #[test]
+fn a_session_found_by_a_search_has_the_menu_it_has_in_the_sessions_view() {
+    let native = normalized(labels_in(View::Sessions, "solo0000"), "solo");
+    let mut app = searched(View::Search, RowFilter::default());
+    select(&mut app, "solo0000");
+    let found = normalized(menu_labels(&mut app), "solo");
+    assert!(native.len() > 1, "{native:?}");
+    assert_eq!(native, found);
+}
+
+#[test]
 fn a_ghost_mux_has_the_same_menu_as_its_history_record() {
     let ghost = normalized(labels_in(View::Mux, "config-agent3"), "config-agent3");
     let mut record = normalized(labels_in(View::History, "h_agent"), "config-agent3");

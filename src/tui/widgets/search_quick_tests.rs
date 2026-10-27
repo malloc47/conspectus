@@ -1,0 +1,483 @@
+use super::*;
+use crate::model::{
+    AgentSessionId, AgentSessionNode, BranchId, CheckoutId, CheckoutNode, ForgePrId, ForgePrNode,
+    GraphNode, GraphSnapshot, MuxSessionId, MuxSessionNode, NodeKind, NodePresence, PinKind,
+    PinNode, RepoId, RepoNode, SlotStatus,
+};
+use crate::tui::search::items_from_rows;
+use ratatui::crossterm::event::{KeyCode, KeyEventKind, KeyEventState, KeyModifiers};
+
+fn press(code: KeyCode, modifiers: KeyModifiers) -> KeyEvent {
+    KeyEvent {
+        code,
+        modifiers,
+        kind: KeyEventKind::Press,
+        state: KeyEventState::NONE,
+    }
+}
+
+fn plain(code: KeyCode) -> KeyEvent {
+    press(code, KeyModifiers::NONE)
+}
+
+fn type_text(state: &mut SearchOverlayState, text: &str) {
+    for c in text.chars() {
+        state.handle_key(plain(KeyCode::Char(c)));
+    }
+}
+
+fn world() -> GraphSnapshot {
+    let mut session = AgentSessionNode::new(
+        AgentSessionId::new("claude-code", "/state", "abc123"),
+        "claude-code",
+    );
+    session.title = Some("Quokka parser rewrite".into());
+    session.cwd = Some("/home/op/src/quokka".into());
+    session.last_active_epoch = Some(100);
+
+    let mut mux = MuxSessionNode::new(MuxSessionId::new("tmux:quokka-dev"), "tmux", "quokka-dev");
+    mux.cwd = Some("/home/op/src/quokka".into());
+    let gone = MuxSessionNode::new(MuxSessionId::new("tmux:quokka-old"), "tmux", "quokka-old");
+
+    let repo_id = RepoId::new("/home/op/src/quokka/.git");
+    let mut repo = RepoNode::new(repo_id.clone());
+    repo.remotes = vec!["git@github.com:acme/quokka.git".into()];
+    let mut checkout = CheckoutNode::new(
+        CheckoutId::new(repo_id.clone(), "/home/op/src/quokka-wt"),
+        "/home/op/src/quokka-wt",
+    );
+    checkout.current_branch = Some(BranchId::new(repo_id, "refs/heads/quokka-login"));
+    let pr = ForgePrNode {
+        id: ForgePrId::new("github", "github.com", "acme", "quokka", 7),
+        provider: "github".into(),
+        host: "github.com".into(),
+        owner: "acme".into(),
+        repo: "quokka".into(),
+        number: 7,
+        state: Some("open".into()),
+        title: Some("Add the quokka login form".into()),
+        url: None,
+        updated_epoch: Some(50),
+        is_draft: false,
+        head_ref: Some("quokka-login".into()),
+    };
+    let pin = PinNode::for_test("quokka-daily", PinKind::Mux, None, SlotStatus::Planned, &[]);
+
+    let gone_id = GraphNode::MuxSession(gone.clone()).id();
+    let mut snapshot = GraphSnapshot {
+        nodes: vec![
+            GraphNode::AgentSession(session),
+            GraphNode::MuxSession(mux),
+            GraphNode::MuxSession(gone),
+            GraphNode::Repo(repo),
+            GraphNode::Checkout(checkout),
+            GraphNode::ForgePr(pr),
+            GraphNode::Pin(pin),
+        ],
+        ..GraphSnapshot::empty()
+    };
+    snapshot
+        .node_presence
+        .insert(gone_id, NodePresence::Gone { last_seen: 10 });
+    snapshot
+}
+
+/// Quick select on the wider reach with `query` typed.
+fn wide_state(query: &str) -> SearchOverlayState {
+    let mut state = SearchOverlayState::new();
+    state.set_entities(EntityIndex::build(&world(), true));
+    state.handle_key(plain(KeyCode::Tab));
+    type_text(&mut state, query);
+    state.refresh_matches(&[]);
+    state
+}
+
+/// What the host would say for each kind, so frames show every word.
+fn words(node: &NodeId) -> String {
+    if node.to_string().contains("quokka-old") {
+        return "in History view".into();
+    }
+    match NodeKind::from(node) {
+        NodeKind::AgentSession => "here".into(),
+        NodeKind::MuxSession => "via repo".into(),
+        NodeKind::Pin => "3 hops".into(),
+        NodeKind::ForgePr => "in PRs view".into(),
+        _ => "in History view".into(),
+    }
+}
+
+fn render_with(
+    state: &SearchOverlayState,
+    items: &[SearchItem<'_>],
+    width: u16,
+    height: u16,
+) -> String {
+    let theme = Theme::default();
+    let area = Rect::new(0, 0, width, height);
+    let mut buf = Buffer::empty(area);
+    SearchOverlayWidget::new(state, items, &theme)
+        .with_outcomes(&words)
+        .render(area, &mut buf);
+    (0..height)
+        .map(|y| {
+            (0..width)
+                .map(|x| buf[(x, y)].symbol().to_string())
+                .collect::<String>()
+                .trim_end()
+                .to_string()
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+fn current_items() -> Vec<crate::tui::rows::Row> {
+    use crate::tui::rows::{AgentSessionRow, MuxIndicator, Row, RowId, RowKind};
+    [
+        ("api1", "quokka api rewrite", "~/src/quokka"),
+        ("dev2", "quokka dev server", "~/src/quokka"),
+        ("else", "something else", "~/src/other"),
+    ]
+    .into_iter()
+    .map(|(key, alias, cwd)| {
+        let session = AgentSessionId::new("claude-code", "/state", key);
+        let primary = NodeId::AgentSession(session.clone());
+        Row {
+            id: RowId::AgentSession(primary.clone()),
+            depth: 1,
+            expandable: false,
+            kind: RowKind::AgentSession(AgentSessionRow {
+                session,
+                short_id: key.to_string(),
+                harness_label: "claude-code".to_string(),
+                cwd_display: Some(cwd.to_string()),
+                project_display: None,
+                recency: None,
+                activity_epoch: None,
+                mux_state: MuxIndicator::Unmuxed,
+                preview: Some(format!("talking about {alias}")),
+                title: None,
+                alias: Some(alias.to_string()),
+                title_disambiguates: false,
+                mux_host: None,
+                primary_node: primary,
+                pin_id: None,
+                content_hit: None,
+            }),
+        }
+    })
+    .collect()
+}
+
+#[test]
+fn quick_select_opens_on_the_current_reach() {
+    let state = SearchOverlayState::new();
+    assert_eq!(state.mode(), SearchMode::Quick);
+    assert_eq!(state.reach(), Reach::Current);
+}
+
+#[test]
+fn tab_and_shift_tab_both_switch_the_reach() {
+    let mut state = SearchOverlayState::new();
+    state.handle_key(plain(KeyCode::Tab));
+    assert_eq!(state.reach(), Reach::All);
+    state.handle_key(plain(KeyCode::Tab));
+    assert_eq!(state.reach(), Reach::Current);
+    state.handle_key(press(KeyCode::BackTab, KeyModifiers::SHIFT));
+    assert_eq!(state.reach(), Reach::All);
+    state.handle_key(press(KeyCode::BackTab, KeyModifiers::SHIFT));
+    assert_eq!(state.reach(), Reach::Current);
+}
+
+#[test]
+fn widening_keeps_the_query_and_goes_back_to_the_top() {
+    let mut state = SearchOverlayState::new();
+    state.set_entities(EntityIndex::build(&world(), true));
+    type_text(&mut state, "quokka");
+    state.handle_key(plain(KeyCode::Tab));
+    state.refresh_matches(&[]);
+    assert_eq!(state.query(), "quokka");
+    assert_eq!(state.cursor(), 0);
+    assert!(
+        state.entity_matches().len() >= 5,
+        "{:?}",
+        state.entity_matches()
+    );
+}
+
+#[test]
+fn the_host_is_asked_for_the_index_only_on_the_first_widening() {
+    let mut state = SearchOverlayState::new();
+    assert!(state.widens_with(plain(KeyCode::Tab)));
+    assert!(state.widens_with(press(KeyCode::BackTab, KeyModifiers::SHIFT)));
+    assert!(!state.widens_with(plain(KeyCode::Char('a'))));
+    state.set_entities(EntityIndex::build(&world(), true));
+    assert!(!state.widens_with(plain(KeyCode::Tab)), "already built");
+
+    let content = SearchOverlayState::configured(
+        SearchMode::Content,
+        Grouping::Session,
+        ContentKinds::default(),
+        true,
+        "",
+    );
+    assert!(
+        !content.widens_with(plain(KeyCode::Tab)),
+        "not in content mode"
+    );
+}
+
+#[test]
+fn enter_on_a_wider_result_opens_that_entity() {
+    let mut state = wide_state("quokka-dev");
+    let outcome = state.handle_key(plain(KeyCode::Enter));
+    let expected = NodeId::MuxSession(MuxSessionId::new("tmux:quokka-dev"));
+    assert_eq!(outcome, SearchOutcome::OpenEntity(Box::new(expected)));
+}
+
+#[test]
+fn enter_with_no_wider_result_closes() {
+    let mut state = wide_state("zzz-nothing");
+    assert_eq!(
+        state.handle_key(plain(KeyCode::Enter)),
+        SearchOutcome::Cancel
+    );
+}
+
+#[test]
+fn the_cursor_moves_among_the_wider_results() {
+    let mut state = wide_state("quokka");
+    let n = state.entity_matches().len();
+    assert!(n >= 3);
+    state.handle_key(plain(KeyCode::Down));
+    assert_eq!(state.cursor(), 1);
+    state.handle_key(plain(KeyCode::Up));
+    state.handle_key(plain(KeyCode::Up));
+    assert_eq!(state.cursor(), n - 1, "wraps");
+}
+
+#[test]
+fn the_overlay_commits_an_open_entity_message() {
+    use crate::tui::Overlay;
+    let mut state = wide_state("quokka-dev");
+    let outcome = state.handle(
+        SearchContext {
+            items: &[],
+            content: &[],
+            entities: None,
+        },
+        plain(KeyCode::Enter),
+    );
+    let crate::tui::OverlayOutcome::Commit(msg) = outcome else {
+        panic!("expected a commit, got {outcome:?}");
+    };
+    assert!(matches!(*msg, crate::tui::Msg::OpenEntity(_)), "{msg:?}");
+}
+
+#[test]
+fn the_wider_reach_ranks_everything_while_the_current_one_ranks_rows() {
+    let rows = current_items();
+    let items = items_from_rows(&rows);
+    let mut state = SearchOverlayState::new();
+    state.set_entities(EntityIndex::build(&world(), true));
+    type_text(&mut state, "quokka");
+    state.refresh_matches(&items);
+    assert_eq!(state.matches().len(), 2, "the two rows that say quokka");
+    assert!(state.entity_matches().is_empty());
+
+    state.handle_key(plain(KeyCode::Tab));
+    state.refresh_matches(&items);
+    assert!(state.matches().is_empty());
+    assert!(state.entity_matches().len() > 2);
+}
+
+#[test]
+fn the_modal_follows_the_sizing_rule() {
+    // width = min(W-2, clamp(0.85 W, 60, 200)), height = min(H-2, clamp(0.8 H, 12, 50))
+    for (terminal, expected) in [
+        ((60, 20), (58, 16)),
+        ((80, 24), (68, 19)),
+        ((120, 40), (102, 32)),
+        ((160, 40), (136, 32)),
+        ((220, 50), (187, 40)),
+        ((300, 100), (200, 50)),
+        ((50, 10), (48, 8)),
+        ((220, 14), (187, 12)),
+    ] {
+        assert_eq!(modal_size(terminal.0, terminal.1), expected, "{terminal:?}");
+    }
+}
+
+#[test]
+fn the_modal_is_centered_and_fits_every_terminal() {
+    for width in [20_u16, 60, 80, 120, 160, 220, 400] {
+        for height in [6_u16, 20, 40, 80] {
+            let area = Rect::new(0, 0, width, height);
+            let modal = centered_modal_rect(area);
+            assert!(
+                modal.right() <= width && modal.bottom() <= height,
+                "{area:?} {modal:?}"
+            );
+            assert_eq!(modal.x, (width - modal.width) / 2);
+            assert_eq!(modal.y, (height - modal.height) / 2);
+        }
+    }
+}
+
+#[test]
+fn entity_columns_always_fit_and_drop_the_context_before_the_outcome() {
+    for inner in [30_usize, 40, 56, 78, 118, 158, 218] {
+        let columns = entity_columns(inner);
+        let context_gap = if columns.context > 0 { COLUMN_GAP } else { 0 };
+        let used =
+            ROW_LEAD + columns.label + context_gap + columns.context + COLUMN_GAP + columns.outcome;
+        assert!(used <= inner + COLUMN_GAP, "{inner}: {columns:?}");
+        assert!(columns.outcome > 0, "{inner}: the outcome word stays");
+    }
+    assert_eq!(
+        entity_columns(40).context,
+        0,
+        "narrow rows lose the context"
+    );
+    assert!(entity_columns(158).context > 40, "wide rows show it");
+    assert_eq!(entity_columns(158).outcome, OUTCOME_WIDTH);
+}
+
+#[test]
+fn the_title_names_both_reaches_and_marks_the_chosen_one() {
+    let theme = Theme::default();
+    let words = |reach| {
+        reach_segments(reach, &theme)
+            .iter()
+            .map(|span| span.content.to_string())
+            .collect::<String>()
+    };
+    assert_eq!(words(Reach::Current), "[ Current ] All");
+    assert_eq!(words(Reach::All), "Current [ All ]");
+    assert_eq!(
+        words(Reach::Current).len(),
+        words(Reach::All).len(),
+        "no layout shift"
+    );
+}
+
+#[test]
+fn the_wider_frame_shows_the_outcome_word_whole_at_every_size() {
+    let state = wide_state("quokka");
+    for (width, height) in [(60, 20), (80, 24), (120, 36), (160, 40), (220, 50)] {
+        let text = render_with(&state, &[], width, height);
+        let modal = centered_modal_rect(Rect::new(0, 0, width, height));
+        // The popup rounds an odd margin its own way, so find its frame.
+        let left = text
+            .lines()
+            .find_map(|line| line.chars().position(|c| c == '┌'))
+            .expect("the frame");
+        for line in text.lines().skip(usize::from(modal.y) + 2) {
+            let inner: String = line
+                .chars()
+                .skip(left + 1)
+                .take(usize::from(modal.width) - 2)
+                .collect();
+            if let Some(word) = [
+                "here",
+                "via repo",
+                "3 hops",
+                "in PRs view",
+                "in History view",
+            ]
+            .iter()
+            .find(|word| inner.trim_end().ends_with(*word))
+            {
+                assert!(
+                    inner.starts_with("> ") || inner.starts_with("  "),
+                    "{width}x{height} modal {modal:?}: {inner:?}\n{text}"
+                );
+                assert!(
+                    inner.trim_end().len() < inner.len()
+                        || inner.chars().count() == usize::from(modal.width) - 2,
+                    "{word} runs into the frame at {width}x{height}: {inner:?}"
+                );
+            }
+        }
+        assert!(text.contains("Current [ All ]"), "{width}x{height}\n{text}");
+        assert!(text.contains("Tab current/all"), "{width}x{height}\n{text}");
+        let results = text.matches("via repo").count()
+            + text.matches("3 hops").count()
+            + text.matches("in PRs view").count()
+            + text.matches("in History view").count()
+            + text.matches("here").count();
+        assert!(
+            results >= 3,
+            "{width}x{height}: outcome words missing\n{text}"
+        );
+    }
+}
+
+#[test]
+fn a_gone_entity_is_listed_with_its_history_word() {
+    let text = render_with(&wide_state("quokka-old"), &[], 160, 30);
+    assert!(text.contains("quokka-old"), "{text}");
+    assert!(text.contains("in History view"), "{text}");
+}
+
+#[test]
+fn snapshot_current_at_80_columns() {
+    let rows = current_items();
+    let items = items_from_rows(&rows);
+    let mut state = SearchOverlayState::new();
+    type_text(&mut state, "quokka");
+    state.refresh_matches(&items);
+    insta::assert_snapshot!(
+        "quick_select_current_80",
+        render_with(&state, &items, 80, 24)
+    );
+}
+
+#[test]
+fn snapshot_current_at_160_columns() {
+    let rows = current_items();
+    let items = items_from_rows(&rows);
+    let mut state = SearchOverlayState::new();
+    type_text(&mut state, "quokka");
+    state.refresh_matches(&items);
+    insta::assert_snapshot!(
+        "quick_select_current_160",
+        render_with(&state, &items, 160, 30)
+    );
+}
+
+#[test]
+fn snapshot_current_at_220_columns() {
+    let rows = current_items();
+    let items = items_from_rows(&rows);
+    let mut state = SearchOverlayState::new();
+    type_text(&mut state, "quokka");
+    state.refresh_matches(&items);
+    insta::assert_snapshot!(
+        "quick_select_current_220",
+        render_with(&state, &items, 220, 30)
+    );
+}
+
+#[test]
+fn snapshot_all_at_80_columns() {
+    insta::assert_snapshot!(
+        "quick_select_all_80",
+        render_with(&wide_state("quokka"), &[], 80, 24)
+    );
+}
+
+#[test]
+fn snapshot_all_at_160_columns() {
+    insta::assert_snapshot!(
+        "quick_select_all_160",
+        render_with(&wide_state("quokka"), &[], 160, 30)
+    );
+}
+
+#[test]
+fn snapshot_all_at_220_columns() {
+    insta::assert_snapshot!(
+        "quick_select_all_220",
+        render_with(&wide_state("quokka"), &[], 220, 30)
+    );
+}

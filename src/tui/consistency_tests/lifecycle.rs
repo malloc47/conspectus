@@ -174,6 +174,8 @@ fn rows_standing_for_mux(app: &App, name: &str) -> Vec<RowId> {
 fn returning_from_an_attach_freezes_every_row_that_shows_the_mux() {
     let mux = MuxSessionId::new("tmux:conspectus-main");
     let mut frozen_rows = 0;
+    // Not the Search view: it lists sessions that have matches, and never
+    // a mux or a pin, so no row there stands for the mux.
     for view in [View::Mux, View::Pinned, View::Sessions] {
         let mut app = app_in(view);
         app.update(Msg::HandoffReturned(mux.clone()));

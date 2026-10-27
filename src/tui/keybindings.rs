@@ -164,6 +164,15 @@ pub const KEYBINDINGS: &[KeyBinding] = &[
         action: || Action::SwitchView(View::History),
         help_text: "Switch to History view",
     },
+    KeyBinding {
+        mode: KeyMode::Global,
+        key: KeyMatcher::Exact {
+            modifiers: KeyModifiers::NONE,
+            code: KeyCode::Char('6'),
+        },
+        action: || Action::SwitchView(View::Search),
+        help_text: "Switch to the Search view",
+    },
     // Union and Forks are hidden from the interactive UI for now, so
     // they have no digit keys (`VIEW_OPTIONS` excludes them). The
     // `View` variants and CLI `table` projections remain so this stays
@@ -322,7 +331,83 @@ pub const KEYBINDINGS: &[KeyBinding] = &[
         mode: KeyMode::Global,
         key: KeyMatcher::AnyModExceptCtrl('/'),
         action: || Action::OpenSearch,
-        help_text: "Open the in-view search overlay",
+        help_text: "Quick select: find a row in this view, or Tab to find anything",
+    },
+    KeyBinding {
+        mode: KeyMode::Global,
+        key: KeyMatcher::AnyModExceptCtrl('s'),
+        action: || Action::OpenContentSearch,
+        help_text: "Search the contents of sessions and mux scrollback",
+    },
+    // Ctrl-/ reaches the app as one of three keys, depending on the
+    // terminal: a terminal using the kitty keyboard protocol sends it as
+    // such; the rest send the byte 0x1F, which decodes as Ctrl-7 (and
+    // which is also what Ctrl-_ sends).
+    KeyBinding {
+        mode: KeyMode::Global,
+        key: KeyMatcher::Exact {
+            modifiers: KeyModifiers::CONTROL,
+            code: KeyCode::Char('/'),
+        },
+        action: || Action::OpenContentSearch,
+        help_text: "Search the contents of sessions and mux scrollback (Ctrl-/)",
+    },
+    KeyBinding {
+        mode: KeyMode::Global,
+        key: KeyMatcher::Exact {
+            modifiers: KeyModifiers::CONTROL,
+            code: KeyCode::Char('7'),
+        },
+        action: || Action::OpenContentSearch,
+        help_text: "Ctrl-/ as most terminals send it (Ctrl-7)",
+    },
+    KeyBinding {
+        mode: KeyMode::Global,
+        key: KeyMatcher::Exact {
+            modifiers: KeyModifiers::CONTROL,
+            code: KeyCode::Char('_'),
+        },
+        action: || Action::OpenContentSearch,
+        help_text: "Ctrl-/ as some terminals send it (Ctrl-_)",
+    },
+    KeyBinding {
+        mode: KeyMode::Global,
+        key: KeyMatcher::AnyModExceptCtrl('<'),
+        action: || Action::Msg(Box::new(crate::tui::Msg::PageSearchHistory(-1))),
+        help_text: "Search view: show the previous (older) search",
+    },
+    KeyBinding {
+        mode: KeyMode::Global,
+        key: KeyMatcher::AnyModExceptCtrl('>'),
+        action: || Action::Msg(Box::new(crate::tui::Msg::PageSearchHistory(1))),
+        help_text: "Search view: show the next (newer) search",
+    },
+    KeyBinding {
+        mode: KeyMode::Global,
+        key: KeyMatcher::Exact {
+            modifiers: KeyModifiers::CONTROL,
+            code: KeyCode::Char('f'),
+        },
+        action: || Action::Msg(Box::new(crate::tui::Msg::ApplySearchEntry)),
+        help_text: "Search view: keep the shown search as the filter on the lists",
+    },
+    KeyBinding {
+        mode: KeyMode::Global,
+        key: KeyMatcher::Exact {
+            modifiers: KeyModifiers::CONTROL,
+            code: KeyCode::Char('l'),
+        },
+        action: || Action::Msg(Box::new(crate::tui::Msg::ToggleSearchGranularity)),
+        help_text: "Search view: list sessions, or the matching messages",
+    },
+    KeyBinding {
+        mode: KeyMode::Global,
+        key: KeyMatcher::Exact {
+            modifiers: KeyModifiers::CONTROL,
+            code: KeyCode::Char('o'),
+        },
+        action: || Action::Msg(Box::new(crate::tui::Msg::OpenSearchOptions)),
+        help_text: "Search view: choose what a search looks in (tools, thinking, panes)",
     },
     KeyBinding {
         mode: KeyMode::Global,
@@ -378,6 +463,32 @@ pub const KEYBINDINGS: &[KeyBinding] = &[
         key: KeyMatcher::AnyMod(KeyCode::Left),
         action: || Action::Msg(Box::new(crate::tui::Msg::CollapseRow)),
         help_text: "Collapse the selected row (Left arrow)",
+    },
+    // Shift+Enter needs a terminal that reports it (kitty protocol);
+    // Alt+Enter arrives everywhere.
+    KeyBinding {
+        mode: KeyMode::Global,
+        key: KeyMatcher::Exact {
+            modifiers: KeyModifiers::SHIFT,
+            code: KeyCode::Enter,
+        },
+        action: || Action::Msg(Box::new(crate::tui::Msg::RevealSelected)),
+        help_text: "Reveal the row's entity in its own view (Backspace returns)",
+    },
+    KeyBinding {
+        mode: KeyMode::Global,
+        key: KeyMatcher::Exact {
+            modifiers: KeyModifiers::ALT,
+            code: KeyCode::Enter,
+        },
+        action: || Action::Msg(Box::new(crate::tui::Msg::RevealSelected)),
+        help_text: "Reveal the row's entity in its own view (Backspace returns)",
+    },
+    KeyBinding {
+        mode: KeyMode::Global,
+        key: KeyMatcher::UpperChar('O'),
+        action: || Action::Msg(Box::new(crate::tui::Msg::RevealSelected)),
+        help_text: "Reveal the row's entity in its own view (Backspace returns)",
     },
     KeyBinding {
         mode: KeyMode::Global,

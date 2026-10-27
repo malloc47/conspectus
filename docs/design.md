@@ -133,7 +133,8 @@ operator-initiated mux lifecycle, Conspectus-owned subprocess launches,
 operator-initiated harness hook installation, and `git clone` into an
 absent path during a rebuild) with an explicit prohibition list covering
 harness-native state beyond that hook entry, terminal input into live
-agent panes, payload persistence, shared/system locations, background
+agent panes, payload persistence (except the opt-in transcript search
+index, ADR 0148), shared/system locations, background
 mutation (the daemon writes category 2 observations only), git mutation
 beyond that clone, and hook bypass. `docs/capabilities.toml` lists every program,
 subcommand, socket, signal, and write path the envelope allows, and tests
@@ -464,7 +465,16 @@ view's preview column and the native transcript viewer (Tier 2,
 ADR 0013 / ADR 0023 / ADR 0052) read payload but cap and
 normalize it and only surface it under an operator gesture;
 hook sidecars and rebuildable state records (Tier 3, ADR 0028)
-stay payload-free.
+stay payload-free. Content search (ADR 0147, ADR 0149) is a Tier 2
+reader of session transcripts and mux pane scrollback: hits and capped
+snippets live in memory for the process lifetime and are never written
+to disk, stored in the graph or
+`graph.bin`, or sent to the daemon; the scan runs in the TUI or CLI
+process, and a persistent index stays deferred behind recorded latency
+and corpus-size thresholds. ADR 0148 decides that index (SQLite FTS5 in
+the bundled SQLite, opt-in, operator-built, never daemon-built, in
+`$XDG_CACHE_HOME`, owner-readable, wipeable, with the scan as the
+authoritative fallback) and permits payload persistence nowhere else.
 
 Additive discovery:
 
@@ -861,9 +871,14 @@ Interactive and static views share a single `RowFilter` predicate type
 so the same narrowing is reproducible at the CLI and in the TUI. v1
 filter dimensions are `harness` (set membership), `max-age` (recency
 window against `last_active_epoch`), and `mux-state` (attached /
-ambiguous / unmuxed). Free-text "contains" filtering is intentionally
-deferred to the `/` fuzzy search overlay; structured filters narrow by
-structure, `/` ranks within the filtered set.
+ambiguous / unmuxed). Free-text "contains" filtering on session
+metadata is intentionally deferred to the `/` quick-select overlay;
+structured filters narrow by structure, `/` ranks within the filtered
+set (the current context), and `Tab` widens it to every entity (ADR
+0149). The one exception is the content filter (ADR 0147): a query on
+what was said in a session's transcript, held app-wide in memory, never
+persisted, that narrows Sessions, Mux, and PRs through a single
+predicate on `RowFilter` and composes with the other filters.
 
 In the TUI, filter / grouping / selection / expanded-set / left-scroll
 state is **per view**. Sort order is **global**. Switching views and
@@ -872,8 +887,27 @@ grouping enum (`SessionsGrouping`, `MuxGrouping`, `UnionGrouping`,
 `PrsGrouping`, `ForksGrouping`) and the same `Grouping` dispatch type
 backs config, CLI flags, and TUI controls.
 
-The TUI's view switcher offers sessions, mux, and PRs (`1`–`3`); union and
-forks remain CLI table projections. The PRs view groups by checkout by
+The TUI's view switcher offers sessions, mux, PRs, pinned, history, and
+search (`1`–`6`); union and forks remain CLI table projections. Search comes in two levels (ADR 0149). `/` is quick select over
+the current context, the rows of the active view after its filters, where
+Enter selects the item in the left pane; `Tab` widens it to every entity,
+and Enter then selects the entity where it is listed, highlights it in the
+right pane along the shortest relationship path when it is related to the
+selection, or switches to the view where it lives, with an outcome word on
+each result saying which. `Ctrl+/` (also `Ctrl+_`, `Ctrl+7`, and plain `s`
+where the terminal cannot send it) searches the content of sessions and
+mux scrollback, with `Tab` switching the current view's entities and all
+entities, deduplicating pane text that a session transcript already shows.
+The Search view (`6`) always holds the last content search and the last ten
+besides, paged with `<` and `>` without rescanning, and opens the viewer at
+a session hit (ADR 0147) or the full-screen pane viewer (with `a` to
+attach) at a pane hit; `Ctrl+S`
+jumps to it from the modal. The view stays as it was while the modal is
+open, and the modal's search joins the history only when it exits.
+`Shift+Tab` in the modal (and `Ctrl+L` in the view) lists a search's
+sessions or its messages, without searching again; `Ctrl+O` opens the options (tool calls,
+thinking, pane scrollback) that decide what a search looks in. Both modals use up to 85% of the terminal
+width. The PRs view groups by checkout by
 default, so each PR sits with the work checked out for it, and PRs checked out
 nowhere sit under their repo, labelled `no checkout` (ADR 0114, 0130). Each PR
 row carries a marker for whether it has a local branch (`⌥`) or not (dim `◌`);

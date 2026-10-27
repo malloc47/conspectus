@@ -15,9 +15,155 @@
 //! caller assembles for each row. The caller owns the cost of looking
 //! up mux state, recency, etc., so the predicate stays pure.
 
+use std::collections::BTreeMap;
+use std::sync::Arc;
 use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
+
+use crate::viewer::search::{Grouping, Hit, SessionHits};
+
+/// The sessions a content search matched, by harness and session key.
+/// Held in memory only (the payload tenet): it is never serialized.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct ContentHitMap(BTreeMap<String, BTreeMap<String, SessionHits>>);
+
+impl ContentHitMap {
+    pub fn get(&self, harness_key: &str, session_key: &str) -> Option<&SessionHits> {
+        self.0.get(harness_key)?.get(session_key)
+    }
+
+    pub fn insert(&mut self, harness_key: String, session_key: String, hits: SessionHits) {
+        self.0
+            .entry(harness_key)
+            .or_default()
+            .insert(session_key, hits);
+    }
+
+    pub fn len(&self) -> usize {
+        self.0.values().map(BTreeMap::len).sum()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.0.is_empty()
+    }
+
+    /// Drop the snippet text of all but the `keep` best-ranked sessions,
+    /// whose counts stay. Bounds what a search with many matches holds.
+    pub fn keep_snippets(&mut self, keep: usize) {
+        if self.len() <= keep {
+            return;
+        }
+        let mut ranked: Vec<(&str, &str, &SessionHits)> = self.iter().collect();
+        ranked.sort_by(|a, b| crate::viewer::search::cmp_sessions(a.2, b.2));
+        let blank: Vec<(String, String)> = ranked
+            .into_iter()
+            .skip(keep)
+            .map(|(harness, session, _)| (harness.to_string(), session.to_string()))
+            .collect();
+        for (harness, session) in blank {
+            if let Some(hits) = self
+                .0
+                .get_mut(&harness)
+                .and_then(|sessions| sessions.get_mut(&session))
+            {
+                hits.best.snippet.clear();
+                hits.best.highlight = 0..0;
+            }
+        }
+    }
+
+    /// How many matching messages the matched sessions hold in all.
+    pub fn total_hits(&self) -> usize {
+        self.0
+            .values()
+            .flat_map(BTreeMap::values)
+            .map(|hits| hits.count)
+            .sum()
+    }
+
+    /// Every matched session with its summary, by harness then session.
+    pub fn iter(&self) -> impl Iterator<Item = (&str, &str, &SessionHits)> {
+        self.0.iter().flat_map(|(harness, sessions)| {
+            sessions
+                .iter()
+                .map(move |(session, hits)| (harness.as_str(), session.as_str(), hits))
+        })
+    }
+}
+
+/// Every matching turn of the sessions a content search found, by
+/// harness and session key. Read on demand for the Search view's
+/// per-message grouping, and held in memory only like [`ContentHitMap`].
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct ContentDetailMap(BTreeMap<String, BTreeMap<String, Arc<Vec<Hit>>>>);
+
+impl ContentDetailMap {
+    pub fn get(&self, harness_key: &str, session_key: &str) -> Option<&[Hit]> {
+        self.0
+            .get(harness_key)?
+            .get(session_key)
+            .map(|hits| hits.as_slice())
+    }
+
+    pub fn insert(&mut self, harness_key: String, session_key: String, hits: Vec<Hit>) {
+        self.0
+            .entry(harness_key)
+            .or_default()
+            .insert(session_key, Arc::new(hits));
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.0.is_empty()
+    }
+
+    /// How many sessions have their matching turns read.
+    pub fn len(&self) -> usize {
+        self.0.values().map(BTreeMap::len).sum()
+    }
+
+    /// How many matching messages are held, across every session.
+    pub fn total_hits(&self) -> usize {
+        self.0
+            .values()
+            .flat_map(BTreeMap::values)
+            .map(|hits| hits.len())
+            .sum()
+    }
+
+    /// Forget a session's matching turns, so they are read again.
+    pub fn remove(&mut self, harness_key: &str, session_key: &str) {
+        if let Some(sessions) = self.0.get_mut(harness_key) {
+            sessions.remove(session_key);
+            if sessions.is_empty() {
+                self.0.remove(harness_key);
+            }
+        }
+    }
+}
+
+/// The content query as the row predicate sees it: which sessions
+/// matched so far. App-wide and never persisted, unlike the structured
+/// filters around it (the one exception to their per-view, saved model).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ContentFilter {
+    /// The query text, for chips and empty states.
+    pub text: String,
+    /// Sessions that matched, streamed in while the scan runs.
+    pub hits: Arc<ContentHitMap>,
+    /// The scan finished; until then a missing session may still match.
+    pub complete: bool,
+    /// How the Search view lists results: one row per session, a row per
+    /// matching turn under each session, or every matching turn in one
+    /// flat list.
+    pub group: Grouping,
+    /// The matching turns of each session, once read (the per-message
+    /// groupings only).
+    pub details: Arc<ContentDetailMap>,
+    /// Mux panes whose scrollback matched, when the search read them
+    /// (ADR 0149). Empty for a search that read only sessions.
+    pub panes: Arc<Vec<crate::content_search::PaneHits>>,
+}
 
 /// Set of independent dimension constraints. Each `None` field means
 /// "no constraint on this dimension"; multiple fields AND together at
@@ -85,6 +231,10 @@ pub struct RowFilter {
     /// preserved.
     #[serde(skip_serializing_if = "is_false")]
     pub float_tracked_prs_top: bool,
+    /// Keep only sessions whose transcripts match the content query.
+    /// Held by the app, injected when a tree is built, and never saved.
+    #[serde(skip)]
+    pub content: Option<ContentFilter>,
 }
 
 impl RowFilter {
@@ -110,7 +260,10 @@ impl RowFilter {
     /// from [`Self::is_empty`] in that ordering toggles do not count
     /// — they re-order rows but never drop them.
     pub fn has_narrowing_predicates(&self) -> bool {
-        self.harness.is_some() || self.max_age.is_some() || self.mux_state.is_some()
+        self.harness.is_some()
+            || self.max_age.is_some()
+            || self.mux_state.is_some()
+            || self.content.is_some()
     }
 
     /// Evaluate the filter against an agent session's per-row data.
@@ -128,6 +281,14 @@ impl RowFilter {
         }
         if let Some(mux_state) = &self.mux_state
             && !mux_state.matches(inputs.mux_state)
+        {
+            return false;
+        }
+        if let Some(content) = &self.content
+            && content
+                .hits
+                .get(inputs.harness_key, inputs.session_key)
+                .is_none()
         {
             return false;
         }
@@ -387,6 +548,8 @@ impl MuxStateKey {
 #[derive(Clone, Copy, Debug)]
 pub struct SessionMatchInputs<'a> {
     pub harness_key: &'a str,
+    /// The harness's own key for the session, for the content filter.
+    pub session_key: &'a str,
     /// Wall-clock epoch (Unix seconds) used as the recency anchor.
     /// `None` disables age-based filtering for the row (the predicate
     /// treats absent `now` as "no constraint can be evaluated" and

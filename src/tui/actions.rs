@@ -188,6 +188,8 @@ pub fn subject_of_row(app: &App, id: &RowId) -> Subject {
             record: Some(record_id.clone()),
             pin: None,
         },
+        RowId::Hit { session, .. } => subject_of_node(app, session),
+        RowId::PaneHit { mux, .. } => subject_of_node(app, mux),
         other => crate::tui::rows::row_node(other)
             .map(|node| subject_of_node(app, node))
             .unwrap_or_default(),
@@ -291,12 +293,23 @@ pub fn resolve_attach_target(app: &App) -> Result<AttachTarget, AttachDisabled> 
         return Err(AttachDisabled::NoSelection);
     }
     let mux_id = mux_for_subject(snapshot, &subject)?;
+    attach_target_for_mux(app, &mux_id)
+}
 
+/// The attach target for the mux `mux_id`, or why it can't be attached.
+pub fn attach_target_for_mux(
+    app: &App,
+    mux_id: &MuxSessionId,
+) -> Result<AttachTarget, AttachDisabled> {
+    let Some(handle) = app.snapshot_handle() else {
+        return Err(AttachDisabled::NoSelection);
+    };
+    let snapshot = handle.snapshot();
     let mux_node = snapshot
         .nodes
         .iter()
         .find_map(|node| match node {
-            crate::model::GraphNode::MuxSession(mux) if mux.id == mux_id => Some(mux),
+            crate::model::GraphNode::MuxSession(mux) if &mux.id == mux_id => Some(mux),
             _ => None,
         })
         .ok_or(AttachDisabled::MuxNodeMissing)?;
@@ -336,6 +349,34 @@ fn viewer_session_for(snapshot: &GraphSnapshot, node: &NodeId) -> Option<AgentSe
         mux @ NodeId::MuxSession(_) => preferred_session_for_mux(snapshot, mux),
         _ => None,
     }
+}
+
+/// Where the viewer opens for the selected row of the Search view: the
+/// session's best hit, or the hit row's own turn. `None` outside the
+/// Search view, with the right pane focused, or without a search to
+/// show.
+pub fn viewer_open_target(app: &App) -> Option<(AgentSessionId, crate::viewer::state::ViewerOpen)> {
+    if app.active_view() != crate::tui::View::Search || app.focus() != crate::tui::app::Focus::Left
+    {
+        return None;
+    }
+    let content = app.viewed_search()?;
+    let (node, turn_index) = match app.selection()? {
+        RowId::Hit { session, turn } => (session, *turn),
+        RowId::AgentSession(node @ NodeId::AgentSession(id)) => {
+            let hits = content.hits().get(&id.harness_key, &id.session_key)?;
+            (node, hits.best.turn_index)
+        }
+        _ => return None,
+    };
+    let session = viewer_session_for(app.snapshot_handle()?.snapshot(), node)?;
+    Some((
+        session,
+        crate::viewer::state::ViewerOpen {
+            query: content.text.clone(),
+            turn_index,
+        },
+    ))
 }
 
 /// Resolve the viewer target for the current subject. Mirrors
@@ -433,6 +474,8 @@ pub fn natural_view(snapshot: &GraphSnapshot, node: &NodeId) -> crate::tui::View
     let live = snapshot.is_live(node);
     match node {
         NodeId::MuxSession(_) => View::Mux,
+        NodeId::Pin(_) => View::Pinned,
+        NodeId::Fork(_) if live => View::Forks,
         NodeId::ForgePr(_) if live => View::Prs,
         _ if !live => View::History,
         _ => View::Sessions,
@@ -854,7 +897,7 @@ pub fn default_effect(app: &App) -> Option<crate::tui::Effect> {
                     None
                 } else {
                     viewer_session_for(snapshot, node)
-                        .map(|session| Effect::Exec(ExecSpec::ViewSession(session)))
+                        .map(|session| Effect::Exec(ExecSpec::ViewSession(session, None)))
                 }
             }
             (SlotStatus::Live, PinKind::Pr) => Some(Effect::Toast(match pin.text("url") {

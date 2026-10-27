@@ -176,7 +176,13 @@ fn session_mux_app() -> (App, RunConfig) {
 }
 
 fn drive(app: &mut App, config: &RunConfig, script: &str) {
-    drive_keys(app, config, parse_key_script(script).expect("parse"), 30);
+    drive_keys(
+        app,
+        config,
+        parse_key_script(script).expect("parse"),
+        30,
+        None,
+    );
 }
 
 #[test]

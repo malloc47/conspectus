@@ -40,6 +40,10 @@ pub enum Msg {
     /// direct `App::set_selection` call inside a specialized runtime
     /// handler.
     SelectRow(Box<RowId>),
+    /// Open a quick-select result: select its row, follow its
+    /// relationships in the right pane, or switch to the view that lists
+    /// it, whichever its outcome word promised.
+    OpenEntity(NodeId),
     /// Left panel: move selection down/up one visible row.
     NavDown,
     NavUp,
@@ -214,6 +218,8 @@ pub enum Msg {
     /// on `ViewerEffect::Close`. No-op when the top of the modal
     /// stack isn't the viewer.
     Viewer(crate::viewer::input::ViewerMsg),
+    /// A key of the viewer's find prompt.
+    ViewerFind(crate::viewer::find::ViewerFindMsg),
     /// Attach to the currently selected row's mux session
     /// (ADR 0085 contract 2). The reducer resolves the target via
     /// `resolve_attach_target(&self)` and emits either
@@ -326,6 +332,12 @@ pub enum Msg {
     RefreshSlot(String),
     /// Slot menu → switch to the entity's native view and select it.
     RevealSlot(String),
+    /// `Shift+Enter` / `Alt+Enter` → switch to the selected row's entity
+    /// in its native view and select it; Backspace returns.
+    RevealSelected,
+    /// Pane viewer → attach to the mux the pane belongs to. A stopped or
+    /// gone mux is refused with a note in the viewer.
+    AttachPane,
     /// Row menu → run `conspectus rebuild <reference> --dry-run` and
     /// show the plan.
     ShowRebuildPlan(String),
@@ -355,6 +367,121 @@ pub enum Msg {
     /// Update the active row filter (ADR 0031). Reducer
     /// mutates the projection state and re-derives the tree.
     SetFilter(crate::filter::RowFilter),
+    /// Search every session's transcript for this text and narrow the
+    /// session lists to the sessions that match. The result stays in
+    /// memory only.
+    StartContentSearch {
+        text: String,
+        kinds: crate::viewer::search::ContentKinds,
+    },
+    /// Search while the `/` overlay is open: the scan runs and its
+    /// results feed the overlay, but the session lists are not narrowed
+    /// until [`Msg::ApplyContentSearch`].
+    PreviewContentSearch {
+        text: String,
+        kinds: crate::viewer::search::ContentKinds,
+        group: crate::viewer::search::Grouping,
+        reach: crate::tui::widgets::search::Reach,
+    },
+    /// Keep this search as the filter on the session lists, and with
+    /// `show_results` open the Search view on it. The previewed scan is
+    /// reused when it is for the same query.
+    ApplyContentSearch {
+        text: String,
+        kinds: crate::viewer::search::ContentKinds,
+        group: crate::viewer::search::Grouping,
+        reach: crate::tui::widgets::search::Reach,
+        show_results: bool,
+    },
+    /// Keep the previewed search as the newest one in the Search view and
+    /// open the view on it, without narrowing the lists. A scan still
+    /// running keeps streaming into the view.
+    KeepContentSearch {
+        text: String,
+        kinds: crate::viewer::search::ContentKinds,
+        group: crate::viewer::search::Grouping,
+        reach: crate::tui::widgets::search::Reach,
+    },
+    /// Show an older (negative) or newer (positive) remembered search in
+    /// the Search view. It is not scanned again.
+    PageSearchHistory(isize),
+    /// Show the remembered search at this position, oldest first.
+    ShowSearchHistory(usize),
+    /// List the remembered searches in a picker.
+    OpenSearchHistory,
+    /// Open the contents search modal (what `s` does).
+    OpenContentSearchModal,
+    /// Open the contents search modal with its options pane showing.
+    OpenSearchOptions,
+    /// Flip the Search view between listing sessions and messages.
+    ToggleSearchGranularity,
+    /// Keep the search the Search view shows as the filter on the lists.
+    ApplySearchEntry,
+    /// Drop the previewed search and bring back the filter it replaced,
+    /// if there was one.
+    DiscardContentPreview,
+    /// Open a mux pane's scrollback at a line a content search found.
+    OpenPaneHit {
+        pane: crate::content_search::PaneRef,
+        line: usize,
+        text: String,
+        /// Select the pane's mux in the Mux view first, as a hit chosen in
+        /// the modal does; a row of the Search view stays where it is.
+        reveal: bool,
+    },
+    /// Open the scrollback of the pane the selected Search-view row names,
+    /// on the line it found.
+    OpenSelectedPane,
+    /// Open the viewer on a session at the turn a content search found.
+    OpenContentHit {
+        session: crate::model::AgentSessionId,
+        text: String,
+        turn_index: usize,
+    },
+    /// Stop the content search and show every session again.
+    ClearContentSearch,
+    /// Read every transcript again for the active content search, as an
+    /// explicit refresh asks.
+    RescanContent,
+    /// Show the content search results per session or per message.
+    SetContentGroup(crate::viewer::search::Grouping),
+    /// The matching turns of some sessions, read for the per-message
+    /// grouping; stale ones are dropped like [`Msg::ContentHits`].
+    ContentDetails {
+        generation: u64,
+        batch: Vec<(
+            crate::content_search::SessionKey,
+            Vec<crate::viewer::search::Hit>,
+        )>,
+    },
+    /// The matching turns of some sessions for a remembered search that is
+    /// not the running one; stale ones are dropped.
+    HistoryDetails {
+        serial: u64,
+        batch: Vec<(
+            crate::content_search::SessionKey,
+            Vec<crate::viewer::search::Hit>,
+        )>,
+    },
+    /// Clear every filter, the content search included.
+    ClearFilters,
+    /// Mux panes the running scan found, stamped like
+    /// [`Msg::ContentHits`] and sent just before them.
+    ContentPanes {
+        generation: u64,
+        batch: Vec<crate::content_search::PaneHits>,
+    },
+    /// Results of the running scan, stamped with the scan they belong
+    /// to. Stale ones are dropped.
+    ContentHits {
+        generation: u64,
+        batch: Vec<(
+            crate::content_search::SessionKey,
+            crate::viewer::search::SessionHits,
+        )>,
+        progress: crate::content_search::Progress,
+        done: bool,
+    },
     /// Update the global sort (ADR 0031). Reducer mutates the
     /// projection state and re-derives the tree; the flat-
     /// sessions grouping forces recency regardless of the

@@ -965,6 +965,15 @@ fn the_built_binary_stays_inside_the_capability_manifest() {
         world.run(&strace, "graph", &["graph", "--format", "json"], project),
         world.run(&strace, "table", &["table", "sessions"], project),
         world.run(&strace, "node", &["columns", "sessions"], project),
+        world.run(&strace, "search", &["search", "release summary"], project),
+        // Sessions still match, so the run succeeds; the pane listing
+        // is what is traced.
+        world.run(
+            &strace,
+            "search-panes",
+            &["search", "release summary", "--source", "all"],
+            project,
+        ),
         world.run(&strace, "pin-list", &["pin", "list"], project),
         world.run(&strace, "history-list", &["history", "list"], project),
         world.run(

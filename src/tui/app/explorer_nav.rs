@@ -6,7 +6,7 @@ use super::*;
 impl App {
     pub(super) fn recompute_detail(&mut self) {
         self.detail = None;
-        self.preview_scroll = 0;
+        self.reset_preview_scroll();
         let Some(selection) = self.selection.as_ref() else {
             self.explorer = None;
             return;
@@ -24,6 +24,8 @@ impl App {
             RowId::Fork(node) => Some(node.clone()),
             RowId::Pin { pin_id } => Some(NodeId::Pin(PinId::new(pin_id.clone()))),
             RowId::Nested { node, .. } => Some(node.clone()),
+            RowId::Hit { session, .. } => Some(session.clone()),
+            RowId::Pane { mux, .. } | RowId::PaneHit { mux, .. } => Some(mux.clone()),
             RowId::History { record_id } => {
                 snapshot.history.meta(record_id).and_then(|(kind, _)| {
                     crate::tui::rows::history::node_of(snapshot, kind, record_id)
@@ -272,7 +274,7 @@ impl App {
                     target: &target,
                     home: home.as_deref(),
                 });
-                self.preview_scroll = 0;
+                self.reset_preview_scroll();
                 self.status_message = None;
                 // Mirror sync — when the drilled neighbor
                 // has a row in the current view, scroll the left
@@ -376,7 +378,7 @@ impl App {
             home: home.as_deref(),
         });
         self.explorer = Some(restored);
-        self.preview_scroll = 0;
+        self.reset_preview_scroll();
         self.status_message = None;
         // Restore the left-pane selection that was active
         // at the time of the drill, so Backspace unwinds both panes

@@ -258,6 +258,7 @@ pub(super) fn view_flag_label(view: crate::tui::View) -> &'static str {
         crate::tui::View::Forks => "forks",
         crate::tui::View::Pinned => "pinned",
         crate::tui::View::History => "history",
+        crate::tui::View::Search => "search",
     }
 }
 
@@ -417,6 +418,8 @@ impl TuiArgs {
             refresh_interval,
             mux_preview_interval,
             live_preview_enabled: !self.no_live_preview,
+            search: outcome.config.search,
+            initial_contains: self.filter_args.contains.clone(),
             color,
             current_tmux_session: current_tmux_session_name(),
             theme: outcome.config.tui.theme.clone(),

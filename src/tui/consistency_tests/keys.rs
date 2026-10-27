@@ -11,8 +11,8 @@ use super::layout::{app_with, builders, name_of};
 use crate::tui::keybindings::overlay::{
     CLOSE_DOWN_KEYS, CONFIRM_KEYS, CONTROLS_KEYS, EnterMeans, HELP_KEYS, KeyRow, MENU_KEYS,
     MESSAGES_KEYS, MODAL_CONVENTION, MULTI_SELECT_KEYS, MUX_LAUNCH_KEYS, NEW_MUX_KEYS,
-    PIN_EDIT_KEYS, SEARCH_KEYS, SpaceMeans, TEXT_INPUT_KEYS, VALUE_MODAL_KEYS, VIEWER_KEYS,
-    resolve,
+    PANE_VIEWER_KEYS, PICKER_KEYS, PIN_EDIT_KEYS, SEARCH_CONTENT_KEYS, SEARCH_KEYS, SpaceMeans,
+    TEXT_INPUT_KEYS, VALUE_MODAL_KEYS, VIEWER_FIND_KEYS, VIEWER_KEYS, resolve,
 };
 
 /// What a table makes of a key, by the name of the action it binds.
@@ -28,10 +28,13 @@ fn tables(modal: &str) -> Vec<Probe> {
         "Help" => vec![table(HELP_KEYS)],
         "Controls" => vec![table(CONTROLS_KEYS), table(MULTI_SELECT_KEYS)],
         "Rename" => vec![table(TEXT_INPUT_KEYS)],
-        "Search" | "Picker" => vec![table(SEARCH_KEYS)],
+        "Search" => vec![table(SEARCH_KEYS), table(SEARCH_CONTENT_KEYS)],
+        "Picker" => vec![table(PICKER_KEYS)],
         "ValueModal" => vec![table(VALUE_MODAL_KEYS)],
         "Messages" => vec![table(MESSAGES_KEYS)],
         "Viewer" => vec![table(VIEWER_KEYS)],
+        "PaneViewer" => vec![table(PANE_VIEWER_KEYS)],
+        "ViewerFind" => vec![table(VIEWER_FIND_KEYS)],
         "WorktreeMenu" => vec![
             table(MENU_KEYS),
             table(CONFIRM_KEYS),
@@ -68,8 +71,11 @@ const CHANGES: &[&str] = &["Toggle", "OptionNext"];
 #[test]
 fn every_modal_has_a_row_in_the_convention() {
     let mut named: Vec<&str> = builders().iter().map(|(name, _, _)| *name).collect();
-    // The transcript viewer needs a transcript on disk to build.
+    // The transcript viewer needs a transcript on disk to build, and its
+    // find prompt is a mode of the viewer rather than a modal of its own.
     named.push("Viewer");
+    named.push("PaneViewer");
+    named.push("ViewerFind");
     for name in &named {
         assert!(
             MODAL_CONVENTION.iter().any(|row| row.modal == *name),
@@ -162,4 +168,50 @@ fn a_departure_from_the_convention_gives_its_reason() {
             row.modal
         );
     }
+}
+
+#[test]
+fn both_search_modals_switch_reach_with_tab_and_the_contents_one_cycles_granularity_with_shift_tab()
+{
+    use crate::tui::keybindings::overlay::{SearchKey, footer};
+    assert_eq!(
+        resolve(SEARCH_KEYS, press(KeyCode::Tab)),
+        Some(SearchKey::Scope)
+    );
+    assert_eq!(
+        resolve(
+            SEARCH_KEYS,
+            KeyEvent::new(KeyCode::BackTab, KeyModifiers::SHIFT)
+        ),
+        Some(SearchKey::Scope)
+    );
+    // The contents modal switches the same way and offers the same words.
+    assert_eq!(
+        resolve(SEARCH_CONTENT_KEYS, press(KeyCode::Tab)),
+        Some(SearchKey::Scope)
+    );
+    assert_eq!(
+        resolve(
+            SEARCH_CONTENT_KEYS,
+            KeyEvent::new(KeyCode::BackTab, KeyModifiers::SHIFT)
+        ),
+        Some(SearchKey::Granularity),
+        "in the contents modal Shift-Tab cycles sessions/messages instead"
+    );
+    assert!(footer(SEARCH_CONTENT_KEYS).contains("Tab current/all"));
+    assert!(footer(SEARCH_CONTENT_KEYS).contains("S-Tab sessions/messages"));
+    assert!(footer(SEARCH_CONTENT_KEYS).contains("Ctrl-R earlier search"));
+    // The hints are generated from the table, in the operator's words.
+    let hints = footer(SEARCH_KEYS);
+    for expected in ["Tab current/all", "Enter pick", "Esc close", "↑/↓ move"] {
+        assert!(
+            hints.contains(expected),
+            "{expected:?} missing from {hints:?}"
+        );
+    }
+    assert!(!hints.contains("contents"), "{hints}");
+    // The list moves with Ctrl-N and Ctrl-P as well as the arrows.
+    let ctrl = |c| KeyEvent::new(KeyCode::Char(c), KeyModifiers::CONTROL);
+    assert_eq!(resolve(SEARCH_KEYS, ctrl('n')), Some(SearchKey::Down));
+    assert_eq!(resolve(SEARCH_KEYS, ctrl('p')), Some(SearchKey::Up));
 }

@@ -46,7 +46,10 @@ pub(super) fn draw_right_panel(app: &mut App, frame: &mut Frame<'_>, area: Rect)
         // per_line_rows math expects, leaving the cursor visible
         // off the bottom of the viewport.
         let content_width = inner.width.saturating_sub(1).max(1) as usize;
-        let ExplorerRender { lines, cursor_line } = {
+        let ExplorerRender {
+            mut lines,
+            mut cursor_line,
+        } = {
             let state = app.explorer().expect("checked above");
             render_explorer_lines(
                 state,
@@ -56,6 +59,12 @@ pub(super) fn draw_right_panel(app: &mut App, frame: &mut Frame<'_>, area: Rect)
                 app.focus() == Focus::Right,
             )
         };
+        // A selected hit row says which turn it is and shows what matched.
+        let hit_lines = selected_hit_lines(app);
+        if !hit_lines.is_empty() {
+            cursor_line = cursor_line.map(|index| index + hit_lines.len());
+            lines.splice(0..0, hit_lines);
+        }
         // Account for Paragraph wrap: any logical line whose
         // displayed width exceeds the pane width consumes extra
         // terminal rows. Without the wrap-aware row count, the
@@ -862,4 +871,51 @@ pub(super) fn empty_right_panel_text(app: &App) -> &'static str {
     } else {
         "Select a row to view its detail."
     }
+}
+
+/// The block shown above the node detail when a hit row is selected:
+/// who said it, what kind of turn it is, when, and the matching text
+/// with the match picked out.
+fn selected_hit_lines(app: &App) -> Vec<Line<'static>> {
+    let Some(selection) = app.selection() else {
+        return Vec::new();
+    };
+    let Some(row) = app.tree().rows.iter().find(|row| &row.id == selection) else {
+        return Vec::new();
+    };
+    let RowKind::Hit(hit) = &row.kind else {
+        return Vec::new();
+    };
+    let theme = app.theme();
+    let secondary = Style::default().fg(theme.secondary_text);
+    let header = Line::from(vec![
+        Span::styled("match", Style::default().add_modifier(Modifier::BOLD)),
+        Span::styled(
+            format!(
+                "  turn {} · {} · {} · {}",
+                hit.turn_index + 1,
+                hit.role,
+                hit.kind,
+                hit.age
+            ),
+            secondary,
+        ),
+    ]);
+    let mut text: Vec<Span<'static>> = Vec::new();
+    let (start, end) = (hit.highlight.start, hit.highlight.end);
+    if start < end
+        && end <= hit.snippet.len()
+        && hit.snippet.is_char_boundary(start)
+        && hit.snippet.is_char_boundary(end)
+    {
+        text.push(Span::raw(hit.snippet[..start].to_string()));
+        text.push(Span::styled(
+            hit.snippet[start..end].to_string(),
+            theme.match_style(),
+        ));
+        text.push(Span::raw(hit.snippet[end..].to_string()));
+    } else {
+        text.push(Span::raw(hit.snippet.clone()));
+    }
+    vec![header, Line::from(text), Line::default()]
 }

@@ -135,7 +135,7 @@ impl TableRowsArgs {
         // `[tui.views.<name>]`) is a follow-up; for now the CLI
         // flags are the only source so the static table narrows the
         // exact set the operator typed.
-        let cli_filter = self.filter_args.to_row_filter()?;
+        let mut cli_filter = self.filter_args.to_row_filter()?;
         let now_epoch = Some(crate::discovery::current_epoch());
 
         let roots: Vec<PathBuf> = if self.scan_roots.is_empty() {
@@ -145,6 +145,9 @@ impl TableRowsArgs {
         };
         let snapshot =
             warm_start_discover_and_resolve(roots, self.refresh, self.no_cache, &outcome.config)?;
+        cli_filter.content = self
+            .filter_args
+            .content_filter(&snapshot, &outcome.config.search);
         let render_width = resolve_table_width(self.wide, self.width, &io::stdout());
         let mut options = match (self.layout, render_width) {
             (LayoutFlag::Columnar, Some(w)) => {

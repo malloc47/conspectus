@@ -27,10 +27,12 @@ pub mod messages;
 pub mod modal;
 pub mod preview;
 pub mod preview_wrap;
+pub mod relation_path;
 pub mod resume;
 pub mod rows;
 mod runtime;
 pub mod search;
+pub mod search_entities;
 #[cfg(feature = "snapshot")]
 pub mod snapshot;
 pub mod theme;
@@ -41,7 +43,7 @@ pub mod viewer_bridge;
 pub mod widgets;
 pub mod worktree_actions;
 
-pub use app::{App, Msg};
+pub use app::{App, ContentSearch, ContentStatus, Msg};
 pub use effect::Effect;
 pub use modal::{Modal, Overlay, OverlayOutcome, RenameOverlayState};
 #[cfg(feature = "snapshot")]
@@ -91,6 +93,12 @@ pub struct RunConfig {
     /// When false, suppress live extras (mux pane capture +
     /// transcript-tail reads). Graph-resident previews still render.
     pub live_preview_enabled: bool,
+    /// `[search]`: the default grouping and content kinds for a content
+    /// search.
+    pub search: crate::config::SearchConfig,
+    /// A content query given on the command line (`--contains`): the
+    /// TUI starts with it applied as a filter.
+    pub initial_contains: Option<String>,
     /// Whether color is enabled, resolved per ADR 0022.
     pub color: bool,
     /// tmux session that hosts this TUI, when known. Used to
@@ -180,6 +188,8 @@ impl RunConfig {
             refresh_interval: Duration::from_secs(30),
             mux_preview_interval: Duration::from_secs(2),
             live_preview_enabled: true,
+            search: crate::config::SearchConfig::default(),
+            initial_contains: None,
             color: true,
             current_tmux_session: None,
             theme: Theme::default(),
@@ -217,6 +227,8 @@ pub enum View {
     Pinned,
     /// Gone entities Conspectus remembers (ADR 0140).
     History,
+    /// Sessions that match the content search (ADR 0147).
+    Search,
 }
 
 /// Row sort within each group.
@@ -446,6 +458,18 @@ pub enum HistoryGrouping {
     None,
 }
 
+/// Top-level grouping in the Search view (ADR 0147).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SearchGrouping {
+    /// One ranked list.
+    None,
+    /// Under the project (repo) the session worked in.
+    Project,
+    /// By harness.
+    Harness,
+}
+
 /// Per-view grouping dispatch. Each variant wraps the per-view
 /// grouping enum so a single [`Grouping`] value can be persisted in
 /// [`crate::tui::app::App`], passed through the CLI surface, or
@@ -466,6 +490,7 @@ pub enum Grouping {
     Forks(ForksGrouping),
     Pinned(PinnedGrouping),
     History(HistoryGrouping),
+    Search(SearchGrouping),
 }
 
 impl Grouping {
@@ -479,6 +504,7 @@ impl Grouping {
             Self::Forks(_) => View::Forks,
             Self::Pinned(_) => View::Pinned,
             Self::History(_) => View::History,
+            Self::Search(_) => View::Search,
         }
     }
 
@@ -494,6 +520,7 @@ impl Grouping {
             View::Forks => Self::Forks(ForksGrouping::Provider),
             View::Pinned => Self::Pinned(PinnedGrouping::Project),
             View::History => Self::History(HistoryGrouping::Project),
+            View::Search => Self::Search(SearchGrouping::None),
         }
     }
 
@@ -524,7 +551,9 @@ impl Grouping {
             Self::Pinned(PinnedGrouping::None) => "none",
             Self::History(HistoryGrouping::Project) => "project",
             Self::History(HistoryGrouping::Kind) => "kind",
-            Self::History(HistoryGrouping::None) => "none",
+            Self::History(HistoryGrouping::None) | Self::Search(SearchGrouping::None) => "none",
+            Self::Search(SearchGrouping::Project) => "project",
+            Self::Search(SearchGrouping::Harness) => "harness",
         }
     }
 
@@ -582,6 +611,11 @@ impl Grouping {
                 Self::History(HistoryGrouping::Project),
                 Self::History(HistoryGrouping::Kind),
                 Self::History(HistoryGrouping::None),
+            ],
+            View::Search => &[
+                Self::Search(SearchGrouping::None),
+                Self::Search(SearchGrouping::Project),
+                Self::Search(SearchGrouping::Harness),
             ],
         }
     }
@@ -649,6 +683,7 @@ mod tests {
             View::Forks,
             View::Pinned,
             View::History,
+            View::Search,
         ] {
             for option in Grouping::values_for(view) {
                 let parsed = Grouping::parse_for(view, option.as_str());
@@ -700,6 +735,7 @@ mod tests {
             View::Forks,
             View::Pinned,
             View::History,
+            View::Search,
         ] {
             assert_eq!(Grouping::default_for(view).view(), view);
         }
