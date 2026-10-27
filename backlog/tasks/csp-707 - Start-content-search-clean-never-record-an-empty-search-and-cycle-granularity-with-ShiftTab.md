@@ -3,9 +3,10 @@ id: CSP-707
 title: >-
   Start content search clean, never record an empty search, and cycle
   granularity with Shift+Tab
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-10-27 02:04'
+updated_date: '2026-10-27 02:22'
 labels:
   - h-search
   - tui
@@ -24,9 +25,9 @@ Follow-up from hands-on testing: an empty search string must never become a hist
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 No path records a history entry whose query is empty or only whitespace
-- [ ] #2 Ctrl+/ and s always open content search with an empty query; a documented key pages backwards (and forwards) through earlier search strings, filling the field and searching, without duplicating history
-- [ ] #3 In the content modal Tab switches Current/All and Shift+Tab cycles Sessions/Messages; the footer, help, docs, and tests say so
+- [x] #1 No path records a history entry whose query is empty or only whitespace
+- [x] #2 Ctrl+/ and s always open content search with an empty query; a documented key pages backwards (and forwards) through earlier search strings, filling the field and searching, without duplicating history
+- [x] #3 In the content modal Tab switches Current/All and Shift+Tab cycles Sessions/Messages; the footer, help, docs, and tests say so
 <!-- AC:END -->
 
 ## Definition of Done
@@ -34,3 +35,9 @@ Follow-up from hands-on testing: an empty search string must never become a hist
 - [ ] #1 `just check` passes, or `git diff --check` for docs-only changes
 - [ ] #2 Docs and ADRs are updated when behavior, architecture, or workflow change
 <!-- DOD:END -->
+
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+Blank queries are rejected by `SearchHistory::record` and `keep`. `Ctrl+/` and `s` always open empty on All. `Ctrl-R` and `Ctrl-T` page earlier search strings, restoring reach and options. `Shift-Tab` cycles Sessions/Messages in the contents modal; `Tab` stays Current/All. Verified with fmt, clippy, nextest twice (3404 pass), release build, and a tmux e2e.
+<!-- SECTION:FINAL_SUMMARY:END -->
