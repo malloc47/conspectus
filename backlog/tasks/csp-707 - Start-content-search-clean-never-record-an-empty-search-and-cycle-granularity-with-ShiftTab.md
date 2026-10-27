@@ -6,7 +6,7 @@ title: >-
 status: Done
 assignee: []
 created_date: '2026-10-27 02:04'
-updated_date: '2026-10-27 02:22'
+updated_date: '2026-10-27 02:51'
 labels:
   - h-search
   - tui
@@ -32,12 +32,12 @@ Follow-up from hands-on testing: an empty search string must never become a hist
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
-- [ ] #1 `just check` passes, or `git diff --check` for docs-only changes
-- [ ] #2 Docs and ADRs are updated when behavior, architecture, or workflow change
+- [x] #1 `just check` passes, or `git diff --check` for docs-only changes
+- [x] #2 Docs and ADRs are updated when behavior, architecture, or workflow change
 <!-- DOD:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Blank queries are rejected by `SearchHistory::record` and `keep`. `Ctrl+/` and `s` always open empty on All. `Ctrl-R` and `Ctrl-T` page earlier search strings, restoring reach and options. `Shift-Tab` cycles Sessions/Messages in the contents modal; `Tab` stays Current/All. Verified with fmt, clippy, nextest twice (3404 pass), release build, and a tmux e2e.
+Empty queries are never recorded; content search opens clean on All; Ctrl-R and Ctrl-T page earlier search strings; Shift-Tab cycles Sessions and Messages.
 <!-- SECTION:FINAL_SUMMARY:END -->
