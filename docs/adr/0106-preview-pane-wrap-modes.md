@@ -2,7 +2,9 @@
 
 ## Status
 
-Accepted.
+Accepted. Amended by [ADR 0155](0155-tui-text-measured-cut-and-wrapped-in-cells.md):
+the Plain and Smart wraps break rows by the framework's shared rule, so a
+word that ends exactly at the preview's edge stays on its row.
 
 ## Context
 

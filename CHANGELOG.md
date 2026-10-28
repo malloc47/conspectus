@@ -66,8 +66,35 @@ Targeted for 0.2.0, after 0.1.0 is tagged. History, rebuild, and pins
   pin edit forms, the previews, and the transcript viewer now follow the
   theme; the default look is unchanged. `docs/operations.md` lists every
   key, its default, and the older names.
+- **Wrapping follows one rule across the TUI.** A word that ends exactly
+  at a row's edge stays on that row (help, the viewers, modals, and
+  previews used to move it down a row); key hints wrap between hints, so
+  a key is never split from its verb and no row starts with `·`; the
+  transcript viewer keeps the blank lines between Markdown paragraphs,
+  lists, and code blocks; and a cut form value or quick select snippet
+  ends in `…` instead of stopping at the edge.
+- **Search snippets favor the text after the match.** A long message's
+  snippet, in the TUI and in `conspectus search --json` (`snippet.text`),
+  is at most 160 terminal cells with its `…` marks (it was 160 characters
+  plus the marks) and spends two thirds of its room after the match,
+  cutting on word edges, instead of centering the match.
 
 ### Fixed
+
+- **Wide text lines up in the TUI.** CJK, emoji, and accented text is
+  cut and padded by the cells it takes, not its characters, wherever a
+  row, chip, form, or find chip cuts text: a 30-character CJK title is
+  cut at the right pane's 48-cell budget instead of wrapping, an emoji
+  written with a variation selector (`⚠️`) no longer pushes its row a
+  cell past its column, and no cut separates a letter from its accent.
+  A value just over that budget now offers `o` for the full value too.
+- **The rows the TUI counts are the rows it draws.** The right pane, the
+  preview, the left pane's notices, and the worktree menu wrap their text
+  before measuring it, so a scrollbar matches its content, the right
+  pane's last row is no longer hidden behind a spare blank row, and the
+  worktree menu no longer cuts off its last lines at narrow widths. A
+  numbered tool-output line in the transcript viewer that wraps hangs
+  under its text instead of running past the pane's edge.
 
 - **Paging and scrolling in the TUI stay on the content.** `PgDn`/`PgUp`
   move by the rows on screen in the tree, help, the full-value viewer,

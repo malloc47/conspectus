@@ -1086,6 +1086,14 @@ terminal cell, and the source scanner that fails on an unmeasured glyph.
 `conspectus` registers its node-kind and state glyphs into that table from
 `tui::icons` and draws every shared mark through the constant.
 
+Text is the third (ADR 0155): the framework's `text` module measures, cuts,
+pads, and wraps strings in terminal cells, moving in whole graphemes, and fits
+snippets around a match, finds matches, and paints them. Every cut that loses
+text ends in `…` inside its budget, paths and identifiers are cut in the middle,
+key hints wrap only between hints, and a surface that needs its row count (a
+scrollbar, a zone's height) draws the rows it wrapped. The CLI's tables share
+the cell measure and the end cut; their column allocation stays their own.
+
 ### Graph-to-View Slicing
 
 The producer pipeline discovers and resolves a typed

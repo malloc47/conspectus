@@ -121,7 +121,10 @@ Two glyphs are kept although a font may draw them wider than a cell, because the
 | `⠋` `⠙` `⠹` `⠸` `⠼` `⠴` `⠦` `⠧` | a refresh is pending for this row | gray | Where the state glyph or word goes |
 
 The `…` character marks text cut to fit, and `·` separates parts of a
-content string (`repo · branch`). Neither is a state.
+content string (`repo · branch`). Neither is a state. Every width on this
+page counts terminal cells, not characters: a CJK character or an emoji
+takes two, a combining accent none, so wide text is cut and padded at the
+same columns as ASCII.
 
 Two glyphs have a second life by design. `⌥` is both the branch kind
 and the "tracked locally" mark on a PR row, because both say "this is a
@@ -233,7 +236,7 @@ A checkout header adds `(linked · locked · prunable)` for those states.
 | # | Cell | Source | Condition | Width and style |
 |---|---|---|---|---|
 | 1 | Prefix | indent, disclosure (only if the session has forks beneath it), `●`, pin marker | always | |
-| 2 | Session key | the harness's own id | always | first 8 characters, dim, padded to 8 |
+| 2 | Session key | the harness's own id | always | first 8 cells, dim, padded to 8 |
 | 3 | Harness chip | the session's harness | always | 10 cells |
 | 4 | Age | last activity | always | 4 cells |
 | 5 | State | `⊸` linked to a definitive mux, `∘` not | always | 1 cell; a spinner while a refresh is pending |

@@ -2,7 +2,9 @@
 
 ## Status
 
-Accepted
+Accepted. Amended by [ADR 0155](0155-tui-text-measured-cut-and-wrapped-in-cells.md):
+a scrolled pane wraps its text first and draws those rows, so the
+scrollbar's content length is the row count drawn, not an estimate.
 
 ## Context
 

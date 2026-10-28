@@ -242,7 +242,11 @@ Work through this list in order. Each step names the rule it applies.
    `M` where something is committed. The control performs no effect. Anything
    external arrives through a trait, a closure, or a sink supplied by the host.
 6. **Measure in cells.** Truncation, padding, and wrapping go through the
-   `text` module and measure terminal cells (house rule 14).
+   `text` module and measure terminal cells (house rule 14). A control
+   that needs its row count (a scroll range, a scrollbar, a height) wraps
+   with `text::wrap_line` and draws those rows, rather than letting the
+   paragraph widget wrap and estimating; see
+   [controls/text.md](controls/text.md).
 7. **Leave seams open, do not build them.** If the control could one day
    carry availability on key rows, report its rendered area for mouse hit
    testing, or accept another content source, keep the types ready for it and

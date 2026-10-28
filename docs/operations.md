@@ -600,7 +600,8 @@ position, counting from 1), `role` (`user`, `assistant`, `system`), `kind` (`mes
 its own `snippet`, and has no `hits` or `latest`. `label` is the session's
 alias, title, or hosting mux name, or `null`. `snippet.highlight` is the
 byte range (not characters) of the match inside `snippet.text`, which is
-capped and has its whitespace collapsed. `truncated` lists the sessions
+capped at 160 terminal cells (a `…` on each cut side included), favors the
+text after the match, and has its whitespace collapsed. `truncated` lists the sessions
 (`harness`, `session`, `matches`, `shown`) whose per-message results were
 capped. `searched.skipped` counts sessions whose
 transcript could not be read; `without_parser` counts sessions of
