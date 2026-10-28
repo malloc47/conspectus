@@ -1,5 +1,7 @@
 //! Right panel: the graph explorer (ADR 0074) and its title.
 
+use tuikit::selection::{self, Cursor};
+
 use super::*;
 
 /// Rows reserved for the Preview zone so a full Related list cannot
@@ -289,13 +291,13 @@ pub(super) fn render_explorer_lines(
             .iter()
             .position(|row| matches!(row, ExplorerRow::NodeField { index, .. } if *index == idx));
         let at_cursor = flat_index == Some(cursor);
-        // The cursor row still drives scrolling when the pane is
-        // unfocused, but only the focused pane draws a highlight.
-        let highlight = at_cursor && focused;
+        // An unfocused pane keeps its cursor row marked, in the inactive
+        // look, so it still shows where the cursor is.
+        let mark = Cursor::of(at_cursor, focused);
         if at_cursor {
             cursor_line = Some(lines.len());
         }
-        lines.push(render_node_field_line(field, highlight, theme));
+        lines.push(render_node_field_line(field, mark, theme));
     }
 
     if view.relationships.groups.is_empty() {
@@ -323,7 +325,7 @@ pub(super) fn render_explorer_lines(
 
     for (row_index, row) in rows.iter().enumerate() {
         let at_cursor = row_index == cursor;
-        let highlight = at_cursor && focused;
+        let mark = Cursor::of(at_cursor, focused);
         let pushed = match row {
             ExplorerRow::NodeField { .. } => false,
             ExplorerRow::ValidatedLink {
@@ -336,7 +338,7 @@ pub(super) fn render_explorer_lines(
                     lines.push(render_validated_link_line(
                         group,
                         link,
-                        highlight,
+                        mark,
                         theme,
                         show_edge_meta,
                         width,
@@ -352,7 +354,7 @@ pub(super) fn render_explorer_lines(
                     counts.other,
                     counts.ambiguous,
                     counts.unresolved,
-                    highlight,
+                    mark,
                     theme,
                 ));
                 true
@@ -367,7 +369,7 @@ pub(super) fn render_explorer_lines(
                     lines.push(render_other_link_line(
                         group,
                         link,
-                        highlight,
+                        mark,
                         theme,
                         show_edge_meta,
                         width,
@@ -384,9 +386,7 @@ pub(super) fn render_explorer_lines(
                 if let Some(group) = view.relationships.groups.get(*group_index)
                     && let Some(unresolved) = group.unresolved.get(*unresolved_index)
                 {
-                    lines.push(render_other_unresolved_line(
-                        group, unresolved, highlight, theme,
-                    ));
+                    lines.push(render_other_unresolved_line(group, unresolved, mark, theme));
                     true
                 } else {
                     false
@@ -400,20 +400,20 @@ pub(super) fn render_explorer_lines(
     ExplorerRender { lines, cursor_line }
 }
 
+/// One field of the explorer's node: the cursor gutter, the label, an
+/// optional kind chip, and the value. The cursor row is highlighted
+/// whole.
 pub(super) fn render_node_field_line(
     field: &crate::tui::explorer::CoreField,
-    highlight: bool,
+    cursor: Cursor,
     theme: &Theme,
 ) -> Line<'static> {
-    let mut style = if field.placeholder {
+    let style = if field.placeholder {
         Style::default().add_modifier(theme.muted)
     } else {
         Style::default()
     };
-    if highlight {
-        style = style.add_modifier(Modifier::REVERSED);
-    }
-    let label = span!(Modifier::BOLD; "  {:<14}", field.label);
+    let label = span!(Modifier::BOLD; "{:<14}", field.label);
     let mut spans = vec![label];
     // ADR 0073 §3: render the kind-chip glyph before the value so the
     // chip stays anchored beside the label even when the value wraps
@@ -435,7 +435,7 @@ pub(super) fn render_node_field_line(
             annotation
         ));
     }
-    Line::from(spans)
+    selection::row(spans, cursor, theme)
 }
 
 /// Per-kind glyph chip used to surface the graph node kind next to a
@@ -470,7 +470,7 @@ pub(super) const VERB_COLUMN_WIDTH: usize = 22;
 pub(super) fn render_validated_link_line(
     group: &crate::tui::explorer::RelationshipGroup,
     link: &crate::tui::explorer::RelationshipLink,
-    highlight: bool,
+    cursor: Cursor,
     theme: &Theme,
     show_edge_meta: bool,
     width: usize,
@@ -478,11 +478,11 @@ pub(super) fn render_validated_link_line(
     render_related_row(
         group,
         link,
-        highlight,
+        cursor,
         theme,
         show_edge_meta,
         width,
-        "  ",
+        "",
         None,
         Style::default().fg(theme.link).add_modifier(Modifier::BOLD),
     )
@@ -493,10 +493,11 @@ pub(super) fn render_validated_link_line(
 /// the zone can tell at a glance which rows are alternates and
 /// which are conflicts:
 ///
-/// - `AltOf(_)` → 6-space indent, no prefix glyph, label in
-///   `theme.edge_alt_of()`. Quiet — these are candidates the
+/// - `AltOf(_)` → 4 cells past the cursor gutter, no prefix glyph,
+///   label in `theme.edge_alt_of()`. Quiet — these are candidates the
 ///   resolver considered but didn't pick.
-/// - `Conflict` → `▲ ` prefix in `theme.edge_conflict()`, label in
+/// - `Conflict` → `▲ ` prefix after the gutter in
+///   `theme.edge_conflict()`, label in
 ///   `theme.edge_conflict()` + BOLD. The `▲` is the cross-mode
 ///   anchor (survives `NO_COLOR`); it also lines up vocabulary
 ///   with the Other header's `K ▲` summary count.
@@ -506,7 +507,7 @@ pub(super) fn render_validated_link_line(
 pub(super) fn render_other_link_line(
     group: &crate::tui::explorer::RelationshipGroup,
     link: &crate::tui::explorer::RelationshipLink,
-    highlight: bool,
+    cursor: Cursor,
     theme: &Theme,
     show_edge_meta: bool,
     width: usize,
@@ -518,16 +519,16 @@ pub(super) fn render_other_link_line(
                 .fg(theme.edge_conflict())
                 .add_modifier(Modifier::BOLD);
             let prefix = span!(conflict_style; "{} ", marks::WARNING);
-            ("    ", Some(prefix), conflict_style)
+            ("  ", Some(prefix), conflict_style)
         }
         EdgeStateLabel::AltOf(_) | EdgeStateLabel::Resolves => {
-            ("      ", None, Style::default().fg(theme.edge_alt_of()))
+            ("    ", None, Style::default().fg(theme.edge_alt_of()))
         }
     };
     render_related_row(
         group,
         link,
-        highlight,
+        cursor,
         theme,
         show_edge_meta,
         width,
@@ -541,35 +542,27 @@ pub(super) fn render_other_link_line(
 /// optional edge-meta suffix gives up its room instead.
 pub(super) const MIN_RELATED_LABEL_WIDTH: usize = 8;
 
-/// Render one related-entities row. The neighbor label is
-/// middle-truncated to the space left after the indent, verb column,
-/// and kind glyph: the explorer paragraph word-wraps, so an unbroken
-/// path that overflows would otherwise drop onto the next line and
-/// leave this row visually empty.
+/// Render one related-entities row: the cursor gutter, an optional
+/// prefix, the indent, the verb column, the kind glyph, and the
+/// neighbor label. The label is middle-truncated to the space left
+/// after them: the explorer paragraph word-wraps, so an unbroken path
+/// that overflows would otherwise drop onto the next line and leave
+/// this row visually empty. The cursor row is highlighted whole.
 #[allow(clippy::too_many_arguments)]
 pub(super) fn render_related_row(
     group: &crate::tui::explorer::RelationshipGroup,
     link: &crate::tui::explorer::RelationshipLink,
-    highlight: bool,
+    cursor: Cursor,
     theme: &Theme,
     show_edge_meta: bool,
     width: usize,
     indent: &str,
     prefix: Option<Span<'static>>,
-    label_style_base: Style,
+    label_style: Style,
 ) -> Line<'static> {
     let verb = crate::tui::explorer::directional_verb(&group.relation, group.direction);
     let verb_text = format!("{indent}{verb:<VERB_COLUMN_WIDTH$} ");
-    let mut row_style = Style::default();
-    let mut label_style = label_style_base;
-    if highlight {
-        row_style = row_style.add_modifier(Modifier::REVERSED);
-        label_style = label_style.add_modifier(Modifier::REVERSED);
-    }
-    let mut kind_chip = kind_chip_span(link.neighbor_kind, theme);
-    if highlight {
-        kind_chip.style = kind_chip.style.add_modifier(Modifier::REVERSED);
-    }
+    let kind_chip = kind_chip_span(link.neighbor_kind, theme);
     let edge_meta = show_edge_meta.then(|| {
         format!(
             "  · {} · {} · {}",
@@ -581,8 +574,8 @@ pub(super) fn render_related_row(
     let prefix_width = prefix
         .as_ref()
         .map_or(0, |p| text::width(p.content.as_ref()));
-    // verb column + glyph + separating space
-    let fixed = prefix_width + text::width(verb_text.as_str()) + 2;
+    // gutter + verb column + glyph + separating space
+    let fixed = selection::GUTTER_WIDTH + prefix_width + text::width(verb_text.as_str()) + 2;
     let meta_width = edge_meta.as_deref().map_or(0, text::width);
     let with_meta = width.saturating_sub(fixed + meta_width);
     let label_budget = if with_meta >= MIN_RELATED_LABEL_WIDTH {
@@ -593,20 +586,17 @@ pub(super) fn render_related_row(
     let label = text::truncate_middle(&link.neighbor_label, label_budget);
 
     let mut spans: Vec<Span<'static>> = Vec::new();
-    if let Some(mut prefix) = prefix {
-        if highlight {
-            prefix.style = prefix.style.add_modifier(Modifier::REVERSED);
-        }
+    if let Some(prefix) = prefix {
         spans.push(prefix);
     }
-    spans.push(span!(row_style; "{verb_text}"));
+    spans.push(Span::raw(verb_text));
     spans.push(kind_chip);
     spans.push(Span::raw(" "));
     spans.push(span!(label_style; "{label}"));
     if let Some(trailing) = edge_meta {
         spans.push(span!(label_style; "{trailing}"));
     }
-    Line::from(spans)
+    selection::row(spans, cursor, theme)
 }
 
 /// `► Other (N · K ▲ · L —)` / `▼ Other (N · K ▲ · L —)` row that
@@ -616,7 +606,7 @@ pub(super) fn render_other_header_line(
     other_count: usize,
     ambiguous_count: usize,
     unresolved_count: usize,
-    highlight: bool,
+    cursor: Cursor,
     theme: &Theme,
 ) -> Line<'static> {
     let glyph = if expanded {
@@ -632,14 +622,11 @@ pub(super) fn render_other_header_line(
         suffix.push_str(&format!(" · {unresolved_count} {}", marks::NO_VALUE));
     }
     suffix.push(')');
-    let text = format!("  {glyph} Other  {suffix}");
-    let mut style = Style::default()
+    let text = format!("{glyph} Other  {suffix}");
+    let style = Style::default()
         .fg(theme.inert)
         .add_modifier(Modifier::BOLD);
-    if highlight {
-        style = style.add_modifier(Modifier::REVERSED);
-    }
-    Line::from(span!(style; "{text}"))
+    selection::row([span!(style; "{text}")], cursor, theme)
 }
 
 /// Render an Other-zone unresolved-evidence row. Shape mirrors
@@ -648,17 +635,14 @@ pub(super) fn render_other_header_line(
 pub(super) fn render_other_unresolved_line(
     group: &crate::tui::explorer::RelationshipGroup,
     row: &crate::tui::explorer::UnresolvedRow,
-    highlight: bool,
+    cursor: Cursor,
     theme: &Theme,
 ) -> Line<'static> {
     let verb = crate::tui::explorer::directional_verb(&group.relation, group.direction);
     let detail = unresolved_evidence_summary(row);
-    let text = format!("      {verb:<VERB_COLUMN_WIDTH$} — {detail}",);
-    let mut style = Style::default().add_modifier(theme.muted);
-    if highlight {
-        style = style.add_modifier(Modifier::REVERSED);
-    }
-    Line::from(span!(style; "{text}"))
+    let text = format!("    {verb:<VERB_COLUMN_WIDTH$} — {detail}",);
+    let style = Style::default().add_modifier(theme.muted);
+    selection::row([span!(style; "{text}")], cursor, theme)
 }
 
 pub(super) fn unresolved_evidence_summary(row: &crate::tui::explorer::UnresolvedRow) -> String {
@@ -732,7 +716,7 @@ pub(super) fn draw_explorer_preview(
                     Some(text) => neighbor_text = Some(text),
                     None => {
                         for field in fields {
-                            lines.push(render_node_field_line(field, false, theme));
+                            lines.push(render_node_field_line(field, Cursor::Off, theme));
                         }
                     }
                 }

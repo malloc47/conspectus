@@ -1,5 +1,7 @@
 //! Left panel: the row tree, its scrollbar, and per-row spans.
 
+use tuikit::selection::{self, Cursor};
+
 use super::*;
 
 use crate::tui::icons::state;
@@ -865,30 +867,13 @@ pub(super) fn render_mixed_spans(
 /// The ghost style: the theme's `inert` color in italics. Gone entities
 /// and pins that aren't running share it in every view.
 pub(super) fn ghost_style(theme: &Theme) -> Style {
-    Style::default()
-        .fg(theme.inert)
-        .add_modifier(Modifier::ITALIC)
+    selection::ghost_style(theme)
 }
 
-/// Whether `style` draws a filled chip (a harness or program badge),
-/// whose fill is its background or its reversed foreground.
-fn is_chip(style: Style) -> bool {
-    style.bg.is_some() || style.add_modifier.contains(Modifier::REVERSED)
-}
-
-/// Restyle `spans` as a ghost. Chips keep their background and are
-/// dimmed instead, so an agent still reads as an agent.
+/// Restyle `spans` as a ghost. Chips keep their fill and recede
+/// instead, so an agent still reads as an agent.
 pub(super) fn ghostify(spans: &mut [Span<'static>], theme: &Theme) {
-    for span in spans {
-        span.style = if is_chip(span.style) {
-            span.style.add_modifier(theme.muted | Modifier::ITALIC)
-        } else {
-            span.style
-                .fg(theme.inert)
-                .remove_modifier(Modifier::BOLD)
-                .add_modifier(Modifier::ITALIC)
-        };
-    }
+    selection::ghost(spans, theme);
 }
 
 /// The kind glyph of a mixed-kind row; PR glyphs take their state's hue.
@@ -1050,9 +1035,7 @@ pub(super) fn render_left_row(
     }
 
     if handoff_spinner.is_some() {
-        for span in &mut spans {
-            span.style = span.style.add_modifier(theme.muted);
-        }
+        selection::pending(&mut spans, theme);
     }
     // A group (or any non-mixed row) standing for an entity that is
     // gone or unknown wears the ghost style like the mixed rows do.
@@ -1063,29 +1046,14 @@ pub(super) fn render_left_row(
     {
         ghostify(&mut spans, theme);
     }
-    let mut line = Line::from(spans);
-    if is_selected {
-        let modifiers = if app.focus() == Focus::Left {
-            theme.selection_active
-        } else {
-            theme.selection_inactive
-        };
-        let selection_style = Style::default().add_modifier(modifiers);
-        line = line.style(selection_style);
-        for span in &mut line.spans {
-            span.style = if is_chip(span.style) {
-                // A chip keeps the look it has on every other row, so it
-                // still reads as a chip: the highlight marks the rest of
-                // the row, and reversing a program chip's fill would
-                // blend it into the highlight.
-                span.style
-                    .remove_modifier(modifiers.difference(span.style.add_modifier))
-            } else {
-                span.style.patch(selection_style)
-            };
-        }
-    }
-    line
+    // The selected row takes the selection pair, active or inactive by
+    // focus. A chip keeps the look it has on every other row, so it
+    // still reads as a chip. The tree's rows start with their disclosure
+    // and kind columns, so they draw the highlight without the cursor
+    // gutter.
+    let cursor = Cursor::of(is_selected, app.focus() == Focus::Left);
+    selection::highlight(&mut spans, cursor, theme);
+    Line::from(spans)
 }
 
 /// `handoff_spinner` replaces the attach glyph while the row awaits

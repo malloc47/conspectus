@@ -199,8 +199,11 @@ fn reversed_cells(buffer: &Buffer, left: bool) -> usize {
         .sum()
 }
 
+/// Only the focused pane reverses its cursor row; the other keeps its
+/// cursor row in the inactive look, which is bold rather than reversed
+/// by default (see `selection.rs`).
 #[test]
-fn an_unfocused_pane_shows_no_highlighted_row() {
+fn only_the_focused_pane_reverses_its_cursor_row() {
     let mut app = app_in(View::Mux);
     select(&mut app, "conspectus-main");
     assert_eq!(app.focus(), Focus::Left);
@@ -214,11 +217,11 @@ fn an_unfocused_pane_shows_no_highlighted_row() {
     // the difference is its highlighted row.
     assert!(
         reversed_cells(&left_focused, true) > reversed_cells(&right_focused, true),
-        "the left pane highlights its row only while focused"
+        "the left pane reverses its row only while focused"
     );
     assert!(
         reversed_cells(&right_focused, false) > reversed_cells(&left_focused, false),
-        "the right pane highlights its row only while focused"
+        "the right pane reverses its row only while focused"
     );
 }
 

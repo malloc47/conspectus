@@ -15,7 +15,7 @@ updated 0s ago · 1 sessions · 1 mux
 │`conspectus pin migrate` to convert it                              │
 └────────────────────────────────────────────────────────────────────┘
 ┌   ◉ pin ───────────────────────────────────────────────────────────┐
-│  id            conspectus-main                                     │
+│► id            conspectus-main                                     │
 │  name          conspectus-main                                     │
 │  kind          mux                                                 │
 │───────────────────────────────────────────────────────── Preview ──│

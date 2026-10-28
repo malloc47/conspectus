@@ -106,7 +106,7 @@ impl App {
             state.cursor = 0;
             return;
         }
-        state.cursor = tuikit::scroll::clamp_step(state.cursor, rows.len(), delta);
+        state.cursor = tuikit::selection::Ends::Clamp.step(state.cursor, rows.len(), delta);
         self.status_message = None;
     }
 

@@ -18,7 +18,7 @@ updated 0s ago · 1 sessions · 1 mux
 │  ◆ ◎ repo-gone         removed     10d              ~/src/lost/.g… │
 └────────────────────────────────────────────────────────────────────┘
 ┌   ◉ pin ───────────────────────────────────────────────────────────┐
-│  id            mux-live                                            │
+│► id            mux-live                                            │
 │  name          mux-live                                           ▲│
 │  kind          mux                                                █│
 │  status        live                                               ▼│

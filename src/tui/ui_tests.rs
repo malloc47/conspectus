@@ -11,6 +11,7 @@ use crate::tui::preview::PreviewSource;
 use crate::tui::rows::sessions::{SessionsBuildInputs, build_sessions_tree};
 use crate::tui::{RunConfig, View};
 use ratatui::layout::{Constraint, Direction, Layout};
+use tuikit::selection::Cursor;
 
 fn seeded_app() -> App {
     let mut snapshot = GraphSnapshot::empty();
@@ -526,8 +527,11 @@ fn focus_marker_prefixes_only_the_active_pane_title() {
     let mut app = seeded_app();
     let buffer = render_to_buffer(&mut app, area);
     let text = buffer_to_string(&buffer);
+    // The pane titles share one line; the explorer's cursor row below
+    // carries the same mark as a list cursor, so count the titles only.
+    let titles = |text: &str| text.lines().nth(1).unwrap_or("").matches('►').count();
     assert_eq!(
-        text.matches('►').count(),
+        titles(&text),
         1,
         "exactly one focus marker should be visible: {text}",
     );
@@ -547,7 +551,7 @@ fn focus_marker_prefixes_only_the_active_pane_title() {
     let buffer = render_to_buffer(&mut app, area);
     let text = buffer_to_string(&buffer);
     assert_eq!(
-        text.matches('►').count(),
+        titles(&text),
         1,
         "exactly one focus marker should still be visible after CycleFocus: {text}",
     );
@@ -900,7 +904,7 @@ fn render_node_field_line_places_kind_chip_before_value() {
         kind_chip: Some(crate::model::NodeKind::Workspace),
         preview: None,
     };
-    let line = render_node_field_line(&field, false, &theme);
+    let line = render_node_field_line(&field, Cursor::Off, &theme);
     let rendered: String = line.spans.iter().map(|s| s.content.as_ref()).collect();
     let label_idx = rendered.find("cwd").expect("label present");
     let chip_idx = rendered.find('▦').expect("workspace chip present");
@@ -1170,7 +1174,7 @@ fn other_link_line_dispatches_per_edge_state() {
     let conflict_line = render_other_link_line(
         &group,
         &link(EdgeStateLabel::Conflict),
-        false,
+        Cursor::Off,
         &theme,
         false,
         200,
@@ -1182,8 +1186,9 @@ fn other_link_line_dispatches_per_edge_state() {
         .collect::<Vec<_>>()
         .join("");
     assert!(
-        text.starts_with("▲ "),
-        "Conflict rows must lead with the `▲ ` prefix (NO_COLOR-safe signal): `{text}`",
+        text.starts_with("  ▲ "),
+        "Conflict rows must lead with the `▲ ` prefix after the cursor gutter \
+         (NO_COLOR-safe signal): `{text}`",
     );
     let label_span = conflict_line
         .spans
@@ -1197,7 +1202,7 @@ fn other_link_line_dispatches_per_edge_state() {
     let alt_line = render_other_link_line(
         &group,
         &link(EdgeStateLabel::AltOf(RelationKind::LinkedToMux)),
-        false,
+        Cursor::Off,
         &theme,
         false,
         200,
@@ -1209,7 +1214,7 @@ fn other_link_line_dispatches_per_edge_state() {
         .collect::<Vec<_>>()
         .join("");
     assert!(
-        !alt_text.starts_with("▲ "),
+        !alt_text.contains("▲ "),
         "AltOf rows should not carry the conflict prefix: `{alt_text}`",
     );
     let alt_label = alt_line
@@ -1257,7 +1262,7 @@ fn validated_link_line_drops_the_legacy_winner_star() {
         preview: Vec::<CoreField>::new(),
         evidence: Vec::new(),
     };
-    let line = render_validated_link_line(&group, &link, false, &theme, true, 200);
+    let line = render_validated_link_line(&group, &link, Cursor::Off, &theme, true, 200);
     let text: String = line
         .spans
         .iter()
@@ -1305,7 +1310,7 @@ fn related_row_truncates_long_labels_instead_of_wrapping_them_away() {
         evidence: Vec::new(),
     };
     let width = 56;
-    let line = render_validated_link_line(&group, &link, false, &theme, false, width);
+    let line = render_validated_link_line(&group, &link, Cursor::Off, &theme, false, width);
     let text: String = line.spans.iter().map(|s| s.content.as_ref()).collect();
     assert!(
         text::width(&text) <= width,
@@ -1320,7 +1325,7 @@ fn related_row_truncates_long_labels_instead_of_wrapping_them_away() {
         "truncation keeps the basename: `{text}`"
     );
 
-    let wide = render_validated_link_line(&group, &link, false, &theme, false, 200);
+    let wide = render_validated_link_line(&group, &link, Cursor::Off, &theme, false, 200);
     let wide_text: String = wide.spans.iter().map(|s| s.content.as_ref()).collect();
     assert!(wide_text.ends_with(path), "no truncation when it fits");
 }
