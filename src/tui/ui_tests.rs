@@ -3691,6 +3691,26 @@ fn scrolling_a_preview_past_its_end_is_taken_back_at_once() {
 }
 
 #[test]
+fn a_preview_still_loading_keeps_its_offset() {
+    // Keys pressed while the Preview shows its placeholder are not lost:
+    // the first frame that shows the content scrolls by them.
+    let mut app = unmuxed_session_app(|_| {});
+    let area = Rect::new(0, 0, 120, 30);
+    render_to_buffer(&mut app, area);
+    for _ in 0..3 {
+        app.update(Msg::ScrollPreviewBy(-1));
+        render_to_buffer(&mut app, area);
+    }
+    assert_eq!(app.preview_scroll(), 3, "the placeholder took nothing back");
+    app.update(Msg::SetPreview {
+        source: codex_transcript(),
+        content: transcript_content(30),
+    });
+    render_to_buffer(&mut app, area);
+    assert_eq!(app.preview_scroll(), 3, "the transcript has room for it");
+}
+
+#[test]
 fn right_pane_explorer_hides_scrollbar_when_related_list_fits() {
     // A workspace with two repos has only two validated rows;
     // the explorer header comfortably fits in any non-tiny

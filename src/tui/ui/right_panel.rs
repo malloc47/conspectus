@@ -9,7 +9,8 @@ use super::*;
 const MIN_PREVIEW_HEIGHT: u16 = 6;
 
 /// Draw the right pane and return the windows its explorer zone and its
-/// Preview drew, `None` for a zone the pane did not draw.
+/// Preview drew, `None` for a zone the pane did not draw (or a Preview
+/// whose content has not loaded).
 pub(super) fn draw_right_panel(
     app: &mut App,
     frame: &mut Frame<'_>,
@@ -102,7 +103,12 @@ pub(super) fn draw_right_panel(
     app.prepare_preview(split[2].width.saturating_sub(1).max(1));
     let state = app.explorer().expect("checked above");
     let preview = draw_explorer_preview(app, state, frame, split[2]);
-    (Some(window), Some(preview))
+    // A Preview still waiting for its content draws a placeholder, not
+    // the rows its offset counts, so it keeps the offset until the
+    // content has loaded and a frame shows it.
+    let loaded = crate::tui::preview::preview_source(app)
+        .is_none_or(|source| app.previews().get(&source).is_some());
+    (Some(window), loaded.then_some(preview))
 }
 
 /// Render the right pane title with the kind of node currently
