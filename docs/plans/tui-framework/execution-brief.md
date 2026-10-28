@@ -142,6 +142,18 @@ writes no file. Domain meaning enters through type parameters (`M`, `Cx`,
 (CSP-718) enforce this; if one fails, fix the design, not the allowlist,
 unless the story says otherwise.
 
+The guards live in `crates/tuikit/tests/independence.rs`. Its module docs
+describe each rule, how matching works, and how to request a reviewed
+allowlist entry; the word list and the dependency allowlist are constants in
+that file. Two things to know before writing framework code:
+
+- The vocabulary guard also flags the test-rig sense of "harness". Call such
+  helpers a driver, checker, or suite (CSP-732 names a "conformance harness"
+  in its title; the framework's own name for it must avoid the word).
+- Everything in the crate directory is scanned except that one file: source,
+  docs, tests, the manifest, and any README. Docs therefore cannot quote the
+  word list; they point at the constant instead.
+
 ## Stop Conditions
 
 - An `EPERM` or "operation not permitted" error: stop at once and report it

@@ -14,7 +14,9 @@
 //!
 //! The crate depends on nothing from the program that hosts it, spawns no
 //! process, and writes no file. Host meaning enters through type parameters,
-//! closures, traits, and a named-style registry.
+//! closures, traits, and a named-style registry. The guard tests in
+//! `tests/independence.rs` enforce this and document how to request a
+//! reviewed exception.
 //!
 //! This crate is not published: it carries no semver promise, and it can
 //! move to its own repository as a directory lift.

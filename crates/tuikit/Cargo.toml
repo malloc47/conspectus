@@ -9,3 +9,10 @@ publish = false
 
 [lints]
 workspace = true
+
+[dev-dependencies]
+# The independence guard in `tests/independence.rs` parses this manifest as
+# TOML instead of guessing at its layout. `toml` is already shared through
+# `[workspace.dependencies]`, so the lockfile gains no package. Every entry
+# here must also be on that guard's dev-dependency allowlist.
+toml = { workspace = true }

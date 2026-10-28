@@ -2587,6 +2587,9 @@ dependencies = [
 [[package]]
 name = "tuikit"
 version = "0.1.0"
+dependencies = [
+ "toml 0.8.23",
+]
 
 [[package]]
 name = "typenum"
