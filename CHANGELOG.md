@@ -162,6 +162,10 @@ Targeted for 0.2.0, after 0.1.0 is tagged. History, rebuild, and pins
 
 ### Fixed
 
+- **The `?` help names the right key and keeps its headings whole.** The
+  content search row said `Ctrl-L` switches between listing sessions and
+  listing messages; inside the search that is `S-Tab`. A heading too long
+  for a narrow help page wraps instead of being cut off at the frame.
 - **Wide text lines up in the TUI.** CJK, emoji, and accented text is
   cut and padded by the cells it takes, not its characters, wherever a
   row, chip, form, or find chip cuts text: a 30-character CJK title is

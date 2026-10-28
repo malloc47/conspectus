@@ -1145,6 +1145,16 @@ tables of its own overlays (search, Controls, Messages, the viewers) and the
 main view's keymap. A letter in an overlay fires plain or shifted, never as
 a chord, and every list moves with `Ctrl-N`/`Ctrl-P`.
 
+Help pages are one page (ADR 0162). The framework's `help` module draws
+every help page the same way (bold headings, keys in an accent column with
+the description wrapped beside them, legends for marks, a scrollbar, and a
+footer generated from the keys that scroll and close it) and generates a
+page from a key table and a description per action, so a viewer's page
+lists every key its table binds and a key with no description fails a test.
+The keymap help keeps its hand-written rows and legends as annotations until
+the program-wide keymap carries help text; every page pages by the rows it
+shows.
+
 ### Graph-to-View Slicing
 
 The producer pipeline discovers and resolves a typed

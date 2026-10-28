@@ -1,0 +1,176 @@
+# ADR 0162: Help Pages Are One Page, Generated From The Key Tables
+
+## Status
+
+Accepted. Extends [ADR 0150](0150-tui-framework-workspace-crate.md) with the
+framework's `help` module and builds on
+[ADR 0160](0160-tui-keys-one-model-one-character-rule-one-footer-grammar.md):
+the help generator reads the key tables of decision 1 there, and the
+availability of decision 7 dims a help row. Applies house rules 8, 12, and
+14 of [ADR 0151](0151-tui-framework-control-set-and-house-rules.md) and
+carries out the `help::Binding` removal of
+[ADR 0152](0152-tui-framework-dependency-ownership.md) decision 4.
+
+## Context
+
+The TUI has three help pages: the keymap's (`?`), the transcript viewer's,
+and the pane viewer's. CSP-703 made the first two look alike by drawing
+both through the keymap help's renderer. The inventory for the framework
+extraction (`docs/plans/tui-framework/inventory/05-search-help-viewers.md`,
+sections 2.3 and 9, and `06-interaction-conventions.md`, section 1.3) found
+the pages still apart where it matters:
+
+- **Three producers, two of them one generator copied.** The transcript
+  viewer's page was generated from its key table and a description per
+  message (`viewer_help::sections_for`); the pane viewer's
+  (`pane_viewer::help_sections`) was the same code over another message
+  type, with its own row type. Both reached into the keymap help for its
+  private row helpers (`binding_lines`, `section`, `blank`, `push_footer`,
+  `dim_unavailable`, `render_help_page`).
+- **An inert dependency.** The keymap page's 48 hand-written rows were
+  `ratatui_cheese::help::Binding` values, used only as a key and a
+  description; the renderer was the TUI's own.
+- **Prose that drifted.** The content search row said `Ctrl-L` switches
+  between listing sessions and messages; inside the search that key is
+  `S-Tab` (`Ctrl-L` is the Search view's).
+- **Three scroll states.** The keymap help kept a `u16` offset and a page
+  size, the viewers a `usize` offset and a page size each, with the same
+  arithmetic written three times.
+- **A gap in the parity test.** The consistency test that holds the pages
+  alike covered the keymap and transcript pages, not the pane viewer's,
+  and nothing failed when a key in a viewer's table had no row on its
+  page (a message missing from the listing was left out silently).
+- **Headings cut off.** A heading longer than a narrow page was clipped by
+  the frame.
+
+## Decision
+
+1. **`tuikit::help` owns the page and the generator.** Its items:
+   `HelpSection` and `HelpRow` (a row of keys and what they do, or a
+   legend entry: a mark, its name, and what it means), `HelpEntry`, the
+   `HelpAction` trait, `sections_for`, `undescribed`, `HelpPage`, and
+   `HelpScroll`. The framework names nothing of the host: a page's content
+   is sections the host writes or generates, and a legend's mark keeps the
+   style the host gives it.
+
+2. **A page is generated from a key table.** An action enum implements
+   `HelpAction`: `LISTED`, its actions in the page's order, and `help`, an
+   exhaustive `match` giving each a `HelpEntry` (its section and one
+   sentence), so a new action fails to compile until described.
+   `sections_for(table)` makes one row per listed action the table binds:
+   every key bound to it (included tables spliced in, aliases too, since a
+   help page lists every key where a footer shows one), written by
+   `key_label`, plain keys before Control and Alt chords and otherwise in
+   table order, joined with ` / `. Rows group under their sections in the
+   order the listing first reaches each. An action no key binds is left
+   out; one listed twice gets one row; a row is dimmed when none of its
+   keys is available. The listing, not the table, orders the page, because
+   a table's order is the order keys resolve in (`Ctrl-C` first).
+
+3. **A key with no description fails a test.** `undescribed(table)` returns
+   the keys a table binds that its page would not describe: keys of an
+   action left out of `LISTED`, or of one whose entry is empty. The host
+   asserts it is empty for both viewers' tables, and a host test checks
+   that every key either viewer binds is listed exactly once on its page,
+   beside its action's description.
+
+4. **One page, one grid.** `HelpPage` draws in `ModalFrame` at
+   `ModalSize::WIDE` (`HelpPage::SIZE`), titled `Help`. Headings are bold
+   and word-wrapped. A key row is indented two cells, its keys in `accent`
+   fill a 16-cell column, and the description starts there, wrapped under
+   a hanging indent; keys that leave no space before the column's end take
+   a line of their own. A legend row pads its mark to the section's widest
+   mark and a space, and its bold name to the longest name and a space, at
+   least 16 cells, so short-named legends line up. The footer is generated
+   from the key table the host names (`footer(table)`), muted, wrapped only
+   between segments, and stays on the frame's last rows, leaving the page
+   at least one row; footer rows that do not fit there scroll with the
+   page. A page taller than its frame gets the scrollbar gutter and is
+   laid out a cell narrower. These are the rules the keymap help already
+   drew by, so its frames do not change.
+
+5. **One scroll state that pages by the viewport.** `HelpScroll` keeps the
+   offset a page asks for and the rows the last draw showed. A step may ask
+   past the end (so `G` works before the first draw); the draw shows the
+   page at the offset brought inside it and returns the window, and `keep`
+   takes it back, so the next key up after any number past the end
+   scrolls up. A page key moves by the rows shown, a half page by half of
+   them (at least one). `apply(PagerKey)` does what a standard pager key
+   asks. The keymap help, the transcript viewer, and the pane viewer each
+   keep one.
+
+6. **The host's pages.** `tui::widgets::help::page` is the one place that
+   builds a help page, with the footer of `HELP_KEYS`, so the three pages
+   cannot take different footers. The keymap page keeps its hand-written
+   rows and its four legends (node kinds, link and mux state, pull request
+   state, pins) as annotation sections until the scoped program-wide keymap
+   generates them (CSP-760); its content search row now names `S-Tab`. The
+   viewers' pages come from `viewer_help::draw(table, scroll, ..)`, generic
+   over the table: `ViewerMsg` and `PaneViewerMsg` implement `HelpAction`.
+   The pane viewer's generator and row type, the transcript viewer's
+   generator and row types, the old renderer and its row helpers, and the
+   `ratatui_cheese::help::Binding` rows are removed. `ratatui-cheese` stays
+   a dependency for the checklist shim until its own extraction.
+
+7. **The parity test covers all three pages.** The consistency suite
+   checks that the keymap, transcript viewer, and pane viewer pages draw
+   the same frame at four sizes, style headings, keys, and footers alike,
+   put every key and every description beside a key in the same columns,
+   end with the same footer row cell for cell, and scroll alike.
+
+## Consequences
+
+- **Visible changes** (the CSP-730 summary lists them): the keymap help's
+  content search row reads `S-Tab switches between listing sessions and
+  listing messages`; a heading too long for a narrow page wraps instead of
+  being cut at the frame (at 40 columns, `Detail-pane graph explorer (right
+  focus)` takes two rows). Every other help frame is unchanged at 100x30,
+  60x20, 80x24, and 40x12, page 1, paged, at the end, and over-scrolled.
+- **A viewer key added to a table gets a help row** without touching the
+  help code, or fails a test if its message is not listed.
+- **The viewers' pages still show the keymap help's footer** (`Esc/q/?
+  close`, while `q` leaves the viewer from its help). The pager extraction
+  generates the viewers' footers from their own tables; until then the
+  three pages share one footer on purpose.
+- **Snapshot mode reaches the pane viewer.** With a fixture root, a pane
+  search hit opens the pane viewer on the scrollback the scenario world
+  recorded, so its help page can be captured like the others.
+- The pager extraction can take over the page's body (a reader that keeps
+  its window) and keep the generator and layout here; the scoped keymap
+  can generate the keymap page from its rows with `sections_for`.
+
+## Alternatives Considered
+
+- **Closures instead of a trait** (`sections_for(table, order, describe)`).
+  As capable, but every call site would pass the enum's listing and
+  descriptions again; one impl per enum keeps them together, as
+  `KeyAction` keeps the roles.
+- **Rows in the table's order.** No listing to keep, but the viewers'
+  pages would open with `Ctrl-C` and the half-page chords, and a page's
+  order would change whenever a row moves for resolution's sake.
+- **Only shown keys on a help page.** Shorter rows, but the viewers bind
+  every key as an alias (their footer is their own), so their pages would
+  be empty, and a help page that leaves out `j` beside `↓` hides keys.
+- **A description column sized per page** (the longest key plus a space).
+  Tighter pages, but the three pages would stop lining up, which is what
+  the parity test holds.
+- **Clip or cut headings** with the ellipsis mark. Clipping loses words
+  silently; a cut keeps the row count but drops the end of a heading,
+  where descriptions and blurbs already wrap.
+- **A `ScrollWindow` as the scroll state.** It clamps on every step, so a
+  `G` that arrives before the first draw would land at the top; the
+  offset the page asks for, taken back at the draw, keeps every key.
+- **Keep `help::Binding` as the row type.** It carries a key and a
+  description and nothing else (no availability, no legend), and is a
+  third-party type the framework would re-export.
+- **Generate the keymap page now from `KEYBINDINGS`.** Its `help_text`
+  strings were never drawn and say less than the hand-written rows; the
+  scoped keymap is designed to carry rendered help text and replaces them
+  in its own story.
+
+## Open Questions Answered
+
+- *Where do hand-written rows live?* In the host, as annotation sections
+  drawn by the same page.
+- *Does a help page list aliases?* Yes: every key bound to an action.
+- *Which page decides the footer?* The host, once, for all its pages.
