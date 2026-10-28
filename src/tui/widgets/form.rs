@@ -6,15 +6,21 @@
 //! completion hint, the harness choices as a row of chips, a row of
 //! launch option checkboxes, and one-of-N choice rows. Sharing them keeps
 //! the forms looking and behaving alike.
+//!
+//! Every row takes the theme: a field's value is drawn in the `field`
+//! token, a focused field's in `field_active` with the cursor cell in
+//! `field_cursor`, scroll markers and hints in `accent`, notes and
+//! footers `muted`, and path marks in `success`, `warning`, and `inert`.
 
 use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
-use ratatui::style::{Color, Modifier, Style};
+use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Paragraph, Widget};
 use tui_popup::KnownSize;
 
 use crate::discovery::harness::{HarnessLaunchOption, argv_contains_fragment};
+use crate::tui::Theme;
 use crate::tui::widgets::input::TextInputState;
 use crate::tui::widgets::path_omnibox::{PathOmniboxState, PathValidation};
 
@@ -66,11 +72,12 @@ pub fn prefix(label: &str, active: bool, label_width: usize) -> (String, Style) 
     (format!("{marker}{label:label_width$}{VALUE_GAP}"), style)
 }
 
-pub fn entry_style(active: bool) -> Style {
+/// A field's value: filled when the field has focus, plain otherwise.
+pub fn entry_style(active: bool, theme: &Theme) -> Style {
     if active {
-        Style::default().fg(Color::White).bg(Color::DarkGray)
+        theme.field_active.into_style()
     } else {
-        Style::default().fg(Color::Gray)
+        theme.field.into_style()
     }
 }
 
@@ -98,20 +105,14 @@ struct Window {
 /// The result is always exactly `width` cells wide, focused or not: the
 /// cell the cursor sits on exists either way, so moving the focus never
 /// shifts what follows the value.
-fn window(value: &str, cursor: usize, width: usize, active: bool) -> Window {
+fn window(value: &str, cursor: usize, width: usize, active: bool, theme: &Theme) -> Window {
     let width = width.max(1);
-    let edge = if active {
-        Style::default()
-            .fg(Color::Cyan)
-            .bg(Color::DarkGray)
-            .add_modifier(Modifier::BOLD)
-    } else {
-        Style::default()
-            .fg(Color::Cyan)
-            .add_modifier(Modifier::BOLD)
-    };
+    // The scroll markers sit on the field's own fill, in the accent.
+    let edge = entry_style(active, theme)
+        .fg(theme.accent)
+        .add_modifier(Modifier::BOLD);
     let cursor_style = if active {
-        Style::default().fg(Color::Black).bg(Color::White)
+        theme.field_cursor.into_style()
     } else {
         Style::default()
     };
@@ -159,8 +160,17 @@ fn window(value: &str, cursor: usize, width: usize, active: bool) -> Window {
 }
 
 /// `value` windowed around `cursor` into exactly `width` cells.
-pub fn value_cells(value: &str, cursor: usize, width: usize, active: bool) -> Vec<Span<'static>> {
-    window_spans(&window(value, cursor, width, active), entry_style(active))
+pub fn value_cells(
+    value: &str,
+    cursor: usize,
+    width: usize,
+    active: bool,
+    theme: &Theme,
+) -> Vec<Span<'static>> {
+    window_spans(
+        &window(value, cursor, width, active, theme),
+        entry_style(active, theme),
+    )
 }
 
 fn window_spans(w: &Window, value_style: Style) -> Vec<Span<'static>> {
@@ -181,6 +191,7 @@ pub fn value_row(
     active: bool,
     cols: Cols,
     suffix: Option<Suffix>,
+    theme: &Theme,
 ) -> Line<'static> {
     let inner_width = cols.inner;
     let (prefix, label_style) = prefix(label, active, cols.label);
@@ -189,17 +200,31 @@ pub fn value_row(
         .saturating_sub(prefix.chars().count())
         .saturating_sub(suffix_width)
         .max(1);
-    let w = window(value, value_cursor, value_width, active);
+    let w = window(value, value_cursor, value_width, active, theme);
     let mut spans = vec![Span::styled(prefix, label_style)];
-    spans.extend(window_spans(&w, entry_style(active)));
+    spans.extend(window_spans(&w, entry_style(active, theme)));
     if let Some(suffix) = suffix {
         spans.extend(suffix.spans);
     }
     Line::from(spans)
 }
 
-pub fn input_row(label: &str, input: &TextInputState, active: bool, cols: Cols) -> Line<'static> {
-    value_row(label, input.value(), input.cursor(), active, cols, None)
+pub fn input_row(
+    label: &str,
+    input: &TextInputState,
+    active: bool,
+    cols: Cols,
+    theme: &Theme,
+) -> Line<'static> {
+    value_row(
+        label,
+        input.value(),
+        input.cursor(),
+        active,
+        cols,
+        None,
+        theme,
+    )
 }
 
 /// A text row followed by a dimmed note, such as where an inherited
@@ -210,6 +235,7 @@ pub fn tagged_input_row(
     tag: &str,
     active: bool,
     cols: Cols,
+    theme: &Theme,
 ) -> Line<'static> {
     let text = format!(" {tag}");
     let width = text.chars().count();
@@ -223,9 +249,10 @@ pub fn tagged_input_row(
             width,
             spans: vec![Span::styled(
                 text,
-                Style::default().add_modifier(Modifier::DIM),
+                Style::default().add_modifier(theme.muted),
             )],
         }),
+        theme,
     )
 }
 
@@ -236,6 +263,7 @@ pub fn path_row(
     omnibox: &PathOmniboxState,
     active: bool,
     cols: Cols,
+    theme: &Theme,
 ) -> Line<'static> {
     value_row(
         label,
@@ -243,16 +271,23 @@ pub fn path_row(
         omnibox.cursor(),
         active,
         cols,
-        Some(path_suffix(omnibox, active)),
+        Some(path_suffix(omnibox, active, theme)),
+        theme,
     )
 }
 
-fn path_suffix(omnibox: &PathOmniboxState, focused: bool) -> Suffix {
-    let (symbol, style) = match omnibox.validation() {
-        PathValidation::Empty => ("?", Style::default().fg(Color::DarkGray)),
-        PathValidation::Exists => ("√", Style::default().fg(Color::Green)),
-        PathValidation::Missing => ("!", Style::default().fg(Color::Yellow)),
-    };
+/// The validity mark of a path value: `√` when it exists, `!` when it is
+/// missing, `?` when it is empty.
+fn path_symbol(omnibox: &PathOmniboxState, theme: &Theme) -> (&'static str, Style) {
+    match omnibox.validation() {
+        PathValidation::Empty => ("?", Style::default().fg(theme.inert)),
+        PathValidation::Exists => ("√", Style::default().fg(theme.success)),
+        PathValidation::Missing => ("!", Style::default().fg(theme.warning)),
+    }
+}
+
+fn path_suffix(omnibox: &PathOmniboxState, focused: bool, theme: &Theme) -> Suffix {
+    let (symbol, style) = path_symbol(omnibox, theme);
     let mut spans = vec![Span::raw(" "), Span::styled(symbol, style)];
     let used = 1 + symbol.chars().count();
     let remaining = PATH_SUFFIX_WIDTH.saturating_sub(used);
@@ -261,7 +296,7 @@ fn path_suffix(omnibox: &PathOmniboxState, focused: bool) -> Suffix {
             let hint = truncate_chars(&hint, remaining.saturating_sub(1));
             let used = used + 1 + hint.chars().count();
             spans.push(Span::raw(" "));
-            spans.push(Span::styled(hint, Style::default().fg(Color::Cyan)));
+            spans.push(Span::styled(hint, Style::default().fg(theme.accent)));
             spans.push(Span::raw(
                 " ".repeat(PATH_SUFFIX_WIDTH.saturating_sub(used)),
             ));
@@ -277,12 +312,8 @@ fn path_suffix(omnibox: &PathOmniboxState, focused: bool) -> Suffix {
 
 /// The validity mark after a path value: two cells, a space and `√`
 /// (exists), `!` (missing) or `?` (empty).
-pub fn path_mark(omnibox: &PathOmniboxState) -> Vec<Span<'static>> {
-    let (symbol, style) = match omnibox.validation() {
-        PathValidation::Empty => ("?", Style::default().fg(Color::DarkGray)),
-        PathValidation::Exists => ("√", Style::default().fg(Color::Green)),
-        PathValidation::Missing => ("!", Style::default().fg(Color::Yellow)),
-    };
+pub fn path_mark(omnibox: &PathOmniboxState, theme: &Theme) -> Vec<Span<'static>> {
+    let (symbol, style) = path_symbol(omnibox, theme);
     vec![Span::raw(" "), Span::styled(symbol, style)]
 }
 
@@ -328,6 +359,7 @@ pub fn harness_row(
     known: &[String],
     active: bool,
     cols: Cols,
+    theme: &Theme,
 ) -> Line<'static> {
     let inner_width = cols.inner;
     let (prefix, label_style) = prefix(label, active, cols.label);
@@ -336,32 +368,37 @@ pub fn harness_row(
     if !value.is_empty() && !known.iter().any(|k| k == value) {
         let suffix = " [custom]";
         let value_width = available.saturating_sub(suffix.len()).max(1);
-        let w = window(input.value(), input.cursor(), value_width, active);
+        let w = window(input.value(), input.cursor(), value_width, active, theme);
         let mut spans = vec![Span::styled(prefix, label_style)];
-        spans.extend(window_spans(&w, entry_style(active)));
-        spans.push(Span::styled(suffix, Style::default().fg(Color::Yellow)));
+        spans.extend(window_spans(&w, entry_style(active, theme)));
+        spans.push(Span::styled(suffix, Style::default().fg(theme.warning)));
         return Line::from(spans);
     }
     let value_width = VALUE_SLOT_WIDTH.min(available).max(1);
     let chips_budget = available.saturating_sub(value_width).min(48);
-    let w = window(input.value(), input.cursor(), value_width, active);
+    let w = window(input.value(), input.cursor(), value_width, active, theme);
     let shown = w.left.chars().count()
         + w.before.chars().count()
         + w.cursor_text.chars().count()
         + w.after.chars().count()
         + w.right.chars().count();
     let padding = value_width.saturating_sub(shown);
-    let style = entry_style(active);
+    let style = entry_style(active, theme);
     let mut spans = vec![Span::styled(prefix, label_style)];
     spans.extend(window_spans(&w, style));
     if padding > 0 {
         spans.push(Span::styled(" ".repeat(padding), style));
     }
-    spans.extend(harness_chips(value, known, chips_budget));
+    spans.extend(harness_chips(value, known, chips_budget, theme));
     Line::from(spans)
 }
 
-pub fn harness_chips(selected: &str, known: &[String], width: usize) -> Vec<Span<'static>> {
+pub fn harness_chips(
+    selected: &str,
+    known: &[String],
+    width: usize,
+    theme: &Theme,
+) -> Vec<Span<'static>> {
     if width < 3 {
         return Vec::new();
     }
@@ -374,7 +411,7 @@ pub fn harness_chips(selected: &str, known: &[String], width: usize) -> Vec<Span
             if remaining >= 2 {
                 spans.push(Span::styled(
                     " …",
-                    Style::default().add_modifier(Modifier::DIM),
+                    Style::default().add_modifier(theme.muted),
                 ));
             }
             break;
@@ -383,13 +420,13 @@ pub fn harness_chips(selected: &str, known: &[String], width: usize) -> Vec<Span
             spans.push(Span::styled(
                 token,
                 Style::default()
-                    .fg(Color::Cyan)
+                    .fg(theme.accent)
                     .add_modifier(Modifier::BOLD),
             ));
         } else {
             spans.push(Span::styled(
                 token,
-                Style::default().add_modifier(Modifier::DIM),
+                Style::default().add_modifier(theme.muted),
             ));
         }
         remaining -= needed;
@@ -405,6 +442,7 @@ pub fn options_row(
     effective_argv: &[String],
     active: bool,
     cols: Cols,
+    theme: &Theme,
 ) -> Line<'static> {
     let value = options
         .iter()
@@ -416,7 +454,7 @@ pub fn options_row(
         })
         .collect::<Vec<_>>()
         .join(" ");
-    static_value_row(label, &value, active, cols)
+    static_value_row(label, &value, active, cols, theme)
 }
 
 /// One-of-N choices: `[x] a  [ ] b`.
@@ -425,17 +463,24 @@ pub fn choice_row(
     choices: &[(&str, bool)],
     active: bool,
     cols: Cols,
+    theme: &Theme,
 ) -> Line<'static> {
     let value = choices
         .iter()
         .map(|(text, selected)| checkbox(text, *selected))
         .collect::<Vec<_>>()
         .join(" ");
-    static_value_row(label, &value, active, cols)
+    static_value_row(label, &value, active, cols, theme)
 }
 
 /// A row of text that isn't edited in place (a toggle, a choice).
-pub fn static_value_row(label: &str, value: &str, active: bool, cols: Cols) -> Line<'static> {
+pub fn static_value_row(
+    label: &str,
+    value: &str,
+    active: bool,
+    cols: Cols,
+    theme: &Theme,
+) -> Line<'static> {
     let inner_width = cols.inner;
     let (prefix, label_style) = prefix(label, active, cols.label);
     let width = inner_width
@@ -444,28 +489,23 @@ pub fn static_value_row(label: &str, value: &str, active: bool, cols: Cols) -> L
     Line::from(vec![
         Span::styled(prefix, label_style),
         Span::raw(TEXT_GUTTER),
-        Span::styled(truncate_chars(value, width), entry_style(active)),
+        Span::styled(truncate_chars(value, width), entry_style(active, theme)),
     ])
 }
 
 /// A dimmed, read-only row, such as the command a form will run.
-pub fn note_row(label: &str, value: &str, cols: Cols) -> Line<'static> {
+pub fn note_row(label: &str, value: &str, cols: Cols, theme: &Theme) -> Line<'static> {
     let inner_width = cols.inner;
     let (prefix, _) = prefix(label, false, cols.label);
     let width = inner_width
         .saturating_sub(prefix.chars().count())
         .saturating_sub(TEXT_GUTTER.chars().count())
         .max(1);
+    let note = Style::default().add_modifier(theme.muted | Modifier::ITALIC);
     Line::from(vec![
-        Span::styled(
-            prefix,
-            Style::default().add_modifier(Modifier::DIM | Modifier::ITALIC),
-        ),
+        Span::styled(prefix, note),
         Span::raw(TEXT_GUTTER),
-        Span::styled(
-            truncate_chars(value, width),
-            Style::default().add_modifier(Modifier::DIM | Modifier::ITALIC),
-        ),
+        Span::styled(truncate_chars(value, width), note),
     ])
 }
 
@@ -473,8 +513,14 @@ pub fn note_row(label: &str, value: &str, cols: Cols) -> Line<'static> {
 /// will run. It sits two cells in with a dim `└` lead-in, in dim italic,
 /// and carries no focus marker, so it reads as output and not as another
 /// input. The value starts in the same column as the field values.
-pub fn derived_row(label: &str, value: &str, warn: bool, cols: Cols) -> Line<'static> {
-    let dim = Style::default().add_modifier(Modifier::DIM | Modifier::ITALIC);
+pub fn derived_row(
+    label: &str,
+    value: &str,
+    warn: bool,
+    cols: Cols,
+    theme: &Theme,
+) -> Line<'static> {
+    let dim = Style::default().add_modifier(theme.muted | Modifier::ITALIC);
     let lead = format!(
         "  └ {label:width$}{VALUE_GAP}",
         width = cols.label.saturating_sub(2)
@@ -486,7 +532,7 @@ pub fn derived_row(label: &str, value: &str, warn: bool, cols: Cols) -> Line<'st
         .max(1);
     let value_style = if warn {
         Style::default()
-            .fg(Color::Yellow)
+            .fg(theme.warning)
             .add_modifier(Modifier::ITALIC)
     } else {
         dim
@@ -498,7 +544,7 @@ pub fn derived_row(label: &str, value: &str, warn: bool, cols: Cols) -> Line<'st
     ])
 }
 
-pub fn warning_row(label: &str, value: &str, cols: Cols) -> Line<'static> {
+pub fn warning_row(label: &str, value: &str, cols: Cols, theme: &Theme) -> Line<'static> {
     let inner_width = cols.inner;
     let (prefix, _) = prefix(label, false, cols.label);
     let width = inner_width
@@ -506,19 +552,19 @@ pub fn warning_row(label: &str, value: &str, cols: Cols) -> Line<'static> {
         .saturating_sub(TEXT_GUTTER.chars().count())
         .max(1);
     Line::from(vec![
-        Span::styled(prefix, Style::default().add_modifier(Modifier::DIM)),
+        Span::styled(prefix, Style::default().add_modifier(theme.muted)),
         Span::raw(TEXT_GUTTER),
         Span::styled(
             truncate_chars(value, width),
-            Style::default().fg(Color::Yellow),
+            Style::default().fg(theme.warning),
         ),
     ])
 }
 
 /// Wrap a key hint footer to `width` cells, breaking at the ` · `
-/// separators, dimmed.
-pub fn wrap_footer(footer: &str, width: usize) -> Vec<Line<'static>> {
-    let dim = Style::default().add_modifier(Modifier::DIM);
+/// separators, muted.
+pub fn wrap_footer(footer: &str, width: usize, theme: &Theme) -> Vec<Line<'static>> {
+    let dim = Style::default().add_modifier(theme.muted);
     let mut lines = Vec::new();
     let mut current = String::new();
     for segment in footer.split(" · ") {

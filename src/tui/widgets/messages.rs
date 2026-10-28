@@ -122,7 +122,7 @@ impl<'a> MessagesWidget<'a> {
 /// Style for an entry's level glyph and summary.
 pub fn level_style(level: LogLevel, theme: &Theme) -> Style {
     match level {
-        LogLevel::Info => Style::default().fg(theme.success),
+        LogLevel::Info => Style::default().fg(theme.info),
         LogLevel::Warning => Style::default().fg(theme.warning),
         LogLevel::Error => Style::default().fg(theme.error),
     }

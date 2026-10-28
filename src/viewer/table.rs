@@ -27,7 +27,7 @@
 //! else.
 
 use comfy_table::{Cell, CellAlignment, ContentArrangement, Table, presets};
-use ratatui::style::{Modifier, Style};
+use ratatui::style::Style;
 use ratatui::text::{Line, Span};
 
 use crate::viewer::theme::Theme;
@@ -327,7 +327,7 @@ pub fn render_table(parsed: &ParsedTable, content_width: u16, theme: &Theme) -> 
     }
 
     let rendered = table.to_string();
-    let border_style = Style::new().fg(theme.inert).add_modifier(Modifier::DIM);
+    let border_style = Style::new().fg(theme.inert).add_modifier(theme.muted);
     let body_style = Style::new();
 
     rendered

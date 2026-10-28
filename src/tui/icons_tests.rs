@@ -100,11 +100,11 @@ fn node_kind_style_uses_theme_color_for_each_kind() {
         node_kind_style(NodeKind::AgentSession, &theme).color,
         theme.node_agent_session(),
     );
-    // ForgePr is the documented sentinel — callers pick from
-    // theme.pr_* themselves.
+    // ForgePr owns no color: without a PR state it takes the open hue,
+    // and callers that know the state pick from the `pr_*` roles.
     assert_eq!(
         node_kind_style(NodeKind::ForgePr, &theme).color,
-        Color::Reset,
+        theme.pr_open(),
     );
 }
 

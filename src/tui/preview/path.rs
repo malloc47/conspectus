@@ -20,8 +20,9 @@ const MAX_READ: usize = 5_000;
 const MAX_FILE_BYTES: u64 = 64 * 1024;
 
 /// Read what `path` holds: a listing for a directory, the contents of
-/// a file, or why neither (ADR 0111: a missing path is ordinary).
-pub fn load_path_preview(path: &Path) -> PreviewContent {
+/// a file, or why neither (ADR 0111: a missing path is ordinary). Notes
+/// and sizes take `muted`, the theme's muted modifier.
+pub fn load_path_preview(path: &Path, muted: Modifier) -> PreviewContent {
     let metadata = match fs::metadata(path) {
         Ok(metadata) => metadata,
         Err(err) if err.kind() == std::io::ErrorKind::NotFound => {
@@ -30,9 +31,9 @@ pub fn load_path_preview(path: &Path) -> PreviewContent {
         Err(err) => return PreviewContent::Failed(format!("cannot read: {err}")),
     };
     let lines = if metadata.is_dir() {
-        list_directory(path)
+        list_directory(path, muted)
     } else {
-        read_file(path, metadata.len())
+        read_file(path, metadata.len(), muted)
     };
     match lines {
         Ok(lines) => PreviewContent::Lines(lines),
@@ -52,7 +53,7 @@ enum EntryKind {
     Other,
 }
 
-fn list_directory(path: &Path) -> std::io::Result<Vec<Line<'static>>> {
+fn list_directory(path: &Path, muted: Modifier) -> std::io::Result<Vec<Line<'static>>> {
     let mut entries = Vec::new();
     let mut unread = false;
     for entry in fs::read_dir(path)? {
@@ -79,7 +80,7 @@ fn list_directory(path: &Path) -> std::io::Result<Vec<Line<'static>>> {
     if entries.is_empty() {
         return Ok(vec![Line::styled(
             "(empty directory)",
-            Style::new().add_modifier(Modifier::DIM),
+            Style::new().add_modifier(muted),
         )]);
     }
     entries.sort_by(|a, b| {
@@ -97,7 +98,7 @@ fn list_directory(path: &Path) -> std::io::Result<Vec<Line<'static>>> {
         .max()
         .unwrap_or(0)
         .min(48);
-    let dim = Style::new().add_modifier(Modifier::DIM);
+    let dim = Style::new().add_modifier(muted);
     let mut lines: Vec<Line<'static>> = entries
         .into_iter()
         .take(MAX_LISTED)
@@ -128,12 +129,12 @@ fn list_directory(path: &Path) -> std::io::Result<Vec<Line<'static>>> {
     Ok(lines)
 }
 
-fn read_file(path: &Path, len: u64) -> std::io::Result<Vec<Line<'static>>> {
+fn read_file(path: &Path, len: u64, muted: Modifier) -> std::io::Result<Vec<Line<'static>>> {
     let mut bytes = Vec::new();
     fs::File::open(path)?
         .take(MAX_FILE_BYTES)
         .read_to_end(&mut bytes)?;
-    let dim = Style::new().add_modifier(Modifier::DIM);
+    let dim = Style::new().add_modifier(muted);
     if bytes.contains(&0) {
         return Ok(vec![Line::styled(
             format!("binary file · {}", human_size(len)),
@@ -197,7 +198,10 @@ mod tests {
         fs::create_dir(dir.path().join("src")).expect("dir");
         fs::write(dir.path().join("README.md"), "hello").expect("file");
         fs::write(dir.path().join("a.txt"), vec![b'x'; 2048]).expect("file");
-        let listing = rows(&load_path_preview(dir.path()));
+        let listing = rows(&load_path_preview(
+            dir.path(),
+            crate::tui::Theme::default().muted,
+        ));
         assert_eq!(listing[0], "src/");
         assert!(listing[1].starts_with("a.txt") && listing[1].ends_with("2.0K"));
         assert!(listing[2].starts_with("README.md") && listing[2].ends_with('5'));
@@ -210,7 +214,10 @@ mod tests {
         let outside = tempfile::tempdir().expect("outside");
         fs::write(outside.path().join("secret"), "x").expect("file");
         std::os::unix::fs::symlink(outside.path(), dir.path().join("elsewhere")).expect("link");
-        let listing = rows(&load_path_preview(dir.path()));
+        let listing = rows(&load_path_preview(
+            dir.path(),
+            crate::tui::Theme::default().muted,
+        ));
         assert_eq!(
             listing,
             [format!("elsewhere -> {}", outside.path().display())]
@@ -221,7 +228,7 @@ mod tests {
     fn a_missing_path_no_longer_exists() {
         let dir = tempfile::tempdir().expect("temp dir");
         assert_eq!(
-            load_path_preview(&dir.path().join("gone")),
+            load_path_preview(&dir.path().join("gone"), crate::tui::Theme::default().muted),
             PreviewContent::Unavailable("no longer exists".to_string())
         );
     }
@@ -232,7 +239,10 @@ mod tests {
         let file = dir.path().join("pins.toml");
         fs::write(&file, "[[pin]]\nid = \"work\"\n").expect("file");
         assert_eq!(
-            rows(&load_path_preview(&file)),
+            rows(&load_path_preview(
+                &file,
+                crate::tui::Theme::default().muted
+            )),
             ["[[pin]]", "id = \"work\""]
         );
     }
@@ -242,7 +252,10 @@ mod tests {
         let dir = tempfile::tempdir().expect("temp dir");
         let file = dir.path().join("big.log");
         fs::write(&file, "line\n".repeat(30_000)).expect("file");
-        let lines = rows(&load_path_preview(&file));
+        let lines = rows(&load_path_preview(
+            &file,
+            crate::tui::Theme::default().muted,
+        ));
         assert_eq!(
             lines.last().map(String::as_str),
             Some("… cut at 64K of 146K")
@@ -255,6 +268,12 @@ mod tests {
         let dir = tempfile::tempdir().expect("temp dir");
         let file = dir.path().join("blob");
         fs::write(&file, [0u8, 1, 2, 3]).expect("file");
-        assert_eq!(rows(&load_path_preview(&file)), ["binary file · 4"]);
+        assert_eq!(
+            rows(&load_path_preview(
+                &file,
+                crate::tui::Theme::default().muted
+            )),
+            ["binary file · 4"]
+        );
     }
 }

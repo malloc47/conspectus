@@ -178,12 +178,7 @@ pub(super) fn right_panel_title(app: &App, width: usize) -> Line<'static> {
     // a misleading kind cue.
     if let Some(node_kind) = right_panel_node_kind(app) {
         let style = node_kind_style(node_kind, app.theme());
-        let color = if matches!(node_kind, NodeKind::ForgePr) {
-            app.theme().pr_open()
-        } else {
-            style.color
-        };
-        spans.push(span!(Style::default().fg(color); "{} ", style.glyph));
+        spans.push(span!(Style::default().fg(style.color); "{} ", style.glyph));
     }
     spans.push(span!(Modifier::BOLD; "{label}"));
     // Render the full drilldown chain in short `kind:tag`
@@ -503,7 +498,7 @@ pub(super) fn render_node_field_line(
 /// a dim `?` so the chip slot stays visible without misleading the
 /// operator.
 ///
-/// `ForgePr`'s glyph color reuses `theme.pr_open()` here because the
+/// `ForgePr`'s glyph takes the `pr_open` hue here because the
 /// chip-rendering surfaces do not carry PR state down — the row
 /// tree's [`pr_kind_glyph_span`] handles state-aware coloring
 /// directly off the row.
@@ -512,12 +507,7 @@ pub(super) fn kind_chip_span(kind: Option<NodeKind>, theme: &Theme) -> Span<'sta
         return span!(theme.muted; "?");
     };
     let style = node_kind_style(node_kind, theme);
-    let color = if matches!(node_kind, NodeKind::ForgePr) {
-        theme.pr_open()
-    } else {
-        style.color
-    };
-    span!(Style::default().fg(color); "{}", style.glyph)
+    span!(Style::default().fg(style.color); "{}", style.glyph)
 }
 
 /// Width of the verb column in row lines (ADR 0074 §3 mockup). The

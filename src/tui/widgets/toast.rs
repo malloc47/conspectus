@@ -28,10 +28,11 @@ use std::borrow::Cow;
 use std::time::Duration;
 
 use ratatui::layout::Rect;
-use ratatui::style::Color;
 use ratatui_comfy_toaster::{
     ToastBorderMode, ToastBuilder, ToastEngine, ToastEngineBuilder, ToastPosition, ToastType,
 };
+
+use crate::tui::Theme;
 
 /// How long a toast stays visible before it's auto-dismissed.
 /// Mirrors the prior in-tree constant byte-for-byte so the operator
@@ -50,14 +51,15 @@ pub fn engine() -> ToastEngine<()> {
 
 /// Build a `ToastBuilder` pre-configured for Conspectus's toast
 /// surface: Success type (green border by default), full border,
-/// transparent background, anchored at the bottom of the frame via
+/// the theme's `surface` background (the terminal's own by default),
+/// anchored at the bottom of the frame via
 /// `Center + offset(0, i16::MAX)` — the offset is clamped against
 /// the engine's area by upstream so a saturating positive `y` pins
 /// the toast to the bottom edge regardless of frame height.
-pub fn builder_for(label: impl Into<Cow<'static, str>>) -> ToastBuilder {
+pub fn builder_for(label: impl Into<Cow<'static, str>>, theme: &Theme) -> ToastBuilder {
     ToastBuilder::new(label.into())
         .toast_type(ToastType::Success)
-        .toast_bg(Color::Reset)
+        .toast_bg(theme.surface)
         .border_mode(ToastBorderMode::Full)
         .position(ToastPosition::Center)
         .offset(0, i16::MAX)
@@ -118,7 +120,7 @@ mod tests {
     fn show_then_tick_after_duration_clears_the_toast() {
         let mut engine = engine();
         engine.set_area(Rect::new(0, 0, 40, 10));
-        engine.show_toast(builder_for("copied: cwd"));
+        engine.show_toast(builder_for("copied: cwd", &Theme::default()));
         assert!(engine.has_toast());
         // Wait past the toast duration plus a small margin so the
         // upstream `tick` retires the expired entry.
@@ -131,7 +133,7 @@ mod tests {
     fn newly_posted_toast_is_visible_immediately() {
         let mut engine = engine();
         engine.set_area(Rect::new(0, 0, 40, 10));
-        engine.show_toast(builder_for("copied: cwd"));
+        engine.show_toast(builder_for("copied: cwd", &Theme::default()));
         engine.tick();
         assert!(engine.has_toast());
     }
@@ -140,8 +142,8 @@ mod tests {
     fn engine_dismiss_all_drains_the_queue() {
         let mut engine = engine();
         engine.set_area(Rect::new(0, 0, 40, 10));
-        engine.show_toast(builder_for("a"));
-        engine.show_toast(builder_for("b"));
+        engine.show_toast(builder_for("a", &Theme::default()));
+        engine.show_toast(builder_for("b", &Theme::default()));
         engine_dismiss_all(&mut engine);
         assert!(!engine.has_toast());
     }
@@ -151,7 +153,7 @@ mod tests {
         let mut engine = engine();
         let area = Rect::new(0, 0, 40, 10);
         engine.set_area(area);
-        engine.show_toast(builder_for("copied: cwd"));
+        engine.show_toast(builder_for("copied: cwd", &Theme::default()));
         let mut buf = Buffer::empty(area);
         engine.render_ref(area, &mut buf);
         // Scan every row of the buffer for the label text. The

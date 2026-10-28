@@ -326,7 +326,7 @@ fn build_body_lines<'a>(
             // content is private reasoning.
             let style = Style::new()
                 .add_modifier(Modifier::ITALIC)
-                .add_modifier(Modifier::DIM);
+                .add_modifier(theme.muted);
             wrap_plain(&turn.body, content_width, style)
         }
         TurnKind::ToolUse | TurnKind::ToolResult => {
@@ -385,7 +385,7 @@ fn render_tool_body(
     content_width: u16,
     detail: ToolDetail,
 ) -> Vec<Line<'static>> {
-    let body_style = Style::new().add_modifier(Modifier::DIM);
+    let body_style = Style::new().add_modifier(theme.muted);
     if matches!(detail, ToolDetail::Hidden) {
         return Vec::new();
     }

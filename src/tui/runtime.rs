@@ -636,10 +636,11 @@ impl LoopMode for LiveMode {
             return;
         }
         let tx = self.preview_tx.clone();
+        let muted = app.theme().muted;
         std::thread::spawn(move || {
             // A loader panic still has to end the load, or the preview
             // would wait on it forever and `r` couldn't retry.
-            let content = std::panic::catch_unwind(|| load_offline_preview(&source))
+            let content = std::panic::catch_unwind(|| load_offline_preview(&source, muted))
                 .ok()
                 .flatten()
                 .unwrap_or_else(|| {
@@ -856,7 +857,7 @@ impl LoopMode for StaticMode {
     /// everything else loads as usual.
     fn load_preview(&mut self, app: &mut App, source: PreviewSource) {
         if let Some(root) = &self.recordings
-            && let Some(content) = recorded_preview(&source, root)
+            && let Some(content) = recorded_preview(&source, root, app.theme().muted)
         {
             app.update(Msg::SetPreview { source, content });
             return;
@@ -1963,12 +1964,16 @@ fn refresh_preview_if_needed(
 /// A preview a materialized scenario recorded in place of a live
 /// source: a PR's `gh pr view` output. `None` for anything else.
 #[cfg(any(test, debug_assertions, feature = "snapshot"))]
-fn recorded_preview(source: &PreviewSource, root: &std::path::Path) -> Option<PreviewContent> {
+fn recorded_preview(
+    source: &PreviewSource,
+    root: &std::path::Path,
+    muted: ratatui::style::Modifier,
+) -> Option<PreviewContent> {
     let PreviewSource::PullRequest(pr) = source else {
         return None;
     };
     crate::dev_scenarios::recorded_pr_view(root, &pr.owner, &pr.repo, pr.number)
-        .map(|json| crate::tui::preview::forge::pr_preview_from_json(&json))
+        .map(|json| crate::tui::preview::forge::pr_preview_from_json(&json, muted))
 }
 
 /// Load one preview on the calling thread. A pane capture goes through
@@ -1989,7 +1994,7 @@ fn load_preview_now(app: &mut App, tmux: &dyn MuxBackend, source: PreviewSource)
             }
         },
         source => {
-            if let Some(content) = load_offline_preview(&source) {
+            if let Some(content) = load_offline_preview(&source, app.theme().muted) {
                 app.update(Msg::SetPreview { source, content });
             }
         }
@@ -2011,7 +2016,7 @@ pub(super) fn load_offline_preview_now(
         return;
     };
     if let Some((_, root)) = rebase
-        && let Some(content) = recorded_preview(&source, root)
+        && let Some(content) = recorded_preview(&source, root, app.theme().muted)
     {
         app.update(Msg::SetPreview { source, content });
         return;
@@ -2033,7 +2038,7 @@ pub(super) fn load_offline_preview_now(
         Some((from, to)) => source.rebased(from, to),
         None => source.clone(),
     };
-    if let Some(content) = load_offline_preview(&read) {
+    if let Some(content) = load_offline_preview(&read, app.theme().muted) {
         app.update(Msg::SetPreview { source, content });
     }
 }

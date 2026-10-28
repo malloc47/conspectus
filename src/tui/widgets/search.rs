@@ -1392,15 +1392,10 @@ fn search_kind_glyph_span(id: &RowId, theme: &Theme, is_cursor: bool) -> Span<'s
 
 /// The glyph span for a known kind.
 fn search_kind_glyph_span_for(kind: NodeKind, theme: &Theme, is_cursor: bool) -> Span<'static> {
+    // A PR's glyph takes the `pr_open` hue: search results carry no
+    // PR state.
     let style = node_kind_style(kind, theme);
-    // ForgePr's slate color is `Color::Reset`; mirror the dodge
-    // `kind_chip_span` and the breadcrumb renderer use — fall back
-    // to `theme.pr_open()` since search results don't carry PR state.
-    let color = if matches!(kind, NodeKind::ForgePr) {
-        theme.pr_open()
-    } else {
-        style.color
-    };
+    let color = style.color;
     let mut span_style = Style::default().fg(color);
     if is_cursor {
         span_style = span_style.add_modifier(Modifier::REVERSED);

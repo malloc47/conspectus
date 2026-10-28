@@ -422,7 +422,7 @@ pub fn draw(state: &mut PaneViewerState, theme: &Theme, frame: &mut Frame<'_>, a
 }
 
 fn dim(theme: &Theme) -> Style {
-    Style::new().fg(theme.inert).add_modifier(Modifier::DIM)
+    Style::new().fg(theme.inert).add_modifier(theme.muted)
 }
 
 fn draw_header(state: &PaneViewerState, theme: &Theme, frame: &mut Frame<'_>, area: Rect) {
@@ -462,7 +462,7 @@ fn draw_body(state: &mut PaneViewerState, theme: &Theme, frame: &mut Frame<'_>, 
         frame.render_widget(
             Paragraph::new(Line::from(Span::styled(
                 "the pane has no scrollback",
-                Style::new().add_modifier(Modifier::DIM),
+                Style::new().add_modifier(theme.muted),
             ))),
             area,
         );

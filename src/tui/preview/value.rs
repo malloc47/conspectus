@@ -10,14 +10,19 @@ use ratatui::text::{Line, Span};
 use crate::tui::explorer::FieldValue;
 
 /// The lines a value previews, or `None` for a value whose preview is
-/// loaded or names a node.
-pub fn value_lines(value: &FieldValue, now: Option<i64>) -> Option<Vec<Line<'static>>> {
+/// loaded or names a node. Labels and notes take `muted`, the theme's
+/// muted modifier.
+pub fn value_lines(
+    value: &FieldValue,
+    now: Option<i64>,
+    muted: Modifier,
+) -> Option<Vec<Line<'static>>> {
     match value {
         FieldValue::Text(text) => Some(text.lines().map(|l| Line::raw(l.to_string())).collect()),
         FieldValue::List(items) => Some(items.iter().map(|i| Line::raw(i.clone())).collect()),
         FieldValue::Command(argv) => Some(command_lines(argv)),
-        FieldValue::Timestamp(epoch) => Some(timestamp_lines(*epoch, now)),
-        FieldValue::Glossary { field, values } => Some(glossary_lines(field, values)),
+        FieldValue::Timestamp(epoch) => Some(timestamp_lines(*epoch, now, muted)),
+        FieldValue::Glossary { field, values } => Some(glossary_lines(field, values, muted)),
         FieldValue::Path(_)
         | FieldValue::Ref { .. }
         | FieldValue::Commit { .. }
@@ -30,8 +35,8 @@ fn bold(text: impl Into<String>) -> Span<'static> {
     Span::styled(text.into(), Style::new().add_modifier(Modifier::BOLD))
 }
 
-fn dim(text: impl Into<String>) -> Span<'static> {
-    Span::styled(text.into(), Style::new().add_modifier(Modifier::DIM))
+fn dim(text: impl Into<String>, muted: Modifier) -> Span<'static> {
+    Span::styled(text.into(), Style::new().add_modifier(muted))
 }
 
 /// The program, then each argument indented on its own line.
@@ -50,7 +55,7 @@ fn command_lines(argv: &[String]) -> Vec<Line<'static>> {
 
 pub use crate::argv::split_command_line;
 
-fn timestamp_lines(epoch: i64, now: Option<i64>) -> Vec<Line<'static>> {
+fn timestamp_lines(epoch: i64, now: Option<i64>, muted: Modifier) -> Vec<Line<'static>> {
     let Some(utc) = chrono::DateTime::from_timestamp(epoch, 0) else {
         return vec![Line::raw(format!("{epoch} (out of range)"))];
     };
@@ -60,17 +65,17 @@ fn timestamp_lines(epoch: i64, now: Option<i64>) -> Vec<Line<'static>> {
     {
         let local = utc.with_timezone(&offset);
         lines.push(Line::from(vec![
-            dim("local  "),
+            dim("local  ", muted),
             Span::raw(format!("{} {zone}", local.format("%Y-%m-%d %H:%M:%S %:z"))),
         ]));
     }
     lines.push(Line::from(vec![
-        dim("UTC    "),
+        dim("UTC    ", muted),
         Span::raw(utc.format("%Y-%m-%d %H:%M:%S").to_string()),
     ]));
     if let Some(age) = crate::tui::rows::format_recency(now, Some(epoch)) {
         lines.push(Line::from(vec![
-            dim("age    "),
+            dim("age    ", muted),
             Span::raw(format!("{age} ago")),
         ]));
     }
@@ -106,7 +111,7 @@ fn local_offset(_epoch: i64) -> Option<(i32, String)> {
     None
 }
 
-fn glossary_lines(field: &str, values: &[String]) -> Vec<Line<'static>> {
+fn glossary_lines(field: &str, values: &[String], muted: Modifier) -> Vec<Line<'static>> {
     let mut lines = Vec::new();
     for value in values {
         if !lines.is_empty() {
@@ -115,7 +120,7 @@ fn glossary_lines(field: &str, values: &[String]) -> Vec<Line<'static>> {
         lines.push(Line::from(bold(value.clone())));
         lines.push(match glossary_entry(field, value) {
             Some(entry) => Line::raw(entry),
-            None => Line::from(dim(format!("no glossary entry for `{value}`"))),
+            None => Line::from(dim(format!("no glossary entry for `{value}`"), muted)),
         });
     }
     lines
@@ -192,7 +197,7 @@ mod tests {
     use super::*;
 
     fn rows(value: &FieldValue, now: Option<i64>) -> Vec<String> {
-        value_lines(value, now)
+        value_lines(value, now, crate::tui::Theme::default().muted)
             .expect("lines")
             .iter()
             .map(ToString::to_string)

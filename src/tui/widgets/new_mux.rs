@@ -184,8 +184,8 @@ impl Widget for NewMuxFormWidget<'_> {
         let name_focused = self.state.focus == NewMuxField::Name;
         let cwd_focused = self.state.focus == NewMuxField::Cwd;
         let mut lines: Vec<Line<'static>> = vec![
-            input_row("name", &self.state.name, name_focused, cols),
-            path_row("cwd", &self.state.cwd, cwd_focused, cols),
+            input_row("name", &self.state.name, name_focused, cols, self.theme),
+            path_row("cwd", &self.state.cwd, cwd_focused, cols, self.theme),
             line![""],
         ];
         lines.extend(wrap_footer(
@@ -193,6 +193,7 @@ impl Widget for NewMuxFormWidget<'_> {
                 crate::tui::keybindings::overlay::NEW_MUX_KEYS,
             ),
             inner_width,
+            self.theme,
         ));
         let modal = form::modal_rect(area, modal_width, lines.len(), 6);
         let inner_height = usize::from(modal.height.saturating_sub(2));

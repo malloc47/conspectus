@@ -76,7 +76,7 @@ fn draw_header(document: &TranscriptDocument, theme: &Theme, frame: &mut Frame<'
         }
     );
     let sep = " · ";
-    let sep_style = Style::new().fg(theme.inert).add_modifier(Modifier::DIM);
+    let sep_style = Style::new().fg(theme.inert).add_modifier(theme.muted);
 
     let spans: Vec<Span<'_>> = vec![
         Span::raw(" "),
@@ -84,9 +84,7 @@ fn draw_header(document: &TranscriptDocument, theme: &Theme, frame: &mut Frame<'
         Span::styled(sep, sep_style),
         Span::styled(
             cwd_text.to_string(),
-            Style::new()
-                .fg(theme.cwd_mark())
-                .add_modifier(Modifier::DIM),
+            Style::new().fg(theme.cwd_mark()).add_modifier(theme.muted),
         ),
         Span::styled(sep, sep_style),
         Span::styled(turn_count_text, sep_style),
@@ -121,7 +119,7 @@ fn draw_separator(theme: &Theme, frame: &mut Frame<'_>, area: Rect) {
     frame.render_widget(
         Paragraph::new(Line::from(Span::styled(
             rule,
-            Style::new().fg(theme.inert).add_modifier(Modifier::DIM),
+            Style::new().fg(theme.inert).add_modifier(theme.muted),
         ))),
         area,
     );
@@ -136,7 +134,7 @@ fn draw_body(state: &mut ViewerState, theme: &Theme, frame: &mut Frame<'_>, area
         state.scroll_offset = 0;
         let banner = Line::from(Span::styled(
             "transcript unavailable",
-            Style::new().add_modifier(Modifier::DIM),
+            Style::new().add_modifier(theme.muted),
         ));
         frame.render_widget(
             Paragraph::new(vec![banner]).wrap(Wrap { trim: false }),
@@ -264,11 +262,11 @@ fn draw_footer(state: &ViewerState, theme: &Theme, frame: &mut Frame<'_>, area: 
     );
 
     let chip_style = Style::new().add_modifier(Modifier::BOLD);
-    let off_style = Style::new().fg(theme.inert).add_modifier(Modifier::DIM);
+    let off_style = Style::new().fg(theme.inert).add_modifier(theme.muted);
     let on_style = Style::new().fg(theme.success).add_modifier(Modifier::BOLD);
     let pipe = Span::styled(
         " · ",
-        Style::new().fg(theme.inert).add_modifier(Modifier::DIM),
+        Style::new().fg(theme.inert).add_modifier(theme.muted),
     );
 
     // Toggle chips inline the binding letter so the key + label
@@ -531,7 +529,7 @@ pub(crate) fn draw_find_prompt(
         Span::raw(after),
         Span::styled(
             hint_text,
-            Style::new().fg(theme.inert).add_modifier(Modifier::DIM),
+            Style::new().fg(theme.inert).add_modifier(theme.muted),
         ),
     ]);
     frame.render_widget(Paragraph::new(line), area);

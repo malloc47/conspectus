@@ -16,7 +16,7 @@
 //! keeps the recency / mux indicator columns aligned downstream.
 
 use ratatui::macros::span;
-use ratatui::style::{Color, Modifier, Style};
+use ratatui::style::{Modifier, Style};
 use ratatui::text::Span;
 
 use crate::tui::Theme;
@@ -36,12 +36,13 @@ pub fn harness_badge(label: &str, theme: &Theme) -> Span<'static> {
 
 /// Render a pane's program name as a badge the same width as
 /// [`harness_badge`], for mux rows with no linked agent. Every program
-/// shares `theme.command_badge()` as the background, under bold white
-/// text, so these chips stay visually quieter than the per-harness
-/// colors. Names longer than the badge are cut with `…`.
+/// shares `theme.command_badge()` as the background, under bold
+/// `theme.command_badge_text()` (white by default), so these chips stay
+/// visually quieter than the per-harness colors. Names longer than the
+/// badge are cut with `…`.
 pub fn command_badge(command: &str, theme: &Theme) -> Span<'static> {
     let style = Style::default()
-        .fg(Color::White)
+        .fg(theme.command_badge_text())
         .bg(theme.command_badge())
         .add_modifier(Modifier::BOLD);
     badge_span(command, style, theme.badge_width)

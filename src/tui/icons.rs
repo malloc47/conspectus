@@ -11,10 +11,10 @@
 //! constants directly.
 //!
 //! `ForgePr` is the one kind that does not own a color: its hue is
-//! driven by PR state (`pr_open`/`pr_closed`/`pr_merged`/`pr_draft`),
-//! so the [`NodeKindStyle::color`] field is the sentinel
-//! [`Color::Reset`] for `ForgePr`. Callers that know the PR's state
-//! take its style from [`crate::tui::rows::PrStatus::mark`].
+//! driven by PR state (`pr_open`/`pr_closed`/`pr_merged`/`pr_draft`).
+//! Its [`NodeKindStyle::color`] is the `pr_open` hue, which every
+//! surface that has no PR state draws it in; callers that know the
+//! PR's state take its style from [`crate::tui::rows::PrStatus::mark`].
 
 use std::collections::BTreeMap;
 
@@ -182,9 +182,9 @@ pub fn all_glyphs() -> Vec<&'static str> {
 /// and the display-cell width of the glyph (always 1; carried so
 /// callers can subtract from column budgets without recomputing).
 ///
-/// For [`NodeKind::ForgePr`] the `color` field is the sentinel
-/// [`Color::Reset`]; a caller that knows the PR's state takes the
-/// style from [`crate::tui::rows::PrStatus::mark`].
+/// For [`NodeKind::ForgePr`] the `color` field is the `pr_open` hue; a
+/// caller that knows the PR's state takes the style from
+/// [`crate::tui::rows::PrStatus::mark`].
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct NodeKindStyle {
     pub glyph: String,
@@ -209,9 +209,9 @@ pub fn node_kind_style(kind: NodeKind, theme: &Theme) -> NodeKindStyle {
     }
 }
 
-/// Default color for `kind`. `ForgePr` returns [`Color::Reset`] as
-/// the documented sentinel; every other kind reads from its own
-/// `node_*` theme field.
+/// Default color for `kind`: its own `node_*` theme role, or for
+/// `ForgePr`, which has none, the `pr_open` hue a PR glyph without a
+/// state takes.
 fn theme_color(kind: NodeKind, theme: &Theme) -> Color {
     match kind {
         NodeKind::Workspace => theme.node_workspace(),
@@ -223,7 +223,7 @@ fn theme_color(kind: NodeKind, theme: &Theme) -> Color {
         NodeKind::RuntimeProcess => theme.node_runtime_process(),
         NodeKind::Branch => theme.node_branch(),
         NodeKind::Fork => theme.node_fork(),
-        NodeKind::ForgePr => Color::Reset,
+        NodeKind::ForgePr => theme.pr_open(),
     }
 }
 

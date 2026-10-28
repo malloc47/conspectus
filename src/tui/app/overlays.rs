@@ -953,8 +953,8 @@ impl App {
     pub fn post_toast(&mut self, label: impl Into<String>) {
         let label = label.into();
         crate::tui::widgets::toast::engine_dismiss_all(&mut self.toast);
-        self.toast
-            .show_toast(crate::tui::widgets::toast::builder_for(label));
+        let toast = crate::tui::widgets::toast::builder_for(label, self.theme());
+        self.toast.show_toast(toast);
     }
 
     /// Update the engine's frame area and retire expired toasts.

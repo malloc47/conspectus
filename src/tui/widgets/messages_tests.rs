@@ -88,3 +88,27 @@ fn renders_list_and_selected_detail() {
     assert!(text.contains("exit: 1"), "{text}");
     assert!(text.contains("No conversation found"), "{text}");
 }
+
+#[test]
+fn each_level_takes_its_own_theme_color() {
+    use crate::tui::theme::OverrideValue::Text;
+    let mut theme = Theme::default();
+    let problems = theme.apply_overrides([("info", Text("blue")), ("success", Text("magenta"))]);
+    assert_eq!(problems, []);
+    assert_eq!(
+        level_style(LogLevel::Info, &theme).fg,
+        Some(ratatui::style::Color::Blue),
+        "info follows `info`, not `success`"
+    );
+    assert_eq!(
+        level_style(LogLevel::Warning, &theme).fg,
+        Some(theme.warning)
+    );
+    assert_eq!(level_style(LogLevel::Error, &theme).fg, Some(theme.error));
+    let default = Theme::default();
+    assert_eq!(
+        level_style(LogLevel::Info, &default).fg,
+        Some(default.success),
+        "the default info color is the success green it always was"
+    );
+}

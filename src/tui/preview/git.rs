@@ -34,15 +34,17 @@ pub enum GitQuery {
     Show { dir: PathBuf, commit: String },
 }
 
-pub fn load_git_preview(query: &GitQuery) -> PreviewContent {
+/// Run `query`. Notes and dates take `muted`, the theme's muted
+/// modifier.
+pub fn load_git_preview(query: &GitQuery, muted: Modifier) -> PreviewContent {
     let result = match query {
-        GitQuery::Status { root } => status(root),
-        GitQuery::Repo { dir } => repo(dir),
+        GitQuery::Status { root } => status(root, muted),
+        GitQuery::Repo { dir } => repo(dir, muted),
         GitQuery::Log {
             dir,
             rev,
             ahead_behind,
-        } => log(dir, rev, ahead_behind.as_ref()),
+        } => log(dir, rev, ahead_behind.as_ref(), muted),
         GitQuery::Show { dir, commit } => show(dir, commit),
     };
     match result {
@@ -109,11 +111,11 @@ fn heading(text: impl Into<String>) -> Line<'static> {
     Line::styled(text.into(), Style::new().add_modifier(Modifier::BOLD))
 }
 
-fn dim(text: impl Into<String>) -> Line<'static> {
-    Line::styled(text.into(), Style::new().add_modifier(Modifier::DIM))
+fn dim(text: impl Into<String>, muted: Modifier) -> Line<'static> {
+    Line::styled(text.into(), Style::new().add_modifier(muted))
 }
 
-fn status(root: &Path) -> Result<Vec<Line<'static>>, GitError> {
+fn status(root: &Path, muted: Modifier) -> Result<Vec<Line<'static>>, GitError> {
     let out = git(root, &["status", "--short", "--branch"])?;
     let mut lines = Vec::new();
     let mut entries = out.lines();
@@ -122,19 +124,22 @@ fn status(root: &Path) -> Result<Vec<Line<'static>>, GitError> {
     }
     let changes: Vec<&str> = entries.collect();
     if changes.is_empty() {
-        lines.push(dim("(clean)"));
+        lines.push(dim("(clean)", muted));
     }
     for change in changes.iter().take(STATUS_LIMIT) {
         lines.push(Line::raw((*change).to_string()));
     }
     if changes.len() > STATUS_LIMIT {
-        lines.push(dim(format!("… {} more", changes.len() - STATUS_LIMIT)));
+        lines.push(dim(
+            format!("… {} more", changes.len() - STATUS_LIMIT),
+            muted,
+        ));
     }
     lines.push(Line::raw(""));
-    match super::path::load_path_preview(root) {
+    match super::path::load_path_preview(root, muted) {
         PreviewContent::Lines(listing) => lines.extend(listing),
         PreviewContent::Unavailable(reason) | PreviewContent::Failed(reason) => {
-            lines.push(dim(reason));
+            lines.push(dim(reason, muted));
         }
         _ => {}
     }
@@ -164,12 +169,12 @@ fn default_branch(dir: &Path) -> Result<String, GitError> {
     }
 }
 
-fn repo(dir: &Path) -> Result<Vec<Line<'static>>, GitError> {
+fn repo(dir: &Path, muted: Modifier) -> Result<Vec<Line<'static>>, GitError> {
     let branch = default_branch(dir)?;
     let mut lines = vec![heading(format!("recent commits on {branch}"))];
-    match commits(dir, &branch) {
+    match commits(dir, &branch, muted) {
         Ok(log) => lines.extend(log),
-        Err(GitError::Failed(_)) => lines.push(dim("(no commits)")),
+        Err(GitError::Failed(_)) => lines.push(dim("(no commits)", muted)),
         Err(err) => return Err(err),
     }
     lines.push(Line::raw(""));
@@ -188,7 +193,7 @@ fn repo(dir: &Path) -> Result<Vec<Line<'static>>, GitError> {
         }
     }
     if seen.is_empty() {
-        lines.push(dim("(none)"));
+        lines.push(dim("(none)", muted));
     }
     lines.extend(
         seen.into_iter()
@@ -197,7 +202,7 @@ fn repo(dir: &Path) -> Result<Vec<Line<'static>>, GitError> {
     Ok(lines)
 }
 
-fn commits(dir: &Path, rev: &str) -> Result<Vec<Line<'static>>, GitError> {
+fn commits(dir: &Path, rev: &str, muted: Modifier) -> Result<Vec<Line<'static>>, GitError> {
     let out = git(
         dir,
         &[
@@ -218,10 +223,7 @@ fn commits(dir: &Path, rev: &str) -> Result<Vec<Line<'static>>, GitError> {
             let subject = parts.next().unwrap_or_default().to_string();
             Line::from(vec![
                 Span::styled(hash, Style::new().add_modifier(Modifier::BOLD)),
-                Span::styled(
-                    format!(" {date} "),
-                    Style::new().add_modifier(Modifier::DIM),
-                ),
+                Span::styled(format!(" {date} "), Style::new().add_modifier(muted)),
                 Span::raw(subject),
             ])
         })
@@ -232,6 +234,7 @@ fn log(
     dir: &Path,
     rev: &str,
     ahead_behind: Option<&(String, String)>,
+    muted: Modifier,
 ) -> Result<Vec<Line<'static>>, GitError> {
     if !rev_exists(dir, rev)? {
         return Err(GitError::Unavailable(format!("{rev} not found")));
@@ -255,11 +258,11 @@ fn log(
                 let behind = parts.next().unwrap_or("0");
                 heading(format!("ahead {ahead} · behind {behind} of {upstream}"))
             }
-            Err(_) => dim(format!("{upstream} not found")),
+            Err(_) => dim(format!("{upstream} not found"), muted),
         });
         lines.push(Line::raw(""));
     }
-    lines.extend(commits(dir, rev)?);
+    lines.extend(commits(dir, rev, muted)?);
     Ok(lines)
 }
 

@@ -186,9 +186,11 @@ fn field_view(
     height: usize,
 ) -> PreviewView {
     use crate::tui::explorer::FieldValue;
-    if let Some(lines) =
-        crate::tui::preview::value_lines(value, Some(crate::tui::rows::tree_current_unix_epoch()))
-    {
+    if let Some(lines) = crate::tui::preview::value_lines(
+        value,
+        Some(crate::tui::rows::tree_current_unix_epoch()),
+        app.theme().muted,
+    ) {
         return PreviewView::text(lines);
     }
     match crate::tui::preview::value_source(app, value) {

@@ -519,6 +519,7 @@ impl Widget for MuxLaunchFormWidget<'_> {
                 crate::tui::keybindings::overlay::MUX_LAUNCH_KEYS,
             ),
             inner_width,
+            self.theme,
         );
         let cols = form::Cols::new(inner_width);
         let focus = state.focus;
@@ -534,7 +535,11 @@ impl Widget for MuxLaunchFormWidget<'_> {
             }
             lines.push(line);
         };
-        row(&mut lines, MuxLaunchField::MuxName, state.name_line(cols));
+        row(
+            &mut lines,
+            MuxLaunchField::MuxName,
+            state.name_line(cols, self.theme),
+        );
         if state.socket_enabled {
             row(
                 &mut lines,
@@ -544,6 +549,7 @@ impl Widget for MuxLaunchFormWidget<'_> {
                     spec.mux_socket(),
                     focus == MuxLaunchField::MuxSocket,
                     cols,
+                    self.theme,
                 ),
             );
         }
@@ -556,6 +562,7 @@ impl Widget for MuxLaunchFormWidget<'_> {
                 spec.known_harness_keys(),
                 focus == MuxLaunchField::Harness,
                 cols,
+                self.theme,
             ),
         );
         if !spec.launch_options().is_empty() {
@@ -570,13 +577,20 @@ impl Widget for MuxLaunchFormWidget<'_> {
                     &effective,
                     focus == MuxLaunchField::LaunchOptions,
                     cols,
+                    self.theme,
                 ),
             );
         }
         row(
             &mut lines,
             MuxLaunchField::Cwd,
-            path_row(CWD_LABEL, spec.cwd(), focus == MuxLaunchField::Cwd, cols),
+            path_row(
+                CWD_LABEL,
+                spec.cwd(),
+                focus == MuxLaunchField::Cwd,
+                cols,
+                self.theme,
+            ),
         );
         row(
             &mut lines,
@@ -586,9 +600,10 @@ impl Widget for MuxLaunchFormWidget<'_> {
                 spec.launch_argv(),
                 focus == MuxLaunchField::LaunchArgv,
                 cols,
+                self.theme,
             ),
         );
-        lines.push(state.command_line(cols));
+        lines.push(state.command_line(cols, self.theme));
         row(
             &mut lines,
             MuxLaunchField::WorktreeToggle,
@@ -601,6 +616,7 @@ impl Widget for MuxLaunchFormWidget<'_> {
                 },
                 focus == MuxLaunchField::WorktreeToggle,
                 cols,
+                self.theme,
             ),
         );
         if spec.worktree_enabled() {
@@ -612,6 +628,7 @@ impl Widget for MuxLaunchFormWidget<'_> {
                     spec.worktree_branch(),
                     focus == MuxLaunchField::WorktreeBranch,
                     cols,
+                    self.theme,
                 ),
             );
             row(
@@ -622,6 +639,7 @@ impl Widget for MuxLaunchFormWidget<'_> {
                     &state.worktree_repo,
                     focus == MuxLaunchField::WorktreeRepo,
                     cols,
+                    self.theme,
                 ),
             );
         }
@@ -640,6 +658,7 @@ impl Widget for MuxLaunchFormWidget<'_> {
                 ],
                 focus == MuxLaunchField::Pin,
                 cols,
+                self.theme,
             ),
         );
         if let Some(err) = spec.error() {
@@ -675,7 +694,7 @@ impl MuxLaunchFormState {
     /// The name row: the name field with the socket checkbox to its
     /// right. The checkbox takes the same cells checked or not, and the
     /// row carries the focus marker when either part has focus.
-    fn name_line(&self, cols: form::Cols) -> Line<'static> {
+    fn name_line(&self, cols: form::Cols, theme: &Theme) -> Line<'static> {
         use ratatui::style::Modifier;
         use ratatui::text::Span;
         let name_focused = self.focus == MuxLaunchField::MuxName;
@@ -685,7 +704,7 @@ impl MuxLaunchFormState {
             width: text.chars().count() + 2,
             spans: vec![
                 Span::raw("  "),
-                Span::styled(text, form::entry_style(toggle_focused)),
+                Span::styled(text, form::entry_style(toggle_focused, theme)),
             ],
         };
         let mut line = form::value_row(
@@ -695,6 +714,7 @@ impl MuxLaunchFormState {
             name_focused,
             cols,
             Some(suffix),
+            theme,
         );
         if toggle_focused
             && let Some(first) = line.spans.first_mut()
@@ -708,19 +728,19 @@ impl MuxLaunchFormState {
 
     /// The command row: what the form will run, and where an empty
     /// argv field gets it. Drawn as derived output, not as a field.
-    fn command_line(&self, cols: form::Cols) -> Line<'static> {
+    fn command_line(&self, cols: form::Cols, theme: &Theme) -> Line<'static> {
         let typed = self.spec.launch_argv().value().trim();
         if !typed.is_empty() {
-            return derived_row("command", typed, false, cols);
+            return derived_row("command", typed, false, cols, theme);
         }
         if let Some(hint) = self.default_hint() {
-            return derived_row("command", &hint, false, cols);
+            return derived_row("command", &hint, false, cols, theme);
         }
         let default = self.default_argv();
         if default.is_empty() {
-            derived_row("command", "no default for this harness", true, cols)
+            derived_row("command", "no default for this harness", true, cols, theme)
         } else {
-            derived_row("command", &form::display_argv(&default), false, cols)
+            derived_row("command", &form::display_argv(&default), false, cols, theme)
         }
     }
 }

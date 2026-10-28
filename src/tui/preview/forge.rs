@@ -23,17 +23,23 @@ pub struct PrQuery {
     pub number: u64,
 }
 
-pub fn load_pr_preview(query: &PrQuery) -> PreviewContent {
+/// The preview for a PR, read with `gh`. Secondary lines take `muted`,
+/// the theme's muted modifier.
+pub fn load_pr_preview(query: &PrQuery, muted: Modifier) -> PreviewContent {
     // Tests and offline setups turn forge reads off wholesale.
     if std::env::var_os("CONSPECTUS_DISABLE_FORGE").is_some() {
         return PreviewContent::Unavailable(
             "forge reads are off (CONSPECTUS_DISABLE_FORGE)".to_string(),
         );
     }
-    load_pr_preview_with(&SystemGh::new(), query)
+    load_pr_preview_with(&SystemGh::new(), query, muted)
 }
 
-pub fn load_pr_preview_with(runner: &dyn GhRunner, query: &PrQuery) -> PreviewContent {
+pub fn load_pr_preview_with(
+    runner: &dyn GhRunner,
+    query: &PrQuery,
+    muted: Modifier,
+) -> PreviewContent {
     if query.provider != crate::discovery::providers::GITHUB {
         return PreviewContent::Unavailable(format!(
             "previews read GitHub pull requests; this one is on {}",
@@ -42,7 +48,7 @@ pub fn load_pr_preview_with(runner: &dyn GhRunner, query: &PrQuery) -> PreviewCo
     }
     let repo = format!("{}/{}/{}", query.host, query.owner, query.repo);
     match runner.view_pull_request(&repo, query.number, PR_FIELDS) {
-        Ok(GhOutcome::PullRequests(json)) => pr_preview_from_json(&json),
+        Ok(GhOutcome::PullRequests(json)) => pr_preview_from_json(&json, muted),
         Ok(GhOutcome::Unavailable(reason)) => {
             PreviewContent::Unavailable(reason.as_str().to_string())
         }
@@ -53,8 +59,12 @@ pub fn load_pr_preview_with(runner: &dyn GhRunner, query: &PrQuery) -> PreviewCo
 
 /// The preview for a `gh pr view --json` object, ages rendered against
 /// the TUI's clock.
-pub fn pr_preview_from_json(json: &str) -> PreviewContent {
-    match render_pr(json, Some(crate::tui::rows::tree_current_unix_epoch())) {
+pub fn pr_preview_from_json(json: &str, muted: Modifier) -> PreviewContent {
+    match render_pr(
+        json,
+        Some(crate::tui::rows::tree_current_unix_epoch()),
+        muted,
+    ) {
         Ok(lines) => PreviewContent::Lines(lines),
         Err(err) => PreviewContent::Failed(format!("gh returned unreadable JSON: {err}")),
     }
@@ -64,8 +74,8 @@ fn bold(text: impl Into<String>) -> Span<'static> {
     Span::styled(text.into(), Style::new().add_modifier(Modifier::BOLD))
 }
 
-fn dim(text: impl Into<String>) -> Span<'static> {
-    Span::styled(text.into(), Style::new().add_modifier(Modifier::DIM))
+fn dim(text: impl Into<String>, muted: Modifier) -> Span<'static> {
+    Span::styled(text.into(), Style::new().add_modifier(muted))
 }
 
 fn str_field<'a>(value: &'a Value, key: &str) -> &'a str {
@@ -74,8 +84,12 @@ fn str_field<'a>(value: &'a Value, key: &str) -> &'a str {
 
 /// Compose a `gh pr view --json` object: title, a state line, the
 /// branches and update time, checks, reviews, then the body. `now`
-/// renders the update time as an age.
-pub fn render_pr(json: &str, now: Option<i64>) -> Result<Vec<Line<'static>>, serde_json::Error> {
+/// renders the update time as an age; `muted` marks the secondary lines.
+pub fn render_pr(
+    json: &str,
+    now: Option<i64>,
+    muted: Modifier,
+) -> Result<Vec<Line<'static>>, serde_json::Error> {
     let pr: Value = serde_json::from_str(json)?;
     let mut lines = vec![Line::from(bold(str_field(&pr, "title").to_string()))];
 
@@ -92,7 +106,7 @@ pub fn render_pr(json: &str, now: Option<i64>) -> Result<Vec<Line<'static>>, ser
     if !decision.is_empty() {
         state.push(decision.to_string());
     }
-    lines.push(Line::from(dim(state.join(" · "))));
+    lines.push(Line::from(dim(state.join(" · "), muted)));
 
     let mut branches = Vec::new();
     match (str_field(&pr, "headRefName"), str_field(&pr, "baseRefName")) {
@@ -107,7 +121,7 @@ pub fn render_pr(json: &str, now: Option<i64>) -> Result<Vec<Line<'static>>, ser
         branches.push(format!("updated {age} ago"));
     }
     if !branches.is_empty() {
-        lines.push(Line::from(dim(branches.join(" · "))));
+        lines.push(Line::from(dim(branches.join(" · "), muted)));
     }
 
     let checks = pr
@@ -117,7 +131,7 @@ pub fn render_pr(json: &str, now: Option<i64>) -> Result<Vec<Line<'static>>, ser
         .unwrap_or_default();
     lines.push(Line::raw(""));
     if checks.is_empty() {
-        lines.push(Line::from(vec![bold("checks"), dim("  none")]));
+        lines.push(Line::from(vec![bold("checks"), dim("  none", muted)]));
     } else {
         let outcomes: Vec<(String, CheckOutcome)> = checks.iter().map(check_outcome).collect();
         let count = |kind: CheckOutcome| outcomes.iter().filter(|(_, o)| *o == kind).count();
@@ -133,7 +147,7 @@ pub fn render_pr(json: &str, now: Option<i64>) -> Result<Vec<Line<'static>>, ser
         for (name, outcome) in &outcomes {
             match outcome {
                 CheckOutcome::Failed => lines.push(Line::raw(format!("  × {name}"))),
-                CheckOutcome::Pending => lines.push(Line::from(dim(format!("  … {name}")))),
+                CheckOutcome::Pending => lines.push(Line::from(dim(format!("  … {name}"), muted))),
                 CheckOutcome::Passed | CheckOutcome::Other => {}
             }
         }
@@ -145,7 +159,7 @@ pub fn render_pr(json: &str, now: Option<i64>) -> Result<Vec<Line<'static>>, ser
         .cloned()
         .unwrap_or_default();
     if reviews.is_empty() {
-        lines.push(Line::from(vec![bold("reviews"), dim("  none")]));
+        lines.push(Line::from(vec![bold("reviews"), dim("  none", muted)]));
     } else {
         lines.push(Line::from(bold("reviews")));
         for review in &reviews {
@@ -163,7 +177,7 @@ pub fn render_pr(json: &str, now: Option<i64>) -> Result<Vec<Line<'static>>, ser
     let body = str_field(&pr, "body").trim();
     lines.push(Line::raw(""));
     if body.is_empty() {
-        lines.push(Line::from(dim("(no description)")));
+        lines.push(Line::from(dim("(no description)", muted)));
     } else {
         lines.extend(
             body.lines()
@@ -240,11 +254,15 @@ mod tests {
 
     #[test]
     fn a_pr_shows_its_title_state_checks_reviews_and_body() {
-        let lines: Vec<String> = render_pr(PR_JSON, Some(1_700_003_600))
-            .expect("renders")
-            .iter()
-            .map(ToString::to_string)
-            .collect();
+        let lines: Vec<String> = render_pr(
+            PR_JSON,
+            Some(1_700_003_600),
+            crate::tui::Theme::default().muted,
+        )
+        .expect("renders")
+        .iter()
+        .map(ToString::to_string)
+        .collect();
         assert_eq!(
             lines,
             [
@@ -273,7 +291,11 @@ mod tests {
             GhUnavailableReason::Offline,
         ] {
             assert_eq!(
-                load_pr_preview_with(&FakeGh::unavailable(reason), &query()),
+                load_pr_preview_with(
+                    &FakeGh::unavailable(reason),
+                    &query(),
+                    crate::tui::Theme::default().muted
+                ),
                 PreviewContent::Unavailable(reason.as_str().to_string())
             );
         }
@@ -286,7 +308,11 @@ mod tests {
             ..query()
         };
         assert!(matches!(
-            load_pr_preview_with(&FakeGh::with_pull_requests(PR_JSON), &query),
+            load_pr_preview_with(
+                &FakeGh::with_pull_requests(PR_JSON),
+                &query,
+                crate::tui::Theme::default().muted
+            ),
             PreviewContent::Unavailable(_)
         ));
     }

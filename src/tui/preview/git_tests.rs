@@ -49,9 +49,12 @@ fn a_checkout_shows_its_status_above_a_listing() {
     let index = std::fs::metadata(repo.path().join(".git/index"))
         .and_then(|m| m.modified())
         .expect("index");
-    let lines = rows(load_git_preview(&GitQuery::Status {
-        root: repo.path().to_path_buf(),
-    }));
+    let lines = rows(load_git_preview(
+        &GitQuery::Status {
+            root: repo.path().to_path_buf(),
+        },
+        crate::tui::Theme::default().muted,
+    ));
     assert_eq!(lines[0], "main");
     assert_eq!(lines[1], "?? new.txt");
     assert!(lines.iter().any(|l| l.starts_with("a.txt")), "{lines:?}");
@@ -64,11 +67,14 @@ fn a_checkout_shows_its_status_above_a_listing() {
 #[test]
 fn a_ref_shows_its_recent_commits_and_ahead_behind() {
     let repo = repo_fixture();
-    let lines = rows(load_git_preview(&GitQuery::Log {
-        dir: repo.path().to_path_buf(),
-        rev: "topic".to_string(),
-        ahead_behind: Some(("topic".to_string(), "main".to_string())),
-    }));
+    let lines = rows(load_git_preview(
+        &GitQuery::Log {
+            dir: repo.path().to_path_buf(),
+            rev: "topic".to_string(),
+            ahead_behind: Some(("topic".to_string(), "main".to_string())),
+        },
+        crate::tui::Theme::default().muted,
+    ));
     assert_eq!(lines[0], "ahead 1 · behind 0 of main");
     assert!(lines[2].ends_with("topic work"), "{lines:?}");
     assert!(lines[4].ends_with("first commit"), "{lines:?}");
@@ -77,9 +83,12 @@ fn a_ref_shows_its_recent_commits_and_ahead_behind() {
 #[test]
 fn a_repo_shows_its_default_branch_history_and_remotes() {
     let repo = repo_fixture();
-    let lines = rows(load_git_preview(&GitQuery::Repo {
-        dir: repo.path().join(".git"),
-    }));
+    let lines = rows(load_git_preview(
+        &GitQuery::Repo {
+            dir: repo.path().join(".git"),
+        },
+        crate::tui::Theme::default().muted,
+    ));
     assert_eq!(lines[0], "recent commits on HEAD");
     assert!(lines[1].ends_with("second commit"), "{lines:?}");
     assert_eq!(&lines[lines.len() - 2..], ["remotes", "(none)"]);
@@ -88,10 +97,13 @@ fn a_repo_shows_its_default_branch_history_and_remotes() {
 #[test]
 fn a_commit_shows_its_stat() {
     let repo = repo_fixture();
-    let lines = rows(load_git_preview(&GitQuery::Show {
-        dir: repo.path().to_path_buf(),
-        commit: "main".to_string(),
-    }));
+    let lines = rows(load_git_preview(
+        &GitQuery::Show {
+            dir: repo.path().to_path_buf(),
+            commit: "main".to_string(),
+        },
+        crate::tui::Theme::default().muted,
+    ));
     assert!(
         lines.iter().any(|l| l.contains("second commit")),
         "{lines:?}"
@@ -103,24 +115,33 @@ fn a_commit_shows_its_stat() {
 fn a_missing_ref_or_checkout_says_so() {
     let repo = repo_fixture();
     assert_eq!(
-        load_git_preview(&GitQuery::Log {
-            dir: repo.path().to_path_buf(),
-            rev: "refs/heads/gone".to_string(),
-            ahead_behind: None,
-        }),
+        load_git_preview(
+            &GitQuery::Log {
+                dir: repo.path().to_path_buf(),
+                rev: "refs/heads/gone".to_string(),
+                ahead_behind: None,
+            },
+            crate::tui::Theme::default().muted
+        ),
         PreviewContent::Unavailable("refs/heads/gone not found".to_string())
     );
     assert_eq!(
-        load_git_preview(&GitQuery::Status {
-            root: repo.path().join("gone"),
-        }),
+        load_git_preview(
+            &GitQuery::Status {
+                root: repo.path().join("gone"),
+            },
+            crate::tui::Theme::default().muted
+        ),
         PreviewContent::Unavailable("no longer exists".to_string())
     );
     let plain = tempfile::tempdir().expect("temp dir");
     assert_eq!(
-        load_git_preview(&GitQuery::Status {
-            root: plain.path().to_path_buf(),
-        }),
+        load_git_preview(
+            &GitQuery::Status {
+                root: plain.path().to_path_buf(),
+            },
+            crate::tui::Theme::default().muted
+        ),
         PreviewContent::Unavailable("not a git repository".to_string())
     );
 }

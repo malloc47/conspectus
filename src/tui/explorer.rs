@@ -961,18 +961,10 @@ fn build_breadcrumb_hops(hops: &[BreadcrumbHop], theme: &Theme) -> Vec<RenderedB
     hops.iter()
         .map(|hop| {
             let kind = NodeKind::from(&hop.focused);
+            // A PR's glyph takes the `pr_open` hue here: the
+            // breadcrumb has no PR state on hand.
             let style = node_kind_style(kind, theme);
-            // ForgePr's slate color is `Color::Reset` (the caller
-            // is supposed to pick `theme.pr_open()` / `pr_closed` /
-            // `pr_merged` / `pr_draft` from PR state). The
-            // breadcrumb does not have PR state on hand, so fall
-            // back to `pr_open` — the same dodge `kind_chip_span`
-            // uses for the same reason.
-            let color = if matches!(kind, NodeKind::ForgePr) {
-                theme.pr_open()
-            } else {
-                style.color
-            };
+            let color = style.color;
             let raw_tag = hop
                 .short_label
                 .split_once(':')

@@ -4811,7 +4811,10 @@ fn fetched_pr(state: &str, draft: bool, checks: &str, review: &str) -> PreviewCo
             "isDraft":{draft},"reviewDecision":"{review}","statusCheckRollup":{checks},
             "latestReviews":[],"headRefName":"feature/notes","baseRefName":"main"}}"#
     );
-    PreviewContent::Lines(crate::tui::preview::forge::render_pr(&json, None).expect("renders"))
+    PreviewContent::Lines(
+        crate::tui::preview::forge::render_pr(&json, None, Theme::default().muted)
+            .expect("renders"),
+    )
 }
 
 const PASSING_CHECKS: &str = r#"[{"name":"test","status":"COMPLETED","conclusion":"SUCCESS"}]"#;

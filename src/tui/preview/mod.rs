@@ -20,6 +20,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::path::PathBuf;
 use std::time::Instant;
 
+use ratatui::style::Modifier;
 use ratatui::text::Line;
 
 pub use forge::PrQuery;
@@ -533,18 +534,20 @@ pub fn pane_native_id(app: &App, mux: &MuxSessionId) -> Option<String> {
 }
 
 /// Load a source that needs no mux backend. Blocking: the live runtime
-/// calls it on a worker thread. `None` for a pane, which captures
-/// through the executor's mux op.
-pub fn load_offline_preview(source: &PreviewSource) -> Option<PreviewContent> {
+/// calls it on a worker thread, so it takes the theme's `muted` modifier
+/// for secondary lines rather than the theme. `None` for a pane, which
+/// captures through the executor's mux op.
+pub fn load_offline_preview(source: &PreviewSource, muted: Modifier) -> Option<PreviewContent> {
     match source {
         PreviewSource::Pane(_) => None,
         PreviewSource::Transcript(session) => Some(load_transcript_preview(session)),
-        PreviewSource::Path(path) => Some(path::load_path_preview(path)),
-        PreviewSource::Git(query) => Some(git::load_git_preview(query)),
-        PreviewSource::PullRequest(query) => Some(forge::load_pr_preview(query)),
+        PreviewSource::Path(path) => Some(path::load_path_preview(path, muted)),
+        PreviewSource::Git(query) => Some(git::load_git_preview(query, muted)),
+        PreviewSource::PullRequest(query) => Some(forge::load_pr_preview(query, muted)),
         PreviewSource::Process(pid) => Some(process::load_process_tree(
             std::path::Path::new("/proc"),
             *pid,
+            muted,
         )),
     }
 }

@@ -680,16 +680,10 @@ pub(super) fn binding_lines(
 /// down-reads the same sequence the row tree and detail pane use.
 fn push_icon_legend(lines: &mut Vec<Line<'static>>, theme: &Theme, width: Option<usize>) {
     for kind in NodeKind::ALL {
+        // A PR's glyph takes the `pr_open` hue: the legend carries no
+        // PR state.
         let style = node_kind_style(kind, theme);
-        // ForgePr's slate color is `Color::Reset`; mirror the
-        // dodge used in `kind_chip_span` / the breadcrumb /
-        // search-result renderers — fall back to `theme.pr_open()`
-        // since the legend doesn't carry PR state.
-        let color = if matches!(kind, NodeKind::ForgePr) {
-            theme.pr_open()
-        } else {
-            style.color
-        };
+        let color = style.color;
         legend_entry(
             lines,
             vec![

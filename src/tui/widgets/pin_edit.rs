@@ -17,7 +17,7 @@ use ratatui::buffer::Buffer;
 use ratatui::crossterm::event::KeyEvent;
 use ratatui::layout::Rect;
 use ratatui::macros::line;
-use ratatui::style::{Color, Modifier, Style};
+use ratatui::style::Style;
 use ratatui::text::{Line, Span};
 use ratatui::widgets::Widget;
 
@@ -661,12 +661,13 @@ impl Widget for PinEditFormWidget<'_> {
         let grid = Grid::new(inner_width, label_width);
         let stops = state.stops();
         let focus = stops.get(state.focus).copied().unwrap_or(Stop::Row(0));
-        let dim = Style::default().add_modifier(Modifier::DIM);
+        let dim = Style::default().add_modifier(self.theme.muted);
 
         let mut top: Vec<Line<'static>> = vec![note_row(
             "pin",
             &format!("{} · {} · {}", state.pin, state.kind.as_str(), state.status),
             cols,
+            self.theme,
         )];
         let help = format!(
             "A blank field follows the running {}, then its last seen value, then what was \
@@ -693,9 +694,14 @@ impl Widget for PinEditFormWidget<'_> {
                     detail.1 = row_help(row);
                 }
             }
-            rows.push(render_row(state, row, active, grid, cols));
+            rows.push(render_row(state, row, active, grid, cols, self.theme));
             if row.which == Which::PinName && state.live_mux {
-                rows.push(note_row("", "renames the tmux session too", cols));
+                rows.push(note_row(
+                    "",
+                    "renames the tmux session too",
+                    cols,
+                    self.theme,
+                ));
             }
             if row.which == Which::Field("harness") && state.has_options() {
                 let active = focus == Stop::Options;
@@ -713,6 +719,7 @@ impl Widget for PinEditFormWidget<'_> {
                     &state.argv_now(),
                     active,
                     cols,
+                    self.theme,
                 ));
             }
         }
@@ -737,6 +744,7 @@ impl Widget for PinEditFormWidget<'_> {
                 crate::tui::keybindings::overlay::PIN_EDIT_KEYS,
             ),
             inner_width,
+            self.theme,
         ));
 
         let content = top.len() + rows.len() + bottom.len();
@@ -788,6 +796,7 @@ fn render_row(
     active: bool,
     grid: Grid,
     cols: Cols,
+    theme: &Theme,
 ) -> Line<'static> {
     let (prefix, label_style) = form::prefix(&row.label, active, grid.label);
     let mut spans = vec![Span::styled(prefix, label_style)];
@@ -803,8 +812,9 @@ fn render_row(
                     input.cursor(),
                     width,
                     active,
+                    theme,
                 ));
-                spans.push(Span::styled(mark, Style::default().fg(Color::Yellow)));
+                spans.push(Span::styled(mark, Style::default().fg(theme.warning)));
             } else {
                 let slot = 18.min(grid.value);
                 spans.extend(form::value_cells(
@@ -812,9 +822,10 @@ fn render_row(
                     input.cursor(),
                     slot,
                     active,
+                    theme,
                 ));
                 let chips =
-                    form::harness_chips(value, &state.known_harness_keys, grid.value - slot);
+                    form::harness_chips(value, &state.known_harness_keys, grid.value - slot, theme);
                 let used: usize = chips.iter().map(|s| s.content.chars().count()).sum();
                 spans.extend(chips);
                 spans.push(Span::raw(" ".repeat(grid.value - slot - used)));
@@ -827,8 +838,9 @@ fn render_row(
                 path.cursor(),
                 width,
                 active,
+                theme,
             ));
-            spans.extend(form::path_mark(path));
+            spans.extend(form::path_mark(path, theme));
         }
         Control::Text(input) => {
             spans.extend(form::value_cells(
@@ -836,15 +848,16 @@ fn render_row(
                 input.cursor(),
                 grid.value,
                 active,
+                theme,
             ));
         }
     }
     spans.push(Span::raw(" "));
     let pending = row.cleared || row.edited();
     let tag_style = if pending {
-        Style::default().fg(Color::Yellow)
+        Style::default().fg(theme.warning)
     } else {
-        Style::default().add_modifier(Modifier::DIM)
+        Style::default().add_modifier(theme.muted)
     };
     spans.push(Span::styled(
         format!("{:>width$}", row.tag(), width = TAG_WIDTH),
