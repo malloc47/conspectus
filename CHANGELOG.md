@@ -65,6 +65,11 @@ Targeted for 0.2.0, after 0.1.0 is tagged. History, rebuild, and pins
   that shrinks no longer leaves blank rows below it, the `.` row menu
   scrolls to its cursor and keeps its key hints, and the row, mux, and
   worktree menus no longer crash a very short terminal.
+- **`Enter` and `o` work on every field the right pane shows.** With
+  Expanded Node Detail on (`F`), the fields past the first five did
+  nothing: `Enter` did not copy them, and `o` said the row had no
+  truncated value even beside a `(truncated · o)` hint. Both now act on
+  the field under the cursor, expanded or not.
 - **Harness hooks work while `conspectus serve` runs.** The daemon
   applied each hook observation to its live graph only, and the next
   refresh, a few seconds later, dropped it. It now records the

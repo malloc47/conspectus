@@ -1027,3 +1027,30 @@ branching in the runtime.
 10. **Header scope.** Is the header line a framework control (a `SummaryLine`)
     or purely app composition? I assumed app composition with only the
     segment/separator primitive shared.
+
+## Verification (CSP-713)
+
+The suspected defect in 3.17 (item 16 in section 8, question 4 in section 10)
+was reproduced at runtime and fixed before the extraction. The reproduction
+is `conspectus tui --snapshot` on the showcase fixture with
+`jjjjjljjjj<Tab>Fjjjjjjjjjo`: the cursor sits on the `last_message_preview`
+row of `showcase-claude`, which shows `(truncated · o)`, and the status line
+read "explorer: row has no truncated value to open". The tests that pinned it
+before the fix are in `src/tui/app_tests.rs` (every shown field, Expanded
+Node Detail on and off) and `src/tui/snapshot_tests.rs` (the same keys).
+
+- **Cause.** `ExplorerRow::NodeField { index, .. }` numbers the rows over
+  `NodeView::fields(expanded_detail)`, which is `all_fields` with `F` on,
+  but `explorer_copy_target` and `open_value_modal_for_cursor` looked the
+  index up in `core_fields`. Past the five core rows the lookup missed
+  (Enter fell through to the activate that does nothing on a field, and `o`
+  reported no value).
+- **Fix.** The row now carries its own `value` beside `label` and
+  `long_value`, and both gestures read the row instead of looking the field
+  up a second time. Copy and inspect therefore agree with what the pane
+  draws by construction, which is the shape `PropertyRow` needs: its
+  `Copy(String)` and `Inspect(label, text)` outcomes come from the row.
+- **Left as is.** `preview_subject` still reads the field by `index`, but in
+  `fields(expanded_detail)`, the list the rows are numbered over, so it was
+  never wrong. Giving the row its typed `FieldValue` would remove that last
+  lookup; the `PropertyGrid` extraction can decide it.
