@@ -107,7 +107,8 @@ impl PathOmniboxState {
     }
 
     pub fn handle_key(&mut self, event: KeyEvent) -> PathOmniboxOutcome {
-        use crate::tui::keybindings::overlay::{OMNIBOX_KEYS, OmniboxKey, resolve};
+        use crate::tui::keybindings::overlay::{OMNIBOX_KEYS, OmniboxKey};
+        use tuikit::keys::resolve;
         if let Some(OmniboxKey::Complete) = resolve(OMNIBOX_KEYS, event) {
             if let Some(path) = self.selected_suggestion_path() {
                 self.input = TextInputState::new(self.title.clone(), path);

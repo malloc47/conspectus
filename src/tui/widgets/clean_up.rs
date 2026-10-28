@@ -70,7 +70,7 @@ impl Overlay for CleanUpState {
     fn handle(&mut self, _ctx: (), key: KeyEvent) -> OverlayOutcome {
         if self.candidates.is_empty() {
             // Nothing to choose: any menu key dismisses the notice.
-            use crate::tui::keybindings::overlay::{MENU_KEYS, MenuKey, resolve};
+            use tuikit::keys::{MENU_KEYS, MenuKey, resolve};
             return match resolve(MENU_KEYS, key) {
                 Some(MenuKey::Abort | MenuKey::Close | MenuKey::Pick) => OverlayOutcome::Close,
                 _ => OverlayOutcome::Consumed,

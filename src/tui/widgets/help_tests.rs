@@ -34,20 +34,13 @@ fn every_keybindings_entry_appears_in_help_sections() {
                 "1 – 5".to_string(),
                 "1 / 2 / 3 / 4".to_string(),
             ],
-            "Ctrl-c" => vec!["Ctrl-C".to_string()],
-            "Ctrl-g" => vec!["Ctrl-G".to_string()],
-            "Ctrl-f" => vec!["Ctrl-F".to_string()],
-            "Ctrl-r" => vec!["Ctrl-R".to_string()],
-            "Ctrl-l" => vec!["Ctrl-L".to_string()],
-            "Ctrl-o" => vec!["Ctrl-O".to_string()],
-            "Down" | "Up" => vec!["↓".to_string(), "↑".to_string()],
-            "Right" | "Left" => vec!["→".to_string(), "←".to_string()],
             "Home" | "End" => vec!["g".to_string(), "G".to_string()],
             other => vec![other.to_string()],
         }
     }
 
-    use crate::tui::keybindings::{KEYBINDINGS, KeyMode, key_label};
+    use crate::tui::keybindings::{KEYBINDINGS, KeyMode};
+    use tuikit::keys::key_label;
     // Concatenate every section's binding key strings.
     let sections = keymap_sections();
     let mut haystack = String::new();
@@ -323,7 +316,7 @@ fn jumping_to_the_end_shows_the_last_lines_not_blank_space() {
         .collect::<Vec<_>>()
         .join("\n");
     assert!(
-        rendered.contains("to close"),
+        rendered.contains("Esc/q/? close"),
         "end of keymap should be visible after G:\n{rendered}"
     );
 }

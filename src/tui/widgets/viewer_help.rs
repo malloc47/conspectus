@@ -12,10 +12,11 @@ use ratatui::Frame;
 use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
 use ratatui::text::Line;
+use tuikit::keys::{KeyRow, key_label, rows};
 use tuikit::scroll::ScrollWindow;
 
 use crate::tui::Theme;
-use crate::tui::keybindings::overlay::{KeyRow, VIEWER_KEYS};
+use crate::tui::keybindings::overlay::VIEWER_KEYS;
 use crate::viewer::input::ViewerMsg;
 
 use super::help::{binding_lines, blank, push_footer, render_help_page, section};
@@ -40,10 +41,9 @@ pub struct ViewerHelpSection {
 pub fn sections_for(table: &[KeyRow<ViewerMsg>]) -> Vec<ViewerHelpSection> {
     let mut sections: Vec<ViewerHelpSection> = Vec::new();
     for msg in ViewerMsg::ALL {
-        let mut keys: Vec<String> = table
-            .iter()
+        let mut keys: Vec<String> = rows(table)
             .filter_map(|row| match row {
-                KeyRow::Bind { key, action, .. } if *action == msg => Some(key_notation(key)),
+                KeyRow::Bind { key, action, .. } if *action == msg => Some(key_label(key)),
                 _ => None,
             })
             .collect();
@@ -66,23 +66,6 @@ pub fn sections_for(table: &[KeyRow<ViewerMsg>]) -> Vec<ViewerHelpSection> {
         }
     }
     sections
-}
-
-/// The same key notation as the keymap help: arrows as arrows, `Ctrl-D`
-/// for control chords.
-pub(super) fn key_notation(key: &crate::tui::keybindings::KeyMatcher) -> String {
-    match crate::tui::keybindings::key_label(key).as_str() {
-        "Up" => "↑".to_string(),
-        "Down" => "↓".to_string(),
-        "Left" => "←".to_string(),
-        "Right" => "→".to_string(),
-        " " => "Space".to_string(),
-        // The keymap help writes control chords as `Ctrl-R`.
-        other => match other.strip_prefix("Ctrl-") {
-            Some(rest) if rest.chars().count() == 1 => format!("Ctrl-{}", rest.to_uppercase()),
-            _ => other.to_string(),
-        },
-    }
 }
 
 /// The page's lines wrapped to `width`: each section heading, its rows,

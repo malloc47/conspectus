@@ -372,7 +372,8 @@ impl Overlay for MuxLaunchFormState {
     type Ctx<'a> = ();
 
     fn handle(&mut self, _ctx: (), key: KeyEvent) -> OverlayOutcome {
-        use crate::tui::keybindings::overlay::{FormKey, MUX_LAUNCH_KEYS, resolve};
+        use crate::tui::keybindings::overlay::MUX_LAUNCH_KEYS;
+        use tuikit::keys::{FormKey, resolve};
         let option_delta = match resolve(MUX_LAUNCH_KEYS, key) {
             Some(FormKey::Abort | FormKey::Cancel) => return OverlayOutcome::Close,
             Some(FormKey::Up) => {
@@ -515,9 +516,7 @@ impl Widget for MuxLaunchFormWidget<'_> {
         let frame = form::modal_frame(self.theme, "Launch harness in new mux");
         let inner_width = usize::from(frame.inner_width(area));
         let footer = footer_lines(
-            &crate::tui::keybindings::overlay::footer(
-                crate::tui::keybindings::overlay::MUX_LAUNCH_KEYS,
-            ),
+            &tuikit::keys::footer(crate::tui::keybindings::overlay::MUX_LAUNCH_KEYS),
             inner_width,
             self.theme,
         );

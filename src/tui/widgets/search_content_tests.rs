@@ -459,12 +459,12 @@ fn the_contents_scope_shows_progress_results_and_the_generated_key_hints() {
         text.contains("3 hits") && text.contains("session aaaa1111"),
         "{text}"
     );
-    assert!(text.contains("Tab current/all"), "{text}");
+    assert!(text.contains("Tab search current/all"), "{text}");
     assert!(text.contains("Ctrl-F filter lists"), "{text}");
-    assert!(text.contains("Ctrl-S Search view"), "{text}");
-    assert!(text.contains("S-Tab sessions/messages"), "{text}");
-    assert!(text.contains("Ctrl-R earlier search"), "{text}");
-    assert!(text.contains("Ctrl-O options"), "{text}");
+    assert!(text.contains("Ctrl-S open Search view"), "{text}");
+    assert!(text.contains("S-Tab list sessions/messages"), "{text}");
+    assert!(text.contains("Ctrl-R recall search"), "{text}");
+    assert!(text.contains("Ctrl-O set options"), "{text}");
     for retired in ["Ctrl-L", "Ctrl-T", "Ctrl-Y", "thinking ·"] {
         assert!(!text.contains(retired), "{retired}: {text}");
     }

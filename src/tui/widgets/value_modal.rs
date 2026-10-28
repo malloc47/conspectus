@@ -98,7 +98,8 @@ impl ValueModalState {
     /// [`ValueModalOutcome::Close`] when the modal should close,
     /// otherwise [`ValueModalOutcome::Continue`].
     pub fn handle_key(&mut self, event: KeyEvent) -> ValueModalOutcome {
-        use crate::tui::keybindings::overlay::{PagerKey, VALUE_MODAL_KEYS, resolve};
+        use crate::tui::keybindings::overlay::VALUE_MODAL_KEYS;
+        use tuikit::keys::{PagerKey, resolve};
         match resolve(VALUE_MODAL_KEYS, event) {
             Some(PagerKey::Abort | PagerKey::Close) => ValueModalOutcome::Close,
             Some(PagerKey::Copy) => ValueModalOutcome::Continue,
@@ -240,9 +241,7 @@ impl ModalBody for ValueModalBody<'_> {
         Paragraph::new(lines)
             .scroll(window.paragraph_scroll())
             .render(text_area, buf);
-        let hint = crate::tui::keybindings::overlay::footer(
-            crate::tui::keybindings::overlay::VALUE_MODAL_KEYS,
-        );
+        let hint = tuikit::keys::footer(crate::tui::keybindings::overlay::VALUE_MODAL_KEYS);
         Paragraph::new(hint)
             .style(Style::default().fg(self.theme.inert))
             .render(footer_area, buf);

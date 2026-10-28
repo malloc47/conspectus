@@ -74,7 +74,8 @@ impl crate::tui::Overlay for MessagesOverlayState {
 
     fn handle(&mut self, log: &MessageLog, key: KeyEvent) -> crate::tui::OverlayOutcome {
         use crate::tui::OverlayOutcome;
-        use crate::tui::keybindings::overlay::{MESSAGES_KEYS, MessagesKey, resolve};
+        use crate::tui::keybindings::overlay::{MESSAGES_KEYS, MessagesKey};
+        use tuikit::keys::resolve;
         let len = log.len();
         match resolve(MESSAGES_KEYS, key) {
             Some(MessagesKey::Abort | MessagesKey::Close) => return OverlayOutcome::Close,
@@ -171,7 +172,7 @@ impl ModalBody for MessagesBody<'_, '_> {
         let footer = line![span!(
             Style::default().add_modifier(theme.muted);
             "{}",
-            crate::tui::keybindings::overlay::footer(crate::tui::keybindings::overlay::MESSAGES_KEYS)
+            tuikit::keys::footer(crate::tui::keybindings::overlay::MESSAGES_KEYS)
         )];
         if log.is_empty() {
             Paragraph::new(vec![

@@ -17,12 +17,12 @@ use ratatui::widgets::{Paragraph, Widget};
 use ratatui_cheese::help::Binding;
 use tuikit::frame::{ModalBody, ModalFrame, ModalSize};
 use tuikit::glyphs::marks;
+use tuikit::keys::HINT_SEPARATOR;
 use tuikit::scroll::{ScrollGutter, ScrollWindow};
 use tuikit::text;
 
 use crate::tui::Theme;
 use crate::tui::icons::{NodeKind, node_kind_style};
-use crate::tui::keybindings::overlay::HINT_SEPARATOR;
 
 /// Pure state for the help overlay. Carries vertical scroll
 /// position so long keymaps stay reachable on short terminals.
@@ -44,7 +44,8 @@ impl HelpOverlayState {
     /// the modal; everything else is swallowed so navigation keys
     /// don't accidentally affect the row tree behind it.
     pub fn handle_key(&mut self, event: KeyEvent) -> HelpOutcome {
-        use crate::tui::keybindings::overlay::{HELP_KEYS, PagerKey, resolve};
+        use crate::tui::keybindings::overlay::HELP_KEYS;
+        use tuikit::keys::{PagerKey, resolve};
         match resolve(HELP_KEYS, event) {
             Some(PagerKey::Abort | PagerKey::Close) => HelpOutcome::Close,
             Some(PagerKey::Down) => {
@@ -181,8 +182,7 @@ fn footer_rows(width: usize) -> usize {
     if width <= 8 {
         return 1;
     }
-    let footer =
-        crate::tui::keybindings::overlay::footer(crate::tui::keybindings::overlay::HELP_KEYS);
+    let footer = tuikit::keys::footer(crate::tui::keybindings::overlay::HELP_KEYS);
     text::wrap_at(&footer, HINT_SEPARATOR, width).len()
 }
 
@@ -527,8 +527,7 @@ fn body_lines_for_width(theme: &Theme, width: Option<usize>) -> Vec<Line<'static
 /// The closing line of a help page, generated from the key table that
 /// scrolls and closes it, wrapped to `width` when known.
 pub(super) fn push_footer(lines: &mut Vec<Line<'static>>, theme: &Theme, width: Option<usize>) {
-    let footer =
-        crate::tui::keybindings::overlay::footer(crate::tui::keybindings::overlay::HELP_KEYS);
+    let footer = tuikit::keys::footer(crate::tui::keybindings::overlay::HELP_KEYS);
     match width.filter(|w| *w > 8) {
         Some(w) => {
             for chunk in text::wrap_at(&footer, HINT_SEPARATOR, w) {

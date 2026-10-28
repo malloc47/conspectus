@@ -13,6 +13,6 @@ expression: "frame_at(&state, 100, 20)"
           │  worktree       [ ] no worktree                                              │
           │  pin            [x] don't pin [ ] launch, then pin [ ] pin, don't launch     │
           │                                                                              │
-          │↑/↓ move · Tab complete/next · S-Tab back · ←/→/Space option · Enter launch   │
+          │↑/↓ move · Tab complete/next · S-Tab back · ←/→/Space change · Enter launch   │
           │Esc cancel                                                                    │
           └──────────────────────────────────────────────────────────────────────────────┘

@@ -143,8 +143,8 @@ fn a_plan_draws_its_commands_in_the_accent_style_and_a_footer() {
     }
     let style = command_cell.expect("the command is drawn");
     assert_eq!(style.fg, Some(theme.accent));
-    assert!(text.contains("y to copy"), "{text}");
-    assert!(text.contains("to scroll"), "{text}");
+    assert!(text.contains("y copy"), "{text}");
+    assert!(text.contains("j/k/PgDn/PgUp scroll"), "{text}");
 }
 
 #[test]

@@ -586,8 +586,7 @@ fn long_row_menu() -> App {
 
 #[test]
 fn the_row_menu_keeps_its_footer_and_its_cursor_in_view() {
-    let footer =
-        crate::tui::keybindings::overlay::footer(crate::tui::keybindings::overlay::MENU_KEYS);
+    let footer = tuikit::keys::footer(tuikit::keys::MENU_KEYS);
     let last_word = footer
         .split_whitespace()
         .last()

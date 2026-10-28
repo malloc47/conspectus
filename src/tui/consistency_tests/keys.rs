@@ -2,31 +2,35 @@
 //! activates, Space changes the focused item.
 //!
 //! `MODAL_CONVENTION` states what each modal does with the three keys;
-//! these tests check each modal's real key tables against it, and that
-//! every [`Modal`] variant has a row.
+//! these tests check each modal's real key tables against it by the role
+//! each bound action declares (`tuikit::keys::KeyAction`), not by its
+//! name, and that every [`Modal`] variant has a row.
 
 use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+use tuikit::keys::{
+    CHECKLIST_KEYS, CONFIRM_KEYS, KeyAction, KeyRole, KeyRow, MENU_KEYS, SpaceMeans,
+    TEXT_INPUT_KEYS, resolve,
+};
 
 use super::layout::{app_with, builders, name_of};
 use crate::tui::keybindings::overlay::{
-    CLOSE_DOWN_KEYS, CONFIRM_KEYS, CONTROLS_KEYS, EnterMeans, HELP_KEYS, KeyRow, MENU_KEYS,
-    MESSAGES_KEYS, MODAL_CONVENTION, MULTI_SELECT_KEYS, MUX_LAUNCH_KEYS, NEW_MUX_KEYS,
-    PANE_VIEWER_KEYS, PICKER_KEYS, PIN_EDIT_KEYS, SEARCH_CONTENT_KEYS, SEARCH_KEYS, SpaceMeans,
-    TEXT_INPUT_KEYS, VALUE_MODAL_KEYS, VIEWER_FIND_KEYS, VIEWER_KEYS, resolve,
+    CLOSE_DOWN_KEYS, CONTROLS_KEYS, HELP_KEYS, MESSAGES_KEYS, MODAL_CONVENTION, MUX_LAUNCH_KEYS,
+    NEW_MUX_KEYS, PANE_VIEWER_KEYS, PICKER_KEYS, PIN_EDIT_KEYS, SEARCH_CONTENT_KEYS, SEARCH_KEYS,
+    VALUE_MODAL_KEYS, VIEWER_FIND_KEYS, VIEWER_KEYS,
 };
 
-/// What a table makes of a key, by the name of the action it binds.
-type Probe = Box<dyn Fn(KeyEvent) -> Option<String>>;
+/// The role of the action a table binds a key to.
+type Probe = Box<dyn Fn(KeyEvent) -> Option<KeyRole>>;
 
-fn table<A: Copy + std::fmt::Debug + 'static>(rows: &'static [KeyRow<A>]) -> Probe {
-    Box::new(move |event| resolve(rows, event).map(|action| format!("{action:?}")))
+fn table<A: KeyAction + 'static>(rows: &'static [KeyRow<A>]) -> Probe {
+    Box::new(move |event| resolve(rows, event).map(KeyAction::role))
 }
 
 /// Every key table a modal consults, by modal name.
 fn tables(modal: &str) -> Vec<Probe> {
     match modal {
         "Help" => vec![table(HELP_KEYS)],
-        "Controls" => vec![table(CONTROLS_KEYS), table(MULTI_SELECT_KEYS)],
+        "Controls" => vec![table(CONTROLS_KEYS), table(CHECKLIST_KEYS)],
         "Rename" => vec![table(TEXT_INPUT_KEYS)],
         "Search" => vec![table(SEARCH_KEYS), table(SEARCH_CONTENT_KEYS)],
         "Picker" => vec![table(PICKER_KEYS)],
@@ -45,7 +49,7 @@ fn tables(modal: &str) -> Vec<Probe> {
         "MuxMenu" | "RowMenu" => vec![table(MENU_KEYS)],
         "MuxLaunch" => vec![table(MUX_LAUNCH_KEYS)],
         "PinEdit" => vec![table(PIN_EDIT_KEYS)],
-        "CleanUp" => vec![table(MULTI_SELECT_KEYS), table(MENU_KEYS)],
+        "CleanUp" => vec![table(CHECKLIST_KEYS), table(MENU_KEYS)],
         other => panic!("{other}: add the key tables this modal consults to tables()"),
     }
 }
@@ -54,19 +58,11 @@ fn press(code: KeyCode) -> KeyEvent {
     KeyEvent::new(code, KeyModifiers::NONE)
 }
 
-/// The action names the first table that binds `code` gives it.
-fn actions(modal: &str, code: KeyCode) -> Vec<String> {
-    tables(modal)
-        .iter()
-        .filter_map(|probe| probe(press(code)))
-        .collect()
+/// The roles the tables `modal` consults give `event`.
+fn roles(modal: &str) -> impl Fn(KeyEvent) -> Vec<KeyRole> + use<> {
+    let probes = tables(modal);
+    move |event| probes.iter().filter_map(|probe| probe(event)).collect()
 }
-
-const LEAVES: &[&str] = &["Cancel", "Close", "No", "Back"];
-const APPLIES: &[&str] = &[
-    "Confirm", "Submit", "Pick", "Yes", "Done", "Merge", "Discard",
-];
-const CHANGES: &[&str] = &["Toggle", "OptionNext"];
 
 #[test]
 fn every_modal_has_a_row_in_the_convention() {
@@ -97,64 +93,17 @@ fn every_modal_has_a_row_in_the_convention() {
     }
 }
 
+/// Esc leaves every modal; Enter applies or activates where the
+/// convention says it does, never leaves, and is unbound in a pager;
+/// Space changes the focused item, pages, or reaches the text field as
+/// the convention says.
 #[test]
-fn esc_leaves_every_modal() {
-    for row in MODAL_CONVENTION {
-        let bound = actions(row.modal, KeyCode::Esc);
-        assert!(
-            bound.iter().any(|name| LEAVES.contains(&name.as_str())),
-            "{}: Esc is bound to {bound:?}, not to leaving the modal",
-            row.modal
-        );
-    }
-}
-
-#[test]
-fn enter_applies_or_activates_where_the_convention_says_it_does() {
-    for row in MODAL_CONVENTION {
-        let bound = actions(row.modal, KeyCode::Enter);
-        match row.enter {
-            EnterMeans::Submits | EnterMeans::Activates => assert!(
-                bound.iter().any(|name| APPLIES.contains(&name.as_str())),
-                "{}: Enter is bound to {bound:?}, not to applying",
-                row.modal
-            ),
-            EnterMeans::Nothing => assert!(
-                bound.is_empty(),
-                "{}: Enter is bound to {bound:?} in a modal where it does nothing special",
-                row.modal
-            ),
-        }
-        assert!(
-            !bound.iter().any(|name| LEAVES.contains(&name.as_str())),
-            "{}: Enter cancels; Esc is the key that leaves without applying",
-            row.modal
-        );
-    }
-}
-
-#[test]
-fn space_changes_the_focused_item_where_the_convention_says_it_does() {
-    for row in MODAL_CONVENTION {
-        let bound = actions(row.modal, KeyCode::Char(' '));
-        match row.space {
-            SpaceMeans::Toggles => assert!(
-                bound.iter().any(|name| CHANGES.contains(&name.as_str())),
-                "{}: Space is bound to {bound:?}, not to toggling or selecting",
-                row.modal
-            ),
-            SpaceMeans::Pages => assert!(
-                bound.iter().any(|name| name.contains("Page")),
-                "{}: Space is bound to {bound:?}, not to paging",
-                row.modal
-            ),
-            SpaceMeans::Types => assert!(
-                bound.is_empty(),
-                "{}: Space is bound to {bound:?}; it should reach the text field",
-                row.modal
-            ),
-        }
-    }
+fn every_modal_keeps_the_convention_by_role() {
+    let breaks: Vec<String> = MODAL_CONVENTION
+        .iter()
+        .flat_map(|row| row.breaks(&roles(row.modal)))
+        .collect();
+    assert!(breaks.is_empty(), "{}", breaks.join("\n"));
 }
 
 #[test]
@@ -170,10 +119,28 @@ fn a_departure_from_the_convention_gives_its_reason() {
     }
 }
 
+/// `Ctrl-C` gets out of every modal at once, or steps out of its one
+/// level; no table lets an earlier row take it.
+#[test]
+fn ctrl_c_dismisses_every_modal() {
+    let ctrl_c = KeyEvent::new(KeyCode::Char('c'), KeyModifiers::CONTROL);
+    for row in MODAL_CONVENTION {
+        let bound = roles(row.modal)(ctrl_c);
+        assert!(
+            bound
+                .first()
+                .is_some_and(|role| matches!(role, KeyRole::Abort | KeyRole::Leave)),
+            "{}: Ctrl-C is bound to {bound:?}",
+            row.modal
+        );
+    }
+}
+
 #[test]
 fn both_search_modals_switch_reach_with_tab_and_the_contents_one_cycles_granularity_with_shift_tab()
 {
-    use crate::tui::keybindings::overlay::{SearchKey, footer};
+    use crate::tui::keybindings::overlay::SearchKey;
+    use tuikit::keys::footer;
     assert_eq!(
         resolve(SEARCH_KEYS, press(KeyCode::Tab)),
         Some(SearchKey::Scope)
@@ -198,12 +165,17 @@ fn both_search_modals_switch_reach_with_tab_and_the_contents_one_cycles_granular
         Some(SearchKey::Granularity),
         "in the contents modal Shift-Tab cycles sessions/messages instead"
     );
-    assert!(footer(SEARCH_CONTENT_KEYS).contains("Tab current/all"));
-    assert!(footer(SEARCH_CONTENT_KEYS).contains("S-Tab sessions/messages"));
-    assert!(footer(SEARCH_CONTENT_KEYS).contains("Ctrl-R earlier search"));
+    assert!(footer(SEARCH_CONTENT_KEYS).contains("Tab search current/all"));
+    assert!(footer(SEARCH_CONTENT_KEYS).contains("S-Tab list sessions/messages"));
+    assert!(footer(SEARCH_CONTENT_KEYS).contains("Ctrl-R recall search"));
     // The hints are generated from the table, in the operator's words.
     let hints = footer(SEARCH_KEYS);
-    for expected in ["Tab current/all", "Enter pick", "Esc close", "↑/↓ move"] {
+    for expected in [
+        "Tab search current/all",
+        "Enter pick",
+        "Esc close",
+        "↑/↓ move",
+    ] {
         assert!(
             hints.contains(expected),
             "{expected:?} missing from {hints:?}"

@@ -110,10 +110,10 @@ impl MultiSelectState {
 
     /// Dispatch a crossterm key event.
     ///
-    /// - `Up` / `k`: move cursor up, wrapping from the first item to
-    ///   the last.
-    /// - `Down` / `j`: move cursor down, wrapping from the last to the
-    ///   first.
+    /// - `Up` / `k` / `Ctrl-P`: move cursor up, wrapping from the first
+    ///   item to the last.
+    /// - `Down` / `j` / `Ctrl-N`: move cursor down, wrapping from the
+    ///   last to the first.
     /// - `Space`: toggle the item under the cursor.
     /// - `Enter`: confirm; returns the selected indices.
     /// - `Esc` (or `Ctrl-C`): cancel.
@@ -121,19 +121,19 @@ impl MultiSelectState {
     /// Empty lists confirm with an empty vector and cancel as usual;
     /// moving and toggling do nothing on an empty list.
     pub fn handle_key(&mut self, event: KeyEvent) -> MultiSelectOutcome {
-        use crate::tui::keybindings::overlay::{MULTI_SELECT_KEYS, MultiSelectKey, resolve};
-        match resolve(MULTI_SELECT_KEYS, event) {
-            Some(MultiSelectKey::Abort | MultiSelectKey::Cancel) => MultiSelectOutcome::Cancel,
-            Some(MultiSelectKey::Confirm) => MultiSelectOutcome::Confirm(self.selected_indices()),
-            Some(MultiSelectKey::Up) => {
+        use tuikit::keys::{CHECKLIST_KEYS, ChecklistKey, resolve};
+        match resolve(CHECKLIST_KEYS, event) {
+            Some(ChecklistKey::Abort | ChecklistKey::Cancel) => MultiSelectOutcome::Cancel,
+            Some(ChecklistKey::Confirm) => MultiSelectOutcome::Confirm(self.selected_indices()),
+            Some(ChecklistKey::Up) => {
                 self.step(-1);
                 MultiSelectOutcome::Continue
             }
-            Some(MultiSelectKey::Down) => {
+            Some(ChecklistKey::Down) => {
                 self.step(1);
                 MultiSelectOutcome::Continue
             }
-            Some(MultiSelectKey::Toggle) => {
+            Some(ChecklistKey::Toggle) => {
                 self.inner.toggle_current(None);
                 MultiSelectOutcome::Continue
             }

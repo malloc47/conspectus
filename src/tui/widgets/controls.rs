@@ -234,7 +234,8 @@ impl ControlsOverlayState {
     /// caller should apply (or [`ControlsOutcome::Continue`] for
     /// in-overlay navigation that didn't change anything).
     pub fn handle_key(&mut self, ctx: &ControlsContext<'_>, event: KeyEvent) -> ControlsOutcome {
-        use crate::tui::keybindings::overlay::{CONTROLS_KEYS, ControlsKey, resolve};
+        use crate::tui::keybindings::overlay::{CONTROLS_KEYS, ControlsKey};
+        use tuikit::keys::resolve;
         let action = resolve(CONTROLS_KEYS, event);
         if action == Some(ControlsKey::Abort) {
             return ControlsOutcome::Close;
@@ -785,10 +786,8 @@ impl Widget for ControlsOverlayWidget<'_> {
         // The footer wraps one column inside the modal's inner width, so
         // no hint touches the border.
         let footer_width = usize::from(frame.inner_width(area)).saturating_sub(1);
-        let footer = crate::tui::keybindings::overlay::footer(
-            crate::tui::keybindings::overlay::CONTROLS_KEYS,
-        );
-        let separator = crate::tui::keybindings::overlay::HINT_SEPARATOR;
+        let footer = tuikit::keys::footer(crate::tui::keybindings::overlay::CONTROLS_KEYS);
+        let separator = tuikit::keys::HINT_SEPARATOR;
         for chunk in tuikit::text::wrap_at(&footer, separator, footer_width) {
             lines.push(Line::from(span!(self.theme.muted; "{}", chunk.trim_end())));
         }

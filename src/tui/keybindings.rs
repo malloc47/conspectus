@@ -20,6 +20,8 @@ use ratatui::crossterm::event::{KeyCode, KeyModifiers};
 
 pub mod overlay;
 
+use tuikit::keys::KeyMatcher;
+
 use crate::tui::View;
 use crate::tui::keymap::Action;
 
@@ -55,52 +57,6 @@ pub enum KeyMode {
 
 /// The undo key. Toasts that offer an undo name it from here.
 pub const UNDO_KEY: char = 'u';
-
-/// Key-matching predicate. A tuple of `(modifiers, code)`
-/// with modifier flexibility because most single-char
-/// bindings accept both `SHIFT + <upper>` and plain
-/// `<upper>` (crossterm normalizes some terminals'
-/// shift-case reporting differently).
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum KeyMatcher {
-    /// Exact modifier + code match.
-    Exact {
-        modifiers: KeyModifiers,
-        code: KeyCode,
-    },
-    /// Char match ignoring SHIFT, for uppercase-letter actions
-    /// that accept both the shifted and the unshifted forms.
-    UpperChar(char),
-    /// Char match admitting any modifier except CONTROL, so `r`
-    /// fires but `Ctrl-R`, bound separately, doesn't.
-    AnyModExceptCtrl(char),
-    /// Non-char code match ignoring modifiers. Used for arrow
-    /// keys and nav keys, where any modifier is fine.
-    AnyMod(KeyCode),
-}
-
-impl KeyMatcher {
-    /// Test a crossterm key event against this matcher.
-    pub fn matches(&self, modifiers: KeyModifiers, code: KeyCode) -> bool {
-        match self {
-            KeyMatcher::Exact {
-                modifiers: m,
-                code: c,
-            } => *m == modifiers && *c == code,
-            KeyMatcher::UpperChar(ch) => match code {
-                KeyCode::Char(c) if c == *ch => {
-                    modifiers == KeyModifiers::NONE || modifiers == KeyModifiers::SHIFT
-                }
-                _ => false,
-            },
-            KeyMatcher::AnyModExceptCtrl(ch) => match code {
-                KeyCode::Char(c) if c == *ch => !modifiers.contains(KeyModifiers::CONTROL),
-                _ => false,
-            },
-            KeyMatcher::AnyMod(k) => code == *k,
-        }
-    }
-}
 
 /// Wave 1 pilot: view switching bindings. Each entry produces
 /// a parameterized `Action::SwitchView` or `Action::CycleView`.
@@ -202,13 +158,13 @@ pub const KEYBINDINGS: &[KeyBinding] = &[
     },
     KeyBinding {
         mode: KeyMode::Global,
-        key: KeyMatcher::UpperChar('S'),
+        key: KeyMatcher::Char('S'),
         action: || Action::Resume,
         help_text: "Resume the selected un-muxed agent session",
     },
     KeyBinding {
         mode: KeyMode::Global,
-        key: KeyMatcher::UpperChar('R'),
+        key: KeyMatcher::Char('R'),
         action: || Action::OpenRename,
         help_text: "Rename the selected agent session or mux",
     },
@@ -220,7 +176,7 @@ pub const KEYBINDINGS: &[KeyBinding] = &[
     },
     KeyBinding {
         mode: KeyMode::Global,
-        key: KeyMatcher::UpperChar('X'),
+        key: KeyMatcher::Char('X'),
         action: || Action::OpenWorktreeCloseDown,
         help_text: "Close down the selected stream (merge/discard + teardown)",
     },
@@ -232,7 +188,7 @@ pub const KEYBINDINGS: &[KeyBinding] = &[
     },
     KeyBinding {
         mode: KeyMode::Global,
-        key: KeyMatcher::UpperChar('N'),
+        key: KeyMatcher::Char('N'),
         action: || Action::Msg(Box::new(crate::tui::Msg::OpenMuxLaunchForm)),
         help_text: "Launch a harness in a new mux (the form can add a worktree)",
     },
@@ -265,13 +221,13 @@ pub const KEYBINDINGS: &[KeyBinding] = &[
     },
     KeyBinding {
         mode: KeyMode::Global,
-        key: KeyMatcher::UpperChar('F'),
+        key: KeyMatcher::Char('F'),
         action: || Action::ClearFilters,
         help_text: "Clear every active filter",
     },
     KeyBinding {
         mode: KeyMode::Global,
-        key: KeyMatcher::UpperChar('E'),
+        key: KeyMatcher::Char('E'),
         action: || Action::Msg(Box::new(crate::tui::Msg::ToggleEdgeMeta)),
         help_text: "Toggle explorer edge-meta visibility",
     },
@@ -482,7 +438,7 @@ pub const KEYBINDINGS: &[KeyBinding] = &[
     },
     KeyBinding {
         mode: KeyMode::Global,
-        key: KeyMatcher::UpperChar('O'),
+        key: KeyMatcher::Char('O'),
         action: || Action::Msg(Box::new(crate::tui::Msg::RevealSelected)),
         help_text: "Reveal the row's entity in its own view (Backspace returns)",
     },
@@ -551,53 +507,6 @@ pub fn translate_via_table(modifiers: KeyModifiers, code: KeyCode) -> Option<Act
         }
     }
     None
-}
-
-/// Render a KeyBinding's key as an operator-
-/// friendly label suitable for a help overlay row (e.g. `Ctrl-C`,
-/// `Enter`, `q`, `↓`). Used by the coherence drift test — every
-/// key label produced here must appear somewhere in
-/// `crate::tui::widgets::help::keymap_sections`'s output so
-/// the table and help stay in sync.
-pub fn key_label(key: &KeyMatcher) -> String {
-    match key {
-        KeyMatcher::Exact { modifiers, code } => {
-            let mut buf = String::new();
-            if modifiers.contains(KeyModifiers::CONTROL) {
-                buf.push_str("Ctrl-");
-            }
-            if modifiers.contains(KeyModifiers::SHIFT)
-                && !matches!(code, KeyCode::Char(c) if c.is_ascii_uppercase())
-            {
-                buf.push_str("Shift-");
-            }
-            buf.push_str(&code_label(*code));
-            buf
-        }
-        KeyMatcher::UpperChar(c) => c.to_string(),
-        KeyMatcher::AnyModExceptCtrl(c) => c.to_string(),
-        KeyMatcher::AnyMod(code) => code_label(*code),
-    }
-}
-
-fn code_label(code: KeyCode) -> String {
-    match code {
-        KeyCode::Char(c) => c.to_string(),
-        KeyCode::Enter => "Enter".to_string(),
-        KeyCode::Backspace => "Backspace".to_string(),
-        KeyCode::Delete => "Delete".to_string(),
-        KeyCode::Home => "Home".to_string(),
-        KeyCode::End => "End".to_string(),
-        KeyCode::PageUp => "PgUp".to_string(),
-        KeyCode::PageDown => "PgDn".to_string(),
-        KeyCode::Up => "Up".to_string(),
-        KeyCode::Down => "Down".to_string(),
-        KeyCode::Left => "Left".to_string(),
-        KeyCode::Right => "Right".to_string(),
-        KeyCode::Esc => "Esc".to_string(),
-        KeyCode::Tab => "Tab".to_string(),
-        other => format!("{other:?}"),
-    }
 }
 
 #[cfg(test)]

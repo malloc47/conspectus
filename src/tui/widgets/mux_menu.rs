@@ -80,7 +80,7 @@ impl Overlay for MuxMenuState {
     type Ctx<'a> = ();
 
     fn handle(&mut self, _ctx: (), key: KeyEvent) -> OverlayOutcome {
-        use crate::tui::keybindings::overlay::{MENU_KEYS, MenuKey, resolve};
+        use tuikit::keys::{MENU_KEYS, MenuKey, resolve};
         match resolve(MENU_KEYS, key) {
             Some(MenuKey::Abort | MenuKey::Close) => OverlayOutcome::Close,
             Some(MenuKey::Up) => {
@@ -129,9 +129,7 @@ impl Widget for MuxMenuWidget<'_> {
             lines.push(Line::from(format!("     {}", entry.subtitle())));
         }
         lines.push(Line::from(""));
-        lines.push(Line::from(crate::tui::keybindings::overlay::footer(
-            crate::tui::keybindings::overlay::MENU_KEYS,
-        )));
+        lines.push(Line::from(tuikit::keys::footer(tuikit::keys::MENU_KEYS)));
 
         ModalFrame::new(self.theme, ModalSize::MENU)
             .title("Mux")

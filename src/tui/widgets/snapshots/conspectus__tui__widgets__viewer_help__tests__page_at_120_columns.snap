@@ -29,5 +29,5 @@ expression: "render_text(120, 30, 0)"
           │  ?             Show or hide this help                                                           ║│
           │  Esc           Step back: close help, then the find, then the viewer                            ▼│
           │  q / Ctrl-C    Leave the viewer at once, even with a find active                                 │
-          │j/k/PgDn/PgUp to scroll · Esc/q/? to close                                                        │
+          │j/k/PgDn/PgUp scroll · Esc/q/? close                                                              │
           └──────────────────────────────────────────────────────────────────────────────────────────────────┘

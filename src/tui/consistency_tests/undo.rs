@@ -85,7 +85,7 @@ fn the_undo_key_is_bound_globally_to_undo() {
     let bound = KEYBINDINGS.iter().any(|binding| {
         matches!(
             binding.key,
-            crate::tui::keybindings::KeyMatcher::AnyModExceptCtrl(c) if c == UNDO_KEY
+            tuikit::keys::KeyMatcher::AnyModExceptCtrl(c) if c == UNDO_KEY
         ) && matches!((binding.action)(), Action::Msg(msg) if *msg == Msg::Undo)
     });
     assert!(bound, "`{UNDO_KEY}` is bound to Msg::Undo");
@@ -94,7 +94,7 @@ fn the_undo_key_is_bound_globally_to_undo() {
         .filter(|binding| {
             matches!(
                 binding.key,
-                crate::tui::keybindings::KeyMatcher::AnyModExceptCtrl(c) if c == UNDO_KEY
+                tuikit::keys::KeyMatcher::AnyModExceptCtrl(c) if c == UNDO_KEY
             )
         })
         .count();

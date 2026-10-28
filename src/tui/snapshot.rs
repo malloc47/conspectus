@@ -379,8 +379,9 @@ fn apply_action(
 /// reach outside the snapshot is skipped with a note: a pick runs a
 /// verb, and `y` would write the clipboard escape into the frame output.
 fn modal_key(app: &mut App, key: KeyEvent) {
-    use crate::tui::keybindings::overlay::{PagerKey, VALUE_MODAL_KEYS, resolve};
+    use crate::tui::keybindings::overlay::VALUE_MODAL_KEYS;
     use crate::tui::{Overlay, OverlayOutcome};
+    use tuikit::keys::{PagerKey, resolve};
     let (outcome, close): (OverlayOutcome, fn(&mut App)) =
         if let Some(state) = app.value_modal_mut() {
             if resolve(VALUE_MODAL_KEYS, key) == Some(PagerKey::Copy) {

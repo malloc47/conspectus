@@ -592,14 +592,10 @@ pub fn warning_row(label: &str, value: &str, cols: Cols, theme: &Theme) -> Line<
 /// between hints so a key stays beside its verb.
 pub fn footer_lines(footer: &str, width: usize, theme: &Theme) -> Vec<Line<'static>> {
     let dim = Style::default().add_modifier(theme.muted);
-    text::wrap_at(
-        footer,
-        crate::tui::keybindings::overlay::HINT_SEPARATOR,
-        width,
-    )
-    .into_iter()
-    .map(|row| Line::styled(row, dim))
-    .collect()
+    text::wrap_at(footer, tuikit::keys::HINT_SEPARATOR, width)
+        .into_iter()
+        .map(|row| Line::styled(row, dim))
+        .collect()
 }
 
 /// The argv an empty argv field means for `harness`: a launch profile or

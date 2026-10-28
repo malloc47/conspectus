@@ -125,7 +125,8 @@ impl Overlay for NewMuxFormState {
 
     fn handle(&mut self, _ctx: (), key: KeyEvent) -> OverlayOutcome {
         // Global chords first so the line editor can't steal them.
-        use crate::tui::keybindings::overlay::{FormKey, NEW_MUX_KEYS, resolve};
+        use crate::tui::keybindings::overlay::NEW_MUX_KEYS;
+        use tuikit::keys::{FormKey, resolve};
         match resolve(NEW_MUX_KEYS, key) {
             Some(FormKey::Abort | FormKey::Cancel) => return OverlayOutcome::Close,
             Some(FormKey::Up | FormKey::Down | FormKey::Back) => {
@@ -187,9 +188,7 @@ impl Widget for NewMuxFormWidget<'_> {
             line![""],
         ];
         lines.extend(footer_lines(
-            &crate::tui::keybindings::overlay::footer(
-                crate::tui::keybindings::overlay::NEW_MUX_KEYS,
-            ),
+            &tuikit::keys::footer(crate::tui::keybindings::overlay::NEW_MUX_KEYS),
             inner_width,
             self.theme,
         ));

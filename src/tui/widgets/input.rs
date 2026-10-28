@@ -70,7 +70,7 @@ impl TextInputState {
     /// locks the surrounding `Tab` focus cycle, so `Tab` is
     /// swallowed here (the line editor itself drops it too).
     pub fn handle_key(&mut self, event: KeyEvent) -> InputOutcome {
-        use crate::tui::keybindings::overlay::{TEXT_INPUT_KEYS, TextInputKey, resolve};
+        use tuikit::keys::{TEXT_INPUT_KEYS, TextInputKey, resolve};
         match resolve(TEXT_INPUT_KEYS, event) {
             Some(TextInputKey::Confirm) => InputOutcome::Confirm(self.input.value().to_string()),
             Some(TextInputKey::Abort | TextInputKey::Cancel) => InputOutcome::Cancel,

@@ -14,11 +14,11 @@ use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Paragraph, Widget};
 use tuikit::frame::{ModalBody, ModalFrame, ModalSize};
+use tuikit::keys::HINT_SEPARATOR;
 use tuikit::scroll::ScrollWindow;
 use tuikit::selection::{self, Cursor, Ends};
 
 use crate::tui::Msg;
-use crate::tui::keybindings::overlay::HINT_SEPARATOR;
 use crate::tui::modal::{Overlay, OverlayOutcome};
 use crate::tui::theme::Theme;
 
@@ -92,7 +92,7 @@ impl Overlay for RowMenuState {
     type Ctx<'a> = ();
 
     fn handle(&mut self, _ctx: (), key: KeyEvent) -> OverlayOutcome {
-        use crate::tui::keybindings::overlay::{MENU_KEYS, MenuKey, resolve};
+        use tuikit::keys::{MENU_KEYS, MenuKey, resolve};
         let last = self.entries.len().saturating_sub(1);
         match resolve(MENU_KEYS, key) {
             Some(MenuKey::Abort | MenuKey::Close) => OverlayOutcome::Close,
@@ -173,8 +173,7 @@ impl Widget for RowMenuWidget<'_> {
             }
         }
         let mut footer: Vec<Line> = vec![Line::from("")];
-        let hint =
-            crate::tui::keybindings::overlay::footer(crate::tui::keybindings::overlay::MENU_KEYS);
+        let hint = tuikit::keys::footer(tuikit::keys::MENU_KEYS);
         for chunk in tuikit::text::wrap_at(&hint, HINT_SEPARATOR, inner_width) {
             footer.push(Line::from(chunk.trim_end().to_string()));
         }

@@ -293,7 +293,8 @@ impl SearchOverlayState {
     /// Whether `event` is the key that widens a quick select that has not
     /// built its entity index yet, so the host can build it first.
     pub fn widens_with(&self, event: KeyEvent) -> bool {
-        use crate::tui::keybindings::overlay::{SEARCH_KEYS, SearchKey, resolve};
+        use crate::tui::keybindings::overlay::{SEARCH_KEYS, SearchKey};
+        use tuikit::keys::resolve;
         self.mode == SearchMode::Quick
             && self.reach == Reach::Current
             && self.entities.is_none()
@@ -454,9 +455,8 @@ impl SearchOverlayState {
     ///   query is the common case; result-list navigation uses
     ///   arrow keys + ctrl-N/P instead.
     pub fn handle_key(&mut self, event: KeyEvent) -> SearchOutcome {
-        use crate::tui::keybindings::overlay::{
-            SEARCH_CONTENT_KEYS, SEARCH_KEYS, SearchKey, resolve,
-        };
+        use crate::tui::keybindings::overlay::{SEARCH_CONTENT_KEYS, SEARCH_KEYS, SearchKey};
+        use tuikit::keys::resolve;
         let table = match self.mode {
             SearchMode::Quick => SEARCH_KEYS,
             SearchMode::Content => SEARCH_CONTENT_KEYS,
@@ -538,7 +538,8 @@ impl SearchOverlayState {
 
     /// A key while the options pane is open.
     fn handle_options_key(&mut self, event: KeyEvent) -> SearchOutcome {
-        use crate::tui::keybindings::overlay::{SEARCH_OPTION_KEYS, SearchOptionKey, resolve};
+        use crate::tui::keybindings::overlay::{SEARCH_OPTION_KEYS, SearchOptionKey};
+        use tuikit::keys::resolve;
         let at = self.options.unwrap_or(0);
         match resolve(SEARCH_OPTION_KEYS, event) {
             Some(SearchOptionKey::Abort) => return SearchOutcome::Cancel,
@@ -797,9 +798,7 @@ impl ModalBody for SearchBody<'_> {
         let hint_rows = self.render_footer(
             area,
             buf,
-            &crate::tui::keybindings::overlay::footer(
-                crate::tui::keybindings::overlay::SEARCH_KEYS,
-            ),
+            &tuikit::keys::footer(crate::tui::keybindings::overlay::SEARCH_KEYS),
         );
         let list_area = Rect {
             x: area.x,
@@ -909,7 +908,8 @@ impl SearchBody<'_> {
 impl SearchBody<'_> {
     /// The contents scope: scan status, results, and the key hints.
     fn render_contents(&self, area: Rect, buf: &mut Buffer) {
-        use crate::tui::keybindings::overlay::{SEARCH_CONTENT_KEYS, footer};
+        use crate::tui::keybindings::overlay::SEARCH_CONTENT_KEYS;
+        use tuikit::keys::footer;
         let width = area.width as usize;
         let empty = ContentView::default();
         let view = self.content.unwrap_or(&empty);
@@ -1004,7 +1004,7 @@ impl SearchBody<'_> {
     /// The key hints, wrapped to the modal and drawn on its last rows.
     /// Returns how many rows they took.
     fn render_footer(&self, area: Rect, buf: &mut Buffer, hints: &str) -> u16 {
-        let separator = crate::tui::keybindings::overlay::HINT_SEPARATOR;
+        let separator = tuikit::keys::HINT_SEPARATOR;
         let lines: Vec<String> = text::wrap_at(hints, separator, area.width as usize)
             .into_iter()
             .map(|row| row.trim_end().to_string())

@@ -232,7 +232,7 @@ fn the_search_overlay_searches_contents_and_promotes_the_query() {
     assert!(quick.contains("/ quick select"), "{quick}");
     assert!(quick.contains("[ Current ] All"), "{quick}");
     assert!(!quick.contains("/ search contents"), "{quick}");
-    assert!(quick.contains("Tab current/all"), "{quick}");
+    assert!(quick.contains("Tab search current/all"), "{quick}");
     let wide = frame(scratch.path(), "/<Tab>");
     assert!(wide.contains("Current [ All ]"), "{wide}");
 
@@ -243,7 +243,7 @@ fn the_search_overlay_searches_contents_and_promotes_the_query() {
     assert!(contents.contains("2 hits"), "{contents}");
     // The footer wraps, so look for the keys rather than whole phrases.
     assert!(contents.contains("Ctrl-F filter"), "{contents}");
-    assert!(contents.contains("Ctrl-S Search"), "{contents}");
+    assert!(contents.contains("Ctrl-S open Search"), "{contents}");
     assert!(
         contents.contains("sessions and panes searched"),
         "{contents}"

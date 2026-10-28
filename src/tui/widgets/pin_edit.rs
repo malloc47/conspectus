@@ -574,7 +574,8 @@ impl Overlay for PinEditFormState {
     type Ctx<'a> = ();
 
     fn handle(&mut self, _ctx: (), key: KeyEvent) -> OverlayOutcome {
-        use crate::tui::keybindings::overlay::{FormKey, PIN_EDIT_KEYS, resolve};
+        use crate::tui::keybindings::overlay::PIN_EDIT_KEYS;
+        use tuikit::keys::{FormKey, resolve};
         let stop = self
             .stops()
             .get(self.focus)
@@ -745,9 +746,7 @@ impl Widget for PinEditFormWidget<'_> {
         }
         bottom.push(line![""]);
         bottom.extend(footer_lines(
-            &crate::tui::keybindings::overlay::footer(
-                crate::tui::keybindings::overlay::PIN_EDIT_KEYS,
-            ),
+            &tuikit::keys::footer(crate::tui::keybindings::overlay::PIN_EDIT_KEYS),
             inner_width,
             self.theme,
         ));

@@ -1155,7 +1155,7 @@ fn the_search_options_pane_opens_and_goes_back() {
 
     world.keys(&["1", "s"]);
     wait_screen(&world, "the modal", |screen| {
-        screen.contains("/ search contents") && screen.contains("Ctrl-O options")
+        screen.contains("/ search contents") && screen.contains("Ctrl-O set options")
     });
     assert!(
         !world.screen().contains("Ctrl-T") && !world.screen().contains("Ctrl-Y"),

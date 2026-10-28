@@ -67,7 +67,7 @@ pub(in crate::tui) fn open_rename_overlay(app: &mut App) {
     app.set_rename_node(node);
     app.update(Msg::SetStatus(Some(format!(
         "rename: {}",
-        crate::tui::keybindings::overlay::footer(crate::tui::keybindings::overlay::TEXT_INPUT_KEYS)
+        tuikit::keys::footer(tuikit::keys::TEXT_INPUT_KEYS)
     ))));
 }
 
@@ -293,8 +293,9 @@ pub(in crate::tui) fn handle_mux_launch_form_key(
 /// [`crate::tui::Overlay`] contract (ADR 0085 contract 3). Close /
 /// Commit outcomes pop the stack; Consumed leaves the modal open.
 pub(super) fn handle_value_modal_key(app: &mut App, key: ratatui::crossterm::event::KeyEvent) {
-    use crate::tui::keybindings::overlay::{PagerKey, VALUE_MODAL_KEYS, resolve};
+    use crate::tui::keybindings::overlay::VALUE_MODAL_KEYS;
     use crate::tui::{Overlay, OverlayOutcome};
+    use tuikit::keys::{PagerKey, resolve};
     // `y` copies; the clipboard write is a side effect the widget
     // doesn't own.
     if resolve(VALUE_MODAL_KEYS, key) == Some(PagerKey::Copy) {
@@ -338,8 +339,9 @@ pub(in crate::tui) fn handle_messages_overlay_key(
     app: &mut App,
     key: ratatui::crossterm::event::KeyEvent,
 ) {
-    use crate::tui::keybindings::overlay::{MESSAGES_KEYS, MessagesKey, resolve};
+    use crate::tui::keybindings::overlay::{MESSAGES_KEYS, MessagesKey};
     use crate::tui::{Overlay, OverlayOutcome};
+    use tuikit::keys::resolve;
     if resolve(MESSAGES_KEYS, key) == Some(MessagesKey::Copy) {
         let text = app
             .messages_overlay()
@@ -573,7 +575,8 @@ pub(in crate::tui) fn handle_viewer_overlay_key(
         .viewer_modal()
         .is_some_and(|state| state.find.prompt.is_some())
     {
-        use crate::tui::keybindings::overlay::{VIEWER_FIND_KEYS, resolve, typed_char};
+        use crate::tui::keybindings::overlay::VIEWER_FIND_KEYS;
+        use tuikit::keys::{resolve, typed_char};
         let fmsg = resolve(VIEWER_FIND_KEYS, key)
             .or_else(|| typed_char(key).map(crate::viewer::find::ViewerFindMsg::Insert));
         if let Some(fmsg) = fmsg {
@@ -581,10 +584,7 @@ pub(in crate::tui) fn handle_viewer_overlay_key(
         }
         return;
     }
-    let vmsg = crate::tui::keybindings::overlay::resolve(
-        crate::tui::keybindings::overlay::VIEWER_KEYS,
-        key,
-    );
+    let vmsg = tuikit::keys::resolve(crate::tui::keybindings::overlay::VIEWER_KEYS, key);
     let Some(vmsg) = vmsg else {
         return;
     };

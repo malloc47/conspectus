@@ -130,8 +130,7 @@ fn both_helps_style_headings_keys_and_footer_alike() {
 #[test]
 fn both_helps_end_with_the_same_footer() {
     let theme = Theme::default();
-    let footer =
-        crate::tui::keybindings::overlay::footer(crate::tui::keybindings::overlay::HELP_KEYS);
+    let footer = tuikit::keys::footer(crate::tui::keybindings::overlay::HELP_KEYS);
     for lines in [
         crate::tui::widgets::help::footer_lines_for_test(&theme, 100),
         viewer_help::help_lines(&theme, Some(100))

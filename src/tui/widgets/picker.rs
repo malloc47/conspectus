@@ -140,7 +140,8 @@ impl Overlay for PickerState {
     type Ctx<'a> = ();
 
     fn handle(&mut self, _ctx: (), key: KeyEvent) -> OverlayOutcome {
-        use crate::tui::keybindings::overlay::{PICKER_KEYS, SearchKey, resolve};
+        use crate::tui::keybindings::overlay::{PICKER_KEYS, SearchKey};
+        use tuikit::keys::resolve;
         match resolve(PICKER_KEYS, key) {
             Some(SearchKey::Abort | SearchKey::Cancel) => OverlayOutcome::Close,
             Some(SearchKey::Pick) => match self.current() {

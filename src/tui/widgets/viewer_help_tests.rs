@@ -36,7 +36,7 @@ fn every_key_the_viewer_binds_is_listed_exactly_once() {
         let KeyRow::Bind { key, .. } = row else {
             continue;
         };
-        let label = key_notation(key);
+        let label = tuikit::keys::key_label(key);
         let count = listed.iter().filter(|k| **k == label).count();
         assert_eq!(count, 1, "`{label}` should be listed exactly once");
     }
@@ -60,12 +60,13 @@ fn every_message_with_a_key_has_a_row_and_a_description() {
 #[test]
 fn a_message_with_no_key_is_left_out() {
     let table = [KeyRow::Bind {
-        key: crate::tui::keybindings::KeyMatcher::Exact {
+        key: tuikit::keys::KeyMatcher::Exact {
             modifiers: ratatui::crossterm::event::KeyModifiers::NONE,
             code: ratatui::crossterm::event::KeyCode::Char('j'),
         },
         action: ViewerMsg::ScrollDown,
-        hint: crate::tui::keybindings::overlay::Hint::Alias,
+        hint: tuikit::keys::Hint::Alias,
+        available: true,
     }];
     let sections = sections_for(&table);
     assert_eq!(sections.len(), 1);
@@ -123,7 +124,7 @@ fn wrapping_keeps_every_word_of_every_description() {
 
 #[test]
 fn the_footer_comes_from_the_scroll_and_close_key_table() {
-    let footer = crate::tui::keybindings::overlay::footer(HELP_KEYS);
+    let footer = tuikit::keys::footer(HELP_KEYS);
     let page = help_lines(&Theme::default(), None)
         .iter()
         .map(text)
@@ -134,29 +135,16 @@ fn the_footer_comes_from_the_scroll_and_close_key_table() {
 
 #[test]
 fn the_keys_the_footer_names_do_what_it_says_in_the_viewer() {
-    use crate::tui::keybindings::overlay::{PagerKey, resolve};
+    use tuikit::keys::{PagerKey, resolve};
     let expect = |event: ratatui::crossterm::event::KeyEvent, viewer: ViewerMsg| {
         assert_eq!(resolve(VIEWER_KEYS, event), Some(viewer), "{event:?}");
     };
-    for row in HELP_KEYS {
+    for row in tuikit::keys::rows(HELP_KEYS) {
         let KeyRow::Bind { key, action, .. } = row else {
             continue;
         };
-        let (modifiers, code) = match key {
-            crate::tui::keybindings::KeyMatcher::Exact { modifiers, code } => (*modifiers, *code),
-            crate::tui::keybindings::KeyMatcher::UpperChar(c) => (
-                ratatui::crossterm::event::KeyModifiers::SHIFT,
-                ratatui::crossterm::event::KeyCode::Char(*c),
-            ),
-            crate::tui::keybindings::KeyMatcher::AnyModExceptCtrl(c) => (
-                ratatui::crossterm::event::KeyModifiers::NONE,
-                ratatui::crossterm::event::KeyCode::Char(*c),
-            ),
-            crate::tui::keybindings::KeyMatcher::AnyMod(code) => {
-                (ratatui::crossterm::event::KeyModifiers::NONE, *code)
-            }
-        };
-        let event = ratatui::crossterm::event::KeyEvent::new(code, modifiers);
+        let event = key.example();
+        let code = event.code;
         let viewer = match action {
             PagerKey::Down => ViewerMsg::ScrollDown,
             PagerKey::Up => ViewerMsg::ScrollUp,
@@ -200,7 +188,7 @@ fn a_short_terminal_scrolls_and_clamps() {
     assert_ne!(top, bottom);
     assert_eq!(render_text(60, 12, usize::MAX), bottom, "scroll is clamped");
     assert!(
-        bottom.contains("to close"),
+        bottom.contains("Esc/q/? close"),
         "the footer is reachable:\n{bottom}"
     );
 }

@@ -20,17 +20,15 @@ use ratatui::text::{Line, Span};
 use ratatui::widgets::Paragraph;
 use tuikit::chip::{PositionChip, StatusChip, Tone};
 use tuikit::glyphs::marks;
+use tuikit::keys::{KeyRow, key_label, resolve, rows, typed_char};
 use tuikit::scroll::ScrollWindow;
 
 use crate::content_search::PaneRef;
 use crate::tui::Theme;
-use crate::tui::keybindings::overlay::{
-    KeyRow, PANE_VIEWER_KEYS, VIEWER_FIND_KEYS, resolve, typed_char,
-};
+use crate::tui::keybindings::overlay::{PANE_VIEWER_KEYS, VIEWER_FIND_KEYS};
 use crate::viewer::find::{FindPrompt, ViewerFindMsg};
 
 use super::help::{binding_lines, blank, push_footer, render_help_page, section};
-use super::viewer_help::key_notation;
 
 /// Lines of context kept above a line the viewer jumps to.
 const CONTEXT_ABOVE: usize = 2;
@@ -180,7 +178,7 @@ impl PaneViewerState {
             help_scroll: 0,
             help_page: 0,
             note: None,
-            find_hint: crate::tui::keybindings::overlay::footer(VIEWER_FIND_KEYS),
+            find_hint: tuikit::keys::footer(VIEWER_FIND_KEYS),
         };
         let wanted = line
             .saturating_sub(1)
@@ -557,10 +555,9 @@ struct HelpRow {
 fn help_sections(table: &[KeyRow<PaneViewerMsg>]) -> Vec<(&'static str, Vec<HelpRow>)> {
     let mut sections: Vec<(&'static str, Vec<HelpRow>)> = Vec::new();
     for msg in PaneViewerMsg::ALL {
-        let mut keys: Vec<String> = table
-            .iter()
+        let mut keys: Vec<String> = rows(table)
             .filter_map(|row| match row {
-                KeyRow::Bind { key, action, .. } if *action == msg => Some(key_notation(key)),
+                KeyRow::Bind { key, action, .. } if *action == msg => Some(key_label(key)),
                 _ => None,
             })
             .collect();

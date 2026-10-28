@@ -56,7 +56,7 @@ pub fn build_viewer_state_at(
         .and_then(|parser| parser.read(&locator).ok())
         .unwrap_or_else(|| TranscriptDocument::unavailable(&locator));
     let mut state = ViewerState::new(document);
-    state.find_hint = crate::tui::keybindings::overlay::footer(VIEWER_FIND_KEYS);
+    state.find_hint = tuikit::keys::footer(VIEWER_FIND_KEYS);
     if let Some(open) = open {
         state.open_at(open);
     }

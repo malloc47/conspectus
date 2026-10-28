@@ -23,5 +23,5 @@ expression: "render_text(80, 24, 0)"
   │Finding                                                                  ║│
   │  /             Find in transcript; a match in hidden content turns that ▼│
   │                content on                                                │
-  │j/k/PgDn/PgUp to scroll · Esc/q/? to close                                │
+  │j/k/PgDn/PgUp scroll · Esc/q/? close                                      │
   └──────────────────────────────────────────────────────────────────────────┘

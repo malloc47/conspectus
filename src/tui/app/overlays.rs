@@ -666,7 +666,8 @@ impl App {
     /// What `/` opens: quick select, on the current view's rows. Returns
     /// the status hint to show.
     pub fn open_search_entry(&mut self) -> String {
-        use crate::tui::keybindings::overlay::{SEARCH_KEYS, footer};
+        use crate::tui::keybindings::overlay::SEARCH_KEYS;
+        use tuikit::keys::footer;
         self.open_search_overlay();
         format!("quick select: type to find · {}", footer(SEARCH_KEYS))
     }
@@ -674,7 +675,8 @@ impl App {
     /// What `s` opens: content search, with the query filled in when a
     /// search is active. Returns the status hint to show.
     pub fn open_content_search_entry(&mut self) -> String {
-        use crate::tui::keybindings::overlay::{SEARCH_CONTENT_KEYS, footer};
+        use crate::tui::keybindings::overlay::SEARCH_CONTENT_KEYS;
+        use tuikit::keys::footer;
         if !self.config.live_preview_enabled {
             return crate::tui::widgets::search::CONTENT_SEARCH_OFF.to_string();
         }

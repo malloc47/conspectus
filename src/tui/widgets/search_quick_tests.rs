@@ -403,7 +403,10 @@ fn the_wider_frame_shows_the_outcome_word_whole_at_every_size() {
             }
         }
         assert!(text.contains("Current [ All ]"), "{width}x{height}\n{text}");
-        assert!(text.contains("Tab current/all"), "{width}x{height}\n{text}");
+        assert!(
+            text.contains("Tab search current/all"),
+            "{width}x{height}\n{text}"
+        );
         let results = text.matches("via repo").count()
             + text.matches("3 hops").count()
             + text.matches("in PRs view").count()

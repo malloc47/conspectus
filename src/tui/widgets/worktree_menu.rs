@@ -383,7 +383,7 @@ impl WorktreeMenuState {
     }
 
     fn handle_list(&mut self, key: KeyEvent) -> OverlayOutcome {
-        use crate::tui::keybindings::overlay::{MENU_KEYS, MenuKey, resolve};
+        use tuikit::keys::{MENU_KEYS, MenuKey, resolve};
         match resolve(MENU_KEYS, key) {
             Some(MenuKey::Abort | MenuKey::Close) => OverlayOutcome::Close,
             Some(MenuKey::Up) => {
@@ -426,7 +426,7 @@ impl WorktreeMenuState {
     }
 
     fn handle_confirm_remove(&mut self, key: KeyEvent) -> OverlayOutcome {
-        use crate::tui::keybindings::overlay::{CONFIRM_KEYS, ConfirmKey, resolve};
+        use tuikit::keys::{CONFIRM_KEYS, ConfirmKey, resolve};
         match resolve(CONFIRM_KEYS, key) {
             Some(ConfirmKey::Yes) => {
                 let (Some(repo_root), Some(branch)) =
@@ -450,7 +450,7 @@ impl WorktreeMenuState {
     }
 
     fn handle_confirm_merge(&mut self, key: KeyEvent) -> OverlayOutcome {
-        use crate::tui::keybindings::overlay::{CONFIRM_KEYS, ConfirmKey, resolve};
+        use tuikit::keys::{CONFIRM_KEYS, ConfirmKey, resolve};
         match resolve(CONFIRM_KEYS, key) {
             Some(ConfirmKey::Yes) => {
                 let Some(worktree_root) = self.ctx.repo_root.clone() else {
@@ -472,7 +472,7 @@ impl WorktreeMenuState {
     }
 
     fn handle_confirm_prune(&mut self, key: KeyEvent) -> OverlayOutcome {
-        use crate::tui::keybindings::overlay::{CONFIRM_KEYS, ConfirmKey, resolve};
+        use tuikit::keys::{CONFIRM_KEYS, ConfirmKey, resolve};
         match resolve(CONFIRM_KEYS, key) {
             Some(ConfirmKey::Yes) => {
                 let Some(repo_root) = self.ctx.repo_root.clone() else {
@@ -491,11 +491,12 @@ impl WorktreeMenuState {
     fn handle_close_down(&mut self, key: KeyEvent) -> OverlayOutcome {
         // `m` lands the branch, `d` discards it; both then tear the
         // stream down (ADR 0093). Esc/q backs out.
-        use crate::tui::keybindings::overlay::{CLOSE_DOWN_KEYS, CloseDownKey, resolve};
+        use crate::tui::keybindings::overlay::{CLOSE_DOWN_KEYS, CloseDown};
+        use tuikit::keys::{ChoiceKey, resolve};
         let discard = match resolve(CLOSE_DOWN_KEYS, key) {
-            Some(CloseDownKey::Merge) => false,
-            Some(CloseDownKey::Discard) => true,
-            Some(CloseDownKey::Abort | CloseDownKey::Back) => {
+            Some(ChoiceKey::Choose(CloseDown::Merge)) => false,
+            Some(ChoiceKey::Choose(CloseDown::Discard)) => true,
+            Some(ChoiceKey::Abort | ChoiceKey::Back) => {
                 self.mode = Mode::List;
                 return OverlayOutcome::Consumed;
             }
@@ -586,9 +587,7 @@ impl Widget for WorktreeMenuWidget<'_> {
                     }
                     lines.push(Line::from(""));
                 }
-                footer = Some(crate::tui::keybindings::overlay::footer(
-                    crate::tui::keybindings::overlay::CONFIRM_KEYS,
-                ));
+                footer = Some(tuikit::keys::footer(tuikit::keys::CONFIRM_KEYS));
                 lines
             }
             Mode::ConfirmMerge => {
@@ -612,9 +611,7 @@ impl Widget for WorktreeMenuWidget<'_> {
                     }
                     lines.push(Line::from(""));
                 }
-                footer = Some(crate::tui::keybindings::overlay::footer(
-                    crate::tui::keybindings::overlay::CONFIRM_KEYS,
-                ));
+                footer = Some(tuikit::keys::footer(tuikit::keys::CONFIRM_KEYS));
                 lines
             }
             Mode::CloseDownChoice => {
@@ -643,15 +640,13 @@ impl Widget for WorktreeMenuWidget<'_> {
                     }
                     lines.push(Line::from(""));
                 }
-                footer = Some(crate::tui::keybindings::overlay::footer(
+                footer = Some(tuikit::keys::footer(
                     crate::tui::keybindings::overlay::CLOSE_DOWN_KEYS,
                 ));
                 lines
             }
             Mode::ConfirmPrune => {
-                footer = Some(crate::tui::keybindings::overlay::footer(
-                    crate::tui::keybindings::overlay::CONFIRM_KEYS,
-                ));
+                footer = Some(tuikit::keys::footer(tuikit::keys::CONFIRM_KEYS));
                 vec![
                     Line::styled(
                         "Prune merged worktrees?",
@@ -674,7 +669,7 @@ impl Widget for WorktreeMenuWidget<'_> {
             .flat_map(|line| tuikit::text::wrap_line(line, inner_width, 0))
             .collect();
         if let Some(footer) = footer {
-            let separator = crate::tui::keybindings::overlay::HINT_SEPARATOR;
+            let separator = tuikit::keys::HINT_SEPARATOR;
             rows.extend(
                 tuikit::text::wrap_at(&footer, separator, inner_width)
                     .into_iter()

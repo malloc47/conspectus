@@ -27,5 +27,5 @@ expression: "render_with(&wide_state(\"quokka\"), &[], 160, 30)"
             │                                                                                                                                      │
             │                                                                                                                                      │
             │                                                                                                                                      │
-            │↑/↓ move · Enter pick · Esc close · Tab current/all                                                                                   │
+            │↑/↓ move · Enter pick · Esc close · Tab search current/all                                                                            │
             └──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┘
