@@ -96,6 +96,7 @@ mod search_view;
 mod state;
 mod styling;
 mod text;
+mod text_entry;
 mod undo;
 
 use fixtures::*;
