@@ -15,7 +15,6 @@
 ///
 /// [`ModalStack::settle`]: super::ModalStack::settle
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-#[must_use]
 pub enum Outcome<M> {
     /// The overlay took the key and stays open; nothing else happens.
     Consumed,

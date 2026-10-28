@@ -9,7 +9,6 @@ use ratatui::widgets::Widget;
 
 use super::*;
 use crate::tui::Theme;
-use crate::tui::modal::Overlay;
 use crate::tui::widgets::mux_launch::{MuxLaunchField, MuxLaunchFormState, MuxLaunchFormWidget};
 use crate::tui::widgets::new_mux::{NewMuxField, NewMuxFormState};
 
@@ -38,19 +37,19 @@ fn rendered(form: &MuxLaunchFormState) -> String {
 fn arrow_keys_move_between_the_launch_forms_fields() {
     let mut form = launch_form("/tmp");
     assert_eq!(form.focus(), MuxLaunchField::MuxName, "the name is first");
-    form.handle((), press(KeyCode::Down));
+    form.handle_key(press(KeyCode::Down));
     assert_eq!(form.focus(), MuxLaunchField::Harness);
-    form.handle((), press(KeyCode::Down));
+    form.handle_key(press(KeyCode::Down));
     assert_eq!(
         form.focus(),
         MuxLaunchField::LaunchOptions,
         "Down moves to the next field: the harness's launch options"
     );
-    form.handle((), press(KeyCode::Down));
+    form.handle_key(press(KeyCode::Down));
     assert_eq!(form.focus(), MuxLaunchField::Cwd);
-    form.handle((), press(KeyCode::Up));
-    form.handle((), press(KeyCode::Up));
-    form.handle((), press(KeyCode::Up));
+    form.handle_key(press(KeyCode::Up));
+    form.handle_key(press(KeyCode::Up));
+    form.handle_key(press(KeyCode::Up));
     assert_eq!(form.focus(), MuxLaunchField::MuxName, "Up moves back");
 }
 
@@ -60,15 +59,15 @@ fn tab_completes_a_directory_in_the_launch_forms_cwd_field() {
     std::fs::create_dir(dir.path().join("alpha-dir")).expect("subdir");
     let typed = format!("{}/alp", dir.path().display());
     let mut form = launch_form(&typed);
-    form.handle((), press(KeyCode::Down));
-    form.handle((), press(KeyCode::Down));
-    form.handle((), press(KeyCode::Down));
+    form.handle_key(press(KeyCode::Down));
+    form.handle_key(press(KeyCode::Down));
+    form.handle_key(press(KeyCode::Down));
     assert_eq!(
         form.focus(),
         MuxLaunchField::Cwd,
         "reach the cwd field first"
     );
-    form.handle((), press(KeyCode::Tab));
+    form.handle_key(press(KeyCode::Tab));
     assert_eq!(
         form.spec().cwd().value(),
         format!("{}/alpha-dir", dir.path().display()),
@@ -83,13 +82,13 @@ fn the_new_mux_form_completes_paths_and_moves_with_arrows() {
     std::fs::create_dir(dir.path().join("alpha-dir")).expect("subdir");
     let typed = format!("{}/alp", dir.path().display());
     let mut form = NewMuxFormState::new("fresh", typed);
-    form.handle((), press(KeyCode::Down));
+    form.handle_key(press(KeyCode::Down));
     assert_eq!(
         form.focus(),
         NewMuxField::Cwd,
         "Down moves to the cwd field"
     );
-    form.handle((), press(KeyCode::Tab));
+    form.handle_key(press(KeyCode::Tab));
     assert_eq!(
         form.cwd_value(),
         format!("{}/alpha-dir", dir.path().display())
@@ -174,7 +173,7 @@ fn the_launch_forms_command_row_is_read_only_and_never_takes_focus() {
     // renders the command.
     for code in [KeyCode::Down, KeyCode::Tab, KeyCode::Up, KeyCode::BackTab] {
         for _ in 0..16 {
-            form.handle((), press(code));
+            form.handle_key(press(code));
             let cells = command_row_cells(&form);
             let marker: String = cells.iter().take(2).map(|(c, _)| *c).collect();
             assert!(

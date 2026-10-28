@@ -257,9 +257,9 @@ fn the_cursor_moves_among_the_wider_results() {
 
 #[test]
 fn the_overlay_commits_an_open_entity_message() {
-    use crate::tui::Overlay;
+    use tuikit::overlay::Outcome;
     let mut state = wide_state("quokka-dev");
-    let outcome = state.handle(
+    let outcome = state.handle_in(
         SearchContext {
             items: &[],
             content: &[],
@@ -267,10 +267,10 @@ fn the_overlay_commits_an_open_entity_message() {
         },
         plain(KeyCode::Enter),
     );
-    let crate::tui::OverlayOutcome::Commit(msg) = outcome else {
+    let Outcome::Commit(msg) = outcome else {
         panic!("expected a commit, got {outcome:?}");
     };
-    assert!(matches!(*msg, crate::tui::Msg::OpenEntity(_)), "{msg:?}");
+    assert!(matches!(msg, crate::tui::Msg::OpenEntity(_)), "{msg:?}");
 }
 
 #[test]

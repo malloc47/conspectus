@@ -11,13 +11,12 @@
 //! so it can scroll and find without touching tmux again. Opening it from
 //! a search result lands on the matching line with that text picked out.
 
-use ratatui::Frame;
 use ratatui::buffer::Buffer;
 use ratatui::crossterm::event::KeyEvent;
 use ratatui::layout::{Constraint, Layout, Rect};
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
-use ratatui::widgets::Paragraph;
+use ratatui::widgets::{Paragraph, Widget};
 use tuikit::chip::{PositionChip, StatusChip, Tone};
 use tuikit::glyphs::marks;
 use tuikit::keys::{KeyRow, key_label, resolve, rows, typed_char};
@@ -399,7 +398,7 @@ impl PaneViewerState {
 
 /// Draw the viewer onto `area`, and its help page over it when open.
 /// Records the body height for paging.
-pub fn draw(state: &mut PaneViewerState, theme: &Theme, frame: &mut Frame<'_>, area: Rect) {
+pub fn draw(state: &mut PaneViewerState, theme: &Theme, buf: &mut Buffer, area: Rect) {
     let chunks = Layout::vertical([
         Constraint::Length(1), // header
         Constraint::Length(1), // rule
@@ -408,13 +407,13 @@ pub fn draw(state: &mut PaneViewerState, theme: &Theme, frame: &mut Frame<'_>, a
         Constraint::Length(1), // footer
     ])
     .split(area);
-    draw_header(state, theme, frame, chunks[0]);
-    draw_rule(theme, frame, chunks[1]);
-    draw_body(state, theme, frame, chunks[2]);
-    draw_rule(theme, frame, chunks[3]);
-    draw_footer(state, theme, frame, chunks[4]);
+    draw_header(state, theme, buf, chunks[0]);
+    draw_rule(theme, buf, chunks[1]);
+    draw_body(state, theme, buf, chunks[2]);
+    draw_rule(theme, buf, chunks[3]);
+    draw_footer(state, theme, buf, chunks[4]);
     if state.show_help {
-        let window = render_help(area, frame.buffer_mut(), theme, state.help_scroll);
+        let window = render_help(area, buf, theme, state.help_scroll);
         state.help_scroll = window.offset();
         state.help_page = window.viewport();
     }
@@ -424,7 +423,7 @@ fn dim(theme: &Theme) -> Style {
     Style::new().fg(theme.inert).add_modifier(theme.muted)
 }
 
-fn draw_header(state: &PaneViewerState, theme: &Theme, frame: &mut Frame<'_>, area: Rect) {
+fn draw_header(state: &PaneViewerState, theme: &Theme, buf: &mut Buffer, area: Rect) {
     let count = state.lines.len();
     let command = state.pane.command.as_deref().unwrap_or("(unknown command)");
     let line = Line::from(vec![
@@ -441,29 +440,31 @@ fn draw_header(state: &PaneViewerState, theme: &Theme, frame: &mut Frame<'_>, ar
             dim(theme),
         ),
     ]);
-    frame.render_widget(Paragraph::new(line), area);
+    Widget::render(Paragraph::new(line), area, buf);
 }
 
-fn draw_rule(theme: &Theme, frame: &mut Frame<'_>, area: Rect) {
-    frame.render_widget(
+fn draw_rule(theme: &Theme, buf: &mut Buffer, area: Rect) {
+    Widget::render(
         Paragraph::new(Line::from(Span::styled(
             marks::RULE.repeat(area.width as usize),
             dim(theme),
         ))),
         area,
+        buf,
     );
 }
 
-fn draw_body(state: &mut PaneViewerState, theme: &Theme, frame: &mut Frame<'_>, area: Rect) {
+fn draw_body(state: &mut PaneViewerState, theme: &Theme, buf: &mut Buffer, area: Rect) {
     state.viewport = area.height;
     state.scroll = state.scroll.min(state.max_scroll());
     if state.lines.is_empty() {
-        frame.render_widget(
+        Widget::render(
             Paragraph::new(Line::from(Span::styled(
                 "the pane has no scrollback",
                 Style::new().add_modifier(theme.muted),
             ))),
             area,
+            buf,
         );
         return;
     }
@@ -483,7 +484,7 @@ fn draw_body(state: &mut PaneViewerState, theme: &Theme, frame: &mut Frame<'_>, 
             Line::from(spans)
         })
         .collect();
-    frame.render_widget(Paragraph::new(visible), area);
+    Widget::render(Paragraph::new(visible), area, buf);
 }
 
 /// `text` with each occurrence of `find` in the theme's match style.
@@ -495,9 +496,9 @@ fn highlighted(text: &str, find: &str, theme: &Theme) -> Vec<Span<'static>> {
     )
 }
 
-fn draw_footer(state: &PaneViewerState, theme: &Theme, frame: &mut Frame<'_>, area: Rect) {
+fn draw_footer(state: &PaneViewerState, theme: &Theme, buf: &mut Buffer, area: Rect) {
     if let Some(prompt) = &state.prompt {
-        crate::viewer::widget::draw_find_prompt(prompt, &state.find_hint, theme, frame, area);
+        crate::viewer::widget::draw_find_prompt(prompt, &state.find_hint, theme, buf, area);
         return;
     }
     let pipe = Span::styled(" · ", dim(theme));
@@ -537,7 +538,7 @@ fn draw_footer(state: &PaneViewerState, theme: &Theme, frame: &mut Frame<'_>, ar
         chips.to_string()
     };
     spans.push(Span::styled(hint, dim(theme)));
-    frame.render_widget(Paragraph::new(Line::from(spans)), area);
+    Widget::render(Paragraph::new(Line::from(spans)), area, buf);
 }
 
 /// One help row: the keys bound to a message, what it does, and whether

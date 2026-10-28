@@ -25,6 +25,9 @@ pub enum Effect {
     /// Post a transient status-bar toast. Non-blocking; input
     /// continues to flow to the underlying view.
     Toast(String),
+    /// Copy `text` to the terminal's clipboard (OSC 52, ADR 0056) and post
+    /// `done` as a toast, or say why the copy failed.
+    Copy { text: String, done: String },
     /// Persist the current TUI state to disk. Best-effort;
     /// failures are silently swallowed by the executor.
     Persist,
@@ -294,6 +297,7 @@ pub fn lifecycle(effect: &Effect) -> Lifecycle {
     match effect {
         Effect::SpawnRefresh { .. }
         | Effect::Toast(_)
+        | Effect::Copy { .. }
         | Effect::Persist
         | Effect::Quit
         | Effect::RunMux(_) => Lifecycle::NONE,

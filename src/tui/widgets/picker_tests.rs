@@ -25,8 +25,8 @@ fn state() -> PickerState {
     )
 }
 
-fn press(state: &mut PickerState, code: KeyCode) -> OverlayOutcome {
-    state.handle((), KeyEvent::new(code, KeyModifiers::NONE))
+fn press(state: &mut PickerState, code: KeyCode) -> Outcome<Msg> {
+    state.handle_key(KeyEvent::new(code, KeyModifiers::NONE))
 }
 
 fn type_text(state: &mut PickerState, text: &str) {
@@ -76,10 +76,10 @@ fn enter_commits_the_item_under_the_cursor() {
     press(&mut state, KeyCode::Down);
     assert_eq!(
         press(&mut state, KeyCode::Enter),
-        OverlayOutcome::Commit(Box::new(Msg::CommitRetarget {
+        Outcome::Commit(Msg::CommitRetarget {
             pin: "demo".into(),
             target: "h_beta".into(),
-        }))
+        })
     );
 }
 
@@ -88,13 +88,13 @@ fn enter_on_an_empty_filter_just_closes() {
     let mut state = state();
     type_text(&mut state, "zzz");
     assert!(labels(&state).is_empty());
-    assert_eq!(press(&mut state, KeyCode::Enter), OverlayOutcome::Close);
+    assert_eq!(press(&mut state, KeyCode::Enter), Outcome::Close);
 }
 
 #[test]
 fn escape_closes_without_committing() {
     let mut state = state();
-    assert_eq!(press(&mut state, KeyCode::Esc), OverlayOutcome::Close);
+    assert_eq!(press(&mut state, KeyCode::Esc), Outcome::Close);
 }
 
 #[test]

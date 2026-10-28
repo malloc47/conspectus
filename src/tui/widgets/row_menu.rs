@@ -19,8 +19,8 @@ use tuikit::scroll::ScrollWindow;
 use tuikit::selection::{self, Cursor, Ends};
 
 use crate::tui::Msg;
-use crate::tui::modal::{Overlay, OverlayOutcome};
 use crate::tui::theme::Theme;
+use tuikit::overlay::Outcome;
 
 /// One verb in the menu.
 #[derive(Debug, Clone, PartialEq)]
@@ -88,33 +88,32 @@ impl RowMenuState {
     }
 }
 
-impl Overlay for RowMenuState {
-    type Ctx<'a> = ();
-
-    fn handle(&mut self, _ctx: (), key: KeyEvent) -> OverlayOutcome {
+impl RowMenuState {
+    /// One key: move, arm a confirming entry, pick, or close.
+    pub fn handle_key(&mut self, key: KeyEvent) -> Outcome<Msg> {
         use tuikit::keys::{MENU_KEYS, MenuKey, resolve};
         let last = self.entries.len().saturating_sub(1);
         match resolve(MENU_KEYS, key) {
-            Some(MenuKey::Abort | MenuKey::Close) => OverlayOutcome::Close,
+            Some(MenuKey::Abort | MenuKey::Close) => Outcome::Close,
             Some(MenuKey::Up) => {
                 self.cursor = Ends::Wrap.step(self.cursor, self.entries.len(), -1);
                 self.armed = None;
-                OverlayOutcome::Consumed
+                Outcome::Consumed
             }
             Some(MenuKey::Down) => {
                 self.cursor = Ends::Wrap.step(self.cursor, self.entries.len(), 1);
                 self.armed = None;
-                OverlayOutcome::Consumed
+                Outcome::Consumed
             }
             Some(MenuKey::Pick) => {
                 let entry = &self.entries[self.cursor.min(last)];
                 if entry.confirm && self.armed != Some(self.cursor) {
                     self.armed = Some(self.cursor);
-                    return OverlayOutcome::Consumed;
+                    return Outcome::Consumed;
                 }
-                OverlayOutcome::Commit(Box::new(entry.msg.clone()))
+                Outcome::Commit(entry.msg.clone())
             }
-            None => OverlayOutcome::Consumed,
+            None => Outcome::Consumed,
         }
     }
 }

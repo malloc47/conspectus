@@ -896,11 +896,9 @@ mod mux_effect_executor {
     }
 }
 
-/// `overlay_key_from_event` centralizes the
-/// modal-stack-aware routing both event loops used to duplicate.
-/// These tests pin the routing: each open modal takes ownership
-/// of the next key press, and the fallback returns None when no
-/// modal is on top.
+/// `overlay_key_from_event` is the one place a key press reaches the
+/// modal stack: an open modal takes every key press, whatever its kind,
+/// and the fallback returns None when no modal is open.
 mod overlay_routing {
     use super::*;
     use ratatui::crossterm::event::KeyEvent;
@@ -924,7 +922,7 @@ mod overlay_routing {
         let mut app = App::new(RunConfig::defaults());
         app.open_help_overlay();
         let action = overlay_key_from_event(&app, &press(KeyCode::Char('j'), KeyModifiers::NONE));
-        assert!(matches!(action, Some(Action::HelpOverlayKey(_))));
+        assert!(matches!(action, Some(Action::ModalKey(_))));
     }
 
     #[test]
@@ -932,7 +930,7 @@ mod overlay_routing {
         let mut app = App::new(RunConfig::defaults());
         app.open_controls_overlay();
         let action = overlay_key_from_event(&app, &press(KeyCode::Enter, KeyModifiers::NONE));
-        assert!(matches!(action, Some(Action::ControlsOverlayKey(_))));
+        assert!(matches!(action, Some(Action::ModalKey(_))));
     }
 
     #[test]
@@ -943,7 +941,7 @@ mod overlay_routing {
         app.open_controls_overlay();
         app.open_help_overlay();
         let action = overlay_key_from_event(&app, &press(KeyCode::Char('j'), KeyModifiers::NONE));
-        assert!(matches!(action, Some(Action::HelpOverlayKey(_))));
+        assert!(matches!(action, Some(Action::ModalKey(_))));
     }
 
     #[test]
@@ -1840,14 +1838,14 @@ mod viewer_find_prompt {
 
     fn type_text(app: &mut App, text: &str) {
         for c in text.chars() {
-            handle_viewer_overlay_key(app, key(KeyCode::Char(c), KeyModifiers::NONE));
+            modal_key_pure(app, key(KeyCode::Char(c), KeyModifiers::NONE));
         }
     }
 
     #[test]
     fn slash_opens_the_prompt_and_every_key_types_into_it() {
         let mut app = app_with_viewer();
-        handle_viewer_overlay_key(&mut app, key(KeyCode::Char('/'), KeyModifiers::NONE));
+        modal_key_pure(&mut app, key(KeyCode::Char('/'), KeyModifiers::NONE));
         // `n`, `q`, and Space are viewer keys, but the prompt owns them now.
         type_text(&mut app, "n q");
         let prompt = app.viewer_modal().and_then(|s| s.find.prompt.as_ref());
@@ -1858,34 +1856,34 @@ mod viewer_find_prompt {
     #[test]
     fn enter_runs_the_find_and_n_steps_afterwards() {
         let mut app = app_with_viewer();
-        handle_viewer_overlay_key(&mut app, key(KeyCode::Char('/'), KeyModifiers::NONE));
+        modal_key_pure(&mut app, key(KeyCode::Char('/'), KeyModifiers::NONE));
         type_text(&mut app, "a");
-        handle_viewer_overlay_key(&mut app, key(KeyCode::Enter, KeyModifiers::NONE));
+        modal_key_pure(&mut app, key(KeyCode::Enter, KeyModifiers::NONE));
         let state = app.viewer_modal().expect("viewer");
         assert_eq!(state.find.matches, [0, 1, 2]);
         assert!(state.find.prompt.is_none());
-        handle_viewer_overlay_key(&mut app, key(KeyCode::Char('n'), KeyModifiers::NONE));
+        modal_key_pure(&mut app, key(KeyCode::Char('n'), KeyModifiers::NONE));
         assert_eq!(app.viewer_modal().and_then(|s| s.find.current), Some(1));
-        handle_viewer_overlay_key(&mut app, key(KeyCode::Char('N'), KeyModifiers::SHIFT));
+        modal_key_pure(&mut app, key(KeyCode::Char('N'), KeyModifiers::SHIFT));
         assert_eq!(app.viewer_modal().and_then(|s| s.find.current), Some(0));
     }
 
     #[test]
     fn escape_leaves_the_prompt_without_closing_the_viewer() {
         let mut app = app_with_viewer();
-        handle_viewer_overlay_key(&mut app, key(KeyCode::Char('/'), KeyModifiers::NONE));
+        modal_key_pure(&mut app, key(KeyCode::Char('/'), KeyModifiers::NONE));
         type_text(&mut app, "x");
-        handle_viewer_overlay_key(&mut app, key(KeyCode::Esc, KeyModifiers::NONE));
+        modal_key_pure(&mut app, key(KeyCode::Esc, KeyModifiers::NONE));
         assert!(app.viewer_modal().is_some_and(|s| s.find.prompt.is_none()));
-        handle_viewer_overlay_key(&mut app, key(KeyCode::Esc, KeyModifiers::NONE));
+        modal_key_pure(&mut app, key(KeyCode::Esc, KeyModifiers::NONE));
         assert!(app.viewer_modal().is_none(), "a second Esc closes it");
     }
 
     #[test]
     fn control_chords_do_not_type() {
         let mut app = app_with_viewer();
-        handle_viewer_overlay_key(&mut app, key(KeyCode::Char('/'), KeyModifiers::NONE));
-        handle_viewer_overlay_key(&mut app, key(KeyCode::Char('a'), KeyModifiers::CONTROL));
+        modal_key_pure(&mut app, key(KeyCode::Char('/'), KeyModifiers::NONE));
+        modal_key_pure(&mut app, key(KeyCode::Char('a'), KeyModifiers::CONTROL));
         let prompt = app.viewer_modal().and_then(|s| s.find.prompt.as_ref());
         assert_eq!(prompt.map(|p| p.text.as_str()), Some(""));
     }

@@ -39,53 +39,44 @@ fn every_candidate_starts_selected_with_its_age() {
 fn confirming_reaps_exactly_the_selected_records() {
     let mut state = state();
     // Deselect the middle one.
-    state.handle((), key(KeyCode::Down));
-    state.handle((), key(KeyCode::Char(' ')));
+    state.handle_key(key(KeyCode::Down));
+    state.handle_key(key(KeyCode::Char(' ')));
     assert_eq!(state.selected(), [0, 2]);
-    let outcome = state.handle((), key(KeyCode::Enter));
+    let outcome = state.handle_key(key(KeyCode::Enter));
     assert_eq!(
         outcome,
-        OverlayOutcome::Commit(Box::new(Msg::ReapRecords(vec!["h_a".into(), "h_c".into()])))
+        Outcome::Commit(Msg::ReapRecords(vec!["h_a".into(), "h_c".into()]))
     );
 }
 
 #[test]
 fn deselecting_everything_closes_without_reaping() {
     let mut state = CleanUpState::new(vec![candidate("h_a", "alpha")], 100);
-    state.handle((), key(KeyCode::Char(' ')));
+    state.handle_key(key(KeyCode::Char(' ')));
     assert!(state.selected().is_empty());
-    assert_eq!(state.handle((), key(KeyCode::Enter)), OverlayOutcome::Close);
+    assert_eq!(state.handle_key(key(KeyCode::Enter)), Outcome::Close);
 }
 
 #[test]
 fn escape_cancels() {
     let mut state = state();
-    assert_eq!(state.handle((), key(KeyCode::Esc)), OverlayOutcome::Close);
+    assert_eq!(state.handle_key(key(KeyCode::Esc)), Outcome::Close);
 }
 
 #[test]
 fn q_dismisses_the_checklist_and_its_empty_notice() {
     let mut state = state();
-    assert_eq!(
-        state.handle((), key(KeyCode::Char('q'))),
-        OverlayOutcome::Close
-    );
+    assert_eq!(state.handle_key(key(KeyCode::Char('q'))), Outcome::Close);
     let mut state = CleanUpState::new(Vec::new(), 100);
-    assert_eq!(
-        state.handle((), key(KeyCode::Char('q'))),
-        OverlayOutcome::Close
-    );
+    assert_eq!(state.handle_key(key(KeyCode::Char('q'))), Outcome::Close);
 }
 
 #[test]
 fn with_no_candidates_enter_and_escape_dismiss_the_notice() {
     let mut state = CleanUpState::new(Vec::new(), 100);
     assert!(state.is_empty());
-    assert_eq!(state.handle((), key(KeyCode::Enter)), OverlayOutcome::Close);
+    assert_eq!(state.handle_key(key(KeyCode::Enter)), Outcome::Close);
     let mut state = CleanUpState::new(Vec::new(), 100);
-    assert_eq!(state.handle((), key(KeyCode::Esc)), OverlayOutcome::Close);
-    assert_eq!(
-        state.handle((), key(KeyCode::Char('x'))),
-        OverlayOutcome::Consumed
-    );
+    assert_eq!(state.handle_key(key(KeyCode::Esc)), Outcome::Close);
+    assert_eq!(state.handle_key(key(KeyCode::Char('x'))), Outcome::Consumed);
 }

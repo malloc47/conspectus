@@ -121,6 +121,13 @@ pub enum Msg {
     /// and stays open sends this to say why: the toast draws over every
     /// overlay, where the status line can be covered.
     Toast(String),
+    /// Copy `text` to the clipboard and, when it worked, say `done` in a
+    /// toast. Overlays that copy (the value modal, Messages) send this:
+    /// the clipboard write is the executor's.
+    Copy {
+        text: String,
+        done: String,
+    },
     /// Log an operation outcome (ADR 0105) and show its summary as
     /// the status message, with a pointer to the Messages overlay
     /// for warnings and errors.

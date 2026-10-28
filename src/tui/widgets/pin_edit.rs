@@ -26,7 +26,6 @@ use crate::discovery::harness::{
 };
 use crate::model::{FieldSource, FieldValue, PinKind, RecipeField, SlotFields};
 use crate::tui::Msg;
-use crate::tui::modal::{Overlay, OverlayOutcome};
 use crate::tui::theme::Theme;
 use crate::tui::widgets::form::{
     self, Cols, SplitBody, display_argv, footer_lines, note_row, options_row,
@@ -34,6 +33,7 @@ use crate::tui::widgets::form::{
 use crate::tui::widgets::input::{InputOutcome, TextInputState};
 use crate::tui::widgets::launch_spec_form::parse_launch_argv;
 use crate::tui::widgets::path_omnibox::{PathCandidate, PathOmniboxOutcome, PathOmniboxState};
+use tuikit::overlay::Outcome;
 
 /// What the form saves: a rename, overrides to set, overrides to drop.
 #[derive(Debug, Clone, PartialEq)]
@@ -534,22 +534,22 @@ impl PinEditFormState {
         })
     }
 
-    fn try_commit(&mut self) -> OverlayOutcome {
+    fn try_commit(&mut self) -> Outcome<Msg> {
         match self.request() {
             Ok(request) => {
                 if request.rename.is_none() && request.set.is_empty() && request.unset.is_empty() {
-                    return OverlayOutcome::Close;
+                    return Outcome::Close;
                 }
-                OverlayOutcome::Commit(Box::new(Msg::CommitPinEdit(request)))
+                Outcome::Commit(Msg::CommitPinEdit(request))
             }
             Err(message) => {
                 self.error = Some(message);
-                OverlayOutcome::Consumed
+                Outcome::Consumed
             }
         }
     }
 
-    fn typed(&mut self, idx: usize, key: KeyEvent) -> OverlayOutcome {
+    fn typed(&mut self, idx: usize, key: KeyEvent) -> Outcome<Msg> {
         let before = self.rows[idx].control.value().to_string();
         let outcome = match &mut self.rows[idx].control {
             Control::Text(input) | Control::Harness(input) => input.handle_key(key),
@@ -563,17 +563,16 @@ impl PinEditFormState {
             self.error = None;
         }
         match outcome {
-            InputOutcome::Continue => OverlayOutcome::Consumed,
-            InputOutcome::Cancel | InputOutcome::Abort => OverlayOutcome::Close,
+            InputOutcome::Continue => Outcome::Consumed,
+            InputOutcome::Cancel | InputOutcome::Abort => Outcome::Close,
             InputOutcome::Confirm(_) => self.try_commit(),
         }
     }
 }
 
-impl Overlay for PinEditFormState {
-    type Ctx<'a> = ();
-
-    fn handle(&mut self, _ctx: (), key: KeyEvent) -> OverlayOutcome {
+impl PinEditFormState {
+    /// One key: edit, move between the rows, change an option, save, or close.
+    pub fn handle_key(&mut self, key: KeyEvent) -> Outcome<Msg> {
         use crate::tui::keybindings::overlay::PIN_EDIT_KEYS;
         use tuikit::keys::{FormKey, resolve};
         let stop = self
@@ -582,14 +581,14 @@ impl Overlay for PinEditFormState {
             .copied()
             .unwrap_or(Stop::Row(0));
         let option_delta = match resolve(PIN_EDIT_KEYS, key) {
-            Some(FormKey::Abort | FormKey::Cancel) => return OverlayOutcome::Close,
+            Some(FormKey::Abort | FormKey::Cancel) => return Outcome::Close,
             Some(FormKey::Up | FormKey::Back) => {
                 self.move_focus(-1);
-                return OverlayOutcome::Consumed;
+                return Outcome::Consumed;
             }
             Some(FormKey::Down) => {
                 self.move_focus(1);
-                return OverlayOutcome::Consumed;
+                return Outcome::Consumed;
             }
             Some(FormKey::Tab) => {
                 if let Stop::Row(idx) = stop
@@ -600,14 +599,14 @@ impl Overlay for PinEditFormState {
                     )
                 {
                     self.rows[idx].cleared = false;
-                    return OverlayOutcome::Consumed;
+                    return Outcome::Consumed;
                 }
                 self.move_focus(1);
-                return OverlayOutcome::Consumed;
+                return Outcome::Consumed;
             }
             Some(FormKey::Inherit) => {
                 self.inherit();
-                return OverlayOutcome::Consumed;
+                return Outcome::Consumed;
             }
             Some(FormKey::Submit) => return self.try_commit(),
             Some(FormKey::OptionPrev) => Some(-1),
@@ -619,13 +618,13 @@ impl Overlay for PinEditFormState {
                 if let Some(delta) = option_delta {
                     self.toggle_option(delta);
                 }
-                OverlayOutcome::Consumed
+                Outcome::Consumed
             }
             Stop::Row(idx) => {
                 if let (Control::Harness(_), Some(delta)) = (&self.rows[idx].control, option_delta)
                 {
                     self.cycle_harness(delta);
-                    return OverlayOutcome::Consumed;
+                    return Outcome::Consumed;
                 }
                 self.typed(idx, key)
             }

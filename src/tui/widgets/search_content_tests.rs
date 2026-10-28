@@ -1,7 +1,9 @@
 use super::*;
 use crate::model::AgentSessionId;
+use crate::tui::Msg;
 use ratatui::crossterm::event::{KeyCode, KeyEventKind, KeyEventState, KeyModifiers};
 use std::time::Duration;
+use tuikit::overlay::Outcome;
 
 fn press(code: KeyCode, modifiers: KeyModifiers) -> KeyEvent {
     KeyEvent {
@@ -86,13 +88,8 @@ fn ctx<'a>(content: &'a [ContentRow]) -> SearchContext<'a> {
     }
 }
 
-fn handle(
-    state: &mut SearchOverlayState,
-    content: &[ContentRow],
-    key: KeyEvent,
-) -> crate::tui::OverlayOutcome {
-    use crate::tui::Overlay;
-    state.handle(ctx(content), key)
+fn handle(state: &mut SearchOverlayState, content: &[ContentRow], key: KeyEvent) -> Outcome<Msg> {
+    state.handle_in(ctx(content), key)
 }
 
 #[test]
@@ -279,19 +276,18 @@ fn the_retired_result_and_kind_keys_edit_the_query_like_any_other() {
 
 #[test]
 fn enter_opens_the_result_under_the_cursor_at_its_turn() {
-    use crate::tui::{Msg, OverlayOutcome};
     let mut state = contents_overlay("quokka");
     let rows = [row("a", 3), row("b", 9)];
     handle(&mut state, &rows, plain(KeyCode::Down));
     let outcome = handle(&mut state, &rows, plain(KeyCode::Enter));
-    let OverlayOutcome::Commit(msg) = outcome else {
+    let Outcome::Commit(msg) = outcome else {
         panic!("{outcome:?}");
     };
     let Msg::OpenContentHit {
         session,
         text,
         turn_index,
-    } = *msg
+    } = msg
     else {
         panic!("not an open");
     };
@@ -305,7 +301,7 @@ fn enter_with_no_results_closes() {
     let mut state = contents_overlay("quokka");
     assert!(matches!(
         handle(&mut state, &[], plain(KeyCode::Enter)),
-        crate::tui::OverlayOutcome::Close
+        Outcome::Close
     ));
 }
 
@@ -321,9 +317,8 @@ fn the_cursor_wraps_over_the_contents_results() {
 
 #[test]
 fn ctrl_f_keeps_the_query_as_the_filter_and_ctrl_s_keeps_it_in_the_search_view() {
-    use crate::tui::{Msg, OverlayOutcome};
     let mut state = contents_overlay("quokka");
-    let OverlayOutcome::Commit(msg) = handle(&mut state, &[], ctrl('f')) else {
+    let Outcome::Commit(msg) = handle(&mut state, &[], ctrl('f')) else {
         panic!("Ctrl-F does not commit");
     };
     let Msg::ApplyContentSearch {
@@ -331,7 +326,7 @@ fn ctrl_f_keeps_the_query_as_the_filter_and_ctrl_s_keeps_it_in_the_search_view()
         show_results,
         reach,
         ..
-    } = *msg
+    } = msg
     else {
         panic!("not an apply");
     };
@@ -341,10 +336,10 @@ fn ctrl_f_keeps_the_query_as_the_filter_and_ctrl_s_keeps_it_in_the_search_view()
     );
 
     let mut state = contents_overlay("quokka").with_reach(Reach::All);
-    let OverlayOutcome::Commit(msg) = handle(&mut state, &[], ctrl('s')) else {
+    let Outcome::Commit(msg) = handle(&mut state, &[], ctrl('s')) else {
         panic!("Ctrl-S does not commit");
     };
-    let Msg::KeepContentSearch { text, reach, .. } = *msg else {
+    let Msg::KeepContentSearch { text, reach, .. } = msg else {
         panic!("not a keep");
     };
     assert_eq!((text.as_str(), reach), ("quokka", Reach::All));
@@ -355,17 +350,16 @@ fn ctrl_o_no_longer_opens_the_search_view() {
     let mut state = contents_overlay("quokka");
     assert!(matches!(
         handle(&mut state, &[], ctrl('o')),
-        crate::tui::OverlayOutcome::Consumed
+        Outcome::Consumed
     ));
 }
 
 #[test]
 fn enter_on_a_pane_row_opens_its_scrollback_after_revealing_the_mux() {
-    use crate::tui::{Msg, OverlayOutcome};
     let mut state = contents_overlay("quokka");
     let rows = [row("a", 3), pane_row(120)];
     handle(&mut state, &rows, plain(KeyCode::Down));
-    let OverlayOutcome::Commit(msg) = handle(&mut state, &rows, plain(KeyCode::Enter)) else {
+    let Outcome::Commit(msg) = handle(&mut state, &rows, plain(KeyCode::Enter)) else {
         panic!("Enter does not commit");
     };
     let Msg::OpenPaneHit {
@@ -373,7 +367,7 @@ fn enter_on_a_pane_row_opens_its_scrollback_after_revealing_the_mux() {
         line,
         text,
         reveal,
-    } = *msg
+    } = msg
     else {
         panic!("not a pane hit");
     };
@@ -386,7 +380,7 @@ fn promoting_an_empty_query_does_nothing() {
     let mut state = contents_overlay("  ");
     assert!(matches!(
         handle(&mut state, &[], ctrl('f')),
-        crate::tui::OverlayOutcome::Consumed
+        Outcome::Consumed
     ));
 }
 
@@ -402,7 +396,7 @@ fn escape_closes_in_either_scope() {
         );
         assert!(matches!(
             handle(&mut state, &[], plain(KeyCode::Esc)),
-            crate::tui::OverlayOutcome::Close
+            Outcome::Close
         ));
     }
 }
@@ -419,7 +413,7 @@ fn the_rows_scope_does_not_bind_the_contents_keys() {
     assert_eq!(state.mode(), SearchMode::Quick);
     assert!(matches!(
         handle(&mut state, &[], ctrl('f')),
-        crate::tui::OverlayOutcome::Consumed
+        Outcome::Consumed
     ));
 }
 

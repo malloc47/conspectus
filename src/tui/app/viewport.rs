@@ -1,14 +1,15 @@
 //! What a drawn frame measured, kept for the next key and the next frame.
 //!
 //! A scrolled surface can only know its window once the layout has given
-//! it an area: the tree's rows, the explorer's wrapped rows, the
-//! Preview's body, and a pager's page all depend on the terminal's size.
+//! it an area: the tree's rows, the explorer's wrapped rows, and the
+//! Preview's body all depend on the terminal's size.
 //! The renderer works the window out from the App and the area it
 //! measured (`tuikit::scroll`), draws it, and returns it in a
 //! [`ViewportReport`]. The caller hands the report to
 //! [`App::keep_viewports`] after the frame. Nothing is dispatched from
 //! inside the draw: keeping a window changes no selection, focus, or arm,
-//! so it is not a reducer transition.
+//! so it is not a reducer transition. A scrolled modal (help, the value
+//! modal, Messages) keeps the window it drew itself, as it draws.
 
 use tuikit::scroll::ScrollWindow;
 
@@ -24,12 +25,6 @@ pub struct ViewportReport {
     pub explorer: Option<ScrollWindow>,
     /// The Preview zone's body, when it scrolls by the Preview's offset.
     pub preview: Option<ScrollWindow>,
-    /// The keymap help page's scrolling part.
-    pub help: Option<ScrollWindow>,
-    /// The value modal's text.
-    pub value: Option<ScrollWindow>,
-    /// The Messages overlay's detail pane.
-    pub messages: Option<ScrollWindow>,
 }
 
 impl App {
@@ -48,21 +43,6 @@ impl App {
             // transcript's newest rows), in the window's rows either way.
             let last = u16::try_from(window.last_offset()).unwrap_or(u16::MAX);
             self.preview_scroll = self.preview_scroll.min(last);
-        }
-        if let Some(window) = report.help
-            && let Some(state) = self.help_overlay_mut()
-        {
-            state.fit(window);
-        }
-        if let Some(window) = report.value
-            && let Some(state) = self.value_modal_mut()
-        {
-            state.fit(window);
-        }
-        if let Some(window) = report.messages
-            && let Some((state, _)) = self.messages_overlay_mut()
-        {
-            state.fit(window);
         }
     }
 

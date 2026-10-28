@@ -8,7 +8,6 @@
 //! description (`ViewerMsg::help`), so a key added to the viewer cannot
 //! be left out of its help.
 
-use ratatui::Frame;
 use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
 use ratatui::text::Line;
@@ -124,10 +123,10 @@ pub fn render(area: Rect, buf: &mut Buffer, theme: &Theme, scroll: usize) -> Scr
 pub fn draw(
     state: &mut crate::viewer::state::ViewerState,
     theme: &Theme,
-    frame: &mut Frame<'_>,
+    buf: &mut Buffer,
     area: Rect,
 ) {
-    let window = render(area, frame.buffer_mut(), theme, state.help_scroll);
+    let window = render(area, buf, theme, state.help_scroll);
     state.help_scroll = window.offset();
     state.help_page = window.viewport();
 }

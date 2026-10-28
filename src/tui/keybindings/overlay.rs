@@ -283,8 +283,8 @@ pub enum MessagesKey {
     DetailUp,
     DetailPageDown,
     DetailPageUp,
-    /// Copy the selected entry. The runtime performs it, because the
-    /// clipboard write is a side effect the widget does not own.
+    /// Copy the selected entry. The overlay asks for it with a message,
+    /// because the clipboard write is the executor's.
     Copy,
 }
 

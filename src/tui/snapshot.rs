@@ -43,11 +43,7 @@ use crate::model::GraphSnapshot;
 use crate::tui::Msg;
 use crate::tui::RunConfig;
 use crate::tui::app::App;
-use crate::tui::runtime::{
-    self, Action, cycle_view, dispatch, handle_controls_overlay_key, handle_help_overlay_key,
-    handle_messages_overlay_key, handle_pane_viewer_key, handle_viewer_overlay_key, refresh,
-    refresh_from_snapshot,
-};
+use crate::tui::runtime::{self, Action, cycle_view, dispatch, refresh, refresh_from_snapshot};
 
 /// Tunables for one snapshot pass. Filled from `--snapshot-*` flags
 /// on the `tui` subcommand.
@@ -262,6 +258,11 @@ fn run_effects_opening_viewers(
 ) {
     use crate::tui::effect::{Effect, ExecSpec};
     for effect in effects {
+        // OSC 52 would land in the frame output.
+        if matches!(effect, Effect::Copy { .. }) {
+            eprintln!("conspectus: snapshot mode skipped a copy");
+            continue;
+        }
         let Effect::Exec(ExecSpec::ViewSession(mut id, open)) = effect else {
             runtime::execute_effects(app, vec![effect]);
             continue;
@@ -290,6 +291,7 @@ fn apply_action(
 ) {
     match action {
         Action::Msg(msg) => dispatch(app, *msg),
+        Action::ModalKey(key) => modal_key(app, key, rebase),
         Action::SwitchView(view) => dispatch(app, Msg::SwitchView(view)),
         Action::CycleView(delta) => {
             let next = cycle_view(app.active_view(), delta);
@@ -315,47 +317,14 @@ fn apply_action(
         }
         Action::OpenHelp => app.open_help_overlay(),
         Action::OpenMessages => app.open_messages_overlay(),
-        Action::MessagesOverlayKey(key) => handle_messages_overlay_key(app, key),
         Action::OpenWorktreeMenu => runtime::open_worktree_menu_action(app),
         Action::OpenWorktreeCloseDown => runtime::open_worktree_close_down_action(app),
         Action::OpenMuxMenu => runtime::open_mux_menu_action(app),
         Action::OpenValueModal => app.open_value_modal_for_cursor(),
-        Action::ValueModalKey(key)
-        | Action::RowMenuKey(key)
-        | Action::MuxMenuKey(key)
-        | Action::WorktreeMenuKey(key) => modal_key(app, key),
-        // The forms open and take their keys as in the live loop; a
-        // submit is skipped like a menu pick.
+        // The forms and the rename prompt open as in the live loop.
         Action::OpenNewMuxForm => runtime::open_new_mux_form_action(app),
-        Action::NewMuxFormKey(key) => runtime::handle_new_mux_form_key(app, key, &mut form_send),
-        Action::MuxLaunchFormKey(key) => {
-            runtime::handle_mux_launch_form_key(app, key, &mut form_send);
-        }
-        Action::PinEditFormKey(key) => runtime::handle_pin_edit_form_key(app, key, &mut form_send),
-        // The rename prompt, the Clean up checklist, and the picker open
-        // and take their keys as in the live loop; a confirm is skipped
-        // like a form submit.
         Action::OpenRename => runtime::open_rename_overlay(app),
-        Action::RenameOverlayKey(key) => {
-            runtime::handle_rename_overlay_key(app, key, &mut form_send);
-        }
-        Action::CleanUpKey(key) => runtime::handle_clean_up_key(app, key, &mut form_send),
-        Action::PickerKey(key) => runtime::handle_picker_key(app, key, &mut form_send),
-        Action::ControlsOverlayKey(key) => handle_controls_overlay_key(app, key),
-        Action::SearchOverlayKey(key) => {
-            // A hit that opens the viewer needs the same effect handling
-            // as `v`.
-            runtime::handle_search_overlay_key_with(app, key, &mut |app, msg| {
-                let effects = app.update(msg);
-                run_effects_opening_viewers(app, effects, rebase);
-            });
-        }
-        Action::HelpOverlayKey(key) => handle_help_overlay_key(app, key),
         Action::View => open_viewer(app, rebase),
-        Action::ViewerOverlayKey(key) => handle_viewer_overlay_key(app, key),
-        Action::PaneViewerKey(key) => {
-            handle_pane_viewer_key(app, key);
-        }
         Action::Refresh => runtime::refresh(app, config),
         Action::HardRefresh => {
             app.update(crate::tui::Msg::ForgeRefreshRequested);
@@ -374,53 +343,44 @@ fn apply_action(
     }
 }
 
-/// A key for the value modal or a menu, handled by the modal itself:
-/// moving, scrolling, and closing behave as in the live loop. What would
-/// reach outside the snapshot is skipped with a note: a pick runs a
-/// verb, and `y` would write the clipboard escape into the frame output.
-fn modal_key(app: &mut App, key: KeyEvent) {
-    use crate::tui::keybindings::overlay::VALUE_MODAL_KEYS;
-    use crate::tui::{Overlay, OverlayOutcome};
-    use tuikit::keys::{PagerKey, resolve};
-    let (outcome, close): (OverlayOutcome, fn(&mut App)) =
-        if let Some(state) = app.value_modal_mut() {
-            if resolve(VALUE_MODAL_KEYS, key) == Some(PagerKey::Copy) {
-                eprintln!("conspectus: snapshot mode skipped a copy");
-                return;
-            }
-            (state.handle((), key), App::close_value_modal)
-        } else if let Some(state) = app.row_menu_mut() {
-            (state.handle((), key), App::close_row_menu)
-        } else if let Some(state) = app.mux_menu_mut() {
-            (state.handle((), key), App::close_mux_menu)
-        } else if let Some(state) = app.worktree_menu_mut() {
-            (state.handle((), key), App::close_worktree_menu)
-        } else {
-            return;
-        };
-    match outcome {
-        OverlayOutcome::Consumed => {}
-        // Closing says nothing: the status line shows the screen's hints.
-        OverlayOutcome::Close => {
-            close(app);
-            app.update(Msg::SetStatus(None));
-        }
-        // A notice the modal shows while it stays open, such as why it
-        // refused input, reaches nothing outside the snapshot.
-        OverlayOutcome::CommitAndStay(msg) if matches!(*msg, Msg::Toast(_)) => {
-            dispatch(app, *msg);
-        }
-        // A pick that only opens a form, a prompt, a picker, or the Clean
-        // up checklist reaches nothing outside the snapshot, so it opens
-        // and can be drawn.
-        OverlayOutcome::Commit(msg) if only_opens_a_modal(&msg) => {
-            close(app);
-            app.update(Msg::SetStatus(None));
-            dispatch(app, *msg);
-        }
-        OverlayOutcome::Commit(_) | OverlayOutcome::CommitAndStay(_) => {
-            eprintln!("conspectus: snapshot mode skipped a menu pick");
-        }
+/// A key for the modal on top, routed as in the live loop: every modal
+/// moves, scrolls, edits, and closes the same way. What it sends goes
+/// through [`snapshot_send`], which keeps the snapshot from reaching
+/// outside itself.
+fn modal_key(app: &mut App, key: KeyEvent, rebase: Option<(&std::path::Path, &std::path::Path)>) {
+    let from = app.top_modal_name();
+    runtime::modal_key(app, key, &mut |app, msg| {
+        snapshot_send(app, from, msg, rebase);
+    });
+}
+
+/// What the snapshot driver does with a message the modal `from` sent.
+///
+/// Help, Controls, Messages, the search overlay, and the transcript
+/// viewer only move the TUI (a setting, a row, a search, a scroll), so
+/// what they send runs, a request to view a session opening the viewer
+/// from the scenario world and a copy skipped. Everything else (the
+/// menus, prompts, forms, checklists, the picker, the value modal, the
+/// pane viewer) acts when it picks or submits, so only what reaches
+/// nothing outside the snapshot runs: a notice it shows while it stays
+/// open, a copy (skipped), and a pick that only opens another modal. The
+/// rest is skipped with a note.
+fn snapshot_send(
+    app: &mut App,
+    from: Option<&str>,
+    msg: Msg,
+    rebase: Option<(&std::path::Path, &std::path::Path)>,
+) {
+    let moves_only = matches!(
+        from,
+        Some("Help" | "Controls" | "Messages" | "Search" | "Viewer")
+    );
+    let harmless = matches!(msg, Msg::Toast(_) | Msg::Copy { .. }) || only_opens_a_modal(&msg);
+    if moves_only || harmless {
+        let effects = app.update(msg);
+        run_effects_opening_viewers(app, effects, rebase);
+    } else {
+        eprintln!("conspectus: snapshot mode skipped a pick or submit");
     }
 }
 
@@ -438,25 +398,12 @@ fn only_opens_a_modal(msg: &Msg) -> bool {
     )
 }
 
-/// What a form, prompt, picker, or checklist sends: a notice it shows
-/// while it stays open is dispatched; a submit is skipped, as a menu
-/// pick is.
-fn form_send(app: &mut App, msg: Msg) {
-    if matches!(msg, Msg::Toast(_)) {
-        dispatch(app, msg);
-    } else {
-        eprintln!("conspectus: snapshot mode skipped a submit");
-    }
-}
-
 fn action_label(action: &Action) -> &'static str {
     match action {
         Action::Attach => "Attach",
         Action::Resume => "Resume",
         Action::DefaultAction => "DefaultAction",
-        Action::PaneViewerKey(_) => "PaneViewerKey",
         Action::OpenValueModal => "OpenValueModal",
-        Action::ValueModalKey(_) => "ValueModalKey",
         _ => "<other>",
     }
 }

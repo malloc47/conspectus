@@ -52,20 +52,11 @@ mod worktree_exec;
 
 use executor::*;
 use launch::*;
-use overlay_keys::*;
 use worktree_exec::*;
 
-#[cfg(any(test, debug_assertions, feature = "snapshot"))]
-pub(super) use overlay_keys::handle_search_overlay_key;
-#[cfg(feature = "snapshot")]
-pub(super) use overlay_keys::{
-    handle_clean_up_key, handle_mux_launch_form_key, handle_new_mux_form_key, handle_picker_key,
-    handle_pin_edit_form_key, handle_rename_overlay_key, open_rename_overlay,
-};
-pub(super) use overlay_keys::{
-    handle_controls_overlay_key, handle_help_overlay_key, handle_messages_overlay_key,
-    handle_pane_viewer_key, handle_search_overlay_key_with, handle_viewer_overlay_key,
-};
+#[cfg(test)]
+pub(super) use overlay_keys::modal_key_pure;
+pub(super) use overlay_keys::{modal_key, open_rename_overlay};
 
 /// What a background discovery worker sends back. `warning` carries a
 /// problem the worker worked around, such as a failed daemon nudge
@@ -521,6 +512,11 @@ impl LoopMode for LiveMode {
                 let generation = self.workers.start();
                 self.spawn_discovery(app, DaemonNudge::LiveAndForge, generation);
             }
+            // What a modal commits can need a terminal, a mux, or a store
+            // (a pick, a submit, a hit that opens the viewer).
+            Some(Action::ModalKey(key)) => {
+                modal_key(app, key, &mut live_send(terminal, config, tmux));
+            }
             Some(Action::Attach) => {
                 dispatch_live(terminal, app, config, tmux, Msg::AttachSelected);
             }
@@ -532,37 +528,10 @@ impl LoopMode for LiveMode {
             }
             Some(Action::DefaultAction) => default_action(terminal, app, config, tmux),
             Some(Action::OpenRename) => open_rename_overlay(app),
-            Some(Action::RenameOverlayKey(key)) => {
-                handle_rename_overlay_key(app, key, &mut live_send(terminal, config, tmux));
-            }
             Some(Action::OpenWorktreeMenu) => open_worktree_menu_action(app),
             Some(Action::OpenWorktreeCloseDown) => open_worktree_close_down_action(app),
-            Some(Action::WorktreeMenuKey(key)) => {
-                handle_worktree_menu_key(app, key, &mut live_send(terminal, config, tmux));
-            }
             Some(Action::OpenNewMuxForm) => open_new_mux_form_action(app),
-            Some(Action::NewMuxFormKey(key)) => {
-                handle_new_mux_form_key(app, key, &mut live_send(terminal, config, tmux));
-            }
             Some(Action::OpenMuxMenu) => open_mux_menu_action(app),
-            Some(Action::MuxMenuKey(key)) => {
-                handle_mux_menu_key(app, key, &mut live_send(terminal, config, tmux));
-            }
-            Some(Action::MuxLaunchFormKey(key)) => {
-                handle_mux_launch_form_key(app, key, &mut live_send(terminal, config, tmux));
-            }
-            Some(Action::PinEditFormKey(key)) => {
-                handle_pin_edit_form_key(app, key, &mut live_send(terminal, config, tmux));
-            }
-            Some(Action::RowMenuKey(key)) => {
-                handle_row_menu_key(app, key, &mut live_send(terminal, config, tmux));
-            }
-            Some(Action::CleanUpKey(key)) => {
-                handle_clean_up_key(app, key, &mut live_send(terminal, config, tmux));
-            }
-            Some(Action::PickerKey(key)) => {
-                handle_picker_key(app, key, &mut live_send(terminal, config, tmux));
-            }
             Some(Action::OpenControls) => {
                 app.open_controls_overlay();
                 app.update(Msg::SetStatus(Some(format!(
@@ -570,7 +539,6 @@ impl LoopMode for LiveMode {
                     tuikit::keys::footer(overlay_keymap::CONTROLS_KEYS)
                 ))));
             }
-            Some(Action::ControlsOverlayKey(key)) => handle_controls_overlay_key(app, key),
             Some(Action::SwitchView(view)) => dispatch(app, Msg::SwitchView(view)),
             Some(Action::CycleView(delta)) => {
                 let next = cycle_view(app.active_view(), delta);
@@ -596,26 +564,11 @@ impl LoopMode for LiveMode {
                 let hint = app.open_content_search_entry();
                 app.update(Msg::SetStatus(Some(hint)));
             }
-            Some(Action::SearchOverlayKey(key)) => {
-                // A hit that opens the viewer needs the live executor.
-                handle_search_overlay_key_with(app, key, &mut |app, msg| {
-                    dispatch_live(terminal, app, config, tmux, msg);
-                });
-            }
             Some(Action::OpenHelp) => {
                 app.open_help_overlay();
             }
-            Some(Action::HelpOverlayKey(key)) => handle_help_overlay_key(app, key),
             Some(Action::OpenMessages) => app.open_messages_overlay(),
-            Some(Action::MessagesOverlayKey(key)) => handle_messages_overlay_key(app, key),
             Some(Action::OpenValueModal) => app.open_value_modal_for_cursor(),
-            Some(Action::ValueModalKey(key)) => handle_value_modal_key(app, key),
-            Some(Action::ViewerOverlayKey(key)) => handle_viewer_overlay_key(app, key),
-            Some(Action::PaneViewerKey(key)) => {
-                if let Some(msg) = handle_pane_viewer_key(app, key) {
-                    dispatch_live(terminal, app, config, tmux, msg);
-                }
-            }
             Some(Action::ExplorerEnter) => explorer_enter_action(app),
             Some(Action::CopySessionId) => copy_session_id_action(app),
             None => {}
@@ -673,18 +626,14 @@ impl StaticMode {
     fn dispatch_action(&mut self, app: &mut App, config: &RunConfig, action: Option<Action>) {
         match action {
             Some(Action::Msg(msg)) => dispatch(app, *msg),
+            // A modal opened any way (`.`, a menu pick, a direct opener)
+            // takes its keys as in the live TUI, so it moves and closes;
+            // the pure executor refuses a pick that needs a terminal, a
+            // mux, or a store.
+            Some(Action::ModalKey(key)) => modal_key(app, key, &mut dispatch),
             Some(Action::OpenHelp) => app.open_help_overlay(),
-            Some(Action::HelpOverlayKey(key)) => handle_help_overlay_key(app, key),
             Some(Action::OpenMessages) => app.open_messages_overlay(),
-            Some(Action::MessagesOverlayKey(key)) => handle_messages_overlay_key(app, key),
             Some(Action::OpenValueModal) => app.open_value_modal_for_cursor(),
-            Some(Action::ValueModalKey(key)) => handle_value_modal_key(app, key),
-            Some(Action::ViewerOverlayKey(key)) => handle_viewer_overlay_key(app, key),
-            Some(Action::PaneViewerKey(key)) => {
-                if let Some(msg) = handle_pane_viewer_key(app, key) {
-                    dispatch(app, msg);
-                }
-            }
             Some(Action::OpenSearch) => {
                 let hint = app.open_search_entry();
                 app.update(Msg::SetStatus(Some(hint)));
@@ -693,7 +642,6 @@ impl StaticMode {
                 let hint = app.open_content_search_entry();
                 app.update(Msg::SetStatus(Some(hint)));
             }
-            Some(Action::SearchOverlayKey(key)) => handle_search_overlay_key(app, key),
             Some(Action::OpenControls) => {
                 app.open_controls_overlay();
                 app.update(Msg::SetStatus(Some(format!(
@@ -701,7 +649,6 @@ impl StaticMode {
                     tuikit::keys::footer(overlay_keymap::CONTROLS_KEYS)
                 ))));
             }
-            Some(Action::ControlsOverlayKey(key)) => handle_controls_overlay_key(app, key),
             Some(Action::SwitchView(view)) => dispatch(app, Msg::SwitchView(view)),
             Some(Action::CycleView(delta)) => {
                 let next = cycle_view(app.active_view(), delta);
@@ -795,23 +742,6 @@ impl StaticMode {
                     "scenario TUI keeps mutating actions disabled".to_string(),
                 )));
             }
-            // A menu or form opened another way (`.`, a menu pick) takes
-            // its keys as in the live TUI, so it moves and closes; the
-            // pure executor refuses a pick that needs a terminal, a mux,
-            // or a store.
-            Some(Action::RenameOverlayKey(key)) => {
-                handle_rename_overlay_key(app, key, &mut dispatch);
-            }
-            Some(Action::WorktreeMenuKey(key)) => handle_worktree_menu_key(app, key, &mut dispatch),
-            Some(Action::NewMuxFormKey(key)) => handle_new_mux_form_key(app, key, &mut dispatch),
-            Some(Action::MuxMenuKey(key)) => handle_mux_menu_key(app, key, &mut dispatch),
-            Some(Action::RowMenuKey(key)) => handle_row_menu_key(app, key, &mut dispatch),
-            Some(Action::CleanUpKey(key)) => handle_clean_up_key(app, key, &mut dispatch),
-            Some(Action::PickerKey(key)) => handle_picker_key(app, key, &mut dispatch),
-            Some(Action::MuxLaunchFormKey(key)) => {
-                handle_mux_launch_form_key(app, key, &mut dispatch);
-            }
-            Some(Action::PinEditFormKey(key)) => handle_pin_edit_form_key(app, key, &mut dispatch),
             Some(Action::ExplorerEnter) => explorer_enter_action(app),
             Some(Action::CopySessionId) => copy_session_id_action(app),
             None => {}
@@ -878,39 +808,14 @@ fn draw_frame(app: &mut App, terminal: &mut DefaultTerminal) -> Result<()> {
     Ok(())
 }
 
-/// Draw the whole screen: the full-screen transcript viewer (with its
-/// help page over it when open) while one is up, the row tree and panes
-/// otherwise. The interactive loops and `--snapshot` share it.
+/// Draw the whole screen (the panes, then every open modal bottom to
+/// top, then a toast) and keep the windows the panes drew. The
+/// interactive loops and `--snapshot` share it.
 pub(super) fn draw_screen(app: &mut App, frame: &mut ratatui::Frame<'_>) {
-    let area = frame.area();
-    if app.viewer_modal().is_some() {
-        let theme = app.theme().clone();
-        if let Some(state) = app.viewer_modal_mut() {
-            crate::viewer::widget::draw(state, &theme, frame, area);
-            if state.show_help {
-                crate::tui::widgets::viewer_help::draw(state, &theme, frame, area);
-            }
-        }
-    } else if app.pane_viewer().is_some() {
-        let theme = app.theme().clone();
-        if let Some(state) = app.pane_viewer_mut() {
-            crate::tui::widgets::pane_viewer::draw(state, &theme, frame, area);
-        }
-    } else {
-        let report = ui::draw(app, frame);
-        app.keep_viewports(report);
-    }
+    let report = ui::draw(app, frame);
+    app.keep_viewports(report);
 }
 
-/// Route a crossterm event through the modal stack (ADR 0085
-/// contract 3). Returns `Some(...OverlayKey(key))` when an overlay
-/// owns the input, `None` when the caller should fall through to
-/// its per-mode action translation.
-///
-/// Shared between the live and static event loops. Only
-/// KeyEventKind::Press events are forwarded — the
-/// modal stack ignores repeat/release + non-key events like the
-/// individual overlay handlers already did.
 /// Resolve a terminal event to an action the way every key path
 /// must: an open overlay owns the key, otherwise the keymap
 /// translates it and the focus pass routes navigation keys to the
@@ -947,60 +852,17 @@ pub(super) fn type_paste(app: &mut App, text: &str, dispatch: &mut dyn FnMut(&mu
     }
 }
 
+/// The key press an open modal owns, as [`Action::ModalKey`] for the
+/// modal stack (ADR 0085 contract 3, ADR 0161); `None` when no modal is
+/// open or the event is not a press, so the caller translates it with the
+/// main keymap. Repeats, releases, and other events never reach a modal.
 fn overlay_key_from_event(app: &App, event: &Event) -> Option<Action> {
-    let key = match event {
-        Event::Key(k) if k.kind == KeyEventKind::Press => *k,
-        _ => return None,
-    };
-    if app.viewer_modal().is_some() {
-        return Some(Action::ViewerOverlayKey(key));
+    match event {
+        Event::Key(key) if key.kind == KeyEventKind::Press && app.has_modal() => {
+            Some(Action::ModalKey(*key))
+        }
+        _ => None,
     }
-    if app.pane_viewer().is_some() {
-        return Some(Action::PaneViewerKey(key));
-    }
-    if app.value_modal().is_some() {
-        return Some(Action::ValueModalKey(key));
-    }
-    if app.messages_overlay().is_some() {
-        return Some(Action::MessagesOverlayKey(key));
-    }
-    if app.rename_overlay().is_some() {
-        return Some(Action::RenameOverlayKey(key));
-    }
-    if app.worktree_menu().is_some() {
-        return Some(Action::WorktreeMenuKey(key));
-    }
-    if app.new_mux_form().is_some() {
-        return Some(Action::NewMuxFormKey(key));
-    }
-    if app.mux_menu().is_some() {
-        return Some(Action::MuxMenuKey(key));
-    }
-    if app.row_menu().is_some() {
-        return Some(Action::RowMenuKey(key));
-    }
-    if app.clean_up().is_some() {
-        return Some(Action::CleanUpKey(key));
-    }
-    if app.picker().is_some() {
-        return Some(Action::PickerKey(key));
-    }
-    if app.mux_launch_form().is_some() {
-        return Some(Action::MuxLaunchFormKey(key));
-    }
-    if app.pin_edit_form().is_some() {
-        return Some(Action::PinEditFormKey(key));
-    }
-    if app.controls_overlay().is_some() {
-        return Some(Action::ControlsOverlayKey(key));
-    }
-    if app.search_overlay().is_some() {
-        return Some(Action::SearchOverlayKey(key));
-    }
-    if app.help_overlay().is_some() {
-        return Some(Action::HelpOverlayKey(key));
-    }
-    None
 }
 
 /// Run the TUI to completion. Restores the terminal on normal exit,
@@ -2136,7 +1998,11 @@ pub(in crate::tui) fn live_executor_for(action: &Action) -> ExecutorKind {
 pub(in crate::tui) fn pure_executor_runs(effect: &Effect) -> bool {
     match effect {
         Effect::Exec(_) | Effect::RunMux(_) | Effect::WriteStore(_) => false,
-        Effect::SpawnRefresh { .. } | Effect::Toast(_) | Effect::Persist | Effect::Quit => true,
+        Effect::SpawnRefresh { .. }
+        | Effect::Toast(_)
+        | Effect::Copy { .. }
+        | Effect::Persist
+        | Effect::Quit => true,
     }
 }
 

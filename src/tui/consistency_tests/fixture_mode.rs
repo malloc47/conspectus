@@ -40,7 +40,7 @@ fn every_overlay_closes_on_esc_and_on_ctrl_c_in_fixture_mode() {
     for (code, modifiers, what) in leaves {
         for (name, view, open) in builders() {
             let mut app = app_with(view, open);
-            let top = app.modal_stack().last().map(name_of);
+            let top = app.modal_stack().top().map(name_of);
             assert_eq!(top, Some(name), "the builder opens {name}");
             let depth = app.modal_stack().len();
             press(&mut app, code, modifiers);

@@ -25,8 +25,8 @@ use tuikit::frame::{Lines, ModalFrame, ModalSize};
 use tuikit::selection::{self, Cursor, Ends};
 
 use crate::tui::Msg;
-use crate::tui::modal::{Overlay, OverlayOutcome};
 use crate::tui::theme::Theme;
+use tuikit::overlay::Outcome;
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
 pub enum MuxMenuChoice {
@@ -76,28 +76,25 @@ impl MuxMenuState {
     }
 }
 
-impl Overlay for MuxMenuState {
-    type Ctx<'a> = ();
-
-    fn handle(&mut self, _ctx: (), key: KeyEvent) -> OverlayOutcome {
+impl MuxMenuState {
+    /// One key: move, pick a verb, or close.
+    pub fn handle_key(&mut self, key: KeyEvent) -> Outcome<Msg> {
         use tuikit::keys::{MENU_KEYS, MenuKey, resolve};
         match resolve(MENU_KEYS, key) {
-            Some(MenuKey::Abort | MenuKey::Close) => OverlayOutcome::Close,
+            Some(MenuKey::Abort | MenuKey::Close) => Outcome::Close,
             Some(MenuKey::Up) => {
                 self.cursor = Ends::Wrap.step(self.cursor, MENU_ENTRIES.len(), -1);
-                OverlayOutcome::Consumed
+                Outcome::Consumed
             }
             Some(MenuKey::Down) => {
                 self.cursor = Ends::Wrap.step(self.cursor, MENU_ENTRIES.len(), 1);
-                OverlayOutcome::Consumed
+                Outcome::Consumed
             }
             Some(MenuKey::Pick) => match self.selected() {
-                MuxMenuChoice::NewBareMux => OverlayOutcome::Commit(Box::new(Msg::OpenNewMuxForm)),
-                MuxMenuChoice::LaunchHarnessMux => {
-                    OverlayOutcome::Commit(Box::new(Msg::OpenMuxLaunchForm))
-                }
+                MuxMenuChoice::NewBareMux => Outcome::Commit(Msg::OpenNewMuxForm),
+                MuxMenuChoice::LaunchHarnessMux => Outcome::Commit(Msg::OpenMuxLaunchForm),
             },
-            None => OverlayOutcome::Consumed,
+            None => Outcome::Consumed,
         }
     }
 }
@@ -149,8 +146,8 @@ mod tests {
     #[test]
     fn enter_on_first_entry_opens_new_mux_form() {
         let mut state = MuxMenuState::new();
-        match state.handle((), key(KeyCode::Enter)) {
-            OverlayOutcome::Commit(msg) => match *msg {
+        match state.handle_key(key(KeyCode::Enter)) {
+            Outcome::Commit(msg) => match msg {
                 Msg::OpenNewMuxForm => {}
                 other => panic!("expected OpenNewMuxForm, got {other:?}"),
             },
@@ -161,9 +158,9 @@ mod tests {
     #[test]
     fn enter_on_second_entry_opens_launch_form() {
         let mut state = MuxMenuState::new();
-        state.handle((), key(KeyCode::Down));
-        match state.handle((), key(KeyCode::Enter)) {
-            OverlayOutcome::Commit(msg) => match *msg {
+        state.handle_key(key(KeyCode::Down));
+        match state.handle_key(key(KeyCode::Enter)) {
+            Outcome::Commit(msg) => match msg {
                 Msg::OpenMuxLaunchForm => {}
                 other => panic!("expected OpenMuxLaunchForm, got {other:?}"),
             },
@@ -174,9 +171,9 @@ mod tests {
     #[test]
     fn the_cursor_wraps_at_both_ends() {
         let mut state = MuxMenuState::new();
-        state.handle((), key(KeyCode::Up));
+        state.handle_key(key(KeyCode::Up));
         assert_eq!(state.cursor(), MENU_ENTRIES.len() - 1, "up from the first");
-        state.handle((), key(KeyCode::Down));
+        state.handle_key(key(KeyCode::Down));
         assert_eq!(state.cursor(), 0, "down from the last");
     }
 
@@ -184,7 +181,7 @@ mod tests {
     fn the_cursor_entry_shows_the_marker_and_the_highlight() {
         let theme = Theme::default();
         let mut state = MuxMenuState::new();
-        state.handle((), key(KeyCode::Down));
+        state.handle_key(key(KeyCode::Down));
         let area = Rect::new(0, 0, 80, 20);
         let mut buf = Buffer::empty(area);
         MuxMenuWidget::new(&state, &theme).render(area, &mut buf);

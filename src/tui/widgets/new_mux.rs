@@ -23,11 +23,11 @@ use ratatui::widgets::Widget;
 use tuikit::frame::Lines;
 
 use crate::tui::Msg;
-use crate::tui::modal::{Overlay, OverlayOutcome};
 use crate::tui::theme::Theme;
 use crate::tui::widgets::form::{self, footer_lines, input_row, path_row};
 use crate::tui::widgets::input::{InputOutcome, TextInputState};
 use crate::tui::widgets::path_omnibox::{PathCandidate, PathOmniboxOutcome, PathOmniboxState};
+use tuikit::overlay::Outcome;
 
 /// Which field currently holds the cursor.
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
@@ -92,17 +92,15 @@ impl NewMuxFormState {
     /// on cwd commits when both fields are non-empty. An empty field
     /// keeps the form open on that field and a toast names it. The cwd
     /// is committed with `~` expanded, since `mux new` takes it as given.
-    fn try_commit(&mut self) -> OverlayOutcome {
-        let missing = |field: &str| {
-            OverlayOutcome::CommitAndStay(Box::new(Msg::Toast(format!("mux: {field} is required"))))
-        };
+    fn try_commit(&mut self) -> Outcome<Msg> {
+        let missing = |field: &str| Outcome::Stay(Msg::Toast(format!("mux: {field} is required")));
         match self.focus {
             NewMuxField::Name => {
                 if self.name.value().trim().is_empty() {
                     return missing("name");
                 }
                 self.focus = NewMuxField::Cwd;
-                OverlayOutcome::Consumed
+                Outcome::Consumed
             }
             NewMuxField::Cwd => {
                 let name = self.name.value().trim().to_string();
@@ -114,24 +112,23 @@ impl NewMuxFormState {
                 if cwd.is_empty() {
                     return missing("cwd");
                 }
-                OverlayOutcome::Commit(Box::new(Msg::CommitMuxNew { name, cwd }))
+                Outcome::Commit(Msg::CommitMuxNew { name, cwd })
             }
         }
     }
 }
 
-impl Overlay for NewMuxFormState {
-    type Ctx<'a> = ();
-
-    fn handle(&mut self, _ctx: (), key: KeyEvent) -> OverlayOutcome {
+impl NewMuxFormState {
+    /// One key: edit, move between the fields, submit, or close.
+    pub fn handle_key(&mut self, key: KeyEvent) -> Outcome<Msg> {
         // Global chords first so the line editor can't steal them.
         use crate::tui::keybindings::overlay::NEW_MUX_KEYS;
         use tuikit::keys::{FormKey, resolve};
         match resolve(NEW_MUX_KEYS, key) {
-            Some(FormKey::Abort | FormKey::Cancel) => return OverlayOutcome::Close,
+            Some(FormKey::Abort | FormKey::Cancel) => return Outcome::Close,
             Some(FormKey::Up | FormKey::Down | FormKey::Back) => {
                 self.focus = self.focus.toggle();
-                return OverlayOutcome::Consumed;
+                return Outcome::Consumed;
             }
             Some(FormKey::Tab) => {
                 if self.focus == NewMuxField::Cwd
@@ -140,10 +137,10 @@ impl Overlay for NewMuxFormState {
                         PathOmniboxOutcome::Completed | PathOmniboxOutcome::Changed
                     )
                 {
-                    return OverlayOutcome::Consumed;
+                    return Outcome::Consumed;
                 }
                 self.focus = self.focus.toggle();
-                return OverlayOutcome::Consumed;
+                return Outcome::Consumed;
             }
             Some(FormKey::Submit) => return self.try_commit(),
             Some(FormKey::OptionPrev | FormKey::OptionNext | FormKey::Inherit) | None => {}
@@ -151,11 +148,11 @@ impl Overlay for NewMuxFormState {
         match self.focus {
             NewMuxField::Cwd => {
                 self.cwd.handle_key(key);
-                OverlayOutcome::Consumed
+                Outcome::Consumed
             }
             NewMuxField::Name => match self.name.handle_key(key) {
-                InputOutcome::Continue => OverlayOutcome::Consumed,
-                InputOutcome::Cancel | InputOutcome::Abort => OverlayOutcome::Close,
+                InputOutcome::Continue => Outcome::Consumed,
+                InputOutcome::Cancel | InputOutcome::Abort => Outcome::Close,
                 // Enter is intercepted above; kept for safety.
                 InputOutcome::Confirm(_) => self.try_commit(),
             },

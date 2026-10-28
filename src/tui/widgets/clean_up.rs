@@ -12,9 +12,9 @@ use tuikit::frame::{Lines, ModalFrame, ModalSize};
 
 use crate::history::reap::Candidate;
 use crate::tui::Msg;
-use crate::tui::modal::{Overlay, OverlayOutcome};
 use crate::tui::theme::Theme;
 use crate::tui::widgets::multi_select::{MultiSelectOutcome, MultiSelectState, MultiSelectWidget};
+use tuikit::overlay::Outcome;
 
 #[derive(Debug, Clone)]
 pub struct CleanUpState {
@@ -64,30 +64,29 @@ impl CleanUpState {
     }
 }
 
-impl Overlay for CleanUpState {
-    type Ctx<'a> = ();
-
-    fn handle(&mut self, _ctx: (), key: KeyEvent) -> OverlayOutcome {
+impl CleanUpState {
+    /// One key: move, toggle, confirm the reap, or close.
+    pub fn handle_key(&mut self, key: KeyEvent) -> Outcome<Msg> {
         if self.candidates.is_empty() {
             // Nothing to choose: any menu key dismisses the notice.
             use tuikit::keys::{MENU_KEYS, MenuKey, resolve};
             return match resolve(MENU_KEYS, key) {
-                Some(MenuKey::Abort | MenuKey::Close | MenuKey::Pick) => OverlayOutcome::Close,
-                _ => OverlayOutcome::Consumed,
+                Some(MenuKey::Abort | MenuKey::Close | MenuKey::Pick) => Outcome::Close,
+                _ => Outcome::Consumed,
             };
         }
         match self.select.handle_key(key) {
-            MultiSelectOutcome::Continue => OverlayOutcome::Consumed,
-            MultiSelectOutcome::Cancel => OverlayOutcome::Close,
+            MultiSelectOutcome::Continue => Outcome::Consumed,
+            MultiSelectOutcome::Cancel => Outcome::Close,
             MultiSelectOutcome::Confirm(indices) => {
                 let ids: Vec<String> = indices
                     .into_iter()
                     .filter_map(|i| self.candidates.get(i).map(|c| c.id.clone()))
                     .collect();
                 if ids.is_empty() {
-                    OverlayOutcome::Close
+                    Outcome::Close
                 } else {
-                    OverlayOutcome::Commit(Box::new(Msg::ReapRecords(ids)))
+                    Outcome::Commit(Msg::ReapRecords(ids))
                 }
             }
         }

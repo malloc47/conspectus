@@ -246,7 +246,7 @@ fn draw_clamps_the_viewers_scroll_position() {
     terminal
         .draw(|frame| {
             let area = frame.area();
-            draw(&mut state, &Theme::default(), frame, area);
+            draw(&mut state, &Theme::default(), frame.buffer_mut(), area);
         })
         .unwrap();
     assert_eq!(

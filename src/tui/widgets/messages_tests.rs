@@ -1,6 +1,6 @@
 use super::*;
-use crate::tui::{Overlay, OverlayOutcome};
 use ratatui::crossterm::event::{KeyCode, KeyModifiers};
+use tuikit::overlay::Outcome;
 
 fn press(code: KeyCode) -> KeyEvent {
     KeyEvent::new(code, KeyModifiers::NONE)
@@ -18,19 +18,19 @@ fn log_with(n: usize) -> MessageLog {
 fn selection_moves_within_the_log_and_resets_detail_scroll() {
     let log = log_with(3);
     let mut state = MessagesOverlayState::new();
-    state.handle(&log, press(KeyCode::Char('J')));
+    state.handle_key(&log, press(KeyCode::Char('J')));
     assert_eq!(state.detail_scroll, 1);
 
-    state.handle(&log, press(KeyCode::Char('j')));
+    state.handle_key(&log, press(KeyCode::Char('j')));
     assert_eq!(state.selected, 1);
     assert_eq!(state.detail_scroll, 0);
-    state.handle(&log, press(KeyCode::Char('G')));
+    state.handle_key(&log, press(KeyCode::Char('G')));
     assert_eq!(state.selected, 2);
-    state.handle(&log, press(KeyCode::Char('j')));
+    state.handle_key(&log, press(KeyCode::Char('j')));
     assert_eq!(state.selected, 2, "clamps at the oldest entry");
-    state.handle(&log, press(KeyCode::Char('g')));
+    state.handle_key(&log, press(KeyCode::Char('g')));
     assert_eq!(state.selected, 0);
-    state.handle(&log, press(KeyCode::Char('k')));
+    state.handle_key(&log, press(KeyCode::Char('k')));
     assert_eq!(
         state.selected, 0,
         "clamps at the newest entry: a log does not wrap"
@@ -47,7 +47,7 @@ fn close_keys_close() {
     let log = log_with(1);
     for code in [KeyCode::Esc, KeyCode::Char('q'), KeyCode::Char('!')] {
         let mut state = MessagesOverlayState::new();
-        assert_eq!(state.handle(&log, press(code)), OverlayOutcome::Close);
+        assert_eq!(state.handle_key(&log, press(code)), Outcome::Close);
     }
 }
 
@@ -122,7 +122,7 @@ fn each_level_takes_its_own_theme_color() {
 fn the_selected_entry_shows_the_marker_and_the_highlight() {
     let log = log_with(3);
     let mut state = MessagesOverlayState::new();
-    state.handle(&log, press(KeyCode::Char('j')));
+    state.handle_key(&log, press(KeyCode::Char('j')));
     let theme = Theme::default();
     let area = Rect::new(0, 0, 80, 24);
     let mut buf = Buffer::empty(area);

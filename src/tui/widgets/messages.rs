@@ -69,16 +69,29 @@ impl MessagesOverlayState {
     }
 }
 
-impl crate::tui::Overlay for MessagesOverlayState {
-    type Ctx<'a> = &'a MessageLog;
-
-    fn handle(&mut self, log: &MessageLog, key: KeyEvent) -> crate::tui::OverlayOutcome {
-        use crate::tui::OverlayOutcome;
+impl MessagesOverlayState {
+    /// One key over `log`: move the selection, scroll the detail, copy
+    /// the selected entry, or close.
+    pub fn handle_key(
+        &mut self,
+        log: &MessageLog,
+        key: KeyEvent,
+    ) -> tuikit::overlay::Outcome<crate::tui::Msg> {
         use crate::tui::keybindings::overlay::{MESSAGES_KEYS, MessagesKey};
         use tuikit::keys::resolve;
+        use tuikit::overlay::Outcome;
         let len = log.len();
         match resolve(MESSAGES_KEYS, key) {
-            Some(MessagesKey::Abort | MessagesKey::Close) => return OverlayOutcome::Close,
+            Some(MessagesKey::Abort | MessagesKey::Close) => return Outcome::Close,
+            // The clipboard write is the executor's.
+            Some(MessagesKey::Copy) => {
+                if let Some(entry) = self.selected_entry(log) {
+                    return Outcome::Stay(crate::tui::Msg::Copy {
+                        text: entry.full_text(),
+                        done: "copied message".to_string(),
+                    });
+                }
+            }
             // A log: the selection stops at the newest and the oldest.
             Some(MessagesKey::Next) => self.select(Ends::Clamp.step(self.selected, len, 1), len),
             Some(MessagesKey::Prev) => self.select(Ends::Clamp.step(self.selected, len, -1), len),
@@ -92,10 +105,9 @@ impl crate::tui::Overlay for MessagesOverlayState {
             Some(MessagesKey::DetailPageUp) => {
                 self.scroll_detail(-i32::from(self.detail_rows.max(1)));
             }
-            // The runtime copies before the key reaches the widget.
-            Some(MessagesKey::Copy) | None => {}
+            None => {}
         }
-        OverlayOutcome::Consumed
+        Outcome::Consumed
     }
 }
 

@@ -192,7 +192,7 @@ fn closing_the_modal_on_a_search_equal_to_an_earlier_one_keeps_one_entry() {
 #[test]
 fn a_content_search_opens_on_all_unless_it_opens_onto_a_search() {
     use crate::tui::Modal;
-    let reach = |app: &App| match app.modal_stack().last() {
+    let reach = |app: &App| match app.modal_stack().top() {
         Some(Modal::Search(state)) => state.reach(),
         _ => panic!("no search modal"),
     };

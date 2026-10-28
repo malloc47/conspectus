@@ -147,6 +147,10 @@ Targeted for 0.2.0, after 0.1.0 is tagged. History, rebuild, and pins
   reports `viewer closed`. Closing any dialog with a key clears the
   status line, so a hint it showed while open (`controls: …`, `viewing
   …`) no longer stays behind.
+- **Dialogs draw as a stack.** Every open dialog is drawn, bottom to
+  top, so one opened over another shows the lower one around its frame
+  (only the top one used to be drawn), and a toast now shows over the
+  full-screen transcript and pane viewers, which used to hide it.
 - **Dialog footers read one way.** Every footer pairs keys with a short
   verb: `to scroll`, `to close`, `to copy`, `to confirm`, and `to cancel`
   lose their "to" (the help page, the value viewer, the worktree

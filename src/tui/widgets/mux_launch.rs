@@ -33,7 +33,6 @@ use ratatui::widgets::Widget;
 use tuikit::frame::Lines;
 
 use crate::tui::Msg;
-use crate::tui::modal::{Overlay, OverlayOutcome};
 use crate::tui::theme::Theme;
 use crate::tui::widgets::form::{
     self, choice_row, derived_row, footer_lines, harness_row, input_row, options_row, path_row,
@@ -44,6 +43,7 @@ use crate::tui::widgets::launch_spec_form::{
     LaunchSpecFormState, LaunchSpecInit, SpecTextField, optional_string, parse_launch_argv,
 };
 use crate::tui::widgets::path_omnibox::PathOmniboxOutcome;
+use tuikit::overlay::Outcome;
 
 const HARNESS_LABEL: &str = "harness";
 const CWD_LABEL: &str = "cwd";
@@ -306,12 +306,12 @@ impl MuxLaunchFormState {
         self.focus = stops[tuikit::selection::Ends::Wrap.step(idx, stops.len(), delta)];
     }
 
-    fn try_commit(&mut self) -> OverlayOutcome {
+    fn try_commit(&mut self) -> Outcome<Msg> {
         match self.build_request() {
-            Ok(req) => OverlayOutcome::Commit(Box::new(Msg::CommitMuxLaunch(req))),
+            Ok(req) => Outcome::Commit(Msg::CommitMuxLaunch(req)),
             Err(msg) => {
                 self.spec.set_error(msg);
-                OverlayOutcome::Consumed
+                Outcome::Consumed
             }
         }
     }
@@ -368,25 +368,24 @@ impl MuxLaunchFormState {
     }
 }
 
-impl Overlay for MuxLaunchFormState {
-    type Ctx<'a> = ();
-
-    fn handle(&mut self, _ctx: (), key: KeyEvent) -> OverlayOutcome {
+impl MuxLaunchFormState {
+    /// One key: edit, move between the rows, change an option, launch, or close.
+    pub fn handle_key(&mut self, key: KeyEvent) -> Outcome<Msg> {
         use crate::tui::keybindings::overlay::MUX_LAUNCH_KEYS;
         use tuikit::keys::{FormKey, resolve};
         let option_delta = match resolve(MUX_LAUNCH_KEYS, key) {
-            Some(FormKey::Abort | FormKey::Cancel) => return OverlayOutcome::Close,
+            Some(FormKey::Abort | FormKey::Cancel) => return Outcome::Close,
             Some(FormKey::Up) => {
                 self.advance_row(-1);
-                return OverlayOutcome::Consumed;
+                return Outcome::Consumed;
             }
             Some(FormKey::Back) => {
                 self.advance_stop(-1);
-                return OverlayOutcome::Consumed;
+                return Outcome::Consumed;
             }
             Some(FormKey::Down) => {
                 self.advance_row(1);
-                return OverlayOutcome::Consumed;
+                return Outcome::Consumed;
             }
             Some(FormKey::Tab) => {
                 // Tab completes a path in the cwd field, and moves on
@@ -395,13 +394,13 @@ impl Overlay for MuxLaunchFormState {
                     match self.spec.cwd_handle_key(key) {
                         PathOmniboxOutcome::Completed | PathOmniboxOutcome::Changed => {
                             self.spec.clear_error();
-                            return OverlayOutcome::Consumed;
+                            return Outcome::Consumed;
                         }
                         PathOmniboxOutcome::NoCompletion | PathOmniboxOutcome::Continue => {}
                     }
                 }
                 self.advance_stop(1);
-                return OverlayOutcome::Consumed;
+                return Outcome::Consumed;
             }
             Some(FormKey::Submit) => return self.try_commit(),
             Some(FormKey::OptionPrev) => Some(-1),
@@ -420,7 +419,7 @@ impl Overlay for MuxLaunchFormState {
                             form::default_argv(defaults.as_ref(), harness, &cwd)
                         });
                     self.spec.clear_error();
-                    return OverlayOutcome::Consumed;
+                    return Outcome::Consumed;
                 }
             }
             MuxLaunchField::LaunchOptions => {
@@ -429,28 +428,28 @@ impl Overlay for MuxLaunchFormState {
                     self.spec.toggle_launch_option(&default, delta);
                     self.spec.clear_error();
                 }
-                return OverlayOutcome::Consumed;
+                return Outcome::Consumed;
             }
             MuxLaunchField::Pin => {
                 if let Some(delta) = option_delta {
                     self.pin = self.pin.cycled(delta);
                     self.spec.clear_error();
                 }
-                return OverlayOutcome::Consumed;
+                return Outcome::Consumed;
             }
             MuxLaunchField::MuxSocketToggle => {
                 if option_delta.is_some() {
                     self.socket_enabled = !self.socket_enabled;
                     self.spec.clear_error();
                 }
-                return OverlayOutcome::Consumed;
+                return Outcome::Consumed;
             }
             MuxLaunchField::WorktreeToggle => {
                 if option_delta.is_some() {
                     self.spec.toggle_worktree();
                     self.spec.clear_error();
                 }
-                return OverlayOutcome::Consumed;
+                return Outcome::Consumed;
             }
             MuxLaunchField::Cwd => {
                 let outcome = self.spec.cwd_handle_key(key);
@@ -460,7 +459,7 @@ impl Overlay for MuxLaunchFormState {
                 ) {
                     self.spec.clear_error();
                 }
-                return OverlayOutcome::Consumed;
+                return Outcome::Consumed;
             }
             _ => {}
         }
@@ -487,11 +486,11 @@ impl Overlay for MuxLaunchFormState {
         match input_outcome {
             Some(InputOutcome::Continue) => {
                 self.spec.clear_error();
-                OverlayOutcome::Consumed
+                Outcome::Consumed
             }
-            Some(InputOutcome::Cancel | InputOutcome::Abort) => OverlayOutcome::Close,
+            Some(InputOutcome::Cancel | InputOutcome::Abort) => Outcome::Close,
             Some(InputOutcome::Confirm(_)) => self.try_commit(),
-            None => OverlayOutcome::Consumed,
+            None => Outcome::Consumed,
         }
     }
 }

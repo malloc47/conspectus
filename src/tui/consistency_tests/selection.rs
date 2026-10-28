@@ -142,9 +142,7 @@ fn short_choice_lists_wrap_from_the_first_row_to_the_last() {
         let mut app = app_with(view, open);
         let rect = rect_of(view, open, &mut app);
         let before = marked_rows(&buffer_of(&mut app, 120, 40), rect);
-        let moved = app
-            .top_modal_mut()
-            .is_some_and(|modal| press(modal, KeyCode::Up));
+        let moved = press(&mut app, KeyCode::Up);
         if !moved || before.is_empty() {
             continue;
         }

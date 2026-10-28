@@ -89,7 +89,7 @@ fn every_modal_has_a_row_in_the_convention() {
     // list in layout.rs makes a new variant fail there first).
     for (name, view, open) in builders() {
         let app = app_with(view, open);
-        assert_eq!(name_of(app.modal_stack().last().expect("a modal")), name);
+        assert_eq!(name_of(app.modal_stack().top().expect("a modal")), name);
     }
 }
 

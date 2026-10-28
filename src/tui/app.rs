@@ -255,14 +255,10 @@ pub struct App {
     /// later duplicate snaps the cursor back to the row after the
     /// first one.
     last_visible_index: Option<usize>,
-    /// Open overlays as a stack (ADR 0085 contract 3). Input routes
-    /// to the top entry first, `draw` renders bottom-to-top, and
-    /// commit / close outcomes pop the top. Grows one variant per
-    /// overlay migration wave — see [`crate::tui::Modal`]. The
-    /// remaining `Option<...>` fields below still host overlays
-    /// that haven't migrated yet; each wave deletes one field and
-    /// moves the state to a `Modal` variant.
-    modal_stack: Vec<crate::tui::Modal>,
+    /// Open overlays as a stack (ADR 0085 contract 3, ADR 0161). Keys
+    /// go to the top entry, every entry is drawn bottom to top, and a
+    /// close or a commit closes the top. See [`crate::tui::modal`].
+    modal_stack: crate::tui::modal::ModalStack,
     /// What the text prompt on top of the stack edits, when it edits a
     /// pin slot rather than the selected row's name.
     slot_prompt: Option<SlotPrompt>,
@@ -594,7 +590,7 @@ impl App {
             left_window: ScrollWindow::default(),
             explorer_window: ScrollWindow::default(),
             last_visible_index: None,
-            modal_stack: Vec::new(),
+            modal_stack: crate::tui::modal::ModalStack::new(),
             slot_prompt: None,
             rename_node: None,
             toast: crate::tui::widgets::toast::ToastEngineHolder(
@@ -1385,6 +1381,7 @@ impl App {
                 self.status_message = message;
             }
             Msg::Toast(text) => effects.push(Effect::Toast(text)),
+            Msg::Copy { text, done } => effects.push(Effect::Copy { text, done }),
             Msg::Report(entry) => {
                 self.status_message = Some(if entry.level.needs_attention() {
                     format!("{} · ! details", entry.summary)
@@ -1486,7 +1483,7 @@ impl App {
             }
             Msg::Viewer(vmsg) => {
                 use crate::viewer::input::{ViewerEffect, reduce};
-                if !matches!(self.modal_stack.last(), Some(crate::tui::Modal::Viewer(_))) {
+                if !matches!(self.modal_stack.top(), Some(crate::tui::Modal::Viewer(_))) {
                     return effects;
                 }
                 let Some(crate::tui::Modal::Viewer(state)) = self.modal_stack.pop() else {
@@ -1502,7 +1499,7 @@ impl App {
                 }
             }
             Msg::ViewerFind(fmsg) => {
-                if !matches!(self.modal_stack.last(), Some(crate::tui::Modal::Viewer(_))) {
+                if !matches!(self.modal_stack.top(), Some(crate::tui::Modal::Viewer(_))) {
                     return effects;
                 }
                 let Some(crate::tui::Modal::Viewer(state)) = self.modal_stack.pop() else {

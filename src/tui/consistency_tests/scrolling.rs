@@ -14,10 +14,8 @@ use ratatui::crossterm::event::{Event, KeyCode, KeyEvent, KeyModifiers};
 
 use super::layout::{builders, framed_and_bare, modal_rect};
 use super::*;
-use crate::tui::Modal;
 use crate::tui::keymap::Action;
 use crate::tui::messages::LogEntry;
-use crate::tui::modal::{Overlay, OverlayOutcome};
 use crate::tui::widgets::value_modal::ValueModalState;
 
 /// The sizes every check runs at: a common terminal and a small one.
@@ -40,23 +38,6 @@ fn key_event(code: KeyCode) -> KeyEvent {
     KeyEvent::new(code, modifiers)
 }
 
-/// Hand a key to the top modal's own handler, closing it when it asks.
-fn to_top_modal(app: &mut App, key: KeyEvent) {
-    let outcome = match app.top_modal_mut() {
-        Some(Modal::ValueModal(state)) => state.handle((), key),
-        Some(Modal::RowMenu(state)) => state.handle((), key),
-        Some(Modal::MuxMenu(state)) => state.handle((), key),
-        Some(Modal::WorktreeMenu(state)) => state.handle((), key),
-        other => panic!(
-            "no handler here for {:?}",
-            other.map(|modal| super::layout::name_of(modal))
-        ),
-    };
-    if outcome == OverlayOutcome::Close {
-        app.pop_top_modal();
-    }
-}
-
 /// What the live loop does for one key: draw the screen, then give the
 /// key to whatever owns it. Returns the next frame.
 fn press(app: &mut App, size: (u16, u16), code: KeyCode) -> Buffer {
@@ -66,22 +47,7 @@ fn press(app: &mut App, size: (u16, u16), code: KeyCode) -> Buffer {
         Some(Action::Msg(msg)) => {
             app.update(*msg);
         }
-        Some(Action::MessagesOverlayKey(key)) => {
-            crate::tui::runtime::handle_messages_overlay_key(app, key);
-        }
-        Some(Action::HelpOverlayKey(key)) => crate::tui::runtime::handle_help_overlay_key(app, key),
-        Some(Action::ViewerOverlayKey(key)) => {
-            crate::tui::runtime::handle_viewer_overlay_key(app, key);
-        }
-        Some(Action::PaneViewerKey(key)) => {
-            crate::tui::runtime::handle_pane_viewer_key(app, key);
-        }
-        Some(
-            Action::ValueModalKey(key)
-            | Action::RowMenuKey(key)
-            | Action::MuxMenuKey(key)
-            | Action::WorktreeMenuKey(key),
-        ) => to_top_modal(app, key),
+        Some(Action::ModalKey(key)) => crate::tui::runtime::modal_key_pure(app, key),
         other => panic!("unexpected action for {code:?}: {other:?}"),
     }
     screen(app, size)

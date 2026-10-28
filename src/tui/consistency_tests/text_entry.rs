@@ -13,10 +13,8 @@ use ratatui::backend::TestBackend;
 use ratatui::crossterm::event::{Event, KeyCode, KeyEvent, KeyModifiers};
 
 use super::*;
-use crate::tui::Modal;
 use crate::tui::effect::{Effect, ExecSpec, StoreOp};
 use crate::tui::keymap::Action;
-use crate::tui::modal::{Overlay, OverlayOutcome};
 use crate::tui::widgets::controls::ControlsOverlayState;
 use crate::tui::widgets::mux_launch::MuxLaunchFormState;
 
@@ -55,68 +53,18 @@ fn apply(app: &mut App, msg: Msg) -> Vec<Effect> {
     effects
 }
 
-/// What the live loop does with an overlay's outcome: a commit closes
-/// the overlay and dispatches its message, a message sent while the
-/// overlay stays open is dispatched in place.
-fn settle(app: &mut App, outcome: OverlayOutcome) -> Vec<Effect> {
-    match outcome {
-        OverlayOutcome::Consumed => Vec::new(),
-        OverlayOutcome::Close => {
-            app.pop_top_modal();
-            Vec::new()
-        }
-        OverlayOutcome::Commit(msg) => {
-            app.pop_top_modal();
-            apply(app, *msg)
-        }
-        OverlayOutcome::CommitAndStay(msg) => apply(app, *msg),
-    }
-}
-
-/// Hand one routed action to the field that owns it.
+/// Hand one routed action to the modal that owns it, as the live loop
+/// does: through the stack, with what it commits or sends while it stays
+/// open run on the pure executor. Returns the effects those asked for.
 fn run(app: &mut App, action: Action) -> Vec<Effect> {
-    match action {
-        Action::RenameOverlayKey(key)
-        | Action::WorktreeMenuKey(key)
-        | Action::NewMuxFormKey(key)
-        | Action::MuxLaunchFormKey(key)
-        | Action::PinEditFormKey(key)
-        | Action::PickerKey(key) => {
-            let outcome = match app.top_modal_mut() {
-                Some(Modal::Rename(state)) => state.handle((), key),
-                Some(Modal::WorktreeMenu(state)) => state.handle((), key),
-                Some(Modal::NewMux(state)) => state.handle((), key),
-                Some(Modal::MuxLaunch(state)) => state.handle((), key),
-                Some(Modal::PinEdit(state)) => state.handle((), key),
-                Some(Modal::Picker(state)) => state.handle((), key),
-                other => panic!(
-                    "no field here for {key:?}: {:?}",
-                    other.map(|modal| super::layout::name_of(modal))
-                ),
-            };
-            settle(app, outcome)
-        }
-        Action::ControlsOverlayKey(key) => {
-            crate::tui::runtime::handle_controls_overlay_key(app, key);
-            Vec::new()
-        }
-        Action::SearchOverlayKey(key) => {
-            let mut effects = Vec::new();
-            crate::tui::runtime::handle_search_overlay_key_with(app, key, &mut |app, msg| {
-                effects.extend(apply(app, msg));
-            });
-            effects
-        }
-        Action::ViewerOverlayKey(key) => {
-            crate::tui::runtime::handle_viewer_overlay_key(app, key);
-            Vec::new()
-        }
-        Action::PaneViewerKey(key) => {
-            crate::tui::runtime::handle_pane_viewer_key(app, key);
-            Vec::new()
-        }
-        other => panic!("not a text field's key: {other:?}"),
-    }
+    let Action::ModalKey(key) = action else {
+        panic!("not a text field's key: {action:?}");
+    };
+    let mut effects = Vec::new();
+    crate::tui::runtime::modal_key(app, key, &mut |app, msg| {
+        effects.extend(apply(app, msg));
+    });
+    effects
 }
 
 /// One key, the way the live loop sends it.

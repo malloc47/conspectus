@@ -1282,10 +1282,9 @@ fn search_kind_glyph_span_for(kind: NodeKind, theme: &Theme) -> Span<'static> {
     span!(Style::default().fg(style.color); "{} ", style.glyph)
 }
 
-/// Per-event context the search overlay reads through the
-/// [`crate::tui::Overlay`] trait. Carries the current
-/// visible-row items so the widget can rerank matches on every
-/// keystroke.
+/// What the search overlay reads on each key: the current visible-row
+/// items, so it can rerank matches on every keystroke, its content
+/// results, and, the first time it widens, every entity.
 pub struct SearchContext<'a> {
     pub items: &'a [SearchItem<'a>],
     /// The contents results, in the order the overlay lists them.
@@ -1295,10 +1294,15 @@ pub struct SearchContext<'a> {
     pub entities: Option<EntityIndex>,
 }
 
-impl crate::tui::Overlay for SearchOverlayState {
-    type Ctx<'a> = SearchContext<'a>;
-
-    fn handle(&mut self, ctx: SearchContext<'_>, key: KeyEvent) -> crate::tui::OverlayOutcome {
+impl SearchOverlayState {
+    /// One key with what the overlay reads (`ctx`): edit the query, move,
+    /// pick a row, an entity, or a hit, regroup, keep the search, or close.
+    pub fn handle_in(
+        &mut self,
+        ctx: SearchContext<'_>,
+        key: KeyEvent,
+    ) -> tuikit::overlay::Outcome<crate::tui::Msg> {
+        use tuikit::overlay::Outcome;
         self.set_content_len(ctx.content.len());
         if let Some(entities) = ctx.entities {
             self.set_entities(entities);
@@ -1306,14 +1310,10 @@ impl crate::tui::Overlay for SearchOverlayState {
         let outcome = self.handle_key(key);
         self.refresh_matches(ctx.items);
         match outcome {
-            SearchOutcome::OpenEntity(node) => {
-                crate::tui::OverlayOutcome::Commit(Box::new(crate::tui::Msg::OpenEntity(*node)))
-            }
-            SearchOutcome::Continue => crate::tui::OverlayOutcome::Consumed,
-            SearchOutcome::Cancel => crate::tui::OverlayOutcome::Close,
-            SearchOutcome::Confirm(id) => {
-                crate::tui::OverlayOutcome::Commit(Box::new(crate::tui::Msg::SelectRow(id)))
-            }
+            SearchOutcome::OpenEntity(node) => Outcome::Commit(crate::tui::Msg::OpenEntity(*node)),
+            SearchOutcome::Continue => Outcome::Consumed,
+            SearchOutcome::Cancel => Outcome::Close,
+            SearchOutcome::Confirm(id) => Outcome::Commit(crate::tui::Msg::SelectRow(id)),
             SearchOutcome::OpenHit(index) => match ctx.content.get(index) {
                 Some(row) => {
                     let text = self.content_text();
@@ -1333,30 +1333,24 @@ impl crate::tui::Overlay for SearchOverlayState {
                             reveal: true,
                         },
                     };
-                    crate::tui::OverlayOutcome::Commit(Box::new(msg))
+                    Outcome::Commit(msg)
                 }
-                None => crate::tui::OverlayOutcome::Close,
+                None => Outcome::Close,
             },
-            SearchOutcome::ApplyFilter => {
-                crate::tui::OverlayOutcome::Commit(Box::new(crate::tui::Msg::ApplyContentSearch {
-                    text: self.content_text(),
-                    kinds: self.kinds,
-                    group: self.group,
-                    reach: self.reach,
-                    show_results: false,
-                }))
-            }
-            SearchOutcome::Regroup(group) => crate::tui::OverlayOutcome::CommitAndStay(Box::new(
-                crate::tui::Msg::SetContentGroup(group),
-            )),
-            SearchOutcome::Keep => {
-                crate::tui::OverlayOutcome::Commit(Box::new(crate::tui::Msg::KeepContentSearch {
-                    text: self.content_text(),
-                    kinds: self.kinds,
-                    group: self.group,
-                    reach: self.reach,
-                }))
-            }
+            SearchOutcome::ApplyFilter => Outcome::Commit(crate::tui::Msg::ApplyContentSearch {
+                text: self.content_text(),
+                kinds: self.kinds,
+                group: self.group,
+                reach: self.reach,
+                show_results: false,
+            }),
+            SearchOutcome::Regroup(group) => Outcome::Stay(crate::tui::Msg::SetContentGroup(group)),
+            SearchOutcome::Keep => Outcome::Commit(crate::tui::Msg::KeepContentSearch {
+                text: self.content_text(),
+                kinds: self.kinds,
+                group: self.group,
+                reach: self.reach,
+            }),
         }
     }
 }

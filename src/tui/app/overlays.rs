@@ -1,44 +1,100 @@
-//! Modal-stack accessors: open, close, and peek each overlay.
+//! The modal stack on the App: lending it out with the App as the
+//! entries' context, routing a key to its top, drawing it, and the open,
+//! close, and peek accessors of each overlay.
 
 use super::*;
 
+use crate::tui::Modal;
+use crate::tui::modal::ModalStack;
+use tuikit::overlay::Settled;
+
 impl App {
+    /// Lends the modal stack out for one call, with the rest of the App as
+    /// the entries' context, and puts it back after. While it is lent out
+    /// the App's own stack is empty, so an entry reads its own state from
+    /// itself, never through the App's modal accessors; nothing opens a
+    /// modal from inside the call.
+    pub fn with_modals<R>(&mut self, f: impl FnOnce(&mut ModalStack, &App) -> R) -> R {
+        let mut stack = std::mem::take(&mut self.modal_stack);
+        let out = f(&mut stack, self);
+        debug_assert!(
+            self.modal_stack.is_empty(),
+            "a modal opened while the stack was lent out"
+        );
+        self.modal_stack = stack;
+        out
+    }
+
+    /// One key for the modal on top: what it asked for, with the stack's
+    /// part done (the top closed for a close or a commit). `None` when no
+    /// modal is open, so the key is the main screen's.
+    pub fn press_modal_key(
+        &mut self,
+        key: ratatui::crossterm::event::KeyEvent,
+    ) -> Option<Settled<Modal, Msg>> {
+        self.with_modals(|stack, app| {
+            let outcome = stack.route(key, app)?;
+            Some(stack.settle(outcome))
+        })
+    }
+
+    /// The bookkeeping as a key closes `closed`, before what it committed
+    /// is handled: the status line drops what the modal showed while it
+    /// was open (closing says nothing), and a closing search remembers how
+    /// it was set. Returns a message to send first, if any: a search that
+    /// was not kept drops its preview.
+    pub(crate) fn modal_closed(&mut self, closed: Modal, committed: Option<&Msg>) -> Option<Msg> {
+        self.status_message = None;
+        let Modal::Search(search) = closed else {
+            return None;
+        };
+        self.search_closed(&search);
+        // Keeping the search is the only way out that keeps its preview.
+        let kept = matches!(
+            committed,
+            Some(Msg::ApplyContentSearch { .. } | Msg::KeepContentSearch { .. })
+        );
+        (!kept).then_some(Msg::DiscardContentPreview)
+    }
+
+    /// Draws every open modal over `area`, bottom to top.
+    pub(crate) fn draw_modals(
+        &mut self,
+        area: ratatui::layout::Rect,
+        buf: &mut ratatui::buffer::Buffer,
+    ) {
+        self.with_modals(|stack, app| stack.draw(area, buf, app, app.theme()));
+    }
+
+    /// Whether any modal is open; an open modal owns every key.
+    pub fn has_modal(&self) -> bool {
+        !self.modal_stack.is_empty()
+    }
+
+    /// Whether an open modal fills the screen (a full-screen viewer), so
+    /// nothing under it is drawn.
+    pub fn modals_fill_screen(&self) -> bool {
+        self.modal_stack.fills_screen()
+    }
+
+    /// The name of the modal on top, as `Modal::NAMES` lists it.
+    pub fn top_modal_name(&self) -> Option<&'static str> {
+        self.modal_stack.top().map(Modal::name)
+    }
+
     /// Whether the overlay on top is typing into a text field: a prompt,
     /// a form row that takes text, a filter editor, a query, or a find
     /// prompt. A paste goes only there; in a menu, a list, or a choice
     /// row its characters would act as keys.
     pub fn text_field_has_keys(&self) -> bool {
-        use crate::tui::Modal;
-        use crate::tui::widgets::controls::SubEditor;
-        let Some(top) = self.modal_stack.last() else {
-            return false;
-        };
-        match top {
-            Modal::Rename(_) | Modal::NewMux(_) | Modal::Picker(_) => true,
-            Modal::WorktreeMenu(menu) => menu.editing_branch(),
-            Modal::MuxLaunch(form) => form.focus().takes_text(),
-            Modal::PinEdit(form) => form.focused_label().is_some(),
-            Modal::Controls(controls) => matches!(
-                controls.sub_editor(),
-                Some(SubEditor::MaxAge(_) | SubEditor::Content(_))
-            ),
-            Modal::Search(search) => search.options_cursor().is_none(),
-            Modal::Viewer(viewer) => viewer.find.prompt.is_some(),
-            Modal::PaneViewer(viewer) => viewer.prompt.is_some(),
-            Modal::Help(_)
-            | Modal::ValueModal(_)
-            | Modal::Messages(_)
-            | Modal::MuxMenu(_)
-            | Modal::RowMenu(_)
-            | Modal::CleanUp(_) => false,
-        }
+        self.modal_stack.takes_text()
     }
 
     /// Active rename-overlay state, if any. Lives on the modal
     /// stack (ADR 0085 contract 3); this accessor peeks the top
     /// entry.
     pub fn rename_overlay(&self) -> Option<&crate::tui::widgets::input::TextInputState> {
-        match self.modal_stack.last()? {
+        match self.modal_stack.top()? {
             crate::tui::Modal::Rename(state) => Some(state.inner()),
             _ => None,
         }
@@ -46,7 +102,7 @@ impl App {
 
     /// Mutable access for the runtime's per-key forwarding.
     pub fn rename_overlay_mut(&mut self) -> Option<&mut crate::tui::RenameOverlayState> {
-        match self.modal_stack.last_mut()? {
+        match self.modal_stack.top_mut()? {
             crate::tui::Modal::Rename(state) => Some(state),
             _ => None,
         }
@@ -326,7 +382,7 @@ impl App {
 
     /// The open picker, if it is on top of the stack.
     pub fn picker(&self) -> Option<&crate::tui::widgets::picker::PickerState> {
-        match self.modal_stack.last()? {
+        match self.modal_stack.top()? {
             crate::tui::Modal::Picker(state) => Some(state.as_ref()),
             _ => None,
         }
@@ -334,7 +390,7 @@ impl App {
 
     /// Mutable access for the runtime's per-key forwarding.
     pub fn picker_mut(&mut self) -> Option<&mut crate::tui::widgets::picker::PickerState> {
-        match self.modal_stack.last_mut()? {
+        match self.modal_stack.top_mut()? {
             crate::tui::Modal::Picker(state) => Some(state.as_mut()),
             _ => None,
         }
@@ -346,21 +402,21 @@ impl App {
     }
 
     pub fn close_picker(&mut self) {
-        if matches!(self.modal_stack.last(), Some(crate::tui::Modal::Picker(_))) {
+        if matches!(self.modal_stack.top(), Some(crate::tui::Modal::Picker(_))) {
             self.modal_stack.pop();
         }
     }
 
     /// Pop the rename overlay if it's on top; no-op otherwise.
     pub fn close_rename_overlay(&mut self) {
-        if matches!(self.modal_stack.last(), Some(crate::tui::Modal::Rename(_))) {
+        if matches!(self.modal_stack.top(), Some(crate::tui::Modal::Rename(_))) {
             self.modal_stack.pop();
         }
     }
 
     /// Active worktree action menu, if on top of the stack.
     pub fn worktree_menu(&self) -> Option<&crate::tui::widgets::worktree_menu::WorktreeMenuState> {
-        match self.modal_stack.last()? {
+        match self.modal_stack.top()? {
             crate::tui::Modal::WorktreeMenu(state) => Some(state.as_ref()),
             _ => None,
         }
@@ -370,7 +426,7 @@ impl App {
     pub fn worktree_menu_mut(
         &mut self,
     ) -> Option<&mut crate::tui::widgets::worktree_menu::WorktreeMenuState> {
-        match self.modal_stack.last_mut()? {
+        match self.modal_stack.top_mut()? {
             crate::tui::Modal::WorktreeMenu(state) => Some(state.as_mut()),
             _ => None,
         }
@@ -388,7 +444,7 @@ impl App {
     /// Pop the worktree menu if it's on top; no-op otherwise.
     pub fn close_worktree_menu(&mut self) {
         if matches!(
-            self.modal_stack.last(),
+            self.modal_stack.top(),
             Some(crate::tui::Modal::WorktreeMenu(_))
         ) {
             self.modal_stack.pop();
@@ -397,7 +453,7 @@ impl App {
 
     /// Active bare mux form, if on top of the stack.
     pub fn new_mux_form(&self) -> Option<&crate::tui::widgets::new_mux::NewMuxFormState> {
-        match self.modal_stack.last()? {
+        match self.modal_stack.top()? {
             crate::tui::Modal::NewMux(state) => Some(state),
             _ => None,
         }
@@ -407,7 +463,7 @@ impl App {
     pub fn new_mux_form_mut(
         &mut self,
     ) -> Option<&mut crate::tui::widgets::new_mux::NewMuxFormState> {
-        match self.modal_stack.last_mut()? {
+        match self.modal_stack.top_mut()? {
             crate::tui::Modal::NewMux(state) => Some(state),
             _ => None,
         }
@@ -420,21 +476,21 @@ impl App {
 
     /// Pop the bare mux form if it's on top; no-op otherwise.
     pub fn close_new_mux_form(&mut self) {
-        if matches!(self.modal_stack.last(), Some(crate::tui::Modal::NewMux(_))) {
+        if matches!(self.modal_stack.top(), Some(crate::tui::Modal::NewMux(_))) {
             self.modal_stack.pop();
         }
     }
 
     /// Active mux action menu, if on top of stack.
     pub fn mux_menu(&self) -> Option<&crate::tui::widgets::mux_menu::MuxMenuState> {
-        match self.modal_stack.last()? {
+        match self.modal_stack.top()? {
             crate::tui::Modal::MuxMenu(state) => Some(state),
             _ => None,
         }
     }
 
     pub fn mux_menu_mut(&mut self) -> Option<&mut crate::tui::widgets::mux_menu::MuxMenuState> {
-        match self.modal_stack.last_mut()? {
+        match self.modal_stack.top_mut()? {
             crate::tui::Modal::MuxMenu(state) => Some(state),
             _ => None,
         }
@@ -445,7 +501,7 @@ impl App {
     }
 
     pub fn close_mux_menu(&mut self) {
-        if matches!(self.modal_stack.last(), Some(crate::tui::Modal::MuxMenu(_))) {
+        if matches!(self.modal_stack.top(), Some(crate::tui::Modal::MuxMenu(_))) {
             self.modal_stack.pop();
         }
     }
@@ -458,14 +514,14 @@ impl App {
 
     /// Active row action menu, if on top of stack.
     pub fn row_menu(&self) -> Option<&crate::tui::widgets::row_menu::RowMenuState> {
-        match self.modal_stack.last()? {
+        match self.modal_stack.top()? {
             crate::tui::Modal::RowMenu(state) => Some(state.as_ref()),
             _ => None,
         }
     }
 
     pub fn row_menu_mut(&mut self) -> Option<&mut crate::tui::widgets::row_menu::RowMenuState> {
-        match self.modal_stack.last_mut()? {
+        match self.modal_stack.top_mut()? {
             crate::tui::Modal::RowMenu(state) => Some(state.as_mut()),
             _ => None,
         }
@@ -477,21 +533,21 @@ impl App {
     }
 
     pub fn close_row_menu(&mut self) {
-        if matches!(self.modal_stack.last(), Some(crate::tui::Modal::RowMenu(_))) {
+        if matches!(self.modal_stack.top(), Some(crate::tui::Modal::RowMenu(_))) {
             self.modal_stack.pop();
         }
     }
 
     /// Active Clean up modal, if on top of stack.
     pub fn clean_up(&self) -> Option<&crate::tui::widgets::clean_up::CleanUpState> {
-        match self.modal_stack.last()? {
+        match self.modal_stack.top()? {
             crate::tui::Modal::CleanUp(state) => Some(state.as_ref()),
             _ => None,
         }
     }
 
     pub fn clean_up_mut(&mut self) -> Option<&mut crate::tui::widgets::clean_up::CleanUpState> {
-        match self.modal_stack.last_mut()? {
+        match self.modal_stack.top_mut()? {
             crate::tui::Modal::CleanUp(state) => Some(state.as_mut()),
             _ => None,
         }
@@ -503,14 +559,14 @@ impl App {
     }
 
     pub fn close_clean_up(&mut self) {
-        if matches!(self.modal_stack.last(), Some(crate::tui::Modal::CleanUp(_))) {
+        if matches!(self.modal_stack.top(), Some(crate::tui::Modal::CleanUp(_))) {
             self.modal_stack.pop();
         }
     }
 
     /// Active mux-launch form, if on top of stack.
     pub fn mux_launch_form(&self) -> Option<&crate::tui::widgets::mux_launch::MuxLaunchFormState> {
-        match self.modal_stack.last()? {
+        match self.modal_stack.top()? {
             crate::tui::Modal::MuxLaunch(state) => Some(state.as_ref()),
             _ => None,
         }
@@ -519,7 +575,7 @@ impl App {
     pub fn mux_launch_form_mut(
         &mut self,
     ) -> Option<&mut crate::tui::widgets::mux_launch::MuxLaunchFormState> {
-        match self.modal_stack.last_mut()? {
+        match self.modal_stack.top_mut()? {
             crate::tui::Modal::MuxLaunch(state) => Some(state.as_mut()),
             _ => None,
         }
@@ -535,7 +591,7 @@ impl App {
 
     pub fn close_mux_launch_form(&mut self) {
         if matches!(
-            self.modal_stack.last(),
+            self.modal_stack.top(),
             Some(crate::tui::Modal::MuxLaunch(_))
         ) {
             self.modal_stack.pop();
@@ -579,7 +635,7 @@ impl App {
 
     /// Active pin edit form, if on top of stack.
     pub fn pin_edit_form(&self) -> Option<&crate::tui::widgets::pin_edit::PinEditFormState> {
-        match self.modal_stack.last()? {
+        match self.modal_stack.top()? {
             crate::tui::Modal::PinEdit(state) => Some(state.as_ref()),
             _ => None,
         }
@@ -588,7 +644,7 @@ impl App {
     pub fn pin_edit_form_mut(
         &mut self,
     ) -> Option<&mut crate::tui::widgets::pin_edit::PinEditFormState> {
-        match self.modal_stack.last_mut()? {
+        match self.modal_stack.top_mut()? {
             crate::tui::Modal::PinEdit(state) => Some(state.as_mut()),
             _ => None,
         }
@@ -600,7 +656,7 @@ impl App {
     }
 
     pub fn close_pin_edit_form(&mut self) {
-        if matches!(self.modal_stack.last(), Some(crate::tui::Modal::PinEdit(_))) {
+        if matches!(self.modal_stack.top(), Some(crate::tui::Modal::PinEdit(_))) {
             self.modal_stack.pop();
         }
     }
@@ -609,7 +665,7 @@ impl App {
     /// Lives on the modal stack (ADR 0085 contract 3); this
     /// accessor peeks the top entry.
     pub fn controls_overlay(&self) -> Option<&crate::tui::widgets::controls::ControlsOverlayState> {
-        match self.modal_stack.last()? {
+        match self.modal_stack.top()? {
             crate::tui::Modal::Controls(state) => Some(state),
             _ => None,
         }
@@ -619,7 +675,7 @@ impl App {
     pub fn controls_overlay_mut(
         &mut self,
     ) -> Option<&mut crate::tui::widgets::controls::ControlsOverlayState> {
-        match self.modal_stack.last_mut()? {
+        match self.modal_stack.top_mut()? {
             crate::tui::Modal::Controls(state) => Some(state),
             _ => None,
         }
@@ -636,10 +692,7 @@ impl App {
 
     /// Pop the controls overlay if it's on top; no-op otherwise.
     pub fn close_controls_overlay(&mut self) {
-        if matches!(
-            self.modal_stack.last(),
-            Some(crate::tui::Modal::Controls(_))
-        ) {
+        if matches!(self.modal_stack.top(), Some(crate::tui::Modal::Controls(_))) {
             self.modal_stack.pop();
         }
     }
@@ -648,7 +701,7 @@ impl App {
     /// modal stack (ADR 0085 contract 3); this accessor peeks the
     /// top entry.
     pub fn search_overlay(&self) -> Option<&crate::tui::widgets::search::SearchOverlayState> {
-        match self.modal_stack.last()? {
+        match self.modal_stack.top()? {
             crate::tui::Modal::Search(state) => Some(state),
             _ => None,
         }
@@ -657,7 +710,7 @@ impl App {
     pub fn search_overlay_mut(
         &mut self,
     ) -> Option<&mut crate::tui::widgets::search::SearchOverlayState> {
-        match self.modal_stack.last_mut()? {
+        match self.modal_stack.top_mut()? {
             crate::tui::Modal::Search(state) => Some(state),
             _ => None,
         }
@@ -747,10 +800,11 @@ impl App {
 
     /// Pop the search overlay if it's on top; no-op otherwise.
     pub fn close_search_overlay(&mut self) {
-        if matches!(self.modal_stack.last(), Some(crate::tui::Modal::Search(_))) {
-            self.remember_search_overlay();
-            self.modal_stack.pop();
-            self.commit_modal_search();
+        if let Some(Modal::Search(search)) = self
+            .modal_stack
+            .pop_if(|top| matches!(top, Modal::Search(_)))
+        {
+            self.search_closed(&search);
         }
     }
 
@@ -758,20 +812,19 @@ impl App {
     /// stack (ADR 0085 contract 3); this accessor peeks the top
     /// entry.
     pub fn help_overlay(&self) -> Option<&crate::tui::widgets::help::HelpOverlayState> {
-        match self.modal_stack.last()? {
+        match self.modal_stack.top()? {
             crate::tui::Modal::Help(state) => Some(state),
             _ => None,
         }
     }
 
     pub fn help_overlay_mut(&mut self) -> Option<&mut crate::tui::widgets::help::HelpOverlayState> {
-        match self.modal_stack.last_mut()? {
+        match self.modal_stack.top_mut()? {
             crate::tui::Modal::Help(state) => Some(state),
             _ => None,
         }
     }
 
-    /// Push a fresh help overlay onto the modal stack.
     /// Open the Messages overlay and mark its warnings and errors
     /// seen.
     pub fn open_messages_overlay(&mut self) {
@@ -782,34 +835,29 @@ impl App {
     }
 
     pub fn messages_overlay(&self) -> Option<&crate::tui::widgets::messages::MessagesOverlayState> {
-        match self.modal_stack.last()? {
+        match self.modal_stack.top()? {
             crate::tui::Modal::Messages(state) => Some(state),
             _ => None,
         }
     }
 
-    /// The open Messages overlay together with the log it reads.
+    /// The open Messages overlay, when it is on top.
     pub fn messages_overlay_mut(
         &mut self,
-    ) -> Option<(
-        &mut crate::tui::widgets::messages::MessagesOverlayState,
-        &crate::tui::messages::MessageLog,
-    )> {
-        match self.modal_stack.last_mut()? {
-            crate::tui::Modal::Messages(state) => Some((state, &self.messages)),
+    ) -> Option<&mut crate::tui::widgets::messages::MessagesOverlayState> {
+        match self.modal_stack.top_mut()? {
+            crate::tui::Modal::Messages(state) => Some(state),
             _ => None,
         }
     }
 
     pub fn close_messages_overlay(&mut self) {
-        if matches!(
-            self.modal_stack.last(),
-            Some(crate::tui::Modal::Messages(_))
-        ) {
+        if matches!(self.modal_stack.top(), Some(crate::tui::Modal::Messages(_))) {
             self.modal_stack.pop();
         }
     }
 
+    /// Push a fresh help overlay onto the modal stack.
     pub fn open_help_overlay(&mut self) {
         self.modal_stack.push(crate::tui::Modal::Help(
             crate::tui::widgets::help::HelpOverlayState::new(),
@@ -818,7 +866,7 @@ impl App {
 
     /// Pop the help overlay if it's on top; no-op otherwise.
     pub fn close_help_overlay(&mut self) {
-        if matches!(self.modal_stack.last(), Some(crate::tui::Modal::Help(_))) {
+        if matches!(self.modal_stack.top(), Some(crate::tui::Modal::Help(_))) {
             self.modal_stack.pop();
         }
     }
@@ -830,19 +878,11 @@ impl App {
         self.modal_stack.pop();
     }
 
-    /// The top of the modal stack, for tests that drive an overlay's own
-    /// key handling and then render it.
+    /// The modal stack, for tests that look at more than the top entry;
+    /// overlay-specific code uses the per-overlay accessors like
+    /// `help_overlay()`.
     #[cfg(test)]
-    pub(crate) fn top_modal_mut(&mut self) -> Option<&mut crate::tui::Modal> {
-        self.modal_stack.last_mut()
-    }
-
-    /// The modal stack (ADR 0085 contract 3). Reserved for
-    /// generic stack-operating code (draw sweep, generic
-    /// input-routing helper); overlay-specific consumers use the
-    /// per-overlay accessors like `help_overlay()`.
-    #[cfg(test)]
-    pub(crate) fn modal_stack(&self) -> &[crate::tui::Modal] {
+    pub(crate) fn modal_stack(&self) -> &ModalStack {
         &self.modal_stack
     }
 
@@ -850,7 +890,7 @@ impl App {
     /// modal stack (ADR 0085 contract 3); this accessor peeks the
     /// top entry.
     pub fn value_modal(&self) -> Option<&crate::tui::widgets::value_modal::ValueModalState> {
-        match self.modal_stack.last()? {
+        match self.modal_stack.top()? {
             crate::tui::Modal::ValueModal(state) => Some(state),
             _ => None,
         }
@@ -859,7 +899,7 @@ impl App {
     pub fn value_modal_mut(
         &mut self,
     ) -> Option<&mut crate::tui::widgets::value_modal::ValueModalState> {
-        match self.modal_stack.last_mut()? {
+        match self.modal_stack.top_mut()? {
             crate::tui::Modal::ValueModal(state) => Some(state),
             _ => None,
         }
@@ -868,7 +908,7 @@ impl App {
     /// Pop the value modal if it's on top; no-op otherwise.
     pub fn close_value_modal(&mut self) {
         if matches!(
-            self.modal_stack.last(),
+            self.modal_stack.top(),
             Some(crate::tui::Modal::ValueModal(_))
         ) {
             self.modal_stack.pop();
@@ -879,16 +919,15 @@ impl App {
     /// Lives on the modal stack
     /// (ADR 0085 contract 3); this accessor peeks the top entry.
     pub fn viewer_modal(&self) -> Option<&crate::viewer::state::ViewerState> {
-        match self.modal_stack.last()? {
+        match self.modal_stack.top()? {
             crate::tui::Modal::Viewer(state) => Some(state),
             _ => None,
         }
     }
 
-    /// Mutable access for the draw path (the widget writes back
-    /// viewport_height + total_lines metrics during render).
+    /// Mutable access to the viewer on top.
     pub fn viewer_modal_mut(&mut self) -> Option<&mut crate::viewer::state::ViewerState> {
-        match self.modal_stack.last_mut()? {
+        match self.modal_stack.top_mut()? {
             crate::tui::Modal::Viewer(state) => Some(state),
             _ => None,
         }
@@ -903,7 +942,7 @@ impl App {
 
     /// The pane scrollback viewer, when it is on top.
     pub fn pane_viewer(&self) -> Option<&crate::tui::widgets::pane_viewer::PaneViewerState> {
-        match self.modal_stack.last()? {
+        match self.modal_stack.top()? {
             crate::tui::Modal::PaneViewer(state) => Some(state),
             _ => None,
         }
@@ -912,7 +951,7 @@ impl App {
     pub fn pane_viewer_mut(
         &mut self,
     ) -> Option<&mut crate::tui::widgets::pane_viewer::PaneViewerState> {
-        match self.modal_stack.last_mut()? {
+        match self.modal_stack.top_mut()? {
             crate::tui::Modal::PaneViewer(state) => Some(state),
             _ => None,
         }
@@ -925,7 +964,7 @@ impl App {
 
     pub fn close_pane_viewer(&mut self) {
         if matches!(
-            self.modal_stack.last(),
+            self.modal_stack.top(),
             Some(crate::tui::Modal::PaneViewer(_))
         ) {
             self.modal_stack.pop();
@@ -934,7 +973,7 @@ impl App {
 
     /// Pop the viewer modal if it's on top; no-op otherwise.
     pub fn close_viewer_modal(&mut self) {
-        if matches!(self.modal_stack.last(), Some(crate::tui::Modal::Viewer(_))) {
+        if matches!(self.modal_stack.top(), Some(crate::tui::Modal::Viewer(_))) {
             self.modal_stack.pop();
         }
     }

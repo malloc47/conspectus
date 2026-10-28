@@ -6237,7 +6237,7 @@ fn going_back_to_a_row_that_vanished_says_so() {
 fn the_mux_launch_form_opens_with_defaults_and_the_worktree_toggle_off() {
     let mut app = native_app(View::Mux, RowFilter::default());
     app.update(Msg::OpenMuxLaunchForm);
-    let Some(crate::tui::Modal::MuxLaunch(form)) = app.modal_stack().last() else {
+    let Some(crate::tui::Modal::MuxLaunch(form)) = app.modal_stack().top() else {
         panic!("the launch form is on top");
     };
     assert!(
@@ -6385,7 +6385,6 @@ fn the_status_hint_for_a_live_repo_slot_matches_what_enter_does() {
 
 #[test]
 fn clean_up_shows_a_deselected_record_unticked() {
-    use crate::tui::modal::Overlay;
     use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
     let mut config = RunConfig::defaults();
     let zero = Some(std::time::Duration::from_secs(0));
@@ -6404,8 +6403,8 @@ fn clean_up_shows_a_deselected_record_unticked() {
     {
         let state = app.clean_up_mut().expect("the modal opened");
         let press = |code| KeyEvent::new(code, KeyModifiers::NONE);
-        state.handle((), press(KeyCode::Down));
-        state.handle((), press(KeyCode::Char(' ')));
+        state.handle_key(press(KeyCode::Down));
+        state.handle_key(press(KeyCode::Char(' ')));
         assert_eq!(state.selected(), [0], "the second record was deselected");
     }
     let frame = pinned_frame(&mut app, 100);

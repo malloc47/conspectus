@@ -20,9 +20,9 @@ use tuikit::scroll::ScrollWindow;
 use tuikit::selection::{self, Cursor, Ends};
 
 use crate::tui::Msg;
-use crate::tui::modal::{Overlay, OverlayOutcome};
 use crate::tui::theme::Theme;
 use crate::tui::widgets::input::TextInputState;
+use tuikit::overlay::Outcome;
 
 /// One candidate: what is shown, and what choosing it commits.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -136,31 +136,30 @@ impl PickerState {
     }
 }
 
-impl Overlay for PickerState {
-    type Ctx<'a> = ();
-
-    fn handle(&mut self, _ctx: (), key: KeyEvent) -> OverlayOutcome {
+impl PickerState {
+    /// One key: move, filter, pick, or close.
+    pub fn handle_key(&mut self, key: KeyEvent) -> Outcome<Msg> {
         use crate::tui::keybindings::overlay::{PICKER_KEYS, SearchKey};
         use tuikit::keys::resolve;
         match resolve(PICKER_KEYS, key) {
-            Some(SearchKey::Abort | SearchKey::Cancel) => OverlayOutcome::Close,
+            Some(SearchKey::Abort | SearchKey::Cancel) => Outcome::Close,
             Some(SearchKey::Pick) => match self.current() {
-                Some(item) => OverlayOutcome::Commit(Box::new(self.commit(item))),
-                None => OverlayOutcome::Close,
+                Some(item) => Outcome::Commit(self.commit(item)),
+                None => Outcome::Close,
             },
             Some(SearchKey::Down) => {
                 self.cursor = Ends::Wrap.step(self.cursor, self.visible.len(), 1);
-                OverlayOutcome::Consumed
+                Outcome::Consumed
             }
             Some(SearchKey::Up) => {
                 self.cursor = Ends::Wrap.step(self.cursor, self.visible.len(), -1);
-                OverlayOutcome::Consumed
+                Outcome::Consumed
             }
             // The picker has no scopes; its table binds none of these.
             Some(_) | None => {
                 let _ = self.query.handle_key(key);
                 self.refilter();
-                OverlayOutcome::Consumed
+                Outcome::Consumed
             }
         }
     }

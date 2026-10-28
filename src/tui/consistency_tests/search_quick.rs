@@ -319,7 +319,7 @@ fn the_search_hint_names_the_tab_keys() {
 fn shift_tab_widens_too() {
     let mut app = app_on_session();
     app.open_search_overlay();
-    crate::tui::runtime::handle_search_overlay_key(
+    crate::tui::runtime::modal_key_pure(
         &mut app,
         KeyEvent::new(KeyCode::BackTab, KeyModifiers::SHIFT),
     );
@@ -356,7 +356,7 @@ fn cursor(app: &App) -> usize {
 }
 
 fn ctrl(app: &mut App, c: char) {
-    crate::tui::runtime::handle_search_overlay_key(
+    crate::tui::runtime::modal_key_pure(
         app,
         KeyEvent::new(KeyCode::Char(c), KeyModifiers::CONTROL),
     );

@@ -31,11 +31,11 @@ use crate::model::{
     path_is_ancestor_of,
 };
 use crate::tui::Msg;
-use crate::tui::modal::{Overlay, OverlayOutcome};
 use crate::tui::rows::RowId;
 use crate::tui::theme::Theme;
 use crate::tui::widgets::input::{InputOutcome, TextInputState, TextInputWidget};
 use crate::tui::worktree_actions::{WorktreeAction, WorktreeContext, worktree_actions};
+use tuikit::overlay::Outcome;
 
 /// Actions the runtime knows how to dispatch today. `worktree_actions`
 /// may return more (reveal, future stories); the menu offers only
@@ -351,148 +351,148 @@ impl WorktreeMenuState {
         self.actions[self.cursor.min(self.actions.len() - 1)]
     }
 
-    fn activate(&mut self) -> OverlayOutcome {
+    fn activate(&mut self) -> Outcome<Msg> {
         match self.selected() {
             WorktreeAction::NewWorktree => {
                 self.mode = Mode::BranchInput(TextInputState::new("New worktree — branch", ""));
-                OverlayOutcome::Consumed
+                Outcome::Consumed
             }
             WorktreeAction::MergeWorktree => {
                 self.mode = Mode::ConfirmMerge;
-                OverlayOutcome::Consumed
+                Outcome::Consumed
             }
             WorktreeAction::RemoveWorktree => {
                 self.mode = Mode::ConfirmRemove;
-                OverlayOutcome::Consumed
+                Outcome::Consumed
             }
             WorktreeAction::CloseDownWorktree => {
                 self.mode = Mode::CloseDownChoice;
-                OverlayOutcome::Consumed
+                Outcome::Consumed
             }
             WorktreeAction::PruneWorktrees => {
                 self.mode = Mode::ConfirmPrune;
-                OverlayOutcome::Consumed
+                Outcome::Consumed
             }
             WorktreeAction::RevealCheckout | WorktreeAction::RevealSessions => {
                 match self.ctx.reveal_target.clone() {
-                    Some(row) => OverlayOutcome::Commit(Box::new(Msg::SelectRow(Box::new(row)))),
-                    None => OverlayOutcome::Close,
+                    Some(row) => Outcome::Commit(Msg::SelectRow(Box::new(row))),
+                    None => Outcome::Close,
                 }
             }
         }
     }
 
-    fn handle_list(&mut self, key: KeyEvent) -> OverlayOutcome {
+    fn handle_list(&mut self, key: KeyEvent) -> Outcome<Msg> {
         use tuikit::keys::{MENU_KEYS, MenuKey, resolve};
         match resolve(MENU_KEYS, key) {
-            Some(MenuKey::Abort | MenuKey::Close) => OverlayOutcome::Close,
+            Some(MenuKey::Abort | MenuKey::Close) => Outcome::Close,
             Some(MenuKey::Up) => {
                 self.cursor = Ends::Wrap.step(self.cursor, self.actions.len(), -1);
-                OverlayOutcome::Consumed
+                Outcome::Consumed
             }
             Some(MenuKey::Down) => {
                 self.cursor = Ends::Wrap.step(self.cursor, self.actions.len(), 1);
-                OverlayOutcome::Consumed
+                Outcome::Consumed
             }
             Some(MenuKey::Pick) => self.activate(),
-            None => OverlayOutcome::Consumed,
+            None => Outcome::Consumed,
         }
     }
 
-    fn handle_branch_input(&mut self, key: KeyEvent) -> OverlayOutcome {
+    fn handle_branch_input(&mut self, key: KeyEvent) -> Outcome<Msg> {
         let Mode::BranchInput(input) = &mut self.mode else {
-            return OverlayOutcome::Consumed;
+            return Outcome::Consumed;
         };
         match input.handle_key(key) {
-            InputOutcome::Continue => OverlayOutcome::Consumed,
-            InputOutcome::Abort => OverlayOutcome::Close,
+            InputOutcome::Continue => Outcome::Consumed,
+            InputOutcome::Abort => Outcome::Close,
             InputOutcome::Cancel => {
                 self.mode = Mode::List;
-                OverlayOutcome::Consumed
+                Outcome::Consumed
             }
             InputOutcome::Confirm(branch) => {
                 let branch = branch.trim().to_string();
                 if branch.is_empty() {
                     // Keep the input open for a real value, and say so.
-                    return OverlayOutcome::CommitAndStay(Box::new(Msg::Toast(
+                    return Outcome::Stay(Msg::Toast(
                         "worktree: branch name is required".to_string(),
-                    )));
+                    ));
                 }
                 let Some(repo_root) = self.ctx.repo_root.clone() else {
-                    return OverlayOutcome::Close;
+                    return Outcome::Close;
                 };
-                OverlayOutcome::Commit(Box::new(Msg::CommitWorktreeCreate { repo_root, branch }))
+                Outcome::Commit(Msg::CommitWorktreeCreate { repo_root, branch })
             }
         }
     }
 
-    fn handle_confirm_remove(&mut self, key: KeyEvent) -> OverlayOutcome {
+    fn handle_confirm_remove(&mut self, key: KeyEvent) -> Outcome<Msg> {
         use tuikit::keys::{CONFIRM_KEYS, ConfirmKey, resolve};
         match resolve(CONFIRM_KEYS, key) {
             Some(ConfirmKey::Yes) => {
                 let (Some(repo_root), Some(branch)) =
                     (self.ctx.repo_root.clone(), self.ctx.branch.clone())
                 else {
-                    return OverlayOutcome::Close;
+                    return Outcome::Close;
                 };
-                OverlayOutcome::Commit(Box::new(Msg::CommitWorktreeRemove {
+                Outcome::Commit(Msg::CommitWorktreeRemove {
                     repo_root,
                     branch,
                     // Confirming past the surfaced guard list is the force.
                     force: !self.ctx.guard_sessions.is_empty(),
-                }))
+                })
             }
-            Some(ConfirmKey::Abort) => OverlayOutcome::Close,
+            Some(ConfirmKey::Abort) => Outcome::Close,
             Some(ConfirmKey::No) => {
                 self.mode = Mode::List;
-                OverlayOutcome::Consumed
+                Outcome::Consumed
             }
-            None => OverlayOutcome::Consumed,
+            None => Outcome::Consumed,
         }
     }
 
-    fn handle_confirm_merge(&mut self, key: KeyEvent) -> OverlayOutcome {
+    fn handle_confirm_merge(&mut self, key: KeyEvent) -> Outcome<Msg> {
         use tuikit::keys::{CONFIRM_KEYS, ConfirmKey, resolve};
         match resolve(CONFIRM_KEYS, key) {
             Some(ConfirmKey::Yes) => {
                 let Some(worktree_root) = self.ctx.repo_root.clone() else {
-                    return OverlayOutcome::Close;
+                    return Outcome::Close;
                 };
                 // Menu merges into the repo's default branch; explicit
                 // targets are a CLI concern.
-                OverlayOutcome::Commit(Box::new(Msg::CommitWorktreeMerge {
+                Outcome::Commit(Msg::CommitWorktreeMerge {
                     worktree_root,
                     target: None,
-                }))
+                })
             }
-            Some(ConfirmKey::Abort) => OverlayOutcome::Close,
+            Some(ConfirmKey::Abort) => Outcome::Close,
             Some(ConfirmKey::No) => {
                 self.mode = Mode::List;
-                OverlayOutcome::Consumed
+                Outcome::Consumed
             }
-            None => OverlayOutcome::Consumed,
+            None => Outcome::Consumed,
         }
     }
 
-    fn handle_confirm_prune(&mut self, key: KeyEvent) -> OverlayOutcome {
+    fn handle_confirm_prune(&mut self, key: KeyEvent) -> Outcome<Msg> {
         use tuikit::keys::{CONFIRM_KEYS, ConfirmKey, resolve};
         match resolve(CONFIRM_KEYS, key) {
             Some(ConfirmKey::Yes) => {
                 let Some(repo_root) = self.ctx.repo_root.clone() else {
-                    return OverlayOutcome::Close;
+                    return Outcome::Close;
                 };
-                OverlayOutcome::Commit(Box::new(Msg::CommitWorktreePrune { repo_root }))
+                Outcome::Commit(Msg::CommitWorktreePrune { repo_root })
             }
-            Some(ConfirmKey::Abort) => OverlayOutcome::Close,
+            Some(ConfirmKey::Abort) => Outcome::Close,
             Some(ConfirmKey::No) => {
                 self.mode = Mode::List;
-                OverlayOutcome::Consumed
+                Outcome::Consumed
             }
-            None => OverlayOutcome::Consumed,
+            None => Outcome::Consumed,
         }
     }
 
-    fn handle_close_down(&mut self, key: KeyEvent) -> OverlayOutcome {
+    fn handle_close_down(&mut self, key: KeyEvent) -> Outcome<Msg> {
         // `m` lands the branch, `d` discards it; both then tear the
         // stream down (ADR 0093). Esc backs out to the list; Ctrl-C and
         // q dismiss the menu.
@@ -501,29 +501,28 @@ impl WorktreeMenuState {
         let discard = match resolve(CLOSE_DOWN_KEYS, key) {
             Some(ChoiceKey::Choose(CloseDown::Merge)) => false,
             Some(ChoiceKey::Choose(CloseDown::Discard)) => true,
-            Some(ChoiceKey::Abort) => return OverlayOutcome::Close,
+            Some(ChoiceKey::Abort) => return Outcome::Close,
             Some(ChoiceKey::Back) => {
                 self.mode = Mode::List;
-                return OverlayOutcome::Consumed;
+                return Outcome::Consumed;
             }
-            None => return OverlayOutcome::Consumed,
+            None => return Outcome::Consumed,
         };
         let (Some(repo_root), Some(branch)) = (self.ctx.repo_root.clone(), self.ctx.branch.clone())
         else {
-            return OverlayOutcome::Close;
+            return Outcome::Close;
         };
-        OverlayOutcome::Commit(Box::new(Msg::CommitWorktreeCloseDown {
+        Outcome::Commit(Msg::CommitWorktreeCloseDown {
             repo_root,
             branch,
             discard,
-        }))
+        })
     }
 }
 
-impl Overlay for WorktreeMenuState {
-    type Ctx<'a> = ();
-
-    fn handle(&mut self, _ctx: (), key: KeyEvent) -> OverlayOutcome {
+impl WorktreeMenuState {
+    /// One key for the screen the menu is on.
+    pub fn handle_key(&mut self, key: KeyEvent) -> Outcome<Msg> {
         match self.mode {
             Mode::List => self.handle_list(key),
             Mode::BranchInput(_) => self.handle_branch_input(key),

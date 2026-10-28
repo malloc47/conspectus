@@ -2010,7 +2010,10 @@ mod modal_stack {
         assert!(app.modal_stack().is_empty());
         app.open_help_overlay();
         assert_eq!(app.modal_stack().len(), 1);
-        assert!(matches!(app.modal_stack().first(), Some(Modal::Help(_))));
+        assert!(matches!(
+            app.modal_stack().iter().next(),
+            Some(Modal::Help(_))
+        ));
         assert!(app.help_overlay().is_some());
     }
 
@@ -2033,21 +2036,23 @@ mod modal_stack {
     #[test]
     fn help_overlay_esc_key_returns_close_via_overlay_trait() {
         use crate::tui::widgets::help::HelpOverlayState;
-        use crate::tui::{Overlay, OverlayOutcome};
         use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+        use tuikit::overlay::{Outcome, Overlay};
+        let app = App::new(RunConfig::defaults());
         let mut state = HelpOverlayState::new();
         let key = KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE);
-        assert_eq!(state.handle((), key), OverlayOutcome::Close);
+        assert_eq!(state.handle(key, &app), Outcome::Close);
     }
 
     #[test]
     fn help_overlay_scroll_key_returns_consumed_via_overlay_trait() {
         use crate::tui::widgets::help::HelpOverlayState;
-        use crate::tui::{Overlay, OverlayOutcome};
         use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+        use tuikit::overlay::{Outcome, Overlay};
+        let app = App::new(RunConfig::defaults());
         let mut state = HelpOverlayState::new();
         let key = KeyEvent::new(KeyCode::Char('j'), KeyModifiers::NONE);
-        assert_eq!(state.handle((), key), OverlayOutcome::Consumed);
+        assert_eq!(state.handle(key, &app), Outcome::Consumed);
     }
 
     // Controls overlay lives on the same
@@ -2061,7 +2066,7 @@ mod modal_stack {
         app.open_controls_overlay();
         assert_eq!(app.modal_stack().len(), 1);
         assert!(matches!(
-            app.modal_stack().first(),
+            app.modal_stack().iter().next(),
             Some(Modal::Controls(_))
         ));
         assert!(app.controls_overlay().is_some());
@@ -2154,7 +2159,10 @@ mod modal_stack {
         let mut app = App::new(RunConfig::defaults());
         app.open_rename_overlay(TextInputState::new("rename", ""));
         assert_eq!(app.modal_stack().len(), 1);
-        assert!(matches!(app.modal_stack().first(), Some(Modal::Rename(_))));
+        assert!(matches!(
+            app.modal_stack().iter().next(),
+            Some(Modal::Rename(_))
+        ));
         assert!(app.rename_overlay().is_some());
     }
 
@@ -2173,7 +2181,10 @@ mod modal_stack {
         let mut app = App::new(RunConfig::defaults());
         app.open_search_overlay();
         assert_eq!(app.modal_stack().len(), 1);
-        assert!(matches!(app.modal_stack().first(), Some(Modal::Search(_))));
+        assert!(matches!(
+            app.modal_stack().iter().next(),
+            Some(Modal::Search(_))
+        ));
         assert!(app.search_overlay().is_some());
     }
 
@@ -2189,21 +2200,23 @@ mod modal_stack {
     #[test]
     fn value_modal_esc_key_returns_close_via_overlay_trait() {
         use crate::tui::widgets::value_modal::ValueModalState;
-        use crate::tui::{Overlay, OverlayOutcome};
         use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+        use tuikit::overlay::{Outcome, Overlay};
+        let app = App::new(RunConfig::defaults());
         let mut state = ValueModalState::new("cwd", "/very/long/path".to_string());
         let key = KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE);
-        assert_eq!(state.handle((), key), OverlayOutcome::Close);
+        assert_eq!(state.handle(key, &app), Outcome::Close);
     }
 
     #[test]
     fn value_modal_scroll_key_returns_consumed_via_overlay_trait() {
         use crate::tui::widgets::value_modal::ValueModalState;
-        use crate::tui::{Overlay, OverlayOutcome};
         use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+        use tuikit::overlay::{Outcome, Overlay};
+        let app = App::new(RunConfig::defaults());
         let mut state = ValueModalState::new("cwd", "/very/long/path".to_string());
         let key = KeyEvent::new(KeyCode::Char('j'), KeyModifiers::NONE);
-        assert_eq!(state.handle((), key), OverlayOutcome::Consumed);
+        assert_eq!(state.handle(key, &app), Outcome::Consumed);
     }
 
     #[test]
@@ -2247,7 +2260,10 @@ mod modal_stack {
         let mut app = App::new(RunConfig::defaults());
         app.open_viewer_modal(ViewerState::new(TranscriptDocument::default()));
         assert_eq!(app.modal_stack().len(), 1);
-        assert!(matches!(app.modal_stack().first(), Some(Modal::Viewer(_))));
+        assert!(matches!(
+            app.modal_stack().iter().next(),
+            Some(Modal::Viewer(_))
+        ));
         assert!(app.viewer_modal().is_some());
     }
 

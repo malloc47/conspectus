@@ -25,6 +25,10 @@ pub(super) fn execute_pure_effect(app: &mut App, effect: Effect) {
             // path routes through here.
         }
         Effect::Toast(label) => app.post_toast(label),
+        Effect::Copy { text, done } => match crate::tui::clipboard::copy_to_clipboard(&text) {
+            Ok(()) => app.post_toast(done),
+            Err(err) => app.post_toast(format!("copy failed: {err}")),
+        },
         Effect::Persist => app.persist_state(),
         Effect::SpawnRefresh { force_local } => {
             if force_local {

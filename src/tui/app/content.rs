@@ -1479,13 +1479,23 @@ impl App {
     /// matches of the running search (or, with the per-message
     /// grouping, its matching turns), ranked as the Search view ranks.
     pub fn content_view(&self) -> crate::tui::widgets::search::ContentView {
+        let query = self
+            .search_overlay()
+            .map(crate::tui::widgets::search::SearchOverlayState::content_text)
+            .unwrap_or_default();
+        self.content_view_for(&query)
+    }
+
+    /// [`App::content_view`] for a contents modal whose query is `query`:
+    /// what the modal itself asks for while it handles a key or draws.
+    pub fn content_view_for(&self, query: &str) -> crate::tui::widgets::search::ContentView {
         use crate::tui::widgets::search::ContentView;
         let mut view = ContentView::default();
         if !self.config.live_preview_enabled {
             view.unavailable = Some(CONTENT_OFF_NOTICE);
             return view;
         }
-        let Some(content) = self.modal_content() else {
+        let Some(content) = self.modal_content(query) else {
             return view;
         };
         let key = ViewKey {
@@ -1513,17 +1523,14 @@ impl App {
     }
 
     /// The search whose results the contents modal lists: the one it is
-    /// previewing, or else the search whose query it was opened with (the
-    /// one the Search view shows, or the one filtering the lists).
-    fn modal_content(&self) -> Option<&ContentSearch> {
+    /// previewing, or else the search whose query (`query`) it was opened
+    /// with (the one the Search view shows, or the one filtering the
+    /// lists).
+    fn modal_content(&self, query: &str) -> Option<&ContentSearch> {
         let live = self.content.as_ref();
         if live.is_some_and(|content| !content.applied) {
             return live;
         }
-        let query = self
-            .search_overlay()
-            .map(crate::tui::widgets::search::SearchOverlayState::content_text)
-            .unwrap_or_default();
         self.viewed_search()
             .filter(|viewed| !query.is_empty() && viewed.text == query)
             .or(live)
@@ -1753,15 +1760,18 @@ impl App {
         let _ = self.update(msg);
     }
 
-    /// Remember how the overlay was set, as it closes.
-    pub(crate) fn remember_search_overlay(&mut self) {
-        if let Some(state) = self.search_overlay() {
-            self.search_memory = Some(SearchMemory {
-                group: state.group(),
-                kinds: state.kinds(),
-                panes: state.panes(),
-            });
-        }
+    /// The search overlay `state` has closed: remember how it was set,
+    /// and keep the search it ran.
+    pub(crate) fn search_closed(
+        &mut self,
+        state: &crate::tui::widgets::search::SearchOverlayState,
+    ) {
+        self.search_memory = Some(SearchMemory {
+            group: state.group(),
+            kinds: state.kinds(),
+            panes: state.panes(),
+        });
+        self.commit_modal_search();
     }
 }
 

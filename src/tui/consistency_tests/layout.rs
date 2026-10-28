@@ -11,16 +11,15 @@ use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
 use super::*;
 use crate::tui::Modal;
-use crate::tui::modal::Overlay;
 
 const WIDTHS: [u16; 5] = [60, 80, 120, 160, 220];
 const HEIGHTS: [u16; 2] = [20, 40];
 
 pub(super) type Open = fn(&mut App);
 
-/// One key into the open search overlay, through the runtime's handler.
+/// One key into the open search overlay, through the modal stack.
 pub(super) fn search_key(app: &mut App, code: KeyCode) {
-    crate::tui::runtime::handle_search_overlay_key(app, KeyEvent::new(code, KeyModifiers::NONE));
+    crate::tui::runtime::modal_key_pure(app, KeyEvent::new(code, KeyModifiers::NONE));
 }
 
 pub(super) fn type_into_search(app: &mut App, text: &str) {
@@ -29,27 +28,9 @@ pub(super) fn type_into_search(app: &mut App, text: &str) {
     }
 }
 
-/// The name of a modal, from an exhaustive match: a new variant does not
-/// compile until it is named here.
+/// The name of a modal, as its registration spells it.
 pub(super) fn name_of(modal: &Modal) -> &'static str {
-    match modal {
-        Modal::Help(_) => "Help",
-        Modal::Controls(_) => "Controls",
-        Modal::Rename(_) => "Rename",
-        Modal::Search(_) => "Search",
-        Modal::ValueModal(_) => "ValueModal",
-        Modal::Messages(_) => "Messages",
-        Modal::Viewer(_) => "Viewer",
-        Modal::PaneViewer(_) => "PaneViewer",
-        Modal::WorktreeMenu(_) => "WorktreeMenu",
-        Modal::NewMux(_) => "NewMux",
-        Modal::MuxMenu(_) => "MuxMenu",
-        Modal::MuxLaunch(_) => "MuxLaunch",
-        Modal::PinEdit(_) => "PinEdit",
-        Modal::RowMenu(_) => "RowMenu",
-        Modal::CleanUp(_) => "CleanUp",
-        Modal::Picker(_) => "Picker",
-    }
+    modal.name()
 }
 
 /// Modals the layout checks can't build here, and why.
@@ -143,54 +124,18 @@ fn key(code: KeyCode) -> KeyEvent {
     KeyEvent::new(code, KeyModifiers::NONE)
 }
 
-/// One key into the top modal's own handler. `false` when the modal
-/// needs live app context to handle keys (its layout is checked without
-/// moving).
-pub(super) fn press(modal: &mut Modal, code: KeyCode) -> bool {
-    let key = key(code);
-    match modal {
-        Modal::Help(state) => {
-            state.handle((), key);
-        }
-        Modal::Rename(state) => {
-            state.handle((), key);
-        }
-        Modal::ValueModal(state) => {
-            state.handle((), key);
-        }
-        Modal::WorktreeMenu(state) => {
-            state.handle((), key);
-        }
-        Modal::NewMux(state) => {
-            state.handle((), key);
-        }
-        Modal::MuxMenu(state) => {
-            state.handle((), key);
-        }
-        Modal::MuxLaunch(state) => {
-            state.handle((), key);
-        }
-        Modal::PinEdit(state) => {
-            state.handle((), key);
-        }
-        Modal::RowMenu(state) => {
-            state.handle((), key);
-        }
-        Modal::CleanUp(state) => {
-            state.handle((), key);
-        }
-        Modal::Picker(state) => {
-            state.handle((), key);
-        }
-        Modal::Controls(_)
-        | Modal::Search(_)
-        | Modal::Messages(_)
-        | Modal::Viewer(_)
-        | Modal::PaneViewer(_) => {
-            return false;
-        }
+/// One key into the top modal, through the stack, its outcome left
+/// unsettled. `false` when the modal reads live App context that moves
+/// with the key (its layout is checked without moving).
+pub(super) fn press(app: &mut App, code: KeyCode) -> bool {
+    let fixed = matches!(
+        app.top_modal_name(),
+        None | Some("Controls" | "Search" | "Messages" | "Viewer" | "PaneViewer")
+    );
+    if !fixed {
+        let _ = app.with_modals(|stack, app| stack.route(key(code), app));
     }
-    true
+    !fixed
 }
 
 /// Modals whose whole body scrolls with Up and Down, so their text
@@ -253,25 +198,10 @@ fn describe_size(name: &str, width: u16, height: u16) -> String {
 
 #[test]
 fn every_modal_is_checked_or_has_a_reason() {
-    let source = include_str!("../modal.rs");
-    let body = source
-        .split("pub enum Modal {")
-        .nth(1)
-        .and_then(|rest| rest.split("\n}\n").next())
-        .expect("the Modal enum");
-    let variants: Vec<&str> = body
-        .lines()
-        .filter(|line| line.starts_with("    ") && !line.starts_with("     "))
-        .filter_map(|line| {
-            let name = line.trim().split('(').next()?;
-            (name.chars().next()?.is_ascii_uppercase() && line.contains('(')).then_some(name)
-        })
-        .collect();
-    assert!(variants.len() >= 10, "found the variants: {variants:?}");
     let built: Vec<&str> = builders().iter().map(|(name, _, _)| *name).collect();
-    for variant in variants {
+    for variant in Modal::NAMES {
         assert!(
-            built.contains(&variant) || SKIPPED.iter().any(|(name, _)| *name == variant),
+            built.contains(variant) || SKIPPED.iter().any(|(name, _)| name == variant),
             "Modal::{variant} is neither built in layout.rs nor listed with a reason"
         );
     }
@@ -283,7 +213,7 @@ fn each_builder_opens_the_modal_it_names() {
         let app = app_with(view, open);
         let top = app
             .modal_stack()
-            .last()
+            .top()
             .unwrap_or_else(|| panic!("{name}: nothing opened"));
         assert_eq!(name_of(top), name);
     }
@@ -352,7 +282,7 @@ fn moving_the_selection_in_a_modal_moves_no_text() {
                 KeyCode::Down,
                 KeyCode::Up,
             ] {
-                let moved = app.top_modal_mut().is_some_and(|modal| press(modal, code));
+                let moved = press(&mut app, code);
                 if !moved {
                     break;
                 }

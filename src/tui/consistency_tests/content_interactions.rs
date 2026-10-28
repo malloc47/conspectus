@@ -284,14 +284,14 @@ fn a_startup_search_with_live_preview_off_says_it_cannot_run() {
 
 #[test]
 fn the_controls_content_row_refuses_with_the_shared_notice_when_live_preview_is_off() {
-    use crate::tui::runtime::handle_controls_overlay_key;
+    use crate::tui::runtime::modal_key_pure;
     use crate::tui::widgets::controls::{ControlsCursor, ControlsOverlayState};
     use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
     let mut app = live_preview_off();
     app.open_controls_overlay();
     let press = |app: &mut App, code| {
-        handle_controls_overlay_key(app, KeyEvent::new(code, KeyModifiers::NONE));
+        modal_key_pure(app, KeyEvent::new(code, KeyModifiers::NONE));
     };
     for _ in 0..60 {
         if app.controls_overlay().map(ControlsOverlayState::cursor)

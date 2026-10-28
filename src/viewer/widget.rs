@@ -24,11 +24,11 @@
 //! `ratatui::*` outside the renderer. Per ADR 0052 the renderer
 //! never branches on harness; it consumes only the normalized model.
 
-use ratatui::Frame;
+use ratatui::buffer::Buffer;
 use ratatui::layout::{Constraint, Layout, Rect};
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
-use ratatui::widgets::Paragraph;
+use ratatui::widgets::{Paragraph, Widget};
 use tuikit::chip::{PositionChip, StatusChip, ToggleChip, Tone};
 use tuikit::glyphs::marks;
 
@@ -46,7 +46,7 @@ use crate::viewer::theme::Theme;
 /// record the layout it observed (viewport height, total line
 /// count) so the reducer can use those numbers on the next key
 /// event.
-pub fn draw(state: &mut ViewerState, theme: &Theme, frame: &mut Frame<'_>, area: Rect) {
+pub fn draw(state: &mut ViewerState, theme: &Theme, buf: &mut Buffer, area: Rect) {
     let chunks = Layout::vertical([
         Constraint::Length(1), // header
         Constraint::Length(1), // separator
@@ -56,14 +56,14 @@ pub fn draw(state: &mut ViewerState, theme: &Theme, frame: &mut Frame<'_>, area:
     ])
     .split(area);
 
-    draw_header(&state.document, theme, frame, chunks[0]);
-    draw_separator(theme, frame, chunks[1]);
-    draw_body(state, theme, frame, chunks[2]);
-    draw_separator(theme, frame, chunks[3]);
-    draw_footer(state, theme, frame, chunks[4]);
+    draw_header(&state.document, theme, buf, chunks[0]);
+    draw_separator(theme, buf, chunks[1]);
+    draw_body(state, theme, buf, chunks[2]);
+    draw_separator(theme, buf, chunks[3]);
+    draw_footer(state, theme, buf, chunks[4]);
 }
 
-fn draw_header(document: &TranscriptDocument, theme: &Theme, frame: &mut Frame<'_>, area: Rect) {
+fn draw_header(document: &TranscriptDocument, theme: &Theme, buf: &mut Buffer, area: Rect) {
     let title = format!("{}:{}", document.meta.harness, document.meta.session_key);
     let title_style = harness_chip_style(&document.meta.harness, theme);
 
@@ -110,21 +110,22 @@ fn draw_header(document: &TranscriptDocument, theme: &Theme, frame: &mut Frame<'
             ),
         ])
     };
-    frame.render_widget(Paragraph::new(line), area);
+    Widget::render(Paragraph::new(line), area, buf);
 }
 
-fn draw_separator(theme: &Theme, frame: &mut Frame<'_>, area: Rect) {
+fn draw_separator(theme: &Theme, buf: &mut Buffer, area: Rect) {
     let rule: String = marks::RULE.repeat(area.width as usize);
-    frame.render_widget(
+    Widget::render(
         Paragraph::new(Line::from(Span::styled(
             rule,
             Style::new().fg(theme.inert).add_modifier(theme.muted),
         ))),
         area,
+        buf,
     );
 }
 
-fn draw_body(state: &mut ViewerState, theme: &Theme, frame: &mut Frame<'_>, area: Rect) {
+fn draw_body(state: &mut ViewerState, theme: &Theme, buf: &mut Buffer, area: Rect) {
     // Empty-document banner short-circuits before we ever touch the
     // turn list.
     if state.document.is_empty() {
@@ -136,7 +137,7 @@ fn draw_body(state: &mut ViewerState, theme: &Theme, frame: &mut Frame<'_>, area
             Style::new().add_modifier(theme.muted),
         ));
         let rows = tuikit::text::wrap_line(&banner, usize::from(area.width), 0);
-        frame.render_widget(Paragraph::new(rows), area);
+        Widget::render(Paragraph::new(rows), area, buf);
         return;
     }
 
@@ -168,7 +169,7 @@ fn draw_body(state: &mut ViewerState, theme: &Theme, frame: &mut Frame<'_>, area
     let cache = state.rendered.as_ref().expect("composed above");
     let mut visible = cache.lines[scroll_offset..visible_end].to_vec();
     highlight_matches(&mut visible, scroll_offset, cache, &state.find, theme);
-    frame.render_widget(Paragraph::new(visible), area);
+    Widget::render(Paragraph::new(visible), area, buf);
 
     state.viewport_height = viewport_height;
     state.total_lines = total;
@@ -244,9 +245,9 @@ fn cache_is_current(state: &ViewerState, content_width: u16) -> bool {
     })
 }
 
-fn draw_footer(state: &ViewerState, theme: &Theme, frame: &mut Frame<'_>, area: Rect) {
+fn draw_footer(state: &ViewerState, theme: &Theme, buf: &mut Buffer, area: Rect) {
     if let Some(prompt) = &state.find.prompt {
-        draw_find_prompt(prompt, &state.find_hint, theme, frame, area);
+        draw_find_prompt(prompt, &state.find_hint, theme, buf, area);
         return;
     }
     let position = PositionChip::new(state.scroll_offset, state.total_lines);
@@ -370,7 +371,7 @@ fn draw_footer(state: &ViewerState, theme: &Theme, frame: &mut Frame<'_>, area: 
             .unwrap_or_else(|| base.into_iter().chain([close_span]).collect());
         Line::from(chosen)
     };
-    frame.render_widget(Paragraph::new(line), area);
+    Widget::render(Paragraph::new(line), area, buf);
 }
 
 /// The most cells the query takes in the footer chip, the ellipsis of a
@@ -407,7 +408,7 @@ pub(crate) fn draw_find_prompt(
     prompt: &crate::viewer::find::FindPrompt,
     hint: &str,
     theme: &Theme,
-    frame: &mut Frame<'_>,
+    buf: &mut Buffer,
     area: Rect,
 ) {
     let hint_text = if hint.is_empty() {
@@ -454,7 +455,7 @@ pub(crate) fn draw_find_prompt(
             Style::new().fg(theme.inert).add_modifier(theme.muted),
         ),
     ]);
-    frame.render_widget(Paragraph::new(line), area);
+    Widget::render(Paragraph::new(line), area, buf);
 }
 
 /// `tools·sum (t)` / `tools·off (t)`: the current tool detail level and
@@ -650,7 +651,10 @@ pub fn render_to_buffer(
     use ratatui::backend::TestBackend;
     let mut terminal = Terminal::new(TestBackend::new(width, height)).expect("test terminal");
     terminal
-        .draw(|frame| draw(state, theme, frame, frame.area()))
+        .draw(|frame| {
+            let area = frame.area();
+            draw(state, theme, frame.buffer_mut(), area);
+        })
         .expect("draw on test backend");
     terminal.backend().buffer().clone()
 }

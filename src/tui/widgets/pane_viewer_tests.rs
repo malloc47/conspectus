@@ -35,7 +35,10 @@ fn render(state: &mut PaneViewerState, width: u16, height: u16) -> String {
     let mut terminal = Terminal::new(TestBackend::new(width, height)).unwrap();
     let theme = Theme::default();
     terminal
-        .draw(|frame| draw(state, &theme, frame, frame.area()))
+        .draw(|frame| {
+            let area = frame.area();
+            draw(state, &theme, frame.buffer_mut(), area);
+        })
         .unwrap();
     let buffer = terminal.backend().buffer().clone();
     (0..height)

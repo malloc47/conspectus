@@ -21,14 +21,16 @@ use crate::tui::app::{App, Focus};
 use crate::tui::{Msg, View};
 
 /// Semantic action the runtime dispatches once a crossterm event
-/// is translated. Overlay-owned keys arrive as `*OverlayKey`
-/// variants; everything else flows through
+/// is translated. A key an open modal owns arrives as
+/// [`Action::ModalKey`]; everything flows through
 /// `crate::tui::runtime::LoopMode::dispatch`.
-#[allow(clippy::enum_variant_names)]
 #[derive(Debug, Clone, PartialEq)]
 #[cfg_attr(feature = "snapshot", allow(dead_code))]
 pub enum Action {
     Msg(Box<Msg>),
+    /// A key for the overlay on top of the modal stack, which owns every
+    /// key while it is open.
+    ModalKey(ratatui::crossterm::event::KeyEvent),
     Refresh,
     /// Refresh and ask the forges again instead of reusing their
     /// listings (ADR 0116).
@@ -39,39 +41,21 @@ pub enum Action {
     /// buffer with the current alias, harness title, or an empty
     /// string per ADR 0030.
     OpenRename,
-    /// Forward a key event into the open rename overlay.
-    RenameOverlayKey(ratatui::crossterm::event::KeyEvent),
     /// `w` — open the worktree action menu for the selected node.
     OpenWorktreeMenu,
     /// `X` — open the worktree menu straight into close-down for the
     /// selected node.
     OpenWorktreeCloseDown,
-    /// Forward a key event into the open worktree menu.
-    WorktreeMenuKey(ratatui::crossterm::event::KeyEvent),
     /// `n` — open the bare tmux new-session form seeded from the
     /// current selection (ADR 0095).
     OpenNewMuxForm,
-    /// Forward a key event into the open bare mux form.
-    NewMuxFormKey(ratatui::crossterm::event::KeyEvent),
     /// `m` — open the Mux action menu (ADR 0096).
     /// Discharges the ADR 0095 follow-up now that a second bare-mux-
     /// shape verb (mux launch) has landed.
     OpenMuxMenu,
-    /// Forward a key event into the open Mux action menu.
-    MuxMenuKey(ratatui::crossterm::event::KeyEvent),
-    /// Forward a key event into the open row action menu.
-    RowMenuKey(ratatui::crossterm::event::KeyEvent),
-    /// Forward a key event into the open Clean up modal.
-    CleanUpKey(ratatui::crossterm::event::KeyEvent),
-    PickerKey(ratatui::crossterm::event::KeyEvent),
-    /// Forward a key event into the open mux-launch form.
-    MuxLaunchFormKey(ratatui::crossterm::event::KeyEvent),
-    PinEditFormKey(ratatui::crossterm::event::KeyEvent),
     /// Open the controls overlay (ADR 0031) at its top
     /// section.
     OpenControls,
-    /// Forward a key event into the open controls overlay.
-    ControlsOverlayKey(ratatui::crossterm::event::KeyEvent),
     /// Switch to a specific view (1–5 accelerators).
     SwitchView(View),
     /// Cycle to the next (delta > 0) or previous (delta < 0) view
@@ -86,21 +70,13 @@ pub enum Action {
     OpenSearch,
     /// `s` — search what was said in the sessions.
     OpenContentSearch,
-    /// Forward a key event into the open search overlay.
-    SearchOverlayKey(ratatui::crossterm::event::KeyEvent),
     /// Open the `?` help overlay.
     OpenHelp,
     /// Open the `!` Messages overlay (ADR 0105).
     OpenMessages,
-    /// Forward a key event into the open Messages overlay.
-    MessagesOverlayKey(ratatui::crossterm::event::KeyEvent),
-    /// Forward a key event into the open help overlay.
-    HelpOverlayKey(ratatui::crossterm::event::KeyEvent),
     /// Open the `o` full-value modal on the active explorer
     /// cursor row, when the row has a truncated value.
     OpenValueModal,
-    /// Forward a key event into the open full-value modal.
-    ValueModalKey(ratatui::crossterm::event::KeyEvent),
     /// Resume the selected un-muxed agent session in a new terminal
     /// (launches the harness binary in the background).
     Resume,
@@ -111,10 +87,6 @@ pub enum Action {
     /// escape-hatch external launch when the harness has no
     /// native parser (kept for `aider` etc.).
     View,
-    /// Forward a key event into the open viewer modal.
-    ViewerOverlayKey(ratatui::crossterm::event::KeyEvent),
-    /// Forward a key event into the open pane scrollback viewer.
-    PaneViewerKey(ratatui::crossterm::event::KeyEvent),
     /// `Enter` on the left pane. The dispatcher resolves
     /// the selected row's default action: attach a mux row, view an
     /// un-muxed session, or expand/collapse a group row. Right-pane
