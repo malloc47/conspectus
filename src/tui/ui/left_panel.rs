@@ -873,12 +873,17 @@ pub(super) fn ghost_style(theme: &Theme) -> Style {
         .add_modifier(Modifier::ITALIC)
 }
 
+/// Whether `style` draws a filled chip (a harness or program badge),
+/// whose fill is its background or its reversed foreground.
+fn is_chip(style: Style) -> bool {
+    style.bg.is_some() || style.add_modifier.contains(Modifier::REVERSED)
+}
+
 /// Restyle `spans` as a ghost. Chips keep their background and are
 /// dimmed instead, so an agent still reads as an agent.
 pub(super) fn ghostify(spans: &mut [Span<'static>], theme: &Theme) {
     for span in spans {
-        let chip = span.style.bg.is_some() || span.style.add_modifier.contains(Modifier::REVERSED);
-        span.style = if chip {
+        span.style = if is_chip(span.style) {
             span.style
                 .add_modifier(theme.placeholder | Modifier::ITALIC)
         } else {
@@ -1072,7 +1077,16 @@ pub(super) fn render_left_row(
         let selection_style = Style::default().add_modifier(modifiers);
         line = line.style(selection_style);
         for span in &mut line.spans {
-            span.style = span.style.patch(selection_style);
+            span.style = if is_chip(span.style) {
+                // A chip keeps the look it has on every other row, so it
+                // still reads as a chip: the highlight marks the rest of
+                // the row, and reversing a program chip's fill would
+                // blend it into the highlight.
+                span.style
+                    .remove_modifier(modifiers.difference(span.style.add_modifier))
+            } else {
+                span.style.patch(selection_style)
+            };
         }
     }
     line

@@ -6540,3 +6540,77 @@ fn a_pr_row_draws_its_kind_glyph_in_the_hue_of_its_state_glyph() {
     }
     assert!(wrong.is_empty(), "{}", wrong.join("\n"));
 }
+
+#[test]
+fn a_chip_keeps_its_look_on_the_selected_row() {
+    // The highlight reverses the rest of the row and leaves a filled
+    // chip, harness or program, live or ghost, as it is on every other
+    // row, so it still reads as a chip.
+    use crate::tui::rows::{MixedChip, MixedGrid, MixedRow, MixedTone, PinMarker};
+    use ratatui::buffer::Buffer;
+    use ratatui::widgets::Widget;
+    let app = seeded_app();
+    let theme = app.theme().clone();
+    let chips = [MixedChip::agent("claude"), MixedChip::program("npm")];
+    for (chip, tone) in chips
+        .iter()
+        .flat_map(|chip| [(chip, MixedTone::Normal), (chip, MixedTone::Dim)])
+    {
+        let row = crate::tui::rows::Row {
+            id: RowId::Pin { pin_id: "p".into() },
+            depth: 0,
+            expandable: false,
+            kind: RowKind::Mixed(MixedRow {
+                node_kind: crate::model::NodeKind::MuxSession,
+                label: "main".into(),
+                status: "live".into(),
+                tone,
+                age: None,
+                age_epoch: None,
+                state: None,
+                chip: Some(chip.clone()),
+                content: "~/src".into(),
+                primary_node: NodeId::MuxSession(MuxSessionId::new("tmux:main")),
+                pr_status: None,
+                marker: PinMarker::None,
+                grid: MixedGrid::Columns,
+            }),
+        };
+        let tree = crate::tui::rows::RowTree {
+            rows: vec![row.clone()],
+            view: crate::tui::rows::ViewLabel::Pinned,
+        };
+        let align = GroupAlign {
+            mixed: MixedAlign::of_tree(&tree, &theme),
+            ..GroupAlign::default()
+        };
+        let draw = |selected: bool| {
+            let line = render_left_row(&row, &app, selected, 60, 0, None, align);
+            let mut buffer = Buffer::empty(Rect::new(0, 0, 60, 1));
+            Paragraph::new(line).render(buffer.area, &mut buffer);
+            buffer
+        };
+        let (plain, selected) = (draw(false), draw(true));
+        let text: String = (0..60)
+            .map(|x| plain[(x, 0)].symbol().to_string())
+            .collect();
+        let case = format!("{chip:?}, {tone:?}: {text}");
+        let start = cell_column(&text, &format!(" {} ", chip.label)).expect("the chip");
+        let reversed =
+            |buffer: &Buffer, x: u16| buffer[(x, 0)].modifier.contains(Modifier::REVERSED);
+        let label = cell_column(&text, "main").expect("the label");
+        assert!(
+            reversed(&selected, u16::try_from(label).unwrap()),
+            "{case}: the row is highlighted"
+        );
+        for x in start..start + theme.badge_width + 2 {
+            let x = u16::try_from(x).unwrap();
+            let (before, after) = (&plain[(x, 0)], &selected[(x, 0)]);
+            assert_eq!(
+                (before.fg, before.bg, reversed(&plain, x)),
+                (after.fg, after.bg, reversed(&selected, x)),
+                "{case}: chip cell {x}"
+            );
+        }
+    }
+}

@@ -69,7 +69,9 @@ record a pin points at, shown only when History lists pinned records.
 ### Selection, pending refresh, and dimming
 
 - The selected row is reversed and bold while the left pane has focus,
-  and bold only when it does not.
+  and bold only when it does not. A harness or program chip on it keeps
+  the look it has on every other row, so it still reads as a chip
+  inside the highlight.
 - Right after an action in tmux (attach, kill, rebuild), the affected
   rows keep their old values, dimmed, with a spinner where their state
   glyph or word goes, until the refresh lands.
