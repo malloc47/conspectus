@@ -4,45 +4,37 @@
 //! starts a process outside `src/exec.rs`, reaches for a network or
 //! process API the manifest doesn't allow, or depends on a networking
 //! crate. `tests/capabilities.rs` checks the built binary's behavior.
+//!
+//! The framework (`crates/tuikit`) ships inside the same binary but has no
+//! manifest entries: it starts no process and opens no socket, signal, or
+//! write path. Instead of skipping its tree, the checks here fail on any
+//! such path in it, with no per-file allowance. The lockfile is shared, so
+//! the networking-crate check already covers the framework's dependencies.
+//! `tests/support/source_tree.rs` explains which hygiene rules apply to
+//! which crate and how the scans are guarded against visiting too few files.
 
 use std::collections::BTreeSet;
 use std::fs;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 use conspectus::exec::Program;
 
-fn root() -> &'static Path {
-    Path::new(env!("CARGO_MANIFEST_DIR"))
-}
+#[path = "support/source_tree.rs"]
+mod source_tree;
+
+use source_tree::{FRAMEWORK_SRC, HOST_SRC, Tree, workspace_root};
 
 fn manifest() -> toml::Table {
-    let text = fs::read_to_string(root().join("docs/capabilities.toml")).expect("read manifest");
+    let text =
+        fs::read_to_string(workspace_root().join("docs/capabilities.toml")).expect("read manifest");
     text.parse().expect("parse docs/capabilities.toml")
-}
-
-fn rust_files(dir: &Path, out: &mut Vec<PathBuf>) {
-    let Ok(entries) = fs::read_dir(dir) else {
-        return;
-    };
-    for entry in entries.flatten() {
-        let path = entry.path();
-        if path.is_dir() {
-            rust_files(&path, out);
-        } else if path.extension().is_some_and(|ext| ext == "rs") {
-            out.push(path);
-        }
-    }
 }
 
 /// The shipped lines of a source file, numbered from 1: test-only files
 /// are skipped, a trailing `#[cfg(test)] mod` is cut off, and comments
 /// are dropped.
 fn shipped_lines(path: &Path) -> Vec<(usize, String)> {
-    let name = path
-        .file_name()
-        .and_then(|name| name.to_str())
-        .unwrap_or("");
-    if name.ends_with("_tests.rs") || name == "tests.rs" {
+    if source_tree::is_test_file(path) {
         return Vec::new();
     }
     let text = fs::read_to_string(path).expect("read source");
@@ -65,7 +57,8 @@ fn shipped_lines(path: &Path) -> Vec<(usize, String)> {
 }
 
 /// A pattern shipped code may only use in `allowed_in` (paths relative
-/// to the crate root), or nowhere when `allowed_in` is empty.
+/// to the workspace root), or nowhere when `allowed_in` is empty.
+#[derive(Clone, Copy)]
 struct Rule {
     pattern: &'static str,
     allowed_in: &'static [&'static str],
@@ -160,20 +153,99 @@ const RULES: &[Rule] = &[
     },
 ];
 
-#[test]
-fn shipped_code_uses_only_the_process_and_network_apis_the_manifest_allows() {
-    let mut files = Vec::new();
-    rust_files(&root().join("src"), &mut files);
-    files.sort();
+/// What the framework may not do on top of `RULES`: start a process by any
+/// route or write to the filesystem. The host's writes are bounded by the
+/// manifest and traced in `tests/capabilities.rs`; the framework has none.
+const FRAMEWORK_EXTRA_RULES: &[Rule] = &[
+    Rule {
+        pattern: "std::process",
+        allowed_in: &[],
+        why: "the framework starts no process; hosts supply what it needs",
+    },
+    Rule {
+        pattern: "File::create",
+        allowed_in: &[],
+        why: "the framework writes no file; hosts supply a sink",
+    },
+    Rule {
+        pattern: "File::options",
+        allowed_in: &[],
+        why: "the framework writes no file; hosts supply a sink",
+    },
+    Rule {
+        pattern: "OpenOptions",
+        allowed_in: &[],
+        why: "the framework writes no file; hosts supply a sink",
+    },
+    Rule {
+        pattern: "fs::write",
+        allowed_in: &[],
+        why: "the framework writes no file; hosts supply a sink",
+    },
+    Rule {
+        pattern: "fs::copy",
+        allowed_in: &[],
+        why: "the framework writes no file; hosts supply a sink",
+    },
+    Rule {
+        pattern: "fs::rename",
+        allowed_in: &[],
+        why: "the framework moves no file",
+    },
+    Rule {
+        pattern: "hard_link",
+        allowed_in: &[],
+        why: "the framework creates no file link",
+    },
+    Rule {
+        pattern: "symlink",
+        allowed_in: &[],
+        why: "the framework creates no file link",
+    },
+    Rule {
+        pattern: "set_permissions",
+        allowed_in: &[],
+        why: "the framework changes no file permissions",
+    },
+    Rule {
+        pattern: "remove_file",
+        allowed_in: &[],
+        why: "the framework deletes no file",
+    },
+    Rule {
+        pattern: "remove_dir",
+        allowed_in: &[],
+        why: "the framework deletes no directory",
+    },
+    Rule {
+        pattern: "create_dir",
+        allowed_in: &[],
+        why: "the framework creates no directory",
+    },
+];
+
+/// The rules for the framework tree: every rule of `RULES` with its
+/// allowance removed (the files it names are host files), plus
+/// `FRAMEWORK_EXTRA_RULES`.
+fn framework_rules() -> Vec<Rule> {
+    RULES
+        .iter()
+        .map(|rule| Rule {
+            allowed_in: &[],
+            ..*rule
+        })
+        .chain(FRAMEWORK_EXTRA_RULES.iter().copied())
+        .collect()
+}
+
+/// Shipped lines under `trees` that match one of `rules` outside the
+/// files the rule allows, as `path:line: ...` findings.
+fn violations(root: &Path, trees: &[Tree], rules: &[Rule]) -> Vec<String> {
     let mut violations = Vec::new();
-    for path in &files {
-        let relative = path
-            .strip_prefix(root())
-            .expect("under the crate root")
-            .to_string_lossy()
-            .replace('\\', "/");
-        for (number, line) in shipped_lines(path) {
-            for rule in RULES {
+    for path in source_tree::rust_files(root, trees) {
+        let relative = source_tree::relative(root, &path);
+        for (number, line) in shipped_lines(&path) {
+            for rule in rules {
                 if line.contains(rule.pattern) && !rule.allowed_in.contains(&relative.as_str()) {
                     violations.push(format!(
                         "{relative}:{number}: `{}`: {}\n    {}",
@@ -185,11 +257,52 @@ fn shipped_code_uses_only_the_process_and_network_apis_the_manifest_allows() {
             }
         }
     }
+    violations
+}
+
+#[test]
+fn shipped_code_uses_only_the_process_and_network_apis_the_manifest_allows() {
+    let violations = violations(workspace_root(), &[HOST_SRC], RULES);
     assert!(
         violations.is_empty(),
         "shipped code outside the capability manifest (docs/capabilities.toml, ADR 0117):\n{}",
         violations.join("\n")
     );
+}
+
+#[test]
+fn the_framework_has_no_process_socket_signal_or_write_path() {
+    let violations = violations(workspace_root(), &[FRAMEWORK_SRC], &framework_rules());
+    assert!(
+        violations.is_empty(),
+        "the framework crate must start no process and open no socket, signal, or write path, \
+         so it has no entry in the capability manifest (ADR 0117, ADR 0150). Pass a sink or a \
+         source in from the host instead:\n{}",
+        violations.join("\n")
+    );
+}
+
+#[test]
+fn a_process_call_is_caught_in_every_tree_the_scan_covers() {
+    let violation = "fn f() { let _ = std::process::Command::new(\"x\"); }\n";
+    source_tree::assert_scan_covers_every_tree(
+        &[HOST_SRC, FRAMEWORK_SRC],
+        violation,
+        |root, lowered| {
+            let (host, framework) = lowered.split_at(1);
+            let mut found = violations(root, host, RULES);
+            found.extend(violations(root, framework, &framework_rules()));
+            found
+        },
+    );
+}
+
+#[test]
+fn a_write_path_is_caught_in_the_framework_tree() {
+    let violation = "fn f() { let _ = std::fs::write(\"x\", \"y\"); }\n";
+    source_tree::assert_scan_covers_every_tree(&[FRAMEWORK_SRC], violation, |root, lowered| {
+        violations(root, lowered, &framework_rules())
+    });
 }
 
 #[test]
@@ -227,7 +340,7 @@ fn every_manifest_section_cites_adrs_that_exist() {
             manifest[name].as_table().expect("section table"),
         ));
     }
-    let adr_dir = root().join("docs/adr");
+    let adr_dir = workspace_root().join("docs/adr");
     let adrs: Vec<String> = fs::read_dir(&adr_dir)
         .expect("read docs/adr")
         .flatten()
@@ -259,7 +372,7 @@ fn no_networking_crate_is_a_dependency() {
         .iter()
         .map(|name| name.as_str().expect("crate name"))
         .collect();
-    let lock: toml::Table = fs::read_to_string(root().join("Cargo.lock"))
+    let lock: toml::Table = fs::read_to_string(workspace_root().join("Cargo.lock"))
         .expect("read Cargo.lock")
         .parse()
         .expect("parse Cargo.lock");
