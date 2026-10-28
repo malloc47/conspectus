@@ -11,6 +11,9 @@
 //! token, a focused field's in `field_active` with the cursor cell in
 //! `field_cursor`, scroll markers and hints in `accent`, notes and
 //! footers `muted`, and path marks in `success`, `warning`, and `inert`.
+//! Every row starts with the cursor gutter, and the focused field's row
+//! takes the list cursor's marker and highlight ([`row`]); the fills of
+//! its value keep their look inside the highlight.
 
 use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
@@ -20,6 +23,7 @@ use ratatui::widgets::{Paragraph, Widget};
 use tuikit::frame::{ModalBody, ModalFrame, ModalSize};
 use tuikit::glyphs::marks;
 use tuikit::scroll::ScrollWindow;
+use tuikit::selection::{self, Cursor};
 use tuikit::text;
 
 use crate::discovery::harness::{HarnessLaunchOption, argv_contains_fragment};
@@ -64,15 +68,32 @@ pub struct Suffix {
     pub spans: Vec<Span<'static>>,
 }
 
-/// The marker and label that start a row, bold when the cursor is on it.
-pub fn prefix(label: &str, active: bool, label_width: usize) -> (String, Style) {
-    let marker = if active { "> " } else { "  " };
-    let style = if active {
-        Style::default().add_modifier(Modifier::BOLD)
-    } else {
-        Style::default()
-    };
-    (format!("{marker}{label:label_width$}{VALUE_GAP}"), style)
+/// The label that starts a row, padded to the label column, and the gap
+/// before the value. The cursor gutter goes before it ([`row`]).
+pub fn prefix(label: &str, label_width: usize) -> String {
+    format!("{label:label_width$}{VALUE_GAP}")
+}
+
+/// The cells a row's lead takes: the cursor gutter and `prefix`.
+fn lead_width(prefix: &str) -> usize {
+    selection::GUTTER_WIDTH + text::width(prefix)
+}
+
+/// A form row: the cursor gutter, then `spans`. The focused field's row
+/// carries the cursor's marker and highlight, as a list's cursor row
+/// does.
+pub fn row(spans: Vec<Span<'static>>, active: bool, theme: &Theme) -> Line<'static> {
+    selection::row(spans, Cursor::of(active, true), theme)
+}
+
+/// `line`, a row drawn without the cursor, given the cursor's marker and
+/// highlight: for a row whose focus is on a part other than its field.
+pub fn with_cursor(mut line: Line<'static>, theme: &Theme) -> Line<'static> {
+    if let Some(gutter) = line.spans.first_mut() {
+        *gutter = selection::gutter(Cursor::Active);
+    }
+    selection::highlight(&mut line.spans, Cursor::Active, theme);
+    line
 }
 
 /// A field's value: filled when the field has focus, plain otherwise.
@@ -197,19 +218,19 @@ pub fn value_row(
     theme: &Theme,
 ) -> Line<'static> {
     let inner_width = cols.inner;
-    let (prefix, label_style) = prefix(label, active, cols.label);
+    let prefix = prefix(label, cols.label);
     let suffix_width = suffix.as_ref().map_or(0, |s| s.width);
     let value_width = inner_width
-        .saturating_sub(text::width(&prefix))
+        .saturating_sub(lead_width(&prefix))
         .saturating_sub(suffix_width)
         .max(1);
     let w = window(value, value_cursor, value_width, active, theme);
-    let mut spans = vec![Span::styled(prefix, label_style)];
+    let mut spans = vec![Span::raw(prefix)];
     spans.extend(window_spans(&w, entry_style(active, theme)));
     if let Some(suffix) = suffix {
         spans.extend(suffix.spans);
     }
-    Line::from(spans)
+    row(spans, active, theme)
 }
 
 pub fn input_row(
@@ -365,17 +386,17 @@ pub fn harness_row(
     theme: &Theme,
 ) -> Line<'static> {
     let inner_width = cols.inner;
-    let (prefix, label_style) = prefix(label, active, cols.label);
-    let available = inner_width.saturating_sub(text::width(&prefix));
+    let prefix = prefix(label, cols.label);
+    let available = inner_width.saturating_sub(lead_width(&prefix));
     let value = input.value().trim();
     if !value.is_empty() && !known.iter().any(|k| k == value) {
         let suffix = " [custom]";
         let value_width = available.saturating_sub(suffix.len()).max(1);
         let w = window(input.value(), input.cursor(), value_width, active, theme);
-        let mut spans = vec![Span::styled(prefix, label_style)];
+        let mut spans = vec![Span::raw(prefix)];
         spans.extend(window_spans(&w, entry_style(active, theme)));
         spans.push(Span::styled(suffix, Style::default().fg(theme.warning)));
-        return Line::from(spans);
+        return row(spans, active, theme);
     }
     let value_width = VALUE_SLOT_WIDTH.min(available).max(1);
     let chips_budget = available.saturating_sub(value_width).min(48);
@@ -387,13 +408,13 @@ pub fn harness_row(
         + w.right.chars().count();
     let padding = value_width.saturating_sub(shown);
     let style = entry_style(active, theme);
-    let mut spans = vec![Span::styled(prefix, label_style)];
+    let mut spans = vec![Span::raw(prefix)];
     spans.extend(window_spans(&w, style));
     if padding > 0 {
         spans.push(Span::styled(" ".repeat(padding), style));
     }
     spans.extend(harness_chips(value, known, chips_budget, theme));
-    Line::from(spans)
+    row(spans, active, theme)
 }
 
 pub fn harness_chips(
@@ -485,31 +506,33 @@ pub fn static_value_row(
     theme: &Theme,
 ) -> Line<'static> {
     let inner_width = cols.inner;
-    let (prefix, label_style) = prefix(label, active, cols.label);
+    let prefix = prefix(label, cols.label);
     let width = inner_width
-        .saturating_sub(text::width(&prefix))
+        .saturating_sub(lead_width(&prefix))
         .saturating_sub(text::width(TEXT_GUTTER));
-    Line::from(vec![
-        Span::styled(prefix, label_style),
+    let spans = vec![
+        Span::raw(prefix),
         Span::raw(TEXT_GUTTER),
         Span::styled(text::truncate_end(value, width), entry_style(active, theme)),
-    ])
+    ];
+    row(spans, active, theme)
 }
 
 /// A dimmed, read-only row, such as the command a form will run.
 pub fn note_row(label: &str, value: &str, cols: Cols, theme: &Theme) -> Line<'static> {
     let inner_width = cols.inner;
-    let (prefix, _) = prefix(label, false, cols.label);
+    let prefix = prefix(label, cols.label);
     let width = inner_width
-        .saturating_sub(text::width(&prefix))
+        .saturating_sub(lead_width(&prefix))
         .saturating_sub(text::width(TEXT_GUTTER))
         .max(1);
     let note = Style::default().add_modifier(theme.muted | Modifier::ITALIC);
-    Line::from(vec![
+    let spans = vec![
         Span::styled(prefix, note),
         Span::raw(TEXT_GUTTER),
         Span::styled(text::truncate_end(value, width), note),
-    ])
+    ];
+    row(spans, false, theme)
 }
 
 /// A line derived from the fields above it, such as the command the form
@@ -549,19 +572,20 @@ pub fn derived_row(
 
 pub fn warning_row(label: &str, value: &str, cols: Cols, theme: &Theme) -> Line<'static> {
     let inner_width = cols.inner;
-    let (prefix, _) = prefix(label, false, cols.label);
+    let prefix = prefix(label, cols.label);
     let width = inner_width
-        .saturating_sub(text::width(&prefix))
+        .saturating_sub(lead_width(&prefix))
         .saturating_sub(text::width(TEXT_GUTTER))
         .max(1);
-    Line::from(vec![
+    let spans = vec![
         Span::styled(prefix, Style::default().add_modifier(theme.muted)),
         Span::raw(TEXT_GUTTER),
         Span::styled(
             text::truncate_end(value, width),
             Style::default().fg(theme.warning),
         ),
-    ])
+    ];
+    row(spans, false, theme)
 }
 
 /// A key hint footer as muted lines that fit `width` cells, wrapped only

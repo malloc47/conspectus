@@ -484,7 +484,7 @@ fn the_checkbox_keeps_its_place_and_the_row_keeps_its_width_when_toggled() {
     assert_eq!(off.find("[ ] socket"), focused.find("[ ] socket"));
     assert_eq!(off.find("[ ] socket"), on.find("[x] socket"));
     assert!(
-        focused.contains("> mux name"),
+        focused.contains(&format!("{} mux name", tuikit::glyphs::marks::POINTER)),
         "the row is marked: {focused}"
     );
 }

@@ -366,7 +366,7 @@ impl PinEditFormState {
 
     fn move_focus(&mut self, delta: i32) {
         let count = self.stops().len();
-        self.focus = tuikit::scroll::wrap_step(self.focus.min(count - 1), count, delta);
+        self.focus = tuikit::selection::Ends::Wrap.step(self.focus.min(count - 1), count, delta);
     }
 
     fn row_index(&self, field: &'static str) -> Option<usize> {
@@ -798,8 +798,7 @@ fn render_row(
     cols: Cols,
     theme: &Theme,
 ) -> Line<'static> {
-    let (prefix, label_style) = form::prefix(&row.label, active, grid.label);
-    let mut spans = vec![Span::styled(prefix, label_style)];
+    let mut spans = vec![Span::raw(form::prefix(&row.label, grid.label))];
     match &row.control {
         Control::Harness(input) => {
             let value = input.value().trim();
@@ -864,7 +863,7 @@ fn render_row(
         tag_style,
     ));
     let _ = cols;
-    Line::from(spans)
+    form::row(spans, active, theme)
 }
 
 #[cfg(test)]

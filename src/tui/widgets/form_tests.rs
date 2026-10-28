@@ -287,3 +287,34 @@ fn path_marks_follow_the_theme() {
         Style::default().fg(Color::LightCyan)
     );
 }
+
+#[test]
+fn the_focused_row_carries_the_cursor_marker_and_highlight_and_its_value_keeps_its_fill() {
+    let theme = theme();
+    let cols = Cols::new(60);
+    let focused = value_row("name", "xyz", 1, true, cols, None, &theme);
+    let idle = value_row("name", "xyz", 1, false, cols, None, &theme);
+    assert!(
+        text(&focused).starts_with(&format!("{} name", marks::POINTER)),
+        "{}",
+        text(&focused)
+    );
+    assert!(text(&idle).starts_with("  name"), "{}", text(&idle));
+    assert_eq!(
+        tuikit::text::width(&text(&focused)),
+        tuikit::text::width(&text(&idle)),
+        "the marker moves no text"
+    );
+    let label = style_of(&focused.spans, "name");
+    assert!(label.add_modifier.contains(theme.selection_active));
+    assert!(style_of(&idle.spans, "name").add_modifier.is_empty());
+    assert_eq!(
+        style_of(&focused.spans, "x"),
+        theme.field_active.into_style(),
+        "the field's fill keeps its look inside the highlight"
+    );
+    assert_eq!(
+        style_of(&focused.spans, "y"),
+        theme.field_cursor.into_style()
+    );
+}

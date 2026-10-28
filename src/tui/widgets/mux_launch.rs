@@ -294,7 +294,7 @@ impl MuxLaunchFormState {
             self.focus
         };
         let idx = fields.iter().position(|f| *f == at).unwrap_or(0);
-        self.focus = fields[tuikit::scroll::wrap_step(idx, fields.len(), delta)];
+        self.focus = fields[tuikit::selection::Ends::Wrap.step(idx, fields.len(), delta)];
     }
 
     /// Tab and Shift-Tab: every stop, the socket checkbox included
@@ -303,7 +303,7 @@ impl MuxLaunchFormState {
         let mut stops = self.visible_fields();
         stops.insert(1, MuxLaunchField::MuxSocketToggle);
         let idx = stops.iter().position(|f| *f == self.focus).unwrap_or(0);
-        self.focus = stops[tuikit::scroll::wrap_step(idx, stops.len(), delta)];
+        self.focus = stops[tuikit::selection::Ends::Wrap.step(idx, stops.len(), delta)];
     }
 
     fn try_commit(&mut self) -> OverlayOutcome {
@@ -686,7 +686,6 @@ impl MuxLaunchFormState {
     /// right. The checkbox takes the same cells checked or not, and the
     /// row carries the focus marker when either part has focus.
     fn name_line(&self, cols: form::Cols, theme: &Theme) -> Line<'static> {
-        use ratatui::style::Modifier;
         use ratatui::text::Span;
         let name_focused = self.focus == MuxLaunchField::MuxName;
         let toggle_focused = self.focus == MuxLaunchField::MuxSocketToggle;
@@ -698,7 +697,7 @@ impl MuxLaunchFormState {
                 Span::styled(text, form::entry_style(toggle_focused, theme)),
             ],
         };
-        let mut line = form::value_row(
+        let line = form::value_row(
             MUX_NAME_LABEL,
             self.spec.mux_name().value(),
             self.spec.mux_name().cursor(),
@@ -707,14 +706,11 @@ impl MuxLaunchFormState {
             Some(suffix),
             theme,
         );
-        if toggle_focused
-            && let Some(first) = line.spans.first_mut()
-            && let Some(rest) = first.content.strip_prefix("  ")
-        {
-            first.content = format!("> {rest}").into();
-            first.style = first.style.add_modifier(Modifier::BOLD);
+        if toggle_focused {
+            form::with_cursor(line, theme)
+        } else {
+            line
         }
-        line
     }
 
     /// The command row: what the form will run, and where an empty

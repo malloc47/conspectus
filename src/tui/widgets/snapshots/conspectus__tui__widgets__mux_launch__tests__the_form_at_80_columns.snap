@@ -3,7 +3,7 @@ source: src/tui/widgets/mux_launch_tests.rs
 expression: "frame_at(&claude_form(), 80, 20)"
 ---
   ┌ Launch harness in new mux ───────────────────────────────────────────────┐
-  │> mux name       adhoc                                          [ ] socket│
+  │► mux name       adhoc                                          [ ] socket│
   │  harness        claude-code      [claude-code] [codex] [opencode]        │
   │  options        [ ] skip permissions                                     │
   │  cwd            /tmp                      √                              │

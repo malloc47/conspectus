@@ -109,7 +109,10 @@ fn each_row_says_where_its_value_comes_from() {
     let row = |label: &str| {
         frame
             .lines()
-            .find(|l| l.contains(&format!("│  {label} ")) || l.contains(&format!("│> {label} ")))
+            .find(|l| {
+                l.contains(&format!("│  {label} "))
+                    || l.contains(&format!("│{} {label} ", tuikit::glyphs::marks::POINTER))
+            })
             .unwrap_or_else(|| panic!("no row {label}:\n{frame}"))
             .to_string()
     };
@@ -385,7 +388,10 @@ fn render_at(form: &PinEditFormState, width: u16, height: u16) -> Vec<String> {
 fn row_end(lines: &[String], label: &str) -> (usize, String) {
     let line = lines
         .iter()
-        .find(|l| l.contains(&format!("│  {label} ")) || l.contains(&format!("│> {label} ")))
+        .find(|l| {
+            l.contains(&format!("│  {label} "))
+                || l.contains(&format!("│{} {label} ", tuikit::glyphs::marks::POINTER))
+        })
         .unwrap_or_else(|| panic!("no row {label}"));
     let inner = line.trim_end().trim_end_matches('│').trim_end();
     (
