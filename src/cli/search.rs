@@ -950,25 +950,20 @@ fn render_grid(table: &Table, width: Option<usize>, color: bool) -> String {
 
     let mut out = String::new();
     for (idx, head) in table.header[..columns].iter().enumerate() {
-        out.push_str(&pad(head, widths[idx]));
+        out.push_str(&tuikit::text::pad(head, widths[idx]));
         out.push_str(GAP);
     }
     out.push_str(table.header[columns]);
     out.push('\n');
     for (row, (snippet, range)) in table.cells.iter().zip(&table.snippets) {
         for (idx, cell) in row.iter().enumerate() {
-            out.push_str(&pad(cell, widths[idx]));
+            out.push_str(&tuikit::text::pad(cell, widths[idx]));
             out.push_str(GAP);
         }
         out.push_str(&fit_snippet(snippet, range, snippet_budget, color));
         out.push('\n');
     }
     out
-}
-
-fn pad(text: &str, width: usize) -> String {
-    let gap = width.saturating_sub(display_width(text));
-    format!("{text}{}", " ".repeat(gap))
 }
 
 /// The snippet cut to `budget` columns (when set) around the match, on
