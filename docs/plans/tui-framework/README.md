@@ -68,6 +68,11 @@ regressions), acceptance criteria, and dependencies. `backlog doctor` reports
 no cycles. IDs were assigned from `ca668a3`; if `main` files tasks first,
 renumber on merge.
 
+Execution note: CSP-721 originally waited on CSP-700 (aider removal, m-24). That
+dependency was dropped when execution began, so this milestone does not remove
+an adapter the operator's separate workstream may be removing. The harness
+palette adapter keeps aider's entries until m-24 lands and deletes them then.
+
 ### Cleanups and suspected defects (first)
 
 | Task | Story | Depends on |
@@ -93,7 +98,7 @@ renumber on merge.
 
 | Task | Story | Depends on |
 | --- | --- | --- |
-| CSP-721 | Move design tokens to a generic `theme` module with an app-registered style map | CSP-718, CSP-720, CSP-700 |
+| CSP-721 | Move design tokens to a generic `theme` module with an app-registered style map | CSP-718, CSP-720 |
 | CSP-722 | Move the vetted glyph table to `glyphs` and retire duplicate glyph literals | CSP-718, CSP-720 |
 | CSP-723 | Merge the truncation, padding, wrapping, and snippet helpers into one `text` module | CSP-718, CSP-720 |
 | CSP-724 | Extract `scroll`: cursor stepping, follow offset, and the scrollbar gutter | CSP-718, CSP-720, CSP-712 |

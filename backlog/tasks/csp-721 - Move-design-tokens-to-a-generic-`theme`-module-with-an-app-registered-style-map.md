@@ -6,6 +6,7 @@ title: >-
 status: To Do
 assignee: []
 created_date: '2026-10-27 20:26'
+updated_date: '2026-10-28 02:45'
 labels:
   - tui-framework
   - tuifw-foundation
@@ -13,7 +14,6 @@ milestone: m-25
 dependencies:
   - CSP-718
   - CSP-720
-  - CSP-700
 references:
   - docs/adr/0032-tui-theme-config.md
   - docs/adr/0022-terminal-color-and-styling.md
@@ -59,3 +59,9 @@ Blockers: m-24: the harness palette adapter is written once, after the aider ada
 - [ ] #1 `just check` passes, or `git diff --check` for docs-only changes
 - [ ] #2 Docs and ADRs are updated when behavior, architecture, or workflow change
 <!-- DOD:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+Dependency on CSP-700 (aider removal, m-24) dropped at execution time: m-24 is a separate operator workstream and may be in progress elsewhere. The harness palette adapter is written with the current harness set, including aider's colour and the harness_aider alias, and m-24 removes those entries from the adapter when it lands. Net cost to m-24 is a small deletion.
+<!-- SECTION:NOTES:END -->
