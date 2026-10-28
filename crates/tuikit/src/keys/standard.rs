@@ -2,7 +2,8 @@
 //! standard control, so every menu, dialog, pager, prompt, checklist, and
 //! form takes the same keys.
 //!
-//! Each table starts with `Ctrl-C`, bound to its `Abort` action. Lists
+//! Each table starts with `Ctrl-C`, bound to its `Abort` action, and a
+//! table where nothing is typed binds `q` to it as well (house rule 4). Lists
 //! move with the arrows, `Ctrl-P` and `Ctrl-N`, and `k` and `j` where
 //! nothing is typed; characters are bound as typed (see
 //! [`KeyMatcher`](super::KeyMatcher)). A host table builds on one with
@@ -18,7 +19,7 @@ use crate::glyphs::marks;
 /// What a menu's keys do.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum MenuKey {
-    /// Dismiss the menu (`Ctrl-C`).
+    /// Dismiss the menu (`Ctrl-C`, `q`).
     Abort,
     /// Move the cursor to the previous entry.
     Up,
@@ -30,9 +31,11 @@ pub enum MenuKey {
     Close,
 }
 
-/// A menu: `↑/↓ move · Enter pick · Esc close`.
+/// A menu: `↑/↓ move · Enter pick · Esc close`. `q` dismisses it too, as
+/// it does every overlay where nothing is typed.
 pub const MENU_KEYS: &[KeyRow<MenuKey>] = &[
     alias(ctrl('c'), MenuKey::Abort),
+    alias(ch('q'), MenuKey::Abort),
     shown(key(KeyCode::Up), MenuKey::Up, marks::ARROW_UP, "move"),
     alias(ch('k'), MenuKey::Up),
     alias(ctrl('p'), MenuKey::Up),
@@ -57,7 +60,7 @@ impl KeyAction for MenuKey {
 /// What a confirmation dialog's keys do.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum ConfirmKey {
-    /// Dismiss the dialog (`Ctrl-C`).
+    /// Dismiss the dialog and the overlay it is in (`Ctrl-C`, `q`).
     Abort,
     /// Go ahead.
     Yes,
@@ -65,9 +68,11 @@ pub enum ConfirmKey {
     No,
 }
 
-/// A yes-or-no dialog: `Enter/y confirm · Esc/n cancel`.
+/// A yes-or-no dialog: `Enter/y confirm · Esc/n cancel`. `q` dismisses
+/// it, as `Ctrl-C` does.
 pub const CONFIRM_KEYS: &[KeyRow<ConfirmKey>] = &[
     alias(ctrl('c'), ConfirmKey::Abort),
+    alias(ch('q'), ConfirmKey::Abort),
     shown(key(KeyCode::Enter), ConfirmKey::Yes, "Enter", "confirm"),
     shown(ch('y'), ConfirmKey::Yes, "y", "confirm"),
     shown(key(KeyCode::Esc), ConfirmKey::No, "Esc", "cancel"),
@@ -88,12 +93,12 @@ impl KeyAction for ConfirmKey {
 /// none.
 ///
 /// A choice dialog's table is the host's, because its keys and verbs are
-/// the choices: `Ctrl-C` first to [`ChoiceKey::Abort`], a shown row per
-/// choice (`m merge & close`), then `Esc` shown as `cancel` and `q` as
-/// its alias, both to [`ChoiceKey::Back`].
+/// the choices: `Ctrl-C` first and `q` to [`ChoiceKey::Abort`], a shown
+/// row per choice (`m merge & close`), then `Esc` shown as `cancel` to
+/// [`ChoiceKey::Back`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum ChoiceKey<C> {
-    /// Dismiss the dialog (`Ctrl-C`).
+    /// Dismiss the dialog and the overlay it is in (`Ctrl-C`, `q`).
     Abort,
     /// Take this choice.
     Choose(C),
@@ -218,7 +223,7 @@ impl KeyAction for TextInputKey {
 /// What a checklist's keys do.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum ChecklistKey {
-    /// Dismiss the checklist (`Ctrl-C`).
+    /// Dismiss the checklist (`Ctrl-C`, `q`).
     Abort,
     /// Move the cursor to the previous item.
     Up,
@@ -233,8 +238,10 @@ pub enum ChecklistKey {
 }
 
 /// A checklist: `↑/↓ move · Space toggle · Enter confirm · Esc cancel`.
+/// `q` dismisses it, as `Ctrl-C` does.
 pub const CHECKLIST_KEYS: &[KeyRow<ChecklistKey>] = &[
     alias(ctrl('c'), ChecklistKey::Abort),
+    alias(ch('q'), ChecklistKey::Abort),
     shown(key(KeyCode::Up), ChecklistKey::Up, marks::ARROW_UP, "move"),
     alias(ch('k'), ChecklistKey::Up),
     alias(ctrl('p'), ChecklistKey::Up),

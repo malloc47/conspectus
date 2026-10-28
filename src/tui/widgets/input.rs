@@ -22,12 +22,15 @@ use crate::tui::Theme;
 /// What the host should do after passing a key event through the
 /// overlay. `Continue` means the overlay stays open; `Confirm`
 /// carries the trimmed buffer value back to the host; `Cancel`
-/// means the overlay closes without committing.
+/// (`Esc`) means the prompt closes without committing, stepping back
+/// one level when it sits inside another overlay; `Abort` (`Ctrl-C`)
+/// dismisses the whole overlay the prompt is in.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum InputOutcome {
     Continue,
     Confirm(String),
     Cancel,
+    Abort,
 }
 
 /// Caller-owned state for a single text-input overlay. The state
@@ -73,7 +76,8 @@ impl TextInputState {
         use tuikit::keys::{TEXT_INPUT_KEYS, TextInputKey, resolve};
         match resolve(TEXT_INPUT_KEYS, event) {
             Some(TextInputKey::Confirm) => InputOutcome::Confirm(self.input.value().to_string()),
-            Some(TextInputKey::Abort | TextInputKey::Cancel) => InputOutcome::Cancel,
+            Some(TextInputKey::Abort) => InputOutcome::Abort,
+            Some(TextInputKey::Cancel) => InputOutcome::Cancel,
             Some(TextInputKey::Tab) => InputOutcome::Continue,
             Some(TextInputKey::WordLeft) => {
                 self.input.handle(InputRequest::GoToPrevWord);

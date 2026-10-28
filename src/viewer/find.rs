@@ -27,6 +27,9 @@ const NEARBY_TURNS: usize = 25;
 /// Keys of the find prompt. Typed characters arrive as [`Self::Insert`].
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ViewerFindMsg {
+    /// Leave the viewer from the prompt (`Ctrl-C`): dismissing reaches
+    /// past the prompt.
+    Quit,
     /// Leave the prompt, keeping any earlier find.
     Cancel,
     /// Run the find and jump to its first match.
@@ -419,7 +422,7 @@ impl ViewerState {
 }
 
 /// Apply one key of the find prompt. Does nothing when no prompt is
-/// open.
+/// open. [`ViewerFindMsg::Quit`] asks to leave the viewer.
 pub fn reduce_find(mut state: ViewerState, msg: ViewerFindMsg) -> (ViewerState, ViewerEffect) {
     state.find.note = None;
     state.stick_to_end = false;
@@ -437,6 +440,7 @@ pub fn reduce_find(mut state: ViewerState, msg: ViewerFindMsg) -> (ViewerState, 
         ViewerFindMsg::Home => prompt.home(),
         ViewerFindMsg::End => prompt.end(),
         ViewerFindMsg::ClearLine => prompt.clear_line(),
+        ViewerFindMsg::Quit => return (state, ViewerEffect::Close),
         ViewerFindMsg::Cancel => state.find.prompt = None,
         ViewerFindMsg::Confirm => {
             let text = prompt.text.trim().to_string();

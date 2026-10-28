@@ -77,6 +77,8 @@ pub const SEARCH_OPTION_KEYS: &[KeyRow<SearchOptionKey>] = &[
     alias(key(KeyCode::Enter), SearchOptionKey::Toggle),
     shown(key(KeyCode::Esc), SearchOptionKey::Back, "Esc", "back"),
     alias(ctrl('o'), SearchOptionKey::Back),
+    // Nothing is typed in the pane, so `q` dismisses the search.
+    alias(ch('q'), SearchOptionKey::Abort),
 ];
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -199,6 +201,9 @@ pub const SEARCH_CONTENT_KEYS: &[KeyRow<SearchKey>] = &[
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ControlsKey {
     Abort,
+    /// `q`: dismisses the overlay, except in an editor that takes text,
+    /// where it types.
+    Quit,
     Up,
     Down,
     /// Select the focused choice, toggle the focused checkbox, or open
@@ -212,7 +217,7 @@ pub enum ControlsKey {
 impl KeyAction for ControlsKey {
     fn role(self) -> KeyRole {
         match self {
-            Self::Abort => KeyRole::Abort,
+            Self::Abort | Self::Quit => KeyRole::Abort,
             Self::Up | Self::Down => KeyRole::Move,
             Self::Toggle => KeyRole::Change,
             Self::Done => KeyRole::Apply,
@@ -223,6 +228,7 @@ impl KeyAction for ControlsKey {
 
 pub const CONTROLS_KEYS: &[KeyRow<ControlsKey>] = &[
     alias(ctrl('c'), ControlsKey::Abort),
+    alias(ch('q'), ControlsKey::Quit),
     shown(key(KeyCode::Up), ControlsKey::Up, marks::ARROW_UP, "move"),
     alias(ch('k'), ControlsKey::Up),
     alias(ctrl('p'), ControlsKey::Up),
@@ -344,7 +350,7 @@ pub const CLOSE_DOWN_KEYS: &[KeyRow<ChoiceKey<CloseDown>>] = &[
         "discard & close",
     ),
     shown(key(KeyCode::Esc), ChoiceKey::Back, "Esc", "cancel"),
-    alias(ch('q'), ChoiceKey::Back),
+    alias(ch('q'), ChoiceKey::Abort),
 ];
 
 // ---------------------------------------------------------------------
@@ -493,6 +499,7 @@ pub const VIEWER_KEYS: &[KeyRow<ViewerMsg>] = &[
 impl KeyAction for ViewerFindMsg {
     fn role(self) -> KeyRole {
         match self {
+            Self::Quit => KeyRole::Abort,
             Self::Cancel => KeyRole::Leave,
             Self::Confirm => KeyRole::Apply,
             Self::Left
@@ -507,9 +514,10 @@ impl KeyAction for ViewerFindMsg {
 }
 
 /// The find prompt inside the viewers. Keys no row binds type into the
-/// prompt (see `tuikit::keys::typed_char`).
+/// prompt (see `tuikit::keys::typed_char`), so `q` types; `Ctrl-C` leaves
+/// the viewer, as it does from anywhere in it.
 pub const VIEWER_FIND_KEYS: &[KeyRow<ViewerFindMsg>] = &[
-    alias(ctrl('c'), ViewerFindMsg::Cancel),
+    alias(ctrl('c'), ViewerFindMsg::Quit),
     shown(key(KeyCode::Enter), ViewerFindMsg::Confirm, "Enter", "find"),
     shown(key(KeyCode::Esc), ViewerFindMsg::Cancel, "Esc", "cancel"),
     alias(key(KeyCode::Backspace), ViewerFindMsg::Backspace),

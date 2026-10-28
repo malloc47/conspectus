@@ -193,6 +193,24 @@ fn an_empty_query_stops_the_preview() {
 }
 
 #[test]
+fn q_dismisses_from_the_options_pane_and_types_into_the_query() {
+    // Nothing is typed in the options pane, so q dismisses the search.
+    let mut state = contents_overlay("quokka");
+    state.handle_key(ctrl('o'));
+    assert!(matches!(
+        state.handle_key(plain(KeyCode::Char('q'))),
+        SearchOutcome::Cancel
+    ));
+    // In the query, q is a letter.
+    let mut state = contents_overlay("quokka");
+    assert!(matches!(
+        state.handle_key(plain(KeyCode::Char('q'))),
+        SearchOutcome::Continue
+    ));
+    assert_eq!(state.content_text(), "quokkaq");
+}
+
+#[test]
 fn the_options_pane_changes_what_is_searched_and_restarts_the_scan() {
     let mut state = contents_overlay("quokka");
     state.handle_key(ctrl('o'));

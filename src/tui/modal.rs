@@ -193,7 +193,7 @@ impl Overlay for RenameOverlayState {
         use crate::tui::widgets::input::InputOutcome;
         match self.inner.handle_key(key) {
             InputOutcome::Continue => OverlayOutcome::Consumed,
-            InputOutcome::Cancel => OverlayOutcome::Close,
+            InputOutcome::Cancel | InputOutcome::Abort => OverlayOutcome::Close,
             InputOutcome::Confirm(value) => {
                 OverlayOutcome::Commit(Box::new(Msg::CommitRename(value)))
             }

@@ -405,6 +405,7 @@ impl WorktreeMenuState {
         };
         match input.handle_key(key) {
             InputOutcome::Continue => OverlayOutcome::Consumed,
+            InputOutcome::Abort => OverlayOutcome::Close,
             InputOutcome::Cancel => {
                 self.mode = Mode::List;
                 OverlayOutcome::Consumed
@@ -441,7 +442,8 @@ impl WorktreeMenuState {
                     force: !self.ctx.guard_sessions.is_empty(),
                 }))
             }
-            Some(ConfirmKey::Abort | ConfirmKey::No) => {
+            Some(ConfirmKey::Abort) => OverlayOutcome::Close,
+            Some(ConfirmKey::No) => {
                 self.mode = Mode::List;
                 OverlayOutcome::Consumed
             }
@@ -463,7 +465,8 @@ impl WorktreeMenuState {
                     target: None,
                 }))
             }
-            Some(ConfirmKey::Abort | ConfirmKey::No) => {
+            Some(ConfirmKey::Abort) => OverlayOutcome::Close,
+            Some(ConfirmKey::No) => {
                 self.mode = Mode::List;
                 OverlayOutcome::Consumed
             }
@@ -480,7 +483,8 @@ impl WorktreeMenuState {
                 };
                 OverlayOutcome::Commit(Box::new(Msg::CommitWorktreePrune { repo_root }))
             }
-            Some(ConfirmKey::Abort | ConfirmKey::No) => {
+            Some(ConfirmKey::Abort) => OverlayOutcome::Close,
+            Some(ConfirmKey::No) => {
                 self.mode = Mode::List;
                 OverlayOutcome::Consumed
             }
@@ -490,13 +494,15 @@ impl WorktreeMenuState {
 
     fn handle_close_down(&mut self, key: KeyEvent) -> OverlayOutcome {
         // `m` lands the branch, `d` discards it; both then tear the
-        // stream down (ADR 0093). Esc/q backs out.
+        // stream down (ADR 0093). Esc backs out to the list; Ctrl-C and
+        // q dismiss the menu.
         use crate::tui::keybindings::overlay::{CLOSE_DOWN_KEYS, CloseDown};
         use tuikit::keys::{ChoiceKey, resolve};
         let discard = match resolve(CLOSE_DOWN_KEYS, key) {
             Some(ChoiceKey::Choose(CloseDown::Merge)) => false,
             Some(ChoiceKey::Choose(CloseDown::Discard)) => true,
-            Some(ChoiceKey::Abort | ChoiceKey::Back) => {
+            Some(ChoiceKey::Abort) => return OverlayOutcome::Close,
+            Some(ChoiceKey::Back) => {
                 self.mode = Mode::List;
                 return OverlayOutcome::Consumed;
             }

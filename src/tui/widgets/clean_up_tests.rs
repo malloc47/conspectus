@@ -64,6 +64,20 @@ fn escape_cancels() {
 }
 
 #[test]
+fn q_dismisses_the_checklist_and_its_empty_notice() {
+    let mut state = state();
+    assert_eq!(
+        state.handle((), key(KeyCode::Char('q'))),
+        OverlayOutcome::Close
+    );
+    let mut state = CleanUpState::new(Vec::new(), 100);
+    assert_eq!(
+        state.handle((), key(KeyCode::Char('q'))),
+        OverlayOutcome::Close
+    );
+}
+
+#[test]
 fn with_no_candidates_enter_and_escape_dismiss_the_notice() {
     let mut state = CleanUpState::new(Vec::new(), 100);
     assert!(state.is_empty());

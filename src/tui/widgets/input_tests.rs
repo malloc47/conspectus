@@ -36,7 +36,7 @@ fn tab_is_swallowed_while_overlay_is_open() {
 }
 
 #[test]
-fn ctrl_c_cancels() {
+fn ctrl_c_aborts_and_esc_cancels() {
     let mut state = TextInputState::new(" rename ", "hello");
     let event = KeyEvent {
         code: KeyCode::Char('c'),
@@ -45,7 +45,8 @@ fn ctrl_c_cancels() {
         state: KeyEventState::NONE,
     };
     let outcome = state.handle_key(event);
-    assert_eq!(outcome, InputOutcome::Cancel);
+    assert_eq!(outcome, InputOutcome::Abort, "Ctrl-C dismisses the overlay");
+    assert_eq!(state.handle_key(key(KeyCode::Esc)), InputOutcome::Cancel);
 }
 
 #[test]

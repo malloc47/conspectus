@@ -2252,7 +2252,7 @@ mod modal_stack {
     }
 
     #[test]
-    fn viewer_msg_close_pops_stack_and_sets_status() {
+    fn viewer_msg_close_pops_stack_silently() {
         use crate::viewer::input::ViewerMsg;
         use crate::viewer::model::TranscriptDocument;
         use crate::viewer::state::ViewerState;
@@ -2261,7 +2261,24 @@ mod modal_stack {
         let effects = app.update(Msg::Viewer(ViewerMsg::Close));
         assert!(effects.is_empty());
         assert!(app.modal_stack().is_empty());
-        assert_eq!(app.status_message(), Some("viewer closed"));
+        assert_eq!(app.status_message(), None, "leaving the viewer is silent");
+    }
+
+    #[test]
+    fn ctrl_c_in_the_viewer_find_prompt_leaves_the_viewer() {
+        use crate::viewer::find::ViewerFindMsg;
+        use crate::viewer::input::ViewerMsg;
+        use crate::viewer::model::TranscriptDocument;
+        use crate::viewer::state::ViewerState;
+        let mut app = App::new(RunConfig::defaults());
+        app.open_viewer_modal(ViewerState::new(TranscriptDocument::default()));
+        app.update(Msg::Viewer(ViewerMsg::FindOpen));
+        assert!(app.viewer_modal().is_some_and(|v| v.find.prompt.is_some()));
+        app.update(Msg::ViewerFind(ViewerFindMsg::Quit));
+        assert!(
+            app.modal_stack().is_empty(),
+            "dismissing reaches past the prompt"
+        );
     }
 
     #[test]

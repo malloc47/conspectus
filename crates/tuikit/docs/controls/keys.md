@@ -144,7 +144,10 @@ assert!(line.spans.iter().all(|span| span.style != unavailable_style(&theme)));
   no cursor and binds neither chord.
 - **`Ctrl-C` comes first** in every table an overlay resolves with, bound
   to an action that dismisses (`KeyRole::Abort`, or `Leave` for one level),
-  so no later row can take it.
+  so no later row can take it. `q` dismisses as well wherever nothing is
+  typed: the menu, confirmation, checklist, and pager tables bind it, and
+  a choice dialog binds it to its `Abort`; the text and form tables leave
+  it to type.
 - **One footer grammar.** A segment is the keys, a space, and a short
   imperative verb with no "to" and no "=": `Esc close`, `Enter pick`,
   `Tab search current/all`. Labels that share a verb join with `/`; notes
@@ -164,12 +167,12 @@ not shown in the footer.
 
 | Table (enum) | Keys | Footer |
 | --- | --- | --- |
-| `MENU_KEYS` (`MenuKey`) | `Ctrl-C` abort; `↑`/`k`/`Ctrl-P` up; `↓`/`j`/`Ctrl-N` down; `Enter` pick; `Esc` close | `↑/↓ move · Enter pick · Esc close` |
-| `CONFIRM_KEYS` (`ConfirmKey`) | `Ctrl-C` abort; `Enter`/`y` yes; `Esc`/`n` no | `Enter/y confirm · Esc/n cancel` |
-| a choice dialog (`ChoiceKey<C>`) | `Ctrl-C` abort; one shown row per choice; `Esc` (shown as cancel) and `q` back | `m merge & close · d discard & close · Esc cancel` (the host's choices) |
+| `MENU_KEYS` (`MenuKey`) | `Ctrl-C` and `q` abort; `↑`/`k`/`Ctrl-P` up; `↓`/`j`/`Ctrl-N` down; `Enter` pick; `Esc` close | `↑/↓ move · Enter pick · Esc close` |
+| `CONFIRM_KEYS` (`ConfirmKey`) | `Ctrl-C` and `q` abort; `Enter`/`y` yes; `Esc`/`n` no | `Enter/y confirm · Esc/n cancel` |
+| a choice dialog (`ChoiceKey<C>`) | `Ctrl-C` and `q` abort; one shown row per choice; `Esc` (shown as cancel) back | `m merge & close · d discard & close · Esc cancel` (the host's choices) |
 | `PAGER_KEYS` (`PagerKey`) | `Ctrl-C` abort; `j`/`↓` down; `k`/`↑` up; `PgDn`/`Space` page down; `PgUp` page up; `g`/`Home` top; `G`/`End` bottom; `Esc`/`q` close | `j/k/PgDn/PgUp scroll · Esc/q close` |
 | `TEXT_INPUT_KEYS` (`TextInputKey`) | `Ctrl-C` abort; `Enter` confirm; `Esc` cancel; `Tab` swallowed; `Alt-b`/`Alt-f` word left and right | `Enter confirm · Esc cancel` |
-| `CHECKLIST_KEYS` (`ChecklistKey`) | `Ctrl-C` abort; `↑`/`k`/`Ctrl-P` up; `↓`/`j`/`Ctrl-N` down; `Space` toggle; `Enter` confirm; `Esc` cancel | `↑/↓ move · Space toggle · Enter confirm · Esc cancel` |
+| `CHECKLIST_KEYS` (`ChecklistKey`) | `Ctrl-C` and `q` abort; `↑`/`k`/`Ctrl-P` up; `↓`/`j`/`Ctrl-N` down; `Space` toggle; `Enter` confirm; `Esc` cancel | `↑/↓ move · Space toggle · Enter confirm · Esc cancel` |
 | `FORM_KEYS` (`FormKey`) | `Ctrl-C` abort; `↑`/`Ctrl-P` previous field; `↓`/`Ctrl-N` next field; `Tab` complete or next; `S-Tab` back | `↑/↓ move · Tab complete/next · S-Tab back` |
 | `FORM_OPTION_KEYS` (`FormKey`) | `←` option back; `→`/`Space` option on | `←/→/Space change` |
 
@@ -194,7 +197,7 @@ the style the control draws its footer in.
 | # | Rule | How this module follows it |
 | --- | --- | --- |
 | 3 | Confirmation | `CONFIRM_KEYS` is the one confirm keymap: `y`/`Enter` confirm, `n`/`Esc` cancel; `ChoiceKey` gives a choice dialog the same leave keys |
-| 4 | Close keys | `Esc` leaves one level in every standard table; `q` closes a pager and backs out of a choice; `Ctrl-C` comes first and dismisses (`ctrl_c_first`) |
+| 4 | Close keys | `Esc` leaves one level in every standard table; `Ctrl-C` comes first and dismisses (`ctrl_c_first`); `q` dismisses too in every table where nothing is typed (menus, confirmations, choices, checklists, pagers) and types in the text and form tables |
 | 6 | Forms | `FORM_KEYS`: `Tab`/`↓`/`Ctrl-N` next and `S-Tab`/`↑`/`Ctrl-P` previous; `Enter` is the form's submit row |
 | 8 | Footers and hints | every footer is generated from its table in one grammar; `unresolved` fails a footer that names a key an earlier row takes |
 | 12 | Paging | `PAGER_KEYS` binds `PgUp`/`PgDn`, `Home`/`End`, and `g`/`G` as typed; the control sizes the page |

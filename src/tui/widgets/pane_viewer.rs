@@ -59,7 +59,7 @@ pub enum PaneViewerMsg {
     Attach,
     /// Step back: close the help, then clear the find, then leave (`Esc`).
     Close,
-    /// Leave at once; with the help up it closes the help only (`q`).
+    /// Leave at once, the help page included (`q`, `Ctrl-C`).
     Quit,
 }
 
@@ -315,13 +315,7 @@ impl PaneViewerState {
                     return PaneViewerOutcome::Close;
                 }
             }
-            PaneViewerMsg::Quit => {
-                if self.show_help {
-                    self.show_help = false;
-                } else {
-                    return PaneViewerOutcome::Close;
-                }
-            }
+            PaneViewerMsg::Quit => return PaneViewerOutcome::Close,
         }
         PaneViewerOutcome::Continue
     }
@@ -345,12 +339,14 @@ impl PaneViewerState {
     }
 
     /// Edit the find prompt. Confirming runs the find and jumps to the
-    /// first match at or after the top of the screen.
-    pub fn apply_find(&mut self, msg: ViewerFindMsg) {
+    /// first match at or after the top of the screen; `Quit` leaves the
+    /// viewer.
+    pub fn apply_find(&mut self, msg: ViewerFindMsg) -> PaneViewerOutcome {
         let Some(prompt) = self.prompt.as_mut() else {
-            return;
+            return PaneViewerOutcome::Continue;
         };
         match msg {
+            ViewerFindMsg::Quit => return PaneViewerOutcome::Close,
             ViewerFindMsg::Cancel => self.prompt = None,
             ViewerFindMsg::Confirm => {
                 let text = prompt.text.clone();
@@ -380,6 +376,7 @@ impl PaneViewerState {
             ViewerFindMsg::ClearLine => prompt.clear_line(),
             ViewerFindMsg::Insert(c) => prompt.insert(c),
         }
+        PaneViewerOutcome::Continue
     }
 
     /// Route a key: to the find prompt while it is open, otherwise
@@ -388,10 +385,10 @@ impl PaneViewerState {
         if self.prompt.is_some() {
             let msg = resolve(VIEWER_FIND_KEYS, key)
                 .or_else(|| typed_char(key).map(ViewerFindMsg::Insert));
-            if let Some(msg) = msg {
-                self.apply_find(msg);
-            }
-            return PaneViewerOutcome::Continue;
+            return match msg {
+                Some(msg) => self.apply_find(msg),
+                None => PaneViewerOutcome::Continue,
+            };
         }
         match resolve(PANE_VIEWER_KEYS, key) {
             Some(msg) => self.apply(msg),

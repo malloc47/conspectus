@@ -254,14 +254,29 @@ fn q_leaves_the_viewer_at_once_even_with_a_find_active() {
 }
 
 #[test]
-fn q_with_the_help_open_closes_only_the_help() {
+fn q_leaves_the_viewer_even_with_the_help_open() {
     let state = find(drawn(document()), "needle");
     let (state, _) = reduce(state, ViewerMsg::ToggleHelp);
-    let (state, effect) = reduce(state, ViewerMsg::Quit);
+    let (_, effect) = reduce(state, ViewerMsg::Quit);
+    assert_eq!(effect, ViewerEffect::Close, "q dismisses the viewer");
+}
+
+#[test]
+fn esc_with_the_help_open_closes_only_the_help() {
+    let state = find(drawn(document()), "needle");
+    let (state, _) = reduce(state, ViewerMsg::ToggleHelp);
+    let (state, effect) = reduce(state, ViewerMsg::Close);
     assert_eq!(effect, ViewerEffect::None);
     assert!(!state.show_help, "the help closed");
     assert!(state.find.is_active(), "the find stayed");
-    let (_, effect) = reduce(state, ViewerMsg::Quit);
+}
+
+#[test]
+fn quitting_from_the_find_prompt_leaves_the_viewer() {
+    let state = find(drawn(document()), "needle");
+    let (state, _) = reduce(state, ViewerMsg::FindOpen);
+    assert!(state.find.prompt.is_some());
+    let (_, effect) = reduce_find(state, ViewerFindMsg::Quit);
     assert_eq!(effect, ViewerEffect::Close);
 }
 

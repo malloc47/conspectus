@@ -489,7 +489,7 @@ impl Overlay for MuxLaunchFormState {
                 self.spec.clear_error();
                 OverlayOutcome::Consumed
             }
-            Some(InputOutcome::Cancel) => OverlayOutcome::Close,
+            Some(InputOutcome::Cancel | InputOutcome::Abort) => OverlayOutcome::Close,
             Some(InputOutcome::Confirm(_)) => self.try_commit(),
             None => OverlayOutcome::Consumed,
         }

@@ -155,7 +155,7 @@ impl Overlay for NewMuxFormState {
             }
             NewMuxField::Name => match self.name.handle_key(key) {
                 InputOutcome::Continue => OverlayOutcome::Consumed,
-                InputOutcome::Cancel => OverlayOutcome::Close,
+                InputOutcome::Cancel | InputOutcome::Abort => OverlayOutcome::Close,
                 // Enter is intercepted above; kept for safety.
                 InputOutcome::Confirm(_) => self.try_commit(),
             },

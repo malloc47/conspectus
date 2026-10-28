@@ -8,6 +8,14 @@
 
 use super::*;
 
+/// What closing an overlay with a key leaves on the status line: nothing,
+/// so the screen's own hints show again. Cancelling is not an event worth
+/// a message, and a hint the overlay put there when it opened must not
+/// outlive it.
+fn left(app: &mut App) {
+    app.update(Msg::SetStatus(None));
+}
+
 /// Resolve the current selection to a renameable row and seed the
 /// rename overlay. Agent sessions use alias > harness title > empty;
 /// pin rows use the pin display name.
@@ -89,10 +97,11 @@ pub(in crate::tui) fn handle_rename_overlay_key(
         OverlayOutcome::Consumed => {}
         OverlayOutcome::Close => {
             app.close_rename_overlay();
-            app.update(Msg::SetStatus(Some("rename: cancelled".to_string())));
+            left(app);
         }
         OverlayOutcome::Commit(msg) => {
             app.close_rename_overlay();
+            left(app);
             send(app, *msg);
         }
         OverlayOutcome::CommitAndStay(msg) => {
@@ -118,10 +127,11 @@ pub(super) fn handle_worktree_menu_key(
         OverlayOutcome::Consumed => {}
         OverlayOutcome::Close => {
             app.close_worktree_menu();
-            app.update(Msg::SetStatus(Some("worktree: cancelled".to_string())));
+            left(app);
         }
         OverlayOutcome::Commit(msg) => {
             app.close_worktree_menu();
+            left(app);
             send(app, *msg);
         }
         OverlayOutcome::CommitAndStay(msg) => {
@@ -144,10 +154,11 @@ pub(in crate::tui) fn handle_new_mux_form_key(
         OverlayOutcome::Consumed => {}
         OverlayOutcome::Close => {
             app.close_new_mux_form();
-            app.update(Msg::SetStatus(Some("mux: cancelled".to_string())));
+            left(app);
         }
         OverlayOutcome::Commit(msg) => {
             app.close_new_mux_form();
+            left(app);
             send(app, *msg);
         }
         OverlayOutcome::CommitAndStay(msg) => {
@@ -175,10 +186,11 @@ pub(super) fn handle_mux_menu_key(
         OverlayOutcome::Consumed => {}
         OverlayOutcome::Close => {
             app.close_mux_menu();
-            app.update(Msg::SetStatus(Some("mux: cancelled".to_string())));
+            left(app);
         }
         OverlayOutcome::Commit(msg) => {
             app.close_mux_menu();
+            left(app);
             send(app, *msg);
         }
         OverlayOutcome::CommitAndStay(msg) => {
@@ -201,9 +213,13 @@ pub(super) fn handle_row_menu_key(
     };
     match outcome {
         OverlayOutcome::Consumed => {}
-        OverlayOutcome::Close => app.close_row_menu(),
+        OverlayOutcome::Close => {
+            app.close_row_menu();
+            left(app);
+        }
         OverlayOutcome::Commit(msg) => {
             app.close_row_menu();
+            left(app);
             send(app, *msg);
         }
         OverlayOutcome::CommitAndStay(msg) => {
@@ -226,9 +242,13 @@ pub(in crate::tui) fn handle_clean_up_key(
     };
     match outcome {
         OverlayOutcome::Consumed => {}
-        OverlayOutcome::Close => app.close_clean_up(),
+        OverlayOutcome::Close => {
+            app.close_clean_up();
+            left(app);
+        }
         OverlayOutcome::Commit(msg) => {
             app.close_clean_up();
+            left(app);
             send(app, *msg);
         }
         OverlayOutcome::CommitAndStay(msg) => {
@@ -251,9 +271,13 @@ pub(in crate::tui) fn handle_picker_key(
     };
     match outcome {
         OverlayOutcome::Consumed => {}
-        OverlayOutcome::Close => app.close_picker(),
+        OverlayOutcome::Close => {
+            app.close_picker();
+            left(app);
+        }
         OverlayOutcome::Commit(msg) => {
             app.close_picker();
+            left(app);
             send(app, *msg);
         }
         OverlayOutcome::CommitAndStay(msg) => {
@@ -277,10 +301,11 @@ pub(in crate::tui) fn handle_mux_launch_form_key(
         OverlayOutcome::Consumed => {}
         OverlayOutcome::Close => {
             app.close_mux_launch_form();
-            app.update(Msg::SetStatus(Some("mux launch: cancelled".to_string())));
+            left(app);
         }
         OverlayOutcome::Commit(msg) => {
             app.close_mux_launch_form();
+            left(app);
             send(app, *msg);
         }
         OverlayOutcome::CommitAndStay(msg) => {
@@ -317,9 +342,13 @@ pub(super) fn handle_value_modal_key(app: &mut App, key: ratatui::crossterm::eve
     };
     match outcome {
         OverlayOutcome::Consumed => {}
-        OverlayOutcome::Close => app.close_value_modal(),
+        OverlayOutcome::Close => {
+            app.close_value_modal();
+            left(app);
+        }
         OverlayOutcome::Commit(msg) => {
             app.close_value_modal();
+            left(app);
             dispatch(app, *msg);
         }
         OverlayOutcome::CommitAndStay(msg) => {
@@ -361,9 +390,13 @@ pub(in crate::tui) fn handle_messages_overlay_key(
     };
     match outcome {
         OverlayOutcome::Consumed => {}
-        OverlayOutcome::Close => app.close_messages_overlay(),
+        OverlayOutcome::Close => {
+            app.close_messages_overlay();
+            left(app);
+        }
         OverlayOutcome::Commit(msg) => {
             app.close_messages_overlay();
+            left(app);
             dispatch(app, *msg);
         }
         OverlayOutcome::CommitAndStay(msg) => {
@@ -383,9 +416,13 @@ pub(in crate::tui) fn handle_help_overlay_key(
     };
     match outcome {
         OverlayOutcome::Consumed => {}
-        OverlayOutcome::Close => app.close_help_overlay(),
+        OverlayOutcome::Close => {
+            app.close_help_overlay();
+            left(app);
+        }
         OverlayOutcome::Commit(msg) => {
             app.close_help_overlay();
+            left(app);
             dispatch(app, *msg);
         }
         OverlayOutcome::CommitAndStay(msg) => {
@@ -463,10 +500,12 @@ pub(in crate::tui) fn handle_search_overlay_key_with(
         OverlayOutcome::Consumed => {}
         OverlayOutcome::Close => {
             app.close_search_overlay();
+            left(app);
             send(app, Msg::DiscardContentPreview);
         }
         OverlayOutcome::Commit(msg) => {
             app.close_search_overlay();
+            left(app);
             // Keeping the search is the only way out that keeps it.
             if !matches!(
                 *msg,
@@ -529,12 +568,14 @@ pub(in crate::tui) fn handle_controls_overlay_key(
         OverlayOutcome::Consumed => {}
         OverlayOutcome::Close => {
             app.close_controls_overlay();
+            left(app);
         }
         OverlayOutcome::CommitAndStay(msg) => {
             dispatch(app, *msg);
         }
         OverlayOutcome::Commit(msg) => {
             app.close_controls_overlay();
+            left(app);
             dispatch(app, *msg);
         }
     }
@@ -556,6 +597,7 @@ pub(in crate::tui) fn handle_pane_viewer_key(
         PaneViewerOutcome::Continue => None,
         PaneViewerOutcome::Close => {
             app.close_pane_viewer();
+            left(app);
             None
         }
         PaneViewerOutcome::Attach => Some(Msg::AttachPane),
@@ -609,10 +651,11 @@ pub(in crate::tui) fn handle_pin_edit_form_key(
         OverlayOutcome::Consumed => {}
         OverlayOutcome::Close => {
             app.close_pin_edit_form();
-            app.update(Msg::SetStatus(Some("pin edit: cancelled".to_string())));
+            left(app);
         }
         OverlayOutcome::Commit(msg) => {
             app.close_pin_edit_form();
+            left(app);
             send(app, *msg);
         }
         OverlayOutcome::CommitAndStay(msg) => {

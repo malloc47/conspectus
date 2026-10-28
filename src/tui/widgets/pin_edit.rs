@@ -564,7 +564,7 @@ impl PinEditFormState {
         }
         match outcome {
             InputOutcome::Continue => OverlayOutcome::Consumed,
-            InputOutcome::Cancel => OverlayOutcome::Close,
+            InputOutcome::Cancel | InputOutcome::Abort => OverlayOutcome::Close,
             InputOutcome::Confirm(_) => self.try_commit(),
         }
     }

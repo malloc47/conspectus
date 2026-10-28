@@ -1395,8 +1395,17 @@ viewers, and `Ctrl-G` there does nothing. A chord a dialog uses is named
 as one (`Ctrl-R`, `Ctrl-O`). Every list moves with `↑`/`↓` and with
 `Ctrl-P`/`Ctrl-N`, and with `k`/`j` where nothing is typed: the menus,
 Controls and its checklists, Clean up, Messages, the picker, quick select,
-content search and its options, and a form's fields. `Ctrl-C` always
-backs out of a dialog.
+content search and its options, and a form's fields.
+
+Leaving a dialog works one way everywhere. `Esc` steps back one level (out
+of an editor in Controls, a worktree confirmation, the search options, a
+viewer's find or help page) and closes the dialog at its first level.
+`Ctrl-C` closes the whole dialog from any level, and so does `q` wherever
+nothing is typed: a menu, a checklist, a confirmation, Controls, the help
+page, Messages, the search options, and the viewers. In a prompt, a form,
+a query, or a find prompt, `q` is a letter. Cancelling says nothing: no
+status message reports it, and closing a dialog clears the status line,
+so the screen's own hints show again.
 
 Each dialog's footer is generated from the keys it takes, so it names
 only keys that work there. A hint is the keys and a short verb (`↑/↓
@@ -1430,8 +1439,9 @@ column, descriptions that wrap, a scrollbar, and a footer naming the keys
 that scroll and close it. Its rows are generated from the viewer's key
 table, so a key added to the viewer is listed automatically. While the
 page is open the movement keys (`j`/`k`, `PgDn`/`PgUp`, `g`/`G`, `Ctrl-D`/
-`Ctrl-U`) scroll it rather than the transcript, `?`, `Esc`, or `q` close
-it, and the toggles wait until it is closed.
+`Ctrl-U`) scroll it rather than the transcript, `?` or `Esc` close it
+(`q` and `Ctrl-C` leave the viewer), and the toggles wait until it is
+closed.
 
 ### Editing text in fields
 
@@ -1481,8 +1491,8 @@ match and wrap at either end, saying so in the footer. The footer shows
 same wording), and each match is highlighted: the current one reversed, the
 others in the shared match style (bold, underlined). `Esc` clears the find before
 it closes the viewer, one step back at a time; `q` (and `Ctrl-C`) leave the
-viewer at once, find or not, except that with the help page open they close
-only the help.
+viewer at once, from the help page or with a find active, and `Ctrl-C`
+leaves from the find prompt too (where `q` is typed).
 
 Find is a case-insensitive substring match on what the viewer is
 showing: messages always, and tool output, thinking, aborted, and hidden

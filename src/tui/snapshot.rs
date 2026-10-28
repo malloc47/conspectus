@@ -400,7 +400,11 @@ fn modal_key(app: &mut App, key: KeyEvent) {
         };
     match outcome {
         OverlayOutcome::Consumed => {}
-        OverlayOutcome::Close => close(app),
+        // Closing says nothing: the status line shows the screen's hints.
+        OverlayOutcome::Close => {
+            close(app);
+            app.update(Msg::SetStatus(None));
+        }
         // A notice the modal shows while it stays open, such as why it
         // refused input, reaches nothing outside the snapshot.
         OverlayOutcome::CommitAndStay(msg) if matches!(*msg, Msg::Toast(_)) => {
@@ -411,6 +415,7 @@ fn modal_key(app: &mut App, key: KeyEvent) {
         // and can be drawn.
         OverlayOutcome::Commit(msg) if only_opens_a_modal(&msg) => {
             close(app);
+            app.update(Msg::SetStatus(None));
             dispatch(app, *msg);
         }
         OverlayOutcome::Commit(_) | OverlayOutcome::CommitAndStay(_) => {

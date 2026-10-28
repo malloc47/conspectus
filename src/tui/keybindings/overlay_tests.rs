@@ -383,7 +383,7 @@ fn find_prompt_keys_edit_confirm_and_leave() {
     let cases = [
         (none, KeyCode::Enter, Some(F::Confirm)),
         (none, KeyCode::Esc, Some(F::Cancel)),
-        (ctrl_mod, KeyCode::Char('c'), Some(F::Cancel)),
+        (ctrl_mod, KeyCode::Char('c'), Some(F::Quit)),
         (none, KeyCode::Backspace, Some(F::Backspace)),
         (none, KeyCode::Delete, Some(F::Delete)),
         (none, KeyCode::Left, Some(F::Left)),

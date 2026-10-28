@@ -130,6 +130,23 @@ Targeted for 0.2.0, after 0.1.0 is tagged. History, rebuild, and pins
   row, mux, and worktree menus, Clean up, Controls and its checklists,
   Messages, and the fields of the new tmux session, launch, and pin edit
   forms, as search and the picker already did.
+- **One way out of every dialog.** `Esc` steps back one level and
+  closes a dialog at its first; `Ctrl-C` closes the whole dialog from any
+  level, and so does `q` wherever nothing is typed. So `q` now closes the
+  row, mux, and worktree menus, Clean up, Controls (and its checklists,
+  but not its max-age and contents fields, where it types), the worktree
+  confirmations and close-down choice (which it used to back out of), and
+  the content search's options; `Ctrl-C` in the worktree menu's branch
+  prompt, confirmations, and close-down choice closes the menu instead of
+  returning to its list; and in the transcript and pane viewers `q` and
+  `Ctrl-C` leave from the help page and `Ctrl-C` from the find prompt
+  (they used to close only the help or the prompt). Cancelling says
+  nothing: the rename prompt, the worktree menu, the new tmux session
+  form, the mux menu, the launch form, and the pin edit form no longer
+  report `…: cancelled`, and leaving the transcript viewer no longer
+  reports `viewer closed`. Closing any dialog with a key clears the
+  status line, so a hint it showed while open (`controls: …`, `viewing
+  …`) no longer stays behind.
 - **Dialog footers read one way.** Every footer pairs keys with a short
   verb: `to scroll`, `to close`, `to copy`, `to confirm`, and `to cancel`
   lose their "to" (the help page, the value viewer, the worktree

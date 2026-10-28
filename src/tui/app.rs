@@ -1492,14 +1492,13 @@ impl App {
                 let Some(crate::tui::Modal::Viewer(state)) = self.modal_stack.pop() else {
                     unreachable!("checked above");
                 };
+                // Leaving is silent, as every overlay's close is: the
+                // status line drops the viewer's own line with it.
                 let (next, effect) = reduce(state, vmsg);
-                match effect {
-                    ViewerEffect::Close => {
-                        self.status_message = Some("viewer closed".to_string());
-                    }
-                    ViewerEffect::None => {
-                        self.modal_stack.push(crate::tui::Modal::Viewer(next));
-                    }
+                if effect == ViewerEffect::None {
+                    self.modal_stack.push(crate::tui::Modal::Viewer(next));
+                } else {
+                    self.status_message = None;
                 }
             }
             Msg::ViewerFind(fmsg) => {
@@ -1509,8 +1508,12 @@ impl App {
                 let Some(crate::tui::Modal::Viewer(state)) = self.modal_stack.pop() else {
                     unreachable!("checked above");
                 };
-                let (next, _) = crate::viewer::find::reduce_find(state, fmsg);
-                self.modal_stack.push(crate::tui::Modal::Viewer(next));
+                let (next, effect) = crate::viewer::find::reduce_find(state, fmsg);
+                if effect == crate::viewer::input::ViewerEffect::None {
+                    self.modal_stack.push(crate::tui::Modal::Viewer(next));
+                } else {
+                    self.status_message = None;
+                }
             }
             Msg::AttachSelected => {
                 use crate::tui::effect::ExecSpec;

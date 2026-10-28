@@ -200,7 +200,8 @@ follows (house rule 4), and the outcome each produces:
 | `q` | Dismiss | `Close` from any level where nothing is typed: a menu, a checklist, a confirmation, a choice, a settings list, a pager, a log, a reader; typed into a prompt, a form, a query, or a find prompt |
 
 The standard tables in [`keys`](keys.md) bind them: `Ctrl-C` first in every
-table, and `q` in the pager table.
+table, `q` in the menu, confirmation, checklist, and pager tables, and a
+choice dialog's `q` to its `Abort`.
 
 ## Theme tokens
 

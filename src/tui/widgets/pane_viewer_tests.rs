@@ -145,6 +145,21 @@ fn q_leaves_at_once_even_with_a_find_active() {
 }
 
 #[test]
+fn q_and_ctrl_c_leave_from_the_help_and_ctrl_c_from_the_find_prompt() {
+    let ctrl_c = KeyEvent::new(KeyCode::Char('c'), KeyModifiers::CONTROL);
+    for leave in [key('q'), ctrl_c] {
+        let mut state = PaneViewerState::open(pane(), scrollback(5), 1, "");
+        press(&mut state, KeyCode::Char('?'));
+        assert!(state.show_help);
+        assert_eq!(state.handle_key(leave), PaneViewerOutcome::Close);
+    }
+    let mut state = PaneViewerState::open(pane(), scrollback(5), 1, "");
+    press(&mut state, KeyCode::Char('/'));
+    assert!(state.prompt.is_some());
+    assert_eq!(state.handle_key(ctrl_c), PaneViewerOutcome::Close);
+}
+
+#[test]
 fn a_asks_to_attach() {
     let mut state = PaneViewerState::open(pane(), scrollback(5), 1, "");
     assert_eq!(

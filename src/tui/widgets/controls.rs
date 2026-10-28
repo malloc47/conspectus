@@ -230,6 +230,15 @@ impl ControlsOverlayState {
         self.sub_editor.as_ref()
     }
 
+    /// Whether an open editor takes text (the max-age and contains
+    /// fields), so typed characters, `q` included, go into it.
+    pub fn editor_takes_text(&self) -> bool {
+        matches!(
+            self.sub_editor,
+            Some(SubEditor::MaxAge(_) | SubEditor::Content(_))
+        )
+    }
+
     /// Dispatch a crossterm key event. Returns the outcome the
     /// caller should apply (or [`ControlsOutcome::Continue`] for
     /// in-overlay navigation that didn't change anything).
@@ -237,7 +246,11 @@ impl ControlsOverlayState {
         use crate::tui::keybindings::overlay::{CONTROLS_KEYS, ControlsKey};
         use tuikit::keys::resolve;
         let action = resolve(CONTROLS_KEYS, event);
-        if action == Some(ControlsKey::Abort) {
+        // Ctrl-C dismisses the overlay from any level, and `q` does too
+        // unless an editor that takes text has the keys (house rule 4).
+        if action == Some(ControlsKey::Abort)
+            || action == Some(ControlsKey::Quit) && !self.editor_takes_text()
+        {
             return ControlsOutcome::Close;
         }
 
@@ -251,7 +264,9 @@ impl ControlsOverlayState {
         }
 
         match action {
-            Some(ControlsKey::Abort | ControlsKey::Close) => ControlsOutcome::Close,
+            Some(ControlsKey::Abort | ControlsKey::Quit | ControlsKey::Close) => {
+                ControlsOutcome::Close
+            }
             Some(ControlsKey::Up) => {
                 self.cursor = move_cursor(self.cursor, ctx, -1);
                 ControlsOutcome::Continue
@@ -481,6 +496,7 @@ impl ControlsOverlayState {
             },
             SubEditor::Content(state) => match state.handle_key(event) {
                 InputOutcome::Continue => ControlsOutcome::Continue,
+                InputOutcome::Abort => ControlsOutcome::Close,
                 InputOutcome::Cancel => {
                     *slot = None;
                     ControlsOutcome::Continue
@@ -500,6 +516,7 @@ impl ControlsOverlayState {
             },
             SubEditor::MaxAge(state) => match state.handle_key(event) {
                 InputOutcome::Continue => ControlsOutcome::Continue,
+                InputOutcome::Abort => ControlsOutcome::Close,
                 InputOutcome::Cancel => {
                     *slot = None;
                     ControlsOutcome::Continue

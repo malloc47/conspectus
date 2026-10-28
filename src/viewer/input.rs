@@ -42,8 +42,8 @@ pub enum ViewerMsg {
     ToggleHelp,
     /// Step back: close the help, then clear the find, then leave (`Esc`).
     Close,
-    /// Leave the viewer at once, whatever is open on it (`q`, `Ctrl-C`);
-    /// with the help up it closes the help only.
+    /// Leave the viewer at once, whatever is open on it (`q`, `Ctrl-C`),
+    /// the help page included.
     Quit,
 }
 
@@ -167,14 +167,7 @@ pub fn reduce(mut state: ViewerState, msg: ViewerMsg) -> (ViewerState, ViewerEff
             }
             return (state, ViewerEffect::Close);
         }
-        ViewerMsg::Quit => {
-            // Only the help page stands between `q` and leaving.
-            if state.show_help {
-                state.show_help = false;
-                return (state, ViewerEffect::None);
-            }
-            return (state, ViewerEffect::Close);
-        }
+        ViewerMsg::Quit => return (state, ViewerEffect::Close),
     }
     (state, ViewerEffect::None)
 }

@@ -54,6 +54,31 @@ fn every_overlay_closes_on_esc_and_on_ctrl_c_in_fixture_mode() {
     }
 }
 
+/// Cancelling is not an event (house rule 5): closing any overlay with
+/// Esc or Ctrl-C puts no message on the status line, which shows the
+/// screen's own hints again (a hint the overlay set when it opened goes
+/// with it), and posts no toast.
+#[test]
+fn closing_an_overlay_says_nothing() {
+    let leaves = [
+        (KeyCode::Esc, KeyModifiers::NONE, "Esc"),
+        (KeyCode::Char('c'), KeyModifiers::CONTROL, "Ctrl-C"),
+    ];
+    for (code, modifiers, what) in leaves {
+        for (name, view, open) in builders() {
+            let mut app = app_with(view, open);
+            app.update(Msg::SetStatus(Some("a hint the overlay set".into())));
+            press(&mut app, code, modifiers);
+            assert_eq!(
+                app.status_message(),
+                None,
+                "{name}: {what} left a message on the status line"
+            );
+            assert!(!app.toast().has_toast(), "{name}: {what} posted a toast");
+        }
+    }
+}
+
 /// The reported case: `.` opens the row menu, `j` moves its cursor, Esc
 /// closes it, and Ctrl-C closes it too; with nothing open Ctrl-C quits.
 #[test]

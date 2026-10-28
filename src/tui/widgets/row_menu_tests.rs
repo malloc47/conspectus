@@ -71,6 +71,21 @@ fn escape_closes() {
 }
 
 #[test]
+fn q_and_ctrl_c_dismiss_even_an_armed_entry() {
+    // Nothing is typed in a menu, so q dismisses it like Ctrl-C.
+    for dismiss in [
+        key(KeyCode::Char('q')),
+        KeyEvent::new(KeyCode::Char('c'), KeyModifiers::CONTROL),
+    ] {
+        let mut state = menu();
+        state.handle((), key(KeyCode::Down));
+        state.handle((), key(KeyCode::Enter));
+        assert_eq!(state.armed(), Some(1));
+        assert_eq!(state.handle((), dismiss), OverlayOutcome::Close);
+    }
+}
+
+#[test]
 fn the_cursor_wraps_at_both_ends() {
     let mut state = menu();
     state.handle((), key(KeyCode::Up));

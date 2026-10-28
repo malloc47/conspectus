@@ -486,6 +486,25 @@ fn the_standard_tables_keep_the_rules() {
 }
 
 #[test]
+fn q_dismisses_where_nothing_is_typed() {
+    // House rule 4: q is a dismiss key in the tables with no text field,
+    // and left to type in the ones that edit text.
+    let q = plain(KeyCode::Char('q'));
+    assert_eq!(resolve(MENU_KEYS, q), Some(MenuKey::Abort));
+    assert_eq!(resolve(CONFIRM_KEYS, q), Some(ConfirmKey::Abort));
+    assert_eq!(resolve(CHECKLIST_KEYS, q), Some(ChecklistKey::Abort));
+    assert_eq!(resolve(PAGER_KEYS, q), Some(PagerKey::Close));
+    assert_eq!(resolve(TEXT_INPUT_KEYS, q), None);
+    assert_eq!(resolve(FORM_KEYS, q), None);
+    assert_eq!(resolve(FORM_OPTION_KEYS, q), None);
+    // A chord of q is not q.
+    assert_eq!(
+        resolve(MENU_KEYS, press(KeyModifiers::CONTROL, KeyCode::Char('q'))),
+        None
+    );
+}
+
+#[test]
 fn the_standard_footers_read_in_the_one_grammar() {
     let sep = HINT_SEPARATOR;
     assert_eq!(

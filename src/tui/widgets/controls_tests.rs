@@ -506,6 +506,37 @@ fn esc_at_top_level_closes_overlay() {
 }
 
 #[test]
+fn q_dismisses_the_overlay_except_in_an_editor_that_takes_text() {
+    let filter = RowFilter::default();
+    let ctx = ctx_with(
+        View::Sessions,
+        Grouping::default_for(View::Sessions),
+        &filter,
+        Sort::Hierarchy,
+    );
+    let q = key(KeyCode::Char('q'));
+    // The list, and the harness checklist behind it: nothing is typed.
+    let mut state = ControlsOverlayState::new(&ctx);
+    assert_eq!(state.handle_key(&ctx, q), ControlsOutcome::Close);
+    let mut state = ControlsOverlayState::new_at_filters(&ctx);
+    state.handle_key(&ctx, key(KeyCode::Enter));
+    assert!(matches!(state.sub_editor(), Some(SubEditor::Harness(_))));
+    assert_eq!(
+        state.handle_key(&ctx, q),
+        ControlsOutcome::Close,
+        "q dismisses the whole overlay, not just the checklist"
+    );
+    // The max-age editor takes text: q types; Ctrl-C still dismisses.
+    let mut state = ControlsOverlayState::new_at_filters(&ctx);
+    state.handle_key(&ctx, key(KeyCode::Down));
+    state.handle_key(&ctx, key(KeyCode::Enter));
+    assert!(state.editor_takes_text());
+    assert_eq!(state.handle_key(&ctx, q), ControlsOutcome::Continue);
+    let ctrl_c = KeyEvent::new(KeyCode::Char('c'), KeyModifiers::CONTROL);
+    assert_eq!(state.handle_key(&ctx, ctrl_c), ControlsOutcome::Close);
+}
+
+#[test]
 fn format_and_parse_round_trip_for_common_durations() {
     let cases = [
         (std::time::Duration::from_secs(7 * 86_400), "7d"),

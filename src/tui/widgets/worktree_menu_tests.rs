@@ -172,6 +172,43 @@ fn confirm_remove_can_be_cancelled_back_to_list() {
     assert_eq!(state.handle((), key(KeyCode::Esc)), OverlayOutcome::Close);
 }
 
+#[test]
+fn ctrl_c_and_q_dismiss_the_menu_from_every_screen() {
+    // House rule 4: Esc steps back to the list; Ctrl-C, and q where
+    // nothing is typed, close the whole menu.
+    let ctrl_c = KeyEvent::new(KeyCode::Char('c'), KeyModifiers::CONTROL);
+    // The screens behind each entry: the branch prompt (typed), the
+    // merge and remove confirmations, and the close-down choice.
+    for (downs, typed) in [(0, true), (1, false), (2, false), (3, false)] {
+        let open = || {
+            let mut state = WorktreeMenuState::new(worktree_ctx(vec![], true)).expect("ok");
+            for _ in 0..downs {
+                state.handle((), key(KeyCode::Down));
+            }
+            state.handle((), key(KeyCode::Enter));
+            state
+        };
+        assert_eq!(
+            open().handle((), ctrl_c),
+            OverlayOutcome::Close,
+            "Ctrl-C on screen {downs}"
+        );
+        let q = if typed {
+            OverlayOutcome::Consumed
+        } else {
+            OverlayOutcome::Close
+        };
+        assert_eq!(open().handle((), char_key('q')), q, "q on screen {downs}");
+        let mut state = open();
+        assert_eq!(
+            state.handle((), key(KeyCode::Esc)),
+            OverlayOutcome::Consumed,
+            "Esc steps back from screen {downs}"
+        );
+        assert_eq!(state.handle((), char_key('q')), OverlayOutcome::Close);
+    }
+}
+
 // ---- context_for_node ----
 
 fn linked_checkout(repo: &str, path: &str, branch: &str) -> GraphNode {
