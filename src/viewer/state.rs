@@ -36,6 +36,9 @@ pub enum ToolDetail {
 }
 
 impl ToolDetail {
+    /// Every level, in cycle order.
+    pub const ALL: [Self; 4] = [Self::Hidden, Self::Summary, Self::Truncated, Self::Full];
+
     /// Next state in the cycle. Bound to `t` in the viewer.
     pub fn cycle(self) -> Self {
         match self {

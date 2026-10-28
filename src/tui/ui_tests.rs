@@ -3986,7 +3986,9 @@ fn row_awaiting_handoff_dims_and_spins_in_the_attach_cell() {
         "spinner replaces the attach glyph: {text}"
     );
     assert!(
-        SPINNER_FRAMES.iter().any(|frame| text.contains(frame)),
+        tuikit::glyphs::marks::SPINNER
+            .iter()
+            .any(|frame| text.contains(frame)),
         "pending row shows a spinner frame: {text}"
     );
     let dim = app.theme().muted;

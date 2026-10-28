@@ -797,7 +797,7 @@ pub(super) fn render_mixed_spans(
         spans.push(Span::raw("  "));
         match &mixed.chip {
             Some(chip) => spans.push(mixed_chip_span(chip, theme)),
-            None => spans.push(span!(theme.muted; " no agent ")),
+            None => spans.push(crate::tui::widgets::badge::no_agent_chip(theme)),
         }
         spans.push(Span::raw("  "));
         spans.push(age_span(mixed.age.as_deref(), mixed.age_epoch, now, theme));
@@ -1156,14 +1156,10 @@ pub(super) fn render_session_spans(
         // An untitled session is already named after its mux, so the
         // chip only says that mux is gone.
         let named_after_it = session.tree_label() == Some(mux);
-        let chip = if named_after_it {
-            "(mux stopped)".to_string()
-        } else {
-            format!("was in {}", text::truncate_end(mux, 20))
-        };
-        spans.push(span!(
-            Style::default().fg(theme.inert).add_modifier(theme.muted);
-            "  {chip}"
+        spans.push(crate::tui::widgets::badge::was_in_chip(
+            mux,
+            named_after_it,
+            theme,
         ));
     }
     if let Some(project) = session
@@ -1280,7 +1276,7 @@ pub(super) fn append_mux_agent_labels(
     theme: &Theme,
     width: usize,
 ) {
-    use crate::tui::widgets::badge::{command_badge, harness_badge};
+    use crate::tui::widgets::badge::{command_badge, harness_badge, no_agent_chip};
 
     if mux.agent_labels.is_empty() {
         // A pane running a harness whose session isn't attributed to this
@@ -1289,7 +1285,7 @@ pub(super) fn append_mux_agent_labels(
         match (&mux.program_harness, &mux.program) {
             (Some(harness), _) => spans.push(harness_badge(harness, theme)),
             (None, Some(program)) => spans.push(command_badge(program, theme)),
-            (None, None) => spans.push(span!(theme.muted; " no agent ")),
+            (None, None) => spans.push(no_agent_chip(theme)),
         }
         return;
     }
@@ -1358,13 +1354,7 @@ fn append_content_hit(
     width: usize,
     theme: &Theme,
 ) {
-    let chip = if hit.count == 1 {
-        "1 hit".to_string()
-    } else {
-        format!("{} hits", hit.count)
-    };
-    let dim = Style::default().fg(theme.inert).add_modifier(theme.muted);
-    spans.push(span!(dim; "  {chip}"));
+    spans.push(crate::tui::widgets::badge::hits_chip(hit.count, theme));
     let used = text::spans_width(spans);
     if width <= used + 8 {
         return;

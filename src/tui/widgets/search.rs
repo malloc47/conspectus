@@ -22,6 +22,7 @@ use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Paragraph, Widget};
 use tui_popup::KnownSize;
+use tuikit::chip::{self, SegmentedTitle};
 use tuikit::scroll::ScrollWindow;
 use tuikit::text;
 
@@ -670,40 +671,20 @@ impl<'a> SearchOverlayWidget<'a> {
     }
 }
 
-/// The reach choices as a title segment: the chosen one in brackets, so
-/// the title is as wide whichever is chosen.
+/// The reach choices as a segmented title: the chosen one in brackets,
+/// so the title is as wide whichever is chosen.
 fn reach_segments(reach: Reach, theme: &Theme) -> Vec<Span<'static>> {
-    choice_segments(
-        [
-            (reach == Reach::Current, "Current"),
-            (reach == Reach::All, "All"),
-        ],
-        theme,
-    )
+    SegmentedTitle::new(&[
+        ("Current", reach == Reach::Current),
+        ("All", reach == Reach::All),
+    ])
+    .spans(theme)
 }
 
-/// The granularity choices as a title segment, the same way.
+/// The granularity choices as a segmented title, the same way.
 fn granularity_segments(group: Grouping, theme: &Theme) -> Vec<Span<'static>> {
     let sessions = group.granularity() == Grouping::Session;
-    choice_segments([(sessions, "Sessions"), (!sessions, "Messages")], theme)
-}
-
-fn choice_segments(choices: [(bool, &'static str); 2], theme: &Theme) -> Vec<Span<'static>> {
-    let chosen = Style::default()
-        .fg(theme.accent)
-        .add_modifier(Modifier::BOLD | Modifier::REVERSED);
-    let mut spans = Vec::new();
-    for (i, (on, word)) in choices.into_iter().enumerate() {
-        if i > 0 {
-            spans.push(Span::raw(" "));
-        }
-        if on {
-            spans.push(Span::styled(format!("[ {word} ]"), chosen));
-        } else {
-            spans.push(Span::raw(word));
-        }
-    }
-    spans
+    SegmentedTitle::new(&[("Sessions", sessions), ("Messages", !sessions)]).spans(theme)
 }
 
 impl Widget for SearchOverlayWidget<'_> {
@@ -1027,7 +1008,7 @@ impl SearchBody<'_> {
         let cursor = self.state.cursor();
         let window = ScrollWindow::new(list_height, view.rows.len()).following(cursor..cursor + 1);
         // Leave a blank cell before the frame.
-        let columns = content_columns(width.saturating_sub(1));
+        let columns = content_columns(width.saturating_sub(1), chip::width(self.theme));
         let lines: Vec<Line<'static>> = window
             .visible()
             .map(|idx| {
@@ -1148,8 +1129,6 @@ pub(crate) struct ContentColumns {
 
 /// The source word's width: the longer of `session` and `pane`.
 const SOURCE_WIDTH: usize = 7;
-/// The harness chip's width.
-const CHIP_WIDTH: usize = 10;
 /// A snippet narrower than this is not worth showing, so cells give way
 /// to it.
 const MIN_SNIPPET: usize = 20;
@@ -1169,15 +1148,17 @@ impl ContentColumns {
     }
 }
 
-/// Split a content result `inner` cells wide: the label takes a fifth of
-/// the width (12 to 32 cells) and the snippet the rest. When the snippet
-/// would be narrower than [`MIN_SNIPPET`] the chip, then the source word,
-/// then the age give up their cells, then the label shrinks.
-pub(crate) fn content_columns(inner: usize) -> ContentColumns {
+/// Split a content result `inner` cells wide: the chip is `chip` cells
+/// (a harness chip's footprint, from the theme), the label takes a fifth
+/// of the width (12 to 32 cells), and the snippet the rest. When the
+/// snippet would be narrower than [`MIN_SNIPPET`] the chip, then the
+/// source word, then the age give up their cells, then the label
+/// shrinks.
+pub(crate) fn content_columns(inner: usize, chip: usize) -> ContentColumns {
     let mut columns = ContentColumns {
         inner,
         source: SOURCE_WIDTH,
-        chip: CHIP_WIDTH,
+        chip,
         label: (inner / 5).clamp(12, 32),
         tag: match inner {
             100.. => 22,

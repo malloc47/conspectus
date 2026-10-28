@@ -31,6 +31,7 @@ use ratatui::macros::{horizontal, span, vertical};
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span, Text};
 use ratatui::widgets::{Block, Borders, Paragraph};
+use tuikit::chip::{StatusChip, Tone};
 use tuikit::glyphs::marks;
 use tuikit::scroll::{ScrollGutter, ScrollWindow, WrappedRows};
 use tuikit::text;

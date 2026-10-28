@@ -123,10 +123,11 @@ pub(super) fn append_ambiguity_chip(
     theme: &Theme,
 ) {
     spans.push(Span::raw(SECTION_SEPARATOR));
-    spans.push(span!(
-        Style::default().fg(theme.warning).add_modifier(Modifier::BOLD);
-        "{}", marks::WARNING
-    ));
+    spans.push(
+        StatusChip::new(marks::WARNING, Tone::Warning)
+            .bold()
+            .span(theme),
+    );
     spans.push(span!(" {ambiguous}"));
 }
 
@@ -245,10 +246,12 @@ pub(super) fn draw_status_bar(app: &App, frame: &mut Frame<'_>, area: Rect) {
     if stale {
         // Reserved up front so the stale mark is never the thing that
         // gets pushed off the end.
-        spans.push(span!(
-            Style::default().fg(theme.warning).add_modifier(Modifier::BOLD);
-            "stale  "
-        ));
+        spans.push(
+            StatusChip::new("stale", Tone::Warning)
+                .bold()
+                .pad(0, 2)
+                .span(theme),
+        );
     }
     let mut provider_spans = Vec::new();
     push_provider_chips(app, theme, &mut provider_spans);
@@ -269,26 +272,20 @@ pub(super) fn push_unseen_messages_chip(app: &App, theme: &Theme, spans: &mut Ve
     if unseen == 0 {
         return;
     }
-    spans.push(span!(
-        Style::default().fg(theme.error).add_modifier(Modifier::BOLD);
-        "{} {unseen} · ! messages  ", marks::WARNING
-    ));
+    spans.push(
+        StatusChip::new(format!("{unseen} · ! messages"), Tone::Error)
+            .mark(marks::WARNING)
+            .bold()
+            .pad(0, 2)
+            .span(theme),
+    );
 }
 
-/// Braille-dot spinner frames (~120ms per frame at cadence
-/// `SPINNER_FRAME_MS`). Cycles through the eight-position pattern
-/// commonly used by cli.rs / npm / systemd loaders.
-pub(super) const SPINNER_FRAMES: [&str; 8] = marks::SPINNER;
-
-pub(super) const SPINNER_FRAME_MS: u128 = 120;
-
-/// Pick a spinner glyph based on how long an op has been in flight.
-/// Advances one frame per [`SPINNER_FRAME_MS`]; wraps modulo the
-/// eight-frame cycle.
+/// The busy spinner's frame for an op started at `started_at`: the
+/// framework's spinner, advanced by wall-clock time, so it needs no
+/// tick of its own.
 pub(super) fn spinner_glyph(started_at: std::time::Instant) -> &'static str {
-    let elapsed_ms = started_at.elapsed().as_millis();
-    let idx = ((elapsed_ms / SPINNER_FRAME_MS) as usize) % SPINNER_FRAMES.len();
-    SPINNER_FRAMES[idx]
+    tuikit::chip::spinner_frame(started_at.elapsed())
 }
 
 /// Append one spinner chip per in-flight async op.
@@ -303,11 +300,8 @@ pub(super) fn push_in_flight_chips(app: &App, theme: &Theme, spans: &mut Vec<Spa
     if ops.is_empty() {
         return;
     }
-    let style = Style::default()
-        .fg(theme.accent)
-        .add_modifier(Modifier::BOLD);
     for op in ops {
-        spans.push(span!(style; "{} {}", spinner_glyph(op.started_at), op.label));
+        spans.push(StatusChip::busy(op.label.as_str(), op.started_at.elapsed()).span(theme));
         spans.push(Span::raw("  "));
     }
 }
@@ -317,29 +311,26 @@ pub(super) fn push_in_flight_chips(app: &App, theme: &Theme, spans: &mut Vec<Spa
 pub(super) fn push_provider_chips(app: &App, theme: &Theme, spans: &mut Vec<Span<'static>>) {
     let status = app.provider_status();
 
-    let mut push_chip = |label: &str, style: Style| {
+    let mut push_chip = |label: String, tone: Tone| {
         spans.push(Span::raw("  "));
-        spans.push(span!(style; "{label}"));
+        spans.push(StatusChip::new(label, tone).span(theme));
     };
 
     if status.tmux_disabled {
-        push_chip("tmux:off", Style::default().add_modifier(theme.muted));
+        push_chip("tmux:off".to_string(), Tone::Muted);
     } else if let Some(false) = status.tmux_available {
         let reason = status.tmux_reason.as_deref().unwrap_or("unavailable");
-        push_chip(
-            &format!("tmux:{reason}"),
-            Style::default().fg(theme.warning),
-        );
+        push_chip(format!("tmux:{reason}"), Tone::Warning);
     }
 
     if status.forge_disabled {
-        push_chip("forge:off", Style::default().add_modifier(theme.muted));
+        push_chip("forge:off".to_string(), Tone::Muted);
     } else if let Some(false) = status.forge_available {
         let reason = status.forge_reason.as_deref().unwrap_or("error");
         // Reasons name `gh` themselves ("gh is not authenticated");
         // the chip's prefix already does.
         let reason = reason.strip_prefix("gh ").unwrap_or(reason);
-        push_chip(&format!("gh:{reason}"), Style::default().fg(theme.warning));
+        push_chip(format!("gh:{reason}"), Tone::Warning);
     }
 }
 

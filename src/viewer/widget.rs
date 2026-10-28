@@ -29,6 +29,7 @@ use ratatui::layout::{Constraint, Layout, Rect};
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::Paragraph;
+use tuikit::chip::{PositionChip, StatusChip, ToggleChip, Tone};
 use tuikit::glyphs::marks;
 
 use crate::viewer::highlight::highlight_matches;
@@ -248,31 +249,20 @@ fn draw_footer(state: &ViewerState, theme: &Theme, frame: &mut Frame<'_>, area: 
         draw_find_prompt(prompt, &state.find_hint, theme, frame, area);
         return;
     }
-    let position = format!(
-        "[ {}/{} ]",
-        state
-            .scroll_offset
-            .saturating_add(1)
-            .min(state.total_lines.max(1)),
-        state.total_lines.max(1),
-    );
+    let position = PositionChip::new(state.scroll_offset, state.total_lines);
 
-    let chip_style = Style::new().add_modifier(Modifier::BOLD);
-    let off_style = Style::new().fg(theme.inert).add_modifier(theme.muted);
-    let on_style = Style::new().fg(theme.success).add_modifier(Modifier::BOLD);
-    let pipe = Span::styled(
-        " · ",
-        Style::new().fg(theme.inert).add_modifier(theme.muted),
-    );
+    let off_style = Tone::Inert.style(theme);
+    let pipe = Span::styled(" · ", off_style);
 
     // Toggle chips inline the binding letter so the key + label
     // travel together (`tools·sum (t)`). Keeps the operator's eyes
     // on one column instead of cross-referencing a separate
     // shortcut hint.
-    let tools_text = tool_chip_label(state.tool_detail);
-    let thinking_text = toggle_chip("think", state.show_thinking, 'T');
-    let aborted_text = abort_chip_label(state.show_aborted);
-    let hidden_text = hidden_chip_label(state.show_hidden);
+    let tool_states = ToolDetail::ALL.map(ToolDetail::footer_label);
+    let tools = tool_chip(state.tool_detail, &tool_states);
+    let thinking = think_chip(state.show_thinking);
+    let aborted = abort_chip(state.show_aborted);
+    let hidden = hidden_chip(state.show_hidden);
 
     // Long hint trails. `?` for help is its own chip so it stands
     // out; `q close` is the last item per the operator-preferred
@@ -286,50 +276,28 @@ fn draw_footer(state: &ViewerState, theme: &Theme, frame: &mut Frame<'_>, area: 
     // turns hidden; for the rest it would toggle nothing.
     let has_hidden = state.document.turns.iter().any(|turn| turn.hidden);
 
-    let tools_on = state.tool_detail.is_visible();
-    let find_text = find_chip_text(state);
-    let find_style = if state.find.is_active() && state.find.matches.is_empty() {
-        Style::new().fg(theme.warning).add_modifier(Modifier::BOLD)
+    let find_tone = if state.find.is_active() && state.find.matches.is_empty() {
+        Tone::Warning
     } else {
-        on_style
+        Tone::Success
     };
+    let find = find_chip_text(state).map(|text| StatusChip::new(text, find_tone).bold());
     let mut spans: Vec<Span<'_>> = vec![
-        Span::styled(position, chip_style),
+        position.span(),
         pipe.clone(),
-        Span::styled(tools_text, if tools_on { on_style } else { off_style }),
+        tools.span(theme),
         pipe.clone(),
-        Span::styled(
-            thinking_text,
-            if state.show_thinking {
-                on_style
-            } else {
-                off_style
-            },
-        ),
+        thinking.span(theme),
         pipe.clone(),
-        Span::styled(
-            aborted_text,
-            if state.show_aborted {
-                on_style
-            } else {
-                off_style
-            },
-        ),
+        aborted.span(theme),
         pipe.clone(),
     ];
     if has_hidden {
-        spans.push(Span::styled(
-            hidden_text,
-            if state.show_hidden {
-                on_style
-            } else {
-                off_style
-            },
-        ));
+        spans.push(hidden.span(theme));
         spans.push(pipe.clone());
     }
-    if let Some(text) = &find_text {
-        spans.splice(2..2, [Span::styled(text.clone(), find_style), pipe.clone()]);
+    if let Some(find) = &find {
+        spans.splice(2..2, [find.span(theme), pipe.clone()]);
     }
     spans.extend([
         Span::styled("(/) find", off_style),
@@ -355,49 +323,17 @@ fn draw_footer(state: &ViewerState, theme: &Theme, frame: &mut Frame<'_>, area: 
     let line = if total <= cap {
         Line::from(spans)
     } else {
-        let position_span = Span::styled(
-            format!(
-                "[ {}/{} ]",
-                state
-                    .scroll_offset
-                    .saturating_add(1)
-                    .min(state.total_lines.max(1)),
-                state.total_lines.max(1)
-            ),
-            chip_style,
-        );
-        let tools_span = Span::styled(
-            format!(" · {}", tool_chip_label(state.tool_detail)),
-            if tools_on { on_style } else { off_style },
-        );
-        let think_span = Span::styled(
-            format!(" · {}", toggle_chip("think", state.show_thinking, 'T')),
-            if state.show_thinking {
-                on_style
-            } else {
-                off_style
-            },
-        );
-        let aborted_span = Span::styled(
-            format!(" · {}", abort_chip_label(state.show_aborted)),
-            if state.show_aborted {
-                on_style
-            } else {
-                off_style
-            },
-        );
-        let hidden_span = Span::styled(
-            format!(" · {}", hidden_chip_label(state.show_hidden)),
-            if state.show_hidden {
-                on_style
-            } else {
-                off_style
-            },
-        );
+        // The tiers lead each chip with its separator, in the chip's
+        // own style.
+        let after_pipe = |text: String, style: Style| Span::styled(format!(" · {text}"), style);
+        let tools_span = after_pipe(tools.text(), tools.look(theme));
+        let think_span = after_pipe(thinking.text(), thinking.look(theme));
+        let aborted_span = after_pipe(aborted.text(), aborted.look(theme));
+        let hidden_span = after_pipe(hidden.text(), hidden.look(theme));
         let close_span = Span::styled(format!(" · {close_chip}"), off_style);
-        let mut base = vec![position_span];
-        if let Some(text) = &find_text {
-            base.push(Span::styled(format!(" · {text}"), find_style));
+        let mut base = vec![position.span()];
+        if let Some(find) = &find {
+            base.push(after_pipe(find.text(), find.look(theme)));
         }
         base.extend([tools_span, think_span]);
         let mut tiers: Vec<Vec<Span<'_>>> = Vec::new();
@@ -521,39 +457,42 @@ pub(crate) fn draw_find_prompt(
     frame.render_widget(Paragraph::new(line), area);
 }
 
-/// `tools·sum (t)` / `tools·off (t)` style chip. Carries the
-/// current ToolDetail value so the operator sees both the level
-/// and the cycle key together.
-fn tool_chip_label(detail: ToolDetail) -> String {
-    let label = detail.footer_label();
-    // Pad to 5 cells so the chip width is stable as the state
-    // cycles (Hidden=3 char, Summary=3, Truncated=5, Full=3).
-    format!("tools·{label:<5} (t)")
+/// `tools·sum (t)` / `tools·off (t)`: the current tool detail level and
+/// its cycle key, the level padded to the widest of `states` so the chip
+/// keeps its width as it cycles. On while tool turns show any body.
+fn tool_chip<'a>(detail: ToolDetail, states: &'a [&'a str]) -> ToggleChip<'a> {
+    ToggleChip::new("tools", detail.footer_label(), detail.is_visible())
+        .states(states)
+        .key("t")
 }
 
-/// `think·on  (T)` / `think·off (T)` style toggle chip. The key
-/// binding is inlined so the operator doesn't need a separate
-/// hint to know how to flip it.
-fn toggle_chip(name: &str, on: bool, key: char) -> String {
-    let state_label = if on { "on " } else { "off" };
-    format!("{name}·{state_label} ({key})")
+/// `think·on  (T)` / `think·off (T)`. The key binding is inlined so the
+/// operator doesn't need a separate hint to know how to flip it.
+fn think_chip(on: bool) -> ToggleChip<'static> {
+    ToggleChip::new("think", if on { "on" } else { "off" }, on)
+        .states(&["on", "off"])
+        .key("T")
 }
 
-/// `aborted·hide (I)` / `aborted·show (I)` chip. Uses `hide`/`show`
-/// instead of `on`/`off` because the operator question isn't "is the
-/// flag on" but "am I looking at the on-disk reality or the
-/// harness-faithful view". Pad so the chip width stays stable.
-fn abort_chip_label(showing: bool) -> String {
-    let state_label = if showing { "show" } else { "hide" };
-    format!("aborted·{state_label} (I)")
+/// `aborted·hide (I)` / `aborted·show (I)`. Uses `hide`/`show` instead
+/// of `on`/`off` because the operator question isn't "is the flag on"
+/// but "am I looking at the on-disk reality or the harness-faithful
+/// view".
+fn abort_chip(showing: bool) -> ToggleChip<'static> {
+    show_hide_chip("aborted", showing, "I")
 }
 
-/// `hidden·hide (H)` / `hidden·show (H)` chip for records the
-/// harness's UI never showed (ADR 0122). Same `hide`/`show` wording as
-/// the aborted chip.
-fn hidden_chip_label(showing: bool) -> String {
-    let state_label = if showing { "show" } else { "hide" };
-    format!("hidden·{state_label} (H)")
+/// `hidden·hide (H)` / `hidden·show (H)` for records the harness's UI
+/// never showed (ADR 0122). Same `hide`/`show` wording as the aborted
+/// chip.
+fn hidden_chip(showing: bool) -> ToggleChip<'static> {
+    show_hide_chip("hidden", showing, "H")
+}
+
+fn show_hide_chip(name: &'static str, showing: bool, key: &'static str) -> ToggleChip<'static> {
+    ToggleChip::new(name, if showing { "show" } else { "hide" }, showing)
+        .states(&["show", "hide"])
+        .key(key)
 }
 
 /// Compute the inner gutter chip-label width from the widest

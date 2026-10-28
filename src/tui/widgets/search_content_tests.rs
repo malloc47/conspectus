@@ -544,20 +544,66 @@ fn the_columns_give_way_to_the_snippet_in_the_documented_order() {
     // Wide: every cell. Narrower: the chip goes first, then the source
     // word, then the age; the label shrinks last. The snippet keeps at
     // least 20 cells whenever any cell can give way.
-    let wide = content_columns(200);
+    let chip = tuikit::chip::width(&Theme::default());
+    let wide = content_columns(200, chip);
     assert!(wide.source > 0 && wide.chip > 0 && wide.age > 0);
     assert_eq!(wide.label, 32, "the label stops growing");
-    let mid = content_columns(83);
+    let mid = content_columns(83, chip);
     assert_eq!((mid.chip, mid.source > 0, mid.age > 0), (0, true, true));
-    let narrow = content_columns(60);
+    let narrow = content_columns(60, chip);
     assert_eq!((narrow.chip, narrow.source), (0, 0));
-    let tiny = content_columns(40);
+    let tiny = content_columns(40, chip);
     assert_eq!((tiny.chip, tiny.source, tiny.age), (0, 0, 0));
     for inner in [40, 60, 83, 120, 200] {
-        let columns = content_columns(inner);
+        let columns = content_columns(inner, chip);
         assert!(
             columns.snippet() >= MIN_SNIPPET || columns.label <= 8,
             "{inner}: {columns:?}"
+        );
+    }
+}
+
+#[test]
+fn the_chip_column_follows_the_theme_badge_width() {
+    // The chip column is a harness chip's footprint, so a narrower or a
+    // wider `badge_width` moves the label with the chip instead of
+    // leaving a gap or running the label into it.
+    for badge_width in [5, 8, 12] {
+        let mut theme = Theme::default();
+        theme.badge_width = badge_width;
+        let chip = tuikit::chip::width(&theme);
+        assert_eq!(content_columns(200, chip).chip, badge_width + 2);
+        let state = contents_overlay("quokka");
+        let content = view(vec![row("aaaa1111", 3), pane_row(4)], true);
+        let area = Rect::new(0, 0, 200, 20);
+        let mut buf = Buffer::empty(area);
+        SearchOverlayWidget::new(&state, &[], &theme)
+            .with_content(&content)
+            .render(area, &mut buf);
+        let lines: Vec<String> = (0..20)
+            .map(|y| (0..200).map(|x| buf[(x, y)].symbol()).collect::<String>())
+            .collect();
+        let session = lines
+            .iter()
+            .find(|line| line.contains("session aaaa1111"))
+            .expect("the session row");
+        let pane = lines
+            .iter()
+            .find(|line| line.contains("zsh"))
+            .expect("the pane row");
+        let badge = tuikit::chip::Chip::new("claude").text(&theme);
+        let chip_at = session.find(badge.as_str()).expect("the harness chip");
+        let label_at = session.find("session aaaa1111").expect("the label");
+        assert_eq!(
+            tuikit::text::width(&session[chip_at..label_at]),
+            chip + 1,
+            "badge_width {badge_width}: the label starts one cell after the chip"
+        );
+        let command_at = pane.find("zsh").expect("the command");
+        assert_eq!(
+            tuikit::text::width(&pane[..command_at]),
+            tuikit::text::width(&session[..chip_at]),
+            "badge_width {badge_width}: the pane's command fills the chip column"
         );
     }
 }

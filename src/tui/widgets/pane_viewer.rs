@@ -18,6 +18,7 @@ use ratatui::layout::{Constraint, Layout, Rect};
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::Paragraph;
+use tuikit::chip::{PositionChip, StatusChip, Tone};
 use tuikit::glyphs::marks;
 use tuikit::scroll::ScrollWindow;
 
@@ -504,31 +505,29 @@ fn draw_footer(state: &PaneViewerState, theme: &Theme, frame: &mut Frame<'_>, ar
         crate::viewer::widget::draw_find_prompt(prompt, &state.find_hint, theme, frame, area);
         return;
     }
-    let on = Style::new().fg(theme.success).add_modifier(Modifier::BOLD);
-    let warn = Style::new().fg(theme.warning).add_modifier(Modifier::BOLD);
     let pipe = Span::styled(" · ", dim(theme));
-    let position = format!(
-        "[ {}/{} ]",
-        (state.scroll + 1).min(state.lines.len().max(1)),
-        state.lines.len().max(1)
-    );
     let mut spans = vec![
-        Span::styled(position, Style::new().add_modifier(Modifier::BOLD)),
+        PositionChip::new(state.scroll, state.lines.len()).span(),
         pipe.clone(),
     ];
     if state.find_is_active() {
         let query = tuikit::text::truncate_end(&state.query, FIND_CHIP_QUERY_CELLS);
-        match state.current {
-            Some(at) => spans.push(Span::styled(
+        let chip = match state.current {
+            Some(at) => StatusChip::new(
                 format!("find \"{query}\" {}/{}", at + 1, state.matches.len()),
-                on,
-            )),
-            None => spans.push(Span::styled(format!("find \"{query}\" no match"), warn)),
-        }
+                Tone::Success,
+            ),
+            None => StatusChip::new(format!("find \"{query}\" no match"), Tone::Warning),
+        };
+        spans.push(chip.bold().span(theme));
         spans.push(pipe.clone());
     }
     if let Some(note) = &state.note {
-        spans.push(Span::styled(note.clone(), warn));
+        spans.push(
+            StatusChip::new(note.as_str(), Tone::Warning)
+                .bold()
+                .span(theme),
+        );
         spans.push(pipe.clone());
     }
     // The keys that matter most stay when the footer is tight; the
