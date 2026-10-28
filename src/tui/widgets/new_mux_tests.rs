@@ -67,7 +67,7 @@ fn enter_on_empty_name_snaps_focus_back_to_name() {
     // send focus back to the name field so the operator fills it.
     let _ = state.handle((), key(KeyCode::Tab));
     let outcome = state.handle((), key(KeyCode::Enter));
-    assert_eq!(outcome, OverlayOutcome::Consumed);
+    assert_eq!(outcome, missing("name"));
     assert_eq!(state.focus(), NewMuxField::Name);
 }
 
@@ -76,8 +76,13 @@ fn enter_on_empty_cwd_stays_on_cwd() {
     let mut state = NewMuxFormState::new("dev", "");
     let _ = state.handle((), key(KeyCode::Tab));
     let outcome = state.handle((), key(KeyCode::Enter));
-    assert_eq!(outcome, OverlayOutcome::Consumed);
+    assert_eq!(outcome, missing("cwd"));
     assert_eq!(state.focus(), NewMuxField::Cwd);
+}
+
+/// The form stays open and a toast names the empty field.
+fn missing(field: &str) -> OverlayOutcome {
+    OverlayOutcome::CommitAndStay(Box::new(Msg::Toast(format!("mux: {field} is required"))))
 }
 
 #[test]

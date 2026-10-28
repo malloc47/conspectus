@@ -1539,6 +1539,7 @@ impl App {
             Msg::SetStatus(message) => {
                 self.status_message = message;
             }
+            Msg::Toast(text) => effects.push(Effect::Toast(text)),
             Msg::Report(entry) => {
                 self.status_message = Some(if entry.level.needs_attention() {
                     format!("{} · ! details", entry.summary)

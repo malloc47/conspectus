@@ -405,8 +405,10 @@ impl WorktreeMenuState {
             InputOutcome::Confirm(branch) => {
                 let branch = branch.trim().to_string();
                 if branch.is_empty() {
-                    // Keep the input open for a real value.
-                    return OverlayOutcome::Consumed;
+                    // Keep the input open for a real value, and say so.
+                    return OverlayOutcome::CommitAndStay(Box::new(Msg::Toast(
+                        "worktree: branch name is required".to_string(),
+                    )));
                 }
                 let Some(repo_root) = self.ctx.repo_root.clone() else {
                     return OverlayOutcome::Close;

@@ -144,6 +144,10 @@ pub enum Msg {
     /// Set or clear the transient status-bar message. `None`
     /// clears any prior message.
     SetStatus(Option<String>),
+    /// Show a short notice in a toast. An overlay that refuses input
+    /// and stays open sends this to say why: the toast draws over every
+    /// overlay, where the status line can be covered.
+    Toast(String),
     /// Log an operation outcome (ADR 0105) and show its summary as
     /// the status message, with a pointer to the Messages overlay
     /// for warnings and errors.

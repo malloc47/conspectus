@@ -361,6 +361,11 @@ fn modal_key(app: &mut App, key: KeyEvent) {
     match outcome {
         OverlayOutcome::Consumed => {}
         OverlayOutcome::Close => close(app),
+        // A notice the modal shows while it stays open, such as why it
+        // refused input, reaches nothing outside the snapshot.
+        OverlayOutcome::CommitAndStay(msg) if matches!(*msg, Msg::Toast(_)) => {
+            dispatch(app, *msg);
+        }
         OverlayOutcome::Commit(_) | OverlayOutcome::CommitAndStay(_) => {
             eprintln!("conspectus: snapshot mode skipped a menu pick");
         }

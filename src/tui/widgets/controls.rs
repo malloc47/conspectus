@@ -514,10 +514,12 @@ impl ControlsOverlayState {
                             let new_filter = with_max_age(ctx.filter.clone(), max_age);
                             ControlsOutcome::ApplyAndStay(crate::tui::Msg::SetFilter(new_filter))
                         }
-                        Err(_) => {
-                            // Reject the commit and keep the editor open
-                            // so the operator can fix the value.
-                            ControlsOutcome::Continue
+                        Err(why) => {
+                            // Keep the editor open so the operator can
+                            // fix the value, and say what is wrong.
+                            ControlsOutcome::ApplyAndStay(crate::tui::Msg::Toast(format!(
+                                "max age: {why}"
+                            )))
                         }
                     }
                 }

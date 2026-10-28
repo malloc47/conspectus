@@ -89,13 +89,18 @@ impl NewMuxFormState {
     }
 
     /// Try to commit. `Enter` on the name field advances focus to cwd
-    /// rather than committing (mirrors other two-field forms); `Enter` on cwd commits when both fields are non-empty.
-    /// Empty-field commit stays on that field with no side effect.
+    /// rather than committing (mirrors other two-field forms); `Enter`
+    /// on cwd commits when both fields are non-empty. An empty field
+    /// keeps the form open on that field and a toast names it. The cwd
+    /// is committed with `~` expanded, since `mux new` takes it as given.
     fn try_commit(&mut self) -> OverlayOutcome {
+        let missing = |field: &str| {
+            OverlayOutcome::CommitAndStay(Box::new(Msg::Toast(format!("mux: {field} is required"))))
+        };
         match self.focus {
             NewMuxField::Name => {
                 if self.name.value().trim().is_empty() {
-                    return OverlayOutcome::Consumed;
+                    return missing("name");
                 }
                 self.focus = NewMuxField::Cwd;
                 OverlayOutcome::Consumed
@@ -105,10 +110,10 @@ impl NewMuxFormState {
                 let cwd = self.cwd.expanded_value();
                 if name.is_empty() {
                     self.focus = NewMuxField::Name;
-                    return OverlayOutcome::Consumed;
+                    return missing("name");
                 }
                 if cwd.is_empty() {
-                    return OverlayOutcome::Consumed;
+                    return missing("cwd");
                 }
                 OverlayOutcome::Commit(Box::new(Msg::CommitMuxNew { name, cwd }))
             }
