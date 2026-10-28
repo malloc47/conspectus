@@ -7,28 +7,27 @@
 //! #[path = "foo_tests.rs"]
 //! mod tests;
 //! ```
+//!
+//! The limit applies to the host (`src`) and the framework
+//! (`crates/tuikit/src`) alike; `tests/support/source_tree.rs` explains
+//! which hygiene rules apply to which crate and how the scans are guarded
+//! against visiting too few files.
 
 use std::fs;
-use std::path::{Path, PathBuf};
+use std::path::Path;
+
+#[path = "support/source_tree.rs"]
+mod source_tree;
+
+use source_tree::{FRAMEWORK_SRC, HOST_SRC, Tree};
+
+/// The trees whose inline test modules are measured.
+const TREES: &[Tree] = &[HOST_SRC, FRAMEWORK_SRC];
 
 /// Inline `mod tests { ... }` blocks this long or longer must move to a
 /// sibling `_tests.rs` file. Counted from the `mod tests {` line to its
 /// closing brace.
 const INLINE_TEST_MODULE_LIMIT: usize = 100;
-
-fn rust_files(dir: &Path, out: &mut Vec<PathBuf>) {
-    let Ok(entries) = fs::read_dir(dir) else {
-        return;
-    };
-    for entry in entries.flatten() {
-        let path = entry.path();
-        if path.is_dir() {
-            rust_files(&path, out);
-        } else if path.extension().is_some_and(|ext| ext == "rs") {
-            out.push(path);
-        }
-    }
-}
 
 /// Line count of each inline `mod tests { ... }` block in `text`, with
 /// the 1-based line it starts on. Brace counting ignores braces inside
@@ -54,30 +53,39 @@ fn inline_test_modules(text: &str) -> Vec<(usize, usize)> {
     out
 }
 
-#[test]
-fn large_test_modules_live_in_sibling_files() {
-    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
-    let mut files = Vec::new();
-    rust_files(&root.join("src"), &mut files);
-    files.sort();
-
+/// Every inline test module of `INLINE_TEST_MODULE_LIMIT` lines or more
+/// under `trees`, as `path:line: ...` findings.
+fn offenders(root: &Path, trees: &[Tree]) -> Vec<String> {
     let mut offenders = Vec::new();
-    for path in files {
+    for path in source_tree::rust_files(root, trees) {
         let text = fs::read_to_string(&path).expect("read source file");
         for (line, length) in inline_test_modules(&text) {
             if length >= INLINE_TEST_MODULE_LIMIT {
                 offenders.push(format!(
                     "{}:{line}: inline `mod tests` is {length} lines",
-                    path.strip_prefix(root).unwrap_or(&path).display()
+                    source_tree::relative(root, &path)
                 ));
             }
         }
     }
+    offenders
+}
+
+#[test]
+fn large_test_modules_live_in_sibling_files() {
+    let offenders = offenders(source_tree::workspace_root(), TREES);
     assert!(
         offenders.is_empty(),
         "move these test modules to a sibling `_tests.rs` file (ADR 0124):\n{}",
         offenders.join("\n")
     );
+}
+
+#[test]
+fn a_large_test_module_is_caught_in_every_tree_the_scan_covers() {
+    let filler = "    // filler\n".repeat(INLINE_TEST_MODULE_LIMIT);
+    let violation = format!("#[cfg(test)]\nmod tests {{\n{filler}}}\n");
+    source_tree::assert_scan_covers_every_tree(TREES, &violation, offenders);
 }
 
 #[test]
