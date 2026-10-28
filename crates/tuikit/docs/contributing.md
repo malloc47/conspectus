@@ -120,6 +120,7 @@ trees it walks. The kinds that reach this crate:
 | Test-module size | An inline `mod tests` block stays under 100 lines. A larger one moves to a sibling file named `<module>_tests.rs`. |
 | Comment hygiene | Comments explain behavior and rationale. They do not cite task-tracker IDs or narrate history, in `src`, `tests`, and `examples`. |
 | Key-table usage | Overlay key handling resolves through key tables, and footers are generated from them. Control code does not match raw key codes by hand; the key-table model itself is the one place that names them. |
+| Working directory | Code does not read the process's working directory, which can vanish while the program runs. A control that needs a directory, such as path completion, takes it from its host as an input. Setting a child's directory is not a read. No file in this crate is exempt. |
 | Process and write capability | The host keeps a manifest of every program, socket, signal, and write path it may use. The framework has no entries, and the scan asserts there is no such path in this crate's tree. |
 | User-visible text | String literals that controls draw contain no decision-record numbers, task IDs, or design-document paths, because that text reaches users through the host. |
 
