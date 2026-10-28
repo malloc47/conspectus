@@ -19,6 +19,8 @@ use ratatui::style::{Color, Modifier, Style};
 
 use crate::tui::icons::IconOverrides;
 
+pub use tuikit::theme::{StyleSpec, parse_color, parse_modifier, parse_style_spec};
+
 /// Default `badge_width`: the longest registered harness label
 /// (`opencode`), so harness names never truncate.
 pub const DEFAULT_BADGE_WIDTH: usize = 8;
@@ -146,52 +148,6 @@ pub struct Theme {
     /// [`crate::tui::icons::node_kind_style`] fall through to the
     /// ADR 0073 default slate when no override is present.
     pub icons: IconOverrides,
-}
-
-/// Color + modifier pair. Used for theme fields where the operator
-/// might want to combine a hue with emphasis (e.g. `"green,bold"`
-/// for the fresh-recency bucket). When `color` is `None`, the
-/// renderer inherits the default fg; when `modifier` is empty, no
-/// modifier is added.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct StyleSpec {
-    pub color: Option<Color>,
-    pub modifier: Modifier,
-}
-
-impl StyleSpec {
-    pub const fn fg(color: Color) -> Self {
-        Self {
-            color: Some(color),
-            modifier: Modifier::empty(),
-        }
-    }
-
-    pub const fn modifier(modifier: Modifier) -> Self {
-        Self {
-            color: None,
-            modifier,
-        }
-    }
-
-    pub const fn fg_mod(color: Color, modifier: Modifier) -> Self {
-        Self {
-            color: Some(color),
-            modifier,
-        }
-    }
-
-    /// Build a `Style` for use in `Span::styled` calls.
-    pub fn into_style(self) -> Style {
-        let mut style = Style::default();
-        if let Some(color) = self.color {
-            style = style.fg(color);
-        }
-        if !self.modifier.is_empty() {
-            style = style.add_modifier(self.modifier);
-        }
-        style
-    }
 }
 
 impl Default for Theme {
@@ -591,137 +547,6 @@ impl Theme {
         }
         true
     }
-}
-
-/// Parse a single color token: a named ANSI color, `ansi256:N`, or
-/// `#RRGGBB`. Returns the rejected reason on failure so the loader
-/// can surface it in a per-key warning.
-pub fn parse_color(raw: &str) -> Result<Color, String> {
-    let trimmed = raw.trim();
-    if trimmed.is_empty() {
-        return Err("empty color value".to_string());
-    }
-    let lower = trimmed.to_ascii_lowercase();
-    if let Some(color) = parse_named_color(&lower) {
-        return Ok(color);
-    }
-    if let Some(idx) = lower.strip_prefix("ansi256:") {
-        return idx
-            .trim()
-            .parse::<u8>()
-            .map(Color::Indexed)
-            .map_err(|_| format!("`{trimmed}`: expected `ansi256:N` with N in 0..=255"));
-    }
-    if let Some(hex) = lower.strip_prefix('#') {
-        return parse_hex_color(hex)
-            .ok_or_else(|| format!("`{trimmed}`: expected `#RRGGBB` hex color"));
-    }
-    Err(format!(
-        "`{trimmed}` is not a recognized color (try a named color, `ansi256:N`, or `#RRGGBB`)"
-    ))
-}
-
-fn parse_named_color(lower: &str) -> Option<Color> {
-    Some(match lower {
-        "default" | "reset" => Color::Reset,
-        "black" => Color::Black,
-        "red" => Color::Red,
-        "green" => Color::Green,
-        "yellow" => Color::Yellow,
-        "blue" => Color::Blue,
-        "magenta" => Color::Magenta,
-        "cyan" => Color::Cyan,
-        "white" => Color::White,
-        "gray" | "grey" | "dark_gray" | "dark_grey" => Color::DarkGray,
-        "bright_black" => Color::DarkGray,
-        "bright_red" => Color::LightRed,
-        "bright_green" => Color::LightGreen,
-        "bright_yellow" => Color::LightYellow,
-        "bright_blue" => Color::LightBlue,
-        "bright_magenta" => Color::LightMagenta,
-        "bright_cyan" => Color::LightCyan,
-        "bright_white" => Color::White,
-        _ => return None,
-    })
-}
-
-fn parse_hex_color(hex: &str) -> Option<Color> {
-    if hex.len() != 6 || !hex.chars().all(|c| c.is_ascii_hexdigit()) {
-        return None;
-    }
-    let r = u8::from_str_radix(&hex[0..2], 16).ok()?;
-    let g = u8::from_str_radix(&hex[2..4], 16).ok()?;
-    let b = u8::from_str_radix(&hex[4..6], 16).ok()?;
-    Some(Color::Rgb(r, g, b))
-}
-
-/// Parse a comma-joined modifier list: `"bold,italic"` →
-/// `BOLD | ITALIC`. Empty input yields the empty modifier set.
-pub fn parse_modifier(raw: &str) -> Result<Modifier, String> {
-    let trimmed = raw.trim();
-    if trimmed.is_empty() {
-        return Ok(Modifier::empty());
-    }
-    let mut acc = Modifier::empty();
-    for token in trimmed.split(',') {
-        let token = token.trim().to_ascii_lowercase();
-        let bit = match token.as_str() {
-            "bold" => Modifier::BOLD,
-            "dim" => Modifier::DIM,
-            "italic" => Modifier::ITALIC,
-            "underline" | "underlined" => Modifier::UNDERLINED,
-            "reversed" | "reverse" => Modifier::REVERSED,
-            "crossed_out" | "strikethrough" => Modifier::CROSSED_OUT,
-            "slow_blink" => Modifier::SLOW_BLINK,
-            "rapid_blink" => Modifier::RAPID_BLINK,
-            "hidden" => Modifier::HIDDEN,
-            "" => continue,
-            other => {
-                return Err(format!(
-                    "`{other}` is not a recognized modifier (expected bold, dim, italic, \
-                         underline, reversed, crossed_out)"
-                ));
-            }
-        };
-        acc |= bit;
-    }
-    Ok(acc)
-}
-
-/// Parse a style spec: `"color"`, `"color,mod1,mod2"`, or
-/// `"mod1,mod2"`. The first comma-separated token may be a color or
-/// a modifier; any subsequent token must be a modifier.
-pub fn parse_style_spec(raw: &str) -> Result<StyleSpec, String> {
-    let trimmed = raw.trim();
-    if trimmed.is_empty() {
-        return Ok(StyleSpec {
-            color: None,
-            modifier: Modifier::empty(),
-        });
-    }
-    let mut parts = trimmed.split(',').map(str::trim);
-    let first = parts.next().unwrap_or("");
-    let rest: Vec<&str> = parts.collect();
-
-    // Try the first token as a color; fall through to modifier-only
-    // parsing on failure so `"bold"` and `"dim,italic"` both work
-    // without a leading color.
-    if let Ok(color) = parse_color(first) {
-        let modifier = if rest.is_empty() {
-            Modifier::empty()
-        } else {
-            parse_modifier(&rest.join(","))?
-        };
-        return Ok(StyleSpec {
-            color: Some(color),
-            modifier,
-        });
-    }
-    let modifier = parse_modifier(trimmed)?;
-    Ok(StyleSpec {
-        color: None,
-        modifier,
-    })
 }
 
 #[cfg(test)]

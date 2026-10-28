@@ -382,6 +382,7 @@ dependencies = [
  "tui-markdown",
  "tui-pantry",
  "tui-popup",
+ "tuikit",
  "unicode-width",
 ]
 
@@ -2588,6 +2589,7 @@ dependencies = [
 name = "tuikit"
 version = "0.1.0"
 dependencies = [
+ "ratatui",
  "toml 0.8.23",
 ]
 

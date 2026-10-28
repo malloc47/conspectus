@@ -202,6 +202,9 @@ toml = { workspace = true }
 toml_edit = { workspace = true }
 tui-input = { workspace = true }
 tui-markdown = { workspace = true }
+# The TUI framework crate (ADR 0150): design tokens, controls, and
+# interaction conventions. It depends on nothing from this package.
+tuikit = { path = "crates/tuikit" }
 unicode-width = { workspace = true }
 
 [dev-dependencies]

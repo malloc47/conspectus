@@ -10,6 +10,9 @@ publish = false
 [lints]
 workspace = true
 
+[dependencies]
+ratatui = { workspace = true }
+
 [dev-dependencies]
 # The independence guard in `tests/independence.rs` parses this manifest as
 # TOML instead of guessing at its layout. `toml` is already shared through
