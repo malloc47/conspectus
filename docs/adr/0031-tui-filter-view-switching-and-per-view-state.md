@@ -8,7 +8,11 @@ app-wide and never persisted, the single exception to the per-view,
 saved, structural-only filters below. Amended by
 [ADR 0149](0149-two-level-search-current-and-wider-context.md): `/` is quick
 select over the current context (the rows after these filters), and `Tab`
-widens it to every entity.
+widens it to every entity. Amended by
+[ADR 0151](0151-tui-framework-control-set-and-house-rules.md): the
+`union` and `forks` views are retired, along with `UnionGrouping`,
+`ForksGrouping`, `--view union|forks`, and their `[tui.views.*]` tables;
+the `conspectus table union|forks` projections stay.
 
 ## Context
 

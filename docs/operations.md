@@ -156,7 +156,7 @@ The tables below are the configuration keys.
 columns = ["default", "+preview"]   # same tokens as `--columns`
 
 [tui]
-default_view = "sessions"   # sessions | mux | prs | pinned (union | forks also accepted)
+default_view = "sessions"   # sessions | mux | prs | pinned | history | search
 scan_roots = ["~/work"]     # tui and serve, when --scan-root is absent; `~` expands
 show_harness_chips = false  # per-harness count chips in the header
 narrow_layout_threshold = 100  # columns below which the panes stack
@@ -164,7 +164,7 @@ preview_wrap = "smart"      # smart | plain | none — how the Preview fits a mu
 session_preview = "transcript"  # transcript | pane — the Preview for a session in tmux
 # sessions_grouping = "graph"  # deprecated alias for [tui.views.sessions] grouping
 
-[tui.views.sessions]        # also mux, union, prs, forks (ADR 0031)
+[tui.views.sessions]        # also mux and prs (ADR 0031)
 grouping = "graph"
 filters = { harness = ["codex"], max_age = "7d", mux_state = ["attached"] }
 
@@ -188,9 +188,13 @@ teardown_grace = "3s"
 
 - **Grouping values per view:** sessions `graph` (default), `workspace`,
   `repo`, `checkout`, `scan-root`, `none`; mux `session`, `host`,
-  `repo`, `workspace` (ADR 0139); union `kind`, `repo`; prs `checkout` (default), `repo`, `state`
-  (ADR 0114); forks `provider`,
-  `parent`; pinned `project` (default), `kind`, `none` (ADR 0141).
+  `repo`, `workspace` (ADR 0139); prs `checkout` (default), `repo`, `state`
+  (ADR 0114); pinned `project` (default), `kind`, `none` (ADR 0141).
+- **Removed views:** the `union` and `forks` views no longer exist.
+  `--view union` and `--view forks` are rejected with the list of valid
+  views, and a `default_view` of either, or a `[tui.views.union]` or
+  `[tui.views.forks]` table, is reported at startup and ignored. The
+  `table union` and `table forks` row-types are unchanged.
 - **Filters:** `filters` takes one inline table or an array of tables
   (`[[tui.views.<name>.filters]]`); entries OR together per dimension.
   `max_age` accepts `s`, `m`, `h`, and `d` suffixes; `mux_state` values are
@@ -1113,7 +1117,7 @@ only** checkbox in Sessions, Mux, and PRs that keeps pinned rows and the
 groups above them.
 
 **Content** in Controls (or `--contains TEXT` on `tui` and the list commands)
-narrows the Sessions, Mux, and Union views to sessions whose transcripts
+narrows the Sessions and Mux views to sessions whose transcripts
 mention the text. The scan runs in this process on background threads,
 streams matches as it goes, and restarts when the text changes; a refresh
 scans only sessions that appeared since. The text is never saved, written to
@@ -1417,11 +1421,11 @@ Schema v1:
 }
 ```
 
-`last_view` is one of `sessions`, `mux`, `union`, `prs`,
-`forks`, or `pinned`. Unknown values, malformed JSON, or a missing file all
-collapse to "no persisted view" without surfacing an error;
-unknown fields round-trip through writes so future schema bumps
-do not strand old payloads.
+`last_view` is one of `sessions`, `mux`, `prs`, `pinned`, or `history`.
+Unknown values (including the removed `union` and `forks`), malformed
+JSON, or a missing file all collapse to "no persisted view" without
+surfacing an error; unknown fields round-trip through writes so future
+schema bumps do not strand old payloads.
 
 **Startup precedence:** explicit `--view <name>` flag wins →
 persisted `last_view` wins → config `[tui].default_view` →

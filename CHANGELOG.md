@@ -46,6 +46,13 @@ Targeted for 0.2.0, after 0.1.0 is tagged. History, rebuild, and pins
   only, with a diagnostic until `conspectus pin migrate` converts them
   and removes the old tables. The Pins modal and the `B`, `b`, `A`, and
   `L` keys are gone.
+- **Breaking: the hidden `union` and `forks` TUI views are removed.**
+  Neither was in the view switcher, and their groupings did nothing.
+  `conspectus tui --view union|forks` now fails and lists the valid
+  views, and `[tui] default_view = "union"` or `"forks"`, or a
+  `[tui.views.union]` or `[tui.views.forks]` table, is reported as a
+  config diagnostic and ignored. `conspectus table union|forks` is
+  unchanged.
 
 ### Fixed
 

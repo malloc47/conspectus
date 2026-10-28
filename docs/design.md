@@ -883,13 +883,15 @@ predicate on `RowFilter` and composes with the other filters.
 In the TUI, filter / grouping / selection / expanded-set / left-scroll
 state is **per view**. Sort order is **global**. Switching views and
 back returns each view to its prior state. Each view has its own
-grouping enum (`SessionsGrouping`, `MuxGrouping`, `UnionGrouping`,
-`PrsGrouping`, `ForksGrouping`) and the same `Grouping` dispatch type
-backs config, CLI flags, and TUI controls.
+grouping enum (`SessionsGrouping`, `MuxGrouping`, `PrsGrouping`,
+`PinnedGrouping`, `HistoryGrouping`, `SearchGrouping`) and the same
+`Grouping` dispatch type backs config, CLI flags, and TUI controls.
 
 The TUI's view switcher offers sessions, mux, PRs, pinned, history, and
-search (`1`–`6`); union and forks remain CLI table projections. Search comes in two levels (ADR 0149). `/` is quick select over
-the current context, the rows of the active view after its filters, where
+search (`1`–`6`), and `--view` accepts exactly those; union and forks
+exist only as CLI table projections. Search comes in two levels (ADR
+0149). `/` is quick select over the current context, the rows of the
+active view after its filters, where
 Enter selects the item in the left pane; `Tab` widens it to every entity,
 and Enter then selects the entity where it is listed, highlights it in the
 right pane along the shortest relationship path when it is related to the

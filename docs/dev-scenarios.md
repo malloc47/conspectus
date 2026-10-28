@@ -70,7 +70,7 @@ Open the real TUI on a static scenario graph:
 ```sh
 cargo run -- dev scenario tui ambiguous-mux --view sessions
 cargo run -- dev scenario tui ambiguous-mux --grouping none --mux-state ambiguous --sort recency
-cargo run -- dev scenario tui fork-lineage --view forks
+cargo run -- dev scenario tui fork-lineage --view sessions
 ```
 
 The scenario TUI uses the normal renderer and reducer, but it does not
@@ -83,7 +83,7 @@ cannot affect live tmux or harness state.
 Scenario TUI accepts the pure exploration flags from normal `conspectus
 tui`:
 
-- `--view {sessions|mux|union|prs|forks}`
+- `--view {sessions|mux|prs|pinned|history|search}`
 - `--grouping VALUE` (valid values depend on `--view`)
 - `--harness HARNESS` (repeatable)
 - `--mux-state attached,ambiguous,unmuxed`
