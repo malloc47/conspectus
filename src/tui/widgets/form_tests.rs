@@ -156,17 +156,6 @@ fn the_footer_wraps_at_separators_without_breaking_a_hint() {
 }
 
 #[test]
-fn the_view_scrolls_only_when_the_cursor_would_fall_off() {
-    assert_eq!(scroll_offset_for_cursor(2, 10, 30), 0);
-    assert_eq!(scroll_offset_for_cursor(12, 10, 30), 3);
-    assert_eq!(
-        scroll_offset_for_cursor(29, 10, 30),
-        20,
-        "never past the end"
-    );
-}
-
-#[test]
 fn display_argv_quotes_what_a_shell_would() {
     assert_eq!(
         display_argv(&["claude".into(), "--model".into(), "opus 4".into()]),

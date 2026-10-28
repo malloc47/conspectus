@@ -20,6 +20,7 @@ use ratatui::text::{Line, Span};
 use ratatui::widgets::{Paragraph, Widget};
 use tui_popup::KnownSize;
 use tuikit::glyphs::marks;
+use tuikit::scroll::ScrollWindow;
 
 use crate::tui::Theme;
 use crate::tui::messages::{LogEntry, LogLevel, MessageLog};
@@ -227,14 +228,13 @@ impl Widget for MessagesBody<'_, '_> {
         };
 
         // Keep the selection inside the list window.
-        let first = state
-            .selected
-            .saturating_sub(usize::from(list_height).saturating_sub(1));
+        let list = ScrollWindow::new(usize::from(list_height), log.len())
+            .following(state.selected..state.selected + 1);
         let lines: Vec<Line> = log
             .newest_first()
             .enumerate()
-            .skip(first)
-            .take(usize::from(list_height))
+            .skip(list.offset())
+            .take(list.viewport())
             .map(|(idx, entry)| list_line(entry, idx == state.selected, theme, now))
             .collect();
         Paragraph::new(lines).render(list_area, buf);

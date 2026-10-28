@@ -16,7 +16,6 @@ use crate::filter::RowFilter;
 pub mod actions;
 mod app;
 pub mod clipboard;
-mod cursor;
 pub mod effect;
 pub mod explorer;
 pub mod icons;

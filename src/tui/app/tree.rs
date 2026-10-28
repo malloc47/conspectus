@@ -157,7 +157,7 @@ impl App {
             .selection
             .as_ref()
             .map_or(0, |id| self.current_visible_index(&visible, id));
-        let target = crate::tui::cursor::clamp_step(current, visible.len(), delta);
+        let target = tuikit::scroll::clamp_step(current, visible.len(), delta);
         self.selection = Some(visible[target].clone());
         self.last_visible_index = Some(target);
         self.recompute_explorer();

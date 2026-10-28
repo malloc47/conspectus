@@ -473,10 +473,9 @@ fn selected_last_sort_row_scrolls_into_short_controls_body() {
     lines.push(Line::from("↑/↓ move · Enter pick · Esc close"));
     let cursor_line = widget.cursor_line_index().unwrap();
     let inner_height = 10;
-    let offset = scroll_offset_for_cursor(Some(cursor_line), inner_height, lines.len());
-    assert!(offset > 0, "short controls body should scroll");
-    assert!(cursor_line >= offset as usize);
-    assert!(cursor_line < offset as usize + inner_height);
+    let window = body_window(Some(cursor_line), inner_height, lines.len());
+    assert!(window.offset() > 0, "short controls body should scroll");
+    assert!(window.visible().contains(&cursor_line));
 }
 
 #[test]

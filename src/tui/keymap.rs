@@ -140,7 +140,7 @@ pub enum Action {
 pub fn cycle_view(view: View, delta: i32) -> View {
     use crate::tui::widgets::controls::VIEW_OPTIONS;
     let idx = VIEW_OPTIONS.iter().position(|v| *v == view).unwrap_or(0);
-    VIEW_OPTIONS[crate::tui::cursor::wrap_step(idx, VIEW_OPTIONS.len(), delta)]
+    VIEW_OPTIONS[tuikit::scroll::wrap_step(idx, VIEW_OPTIONS.len(), delta)]
 }
 
 /// Re-map an action based on which pane currently has focus. Used

@@ -16,6 +16,7 @@ use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Paragraph, Widget};
 use tui_popup::KnownSize;
+use tuikit::scroll::ScrollWindow;
 
 use crate::tui::Msg;
 use crate::tui::modal::{Overlay, OverlayOutcome};
@@ -146,11 +147,11 @@ impl Overlay for PickerState {
                 None => OverlayOutcome::Close,
             },
             Some(SearchKey::Down) => {
-                self.cursor = crate::tui::cursor::wrap_step(self.cursor, self.visible.len(), 1);
+                self.cursor = tuikit::scroll::wrap_step(self.cursor, self.visible.len(), 1);
                 OverlayOutcome::Consumed
             }
             Some(SearchKey::Up) => {
-                self.cursor = crate::tui::cursor::wrap_step(self.cursor, self.visible.len(), -1);
+                self.cursor = tuikit::scroll::wrap_step(self.cursor, self.visible.len(), -1);
                 OverlayOutcome::Consumed
             }
             // The picker has no scopes; its table binds none of these.
@@ -236,18 +237,14 @@ impl Widget for PickerBody<'_> {
             Paragraph::new(line![span!(self.theme.muted; "{note}")]).render(list, buf);
             return;
         }
-        let rows = list.height as usize;
         let cursor = self.state.cursor();
-        let first = if rows > 0 && cursor >= rows {
-            cursor + 1 - rows
-        } else {
-            0
-        };
+        let window =
+            ScrollWindow::new(usize::from(list.height), items.len()).following(cursor..cursor + 1);
         let lines: Vec<Line<'static>> = items
             .iter()
             .enumerate()
-            .skip(first)
-            .take(rows)
+            .skip(window.offset())
+            .take(window.viewport())
             .map(|(index, item)| {
                 let selected = index == cursor;
                 let emphasis = if selected {

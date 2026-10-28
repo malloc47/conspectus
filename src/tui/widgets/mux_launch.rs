@@ -30,13 +30,14 @@ use ratatui::macros::line;
 use ratatui::style::Style;
 use ratatui::text::Line;
 use ratatui::widgets::Widget;
+use tuikit::scroll::ScrollWindow;
 
 use crate::tui::Msg;
 use crate::tui::modal::{Overlay, OverlayOutcome};
 use crate::tui::theme::Theme;
 use crate::tui::widgets::form::{
     self, ScrollLinesBody, choice_row, derived_row, footer_lines, harness_row, input_row,
-    options_row, path_row, scroll_offset_for_cursor, static_value_row,
+    options_row, path_row, static_value_row,
 };
 use crate::tui::widgets::input::{InputOutcome, TextInputState};
 use crate::tui::widgets::launch_spec_form::{
@@ -99,7 +100,7 @@ impl PinChoice {
     fn cycled(self, delta: i32) -> Self {
         const ORDER: [PinChoice; 3] = [PinChoice::Off, PinChoice::Pin, PinChoice::PlanOnly];
         let idx = ORDER.iter().position(|c| *c == self).unwrap_or(0);
-        ORDER[crate::tui::cursor::wrap_step(idx, ORDER.len(), delta)]
+        ORDER[tuikit::scroll::wrap_step(idx, ORDER.len(), delta)]
     }
 
     fn label(self) -> &'static str {
@@ -293,7 +294,7 @@ impl MuxLaunchFormState {
             self.focus
         };
         let idx = fields.iter().position(|f| *f == at).unwrap_or(0);
-        self.focus = fields[crate::tui::cursor::wrap_step(idx, fields.len(), delta)];
+        self.focus = fields[tuikit::scroll::wrap_step(idx, fields.len(), delta)];
     }
 
     /// Tab and Shift-Tab: every stop, the socket checkbox included
@@ -302,7 +303,7 @@ impl MuxLaunchFormState {
         let mut stops = self.visible_fields();
         stops.insert(1, MuxLaunchField::MuxSocketToggle);
         let idx = stops.iter().position(|f| *f == self.focus).unwrap_or(0);
-        self.focus = stops[crate::tui::cursor::wrap_step(idx, stops.len(), delta)];
+        self.focus = stops[tuikit::scroll::wrap_step(idx, stops.len(), delta)];
     }
 
     fn try_commit(&mut self) -> OverlayOutcome {
@@ -676,7 +677,8 @@ impl Widget for MuxLaunchFormWidget<'_> {
         let modal = form::modal_rect(area, modal_width, lines.len(), 10);
         let inner_height = usize::from(modal.height.saturating_sub(2));
         let body = ScrollLinesBody {
-            scroll_offset: scroll_offset_for_cursor(cursor_line, inner_height, lines.len()),
+            window: ScrollWindow::new(inner_height, lines.len())
+                .following(cursor_line..cursor_line + 1),
             lines,
             inner_width: usize::from(modal.width.saturating_sub(2)),
             inner_height,

@@ -106,7 +106,7 @@ impl App {
             state.cursor = 0;
             return;
         }
-        state.cursor = crate::tui::cursor::clamp_step(state.cursor, rows.len(), delta);
+        state.cursor = tuikit::scroll::clamp_step(state.cursor, rows.len(), delta);
         self.status_message = None;
     }
 

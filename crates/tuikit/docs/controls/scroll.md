@@ -92,14 +92,17 @@ assert_eq!(list.cursor, 10);
 assert_eq!(list.window.visible(), 1..11);
 ```
 
-A list that keeps no window passes 0 as the previous offset, and a
-pager without a cursor scrolls the window itself:
+A list that keeps no window builds one around its cursor each frame
+(the same as following from offset 0), and a pager without a cursor
+scrolls the window itself:
 
 ```rust
 use tuikit::scroll::{ScrollWindow, follow_offset};
 
 // The cursor on the last line once it passes the first screen.
 assert_eq!(follow_offset(0, 14..15, 6, 30), 9);
+let window = ScrollWindow::new(6, 30).following(14..15);
+assert_eq!(window.visible(), 9..15);
 
 let mut pager = ScrollWindow::new(6, 30);
 pager.page_down();
@@ -115,6 +118,7 @@ assert_eq!(pager.visible(), 24..30);
 | `clamp_step(index, len, delta)` | moves a cursor, stopping at the ends | scrollable content (house rule 2); a page passes the window's `page()` |
 | `follow_offset(offset, rows, viewport, content)` | the offset that shows `rows`, moved as little as it must | the rule below; a list with no stored window passes 0 |
 | `ScrollWindow::new(viewport, content)`, `at(offset)` | a window at the top, or at an offset | `at` clamps |
+| `following(rows)` | a new window moved to show `rows` | for a list that keeps no window: `new(viewport, content).following(cursor..cursor + 1)` |
 | `resize`, `follow` | measure again; show the cursor's rows | every frame, in that order |
 | `scroll_by`, `page_down`, `page_up`, `to_top`, `to_bottom` | scroll a window with no cursor | each clamps |
 | `offset`, `viewport`, `content`, `last_offset`, `visible`, `overflows`, `page` | read the window | `page` is at least 1 |

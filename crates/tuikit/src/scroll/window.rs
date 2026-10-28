@@ -94,6 +94,19 @@ impl ScrollWindow {
         }
     }
 
+    /// This window moved to show `rows`, by the rule of
+    /// [`follow_offset`].
+    ///
+    /// A list that keeps no window builds one each frame with
+    /// `ScrollWindow::new(viewport, content).following(rows)`: the
+    /// window stays at the top until the cursor passes the first screen,
+    /// then keeps the cursor on its last line.
+    #[must_use]
+    pub fn following(mut self, rows: Range<usize>) -> Self {
+        self.follow(rows);
+        self
+    }
+
     /// Measure the window again: `viewport` rows over `content` rows. The
     /// offset stays where it still fits and otherwise comes back to the
     /// last offset.

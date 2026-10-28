@@ -20,13 +20,12 @@ use ratatui::layout::Rect;
 use ratatui::macros::line;
 use ratatui::text::Line;
 use ratatui::widgets::Widget;
+use tuikit::scroll::ScrollWindow;
 
 use crate::tui::Msg;
 use crate::tui::modal::{Overlay, OverlayOutcome};
 use crate::tui::theme::Theme;
-use crate::tui::widgets::form::{
-    self, ScrollLinesBody, footer_lines, input_row, path_row, scroll_offset_for_cursor,
-};
+use crate::tui::widgets::form::{self, ScrollLinesBody, footer_lines, input_row, path_row};
 use crate::tui::widgets::input::{InputOutcome, TextInputState};
 use crate::tui::widgets::path_omnibox::{PathCandidate, PathOmniboxOutcome, PathOmniboxState};
 
@@ -198,11 +197,8 @@ impl Widget for NewMuxFormWidget<'_> {
         let modal = form::modal_rect(area, modal_width, lines.len(), 6);
         let inner_height = usize::from(modal.height.saturating_sub(2));
         let body = ScrollLinesBody {
-            scroll_offset: scroll_offset_for_cursor(
-                usize::from(cwd_focused),
-                inner_height,
-                lines.len(),
-            ),
+            window: ScrollWindow::new(inner_height, lines.len())
+                .following(usize::from(cwd_focused)..usize::from(cwd_focused) + 1),
             lines,
             inner_width: usize::from(modal.width.saturating_sub(2)),
             inner_height,

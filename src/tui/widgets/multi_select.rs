@@ -27,6 +27,7 @@ use ratatui_cheese::multi_select::{
     MultiSelectState as CheeseMultiSelectState, MultiSelectStyles as CheeseMultiSelectStyles,
 };
 use tui_popup::KnownSize;
+use tuikit::scroll::ScrollWindow;
 
 use crate::tui::Theme;
 
@@ -251,15 +252,17 @@ impl<T: AsRef<str>> KnownSize for MultiSelectBody<'_, T> {
 
 impl<T: AsRef<str>> Widget for MultiSelectBody<'_, T> {
     fn render(self, area: Rect, buf: &mut Buffer) {
-        let visible_rows = area.height as usize;
-        let scroll = compute_scroll(self.state.cursor(), visible_rows, self.items.len());
+        let cursor = self.state.cursor();
+        let window = ScrollWindow::new(usize::from(area.height), self.items.len())
+            .following(cursor..cursor + 1);
+        let scroll = window.offset();
 
         // Bridge our `[T: AsRef<str>]` slice into upstream
         // `MultiSelectOption`s. The Vec lives for the duration of
         // this call so the borrow into the widget is valid.
         let options: Vec<MultiSelectOption<'_>> = self
             .items
-            .get(scroll..(scroll + visible_rows).min(self.items.len()))
+            .get(window.visible())
             .unwrap_or(&[])
             .iter()
             .map(|item| MultiSelectOption::new(item.as_ref()))
@@ -289,17 +292,6 @@ impl<T: AsRef<str>> Widget for MultiSelectBody<'_, T> {
             widget = widget.styles(cheese_styles_from_theme(theme));
         }
         StatefulWidget::render(&widget, area, buf, &mut mirror);
-    }
-}
-
-fn compute_scroll(cursor: usize, visible_rows: usize, total: usize) -> usize {
-    if visible_rows == 0 || total <= visible_rows {
-        return 0;
-    }
-    if cursor >= visible_rows {
-        cursor + 1 - visible_rows
-    } else {
-        0
     }
 }
 

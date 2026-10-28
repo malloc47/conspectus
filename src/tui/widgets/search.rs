@@ -22,6 +22,7 @@ use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Paragraph, Widget};
 use tui_popup::KnownSize;
+use tuikit::scroll::ScrollWindow;
 use tuikit::text;
 
 use crate::model::NodeId;
@@ -554,10 +555,10 @@ impl SearchOverlayState {
             Some(SearchOptionKey::Abort) => return SearchOutcome::Cancel,
             Some(SearchOptionKey::Back) => self.options = None,
             Some(SearchOptionKey::Down) => {
-                self.options = Some(crate::tui::cursor::wrap_step(at, SEARCH_OPTIONS.len(), 1));
+                self.options = Some(tuikit::scroll::wrap_step(at, SEARCH_OPTIONS.len(), 1));
             }
             Some(SearchOptionKey::Up) => {
-                self.options = Some(crate::tui::cursor::wrap_step(at, SEARCH_OPTIONS.len(), -1));
+                self.options = Some(tuikit::scroll::wrap_step(at, SEARCH_OPTIONS.len(), -1));
             }
             Some(SearchOptionKey::Toggle) => {
                 match at {
@@ -621,7 +622,7 @@ impl SearchOverlayState {
             self.cursor = 0;
             return;
         }
-        self.cursor = crate::tui::cursor::wrap_step(self.cursor, len, delta);
+        self.cursor = tuikit::scroll::wrap_step(self.cursor, len, delta);
     }
 }
 
@@ -864,9 +865,10 @@ impl Widget for SearchBody<'_> {
             return;
         }
 
-        let visible_rows = list_area.height as usize;
-        let scroll = compute_scroll(self.state.cursor(), visible_rows, total);
-        let range = scroll..(scroll + visible_rows).min(total);
+        let cursor = self.state.cursor();
+        let range = ScrollWindow::new(usize::from(list_area.height), total)
+            .following(cursor..cursor + 1)
+            .visible();
         let lines: Vec<Line<'static>> = match self.state.reach() {
             Reach::All => range
                 .map(|idx| self.entity_line(idx, list_area.width as usize))
@@ -1022,10 +1024,12 @@ impl SearchBody<'_> {
             Paragraph::new(line![span!(self.theme.muted; "{label}")]).render(list_area, buf);
             return;
         }
-        let scroll = compute_scroll(self.state.cursor(), list_height, view.rows.len());
+        let cursor = self.state.cursor();
+        let window = ScrollWindow::new(list_height, view.rows.len()).following(cursor..cursor + 1);
         // Leave a blank cell before the frame.
         let columns = content_columns(width.saturating_sub(1));
-        let lines: Vec<Line<'static>> = (scroll..(scroll + list_height).min(view.rows.len()))
+        let lines: Vec<Line<'static>> = window
+            .visible()
             .map(|idx| {
                 content_row_line(
                     &view.rows[idx],
@@ -1389,17 +1393,6 @@ fn search_kind_glyph_span_for(kind: NodeKind, theme: &Theme, is_cursor: bool) ->
 pub(crate) fn centered_modal_rect(area: Rect) -> Rect {
     let (width, height) = modal_size(area.width, area.height);
     super::popup_frame::centered_rect(area, width, height)
-}
-
-fn compute_scroll(cursor: usize, visible_rows: usize, total: usize) -> usize {
-    if visible_rows == 0 || total <= visible_rows {
-        return 0;
-    }
-    if cursor >= visible_rows {
-        cursor + 1 - visible_rows
-    } else {
-        0
-    }
 }
 
 /// Per-event context the search overlay reads through the

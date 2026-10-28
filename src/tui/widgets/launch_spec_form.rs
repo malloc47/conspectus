@@ -205,7 +205,7 @@ impl LaunchSpecFormState {
             .iter()
             .position(|known| known == value)
         {
-            Some(idx) => crate::tui::cursor::wrap_step(idx, self.known_harness_keys.len(), delta),
+            Some(idx) => tuikit::scroll::wrap_step(idx, self.known_harness_keys.len(), delta),
             None if delta < 0 => self.known_harness_keys.len().saturating_sub(1),
             None => 0,
         };
@@ -270,7 +270,7 @@ impl LaunchSpecFormState {
             .collect();
         let idx = match (selected.as_slice(), delta) {
             ([only], -1 | 1) if options.len() > 1 => {
-                crate::tui::cursor::wrap_step(*only, options.len(), delta)
+                tuikit::scroll::wrap_step(*only, options.len(), delta)
             }
             ([first, ..], _) => *first,
             ([], _) => 0,

@@ -83,6 +83,17 @@ fn following_from_the_top_keeps_the_cursor_on_the_last_line() {
 }
 
 #[test]
+fn a_window_built_around_a_cursor_follows_from_the_top() {
+    let window = ScrollWindow::new(5, 20).following(12..13);
+    assert_eq!(window.visible(), 8..13);
+    assert_eq!(ScrollWindow::new(5, 20).following(3..4).offset(), 0);
+    assert_eq!(
+        ScrollWindow::new(5, 20).at(10).following(12..13).offset(),
+        10
+    );
+}
+
+#[test]
 fn following_a_span_from_the_top_shows_its_end_or_its_start() {
     for content in 0..20 {
         for viewport in 1..10 {

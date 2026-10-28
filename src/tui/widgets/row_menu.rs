@@ -14,6 +14,7 @@ use ratatui::style::{Modifier, Style};
 use ratatui::text::Line;
 use ratatui::widgets::{Block, Borders, Clear, Paragraph, Widget};
 use tuikit::glyphs::marks;
+use tuikit::scroll::ScrollWindow;
 
 use crate::tui::Msg;
 use crate::tui::keybindings::overlay::HINT_SEPARATOR;
@@ -198,10 +199,7 @@ impl Widget for RowMenuWidget<'_> {
         let footer_rows = footer.len().min(rows.saturating_sub(1));
         let footer = footer.split_off(footer.len() - footer_rows);
         let entry_rows = lines.len().min(rows - footer_rows);
-        let scroll = cursor_rows
-            .end
-            .saturating_sub(entry_rows)
-            .min(cursor_rows.start);
+        let window = ScrollWindow::new(entry_rows, lines.len()).following(cursor_rows);
         let entries_area = Rect {
             height: u16::try_from(entry_rows).unwrap_or(inner.height),
             ..inner
@@ -212,7 +210,7 @@ impl Widget for RowMenuWidget<'_> {
             ..inner
         };
         Paragraph::new(lines)
-            .scroll((u16::try_from(scroll).unwrap_or(u16::MAX), 0))
+            .scroll(window.paragraph_scroll())
             .render(entries_area, buf);
         Paragraph::new(footer).render(footer_area, buf);
     }

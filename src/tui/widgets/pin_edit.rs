@@ -366,7 +366,7 @@ impl PinEditFormState {
 
     fn move_focus(&mut self, delta: i32) {
         let count = self.stops().len();
-        self.focus = crate::tui::cursor::wrap_step(self.focus.min(count - 1), count, delta);
+        self.focus = tuikit::scroll::wrap_step(self.focus.min(count - 1), count, delta);
     }
 
     fn row_index(&self, field: &'static str) -> Option<usize> {
@@ -422,7 +422,7 @@ impl PinEditFormState {
             .collect();
         let idx = match (selected.as_slice(), delta) {
             ([only], -1 | 1) if options.len() > 1 => {
-                crate::tui::cursor::wrap_step(*only, options.len(), delta)
+                tuikit::scroll::wrap_step(*only, options.len(), delta)
             }
             ([first, ..], _) => *first,
             ([], _) => 0,
@@ -454,7 +454,7 @@ impl PinEditFormState {
         .unwrap_or_default();
         let keys = &self.known_harness_keys;
         let next_idx = match keys.iter().position(|key| *key == old) {
-            Some(pos) => crate::tui::cursor::wrap_step(pos, keys.len(), delta),
+            Some(pos) => tuikit::scroll::wrap_step(pos, keys.len(), delta),
             None if delta < 0 => keys.len() - 1,
             None => 0,
         };

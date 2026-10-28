@@ -19,6 +19,7 @@ use ratatui::text::{Line, Span};
 use ratatui::widgets::{Paragraph, Widget};
 use tui_popup::KnownSize;
 use tuikit::glyphs::marks;
+use tuikit::scroll::ScrollWindow;
 use tuikit::text;
 
 use crate::discovery::harness::{HarnessLaunchOption, argv_contains_fragment};
@@ -642,7 +643,8 @@ pub struct ScrollLinesBody {
     pub lines: Vec<Line<'static>>,
     pub inner_width: usize,
     pub inner_height: usize,
-    pub scroll_offset: u16,
+    /// The window onto `lines` that shows the cursor row.
+    pub window: ScrollWindow,
 }
 
 impl KnownSize for ScrollLinesBody {
@@ -658,7 +660,7 @@ impl KnownSize for ScrollLinesBody {
 impl Widget for ScrollLinesBody {
     fn render(self, area: Rect, buf: &mut Buffer) {
         Paragraph::new(self.lines)
-            .scroll((self.scroll_offset, 0))
+            .scroll(self.window.paragraph_scroll())
             .render(area, buf);
     }
 }
@@ -691,7 +693,8 @@ impl Widget for SplitBody {
         let bottom = self.bottom.len().min(height);
         let top = self.top.len().min(height - bottom);
         let rows_height = height - bottom - top;
-        let offset = scroll_offset_for_cursor(self.cursor_row, rows_height, self.rows.len());
+        let window = ScrollWindow::new(rows_height, self.rows.len())
+            .following(self.cursor_row..self.cursor_row + 1);
         let line_at = |y: usize| {
             Rect::new(
                 area.x,
@@ -706,7 +709,7 @@ impl Widget for SplitBody {
         for (i, line) in self
             .rows
             .into_iter()
-            .skip(usize::from(offset))
+            .skip(window.offset())
             .take(rows_height)
             .enumerate()
         {
@@ -717,22 +720,6 @@ impl Widget for SplitBody {
             Paragraph::new(line).render(line_at(first + i), buf);
         }
     }
-}
-
-/// How far to scroll so line `cursor_line` is the last one visible.
-pub fn scroll_offset_for_cursor(
-    cursor_line: usize,
-    inner_height: usize,
-    content_height: usize,
-) -> u16 {
-    if inner_height == 0 || cursor_line < inner_height {
-        return 0;
-    }
-    let max_scroll = content_height.saturating_sub(inner_height);
-    let offset = cursor_line
-        .saturating_sub(inner_height.saturating_sub(1))
-        .min(max_scroll);
-    u16::try_from(offset).unwrap_or(u16::MAX)
 }
 
 #[cfg(test)]

@@ -33,6 +33,7 @@ use ratatui::text::Line;
 use ratatui::widgets::{Paragraph, Widget};
 use tui_popup::KnownSize;
 use tuikit::glyphs::marks;
+use tuikit::scroll::ScrollWindow;
 
 use crate::filter::{
     HarnessFilter, MuxStateFilter, MuxStateKey, PrBranchFilter, PrStateFilter, PrStateKey,
@@ -686,7 +687,7 @@ fn move_cursor(cursor: ControlsCursor, ctx: &ControlsContext<'_>, delta: i32) ->
         return cursor;
     }
     let idx = list.iter().position(|c| *c == cursor).unwrap_or(0);
-    list[crate::tui::cursor::wrap_step(idx, list.len(), delta)]
+    list[tuikit::scroll::wrap_step(idx, list.len(), delta)]
 }
 
 /// All actionable rows in display order. Section headers are
@@ -796,8 +797,7 @@ impl Widget for ControlsOverlayWidget<'_> {
         }
         let modal = centered_modal_rect_for_content(area, lines.len());
         let inner_height = modal.height.saturating_sub(2) as usize;
-        let scroll_offset =
-            scroll_offset_for_cursor(self.cursor_line_index(), inner_height, lines.len());
+        let window = body_window(self.cursor_line_index(), inner_height, lines.len());
 
         let sub_editor_to_render = self.state.sub_editor();
         let theme = self.theme;
@@ -805,7 +805,7 @@ impl Widget for ControlsOverlayWidget<'_> {
             lines,
             inner_width: modal.width.saturating_sub(2) as usize,
             inner_height,
-            scroll_offset,
+            window,
         };
         let popup =
             crate::tui::widgets::popup_frame::themed_popup(body, line![" Controls "], theme);
@@ -1084,7 +1084,7 @@ struct ControlsBody {
     lines: Vec<Line<'static>>,
     inner_width: usize,
     inner_height: usize,
-    scroll_offset: u16,
+    window: ScrollWindow,
 }
 
 impl KnownSize for ControlsBody {
@@ -1100,27 +1100,19 @@ impl KnownSize for ControlsBody {
 impl Widget for ControlsBody {
     fn render(self, area: Rect, buf: &mut Buffer) {
         Paragraph::new(self.lines)
-            .scroll((self.scroll_offset, 0))
+            .scroll(self.window.paragraph_scroll())
             .render(area, buf);
     }
 }
 
-fn scroll_offset_for_cursor(
-    cursor_line: Option<usize>,
-    inner_height: usize,
-    content_height: usize,
-) -> u16 {
-    let Some(cursor_line) = cursor_line else {
-        return 0;
-    };
-    if inner_height == 0 || cursor_line < inner_height {
-        return 0;
+/// The window onto the body's `content` lines that shows the cursor's
+/// line, or the top when no line holds the cursor.
+fn body_window(cursor_line: Option<usize>, inner_height: usize, content: usize) -> ScrollWindow {
+    let window = ScrollWindow::new(inner_height, content);
+    match cursor_line {
+        Some(line) => window.following(line..line + 1),
+        None => window,
     }
-    let max_scroll = content_height.saturating_sub(inner_height);
-    let offset = cursor_line
-        .saturating_sub(inner_height.saturating_sub(1))
-        .min(max_scroll);
-    u16::try_from(offset).unwrap_or(u16::MAX)
 }
 
 fn section_header(label: &str) -> Line<'static> {
