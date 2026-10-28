@@ -9,6 +9,7 @@ Contents:
 
 - [Independence guards](#independence-guards)
 - [The raw-style guard](#the-raw-style-guard)
+- [The glyph guard](#the-glyph-guard)
 - [Repository-wide hygiene scans](#repository-wide-hygiene-scans)
 - [The documentation lint](#the-documentation-lint)
 - [Adding a control](#adding-a-control)
@@ -130,6 +131,31 @@ matches nothing. A control that seems to need a raw color needs a token or a
 named style instead; add the token to the table in `src/theme.rs` and to the
 theme's page.
 
+## The glyph guard
+
+A glyph the terminal's font lacks is drawn from a fallback font and spills
+over its neighbor, so every character the framework draws is measured once
+and recorded in the vetted table (`src/glyphs/vetted.rs`), and shared glyphs
+are defined once as constants in `glyphs::marks`. `tests/glyph_literals.rs`
+scans non-test Rust source under `src/` with the scanner the module exports
+(`glyphs::drawn_glyphs`: non-ASCII characters in code, outside comments and
+`#[cfg(test)]` items) and fails on:
+
+- a non-ASCII character in code anywhere but the `glyphs` module, vetted or
+  not. Draw a mark (`marks::POINTER`, `marks::ELLIPSIS`, ...), or add the
+  glyph to the module so it has one definition;
+- a character inside the `glyphs` module that the framework's table does not
+  hold.
+
+To add a glyph, measure it with `scripts/glyph-widths.py GLYPH...` (run from
+the crate directory), add a constant to `src/glyphs/marks.rs` if controls
+share it and list it in `marks::ALL`, and add the table entry with a note on
+how it was checked. A host registers the glyphs of its own vocabulary with
+`VettedGlyphs::register` from an adapter and runs the same scanner over its
+trees, so the table it checks against is the union. The guard has no exception
+list: a control that wants a glyph needs a mark or a table entry. The
+control's page, [controls/glyphs.md](controls/glyphs.md), is the reference.
+
 ## Repository-wide hygiene scans
 
 The host repository runs source-scanning tests over every Rust tree it
@@ -145,6 +171,7 @@ trees it walks. The kinds that reach this crate:
 | Working directory | Code does not read the process's working directory, which can vanish while the program runs. A control that needs a directory, such as path completion, takes it from its host as an input. Setting a child's directory is not a read. No file in this crate is exempt. |
 | Terminal ownership | Code does not enter raw mode or the alternate screen, or leave them. The host takes the terminal over and hands it back, with bracketed paste on only while it has it, and gives controls the frames to draw and the key and paste events to handle. No file in this crate is exempt. |
 | Process and write capability | The host keeps a manifest of every program, socket, signal, and write path it may use. The framework has no entries, and the scan asserts there is no such path in this crate's tree. |
+| Glyph vetting | Every non-ASCII character that code in either crate draws (outside comments and test items) is in the vetted table the host builds: the framework's glyphs plus the host's registrations. A character the table does not hold fails the scan, with the file and line. |
 | User-visible text | String literals that controls draw contain no decision-record numbers, task IDs, or design-document paths, because that text reaches users through the host. |
 
 Rules that guard what the host does or says (its rendered screens, its
@@ -203,7 +230,9 @@ Work through this list in order. Each step names the rule it applies.
 3. **Take the theme.** The constructor or render function takes `&Theme`. No
    raw `Color::` values and no raw `Modifier::DIM`; host roles are looked up
    in the named-style registry (house rule 13, enforced by
-   [the raw-style guard](#the-raw-style-guard)).
+   [the raw-style guard](#the-raw-style-guard)). Draw shared glyphs through
+   `glyphs::marks` and never type the character
+   ([the glyph guard](#the-glyph-guard)).
 4. **Write its key table.** Define the control's keys as a key table, and
    generate its footer and help from that table. Never hand-write hints
    (house rule 8). Use the standard tables for menus, dialogs, pagers, text

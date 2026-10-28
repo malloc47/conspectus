@@ -1,15 +1,24 @@
 #!/usr/bin/env python3
 """Measure whether glyphs fit one terminal cell in common monospace fonts.
 
-    scripts/glyph-widths.py GLYPH...     # measure the glyphs given
-    scripts/glyph-widths.py --source     # every non-ASCII character src/tui draws
+    scripts/glyph-widths.py GLYPH...          # measure the glyphs given
+    scripts/glyph-widths.py --source [DIR...] # every non-ASCII character the
+                                              # Rust sources under each DIR draw
+                                              # (default: src)
 
 A glyph the monospace font lacks is drawn from a fallback font, and when
 that font's advance is wider than a cell the glyph spills into its
 neighbor, so a selection highlight cuts it in half. Prefer glyphs that
-DejaVu Sans Mono carries at exactly 1.00. Record the result in
-`VETTED` in src/tui/icons.rs. Pure Python, no packages: it reads the
-fonts' cmap and hmtx tables directly.
+DejaVu Sans Mono carries at exactly 1.00. Record the result in the vetted
+table (`tuikit::glyphs::VettedGlyphs::register`; the framework's own
+glyphs are in `src/glyphs/vetted.rs`, and a host registers its own from an
+adapter). Pure Python, no packages: it reads the fonts' cmap and hmtx
+tables directly.
+
+`--source` skips comment lines, test files (`tests.rs`, `*_tests.rs`), and
+directories named `tests`, `snapshots`, or ending in `_tests`. It does not
+skip a `#[cfg(test)]` module inside a source file, so it can list a glyph
+the Rust scanner (`tuikit::glyphs::drawn_glyphs`) would not.
 """
 import struct, sys, subprocess, unicodedata
 def tables(d):
@@ -62,27 +71,33 @@ FONTS = {
 FALLBACK = '/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf'
 
 
-def drawn_glyphs(root):
-    """Non-ASCII characters on non-comment lines of the TUI sources."""
+def drawn_glyphs(roots):
+    """Non-ASCII characters on non-comment lines of the Rust sources under roots."""
     seen = []
-    for dirpath, _, names in os.walk(root):
-        for name in names:
-            if not name.endswith('.rs') or name.endswith('_tests.rs') or any(d == 'tests' or d.endswith('_tests') or d == 'snapshots' for d in dirpath.split(os.sep)):
-                continue
-            for line in open(os.path.join(dirpath, name), encoding='utf-8'):
-                if line.lstrip().startswith('//'):
+    for root in roots:
+        for dirpath, _, names in os.walk(root):
+            for name in names:
+                is_test_file = name == 'tests.rs' or name.endswith('_tests.rs')
+                in_test_dir = any(d == 'tests' or d.endswith('_tests') or d == 'snapshots' for d in dirpath.split(os.sep))
+                if not name.endswith('.rs') or is_test_file or in_test_dir:
                     continue
-                for ch in line:
-                    if ord(ch) > 0x7F and ch not in seen:
-                        seen.append(ch)
+                for line in open(os.path.join(dirpath, name), encoding='utf-8'):
+                    if line.lstrip().startswith('//'):
+                        continue
+                    for ch in line:
+                        if ord(ch) > 0x7F and ch not in seen:
+                            seen.append(ch)
     return seen
 
 
 def main():
     args = sys.argv[1:]
-    glyphs = drawn_glyphs('src/tui') if args == ['--source'] else args
+    if args[:1] == ['--source']:
+        glyphs = drawn_glyphs(args[1:] or ['src'])
+    else:
+        glyphs = args
     if not glyphs:
-        print('usage: glyph-widths.py GLYPH... | --source', file=sys.stderr)
+        print('usage: glyph-widths.py GLYPH... | --source [DIR...]', file=sys.stderr)
         return 2
     fonts = {}
     for name, path in FONTS.items():

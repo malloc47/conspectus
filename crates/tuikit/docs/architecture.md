@@ -49,7 +49,7 @@ each names its module path.
 | Module | Provides | Status |
 | --- | --- | --- |
 | `theme` | Generic role tokens (accent and focus cue, muted, inert, selection, success, warning, error, info, link, match highlight, badge, recency scale, surface, input fields); a registry of named styles for roles only the host knows; alias keys; the style-spec grammar; applying overrides from a config table the host supplies. Page: [controls/theme.md](controls/theme.md) | landed |
-| `glyphs` | The vetted glyph table; shared marks (pointer, disclosure, ok, fail, back, ellipsis, no-value); cell-width checks | planned |
+| `glyphs` | The vetted glyph table with host registration; shared marks (pointer, back, disclosure, ok, fail, warning, bullet, ellipsis, no-value, rule, spinner); cell-width and emoji-risk checks; the source scanner that finds unvetted glyphs. Page: [controls/glyphs.md](controls/glyphs.md) | landed |
 | `text` | Cell-width measuring; end and middle truncation; padding; fitting spans; word and character wrapping; snippet fitting; match painting | planned |
 | `scroll` | Wrap-or-clamp cursor stepping; follow-cursor offsets; scroll windows; the scrollbar gutter; wrapped-row counts | planned |
 | `chip` | Fixed-width chips: toggle, segmented title, position, status | planned |
@@ -185,6 +185,7 @@ crates/tuikit/
 ├─ Cargo.toml
 ├─ README.md             crate summary; also the crate-level API documentation
 ├─ src/                  the library (documentation is mandatory)
+├─ scripts/              glyph-widths.py, which measures glyphs in common fonts
 ├─ tests/                independence guards, documentation checks, integration tests
 ├─ examples/             previews of controls, once the first one lands
 └─ docs/

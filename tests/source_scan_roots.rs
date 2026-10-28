@@ -64,7 +64,7 @@ fn a_wrong_root_trips_the_tripwire_for_every_tree() {
         "{error}"
     );
     assert!(
-        error.contains("`crates/tuikit/src`: 0 Rust files, at least 4 expected"),
+        error.contains("`crates/tuikit/src`: 0 Rust files, at least 9 expected"),
         "{error}"
     );
 }

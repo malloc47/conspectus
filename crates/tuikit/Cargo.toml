@@ -12,6 +12,9 @@ workspace = true
 
 [dependencies]
 ratatui = { workspace = true }
+# Cell widths for the glyph checks. Already shared through
+# `[workspace.dependencies]` and in ratatui's own tree; ADR 0152 names it.
+unicode-width = { workspace = true }
 
 [dev-dependencies]
 # The independence guard in `tests/independence.rs` parses this manifest as

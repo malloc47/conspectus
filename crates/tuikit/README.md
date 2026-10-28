@@ -35,8 +35,10 @@ keep it independent from these pages.
 
 The crate is populated one module at a time as controls move in from the
 host. Today it holds the `theme` module (design tokens, named styles, and
-the style-spec grammar), the source guards, and this documentation set; the
-module map in the architecture guide says which modules have landed.
+the style-spec grammar), the `glyphs` module (shared marks, the vetted-glyph
+table, and the source scanner), the source guards, and this documentation
+set; the module map in the architecture guide says which modules have
+landed.
 
 ## Depending on it by path
 
