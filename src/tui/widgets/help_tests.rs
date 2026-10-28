@@ -426,3 +426,35 @@ fn the_rendered_help_modal_shows_every_word_as_you_scroll() {
         );
     }
 }
+
+/// The content search row names the key the search itself binds for
+/// listing sessions or messages, not the Search view's.
+#[test]
+fn the_content_search_row_names_the_key_the_search_binds() {
+    use crate::tui::keybindings::overlay::{SEARCH_CONTENT_KEYS, SearchKey};
+    use tuikit::keys::{Hint, KeyRow, rows};
+    let label = rows(SEARCH_CONTENT_KEYS)
+        .find_map(|row| match row {
+            KeyRow::Bind {
+                action: SearchKey::Granularity,
+                hint: Hint::Shown { label, .. },
+                ..
+            } => Some(*label),
+            _ => None,
+        })
+        .expect("the search shows its sessions/messages key");
+    let row = keymap_sections()
+        .into_iter()
+        .flat_map(|section| section.rows)
+        .find_map(|row| match row {
+            HelpRow::Keys {
+                keys, description, ..
+            } if keys.starts_with("Ctrl-/") => Some(description),
+            _ => None,
+        })
+        .expect("the content search row");
+    assert!(
+        row.contains(&format!("{label} switches between listing sessions")),
+        "{row}"
+    );
+}
