@@ -19,6 +19,7 @@ use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::Paragraph;
 use tuikit::glyphs::marks;
+use tuikit::scroll::ScrollWindow;
 
 use crate::content_search::PaneRef;
 use crate::tui::Theme;
@@ -28,7 +29,6 @@ use crate::tui::keybindings::overlay::{
 use crate::viewer::find::{FindPrompt, ViewerFindMsg};
 
 use super::help::{binding_lines, blank, push_footer, render_help_page, section};
-use super::popup_frame::ScrollFit;
 use super::viewer_help::key_notation;
 
 /// Lines of context kept above a line the viewer jumps to.
@@ -418,9 +418,9 @@ pub fn draw(state: &mut PaneViewerState, theme: &Theme, frame: &mut Frame<'_>, a
     draw_rule(theme, frame, chunks[3]);
     draw_footer(state, theme, frame, chunks[4]);
     if state.show_help {
-        let fit = render_help(area, frame.buffer_mut(), theme, state.help_scroll);
-        state.help_scroll = state.help_scroll.min(fit.max_scroll);
-        state.help_page = fit.rows;
+        let window = render_help(area, frame.buffer_mut(), theme, state.help_scroll);
+        state.help_scroll = window.offset();
+        state.help_page = window.viewport();
     }
 }
 
@@ -596,7 +596,7 @@ pub fn help_lines(theme: &Theme, width: Option<usize>) -> Vec<Line<'static>> {
     lines
 }
 
-fn render_help(area: Rect, buf: &mut Buffer, theme: &Theme, scroll: usize) -> ScrollFit {
+fn render_help(area: Rect, buf: &mut Buffer, theme: &Theme, scroll: usize) -> ScrollWindow {
     render_help_page(area, buf, theme, scroll, &|width| {
         help_lines(theme, Some(width))
     })

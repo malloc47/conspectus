@@ -9,20 +9,20 @@
 
 use ratatui::buffer::Buffer;
 use ratatui::crossterm::event::KeyEvent;
-use ratatui::layout::{Margin, Rect};
+use ratatui::layout::Rect;
 use ratatui::macros::{line, span};
 use ratatui::style::{Modifier, Style};
 use ratatui::text::Line;
-use ratatui::widgets::{Paragraph, Scrollbar, ScrollbarOrientation, ScrollbarState, Widget};
+use ratatui::widgets::{Paragraph, Widget};
 use ratatui_cheese::help::Binding;
 use tui_popup::KnownSize;
 use tuikit::glyphs::marks;
+use tuikit::scroll::{ScrollGutter, ScrollWindow};
 use tuikit::text;
 
 use crate::tui::Theme;
 use crate::tui::icons::{NodeKind, node_kind_style};
 use crate::tui::keybindings::overlay::HINT_SEPARATOR;
-use crate::tui::widgets::popup_frame::ScrollFit;
 
 /// Pure state for the help overlay. Carries vertical scroll
 /// position so long keymaps stay reachable on short terminals.
@@ -81,13 +81,13 @@ impl HelpOverlayState {
         self.scroll = u16::try_from(next.min(i32::from(u16::MAX))).unwrap_or(u16::MAX);
     }
 
-    /// Take in what the last draw showed: the offset comes back inside
-    /// the page (so `G`, or `j` past the end, is undone by the next key
-    /// up) and page keys move by the rows on screen.
-    pub fn fit(&mut self, fit: ScrollFit) {
-        let max = u16::try_from(fit.max_scroll).unwrap_or(u16::MAX);
-        self.scroll = self.scroll.min(max);
-        self.page_rows = u16::try_from(fit.rows).unwrap_or(u16::MAX);
+    /// Take in the window the last draw showed: the offset comes back
+    /// inside the page (so `G`, or `j` past the end, is undone by the next
+    /// key up) and page keys move by the rows on screen.
+    pub fn fit(&mut self, window: ScrollWindow) {
+        let last = u16::try_from(window.last_offset()).unwrap_or(u16::MAX);
+        self.scroll = self.scroll.min(last);
+        self.page_rows = u16::try_from(window.viewport()).unwrap_or(u16::MAX);
     }
 }
 
@@ -126,9 +126,9 @@ impl<'a> HelpOverlayWidget<'a> {
 }
 
 impl HelpOverlayWidget<'_> {
-    /// Draw the help and report what the page showed, for
+    /// Draw the help and report the window the page showed, for
     /// [`HelpOverlayState::fit`].
-    pub fn draw(self, area: Rect, buf: &mut Buffer) -> ScrollFit {
+    pub fn draw(self, area: Rect, buf: &mut Buffer) -> ScrollWindow {
         let theme = self.theme;
         render_help_page(area, buf, theme, self.state.scroll as usize, &|width| {
             body_lines_for_width(theme, Some(width))
@@ -146,23 +146,23 @@ impl Widget for HelpOverlayWidget<'_> {
 /// the page's lines scrolled to `scroll` and wrapped to the modal's
 /// width, and a scrollbar when the page overflows. The keymap help and
 /// the transcript viewer's help both draw through here, so the two
-/// modals share one frame, size, and scroll behavior. Returns the rows
-/// the page's scrolling part had and how far it can scroll; the footer
-/// is pinned, so only the lines above it scroll.
+/// modals share one frame, size, and scroll behavior. Returns the window
+/// the page's scrolling part showed; the footer stays on the last rows,
+/// so only the lines above it scroll.
 pub(super) fn render_help_page(
     area: Rect,
     buf: &mut Buffer,
     theme: &Theme,
     scroll: usize,
     lines_for: &dyn Fn(usize) -> Vec<Line<'static>>,
-) -> ScrollFit {
+) -> ScrollWindow {
     // The centered-bordered-modal shell — clear, border, title — is
     // owned by `tui_popup::Popup` via
     // `crate::tui::widgets::popup_frame::themed_popup`. The body
     // wrapper reports the same cap dimensions `help_modal_rect`
     // computes, so the popup's auto-sizing reproduces that rect.
     let modal = help_modal_rect(area);
-    let mut fit = ScrollFit::default();
+    let mut fit = ScrollWindow::default();
     let body = HelpBody {
         scroll,
         lines_for,
@@ -184,7 +184,6 @@ struct PageLayout {
     body_height: usize,
     /// Columns the text has (one fewer when a scrollbar is drawn).
     text_width: usize,
-    overflows: bool,
 }
 
 /// Rows the footer takes at `width`.
@@ -217,7 +216,6 @@ fn page_layout(
             footer,
             body_height,
             text_width: width,
-            overflows: false,
         };
     }
     // The scrollbar takes a column once the page overflows.
@@ -228,7 +226,6 @@ fn page_layout(
         footer,
         body_height,
         text_width: width - 1,
-        overflows: true,
     }
 }
 
@@ -240,8 +237,8 @@ struct HelpBody<'a> {
     lines_for: &'a dyn Fn(usize) -> Vec<Line<'static>>,
     inner_width: usize,
     inner_height: usize,
-    /// Where the body reports the rows it drew.
-    fit: &'a mut ScrollFit,
+    /// Where the body reports the window it drew.
+    fit: &'a mut ScrollWindow,
 }
 
 impl KnownSize for HelpBody<'_> {
@@ -259,20 +256,19 @@ impl Widget for HelpBody<'_> {
         let page = page_layout(self.lines_for, area.width as usize, area.height as usize);
         let text_width = u16::try_from(page.text_width).unwrap_or(area.width);
         let body_height = u16::try_from(page.body_height).unwrap_or(area.height);
-        let max_scroll = page.body.len().saturating_sub(page.body_height);
-        let scroll = self.scroll.min(max_scroll);
-        *self.fit = ScrollFit {
-            rows: page.body_height,
-            max_scroll,
-        };
-        let body_area = Rect {
-            width: text_width,
-            height: body_height,
-            ..area
-        };
+        let window = ScrollWindow::new(page.body_height, page.body.len()).at(self.scroll);
+        *self.fit = window;
+        // The page was laid out for the gutter the scrolling part needs.
+        let gutter = ScrollGutter::layout(
+            Rect {
+                height: body_height,
+                ..area
+            },
+            page.body.len(),
+        );
         Paragraph::new(page.body)
-            .scroll((u16::try_from(scroll).unwrap_or(u16::MAX), 0))
-            .render(body_area, buf);
+            .scroll(window.paragraph_scroll())
+            .render(gutter.content(), buf);
         // The footer stays on the last rows whatever the scroll.
         let footer_area = Rect {
             x: area.x,
@@ -281,28 +277,7 @@ impl Widget for HelpBody<'_> {
             height: area.height.saturating_sub(body_height),
         };
         Paragraph::new(page.footer).render(footer_area, buf);
-        if page.overflows {
-            let bar_area = Rect {
-                x: area.x + area.width - 1,
-                width: 1,
-                height: body_height,
-                ..area
-            };
-            let mut bar_state = ScrollbarState::new(max_scroll + 1)
-                .position(scroll)
-                .viewport_content_length(page.body_height);
-            let scrollbar = Scrollbar::new(ScrollbarOrientation::VerticalRight)
-                .style(Style::default().remove_modifier(Modifier::REVERSED));
-            ratatui::widgets::StatefulWidget::render(
-                scrollbar,
-                bar_area.inner(Margin {
-                    vertical: 1,
-                    horizontal: 0,
-                }),
-                buf,
-                &mut bar_state,
-            );
-        }
+        gutter.render(&window, buf);
     }
 }
 

@@ -3247,7 +3247,7 @@ fn right_pane_scrolls_to_keep_explorer_cursor_visible() {
     // (`Related N validated · M other`) is sized to the
     // paragraph's render width. Pre-fix, the divider's width
     // was computed against the full inner width; once
-    // `scrollbar_layout` reserved a gutter, the paragraph
+    // the scrollbar gutter took a column, the paragraph
     // rendered at one less column and the divider wrapped a
     // few characters onto a second row. Every cursor row
     // below the divider then landed one row lower than the

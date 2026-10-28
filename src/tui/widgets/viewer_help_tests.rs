@@ -183,7 +183,7 @@ fn the_keys_the_footer_names_do_what_it_says_in_the_viewer() {
 
 /// How far the page can scroll in `area`, as its render reports it.
 fn max_scroll(area: Rect, theme: &Theme) -> usize {
-    render(area, &mut Buffer::empty(area), theme, 0).max_scroll
+    render(area, &mut Buffer::empty(area), theme, 0).last_offset()
 }
 
 #[test]

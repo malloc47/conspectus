@@ -8,16 +8,9 @@ use crate::viewer::state::ViewerState;
 pub(super) struct PreviewView {
     pub text: Text<'static>,
     /// Set when the body is already cut to the zone, as a transcript
-    /// is: the rows it has in all and the first one shown, for the
-    /// scrollbar. `None` scrolls the text by the Preview's offset from
-    /// the top.
-    pub window: Option<PreviewWindow>,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(super) struct PreviewWindow {
-    pub total: usize,
-    pub top: usize,
+    /// is: its window onto all of its rows, for the scrollbar. `None`
+    /// scrolls the text by the Preview's offset from the top.
+    pub window: Option<ScrollWindow>,
 }
 
 impl PreviewView {
@@ -50,36 +43,37 @@ pub(super) fn draw_detail_preview(app: &App, frame: &mut Frame<'_>, area: Rect) 
 pub(super) fn draw_preview_view(app: &App, view: PreviewView, frame: &mut Frame<'_>, area: Rect) {
     match view.window {
         None => {
-            let (text, content_area, scrollbar_area) = wrap_into(&view.text, area);
-            let total_rows = text.lines.len();
-            let widget = Paragraph::new(text).scroll((app.preview_scroll(), 0));
-            frame.render_widget(widget, content_area);
-            if let Some(sb_area) = scrollbar_area {
-                render_vertical_scrollbar(
-                    frame,
-                    sb_area,
-                    total_rows,
-                    app.preview_scroll() as usize,
-                );
-            }
+            let rows = WrappedRows::fit(
+                &view.text.lines,
+                usize::from(area.width),
+                usize::from(area.height),
+            );
+            let gutter = ScrollGutter::layout(area, rows.len());
+            let window = ScrollWindow::new(usize::from(area.height), rows.len())
+                .at(usize::from(app.preview_scroll()));
+            let text = Text {
+                lines: rows.into_rows(),
+                style: view.text.style,
+                alignment: view.text.alignment,
+            };
+            let widget = Paragraph::new(text).scroll(window.paragraph_scroll());
+            frame.render_widget(widget, gutter.content());
+            gutter.render(&window, frame.buffer_mut());
         }
         Some(window) => {
             // The thumb tracks the transcript; a failure banner above
             // it stays put.
-            let (content_area, scrollbar_area) =
-                scrollbar_layout(area, window.total.max(view.text.lines.len()));
-            let rows = wrap_lines(&view.text.lines, content_area.width);
+            let gutter = ScrollGutter::layout(area, window.content().max(view.text.lines.len()));
+            let rows = WrappedRows::new(&view.text.lines, usize::from(gutter.content().width));
             frame.render_widget(
                 Paragraph::new(Text {
-                    lines: rows,
+                    lines: rows.into_rows(),
                     style: view.text.style,
                     alignment: view.text.alignment,
                 }),
-                content_area,
+                gutter.content(),
             );
-            if let Some(sb_area) = scrollbar_area {
-                render_vertical_scrollbar(frame, sb_area, window.total, window.top);
-            }
+            gutter.render(&window, frame.buffer_mut());
         }
     }
 }
@@ -100,7 +94,7 @@ pub(super) fn preview_view_for_selection(app: &App, width: u16, height: usize) -
             // The body gets the rows the banner leaves, so its newest
             // output stays on screen below the banner.
             let banner = failure_banner(entry, app.theme());
-            let banner_rows = wrap_lines(&banner.lines, width).len();
+            let banner_rows = WrappedRows::new(&banner.lines, usize::from(width)).len();
             let body_height = height.saturating_sub(banner_rows).max(1);
             selection_preview_body(app, width, body_height).below(banner)
         }
@@ -368,7 +362,7 @@ fn transcript_view(app: &App, source: &PreviewSource, width: u16, height: usize)
     }
     PreviewView {
         text: Text::from(window),
-        window: Some(PreviewWindow { total, top }),
+        window: Some(ScrollWindow::new(height, total).at(top)),
     }
 }
 

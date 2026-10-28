@@ -93,13 +93,3 @@ impl Widget for LinesBody {
         Paragraph::new(self.lines).render(area, buf);
     }
 }
-
-/// What a scrolling modal body showed when it was drawn: the rows of text
-/// it had and how far that text can scroll. The draw path writes it back
-/// into the modal's state, so a page key moves by the rows the operator
-/// saw and an offset past the end is taken back before the next key.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-pub struct ScrollFit {
-    pub rows: usize,
-    pub max_scroll: usize,
-}

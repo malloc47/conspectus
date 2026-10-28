@@ -27,10 +27,10 @@ use ratatui::style::{Modifier, Style};
 use ratatui::text::Line;
 use ratatui::widgets::{Paragraph, Widget};
 use tui_popup::KnownSize;
+use tuikit::scroll::ScrollWindow;
 
 use crate::tui::Theme;
 use crate::tui::widgets::help::centered_modal_rect;
-use crate::tui::widgets::popup_frame::ScrollFit;
 
 /// Pure state for the full-value modal.
 #[derive(Debug, Clone)]
@@ -138,13 +138,13 @@ impl ValueModalState {
         self.scroll = u16::try_from(next.min(i32::from(u16::MAX))).unwrap_or(u16::MAX);
     }
 
-    /// Take in what the last draw showed: the offset comes back inside
-    /// the text (so `G`, or scrolling past the end, is undone by the next
-    /// key up) and page keys move by the rows on screen.
-    pub fn fit(&mut self, fit: ScrollFit) {
-        let max = u16::try_from(fit.max_scroll).unwrap_or(u16::MAX);
-        self.scroll = self.scroll.min(max);
-        self.page_rows = u16::try_from(fit.rows).unwrap_or(u16::MAX);
+    /// Take in the window the last draw showed: the offset comes back
+    /// inside the text (so `G`, or scrolling past the end, is undone by
+    /// the next key up) and page keys move by the rows on screen.
+    pub fn fit(&mut self, window: ScrollWindow) {
+        let last = u16::try_from(window.last_offset()).unwrap_or(u16::MAX);
+        self.scroll = self.scroll.min(last);
+        self.page_rows = u16::try_from(window.viewport()).unwrap_or(u16::MAX);
     }
 
     /// The value wrapped to `width` cells; a command line keeps the
@@ -199,16 +199,16 @@ impl<'a> ValueModalWidget<'a> {
 }
 
 impl ValueModalWidget<'_> {
-    /// Draw the modal and report what its body showed, for
+    /// Draw the modal and report the window its body showed, for
     /// [`ValueModalState::fit`].
-    pub fn draw(self, area: Rect, buf: &mut Buffer) -> ScrollFit {
+    pub fn draw(self, area: Rect, buf: &mut Buffer) -> ScrollWindow {
         // Framing through `tui_popup::Popup`.
         let modal = centered_modal_rect(area);
         let label_style = Style::default()
             .fg(self.theme.accent)
             .add_modifier(Modifier::BOLD);
         let title = line![" ", span!(label_style; " {} ", self.state.label), " "];
-        let mut fit = ScrollFit::default();
+        let mut fit = ScrollWindow::default();
         let body = ValueModalBody {
             state: self.state,
             theme: self.theme,
@@ -236,8 +236,8 @@ struct ValueModalBody<'a> {
     theme: &'a Theme,
     inner_width: usize,
     inner_height: usize,
-    /// Where the body reports the rows it drew.
-    fit: &'a mut ScrollFit,
+    /// Where the body reports the window it drew.
+    fit: &'a mut ScrollWindow,
 }
 
 impl KnownSize for ValueModalBody<'_> {
@@ -257,14 +257,11 @@ impl Widget for ValueModalBody<'_> {
             Layout::vertical([Constraint::Min(1), Constraint::Length(1)]).areas(area);
         let lines = self.state.wrapped(text_area.width, self.theme);
         // An offset past the end (`G`, or paging on) shows the last rows.
-        let max_scroll = lines.len().saturating_sub(usize::from(text_area.height));
-        let scroll = usize::from(self.state.scroll).min(max_scroll);
-        *self.fit = ScrollFit {
-            rows: usize::from(text_area.height),
-            max_scroll,
-        };
+        let window = ScrollWindow::new(usize::from(text_area.height), lines.len())
+            .at(usize::from(self.state.scroll));
+        *self.fit = window;
         Paragraph::new(lines)
-            .scroll((u16::try_from(scroll).unwrap_or(u16::MAX), 0))
+            .scroll(window.paragraph_scroll())
             .render(text_area, buf);
         let hint = crate::tui::keybindings::overlay::footer(
             crate::tui::keybindings::overlay::VALUE_MODAL_KEYS,

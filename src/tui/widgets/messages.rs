@@ -24,7 +24,6 @@ use tuikit::scroll::ScrollWindow;
 
 use crate::tui::Theme;
 use crate::tui::messages::{LogEntry, LogLevel, MessageLog};
-use crate::tui::widgets::popup_frame::ScrollFit;
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct MessagesOverlayState {
@@ -59,12 +58,13 @@ impl MessagesOverlayState {
         self.detail_scroll = u16::try_from(next).unwrap_or(u16::MAX);
     }
 
-    /// Take in what the last draw's detail pane showed: its offset comes
-    /// back inside the text and page keys move by the rows on screen.
-    pub fn fit(&mut self, fit: ScrollFit) {
-        let max = u16::try_from(fit.max_scroll).unwrap_or(u16::MAX);
-        self.detail_scroll = self.detail_scroll.min(max);
-        self.detail_rows = u16::try_from(fit.rows).unwrap_or(u16::MAX);
+    /// Take in the window the last draw's detail pane showed: its offset
+    /// comes back inside the text and page keys move by the rows on
+    /// screen.
+    pub fn fit(&mut self, window: ScrollWindow) {
+        let last = u16::try_from(window.last_offset()).unwrap_or(u16::MAX);
+        self.detail_scroll = self.detail_scroll.min(last);
+        self.detail_rows = u16::try_from(window.viewport()).unwrap_or(u16::MAX);
     }
 }
 
@@ -131,9 +131,9 @@ pub fn level_style(level: LogLevel, theme: &Theme) -> Style {
 }
 
 impl MessagesWidget<'_> {
-    /// Draw the overlay and report what its detail pane showed, for
+    /// Draw the overlay and report the window its detail pane showed, for
     /// [`MessagesOverlayState::fit`].
-    pub fn draw(self, area: Rect, buf: &mut Buffer) -> ScrollFit {
+    pub fn draw(self, area: Rect, buf: &mut Buffer) -> ScrollWindow {
         let width = area.width.saturating_sub(4).clamp(40, 110);
         let height = area.height.saturating_sub(2).max(10);
         let modal = crate::tui::widgets::popup_frame::centered_rect(area, width, height);
@@ -145,7 +145,7 @@ impl MessagesWidget<'_> {
             span!(label_style; " Messages · {} ", self.log.len()),
             " "
         ];
-        let mut fit = ScrollFit::default();
+        let mut fit = ScrollWindow::default();
         let body = MessagesBody {
             widget: &self,
             inner_width: modal.width.saturating_sub(2) as usize,
@@ -167,8 +167,8 @@ struct MessagesBody<'a, 'w> {
     widget: &'a MessagesWidget<'w>,
     inner_width: usize,
     inner_height: usize,
-    /// Where the body reports the rows its detail pane drew.
-    fit: &'a mut ScrollFit,
+    /// Where the body reports the window its detail pane drew.
+    fit: &'a mut ScrollWindow,
 }
 
 impl KnownSize for MessagesBody<'_, '_> {
@@ -254,14 +254,11 @@ impl Widget for MessagesBody<'_, '_> {
                 .flat_map(|line| tuikit::text::wrap(line, usize::from(detail_area.width)))
                 .map(|row| Line::from(row.trim_end().to_string()))
                 .collect();
-            let max_scroll = lines.len().saturating_sub(usize::from(detail_area.height));
-            let scroll = usize::from(state.detail_scroll).min(max_scroll);
-            *self.fit = ScrollFit {
-                rows: usize::from(detail_area.height),
-                max_scroll,
-            };
+            let window = ScrollWindow::new(usize::from(detail_area.height), lines.len())
+                .at(usize::from(state.detail_scroll));
+            *self.fit = window;
             Paragraph::new(lines)
-                .scroll((u16::try_from(scroll).unwrap_or(u16::MAX), 0))
+                .scroll(window.paragraph_scroll())
                 .render(detail_area, buf);
         }
         Paragraph::new(footer).render(footer_area, buf);

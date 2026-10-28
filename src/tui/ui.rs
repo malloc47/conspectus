@@ -26,14 +26,13 @@
 
 use ansi_to_tui::IntoText;
 use ratatui::Frame;
-use ratatui::layout::{Margin, Rect};
+use ratatui::layout::Rect;
 use ratatui::macros::{horizontal, span, vertical};
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span, Text};
-use ratatui::widgets::{
-    Block, Borders, Paragraph, Scrollbar, ScrollbarOrientation, ScrollbarState,
-};
+use ratatui::widgets::{Block, Borders, Paragraph};
 use tuikit::glyphs::marks;
+use tuikit::scroll::{ScrollGutter, ScrollWindow, WrappedRows};
 use tuikit::text;
 
 use crate::model::{MuxSessionId, NodeId};
@@ -340,34 +339,6 @@ fn focus_marker_span(app: &App, panel: Focus) -> Span<'static> {
     let focused = app.focus() == panel;
     let marker = if focused { marks::POINTER } else { " " };
     span!(Style::default().fg(app.theme().panel_focus_accent); "{marker} ")
-}
-
-/// `lines` wrapped to `width` cells by `tuikit::text`'s rules. A
-/// surface that counts its rows (a scrollbar's length, a zone's height)
-/// draws these rows unwrapped, so the count is the count drawn.
-fn wrap_lines(lines: &[Line<'_>], width: u16) -> Vec<Line<'static>> {
-    let width = usize::from(width.max(1));
-    lines
-        .iter()
-        .flat_map(|line| text::wrap_line(line, width, 0))
-        .collect()
-}
-
-/// `text` wrapped to fit `area`, with the area to draw it in and, when
-/// the rows overflow, the scrollbar gutter carved from its right edge
-/// (the rows are wrapped again at the narrower width).
-fn wrap_into(text: &Text<'_>, area: Rect) -> (Text<'static>, Rect, Option<Rect>) {
-    let mut rows = wrap_lines(&text.lines, area.width);
-    let (content, scrollbar) = scrollbar_layout(area, rows.len());
-    if content.width != area.width {
-        rows = wrap_lines(&text.lines, content.width);
-    }
-    let wrapped = Text {
-        lines: rows,
-        style: text.style,
-        alignment: text.alignment,
-    };
-    (wrapped, content, scrollbar)
 }
 
 // -----------------------------------------------------------------------------

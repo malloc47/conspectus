@@ -12,13 +12,13 @@ use ratatui::Frame;
 use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
 use ratatui::text::Line;
+use tuikit::scroll::ScrollWindow;
 
 use crate::tui::Theme;
 use crate::tui::keybindings::overlay::{KeyRow, VIEWER_KEYS};
 use crate::viewer::input::ViewerMsg;
 
 use super::help::{binding_lines, blank, push_footer, render_help_page, section};
-use super::popup_frame::ScrollFit;
 
 /// One help row: the keys bound to a message and what it does.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -100,9 +100,9 @@ pub fn help_lines(theme: &Theme, width: Option<usize>) -> Vec<Line<'static>> {
     lines
 }
 
-/// Render the page scrolled to `scroll`, reporting the rows its
-/// scrolling part showed and how far it can scroll.
-pub fn render(area: Rect, buf: &mut Buffer, theme: &Theme, scroll: usize) -> ScrollFit {
+/// Render the page scrolled to `scroll`, reporting the window its
+/// scrolling part showed.
+pub fn render(area: Rect, buf: &mut Buffer, theme: &Theme, scroll: usize) -> ScrollWindow {
     render_help_page(area, buf, theme, scroll, &|width| {
         help_lines(theme, Some(width))
     })
@@ -117,9 +117,9 @@ pub fn draw(
     frame: &mut Frame<'_>,
     area: Rect,
 ) {
-    let fit = render(area, frame.buffer_mut(), theme, state.help_scroll);
-    state.help_scroll = state.help_scroll.min(fit.max_scroll);
-    state.help_page = fit.rows;
+    let window = render(area, frame.buffer_mut(), theme, state.help_scroll);
+    state.help_scroll = window.offset();
+    state.help_page = window.viewport();
 }
 
 #[cfg(test)]

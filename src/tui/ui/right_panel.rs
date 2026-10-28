@@ -32,14 +32,13 @@ pub(super) fn draw_right_panel(app: &mut App, frame: &mut Frame<'_>, area: Rect)
     // re-borrow the state for the preview render below.
     //
     // Render the chip dividers (`Related`, `Other`) at the
-    // narrower content width that `scrollbar_layout` will give
-    // the paragraph once it reserves a gutter for the
-    // scrollbar. Sizing the chip line to `inner.width` instead
-    // would force the divider to overflow by one character at
-    // the gutter boundary — it wraps to the next row and every
-    // cursor row below it lands one line lower than the
-    // per_line_rows math expects, leaving the cursor visible
-    // off the bottom of the viewport.
+    // narrower content width the scrollbar gutter leaves the
+    // paragraph once it reserves a column for the scrollbar.
+    // Sizing the chip line to `inner.width` instead would force
+    // the divider to overflow by one character at the gutter
+    // boundary: it wraps to the next row and every cursor row
+    // below it lands one line lower than the row count expects,
+    // leaving the cursor visible off the bottom of the viewport.
     let content_width = inner.width.saturating_sub(1).max(1) as usize;
     let ExplorerRender {
         mut lines,
@@ -64,38 +63,25 @@ pub(super) fn draw_right_panel(app: &mut App, frame: &mut Frame<'_>, area: Rect)
     // the header sizing and the cursor-position math count exactly the
     // rows the paragraph paints. The rows wrap at the full width when
     // they fit the zone, and at one column less when they overflow it,
-    // since `scrollbar_layout` then carves a gutter for the scrollbar.
+    // since the scrollbar gutter then takes a column.
     let preview_floor = MIN_PREVIEW_HEIGHT.min(inner.height.saturating_sub(4));
     let max_header_height = inner
         .height
         .saturating_sub(preview_floor.saturating_add(1))
         .max(3);
-    let wrap_at = |width: u16| -> Vec<Vec<Line<'static>>> {
-        lines
-            .iter()
-            .map(|line| text::wrap_line(line, usize::from(width.max(1)), 0))
-            .collect()
-    };
-    let mut wrapped = wrap_at(inner.width);
-    if wrapped.iter().map(Vec::len).sum::<usize>() > usize::from(max_header_height) {
-        wrapped = wrap_at(inner.width.saturating_sub(1));
-    }
-    let per_line_rows: Vec<usize> = wrapped.iter().map(Vec::len).collect();
-    let wrapped_rows: usize = per_line_rows.iter().sum();
-    // Post-wrap row span of the cursor in `lines`. The first
-    // row is the sum of wrap rows for everything above the
-    // cursor's logical line; the last row is the first row
-    // plus the cursor line's own wrap count minus one. Using
-    // both keeps a wrapped cursor line fully visible — the
-    // first row drives "scroll up if cursor moves above the
-    // top," the last row drives "scroll down if cursor moves
-    // past the bottom."
-    let (cursor_first_row, cursor_last_row) = cursor_line.map_or((0, 0), |idx| {
-        let first = per_line_rows.iter().take(idx).sum::<usize>();
-        let height = per_line_rows.get(idx).copied().unwrap_or(1).max(1);
-        (first, first + height - 1)
-    });
-    let header_height = u16::try_from(wrapped_rows)
+    let rows = WrappedRows::fit(
+        &lines,
+        usize::from(inner.width),
+        usize::from(max_header_height),
+    );
+    // The rows the cursor's line took, so a wrapped cursor line is
+    // shown whole; with no cursor, the first row.
+    let cursor_rows = cursor_line.map_or(0..1, |idx| rows.rows_of(idx));
+    let (cursor_first_row, cursor_last_row) = (
+        cursor_rows.start,
+        cursor_rows.end.max(cursor_rows.start + 1) - 1,
+    );
+    let header_height = u16::try_from(rows.len())
         .unwrap_or(u16::MAX)
         .min(max_header_height)
         .max(3);
@@ -112,16 +98,14 @@ pub(super) fn draw_right_panel(app: &mut App, frame: &mut Frame<'_>, area: Rect)
         cursor_last_row,
         viewport_height: split[0].height,
     });
-    let scroll = app.explorer_scroll();
-    let (explorer_content_area, explorer_scrollbar_area) = scrollbar_layout(split[0], wrapped_rows);
-    let rows: Vec<Line<'static>> = wrapped.into_iter().flatten().collect();
+    let window = ScrollWindow::new(usize::from(split[0].height), rows.len())
+        .at(usize::from(app.explorer_scroll()));
+    let gutter = ScrollGutter::layout(split[0], rows.len());
     frame.render_widget(
-        Paragraph::new(rows).scroll((scroll, 0)),
-        explorer_content_area,
+        Paragraph::new(rows.into_rows()).scroll(window.paragraph_scroll()),
+        gutter.content(),
     );
-    if let Some(area) = explorer_scrollbar_area {
-        render_vertical_scrollbar(frame, area, wrapped_rows, scroll as usize);
-    }
+    gutter.render(&window, frame.buffer_mut());
     frame.render_widget(
         Paragraph::new(preview_divider_line(
             app,
@@ -836,7 +820,7 @@ pub(super) fn draw_explorer_preview(
     }
     let view = if let Some(source) = neighbor_source {
         lines.push(Line::raw(""));
-        let header_rows = wrap_lines(&lines, area.width).len();
+        let header_rows = WrappedRows::new(&lines, usize::from(area.width)).len();
         let body_height = (area.height as usize).saturating_sub(header_rows).max(1);
         source_view(app, &source, area.width, body_height).below(Text::from(lines))
     } else {

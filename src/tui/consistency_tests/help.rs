@@ -156,7 +156,7 @@ fn both_helps_end_with_the_same_footer() {
 fn the_viewer_help_scrolls_where_the_keymap_help_does() {
     let theme = Theme::default();
     let max_scroll =
-        |area: Rect| viewer_help::render(area, &mut Buffer::empty(area), &theme, 0).max_scroll;
+        |area: Rect| viewer_help::render(area, &mut Buffer::empty(area), &theme, 0).last_offset();
     assert!(max_scroll(Rect::new(0, 0, 60, 12)) > 0);
     assert_eq!(max_scroll(Rect::new(0, 0, 100, 60)), 0);
 }

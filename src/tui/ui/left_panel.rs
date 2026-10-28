@@ -17,17 +17,16 @@ pub(super) fn draw_left_panel(app: &mut App, frame: &mut Frame<'_>, area: Rect) 
     // `pin migrate` on the last line of the pane.
     let inner = match pinned_banner(app) {
         Some(banner) if inner.height > 4 => {
-            let rows: Vec<Line<'static>> = text::wrap(&banner, usize::from(inner.width))
-                .into_iter()
-                .map(|row| Line::from(row.trim_end().to_string()))
-                .collect();
+            let lines: Vec<Line<'_>> = banner.split('\n').map(Line::from).collect();
+            let rows = WrappedRows::new(&lines, usize::from(inner.width));
             let wrapped = u16::try_from(rows.len()).unwrap_or(u16::MAX).clamp(1, 3);
             let banner_area = Rect {
                 y: inner.y + inner.height - wrapped,
                 height: wrapped,
                 ..inner
             };
-            let widget = Paragraph::new(rows).style(Style::default().fg(app.theme().warning));
+            let widget =
+                Paragraph::new(rows.into_rows()).style(Style::default().fg(app.theme().warning));
             frame.render_widget(widget, banner_area);
             Rect {
                 height: inner.height - wrapped,
@@ -71,7 +70,8 @@ pub(super) fn draw_left_panel(app: &mut App, frame: &mut Frame<'_>, area: Rect) 
 
     // Lay rows out against the width the paragraph really gets: the
     // scrollbar gutter is carved out of the pane when the rows overflow it.
-    let row_width = scrollbar_layout(inner, visible.len()).0.width as usize;
+    let gutter = ScrollGutter::layout(inner, visible.len());
+    let row_width = usize::from(gutter.content().width);
 
     let mut lines: Vec<Line<'static>> = Vec::with_capacity(visible.len());
     let mut selected_primary_line: Option<usize> = None;
@@ -95,89 +95,11 @@ pub(super) fn draw_left_panel(app: &mut App, frame: &mut Frame<'_>, area: Rect) 
     app.update(Msg::LeftViewportChanged {
         viewport_height: inner.height,
     });
-    let scroll = app.left_scroll();
-
-    let total_lines = lines.len();
-    let (content_area, scrollbar_area) = scrollbar_layout(inner, total_lines);
-    let widget = Paragraph::new(lines).scroll((scroll, 0));
-    frame.render_widget(widget, content_area);
-    if let Some(area) = scrollbar_area {
-        render_vertical_scrollbar(frame, area, total_lines, scroll as usize);
-    }
-}
-
-/// Reserve a 1-column gutter on the right edge of `area` for the
-/// vertical scrollbar when `content_length > area.height` (ADR 0076).
-/// Returns `(content_area, Some(scrollbar_area))` for the scrolled
-/// case so the paragraph body and scrollbar widget render into
-/// disjoint regions — no overpaint, no inherited selection-row
-/// `REVERSED` modifier bleeding through the scrollbar glyphs.
-/// Returns `(area, None)` when content fits in the viewport
-/// (fade-on-fit).
-pub(super) fn scrollbar_layout(area: Rect, content_length: usize) -> (Rect, Option<Rect>) {
-    if content_length == 0 || content_length <= area.height as usize || area.width < 2 {
-        return (area, None);
-    }
-    let content = Rect {
-        x: area.x,
-        y: area.y,
-        width: area.width - 1,
-        height: area.height,
-    };
-    let scrollbar = Rect {
-        x: area.x + area.width - 1,
-        y: area.y,
-        width: 1,
-        height: area.height,
-    };
-    (content, Some(scrollbar))
-}
-
-/// Render a vertical scrollbar into the gutter `area` returned by
-/// [`scrollbar_layout`]. `content_length` is the total wrapped-line
-/// count of the buffered content; `position` is the renderer's
-/// scroll offset (top of the visible window).
-///
-/// The ratatui `Scrollbar` widget treats `position` as the index
-/// of the topmost visible item in a model where you can keep
-/// scrolling until only one item is at the top — so its max
-/// position is `content_length - 1`. Our scroll offset only goes
-/// up to `content_length - viewport_height` (last item flush with
-/// the viewport bottom), which mapped to a thumb that stopped at
-/// the middle of the track even when the operator had scrolled all
-/// the way down. Pass an effective `content_length = content -
-/// viewport + 1` so the widget's max-position matches our max
-/// scroll offset and "scrolled to the bottom" reads as
-/// "thumb at the bottom."
-///
-/// `.remove_modifier(Modifier::REVERSED)` patches each scrollbar
-/// cell with `sub_modifier = REVERSED` so the bar does not inherit
-/// the selection highlight from whatever was painted there before.
-pub(super) fn render_vertical_scrollbar(
-    frame: &mut Frame<'_>,
-    area: Rect,
-    content_length: usize,
-    position: usize,
-) {
-    let viewport = area.height as usize;
-    if viewport == 0 || content_length <= viewport {
-        return;
-    }
-    let effective_content = content_length - viewport + 1;
-    let position = position.min(effective_content - 1);
-    let mut state = ScrollbarState::new(effective_content)
-        .position(position)
-        .viewport_content_length(viewport);
-    let scrollbar = Scrollbar::new(ScrollbarOrientation::VerticalRight)
-        .style(Style::default().remove_modifier(Modifier::REVERSED));
-    frame.render_stateful_widget(
-        scrollbar,
-        area.inner(Margin {
-            vertical: 1,
-            horizontal: 0,
-        }),
-        &mut state,
-    );
+    let window = ScrollWindow::new(usize::from(inner.height), lines.len())
+        .at(usize::from(app.left_scroll()));
+    let widget = Paragraph::new(lines).scroll(window.paragraph_scroll());
+    frame.render_widget(widget, gutter.content());
+    gutter.render(&window, frame.buffer_mut());
 }
 
 /// Render the left pane title as a lazydocker-style tab strip

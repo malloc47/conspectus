@@ -53,10 +53,7 @@ fn j_and_k_scroll_one_row() {
 #[test]
 fn page_down_and_up_jump_by_the_rows_the_last_draw_showed() {
     let mut state = ValueModalState::new("cwd", "/long/path");
-    state.fit(ScrollFit {
-        rows: 12,
-        max_scroll: 100,
-    });
+    state.fit(ScrollWindow::new(12, 112));
     state.handle_key(press(KeyCode::PageDown));
     assert_eq!(state.scroll, 12);
     state.handle_key(press(KeyCode::PageUp));
@@ -69,10 +66,7 @@ fn g_and_capital_g_jump_to_top_and_bottom() {
     state.handle_key(press(KeyCode::Char('G')));
     assert_eq!(state.scroll, u16::MAX);
     // The next draw brings the bottom back to the last row it can show.
-    state.fit(ScrollFit {
-        rows: 12,
-        max_scroll: 30,
-    });
+    state.fit(ScrollWindow::new(12, 42));
     assert_eq!(state.scroll, 30);
     state.handle_key(press(KeyCode::Char('g')));
     assert_eq!(state.scroll, 0);
@@ -87,10 +81,10 @@ fn the_draw_reports_the_rows_the_value_fills() {
         .join("\n");
     let state = ValueModalState::new("detail", value);
     let area = Rect::new(0, 0, 80, 24);
-    let fit = ValueModalWidget::new(&state, &theme).draw(area, &mut Buffer::empty(area));
+    let window = ValueModalWidget::new(&state, &theme).draw(area, &mut Buffer::empty(area));
     // A 22-row modal: 20 inside the frame, one of them the footer.
-    assert_eq!(fit.rows, 19);
-    assert_eq!(fit.max_scroll, 40 - 19);
+    assert_eq!(window.viewport(), 19);
+    assert_eq!(window.last_offset(), 40 - 19);
 }
 
 #[test]
