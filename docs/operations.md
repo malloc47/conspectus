@@ -264,8 +264,8 @@ panel_focus_accent = "cyan"            # the ► marker on the focused pane; fol
 disclosure         = "cyan"            # the ▶ / ▼ tree arrows
 muted              = "dim"             # hints, placeholders, notes, rules, footers, the unlinked ∘ (a modifier)
 inert              = "dark_gray"       # short ids, previews, gone or stopped rows (a color)
-selection_active   = "reversed,bold"   # the cursor row of the focused pane
-selection_inactive = "bold"            # the cursor row of the other pane
+selection_active   = "reversed,bold"   # the cursor row of the list that has focus: a pane, menu, form, or picker
+selection_inactive = "bold"            # the cursor row of a list without focus, such as the other pane
 success            = "green"
 warning            = "yellow"
 error              = "red"
@@ -1387,6 +1387,14 @@ Every dialog uses the same three keys the same way:
 | `Esc` | Leaves the dialog without applying what is still pending. |
 | `Enter` | Applies or submits the dialog's main action; in a list it activates the focused item. |
 | `Space` | Changes the focused item: toggles a checkbox, steps an option, selects a choice. In a text field it types a space. |
+
+Every list marks the row its cursor is on the same way: `►` in the two
+cells before the row, and the row drawn with `selection_active` (reversed
+and bold) while the list has focus, or `selection_inactive` (bold) while
+it does not, so the pane without focus still shows its cursor. Menus, the
+picker, the checklists, the controls dialog, the search lists, and a
+form's fields wrap from their last row to their first and back; the tree,
+the right pane, and the messages list stop at their ends.
 
 The controls dialog (`f`) applies each change as you make it, so `Esc`
 closes it and keeps what you already changed. In it `Space` selects the

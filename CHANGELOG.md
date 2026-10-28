@@ -102,6 +102,22 @@ Targeted for 0.2.0, after 0.1.0 is tagged. History, rebuild, and pins
   its entries. Below 44 columns the forms fit their key hints to the
   frame instead of cutting them, and the empty Clean up wraps its text.
   `[tui.theme] surface` now also paints the modals' background.
+- **Every list shows its cursor the same way.** The row the cursor is on
+  is marked `►` in the two cells before it and drawn with
+  `[tui.theme] selection_active` (reversed and bold by default), in the
+  menus, Controls, the picker, the checklists and Clean up, quick select,
+  content search and its options, the forms, Messages, and the right pane.
+  The menus were bold only and Controls, the picker, the search lists, and
+  the forms showed `>`. While the tree has focus the right pane keeps its
+  cursor row marked in `selection_inactive` (bold) instead of showing no
+  cursor, and with focus it highlights the whole row rather than one
+  value. The menus now wrap from their last entry to their first and back,
+  like the other short lists. Messages' entries move two cells right for
+  the mark, the search lists' cursor row keeps its dimmed context, a
+  form's focused row highlights its label around the field's own fill, a
+  conflict row in the right pane's Other zone shows its `▲` two cells
+  further in, and the checklists cut a long label with `…`. The left
+  pane's look is unchanged.
 
 ### Fixed
 

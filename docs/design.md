@@ -1123,6 +1123,17 @@ search overlay. Every modal keeps two columns and a row clear on each side
 while the terminal allows, and its body is measured once at the width its
 size gives.
 
+Selection is the eighth (ADR 0159). Every list draws its rows through the
+framework's `selection` module: the `►` mark in a 2-cell gutter on the
+cursor row, and the row highlighted from the theme's selection pair,
+`selection_active` while the list takes keys and `selection_inactive` while
+it does not, so the unfocused pane still shows its cursor. Chips and field
+fills keep their look inside the highlight. Short choice lists (menus, the
+picker, checklists, Controls, the search lists, a form's fields) wrap at
+their ends; the tree, the explorer, and the Messages log stop. The left
+pane's tree draws the highlight without the gutter until its column schema
+lands.
+
 ### Graph-to-View Slicing
 
 The producer pipeline discovers and resolves a typed

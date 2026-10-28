@@ -71,7 +71,8 @@ record a pin points at, shown only when History lists pinned records.
 - The selected row is reversed and bold while the left pane has focus,
   and bold only when it does not. A harness or program chip on it keeps
   the look it has on every other row, so it still reads as a chip
-  inside the highlight.
+  inside the highlight. The tree draws no `►` before the selected row;
+  the right pane and every menu, form, and list mark theirs with it.
 - Right after an action in tmux (attach, kill, rebuild), the affected
   rows keep their old values, dimmed, with a spinner where their state
   glyph or word goes, until the refresh lands.
@@ -110,7 +111,7 @@ Two glyphs are kept although a font may draw them wider than a cell, because the
 | `⊗` | a closed pull request | red | PR rows |
 | `▼` | an expanded row | cyan | The disclosure cell |
 | `▶` | a collapsed row | cyan | The disclosure cell |
-| `►` | the focused pane, or a menu cursor | cyan | Left of the tab bar and menu rows |
+| `►` | the focused pane; or the cursor row of a list | cyan in a pane title; the row's look on a cursor row | Left of the tab bar; before the cursor row of the right pane, menus, forms, and lists |
 | `▲` | at least one session below has an ambiguous mux link | yellow bold | Group headers |
 | `◌` | a pull request with no local branch | dim | PR rows, in the tracking cell |
 | `—` | an age or value that isn't known | dim | Age cells |
