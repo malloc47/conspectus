@@ -5,76 +5,22 @@
 //! a pure function over text so the self-tests can feed it a deliberately
 //! leaking snippet from memory (no leaking fixture ever sits on disk):
 //!
-//! 1. **Manifest** (`manifest_scan`): every `Cargo.toml` under the crate is
-//!    parsed. A dependency on the host (by key or by a `package = ` rename) or
-//!    on any crate outside `RUNTIME_DEPENDENCIES` / `DEV_DEPENDENCIES`
-//!    fails. Build dependencies are never allowed: a build script is arbitrary
-//!    code.
-//! 2. **Vocabulary** (`vocabulary_scan`): no file in the crate (source,
-//!    docs, tests, manifest, README) uses a word from `DOMAIN_TERMS`, except
-//!    the reviewed `VOCABULARY_EXCEPTIONS`. This file is excluded by name
-//!    (`GUARD_FILE`) because it has to contain the words to test for them.
-//! 3. **Process and write** (`capability_scan`): non-test Rust source
-//!    starts no process and writes, renames, or deletes no file. Read-only
-//!    filesystem access (`File::open`, `fs::read`, `fs::read_dir`,
-//!    `fs::metadata`) is allowed. Hosts supply sinks (a clipboard `Write`, a
-//!    path-completion source) instead.
+//! 1. **Manifest** (`manifest_scan`): dependencies on the host, and
+//!    dependencies off the allowlist.
+//! 2. **Vocabulary** (`vocabulary_scan`): host-domain words anywhere in the
+//!    crate, this file excepted (`GUARD_FILE`) because it has to contain the
+//!    words to test for them.
+//! 3. **Process and write** (`capability_scan`): process spawning and file
+//!    writes in non-test source.
 //!
-//! Each scan reports how many files it visited, and a tripwire fails the run
-//! when that is below the stated minimum (`MIN_MANIFESTS`,
-//! `MIN_VOCABULARY_FILES`, `MIN_CAPABILITY_FILES`), so a scan pointed at
-//! the wrong directory fails instead of passing empty. The minimums are 1
-//! while the crate is small; raise each one as the crate grows.
-//!
-//! # How the matching works
-//!
-//! * Vocabulary matching is case-insensitive and whole-word. Text is split on
-//!   anything that is not a letter or digit, and identifiers are split into
-//!   words at `snake_case`, `kebab-case`, and `camelCase` boundaries, so
-//!   `Session`, `SESSION`, `session_id`, and `SessionId` all hit while
-//!   `obsession` and `pinch` do not. A plural (`pins`, `muxes`, `PRs`) hits
-//!   like its singular. A multi-word term (`pull request`) hits when its
-//!   words are consecutive, however the text is wrapped or joined
-//!   (`pull_request`, `PullRequest`, a line break between the words).
-//! * The process and write scan removes comments, string and character
-//!   literals, and `#[cfg(test)]` items first, so prose and test fixtures do
-//!   not trip it. It then looks for the needles in `CAPABILITY_NEEDLES` at a
-//!   word start (`remove_dir` also covers `remove_dir_all`), plus names
-//!   imported through `use std::fs::{...}`. Files named `tests.rs` or
-//!   `*_tests.rs` and anything under a `tests` directory (this crate's own
-//!   `tests/` included) are test code and are skipped. It assumes
-//!   `rustfmt`-formatted source. It is a tripwire for accidental additions,
-//!   not a sandbox: the compiler and review remain the defense against
-//!   deliberate evasion.
-//!
-//! # Requesting an allowlist entry
-//!
-//! The guards exist so a convenient host type does not creep in the first
-//! time a control is awkward to make generic. Fix the design first: pass the
-//! host meaning in through a type parameter, a closure, a trait, the
-//! named-style registry, or a host-supplied sink. If that truly cannot work:
-//!
-//! 1. Add one entry to the relevant constant here (`RUNTIME_DEPENDENCIES`,
-//!    `DEV_DEPENDENCIES`, `VOCABULARY_EXCEPTIONS`, or
-//!    `CAPABILITY_EXCEPTIONS`) with a reason that names the file and says
-//!    why the design cannot change. Exceptions are per file and per term; they
-//!    never cover a whole directory.
-//! 2. A new dependency needs its decision record first (the project rule for
-//!    any new third-party crate); cite it in the reason.
-//! 3. Say in the commit message and the story summary that an allowlist
-//!    changed, so the reviewer sees it. An exception that no longer matches
-//!    anything fails the scan, so the lists stay short and current.
-//!
-//! A known collision: the testing-harness sense of a listed word is also
-//! flagged. Name such helpers a "driver", "checker", or "suite", or request
-//! a reviewed exception for the file.
-//!
-//! # Where this text lives
-//!
-//! The crate's contribution guide (`docs/contributing.md`) does not exist
-//! yet; backlog `CSP-720` creates the documentation skeleton and should move
-//! this section there. The guide is itself scanned for domain words, so it
-//! must point at `DOMAIN_TERMS` instead of repeating the list.
+//! What each guard checks, how matching works, how the file-count tripwires
+//! (`MIN_MANIFESTS`, `MIN_VOCABULARY_FILES`, `MIN_CAPABILITY_FILES`) are
+//! chosen, and the process for requesting a reviewed allowlist entry are
+//! written down in the crate's contribution guide, `docs/contributing.md`
+//! (section "Independence guards"). That guide is the single copy of the
+//! rules; change it together with this file. The guide is itself scanned for
+//! domain words, so it points at `DOMAIN_TERMS` instead of repeating the
+//! list.
 //!
 //! # Why the manifest is parsed with `toml`
 //!
@@ -88,8 +34,8 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 // ---------------------------------------------------------------------------
-// Policy: the reviewed lists. Edit these through the process in the module
-// docs; every entry states why it is there.
+// Policy: the reviewed lists. Edit these through the process in
+// `docs/contributing.md`; every entry states why it is there.
 // ---------------------------------------------------------------------------
 
 /// Crate-relative path of this file. The vocabulary scan skips exactly this
@@ -99,8 +45,10 @@ const GUARD_FILE: &str = "tests/independence.rs";
 
 /// Fewest manifests the manifest scan may visit.
 const MIN_MANIFESTS: usize = 1;
-/// Fewest files the vocabulary scan may visit.
-const MIN_VOCABULARY_FILES: usize = 1;
+/// Fewest files the vocabulary scan may visit. The manifest, the README, four
+/// pages under `docs`, `src/lib.rs`, and two test files besides this one make
+/// 9 today; the minimum is a little under three quarters of that.
+const MIN_VOCABULARY_FILES: usize = 7;
 /// Fewest non-test Rust files the process and write scan may visit.
 const MIN_CAPABILITY_FILES: usize = 1;
 
@@ -179,7 +127,7 @@ const CAPABILITY_EXCEPTIONS: &[Exception] = &[];
 
 /// Words that belong to the host application's domain, lower case and
 /// singular. A listed word is matched whole, ignoring case, in any
-/// identifier or prose form (see the module docs).
+/// identifier or prose form (see `docs/contributing.md`).
 const DOMAIN_TERMS: &[&str] = &[
     // The host's own name and its sanctioned short name.
     "conspectus",
@@ -288,8 +236,7 @@ fn verdict(name: &str, scan: &Scan, minimum: usize) -> Result<(), String> {
     }
     Err(format!(
         "the {name} independence guard failed:\n{}\n\nFix the design first. To request a \
-         reviewed exception, follow the process in the module docs of \
-         crates/tuikit/tests/independence.rs.",
+         reviewed exception, follow the process in crates/tuikit/docs/contributing.md.",
         problems.join("\n")
     ))
 }
@@ -1356,7 +1303,7 @@ fn the_verdict_fails_on_a_violation_and_on_an_empty_scan() {
         violations: vec!["a.rs:1: leak".to_owned()],
     };
     let report = verdict("demo", &leak, 1).expect_err("a violation must fail the guard");
-    assert!(report.contains("a.rs:1: leak") && report.contains("module docs"));
+    assert!(report.contains("a.rs:1: leak") && report.contains("docs/contributing.md"));
 
     let empty = Scan {
         visited: 0,

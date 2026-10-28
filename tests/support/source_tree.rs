@@ -32,6 +32,11 @@
 //! enforces what only the framework needs: no host dependency, no domain
 //! vocabulary, no process or write path.
 //!
+//! The framework's contribution guide describes the same scans in terms the
+//! framework may use (its documents cannot name the host), under
+//! "Repository-wide hygiene scans" in `crates/tuikit/docs/contributing.md`.
+//! Change the two together so they do not drift.
+//!
 //! # Tripwires
 //!
 //! Every [`Tree`] states the fewest `.rs` files its scan may visit, and
@@ -96,7 +101,7 @@ pub const HOST_TESTS: Tree = Tree::new("tests", 30);
 pub const HOST_EXAMPLES: Tree = Tree::new("examples", 1);
 /// The framework's `src` (1 file today). Raise this as code moves in.
 pub const FRAMEWORK_SRC: Tree = Tree::new("crates/tuikit/src", 1);
-/// The framework's integration tests (2 files today). The independence
+/// The framework's integration tests (3 files today). The independence
 /// guard alone keeps the minimum of 1.
 pub const FRAMEWORK_TESTS: Tree = Tree::new("crates/tuikit/tests", 1);
 /// The framework's examples (none today).
