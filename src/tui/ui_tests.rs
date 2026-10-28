@@ -6618,3 +6618,131 @@ fn a_chip_keeps_its_look_on_the_selected_row() {
         }
     }
 }
+
+/// [`seeded_app`] with the session titled `title`.
+fn seeded_app_titled(title: &str) -> App {
+    let mut snapshot = GraphSnapshot::empty();
+    snapshot
+        .nodes
+        .push(GraphNode::Repo(RepoNode::new(RepoId::new(
+            "/home/op/src/proj",
+        ))));
+    snapshot.nodes.push(GraphNode::AgentSession(
+        AgentSessionNode::new(
+            AgentSessionId::new("codex", "/state", "abc"),
+            "codex".to_string(),
+        )
+        .with_cwd("/home/op/src/proj".to_string())
+        .with_title(title.to_string()),
+    ));
+    let snapshot = resolve_snapshot(snapshot);
+    let tree = build_sessions_tree(SessionsBuildInputs {
+        snapshot: &snapshot,
+        grouping: SessionsGrouping::Graph,
+        home: Some(std::path::Path::new("/home/op")),
+        now: None,
+        cwd: None,
+        filter: RowFilter::default(),
+    });
+    let mut config = RunConfig::defaults();
+    config.default_view = View::Sessions;
+    let mut app = App::new(config);
+    app.update(Msg::SetData {
+        snapshot: SnapshotHandle::from_snapshot(&snapshot),
+        tree,
+        loaded_at_epoch: 1_700_000_000,
+        initial_selection_hint: None,
+    });
+    app
+}
+
+#[test]
+fn a_wide_title_is_cut_at_its_cell_budget_and_offers_the_full_value() {
+    // Thirty CJK characters take sixty cells: past the title's 48-cell
+    // budget although the title is only thirty characters long.
+    let title = "東京の会議メモと設計レビューについての長いタイトルの表示幅テスト";
+    assert!(title.chars().count() < 48 && text::width(title) > 48);
+    let mut app = seeded_app_titled(title);
+    app.update(Msg::NavDown);
+    let rendered = buffer_to_string(&render_to_buffer(&mut app, Rect::new(0, 0, 160, 30)));
+    assert!(
+        rendered.contains("(truncated"),
+        "a cut title offers the full value: {rendered}"
+    );
+    // A title one cell over the budget is cut too, and says so.
+    let mut app = seeded_app_titled(&"x".repeat(49));
+    app.update(Msg::NavDown);
+    let rendered = buffer_to_string(&render_to_buffer(&mut app, Rect::new(0, 0, 160, 30)));
+    assert!(rendered.contains("(truncated"), "{rendered}");
+}
+
+#[test]
+fn mux_rows_with_wide_names_fit_and_keep_the_columns_of_ascii_rows() {
+    let theme = Theme::default();
+    let wide = |native: &str, preview: &str| MuxSessionRow {
+        native_id: native.into(),
+        single_session_preview: Some(preview.into()),
+        agent_labels: vec!["codex".into()],
+        ..agentless_mux_row(None)
+    };
+    let ascii = wide("build-server", "running the suite");
+    let rows = [
+        wide("東京ビルドサーバー", "テスト ✅ 完了 ⚠\u{fe0f} 警告あり 🎉"),
+        wide(
+            "cafe\u{301}-na\u{308}ive",
+            "re\u{301}sume\u{301} of the run",
+        ),
+        wide("⚠\u{fe0f}-alerts", "👨\u{200d}👩\u{200d}👧 family emoji"),
+    ];
+    let column_of_badge = |spans: &[Span<'_>]| -> usize {
+        let at = spans
+            .iter()
+            .position(|span| span.content.contains("codex"))
+            .expect("badge");
+        text::spans_width(&spans[..at])
+    };
+    let reference = column_of_badge(&render_mux_session_spans(&ascii, &theme, 0, 100, None));
+    for row in &rows {
+        assert_eq!(
+            column_of_badge(&render_mux_session_spans(row, &theme, 0, 100, None)),
+            reference,
+            "{}: the badge column moved",
+            row.native_id
+        );
+        for width in 10..=100 {
+            let spans = render_mux_session_spans(row, &theme, 0, width, None);
+            assert!(
+                text::spans_width(&spans) <= width,
+                "{} at {width}: {spans:?}",
+                row.native_id
+            );
+        }
+    }
+}
+
+#[test]
+fn a_badge_with_a_wide_command_keeps_the_badge_width() {
+    let theme = Theme::default();
+    for command in ["ビルド", "ビルドサーバー起動", "🎉party", "cafe\u{301}"] {
+        let badge = crate::tui::widgets::badge::command_badge(command, &theme);
+        assert_eq!(
+            text::width(&badge.content),
+            theme.badge_width + 2,
+            "{command}: {:?}",
+            badge.content
+        );
+    }
+}
+
+#[test]
+fn form_rows_with_wide_values_fit_the_form() {
+    use crate::tui::widgets::form::{Cols, note_row};
+    let theme = Theme::default();
+    let value = "東京/設計/レビュー/ノート/最終版/ドラフト/コメント付き ⚠\u{fe0f} 確認待ち";
+    for inner in [30, 44, 60] {
+        let line = note_row("cwd", value, Cols::new(inner), &theme);
+        let width = line.width();
+        assert!(width <= inner, "{inner}: {width} cells: {line:?}");
+        assert!(line.to_string().ends_with('…'), "{inner}: {line:?}");
+    }
+}

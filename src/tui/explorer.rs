@@ -1401,7 +1401,7 @@ fn agent_session_core(
         let truncated = text::truncate_end(title, 48);
         let mut field = CoreField::plain("title", truncated.clone())
             .previewing(FieldValue::Text(title.to_string()));
-        if truncated.len() < title.len() {
+        if truncated != *title {
             field = field.with_long(title.to_string());
         }
         fields.push(field);
@@ -1454,7 +1454,7 @@ fn agent_session_extras(
         let truncated = text::truncate_end(preview, 48);
         let mut field = CoreField::plain("last_message_preview", truncated.clone())
             .previewing(FieldValue::Text(preview.clone()));
-        if truncated.len() < preview.len() {
+        if truncated != *preview {
             field = field.with_long(preview.clone());
         }
         fields.push(field);
@@ -1527,7 +1527,7 @@ fn mux_session_extras(m: &MuxSessionNode, now: Option<i64>) -> Vec<CoreField> {
         let truncated = text::truncate_end(cmd, 48);
         let mut field = CoreField::plain("active_pane_command", truncated.clone())
             .previewing(FieldValue::Command(split_command_line(cmd)));
-        if truncated.len() < cmd.len() {
+        if truncated != *cmd {
             field = field.with_long(cmd.clone());
         }
         fields.push(field);
@@ -1545,7 +1545,7 @@ fn mux_session_extras(m: &MuxSessionNode, now: Option<i64>) -> Vec<CoreField> {
         let truncated = text::truncate_end(cmd, 48);
         let mut field = CoreField::plain("active_pane_start_command", truncated.clone())
             .previewing(FieldValue::Command(split_command_line(cmd)));
-        if truncated.len() < cmd.len() {
+        if truncated != *cmd {
             field = field.with_long(cmd.clone());
         }
         fields.push(field);
@@ -1638,7 +1638,7 @@ fn runtime_process_core(
             let truncated = text::truncate_end(cmd, 48);
             let mut field = CoreField::plain("command", truncated.clone())
                 .previewing(FieldValue::Command(split_command_line(cmd)));
-            if truncated.len() < cmd.len() {
+            if truncated != *cmd {
                 field = field.with_long(cmd.clone());
             }
             field
@@ -1806,7 +1806,7 @@ fn forge_pr_core(pr: &ForgePrNode, now: Option<i64>) -> Vec<CoreField> {
         Some(url) => {
             let truncated = text::truncate_end(url, 48);
             let mut field = CoreField::plain("url", truncated.clone());
-            if truncated.len() < url.len() {
+            if truncated != *url {
                 field = field.with_long(url.clone());
             }
             field
