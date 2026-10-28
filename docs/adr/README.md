@@ -113,7 +113,7 @@ The continuous server, the snapshot format, and the SQLite arc that was built an
 | [0146](0146-the-hook-spool-is-the-durable-hook-record.md) | The Hook Spool Is The Durable Hook Record | Accepted |
 | [0147](0147-session-content-search.md) | Session Content Search | Accepted (amended by 0149) |
 | [0148](0148-opt-in-transcript-search-index.md) | Opt-In Transcript Search Index | Accepted (decided, not built) |
-| [0149](0149-two-level-search-current-and-wider-context.md) | Two-Level Search: Current Context And Wider Context | Accepted |
+| [0149](0149-two-level-search-current-and-wider-context.md) | Two-Level Search: Current Context And Wider Context | Accepted (amended by 0157) |
 
 ## CLI output and exports
 
@@ -179,6 +179,7 @@ Runtime architecture, controls, theming, detail pane, and visual language.
 | [0154](0154-tui-glyph-marks-vetted-table-and-scan.md) | Shared Glyph Marks, The Vetted Table, And The Source Scan | Accepted |
 | [0155](0155-tui-text-measured-cut-and-wrapped-in-cells.md) | Text Is Measured, Cut, And Wrapped In Terminal Cells By One Module | Accepted |
 | [0156](0156-tui-scroll-window-follow-rule-and-viewports-by-value.md) | One Scroll Window, One Follow Rule, And Viewports Returned By Value | Accepted |
+| [0157](0157-tui-chips-one-width-rule-and-ages-one-ladder.md) | Chips Share One Width Rule, And Ages One Ladder | Accepted |
 
 ## Transcript viewer
 

@@ -1102,6 +1102,17 @@ drawn. A renderer works its window out from the App and the area it measured
 and returns it; `ui::draw` hands the frame's windows back in a
 `ViewportReport` that the App keeps, so no draw sends a message.
 
+Chips and ages are the fifth and sixth (ADR 0157). The framework's `chip`
+module draws the filled chip (its label `badge_width` cells, cut or padded,
+so every chip and every chip column has one footprint), switches that keep
+their width, the segmented title, the `[ n/m ]` position chip, and status
+chips in a tone; `conspectus` keeps what each chip means (harness and program
+colors, the `no agent`, `N hits`, and `was in` notes). The `age` module writes
+every age on one ladder (`s`, `m`, `h`, `d`; ` ago` in prose), tints it by
+recency with replaceable bounds, and draws the four-cell age cell every row
+uses. The CLI's tables share the formatter and its thresholds and go on to
+weeks.
+
 ### Graph-to-View Slicing
 
 The producer pipeline discovers and resolves a typed

@@ -78,6 +78,17 @@ Targeted for 0.2.0, after 0.1.0 is tagged. History, rebuild, and pins
   is at most 160 terminal cells with its `…` marks (it was 160 characters
   plus the marks) and spends two thirds of its room after the match,
   cutting on word edges, instead of centering the match.
+- **Ages read one way across the TUI.** The Search view's match, pane,
+  and pane-line rows color their age by how recent it is, as every other
+  row does (they were all gray). The search status says `scanned 0s ago`
+  rather than `scanned just now`, and a scan a day old reads `1d ago`
+  rather than `25h ago`. The History view's Clean up list counts days
+  (`last seen 21d ago`) like the History rows, not weeks. The CLI's
+  tables are unchanged and still go on to weeks.
+- **`[tui.theme] badge_width` sizes every chip.** The content search's
+  chip column and a mux's ` no agent ` placeholder now follow it, so with
+  a narrower or wider chip the labels after them stay in one column. The
+  default look is unchanged.
 
 ### Fixed
 

@@ -9,7 +9,8 @@ view's relation to the content filter (see the amendment note in ADR
 content filter, `conspectus search`, the payload rules, and the thresholds
 for a persistent index. Amends ADR 0086 (Tier 2 gains mux scrollback as a
 second content source) and builds on ADR 0112 (in-memory pane captures,
-`--no-live-preview`).
+`--no-live-preview`). Amended by ADR 0157: the chip column of item 25 is
+a chip's footprint from the theme.
 
 ## Context
 
@@ -266,9 +267,10 @@ Facts established while writing this decision:
 25. **Modal rect.** Width is `min(W - 2, clamp(0.85 W, 60, 200))` and
     height `min(H - 2, clamp(0.8 H, 12, 50))`, centered, where `W` and `H`
     are the terminal's. Quick select and content search share it. Columns
-    scale with the inner width `n`: marker 2, kind glyph 2, chip or source
-    word 8 to 10, label `clamp(0.2 n, 12, 32)`, age 4, and the context or
-    snippet takes the rest, never less than 20. When the terminal is
+    scale with the inner width `n`: marker 2, kind glyph 2, chip (a
+    harness chip's footprint, `badge_width + 2`, 10 by default; ADR 0157)
+    or source word 7, label `clamp(0.2 n, 12, 32)`, age 4, and the context
+    or snippet takes the rest, never less than 20. When the terminal is
     narrower than 100 columns or `n` is small, columns drop in this order:
     chip, source word, age, context; the snippet is cropped around the
     match and ends with an ellipsis, text is never clipped mid-word, and
