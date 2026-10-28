@@ -46,7 +46,9 @@ frame and its named sizes), the `selection` module (the list cursor's
 marker and highlight, the ghost and pending looks, and the wrap-or-clamp
 rule), the `keys` module (key tables, footers, key labels, roles, and the
 standard tables for menus, dialogs, pagers, prompts, checklists, and
-forms), the source guards, and this documentation set; the module map in
+forms), the `overlay` module (the overlay contract, its outcomes, and the
+host-owned modal stack that routes keys to its top entry and draws every
+entry), the source guards, and this documentation set; the module map in
 the architecture guide says which modules have landed.
 
 ## Depending on it by path

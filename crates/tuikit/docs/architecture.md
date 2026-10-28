@@ -73,7 +73,7 @@ each names its module path.
 | Module | Provides | Status |
 | --- | --- | --- |
 | `keys` | The key-table model: matchers with one rule for characters, rows that can include another table and carry availability, hints, resolving a key against a table, footers in one grammar (dimming what cannot act now), one key-label notation, the `KeyRole` classifier and the modal key convention checked by it, and checks for mislabeled, shadowed, and loosely bound rows; standard tables and action enums for menus, confirm and choice dialogs, pagers, text input, checklists, and forms. Later: a scoped program-wide keymap. Page: [controls/keys.md](controls/keys.md) | landed |
-| `overlay` | The `Overlay<M, Cx>` contract (`handle` and `render`), `Outcome<M>`, and `ModalStack`, which the host owns and which draws every entry from bottom to top | planned |
+| `overlay` | The `Overlay<M, Cx>` contract (`handle` and `render`, and whether an overlay fills the screen), `Outcome<M>` (consumed, close, commit, stay), and `ModalStack<E>` over the host's entry type, which the host owns and passes its state to as `&Cx`, which routes a key to the top entry and closes it for a close or a commit, and which draws every entry from bottom to top. Page: [controls/overlay.md](controls/overlay.md) | landed |
 | `help` | The generator that turns key tables into help pages, and the page renderer | planned |
 | `focus` | Declared focus rules: the pane focus cue, the modal focus lock, the Tab cycle | planned |
 | `feedback` | One `Feedback { severity, text, ttl }` type feeding three channels (status line, toast, message log); a bounded, repeat-collapsing log; the clipboard sink | planned |
@@ -130,18 +130,25 @@ value that says what the user meant, which the host interprets in its own
 runtime.
 
 ```rust
-// Illustrative shape only; each control's page gives the real outcomes.
+// The overlay contract's outcome (`tuikit::overlay::Outcome`); a control
+// that is not an overlay reports its own result type the same way.
 match prompt.handle(key, &cx) {
-    Outcome::Commit(message) => host.dispatch(message),
+    Outcome::Commit(message) => {
+        host.close_top_overlay();
+        host.dispatch(message);
+    }
+    Outcome::Stay(message) => host.dispatch(message),
     Outcome::Close => host.close_top_overlay(),
-    Outcome::Consumed | Outcome::Ignored => {}
+    Outcome::Consumed => {}
 }
 ```
 
 - A commit carries the host's `M`. What a commit does (rename something, start
   a task, save a setting) is the host's effect system, not the control's.
-- Dismissal, going back a level, and "this key is not mine" are outcomes too,
-  so the host's stack can decide what to do next.
+- Dismissal is an outcome too, so the host's stack can decide what to do
+  next. Going back a level inside an overlay is the overlay's own business
+  (it stays open), and an open overlay owns every key, so no outcome says
+  "this key is not mine".
 - Where a control needs an external capability, the host supplies it: the
   clipboard takes a `Write` sink, and path completion takes a source trait.
   The framework starts no process and writes no file itself.
