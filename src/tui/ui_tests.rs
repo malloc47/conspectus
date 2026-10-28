@@ -472,6 +472,25 @@ fn left_panel_title_renders_a_view_tab_strip() {
     }
 }
 
+/// The left pane's title at the widths around the side-by-side split,
+/// where the panes are narrowest, in every view: whole names, the
+/// active one kept, `…` where views are left out.
+#[test]
+fn left_panel_tab_strip_at_the_split_widths() {
+    let mut out = String::new();
+    for width in [90u16, 100, 104, 107, 120] {
+        for view in crate::tui::widgets::controls::VIEW_OPTIONS {
+            let mut app = seeded_app();
+            app.update(Msg::SwitchView(*view));
+            let text = buffer_to_string(&render_to_buffer(&mut app, Rect::new(0, 0, width, 8)));
+            let line = text.lines().nth(1).expect("the panes' top border");
+            let title: String = line.chars().take_while(|c| *c != '┐').collect();
+            out.push_str(&format!("{width:>3} {:<8} {title}┐\n", view_label(*view)));
+        }
+    }
+    insta::assert_snapshot!("left_panel_tab_strip_at_the_split_widths", out);
+}
+
 #[test]
 fn right_panel_title_names_the_selected_node_kind() {
     // Phase 11: instead of a constant `detail`, the right pane

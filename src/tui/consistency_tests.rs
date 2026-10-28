@@ -26,7 +26,8 @@
 //!   dimming, focus highlight, and scroll (`rendering`).
 //! - **User-visible text speaks the operator's language**: no developer
 //!   artifacts, and one word for one thing (`text`).
-//! - **The chrome agrees with the view**: the header counts what the
+//! - **The chrome fits and agrees with the view**: the tab strip never
+//!   cuts a view's name at any width, and the header counts what the
 //!   active view lists (`chrome`).
 //!
 //! # Diagnosis of the reported defects

@@ -1,0 +1,34 @@
+---
+source: src/tui/ui_tests.rs
+expression: out
+---
+ 90 sessions ┌ ► sessions · mux · prs · pinned · history · search ────────────────────────────────────┐
+ 90 mux      ┌ ► sessions · mux · prs · pinned · history · search ────────────────────────────────────┐
+ 90 prs      ┌ ► sessions · mux · prs · pinned · history · search ────────────────────────────────────┐
+ 90 pinned   ┌ ► sessions · mux · prs · pinned · history · search ────────────────────────────────────┐
+ 90 history  ┌ ► sessions · mux · prs · pinned · history · search ────────────────────────────────────┐
+ 90 search   ┌ ► sessions · mux · prs · pinned · history · search ────────────────────────────────────┐
+100 sessions ┌ ► sessions · mux · prs · pinned · history … ───┐
+100 mux      ┌ ► sessions · mux · prs · pinned · history … ───┐
+100 prs      ┌ ► sessions · mux · prs · pinned · history … ───┐
+100 pinned   ┌ ► sessions · mux · prs · pinned · history … ───┐
+100 history  ┌ ► sessions · mux · prs · pinned · history … ───┐
+100 search   ┌ ► sessions · mux · prs · pinned · search … ────┐
+104 sessions ┌ ► sessions · mux · prs · pinned · history … ─────┐
+104 mux      ┌ ► sessions · mux · prs · pinned · history … ─────┐
+104 prs      ┌ ► sessions · mux · prs · pinned · history … ─────┐
+104 pinned   ┌ ► sessions · mux · prs · pinned · history … ─────┐
+104 history  ┌ ► sessions · mux · prs · pinned · history … ─────┐
+104 search   ┌ ► sessions · mux · prs · pinned · search … ──────┐
+107 sessions ┌ ► sessions · mux · prs · pinned · history · search ┐
+107 mux      ┌ ► sessions · mux · prs · pinned · history · search ┐
+107 prs      ┌ ► sessions · mux · prs · pinned · history · search ┐
+107 pinned   ┌ ► sessions · mux · prs · pinned · history · search ┐
+107 history  ┌ ► sessions · mux · prs · pinned · history · search ┐
+107 search   ┌ ► sessions · mux · prs · pinned · history · search ┐
+120 sessions ┌ ► sessions · mux · prs · pinned · history · search ──────┐
+120 mux      ┌ ► sessions · mux · prs · pinned · history · search ──────┐
+120 prs      ┌ ► sessions · mux · prs · pinned · history · search ──────┐
+120 pinned   ┌ ► sessions · mux · prs · pinned · history · search ──────┐
+120 history  ┌ ► sessions · mux · prs · pinned · history · search ──────┐
+120 search   ┌ ► sessions · mux · prs · pinned · history · search ──────┐

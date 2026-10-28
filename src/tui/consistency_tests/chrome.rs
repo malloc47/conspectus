@@ -1,12 +1,134 @@
-//! The frame around the rows agrees with the view: the header's session
-//! count says what the active view lists.
+//! The frame around the rows reads right in every view and at every
+//! width: the left pane's tab strip never cuts a view's name, and the
+//! header's session count agrees with what the active view lists.
 //!
-//! It is checked on the rendered frame, the way the operator reads it,
-//! so it holds whichever control draws the header.
+//! Both are checked on the rendered frame, the way the operator reads
+//! them, so they hold whichever control draws the strip or the header.
 
 use super::*;
 use crate::filter::{HarnessFilter, PrStateFilter, PrStateKey};
 use crate::tui::rows::RowKind;
+
+/// The word the tab strip uses for each view, in strip order.
+const TAB_LABELS: [(View, &str); 6] = [
+    (View::Sessions, "sessions"),
+    (View::Mux, "mux"),
+    (View::Prs, "prs"),
+    (View::Pinned, "pinned"),
+    (View::History, "history"),
+    (View::Search, "search"),
+];
+
+fn tab_label(view: View) -> &'static str {
+    TAB_LABELS
+        .iter()
+        .find(|(candidate, _)| *candidate == view)
+        .map(|(_, label)| *label)
+        .expect("every view has a tab")
+}
+
+/// The words of the left pane's title: what lies between its top-left
+/// corner and the next corner, without the border, the focus marker,
+/// and the separators.
+fn tab_strip_words(frame: &str) -> Vec<String> {
+    let line = frame.lines().nth(1).expect("the panes' top border");
+    let start = line.find('┌').expect("the left pane's top-left corner") + '┌'.len_utf8();
+    let end = line[start..]
+        .find('┐')
+        .map_or(line.len(), |offset| start + offset);
+    line[start..end]
+        .replace(['─', '►'], " ")
+        .split_whitespace()
+        .filter(|word| *word != "·")
+        .map(str::to_string)
+        .collect()
+}
+
+/// Every width from 40 to 120 columns, both layouts (stacked below the
+/// default threshold of 100, side by side from it), every view, and both
+/// focus states: the strip shows whole view names in order, always the
+/// active one, and ends with `…` when it leaves any out.
+#[test]
+fn the_tab_strip_never_cuts_a_view_name_at_any_width() {
+    let labels: Vec<&str> = TAB_LABELS.iter().map(|(_, label)| *label).collect();
+    for view in ALL_VIEWS {
+        let mut app = app_in(view);
+        for focus_right in [false, true] {
+            if focus_right {
+                app.update(Msg::CycleFocus);
+            }
+            for width in 40..=120 {
+                let shown = frame(&mut app, width, 12);
+                let words = tab_strip_words(&shown);
+                let context = format!(
+                    "{view:?} at {width} columns, right pane focused: {focus_right}: {words:?}\n{}",
+                    shown.lines().nth(1).unwrap_or_default()
+                );
+                let shortened = words.last().is_some_and(|word| word == "…");
+                let names = &words[..words.len() - usize::from(shortened)];
+                for name in names {
+                    assert!(
+                        labels.contains(&name.as_str()),
+                        "`{name}` is not a whole view name: {context}"
+                    );
+                }
+                assert!(
+                    names.iter().any(|name| name == tab_label(view)),
+                    "the active view's name is missing: {context}"
+                );
+                let order: Vec<usize> = names
+                    .iter()
+                    .map(|name| labels.iter().position(|label| label == name).unwrap())
+                    .collect();
+                assert!(
+                    order.windows(2).all(|pair| pair[0] < pair[1]),
+                    "the names are out of order: {context}"
+                );
+                assert_eq!(
+                    shortened,
+                    names.len() < labels.len(),
+                    "the strip ends with `…` exactly when it leaves a view out: {context}"
+                );
+            }
+        }
+    }
+}
+
+/// Below 40 columns the strip keeps shortening, down to a cut active
+/// name, without the frame failing to draw.
+#[test]
+fn the_tab_strip_draws_in_any_narrow_pane() {
+    for view in ALL_VIEWS {
+        let mut app = app_in(view);
+        for width in 1..40 {
+            let shown = frame(&mut app, width, 12);
+            assert!(shown.lines().count() > 1, "{view:?} at {width} columns");
+        }
+    }
+}
+
+/// A pane wide enough for the whole strip names every view; one a few
+/// cells short of it drops the names after the active one first.
+#[test]
+fn the_tab_strip_names_every_view_when_they_fit() {
+    let mut app = app_in(View::Sessions);
+    // Side by side at 108 columns the left pane is 54 wide.
+    let words = tab_strip_words(&frame(&mut app, 108, 12));
+    assert_eq!(words, TAB_LABELS.map(|(_, label)| label.to_string()));
+    // At 100 columns it is 50 wide: `search` gives way.
+    let words = tab_strip_words(&frame(&mut app, 100, 12));
+    assert_eq!(
+        words,
+        ["sessions", "mux", "prs", "pinned", "history", "…"].map(String::from)
+    );
+    // With Search active, `history` gives way instead.
+    let mut app = app_in(View::Search);
+    let words = tab_strip_words(&frame(&mut app, 100, 12));
+    assert_eq!(
+        words,
+        ["sessions", "mux", "prs", "pinned", "search", "…"].map(String::from)
+    );
+}
 
 /// The header's `N/M sessions` and `M sessions` cell, as numbers.
 fn header_count(app: &mut App) -> (Option<usize>, usize) {
