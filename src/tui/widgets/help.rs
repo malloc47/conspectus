@@ -525,16 +525,28 @@ fn body_lines_for_width(theme: &Theme, width: Option<usize>) -> Vec<Line<'static
 }
 
 /// The closing line of a help page, generated from the key table that
-/// scrolls and closes it, wrapped to `width` when known.
+/// scrolls and closes it, wrapped to `width` when known. It recedes in
+/// the theme's `muted` look; a key that cannot act now is dimmed further.
 pub(super) fn push_footer(lines: &mut Vec<Line<'static>>, theme: &Theme, width: Option<usize>) {
-    let footer = tuikit::keys::footer(crate::tui::keybindings::overlay::HELP_KEYS);
-    match width.filter(|w| *w > 8) {
-        Some(w) => {
-            for chunk in text::wrap_at(&footer, HINT_SEPARATOR, w) {
-                lines.push(line![span!(theme.muted; "{}", chunk.trim_end())]);
-            }
+    let footer = tuikit::keys::Footer::new(crate::tui::keybindings::overlay::HELP_KEYS);
+    let width = width.filter(|w| *w > 8).unwrap_or(usize::MAX);
+    let muted = Style::default().add_modifier(theme.muted);
+    for mut line in footer.lines(width, theme) {
+        for span in &mut line.spans {
+            span.style = muted.patch(span.style);
         }
-        None => lines.push(line![span!(theme.muted; "{footer}")]),
+        lines.push(line);
+    }
+}
+
+/// Draws `lines` (a help row whose action cannot act now) in the look a
+/// footer gives such a key, key column included.
+pub(super) fn dim_unavailable(lines: &mut [Line<'static>], theme: &Theme) {
+    let dim = tuikit::keys::unavailable_style(theme);
+    for line in lines {
+        for span in &mut line.spans {
+            span.style = span.style.patch(dim);
+        }
     }
 }
 

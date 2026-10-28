@@ -28,7 +28,7 @@ use crate::tui::Theme;
 use crate::tui::keybindings::overlay::{PANE_VIEWER_KEYS, VIEWER_FIND_KEYS};
 use crate::viewer::find::{FindPrompt, ViewerFindMsg};
 
-use super::help::{binding_lines, blank, push_footer, render_help_page, section};
+use super::help::{binding_lines, blank, dim_unavailable, push_footer, render_help_page, section};
 
 /// Lines of context kept above a line the viewer jumps to.
 const CONTEXT_ABOVE: usize = 2;
@@ -543,10 +543,12 @@ fn draw_footer(state: &PaneViewerState, theme: &Theme, frame: &mut Frame<'_>, ar
     frame.render_widget(Paragraph::new(Line::from(spans)), area);
 }
 
-/// One help row: the keys bound to a message and what it does.
+/// One help row: the keys bound to a message, what it does, and whether
+/// it can act now.
 struct HelpRow {
     keys: String,
     description: &'static str,
+    available: bool,
 }
 
 /// The help page's rows by section, generated from the key table and
@@ -555,9 +557,18 @@ struct HelpRow {
 fn help_sections(table: &[KeyRow<PaneViewerMsg>]) -> Vec<(&'static str, Vec<HelpRow>)> {
     let mut sections: Vec<(&'static str, Vec<HelpRow>)> = Vec::new();
     for msg in PaneViewerMsg::ALL {
+        let mut available = false;
         let mut keys: Vec<String> = rows(table)
             .filter_map(|row| match row {
-                KeyRow::Bind { key, action, .. } if *action == msg => Some(key_label(key)),
+                KeyRow::Bind {
+                    key,
+                    action,
+                    available: now,
+                    ..
+                } if *action == msg => {
+                    available |= *now;
+                    Some(key_label(key))
+                }
                 _ => None,
             })
             .collect();
@@ -569,6 +580,7 @@ fn help_sections(table: &[KeyRow<PaneViewerMsg>]) -> Vec<(&'static str, Vec<Help
         let row = HelpRow {
             keys: keys.join(" / "),
             description,
+            available,
         };
         match sections.iter_mut().find(|(t, _)| *t == title) {
             Some((_, rows)) => rows.push(row),
@@ -584,7 +596,11 @@ pub fn help_lines(theme: &Theme, width: Option<usize>) -> Vec<Line<'static>> {
     for (title, rows) in help_sections(PANE_VIEWER_KEYS) {
         section(&mut lines, title);
         for row in &rows {
-            lines.extend(binding_lines(&row.keys, row.description, theme, width));
+            let mut drawn = binding_lines(&row.keys, row.description, theme, width);
+            if !row.available {
+                dim_unavailable(&mut drawn, theme);
+            }
+            lines.extend(drawn);
         }
         blank(&mut lines);
     }

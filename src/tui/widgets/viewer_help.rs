@@ -19,13 +19,15 @@ use crate::tui::Theme;
 use crate::tui::keybindings::overlay::VIEWER_KEYS;
 use crate::viewer::input::ViewerMsg;
 
-use super::help::{binding_lines, blank, push_footer, render_help_page, section};
+use super::help::{binding_lines, blank, dim_unavailable, push_footer, render_help_page, section};
 
-/// One help row: the keys bound to a message and what it does.
+/// One help row: the keys bound to a message, what it does, and whether
+/// it can act now (a row that cannot is drawn dimmed).
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ViewerHelpRow {
     pub keys: String,
     pub description: &'static str,
+    pub available: bool,
 }
 
 /// A heading and the rows under it.
@@ -37,13 +39,23 @@ pub struct ViewerHelpSection {
 
 /// The help page's content, generated from `table` (the viewer's key
 /// table) and the descriptions in `ViewerMsg::help`. A message with no
-/// key bound to it is left out, as there is nothing to press.
+/// key bound to it is left out, as there is nothing to press; one whose
+/// rows are all unavailable is marked so.
 pub fn sections_for(table: &[KeyRow<ViewerMsg>]) -> Vec<ViewerHelpSection> {
     let mut sections: Vec<ViewerHelpSection> = Vec::new();
     for msg in ViewerMsg::ALL {
+        let mut available = false;
         let mut keys: Vec<String> = rows(table)
             .filter_map(|row| match row {
-                KeyRow::Bind { key, action, .. } if *action == msg => Some(key_label(key)),
+                KeyRow::Bind {
+                    key,
+                    action,
+                    available: now,
+                    ..
+                } if *action == msg => {
+                    available |= *now;
+                    Some(key_label(key))
+                }
                 _ => None,
             })
             .collect();
@@ -56,6 +68,7 @@ pub fn sections_for(table: &[KeyRow<ViewerMsg>]) -> Vec<ViewerHelpSection> {
         let row = ViewerHelpRow {
             keys: keys.join(" / "),
             description: entry.description,
+            available,
         };
         match sections.iter_mut().find(|s| s.title == entry.section) {
             Some(section) => section.rows.push(row),
@@ -71,11 +84,25 @@ pub fn sections_for(table: &[KeyRow<ViewerMsg>]) -> Vec<ViewerHelpSection> {
 /// The page's lines wrapped to `width`: each section heading, its rows,
 /// a blank line, and the footer.
 pub fn help_lines(theme: &Theme, width: Option<usize>) -> Vec<Line<'static>> {
+    help_lines_for(VIEWER_KEYS, theme, width)
+}
+
+/// [`help_lines`] for `table`, whose rows may say an action cannot act
+/// now (`tuikit::keys::with_availability`); such a row is dimmed.
+pub fn help_lines_for(
+    table: &[KeyRow<ViewerMsg>],
+    theme: &Theme,
+    width: Option<usize>,
+) -> Vec<Line<'static>> {
     let mut lines = Vec::new();
-    for sect in sections_for(VIEWER_KEYS) {
+    for sect in sections_for(table) {
         section(&mut lines, sect.title);
         for row in &sect.rows {
-            lines.extend(binding_lines(&row.keys, row.description, theme, width));
+            let mut drawn = binding_lines(&row.keys, row.description, theme, width);
+            if !row.available {
+                dim_unavailable(&mut drawn, theme);
+            }
+            lines.extend(drawn);
         }
         blank(&mut lines);
     }

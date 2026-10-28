@@ -169,6 +169,48 @@ fn the_keys_the_footer_names_do_what_it_says_in_the_viewer() {
     }
 }
 
+#[test]
+fn a_key_that_cannot_act_now_is_dimmed_on_the_help_page() {
+    let theme = Theme::default();
+    let rows = tuikit::keys::with_availability(VIEWER_KEYS, |msg| msg != ViewerMsg::ToggleThinking);
+    let lines = help_lines_for(&rows, &theme, Some(100));
+    let row_of = |msg: ViewerMsg| {
+        let start: String = msg
+            .help()
+            .description
+            .split_whitespace()
+            .take(3)
+            .collect::<Vec<_>>()
+            .join(" ");
+        lines
+            .iter()
+            .find(|line| text(line).contains(&start))
+            .unwrap_or_else(|| panic!("no row for {msg:?}"))
+            .clone()
+    };
+    let dim = tuikit::keys::unavailable_style(&theme);
+    let off = row_of(ViewerMsg::ToggleThinking);
+    for span in off
+        .spans
+        .iter()
+        .filter(|span| !span.content.trim().is_empty())
+    {
+        assert_eq!(span.style.fg, dim.fg, "{:?}", span.content);
+        assert!(span.style.add_modifier.contains(theme.muted));
+    }
+    let on = row_of(ViewerMsg::ScrollDown);
+    assert!(
+        on.spans
+            .iter()
+            .any(|span| span.style.fg == Some(theme.accent)),
+        "an available row keeps its accent key column"
+    );
+    assert_eq!(
+        help_lines_for(VIEWER_KEYS, &theme, Some(100)),
+        help_lines(&theme, Some(100))
+    );
+}
+
 /// How far the page can scroll in `area`, as its render reports it.
 fn max_scroll(area: Rect, theme: &Theme) -> usize {
     render(area, &mut Buffer::empty(area), theme, 0).last_offset()
