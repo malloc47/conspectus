@@ -1113,6 +1113,16 @@ recency with replaceable bounds, and draws the four-cell age cell every row
 uses. The CLI's tables share the formatter and its thresholds and go on to
 weeks.
 
+Frames are the seventh (ADR 0158). Every modal draws in the framework's
+`ModalFrame`: a cleared rect, an accent border, and one title form (plain,
+one space each side), sized by one of five named policies, each a share, a
+cap, a minimum, and a margin per direction: compact for prompts and
+checklists, menu for menus and Controls, form for the forms, wide for the
+help pages, the value modal, Messages, and the picker, and palette for the
+search overlay. Every modal keeps two columns and a row clear on each side
+while the terminal allows, and its body is measured once at the width its
+size gives.
+
 ### Graph-to-View Slicing
 
 The producer pipeline discovers and resolves a typed

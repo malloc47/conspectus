@@ -89,6 +89,19 @@ Targeted for 0.2.0, after 0.1.0 is tagged. History, rebuild, and pins
   chip column and a mux's ` no agent ` placeholder now follow it, so with
   a narrower or wider chip the labels after them stay in one column. The
   default look is unchanged.
+- **Modals share one frame and five sizes.** Every menu, prompt, form,
+  list, and reader draws the same border and title (plain, one space each
+  side: the Messages and value titles are no longer bold) and takes one of
+  five sizes. Menus are 64 columns (the row menu was 72, the mux menu 62,
+  the worktree menu 56), forms 80 (the pin edit form was 84, the others
+  76), the picker and the value modal the help's size, and the help two
+  rows taller. Every modal now leaves two columns and a row clear around
+  it, so a menu or form on a short terminal no longer covers the header
+  and status line (it scrolls), and a menu on a narrow one no longer
+  touches the screen's edges. A short worktree menu is only as tall as
+  its entries. Below 44 columns the forms fit their key hints to the
+  frame instead of cutting them, and the empty Clean up wraps its text.
+  `[tui.theme] surface` now also paints the modals' background.
 
 ### Fixed
 

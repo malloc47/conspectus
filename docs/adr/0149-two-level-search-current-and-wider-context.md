@@ -10,7 +10,8 @@ content filter, `conspectus search`, the payload rules, and the thresholds
 for a persistent index. Amends ADR 0086 (Tier 2 gains mux scrollback as a
 second content source) and builds on ADR 0112 (in-memory pane captures,
 `--no-live-preview`). Amended by ADR 0157: the chip column of item 25 is
-a chip's footprint from the theme.
+a chip's footprint from the theme. Amended by ADR 0158: the rect of item
+25 is the framework's palette policy, whose minimums beat the margin.
 
 ## Context
 
@@ -264,9 +265,10 @@ Facts established while writing this decision:
 
 ### Sizing
 
-25. **Modal rect.** Width is `min(W - 2, clamp(0.85 W, 60, 200))` and
-    height `min(H - 2, clamp(0.8 H, 12, 50))`, centered, where `W` and `H`
-    are the terminal's. Quick select and content search share it. Columns
+25. **Modal rect.** Width is 85% of `W` between 60 and 200 columns and
+    height 80% of `H` between 12 and 50 rows, never past the terminal,
+    centered, where `W` and `H` are the terminal's (the framework's palette
+    policy, ADR 0158; the minimums beat its margin on a small terminal). Quick select and content search share it. Columns
     scale with the inner width `n`: marker 2, kind glyph 2, chip (a
     harness chip's footprint, `badge_width + 2`, 10 by default; ADR 0157)
     or source word 7, label `clamp(0.2 n, 12, 32)`, age 4, and the context
