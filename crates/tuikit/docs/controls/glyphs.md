@@ -18,7 +18,7 @@ selection highlight cuts it in half. The module has four parts:
 - **Marks** (`glyphs::marks`): the shared glyphs, each defined once: the
   list cursor, a "go back" arrow, the two disclosure arrows, the check and
   failure marks, a warning mark, a bullet, the ellipsis, the no-value dash,
-  one cell of a rule, and the eight frames of a spinner. A control draws a
+  one cell of a rule, the separator dot, and the eight frames of a spinner. A control draws a
   mark by constant, so two surfaces cannot drift to look-alike codepoints.
 - **The vetted table** (`VettedGlyphs`): the glyphs that have been measured,
   each with a note on how. The framework's own glyphs are in it; a host
@@ -74,6 +74,7 @@ for drawn in vetted.unvetted(source) {
 | `ELLIPSIS` | `…` | text cut to fit |
 | `NO_VALUE` | `—` | a value that is not known |
 | `RULE` | `─` | one cell of a horizontal rule |
+| `SEPARATOR` | `·` | the separator between the parts of one item (a name and its state in a chip) and between short items in a line |
 | `SPINNER` | `⠋ ⠙ ⠹ ⠸ ⠼ ⠴ ⠦ ⠧` | the frames of a busy spinner (an operator-preference exception, below) |
 
 `marks::ALL` lists every mark once, spinner frames included, and a test keeps
@@ -167,5 +168,5 @@ the checks on them.
 - **Another source language.** `drawn_glyphs` lexes Rust. A host whose
   glyphs live in data files can call `glyph_risk` on each glyph directly.
 - **More marks.** A mark is a constant plus a line in `marks::ALL` and a
-  table entry in `src/glyphs/vetted.rs`; a separator and the key arrows are
-  vetted already and have no constant yet.
+  table entry in `src/glyphs/vetted.rs`; the key arrows are vetted already
+  and have no constant yet.

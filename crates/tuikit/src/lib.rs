@@ -16,6 +16,7 @@
 #![deny(rustdoc::private_intra_doc_links)]
 
 pub mod age;
+pub mod chip;
 pub mod glyphs;
 pub mod scroll;
 pub mod text;

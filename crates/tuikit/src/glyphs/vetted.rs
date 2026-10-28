@@ -53,6 +53,7 @@ const FRAMEWORK: &[(&str, &str)] = &[
         "Latin-1 range punctuation; every font; ambiguous",
     ),
     (marks::RULE, BOX),
+    (marks::SEPARATOR, "Latin-1; every font; ambiguous"),
     (marks::SPINNER[0], BRAILLE),
     (marks::SPINNER[1], BRAILLE),
     (marks::SPINNER[2], BRAILLE),
@@ -62,7 +63,6 @@ const FRAMEWORK: &[(&str, &str)] = &[
     (marks::SPINNER[6], BRAILLE),
     (marks::SPINNER[7], BRAILLE),
     // Punctuation and arrows the interface text uses.
-    ("·", "Latin-1; every font; ambiguous"),
     ("›", "WGL4; every font"),
     ("←", "WGL4 arrows; every font; ambiguous"),
     ("↑", "WGL4 arrows; every font; ambiguous"),

@@ -39,6 +39,9 @@ pub const ELLIPSIS: &str = "…";
 pub const NO_VALUE: &str = "—";
 /// One cell of a horizontal rule.
 pub const RULE: &str = "─";
+/// The separator between the parts of one item, such as a name and its
+/// state in a chip (`wrap·on`), and between short items in a line.
+pub const SEPARATOR: &str = "·";
 /// The frames of a busy spinner, drawn one after another.
 ///
 /// These are Braille dot patterns, kept by operator preference even though
@@ -50,5 +53,6 @@ pub const SPINNER: [&str; 8] = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦",
 /// the module's own tests run over this list.
 pub const ALL: &[&str] = &[
     POINTER, BACK, EXPANDED, COLLAPSED, OK, FAIL, WARNING, BULLET, ELLIPSIS, NO_VALUE, RULE,
-    SPINNER[0], SPINNER[1], SPINNER[2], SPINNER[3], SPINNER[4], SPINNER[5], SPINNER[6], SPINNER[7],
+    SEPARATOR, SPINNER[0], SPINNER[1], SPINNER[2], SPINNER[3], SPINNER[4], SPINNER[5], SPINNER[6],
+    SPINNER[7],
 ];
