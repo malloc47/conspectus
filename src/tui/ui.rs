@@ -193,11 +193,13 @@ fn draw_messages_overlay(app: &App, frame: &mut Frame<'_>, area: Rect) -> Option
     use crate::tui::widgets::messages::MessagesWidget;
 
     let state = app.messages_overlay()?;
+    // Ages read against the clock the rows use, which snapshot mode
+    // freezes.
     let widget = MessagesWidget::new(
         state,
         app.messages(),
         app.theme(),
-        crate::discovery::current_epoch(),
+        current_unix_epoch_for_render(),
     );
     Some(widget.draw(area, frame.buffer_mut()))
 }

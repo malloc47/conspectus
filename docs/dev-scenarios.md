@@ -168,6 +168,10 @@ conspectus tui --snapshot --snapshot-keys 'jjj<Enter>'  # navigate, expand
 # `<Enter>`, and `<Backspace>` drive the right-pane explorer.
 conspectus tui --snapshot --snapshot-pane right --snapshot-keys 'j<Tab>jjjjj<Enter>'
 
+# Draw the Messages log with entries in it (repeat for more; the last is
+# the newest)
+conspectus tui --snapshot --snapshot-message 'attached tmux:a' --snapshot-message 'renamed tmux:b' --snapshot-keys '!'
+
 # Capture the live world to a fixture JSON for later iteration
 conspectus tui --snapshot --snapshot-export-fixture world.json
 

@@ -149,6 +149,13 @@ pub(super) struct TuiArgs {
     #[arg(long = "snapshot-now", value_name = "EPOCH")]
     snapshot_now: Option<i64>,
 
+    /// Put an entry in the Messages log before the keys run, so the
+    /// log can be drawn with something in it. Repeat for more entries;
+    /// the last one given is the newest.
+    #[cfg(feature = "snapshot")]
+    #[arg(long = "snapshot-message", value_name = "TEXT")]
+    snapshot_messages: Vec<String>,
+
     /// Launch the interactive TUI against a fixture JSON instead
     /// of running live discovery. Bypasses scan-root
     /// discovery entirely; the `r` accelerator re-reads the
@@ -218,6 +225,8 @@ impl Default for TuiArgs {
             snapshot_fixture_root: None,
             #[cfg(feature = "snapshot")]
             snapshot_now: None,
+            #[cfg(feature = "snapshot")]
+            snapshot_messages: Vec::new(),
             #[cfg(feature = "snapshot")]
             fixture: None,
         }
@@ -457,6 +466,7 @@ impl TuiArgs {
                     export_fixture: self.snapshot_export_fixture,
                     fixture_root: self.snapshot_fixture_root,
                     now: self.snapshot_now,
+                    messages: self.snapshot_messages,
                 },
             );
         }

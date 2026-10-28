@@ -76,6 +76,9 @@ pub struct SnapshotConfig {
     pub fixture_root: Option<PathBuf>,
     /// Unix time to render ages against instead of the clock.
     pub now: Option<i64>,
+    /// Entries put in the Messages log before the keys run, oldest
+    /// first, dated `now` when it is set.
+    pub messages: Vec<String>,
 }
 
 /// The prefix fixtures write in place of the temp directory a world
@@ -131,6 +134,8 @@ pub fn run(config: RunConfig, snap: SnapshotConfig) -> Result<()> {
         refresh(&mut app, &config);
     }
 
+    seed_messages(&mut app, &snap.messages, snap.now);
+
     let keys = parse_key_script(&snap.keys)?;
     let rebase = snap
         .fixture_root
@@ -172,6 +177,23 @@ pub fn run(config: RunConfig, snap: SnapshotConfig) -> Result<()> {
     stdout.write_all(b"\n")?;
     stdout.flush()?;
     Ok(())
+}
+
+/// Put `messages` in the Messages log as information, oldest first, so
+/// the log can be drawn with entries. Reporting an entry also sets the
+/// status line; that is cleared again so the frame shows what the keys
+/// leave there.
+fn seed_messages(app: &mut App, messages: &[String], now: Option<i64>) {
+    for text in messages {
+        let mut entry = crate::tui::messages::LogEntry::info(text.clone());
+        if let Some(now) = now {
+            entry.at_epoch = now;
+        }
+        app.update(Msg::Report(Box::new(entry)));
+    }
+    if !messages.is_empty() {
+        app.update(Msg::SetStatus(None));
+    }
 }
 
 /// Read and deserialize a `GraphSnapshot` from a JSON fixture.
