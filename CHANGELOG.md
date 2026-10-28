@@ -105,6 +105,12 @@ Targeted for 0.2.0, after 0.1.0 is tagged. History, rebuild, and pins
   that shrinks no longer leaves blank rows below it, the `.` row menu
   scrolls to its cursor and keeps its key hints, and the row, mux, and
   worktree menus no longer crash a very short terminal.
+- **The right pane stays on its content too.** Scrolling the Preview
+  (`J`/`K`) past its end shows its last lines instead of blank rows, and
+  the first key back moves it at once; the explorer fills its zone after
+  its rows shrink (hiding edge metadata at the end of a long Related list)
+  instead of leaving the last row over blank rows; and a field that wraps
+  to more rows than the zone shows its label first.
 - **`Enter` and `o` work on every field the right pane shows.** With
   Expanded Node Detail on (`F`), the fields past the first five did
   nothing: `Enter` did not copy them, and `o` said the row had no

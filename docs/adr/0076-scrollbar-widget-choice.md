@@ -5,6 +5,10 @@
 Accepted. Amended by [ADR 0155](0155-tui-text-measured-cut-and-wrapped-in-cells.md):
 a scrolled pane wraps its text first and draws those rows, so the
 scrollbar's content length is the row count drawn, not an estimate.
+Amended by [ADR 0156](0156-tui-scroll-window-follow-rule-and-viewports-by-value.md):
+the gutter is carved out of the body rather than the bar drawn over it,
+one recipe in the framework's `scroll` module draws every bar, and the
+thumb is placed by the window the body scrolls.
 
 ## Context
 

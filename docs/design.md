@@ -1094,6 +1094,14 @@ key hints wrap only between hints, and a surface that needs its row count (a
 scrollbar, a zone's height) draws the rows it wrapped. The CLI's tables share
 the cell measure and the end cut; their column allocation stays their own.
 
+Scrolling is the fourth (ADR 0156): the framework's `scroll` module steps a
+cursor (short choice lists wrap, scrollable content clamps), follows it with
+minimal motion, keeps a window that never scrolls past its content, carves the
+scrollbar gutter only when rows overflow, and counts wrapped rows from the rows
+drawn. A renderer works its window out from the App and the area it measured
+and returns it; `ui::draw` hands the frame's windows back in a
+`ViewportReport` that the App keeps, so no draw sends a message.
+
 ### Graph-to-View Slicing
 
 The producer pipeline discovers and resolves a typed

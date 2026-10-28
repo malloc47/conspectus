@@ -2,7 +2,11 @@
 
 ## Status
 
-Accepted
+Accepted. Contract 5 amended by
+[ADR 0156](0156-tui-scroll-window-follow-rule-and-viewports-by-value.md):
+the draw reconciles scroll from the App and the measured area and
+returns the windows it drew in a `ViewportReport`, which the App keeps
+after the frame; viewport dimensions are no longer delivered as `Msg`.
 
 ## Context
 
