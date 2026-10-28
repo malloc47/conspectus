@@ -75,6 +75,13 @@ pub fn clip(text: &str, width: usize) -> String {
     text[..end].to_string()
 }
 
+/// The end of `text` that fits in `width` cells, with no mark: the hard
+/// cut for the distinctive tail of an identifier (`…a41f` keeps `a41f`).
+pub fn clip_start(text: &str, width: usize) -> String {
+    let (start, _) = suffix(text, width, 0);
+    text[start..].to_string()
+}
+
 /// `text` followed by spaces up to `width` cells. Text already as wide or
 /// wider is returned as it is; pair it with [`truncate_end`] (or use
 /// [`fit`]) when the column must not grow.

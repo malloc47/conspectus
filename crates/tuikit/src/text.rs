@@ -12,7 +12,8 @@
 //!
 //! - **Measure**: [`width`] and [`spans_width`].
 //! - **Cut and pad**: [`truncate_end`] for labels, [`truncate_middle`]
-//!   for paths and identifiers, [`clip`] for a hard cut with no mark,
+//!   for paths and identifiers, [`clip`] and [`clip_start`] for a hard
+//!   cut with no mark (keeping the start or the end),
 //!   [`pad`] and [`pad_start`] to fill a column, [`fit`] to make a
 //!   column exactly so wide, and [`fit_spans`] to cut a styled row. Every
 //!   cut that loses text ends in [`marks::ELLIPSIS`](crate::glyphs::marks::ELLIPSIS),
@@ -65,7 +66,7 @@ mod measure;
 mod snippet;
 mod wrap;
 
-pub use cut::{clip, fit, fit_spans, pad, pad_start, truncate_end, truncate_middle};
+pub use cut::{clip, clip_start, fit, fit_spans, pad, pad_start, truncate_end, truncate_middle};
 pub use find::{FindAll, find_all_ci, find_ci, paint};
 pub use measure::{spans_width, width};
 pub use snippet::{Snippet, fit_snippet};

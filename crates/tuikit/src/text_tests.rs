@@ -95,6 +95,7 @@ fn cuts_never_exceed_the_budget_and_are_idempotent() {
                 ("truncate_end", truncate_end as fn(&str, usize) -> String),
                 ("truncate_middle", truncate_middle),
                 ("clip", clip),
+                ("clip_start", clip_start),
             ] {
                 let once = cut(&text, budget);
                 assert!(
@@ -115,6 +116,12 @@ fn cuts_never_exceed_the_budget_and_are_idempotent() {
 fn end_cuts_and_clips_keep_a_prefix_of_whole_graphemes() {
     for text in samples() {
         for budget in 0..=width(&text) {
+            let tail = clip_start(&text, budget);
+            assert!(text.ends_with(&tail), "clip_start({text:?}, {budget})");
+            assert!(
+                whole_graphemes(&text, &tail, text.len()),
+                "clip_start({text:?}, {budget}) = {tail:?} split a grapheme"
+            );
             let clipped = clip(&text, budget);
             assert!(text.starts_with(&clipped), "clip({text:?}, {budget})");
             assert!(

@@ -79,7 +79,7 @@ assert_eq!(painted.iter().filter(|span| span.style == bold).count(), 3);
 | `width`, `spans_width` | cells a string or a span list takes | the count ratatui lays out by |
 | `truncate_end` | cut to a budget, `…` in the last cell | for labels; spaces alone past the budget go without a mark |
 | `truncate_middle` | cut the middle out, `…` between the ends | for paths and identifiers (house rule 14) |
-| `clip` | hard cut, no mark | for a column whose content is a prefix by nature |
+| `clip`, `clip_start` | hard cut, no mark, keeping the start or the end | for a column whose content is a prefix by nature, or an identifier's distinctive tail |
 | `pad`, `pad_start` | fill to a width with spaces after or before | never cut |
 | `fit` | cut then pad: exactly the width | |
 | `fit_spans` | cut a styled row, `…` in the style of the cut span | spaces alone past the budget go without a mark |

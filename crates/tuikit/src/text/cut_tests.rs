@@ -73,6 +73,10 @@ fn a_hard_cut_has_no_mark() {
     assert_eq!(clip("short", 8), "short");
     assert_eq!(clip("東京都", 3), "東");
     assert_eq!(clip("x", 0), "");
+    assert_eq!(clip_start("record-0123456789", 4), "6789");
+    assert_eq!(clip_start("東京都", 3), "都");
+    assert_eq!(clip_start("short", 8), "short");
+    assert_eq!(clip_start("x", 0), "");
 }
 
 #[test]
