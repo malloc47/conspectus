@@ -99,6 +99,15 @@ to Conspectus CLI and library entry points.
 Purpose: architecture decision records. `docs/adr/README.md` indexes all of
 them by theme with their status.
 
+## `crates/tuikit/README.md`
+
+Purpose: entry point to the TUI framework crate's own documentation set:
+layers and module map (`crates/tuikit/docs/architecture.md`), independence
+rules, house rules, and how to add a control
+(`crates/tuikit/docs/contributing.md`), the per-control page template, and the
+framework-scoped decision index. Written to stand alone so the crate can leave
+this repository; ADRs 0150 to 0152 record the decisions behind it.
+
 ## `docs/implementation/`
 
 Purpose: phase-by-phase implementation plan for turning the design into
