@@ -884,24 +884,6 @@ fn group_rows_carry_session_count_chip_only_when_no_ambiguity() {
 }
 
 #[test]
-fn truncate_to_width_middle_collapses_to_inline_ellipsis() {
-    // Fits unchanged.
-    assert_eq!(
-        truncate_to_width_middle("/fixture/repos/project", 30),
-        "/fixture/repos/project"
-    );
-    // Drops the middle and keeps both ends visible.
-    let collapsed = truncate_to_width_middle("/fixture/atelier-demo/repo-a", 15);
-    assert!(collapsed.contains('…'), "{collapsed}");
-    assert!(collapsed.starts_with('/'), "{collapsed}");
-    assert!(collapsed.ends_with("repo-a"), "{collapsed}");
-    assert_eq!(UnicodeWidthStr::width(collapsed.as_str()), 15);
-    // Degenerate widths render the ellipsis alone or nothing.
-    assert_eq!(truncate_to_width_middle("abc", 1), "…");
-    assert_eq!(truncate_to_width_middle("abc", 0), "");
-}
-
-#[test]
 fn render_node_field_line_places_kind_chip_before_value() {
     // ADR 0073 §3 amendment: the cwd kind-chip glyph should sit
     // beside the label so the chip stays attached when the value
@@ -1326,7 +1308,7 @@ fn related_row_truncates_long_labels_instead_of_wrapping_them_away() {
     let line = render_validated_link_line(&group, &link, false, &theme, false, width);
     let text: String = line.spans.iter().map(|s| s.content.as_ref()).collect();
     assert!(
-        UnicodeWidthStr::width(text.as_str()) <= width,
+        text::width(&text) <= width,
         "row must fit the pane so it never wraps: `{text}`"
     );
     assert!(
@@ -2180,7 +2162,7 @@ fn mux_session_row_mirrors_session_column_order() {
     let rendered: String = spans.iter().map(|span| span.content.as_ref()).collect();
 
     assert!(
-        UnicodeWidthStr::width(rendered.as_str()) <= 100,
+        text::width(&rendered) <= 100,
         "mux row should fit the given width: {rendered:?}"
     );
     assert!(

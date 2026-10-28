@@ -34,7 +34,7 @@ use ratatui::widgets::{
     Block, Borders, Paragraph, Scrollbar, ScrollbarOrientation, ScrollbarState, Wrap,
 };
 use tuikit::glyphs::marks;
-use unicode_width::UnicodeWidthStr;
+use tuikit::text;
 
 use crate::model::{MuxSessionId, NodeId};
 use crate::tui::Msg;
@@ -50,17 +50,17 @@ use crate::tui::rows::{
     format_recency, recency_bucket,
 };
 
+mod compact;
 mod header;
 mod left_panel;
 mod preview_pane;
 mod right_panel;
-mod text;
 
+use compact::*;
 use header::*;
 use left_panel::*;
 use preview_pane::*;
 use right_panel::*;
-use text::*;
 
 /// Render one frame.
 ///
@@ -329,7 +329,7 @@ fn draw_body(app: &mut App, frame: &mut Frame<'_>, area: Rect) {
 }
 
 fn focus_marker_width(app: &App, focus: Focus) -> usize {
-    focus_marker_span(app, focus).content.chars().count()
+    text::width(&focus_marker_span(app, focus).content)
 }
 
 /// `► ` when the given panel has focus, two-space pad otherwise.
@@ -354,7 +354,7 @@ fn wrapped_line_count(lines: &[Line<'_>], width: u16) -> usize {
             let line_width = line
                 .spans
                 .iter()
-                .map(|s| UnicodeWidthStr::width(s.content.as_ref()))
+                .map(|s| text::width(s.content.as_ref()))
                 .sum::<usize>()
                 .max(1);
             line_width.div_ceil(pane_width).max(1)

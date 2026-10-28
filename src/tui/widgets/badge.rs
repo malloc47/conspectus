@@ -18,7 +18,6 @@
 use ratatui::macros::span;
 use ratatui::style::{Modifier, Style};
 use ratatui::text::Span;
-use tuikit::glyphs::marks;
 
 use crate::tui::Theme;
 
@@ -49,17 +48,11 @@ pub fn command_badge(command: &str, theme: &Theme) -> Span<'static> {
     badge_span(command, style, theme.badge_width)
 }
 
-/// `label` padded or cut (with `…`) to `width` characters, inside one
+/// `label` padded or cut (with `…`) to `width` cells, inside one
 /// styled span so the padding carries the chip background too.
 fn badge_span(label: &str, style: Style, width: usize) -> Span<'static> {
     let width = width.max(crate::tui::theme::MIN_BADGE_WIDTH);
-    let label = if label.chars().count() > width {
-        let kept: String = label.chars().take(width - 1).collect();
-        format!("{kept}{}", marks::ELLIPSIS)
-    } else {
-        label.to_string()
-    };
-    span!(style; " {label:<width$} ")
+    span!(style; " {} ", tuikit::text::fit(label, width))
 }
 
 #[cfg(test)]

@@ -28,7 +28,7 @@ use std::path::Path;
 use ratatui::style::{Color, Style};
 use ratatui::text::{Line, Span};
 use tuikit::glyphs::marks;
-use unicode_width::UnicodeWidthStr;
+use tuikit::text;
 
 use crate::model::{
     AgentSessionNode, BranchNode, CheckoutNode, Confidence, ForgePrNode, ForkNode, GraphLink,
@@ -971,14 +971,12 @@ fn build_breadcrumb_hops(hops: &[BreadcrumbHop], theme: &Theme) -> Vec<RenderedB
                 .split_once(':')
                 .map_or(hop.short_label.as_str(), |(_, tag)| tag);
             let tag = if counts.get(hop.short_label.as_str()).copied().unwrap_or(0) > 1 {
-                let id_text = hop.focused.to_string();
-                let tail: String = id_text.chars().rev().take(4).collect();
-                let tail: String = tail.chars().rev().collect();
+                let tail = text::clip_start(&hop.focused.to_string(), 4);
                 format!("{raw_tag}·{tail}")
             } else {
                 raw_tag.to_string()
             };
-            let width = style.width + 1 + UnicodeWidthStr::width(tag.as_str());
+            let width = style.width + 1 + text::width(&tag);
             RenderedBreadcrumbHop {
                 glyph: style.glyph,
                 glyph_color: color,
@@ -1171,15 +1169,10 @@ pub fn short_node_label(node: &GraphNode) -> String {
                     .rsplit(['-', '/'])
                     .find(|seg| !seg.is_empty())
                     .unwrap_or(s.id.session_key.as_str());
-            let tag = if tag.chars().count() > 8 {
-                &tag[tag.len().saturating_sub(8)..]
-            } else {
-                tag
-            };
-            format!("session:{tag}")
+            format!("session:{}", text::clip_start(tag, 8))
         }
         GraphNode::MuxSession(m) => format!("mux:{}", m.native_id),
-        GraphNode::Pin(p) => format!("pin:{}", truncate(&p.label, 16)),
+        GraphNode::Pin(p) => format!("pin:{}", text::truncate_end(&p.label, 16)),
         GraphNode::RuntimeProcess(p) => {
             let head = p
                 .command
@@ -1187,13 +1180,13 @@ pub fn short_node_label(node: &GraphNode) -> String {
                 .map(|cmd| basename(cmd.split_whitespace().next().unwrap_or(cmd)).to_string())
                 .or_else(|| p.pid.map(|pid| format!("pid {pid}")))
                 .unwrap_or_else(|| basename(&p.observation_key).to_string());
-            let head = truncate(&head, 14);
+            let head = text::truncate_end(&head, 14);
             format!("proc:{head}")
         }
         GraphNode::ForgePr(pr) => format!("pr:{}/{}#{}", pr.owner, pr.repo, pr.number),
         GraphNode::Fork(f) => {
             let tag = f.name.as_deref().unwrap_or(f.provider_source_key.as_str());
-            format!("fork:{}", truncate(tag, 16))
+            format!("fork:{}", text::truncate_end(tag, 16))
         }
         GraphNode::Repo(r) => format!("repo:{}", basename(&r.common_dir)),
         GraphNode::Checkout(c) => format!("co:{}", basename(&c.root)),
@@ -1221,9 +1214,9 @@ pub(crate) fn title_line(snapshot: &GraphSnapshot, node: &GraphNode) -> String {
         GraphNode::MuxSession(m) => m.display_label(),
         GraphNode::Pin(p) => format!("pin:{}", p.label),
         GraphNode::RuntimeProcess(p) => match (p.pid, p.command.as_deref()) {
-            (Some(pid), Some(cmd)) => format!("pid {pid}: {}", truncate(cmd, 48)),
+            (Some(pid), Some(cmd)) => format!("pid {pid}: {}", text::truncate_end(cmd, 48)),
             (Some(pid), None) => format!("pid {pid}"),
-            (None, Some(cmd)) => truncate(cmd, 48),
+            (None, Some(cmd)) => text::truncate_end(cmd, 48),
             (None, None) => p.observation_key.clone(),
         },
         GraphNode::ForgePr(pr) => format!("{}/{}#{}", pr.owner, pr.repo, pr.number),
@@ -1405,7 +1398,7 @@ fn agent_session_core(
     if let Some(alias) = &alias {
         fields.push(CoreField::text("alias", alias.clone()));
     } else if let Some(title) = s.title.as_deref().map(str::trim).filter(|t| !t.is_empty()) {
-        let truncated = truncate(title, 48);
+        let truncated = text::truncate_end(title, 48);
         let mut field = CoreField::plain("title", truncated.clone())
             .previewing(FieldValue::Text(title.to_string()));
         if truncated.len() < title.len() {
@@ -1458,7 +1451,7 @@ fn agent_session_extras(
         );
     }
     if let Some(preview) = &s.last_message_preview {
-        let truncated = truncate(preview, 48);
+        let truncated = text::truncate_end(preview, 48);
         let mut field = CoreField::plain("last_message_preview", truncated.clone())
             .previewing(FieldValue::Text(preview.clone()));
         if truncated.len() < preview.len() {
@@ -1531,7 +1524,7 @@ fn mux_session_extras(m: &MuxSessionNode, now: Option<i64>) -> Vec<CoreField> {
         fields.push(CoreField::timestamp("created", epoch, now));
     }
     if let Some(cmd) = &m.active_pane_command {
-        let truncated = truncate(cmd, 48);
+        let truncated = text::truncate_end(cmd, 48);
         let mut field = CoreField::plain("active_pane_command", truncated.clone())
             .previewing(FieldValue::Command(split_command_line(cmd)));
         if truncated.len() < cmd.len() {
@@ -1549,7 +1542,7 @@ fn mux_session_extras(m: &MuxSessionNode, now: Option<i64>) -> Vec<CoreField> {
         fields.push(CoreField::path("active_pane_current_path", path, None));
     }
     if let Some(cmd) = &m.active_pane_start_command {
-        let truncated = truncate(cmd, 48);
+        let truncated = text::truncate_end(cmd, 48);
         let mut field = CoreField::plain("active_pane_start_command", truncated.clone())
             .previewing(FieldValue::Command(split_command_line(cmd)));
         if truncated.len() < cmd.len() {
@@ -1642,7 +1635,7 @@ fn runtime_process_core(
     });
     let command_field = match &p.command {
         Some(cmd) => {
-            let truncated = truncate(cmd, 48);
+            let truncated = text::truncate_end(cmd, 48);
             let mut field = CoreField::plain("command", truncated.clone())
                 .previewing(FieldValue::Command(split_command_line(cmd)));
             if truncated.len() < cmd.len() {
@@ -1811,7 +1804,7 @@ fn forge_pr_core(pr: &ForgePrNode, now: Option<i64>) -> Vec<CoreField> {
     });
     fields.push(match &pr.url {
         Some(url) => {
-            let truncated = truncate(url, 48);
+            let truncated = text::truncate_end(url, 48);
             let mut field = CoreField::plain("url", truncated.clone());
             if truncated.len() < url.len() {
                 field = field.with_long(url.clone());
@@ -1852,15 +1845,6 @@ fn relative_epoch(epoch: i64, now: Option<i64>) -> String {
 }
 
 use crate::tui::preview::split_command_line;
-
-fn truncate(value: &str, max: usize) -> String {
-    if value.chars().count() <= max {
-        return value.to_string();
-    }
-    let mut out: String = value.chars().take(max.saturating_sub(1)).collect();
-    out.push_str(marks::ELLIPSIS);
-    out
-}
 
 // ----- Relationship explorer assembly ---------------------------------------
 
@@ -2127,9 +2111,9 @@ fn neighbor_display_label(node: &GraphNode, home: Option<&Path>) -> String {
         GraphNode::MuxSession(m) => m.display_label(),
         GraphNode::Pin(p) => format!("pin:{}", p.label),
         GraphNode::RuntimeProcess(p) => match (p.pid, p.command.as_deref()) {
-            (Some(pid), Some(cmd)) => format!("{} · pid {pid}", truncate(cmd, 24)),
+            (Some(pid), Some(cmd)) => format!("{} · pid {pid}", text::truncate_end(cmd, 24)),
             (Some(pid), None) => format!("pid {pid}"),
-            (None, Some(cmd)) => truncate(cmd, 32),
+            (None, Some(cmd)) => text::truncate_end(cmd, 32),
             (None, None) => p.observation_key.clone(),
         },
         GraphNode::ForgePr(pr) => format!("{}/{}#{}", pr.owner, pr.repo, pr.number),

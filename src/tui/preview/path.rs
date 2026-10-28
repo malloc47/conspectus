@@ -94,7 +94,7 @@ fn list_directory(path: &Path, muted: Modifier) -> std::io::Result<Vec<Line<'sta
     let name_width = entries
         .iter()
         .take(MAX_LISTED)
-        .map(|e| unicode_width::UnicodeWidthStr::width(e.name.as_str()) + 1)
+        .map(|e| tuikit::text::width(&e.name) + 1)
         .max()
         .unwrap_or(0)
         .min(48);
@@ -108,7 +108,7 @@ fn list_directory(path: &Path, muted: Modifier) -> std::io::Result<Vec<Line<'sta
                 Style::new().add_modifier(Modifier::BOLD),
             ),
             EntryKind::File(size) => Line::from(vec![
-                Span::raw(format!("{:<name_width$}", entry.name)),
+                Span::raw(tuikit::text::pad(&entry.name, name_width)),
                 Span::styled(format!(" {:>6}", human_size(size)), dim),
             ]),
             EntryKind::Symlink(target) => Line::from(vec![

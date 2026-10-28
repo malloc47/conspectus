@@ -34,7 +34,6 @@ use ratatui::style::Style;
 use ratatui::text::Line;
 use ratatui::widgets::{Borders, Paragraph, Widget};
 use tui_popup::{KnownSize, Popup};
-use tuikit::glyphs::marks;
 
 use crate::tui::Theme;
 
@@ -113,26 +112,4 @@ pub fn wrapped_lines(text: &str, indent: usize, width: usize) -> Vec<String> {
 pub struct ScrollFit {
     pub rows: usize,
     pub max_scroll: usize,
-}
-
-/// Cut `text` to at most `width` cells, ending in `…` when it was cut:
-/// the deliberate form of truncation for a label that must stay on one
-/// line.
-pub fn ellipsize(text: &str, width: usize) -> String {
-    use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
-    if UnicodeWidthStr::width(text) <= width {
-        return text.to_string();
-    }
-    let mut out = String::new();
-    let mut used = 0;
-    for ch in text.chars() {
-        let w = UnicodeWidthChar::width(ch).unwrap_or(0);
-        if used + w + 1 > width {
-            break;
-        }
-        out.push(ch);
-        used += w;
-    }
-    out.push_str(marks::ELLIPSIS);
-    out
 }

@@ -18,7 +18,7 @@ pub(super) fn draw_left_panel(app: &mut App, frame: &mut Frame<'_>, area: Rect) 
     let inner = match pinned_banner(app) {
         Some(banner) if inner.height > 4 => {
             let wrapped = u16::try_from(
-                UnicodeWidthStr::width(banner.as_str()).div_ceil(usize::from(inner.width).max(1)),
+                text::width(banner.as_str()).div_ceil(usize::from(inner.width).max(1)),
             )
             .unwrap_or(u16::MAX)
             .clamp(1, 3);
@@ -251,11 +251,11 @@ pub(super) struct TabStripFit {
 /// shortened. Only when the active label alone is too wide is it cut,
 /// with its own `…`. A label is never cut in the middle by the border.
 pub(super) fn tab_strip_fit(labels: &[&str], active: usize, room: usize) -> TabStripFit {
-    let separator = UnicodeWidthStr::width(TAB_SEPARATOR);
+    let separator = text::width(TAB_SEPARATOR);
     let span_of = |shown: &[usize]| -> usize {
         shown
             .iter()
-            .map(|&index| UnicodeWidthStr::width(labels[index]))
+            .map(|&index| text::width(labels[index]))
             .sum::<usize>()
             + separator * shown.len().saturating_sub(1)
     };
@@ -269,7 +269,7 @@ pub(super) fn tab_strip_fit(labels: &[&str], active: usize, room: usize) -> TabS
     }
     let active = active.min(labels.len().saturating_sub(1));
     // The marker and a pad after it, so the `…` never touches the corner.
-    let budget = room.saturating_sub(UnicodeWidthStr::width(TAB_STRIP_MORE) + 1);
+    let budget = room.saturating_sub(text::width(TAB_STRIP_MORE) + 1);
     let mut shown = vec![active];
     for index in (0..labels.len()).filter(|&index| index != active) {
         let mut wider = shown.clone();
@@ -280,7 +280,7 @@ pub(super) fn tab_strip_fit(labels: &[&str], active: usize, room: usize) -> TabS
         }
         shown = wider;
     }
-    let active_label = (span_of(&shown) > budget).then(|| truncate_to_width(labels[active], room));
+    let active_label = (span_of(&shown) > budget).then(|| text::truncate_end(labels[active], room));
     TabStripFit {
         shortened: active_label.is_none(),
         shown,
@@ -313,12 +313,7 @@ pub(super) fn search_header(app: &App, width: usize) -> Option<Line<'static>> {
     let entry = app.search_history().viewed()?;
     let search = &entry.search;
     let theme = app.theme();
-    let query = if search.text.chars().count() > 28 {
-        let head: String = search.text.chars().take(27).collect();
-        format!("{head}{}", marks::ELLIPSIS)
-    } else {
-        search.text.clone()
-    };
+    let query = text::truncate_end(&search.text, 28);
     let reach = match search.reach {
         Reach::Current => "Current",
         Reach::All => "All",
@@ -335,9 +330,8 @@ pub(super) fn search_header(app: &App, width: usize) -> Option<Line<'static>> {
     };
     let lead = format!("search {position}/{total} \"{query}\"");
     // What follows the query gives way when the pane is narrow.
-    let room = width
-        .saturating_sub(UnicodeWidthStr::width(lead.as_str()) + UnicodeWidthStr::width(filtering));
-    let detail = truncate_to_width(&format!(" · {reach} · {note}"), room);
+    let room = width.saturating_sub(text::width(lead.as_str()) + text::width(filtering));
+    let detail = text::truncate_end(&format!(" · {reach} · {note}"), room);
     let mut spans = vec![
         span!(Style::default().fg(theme.accent).add_modifier(Modifier::BOLD);
             "search {position}/{total}"),
@@ -349,8 +343,8 @@ pub(super) fn search_header(app: &App, width: usize) -> Option<Line<'static>> {
     }
     if total > 1 {
         let hint = "< older  > newer";
-        let used = spans_width(&spans);
-        let gap = width.saturating_sub(used + UnicodeWidthStr::width(hint));
+        let used = text::spans_width(&spans);
+        let gap = width.saturating_sub(used + text::width(hint));
         if gap >= 2 {
             spans.push(Span::raw(" ".repeat(gap)));
             spans.push(span!(dim; "{hint}"));
@@ -518,7 +512,7 @@ pub(super) fn append_group_body_spans(
     secondary_max_width: Option<usize>,
 ) {
     let label = compact_path_label(&group.display_path);
-    let label_width = UnicodeWidthStr::width(label.as_str());
+    let label_width = text::width(label.as_str());
     spans.push(span!(Modifier::BOLD; "{label}"));
     // Pad the label cell so the secondary content starts at the
     // same column across every visible group row. Skipped when the
@@ -533,8 +527,8 @@ pub(super) fn append_group_body_spans(
         // push the trailing summary chip block (count + ambiguity
         // glyph) past the right edge of the pane.
         let rendered = match secondary_max_width {
-            Some(budget) if budget < UnicodeWidthStr::width(secondary.as_str()) => {
-                truncate_to_width_middle(&secondary, budget)
+            Some(budget) if budget < text::width(secondary.as_str()) => {
+                text::truncate_middle(&secondary, budget)
             }
             _ => secondary,
         };
@@ -564,7 +558,7 @@ pub(super) fn group_row_body_width(
     };
     let mut spans = row_prefix_spans(row, app, align);
     append_group_body_spans(&mut spans, group, app.theme(), align.label_width, None);
-    spans_width(&spans)
+    text::spans_width(&spans)
 }
 
 /// Width of just the label cell for a group row (excluding indent,
@@ -575,7 +569,7 @@ pub(super) fn group_row_label_width(row: &crate::tui::rows::Row) -> usize {
     let RowKind::Group(group) = &row.kind else {
         return 0;
     };
-    UnicodeWidthStr::width(compact_path_label(&group.display_path).as_str())
+    text::width(compact_path_label(&group.display_path).as_str())
 }
 
 /// Append the right-aligned summary chips to a group row's span
@@ -729,7 +723,7 @@ impl PrAlign {
             let RowKind::Pr(pr) = &row.kind else {
                 continue;
             };
-            align.label = align.label.max(UnicodeWidthStr::width(pr.label.as_str()));
+            align.label = align.label.max(text::width(pr.label.as_str()));
         }
         align
     }
@@ -779,18 +773,17 @@ impl MixedAlign {
             // The label cell runs from the row's own indent to a common
             // column, so nested rows line their status up with their
             // parents'.
-            let label_width =
-                UnicodeWidthStr::width(mixed.label.as_str()).min(MIXED_LABEL_MAX_WIDTH);
+            let label_width = text::width(mixed.label.as_str()).min(MIXED_LABEL_MAX_WIDTH);
             align.label = align
                 .label
                 .max(mixed_prefix_width(row.depth, align.marker) + label_width);
             align.status = align
                 .status
-                .max(UnicodeWidthStr::width(mixed.status.as_str()).min(MIXED_STATUS_MAX_WIDTH));
+                .max(text::width(mixed.status.as_str()).min(MIXED_STATUS_MAX_WIDTH));
             if let Some(chip) = &mixed.chip {
-                align.chip = align.chip.max(UnicodeWidthStr::width(
-                    mixed_chip_span(chip, theme).content.as_ref(),
-                ));
+                align.chip = align
+                    .chip
+                    .max(text::width(mixed_chip_span(chip, theme).content.as_ref()));
             }
         }
         align
@@ -839,12 +832,13 @@ pub(super) fn age_span(
     now: i64,
     theme: &Theme,
 ) -> Span<'static> {
-    let text = age.unwrap_or(marks::NO_VALUE);
+    let age = age.unwrap_or(marks::NO_VALUE);
     let style = recency_bucket(Some(now), epoch).map_or_else(
         || Style::default().add_modifier(theme.muted),
         |bucket| bucket.style(theme),
     );
-    span!(style; "{:>width$}", truncate_to_width_strict(text, AGE_CELL_WIDTH), width = AGE_CELL_WIDTH)
+    let cell = text::pad_start(&text::truncate_end(age, AGE_CELL_WIDTH), AGE_CELL_WIDTH);
+    span!(style; "{cell}")
 }
 
 /// The body of a mixed-kind row after its kind glyph. The Columns grid
@@ -871,7 +865,7 @@ pub(super) fn render_mixed_spans(
         spans.push(span!(
             Style::default().fg(theme.link);
             "{}",
-            pad_to_width(truncate_to_width_strict(&mixed.label, label_width), label_width)
+            text::fit(&mixed.label, label_width)
         ));
         spans.push(Span::raw("  "));
         match &mixed.chip {
@@ -892,9 +886,9 @@ pub(super) fn render_mixed_spans(
                 Some(EntityState::Unknown) | None => span!(theme.muted; "{}", state::UNKNOWN),
             },
         });
-        let room = budget.saturating_sub(spans_width(&spans));
+        let room = budget.saturating_sub(text::spans_width(&spans));
         if room > 4 && !mixed.content.is_empty() {
-            let content = truncate_to_width_strict(&mixed.content, room - 2);
+            let content = text::truncate_end(&mixed.content, room - 2);
             spans.push(Span::styled(
                 format!("  {content}"),
                 Style::default().fg(theme.inert),
@@ -912,18 +906,18 @@ pub(super) fn render_mixed_spans(
             (MixedTone::Normal, Some(status)) => status.mark(theme).1,
             (MixedTone::Normal, None) => Style::default().fg(theme.mux_attached()),
         };
-        let label = truncate_to_width_strict(&mixed.label, MIXED_LABEL_MAX_WIDTH);
+        let label = text::truncate_end(&mixed.label, MIXED_LABEL_MAX_WIDTH);
         let label_cell = align.label.saturating_sub(prefix_width);
-        spans.push(span!(Modifier::BOLD; "{}", pad_to_width(label, label_cell)));
-        let status = truncate_to_width_strict(status_word, MIXED_STATUS_MAX_WIDTH);
-        spans.push(span!(status_style; "  {}", pad_to_width(status, align.status)));
+        spans.push(span!(Modifier::BOLD; "{}", text::pad(&label, label_cell)));
+        let status = text::truncate_end(status_word, MIXED_STATUS_MAX_WIDTH);
+        spans.push(span!(status_style; "  {}", text::pad(&status, align.status)));
         spans.push(Span::raw("  "));
         spans.push(age_span(mixed.age.as_deref(), mixed.age_epoch, now, theme));
         // The chip cell has one width in the tree, so the content starts
         // in one column whether or not a row has a chip.
         if align.chip > 0 {
             let cell = 2 + align.chip;
-            let fits = budget.saturating_sub(spans_width(&spans)) > cell + 2;
+            let fits = budget.saturating_sub(text::spans_width(&spans)) > cell + 2;
             match (&mixed.chip, fits) {
                 (Some(chip), true) => {
                     spans.push(Span::raw("  "));
@@ -933,9 +927,9 @@ pub(super) fn render_mixed_spans(
                 _ => {}
             }
         }
-        let room = budget.saturating_sub(spans_width(&spans));
+        let room = budget.saturating_sub(text::spans_width(&spans));
         if room > 2 && !mixed.content.is_empty() {
-            let content = truncate_to_width_strict(&mixed.content, room - 2);
+            let content = text::truncate_end(&mixed.content, room - 2);
             spans.push(Span::styled(
                 format!("  {content}"),
                 Style::default().fg(theme.inert),
@@ -1065,7 +1059,7 @@ pub(super) fn render_left_row(
             let summary_reservation = group_summary
                 .filter(|s| s.agents > 0)
                 .map_or(0, |_| align.count_width + 5);
-            let head_width = spans_width(&spans);
+            let head_width = text::spans_width(&spans);
             let label_cell_width = align.label_width.max(group_row_label_width(row));
             let secondary_budget = width
                 .saturating_sub(head_width)
@@ -1083,7 +1077,7 @@ pub(super) fn render_left_row(
                 let body_target = align
                     .body_width
                     .min(width.saturating_sub(summary_reservation));
-                let current_width = spans_width(&spans);
+                let current_width = text::spans_width(&spans);
                 if current_width < body_target {
                     spans.push(Span::raw(" ".repeat(body_target - current_width)));
                 }
@@ -1095,7 +1089,7 @@ pub(super) fn render_left_row(
             append_session_preview(&mut spans, session, width, theme);
         }
         RowKind::MuxSession(mux) => {
-            let remaining = width.saturating_sub(spans_width(&spans));
+            let remaining = width.saturating_sub(text::spans_width(&spans));
             spans.extend(render_mux_session_spans(
                 mux,
                 theme,
@@ -1105,23 +1099,23 @@ pub(super) fn render_left_row(
             ));
         }
         RowKind::Pr(pr) => {
-            let budget = width.saturating_sub(spans_width(&spans));
+            let budget = width.saturating_sub(text::spans_width(&spans));
             spans.extend(render_pr_spans(pr, theme, align.pr, budget, now));
         }
         RowKind::Hit(hit) => {
-            let budget = width.saturating_sub(spans_width(&spans));
+            let budget = width.saturating_sub(text::spans_width(&spans));
             spans.extend(render_hit_spans(hit, theme, budget));
         }
         RowKind::Pane(pane) => {
-            let budget = width.saturating_sub(spans_width(&spans));
+            let budget = width.saturating_sub(text::spans_width(&spans));
             spans.extend(render_pane_spans(pane, theme, budget));
         }
         RowKind::PaneHit(hit) => {
-            let budget = width.saturating_sub(spans_width(&spans));
+            let budget = width.saturating_sub(text::spans_width(&spans));
             spans.extend(render_pane_hit_spans(hit, theme, budget));
         }
         RowKind::Mixed(mixed) => {
-            let prefix_width = spans_width(&spans);
+            let prefix_width = text::spans_width(&spans);
             let budget = width.saturating_sub(prefix_width);
             spans.extend(render_mixed_spans(
                 mixed,
@@ -1191,10 +1185,12 @@ pub(super) fn render_session_spans(
     // Conspectus's internal short node id. Operators recognize the
     // external session id; the internal id is still accepted by
     // explicit node lookup commands.
-    let session_id =
-        truncate_to_width_no_marker(&session.session.session_key, SESSION_ID_COLUMN_WIDTH);
+    let session_id = text::pad(
+        &text::clip(&session.session.session_key, SESSION_ID_COLUMN_WIDTH),
+        SESSION_ID_COLUMN_WIDTH,
+    );
     let id_style = Style::default().fg(theme.inert);
-    spans.push(span!(id_style; "{session_id:<SESSION_ID_COLUMN_WIDTH$}  "));
+    spans.push(span!(id_style; "{session_id}  "));
     // The badge widget pads internally so every chip is the same
     // width regardless of label length; no external padding span
     // needed.
@@ -1217,7 +1213,7 @@ pub(super) fn render_session_spans(
     // the builder flagged this row for disambiguation. Right pane,
     // search index, and status hints still read `display_label`.
     if let Some(label) = session.tree_label().filter(|label| !label.is_empty()) {
-        let label = truncate_to_width_strict(label, SESSION_DISPLAY_LABEL_WIDTH);
+        let label = text::truncate_end(label, SESSION_DISPLAY_LABEL_WIDTH);
         let style = if session
             .alias
             .as_deref()
@@ -1236,7 +1232,7 @@ pub(super) fn render_session_spans(
         let chip = if named_after_it {
             "(mux stopped)".to_string()
         } else {
-            format!("was in {}", truncate_to_width(mux, 20))
+            format!("was in {}", text::truncate_end(mux, 20))
         };
         spans.push(span!(
             Style::default().fg(theme.inert).add_modifier(theme.muted);
@@ -1250,8 +1246,8 @@ pub(super) fn render_session_spans(
     {
         spans.push(span!(
             Style::default().fg(theme.inert);
-            "  {:<16}",
-            truncate_to_width(project, 16)
+            "  {}",
+            text::fit(project, 16)
         ));
     }
     spans
@@ -1270,7 +1266,7 @@ pub(super) fn append_session_preview(
     let Some(preview) = session.preview.as_deref().filter(|p| !p.is_empty()) else {
         return;
     };
-    let used = spans_width(spans);
+    let used = text::spans_width(spans);
     if width <= used + 8 {
         return;
     }
@@ -1278,7 +1274,7 @@ pub(super) fn append_session_preview(
     spans.push(span!(
         Style::default().fg(theme.inert).add_modifier(Modifier::ITALIC);
         "{}",
-        truncate_to_width(preview, width - used - 2)
+        text::truncate_end(preview, width - used - 2)
     ));
 }
 
@@ -1308,18 +1304,18 @@ pub(super) fn render_mux_session_spans(
     spans.push(span!(
         label_style;
         "{}",
-        pad_to_width(truncate_to_width_strict(&label, label_width), label_width)
+        text::fit(&label, label_width)
     ));
 
-    if width <= spans_width(&spans) + 4 {
-        return fit_spans_to_width(spans, width);
+    if width <= text::spans_width(&spans) + 4 {
+        return text::fit_spans(spans, width);
     }
 
     spans.push(Span::raw("  "));
     append_mux_agent_labels(&mut spans, mux, theme, width);
 
-    if width <= spans_width(&spans) + 4 {
-        return fit_spans_to_width(spans, width);
+    if width <= text::spans_width(&spans) + 4 {
+        return text::fit_spans(spans, width);
     }
 
     spans.push(Span::raw("  "));
@@ -1348,7 +1344,7 @@ pub(super) fn render_mux_session_spans(
     }
 
     append_mux_single_session_preview(&mut spans, mux, theme, width);
-    fit_spans_to_width(spans, width)
+    text::fit_spans(spans, width)
 }
 
 pub(super) fn append_mux_agent_labels(
@@ -1414,7 +1410,7 @@ pub(super) fn append_mux_single_session_preview(
     else {
         return;
     };
-    let used = spans_width(spans);
+    let used = text::spans_width(spans);
     if width <= used + 8 {
         return;
     }
@@ -1422,7 +1418,7 @@ pub(super) fn append_mux_single_session_preview(
     spans.push(span!(
         Style::default().fg(theme.inert).add_modifier(Modifier::ITALIC);
         "{}",
-        truncate_to_width(preview, width - used - 2)
+        text::truncate_end(preview, width - used - 2)
     ));
 }
 
@@ -1442,7 +1438,7 @@ fn append_content_hit(
     };
     let dim = Style::default().fg(theme.inert).add_modifier(theme.muted);
     spans.push(span!(dim; "  {chip}"));
-    let used = spans_width(spans);
+    let used = text::spans_width(spans);
     if width <= used + 8 {
         return;
     }
@@ -1469,10 +1465,7 @@ fn render_hit_spans(
             &origin.harness_label,
             theme,
         ));
-        let name = pad_to_width(
-            truncate_to_width_strict(&origin.label, FLAT_LABEL_WIDTH),
-            FLAT_LABEL_WIDTH,
-        );
+        let name = text::fit(&origin.label, FLAT_LABEL_WIDTH);
         spans.push(span!(Modifier::BOLD; " {name}  "));
     }
     spans.extend([
@@ -1481,7 +1474,7 @@ fn render_hit_spans(
         span!(theme.muted; "  {:<11}", hit.kind),
         span!(secondary; "  {:>4}", hit.age),
     ]);
-    let used = spans_width(&spans);
+    let used = text::spans_width(&spans);
     if budget > used + 8 {
         spans.push(Span::raw("  "));
         append_snippet(
@@ -1507,14 +1500,8 @@ fn render_pane_spans(
     budget: usize,
 ) -> Vec<Span<'static>> {
     let secondary = Style::default().fg(theme.inert);
-    let name = pad_to_width(
-        truncate_to_width_strict(&pane.mux_label, PANE_LABEL_WIDTH),
-        PANE_LABEL_WIDTH,
-    );
-    let command = pad_to_width(
-        truncate_to_width_strict(pane.command.as_deref().unwrap_or(""), 8),
-        8,
-    );
+    let name = text::fit(&pane.mux_label, PANE_LABEL_WIDTH);
+    let command = text::fit(pane.command.as_deref().unwrap_or(""), 8);
     let mut spans = vec![
         span!(Modifier::BOLD; "{name}"),
         span!(secondary; "  {:<5}", pane.location),
@@ -1542,17 +1529,14 @@ fn render_pane_hit_spans(
     let secondary = Style::default().fg(theme.inert);
     let mut spans = Vec::new();
     if let Some(origin) = &hit.origin {
-        let name = pad_to_width(
-            truncate_to_width_strict(origin, PANE_LABEL_WIDTH),
-            PANE_LABEL_WIDTH,
-        );
+        let name = text::fit(origin, PANE_LABEL_WIDTH);
         spans.push(span!(Modifier::BOLD; "{name}  "));
     }
     spans.extend([
         span!(secondary; "line {:<5}", hit.line),
         span!(secondary; "  {:>4}", hit.age),
     ]);
-    let used = spans_width(&spans);
+    let used = text::spans_width(&spans);
     if budget > used + 8 {
         spans.push(Span::raw("  "));
         append_snippet(
@@ -1593,13 +1577,6 @@ fn append_snippet(
             spans.push(Span::styled(piece.to_string(), style));
         }
     }
-}
-
-pub(super) fn spans_width(spans: &[Span<'_>]) -> usize {
-    spans
-        .iter()
-        .map(|span| UnicodeWidthStr::width(span.content.as_ref()))
-        .sum()
 }
 
 /// Per-row node-kind glyph span (ADR 0073). Renders the slate glyph
@@ -1655,7 +1632,7 @@ pub(super) fn render_pr_spans(
     now: i64,
 ) -> Vec<Span<'static>> {
     let mut spans: Vec<Span<'static>> = Vec::new();
-    spans.push(span!(Modifier::BOLD; "{}", pad_to_width(pr.label.clone(), align.label)));
+    spans.push(span!(Modifier::BOLD; "{}", text::pad(&pr.label, align.label)));
     spans.push(Span::raw(" "));
     spans.push(pr_tracking_span(pr, theme));
     spans.push(Span::raw("  "));
@@ -1670,17 +1647,17 @@ pub(super) fn render_pr_spans(
     spans.push(span!(style; "{glyph}"));
     // The content: the local branch when there is one, then the title.
     // Two cells separate each part from what comes before it.
-    let mut room = budget.saturating_sub(spans_width(&spans));
+    let mut room = budget.saturating_sub(text::spans_width(&spans));
     let mut push_content = |spans: &mut Vec<Span<'static>>, style: Style, text: &str| {
         if room <= 2 {
             return;
         }
-        let text = truncate_to_width_strict(text, room - 2);
-        room = room.saturating_sub(UnicodeWidthStr::width(text.as_str()) + 2);
+        let text = text::truncate_end(text, room - 2);
+        room = room.saturating_sub(text::width(text.as_str()) + 2);
         spans.push(Span::styled(format!("  {text}"), style));
     };
     if let Some(branch) = pr.branch_name.as_deref() {
-        let branch = truncate_to_width_strict(branch, PR_BRANCH_MAX_WIDTH);
+        let branch = text::truncate_end(branch, PR_BRANCH_MAX_WIDTH);
         push_content(
             &mut spans,
             Style::default().add_modifier(theme.muted),

@@ -701,7 +701,7 @@ impl MuxLaunchFormState {
         let toggle_focused = self.focus == MuxLaunchField::MuxSocketToggle;
         let text = form::checkbox("socket", self.socket_enabled);
         let suffix = form::Suffix {
-            width: text.chars().count() + 2,
+            width: tuikit::text::width(&text) + 2,
             spans: vec![
                 Span::raw("  "),
                 Span::styled(text, form::entry_style(toggle_focused, theme)),

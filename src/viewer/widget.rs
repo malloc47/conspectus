@@ -450,8 +450,9 @@ fn draw_footer(state: &ViewerState, theme: &Theme, frame: &mut Frame<'_>, area: 
     frame.render_widget(Paragraph::new(line), area);
 }
 
-/// The longest query shown in the footer chip before it is cut.
-const FIND_CHIP_QUERY_CELLS: usize = 16;
+/// The most cells the query takes in the footer chip, the ellipsis of a
+/// cut query included.
+const FIND_CHIP_QUERY_CELLS: usize = 17;
 
 /// The find chip: the query with its position among the matches, or
 /// `no match` (and how many matches the hidden turns hold), then the
@@ -461,10 +462,7 @@ fn find_chip_text(state: &ViewerState) -> Option<String> {
     if !find.is_active() {
         return find.note.clone();
     }
-    let mut query: String = find.query.chars().take(FIND_CHIP_QUERY_CELLS).collect();
-    if find.query.chars().count() > FIND_CHIP_QUERY_CELLS {
-        query.push_str(marks::ELLIPSIS);
-    }
+    let query = tuikit::text::truncate_end(&find.query, FIND_CHIP_QUERY_CELLS);
     let mut text = match find.current {
         Some(index) => format!("find \"{query}\" {}/{}", index + 1, find.matches.len()),
         None => format!("find \"{query}\" no match"),

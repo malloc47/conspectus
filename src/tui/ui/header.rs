@@ -252,7 +252,7 @@ pub(super) fn draw_status_bar(app: &App, frame: &mut Frame<'_>, area: Rect) {
     }
     let mut provider_spans = Vec::new();
     push_provider_chips(app, theme, &mut provider_spans);
-    let reserved = spans_cells(&spans) + spans_cells(&provider_spans);
+    let reserved = text::spans_width(&spans) + text::spans_width(&provider_spans);
     let room = usize::from(area.width).saturating_sub(reserved);
     spans.extend(fit_status_segments(app, theme, room));
     spans.extend(provider_spans);
@@ -369,12 +369,7 @@ fn view_state_segments(app: &App) -> Vec<(u8, String)> {
 /// got, or how many sessions it found once it is done.
 pub(super) fn render_find_chip(app: &App) -> Option<String> {
     let content = app.content()?;
-    let text = if content.text.chars().count() > 24 {
-        let head: String = content.text.chars().take(23).collect();
-        format!("{head}{}", marks::ELLIPSIS)
-    } else {
-        content.text.clone()
-    };
+    let text = text::truncate_end(&content.text, 24);
     if matches!(
         app.active_view(),
         crate::tui::View::Pinned | crate::tui::View::History
@@ -571,7 +566,7 @@ fn fit_status_segments(app: &App, theme: &Theme, room: usize) -> Vec<Span<'stati
     }
     let width = |kept: &[&Piece]| -> usize {
         kept.iter()
-            .map(|piece| UnicodeWidthStr::width(piece.text.as_str()))
+            .map(|piece| text::width(piece.text.as_str()))
             .sum::<usize>()
             + 3 * kept.len().saturating_sub(1)
     };
@@ -609,13 +604,6 @@ fn fit_status_segments(app: &App, theme: &Theme, room: usize) -> Vec<Span<'stati
         spans.push(span!(theme.muted; " …"));
     }
     spans
-}
-
-fn spans_cells(spans: &[Span<'_>]) -> usize {
-    spans
-        .iter()
-        .map(|span| UnicodeWidthStr::width(span.content.as_ref()))
-        .sum()
 }
 
 /// Status-bar action hint that advertises `Enter` as the primary

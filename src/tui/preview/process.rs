@@ -8,7 +8,6 @@ use std::path::Path;
 
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
-use tuikit::glyphs::marks;
 
 use super::PreviewContent;
 
@@ -16,9 +15,9 @@ use super::PreviewContent;
 const MAX_PROCESSES: usize = 200;
 /// Levels below the root a tree descends.
 const MAX_DEPTH: usize = 16;
-/// Characters of a command line a tree shows, so one long command
-/// doesn't push its siblings out of view.
-const MAX_COMMAND_CHARS: usize = 200;
+/// Cells of a command line a tree shows, the ellipsis included, so one
+/// long command doesn't push its siblings out of view.
+const MAX_COMMAND_CELLS: usize = 201;
 
 /// The process tree rooted at `pid`, read from `proc_root` (`/proc` in
 /// the TUI). Working directories and notes take `muted`, the theme's
@@ -110,12 +109,7 @@ fn process_lines(proc_root: &Path, pid: i64, depth: usize, muted: Modifier) -> [
         // Kernel threads and zombies have no command line.
         .or_else(|| read_stat(proc_root, pid).map(|stat| format!("[{}]", stat.comm)))
         .unwrap_or_else(|| "(exited)".to_string());
-    let command = if command.chars().count() > MAX_COMMAND_CHARS {
-        let cut: String = command.chars().take(MAX_COMMAND_CHARS).collect();
-        format!("{cut}{}", marks::ELLIPSIS)
-    } else {
-        command
-    };
+    let command = tuikit::text::truncate_end(&command, MAX_COMMAND_CELLS);
     let cwd = fs::read_link(dir.join("cwd")).map_or_else(
         |_| "(cwd unreadable)".to_string(),
         |path| path.display().to_string(),

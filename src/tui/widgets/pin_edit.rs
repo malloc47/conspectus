@@ -653,7 +653,7 @@ impl Widget for PinEditFormWidget<'_> {
         let label_width = state
             .rows
             .iter()
-            .map(|row| row.label.chars().count())
+            .map(|row| tuikit::text::width(&row.label))
             .max()
             .unwrap_or(11)
             .clamp(11, 16);
@@ -729,12 +729,18 @@ impl Widget for PinEditFormWidget<'_> {
         let detail_width = inner_width.saturating_sub(2);
         let mut bottom: Vec<Line<'static>> = vec![
             line![""],
-            Line::styled(format!("  {}", form::fit(&detail.0, detail_width)), dim),
-            Line::styled(format!("  {}", form::fit(&detail.1, detail_width)), dim),
+            Line::styled(
+                format!("  {}", tuikit::text::fit(&detail.0, detail_width)),
+                dim,
+            ),
+            Line::styled(
+                format!("  {}", tuikit::text::fit(&detail.1, detail_width)),
+                dim,
+            ),
         ];
         if let Some(err) = state.error() {
             bottom.push(Line::styled(
-                format!("  {}", form::fit(err, detail_width)),
+                format!("  {}", tuikit::text::fit(err, detail_width)),
                 Style::default().fg(self.theme.error),
             ));
         }
@@ -806,7 +812,7 @@ fn render_row(
             let custom = !value.is_empty() && !state.known_harness_keys.iter().any(|k| k == value);
             if custom {
                 let mark = " [custom]";
-                let width = grid.value.saturating_sub(mark.chars().count());
+                let width = grid.value.saturating_sub(tuikit::text::width(mark));
                 spans.extend(form::value_cells(
                     input.value(),
                     input.cursor(),
@@ -826,7 +832,7 @@ fn render_row(
                 ));
                 let chips =
                     form::harness_chips(value, &state.known_harness_keys, grid.value - slot, theme);
-                let used: usize = chips.iter().map(|s| s.content.chars().count()).sum();
+                let used = tuikit::text::spans_width(&chips);
                 spans.extend(chips);
                 spans.push(Span::raw(" ".repeat(grid.value - slot - used)));
             }

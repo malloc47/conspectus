@@ -157,7 +157,7 @@ impl Widget for RowMenuWidget<'_> {
                 Style::default()
             };
             lines.push(Line::styled(
-                popup_frame::ellipsize(&label, inner_width),
+                tuikit::text::truncate_end(&label, inner_width),
                 style,
             ));
             for chunk in popup_frame::wrapped_lines(&entry.subtitle, 5, inner_width) {

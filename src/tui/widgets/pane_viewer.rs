@@ -19,7 +19,6 @@ use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::Paragraph;
 use tuikit::glyphs::marks;
-use unicode_width::UnicodeWidthStr;
 
 use crate::content_search::PaneRef;
 use crate::tui::Theme;
@@ -35,6 +34,10 @@ use super::viewer_help::key_notation;
 
 /// Lines of context kept above a line the viewer jumps to.
 const CONTEXT_ABOVE: usize = 2;
+/// The most cells the query takes in the footer's find chip, the
+/// ellipsis of a cut query included (the transcript viewer's chip uses
+/// the same budget).
+const FIND_CHIP_QUERY_CELLS: usize = 17;
 
 /// Everything the pane viewer can be told to do.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -525,10 +528,7 @@ fn draw_footer(state: &PaneViewerState, theme: &Theme, frame: &mut Frame<'_>, ar
         pipe.clone(),
     ];
     if state.find_is_active() {
-        let mut query: String = state.query.chars().take(16).collect();
-        if state.query.chars().count() > 16 {
-            query.push_str(marks::ELLIPSIS);
-        }
+        let query = tuikit::text::truncate_end(&state.query, FIND_CHIP_QUERY_CELLS);
         match state.current {
             Some(at) => spans.push(Span::styled(
                 format!("find \"{query}\" {}/{}", at + 1, state.matches.len()),
@@ -544,11 +544,11 @@ fn draw_footer(state: &PaneViewerState, theme: &Theme, frame: &mut Frame<'_>, ar
     }
     // The keys that matter most stay when the footer is tight; the
     // movement reminder goes first.
-    let used: usize = spans.iter().map(|s| s.content.width()).sum();
+    let used = tuikit::text::spans_width(&spans);
     let chips = "(a) attach · (?) help · (q) close";
     let scroll = "j/k scroll · g/G top/end · / find · ";
     let full = format!("{scroll}{chips}");
-    let hint = if used + full.width() <= area.width as usize {
+    let hint = if used + tuikit::text::width(&full) <= area.width as usize {
         full
     } else {
         chips.to_string()

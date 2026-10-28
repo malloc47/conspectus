@@ -84,7 +84,7 @@ pub(super) fn draw_right_panel(app: &mut App, frame: &mut Frame<'_>, area: Rect)
             let width = line
                 .spans
                 .iter()
-                .map(|s| UnicodeWidthStr::width(s.content.as_ref()))
+                .map(|s| text::width(s.content.as_ref()))
                 .sum::<usize>()
                 .max(1);
             width.div_ceil(pane_width).max(1)
@@ -203,9 +203,9 @@ pub(super) fn right_panel_title(app: &App, width: usize) -> Line<'static> {
         let fixed_width = 1
             + focus_marker_width(app, Focus::Right)
             + kind_glyph_width
-            + label.chars().count()
-            + back_prefix.chars().count()
-            + depth_suffix.chars().count()
+            + text::width(label)
+            + text::width(&back_prefix)
+            + text::width(&depth_suffix)
             + 1;
         let available = width.saturating_sub(fixed_width);
         if let Some(chain) = crate::tui::explorer::render_breadcrumb_chain(
@@ -284,9 +284,9 @@ pub(super) fn chip_divider_line(
     anchor: ChipAnchor,
 ) -> Line<'static> {
     let chip_text = format!(" {label} ");
-    let chip_width = chip_text.chars().count();
+    let chip_width = text::width(&chip_text);
     let suffix_text = suffix.map(|s| format!(" {s} ")).unwrap_or_default();
-    let suffix_width = suffix_text.chars().count();
+    let suffix_width = text::width(&suffix_text);
     let trailing_rule = 2;
     let leading_rule = width.saturating_sub(chip_width + suffix_width + trailing_rule);
     let chip_span = span!(
@@ -633,17 +633,17 @@ pub(super) fn render_related_row(
     });
     let prefix_width = prefix
         .as_ref()
-        .map_or(0, |p| UnicodeWidthStr::width(p.content.as_ref()));
+        .map_or(0, |p| text::width(p.content.as_ref()));
     // verb column + glyph + separating space
-    let fixed = prefix_width + UnicodeWidthStr::width(verb_text.as_str()) + 2;
-    let meta_width = edge_meta.as_deref().map_or(0, UnicodeWidthStr::width);
+    let fixed = prefix_width + text::width(verb_text.as_str()) + 2;
+    let meta_width = edge_meta.as_deref().map_or(0, text::width);
     let with_meta = width.saturating_sub(fixed + meta_width);
     let label_budget = if with_meta >= MIN_RELATED_LABEL_WIDTH {
         with_meta
     } else {
         width.saturating_sub(fixed).max(1)
     };
-    let label = truncate_to_width_middle(&link.neighbor_label, label_budget);
+    let label = text::truncate_middle(&link.neighbor_label, label_budget);
 
     let mut spans: Vec<Span<'static>> = Vec::new();
     if let Some(mut prefix) = prefix {

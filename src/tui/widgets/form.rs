@@ -19,6 +19,7 @@ use ratatui::text::{Line, Span};
 use ratatui::widgets::{Paragraph, Widget};
 use tui_popup::KnownSize;
 use tuikit::glyphs::marks;
+use tuikit::text;
 
 use crate::discovery::harness::{HarnessLaunchOption, argv_contains_fragment};
 use crate::tui::Theme;
@@ -198,7 +199,7 @@ pub fn value_row(
     let (prefix, label_style) = prefix(label, active, cols.label);
     let suffix_width = suffix.as_ref().map_or(0, |s| s.width);
     let value_width = inner_width
-        .saturating_sub(prefix.chars().count())
+        .saturating_sub(text::width(&prefix))
         .saturating_sub(suffix_width)
         .max(1);
     let w = window(value, value_cursor, value_width, active, theme);
@@ -239,7 +240,7 @@ pub fn tagged_input_row(
     theme: &Theme,
 ) -> Line<'static> {
     let text = format!(" {tag}");
-    let width = text.chars().count();
+    let width = tuikit::text::width(&text);
     value_row(
         label,
         input.value(),
@@ -290,12 +291,12 @@ fn path_symbol(omnibox: &PathOmniboxState, theme: &Theme) -> (&'static str, Styl
 fn path_suffix(omnibox: &PathOmniboxState, focused: bool, theme: &Theme) -> Suffix {
     let (symbol, style) = path_symbol(omnibox, theme);
     let mut spans = vec![Span::raw(" "), Span::styled(symbol, style)];
-    let used = 1 + symbol.chars().count();
+    let used = 1 + text::width(symbol);
     let remaining = PATH_SUFFIX_WIDTH.saturating_sub(used);
     if remaining > 1 {
         if let Some(hint) = completion_hint(omnibox, focused) {
-            let hint = truncate_chars(&hint, remaining.saturating_sub(1));
-            let used = used + 1 + hint.chars().count();
+            let hint = text::truncate_end(&hint, remaining.saturating_sub(1));
+            let used = used + 1 + text::width(&hint);
             spans.push(Span::raw(" "));
             spans.push(Span::styled(hint, Style::default().fg(theme.accent)));
             spans.push(Span::raw(
@@ -364,7 +365,7 @@ pub fn harness_row(
 ) -> Line<'static> {
     let inner_width = cols.inner;
     let (prefix, label_style) = prefix(label, active, cols.label);
-    let available = inner_width.saturating_sub(prefix.chars().count());
+    let available = inner_width.saturating_sub(text::width(&prefix));
     let value = input.value().trim();
     if !value.is_empty() && !known.iter().any(|k| k == value) {
         let suffix = " [custom]";
@@ -485,12 +486,12 @@ pub fn static_value_row(
     let inner_width = cols.inner;
     let (prefix, label_style) = prefix(label, active, cols.label);
     let width = inner_width
-        .saturating_sub(prefix.chars().count())
-        .saturating_sub(TEXT_GUTTER.chars().count());
+        .saturating_sub(text::width(&prefix))
+        .saturating_sub(text::width(TEXT_GUTTER));
     Line::from(vec![
         Span::styled(prefix, label_style),
         Span::raw(TEXT_GUTTER),
-        Span::styled(truncate_chars(value, width), entry_style(active, theme)),
+        Span::styled(text::truncate_end(value, width), entry_style(active, theme)),
     ])
 }
 
@@ -499,14 +500,14 @@ pub fn note_row(label: &str, value: &str, cols: Cols, theme: &Theme) -> Line<'st
     let inner_width = cols.inner;
     let (prefix, _) = prefix(label, false, cols.label);
     let width = inner_width
-        .saturating_sub(prefix.chars().count())
-        .saturating_sub(TEXT_GUTTER.chars().count())
+        .saturating_sub(text::width(&prefix))
+        .saturating_sub(text::width(TEXT_GUTTER))
         .max(1);
     let note = Style::default().add_modifier(theme.muted | Modifier::ITALIC);
     Line::from(vec![
         Span::styled(prefix, note),
         Span::raw(TEXT_GUTTER),
-        Span::styled(truncate_chars(value, width), note),
+        Span::styled(text::truncate_end(value, width), note),
     ])
 }
 
@@ -528,8 +529,8 @@ pub fn derived_row(
     );
     let width = cols
         .inner
-        .saturating_sub(lead.chars().count())
-        .saturating_sub(TEXT_GUTTER.chars().count())
+        .saturating_sub(text::width(&lead))
+        .saturating_sub(text::width(TEXT_GUTTER))
         .max(1);
     let value_style = if warn {
         Style::default()
@@ -541,7 +542,7 @@ pub fn derived_row(
     Line::from(vec![
         Span::styled(lead, dim),
         Span::raw(TEXT_GUTTER),
-        Span::styled(truncate_chars(value, width), value_style),
+        Span::styled(text::truncate_end(value, width), value_style),
     ])
 }
 
@@ -549,14 +550,14 @@ pub fn warning_row(label: &str, value: &str, cols: Cols, theme: &Theme) -> Line<
     let inner_width = cols.inner;
     let (prefix, _) = prefix(label, false, cols.label);
     let width = inner_width
-        .saturating_sub(prefix.chars().count())
-        .saturating_sub(TEXT_GUTTER.chars().count())
+        .saturating_sub(text::width(&prefix))
+        .saturating_sub(text::width(TEXT_GUTTER))
         .max(1);
     Line::from(vec![
         Span::styled(prefix, Style::default().add_modifier(theme.muted)),
         Span::raw(TEXT_GUTTER),
         Span::styled(
-            truncate_chars(value, width),
+            text::truncate_end(value, width),
             Style::default().fg(theme.warning),
         ),
     ])
@@ -615,25 +616,6 @@ pub fn checkbox(label: &str, selected: bool) -> String {
     } else {
         format!("[ ] {label}")
     }
-}
-
-pub fn truncate_chars(value: &str, width: usize) -> String {
-    value.chars().take(width).collect()
-}
-
-/// `text` cut to `width` cells with a trailing `…` when it is longer,
-/// and padded with spaces to exactly `width` cells when shorter.
-pub fn fit(text: &str, width: usize) -> String {
-    let count = text.chars().count();
-    if count <= width {
-        return format!("{text}{}", " ".repeat(width - count));
-    }
-    if width == 0 {
-        return String::new();
-    }
-    let mut cut: String = text.chars().take(width - 1).collect();
-    cut.push_str(marks::ELLIPSIS);
-    cut
 }
 
 /// `text` broken at spaces into lines of at most `width` cells.

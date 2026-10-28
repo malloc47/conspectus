@@ -22,6 +22,7 @@ use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Paragraph, Widget};
 use tui_popup::KnownSize;
+use tuikit::text;
 
 use crate::model::NodeId;
 use crate::tui::Theme;
@@ -906,8 +907,6 @@ impl SearchBody<'_> {
     /// One entity result: cursor mark, kind glyph, label, context, and the
     /// outcome word at the right edge.
     fn entity_line(&self, idx: usize, width: usize) -> Line<'static> {
-        use crate::tui::widgets::popup_frame::ellipsize;
-
         let is_cursor = idx == self.state.cursor();
         let Some(entity) = self
             .state
@@ -936,8 +935,8 @@ impl SearchBody<'_> {
         } else {
             Style::default().add_modifier(self.theme.muted)
         };
-        let label = ellipsize(&entity.label, columns.label);
-        let label_width = cells(&label);
+        let label = text::truncate_end(&entity.label, columns.label);
+        let label_width = text::width(&label);
         let mut spans: Vec<Span<'static>> = vec![
             span!(plain; "{}", if is_cursor { "> " } else { "  " }),
             search_kind_glyph_span_for(NodeKind::from(&entity.node), self.theme, is_cursor),
@@ -962,8 +961,8 @@ impl SearchBody<'_> {
         let mut used = ROW_LEAD + label_width;
         if columns.context > 0 {
             let pad = columns.label.saturating_sub(label_width) + COLUMN_GAP;
-            let context = ellipsize(&entity.context, columns.context);
-            used += pad + cells(&context);
+            let context = text::truncate_end(&entity.context, columns.context);
+            used += pad + text::width(&context);
             spans.push(span!(plain; "{}", " ".repeat(pad)));
             spans.push(span!(dim; "{context}"));
         }
@@ -971,8 +970,8 @@ impl SearchBody<'_> {
             .outcomes
             .map(|outcomes| outcomes(&entity.node))
             .unwrap_or_default();
-        let word = ellipsize(&word, columns.outcome);
-        let word_width = cells(&word);
+        let word = text::truncate_end(&word, columns.outcome);
+        let word_width = text::width(&word);
         let gap = width.saturating_sub(used + word_width);
         spans.push(span!(plain; "{}", " ".repeat(gap)));
         spans.push(span!(dim; "{word}"));
@@ -984,8 +983,6 @@ impl SearchBody<'_> {
     /// The contents scope: scan status, results, and the key hints.
     fn render_contents(&self, area: Rect, buf: &mut Buffer) {
         use crate::tui::keybindings::overlay::{SEARCH_CONTENT_KEYS, footer};
-        use crate::tui::widgets::popup_frame::ellipsize;
-
         let width = area.width as usize;
         let empty = ContentView::default();
         let view = self.content.unwrap_or(&empty);
@@ -999,7 +996,7 @@ impl SearchBody<'_> {
         let hint_top = area.y + area.height - hint_rows;
 
         // Status row: what is searched and how far the scan has got.
-        let status = ellipsize(&self.status_text(view), width);
+        let status = text::truncate_end(&self.status_text(view), width);
         let status_rect = Rect {
             x: area.x,
             y: area.y.saturating_add(1),
@@ -1034,7 +1031,7 @@ impl SearchBody<'_> {
             } else {
                 "(searching…)"
             };
-            let label = ellipsize(label, width);
+            let label = text::truncate_end(label, width);
             Paragraph::new(line![span!(self.theme.muted; "{label}")]).render(list_area, buf);
             return;
         }
@@ -1216,7 +1213,6 @@ fn content_row_line(
     theme: &Theme,
 ) -> Line<'static> {
     use crate::tui::widgets::badge::harness_badge;
-    use crate::tui::widgets::popup_frame::ellipsize;
 
     let mark = if is_cursor {
         Modifier::REVERSED
@@ -1229,15 +1225,10 @@ fn content_row_line(
     } else {
         Style::default().add_modifier(theme.muted)
     };
-    let pad = |text: &str, width: usize| {
-        let text = ellipsize(text, width);
-        let gap = width.saturating_sub(cells(&text));
-        format!("{text}{}", " ".repeat(gap))
-    };
     let mut spans: Vec<Span<'static>> =
         vec![span!(plain; "{}", if is_cursor { "> " } else { "  " })];
     if columns.source > 0 {
-        spans.push(span!(dim; "{} ", pad(row.target.source_word(), columns.source)));
+        spans.push(span!(dim; "{} ", text::fit(row.target.source_word(), columns.source)));
     }
     if columns.chip > 0 {
         match row.target {
@@ -1246,11 +1237,11 @@ fn content_row_line(
                 spans.push(span!(plain; " "));
             }
             ContentTarget::Pane { .. } => {
-                spans.push(span!(dim; "{} ", pad(&row.chip, columns.chip)));
+                spans.push(span!(dim; "{} ", text::fit(&row.chip, columns.chip)));
             }
         }
     }
-    spans.push(span!(plain; "{}  ", pad(&row.label, columns.label)));
+    spans.push(span!(plain; "{}  ", text::fit(&row.label, columns.label)));
     let tag = match &row.turn {
         Some(turn) => turn.clone(),
         None => format!(
@@ -1259,10 +1250,10 @@ fn content_row_line(
             if row.hits == 1 { "hit" } else { "hits" }
         ),
     };
-    spans.push(span!(dim; "{}  ", pad(&tag, columns.tag)));
+    spans.push(span!(dim; "{}  ", text::fit(&tag, columns.tag)));
     if columns.age > 0 {
         spans
-            .push(span!(dim; "{:>width$} ", ellipsize(&row.age, columns.age), width = columns.age));
+            .push(span!(dim; "{} ", text::pad_start(&text::truncate_end(&row.age, columns.age), columns.age)));
     }
     let budget = columns.snippet().max(8);
     let snippet = crate::tui::widgets::snippet::fit(
@@ -1407,11 +1398,6 @@ fn search_kind_glyph_span_for(kind: NodeKind, theme: &Theme, is_cursor: bool) ->
 pub(crate) fn centered_modal_rect(area: Rect) -> Rect {
     let (width, height) = modal_size(area.width, area.height);
     super::popup_frame::centered_rect(area, width, height)
-}
-
-/// Terminal cells `text` occupies.
-fn cells(text: &str) -> usize {
-    unicode_width::UnicodeWidthStr::width(text)
 }
 
 fn compute_scroll(cursor: usize, visible_rows: usize, total: usize) -> usize {
