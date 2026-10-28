@@ -505,7 +505,7 @@ pub(super) fn render_node_field_line(
 ///
 /// `ForgePr`'s glyph color reuses `theme.pr_open` here because the
 /// chip-rendering surfaces do not carry PR state down — the row
-/// tree's [`forge_pr_glyph_span`] handles state-aware coloring
+/// tree's [`pr_kind_glyph_span`] handles state-aware coloring
 /// directly off the row.
 pub(super) fn kind_chip_span(kind: Option<NodeKind>, theme: &Theme) -> Span<'static> {
     let Some(node_kind) = kind else {

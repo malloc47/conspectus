@@ -12,7 +12,8 @@ use crate::model::{
 use crate::output::render::{node_short_id_from_display, strip_branch_prefix, unique_prefix_len};
 use crate::tui::PrsGrouping;
 use crate::tui::rows::{
-    GroupRow, PrRow, Row, RowId, RowKind, RowTree, ViewLabel, format_recency, shorten_home,
+    GroupRow, PrRow, PrStatus, Row, RowId, RowKind, RowTree, ViewLabel, format_recency,
+    shorten_home,
 };
 
 pub struct PrsBuildInputs<'a> {
@@ -62,38 +63,18 @@ enum Bucket {
     /// A forge repo (`owner/repo`) with no local repo known for its
     /// PRs, so the graph is too sparse to file them anywhere else.
     Remote(String),
-    State(StateBucket),
+    /// The state grouping files a PR under what its state reads as.
+    State(PrStatus),
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
-enum StateBucket {
-    Open,
-    Draft,
-    Merged,
-    Closed,
-    Other,
-}
-
-impl StateBucket {
-    fn of(pr: &ForgePrNode) -> Self {
-        let state = pr.state.as_deref().unwrap_or_default().to_ascii_lowercase();
-        match state.as_str() {
-            "open" if pr.is_draft => Self::Draft,
-            "open" => Self::Open,
-            "merged" => Self::Merged,
-            "closed" => Self::Closed,
-            _ => Self::Other,
-        }
-    }
-
-    fn row(self) -> (&'static str, &'static str) {
-        match self {
-            Self::Open => ("prs-open", "Open"),
-            Self::Draft => ("prs-draft", "Draft"),
-            Self::Merged => ("prs-merged", "Merged"),
-            Self::Closed => ("prs-closed", "Closed"),
-            Self::Other => ("prs-other", "Other"),
-        }
+/// The row id and label of a state group.
+fn state_group(status: PrStatus) -> (&'static str, &'static str) {
+    match status {
+        PrStatus::Open => ("prs-open", "Open"),
+        PrStatus::Draft => ("prs-draft", "Draft"),
+        PrStatus::Merged => ("prs-merged", "Merged"),
+        PrStatus::Closed => ("prs-closed", "Closed"),
+        PrStatus::Unknown => ("prs-other", "Other"),
     }
 }
 
@@ -187,7 +168,9 @@ pub fn build_prs_tree(inputs: PrsBuildInputs<'_>) -> RowTree {
             PrsGrouping::Repo => {
                 repo_group().map_or_else(remote_group, |(path, id)| Bucket::Repo { path, id })
             }
-            PrsGrouping::State => Bucket::State(StateBucket::of(pr.node)),
+            PrsGrouping::State => {
+                Bucket::State(PrStatus::of(pr.node.state.as_deref(), pr.node.is_draft))
+            }
         };
 
         slugs
@@ -313,8 +296,8 @@ fn group_row(bucket: &Bucket, launch_root: Option<&str>, home: Option<&Path>) ->
             )
         }
         Bucket::Remote(slug) => (RowId::Remote(slug.clone()), slug.clone(), None, false),
-        Bucket::State(state) => {
-            let (id, label) = state.row();
+        Bucket::State(status) => {
+            let (id, label) = state_group(*status);
             (RowId::Synthetic(id), label.to_string(), None, false)
         }
     };

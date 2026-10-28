@@ -829,21 +829,13 @@ pub(super) fn render_mixed_spans(
         // A row awaiting the refresh after an action shows a spinner
         // where its status word goes.
         let status_word = handoff_spinner.map_or(mixed.status.as_str(), |glyph| glyph);
-        // A pull request's word takes the hue of its state glyph, so the
-        // two read as one signal; other live words share the attached
-        // color.
-        let status_style = match (mixed.tone, mixed.node_kind, mixed.pr_state.as_deref()) {
-            (MixedTone::Dim, ..) => Style::default(),
-            (MixedTone::Normal, NodeKind::ForgePr, Some("merged")) => {
-                Style::default().fg(theme.pr_merged)
-            }
-            (MixedTone::Normal, NodeKind::ForgePr, Some("closed")) => {
-                Style::default().fg(theme.pr_closed)
-            }
-            (MixedTone::Normal, NodeKind::ForgePr, Some("draft")) => {
-                Style::default().fg(theme.pr_draft)
-            }
-            (MixedTone::Normal, ..) => Style::default().fg(theme.mux_attached),
+        // A pull request's word takes the style of its state glyph, so
+        // the two read as one signal; other live words share the
+        // attached color.
+        let status_style = match (mixed.tone, mixed.pr_status) {
+            (MixedTone::Dim, _) => Style::default(),
+            (MixedTone::Normal, Some(status)) => status.mark(theme).1,
+            (MixedTone::Normal, None) => Style::default().fg(theme.mux_attached),
         };
         let label = truncate_to_width_strict(&mixed.label, MIXED_LABEL_MAX_WIDTH);
         let label_cell = align.label.saturating_sub(prefix_width);
@@ -909,14 +901,7 @@ pub(super) fn ghostify(spans: &mut [Span<'static>], theme: &Theme) {
 /// The kind glyph of a mixed-kind row; PR glyphs take their state's hue.
 fn mixed_glyph_span(mixed: &crate::tui::rows::MixedRow, theme: &Theme) -> Span<'static> {
     if mixed.node_kind == NodeKind::ForgePr {
-        let style = node_kind_style(NodeKind::ForgePr, theme);
-        let color = match mixed.pr_state.as_deref() {
-            Some("closed") => theme.pr_closed,
-            Some("merged") => theme.pr_merged,
-            Some("draft") => theme.pr_draft,
-            _ => theme.pr_open,
-        };
-        return span!(Style::default().fg(color); "{} ", style.glyph);
+        return pr_kind_glyph_span(mixed.pr_status, theme);
     }
     node_kind_glyph_span(mixed.node_kind, theme)
 }
@@ -1524,31 +1509,24 @@ pub(super) fn spans_width(spans: &[Span<'_>]) -> usize {
 /// downstream width math automatically subtracts the new cells.
 ///
 /// `ForgePr` is the one kind whose color depends on PR state; callers
-/// render PR rows through [`forge_pr_glyph_span`] instead so the hue
-/// follows `theme.pr_*`.
+/// render PR glyphs through [`pr_kind_glyph_span`] instead so the hue
+/// follows the state.
 pub(super) fn node_kind_glyph_span(kind: NodeKind, theme: &Theme) -> Span<'static> {
     let style = node_kind_style(kind, theme);
     span!(Style::default().fg(style.color); "{} ", style.glyph)
 }
 
-/// Variant of [`node_kind_glyph_span`] for PR rows: emits the
-/// `NodeKind::ForgePr` glyph styled with the appropriate `theme.pr_*`
-/// color based on PR state. `is_draft` overrides the state-based hue
-/// because the draft flag is independent of the open/closed/merged
-/// label in our model.
-pub(super) fn forge_pr_glyph_span(pr: &PrRow, theme: &Theme) -> Span<'static> {
-    let style = node_kind_style(NodeKind::ForgePr, theme);
-    let color = if pr.is_draft {
-        theme.pr_draft
-    } else {
-        match pr.state.as_deref() {
-            Some("open") => theme.pr_open,
-            Some("closed") => theme.pr_closed,
-            Some("merged") => theme.pr_merged,
-            _ => theme.pr_open,
-        }
-    };
-    span!(Style::default().fg(color); "{} ", style.glyph)
+/// The PR kind glyph in the style of the PR's state glyph, so the two
+/// never disagree. A row that doesn't know the state (a pin whose PR
+/// isn't listed) uses the open hue, as every other PR glyph drawn
+/// without a state does.
+pub(super) fn pr_kind_glyph_span(status: Option<PrStatus>, theme: &Theme) -> Span<'static> {
+    let glyph = node_kind_style(NodeKind::ForgePr, theme).glyph;
+    let style = status.map_or_else(
+        || Style::default().fg(theme.pr_open),
+        |status| status.mark(theme).1,
+    );
+    span!(style; "{glyph} ")
 }
 
 /// The PR row's local-branch marker (ADR 0129): the Branch glyph in the
@@ -1561,24 +1539,6 @@ pub(super) fn pr_tracking_span(pr: &PrRow, theme: &Theme) -> Span<'static> {
     } else {
         span!(theme.placeholder; "{}", crate::tui::icons::marks::UNTRACKED)
     }
-}
-
-/// The state glyph of a PR row, one shape per state so it reads without
-/// color: open, draft, merged, closed, or unknown when the forge gave no
-/// state. A draft is an open PR still marked draft.
-pub(super) fn pr_state_span(pr: &PrRow, theme: &Theme) -> Span<'static> {
-    let state = pr.state.as_deref().map(str::to_ascii_lowercase);
-    let (glyph, color) = if pr.is_draft && matches!(state.as_deref(), None | Some("open")) {
-        (state::PR_DRAFT, theme.pr_draft)
-    } else {
-        match state.as_deref() {
-            Some("open") => (state::PR_OPEN, theme.pr_open),
-            Some("merged") => (state::PR_MERGED, theme.pr_merged),
-            Some("closed") => (state::PR_CLOSED, theme.pr_closed),
-            _ => return span!(theme.placeholder; "{}", state::UNKNOWN),
-        }
-    };
-    span!(Style::default().fg(color); "{glyph}")
 }
 
 /// The body of a PR row after its kind glyph: number, local branch
@@ -1605,7 +1565,8 @@ pub(super) fn render_pr_spans(
         theme,
     ));
     spans.push(Span::raw("  "));
-    spans.push(pr_state_span(pr, theme));
+    let (glyph, style) = pr.status().mark(theme);
+    spans.push(span!(style; "{glyph}"));
     // The content: the local branch when there is one, then the title.
     // Two cells separate each part from what comes before it.
     let mut room = budget.saturating_sub(spans_width(&spans));
@@ -1653,7 +1614,7 @@ pub(super) fn row_kind_glyph_span(kind: &RowKind, theme: &Theme) -> Option<Span<
         // as a session wherever it appears; the harness pill follows it.
         RowKind::AgentSession(_) => NodeKind::AgentSession,
         RowKind::MuxSession(_) => NodeKind::MuxSession,
-        RowKind::Pr(pr) => return Some(forge_pr_glyph_span(pr, theme)),
+        RowKind::Pr(pr) => return Some(pr_kind_glyph_span(Some(pr.status()), theme)),
         RowKind::Mixed(mixed) => return Some(mixed_glyph_span(mixed, theme)),
         // A matching turn is drawn under its session without a glyph.
         RowKind::Hit(_) | RowKind::PaneHit(_) => return None,

@@ -739,7 +739,7 @@ fn collect_ghosts(
                 chip,
                 content,
                 primary_node: id.clone(),
-                pr_state: None,
+                pr_status: None,
                 marker: PinMarker::None,
                 grid: MixedGrid::Mux,
             };

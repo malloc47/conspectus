@@ -1583,64 +1583,53 @@ fn node_kind_glyph_span_uses_slate_glyph_and_theme_color() {
 }
 
 #[test]
-fn forge_pr_glyph_span_picks_color_from_pr_state() {
-    // The PR glyph color follows `theme.pr_*` based on PR state
-    // (ADR 0073 §2). Draft overrides state.
-    use crate::tui::rows::PrRow;
+fn a_pinned_pr_draws_its_kind_glyph_and_word_in_one_style() {
+    // The Pinned and History rows spell the state as a word; the kind
+    // glyph and the word take the state glyph's style, so they agree
+    // with the PRs view for every state crossed with draft.
+    use crate::tui::rows::{MixedGrid, MixedRow, MixedTone, PinMarker, PrStatus};
     let theme = Theme::default();
-    let base = PrRow {
-        pr_number: 1,
-        repo_display: "owner/repo".into(),
-        label: "owner/repo".into(),
-        state: Some("open".into()),
-        is_draft: false,
-        branch_name: None,
-        tracked: false,
-        title: None,
-        updated_recency: None,
-        updated_epoch: None,
-        url: None,
+    let pr_row = |status: Option<PrStatus>| MixedRow {
+        node_kind: crate::model::NodeKind::ForgePr,
+        label: "pr".into(),
+        status: status.map_or("live", PrStatus::word).into(),
+        tone: MixedTone::Normal,
+        age: None,
+        age_epoch: None,
+        state: None,
+        chip: None,
+        content: String::new(),
         primary_node: NodeId::ForgePr(crate::model::ForgePrId::new(
             "github",
             "github.com",
-            "owner",
-            "repo",
+            "o",
+            "r",
             1,
         )),
+        pr_status: status,
+        marker: PinMarker::None,
+        grid: MixedGrid::Columns,
     };
-    assert_eq!(
-        forge_pr_glyph_span(&base, &theme).style.fg,
-        Some(theme.pr_open)
-    );
-    let closed = PrRow {
-        state: Some("closed".into()),
-        ..base.clone()
-    };
-    assert_eq!(
-        forge_pr_glyph_span(&closed, &theme).style.fg,
-        Some(theme.pr_closed)
-    );
-    let merged = PrRow {
-        state: Some("merged".into()),
-        ..base.clone()
-    };
-    assert_eq!(
-        forge_pr_glyph_span(&merged, &theme).style.fg,
-        Some(theme.pr_merged)
-    );
-    let draft = PrRow {
-        is_draft: true,
-        state: Some("open".into()),
-        ..base.clone()
-    };
-    assert_eq!(
-        forge_pr_glyph_span(&draft, &theme).style.fg,
-        Some(theme.pr_draft),
-        "draft overrides state-based color",
-    );
-    // Glyph itself stays the `NodeKind::ForgePr` slate glyph
-    // regardless of color.
-    assert_eq!(forge_pr_glyph_span(&base, &theme).content, "⇄ ");
+    let mut wrong = Vec::new();
+    for (state, draft, _, word, style) in pr_state_cases(&theme) {
+        let row = pr_row(Some(PrStatus::of(state, draft)));
+        let kind = row_kind_glyph_span(&RowKind::Mixed(row.clone()), &theme).expect("a glyph");
+        let spans = render_mixed_spans(&row, &theme, MixedAlign::default(), 4, 80, 0, None);
+        let status = &spans[1];
+        if status.content.trim() != word || status.style != style || kind.style != style {
+            wrong.push(format!(
+                "state {state:?}, draft {draft}: {} {:?} beside {:?} {:?}, want {word} {style:?}",
+                kind.content, kind.style, status.content, status.style
+            ));
+        }
+    }
+    assert!(wrong.is_empty(), "{}", wrong.join("\n"));
+
+    // A pin whose PR isn't listed has no state on hand: the glyph keeps
+    // the open hue every stateless PR glyph uses.
+    let kind = row_kind_glyph_span(&RowKind::Mixed(pr_row(None)), &theme).expect("a glyph");
+    assert_eq!(kind.content, "⇄ ");
+    assert_eq!(kind.style, Style::default().fg(theme.pr_open));
 }
 
 #[test]
@@ -6238,7 +6227,7 @@ fn every_value_of_a_state_has_its_own_glyph() {
         chip: None,
         content: String::new(),
         primary_node: NodeId::MuxSession(MuxSessionId::new("m")),
-        pr_state: None,
+        pr_status: None,
         marker: PinMarker::None,
         grid: MixedGrid::Mux,
     };
@@ -6277,19 +6266,7 @@ fn every_value_of_a_state_has_its_own_glyph() {
     );
 
     // Pull requests: one shape per state.
-    let mut pr_glyphs = Vec::new();
-    for (state_name, draft) in [
-        (Some("open"), false),
-        (Some("open"), true),
-        (Some("merged"), false),
-        (Some("closed"), false),
-        (None, false),
-    ] {
-        let mut pr = pr_row_for_layout("#1", "open", None);
-        pr.state = state_name.map(str::to_string);
-        pr.is_draft = draft;
-        pr_glyphs.push(text(&pr_state_span(&pr, &theme)));
-    }
+    let pr_glyphs = crate::tui::rows::PrStatus::ALL.map(|status| status.mark(&theme).0);
     assert_eq!(
         pr_glyphs,
         [
@@ -6308,4 +6285,68 @@ fn every_value_of_a_state_has_its_own_glyph() {
         .map(|marker| text(&pin_marker_span(*marker, &theme)))
         .collect();
     assert_eq!(drawn, ["  ", "◉ ", "◎ "]);
+}
+
+/// One forge state and draft flag, and the state glyph, status word,
+/// and style every PR cell must draw for it.
+type PrStateCase = (
+    Option<&'static str>,
+    bool,
+    &'static str,
+    &'static str,
+    Style,
+);
+
+/// Every forge state a PR can carry, crossed with the draft flag: state
+/// beats draft, so only an open PR reads as a draft, and a PR with no
+/// state (or one the forge invented) reads as unknown either way.
+fn pr_state_cases(theme: &Theme) -> Vec<PrStateCase> {
+    use crate::tui::icons::state;
+    let fg = |color| Style::default().fg(color);
+    let dim = Style::default().add_modifier(theme.placeholder);
+    let (open, draft, merged, closed) = (
+        fg(theme.pr_open),
+        fg(theme.pr_draft),
+        fg(theme.pr_merged),
+        fg(theme.pr_closed),
+    );
+    vec![
+        (Some("open"), false, state::PR_OPEN, "open", open),
+        (Some("open"), true, state::PR_DRAFT, "draft", draft),
+        (Some("OPEN"), true, state::PR_DRAFT, "draft", draft),
+        (Some("merged"), false, state::PR_MERGED, "merged", merged),
+        (Some("merged"), true, state::PR_MERGED, "merged", merged),
+        (Some("closed"), false, state::PR_CLOSED, "closed", closed),
+        (Some("closed"), true, state::PR_CLOSED, "closed", closed),
+        (Some("CLOSED"), false, state::PR_CLOSED, "closed", closed),
+        (Some("CLOSED"), true, state::PR_CLOSED, "closed", closed),
+        (None, false, state::UNKNOWN, "unknown", dim),
+        (None, true, state::UNKNOWN, "unknown", dim),
+        (Some(""), true, state::UNKNOWN, "unknown", dim),
+        (Some("locked"), false, state::UNKNOWN, "unknown", dim),
+    ]
+}
+
+#[test]
+fn a_pr_row_draws_its_kind_glyph_in_the_hue_of_its_state_glyph() {
+    // Both cells follow one rule, so a closed draft can't draw a
+    // draft-yellow kind glyph beside its red closed glyph.
+    let theme = Theme::default();
+    let mut wrong = Vec::new();
+    for (state, draft, glyph, _, style) in pr_state_cases(&theme) {
+        let mut pr = pr_row_for_layout("#1", "open", None);
+        pr.state = state.map(str::to_string);
+        pr.is_draft = draft;
+        let kind = row_kind_glyph_span(&RowKind::Pr(pr.clone()), &theme).expect("a kind glyph");
+        let spans = render_pr_spans(&pr, &theme, PrAlign::default(), 80, 0);
+        let cell = spans.last().expect("the state cell");
+        if cell.content != glyph || cell.style != style || kind.style != style {
+            wrong.push(format!(
+                "state {state:?}, draft {draft}: {} {:?} beside {} {:?}, want {glyph} {style:?}",
+                kind.content, kind.style, cell.content, cell.style
+            ));
+        }
+        assert_eq!(kind.content, "⇄ ");
+    }
+    assert!(wrong.is_empty(), "{}", wrong.join("\n"));
 }

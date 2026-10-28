@@ -89,7 +89,7 @@ Every glyph is one that DejaVu Sans Mono draws at exactly one cell, or one every
 | `◈` | runtime process | process color | Never drawn in the left panel |
 | `⌥` | branch | green | Pinned branch pins; and on a PR row, a pull request whose branch exists locally |
 | `⋎` | fork | light magenta | Pinned fork pins |
-| `⇄` | pull request | by state: open green, draft yellow, merged magenta, closed red | PR rows; Pinned and History PRs |
+| `⇄` | pull request | the style of its state glyph: open green, draft yellow, merged magenta, closed red, dim when the state isn't known | PR rows; Pinned and History PRs |
 | `⊸` | linked: a session with a definitive mux, or a mux with a client attached | green | Session rows, Mux rows, nested sessions |
 | `∘` | not linked: a session with no definitive mux (none or ambiguous), or a mux with no client | dim | Session rows, Mux rows, nested sessions |
 | `⊘` | a mux that has stopped | ghost | Stopped mux rows in the Mux view |
@@ -131,16 +131,18 @@ the last column instead.
 | `removed` | a worktree or repo that no longer exists | none (no view lists these alone) | Pinned, History |
 | `missing` | a pin whose session or target can't be found anywhere | none | Pinned |
 | `planned` | a pin with no target yet; the first rebuild creates it | none | Pinned |
-| `unknown` | the entity couldn't be checked | `?` | Pinned |
+| `unknown` | the entity couldn't be checked, or a pull request has no state yet | `?` | Pinned, History |
 | `open` | an open pull request | `○` | Pinned, History |
 | `draft` | an open pull request marked draft | `◐` | Pinned, History |
 | `merged` | a merged pull request | `⊕` | Pinned, History |
 | `closed` | a closed, unmerged pull request | `⊗` | Pinned, History |
 
-In Pinned, the word of a live pull request takes the hue of its state
-glyph (green, yellow, magenta, red); other live words are green. Words of
-rows that are stopped, removed, missing, planned, or unknown are ghost
-style.
+In Pinned, the word of a live pull request takes the style of its state
+glyph (green, yellow, magenta, red, or dim for `unknown`); other live
+words are green. Words of rows that are stopped, removed, missing,
+planned, or unknown are ghost style. A pull request's word follows the
+same rule as its glyph (see [PR row](#pr-row)): a closed or merged draft
+reads `closed` or `merged`.
 
 ## Age
 
@@ -375,6 +377,14 @@ them has an ambiguous mux link.
 | 5 | State | `○` open, `◐` draft, `⊕` merged, `⊗` closed, `?` no state | always | 1 cell |
 | 6 | Branch | the local branch | only when tracked | dim, cut at 24 |
 | 7 | Title | the PR title | always | gray, takes the rest |
+
+One rule decides how a pull request's state shows, everywhere it shows:
+the forge's state beats the draft flag. Only an open PR marked draft
+reads as a draft (`◐`, the word `draft`, the `Draft` group). A closed or
+merged PR that is still marked draft reads closed or merged, and a PR
+with no state reads `?` (the word `unknown`, the `Other` group), draft
+or not. The `⇄` kind glyph always takes its state glyph's style, so the
+two never disagree.
 
 <!-- frame: keys="3" width=170 height=30 -->
 ```text

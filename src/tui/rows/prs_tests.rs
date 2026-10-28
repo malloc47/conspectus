@@ -462,6 +462,58 @@ fn numbers_with_state(
 }
 
 #[test]
+fn the_state_grouping_files_a_draft_under_draft_only_while_it_is_open() {
+    // State beats draft: every state crossed with the draft flag, as
+    // `PR number -> group`.
+    let mut snapshot = world();
+    let cases = [
+        (10, Some("OPEN"), false, "Open"),
+        (11, Some("OPEN"), true, "Draft"),
+        (12, Some("MERGED"), false, "Merged"),
+        (13, Some("MERGED"), true, "Merged"),
+        (14, Some("CLOSED"), false, "Closed"),
+        (15, Some("CLOSED"), true, "Closed"),
+        (16, None, false, "Other"),
+        (17, None, true, "Other"),
+    ];
+    for (number, state, draft, _) in cases {
+        snapshot.nodes.push(GraphNode::ForgePr(ForgePrNode {
+            id: ForgePrId::new("github", "github.com", "o", "r", number),
+            provider: "github".to_string(),
+            host: "github.com".to_string(),
+            owner: "o".to_string(),
+            repo: "r".to_string(),
+            number,
+            state: state.map(str::to_string),
+            title: None,
+            url: None,
+            updated_epoch: None,
+            is_draft: draft,
+            head_ref: None,
+        }));
+    }
+    let tree = build(&snapshot, PrsGrouping::State, None);
+    let mut group = String::new();
+    let mut filed = HashMap::new();
+    for row in &tree.rows {
+        match &row.kind {
+            RowKind::Group(header) => group.clone_from(&header.display_path),
+            RowKind::Pr(pr) => {
+                filed.insert(pr.pr_number, group.clone());
+            }
+            _ => {}
+        }
+    }
+    for (number, state, draft, want) in cases {
+        assert_eq!(
+            filed.get(&number).map(String::as_str),
+            Some(want),
+            "#{number}: state {state:?}, draft {draft}"
+        );
+    }
+}
+
+#[test]
 fn the_state_filter_keeps_only_prs_in_the_chosen_states_under_every_grouping() {
     use crate::filter::PrStateKey::{Closed, Draft, Merged, Open};
     let snapshot = world_with_states();

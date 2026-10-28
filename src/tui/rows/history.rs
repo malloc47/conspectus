@@ -17,8 +17,8 @@ use crate::tui::HistoryGrouping;
 
 use super::pinned::{join_dot, project_for_path};
 use super::{
-    GroupRow, MixedChip, MixedGrid, MixedRow, MixedTone, PinMarker, Row, RowId, RowKind, RowTree,
-    ViewLabel, format_recency, harness_label, shorten_home,
+    GroupRow, MixedChip, MixedGrid, MixedRow, MixedTone, PinMarker, PrStatus, Row, RowId, RowKind,
+    RowTree, ViewLabel, format_recency, harness_label, shorten_home,
 };
 
 pub struct HistoryBuildInputs<'a> {
@@ -205,7 +205,7 @@ fn describe(
 ) -> Option<MixedRow> {
     let history = &snapshot.history;
     let path = |p: &str| shorten_home(p, home);
-    let (node_kind, label, status, chip, content, pr_state) = match kind {
+    let (node_kind, label, status, chip, content, pr_status) = match kind {
         HistoryKind::Mux => {
             let r = &history.mux(&meta.id)?.recipe;
             (
@@ -262,29 +262,17 @@ fn describe(
         }
         HistoryKind::Pr => {
             let r = &history.pr(&meta.id)?.recipe;
-            let state = r.state.clone().unwrap_or_default().to_ascii_lowercase();
-            let status = if r.draft && (state.is_empty() || state == "open") {
-                super::words::PR_DRAFT.to_string()
-            } else if state.is_empty() {
-                super::words::PR_OPEN.to_string()
-            } else {
-                state.clone()
-            };
-            let state = if status == super::words::PR_DRAFT {
-                status.clone()
-            } else {
-                state
-            };
+            let status = PrStatus::of(r.state.as_deref(), r.draft);
             (
                 NodeKind::ForgePr,
                 format!("#{}", r.number),
-                status,
+                status.word().to_string(),
                 None,
                 join_dot([
                     format!("{}/{}", r.owner, r.repo),
                     r.title.clone().unwrap_or_default(),
                 ]),
-                Some(state),
+                Some(status),
             )
         }
     };
@@ -299,7 +287,7 @@ fn describe(
         chip,
         content: content.replace('\n', " ").trim().to_string(),
         primary_node: node_of(snapshot, kind, &meta.id)?,
-        pr_state,
+        pr_status,
         marker: if pinned_by(snapshot, &meta.id).is_empty() {
             PinMarker::None
         } else {

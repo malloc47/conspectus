@@ -764,34 +764,15 @@ fn push_mux_state_legend(lines: &mut Vec<Line<'static>>, theme: &Theme, width: O
 /// Legend for the pull request state glyphs. The Pinned and History
 /// views spell the same states as words instead.
 fn push_pr_state_legend(lines: &mut Vec<Line<'static>>, theme: &Theme, width: Option<usize>) {
-    use crate::tui::icons::state;
-    let entries: [(&str, Style, &str, &str); 4] = [
-        (
-            state::PR_OPEN,
-            Style::default().fg(theme.pr_open),
-            "Open",
-            "ready for review",
-        ),
-        (
-            state::PR_DRAFT,
-            Style::default().fg(theme.pr_draft),
-            "Draft",
-            "open, but marked as a draft",
-        ),
-        (
-            state::PR_MERGED,
-            Style::default().fg(theme.pr_merged),
-            "Merged",
-            "landed on its base branch",
-        ),
-        (
-            state::PR_CLOSED,
-            Style::default().fg(theme.pr_closed),
-            "Closed",
-            "closed without merging",
-        ),
+    use crate::tui::rows::PrStatus;
+    let entries: [(PrStatus, &str, &str); 4] = [
+        (PrStatus::Open, "Open", "ready for review"),
+        (PrStatus::Draft, "Draft", "open, but marked as a draft"),
+        (PrStatus::Merged, "Merged", "landed on its base branch"),
+        (PrStatus::Closed, "Closed", "closed without merging"),
     ];
-    for (glyph, style, name, blurb) in entries {
+    for (status, name, blurb) in entries {
+        let (glyph, style) = status.mark(theme);
         legend_entry(
             lines,
             vec![

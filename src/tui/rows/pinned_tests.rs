@@ -64,6 +64,45 @@ fn status_words_follow_the_kind_vocabulary() {
 }
 
 #[test]
+fn a_live_pr_pin_reads_its_state_and_a_draft_only_while_open() {
+    // State beats draft: a closed or merged draft reads its state, and a
+    // PR with no state reads unknown, draft or not.
+    let cases = [
+        (Some("open"), false, "open"),
+        (Some("OPEN"), true, "draft"),
+        (Some("merged"), true, "merged"),
+        (Some("closed"), true, "closed"),
+        (Some("closed"), false, "closed"),
+        (None, true, "unknown"),
+        (Some(""), false, "unknown"),
+    ];
+    for (state, draft, word) in cases {
+        let mut snapshot = all_kinds_world();
+        let pr = snapshot
+            .nodes
+            .iter_mut()
+            .find_map(|node| match node {
+                GraphNode::ForgePr(pr) if pr.number == 42 => Some(pr),
+                _ => None,
+            })
+            .expect("the pinned draft PR");
+        pr.state = state.map(str::to_string);
+        pr.is_draft = draft;
+        let tree = build_pinned_tree(PinnedBuildInputs {
+            snapshot: &snapshot,
+            home: Some(Path::new("/home/op")),
+            now: Some(1_700_000_000),
+            grouping: PinnedGrouping::None,
+            sort: Sort::Hierarchy,
+        });
+        let row = mixed(&tree, "pr-draft");
+        let case = format!("state {state:?}, draft {draft}");
+        assert_eq!(row.status, word, "{case}");
+        assert_eq!(row.pr_status, Some(PrStatus::of(state, draft)), "{case}");
+    }
+}
+
+#[test]
 fn gone_and_planned_rows_are_dimmed_and_live_ones_are_not() {
     let tree = tree(PinnedGrouping::None, Sort::Hierarchy);
     for (label, tone) in [

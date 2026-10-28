@@ -13,8 +13,8 @@
 //! `ForgePr` is the one kind that does not own a color: its hue is
 //! driven by PR state (`pr_open`/`pr_closed`/`pr_merged`/`pr_draft`),
 //! so the [`NodeKindStyle::color`] field is the sentinel
-//! [`Color::Reset`] for `ForgePr`. Callers that render a PR row pick
-//! the color from the appropriate `theme.pr_*` field directly.
+//! [`Color::Reset`] for `ForgePr`. Callers that know the PR's state
+//! take its style from [`crate::tui::rows::PrStatus::mark`].
 
 use std::collections::BTreeMap;
 
@@ -183,9 +183,8 @@ pub fn all_glyphs() -> Vec<&'static str> {
 /// callers can subtract from column budgets without recomputing).
 ///
 /// For [`NodeKind::ForgePr`] the `color` field is the sentinel
-/// [`Color::Reset`]; the caller picks `theme.pr_open` /
-/// `theme.pr_closed` / `theme.pr_merged` / `theme.pr_draft` based on
-/// PR state.
+/// [`Color::Reset`]; a caller that knows the PR's state takes the
+/// style from [`crate::tui::rows::PrStatus::mark`].
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct NodeKindStyle {
     pub glyph: String,

@@ -26,10 +26,12 @@ pub(crate) mod content;
 pub mod history;
 pub mod mux;
 pub mod pinned;
+mod pr_status;
 pub mod prs;
 pub mod search;
 pub mod sessions;
 
+pub use pr_status::PrStatus;
 pub use sessions::{SessionsBuildInputs, build_sessions_tree};
 
 /// Stable, hashable row identity. Used by the selection state
@@ -288,8 +290,9 @@ pub struct MixedRow {
     /// What follows the chip: a directory, a title, a repo and branch.
     pub content: String,
     pub primary_node: NodeId,
-    /// PR state, which tints the PR glyph.
-    pub pr_state: Option<String>,
+    /// A PR's state, when the row knows it: it tints the PR glyph and
+    /// the status word.
+    pub pr_status: Option<PrStatus>,
     /// The pin marker cell after the kind glyph.
     pub marker: PinMarker,
     /// Which column grid draws the row.
@@ -579,6 +582,13 @@ pub struct PrRow {
     pub updated_epoch: Option<i64>,
     pub url: Option<String>,
     pub primary_node: NodeId,
+}
+
+impl PrRow {
+    /// What the PR's state reads as on its row.
+    pub fn status(&self) -> PrStatus {
+        PrStatus::of(self.state.as_deref(), self.is_draft)
+    }
 }
 
 // -----------------------------------------------------------------------------
