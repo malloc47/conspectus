@@ -975,6 +975,118 @@ pub(crate) fn live_pin_target(
     snapshot.find_node(&id).is_some().then_some(id)
 }
 
+/// The muxes that sessions under `group` are ambiguous about: every mux
+/// that a session whose natural parent is `group` lists as one of two or
+/// more active `LinkedToMux` candidates (ADR 0071). The resolver has not
+/// picked a winner for these, so the operator decides which to attach to.
+///
+/// The natural parent is the same shape the Sessions view uses (ADR
+/// 0064):
+///
+/// - `Workspace` group: sessions with an active `AssociatedWith` link to
+///   this workspace.
+/// - `Checkout` group: sessions with an active `AssociatedWith` link to
+///   this checkout and no workspace association.
+/// - `Repo` group: the same checkout-scoped sessions, over every checkout
+///   of this repo.
+///
+/// Any other node returns empty.
+pub(crate) fn ambiguous_muxes_for_group(
+    snapshot: &crate::model::GraphSnapshot,
+    group: &NodeId,
+) -> Vec<NodeId> {
+    let mut muxes: std::collections::BTreeSet<NodeId> = std::collections::BTreeSet::new();
+    for session in sessions_scoped_to_group(snapshot, group) {
+        let unique_targets: std::collections::BTreeSet<NodeId> = snapshot
+            .candidate_links
+            .iter()
+            .filter(|link| {
+                matches!(link.state, crate::model::LinkState::Active)
+                    && link.source == session
+                    && link.relation == crate::model::RelationKind::LinkedToMux
+            })
+            .filter_map(|link| link.target_node_id().cloned())
+            .collect();
+        if unique_targets.len() >= 2 {
+            muxes.extend(unique_targets);
+        }
+    }
+    muxes.into_iter().collect()
+}
+
+fn sessions_scoped_to_group(snapshot: &crate::model::GraphSnapshot, group: &NodeId) -> Vec<NodeId> {
+    match group {
+        NodeId::Workspace(_) => sessions_associated_with(snapshot, group),
+        NodeId::Checkout(_) => sessions_associated_with(snapshot, group)
+            .into_iter()
+            .filter(|session| !session_has_workspace_association(snapshot, session))
+            .collect(),
+        NodeId::Repo(repo_id) => {
+            // `CheckoutId` carries the owning repo id directly on the
+            // node, so walk nodes rather than relying on a
+            // resolver-produced `BelongsToRepo` link. This works for
+            // synthetic fixtures that bypass the git discovery
+            // adapter.
+            let mut checkouts: Vec<NodeId> = snapshot
+                .nodes
+                .iter()
+                .filter_map(|node| match node {
+                    crate::model::GraphNode::Checkout(co) if &co.id.repo == repo_id => {
+                        Some(NodeId::Checkout(co.id.clone()))
+                    }
+                    _ => None,
+                })
+                .collect();
+            checkouts.sort();
+            checkouts.dedup();
+            let mut out: Vec<NodeId> = checkouts
+                .iter()
+                .flat_map(|checkout| {
+                    sessions_associated_with(snapshot, checkout)
+                        .into_iter()
+                        .filter(|session| !session_has_workspace_association(snapshot, session))
+                })
+                .collect();
+            out.sort();
+            out.dedup();
+            out
+        }
+        _ => Vec::new(),
+    }
+}
+
+fn sessions_associated_with(
+    snapshot: &crate::model::GraphSnapshot,
+    target: &NodeId,
+) -> Vec<NodeId> {
+    let mut out: Vec<NodeId> = snapshot
+        .candidate_links
+        .iter()
+        .filter(|link| {
+            matches!(link.state, crate::model::LinkState::Active)
+                && link.relation == crate::model::RelationKind::AssociatedWith
+                && matches!(&link.source, NodeId::AgentSession(_))
+                && link.target_node_id() == Some(target)
+        })
+        .map(|link| link.source.clone())
+        .collect();
+    out.sort();
+    out.dedup();
+    out
+}
+
+fn session_has_workspace_association(
+    snapshot: &crate::model::GraphSnapshot,
+    session: &NodeId,
+) -> bool {
+    snapshot.candidate_links.iter().any(|link| {
+        matches!(link.state, crate::model::LinkState::Active)
+            && link.source == *session
+            && link.relation == crate::model::RelationKind::AssociatedWith
+            && matches!(link.target_node_id(), Some(NodeId::Workspace(_)))
+    })
+}
+
 fn program_name(command: &str) -> Option<String> {
     let command = command.trim();
     let name = command.rsplit('/').next().unwrap_or(command);

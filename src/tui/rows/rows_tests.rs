@@ -297,3 +297,209 @@ fn repo_display_path_for_bare_repos_uses_a_probed_checkout() {
     assert_eq!(repo_display_path(&repo, Some(&node)), "/home/op/src/foo");
     assert_eq!(repo_display_path(&repo, None), "/srv/git/foo.git");
 }
+
+fn group_scope_link(
+    id: &str,
+    source: &NodeId,
+    target: &NodeId,
+    relation: crate::model::RelationKind,
+) -> crate::model::GraphLink {
+    crate::model::GraphLink {
+        id: id.to_string(),
+        source: source.clone(),
+        target: crate::model::LinkEndpoint::Node { id: target.clone() },
+        relation,
+        provenance: crate::model::Provenance::Discovered,
+        confidence: crate::model::Confidence::Medium,
+        freshness: crate::model::Freshness::Fresh,
+        source_metadata: crate::model::SourceMetadata::default(),
+        state: crate::model::LinkState::Active,
+    }
+}
+
+fn group_scope_session(key: &str) -> (NodeId, crate::model::GraphNode) {
+    let id = crate::model::AgentSessionId::new("claude-code", "/state", key);
+    let node = crate::model::GraphNode::AgentSession(crate::model::AgentSessionNode::new(
+        id.clone(),
+        "claude-code".to_string(),
+    ));
+    (NodeId::AgentSession(id), node)
+}
+
+fn group_scope_mux(native: &str) -> (NodeId, crate::model::GraphNode) {
+    let id = MuxSessionId::new(native);
+    let node = crate::model::GraphNode::MuxSession(crate::model::MuxSessionNode::new(
+        id.clone(),
+        "tmux".to_string(),
+        native.to_string(),
+    ));
+    (NodeId::MuxSession(id), node)
+}
+
+#[test]
+fn ambiguous_muxes_for_group_aggregates_workspace_scoped_sessions() {
+    // When several sessions in one workspace are each ambiguously
+    // linked to two muxes, the workspace lists those muxes once, not
+    // once per session.
+    use crate::model::{GraphNode, GraphSnapshot, RelationKind, WorkspaceId, WorkspaceNode};
+    let workspace_id = WorkspaceId::new("/home/op/ws");
+    let workspace = NodeId::Workspace(workspace_id.clone());
+    let (session_a, node_a) = group_scope_session("a");
+    let (session_b, node_b) = group_scope_session("b");
+    let (mux_x, node_x) = group_scope_mux("editor");
+    let (mux_y, node_y) = group_scope_mux("scratch");
+
+    let mut snapshot = GraphSnapshot::empty();
+    snapshot.nodes.push(GraphNode::Workspace(WorkspaceNode {
+        id: workspace_id,
+        root: "/home/op/ws".to_string(),
+        provider: Some("atelier".to_string()),
+        name: Some("ws".to_string()),
+    }));
+    snapshot.nodes.extend([node_a, node_b, node_x, node_y]);
+    let mut next_link = 0_usize;
+    for session in [&session_a, &session_b] {
+        next_link += 1;
+        snapshot.candidate_links.push(group_scope_link(
+            &format!("test-{next_link}"),
+            session,
+            &workspace,
+            RelationKind::AssociatedWith,
+        ));
+        for mux in [&mux_x, &mux_y] {
+            next_link += 1;
+            snapshot.candidate_links.push(group_scope_link(
+                &format!("test-{next_link}"),
+                session,
+                mux,
+                RelationKind::LinkedToMux,
+            ));
+        }
+    }
+    let snapshot = crate::resolve::resolve_snapshot(snapshot);
+
+    let muxes = ambiguous_muxes_for_group(&snapshot, &workspace);
+    assert_eq!(
+        muxes.len(),
+        2,
+        "two distinct muxes surface once on the workspace, not per session: {muxes:?}",
+    );
+    assert!(muxes.contains(&mux_x));
+    assert!(muxes.contains(&mux_y));
+}
+
+#[test]
+fn ambiguous_muxes_for_group_is_empty_when_no_session_in_scope_is_ambiguous() {
+    use crate::model::{GraphNode, GraphSnapshot, RelationKind, WorkspaceId, WorkspaceNode};
+    let workspace_id = WorkspaceId::new("/home/op/ws");
+    let workspace = NodeId::Workspace(workspace_id.clone());
+    let (session, session_node) = group_scope_session("a");
+    let (mux, mux_node) = group_scope_mux("only");
+
+    let mut snapshot = GraphSnapshot::empty();
+    snapshot.nodes.push(GraphNode::Workspace(WorkspaceNode {
+        id: workspace_id,
+        root: "/home/op/ws".to_string(),
+        provider: None,
+        name: None,
+    }));
+    snapshot.nodes.extend([session_node, mux_node]);
+    snapshot.candidate_links.push(group_scope_link(
+        "assoc",
+        &session,
+        &workspace,
+        RelationKind::AssociatedWith,
+    ));
+    snapshot.candidate_links.push(group_scope_link(
+        "mux",
+        &session,
+        &mux,
+        RelationKind::LinkedToMux,
+    ));
+    let snapshot = crate::resolve::resolve_snapshot(snapshot);
+
+    assert!(
+        ambiguous_muxes_for_group(&snapshot, &workspace).is_empty(),
+        "one mux per session is not ambiguous",
+    );
+}
+
+#[test]
+fn ambiguous_muxes_for_group_scopes_checkout_and_repo_to_unworkspaced_sessions() {
+    // A session associated with a workspace belongs to the workspace,
+    // so its muxes do not also surface on the checkout or repo it
+    // works in. A session with no workspace belongs to its checkout,
+    // and through it to the repo.
+    use crate::model::{
+        CheckoutId, CheckoutNode, GraphNode, GraphSnapshot, RelationKind, RepoId, RepoNode,
+        WorkspaceId, WorkspaceNode,
+    };
+    let repo_id = RepoId::new("/home/op/src/proj");
+    let checkout_id = CheckoutId::new(repo_id.clone(), "/home/op/src/proj");
+    let workspace_id = WorkspaceId::new("/home/op/ws");
+    let repo = NodeId::Repo(repo_id.clone());
+    let checkout = NodeId::Checkout(checkout_id.clone());
+    let workspace = NodeId::Workspace(workspace_id.clone());
+    let (loose, loose_node) = group_scope_session("loose");
+    let (owned, owned_node) = group_scope_session("owned");
+    let muxes = [
+        group_scope_mux("editor"),
+        group_scope_mux("scratch"),
+        group_scope_mux("build"),
+        group_scope_mux("deploy"),
+    ];
+
+    let mut snapshot = GraphSnapshot::empty();
+    snapshot.nodes.push(GraphNode::Repo(RepoNode::new(repo_id)));
+    snapshot.nodes.push(GraphNode::Checkout(CheckoutNode {
+        id: checkout_id,
+        root: "/home/op/src/proj".to_string(),
+        git_dir: None,
+        current_branch: None,
+        worktree: None,
+        head_commit: None,
+    }));
+    snapshot.nodes.push(GraphNode::Workspace(WorkspaceNode {
+        id: workspace_id,
+        root: "/home/op/ws".to_string(),
+        provider: None,
+        name: None,
+    }));
+    snapshot.nodes.extend([loose_node, owned_node]);
+    snapshot
+        .nodes
+        .extend(muxes.iter().map(|(_, node)| node.clone()));
+    let links = [
+        (&loose, &checkout, RelationKind::AssociatedWith),
+        (&owned, &checkout, RelationKind::AssociatedWith),
+        (&owned, &workspace, RelationKind::AssociatedWith),
+        (&loose, &muxes[0].0, RelationKind::LinkedToMux),
+        (&loose, &muxes[1].0, RelationKind::LinkedToMux),
+        (&owned, &muxes[2].0, RelationKind::LinkedToMux),
+        (&owned, &muxes[3].0, RelationKind::LinkedToMux),
+    ];
+    for (index, (source, target, relation)) in links.into_iter().enumerate() {
+        snapshot.candidate_links.push(group_scope_link(
+            &format!("link-{index}"),
+            source,
+            target,
+            relation,
+        ));
+    }
+
+    // The answer is sorted, whichever order the links came in.
+    let mut loose_muxes = vec![muxes[0].0.clone(), muxes[1].0.clone()];
+    loose_muxes.sort();
+    let mut owned_muxes = vec![muxes[2].0.clone(), muxes[3].0.clone()];
+    owned_muxes.sort();
+    assert_eq!(ambiguous_muxes_for_group(&snapshot, &checkout), loose_muxes);
+    assert_eq!(ambiguous_muxes_for_group(&snapshot, &repo), loose_muxes);
+    assert_eq!(
+        ambiguous_muxes_for_group(&snapshot, &workspace),
+        owned_muxes
+    );
+    assert!(
+        ambiguous_muxes_for_group(&snapshot, &muxes[0].0).is_empty(),
+        "only workspace, checkout, and repo groups scope sessions"
+    );
+}

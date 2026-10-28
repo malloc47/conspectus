@@ -268,7 +268,7 @@ fn mux_for_subject(
         // `a` on a workspace, repo, or checkout attaches to the single
         // ambiguous mux scoped to that group, if any.
         group @ (NodeId::Workspace(_) | NodeId::Repo(_) | NodeId::Checkout(_)) => {
-            let muxes = crate::tui::detail::ambiguous_muxes_for_group(snapshot, group);
+            let muxes = crate::tui::rows::ambiguous_muxes_for_group(snapshot, group);
             match muxes.as_slice() {
                 [] => Err(AttachDisabled::UnmuxedSession),
                 [NodeId::MuxSession(id)] => Ok(id.clone()),
