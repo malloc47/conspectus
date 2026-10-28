@@ -1134,6 +1134,17 @@ their ends; the tree, the explorer, and the Messages log stop. The left
 pane's tree draws the highlight without the gutter until its column schema
 lands.
 
+Keys are the first convention (ADR 0160). Every overlay resolves its keys
+through a table in the framework's `keys` module and generates its footer
+from it: the framework owns the matchers, the rows (which can include a
+standard table and carry whether an action is available now), the footer
+grammar (keys and a short verb, no "to"), one key notation, the roles the
+modal key convention is checked by, and the standard tables for menus,
+dialogs, pagers, prompts, checklists, and forms; `conspectus` keeps the
+tables of its own overlays (search, Controls, Messages, the viewers) and the
+main view's keymap. A letter in an overlay fires plain or shifted, never as
+a chord, and every list moves with `Ctrl-N`/`Ctrl-P`.
+
 ### Graph-to-View Slicing
 
 The producer pipeline discovers and resolves a typed

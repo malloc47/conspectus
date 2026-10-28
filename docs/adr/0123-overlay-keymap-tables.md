@@ -3,7 +3,12 @@
 ## Status
 
 Accepted. Extends ADR 0085 contract 3 (modal stack and one `Overlay`
-contract).
+contract). Amended by
+[ADR 0160](0160-tui-keys-one-model-one-character-rule-one-footer-grammar.md):
+the model and the standard tables are the framework's `tuikit::keys`, a
+character binding no longer fires on its Control or Alt chords (this ADR
+kept each key's old modifier handling), every list moves with
+`Ctrl-N`/`Ctrl-P`, and footers take one grammar with no "to".
 
 ## Context
 

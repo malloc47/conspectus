@@ -1388,6 +1388,22 @@ Every dialog uses the same three keys the same way:
 | `Enter` | Applies or submits the dialog's main action; in a list it activates the focused item. |
 | `Space` | Changes the focused item: toggles a checkbox, steps an option, selects a choice. In a text field it types a space. |
 
+A letter key in a dialog means the letter typed plain or with Shift, never
+a `Ctrl` or `Alt` chord of it: `g` and `G` (or `Home` and `End`) go to the
+top and bottom of the help page, the value viewer, Messages, and the
+viewers, and `Ctrl-G` there does nothing. A chord a dialog uses is named
+as one (`Ctrl-R`, `Ctrl-O`). Every list moves with `↑`/`↓` and with
+`Ctrl-P`/`Ctrl-N`, and with `k`/`j` where nothing is typed: the menus,
+Controls and its checklists, Clean up, Messages, the picker, quick select,
+content search and its options, and a form's fields. `Ctrl-C` always
+backs out of a dialog.
+
+Each dialog's footer is generated from the keys it takes, so it names
+only keys that work there. A hint is the keys and a short verb (`↑/↓
+move`, `Enter pick`); `Esc close` means leaving loses nothing, `Esc
+cancel` that something unfinished is dropped, and `Esc back` that it
+returns to the pane below in the same dialog.
+
 Every list marks the row its cursor is on the same way: `►` in the two
 cells before the row, and the row drawn with `selection_active` (reversed
 and bold) while the list has focus, or `selection_inactive` (bold) while

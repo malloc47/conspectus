@@ -118,6 +118,26 @@ Targeted for 0.2.0, after 0.1.0 is tagged. History, rebuild, and pins
   conflict row in the right pane's Other zone shows its `▲` two cells
   further in, and the checklists cut a long label with `…`. The left
   pane's look is unchanged.
+- **A letter in a dialog means the letter, not its chords.** Inside
+  menus, prompts, forms, Controls, search, Messages, the help page, the
+  value viewer, and the transcript and pane viewers, a letter key fires
+  plain or with Shift only. `Ctrl-G` and `Alt-G` no longer jump to the
+  top (and `Alt-G` to the bottom) of the help page, the value viewer, and
+  Messages; `Ctrl-G` no longer jumps to the top of the viewers; `Ctrl-D`
+  no longer discards a branch in the close-down choice, and `Ctrl-Y` no
+  longer confirms a worktree removal, merge, or prune or copies in the
+  value viewer. Every list now also moves with `Ctrl-N` and `Ctrl-P`: the
+  row, mux, and worktree menus, Clean up, Controls and its checklists,
+  Messages, and the fields of the new tmux session, launch, and pin edit
+  forms, as search and the picker already did.
+- **Dialog footers read one way.** Every footer pairs keys with a short
+  verb: `to scroll`, `to close`, `to copy`, `to confirm`, and `to cancel`
+  lose their "to" (the help page, the value viewer, the worktree
+  confirmations), the close-down choice reads `m merge & close`, search
+  reads `Tab search current/all`, `S-Tab list sessions/messages`,
+  `Ctrl-R recall search`, `Ctrl-O set options`, and `Ctrl-S open Search
+  view`, and the forms read `←/→/Space change`. The value viewer's footer
+  lists its keys in the help page's order and names `PgDn`/`PgUp`.
 
 ### Fixed
 
