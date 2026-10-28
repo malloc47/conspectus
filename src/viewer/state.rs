@@ -137,12 +137,11 @@ pub struct ViewerState {
     /// over the body listing every viewer keybinding. Toggled by
     /// `?`; closed by `?` or `Esc`.
     pub show_help: bool,
-    /// First visible line of the help page while it is open; the help
-    /// widget clamps it to what the page can scroll.
-    pub help_scroll: usize,
-    /// Rows of the help page the last draw showed; its page keys move by
-    /// this many (the transcript's own viewport is taller).
-    pub help_page: usize,
+    /// Where the help page is scrolled while it is open. Each draw brings
+    /// it back inside the page and records the rows the page showed,
+    /// which its page keys move by (the transcript's own viewport is
+    /// taller).
+    pub help_scroll: tuikit::help::HelpScroll,
     /// Viewport height (in cells / lines) last seen during draw.
     /// Used by the reducer to compute page/half-page deltas.
     pub viewport_height: u16,
@@ -175,8 +174,7 @@ impl ViewerState {
             show_aborted: false,
             show_hidden: false,
             show_help: false,
-            help_scroll: 0,
-            help_page: 0,
+            help_scroll: tuikit::help::HelpScroll::new(),
             viewport_height: 0,
             total_lines: 0,
             rendered: None,

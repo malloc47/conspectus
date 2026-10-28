@@ -1,6 +1,26 @@
 use super::*;
 use ratatui::crossterm::event::{KeyCode, KeyModifiers};
 use ratatui::crossterm::event::{KeyEventKind, KeyEventState};
+use ratatui::text::Line;
+use tuikit::help::HelpRow;
+
+/// Where a description starts: the indent and the key column.
+const KEY_COLUMN_WIDTH: usize = 16;
+
+/// The page's lines laid out `width` cells wide (`None` wraps nothing),
+/// the footer last, as the modal draws them.
+fn body_lines_for_width(theme: &Theme, width: Option<usize>) -> Vec<Line<'static>> {
+    let sections = sections(theme);
+    let page = page(theme, &sections);
+    let width = width.unwrap_or(usize::MAX);
+    let mut lines = page.lines(width);
+    lines.extend(page.footer_lines(width));
+    lines
+}
+
+fn body_lines(theme: &Theme) -> Vec<Line<'static>> {
+    body_lines_for_width(theme, None)
+}
 
 fn key(code: KeyCode) -> KeyEvent {
     KeyEvent {
@@ -18,9 +38,8 @@ fn key(code: KeyCode) -> KeyEvent {
 /// operator-facing help.
 #[test]
 fn every_keybindings_entry_appears_in_help_sections() {
-    // Ratatui-cheese `Binding::key(&self)` returns the key
-    // string; the haystack now holds every operator-facing
-    // key label. Check each KEYBINDINGS entry.
+    // The haystack holds every operator-facing key label of the
+    // keymap's rows. Check each KEYBINDINGS entry.
     //
     // Multi-key help rows collapse several bindings into one
     // string (e.g. "1 – 5", "j / k / ↓ / ↑"). The test
@@ -45,9 +64,11 @@ fn every_keybindings_entry_appears_in_help_sections() {
     let sections = keymap_sections();
     let mut haystack = String::new();
     for section in &sections {
-        for binding in &section.bindings {
-            haystack.push_str(binding.key());
-            haystack.push('\n');
+        for row in &section.rows {
+            if let HelpRow::Keys { keys, .. } = row {
+                haystack.push_str(keys);
+                haystack.push('\n');
+            }
         }
     }
 
@@ -327,7 +348,7 @@ const TERMINAL_WIDTHS: [u16; 4] = [60, 80, 120, 160];
 /// The cells the help body's text gets at a terminal width: the modal's
 /// inner width, less the scrollbar column.
 fn text_width_at(terminal_width: u16) -> usize {
-    let modal = HELP_SIZE.rect(Rect::new(0, 0, terminal_width, 40), 0);
+    let modal = HelpPage::SIZE.rect(Rect::new(0, 0, terminal_width, 40), 0);
     usize::from(modal.width.saturating_sub(2)).saturating_sub(1)
 }
 
@@ -388,7 +409,7 @@ fn the_rendered_help_modal_shows_every_word_as_you_scroll() {
             state.fit(fit);
             // The text columns only: inside the frame, left of the
             // scrollbar.
-            let modal = HELP_SIZE.rect(area, 0);
+            let modal = HelpPage::SIZE.rect(area, 0);
             for y in modal.y + 1..modal.y + modal.height - 1 {
                 let row: String = (modal.x + 1..modal.x + modal.width - 2)
                     .map(|x| buf[(x, y)].symbol().to_string())

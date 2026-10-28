@@ -24,11 +24,10 @@ use ratatui::layout::Rect;
 use ratatui::style::Style;
 use ratatui::text::Line;
 use ratatui::widgets::{Paragraph, Widget};
-use tuikit::frame::{ModalBody, ModalFrame};
+use tuikit::frame::{ModalBody, ModalFrame, ModalSize};
 use tuikit::scroll::ScrollWindow;
 
 use crate::tui::Theme;
-use crate::tui::widgets::help::HELP_SIZE;
 
 /// Pure state for the full-value modal.
 #[derive(Debug, Clone)]
@@ -193,7 +192,7 @@ impl ValueModalWidget<'_> {
             state: self.state,
             theme: self.theme,
         };
-        ModalFrame::new(self.theme, HELP_SIZE)
+        ModalFrame::new(self.theme, ModalSize::WIDE)
             .title(self.state.label.as_str())
             .render(area, buf, body)
     }

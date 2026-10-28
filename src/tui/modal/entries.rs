@@ -206,7 +206,13 @@ impl Overlay<Msg, App> for crate::viewer::state::ViewerState {
     fn render(&mut self, area: Rect, buf: &mut Buffer, app: &App, _theme: &KitTheme) {
         crate::viewer::widget::draw(self, app.theme(), buf, area);
         if self.show_help {
-            crate::tui::widgets::viewer_help::draw(self, app.theme(), buf, area);
+            crate::tui::widgets::viewer_help::draw(
+                crate::tui::keybindings::overlay::VIEWER_KEYS,
+                &mut self.help_scroll,
+                app.theme(),
+                buf,
+                area,
+            );
         }
     }
 

@@ -190,25 +190,16 @@ fn the_find_prompt_owns_the_keys_while_it_is_open() {
 }
 
 #[test]
-fn the_help_page_lists_every_bound_key_including_attach() {
-    let theme = Theme::default();
-    let text: String = help_lines(&theme, Some(80))
-        .iter()
-        .map(|line| {
-            line.spans
-                .iter()
-                .map(|s| s.content.as_ref())
-                .collect::<String>()
-        })
-        .collect::<Vec<_>>()
-        .join("\n");
-    assert!(text.contains("Attach to the pane's mux"), "{text}");
-    for msg in PaneViewerMsg::ALL {
-        assert!(
-            text.contains(msg.help().1),
-            "{msg:?} is missing from the help page"
-        );
-    }
+fn the_help_page_is_drawn_over_the_viewer_and_scrolls_inside_itself() {
+    let mut state = PaneViewerState::open(pane(), scrollback(5), 1, "");
+    press(&mut state, KeyCode::Char('?'));
+    let screen = render(&mut state, 90, 40);
+    assert!(screen.contains("Attach to the pane's mux"), "{screen}");
+    assert!(screen.contains("Esc/q/? close"), "{screen}");
+    // The page fits, so a key past its end is taken back by the draw.
+    press(&mut state, KeyCode::Char('G'));
+    render(&mut state, 90, 40);
+    assert_eq!(state.help_scroll.offset(), 0);
 }
 
 #[test]

@@ -1,37 +1,35 @@
-//! `?` help overlay.
+//! `?` help overlay: the keymap's reference card.
 //!
-//! Minimal reference card for the current keymap. Render-only — no
-//! mutation, no sub-editors — so the state struct is empty today and
-//! exists mainly so the runtime can use the same open/close pattern
-//! it uses for the controls, rename, and search overlays. As more
-//! capabilities accumulate this can grow tabs or scrolling without
-//! changing its boundary with the runtime.
+//! Every help page of the TUI (this one and the transcript and pane
+//! viewers' pages in `viewer_help`) draws through `page`, the
+//! framework's help page with the footer of the keys that scroll and
+//! close it, so the three share one frame, one column grid, one heading
+//! style, and one footer. The viewers' pages are generated from their key
+//! tables. This one's rows are hand-written prose, kept as annotation
+//! sections until the program-wide keymap carries help text the page can
+//! be generated from (backlog `CSP-760`), followed by legends of the
+//! marks the screens draw.
 
 use ratatui::buffer::Buffer;
 use ratatui::crossterm::event::KeyEvent;
 use ratatui::layout::Rect;
-use ratatui::macros::{line, span};
 use ratatui::style::{Modifier, Style};
-use ratatui::text::Line;
-use ratatui::widgets::{Paragraph, Widget};
-use ratatui_cheese::help::Binding;
-use tuikit::frame::{ModalBody, ModalFrame, ModalSize};
+use ratatui::text::Span;
+use ratatui::widgets::Widget;
 use tuikit::glyphs::marks;
-use tuikit::keys::HINT_SEPARATOR;
-use tuikit::scroll::{ScrollGutter, ScrollWindow};
-use tuikit::text;
+use tuikit::help::{HelpPage, HelpScroll, HelpSection};
+use tuikit::keys::{PagerKey, resolve};
+use tuikit::scroll::ScrollWindow;
 
 use crate::tui::Theme;
 use crate::tui::icons::{NodeKind, node_kind_style};
+use crate::tui::keybindings::overlay::HELP_KEYS;
 
-/// Pure state for the help overlay. Carries vertical scroll
-/// position so long keymaps stay reachable on short terminals.
+/// Pure state for the help overlay: where the page is scrolled, so long
+/// keymaps stay reachable on short terminals.
 #[derive(Debug, Clone, Default)]
 pub struct HelpOverlayState {
-    pub scroll: u16,
-    /// Rows of the page the modal showed at the last draw; a page key
-    /// moves by this many.
-    pub page_rows: u16,
+    pub scroll: HelpScroll,
 }
 
 impl HelpOverlayState {
@@ -39,56 +37,26 @@ impl HelpOverlayState {
         Self::default()
     }
 
-    /// Dispatch a crossterm key event. Esc / Ctrl-C / `q` close the
-    /// overlay; j/k/PgDn/PgUp/g/G scroll the keymap if it overflows
+    /// Dispatch a crossterm key event. Esc / Ctrl-C / `q` / `?` close
+    /// the overlay; j/k/PgDn/PgUp/g/G scroll the keymap if it overflows
     /// the modal; everything else is swallowed so navigation keys
     /// don't accidentally affect the row tree behind it.
     pub fn handle_key(&mut self, event: KeyEvent) -> HelpOutcome {
-        use crate::tui::keybindings::overlay::HELP_KEYS;
-        use tuikit::keys::{PagerKey, resolve};
         match resolve(HELP_KEYS, event) {
             Some(PagerKey::Abort | PagerKey::Close) => HelpOutcome::Close,
-            Some(PagerKey::Down) => {
-                self.scroll_by(1);
+            Some(key) => {
+                self.scroll.apply(key);
                 HelpOutcome::Continue
             }
-            Some(PagerKey::Up) => {
-                self.scroll_by(-1);
-                HelpOutcome::Continue
-            }
-            Some(PagerKey::PageDown) => {
-                self.scroll_by(i32::from(self.page_rows.max(1)));
-                HelpOutcome::Continue
-            }
-            Some(PagerKey::PageUp) => {
-                self.scroll_by(-i32::from(self.page_rows.max(1)));
-                HelpOutcome::Continue
-            }
-            Some(PagerKey::Top) => {
-                self.scroll = 0;
-                HelpOutcome::Continue
-            }
-            Some(PagerKey::Bottom) => {
-                self.scroll = u16::MAX;
-                HelpOutcome::Continue
-            }
-            Some(PagerKey::Copy) | None => HelpOutcome::Continue,
+            None => HelpOutcome::Continue,
         }
-    }
-
-    fn scroll_by(&mut self, delta: i32) {
-        let current = i32::from(self.scroll);
-        let next = current.saturating_add(delta).max(0);
-        self.scroll = u16::try_from(next.min(i32::from(u16::MAX))).unwrap_or(u16::MAX);
     }
 
     /// Take in the window the last draw showed: the offset comes back
     /// inside the page (so `G`, or `j` past the end, is undone by the next
     /// key up) and page keys move by the rows on screen.
     pub fn fit(&mut self, window: ScrollWindow) {
-        let last = u16::try_from(window.last_offset()).unwrap_or(u16::MAX);
-        self.scroll = self.scroll.min(last);
-        self.page_rows = u16::try_from(window.viewport()).unwrap_or(u16::MAX);
+        self.scroll.keep(window);
     }
 }
 
@@ -100,10 +68,8 @@ pub enum HelpOutcome {
     Close,
 }
 
-/// Centered modal that renders the keymap reference. Lays out two
-/// columns of `key · action` pairs grouped into sections so the
-/// operator can scan for the action they want. Supports vertical
-/// scrolling when the keymap overflows the modal.
+/// Centered modal that renders the keymap reference: the keymap's
+/// sections, then the legends, scrolled when they overflow the modal.
 pub struct HelpOverlayWidget<'a> {
     state: &'a HelpOverlayState,
     theme: &'a Theme,
@@ -119,10 +85,10 @@ impl HelpOverlayWidget<'_> {
     /// Draw the help and report the window the page showed, for
     /// [`HelpOverlayState::fit`].
     pub fn draw(self, area: Rect, buf: &mut Buffer) -> ScrollWindow {
-        let theme = self.theme;
-        render_help_page(area, buf, theme, self.state.scroll as usize, &|width| {
-            body_lines_for_width(theme, Some(width))
-        })
+        let sections = sections(self.theme);
+        page(self.theme, &sections)
+            .scrolled(&self.state.scroll)
+            .render(area, buf)
     }
 }
 
@@ -132,499 +98,180 @@ impl Widget for HelpOverlayWidget<'_> {
     }
 }
 
-/// How large a help page is: a reader's size.
-pub(crate) const HELP_SIZE: ModalSize = ModalSize::WIDE;
-
-/// Draw a help page: the modal frame with the `Help` title, the page's
-/// lines scrolled to `scroll` and wrapped to the modal's width, and a
-/// scrollbar when the page overflows. The keymap help and the viewers'
-/// helps all draw through here, so they share one frame, size, and
-/// scroll behavior. Returns the window the page's scrolling part showed;
-/// the footer stays on the last rows, so only the lines above it scroll.
-pub(super) fn render_help_page(
-    area: Rect,
-    buf: &mut Buffer,
-    theme: &Theme,
-    scroll: usize,
-    lines_for: &dyn Fn(usize) -> Vec<Line<'static>>,
-) -> ScrollWindow {
-    ModalFrame::new(theme, HELP_SIZE).title("Help").render(
-        area,
-        buf,
-        HelpBody { scroll, lines_for },
-    )
+/// A help page of `sections` as the TUI draws every help page: the
+/// framework's page, with the footer of the keys that scroll and close it.
+pub(crate) fn page<'a>(theme: &'a Theme, sections: &'a [HelpSection]) -> HelpPage<'a> {
+    HelpPage::new(theme, sections).footer(HELP_KEYS)
 }
 
-/// A help page split into the lines that scroll and the footer that
-/// stays on the modal's last rows.
-struct PageLayout {
-    body: Vec<Line<'static>>,
-    footer: Vec<Line<'static>>,
-    /// Rows the scrolling part has.
-    body_height: usize,
-    /// Columns the text has (one fewer when a scrollbar is drawn).
-    text_width: usize,
+/// The keymap page: the keymap's sections, then the legends.
+pub(crate) fn sections(theme: &Theme) -> Vec<HelpSection> {
+    let mut sections = keymap_sections();
+    sections.extend([
+        icon_legend(theme),
+        mux_state_legend(theme),
+        pr_state_legend(theme),
+        pin_marker_legend(theme),
+    ]);
+    sections
 }
 
-/// Rows the footer takes at `width`.
-fn footer_rows(width: usize) -> usize {
-    if width <= 8 {
-        return 1;
-    }
-    let footer = tuikit::keys::footer(crate::tui::keybindings::overlay::HELP_KEYS);
-    text::wrap_at(&footer, HINT_SEPARATOR, width).len()
-}
-
-fn page_layout(
-    lines_for: &dyn Fn(usize) -> Vec<Line<'static>>,
-    width: usize,
-    height: usize,
-) -> PageLayout {
-    let split = |lines: Vec<Line<'static>>, text_width: usize| {
-        let keep = footer_rows(text_width).min(height.saturating_sub(1));
-        let at = lines.len().saturating_sub(keep);
-        let mut body = lines;
-        let footer = body.split_off(at);
-        (body, footer)
-    };
-    let (body, footer) = split(lines_for(width), width);
-    let body_height = height.saturating_sub(footer.len());
-    if body.len() <= body_height || width <= 1 {
-        return PageLayout {
-            body,
-            footer,
-            body_height,
-            text_width: width,
-        };
-    }
-    // The scrollbar takes a column once the page overflows.
-    let (body, footer) = split(lines_for(width - 1), width - 1);
-    let body_height = height.saturating_sub(footer.len());
-    PageLayout {
-        body,
-        footer,
-        body_height,
-        text_width: width - 1,
-    }
-}
-
-/// A help page inside its frame: the lines for the frame's width, the
-/// part above the footer scrolled to `scroll`.
-struct HelpBody<'a> {
-    scroll: usize,
-    lines_for: &'a dyn Fn(usize) -> Vec<Line<'static>>,
-}
-
-impl ModalBody for HelpBody<'_> {
-    type Output = ScrollWindow;
-
-    /// The page fills its frame, so it is laid out in `render`, where the
-    /// height is known.
-    fn measure(&mut self, _width: u16) -> u16 {
-        0
-    }
-
-    fn render(self, area: Rect, buf: &mut Buffer) -> ScrollWindow {
-        let page = page_layout(self.lines_for, area.width as usize, area.height as usize);
-        let text_width = u16::try_from(page.text_width).unwrap_or(area.width);
-        let body_height = u16::try_from(page.body_height).unwrap_or(area.height);
-        let window = ScrollWindow::new(page.body_height, page.body.len()).at(self.scroll);
-        // The page was laid out for the gutter the scrolling part needs.
-        let gutter = ScrollGutter::layout(
-            Rect {
-                height: body_height,
-                ..area
-            },
-            page.body.len(),
-        );
-        Paragraph::new(page.body)
-            .scroll(window.paragraph_scroll())
-            .render(gutter.content(), buf);
-        // The footer stays on the last rows whatever the scroll.
-        let footer_area = Rect {
-            x: area.x,
-            y: area.y + body_height,
-            width: text_width,
-            height: area.height.saturating_sub(body_height),
-        };
-        Paragraph::new(page.footer).render(footer_area, buf);
-        gutter.render(&window, buf);
-        window
-    }
-}
-
-/// One named section in the help overlay's keymap. Sections render
-/// as a bold header followed by every enabled binding in the
-/// section, then a blank spacer row.
-struct HelpSection {
-    title: &'static str,
-    bindings: Vec<Binding>,
-}
-
-/// The static keymap as data. Sections come first; the node-kind
-/// icon legend is rendered separately because it's not a binding
-/// list. Bindings are
-/// [`ratatui_cheese::help::Binding`](Binding) so future refactors
-/// (filter to a view-specific set, disable a binding, etc.) become
-/// operations on the data rather than on rendered lines. The
-/// renderer keeps the in-tree sectioned-vertical layout — cheese's
-/// short / multi-column modes don't fit our 200+ char descriptions.
+/// The keymap as hand-written sections. Their prose says more than a
+/// key table's one-line descriptions can, so they stay annotations until
+/// the program-wide keymap's rows carry help text of their own.
 fn keymap_sections() -> Vec<HelpSection> {
     vec![
-        HelpSection {
-            title: "Discoverable controls",
-            bindings: vec![
-                Binding::new(
-                    "f",
-                    "Open the controls overlay (view / grouping / filters / sort / preview wrap); Space selects or toggles, Enter applies and closes, Esc closes",
-                ),
-                Binding::new("!", crate::tui::keybindings::MESSAGES_HELP),
-                Binding::new("?", "This help"),
-            ],
-        },
-        HelpSection {
-            title: "Actions",
-            bindings: vec![
-                Binding::new(
-                    "Enter",
-                    "Default action on the selected row: attach mux/muxed sessions, view un-muxed sessions, rebuild a stopped mux, pin, or history record, expand groups",
-                ),
-                Binding::new("a", "Attach to the selected mux"),
-                Binding::new(
-                    "i",
-                    "Copy the selected agent or mux session's full id to the clipboard",
-                ),
-                Binding::new(
-                    "R",
-                    "Rename the selected agent session (alias) or mux (tmux + pin cascade)",
-                ),
-                Binding::new(
-                    "w",
-                    "Open the worktree action menu for the selected repo / worktree / mux (new, merge, remove, close-down, prune, reveal; mutations need a backend)",
-                ),
-                Binding::new(
-                    "X",
-                    "Close down the selected stream: merge or discard the branch, end its sessions, remove the worktree, forget its history",
-                ),
-                Binding::new(
-                    "v",
-                    "Open the selected session's transcript (or the mux row's linked session); q/Esc close, j/k or PgDn/PgUp scroll, g/G start/end, t cycle tool detail, T thinking, / find then n/N step through matches, ? lists every key",
-                ),
-                Binding::new("r", "Refresh discovery now"),
-                Binding::new("Ctrl-R", crate::tui::keybindings::HARD_REFRESH_HELP),
-                Binding::new(
-                    "S",
-                    "Resume the selected un-muxed agent session in a new terminal",
-                ),
-                Binding::new("q / Ctrl-C", "Quit"),
-            ],
-        },
-        HelpSection {
-            title: "Mux",
-            bindings: vec![
-                Binding::new(
-                    "n",
-                    "Create a bare tmux session (no agent, no worktree) — shell in the selected cwd",
-                ),
-                Binding::new(
-                    "N",
-                    "Launch a harness in a new mux (the form can also create a worktree for it)",
-                ),
-                Binding::new(
-                    "m",
-                    "Open the Mux action menu — pick between new bare session and launching a harness in a fresh mux",
-                ),
-            ],
-        },
-        HelpSection {
-            title: "Row actions",
-            bindings: vec![
-                Binding::new(
-                    "p",
-                    "Pin the selected row, or unpin it when it is already pinned; pinned rows carry ◉ (◎ when the pinned entity isn't running)",
-                ),
-                Binding::new(
-                    crate::tui::keybindings::UNDO_KEY.to_string(),
-                    "Undo the last pin or unpin, as far back as this session goes; a removed pin comes back with its overrides and its place in the order",
-                ),
-                Binding::new(
-                    ".",
-                    "Open the row action menu — pin or unpin; rebuild, forget, or show the rebuild plan for a history record; edit, rename, retarget, refresh, or reveal a pin in the Pinned view; Clean up… in the History view",
-                ),
-            ],
-        },
-        HelpSection {
-            title: "View switching",
-            bindings: vec![
-                Binding::new(
-                    "1 / 2 / 3 / 4",
-                    "Switch directly to the sessions / mux / PRs / pinned view",
-                ),
-                Binding::new("5", "Switch directly to the history view"),
-                Binding::new("6", "Switch directly to the Search view"),
-                Binding::new("] / [", "Cycle to next / previous view"),
-            ],
-        },
-        HelpSection {
-            title: "Filters & grouping",
-            bindings: vec![
-                Binding::new("F", "Clear all active filters for the visible view"),
-                Binding::new("Ctrl-G", "Cycle grouping forward for the active view"),
-            ],
-        },
-        HelpSection {
-            title: "Search",
-            bindings: vec![
-                Binding::new(
-                    "/",
-                    "Quick select: find a row of this view by name (rows under collapsed groups too); Enter selects it",
-                ),
-                Binding::new(
-                    "/ then Tab",
-                    "Find anything, whichever view it lives in (Tab again goes back to this view); the word at the right says whether Enter selects it here, follows its relationships in the right pane, or switches views",
-                ),
-                Binding::new(
-                    "Ctrl-/ (or Ctrl-_ / Ctrl-7) / s",
-                    "Search contents: what was said in the sessions and what is in mux scrollback, in this view's sessions and muxes (Tab searches all of them). Ctrl-L switches between listing sessions and listing messages; Ctrl-O opens the options (tool calls, thinking, pane scrollback); Ctrl-S keeps the search in the Search view and goes there; Ctrl-F keeps the query as a filter on the lists. `s` works in every terminal",
-                ),
-                Binding::new(
-                    "< / >",
-                    "Search view: show the previous (older) or next (newer) remembered search without searching again; Controls lists them",
-                ),
-                Binding::new(
-                    "Ctrl-L",
-                    "Search view: list sessions or messages (the same matches, no new scan)",
-                ),
-                Binding::new(
-                    "Ctrl-O",
-                    "Search view: choose what a search looks in (tool calls, thinking, pane scrollback)",
-                ),
-                Binding::new(
-                    "Ctrl-F",
-                    "Search view: keep the search shown as the filter on the lists (paging does not change the filter; F clears it)",
-                ),
-            ],
-        },
-        HelpSection {
-            title: "Navigation",
-            bindings: vec![
-                Binding::new("j / k / ↓ / ↑", "Move selection down / up"),
-                Binding::new(
-                    "l / → / h / ←",
-                    "Expand / collapse the selected left-tree row (vi-style fold)",
-                ),
-                Binding::new("PgDn / PgUp", "Page through the row tree"),
-                Binding::new("g / G", "First / last row"),
-                Binding::new(
-                    "Enter",
-                    "Left tree: row-kind default action (attach / view / rebuild / expand); right pane: drill or expand a group",
-                ),
-                Binding::new(
-                    "Shift-Enter / Alt-Enter / O",
-                    "Reveal the row's entity in its own view (Sessions, Mux, PRs, History); Backspace on the left tree returns. Shift-Enter needs a terminal that reports it",
-                ),
-                Binding::new("Tab", "Cycle focus between left tree and right panel"),
-                Binding::new("J / K", "Scroll the right-panel preview"),
-            ],
-        },
-        HelpSection {
-            title: "Detail-pane graph explorer (right focus)",
-            bindings: vec![
-                Binding::new(
-                    "j / k",
-                    "Move the explorer cursor between Node fields and relationship rows",
-                ),
-                Binding::new(
-                    "Enter",
-                    "Copy the value on a Node-zone field row · drill on a link row · expand on a group header",
-                ),
-                Binding::new("e", "Toggle expand/collapse on a multi-link group header"),
-                Binding::new(
-                    "Backspace",
-                    "Back out of the most recent drilldown hop · once the stack is empty, press twice to return focus to the left pane",
-                ),
-                Binding::new(
-                    "F",
-                    "Toggle Expanded Node Detail (every per-kind field) on the focused node",
-                ),
-                Binding::new(
-                    "E",
-                    "Toggle edge meta (provenance · confidence · state) on link rows",
-                ),
-                Binding::new(
-                    "o",
-                    "Open the full untruncated value for the cursor row in a modal",
-                ),
-            ],
-        },
+        HelpSection::new("Discoverable controls")
+            .keys(
+                "f",
+                "Open the controls overlay (view / grouping / filters / sort / preview wrap); Space selects or toggles, Enter applies and closes, Esc closes",
+            )
+            .keys("!", crate::tui::keybindings::MESSAGES_HELP)
+            .keys("?", "This help"),
+        HelpSection::new("Actions")
+            .keys(
+                "Enter",
+                "Default action on the selected row: attach mux/muxed sessions, view un-muxed sessions, rebuild a stopped mux, pin, or history record, expand groups",
+            )
+            .keys("a", "Attach to the selected mux")
+            .keys(
+                "i",
+                "Copy the selected agent or mux session's full id to the clipboard",
+            )
+            .keys(
+                "R",
+                "Rename the selected agent session (alias) or mux (tmux + pin cascade)",
+            )
+            .keys(
+                "w",
+                "Open the worktree action menu for the selected repo / worktree / mux (new, merge, remove, close-down, prune, reveal; mutations need a backend)",
+            )
+            .keys(
+                "X",
+                "Close down the selected stream: merge or discard the branch, end its sessions, remove the worktree, forget its history",
+            )
+            .keys(
+                "v",
+                "Open the selected session's transcript (or the mux row's linked session); q/Esc close, j/k or PgDn/PgUp scroll, g/G start/end, t cycle tool detail, T thinking, / find then n/N step through matches, ? lists every key",
+            )
+            .keys("r", "Refresh discovery now")
+            .keys("Ctrl-R", crate::tui::keybindings::HARD_REFRESH_HELP)
+            .keys(
+                "S",
+                "Resume the selected un-muxed agent session in a new terminal",
+            )
+            .keys("q / Ctrl-C", "Quit"),
+        HelpSection::new("Mux")
+            .keys(
+                "n",
+                "Create a bare tmux session (no agent, no worktree) — shell in the selected cwd",
+            )
+            .keys(
+                "N",
+                "Launch a harness in a new mux (the form can also create a worktree for it)",
+            )
+            .keys(
+                "m",
+                "Open the Mux action menu — pick between new bare session and launching a harness in a fresh mux",
+            ),
+        HelpSection::new("Row actions")
+            .keys(
+                "p",
+                "Pin the selected row, or unpin it when it is already pinned; pinned rows carry ◉ (◎ when the pinned entity isn't running)",
+            )
+            .keys(
+                crate::tui::keybindings::UNDO_KEY.to_string(),
+                "Undo the last pin or unpin, as far back as this session goes; a removed pin comes back with its overrides and its place in the order",
+            )
+            .keys(
+                ".",
+                "Open the row action menu — pin or unpin; rebuild, forget, or show the rebuild plan for a history record; edit, rename, retarget, refresh, or reveal a pin in the Pinned view; Clean up… in the History view",
+            ),
+        HelpSection::new("View switching")
+            .keys(
+                "1 / 2 / 3 / 4",
+                "Switch directly to the sessions / mux / PRs / pinned view",
+            )
+            .keys("5", "Switch directly to the history view")
+            .keys("6", "Switch directly to the Search view")
+            .keys("] / [", "Cycle to next / previous view"),
+        HelpSection::new("Filters & grouping")
+            .keys("F", "Clear all active filters for the visible view")
+            .keys("Ctrl-G", "Cycle grouping forward for the active view"),
+        HelpSection::new("Search")
+            .keys(
+                "/",
+                "Quick select: find a row of this view by name (rows under collapsed groups too); Enter selects it",
+            )
+            .keys(
+                "/ then Tab",
+                "Find anything, whichever view it lives in (Tab again goes back to this view); the word at the right says whether Enter selects it here, follows its relationships in the right pane, or switches views",
+            )
+            .keys(
+                "Ctrl-/ (or Ctrl-_ / Ctrl-7) / s",
+                "Search contents: what was said in the sessions and what is in mux scrollback, in this view's sessions and muxes (Tab searches all of them). Ctrl-L switches between listing sessions and listing messages; Ctrl-O opens the options (tool calls, thinking, pane scrollback); Ctrl-S keeps the search in the Search view and goes there; Ctrl-F keeps the query as a filter on the lists. `s` works in every terminal",
+            )
+            .keys(
+                "< / >",
+                "Search view: show the previous (older) or next (newer) remembered search without searching again; Controls lists them",
+            )
+            .keys(
+                "Ctrl-L",
+                "Search view: list sessions or messages (the same matches, no new scan)",
+            )
+            .keys(
+                "Ctrl-O",
+                "Search view: choose what a search looks in (tool calls, thinking, pane scrollback)",
+            )
+            .keys(
+                "Ctrl-F",
+                "Search view: keep the search shown as the filter on the lists (paging does not change the filter; F clears it)",
+            ),
+        HelpSection::new("Navigation")
+            .keys("j / k / ↓ / ↑", "Move selection down / up")
+            .keys(
+                "l / → / h / ←",
+                "Expand / collapse the selected left-tree row (vi-style fold)",
+            )
+            .keys("PgDn / PgUp", "Page through the row tree")
+            .keys("g / G", "First / last row")
+            .keys(
+                "Enter",
+                "Left tree: row-kind default action (attach / view / rebuild / expand); right pane: drill or expand a group",
+            )
+            .keys(
+                "Shift-Enter / Alt-Enter / O",
+                "Reveal the row's entity in its own view (Sessions, Mux, PRs, History); Backspace on the left tree returns. Shift-Enter needs a terminal that reports it",
+            )
+            .keys("Tab", "Cycle focus between left tree and right panel")
+            .keys("J / K", "Scroll the right-panel preview"),
+        HelpSection::new("Detail-pane graph explorer (right focus)")
+            .keys(
+                "j / k",
+                "Move the explorer cursor between Node fields and relationship rows",
+            )
+            .keys(
+                "Enter",
+                "Copy the value on a Node-zone field row · drill on a link row · expand on a group header",
+            )
+            .keys("e", "Toggle expand/collapse on a multi-link group header")
+            .keys(
+                "Backspace",
+                "Back out of the most recent drilldown hop · once the stack is empty, press twice to return focus to the left pane",
+            )
+            .keys(
+                "F",
+                "Toggle Expanded Node Detail (every per-kind field) on the focused node",
+            )
+            .keys(
+                "E",
+                "Toggle edge meta (provenance · confidence · state) on link rows",
+            )
+            .keys(
+                "o",
+                "Open the full untruncated value for the cursor row in a modal",
+            ),
     ]
-}
-
-/// Render the keymap as `Vec<Line<'static>>` lines, one per
-/// binding plus section headers, blank spacers, the icon legend,
-/// and the close hint. Layout stays sectioned-vertical because
-/// cheese's short / multi-column Help modes don't fit our long
-/// descriptions; the win is that the keymap is now data
-/// ([`keymap_sections`]) rather than imperative `bind(...)` calls.
-#[cfg(test)]
-fn body_lines(theme: &Theme) -> Vec<Line<'static>> {
-    body_lines_for_width(theme, None)
-}
-
-/// [`body_lines`] with binding descriptions wrapped to `width` cells
-/// under a hanging indent aligned with the description column. `None`
-/// leaves every binding on one line.
-fn body_lines_for_width(theme: &Theme, width: Option<usize>) -> Vec<Line<'static>> {
-    let mut lines: Vec<Line<'static>> = Vec::new();
-
-    for section in keymap_sections() {
-        self::section(&mut lines, section.title);
-        for binding in &section.bindings {
-            if !binding.is_enabled() {
-                continue;
-            }
-            lines.extend(binding_lines(
-                binding.key(),
-                binding.description(),
-                theme,
-                width,
-            ));
-        }
-        blank(&mut lines);
-    }
-
-    self::section(&mut lines, "Node kind icons");
-    push_icon_legend(&mut lines, theme, width);
-    blank(&mut lines);
-
-    self::section(&mut lines, "Link and mux state");
-    push_mux_state_legend(&mut lines, theme, width);
-    blank(&mut lines);
-
-    self::section(&mut lines, "Pull request state");
-    push_pr_state_legend(&mut lines, theme, width);
-    blank(&mut lines);
-
-    self::section(&mut lines, "Pins");
-    push_pin_marker_legend(&mut lines, theme, width);
-    blank(&mut lines);
-
-    push_footer(&mut lines, theme, width);
-    lines
-}
-
-/// The closing line of a help page, generated from the key table that
-/// scrolls and closes it, wrapped to `width` when known. It recedes in
-/// the theme's `muted` look; a key that cannot act now is dimmed further.
-pub(super) fn push_footer(lines: &mut Vec<Line<'static>>, theme: &Theme, width: Option<usize>) {
-    let footer = tuikit::keys::Footer::new(crate::tui::keybindings::overlay::HELP_KEYS);
-    let width = width.filter(|w| *w > 8).unwrap_or(usize::MAX);
-    let muted = Style::default().add_modifier(theme.muted);
-    for mut line in footer.lines(width, theme) {
-        for span in &mut line.spans {
-            span.style = muted.patch(span.style);
-        }
-        lines.push(line);
-    }
-}
-
-/// Draws `lines` (a help row whose action cannot act now) in the look a
-/// footer gives such a key, key column included.
-pub(super) fn dim_unavailable(lines: &mut [Line<'static>], theme: &Theme) {
-    let dim = tuikit::keys::unavailable_style(theme);
-    for line in lines {
-        for span in &mut line.spans {
-            span.style = span.style.patch(dim);
-        }
-    }
-}
-
-/// The footer as plain text lines at `width`, for tests that compare the
-/// two help pages.
-#[cfg(test)]
-pub(crate) fn footer_lines_for_test(theme: &Theme, width: usize) -> Vec<String> {
-    let mut lines = Vec::new();
-    push_footer(&mut lines, theme, Some(width));
-    lines
-        .iter()
-        .map(|l| l.spans.iter().map(|s| s.content.as_ref()).collect())
-        .collect()
-}
-
-/// Cells before the blurb in a legend row: two of indent, the glyph and
-/// its space, and a 16-cell name column.
-const LEGEND_LEAD_WIDTH: usize = 2 + 2 + 16;
-/// The same for the pin legend, whose names are longer.
-const PIN_LEGEND_LEAD_WIDTH: usize = 2 + 2 + 20;
-
-/// Push one legend row: `lead` spans after a two-cell indent, then the
-/// blurb, wrapped under a hanging indent that lines up with it when
-/// `width` is known so no text runs past the modal edge.
-fn legend_entry(
-    lines: &mut Vec<Line<'static>>,
-    lead: Vec<ratatui::text::Span<'static>>,
-    lead_width: usize,
-    blurb: &str,
-    width: Option<usize>,
-) {
-    let mut first = vec![ratatui::text::Span::raw("  ")];
-    first.extend(lead);
-    let Some(width) = width.filter(|w| *w > lead_width + 8) else {
-        first.push(ratatui::text::Span::raw(blurb.to_string()));
-        lines.push(Line::from(first));
-        return;
-    };
-    let mut chunks = text::wrap(blurb, width - lead_width).into_iter();
-    first.push(ratatui::text::Span::raw(
-        chunks.next().unwrap_or_default().trim_end().to_string(),
-    ));
-    lines.push(Line::from(first));
-    for chunk in chunks {
-        lines.push(line![" ".repeat(lead_width), chunk.trim_end().to_string()]);
-    }
-}
-
-/// Width of the `  <key:<14>` column that precedes each description.
-const KEY_COLUMN_WIDTH: usize = 16;
-
-/// Render a binding as `  <key:<14>  <description>`, wrapping the
-/// description under a hanging indent when `width` is too narrow. The
-/// key column inherits `theme.accent` so operators scan
-/// the keymap by accent color.
-pub(super) fn binding_lines(
-    key: &str,
-    description: &str,
-    theme: &Theme,
-    width: Option<usize>,
-) -> Vec<Line<'static>> {
-    // A key label wider than its column gets a line to itself, with the
-    // description wrapped beneath on the hanging indent.
-    if text::width(key) > KEY_COLUMN_WIDTH - 2 {
-        let key_line = line![span!(Style::default().fg(theme.accent); "  {key}")];
-        let mut out = vec![key_line];
-        let budget = width.map_or(usize::MAX, |w| w.saturating_sub(KEY_COLUMN_WIDTH));
-        for chunk in text::wrap(description, budget.max(8)) {
-            out.push(line![
-                " ".repeat(KEY_COLUMN_WIDTH),
-                chunk.trim_end().to_string()
-            ]);
-        }
-        return out;
-    }
-    let key_span = span!(Style::default().fg(theme.accent); "  {key:<14}");
-    let Some(width) = width.filter(|w| *w > KEY_COLUMN_WIDTH + 8) else {
-        return vec![line![key_span, description.to_string()]];
-    };
-    let mut chunks = text::wrap(description, width - KEY_COLUMN_WIDTH).into_iter();
-    let first = chunks.next().unwrap_or_default();
-    let mut out = vec![line![key_span, first.trim_end().to_string()]];
-    for chunk in chunks {
-        out.push(line![
-            " ".repeat(KEY_COLUMN_WIDTH),
-            chunk.trim_end().to_string()
-        ]);
-    }
-    out
 }
 
 /// Built-in legend mapping each `NodeKind` glyph to its
@@ -632,30 +279,26 @@ pub(super) fn binding_lines(
 /// pressing `?` instead of reading the docs. Mirrors ADR 0073's
 /// canonical display order (`NodeKind::ALL`) so the icon column
 /// down-reads the same sequence the row tree and detail pane use.
-fn push_icon_legend(lines: &mut Vec<Line<'static>>, theme: &Theme, width: Option<usize>) {
-    for kind in NodeKind::ALL {
-        // A PR's glyph takes the `pr_open` hue: the legend carries no
-        // PR state.
-        let style = node_kind_style(kind, theme);
-        let color = style.color;
-        legend_entry(
-            lines,
-            vec![
-                span!(Style::default().fg(color); "{} ", style.glyph),
-                span!(Modifier::BOLD; "{:<16}", node_kind_display_name(kind)),
-            ],
-            LEGEND_LEAD_WIDTH,
-            node_kind_help_blurb(kind),
-            width,
-        );
-    }
+fn icon_legend(theme: &Theme) -> HelpSection {
+    NodeKind::ALL
+        .into_iter()
+        .fold(HelpSection::new("Node kind icons"), |section, kind| {
+            // A PR's glyph takes the `pr_open` hue: the legend carries no
+            // PR state.
+            let style = node_kind_style(kind, theme);
+            section.legend(
+                Span::styled(style.glyph, Style::default().fg(style.color)),
+                node_kind_display_name(kind),
+                node_kind_help_blurb(kind),
+            )
+        })
 }
 
 /// Legend for the glyphs in the row tree's attach-state column plus the
 /// ambiguity warning on group rows and the header. The same glyph can
 /// answer a different question on a session row than on a mux row, so
 /// the blurb names both where they differ.
-fn push_mux_state_legend(lines: &mut Vec<Line<'static>>, theme: &Theme, width: Option<usize>) {
+fn mux_state_legend(theme: &Theme) -> HelpSection {
     use crate::tui::icons::state;
     let bold_warning = Style::default()
         .fg(theme.warning)
@@ -663,110 +306,76 @@ fn push_mux_state_legend(lines: &mut Vec<Line<'static>>, theme: &Theme, width: O
     let ghost = Style::default()
         .fg(theme.inert)
         .add_modifier(Modifier::ITALIC);
-    let entries: [(&str, Style, &str, &str); 5] = [
-        (
-            state::LINKED,
-            Style::default().fg(theme.mux_attached()),
+    let muted = Style::default().add_modifier(theme.muted);
+    HelpSection::new("Link and mux state")
+        .legend(
+            Span::styled(state::LINKED, Style::default().fg(theme.mux_attached())),
             "Linked",
             "session: one mux, Enter/a attaches · mux: client attached",
-        ),
-        (
-            state::UNLINKED,
-            Style::default().add_modifier(theme.muted),
+        )
+        .legend(
+            Span::styled(state::UNLINKED, muted),
             "Not linked",
             "session: no mux, or several candidates · mux: no client",
-        ),
-        (
-            state::STOPPED,
-            ghost,
+        )
+        .legend(
+            Span::styled(state::STOPPED, ghost),
             "Stopped",
             "a mux that is no longer running; Enter starts it again",
-        ),
-        (
-            state::UNKNOWN,
-            Style::default().add_modifier(theme.muted),
+        )
+        .legend(
+            Span::styled(state::UNKNOWN, muted),
             "Unknown",
             "the mux backend didn't report whether a client is attached",
-        ),
-        (
-            marks::WARNING,
-            bold_warning,
+        )
+        .legend(
+            Span::styled(marks::WARNING, bold_warning),
             "Ambiguous mux",
             "sessions with several candidate muxes; the detail pane lists them",
-        ),
-    ];
-    for (glyph, style, name, blurb) in entries {
-        legend_entry(
-            lines,
-            vec![
-                span!(style; "{glyph} "),
-                span!(Modifier::BOLD; "{name:<16}"),
-            ],
-            LEGEND_LEAD_WIDTH,
-            blurb,
-            width,
-        );
-    }
+        )
 }
 
 /// Legend for the pull request state glyphs. The Pinned and History
 /// views spell the same states as words instead.
-fn push_pr_state_legend(lines: &mut Vec<Line<'static>>, theme: &Theme, width: Option<usize>) {
+fn pr_state_legend(theme: &Theme) -> HelpSection {
     use crate::tui::rows::PrStatus;
-    let entries: [(PrStatus, &str, &str); 4] = [
+    [
         (PrStatus::Open, "Open", "ready for review"),
         (PrStatus::Draft, "Draft", "open, but marked as a draft"),
         (PrStatus::Merged, "Merged", "landed on its base branch"),
         (PrStatus::Closed, "Closed", "closed without merging"),
-    ];
-    for (status, name, blurb) in entries {
-        let (glyph, style) = status.mark(theme);
-        legend_entry(
-            lines,
-            vec![
-                span!(style; "{glyph} "),
-                span!(Modifier::BOLD; "{name:<16}"),
-            ],
-            LEGEND_LEAD_WIDTH,
-            blurb,
-            width,
-        );
-    }
+    ]
+    .into_iter()
+    .fold(
+        HelpSection::new("Pull request state"),
+        |section, (status, name, blurb)| {
+            let (glyph, style) = status.mark(theme);
+            section.legend(Span::styled(glyph, style), name, blurb)
+        },
+    )
 }
 
 /// Legend for the pin marker: filled for something a pin points at,
 /// hollow and in the ghost style for a pin with nothing running.
-fn push_pin_marker_legend(lines: &mut Vec<Line<'static>>, theme: &Theme, width: Option<usize>) {
+fn pin_marker_legend(theme: &Theme) -> HelpSection {
     use crate::tui::icons::state;
     let pin_color = node_kind_style(NodeKind::Pin, theme).color;
-    let entries: [(&str, Style, &str, &str); 2] = [
-        (
-            state::PIN_RUNNING,
-            Style::default().fg(pin_color),
+    HelpSection::new("Pins")
+        .legend(
+            Span::styled(state::PIN_RUNNING, Style::default().fg(pin_color)),
             "Pinned",
             "a pin points at this row and it is running; the Pinned view lists every pin",
-        ),
-        (
-            state::PIN_STOPPED,
-            Style::default()
-                .fg(theme.inert)
-                .add_modifier(Modifier::ITALIC),
+        )
+        .legend(
+            Span::styled(
+                state::PIN_STOPPED,
+                Style::default()
+                    .fg(theme.inert)
+                    .add_modifier(Modifier::ITALIC),
+            ),
             "Pinned, not running",
             "the pinned entity is stopped, removed, missing, or not started yet; Enter starts it",
-        ),
-    ];
-    for (glyph, style, name, blurb) in entries {
-        legend_entry(
-            lines,
-            vec![
-                span!(style; "{glyph} "),
-                span!(Modifier::BOLD; "{name:<20}"),
-            ],
-            PIN_LEGEND_LEAD_WIDTH,
-            blurb,
-            width,
-        );
-    }
+        )
 }
 
 /// Operator-facing display name for a `NodeKind`. Distinct from
@@ -803,14 +412,6 @@ fn node_kind_help_blurb(kind: NodeKind) -> &'static str {
         NodeKind::Fork => "atelier fork (worktree-backed branch family)",
         NodeKind::ForgePr => "forge pull request (GitHub, …)",
     }
-}
-
-pub(super) fn section(lines: &mut Vec<Line<'static>>, title: &str) {
-    lines.push(line![span!(Modifier::BOLD; "{title}")]);
-}
-
-pub(super) fn blank(lines: &mut Vec<Line<'static>>) {
-    lines.push(line![""]);
 }
 
 #[cfg(test)]

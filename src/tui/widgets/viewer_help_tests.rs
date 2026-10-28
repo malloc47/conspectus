@@ -1,14 +1,26 @@
 use ratatui::buffer::Buffer;
+use ratatui::crossterm::event::KeyCode;
 use ratatui::layout::Rect;
+use ratatui::text::Line;
+use tuikit::help::{HelpPage, HelpRow, HelpSection, undescribed};
+use tuikit::keys::{KeyRow, key_label, rows};
 use unicode_width::UnicodeWidthStr;
 
 use super::*;
-use crate::tui::keybindings::overlay::HELP_KEYS;
+use crate::tui::keybindings::overlay::{HELP_KEYS, PANE_VIEWER_KEYS, VIEWER_KEYS};
+use crate::tui::widgets::pane_viewer::PaneViewerMsg;
+use crate::viewer::input::ViewerMsg;
 
 fn render_text(width: u16, height: u16, scroll: usize) -> String {
     let area = Rect::new(0, 0, width, height);
     let mut buf = Buffer::empty(area);
-    render(area, &mut buf, &Theme::default(), scroll);
+    render(
+        VIEWER_KEYS,
+        area,
+        &mut buf,
+        &Theme::default(),
+        &HelpScroll::at(scroll),
+    );
     (0..height)
         .map(|y| {
             (0..width)
@@ -25,60 +37,116 @@ fn text(line: &Line<'_>) -> String {
     line.spans.iter().map(|s| s.content.as_ref()).collect()
 }
 
-#[test]
-fn every_key_the_viewer_binds_is_listed_exactly_once() {
-    let listed: Vec<String> = sections_for(VIEWER_KEYS)
+/// The page of `table` laid out `width` cells wide, footer last.
+fn help_lines<A: HelpAction>(
+    table: &[KeyRow<A>],
+    theme: &Theme,
+    width: usize,
+) -> Vec<Line<'static>> {
+    let sections = sections_for(table);
+    let page = crate::tui::widgets::help::page(theme, &sections);
+    let mut lines = page.lines(width);
+    lines.extend(page.footer_lines(width));
+    lines
+}
+
+/// Every key row of `sections`, as `(keys, description, available)`.
+fn key_rows(sections: &[HelpSection]) -> Vec<(String, String, bool)> {
+    sections
         .iter()
-        .flat_map(|s| s.rows.iter())
-        .flat_map(|r| r.keys.split(" / ").map(str::to_string).collect::<Vec<_>>())
-        .collect();
-    for row in VIEWER_KEYS {
-        let KeyRow::Bind { key, .. } = row else {
-            continue;
-        };
-        let label = tuikit::keys::key_label(key);
-        let count = listed.iter().filter(|k| **k == label).count();
-        assert_eq!(count, 1, "`{label}` should be listed exactly once");
+        .flat_map(|section| &section.rows)
+        .filter_map(|row| match row {
+            HelpRow::Keys {
+                keys,
+                description,
+                available,
+            } => Some((keys.clone(), description.to_string(), *available)),
+            HelpRow::Legend { .. } => None,
+        })
+        .collect()
+}
+
+/// Every key `table` binds that its page does not list exactly once, on
+/// a row that says what the key's action does.
+fn keys_missing_from_the_page<A: HelpAction + std::fmt::Debug>(table: &[KeyRow<A>]) -> Vec<String> {
+    let page = key_rows(&sections_for(table));
+    rows(table)
+        .filter_map(|row| match row {
+            KeyRow::Bind { key, action, .. } => {
+                let label = key_label(key);
+                let listing: Vec<&(String, String, bool)> = page
+                    .iter()
+                    .filter(|(keys, _, _)| keys.split(" / ").any(|k| k == label))
+                    .collect();
+                let described = listing.len() == 1
+                    && listing[0].1 == action.help().description
+                    && !listing[0].1.trim().is_empty();
+                (!described).then(|| format!("{label} ({action:?})"))
+            }
+            _ => None,
+        })
+        .collect()
+}
+
+#[test]
+fn every_key_either_viewer_binds_is_described_once_on_its_page() {
+    assert_eq!(
+        keys_missing_from_the_page(VIEWER_KEYS),
+        Vec::<String>::new()
+    );
+    assert_eq!(
+        keys_missing_from_the_page(PANE_VIEWER_KEYS),
+        Vec::<String>::new()
+    );
+    assert!(undescribed(VIEWER_KEYS).is_empty());
+    assert!(undescribed(PANE_VIEWER_KEYS).is_empty());
+}
+
+#[test]
+fn a_key_with_no_description_fails_the_check() {
+    // A table that binds a message its listing leaves out: the check that
+    // guards the viewers' tables names the key.
+    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+    enum Probe {
+        Listed,
+        Forgotten,
+    }
+    impl HelpAction for Probe {
+        const LISTED: &'static [Self] = &[Probe::Listed];
+        fn help(self) -> tuikit::help::HelpEntry {
+            tuikit::help::HelpEntry::new("Moving", "Scroll")
+        }
+    }
+    const PROBE_KEYS: &[KeyRow<Probe>] = &[
+        tuikit::keys::alias(tuikit::keys::ch('j'), Probe::Listed),
+        tuikit::keys::alias(tuikit::keys::ch('x'), Probe::Forgotten),
+    ];
+    assert_eq!(keys_missing_from_the_page(PROBE_KEYS), ["x (Forgotten)"]);
+    assert_eq!(undescribed(PROBE_KEYS), ["x"]);
+}
+
+#[test]
+fn the_pane_page_lists_attach_and_every_message_with_a_key() {
+    let theme = Theme::default();
+    let page: String = help_lines(PANE_VIEWER_KEYS, &theme, 80)
+        .iter()
+        .map(text)
+        .collect::<Vec<_>>()
+        .join("\n");
+    assert!(page.contains("Attach to the pane's mux"), "{page}");
+    for msg in PaneViewerMsg::ALL {
+        assert!(
+            page.contains(msg.help().description),
+            "{msg:?} is missing from the help page"
+        );
     }
 }
 
 #[test]
-fn every_message_with_a_key_has_a_row_and_a_description() {
-    let sections = sections_for(VIEWER_KEYS);
-    for msg in ViewerMsg::ALL {
-        let bound = VIEWER_KEYS
-            .iter()
-            .any(|row| matches!(row, KeyRow::Bind { action, .. } if *action == msg));
-        let described = sections
-            .iter()
-            .flat_map(|s| s.rows.iter())
-            .any(|r| r.description == msg.help().description);
-        assert_eq!(bound, described, "{msg:?}");
-    }
-}
-
-#[test]
-fn a_message_with_no_key_is_left_out() {
-    let table = [KeyRow::Bind {
-        key: tuikit::keys::KeyMatcher::Exact {
-            modifiers: ratatui::crossterm::event::KeyModifiers::NONE,
-            code: ratatui::crossterm::event::KeyCode::Char('j'),
-        },
-        action: ViewerMsg::ScrollDown,
-        hint: tuikit::keys::Hint::Alias,
-        available: true,
-    }];
-    let sections = sections_for(&table);
-    assert_eq!(sections.len(), 1);
-    assert_eq!(sections[0].rows.len(), 1);
-    assert_eq!(sections[0].rows[0].keys, "j");
-}
-
-#[test]
-fn keys_use_the_keymap_help_notation() {
-    let all: String = sections_for(VIEWER_KEYS)
+fn keys_use_the_one_key_notation() {
+    let all: String = key_rows(&sections_for(VIEWER_KEYS))
         .iter()
-        .flat_map(|s| s.rows.iter().map(|r| r.keys.clone()))
+        .map(|row| row.0.clone())
         .collect::<Vec<_>>()
         .join(" | ");
     for expected in [
@@ -97,7 +165,10 @@ fn keys_use_the_keymap_help_notation() {
 #[test]
 fn no_line_is_wider_than_the_page_at_any_width() {
     for width in [40usize, 50, 60, 80, 100] {
-        for line in help_lines(&Theme::default(), Some(width)) {
+        for line in help_lines(VIEWER_KEYS, &Theme::default(), width)
+            .into_iter()
+            .chain(help_lines(PANE_VIEWER_KEYS, &Theme::default(), width))
+        {
             let w = UnicodeWidthStr::width(text(&line).as_str());
             assert!(w <= width, "{w} > {width}: {:?}", text(&line));
         }
@@ -107,16 +178,14 @@ fn no_line_is_wider_than_the_page_at_any_width() {
 #[test]
 fn wrapping_keeps_every_word_of_every_description() {
     for width in [40usize, 50, 80] {
-        let page: Vec<String> = help_lines(&Theme::default(), Some(width))
+        let flat = help_lines(VIEWER_KEYS, &Theme::default(), width)
             .iter()
             .map(text)
-            .collect();
-        let flat = page.join(" ");
-        for section in sections_for(VIEWER_KEYS) {
-            for row in section.rows {
-                for word in row.description.split_whitespace() {
-                    assert!(flat.contains(word), "`{word}` lost at width {width}");
-                }
+            .collect::<Vec<_>>()
+            .join(" ");
+        for (_, description, _) in key_rows(&sections_for(VIEWER_KEYS)) {
+            for word in description.split_whitespace() {
+                assert!(flat.contains(word), "`{word}` lost at width {width}");
             }
         }
     }
@@ -125,12 +194,16 @@ fn wrapping_keeps_every_word_of_every_description() {
 #[test]
 fn the_footer_comes_from_the_scroll_and_close_key_table() {
     let footer = tuikit::keys::footer(HELP_KEYS);
-    let page = help_lines(&Theme::default(), None)
-        .iter()
-        .map(text)
-        .collect::<Vec<_>>()
-        .join("\n");
-    assert!(page.contains(&footer), "{footer} not in\n{page}");
+    for page in [
+        help_lines(VIEWER_KEYS, &Theme::default(), usize::MAX),
+        help_lines(PANE_VIEWER_KEYS, &Theme::default(), usize::MAX),
+    ] {
+        let page = page.iter().map(text).collect::<Vec<_>>().join("\n");
+        assert!(
+            page.ends_with(&footer),
+            "{footer} not at the end of\n{page}"
+        );
+    }
 }
 
 #[test]
@@ -153,15 +226,9 @@ fn the_keys_the_footer_names_do_what_it_says_in_the_viewer() {
             PagerKey::Top => ViewerMsg::JumpToStart,
             PagerKey::Bottom => ViewerMsg::JumpToEnd,
             // `?` toggles the viewer's help; the rest close it.
-            PagerKey::Close if code == ratatui::crossterm::event::KeyCode::Char('?') => {
-                ViewerMsg::ToggleHelp
-            }
+            PagerKey::Close if code == KeyCode::Char('?') => ViewerMsg::ToggleHelp,
             // Esc steps back; `q` and Ctrl-C leave at once.
-            PagerKey::Abort | PagerKey::Close
-                if code == ratatui::crossterm::event::KeyCode::Esc =>
-            {
-                ViewerMsg::Close
-            }
+            PagerKey::Abort | PagerKey::Close if code == KeyCode::Esc => ViewerMsg::Close,
             PagerKey::Abort | PagerKey::Close => ViewerMsg::Quit,
             PagerKey::Copy => continue,
         };
@@ -173,7 +240,7 @@ fn the_keys_the_footer_names_do_what_it_says_in_the_viewer() {
 fn a_key_that_cannot_act_now_is_dimmed_on_the_help_page() {
     let theme = Theme::default();
     let rows = tuikit::keys::with_availability(VIEWER_KEYS, |msg| msg != ViewerMsg::ToggleThinking);
-    let lines = help_lines_for(&rows, &theme, Some(100));
+    let lines = help_lines(&rows, &theme, 100);
     let row_of = |msg: ViewerMsg| {
         let start: String = msg
             .help()
@@ -205,15 +272,18 @@ fn a_key_that_cannot_act_now_is_dimmed_on_the_help_page() {
             .any(|span| span.style.fg == Some(theme.accent)),
         "an available row keeps its accent key column"
     );
-    assert_eq!(
-        help_lines_for(VIEWER_KEYS, &theme, Some(100)),
-        help_lines(&theme, Some(100))
-    );
 }
 
 /// How far the page can scroll in `area`, as its render reports it.
 fn max_scroll(area: Rect, theme: &Theme) -> usize {
-    render(area, &mut Buffer::empty(area), theme, 0).last_offset()
+    render(
+        VIEWER_KEYS,
+        area,
+        &mut Buffer::empty(area),
+        theme,
+        &HelpScroll::new(),
+    )
+    .last_offset()
 }
 
 #[test]
@@ -242,20 +312,47 @@ fn draw_clamps_the_viewers_scroll_position() {
     let mut state =
         crate::viewer::state::ViewerState::new(crate::viewer::model::TranscriptDocument::default());
     state.show_help = true;
-    state.help_scroll = usize::MAX;
+    state.help_scroll.to_bottom();
     terminal
         .draw(|frame| {
             let area = frame.area();
-            draw(&mut state, &Theme::default(), frame.buffer_mut(), area);
+            draw(
+                VIEWER_KEYS,
+                &mut state.help_scroll,
+                &Theme::default(),
+                frame.buffer_mut(),
+                area,
+            );
         })
         .unwrap();
     assert_eq!(
-        state.help_scroll,
+        state.help_scroll.offset(),
         max_scroll(Rect::new(0, 0, 60, 12), &Theme::default())
     );
     // The page keys move by the help's own rows: the modal's 8 inner
     // rows less its one-row footer, not the transcript's viewport.
-    assert_eq!(state.help_page, 7);
+    assert_eq!(state.help_scroll.page(), 7);
+}
+
+#[test]
+fn both_viewers_draw_their_page_through_the_one_page_size() {
+    // The pane viewer's page is the transcript viewer's shape: one frame
+    // at the reader's size, whichever table generated it.
+    let area = Rect::new(0, 0, 80, 24);
+    let rect = HelpPage::SIZE.rect(area, 0);
+    let mut pane = Buffer::empty(area);
+    render(
+        PANE_VIEWER_KEYS,
+        area,
+        &mut pane,
+        &Theme::default(),
+        &HelpScroll::new(),
+    );
+    assert_eq!(pane[(rect.x, rect.y)].symbol(), "┌");
+    assert_eq!(
+        pane[(rect.x + rect.width - 1, rect.y + rect.height - 1)].symbol(),
+        "┘"
+    );
 }
 
 #[test]

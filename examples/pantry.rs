@@ -259,7 +259,7 @@ impl Ingredient for ValueModalVariant {
 /// state is the scroll offset; the keymap is static data baked into
 /// the renderer.
 struct HelpVariant {
-    scroll: u16,
+    scroll: usize,
     variant_name: &'static str,
     description_text: &'static str,
 }
@@ -284,8 +284,7 @@ impl Ingredient for HelpVariant {
     fn render(&self, area: Rect, buf: &mut Buffer) {
         let theme = Theme::default();
         let state = HelpOverlayState {
-            scroll: self.scroll,
-            ..HelpOverlayState::default()
+            scroll: tuikit::help::HelpScroll::at(self.scroll),
         };
         HelpOverlayWidget::new(&state, &theme).render(area, buf);
     }
@@ -647,7 +646,7 @@ fn main() -> std::io::Result<()> {
             scroll: 50,
             variant_name: "Icon legend (scroll 50)",
             description_text:
-                "Scrolled so the Node kind icons (ADR 0073) section is in view — exercises the per-glyph rendering through `push_icon_legend`.",
+                "Scrolled so the Node kind icons (ADR 0073) section is in view — exercises the per-glyph rendering of the legend rows.",
         }),
         Box::new(SearchVariant {
             items: search_mock_items(),

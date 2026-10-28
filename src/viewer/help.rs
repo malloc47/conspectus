@@ -1,21 +1,14 @@
 //! What each viewer message does, as help text.
 //!
 //! The viewer's key table lives with the other overlay key tables in
-//! the TUI, so the help page is built there by pairing each message's
-//! description from here with the keys that table binds to it. A new
-//! [`ViewerMsg`] has to be described here (the match is exhaustive), so
-//! it cannot be left out of the help.
+//! the TUI, so the help page is generated there from that table and the
+//! description each message gives here (`tuikit::help::sections_for`). A
+//! new [`ViewerMsg`] has to be described here (the match is exhaustive),
+//! so it cannot be left out of the help.
+
+use tuikit::help::{HelpAction, HelpEntry};
 
 use crate::viewer::input::ViewerMsg;
-
-/// A message's place in the help page.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct HelpEntry {
-    /// The section heading it is listed under.
-    pub section: &'static str,
-    /// What it does, in one sentence.
-    pub description: &'static str,
-}
 
 impl ViewerMsg {
     /// Every message, in the order the help page lists them.
@@ -39,9 +32,13 @@ impl ViewerMsg {
         ViewerMsg::Close,
         ViewerMsg::Quit,
     ];
+}
+
+impl HelpAction for ViewerMsg {
+    const LISTED: &'static [Self] = &Self::ALL;
 
     /// Where this message is listed in the help, and what it does.
-    pub fn help(self) -> HelpEntry {
+    fn help(self) -> HelpEntry {
         let (section, description) = match self {
             ViewerMsg::ScrollDown => ("Moving", "Scroll one line down"),
             ViewerMsg::ScrollUp => ("Moving", "Scroll one line up"),
@@ -80,10 +77,7 @@ impl ViewerMsg {
                 "Leave the viewer at once, even with a find active",
             ),
         };
-        HelpEntry {
-            section,
-            description,
-        }
+        HelpEntry::new(section, description)
     }
 }
 

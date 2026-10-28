@@ -168,20 +168,24 @@ fn movement_keys_scroll_the_help_page_while_it_is_open() {
     s.viewport_height = 10;
     // The help's own body showed 7 rows; a page is those, not the
     // transcript's 10.
-    s.help_page = 7;
+    s.help_scroll.keep(tuikit::scroll::ScrollWindow::new(7, 30));
     let (s, _) = reduce(s, ViewerMsg::ToggleHelp);
-    assert_eq!(s.help_scroll, 0);
+    assert_eq!(s.help_scroll.offset(), 0);
     let before = s.scroll_offset;
     let (s, _) = reduce(s, ViewerMsg::ScrollDown);
-    assert_eq!(s.help_scroll, 1);
+    assert_eq!(s.help_scroll.offset(), 1);
     let (s, _) = reduce(s, ViewerMsg::PageDown);
-    assert_eq!(s.help_scroll, 8);
+    assert_eq!(s.help_scroll.offset(), 8);
     let (s, _) = reduce(s, ViewerMsg::HalfPageUp);
-    assert_eq!(s.help_scroll, 5);
+    assert_eq!(s.help_scroll.offset(), 5);
     let (s, _) = reduce(s, ViewerMsg::JumpToEnd);
-    assert_eq!(s.help_scroll, usize::MAX);
+    assert_eq!(
+        s.help_scroll.offset(),
+        usize::MAX,
+        "the next draw takes it back"
+    );
     let (s, _) = reduce(s, ViewerMsg::JumpToStart);
-    assert_eq!(s.help_scroll, 0);
+    assert_eq!(s.help_scroll.offset(), 0);
     assert_eq!(s.scroll_offset, before, "the transcript did not move");
 }
 
@@ -198,9 +202,9 @@ fn toggles_wait_while_the_help_page_is_open() {
 fn reopening_the_help_starts_at_the_top() {
     let mut s = state_with(100, 24, 0);
     s.show_help = true;
-    s.help_scroll = 9;
+    s.help_scroll = tuikit::help::HelpScroll::at(9);
     let (s, _) = reduce(s, ViewerMsg::ToggleHelp);
     let (s, _) = reduce(s, ViewerMsg::ToggleHelp);
     assert!(s.show_help);
-    assert_eq!(s.help_scroll, 0);
+    assert_eq!(s.help_scroll.offset(), 0);
 }

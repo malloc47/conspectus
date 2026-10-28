@@ -151,7 +151,7 @@ pub fn reduce(mut state: ViewerState, msg: ViewerMsg) -> (ViewerState, ViewerEff
         ViewerMsg::FindPrev => state.step_find(false),
         ViewerMsg::ToggleHelp => {
             state.show_help = !state.show_help;
-            state.help_scroll = 0;
+            state.help_scroll.to_top();
         }
         ViewerMsg::Close => {
             // Close the help overlay first when it's up; only
@@ -176,19 +176,18 @@ pub fn reduce(mut state: ViewerState, msg: ViewerMsg) -> (ViewerState, ViewerEff
 /// while the help covers the transcript. A page is the rows the help
 /// showed, not the transcript's taller viewport behind it.
 fn scroll_help(state: &mut ViewerState, msg: ViewerMsg) {
-    let page = state.help_page.max(1);
-    let half = (page / 2).max(1);
-    state.help_scroll = match msg {
-        ViewerMsg::ScrollUp => state.help_scroll.saturating_sub(1),
-        ViewerMsg::ScrollDown => state.help_scroll.saturating_add(1),
-        ViewerMsg::PageUp => state.help_scroll.saturating_sub(page),
-        ViewerMsg::PageDown => state.help_scroll.saturating_add(page),
-        ViewerMsg::HalfPageUp => state.help_scroll.saturating_sub(half),
-        ViewerMsg::HalfPageDown => state.help_scroll.saturating_add(half),
-        ViewerMsg::JumpToStart => 0,
-        ViewerMsg::JumpToEnd => usize::MAX,
-        _ => state.help_scroll,
-    };
+    let help = &mut state.help_scroll;
+    match msg {
+        ViewerMsg::ScrollUp => help.up(1),
+        ViewerMsg::ScrollDown => help.down(1),
+        ViewerMsg::PageUp => help.page_up(),
+        ViewerMsg::PageDown => help.page_down(),
+        ViewerMsg::HalfPageUp => help.half_page_up(),
+        ViewerMsg::HalfPageDown => help.half_page_down(),
+        ViewerMsg::JumpToStart => help.to_top(),
+        ViewerMsg::JumpToEnd => help.to_bottom(),
+        _ => {}
+    }
 }
 
 #[cfg(test)]

@@ -19,15 +19,13 @@ use ratatui::text::{Line, Span};
 use ratatui::widgets::{Paragraph, Widget};
 use tuikit::chip::{PositionChip, StatusChip, Tone};
 use tuikit::glyphs::marks;
-use tuikit::keys::{KeyRow, key_label, resolve, rows, typed_char};
-use tuikit::scroll::ScrollWindow;
+use tuikit::help::{HelpAction, HelpEntry, HelpScroll};
+use tuikit::keys::{resolve, typed_char};
 
 use crate::content_search::PaneRef;
 use crate::tui::Theme;
 use crate::tui::keybindings::overlay::{PANE_VIEWER_KEYS, VIEWER_FIND_KEYS};
 use crate::viewer::find::{FindPrompt, ViewerFindMsg};
-
-use super::help::{binding_lines, blank, dim_unavailable, push_footer, render_help_page, section};
 
 /// Lines of context kept above a line the viewer jumps to.
 const CONTEXT_ABOVE: usize = 2;
@@ -81,10 +79,14 @@ impl PaneViewerMsg {
         PaneViewerMsg::Close,
         PaneViewerMsg::Quit,
     ];
+}
+
+impl HelpAction for PaneViewerMsg {
+    const LISTED: &'static [Self] = &Self::ALL;
 
     /// The help section a message is listed under, and what it does.
-    pub fn help(self) -> (&'static str, &'static str) {
-        match self {
+    fn help(self) -> HelpEntry {
+        let (section, description) = match self {
             PaneViewerMsg::ScrollDown => ("Moving", "Scroll one line down"),
             PaneViewerMsg::ScrollUp => ("Moving", "Scroll one line up"),
             PaneViewerMsg::PageDown => ("Moving", "Page down"),
@@ -109,7 +111,8 @@ impl PaneViewerMsg {
                 "Viewer",
                 "Leave the viewer at once, even with a find active",
             ),
-        }
+        };
+        HelpEntry::new(section, description)
     }
 }
 
@@ -143,10 +146,9 @@ pub struct PaneViewerState {
     /// The match the viewer is on, as an index into `matches`.
     pub current: Option<usize>,
     pub show_help: bool,
-    pub help_scroll: usize,
-    /// Rows of the help page the last draw showed; its page keys move by
-    /// this many.
-    pub help_page: usize,
+    /// Where the help page is scrolled; each draw brings it back inside
+    /// the page and records the rows a page key moves.
+    pub help_scroll: HelpScroll,
     /// Why the last key did nothing, shown in the footer until the next.
     pub note: Option<String>,
     /// The find hint for the prompt's footer, generated from its key table.
@@ -174,8 +176,7 @@ impl PaneViewerState {
             matches: Vec::new(),
             current: None,
             show_help: false,
-            help_scroll: 0,
-            help_page: 0,
+            help_scroll: HelpScroll::new(),
             note: None,
             find_hint: tuikit::keys::footer(VIEWER_FIND_KEYS),
         };
@@ -302,7 +303,7 @@ impl PaneViewerState {
             PaneViewerMsg::FindPrev => self.step_find(false),
             PaneViewerMsg::ToggleHelp => {
                 self.show_help = !self.show_help;
-                self.help_scroll = 0;
+                self.help_scroll.to_top();
             }
             PaneViewerMsg::Attach => return PaneViewerOutcome::Attach,
             PaneViewerMsg::Close => {
@@ -322,19 +323,18 @@ impl PaneViewerState {
     /// Move the help page. A page is the rows the help showed, not the
     /// scrollback's taller viewport behind it.
     fn scroll_help(&mut self, msg: PaneViewerMsg) {
-        let page = self.help_page.max(1);
-        let half = (page / 2).max(1);
-        self.help_scroll = match msg {
-            PaneViewerMsg::ScrollUp => self.help_scroll.saturating_sub(1),
-            PaneViewerMsg::ScrollDown => self.help_scroll.saturating_add(1),
-            PaneViewerMsg::PageUp => self.help_scroll.saturating_sub(page),
-            PaneViewerMsg::PageDown => self.help_scroll.saturating_add(page),
-            PaneViewerMsg::HalfPageUp => self.help_scroll.saturating_sub(half),
-            PaneViewerMsg::HalfPageDown => self.help_scroll.saturating_add(half),
-            PaneViewerMsg::JumpToStart => 0,
-            PaneViewerMsg::JumpToEnd => usize::MAX,
-            _ => self.help_scroll,
-        };
+        let help = &mut self.help_scroll;
+        match msg {
+            PaneViewerMsg::ScrollUp => help.up(1),
+            PaneViewerMsg::ScrollDown => help.down(1),
+            PaneViewerMsg::PageUp => help.page_up(),
+            PaneViewerMsg::PageDown => help.page_down(),
+            PaneViewerMsg::HalfPageUp => help.half_page_up(),
+            PaneViewerMsg::HalfPageDown => help.half_page_down(),
+            PaneViewerMsg::JumpToStart => help.to_top(),
+            PaneViewerMsg::JumpToEnd => help.to_bottom(),
+            _ => {}
+        }
     }
 
     /// Edit the find prompt. Confirming runs the find and jumps to the
@@ -413,9 +413,7 @@ pub fn draw(state: &mut PaneViewerState, theme: &Theme, buf: &mut Buffer, area: 
     draw_rule(theme, buf, chunks[3]);
     draw_footer(state, theme, buf, chunks[4]);
     if state.show_help {
-        let window = render_help(area, buf, theme, state.help_scroll);
-        state.help_scroll = window.offset();
-        state.help_page = window.viewport();
+        super::viewer_help::draw(PANE_VIEWER_KEYS, &mut state.help_scroll, theme, buf, area);
     }
 }
 
@@ -539,77 +537,6 @@ fn draw_footer(state: &PaneViewerState, theme: &Theme, buf: &mut Buffer, area: R
     };
     spans.push(Span::styled(hint, dim(theme)));
     Widget::render(Paragraph::new(Line::from(spans)), area, buf);
-}
-
-/// One help row: the keys bound to a message, what it does, and whether
-/// it can act now.
-struct HelpRow {
-    keys: String,
-    description: &'static str,
-    available: bool,
-}
-
-/// The help page's rows by section, generated from the key table and
-/// the descriptions on [`PaneViewerMsg::help`]. A message with no key is
-/// left out, as there is nothing to press.
-fn help_sections(table: &[KeyRow<PaneViewerMsg>]) -> Vec<(&'static str, Vec<HelpRow>)> {
-    let mut sections: Vec<(&'static str, Vec<HelpRow>)> = Vec::new();
-    for msg in PaneViewerMsg::ALL {
-        let mut available = false;
-        let mut keys: Vec<String> = rows(table)
-            .filter_map(|row| match row {
-                KeyRow::Bind {
-                    key,
-                    action,
-                    available: now,
-                    ..
-                } if *action == msg => {
-                    available |= *now;
-                    Some(key_label(key))
-                }
-                _ => None,
-            })
-            .collect();
-        if keys.is_empty() {
-            continue;
-        }
-        keys.sort_by_key(|k| k.starts_with("Ctrl-"));
-        let (title, description) = msg.help();
-        let row = HelpRow {
-            keys: keys.join(" / "),
-            description,
-            available,
-        };
-        match sections.iter_mut().find(|(t, _)| *t == title) {
-            Some((_, rows)) => rows.push(row),
-            None => sections.push((title, vec![row])),
-        }
-    }
-    sections
-}
-
-/// The help page's text, wrapped to `width`.
-pub fn help_lines(theme: &Theme, width: Option<usize>) -> Vec<Line<'static>> {
-    let mut lines = Vec::new();
-    for (title, rows) in help_sections(PANE_VIEWER_KEYS) {
-        section(&mut lines, title);
-        for row in &rows {
-            let mut drawn = binding_lines(&row.keys, row.description, theme, width);
-            if !row.available {
-                dim_unavailable(&mut drawn, theme);
-            }
-            lines.extend(drawn);
-        }
-        blank(&mut lines);
-    }
-    push_footer(&mut lines, theme, width);
-    lines
-}
-
-fn render_help(area: Rect, buf: &mut Buffer, theme: &Theme, scroll: usize) -> ScrollWindow {
-    render_help_page(area, buf, theme, scroll, &|width| {
-        help_lines(theme, Some(width))
-    })
 }
 
 #[cfg(test)]
