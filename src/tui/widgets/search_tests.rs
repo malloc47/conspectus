@@ -173,6 +173,24 @@ fn match_line_includes_snippet_with_matched_bytes_highlighted() {
     // renderer can style it.
     let has_match_span = line.spans.iter().any(|s| s.content.as_ref() == "puffin");
     assert!(has_match_span, "match span missing in: {:?}", line.spans);
+    // The cursor row: the marker in its gutter and the whole row in the
+    // active highlight, the match keeping its color inside it.
+    assert!(
+        rendered.starts_with(tuikit::glyphs::marks::POINTER),
+        "{rendered}"
+    );
+    for span in &line.spans {
+        assert!(
+            span.style.add_modifier.contains(theme.selection_active),
+            "{span:?}"
+        );
+    }
+    let matched = line
+        .spans
+        .iter()
+        .find(|s| s.content.as_ref() == "puffin")
+        .expect("match span");
+    assert_eq!(matched.style.fg, Some(theme.match_highlight));
 }
 
 #[test]
@@ -223,7 +241,7 @@ fn search_glyph_span_uses_kind_color_for_graph_rows() {
     let theme = Theme::default();
 
     let session_id = NodeId::AgentSession(AgentSessionId::new("claude-code", "/state", "abc"));
-    let session_span = search_kind_glyph_span(&RowId::AgentSession(session_id), &theme, false);
+    let session_span = search_kind_glyph_span(&RowId::AgentSession(session_id), &theme);
     let session_glyph = NodeKind::AgentSession.default_glyph();
     assert!(
         session_span.content.starts_with(session_glyph),
@@ -233,7 +251,7 @@ fn search_glyph_span_uses_kind_color_for_graph_rows() {
     assert_eq!(session_span.style.fg, Some(theme.node_agent_session()));
 
     let mux_id = NodeId::MuxSession(MuxSessionId::new("editor"));
-    let mux_span = search_kind_glyph_span(&RowId::MuxSession(mux_id), &theme, false);
+    let mux_span = search_kind_glyph_span(&RowId::MuxSession(mux_id), &theme);
     let mux_glyph = NodeKind::MuxSession.default_glyph();
     assert!(mux_span.content.starts_with(mux_glyph));
     assert_eq!(mux_span.style.fg, Some(theme.node_mux_session()));
@@ -248,14 +266,13 @@ fn search_glyph_span_falls_back_to_two_spaces_for_kindless_rows() {
             pin_id: "ingest".to_string(),
         },
         &theme,
-        false,
     );
     assert_eq!(pin_span.content, "◉ ");
     assert_eq!(pin_span.style.fg, Some(theme.node_mux_session()));
 
     // Synthetic ids aren't graph nodes — they get two blank
     // cells so the label column lines up with glyph-bearing rows.
-    let synthetic_span = search_kind_glyph_span(&RowId::Synthetic("ungrouped"), &theme, false);
+    let synthetic_span = search_kind_glyph_span(&RowId::Synthetic("ungrouped"), &theme);
     assert_eq!(synthetic_span.content, "  ");
     assert_eq!(synthetic_span.style.fg, None);
 }

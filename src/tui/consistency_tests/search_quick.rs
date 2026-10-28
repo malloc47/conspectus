@@ -432,9 +432,18 @@ fn the_highlighted_row_scrolls_into_view_past_the_first_screen() {
         }
         assert_eq!(cursor(&app), 25);
         let shown = frame(&mut app, 120, 24);
+        // The marker sits in the modal's gutter, just inside its frame.
+        let left = shown
+            .lines()
+            .find_map(|line| {
+                line.find("┌ / quick select")
+                    .map(|byte| line[..byte].chars().count())
+            })
+            .unwrap_or_else(|| panic!("the quick select frame in:\n{shown}"));
+        let pointer = tuikit::glyphs::marks::POINTER.chars().next();
         let marked = shown
             .lines()
-            .find(|line| line.contains("│> "))
+            .find(|line| line.chars().nth(left + 1) == pointer)
             .unwrap_or_else(|| panic!("a marked row in:\n{shown}"));
         assert!(
             marked.contains("alpha-25"),

@@ -12,11 +12,12 @@ use ratatui::buffer::Buffer;
 use ratatui::crossterm::event::KeyEvent;
 use ratatui::layout::Rect;
 use ratatui::macros::{line, span};
-use ratatui::style::{Modifier, Style};
+use ratatui::style::Style;
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Paragraph, Widget};
 use tuikit::frame::{ModalBody, ModalFrame, ModalSize};
 use tuikit::scroll::ScrollWindow;
+use tuikit::selection::{self, Cursor, Ends};
 
 use crate::tui::Msg;
 use crate::tui::modal::{Overlay, OverlayOutcome};
@@ -147,11 +148,11 @@ impl Overlay for PickerState {
                 None => OverlayOutcome::Close,
             },
             Some(SearchKey::Down) => {
-                self.cursor = tuikit::scroll::wrap_step(self.cursor, self.visible.len(), 1);
+                self.cursor = Ends::Wrap.step(self.cursor, self.visible.len(), 1);
                 OverlayOutcome::Consumed
             }
             Some(SearchKey::Up) => {
-                self.cursor = tuikit::scroll::wrap_step(self.cursor, self.visible.len(), -1);
+                self.cursor = Ends::Wrap.step(self.cursor, self.visible.len(), -1);
                 OverlayOutcome::Consumed
             }
             // The picker has no scopes; its table binds none of these.
@@ -239,23 +240,11 @@ impl ModalBody for PickerBody<'_> {
             .skip(window.offset())
             .take(window.viewport())
             .map(|(index, item)| {
-                let selected = index == cursor;
-                let emphasis = if selected {
-                    Modifier::REVERSED
-                } else {
-                    Modifier::empty()
-                };
-                let mut spans: Vec<Span<'static>> = vec![
-                    span!(Style::default().add_modifier(emphasis); "{}", if selected { "> " } else { "  " }),
-                    span!(Style::default().add_modifier(emphasis); "{}", item.label),
-                ];
+                let mut spans: Vec<Span<'static>> = vec![Span::raw(item.label.clone())];
                 if !item.detail.is_empty() {
-                    spans.push(span!(
-                        Style::default().add_modifier(emphasis | self.theme.muted);
-                        "  · {}", item.detail
-                    ));
+                    spans.push(span!(self.theme.muted; "  · {}", item.detail));
                 }
-                Line::from(spans)
+                selection::row(spans, Cursor::of(index == cursor, true), self.theme)
             })
             .collect();
         Paragraph::new(lines).render(list, buf);

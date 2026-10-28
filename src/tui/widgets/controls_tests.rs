@@ -201,6 +201,32 @@ fn enter_on_harness_opens_multi_select_sub_editor() {
 }
 
 #[test]
+fn behind_an_open_sub_editor_the_cursor_row_takes_the_inactive_look() {
+    let filter = RowFilter::default();
+    let theme = Theme::default();
+    let ctx = ctx_with(
+        View::Sessions,
+        Grouping::default_for(View::Sessions),
+        &filter,
+        Sort::Hierarchy,
+    );
+    let mut state = ControlsOverlayState::new_at_filters(&ctx);
+    let row_style = |state: &ControlsOverlayState| {
+        let widget = ControlsOverlayWidget::new(state, ctx.clone(), &theme);
+        let index = widget.cursor_line_index().expect("cursor row");
+        let line = widget.body_lines()[index].clone();
+        assert!(line.to_string().starts_with(marks::POINTER), "{line}");
+        line.spans[1].style.add_modifier
+    };
+    assert!(row_style(&state).contains(theme.selection_active));
+    state.handle_key(&ctx, key(KeyCode::Enter));
+    assert!(state.sub_editor().is_some());
+    let behind = row_style(&state);
+    assert!(behind.contains(theme.selection_inactive), "{behind:?}");
+    assert!(!behind.contains(Modifier::REVERSED), "{behind:?}");
+}
+
+#[test]
 fn harness_sub_editor_confirm_emits_set_filter() {
     let filter = RowFilter::default();
     let ctx = ctx_with(
@@ -453,14 +479,13 @@ fn selected_last_sort_row_scrolls_into_short_controls_body() {
         .map(|y| (0..area.width).map(|x| buf[(x, y)].symbol()).collect())
         .collect();
     assert!(
-        rows.iter().any(|row| row.contains("> Recency")),
+        rows.iter()
+            .any(|row| row.contains(&format!("{} Recency", marks::POINTER))),
         "the selected sort row is drawn:\n{}",
         rows.join("\n")
     );
     assert!(
-        !rows
-            .iter()
-            .any(|row| row.contains("> Sessions") || row.contains("  Sessions [1]")),
+        !rows.iter().any(|row| row.contains("Sessions [1]")),
         "the top of the body scrolled away:\n{}",
         rows.join("\n")
     );
@@ -582,10 +607,16 @@ fn cursor_line_index_points_at_the_cursored_row_in_every_section() {
             let lines = widget.body_lines();
             let index = widget.cursor_line_index().expect("cursor row is rendered");
             assert!(
-                lines[index].to_string().starts_with("> "),
+                lines[index].to_string().starts_with(marks::POINTER),
                 "{view:?} {row:?}: {}",
                 lines[index]
             );
+            for span in &lines[index].spans {
+                assert!(
+                    span.style.add_modifier.contains(theme.selection_active),
+                    "{view:?} {row:?}: the whole row is highlighted: {span:?}"
+                );
+            }
         }
     }
 }

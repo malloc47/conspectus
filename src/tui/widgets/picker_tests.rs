@@ -1,4 +1,7 @@
+use ratatui::buffer::Buffer;
 use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+use ratatui::layout::Rect;
+use ratatui::widgets::Widget;
 
 use super::*;
 
@@ -102,4 +105,30 @@ fn narrowing_keeps_the_cursor_on_the_list() {
     type_text(&mut state, "beta");
     assert_eq!(state.cursor(), 0);
     assert_eq!(state.current().map(|i| i.label.as_str()), Some("beta"));
+}
+
+#[test]
+fn the_cursor_row_shows_the_marker_and_the_highlight() {
+    let theme = Theme::default();
+    let mut state = state();
+    press(&mut state, KeyCode::Down);
+    let area = Rect::new(0, 0, 80, 20);
+    let mut buf = Buffer::empty(area);
+    PickerWidget::new(&state, &theme).render(area, &mut buf);
+    let marked: Vec<(u16, u16)> = (0..area.height)
+        .flat_map(|y| (0..area.width).map(move |x| (x, y)))
+        .filter(|(x, y)| buf[(*x, *y)].symbol() == tuikit::glyphs::marks::POINTER)
+        .collect();
+    assert_eq!(marked.len(), 1, "one marked row");
+    let (x, y) = marked[0];
+    let label: String = (x + 2..x + 6).map(|x| buf[(x, y)].symbol()).collect();
+    assert_eq!(label, "beta");
+    for x in x..x + 12 {
+        assert!(
+            buf[(x, y)].modifier.contains(theme.selection_active),
+            "cell {x}"
+        );
+    }
+    let above: String = (x..x + 7).map(|x| buf[(x, y - 1)].symbol()).collect();
+    assert_eq!(above, "  alpha", "other rows keep the label a gutter in");
 }

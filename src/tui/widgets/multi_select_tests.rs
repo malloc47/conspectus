@@ -129,3 +129,47 @@ fn selected_last_row_scrolls_into_short_multi_select_body() {
     );
     assert!(!text.contains("item 3"), "{text}");
 }
+
+#[test]
+fn the_cursor_row_shows_the_marker_and_the_highlight_and_checks_keep_their_mark() {
+    let items = ["alpha", "beta", "gamma"];
+    let mut state = MultiSelectState::new("pick", items.len(), &[2]);
+    state.handle_key(key(KeyCode::Down));
+    let theme = Theme::default();
+    let area = Rect::new(0, 0, 40, 10);
+    let mut buf = Buffer::empty(area);
+    MultiSelectWidget::new(&state, &items, &theme).render(area, &mut buf);
+    let row_of = |label: &str| {
+        (0..area.height)
+            .find_map(|y| {
+                let text: String = (0..area.width).map(|x| buf[(x, y)].symbol()).collect();
+                text.find(label).map(|byte| {
+                    let x = text[..byte].chars().count();
+                    (u16::try_from(x).unwrap_or(0), y, text)
+                })
+            })
+            .unwrap_or_else(|| panic!("{label} is drawn"))
+    };
+    let (x, y, text) = row_of("beta");
+    let lead: String = (x - 4..x).map(|x| buf[(x, y)].symbol()).collect();
+    assert_eq!(
+        lead,
+        format!("{} {} ", marks::POINTER, marks::BULLET),
+        "{text}"
+    );
+    for x in x - 4..x + 4 {
+        assert!(
+            buf[(x, y)].modifier.contains(theme.selection_active),
+            "cell {x}: {text}"
+        );
+    }
+    let (x, y, _) = row_of("gamma");
+    let lead: String = (x - 4..x).map(|x| buf[(x, y)].symbol()).collect();
+    assert_eq!(
+        lead,
+        format!("  {} ", marks::OK),
+        "a checked row off the cursor"
+    );
+    assert_eq!(buf[(x, y)].fg, theme.accent);
+    assert!(!buf[(x, y)].modifier.contains(Modifier::REVERSED));
+}

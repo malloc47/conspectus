@@ -18,12 +18,13 @@ use ratatui::buffer::Buffer;
 use ratatui::crossterm::event::KeyEvent;
 use ratatui::layout::Rect;
 use ratatui::macros::{line, span};
-use ratatui::style::{Modifier, Style};
+use ratatui::style::Style;
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Paragraph, Widget};
 use tuikit::chip::{self, SegmentedTitle};
 use tuikit::frame::{ModalBody, ModalFrame, ModalSize};
 use tuikit::scroll::ScrollWindow;
+use tuikit::selection::{self, Cursor, Ends};
 use tuikit::text;
 
 use crate::model::NodeId;
@@ -543,10 +544,10 @@ impl SearchOverlayState {
             Some(SearchOptionKey::Abort) => return SearchOutcome::Cancel,
             Some(SearchOptionKey::Back) => self.options = None,
             Some(SearchOptionKey::Down) => {
-                self.options = Some(tuikit::scroll::wrap_step(at, SEARCH_OPTIONS.len(), 1));
+                self.options = Some(Ends::Wrap.step(at, SEARCH_OPTIONS.len(), 1));
             }
             Some(SearchOptionKey::Up) => {
-                self.options = Some(tuikit::scroll::wrap_step(at, SEARCH_OPTIONS.len(), -1));
+                self.options = Some(Ends::Wrap.step(at, SEARCH_OPTIONS.len(), -1));
             }
             Some(SearchOptionKey::Toggle) => {
                 match at {
@@ -610,7 +611,7 @@ impl SearchOverlayState {
             self.cursor = 0;
             return;
         }
-        self.cursor = tuikit::scroll::wrap_step(self.cursor, len, delta);
+        self.cursor = Ends::Wrap.step(self.cursor, len, delta);
     }
 }
 
@@ -857,7 +858,7 @@ impl SearchBody<'_> {
     /// One entity result: cursor mark, kind glyph, label, context, and the
     /// outcome word at the right edge.
     fn entity_line(&self, idx: usize, width: usize) -> Line<'static> {
-        let is_cursor = idx == self.state.cursor();
+        let cursor = Cursor::of(idx == self.state.cursor(), true);
         let Some(entity) = self
             .state
             .entity_matches()
@@ -870,33 +871,15 @@ impl SearchBody<'_> {
         // Leave a blank cell before the frame.
         let width = width.saturating_sub(1);
         let columns = entity_columns(width);
-        let mark = if is_cursor {
-            Modifier::REVERSED
-        } else {
-            Modifier::empty()
-        };
-        let plain = Style::default().add_modifier(mark);
-        let dim = if is_cursor || entity.gone {
-            plain.add_modifier(if entity.gone && !is_cursor {
-                self.theme.muted
-            } else {
-                Modifier::empty()
-            })
-        } else {
-            Style::default().add_modifier(self.theme.muted)
-        };
+        let dim = Style::default().add_modifier(self.theme.muted);
         let label = text::truncate_end(&entity.label, columns.label);
         let label_width = text::width(&label);
-        let mut spans: Vec<Span<'static>> = vec![
-            span!(plain; "{}", if is_cursor { "> " } else { "  " }),
-            search_kind_glyph_span_for(NodeKind::from(&entity.node), self.theme, is_cursor),
-        ];
-        let label_style = if entity.gone && !is_cursor {
-            dim
-        } else {
-            plain
-        };
-        let match_style = self.theme.match_style().add_modifier(mark);
+        let mut spans: Vec<Span<'static>> = vec![search_kind_glyph_span_for(
+            NodeKind::from(&entity.node),
+            self.theme,
+        )];
+        let label_style = if entity.gone { dim } else { Style::default() };
+        let match_style = self.theme.match_style();
         spans.extend(text::paint(
             &[Span::styled(label.as_str(), label_style)],
             hit.label_range.clone().filter(|r| r.end <= label.len()),
@@ -907,7 +890,7 @@ impl SearchBody<'_> {
             let pad = columns.label.saturating_sub(label_width) + COLUMN_GAP;
             let context = text::truncate_end(&entity.context, columns.context);
             used += pad + text::width(&context);
-            spans.push(span!(plain; "{}", " ".repeat(pad)));
+            spans.push(Span::raw(" ".repeat(pad)));
             spans.push(span!(dim; "{context}"));
         }
         let word = self
@@ -917,9 +900,9 @@ impl SearchBody<'_> {
         let word = text::truncate_end(&word, columns.outcome);
         let word_width = text::width(&word);
         let gap = width.saturating_sub(used + word_width);
-        spans.push(span!(plain; "{}", " ".repeat(gap)));
+        spans.push(Span::raw(" ".repeat(gap)));
         spans.push(span!(dim; "{word}"));
-        Line::from(spans)
+        selection::row(spans, cursor, self.theme)
     }
 }
 
@@ -1007,17 +990,12 @@ impl SearchBody<'_> {
             .zip(on)
             .enumerate()
             .map(|(i, (name, on))| {
-                let mark = if i == at { "> " } else { "  " };
                 let boxed = if on { "[x]" } else { "[ ]" };
-                let text = format!("{mark}{boxed} {name}");
-                if i == at {
-                    Line::from(Span::styled(
-                        text,
-                        Style::default().add_modifier(Modifier::REVERSED),
-                    ))
-                } else {
-                    Line::from(text)
-                }
+                selection::row(
+                    [Span::raw(format!("{boxed} {name}"))],
+                    Cursor::of(i == at, true),
+                    self.theme,
+                )
             })
             .collect();
         Paragraph::new(lines).render(area, buf);
@@ -1167,19 +1145,8 @@ fn content_row_line(
 ) -> Line<'static> {
     use crate::tui::widgets::badge::harness_badge;
 
-    let mark = if is_cursor {
-        Modifier::REVERSED
-    } else {
-        Modifier::empty()
-    };
-    let plain = Style::default().add_modifier(mark);
-    let dim = if is_cursor {
-        plain
-    } else {
-        Style::default().add_modifier(theme.muted)
-    };
-    let mut spans: Vec<Span<'static>> =
-        vec![span!(plain; "{}", if is_cursor { "> " } else { "  " })];
+    let dim = Style::default().add_modifier(theme.muted);
+    let mut spans: Vec<Span<'static>> = Vec::new();
     if columns.source > 0 {
         spans.push(span!(dim; "{} ", text::fit(row.target.source_word(), columns.source)));
     }
@@ -1187,14 +1154,17 @@ fn content_row_line(
         match row.target {
             ContentTarget::Session { .. } => {
                 spans.push(harness_badge(&row.chip, theme));
-                spans.push(span!(plain; " "));
+                spans.push(Span::raw(" "));
             }
             ContentTarget::Pane { .. } => {
                 spans.push(span!(dim; "{} ", text::fit(&row.chip, columns.chip)));
             }
         }
     }
-    spans.push(span!(plain; "{}  ", text::fit(&row.label, columns.label)));
+    spans.push(Span::raw(format!(
+        "{}  ",
+        text::fit(&row.label, columns.label)
+    )));
     let tag = match &row.turn {
         Some(turn) => turn.clone(),
         None => format!(
@@ -1215,19 +1185,19 @@ fn content_row_line(
         budget,
         MARKDOWN_TICKS,
     );
-    let match_style = theme.match_style().add_modifier(mark);
+    let match_style = theme.match_style();
     spans.extend(text::paint(
         &[Span::styled(snippet.text, dim)],
         snippet.highlight,
         |_| match_style,
     ));
-    Line::from(spans)
+    selection::row(spans, Cursor::of(is_cursor, true), theme)
 }
 
-/// Render a single match row with prefix, label, and a snippet of
-/// the haystack around the matched range. The cursor row carries a
-/// background highlight on every span; the matched bytes inside
-/// the snippet are bolded so they stand out even on the highlighted
+/// Render a single match row with the cursor gutter, kind glyph, label,
+/// and a snippet of the haystack around the matched range. Off the
+/// cursor row's highlight the snippet's context recedes so the matched
+/// portion pops; the matched bytes are drawn in the match style on every
 /// row.
 fn build_match_line(
     label: String,
@@ -1237,33 +1207,16 @@ fn build_match_line(
     width: usize,
     theme: &Theme,
 ) -> Line<'static> {
-    // Compose a per-span style. The cursor row uses
-    // `Modifier::REVERSED` rather than an explicit background color
-    // so the highlight adapts to whatever fg/bg the terminal theme
-    // provides — a fixed dark-gray bg renders dark-on-dark on
-    // light themes. Off-cursor rows dim the snippet context so the
-    // matched portion pops; the cursor row skips DIM because the
-    // reversed surface already separates it from neighbors.
-    let span_style = |dim_when_not_cursor: bool, extra: Style| -> Style {
-        let mut style = extra;
-        if is_cursor {
-            style = style.add_modifier(Modifier::REVERSED);
-        } else if dim_when_not_cursor {
-            style = style.add_modifier(theme.muted);
-        }
-        style
-    };
-    let prefix = if is_cursor { "> " } else { "  " };
+    let dim = Style::default().add_modifier(theme.muted);
     let mut spans: Vec<Span<'static>> = Vec::new();
-    spans.push(span!(span_style(false, Style::default()); "{prefix}"));
     // Prepend a kind glyph so operators scan
     // results by symbol (`● session`, `▣ mux`, `⇄ pr`, …) instead
     // of relying on the textual `kind:` prefix some labels carry.
     // RowIds without a NodeKind mapping (Pin, Synthetic) get two
     // spaces so the label column stays aligned across the result
     // list — operators don't see the label jiggle row by row.
-    spans.push(search_kind_glyph_span(&m.id, theme, is_cursor));
-    spans.push(span!(span_style(false, Style::default()); "{}", label));
+    spans.push(search_kind_glyph_span(&m.id, theme));
+    spans.push(Span::raw(label.clone()));
 
     // If we can show a snippet (haystack present and either
     // distinct from the label or carrying a match range), append
@@ -1273,17 +1226,14 @@ fn build_match_line(
     let matched_range = m.matched_range.clone().unwrap_or(0..0);
     let snippet_distinct = haystack != label;
     if !haystack.is_empty() && snippet_distinct {
-        spans.push(span!(span_style(true, Style::default()); "  · "));
+        spans.push(span!(dim; "  · "));
         // The snippet takes the rest of the row but the blank cell before
         // the frame that entity rows leave, so its cut ends in `…`
         // instead of at the frame; a long label leaves it a few cells.
-        let budget = width.saturating_sub(text::spans_width(&spans) + 1).max(8);
+        let used = selection::GUTTER_WIDTH + text::spans_width(&spans);
+        let budget = width.saturating_sub(used + 1).max(8);
         let snippet = text::fit_snippet(haystack, matched_range, budget, &[]);
-        // The matched portion always renders bold + yellow so it
-        // pops on both cursor and non-cursor rows; pre/post context
-        // dims only when the row isn't the cursor.
-        let match_style = span_style(false, theme.match_style());
-        let dim = span_style(true, Style::default());
+        let match_style = theme.match_style();
         spans.extend(text::paint(
             &[Span::styled(snippet.text, dim)],
             snippet.highlight,
@@ -1291,7 +1241,7 @@ fn build_match_line(
         ));
     }
 
-    Line::from(spans)
+    selection::row(spans, Cursor::of(is_cursor, true), theme)
 }
 
 /// Resolve the NodeKind a search result row represents, when there
@@ -1314,34 +1264,22 @@ fn search_row_node_kind(id: &RowId) -> Option<NodeKind> {
 
 /// Build the leading glyph span for a search result row. Two cells
 /// wide: `<glyph> ` for graph-backed rows; `  ` for Pin / Synthetic
-/// rows that don't carry a NodeKind. The glyph keeps its kind color
-/// even on the cursor row — the surrounding `REVERSED` modifier on
-/// the prefix and label already separates the highlighted row from
-/// its neighbors, so leaving the color intact keeps the symbol's
-/// identity legible.
-fn search_kind_glyph_span(id: &RowId, theme: &Theme, is_cursor: bool) -> Span<'static> {
+/// rows that don't carry a NodeKind. The glyph keeps its kind color on
+/// the cursor row too, where the row's highlight covers it, so the
+/// symbol's identity stays legible.
+fn search_kind_glyph_span(id: &RowId, theme: &Theme) -> Span<'static> {
     let Some(kind) = search_row_node_kind(id) else {
-        let style = if is_cursor {
-            Style::default().add_modifier(Modifier::REVERSED)
-        } else {
-            Style::default()
-        };
-        return span!(style; "  ");
+        return Span::raw("  ");
     };
-    search_kind_glyph_span_for(kind, theme, is_cursor)
+    search_kind_glyph_span_for(kind, theme)
 }
 
 /// The glyph span for a known kind.
-fn search_kind_glyph_span_for(kind: NodeKind, theme: &Theme, is_cursor: bool) -> Span<'static> {
+fn search_kind_glyph_span_for(kind: NodeKind, theme: &Theme) -> Span<'static> {
     // A PR's glyph takes the `pr_open` hue: search results carry no
     // PR state.
     let style = node_kind_style(kind, theme);
-    let color = style.color;
-    let mut span_style = Style::default().fg(color);
-    if is_cursor {
-        span_style = span_style.add_modifier(Modifier::REVERSED);
-    }
-    span!(span_style; "{} ", style.glyph)
+    span!(Style::default().fg(style.color); "{} ", style.glyph)
 }
 
 /// Per-event context the search overlay reads through the

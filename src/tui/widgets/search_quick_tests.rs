@@ -391,7 +391,8 @@ fn the_wider_frame_shows_the_outcome_word_whole_at_every_size() {
             .find(|word| inner.trim_end().ends_with(*word))
             {
                 assert!(
-                    inner.starts_with("> ") || inner.starts_with("  "),
+                    inner.starts_with(&format!("{} ", tuikit::glyphs::marks::POINTER))
+                        || inner.starts_with("  "),
                     "{width}x{height} modal {modal:?}: {inner:?}\n{text}"
                 );
                 assert!(

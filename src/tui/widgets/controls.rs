@@ -29,10 +29,11 @@ use ratatui::crossterm::event::KeyEvent;
 use ratatui::layout::Rect;
 use ratatui::macros::{line, span};
 use ratatui::style::{Modifier, Style};
-use ratatui::text::Line;
+use ratatui::text::{Line, Span};
 use ratatui::widgets::Widget;
 use tuikit::frame::{Lines, ModalFrame, ModalSize};
 use tuikit::glyphs::marks;
+use tuikit::selection::{self, Cursor, Ends};
 
 use crate::filter::{
     HarnessFilter, MuxStateFilter, MuxStateKey, PrBranchFilter, PrStateFilter, PrStateKey,
@@ -686,7 +687,7 @@ fn move_cursor(cursor: ControlsCursor, ctx: &ControlsContext<'_>, delta: i32) ->
         return cursor;
     }
     let idx = list.iter().position(|c| *c == cursor).unwrap_or(0);
-    list[tuikit::scroll::wrap_step(idx, list.len(), delta)]
+    list[Ends::Wrap.step(idx, list.len(), delta)]
 }
 
 /// All actionable rows in display order. Section headers are
@@ -847,14 +848,16 @@ impl ControlsOverlayWidget<'_> {
     /// recorded as rows are pushed so the two can't drift apart.
     fn body(&self) -> (Vec<Line<'static>>, Option<usize>) {
         let cursor = self.state.cursor();
-        let mut body = Body::default();
+        // Behind an open sub-editor the list is not the one taking keys.
+        let focused = self.state.sub_editor().is_none();
+        let mut body = Body::new(self.theme, focused);
 
         body.push(section_header("View"));
         for (idx, view) in VIEW_OPTIONS.iter().enumerate() {
             let row = ControlsCursor::View(idx);
             let active = *view == self.ctx.view;
             let label = format!("{} [{}]", view_label(*view), idx + 1);
-            body.push_row(row_line(label, active, cursor == row), cursor == row);
+            body.push_row(row_line(label, active), cursor == row);
         }
         body.push(line![""]);
 
@@ -866,7 +869,7 @@ impl ControlsOverlayWidget<'_> {
             let row = ControlsCursor::Grouping(idx);
             let active = *grouping == self.ctx.grouping;
             let label = grouping.as_str().to_string();
-            body.push_row(row_line(label, active, cursor == row), cursor == row);
+            body.push_row(row_line(label, active), cursor == row);
         }
         body.push(line![""]);
 
@@ -874,24 +877,21 @@ impl ControlsOverlayWidget<'_> {
             body.push(section_header("Results"));
             let here = cursor == ControlsCursor::ContentGroup;
             let value = crate::tui::app::grouping_description(self.ctx.content_group);
-            body.push_row(cycle_row("listed as", value.to_string(), here), here);
+            body.push_row(cycle_row("listed as", value.to_string()), here);
             let here = cursor == ControlsCursor::SearchHistory;
             let value = match self.ctx.search_history {
                 Some((position, total)) => format!("{position} of {total}"),
                 None => "none yet".to_string(),
             };
-            body.push_row(filter_row("searches", value, here), here);
+            body.push_row(filter_row("searches", value), here);
             body.push(line![""]);
         }
 
         body.push(section_header("Search"));
         let here = cursor == ControlsCursor::SearchContents;
-        body.push_row(
-            filter_row("contents", "Enter searches".to_string(), here),
-            here,
-        );
+        body.push_row(filter_row("contents", "Enter searches".to_string()), here);
         let here = cursor == ControlsCursor::SearchOptions;
-        body.push_row(filter_row("options", "Enter opens".to_string(), here), here);
+        body.push_row(filter_row("options", "Enter opens".to_string()), here);
         body.push(line![""]);
 
         body.push(section_header(&format!(
@@ -899,18 +899,12 @@ impl ControlsOverlayWidget<'_> {
             view_label(self.ctx.view)
         )));
         let here = cursor == ControlsCursor::FilterHarness;
-        body.push_row(
-            filter_row("harness", harness_value(self.ctx.filter), here),
-            here,
-        );
+        body.push_row(filter_row("harness", harness_value(self.ctx.filter)), here);
         let here = cursor == ControlsCursor::FilterMaxAge;
-        body.push_row(
-            filter_row("max age", max_age_value(self.ctx.filter), here),
-            here,
-        );
+        body.push_row(filter_row("max age", max_age_value(self.ctx.filter)), here);
         let here = cursor == ControlsCursor::FilterMuxState;
         body.push_row(
-            filter_row("mux state", mux_state_value(self.ctx.filter), here),
+            filter_row("mux state", mux_state_value(self.ctx.filter)),
             here,
         );
         if matches!(
@@ -919,7 +913,7 @@ impl ControlsOverlayWidget<'_> {
         ) {
             let here = cursor == ControlsCursor::FilterContent;
             body.push_row(
-                filter_row("contains", content_value(self.ctx.content), here),
+                filter_row("contains", content_value(self.ctx.content)),
                 here,
             );
         }
@@ -929,7 +923,6 @@ impl ControlsOverlayWidget<'_> {
                 checkbox_row(
                     "Float muxed sessions to top",
                     self.ctx.filter.float_muxed_sessions_top,
-                    here,
                 ),
                 here,
             );
@@ -940,29 +933,24 @@ impl ControlsOverlayWidget<'_> {
                 checkbox_row(
                     "Float attached muxes to top",
                     self.ctx.filter.float_attached_muxes_top,
-                    here,
                 ),
                 here,
             );
             let here = cursor == ControlsCursor::FilterShowStoppedMuxes;
             body.push_row(
-                checkbox_row(
-                    "Show all stopped muxes",
-                    self.ctx.filter.show_stopped_muxes,
-                    here,
-                ),
+                checkbox_row("Show all stopped muxes", self.ctx.filter.show_stopped_muxes),
                 here,
             );
         }
         if matches!(self.ctx.view, View::Prs) {
             let here = cursor == ControlsCursor::FilterPrState;
             body.push_row(
-                filter_row("PR state", pr_state_value(self.ctx.filter), here),
+                filter_row("PR state", pr_state_value(self.ctx.filter)),
                 here,
             );
             let here = cursor == ControlsCursor::FilterPrBranch;
             body.push_row(
-                cycle_row("local branch", pr_branch_value(self.ctx.filter), here),
+                cycle_row("local branch", pr_branch_value(self.ctx.filter)),
                 here,
             );
             let here = cursor == ControlsCursor::FilterFloatTrackedPrs;
@@ -970,7 +958,6 @@ impl ControlsOverlayWidget<'_> {
                 checkbox_row(
                     "Float PRs with a local branch to top",
                     self.ctx.filter.float_tracked_prs_top,
-                    here,
                 ),
                 here,
             );
@@ -978,19 +965,19 @@ impl ControlsOverlayWidget<'_> {
         if matches!(self.ctx.view, View::Sessions | View::Mux | View::Prs) {
             let here = cursor == ControlsCursor::FilterPinnedOnly;
             body.push_row(
-                checkbox_row("Pinned only", self.ctx.filter.pinned_only, here),
+                checkbox_row("Pinned only", self.ctx.filter.pinned_only),
                 here,
             );
         }
         if matches!(self.ctx.view, View::History) {
             let here = cursor == ControlsCursor::FilterHistoryUnpinnedOnly;
             body.push_row(
-                checkbox_row("Unpinned only", !self.ctx.filter.show_pinned_history, here),
+                checkbox_row("Unpinned only", !self.ctx.filter.show_pinned_history),
                 here,
             );
         }
         let here = cursor == ControlsCursor::FilterClear;
-        body.push_row(row_line("Clear all filters".to_string(), false, here), here);
+        body.push_row(row_line("Clear all filters".to_string(), false), here);
         body.push(line![""]);
 
         body.push(section_header("Sort"));
@@ -998,7 +985,7 @@ impl ControlsOverlayWidget<'_> {
             let row = ControlsCursor::Sort(idx);
             let active = *sort == self.ctx.sort;
             body.push_row(
-                row_line(sort_label(*sort).to_string(), active, cursor == row),
+                row_line(sort_label(*sort).to_string(), active),
                 cursor == row,
             );
         }
@@ -1012,10 +999,7 @@ impl ControlsOverlayWidget<'_> {
             for (idx, basis) in crate::tui::MuxRecency::ALL.iter().enumerate() {
                 let row = ControlsCursor::MuxRecency(idx);
                 let active = *basis == self.ctx.mux_recency;
-                body.push_row(
-                    row_line(basis.label().to_string(), active, cursor == row),
-                    cursor == row,
-                );
+                body.push_row(row_line(basis.label().to_string(), active), cursor == row);
             }
         }
 
@@ -1024,10 +1008,7 @@ impl ControlsOverlayWidget<'_> {
         for (idx, wrap) in crate::tui::PreviewWrap::ALL.iter().enumerate() {
             let row = ControlsCursor::PreviewWrap(idx);
             let active = *wrap == self.ctx.preview_wrap;
-            body.push_row(
-                row_line(wrap.label().to_string(), active, cursor == row),
-                cursor == row,
-            );
+            body.push_row(row_line(wrap.label().to_string(), active), cursor == row);
         }
 
         body.push(line![""]);
@@ -1035,32 +1016,42 @@ impl ControlsOverlayWidget<'_> {
         for (idx, choice) in crate::tui::SessionPreview::ALL.iter().enumerate() {
             let row = ControlsCursor::SessionPreview(idx);
             let active = *choice == self.ctx.session_preview;
-            body.push_row(
-                row_line(choice.label().to_string(), active, cursor == row),
-                cursor == row,
-            );
+            body.push_row(row_line(choice.label().to_string(), active), cursor == row);
         }
         (body.lines, body.cursor_line)
     }
 }
 
 /// Overlay lines under construction, plus where the cursor row landed.
-#[derive(Default)]
-struct Body {
+struct Body<'t> {
     lines: Vec<Line<'static>>,
     cursor_line: Option<usize>,
+    theme: &'t Theme,
+    /// Whether the list has focus: its cursor row takes the active look.
+    focused: bool,
 }
 
-impl Body {
+impl<'t> Body<'t> {
+    fn new(theme: &'t Theme, focused: bool) -> Self {
+        Self {
+            lines: Vec::new(),
+            cursor_line: None,
+            theme,
+            focused,
+        }
+    }
+
     fn push(&mut self, line: Line<'static>) {
         self.lines.push(line);
     }
 
-    fn push_row(&mut self, line: Line<'static>, cursored: bool) {
+    /// A row the cursor can land on, behind the cursor gutter.
+    fn push_row(&mut self, spans: Vec<Span<'static>>, cursored: bool) {
         if cursored {
             self.cursor_line = Some(self.lines.len());
         }
-        self.lines.push(line);
+        let cursor = Cursor::of(cursored, self.focused);
+        self.lines.push(selection::row(spans, cursor, self.theme));
     }
 }
 
@@ -1068,41 +1059,25 @@ fn section_header(label: &str) -> Line<'static> {
     line![span!(Modifier::BOLD; "{label}")]
 }
 
-fn row_line(label: String, active: bool, cursored: bool) -> Line<'static> {
-    let marker = if cursored { "> " } else { "  " };
-    // REVERSED (not a fixed bg color) so the cursor row stays
-    // readable on both light and dark terminal themes.
-    let mut style = Style::default();
-    if cursored {
-        style = style.add_modifier(Modifier::REVERSED);
-    }
-    if active {
-        style = style.add_modifier(Modifier::BOLD);
-    }
-    let active_tag = if active { "  active" } else { "" };
-    line![span!(style; "{marker}{label}{active_tag}")]
-}
-
-fn filter_row(name: &str, value: String, cursored: bool) -> Line<'static> {
-    let marker = if cursored { "> " } else { "  " };
-    let style = if cursored {
-        Style::default().add_modifier(Modifier::REVERSED)
+/// A choice row; the active choice is bold and says so.
+fn row_line(label: String, active: bool) -> Vec<Span<'static>> {
+    let style = if active {
+        Style::default().add_modifier(Modifier::BOLD)
     } else {
         Style::default()
     };
-    line![span!(style; "{marker}{name:12} {value}  [ Edit ]")]
+    let active_tag = if active { "  active" } else { "" };
+    vec![span!(style; "{label}{active_tag}")]
+}
+
+fn filter_row(name: &str, value: String) -> Vec<Span<'static>> {
+    vec![span!("{name:12} {value}  [ Edit ]")]
 }
 
 /// A filter row whose value Space steps to the next choice rather
 /// than opening an editor.
-fn cycle_row(name: &str, value: String, cursored: bool) -> Line<'static> {
-    let marker = if cursored { "> " } else { "  " };
-    let style = if cursored {
-        Style::default().add_modifier(Modifier::REVERSED)
-    } else {
-        Style::default()
-    };
-    line![span!(style; "{marker}{name:12} {value}  [ Cycle ]")]
+fn cycle_row(name: &str, value: String) -> Vec<Span<'static>> {
+    vec![span!("{name:12} {value}  [ Cycle ]")]
 }
 
 fn pr_state_value(filter: &RowFilter) -> String {
@@ -1122,17 +1097,14 @@ fn pr_branch_value(filter: &RowFilter) -> String {
         .map_or_else(|| "any".to_string(), |value| value.as_str().to_string())
 }
 
-fn checkbox_row(label: &str, checked: bool, cursored: bool) -> Line<'static> {
-    let marker = if cursored { "> " } else { "  " };
-    let mut style = Style::default();
-    if cursored {
-        style = style.add_modifier(Modifier::REVERSED);
-    }
-    if checked {
-        style = style.add_modifier(Modifier::BOLD);
-    }
+fn checkbox_row(label: &str, checked: bool) -> Vec<Span<'static>> {
+    let style = if checked {
+        Style::default().add_modifier(Modifier::BOLD)
+    } else {
+        Style::default()
+    };
     let box_glyph = if checked { "[x]" } else { "[ ]" };
-    line![span!(style; "{marker}{box_glyph} {label}")]
+    vec![span!(style; "{box_glyph} {label}")]
 }
 
 fn harness_value(filter: &RowFilter) -> String {

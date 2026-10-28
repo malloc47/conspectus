@@ -1,62 +1,27 @@
 //! Multi-select list overlay primitive (ADR 0031).
 //!
-//! Thin shim over [`ratatui_cheese::multi_select`]. The
-//! upstream crate owns the cursor + selection state machine and the
-//! per-row rendering; this module preserves the in-tree
-//! [`MultiSelectOutcome`] + [`MultiSelectState::handle_key`] contract
-//! that `widgets/controls.rs`'s sub-editor dispatch expects, so the
-//! swap stays a single-file change at the API boundary. The list draws
-//! inside the framework's compact modal frame.
-//!
-//! Theme bridge: `cheese_styles_from_theme` maps the `[tui.theme]`
-//! keys (ADR 0032) onto the upstream
-//! [`ratatui_cheese::multi_select::MultiSelectStyles`] surface so the
-//! sub-editor honors operator overrides; [`MultiSelectWidget::new`]
-//! takes the `&Theme`.
+//! The checked set lives in [`ratatui_cheese::multi_select`]'s state;
+//! this module preserves the in-tree [`MultiSelectOutcome`] +
+//! [`MultiSelectState::handle_key`] contract that
+//! `widgets/controls.rs`'s sub-editor dispatch expects. The cursor
+//! wraps like every short choice list and each row is drawn through
+//! [`tuikit::selection`], so the checklist shows its cursor the way
+//! every other list does. The list draws inside the framework's compact
+//! modal frame and takes the `&Theme` in [`MultiSelectWidget::new`].
 
 use ratatui::buffer::Buffer;
 use ratatui::crossterm::event::KeyEvent;
 use ratatui::layout::Rect;
 use ratatui::style::{Modifier, Style};
-use ratatui::widgets::{StatefulWidget, Widget};
-use ratatui_cheese::multi_select::{
-    MultiSelect as CheeseMultiSelect, MultiSelectOption,
-    MultiSelectState as CheeseMultiSelectState, MultiSelectStyles as CheeseMultiSelectStyles,
-};
+use ratatui::text::{Line, Span};
+use ratatui::widgets::{Paragraph, Widget};
+use ratatui_cheese::multi_select::MultiSelectState as CheeseMultiSelectState;
 use tuikit::frame::{ModalBody, ModalFrame, ModalSize};
+use tuikit::glyphs::marks;
 use tuikit::scroll::ScrollWindow;
+use tuikit::selection::{self, Cursor, Ends};
 
 use crate::tui::Theme;
-
-/// Bridge the project's [`Theme`] (ADR 0032) onto upstream
-/// [`CheeseMultiSelectStyles`]. The bordered modal title is rendered
-/// by this module's [`MultiSelectWidget`], not by the upstream
-/// widget, so the `title` and `description` slots stay defaulted —
-/// they are unreachable in our composition. The remaining slots map:
-///
-/// - `cursor` → `accent` so the `>` indicator pops.
-/// - `checked` → `accent` + BOLD so checked items read
-///   as the operator's selection.
-/// - `unchecked` → unset so labels render as regular text.
-/// - `disabled` → the `muted` modifier so disabled rows dim
-///   uniformly (no disabled options today; future-proofs the swap).
-/// - `validation_error` / `validation_success` → `error` / `success`
-///   colors so future limit/required validators inherit the project
-///   palette.
-fn cheese_styles_from_theme(theme: &Theme) -> CheeseMultiSelectStyles {
-    CheeseMultiSelectStyles {
-        title: Style::default(),
-        description: Style::default(),
-        cursor: Style::default().fg(theme.accent),
-        checked: Style::default()
-            .fg(theme.accent)
-            .add_modifier(Modifier::BOLD),
-        unchecked: Style::default(),
-        disabled: Style::default().add_modifier(theme.muted),
-        validation_error: Style::default().fg(theme.error),
-        validation_success: Style::default().fg(theme.success),
-    }
-}
 
 /// What the host should do after passing a key event through the
 /// overlay. `Continue` keeps the overlay open; `Confirm` carries
@@ -70,9 +35,9 @@ pub enum MultiSelectOutcome {
 }
 
 /// Pure state for a multi-select list. Wraps
-/// [`ratatui_cheese::multi_select::MultiSelectState`] so the in-tree
-/// callers keep their handle_key/outcome contract while the cursor
-/// movement, wrapping, and toggle semantics come from upstream.
+/// [`ratatui_cheese::multi_select::MultiSelectState`], which keeps the
+/// cursor and the checked set, so the in-tree callers keep their
+/// handle_key/outcome contract.
 #[derive(Debug)]
 pub struct MultiSelectState {
     title: String,
@@ -145,26 +110,27 @@ impl MultiSelectState {
 
     /// Dispatch a crossterm key event.
     ///
-    /// - `Up` / `k`: move cursor up (wraps via upstream `prev`).
-    /// - `Down` / `j`: move cursor down (wraps via upstream `next`).
+    /// - `Up` / `k`: move cursor up, wrapping from the first item to
+    ///   the last.
+    /// - `Down` / `j`: move cursor down, wrapping from the last to the
+    ///   first.
     /// - `Space`: toggle the item under the cursor.
     /// - `Enter`: confirm; returns the selected indices.
     /// - `Esc` (or `Ctrl-C`): cancel.
     ///
     /// Empty lists confirm with an empty vector and cancel as usual;
-    /// upstream `next` / `prev` / `toggle_current` are all no-ops on
-    /// an empty option set.
+    /// moving and toggling do nothing on an empty list.
     pub fn handle_key(&mut self, event: KeyEvent) -> MultiSelectOutcome {
         use crate::tui::keybindings::overlay::{MULTI_SELECT_KEYS, MultiSelectKey, resolve};
         match resolve(MULTI_SELECT_KEYS, event) {
             Some(MultiSelectKey::Abort | MultiSelectKey::Cancel) => MultiSelectOutcome::Cancel,
             Some(MultiSelectKey::Confirm) => MultiSelectOutcome::Confirm(self.selected_indices()),
             Some(MultiSelectKey::Up) => {
-                self.inner.prev();
+                self.step(-1);
                 MultiSelectOutcome::Continue
             }
             Some(MultiSelectKey::Down) => {
-                self.inner.next();
+                self.step(1);
                 MultiSelectOutcome::Continue
             }
             Some(MultiSelectKey::Toggle) => {
@@ -172,6 +138,14 @@ impl MultiSelectState {
                 MultiSelectOutcome::Continue
             }
             None => MultiSelectOutcome::Continue,
+        }
+    }
+
+    /// A checklist is a short choice list: the cursor wraps.
+    fn step(&mut self, delta: i32) {
+        if self.item_count > 0 {
+            let at = Ends::Wrap.step(self.inner.cursor(), self.item_count, delta);
+            self.inner.set_cursor(at);
         }
     }
 }
@@ -211,8 +185,8 @@ impl<T: AsRef<str>> Widget for MultiSelectWidget<'_, T> {
     }
 }
 
-/// The upstream `MultiSelect` widget drawn as the frame's body, one row
-/// per item, scrolled to keep the cursor in view.
+/// The items drawn as the frame's body, one row per item behind the
+/// cursor gutter, scrolled to keep the cursor in view.
 struct MultiSelectBody<'a, T: AsRef<str>> {
     state: &'a MultiSelectState,
     items: &'a [T],
@@ -230,41 +204,37 @@ impl<T: AsRef<str>> ModalBody for MultiSelectBody<'_, T> {
         let cursor = self.state.cursor();
         let window = ScrollWindow::new(usize::from(area.height), self.items.len())
             .following(cursor..cursor + 1);
-        let scroll = window.offset();
-
-        // Bridge our `[T: AsRef<str>]` slice into upstream
-        // `MultiSelectOption`s. The Vec lives for the duration of
-        // this call so the borrow into the widget is valid.
-        let options: Vec<MultiSelectOption<'_>> = self
-            .items
-            .get(window.visible())
-            .unwrap_or(&[])
-            .iter()
-            .map(|item| MultiSelectOption::new(item.as_ref()))
+        // The gutter, the check mark, and a space come before the label.
+        let label_width = usize::from(area.width).saturating_sub(selection::GUTTER_WIDTH + 2);
+        let checked = Style::default()
+            .fg(self.theme.accent)
+            .add_modifier(Modifier::BOLD);
+        let lines: Vec<Line<'_>> = window
+            .visible()
+            .map(|index| {
+                let style = if self.state.is_selected(index) {
+                    checked
+                } else {
+                    Style::default()
+                };
+                let mark = if self.state.is_selected(index) {
+                    marks::OK
+                } else {
+                    marks::BULLET
+                };
+                let label = tuikit::text::truncate_end(self.items[index].as_ref(), label_width);
+                selection::row(
+                    [
+                        Span::styled(mark, style),
+                        Span::raw(" "),
+                        Span::styled(label, style),
+                    ],
+                    Cursor::of(index == cursor, true),
+                    self.theme,
+                )
+            })
             .collect();
-
-        // The upstream widget renders via &mut state. We're behind a
-        // shared borrow, so build a mirror that reflects cursor +
-        // selections and pass that.
-        let mut mirror = CheeseMultiSelectState::new(options.len());
-        mirror.set_cursor(self.state.cursor().saturating_sub(scroll));
-        for idx in self.state.selected_indices() {
-            if let Some(visible_idx) = idx.checked_sub(scroll)
-                && visible_idx < options.len()
-            {
-                mirror.set_selected(visible_idx, true);
-            }
-        }
-        mirror.set_focused(true);
-
-        // Title is rendered by the popup frame; pass an empty title
-        // to the upstream widget so it doesn't re-stamp a second
-        // one inside the inner area.
-        let widget = CheeseMultiSelect::new("", &options)
-            .checked_indicator(tuikit::glyphs::marks::OK)
-            .unchecked_indicator(tuikit::glyphs::marks::BULLET)
-            .styles(cheese_styles_from_theme(self.theme));
-        StatefulWidget::render(&widget, area, buf, &mut mirror);
+        Paragraph::new(lines).render(area, buf);
     }
 }
 

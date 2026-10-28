@@ -8,7 +8,7 @@ expression: text
         ┌ / search contents  [ Current ] All  [ Sessions ] Messages ────────────────────────┐
         │/quokka                                                                            │
         │2 results · messages · 34/77 sessions · 2 skipped                                  │
-        │> session session aaaa1111  3 hits                  1h …the quokka design for it   │
+        │► session session aaaa1111  3 hits                  1h …the quokka design for it   │
         │  session session bbbb2222  3 hits                  1h …the quokka design for it   │
         │                                                                                   │
         │                                                                                   │

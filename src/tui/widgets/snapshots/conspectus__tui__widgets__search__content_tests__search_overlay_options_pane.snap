@@ -6,7 +6,7 @@ expression: text
         ┌ / search contents  [ Current ] All  [ Sessions ] Messages ────────────────────────┐
         │/quokka                                                                            │
         │1 result · messages + tools · 34 sessions searched · 2 skipped                     │
-        │> [x] Tool calls and output                                                        │
+        │► [x] Tool calls and output                                                        │
         │  [ ] Thinking                                                                     │
         │  [x] Pane scrollback                                                              │
         │                                                                                   │

@@ -7,7 +7,7 @@ expression: "render_with(&wide_state(\"quokka\"), &[], 160, 30)"
 
             ┌ / quick select  Current [ All ]  (7) ────────────────────────────────────────────────────────────────────────────────────────────────┐
             │/quokka                                                                                                                               │
-            │> ● Quokka parser rewrite                             /home/op/src/quokka                                                        here │
+            │► ● Quokka parser rewrite                             /home/op/src/quokka                                                        here │
             │  ▣ quokka-dev                                        /home/op/src/quokka                                                    via repo │
             │  ◉ quokka-daily                                                                                                               3 hops │
             │  ◇ quokka-wt                                         quokka-login · /home/op/src/quokka-wt                           in History view │
