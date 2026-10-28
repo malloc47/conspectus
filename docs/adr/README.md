@@ -156,7 +156,7 @@ Runtime architecture, controls, theming, detail pane, and visual language.
 | [0075](0075-edge-state-visual-language.md) | Edge-State Visual Language In The Detail-Pane Other Zone | Accepted |
 | [0076](0076-scrollbar-widget-choice.md) | Scrollbar Widget Choice For Scrolled Panes | Accepted (amended by 0155, 0156) |
 | [0078](0078-tui-surface-division-of-labor.md) | TUI Surface Division Of Labor | Accepted |
-| [0085](0085-tui-mvu-architecture.md) | TUI Elm/MVU Architecture | Accepted (amended by 0156) |
+| [0085](0085-tui-mvu-architecture.md) | TUI Elm/MVU Architecture | Accepted (amended by 0156, 0161) |
 | [0105](0105-tui-message-log.md) | TUI Message Log For Operation Outcomes | Accepted |
 | [0106](0106-preview-pane-wrap-modes.md) | Preview Pane Wrap Modes | Accepted (amended by 0155) |
 | [0107](0107-related-view-neighbor-granularity.md) | Related View At Neighbor Granularity | Accepted (amended) |
@@ -168,7 +168,7 @@ Runtime architecture, controls, theming, detail pane, and visual language.
 | [0117](0117-capability-manifest-and-traced-backstop.md) | A Capability Manifest With A Traced Backstop | Accepted |
 | [0118](0118-csp-short-name.md) | `csp` Is The Short Name | Accepted |
 | [0119](0119-compass-rose-logo.md) | The Compass-Rose Logo | Accepted |
-| [0123](0123-overlay-keymap-tables.md) | Overlay Keymap Tables | Accepted (amended by 0160) |
+| [0123](0123-overlay-keymap-tables.md) | Overlay Keymap Tables | Accepted (amended by 0160, 0161) |
 | [0139](0139-mux-workspace-or-repo-grouping.md) | Workspace-Or-Repo Grouping In The Mux View | Accepted (amended) |
 | [0144](0144-pinned-and-history-views.md) | Pinned And History Views | Accepted (amended by 0145) |
 | [0145](0145-state-glyphs-and-words-in-the-left-panel.md) | State Glyphs And Words In The Left Panel | Accepted |
@@ -178,11 +178,12 @@ Runtime architecture, controls, theming, detail pane, and visual language.
 | [0153](0153-tui-theme-roles-aliases-and-named-styles.md) | TUI Theme Roles, Alias Keys, And Named Styles | Accepted |
 | [0154](0154-tui-glyph-marks-vetted-table-and-scan.md) | Shared Glyph Marks, The Vetted Table, And The Source Scan | Accepted |
 | [0155](0155-tui-text-measured-cut-and-wrapped-in-cells.md) | Text Is Measured, Cut, And Wrapped In Terminal Cells By One Module | Accepted |
-| [0156](0156-tui-scroll-window-follow-rule-and-viewports-by-value.md) | One Scroll Window, One Follow Rule, And Viewports Returned By Value | Accepted |
+| [0156](0156-tui-scroll-window-follow-rule-and-viewports-by-value.md) | One Scroll Window, One Follow Rule, And Viewports Returned By Value | Accepted (amended by 0161) |
 | [0157](0157-tui-chips-one-width-rule-and-ages-one-ladder.md) | Chips Share One Width Rule, And Ages One Ladder | Accepted |
 | [0158](0158-tui-modals-one-frame-and-named-sizes.md) | Modals Share One Frame And Five Named Sizes | Accepted |
 | [0159](0159-tui-lists-show-their-cursor-one-way.md) | Lists Show Their Cursor One Way And Step By Their Kind | Accepted |
 | [0160](0160-tui-keys-one-model-one-character-rule-one-footer-grammar.md) | Overlay Keys Share One Model, One Character Rule, And One Footer Grammar | Accepted |
+| [0161](0161-tui-overlays-draw-themselves-on-one-host-owned-stack.md) | Overlays Draw Themselves On One Host-Owned Modal Stack | Accepted |
 
 ## Transcript viewer
 

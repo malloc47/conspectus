@@ -7,6 +7,15 @@ Accepted. Contract 5 amended by
 the draw reconciles scroll from the App and the measured area and
 returns the windows it drew in a `ViewportReport`, which the App keeps
 after the frame; viewport dimensions are no longer delivered as `Msg`.
+Contract 3 amended by
+[ADR 0161](0161-tui-overlays-draw-themselves-on-one-host-owned-stack.md):
+the contract is the framework's `tuikit::overlay`, whose `handle` and
+`render` both take the host's context; the App lends its stack out with
+itself as that context; the stack routes every key an open modal owns
+to its top entry and draws every entry bottom to top; and the outcome
+gains `Stay` for a message sent while the overlay stays open. Until
+that ADR, only the top modal drew and routing and drawing were
+per-modal ladders.
 
 ## Context
 
@@ -104,23 +113,26 @@ instead of implicit statement order per call site.
 
 ### 3. Modal stack + one `Overlay` contract
 
-Modality is structural. `App` holds a `Vec<Modal>`; input routes to
-the top of the stack first; `draw` renders the stack in order; commit
-and close pop. Every overlay implements one trait:
+Modality is structural. `App` holds a stack of `Modal` entries;
+input routes to the top of the stack first; `draw` renders the stack
+in order; commit and close pop. Every overlay implements one trait,
+which ADR 0161 placed in the framework as `tuikit::overlay` with the
+host's message `M` and context `Cx`:
 
 ```rust
-trait Overlay {
-    fn handle(&mut self, key: KeyEvent) -> OverlayOutcome;
-    fn render(&self, frame: &mut Frame, area: Rect, theme: &Theme);
+trait Overlay<M, Cx> {
+    fn handle(&mut self, key: KeyEvent, cx: &Cx) -> Outcome<M>;
+    fn render(&mut self, area: Rect, buf: &mut Buffer, cx: &Cx, theme: &Theme);
 }
 
-enum OverlayOutcome { Consumed, Commit(Msg), Close }
+enum Outcome<M> { Consumed, Close, Commit(M), Stay(M) }
 ```
 
 Adding a new modal is a state struct + trait impl + one `Modal`
-variant. The keymap, loops, and draw acquire zero new branches. The
-viewer stops being an eighth special slot and becomes a stack entry
-with a nested reducer per contract 1.
+variant (one line of the `modals!` registration). The keymap, loops,
+and draw acquire zero new branches. The viewer stops being an eighth
+special slot and becomes a stack entry with a nested reducer per
+contract 1.
 
 ### 4. Derived view-models
 

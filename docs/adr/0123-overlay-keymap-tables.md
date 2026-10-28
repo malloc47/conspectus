@@ -8,7 +8,11 @@ contract). Amended by
 the model and the standard tables are the framework's `tuikit::keys`, a
 character binding no longer fires on its Control or Alt chords (this ADR
 kept each key's old modifier handling), every list moves with
-`Ctrl-N`/`Ctrl-P`, and footers take one grammar with no "to".
+`Ctrl-N`/`Ctrl-P`, and footers take one grammar with no "to". Amended
+by [ADR 0161](0161-tui-overlays-draw-themselves-on-one-host-owned-stack.md):
+`Abort` (`Ctrl-C`) dismisses the whole overlay from any level rather
+than meaning what each handler decides, the worktree menu's screens
+included, and `q` binds to it wherever nothing is typed.
 
 ## Context
 

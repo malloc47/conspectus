@@ -8,7 +8,11 @@ choice): the gutter is carved out of the body instead of the bar being
 drawn over it, and a window's thumb is placed by the rows that window
 scrolls. Amends ADR 0085 contract 5 (one draw contract): scroll is
 reconciled in the draw from the App and the measured area, and the
-drawn windows come back to the App as a value, not as a `Msg`.
+drawn windows come back to the App as a value, not as a `Msg`. Amended
+by [ADR 0161](0161-tui-overlays-draw-themselves-on-one-host-owned-stack.md):
+a scrolled modal (the help page, the value modal, Messages) keeps the
+window it drew as it draws, so the viewport report carries the panes'
+windows only.
 
 ## Context
 
