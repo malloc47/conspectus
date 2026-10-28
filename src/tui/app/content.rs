@@ -1564,7 +1564,7 @@ impl App {
         let now = Some(crate::tui::rows::tree_current_unix_epoch());
         let age = |time: Option<i64>| {
             crate::tui::rows::format_recency(now, time)
-                .unwrap_or_else(|| crate::tui::icons::marks::NO_VALUE.to_string())
+                .unwrap_or_else(|| tuikit::glyphs::marks::NO_VALUE.to_string())
         };
         let turn_tag = |hit: &Hit| {
             format!(

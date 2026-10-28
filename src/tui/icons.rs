@@ -10,6 +10,14 @@
 //! sites should not reach into the override map or the per-kind
 //! constants directly.
 //!
+//! The glyphs every control shares (the list cursor, the disclosure
+//! arrows, the check and failure marks, the ellipsis, the no-value dash)
+//! are `tuikit::glyphs::marks`; this module keeps only the vocabulary
+//! that is Conspectus's own, the node kinds and the [`state`] glyphs.
+//! [`register_glyphs`] adds those, and the few other domain glyphs the
+//! sources draw, to the framework's vetted-glyph table, which the source
+//! scan checks every drawn character against.
+//!
 //! `ForgePr` is the one kind that does not own a color: its hue is
 //! driven by PR state (`pr_open`/`pr_closed`/`pr_merged`/`pr_draft`).
 //! Its [`NodeKindStyle::color`] is the `pr_open` hue, which every
@@ -19,11 +27,15 @@
 use std::collections::BTreeMap;
 
 use ratatui::style::Color;
-use unicode_width::UnicodeWidthStr;
+use tuikit::glyphs::{cell_width, marks};
 
 use crate::tui::theme::Theme;
 
 pub use crate::model::NodeKind;
+
+mod vetted;
+
+pub use vetted::{register_glyphs, vetted_glyphs};
 
 /// TUI presentation of each kind (ADR 0073).
 impl NodeKind {
@@ -91,6 +103,9 @@ pub mod state {
     pub const PR_MERGED: &str = "⊕";
     /// A closed, unmerged pull request.
     pub const PR_CLOSED: &str = "⊗";
+    /// A pull request with no local branch: the other half of the pair
+    /// whose first half is the branch kind glyph on a tracked one.
+    pub const UNTRACKED: &str = "◌";
     /// A pin on an entity that is running: the filled pin glyph.
     pub const PIN_RUNNING: &str = "◉";
     /// A pin on an entity that is stopped, removed, missing, or not
@@ -99,7 +114,7 @@ pub mod state {
     pub const PIN_STOPPED: &str = "◎";
 
     /// Every state glyph, for tests that check width and uniqueness.
-    pub const ALL: [&str; 10] = [
+    pub const ALL: [&str; 11] = [
         LINKED,
         UNLINKED,
         STOPPED,
@@ -108,42 +123,17 @@ pub mod state {
         PR_DRAFT,
         PR_MERGED,
         PR_CLOSED,
+        UNTRACKED,
         PIN_RUNNING,
         PIN_STOPPED,
     ];
 }
 
-/// The other one-cell marks the left panel draws: disclosure, the group
-/// warning, the PR tracking marker, the missing-value dash, and the
-/// spinner that stands in for a state while a refresh is pending.
-pub mod marks {
-    /// A group or row that is expanded.
-    pub const EXPANDED: &str = "▼";
-    /// A group or row that is collapsed.
-    pub const COLLAPSED: &str = "▶";
-    /// A group with a session whose mux link is ambiguous.
-    pub const WARNING: &str = "▲";
-    /// A pull request with no local branch.
-    pub const UNTRACKED: &str = "◌";
-    /// An age or value that isn't known.
-    pub const NO_VALUE: &str = "—";
-    /// A path or value that checked out, in forms.
-    pub const OK: &str = "√";
-    /// A check or value that failed.
-    pub const FAIL: &str = "×";
-    /// An unchecked item in a multi-select list.
-    pub const BULLET: &str = "•";
-    /// The row cursor in menus and the "points back" mark in headers.
-    pub const POINTER: &str = "►";
-    /// The mark for "go back" in the right pane's breadcrumb.
-    pub const BACK: &str = "◄";
-    /// The frames of the pending-refresh spinner.
-    pub const SPINNER: [&str; 8] = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧"];
-}
-
 /// Every glyph the left panel can draw, once each: the kind glyphs, the
-/// state glyphs, and the marks. The reference document lists exactly
-/// these, and a test keeps the two in step.
+/// state glyphs, and the framework marks it uses. The reference document
+/// lists exactly these, and a test keeps the two in step. (The ellipsis
+/// and the rule cell are marks too, but the reference describes them in
+/// prose; they are not part of a row's vocabulary.)
 pub fn all_glyphs() -> Vec<&'static str> {
     let mut out: Vec<&'static str> = Vec::new();
     let mut push = |glyph: &'static str| {
@@ -161,7 +151,6 @@ pub fn all_glyphs() -> Vec<&'static str> {
         marks::EXPANDED,
         marks::COLLAPSED,
         marks::WARNING,
-        marks::UNTRACKED,
         marks::NO_VALUE,
         marks::OK,
         marks::BULLET,
@@ -200,7 +189,7 @@ pub fn node_kind_style(kind: NodeKind, theme: &Theme) -> NodeKindStyle {
         .icons
         .glyph(kind)
         .unwrap_or_else(|| kind.default_glyph().to_string());
-    let width = UnicodeWidthStr::width(glyph.as_str());
+    let width = cell_width(&glyph);
     let color = theme_color(kind, theme);
     NodeKindStyle {
         glyph,
@@ -288,7 +277,7 @@ pub fn parse_icon_override(key: &str, raw: &str) -> Result<(NodeKind, String), S
         ));
     }
 
-    let width = UnicodeWidthStr::width(raw);
+    let width = cell_width(raw);
     if width != 1 {
         return Err(format!(
             "`[tui.theme.icons].{key}`: glyph `{raw}` has display width {width}, expected 1"
@@ -301,213 +290,3 @@ pub fn parse_icon_override(key: &str, raw: &str) -> Result<(NodeKind, String), S
 #[cfg(test)]
 #[path = "icons_tests.rs"]
 mod tests;
-
-/// Glyphs that have been checked to draw inside one terminal cell, with
-/// how. A glyph the TUI draws that is missing here fails
-/// `all_glyphs_are_vetted`.
-///
-/// A terminal falls back to a proportional font for a glyph its monospace
-/// font lacks, and that glyph then overflows its cell (and a selection
-/// highlight cuts it in half). So every glyph here is in DejaVu Sans Mono
-/// at exactly one cell advance, in Latin-1, or in the WGL4 set that
-/// Liberation Mono, Courier New and Andale Mono also carry. Measure a new
-/// glyph with `scripts/glyph-widths.py` and record it here.
-///
-/// `ambiguous` marks glyphs whose East Asian width is ambiguous: one cell
-/// in Western locales, two in some CJK ones, as every Geometric Shapes
-/// glyph is. Wide and emoji-presentation glyphs are not allowed at all.
-pub const VETTED: &[(&str, &str)] = &[
-    (
-        "⠋",
-        "Braille Patterns; kept by operator preference; some fonts draw it past one cell",
-    ),
-    (
-        "⠙",
-        "Braille Patterns; kept by operator preference; some fonts draw it past one cell",
-    ),
-    (
-        "⠹",
-        "Braille Patterns; kept by operator preference; some fonts draw it past one cell",
-    ),
-    (
-        "⠸",
-        "Braille Patterns; kept by operator preference; some fonts draw it past one cell",
-    ),
-    (
-        "⠼",
-        "Braille Patterns; kept by operator preference; some fonts draw it past one cell",
-    ),
-    (
-        "⠴",
-        "Braille Patterns; kept by operator preference; some fonts draw it past one cell",
-    ),
-    (
-        "⠦",
-        "Braille Patterns; kept by operator preference; some fonts draw it past one cell",
-    ),
-    (
-        "⠧",
-        "Braille Patterns; kept by operator preference; some fonts draw it past one cell",
-    ),
-    ("▦", "Geometric Shapes; DejaVu Sans Mono 1.00; ambiguous"),
-    ("◆", "Geometric Shapes; DejaVu Sans Mono 1.00; ambiguous"),
-    ("◇", "Geometric Shapes; DejaVu Sans Mono 1.00; ambiguous"),
-    (
-        "●",
-        "WGL4; DejaVu Sans Mono and Liberation Mono 1.00; ambiguous",
-    ),
-    ("▣", "Geometric Shapes; DejaVu Sans Mono 1.00; ambiguous"),
-    ("◈", "Geometric Shapes; DejaVu Sans Mono 1.00; ambiguous"),
-    ("⌥", "Miscellaneous Technical; DejaVu Sans Mono 1.00"),
-    ("⋎", "Mathematical Operators; DejaVu Sans Mono 1.00"),
-    ("⇄", "Arrows; DejaVu Sans Mono 1.00"),
-    ("⊸", "Mathematical Operators; DejaVu Sans Mono 1.00"),
-    ("∘", "Mathematical Operators; DejaVu Sans Mono 1.00"),
-    ("⊘", "Mathematical Operators; DejaVu Sans Mono 1.00"),
-    ("?", "ASCII"),
-    (
-        "○",
-        "WGL4; DejaVu Sans Mono and Liberation Mono 1.00; ambiguous",
-    ),
-    (
-        "◐",
-        "Geometric Shapes; DejaVu Sans Mono and Liberation Mono 1.00; ambiguous",
-    ),
-    ("⊕", "Mathematical Operators; DejaVu Sans Mono 1.00"),
-    ("⊗", "Mathematical Operators; DejaVu Sans Mono 1.00"),
-    ("◉", "Geometric Shapes; DejaVu Sans Mono 1.00; ambiguous"),
-    ("◎", "Geometric Shapes; DejaVu Sans Mono 1.00; ambiguous"),
-    (
-        "▼",
-        "WGL4; DejaVu Sans Mono and Liberation Mono 1.00; ambiguous",
-    ),
-    (
-        "►",
-        "WGL4; DejaVu Sans Mono and Liberation Mono 1.00; ambiguous",
-    ),
-    (
-        "▶",
-        "Geometric Shapes; kept by operator preference; a terminal with an emoji font may draw it wide",
-    ),
-    (
-        "◄",
-        "WGL4; DejaVu Sans Mono and Liberation Mono 1.00; ambiguous",
-    ),
-    (
-        "▲",
-        "WGL4; DejaVu Sans Mono and Liberation Mono 1.00; ambiguous",
-    ),
-    (
-        "◌",
-        "Geometric Shapes; DejaVu Sans Mono and Liberation Mono 1.00; ambiguous",
-    ),
-    ("—", "Latin-1 range punctuation; every font; ambiguous"),
-    (
-        "√",
-        "Mathematical Operators; DejaVu Sans Mono and Liberation Mono 1.00",
-    ),
-    ("×", "Latin-1; every font"),
-    // Punctuation, arrows, and line drawing the interface text uses.
-    ("·", "Latin-1; every font; ambiguous"),
-    ("•", "WGL4; every font; ambiguous"),
-    ("…", "WGL4; every font; ambiguous"),
-    ("›", "WGL4; every font"),
-    ("é", "Latin-1; every font"),
-    ("§", "Latin-1; every font; ambiguous"),
-    ("←", "WGL4 arrows; every font; ambiguous"),
-    ("↑", "WGL4 arrows; every font; ambiguous"),
-    ("→", "WGL4 arrows; every font; ambiguous"),
-    ("↓", "WGL4 arrows; every font; ambiguous"),
-    (
-        "─",
-        "Box Drawing; drawn by the terminal itself in most; ambiguous",
-    ),
-    (
-        "│",
-        "Box Drawing; drawn by the terminal itself in most; ambiguous",
-    ),
-    (
-        "┃",
-        "Box Drawing; drawn by the terminal itself in most; ambiguous",
-    ),
-    (
-        "║",
-        "Box Drawing; drawn by the terminal itself in most; ambiguous",
-    ),
-    (
-        "┌",
-        "Box Drawing; drawn by the terminal itself in most; ambiguous",
-    ),
-    (
-        "┐",
-        "Box Drawing; drawn by the terminal itself in most; ambiguous",
-    ),
-    (
-        "└",
-        "Box Drawing; drawn by the terminal itself in most; ambiguous",
-    ),
-    (
-        "┘",
-        "Box Drawing; drawn by the terminal itself in most; ambiguous",
-    ),
-    (
-        "╭",
-        "Box Drawing; drawn by the terminal itself in most; ambiguous",
-    ),
-    (
-        "╮",
-        "Box Drawing; drawn by the terminal itself in most; ambiguous",
-    ),
-    (
-        "╰",
-        "Box Drawing; drawn by the terminal itself in most; ambiguous",
-    ),
-    (
-        "╯",
-        "Box Drawing; drawn by the terminal itself in most; ambiguous",
-    ),
-    (
-        "╔",
-        "Box Drawing; drawn by the terminal itself in most; ambiguous",
-    ),
-    (
-        "╗",
-        "Box Drawing; drawn by the terminal itself in most; ambiguous",
-    ),
-    (
-        "╚",
-        "Box Drawing; drawn by the terminal itself in most; ambiguous",
-    ),
-    (
-        "╝",
-        "Box Drawing; drawn by the terminal itself in most; ambiguous",
-    ),
-];
-
-/// Why `glyph` must not be drawn in a one-cell slot, if it can't be: it
-/// is wide, can take emoji presentation, or needs a joiner or variation
-/// selector to draw.
-pub fn glyph_risk(glyph: &str) -> Option<&'static str> {
-    if UnicodeWidthStr::width(glyph) != 1 || glyph.chars().count() != 1 {
-        return Some("not exactly one cell wide, or more than one character");
-    }
-    let cp = glyph.chars().next().map_or(0, |c| c as u32);
-    match cp {
-        0x200D | 0xFE00..=0xFE0F => Some("joiner or variation selector"),
-        0x1F000..=0x1FFFF => Some("emoji block"),
-        // Text-presentation characters that terminals commonly draw as
-        // color emoji, wide, when an emoji font is installed.
-        // The collapsed-tree arrow stays `▶` by operator preference.
-        0x25B6 => None,
-        _ if EMOJI_CAPABLE.contains(&cp) => Some("can take emoji presentation"),
-        _ => None,
-    }
-}
-
-/// Characters that have an emoji presentation and so may draw wide:
-/// a deny-list of the ones near the TUI's vocabulary.
-const EMOJI_CAPABLE: &[u32] = &[
-    0x25B6, 0x25C0, 0x25AA, 0x25AB, 0x25FB, 0x25FC, 0x25FD, 0x25FE, 0x2699, 0x26A0, 0x2714, 0x2716,
-    0x2764, 0x2611, 0x2B05, 0x2B06, 0x2B07, 0x2B1B, 0x2B1C, 0x2B50, 0x2B55, 0x231A, 0x231B, 0x23E9,
-    0x23EA, 0x23F0, 0x23F3, 0x2705, 0x274C, 0x2753, 0x2757, 0x26D3, 0x2139,
-];

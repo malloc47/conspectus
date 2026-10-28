@@ -432,7 +432,7 @@ fn mux_node(pane: &PaneHits) -> NodeId {
 /// How long ago a pane's scrollback was read.
 fn pane_age(pane: &PaneHits, now: Option<i64>) -> String {
     format_recency(now, Some(pane.captured_at))
-        .unwrap_or_else(|| crate::tui::icons::marks::NO_VALUE.to_string())
+        .unwrap_or_else(|| tuikit::glyphs::marks::NO_VALUE.to_string())
 }
 
 /// A pane's row: where a session row would be.
@@ -516,7 +516,7 @@ fn hit_rows(session_row: &Row, details: &[Hit], now: Option<i64>) -> Vec<Row> {
                 age: hit
                     .timestamp
                     .and_then(|time| format_recency(now, Some(time.timestamp())))
-                    .unwrap_or_else(|| crate::tui::icons::marks::NO_VALUE.to_string()),
+                    .unwrap_or_else(|| tuikit::glyphs::marks::NO_VALUE.to_string()),
                 snippet: hit.snippet.clone(),
                 highlight: hit.highlight.clone(),
             }),

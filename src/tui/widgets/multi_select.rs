@@ -283,8 +283,8 @@ impl<T: AsRef<str>> Widget for MultiSelectBody<'_, T> {
         // to the upstream widget so it doesn't re-stamp a second
         // one inside the inner area.
         let mut widget = CheeseMultiSelect::new("", &options)
-            .checked_indicator(crate::tui::icons::marks::OK)
-            .unchecked_indicator(crate::tui::icons::marks::BULLET);
+            .checked_indicator(tuikit::glyphs::marks::OK)
+            .unchecked_indicator(tuikit::glyphs::marks::BULLET);
         if let Some(theme) = self.theme {
             widget = widget.styles(cheese_styles_from_theme(theme));
         }

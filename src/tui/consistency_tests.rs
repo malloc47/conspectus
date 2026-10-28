@@ -89,6 +89,7 @@ mod fixtures;
 mod focus;
 mod forms;
 mod freshness;
+mod glyphs;
 mod help;
 mod keys;
 mod layout;

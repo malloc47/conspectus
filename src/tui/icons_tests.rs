@@ -60,7 +60,7 @@ fn default_glyphs_are_all_one_cell_wide() {
     // would silently break column budgets; catch it at build
     // time via this assertion.
     for kind in NodeKind::ALL {
-        let width = UnicodeWidthStr::width(kind.default_glyph());
+        let width = cell_width(kind.default_glyph());
         assert_eq!(
             width, 1,
             "default glyph for {kind:?} is {width} cells wide, expected 1"
@@ -219,11 +219,7 @@ fn from_node_id_covers_every_variant() {
 fn state_glyphs_are_one_cell_wide_and_all_different() {
     let mut seen = std::collections::BTreeSet::new();
     for glyph in state::ALL {
-        assert_eq!(
-            UnicodeWidthStr::width(glyph),
-            1,
-            "`{glyph}` must be one cell wide"
-        );
+        assert_eq!(cell_width(glyph), 1, "`{glyph}` must be one cell wide");
         assert!(seen.insert(glyph), "`{glyph}` is used for two states");
     }
 }
@@ -243,96 +239,72 @@ fn state_glyphs_do_not_reuse_a_node_kind_glyph_except_the_pin_marker() {
     }
 }
 
-fn vetted(glyph: &str) -> bool {
-    VETTED.iter().any(|(g, _)| *g == glyph)
+fn host_table() -> tuikit::glyphs::VettedGlyphs {
+    vetted_glyphs().expect("the host's glyph registrations are valid")
 }
 
 #[test]
 fn all_glyphs_are_vetted() {
+    let table = host_table();
     for glyph in all_glyphs() {
         assert!(
-            vetted(glyph),
-            "`{glyph}` is drawn by the left panel but is not in icons::VETTED: measure it with \
-             scripts/glyph-widths.py and record the result"
+            table.contains(glyph),
+            "`{glyph}` is drawn by the left panel but is not vetted: measure it with \
+             crates/tuikit/scripts/glyph-widths.py and register it in icons/vetted.rs"
         );
     }
 }
 
 #[test]
-fn vetted_glyphs_have_no_width_or_emoji_risk() {
+fn the_adapter_adds_its_glyphs_to_the_framework_table() {
+    let framework = tuikit::glyphs::VettedGlyphs::default();
+    let table = host_table();
+    assert!(table.len() > framework.len());
+    for (glyph, _) in framework.iter() {
+        assert!(table.contains(glyph), "`{glyph}` fell out of the table");
+    }
+    for kind in NodeKind::ALL {
+        assert!(
+            table.contains(kind.default_glyph()),
+            "{kind:?}'s glyph is not vetted"
+        );
+        if kind != NodeKind::Pin {
+            assert!(
+                framework.note(kind.default_glyph()).is_none(),
+                "{kind:?}'s glyph belongs to the host, not the framework"
+            );
+        }
+    }
+    for glyph in state::ALL {
+        assert!(table.contains(glyph), "state glyph `{glyph}` is not vetted");
+    }
+}
+
+#[test]
+fn every_host_entry_has_a_note_and_nothing_is_registered_twice() {
+    let table = host_table();
     let mut seen = std::collections::HashSet::new();
-    for (glyph, note) in VETTED {
-        assert!(seen.insert(*glyph), "`{glyph}` is listed twice in VETTED");
-        assert!(
-            !note.is_empty(),
-            "`{glyph}` needs a note saying how it was vetted"
-        );
-        if let Some(why) = glyph_risk(glyph) {
-            panic!("`{glyph}` is in VETTED but {why}");
-        }
+    for (glyph, note) in table.iter() {
+        assert!(seen.insert(glyph), "`{glyph}` is listed twice");
+        assert!(!note.trim().is_empty(), "`{glyph}` needs a note");
     }
 }
 
 #[test]
-fn risky_glyphs_are_rejected() {
-    for glyph in [
-        "◀",
-        "⚠",
-        "⚙",
-        "✔",
-        "😀",
-        "東",
-        "ab",
-        "\u{200D}",
-        "▶\u{FE0F}",
-    ] {
-        assert!(glyph_risk(glyph).is_some(), "`{glyph}` should be rejected");
-    }
-    for glyph in ["▼", "▶", "◉", "⊸", "?"] {
-        assert_eq!(glyph_risk(glyph), None, "`{glyph}` should be allowed");
-    }
+fn registering_the_host_glyphs_twice_is_refused() {
+    let mut table = host_table();
+    assert!(matches!(
+        register_glyphs(&mut table),
+        Err(tuikit::glyphs::RegisterError::Duplicate { .. })
+    ));
 }
 
-/// Every non-ASCII character the TUI sources draw, on a line that isn't a
-/// comment, must have been vetted. Test modules and snapshots are skipped.
 #[test]
-fn every_glyph_the_sources_draw_is_vetted() {
-    fn walk(dir: &std::path::Path, found: &mut Vec<(String, char)>) {
-        for entry in std::fs::read_dir(dir).unwrap().flatten() {
-            let path = entry.path();
-            let name = path.file_name().unwrap().to_string_lossy().into_owned();
-            if path.is_dir() {
-                if name == "tests" || name == "snapshots" || name.ends_with("_tests") {
-                    continue;
-                }
-                walk(&path, found);
-            } else if path.extension().is_some_and(|e| e == "rs") && !name.ends_with("_tests.rs") {
-                for line in std::fs::read_to_string(&path).unwrap().lines() {
-                    if line.trim_start().starts_with("//") {
-                        continue;
-                    }
-                    for ch in line.chars().filter(|c| !c.is_ascii()) {
-                        found.push((path.display().to_string(), ch));
-                    }
-                }
-            }
-        }
-    }
-    let mut found = Vec::new();
-    walk(
-        &std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src/tui"),
-        &mut found,
-    );
-    assert!(
-        !found.is_empty(),
-        "the scan found no glyphs, so it is broken"
-    );
-    for (file, ch) in found {
-        assert!(
-            vetted(&ch.to_string()),
-            "`{ch}` (U+{:04X}) is drawn in {file} but is not in icons::VETTED: run \
-             scripts/glyph-widths.py --source and record it",
-            ch as u32
-        );
-    }
+fn the_pin_marker_is_the_only_kind_glyph_that_is_also_a_state_glyph() {
+    // `register_glyphs` skips the pin kind because `state::PIN_RUNNING`
+    // registers its glyph; a second kind sharing a glyph would be a
+    // duplicate registration.
+    let mut table = tuikit::glyphs::VettedGlyphs::default();
+    register_glyphs(&mut table).expect("no kind shares a glyph but the pin");
+    assert_eq!(NodeKind::Pin.default_glyph(), state::PIN_RUNNING);
 }
