@@ -95,6 +95,9 @@ impl PathOmniboxState {
         }
     }
 
+    /// The value a form commits: trimmed, with a leading `~` or `~/`
+    /// expanded to the home directory. Validation already reads `~` that
+    /// way, and the commands the forms run take the path as given.
     pub fn expanded_value(&self) -> String {
         expand_home_prefix(self.value().trim())
     }
@@ -286,7 +289,9 @@ fn display_path(path: PathBuf, collapse_home: bool) -> String {
     }
 }
 
-fn expand_home_prefix(value: &str) -> String {
+/// `value` with a leading `~` or `~/` expanded to `$HOME`; anything
+/// else, and everything when `$HOME` is unset, is returned as is.
+pub fn expand_home_prefix(value: &str) -> String {
     expand_home_prefix_with(
         value,
         std::env::var_os("HOME").map(PathBuf::from).as_deref(),

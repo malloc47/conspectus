@@ -80,6 +80,15 @@ impl Control {
         }
     }
 
+    /// The value saving commits: trimmed, and with `~` expanded in a
+    /// path, which the commands that read the pin take as given.
+    fn committed(&self) -> String {
+        match self {
+            Self::Text(input) | Self::Harness(input) => input.value().trim().to_string(),
+            Self::Path(path) => path.expanded_value(),
+        }
+    }
+
     fn replace(&mut self, value: String) {
         match self {
             Self::Text(input) => *input = TextInputState::new(input.title().to_string(), value),
@@ -496,7 +505,7 @@ impl PinEditFormState {
             let Which::Field(field) = row.which else {
                 continue;
             };
-            let text = row.control.value().trim().to_string();
+            let text = row.control.committed();
             if row.cleared {
                 if row.overridden {
                     unset.push(field.to_string());

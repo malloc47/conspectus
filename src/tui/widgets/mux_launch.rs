@@ -195,10 +195,10 @@ impl MuxLaunchFormState {
         if !self.spec.launch_argv().value().trim().is_empty() {
             return None;
         }
-        let cwd = self.spec.cwd().value().trim();
+        let cwd = self.spec.cwd().expanded_value();
         let (argv, source) = defaults.default_argv(
             self.spec.harness().value().trim(),
-            (!cwd.is_empty()).then(|| std::path::Path::new(cwd)),
+            (!cwd.is_empty()).then(|| std::path::Path::new(&cwd)),
         )?;
         let command: Vec<String> = argv
             .iter()
@@ -221,7 +221,7 @@ impl MuxLaunchFormState {
         form::default_argv(
             self.defaults.as_ref(),
             self.spec.harness().value().trim(),
-            self.spec.cwd().value(),
+            &self.spec.cwd().expanded_value(),
         )
     }
 
@@ -318,7 +318,7 @@ impl MuxLaunchFormState {
                 "mux launch: tmux session `{name}` is already live; pick another name"
             ));
         }
-        let cwd = self.spec.cwd().value().trim().to_string();
+        let cwd = self.spec.cwd().expanded_value();
         if cwd.is_empty() {
             return Err("mux launch: cwd is required".to_string());
         }
@@ -333,7 +333,9 @@ impl MuxLaunchFormState {
             if branch.is_empty() {
                 return Err("mux launch: worktree branch is required".to_string());
             }
-            let repo = self.worktree_repo.value().trim().to_string();
+            let repo = crate::tui::widgets::path_omnibox::expand_home_prefix(
+                self.worktree_repo.value().trim(),
+            );
             if repo.is_empty() {
                 return Err("mux launch: worktree repo is required".to_string());
             }
@@ -398,7 +400,7 @@ impl Overlay for MuxLaunchFormState {
         match self.focus {
             MuxLaunchField::Harness => {
                 if let Some(delta) = option_delta {
-                    let cwd = self.spec.cwd().value().to_string();
+                    let cwd = self.spec.cwd().expanded_value();
                     let defaults = self.defaults.clone();
                     self.spec
                         .cycle_harness_keeping_argv(delta, HARNESS_LABEL, &|harness| {

@@ -102,7 +102,7 @@ impl NewMuxFormState {
             }
             NewMuxField::Cwd => {
                 let name = self.name.value().trim().to_string();
-                let cwd = self.cwd.value().trim().to_string();
+                let cwd = self.cwd.expanded_value();
                 if name.is_empty() {
                     self.focus = NewMuxField::Name;
                     return OverlayOutcome::Consumed;
