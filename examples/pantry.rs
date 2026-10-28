@@ -457,10 +457,7 @@ impl ThemeSample {
                 line
             }
             ThemeSample::Style(spec) => {
-                let mut style = Style::default().add_modifier(spec.modifier);
-                if let Some(color) = spec.color {
-                    style = style.fg(color);
-                }
+                let style = spec.into_style();
                 let mut line = Line::default();
                 line.spans.push(format!("  {key:<24}  ").into());
                 line.spans

@@ -34,7 +34,8 @@ be able to learn what the framework is, add a control, and find the rules that
 keep it independent from these pages.
 
 The crate is populated one module at a time as controls move in from the
-host. Today it holds the independence guards and this documentation set; the
+host. Today it holds the `theme` module (design tokens, named styles, and
+the style-spec grammar), the source guards, and this documentation set; the
 module map in the architecture guide says which modules have landed.
 
 ## Depending on it by path

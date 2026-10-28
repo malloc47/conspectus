@@ -48,7 +48,7 @@ each names its module path.
 
 | Module | Provides | Status |
 | --- | --- | --- |
-| `theme` | Generic role tokens (surface, accent, muted, inert, selection, warning, error, success, link, match highlight, badge); a registry of named styles for roles only the host knows; the style-spec grammar; applying overrides from a config table the host supplies | planned |
+| `theme` | Generic role tokens (accent and focus cue, muted, inert, selection, success, warning, error, info, link, match highlight, badge, recency scale, surface, input fields); a registry of named styles for roles only the host knows; alias keys; the style-spec grammar; applying overrides from a config table the host supplies. Page: [controls/theme.md](controls/theme.md) | landed |
 | `glyphs` | The vetted glyph table; shared marks (pointer, disclosure, ok, fail, back, ellipsis, no-value); cell-width checks | planned |
 | `text` | Cell-width measuring; end and middle truncation; padding; fitting spans; word and character wrapping; snippet fitting; match painting | planned |
 | `scroll` | Wrap-or-clamp cursor stepping; follow-cursor offsets; scroll windows; the scrollbar gutter; wrapped-row counts | planned |

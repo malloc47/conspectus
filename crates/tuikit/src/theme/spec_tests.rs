@@ -20,6 +20,7 @@ fn parse_color_accepts_named_ansi() {
     assert_eq!(parse_color("Bright_Green").unwrap(), Color::LightGreen);
     assert_eq!(parse_color("default").unwrap(), Color::Reset);
     assert_eq!(parse_color(" grey ").unwrap(), Color::DarkGray);
+    assert_eq!(parse_color("light_gray").unwrap(), Color::Gray);
 }
 
 #[test]
@@ -62,25 +63,82 @@ fn parse_modifier_rejects_unknown_token() {
 #[test]
 fn parse_style_spec_handles_color_plus_modifier() {
     let spec = parse_style_spec("green,bold").unwrap();
-    assert_eq!(spec.color, Some(Color::Green));
+    assert_eq!(spec.fg, Some(Color::Green));
     assert!(spec.modifier.contains(Modifier::BOLD));
 }
 
 #[test]
 fn parse_style_spec_handles_modifier_only() {
     let spec = parse_style_spec("dim").unwrap();
-    assert_eq!(spec.color, None);
+    assert_eq!(spec.fg, None);
     assert!(spec.modifier.contains(Modifier::DIM));
 }
 
 #[test]
 fn parse_style_spec_handles_color_only() {
     let spec = parse_style_spec("#ff8800").unwrap();
-    assert_eq!(spec.color, Some(Color::Rgb(0xff, 0x88, 0x00)));
+    assert_eq!(spec.fg, Some(Color::Rgb(0xff, 0x88, 0x00)));
     assert_eq!(spec.modifier, Modifier::empty());
 }
 
 #[test]
 fn parse_style_spec_rejects_a_modifier_it_does_not_know() {
     assert!(parse_style_spec("green,shiny").is_err());
+}
+
+#[test]
+fn style_spec_into_style_sets_the_background() {
+    let style = StyleSpec::on(Color::White, Color::DarkGray).into_style();
+    assert_eq!(style.fg, Some(Color::White));
+    assert_eq!(style.bg, Some(Color::DarkGray));
+}
+
+#[test]
+fn parse_style_spec_reads_a_foreground_on_a_background() {
+    let spec = parse_style_spec("white on dark_gray").unwrap();
+    assert_eq!(spec, StyleSpec::on(Color::White, Color::DarkGray));
+
+    let spec = parse_style_spec(" Black ON #ffffff , bold ").unwrap();
+    assert_eq!(spec.fg, Some(Color::Black));
+    assert_eq!(spec.bg, Some(Color::Rgb(0xff, 0xff, 0xff)));
+    assert_eq!(spec.modifier, Modifier::BOLD);
+}
+
+#[test]
+fn parse_style_spec_reads_a_background_alone() {
+    let spec = parse_style_spec("on blue,italic").unwrap();
+    assert_eq!(spec.fg, None);
+    assert_eq!(spec.bg, Some(Color::Blue));
+    assert_eq!(spec.modifier, Modifier::ITALIC);
+}
+
+#[test]
+fn parse_style_spec_rejects_a_broken_on_form() {
+    for raw in [
+        "white on",
+        "on",
+        "white on nothing",
+        "nothing on white",
+        "a on b on c",
+    ] {
+        assert!(parse_style_spec(raw).is_err(), "{raw}");
+    }
+}
+
+#[test]
+fn every_value_the_older_grammar_took_still_parses_the_same() {
+    for (raw, expected) in [
+        ("green", StyleSpec::fg(Color::Green)),
+        (
+            "green,bold",
+            StyleSpec::fg_mod(Color::Green, Modifier::BOLD),
+        ),
+        (
+            "dim,italic",
+            StyleSpec::modifier(Modifier::DIM.union(Modifier::ITALIC)),
+        ),
+        ("", StyleSpec::default()),
+    ] {
+        assert_eq!(parse_style_spec(raw).unwrap(), expected, "{raw}");
+    }
 }

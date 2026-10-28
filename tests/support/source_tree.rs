@@ -52,7 +52,8 @@
 //! * When a story moves files from `src` into `crates/tuikit/src`, raise
 //!   `FRAMEWORK_SRC` in the same change and lower `HOST_SRC` if the move
 //!   took the host under its minimum. The sum of the two should not shrink.
-//! * `FRAMEWORK_SRC` is 1 today because the crate holds only `lib.rs`.
+//! * `FRAMEWORK_SRC` asks for 4 of the 6 files the crate holds today:
+//!   `lib.rs` and the `theme` module with its sibling test files.
 //!   `FRAMEWORK_EXAMPLES` is 0 until the first example exists; raise it to 1
 //!   with that example.
 //! * A tree can name a single file (`src/tui/modal.rs`). Its minimum is 1,
@@ -101,10 +102,11 @@ pub const HOST_SRC: Tree = Tree::new("src", 300);
 pub const HOST_TESTS: Tree = Tree::new("tests", 30);
 /// The host's examples (1 file today).
 pub const HOST_EXAMPLES: Tree = Tree::new("examples", 1);
-/// The framework's `src` (1 file today). Raise this as code moves in.
-pub const FRAMEWORK_SRC: Tree = Tree::new("crates/tuikit/src", 1);
-/// The framework's integration tests (3 files today). The independence
-/// guard alone keeps the minimum of 1.
+/// The framework's `src` (6 files today). Raise this as code moves in.
+pub const FRAMEWORK_SRC: Tree = Tree::new("crates/tuikit/src", 4);
+/// The framework's integration tests (5 files today, one of them shared
+/// scan plumbing under `support/`). The independence guard alone keeps the
+/// minimum of 1.
 pub const FRAMEWORK_TESTS: Tree = Tree::new("crates/tuikit/tests", 1);
 /// The framework's examples (none today).
 pub const FRAMEWORK_EXAMPLES: Tree = Tree::new("crates/tuikit/examples", 0);

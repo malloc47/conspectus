@@ -8,6 +8,7 @@ protect.
 Contents:
 
 - [Independence guards](#independence-guards)
+- [The raw-style guard](#the-raw-style-guard)
 - [Repository-wide hygiene scans](#repository-wide-hygiene-scans)
 - [The documentation lint](#the-documentation-lint)
 - [Adding a control](#adding-a-control)
@@ -108,6 +109,27 @@ registry, or a host-supplied sink or source. If that truly cannot work:
    changed, so the reviewer sees it. An exception that no longer matches
    anything fails the scan, so the lists stay short and current.
 
+## The raw-style guard
+
+House rule 13 says every control styles from the theme its host passes in.
+`tests/raw_styles.rs` enforces the part a scan can see: non-test Rust source
+names no `Color::` value, no `Modifier::DIM`, and does not import ratatui's
+`Stylize` shorthands. Read a typed token (`theme.warning`), use `muted` for
+text that should recede, or look up a named style the host registered
+(`theme.style(name)`). Other modifiers (`BOLD`, `ITALIC`, `REVERSED`) are
+typographic and stay allowed.
+
+The guard shares its walk, its Rust sanitizer (comments, literals, and
+`#[cfg(test)]` items are blanked first), and its report format with the
+independence guards through `tests/support/source_scan.rs`, and like them it
+feeds itself leaking snippets from memory in its self-tests. The theme module
+is the reviewed exception: its token table holds the default palette and its
+grammar maps color names to colors. An exception is per file and per needle,
+lists its reason in the guard's `EXCEPTIONS`, and fails the scan once it
+matches nothing. A control that seems to need a raw color needs a token or a
+named style instead; add the token to the table in `src/theme.rs` and to the
+theme's page.
+
 ## Repository-wide hygiene scans
 
 The host repository runs source-scanning tests over every Rust tree it
@@ -179,8 +201,9 @@ Work through this list in order. Each step names the rule it applies.
 2. **Place it.** One file per module under `src/`, declared in `lib.rs` with
    module docs. Inline test modules stay under 100 lines.
 3. **Take the theme.** The constructor or render function takes `&Theme`. No
-   raw `Color::` values; domain roles are looked up in the named-style
-   registry (house rule 13).
+   raw `Color::` values and no raw `Modifier::DIM`; host roles are looked up
+   in the named-style registry (house rule 13, enforced by
+   [the raw-style guard](#the-raw-style-guard)).
 4. **Write its key table.** Define the control's keys as a key table, and
    generate its footer and help from that table. Never hand-write hints
    (house rule 8). Use the standard tables for menus, dialogs, pagers, text

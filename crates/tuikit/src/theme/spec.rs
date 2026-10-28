@@ -4,12 +4,14 @@
 //! The grammar is small on purpose, so a configuration file reads the same
 //! in every host:
 //!
-//! - a color is a named ANSI color (`red`, `bright_green`, `dark_gray`),
-//!   `default` or `reset` for the terminal's own color, `ansi256:N` for an
-//!   indexed color, or `#RRGGBB` for a true color;
+//! - a color is a named ANSI color (`red`, `bright_green`, `dark_gray`,
+//!   `light_gray`), `default` or `reset` for the terminal's own color,
+//!   `ansi256:N` for an indexed color, or `#RRGGBB` for a true color;
 //! - a modifier list is comma-joined names (`bold`, `dim,italic`);
-//! - a style spec is a color, a modifier list, or a color followed by
-//!   modifiers (`green,bold`).
+//! - a style spec is colors, a modifier list, or colors followed by
+//!   modifiers. Its colors are a foreground (`green`), a foreground on a
+//!   background (`white on dark_gray`), or a background alone
+//!   (`on dark_gray`): `black on white,bold`, `green,bold`, `dim`.
 //!
 //! Names are matched without regard to case, and whitespace around each
 //! token is ignored. Every parser returns the reason it rejected a value,
@@ -17,14 +19,16 @@
 
 use ratatui::style::{Color, Modifier, Style};
 
-/// A color and modifier pair, the value of a style token.
+/// Colors and modifiers together, the value of a style token.
 ///
-/// When `color` is `None` the text keeps the color it would otherwise have;
-/// when `modifier` is empty nothing is added.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+/// A color left `None` keeps the color the text would otherwise have; an
+/// empty `modifier` adds nothing.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct StyleSpec {
     /// The foreground color, if the spec sets one.
-    pub color: Option<Color>,
+    pub fg: Option<Color>,
+    /// The background color, if the spec sets one.
+    pub bg: Option<Color>,
     /// The modifiers the spec adds.
     pub modifier: Modifier,
 }
@@ -33,7 +37,8 @@ impl StyleSpec {
     /// A spec that sets only a foreground color.
     pub const fn fg(color: Color) -> Self {
         Self {
-            color: Some(color),
+            fg: Some(color),
+            bg: None,
             modifier: Modifier::empty(),
         }
     }
@@ -41,7 +46,8 @@ impl StyleSpec {
     /// A spec that adds only modifiers.
     pub const fn modifier(modifier: Modifier) -> Self {
         Self {
-            color: None,
+            fg: None,
+            bg: None,
             modifier,
         }
     }
@@ -49,16 +55,29 @@ impl StyleSpec {
     /// A spec that sets a foreground color and adds modifiers.
     pub const fn fg_mod(color: Color, modifier: Modifier) -> Self {
         Self {
-            color: Some(color),
+            fg: Some(color),
+            bg: None,
             modifier,
+        }
+    }
+
+    /// A spec that sets a foreground color on a background color.
+    pub const fn on(fg: Color, bg: Color) -> Self {
+        Self {
+            fg: Some(fg),
+            bg: Some(bg),
+            modifier: Modifier::empty(),
         }
     }
 
     /// The spec as a ratatui [`Style`], ready to draw a span with.
     pub fn into_style(self) -> Style {
         let mut style = Style::default();
-        if let Some(color) = self.color {
+        if let Some(color) = self.fg {
             style = style.fg(color);
+        }
+        if let Some(color) = self.bg {
+            style = style.bg(color);
         }
         if !self.modifier.is_empty() {
             style = style.add_modifier(self.modifier);
@@ -109,6 +128,7 @@ fn parse_named_color(lower: &str) -> Option<Color> {
         "cyan" => Color::Cyan,
         "white" => Color::White,
         "gray" | "grey" | "dark_gray" | "dark_grey" => Color::DarkGray,
+        "light_gray" | "light_grey" => Color::Gray,
         "bright_black" => Color::DarkGray,
         "bright_red" => Color::LightRed,
         "bright_green" => Color::LightGreen,
@@ -168,44 +188,66 @@ pub fn parse_modifier(raw: &str) -> Result<Modifier, String> {
     Ok(acc)
 }
 
-/// Parses a style spec: `"color"`, `"color,mod1,mod2"`, or `"mod1,mod2"`.
-/// The first comma-separated token may be a color or a modifier; every
-/// later token must be a modifier.
+/// Parses a style spec: colors, colors followed by modifiers, or modifiers
+/// alone, comma-joined. The first token may be colors (`fg`, `fg on bg`,
+/// or `on bg`) or a modifier; every later token must be a modifier.
 ///
 /// # Errors
 ///
-/// Returns the reason when a token is neither a color in first place nor
-/// a modifier.
+/// Returns the reason when the first token is neither colors nor a
+/// modifier, or a later token is not a modifier.
 pub fn parse_style_spec(raw: &str) -> Result<StyleSpec, String> {
     let trimmed = raw.trim();
     if trimmed.is_empty() {
-        return Ok(StyleSpec {
-            color: None,
-            modifier: Modifier::empty(),
-        });
+        return Ok(StyleSpec::default());
     }
     let mut parts = trimmed.split(',').map(str::trim);
     let first = parts.next().unwrap_or("");
     let rest: Vec<&str> = parts.collect();
 
-    // A first token that is not a color falls through to modifier-only
+    // A first token that is not colors falls through to modifier-only
     // parsing, so `"bold"` and `"dim,italic"` work without a color.
-    if let Ok(color) = parse_color(first) {
-        let modifier = if rest.is_empty() {
-            Modifier::empty()
-        } else {
-            parse_modifier(&rest.join(","))?
-        };
-        return Ok(StyleSpec {
-            color: Some(color),
-            modifier,
-        });
-    }
-    let modifier = parse_modifier(trimmed)?;
+    let colors = match parse_colors(first) {
+        Some(colors) => colors?,
+        None => {
+            return Ok(StyleSpec {
+                modifier: parse_modifier(trimmed)?,
+                ..StyleSpec::default()
+            });
+        }
+    };
+    let modifier = if rest.is_empty() {
+        Modifier::empty()
+    } else {
+        parse_modifier(&rest.join(","))?
+    };
     Ok(StyleSpec {
-        color: None,
+        fg: colors.0,
+        bg: colors.1,
         modifier,
     })
+}
+
+/// A foreground and a background, either of them optional.
+type Colors = (Option<Color>, Option<Color>);
+
+/// The foreground and background named by `token`: `fg`, `fg on bg`, or
+/// `on bg`. `None` when the token is not colors at all (it may be a
+/// modifier); `Some(Err)` when it uses `on` but a side names no color.
+fn parse_colors(token: &str) -> Option<Result<Colors, String>> {
+    let words: Vec<&str> = token.split_whitespace().collect();
+    let is_on = |word: &str| word.eq_ignore_ascii_case("on");
+    match words.as_slice() {
+        [fg] => parse_color(fg).ok().map(|fg| Ok((Some(fg), None))),
+        [on, bg] if is_on(on) => Some(parse_color(bg).map(|bg| (None, Some(bg)))),
+        [fg, on, bg] if is_on(on) => {
+            Some(parse_color(fg).and_then(|fg| parse_color(bg).map(|bg| (Some(fg), Some(bg)))))
+        }
+        _ if words.iter().any(|word| is_on(word)) => Some(Err(format!(
+            "`{token}`: expected `fg on bg`, `on bg`, or one color"
+        ))),
+        _ => None,
+    }
 }
 
 #[cfg(test)]
