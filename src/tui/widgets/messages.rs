@@ -23,7 +23,7 @@ use tuikit::glyphs::marks;
 
 use crate::tui::Theme;
 use crate::tui::messages::{LogEntry, LogLevel, MessageLog};
-use crate::tui::widgets::popup_frame::{ScrollFit, wrapped_lines};
+use crate::tui::widgets::popup_frame::ScrollFit;
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct MessagesOverlayState {
@@ -251,8 +251,8 @@ impl Widget for MessagesBody<'_, '_> {
             let lines: Vec<Line> = entry
                 .full_text()
                 .lines()
-                .flat_map(|line| wrapped_lines(line, 0, usize::from(detail_area.width)))
-                .map(Line::from)
+                .flat_map(|line| tuikit::text::wrap(line, usize::from(detail_area.width)))
+                .map(|row| Line::from(row.trim_end().to_string()))
                 .collect();
             let max_scroll = lines.len().saturating_sub(usize::from(detail_area.height));
             let scroll = usize::from(state.detail_scroll).min(max_scroll);

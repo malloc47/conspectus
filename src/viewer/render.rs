@@ -13,7 +13,7 @@
 
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
-use unicode_width::UnicodeWidthStr;
+use tuikit::text;
 
 use crate::viewer::model::{TranscriptTurn, TurnKind, TurnRole};
 use crate::viewer::state::ToolDetail;
@@ -308,7 +308,7 @@ fn build_body_lines<'a>(
                     crate::viewer::table::BodySegment::Markdown(src) => {
                         let text = tui_markdown::from_str(src);
                         for line in join_orphan_list_markers(text.lines) {
-                            wrap_styled_line(line, content_width, &mut out);
+                            out.extend(text::wrap_line(&line, usize::from(content_width), 0));
                         }
                     }
                     crate::viewer::table::BodySegment::Table(parsed) => {
@@ -460,29 +460,14 @@ fn line_with_styled_prefix(
     if let Some((prefix_end, _)) = detect_line_number_prefix(raw) {
         let prefix = &raw[..prefix_end];
         let rest = &raw[prefix_end..];
-        let prefix_w = UnicodeWidthStr::width(prefix) as u16;
-        // We word-wrap the body only, using the remaining width
-        // after the prefix on the first line. Wrapped continuation
-        // lines don't repeat the prefix (matches how grep / cat
-        // outputs read in a pager).
-        let first_budget = content_width.saturating_sub(prefix_w).max(1);
-        let pieces = word_wrap_with_budgets(rest, first_budget, content_width);
-        let mut out: Vec<Line<'static>> = Vec::with_capacity(pieces.len());
-        for (i, piece) in pieces.into_iter().enumerate() {
-            if i == 0 {
-                out.push(Line::from(vec![
-                    Span::styled(prefix.to_string(), prefix_style),
-                    Span::styled(piece, body_style),
-                ]));
-            } else {
-                let pad = Span::raw(" ".repeat(prefix_w as usize));
-                out.push(Line::from(vec![pad, Span::styled(piece, body_style)]));
-            }
-        }
-        if out.is_empty() {
-            out.push(Line::from(Span::styled(prefix.to_string(), prefix_style)));
-        }
-        out
+        // The body wraps after the prefix on the first row; continuation
+        // rows hang under the body instead of repeating the prefix
+        // (matches how grep / cat outputs read in a pager).
+        let line = Line::from(vec![
+            Span::styled(prefix.to_string(), prefix_style),
+            Span::styled(rest.to_string(), body_style),
+        ]);
+        text::wrap_line(&line, usize::from(content_width), text::width(prefix))
     } else {
         wrap_plain(raw, content_width, body_style)
     }
@@ -532,168 +517,16 @@ fn detect_line_number_prefix(raw: &str) -> Option<(usize, usize)> {
 }
 
 /// Wrap a plain-text body at `width` cells with one fixed style.
-/// Splits on existing newlines first, then word-wraps each chunk.
-/// Returns owned spans (`'static`) so callers can pass either
+/// Splits on existing newlines first, then word-wraps each line, so a
+/// body without text gives no lines and a blank line stays one blank
+/// row. Returns owned spans (`'static`) so callers can pass either
 /// borrowed input from the turn or a locally-built `String` (e.g.
 /// detabbed tool output) without lifetime contortions.
 fn wrap_plain(body: &str, width: u16, style: Style) -> Vec<Line<'static>> {
-    let mut out = Vec::new();
-    for raw in body.lines() {
-        for wrapped in word_wrap(raw, width) {
-            out.push(Line::from(Span::styled(wrapped, style)));
-        }
-    }
-    out
-}
-
-/// Wrap a single line of plain text at `width` cells, breaking at
-/// whitespace where possible. Convenience wrapper over
-/// [`word_wrap_with_budgets`] when first-line and subsequent-line
-/// budgets are the same.
-pub(crate) fn word_wrap(input: &str, width: u16) -> Vec<String> {
-    word_wrap_with_budgets(input, width, width)
-}
-
-/// Wrap with a distinct first-line cap. The first returned chunk
-/// fits in `first_budget` cells; subsequent chunks fit in `rest`.
-/// This is what keeps the styled wrapper from orphaning leading
-/// content (like a `1. ` list marker) onto its own line: the
-/// caller passes the remaining cells on the current line as
-/// `first_budget` so the wrap picks a body chunk that joins
-/// cleanly.
-fn word_wrap_with_budgets(input: &str, first_budget: u16, rest: u16) -> Vec<String> {
-    let first = first_budget.max(1) as usize;
-    let rest = rest.max(1) as usize;
-    if input.is_empty() {
-        return vec![String::new()];
-    }
-    let mut out: Vec<String> = Vec::new();
-    let mut current = String::new();
-    let mut current_width = 0usize;
-    let mut current_cap = first;
-
-    for word in input.split_inclusive(char::is_whitespace) {
-        let w = UnicodeWidthStr::width(word);
-        if w > current_cap {
-            // Word too long for the current line.
-            if !current.is_empty() {
-                out.push(std::mem::take(&mut current));
-                current_width = 0;
-            } else if out.is_empty() && first < rest {
-                // Nothing fits in the cells left on the caller's line.
-                // An empty first piece tells the caller to start the
-                // word on a fresh line instead of overflowing this one.
-                out.push(String::new());
-            }
-            // Whether or not we flushed, we're past the first piece
-            // now — switch to the full `rest` budget before deciding
-            // whether to hard-break. Skipping this swap was the bug
-            // behind `ccview`-style words getting broken into one
-            // character per line when they entered the slow path
-            // with a tiny `first_budget`.
-            current_cap = rest;
-            if w > current_cap {
-                // Word still too wide for normal lines; hard-break.
-                for piece in hard_break(word, current_cap) {
-                    out.push(piece);
-                }
-                continue;
-            }
-            current.push_str(word);
-            current_width = w;
-            continue;
-        }
-        if current_width + w > current_cap {
-            out.push(std::mem::take(&mut current));
-            current_width = 0;
-            current_cap = rest;
-        }
-        current.push_str(word);
-        current_width += w;
-    }
-    if !current.is_empty() {
-        out.push(current);
-    }
-    if out.is_empty() {
-        out.push(String::new());
-    }
-    out
-}
-
-/// Split a single string at `width` cells regardless of word
-/// boundaries. Used as the fallback for very long tokens.
-fn hard_break(input: &str, width: usize) -> Vec<String> {
-    let mut out = Vec::new();
-    let mut buf = String::new();
-    let mut buf_width = 0usize;
-    for ch in input.chars() {
-        let cw = UnicodeWidthStr::width(ch.to_string().as_str());
-        if buf_width + cw > width {
-            out.push(std::mem::take(&mut buf));
-            buf_width = 0;
-        }
-        buf.push(ch);
-        buf_width += cw;
-    }
-    if !buf.is_empty() {
-        out.push(buf);
-    }
-    out
-}
-
-/// Wrap a *styled* line at `width`. Each output span preserves its
-/// source span's style; breaks happen between spans when possible
-/// and inside long spans when not. Continuation lines own the same
-/// style chain as the source span chain.
-fn wrap_styled_line<'a>(line: Line<'a>, width: u16, out: &mut Vec<Line<'a>>) {
-    let width = width.max(1);
-    let mut current_spans: Vec<Span<'a>> = Vec::new();
-    let mut current_width: u16 = 0;
-    let max = width as usize;
-
-    for span in line.spans {
-        let span_width = UnicodeWidthStr::width(span.content.as_ref());
-        if span_width == 0 {
-            current_spans.push(span);
-            continue;
-        }
-        // Fast path: whole span fits.
-        if (current_width as usize) + span_width <= max {
-            current_width += span_width as u16;
-            current_spans.push(span);
-            continue;
-        }
-        // Slow path: split the span's content by word-wrap. The
-        // first chunk gets a budget equal to the remaining cells
-        // on the current line so leading content (a `1. ` list
-        // marker, an inline-code open, ...) doesn't orphan onto
-        // its own line. Subsequent chunks land on fresh lines.
-        let style = span.style;
-        let content = span.content;
-        let first_budget = width.saturating_sub(current_width);
-        let pieces = word_wrap_with_budgets(content.as_ref(), first_budget, width);
-        for (i, piece) in pieces.into_iter().enumerate() {
-            if i > 0 && (!current_spans.is_empty() || current_width > 0) {
-                out.push(Line::from(std::mem::take(&mut current_spans)));
-                current_width = 0;
-            }
-            if piece.is_empty() {
-                continue;
-            }
-            let piece_width = UnicodeWidthStr::width(piece.as_str()) as u16;
-            current_spans.push(Span::styled(piece, style));
-            current_width += piece_width;
-            if current_width >= width {
-                out.push(Line::from(std::mem::take(&mut current_spans)));
-                current_width = 0;
-            }
-        }
-    }
-    if !current_spans.is_empty() {
-        out.push(Line::from(current_spans));
-    } else if out.is_empty() {
-        out.push(Line::raw(""));
-    }
+    body.lines()
+        .flat_map(|raw| text::wrap(raw, usize::from(width)))
+        .map(|row| Line::from(Span::styled(row, style)))
+        .collect()
 }
 
 #[cfg(test)]

@@ -31,7 +31,7 @@ use ratatui::macros::{horizontal, span, vertical};
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span, Text};
 use ratatui::widgets::{
-    Block, Borders, Paragraph, Scrollbar, ScrollbarOrientation, ScrollbarState, Wrap,
+    Block, Borders, Paragraph, Scrollbar, ScrollbarOrientation, ScrollbarState,
 };
 use tuikit::glyphs::marks;
 use tuikit::text;
@@ -342,24 +342,32 @@ fn focus_marker_span(app: &App, panel: Focus) -> Span<'static> {
     span!(Style::default().fg(app.theme().panel_focus_accent); "{marker} ")
 }
 
-/// Sum of post-wrap terminal rows the given lines occupy when
-/// rendered into a paragraph `width` wide. Mirrors the per-line
-/// count used by the explorer header budget — used here to drive
-/// scrollbar `content_length` (ADR 0076).
-fn wrapped_line_count(lines: &[Line<'_>], width: u16) -> usize {
-    let pane_width = width.max(1) as usize;
+/// `lines` wrapped to `width` cells by `tuikit::text`'s rules. A
+/// surface that counts its rows (a scrollbar's length, a zone's height)
+/// draws these rows unwrapped, so the count is the count drawn.
+fn wrap_lines(lines: &[Line<'_>], width: u16) -> Vec<Line<'static>> {
+    let width = usize::from(width.max(1));
     lines
         .iter()
-        .map(|line| {
-            let line_width = line
-                .spans
-                .iter()
-                .map(|s| text::width(s.content.as_ref()))
-                .sum::<usize>()
-                .max(1);
-            line_width.div_ceil(pane_width).max(1)
-        })
-        .sum()
+        .flat_map(|line| text::wrap_line(line, width, 0))
+        .collect()
+}
+
+/// `text` wrapped to fit `area`, with the area to draw it in and, when
+/// the rows overflow, the scrollbar gutter carved from its right edge
+/// (the rows are wrapped again at the narrower width).
+fn wrap_into(text: &Text<'_>, area: Rect) -> (Text<'static>, Rect, Option<Rect>) {
+    let mut rows = wrap_lines(&text.lines, area.width);
+    let (content, scrollbar) = scrollbar_layout(area, rows.len());
+    if content.width != area.width {
+        rows = wrap_lines(&text.lines, content.width);
+    }
+    let wrapped = Text {
+        lines: rows,
+        style: text.style,
+        alignment: text.alignment,
+    };
+    (wrapped, content, scrollbar)
 }
 
 // -----------------------------------------------------------------------------

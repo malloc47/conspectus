@@ -50,11 +50,9 @@ pub(super) fn draw_detail_preview(app: &App, frame: &mut Frame<'_>, area: Rect) 
 pub(super) fn draw_preview_view(app: &App, view: PreviewView, frame: &mut Frame<'_>, area: Rect) {
     match view.window {
         None => {
-            let total_rows = wrapped_line_count(&view.text.lines, area.width);
-            let (content_area, scrollbar_area) = scrollbar_layout(area, total_rows);
-            let widget = Paragraph::new(view.text)
-                .wrap(Wrap { trim: false })
-                .scroll((app.preview_scroll(), 0));
+            let (text, content_area, scrollbar_area) = wrap_into(&view.text, area);
+            let total_rows = text.lines.len();
+            let widget = Paragraph::new(text).scroll((app.preview_scroll(), 0));
             frame.render_widget(widget, content_area);
             if let Some(sb_area) = scrollbar_area {
                 render_vertical_scrollbar(
@@ -70,8 +68,13 @@ pub(super) fn draw_preview_view(app: &App, view: PreviewView, frame: &mut Frame<
             // it stays put.
             let (content_area, scrollbar_area) =
                 scrollbar_layout(area, window.total.max(view.text.lines.len()));
+            let rows = wrap_lines(&view.text.lines, content_area.width);
             frame.render_widget(
-                Paragraph::new(view.text).wrap(Wrap { trim: false }),
+                Paragraph::new(Text {
+                    lines: rows,
+                    style: view.text.style,
+                    alignment: view.text.alignment,
+                }),
                 content_area,
             );
             if let Some(sb_area) = scrollbar_area {
@@ -97,7 +100,7 @@ pub(super) fn preview_view_for_selection(app: &App, width: u16, height: usize) -
             // The body gets the rows the banner leaves, so its newest
             // output stays on screen below the banner.
             let banner = failure_banner(entry, app.theme());
-            let banner_rows = wrapped_line_count(&banner.lines, width);
+            let banner_rows = wrap_lines(&banner.lines, width).len();
             let body_height = height.saturating_sub(banner_rows).max(1);
             selection_preview_body(app, width, body_height).below(banner)
         }

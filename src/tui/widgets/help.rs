@@ -17,9 +17,11 @@ use ratatui::widgets::{Paragraph, Scrollbar, ScrollbarOrientation, ScrollbarStat
 use ratatui_cheese::help::Binding;
 use tui_popup::KnownSize;
 use tuikit::glyphs::marks;
+use tuikit::text;
 
 use crate::tui::Theme;
 use crate::tui::icons::{NodeKind, node_kind_style};
+use crate::tui::keybindings::overlay::HINT_SEPARATOR;
 use crate::tui::widgets::popup_frame::ScrollFit;
 
 /// Pure state for the help overlay. Carries vertical scroll
@@ -192,9 +194,7 @@ fn footer_rows(width: usize) -> usize {
     }
     let footer =
         crate::tui::keybindings::overlay::footer(crate::tui::keybindings::overlay::HELP_KEYS);
-    crate::viewer::render::word_wrap(&footer, u16::try_from(width).unwrap_or(u16::MAX))
-        .len()
-        .max(1)
+    text::wrap_at(&footer, HINT_SEPARATOR, width).len()
 }
 
 fn page_layout(
@@ -573,8 +573,7 @@ pub(super) fn push_footer(lines: &mut Vec<Line<'static>>, theme: &Theme, width: 
         crate::tui::keybindings::overlay::footer(crate::tui::keybindings::overlay::HELP_KEYS);
     match width.filter(|w| *w > 8) {
         Some(w) => {
-            let budget = u16::try_from(w).unwrap_or(u16::MAX);
-            for chunk in crate::viewer::render::word_wrap(&footer, budget) {
+            for chunk in text::wrap_at(&footer, HINT_SEPARATOR, w) {
                 lines.push(line![span!(theme.muted; "{}", chunk.trim_end())]);
             }
         }
@@ -617,8 +616,7 @@ fn legend_entry(
         lines.push(Line::from(first));
         return;
     };
-    let budget = u16::try_from(width - lead_width).unwrap_or(u16::MAX);
-    let mut chunks = crate::viewer::render::word_wrap(blurb, budget).into_iter();
+    let mut chunks = text::wrap(blurb, width - lead_width).into_iter();
     first.push(ratatui::text::Span::raw(
         chunks.next().unwrap_or_default().trim_end().to_string(),
     ));
@@ -643,13 +641,11 @@ pub(super) fn binding_lines(
 ) -> Vec<Line<'static>> {
     // A key label wider than its column gets a line to itself, with the
     // description wrapped beneath on the hanging indent.
-    if unicode_width::UnicodeWidthStr::width(key) > KEY_COLUMN_WIDTH - 2 {
+    if text::width(key) > KEY_COLUMN_WIDTH - 2 {
         let key_line = line![span!(Style::default().fg(theme.accent); "  {key}")];
         let mut out = vec![key_line];
-        let budget = width.map_or(u16::MAX, |w| {
-            u16::try_from(w.saturating_sub(KEY_COLUMN_WIDTH)).unwrap_or(u16::MAX)
-        });
-        for chunk in crate::viewer::render::word_wrap(description, budget.max(8)) {
+        let budget = width.map_or(usize::MAX, |w| w.saturating_sub(KEY_COLUMN_WIDTH));
+        for chunk in text::wrap(description, budget.max(8)) {
             out.push(line![
                 " ".repeat(KEY_COLUMN_WIDTH),
                 chunk.trim_end().to_string()
@@ -661,8 +657,7 @@ pub(super) fn binding_lines(
     let Some(width) = width.filter(|w| *w > KEY_COLUMN_WIDTH + 8) else {
         return vec![line![key_span, description.to_string()]];
     };
-    let budget = u16::try_from(width - KEY_COLUMN_WIDTH).unwrap_or(u16::MAX);
-    let mut chunks = crate::viewer::render::word_wrap(description, budget).into_iter();
+    let mut chunks = text::wrap(description, width - KEY_COLUMN_WIDTH).into_iter();
     let first = chunks.next().unwrap_or_default();
     let mut out = vec![line![key_span, first.trim_end().to_string()]];
     for chunk in chunks {

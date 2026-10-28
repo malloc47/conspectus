@@ -29,7 +29,7 @@ use crate::tui::Msg;
 use crate::tui::modal::{Overlay, OverlayOutcome};
 use crate::tui::theme::Theme;
 use crate::tui::widgets::form::{
-    self, Cols, SplitBody, display_argv, note_row, options_row, wrap_footer,
+    self, Cols, SplitBody, display_argv, footer_lines, note_row, options_row,
 };
 use crate::tui::widgets::input::{InputOutcome, TextInputState};
 use crate::tui::widgets::launch_spec_form::parse_launch_argv;
@@ -676,9 +676,9 @@ impl Widget for PinEditFormWidget<'_> {
             state.kind.as_str()
         );
         top.extend(
-            form::wrap_words(&help, inner_width.saturating_sub(2))
+            tuikit::text::wrap(&help, inner_width.saturating_sub(2))
                 .into_iter()
-                .map(|text| Line::styled(format!("  {text}"), dim)),
+                .map(|text| Line::styled(format!("  {}", text.trim_end()), dim)),
         );
         top.push(line![""]);
 
@@ -745,7 +745,7 @@ impl Widget for PinEditFormWidget<'_> {
             ));
         }
         bottom.push(line![""]);
-        bottom.extend(wrap_footer(
+        bottom.extend(footer_lines(
             &crate::tui::keybindings::overlay::footer(
                 crate::tui::keybindings::overlay::PIN_EDIT_KEYS,
             ),

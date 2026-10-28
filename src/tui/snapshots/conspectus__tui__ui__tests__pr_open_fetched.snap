@@ -10,7 +10,6 @@ updated 0s ago · 0 sessions · 0 mux
 │    ⇄ #2 ◌     —  ⊗                                            ││  head          feature/1                                      │
 │    ⇄ #1 ◌     —  ○                                            ││  updated       —                                              │
 │                                                               ││  url           https://github.com/conspectus/project/pull/1   │
-│                                                               ││                                                               │
 │                                                               ││──────────────────────────────────────────────────── Preview ──│
 │                                                               ││Release notes for 0.3                                          │
 │                                                               ││open · review required                                         │
@@ -20,6 +19,7 @@ updated 0s ago · 0 sessions · 0 mux
 │                                                               ││reviews  none                                                  │
 │                                                               ││                                                               │
 │                                                               ││Adds the release summary.                                      │
+│                                                               ││                                                               │
 │                                                               ││                                                               │
 │                                                               ││                                                               │
 │                                                               ││                                                               │

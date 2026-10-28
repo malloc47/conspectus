@@ -790,8 +790,9 @@ impl Widget for ControlsOverlayWidget<'_> {
         let footer = crate::tui::keybindings::overlay::footer(
             crate::tui::keybindings::overlay::CONTROLS_KEYS,
         );
-        for chunk in crate::tui::widgets::popup_frame::wrapped_lines(&footer, 0, footer_width) {
-            lines.push(Line::from(span!(self.theme.muted; "{chunk}")));
+        let separator = crate::tui::keybindings::overlay::HINT_SEPARATOR;
+        for chunk in tuikit::text::wrap_at(&footer, separator, footer_width) {
+            lines.push(Line::from(span!(self.theme.muted; "{}", chunk.trim_end())));
         }
         let modal = centered_modal_rect_for_content(area, lines.len());
         let inner_height = modal.height.saturating_sub(2) as usize;

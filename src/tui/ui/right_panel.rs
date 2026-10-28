@@ -60,36 +60,27 @@ pub(super) fn draw_right_panel(app: &mut App, frame: &mut Frame<'_>, area: Rect)
         cursor_line = cursor_line.map(|index| index + hit_lines.len());
         lines.splice(0..0, hit_lines);
     }
-    // Account for Paragraph wrap: any logical line whose
-    // displayed width exceeds the pane width consumes extra
-    // terminal rows. Without the wrap-aware row count, the
-    // header sizing and the cursor-position math both
-    // misread how much vertical space each line consumes.
-    //
-    // The paragraph renders at `content_area.width = inner.width
-    // - 1` once `scrollbar_layout` reserves a gutter for the
-    // scrollbar (it does for any overflowing content). Compute
-    // wrap counts at that narrower width so a line that fits at
-    // the full inner width but spills at the content width —
-    // the `Related` chip divider is the canonical case, sized
-    // to fit "exactly" the pane — gets the row count the
-    // paragraph actually paints. When content fits in the
-    // viewport and the gutter isn't reserved, this overcounts
-    // by at most one row per long line; the worst case is a
-    // tiny bit of slack in `header_height`, which is harmless.
-    let pane_width = inner.width.saturating_sub(1).max(1) as usize;
-    let per_line_rows: Vec<usize> = lines
-        .iter()
-        .map(|line| {
-            let width = line
-                .spans
-                .iter()
-                .map(|s| text::width(s.content.as_ref()))
-                .sum::<usize>()
-                .max(1);
-            width.div_ceil(pane_width).max(1)
-        })
-        .collect();
+    // Wrap every logical line here and draw these rows as they are, so
+    // the header sizing and the cursor-position math count exactly the
+    // rows the paragraph paints. The rows wrap at the full width when
+    // they fit the zone, and at one column less when they overflow it,
+    // since `scrollbar_layout` then carves a gutter for the scrollbar.
+    let preview_floor = MIN_PREVIEW_HEIGHT.min(inner.height.saturating_sub(4));
+    let max_header_height = inner
+        .height
+        .saturating_sub(preview_floor.saturating_add(1))
+        .max(3);
+    let wrap_at = |width: u16| -> Vec<Vec<Line<'static>>> {
+        lines
+            .iter()
+            .map(|line| text::wrap_line(line, usize::from(width.max(1)), 0))
+            .collect()
+    };
+    let mut wrapped = wrap_at(inner.width);
+    if wrapped.iter().map(Vec::len).sum::<usize>() > usize::from(max_header_height) {
+        wrapped = wrap_at(inner.width.saturating_sub(1));
+    }
+    let per_line_rows: Vec<usize> = wrapped.iter().map(Vec::len).collect();
     let wrapped_rows: usize = per_line_rows.iter().sum();
     // Post-wrap row span of the cursor in `lines`. The first
     // row is the sum of wrap rows for everything above the
@@ -104,22 +95,8 @@ pub(super) fn draw_right_panel(app: &mut App, frame: &mut Frame<'_>, area: Rect)
         let height = per_line_rows.get(idx).copied().unwrap_or(1).max(1);
         (first, first + height - 1)
     });
-    let preview_floor = MIN_PREVIEW_HEIGHT.min(inner.height.saturating_sub(4));
-    let max_header_height = inner
-        .height
-        .saturating_sub(preview_floor.saturating_add(1))
-        .max(3);
-    // +1 safety margin: the per-line `div_ceil` count assumes
-    // the renderer packs each line tight to the right edge, but
-    // Paragraph wraps on word boundaries and a long unbroken
-    // token can push the actual row count one above the
-    // estimate. Without the slack the last explorer line
-    // (typically a single-link composite or the trailing Down-
-    // stream row) gets clipped when the Node zone carries a
-    // very long value.
     let header_height = u16::try_from(wrapped_rows)
         .unwrap_or(u16::MAX)
-        .saturating_add(1)
         .min(max_header_height)
         .max(3);
     let split = vertical![==header_height, ==1, >=0].split(inner);
@@ -137,10 +114,9 @@ pub(super) fn draw_right_panel(app: &mut App, frame: &mut Frame<'_>, area: Rect)
     });
     let scroll = app.explorer_scroll();
     let (explorer_content_area, explorer_scrollbar_area) = scrollbar_layout(split[0], wrapped_rows);
+    let rows: Vec<Line<'static>> = wrapped.into_iter().flatten().collect();
     frame.render_widget(
-        Paragraph::new(lines)
-            .wrap(Wrap { trim: false })
-            .scroll((scroll, 0)),
+        Paragraph::new(rows).scroll((scroll, 0)),
         explorer_content_area,
     );
     if let Some(area) = explorer_scrollbar_area {
@@ -860,7 +836,7 @@ pub(super) fn draw_explorer_preview(
     }
     let view = if let Some(source) = neighbor_source {
         lines.push(Line::raw(""));
-        let header_rows = wrapped_line_count(&lines, area.width);
+        let header_rows = wrap_lines(&lines, area.width).len();
         let body_height = (area.height as usize).saturating_sub(header_rows).max(1);
         source_view(app, &source, area.width, body_height).below(Text::from(lines))
     } else {

@@ -1080,7 +1080,11 @@ impl SearchBody<'_> {
     /// The key hints, wrapped to the modal and drawn on its last rows.
     /// Returns how many rows they took.
     fn render_footer(&self, area: Rect, buf: &mut Buffer, hints: &str) -> u16 {
-        let lines = crate::tui::widgets::popup_frame::wrapped_lines(hints, 0, area.width as usize);
+        let separator = crate::tui::keybindings::overlay::HINT_SEPARATOR;
+        let lines: Vec<String> = text::wrap_at(hints, separator, area.width as usize)
+            .into_iter()
+            .map(|row| row.trim_end().to_string())
+            .collect();
         let rows = lines
             .len()
             .min(4)

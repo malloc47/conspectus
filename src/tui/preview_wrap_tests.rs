@@ -93,10 +93,11 @@ fn smart_word_wraps_content_with_a_hanging_indent() {
             None,
             24
         ),
+        // `fox` ends exactly at the edge, so it stays on the first row.
         [
-            "  ⎿  the quick brown ",
-            "  fox jumps over the ",
-            "  lazy dog"
+            "  ⎿  the quick brown fox",
+            "  jumps over the lazy ",
+            "  dog"
         ]
     );
 }

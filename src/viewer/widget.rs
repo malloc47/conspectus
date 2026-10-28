@@ -28,7 +28,7 @@ use ratatui::Frame;
 use ratatui::layout::{Constraint, Layout, Rect};
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{Paragraph, Wrap};
+use ratatui::widgets::Paragraph;
 use tuikit::glyphs::marks;
 
 use crate::viewer::highlight::highlight_matches;
@@ -95,10 +95,7 @@ fn draw_header(document: &TranscriptDocument, theme: &Theme, frame: &mut Frame<'
     // the lowest-priority pieces (cwd first, then turn count) so
     // the title always survives. Cheap implementation: build a
     // single string, measure, and rebuild minimal if needed.
-    let total: usize = spans
-        .iter()
-        .map(|s| unicode_width::UnicodeWidthStr::width(s.content.as_ref()))
-        .sum();
+    let total = tuikit::text::spans_width(&spans);
     let cap = area.width as usize;
     let line = if total <= cap {
         Line::from(spans)
@@ -137,10 +134,8 @@ fn draw_body(state: &mut ViewerState, theme: &Theme, frame: &mut Frame<'_>, area
             "transcript unavailable",
             Style::new().add_modifier(theme.muted),
         ));
-        frame.render_widget(
-            Paragraph::new(vec![banner]).wrap(Wrap { trim: false }),
-            area,
-        );
+        let rows = tuikit::text::wrap_line(&banner, usize::from(area.width), 0);
+        frame.render_widget(Paragraph::new(rows), area);
         return;
     }
 
@@ -355,10 +350,7 @@ fn draw_footer(state: &ViewerState, theme: &Theme, frame: &mut Frame<'_>, area: 
     //   4. Drop that chip too. Those filters are rarely flipped, and the
     //      tools / think chips reflect ongoing state — those stay until
     //      close itself is at risk.
-    let total: usize = spans
-        .iter()
-        .map(|s| unicode_width::UnicodeWidthStr::width(s.content.as_ref()))
-        .sum();
+    let total = tuikit::text::spans_width(&spans);
     let cap = area.width as usize;
     let line = if total <= cap {
         Line::from(spans)
@@ -435,12 +427,7 @@ fn draw_footer(state: &ViewerState, theme: &Theme, frame: &mut Frame<'_>, area: 
                 .chain([single, close_span.clone()])
                 .collect(),
         );
-        let width = |spans: &[Span<'_>]| -> usize {
-            spans
-                .iter()
-                .map(|s| unicode_width::UnicodeWidthStr::width(s.content.as_ref()))
-                .sum()
-        };
+        let width = |spans: &[Span<'_>]| -> usize { tuikit::text::spans_width(spans) };
         let chosen = tiers
             .into_iter()
             .find(|tier| width(tier) <= cap)
@@ -492,7 +479,7 @@ pub(crate) fn draw_find_prompt(
     } else {
         format!("   {hint}")
     };
-    let hint_cells = unicode_width::UnicodeWidthStr::width(hint_text.as_str());
+    let hint_cells = tuikit::text::width(&hint_text);
     let width = area.width as usize;
     // Cells for the text and the cursor after the leading `/`.
     let room = width.saturating_sub(1 + hint_cells).max(4);

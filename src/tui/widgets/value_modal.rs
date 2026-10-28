@@ -30,7 +30,7 @@ use tui_popup::KnownSize;
 
 use crate::tui::Theme;
 use crate::tui::widgets::help::centered_modal_rect;
-use crate::tui::widgets::popup_frame::{ScrollFit, wrapped_lines};
+use crate::tui::widgets::popup_frame::ScrollFit;
 
 /// Pure state for the full-value modal.
 #[derive(Debug, Clone)]
@@ -159,9 +159,9 @@ impl ValueModalState {
                 } else {
                     Style::default()
                 };
-                wrapped_lines(line, 0, usize::from(width))
+                tuikit::text::wrap(line, usize::from(width))
                     .into_iter()
-                    .map(move |row| Line::styled(row, style))
+                    .map(move |row| Line::styled(row.trim_end().to_string(), style))
             })
             .collect()
     }

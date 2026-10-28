@@ -94,16 +94,6 @@ impl Widget for LinesBody {
     }
 }
 
-/// Wrap `text` into lines of at most `width` cells, each prefixed with
-/// `indent` spaces, so a modal's prose never runs past its frame.
-pub fn wrapped_lines(text: &str, indent: usize, width: usize) -> Vec<String> {
-    let budget = u16::try_from(width.saturating_sub(indent).max(1)).unwrap_or(u16::MAX);
-    crate::viewer::render::word_wrap(text, budget)
-        .into_iter()
-        .map(|chunk| format!("{}{}", " ".repeat(indent), chunk.trim_end()))
-        .collect()
-}
-
 /// What a scrolling modal body showed when it was drawn: the rows of text
 /// it had and how far that text can scroll. The draw path writes it back
 /// into the modal's state, so a page key moves by the rows the operator

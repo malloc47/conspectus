@@ -19,7 +19,7 @@ use ratatui::crossterm::event::KeyEvent;
 use ratatui::layout::Rect;
 use ratatui::style::{Modifier, Style};
 use ratatui::text::Line;
-use ratatui::widgets::{Block, Borders, Clear, Paragraph, Widget, Wrap};
+use ratatui::widgets::{Block, Borders, Clear, Paragraph, Widget};
 
 use std::path::Path;
 use tuikit::glyphs::marks;
@@ -550,6 +550,9 @@ impl Widget for WorktreeMenuWidget<'_> {
             return;
         }
 
+        // The key hints of a confirmation, wrapped apart from the body so
+        // they break only between hints.
+        let mut footer = None;
         let lines: Vec<Line> = match &self.state.mode {
             Mode::List => self
                 .state
@@ -590,9 +593,9 @@ impl Widget for WorktreeMenuWidget<'_> {
                     }
                     lines.push(Line::from(""));
                 }
-                lines.push(Line::from(crate::tui::keybindings::overlay::footer(
+                footer = Some(crate::tui::keybindings::overlay::footer(
                     crate::tui::keybindings::overlay::CONFIRM_KEYS,
-                )));
+                ));
                 lines
             }
             Mode::ConfirmMerge => {
@@ -616,9 +619,9 @@ impl Widget for WorktreeMenuWidget<'_> {
                     }
                     lines.push(Line::from(""));
                 }
-                lines.push(Line::from(crate::tui::keybindings::overlay::footer(
+                footer = Some(crate::tui::keybindings::overlay::footer(
                     crate::tui::keybindings::overlay::CONFIRM_KEYS,
-                )));
+                ));
                 lines
             }
             Mode::CloseDownChoice => {
@@ -647,12 +650,15 @@ impl Widget for WorktreeMenuWidget<'_> {
                     }
                     lines.push(Line::from(""));
                 }
-                lines.push(Line::from(crate::tui::keybindings::overlay::footer(
+                footer = Some(crate::tui::keybindings::overlay::footer(
                     crate::tui::keybindings::overlay::CLOSE_DOWN_KEYS,
-                )));
+                ));
                 lines
             }
             Mode::ConfirmPrune => {
+                footer = Some(crate::tui::keybindings::overlay::footer(
+                    crate::tui::keybindings::overlay::CONFIRM_KEYS,
+                ));
                 vec![
                     Line::styled(
                         "Prune merged worktrees?",
@@ -661,21 +667,34 @@ impl Widget for WorktreeMenuWidget<'_> {
                     Line::from("Removes every worktree already merged into the default"),
                     Line::from("branch (worktrunk skips ones younger than its min-age)."),
                     Line::from(""),
-                    Line::from(crate::tui::keybindings::overlay::footer(
-                        crate::tui::keybindings::overlay::CONFIRM_KEYS,
-                    )),
                 ]
             }
             Mode::BranchInput(_) => unreachable!("handled above"),
         };
 
+        // Wrapped to the frame's inner width, so the height counts the rows
+        // drawn and nothing is cut off at the bottom.
+        let width = 56.min(area.width);
+        let inner_width = usize::from(width.saturating_sub(2));
+        let mut rows: Vec<Line<'static>> = lines
+            .iter()
+            .flat_map(|line| tuikit::text::wrap_line(line, inner_width, 0))
+            .collect();
+        if let Some(footer) = footer {
+            let separator = crate::tui::keybindings::overlay::HINT_SEPARATOR;
+            rows.extend(
+                tuikit::text::wrap_at(&footer, separator, inner_width)
+                    .into_iter()
+                    .map(Line::from),
+            );
+        }
         // At least 5 rows, but never taller than the terminal.
-        let height = u16::try_from(lines.len())
+        let height = u16::try_from(rows.len())
             .unwrap_or(u16::MAX)
             .saturating_add(2)
             .max(5)
             .min(area.height);
-        let rect = popup_frame::centered_rect(area, 56.min(area.width), height);
+        let rect = popup_frame::centered_rect(area, width, height);
         Clear.render(rect, buf);
         let block = Block::default()
             .borders(Borders::ALL)
@@ -683,9 +702,7 @@ impl Widget for WorktreeMenuWidget<'_> {
             .border_style(Style::default().fg(self.theme.accent));
         let inner = block.inner(rect);
         block.render(rect, buf);
-        Paragraph::new(lines)
-            .wrap(Wrap { trim: false })
-            .render(inner, buf);
+        Paragraph::new(rows).render(inner, buf);
     }
 }
 

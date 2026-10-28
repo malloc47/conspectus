@@ -52,8 +52,12 @@ pub fn resolve<A: Copy>(rows: &[KeyRow<A>], event: KeyEvent) -> Option<A> {
     })
 }
 
+/// What joins the segments of a footer hint. A footer too wide for its
+/// row wraps only here, so a key stays beside its verb.
+pub const HINT_SEPARATOR: &str = " · ";
+
 /// The footer hint for `rows`: one segment per verb or note, in the
-/// order each first appears, joined with ` · `.
+/// order each first appears, joined with [`HINT_SEPARATOR`].
 pub fn footer<A>(rows: &[KeyRow<A>]) -> String {
     enum Segment {
         Keys {
@@ -94,7 +98,7 @@ pub fn footer<A>(rows: &[KeyRow<A>]) -> String {
             Segment::Note(text) => (*text).to_string(),
         })
         .collect::<Vec<_>>()
-        .join(" · ")
+        .join(HINT_SEPARATOR)
 }
 
 /// Rows whose footer label does not name the key they bind, as

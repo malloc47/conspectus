@@ -35,8 +35,8 @@ use crate::tui::Msg;
 use crate::tui::modal::{Overlay, OverlayOutcome};
 use crate::tui::theme::Theme;
 use crate::tui::widgets::form::{
-    self, ScrollLinesBody, choice_row, derived_row, harness_row, input_row, options_row, path_row,
-    scroll_offset_for_cursor, static_value_row, wrap_footer,
+    self, ScrollLinesBody, choice_row, derived_row, footer_lines, harness_row, input_row,
+    options_row, path_row, scroll_offset_for_cursor, static_value_row,
 };
 use crate::tui::widgets::input::{InputOutcome, TextInputState};
 use crate::tui::widgets::launch_spec_form::{
@@ -514,7 +514,7 @@ impl Widget for MuxLaunchFormWidget<'_> {
         let modal_width = 76;
         let inner_width =
             usize::from(std::cmp::min(modal_width, area.width.saturating_sub(4)).max(44)) - 2;
-        let footer = wrap_footer(
+        let footer = footer_lines(
             &crate::tui::keybindings::overlay::footer(
                 crate::tui::keybindings::overlay::MUX_LAUNCH_KEYS,
             ),

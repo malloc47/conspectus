@@ -7,6 +7,7 @@
 
 use ratatui::style::Style;
 use ratatui::text::{Line, Span};
+use tuikit::text;
 use unicode_width::UnicodeWidthChar;
 
 use super::PreviewWrap;
@@ -68,44 +69,54 @@ pub fn layout_capture(
     let mut rows = Vec::new();
     for line in cells {
         match mode {
-            PreviewWrap::Plain => rows.extend(word_wrap(line, width, 0)),
+            PreviewWrap::Plain => rows.extend(text::wrap_line(&cells_line(line), width, 0)),
             PreviewWrap::Smart => rows.extend(smart_rows(line, width)),
             PreviewWrap::None => {
+                let line = cells_line(line);
                 let tmux_rows = match pane_width.map(usize::from) {
-                    Some(pane_width) if pane_width > 0 => hard_wrap(line, pane_width),
+                    Some(pane_width) if pane_width > 0 => text::wrap_line_chars(&line, pane_width),
                     _ => vec![line],
                 };
-                rows.extend(tmux_rows.into_iter().map(|row| truncate(row, width)));
+                rows.extend(tmux_rows.iter().map(|row| clip_line(row, width)));
             }
         }
     }
-    rows.into_iter().map(cells_line).collect()
+    rows
+}
+
+/// `line` cut to `width` cells with no mark, as a terminal clips a row:
+/// the first row of a character wrap.
+fn clip_line(line: &Line<'_>, width: usize) -> Line<'static> {
+    text::wrap_line_chars(line, width)
+        .into_iter()
+        .next()
+        .unwrap_or_default()
 }
 
 /// Smart wrap for one line: drop trailing padding, truncate when only
 /// decoration would spill past the edge, squeeze interior padding when
 /// that makes the line fit, and otherwise word-wrap with a hanging
 /// indent.
-fn smart_rows(mut line: Vec<Cell>, width: usize) -> Vec<Vec<Cell>> {
+fn smart_rows(mut line: Vec<Cell>, width: usize) -> Vec<Line<'static>> {
     while line.last().is_some_and(Cell::is_blank) {
         line.pop();
     }
     if line_width(&line) <= width {
-        return vec![line];
+        return vec![cells_line(line)];
     }
-    let (_, overflow) = split_at_width(&line, width);
+    let (kept, overflow) = split_at_width(&line, width);
     if overflow
         .iter()
         .all(|cell| cell.is_blank() || cell.is_decoration())
     {
-        let mut kept = truncate(line, width);
+        let mut kept = kept.to_vec();
         while kept.last().is_some_and(Cell::is_blank) {
             kept.pop();
         }
-        return vec![kept];
+        return vec![cells_line(kept)];
     }
     if let Some(squeezed) = squeeze_padding(&line, width) {
-        return vec![squeezed];
+        return vec![cells_line(squeezed)];
     }
     let indent = line
         .iter()
@@ -113,7 +124,7 @@ fn smart_rows(mut line: Vec<Cell>, width: usize) -> Vec<Vec<Cell>> {
         .map(|cell| cell.width)
         .sum::<usize>();
     let hanging = if indent * 2 < width { indent } else { 0 };
-    word_wrap(line, width, hanging)
+    text::wrap_line(&cells_line(line), width, hanging)
 }
 
 /// Shrink interior runs of two or more spaces (never the leading
@@ -160,58 +171,6 @@ fn squeeze_padding(line: &[Cell], width: usize) -> Option<Vec<Cell>> {
     Some(out)
 }
 
-/// Wrap at `width`, breaking after the last space that fits when there
-/// is one. Continuation rows start with `hanging` spaces of indent.
-fn word_wrap(line: Vec<Cell>, width: usize, hanging: usize) -> Vec<Vec<Cell>> {
-    let mut rows = Vec::new();
-    let mut rest = line;
-    let mut first = true;
-    loop {
-        let prefix = if first { 0 } else { hanging };
-        let room = width.saturating_sub(prefix).max(1);
-        if line_width(&rest) <= room {
-            rows.push(with_indent(rest, prefix));
-            return rows;
-        }
-        let (head, _) = split_at_width(&rest, room);
-        let fit = head.len().max(1);
-        let break_at = rest[..fit]
-            .iter()
-            .rposition(Cell::is_blank)
-            .filter(|&space| rest[..space].iter().any(|cell| !cell.is_blank()))
-            .map_or(fit, |space| space + 1);
-        let tail = rest.split_off(break_at);
-        rows.push(with_indent(rest, prefix));
-        // The break consumed the space it happened at; any more would
-        // only indent the continuation row by accident.
-        rest = tail.into_iter().skip_while(Cell::is_blank).collect();
-        first = false;
-        if rest.is_empty() {
-            return rows;
-        }
-    }
-}
-
-/// Split into rows of exactly `width` cells, as a terminal wraps.
-fn hard_wrap(line: Vec<Cell>, width: usize) -> Vec<Vec<Cell>> {
-    let mut rows = Vec::new();
-    let mut rest = line;
-    while line_width(&rest) > width {
-        let (head, _) = split_at_width(&rest, width);
-        let tail = rest.split_off(head.len().max(1));
-        rows.push(rest);
-        rest = tail;
-    }
-    rows.push(rest);
-    rows
-}
-
-fn truncate(mut line: Vec<Cell>, width: usize) -> Vec<Cell> {
-    let fit = split_at_width(&line, width).0.len();
-    line.truncate(fit);
-    line
-}
-
 /// The longest prefix that fits in `width` cells, and the rest.
 fn split_at_width(line: &[Cell], width: usize) -> (&[Cell], &[Cell]) {
     let mut used = 0;
@@ -222,15 +181,6 @@ fn split_at_width(line: &[Cell], width: usize) -> (&[Cell], &[Cell]) {
         used += cell.width;
     }
     (line, &[])
-}
-
-fn with_indent(mut row: Vec<Cell>, indent: usize) -> Vec<Cell> {
-    if indent > 0 {
-        let mut indented = vec![Cell::space(Style::default()); indent];
-        indented.append(&mut row);
-        row = indented;
-    }
-    row
 }
 
 fn line_width(line: &[Cell]) -> usize {

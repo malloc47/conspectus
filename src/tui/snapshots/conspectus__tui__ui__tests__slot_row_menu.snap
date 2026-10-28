@@ -15,9 +15,9 @@ updated 0s ago · 1 sessions · 1 mux
 │             │  Retarget…                                                           │             │
 │             │     point it at another entity of the same kind                      │  Related ── │
 │             │  Refresh snapshot                                                    │spectus-main │
-│             │     copy the entity's current recipe into the pin                    │             │
+│             │     copy the entity's current recipe into the pin                    │── Preview ──│
 │             │  Reveal in its view                                                  │             │
-│             │     jump to the entity in Sessions, Mux, PRs, or History             │── Preview ──│
+│             │     jump to the entity in Sessions, Mux, PRs, or History             │             │
 │             │  Unpin conspectus-main                                               │             │
 │             │     remove the pin; the entity and its history stay                  │             │
 │             │                                                                      │             │

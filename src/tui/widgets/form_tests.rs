@@ -146,7 +146,7 @@ fn launch_options_show_checked_when_the_argv_carries_the_flags() {
 fn the_footer_wraps_at_separators_without_breaking_a_hint() {
     let footer =
         "↑/↓ move · Tab complete/next · S-Tab back · ←/→/Space option · Enter launch · Esc cancel";
-    let lines = wrap_footer(footer, 40, &theme());
+    let lines = footer_lines(footer, 40, &theme());
     assert!(lines.len() >= 2);
     for line in &lines {
         assert!(text(line).chars().count() <= 40, "{}", text(line));
@@ -252,7 +252,7 @@ fn chips_notes_footers_and_warnings_follow_the_theme() {
         style_of(&note.spans, "a note"),
         Style::default().add_modifier(Modifier::ITALIC)
     );
-    let footer = wrap_footer("Enter save · Esc cancel", 40, &theme);
+    let footer = footer_lines("Enter save · Esc cancel", 40, &theme);
     assert_eq!(
         footer[0].style,
         Style::default().add_modifier(Modifier::ITALIC)

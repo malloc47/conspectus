@@ -25,7 +25,7 @@ use crate::tui::Msg;
 use crate::tui::modal::{Overlay, OverlayOutcome};
 use crate::tui::theme::Theme;
 use crate::tui::widgets::form::{
-    self, ScrollLinesBody, input_row, path_row, scroll_offset_for_cursor, wrap_footer,
+    self, ScrollLinesBody, footer_lines, input_row, path_row, scroll_offset_for_cursor,
 };
 use crate::tui::widgets::input::{InputOutcome, TextInputState};
 use crate::tui::widgets::path_omnibox::{PathCandidate, PathOmniboxOutcome, PathOmniboxState};
@@ -188,7 +188,7 @@ impl Widget for NewMuxFormWidget<'_> {
             path_row("cwd", &self.state.cwd, cwd_focused, cols, self.theme),
             line![""],
         ];
-        lines.extend(wrap_footer(
+        lines.extend(footer_lines(
             &crate::tui::keybindings::overlay::footer(
                 crate::tui::keybindings::overlay::NEW_MUX_KEYS,
             ),

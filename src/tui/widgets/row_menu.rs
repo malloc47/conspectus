@@ -16,6 +16,7 @@ use ratatui::widgets::{Block, Borders, Clear, Paragraph, Widget};
 use tuikit::glyphs::marks;
 
 use crate::tui::Msg;
+use crate::tui::keybindings::overlay::HINT_SEPARATOR;
 use crate::tui::modal::{Overlay, OverlayOutcome};
 use crate::tui::theme::Theme;
 use crate::tui::widgets::popup_frame;
@@ -160,8 +161,8 @@ impl Widget for RowMenuWidget<'_> {
                 tuikit::text::truncate_end(&label, inner_width),
                 style,
             ));
-            for chunk in popup_frame::wrapped_lines(&entry.subtitle, 5, inner_width) {
-                lines.push(Line::from(chunk));
+            for chunk in tuikit::text::wrap(&entry.subtitle, inner_width.saturating_sub(5)) {
+                lines.push(Line::from(format!("     {}", chunk.trim_end())));
             }
             if focused {
                 cursor_rows = first_row..lines.len();
@@ -170,8 +171,8 @@ impl Widget for RowMenuWidget<'_> {
         let mut footer: Vec<Line> = vec![Line::from("")];
         let hint =
             crate::tui::keybindings::overlay::footer(crate::tui::keybindings::overlay::MENU_KEYS);
-        for chunk in popup_frame::wrapped_lines(&hint, 0, inner_width) {
-            footer.push(Line::from(chunk));
+        for chunk in tuikit::text::wrap_at(&hint, HINT_SEPARATOR, inner_width) {
+            footer.push(Line::from(chunk.trim_end().to_string()));
         }
 
         // At least 8 rows, but never taller than the terminal.

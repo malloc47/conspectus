@@ -411,11 +411,26 @@ fn moving_the_selection_in_a_modal_moves_no_text() {
     }
 }
 
-/// The text of each row inside the modal's frame, frame excluded.
+/// The text of each row inside the modal's frame, frame excluded. A
+/// scrollbar cell in the last column reads as a space, so a word that
+/// fills the last text column is not glued to the bar.
 fn inner_rows(buf: &Buffer, rect: (u16, u16, u16, u16)) -> Vec<String> {
     let (x0, y0, x1, y1) = rect;
+    let bar = ratatui::symbols::scrollbar::DOUBLE_VERTICAL;
+    let parts = [bar.begin, bar.end, bar.thumb, bar.track];
     ((y0 + 1)..y1)
-        .map(|y| ((x0 + 1)..x1).map(|x| symbol(buf, x, y)).collect())
+        .map(|y| {
+            ((x0 + 1)..x1)
+                .map(|x| {
+                    let cell = symbol(buf, x, y);
+                    if x + 1 == x1 && parts.contains(&cell) {
+                        " "
+                    } else {
+                        cell
+                    }
+                })
+                .collect()
+        })
         .collect()
 }
 

@@ -17,19 +17,17 @@ pub(super) fn draw_left_panel(app: &mut App, frame: &mut Frame<'_>, area: Rect) 
     // `pin migrate` on the last line of the pane.
     let inner = match pinned_banner(app) {
         Some(banner) if inner.height > 4 => {
-            let wrapped = u16::try_from(
-                text::width(banner.as_str()).div_ceil(usize::from(inner.width).max(1)),
-            )
-            .unwrap_or(u16::MAX)
-            .clamp(1, 3);
+            let rows: Vec<Line<'static>> = text::wrap(&banner, usize::from(inner.width))
+                .into_iter()
+                .map(|row| Line::from(row.trim_end().to_string()))
+                .collect();
+            let wrapped = u16::try_from(rows.len()).unwrap_or(u16::MAX).clamp(1, 3);
             let banner_area = Rect {
                 y: inner.y + inner.height - wrapped,
                 height: wrapped,
                 ..inner
             };
-            let widget = Paragraph::new(banner)
-                .wrap(Wrap { trim: true })
-                .style(Style::default().fg(app.theme().warning));
+            let widget = Paragraph::new(rows).style(Style::default().fg(app.theme().warning));
             frame.render_widget(widget, banner_area);
             Rect {
                 height: inner.height - wrapped,
@@ -56,10 +54,13 @@ pub(super) fn draw_left_panel(app: &mut App, frame: &mut Frame<'_>, area: Rect) 
 
     let visible = app.visible_rows();
     if visible.is_empty() {
-        let placeholder = empty_left_panel_text(app);
-        let widget = Paragraph::new(placeholder)
-            .wrap(Wrap { trim: false })
-            .style(Style::default().add_modifier(app.theme().muted));
+        let placeholder: Vec<Line<'static>> =
+            text::wrap(&empty_left_panel_text(app), usize::from(inner.width))
+                .into_iter()
+                .map(Line::from)
+                .collect();
+        let widget =
+            Paragraph::new(placeholder).style(Style::default().add_modifier(app.theme().muted));
         frame.render_widget(widget, inner);
         return;
     }

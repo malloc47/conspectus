@@ -563,27 +563,18 @@ pub fn warning_row(label: &str, value: &str, cols: Cols, theme: &Theme) -> Line<
     ])
 }
 
-/// Wrap a key hint footer to `width` cells, breaking at the ` · `
-/// separators, muted.
-pub fn wrap_footer(footer: &str, width: usize, theme: &Theme) -> Vec<Line<'static>> {
+/// A key hint footer as muted lines that fit `width` cells, wrapped only
+/// between hints so a key stays beside its verb.
+pub fn footer_lines(footer: &str, width: usize, theme: &Theme) -> Vec<Line<'static>> {
     let dim = Style::default().add_modifier(theme.muted);
-    let mut lines = Vec::new();
-    let mut current = String::new();
-    for segment in footer.split(" · ") {
-        let extra = if current.is_empty() { 0 } else { 3 };
-        if !current.is_empty() && current.chars().count() + extra + segment.chars().count() > width
-        {
-            lines.push(Line::styled(std::mem::take(&mut current), dim));
-        }
-        if !current.is_empty() {
-            current.push_str(" · ");
-        }
-        current.push_str(segment);
-    }
-    if !current.is_empty() {
-        lines.push(Line::styled(current, dim));
-    }
-    lines
+    text::wrap_at(
+        footer,
+        crate::tui::keybindings::overlay::HINT_SEPARATOR,
+        width,
+    )
+    .into_iter()
+    .map(|row| Line::styled(row, dim))
+    .collect()
 }
 
 /// The argv an empty argv field means for `harness`: a launch profile or
@@ -616,27 +607,6 @@ pub fn checkbox(label: &str, selected: bool) -> String {
     } else {
         format!("[ ] {label}")
     }
-}
-
-/// `text` broken at spaces into lines of at most `width` cells.
-pub fn wrap_words(text: &str, width: usize) -> Vec<String> {
-    let width = width.max(1);
-    let mut lines = Vec::new();
-    let mut current = String::new();
-    for word in text.split_whitespace() {
-        let needed = usize::from(!current.is_empty()) + word.chars().count();
-        if !current.is_empty() && current.chars().count() + needed > width {
-            lines.push(std::mem::take(&mut current));
-        }
-        if !current.is_empty() {
-            current.push(' ');
-        }
-        current.push_str(word);
-    }
-    if !current.is_empty() {
-        lines.push(current);
-    }
-    lines
 }
 
 /// An argv shown the way a shell would take it back.

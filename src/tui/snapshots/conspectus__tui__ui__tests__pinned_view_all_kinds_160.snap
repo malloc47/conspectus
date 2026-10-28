@@ -15,9 +15,9 @@ updated 0s ago · 1 sessions · 1 mux
 │  ◇ ◎ worktree-gone     removed      2d              conspectus · feature/old ││  argv          codex                                                         │
 │  ◇ ◎ worktree-planned  planned       —                                       ││───────────────────────────────────────────────────── 1 validated  Related ── │
 │  ◆ ◉ repo-live         live          —              ~/src/conspectus/.git    ││  targets                ▣ tmux:main                                          │
-│  ◆ ◎ repo-gone         removed     10d              ~/src/lost/.git          ││                                                                              │
-│  ⇄ ◉ pr-open           open          —              malloc47/conspectus · Ch…││─────────────────────────────────────────────────────────────────── Preview ──│
-│  ⇄ ◉ pr-draft          draft         —              malloc47/conspectus · Ch…││loading mux preview…                                                          │
+│  ◆ ◎ repo-gone         removed     10d              ~/src/lost/.git          ││─────────────────────────────────────────────────────────────────── Preview ──│
+│  ⇄ ◉ pr-open           open          —              malloc47/conspectus · Ch…││loading mux preview…                                                          │
+│  ⇄ ◉ pr-draft          draft         —              malloc47/conspectus · Ch…││                                                                              │
 │  ⇄ ◉ pr-closed         closed        —              malloc47/conspectus · Ch…││                                                                              │
 │  ⌥ ◉ branch-live       live          —              conspectus · main        ││                                                                              │
 │  ⌥ ◎ branch-missing    missing       —                                       ││                                                                              │
