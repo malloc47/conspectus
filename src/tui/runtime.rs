@@ -61,6 +61,10 @@ pub(super) use overlay_keys::{
     handle_controls_overlay_key, handle_help_overlay_key, handle_messages_overlay_key,
     handle_pane_viewer_key, handle_search_overlay_key_with, handle_viewer_overlay_key,
 };
+#[cfg(feature = "snapshot")]
+pub(super) use overlay_keys::{
+    handle_mux_launch_form_key, handle_new_mux_form_key, handle_pin_edit_form_key,
+};
 
 /// What a background discovery worker sends back. `warning` carries a
 /// problem the worker worked around, such as a failed daemon nudge

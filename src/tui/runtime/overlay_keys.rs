@@ -130,7 +130,7 @@ pub(super) fn handle_worktree_menu_key(
     }
 }
 
-pub(super) fn handle_new_mux_form_key(
+pub(in crate::tui) fn handle_new_mux_form_key(
     app: &mut App,
     key: ratatui::crossterm::event::KeyEvent,
     send: &mut dyn FnMut(&mut App, Msg),
@@ -263,7 +263,7 @@ pub(super) fn handle_picker_key(
 }
 
 /// Forward a key to the mux-launch form (ADR 0096).
-pub(super) fn handle_mux_launch_form_key(
+pub(in crate::tui) fn handle_mux_launch_form_key(
     app: &mut App,
     key: ratatui::crossterm::event::KeyEvent,
     send: &mut dyn FnMut(&mut App, Msg),
@@ -595,7 +595,7 @@ pub(in crate::tui) fn handle_viewer_overlay_key(
     dispatch(app, Msg::Viewer(vmsg));
 }
 
-pub(super) fn handle_pin_edit_form_key(
+pub(in crate::tui) fn handle_pin_edit_form_key(
     app: &mut App,
     key: ratatui::crossterm::event::KeyEvent,
     send: &mut dyn FnMut(&mut App, Msg),

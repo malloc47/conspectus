@@ -3,10 +3,11 @@ id: CSP-721
 title: >-
   Move design tokens to a generic `theme` module with an app-registered style
   map
-status: To Do
-assignee: []
+status: In Progress
+assignee:
+  - '@claude'
 created_date: '2026-10-27 20:26'
-updated_date: '2026-10-28 02:45'
+updated_date: '2026-10-28 09:49'
 labels:
   - tui-framework
   - tuifw-foundation
@@ -59,6 +60,18 @@ Blockers: m-24: the harness palette adapter is written once, after the aider ada
 - [ ] #1 `just check` passes, or `git diff --check` for docs-only changes
 - [ ] #2 Docs and ADRs are updated when behavior, architecture, or workflow change
 <!-- DOD:END -->
+
+## Implementation Plan
+
+<!-- SECTION:PLAN:BEGIN -->
+1. Snapshot tool: let `--snapshot` open the three forms (new mux `n`, mux launch `N`, pin edit from the Pinned row menu) so before/after frames can be captured; capture default and custom-theme frames with that binary first.
+2. Move the style-spec grammar (`StyleSpec`, `parse_color`, `parse_modifier`, `parse_style_spec`) into `tuikit::theme` with its tests; tuikit gains `ratatui` (on its allowlist); the host re-exports it.
+3. Add `tuikit::theme::Theme`: typed generic tokens declared once by a macro (field, key, kind, default, description), an app-registered named-style map, alias keys with a fixed precedence, and the config table walk over host-converted values. Extend the grammar with `fg on bg`. Add the raw `Color::`/`Modifier::DIM` guard test in tuikit.
+4. Host adapter `src/tui/theme.rs`: wrap the framework theme (Deref) plus icon overrides; register harness, mux, cwd, command badge, PR, node, edge roles and the legacy aliases (placeholder/divider/mux_unmuxed -> muted; secondary_text/ghost -> inert; link_id -> link; panel_focus_accent -> accent; harness_* -> harness.<key>). Config loader uses the walk. Call sites move to the new tokens and role accessors.
+5. Replace the remaining raw `Color::`/`Modifier::DIM` in host production code (forms, pin edit, previews, viewer, pane viewer, controls, badge, toast, node-kind sentinel); forms take `&Theme` with `field`, `field_active`, `field_cursor` tokens whose defaults reproduce today.
+6. One key list: pantry and docs read it; two-way drift test against docs/operations.md; alias tests per old key.
+7. Docs: operations.md theme section, new ADR amending 0032, tuikit control page and architecture row, operator-review entries. Snapshot before/after, full checks.
+<!-- SECTION:PLAN:END -->
 
 ## Implementation Notes
 

@@ -302,6 +302,14 @@ fn apply_action(
         | Action::RowMenuKey(key)
         | Action::MuxMenuKey(key)
         | Action::WorktreeMenuKey(key) => modal_key(app, key),
+        // The forms open and take their keys as in the live loop; a
+        // submit is skipped like a menu pick.
+        Action::OpenNewMuxForm => runtime::open_new_mux_form_action(app),
+        Action::NewMuxFormKey(key) => runtime::handle_new_mux_form_key(app, key, &mut form_send),
+        Action::MuxLaunchFormKey(key) => {
+            runtime::handle_mux_launch_form_key(app, key, &mut form_send);
+        }
+        Action::PinEditFormKey(key) => runtime::handle_pin_edit_form_key(app, key, &mut form_send),
         Action::ControlsOverlayKey(key) => handle_controls_overlay_key(app, key),
         Action::SearchOverlayKey(key) => {
             // A hit that opens the viewer needs the same effect handling
@@ -366,9 +374,33 @@ fn modal_key(app: &mut App, key: KeyEvent) {
         OverlayOutcome::CommitAndStay(msg) if matches!(*msg, Msg::Toast(_)) => {
             dispatch(app, *msg);
         }
+        // A pick that only opens a form reaches nothing outside the
+        // snapshot, so the form opens and can be drawn.
+        OverlayOutcome::Commit(msg) if opens_a_form(&msg) => {
+            close(app);
+            dispatch(app, *msg);
+        }
         OverlayOutcome::Commit(_) | OverlayOutcome::CommitAndStay(_) => {
             eprintln!("conspectus: snapshot mode skipped a menu pick");
         }
+    }
+}
+
+/// Whether `msg` does nothing but open one of the forms.
+fn opens_a_form(msg: &Msg) -> bool {
+    matches!(
+        msg,
+        Msg::OpenNewMuxForm | Msg::OpenMuxLaunchForm | Msg::OpenSlotEdit(_)
+    )
+}
+
+/// What a form sends: a notice it shows while it stays open is
+/// dispatched; a submit is skipped, as a menu pick is.
+fn form_send(app: &mut App, msg: Msg) {
+    if matches!(msg, Msg::Toast(_)) {
+        dispatch(app, msg);
+    } else {
+        eprintln!("conspectus: snapshot mode skipped a form submit");
     }
 }
 
