@@ -700,3 +700,25 @@ Counts and locations; "n/m" means n of m surfaces in this slice.
 10. **MuxMenu.** Remove the dedicated widget and fold its two entries into `ActionMenu` (changes: title heading, width 62 -> shared)? Same for any future one-off menu.
 11. **Defect fixes as part of extraction.** Treat unclamped value-modal/messages scroll (D16), the short-terminal clamp panics (D17), the dead picker height cap (D20), and silent input rejection (D22) as "consistency wins" inside the extraction stories, or file them separately first?
 12. **Wording convention.** Footer grammar (`Esc close` vs `Esc to close`), title case and padding, ellipsis rule (D23), and toast tone: pick one set for the framework's default strings.
+
+## Verification (CSP-712)
+
+D16, D17, and D18 were reproduced at runtime and fixed before the
+extraction; the reproductions are the behavior tests in
+`src/tui/consistency_tests/scrolling.rs`, which drive keys the way the
+live loop does (draw, then key).
+
+- **D16.** `G`, and `PageDown` on a short value, drew a blank value-modal
+  body at 80x24 and 40x10; the Messages record went blank after paging past
+  its end; page keys moved a fixed 8 rows. Now both bodies wrap their text
+  themselves, the draw reports the rows it showed and how far the text can
+  scroll (`popup_frame::ScrollFit`), and the state takes that back: the
+  offset is clamped and a page is the rows on screen.
+- **D17.** Confirmed: the worktree, mux, and row menus panicked below 5, 10,
+  and 8 rows (`min > max`), also through `conspectus tui --snapshot`. The
+  heights are now `max(min).min(area.height)`.
+- **D18.** Confirmed: the `history_row_menu` frame (100x24) lost its
+  footer, and at 80x14 and 40x10 the cursor could move onto clipped entries.
+  The row menu now keeps the footer on its last rows and scrolls the entries
+  to the cursor; the snapshot was updated. The mux menu still clips its
+  footer below 10 rows; `ActionMenu` takes over scrolling for every menu.

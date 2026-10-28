@@ -56,6 +56,15 @@ Targeted for 0.2.0, after 0.1.0 is tagged. History, rebuild, and pins
 
 ### Fixed
 
+- **Paging and scrolling in the TUI stay on the content.** `PgDn`/`PgUp`
+  move by the rows on screen in the tree, help, the full-value viewer,
+  the Messages record, and the viewers' help pages (the tree stepped by
+  the terminal height and the dialogs by 8 lines). `G`, or paging past
+  the end, of a full value or a Messages record shows its last lines
+  instead of a blank body, and the next key up moves at once. A tree
+  that shrinks no longer leaves blank rows below it, the `.` row menu
+  scrolls to its cursor and keeps its key hints, and the row, mux, and
+  worktree menus no longer crash a very short terminal.
 - **Harness hooks work while `conspectus serve` runs.** The daemon
   applied each hook observation to its live graph only, and the next
   refresh, a few seconds later, dropped it. It now records the

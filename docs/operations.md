@@ -1337,7 +1337,9 @@ focused choice, toggles a checkbox, steps a cycle, or opens a filter's
 editor; `Enter` applies the focused choice and closes (on a filter row it
 opens the editor, and on a checkbox it just closes). Scrolling dialogs
 (help, the full-value viewer, messages, the transcript viewer) use
-`Space` to page down, as pagers do. Help and the other long dialogs wrap
+`Space` to page down, as pagers do. A page is the rows the dialog shows,
+as it is for `PgDn`/`PgUp` in the tree, and scrolling stops at the last
+line. Help and the other long dialogs wrap
 their text to the dialog's width, and menus cut a label that cannot fit
 with an ellipsis, so no word is clipped at the edge.
 

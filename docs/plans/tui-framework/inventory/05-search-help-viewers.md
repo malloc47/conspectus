@@ -1061,3 +1061,20 @@ Numbered for backlog citation; counts are exact where stated.
 | Preview sources/loaders/store/banner/search derivation | `tui/preview/*`, `preview_pane.rs` | stays in Conspectus |
 | Messages log, entity index, outcome words, content search state | various | stays in Conspectus |
 | `src/tui/viewer.rs` | external viewer launch | stays in Conspectus |
+
+## Verification (CSP-712)
+
+Items 6, 7, and 8 of section 9 were reproduced at runtime and fixed before
+the extraction; the reproductions are the help and value-modal tests in
+`src/tui/consistency_tests/scrolling.rs`.
+
+- **Main help (S3).** Confirmed: `k` after `G`, or after extra `j` at the
+  end, did not move, and `PageDown` moved 8 lines of a 17-row body at
+  80x24. The draw now writes back the clamped offset and the body height,
+  and page keys move by that height.
+- **Viewer and pane-viewer help (S4, S5).** Confirmed: at 80x16 `PageDown`
+  moved 12 lines (the transcript's viewport) through a 9-row help body. The
+  help draw records its own body height (`help_page`) and the help pages by
+  it.
+- **Value modal and Messages detail (S6, S7).** Confirmed blank after `G`
+  or paging past the end; see inventory 04, D16.

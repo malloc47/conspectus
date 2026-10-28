@@ -529,3 +529,19 @@ runtime.
 11. **Selected-row chips**: is the chip staying un-inverted on the selected row intentional
     (needs a visual check; this survey could not run the TUI)?
 12. **Persistence**: should expansion and scroll survive restarts (currently in-memory only)?
+
+## Verification (CSP-712)
+
+I7 and I8 were reproduced at runtime and fixed before the extraction; the
+reproductions are the tree tests in
+`src/tui/consistency_tests/scrolling.rs`.
+
+- **I7.** Confirmed: `PageDown` moved the selection 22 rows in a 20-row
+  tree at 120x24, and to the end of a 2-row stacked tree at 40x10. The App
+  now keeps the height the tree drew (`Msg::LeftViewportChanged`) and the
+  key path pages by it; the `--snapshot` driver draws a frame before each
+  key, as the live loop does, so it pages the same way.
+- **I8.** Confirmed: collapsing the last group from the end of a 70-row
+  Pinned tree left one row drawn with six scrolled off above and the rest of
+  the pane blank. `adjust_left_scroll` now clamps the offset to
+  `rows - viewport`.
