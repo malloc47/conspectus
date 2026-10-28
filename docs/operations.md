@@ -249,77 +249,133 @@ run. The legacy `[session]` section (pre-ADR 0021) is recognized
 solely to emit a one-line diagnostic pointing at the new schema; its
 contents are ignored.
 
-### `[tui.theme]` — palette overrides (ADR 0032)
+### `[tui.theme]` — palette overrides (ADR 0032, ADR 0153)
 
-`conspectus tui` ships a centralized `Theme` covering every color
-and modifier the renderer reads. Each field is overridable in
-config:
+`conspectus tui` draws every color and modifier from one theme, and
+each entry can be overridden in config. The block below lists every key
+with its default; the tests check it against the code, so it is the
+complete list. Set only the keys you want to change.
 
 ```toml
 [tui.theme]
-# Per-harness colors used by the row badge and header chip.
-harness_claude   = "magenta"
-harness_codex    = "cyan"
-harness_opencode = "green"
-harness_aider    = "red"
-harness_pi       = "bright_blue"
+# Shared looks, used by every view, menu, form, and viewer.
+accent             = "cyan"            # popup borders and titles, help keys, the active tab, chosen chips, hints
+panel_focus_accent = "cyan"            # the ► marker on the focused pane; follows `accent` unless set
+disclosure         = "cyan"            # the ▶ / ▼ tree arrows
+muted              = "dim"             # hints, placeholders, notes, rules, footers, the unlinked ∘ (a modifier)
+inert              = "dark_gray"       # short ids, previews, gone or stopped rows (a color)
+selection_active   = "reversed,bold"   # the cursor row of the focused pane
+selection_inactive = "bold"            # the cursor row of the other pane
+success            = "green"
+warning            = "yellow"
+error              = "red"
+info               = "green"           # informational entries in Messages
+link               = "blue"            # mux names and link rows
+match_highlight    = "yellow"          # text a search matched (bold, underlined)
+badge              = "reversed,bold"   # the chip look
+badge_width        = 8                 # label cells in every chip (an integer, at least 2)
+recency_fresh      = "bright_green,bold"
+recency_active     = "green"
+recency_recent     = "yellow"
+recency_cold       = "dim"
+surface            = "default"         # the toast background
+field              = "light_gray"      # a form field's value
+field_active       = "white on dark_gray"  # the focused form field
+field_cursor       = "black on white"  # the text cursor in a form field
 
-# Activity buckets coloring the session recency column.
-# Accepts `color`, `color,mod`, or `mod` alone.
-recency_fresh  = "bright_green,bold"
-recency_active = "green"
-recency_recent = "yellow"
-recency_cold   = "dim"
+# Conspectus's own roles.
+harness_unknown    = "white"           # the badge of a harness with no entry below
+mux_attached       = "green"           # the linked or attached ⊸ and its counts
+cwd_mark           = "cyan"            # the (cwd) launch-context mark
+command_badge      = "black"           # background of the program chip a mux row shows
+command_badge_text = "white"           # its text, drawn bold
+pr_open            = "green"           # also a PR glyph drawn without a state
+pr_closed          = "red"
+pr_merged          = "magenta"
+pr_draft           = "yellow"
+node_workspace     = "bright_blue"     # the kind glyph of each node in the tree and detail pane
+node_repo          = "blue"
+node_checkout      = "cyan"
+node_agent_session = "bright_green"
+node_mux_session   = "magenta"         # pins share it
+node_runtime_process = "dark_gray"
+node_branch        = "green"
+node_fork          = "bright_magenta"
+edge_alt_of        = "dark_gray"       # a non-winning alternative link row
+edge_conflict      = "yellow"          # a conflicting link row
+pin_placeholder    = "bright_yellow"   # no longer drawn; kept so older files load
 
-# Mux-state glyphs (⊸ linked or attached, ∘ not linked or no client).
-mux_attached  = "green"
-mux_unmuxed   = "dim"
+[tui.theme.harness]
+# Badge and chip color per harness, by harness key.
+claude-code = "magenta"
+codex       = "cyan"
+opencode    = "green"
+aider       = "red"
+pi          = "bright_blue"
 
-# Background of the chip a mux row shows for its pane's program (`npm`,
-# `zsh`, …) when no agent session is linked; text is bold white. A pane
-# running a harness, directly or through a launch wrapper such as
-# `atelier exec claude`, keeps that harness's badge and color instead.
-command_badge = "black"
-
-# Detail-pane and structural cues.
-cwd_mark           = "cyan"
-link_id            = "blue"
-secondary_text     = "dark_gray"   # short ids + preview snippets
-disclosure         = "cyan"        # the ▶ / ▼ tree affordance
-match_highlight    = "yellow"      # text a search matched (bold, underlined)
-divider            = "dim"
-panel_focus_accent = "cyan"        # the ▸ marker on the active pane title
-                                   # and the detail-pane section chip
-
-# PR-state coloring (matches the ADR 0022 table palette defaults).
-pr_open   = "green"
-pr_closed = "red"
-pr_merged = "magenta"
-pr_draft  = "yellow"
-
-# Badge composition; default `REVERSED | BOLD` is the chip look.
-badge              = "reversed,bold"
-# Label characters in every agent / program badge (an integer, at
-# least 2). Shorter labels pad, longer ones are cut with `…`.
-badge_width        = 8
-selection_active   = "reversed,bold"
-selection_inactive = "bold"
+[tui.theme.icons]
+# One-cell kind glyphs; see the glyph table in docs/tui-columns.md.
+node_workspace       = "▦"
+node_repo            = "◆"
+node_checkout        = "◇"
+node_agent_session   = "●"
+node_mux_session     = "▣"
+node_pin             = "◉"
+node_runtime_process = "◈"
+node_branch          = "⌥"
+node_fork            = "⋎"
+node_forge_pr        = "⇄"
 ```
 
-Each value is a single string that may be:
+Each value is a single string (except `badge_width`):
 
-- a named ANSI color: `red`, `magenta`, `cyan`, `bright_green`, …
-  plus the alias `default` (or `reset`) for the terminal's default
-  foreground;
+- a named ANSI color: `red`, `magenta`, `cyan`, `bright_green`,
+  `dark_gray`, `light_gray`, … plus `default` (or `reset`) for the
+  terminal's own color;
 - an indexed 256-color: `ansi256:42` (0–255);
 - a truecolor hex: `#ff8800` (case-insensitive);
 - a comma-joined modifier list: `bold`, `dim,italic`, `reversed`,
   `crossed_out`, …;
-- a color followed by modifiers: `green,bold`, `#ff8800,italic`.
+- for the keys whose default has both, colors then modifiers:
+  `green,bold`, `#ff8800,italic`, and a background with `on`:
+  `white on dark_gray`, `on blue`, `black on white,bold`.
+
+A key whose default is a color takes a color, one whose default is a
+modifier list takes modifiers, and `recency_*` and `field*` take either
+or both.
+
+**Older keys.** These keys from earlier versions still load. Each sets
+the key it was merged into:
+
+| Older key | Sets | Note |
+| --- | --- | --- |
+| `placeholder` | `muted` | |
+| `divider` | `muted` | rules drew `dim` like `placeholder` |
+| `mux_unmuxed` | `muted` | the unlinked `∘` |
+| `secondary_text` | `inert` | |
+| `ghost` | `inert` | gone rows stay italic |
+| `link_id` | `link` | |
+| `panel_focus_accent` | `accent` | still sets the focus marker too |
+| `harness_claude` | `[tui.theme.harness] claude-code` | |
+| `harness_codex` | `[tui.theme.harness] codex` | |
+| `harness_opencode` | `[tui.theme.harness] opencode` | |
+| `harness_aider` | `[tui.theme.harness] aider` | |
+| `harness_pi` | `[tui.theme.harness] pi` | |
+
+Within one file, a key's own name wins over its older names, and among
+older names the one higher in the table wins: `muted` over `placeholder`
+over `divider` over `mux_unmuxed`, and `inert` over `secondary_text` over
+`ghost`. An older key that loses to a different value gets a warning
+naming the key that won. Because five keys became two, setting only
+`placeholder` now also restyles the rules and the unlinked `∘`, and
+setting only `secondary_text` also recolors gone rows. `accent` sets
+`panel_focus_accent` as well unless the same file sets it, and
+`panel_focus_accent` alone still sets both, as it always did. A project
+`.conspectus.toml` overrides the user config whichever name either uses.
 
 Unknown keys and malformed values both surface as `ConfigDiagnostic`
-warnings; the field falls back to its built-in default and the rest
-of `[tui.theme]` continues to load. The TUI never aborts on theme
+warnings; the entry keeps its built-in default and the rest of
+`[tui.theme]` continues to load. The TUI never aborts on theme
 errors. The `[table]` palette (ADR 0022) is **not** affected by
 `[tui.theme]` — table CLI output keeps its own colors.
 
@@ -1050,10 +1106,10 @@ cut at 28 cells, the status is one word (`live`, `stopped`, `removed`,
 `unknown`, `planned`, `missing`, `in mux`, `resumable`, or a PR's state), the age is the
 last activity of a live entity or the time a gone one was last seen, and the
 content is the harness and place, the title, or the remote. Gone, missing,
-planned, and unknown rows wear the ghost style (the theme's `ghost` color, in italics). The agent or program that runs is a
+planned, and unknown rows wear the ghost style (the theme's `inert` color, in italics). The agent or program that runs is a
 filled chip, the same as in the other views, ahead of the text that follows
 it. A pin with nothing running (`planned`, `stopped`, `removed`, `missing`, or
-`unknown`) wears a hollow pin glyph, `◎`, in the ghost color after its kind
+`unknown`) wears a hollow pin glyph, `◎`, in the `inert` color after its kind
 glyph; the filled `◉` is for a pin on an entity that is running, and every
 row that has a pin wears one of the two, in the same place in every view.
 A mux that stopped reads `stopped` and a worktree or repo that vanished reads

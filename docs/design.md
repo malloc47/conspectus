@@ -1073,6 +1073,12 @@ preview sources stay in `conspectus` as adapters over the framework's
 controls. The framework starts no processes and writes no files, so it adds no
 entries to the capability manifest.
 
+The theme is the first piece in the framework (ADR 0153): typed role tokens
+(accent, `muted`, `inert`, selection, status colors, fields, and the rest) that
+every control reads, plus named styles `conspectus` registers for its own
+roles (harness, mux, PR, node-kind, and edge colors). `[tui.theme]` keeps its
+flat keys; the five older muted keys load as aliases of `muted` and `inert`.
+
 ### Graph-to-View Slicing
 
 The producer pipeline discovers and resolves a typed

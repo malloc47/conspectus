@@ -321,3 +321,158 @@ fn every_key_and_alias_is_unique() {
     aliases.dedup();
     assert_eq!(aliases.len(), ALIASES.len(), "an alias is listed twice");
 }
+
+// ---------------------------------------------------------------------
+// The documented key list (`docs/operations.md`) and the code agree,
+// both ways: every key the theme stores is documented with its default,
+// every documented key is one the theme stores, and the older-key table
+// is the alias list in precedence order.
+// ---------------------------------------------------------------------
+
+/// The `[tui.theme]` section of the operator guide.
+fn documented_theme_section() -> String {
+    let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("docs/operations.md");
+    let text = std::fs::read_to_string(&path).expect("read docs/operations.md");
+    let start = text
+        .find("### `[tui.theme]`")
+        .expect("operations.md has a `[tui.theme]` section");
+    let rest = &text[start + 3..];
+    let end = [rest.find("\n### "), rest.find("\n## ")]
+        .into_iter()
+        .flatten()
+        .min()
+        .unwrap_or(rest.len());
+    rest[..end].to_string()
+}
+
+/// The section's TOML example, parsed: `[tui.theme]` and its sub-tables.
+fn documented_theme_table() -> toml::Table {
+    let section = documented_theme_section();
+    let start = section.find("```toml\n").expect("a toml block") + "```toml\n".len();
+    let end = start + section[start..].find("```").expect("the block ends");
+    let parsed: toml::Table = toml::from_str(&section[start..end]).expect("the block parses");
+    parsed["tui"]["theme"]
+        .as_table()
+        .expect("a [tui.theme] table")
+        .clone()
+}
+
+/// The documented keys with their values: flat keys as they are, and
+/// `[tui.theme.harness]` entries as `harness.<key>`.
+fn documented_style_keys() -> Vec<(String, toml::Value)> {
+    let mut keys = Vec::new();
+    for (key, value) in documented_theme_table() {
+        match (key.as_str(), value) {
+            ("icons", _) => {}
+            ("harness", toml::Value::Table(harnesses)) => {
+                for (harness, color) in harnesses {
+                    keys.push((format!("{}{harness}", role::HARNESS_PREFIX), color));
+                }
+            }
+            (_, value) => keys.push((key, value)),
+        }
+    }
+    keys
+}
+
+fn override_value(value: &toml::Value) -> OverrideValue<'_> {
+    match value {
+        toml::Value::String(text) => OverrideValue::Text(text),
+        toml::Value::Integer(number) => OverrideValue::Integer(*number),
+        _ => OverrideValue::Other,
+    }
+}
+
+#[test]
+fn every_theme_key_is_documented_and_every_documented_key_exists() {
+    let theme = Theme::default();
+    let mut in_code: Vec<String> = theme.keys().into_iter().map(|key| key.name).collect();
+    let mut documented: Vec<String> = documented_style_keys()
+        .into_iter()
+        .map(|(key, _)| key)
+        .collect();
+    in_code.sort();
+    documented.sort();
+    let undocumented: Vec<&String> = in_code
+        .iter()
+        .filter(|key| !documented.contains(key))
+        .collect();
+    let unknown: Vec<&String> = documented
+        .iter()
+        .filter(|key| !in_code.contains(key))
+        .collect();
+    assert!(
+        undocumented.is_empty() && unknown.is_empty(),
+        "docs/operations.md and the theme disagree.\n  in the theme, not documented: \
+         {undocumented:?}\n  documented, not in the theme: {unknown:?}"
+    );
+}
+
+#[test]
+fn the_documented_values_are_the_defaults() {
+    let entries = documented_style_keys();
+    let mut theme = Theme::default();
+    let problems = theme.apply_overrides(
+        entries
+            .iter()
+            .map(|(key, value)| (key.as_str(), override_value(value))),
+    );
+    assert_eq!(problems, [], "every documented value parses");
+    for (key, _) in &entries {
+        assert_eq!(
+            theme.value(key),
+            Theme::default().value(key),
+            "docs/operations.md gives `{key}` a value other than its default"
+        );
+    }
+}
+
+#[test]
+fn the_documented_icons_are_every_kind_with_its_default_glyph() {
+    use crate::tui::icons::NodeKind;
+    let table = documented_theme_table();
+    let icons = table["icons"].as_table().expect("an icons table");
+    let mut documented: Vec<&str> = icons.keys().map(String::as_str).collect();
+    let mut kinds: Vec<&str> = NodeKind::ALL.iter().map(|kind| kind.theme_key()).collect();
+    documented.sort_unstable();
+    kinds.sort_unstable();
+    assert_eq!(documented, kinds);
+    for kind in NodeKind::ALL {
+        assert_eq!(
+            icons[kind.theme_key()].as_str(),
+            Some(kind.default_glyph()),
+            "{}",
+            kind.theme_key()
+        );
+    }
+}
+
+#[test]
+fn the_older_key_table_is_the_alias_list_in_precedence_order() {
+    let section = documented_theme_section();
+    let table = section
+        .split("**Older keys.**")
+        .nth(1)
+        .expect("an older-keys paragraph");
+    let cell = |text: &str| text.trim().trim_matches('`').to_string();
+    let documented: Vec<(String, String)> = table
+        .lines()
+        .skip_while(|line| !line.starts_with('|'))
+        .take_while(|line| line.starts_with('|'))
+        .skip(2)
+        .map(|line| {
+            let cells: Vec<&str> = line.trim_matches('|').split('|').collect();
+            let target = cell(cells[1]);
+            let target = match target.strip_prefix("[tui.theme.harness] ") {
+                Some(harness) => format!("{}{harness}", role::HARNESS_PREFIX),
+                None => target,
+            };
+            (cell(cells[0]), target)
+        })
+        .collect();
+    let aliases: Vec<(String, String)> = ALIASES
+        .iter()
+        .map(|(key, target)| ((*key).to_string(), (*target).to_string()))
+        .collect();
+    assert_eq!(documented, aliases);
+}

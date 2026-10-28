@@ -137,7 +137,7 @@ Runtime architecture, controls, theming, detail pane, and visual language.
 | [0025](0025-tui-preview-ansi-rendering-dependency.md) | TUI Preview ANSI Rendering Dependency | Accepted |
 | [0030](0030-tui-text-input-primitive.md) | TUI Text-Input Primitive | Accepted |
 | [0031](0031-tui-filter-view-switching-and-per-view-state.md) | TUI Filter, View Switching, And Per-View State | Accepted (amended by 0147, 0149) |
-| [0032](0032-tui-theme-config.md) | TUI Theme Configuration | Accepted |
+| [0032](0032-tui-theme-config.md) | TUI Theme Configuration | Accepted (amended by 0153) |
 | [0033](0033-tui-detail-pane-sections.md) | TUI Detail-Pane Section Model | Superseded by 0074 |
 | [0034](0034-repo-row-display-path-preference.md) | Repo Row Display Path Preference | Accepted (amended) |
 | [0045](0045-sessions-graph-lineage-and-repo-default.md) | Sessions Graph Lineage And Repo Default | Accepted |
@@ -175,6 +175,7 @@ Runtime architecture, controls, theming, detail pane, and visual language.
 | [0150](0150-tui-framework-workspace-crate.md) | The TUI Framework Is A Workspace Member Crate | Accepted |
 | [0151](0151-tui-framework-control-set-and-house-rules.md) | The Framework Control Set And Its House Rules | Accepted |
 | [0152](0152-tui-framework-dependency-ownership.md) | Who Owns The Framework's Third-Party Crates | Accepted |
+| [0153](0153-tui-theme-roles-aliases-and-named-styles.md) | TUI Theme Roles, Alias Keys, And Named Styles | Accepted |
 
 ## Transcript viewer
 

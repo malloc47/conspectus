@@ -53,6 +53,19 @@ Targeted for 0.2.0, after 0.1.0 is tagged. History, rebuild, and pins
   `[tui.views.union]` or `[tui.views.forks]` table, is reported as a
   config diagnostic and ignored. `conspectus table union|forks` is
   unchanged.
+- **`[tui.theme]` has two muted keys instead of five, and reaches the
+  forms.** `muted` (a modifier, `dim`) and `inert` (a color, dark gray)
+  replace `placeholder`, `divider`, `mux_unmuxed`, `secondary_text`, and
+  `ghost`, which still load as aliases; set several of them differently
+  and they merge by a fixed precedence, with a warning for each key that
+  lost. Setting only `placeholder` now also restyles rules and the
+  unlinked `∘`, and setting only `secondary_text` also recolors gone
+  rows. New keys: `accent`, `link`, `info`, `surface`, `field`,
+  `field_active`, `field_cursor`, and `command_badge_text`; a style may
+  name a background (`white on dark_gray`). The mux launch, new mux, and
+  pin edit forms, the previews, and the transcript viewer now follow the
+  theme; the default look is unchanged. `docs/operations.md` lists every
+  key, its default, and the older names.
 
 ### Fixed
 

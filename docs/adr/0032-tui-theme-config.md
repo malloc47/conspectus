@@ -2,7 +2,11 @@
 
 ## Status
 
-Accepted
+Accepted. Amended by ADR 0153: the theme moves into the framework crate as
+typed role tokens plus named styles Conspectus registers; `placeholder`,
+`divider`, and `mux_unmuxed` load as aliases of `muted`, `secondary_text` and
+`ghost` of `inert`, with a fixed precedence; style values may name a
+background (`white on dark_gray`).
 
 ## Context
 
