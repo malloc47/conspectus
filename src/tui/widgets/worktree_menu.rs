@@ -340,6 +340,11 @@ impl WorktreeMenuState {
         &self.ctx
     }
 
+    /// Whether the branch-name prompt has the keys.
+    pub fn editing_branch(&self) -> bool {
+        matches!(self.mode, Mode::BranchInput(_))
+    }
+
     fn selected(&self) -> WorktreeAction {
         self.actions[self.cursor.min(self.actions.len() - 1)]
     }

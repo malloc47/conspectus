@@ -518,9 +518,9 @@ pub(super) fn run_mux_attach(
             ));
         }
     };
-    ratatui::restore();
+    term::leave();
     let outcome = runner.attach_session(socket_name, &target.native_id);
-    *terminal = ratatui::init();
+    *terminal = term::enter();
     let _ = terminal.clear();
     attach_outcome(&target.backend, outcome)
 }
@@ -553,7 +553,7 @@ pub(super) fn run_tmux_attach_with_socket(
 ) -> AttachOutcome {
     // Suspend the ratatui terminal so tmux owns the real screen
     // for the duration of the attach.
-    ratatui::restore();
+    term::leave();
 
     let nested = std::env::var_os("TMUX").is_some();
     let subcommand = if nested {
@@ -570,7 +570,7 @@ pub(super) fn run_tmux_attach_with_socket(
     // Re-enter the alt screen + raw mode and swap the terminal in
     // place. Failure to re-init is fatal for the TUI, but we
     // attempted restore() first so the shell stays usable.
-    *terminal = ratatui::init();
+    *terminal = term::enter();
     // Forget any cached frame state — the parent screen was
     // overwritten by tmux, and a clean clear avoids ghost cells
     // from the suspended buffer.
@@ -620,7 +620,7 @@ pub(super) fn run_viewer_launch(
         terminal::{Clear, ClearType},
     };
 
-    ratatui::restore();
+    term::leave();
     let _ = execute!(std::io::stdout(), Clear(ClearType::All), MoveTo(0, 0));
 
     let status = crate::exec::command(crate::exec::Program::ClaudeHistory, &plan.program)
@@ -639,7 +639,7 @@ pub(super) fn run_viewer_launch(
         let _ = std::io::stdin().read_line(&mut buf);
     }
 
-    *terminal = ratatui::init();
+    *terminal = term::enter();
     let _ = terminal.clear();
     outcome
 }

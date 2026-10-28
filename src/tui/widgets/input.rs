@@ -91,6 +91,35 @@ impl TextInputState {
     }
 }
 
+/// The text a paste types into a single-line field. A line break would
+/// press Enter and submit the field, and a single line cannot show one,
+/// so the paste is flattened instead of cut at its first line: line
+/// breaks at either end are dropped (a copied line usually ends in one),
+/// each run of line breaks inside becomes one space, a tab becomes a
+/// space (Tab would complete or move to the next field), and any other
+/// control character is dropped.
+pub fn single_line_paste(text: &str) -> String {
+    let is_break = |c: char| c == '\n' || c == '\r';
+    let mut out = String::with_capacity(text.len());
+    let mut in_break = false;
+    for c in text.trim_matches(is_break).chars() {
+        if is_break(c) {
+            if !in_break {
+                out.push(' ');
+            }
+            in_break = true;
+            continue;
+        }
+        in_break = false;
+        if c == '\t' {
+            out.push(' ');
+        } else if !c.is_control() {
+            out.push(c);
+        }
+    }
+    out
+}
+
 /// Centered modal rendering of [`TextInputState`]. Defaults to the
 /// upstream popup palette when no `.theme(&Theme)` is provided so
 /// the constructor stays a one-arg call from existing sites.

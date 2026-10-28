@@ -3,6 +3,37 @@
 use super::*;
 
 impl App {
+    /// Whether the overlay on top is typing into a text field: a prompt,
+    /// a form row that takes text, a filter editor, a query, or a find
+    /// prompt. A paste goes only there; in a menu, a list, or a choice
+    /// row its characters would act as keys.
+    pub fn text_field_has_keys(&self) -> bool {
+        use crate::tui::Modal;
+        use crate::tui::widgets::controls::SubEditor;
+        let Some(top) = self.modal_stack.last() else {
+            return false;
+        };
+        match top {
+            Modal::Rename(_) | Modal::NewMux(_) | Modal::Picker(_) => true,
+            Modal::WorktreeMenu(menu) => menu.editing_branch(),
+            Modal::MuxLaunch(form) => form.focus().takes_text(),
+            Modal::PinEdit(form) => form.focused_label().is_some(),
+            Modal::Controls(controls) => matches!(
+                controls.sub_editor(),
+                Some(SubEditor::MaxAge(_) | SubEditor::Content(_))
+            ),
+            Modal::Search(search) => search.options_cursor().is_none(),
+            Modal::Viewer(viewer) => viewer.find.prompt.is_some(),
+            Modal::PaneViewer(viewer) => viewer.prompt.is_some(),
+            Modal::Help(_)
+            | Modal::ValueModal(_)
+            | Modal::Messages(_)
+            | Modal::MuxMenu(_)
+            | Modal::RowMenu(_)
+            | Modal::CleanUp(_) => false,
+        }
+    }
+
     /// Active rename-overlay state, if any. Lives on the modal
     /// stack (ADR 0085 contract 3); this accessor peeks the top
     /// entry.

@@ -1,8 +1,8 @@
 //! Terminal lifecycle and event loop.
 //!
-//! `ratatui::init` already installs a panic hook that restores the
-//! terminal, so this module just sets up the loop and is the only
-//! place in the crate that touches stdout in raw mode.
+//! `term` takes the terminal over and hands it back (with a panic
+//! hook that restores it), so this module just sets up the loop and is
+//! the only place in the crate that touches stdout in raw mode.
 //!
 //! Discovery runs on a background thread per ADR 0024 (`mpsc` + no
 //! async runtime). The initial load still runs synchronously so the
@@ -46,6 +46,7 @@ mod content;
 mod executor;
 mod launch;
 mod overlay_keys;
+mod term;
 mod visibility;
 mod worktree_exec;
 
@@ -143,6 +144,16 @@ fn run_loop(
         force_preview = false;
         if event::poll(poll_timeout)? {
             let event = event::read()?;
+            if let Event::Paste(text) = &event {
+                let mut dispatched = Ok(());
+                type_paste(&mut app, text, &mut |app, action| {
+                    if dispatched.is_ok() {
+                        dispatched = mode.dispatch(terminal, app, &config, Some(action));
+                    }
+                });
+                dispatched?;
+                continue;
+            }
             let action = action_for_event(&app, event);
             force_preview = matches!(action, Some(Action::Refresh | Action::HardRefresh));
             mode.dispatch(terminal, &mut app, &config, action)?;
@@ -881,6 +892,29 @@ pub(super) fn action_for_event(app: &App, event: Event) -> Option<Action> {
     })
 }
 
+/// Type a bracketed paste into the text field that has the keys, one key
+/// per character, so each field edits, completes, and refilters exactly
+/// as it does for typing. The text is flattened to one line first
+/// (`single_line_paste`), so a paste never presses Enter or Tab.
+/// `dispatch` handles each key's action the way the loop handles a typed
+/// key. A paste goes only into a text field (`App::text_field_has_keys`):
+/// with none focused it does nothing, and typing stops if a key leaves
+/// the field, so pasted characters never act as the keys of a menu, a
+/// choice, or the tree.
+pub(super) fn type_paste(app: &mut App, text: &str, dispatch: &mut dyn FnMut(&mut App, Action)) {
+    use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+    for c in crate::tui::widgets::input::single_line_paste(text).chars() {
+        if !app.text_field_has_keys() {
+            break;
+        }
+        let key = Event::Key(KeyEvent::new(KeyCode::Char(c), KeyModifiers::NONE));
+        let Some(action) = overlay_key_from_event(app, &key) else {
+            break;
+        };
+        dispatch(app, action);
+    }
+}
+
 fn overlay_key_from_event(app: &App, event: &Event) -> Option<Action> {
     let key = match event {
         Event::Key(k) if k.kind == KeyEventKind::Press => *k,
@@ -938,10 +972,10 @@ fn overlay_key_from_event(app: &App, event: &Event) -> Option<Action> {
 }
 
 /// Run the TUI to completion. Restores the terminal on normal exit,
-/// errors, and panics (the panic path is covered by the hook
-/// `ratatui::init` installs).
+/// errors, and panics (the panic path is covered by the hooks
+/// `term::enter` installs).
 pub fn run(config: RunConfig) -> Result<()> {
-    let mut terminal = ratatui::init();
+    let mut terminal = term::enter();
     // Explicitly clear the alt screen before the first draw.
     // `EnterAlternateScreen` alone isn't enough under some
     // multiplexers — notably mosh, which doesn't fully blank the
@@ -952,7 +986,7 @@ pub fn run(config: RunConfig) -> Result<()> {
     // the reattach path below.
     let _ = terminal.clear();
     let result = event_loop(&mut terminal, config);
-    ratatui::restore();
+    term::leave();
     result
 }
 
@@ -970,10 +1004,10 @@ pub fn run_static(
     tmux: Box<dyn MuxBackend>,
     recordings: Option<std::path::PathBuf>,
 ) -> Result<()> {
-    let mut terminal = ratatui::init();
+    let mut terminal = term::enter();
     let _ = terminal.clear();
     let result = static_event_loop(&mut terminal, config, snapshot, None, tmux, recordings);
-    ratatui::restore();
+    term::leave();
     result
 }
 
@@ -987,7 +1021,7 @@ pub fn run_from_fixture(config: RunConfig, fixture_path: std::path::PathBuf) -> 
     use anyhow::Context as _;
     let snapshot = read_fixture(&fixture_path)
         .with_context(|| format!("load fixture `{}`", fixture_path.display()))?;
-    let mut terminal = ratatui::init();
+    let mut terminal = term::enter();
     let _ = terminal.clear();
     let result = static_event_loop(
         &mut terminal,
@@ -997,7 +1031,7 @@ pub fn run_from_fixture(config: RunConfig, fixture_path: std::path::PathBuf) -> 
         Box::new(SystemTmux::new()),
         None,
     );
-    ratatui::restore();
+    term::leave();
     result
 }
 

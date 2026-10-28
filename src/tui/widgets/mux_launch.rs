@@ -73,6 +73,17 @@ pub enum MuxLaunchField {
     Pin,
 }
 
+impl MuxLaunchField {
+    /// Whether the field takes typed text; the others are choices and
+    /// toggles.
+    pub fn takes_text(self) -> bool {
+        !matches!(
+            self,
+            Self::LaunchOptions | Self::MuxSocketToggle | Self::WorktreeToggle | Self::Pin
+        )
+    }
+}
+
 /// Whether the launch also pins the new mux (ADR 0141).
 #[derive(Debug, Clone, Copy, Default, Eq, PartialEq)]
 pub enum PinChoice {

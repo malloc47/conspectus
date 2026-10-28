@@ -77,6 +77,17 @@ fn alt_b_and_alt_f_move_by_word() {
 }
 
 #[test]
+fn a_paste_flattens_to_one_line() {
+    assert_eq!(single_line_paste("one\ntwo"), "one two");
+    assert_eq!(single_line_paste("one\r\ntwo\r\n"), "one two");
+    assert_eq!(single_line_paste("\n\none\n\n\ntwo\n"), "one two");
+    assert_eq!(single_line_paste("a\tb"), "a b");
+    assert_eq!(single_line_paste("a\u{1b}[31mb"), "a[31mb");
+    assert_eq!(single_line_paste("  keep  spaces  "), "  keep  spaces  ");
+    assert_eq!(single_line_paste("~/src/über"), "~/src/über");
+}
+
+#[test]
 fn enter_returns_trimmed_or_raw_value_per_caller_choice() {
     // The widget never trims itself — callers decide how to
     // treat whitespace. Round-trip an all-whitespace buffer to
