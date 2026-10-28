@@ -371,6 +371,8 @@ impl PaneViewerState {
             ViewerFindMsg::Delete => prompt.delete(),
             ViewerFindMsg::Left => prompt.left(),
             ViewerFindMsg::Right => prompt.right(),
+            ViewerFindMsg::WordLeft => prompt.word_left(),
+            ViewerFindMsg::WordRight => prompt.word_right(),
             ViewerFindMsg::Home => prompt.home(),
             ViewerFindMsg::End => prompt.end(),
             ViewerFindMsg::ClearLine => prompt.clear_line(),

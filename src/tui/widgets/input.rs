@@ -13,8 +13,8 @@ use ratatui::layout::Rect;
 use ratatui::style::{Modifier, Style};
 use ratatui::text::Line;
 use ratatui::widgets::{Paragraph, Widget};
-use tui_input::Input;
 use tui_input::backend::crossterm::EventHandler;
+use tui_input::{Input, InputRequest};
 use tui_popup::KnownSize;
 
 use crate::tui::Theme;
@@ -75,6 +75,14 @@ impl TextInputState {
             Some(TextInputKey::Confirm) => InputOutcome::Confirm(self.input.value().to_string()),
             Some(TextInputKey::Abort | TextInputKey::Cancel) => InputOutcome::Cancel,
             Some(TextInputKey::Tab) => InputOutcome::Continue,
+            Some(TextInputKey::WordLeft) => {
+                self.input.handle(InputRequest::GoToPrevWord);
+                InputOutcome::Continue
+            }
+            Some(TextInputKey::WordRight) => {
+                self.input.handle(InputRequest::GoToNextWord);
+                InputOutcome::Continue
+            }
             None => {
                 self.input.handle_event(&CrosstermEvent::Key(event));
                 InputOutcome::Continue

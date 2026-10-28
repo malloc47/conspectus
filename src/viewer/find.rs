@@ -33,6 +33,10 @@ pub enum ViewerFindMsg {
     Delete,
     Left,
     Right,
+    /// Move to the start of the word before the cursor.
+    WordLeft,
+    /// Move to the start of the word after the cursor.
+    WordRight,
     Home,
     End,
     /// Delete everything before the cursor.
@@ -94,6 +98,36 @@ impl FindPrompt {
         self.cursor = (self.cursor + 1).min(self.text.chars().count());
     }
 
+    /// Move to the start of the word before the cursor, the way the
+    /// TUI's other text fields do: back over anything that isn't part of
+    /// a word, then over the word.
+    pub fn word_left(&mut self) {
+        let chars: Vec<char> = self.text.chars().collect();
+        let mut at = self.cursor.min(chars.len());
+        while at > 0 && !is_word_char(chars[at - 1]) {
+            at -= 1;
+        }
+        while at > 0 && is_word_char(chars[at - 1]) {
+            at -= 1;
+        }
+        self.cursor = at;
+    }
+
+    /// Move to the start of the word after the cursor (the end of the
+    /// text when there is none): over the rest of this word, then over
+    /// what separates it from the next.
+    pub fn word_right(&mut self) {
+        let chars: Vec<char> = self.text.chars().collect();
+        let mut at = self.cursor.min(chars.len());
+        while at < chars.len() && is_word_char(chars[at]) {
+            at += 1;
+        }
+        while at < chars.len() && !is_word_char(chars[at]) {
+            at += 1;
+        }
+        self.cursor = at;
+    }
+
     pub fn home(&mut self) {
         self.cursor = 0;
     }
@@ -107,6 +141,12 @@ impl FindPrompt {
         self.text.drain(..at);
         self.cursor = 0;
     }
+}
+
+/// Whether `c` is part of a word for word motion: anything but
+/// whitespace and ASCII punctuation, as in the TUI's line editor.
+fn is_word_char(c: char) -> bool {
+    !c.is_whitespace() && !c.is_ascii_punctuation()
 }
 
 /// The find in progress: the prompt while it is open, and the active
@@ -390,6 +430,8 @@ pub fn reduce_find(mut state: ViewerState, msg: ViewerFindMsg) -> (ViewerState, 
         ViewerFindMsg::Delete => prompt.delete(),
         ViewerFindMsg::Left => prompt.left(),
         ViewerFindMsg::Right => prompt.right(),
+        ViewerFindMsg::WordLeft => prompt.word_left(),
+        ViewerFindMsg::WordRight => prompt.word_right(),
         ViewerFindMsg::Home => prompt.home(),
         ViewerFindMsg::End => prompt.end(),
         ViewerFindMsg::ClearLine => prompt.clear_line(),

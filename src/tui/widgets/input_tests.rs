@@ -64,6 +64,19 @@ fn backspace_deletes_char_before_cursor() {
 }
 
 #[test]
+fn alt_b_and_alt_f_move_by_word() {
+    let alt = |c| KeyEvent::new(KeyCode::Char(c), KeyModifiers::ALT);
+    let mut state = TextInputState::new(" rename ", "alpha beta-gamma");
+    assert_eq!(state.handle_key(alt('b')), InputOutcome::Continue);
+    assert_eq!(state.cursor(), 11, "back to the start of `gamma`");
+    state.handle_key(alt('b'));
+    assert_eq!(state.cursor(), 6, "punctuation separates words");
+    state.handle_key(alt('f'));
+    assert_eq!(state.cursor(), 11);
+    assert_eq!(state.value(), "alpha beta-gamma", "motion never types");
+}
+
+#[test]
 fn enter_returns_trimmed_or_raw_value_per_caller_choice() {
     // The widget never trims itself — callers decide how to
     // treat whitespace. Round-trip an all-whitespace buffer to

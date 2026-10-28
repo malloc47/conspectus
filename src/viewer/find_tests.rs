@@ -121,6 +121,24 @@ fn the_prompt_edits_like_a_line() {
 }
 
 #[test]
+fn the_prompt_moves_by_word_like_the_other_text_fields() {
+    let mut prompt = FindPrompt::with_text("héllo wörld-two  ");
+    prompt.word_left();
+    assert_eq!(prompt.cursor, 12, "back over the spaces to `two`");
+    prompt.word_left();
+    assert_eq!(prompt.cursor, 6, "punctuation separates words");
+    prompt.word_left();
+    prompt.word_left();
+    assert_eq!(prompt.cursor, 0, "stops at the start");
+    prompt.word_right();
+    assert_eq!(prompt.cursor, 6, "to the start of the next word");
+    prompt.word_right();
+    prompt.word_right();
+    assert_eq!(prompt.cursor, 17, "past the last word, to the end");
+    assert_eq!(prompt.text, "héllo wörld-two  ", "motion never types");
+}
+
+#[test]
 fn confirming_jumps_to_the_first_match_below_the_top() {
     let state = find(drawn(document()), "needle");
     assert_eq!(state.find.matches, [2, 5, 9]);

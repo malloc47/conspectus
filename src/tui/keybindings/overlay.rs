@@ -161,6 +161,20 @@ const fn ctrl(c: char) -> KeyMatcher {
     }
 }
 
+const fn alt(c: char) -> KeyMatcher {
+    KeyMatcher::Exact {
+        modifiers: KeyModifiers::ALT,
+        code: KeyCode::Char(c),
+    }
+}
+
+const fn ctrl_key(code: KeyCode) -> KeyMatcher {
+    KeyMatcher::Exact {
+        modifiers: KeyModifiers::CONTROL,
+        code,
+    }
+}
+
 const fn shown<A>(
     key: KeyMatcher,
     action: A,
@@ -315,8 +329,16 @@ pub enum TextInputKey {
     Cancel,
     /// Swallowed so it never reaches the line editor.
     Tab,
+    /// Move to the start of the word before the cursor.
+    WordLeft,
+    /// Move to the start of the word after the cursor.
+    WordRight,
 }
 
+/// The line editor binds Alt-B and Alt-F to the META modifier, but a
+/// terminal sends Alt as an Esc prefix, which arrives as ALT, so the
+/// word motions are bound here. Ctrl-Left and Ctrl-Right reach the line
+/// editor, which binds them itself.
 pub const TEXT_INPUT_KEYS: &[KeyRow<TextInputKey>] = &[
     alias(ctrl('c'), TextInputKey::Abort),
     shown(
@@ -327,6 +349,8 @@ pub const TEXT_INPUT_KEYS: &[KeyRow<TextInputKey>] = &[
     ),
     shown(key(KeyCode::Esc), TextInputKey::Cancel, "Esc", "cancel"),
     alias(key(KeyCode::Tab), TextInputKey::Tab),
+    alias(alt('b'), TextInputKey::WordLeft),
+    alias(alt('f'), TextInputKey::WordRight),
 ];
 
 // ---------------------------------------------------------------------
@@ -694,6 +718,10 @@ pub const VIEWER_FIND_KEYS: &[KeyRow<ViewerFindMsg>] = &[
     shown(key(KeyCode::Esc), ViewerFindMsg::Cancel, "Esc", "cancel"),
     alias(key(KeyCode::Backspace), ViewerFindMsg::Backspace),
     alias(key(KeyCode::Delete), ViewerFindMsg::Delete),
+    alias(alt('b'), ViewerFindMsg::WordLeft),
+    alias(alt('f'), ViewerFindMsg::WordRight),
+    alias(ctrl_key(KeyCode::Left), ViewerFindMsg::WordLeft),
+    alias(ctrl_key(KeyCode::Right), ViewerFindMsg::WordRight),
     alias(key(KeyCode::Left), ViewerFindMsg::Left),
     alias(key(KeyCode::Right), ViewerFindMsg::Right),
     alias(key(KeyCode::Home), ViewerFindMsg::Home),
