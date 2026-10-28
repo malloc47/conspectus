@@ -19,12 +19,16 @@ use tui_popup::KnownSize;
 
 use crate::tui::Theme;
 use crate::tui::icons::{NodeKind, node_kind_style};
+use crate::tui::widgets::popup_frame::ScrollFit;
 
 /// Pure state for the help overlay. Carries vertical scroll
 /// position so long keymaps stay reachable on short terminals.
 #[derive(Debug, Clone, Default)]
 pub struct HelpOverlayState {
     pub scroll: u16,
+    /// Rows of the page the modal showed at the last draw; a page key
+    /// moves by this many.
+    pub page_rows: u16,
 }
 
 impl HelpOverlayState {
@@ -49,11 +53,11 @@ impl HelpOverlayState {
                 HelpOutcome::Continue
             }
             Some(PagerKey::PageDown) => {
-                self.scroll_by(8);
+                self.scroll_by(i32::from(self.page_rows.max(1)));
                 HelpOutcome::Continue
             }
             Some(PagerKey::PageUp) => {
-                self.scroll_by(-8);
+                self.scroll_by(-i32::from(self.page_rows.max(1)));
                 HelpOutcome::Continue
             }
             Some(PagerKey::Top) => {
@@ -72,6 +76,15 @@ impl HelpOverlayState {
         let current = i32::from(self.scroll);
         let next = current.saturating_add(delta).max(0);
         self.scroll = u16::try_from(next.min(i32::from(u16::MAX))).unwrap_or(u16::MAX);
+    }
+
+    /// Take in what the last draw showed: the offset comes back inside
+    /// the page (so `G`, or `j` past the end, is undone by the next key
+    /// up) and page keys move by the rows on screen.
+    pub fn fit(&mut self, fit: ScrollFit) {
+        let max = u16::try_from(fit.max_scroll).unwrap_or(u16::MAX);
+        self.scroll = self.scroll.min(max);
+        self.page_rows = u16::try_from(fit.rows).unwrap_or(u16::MAX);
     }
 }
 
@@ -109,12 +122,20 @@ impl<'a> HelpOverlayWidget<'a> {
     }
 }
 
-impl Widget for HelpOverlayWidget<'_> {
-    fn render(self, area: Rect, buf: &mut Buffer) {
+impl HelpOverlayWidget<'_> {
+    /// Draw the help and report what the page showed, for
+    /// [`HelpOverlayState::fit`].
+    pub fn draw(self, area: Rect, buf: &mut Buffer) -> ScrollFit {
         let theme = self.theme;
         render_help_page(area, buf, theme, self.state.scroll as usize, &|width| {
             body_lines_for_width(theme, Some(width))
-        });
+        })
+    }
+}
+
+impl Widget for HelpOverlayWidget<'_> {
+    fn render(self, area: Rect, buf: &mut Buffer) {
+        self.draw(area, buf);
     }
 }
 
@@ -122,43 +143,33 @@ impl Widget for HelpOverlayWidget<'_> {
 /// the page's lines scrolled to `scroll` and wrapped to the modal's
 /// width, and a scrollbar when the page overflows. The keymap help and
 /// the transcript viewer's help both draw through here, so the two
-/// modals share one frame, size, and scroll behavior.
+/// modals share one frame, size, and scroll behavior. Returns the rows
+/// the page's scrolling part had and how far it can scroll; the footer
+/// is pinned, so only the lines above it scroll.
 pub(super) fn render_help_page(
     area: Rect,
     buf: &mut Buffer,
     theme: &Theme,
     scroll: usize,
     lines_for: &dyn Fn(usize) -> Vec<Line<'static>>,
-) {
+) -> ScrollFit {
     // The centered-bordered-modal shell — clear, border, title — is
     // owned by `tui_popup::Popup` via
     // `crate::tui::widgets::popup_frame::themed_popup`. The body
     // wrapper reports the same cap dimensions `help_modal_rect`
     // computes, so the popup's auto-sizing reproduces that rect.
     let modal = help_modal_rect(area);
+    let mut fit = ScrollFit::default();
     let body = HelpBody {
         scroll,
         lines_for,
         inner_width: modal.width.saturating_sub(2) as usize,
         inner_height: modal.height.saturating_sub(2) as usize,
+        fit: &mut fit,
     };
     let popup = crate::tui::widgets::popup_frame::themed_popup(body, line![" Help "], theme);
     popup.render(area, buf);
-}
-
-/// How far a help page can scroll in a modal drawn into `area`. The
-/// footer is pinned, so only the lines above it scroll.
-pub(super) fn help_max_scroll(
-    area: Rect,
-    lines_for: &dyn Fn(usize) -> Vec<Line<'static>>,
-) -> usize {
-    let modal = help_modal_rect(area);
-    let (width, height) = (
-        modal.width.saturating_sub(2) as usize,
-        modal.height.saturating_sub(2) as usize,
-    );
-    let page = page_layout(lines_for, width, height);
-    page.body.len().saturating_sub(page.body_height)
+    fit
 }
 
 /// A help page split into the lines that scroll and the footer that
@@ -228,6 +239,8 @@ struct HelpBody<'a> {
     lines_for: &'a dyn Fn(usize) -> Vec<Line<'static>>,
     inner_width: usize,
     inner_height: usize,
+    /// Where the body reports the rows it drew.
+    fit: &'a mut ScrollFit,
 }
 
 impl KnownSize for HelpBody<'_> {
@@ -247,6 +260,10 @@ impl Widget for HelpBody<'_> {
         let body_height = u16::try_from(page.body_height).unwrap_or(area.height);
         let max_scroll = page.body.len().saturating_sub(page.body_height);
         let scroll = self.scroll.min(max_scroll);
+        *self.fit = ScrollFit {
+            rows: page.body_height,
+            max_scroll,
+        };
         let body_area = Rect {
             width: text_width,
             height: body_height,

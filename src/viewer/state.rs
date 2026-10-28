@@ -137,6 +137,9 @@ pub struct ViewerState {
     /// First visible line of the help page while it is open; the help
     /// widget clamps it to what the page can scroll.
     pub help_scroll: usize,
+    /// Rows of the help page the last draw showed; its page keys move by
+    /// this many (the transcript's own viewport is taller).
+    pub help_page: usize,
     /// Viewport height (in cells / lines) last seen during draw.
     /// Used by the reducer to compute page/half-page deltas.
     pub viewport_height: u16,
@@ -170,6 +173,7 @@ impl ViewerState {
             show_hidden: false,
             show_help: false,
             help_scroll: 0,
+            help_page: 0,
             viewport_height: 0,
             total_lines: 0,
             rendered: None,

@@ -5,7 +5,8 @@
 //! Input:
 //! - `j` / `k` / `Down` / `Up` select an entry; `g` / `G` jump to the
 //!   newest / oldest.
-//! - `J` / `K` / `PageDown` / `PageUp` scroll the detail pane.
+//! - `J` / `K` scroll the detail pane a row; `PageDown` / `PageUp` by the
+//!   rows it showed.
 //! - `y` copies the selected entry (handled by the runtime, which
 //!   owns the clipboard).
 //! - `Esc` / `q` / `!` close.
@@ -16,17 +17,21 @@ use ratatui::layout::Rect;
 use ratatui::macros::{line, span};
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{Paragraph, Widget, Wrap};
+use ratatui::widgets::{Paragraph, Widget};
 use tui_popup::KnownSize;
 
 use crate::tui::Theme;
 use crate::tui::messages::{LogEntry, LogLevel, MessageLog};
+use crate::tui::widgets::popup_frame::{ScrollFit, wrapped_lines};
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct MessagesOverlayState {
     /// Index into the newest-first entry list.
     pub selected: usize,
     pub detail_scroll: u16,
+    /// Rows the detail pane showed at the last draw; a page key moves by
+    /// this many.
+    pub detail_rows: u16,
 }
 
 impl MessagesOverlayState {
@@ -51,6 +56,14 @@ impl MessagesOverlayState {
         let next = i32::from(self.detail_scroll).saturating_add(delta).max(0);
         self.detail_scroll = u16::try_from(next).unwrap_or(u16::MAX);
     }
+
+    /// Take in what the last draw's detail pane showed: its offset comes
+    /// back inside the text and page keys move by the rows on screen.
+    pub fn fit(&mut self, fit: ScrollFit) {
+        let max = u16::try_from(fit.max_scroll).unwrap_or(u16::MAX);
+        self.detail_scroll = self.detail_scroll.min(max);
+        self.detail_rows = u16::try_from(fit.rows).unwrap_or(u16::MAX);
+    }
 }
 
 impl crate::tui::Overlay for MessagesOverlayState {
@@ -70,8 +83,12 @@ impl crate::tui::Overlay for MessagesOverlayState {
             Some(MessagesKey::Last) => self.select(len.saturating_sub(1), len),
             Some(MessagesKey::DetailDown) => self.scroll_detail(1),
             Some(MessagesKey::DetailUp) => self.scroll_detail(-1),
-            Some(MessagesKey::DetailPageDown) => self.scroll_detail(8),
-            Some(MessagesKey::DetailPageUp) => self.scroll_detail(-8),
+            Some(MessagesKey::DetailPageDown) => {
+                self.scroll_detail(i32::from(self.detail_rows.max(1)));
+            }
+            Some(MessagesKey::DetailPageUp) => {
+                self.scroll_detail(-i32::from(self.detail_rows.max(1)));
+            }
             // The runtime copies before the key reaches the widget.
             Some(MessagesKey::Copy) | None => {}
         }
@@ -111,8 +128,10 @@ pub fn level_style(level: LogLevel, theme: &Theme) -> Style {
     }
 }
 
-impl Widget for MessagesWidget<'_> {
-    fn render(self, area: Rect, buf: &mut Buffer) {
+impl MessagesWidget<'_> {
+    /// Draw the overlay and report what its detail pane showed, for
+    /// [`MessagesOverlayState::fit`].
+    pub fn draw(self, area: Rect, buf: &mut Buffer) -> ScrollFit {
         let width = area.width.saturating_sub(4).clamp(40, 110);
         let height = area.height.saturating_sub(2).max(10);
         let modal = crate::tui::widgets::popup_frame::centered_rect(area, width, height);
@@ -124,12 +143,21 @@ impl Widget for MessagesWidget<'_> {
             span!(label_style; " Messages · {} ", self.log.len()),
             " "
         ];
+        let mut fit = ScrollFit::default();
         let body = MessagesBody {
             widget: &self,
             inner_width: modal.width.saturating_sub(2) as usize,
             inner_height: modal.height.saturating_sub(2) as usize,
+            fit: &mut fit,
         };
         crate::tui::widgets::popup_frame::themed_popup(body, title, self.theme).render(area, buf);
+        fit
+    }
+}
+
+impl Widget for MessagesWidget<'_> {
+    fn render(self, area: Rect, buf: &mut Buffer) {
+        self.draw(area, buf);
     }
 }
 
@@ -137,6 +165,8 @@ struct MessagesBody<'a, 'w> {
     widget: &'a MessagesWidget<'w>,
     inner_width: usize,
     inner_height: usize,
+    /// Where the body reports the rows its detail pane drew.
+    fit: &'a mut ScrollFit,
 }
 
 impl KnownSize for MessagesBody<'_, '_> {
@@ -215,9 +245,22 @@ impl Widget for MessagesBody<'_, '_> {
         .render(rule_area, buf);
 
         if let Some(entry) = state.selected_entry(log) {
-            Paragraph::new(entry.full_text())
-                .wrap(Wrap { trim: false })
-                .scroll((state.detail_scroll, 0))
+            // Wrapped here so the offset can be kept inside the text: paging
+            // past the end shows the last rows.
+            let lines: Vec<Line> = entry
+                .full_text()
+                .lines()
+                .flat_map(|line| wrapped_lines(line, 0, usize::from(detail_area.width)))
+                .map(Line::from)
+                .collect();
+            let max_scroll = lines.len().saturating_sub(usize::from(detail_area.height));
+            let scroll = usize::from(state.detail_scroll).min(max_scroll);
+            *self.fit = ScrollFit {
+                rows: usize::from(detail_area.height),
+                max_scroll,
+            };
+            Paragraph::new(lines)
+                .scroll((u16::try_from(scroll).unwrap_or(u16::MAX), 0))
                 .render(detail_area, buf);
         }
         Paragraph::new(footer).render(footer_area, buf);

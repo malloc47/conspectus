@@ -180,16 +180,18 @@ pub fn reduce(mut state: ViewerState, msg: ViewerMsg) -> (ViewerState, ViewerEff
 }
 
 /// Move the help page for a movement message; other messages do nothing
-/// while the help covers the transcript.
+/// while the help covers the transcript. A page is the rows the help
+/// showed, not the transcript's taller viewport behind it.
 fn scroll_help(state: &mut ViewerState, msg: ViewerMsg) {
-    let page = usize::from(state.viewport_height.max(2));
+    let page = state.help_page.max(1);
+    let half = (page / 2).max(1);
     state.help_scroll = match msg {
         ViewerMsg::ScrollUp => state.help_scroll.saturating_sub(1),
         ViewerMsg::ScrollDown => state.help_scroll.saturating_add(1),
         ViewerMsg::PageUp => state.help_scroll.saturating_sub(page),
         ViewerMsg::PageDown => state.help_scroll.saturating_add(page),
-        ViewerMsg::HalfPageUp => state.help_scroll.saturating_sub(page / 2),
-        ViewerMsg::HalfPageDown => state.help_scroll.saturating_add(page / 2),
+        ViewerMsg::HalfPageUp => state.help_scroll.saturating_sub(half),
+        ViewerMsg::HalfPageDown => state.help_scroll.saturating_add(half),
         ViewerMsg::JumpToStart => 0,
         ViewerMsg::JumpToEnd => usize::MAX,
         _ => state.help_scroll,

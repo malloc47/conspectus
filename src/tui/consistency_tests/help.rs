@@ -16,7 +16,11 @@ const SIZES: [(u16, u16); 4] = [(60, 20), (80, 24), (120, 40), (160, 50)];
 
 fn main_help_at(area: Rect, theme: &Theme, scroll: u16) -> Buffer {
     let mut buf = Buffer::empty(area);
-    HelpOverlayWidget::new(&HelpOverlayState { scroll }, theme).render(area, &mut buf);
+    let state = HelpOverlayState {
+        scroll,
+        ..HelpOverlayState::default()
+    };
+    HelpOverlayWidget::new(&state, theme).render(area, &mut buf);
     buf
 }
 
@@ -151,8 +155,8 @@ fn both_helps_end_with_the_same_footer() {
 #[test]
 fn the_viewer_help_scrolls_where_the_keymap_help_does() {
     let theme = Theme::default();
-    let area = Rect::new(0, 0, 60, 12);
-    assert!(viewer_help::max_scroll(area, &theme) > 0);
-    let tall = Rect::new(0, 0, 100, 60);
-    assert_eq!(viewer_help::max_scroll(tall, &theme), 0);
+    let max_scroll =
+        |area: Rect| viewer_help::render(area, &mut Buffer::empty(area), &theme, 0).max_scroll;
+    assert!(max_scroll(Rect::new(0, 0, 60, 12)) > 0);
+    assert_eq!(max_scroll(Rect::new(0, 0, 100, 60)), 0);
 }

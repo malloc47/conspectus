@@ -17,7 +17,8 @@ use crate::tui::Theme;
 use crate::tui::keybindings::overlay::{KeyRow, VIEWER_KEYS};
 use crate::viewer::input::ViewerMsg;
 
-use super::help::{binding_lines, blank, help_max_scroll, push_footer, render_help_page, section};
+use super::help::{binding_lines, blank, push_footer, render_help_page, section};
+use super::popup_frame::ScrollFit;
 
 /// One help row: the keys bound to a message and what it does.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -99,28 +100,26 @@ pub fn help_lines(theme: &Theme, width: Option<usize>) -> Vec<Line<'static>> {
     lines
 }
 
-/// Render the page scrolled to `scroll`.
-pub fn render(area: Rect, buf: &mut Buffer, theme: &Theme, scroll: usize) {
+/// Render the page scrolled to `scroll`, reporting the rows its
+/// scrolling part showed and how far it can scroll.
+pub fn render(area: Rect, buf: &mut Buffer, theme: &Theme, scroll: usize) -> ScrollFit {
     render_help_page(area, buf, theme, scroll, &|width| {
         help_lines(theme, Some(width))
-    });
-}
-
-/// How far the page can scroll in `area`.
-pub fn max_scroll(area: Rect, theme: &Theme) -> usize {
-    help_max_scroll(area, &|width| help_lines(theme, Some(width)))
+    })
 }
 
 /// Draw the viewer's help over the transcript, keeping the viewer's
-/// scroll position inside what the page can reach.
+/// scroll position inside what the page can reach and recording the
+/// rows a page key moves.
 pub fn draw(
     state: &mut crate::viewer::state::ViewerState,
     theme: &Theme,
     frame: &mut Frame<'_>,
     area: Rect,
 ) {
-    state.help_scroll = state.help_scroll.min(max_scroll(area, theme));
-    render(area, frame.buffer_mut(), theme, state.help_scroll);
+    let fit = render(area, frame.buffer_mut(), theme, state.help_scroll);
+    state.help_scroll = state.help_scroll.min(fit.max_scroll);
+    state.help_page = fit.rows;
 }
 
 #[cfg(test)]

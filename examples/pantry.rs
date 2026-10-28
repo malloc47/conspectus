@@ -284,6 +284,7 @@ impl Ingredient for HelpVariant {
         let theme = Theme::default();
         let state = HelpOverlayState {
             scroll: self.scroll,
+            ..HelpOverlayState::default()
         };
         HelpOverlayWidget::new(&state, &theme).render(area, buf);
     }

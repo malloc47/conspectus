@@ -181,6 +181,11 @@ fn the_keys_the_footer_names_do_what_it_says_in_the_viewer() {
     }
 }
 
+/// How far the page can scroll in `area`, as its render reports it.
+fn max_scroll(area: Rect, theme: &Theme) -> usize {
+    render(area, &mut Buffer::empty(area), theme, 0).max_scroll
+}
+
 #[test]
 fn a_short_terminal_scrolls_and_clamps() {
     let theme = Theme::default();
@@ -218,6 +223,9 @@ fn draw_clamps_the_viewers_scroll_position() {
         state.help_scroll,
         max_scroll(Rect::new(0, 0, 60, 12), &Theme::default())
     );
+    // The page keys move by the help's own rows: the modal's 8 inner
+    // rows less its one-row footer, not the transcript's viewport.
+    assert_eq!(state.help_page, 7);
 }
 
 #[test]

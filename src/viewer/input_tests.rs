@@ -166,15 +166,18 @@ fn close_dismisses_help_overlay_first_then_modal() {
 fn movement_keys_scroll_the_help_page_while_it_is_open() {
     let mut s = state_with(100, 24, 5);
     s.viewport_height = 10;
+    // The help's own body showed 7 rows; a page is those, not the
+    // transcript's 10.
+    s.help_page = 7;
     let (s, _) = reduce(s, ViewerMsg::ToggleHelp);
     assert_eq!(s.help_scroll, 0);
     let before = s.scroll_offset;
     let (s, _) = reduce(s, ViewerMsg::ScrollDown);
     assert_eq!(s.help_scroll, 1);
     let (s, _) = reduce(s, ViewerMsg::PageDown);
-    assert_eq!(s.help_scroll, 11);
+    assert_eq!(s.help_scroll, 8);
     let (s, _) = reduce(s, ViewerMsg::HalfPageUp);
-    assert_eq!(s.help_scroll, 6);
+    assert_eq!(s.help_scroll, 5);
     let (s, _) = reduce(s, ViewerMsg::JumpToEnd);
     assert_eq!(s.help_scroll, usize::MAX);
     let (s, _) = reduce(s, ViewerMsg::JumpToStart);

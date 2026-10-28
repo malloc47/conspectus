@@ -73,10 +73,13 @@ use text::*;
 /// draw into separate measure + render passes so the runtime can
 /// dispatch the Msgs upstream — that's an ADR 0085 contract-5
 /// optional cleanup, not a correctness need. The mutation surface
-/// today is bounded to those two Msg dispatches; every subsequent
-/// draw helper (`draw_header` / `draw_status_bar` / overlays /
-/// toast) takes `&App` and is byte-identical over the same App
-/// state.
+/// today is bounded to those two Msg dispatches plus what the
+/// scrolling overlays (value modal, Messages, help) showed: each
+/// draws from `&App`, then writes back its rows and scroll limit so
+/// the next page key moves by what was drawn and an offset past the
+/// end is taken back. Every other draw helper (`draw_header` /
+/// `draw_status_bar` / the remaining overlays / toast) takes `&App`
+/// and is byte-identical over the same App state.
 pub fn draw(app: &mut App, frame: &mut Frame<'_>) {
     let area = frame.area();
     let layout = vertical![==1, >=3, ==1].split(area);
@@ -184,39 +187,46 @@ fn draw_toast(app: &App, frame: &mut Frame<'_>, area: Rect) {
     frame.render_widget(app.toast(), area);
 }
 
-fn draw_value_modal(app: &App, frame: &mut Frame<'_>, area: Rect) {
+fn draw_value_modal(app: &mut App, frame: &mut Frame<'_>, area: Rect) {
     use crate::tui::widgets::value_modal::ValueModalWidget;
 
     let Some(state) = app.value_modal() else {
         return;
     };
-    frame.render_widget(ValueModalWidget::new(state, app.theme()), area);
+    let fit = ValueModalWidget::new(state, app.theme()).draw(area, frame.buffer_mut());
+    if let Some(state) = app.value_modal_mut() {
+        state.fit(fit);
+    }
 }
 
-fn draw_messages_overlay(app: &App, frame: &mut Frame<'_>, area: Rect) {
+fn draw_messages_overlay(app: &mut App, frame: &mut Frame<'_>, area: Rect) {
     use crate::tui::widgets::messages::MessagesWidget;
 
     let Some(state) = app.messages_overlay() else {
         return;
     };
-    frame.render_widget(
-        MessagesWidget::new(
-            state,
-            app.messages(),
-            app.theme(),
-            crate::discovery::current_epoch(),
-        ),
-        area,
-    );
+    let fit = MessagesWidget::new(
+        state,
+        app.messages(),
+        app.theme(),
+        crate::discovery::current_epoch(),
+    )
+    .draw(area, frame.buffer_mut());
+    if let Some((state, _)) = app.messages_overlay_mut() {
+        state.fit(fit);
+    }
 }
 
-fn draw_help_overlay(app: &App, frame: &mut Frame<'_>, area: Rect) {
+fn draw_help_overlay(app: &mut App, frame: &mut Frame<'_>, area: Rect) {
     use crate::tui::widgets::help::HelpOverlayWidget;
 
     let Some(state) = app.help_overlay() else {
         return;
     };
-    frame.render_widget(HelpOverlayWidget::new(state, app.theme()), area);
+    let fit = HelpOverlayWidget::new(state, app.theme()).draw(area, frame.buffer_mut());
+    if let Some(state) = app.help_overlay_mut() {
+        state.fit(fit);
+    }
 }
 
 fn draw_search_overlay(app: &App, frame: &mut Frame<'_>, area: Rect) {

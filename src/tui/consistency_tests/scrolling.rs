@@ -16,7 +16,12 @@ use super::layout::{builders, framed_and_bare, modal_rect};
 use super::*;
 use crate::tui::Modal;
 use crate::tui::keymap::Action;
+use crate::tui::messages::LogEntry;
 use crate::tui::modal::{Overlay, OverlayOutcome};
+use crate::tui::widgets::value_modal::ValueModalState;
+
+/// The sizes every check runs at: a common terminal and a small one.
+const SIZES: [(u16, u16); 2] = [(80, 24), (40, 10)];
 
 /// One frame of the whole screen, the full-screen viewers included.
 fn screen(app: &mut App, (width, height): (u16, u16)) -> Buffer {
@@ -82,6 +87,14 @@ fn press(app: &mut App, size: (u16, u16), code: KeyCode) -> Buffer {
     screen(app, size)
 }
 
+fn press_n(app: &mut App, size: (u16, u16), code: KeyCode, times: usize) -> Buffer {
+    let mut last = screen(app, size);
+    for _ in 0..times {
+        last = press(app, size, code);
+    }
+    last
+}
+
 fn rows_of(buf: &Buffer) -> Vec<String> {
     (0..buf.area.height)
         .map(|y| {
@@ -92,8 +105,287 @@ fn rows_of(buf: &Buffer) -> Vec<String> {
         .collect()
 }
 
+/// The row span (first, last) whose text differs between two frames.
+fn changed_rows(a: &Buffer, b: &Buffer) -> Option<(usize, usize)> {
+    let (a, b) = (rows_of(a), rows_of(b));
+    let changed: Vec<usize> = (0..a.len()).filter(|&y| a[y] != b[y]).collect();
+    Some((*changed.first()?, *changed.last()?))
+}
+
+/// Rows of a scrolling body: the span that moves when the content
+/// scrolls by one line from `top` with `down`.
+fn scrolling_rows(app: &mut App, size: (u16, u16), down: KeyCode) -> usize {
+    let top = screen(app, size);
+    let moved = press(app, size, down);
+    let (first, last) = changed_rows(&top, &moved).expect("one line of scroll changes the body");
+    last - first + 1
+}
+
+/// How far a page key moved, in lines: the number of single-line steps
+/// `up` needs to bring back the frame the page started from. One `down`
+/// after the page proves the page did not stop at the end, where the
+/// distance would measure the content instead.
+fn page_distance(app: &mut App, size: (u16, u16), keys: [KeyCode; 3]) -> usize {
+    let [page, down, up] = keys;
+    let start = screen(app, size);
+    let paged = press(app, size, page);
+    let mut frame = press(app, size, down);
+    assert_ne!(
+        rows_of(&frame),
+        rows_of(&paged),
+        "the page reached the end; the check needs longer content\n{}",
+        buffer_to_string(&paged)
+    );
+    for steps in 1..=200 {
+        frame = press(app, size, up);
+        if rows_of(&frame) == rows_of(&start) {
+            return steps - 1;
+        }
+    }
+    panic!(
+        "{up:?} never brought the first page back\n{}",
+        buffer_to_string(&frame)
+    );
+}
+
+const PAGE_DOWN_J_K: [KeyCode; 3] = [KeyCode::PageDown, KeyCode::Char('j'), KeyCode::Char('k')];
+
+/// `line-01` .. `line-NN`, one per line.
+fn numbered(count: usize) -> String {
+    (1..=count)
+        .map(|n| format!("line-{n:02}"))
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+/// The numbers of the `line-NN` lines on screen, top to bottom.
+fn shown_numbers(buf: &Buffer) -> Vec<usize> {
+    rows_of(buf)
+        .iter()
+        .filter_map(|row| {
+            let at = row.find("line-")?;
+            row[at + 5..]
+                .chars()
+                .take_while(char::is_ascii_digit)
+                .collect::<String>()
+                .parse()
+                .ok()
+        })
+        .collect()
+}
+
 fn describe(what: &str, (width, height): (u16, u16)) -> String {
     format!("{what} at {width}x{height}")
+}
+
+// ---- value modal ----------------------------------------------------------
+
+fn value_modal_app(value: &str) -> App {
+    let mut app = app_in(View::Pinned);
+    app.open_value_modal(ValueModalState::new("detail", value));
+    app
+}
+
+#[test]
+fn jumping_to_the_end_of_a_value_shows_its_last_line_and_k_moves_at_once() {
+    for size in SIZES {
+        let label = describe("value modal", size);
+        let mut app = value_modal_app(&numbered(60));
+        let end = press(&mut app, size, KeyCode::Char('G'));
+        let shown = shown_numbers(&end);
+        assert_eq!(
+            shown.last(),
+            Some(&60),
+            "{label}: G shows the last line\n{}",
+            buffer_to_string(&end)
+        );
+        let up = press(&mut app, size, KeyCode::Char('k'));
+        assert_eq!(
+            shown_numbers(&up).last(),
+            Some(&59),
+            "{label}: k after G scrolls up one line\n{}",
+            buffer_to_string(&up)
+        );
+    }
+}
+
+#[test]
+fn paging_down_a_short_value_keeps_it_on_screen() {
+    for size in SIZES {
+        let label = describe("value modal", size);
+        let mut app = value_modal_app(&numbered(3));
+        let paged = press(&mut app, size, KeyCode::PageDown);
+        assert_eq!(
+            shown_numbers(&paged),
+            [1, 2, 3],
+            "{label}: the whole value stays visible\n{}",
+            buffer_to_string(&paged)
+        );
+    }
+}
+
+#[test]
+fn paging_a_value_moves_by_the_rows_the_modal_shows() {
+    for size in SIZES {
+        let label = describe("value modal", size);
+        let mut app = value_modal_app(&numbered(60));
+        let first = shown_numbers(&screen(&mut app, size));
+        let paged = press(&mut app, size, KeyCode::PageDown);
+        assert_eq!(
+            shown_numbers(&paged).first(),
+            Some(&(first.last().expect("lines shown") + 1)),
+            "{label}: the next page starts below the last line shown\n{}",
+            buffer_to_string(&paged)
+        );
+        let back = press(&mut app, size, KeyCode::PageUp);
+        assert_eq!(shown_numbers(&back), first, "{label}: PageUp goes back");
+    }
+}
+
+// ---- Messages detail -------------------------------------------------------
+
+fn messages_app(detail: &str) -> App {
+    let mut app = app_in(View::Pinned);
+    app.update(Msg::Report(Box::new(
+        LogEntry::error("launch failed").with_detail(detail),
+    )));
+    app.open_messages_overlay();
+    app
+}
+
+#[test]
+fn paging_the_messages_detail_past_its_end_keeps_the_last_lines() {
+    for size in SIZES {
+        let label = describe("Messages", size);
+        let mut app = messages_app(&numbered(30));
+        let paged = press_n(&mut app, size, KeyCode::PageDown, 12);
+        assert_eq!(
+            shown_numbers(&paged).last(),
+            Some(&30),
+            "{label}: the detail still shows its last line\n{}",
+            buffer_to_string(&paged)
+        );
+        let up = press(&mut app, size, KeyCode::Char('K'));
+        assert_eq!(
+            shown_numbers(&up).last(),
+            Some(&29),
+            "{label}: K after the end scrolls up one line\n{}",
+            buffer_to_string(&up)
+        );
+
+        let mut short = messages_app(&numbered(2));
+        let paged = press(&mut short, size, KeyCode::PageDown);
+        assert_eq!(
+            shown_numbers(&paged),
+            [1, 2],
+            "{label}: a short detail stays visible\n{}",
+            buffer_to_string(&paged)
+        );
+    }
+}
+
+#[test]
+fn paging_the_messages_detail_moves_by_the_rows_it_shows() {
+    for size in SIZES {
+        let label = describe("Messages", size);
+        let mut app = messages_app(&numbered(60));
+        let first = shown_numbers(&screen(&mut app, size));
+        let paged = press(&mut app, size, KeyCode::PageDown);
+        assert_eq!(
+            shown_numbers(&paged).first(),
+            Some(&(first.last().expect("lines shown") + 1)),
+            "{label}: the next page starts below the last line shown\n{}",
+            buffer_to_string(&paged)
+        );
+    }
+}
+
+// ---- help pages ------------------------------------------------------------
+
+#[test]
+fn scrolling_past_the_end_of_the_help_is_taken_back_at_once() {
+    for size in SIZES {
+        let label = describe("help", size);
+        let mut app = app_in(View::Pinned);
+        app.open_help_overlay();
+        let end = press(&mut app, size, KeyCode::Char('G'));
+        let up = press(&mut app, size, KeyCode::Char('k'));
+        assert_ne!(
+            rows_of(&up),
+            rows_of(&end),
+            "{label}: k after G scrolls up\n{}",
+            buffer_to_string(&up)
+        );
+        press_n(&mut app, size, KeyCode::Char('j'), 6);
+        let up = press(&mut app, size, KeyCode::Char('k'));
+        assert_ne!(
+            rows_of(&up),
+            rows_of(&end),
+            "{label}: j past the end is not stored up\n{}",
+            buffer_to_string(&up)
+        );
+    }
+}
+
+#[test]
+fn paging_the_help_moves_by_the_rows_it_shows() {
+    for size in SIZES {
+        let label = describe("help", size);
+        let mut app = app_in(View::Pinned);
+        app.open_help_overlay();
+        let rows = scrolling_rows(&mut app, size, KeyCode::Char('j'));
+        press(&mut app, size, KeyCode::Char('g'));
+        let distance = page_distance(&mut app, size, PAGE_DOWN_J_K);
+        assert_eq!(distance, rows, "{label}: a page is the rows on screen");
+    }
+}
+
+/// The viewers' help pages are shorter than the keymap's, so they are
+/// paged on terminals short enough to hold several pages.
+const VIEWER_HELP_SIZES: [(u16, u16); 2] = [(80, 16), (40, 10)];
+
+#[test]
+fn paging_the_transcript_viewers_help_moves_by_the_rows_it_shows() {
+    for size in VIEWER_HELP_SIZES {
+        let label = describe("viewer help", size);
+        let mut app = app_in(View::Pinned);
+        app.open_viewer_modal(crate::viewer::state::ViewerState::new(
+            crate::viewer::model::TranscriptDocument::default(),
+        ));
+        press(&mut app, size, KeyCode::Char('?'));
+        let rows = scrolling_rows(&mut app, size, KeyCode::Char('j'));
+        press(&mut app, size, KeyCode::Char('g'));
+        let distance = page_distance(&mut app, size, PAGE_DOWN_J_K);
+        assert_eq!(distance, rows, "{label}: a page is the rows on screen");
+    }
+}
+
+#[test]
+fn paging_the_pane_viewers_help_moves_by_the_rows_it_shows() {
+    use crate::content_search::{MuxRef, PaneRef};
+    use crate::tui::widgets::pane_viewer::PaneViewerState;
+    for size in VIEWER_HELP_SIZES {
+        let label = describe("pane viewer help", size);
+        let mut app = app_in(View::Pinned);
+        let pane = PaneRef {
+            mux: MuxRef {
+                backend: "tmux".into(),
+                socket: None,
+                session: "shell".into(),
+            },
+            pane_id: "%0".into(),
+            window_index: "0".into(),
+            pane_index: "0".into(),
+            command: Some("bash".into()),
+        };
+        let lines = (1..=100).map(|n| format!("output {n}")).collect();
+        app.open_pane_viewer(PaneViewerState::open(pane, lines, 1, ""));
+        press(&mut app, size, KeyCode::Char('?'));
+        let rows = scrolling_rows(&mut app, size, KeyCode::Char('j'));
+        press(&mut app, size, KeyCode::Char('g'));
+        let distance = page_distance(&mut app, size, PAGE_DOWN_J_K);
+        assert_eq!(distance, rows, "{label}: a page is the rows on screen");
+    }
 }
 
 // ---- the tree --------------------------------------------------------------

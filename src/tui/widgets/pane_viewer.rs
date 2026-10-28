@@ -28,7 +28,8 @@ use crate::tui::keybindings::overlay::{
 use crate::viewer::find::{FindPrompt, ViewerFindMsg};
 use crate::viewer::search::find_ci;
 
-use super::help::{binding_lines, blank, help_max_scroll, push_footer, render_help_page, section};
+use super::help::{binding_lines, blank, push_footer, render_help_page, section};
+use super::popup_frame::ScrollFit;
 use super::viewer_help::key_notation;
 
 /// Lines of context kept above a line the viewer jumps to.
@@ -142,6 +143,9 @@ pub struct PaneViewerState {
     pub current: Option<usize>,
     pub show_help: bool,
     pub help_scroll: usize,
+    /// Rows of the help page the last draw showed; its page keys move by
+    /// this many.
+    pub help_page: usize,
     /// Why the last key did nothing, shown in the footer until the next.
     pub note: Option<String>,
     /// The find hint for the prompt's footer, generated from its key table.
@@ -170,6 +174,7 @@ impl PaneViewerState {
             current: None,
             show_help: false,
             help_scroll: 0,
+            help_page: 0,
             note: None,
             find_hint: crate::tui::keybindings::overlay::footer(VIEWER_FIND_KEYS),
         };
@@ -319,15 +324,18 @@ impl PaneViewerState {
         PaneViewerOutcome::Continue
     }
 
+    /// Move the help page. A page is the rows the help showed, not the
+    /// scrollback's taller viewport behind it.
     fn scroll_help(&mut self, msg: PaneViewerMsg) {
-        let page = usize::from(self.viewport.max(2));
+        let page = self.help_page.max(1);
+        let half = (page / 2).max(1);
         self.help_scroll = match msg {
             PaneViewerMsg::ScrollUp => self.help_scroll.saturating_sub(1),
             PaneViewerMsg::ScrollDown => self.help_scroll.saturating_add(1),
             PaneViewerMsg::PageUp => self.help_scroll.saturating_sub(page),
             PaneViewerMsg::PageDown => self.help_scroll.saturating_add(page),
-            PaneViewerMsg::HalfPageUp => self.help_scroll.saturating_sub(page / 2),
-            PaneViewerMsg::HalfPageDown => self.help_scroll.saturating_add(page / 2),
+            PaneViewerMsg::HalfPageUp => self.help_scroll.saturating_sub(half),
+            PaneViewerMsg::HalfPageDown => self.help_scroll.saturating_add(half),
             PaneViewerMsg::JumpToStart => 0,
             PaneViewerMsg::JumpToEnd => usize::MAX,
             _ => self.help_scroll,
@@ -405,8 +413,9 @@ pub fn draw(state: &mut PaneViewerState, theme: &Theme, frame: &mut Frame<'_>, a
     draw_rule(theme, frame, chunks[3]);
     draw_footer(state, theme, frame, chunks[4]);
     if state.show_help {
-        state.help_scroll = state.help_scroll.min(max_help_scroll(area, theme));
-        render_help(area, frame.buffer_mut(), theme, state.help_scroll);
+        let fit = render_help(area, frame.buffer_mut(), theme, state.help_scroll);
+        state.help_scroll = state.help_scroll.min(fit.max_scroll);
+        state.help_page = fit.rows;
     }
 }
 
@@ -601,14 +610,10 @@ pub fn help_lines(theme: &Theme, width: Option<usize>) -> Vec<Line<'static>> {
     lines
 }
 
-fn render_help(area: Rect, buf: &mut Buffer, theme: &Theme, scroll: usize) {
+fn render_help(area: Rect, buf: &mut Buffer, theme: &Theme, scroll: usize) -> ScrollFit {
     render_help_page(area, buf, theme, scroll, &|width| {
         help_lines(theme, Some(width))
-    });
-}
-
-fn max_help_scroll(area: Rect, theme: &Theme) -> usize {
-    help_max_scroll(area, &|width| help_lines(theme, Some(width)))
+    })
 }
 
 #[cfg(test)]

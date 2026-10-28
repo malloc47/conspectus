@@ -10,8 +10,11 @@
 //! Input handling:
 //! - `Esc` / `q` / `o` close the modal.
 //! - `j` / `k` / `Down` / `Up` scroll the value body by one row.
-//! - `PageDown` / `PageUp` / `Space` jump by a viewport.
+//! - `PageDown` / `PageUp` / `Space` jump by the rows the body showed.
 //! - `g` / `G` jump to the top / bottom.
+//!
+//! The value is wrapped here rather than by the paragraph, so the draw
+//! knows how many rows it has and can keep the offset inside them.
 //! - `y` copies the text, or the payload the opener supplied (a rebuild
 //!   plan copies its commands as a script rather than its prose); the
 //!   runtime does the clipboard write and the toast.
@@ -21,11 +24,13 @@ use ratatui::crossterm::event::KeyEvent;
 use ratatui::layout::Rect;
 use ratatui::macros::{line, span};
 use ratatui::style::{Modifier, Style};
-use ratatui::widgets::{Paragraph, Widget, Wrap};
+use ratatui::text::Line;
+use ratatui::widgets::{Paragraph, Widget};
 use tui_popup::KnownSize;
 
 use crate::tui::Theme;
 use crate::tui::widgets::help::centered_modal_rect;
+use crate::tui::widgets::popup_frame::{ScrollFit, wrapped_lines};
 
 /// Pure state for the full-value modal.
 #[derive(Debug, Clone)]
@@ -36,6 +41,9 @@ pub struct ValueModalState {
     pub value: String,
     /// Vertical scroll offset in rendered rows.
     pub scroll: u16,
+    /// Rows of text the body showed at the last draw; a page key moves
+    /// by this many.
+    pub page_rows: u16,
     /// What `y` copies when that isn't the value itself.
     pub copy: Option<ValueCopy>,
     /// Draw lines that show a command (`$ …`) in the accent style.
@@ -57,6 +65,7 @@ impl ValueModalState {
             label: label.into(),
             value: value.into(),
             scroll: 0,
+            page_rows: 0,
             copy: None,
             highlight_commands: false,
         }
@@ -104,11 +113,11 @@ impl ValueModalState {
                 ValueModalOutcome::Continue
             }
             Some(PagerKey::PageDown) => {
-                self.scroll_by(8);
+                self.scroll_by(i32::from(self.page_rows.max(1)));
                 ValueModalOutcome::Continue
             }
             Some(PagerKey::PageUp) => {
-                self.scroll_by(-8);
+                self.scroll_by(-i32::from(self.page_rows.max(1)));
                 ValueModalOutcome::Continue
             }
             Some(PagerKey::Top) => {
@@ -127,6 +136,34 @@ impl ValueModalState {
         let current = i32::from(self.scroll);
         let next = current.saturating_add(delta).max(0);
         self.scroll = u16::try_from(next.min(i32::from(u16::MAX))).unwrap_or(u16::MAX);
+    }
+
+    /// Take in what the last draw showed: the offset comes back inside
+    /// the text (so `G`, or scrolling past the end, is undone by the next
+    /// key up) and page keys move by the rows on screen.
+    pub fn fit(&mut self, fit: ScrollFit) {
+        let max = u16::try_from(fit.max_scroll).unwrap_or(u16::MAX);
+        self.scroll = self.scroll.min(max);
+        self.page_rows = u16::try_from(fit.rows).unwrap_or(u16::MAX);
+    }
+
+    /// The value wrapped to `width` cells; a command line keeps the
+    /// command style on every row it wraps onto.
+    fn wrapped(&self, width: u16, theme: &Theme) -> Vec<Line<'static>> {
+        let command_style = Style::default().fg(theme.panel_focus_accent);
+        self.value
+            .lines()
+            .flat_map(|line| {
+                let style = if self.highlight_commands && line.trim_start().starts_with("$ ") {
+                    command_style
+                } else {
+                    Style::default()
+                };
+                wrapped_lines(line, 0, usize::from(width))
+                    .into_iter()
+                    .map(move |row| Line::styled(row, style))
+            })
+            .collect()
     }
 }
 
@@ -161,22 +198,33 @@ impl<'a> ValueModalWidget<'a> {
     }
 }
 
-impl Widget for ValueModalWidget<'_> {
-    fn render(self, area: Rect, buf: &mut Buffer) {
+impl ValueModalWidget<'_> {
+    /// Draw the modal and report what its body showed, for
+    /// [`ValueModalState::fit`].
+    pub fn draw(self, area: Rect, buf: &mut Buffer) -> ScrollFit {
         // Framing through `tui_popup::Popup`.
         let modal = centered_modal_rect(area);
         let label_style = Style::default()
             .fg(self.theme.panel_focus_accent)
             .add_modifier(Modifier::BOLD);
         let title = line![" ", span!(label_style; " {} ", self.state.label), " "];
+        let mut fit = ScrollFit::default();
         let body = ValueModalBody {
             state: self.state,
             theme: self.theme,
             inner_width: modal.width.saturating_sub(2) as usize,
             inner_height: modal.height.saturating_sub(2) as usize,
+            fit: &mut fit,
         };
         let popup = crate::tui::widgets::popup_frame::themed_popup(body, title, self.theme);
         popup.render(area, buf);
+        fit
+    }
+}
+
+impl Widget for ValueModalWidget<'_> {
+    fn render(self, area: Rect, buf: &mut Buffer) {
+        self.draw(area, buf);
     }
 }
 
@@ -188,6 +236,8 @@ struct ValueModalBody<'a> {
     theme: &'a Theme,
     inner_width: usize,
     inner_height: usize,
+    /// Where the body reports the rows it drew.
+    fit: &'a mut ScrollFit,
 }
 
 impl KnownSize for ValueModalBody<'_> {
@@ -205,25 +255,16 @@ impl Widget for ValueModalBody<'_> {
         use ratatui::layout::{Constraint, Layout};
         let [text_area, footer_area] =
             Layout::vertical([Constraint::Min(1), Constraint::Length(1)]).areas(area);
-        let text: ratatui::text::Text = if self.state.highlight_commands {
-            let command_style = Style::default().fg(self.theme.panel_focus_accent);
-            self.state
-                .value
-                .lines()
-                .map(|line| {
-                    if line.trim_start().starts_with("$ ") {
-                        ratatui::text::Line::styled(line.to_string(), command_style)
-                    } else {
-                        ratatui::text::Line::raw(line.to_string())
-                    }
-                })
-                .collect()
-        } else {
-            ratatui::text::Text::raw(self.state.value.clone())
+        let lines = self.state.wrapped(text_area.width, self.theme);
+        // An offset past the end (`G`, or paging on) shows the last rows.
+        let max_scroll = lines.len().saturating_sub(usize::from(text_area.height));
+        let scroll = usize::from(self.state.scroll).min(max_scroll);
+        *self.fit = ScrollFit {
+            rows: usize::from(text_area.height),
+            max_scroll,
         };
-        Paragraph::new(text)
-            .scroll((self.state.scroll, 0))
-            .wrap(Wrap { trim: false })
+        Paragraph::new(lines)
+            .scroll((u16::try_from(scroll).unwrap_or(u16::MAX), 0))
             .render(text_area, buf);
         let hint = crate::tui::keybindings::overlay::footer(
             crate::tui::keybindings::overlay::VALUE_MODAL_KEYS,

@@ -390,7 +390,9 @@ fn the_rendered_help_modal_shows_every_word_as_you_scroll() {
         let mut state = HelpOverlayState::new();
         for _ in 0..80 {
             let mut buf = Buffer::empty(area);
-            HelpOverlayWidget::new(&state, &theme).render(area, &mut buf);
+            // As the app draws it: what the frame showed sizes the next page.
+            let fit = HelpOverlayWidget::new(&state, &theme).draw(area, &mut buf);
+            state.fit(fit);
             // The text columns only: inside the frame, left of the
             // scrollbar.
             let modal = help_modal_rect(area);
