@@ -648,6 +648,196 @@ fn group_row_secondary_column_starts_at_same_column_across_groups() {
     );
 }
 
+/// Repos `x` (one checkout) and `y` (its main checkout and a worktree
+/// with a long name), a session in each checkout, and a session with no
+/// directory, which belongs to no group. `pin_x` pins the session in
+/// `x`, so the tree reserves the pin marker cell.
+fn nested_groups_world(pin_x: bool) -> GraphSnapshot {
+    let mut snapshot = GraphSnapshot::empty();
+    for name in ["x", "y"] {
+        let repo = RepoId::new(format!("/home/op/src/{name}"));
+        snapshot.nodes.push(GraphNode::Repo(RepoNode::new(repo)));
+    }
+    let checkouts = [
+        ("x", "/home/op/src/x"),
+        ("y", "/home/op/src/y"),
+        ("y", "/home/op/src/y-with-a-much-longer-worktree-name"),
+    ];
+    for (index, (repo, root)) in checkouts.into_iter().enumerate() {
+        let repo = RepoId::new(format!("/home/op/src/{repo}"));
+        snapshot.nodes.push(GraphNode::Checkout(CheckoutNode::new(
+            CheckoutId::new(repo, root),
+            root,
+        )));
+        snapshot.nodes.push(GraphNode::AgentSession(
+            AgentSessionNode::new(
+                AgentSessionId::new("codex", "/state", format!("s{index}")),
+                "codex".to_string(),
+            )
+            .with_cwd(root),
+        ));
+    }
+    snapshot
+        .nodes
+        .push(GraphNode::AgentSession(AgentSessionNode::new(
+            AgentSessionId::new("codex", "/state", "loose"),
+            "codex".to_string(),
+        )));
+    if pin_x {
+        use crate::model::{PinKind, PinSlot, SlotFields};
+        let session = NodeId::AgentSession(AgentSessionId::new("codex", "/state", "s0"));
+        snapshot.pins.push(PinSlot {
+            id: "x-session".to_string(),
+            kind: PinKind::Session,
+            target: Some(session.to_string()),
+            pinned_at: None,
+            overrides: SlotFields::new(),
+            snapshot: SlotFields::new(),
+            order: 0,
+            legacy: false,
+        });
+    }
+    snapshot
+}
+
+/// The Sessions view over `snapshot`, grouped by `grouping`.
+fn sessions_app_over(snapshot: GraphSnapshot, grouping: SessionsGrouping) -> App {
+    let snapshot = resolve_snapshot(snapshot);
+    let mut config = RunConfig::defaults();
+    config.default_view = View::Sessions;
+    config.sessions_grouping = grouping;
+    let mut app = App::new(config);
+    let tree = crate::tui::rows::build_tree_for_view(crate::tui::rows::TreeInputs::from_app(
+        &snapshot, &app,
+    ));
+    app.update(Msg::SetData {
+        snapshot: SnapshotHandle::from_snapshot(&snapshot),
+        tree,
+        loaded_at_epoch: 1_700_000_000,
+        initial_selection_hint: None,
+    });
+    app
+}
+
+/// The left pane's rows, as text, from a 160 x 24 frame.
+fn left_rows(app: &mut App) -> Vec<String> {
+    let buffer = render_to_buffer(app, Rect::new(0, 0, 160, 24));
+    buffer_to_string(&buffer)
+        .lines()
+        .map(|line| line.chars().take(80).collect())
+        .collect()
+}
+
+/// The cell column `needle` starts at in `line`.
+fn cell_column(line: &str, needle: &str) -> Option<usize> {
+    line.find(needle).map(|byte| line[..byte].chars().count())
+}
+
+/// The cell column of a group header's `(N)` count.
+fn count_column(line: &str) -> Option<usize> {
+    let chars: Vec<char> = line.chars().collect();
+    (0..chars.len().saturating_sub(1))
+        .rev()
+        .find(|&index| chars[index] == '(' && chars[index + 1].is_ascii_digit())
+}
+
+/// The cell column of a row's first letter or digit: a group header's
+/// label.
+fn label_column(line: &str) -> Option<usize> {
+    line.chars().position(char::is_alphanumeric)
+}
+
+#[test]
+fn group_columns_hold_still_when_another_group_folds() {
+    // The label, path, and count columns are measured over the whole
+    // tree, so unfolding `y` (whose worktree has a long name) leaves
+    // the columns of `x` where they were.
+    let mut app = sessions_app_over(nested_groups_world(false), SessionsGrouping::Checkout);
+    let x_header = |rows: &[String]| {
+        rows.iter()
+            .find(|row| row.contains('◆') && row.contains("/home/op/src/x"))
+            .cloned()
+            .unwrap_or_else(|| panic!("no header for x:\n{}", rows.join("\n")))
+    };
+    let folded = left_rows(&mut app);
+    let y = app
+        .tree()
+        .rows
+        .iter()
+        .find(|row| {
+            matches!(&row.kind, RowKind::Group(group)
+                if row.depth == 0 && group.display_path.ends_with("/y"))
+        })
+        .map(|row| row.id.clone())
+        .expect("a header for y");
+    assert!(!app.is_expanded(&y), "y starts folded");
+    app.set_selection(y);
+    app.update(Msg::ToggleExpand);
+    let unfolded = left_rows(&mut app);
+    assert!(
+        unfolded
+            .iter()
+            .any(|row| row.contains("y-with-a-much-longer")),
+        "unfolding y shows its worktree:\n{}",
+        unfolded.join("\n")
+    );
+    let (before, after) = (x_header(&folded), x_header(&unfolded));
+    assert_eq!(
+        cell_column(&before, "/home/op/src/x"),
+        cell_column(&after, "/home/op/src/x"),
+        "the path column moved:\n{before}\n{after}"
+    );
+    assert_eq!(
+        count_column(&before),
+        count_column(&after),
+        "the count column moved:\n{before}\n{after}"
+    );
+}
+
+#[test]
+fn a_header_for_no_entity_starts_its_label_in_the_column_of_its_siblings() {
+    // `Ungrouped` has no kind glyph; its glyph cell is left blank so
+    // its label lines up with the repo headers' labels.
+    let mut app = sessions_app_over(nested_groups_world(false), SessionsGrouping::Graph);
+    let rows = left_rows(&mut app);
+    let repo = rows
+        .iter()
+        .find(|row| row.contains('◆') && row.contains("/home/op/src/x"))
+        .expect("a header for x");
+    let ungrouped = rows
+        .iter()
+        .find(|row| row.contains("Ungrouped"))
+        .expect("the Ungrouped header");
+    assert_eq!(
+        label_column(repo),
+        label_column(ungrouped),
+        "\n{repo}\n{ungrouped}"
+    );
+    assert_eq!(count_column(repo), count_column(ungrouped));
+}
+
+#[test]
+fn group_counts_line_up_when_the_pin_marker_cell_is_reserved() {
+    let mut app = sessions_app_over(nested_groups_world(true), SessionsGrouping::Graph);
+    let rows = left_rows(&mut app);
+    assert!(
+        rows.iter().any(|row| row.contains('◉')),
+        "the pinned session is marked:\n{}",
+        rows.join("\n")
+    );
+    let headers: Vec<&String> = rows
+        .iter()
+        .filter(|row| count_column(row).is_some() && !row.contains('●'))
+        .collect();
+    assert!(headers.len() >= 3, "{}", rows.join("\n"));
+    let columns: Vec<_> = headers.iter().map(|row| count_column(row)).collect();
+    assert!(
+        columns.windows(2).all(|pair| pair[0] == pair[1]),
+        "the counts don't line up:\n{}",
+        rows.join("\n")
+    );
+}
+
 #[test]
 fn group_rows_carry_session_count_chip_only_when_no_ambiguity() {
     // ADR 0072: group rows show `(N)` total agents and nothing

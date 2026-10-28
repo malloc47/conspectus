@@ -50,8 +50,14 @@ Every row starts with the same cells, left to right:
 |---|---|---|---|---|
 | 1 | Indent | 2 cells per level | nothing | Flat Sessions (grouping `none`) has no indent |
 | 2 | Disclosure | 2 cells | `▶` collapsed or `▼` expanded, in cyan | Blank when the row has nothing under it |
-| 3 | Kind glyph | 1 cell and a space | what the row is (see [Glyphs](#glyphs)) | Omitted on rows that stand for no entity: the Ungrouped bucket, PR remote and state groups, and the Pinned and History buckets |
+| 3 | Kind glyph | 1 cell and a space | what the row is (see [Glyphs](#glyphs)) | A group header that stands for no entity (the Ungrouped bucket, PR remote and state groups, and the Pinned, History, and Search buckets) has none: the cell is blank when another header in the tree has a glyph, so every header's label starts in one column, and omitted when none has |
 | 4 | Pin marker | 2 cells | `◉` pin on a running entity, `◎` pin on one that isn't | Reserved on every row of the tree once any row in it has a marker, so columns hold still |
+
+A column padded to its widest value (group labels, paths, and counts,
+PR numbers, and the label, status, and chip of a Pinned or History row)
+is measured over every row of the tree, folded groups included, so
+folding or unfolding a group never moves a column. A long name inside a
+folded group still widens its column.
 
 The pin marker is the same pair in every view. In Sessions, Mux, and
 PRs it appears on a row whose entity a pin points at. In Pinned it
@@ -205,14 +211,15 @@ floats sessions that have a mux to the top.
 ### Group header
 
 Workspace `▦`, repo `◆`, checkout `◇`, or the glyph-less Ungrouped
-bucket.
+bucket, whose blank glyph cell keeps its label in the column of the
+others.
 
 | # | Cell | Source | Condition | Style |
 |---|---|---|---|---|
-| 1 | Label | workspace name, or the last part of the path | always | bold, padded to the widest in the tree |
+| 1 | Label | workspace name, or the last part of the path | always | bold, padded to the widest in the tree, folded groups included |
 | 2 | Path | full path with `~`, or members and provider for a workspace | when it differs from the label | dim, cut in the middle to fit |
 | 3 | `(cwd)` | the launch directory | only the group containing where Conspectus was started | cyan |
-| 4 | Count | agent sessions beneath | N > 0 | dim, right-aligned across groups |
+| 4 | Count | agent sessions beneath | N > 0 | dim, in one column across the tree's headers |
 | 5 | `▲` | ambiguous links beneath | any | yellow bold |
 
 A checkout header adds `(linked · locked · prunable)` for those states.
@@ -244,11 +251,11 @@ The text lives only in memory. Pinned and History ignore the filter and say so.
 ┌ ► sessions · mux · prs · pinned · history · search ───────────────────────────────┐
 │▼ ▦   showcase-deck  atelier-repo-a+project  (agent-deck)  (1)                     │
 │    ●   showcase   claude       1m  ⊸  Showcase: agent-deck composite launcher     │
-│▶ ◆   repo-a         ~/atelier-demo/repo-a               (3)                       │
-│▶ ◆   repo-b         ~/atelier-demo/repo-b               (1)                       │
-│▶ ◆   bare-project   ~/checkouts/bare-project            (1)                       │
-│▶ ◆   project        ~/repos/project                     (4)  ▲                    │
-│▶   Ungrouped                                            (1)                       │
+│▶ ◆   repo-a         ~/atelier-demo/repo-a                 (3)                     │
+│▶ ◆   repo-b         ~/atelier-demo/repo-b                 (1)                     │
+│▶ ◆   bare-project   ~/checkouts/bare-project              (1)                     │
+│▶ ◆   project        ~/repos/project                       (4)  ▲                  │
+│▶     Ungrouped                                            (1)                     │
 ```
 
 <!-- frame: keys="jjjjjlj" width=170 height=30 -->
@@ -256,15 +263,15 @@ The text lives only in memory. Pinned and History ignore the filter and say so.
 ┌ ► sessions · mux · prs · pinned · history · search ───────────────────────────────┐
 │▼ ▦   showcase-deck  atelier-repo-a+project  (agent-deck)  (1)                     │
 │    ●   showcase   claude       1m  ⊸  Showcase: agent-deck composite launcher     │
-│▶ ◆   repo-a         ~/atelier-demo/repo-a               (3)                       │
-│▶ ◆   repo-b         ~/atelier-demo/repo-b               (1)                       │
-│▶ ◆   bare-project   ~/checkouts/bare-project            (1)                       │
-│▼ ◆   project        ~/repos/project                     (4)  ▲                    │
+│▶ ◆   repo-a         ~/atelier-demo/repo-a                 (3)                     │
+│▶ ◆   repo-b         ~/atelier-demo/repo-b                 (1)                     │
+│▶ ◆   bare-project   ~/checkouts/bare-project              (1)                     │
+│▼ ◆   project        ~/repos/project                       (4)  ▲                  │
 │    ●   showcase   claude       1m  ∘  ambiguous mux candidate A  Showcase: ambigu…│
 │    ●   showcase   claude       1m  ∘  ambiguous mux candidate B  Showcase: ambigu…│
 │    ●   showcase   claude       1m  ∘  hook-supersession current sessi…  Showcase:…│
 │    ● ◉ showcase   claude       1h  ∘  claude-code in project repo  I expanded `no…│
-│▶   Ungrouped                                            (1)                       │
+│▶     Ungrouped                                            (1)                     │
 ```
 
 <!-- frame: keys="<C-g><C-g><C-g><C-g><C-g>" width=170 height=30 -->
@@ -340,7 +347,7 @@ with the running ones, drawn as a ghost.
 │▼ ◆   bare-project  ~/checkouts/bare-project                                       │
 │    ▣   bare-work                  codex        2h  ∘  Showcase: codex resume via …│
 │▶ ◆   project       ~/repos/project                                                │
-│▶   Ungrouped                                                                      │
+│▶     Ungrouped                                                                    │
 ```
 
 Under a mux with more than one agent attached, each agent is a nested
@@ -360,7 +367,7 @@ Sessions working on a PR's branch are nested beneath it.
 | checkout | `◇`, the forge name (`owner/repo`) in bold, the checkout path dim |
 | checkout, no checkout but a local repo | `◆`, the forge name, the path, and `no checkout` |
 | repo | `◆`, the forge name, the path |
-| PRs with no local repo | no glyph; the repo name in bold, the forge name dim |
+| PRs with no local repo | a blank glyph cell, so the name lines up with the others; the repo name in bold, the forge name dim |
 | state | no glyph; `Open`, `Draft`, `Merged`, `Closed`, or `Other` |
 
 Each ends with the count of sessions beneath its PRs, and `▲` when one of
@@ -392,7 +399,7 @@ two never disagree.
 │▼ ◇   conspectus/project  ~/repos/project  (4)  ▲                                  │
 │  ▶ ⇄   #7 ⌥    2h  ◐  feature/extra  Release notes for 0.3                        │
 │▶ ◆   conspectus/project  ~/repos/project  no checkout                             │
-│▶   project             conspectus/project                                         │
+│▶     project             conspectus/project                                       │
 ```
 
 <!-- frame: keys="3<C-g><C-g>" width=170 height=30 -->

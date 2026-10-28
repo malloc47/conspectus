@@ -64,45 +64,7 @@ pub(super) fn draw_left_panel(app: &mut App, frame: &mut Frame<'_>, area: Rect) 
 
     let now = current_unix_epoch_for_render();
     let summaries = compute_group_summaries(app.tree());
-
-    // Pre-pass over visible group rows. We compute two column
-    // anchors so adjacent group rows read like a table:
-    //   1. `label_width` — the widest label across every visible
-    //      group row. Pads between the label and the secondary
-    //      segment so the secondary column starts at the same
-    //      column on every row.
-    //   2. `body_width` — the widest body (with #1's padding
-    //      already applied) across the rows that will get a
-    //      summary chip block. Rows without a chip block don't
-    //      participate so an idle workspace header doesn't push
-    //      everyone else's chips right.
-    let mut align = GroupAlign::default();
-    for row in &visible {
-        let label_width = group_row_label_width(row);
-        if label_width > align.label_width {
-            align.label_width = label_width;
-        }
-    }
-    for row in &visible {
-        let Some(summary) = summaries.get(&row.id).copied() else {
-            continue;
-        };
-        if summary.agents == 0 {
-            continue;
-        }
-        let body_width = group_row_body_width(row, app, align.label_width);
-        if body_width > align.body_width {
-            align.body_width = body_width;
-        }
-        let count_width = format!("({})", summary.agents).chars().count();
-        if count_width > align.count_width {
-            align.count_width = count_width;
-        }
-    }
-
-    align.pr = PrAlign::of_tree(app.tree());
-    align.mixed = MixedAlign::of_tree(app.tree(), app.theme());
-    align.native_marker = native_marker_reserved(app);
+    let align = GroupAlign::of_tree(app, &summaries);
 
     // Lay rows out against the width the paragraph really gets: the
     // scrollbar gutter is carved out of the pane when the rows overflow it.
@@ -503,36 +465,22 @@ pub(super) fn append_group_body_spans(
     }
 }
 
-/// Width of the group row body (indent + disclosure + label +
-/// secondary + cwd marker), padded to `target_label_width` between
-/// the label and the secondary segment. Used by the left-pane
-/// renderer to align the summary-chip column across visible group
-/// rows. Returns 0 for non-group rows so callers can fold every
-/// visible row through the same width-max.
+/// Width of the group row body (the row prefix, label, secondary, and
+/// cwd marker), with the label padded to `align.label_width`. Used to
+/// align the summary-chip column across the tree's group rows; it
+/// measures the prefix [`render_left_row`] draws, so the two agree.
+/// Returns 0 for non-group rows so callers can fold every row through
+/// the same width-max.
 pub(super) fn group_row_body_width(
     row: &crate::tui::rows::Row,
     app: &App,
-    target_label_width: usize,
+    align: &GroupAlign,
 ) -> usize {
     let RowKind::Group(group) = &row.kind else {
         return 0;
     };
-    let mut spans: Vec<Span<'static>> = Vec::new();
-    let flat_sessions = matches!(
-        app.grouping(),
-        crate::tui::Grouping::Sessions(SessionsGrouping::None)
-    );
-    if !(flat_sessions && matches!(row.kind, RowKind::AgentSession(_))) {
-        spans.push(Span::raw(row_indent(row.depth)));
-    }
-    spans.push(disclosure_span(row, app));
-    // Mirror `render_left_row`'s ADR 0073 prefix glyph so the body
-    // width the pre-pass measures matches the body width the row
-    // renderer actually produces.
-    if let Some(glyph) = row_kind_glyph_span(&row.kind, app.theme()) {
-        spans.push(glyph);
-    }
-    append_group_body_spans(&mut spans, group, app.theme(), target_label_width, None);
+    let mut spans = row_prefix_spans(row, app, align);
+    append_group_body_spans(&mut spans, group, app.theme(), align.label_width, None);
     spans_width(&spans)
 }
 
@@ -580,23 +528,25 @@ pub(super) fn append_group_summary_spans(
     }
 }
 
-/// Column anchors for group-row alignment computed once per render
+/// Column anchors for the rows of a tree, computed once per render
 /// pass. Padding keys the secondary segment and summary chip block
 /// onto consistent columns so adjacent group rows read like a
-/// table; non-group rows ignore these widths.
+/// table; non-group rows ignore these widths. Every width is measured
+/// over the whole tree, folded groups included (ADR 0131's rule), so
+/// folding or unfolding a group never moves the columns of the others.
 #[derive(Clone, Copy, Default)]
 pub(super) struct GroupAlign {
-    /// Max label width across visible group rows. Pads between the
+    /// Max label width across the tree's group rows. Pads between the
     /// label and the secondary segment.
     pub(super) label_width: usize,
-    /// Max body width (label-padded) across visible group rows that
-    /// will get a summary chip block. Pads between the body and the
-    /// `(N)` count plus optional `▲` ambiguity glyph (ADR 0072).
+    /// Max body width (label-padded) across the group rows that get a
+    /// summary chip block. Pads between the body and the `(N)` count
+    /// plus optional `▲` ambiguity glyph (ADR 0072).
     pub(super) body_width: usize,
-    /// Max `(N)` count chip width (including parens) across visible
-    /// group rows with sessions. Right-pads the count chip so any
-    /// trailing ambiguity glyph anchors on the same column whether
-    /// the count is `(2)` or `(72)`.
+    /// Max `(N)` count chip width (including parens) across the group
+    /// rows with sessions. Right-pads the count chip so any trailing
+    /// ambiguity glyph anchors on the same column whether the count is
+    /// `(2)` or `(72)`.
     pub(super) count_width: usize,
     /// Column widths for PR rows (ADR 0131).
     pub(super) pr: PrAlign,
@@ -607,6 +557,48 @@ pub(super) struct GroupAlign {
     /// cell: once any row in the tree is pinned, every row holds its
     /// place so the columns don't move.
     pub(super) native_marker: bool,
+    /// Whether a group header that stands for no entity keeps a blank
+    /// kind glyph cell: once any header in the tree has a glyph, the
+    /// glyph-less ones (`Ungrouped`, a PR remote group) hold its place
+    /// so every header's label starts in the same column.
+    pub(super) group_glyph: bool,
+}
+
+impl GroupAlign {
+    /// The anchors for `app`'s tree, given each group's `summaries`.
+    pub(super) fn of_tree(
+        app: &App,
+        summaries: &std::collections::HashMap<RowId, GroupSummary>,
+    ) -> Self {
+        let tree = app.tree();
+        let mut align = Self {
+            pr: PrAlign::of_tree(tree),
+            mixed: MixedAlign::of_tree(tree, app.theme()),
+            native_marker: native_marker_reserved(app),
+            group_glyph: tree.rows.iter().any(
+                |row| matches!(&row.kind, RowKind::Group(group) if group.primary_node.is_some()),
+            ),
+            ..Self::default()
+        };
+        align.label_width = tree
+            .rows
+            .iter()
+            .map(group_row_label_width)
+            .max()
+            .unwrap_or(0);
+        // Rows without a summary chip block don't take part, so an idle
+        // workspace header doesn't push everyone else's counts right.
+        for row in &tree.rows {
+            let Some(summary) = summaries.get(&row.id).filter(|summary| summary.agents > 0) else {
+                continue;
+            };
+            align.body_width = align.body_width.max(group_row_body_width(row, app, &align));
+            align.count_width = align
+                .count_width
+                .max(format!("({})", summary.agents).chars().count());
+        }
+        align
+    }
 }
 
 /// Whether the native views' pin marker cell is reserved: some row of
@@ -906,41 +898,34 @@ fn mixed_glyph_span(mixed: &crate::tui::rows::MixedRow, theme: &Theme) -> Span<'
     node_kind_glyph_span(mixed.node_kind, theme)
 }
 
-/// Build the rendered line for a single visible row.
-pub(super) fn render_left_row(
+/// The cells every row starts with: indent, disclosure, kind glyph, and
+/// pin marker. The group pre-pass measures headers with it, so it and
+/// [`render_left_row`] agree on where each header's body starts.
+fn row_prefix_spans(
     row: &crate::tui::rows::Row,
     app: &App,
-    is_selected: bool,
-    width: usize,
-    now: i64,
-    group_summary: Option<GroupSummary>,
-    align: GroupAlign,
-) -> Line<'static> {
+    align: &GroupAlign,
+) -> Vec<Span<'static>> {
     let theme = app.theme();
-    // Rows the operator just left in tmux keep their old values,
-    // dimmed, with a spinner where the attach glyph goes, until the
-    // background refresh lands (ADR 0108).
-    let handoff_spinner = app
-        .handoff()
-        .filter(|_| app.row_is_frozen(row))
-        .map(|handoff| spinner_glyph(handoff.started_at));
     let mut spans: Vec<Span<'static>> = Vec::new();
     let flat_sessions = matches!(
         app.grouping(),
         crate::tui::Grouping::Sessions(SessionsGrouping::None)
     );
-    if flat_sessions && matches!(row.kind, RowKind::AgentSession(_)) {
-        spans.push(disclosure_span(row, app));
-    } else {
+    if !(flat_sessions && matches!(row.kind, RowKind::AgentSession(_))) {
         spans.push(Span::raw(row_indent(row.depth)));
-        spans.push(disclosure_span(row, app));
     }
+    spans.push(disclosure_span(row, app));
 
     // ADR 0073: per-row node-kind glyph between the disclosure and
-    // the row body. Skipped for synthetic group buckets without a
-    // backing node.
-    if let Some(glyph) = row_kind_glyph_span(&row.kind, theme) {
-        spans.push(glyph);
+    // the row body. A group header for no entity has none, and leaves
+    // the cell blank when a sibling header has one.
+    match row_kind_glyph_span(&row.kind, theme) {
+        Some(glyph) => spans.push(glyph),
+        None if align.group_glyph && matches!(row.kind, RowKind::Group(_)) => {
+            spans.push(Span::raw("  "));
+        }
+        None => {}
     }
     // Native views mark a pinned entity where it sits, with the marker
     // the Pinned view uses. Once any row is pinned the cell is reserved
@@ -960,6 +945,28 @@ pub(super) fn render_left_row(
     {
         spans.push(pin_marker_span(mixed.marker, theme));
     }
+    spans
+}
+
+/// Build the rendered line for a single visible row.
+pub(super) fn render_left_row(
+    row: &crate::tui::rows::Row,
+    app: &App,
+    is_selected: bool,
+    width: usize,
+    now: i64,
+    group_summary: Option<GroupSummary>,
+    align: GroupAlign,
+) -> Line<'static> {
+    let theme = app.theme();
+    // Rows the operator just left in tmux keep their old values,
+    // dimmed, with a spinner where the attach glyph goes, until the
+    // background refresh lands (ADR 0108).
+    let handoff_spinner = app
+        .handoff()
+        .filter(|_| app.row_is_frozen(row))
+        .map(|handoff| spinner_glyph(handoff.started_at));
+    let mut spans = row_prefix_spans(row, app, &align);
 
     match &row.kind {
         RowKind::Group(group) => {
