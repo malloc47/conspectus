@@ -246,7 +246,7 @@ fn clearing_everything_with_f_removes_the_search_too() {
     finish_with(&mut app, &[&matched], true);
 
     let key = KeyEvent::new(KeyCode::Char('F'), KeyModifiers::SHIFT);
-    let action = crate::tui::runtime::action_for_event(&app, Event::Key(key), 20);
+    let action = crate::tui::runtime::action_for_event(&app, Event::Key(key));
     assert!(
         matches!(action, Some(crate::tui::keymap::Action::ClearFilters)),
         "F clears the filters: {action:?}"

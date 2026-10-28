@@ -519,34 +519,47 @@ fn scroll_preview_by_advances_by_arbitrary_delta() {
 #[test]
 fn adjust_left_scroll_keeps_selection_above_top() {
     let mut app = App::new(RunConfig::defaults());
-    // Selection at line 0 with viewport 5: offset is 0.
-    assert_eq!(app.adjust_left_scroll(0, 5), 0);
+    // Selection at line 0 with viewport 5 over 20 lines: offset is 0.
+    assert_eq!(app.adjust_left_scroll(0, 20, 5), 0);
     // Walk the selection down to line 10; offset advances so
     // the selection is on the bottom edge of the viewport.
-    assert_eq!(app.adjust_left_scroll(10, 5), 6);
+    assert_eq!(app.adjust_left_scroll(10, 20, 5), 6);
     // Walk back up to line 4 — selection moved above the top
     // edge, so the offset retreats to it.
-    assert_eq!(app.adjust_left_scroll(4, 5), 4);
+    assert_eq!(app.adjust_left_scroll(4, 20, 5), 4);
 }
 
 #[test]
 fn adjust_left_scroll_holds_when_selection_inside_viewport() {
     let mut app = App::new(RunConfig::defaults());
     // Prime offset by scrolling to line 10 in a 5-tall viewport.
-    app.adjust_left_scroll(10, 5);
+    app.adjust_left_scroll(10, 20, 5);
     assert_eq!(app.left_scroll(), 6);
     // Move selection within [6, 10] — offset should not change.
-    assert_eq!(app.adjust_left_scroll(8, 5), 6);
-    assert_eq!(app.adjust_left_scroll(7, 5), 6);
-    assert_eq!(app.adjust_left_scroll(10, 5), 6);
+    assert_eq!(app.adjust_left_scroll(8, 20, 5), 6);
+    assert_eq!(app.adjust_left_scroll(7, 20, 5), 6);
+    assert_eq!(app.adjust_left_scroll(10, 20, 5), 6);
+}
+
+#[test]
+fn adjust_left_scroll_never_scrolls_past_the_last_line() {
+    let mut app = App::new(RunConfig::defaults());
+    // The end of a 20-line tree in a 5-tall viewport.
+    assert_eq!(app.adjust_left_scroll(19, 20, 5), 15);
+    // The tree shrank to 8 lines with the selection still inside the
+    // old window: the offset comes back so the last line is at the
+    // bottom.
+    assert_eq!(app.adjust_left_scroll(7, 8, 5), 3);
+    // A tree shorter than the viewport shows from its top.
+    assert_eq!(app.adjust_left_scroll(2, 3, 5), 0);
 }
 
 #[test]
 fn adjust_left_scroll_with_zero_viewport_does_nothing() {
     let mut app = App::new(RunConfig::defaults());
-    app.adjust_left_scroll(10, 5);
+    app.adjust_left_scroll(10, 20, 5);
     let before = app.left_scroll();
-    let returned = app.adjust_left_scroll(99, 0);
+    let returned = app.adjust_left_scroll(99, 100, 0);
     assert_eq!(returned, before);
     assert_eq!(app.left_scroll(), before);
 }

@@ -234,6 +234,10 @@ pub struct App {
     /// visible: draw measures the viewport and dispatches
     /// `Msg::LeftViewportChanged` (ADR 0085 contract 5).
     left_scroll: u16,
+    /// Rows the tree drew in the last frame (from
+    /// `Msg::LeftViewportChanged`); `PageUp` / `PageDown` move the
+    /// selection by this many. Zero before the first frame.
+    left_viewport: u16,
     /// Right-panel explorer scroll offset, in rendered lines. Used
     /// to keep the explorer cursor visible inside the header section
     /// when the Related list grows past the section's height (the
@@ -589,6 +593,7 @@ impl App {
             undo: crate::tui::undo::UndoStack::default(),
             preview_store: PreviewStore::new(),
             left_scroll: 0,
+            left_viewport: 0,
             explorer_scroll: 0,
             last_visible_index: None,
             modal_stack: Vec::new(),
@@ -1261,7 +1266,15 @@ impl App {
     ///   bottom edge moves down (and the offset advances).
     /// - Otherwise the offset is left alone — incidental cursor
     ///   movement inside the viewport doesn't reshuffle the view.
-    pub fn adjust_left_scroll(&mut self, selected_line: usize, viewport_height: u16) -> u16 {
+    /// - The offset never passes `total_lines - viewport_height`, so a
+    ///   tree that shrank (a collapse, a filter) fills the pane rather
+    ///   than leaving blank rows below it with rows hidden above.
+    pub fn adjust_left_scroll(
+        &mut self,
+        selected_line: usize,
+        total_lines: usize,
+        viewport_height: u16,
+    ) -> u16 {
         let vh = viewport_height as usize;
         if vh == 0 {
             return self.left_scroll;
@@ -1272,6 +1285,7 @@ impl App {
         } else if selected_line >= offset + vh {
             offset = selected_line + 1 - vh;
         }
+        let offset = offset.min(total_lines.saturating_sub(vh));
         let clamped = u16::try_from(offset).unwrap_or(u16::MAX);
         self.left_scroll = clamped;
         clamped
@@ -1283,6 +1297,12 @@ impl App {
     /// renderer reads this to size `Paragraph::scroll`.
     pub fn left_scroll(&self) -> u16 {
         self.left_scroll
+    }
+
+    /// Rows the tree drew in the last frame, which a page key moves the
+    /// selection by. Zero before the first frame.
+    pub fn left_viewport(&self) -> u16 {
+        self.left_viewport
     }
 
     /// Reconcile the explorer (right-pane) scroll offset against the
@@ -1444,15 +1464,18 @@ impl App {
                 // one primary line, so the selected row's line
                 // index equals its position in the visible
                 // projection. No selection → no reconciliation
-                // (empty tree keeps scroll at 0).
+                // (empty tree keeps scroll at 0). The height is kept
+                // for the page keys.
+                self.left_viewport = viewport_height;
                 let Some(selected) = self.selection.clone() else {
                     return effects;
                 };
-                let Some(line_idx) = self.visible_rows().iter().position(|r| r.id == selected)
-                else {
+                let visible = self.visible_rows();
+                let total = visible.len();
+                let Some(line_idx) = visible.iter().position(|r| r.id == selected) else {
                     return effects;
                 };
-                self.adjust_left_scroll(line_idx, viewport_height);
+                self.adjust_left_scroll(line_idx, total, viewport_height);
             }
             Msg::ExplorerViewportChanged {
                 cursor_first_row,

@@ -143,8 +143,7 @@ fn run_loop(
         force_preview = false;
         if event::poll(poll_timeout)? {
             let event = event::read()?;
-            let viewport = terminal.size()?.height.saturating_sub(2);
-            let action = action_for_event(&app, event, viewport);
+            let action = action_for_event(&app, event);
             force_preview = matches!(action, Some(Action::Refresh | Action::HardRefresh));
             mode.dispatch(terminal, &mut app, &config, action)?;
         }
@@ -874,10 +873,12 @@ pub(super) fn draw_screen(app: &mut App, frame: &mut ratatui::Frame<'_>) {
 /// translates it and the focus pass routes navigation keys to the
 /// focused pane. The interactive loop and the `--snapshot-keys`
 /// driver both go through here so they can't disagree about what a
-/// key does.
-pub(super) fn action_for_event(app: &App, event: Event, viewport_height: u16) -> Option<Action> {
-    overlay_key_from_event(app, &event)
-        .or_else(|| translate(event, viewport_height).and_then(|a| remap_for_focus(a, app.focus())))
+/// key does. Page keys move the tree by the rows it drew in the last
+/// frame.
+pub(super) fn action_for_event(app: &App, event: Event) -> Option<Action> {
+    overlay_key_from_event(app, &event).or_else(|| {
+        translate(event, app.left_viewport()).and_then(|a| remap_for_focus(a, app.focus()))
+    })
 }
 
 fn overlay_key_from_event(app: &App, event: &Event) -> Option<Action> {

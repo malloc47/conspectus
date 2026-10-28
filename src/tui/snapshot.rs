@@ -142,9 +142,9 @@ pub fn run(config: RunConfig, snap: SnapshotConfig) -> Result<()> {
         &mut app,
         &config,
         keys,
-        snap.height.saturating_sub(2),
+        Rect::new(0, 0, snap.width, snap.height),
         rebase,
-    );
+    )?;
     // One frame, no event loop: read the selection's preview now
     // rather than showing it loading.
     let fixture_root = snap
@@ -197,15 +197,21 @@ fn write_fixture(path: &std::path::Path, snapshot: &GraphSnapshot) -> Result<()>
 
 /// Dispatch the key prelude one key at a time, resolving each through
 /// the same overlay / keymap / focus pipeline as the interactive loop.
+/// Like that loop, a frame of `area` is drawn before each key, so a key
+/// that acts on what was drawn (a page key moving by the rows a pane or
+/// modal showed) does the same here.
 fn drive_keys(
     app: &mut App,
     config: &RunConfig,
     keys: Vec<KeyEvent>,
-    viewport_height: u16,
+    area: Rect,
     rebase: Option<(&std::path::Path, &std::path::Path)>,
-) {
+) -> Result<()> {
+    let mut terminal = Terminal::new(TestBackend::new(area.width, area.height))?;
     for key in keys {
-        if let Some(action) = runtime::action_for_event(app, Event::Key(key), viewport_height) {
+        app.prepare_toast_for_render(area);
+        terminal.draw(|frame| runtime::draw_screen(app, frame))?;
+        if let Some(action) = runtime::action_for_event(app, Event::Key(key)) {
             apply_action(app, config, action, rebase);
             // Overlay keys can start a search; finish it before the
             // next key so the frame is deterministic.
@@ -213,6 +219,7 @@ fn drive_keys(
             runtime::run_pending_content_scans(app, rebase);
         }
     }
+    Ok(())
 }
 
 /// Open the transcript viewer for the selected session, reading the

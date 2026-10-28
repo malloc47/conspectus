@@ -180,9 +180,10 @@ fn drive(app: &mut App, config: &RunConfig, script: &str) {
         app,
         config,
         parse_key_script(script).expect("parse"),
-        30,
+        Rect::new(0, 0, 120, 32),
         None,
-    );
+    )
+    .expect("drive");
 }
 
 #[test]

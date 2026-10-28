@@ -89,6 +89,7 @@ mod lifecycle;
 mod menus;
 mod parity;
 mod rendering;
+mod scrolling;
 mod search_flat;
 mod search_quick;
 mod search_view;
