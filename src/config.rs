@@ -357,9 +357,7 @@ pub struct TuiDetailConfig {
 pub struct TuiViewsConfig {
     pub sessions: TuiViewConfig,
     pub mux: TuiViewConfig,
-    pub union: TuiViewConfig,
     pub prs: TuiViewConfig,
-    pub forks: TuiViewConfig,
     pub pinned: TuiViewConfig,
     pub history: TuiViewConfig,
     pub search: TuiViewConfig,
@@ -371,9 +369,7 @@ impl TuiViewsConfig {
         match view {
             View::Sessions => &self.sessions,
             View::Mux => &self.mux,
-            View::Union => &self.union,
             View::Prs => &self.prs,
-            View::Forks => &self.forks,
             View::Pinned => &self.pinned,
             View::History => &self.history,
             View::Search => &self.search,
@@ -613,11 +609,14 @@ struct TuiViewsFile {
     #[serde(default)]
     mux: Option<TuiViewFile>,
     #[serde(default)]
-    union: Option<TuiViewFile>,
-    #[serde(default)]
     prs: Option<TuiViewFile>,
+    /// Tables for views that no longer exist. Their content is never
+    /// read; they are kept only so the loader can tell the operator
+    /// that the table does nothing now.
     #[serde(default)]
-    forks: Option<TuiViewFile>,
+    union: Option<serde::de::IgnoredAny>,
+    #[serde(default)]
+    forks: Option<serde::de::IgnoredAny>,
 }
 
 #[derive(Clone, Debug, Default, Deserialize)]
@@ -1240,26 +1239,24 @@ fn merge_tui(
             diagnostics,
         );
         merge_tui_view(
-            &mut config.views.union,
-            views.union,
-            View::Union,
-            path,
-            diagnostics,
-        );
-        merge_tui_view(
             &mut config.views.prs,
             views.prs,
             View::Prs,
             path,
             diagnostics,
         );
-        merge_tui_view(
-            &mut config.views.forks,
-            views.forks,
-            View::Forks,
-            path,
-            diagnostics,
-        );
+        for (retired, present) in [("union", views.union), ("forks", views.forks)] {
+            if present.is_some() {
+                diagnostics.push(ConfigDiagnostic {
+                    path: path.to_path_buf(),
+                    message: format!(
+                        "`[tui.views.{retired}]` is ignored: the {retired} view was removed; \
+                         the views are {}",
+                        view_choices()
+                    ),
+                });
+            }
+        }
     }
 
     // Seed the sessions grouping from the legacy alias only when the
@@ -1303,8 +1300,13 @@ fn merge_tui(
             None => diagnostics.push(ConfigDiagnostic {
                 path: path.to_path_buf(),
                 message: format!(
-                    "invalid `[tui] default_view` value `{raw}`; \
-                     expected one of sessions, mux, union, prs, forks"
+                    "invalid `[tui] default_view` value `{raw}`{}; expected one of {}",
+                    if is_retired_view_name(&raw) {
+                        " (that view was removed)"
+                    } else {
+                        ""
+                    },
+                    view_choices()
                 ),
             }),
         }
@@ -1671,13 +1673,27 @@ fn view_config_key(view: View) -> &'static str {
     match view {
         View::Sessions => "sessions",
         View::Mux => "mux",
-        View::Union => "union",
         View::Prs => "prs",
-        View::Forks => "forks",
         View::Pinned => "pinned",
         View::History => "history",
         View::Search => "search",
     }
+}
+
+/// The views `default_view` accepts, spelled as the config and `--view`
+/// spell them, in tab order.
+fn view_choices() -> String {
+    crate::tui::widgets::controls::VIEW_OPTIONS
+        .iter()
+        .map(|view| view_config_key(*view))
+        .collect::<Vec<_>>()
+        .join(", ")
+}
+
+/// Names of views that were removed, so a config written for an older
+/// build is told what happened instead of just "invalid".
+fn is_retired_view_name(raw: &str) -> bool {
+    matches!(raw.trim().to_ascii_lowercase().as_str(), "union" | "forks")
 }
 
 fn grouping_choices_for(view: View) -> String {
@@ -1761,9 +1777,7 @@ fn parse_view_name(raw: &str) -> Option<crate::tui::View> {
     match raw.trim().to_ascii_lowercase().as_str() {
         "sessions" => Some(View::Sessions),
         "mux" => Some(View::Mux),
-        "union" => Some(View::Union),
         "prs" => Some(View::Prs),
-        "forks" => Some(View::Forks),
         "pinned" => Some(View::Pinned),
         "history" => Some(View::History),
         "search" => Some(View::Search),

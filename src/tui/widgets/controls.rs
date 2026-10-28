@@ -60,15 +60,10 @@ pub const MUX_STATE_OPTIONS: &[MuxStateKey] = &[
     MuxStateKey::Unmuxed,
 ];
 
-/// All views displayed in the View section, in stable order.
-///
-/// Union and Forks are intentionally omitted: they were causing
-/// confusion and are hidden from the interactive UI until they mature
-/// (PRs came back with ADR 0114). This constant is the single source of
-/// truth for the controls-overlay View section, the left-pane tab
-/// strip, and the `[` / `]` view-cycle accelerator, so trimming it here
-/// hides those views everywhere without touching the `View` enum or the
-/// `conspectus table union|forks` CLI projections.
+/// All views displayed in the View section, in stable order. This
+/// constant is the single source of truth for the controls-overlay View
+/// section, the left-pane tab strip, and the `[` / `]` view-cycle
+/// accelerator. It lists every [`View`].
 pub const VIEW_OPTIONS: &[View] = &[
     View::Sessions,
     View::Mux,
@@ -1242,9 +1237,7 @@ pub(crate) fn view_label(view: View) -> &'static str {
     match view {
         View::Sessions => "Sessions",
         View::Mux => "Mux",
-        View::Union => "Union",
         View::Prs => "PRs",
-        View::Forks => "Forks",
         View::Pinned => "Pinned",
         View::History => "History",
         View::Search => "Search",

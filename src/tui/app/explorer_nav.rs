@@ -22,7 +22,6 @@ impl App {
             RowId::AgentSession(node) => Some(node.clone()),
             RowId::MuxSession(node) => Some(node.clone()),
             RowId::Pr(node) => Some(node.clone()),
-            RowId::Fork(node) => Some(node.clone()),
             RowId::Pin { pin_id } => Some(NodeId::Pin(PinId::new(pin_id.clone()))),
             RowId::Nested { node, .. } => Some(node.clone()),
             RowId::Hit { session, .. } => Some(session.clone()),

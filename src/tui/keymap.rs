@@ -325,9 +325,9 @@ pub fn selected_default_action(app: &App) -> SelectedDefault {
             MuxIndicator::Unmuxed => SelectedDefault::View,
             MuxIndicator::Attached | MuxIndicator::Ambiguous { .. } => SelectedDefault::Attach,
         },
-        // PR / Fork rows: no muxable target and no viewer;
+        // PR rows: no muxable target and no viewer;
         // fall back to toggle so expandable parents still behave.
-        RowKind::Pr(_) | RowKind::Fork(_) => SelectedDefault::ToggleExpand,
+        RowKind::Pr(_) => SelectedDefault::ToggleExpand,
         // Nested rows act on their own entity: attach a mux, view a
         // session.
         RowKind::Mixed(_) => SelectedDefault::ToggleExpand,

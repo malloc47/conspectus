@@ -468,14 +468,15 @@ pub fn slots_pinning(snapshot: &GraphSnapshot, subject: &PinSubject) -> Vec<Stri
 }
 
 /// The view an entity lives in: the one that lists it, where a gone
-/// entity is only listed in History.
+/// entity is only listed in History. An entity no view lists (a live
+/// fork, say) answers Sessions, where revealing it reports that it
+/// isn't there.
 pub fn natural_view(snapshot: &GraphSnapshot, node: &NodeId) -> crate::tui::View {
     use crate::tui::View;
     let live = snapshot.is_live(node);
     match node {
         NodeId::MuxSession(_) => View::Mux,
         NodeId::Pin(_) => View::Pinned,
-        NodeId::Fork(_) if live => View::Forks,
         NodeId::ForgePr(_) if live => View::Prs,
         _ if !live => View::History,
         _ => View::Sessions,

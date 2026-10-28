@@ -1029,19 +1029,6 @@ pub(super) fn render_left_row(
             let budget = width.saturating_sub(spans_width(&spans));
             spans.extend(render_pr_spans(pr, theme, align.pr, budget, now));
         }
-        RowKind::Fork(fork) => {
-            spans.push(span!(Modifier::BOLD; "{}", fork.fork_label.clone()));
-            if let Some(parent) = &fork.parent_label {
-                spans.push(span!(
-                    Style::default().fg(theme.secondary_text);
-                    "  parent:{parent}"
-                ));
-            }
-            if let Some(scope) = &fork.scope {
-                spans.push(span!(theme.placeholder; "  {scope}"));
-            }
-            spans.push(span!(theme.placeholder; "  ({})", fork.child_count));
-        }
         RowKind::Hit(hit) => {
             let budget = width.saturating_sub(spans_width(&spans));
             spans.extend(render_hit_spans(hit, theme, budget));
@@ -1667,7 +1654,6 @@ pub(super) fn row_kind_glyph_span(kind: &RowKind, theme: &Theme) -> Option<Span<
         RowKind::AgentSession(_) => NodeKind::AgentSession,
         RowKind::MuxSession(_) => NodeKind::MuxSession,
         RowKind::Pr(pr) => return Some(forge_pr_glyph_span(pr, theme)),
-        RowKind::Fork(_) => NodeKind::Fork,
         RowKind::Mixed(mixed) => return Some(mixed_glyph_span(mixed, theme)),
         // A matching turn is drawn under its session without a glyph.
         RowKind::Hit(_) | RowKind::PaneHit(_) => return None,

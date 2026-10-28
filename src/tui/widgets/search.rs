@@ -1365,7 +1365,6 @@ fn search_row_node_kind(id: &RowId) -> Option<NodeKind> {
         RowId::Hit { session, .. } => Some(NodeKind::from(session)),
         RowId::Pane { mux, .. } | RowId::PaneHit { mux, .. } => Some(NodeKind::from(mux)),
         RowId::Pr(_) => Some(NodeKind::ForgePr),
-        RowId::Fork(_) => Some(NodeKind::Fork),
         RowId::Pin { .. } => Some(NodeKind::Pin),
         RowId::Nested { node, .. } => Some(NodeKind::from(node)),
         RowId::History { .. } | RowId::Remote(_) | RowId::Bucket(_) | RowId::Synthetic(_) => None,

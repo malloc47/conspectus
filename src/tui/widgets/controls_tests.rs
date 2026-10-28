@@ -355,16 +355,14 @@ fn float_muxed_checkbox_only_appears_on_sessions_view() {
     assert!(!rows_mux.contains(&ControlsCursor::FilterFloatMuxedSessions));
     assert!(rows_mux.contains(&ControlsCursor::FilterFloatAttachedMuxes));
 
-    for view in [View::Union, View::Prs, View::Forks] {
-        let rows = flatten_rows(&ctx_with(
-            view,
-            Grouping::default_for(view),
-            &filter,
-            Sort::Hierarchy,
-        ));
-        assert!(!rows.contains(&ControlsCursor::FilterFloatMuxedSessions));
-        assert!(!rows.contains(&ControlsCursor::FilterFloatAttachedMuxes));
-    }
+    let rows_prs = flatten_rows(&ctx_with(
+        View::Prs,
+        Grouping::default_for(View::Prs),
+        &filter,
+        Sort::Hierarchy,
+    ));
+    assert!(!rows_prs.contains(&ControlsCursor::FilterFloatMuxedSessions));
+    assert!(!rows_prs.contains(&ControlsCursor::FilterFloatAttachedMuxes));
 }
 
 #[test]
@@ -623,7 +621,13 @@ fn modal_height_budget_covers_the_tallest_body() {
 #[test]
 fn pr_branch_rows_only_appear_on_the_prs_view() {
     let filter = RowFilter::default();
-    for view in [View::Sessions, View::Mux, View::Union, View::Forks] {
+    for view in [
+        View::Sessions,
+        View::Mux,
+        View::Pinned,
+        View::History,
+        View::Search,
+    ] {
         let rows = flatten_rows(&ctx_with(
             view,
             Grouping::default_for(view),
@@ -738,7 +742,13 @@ fn clear_all_resets_the_pr_settings() {
 #[test]
 fn pr_state_row_only_appears_on_the_prs_view() {
     let filter = RowFilter::default();
-    for view in [View::Sessions, View::Mux, View::Union, View::Forks] {
+    for view in [
+        View::Sessions,
+        View::Mux,
+        View::Pinned,
+        View::History,
+        View::Search,
+    ] {
         let rows = flatten_rows(&ctx_with(
             view,
             Grouping::default_for(view),

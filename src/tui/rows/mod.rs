@@ -23,14 +23,12 @@ use crate::model::{AgentSessionId, MuxSessionId, NodeId};
 use crate::tui::View;
 
 pub(crate) mod content;
-pub mod forks;
 pub mod history;
 pub mod mux;
 pub mod pinned;
 pub mod prs;
 pub mod search;
 pub mod sessions;
-pub mod union;
 
 pub use sessions::{SessionsBuildInputs, build_sessions_tree};
 
@@ -47,7 +45,6 @@ pub enum RowId {
     AgentSession(NodeId),
     MuxSession(NodeId),
     Pr(NodeId),
-    Fork(NodeId),
     /// A record row in the History view (ADR 0140), keyed on the
     /// record's stable id.
     History {
@@ -109,9 +106,7 @@ pub enum ViewLabel {
     #[default]
     Sessions,
     Mux,
-    Union,
     Prs,
-    Forks,
     Pinned,
     History,
     Search,
@@ -122,9 +117,7 @@ impl From<View> for ViewLabel {
         match view {
             View::Sessions => Self::Sessions,
             View::Mux => Self::Mux,
-            View::Union => Self::Union,
             View::Prs => Self::Prs,
-            View::Forks => Self::Forks,
             View::Pinned => Self::Pinned,
             View::History => Self::History,
             View::Search => Self::Search,
@@ -155,7 +148,6 @@ pub enum RowKind {
     AgentSession(AgentSessionRow),
     MuxSession(MuxSessionRow),
     Pr(PrRow),
-    Fork(ForkRow),
     /// A row of any kind in the Pinned and History views, drawn in the
     /// shared mixed-kind columns.
     Mixed(MixedRow),
@@ -520,7 +512,7 @@ pub enum MuxIndicator {
     Unmuxed,
 }
 
-/// A mux-session row in the mux or union view.
+/// A mux-session row in the mux view.
 #[derive(Clone, Debug, PartialEq)]
 pub struct MuxSessionRow {
     pub mux: MuxSessionId,
@@ -586,17 +578,6 @@ pub struct PrRow {
     /// The instant behind [`Self::updated_recency`], for its color.
     pub updated_epoch: Option<i64>,
     pub url: Option<String>,
-    pub primary_node: NodeId,
-}
-
-/// A fork row in the forks view.
-#[derive(Clone, Debug, PartialEq)]
-pub struct ForkRow {
-    pub fork_label: String,
-    pub provider: String,
-    pub scope: Option<String>,
-    pub parent_label: Option<String>,
-    pub child_count: usize,
     pub primary_node: NodeId,
 }
 
@@ -934,7 +915,6 @@ pub(crate) fn row_node(id: &RowId) -> Option<&NodeId> {
         | RowId::AgentSession(node)
         | RowId::MuxSession(node)
         | RowId::Pr(node)
-        | RowId::Fork(node)
         | RowId::Nested { node, .. }
         | RowId::Pane { mux: node, .. } => Some(node),
         _ => None,
@@ -1148,16 +1128,16 @@ pub enum RecencyBucket {
 }
 
 // Shared row-assembly helpers (`agent_row`, `mux_indicator`,
-// `session_matches_filter`, …) used by the per-view builders in
-// `rows/{union,prs,forks}.rs` and `output/{prs,forks}.rs`.
+// `session_matches_filter`, …) used by the PRs view builder in
+// `rows/prs.rs`.
 //
 // `rows/mux.rs::agent_row` is separate because it takes a different
 // input struct (`AttachedAgent`).
 
-/// Snapshot of an `AgentSessionNode` prepared for the sessions
-/// / union / prs / forks row builders. The `node_id` field is
-/// the stringified `NodeId::AgentSession(agent.id)` used to
-/// index the `candidate_counts` map.
+/// Snapshot of an `AgentSessionNode` prepared for the PRs row
+/// builder. The `node_id` field is the stringified
+/// `NodeId::AgentSession(agent.id)` used to index the
+/// `candidate_counts` map.
 #[derive(Clone, Debug)]
 pub(crate) struct AgentData<'a> {
     pub node_id: String,
@@ -1166,10 +1146,10 @@ pub(crate) struct AgentData<'a> {
     pub alias: Option<String>,
 }
 
-/// Build an `AgentSession` row for a single `AgentData`. Every
-/// non-mux row-tree builder consumes this — the mux builder
-/// uses its own near-twin (`rows/mux.rs::agent_row`) because
-/// it works over a different input struct.
+/// Build an `AgentSession` row for a single `AgentData`. The PRs
+/// builder consumes this; the mux builder uses its own near-twin
+/// (`rows/mux.rs::agent_row`) because it works over a different
+/// input struct.
 pub(crate) fn agent_row(
     agent: &AgentData<'_>,
     depth: u8,
@@ -1376,11 +1356,6 @@ fn build_tree_for_view_unfiltered(inputs: TreeInputs<'_>) -> RowTree {
                 mux_recency,
             })
         }
-        View::Union => union::build_union_tree(union::UnionBuildInputs {
-            snapshot,
-            home: home.as_deref(),
-            filter,
-        }),
         View::Prs => prs::build_prs_tree(prs::PrsBuildInputs {
             snapshot,
             home: home.as_deref(),
@@ -1391,10 +1366,6 @@ fn build_tree_for_view_unfiltered(inputs: TreeInputs<'_>) -> RowTree {
             filter,
             now,
             cwd,
-        }),
-        View::Forks => forks::build_forks_tree(forks::ForksBuildInputs {
-            snapshot,
-            home: home.as_deref(),
         }),
         View::History => history::build_history_tree(history::HistoryBuildInputs {
             snapshot,

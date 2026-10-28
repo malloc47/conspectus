@@ -88,7 +88,7 @@ Every glyph is one that DejaVu Sans Mono draws at exactly one cell, or one every
 | `◎` | pin on an entity that is stopped, removed, missing, unknown, or not started | ghost | The pin marker cell, in every view |
 | `◈` | runtime process | process color | Never drawn in the left panel |
 | `⌥` | branch | green | Pinned branch pins; and on a PR row, a pull request whose branch exists locally |
-| `⋎` | fork | light magenta | Fork rows; Pinned fork pins |
+| `⋎` | fork | light magenta | Pinned fork pins |
 | `⇄` | pull request | by state: open green, draft yellow, merged magenta, closed red | PR rows; Pinned and History PRs |
 | `⊸` | linked: a session with a definitive mux, or a mux with a client attached | green | Session rows, Mux rows, nested sessions |
 | `∘` | not linked: a session with no definitive mux (none or ambiguous), or a mux with no client | dim | Session rows, Mux rows, nested sessions |
@@ -697,28 +697,3 @@ prefixed with the mux's name and the pane's place, padded to 16.
 │  ● ◉ showcase   claude       1h  ∘  project           2 hits  │
 │  ●   showcase   pi           2h  ∘  repo-a            2 hits  │
 ```
-
-## Union view
-
-Reachable only with `--view union`; it is not in the tab bar. It lists
-every session, then every mux, flat, with the Session and Mux columns
-above. It shows no pin marker, and its ages read `—` because it does not
-measure time.
-
-## Forks view
-
-Reachable only with `--view forks`; it is not in the tab bar. Groupings:
-by provider or by parent (the choice currently does not change the
-tree).
-
-### Fork row
-
-| # | Cell | Source | Style |
-|---|---|---|---|
-| 1 | Prefix | indent, disclosure, `⋎` | |
-| 2 | Label | `provider:name`, or the source key | bold |
-| 3 | Parent | `parent:<label>` | gray |
-| 4 | Scope | where the fork lives (a workspace, say) | dim |
-| 5 | Count | `(N)` child sessions | dim |
-
-Child sessions nest beneath as [Session rows](#session-row).

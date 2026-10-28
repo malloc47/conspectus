@@ -253,9 +253,7 @@ pub(super) fn view_flag_label(view: crate::tui::View) -> &'static str {
     match view {
         crate::tui::View::Sessions => "sessions",
         crate::tui::View::Mux => "mux",
-        crate::tui::View::Union => "union",
         crate::tui::View::Prs => "prs",
-        crate::tui::View::Forks => "forks",
         crate::tui::View::Pinned => "pinned",
         crate::tui::View::History => "history",
         crate::tui::View::Search => "search",

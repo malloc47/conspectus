@@ -58,6 +58,37 @@ fn unknown_view_value_collapses_to_none() {
 }
 
 #[test]
+fn state_saved_in_a_removed_view_costs_only_that_view() {
+    let dir = TempDir::new().expect("tempdir");
+    let cache = cache_in(&dir);
+    let path = cache.path().expect("path");
+    fs::create_dir_all(path.parent().unwrap()).expect("mkdir");
+    fs::write(
+        &path,
+        r#"{
+            "schema_version": 1,
+            "last_view": "union",
+            "sort": "recency",
+            "view_states": {
+                "union": {"grouping": {"Union": "kind"}},
+                "forks": {"grouping": {"Forks": "provider"}},
+                "mux": {"grouping": {"Mux": "repo"}}
+            }
+        }"#,
+    )
+    .expect("write state from a build that had the views");
+
+    assert!(read_last_view(&cache).is_none());
+    let state = read_tui_state(&cache).expect("the rest of the state still loads");
+    assert_eq!(state.last_view, None);
+    assert_eq!(state.sort, Some(Sort::Recency));
+    assert_eq!(
+        state.view_states.keys().copied().collect::<Vec<_>>(),
+        vec![View::Mux]
+    );
+}
+
+#[test]
 fn unknown_fields_round_trip_through_write() {
     let dir = TempDir::new().expect("tempdir");
     let cache = cache_in(&dir);

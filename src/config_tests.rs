@@ -1260,6 +1260,14 @@ fn load_tui_config(body: &str) -> crate::config::LoadOutcome {
         .load_from(&project)
 }
 
+fn diagnostic_messages(outcome: &LoadOutcome) -> Vec<String> {
+    outcome
+        .diagnostics
+        .iter()
+        .map(|d| d.message.clone())
+        .collect()
+}
+
 #[test]
 fn tui_default_view_is_unset_by_default() {
     let outcome = load_tui_config("[tui]\n");
@@ -1286,6 +1294,57 @@ fn tui_default_view_unknown_value_diagnoses_and_stays_unset() {
         "{:?}",
         outcome.diagnostics
     );
+}
+
+#[test]
+fn tui_default_view_unknown_value_names_the_valid_views() {
+    let outcome = load_tui_config("[tui]\ndefault_view = \"graph\"\n");
+    assert_eq!(
+        diagnostic_messages(&outcome),
+        vec![
+            "invalid `[tui] default_view` value `graph`; \
+             expected one of sessions, mux, prs, pinned, history, search"
+        ]
+    );
+}
+
+#[test]
+fn tui_default_view_removed_views_diagnose_and_name_the_valid_views() {
+    for removed in ["union", "forks", "Union"] {
+        let outcome = load_tui_config(&format!("[tui]\ndefault_view = \"{removed}\"\n"));
+        assert_eq!(outcome.config.tui.default_view, None, "{removed}");
+        assert_eq!(
+            diagnostic_messages(&outcome),
+            vec![format!(
+                "invalid `[tui] default_view` value `{removed}` (that view was removed); \
+                 expected one of sessions, mux, prs, pinned, history, search"
+            )],
+            "{removed}"
+        );
+    }
+}
+
+#[test]
+fn tui_views_tables_for_removed_views_diagnose_and_name_the_valid_views() {
+    for removed in ["union", "forks"] {
+        let outcome = load_tui_config(&format!(
+            "[tui.views.{removed}]\ngrouping = \"kind\"\n\n[tui.views.mux]\ngrouping = \"repo\"\n"
+        ));
+        assert_eq!(
+            diagnostic_messages(&outcome),
+            vec![format!(
+                "`[tui.views.{removed}]` is ignored: the {removed} view was removed; \
+                 the views are sessions, mux, prs, pinned, history, search"
+            )],
+            "{removed}"
+        );
+        // The tables that remain still load.
+        assert_eq!(
+            outcome.config.tui.views.mux.grouping,
+            Some(Grouping::Mux(crate::tui::MuxGrouping::Repo)),
+            "{removed}"
+        );
+    }
 }
 
 #[test]

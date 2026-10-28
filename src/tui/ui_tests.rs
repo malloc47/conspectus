@@ -454,28 +454,20 @@ fn seeded_app_with_harness_chips() -> App {
 
 #[test]
 fn left_panel_title_renders_a_view_tab_strip() {
-    // The left pane title lists the surfaced views as a tab strip
-    // with the active one accented. Only Sessions and Mux are
-    // surfaced (Union/PRs/Forks are hidden), so the
-    // strip carries exactly those two.
+    // The left pane title lists the views as a tab strip with the
+    // active one accented.
     let mut app = seeded_app();
     let area = Rect::new(0, 0, 160, 24);
     let buffer = render_to_buffer(&mut app, area);
     let text = buffer_to_string(&buffer);
     let title_line = text
         .lines()
-        .find(|l| l.contains("sessions") && l.contains("mux"))
+        .find(|l| l.contains("sessions · mux"))
         .expect("left pane tab strip line present");
-    for label in ["sessions", "mux"] {
+    for label in ["sessions", "mux", "prs", "pinned", "history", "search"] {
         assert!(
             title_line.contains(label),
             "tab strip missing `{label}`: {title_line}",
-        );
-    }
-    for label in ["union", "prs", "forks"] {
-        assert!(
-            !title_line.contains(label),
-            "tab strip should not list hidden view `{label}`: {title_line}",
         );
     }
 }
@@ -1696,7 +1688,7 @@ fn pr_tracking_span_tells_a_local_branch_from_none() {
 
 #[test]
 fn row_kind_glyph_span_dispatches_per_row_kind() {
-    use crate::tui::rows::{ForkRow, GroupRow};
+    use crate::tui::rows::GroupRow;
     let theme = Theme::default();
 
     // Group rows derive their kind from `primary_node`; synthetic
@@ -1776,18 +1768,6 @@ fn row_kind_glyph_span_dispatches_per_row_kind() {
             .as_deref(),
         Some("▣ "),
     );
-    // Fork rows get `⋎`.
-    let fork = RowKind::Fork(ForkRow {
-        fork_label: "alpha".into(),
-        provider: "github".into(),
-        scope: None,
-        parent_label: None,
-        child_count: 0,
-        primary_node: NodeId::Fork(crate::model::ForkId::new("alpha")),
-    });
-    let fork_glyph = row_kind_glyph_span(&fork, &theme).unwrap();
-    assert_eq!(fork_glyph.content, "⋎ ");
-    assert_eq!(fork_glyph.style.fg, Some(theme.node_fork));
 }
 
 #[test]

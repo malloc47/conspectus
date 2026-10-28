@@ -2619,6 +2619,41 @@ fn tui_rejects_unknown_view_value() {
 }
 
 #[test]
+fn tui_rejects_removed_view_values_and_names_the_valid_views() {
+    for removed in ["union", "forks"] {
+        Command::cargo_bin("conspectus")
+            .expect("conspectus binary exists")
+            .args(["tui", "--view", removed])
+            .assert()
+            .failure()
+            .stderr(predicate::str::contains(format!(
+                "invalid value '{removed}' for '--view <VIEW>'"
+            )))
+            .stderr(predicate::str::contains(
+                "[possible values: sessions, mux, prs, pinned, history, search]",
+            ));
+    }
+}
+
+#[cfg(debug_assertions)]
+#[test]
+fn dev_scenario_tui_rejects_removed_view_values_and_names_the_valid_views() {
+    for removed in ["union", "forks"] {
+        Command::cargo_bin("conspectus")
+            .expect("conspectus binary exists")
+            .args(["dev", "scenario", "tui", "ambiguous-mux", "--view", removed])
+            .assert()
+            .failure()
+            .stderr(predicate::str::contains(format!(
+                "invalid value '{removed}' for '--view <VIEW>'"
+            )))
+            .stderr(predicate::str::contains(
+                "[possible values: sessions, mux, prs, pinned, history, search]",
+            ));
+    }
+}
+
+#[test]
 fn tui_rejects_malformed_refresh_interval() {
     Command::cargo_bin("conspectus")
         .expect("conspectus binary exists")

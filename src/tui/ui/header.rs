@@ -430,9 +430,7 @@ pub(super) fn view_label(view: View) -> &'static str {
     match view {
         View::Sessions => "sessions",
         View::Mux => "mux",
-        View::Union => "union",
         View::Prs => "prs",
-        View::Forks => "forks",
         View::Pinned => "pinned",
         View::History => "history",
         View::Search => "search",

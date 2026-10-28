@@ -196,8 +196,7 @@ fn translate_ctrl_g_cycles_grouping() {
 
 #[test]
 fn translate_digits_switch_views_directly() {
-    // Sessions, Mux, PRs, Pinned, History, and Search are surfaced in the UI; the
-    // hidden Union and Forks views have no digit accelerators.
+    // Sessions, Mux, PRs, Pinned, History, and Search each have a digit.
     let cases = [
         ('1', View::Sessions),
         ('2', View::Mux),
@@ -217,7 +216,7 @@ fn translate_digits_switch_views_directly() {
         assert_eq!(
             translate(press(KeyCode::Char(ch), KeyModifiers::NONE), 24),
             None,
-            "hidden view char {ch}"
+            "no view on char {ch}"
         );
     }
 }

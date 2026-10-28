@@ -356,9 +356,7 @@ fn view_to_snake_case(view: View) -> &'static str {
     match view {
         View::Sessions => "sessions",
         View::Mux => "mux",
-        View::Union => "union",
         View::Prs => "prs",
-        View::Forks => "forks",
         View::Pinned => "pinned",
         View::History => "history",
         View::Search => "search",
@@ -369,9 +367,7 @@ fn view_from_snake_case(value: &str) -> Option<View> {
     match value {
         "sessions" => Some(View::Sessions),
         "mux" => Some(View::Mux),
-        "union" => Some(View::Union),
         "prs" => Some(View::Prs),
-        "forks" => Some(View::Forks),
         "pinned" => Some(View::Pinned),
         "history" => Some(View::History),
         "search" => Some(View::Search),

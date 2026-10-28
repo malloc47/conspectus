@@ -7,12 +7,10 @@ use super::*;
 pub(super) const NOW: i64 = 1_700_000_000;
 
 /// Every view the operator can switch to.
-pub(super) const ALL_VIEWS: [View; 8] = [
+pub(super) const ALL_VIEWS: [View; 6] = [
     View::Sessions,
     View::Mux,
-    View::Union,
     View::Prs,
-    View::Forks,
     View::Pinned,
     View::History,
     View::Search,

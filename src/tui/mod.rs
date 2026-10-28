@@ -211,17 +211,14 @@ impl RunConfig {
     }
 }
 
-/// Which of the registered row-tree views to render initially.
-/// Mirrors `Projection` from `conspectus table <ROWS>` so the
-/// terminology stays consistent across CLI and TUI.
+/// Which of the registered row-tree views to render initially. The
+/// names are the `--view` values and the `[tui.views.*]` config keys.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum View {
     Sessions,
     Mux,
-    Union,
     Prs,
-    Forks,
     /// Pin slots, whatever their kind (ADR 0141).
     Pinned,
     /// Gone entities Conspectus remembers (ADR 0140).
@@ -405,14 +402,6 @@ pub enum MuxGrouping {
     Workspace,
 }
 
-/// Top-level grouping in the union view (per ADR 0031).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum UnionGrouping {
-    Kind,
-    Repo,
-}
-
 /// Top-level grouping in the PRs view (ADR 0031, ADR 0114).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -423,14 +412,6 @@ pub enum PrsGrouping {
     Repo,
     /// By state: open, draft, merged, closed.
     State,
-}
-
-/// Top-level grouping in the forks view (per ADR 0031).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum ForksGrouping {
-    Provider,
-    Parent,
 }
 
 /// Top-level grouping in the Pinned view (ADR 0141).
@@ -484,9 +465,7 @@ pub enum SearchGrouping {
 pub enum Grouping {
     Sessions(SessionsGrouping),
     Mux(MuxGrouping),
-    Union(UnionGrouping),
     Prs(PrsGrouping),
-    Forks(ForksGrouping),
     Pinned(PinnedGrouping),
     History(HistoryGrouping),
     Search(SearchGrouping),
@@ -498,9 +477,7 @@ impl Grouping {
         match self {
             Self::Sessions(_) => View::Sessions,
             Self::Mux(_) => View::Mux,
-            Self::Union(_) => View::Union,
             Self::Prs(_) => View::Prs,
-            Self::Forks(_) => View::Forks,
             Self::Pinned(_) => View::Pinned,
             Self::History(_) => View::History,
             Self::Search(_) => View::Search,
@@ -514,9 +491,7 @@ impl Grouping {
         match view {
             View::Sessions => Self::Sessions(SessionsGrouping::Graph),
             View::Mux => Self::Mux(MuxGrouping::Session),
-            View::Union => Self::Union(UnionGrouping::Kind),
             View::Prs => Self::Prs(PrsGrouping::Checkout),
-            View::Forks => Self::Forks(ForksGrouping::Provider),
             View::Pinned => Self::Pinned(PinnedGrouping::Project),
             View::History => Self::History(HistoryGrouping::Project),
             View::Search => Self::Search(SearchGrouping::None),
@@ -531,20 +506,15 @@ impl Grouping {
             Self::Sessions(SessionsGrouping::Workspace) | Self::Mux(MuxGrouping::Workspace) => {
                 "workspace"
             }
-            Self::Sessions(SessionsGrouping::Repo)
-            | Self::Mux(MuxGrouping::Repo)
-            | Self::Union(UnionGrouping::Repo) => "repo",
+            Self::Sessions(SessionsGrouping::Repo) | Self::Mux(MuxGrouping::Repo) => "repo",
             Self::Sessions(SessionsGrouping::Checkout) => "checkout",
             Self::Sessions(SessionsGrouping::ScanRoot) => "scan-root",
             Self::Sessions(SessionsGrouping::None) => "none",
             Self::Mux(MuxGrouping::Session) => "session",
             Self::Mux(MuxGrouping::Host) => "host",
-            Self::Union(UnionGrouping::Kind) => "kind",
             Self::Prs(PrsGrouping::Checkout) => "checkout",
             Self::Prs(PrsGrouping::Repo) => "repo",
             Self::Prs(PrsGrouping::State) => "state",
-            Self::Forks(ForksGrouping::Provider) => "provider",
-            Self::Forks(ForksGrouping::Parent) => "parent",
             Self::Pinned(PinnedGrouping::Project) => "project",
             Self::Pinned(PinnedGrouping::Kind) => "kind",
             Self::Pinned(PinnedGrouping::None) => "none",
@@ -588,18 +558,10 @@ impl Grouping {
                 Self::Mux(MuxGrouping::Repo),
                 Self::Mux(MuxGrouping::Workspace),
             ],
-            View::Union => &[
-                Self::Union(UnionGrouping::Kind),
-                Self::Union(UnionGrouping::Repo),
-            ],
             View::Prs => &[
                 Self::Prs(PrsGrouping::Checkout),
                 Self::Prs(PrsGrouping::Repo),
                 Self::Prs(PrsGrouping::State),
-            ],
-            View::Forks => &[
-                Self::Forks(ForksGrouping::Provider),
-                Self::Forks(ForksGrouping::Parent),
             ],
             View::Pinned => &[
                 Self::Pinned(PinnedGrouping::Project),
@@ -659,16 +621,8 @@ mod tests {
             Grouping::Mux(MuxGrouping::Session)
         );
         assert_eq!(
-            Grouping::default_for(View::Union),
-            Grouping::Union(UnionGrouping::Kind)
-        );
-        assert_eq!(
             Grouping::default_for(View::Prs),
             Grouping::Prs(PrsGrouping::Checkout)
-        );
-        assert_eq!(
-            Grouping::default_for(View::Forks),
-            Grouping::Forks(ForksGrouping::Provider)
         );
     }
 
@@ -677,9 +631,7 @@ mod tests {
         for view in [
             View::Sessions,
             View::Mux,
-            View::Union,
             View::Prs,
-            View::Forks,
             View::Pinned,
             View::History,
             View::Search,
@@ -729,9 +681,7 @@ mod tests {
         for view in [
             View::Sessions,
             View::Mux,
-            View::Union,
             View::Prs,
-            View::Forks,
             View::Pinned,
             View::History,
             View::Search,
