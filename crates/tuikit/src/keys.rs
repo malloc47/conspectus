@@ -71,7 +71,8 @@
 //! The tables of its own overlays (their action enums, verbs, and notes),
 //! what an action does, which actions are available now, and its
 //! program-wide keymap. A later step adds a scoped program-wide keymap
-//! here, and the help generator reads these tables.
+//! here. The help generator ([`help::sections_for`](crate::help::sections_for))
+//! reads these tables.
 
 mod footer;
 mod matcher;

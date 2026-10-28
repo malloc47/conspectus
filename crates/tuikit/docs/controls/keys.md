@@ -220,9 +220,10 @@ pager's stepping is the pager's; its keys come from here). Half-page
 - **A scoped program-wide keymap.** The host's main keymap keeps its own
   table for now. A later step adds scopes (program, pane focus, overlay)
   whose rows carry help text, built on `KeyMatcher` and `KeyRow`.
-- **Generated help pages.** `rows` and `key_label` are what a help-page
-  generator reads; the generator and the page renderer join the `help`
-  module.
+- **Generated help pages.** `rows` and `key_label` are what the `help`
+  module's generator reads: `help::sections_for` turns a table and a
+  description per action into a help page, and `help::undescribed` finds
+  a key it would leave out (see [help.md](help.md)).
 - **Key notation round trip.** `key_label` writes keys; parsing the same
   notation back into a matcher (for configuration or a test key DSL) would
   sit beside it.

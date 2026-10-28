@@ -63,7 +63,8 @@ each names its module path.
 | --- | --- | --- |
 | Text entry | `LineEdit` and `TextField`; `TextPrompt<M>`; `PathField`; `Form<M>` | planned |
 | Choice and command | `ActionMenu<M>`; `Dialog<M>`; `Checklist`; `Palette<R>` (filter picker, quick select, content search, and a command palette are instances); `SettingsPanel<M>` | planned |
-| Reading | `Pager` with `Find`; `HelpPage`; `LogList`; `richtext` (a cargo feature) | planned |
+| Reading | `Pager` with `Find`; `LogList`; `richtext` (a cargo feature) | planned |
+| Reading | `HelpPage` (in the `help` convention module, below) | landed |
 | Data display | `TreeView<R>` with `TreeState<Id>` and `ColumnSchema`; `PropertyGrid`; `Explorer` | planned |
 | Feedback | `Toasts` | planned |
 | Chrome | `AppFrame`; `TabBar`; `StatusBar`; `EmptyState`; the pane frame with its focus cue | planned |
@@ -74,7 +75,7 @@ each names its module path.
 | --- | --- | --- |
 | `keys` | The key-table model: matchers with one rule for characters, rows that can include another table and carry availability, hints, resolving a key against a table, footers in one grammar (dimming what cannot act now), one key-label notation, the `KeyRole` classifier and the modal key convention checked by it, and checks for mislabeled, shadowed, and loosely bound rows; standard tables and action enums for menus, confirm and choice dialogs, pagers, text input, checklists, and forms. Later: a scoped program-wide keymap. Page: [controls/keys.md](controls/keys.md) | landed |
 | `overlay` | The `Overlay<M, Cx>` contract (`handle` and `render`, and whether an overlay fills the screen), `Outcome<M>` (consumed, close, commit, stay), and `ModalStack<E>` over the host's entry type, which the host owns and passes its state to as `&Cx`, which routes a key to the top entry and closes it for a close or a commit, and which draws every entry from bottom to top. Page: [controls/overlay.md](controls/overlay.md) | landed |
-| `help` | The generator that turns key tables into help pages, and the page renderer | planned |
+| `help` | `HelpPage`, the one help page: bold headings, keys in an accent column with descriptions wrapped beside them, legend rows for marks, a scrollbar, and a footer generated from the key table that scrolls and closes it, in the reader-sized modal frame; `sections_for`, which generates a page from a key table and a `HelpAction` description per action, and `undescribed`, which finds a key the page would leave out; `HelpScroll`, which pages by the rows shown and takes an offset past the end back at the next draw. Page: [controls/help.md](controls/help.md) | landed |
 | `focus` | Declared focus rules: the pane focus cue, the modal focus lock, the Tab cycle | planned |
 | `feedback` | One `Feedback { severity, text, ttl }` type feeding three channels (status line, toast, message log); a bounded, repeat-collapsing log; the clipboard sink | planned |
 | `testkit` | Buffer inspection; a key DSL; an ANSI-preserving one-frame driver; a convention conformance suite (`assert_conventions` over a registry of overlays); source-scan helpers; documentation-table sync | planned |

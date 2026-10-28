@@ -19,6 +19,7 @@ pub mod age;
 pub mod chip;
 pub mod frame;
 pub mod glyphs;
+pub mod help;
 pub mod keys;
 pub mod overlay;
 pub mod scroll;
