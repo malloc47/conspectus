@@ -70,6 +70,20 @@ Targeted for 0.2.0, after 0.1.0 is tagged. History, rebuild, and pins
   nothing: `Enter` did not copy them, and `o` said the row had no
   truncated value even beside a `(truncated · o)` hint. Both now act on
   the field under the cursor, expanded or not.
+- **A pull request's state reads one way everywhere.** A closed or merged
+  PR still marked draft drew a draft-yellow `⇄` beside its red or
+  magenta state glyph. The state now beats the draft flag in every cell,
+  view, and group: only an open draft reads as a draft, and a PR with no
+  state reads `?` (`unknown` in Pinned and History), draft or not.
+- **Group headers line up.** The label, path, and count columns are
+  measured over the whole tree, so unfolding a group no longer moves the
+  others' columns (a long name inside a folded group widens them
+  instead); the counts line up when a pin marker is shown, and
+  `Ungrouped` and a PR group with no local repo start their name in the
+  column of the headers beside them.
+- **Chips stay chips on the selected row.** A program chip no longer
+  turns into the selection highlight; like a harness chip, it keeps its
+  look.
 - **Harness hooks work while `conspectus serve` runs.** The daemon
   applied each hook observation to its live graph only, and the next
   refresh, a few seconds later, dropped it. It now records the

@@ -545,3 +545,41 @@ reproductions are the tree tests in
   Pinned tree left one row drawn with six scrolled off above and the rest of
   the pane blank. `adjust_left_scroll` now clamps the offset to
   `rows - viewport`.
+
+## Verification (CSP-714)
+
+I1 (with D7), I5, I6, and the selected-chip question (section 8, open
+question 11) were reproduced and fixed before the extraction; the
+reproductions are tests in `src/tui/ui_tests.rs` and `src/tui/rows/`.
+`docs/tui-columns.md` states each rule.
+
+- **I1 / D7.** Confirmed for every state crossed with the draft flag: a
+  closed or merged draft drew a yellow `⇄` beside its red `⊗` or magenta
+  `⊕`; an upper-case `CLOSED` left `⇄` green (the kind glyph didn't fold
+  case); a draft with no state read `◐` while one with an empty state
+  read `?`. `PrStatus::of` (`src/tui/rows/pr_status.rs`) is now the one
+  rule, state beats draft (the rule ADRs 0131 and 0134 already gave the
+  state column and the filter): only an open PR reads as a draft, and no
+  state reads `?`/`unknown`, draft or not. `PrStatus::mark` is the one
+  glyph-and-style mapping. The PR row, the kind glyphs, the Pinned and
+  History words and hues, the state groups, and the help legend use them;
+  the five other mappings are gone. The rule needs the operator's
+  confirmation in review.
+- **I5.** Confirmed: in checkout grouping, unfolding a repo whose worktree
+  has a long name moved every other header's path column from 15 to 39
+  and its count column with it. The label, body, and count widths are now
+  measured over the whole tree (the document was right). The pre-pass
+  also left out the pin marker cell the renderer draws, so once a pin
+  reserved it the widest headers' counts sat two cells right of the rest
+  (visible in the old Sessions frames as `(1)` beside `(3)`); both now
+  build the prefix with `row_prefix_spans`.
+- **I6.** Confirmed: `Ungrouped`, and a PR remote group, started their
+  label two cells left of their siblings. A header for no entity now
+  leaves its glyph cell blank when another header in the tree has a
+  glyph, like the pin marker cell. Trees whose headers all lack one
+  (Pinned, History, Search buckets, PR state groups) are unchanged.
+- **Selected chip.** The harness chip did keep its normal look (REVERSED
+  on REVERSED), confirmed in the ANSI of a `--snapshot` frame, but a
+  program chip, whose fill is a background, inverted and blended into the
+  highlight. The chosen look is the first: every filled chip keeps the
+  look it has on every other row, so it still reads as a chip.
