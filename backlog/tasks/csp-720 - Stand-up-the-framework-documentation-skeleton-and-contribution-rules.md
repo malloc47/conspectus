@@ -4,6 +4,7 @@ title: Stand up the framework documentation skeleton and contribution rules
 status: To Do
 assignee: []
 created_date: '2026-10-27 20:26'
+updated_date: '2026-10-28 03:40'
 labels:
   - tui-framework
   - tuifw-workspace
@@ -45,3 +46,9 @@ Blockers: The workspace conversion.
 - [ ] #1 `just check` passes, or `git diff --check` for docs-only changes
 - [ ] #2 Docs and ADRs are updated when behavior, architecture, or workflow change
 <!-- DOD:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+Handoff from CSP-719: the table of which repo hygiene rules apply to the framework, and why the rest do not, is the module doc of `tests/support/source_tree.rs` in the root workspace. Move it into `crates/tuikit/docs/contributing.md` (keeping the words the framework cannot use out of it; see the guard's `DOMAIN_TERMS`), and leave a pointer behind so the two do not drift. The same module doc explains how to raise a scan's minimum file count when code moves into the framework.
+<!-- SECTION:NOTES:END -->
