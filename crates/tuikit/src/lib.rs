@@ -1,22 +1,16 @@
-//! A terminal UI framework built on ratatui.
-//!
-//! The crate covers two layers:
-//!
-//! - **Components and design tokens:** widgets, theme and palette, glyphs,
-//!   chips, text and scroll helpers, and layout frames.
-//! - **Interaction conventions:** key tables that generate footers and help,
-//!   the overlay and modal-stack contract, focus rules, a feedback model, and
-//!   a test kit.
-//!
-//! The application runtime stays with the host: the event loop, the effect
-//! lifecycle, and terminal hand-off belong to the program that uses these
-//! controls.
-//!
-//! The crate depends on nothing from the program that hosts it, spawns no
-//! process, and writes no file. Host meaning enters through type parameters,
-//! closures, traits, and a named-style registry. The guard tests in
-//! `tests/independence.rs` enforce this and document how to request a
-//! reviewed exception.
-//!
-//! This crate is not published: it carries no semver promise, and it can
-//! move to its own repository as a directory lift.
+// The crate-level documentation is the README, so the two cannot drift. The
+// README keeps its links relative and tags every code fence, because an
+// untagged fence would compile as a doctest.
+#![doc = include_str!("../README.md")]
+// Documentation is part of the public API: a public module or item without
+// docs fails the build. These lints live in the crate, not in the workspace
+// lint table, for two reasons. Cargo does not let a package extend the
+// workspace table (`lints.workspace = true` excludes any other lint table),
+// and the host package does not require docs on every item. An attribute in
+// the crate also survives a lift into its own repository, where the
+// workspace table is gone. The two rustdoc denies repeat the workspace
+// table for the same reason. `tests/documentation.rs` fails if any of the
+// lines below is removed.
+#![deny(missing_docs)]
+#![deny(rustdoc::broken_intra_doc_links)]
+#![deny(rustdoc::private_intra_doc_links)]
