@@ -97,6 +97,7 @@ mod lifecycle;
 mod marks;
 mod menus;
 mod parity;
+mod registry;
 mod rendering;
 mod scrolling;
 mod search_flat;

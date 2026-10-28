@@ -527,3 +527,39 @@ fn every_modal_draws_one_frame_and_one_title_form() {
     }
     assert!(checked.len() >= 14, "{checked:?}");
 }
+
+/// A stacked pair draws as its two halves: over any modal, a prompt
+/// draws exactly as it does alone (it clears its own frame), and outside
+/// the prompt the modal under it draws exactly as it does alone.
+#[test]
+fn a_modal_over_another_draws_over_it_and_leaves_the_rest_alone() {
+    let prompt = || crate::tui::widgets::input::TextInputState::new("Above", "typed");
+    for (name, view, open) in builders() {
+        for (width, height) in [(80_u16, 24_u16), (120, 40)] {
+            let label = describe_size(name, width, height);
+            let mut app = app_with(view, open);
+            let lower = buffer_of(&mut app, width, height);
+            app.open_rename_overlay(prompt());
+            let both = buffer_of(&mut app, width, height);
+            let mut app = app_with(view, open);
+            app.pop_top_modal();
+            let bare = buffer_of(&mut app, width, height);
+            app.open_rename_overlay(prompt());
+            let top = buffer_of(&mut app, width, height);
+            let (x0, y0, x1, y1) =
+                modal_rect(&top, &bare).unwrap_or_else(|| panic!("{label}: no prompt frame"));
+            for y in 0..both.area.height {
+                for x in 0..both.area.width {
+                    let inside = (x0..=x1).contains(&x) && (y0..=y1).contains(&y);
+                    let expected = if inside { &top } else { &lower };
+                    assert_eq!(
+                        both[(x, y)],
+                        expected[(x, y)],
+                        "{label}: cell ({x},{y}) of the pair is neither the prompt's nor the modal's\n{}",
+                        buffer_to_string(&both)
+                    );
+                }
+            }
+        }
+    }
+}

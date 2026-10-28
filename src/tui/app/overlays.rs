@@ -66,6 +66,12 @@ impl App {
         self.with_modals(|stack, app| stack.draw(area, buf, app, app.theme()));
     }
 
+    /// Open `modal` on top of the stack; it takes the keys from now on.
+    /// The per-overlay openers below do this with the state they build.
+    pub fn open_modal(&mut self, modal: Modal) {
+        self.modal_stack.push(modal);
+    }
+
     /// Whether any modal is open; an open modal owns every key.
     pub fn has_modal(&self) -> bool {
         !self.modal_stack.is_empty()

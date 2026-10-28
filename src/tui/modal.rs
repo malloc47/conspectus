@@ -25,8 +25,9 @@
 //! Adding a modal is a state struct, an `Overlay<Msg, App>` impl (in
 //! `modal/entries.rs` beside the others), and one line in the registration
 //! below. The keymap, the loops, and the draw take no new branch, and the
-//! layout suite's coverage check (`consistency_tests/layout.rs`) fails
-//! until the new modal is built there.
+//! registry test (`consistency_tests/registry.rs`) fails until the new
+//! modal is built there, where it is checked for routing, drawing, and the
+//! close keys.
 //!
 //! [`App::with_modals`]: crate::tui::App::with_modals
 
