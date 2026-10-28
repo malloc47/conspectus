@@ -11,11 +11,11 @@ use ratatui::buffer::Buffer;
 use ratatui::crossterm::event::KeyEvent;
 use ratatui::layout::Rect;
 use ratatui::style::{Modifier, Style};
-use ratatui::text::Line;
+use ratatui::text::{Line, Span};
 use ratatui::widgets::{Paragraph, Widget};
 use tuikit::frame::{ModalBody, ModalFrame, ModalSize};
-use tuikit::glyphs::marks;
 use tuikit::scroll::ScrollWindow;
+use tuikit::selection::{self, Cursor, Ends};
 
 use crate::tui::Msg;
 use crate::tui::keybindings::overlay::HINT_SEPARATOR;
@@ -97,12 +97,12 @@ impl Overlay for RowMenuState {
         match resolve(MENU_KEYS, key) {
             Some(MenuKey::Abort | MenuKey::Close) => OverlayOutcome::Close,
             Some(MenuKey::Up) => {
-                self.cursor = self.cursor.saturating_sub(1);
+                self.cursor = Ends::Wrap.step(self.cursor, self.entries.len(), -1);
                 self.armed = None;
                 OverlayOutcome::Consumed
             }
             Some(MenuKey::Down) => {
-                self.cursor = (self.cursor + 1).min(last);
+                self.cursor = Ends::Wrap.step(self.cursor, self.entries.len(), 1);
                 self.armed = None;
                 OverlayOutcome::Consumed
             }
@@ -140,28 +140,30 @@ impl Widget for RowMenuWidget<'_> {
         // The rows of the cursor's entry, so a menu taller than the frame
         // can scroll to it.
         let mut cursor_rows = 0..0;
+        let label_width = inner_width.saturating_sub(selection::GUTTER_WIDTH);
         for (idx, entry) in self.state.entries.iter().enumerate() {
             let first_row = lines.len();
             let focused = idx == self.state.cursor;
-            let marker = if focused { marks::POINTER } else { " " };
             let armed = self.state.armed == Some(idx);
             let label = if armed {
-                format!("{marker} {} — press Enter again to confirm", entry.label)
+                format!("{} — press Enter again to confirm", entry.label)
             } else {
-                format!("{marker} {}", entry.label)
+                entry.label.clone()
             };
             let style = if armed {
                 Style::default()
                     .fg(self.theme.error)
                     .add_modifier(Modifier::BOLD)
-            } else if focused {
-                Style::default().add_modifier(Modifier::BOLD)
             } else {
                 Style::default()
             };
-            lines.push(Line::styled(
-                tuikit::text::truncate_end(&label, inner_width),
-                style,
+            lines.push(selection::row(
+                [Span::styled(
+                    tuikit::text::truncate_end(&label, label_width),
+                    style,
+                )],
+                Cursor::of(focused, true),
+                self.theme,
             ));
             for chunk in tuikit::text::wrap(&entry.subtitle, inner_width.saturating_sub(5)) {
                 lines.push(Line::from(format!("     {}", chunk.trim_end())));

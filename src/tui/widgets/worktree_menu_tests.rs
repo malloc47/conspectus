@@ -363,3 +363,48 @@ fn containing_checkout_is_the_innermost_worktree() {
     assert_eq!(outer.root, "/wt/outer");
     assert!(worktree_checkout_containing(&snap, "/elsewhere").is_none());
 }
+
+#[test]
+fn the_action_list_wraps_at_both_ends() {
+    let mut state = WorktreeMenuState::new(worktree_ctx(vec![], true)).expect("actions");
+    state.handle((), key(KeyCode::Up));
+    assert_eq!(
+        state.selected(),
+        WorktreeAction::CloseDownWorktree,
+        "up from the first"
+    );
+    state.handle((), key(KeyCode::Down));
+    assert_eq!(
+        state.selected(),
+        WorktreeAction::NewWorktree,
+        "down from the last"
+    );
+}
+
+#[test]
+fn the_cursor_action_shows_the_marker_and_the_highlight() {
+    use ratatui::buffer::Buffer;
+    use ratatui::layout::Rect;
+    use ratatui::widgets::Widget;
+
+    let theme = Theme::default();
+    let mut state = WorktreeMenuState::new(worktree_ctx(vec![], true)).expect("actions");
+    state.handle((), key(KeyCode::Down));
+    let area = Rect::new(0, 0, 80, 20);
+    let mut buf = Buffer::empty(area);
+    WorktreeMenuWidget::new(&state, &theme).render(area, &mut buf);
+    let marked: Vec<(u16, u16)> = (0..area.height)
+        .flat_map(|y| (0..area.width).map(move |x| (x, y)))
+        .filter(|(x, y)| buf[(*x, *y)].symbol() == marks::POINTER)
+        .collect();
+    assert_eq!(marked.len(), 1, "one marked row");
+    let (x, y) = marked[0];
+    let row: String = (x..area.width).map(|x| buf[(x, y)].symbol()).collect();
+    assert!(row.contains(WorktreeAction::MergeWorktree.label()), "{row}");
+    assert!(buf[(x + 2, y)].modifier.contains(theme.selection_active));
+    assert!(
+        !buf[(x + 2, y + 1)]
+            .modifier
+            .contains(theme.selection_active)
+    );
+}

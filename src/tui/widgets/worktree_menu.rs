@@ -18,12 +18,13 @@ use ratatui::buffer::Buffer;
 use ratatui::crossterm::event::KeyEvent;
 use ratatui::layout::Rect;
 use ratatui::style::{Modifier, Style};
-use ratatui::text::Line;
+use ratatui::text::{Line, Span};
 use ratatui::widgets::Widget;
 
 use std::path::Path;
 use tuikit::frame::{Lines, ModalFrame, ModalSize};
 use tuikit::glyphs::marks;
+use tuikit::selection::{self, Cursor, Ends};
 
 use crate::model::{
     CheckoutNode, GraphNode, GraphSnapshot, NodeId, RepoId, SnapshotIndex, WorktreeKind,
@@ -386,11 +387,11 @@ impl WorktreeMenuState {
         match resolve(MENU_KEYS, key) {
             Some(MenuKey::Abort | MenuKey::Close) => OverlayOutcome::Close,
             Some(MenuKey::Up) => {
-                self.cursor = self.cursor.saturating_sub(1);
+                self.cursor = Ends::Wrap.step(self.cursor, self.actions.len(), -1);
                 OverlayOutcome::Consumed
             }
             Some(MenuKey::Down) => {
-                self.cursor = (self.cursor + 1).min(self.actions.len().saturating_sub(1));
+                self.cursor = Ends::Wrap.step(self.cursor, self.actions.len(), 1);
                 OverlayOutcome::Consumed
             }
             Some(MenuKey::Pick) => self.activate(),
@@ -558,17 +559,11 @@ impl Widget for WorktreeMenuWidget<'_> {
                 .iter()
                 .enumerate()
                 .map(|(i, action)| {
-                    let marker = if i == self.state.cursor {
-                        marks::POINTER
-                    } else {
-                        " "
-                    };
-                    let style = if i == self.state.cursor {
-                        Style::default().add_modifier(Modifier::BOLD)
-                    } else {
-                        Style::default()
-                    };
-                    Line::styled(format!("{marker} {}", action.label()), style)
+                    selection::row(
+                        [Span::raw(action.label())],
+                        Cursor::of(i == self.state.cursor, true),
+                        self.theme,
+                    )
                 })
                 .collect(),
             Mode::ConfirmRemove => {

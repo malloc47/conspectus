@@ -19,10 +19,10 @@ use ratatui::buffer::Buffer;
 use ratatui::crossterm::event::KeyEvent;
 use ratatui::layout::Rect;
 use ratatui::style::{Modifier, Style};
-use ratatui::text::Line;
+use ratatui::text::{Line, Span};
 use ratatui::widgets::Widget;
 use tuikit::frame::{Lines, ModalFrame, ModalSize};
-use tuikit::glyphs::marks;
+use tuikit::selection::{self, Cursor, Ends};
 
 use crate::tui::Msg;
 use crate::tui::modal::{Overlay, OverlayOutcome};
@@ -84,11 +84,11 @@ impl Overlay for MuxMenuState {
         match resolve(MENU_KEYS, key) {
             Some(MenuKey::Abort | MenuKey::Close) => OverlayOutcome::Close,
             Some(MenuKey::Up) => {
-                self.cursor = self.cursor.saturating_sub(1);
+                self.cursor = Ends::Wrap.step(self.cursor, MENU_ENTRIES.len(), -1);
                 OverlayOutcome::Consumed
             }
             Some(MenuKey::Down) => {
-                self.cursor = (self.cursor + 1).min(MENU_ENTRIES.len() - 1);
+                self.cursor = Ends::Wrap.step(self.cursor, MENU_ENTRIES.len(), 1);
                 OverlayOutcome::Consumed
             }
             Some(MenuKey::Pick) => match self.selected() {
@@ -120,17 +120,12 @@ impl Widget for MuxMenuWidget<'_> {
             Line::from(""),
         ];
         for (idx, entry) in MENU_ENTRIES.iter().enumerate() {
-            let focused = idx == self.state.cursor;
-            let marker = if focused { marks::POINTER } else { " " };
-            let label = format!("{marker} {}", entry.label());
-            if focused {
-                lines.push(Line::styled(
-                    label,
-                    Style::default().add_modifier(Modifier::BOLD),
-                ));
-            } else {
-                lines.push(Line::from(label));
-            }
+            let cursor = Cursor::of(idx == self.state.cursor, true);
+            lines.push(selection::row(
+                [Span::raw(entry.label())],
+                cursor,
+                self.theme,
+            ));
             lines.push(Line::from(format!("     {}", entry.subtitle())));
         }
         lines.push(Line::from(""));
@@ -179,11 +174,34 @@ mod tests {
     }
 
     #[test]
-    fn cursor_clamps_at_last_entry() {
+    fn the_cursor_wraps_at_both_ends() {
         let mut state = MuxMenuState::new();
-        for _ in 0..10 {
-            state.handle((), key(KeyCode::Down));
-        }
-        assert_eq!(state.cursor(), MENU_ENTRIES.len() - 1);
+        state.handle((), key(KeyCode::Up));
+        assert_eq!(state.cursor(), MENU_ENTRIES.len() - 1, "up from the first");
+        state.handle((), key(KeyCode::Down));
+        assert_eq!(state.cursor(), 0, "down from the last");
+    }
+
+    #[test]
+    fn the_cursor_entry_shows_the_marker_and_the_highlight() {
+        let theme = Theme::default();
+        let mut state = MuxMenuState::new();
+        state.handle((), key(KeyCode::Down));
+        let area = Rect::new(0, 0, 80, 20);
+        let mut buf = Buffer::empty(area);
+        MuxMenuWidget::new(&state, &theme).render(area, &mut buf);
+        let marked: Vec<u16> = (0..area.height)
+            .filter(|y| {
+                (0..area.width).any(|x| buf[(x, *y)].symbol() == tuikit::glyphs::marks::POINTER)
+            })
+            .collect();
+        assert_eq!(marked.len(), 1, "one marked row");
+        let y = marked[0];
+        let row: String = (0..area.width).map(|x| buf[(x, y)].symbol()).collect();
+        assert!(row.contains(MENU_ENTRIES[1].label()), "{row}");
+        let x = (0..area.width)
+            .find(|x| buf[(*x, y)].symbol() == tuikit::glyphs::marks::POINTER)
+            .unwrap_or(0);
+        assert!(buf[(x + 2, y)].modifier.contains(theme.selection_active));
     }
 }

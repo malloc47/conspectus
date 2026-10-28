@@ -1,4 +1,7 @@
+use ratatui::buffer::Buffer;
 use ratatui::crossterm::event::{KeyCode, KeyModifiers};
+use ratatui::layout::Rect;
+use ratatui::widgets::Widget;
 
 use super::*;
 
@@ -62,11 +65,68 @@ fn moving_disarms_a_pending_confirmation() {
 }
 
 #[test]
-fn escape_closes_and_the_cursor_clamps() {
+fn escape_closes() {
     let mut state = menu();
-    for _ in 0..5 {
-        state.handle((), key(KeyCode::Down));
-    }
-    assert_eq!(state.cursor(), 1);
     assert_eq!(state.handle((), key(KeyCode::Esc)), OverlayOutcome::Close);
+}
+
+#[test]
+fn the_cursor_wraps_at_both_ends() {
+    let mut state = menu();
+    state.handle((), key(KeyCode::Up));
+    assert_eq!(state.cursor(), 1, "up from the first entry is the last");
+    state.handle((), key(KeyCode::Down));
+    assert_eq!(state.cursor(), 0, "down from the last entry is the first");
+}
+
+/// The menu drawn on an 80x20 screen.
+fn drawn(state: &RowMenuState, theme: &Theme) -> Buffer {
+    let area = Rect::new(0, 0, 80, 20);
+    let mut buf = Buffer::empty(area);
+    RowMenuWidget::new(state, theme).render(area, &mut buf);
+    buf
+}
+
+/// The rows that hold the pointer mark, with the cell it is drawn in.
+fn marked(buf: &Buffer) -> Vec<(u16, u16)> {
+    let area = buf.area;
+    (0..area.height)
+        .flat_map(|y| (0..area.width).map(move |x| (x, y)))
+        .filter(|(x, y)| buf[(*x, *y)].symbol() == tuikit::glyphs::marks::POINTER)
+        .collect()
+}
+
+#[test]
+fn the_cursor_entry_shows_the_marker_and_the_highlight() {
+    let theme = Theme::default();
+    let mut state = menu();
+    state.handle((), key(KeyCode::Down));
+    let buf = drawn(&state, &theme);
+    let marks = marked(&buf);
+    assert_eq!(marks.len(), 1, "one marked row");
+    let (x, y) = marks[0];
+    let label: String = (x + 2..x + 8).map(|x| buf[(x, y)].symbol()).collect();
+    assert_eq!(label, "Forget");
+    for x in x..x + 8 {
+        assert!(buf[(x, y)].modifier.contains(theme.selection_active));
+    }
+    // The entry's explanation below is not part of the highlight.
+    assert!(
+        !buf[(x + 5, y + 1)]
+            .modifier
+            .contains(theme.selection_active)
+    );
+}
+
+#[test]
+fn an_armed_entry_keeps_the_highlight_in_the_error_color() {
+    let theme = Theme::default();
+    let mut state = menu();
+    state.handle((), key(KeyCode::Down));
+    state.handle((), key(KeyCode::Enter));
+    let buf = drawn(&state, &theme);
+    let (x, y) = marked(&buf)[0];
+    let cell = &buf[(x + 2, y)];
+    assert_eq!(cell.fg, theme.error);
+    assert!(cell.modifier.contains(theme.selection_active));
 }

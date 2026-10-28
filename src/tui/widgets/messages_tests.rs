@@ -30,6 +30,11 @@ fn selection_moves_within_the_log_and_resets_detail_scroll() {
     assert_eq!(state.selected, 2, "clamps at the oldest entry");
     state.handle(&log, press(KeyCode::Char('g')));
     assert_eq!(state.selected, 0);
+    state.handle(&log, press(KeyCode::Char('k')));
+    assert_eq!(
+        state.selected, 0,
+        "clamps at the newest entry: a log does not wrap"
+    );
     assert_eq!(
         state.selected_entry(&log).map(|e| e.summary.as_str()),
         Some("entry 2"),
@@ -111,4 +116,28 @@ fn each_level_takes_its_own_theme_color() {
         Some(default.success),
         "the default info color is the success green it always was"
     );
+}
+
+#[test]
+fn the_selected_entry_shows_the_marker_and_the_highlight() {
+    let log = log_with(3);
+    let mut state = MessagesOverlayState::new();
+    state.handle(&log, press(KeyCode::Char('j')));
+    let theme = Theme::default();
+    let area = Rect::new(0, 0, 80, 24);
+    let mut buf = Buffer::empty(area);
+    let now = log.newest_first().next().unwrap().at_epoch;
+    MessagesWidget::new(&state, &log, &theme, now).render(area, &mut buf);
+    let marked: Vec<(u16, u16)> = (0..area.height)
+        .flat_map(|y| (0..area.width).map(move |x| (x, y)))
+        .filter(|(x, y)| buf[(*x, *y)].symbol() == marks::POINTER)
+        .collect();
+    assert_eq!(marked.len(), 1, "one marked entry");
+    let (x, y) = marked[0];
+    let row: String = (x..area.width).map(|x| buf[(x, y)].symbol()).collect();
+    assert!(row.contains("entry 1"), "{row}");
+    assert!(buf[(x, y)].modifier.contains(theme.selection_active));
+    // The other entries keep their text a gutter in, unmarked.
+    let other: String = (x..x + 2).map(|x| buf[(x, y - 1)].symbol()).collect();
+    assert_eq!(other, "  ");
 }

@@ -21,6 +21,7 @@ use ratatui::widgets::{Paragraph, Widget};
 use tuikit::frame::{ModalBody, ModalFrame, ModalSize};
 use tuikit::glyphs::marks;
 use tuikit::scroll::ScrollWindow;
+use tuikit::selection::{self, Cursor, Ends};
 
 use crate::tui::Theme;
 use crate::tui::messages::{LogEntry, LogLevel, MessageLog};
@@ -77,10 +78,9 @@ impl crate::tui::Overlay for MessagesOverlayState {
         let len = log.len();
         match resolve(MESSAGES_KEYS, key) {
             Some(MessagesKey::Abort | MessagesKey::Close) => return OverlayOutcome::Close,
-            Some(MessagesKey::Next) => self.select(self.selected + 1, len),
-            Some(MessagesKey::Prev) => {
-                self.select(self.selected.saturating_sub(1), len);
-            }
+            // A log: the selection stops at the newest and the oldest.
+            Some(MessagesKey::Next) => self.select(Ends::Clamp.step(self.selected, len, 1), len),
+            Some(MessagesKey::Prev) => self.select(Ends::Clamp.step(self.selected, len, -1), len),
             Some(MessagesKey::First) => self.select(0, len),
             Some(MessagesKey::Last) => self.select(len.saturating_sub(1), len),
             Some(MessagesKey::DetailDown) => self.scroll_detail(1),
@@ -247,7 +247,7 @@ impl ModalBody for MessagesBody<'_, '_> {
 
 fn list_line(entry: &LogEntry, selected: bool, theme: &Theme, now: i64) -> Line<'static> {
     let age = tuikit::age::Age::between(entry.at_epoch, now).label();
-    let mut spans = vec![
+    let spans = [
         Span::styled(
             format!("{} ", entry.level.glyph()),
             level_style(entry.level, theme),
@@ -255,12 +255,7 @@ fn list_line(entry: &LogEntry, selected: bool, theme: &Theme, now: i64) -> Line<
         Span::styled(format!("{age:>4} ago  "), Style::default().fg(theme.inert)),
         Span::raw(entry.summary_with_repeats()),
     ];
-    if selected {
-        for span in &mut spans {
-            span.style = span.style.add_modifier(theme.selection_active);
-        }
-    }
-    Line::from(spans)
+    selection::row(spans, Cursor::of(selected, true), theme)
 }
 
 #[cfg(test)]
