@@ -55,7 +55,7 @@ each names its module path.
 | `chip` | The fixed-width filled chip and its one width rule (`badge_width` in cells, cut with the ellipsis mark, padding that carries the fill); toggle chips that keep their width; the segmented title; the `[ n/m ]` position chip; status chips in a tone, with a mark or a busy spinner frame. Page: [controls/chip.md](controls/chip.md) | landed |
 | `age` | Ages from two Unix times; the unit ladder (days by default, weeks on request, or a host's units) and the one prose suffix; recency steps with injectable bounds and their theme tint; the fixed-width age cell. Page: [controls/age.md](controls/age.md) | landed |
 | `frame` | The modal frame: named sizing policies from a share, a cap, a minimum, and a margin per direction; one cleared, accent-bordered frame with one title form and optional padding; bodies measured once at the width the policy gives. Planned in the same module: the pane frame with its focus cue, the split pane, rules. Page: [controls/frame.md](controls/frame.md) | landed (modal frame) |
-| `selection` | The list cursor marker and the selected, active, inactive, ghost, and pending row styles | planned |
+| `selection` | The list cursor: the pointer marker in a 2-cell gutter; the full-row highlight from the theme's selection pair, active while the list has focus and inactive while it does not, with filled spans kept; the ghost and pending row looks; the wrap-or-clamp rule for stepping a cursor by the kind of list. Page: [controls/selection.md](controls/selection.md) | landed |
 
 ### Controls (layer 1)
 

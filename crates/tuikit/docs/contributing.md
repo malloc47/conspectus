@@ -115,17 +115,24 @@ registry, or a host-supplied sink or source. If that truly cannot work:
 House rule 13 says every control styles from the theme its host passes in.
 `tests/raw_styles.rs` enforces the part a scan can see: non-test Rust source
 names no `Color::` value, no `Modifier::DIM`, and does not import ratatui's
-`Stylize` shorthands. Read a typed token (`theme.warning`), use `muted` for
-text that should recede, or look up a named style the host registered
-(`theme.style(name)`). Other modifiers (`BOLD`, `ITALIC`, `REVERSED`) are
+`Stylize` shorthands, and adds no `Modifier::REVERSED` of its own. Read a
+typed token (`theme.warning`), use `muted` for text that should recede, or
+look up a named style the host registered (`theme.style(name)`). A cursor
+row is highlighted by `selection::highlight` from the theme's selection
+pair and a chip takes the `badge` token, so neither reverses anything by
+hand (house rule 1). Other modifiers (`BOLD`, `ITALIC`, `UNDERLINED`) are
 typographic and stay allowed.
 
 The guard shares its walk, its Rust sanitizer (comments, literals, and
 `#[cfg(test)]` items are blanked first), and its report format with the
 independence guards through `tests/support/source_scan.rs`, and like them it
 feeds itself leaking snippets from memory in its self-tests. The theme module
-is the reviewed exception: its token table holds the default palette and its
-grammar maps color names to colors. An exception is per file and per needle,
+is the reviewed exception: its token table holds the default palette (the
+selection and chip looks are reversed by default) and its grammar maps color
+and modifier names to values. Two other files name the reversed modifier
+without drawing a cursor: the scrollbar removes it so a highlight does not
+show through the bar, and the selection highlight looks for it to leave a
+chip's fill alone. An exception is per file and per needle,
 lists its reason in the guard's `EXCEPTIONS`, and fails the scan once it
 matches nothing. A control that seems to need a raw color needs a token or a
 named style instead; add the token to the table in `src/theme.rs` and to the
@@ -249,32 +256,39 @@ Work through this list in order. Each step names the rule it applies.
    [controls/text.md](controls/text.md) and
    [controls/scroll.md](controls/scroll.md).
 7. **Scroll through one window.** A scrolled control steps its cursor
-   with `scroll::clamp_step` or `scroll::wrap_step` (house rule 2), keeps
+   by its list's rule (`selection::Ends`, step 8), keeps
    a `scroll::ScrollWindow` that clamps, follows the cursor by the one
    rule, draws its scrollbar through `scroll::ScrollGutter`, and returns
    the window it drew to its owner as a value. It never sends a message
    from inside a draw to report what it measured.
-8. **Frame a modal.** A control that floats over the screen draws inside
+8. **Show the cursor one way.** A list draws each row through
+   `selection::row` (the pointer in a 2-cell gutter and the theme's
+   selection pair, active or inactive by focus) and steps its cursor with
+   `selection::Ends`: `Wrap` for a short choice list, `Clamp` for
+   scrollable content (house rules 1, 2, and 10). It never types a cursor
+   glyph or reverses a row by hand; see
+   [controls/selection.md](controls/selection.md).
+9. **Frame a modal.** A control that floats over the screen draws inside
    `frame::ModalFrame` with one of the named sizes (or a `ModalSize` built
    from the same parameters) and is its `frame::ModalBody`: it is measured
    once at the width the size gives and never computes a rect, a border,
    or a title of its own; see [controls/frame.md](controls/frame.md).
-9. **Leave seams open, do not build them.** If the control could one day
-   carry availability on key rows, report its rendered area for mouse hit
-   testing, or accept another content source, keep the types ready for it and
-   record it on the page. Do not build the feature.
-10. **Document it.** Module docs and doc comments on every public item (the
+10. **Leave seams open, do not build them.** If the control could one day
+    carry availability on key rows, report its rendered area for mouse hit
+    testing, or accept another content source, keep the types ready for it
+    and record it on the page. Do not build the feature.
+11. **Document it.** Module docs and doc comments on every public item (the
     lint requires them). Copy [controls/_template.md](controls/_template.md)
     to `docs/controls/<control>.md` and fill in every section. Flip the
     control's row in the module map in [architecture.md](architecture.md) to
     landed in the same change.
-11. **Test it.** Unit tests for behavior, rendered-buffer tests for layout, and
+12. **Test it.** Unit tests for behavior, rendered-buffer tests for layout, and
     the test kit's conformance suite once it exists (see [Testing](#testing)).
-12. **Move the host onto it in the same change, when the control comes from
+13. **Move the host onto it in the same change, when the control comes from
     the host.** Unify on the best variant instead of copying the host's
     disagreements, and catalog every visible difference
     ([Cataloging visible changes](#cataloging-visible-changes)).
-13. **Run the checks** at the end of this guide.
+14. **Run the checks** at the end of this guide.
 
 A decision that changes the crate's public API shape, house rules,
 dependencies, or independence rules gets a record in

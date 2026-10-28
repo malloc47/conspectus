@@ -1,16 +1,20 @@
 //! The raw-style guard: framework code draws with the theme its host
-//! passes in, never with a color or a dim modifier of its own (house rule
-//! 13).
+//! passes in, never with a color, a dim modifier, or a reversed cursor row
+//! of its own (house rules 1 and 13).
 //!
 //! A control that names `Color::Yellow` ignores the host's palette, and one
 //! that adds `Modifier::DIM` sidesteps the `muted` token a host can
-//! retarget (some terminals draw nothing for dim). The guard scans
-//! non-test Rust source the way the independence guards do (comments,
-//! literals, and `#[cfg(test)]` items blanked first; see
+//! retarget (some terminals draw nothing for dim). One that reverses its
+//! cursor row by hand draws a selection look of its own instead of the
+//! `selection` module's highlight from the theme's selection pair. The
+//! guard scans non-test Rust source the way the independence guards do
+//! (comments, literals, and `#[cfg(test)]` items blanked first; see
 //! `support/source_scan.rs`) and fails on each needle below. The theme
-//! module defines the default palette and the grammar that names colors,
-//! so it is the reviewed exception. The rule and the exception process
-//! are in `docs/contributing.md`, section "The raw-style guard".
+//! module defines the default palette and the grammar that names colors
+//! and modifiers, so it is the reviewed exception, along with the two
+//! places that look for the reversed modifier without drawing a cursor.
+//! The rule and the exception process are in `docs/contributing.md`,
+//! section "The raw-style guard".
 
 #[path = "support/source_scan.rs"]
 mod source_scan;
@@ -31,6 +35,10 @@ const NEEDLES: &[Needle] = &[
     Needle { text: "Color::", why: "is a raw color; read a theme token or a named style" },
     Needle { text: "Modifier::DIM", why: "is a raw dim; use the theme's `muted` token" },
     Needle { text: "Stylize", why: "brings color and dim shorthands that bypass the theme" },
+    Needle {
+        text: "Modifier::REVERSED",
+        why: "is a hand-written reverse; a cursor row takes `selection::highlight` and a chip the theme's `badge` token",
+    },
 ];
 
 /// Reviewed files that may name raw values, with why.
@@ -54,6 +62,26 @@ const EXCEPTIONS: &[Exception] = &[
         path: "src/theme/spec.rs",
         term: "Modifier::DIM",
         reason: "the grammar maps `dim` to the modifier",
+    },
+    Exception {
+        path: "src/theme.rs",
+        term: "Modifier::REVERSED",
+        reason: "the default `selection_active` and `badge` tokens are reversed",
+    },
+    Exception {
+        path: "src/theme/spec.rs",
+        term: "Modifier::REVERSED",
+        reason: "the grammar maps `reversed` to the modifier",
+    },
+    Exception {
+        path: "src/scroll/gutter.rs",
+        term: "Modifier::REVERSED",
+        reason: "the scrollbar removes the reverse so a highlight painted under it does not show through",
+    },
+    Exception {
+        path: "src/selection/look.rs",
+        term: "Modifier::REVERSED",
+        reason: "the highlight finds a chip's reversed fill so it can leave it as it is",
     },
 ];
 
@@ -128,6 +156,8 @@ fn the_guard_catches_realistic_leaks() {
         "let dim = Style::default().add_modifier(Modifier::DIM | Modifier::ITALIC);",
         "let dim = span!(Modifier::DIM; \"note\");",
         "use ratatui::style::Stylize;",
+        "let cursor = Style::default().add_modifier(Modifier::REVERSED);",
+        "if selected { style = style.add_modifier(Modifier::REVERSED | Modifier::BOLD); }",
     ];
     for leak in leaks {
         assert!(
@@ -141,13 +171,14 @@ fn the_guard_catches_realistic_leaks() {
 fn the_guard_allows_theme_reads_other_modifiers_and_prose() {
     let clean = r#"
 use ratatui::style::{Color, Modifier, Style};
-/// Draws in `Color::Yellow` unless the theme says otherwise; never `Modifier::DIM`.
+/// Draws in `Color::Yellow` unless the theme says otherwise; never `Modifier::DIM`
+/// or `Modifier::REVERSED`.
 fn draw(theme: &Theme, color: Color) -> Style {
     // Color::Red in a comment
     let _ = "Color::Blue in a string";
     Style::default()
         .fg(theme.accent)
-        .add_modifier(theme.muted | Modifier::BOLD | Modifier::ITALIC | Modifier::REVERSED)
+        .add_modifier(theme.muted | theme.selection_active | Modifier::BOLD | Modifier::ITALIC)
         .bg(color)
 }
 "#;
