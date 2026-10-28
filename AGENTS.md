@@ -155,11 +155,17 @@ standard checks.
 
 Before a feature branch, squash merge, or direct commit lands on `main`:
 
-- Relevant tests pass. Once the Rust crate exists, run at least
-  `cargo test --all-targets --all-features`; prefer
-  `cargo nextest run --all-targets --all-features` for full validation.
-- Formatting and linting pass: `cargo fmt -- --check` and
-  `cargo clippy --all-targets --all-features -- -D warnings` when code exists.
+- The repository is a Cargo workspace (the `conspectus` package at the root and
+  the `tuikit` framework crate under `crates/`), so every cargo check below runs
+  with `--workspace`; a run without it can leave the framework crate untested.
+- Relevant tests pass. Run at least
+  `cargo test --workspace --all-targets --all-features`; prefer
+  `cargo nextest run --workspace --all-targets --all-features` for full
+  validation.
+- Formatting and linting pass: `cargo fmt --all -- --check` and
+  `cargo clippy --workspace --all-targets --all-features -- -D warnings`.
+- Rustdoc passes with warnings as errors:
+  `RUSTDOCFLAGS='-D warnings' cargo doc --workspace --no-deps`.
 - `git diff --check` passes for every change.
 - Documentation is updated when behavior, architecture, workflow, or commands
   change.

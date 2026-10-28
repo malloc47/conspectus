@@ -82,10 +82,11 @@
             fi
             echo
             echo "Common checks:"
-            echo "  cargo fmt -- --check"
-            echo "  cargo clippy --all-targets --all-features -- -D warnings"
-            echo "  cargo test --all-targets --all-features"
-            echo "  cargo nextest run --all-targets --all-features"
+            echo "  cargo fmt --all -- --check"
+            echo "  cargo clippy --workspace --all-targets --all-features -- -D warnings"
+            echo "  cargo test --workspace --all-targets --all-features"
+            echo "  cargo nextest run --workspace --all-targets --all-features"
+            echo "  RUSTDOCFLAGS='-D warnings' cargo doc --workspace --no-deps"
             echo "  git diff --check"
           '';
         };

@@ -1,87 +1,19 @@
-# Curated clippy lints (CSP-466). Adds a whole-workspace
-# `[lints.clippy]` table so drive-by fixes land in one place
-# instead of six copies of the same pattern. Levels:
-#
-# - `deny`: enforced by CI (`cargo clippy -D warnings`); no
-#   remaining warnings in the workspace.
-# - `allow`: known targeted lint; too many current-workspace
-#   warnings to fix in CSP-466's first landing. Follow-up
-#   commits will flip these to `deny` incrementally. See the
-#   CSP-466 backlog entry for the current counts.
-#
-# Consciously skipped (per audit): the doc lints (missing_docs,
-# missing_errors_doc, etc.) — Conspectus has an explicit doc
-# culture around ADRs and per-module `//!` headers rather than
-# per-fn docs. Cast-truncation is allowed in TUI layout modules
-# via per-module `#![allow]` where it's the intentional shape.
-[lints.clippy]
-# Pedantic lints whose fixes are behavior-preserving, enforced so
-# past cleanups don't regress. `match_wildcard_for_single_variants`
-# matters most: a wildcard arm over a two-variant enum would hide a
-# future third variant.
-bool_to_int_with_if = "deny"
-case_sensitive_file_extension_comparisons = "deny"
-cloned_instead_of_copied = "deny"
-explicit_iter_loop = "deny"
-filter_map_next = "deny"
-if_not_else = "deny"
-ignored_unit_patterns = "deny"
-implicit_clone = "deny"
-items_after_statements = "deny"
-iter_with_drain = "deny"
-manual_assert = "deny"
-manual_let_else = "deny"
-manual_string_new = "deny"
-map_unwrap_or = "deny"
-match_bool = "deny"
-match_wildcard_for_single_variants = "deny"
-needless_collect = "deny"
-needless_raw_string_hashes = "deny"
-option_as_ref_cloned = "deny"
-or_fun_call = "deny"
-redundant_clone = "deny"
-redundant_closure_for_method_calls = "deny"
-redundant_else = "deny"
-semicolon_if_nothing_returned = "deny"
-single_match_else = "deny"
-stable_sort_primitive = "deny"
-uninlined_format_args = "deny"
-unnecessary_struct_initialization = "deny"
-unnested_or_patterns = "deny"
-unnecessary_wraps = "deny"
-# One arm per input case reads better than a merged `A | B | C =>`
-# pattern in the lookup tables (`tui/detail.rs`, `tui/explorer.rs`,
-# `discovery/pins.rs`), so this one stays allowed.
-match_same_arms = "allow"
-# Passing by value is how this codebase spells named arguments (row and
-# detail builders take an `…Inputs<'_>` struct of borrows), moves values
-# into threads and out of effect enums, and passes small enums; taking
-# references there would make the APIs worse without saving a copy.
-needless_pass_by_value = "allow"
+# The repository is a Cargo workspace: the `conspectus` package at the root
+# and the `tuikit` framework crate under `crates/` (ADR 0150). `Cargo.lock`
+# and `rust-toolchain.toml` are shared at the root.
+[workspace]
+members = [".", "crates/tuikit"]
+# Both members are defaults, so a bare `cargo build`, `cargo clippy`, or
+# `cargo test` still reaches the framework crate; CI and `just` pass
+# `--workspace` regardless.
+default-members = [".", "crates/tuikit"]
+resolver = "3"
 
-[lints.rustdoc]
-broken_intra_doc_links = "deny"
-private_intra_doc_links = "deny"
-
-[package]
-name = "conspectus"
-version = "0.1.0"
+[workspace.package]
 edition = "2024"
-# `src/bin/csp.rs` installs `csp`, the sanctioned short name (ADR 0118),
-# so `cargo run` needs to know which binary is the default.
-default-run = "conspectus"
 license = "MIT"
-description = "AI work graph status tool"
 
-[features]
-# Dev-only `conspectus tui --snapshot` mode (ADR 0067). Renders one
-# TUI frame to stdout with ANSI styling preserved so agents can
-# iterate on renderer changes without a manual screenshot loop.
-# Off by default; `just check` and CI enable it through
-# `--all-features`, while release/downstream builds leave it off.
-snapshot = []
-
-[dependencies]
+[workspace.dependencies]
 ansi-to-tui = { version = "8.0.1", default-features = false }
 anstyle = "1.0"
 anyhow = "1.0"
@@ -146,7 +78,8 @@ tui-input = { version = "0.15", default-features = false, features = ["ratatui-c
 tui-markdown = { version = "0.3", default-features = false, features = ["highlight-code"] }
 unicode-width = "0.2"
 
-[dev-dependencies]
+# Dev-only dependencies share the same table; each member opts in under
+# its own `[dev-dependencies]`.
 assert_cmd = "2.0"
 insta = "1.42"
 # CSP-424 spike: evaluating tui-pantry as a Storybook-style widget
@@ -155,3 +88,125 @@ insta = "1.42"
 tui-pantry = "0.4"
 predicates = "3.1"
 tempfile = "3.15"
+
+# Curated clippy lints (CSP-466). Adds a whole-workspace
+# `[workspace.lints.clippy]` table so drive-by fixes land in one place
+# instead of six copies of the same pattern. Levels:
+#
+# - `deny`: enforced by CI (`cargo clippy -D warnings`); no
+#   remaining warnings in the workspace.
+# - `allow`: known targeted lint; too many current-workspace
+#   warnings to fix in CSP-466's first landing. Follow-up
+#   commits will flip these to `deny` incrementally. See the
+#   CSP-466 backlog entry for the current counts.
+#
+# Consciously skipped (per audit): the doc lints (missing_docs,
+# missing_errors_doc, etc.) — Conspectus has an explicit doc
+# culture around ADRs and per-module `//!` headers rather than
+# per-fn docs. Cast-truncation is allowed in TUI layout modules
+# via per-module `#![allow]` where it's the intentional shape.
+[workspace.lints.clippy]
+# Pedantic lints whose fixes are behavior-preserving, enforced so
+# past cleanups don't regress. `match_wildcard_for_single_variants`
+# matters most: a wildcard arm over a two-variant enum would hide a
+# future third variant.
+bool_to_int_with_if = "deny"
+case_sensitive_file_extension_comparisons = "deny"
+cloned_instead_of_copied = "deny"
+explicit_iter_loop = "deny"
+filter_map_next = "deny"
+if_not_else = "deny"
+ignored_unit_patterns = "deny"
+implicit_clone = "deny"
+items_after_statements = "deny"
+iter_with_drain = "deny"
+manual_assert = "deny"
+manual_let_else = "deny"
+manual_string_new = "deny"
+map_unwrap_or = "deny"
+match_bool = "deny"
+match_wildcard_for_single_variants = "deny"
+needless_collect = "deny"
+needless_raw_string_hashes = "deny"
+option_as_ref_cloned = "deny"
+or_fun_call = "deny"
+redundant_clone = "deny"
+redundant_closure_for_method_calls = "deny"
+redundant_else = "deny"
+semicolon_if_nothing_returned = "deny"
+single_match_else = "deny"
+stable_sort_primitive = "deny"
+uninlined_format_args = "deny"
+unnecessary_struct_initialization = "deny"
+unnested_or_patterns = "deny"
+unnecessary_wraps = "deny"
+# One arm per input case reads better than a merged `A | B | C =>`
+# pattern in the lookup tables (`tui/detail.rs`, `tui/explorer.rs`,
+# `discovery/pins.rs`), so this one stays allowed.
+match_same_arms = "allow"
+# Passing by value is how this codebase spells named arguments (row and
+# detail builders take an `…Inputs<'_>` struct of borrows), moves values
+# into threads and out of effect enums, and passes small enums; taking
+# references there would make the APIs worse without saving a copy.
+needless_pass_by_value = "allow"
+
+[workspace.lints.rustdoc]
+broken_intra_doc_links = "deny"
+private_intra_doc_links = "deny"
+
+[package]
+name = "conspectus"
+version = "0.1.0"
+edition.workspace = true
+# `src/bin/csp.rs` installs `csp`, the sanctioned short name (ADR 0118),
+# so `cargo run` needs to know which binary is the default.
+default-run = "conspectus"
+license.workspace = true
+description = "AI work graph status tool"
+
+[lints]
+workspace = true
+
+[features]
+# Dev-only `conspectus tui --snapshot` mode (ADR 0067). Renders one
+# TUI frame to stdout with ANSI styling preserved so agents can
+# iterate on renderer changes without a manual screenshot loop.
+# Off by default; `just check` and CI enable it through
+# `--all-features`, while release/downstream builds leave it off.
+snapshot = []
+
+[dependencies]
+ansi-to-tui = { workspace = true }
+anstyle = { workspace = true }
+anyhow = { workspace = true }
+chrono = { workspace = true }
+clap = { workspace = true }
+comfy-table = { workspace = true }
+indexmap = { workspace = true }
+notify = { workspace = true }
+libc = { workspace = true }
+ratatui = { workspace = true }
+rkyv = { workspace = true }
+memmap2 = { workspace = true }
+base64 = { workspace = true }
+ratatui-cheese = { workspace = true }
+ratatui-comfy-toaster = { workspace = true }
+tui-popup = { workspace = true }
+rusqlite = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+signal-hook = { workspace = true }
+terminal_size = { workspace = true }
+thiserror = { workspace = true }
+toml = { workspace = true }
+toml_edit = { workspace = true }
+tui-input = { workspace = true }
+tui-markdown = { workspace = true }
+unicode-width = { workspace = true }
+
+[dev-dependencies]
+assert_cmd = { workspace = true }
+insta = { workspace = true }
+tui-pantry = { workspace = true }
+predicates = { workspace = true }
+tempfile = { workspace = true }

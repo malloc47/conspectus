@@ -8,20 +8,20 @@ fmt:
     cargo fmt --all -- --check
 
 clippy:
-    cargo clippy --all-targets --all-features -- -D warnings
+    cargo clippy --workspace --all-targets --all-features -- -D warnings
 
 test:
-    cargo test --all-targets --all-features
+    cargo test --workspace --all-targets --all-features
 
 nextest:
-    cargo nextest run --all-targets --all-features
+    cargo nextest run --workspace --all-targets --all-features
 
 diff-check:
     git diff --check
 
 # Rustdoc with warnings as errors (broken or private intra-doc links)
 doc:
-    RUSTDOCFLAGS="-D warnings" cargo doc --no-deps
+    RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps
 
 # Regenerate the comprehensive showcase fixture (ADR 0070).
 #
