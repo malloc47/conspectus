@@ -246,7 +246,7 @@ fn draw_rename_overlay(app: &App, frame: &mut Frame<'_>, area: Rect) {
     let Some(state) = app.rename_overlay() else {
         return;
     };
-    let widget = TextInputWidget::new(state).theme(app.theme());
+    let widget = TextInputWidget::new(state, app.theme());
     frame.render_widget(widget, area);
 }
 

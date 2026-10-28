@@ -3,9 +3,8 @@
 //! Surfaces the untruncated text of a long detail-pane value (`cwd`,
 //! `command`, `url`, `last_message_preview`, …) in a centered modal
 //! so the operator can read or copy the full content without forcing
-//! it into the main right-panel layout. Reuses the same centered
-//! modal frame as the help overlay (`centered_modal_rect`) per the
-//! existing modal conventions and avoids new dependencies.
+//! it into the main right-panel layout. It is a reader, so it takes the
+//! help page's size and frame.
 //!
 //! Input handling:
 //! - `Esc` / `q` / `o` close the modal.
@@ -22,15 +21,14 @@
 use ratatui::buffer::Buffer;
 use ratatui::crossterm::event::KeyEvent;
 use ratatui::layout::Rect;
-use ratatui::macros::{line, span};
-use ratatui::style::{Modifier, Style};
+use ratatui::style::Style;
 use ratatui::text::Line;
 use ratatui::widgets::{Paragraph, Widget};
-use tui_popup::KnownSize;
+use tuikit::frame::{ModalBody, ModalFrame};
 use tuikit::scroll::ScrollWindow;
 
 use crate::tui::Theme;
-use crate::tui::widgets::help::centered_modal_rect;
+use crate::tui::widgets::help::HELP_SIZE;
 
 /// Pure state for the full-value modal.
 #[derive(Debug, Clone)]
@@ -184,9 +182,8 @@ impl crate::tui::Overlay for ValueModalState {
     }
 }
 
-/// Centered modal that renders [`ValueModalState`]. Uses the same
-/// `centered_modal_rect` frame as the help overlay so all modal
-/// surfaces line up consistently.
+/// Centered modal that renders [`ValueModalState`], in the help page's
+/// size and frame.
 pub struct ValueModalWidget<'a> {
     state: &'a ValueModalState,
     theme: &'a Theme,
@@ -202,23 +199,13 @@ impl ValueModalWidget<'_> {
     /// Draw the modal and report the window its body showed, for
     /// [`ValueModalState::fit`].
     pub fn draw(self, area: Rect, buf: &mut Buffer) -> ScrollWindow {
-        // Framing through `tui_popup::Popup`.
-        let modal = centered_modal_rect(area);
-        let label_style = Style::default()
-            .fg(self.theme.accent)
-            .add_modifier(Modifier::BOLD);
-        let title = line![" ", span!(label_style; " {} ", self.state.label), " "];
-        let mut fit = ScrollWindow::default();
         let body = ValueModalBody {
             state: self.state,
             theme: self.theme,
-            inner_width: modal.width.saturating_sub(2) as usize,
-            inner_height: modal.height.saturating_sub(2) as usize,
-            fit: &mut fit,
         };
-        let popup = crate::tui::widgets::popup_frame::themed_popup(body, title, self.theme);
-        popup.render(area, buf);
-        fit
+        ModalFrame::new(self.theme, HELP_SIZE)
+            .title(self.state.label.as_str())
+            .render(area, buf, body)
     }
 }
 
@@ -228,30 +215,21 @@ impl Widget for ValueModalWidget<'_> {
     }
 }
 
-/// Body wrapper for `tui_popup::Popup`. Renders the wrapped value
-/// text with vertical scroll; sizing follows the cap dims so the
-/// popup auto-sizing reproduces the in-tree rect.
+/// The wrapped value, scrolled, over its key hints.
 struct ValueModalBody<'a> {
     state: &'a ValueModalState,
     theme: &'a Theme,
-    inner_width: usize,
-    inner_height: usize,
-    /// Where the body reports the window it drew.
-    fit: &'a mut ScrollWindow,
 }
 
-impl KnownSize for ValueModalBody<'_> {
-    fn width(&self) -> usize {
-        self.inner_width
+impl ModalBody for ValueModalBody<'_> {
+    type Output = ScrollWindow;
+
+    /// The value fills its frame, so it is wrapped in `render`.
+    fn measure(&mut self, _width: u16) -> u16 {
+        0
     }
 
-    fn height(&self) -> usize {
-        self.inner_height
-    }
-}
-
-impl Widget for ValueModalBody<'_> {
-    fn render(self, area: Rect, buf: &mut Buffer) {
+    fn render(self, area: Rect, buf: &mut Buffer) -> ScrollWindow {
         use ratatui::layout::{Constraint, Layout};
         let [text_area, footer_area] =
             Layout::vertical([Constraint::Min(1), Constraint::Length(1)]).areas(area);
@@ -259,7 +237,6 @@ impl Widget for ValueModalBody<'_> {
         // An offset past the end (`G`, or paging on) shows the last rows.
         let window = ScrollWindow::new(usize::from(text_area.height), lines.len())
             .at(usize::from(self.state.scroll));
-        *self.fit = window;
         Paragraph::new(lines)
             .scroll(window.paragraph_scroll())
             .render(text_area, buf);
@@ -269,6 +246,7 @@ impl Widget for ValueModalBody<'_> {
         Paragraph::new(hint)
             .style(Style::default().fg(self.theme.inert))
             .render(footer_area, buf);
+        window
     }
 }
 

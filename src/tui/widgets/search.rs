@@ -21,8 +21,8 @@ use ratatui::macros::{line, span};
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Paragraph, Widget};
-use tui_popup::KnownSize;
 use tuikit::chip::{self, SegmentedTitle};
+use tuikit::frame::{ModalBody, ModalFrame, ModalSize};
 use tuikit::scroll::ScrollWindow;
 use tuikit::text;
 
@@ -72,22 +72,9 @@ impl Reach {
     }
 }
 
-/// The least and most the modal's width and height grow to, and the share
-/// of the terminal it aims for. The modal always leaves a one-cell margin.
-const MODAL_WIDTH: (u32, u32, u32) = (85, 60, 200);
-const MODAL_HEIGHT: (u32, u32, u32) = (80, 12, 50);
-
-/// The modal's outer size on a terminal of `width` x `height` cells.
-pub fn modal_size(width: u16, height: u16) -> (u16, u16) {
-    let fit = |terminal: u16, (percent, min, max): (u32, u32, u32)| -> u16 {
-        let wanted = (u32::from(terminal) * percent / 100).clamp(min, max);
-        u16::try_from(wanted)
-            .unwrap_or(u16::MAX)
-            .min(terminal.saturating_sub(2))
-            .max(1)
-    };
-    (fit(width, MODAL_WIDTH), fit(height, MODAL_HEIGHT))
-}
+/// How large the overlay is: a palette's size, most of the screen, so a
+/// wide terminal shows more of each result.
+pub(crate) const SEARCH_SIZE: ModalSize = ModalSize::PALETTE;
 
 /// What a content result opens.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -689,17 +676,12 @@ fn granularity_segments(group: Grouping, theme: &Theme) -> Vec<Span<'static>> {
 
 impl Widget for SearchOverlayWidget<'_> {
     fn render(self, area: Rect, buf: &mut Buffer) {
-        // Framing through `tui_popup::Popup`; the body wrapper reports the
-        // inner dims of the rect `centered_modal_rect` produces so
-        // auto-sizing reproduces it.
-        let modal = centered_modal_rect(area);
         let title = match (self.state.mode(), self.content) {
             (SearchMode::Content, _) => {
-                let mut spans = vec![Span::raw(" / search contents  ")];
+                let mut spans = vec![Span::raw("/ search contents  ")];
                 spans.extend(reach_segments(self.state.reach(), self.theme));
                 spans.push(Span::raw("  "));
                 spans.extend(granularity_segments(self.state.group(), self.theme));
-                spans.push(Span::raw(" "));
                 Line::from(spans)
             }
             (SearchMode::Quick, _) => {
@@ -707,9 +689,9 @@ impl Widget for SearchOverlayWidget<'_> {
                     Reach::Current => self.state.matches().len(),
                     Reach::All => self.state.entity_matches().len(),
                 };
-                let mut spans = vec![Span::raw(" / quick select  ")];
+                let mut spans = vec![Span::raw("/ quick select  ")];
                 spans.extend(reach_segments(self.state.reach(), self.theme));
-                spans.push(Span::raw(format!("  ({n}) ")));
+                spans.push(Span::raw(format!("  ({n})")));
                 Line::from(spans)
             }
         };
@@ -719,36 +701,21 @@ impl Widget for SearchOverlayWidget<'_> {
             content: self.content,
             outcomes: self.outcomes,
             theme: self.theme,
-            inner_width: modal.width.saturating_sub(2) as usize,
-            inner_height: modal.height.saturating_sub(2) as usize,
         };
-        let popup = crate::tui::widgets::popup_frame::themed_popup(body, title, self.theme);
-        popup.render(area, buf);
+        ModalFrame::new(self.theme, SEARCH_SIZE)
+            .title(title)
+            .render(area, buf, body);
     }
 }
 
-/// Body wrapper for `tui_popup::Popup`. Renders the query row +
-/// ranked match list into the inner area; sizing is reported via
-/// the cap dims so the popup's auto-sizing reproduces the in-tree
-/// rect.
+/// The query row over the ranked results, drawn in the frame's inner
+/// area.
 struct SearchBody<'a> {
     state: &'a SearchOverlayState,
     items: &'a [SearchItem<'a>],
     content: Option<&'a ContentView>,
     outcomes: Option<OutcomeWords<'a>>,
     theme: &'a Theme,
-    inner_width: usize,
-    inner_height: usize,
-}
-
-impl KnownSize for SearchBody<'_> {
-    fn width(&self) -> usize {
-        self.inner_width
-    }
-
-    fn height(&self) -> usize {
-        self.inner_height
-    }
 }
 
 /// Widths of the columns in an entity result, left to right after the
@@ -794,7 +761,14 @@ pub(crate) fn entity_columns(inner: usize) -> EntityColumns {
     }
 }
 
-impl Widget for SearchBody<'_> {
+impl ModalBody for SearchBody<'_> {
+    type Output = ();
+
+    /// The overlay fills its frame, so it is laid out in `render`.
+    fn measure(&mut self, _width: u16) -> u16 {
+        0
+    }
+
     fn render(self, area: Rect, buf: &mut Buffer) {
         // First row: the query input (rendered as plain text with a
         // leading `/` so the operator sees the live query). Reuse
@@ -1368,12 +1342,6 @@ fn search_kind_glyph_span_for(kind: NodeKind, theme: &Theme, is_cursor: bool) ->
         span_style = span_style.add_modifier(Modifier::REVERSED);
     }
     span!(span_style; "{} ", style.glyph)
-}
-
-/// The modal's outer rect, centered in `area`.
-pub(crate) fn centered_modal_rect(area: Rect) -> Rect {
-    let (width, height) = modal_size(area.width, area.height);
-    super::popup_frame::centered_rect(area, width, height)
 }
 
 /// Per-event context the search overlay reads through the

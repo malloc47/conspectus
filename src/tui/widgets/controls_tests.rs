@@ -432,28 +432,6 @@ fn ordering_bool_keeps_filter_non_empty_for_clear_all() {
 }
 
 #[test]
-fn max_content_line_count_tracks_rendered_controls_body() {
-    let filter = RowFilter::default();
-    let theme = Theme::default();
-    let max_rendered = VIEW_OPTIONS
-        .iter()
-        .map(|view| {
-            let ctx = ctx_with(
-                *view,
-                Grouping::default_for(*view),
-                &filter,
-                Sort::Hierarchy,
-            );
-            let state = ControlsOverlayState::new(&ctx);
-            let widget = ControlsOverlayWidget::new(&state, ctx, &theme);
-            widget.body_lines().len() + 2
-        })
-        .max()
-        .unwrap();
-    assert_eq!(max_controls_content_lines(), max_rendered);
-}
-
-#[test]
 fn selected_last_sort_row_scrolls_into_short_controls_body() {
     let filter = RowFilter::default();
     let ctx = ctx_with(
@@ -467,15 +445,25 @@ fn selected_last_sort_row_scrolls_into_short_controls_body() {
         sub_editor: None,
     };
     let theme = Theme::default();
-    let widget = ControlsOverlayWidget::new(&state, ctx, &theme);
-    let mut lines = widget.body_lines();
-    lines.push(Line::default());
-    lines.push(Line::from("↑/↓ move · Enter pick · Esc close"));
-    let cursor_line = widget.cursor_line_index().unwrap();
-    let inner_height = 10;
-    let window = body_window(Some(cursor_line), inner_height, lines.len());
-    assert!(window.offset() > 0, "short controls body should scroll");
-    assert!(window.visible().contains(&cursor_line));
+    // Too short for every row: the body scrolls to the cursor's row.
+    let area = Rect::new(0, 0, 80, 14);
+    let mut buf = Buffer::empty(area);
+    ControlsOverlayWidget::new(&state, ctx, &theme).render(area, &mut buf);
+    let rows: Vec<String> = (0..area.height)
+        .map(|y| (0..area.width).map(|x| buf[(x, y)].symbol()).collect())
+        .collect();
+    assert!(
+        rows.iter().any(|row| row.contains("> Recency")),
+        "the selected sort row is drawn:\n{}",
+        rows.join("\n")
+    );
+    assert!(
+        !rows
+            .iter()
+            .any(|row| row.contains("> Sessions") || row.contains("  Sessions [1]")),
+        "the top of the body scrolled away:\n{}",
+        rows.join("\n")
+    );
 }
 
 #[test]
@@ -599,27 +587,6 @@ fn cursor_line_index_points_at_the_cursored_row_in_every_section() {
                 lines[index]
             );
         }
-    }
-}
-
-#[test]
-fn modal_height_budget_covers_the_tallest_body() {
-    let filter = RowFilter::default();
-    let theme = Theme::default();
-    for view in VIEW_OPTIONS {
-        let ctx = ctx_with(
-            *view,
-            Grouping::default_for(*view),
-            &filter,
-            Sort::Hierarchy,
-        );
-        let state = ControlsOverlayState::new(&ctx);
-        let widget = ControlsOverlayWidget::new(&state, ctx.clone(), &theme);
-        // Body plus the blank + key-hint footer.
-        assert!(
-            widget.body_lines().len() + 2 <= max_controls_content_lines(),
-            "{view:?}"
-        );
     }
 }
 

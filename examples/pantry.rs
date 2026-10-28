@@ -96,11 +96,12 @@ impl Ingredient for MultiSelectVariant {
 
     fn render(&self, area: Rect, buf: &mut Buffer) {
         let state = self.build_state();
+        let theme = Theme::default();
         // `MultiSelectItem` is impl'd for `String` directly, so we
         // can hand the items slice through without converting to
         // borrowed `&str` — that would lose the static lifetime
         // the `&'static str` impl needs.
-        MultiSelectWidget::new(&state, self.items.as_slice()).render(area, buf);
+        MultiSelectWidget::new(&state, self.items.as_slice(), &theme).render(area, buf);
     }
 }
 
@@ -415,7 +416,7 @@ impl Ingredient for TextInputVariant {
             };
             let _ = state.handle_key(event);
         }
-        TextInputWidget::new(&state).theme(&theme).render(area, buf);
+        TextInputWidget::new(&state, &theme).render(area, buf);
     }
 }
 

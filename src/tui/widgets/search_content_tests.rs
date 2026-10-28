@@ -655,7 +655,7 @@ fn the_modal_scales_to_a_wide_terminal_without_clipping() {
             .map(|l| l.trim().chars().count())
             .max()
             .unwrap_or(0);
-        let expected = usize::from(modal_size(width, 30).0);
+        let expected = usize::from(SEARCH_SIZE.width(width));
         assert!(
             (expected..=expected + 1).contains(&widest),
             "{width}: the modal is {widest} cells wide, the rule gives {expected}"

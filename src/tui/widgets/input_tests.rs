@@ -97,15 +97,15 @@ fn enter_returns_trimmed_or_raw_value_per_caller_choice() {
     assert_eq!(outcome, InputOutcome::Confirm("   ".to_string()));
 }
 
+/// The prompt's frame on `area`: one row of text and its border.
+fn prompt_rect(area: Rect) -> Rect {
+    let theme = Theme::default();
+    ModalFrame::new(&theme, PROMPT_SIZE).rect(area, 1)
+}
+
 #[test]
 fn centered_modal_caps_width_at_60() {
-    let area = Rect {
-        x: 0,
-        y: 0,
-        width: 120,
-        height: 30,
-    };
-    let modal = centered_modal_rect(area);
+    let modal = prompt_rect(Rect::new(0, 0, 120, 30));
     assert_eq!(modal.width, 60);
     assert_eq!(modal.height, 3);
     assert!(modal.x > 0);
@@ -114,27 +114,15 @@ fn centered_modal_caps_width_at_60() {
 
 #[test]
 fn centered_modal_scales_down_on_narrow_terminal() {
-    let area = Rect {
-        x: 0,
-        y: 0,
-        width: 30,
-        height: 12,
-    };
-    let modal = centered_modal_rect(area);
+    let modal = prompt_rect(Rect::new(0, 0, 30, 12));
     assert_eq!(modal.width, 26); // 30 - 4
     assert_eq!(modal.height, 3);
 }
 
 #[test]
-fn centered_modal_floors_width_at_20() {
-    let area = Rect {
-        x: 0,
-        y: 0,
-        width: 18,
-        height: 6,
-    };
-    let modal = centered_modal_rect(area);
-    assert_eq!(modal.width, 20);
+fn centered_modal_floors_width_at_20_within_the_terminal() {
+    assert_eq!(prompt_rect(Rect::new(0, 0, 22, 6)).width, 20);
+    assert_eq!(prompt_rect(Rect::new(0, 0, 18, 6)).width, 18);
 }
 
 #[test]

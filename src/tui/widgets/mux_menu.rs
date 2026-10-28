@@ -20,13 +20,13 @@ use ratatui::crossterm::event::KeyEvent;
 use ratatui::layout::Rect;
 use ratatui::style::{Modifier, Style};
 use ratatui::text::Line;
-use ratatui::widgets::{Block, Borders, Clear, Paragraph, Widget};
+use ratatui::widgets::Widget;
+use tuikit::frame::{Lines, ModalFrame, ModalSize};
 use tuikit::glyphs::marks;
 
 use crate::tui::Msg;
 use crate::tui::modal::{Overlay, OverlayOutcome};
 use crate::tui::theme::Theme;
-use crate::tui::widgets::popup_frame;
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
 pub enum MuxMenuChoice {
@@ -138,22 +138,9 @@ impl Widget for MuxMenuWidget<'_> {
             crate::tui::keybindings::overlay::MENU_KEYS,
         )));
 
-        // At least 10 rows, but never taller than the terminal.
-        let height = u16::try_from(lines.len())
-            .unwrap_or(u16::MAX)
-            .saturating_add(2)
-            .max(10)
-            .min(area.height);
-        let width = 62_u16.min(area.width);
-        let rect = popup_frame::centered_rect(area, width, height);
-        Clear.render(rect, buf);
-        let block = Block::default()
-            .borders(Borders::ALL)
-            .title(" Mux ")
-            .border_style(Style::default().fg(self.theme.accent));
-        let inner = block.inner(rect);
-        block.render(rect, buf);
-        Paragraph::new(lines).render(inner, buf);
+        ModalFrame::new(self.theme, ModalSize::MENU)
+            .title("Mux")
+            .render(area, buf, Lines::new(lines));
     }
 }
 

@@ -30,14 +30,14 @@ use ratatui::macros::line;
 use ratatui::style::Style;
 use ratatui::text::Line;
 use ratatui::widgets::Widget;
-use tuikit::scroll::ScrollWindow;
+use tuikit::frame::Lines;
 
 use crate::tui::Msg;
 use crate::tui::modal::{Overlay, OverlayOutcome};
 use crate::tui::theme::Theme;
 use crate::tui::widgets::form::{
-    self, ScrollLinesBody, choice_row, derived_row, footer_lines, harness_row, input_row,
-    options_row, path_row, static_value_row,
+    self, choice_row, derived_row, footer_lines, harness_row, input_row, options_row, path_row,
+    static_value_row,
 };
 use crate::tui::widgets::input::{InputOutcome, TextInputState};
 use crate::tui::widgets::launch_spec_form::{
@@ -512,9 +512,8 @@ impl Widget for MuxLaunchFormWidget<'_> {
     fn render(self, area: Rect, buf: &mut Buffer) {
         let state = self.state;
         let spec = state.spec();
-        let modal_width = 76;
-        let inner_width =
-            usize::from(std::cmp::min(modal_width, area.width.saturating_sub(4)).max(44)) - 2;
+        let frame = form::modal_frame(self.theme, "Launch harness in new mux");
+        let inner_width = usize::from(frame.inner_width(area));
         let footer = footer_lines(
             &crate::tui::keybindings::overlay::footer(
                 crate::tui::keybindings::overlay::MUX_LAUNCH_KEYS,
@@ -674,21 +673,11 @@ impl Widget for MuxLaunchFormWidget<'_> {
             lines.push(footer_line);
         }
 
-        let modal = form::modal_rect(area, modal_width, lines.len(), 10);
-        let inner_height = usize::from(modal.height.saturating_sub(2));
-        let body = ScrollLinesBody {
-            window: ScrollWindow::new(inner_height, lines.len())
-                .following(cursor_line..cursor_line + 1),
-            lines,
-            inner_width: usize::from(modal.width.saturating_sub(2)),
-            inner_height,
-        };
-        crate::tui::widgets::popup_frame::themed_popup(
-            body,
-            line![" Launch harness in new mux "],
-            self.theme,
-        )
-        .render(area, buf);
+        frame.render(
+            area,
+            buf,
+            Lines::new(lines).following(cursor_line..cursor_line + 1),
+        );
     }
 }
 

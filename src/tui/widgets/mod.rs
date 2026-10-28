@@ -16,7 +16,6 @@ pub mod pane_viewer;
 pub mod path_omnibox;
 pub mod picker;
 pub mod pin_edit;
-pub mod popup_frame;
 pub mod row_menu;
 pub mod search;
 pub mod toast;

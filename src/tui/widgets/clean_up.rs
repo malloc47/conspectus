@@ -5,17 +5,16 @@
 use ratatui::buffer::Buffer;
 use ratatui::crossterm::event::KeyEvent;
 use ratatui::layout::Rect;
-use ratatui::style::Style;
 use ratatui::text::Line;
-use ratatui::widgets::{Block, Borders, Clear, Paragraph, Widget};
+use ratatui::widgets::Widget;
 use tuikit::age::Age;
+use tuikit::frame::{Lines, ModalFrame, ModalSize};
 
 use crate::history::reap::Candidate;
 use crate::tui::Msg;
 use crate::tui::modal::{Overlay, OverlayOutcome};
 use crate::tui::theme::Theme;
 use crate::tui::widgets::multi_select::{MultiSelectOutcome, MultiSelectState, MultiSelectWidget};
-use crate::tui::widgets::popup_frame;
 
 #[derive(Debug, Clone)]
 pub struct CleanUpState {
@@ -109,34 +108,28 @@ impl<'a> CleanUpWidget<'a> {
 impl Widget for CleanUpWidget<'_> {
     fn render(self, area: Rect, buf: &mut Buffer) {
         if !self.state.is_empty() {
-            MultiSelectWidget::new(&self.state.select, &self.state.labels)
-                .theme(self.theme)
+            MultiSelectWidget::new(&self.state.select, &self.state.labels, self.theme)
                 .render(area, buf);
             return;
         }
-        let lines = vec![
+        let frame = ModalFrame::new(self.theme, ModalSize::MENU).title("Clean up");
+        let width = usize::from(frame.inner_width(area));
+        let lines = [
             Line::from(""),
             Line::from("Nothing to clean up."),
             Line::from(
-                "Stopped and removed records are kept until they pass their `[history.reap_after]`",
+                "Stopped and removed records are kept until they pass their \
+                 `[history.reap_after]` age, and records a pin targets are never listed.",
             ),
-            Line::from("age, and records a pin targets are never listed."),
             Line::from(""),
             Line::from("Esc/Enter close"),
         ];
-        let height = u16::try_from(lines.len())
-            .unwrap_or(u16::MAX)
-            .saturating_add(2)
-            .min(area.height);
-        let rect = popup_frame::centered_rect(area, 68_u16.min(area.width), height);
-        Clear.render(rect, buf);
-        let block = Block::default()
-            .borders(Borders::ALL)
-            .title(" Clean up ")
-            .border_style(Style::default().fg(self.theme.accent));
-        let inner = block.inner(rect);
-        block.render(rect, buf);
-        Paragraph::new(lines).render(inner, buf);
+        // Wrapped to the frame, so a long sentence breaks between words.
+        let rows: Vec<Line<'static>> = lines
+            .iter()
+            .flat_map(|line| tuikit::text::wrap_line(line, width, 0))
+            .collect();
+        frame.render(area, buf, Lines::new(rows));
     }
 }
 

@@ -15,7 +15,7 @@ use ratatui::style::{Modifier, Style};
 use ratatui::text::Line;
 use ratatui::widgets::{Paragraph, Widget};
 use ratatui_cheese::help::Binding;
-use tui_popup::KnownSize;
+use tuikit::frame::{ModalBody, ModalFrame, ModalSize};
 use tuikit::glyphs::marks;
 use tuikit::scroll::{ScrollGutter, ScrollWindow};
 use tuikit::text;
@@ -142,13 +142,15 @@ impl Widget for HelpOverlayWidget<'_> {
     }
 }
 
-/// Draw a help page: the shared popup frame with the ` Help ` title,
-/// the page's lines scrolled to `scroll` and wrapped to the modal's
-/// width, and a scrollbar when the page overflows. The keymap help and
-/// the transcript viewer's help both draw through here, so the two
-/// modals share one frame, size, and scroll behavior. Returns the window
-/// the page's scrolling part showed; the footer stays on the last rows,
-/// so only the lines above it scroll.
+/// How large a help page is: a reader's size.
+pub(crate) const HELP_SIZE: ModalSize = ModalSize::WIDE;
+
+/// Draw a help page: the modal frame with the `Help` title, the page's
+/// lines scrolled to `scroll` and wrapped to the modal's width, and a
+/// scrollbar when the page overflows. The keymap help and the viewers'
+/// helps all draw through here, so they share one frame, size, and
+/// scroll behavior. Returns the window the page's scrolling part showed;
+/// the footer stays on the last rows, so only the lines above it scroll.
 pub(super) fn render_help_page(
     area: Rect,
     buf: &mut Buffer,
@@ -156,23 +158,11 @@ pub(super) fn render_help_page(
     scroll: usize,
     lines_for: &dyn Fn(usize) -> Vec<Line<'static>>,
 ) -> ScrollWindow {
-    // The centered-bordered-modal shell — clear, border, title — is
-    // owned by `tui_popup::Popup` via
-    // `crate::tui::widgets::popup_frame::themed_popup`. The body
-    // wrapper reports the same cap dimensions `help_modal_rect`
-    // computes, so the popup's auto-sizing reproduces that rect.
-    let modal = help_modal_rect(area);
-    let mut fit = ScrollWindow::default();
-    let body = HelpBody {
-        scroll,
-        lines_for,
-        inner_width: modal.width.saturating_sub(2) as usize,
-        inner_height: modal.height.saturating_sub(2) as usize,
-        fit: &mut fit,
-    };
-    let popup = crate::tui::widgets::popup_frame::themed_popup(body, line![" Help "], theme);
-    popup.render(area, buf);
-    fit
+    ModalFrame::new(theme, HELP_SIZE).title("Help").render(
+        area,
+        buf,
+        HelpBody { scroll, lines_for },
+    )
 }
 
 /// A help page split into the lines that scroll and the footer that
@@ -229,35 +219,27 @@ fn page_layout(
     }
 }
 
-/// Body wrapper for `tui_popup::Popup`. Reports the inner width /
-/// height the in-tree `help_modal_rect` cap produces so the popup's
-/// auto-sizing reproduces that rect.
+/// A help page inside its frame: the lines for the frame's width, the
+/// part above the footer scrolled to `scroll`.
 struct HelpBody<'a> {
     scroll: usize,
     lines_for: &'a dyn Fn(usize) -> Vec<Line<'static>>,
-    inner_width: usize,
-    inner_height: usize,
-    /// Where the body reports the window it drew.
-    fit: &'a mut ScrollWindow,
 }
 
-impl KnownSize for HelpBody<'_> {
-    fn width(&self) -> usize {
-        self.inner_width
+impl ModalBody for HelpBody<'_> {
+    type Output = ScrollWindow;
+
+    /// The page fills its frame, so it is laid out in `render`, where the
+    /// height is known.
+    fn measure(&mut self, _width: u16) -> u16 {
+        0
     }
 
-    fn height(&self) -> usize {
-        self.inner_height
-    }
-}
-
-impl Widget for HelpBody<'_> {
-    fn render(self, area: Rect, buf: &mut Buffer) {
+    fn render(self, area: Rect, buf: &mut Buffer) -> ScrollWindow {
         let page = page_layout(self.lines_for, area.width as usize, area.height as usize);
         let text_width = u16::try_from(page.text_width).unwrap_or(area.width);
         let body_height = u16::try_from(page.body_height).unwrap_or(area.height);
         let window = ScrollWindow::new(page.body_height, page.body.len()).at(self.scroll);
-        *self.fit = window;
         // The page was laid out for the gutter the scrolling part needs.
         let gutter = ScrollGutter::layout(
             Rect {
@@ -278,6 +260,7 @@ impl Widget for HelpBody<'_> {
         };
         Paragraph::new(page.footer).render(footer_area, buf);
         gutter.render(&window, buf);
+        window
     }
 }
 
@@ -828,25 +811,6 @@ pub(super) fn section(lines: &mut Vec<Line<'static>>, title: &str) {
 
 pub(super) fn blank(lines: &mut Vec<Line<'static>>) {
     lines.push(line![""]);
-}
-
-/// Help-overlay modal: as tall as the terminal allows (less a small
-/// margin) so more of the keymap is visible at once, and up to 100
-/// columns wide so long descriptions wrap less.
-pub(crate) fn help_modal_rect(area: Rect) -> Rect {
-    let width = std::cmp::min(100, area.width.saturating_sub(4)).max(40);
-    let height = area.height.saturating_sub(4).max(10);
-    super::popup_frame::centered_rect(area, width, height)
-}
-
-/// Centered modal sized to roughly two thirds of the terminal,
-/// capped so it stays readable on wide screens. Shared with the
-/// value modal.
-pub fn centered_modal_rect(area: Rect) -> Rect {
-    let width = std::cmp::min(78, area.width.saturating_sub(4)).max(40);
-    let max_height = area.height.saturating_sub(2);
-    let height = 28u16.clamp(10, max_height.max(10));
-    super::popup_frame::centered_rect(area, width, height)
 }
 
 #[cfg(test)]

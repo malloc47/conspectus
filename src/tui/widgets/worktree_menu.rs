@@ -19,9 +19,10 @@ use ratatui::crossterm::event::KeyEvent;
 use ratatui::layout::Rect;
 use ratatui::style::{Modifier, Style};
 use ratatui::text::Line;
-use ratatui::widgets::{Block, Borders, Clear, Paragraph, Widget};
+use ratatui::widgets::Widget;
 
 use std::path::Path;
+use tuikit::frame::{Lines, ModalFrame, ModalSize};
 use tuikit::glyphs::marks;
 
 use crate::model::{
@@ -33,7 +34,6 @@ use crate::tui::modal::{Overlay, OverlayOutcome};
 use crate::tui::rows::RowId;
 use crate::tui::theme::Theme;
 use crate::tui::widgets::input::{InputOutcome, TextInputState, TextInputWidget};
-use crate::tui::widgets::popup_frame;
 use crate::tui::worktree_actions::{WorktreeAction, WorktreeContext, worktree_actions};
 
 /// Actions the runtime knows how to dispatch today. `worktree_actions`
@@ -544,9 +544,7 @@ impl Widget for WorktreeMenuWidget<'_> {
     fn render(self, area: Rect, buf: &mut Buffer) {
         // Branch input renders through the shared text-input widget.
         if let Mode::BranchInput(input) = &self.state.mode {
-            TextInputWidget::new(input)
-                .theme(self.theme)
-                .render(area, buf);
+            TextInputWidget::new(input, self.theme).render(area, buf);
             return;
         }
 
@@ -674,8 +672,8 @@ impl Widget for WorktreeMenuWidget<'_> {
 
         // Wrapped to the frame's inner width, so the height counts the rows
         // drawn and nothing is cut off at the bottom.
-        let width = 56.min(area.width);
-        let inner_width = usize::from(width.saturating_sub(2));
+        let frame = ModalFrame::new(self.theme, ModalSize::MENU).title("Worktree");
+        let inner_width = usize::from(frame.inner_width(area));
         let mut rows: Vec<Line<'static>> = lines
             .iter()
             .flat_map(|line| tuikit::text::wrap_line(line, inner_width, 0))
@@ -688,21 +686,7 @@ impl Widget for WorktreeMenuWidget<'_> {
                     .map(Line::from),
             );
         }
-        // At least 5 rows, but never taller than the terminal.
-        let height = u16::try_from(rows.len())
-            .unwrap_or(u16::MAX)
-            .saturating_add(2)
-            .max(5)
-            .min(area.height);
-        let rect = popup_frame::centered_rect(area, width, height);
-        Clear.render(rect, buf);
-        let block = Block::default()
-            .borders(Borders::ALL)
-            .title(" Worktree ")
-            .border_style(Style::default().fg(self.theme.accent));
-        let inner = block.inner(rect);
-        block.render(rect, buf);
-        Paragraph::new(rows).render(inner, buf);
+        frame.render(area, buf, Lines::new(rows));
     }
 }
 

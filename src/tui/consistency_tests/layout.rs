@@ -488,7 +488,11 @@ fn no_word_in_a_modal_is_cut_off_at_its_edge() {
 
 #[test]
 fn the_search_modal_is_wide_and_follows_the_sizing_rule_at_every_size() {
-    use crate::tui::widgets::search::modal_size;
+    use crate::tui::widgets::search::SEARCH_SIZE;
+    let modal_size = |width, height| {
+        let rect = SEARCH_SIZE.rect(ratatui::layout::Rect::new(0, 0, width, height), 0);
+        (rect.width, rect.height)
+    };
     let mut checked = 0;
     for (name, view, open) in builders() {
         if name != "Search" {
@@ -546,4 +550,50 @@ fn the_quick_select_title_shows_both_reaches_and_does_not_shift_when_toggled() {
         );
         search_key(&mut app, KeyCode::Tab);
     }
+}
+
+#[test]
+fn every_modal_draws_one_frame_and_one_title_form() {
+    use ratatui::style::Modifier;
+    let accent = crate::tui::Theme::default().accent;
+    let mut checked = Vec::new();
+    for (name, view, open) in builders() {
+        let (with, without) = framed_and_bare(view, open, 120, 40);
+        let label = describe_size(name, 120, 40);
+        let (x0, y0, x1, y1) = modal_rect(&with, &without).unwrap_or_else(|| panic!("{label}"));
+        for (x, y) in [(x0, y0), (x1, y0), (x0, y1), (x1, y1)] {
+            assert_eq!(with[(x, y)].fg, accent, "{label}: the border is the accent");
+        }
+        // The title runs from the corner to the first rule cell.
+        let cells: Vec<_> = (x0 + 1..x1)
+            .map(|x| &with[(x, y0)])
+            .take_while(|cell| cell.symbol() != "─")
+            .collect();
+        let title: String = cells.iter().map(|cell| cell.symbol()).collect();
+        assert!(
+            title.len() > 2 && title.starts_with(' ') && !title.starts_with("  "),
+            "{label}: one space before the title: {title:?}"
+        );
+        assert!(
+            title.ends_with(' ') && !title.ends_with("  "),
+            "{label}: one space after the title: {title:?}"
+        );
+        // Outside the chips a title may carry, it is plain text in the
+        // border's color.
+        for cell in cells
+            .iter()
+            .filter(|cell| !cell.modifier.contains(Modifier::REVERSED))
+        {
+            assert_eq!(cell.fg, accent, "{label}: {title:?}");
+            assert!(
+                !cell.modifier.contains(Modifier::BOLD),
+                "{label}: the title is regular weight: {title:?}"
+            );
+        }
+        checked.push(name);
+    }
+    for (name, _) in SKIPPED {
+        assert!(!checked.contains(name), "{name}");
+    }
+    assert!(checked.len() >= 14, "{checked:?}");
 }

@@ -114,18 +114,18 @@ fn selected_last_row_scrolls_into_short_multi_select_body() {
     let mut state = MultiSelectState::new("pick", items.len(), &[]);
     state.handle_key(key(KeyCode::Up));
     assert_eq!(state.cursor(), 9);
-    // A terminal 10 rows tall leaves the modal 4 item rows.
+    // A terminal 10 rows tall leaves the modal 6 item rows.
     let area = Rect::new(0, 0, 40, 10);
     let mut buf = Buffer::empty(area);
-    MultiSelectWidget::new(&state, &items).render(area, &mut buf);
+    MultiSelectWidget::new(&state, &items, &Theme::default()).render(area, &mut buf);
     let text: String = (0..area.height)
         .flat_map(|y| (0..area.width).map(move |x| (x, y)))
         .map(|(x, y)| buf[(x, y)].symbol().to_string())
         .collect();
     assert!(text.contains("item 9"), "the cursor's row is drawn: {text}");
     assert!(
-        text.contains("item 6"),
+        text.contains("item 4"),
         "the rows above it fill the body: {text}"
     );
-    assert!(!text.contains("item 5"), "{text}");
+    assert!(!text.contains("item 3"), "{text}");
 }

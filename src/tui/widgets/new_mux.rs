@@ -20,12 +20,12 @@ use ratatui::layout::Rect;
 use ratatui::macros::line;
 use ratatui::text::Line;
 use ratatui::widgets::Widget;
-use tuikit::scroll::ScrollWindow;
+use tuikit::frame::Lines;
 
 use crate::tui::Msg;
 use crate::tui::modal::{Overlay, OverlayOutcome};
 use crate::tui::theme::Theme;
-use crate::tui::widgets::form::{self, ScrollLinesBody, footer_lines, input_row, path_row};
+use crate::tui::widgets::form::{self, footer_lines, input_row, path_row};
 use crate::tui::widgets::input::{InputOutcome, TextInputState};
 use crate::tui::widgets::path_omnibox::{PathCandidate, PathOmniboxOutcome, PathOmniboxState};
 
@@ -176,9 +176,8 @@ impl<'a> NewMuxFormWidget<'a> {
 
 impl Widget for NewMuxFormWidget<'_> {
     fn render(self, area: Rect, buf: &mut Buffer) {
-        let modal_width = 76;
-        let inner_width =
-            usize::from(std::cmp::min(modal_width, area.width.saturating_sub(4)).max(44)) - 2;
+        let frame = form::modal_frame(self.theme, "New tmux session");
+        let inner_width = usize::from(frame.inner_width(area));
         let cols = form::Cols::new(inner_width);
         let name_focused = self.state.focus == NewMuxField::Name;
         let cwd_focused = self.state.focus == NewMuxField::Cwd;
@@ -194,21 +193,8 @@ impl Widget for NewMuxFormWidget<'_> {
             inner_width,
             self.theme,
         ));
-        let modal = form::modal_rect(area, modal_width, lines.len(), 6);
-        let inner_height = usize::from(modal.height.saturating_sub(2));
-        let body = ScrollLinesBody {
-            window: ScrollWindow::new(inner_height, lines.len())
-                .following(usize::from(cwd_focused)..usize::from(cwd_focused) + 1),
-            lines,
-            inner_width: usize::from(modal.width.saturating_sub(2)),
-            inner_height,
-        };
-        crate::tui::widgets::popup_frame::themed_popup(
-            body,
-            line![" New tmux session "],
-            self.theme,
-        )
-        .render(area, buf);
+        let cursor = usize::from(cwd_focused);
+        frame.render(area, buf, Lines::new(lines).following(cursor..cursor + 1));
     }
 }
 

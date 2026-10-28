@@ -15,7 +15,7 @@ use ratatui::text::Line;
 use ratatui::widgets::{Paragraph, Widget};
 use tui_input::backend::crossterm::EventHandler;
 use tui_input::{Input, InputRequest};
-use tui_popup::KnownSize;
+use tuikit::frame::{ModalBody, ModalFrame, ModalSize};
 
 use crate::tui::Theme;
 
@@ -120,70 +120,42 @@ pub fn single_line_paste(text: &str) -> String {
     out
 }
 
-/// Centered modal rendering of [`TextInputState`]. Defaults to the
-/// upstream popup palette when no `.theme(&Theme)` is provided so
-/// the constructor stays a one-arg call from existing sites.
+/// How large a prompt is: one row in a compact frame.
+pub(crate) const PROMPT_SIZE: ModalSize = ModalSize::COMPACT;
+
+/// Centered modal rendering of [`TextInputState`]: the field in a
+/// compact frame titled with the prompt.
 pub struct TextInputWidget<'a> {
     state: &'a TextInputState,
-    theme: Option<&'a Theme>,
+    theme: &'a Theme,
 }
 
 impl<'a> TextInputWidget<'a> {
-    pub fn new(state: &'a TextInputState) -> Self {
-        Self { state, theme: None }
-    }
-
-    /// Honor operator `[tui.theme]` overrides (ADR 0032). Without
-    /// this the bordered modal renders with the upstream defaults.
-    pub fn theme(mut self, theme: &'a Theme) -> Self {
-        self.theme = Some(theme);
-        self
+    pub fn new(state: &'a TextInputState, theme: &'a Theme) -> Self {
+        Self { state, theme }
     }
 }
 
 impl Widget for TextInputWidget<'_> {
     fn render(self, area: Rect, buf: &mut Buffer) {
-        // Framing through `tui_popup::Popup`. When a
-        // theme is set we route through `themed_popup`; otherwise
-        // fall back to upstream defaults so call sites that don't
-        // pass a theme still render legibly.
-        let modal = centered_modal_rect(area);
-        let body = TextInputBody {
-            state: self.state,
-            inner_width: modal.width.saturating_sub(2) as usize,
-            inner_height: modal.height.saturating_sub(2) as usize,
-        };
-        let title = Line::from(self.state.title.clone());
-        if let Some(theme) = self.theme {
-            let popup = crate::tui::widgets::popup_frame::themed_popup(body, title, theme);
-            popup.render(area, buf);
-        } else {
-            let popup = tui_popup::Popup::new(body).title(title);
-            popup.render(area, buf);
-        }
+        ModalFrame::new(self.theme, PROMPT_SIZE)
+            .title(self.state.title.as_str())
+            .render(area, buf, TextInputBody { state: self.state });
     }
 }
 
-/// Body wrapper that renders the visible-window text and reverses
-/// the cursor cell. Sizing follows the cap dims so the popup auto-
-/// sizing reproduces the in-tree 3-row rect.
+/// The visible window of the text, with the cursor cell reversed.
 struct TextInputBody<'a> {
     state: &'a TextInputState,
-    inner_width: usize,
-    inner_height: usize,
 }
 
-impl KnownSize for TextInputBody<'_> {
-    fn width(&self) -> usize {
-        self.inner_width
+impl ModalBody for TextInputBody<'_> {
+    type Output = ();
+
+    fn measure(&mut self, _width: u16) -> u16 {
+        1
     }
 
-    fn height(&self) -> usize {
-        self.inner_height
-    }
-}
-
-impl Widget for TextInputBody<'_> {
     fn render(self, area: Rect, buf: &mut Buffer) {
         let value = self.state.input.value();
         let cursor = self.state.input.cursor();
@@ -196,12 +168,6 @@ impl Widget for TextInputBody<'_> {
             cell.set_style(Style::default().add_modifier(Modifier::REVERSED));
         }
     }
-}
-
-/// 3-row × min(60, width-4) centered modal, per ADR 0030.
-pub fn centered_modal_rect(area: Rect) -> Rect {
-    let width = std::cmp::min(60, area.width.saturating_sub(4)).max(20);
-    super::popup_frame::centered_rect(area, width, 3)
 }
 
 struct VisibleWindow {

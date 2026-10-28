@@ -647,9 +647,8 @@ impl<'a> PinEditFormWidget<'a> {
 impl Widget for PinEditFormWidget<'_> {
     fn render(self, area: Rect, buf: &mut Buffer) {
         let state = self.state;
-        let modal_width = 84;
-        let inner_width =
-            usize::from(std::cmp::min(modal_width, area.width.saturating_sub(4)).max(44)) - 2;
+        let frame = form::modal_frame(self.theme, "Edit pin");
+        let inner_width = usize::from(frame.inner_width(area));
         let label_width = state
             .rows
             .iter()
@@ -753,18 +752,13 @@ impl Widget for PinEditFormWidget<'_> {
             self.theme,
         ));
 
-        let content = top.len() + rows.len() + bottom.len();
-        let modal = form::modal_rect(area, modal_width, content, 10);
         let body = SplitBody {
             top,
             rows,
             bottom,
             cursor_row,
-            inner_width: usize::from(modal.width.saturating_sub(2)),
-            inner_height: usize::from(modal.height.saturating_sub(2)),
         };
-        crate::tui::widgets::popup_frame::themed_popup(body, line![" Edit pin "], self.theme)
-            .render(area, buf);
+        frame.render(area, buf, body);
     }
 }
 

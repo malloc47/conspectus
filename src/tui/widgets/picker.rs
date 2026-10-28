@@ -15,7 +15,7 @@ use ratatui::macros::{line, span};
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Paragraph, Widget};
-use tui_popup::KnownSize;
+use tuikit::frame::{ModalBody, ModalFrame, ModalSize};
 use tuikit::scroll::ScrollWindow;
 
 use crate::tui::Msg;
@@ -177,44 +177,37 @@ impl<'a> PickerWidget<'a> {
 
 impl Widget for PickerWidget<'_> {
     fn render(self, area: Rect, buf: &mut Buffer) {
-        let width = std::cmp::min(80, area.width.saturating_sub(4)).max(30);
-        let max_height = area.height.saturating_sub(4);
-        let height = max_height.clamp(8, 20.max(max_height));
-        let modal = super::popup_frame::centered_rect(area, width, height);
-        let title = line![format!(
-            " {} ({}/{}) ",
+        let title = format!(
+            "{} ({}/{})",
             self.state.title,
             self.state.visible.len(),
             self.state.total()
-        )];
+        );
         let body = PickerBody {
             state: self.state,
             theme: self.theme,
-            inner_width: modal.width.saturating_sub(2) as usize,
-            inner_height: modal.height.saturating_sub(2) as usize,
         };
-        super::popup_frame::themed_popup(body, title, self.theme).render(area, buf);
+        // A long list: the frame keeps its size while the filter narrows it.
+        ModalFrame::new(self.theme, ModalSize::WIDE)
+            .title(title)
+            .render(area, buf, body);
     }
 }
 
+/// The query row over the filtered list.
 struct PickerBody<'a> {
     state: &'a PickerState,
     theme: &'a Theme,
-    inner_width: usize,
-    inner_height: usize,
 }
 
-impl KnownSize for PickerBody<'_> {
-    fn width(&self) -> usize {
-        self.inner_width
+impl ModalBody for PickerBody<'_> {
+    type Output = ();
+
+    /// The list fills its frame, so it is laid out in `render`.
+    fn measure(&mut self, _width: u16) -> u16 {
+        0
     }
 
-    fn height(&self) -> usize {
-        self.inner_height
-    }
-}
-
-impl Widget for PickerBody<'_> {
     fn render(self, area: Rect, buf: &mut Buffer) {
         let query = line![
             span!(Style::default().fg(self.theme.accent); "/"),

@@ -15,10 +15,10 @@ use ratatui::buffer::Buffer;
 use ratatui::crossterm::event::KeyEvent;
 use ratatui::layout::Rect;
 use ratatui::macros::{line, span};
-use ratatui::style::{Modifier, Style};
+use ratatui::style::Style;
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Paragraph, Widget};
-use tui_popup::KnownSize;
+use tuikit::frame::{ModalBody, ModalFrame, ModalSize};
 use tuikit::glyphs::marks;
 use tuikit::scroll::ScrollWindow;
 
@@ -134,26 +134,10 @@ impl MessagesWidget<'_> {
     /// Draw the overlay and report the window its detail pane showed, for
     /// [`MessagesOverlayState::fit`].
     pub fn draw(self, area: Rect, buf: &mut Buffer) -> ScrollWindow {
-        let width = area.width.saturating_sub(4).clamp(40, 110);
-        let height = area.height.saturating_sub(2).max(10);
-        let modal = crate::tui::widgets::popup_frame::centered_rect(area, width, height);
-        let label_style = Style::default()
-            .fg(self.theme.accent)
-            .add_modifier(Modifier::BOLD);
-        let title = line![
-            " ",
-            span!(label_style; " Messages · {} ", self.log.len()),
-            " "
-        ];
-        let mut fit = ScrollWindow::default();
-        let body = MessagesBody {
-            widget: &self,
-            inner_width: modal.width.saturating_sub(2) as usize,
-            inner_height: modal.height.saturating_sub(2) as usize,
-            fit: &mut fit,
-        };
-        crate::tui::widgets::popup_frame::themed_popup(body, title, self.theme).render(area, buf);
-        fit
+        let title = format!("Messages · {}", self.log.len());
+        ModalFrame::new(self.theme, ModalSize::WIDE)
+            .title(title)
+            .render(area, buf, MessagesBody { widget: &self })
     }
 }
 
@@ -163,26 +147,21 @@ impl Widget for MessagesWidget<'_> {
     }
 }
 
+/// The list over the selected entry's detail, which scrolls.
 struct MessagesBody<'a, 'w> {
     widget: &'a MessagesWidget<'w>,
-    inner_width: usize,
-    inner_height: usize,
-    /// Where the body reports the window its detail pane drew.
-    fit: &'a mut ScrollWindow,
 }
 
-impl KnownSize for MessagesBody<'_, '_> {
-    fn width(&self) -> usize {
-        self.inner_width
+impl ModalBody for MessagesBody<'_, '_> {
+    /// The window the detail pane showed.
+    type Output = ScrollWindow;
+
+    /// The overlay fills its frame, so it is laid out in `render`.
+    fn measure(&mut self, _width: u16) -> u16 {
+        0
     }
 
-    fn height(&self) -> usize {
-        self.inner_height
-    }
-}
-
-impl Widget for MessagesBody<'_, '_> {
-    fn render(self, area: Rect, buf: &mut Buffer) {
+    fn render(self, area: Rect, buf: &mut Buffer) -> ScrollWindow {
         let MessagesWidget {
             state,
             log,
@@ -202,7 +181,7 @@ impl Widget for MessagesBody<'_, '_> {
                 footer,
             ])
             .render(area, buf);
-            return;
+            return ScrollWindow::default();
         }
 
         // List gets up to 40% of the height, the detail the rest.
@@ -245,6 +224,7 @@ impl Widget for MessagesBody<'_, '_> {
         )))
         .render(rule_area, buf);
 
+        let mut detail = ScrollWindow::default();
         if let Some(entry) = state.selected_entry(log) {
             // Wrapped here so the offset can be kept inside the text: paging
             // past the end shows the last rows.
@@ -254,14 +234,14 @@ impl Widget for MessagesBody<'_, '_> {
                 .flat_map(|line| tuikit::text::wrap(line, usize::from(detail_area.width)))
                 .map(|row| Line::from(row.trim_end().to_string()))
                 .collect();
-            let window = ScrollWindow::new(usize::from(detail_area.height), lines.len())
+            detail = ScrollWindow::new(usize::from(detail_area.height), lines.len())
                 .at(usize::from(state.detail_scroll));
-            *self.fit = window;
             Paragraph::new(lines)
-                .scroll(window.paragraph_scroll())
+                .scroll(detail.paragraph_scroll())
                 .render(detail_area, buf);
         }
         Paragraph::new(footer).render(footer_area, buf);
+        detail
     }
 }
 

@@ -30,10 +30,9 @@ use ratatui::layout::Rect;
 use ratatui::macros::{line, span};
 use ratatui::style::{Modifier, Style};
 use ratatui::text::Line;
-use ratatui::widgets::{Paragraph, Widget};
-use tui_popup::KnownSize;
+use ratatui::widgets::Widget;
+use tuikit::frame::{Lines, ModalFrame, ModalSize};
 use tuikit::glyphs::marks;
-use tuikit::scroll::ScrollWindow;
 
 use crate::filter::{
     HarnessFilter, MuxStateFilter, MuxStateKey, PrBranchFilter, PrStateFilter, PrStateKey,
@@ -779,15 +778,12 @@ impl<'a> ControlsOverlayWidget<'a> {
 
 impl Widget for ControlsOverlayWidget<'_> {
     fn render(self, area: Rect, buf: &mut Buffer) {
-        // Framing through `tui_popup::Popup`; the body
-        // wrapper reports the same cap dims `centered_modal_rect`
-        // produces so auto-sizing reproduces the legacy rect.
-        let mut lines = self.body_lines();
+        let frame = ModalFrame::new(self.theme, ModalSize::MENU).title("Controls");
+        let (mut lines, cursor_line) = self.body();
         lines.push(Line::default());
-        // The footer wraps to the modal's inner width (one column is the
-        // scrollbar's) so no hint runs past the frame.
-        let footer_width =
-            usize::from(centered_modal_rect_for_content(area, 0).width).saturating_sub(3);
+        // The footer wraps one column inside the modal's inner width, so
+        // no hint touches the border.
+        let footer_width = usize::from(frame.inner_width(area)).saturating_sub(1);
         let footer = crate::tui::keybindings::overlay::footer(
             crate::tui::keybindings::overlay::CONTROLS_KEYS,
         );
@@ -795,25 +791,17 @@ impl Widget for ControlsOverlayWidget<'_> {
         for chunk in tuikit::text::wrap_at(&footer, separator, footer_width) {
             lines.push(Line::from(span!(self.theme.muted; "{}", chunk.trim_end())));
         }
-        let modal = centered_modal_rect_for_content(area, lines.len());
-        let inner_height = modal.height.saturating_sub(2) as usize;
-        let window = body_window(self.cursor_line_index(), inner_height, lines.len());
-
-        let sub_editor_to_render = self.state.sub_editor();
-        let theme = self.theme;
-        let body = ControlsBody {
-            lines,
-            inner_width: modal.width.saturating_sub(2) as usize,
-            inner_height,
-            window,
+        // The body scrolls to keep the cursor's line in view when the
+        // terminal is too short for every row.
+        let body = match cursor_line {
+            Some(line) => Lines::new(lines).following(line..line + 1),
+            None => Lines::new(lines),
         };
-        let popup =
-            crate::tui::widgets::popup_frame::themed_popup(body, line![" Controls "], theme);
-        popup.render(area, buf);
+        frame.render(area, buf, body);
 
         // If a sub-editor is open, render it on top of the overlay.
-        if let Some(editor) = sub_editor_to_render {
-            render_sub_editor(editor, area, buf, theme);
+        if let Some(editor) = self.state.sub_editor() {
+            render_sub_editor(editor, area, buf, self.theme);
         }
     }
 }
@@ -822,9 +810,7 @@ fn render_sub_editor(editor: &SubEditor, area: Rect, buf: &mut Buffer, theme: &T
     match editor {
         SubEditor::Harness(state) => {
             use crate::tui::widgets::multi_select::MultiSelectWidget;
-            MultiSelectWidget::new(state, harness_options())
-                .theme(theme)
-                .render(area, buf);
+            MultiSelectWidget::new(state, harness_options(), theme).render(area, buf);
         }
         SubEditor::MuxState(state) => {
             use crate::tui::widgets::multi_select::MultiSelectWidget;
@@ -832,29 +818,27 @@ fn render_sub_editor(editor: &SubEditor, area: Rect, buf: &mut Buffer, theme: &T
             // The MultiSelectWidget requires a slice that owns the
             // items by reference; since `as_str` returns &'static
             // str the temporary Vec is fine.
-            MultiSelectWidget::new(state, &labels)
-                .theme(theme)
-                .render(area, buf);
+            MultiSelectWidget::new(state, &labels, theme).render(area, buf);
         }
         SubEditor::PrState(state) => {
             use crate::tui::widgets::multi_select::MultiSelectWidget;
             let labels: Vec<&'static str> = PR_STATE_OPTIONS.iter().map(|k| k.as_str()).collect();
-            MultiSelectWidget::new(state, &labels)
-                .theme(theme)
-                .render(area, buf);
+            MultiSelectWidget::new(state, &labels, theme).render(area, buf);
         }
         SubEditor::MaxAge(state) | SubEditor::Content(state) => {
             use crate::tui::widgets::input::TextInputWidget;
-            TextInputWidget::new(state).theme(theme).render(area, buf);
+            TextInputWidget::new(state, theme).render(area, buf);
         }
     }
 }
 
 impl ControlsOverlayWidget<'_> {
+    #[cfg(test)]
     fn body_lines(&self) -> Vec<Line<'static>> {
         self.body().0
     }
 
+    #[cfg(test)]
     fn cursor_line_index(&self) -> Option<usize> {
         self.body().1
     }
@@ -1080,41 +1064,6 @@ impl Body {
     }
 }
 
-struct ControlsBody {
-    lines: Vec<Line<'static>>,
-    inner_width: usize,
-    inner_height: usize,
-    window: ScrollWindow,
-}
-
-impl KnownSize for ControlsBody {
-    fn width(&self) -> usize {
-        self.inner_width
-    }
-
-    fn height(&self) -> usize {
-        self.inner_height
-    }
-}
-
-impl Widget for ControlsBody {
-    fn render(self, area: Rect, buf: &mut Buffer) {
-        Paragraph::new(self.lines)
-            .scroll(self.window.paragraph_scroll())
-            .render(area, buf);
-    }
-}
-
-/// The window onto the body's `content` lines that shows the cursor's
-/// line, or the top when no line holds the cursor.
-fn body_window(cursor_line: Option<usize>, inner_height: usize, content: usize) -> ScrollWindow {
-    let window = ScrollWindow::new(inner_height, content);
-    match cursor_line {
-        Some(line) => window.following(line..line + 1),
-        None => window,
-    }
-}
-
 fn section_header(label: &str) -> Line<'static> {
     line![span!(Modifier::BOLD; "{label}")]
 }
@@ -1245,70 +1194,6 @@ fn sort_label(sort: Sort) -> &'static str {
         Sort::Hierarchy => "Hierarchy",
         Sort::Recency => "Recency",
     }
-}
-
-/// 60-column centered modal sized to its content. When the terminal
-/// is too short for every row, the body scrolls enough to keep the
-/// selected row visible.
-pub fn centered_modal_rect(area: Rect) -> Rect {
-    centered_modal_rect_for_content(area, max_controls_content_lines())
-}
-
-fn centered_modal_rect_for_content(area: Rect, content_lines: usize) -> Rect {
-    let width = std::cmp::min(64, area.width.saturating_sub(4)).max(40);
-    let max_height = area.height;
-    let desired = u16::try_from(content_lines.saturating_add(2)).unwrap_or(u16::MAX);
-    let height = desired.clamp(8, max_height.max(8));
-    super::popup_frame::centered_rect(area, width, height)
-}
-
-fn max_controls_content_lines() -> usize {
-    VIEW_OPTIONS
-        .iter()
-        .map(|view| {
-            let filter_rows = match *view {
-                // The content row and the pinned-only checkbox join each
-                // native view's filters.
-                View::Sessions => 7,
-                // Mux adds the hide-gone-muxes checkbox.
-                View::Mux => 8,
-                // The state row, the local-branch row, and the float
-                // checkbox.
-                View::Prs => 9,
-                _ => 4,
-            };
-            // Mux view appends a "Recency by" section: blank + header
-            // + one row per basis.
-            let mux_recency_rows = if matches!(*view, View::Mux) {
-                1 + 1 + crate::tui::MuxRecency::ALL.len()
-            } else {
-                0
-            };
-            // Every view ends with the Preview wrap and Session
-            // preview sections: blank + header + one row per choice.
-            let preview_wrap_rows = 1 + 1 + crate::tui::PreviewWrap::ALL.len();
-            let session_preview_rows = 1 + 1 + crate::tui::SessionPreview::ALL.len();
-            let body_lines = 1
-                + VIEW_OPTIONS.len()
-                + 1
-                + 1
-                + Grouping::values_for(*view).len()
-                // The Search section: header, the contents and options
-                // rows, blank.
-                + 4
-                + 1
-                + 1
-                + filter_rows
-                + 1
-                + 1
-                + SORT_OPTIONS.len()
-                + mux_recency_rows
-                + preview_wrap_rows
-                + session_preview_rows;
-            body_lines + 2
-        })
-        .max()
-        .unwrap_or(0)
 }
 
 impl crate::tui::Overlay for ControlsOverlayState {

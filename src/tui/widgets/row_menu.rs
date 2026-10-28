@@ -12,7 +12,8 @@ use ratatui::crossterm::event::KeyEvent;
 use ratatui::layout::Rect;
 use ratatui::style::{Modifier, Style};
 use ratatui::text::Line;
-use ratatui::widgets::{Block, Borders, Clear, Paragraph, Widget};
+use ratatui::widgets::{Paragraph, Widget};
+use tuikit::frame::{ModalBody, ModalFrame, ModalSize};
 use tuikit::glyphs::marks;
 use tuikit::scroll::ScrollWindow;
 
@@ -20,7 +21,6 @@ use crate::tui::Msg;
 use crate::tui::keybindings::overlay::HINT_SEPARATOR;
 use crate::tui::modal::{Overlay, OverlayOutcome};
 use crate::tui::theme::Theme;
-use crate::tui::widgets::popup_frame;
 
 /// One verb in the menu.
 #[derive(Debug, Clone, PartialEq)]
@@ -134,7 +134,8 @@ impl Widget for RowMenuWidget<'_> {
     fn render(self, area: Rect, buf: &mut Buffer) {
         // Text is fitted to the frame's inner width: labels are cut with an
         // ellipsis, explanations and the footer wrap.
-        let inner_width = usize::from(72_u16.min(area.width).saturating_sub(2));
+        let frame = ModalFrame::new(self.theme, ModalSize::MENU).title(self.state.title.as_str());
+        let inner_width = usize::from(frame.inner_width(area));
         let mut lines: Vec<Line> = vec![Line::from("")];
         // The rows of the cursor's entry, so a menu taller than the frame
         // can scroll to it.
@@ -175,23 +176,39 @@ impl Widget for RowMenuWidget<'_> {
         for chunk in tuikit::text::wrap_at(&hint, HINT_SEPARATOR, inner_width) {
             footer.push(Line::from(chunk.trim_end().to_string()));
         }
+        frame.render(
+            area,
+            buf,
+            RowMenuBody {
+                entries: lines,
+                footer,
+                cursor_rows,
+            },
+        );
+    }
+}
 
-        // At least 8 rows, but never taller than the terminal.
-        let height = u16::try_from(lines.len() + footer.len())
-            .unwrap_or(u16::MAX)
-            .saturating_add(2)
-            .max(8)
-            .min(area.height);
-        let width = 72_u16.min(area.width);
-        let rect = popup_frame::centered_rect(area, width, height);
-        Clear.render(rect, buf);
-        let block = Block::default()
-            .borders(Borders::ALL)
-            .title(format!(" {} ", self.state.title))
-            .border_style(Style::default().fg(self.theme.accent));
-        let inner = block.inner(rect);
-        block.render(rect, buf);
+/// The entries over the key hints, laid out for the frame's width.
+struct RowMenuBody<'a> {
+    entries: Vec<Line<'a>>,
+    footer: Vec<Line<'a>>,
+    /// The rows of the cursor's entry.
+    cursor_rows: std::ops::Range<usize>,
+}
 
+impl ModalBody for RowMenuBody<'_> {
+    type Output = ();
+
+    fn measure(&mut self, _width: u16) -> u16 {
+        u16::try_from(self.entries.len() + self.footer.len()).unwrap_or(u16::MAX)
+    }
+
+    fn render(self, inner: Rect, buf: &mut Buffer) {
+        let Self {
+            entries: lines,
+            mut footer,
+            cursor_rows,
+        } = self;
         // When the menu is taller than its frame the footer keeps the last
         // rows (all but one, its blank line going first) and the entries
         // scroll just far enough to show the cursor's entry.

@@ -334,7 +334,7 @@ const TERMINAL_WIDTHS: [u16; 4] = [60, 80, 120, 160];
 /// The cells the help body's text gets at a terminal width: the modal's
 /// inner width, less the scrollbar column.
 fn text_width_at(terminal_width: u16) -> usize {
-    let modal = help_modal_rect(Rect::new(0, 0, terminal_width, 40));
+    let modal = HELP_SIZE.rect(Rect::new(0, 0, terminal_width, 40), 0);
     usize::from(modal.width.saturating_sub(2)).saturating_sub(1)
 }
 
@@ -395,7 +395,7 @@ fn the_rendered_help_modal_shows_every_word_as_you_scroll() {
             state.fit(fit);
             // The text columns only: inside the frame, left of the
             // scrollbar.
-            let modal = help_modal_rect(area);
+            let modal = HELP_SIZE.rect(area, 0);
             for y in modal.y + 1..modal.y + modal.height - 1 {
                 let row: String = (modal.x + 1..modal.x + modal.width - 2)
                     .map(|x| buf[(x, y)].symbol().to_string())

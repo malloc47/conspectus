@@ -292,18 +292,20 @@ fn the_wider_reach_ranks_everything_while_the_current_one_ranks_rows() {
 
 #[test]
 fn the_modal_follows_the_sizing_rule() {
-    // width = min(W-2, clamp(0.85 W, 60, 200)), height = min(H-2, clamp(0.8 H, 12, 50))
+    // The palette policy: width 85% of W within 60..=200, height 80% of H
+    // within 12..=50, and never past the terminal.
     for (terminal, expected) in [
-        ((60, 20), (58, 16)),
+        ((60, 20), (60, 16)),
         ((80, 24), (68, 19)),
         ((120, 40), (102, 32)),
         ((160, 40), (136, 32)),
         ((220, 50), (187, 40)),
         ((300, 100), (200, 50)),
-        ((50, 10), (48, 8)),
+        ((50, 10), (50, 10)),
         ((220, 14), (187, 12)),
     ] {
-        assert_eq!(modal_size(terminal.0, terminal.1), expected, "{terminal:?}");
+        let rect = SEARCH_SIZE.rect(Rect::new(0, 0, terminal.0, terminal.1), 0);
+        assert_eq!((rect.width, rect.height), expected, "{terminal:?}");
     }
 }
 
@@ -312,13 +314,14 @@ fn the_modal_is_centered_and_fits_every_terminal() {
     for width in [20_u16, 60, 80, 120, 160, 220, 400] {
         for height in [6_u16, 20, 40, 80] {
             let area = Rect::new(0, 0, width, height);
-            let modal = centered_modal_rect(area);
+            let modal = SEARCH_SIZE.rect(area, 0);
             assert!(
                 modal.right() <= width && modal.bottom() <= height,
                 "{area:?} {modal:?}"
             );
-            assert_eq!(modal.x, (width - modal.width) / 2);
-            assert_eq!(modal.y, (height - modal.height) / 2);
+            // An odd cell left over goes before the modal.
+            assert_eq!(modal.x, (width - modal.width).div_ceil(2));
+            assert_eq!(modal.y, (height - modal.height).div_ceil(2));
         }
     }
 }
@@ -365,8 +368,8 @@ fn the_wider_frame_shows_the_outcome_word_whole_at_every_size() {
     let state = wide_state("quokka");
     for (width, height) in [(60, 20), (80, 24), (120, 36), (160, 40), (220, 50)] {
         let text = render_with(&state, &[], width, height);
-        let modal = centered_modal_rect(Rect::new(0, 0, width, height));
-        // The popup rounds an odd margin its own way, so find its frame.
+        let modal = SEARCH_SIZE.rect(Rect::new(0, 0, width, height), 0);
+        // An odd margin puts the extra cell before the frame, so find it.
         let left = text
             .lines()
             .find_map(|line| line.chars().position(|c| c == '┌'))

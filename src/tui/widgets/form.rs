@@ -17,7 +17,7 @@ use ratatui::layout::Rect;
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Paragraph, Widget};
-use tui_popup::KnownSize;
+use tuikit::frame::{ModalBody, ModalFrame, ModalSize};
 use tuikit::glyphs::marks;
 use tuikit::scroll::ScrollWindow;
 use tuikit::text;
@@ -630,42 +630,14 @@ fn shell_display_arg(arg: &str) -> String {
     format!("'{}'", arg.replace('\'', "'\\''"))
 }
 
-/// A centered popup rect sized for `content_lines` rows.
-pub fn modal_rect(area: Rect, width_cap: u16, content_lines: usize, min_height: u16) -> Rect {
-    let width = std::cmp::min(width_cap, area.width.saturating_sub(4)).max(44);
-    let desired = u16::try_from(content_lines.saturating_add(2)).unwrap_or(u16::MAX);
-    let height = desired.clamp(min_height, area.height.max(min_height));
-    super::popup_frame::centered_rect(area, width, height)
+/// The frame every form draws in: a form's size, with `title`. A form
+/// lays its rows out for the frame's
+/// [`inner_width`](ModalFrame::inner_width) and draws them as the body.
+pub fn modal_frame<'a>(theme: &'a Theme, title: &'a str) -> ModalFrame<'a> {
+    ModalFrame::new(theme, ModalSize::FORM).title(title)
 }
 
-/// Popup body that scrolls so the cursor row stays visible.
-pub struct ScrollLinesBody {
-    pub lines: Vec<Line<'static>>,
-    pub inner_width: usize,
-    pub inner_height: usize,
-    /// The window onto `lines` that shows the cursor row.
-    pub window: ScrollWindow,
-}
-
-impl KnownSize for ScrollLinesBody {
-    fn width(&self) -> usize {
-        self.inner_width
-    }
-
-    fn height(&self) -> usize {
-        self.inner_height
-    }
-}
-
-impl Widget for ScrollLinesBody {
-    fn render(self, area: Rect, buf: &mut Buffer) {
-        Paragraph::new(self.lines)
-            .scroll(self.window.paragraph_scroll())
-            .render(area, buf);
-    }
-}
-
-/// Popup body in three bands: lines that stay put at the top and bottom,
+/// A form body in three bands: lines that stay put at the top and bottom,
 /// and between them rows that scroll to keep the cursor row visible.
 /// The fixed bands keep their place however many rows there are.
 pub struct SplitBody {
@@ -673,21 +645,15 @@ pub struct SplitBody {
     pub rows: Vec<Line<'static>>,
     pub bottom: Vec<Line<'static>>,
     pub cursor_row: usize,
-    pub inner_width: usize,
-    pub inner_height: usize,
 }
 
-impl KnownSize for SplitBody {
-    fn width(&self) -> usize {
-        self.inner_width
+impl ModalBody for SplitBody {
+    type Output = ();
+
+    fn measure(&mut self, _width: u16) -> u16 {
+        u16::try_from(self.top.len() + self.rows.len() + self.bottom.len()).unwrap_or(u16::MAX)
     }
 
-    fn height(&self) -> usize {
-        self.inner_height
-    }
-}
-
-impl Widget for SplitBody {
     fn render(self, area: Rect, buf: &mut Buffer) {
         let height = usize::from(area.height);
         let bottom = self.bottom.len().min(height);

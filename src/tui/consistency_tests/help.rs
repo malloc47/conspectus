@@ -9,7 +9,7 @@ use ratatui::style::{Color, Modifier};
 use ratatui::widgets::Widget;
 
 use crate::tui::Theme;
-use crate::tui::widgets::help::{HelpOverlayState, HelpOverlayWidget, help_modal_rect};
+use crate::tui::widgets::help::{HELP_SIZE, HelpOverlayState, HelpOverlayWidget};
 use crate::tui::widgets::viewer_help;
 
 const SIZES: [(u16, u16); 4] = [(60, 20), (80, 24), (120, 40), (160, 50)];
@@ -50,7 +50,7 @@ fn both_helps_draw_the_same_frame() {
     let theme = Theme::default();
     for (w, h) in SIZES {
         let area = Rect::new(0, 0, w, h);
-        let rect = help_modal_rect(area);
+        let rect = HELP_SIZE.rect(area, 0);
         let (a, b) = (main_help(area, &theme), viewer_help_page(area, &theme));
         let (right, bottom) = (rect.x + rect.width - 1, rect.y + rect.height - 1);
         // Corners, and the whole top and bottom borders up to the title.
@@ -94,7 +94,7 @@ fn row_styles(
     area: Rect,
     theme: &Theme,
 ) -> (Vec<Modifier>, Vec<Color>, Vec<Modifier>) {
-    let rect = help_modal_rect(area);
+    let rect = HELP_SIZE.rect(area, 0);
     let (mut headings, mut keys, mut footers) = (Vec::new(), Vec::new(), Vec::new());
     for y in rect.y + 1..rect.y + rect.height - 1 {
         let first = cell(buf, rect.x + 1, y);

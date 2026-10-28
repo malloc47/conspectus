@@ -3,7 +3,6 @@ source: src/tui/widgets/viewer_help_tests.rs
 expression: "render_text(120, 30, 0)"
 ---
 
-
           ┌ Help ────────────────────────────────────────────────────────────────────────────────────────────┐
           │Moving                                                                                            │
           │  j / ↓         Scroll one line down                                                             ▲│
@@ -24,9 +23,11 @@ expression: "render_text(120, 30, 0)"
           │Finding                                                                                          █│
           │  /             Find in transcript; a match in hidden content turns that content on              █│
           │  n             Next match, wrapping at the end                                                  █│
-          │  N             Previous match, wrapping at the start                                            ║│
-          │                                                                                                 ║│
-          │Viewer                                                                                           ▼│
-          │  ?             Show or hide this help                                                            │
+          │  N             Previous match, wrapping at the start                                            █│
+          │                                                                                                 █│
+          │Viewer                                                                                           █│
+          │  ?             Show or hide this help                                                           ║│
+          │  Esc           Step back: close help, then the find, then the viewer                            ▼│
+          │  q / Ctrl-C    Leave the viewer at once, even with a find active                                 │
           │j/k/PgDn/PgUp to scroll · Esc/q/? to close                                                        │
           └──────────────────────────────────────────────────────────────────────────────────────────────────┘

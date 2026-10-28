@@ -5,28 +5,25 @@
 //! per-row rendering; this module preserves the in-tree
 //! [`MultiSelectOutcome`] + [`MultiSelectState::handle_key`] contract
 //! that `widgets/controls.rs`'s sub-editor dispatch expects, so the
-//! swap stays a single-file change at the API boundary. The bordered
-//! centered modal + buffer-clear remain in this module because
-//! they're UI integration code, not widget rendering.
+//! swap stays a single-file change at the API boundary. The list draws
+//! inside the framework's compact modal frame.
 //!
 //! Theme bridge: `cheese_styles_from_theme` maps the `[tui.theme]`
 //! keys (ADR 0032) onto the upstream
 //! [`ratatui_cheese::multi_select::MultiSelectStyles`] surface so the
-//! sub-editor honors operator overrides. Callers pass a `&Theme` to
-//! [`MultiSelectWidget::theme`] at construction; with no theme the
-//! widget falls back to the upstream dark palette.
+//! sub-editor honors operator overrides; [`MultiSelectWidget::new`]
+//! takes the `&Theme`.
 
 use ratatui::buffer::Buffer;
 use ratatui::crossterm::event::KeyEvent;
 use ratatui::layout::Rect;
-use ratatui::macros::line;
 use ratatui::style::{Modifier, Style};
 use ratatui::widgets::{StatefulWidget, Widget};
 use ratatui_cheese::multi_select::{
     MultiSelect as CheeseMultiSelect, MultiSelectOption,
     MultiSelectState as CheeseMultiSelectState, MultiSelectStyles as CheeseMultiSelectStyles,
 };
-use tui_popup::KnownSize;
+use tuikit::frame::{ModalBody, ModalFrame, ModalSize};
 use tuikit::scroll::ScrollWindow;
 
 use crate::tui::Theme;
@@ -179,78 +176,56 @@ impl MultiSelectState {
     }
 }
 
+/// How large a checklist is: a compact frame as tall as its items.
+pub(crate) const CHECKLIST_SIZE: ModalSize = ModalSize::COMPACT;
+
 /// Centered modal rendering of [`MultiSelectState`] over a slice of
 /// items. The items are passed at render time so the state stays
 /// generic-free.
 pub struct MultiSelectWidget<'a, T: AsRef<str>> {
     state: &'a MultiSelectState,
     items: &'a [T],
-    theme: Option<&'a Theme>,
+    theme: &'a Theme,
 }
 
 impl<'a, T: AsRef<str>> MultiSelectWidget<'a, T> {
-    pub fn new(state: &'a MultiSelectState, items: &'a [T]) -> Self {
+    pub fn new(state: &'a MultiSelectState, items: &'a [T], theme: &'a Theme) -> Self {
         Self {
             state,
             items,
-            theme: None,
+            theme,
         }
-    }
-
-    /// Honor operator `[tui.theme]` overrides (ADR 0032). Without
-    /// this the widget renders with the upstream dark palette.
-    pub fn theme(mut self, theme: &'a Theme) -> Self {
-        self.theme = Some(theme);
-        self
     }
 }
 
 impl<T: AsRef<str>> Widget for MultiSelectWidget<'_, T> {
     fn render(self, area: Rect, buf: &mut Buffer) {
-        // Framing through `tui_popup::Popup`. Theme glue
-        // applies when set; falls back to upstream defaults when
-        // unset so call sites that don't pass a theme still render.
-        let modal = centered_modal_rect(area, self.items.len());
-        let title = line![self.state.title().to_string()];
         let body = MultiSelectBody {
             state: self.state,
             items: self.items,
             theme: self.theme,
-            inner_width: modal.width.saturating_sub(2) as usize,
-            inner_height: modal.height.saturating_sub(2) as usize,
         };
-        if let Some(theme) = self.theme {
-            let popup = crate::tui::widgets::popup_frame::themed_popup(body, title, theme);
-            Widget::render(popup, area, buf);
-        } else {
-            let popup = tui_popup::Popup::new(body).title(title);
-            Widget::render(popup, area, buf);
-        }
+        ModalFrame::new(self.theme, CHECKLIST_SIZE)
+            .title(self.state.title())
+            .render(area, buf, body);
     }
 }
 
-/// Body wrapper that bridges the ratatui-cheese `MultiSelect`
-/// upstream widget into a popup body. Sizing follows the cap dims
-/// the in-tree `centered_modal_rect` computed.
+/// The upstream `MultiSelect` widget drawn as the frame's body, one row
+/// per item, scrolled to keep the cursor in view.
 struct MultiSelectBody<'a, T: AsRef<str>> {
     state: &'a MultiSelectState,
     items: &'a [T],
-    theme: Option<&'a Theme>,
-    inner_width: usize,
-    inner_height: usize,
+    theme: &'a Theme,
 }
 
-impl<T: AsRef<str>> KnownSize for MultiSelectBody<'_, T> {
-    fn width(&self) -> usize {
-        self.inner_width
+impl<T: AsRef<str>> ModalBody for MultiSelectBody<'_, T> {
+    type Output = ();
+
+    fn measure(&mut self, _width: u16) -> u16 {
+        u16::try_from(self.items.len()).unwrap_or(u16::MAX)
     }
 
-    fn height(&self) -> usize {
-        self.inner_height
-    }
-}
-
-impl<T: AsRef<str>> Widget for MultiSelectBody<'_, T> {
     fn render(self, area: Rect, buf: &mut Buffer) {
         let cursor = self.state.cursor();
         let window = ScrollWindow::new(usize::from(area.height), self.items.len())
@@ -285,28 +260,12 @@ impl<T: AsRef<str>> Widget for MultiSelectBody<'_, T> {
         // Title is rendered by the popup frame; pass an empty title
         // to the upstream widget so it doesn't re-stamp a second
         // one inside the inner area.
-        let mut widget = CheeseMultiSelect::new("", &options)
+        let widget = CheeseMultiSelect::new("", &options)
             .checked_indicator(tuikit::glyphs::marks::OK)
-            .unchecked_indicator(tuikit::glyphs::marks::BULLET);
-        if let Some(theme) = self.theme {
-            widget = widget.styles(cheese_styles_from_theme(theme));
-        }
+            .unchecked_indicator(tuikit::glyphs::marks::BULLET)
+            .styles(cheese_styles_from_theme(self.theme));
         StatefulWidget::render(&widget, area, buf, &mut mirror);
     }
-}
-
-/// Centered modal sized to the item list, capped at the available
-/// area. Width follows the same 60-column cap as the text-input
-/// modal so the two primitives feel like one family. Height grows
-/// to fit the items plus a 2-row border (top + bottom).
-pub fn centered_modal_rect(area: Rect, item_count: usize) -> Rect {
-    let width = std::cmp::min(60, area.width.saturating_sub(4)).max(20);
-    let max_height = area.height.saturating_sub(4);
-    let desired_height = u16::try_from(item_count)
-        .unwrap_or(u16::MAX)
-        .saturating_add(2);
-    let height = desired_height.clamp(3, max_height.max(3));
-    super::popup_frame::centered_rect(area, width, height)
 }
 
 #[cfg(test)]
