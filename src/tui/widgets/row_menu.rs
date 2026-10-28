@@ -13,6 +13,7 @@ use ratatui::layout::Rect;
 use ratatui::style::{Modifier, Style};
 use ratatui::text::Line;
 use ratatui::widgets::{Block, Borders, Clear, Paragraph, Widget};
+use tuikit::glyphs::marks;
 
 use crate::tui::Msg;
 use crate::tui::modal::{Overlay, OverlayOutcome};
@@ -139,7 +140,7 @@ impl Widget for RowMenuWidget<'_> {
         for (idx, entry) in self.state.entries.iter().enumerate() {
             let first_row = lines.len();
             let focused = idx == self.state.cursor;
-            let marker = if focused { "►" } else { " " };
+            let marker = if focused { marks::POINTER } else { " " };
             let armed = self.state.armed == Some(idx);
             let label = if armed {
                 format!("{marker} {} — press Enter again to confirm", entry.label)

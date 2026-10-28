@@ -5,6 +5,7 @@
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 use serde_json::Value;
+use tuikit::glyphs::marks;
 
 use super::PreviewContent;
 use crate::discovery::forge::{GhOutcome, GhRunner, SystemGh};
@@ -146,7 +147,7 @@ pub fn render_pr(
         ]));
         for (name, outcome) in &outcomes {
             match outcome {
-                CheckOutcome::Failed => lines.push(Line::raw(format!("  × {name}"))),
+                CheckOutcome::Failed => lines.push(Line::raw(format!("  {} {name}", marks::FAIL))),
                 CheckOutcome::Pending => lines.push(Line::from(dim(format!("  … {name}"), muted))),
                 CheckOutcome::Passed | CheckOutcome::Other => {}
             }

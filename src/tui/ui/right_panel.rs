@@ -192,9 +192,10 @@ pub(super) fn right_panel_title(app: &App, width: usize) -> Line<'static> {
     {
         // Budget for the chain itself: total title width minus the
         // fixed-cost spans we already pushed (focus marker + label +
-        // " ◄ " prefix + " · depth N" suffix + the leading/trailing
+        // back-mark prefix + " · depth N" suffix + the leading/trailing
         // padding spaces).
         let depth_suffix = format!(" · depth {}", state.breadcrumb.len());
+        let back_prefix = format!(" {} ", marks::BACK);
         // ADR 0073 §3 prefix glyph: `<glyph> ` between the focus
         // marker and the bold label takes 2 cells whenever the pane
         // resolves to a known node kind, which a live explorer does.
@@ -203,7 +204,7 @@ pub(super) fn right_panel_title(app: &App, width: usize) -> Line<'static> {
             + focus_marker_width(app, Focus::Right)
             + kind_glyph_width
             + label.chars().count()
-            + " ◄ ".chars().count()
+            + back_prefix.chars().count()
             + depth_suffix.chars().count()
             + 1;
         let available = width.saturating_sub(fixed_width);
@@ -216,7 +217,7 @@ pub(super) fn right_panel_title(app: &App, width: usize) -> Line<'static> {
             // `inert`; the chain itself carries its own per-hop
             // styling (kind glyph in kind color, tag `inert`) so the
             // spans are pushed verbatim.
-            spans.push(span!(Style::default().fg(app.theme().inert); " ◄ "));
+            spans.push(span!(Style::default().fg(app.theme().inert); "{back_prefix}"));
             spans.extend(chain.spans);
             spans.push(span!(Style::default().fg(app.theme().inert); "{depth_suffix}"));
         }
@@ -296,7 +297,7 @@ pub(super) fn chip_divider_line(
         (suffix_width > 0).then(|| span!(Style::default().fg(theme.inert); "{suffix_text}"));
     let mut spans = Vec::with_capacity(4);
     if leading_rule > 0 {
-        spans.push(span!(theme.muted; "{}", "─".repeat(leading_rule)));
+        spans.push(span!(theme.muted; "{}", marks::RULE.repeat(leading_rule)));
     }
     match anchor {
         ChipAnchor::Left => {
@@ -312,7 +313,7 @@ pub(super) fn chip_divider_line(
             spans.push(chip_span);
         }
     }
-    spans.push(span!(theme.muted; "{}", "─".repeat(trailing_rule)));
+    spans.push(span!(theme.muted; "{}", marks::RULE.repeat(trailing_rule)));
     Line::from(spans)
 }
 
@@ -359,10 +360,10 @@ pub(super) fn render_explorer_lines(
     if counts.other > 0 {
         summary.push_str(&format!(" · {} other", counts.other));
         if counts.ambiguous > 0 {
-            summary.push_str(&format!(" · {} ▲", counts.ambiguous));
+            summary.push_str(&format!(" · {} {}", counts.ambiguous, marks::WARNING));
         }
         if counts.unresolved > 0 {
-            summary.push_str(&format!(" · {} —", counts.unresolved));
+            summary.push_str(&format!(" · {} {}", counts.unresolved, marks::NO_VALUE));
         }
     }
     lines.push(chip_divider_line(
@@ -569,7 +570,7 @@ pub(super) fn render_other_link_line(
             let conflict_style = Style::default()
                 .fg(theme.edge_conflict())
                 .add_modifier(Modifier::BOLD);
-            let prefix = span!(conflict_style; "▲ ");
+            let prefix = span!(conflict_style; "{} ", marks::WARNING);
             ("    ", Some(prefix), conflict_style)
         }
         EdgeStateLabel::AltOf(_) | EdgeStateLabel::Resolves => {
@@ -671,13 +672,17 @@ pub(super) fn render_other_header_line(
     highlight: bool,
     theme: &Theme,
 ) -> Line<'static> {
-    let glyph = if expanded { "▼" } else { "▶" };
+    let glyph = if expanded {
+        marks::EXPANDED
+    } else {
+        marks::COLLAPSED
+    };
     let mut suffix = format!("({other_count}");
     if ambiguous_count > 0 {
-        suffix.push_str(&format!(" · {ambiguous_count} ▲"));
+        suffix.push_str(&format!(" · {ambiguous_count} {}", marks::WARNING));
     }
     if unresolved_count > 0 {
-        suffix.push_str(&format!(" · {unresolved_count} —"));
+        suffix.push_str(&format!(" · {unresolved_count} {}", marks::NO_VALUE));
     }
     suffix.push(')');
     let text = format!("  {glyph} Other  {suffix}");

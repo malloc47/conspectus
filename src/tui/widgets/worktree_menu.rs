@@ -22,6 +22,7 @@ use ratatui::text::Line;
 use ratatui::widgets::{Block, Borders, Clear, Paragraph, Widget, Wrap};
 
 use std::path::Path;
+use tuikit::glyphs::marks;
 
 use crate::model::{
     CheckoutNode, GraphNode, GraphSnapshot, NodeId, RepoId, SnapshotIndex, WorktreeKind,
@@ -556,13 +557,17 @@ impl Widget for WorktreeMenuWidget<'_> {
                 .iter()
                 .enumerate()
                 .map(|(i, action)| {
-                    let marker = if i == self.state.cursor { "► " } else { "  " };
+                    let marker = if i == self.state.cursor {
+                        marks::POINTER
+                    } else {
+                        " "
+                    };
                     let style = if i == self.state.cursor {
                         Style::default().add_modifier(Modifier::BOLD)
                     } else {
                         Style::default()
                     };
-                    Line::styled(format!("{marker}{}", action.label()), style)
+                    Line::styled(format!("{marker} {}", action.label()), style)
                 })
                 .collect(),
             Mode::ConfirmRemove => {
@@ -574,7 +579,8 @@ impl Widget for WorktreeMenuWidget<'_> {
                 if !self.state.ctx.guard_sessions.is_empty() {
                     lines.push(Line::styled(
                         format!(
-                            "▲ hosts {} live session(s):",
+                            "{} hosts {} live session(s):",
+                            marks::WARNING,
                             self.state.ctx.guard_sessions.len()
                         ),
                         Style::default().add_modifier(Modifier::BOLD),
@@ -599,7 +605,8 @@ impl Widget for WorktreeMenuWidget<'_> {
                 if !self.state.ctx.guard_sessions.is_empty() {
                     lines.push(Line::styled(
                         format!(
-                            "▲ hosts {} live session(s):",
+                            "{} hosts {} live session(s):",
+                            marks::WARNING,
                             self.state.ctx.guard_sessions.len()
                         ),
                         Style::default().add_modifier(Modifier::BOLD),
@@ -629,7 +636,8 @@ impl Widget for WorktreeMenuWidget<'_> {
                 if !self.state.ctx.guard_sessions.is_empty() {
                     lines.push(Line::styled(
                         format!(
-                            "▲ ends {} live session(s) (transcripts preserved):",
+                            "{} ends {} live session(s) (transcripts preserved):",
+                            marks::WARNING,
                             self.state.ctx.guard_sessions.len()
                         ),
                         Style::default().add_modifier(Modifier::BOLD),

@@ -94,6 +94,7 @@ mod help;
 mod keys;
 mod layout;
 mod lifecycle;
+mod marks;
 mod menus;
 mod parity;
 mod rendering;

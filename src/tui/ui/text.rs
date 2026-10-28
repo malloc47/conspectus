@@ -15,7 +15,7 @@ pub(super) fn truncate_to_width_strict(text: &str, width: usize) -> String {
         return String::new();
     }
     if width == 1 {
-        return "…".to_string();
+        return marks::ELLIPSIS.to_string();
     }
     let mut out = String::with_capacity(width);
     let mut used = 0;
@@ -27,7 +27,7 @@ pub(super) fn truncate_to_width_strict(text: &str, width: usize) -> String {
         out.push(ch);
         used += ch_width;
     }
-    out.push('…');
+    out.push_str(marks::ELLIPSIS);
     out
 }
 
@@ -46,7 +46,7 @@ pub(super) fn truncate_to_width_middle(text: &str, width: usize) -> String {
         return text.to_string();
     }
     if width == 1 {
-        return "…".to_string();
+        return marks::ELLIPSIS.to_string();
     }
     let usable = width - 1;
     let left_budget = usable.div_ceil(2);
@@ -78,7 +78,7 @@ pub(super) fn truncate_to_width_middle(text: &str, width: usize) -> String {
 
     let mut out = String::with_capacity(width);
     out.push_str(&left);
-    out.push('…');
+    out.push_str(marks::ELLIPSIS);
     out.push_str(&right);
     out
 }
@@ -206,5 +206,5 @@ pub(super) fn compact_mux_native_id(native: &str) -> String {
         .chars()
         .rev()
         .collect();
-    format!("{head}…{tail}")
+    format!("{head}{}{tail}", marks::ELLIPSIS)
 }

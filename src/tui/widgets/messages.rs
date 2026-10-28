@@ -19,6 +19,7 @@ use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Paragraph, Widget};
 use tui_popup::KnownSize;
+use tuikit::glyphs::marks;
 
 use crate::tui::Theme;
 use crate::tui::messages::{LogEntry, LogLevel, MessageLog};
@@ -240,7 +241,7 @@ impl Widget for MessagesBody<'_, '_> {
 
         Paragraph::new(Line::from(span!(
             Style::default().add_modifier(theme.muted);
-            "{}", "─".repeat(usize::from(area.width))
+            "{}", marks::RULE.repeat(usize::from(area.width))
         )))
         .render(rule_area, buf);
 
@@ -269,7 +270,7 @@ impl Widget for MessagesBody<'_, '_> {
 
 fn list_line(entry: &LogEntry, selected: bool, theme: &Theme, now: i64) -> Line<'static> {
     let age = crate::tui::rows::format_recency(Some(now), Some(entry.at_epoch))
-        .unwrap_or_else(|| "—".to_string());
+        .unwrap_or_else(|| marks::NO_VALUE.to_string());
     let mut spans = vec![
         Span::styled(
             format!("{} ", entry.level.glyph()),

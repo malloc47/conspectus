@@ -125,7 +125,7 @@ pub(super) fn append_ambiguity_chip(
     spans.push(Span::raw(SECTION_SEPARATOR));
     spans.push(span!(
         Style::default().fg(theme.warning).add_modifier(Modifier::BOLD);
-        "▲"
+        "{}", marks::WARNING
     ));
     spans.push(span!(" {ambiguous}"));
 }
@@ -271,14 +271,14 @@ pub(super) fn push_unseen_messages_chip(app: &App, theme: &Theme, spans: &mut Ve
     }
     spans.push(span!(
         Style::default().fg(theme.error).add_modifier(Modifier::BOLD);
-        "▲ {unseen} · ! messages  "
+        "{} {unseen} · ! messages  ", marks::WARNING
     ));
 }
 
 /// Braille-dot spinner frames (~120ms per frame at cadence
 /// `SPINNER_FRAME_MS`). Cycles through the eight-position pattern
 /// commonly used by cli.rs / npm / systemd loaders.
-pub(super) const SPINNER_FRAMES: [&str; 8] = tuikit::glyphs::marks::SPINNER;
+pub(super) const SPINNER_FRAMES: [&str; 8] = marks::SPINNER;
 
 pub(super) const SPINNER_FRAME_MS: u128 = 120;
 
@@ -371,7 +371,7 @@ pub(super) fn render_find_chip(app: &App) -> Option<String> {
     let content = app.content()?;
     let text = if content.text.chars().count() > 24 {
         let head: String = content.text.chars().take(23).collect();
-        format!("{head}…")
+        format!("{head}{}", marks::ELLIPSIS)
     } else {
         content.text.clone()
     };

@@ -33,6 +33,7 @@ use ratatui::text::{Line, Span, Text};
 use ratatui::widgets::{
     Block, Borders, Paragraph, Scrollbar, ScrollbarOrientation, ScrollbarState, Wrap,
 };
+use tuikit::glyphs::marks;
 use unicode_width::UnicodeWidthStr;
 
 use crate::model::{MuxSessionId, NodeId};
@@ -337,8 +338,8 @@ fn focus_marker_width(app: &App, focus: Focus) -> usize {
 /// after `Tab`.
 fn focus_marker_span(app: &App, panel: Focus) -> Span<'static> {
     let focused = app.focus() == panel;
-    let glyph = if focused { "► " } else { "  " };
-    span!(Style::default().fg(app.theme().panel_focus_accent); "{glyph}")
+    let marker = if focused { marks::POINTER } else { " " };
+    span!(Style::default().fg(app.theme().panel_focus_accent); "{marker} ")
 }
 
 /// Sum of post-wrap terminal rows the given lines occupy when

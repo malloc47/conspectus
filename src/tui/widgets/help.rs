@@ -16,6 +16,7 @@ use ratatui::text::Line;
 use ratatui::widgets::{Paragraph, Scrollbar, ScrollbarOrientation, ScrollbarState, Widget};
 use ratatui_cheese::help::Binding;
 use tui_popup::KnownSize;
+use tuikit::glyphs::marks;
 
 use crate::tui::Theme;
 use crate::tui::icons::{NodeKind, node_kind_style};
@@ -735,7 +736,7 @@ fn push_mux_state_legend(lines: &mut Vec<Line<'static>>, theme: &Theme, width: O
             "the mux backend didn't report whether a client is attached",
         ),
         (
-            "▲",
+            marks::WARNING,
             bold_warning,
             "Ambiguous mux",
             "sessions with several candidate muxes; the detail pane lists them",

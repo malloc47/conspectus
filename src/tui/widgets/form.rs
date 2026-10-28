@@ -18,6 +18,7 @@ use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Paragraph, Widget};
 use tui_popup::KnownSize;
+use tuikit::glyphs::marks;
 
 use crate::discovery::harness::{HarnessLaunchOption, argv_contains_fragment};
 use crate::tui::Theme;
@@ -281,7 +282,7 @@ pub fn path_row(
 fn path_symbol(omnibox: &PathOmniboxState, theme: &Theme) -> (&'static str, Style) {
     match omnibox.validation() {
         PathValidation::Empty => ("?", Style::default().fg(theme.inert)),
-        PathValidation::Exists => ("√", Style::default().fg(theme.success)),
+        PathValidation::Exists => (marks::OK, Style::default().fg(theme.success)),
         PathValidation::Missing => ("!", Style::default().fg(theme.warning)),
     }
 }
@@ -631,7 +632,7 @@ pub fn fit(text: &str, width: usize) -> String {
         return String::new();
     }
     let mut cut: String = text.chars().take(width - 1).collect();
-    cut.push('…');
+    cut.push_str(marks::ELLIPSIS);
     cut
 }
 

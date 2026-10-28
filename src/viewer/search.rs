@@ -20,6 +20,7 @@ use std::cmp::Ordering;
 use std::ops::Range;
 
 use chrono::{DateTime, Utc};
+use tuikit::glyphs::marks;
 
 use super::model::{TranscriptDocument, TranscriptTurn, TurnKind, TurnRole};
 
@@ -286,7 +287,7 @@ pub fn snippet_around(haystack: &str, byte_range: Range<usize>, max_chars: usize
     else {
         let chars: Vec<char> = haystack.chars().take(max_chars.saturating_sub(1)).collect();
         let mut text: String = chars.iter().collect();
-        text.push('…');
+        text.push_str(marks::ELLIPSIS);
         return MatchSnippet {
             text,
             highlight: None,
@@ -324,7 +325,7 @@ pub fn snippet_around(haystack: &str, byte_range: Range<usize>, max_chars: usize
 
     let mut text = String::new();
     if needs_leading {
-        text.push('…');
+        text.push_str(marks::ELLIPSIS);
     }
     let pre: String = chars[window_start..match_start_char].iter().collect();
     text.push_str(&pre);
@@ -339,7 +340,7 @@ pub fn snippet_around(haystack: &str, byte_range: Range<usize>, max_chars: usize
         .collect();
     text.push_str(&post);
     if needs_trailing {
-        text.push('…');
+        text.push_str(marks::ELLIPSIS);
     }
 
     MatchSnippet {

@@ -18,6 +18,7 @@ use ratatui::layout::{Constraint, Layout, Rect};
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::Paragraph;
+use tuikit::glyphs::marks;
 use unicode_width::UnicodeWidthStr;
 
 use crate::content_search::PaneRef;
@@ -448,7 +449,7 @@ fn draw_header(state: &PaneViewerState, theme: &Theme, frame: &mut Frame<'_>, ar
 fn draw_rule(theme: &Theme, frame: &mut Frame<'_>, area: Rect) {
     frame.render_widget(
         Paragraph::new(Line::from(Span::styled(
-            "─".repeat(area.width as usize),
+            marks::RULE.repeat(area.width as usize),
             dim(theme),
         ))),
         area,
@@ -526,7 +527,7 @@ fn draw_footer(state: &PaneViewerState, theme: &Theme, frame: &mut Frame<'_>, ar
     if state.find_is_active() {
         let mut query: String = state.query.chars().take(16).collect();
         if state.query.chars().count() > 16 {
-            query.push('…');
+            query.push_str(marks::ELLIPSIS);
         }
         match state.current {
             Some(at) => spans.push(Span::styled(

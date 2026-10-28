@@ -21,6 +21,7 @@ use ratatui::layout::Rect;
 use ratatui::style::{Modifier, Style};
 use ratatui::text::Line;
 use ratatui::widgets::{Block, Borders, Clear, Paragraph, Widget};
+use tuikit::glyphs::marks;
 
 use crate::tui::Msg;
 use crate::tui::modal::{Overlay, OverlayOutcome};
@@ -120,7 +121,7 @@ impl Widget for MuxMenuWidget<'_> {
         ];
         for (idx, entry) in MENU_ENTRIES.iter().enumerate() {
             let focused = idx == self.state.cursor;
-            let marker = if focused { "►" } else { " " };
+            let marker = if focused { marks::POINTER } else { " " };
             let label = format!("{marker} {}", entry.label());
             if focused {
                 lines.push(Line::styled(

@@ -21,7 +21,7 @@ const EVERY_SOURCE: &[Tree] = &[HOST_SRC, FRAMEWORK_SRC];
 
 /// Whether a source file is production code: not a test file, and not
 /// under a directory of tests or snapshots.
-fn is_production(root: &Path, path: &Path) -> bool {
+pub(super) fn is_production(root: &Path, path: &Path) -> bool {
     let relative = source_tree::relative(root, path);
     !source_tree::is_test_file(path)
         && !relative
@@ -30,7 +30,7 @@ fn is_production(root: &Path, path: &Path) -> bool {
 }
 
 /// The production sources under `trees` with their text.
-fn sources(root: &Path, trees: &[Tree]) -> Vec<(String, String)> {
+pub(super) fn sources(root: &Path, trees: &[Tree]) -> Vec<(String, String)> {
     source_tree::rust_files(root, trees)
         .into_iter()
         .filter(|path| is_production(root, path))

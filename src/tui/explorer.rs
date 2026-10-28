@@ -27,6 +27,7 @@ use std::path::Path;
 
 use ratatui::style::{Color, Style};
 use ratatui::text::{Line, Span};
+use tuikit::glyphs::marks;
 use unicode_width::UnicodeWidthStr;
 
 use crate::model::{
@@ -990,7 +991,7 @@ fn build_breadcrumb_hops(hops: &[BreadcrumbHop], theme: &Theme) -> Vec<RenderedB
 
 const BREADCRUMB_SEPARATOR: &str = " › ";
 const BREADCRUMB_SEPARATOR_WIDTH: usize = 3;
-const BREADCRUMB_ELLIPSIS: &str = "…";
+const BREADCRUMB_ELLIPSIS: &str = marks::ELLIPSIS;
 const BREADCRUMB_ELLIPSIS_WIDTH: usize = 1;
 
 fn build_breadcrumb_line(
@@ -1308,7 +1309,7 @@ fn repo_core(r: &RepoNode, home: Option<&Path>) -> Vec<CoreField> {
             CoreField::plain("remotes", value).previewing(FieldValue::List(r.remotes.clone())),
         );
     } else {
-        fields.push(CoreField::placeholder("remotes", "—"));
+        fields.push(CoreField::placeholder("remotes", marks::NO_VALUE));
     }
     if let Some(path) = r.source_paths.first() {
         let value = if r.source_paths.len() > 1 {
@@ -1324,7 +1325,7 @@ fn repo_core(r: &RepoNode, home: Option<&Path>) -> Vec<CoreField> {
             CoreField::plain("source_paths", value).previewing(FieldValue::Path(path.clone())),
         );
     } else {
-        fields.push(CoreField::placeholder("source_paths", "—"));
+        fields.push(CoreField::placeholder("source_paths", marks::NO_VALUE));
     }
     fields.push(CoreField::plain(
         "full_id",
@@ -1344,7 +1345,10 @@ fn checkout_core(c: &CheckoutNode, home: Option<&Path>) -> Vec<CoreField> {
                 .previewing(FieldValue::Node(NodeId::Branch(branch.clone()))),
         );
     } else {
-        fields.push(CoreField::placeholder("current_branch", "— (detached)"));
+        fields.push(CoreField::placeholder(
+            "current_branch",
+            format!("{} (detached)", marks::NO_VALUE),
+        ));
     }
     fields.push(
         CoreField::plain("repo", format!("{}", c.id.repo))
@@ -1353,7 +1357,7 @@ fn checkout_core(c: &CheckoutNode, home: Option<&Path>) -> Vec<CoreField> {
     if let Some(git_dir) = &c.git_dir {
         fields.push(CoreField::path("git_dir", git_dir, home));
     } else {
-        fields.push(CoreField::placeholder("git_dir", "—"));
+        fields.push(CoreField::placeholder("git_dir", marks::NO_VALUE));
     }
     fields
 }
@@ -1366,13 +1370,13 @@ fn workspace_core(w: &WorkspaceNode, home: Option<&Path>) -> Vec<CoreField> {
     if let Some(name) = &w.name {
         fields.push(CoreField::text("name", name.clone()));
     } else {
-        fields.push(CoreField::placeholder("name", "—"));
+        fields.push(CoreField::placeholder("name", marks::NO_VALUE));
     }
     fields.push(CoreField::path("root", &w.root, home));
     if let Some(provider) = &w.provider {
         fields.push(CoreField::glossary("provider", provider.clone()));
     } else {
-        fields.push(CoreField::placeholder("provider", "—"));
+        fields.push(CoreField::placeholder("provider", marks::NO_VALUE));
     }
     fields.push(CoreField::plain(
         "full_id",
@@ -1409,7 +1413,7 @@ fn agent_session_core(
         }
         fields.push(field);
     } else {
-        fields.push(CoreField::placeholder("alias", "—"));
+        fields.push(CoreField::placeholder("alias", marks::NO_VALUE));
     }
     fields.push(match &s.cwd {
         Some(cwd) => {
@@ -1419,7 +1423,7 @@ fn agent_session_core(
                 None => field,
             }
         }
-        None => CoreField::placeholder("cwd", "— (unknown)"),
+        None => CoreField::placeholder("cwd", format!("{} (unknown)", marks::NO_VALUE)),
     });
     let mut status = CoreField::plain("status", session_status(s, now));
     if s.last_active_epoch.is_some() {
@@ -1497,12 +1501,12 @@ fn mux_session_core(
                 None => field,
             }
         }
-        None => CoreField::placeholder("cwd", "— (unknown)"),
+        None => CoreField::placeholder("cwd", format!("{} (unknown)", marks::NO_VALUE)),
     });
     let attached = match m.client_attached {
         Some(true) => "yes".to_string(),
         Some(false) => "no".to_string(),
-        None => "—".to_string(),
+        None => marks::NO_VALUE.to_string(),
     };
     let mut attached_field = CoreField::plain("attached", attached.clone());
     if m.client_attached.is_none() {
@@ -1516,7 +1520,7 @@ fn mux_session_core(
     fields.push(attached_field);
     fields.push(match m.activity_epoch {
         Some(epoch) => CoreField::timestamp("last_active", epoch, now),
-        None => CoreField::placeholder("last_active", "—"),
+        None => CoreField::placeholder("last_active", marks::NO_VALUE),
     });
     fields
 }
@@ -1625,7 +1629,7 @@ fn runtime_process_core(
             }
             format!("{pid}{annotation}")
         }
-        None => "—".to_string(),
+        None => marks::NO_VALUE.to_string(),
     };
     fields.push(CoreField {
         label: "pid",
@@ -1646,7 +1650,7 @@ fn runtime_process_core(
             }
             field
         }
-        None => CoreField::placeholder("command", "—"),
+        None => CoreField::placeholder("command", marks::NO_VALUE),
     };
     fields.push(command_field);
     fields.push(match p.role {
@@ -1660,11 +1664,11 @@ fn runtime_process_core(
                 RuntimeProcessRole::Unknown => "unknown",
             },
         ),
-        None => CoreField::plain("role", "—"),
+        None => CoreField::plain("role", marks::NO_VALUE),
     });
     fields.push(match p.observed_epoch {
         Some(epoch) => CoreField::timestamp("observed", epoch, now),
-        None => CoreField::placeholder("observed", "—"),
+        None => CoreField::placeholder("observed", marks::NO_VALUE),
     });
     fields
 }
@@ -1725,7 +1729,7 @@ fn branch_core(b: &BranchNode) -> Vec<CoreField> {
                 commit: commit.clone(),
             })
         }
-        None => CoreField::placeholder("current_commit", "—"),
+        None => CoreField::placeholder("current_commit", marks::NO_VALUE),
     });
     fields.push(match &b.upstream {
         Some(upstream) => {
@@ -1735,7 +1739,7 @@ fn branch_core(b: &BranchNode) -> Vec<CoreField> {
                 ahead_behind: Some((b.refname.clone(), upstream.clone())),
             })
         }
-        None => CoreField::placeholder("upstream", "—"),
+        None => CoreField::placeholder("upstream", marks::NO_VALUE),
     });
     fields.push(
         CoreField::plain("repo", format!("{}", b.id.repo))
@@ -1751,12 +1755,12 @@ fn fork_core(f: &ForkNode) -> Vec<CoreField> {
     )];
     fields.push(match &f.name {
         Some(name) => CoreField::text("name", name.clone()),
-        None => CoreField::placeholder("name", "—"),
+        None => CoreField::placeholder("name", marks::NO_VALUE),
     });
     fields.push(CoreField::glossary("provider", f.provider.clone()));
     fields.push(match &f.scope {
         Some(scope) => CoreField::glossary("scope", scope.clone()),
-        None => CoreField::placeholder("scope", "—"),
+        None => CoreField::placeholder("scope", marks::NO_VALUE),
     });
     fields.push(match f.capabilities.first() {
         Some(first) => {
@@ -1770,7 +1774,7 @@ fn fork_core(f: &ForkNode) -> Vec<CoreField> {
                 values: f.capabilities.clone(),
             })
         }
-        None => CoreField::placeholder("capabilities", "—"),
+        None => CoreField::placeholder("capabilities", marks::NO_VALUE),
     });
     fields
 }
@@ -1799,11 +1803,11 @@ fn forge_pr_core(pr: &ForgePrNode, now: Option<i64>) -> Vec<CoreField> {
     }
     fields.push(match &pr.head_ref {
         Some(head) => CoreField::text("head", head.clone()),
-        None => CoreField::placeholder("head", "—"),
+        None => CoreField::placeholder("head", marks::NO_VALUE),
     });
     fields.push(match pr.updated_epoch {
         Some(epoch) => CoreField::timestamp("updated", epoch, now),
-        None => CoreField::placeholder("updated", "—"),
+        None => CoreField::placeholder("updated", marks::NO_VALUE),
     });
     fields.push(match &pr.url {
         Some(url) => {
@@ -1814,7 +1818,7 @@ fn forge_pr_core(pr: &ForgePrNode, now: Option<i64>) -> Vec<CoreField> {
             }
             field
         }
-        None => CoreField::placeholder("url", "—"),
+        None => CoreField::placeholder("url", marks::NO_VALUE),
     });
     fields
 }
@@ -1838,13 +1842,13 @@ fn forge_pr_extras(pr: &ForgePrNode) -> Vec<CoreField> {
 fn session_status(s: &AgentSessionNode, now: Option<i64>) -> String {
     match s.last_active_epoch {
         Some(epoch) => format!("active · last {}", relative_epoch(epoch, now)),
-        None => "—".to_string(),
+        None => marks::NO_VALUE.to_string(),
     }
 }
 
 fn relative_epoch(epoch: i64, now: Option<i64>) -> String {
     crate::tui::rows::format_recency(now, Some(epoch))
-        .map_or_else(|| "—".to_string(), |age| format!("{age} ago"))
+        .map_or_else(|| marks::NO_VALUE.to_string(), |age| format!("{age} ago"))
 }
 
 use crate::tui::preview::split_command_line;
@@ -1854,7 +1858,7 @@ fn truncate(value: &str, max: usize) -> String {
         return value.to_string();
     }
     let mut out: String = value.chars().take(max.saturating_sub(1)).collect();
-    out.push('…');
+    out.push_str(marks::ELLIPSIS);
     out
 }
 

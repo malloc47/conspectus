@@ -315,7 +315,7 @@ pub(super) fn search_header(app: &App, width: usize) -> Option<Line<'static>> {
     let theme = app.theme();
     let query = if search.text.chars().count() > 28 {
         let head: String = search.text.chars().take(27).collect();
-        format!("{head}…")
+        format!("{head}{}", marks::ELLIPSIS)
     } else {
         search.text.clone()
     };
@@ -606,7 +606,7 @@ pub(super) fn append_group_summary_spans(
         spans.push(Span::raw("  "));
         spans.push(span!(
             Style::default().fg(theme.warning).add_modifier(Modifier::BOLD);
-            "{}", tuikit::glyphs::marks::WARNING
+            "{}", marks::WARNING
         ));
     }
 }
@@ -839,7 +839,7 @@ pub(super) fn age_span(
     now: i64,
     theme: &Theme,
 ) -> Span<'static> {
-    let text = age.unwrap_or(tuikit::glyphs::marks::NO_VALUE);
+    let text = age.unwrap_or(marks::NO_VALUE);
     let style = recency_bucket(Some(now), epoch).map_or_else(
         || Style::default().add_modifier(theme.muted),
         |bucket| bucket.style(theme),
@@ -1746,9 +1746,9 @@ pub(super) fn disclosure_span(row: &crate::tui::rows::Row, app: &App) -> Span<'s
         return Span::raw("  ");
     }
     let glyph = if app.is_expanded(&row.id) {
-        tuikit::glyphs::marks::EXPANDED
+        marks::EXPANDED
     } else {
-        tuikit::glyphs::marks::COLLAPSED
+        marks::COLLAPSED
     };
     span!(Style::default().fg(app.theme().disclosure); "{glyph} ")
 }

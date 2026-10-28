@@ -8,6 +8,7 @@
 
 use std::ops::Range;
 
+use tuikit::glyphs::marks;
 use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 
 /// A snippet cut to fit, with the match's byte range in the cut text.
@@ -83,7 +84,7 @@ fn head(text: &str, budget: usize) -> String {
         out.push(c);
         used += w;
     }
-    out.push('…');
+    out.push_str(marks::ELLIPSIS);
     out
 }
 
@@ -118,7 +119,7 @@ fn crop(text: &str, highlight: &Range<usize>, budget: usize) -> Fitted {
             used += cell.width;
         }
         let range = 0..shown.len();
-        shown.push('…');
+        shown.push_str(marks::ELLIPSIS);
         return Fitted {
             text: shown,
             highlight: Some(range),
@@ -176,14 +177,14 @@ fn crop(text: &str, highlight: &Range<usize>, budget: usize) -> Fitted {
 
     let mut out = String::new();
     if start > 0 {
-        out.push('…');
+        out.push_str(marks::ELLIPSIS);
     }
     let lead = out.len();
     let from = cells[start].byte;
     let to = cells.get(end).map_or(text.len(), |c| c.byte);
     out.push_str(&text[from..to]);
     if end < cells.len() {
-        out.push('…');
+        out.push_str(marks::ELLIPSIS);
     }
     let begin = lead + (highlight.start - from);
     let finish = lead + (highlight.end - from);

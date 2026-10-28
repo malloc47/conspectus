@@ -34,6 +34,7 @@ use ratatui::style::Style;
 use ratatui::text::Line;
 use ratatui::widgets::{Borders, Paragraph, Widget};
 use tui_popup::{KnownSize, Popup};
+use tuikit::glyphs::marks;
 
 use crate::tui::Theme;
 
@@ -132,6 +133,6 @@ pub fn ellipsize(text: &str, width: usize) -> String {
         out.push(ch);
         used += w;
     }
-    out.push('…');
+    out.push_str(marks::ELLIPSIS);
     out
 }

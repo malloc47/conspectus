@@ -219,7 +219,7 @@ fn no_help_page_shows_a_developer_artifact() {
 /// The string literals of `source` outside comments, with their 1-based
 /// line numbers. Understands escapes, raw strings, and char literals;
 /// stops at the first `#[cfg(test)]` so test code is exempt.
-fn string_literals(source: &str) -> Vec<(usize, String)> {
+pub(super) fn string_literals(source: &str) -> Vec<(usize, String)> {
     let chars: Vec<char> = source.chars().collect();
     let mut out = Vec::new();
     let (mut i, mut line) = (0, 1);

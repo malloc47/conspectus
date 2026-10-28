@@ -8,6 +8,8 @@
 use std::collections::VecDeque;
 use std::process::Output;
 
+use tuikit::glyphs::marks;
+
 use crate::model::MuxSessionId;
 
 /// Entries kept before the oldest is dropped.
@@ -23,9 +25,9 @@ pub enum LogLevel {
 impl LogLevel {
     pub fn glyph(self) -> &'static str {
         match self {
-            Self::Info => "√",
-            Self::Warning => "▲",
-            Self::Error => "×",
+            Self::Info => marks::OK,
+            Self::Warning => marks::WARNING,
+            Self::Error => marks::FAIL,
         }
     }
 

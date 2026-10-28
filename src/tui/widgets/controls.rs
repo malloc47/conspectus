@@ -32,6 +32,7 @@ use ratatui::style::{Modifier, Style};
 use ratatui::text::Line;
 use ratatui::widgets::{Paragraph, Widget};
 use tui_popup::KnownSize;
+use tuikit::glyphs::marks;
 
 use crate::filter::{
     HarnessFilter, MuxStateFilter, MuxStateKey, PrBranchFilter, PrStateFilter, PrStateKey,
@@ -1169,7 +1170,7 @@ fn pr_state_value(filter: &RowFilter) -> String {
             .map(|k| k.as_str())
             .collect::<Vec<_>>()
             .join(", "),
-        _ => "—".to_string(),
+        _ => marks::NO_VALUE.to_string(),
     }
 }
 
@@ -1195,14 +1196,14 @@ fn checkbox_row(label: &str, checked: bool, cursored: bool) -> Line<'static> {
 fn harness_value(filter: &RowFilter) -> String {
     match &filter.harness {
         Some(HarnessFilter::Any(values)) if !values.is_empty() => values.join(", "),
-        _ => "—".to_string(),
+        _ => marks::NO_VALUE.to_string(),
     }
 }
 
 /// How the Content row reads: the query and where its scan is.
 fn content_value(content: Option<(&str, crate::tui::ContentStatus, usize)>) -> String {
     match content {
-        None => "—".to_string(),
+        None => marks::NO_VALUE.to_string(),
         Some((text, crate::tui::ContentStatus::Running(progress), _)) => {
             format!(
                 "\"{text}\" searching {}/{}",
@@ -1221,7 +1222,7 @@ fn content_value(content: Option<(&str, crate::tui::ContentStatus, usize)>) -> S
 fn max_age_value(filter: &RowFilter) -> String {
     filter
         .max_age
-        .map_or_else(|| "—".to_string(), format_duration_for_input)
+        .map_or_else(|| marks::NO_VALUE.to_string(), format_duration_for_input)
 }
 
 fn mux_state_value(filter: &RowFilter) -> String {
@@ -1231,7 +1232,7 @@ fn mux_state_value(filter: &RowFilter) -> String {
             .map(|k| k.as_str())
             .collect::<Vec<_>>()
             .join(", "),
-        _ => "—".to_string(),
+        _ => marks::NO_VALUE.to_string(),
     }
 }
 

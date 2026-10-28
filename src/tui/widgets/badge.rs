@@ -18,6 +18,7 @@
 use ratatui::macros::span;
 use ratatui::style::{Modifier, Style};
 use ratatui::text::Span;
+use tuikit::glyphs::marks;
 
 use crate::tui::Theme;
 
@@ -54,7 +55,7 @@ fn badge_span(label: &str, style: Style, width: usize) -> Span<'static> {
     let width = width.max(crate::tui::theme::MIN_BADGE_WIDTH);
     let label = if label.chars().count() > width {
         let kept: String = label.chars().take(width - 1).collect();
-        format!("{kept}…")
+        format!("{kept}{}", marks::ELLIPSIS)
     } else {
         label.to_string()
     };

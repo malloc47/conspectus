@@ -29,6 +29,7 @@ use ratatui::layout::{Constraint, Layout, Rect};
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Paragraph, Wrap};
+use tuikit::glyphs::marks;
 
 use crate::viewer::highlight::highlight_matches;
 use crate::viewer::model::{TranscriptDocument, TurnKind};
@@ -115,7 +116,7 @@ fn draw_header(document: &TranscriptDocument, theme: &Theme, frame: &mut Frame<'
 }
 
 fn draw_separator(theme: &Theme, frame: &mut Frame<'_>, area: Rect) {
-    let rule: String = "─".repeat(area.width as usize);
+    let rule: String = marks::RULE.repeat(area.width as usize);
     frame.render_widget(
         Paragraph::new(Line::from(Span::styled(
             rule,
@@ -462,7 +463,7 @@ fn find_chip_text(state: &ViewerState) -> Option<String> {
     }
     let mut query: String = find.query.chars().take(FIND_CHIP_QUERY_CELLS).collect();
     if find.query.chars().count() > FIND_CHIP_QUERY_CELLS {
-        query.push('…');
+        query.push_str(marks::ELLIPSIS);
     }
     let mut text = match find.current {
         Some(index) => format!("find \"{query}\" {}/{}", index + 1, find.matches.len()),

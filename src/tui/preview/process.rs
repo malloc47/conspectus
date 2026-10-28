@@ -8,6 +8,7 @@ use std::path::Path;
 
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
+use tuikit::glyphs::marks;
 
 use super::PreviewContent;
 
@@ -111,7 +112,7 @@ fn process_lines(proc_root: &Path, pid: i64, depth: usize, muted: Modifier) -> [
         .unwrap_or_else(|| "(exited)".to_string());
     let command = if command.chars().count() > MAX_COMMAND_CHARS {
         let cut: String = command.chars().take(MAX_COMMAND_CHARS).collect();
-        format!("{cut}…")
+        format!("{cut}{}", marks::ELLIPSIS)
     } else {
         command
     };
