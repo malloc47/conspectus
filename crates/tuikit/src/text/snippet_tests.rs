@@ -86,6 +86,17 @@ fn wide_characters_are_counted_by_cells() {
 }
 
 #[test]
+fn accented_text_is_cut_between_characters() {
+    let text = "naïve · approach · brûlée · crème · déjà vu · façade";
+    let start = text.find("approach").unwrap();
+    for budget in 10..width(text) {
+        let fitted = fit_snippet(text, start..start + "approach".len(), budget, &[]);
+        assert!(width(&fitted.text) <= budget, "{budget}: {:?}", fitted.text);
+        assert_eq!(marked(&fitted), "approach", "{budget}");
+    }
+}
+
+#[test]
 fn a_highlight_inside_a_grapheme_widens_to_the_whole_grapheme() {
     // The match ends between `e` and its combining accent.
     let text = "the cafe\u{301} on the corner";

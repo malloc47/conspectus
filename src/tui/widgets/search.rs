@@ -30,7 +30,7 @@ use crate::tui::search_entities::{EntityIndex, EntityMatch, SearchEntity};
 
 use crate::tui::icons::{NodeKind, node_kind_style};
 use crate::tui::rows::RowId;
-use crate::tui::search::{SearchItem, SearchMatch, rank, snippet_around};
+use crate::tui::search::{SearchItem, SearchMatch, rank};
 use crate::tui::widgets::input::TextInputState;
 use crate::viewer::search::{ContentKinds, Grouping};
 
@@ -874,13 +874,6 @@ impl Widget for SearchBody<'_> {
             Reach::Current => {
                 let id_to_item: std::collections::HashMap<&RowId, &SearchItem<'_>> =
                     self.items.iter().map(|item| (&item.id, item)).collect();
-                // Budget the snippet width against the modal so the line
-                // (label + separator + snippet) fits without wrapping; the
-                // label itself can be wide for verbose aliases, so the
-                // snippet always reserves at least ~24 chars.
-                let snippet_budget = (list_area.width as usize)
-                    .saturating_sub(8 /* prefix + label spacer + ellipsis */)
-                    .max(24);
                 range
                     .map(|idx| {
                         let m = &self.state.matches()[idx];
@@ -892,7 +885,7 @@ impl Widget for SearchBody<'_> {
                             item.copied(),
                             m,
                             idx == self.state.cursor(),
-                            snippet_budget,
+                            list_area.width as usize,
                             self.theme,
                         )
                     })
@@ -946,18 +939,12 @@ impl SearchBody<'_> {
         } else {
             plain
         };
-        match hit.label_range.clone().filter(|r| r.end <= label.len()) {
-            Some(range)
-                if label.is_char_boundary(range.start) && label.is_char_boundary(range.end) =>
-            {
-                spans.push(span!(label_style; "{}", &label[..range.start]));
-                spans.push(
-                    span!(self.theme.match_style().add_modifier(mark); "{}", &label[range.clone()]),
-                );
-                spans.push(span!(label_style; "{}", &label[range.end..]));
-            }
-            _ => spans.push(span!(label_style; "{label}")),
-        }
+        let match_style = self.theme.match_style().add_modifier(mark);
+        spans.extend(text::paint(
+            &[Span::styled(label.as_str(), label_style)],
+            hit.label_range.clone().filter(|r| r.end <= label.len()),
+            |_| match_style,
+        ));
         let mut used = ROW_LEAD + label_width;
         if columns.context > 0 {
             let pad = columns.label.saturating_sub(label_width) + COLUMN_GAP;
@@ -1162,6 +1149,9 @@ const CHIP_WIDTH: usize = 10;
 /// A snippet narrower than this is not worth showing, so cells give way
 /// to it.
 const MIN_SNIPPET: usize = 20;
+/// Characters a one-line snippet drops: Markdown code ticks only add
+/// noise to a preview.
+pub(crate) const MARKDOWN_TICKS: &[char] = &['`'];
 
 impl ContentColumns {
     /// Cells the snippet gets: what is left after the other cells, their
@@ -1260,20 +1250,18 @@ fn content_row_line(
             .push(span!(dim; "{} ", text::pad_start(&text::truncate_end(&row.age, columns.age), columns.age)));
     }
     let budget = columns.snippet().max(8);
-    let snippet = crate::tui::widgets::snippet::fit(
+    let snippet = text::fit_snippet(
         &row.snippet,
-        &row.highlight.clone().unwrap_or(0..0),
+        row.highlight.clone().unwrap_or(0..0),
         budget,
+        MARKDOWN_TICKS,
     );
-    match snippet.highlight.clone() {
-        Some(range) => {
-            let match_style = theme.match_style().add_modifier(mark);
-            spans.push(span!(dim; "{}", &snippet.text[..range.start]));
-            spans.push(span!(match_style; "{}", &snippet.text[range.clone()]));
-            spans.push(span!(dim; "{}", &snippet.text[range.end..]));
-        }
-        None => spans.push(span!(dim; "{}", snippet.text)),
-    }
+    let match_style = theme.match_style().add_modifier(mark);
+    spans.extend(text::paint(
+        &[Span::styled(snippet.text, dim)],
+        snippet.highlight,
+        |_| match_style,
+    ));
     Line::from(spans)
 }
 
@@ -1287,7 +1275,7 @@ fn build_match_line(
     item: Option<&SearchItem<'_>>,
     m: &SearchMatch,
     is_cursor: bool,
-    snippet_budget: usize,
+    width: usize,
     theme: &Theme,
 ) -> Line<'static> {
     // Compose a per-span style. The cursor row uses
@@ -1327,22 +1315,21 @@ fn build_match_line(
     let snippet_distinct = haystack != label;
     if !haystack.is_empty() && snippet_distinct {
         spans.push(span!(span_style(true, Style::default()); "  · "));
-        let snippet = snippet_around(haystack, matched_range, snippet_budget);
+        // The snippet takes the rest of the row but the blank cell before
+        // the frame that entity rows leave, so its cut ends in `…`
+        // instead of at the frame; a long label leaves it a few cells.
+        let budget = width.saturating_sub(text::spans_width(&spans) + 1).max(8);
+        let snippet = text::fit_snippet(haystack, matched_range, budget, &[]);
         // The matched portion always renders bold + yellow so it
         // pops on both cursor and non-cursor rows; pre/post context
         // dims only when the row isn't the cursor.
         let match_style = span_style(false, theme.match_style());
-        if let Some(range) = snippet.highlight.clone() {
-            let pre = snippet.text[..range.start].to_string();
-            let mid = snippet.text[range.clone()].to_string();
-            let post = snippet.text[range.end..].to_string();
-            let dim = span_style(true, Style::default());
-            spans.push(span!(dim; "{pre}"));
-            spans.push(span!(match_style; "{mid}"));
-            spans.push(span!(dim; "{post}"));
-        } else {
-            spans.push(span!(span_style(true, Style::default()); "{}", snippet.text));
-        }
+        let dim = span_style(true, Style::default());
+        spans.extend(text::paint(
+            &[Span::styled(snippet.text, dim)],
+            snippet.highlight,
+            |_| match_style,
+        ));
     }
 
     Line::from(spans)

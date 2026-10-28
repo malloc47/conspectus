@@ -96,54 +96,6 @@ fn items_from_rows_uses_alias_then_title_then_short_id_for_label() {
 }
 
 #[test]
-fn snippet_around_returns_haystack_unchanged_when_short() {
-    let snippet = snippet_around("look at puffin here", 8..14, 80);
-    assert_eq!(snippet.text, "look at puffin here");
-    assert_eq!(snippet.highlight, Some(8..14));
-}
-
-#[test]
-fn snippet_around_windows_long_haystack_with_ellipses() {
-    let haystack: String = (0..200).map(|_| "x").collect::<String>()
-        + "puffin"
-        + &(0..200).map(|_| "y").collect::<String>();
-    let needle_byte_start = 200;
-    let needle_byte_end = needle_byte_start + "puffin".len();
-    let snippet = snippet_around(&haystack, needle_byte_start..needle_byte_end, 30);
-    assert!(snippet.text.starts_with('…'));
-    assert!(snippet.text.ends_with('…'));
-    assert!(snippet.text.contains("puffin"));
-    // Highlight should locate the puffin substring inside the
-    // rendered snippet.
-    let range = snippet.highlight.expect("highlight present");
-    assert_eq!(&snippet.text[range], "puffin");
-    // Width budget honored within tolerance (chars; not bytes
-    // because UTF-8 ellipsis is 3 bytes).
-    let char_count = snippet.text.chars().count();
-    assert!(char_count <= 30, "snippet too wide: {char_count}");
-}
-
-#[test]
-fn snippet_around_unicode_safe_split() {
-    let haystack = "naïve · approach · brûlée";
-    let needle_byte_start = haystack.find("approach").unwrap();
-    let needle_byte_end = needle_byte_start + "approach".len();
-    let snippet = snippet_around(haystack, needle_byte_start..needle_byte_end, 15);
-    // Should not panic and should keep the match visible.
-    assert!(snippet.text.contains("approach"));
-    let range = snippet.highlight.unwrap();
-    assert_eq!(&snippet.text[range], "approach");
-}
-
-#[test]
-fn snippet_around_falls_back_when_range_is_out_of_bounds() {
-    let snippet = snippet_around("short text", 100..200, 20);
-    // No highlight, but still a readable snippet (head-anchored).
-    assert!(snippet.highlight.is_none());
-    assert!(!snippet.text.is_empty());
-}
-
-#[test]
 fn a_session_is_found_by_the_id_its_row_shows() {
     // The row's id column shows the session key; the content-addressed
     // short id the status bar uses is different.

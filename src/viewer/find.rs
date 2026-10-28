@@ -15,7 +15,9 @@
 
 use crate::viewer::input::ViewerEffect;
 use crate::viewer::model::TurnKind;
-use crate::viewer::search::{ContentKinds, ContentQuery, find_ci, matching_turns};
+use tuikit::text::find_ci;
+
+use crate::viewer::search::{ContentKinds, ContentQuery, matching_turns};
 use crate::viewer::state::{ToolDetail, ViewerOpen, ViewerState};
 
 /// How far from the remembered turn to look for a match when the

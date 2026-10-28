@@ -1561,23 +1561,17 @@ fn append_snippet(
     budget: usize,
     theme: &Theme,
 ) {
-    let fitted = crate::tui::widgets::snippet::fit(text, highlight, budget);
+    let ticks = crate::tui::widgets::search::MARKDOWN_TICKS;
+    let fitted = text::fit_snippet(text, highlight.clone(), budget, ticks);
     let plain = Style::default()
         .fg(theme.inert)
         .add_modifier(Modifier::ITALIC);
-    let (before, mid, after) = match fitted.highlight.clone() {
-        Some(range) => (
-            &fitted.text[..range.start],
-            &fitted.text[range.clone()],
-            &fitted.text[range.end..],
-        ),
-        None => (fitted.text.as_str(), "", ""),
-    };
-    for (piece, style) in [(before, plain), (mid, theme.match_style()), (after, plain)] {
-        if !piece.is_empty() {
-            spans.push(Span::styled(piece.to_string(), style));
-        }
-    }
+    let painted = text::paint(
+        &[Span::styled(fitted.text, plain)],
+        fitted.highlight,
+        |_| theme.match_style(),
+    );
+    spans.extend(painted.into_iter().filter(|span| !span.content.is_empty()));
 }
 
 /// Per-row node-kind glyph span (ADR 0073). Renders the slate glyph

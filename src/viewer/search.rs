@@ -20,17 +20,18 @@ use std::cmp::Ordering;
 use std::ops::Range;
 
 use chrono::{DateTime, Utc};
-use tuikit::glyphs::marks;
+use tuikit::text::{self, find_ci};
 
 use super::model::{TranscriptDocument, TranscriptTurn, TurnKind, TurnRole};
 
-/// Longest snippet, in characters, before the `…` truncation markers.
-pub const SNIPPET_MAX_CHARS: usize = 160;
+/// Widest snippet, in terminal cells, the `…` marks on its cut sides
+/// included.
+pub const SNIPPET_MAX_CELLS: usize = 160;
 
 /// How much raw text on each side of a match is normalized when
 /// building a snippet, so a match in a multi-megabyte tool result
 /// doesn't normalize the whole body.
-const SNIPPET_WINDOW_CHARS: usize = SNIPPET_MAX_CHARS * 4;
+const SNIPPET_WINDOW_CHARS: usize = SNIPPET_MAX_CELLS * 4;
 
 /// How hits are presented.
 ///
@@ -182,28 +183,6 @@ pub struct Hit {
     pub highlight: Range<usize>,
 }
 
-/// Find the first case-insensitive (ASCII) occurrence of `needle` in
-/// `haystack`, as a byte offset, without allocating. Non-ASCII bytes
-/// compare exactly. The offset is always a character boundary because
-/// `needle` is valid UTF-8 and starts on one.
-pub fn find_ci(haystack: &str, needle: &str) -> Option<usize> {
-    let hay = haystack.as_bytes();
-    let pat = needle.as_bytes();
-    let first = *pat.first()?;
-    if pat.len() > hay.len() {
-        return None;
-    }
-    let first = first.to_ascii_lowercase();
-    let last_start = hay.len() - pat.len();
-    (0..=last_start).find(|&start| {
-        hay[start].to_ascii_lowercase() == first
-            && hay[start + 1..start + pat.len()]
-                .iter()
-                .zip(&pat[1..])
-                .all(|(h, p)| h.eq_ignore_ascii_case(p))
-    })
-}
-
 /// The indexes of the turns in `doc` that match `query`, in turn order.
 ///
 /// Cheaper than [`match_document`] when the caller needs only which
@@ -252,126 +231,6 @@ pub fn match_turn(turn_index: usize, turn: &TranscriptTurn, needle: &str) -> Opt
     })
 }
 
-/// A windowed view of `haystack` around a matched byte range, sized to
-/// fit a result list while keeping the match visible.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct MatchSnippet {
-    /// The display text, with `…` markers on truncated sides.
-    pub text: String,
-    /// Byte range inside `text` to highlight. `None` when the source
-    /// range was empty or fell outside the haystack.
-    pub highlight: Option<Range<usize>>,
-}
-
-/// Build a [`MatchSnippet`] for `haystack` centered on `byte_range`,
-/// constrained to at most `max_chars` characters of text plus the two
-/// truncation markers. The result always contains the matched span.
-/// Operates in `char`s so multi-byte UTF-8 stays valid.
-///
-/// `byte_range` is the byte range of a match against the same haystack.
-/// An empty or out-of-range range yields a snippet without a highlight.
-pub fn snippet_around(haystack: &str, byte_range: Range<usize>, max_chars: usize) -> MatchSnippet {
-    let total_chars = haystack.chars().count();
-    if total_chars <= max_chars {
-        let highlight = valid_byte_range(haystack, byte_range);
-        return MatchSnippet {
-            text: haystack.to_string(),
-            highlight,
-        };
-    }
-
-    // Locate the matched span's char indices. When the byte range is
-    // empty or outside the haystack, fall back to a head-anchored
-    // snippet without a highlight.
-    let Some((match_start_char, match_len_chars)) = chars_for_byte_range(haystack, &byte_range)
-    else {
-        let chars: Vec<char> = haystack.chars().take(max_chars.saturating_sub(1)).collect();
-        let mut text: String = chars.iter().collect();
-        text.push_str(marks::ELLIPSIS);
-        return MatchSnippet {
-            text,
-            highlight: None,
-        };
-    };
-
-    // Budget for context on either side, after accounting for the
-    // matched span and the two ellipsis markers.
-    let context = max_chars
-        .saturating_sub(match_len_chars)
-        .saturating_sub(2 /* room for two `…` */);
-    let before_budget = context / 2;
-    let after_budget = context - before_budget;
-
-    let chars: Vec<char> = haystack.chars().collect();
-    let mut window_start = match_start_char.saturating_sub(before_budget);
-    let mut window_end = (match_start_char + match_len_chars + after_budget).min(total_chars);
-
-    // If one side was unbounded, spend the leftover budget on the
-    // other side so the visible width stays close to `max_chars`.
-    if window_start == 0 && match_start_char < before_budget {
-        let slack = before_budget - match_start_char;
-        window_end = (window_end + slack).min(total_chars);
-    }
-    if window_end == total_chars {
-        let used_after = window_end - (match_start_char + match_len_chars);
-        if used_after < after_budget {
-            let slack = after_budget - used_after;
-            window_start = window_start.saturating_sub(slack);
-        }
-    }
-
-    let needs_leading = window_start > 0;
-    let needs_trailing = window_end < total_chars;
-
-    let mut text = String::new();
-    if needs_leading {
-        text.push_str(marks::ELLIPSIS);
-    }
-    let pre: String = chars[window_start..match_start_char].iter().collect();
-    text.push_str(&pre);
-    let highlight_start = text.len();
-    let matched: String = chars[match_start_char..match_start_char + match_len_chars]
-        .iter()
-        .collect();
-    text.push_str(&matched);
-    let highlight_end = text.len();
-    let post: String = chars[match_start_char + match_len_chars..window_end]
-        .iter()
-        .collect();
-    text.push_str(&post);
-    if needs_trailing {
-        text.push_str(marks::ELLIPSIS);
-    }
-
-    MatchSnippet {
-        text,
-        highlight: Some(highlight_start..highlight_end),
-    }
-}
-
-fn chars_for_byte_range(haystack: &str, byte_range: &Range<usize>) -> Option<(usize, usize)> {
-    if !is_valid_range(haystack, byte_range) {
-        return None;
-    }
-    let start_char = haystack[..byte_range.start].chars().count();
-    let len_chars = haystack[byte_range.clone()].chars().count();
-    Some((start_char, len_chars))
-}
-
-fn valid_byte_range(haystack: &str, range: Range<usize>) -> Option<Range<usize>> {
-    is_valid_range(haystack, &range).then_some(range)
-}
-
-/// Whether `range` is non-empty, inside `haystack`, and on character
-/// boundaries at both ends.
-fn is_valid_range(haystack: &str, range: &Range<usize>) -> bool {
-    !range.is_empty()
-        && range.start < range.end
-        && range.end <= haystack.len()
-        && haystack.is_char_boundary(range.start)
-        && haystack.is_char_boundary(range.end)
-}
-
 /// The capped, normalized snippet for a match at `range` in `body`, and
 /// the highlight inside it.
 ///
@@ -386,7 +245,7 @@ fn snippet_for(body: &str, range: Range<usize>) -> (String, Range<usize>) {
     let end = char_boundary_forward(body, range.end, SNIPPET_WINDOW_CHARS);
     let (window, tracked) =
         normalize_tracking(&body[start..end], range.start - start..range.end - start);
-    let snippet = snippet_around(&window, tracked, SNIPPET_MAX_CHARS);
+    let snippet = text::fit_snippet(&window, tracked, SNIPPET_MAX_CELLS, &[]);
     let highlight = snippet.highlight.unwrap_or(0..0);
     (snippet.text, highlight)
 }

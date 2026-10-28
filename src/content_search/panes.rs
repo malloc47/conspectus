@@ -22,7 +22,9 @@ use crate::discovery::tmux::{
     MuxBackend, TMUX_BACKEND, TmuxCaptureOutcome, TmuxOutcome, strip_ansi,
 };
 use crate::model::{AgentSessionId, GraphNode, GraphSnapshot, NodeId};
-use crate::viewer::search::{ContentQuery, SNIPPET_MAX_CHARS, find_ci, snippet_around};
+use tuikit::text::{find_ci, fit_snippet};
+
+use crate::viewer::search::{ContentQuery, SNIPPET_MAX_CELLS};
 
 use super::dedup::{drop_duplicates, matching_bodies, normalize_for_compare};
 use super::scan::worker_count;
@@ -416,12 +418,16 @@ fn pane_hit(index: usize, line: &str, needle: &str) -> PaneHit {
     let collapsed = line.split_whitespace().collect::<Vec<_>>().join(" ");
     let (text, highlight) = match find_ci(&collapsed, needle) {
         Some(start) => {
-            let snippet =
-                snippet_around(&collapsed, start..start + needle.len(), SNIPPET_MAX_CHARS);
+            let snippet = fit_snippet(
+                &collapsed,
+                start..start + needle.len(),
+                SNIPPET_MAX_CELLS,
+                &[],
+            );
             (snippet.text, snippet.highlight.unwrap_or(0..0))
         }
         None => (
-            snippet_around(&collapsed, 0..0, SNIPPET_MAX_CHARS).text,
+            fit_snippet(&collapsed, 0..0, SNIPPET_MAX_CELLS, &[]).text,
             0..0,
         ),
     };

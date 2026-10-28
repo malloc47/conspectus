@@ -11,7 +11,7 @@ use std::ops::Range;
 
 use crate::aliases::session_display_name;
 use crate::model::{GraphNode, GraphSnapshot, NodeId, NodeKind, NodePresence};
-use crate::tui::search::find_ci;
+use tuikit::text::find_ci;
 
 /// One searchable entity.
 #[derive(Debug, Clone, PartialEq, Eq)]

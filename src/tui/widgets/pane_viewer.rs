@@ -26,7 +26,6 @@ use crate::tui::keybindings::overlay::{
     KeyRow, PANE_VIEWER_KEYS, VIEWER_FIND_KEYS, resolve, typed_char,
 };
 use crate::viewer::find::{FindPrompt, ViewerFindMsg};
-use crate::viewer::search::find_ci;
 
 use super::help::{binding_lines, blank, push_footer, render_help_page, section};
 use super::popup_frame::ScrollFit;
@@ -220,7 +219,7 @@ impl PaneViewerState {
             self.lines
                 .iter()
                 .enumerate()
-                .filter(|(_, text)| find_ci(text, &self.query).is_some())
+                .filter(|(_, text)| tuikit::text::find_ci(text, &self.query).is_some())
                 .map(|(index, _)| index)
                 .collect()
         };
@@ -493,21 +492,11 @@ fn draw_body(state: &mut PaneViewerState, theme: &Theme, frame: &mut Frame<'_>, 
 
 /// `text` with each occurrence of `find` in the theme's match style.
 fn highlighted(text: &str, find: &str, theme: &Theme) -> Vec<Span<'static>> {
-    let mut spans = Vec::new();
-    let mut rest = text;
-    while !find.is_empty()
-        && let Some(start) = find_ci(rest, find)
-    {
-        let end = start + find.len();
-        spans.push(Span::raw(rest[..start].to_string()));
-        spans.push(Span::styled(
-            rest[start..end].to_string(),
-            theme.match_style(),
-        ));
-        rest = &rest[end..];
-    }
-    spans.push(Span::raw(rest.to_string()));
-    spans
+    tuikit::text::paint(
+        &[Span::raw(text)],
+        tuikit::text::find_all_ci(text, find),
+        |base| base.patch(theme.match_style()),
+    )
 }
 
 fn draw_footer(state: &PaneViewerState, theme: &Theme, frame: &mut Frame<'_>, area: Rect) {

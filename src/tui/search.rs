@@ -9,11 +9,12 @@
 
 use std::borrow::Cow;
 
+use tuikit::text::find_ci;
+
 use crate::tui::rows::{Row, RowId, RowKind};
 
 // The matching and snippet helpers are shared with content search so
 // `/` and the transcript search agree on what a match is.
-pub use crate::viewer::search::{MatchSnippet, find_ci, snippet_around};
 
 /// One searchable row's haystack plus the [`RowId`] the renderer
 /// needs to highlight or commit. `label` is the operator-facing

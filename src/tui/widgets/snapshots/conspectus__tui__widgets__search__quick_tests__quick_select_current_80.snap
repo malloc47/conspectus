@@ -7,8 +7,8 @@ expression: "render_with(&state, &items, 80, 24)"
 
       ┌ / quick select  [ Current ] All  (2) ────────────────────────────┐
       │/quokka                                                           │
-      │> ● quokka api rewrite  · quokka api rewrite · claude-code · api1 │
-      │  ● quokka dev server  · quokka dev server · claude-code · dev2 · │
+      │> ● quokka api rewrite  · quokka api rewrite · claude-code ·…     │
+      │  ● quokka dev server  · quokka dev server · claude-code · dev2…  │
       │                                                                  │
       │                                                                  │
       │                                                                  │

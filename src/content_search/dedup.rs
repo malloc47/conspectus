@@ -12,7 +12,7 @@
 //! few words on their own match too easily.
 
 use crate::viewer::model::TranscriptDocument;
-use crate::viewer::search::find_ci;
+use tuikit::text::find_ci;
 
 /// Lines with fewer characters than this are compared with their
 /// neighbors joined.

@@ -13,7 +13,6 @@ use crate::tui::View;
 use crate::tui::app::App;
 use crate::tui::preview::{PreviewSubject, preview_subject};
 use crate::tui::rows::RowId;
-use crate::viewer::highlight::paint;
 use crate::viewer::state::ViewerState;
 
 /// What to mark in the Preview of the selected row.
@@ -102,7 +101,7 @@ pub fn mark_rows(
     let matching: Vec<usize> = rows
         .iter()
         .enumerate()
-        .filter(|(_, row)| crate::viewer::search::find_ci(&row_text(row), query).is_some())
+        .filter(|(_, row)| tuikit::text::find_ci(&row_text(row), query).is_some())
         .map(|(index, _)| index)
         .collect();
     let bottom = rows.len().saturating_sub(height);
@@ -116,7 +115,14 @@ pub fn mark_rows(
         .enumerate()
         .map(|(offset, row)| {
             if matching.binary_search(&(start + offset)).is_ok() {
-                paint(row, 0, query, style)
+                Line {
+                    spans: tuikit::text::paint(
+                        &row.spans,
+                        tuikit::text::find_all_ci(&row_text(row), query),
+                        |base| base.patch(style),
+                    ),
+                    ..row.clone()
+                }
             } else {
                 row.clone()
             }

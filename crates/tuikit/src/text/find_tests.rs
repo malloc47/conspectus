@@ -37,6 +37,32 @@ fn other_characters_compare_exactly_and_offsets_stay_on_boundaries() {
 }
 
 #[test]
+fn only_ascii_letters_fold() {
+    assert_eq!(
+        find_ci("Café au lait", "CAFÉ"),
+        None,
+        "É is not folded to é"
+    );
+    assert_eq!(
+        find_ci("Café au lait", "CAFé"),
+        Some(0),
+        "ASCII letters fold"
+    );
+    assert_eq!(find_ci("naïve Straße", "Straße"), Some(7));
+    assert_eq!(find_ci("STRASSE", "straße"), None);
+}
+
+#[test]
+fn a_match_in_wide_text_starts_and_ends_on_a_character_boundary() {
+    let text = "日本語のテキスト and 😀 emoji";
+    for needle in ["本語", "😀", "emoji", "テキスト"] {
+        let start = find_ci(text, needle).expect(needle);
+        assert!(text.is_char_boundary(start), "{needle}");
+        assert!(text.is_char_boundary(start + needle.len()), "{needle}");
+    }
+}
+
+#[test]
 fn every_match_is_found_without_overlap() {
     let found: Vec<_> = find_all_ci("aaaa", "aa").collect();
     assert_eq!(found, [0..2, 2..4]);

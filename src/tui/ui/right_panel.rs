@@ -886,21 +886,10 @@ fn selected_hit_lines(app: &App) -> Vec<Line<'static>> {
             secondary,
         ),
     ]);
-    let mut text: Vec<Span<'static>> = Vec::new();
-    let (start, end) = (hit.highlight.start, hit.highlight.end);
-    if start < end
-        && end <= hit.snippet.len()
-        && hit.snippet.is_char_boundary(start)
-        && hit.snippet.is_char_boundary(end)
-    {
-        text.push(Span::raw(hit.snippet[..start].to_string()));
-        text.push(Span::styled(
-            hit.snippet[start..end].to_string(),
-            theme.match_style(),
-        ));
-        text.push(Span::raw(hit.snippet[end..].to_string()));
-    } else {
-        text.push(Span::raw(hit.snippet.clone()));
-    }
-    vec![header, Line::from(text), Line::default()]
+    let snippet = text::paint(
+        &[Span::raw(hit.snippet.as_str())],
+        Some(hit.highlight.clone()).filter(|range| range.end <= hit.snippet.len()),
+        |base| base.patch(theme.match_style()),
+    );
+    vec![header, Line::from(snippet), Line::default()]
 }

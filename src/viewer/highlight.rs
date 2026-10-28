@@ -8,11 +8,10 @@
 //! same as a match in any other snippet.
 
 use ratatui::style::{Modifier, Style};
-use ratatui::text::{Line, Span};
-use unicode_width::UnicodeWidthChar;
+use ratatui::text::Line;
+use tuikit::text;
 
 use crate::viewer::find::FindState;
-use crate::viewer::search::find_ci;
 use crate::viewer::state::RenderCache;
 use crate::viewer::theme::Theme;
 
@@ -45,68 +44,23 @@ pub fn highlight_matches(
         } else {
             theme.match_style()
         };
-        *line = paint(line, cache.leader, &find.query, style);
+        *line = paint_after(line, cache.leader, &find.query, style);
     }
 }
 
 /// `line` with every case-insensitive occurrence of `needle` after the
 /// first `leader` columns patched with `style`.
-pub(crate) fn paint(
-    line: &Line<'static>,
-    leader: usize,
-    needle: &str,
-    style: Style,
-) -> Line<'static> {
-    let chars: Vec<(char, Style)> = line
+fn paint_after(line: &Line<'static>, leader: usize, needle: &str, style: Style) -> Line<'static> {
+    let joined: String = line
         .spans
         .iter()
-        .flat_map(|span| span.content.chars().map(move |c| (c, span.style)))
+        .map(|span| span.content.as_ref())
         .collect();
-    let mut column = 0usize;
-    let mut body_from = chars.len();
-    for (index, (c, _)) in chars.iter().enumerate() {
-        if column >= leader {
-            body_from = index;
-            break;
-        }
-        column += c.width().unwrap_or(0);
-    }
-    let body: String = chars[body_from..].iter().map(|(c, _)| *c).collect();
-    let starts: Vec<usize> = body.char_indices().map(|(i, _)| i).collect();
-    let mut marked = vec![false; chars.len()];
-    let mut from = 0usize;
-    while let Some(found) = find_ci(&body[from..], needle) {
-        let begin = from + found;
-        let end = begin + needle.len();
-        let first = starts.partition_point(|&b| b < begin);
-        let last = starts.partition_point(|&b| b < end);
-        for flag in &mut marked[body_from + first..body_from + last] {
-            *flag = true;
-        }
-        from = end;
-    }
-    if !marked.iter().any(|m| *m) {
-        return line.clone();
-    }
-    let mut spans: Vec<Span<'static>> = Vec::new();
-    let mut run = String::new();
-    let mut run_style = Style::default();
-    let mut run_marked = false;
-    for (index, (c, base)) in chars.iter().enumerate() {
-        let is_marked = marked[index];
-        let effective = if is_marked { base.patch(style) } else { *base };
-        if !run.is_empty() && (effective != run_style || is_marked != run_marked) {
-            spans.push(Span::styled(std::mem::take(&mut run), run_style));
-        }
-        run_style = effective;
-        run_marked = is_marked;
-        run.push(*c);
-    }
-    if !run.is_empty() {
-        spans.push(Span::styled(run, run_style));
-    }
+    let from = text::clip(&joined, leader).len();
+    let ranges = text::find_all_ci(&joined[from..], needle)
+        .map(|range| from + range.start..from + range.end);
     Line {
-        spans,
+        spans: text::paint(&line.spans, ranges, |base| base.patch(style)),
         ..line.clone()
     }
 }
