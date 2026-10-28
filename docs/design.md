@@ -1079,6 +1079,13 @@ every control reads, plus named styles `conspectus` registers for its own
 roles (harness, mux, PR, node-kind, and edge colors). `[tui.theme]` keeps its
 flat keys; the five older muted keys load as aliases of `muted` and `inert`.
 
+Glyphs are the second (ADR 0154): the framework's `glyphs` module defines the
+shared marks (list cursor, back, disclosure arrows, ok, fail, warning,
+ellipsis, no-value dash, rule, spinner), the table of glyphs measured to fit one
+terminal cell, and the source scanner that fails on an unmeasured glyph.
+`conspectus` registers its node-kind and state glyphs into that table from
+`tui::icons` and draws every shared mark through the constant.
+
 ### Graph-to-View Slicing
 
 The producer pipeline discovers and resolves a typed

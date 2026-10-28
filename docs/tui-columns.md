@@ -85,6 +85,8 @@ glyphs can be overridden in the theme configuration.
 
 Every glyph is one that DejaVu Sans Mono draws at exactly one cell, or one every common font carries. A glyph a terminal's monospace font lacks is borrowed from a wider font and spills over its neighbor, which cuts it in half under a selection highlight, so new glyphs are measured before they are used.
 
+Two glyphs are kept although a font may draw them wider than a cell, because the operator prefers how they look. `▶`, the collapsed-row arrow, is U+25B6, which a terminal with an emoji font may draw wide (the cursor `►` is a different codepoint and has no such risk). The eight Braille spinner frames are in none of the common monospace fonts, so the terminal borrows a proportional one. The marks that several surfaces share (the cursor, the arrows, the check, failure, and warning marks, the no-value dash) are defined once, so a mark looks the same wherever it is drawn.
+
 | Glyph | Meaning | Style | Where it appears |
 |---|---|---|---|
 | `▦` | workspace | light blue | Sessions and Mux group headers; Pinned workspace pins |
