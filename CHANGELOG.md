@@ -84,6 +84,23 @@ Targeted for 0.2.0, after 0.1.0 is tagged. History, rebuild, and pins
 - **Chips stay chips on the selected row.** A program chip no longer
   turns into the selection highlight; like a harness chip, it keeps its
   look.
+- **A paste can't submit a TUI prompt or form.** The TUI turns on
+  bracketed paste, so a multi-line paste is typed into the field as one
+  line (line breaks become a space) instead of pressing Enter at the end
+  of its first line. A paste outside a text field (the tree, a menu, a
+  form's option row) is ignored rather than read as keys.
+- **Alt-B and Alt-F move by word in every TUI text field.** They did
+  nothing; the transcript and scrollback find prompts also gain word
+  motion on Alt-B/Alt-F and Ctrl-←/Ctrl-→.
+- **`~` in a TUI path field reaches the command expanded.** The new tmux
+  session form, the launch form's cwd and worktree repo, and a pin's
+  path fields expand a leading `~` when they commit, so `mux new`, `mux
+  launch`, and rebuilds get the directory instead of rejecting a literal
+  `~/…` path the form had shown as valid.
+- **Refused input says why.** An invalid max age in the controls, an
+  empty branch name for a new worktree, and an empty name or cwd in the
+  new tmux session form show a toast naming the problem, where they
+  used to do nothing; the field stays open for a fix.
 - **Harness hooks work while `conspectus serve` runs.** The daemon
   applied each hook observation to its live graph only, and the next
   refresh, a few seconds later, dropped it. It now records the

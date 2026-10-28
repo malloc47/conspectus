@@ -545,3 +545,65 @@ Gaps for extraction: no snapshot for the text modal, new mux, pin edit, path row
 16. **Labels.** Adopt one vocabulary (`mux name` vs `name`, `launch argv` vs `argv`, `branch` vs `worktree_branch`) and stop showing raw field names in pin edit?
 17. **Radio vs checkbox glyphs** for one-of-N (e.g. `(o)` / `( )`) - currently identical `[x]`.
 18. **Retire `LaunchSpecFormState` / ADR 0097** when mux launch moves to the generic Form? (Its premise, a second consumer, is gone.)
+
+## Verification (CSP-715)
+
+The four suspected defects (2.1, 2.2 item 11, D19, D21, and open questions 6,
+9, and 10) were run before the extraction. Three reproduced in full and one in
+part. The reproductions are the behavior tests in
+`src/tui/consistency_tests/text_entry.rs`: each opens a field the way the
+operator does, drives it with the keys `action_for_event` routes, and reads the
+frame, the toast, or the command the commit asks for, so the tests move to
+`LineEdit`, `TextPrompt`, `PathField`, and `Form` unchanged.
+
+- **`~` committed unexpanded.** Confirmed in all four places: typing
+  `~/projects` and pressing Enter asked for `MuxNew { cwd: "~/projects" }`,
+  a `MuxLaunch` request with that cwd and, with the worktree toggle on, that
+  worktree repo, and a `SavePin` setting `cwd = "~/projects"`; `mux new`,
+  `mux launch`, and the rebuild test the path with `is_dir()` and do not
+  expand it. The new mux form, the launch form, and the pin edit path rows
+  now commit `PathOmniboxState::expanded_value()`, and the launch form's
+  worktree repo (a plain text field) uses the same expansion. The launch
+  form's default-argv preview also reads the expanded cwd, so the preview and
+  the launch find the same project profile. The three `~` expansions (D19)
+  stay separate: the omnibox's is the one `PathField` takes into the
+  framework, which cannot import the host's `legacy_pins` or `config` copies,
+  and those two are outside the TUI.
+- **A multi-line paste submits.** Confirmed by reading and by test: the
+  runtime never enabled bracketed paste, so a terminal sent a paste as keys
+  and its first line break was Enter; with it enabled but unhandled, the
+  loop would have dropped `Event::Paste` (`action_for_event` returns `None`
+  for non-key events). `src/tui/runtime/term.rs` now enables bracketed paste
+  after `ratatui::init` and disables it before `ratatui::restore`, at startup,
+  exit, each attach and external-viewer hand-off, and in a panic hook;
+  `tests/terminal_hygiene.rs` keeps every other file from calling
+  `ratatui::init` or `ratatui::restore`. A paste is typed into the text field
+  that has the keys, one key per character after `single_line_paste`
+  flattens it (ends trimmed of line breaks, a run of breaks inside becomes one
+  space, tab becomes a space, other control characters dropped), so each field
+  edits, completes, and refilters as it does for typing. Anywhere that is not a
+  text field (`App::text_field_has_keys`: the tree, a menu, a list, a form's
+  option row) a paste is ignored, and typing stops if a key leaves the field,
+  so pasted letters never act as a menu's keys (as keystrokes, a `d` in a
+  paste reaching the close-down choice picks discard). A live
+  run in a pseudo-terminal (`conspectus tui --fixture
+  tests/fixtures/showcase.json`, quick select, because fixture mode keeps
+  rename disabled) confirmed the enable and disable sequences and that
+  `first\r\nsecond\n` was drawn as `first second` with the field still open.
+- **Alt-B / Alt-F inert.** Confirmed in all fifteen text fields: tui-input
+  binds the word motions to META, and crossterm reports Alt as ALT, so the
+  keys did nothing (Ctrl-Left / Ctrl-Right worked everywhere except the two
+  find prompts, which had no word motion at all). `TEXT_INPUT_KEYS` binds
+  Alt-B and Alt-F to the line editor's word motions, and `VIEWER_FIND_KEYS`
+  binds them and Ctrl-Left / Ctrl-Right to new `FindPrompt` word motions with
+  the same word rule.
+- **Silent rejections.** Confirmed for three of the four: an invalid max
+  age kept the editor open with no message, an empty worktree branch name did
+  nothing, and the new mux form did nothing on an empty name or cwd. Each now
+  stays open and posts a toast (`max age: <why>`, `worktree: branch name is
+  required`, `mux: name is required`, `mux: cwd is required`) through a new
+  `Msg::Toast`. The toast is the channel because it draws over every overlay,
+  and the Controls overlay covers the status line at common heights. **The
+  empty pin rename did not reproduce:** it already closes the prompt and
+  toasts `pin: nothing entered` (as an empty mux rename toasts `mux rename:
+  name cannot be empty`); the test pins that behavior.

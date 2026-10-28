@@ -1352,13 +1352,49 @@ page is open the movement keys (`j`/`k`, `PgDn`/`PgUp`, `g`/`G`, `Ctrl-D`/
 `Ctrl-U`) scroll it rather than the transcript, `?`, `Esc`, or `q` close
 it, and the toggles wait until it is closed.
 
+### Editing text in fields
+
+Every text field (the rename and branch-name prompts, the max-age and
+contents editors in the controls, the search and picker queries, the
+fields of the new tmux session, launch, and pin edit forms, and the
+viewers' find prompts) moves a word back and forward with `Alt-B` and
+`Alt-F`, or `Ctrl-←` and `Ctrl-→`. Apart from the find prompts, the
+fields also take the usual line-editing keys: `Ctrl-A`/`Ctrl-E` for the
+start and end, `Ctrl-W` to delete the word before the cursor, `Ctrl-K`
+to delete to the end, `Ctrl-U` to clear the line, and `Ctrl-Y` to put
+back what one of those deleted. A dialog's own keys come first: on a
+form's option rows, `←`, `→`, and `Space` change the option.
+
+The TUI turns on bracketed paste while it runs, so the terminal delivers
+a paste as one piece, typed into the field that has the cursor. A field
+holds one line, so a paste is flattened instead of cut at its first
+line: line breaks at the start and end are dropped, each run of line
+breaks inside becomes one space, a tab becomes a space, and other
+control characters are dropped. A paste therefore never presses `Enter`
+or `Tab`, and cannot submit a prompt or form. Anywhere else (the tree, a
+menu, a list, a form's option row) a paste is ignored instead of being
+read as keys. A terminal without bracketed paste still sends a paste as
+keystrokes, line breaks included.
+
+A path typed as `~` or `~/…` in the new tmux session form, the launch
+form (its cwd and worktree repo), or a pin's `cwd`, `location`, or
+`path` field is expanded to your home directory when the form commits,
+so the command it runs gets the directory, and the pin stores it.
+
+Input a field refuses is explained in a toast. An invalid max age
+(`max age: missing unit (expected ms/s/m/h/d)`), an empty branch name
+for a new worktree, and an empty name or cwd in the new tmux session
+form keep the field open for a fix; renaming a pin or a tmux session to
+nothing closes the prompt and says so.
+
 ### Finding text in a transcript
 
 Inside the transcript viewer, `/` opens a find prompt in the footer.
 Type a query and press `Enter` to jump to the first match at or below the
 top of the screen; `Esc` leaves the prompt and keeps an earlier find, and
-the prompt supports `Backspace`, `Delete`, `←`/`→`, `Home`/`End`, and
-`Ctrl-U` (delete to the start). `n` and `N` step to the next and previous
+the prompt supports `Backspace`, `Delete`, `←`/`→`, `Alt-B`/`Alt-F` and
+`Ctrl-←`/`Ctrl-→` (a word back and forward), `Home`/`End`, and `Ctrl-U`
+(delete to the start). `n` and `N` step to the next and previous
 match and wrap at either end, saying so in the footer. The footer shows
 `find "query" i/N` (or `no match`; the header's `find:"query"` chip uses the
 same wording), and each match is highlighted: the current one reversed, the
