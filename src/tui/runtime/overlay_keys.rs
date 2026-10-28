@@ -11,7 +11,7 @@ use super::*;
 /// Resolve the current selection to a renameable row and seed the
 /// rename overlay. Agent sessions use alias > harness title > empty;
 /// pin rows use the pin display name.
-pub(super) fn open_rename_overlay(app: &mut App) {
+pub(in crate::tui) fn open_rename_overlay(app: &mut App) {
     use crate::model::NodeId;
     let subject = crate::tui::actions::action_subject(app);
     if let Some(pin) = subject.pin {
@@ -75,7 +75,7 @@ pub(super) fn open_rename_overlay(app: &mut App) {
 /// resulting outcome. Confirm runs the lockstep plan (alias write +
 /// optional tmux rename) and refreshes; Cancel just closes the
 /// overlay.
-pub(super) fn handle_rename_overlay_key(
+pub(in crate::tui) fn handle_rename_overlay_key(
     app: &mut App,
     key: ratatui::crossterm::event::KeyEvent,
     send: &mut dyn FnMut(&mut App, Msg),
@@ -214,7 +214,7 @@ pub(super) fn handle_row_menu_key(
 
 /// Forward a key to the Clean up modal. Confirming pops it and
 /// dispatches the reap of the selected records.
-pub(super) fn handle_clean_up_key(
+pub(in crate::tui) fn handle_clean_up_key(
     app: &mut App,
     key: ratatui::crossterm::event::KeyEvent,
     send: &mut dyn FnMut(&mut App, Msg),
@@ -239,7 +239,7 @@ pub(super) fn handle_clean_up_key(
 
 /// Forward a key to the picker. Choosing an item pops it and
 /// dispatches what the item commits.
-pub(super) fn handle_picker_key(
+pub(in crate::tui) fn handle_picker_key(
     app: &mut App,
     key: ratatui::crossterm::event::KeyEvent,
     send: &mut dyn FnMut(&mut App, Msg),

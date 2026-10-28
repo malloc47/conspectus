@@ -310,6 +310,15 @@ fn apply_action(
             runtime::handle_mux_launch_form_key(app, key, &mut form_send);
         }
         Action::PinEditFormKey(key) => runtime::handle_pin_edit_form_key(app, key, &mut form_send),
+        // The rename prompt, the Clean up checklist, and the picker open
+        // and take their keys as in the live loop; a confirm is skipped
+        // like a form submit.
+        Action::OpenRename => runtime::open_rename_overlay(app),
+        Action::RenameOverlayKey(key) => {
+            runtime::handle_rename_overlay_key(app, key, &mut form_send);
+        }
+        Action::CleanUpKey(key) => runtime::handle_clean_up_key(app, key, &mut form_send),
+        Action::PickerKey(key) => runtime::handle_picker_key(app, key, &mut form_send),
         Action::ControlsOverlayKey(key) => handle_controls_overlay_key(app, key),
         Action::SearchOverlayKey(key) => {
             // A hit that opens the viewer needs the same effect handling
@@ -374,9 +383,10 @@ fn modal_key(app: &mut App, key: KeyEvent) {
         OverlayOutcome::CommitAndStay(msg) if matches!(*msg, Msg::Toast(_)) => {
             dispatch(app, *msg);
         }
-        // A pick that only opens a form reaches nothing outside the
-        // snapshot, so the form opens and can be drawn.
-        OverlayOutcome::Commit(msg) if opens_a_form(&msg) => {
+        // A pick that only opens a form, a prompt, a picker, or the Clean
+        // up checklist reaches nothing outside the snapshot, so it opens
+        // and can be drawn.
+        OverlayOutcome::Commit(msg) if only_opens_a_modal(&msg) => {
             close(app);
             dispatch(app, *msg);
         }
@@ -386,21 +396,28 @@ fn modal_key(app: &mut App, key: KeyEvent) {
     }
 }
 
-/// Whether `msg` does nothing but open one of the forms.
-fn opens_a_form(msg: &Msg) -> bool {
+/// Whether `msg` does nothing but open a modal: one of the forms, the
+/// rename prompt, the picker, or the Clean up checklist.
+fn only_opens_a_modal(msg: &Msg) -> bool {
     matches!(
         msg,
-        Msg::OpenNewMuxForm | Msg::OpenMuxLaunchForm | Msg::OpenSlotEdit(_)
+        Msg::OpenNewMuxForm
+            | Msg::OpenMuxLaunchForm
+            | Msg::OpenSlotEdit(_)
+            | Msg::OpenSlotRename(_)
+            | Msg::OpenSlotRetarget(_)
+            | Msg::OpenCleanUp
     )
 }
 
-/// What a form sends: a notice it shows while it stays open is
-/// dispatched; a submit is skipped, as a menu pick is.
+/// What a form, prompt, picker, or checklist sends: a notice it shows
+/// while it stays open is dispatched; a submit is skipped, as a menu
+/// pick is.
 fn form_send(app: &mut App, msg: Msg) {
     if matches!(msg, Msg::Toast(_)) {
         dispatch(app, msg);
     } else {
-        eprintln!("conspectus: snapshot mode skipped a form submit");
+        eprintln!("conspectus: snapshot mode skipped a submit");
     }
 }
 
@@ -410,8 +427,6 @@ fn action_label(action: &Action) -> &'static str {
         Action::Resume => "Resume",
         Action::DefaultAction => "DefaultAction",
         Action::PaneViewerKey(_) => "PaneViewerKey",
-        Action::OpenRename => "OpenRename",
-        Action::RenameOverlayKey(_) => "RenameOverlayKey",
         Action::OpenValueModal => "OpenValueModal",
         Action::ValueModalKey(_) => "ValueModalKey",
         _ => "<other>",
