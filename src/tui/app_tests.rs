@@ -1514,35 +1514,37 @@ fn explorer_nav_clamps_inside_flat_row_range() {
     assert_eq!(app.explorer().expect("state").cursor, 0);
 }
 
-#[test]
-fn open_value_modal_when_cursor_has_a_long_value() {
-    // Build an app focused on a session that carries a long
-    // `last_message_preview` so the cursor walks to a row with
-    // a long_value set.
-    let snap = {
-        let mut snap = GraphSnapshot::empty();
-        let repo_id = RepoId::new("/p/proj");
-        snap.nodes
-            .push(GraphNode::Repo(RepoNode::new(repo_id.clone())));
-        snap.nodes.push(GraphNode::Checkout(CheckoutNode {
-            id: CheckoutId::new(repo_id, "/p/proj".to_string()),
-            root: "/p/proj".to_string(),
-            git_dir: None,
-            current_branch: None,
-            worktree: None,
-            head_commit: None,
-        }));
-        snap.nodes.push(GraphNode::AgentSession(
-            AgentSessionNode::new(
-                AgentSessionId::new("claude-code", "/state", "abc"),
-                "claude-code".to_string(),
-            )
-            .with_cwd("/p/proj".to_string())
-            .with_last_message_preview("a".repeat(120))
-            .with_last_active_epoch(1_700_000_000),
-        ));
-        resolve_snapshot(snap)
-    };
+/// The title and last message both run past the 48 columns the Node zone
+/// shows, so the title (a core row) and the last message (an extra row,
+/// past the five core rows) each carry a full value to copy or inspect.
+const LONG_TITLE: &str = "a title that runs well past the width the Node zone shows for it";
+const LONG_PREVIEW: &str = "the last message is long as well, so Enter and o have to reach the whole text and not what the pane cut";
+
+/// App focused on an agent session with the long title and last message.
+fn app_with_truncated_fields() -> App {
+    let mut snap = GraphSnapshot::empty();
+    let repo_id = RepoId::new("/p/proj");
+    snap.nodes
+        .push(GraphNode::Repo(RepoNode::new(repo_id.clone())));
+    snap.nodes.push(GraphNode::Checkout(CheckoutNode {
+        id: CheckoutId::new(repo_id, "/p/proj".to_string()),
+        root: "/p/proj".to_string(),
+        git_dir: None,
+        current_branch: None,
+        worktree: None,
+        head_commit: None,
+    }));
+    snap.nodes.push(GraphNode::AgentSession(
+        AgentSessionNode::new(
+            AgentSessionId::new("claude-code", "/state", "abc"),
+            "claude-code".to_string(),
+        )
+        .with_cwd("/p/proj".to_string())
+        .with_title(LONG_TITLE)
+        .with_last_message_preview(LONG_PREVIEW)
+        .with_last_active_epoch(1_700_000_000),
+    ));
+    let snap = resolve_snapshot(snap);
     let tree = build_tree(&snap);
     let mut app = App::new(RunConfig::defaults());
     app.update(Msg::SetData {
@@ -1560,16 +1562,150 @@ fn open_value_modal_when_cursor_has_a_long_value() {
         })
         .expect("session row");
     app.set_selection(row_id);
-    // The session's `last_message_preview` lives only in
-    // `all_fields`, not `core_fields`. Without the full-node
-    // toggle the cursor never lands on it through
-    // navigation. For now we exercise the no-value branch.
-    app.open_value_modal_for_cursor();
-    assert!(app.value_modal().is_none());
+    app
+}
+
+/// Put the explorer cursor on the `label` field the pane shows.
+fn put_cursor_on_field(app: &mut App, label: &str) {
+    let expanded = app.explorer().expect("state").full_detail_expanded;
+    let position = app
+        .explorer()
+        .expect("state")
+        .view
+        .fields(expanded)
+        .iter()
+        .position(|field| field.label == label)
+        .unwrap_or_else(|| panic!("the pane shows no {label} field"));
+    app.update(Msg::ExplorerHome);
+    for _ in 0..position {
+        app.update(Msg::ExplorerNavDown);
+    }
+    assert_eq!(app.explorer().expect("state").cursor, position);
+}
+
+/// Enter on the focused explorer row, with the clipboard write captured.
+fn press_enter_capturing_clipboard(app: &mut App) -> Option<String> {
+    let mut clipboard = None;
+    crate::tui::runtime::explorer_enter(app, |text| clipboard = Some(text.to_string()));
+    clipboard
+}
+
+#[test]
+fn o_opens_a_truncated_field_past_the_core_rows_when_the_node_detail_is_expanded() {
+    let mut app = app_with_truncated_fields();
+    app.update(Msg::ExplorerToggleFullDetail);
+    let state = app.explorer().expect("state");
+    let core_rows = state.view.core_fields.len();
+    let shown = state.view.fields(true);
+    let preview_row = shown
+        .iter()
+        .position(|field| field.label == "last_message_preview")
+        .expect("expanded detail shows the last message");
     assert!(
-        app.status_message()
-            .is_some_and(|s| s.contains("no truncated"))
+        preview_row >= core_rows,
+        "test premise: the last message sits past the core rows",
     );
+    put_cursor_on_field(&mut app, "last_message_preview");
+
+    app.open_value_modal_for_cursor();
+
+    let modal = app.value_modal().expect("o opens the full-value modal");
+    assert_eq!(modal.label, "last_message_preview");
+    assert_eq!(modal.value, LONG_PREVIEW);
+}
+
+#[test]
+fn enter_copies_a_field_past_the_core_rows_when_the_node_detail_is_expanded() {
+    let mut app = app_with_truncated_fields();
+    app.update(Msg::ExplorerToggleFullDetail);
+    put_cursor_on_field(&mut app, "last_message_preview");
+
+    let clipboard = press_enter_capturing_clipboard(&mut app);
+
+    assert_eq!(clipboard.as_deref(), Some(LONG_PREVIEW));
+    assert_eq!(
+        app.toast().current_message(),
+        Some("copied: last_message_preview"),
+    );
+    // A field with nothing cut copies what it shows.
+    put_cursor_on_field(&mut app, "session_key");
+    assert_eq!(
+        press_enter_capturing_clipboard(&mut app).as_deref(),
+        Some("abc"),
+    );
+}
+
+#[test]
+fn enter_copies_the_field_under_the_cursor_with_the_node_detail_collapsed_and_expanded() {
+    for expanded in [false, true] {
+        let mut app = app_with_truncated_fields();
+        if expanded {
+            app.update(Msg::ExplorerToggleFullDetail);
+        }
+        let shown = app
+            .explorer()
+            .expect("state")
+            .view
+            .fields(expanded)
+            .to_vec();
+        assert!(
+            shown.iter().any(|field| field.long_value.is_some()),
+            "test premise: a shown field is cut short (expanded: {expanded})",
+        );
+        for field in &shown {
+            put_cursor_on_field(&mut app, field.label);
+            let wanted = field.long_value.as_deref().unwrap_or(&field.value);
+            let clipboard = press_enter_capturing_clipboard(&mut app);
+            assert_eq!(
+                clipboard.as_deref(),
+                Some(wanted),
+                "Enter on {} copies it (expanded: {expanded})",
+                field.label,
+            );
+            assert_eq!(
+                app.toast().current_message(),
+                Some(format!("copied: {}", field.label).as_str()),
+            );
+        }
+    }
+}
+
+#[test]
+fn o_inspects_the_field_under_the_cursor_with_the_node_detail_collapsed_and_expanded() {
+    for expanded in [false, true] {
+        let mut app = app_with_truncated_fields();
+        if expanded {
+            app.update(Msg::ExplorerToggleFullDetail);
+        }
+        let shown = app
+            .explorer()
+            .expect("state")
+            .view
+            .fields(expanded)
+            .to_vec();
+        for field in &shown {
+            put_cursor_on_field(&mut app, field.label);
+            app.open_value_modal_for_cursor();
+            if let Some(full) = &field.long_value {
+                let modal = app
+                    .value_modal()
+                    .unwrap_or_else(|| panic!("o opens {} (expanded: {expanded})", field.label));
+                assert_eq!(modal.label, field.label);
+                assert_eq!(&modal.value, full);
+                app.close_value_modal();
+            } else {
+                assert!(
+                    app.value_modal().is_none(),
+                    "{} shows all of its value, so o opens nothing (expanded: {expanded})",
+                    field.label,
+                );
+                assert!(
+                    app.status_message()
+                        .is_some_and(|s| s.contains("no truncated")),
+                );
+            }
+        }
+    }
 }
 
 #[test]

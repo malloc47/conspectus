@@ -230,3 +230,52 @@ fn key_prelude_enter_on_a_related_row_drills_and_backspace_returns() {
     drive(&mut app, &config, "<Backspace>");
     assert!(app.explorer().expect("explorer").breadcrumb.is_empty());
 }
+
+const LONG_MESSAGE: &str = "this message runs far past the width the Node zone shows for it";
+
+/// App loaded with one session whose last message is too long for the
+/// Node zone, on the default sessions view.
+fn session_with_long_message_app() -> (App, RunConfig) {
+    use crate::model::{AgentSessionId, AgentSessionNode, GraphNode};
+    let mut snapshot = GraphSnapshot::empty();
+    snapshot.nodes.push(GraphNode::AgentSession(
+        AgentSessionNode::new(
+            AgentSessionId::new("codex", "/state", "abc"),
+            "codex".to_string(),
+        )
+        .with_last_message_preview(LONG_MESSAGE),
+    ));
+    let config = RunConfig::defaults();
+    let mut app = App::new(config.clone());
+    refresh_from_snapshot(&mut app, &config, snapshot);
+    (app, config)
+}
+
+#[test]
+fn key_prelude_o_and_enter_reach_a_truncated_field_past_the_core_rows() {
+    let (mut app, config) = session_with_long_message_app();
+    drive(&mut app, &config, "j<Tab>F");
+    let state = app.explorer().expect("explorer");
+    let row = state
+        .view
+        .fields(true)
+        .iter()
+        .position(|field| field.label == "last_message_preview")
+        .expect("expanded detail shows the last message");
+    assert!(row >= state.view.core_fields.len());
+    let cursor = state.cursor;
+
+    drive(&mut app, &config, &"j".repeat(row - cursor));
+    drive(&mut app, &config, "o");
+    let modal = app.value_modal().expect("o opens the value modal");
+    assert_eq!(modal.label, "last_message_preview");
+    assert_eq!(modal.value, LONG_MESSAGE);
+
+    drive(&mut app, &config, "o<Enter>");
+    assert!(app.value_modal().is_none(), "o closes the modal again");
+    assert_eq!(
+        app.toast().current_message(),
+        Some("copied: last_message_preview"),
+        "Enter copies the same field"
+    );
+}

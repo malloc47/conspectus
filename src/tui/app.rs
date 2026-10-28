@@ -699,26 +699,23 @@ impl App {
     /// field has no value (empty or absent), so the toast never
     /// claims a copy that didn't happen.
     pub fn explorer_copy_target(&self) -> Option<(String, String)> {
-        let state = self.explorer.as_ref()?;
-        let row = state.selected_row()?;
-        match row {
-            ExplorerRow::NodeField { index, label, .. } => {
-                let field = state.view.core_fields.get(index)?;
-                // Prefer the untruncated form when present so the
-                // clipboard always carries the full value; fall back
-                // to the rendered short form for fields without a
-                // separately-tracked long form.
-                let value = field
-                    .long_value
-                    .clone()
-                    .unwrap_or_else(|| field.value.clone());
-                if value.is_empty() {
-                    return None;
-                }
-                Some((label.to_string(), value))
-            }
-            _ => None,
+        let ExplorerRow::NodeField {
+            label,
+            value,
+            long_value,
+            ..
+        } = self.explorer.as_ref()?.selected_row()?
+        else {
+            return None;
+        };
+        // Prefer the untruncated form when present so the clipboard
+        // always carries the full value; fall back to the rendered
+        // short form for fields without a separately-tracked long form.
+        let value = long_value.unwrap_or(value);
+        if value.is_empty() {
+            return None;
         }
+        Some((label.to_string(), value))
     }
 
     /// Resolve the full id of the selected agent or mux session row
@@ -756,14 +753,11 @@ impl App {
             return;
         };
         let opened = match row {
-            ExplorerRow::NodeField { index, label, .. } => {
-                state.view.core_fields.get(index).and_then(|field| {
-                    field
-                        .long_value
-                        .clone()
-                        .map(|value| (label.to_string(), value))
-                })
-            }
+            ExplorerRow::NodeField {
+                label,
+                long_value: Some(value),
+                ..
+            } => Some((label.to_string(), value)),
             _ => None,
         };
         match opened {

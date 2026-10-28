@@ -583,12 +583,17 @@ pub struct NeighborRowKey {
 /// agree.
 #[derive(Clone, Debug, PartialEq)]
 pub enum ExplorerRow {
-    /// One of the focused node's core summary rows. Carries the
-    /// underlying [`CoreField`] index so `o` can find the long
-    /// value when the row was truncated.
+    /// One of the focused node's field rows. `index` is its place in
+    /// the list the pane shows ([`NodeView::fields`] for the current
+    /// Expanded Node Detail state). The row carries the field's own
+    /// text, so Enter and `o` act on what the row shows without
+    /// looking the field up again.
     NodeField {
         index: usize,
         label: &'static str,
+        /// The value as the pane shows it, possibly cut short.
+        value: String,
+        /// The whole value when `value` is cut short.
         long_value: Option<String>,
     },
     /// A resolver-winner row in the validated zone. `Enter` drills.
@@ -687,6 +692,7 @@ impl NodeView {
             rows.push(ExplorerRow::NodeField {
                 index,
                 label: field.label,
+                value: field.value.clone(),
                 long_value: field.long_value.clone(),
             });
         }
