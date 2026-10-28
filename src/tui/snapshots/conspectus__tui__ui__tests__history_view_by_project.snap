@@ -2,7 +2,7 @@
 source: src/tui/ui_tests.rs
 expression: "pinned_frame(&mut app, 110)"
 ---
-updated 0s ago · 0/1 sessions · 1 mux                                                                         
+updated 0s ago · 1 sessions · 1 mux                                                                           
 ┌ ► sessions · mux · prs · pinned · history · search ─┐┌   detail ───────────────────────────────────────────┐
 │▼ conspectus  ~/src/conspectus                       ││Select a row to view its detail.                     │
 │    ◇ ◎ conspectus-ledger  removed    2d  conspectus…││                                                     │

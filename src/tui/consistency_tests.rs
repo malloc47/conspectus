@@ -26,6 +26,8 @@
 //!   dimming, focus highlight, and scroll (`rendering`).
 //! - **User-visible text speaks the operator's language**: no developer
 //!   artifacts, and one word for one thing (`text`).
+//! - **The chrome agrees with the view**: the header counts what the
+//!   active view lists (`chrome`).
 //!
 //! # Diagnosis of the reported defects
 //!
@@ -75,6 +77,7 @@ use crate::tui::ui::{buffer_to_string, render_to_buffer};
 mod source_tree;
 
 mod actions;
+mod chrome;
 mod content_filter;
 mod content_interactions;
 mod docs;

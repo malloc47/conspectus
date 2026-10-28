@@ -144,30 +144,65 @@ pub(super) fn format_count_with_filtered(visible: usize, total: usize) -> String
 
 /// Count the agent sessions the visible row tree accounts for, so the
 /// header's `N/M sessions` mirrors what the left panel shows after
-/// filters apply.
+/// filters apply. `N/` appears only when the view lists fewer sessions
+/// than there are, so it never reads as if something were filtered out
+/// when nothing was.
 ///
-/// The Mux view renders a single attributed agent inline in its mux
-/// row and only emits agent child rows for muxes with several agents,
-/// so counting `AgentSession` rows there would read `0/M`. Instead it
-/// reports the plain total when no filter narrows the view, and
-/// otherwise sums the sessions attributed to the visible mux rows.
+/// - Sessions lists the sessions themselves: count its session rows.
+/// - Search lists the sessions the search it shows found, as session
+///   rows or, in the flat listing, as the hits that name them. Before
+///   any search it lists nothing and hides nothing: the plain total.
+/// - Mux and PRs list other things and only some of the sessions with
+///   them (a single agent sits inline in its mux row; a PR lists only
+///   the sessions on its branch), so counting rows there would read
+///   `0/M` or `4/M` unfiltered. They report the plain total until a
+///   filter narrows them, then the sessions their visible rows hold.
+/// - Pinned and History list entities of every kind and ignore the
+///   filter: the plain total.
 pub(super) fn visible_agent_session_count(app: &App, total: usize) -> usize {
     let rows = &app.tree().rows;
-    if app.active_view() == View::Mux {
-        if !app.filter().has_narrowing_predicates() {
-            return total;
+    let session_rows = || {
+        rows.iter()
+            .filter(|row| matches!(row.kind, RowKind::AgentSession(_)))
+            .count()
+    };
+    match app.active_view() {
+        View::Sessions => session_rows(),
+        View::Search if app.search_history().viewed().is_none() => total,
+        View::Search => {
+            let mut found = std::collections::BTreeSet::new();
+            for row in rows {
+                match &row.kind {
+                    RowKind::AgentSession(session) => found.insert(&session.session),
+                    RowKind::Hit(hit) => found.insert(&hit.session),
+                    _ => false,
+                };
+            }
+            found.len()
         }
-        return rows
+        View::Mux | View::Prs if !filter_narrows_view(app) => total,
+        View::Mux => rows
             .iter()
             .filter_map(|row| match &row.kind {
                 RowKind::MuxSession(mux) => Some(mux.attached_count),
                 _ => None,
             })
-            .sum();
+            .sum(),
+        View::Prs => session_rows(),
+        View::Pinned | View::History => total,
     }
-    rows.iter()
-        .filter(|row| matches!(row.kind, RowKind::AgentSession(_)))
-        .count()
+}
+
+/// Whether the filter leaves anything out of the Mux or PRs view: a
+/// session predicate, the content search, pinned-only, or, in PRs, a
+/// PR state or branch.
+fn filter_narrows_view(app: &App) -> bool {
+    let filter = app.filter();
+    filter.has_narrowing_predicates()
+        || app.content().is_some()
+        || filter.pinned_only
+        || app.active_view() == View::Prs
+            && (filter.pr_state.is_some() || filter.pr_branch.is_some())
 }
 
 /// Build the `updated Ns ago · ` slice of the header, or an empty

@@ -2,7 +2,7 @@
 source: src/tui/ui_tests.rs
 expression: all_kinds_frame(width)
 ---
-updated 0s ago · 0/1 sessions · 1 mux                                 
+updated 0s ago · 1 sessions · 1 mux                                   
 ┌ ► sessions · mux · prs · pinned · history · search ────────────────┐
 │  ▣ ◉ mux-live          live         1m   codex      ~/src/conspec… │
 │  ▣ ◎ mux-gone          stopped      4d   codex      ~/src/conspec…▲│
