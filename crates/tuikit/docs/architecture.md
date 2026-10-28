@@ -53,7 +53,7 @@ each names its module path.
 | `text` | Cell-width measuring; end and middle truncation; padding; fitting spans; word, character, and separator wrapping; snippet fitting; ASCII case-folding find; the match painter. Page: [controls/text.md](controls/text.md) | landed |
 | `scroll` | Wrap-or-clamp cursor stepping; the minimal-motion follow rule; the clamping scroll window a renderer returns to its owner; the fade-on-fit scrollbar gutter and the one scrollbar look; wrapped rows counted from the rows drawn. Page: [controls/scroll.md](controls/scroll.md) | landed |
 | `chip` | Fixed-width chips: toggle, segmented title, position, status | planned |
-| `age` | Relative-time formatting and recency tint with injectable thresholds | planned |
+| `age` | Ages from two Unix times; the unit ladder (days by default, weeks on request, or a host's units) and the one prose suffix; recency steps with injectable bounds and their theme tint; the fixed-width age cell. Page: [controls/age.md](controls/age.md) | landed |
 | `frame` | The modal frame (one sizing policy), the pane frame with its focus cue, the split pane, rules | planned |
 | `selection` | The list cursor marker and the selected, active, inactive, ghost, and pending row styles | planned |
 
