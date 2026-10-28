@@ -37,8 +37,10 @@ The crate is populated one module at a time as controls move in from the
 host. Today it holds the `theme` module (design tokens, named styles, and
 the style-spec grammar), the `glyphs` module (shared marks, the vetted-glyph
 table, and the source scanner), the `text` module (measuring, cutting,
-wrapping, snippets, and match painting in terminal cells), the source
-guards, and this documentation set; the module map in the architecture
+wrapping, snippets, and match painting in terminal cells), the `scroll`
+module (cursor stepping, the follow rule, the clamping scroll window, the
+scrollbar gutter, and wrapped-row counts), the source guards, and this
+documentation set; the module map in the architecture
 guide says which modules have landed.
 
 ## Depending on it by path

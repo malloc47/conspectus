@@ -1,0 +1,97 @@
+//! Counting the rows wrapped lines take, from the rows themselves.
+
+use std::ops::Range;
+
+use ratatui::text::Line;
+
+use crate::text::wrap_line;
+
+/// Lines wrapped to a width, with the rows each line took.
+///
+/// A scrolled body needs its row count before it draws: for the window's
+/// range, the scrollbar's length, a height budget, and the span a wrapped
+/// cursor line takes. Estimating the count apart from the wrap lets the
+/// two disagree, and the cursor then sits a row off the screen. These
+/// rows are wrapped by [`text::wrap_line`](crate::text::wrap_line) and
+/// drawn as they are (a paragraph without its own wrap), so the count is
+/// the count drawn.
+///
+/// Every line takes at least one row; an empty line is one empty row.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct WrappedRows {
+    rows: Vec<Line<'static>>,
+    /// One past the last row of each line, in line order.
+    ends: Vec<usize>,
+}
+
+impl WrappedRows {
+    /// `lines` wrapped to `width` cells by the
+    /// [wrapping rules](crate::text#wrapping-rules), with no hanging
+    /// indent. A width of 0 is treated as 1.
+    pub fn new(lines: &[Line<'_>], width: usize) -> Self {
+        let mut rows = Vec::with_capacity(lines.len());
+        let mut ends = Vec::with_capacity(lines.len());
+        for line in lines {
+            rows.extend(wrap_line(line, width.max(1), 0));
+            ends.push(rows.len());
+        }
+        Self { rows, ends }
+    }
+
+    /// `lines` wrapped to fit an area `width` cells wide and `height` rows
+    /// tall: at the full width when they fit, and one cell narrower when
+    /// they overflow and [`ScrollGutter::layout`](super::ScrollGutter::layout)
+    /// gives that column to the scrollbar. Lay the area out with the
+    /// returned row count; its content area is then as wide as the rows.
+    pub fn fit(lines: &[Line<'_>], width: usize, height: usize) -> Self {
+        let rows = Self::new(lines, width);
+        if rows.len() > height && width >= 2 {
+            Self::new(lines, width - 1)
+        } else {
+            rows
+        }
+    }
+
+    /// How many rows the lines took.
+    pub fn len(&self) -> usize {
+        self.rows.len()
+    }
+
+    /// Whether there are no rows, which happens only for no lines.
+    pub fn is_empty(&self) -> bool {
+        self.rows.is_empty()
+    }
+
+    /// How many lines were wrapped.
+    pub fn lines(&self) -> usize {
+        self.ends.len()
+    }
+
+    /// The rows line `index` took. Past the last line, the empty range at
+    /// the end.
+    pub fn rows_of(&self, index: usize) -> Range<usize> {
+        let Some(&end) = self.ends.get(index) else {
+            return self.len()..self.len();
+        };
+        let start = index
+            .checked_sub(1)
+            .and_then(|previous| self.ends.get(previous))
+            .copied()
+            .unwrap_or(0);
+        start..end
+    }
+
+    /// The rows, top to bottom.
+    pub fn rows(&self) -> &[Line<'static>] {
+        &self.rows
+    }
+
+    /// The rows, for a paragraph that draws them without wrapping again.
+    pub fn into_rows(self) -> Vec<Line<'static>> {
+        self.rows
+    }
+}
+
+#[cfg(test)]
+#[path = "rows_tests.rs"]
+mod tests;

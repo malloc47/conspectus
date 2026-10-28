@@ -244,25 +244,32 @@ Work through this list in order. Each step names the rule it applies.
 6. **Measure in cells.** Truncation, padding, and wrapping go through the
    `text` module and measure terminal cells (house rule 14). A control
    that needs its row count (a scroll range, a scrollbar, a height) wraps
-   with `text::wrap_line` and draws those rows, rather than letting the
-   paragraph widget wrap and estimating; see
-   [controls/text.md](controls/text.md).
-7. **Leave seams open, do not build them.** If the control could one day
+   with `scroll::WrappedRows` (built on `text::wrap_line`) and draws those
+   rows, rather than letting the paragraph widget wrap and estimating; see
+   [controls/text.md](controls/text.md) and
+   [controls/scroll.md](controls/scroll.md).
+7. **Scroll through one window.** A scrolled control steps its cursor
+   with `scroll::clamp_step` or `scroll::wrap_step` (house rule 2), keeps
+   a `scroll::ScrollWindow` that clamps, follows the cursor by the one
+   rule, draws its scrollbar through `scroll::ScrollGutter`, and returns
+   the window it drew to its owner as a value. It never sends a message
+   from inside a draw to report what it measured.
+8. **Leave seams open, do not build them.** If the control could one day
    carry availability on key rows, report its rendered area for mouse hit
    testing, or accept another content source, keep the types ready for it and
    record it on the page. Do not build the feature.
-8. **Document it.** Module docs and doc comments on every public item (the
+9. **Document it.** Module docs and doc comments on every public item (the
    lint requires them). Copy [controls/_template.md](controls/_template.md)
    to `docs/controls/<control>.md` and fill in every section. Flip the
    control's row in the module map in [architecture.md](architecture.md) to
    landed in the same change.
-9. **Test it.** Unit tests for behavior, rendered-buffer tests for layout, and
-   the test kit's conformance suite once it exists (see [Testing](#testing)).
-10. **Move the host onto it in the same change, when the control comes from
+10. **Test it.** Unit tests for behavior, rendered-buffer tests for layout, and
+    the test kit's conformance suite once it exists (see [Testing](#testing)).
+11. **Move the host onto it in the same change, when the control comes from
     the host.** Unify on the best variant instead of copying the host's
     disagreements, and catalog every visible difference
     ([Cataloging visible changes](#cataloging-visible-changes)).
-11. **Run the checks** at the end of this guide.
+12. **Run the checks** at the end of this guide.
 
 A decision that changes the crate's public API shape, house rules,
 dependencies, or independence rules gets a record in

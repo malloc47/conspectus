@@ -51,7 +51,7 @@ each names its module path.
 | `theme` | Generic role tokens (accent and focus cue, muted, inert, selection, success, warning, error, info, link, match highlight, badge, recency scale, surface, input fields); a registry of named styles for roles only the host knows; alias keys; the style-spec grammar; applying overrides from a config table the host supplies. Page: [controls/theme.md](controls/theme.md) | landed |
 | `glyphs` | The vetted glyph table with host registration; shared marks (pointer, back, disclosure, ok, fail, warning, bullet, ellipsis, no-value, rule, spinner); cell-width and emoji-risk checks; the source scanner that finds unvetted glyphs. Page: [controls/glyphs.md](controls/glyphs.md) | landed |
 | `text` | Cell-width measuring; end and middle truncation; padding; fitting spans; word, character, and separator wrapping; snippet fitting; ASCII case-folding find; the match painter. Page: [controls/text.md](controls/text.md) | landed |
-| `scroll` | Wrap-or-clamp cursor stepping; follow-cursor offsets; scroll windows; the scrollbar gutter; wrapped-row counts | planned |
+| `scroll` | Wrap-or-clamp cursor stepping; the minimal-motion follow rule; the clamping scroll window a renderer returns to its owner; the fade-on-fit scrollbar gutter and the one scrollbar look; wrapped rows counted from the rows drawn. Page: [controls/scroll.md](controls/scroll.md) | landed |
 | `chip` | Fixed-width chips: toggle, segmented title, position, status | planned |
 | `age` | Relative-time formatting and recency tint with injectable thresholds | planned |
 | `frame` | The modal frame (one sizing policy), the pane frame with its focus cue, the split pane, rules | planned |
