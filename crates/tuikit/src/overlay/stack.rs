@@ -186,6 +186,18 @@ impl<E> ModalStack<E> {
         }
     }
 
+    /// Whether the top entry has a text field taking keys now, so a paste
+    /// goes into it ([`Overlay::takes_text`]). `false` when the stack is
+    /// empty.
+    pub fn takes_text<M, Cx: ?Sized>(&self) -> bool
+    where
+        E: Overlay<M, Cx>,
+    {
+        self.entries
+            .last()
+            .is_some_and(|entry| Overlay::<M, Cx>::takes_text(entry))
+    }
+
     /// Whether an open entry fills the screen, so a host need not draw
     /// its own screen under the stack.
     pub fn fills_screen<M, Cx: ?Sized>(&self) -> bool

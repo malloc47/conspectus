@@ -167,6 +167,7 @@ stack.draw(area, &mut buf, &model, &theme);
 | `Overlay::handle(&mut self, key, &cx)` | one key press while the overlay is on top | returns an `Outcome<M>`; performs no effect |
 | `Overlay::render(&mut self, area, buf, &cx, &theme)` | draws the overlay over the screen | clears what it covers; `&mut self` so a scrolled overlay keeps the window it drew |
 | `Overlay::fills_screen(&self)` | whether the overlay covers the whole screen | `false` by default; nothing under it is drawn |
+| `Overlay::takes_text(&self)` | whether a text field in the overlay has the keys now | `false` by default; a host types a paste only into an overlay that says so |
 | `impl Overlay for Box<T>` | a boxed overlay is an overlay | so `ModalStack<Box<dyn Overlay<M, Cx>>>` works |
 | `Outcome::{Consumed, Close, Commit(M), Stay(M)}` | what the key asks the host to do | `map`, `closes`, `message` |
 | `ModalStack::new`, `push`, `pop`, `pop_if`, `close_all` | open and close entries | `pop_if` closes one kind of overlay only when it is on top; `close_all` returns the entries top first |
@@ -175,6 +176,7 @@ stack.draw(area, &mut buf, &model, &theme);
 | `settle(outcome)` | the stack's part of an outcome | closes the top for `Close` and `Commit`; returns a `Settled { closed, message }` |
 | `draw(area, buf, &cx, &theme)` | draws every entry, bottom to top | starts at the topmost entry that fills the screen, on a cleared area |
 | `fills_screen()` | whether any open entry fills the screen | the host skips its own screen when it does |
+| `takes_text()` | whether the top entry takes a paste | `false` when the stack is empty |
 
 ### The host's context
 

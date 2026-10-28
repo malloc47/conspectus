@@ -300,3 +300,24 @@ fn an_outcome_maps_its_message_and_says_whether_it_closes() {
     assert_eq!(Outcome::Stay(3).message(), Some(3));
     assert_eq!(Outcome::<u8>::Close.message(), None);
 }
+
+#[test]
+fn only_the_top_entry_says_whether_a_paste_goes_in() {
+    struct Field(bool);
+    impl Overlay<(), ()> for Field {
+        fn handle(&mut self, _key: KeyEvent, _cx: &()) -> Outcome<()> {
+            Outcome::Consumed
+        }
+        fn render(&mut self, _area: Rect, _buf: &mut Buffer, _cx: &(), _theme: &Theme) {}
+        fn takes_text(&self) -> bool {
+            self.0
+        }
+    }
+    let mut stack: ModalStack<Field> = ModalStack::new();
+    assert!(!stack.takes_text(), "an empty stack takes no paste");
+    stack.push(Field(true));
+    assert!(stack.takes_text());
+    stack.push(Field(false));
+    assert!(!stack.takes_text(), "a menu over a prompt takes no paste");
+    assert!(!Tile::new("a", Rect::default()).takes_text(), "false unless said");
+}

@@ -29,6 +29,9 @@ use crate::theme::Theme;
 ///   with its own header and footer) says so with
 ///   [`fills_screen`](Self::fills_screen); its stack draws nothing under
 ///   it.
+/// - **Text.** An overlay whose text field has the keys says so with
+///   [`takes_text`](Self::takes_text), so a host types a paste into it
+///   and nowhere else.
 pub trait Overlay<M, Cx: ?Sized> {
     /// Handles one key press with the host's context, and says what the
     /// host should do next.
@@ -40,6 +43,15 @@ pub trait Overlay<M, Cx: ?Sized> {
     /// Whether the overlay covers the whole screen, so nothing under it
     /// needs drawing. `false` unless an overlay says otherwise.
     fn fills_screen(&self) -> bool {
+        false
+    }
+
+    /// Whether a text field in the overlay has the keys now (a prompt, a
+    /// form's text row, a query, a find prompt), so text pasted into the
+    /// overlay goes there (house rule 15). `false` unless an overlay says
+    /// otherwise, so a paste never acts as the keys of a menu, a list, or
+    /// a choice.
+    fn takes_text(&self) -> bool {
         false
     }
 }
@@ -57,5 +69,9 @@ impl<M, Cx: ?Sized, T: Overlay<M, Cx> + ?Sized> Overlay<M, Cx> for Box<T> {
 
     fn fills_screen(&self) -> bool {
         (**self).fills_screen()
+    }
+
+    fn takes_text(&self) -> bool {
+        (**self).takes_text()
     }
 }
