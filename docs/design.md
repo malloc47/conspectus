@@ -1049,6 +1049,28 @@ The new layout preserves orientation, keeps the focused node's own
 facts visually distinct, and uses explicit navigation for graph
 depth.
 
+### TUI Framework
+
+The TUI's widgets, design tokens, and interaction conventions are being
+separated into a workspace member crate, `tuikit` at `crates/tuikit/`
+(ADR 0150), that `conspectus` depends on by path and that depends on nothing
+from `conspectus`. It is for internal reuse and can move to its own repository
+at any time; it is not published and promises no stable API.
+
+The first cut covers components and design tokens (layer 1) and interaction
+conventions (layer 2): key tables that generate footers and help, the overlay
+and modal-stack contract, focus rules, a feedback model, and a test kit. The
+application runtime (the MVU loop, effects, undo, and terminal hand-off) stays
+in `conspectus`. The control set and the house rules that make the controls
+behave alike are ADR 0151; who owns the third-party crates is ADR 0152. The
+planning record, with the inventory, control set, and gap analysis, is
+`docs/plans/tui-framework/`.
+
+Row builders, harness colors, state-word meanings, the transcript model, and
+preview sources stay in `conspectus` as adapters over the framework's
+controls. The framework starts no processes and writes no files, so it adds no
+entries to the capability manifest.
+
 ### Graph-to-View Slicing
 
 The producer pipeline discovers and resolves a typed
@@ -1375,6 +1397,11 @@ migration helper and harmless if it fails.
   `$XDG_STATE_HOME/conspectus/hooks` or
   `$HOME/.local/state/conspectus/hooks`, with
   `$CONSPECTUS_HOOK_SIDECAR_STATE` as an override.
+- The TUI's generic controls and conventions live in the `tuikit` workspace
+  crate, which depends on nothing from `conspectus` (ADR 0150). Its control set
+  and the house rules every control follows are ADR 0151, and it owns the TUI's
+  third-party widget crates, replacing three shims with in-tree code
+  (ADR 0152).
 
 ## Remaining Design Questions
 

@@ -111,3 +111,8 @@ Purpose: tentative redesign plans captured during operator review or design
 brainstorming, before they are promoted to ADRs or phase work. Each file
 anchors one or more backlog tasks and records the tradeoffs the
 later ADR will need to settle.
+
+The TUI framework extraction (`docs/plans/tui-framework/`) is a directory,
+not a file: its `README.md` indexes the inventory, control set, gap analysis,
+workspace-impact notes, and the research behind them. ADRs 0150 to 0152 record
+its decisions, and milestone m-25 carries the stories.
