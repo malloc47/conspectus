@@ -654,10 +654,12 @@ impl Widget for WorktreeMenuWidget<'_> {
             Mode::BranchInput(_) => unreachable!("handled above"),
         };
 
+        // At least 5 rows, but never taller than the terminal.
         let height = u16::try_from(lines.len())
             .unwrap_or(u16::MAX)
             .saturating_add(2)
-            .clamp(5, area.height);
+            .max(5)
+            .min(area.height);
         let rect = popup_frame::centered_rect(area, 56.min(area.width), height);
         Clear.render(rect, buf);
         let block = Block::default()

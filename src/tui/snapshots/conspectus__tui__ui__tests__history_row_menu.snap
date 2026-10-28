@@ -23,6 +23,6 @@ updated 0s ago┌ mux config-agent3 ──────────────�
 │             │  Forget                                                              │             │
 │             │     remove the record; config-agent3 would lose its target           │             │
 │             │  Clean up…                                                           │             │
-│             │     forget gone records past their reap age                          │             │
-└─────────────│                                                                      │─────────────┘
+│             │                                                                      │             │
+└─────────────│↑/↓ move · Enter pick · Esc close                                     │─────────────┘
 [left] group:n└──────────────────────────────────────────────────────────────────────┘· q quit …

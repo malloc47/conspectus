@@ -137,10 +137,12 @@ impl Widget for MuxMenuWidget<'_> {
             crate::tui::keybindings::overlay::MENU_KEYS,
         )));
 
+        // At least 10 rows, but never taller than the terminal.
         let height = u16::try_from(lines.len())
             .unwrap_or(u16::MAX)
             .saturating_add(2)
-            .clamp(10, area.height);
+            .max(10)
+            .min(area.height);
         let width = 62_u16.min(area.width);
         let rect = popup_frame::centered_rect(area, width, height);
         Clear.render(rect, buf);

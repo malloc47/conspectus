@@ -12,6 +12,7 @@ use ratatui::backend::TestBackend;
 use ratatui::buffer::Buffer;
 use ratatui::crossterm::event::{Event, KeyCode, KeyEvent, KeyModifiers};
 
+use super::layout::{builders, framed_and_bare, modal_rect};
 use super::*;
 use crate::tui::Modal;
 use crate::tui::keymap::Action;
@@ -167,4 +168,114 @@ fn a_tree_that_shrinks_leaves_no_blank_rows_below_it() {
         app.left_scroll(),
         buffer_to_string(&collapsed)
     );
+}
+
+// ---- menus and every modal on a short terminal -----------------------------
+
+#[test]
+fn menus_draw_on_a_terminal_shorter_than_their_frame() {
+    let mut failures = Vec::new();
+    for (name, view, open) in builders() {
+        if !matches!(name, "RowMenu" | "MuxMenu" | "WorktreeMenu") {
+            continue;
+        }
+        for width in [40_u16, 80] {
+            for height in 3..=12_u16 {
+                let label = describe(name, (width, height));
+                let drawn = std::panic::catch_unwind(|| framed_and_bare(view, open, width, height));
+                let Ok((with, without)) = drawn else {
+                    failures.push(format!("{label}: panicked"));
+                    continue;
+                };
+                if height < 10 {
+                    continue;
+                }
+                let cursor_shown = modal_rect(&with, &without)
+                    .is_some_and(|rect| inner_text(&with, rect).contains('►'));
+                if !cursor_shown {
+                    failures.push(format!(
+                        "{label}: the cursor entry is not visible\n{}",
+                        buffer_to_string(&with)
+                    ));
+                }
+            }
+        }
+    }
+    assert!(failures.is_empty(), "{}", failures.join("\n"));
+}
+
+/// The text inside a modal's frame, frame excluded.
+fn inner_text(buf: &Buffer, (x0, y0, x1, y1): (u16, u16, u16, u16)) -> String {
+    ((y0 + 1)..y1)
+        .flat_map(|y| ((x0 + 1)..x1).map(move |x| (x, y)))
+        .map(|(x, y)| buf[(x, y)].symbol().to_string())
+        .collect()
+}
+
+#[test]
+fn every_modal_shows_its_body_at_40x10() {
+    for (name, view, open) in builders() {
+        let (with, without) = framed_and_bare(view, open, 40, 10);
+        let label = describe(name, (40, 10));
+        let Some(rect) = modal_rect(&with, &without) else {
+            panic!("{label}: no frame\n{}", buffer_to_string(&with));
+        };
+        assert!(
+            !inner_text(&with, rect).trim().is_empty(),
+            "{label}: the body is blank\n{}",
+            buffer_to_string(&with)
+        );
+    }
+}
+
+/// The row menu with the most entries the fixture offers: a gone
+/// record's in the History view.
+fn long_row_menu() -> App {
+    let mut app = app_in(View::History);
+    let record = app
+        .tree()
+        .rows
+        .iter()
+        .find(|row| matches!(row.id, RowId::History { .. }))
+        .expect("a history record")
+        .id
+        .clone();
+    app.set_selection(record);
+    app.update(Msg::OpenRowMenu);
+    assert!(app.row_menu().is_some(), "the row menu opened");
+    app
+}
+
+#[test]
+fn the_row_menu_keeps_its_footer_and_its_cursor_in_view() {
+    let footer =
+        crate::tui::keybindings::overlay::footer(crate::tui::keybindings::overlay::MENU_KEYS);
+    let last_word = footer
+        .split_whitespace()
+        .last()
+        .expect("a footer")
+        .to_string();
+    for size in [(100_u16, 24_u16), (80, 14), (40, 10)] {
+        let label = describe("row menu", size);
+        let mut app = long_row_menu();
+        let entries = app.row_menu().expect("menu").entries().len();
+        let mut frame = screen(&mut app, size);
+        for step in 0..entries {
+            let text = buffer_to_string(&frame);
+            let cursor = app.row_menu().expect("menu").cursor();
+            let entry = app.row_menu().expect("menu").entries()[cursor]
+                .label
+                .clone();
+            assert!(
+                text.contains(&last_word),
+                "{label}, step {step}: the footer is visible\n{text}"
+            );
+            assert!(
+                text.lines()
+                    .any(|line| line.contains('►') && line.contains(&entry)),
+                "{label}, step {step}: the cursor entry `{entry}` is visible\n{text}"
+            );
+            frame = press(&mut app, size, KeyCode::Down);
+        }
+    }
 }

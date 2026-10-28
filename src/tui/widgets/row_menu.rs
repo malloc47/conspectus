@@ -133,7 +133,11 @@ impl Widget for RowMenuWidget<'_> {
         // ellipsis, explanations and the footer wrap.
         let inner_width = usize::from(72_u16.min(area.width).saturating_sub(2));
         let mut lines: Vec<Line> = vec![Line::from("")];
+        // The rows of the cursor's entry, so a menu taller than the frame
+        // can scroll to it.
+        let mut cursor_rows = 0..0;
         for (idx, entry) in self.state.entries.iter().enumerate() {
+            let first_row = lines.len();
             let focused = idx == self.state.cursor;
             let marker = if focused { "►" } else { " " };
             let armed = self.state.armed == Some(idx);
@@ -158,18 +162,23 @@ impl Widget for RowMenuWidget<'_> {
             for chunk in popup_frame::wrapped_lines(&entry.subtitle, 5, inner_width) {
                 lines.push(Line::from(chunk));
             }
+            if focused {
+                cursor_rows = first_row..lines.len();
+            }
         }
-        lines.push(Line::from(""));
-        let footer =
+        let mut footer: Vec<Line> = vec![Line::from("")];
+        let hint =
             crate::tui::keybindings::overlay::footer(crate::tui::keybindings::overlay::MENU_KEYS);
-        for chunk in popup_frame::wrapped_lines(&footer, 0, inner_width) {
-            lines.push(Line::from(chunk));
+        for chunk in popup_frame::wrapped_lines(&hint, 0, inner_width) {
+            footer.push(Line::from(chunk));
         }
 
-        let height = u16::try_from(lines.len())
+        // At least 8 rows, but never taller than the terminal.
+        let height = u16::try_from(lines.len() + footer.len())
             .unwrap_or(u16::MAX)
             .saturating_add(2)
-            .clamp(8, area.height);
+            .max(8)
+            .min(area.height);
         let width = 72_u16.min(area.width);
         let rect = popup_frame::centered_rect(area, width, height);
         Clear.render(rect, buf);
@@ -179,7 +188,31 @@ impl Widget for RowMenuWidget<'_> {
             .border_style(Style::default().fg(self.theme.panel_focus_accent));
         let inner = block.inner(rect);
         block.render(rect, buf);
-        Paragraph::new(lines).render(inner, buf);
+
+        // When the menu is taller than its frame the footer keeps the last
+        // rows (all but one, its blank line going first) and the entries
+        // scroll just far enough to show the cursor's entry.
+        let rows = usize::from(inner.height);
+        let footer_rows = footer.len().min(rows.saturating_sub(1));
+        let footer = footer.split_off(footer.len() - footer_rows);
+        let entry_rows = lines.len().min(rows - footer_rows);
+        let scroll = cursor_rows
+            .end
+            .saturating_sub(entry_rows)
+            .min(cursor_rows.start);
+        let entries_area = Rect {
+            height: u16::try_from(entry_rows).unwrap_or(inner.height),
+            ..inner
+        };
+        let footer_area = Rect {
+            y: inner.y + entries_area.height,
+            height: inner.height - entries_area.height,
+            ..inner
+        };
+        Paragraph::new(lines)
+            .scroll((u16::try_from(scroll).unwrap_or(u16::MAX), 0))
+            .render(entries_area, buf);
+        Paragraph::new(footer).render(footer_area, buf);
     }
 }
 

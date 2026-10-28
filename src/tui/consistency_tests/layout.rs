@@ -198,7 +198,7 @@ fn press(modal: &mut Modal, code: KeyCode) -> bool {
 const SCROLLS: &[&str] = &["Help", "ValueModal"];
 
 /// The frame with the modal open, and the same app state without it.
-fn framed_and_bare(view: View, open: Open, width: u16, height: u16) -> (Buffer, Buffer) {
+pub(super) fn framed_and_bare(view: View, open: Open, width: u16, height: u16) -> (Buffer, Buffer) {
     let mut app = app_with(view, open);
     let with = buffer_of(&mut app, width, height);
     app.pop_top_modal();
@@ -229,7 +229,7 @@ fn vertical(symbol: &str) -> bool {
 
 /// The rectangle of the frame the modal drew, from its corner glyphs
 /// among the cells that differ from the frame without it.
-fn modal_rect(with: &Buffer, without: &Buffer) -> Option<(u16, u16, u16, u16)> {
+pub(super) fn modal_rect(with: &Buffer, without: &Buffer) -> Option<(u16, u16, u16, u16)> {
     let area = with.area;
     let (mut x0, mut y0, mut x1, mut y1) = (u16::MAX, u16::MAX, 0, 0);
     let mut found = false;
