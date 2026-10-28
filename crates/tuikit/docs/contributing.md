@@ -240,11 +240,17 @@ Work through this list in order. Each step names the rule it applies.
    [the raw-style guard](#the-raw-style-guard)). Draw shared glyphs through
    `glyphs::marks` and never type the character
    ([the glyph guard](#the-glyph-guard)).
-4. **Write its key table.** Define the control's keys as a key table, and
-   generate its footer and help from that table. Never hand-write hints
-   (house rule 8). Use the standard tables for menus, dialogs, pagers, text
-   input, checklists, and forms where the control matches one, and follow the
-   close-key, confirmation, and paging rules (house rules 3, 4, 5, 12).
+4. **Write its key table.** Define the control's keys as a `keys` table over
+   its own action enum, implement `KeyAction` for the enum, and generate its
+   footer and help from that table. Never hand-write hints (house rule 8).
+   Use the standard tables for menus, dialogs, pagers, text input,
+   checklists, and forms where the control matches one, building on them
+   with `include` rather than copying rows; bind characters with `ch`
+   (never a chord of them), move every list with `Ctrl-P`/`Ctrl-N`, start
+   with `Ctrl-C`, and follow the close-key, confirmation, and paging rules
+   (house rules 3, 4, 5, 12). Run `mislabeled`, `unresolved`,
+   `loose_characters`, and `ctrl_c_first` over the table in its tests; see
+   [controls/keys.md](controls/keys.md).
 5. **Return outcomes.** Handling a key returns an outcome carrying the host's
    `M` where something is committed. The control performs no effect. Anything
    external arrives through a trait, a closure, or a sink supplied by the host.

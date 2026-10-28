@@ -75,10 +75,13 @@ for drawn in vetted.unvetted(source) {
 | `NO_VALUE` | `—` | a value that is not known |
 | `RULE` | `─` | one cell of a horizontal rule |
 | `SEPARATOR` | `·` | the separator between the parts of one item (a name and its state in a chip) and between short items in a line |
+| `ARROW_UP`, `ARROW_DOWN`, `ARROW_LEFT`, `ARROW_RIGHT` | `↑ ↓ ← →` | the arrow keys, as key labels name them (see [keys.md](keys.md)) |
 | `SPINNER` | `⠋ ⠙ ⠹ ⠸ ⠼ ⠴ ⠦ ⠧` | the frames of a busy spinner (an operator-preference exception, below) |
 
 `marks::ALL` lists every mark once, spinner frames included, and a test keeps
-the list and the module's source in step. The pointer (`►`, U+25BA) and the
+the list and the module's source in step. `marks::SPACED_SEPARATOR` is
+`SEPARATOR` with a space on each side (` · `), what joins the hints of a
+footer; it is three cells, so it is not one of the marks. The pointer (`►`, U+25BA) and the
 collapsed arrow (`▶`, U+25B6) are look-alike codepoints on purpose: the
 pointer is not emoji-capable, and the collapsed arrow is the preference
 below. Do not substitute one for the other.

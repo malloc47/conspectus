@@ -72,7 +72,7 @@ each names its module path.
 
 | Module | Provides | Status |
 | --- | --- | --- |
-| `keys` | The key-table model: matchers, rows, hints, resolving a key against a table, footer generation, key labels, and a check for mislabeled rows; standard tables for menus, dialogs, pagers, text input, checklists, and forms; later, a scoped global keymap | planned |
+| `keys` | The key-table model: matchers with one rule for characters, rows that can include another table and carry availability, hints, resolving a key against a table, footers in one grammar (dimming what cannot act now), one key-label notation, the `KeyRole` classifier and the modal key convention checked by it, and checks for mislabeled, shadowed, and loosely bound rows; standard tables and action enums for menus, confirm and choice dialogs, pagers, text input, checklists, and forms. Later: a scoped program-wide keymap. Page: [controls/keys.md](controls/keys.md) | landed |
 | `overlay` | The `Overlay<M, Cx>` contract (`handle` and `render`), `Outcome<M>`, and `ModalStack`, which the host owns and which draws every entry from bottom to top | planned |
 | `help` | The generator that turns key tables into help pages, and the page renderer | planned |
 | `focus` | Declared focus rules: the pane focus cue, the modal focus lock, the Tab cycle | planned |

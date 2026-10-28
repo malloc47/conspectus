@@ -1,5 +1,6 @@
-//! Overlay keys resolve through `tui::keybindings::overlay` tables, and
-//! overlay footers are generated from those tables (ADR 0123). This
+//! Overlay keys resolve through key tables (`tuikit::keys` and the
+//! host's `tui::keybindings::overlay`), and overlay footers are generated
+//! from those tables (ADR 0123, ADR 0160). This
 //! guard fails when overlay code matches `KeyCode` by hand or renders a
 //! hand-written key hint, the two ways a footer could drift from what
 //! its handler accepts.
@@ -34,7 +35,24 @@ const TREES: &[Tree] = &[
 /// Add an entry only for a file whose job is to turn raw key events into
 /// table lookups; overlay and control code resolves through the tables and
 /// stays covered.
-const KEY_MODEL_FILES: &[(&str, &str)] = &[];
+const KEY_MODEL_FILES: &[(&str, &str)] = &[
+    (
+        "crates/tuikit/src/keys/matcher.rs",
+        "the key matcher: matches key events, writes key labels, and builds matchers",
+    ),
+    (
+        "crates/tuikit/src/keys/table.rs",
+        "resolves key events against tables and tells a typed character from a key",
+    ),
+    (
+        "crates/tuikit/src/keys/role.rs",
+        "presses Esc, Enter, and Space to check a modal's tables against the convention",
+    ),
+    (
+        "crates/tuikit/src/keys/standard.rs",
+        "the standard key tables themselves: the rows name the keys they bind",
+    ),
+];
 
 /// Help-overlay prose that reads like a key hint but describes the
 /// main view, not the overlay it appears in.
@@ -142,11 +160,30 @@ fn overlay_code_resolves_keys_through_keymap_tables() {
     let offenders = hand_matched_keys(source_tree::workspace_root(), TREES);
     assert!(
         offenders.is_empty(),
-        "overlay code matches keys by hand; add rows to a `tui::keybindings::overlay` table \
-         instead (a framework file that defines the key-table model itself belongs in \
-         `KEY_MODEL_FILES`):\n{}",
+        "overlay code matches keys by hand; add rows to a key table (`tuikit::keys` or \
+         `tui::keybindings::overlay`) instead (a framework file that defines the key-table \
+         model itself belongs in `KEY_MODEL_FILES`):\n{}",
         offenders.join("\n")
     );
+}
+
+/// A key-model entry that no longer names `KeyCode` (or whose file is
+/// gone) would exempt nothing, so it fails until it is removed.
+#[test]
+fn every_key_model_file_still_names_key_codes() {
+    let root = source_tree::workspace_root();
+    for (file, reason) in KEY_MODEL_FILES {
+        let text = fs::read_to_string(root.join(file))
+            .unwrap_or_else(|error| panic!("{file} ({reason}): {error}"));
+        assert!(
+            production_text(&text).lines().any(|line| line
+                .split("//")
+                .next()
+                .unwrap_or("")
+                .contains("KeyCode::")),
+            "{file} no longer names `KeyCode`; remove it from KEY_MODEL_FILES"
+        );
+    }
 }
 
 #[test]
@@ -154,7 +191,7 @@ fn overlay_footers_are_generated_from_keymap_tables() {
     let offenders = hand_written_hints(source_tree::workspace_root(), TREES);
     assert!(
         offenders.is_empty(),
-        "overlay code renders a hand-written key hint; generate it with `overlay::footer` instead:\n{}",
+        "overlay code renders a hand-written key hint; generate it with `tuikit::keys::footer` instead:\n{}",
         offenders.join("\n")
     );
 }

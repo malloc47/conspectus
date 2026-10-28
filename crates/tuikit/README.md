@@ -44,7 +44,9 @@ toggle, segmented, position, and status chips), the `age` module (age
 text, recency tint, and the age cell), the `frame` module (the modal
 frame and its named sizes), the `selection` module (the list cursor's
 marker and highlight, the ghost and pending looks, and the wrap-or-clamp
-rule), the source guards, and this documentation set; the module map in
+rule), the `keys` module (key tables, footers, key labels, roles, and the
+standard tables for menus, dialogs, pagers, prompts, checklists, and
+forms), the source guards, and this documentation set; the module map in
 the architecture guide says which modules have landed.
 
 ## Depending on it by path
