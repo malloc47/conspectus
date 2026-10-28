@@ -1,4 +1,10 @@
 //! Key handlers for overlays that need runtime services.
+//!
+//! A menu, prompt, or form moves, edits, and closes itself the same way
+//! in every mode; what it commits goes to the `send` callback its
+//! handler takes. The live loop runs commits on the live executor, the
+//! fixture and scenario TUI on the pure one, which says so when a commit
+//! needs a terminal, a mux, or a store.
 
 use super::*;
 
@@ -70,11 +76,9 @@ pub(super) fn open_rename_overlay(app: &mut App) {
 /// optional tmux rename) and refreshes; Cancel just closes the
 /// overlay.
 pub(super) fn handle_rename_overlay_key(
-    terminal: &mut DefaultTerminal,
     app: &mut App,
-    config: &RunConfig,
-    tmux: &dyn MuxBackend,
     key: ratatui::crossterm::event::KeyEvent,
+    send: &mut dyn FnMut(&mut App, Msg),
 ) {
     use crate::tui::{Overlay, OverlayOutcome};
     let outcome = match app.rename_overlay_mut() {
@@ -89,10 +93,10 @@ pub(super) fn handle_rename_overlay_key(
         }
         OverlayOutcome::Commit(msg) => {
             app.close_rename_overlay();
-            dispatch_live(terminal, app, config, tmux, *msg);
+            send(app, *msg);
         }
         OverlayOutcome::CommitAndStay(msg) => {
-            dispatch_live(terminal, app, config, tmux, *msg);
+            send(app, *msg);
         }
     }
 }
@@ -101,11 +105,9 @@ pub(super) fn handle_rename_overlay_key(
 /// (mirrors the rename overlay). Commit runs the mutation via the
 /// executor and refreshes; Close just dismisses.
 pub(super) fn handle_worktree_menu_key(
-    terminal: &mut DefaultTerminal,
     app: &mut App,
-    config: &RunConfig,
-    tmux: &dyn MuxBackend,
     key: ratatui::crossterm::event::KeyEvent,
+    send: &mut dyn FnMut(&mut App, Msg),
 ) {
     use crate::tui::{Overlay, OverlayOutcome};
     let outcome = match app.worktree_menu_mut() {
@@ -120,20 +122,18 @@ pub(super) fn handle_worktree_menu_key(
         }
         OverlayOutcome::Commit(msg) => {
             app.close_worktree_menu();
-            dispatch_live(terminal, app, config, tmux, *msg);
+            send(app, *msg);
         }
         OverlayOutcome::CommitAndStay(msg) => {
-            dispatch_live(terminal, app, config, tmux, *msg);
+            send(app, *msg);
         }
     }
 }
 
 pub(super) fn handle_new_mux_form_key(
-    terminal: &mut DefaultTerminal,
     app: &mut App,
-    config: &RunConfig,
-    tmux: &dyn MuxBackend,
     key: ratatui::crossterm::event::KeyEvent,
+    send: &mut dyn FnMut(&mut App, Msg),
 ) {
     use crate::tui::{Overlay, OverlayOutcome};
     let outcome = match app.new_mux_form_mut() {
@@ -148,10 +148,10 @@ pub(super) fn handle_new_mux_form_key(
         }
         OverlayOutcome::Commit(msg) => {
             app.close_new_mux_form();
-            dispatch_live(terminal, app, config, tmux, *msg);
+            send(app, *msg);
         }
         OverlayOutcome::CommitAndStay(msg) => {
-            dispatch_live(terminal, app, config, tmux, *msg);
+            send(app, *msg);
         }
     }
 }
@@ -162,11 +162,9 @@ pub(super) fn handle_new_mux_form_key(
 /// `Msg::OpenMuxLaunchForm` arm pushes the target modal seeded from
 /// current selection.
 pub(super) fn handle_mux_menu_key(
-    terminal: &mut DefaultTerminal,
     app: &mut App,
-    config: &RunConfig,
-    tmux: &dyn MuxBackend,
     key: ratatui::crossterm::event::KeyEvent,
+    send: &mut dyn FnMut(&mut App, Msg),
 ) {
     use crate::tui::{Overlay, OverlayOutcome};
     let outcome = match app.mux_menu_mut() {
@@ -181,10 +179,10 @@ pub(super) fn handle_mux_menu_key(
         }
         OverlayOutcome::Commit(msg) => {
             app.close_mux_menu();
-            dispatch_live(terminal, app, config, tmux, *msg);
+            send(app, *msg);
         }
         OverlayOutcome::CommitAndStay(msg) => {
-            dispatch_live(terminal, app, config, tmux, *msg);
+            send(app, *msg);
         }
     }
 }
@@ -192,11 +190,9 @@ pub(super) fn handle_mux_menu_key(
 /// Forward a key to the row action menu. A pick pops the menu and
 /// dispatches its message; the reducer does the rest.
 pub(super) fn handle_row_menu_key(
-    terminal: &mut DefaultTerminal,
     app: &mut App,
-    config: &RunConfig,
-    tmux: &dyn MuxBackend,
     key: ratatui::crossterm::event::KeyEvent,
+    send: &mut dyn FnMut(&mut App, Msg),
 ) {
     use crate::tui::{Overlay, OverlayOutcome};
     let outcome = match app.row_menu_mut() {
@@ -208,10 +204,10 @@ pub(super) fn handle_row_menu_key(
         OverlayOutcome::Close => app.close_row_menu(),
         OverlayOutcome::Commit(msg) => {
             app.close_row_menu();
-            dispatch_live(terminal, app, config, tmux, *msg);
+            send(app, *msg);
         }
         OverlayOutcome::CommitAndStay(msg) => {
-            dispatch_live(terminal, app, config, tmux, *msg);
+            send(app, *msg);
         }
     }
 }
@@ -219,11 +215,9 @@ pub(super) fn handle_row_menu_key(
 /// Forward a key to the Clean up modal. Confirming pops it and
 /// dispatches the reap of the selected records.
 pub(super) fn handle_clean_up_key(
-    terminal: &mut DefaultTerminal,
     app: &mut App,
-    config: &RunConfig,
-    tmux: &dyn MuxBackend,
     key: ratatui::crossterm::event::KeyEvent,
+    send: &mut dyn FnMut(&mut App, Msg),
 ) {
     use crate::tui::{Overlay, OverlayOutcome};
     let outcome = match app.clean_up_mut() {
@@ -235,10 +229,10 @@ pub(super) fn handle_clean_up_key(
         OverlayOutcome::Close => app.close_clean_up(),
         OverlayOutcome::Commit(msg) => {
             app.close_clean_up();
-            dispatch_live(terminal, app, config, tmux, *msg);
+            send(app, *msg);
         }
         OverlayOutcome::CommitAndStay(msg) => {
-            dispatch_live(terminal, app, config, tmux, *msg);
+            send(app, *msg);
         }
     }
 }
@@ -246,11 +240,9 @@ pub(super) fn handle_clean_up_key(
 /// Forward a key to the picker. Choosing an item pops it and
 /// dispatches what the item commits.
 pub(super) fn handle_picker_key(
-    terminal: &mut DefaultTerminal,
     app: &mut App,
-    config: &RunConfig,
-    tmux: &dyn MuxBackend,
     key: ratatui::crossterm::event::KeyEvent,
+    send: &mut dyn FnMut(&mut App, Msg),
 ) {
     use crate::tui::{Overlay, OverlayOutcome};
     let outcome = match app.picker_mut() {
@@ -262,21 +254,19 @@ pub(super) fn handle_picker_key(
         OverlayOutcome::Close => app.close_picker(),
         OverlayOutcome::Commit(msg) => {
             app.close_picker();
-            dispatch_live(terminal, app, config, tmux, *msg);
+            send(app, *msg);
         }
         OverlayOutcome::CommitAndStay(msg) => {
-            dispatch_live(terminal, app, config, tmux, *msg);
+            send(app, *msg);
         }
     }
 }
 
 /// Forward a key to the mux-launch form (ADR 0096).
 pub(super) fn handle_mux_launch_form_key(
-    terminal: &mut DefaultTerminal,
     app: &mut App,
-    config: &RunConfig,
-    tmux: &dyn MuxBackend,
     key: ratatui::crossterm::event::KeyEvent,
+    send: &mut dyn FnMut(&mut App, Msg),
 ) {
     use crate::tui::{Overlay, OverlayOutcome};
     let outcome = match app.mux_launch_form_mut() {
@@ -291,10 +281,10 @@ pub(super) fn handle_mux_launch_form_key(
         }
         OverlayOutcome::Commit(msg) => {
             app.close_mux_launch_form();
-            dispatch_live(terminal, app, config, tmux, *msg);
+            send(app, *msg);
         }
         OverlayOutcome::CommitAndStay(msg) => {
-            dispatch_live(terminal, app, config, tmux, *msg);
+            send(app, *msg);
         }
     }
 }
@@ -606,11 +596,9 @@ pub(in crate::tui) fn handle_viewer_overlay_key(
 }
 
 pub(super) fn handle_pin_edit_form_key(
-    terminal: &mut DefaultTerminal,
     app: &mut App,
-    config: &RunConfig,
-    tmux: &dyn MuxBackend,
     key: ratatui::crossterm::event::KeyEvent,
+    send: &mut dyn FnMut(&mut App, Msg),
 ) {
     use crate::tui::{Overlay, OverlayOutcome};
     let outcome = match app.pin_edit_form_mut() {
@@ -625,10 +613,10 @@ pub(super) fn handle_pin_edit_form_key(
         }
         OverlayOutcome::Commit(msg) => {
             app.close_pin_edit_form();
-            dispatch_live(terminal, app, config, tmux, *msg);
+            send(app, *msg);
         }
         OverlayOutcome::CommitAndStay(msg) => {
-            dispatch_live(terminal, app, config, tmux, *msg);
+            send(app, *msg);
         }
     }
 }

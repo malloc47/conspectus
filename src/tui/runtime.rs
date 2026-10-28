@@ -528,28 +528,36 @@ impl LoopMode for LiveMode {
             Some(Action::DefaultAction) => default_action(terminal, app, config, tmux),
             Some(Action::OpenRename) => open_rename_overlay(app),
             Some(Action::RenameOverlayKey(key)) => {
-                handle_rename_overlay_key(terminal, app, config, tmux, key);
+                handle_rename_overlay_key(app, key, &mut live_send(terminal, config, tmux));
             }
             Some(Action::OpenWorktreeMenu) => open_worktree_menu_action(app),
             Some(Action::OpenWorktreeCloseDown) => open_worktree_close_down_action(app),
             Some(Action::WorktreeMenuKey(key)) => {
-                handle_worktree_menu_key(terminal, app, config, tmux, key);
+                handle_worktree_menu_key(app, key, &mut live_send(terminal, config, tmux));
             }
             Some(Action::OpenNewMuxForm) => open_new_mux_form_action(app),
             Some(Action::NewMuxFormKey(key)) => {
-                handle_new_mux_form_key(terminal, app, config, tmux, key);
+                handle_new_mux_form_key(app, key, &mut live_send(terminal, config, tmux));
             }
             Some(Action::OpenMuxMenu) => open_mux_menu_action(app),
-            Some(Action::MuxMenuKey(key)) => handle_mux_menu_key(terminal, app, config, tmux, key),
+            Some(Action::MuxMenuKey(key)) => {
+                handle_mux_menu_key(app, key, &mut live_send(terminal, config, tmux));
+            }
             Some(Action::MuxLaunchFormKey(key)) => {
-                handle_mux_launch_form_key(terminal, app, config, tmux, key);
+                handle_mux_launch_form_key(app, key, &mut live_send(terminal, config, tmux));
             }
             Some(Action::PinEditFormKey(key)) => {
-                handle_pin_edit_form_key(terminal, app, config, tmux, key);
+                handle_pin_edit_form_key(app, key, &mut live_send(terminal, config, tmux));
             }
-            Some(Action::RowMenuKey(key)) => handle_row_menu_key(terminal, app, config, tmux, key),
-            Some(Action::CleanUpKey(key)) => handle_clean_up_key(terminal, app, config, tmux, key),
-            Some(Action::PickerKey(key)) => handle_picker_key(terminal, app, config, tmux, key),
+            Some(Action::RowMenuKey(key)) => {
+                handle_row_menu_key(app, key, &mut live_send(terminal, config, tmux));
+            }
+            Some(Action::CleanUpKey(key)) => {
+                handle_clean_up_key(app, key, &mut live_send(terminal, config, tmux));
+            }
+            Some(Action::PickerKey(key)) => {
+                handle_picker_key(app, key, &mut live_send(terminal, config, tmux));
+            }
             Some(Action::OpenControls) => {
                 app.open_controls_overlay();
                 app.update(Msg::SetStatus(Some(format!(
@@ -641,7 +649,8 @@ impl LoopMode for LiveMode {
 
 /// Static-mode loop state: fixture-replay + scenario TUI. Its
 /// `dispatch` blocks mutating actions with a status hint and
-/// reloads the fixture on `Action::Refresh`.
+/// reloads the fixture on `Action::Refresh`. Overlays take their keys
+/// as in the live loop; what they commit runs on the pure executor.
 #[cfg(any(test, debug_assertions, feature = "snapshot"))]
 struct StaticMode {
     tmux: Box<dyn MuxBackend>,
@@ -653,32 +662,9 @@ struct StaticMode {
 }
 
 #[cfg(any(test, debug_assertions, feature = "snapshot"))]
-impl LoopMode for StaticMode {
-    fn init(
-        &mut self,
-        _terminal: &mut DefaultTerminal,
-        app: &mut App,
-        config: &RunConfig,
-    ) -> Result<()> {
-        set_static_data(app, config, &self.snapshot);
-        Ok(())
-    }
-
-    fn drain(&mut self, app: &mut App, _config: &RunConfig) -> Result<()> {
-        // Scenario mode has no async event sources: no discovery
-        // worker to poll and no refresh timer to arm. A requested
-        // content search runs to completion here.
-        content::run_blocking(app, None);
-        Ok(())
-    }
-
-    fn dispatch(
-        &mut self,
-        _terminal: &mut DefaultTerminal,
-        app: &mut App,
-        config: &RunConfig,
-        action: Option<Action>,
-    ) -> Result<()> {
+impl StaticMode {
+    /// What [`LoopMode::dispatch`] does; it needs no terminal.
+    fn dispatch_action(&mut self, app: &mut App, config: &RunConfig, action: Option<Action>) {
         match action {
             Some(Action::Msg(msg)) => dispatch(app, *msg),
             Some(Action::OpenHelp) => app.open_help_overlay(),
@@ -794,28 +780,67 @@ impl LoopMode for StaticMode {
             }
             Some(
                 Action::OpenRename
-                | Action::RenameOverlayKey(_)
                 | Action::OpenWorktreeMenu
                 | Action::OpenWorktreeCloseDown
-                | Action::WorktreeMenuKey(_)
                 | Action::OpenNewMuxForm
-                | Action::NewMuxFormKey(_)
-                | Action::OpenMuxMenu
-                | Action::MuxMenuKey(_)
-                | Action::RowMenuKey(_)
-                | Action::CleanUpKey(_)
-                | Action::PickerKey(_)
-                | Action::MuxLaunchFormKey(_)
-                | Action::PinEditFormKey(_),
+                | Action::OpenMuxMenu,
             ) => {
                 app.update(Msg::SetStatus(Some(
                     "scenario TUI keeps mutating actions disabled".to_string(),
                 )));
             }
+            // A menu or form opened another way (`.`, a menu pick) takes
+            // its keys as in the live TUI, so it moves and closes; the
+            // pure executor refuses a pick that needs a terminal, a mux,
+            // or a store.
+            Some(Action::RenameOverlayKey(key)) => {
+                handle_rename_overlay_key(app, key, &mut dispatch);
+            }
+            Some(Action::WorktreeMenuKey(key)) => handle_worktree_menu_key(app, key, &mut dispatch),
+            Some(Action::NewMuxFormKey(key)) => handle_new_mux_form_key(app, key, &mut dispatch),
+            Some(Action::MuxMenuKey(key)) => handle_mux_menu_key(app, key, &mut dispatch),
+            Some(Action::RowMenuKey(key)) => handle_row_menu_key(app, key, &mut dispatch),
+            Some(Action::CleanUpKey(key)) => handle_clean_up_key(app, key, &mut dispatch),
+            Some(Action::PickerKey(key)) => handle_picker_key(app, key, &mut dispatch),
+            Some(Action::MuxLaunchFormKey(key)) => {
+                handle_mux_launch_form_key(app, key, &mut dispatch);
+            }
+            Some(Action::PinEditFormKey(key)) => handle_pin_edit_form_key(app, key, &mut dispatch),
             Some(Action::ExplorerEnter) => explorer_enter_action(app),
             Some(Action::CopySessionId) => copy_session_id_action(app),
             None => {}
         }
+    }
+}
+
+#[cfg(any(test, debug_assertions, feature = "snapshot"))]
+impl LoopMode for StaticMode {
+    fn init(
+        &mut self,
+        _terminal: &mut DefaultTerminal,
+        app: &mut App,
+        config: &RunConfig,
+    ) -> Result<()> {
+        set_static_data(app, config, &self.snapshot);
+        Ok(())
+    }
+
+    fn drain(&mut self, app: &mut App, _config: &RunConfig) -> Result<()> {
+        // Scenario mode has no async event sources: no discovery
+        // worker to poll and no refresh timer to arm. A requested
+        // content search runs to completion here.
+        content::run_blocking(app, None);
+        Ok(())
+    }
+
+    fn dispatch(
+        &mut self,
+        _terminal: &mut DefaultTerminal,
+        app: &mut App,
+        config: &RunConfig,
+        action: Option<Action>,
+    ) -> Result<()> {
+        self.dispatch_action(app, config, action);
         Ok(())
     }
 
@@ -1115,6 +1140,25 @@ fn set_static_data(app: &mut App, config: &RunConfig, snapshot: &crate::model::G
         initial_selection_hint,
     });
     populate_provider_status(app, config);
+}
+
+/// Handle one terminal event the way `tui --fixture` and the scenario
+/// TUI do: the loop's key routing, then their dispatch. For tests, which
+/// have no terminal; `r` reloads the snapshot `app` holds.
+#[cfg(test)]
+pub(in crate::tui) fn press_in_fixture_mode(app: &mut App, event: Event) {
+    let mut mode = StaticMode {
+        tmux: Box::new(crate::discovery::tmux::FakeTmux::with_sessions("")),
+        snapshot: app
+            .snapshot_handle()
+            .map(|handle| handle.snapshot().clone())
+            .unwrap_or_default(),
+        fixture_path: None,
+        recordings: None,
+    };
+    let config = app.config().clone();
+    let action = action_for_event(app, event);
+    mode.dispatch_action(app, &config, action);
 }
 
 /// Whether a refresh first asks a running daemon to rescan.
@@ -2124,6 +2168,16 @@ pub(super) fn dispatch_live(
 ) {
     let effects = app.update(msg);
     execute_effects_live(terminal, app, config, tmux, effects);
+}
+
+/// [`dispatch_live`] as the `send` callback an overlay's key handler
+/// takes for what the overlay commits.
+fn live_send<'a>(
+    terminal: &'a mut DefaultTerminal,
+    config: &'a RunConfig,
+    tmux: &'a dyn MuxBackend,
+) -> impl FnMut(&mut App, Msg) + 'a {
+    move |app, msg| dispatch_live(terminal, app, config, tmux, msg)
 }
 
 /// The configuration a refresh after a state-changing action runs

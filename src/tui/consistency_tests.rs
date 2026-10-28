@@ -29,6 +29,8 @@
 //! - **The chrome fits and agrees with the view**: the tab strip never
 //!   cuts a view's name at any width, and the header counts what the
 //!   active view lists (`chrome`).
+//! - **No overlay shuts the operator in**: the fixture and scenario TUI
+//!   close every overlay with the keys the live TUI uses (`fixture_mode`).
 //!
 //! # Diagnosis of the reported defects
 //!
@@ -82,6 +84,7 @@ mod chrome;
 mod content_filter;
 mod content_interactions;
 mod docs;
+mod fixture_mode;
 mod fixtures;
 mod focus;
 mod forms;
