@@ -1054,3 +1054,46 @@ Node Detail on and off) and `src/tui/snapshot_tests.rs` (the same keys).
   `fields(expanded_detail)`, the list the rows are numbered over, so it was
   never wrong. Giving the row its typed `FieldValue` would remove that last
   lookup; the `PropertyGrid` extraction can decide it.
+
+## Verification (CSP-716)
+
+The two suspected chrome defects in 3.4 and 3.5 (D13 in the inventory's
+suspected defects, and the tab-strip row of section 6) were run before the
+extraction. Both reproduced and are fixed. The reproduction is
+`conspectus tui --snapshot` on the showcase fixture (`--snapshot-now
+1790769600`, `HOME=/fixture`), the strip read off the second row of the
+frame in every view, and the header in every view at 160 columns. The
+tests that pin the fixes are in `src/tui/consistency_tests/chrome.rs`; they
+read the rendered frame, so they move to `TabBar` and the header's line of
+segments unchanged.
+
+- **Tab strip.** Confirmed, and wider than suspected. The strip is 52 cells
+  (lead, marker, labels, separators, pad) and the pane's border clipped it
+  mid-label whenever the title had less: `sea`, `sear`, `searc` side by side
+  at 100 to 104 columns, the trailing pad only at 105 and 106, and stacked
+  below the threshold at 52 columns and under (`his` at 40). With Search
+  active its own name was the one cut. Now `left_panel_title` takes the
+  title width and `tab_strip_fit` decides: every name when they fit (the
+  pad is dropped only when that lets every name show); otherwise the
+  inactive names give way from the end of the strip, the active one stays,
+  and the strip ends with ` …` and a pad. Only a pane too narrow for the
+  active name alone cuts it, with its own `…`. Checked at every width from
+  40 to 120, both layouts, every view, both focus states; a snapshot keeps
+  90, 100, 104, 107, and 120. Width is measured in cells, not `char`s. The
+  breadcrumb in the right title still has its own rule (floor 8 cells);
+  `TabBar` and the breadcrumb can share one drop-and-mark rule when they
+  are extracted.
+- **Header count.** Confirmed: Pinned, History, and Search before a search
+  read `0/11 sessions`, and PRs read `4/11` with no filter (it counted the
+  session rows under its PRs). `visible_agent_session_count` now applies
+  the Mux view's rule everywhere: the plain total unless something narrows
+  the view. Sessions counts its session rows; Search counts the sessions
+  the search it shows found (session rows, or in the flat listing the
+  sessions its hits name), and reads the plain total before any search;
+  Mux and PRs read the plain total until a session predicate, the content
+  search, pinned-only, or (PRs) a PR state or branch narrows them, then the
+  sessions their visible rows hold; Pinned and History ignore the filter,
+  so they always read the plain total. Mux used to look only at the saved
+  filter's predicates, so the content search and pinned-only narrowed its
+  rows without its count. The per-view count words ADR 0078 deferred
+  (`N prs`, `N pins`) were not added: the header stays `sessions · mux`.

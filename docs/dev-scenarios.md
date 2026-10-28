@@ -78,7 +78,11 @@ run live discovery. Pressing `r` reloads the static scenario snapshot.
 The controls overlay, grouping cycle, clear-filters action, search, and
 view switching work against the pre-materialized graph. Attach/resume
 and mutating actions such as rename writes are disabled so scenario runs
-cannot affect live tmux or harness state.
+cannot affect live tmux or harness state. A menu or form you can open
+there (the `.` row menu, and what its entries open) moves and closes
+with the usual keys (`Esc`, `Ctrl-C`); an entry that would write,
+launch, or touch a mux says it isn't available in this mode. The same
+holds for `tui --fixture`.
 
 Scenario TUI accepts the pure exploration flags from normal `conspectus
 tui`:

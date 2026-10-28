@@ -963,3 +963,46 @@ their own `Buffer::empty` render dance.
 10. **Gallery coverage policy.** Pantry covers 5 of 16 modals. Is "every
     framework control has a gallery case" a hard rule enforced by the registry
     test (open question 7), or best effort?
+
+## Verification (CSP-716)
+
+Open question 6 and item 6 of 9.1 (D12 in the inventory's suspected
+defects) were run before the extraction. The defect reproduced, worse than
+suspected, and is fixed; interactive fixture mode was kept because it is
+used.
+
+- **Is it used?** Yes. `just demo` runs `tui --fixture
+  tests/fixtures/showcase.json`; the README and `docs/dev-scenarios.md`
+  document it, ADRs 0069 and 0070 introduced it, and `dev scenario tui`
+  runs the same `StaticMode` loop. Removing it was not an option.
+- **Reproduction.** A pseudo-terminal run of `conspectus tui --fixture
+  tests/fixtures/showcase.json` (tmux and the state directories isolated):
+  `j` then `.` opened the `session showcase` row menu; Esc drew "scenario
+  TUI keeps mutating actions disabled" and left it open; Ctrl-C and `q` did
+  nothing, because an open overlay owns every key, so the process had to be
+  killed. Any overlay reached another way was a trap too, since
+  `Action::Msg` reaches the reducer in static mode: the launch form `N`
+  opens, the pin menu `p` opens on an entity several pins point at, and
+  whatever a menu entry opens.
+- **Fix.** The nine menu, prompt, and form handlers in
+  `runtime/overlay_keys.rs` take a `send` callback for what the overlay
+  commits instead of the live loop's terminal, mux, and config.
+  `LiveMode` passes the live executor and `StaticMode` the pure one, so the
+  overlays move, edit, and close the same way in both modes, and a pick
+  that needs a terminal, a mux, or a store is refused with the pure
+  executor's toast ("that isn't available in this mode"), as `p` already
+  was. The direct openers that static mode refused (`R`, `w`, `X`, `n`,
+  `m`) stay refused with the old hint. The same run after the fix: `.`,
+  `j` moved to `Show rebuild plan`, Esc closed the menu, `.` and Ctrl-C
+  closed it again, a second Ctrl-C quit with status 0.
+- **Tests.** `src/tui/consistency_tests/fixture_mode.rs` drives keys
+  through `press_in_fixture_mode` (the loop's `action_for_event`, then the
+  static dispatch, with no terminal): every modal the layout suite builds
+  closes on Esc and on Ctrl-C without quitting, `.` then `j` and Esc move
+  and close the row menu, and a Pin pick and `p` are refused out loud. The
+  viewer and pane viewer, which the layout suite cannot build, already took
+  their keys in static mode.
+- **Left as is.** `snapshot::apply_action` still skips menu picks and the
+  form and picker keys; CSP-732 extends the snapshot driver to every
+  overlay key. With the handlers taking `send`, that driver can pass its
+  own. The three dispatchers remain three.

@@ -101,6 +101,21 @@ Targeted for 0.2.0, after 0.1.0 is tagged. History, rebuild, and pins
   empty branch name for a new worktree, and an empty name or cwd in the
   new tmux session form show a toast naming the problem, where they
   used to do nothing; the field stays open for a fix.
+- **The view tabs fit their pane.** At 100 to 104 columns, and below 53
+  in the stacked layout, the pane's border cut the last view's name in
+  half (`sea`, `his`), the active one included. Names that don't fit now
+  give way from the end of the strip, the active view's name always
+  shows, and the strip ends with `…`.
+- **The header's session count matches the view.** Pinned, History, and
+  Search before a search read `0/N sessions`, and PRs read `4/N` with no
+  filter, as if sessions were filtered out. The count reads `N sessions`
+  unless a filter or a search narrows what the view lists; Search counts
+  the sessions its search found.
+- **Menus close in `tui --fixture` and `dev scenario tui`.** A menu or
+  form opened there (`.`, `N`, or a menu entry) ignored every key, Esc
+  and Ctrl-C included, so the TUI could not be closed. It now moves and
+  closes as usual, and an entry that would write or launch says it isn't
+  available in this mode.
 - **Harness hooks work while `conspectus serve` runs.** The daemon
   applied each hook observation to its live graph only, and the next
   refresh, a few seconds later, dropped it. It now records the
