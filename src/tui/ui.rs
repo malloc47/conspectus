@@ -7,7 +7,7 @@
 //! Locked decisions reflected here:
 //!
 //! - `~`-shortened paths are produced upstream in the row tree and
-//!   detail view-models; the renderer just lays them out.
+//!   explorer view model; the renderer just lays them out.
 //! - Mux glyphs `◉` / `◯` with color carrying the primary signal
 //!   (green attached / dim not attached); mux ambiguity surfaces as
 //!   `▲` on group rows and the header.
@@ -42,7 +42,6 @@ use crate::tui::Theme;
 use crate::tui::View;
 use crate::tui::actions::{attach_disabled_reason, resolve_attach_target};
 use crate::tui::app::{App, Focus, SnapshotHandle};
-use crate::tui::detail::{HeaderField, NodeDetail, SectionKind};
 use crate::tui::icons::{NodeKind, node_kind_style};
 use crate::tui::preview::PreviewContent;
 use crate::tui::rows::{
@@ -50,14 +49,12 @@ use crate::tui::rows::{
     recency_bucket,
 };
 
-mod detail_header;
 mod header;
 mod left_panel;
 mod preview_pane;
 mod right_panel;
 mod text;
 
-use detail_header::*;
 use header::*;
 use left_panel::*;
 use preview_pane::*;

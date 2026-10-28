@@ -157,7 +157,12 @@ pub fn cycle_view(view: View, delta: i32) -> View {
 /// preview without switching panes.
 pub fn remap_for_focus(action: Action, focus: Focus) -> Option<Action> {
     if focus != Focus::Right {
-        return Some(action);
+        // `e` toggles the explorer's Other zone, which only the right
+        // pane shows; the left tree has nothing for it to act on.
+        return match action {
+            Action::Msg(boxed) if matches!(*boxed, Msg::ExplorerToggleGroup) => None,
+            other => Some(other),
+        };
     }
     match action {
         Action::Msg(boxed) => match *boxed {
@@ -168,9 +173,6 @@ pub fn remap_for_focus(action: Action, focus: Focus) -> Option<Action> {
             Msg::NavUp => Some(Action::Msg(Box::new(Msg::ExplorerNavUp))),
             Msg::PageDown(_) => Some(Action::Msg(Box::new(Msg::ExplorerNavDown))),
             Msg::PageUp(_) => Some(Action::Msg(Box::new(Msg::ExplorerNavUp))),
-            // `e` toggles group expansion; on a non-header row the
-            // reducer surfaces a status hint.
-            Msg::ToggleLinkedDetails => Some(Action::Msg(Box::new(Msg::ExplorerToggleGroup))),
             // `h`/`l`/`←`/`→` are left-tree expand/collapse keys.
             // When the right pane has focus, drop them so they
             // don't reach across panes and mutate the tree the

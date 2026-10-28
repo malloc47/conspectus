@@ -170,15 +170,19 @@ fn selected_pinned_session_row_shows_the_session_detail() {
         .expect("a pinned session should render as a session row");
     app.set_selection(row_id);
 
-    let detail = app
-        .detail()
-        .expect("pinned session row should resolve detail");
-    assert_eq!(detail.kind, crate::model::NodeKind::AgentSession);
+    let state = app
+        .explorer()
+        .expect("pinned session row should resolve to a node");
+    assert_eq!(state.view.kind, crate::model::NodeKind::AgentSession);
     assert!(
-        detail
-            .header_fields
-            .iter()
-            .any(|field| { field.label == "pin" && field.value.contains("ingest") })
+        state.view.relationships.groups.iter().any(|group| {
+            group.relation == crate::model::RelationKind::PinTargets
+                && group
+                    .links
+                    .iter()
+                    .any(|link| matches!(&link.neighbor_id, NodeId::Pin(pin) if pin.id == "ingest"))
+        }),
+        "the session should list the pin that points at it"
     );
 }
 
@@ -192,7 +196,7 @@ fn empty_tree_leaves_selection_none() {
         initial_selection_hint: None,
     });
     assert!(app.selection().is_none());
-    assert!(app.detail().is_none());
+    assert!(app.explorer().is_none());
 }
 
 #[test]
@@ -600,8 +604,8 @@ fn adjust_explorer_scroll_keeps_wrapped_cursor_line_fully_visible() {
 fn scenario_ambiguous_mux_session_is_leaf_after_adr_0071() {
     // ADR 0071: ambiguous mux candidates no longer expand a
     // per-session subtree; the chip stays but the row is a
-    // leaf. The catalog of muxes lives on the shared-ancestor
-    // group's detail pane via `ambiguous_muxes_for_group`.
+    // leaf. The catalog of muxes is what `a` on the shared-ancestor
+    // group reads, via `ambiguous_muxes_for_group`.
     let (mut app, _) = scenario_app("ambiguous-mux");
     select_session(&mut app, "ambiguous");
 
@@ -717,12 +721,12 @@ fn set_data_falls_back_to_nearest_index_when_selection_disappears() {
 }
 
 #[test]
-fn detail_is_recomputed_when_selection_lands_on_a_node_row() {
+fn explorer_is_recomputed_when_selection_lands_on_a_node_row() {
     let app = seeded_app(&[("codex", "a", "/p/proja")]);
     // Selection auto-lands on the first visible row (a group);
-    // groups still produce a NodeDetail because they're backed
-    // by a NodeId.
-    assert!(app.detail().is_some());
+    // groups still open an explorer because they're backed by a
+    // NodeId.
+    assert!(app.explorer().is_some());
 }
 
 // ---- ADR 0031: per-view state retention ----

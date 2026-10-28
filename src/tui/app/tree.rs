@@ -52,7 +52,7 @@ impl App {
             self.selection = Some(visible[0].clone());
             self.last_visible_index = Some(0);
         }
-        self.recompute_detail();
+        self.recompute_explorer();
     }
 
     /// Swap the row tree in place after a projection-only rebuild
@@ -110,7 +110,7 @@ impl App {
             self.selection = Some(visible[0].clone());
             self.last_visible_index = Some(0);
         }
-        self.recompute_detail();
+        self.recompute_explorer();
     }
 
     /// Find `selection` in `visible`, preferring the occurrence
@@ -146,11 +146,10 @@ impl App {
 
     pub(super) fn move_selection(&mut self, delta: i32) {
         self.status_message = None;
-        self.detail_links_expanded = false;
         let visible = self.visible_rows_owned();
         if visible.is_empty() {
             self.selection = None;
-            self.detail = None;
+            self.explorer = None;
             self.last_visible_index = None;
             return;
         }
@@ -161,23 +160,22 @@ impl App {
         let target = crate::tui::cursor::clamp_step(current, visible.len(), delta);
         self.selection = Some(visible[target].clone());
         self.last_visible_index = Some(target);
-        self.recompute_detail();
+        self.recompute_explorer();
     }
 
     pub(super) fn move_selection_to(&mut self, index: usize) {
         self.status_message = None;
-        self.detail_links_expanded = false;
         let visible = self.visible_rows_owned();
         if visible.is_empty() {
             self.selection = None;
-            self.detail = None;
+            self.explorer = None;
             self.last_visible_index = None;
             return;
         }
         let clamped = index.min(visible.len() - 1);
         self.selection = Some(visible[clamped].clone());
         self.last_visible_index = Some(clamped);
-        self.recompute_detail();
+        self.recompute_explorer();
     }
 
     /// Resolve the visible-row index of the currently-selected
@@ -250,21 +248,6 @@ impl App {
 
     pub(super) fn visible_rows_owned(&self) -> Vec<RowId> {
         self.visible_rows().iter().map(|r| r.id.clone()).collect()
-    }
-
-    pub(super) fn toggle_linked_details(&mut self) {
-        let has_linked_details = self.detail.as_ref().is_some_and(|detail| {
-            detail
-                .header_fields
-                .iter()
-                .any(|field| !field.expanded_fields.is_empty())
-        });
-        if has_linked_details {
-            self.detail_links_expanded = !self.detail_links_expanded;
-            self.status_message = None;
-        } else {
-            self.status_message = Some("detail: no linked entities to expand".to_string());
-        }
     }
 }
 

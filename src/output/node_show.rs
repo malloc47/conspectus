@@ -309,7 +309,7 @@ fn write_workspace_summary(out: &mut String, snapshot: &GraphSnapshot, workspace
 
 /// Resolver-chosen `workspace_contains_repo` members rendered as
 /// the basename of each selected link's `logical_path` source
-/// field. Mirrors the TUI's `member` HeaderField labeling.
+/// field.
 fn workspace_member_displays(
     snapshot: &GraphSnapshot,
     workspace_id: &crate::model::WorkspaceId,

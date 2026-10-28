@@ -1,8 +1,6 @@
 //! Detail-pane graph explorer view model.
 //!
-//! Replaces the recursive `HeaderField.expanded_fields` model that
-//! `detail.rs` exposes. The renderer wants three distinct surfaces
-//! per focused node:
+//! The renderer wants three distinct surfaces per focused node:
 //!
 //! - A focused **Node** zone with the node's own core summary
 //!   fields. The per-kind picks come from the Core column of the
@@ -426,8 +424,8 @@ pub struct RelationshipGroup {
     pub neighbor_kind: String,
     /// One row per neighbor (ADR 0107). Resolver-picked neighbors
     /// sort first; the rest follow their strongest link's
-    /// `(provenance, confidence, link_id)` order matching
-    /// `crate::tui::detail::preferred_link`.
+    /// `(provenance, confidence, link_id)` order, the order
+    /// `crate::model::pick_preferred` ranks candidates in.
     pub links: Vec<RelationshipLink>,
     /// Unresolved-evidence stubs not represented by a concrete
     /// neighbor.

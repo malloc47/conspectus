@@ -2,6 +2,12 @@
 
 use super::*;
 
+/// Rows reserved for the Preview zone so a full Related list cannot
+/// collapse it to one or two lines. Below this floor on very small
+/// terminals the layout falls back to a smaller preview (at least two
+/// rows after the divider).
+const MIN_PREVIEW_HEIGHT: u16 = 6;
+
 pub(super) fn draw_right_panel(app: &mut App, frame: &mut Frame<'_>, area: Rect) {
     let block = Block::default()
         .borders(Borders::ALL)
@@ -9,193 +15,137 @@ pub(super) fn draw_right_panel(app: &mut App, frame: &mut Frame<'_>, area: Rect)
     let inner = block.inner(area);
     frame.render_widget(block, area);
 
-    let Some(detail) = app.detail() else {
+    // No explorer means the selection names no node (or nothing has
+    // loaded yet): show the placeholder instead of the explorer.
+    if app.explorer().is_none() {
         let widget = Paragraph::new(empty_right_panel_text(app))
             .style(Style::default().add_modifier(app.theme().placeholder));
         frame.render_widget(widget, inner);
         return;
-    };
-
-    // When the graph explorer state is available, render
-    // the new mockup layout (Node + Upstream + Downstream sections
-    // with cursor highlight) on top. Falls back to the legacy
-    // section-grouped detail when the explorer state isn't ready
-    // yet (race during the first SetData).
-    if app.explorer().is_some() {
-        // Reserve a usable minimum for the preview zone so a full
-        // Related list cannot collapse the preview to 1–2 lines.
-        // Below this floor on very small terminals the layout
-        // falls back to the prior behavior (preview keeps at least
-        // two rows after the divider).
-        const MIN_PREVIEW_HEIGHT: u16 = 6;
-
-        // `app` is `&mut` here so scroll
-        // reconciliation lives on the App fields directly rather
-        // than in `Cell`s. We derive all state-dependent lines +
-        // wrap counts through an immutable borrow of the explorer
-        // state, drop that borrow, mutate the scroll offset, then
-        // re-borrow the state for the preview render below.
-        //
-        // Render the chip dividers (`Related`, `Other`) at the
-        // narrower content width that `scrollbar_layout` will give
-        // the paragraph once it reserves a gutter for the
-        // scrollbar. Sizing the chip line to `inner.width` instead
-        // would force the divider to overflow by one character at
-        // the gutter boundary — it wraps to the next row and every
-        // cursor row below it lands one line lower than the
-        // per_line_rows math expects, leaving the cursor visible
-        // off the bottom of the viewport.
-        let content_width = inner.width.saturating_sub(1).max(1) as usize;
-        let ExplorerRender {
-            mut lines,
-            mut cursor_line,
-        } = {
-            let state = app.explorer().expect("checked above");
-            render_explorer_lines(
-                state,
-                content_width,
-                app.theme(),
-                app.edge_meta_visible(),
-                app.focus() == Focus::Right,
-            )
-        };
-        // A selected hit row says which turn it is and shows what matched.
-        let hit_lines = selected_hit_lines(app);
-        if !hit_lines.is_empty() {
-            cursor_line = cursor_line.map(|index| index + hit_lines.len());
-            lines.splice(0..0, hit_lines);
-        }
-        // Account for Paragraph wrap: any logical line whose
-        // displayed width exceeds the pane width consumes extra
-        // terminal rows. Without the wrap-aware row count, the
-        // header sizing and the cursor-position math both
-        // misread how much vertical space each line consumes.
-        //
-        // The paragraph renders at `content_area.width = inner.width
-        // - 1` once `scrollbar_layout` reserves a gutter for the
-        // scrollbar (it does for any overflowing content). Compute
-        // wrap counts at that narrower width so a line that fits at
-        // the full inner width but spills at the content width —
-        // the `Related` chip divider is the canonical case, sized
-        // to fit "exactly" the pane — gets the row count the
-        // paragraph actually paints. When content fits in the
-        // viewport and the gutter isn't reserved, this overcounts
-        // by at most one row per long line; the worst case is a
-        // tiny bit of slack in `header_height`, which is harmless.
-        let pane_width = inner.width.saturating_sub(1).max(1) as usize;
-        let per_line_rows: Vec<usize> = lines
-            .iter()
-            .map(|line| {
-                let width = line
-                    .spans
-                    .iter()
-                    .map(|s| UnicodeWidthStr::width(s.content.as_ref()))
-                    .sum::<usize>()
-                    .max(1);
-                width.div_ceil(pane_width).max(1)
-            })
-            .collect();
-        let wrapped_rows: usize = per_line_rows.iter().sum();
-        // Post-wrap row span of the cursor in `lines`. The first
-        // row is the sum of wrap rows for everything above the
-        // cursor's logical line; the last row is the first row
-        // plus the cursor line's own wrap count minus one. Using
-        // both keeps a wrapped cursor line fully visible — the
-        // first row drives "scroll up if cursor moves above the
-        // top," the last row drives "scroll down if cursor moves
-        // past the bottom."
-        let (cursor_first_row, cursor_last_row) = cursor_line.map_or((0, 0), |idx| {
-            let first = per_line_rows.iter().take(idx).sum::<usize>();
-            let height = per_line_rows.get(idx).copied().unwrap_or(1).max(1);
-            (first, first + height - 1)
-        });
-        let preview_floor = MIN_PREVIEW_HEIGHT.min(inner.height.saturating_sub(4));
-        let max_header_height = inner
-            .height
-            .saturating_sub(preview_floor.saturating_add(1))
-            .max(3);
-        // +1 safety margin: the per-line `div_ceil` count assumes
-        // the renderer packs each line tight to the right edge, but
-        // Paragraph wraps on word boundaries and a long unbroken
-        // token can push the actual row count one above the
-        // estimate. Without the slack the last explorer line
-        // (typically a single-link composite or the trailing Down-
-        // stream row) gets clipped when the Node zone carries a
-        // very long value.
-        let header_height = u16::try_from(wrapped_rows)
-            .unwrap_or(u16::MAX)
-            .saturating_add(1)
-            .min(max_header_height)
-            .max(3);
-        let split = vertical![==header_height, ==1, >=0].split(inner);
-        // The reducer owns scroll reconciliation.
-        // Draw measures the post-wrap cursor row span (that math
-        // needs the widget-rendered lines) and dispatches the
-        // measurement as a Msg; the reducer runs the same offset
-        // math it used to run in the renderer and updates
-        // `explorer_scroll`. Draw then reads the pre-computed
-        // offset as a pure getter.
-        app.update(Msg::ExplorerViewportChanged {
-            cursor_first_row,
-            cursor_last_row,
-            viewport_height: split[0].height,
-        });
-        let scroll = app.explorer_scroll();
-        let (explorer_content_area, explorer_scrollbar_area) =
-            scrollbar_layout(split[0], wrapped_rows);
-        frame.render_widget(
-            Paragraph::new(lines)
-                .wrap(Wrap { trim: false })
-                .scroll((scroll, 0)),
-            explorer_content_area,
-        );
-        if let Some(area) = explorer_scrollbar_area {
-            render_vertical_scrollbar(frame, area, wrapped_rows, scroll as usize);
-        }
-        frame.render_widget(
-            Paragraph::new(preview_divider_line(
-                app,
-                split[1].width as usize,
-                app.theme(),
-            )),
-            split[1],
-        );
-        // A transcript preview leaves a column for its scrollbar.
-        app.prepare_preview(split[2].width.saturating_sub(1).max(1));
-        // Re-fetch the explorer state for the preview render — the
-        // adjust_explorer_scroll call above needed a mutable
-        // borrow of `app`, which required dropping the earlier
-        // immutable state borrow.
-        let state = app.explorer().expect("checked above");
-        draw_explorer_preview(app, state, frame, split[2]);
-        return;
     }
 
-    let mux_runtime = mux_runtime_rows(app);
-    // Give the header exactly the height its fields need
-    // (title + blank + one row per HeaderField), clamped
-    // so the preview zone keeps a minimum of two rows.
-    let header_h = header_zone_height(
-        detail,
-        app.detail_links_expanded(),
-        &mux_runtime,
-        inner.height,
-        inner.width,
-    );
-    let split = vertical![==header_h, ==1, >=0].split(inner);
-    app.prepare_preview(split[2].width.saturating_sub(1).max(1));
-    let Some(detail) = app.detail() else {
-        return;
+    // `app` is `&mut` here so scroll
+    // reconciliation lives on the App fields directly rather
+    // than in `Cell`s. We derive all state-dependent lines +
+    // wrap counts through an immutable borrow of the explorer
+    // state, drop that borrow, mutate the scroll offset, then
+    // re-borrow the state for the preview render below.
+    //
+    // Render the chip dividers (`Related`, `Other`) at the
+    // narrower content width that `scrollbar_layout` will give
+    // the paragraph once it reserves a gutter for the
+    // scrollbar. Sizing the chip line to `inner.width` instead
+    // would force the divider to overflow by one character at
+    // the gutter boundary — it wraps to the next row and every
+    // cursor row below it lands one line lower than the
+    // per_line_rows math expects, leaving the cursor visible
+    // off the bottom of the viewport.
+    let content_width = inner.width.saturating_sub(1).max(1) as usize;
+    let ExplorerRender {
+        mut lines,
+        mut cursor_line,
+    } = {
+        let state = app.explorer().expect("checked above");
+        render_explorer_lines(
+            state,
+            content_width,
+            app.theme(),
+            app.edge_meta_visible(),
+            app.focus() == Focus::Right,
+        )
     };
-
-    draw_detail_header(
-        detail,
-        app.detail_links_expanded(),
-        &mux_runtime,
-        frame,
-        split[0],
-        app.theme(),
+    // A selected hit row says which turn it is and shows what matched.
+    let hit_lines = selected_hit_lines(app);
+    if !hit_lines.is_empty() {
+        cursor_line = cursor_line.map(|index| index + hit_lines.len());
+        lines.splice(0..0, hit_lines);
+    }
+    // Account for Paragraph wrap: any logical line whose
+    // displayed width exceeds the pane width consumes extra
+    // terminal rows. Without the wrap-aware row count, the
+    // header sizing and the cursor-position math both
+    // misread how much vertical space each line consumes.
+    //
+    // The paragraph renders at `content_area.width = inner.width
+    // - 1` once `scrollbar_layout` reserves a gutter for the
+    // scrollbar (it does for any overflowing content). Compute
+    // wrap counts at that narrower width so a line that fits at
+    // the full inner width but spills at the content width —
+    // the `Related` chip divider is the canonical case, sized
+    // to fit "exactly" the pane — gets the row count the
+    // paragraph actually paints. When content fits in the
+    // viewport and the gutter isn't reserved, this overcounts
+    // by at most one row per long line; the worst case is a
+    // tiny bit of slack in `header_height`, which is harmless.
+    let pane_width = inner.width.saturating_sub(1).max(1) as usize;
+    let per_line_rows: Vec<usize> = lines
+        .iter()
+        .map(|line| {
+            let width = line
+                .spans
+                .iter()
+                .map(|s| UnicodeWidthStr::width(s.content.as_ref()))
+                .sum::<usize>()
+                .max(1);
+            width.div_ceil(pane_width).max(1)
+        })
+        .collect();
+    let wrapped_rows: usize = per_line_rows.iter().sum();
+    // Post-wrap row span of the cursor in `lines`. The first
+    // row is the sum of wrap rows for everything above the
+    // cursor's logical line; the last row is the first row
+    // plus the cursor line's own wrap count minus one. Using
+    // both keeps a wrapped cursor line fully visible — the
+    // first row drives "scroll up if cursor moves above the
+    // top," the last row drives "scroll down if cursor moves
+    // past the bottom."
+    let (cursor_first_row, cursor_last_row) = cursor_line.map_or((0, 0), |idx| {
+        let first = per_line_rows.iter().take(idx).sum::<usize>();
+        let height = per_line_rows.get(idx).copied().unwrap_or(1).max(1);
+        (first, first + height - 1)
+    });
+    let preview_floor = MIN_PREVIEW_HEIGHT.min(inner.height.saturating_sub(4));
+    let max_header_height = inner
+        .height
+        .saturating_sub(preview_floor.saturating_add(1))
+        .max(3);
+    // +1 safety margin: the per-line `div_ceil` count assumes
+    // the renderer packs each line tight to the right edge, but
+    // Paragraph wraps on word boundaries and a long unbroken
+    // token can push the actual row count one above the
+    // estimate. Without the slack the last explorer line
+    // (typically a single-link composite or the trailing Down-
+    // stream row) gets clipped when the Node zone carries a
+    // very long value.
+    let header_height = u16::try_from(wrapped_rows)
+        .unwrap_or(u16::MAX)
+        .saturating_add(1)
+        .min(max_header_height)
+        .max(3);
+    let split = vertical![==header_height, ==1, >=0].split(inner);
+    // The reducer owns scroll reconciliation.
+    // Draw measures the post-wrap cursor row span (that math
+    // needs the widget-rendered lines) and dispatches the
+    // measurement as a Msg; the reducer runs the same offset
+    // math it used to run in the renderer and updates
+    // `explorer_scroll`. Draw then reads the pre-computed
+    // offset as a pure getter.
+    app.update(Msg::ExplorerViewportChanged {
+        cursor_first_row,
+        cursor_last_row,
+        viewport_height: split[0].height,
+    });
+    let scroll = app.explorer_scroll();
+    let (explorer_content_area, explorer_scrollbar_area) = scrollbar_layout(split[0], wrapped_rows);
+    frame.render_widget(
+        Paragraph::new(lines)
+            .wrap(Wrap { trim: false })
+            .scroll((scroll, 0)),
+        explorer_content_area,
     );
+    if let Some(area) = explorer_scrollbar_area {
+        render_vertical_scrollbar(frame, area, wrapped_rows, scroll as usize);
+    }
     frame.render_widget(
         Paragraph::new(preview_divider_line(
             app,
@@ -204,7 +154,14 @@ pub(super) fn draw_right_panel(app: &mut App, frame: &mut Frame<'_>, area: Rect)
         )),
         split[1],
     );
-    draw_detail_preview(app, detail, frame, split[2]);
+    // A transcript preview leaves a column for its scrollbar.
+    app.prepare_preview(split[2].width.saturating_sub(1).max(1));
+    // Re-fetch the explorer state for the preview render — the
+    // adjust_explorer_scroll call above needed a mutable
+    // borrow of `app`, which required dropping the earlier
+    // immutable state borrow.
+    let state = app.explorer().expect("checked above");
+    draw_explorer_preview(app, state, frame, split[2]);
 }
 
 /// Render the right pane title with the kind of node currently
@@ -219,8 +176,7 @@ pub(super) fn right_panel_title(app: &App, width: usize) -> Line<'static> {
     // glyph is suppressed when there is no resolved selection
     // (fallback "detail" label) so a placeholder pane does not stamp
     // a misleading kind cue.
-    if let Some(detail) = app.detail() {
-        let node_kind = detail.kind;
+    if let Some(node_kind) = right_panel_node_kind(app) {
         let style = node_kind_style(node_kind, app.theme());
         let color = if matches!(node_kind, NodeKind::ForgePr) {
             app.theme().pr_open
@@ -245,9 +201,9 @@ pub(super) fn right_panel_title(app: &App, width: usize) -> Line<'static> {
         // padding spaces).
         let depth_suffix = format!(" · depth {}", state.breadcrumb.len());
         // ADR 0073 §3 prefix glyph: `<glyph> ` between the focus
-        // marker and the bold label takes 2 cells when the detail
-        // pane resolves to a known node kind.
-        let kind_glyph_width = if app.detail().is_some() { 2 } else { 0 };
+        // marker and the bold label takes 2 cells whenever the pane
+        // resolves to a known node kind, which a live explorer does.
+        let kind_glyph_width = 2;
         let fixed_width = 1
             + focus_marker_width(app, Focus::Right)
             + kind_glyph_width
@@ -274,11 +230,17 @@ pub(super) fn right_panel_title(app: &App, width: usize) -> Line<'static> {
     Line::from(spans)
 }
 
+/// The kind of node the explorer is focused on, `None` while no
+/// selection resolves to a node.
+fn right_panel_node_kind(app: &App) -> Option<NodeKind> {
+    app.explorer().map(|state| state.view.kind)
+}
+
 pub(super) fn right_panel_kind_label(app: &App) -> &'static str {
-    let Some(detail) = app.detail() else {
+    let Some(node_kind) = right_panel_node_kind(app) else {
         return "detail";
     };
-    match detail.kind {
+    match node_kind {
         NodeKind::AgentSession => "session",
         NodeKind::MuxSession => "mux",
         NodeKind::ForgePr => "pr",
@@ -299,6 +261,64 @@ pub(super) fn right_panel_kind_label(app: &App) -> &'static str {
 pub(super) struct ExplorerRender {
     pub(super) lines: Vec<Line<'static>>,
     pub(super) cursor_line: Option<usize>,
+}
+
+/// Where a zone divider puts its summary relative to its chip. The line
+/// is a rule, then the chip and summary, then a short closing rule.
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+pub(super) enum ChipAnchor {
+    /// The summary follows the chip. Preview has no summary, so its chip
+    /// ends the line.
+    Left,
+    /// The summary precedes the chip, which sits flush against the
+    /// closing rule. That keeps the bold zone label easy to scan
+    /// vertically as the summary changes length.
+    Right,
+}
+
+/// A zone divider: a dim rule that fills the width, a filled-chip label
+/// (`" label "`, accent colour with the badge modifier), an optional dim
+/// summary beside the chip, and a two-cell closing rule. When the chip
+/// and summary leave no room, the leading rule drops out.
+pub(super) fn chip_divider_line(
+    label: &str,
+    suffix: Option<&str>,
+    width: usize,
+    theme: &Theme,
+    anchor: ChipAnchor,
+) -> Line<'static> {
+    let chip_text = format!(" {label} ");
+    let chip_width = chip_text.chars().count();
+    let suffix_text = suffix.map(|s| format!(" {s} ")).unwrap_or_default();
+    let suffix_width = suffix_text.chars().count();
+    let trailing_rule = 2;
+    let leading_rule = width.saturating_sub(chip_width + suffix_width + trailing_rule);
+    let chip_span = span!(
+        Style::default().fg(theme.panel_focus_accent).add_modifier(theme.badge);
+        "{chip_text}"
+    );
+    let suffix_span = (suffix_width > 0)
+        .then(|| span!(Style::default().fg(theme.secondary_text); "{suffix_text}"));
+    let mut spans = Vec::with_capacity(4);
+    if leading_rule > 0 {
+        spans.push(span!(theme.divider; "{}", "─".repeat(leading_rule)));
+    }
+    match anchor {
+        ChipAnchor::Left => {
+            spans.push(chip_span);
+            if let Some(span) = suffix_span {
+                spans.push(span);
+            }
+        }
+        ChipAnchor::Right => {
+            if let Some(span) = suffix_span {
+                spans.push(span);
+            }
+            spans.push(chip_span);
+        }
+    }
+    spans.push(span!(theme.divider; "{}", "─".repeat(trailing_rule)));
+    Line::from(spans)
 }
 
 /// Render the related-entities layout (ADR 0074). Validated rows
@@ -736,19 +756,15 @@ pub(super) fn draw_explorer_preview(
 ) {
     use crate::tui::explorer::RowPreview;
     let Some(row) = state.selected_row() else {
-        // Fall back to the legacy preview body for rows that don't
-        // carry a neighbor (node fields land here).
-        if let Some(detail) = app.detail() {
-            draw_detail_preview(app, detail, frame, area);
-        }
+        // Rows that don't carry a neighbor (node fields land here)
+        // show the focused node's own preview body.
+        draw_detail_preview(app, frame, area);
         return;
     };
     let Some(preview) = state.view.row_preview(&row) else {
-        // No neighbor for this row — defer to the legacy preview
-        // body (live mux capture, message preview, etc.).
-        if let Some(detail) = app.detail() {
-            draw_detail_preview(app, detail, frame, area);
-        }
+        // No neighbor for this row — show the focused node's own
+        // preview body (live mux capture, message preview, etc.).
+        draw_detail_preview(app, frame, area);
         return;
     };
     let theme = app.theme();

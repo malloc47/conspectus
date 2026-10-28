@@ -107,6 +107,27 @@ fn translate_i_requests_copy_session_id() {
 }
 
 #[test]
+fn translate_e_toggles_the_explorer_other_zone_on_the_right_pane_only() {
+    use crate::tui::app::Focus;
+    let key = translate(press(KeyCode::Char('e'), KeyModifiers::NONE), 24)
+        .expect("`e` is bound in the keymap");
+    assert_eq!(
+        key,
+        Action::Msg(Box::new(Msg::ExplorerToggleGroup)),
+        "`e` has one meaning: the explorer's Other zone"
+    );
+    assert_eq!(
+        remap_for_focus(key.clone(), Focus::Right),
+        Some(key.clone())
+    );
+    assert_eq!(
+        remap_for_focus(key, Focus::Left),
+        None,
+        "the left tree has no Other zone, so the key does nothing there"
+    );
+}
+
+#[test]
 fn translate_v_opens_viewer() {
     assert_eq!(
         translate(press(KeyCode::Char('v'), KeyModifiers::NONE), 24),
@@ -378,13 +399,19 @@ fn remap_for_focus_right_routes_enter_and_e_to_the_explorer() {
         remap_for_focus(Action::DefaultAction, Focus::Left),
         Some(Action::DefaultAction)
     );
-    // `e` is the explicit expand/collapse accelerator.
+    // `e` is the explicit expand/collapse accelerator for the Other
+    // zone. The explorer is the only pane that shows it, so the left
+    // pane ignores the key.
     assert_eq!(
         remap_for_focus(
-            Action::Msg(Box::new(Msg::ToggleLinkedDetails)),
+            Action::Msg(Box::new(Msg::ExplorerToggleGroup)),
             Focus::Right
         ),
         Some(Action::Msg(Box::new(Msg::ExplorerToggleGroup)))
+    );
+    assert_eq!(
+        remap_for_focus(Action::Msg(Box::new(Msg::ExplorerToggleGroup)), Focus::Left),
+        None
     );
     assert_eq!(
         remap_for_focus(Action::Msg(Box::new(Msg::Quit)), Focus::Right),

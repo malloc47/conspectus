@@ -436,8 +436,8 @@ pub const KEYBINDINGS: &[KeyBinding] = &[
     KeyBinding {
         mode: KeyMode::Global,
         key: KeyMatcher::AnyModExceptCtrl('e'),
-        action: || Action::Msg(Box::new(crate::tui::Msg::ToggleLinkedDetails)),
-        help_text: "Toggle explorer linked-details",
+        action: || Action::Msg(Box::new(crate::tui::Msg::ExplorerToggleGroup)),
+        help_text: "Toggle the explorer's Other zone (right pane)",
     },
     // Arrow / nav keys — any modifier is fine.
     KeyBinding {

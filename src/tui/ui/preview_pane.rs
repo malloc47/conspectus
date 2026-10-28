@@ -40,12 +40,7 @@ impl PreviewView {
     }
 }
 
-pub(super) fn draw_detail_preview(
-    app: &App,
-    _detail: &NodeDetail,
-    frame: &mut Frame<'_>,
-    area: Rect,
-) {
+pub(super) fn draw_detail_preview(app: &App, frame: &mut Frame<'_>, area: Rect) {
     let view = preview_view_for_selection(app, area.width, area.height as usize);
     draw_preview_view(app, view, frame, area);
 }
@@ -459,12 +454,9 @@ pub(super) fn render_captured_pane(text: &str, color: bool) -> Text<'static> {
         .unwrap_or_else(|_| Text::raw(text.to_string()))
 }
 
-/// Build the chip-style divider above the preview body. Sits in
-/// the same right-anchored position as the section dividers
-/// (Session / Mux / PR / Lineage) so the `[ Preview ]` chip lines
-/// up below them. No inline suffix: the mux pane label and
-/// captured-time freshness already render in the Mux section
-/// above, and a second copy here pushed the chip far to the left.
+/// Build the chip-style divider above the preview body. It sits in the
+/// same right-anchored position as the `Related` divider so the
+/// `Preview` chip lines up below it. It carries no summary.
 pub(super) fn preview_divider_line(_app: &App, width: usize, theme: &Theme) -> Line<'static> {
     chip_divider_line("Preview", None, width, theme, ChipAnchor::Left)
 }

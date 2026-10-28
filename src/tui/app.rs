@@ -13,7 +13,6 @@ use std::rc::Rc;
 use std::time::Instant;
 
 use crate::model::{AgentSessionId, GraphSnapshot, MuxSessionId, NodeId, PinId};
-use crate::tui::detail::{DetailInputs, NodeDetail, build_node_detail};
 use crate::tui::explorer::{
     BreadcrumbHop, ExplorerInputs, ExplorerRow, ExplorerRowKey, NodeView, build_node_view,
 };
@@ -129,17 +128,13 @@ pub struct App {
     expanded: BTreeSet<RowId>,
     /// Selected row by id. `None` when the tree is empty.
     selection: Option<RowId>,
-    /// Detail view-model for the current selection. Recomputed
-    /// whenever selection or snapshot changes; the renderer reads
-    /// it directly.
-    detail: Option<NodeDetail>,
-    /// Whether linked-entity summary rows in the right-panel detail
-    /// are expanded in place.
-    detail_links_expanded: bool,
     /// Right-panel graph explorer state. Carries
     /// the focused node view, the navigation cursor, group expansion,
-    /// and the breadcrumb stack for drilldown. `None` until the
-    /// reducer has resolved a selection into a node view.
+    /// and the breadcrumb stack for drilldown. Recomputed whenever
+    /// selection or snapshot changes. `None` until the reducer has
+    /// resolved a selection into a node view, and again whenever the
+    /// selection names no node; the right pane shows its placeholder
+    /// then.
     explorer: Option<ExplorerState>,
     /// Which panel currently consumes navigation keys.
     focus: Focus,
@@ -562,8 +557,6 @@ impl App {
             tree: RowTree::default(),
             expanded: BTreeSet::new(),
             selection: None,
-            detail: None,
-            detail_links_expanded: false,
             explorer: None,
             focus: Focus::Left,
             edge_meta_visible,
@@ -783,7 +776,7 @@ impl App {
     }
 
     /// Programmatically set the selection to a row id, recomputing
-    /// the detail view-model. Used by the search overlay to land
+    /// the explorer. Used by the search overlay to land
     /// the operator on a picked match without typing j/k. No-op
     /// when the id isn't currently visible (the overlay would have
     /// rejected it during commit; the guard here is defensive).
@@ -799,7 +792,7 @@ impl App {
         self.last_visible_index = None;
         self.selection = Some(id);
         self.status_message = None;
-        self.recompute_detail();
+        self.recompute_explorer();
     }
 
     /// Active row filter for the visible view.
@@ -1008,15 +1001,6 @@ impl App {
     /// the tree is empty.
     pub fn selection(&self) -> Option<&RowId> {
         self.selection.as_ref()
-    }
-
-    /// Detail view-model for the current selection.
-    pub fn detail(&self) -> Option<&NodeDetail> {
-        self.detail.as_ref()
-    }
-
-    pub fn detail_links_expanded(&self) -> bool {
-        self.detail_links_expanded
     }
 
     /// Right-pane graph explorer state for the current focused
@@ -1498,7 +1482,6 @@ impl App {
                 self.queue_details();
             }
             Msg::CollapseRow => self.collapse_selected(),
-            Msg::ToggleLinkedDetails => self.toggle_linked_details(),
             Msg::ExplorerNavDown => self.explorer_move_cursor(1),
             Msg::ExplorerNavUp => self.explorer_move_cursor(-1),
             Msg::ExplorerHome => self.explorer_jump_cursor_to(0),

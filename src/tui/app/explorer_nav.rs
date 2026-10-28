@@ -1,11 +1,12 @@
-//! Right-pane explorer state: detail recompute, cursor, drill, and back.
+//! Right-pane explorer state: recompute, cursor, drill, and back.
 
 use super::tree::row_matches;
 use super::*;
 
 impl App {
-    pub(super) fn recompute_detail(&mut self) {
-        self.detail = None;
+    /// Point the explorer at the node the left-pane selection names, or
+    /// clear it when the selection names no node.
+    pub(super) fn recompute_explorer(&mut self) {
         self.reset_preview_scroll();
         let Some(selection) = self.selection.as_ref() else {
             self.explorer = None;
@@ -37,15 +38,8 @@ impl App {
             self.explorer = None;
             return;
         };
-        let target = raw_target;
         let home = home_for_config(&self.config);
-        let detail = build_node_detail(DetailInputs {
-            snapshot,
-            target: &target,
-            home: home.as_deref(),
-        });
-        self.detail = detail;
-        self.recompute_explorer_for(target, home.as_deref(), false);
+        self.recompute_explorer_for(raw_target, home.as_deref(), false);
     }
 
     pub(super) fn recompute_explorer_for(
@@ -266,14 +260,6 @@ impl App {
                 new_state.breadcrumb = state.breadcrumb.clone();
                 new_state.breadcrumb.push(hop);
                 self.explorer = Some(new_state);
-                // Recompute the legacy detail too so the renderer
-                // surfaces consistent info during the renderer
-                // transition.
-                self.detail = build_node_detail(DetailInputs {
-                    snapshot: handle.snapshot(),
-                    target: &target,
-                    home: home.as_deref(),
-                });
                 self.reset_preview_scroll();
                 self.status_message = None;
                 // Mirror sync — when the drilled neighbor
@@ -316,7 +302,7 @@ impl App {
             }
         }
         // Bypass `set_selection` so we don't trigger the
-        // recompute_detail path — the explorer was just rebuilt for
+        // recompute_explorer path — the explorer was just rebuilt for
         // the drilled neighbor and that's what we want to keep.
         self.selection = Some(target_id);
     }
@@ -372,11 +358,6 @@ impl App {
         restored.breadcrumb = breadcrumb_remaining;
         restored.full_detail_expanded = hop.full_detail_expanded;
         restored.reseat_cursor(hop.cursor_key);
-        self.detail = build_node_detail(DetailInputs {
-            snapshot: handle.snapshot(),
-            target: &hop.focused,
-            home: home.as_deref(),
-        });
         self.explorer = Some(restored);
         self.reset_preview_scroll();
         self.status_message = None;

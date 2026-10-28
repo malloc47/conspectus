@@ -92,9 +92,6 @@ pub enum Msg {
     /// Left panel: collapse the selected row when it is expanded.
     /// No-op on already-collapsed or leaf rows. Bound to `←` / `h`.
     CollapseRow,
-    /// Right panel: expand/collapse linked entity details under the
-    /// selected node's compact link rows.
-    ToggleLinkedDetails,
     /// Right panel (graph explorer): move the cursor down one row
     /// in the flat row list.
     ExplorerNavDown,
@@ -113,9 +110,9 @@ pub enum Msg {
     /// link row it drills into the neighbor and pushes a breadcrumb
     /// hop. No-op on unresolved-evidence rows in v1.
     ExplorerActivate,
-    /// Right panel (graph explorer): toggle expansion of the
-    /// highlighted multi-link group. No-op when the cursor isn't
-    /// on a header.
+    /// Right panel (graph explorer): expand or collapse the `Other`
+    /// zone when the cursor is on its header; a status hint
+    /// otherwise. Bound to `e`, which the left pane ignores.
     ExplorerToggleGroup,
     /// Right panel (graph explorer): toggle the visibility of the
     /// link rows' trailing `provenance · confidence · state` meta
