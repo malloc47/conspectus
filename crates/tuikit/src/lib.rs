@@ -16,4 +16,5 @@
 #![deny(rustdoc::private_intra_doc_links)]
 
 pub mod glyphs;
+pub mod text;
 pub mod theme;

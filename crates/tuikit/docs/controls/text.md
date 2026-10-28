@@ -1,0 +1,186 @@
+# `text`
+
+| | |
+| --- | --- |
+| Module | `tuikit::text` |
+| Layer | 1 (foundation) |
+| Type parameters | none |
+| Cargo feature | none |
+| Outcomes | none: every function is pure and returns the text, rows, or spans it built |
+
+## Purpose
+
+`text` measures, cuts, pads, wraps, and marks strings in terminal cells, so
+a column lines up and a row fits whatever the text holds. A terminal gives a
+CJK character or an emoji two cells, a combining accent none, and an emoji
+written with a variation selector the two cells of the picture it draws.
+Code that counts `char`s cuts a row a cell late or early, and the columns
+after it drift. Every function here measures cells and moves in whole
+graphemes (a letter and its accent, an emoji and its selector), so no cut,
+wrap, or highlight separates them.
+
+The module replaces the scattered helpers a program grows: several
+truncators (some counting characters), padding helpers, word wrappers that
+disagree about where a row breaks, two ways of cropping a snippet around a
+match, and a match painter per surface. The host keeps what its text means:
+which column holds which value, how wide each column is, domain-specific
+compaction (a path shortened to its last segment, an identifier kept to a
+fixed head and tail), and which style a match takes.
+
+## Usage example
+
+```rust
+use ratatui::style::{Modifier, Style};
+use ratatui::text::{Line, Span};
+use tuikit::text::{
+    find_all_ci, fit, fit_snippet, fit_spans, paint, spans_width, truncate_middle, width,
+    wrap, wrap_at, wrap_line,
+};
+
+// Columns: a fixed-width label, then a path cut in the middle.
+let label = fit("東京オフィス", 8);
+assert_eq!(width(&label), 8);
+let path = truncate_middle("/srv/data/archive/2026/report.txt", 20);
+assert_eq!(width(&path), 20);
+
+// A styled row cut to the pane, ending in the ellipsis mark.
+let row = vec![Span::raw(label), Span::raw("  "), Span::raw(path)];
+let row = fit_spans(row, 24);
+assert!(spans_width(&row) <= 24);
+
+// Prose and key hints wrapped to a modal's width.
+let body = wrap("Removes every entry that is already merged.", 20);
+assert!(body.iter().all(|row| width(row) <= 20));
+let hints = wrap_at("Enter open · Space mark · Esc close", " · ", 24);
+assert_eq!(hints, ["Enter open · Space mark", "Esc close"]);
+
+// A styled line with a hanging indent, for a body that needs its row count.
+let line = Line::from(vec![Span::raw("  note: "), Span::raw("the rest of a long sentence")]);
+let rows = wrap_line(&line, 18, 2);
+assert!(rows.iter().all(|row| row.width() <= 18));
+
+// A search result: crop around the match, then paint it.
+let text = "the cache is rebuilt from the index whenever the schema changes";
+let at = text.find("index").unwrap();
+let snippet = fit_snippet(text, at..at + 5, 30, &[]);
+let bold = Style::default().add_modifier(Modifier::BOLD);
+let spans = paint(&[Span::raw(snippet.text.as_str())], snippet.highlight.clone(), |_| bold);
+assert_eq!(spans.iter().filter(|span| span.style == bold).count(), 1);
+
+// Every occurrence, for a pager's find.
+let painted = paint(&[Span::raw(text)], find_all_ci(text, "THE"), |base| base.patch(bold));
+assert_eq!(painted.iter().filter(|span| span.style == bold).count(), 3);
+```
+
+### The functions
+
+| Function | Does | Notes |
+| --- | --- | --- |
+| `width`, `spans_width` | cells a string or a span list takes | the count ratatui lays out by |
+| `truncate_end` | cut to a budget, `…` in the last cell | for labels; spaces alone past the budget go without a mark |
+| `truncate_middle` | cut the middle out, `…` between the ends | for paths and identifiers (house rule 14) |
+| `clip` | hard cut, no mark | for a column whose content is a prefix by nature |
+| `pad`, `pad_start` | fill to a width with spaces after or before | never cut |
+| `fit` | cut then pad: exactly the width | |
+| `fit_spans` | cut a styled row, `…` in the style of the cut span | spaces alone past the budget go without a mark |
+| `wrap` | word wrap | rules below |
+| `wrap_chars` | wrap anywhere between graphemes, as a terminal does | |
+| `wrap_at` | wrap only at a separator, dropping it at a break | for key hints; an item wider than a row is word-wrapped |
+| `wrap_line`, `wrap_line_chars` | the styled forms of `wrap` and `wrap_chars` | `wrap_line` takes a hanging indent for continuation rows |
+| `fit_snippet` | crop an excerpt around a match to a budget | favors the text after the match; drops the characters you name first |
+| `find_ci`, `find_all_ci` | find matches, ASCII letters without case | offsets stay valid for highlighting |
+| `paint` | restyle byte ranges of a span list | the one match painter |
+
+### Cutting rules
+
+- Every cut that loses text ends in `glyphs::marks::ELLIPSIS`, inside the
+  budget: the result never exceeds the width. A budget of 1 leaves only the
+  mark; a budget of 0 leaves nothing.
+- A two-cell character that would straddle the budget is dropped whole, so a
+  cut can be a cell short; `fit` and `pad` fill that cell.
+- When only spaces lie past the budget, they are dropped with no mark: no
+  text was lost.
+- A cut is idempotent: cutting a cut text to the same budget changes nothing.
+
+### Wrapping rules
+
+Every word wrapper lays out rows the same way, styled or not:
+
+- A row breaks at the last space that fits. A word that ends exactly at the
+  edge stays on its row.
+- Spaces before a break stay on their row when they fit; spaces that would
+  run past the edge are dropped, and a continuation row never starts with
+  one. The first row keeps its leading indent.
+- A word wider than a row is broken between graphemes, and the rest of it
+  carries on as ordinary text.
+- No grapheme is split and no row is wider than the width. A character wider
+  than the whole row (a two-cell character in a row of one) cannot be drawn,
+  so the ellipsis mark stands in for it.
+- A line break ends a row, an empty text is one empty row, and a width of 0
+  is treated as 1.
+
+These are the rules ratatui's paragraph wrapper follows when it keeps
+whitespace (`Wrap { trim: false }`), so pre-wrapped text reads like a wrapped
+paragraph. The difference is that the row count is known before drawing: a
+surface that needs it (a scroll range, a scrollbar's length, a height
+budget) wraps with these functions and draws the rows unwrapped, so the
+count and the drawing cannot disagree.
+
+### Snippets
+
+`fit_snippet(text, highlight, budget, drop)` removes the characters in
+`drop` (for example Markdown code ticks, `&['`']`; or `&[]`), moves the
+highlight with the text, and, when the text is wider than the budget, keeps
+the match and spends the rest on context: two thirds after the match, the
+rest before it. Each cut side ends in the mark, a cut that would split a
+word moves to the word's edge unless that gives up the room next to the
+match, and a match wider than the budget shows as much of its start as
+fits. The highlight is widened to whole graphemes.
+
+### Finding and painting
+
+`find_ci` folds ASCII letters only, so a match is exactly as many bytes as
+the needle and `offset..offset + needle.len()` is its range. Folding other
+letters can change byte lengths, which would put a highlight in the wrong
+place. `paint(spans, ranges, restyle)` takes byte ranges into the spans'
+text laid end to end (an iterator, an `Option` of one range, or
+`find_all_ci`'s output) and gives each painted grapheme `restyle(base)`:
+`|base| base.patch(m)` layers the match style `m` on the surrounding look,
+`|_| m` replaces it. Range edges move outward to grapheme edges, so a
+highlight never strands an accent.
+
+## Key table
+
+None: the module handles no keys.
+
+## Theme tokens
+
+None: the module reads no theme. Its callers choose the styles: a match is
+usually painted with a style built from `match_highlight`, and the mark a
+cut adds takes the style of the span it stands in for.
+
+## House rules followed
+
+| # | Rule | How this module follows it |
+| --- | --- | --- |
+| 14 | Width | Every function measures terminal cells and moves in whole graphemes; every cut ends in `marks::ELLIPSIS`; `truncate_middle` is the cut for paths and identifiers |
+
+Not applicable: 1 to 13 and 15 to 18 govern how controls look, move, close,
+confirm, edit, page, and label. The module only shapes text; the controls
+that draw it follow those rules.
+
+## Seams left open
+
+- **East Asian ambiguous widths.** `width` counts ambiguous-width characters
+  as one cell, as most terminals outside East Asian locales draw them. A host
+  whose users run a CJK terminal would want them as two; a width context
+  passed to the functions would carry the choice.
+- **Hyphenation and language-aware breaking.** Words break at spaces and,
+  when too long, between graphemes. Scripts written without spaces (Chinese,
+  Japanese, Thai) wrap between graphemes; a line-breaking table would plug
+  in where a row's break is chosen.
+- **Folding beyond ASCII.** `find_ci` could take a folding mode that keeps a
+  byte map from folded text back to the source, which a highlight would then
+  read.
+- **Grapheme cursor motion.** An editor's left and right keys could move by
+  the same graphemes the cuts use; today the edit engine has its own rule.

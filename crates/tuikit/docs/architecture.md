@@ -50,7 +50,7 @@ each names its module path.
 | --- | --- | --- |
 | `theme` | Generic role tokens (accent and focus cue, muted, inert, selection, success, warning, error, info, link, match highlight, badge, recency scale, surface, input fields); a registry of named styles for roles only the host knows; alias keys; the style-spec grammar; applying overrides from a config table the host supplies. Page: [controls/theme.md](controls/theme.md) | landed |
 | `glyphs` | The vetted glyph table with host registration; shared marks (pointer, back, disclosure, ok, fail, warning, bullet, ellipsis, no-value, rule, spinner); cell-width and emoji-risk checks; the source scanner that finds unvetted glyphs. Page: [controls/glyphs.md](controls/glyphs.md) | landed |
-| `text` | Cell-width measuring; end and middle truncation; padding; fitting spans; word and character wrapping; snippet fitting; match painting | planned |
+| `text` | Cell-width measuring; end and middle truncation; padding; fitting spans; word, character, and separator wrapping; snippet fitting; ASCII case-folding find; the match painter. Page: [controls/text.md](controls/text.md) | landed |
 | `scroll` | Wrap-or-clamp cursor stepping; follow-cursor offsets; scroll windows; the scrollbar gutter; wrapped-row counts | planned |
 | `chip` | Fixed-width chips: toggle, segmented title, position, status | planned |
 | `age` | Relative-time formatting and recency tint with injectable thresholds | planned |

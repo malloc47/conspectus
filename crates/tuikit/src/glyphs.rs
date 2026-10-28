@@ -54,14 +54,13 @@ pub mod marks;
 mod scan;
 mod vetted;
 
-use unicode_width::UnicodeWidthStr;
-
 pub use scan::{Drawn, drawn_glyphs};
 pub use vetted::{RegisterError, VettedGlyphs};
 
-/// How many terminal cells `glyph` takes.
+/// How many terminal cells `glyph` takes: [`crate::text::width`], the one
+/// measure every control uses.
 pub fn cell_width(glyph: &str) -> usize {
-    UnicodeWidthStr::width(glyph)
+    crate::text::width(glyph)
 }
 
 /// Why `glyph` must not be drawn in a one-cell slot, if it can't be: it

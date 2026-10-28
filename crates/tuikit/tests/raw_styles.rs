@@ -21,9 +21,9 @@ use source_scan::{
     tripwire,
 };
 
-/// Fewest non-test Rust files the scan may visit: `lib.rs` and the three
-/// theme files make 4 today.
-const MIN_FILES: usize = 3;
+/// Fewest non-test Rust files the scan may visit: `lib.rs`, four glyph
+/// files, three theme files, and six text files make 14 today.
+const MIN_FILES: usize = 10;
 
 /// What the guard looks for, matched at a word start.
 #[rustfmt::skip]

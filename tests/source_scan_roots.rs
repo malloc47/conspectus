@@ -59,14 +59,13 @@ fn a_wrong_root_trips_the_tripwire_for_every_tree() {
     let scratch = tempfile::tempdir().expect("scratch directory");
     let error = source_tree::try_rust_files(scratch.path(), &[HOST_SRC, FRAMEWORK_SRC])
         .expect_err("an empty root has no sources");
-    assert!(
-        error.contains("`src`: 0 Rust files, at least 300 expected"),
-        "{error}"
-    );
-    assert!(
-        error.contains("`crates/tuikit/src`: 0 Rust files, at least 9 expected"),
-        "{error}"
-    );
+    for tree in [HOST_SRC, FRAMEWORK_SRC] {
+        let expected = format!(
+            "`{}`: 0 Rust files, at least {} expected",
+            tree.dir, tree.min_files
+        );
+        assert!(error.contains(&expected), "{error}");
+    }
 }
 
 #[test]

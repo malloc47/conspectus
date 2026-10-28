@@ -25,9 +25,9 @@ use source_scan::{
 };
 use tuikit::glyphs::{VettedGlyphs, drawn_glyphs};
 
-/// Fewest non-test Rust files the scan may visit: `lib.rs`, the four glyph
-/// files, and the three theme files make 8 today.
-const MIN_FILES: usize = 6;
+/// Fewest non-test Rust files the scan may visit: `lib.rs`, four glyph
+/// files, three theme files, and six text files make 14 today.
+const MIN_FILES: usize = 10;
 
 /// Whether `path` (crate-relative, forward slashes) is the glyph module.
 fn in_glyph_module(path: &str) -> bool {
