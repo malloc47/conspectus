@@ -172,6 +172,10 @@ conspectus tui --snapshot --snapshot-pane right --snapshot-keys 'j<Tab>jjjjj<Ent
 # the newest)
 conspectus tui --snapshot --snapshot-message 'attached tmux:a' --snapshot-message 'renamed tmux:b' --snapshot-keys '!'
 
+# Draw a toast, or a status-line message, after the keys run
+conspectus tui --snapshot --snapshot-toast 'copied: cwd'
+conspectus tui --snapshot --snapshot-status 'rename: lost selection before commit'
+
 # Capture the live world to a fixture JSON for later iteration
 conspectus tui --snapshot --snapshot-export-fixture world.json
 

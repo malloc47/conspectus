@@ -156,6 +156,16 @@ pub(super) struct TuiArgs {
     #[arg(long = "snapshot-message", value_name = "TEXT")]
     snapshot_messages: Vec<String>,
 
+    /// Post a toast after the keys run, so the frame shows it.
+    #[cfg(feature = "snapshot")]
+    #[arg(long = "snapshot-toast", value_name = "TEXT")]
+    snapshot_toast: Option<String>,
+
+    /// Show a message on the status line after the keys run.
+    #[cfg(feature = "snapshot")]
+    #[arg(long = "snapshot-status", value_name = "TEXT")]
+    snapshot_status: Option<String>,
+
     /// Launch the interactive TUI against a fixture JSON instead
     /// of running live discovery. Bypasses scan-root
     /// discovery entirely; the `r` accelerator re-reads the
@@ -227,6 +237,10 @@ impl Default for TuiArgs {
             snapshot_now: None,
             #[cfg(feature = "snapshot")]
             snapshot_messages: Vec::new(),
+            #[cfg(feature = "snapshot")]
+            snapshot_toast: None,
+            #[cfg(feature = "snapshot")]
+            snapshot_status: None,
             #[cfg(feature = "snapshot")]
             fixture: None,
         }
@@ -467,6 +481,8 @@ impl TuiArgs {
                     fixture_root: self.snapshot_fixture_root,
                     now: self.snapshot_now,
                     messages: self.snapshot_messages,
+                    toast: self.snapshot_toast,
+                    status: self.snapshot_status,
                 },
             );
         }

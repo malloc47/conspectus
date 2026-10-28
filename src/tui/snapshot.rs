@@ -75,6 +75,10 @@ pub struct SnapshotConfig {
     /// Entries put in the Messages log before the keys run, oldest
     /// first, dated `now` when it is set.
     pub messages: Vec<String>,
+    /// A toast posted after the keys run, so the frame shows it.
+    pub toast: Option<String>,
+    /// A status-line message set after the keys run.
+    pub status: Option<String>,
 }
 
 /// The prefix fixtures write in place of the temp directory a world
@@ -146,6 +150,7 @@ pub fn run(config: RunConfig, snap: SnapshotConfig) -> Result<()> {
         Rect::new(0, 0, snap.width, snap.height),
         rebase,
     )?;
+    show_feedback(&mut app, &snap);
     // One frame, no event loop: read the selection's preview now
     // rather than showing it loading.
     let fixture_root = snap
@@ -189,6 +194,17 @@ fn seed_messages(app: &mut App, messages: &[String], now: Option<i64>) {
     }
     if !messages.is_empty() {
         app.update(Msg::SetStatus(None));
+    }
+}
+
+/// Post the toast and set the status line the flags ask for, after the
+/// keys (which clear the status line as they move) have run.
+fn show_feedback(app: &mut App, snap: &SnapshotConfig) {
+    if let Some(text) = &snap.status {
+        app.update(Msg::SetStatus(Some(text.clone())));
+    }
+    if let Some(text) = &snap.toast {
+        app.post_toast(text.clone());
     }
 }
 

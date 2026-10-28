@@ -3,9 +3,11 @@ id: CSP-731
 title: >-
   Extract `feedback`: severity, `Toasts`, the message log, and the clipboard
   sink
-status: To Do
-assignee: []
+status: In Progress
+assignee:
+  - '@claude'
 created_date: '2026-10-27 20:26'
+updated_date: '2026-10-28 23:39'
 labels:
   - tui-framework
   - tuifw-conventions
@@ -57,3 +59,14 @@ Blockers: The theme, glyph, and frame extractions.
 - [ ] #1 `just check` passes, or `git diff --check` for docs-only changes
 - [ ] #2 Docs and ADRs are updated when behavior, architecture, or workflow change
 <!-- DOD:END -->
+
+## Implementation Plan
+
+<!-- SECTION:PLAN:BEGIN -->
+1. Capture before frames (snapshot build at HEAD) of the toast, status line, and Messages overlay at 100x30 and 60x20, extending snapshot mode with dev-only flags that post a toast, set the status line, and seed log entries of a chosen severity.
+2. Add `tuikit::feedback`: `Severity` (info, success, warning, error; color/style/mark/default lifetime from the theme), `Feedback { severity, text, ttl }`, the status-line span helper, `Toasts` (in-tree queue/stack with per-toast lifetime, bottom-centered bordered rendering; border from the severity token, text from a new `toast_text` token; same placement, 1.5 s, and look as before for success), the generic `Log<T>`/`Entry<T>` (bounded, repeat-collapsing, unseen counter), and `clipboard::copy` writing OSC 52 to a host-supplied `Write`. Unit tests per severity; doc page `docs/controls/feedback.md`.
+3. Host: `messages.rs` keeps `LogTarget`/`CommandRecord` as the log item payload (`Record`), `LogLevel` becomes `Severity`; `clipboard.rs` passes stdout to the framework; `widgets/toast.rs` and `ratatui-comfy-toaster` go; App holds `Toasts`.
+4. Status line: `status_message` holds a `Feedback`; `Msg::SetStatus(Option<Feedback>)`; header draws by severity. Audit every status site and assign a severity (refusals/failures warning or error, confirmations success, hints info).
+5. Toasts: `Effect::Toast(Feedback)`, `Msg::Toast(Feedback)`, `post_toast(Feedback)`; give every call site a severity.
+6. ADR 0163, ADR index, design/operations/changelog notes, operator-review entries; after frames and comparison; full checks.
+<!-- SECTION:PLAN:END -->
