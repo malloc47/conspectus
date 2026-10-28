@@ -17,6 +17,7 @@
 
 pub mod age;
 pub mod chip;
+pub mod frame;
 pub mod glyphs;
 pub mod scroll;
 pub mod text;

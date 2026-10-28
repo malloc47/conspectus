@@ -380,8 +380,8 @@ tokens! {
     /// The oldest step of the recency scale.
     recency_cold: StyleSpec = StyleSpec::modifier(Modifier::DIM), TokenKind::Style,
         "recency scale: cold";
-    /// The background a floating surface (a toast) paints. `Reset` keeps
-    /// the terminal's own background.
+    /// The background a floating surface (a modal frame, a toast) paints.
+    /// `Reset` keeps the terminal's own background.
     surface: Color = Color::Reset, TokenKind::Color,
         "background of floating surfaces";
     /// An input field's value when the field is not focused.

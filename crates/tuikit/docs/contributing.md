@@ -254,22 +254,27 @@ Work through this list in order. Each step names the rule it applies.
    rule, draws its scrollbar through `scroll::ScrollGutter`, and returns
    the window it drew to its owner as a value. It never sends a message
    from inside a draw to report what it measured.
-8. **Leave seams open, do not build them.** If the control could one day
+8. **Frame a modal.** A control that floats over the screen draws inside
+   `frame::ModalFrame` with one of the named sizes (or a `ModalSize` built
+   from the same parameters) and is its `frame::ModalBody`: it is measured
+   once at the width the size gives and never computes a rect, a border,
+   or a title of its own; see [controls/frame.md](controls/frame.md).
+9. **Leave seams open, do not build them.** If the control could one day
    carry availability on key rows, report its rendered area for mouse hit
    testing, or accept another content source, keep the types ready for it and
    record it on the page. Do not build the feature.
-9. **Document it.** Module docs and doc comments on every public item (the
-   lint requires them). Copy [controls/_template.md](controls/_template.md)
-   to `docs/controls/<control>.md` and fill in every section. Flip the
-   control's row in the module map in [architecture.md](architecture.md) to
-   landed in the same change.
-10. **Test it.** Unit tests for behavior, rendered-buffer tests for layout, and
+10. **Document it.** Module docs and doc comments on every public item (the
+    lint requires them). Copy [controls/_template.md](controls/_template.md)
+    to `docs/controls/<control>.md` and fill in every section. Flip the
+    control's row in the module map in [architecture.md](architecture.md) to
+    landed in the same change.
+11. **Test it.** Unit tests for behavior, rendered-buffer tests for layout, and
     the test kit's conformance suite once it exists (see [Testing](#testing)).
-11. **Move the host onto it in the same change, when the control comes from
+12. **Move the host onto it in the same change, when the control comes from
     the host.** Unify on the best variant instead of copying the host's
     disagreements, and catalog every visible difference
     ([Cataloging visible changes](#cataloging-visible-changes)).
-12. **Run the checks** at the end of this guide.
+13. **Run the checks** at the end of this guide.
 
 A decision that changes the crate's public API shape, house rules,
 dependencies, or independence rules gets a record in

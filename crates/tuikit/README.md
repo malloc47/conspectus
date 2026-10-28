@@ -41,8 +41,9 @@ wrapping, snippets, and match painting in terminal cells), the `scroll`
 module (cursor stepping, the follow rule, the clamping scroll window, the
 scrollbar gutter, and wrapped-row counts), the `chip` module (filled,
 toggle, segmented, position, and status chips), the `age` module (age
-text, recency tint, and the age cell), the source guards, and this
-documentation set; the module map in the architecture
+text, recency tint, and the age cell), the `frame` module (the modal
+frame and its named sizes), the source guards, and this documentation
+set; the module map in the architecture
 guide says which modules have landed.
 
 ## Depending on it by path
