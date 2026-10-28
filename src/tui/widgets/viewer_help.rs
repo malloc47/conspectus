@@ -34,7 +34,7 @@ pub struct ViewerHelpSection {
 }
 
 /// The help page's content, generated from `table` (the viewer's key
-/// table) and the descriptions in [`ViewerMsg::help`]. A message with no
+/// table) and the descriptions in `ViewerMsg::help`. A message with no
 /// key bound to it is left out, as there is nothing to press.
 pub fn sections_for(table: &[KeyRow<ViewerMsg>]) -> Vec<ViewerHelpSection> {
     let mut sections: Vec<ViewerHelpSection> = Vec::new();

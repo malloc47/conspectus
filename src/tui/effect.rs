@@ -75,10 +75,8 @@ pub enum ExecSpec {
     /// picks native (parse transcript on disk into `ViewerState` +
     /// `App::open_viewer_modal`) vs external fallback (spawn
     /// `claude-history` etc.); both paths read the filesystem so the
-    /// reducer never touches them. With a [`ViewerOpen`] the viewer
+    /// reducer never touches them. With a `ViewerOpen` the viewer
     /// lands on that search result with the query highlighted.
-    ///
-    /// [`ViewerOpen`]: crate::viewer::state::ViewerOpen
     ViewSession(AgentSessionId, Option<crate::viewer::state::ViewerOpen>),
     /// Read a mux pane's scrollback now and open it in a pager on the
     /// line a content search found, with `text` picked out. Reads the

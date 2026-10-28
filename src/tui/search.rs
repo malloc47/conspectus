@@ -1,6 +1,6 @@
 //! Ranking for the `/` in-view search overlay. Per ADR 0024 the
 //! matcher is hand-rolled: a case-insensitive (ASCII) substring match,
-//! shared with content search through [`crate::viewer::search`].
+//! shared with content search through `crate::viewer::search`.
 //!
 //! Per ADR 0031 the `/` overlay ranks within the **active filter
 //! set**, not the full snapshot. The runtime extracts

@@ -209,7 +209,7 @@ impl SessionDetail {
 
 /// Every hit in one session, for showing its matches. Capped at
 /// [`MAX_HITS_PER_SESSION`], keeping the newest; the count on
-/// [`SessionHits`] is the true total. Reads the transcript again, since a
+/// `SessionHits` is the true total. Reads the transcript again, since a
 /// scan keeps only the best hit per session.
 pub fn hits_for(session: &ScanSession, query: &ContentQuery) -> Vec<Hit> {
     session_detail(session, query).hits

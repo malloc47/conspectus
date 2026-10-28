@@ -1,9 +1,9 @@
 //! Search the contents of every session's transcript.
 //!
 //! This is the scan behind content search: given the sessions in a
-//! snapshot and a [`ContentQuery`], read each session's transcript where
+//! snapshot and a `ContentQuery`, read each session's transcript where
 //! the harness keeps it, match it with the shared matcher in
-//! [`crate::viewer::search`], and stream the sessions that match. It reads
+//! `crate::viewer::search`, and stream the sessions that match. It reads
 //! files and databases and nothing else: it starts no process, opens no
 //! socket, and writes nothing. Hits live in memory for as long as the
 //! caller keeps them and are never persisted or sent to the daemon.
@@ -46,7 +46,7 @@ pub use unified::{
 };
 
 /// Per-session cap on hits materialized by [`hits_for`]. The count in
-/// [`SessionHits`] is always the true number of matching turns.
+/// `SessionHits` is always the true number of matching turns.
 pub const MAX_HITS_PER_SESSION: usize = 500;
 
 /// Identifies a session across harnesses.
