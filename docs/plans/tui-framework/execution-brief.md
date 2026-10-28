@@ -154,6 +154,18 @@ that file. Two things to know before writing framework code:
   docs, tests, the manifest, and any README. Docs therefore cannot quote the
   word list; they point at the constant instead.
 
+### Words The Framework Cannot Use
+
+The vocabulary guard (`crates/tuikit/tests/independence.rs`, `DOMAIN_TERMS`)
+fails on whole-word, case-insensitive hits, including plurals and the
+snake/camel forms, in `tuikit` source, docs, tests, and manifest. Read the
+list, then write around it. Common traps: "pinned footer" or "pinned row" (say
+"fixed" or "sticky"), "conformance harness" or "test harness" (say
+"conformance suite" or "test rig"), "transcript" (say "document" or
+"content"), "session" (say "run" or "context"), "repo", "checkout", "PR",
+"forge", "mux", "tmux". The Conspectus-side adapter, in `src/`, may use any
+of them.
+
 ## Stop Conditions
 
 - An `EPERM` or "operation not permitted" error: stop at once and report it

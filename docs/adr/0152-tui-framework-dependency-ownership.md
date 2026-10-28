@@ -63,7 +63,9 @@ all-or-nothing (CSP-433), and the new design kits (`tuika`, `tui-lipan`,
    gallery or coverage rule is introduced.
 
 6. **No new dependencies.** This ADR adds none. A framework story that needs
-   one writes its own ADR first (the standing rule).
+   one writes its own ADR first (the standing rule). A crate that is already in the workspace lockfile and is used only as a
+   dev-dependency of the framework's own tests (the independence guard parses
+   its manifest with `toml`) is not a new dependency.
 
 ## Consequences
 
