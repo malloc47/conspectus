@@ -68,6 +68,12 @@ use crate::tui::app::{App, Msg, SnapshotHandle};
 use crate::tui::rows::RowId;
 use crate::tui::ui::{buffer_to_string, render_to_buffer};
 
+/// The plumbing the source-scanning tests share, included from the
+/// integration tests' support directory so one list of scanned trees, and
+/// one set of minimum file counts, serves them all.
+#[path = "../../tests/support/source_tree.rs"]
+mod source_tree;
+
 mod actions;
 mod content_filter;
 mod content_interactions;

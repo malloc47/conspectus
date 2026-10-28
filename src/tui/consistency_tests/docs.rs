@@ -13,7 +13,7 @@ use crate::tui::rows::{RowKind, words};
 const DOC: &str = "docs/tui-columns.md";
 
 fn doc() -> String {
-    std::fs::read_to_string(Path::new(env!("CARGO_MANIFEST_DIR")).join(DOC))
+    std::fs::read_to_string(source_tree::workspace_root().join(DOC))
         .unwrap_or_else(|err| panic!("{DOC}: {err}"))
 }
 
@@ -212,7 +212,7 @@ fn the_reference_speaks_the_operators_language() {
 
 #[test]
 fn the_reference_is_linked_from_the_places_people_start() {
-    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let root = source_tree::workspace_root();
     for file in ["docs/index.md", "docs/design.md", "README.md"] {
         let text = std::fs::read_to_string(root.join(file)).unwrap();
         assert!(text.contains("tui-columns.md"), "{file} should link {DOC}");

@@ -2,9 +2,16 @@
 //! backlog IDs, and design-document paths are developer artifacts and
 //! never reach the screen, `--help`, or an error message; a pin is
 //! called a pin, never by its storage word.
+//!
+//! The scans of source string literals cover the framework's sources
+//! (`crates/tuikit/src`) for developer artifacts as well as the host's;
+//! the storage-word rule, the rendered screens, and the help pages are
+//! host-only. `tests/support/source_tree.rs` explains why, and how each
+//! scan is guarded against visiting too few files.
 
 use clap::CommandFactory;
 
+use super::source_tree::{self, FRAMEWORK_SRC, Tree};
 use super::*;
 
 /// Documents written for operators, which messages may point at. Every
@@ -309,46 +316,39 @@ fn the_literal_scanner_skips_comments_and_tests() {
     assert_eq!(found, ["keep", "raw \"q\" ", "e\"s"]);
 }
 
-fn source_files(dir: &str) -> Vec<(PathBuf, String)> {
-    fn walk(dir: &Path, out: &mut Vec<PathBuf>) {
-        let Ok(entries) = std::fs::read_dir(dir) else {
-            return;
-        };
-        for entry in entries.flatten() {
-            let path = entry.path();
-            if path.is_dir() {
-                walk(&path, out);
-            } else if path.extension().is_some_and(|ext| ext == "rs") {
-                out.push(path);
-            }
-        }
-    }
-    let mut paths = Vec::new();
-    walk(&Path::new(env!("CARGO_MANIFEST_DIR")).join(dir), &mut paths);
-    paths
+/// The host's TUI sources. The tripwire minimum is below the current
+/// count (169 files) because code leaves `src/tui` for the framework.
+const TUI_SRC: Tree = Tree::new("src/tui", 100);
+/// The host's CLI sources (22 files today).
+const CLI_SRC: Tree = Tree::new("src/cli", 15);
+
+/// The non-test sources under `trees` with their text. The consistency
+/// tests are skipped: they hold the offending words on purpose.
+fn source_files(root: &Path, trees: &[Tree]) -> Vec<(PathBuf, String)> {
+    source_tree::rust_files(root, trees)
         .into_iter()
         .filter(|path| {
-            let name = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
-            !name.ends_with("_tests.rs")
-                && name != "tests.rs"
-                && !path.to_string_lossy().contains("consistency_tests")
+            !source_tree::is_test_file(path)
+                && !source_tree::relative(root, path).contains("consistency_tests")
         })
         .filter_map(|path| Some((path.clone(), std::fs::read_to_string(path).ok()?)))
         .collect()
 }
 
-fn literal_offenders(dir: &str, bad: impl Fn(&str) -> Option<String>) -> Vec<String> {
-    let files = source_files(dir);
-    assert!(files.len() > 10, "{dir} has sources: {}", files.len());
+/// String literals under `trees` that `bad` flags, as `path:line: ...`
+/// findings.
+fn literal_offenders(
+    root: &Path,
+    trees: &[Tree],
+    bad: impl Fn(&str) -> Option<String>,
+) -> Vec<String> {
     let mut out = Vec::new();
-    for (path, source) in files {
+    for (path, source) in source_files(root, trees) {
         for (line, text) in string_literals(&source) {
             if let Some(found) = bad(&text) {
                 out.push(format!(
                     "{}:{line}: {found} in {:?}",
-                    path.strip_prefix(env!("CARGO_MANIFEST_DIR"))
-                        .unwrap_or(&path)
-                        .display(),
+                    source_tree::relative(root, &path),
                     text.chars().take(70).collect::<String>()
                 ));
             }
@@ -357,20 +357,52 @@ fn literal_offenders(dir: &str, bad: impl Fn(&str) -> Option<String>) -> Vec<Str
     out
 }
 
+fn slot_in(text: &str) -> Option<String> {
+    says_slot(text).then(|| "slot".into())
+}
+
 #[test]
 fn no_string_in_the_tui_names_a_developer_artifact() {
-    let offenders = literal_offenders("src/tui", artifact_in);
+    let offenders = literal_offenders(source_tree::workspace_root(), &[TUI_SRC], artifact_in);
     assert!(offenders.is_empty(), "{}", offenders.join("\n"));
 }
 
 #[test]
 fn no_string_in_the_cli_names_a_developer_artifact() {
-    let offenders = literal_offenders("src/cli", artifact_in);
+    let offenders = literal_offenders(source_tree::workspace_root(), &[CLI_SRC], artifact_in);
+    assert!(offenders.is_empty(), "{}", offenders.join("\n"));
+}
+
+/// The framework's text reaches the operator through the host's screens,
+/// so it follows the same rule as the host's own strings.
+#[test]
+fn no_string_in_the_framework_names_a_developer_artifact() {
+    let offenders = literal_offenders(source_tree::workspace_root(), &[FRAMEWORK_SRC], artifact_in);
+    assert!(offenders.is_empty(), "{}", offenders.join("\n"));
+}
+
+/// Host only: a pin is a Conspectus word the framework may not name, so a
+/// "slot" there is some other generic thing.
+#[test]
+fn no_string_in_the_tui_calls_a_pin_a_slot() {
+    let offenders = literal_offenders(source_tree::workspace_root(), &[TUI_SRC], slot_in);
     assert!(offenders.is_empty(), "{}", offenders.join("\n"));
 }
 
 #[test]
-fn no_string_in_the_tui_calls_a_pin_a_slot() {
-    let offenders = literal_offenders("src/tui", |text| says_slot(text).then(|| "slot".into()));
-    assert!(offenders.is_empty(), "{}", offenders.join("\n"));
+fn an_artifact_in_a_string_is_caught_in_every_tree_the_scan_covers() {
+    let violation = "fn f() { let _ = \"see ADR 0141\"; }\n";
+    source_tree::assert_scan_covers_every_tree(
+        &[TUI_SRC, CLI_SRC, FRAMEWORK_SRC],
+        violation,
+        |root, trees| literal_offenders(root, trees, artifact_in),
+    );
+}
+
+#[test]
+fn a_slot_in_a_string_is_caught_in_the_tui_tree() {
+    let violation = "fn f() { let _ = \"unpin this slot\"; }\n";
+    source_tree::assert_scan_covers_every_tree(&[TUI_SRC], violation, |root, trees| {
+        literal_offenders(root, trees, slot_in)
+    });
 }
