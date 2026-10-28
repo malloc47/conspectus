@@ -96,7 +96,10 @@ fn draw(stack: &mut ModalStack<Tile>, width: u16, height: u16) -> Buffer {
 #[test]
 fn an_empty_stack_routes_nothing_and_draws_nothing() {
     let mut stack: ModalStack<Tile> = ModalStack::new();
-    assert_eq!(stack.route(press(KeyCode::Enter), &Shelf { word: "w" }), None);
+    assert_eq!(
+        stack.route(press(KeyCode::Enter), &Shelf { word: "w" }),
+        None
+    );
     let buf = draw(&mut stack, 4, 1);
     assert_eq!(row(&buf, 0), "....");
     assert!(stack.is_empty());
@@ -167,7 +170,11 @@ fn every_entry_draws_bottom_to_top() {
     stack.push(Tile::new("a", Rect::new(1, 0, 6, 1)));
     stack.push(Tile::new("b", Rect::new(3, 0, 2, 1)));
     let buf = draw(&mut stack, 8, 1);
-    assert_eq!(row(&buf, 0), ".aabbaa.", "the lower entry shows around the upper");
+    assert_eq!(
+        row(&buf, 0),
+        ".aabbaa.",
+        "the lower entry shows around the upper"
+    );
     assert!(stack.iter().all(|tile| tile.drawn == 1));
 }
 
@@ -181,7 +188,11 @@ fn an_entry_that_fills_the_screen_hides_everything_under_it() {
     let buf = draw(&mut stack, 8, 1);
     assert_eq!(row(&buf, 0), "fffbbfff");
     let drawn: Vec<usize> = stack.iter().map(|tile| tile.drawn).collect();
-    assert_eq!(drawn, [0, 1, 1], "nothing under the full-screen entry is drawn");
+    assert_eq!(
+        drawn,
+        [0, 1, 1],
+        "nothing under the full-screen entry is drawn"
+    );
 }
 
 #[test]
@@ -222,9 +233,11 @@ fn a_framed_modal_over_another_shows_both_frames() {
         }
         fn render(&mut self, area: Rect, buf: &mut Buffer, _cx: &(), theme: &Theme) {
             let lines = (0..8).map(|n| format!("row {n}").into()).collect();
-            ModalFrame::new(theme, self.size)
-                .title(self.title)
-                .render(area, buf, Lines::new(lines));
+            ModalFrame::new(theme, self.size).title(self.title).render(
+                area,
+                buf,
+                Lines::new(lines),
+            );
         }
     }
     let area = Rect::new(0, 0, 80, 24);
@@ -251,7 +264,10 @@ fn pop_if_closes_only_a_matching_top() {
     stack.push(Tile::new("b", Rect::default()));
     assert_eq!(stack.pop_if(|tile| tile.mark == "a"), None);
     assert_eq!(stack.len(), 2);
-    assert_eq!(stack.pop_if(|tile| tile.mark == "b").map(|t| t.mark), Some("b"));
+    assert_eq!(
+        stack.pop_if(|tile| tile.mark == "b").map(|t| t.mark),
+        Some("b")
+    );
     assert_eq!(stack.pop().map(|t| t.mark), Some("a"));
     assert_eq!(stack.pop(), None);
 }
@@ -319,5 +335,8 @@ fn only_the_top_entry_says_whether_a_paste_goes_in() {
     assert!(stack.takes_text());
     stack.push(Field(false));
     assert!(!stack.takes_text(), "a menu over a prompt takes no paste");
-    assert!(!Tile::new("a", Rect::default()).takes_text(), "false unless said");
+    assert!(
+        !Tile::new("a", Rect::default()).takes_text(),
+        "false unless said"
+    );
 }
