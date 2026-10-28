@@ -2,7 +2,9 @@
 
 ## Status
 
-Accepted. Narrowed 2026-10-02 by [ADR 0107](0107-related-view-neighbor-granularity.md):
+Accepted. Supersedes the sectioned detail pane of
+[ADR 0033](0033-tui-detail-pane-sections.md) and the `Ambiguous muxes`
+section of [ADR 0071](0071-ambiguous-mux-scope-and-detail.md). Narrowed 2026-10-02 by [ADR 0107](0107-related-view-neighbor-granularity.md):
 rows are one per neighbor rather than one per candidate link, the
 Other zone holds only neighbors the resolver did not pick, and row
 keys identify neighbors.

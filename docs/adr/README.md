@@ -138,7 +138,7 @@ Runtime architecture, controls, theming, detail pane, and visual language.
 | [0030](0030-tui-text-input-primitive.md) | TUI Text-Input Primitive | Accepted |
 | [0031](0031-tui-filter-view-switching-and-per-view-state.md) | TUI Filter, View Switching, And Per-View State | Accepted (amended by 0147, 0149) |
 | [0032](0032-tui-theme-config.md) | TUI Theme Configuration | Accepted |
-| [0033](0033-tui-detail-pane-sections.md) | TUI Detail-Pane Section Model | Accepted |
+| [0033](0033-tui-detail-pane-sections.md) | TUI Detail-Pane Section Model | Superseded by 0074 |
 | [0034](0034-repo-row-display-path-preference.md) | Repo Row Display Path Preference | Accepted (amended) |
 | [0045](0045-sessions-graph-lineage-and-repo-default.md) | Sessions Graph Lineage And Repo Default | Accepted |
 | [0055](0055-sessions-graph-default.md) | Sessions Graph Default | Accepted |
@@ -148,7 +148,7 @@ Runtime architecture, controls, theming, detail pane, and visual language.
 | [0063](0063-drop-workspace-cross-reference-chip.md) | Drop The Workspace Cross-Reference Chip | Accepted |
 | [0064](0064-hybrid-sessions-graph-grouping.md) | Hybrid Workspace+Repo Grouping In Sessions/Graph | Accepted |
 | [0065](0065-sessions-workspace-grouping-replaces-workspaces-view.md) | Workspace Grouping In Sessions Replaces The Workspaces View | Accepted |
-| [0071](0071-ambiguous-mux-scope-and-detail.md) | Ambiguous Mux Surface Moves From Session Row To Group Detail | Accepted |
+| [0071](0071-ambiguous-mux-scope-and-detail.md) | Ambiguous Mux Surface Moves From Session Row To Group Detail | Accepted (detail-pane section superseded by 0074) |
 | [0072](0072-mux-indicator-attachable-binary.md) | Mux Indicator Becomes Attachable-Binary; Group Rows Own The Ambiguity Glyph | Accepted (amended by 0145) |
 | [0120](0120-mux-rows-drop-the-ambiguity-glyph.md) | Mux Rows Drop The Ambiguity Glyph | Accepted |
 | [0073](0073-node-kind-visual-identity.md) | Per-Node-Kind Visual Identity (Glyph + Color) | Accepted (amended by 0144, 0145) |

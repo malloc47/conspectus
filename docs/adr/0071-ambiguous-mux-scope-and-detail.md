@@ -2,7 +2,11 @@
 
 ## Status
 
-Accepted
+Accepted. Decision 2 (an `Ambiguous muxes` section on the group's
+detail pane) is superseded by [ADR 0074](0074-detail-pane-related-entities-flatten.md):
+the explorer has no such section, and the sectioned detail model that
+emitted it is deleted. Decisions 1 and 3 stand; `a` on a group row
+still attaches to the single ambiguous mux scoped to that group.
 
 ## Context
 
