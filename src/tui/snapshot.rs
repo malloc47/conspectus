@@ -296,6 +296,12 @@ fn apply_action(
         Action::MessagesOverlayKey(key) => handle_messages_overlay_key(app, key),
         Action::OpenWorktreeMenu => runtime::open_worktree_menu_action(app),
         Action::OpenWorktreeCloseDown => runtime::open_worktree_close_down_action(app),
+        Action::OpenMuxMenu => runtime::open_mux_menu_action(app),
+        Action::OpenValueModal => app.open_value_modal_for_cursor(),
+        Action::ValueModalKey(key)
+        | Action::RowMenuKey(key)
+        | Action::MuxMenuKey(key)
+        | Action::WorktreeMenuKey(key) => modal_key(app, key),
         Action::ControlsOverlayKey(key) => handle_controls_overlay_key(app, key),
         Action::SearchOverlayKey(key) => {
             // A hit that opens the viewer needs the same effect handling
@@ -325,6 +331,38 @@ fn apply_action(
                 "conspectus: snapshot mode skipped unsupported action: {}",
                 action_label(&other)
             );
+        }
+    }
+}
+
+/// A key for the value modal or a menu, handled by the modal itself:
+/// moving, scrolling, and closing behave as in the live loop. What would
+/// reach outside the snapshot is skipped with a note: a pick runs a
+/// verb, and `y` would write the clipboard escape into the frame output.
+fn modal_key(app: &mut App, key: KeyEvent) {
+    use crate::tui::keybindings::overlay::{PagerKey, VALUE_MODAL_KEYS, resolve};
+    use crate::tui::{Overlay, OverlayOutcome};
+    let (outcome, close): (OverlayOutcome, fn(&mut App)) =
+        if let Some(state) = app.value_modal_mut() {
+            if resolve(VALUE_MODAL_KEYS, key) == Some(PagerKey::Copy) {
+                eprintln!("conspectus: snapshot mode skipped a copy");
+                return;
+            }
+            (state.handle((), key), App::close_value_modal)
+        } else if let Some(state) = app.row_menu_mut() {
+            (state.handle((), key), App::close_row_menu)
+        } else if let Some(state) = app.mux_menu_mut() {
+            (state.handle((), key), App::close_mux_menu)
+        } else if let Some(state) = app.worktree_menu_mut() {
+            (state.handle((), key), App::close_worktree_menu)
+        } else {
+            return;
+        };
+    match outcome {
+        OverlayOutcome::Consumed => {}
+        OverlayOutcome::Close => close(app),
+        OverlayOutcome::Commit(_) | OverlayOutcome::CommitAndStay(_) => {
+            eprintln!("conspectus: snapshot mode skipped a menu pick");
         }
     }
 }
