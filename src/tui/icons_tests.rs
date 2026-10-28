@@ -90,15 +90,15 @@ fn node_kind_style_uses_theme_color_for_each_kind() {
     // — `node_kind_style` reads from the right field per kind.
     assert_eq!(
         node_kind_style(NodeKind::Workspace, &theme).color,
-        theme.node_workspace,
+        theme.node_workspace(),
     );
     assert_eq!(
         node_kind_style(NodeKind::Repo, &theme).color,
-        theme.node_repo,
+        theme.node_repo(),
     );
     assert_eq!(
         node_kind_style(NodeKind::AgentSession, &theme).color,
-        theme.node_agent_session,
+        theme.node_agent_session(),
     );
     // ForgePr is the documented sentinel — callers pick from
     // theme.pr_* themselves.

@@ -1076,10 +1076,10 @@ fn kind_chip_span_renders_per_kind_glyph_in_node_kind_color() {
     // without misleading the operator.
     let theme = Theme::default();
     let cases = [
-        (NodeKind::Workspace, "▦", theme.node_workspace),
-        (NodeKind::MuxSession, "▣", theme.node_mux_session),
-        (NodeKind::Fork, "⋎", theme.node_fork),
-        (NodeKind::Checkout, "◇", theme.node_checkout),
+        (NodeKind::Workspace, "▦", theme.node_workspace()),
+        (NodeKind::MuxSession, "▣", theme.node_mux_session()),
+        (NodeKind::Fork, "⋎", theme.node_fork()),
+        (NodeKind::Checkout, "◇", theme.node_checkout()),
     ];
     for (tag, glyph, expected_color) in cases {
         let span = kind_chip_span(Some(tag), &theme);
@@ -1094,11 +1094,11 @@ fn kind_chip_span_renders_per_kind_glyph_in_node_kind_color() {
     // because the chip layer doesn't carry PR state.
     let pr = kind_chip_span(Some(NodeKind::ForgePr), &theme);
     assert_eq!(pr.content.as_ref(), "⇄");
-    assert_eq!(pr.style.fg, Some(theme.pr_open));
+    assert_eq!(pr.style.fg, Some(theme.pr_open()));
     // Missing kind → dim `?` fallback.
     let unknown = kind_chip_span(None, &theme);
     assert_eq!(unknown.content.as_ref(), "?");
-    assert!(unknown.style.add_modifier.contains(theme.placeholder));
+    assert!(unknown.style.add_modifier.contains(theme.muted));
 }
 
 #[test]
@@ -1208,7 +1208,7 @@ fn other_link_line_dispatches_per_edge_state() {
         .iter()
         .find(|s| s.content.contains("tmux:x"))
         .expect("neighbor-label span present on conflict row");
-    assert_eq!(label_span.style.fg, Some(theme.edge_conflict));
+    assert_eq!(label_span.style.fg, Some(theme.edge_conflict()));
     assert!(label_span.style.add_modifier.contains(Modifier::BOLD));
 
     // AltOf: no prefix, label color = edge_alt_of, no BOLD.
@@ -1235,7 +1235,7 @@ fn other_link_line_dispatches_per_edge_state() {
         .iter()
         .find(|s| s.content.contains("tmux:x"))
         .expect("neighbor-label span present on alt row");
-    assert_eq!(alt_label.style.fg, Some(theme.edge_alt_of));
+    assert_eq!(alt_label.style.fg, Some(theme.edge_alt_of()));
     assert!(!alt_label.style.add_modifier.contains(Modifier::BOLD));
 }
 
@@ -1785,10 +1785,10 @@ fn node_kind_glyph_span_uses_slate_glyph_and_theme_color() {
     let theme = Theme::default();
     let span = node_kind_glyph_span(NodeKind::Repo, &theme);
     assert_eq!(span.content, "◆ ");
-    assert_eq!(span.style.fg, Some(theme.node_repo));
+    assert_eq!(span.style.fg, Some(theme.node_repo()));
     let workspace = node_kind_glyph_span(NodeKind::Workspace, &theme);
     assert_eq!(workspace.content, "▦ ");
-    assert_eq!(workspace.style.fg, Some(theme.node_workspace));
+    assert_eq!(workspace.style.fg, Some(theme.node_workspace()));
 }
 
 #[test]
@@ -1838,7 +1838,7 @@ fn a_pinned_pr_draws_its_kind_glyph_and_word_in_one_style() {
     // the open hue every stateless PR glyph uses.
     let kind = row_kind_glyph_span(&RowKind::Mixed(pr_row(None)), &theme).expect("a glyph");
     assert_eq!(kind.content, "⇄ ");
-    assert_eq!(kind.style, Style::default().fg(theme.pr_open));
+    assert_eq!(kind.style, Style::default().fg(theme.pr_open()));
 }
 
 #[test]
@@ -1876,11 +1876,11 @@ fn pr_tracking_span_tells_a_local_branch_from_none() {
 
     let none = pr_tracking_span(&untracked, &theme);
     assert_eq!(none.content, "◌");
-    assert!(none.style.add_modifier.contains(theme.placeholder));
+    assert!(none.style.add_modifier.contains(theme.muted));
 
     let some = pr_tracking_span(&tracked, &theme);
     assert_eq!(some.content, "⌥");
-    assert_eq!(some.style.fg, Some(theme.node_branch));
+    assert_eq!(some.style.fg, Some(theme.node_branch()));
     assert_eq!(some.width(), none.width());
 }
 
@@ -2320,7 +2320,7 @@ fn session_recency_span_picks_bucket_style_from_theme() {
     let spans = render_session_spans(&unknown, &theme, now, None);
     assert_eq!(
         recency_span(&spans, "—").style,
-        Style::default().add_modifier(theme.placeholder),
+        Style::default().add_modifier(theme.muted),
         "missing activity_epoch falls back to placeholder dimming",
     );
 }
@@ -2911,7 +2911,7 @@ fn compact_path_helpers_keep_primary_label_short() {
 fn compact_path_helpers_split_workspace_display_at_double_space() {
     // `format_workspace_display` joins label, members, and
     // provider with `  ` separators. The renderer bolds the
-    // label and renders the rest with `theme.placeholder`, so
+    // label and renders the rest with `theme.muted`, so
     // the helpers must split there to keep the member list and
     // provider chip out of the bold span — parallel to how a
     // repo header bolds the basename and leaves the CWD path
@@ -3858,7 +3858,7 @@ fn agentless_mux_row_labels_itself_with_the_pane_command() {
         .iter()
         .find(|span| span.content.contains("npm"))
         .expect("chip span");
-    assert_eq!(chip.style.bg, Some(theme.command_badge));
+    assert_eq!(chip.style.bg, Some(theme.command_badge()));
 }
 
 #[test]
@@ -3884,7 +3884,7 @@ fn agentless_mux_row_running_a_harness_uses_the_harness_badge() {
             .find(|span| span.content.trim() == label)
             .unwrap_or_else(|| panic!("{label} chip for {program}: {spans:?}"));
         assert_eq!(chip.style.fg, Some(theme.harness_color(label)), "{program}");
-        assert_ne!(chip.style.bg, Some(theme.command_badge), "{program}");
+        assert_ne!(chip.style.bg, Some(theme.command_badge()), "{program}");
     }
 }
 
@@ -3928,7 +3928,7 @@ fn row_awaiting_handoff_dims_and_spins_in_the_attach_cell() {
         SPINNER_FRAMES.iter().any(|frame| text.contains(frame)),
         "pending row shows a spinner frame: {text}"
     );
-    let dim = app.theme().placeholder;
+    let dim = app.theme().muted;
     assert!(
         pending
             .spans
@@ -5028,7 +5028,7 @@ fn pr_title_takes_the_remaining_width_and_is_cut_with_an_ellipsis() {
     assert!(text.ends_with('…'), "{text:?}");
     assert_eq!(unicode_width::UnicodeWidthStr::width(text.as_str()), 30);
     let title = spans.last().expect("title span");
-    assert_eq!(title.style.fg, Some(theme.secondary_text));
+    assert_eq!(title.style.fg, Some(theme.inert));
 
     // No room for even a sliver of title: it is left out, not wrapped.
     let tight = pr_text(&render_pr_spans(&pr, &theme, align, 14, 0));
@@ -5341,7 +5341,7 @@ fn gone_and_planned_rows_render_dimmed_and_live_rows_do_not() {
             };
             let x = u16::try_from(line[..byte].chars().count()).unwrap();
             let style = buffer[(x, y)].style();
-            style.fg == Some(Theme::default().ghost)
+            style.fg == Some(Theme::default().inert)
                 && style.add_modifier.contains(Modifier::ITALIC)
         })
     };
@@ -6512,12 +6512,12 @@ type PrStateCase = (
 fn pr_state_cases(theme: &Theme) -> Vec<PrStateCase> {
     use crate::tui::icons::state;
     let fg = |color| Style::default().fg(color);
-    let dim = Style::default().add_modifier(theme.placeholder);
+    let dim = Style::default().add_modifier(theme.muted);
     let (open, draft, merged, closed) = (
-        fg(theme.pr_open),
-        fg(theme.pr_draft),
-        fg(theme.pr_merged),
-        fg(theme.pr_closed),
+        fg(theme.pr_open()),
+        fg(theme.pr_draft()),
+        fg(theme.pr_merged()),
+        fg(theme.pr_closed()),
     );
     vec![
         (Some("open"), false, state::PR_OPEN, "open", open),

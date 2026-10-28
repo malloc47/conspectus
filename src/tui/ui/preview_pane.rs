@@ -144,11 +144,11 @@ fn failure_banner(entry: &crate::tui::messages::LogEntry, theme: &Theme) -> Text
     }
     lines.push(Line::styled(
         "! for the full output".to_string(),
-        Style::default().add_modifier(theme.placeholder),
+        Style::default().add_modifier(theme.muted),
     ));
     lines.push(Line::styled(
         "─".repeat(40),
-        Style::default().add_modifier(theme.divider),
+        Style::default().add_modifier(theme.muted),
     ));
     Text::from(lines)
 }

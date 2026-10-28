@@ -36,13 +36,13 @@ pub fn harness_badge(label: &str, theme: &Theme) -> Span<'static> {
 
 /// Render a pane's program name as a badge the same width as
 /// [`harness_badge`], for mux rows with no linked agent. Every program
-/// shares `theme.command_badge` as the background, under bold white
+/// shares `theme.command_badge()` as the background, under bold white
 /// text, so these chips stay visually quieter than the per-harness
 /// colors. Names longer than the badge are cut with `…`.
 pub fn command_badge(command: &str, theme: &Theme) -> Span<'static> {
     let style = Style::default()
         .fg(Color::White)
-        .bg(theme.command_badge)
+        .bg(theme.command_badge())
         .add_modifier(Modifier::BOLD);
     badge_span(command, style, theme.badge_width)
 }
@@ -87,16 +87,14 @@ mod tests {
         let long = command_badge("conspectus", &theme);
         assert_eq!(long.content, " conspec… ");
         assert_eq!(long.content.chars().count(), theme.badge_width + 2);
-        assert_eq!(long.style.bg, Some(theme.command_badge));
+        assert_eq!(long.style.bg, Some(theme.command_badge()));
         assert_eq!(long.style.fg, Some(Color::White));
     }
 
     #[test]
     fn badges_follow_the_theme_badge_width() {
-        let mut theme = Theme {
-            badge_width: 5,
-            ..Theme::default()
-        };
+        let mut theme = Theme::default();
+        theme.badge_width = 5;
         assert_eq!(harness_badge("codex", &theme).content, " codex ");
         assert_eq!(harness_badge("opencode", &theme).content, " open… ");
         assert_eq!(command_badge("npm", &theme).content, " npm   ");
@@ -120,7 +118,7 @@ mod tests {
     fn harness_badge_unknown_harness_uses_unknown_color() {
         let theme = Theme::default();
         let span = harness_badge("custom", &theme);
-        assert_eq!(span.style.fg, Some(theme.harness_unknown));
+        assert_eq!(span.style.fg, Some(theme.harness_unknown()));
     }
 
     #[test]

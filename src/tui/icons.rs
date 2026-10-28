@@ -78,7 +78,7 @@ pub mod state {
     /// A session with no definitive mux (none or ambiguous), or a mux
     /// with no client attached. Drawn dim.
     pub const UNLINKED: &str = "∘";
-    /// A mux that has stopped running. Drawn in the ghost color.
+    /// A mux that has stopped running. Drawn in the ghost look.
     pub const STOPPED: &str = "⊘";
     /// A state that couldn't be checked: a mux whose server didn't
     /// answer, or a pull request with no state yet.
@@ -95,7 +95,7 @@ pub mod state {
     pub const PIN_RUNNING: &str = "◉";
     /// A pin on an entity that is stopped, removed, missing, or not
     /// started yet: the hollow twin of [`PIN_RUNNING`], drawn in the
-    /// ghost color.
+    /// ghost look.
     pub const PIN_STOPPED: &str = "◎";
 
     /// Every state glyph, for tests that check width and uniqueness.
@@ -214,15 +214,15 @@ pub fn node_kind_style(kind: NodeKind, theme: &Theme) -> NodeKindStyle {
 /// `node_*` theme field.
 fn theme_color(kind: NodeKind, theme: &Theme) -> Color {
     match kind {
-        NodeKind::Workspace => theme.node_workspace,
-        NodeKind::Repo => theme.node_repo,
-        NodeKind::Checkout => theme.node_checkout,
-        NodeKind::AgentSession => theme.node_agent_session,
-        NodeKind::MuxSession => theme.node_mux_session,
-        NodeKind::Pin => theme.node_mux_session,
-        NodeKind::RuntimeProcess => theme.node_runtime_process,
-        NodeKind::Branch => theme.node_branch,
-        NodeKind::Fork => theme.node_fork,
+        NodeKind::Workspace => theme.node_workspace(),
+        NodeKind::Repo => theme.node_repo(),
+        NodeKind::Checkout => theme.node_checkout(),
+        NodeKind::AgentSession => theme.node_agent_session(),
+        NodeKind::MuxSession => theme.node_mux_session(),
+        NodeKind::Pin => theme.node_mux_session(),
+        NodeKind::RuntimeProcess => theme.node_runtime_process(),
+        NodeKind::Branch => theme.node_branch(),
+        NodeKind::Fork => theme.node_fork(),
         NodeKind::ForgePr => Color::Reset,
     }
 }

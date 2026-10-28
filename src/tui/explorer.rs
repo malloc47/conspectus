@@ -963,13 +963,13 @@ fn build_breadcrumb_hops(hops: &[BreadcrumbHop], theme: &Theme) -> Vec<RenderedB
             let kind = NodeKind::from(&hop.focused);
             let style = node_kind_style(kind, theme);
             // ForgePr's slate color is `Color::Reset` (the caller
-            // is supposed to pick `theme.pr_open` / `pr_closed` /
+            // is supposed to pick `theme.pr_open()` / `pr_closed` /
             // `pr_merged` / `pr_draft` from PR state). The
             // breadcrumb does not have PR state on hand, so fall
             // back to `pr_open` — the same dodge `kind_chip_span`
             // uses for the same reason.
             let color = if matches!(kind, NodeKind::ForgePr) {
-                theme.pr_open
+                theme.pr_open()
             } else {
                 style.color
             };
@@ -1006,7 +1006,7 @@ fn build_breadcrumb_line(
     theme: &Theme,
     available: usize,
 ) -> Line<'static> {
-    let secondary = Style::default().fg(theme.secondary_text);
+    let secondary = Style::default().fg(theme.inert);
     let full_width: usize = rendered.iter().map(|h| h.width).sum::<usize>()
         + BREADCRUMB_SEPARATOR_WIDTH * rendered.len().saturating_sub(1);
     if full_width <= available || rendered.len() <= 1 {

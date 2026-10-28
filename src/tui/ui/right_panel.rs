@@ -19,7 +19,7 @@ pub(super) fn draw_right_panel(app: &mut App, frame: &mut Frame<'_>, area: Rect)
     // loaded yet): show the placeholder instead of the explorer.
     if app.explorer().is_none() {
         let widget = Paragraph::new(empty_right_panel_text(app))
-            .style(Style::default().add_modifier(app.theme().placeholder));
+            .style(Style::default().add_modifier(app.theme().muted));
         frame.render_widget(widget, inner);
         return;
     }
@@ -179,7 +179,7 @@ pub(super) fn right_panel_title(app: &App, width: usize) -> Line<'static> {
     if let Some(node_kind) = right_panel_node_kind(app) {
         let style = node_kind_style(node_kind, app.theme());
         let color = if matches!(node_kind, NodeKind::ForgePr) {
-            app.theme().pr_open
+            app.theme().pr_open()
         } else {
             style.color
         };
@@ -218,12 +218,12 @@ pub(super) fn right_panel_title(app: &App, width: usize) -> Line<'static> {
             available.max(8),
         ) {
             // The leading ` ◄ ` and trailing `depth N` chrome stays
-            // in `secondary_text`; the chain itself carries its own
-            // per-hop styling (kind glyph in kind color, tag in
-            // secondary_text) so the spans are pushed verbatim.
-            spans.push(span!(Style::default().fg(app.theme().secondary_text); " ◄ "));
+            // `inert`; the chain itself carries its own per-hop
+            // styling (kind glyph in kind color, tag `inert`) so the
+            // spans are pushed verbatim.
+            spans.push(span!(Style::default().fg(app.theme().inert); " ◄ "));
             spans.extend(chain.spans);
-            spans.push(span!(Style::default().fg(app.theme().secondary_text); "{depth_suffix}"));
+            spans.push(span!(Style::default().fg(app.theme().inert); "{depth_suffix}"));
         }
     }
     spans.push(Span::raw(" "));
@@ -294,14 +294,14 @@ pub(super) fn chip_divider_line(
     let trailing_rule = 2;
     let leading_rule = width.saturating_sub(chip_width + suffix_width + trailing_rule);
     let chip_span = span!(
-        Style::default().fg(theme.panel_focus_accent).add_modifier(theme.badge);
+        Style::default().fg(theme.accent).add_modifier(theme.badge);
         "{chip_text}"
     );
-    let suffix_span = (suffix_width > 0)
-        .then(|| span!(Style::default().fg(theme.secondary_text); "{suffix_text}"));
+    let suffix_span =
+        (suffix_width > 0).then(|| span!(Style::default().fg(theme.inert); "{suffix_text}"));
     let mut spans = Vec::with_capacity(4);
     if leading_rule > 0 {
-        spans.push(span!(theme.divider; "{}", "─".repeat(leading_rule)));
+        spans.push(span!(theme.muted; "{}", "─".repeat(leading_rule)));
     }
     match anchor {
         ChipAnchor::Left => {
@@ -317,7 +317,7 @@ pub(super) fn chip_divider_line(
             spans.push(chip_span);
         }
     }
-    spans.push(span!(theme.divider; "{}", "─".repeat(trailing_rule)));
+    spans.push(span!(theme.muted; "{}", "─".repeat(trailing_rule)));
     Line::from(spans)
 }
 
@@ -463,7 +463,7 @@ pub(super) fn render_node_field_line(
     theme: &Theme,
 ) -> Line<'static> {
     let mut style = if field.placeholder {
-        Style::default().add_modifier(theme.placeholder)
+        Style::default().add_modifier(theme.muted)
     } else {
         Style::default()
     };
@@ -482,7 +482,7 @@ pub(super) fn render_node_field_line(
     }
     spans.push(span!(style; "{}", field.value.clone()));
     if field.long_value.is_some() {
-        spans.push(span!(theme.placeholder; "  (truncated · o)"));
+        spans.push(span!(theme.muted; "  (truncated · o)"));
     }
     if let Some(annotation) = field.annotation {
         spans.push(Span::raw(" "));
@@ -503,17 +503,17 @@ pub(super) fn render_node_field_line(
 /// a dim `?` so the chip slot stays visible without misleading the
 /// operator.
 ///
-/// `ForgePr`'s glyph color reuses `theme.pr_open` here because the
+/// `ForgePr`'s glyph color reuses `theme.pr_open()` here because the
 /// chip-rendering surfaces do not carry PR state down — the row
 /// tree's [`pr_kind_glyph_span`] handles state-aware coloring
 /// directly off the row.
 pub(super) fn kind_chip_span(kind: Option<NodeKind>, theme: &Theme) -> Span<'static> {
     let Some(node_kind) = kind else {
-        return span!(theme.placeholder; "?");
+        return span!(theme.muted; "?");
     };
     let style = node_kind_style(node_kind, theme);
     let color = if matches!(node_kind, NodeKind::ForgePr) {
-        theme.pr_open
+        theme.pr_open()
     } else {
         style.color
     };
@@ -546,9 +546,7 @@ pub(super) fn render_validated_link_line(
         width,
         "  ",
         None,
-        Style::default()
-            .fg(theme.link_id)
-            .add_modifier(Modifier::BOLD),
+        Style::default().fg(theme.link).add_modifier(Modifier::BOLD),
     )
 }
 
@@ -558,10 +556,10 @@ pub(super) fn render_validated_link_line(
 /// which are conflicts:
 ///
 /// - `AltOf(_)` → 6-space indent, no prefix glyph, label in
-///   `theme.edge_alt_of`. Quiet — these are candidates the
+///   `theme.edge_alt_of()`. Quiet — these are candidates the
 ///   resolver considered but didn't pick.
-/// - `Conflict` → `▲ ` prefix in `theme.edge_conflict`, label in
-///   `theme.edge_conflict` + BOLD. The `▲` is the cross-mode
+/// - `Conflict` → `▲ ` prefix in `theme.edge_conflict()`, label in
+///   `theme.edge_conflict()` + BOLD. The `▲` is the cross-mode
 ///   anchor (survives `NO_COLOR`); it also lines up vocabulary
 ///   with the Other header's `K ▲` summary count.
 /// - `Resolves` is unreachable here — Resolves rows live in the
@@ -579,13 +577,13 @@ pub(super) fn render_other_link_line(
     let (indent, prefix_span, label_style) = match link.edge_state {
         EdgeStateLabel::Conflict => {
             let conflict_style = Style::default()
-                .fg(theme.edge_conflict)
+                .fg(theme.edge_conflict())
                 .add_modifier(Modifier::BOLD);
             let prefix = span!(conflict_style; "▲ ");
             ("    ", Some(prefix), conflict_style)
         }
         EdgeStateLabel::AltOf(_) | EdgeStateLabel::Resolves => {
-            ("      ", None, Style::default().fg(theme.edge_alt_of))
+            ("      ", None, Style::default().fg(theme.edge_alt_of()))
         }
     };
     render_related_row(
@@ -694,7 +692,7 @@ pub(super) fn render_other_header_line(
     suffix.push(')');
     let text = format!("  {glyph} Other  {suffix}");
     let mut style = Style::default()
-        .fg(theme.secondary_text)
+        .fg(theme.inert)
         .add_modifier(Modifier::BOLD);
     if highlight {
         style = style.add_modifier(Modifier::REVERSED);
@@ -714,7 +712,7 @@ pub(super) fn render_other_unresolved_line(
     let verb = crate::tui::explorer::directional_verb(&group.relation, group.direction);
     let detail = unresolved_evidence_summary(row);
     let text = format!("      {verb:<VERB_COLUMN_WIDTH$} — {detail}",);
-    let mut style = Style::default().add_modifier(theme.placeholder);
+    let mut style = Style::default().add_modifier(theme.muted);
     if highlight {
         style = style.add_modifier(Modifier::REVERSED);
     }
@@ -825,7 +823,7 @@ pub(super) fn draw_explorer_preview(
                     .join(" · ");
                 lines.push(Line::from(vec![
                     span!(Modifier::BOLD; "  {label:<14}"),
-                    span!(theme.placeholder; "{value}"),
+                    span!(theme.muted; "{value}"),
                 ]));
             }
         }
@@ -856,7 +854,7 @@ pub(super) fn draw_explorer_preview(
             lines.push(Line::from(vec![
                 span!(Modifier::BOLD; "  {:<14}", "edge"),
                 span!(
-                    theme.placeholder;
+                    theme.muted;
                     "{} · {} · {}",
                     provenance.snake_case(),
                     confidence.snake_case(),
@@ -903,7 +901,7 @@ fn selected_hit_lines(app: &App) -> Vec<Line<'static>> {
         return Vec::new();
     };
     let theme = app.theme();
-    let secondary = Style::default().fg(theme.secondary_text);
+    let secondary = Style::default().fg(theme.inert);
     let header = Line::from(vec![
         Span::styled("match", Style::default().add_modifier(Modifier::BOLD)),
         Span::styled(

@@ -148,7 +148,7 @@ fn a_plan_draws_its_commands_in_the_accent_style_and_a_footer() {
         text.push('\n');
     }
     let style = command_cell.expect("the command is drawn");
-    assert_eq!(style.fg, Some(theme.panel_focus_accent));
+    assert_eq!(style.fg, Some(theme.accent));
     assert!(text.contains("y to copy"), "{text}");
     assert!(text.contains("to scroll"), "{text}");
 }

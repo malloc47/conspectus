@@ -185,7 +185,7 @@ impl Widget for RowMenuWidget<'_> {
         let block = Block::default()
             .borders(Borders::ALL)
             .title(format!(" {} ", self.state.title))
-            .border_style(Style::default().fg(self.theme.panel_focus_accent));
+            .border_style(Style::default().fg(self.theme.accent));
         let inner = block.inner(rect);
         block.render(rect, buf);
 

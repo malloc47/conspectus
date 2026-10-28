@@ -36,11 +36,11 @@ use crate::tui::Theme;
 /// widget, so the `title` and `description` slots stay defaulted —
 /// they are unreachable in our composition. The remaining slots map:
 ///
-/// - `cursor` → `panel_focus_accent` so the `>` indicator pops.
-/// - `checked` → `panel_focus_accent` + BOLD so checked items read
+/// - `cursor` → `accent` so the `>` indicator pops.
+/// - `checked` → `accent` + BOLD so checked items read
 ///   as the operator's selection.
 /// - `unchecked` → unset so labels render as regular text.
-/// - `disabled` → `placeholder` modifier so disabled rows dim
+/// - `disabled` → the `muted` modifier so disabled rows dim
 ///   uniformly (no disabled options today; future-proofs the swap).
 /// - `validation_error` / `validation_success` → `error` / `success`
 ///   colors so future limit/required validators inherit the project
@@ -49,12 +49,12 @@ fn cheese_styles_from_theme(theme: &Theme) -> CheeseMultiSelectStyles {
     CheeseMultiSelectStyles {
         title: Style::default(),
         description: Style::default(),
-        cursor: Style::default().fg(theme.panel_focus_accent),
+        cursor: Style::default().fg(theme.accent),
         checked: Style::default()
-            .fg(theme.panel_focus_accent)
+            .fg(theme.accent)
             .add_modifier(Modifier::BOLD),
         unchecked: Style::default(),
-        disabled: Style::default().add_modifier(theme.placeholder),
+        disabled: Style::default().add_modifier(theme.muted),
         validation_error: Style::default().fg(theme.error),
         validation_success: Style::default().fg(theme.success),
     }

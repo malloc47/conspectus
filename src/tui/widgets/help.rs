@@ -574,10 +574,10 @@ pub(super) fn push_footer(lines: &mut Vec<Line<'static>>, theme: &Theme, width: 
         Some(w) => {
             let budget = u16::try_from(w).unwrap_or(u16::MAX);
             for chunk in crate::viewer::render::word_wrap(&footer, budget) {
-                lines.push(line![span!(theme.placeholder; "{}", chunk.trim_end())]);
+                lines.push(line![span!(theme.muted; "{}", chunk.trim_end())]);
             }
         }
-        None => lines.push(line![span!(theme.placeholder; "{footer}")]),
+        None => lines.push(line![span!(theme.muted; "{footer}")]),
     }
 }
 
@@ -632,7 +632,7 @@ const KEY_COLUMN_WIDTH: usize = 16;
 
 /// Render a binding as `  <key:<14>  <description>`, wrapping the
 /// description under a hanging indent when `width` is too narrow. The
-/// key column inherits `theme.panel_focus_accent` so operators scan
+/// key column inherits `theme.accent` so operators scan
 /// the keymap by accent color.
 pub(super) fn binding_lines(
     key: &str,
@@ -643,7 +643,7 @@ pub(super) fn binding_lines(
     // A key label wider than its column gets a line to itself, with the
     // description wrapped beneath on the hanging indent.
     if unicode_width::UnicodeWidthStr::width(key) > KEY_COLUMN_WIDTH - 2 {
-        let key_line = line![span!(Style::default().fg(theme.panel_focus_accent); "  {key}")];
+        let key_line = line![span!(Style::default().fg(theme.accent); "  {key}")];
         let mut out = vec![key_line];
         let budget = width.map_or(u16::MAX, |w| {
             u16::try_from(w.saturating_sub(KEY_COLUMN_WIDTH)).unwrap_or(u16::MAX)
@@ -656,7 +656,7 @@ pub(super) fn binding_lines(
         }
         return out;
     }
-    let key_span = span!(Style::default().fg(theme.panel_focus_accent); "  {key:<14}");
+    let key_span = span!(Style::default().fg(theme.accent); "  {key:<14}");
     let Some(width) = width.filter(|w| *w > KEY_COLUMN_WIDTH + 8) else {
         return vec![line![key_span, description.to_string()]];
     };
@@ -683,10 +683,10 @@ fn push_icon_legend(lines: &mut Vec<Line<'static>>, theme: &Theme, width: Option
         let style = node_kind_style(kind, theme);
         // ForgePr's slate color is `Color::Reset`; mirror the
         // dodge used in `kind_chip_span` / the breadcrumb /
-        // search-result renderers — fall back to `theme.pr_open`
+        // search-result renderers — fall back to `theme.pr_open()`
         // since the legend doesn't carry PR state.
         let color = if matches!(kind, NodeKind::ForgePr) {
-            theme.pr_open
+            theme.pr_open()
         } else {
             style.color
         };
@@ -713,18 +713,18 @@ fn push_mux_state_legend(lines: &mut Vec<Line<'static>>, theme: &Theme, width: O
         .fg(theme.warning)
         .add_modifier(Modifier::BOLD);
     let ghost = Style::default()
-        .fg(theme.ghost)
+        .fg(theme.inert)
         .add_modifier(Modifier::ITALIC);
     let entries: [(&str, Style, &str, &str); 5] = [
         (
             state::LINKED,
-            Style::default().fg(theme.mux_attached),
+            Style::default().fg(theme.mux_attached()),
             "Linked",
             "session: one mux, Enter/a attaches · mux: client attached",
         ),
         (
             state::UNLINKED,
-            Style::default().add_modifier(theme.mux_unmuxed),
+            Style::default().add_modifier(theme.muted),
             "Not linked",
             "session: no mux, or several candidates · mux: no client",
         ),
@@ -736,7 +736,7 @@ fn push_mux_state_legend(lines: &mut Vec<Line<'static>>, theme: &Theme, width: O
         ),
         (
             state::UNKNOWN,
-            Style::default().add_modifier(theme.placeholder),
+            Style::default().add_modifier(theme.muted),
             "Unknown",
             "the mux backend didn't report whether a client is attached",
         ),
@@ -801,7 +801,7 @@ fn push_pin_marker_legend(lines: &mut Vec<Line<'static>>, theme: &Theme, width: 
         (
             state::PIN_STOPPED,
             Style::default()
-                .fg(theme.ghost)
+                .fg(theme.inert)
                 .add_modifier(Modifier::ITALIC),
             "Pinned, not running",
             "the pinned entity is stopped, removed, missing, or not started yet; Enter starts it",

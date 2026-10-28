@@ -69,14 +69,11 @@ impl PrStatus {
     pub fn mark(self, theme: &Theme) -> (&'static str, Style) {
         let hue = |color| Style::default().fg(color);
         match self {
-            Self::Open => (state::PR_OPEN, hue(theme.pr_open)),
-            Self::Draft => (state::PR_DRAFT, hue(theme.pr_draft)),
-            Self::Merged => (state::PR_MERGED, hue(theme.pr_merged)),
-            Self::Closed => (state::PR_CLOSED, hue(theme.pr_closed)),
-            Self::Unknown => (
-                state::UNKNOWN,
-                Style::default().add_modifier(theme.placeholder),
-            ),
+            Self::Open => (state::PR_OPEN, hue(theme.pr_open())),
+            Self::Draft => (state::PR_DRAFT, hue(theme.pr_draft())),
+            Self::Merged => (state::PR_MERGED, hue(theme.pr_merged())),
+            Self::Closed => (state::PR_CLOSED, hue(theme.pr_closed())),
+            Self::Unknown => (state::UNKNOWN, Style::default().add_modifier(theme.muted)),
         }
     }
 }

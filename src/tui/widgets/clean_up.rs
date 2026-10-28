@@ -132,7 +132,7 @@ impl Widget for CleanUpWidget<'_> {
         let block = Block::default()
             .borders(Borders::ALL)
             .title(" Clean up ")
-            .border_style(Style::default().fg(self.theme.panel_focus_accent));
+            .border_style(Style::default().fg(self.theme.accent));
         let inner = block.inner(rect);
         block.render(rect, buf);
         Paragraph::new(lines).render(inner, buf);

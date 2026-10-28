@@ -150,7 +150,7 @@ impl ValueModalState {
     /// The value wrapped to `width` cells; a command line keeps the
     /// command style on every row it wraps onto.
     fn wrapped(&self, width: u16, theme: &Theme) -> Vec<Line<'static>> {
-        let command_style = Style::default().fg(theme.panel_focus_accent);
+        let command_style = Style::default().fg(theme.accent);
         self.value
             .lines()
             .flat_map(|line| {
@@ -205,7 +205,7 @@ impl ValueModalWidget<'_> {
         // Framing through `tui_popup::Popup`.
         let modal = centered_modal_rect(area);
         let label_style = Style::default()
-            .fg(self.theme.panel_focus_accent)
+            .fg(self.theme.accent)
             .add_modifier(Modifier::BOLD);
         let title = line![" ", span!(label_style; " {} ", self.state.label), " "];
         let mut fit = ScrollFit::default();
@@ -270,7 +270,7 @@ impl Widget for ValueModalBody<'_> {
             crate::tui::keybindings::overlay::VALUE_MODAL_KEYS,
         );
         Paragraph::new(hint)
-            .style(Style::default().fg(self.theme.secondary_text))
+            .style(Style::default().fg(self.theme.inert))
             .render(footer_area, buf);
     }
 }

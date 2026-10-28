@@ -59,7 +59,7 @@ pub(super) fn draw_left_panel(app: &mut App, frame: &mut Frame<'_>, area: Rect) 
         let placeholder = empty_left_panel_text(app);
         let widget = Paragraph::new(placeholder)
             .wrap(Wrap { trim: false })
-            .style(Style::default().add_modifier(app.theme().placeholder));
+            .style(Style::default().add_modifier(app.theme().muted));
         frame.render_widget(widget, inner);
         return;
     }
@@ -197,7 +197,7 @@ pub(super) fn left_panel_title(app: &App, width: usize) -> Line<'static> {
     let labels: Vec<&str> = views.iter().map(|&view| view_label(view)).collect();
     let active_index = views.iter().position(|&view| view == active).unwrap_or(0);
     let fit = tab_strip_fit(&labels, active_index, width.saturating_sub(lead_width));
-    let dim = Style::default().fg(theme.secondary_text);
+    let dim = Style::default().fg(theme.inert);
     let mut spans = lead;
     for (position, &index) in fit.shown.iter().enumerate() {
         if position > 0 {
@@ -212,7 +212,7 @@ pub(super) fn left_panel_title(app: &App, width: usize) -> Line<'static> {
             spans.push(Span::styled(
                 label,
                 Style::default()
-                    .fg(theme.panel_focus_accent)
+                    .fg(theme.accent)
                     .add_modifier(Modifier::BOLD),
             ));
         } else {
@@ -327,7 +327,7 @@ pub(super) fn search_header(app: &App, width: usize) -> Option<Line<'static>> {
     if entry.stopped {
         note.push_str(" · stopped");
     }
-    let dim = Style::default().add_modifier(theme.placeholder);
+    let dim = Style::default().add_modifier(theme.muted);
     let filtering = if app.viewed_is_filter() {
         " · filtering"
     } else {
@@ -339,13 +339,13 @@ pub(super) fn search_header(app: &App, width: usize) -> Option<Line<'static>> {
         .saturating_sub(UnicodeWidthStr::width(lead.as_str()) + UnicodeWidthStr::width(filtering));
     let detail = truncate_to_width(&format!(" · {reach} · {note}"), room);
     let mut spans = vec![
-        span!(Style::default().fg(theme.panel_focus_accent).add_modifier(Modifier::BOLD);
+        span!(Style::default().fg(theme.accent).add_modifier(Modifier::BOLD);
             "search {position}/{total}"),
         span!(Modifier::BOLD; " \"{query}\""),
         span!(dim; "{detail}"),
     ];
     if !filtering.is_empty() {
-        spans.push(span!(Style::default().fg(theme.panel_focus_accent); "{filtering}"));
+        spans.push(span!(Style::default().fg(theme.accent); "{filtering}"));
     }
     if total > 1 {
         let hint = "< older  > newer";
@@ -538,11 +538,11 @@ pub(super) fn append_group_body_spans(
             }
             _ => secondary,
         };
-        spans.push(span!(theme.placeholder; "  {rendered}"));
+        spans.push(span!(theme.muted; "  {rendered}"));
     }
     if group.is_launch_context {
         spans.push(span!(
-            Style::default().fg(theme.cwd_mark).add_modifier(theme.placeholder);
+            Style::default().fg(theme.cwd_mark()).add_modifier(theme.muted);
             "  (cwd)"
         ));
     }
@@ -601,7 +601,7 @@ pub(super) fn append_group_summary_spans(
         return;
     }
     let count = format!("({})", summary.agents);
-    spans.push(span!(theme.placeholder; "  {count:>count_width$}"));
+    spans.push(span!(theme.muted; "  {count:>count_width$}"));
     if summary.ambiguous > 0 {
         spans.push(Span::raw("  "));
         spans.push(span!(
@@ -841,7 +841,7 @@ pub(super) fn age_span(
 ) -> Span<'static> {
     let text = age.unwrap_or(crate::tui::icons::marks::NO_VALUE);
     let style = recency_bucket(Some(now), epoch).map_or_else(
-        || Style::default().add_modifier(theme.placeholder),
+        || Style::default().add_modifier(theme.muted),
         |bucket| bucket.style(theme),
     );
     span!(style; "{:>width$}", truncate_to_width_strict(text, AGE_CELL_WIDTH), width = AGE_CELL_WIDTH)
@@ -869,27 +869,27 @@ pub(super) fn render_mixed_spans(
         // link color, the chip, the age, then the state glyph.
         let label_width = mux_label_column_width(budget);
         spans.push(span!(
-            Style::default().fg(theme.link_id);
+            Style::default().fg(theme.link);
             "{}",
             pad_to_width(truncate_to_width_strict(&mixed.label, label_width), label_width)
         ));
         spans.push(Span::raw("  "));
         match &mixed.chip {
             Some(chip) => spans.push(mixed_chip_span(chip, theme)),
-            None => spans.push(span!(theme.placeholder; " no agent ")),
+            None => spans.push(span!(theme.muted; " no agent ")),
         }
         spans.push(Span::raw("  "));
         spans.push(age_span(mixed.age.as_deref(), mixed.age_epoch, now, theme));
         spans.push(Span::raw("  "));
         spans.push(match handoff_spinner {
-            Some(glyph) => span!(Style::default().fg(theme.secondary_text); "{glyph}"),
+            Some(glyph) => span!(Style::default().fg(theme.inert); "{glyph}"),
             None => match mixed.state {
                 Some(EntityState::Stopped) => span!(ghost_style(theme); "{}", state::STOPPED),
                 Some(EntityState::Linked) => {
-                    span!(Style::default().fg(theme.mux_attached); "{}", state::LINKED)
+                    span!(Style::default().fg(theme.mux_attached()); "{}", state::LINKED)
                 }
-                Some(EntityState::Unlinked) => span!(theme.mux_unmuxed; "{}", state::UNLINKED),
-                Some(EntityState::Unknown) | None => span!(theme.placeholder; "{}", state::UNKNOWN),
+                Some(EntityState::Unlinked) => span!(theme.muted; "{}", state::UNLINKED),
+                Some(EntityState::Unknown) | None => span!(theme.muted; "{}", state::UNKNOWN),
             },
         });
         let room = budget.saturating_sub(spans_width(&spans));
@@ -897,7 +897,7 @@ pub(super) fn render_mixed_spans(
             let content = truncate_to_width_strict(&mixed.content, room - 2);
             spans.push(Span::styled(
                 format!("  {content}"),
-                Style::default().fg(theme.secondary_text),
+                Style::default().fg(theme.inert),
             ));
         }
     } else {
@@ -910,7 +910,7 @@ pub(super) fn render_mixed_spans(
         let status_style = match (mixed.tone, mixed.pr_status) {
             (MixedTone::Dim, _) => Style::default(),
             (MixedTone::Normal, Some(status)) => status.mark(theme).1,
-            (MixedTone::Normal, None) => Style::default().fg(theme.mux_attached),
+            (MixedTone::Normal, None) => Style::default().fg(theme.mux_attached()),
         };
         let label = truncate_to_width_strict(&mixed.label, MIXED_LABEL_MAX_WIDTH);
         let label_cell = align.label.saturating_sub(prefix_width);
@@ -938,7 +938,7 @@ pub(super) fn render_mixed_spans(
             let content = truncate_to_width_strict(&mixed.content, room - 2);
             spans.push(Span::styled(
                 format!("  {content}"),
-                Style::default().fg(theme.secondary_text),
+                Style::default().fg(theme.inert),
             ));
         }
     }
@@ -948,11 +948,11 @@ pub(super) fn render_mixed_spans(
     spans
 }
 
-/// The ghost style: the theme's ghost color in italics. Gone entities
+/// The ghost style: the theme's `inert` color in italics. Gone entities
 /// and pins that aren't running share it in every view.
 pub(super) fn ghost_style(theme: &Theme) -> Style {
     Style::default()
-        .fg(theme.ghost)
+        .fg(theme.inert)
         .add_modifier(Modifier::ITALIC)
 }
 
@@ -967,11 +967,10 @@ fn is_chip(style: Style) -> bool {
 pub(super) fn ghostify(spans: &mut [Span<'static>], theme: &Theme) {
     for span in spans {
         span.style = if is_chip(span.style) {
-            span.style
-                .add_modifier(theme.placeholder | Modifier::ITALIC)
+            span.style.add_modifier(theme.muted | Modifier::ITALIC)
         } else {
             span.style
-                .fg(theme.ghost)
+                .fg(theme.inert)
                 .remove_modifier(Modifier::BOLD)
                 .add_modifier(Modifier::ITALIC)
         };
@@ -1138,7 +1137,7 @@ pub(super) fn render_left_row(
 
     if handoff_spinner.is_some() {
         for span in &mut spans {
-            span.style = span.style.add_modifier(theme.placeholder);
+            span.style = span.style.add_modifier(theme.muted);
         }
     }
     // A group (or any non-mixed row) standing for an entity that is
@@ -1194,7 +1193,7 @@ pub(super) fn render_session_spans(
     // explicit node lookup commands.
     let session_id =
         truncate_to_width_no_marker(&session.session.session_key, SESSION_ID_COLUMN_WIDTH);
-    let id_style = Style::default().fg(theme.secondary_text);
+    let id_style = Style::default().fg(theme.inert);
     spans.push(span!(id_style; "{session_id:<SESSION_ID_COLUMN_WIDTH$}  "));
     // The badge widget pads internally so every chip is the same
     // width regardless of label length; no external padding span
@@ -1209,7 +1208,7 @@ pub(super) fn render_session_spans(
     ));
     spans.push(Span::raw("  "));
     if let Some(glyph) = handoff_spinner {
-        spans.push(span!(Style::default().fg(theme.secondary_text); "{glyph}"));
+        spans.push(span!(Style::default().fg(theme.inert); "{glyph}"));
     } else {
         spans.push(mux_indicator_span(session.mux_state, theme));
     }
@@ -1240,7 +1239,7 @@ pub(super) fn render_session_spans(
             format!("was in {}", truncate_to_width(mux, 20))
         };
         spans.push(span!(
-            Style::default().fg(theme.secondary_text).add_modifier(theme.placeholder);
+            Style::default().fg(theme.inert).add_modifier(theme.muted);
             "  {chip}"
         ));
     }
@@ -1250,7 +1249,7 @@ pub(super) fn render_session_spans(
         .filter(|project| !project.is_empty())
     {
         spans.push(span!(
-            Style::default().fg(theme.secondary_text);
+            Style::default().fg(theme.inert);
             "  {:<16}",
             truncate_to_width(project, 16)
         ));
@@ -1277,7 +1276,7 @@ pub(super) fn append_session_preview(
     }
     spans.push(Span::raw("  "));
     spans.push(span!(
-        Style::default().fg(theme.secondary_text).add_modifier(Modifier::ITALIC);
+        Style::default().fg(theme.inert).add_modifier(Modifier::ITALIC);
         "{}",
         truncate_to_width(preview, width - used - 2)
     ));
@@ -1305,7 +1304,7 @@ pub(super) fn render_mux_session_spans(
     // steals horizontal space.
     let label = compact_mux_native_id(&mux.native_id);
     let label_width = mux_label_column_width(width);
-    let label_style = Style::default().fg(theme.link_id);
+    let label_style = Style::default().fg(theme.link);
     spans.push(span!(
         label_style;
         "{}",
@@ -1333,17 +1332,17 @@ pub(super) fn render_mux_session_spans(
 
     spans.push(Span::raw("  "));
     if let Some(glyph) = handoff_spinner {
-        spans.push(span!(Style::default().fg(theme.secondary_text); "{glyph}"));
+        spans.push(span!(Style::default().fg(theme.inert); "{glyph}"));
     } else {
         match mux.client_attached {
             Some(true) => {
-                spans.push(span!(Style::default().fg(theme.mux_attached); "{}", state::LINKED));
+                spans.push(span!(Style::default().fg(theme.mux_attached()); "{}", state::LINKED));
             }
             Some(false) => {
-                spans.push(span!(theme.mux_unmuxed; "{}", state::UNLINKED));
+                spans.push(span!(theme.muted; "{}", state::UNLINKED));
             }
             None => {
-                spans.push(span!(theme.placeholder; "{}", state::UNKNOWN));
+                spans.push(span!(theme.muted; "{}", state::UNKNOWN));
             }
         }
     }
@@ -1367,7 +1366,7 @@ pub(super) fn append_mux_agent_labels(
         match (&mux.program_harness, &mux.program) {
             (Some(harness), _) => spans.push(harness_badge(harness, theme)),
             (None, Some(program)) => spans.push(command_badge(program, theme)),
-            (None, None) => spans.push(span!(theme.placeholder; " no agent ")),
+            (None, None) => spans.push(span!(theme.muted; " no agent ")),
         }
         return;
     }
@@ -1383,7 +1382,7 @@ pub(super) fn append_mux_agent_labels(
     let hidden_labels = mux.agent_labels.len().saturating_sub(max_labels);
     if hidden_labels > 0 {
         spans.push(span!(
-            Style::default().fg(theme.secondary_text);
+            Style::default().fg(theme.inert);
             " +{hidden_labels}"
         ));
     }
@@ -1421,7 +1420,7 @@ pub(super) fn append_mux_single_session_preview(
     }
     spans.push(Span::raw("  "));
     spans.push(span!(
-        Style::default().fg(theme.secondary_text).add_modifier(Modifier::ITALIC);
+        Style::default().fg(theme.inert).add_modifier(Modifier::ITALIC);
         "{}",
         truncate_to_width(preview, width - used - 2)
     ));
@@ -1441,9 +1440,7 @@ fn append_content_hit(
     } else {
         format!("{} hits", hit.count)
     };
-    let dim = Style::default()
-        .fg(theme.secondary_text)
-        .add_modifier(theme.placeholder);
+    let dim = Style::default().fg(theme.inert).add_modifier(theme.muted);
     spans.push(span!(dim; "  {chip}"));
     let used = spans_width(spans);
     if width <= used + 8 {
@@ -1463,7 +1460,7 @@ fn render_hit_spans(
     theme: &Theme,
     budget: usize,
 ) -> Vec<Span<'static>> {
-    let secondary = Style::default().fg(theme.secondary_text);
+    let secondary = Style::default().fg(theme.inert);
     let mut spans = Vec::new();
     if let Some(origin) = &hit.origin {
         // A flat row names its session: the harness chip and the name,
@@ -1481,7 +1478,7 @@ fn render_hit_spans(
     spans.extend([
         span!(secondary; "turn {:<4}", hit.turn_index + 1),
         span!(secondary; "  {:<6}", hit.role),
-        span!(theme.placeholder; "  {:<11}", hit.kind),
+        span!(theme.muted; "  {:<11}", hit.kind),
         span!(secondary; "  {:>4}", hit.age),
     ]);
     let used = spans_width(&spans);
@@ -1509,7 +1506,7 @@ fn render_pane_spans(
     theme: &Theme,
     budget: usize,
 ) -> Vec<Span<'static>> {
-    let secondary = Style::default().fg(theme.secondary_text);
+    let secondary = Style::default().fg(theme.inert);
     let name = pad_to_width(
         truncate_to_width_strict(&pane.mux_label, PANE_LABEL_WIDTH),
         PANE_LABEL_WIDTH,
@@ -1521,7 +1518,7 @@ fn render_pane_spans(
     let mut spans = vec![
         span!(Modifier::BOLD; "{name}"),
         span!(secondary; "  {:<5}", pane.location),
-        span!(theme.placeholder; "  {command}"),
+        span!(theme.muted; "  {command}"),
         span!(secondary; "  {:>4}", pane.age),
     ];
     let cell = crate::tui::rows::ContentHitCell {
@@ -1542,7 +1539,7 @@ fn render_pane_hit_spans(
     theme: &Theme,
     budget: usize,
 ) -> Vec<Span<'static>> {
-    let secondary = Style::default().fg(theme.secondary_text);
+    let secondary = Style::default().fg(theme.inert);
     let mut spans = Vec::new();
     if let Some(origin) = &hit.origin {
         let name = pad_to_width(
@@ -1581,7 +1578,7 @@ fn append_snippet(
 ) {
     let fitted = crate::tui::widgets::snippet::fit(text, highlight, budget);
     let plain = Style::default()
-        .fg(theme.secondary_text)
+        .fg(theme.inert)
         .add_modifier(Modifier::ITALIC);
     let (before, mid, after) = match fitted.highlight.clone() {
         Some(range) => (
@@ -1627,7 +1624,7 @@ pub(super) fn node_kind_glyph_span(kind: NodeKind, theme: &Theme) -> Span<'stati
 pub(super) fn pr_kind_glyph_span(status: Option<PrStatus>, theme: &Theme) -> Span<'static> {
     let glyph = node_kind_style(NodeKind::ForgePr, theme).glyph;
     let style = status.map_or_else(
-        || Style::default().fg(theme.pr_open),
+        || Style::default().fg(theme.pr_open()),
         |status| status.mark(theme).1,
     );
     span!(style; "{glyph} ")
@@ -1641,7 +1638,7 @@ pub(super) fn pr_tracking_span(pr: &PrRow, theme: &Theme) -> Span<'static> {
         let style = node_kind_style(NodeKind::Branch, theme);
         span!(Style::default().fg(style.color); "{}", style.glyph)
     } else {
-        span!(theme.placeholder; "{}", crate::tui::icons::marks::UNTRACKED)
+        span!(theme.muted; "{}", crate::tui::icons::marks::UNTRACKED)
     }
 }
 
@@ -1686,12 +1683,12 @@ pub(super) fn render_pr_spans(
         let branch = truncate_to_width_strict(branch, PR_BRANCH_MAX_WIDTH);
         push_content(
             &mut spans,
-            Style::default().add_modifier(theme.placeholder),
+            Style::default().add_modifier(theme.muted),
             &branch,
         );
     }
     if let Some(title) = pr.title.as_deref() {
-        push_content(&mut spans, Style::default().fg(theme.secondary_text), title);
+        push_content(&mut spans, Style::default().fg(theme.inert), title);
     }
     spans
 }
@@ -1736,10 +1733,10 @@ pub(super) fn mux_indicator_span(indicator: MuxIndicator, theme: &Theme) -> Span
     // row.
     match indicator {
         MuxIndicator::Attached => {
-            span!(Style::default().fg(theme.mux_attached); "{}", state::LINKED)
+            span!(Style::default().fg(theme.mux_attached()); "{}", state::LINKED)
         }
         MuxIndicator::Ambiguous { .. } | MuxIndicator::Unmuxed => {
-            span!(theme.mux_unmuxed; "{}", state::UNLINKED)
+            span!(theme.muted; "{}", state::UNLINKED)
         }
     }
 }

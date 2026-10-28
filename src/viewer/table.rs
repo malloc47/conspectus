@@ -276,7 +276,7 @@ fn line_offsets(s: &str) -> Vec<usize> {
 
 /// Render a [`ParsedTable`] into Ratatui [`Line`]s using comfy-table's
 /// dynamic-width column allocator. Borders are dimmed with the
-/// theme's `secondary_text` colour so the table reads as
+/// theme's `inert` colour so the table reads as
 /// structurally distinct without competing with role chips.
 pub fn render_table(parsed: &ParsedTable, content_width: u16, theme: &Theme) -> Vec<Line<'static>> {
     let mut table = Table::new();
@@ -327,9 +327,7 @@ pub fn render_table(parsed: &ParsedTable, content_width: u16, theme: &Theme) -> 
     }
 
     let rendered = table.to_string();
-    let border_style = Style::new()
-        .fg(theme.secondary_text)
-        .add_modifier(Modifier::DIM);
+    let border_style = Style::new().fg(theme.inert).add_modifier(Modifier::DIM);
     let body_style = Style::new();
 
     rendered

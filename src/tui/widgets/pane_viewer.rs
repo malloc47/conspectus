@@ -422,9 +422,7 @@ pub fn draw(state: &mut PaneViewerState, theme: &Theme, frame: &mut Frame<'_>, a
 }
 
 fn dim(theme: &Theme) -> Style {
-    Style::new()
-        .fg(theme.secondary_text)
-        .add_modifier(Modifier::DIM)
+    Style::new().fg(theme.inert).add_modifier(Modifier::DIM)
 }
 
 fn draw_header(state: &PaneViewerState, theme: &Theme, frame: &mut Frame<'_>, area: Rect) {
@@ -434,9 +432,7 @@ fn draw_header(state: &PaneViewerState, theme: &Theme, frame: &mut Frame<'_>, ar
         Span::raw(" "),
         Span::styled(
             state.label.clone(),
-            Style::new()
-                .fg(theme.panel_focus_accent)
-                .add_modifier(Modifier::BOLD),
+            Style::new().fg(theme.accent).add_modifier(Modifier::BOLD),
         ),
         Span::styled(" · ", dim(theme)),
         Span::styled(command.to_string(), dim(theme)),
@@ -474,10 +470,8 @@ fn draw_body(state: &mut PaneViewerState, theme: &Theme, frame: &mut Frame<'_>, 
     }
     let end = state.lines.len().min(state.scroll + area.height as usize);
     let anchor = state.current.map(|position| state.matches[position]);
-    let gutter = Style::new().fg(theme.secondary_text);
-    let anchored = Style::new()
-        .fg(theme.panel_focus_accent)
-        .add_modifier(Modifier::BOLD);
+    let gutter = Style::new().fg(theme.inert);
+    let anchored = Style::new().fg(theme.accent).add_modifier(Modifier::BOLD);
     let visible: Vec<Line<'static>> = (state.scroll..end)
         .map(|index| {
             let number = if Some(index) == anchor {

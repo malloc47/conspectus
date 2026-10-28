@@ -22,7 +22,7 @@
 //!    the popup after step 3.
 //!
 //! Theme bridge (ADR 0032): the border + title both inherit
-//! `theme.panel_focus_accent` by default. The body style stays
+//! `theme.accent` by default. The body style stays
 //! untouched so the per-modal body widget retains full control of
 //! its own colors. Override knobs for individual modals can be
 //! added later if needed; today's nine modals all use the same
@@ -62,7 +62,7 @@ where
     Popup::new(body)
         .borders(Borders::ALL)
         .title(title)
-        .border_style(Style::default().fg(theme.panel_focus_accent))
+        .border_style(Style::default().fg(theme.accent))
 }
 
 /// Reusable popup-body wrapper for the common case of "a `Vec<Line>`

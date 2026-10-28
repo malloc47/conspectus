@@ -101,9 +101,9 @@ fn row_styles(
         let key = cell(buf, rect.x + 3, y);
         if first.3.contains(Modifier::BOLD) && first.0 != " " {
             headings.push(first.3);
-        } else if key.1 == theme.panel_focus_accent && key.0 != " " {
+        } else if key.1 == theme.accent && key.0 != " " {
             keys.push(key.1);
-        } else if first.3.contains(theme.placeholder) && first.0 != " " {
+        } else if first.3.contains(theme.muted) && first.0 != " " {
             footers.push(first.3);
         }
     }

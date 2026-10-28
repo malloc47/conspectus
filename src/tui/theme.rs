@@ -1,551 +1,370 @@
-//! Centralized TUI palette per ADR 0032.
+//! The TUI palette (ADR 0032): the framework's design tokens plus the
+//! roles only Conspectus knows.
 //!
-//! Every color, modifier, and badge style the TUI renderer reads
-//! lives on the [`Theme`] struct. [`Theme::default`] reproduces the
-//! pre-ADR-0032 inline literals byte-for-byte so existing buffer
-//! snapshots stay stable when the module is introduced. Operators
-//! override individual entries through the `[tui.theme]` config
-//! table loaded by [`crate::config`].
+//! [`Theme`] wraps [`tuikit::theme::Theme`] and dereferences to it, so
+//! render code reads the framework's typed tokens as fields
+//! (`theme.accent`, `theme.muted`, `theme.inert`, `theme.warning`) and
+//! Conspectus's own roles through accessors (`theme.pr_open()`,
+//! `theme.harness_color(..)`). The roles are registered in the framework
+//! theme's named-style map from [`ROLES`] and [`HARNESS_COLORS`], and the
+//! keys older configuration files use are registered as aliases from
+//! [`ALIASES`]. Those three tables and the framework's token table are the
+//! only list of `[tui.theme]` keys: the config loader, the docs drift test,
+//! and the widget preview all read [`tuikit::theme::Theme::keys`] and
+//! [`tuikit::theme::Theme::aliases`].
 //!
-//! The TUI does not detect light vs dark terminals at runtime;
-//! selection highlights use [`Modifier::REVERSED`] so they flip
-//! against whatever fg/bg pair the terminal provides. Operators on
-//! light terminals who want a different foreground palette override
-//! the corresponding theme fields.
+//! [`Theme::default`] draws exactly what the TUI drew before the tokens
+//! moved into the framework. Five older muted keys now feed two tokens:
+//! `placeholder`, `divider`, and `mux_unmuxed` set `muted` (a modifier,
+//! `DIM`), and `secondary_text` and `ghost` set `inert` (a color, dark
+//! gray). Within one file a token's own key wins, then its aliases in the
+//! order [`ALIASES`] lists them; `docs/operations.md` spells this out for
+//! operators.
+//!
+//! The TUI does not detect light or dark terminals; selection highlights
+//! use reversed video so they flip against whatever colors the terminal
+//! provides.
 
-use std::collections::BTreeMap;
+use std::ops::{Deref, DerefMut};
 
-use ratatui::style::{Color, Modifier, Style};
+use ratatui::style::Color;
+
+pub use tuikit::theme::{
+    Alias, DEFAULT_BADGE_WIDTH, KeyOrigin, MIN_BADGE_WIDTH, OverrideError, OverrideProblem,
+    OverrideValue, StyleSpec, ThemeKey, TokenKind, TokenValue, parse_color, parse_modifier,
+    parse_style_spec,
+};
 
 use crate::tui::icons::IconOverrides;
 
-pub use tuikit::theme::{StyleSpec, parse_color, parse_modifier, parse_style_spec};
+/// The names Conspectus registers its roles under, which are also their
+/// `[tui.theme]` keys.
+pub mod role {
+    /// Badge color of a harness no other entry names.
+    pub const HARNESS_UNKNOWN: &str = "harness_unknown";
+    /// Prefix of the per-harness badge colors, `harness.<key>`, which
+    /// `[tui.theme.harness]` sets.
+    pub const HARNESS_PREFIX: &str = "harness.";
+    /// The linked or attached mux glyph.
+    pub const MUX_ATTACHED: &str = "mux_attached";
+    /// The `(cwd)` launch-context mark.
+    pub const CWD_MARK: &str = "cwd_mark";
+    /// Background of the pane-command chip.
+    pub const COMMAND_BADGE: &str = "command_badge";
+    /// Text of the pane-command chip.
+    pub const COMMAND_BADGE_TEXT: &str = "command_badge_text";
+    /// An open PR.
+    pub const PR_OPEN: &str = "pr_open";
+    /// A closed PR.
+    pub const PR_CLOSED: &str = "pr_closed";
+    /// A merged PR.
+    pub const PR_MERGED: &str = "pr_merged";
+    /// A draft PR.
+    pub const PR_DRAFT: &str = "pr_draft";
+    /// The workspace node-kind glyph.
+    pub const NODE_WORKSPACE: &str = "node_workspace";
+    /// The repo node-kind glyph.
+    pub const NODE_REPO: &str = "node_repo";
+    /// The checkout node-kind glyph.
+    pub const NODE_CHECKOUT: &str = "node_checkout";
+    /// The agent-session node-kind glyph.
+    pub const NODE_AGENT_SESSION: &str = "node_agent_session";
+    /// The mux-session node-kind glyph, which pins share.
+    pub const NODE_MUX_SESSION: &str = "node_mux_session";
+    /// The runtime-process node-kind glyph.
+    pub const NODE_RUNTIME_PROCESS: &str = "node_runtime_process";
+    /// The branch node-kind glyph.
+    pub const NODE_BRANCH: &str = "node_branch";
+    /// The fork node-kind glyph.
+    pub const NODE_FORK: &str = "node_fork";
+    /// A non-winning `AltOf` link row in the detail pane.
+    pub const EDGE_ALT_OF: &str = "edge_alt_of";
+    /// A `Conflict` link row in the detail pane.
+    pub const EDGE_CONFLICT: &str = "edge_conflict";
+    /// No longer drawn; kept so older theme files load.
+    pub const PIN_PLACEHOLDER: &str = "pin_placeholder";
+}
 
-/// Default `badge_width`: the longest registered harness label
-/// (`opencode`), so harness names never truncate.
-pub const DEFAULT_BADGE_WIDTH: usize = 8;
+/// One role Conspectus registers: its key, its default, and what it styles.
+pub struct Role {
+    pub key: &'static str,
+    pub default: TokenValue,
+    pub about: &'static str,
+}
 
-/// Narrowest `badge_width` the config accepts: one character plus `…`.
-pub const MIN_BADGE_WIDTH: usize = 2;
+const fn color(key: &'static str, default: Color, about: &'static str) -> Role {
+    Role {
+        key,
+        default: TokenValue::Color(default),
+        about,
+    }
+}
 
-/// Palette + modifier set for every styled surface in the TUI.
-///
-/// Fields are grouped by purpose with a `Color` for foreground-only
-/// values and a `Modifier` for emphasis-only values. A handful of
-/// fields combine both via [`StyleSpec`] so the operator can pair a
-/// color with bold/italic without two config keys.
+/// The roles Conspectus registers in the framework theme, besides the
+/// per-harness colors.
+pub const ROLES: &[Role] = &[
+    color(
+        role::HARNESS_UNKNOWN,
+        Color::White,
+        "badge of a harness no entry names",
+    ),
+    color(
+        role::MUX_ATTACHED,
+        Color::Green,
+        "linked or attached mux glyph and counts",
+    ),
+    color(role::CWD_MARK, Color::Cyan, "the (cwd) launch-context mark"),
+    color(
+        role::COMMAND_BADGE,
+        Color::Black,
+        "background of a mux row's pane-command chip",
+    ),
+    color(
+        role::COMMAND_BADGE_TEXT,
+        Color::White,
+        "text of a mux row's pane-command chip (drawn bold)",
+    ),
+    color(
+        role::PR_OPEN,
+        Color::Green,
+        "open PRs, and a PR glyph drawn without a state",
+    ),
+    color(role::PR_CLOSED, Color::Red, "closed PRs"),
+    color(role::PR_MERGED, Color::Magenta, "merged PRs"),
+    color(role::PR_DRAFT, Color::Yellow, "draft PRs"),
+    color(role::NODE_WORKSPACE, Color::LightBlue, "workspace glyph"),
+    color(role::NODE_REPO, Color::Blue, "repo glyph"),
+    color(role::NODE_CHECKOUT, Color::Cyan, "checkout glyph"),
+    color(
+        role::NODE_AGENT_SESSION,
+        Color::LightGreen,
+        "agent session glyph",
+    ),
+    color(
+        role::NODE_MUX_SESSION,
+        Color::Magenta,
+        "mux session and pin glyph",
+    ),
+    color(
+        role::NODE_RUNTIME_PROCESS,
+        Color::DarkGray,
+        "runtime process glyph",
+    ),
+    color(role::NODE_BRANCH, Color::Green, "branch glyph"),
+    color(role::NODE_FORK, Color::LightMagenta, "fork glyph"),
+    color(
+        role::EDGE_ALT_OF,
+        Color::DarkGray,
+        "a non-winning alternative link row in the detail pane",
+    ),
+    color(
+        role::EDGE_CONFLICT,
+        Color::Yellow,
+        "a conflicting link row in the detail pane",
+    ),
+    color(
+        role::PIN_PLACEHOLDER,
+        Color::LightYellow,
+        "no longer drawn; kept so older theme files load",
+    ),
+];
+
+/// Default badge color of each harness, by harness key, registered as
+/// `harness.<key>`. Every registered adapter has an entry, and every entry
+/// is a registered adapter (a test checks both).
+pub const HARNESS_COLORS: &[(&str, Color)] = &[
+    ("claude-code", Color::Magenta),
+    ("codex", Color::Cyan),
+    ("opencode", Color::Green),
+    ("aider", Color::Red),
+    ("pi", Color::LightBlue),
+];
+
+/// Keys older configuration files use, and the token or role each now
+/// sets. For one target, the order here is the precedence among its
+/// aliases; the target's own key beats them all.
+pub const ALIASES: &[(&str, &str)] = &[
+    ("placeholder", "muted"),
+    ("divider", "muted"),
+    ("mux_unmuxed", "muted"),
+    ("secondary_text", "inert"),
+    ("ghost", "inert"),
+    ("link_id", "link"),
+    ("panel_focus_accent", "accent"),
+    ("harness_claude", "harness.claude-code"),
+    ("harness_codex", "harness.codex"),
+    ("harness_opencode", "harness.opencode"),
+    ("harness_aider", "harness.aider"),
+    ("harness_pi", "harness.pi"),
+];
+
+/// The TUI's theme: the framework theme with Conspectus's roles and
+/// aliases registered, plus the node-kind glyph overrides from
+/// `[tui.theme.icons]`.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Theme {
-    // ---- harness identity ---------------------------------------------------
-    /// Per-harness identity colors, keyed by adapter harness key.
-    /// The default populates the four v1 harnesses;
-    /// operators add or override entries via `[tui.theme.harness]`
-    /// in config. Lookup goes through [`Theme::harness_color`],
-    /// which walks the adapter registry so callers can pass
-    /// either a harness key or a display label. Missing entries
-    /// fall back to [`Theme::harness_unknown`].
-    pub harness_colors: BTreeMap<String, Color>,
-    pub harness_unknown: Color,
-
-    // ---- recency buckets (Phase 3 introduces the buckets; the colors
-    // ---- live here so they can be themed alongside everything else) -------
-    pub recency_fresh: StyleSpec,
-    pub recency_active: StyleSpec,
-    pub recency_recent: StyleSpec,
-    pub recency_cold: StyleSpec,
-
-    // ---- mux state ----------------------------------------------------------
-    pub mux_attached: Color,
-    pub mux_unmuxed: Modifier,
-
-    // ---- selection / focus --------------------------------------------------
-    pub selection_active: Modifier,
-    pub selection_inactive: Modifier,
-    pub panel_focus_accent: Color,
-
-    // ---- structural / semantic ---------------------------------------------
-    pub cwd_mark: Color,
-    pub link_id: Color,
-    pub placeholder: Modifier,
-    /// Foreground of ghost rows: entities that are gone or pins that
-    /// aren't running. A concrete color, because `placeholder`'s DIM
-    /// does nothing in some terminals; ghost rows are italic as well.
-    pub ghost: Color,
-    /// Foreground of the text a search matched, drawn bold and
-    /// underlined wherever a match is picked out of a snippet, so one
-    /// look means "this is what you searched for".
-    pub match_highlight: Color,
-    /// No longer drawn: pin slots have their own view and no
-    /// placeholder rows. The key stays so existing theme files keep
-    /// loading.
-    pub pin_placeholder: Color,
-    /// Background of the pane-command chip a mux row shows when no
-    /// agent is linked (`npm`, `zsh`, …). One color for every
-    /// program, drawn behind bold white text so it reads on dark and
-    /// light terminals alike.
-    pub command_badge: Color,
-    /// Reliable foreground color for "secondary" text the operator
-    /// shouldn't put the same visual weight on as primary columns —
-    /// row short ids and the inline preview snippet. Modeled as a
-    /// concrete `Color` rather than the `placeholder` modifier
-    /// because the `DIM` modifier renders inconsistently across
-    /// terminals (no effect in some popular configurations).
-    pub secondary_text: Color,
-    /// Color for the ► / ▼ disclosure glyphs so the affordance is
-    /// distinct from the label text it sits next to. Subtle accent
-    /// by default; operators can swap for a dimmer color if the
-    /// glyph competes with their group labels.
-    pub disclosure: Color,
-    pub divider: Modifier,
-    pub warning: Color,
-    pub error: Color,
-    pub success: Color,
-
-    // ---- PR state (mirrors ADR 0022's table palette by default) -------------
-    pub pr_open: Color,
-    pub pr_closed: Color,
-    pub pr_merged: Color,
-    pub pr_draft: Color,
-
-    // ---- badge composition --------------------------------------------------
-    /// Modifier applied to badge spans (harness chips, status chips).
-    /// Default is `REVERSED | BOLD` so the badge reads as a filled
-    /// pill against any terminal theme.
-    pub badge: Modifier,
-    /// Label characters in every agent / program badge, set by
-    /// `[tui.theme] badge_width`. Shorter labels are padded and longer
-    /// ones cut with `…`, so all badges share one width and the columns
-    /// after them stay aligned.
-    pub badge_width: usize,
-
-    // ---- per-node-kind identity (ADR 0073) ----------------------------------
-    /// Foreground color for the per-row node-kind glyph. One field
-    /// per `NodeKind` variant that owns a color; `ForgePr` does not
-    /// own one (its hue comes from `pr_*` based on PR state, see
-    /// ADR 0073 §2).
-    pub node_workspace: Color,
-    pub node_repo: Color,
-    pub node_checkout: Color,
-    pub node_agent_session: Color,
-    pub node_mux_session: Color,
-    pub node_runtime_process: Color,
-    pub node_branch: Color,
-    pub node_fork: Color,
-
-    // ---- detail-pane edge state (ADR 0075) ----------------------------------
-    /// Color for non-winning `EdgeStateLabel::AltOf(_)` rows in the
-    /// detail-pane Other zone. Defaults to the `secondary_text`
-    /// hue; operators can shift it independently of the broader
-    /// secondary palette via `[tui.theme] edge_alt_of`.
-    pub edge_alt_of: Color,
-    /// Color for `EdgeStateLabel::Conflict` rows in the detail-pane
-    /// Other zone. Defaults to the `warning` hue; operators can
-    /// shift it independently of the broader warning palette via
-    /// `[tui.theme] edge_conflict`.
-    pub edge_conflict: Color,
-    /// Operator overrides for individual node-kind glyphs, parsed
-    /// from `[tui.theme.icons]`. Empty by default; lookups in
-    /// [`crate::tui::icons::node_kind_style`] fall through to the
-    /// ADR 0073 default slate when no override is present.
+    kit: tuikit::theme::Theme,
+    /// Operator overrides for individual node-kind glyphs, parsed from
+    /// `[tui.theme.icons]`. Empty by default; lookups in
+    /// [`crate::tui::icons::node_kind_style`] fall through to the default
+    /// slate when no override is present.
     pub icons: IconOverrides,
 }
 
 impl Default for Theme {
-    /// Reproduces the pre-overhaul inline palette so introducing the
-    /// theme indirection does not move pixels in existing snapshots.
-    /// New fields (recency buckets, badge composition) pick values
-    /// that the styling overhaul plan's later phases will exercise;
-    /// they are inert until those phases call them.
     fn default() -> Self {
-        // Per-harness colors keyed by adapter harness key.
-        let mut harness_colors = BTreeMap::new();
-        harness_colors.insert("claude-code".to_string(), Color::Magenta);
-        harness_colors.insert("codex".to_string(), Color::Cyan);
-        harness_colors.insert("opencode".to_string(), Color::Green);
-        harness_colors.insert("aider".to_string(), Color::Red);
-        harness_colors.insert("pi".to_string(), Color::LightBlue);
-
+        let mut kit = tuikit::theme::Theme::default();
+        for role in ROLES {
+            kit.register(role.key, role.default, role.about);
+        }
+        for (key, color) in HARNESS_COLORS {
+            kit.register(
+                format!("{}{key}", role::HARNESS_PREFIX),
+                *color,
+                format!("{key} badge and chip"),
+            );
+        }
+        for (key, target) in ALIASES {
+            kit.register_alias(*key, *target);
+        }
         Self {
-            harness_colors,
-            harness_unknown: Color::White,
-
-            recency_fresh: StyleSpec::fg_mod(Color::LightGreen, Modifier::BOLD),
-            recency_active: StyleSpec::fg(Color::Green),
-            recency_recent: StyleSpec::fg(Color::Yellow),
-            recency_cold: StyleSpec::modifier(Modifier::DIM),
-
-            mux_attached: Color::Green,
-            mux_unmuxed: Modifier::DIM,
-
-            selection_active: Modifier::REVERSED.union(Modifier::BOLD),
-            selection_inactive: Modifier::BOLD,
-            panel_focus_accent: Color::Cyan,
-
-            cwd_mark: Color::Cyan,
-            link_id: Color::Blue,
-            placeholder: Modifier::DIM,
-            ghost: Color::DarkGray,
-            match_highlight: Color::Yellow,
-            pin_placeholder: Color::LightYellow,
-            command_badge: Color::Black,
-            secondary_text: Color::DarkGray,
-            disclosure: Color::Cyan,
-            divider: Modifier::DIM,
-            warning: Color::Yellow,
-            error: Color::Red,
-            success: Color::Green,
-
-            pr_open: Color::Green,
-            pr_closed: Color::Red,
-            pr_merged: Color::Magenta,
-            pr_draft: Color::Yellow,
-
-            badge: Modifier::REVERSED.union(Modifier::BOLD),
-
-            badge_width: DEFAULT_BADGE_WIDTH,
-
-            node_workspace: Color::LightBlue,
-            node_repo: Color::Blue,
-            node_checkout: Color::Cyan,
-            node_agent_session: Color::LightGreen,
-            node_mux_session: Color::Magenta,
-            node_runtime_process: Color::DarkGray,
-            node_branch: Color::Green,
-            node_fork: Color::LightMagenta,
-
-            edge_alt_of: Color::DarkGray,
-            edge_conflict: Color::Yellow,
+            kit,
             icons: IconOverrides::default(),
         }
     }
 }
 
+impl Deref for Theme {
+    type Target = tuikit::theme::Theme;
+
+    fn deref(&self) -> &Self::Target {
+        &self.kit
+    }
+}
+
+impl DerefMut for Theme {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.kit
+    }
+}
+
 impl Theme {
-    /// The style of matched text in a search snippet: the same on every
-    /// surface, a foreground color rather than a background so it reads
-    /// on a selected (reversed) row too.
-    pub fn match_style(&self) -> Style {
-        Style::default()
-            .fg(self.match_highlight)
-            .add_modifier(Modifier::BOLD | Modifier::UNDERLINED)
+    /// The color registered under `name`; every role in [`ROLES`] is
+    /// registered, so the default only answers for a name that is not.
+    fn role(&self, name: &str) -> Color {
+        self.kit.color(name).unwrap_or_default()
     }
 
-    /// Color associated with a harness. Accepts either the
-    /// canonical harness key (`claude-code`) or the display label
-    /// (`claude`) — both resolve to the same entry in
-    /// [`Self::harness_colors`] by walking the adapter registry.
-    /// Unknown harnesses fall back to
-    /// [`Self::harness_unknown`] so the renderer always has a
-    /// hue to use.
+    /// Color associated with a harness. Accepts either the canonical
+    /// harness key (`claude-code`) or the display label (`claude`): both
+    /// resolve to the same `harness.<key>` entry by walking the adapter
+    /// registry. Unknown harnesses take [`Self::harness_unknown`].
     pub fn harness_color(&self, label_or_key: &str) -> Color {
-        // Resolve label → key via the registry so callers that
-        // pass display labels hit the same map entry as callers
-        // that pass harness keys.
-        let canonical_key = crate::discovery::harness::registered_adapters()
+        let key = crate::discovery::harness::registered_adapters()
             .find(|a| a.harness_key() == label_or_key || a.display_label() == label_or_key)
-            .map(super::super::discovery::harness::HarnessAdapter::harness_key);
-        match canonical_key {
-            Some(key) => self
-                .harness_colors
-                .get(key)
-                .copied()
-                .unwrap_or(self.harness_unknown),
-            None => self
-                .harness_colors
-                .get(label_or_key)
-                .copied()
-                .unwrap_or(self.harness_unknown),
-        }
-    }
-}
-
-// -----------------------------------------------------------------------------
-// Color / modifier spec parsing (ADR 0032)
-// -----------------------------------------------------------------------------
-
-/// Theme key kinds, used by the config loader to route each
-/// `[tui.theme]` entry to the right parser. Returned by
-/// [`Theme::known_keys`] so the loader can iterate without
-/// hardcoding the list in two places.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum ThemeKeyKind {
-    /// Foreground color only.
-    Color,
-    /// Modifier set only.
-    Modifier,
-    /// Color + optional comma-joined modifiers.
-    StyleSpec,
-}
-
-/// One entry in [`Theme::known_keys`]. The config loader walks this
-/// to validate the user's `[tui.theme]` table and dispatch on kind.
-pub struct ThemeKey {
-    pub name: &'static str,
-    pub kind: ThemeKeyKind,
-}
-
-impl Theme {
-    /// Every key the operator may override under `[tui.theme]`, with
-    /// its expected value kind. The loader iterates this to validate
-    /// unknown keys and route value parsing.
-    pub fn known_keys() -> &'static [ThemeKey] {
-        use ThemeKeyKind::*;
-        &[
-            ThemeKey {
-                name: "harness_claude",
-                kind: Color,
-            },
-            ThemeKey {
-                name: "harness_codex",
-                kind: Color,
-            },
-            ThemeKey {
-                name: "harness_opencode",
-                kind: Color,
-            },
-            ThemeKey {
-                name: "harness_aider",
-                kind: Color,
-            },
-            ThemeKey {
-                name: "harness_pi",
-                kind: Color,
-            },
-            ThemeKey {
-                name: "harness_unknown",
-                kind: Color,
-            },
-            ThemeKey {
-                name: "recency_fresh",
-                kind: StyleSpec,
-            },
-            ThemeKey {
-                name: "recency_active",
-                kind: StyleSpec,
-            },
-            ThemeKey {
-                name: "recency_recent",
-                kind: StyleSpec,
-            },
-            ThemeKey {
-                name: "recency_cold",
-                kind: StyleSpec,
-            },
-            ThemeKey {
-                name: "mux_attached",
-                kind: Color,
-            },
-            ThemeKey {
-                name: "mux_unmuxed",
-                kind: Modifier,
-            },
-            ThemeKey {
-                name: "selection_active",
-                kind: Modifier,
-            },
-            ThemeKey {
-                name: "selection_inactive",
-                kind: Modifier,
-            },
-            ThemeKey {
-                name: "panel_focus_accent",
-                kind: Color,
-            },
-            ThemeKey {
-                name: "cwd_mark",
-                kind: Color,
-            },
-            ThemeKey {
-                name: "link_id",
-                kind: Color,
-            },
-            ThemeKey {
-                name: "placeholder",
-                kind: Modifier,
-            },
-            ThemeKey {
-                name: "ghost",
-                kind: Color,
-            },
-            ThemeKey {
-                name: "match_highlight",
-                kind: Color,
-            },
-            ThemeKey {
-                name: "pin_placeholder",
-                kind: Color,
-            },
-            ThemeKey {
-                name: "command_badge",
-                kind: Color,
-            },
-            ThemeKey {
-                name: "secondary_text",
-                kind: Color,
-            },
-            ThemeKey {
-                name: "disclosure",
-                kind: Color,
-            },
-            ThemeKey {
-                name: "divider",
-                kind: Modifier,
-            },
-            ThemeKey {
-                name: "warning",
-                kind: Color,
-            },
-            ThemeKey {
-                name: "error",
-                kind: Color,
-            },
-            ThemeKey {
-                name: "success",
-                kind: Color,
-            },
-            ThemeKey {
-                name: "pr_open",
-                kind: Color,
-            },
-            ThemeKey {
-                name: "pr_closed",
-                kind: Color,
-            },
-            ThemeKey {
-                name: "pr_merged",
-                kind: Color,
-            },
-            ThemeKey {
-                name: "pr_draft",
-                kind: Color,
-            },
-            ThemeKey {
-                name: "badge",
-                kind: Modifier,
-            },
-            ThemeKey {
-                name: "node_workspace",
-                kind: Color,
-            },
-            ThemeKey {
-                name: "node_repo",
-                kind: Color,
-            },
-            ThemeKey {
-                name: "node_checkout",
-                kind: Color,
-            },
-            ThemeKey {
-                name: "node_agent_session",
-                kind: Color,
-            },
-            ThemeKey {
-                name: "node_mux_session",
-                kind: Color,
-            },
-            ThemeKey {
-                name: "node_runtime_process",
-                kind: Color,
-            },
-            ThemeKey {
-                name: "node_branch",
-                kind: Color,
-            },
-            ThemeKey {
-                name: "node_fork",
-                kind: Color,
-            },
-            ThemeKey {
-                name: "edge_alt_of",
-                kind: Color,
-            },
-            ThemeKey {
-                name: "edge_conflict",
-                kind: Color,
-            },
-        ]
+            .map_or(label_or_key, |adapter| adapter.harness_key());
+        self.kit
+            .color(&format!("{}{key}", role::HARNESS_PREFIX))
+            .unwrap_or_else(|| self.harness_unknown())
     }
 
-    /// Apply a parsed color to the named field. Returns `false` when
-    /// the name is not a `Color`-kind field; the caller treats that
-    /// as a routing-error diagnostic.
-    pub fn set_color(&mut self, name: &str, color: Color) -> bool {
-        match name {
-            // Legacy flat harness aliases. Kept for config
-            // back-compat per ADR 0031's precedent for
-            // grandfathered keys; they route to the same
-            // `harness_colors` entry the new
-            // `[tui.theme.harness].<key>` form would.
-            "harness_claude" => {
-                self.harness_colors.insert("claude-code".to_string(), color);
-            }
-            "harness_codex" => {
-                self.harness_colors.insert("codex".to_string(), color);
-            }
-            "harness_opencode" => {
-                self.harness_colors.insert("opencode".to_string(), color);
-            }
-            "harness_aider" => {
-                self.harness_colors.insert("aider".to_string(), color);
-            }
-            "harness_pi" => {
-                self.harness_colors.insert("pi".to_string(), color);
-            }
-            "harness_unknown" => self.harness_unknown = color,
-            "mux_attached" => self.mux_attached = color,
-            "panel_focus_accent" => self.panel_focus_accent = color,
-            "cwd_mark" => self.cwd_mark = color,
-            "link_id" => self.link_id = color,
-            "ghost" => self.ghost = color,
-            "match_highlight" => self.match_highlight = color,
-            "pin_placeholder" => self.pin_placeholder = color,
-            "command_badge" => self.command_badge = color,
-            "secondary_text" => self.secondary_text = color,
-            "disclosure" => self.disclosure = color,
-            "warning" => self.warning = color,
-            "error" => self.error = color,
-            "success" => self.success = color,
-            "pr_open" => self.pr_open = color,
-            "pr_closed" => self.pr_closed = color,
-            "pr_merged" => self.pr_merged = color,
-            "pr_draft" => self.pr_draft = color,
-            "node_workspace" => self.node_workspace = color,
-            "node_repo" => self.node_repo = color,
-            "node_checkout" => self.node_checkout = color,
-            "node_agent_session" => self.node_agent_session = color,
-            "node_mux_session" => self.node_mux_session = color,
-            "node_runtime_process" => self.node_runtime_process = color,
-            "node_branch" => self.node_branch = color,
-            "node_fork" => self.node_fork = color,
-            "edge_alt_of" => self.edge_alt_of = color,
-            "edge_conflict" => self.edge_conflict = color,
-            _ => return false,
-        }
-        true
+    /// Badge color of a harness no entry names.
+    pub fn harness_unknown(&self) -> Color {
+        self.role(role::HARNESS_UNKNOWN)
     }
 
-    pub fn set_modifier(&mut self, name: &str, modifier: Modifier) -> bool {
-        match name {
-            "mux_unmuxed" => self.mux_unmuxed = modifier,
-            "selection_active" => self.selection_active = modifier,
-            "selection_inactive" => self.selection_inactive = modifier,
-            "placeholder" => self.placeholder = modifier,
-            "divider" => self.divider = modifier,
-            "badge" => self.badge = modifier,
-            _ => return false,
-        }
-        true
+    /// The linked or attached mux glyph.
+    pub fn mux_attached(&self) -> Color {
+        self.role(role::MUX_ATTACHED)
     }
 
-    pub fn set_style_spec(&mut self, name: &str, spec: StyleSpec) -> bool {
-        match name {
-            "recency_fresh" => self.recency_fresh = spec,
-            "recency_active" => self.recency_active = spec,
-            "recency_recent" => self.recency_recent = spec,
-            "recency_cold" => self.recency_cold = spec,
-            _ => return false,
-        }
-        true
+    /// The `(cwd)` launch-context mark.
+    pub fn cwd_mark(&self) -> Color {
+        self.role(role::CWD_MARK)
+    }
+
+    /// Background of the pane-command chip a mux row shows when no agent
+    /// is linked (`npm`, `zsh`, …): one color for every program.
+    pub fn command_badge(&self) -> Color {
+        self.role(role::COMMAND_BADGE)
+    }
+
+    /// Text of the pane-command chip, drawn bold over
+    /// [`Self::command_badge`].
+    pub fn command_badge_text(&self) -> Color {
+        self.role(role::COMMAND_BADGE_TEXT)
+    }
+
+    /// An open PR, and a PR glyph drawn where the state is unknown.
+    pub fn pr_open(&self) -> Color {
+        self.role(role::PR_OPEN)
+    }
+
+    /// A closed PR.
+    pub fn pr_closed(&self) -> Color {
+        self.role(role::PR_CLOSED)
+    }
+
+    /// A merged PR.
+    pub fn pr_merged(&self) -> Color {
+        self.role(role::PR_MERGED)
+    }
+
+    /// A draft PR.
+    pub fn pr_draft(&self) -> Color {
+        self.role(role::PR_DRAFT)
+    }
+
+    /// The workspace node-kind glyph (ADR 0073).
+    pub fn node_workspace(&self) -> Color {
+        self.role(role::NODE_WORKSPACE)
+    }
+
+    /// The repo node-kind glyph.
+    pub fn node_repo(&self) -> Color {
+        self.role(role::NODE_REPO)
+    }
+
+    /// The checkout node-kind glyph.
+    pub fn node_checkout(&self) -> Color {
+        self.role(role::NODE_CHECKOUT)
+    }
+
+    /// The agent-session node-kind glyph.
+    pub fn node_agent_session(&self) -> Color {
+        self.role(role::NODE_AGENT_SESSION)
+    }
+
+    /// The mux-session node-kind glyph, which pins share.
+    pub fn node_mux_session(&self) -> Color {
+        self.role(role::NODE_MUX_SESSION)
+    }
+
+    /// The runtime-process node-kind glyph.
+    pub fn node_runtime_process(&self) -> Color {
+        self.role(role::NODE_RUNTIME_PROCESS)
+    }
+
+    /// The branch node-kind glyph.
+    pub fn node_branch(&self) -> Color {
+        self.role(role::NODE_BRANCH)
+    }
+
+    /// The fork node-kind glyph.
+    pub fn node_fork(&self) -> Color {
+        self.role(role::NODE_FORK)
+    }
+
+    /// A non-winning `EdgeStateLabel::AltOf(_)` row in the detail pane's
+    /// Other zone (ADR 0075). Defaults to the `inert` hue.
+    pub fn edge_alt_of(&self) -> Color {
+        self.role(role::EDGE_ALT_OF)
+    }
+
+    /// An `EdgeStateLabel::Conflict` row in the detail pane's Other zone.
+    /// Defaults to the `warning` hue.
+    pub fn edge_conflict(&self) -> Color {
+        self.role(role::EDGE_CONFLICT)
     }
 }
 

@@ -136,7 +136,7 @@ impl MessagesWidget<'_> {
         let height = area.height.saturating_sub(2).max(10);
         let modal = crate::tui::widgets::popup_frame::centered_rect(area, width, height);
         let label_style = Style::default()
-            .fg(self.theme.panel_focus_accent)
+            .fg(self.theme.accent)
             .add_modifier(Modifier::BOLD);
         let title = line![
             " ",
@@ -188,7 +188,7 @@ impl Widget for MessagesBody<'_, '_> {
             now,
         } = *self.widget;
         let footer = line![span!(
-            Style::default().add_modifier(theme.placeholder);
+            Style::default().add_modifier(theme.muted);
             "{}",
             crate::tui::keybindings::overlay::footer(crate::tui::keybindings::overlay::MESSAGES_KEYS)
         )];
@@ -239,7 +239,7 @@ impl Widget for MessagesBody<'_, '_> {
         Paragraph::new(lines).render(list_area, buf);
 
         Paragraph::new(Line::from(span!(
-            Style::default().add_modifier(theme.divider);
+            Style::default().add_modifier(theme.muted);
             "{}", "─".repeat(usize::from(area.width))
         )))
         .render(rule_area, buf);
@@ -275,10 +275,7 @@ fn list_line(entry: &LogEntry, selected: bool, theme: &Theme, now: i64) -> Line<
             format!("{} ", entry.level.glyph()),
             level_style(entry.level, theme),
         ),
-        Span::styled(
-            format!("{age:>4} ago  "),
-            Style::default().fg(theme.secondary_text),
-        ),
+        Span::styled(format!("{age:>4} ago  "), Style::default().fg(theme.inert)),
         Span::raw(entry.summary_with_repeats()),
     ];
     if selected {

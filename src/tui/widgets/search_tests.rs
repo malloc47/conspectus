@@ -217,7 +217,7 @@ fn match_line_skips_snippet_when_label_equals_haystack() {
 fn search_glyph_span_uses_kind_color_for_graph_rows() {
     // Each result row carries a kind glyph in
     // its NodeKind color (ADR 0073). An AgentSession row picks
-    // up the AgentSession glyph + `theme.node_agent_session`
+    // up the AgentSession glyph + `theme.node_agent_session()`
     // color; a MuxSession row picks up the mux glyph + color.
     use crate::model::MuxSessionId;
     let theme = Theme::default();
@@ -230,13 +230,13 @@ fn search_glyph_span_uses_kind_color_for_graph_rows() {
         "session glyph span content: {:?}",
         session_span.content,
     );
-    assert_eq!(session_span.style.fg, Some(theme.node_agent_session));
+    assert_eq!(session_span.style.fg, Some(theme.node_agent_session()));
 
     let mux_id = NodeId::MuxSession(MuxSessionId::new("editor"));
     let mux_span = search_kind_glyph_span(&RowId::MuxSession(mux_id), &theme, false);
     let mux_glyph = NodeKind::MuxSession.default_glyph();
     assert!(mux_span.content.starts_with(mux_glyph));
-    assert_eq!(mux_span.style.fg, Some(theme.node_mux_session));
+    assert_eq!(mux_span.style.fg, Some(theme.node_mux_session()));
 }
 
 #[test]
@@ -251,7 +251,7 @@ fn search_glyph_span_falls_back_to_two_spaces_for_kindless_rows() {
         false,
     );
     assert_eq!(pin_span.content, "◉ ");
-    assert_eq!(pin_span.style.fg, Some(theme.node_mux_session));
+    assert_eq!(pin_span.style.fg, Some(theme.node_mux_session()));
 
     // Synthetic ids aren't graph nodes — they get two blank
     // cells so the label column lines up with glyph-bearing rows.
@@ -288,7 +288,7 @@ fn match_line_includes_kind_glyph_before_label() {
         .iter()
         .find(|s| s.content == format!("{agent_glyph} "))
         .expect("kind glyph span present in match line");
-    assert_eq!(glyph_span.style.fg, Some(theme.node_agent_session));
+    assert_eq!(glyph_span.style.fg, Some(theme.node_agent_session()));
 }
 
 #[test]

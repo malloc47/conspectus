@@ -273,8 +273,8 @@ pub fn chip_label_width(label: &str) -> usize {
 /// re-export so users can override via `[tui.theme]` config.
 fn chip_color(turn: &TranscriptTurn, theme: &Theme) -> ratatui::style::Color {
     match (turn.role, turn.kind) {
-        (_, TurnKind::CompactionSummary) => theme.pr_merged,
-        (_, TurnKind::Thinking) => theme.secondary_text,
+        (_, TurnKind::CompactionSummary) => theme.pr_merged(),
+        (_, TurnKind::Thinking) => theme.inert,
         (_, TurnKind::ToolUse) => theme.warning,
         (_, TurnKind::ToolResult) => theme.warning,
         // Semantic reuse of the codex identity color
@@ -283,7 +283,7 @@ fn chip_color(turn: &TranscriptTurn, theme: &Theme) -> ratatui::style::Color {
         // `[tui.theme.harness].codex` also recolors user turns.
         (TurnRole::User, _) => theme.harness_color("codex"),
         (TurnRole::Assistant, _) => theme.success,
-        (TurnRole::System, _) => theme.secondary_text,
+        (TurnRole::System, _) => theme.inert,
     }
 }
 
@@ -457,7 +457,7 @@ fn line_with_styled_prefix(
     // double-dimming (color-fg + DIM) renders inconsistently across
     // terminals: some honor only one of the SGR codes, leaving the
     // prefix *more* visible than intended.
-    let prefix_style = Style::new().fg(theme.secondary_text);
+    let prefix_style = Style::new().fg(theme.inert);
     if let Some((prefix_end, _)) = detect_line_number_prefix(raw) {
         let prefix = &raw[..prefix_end];
         let rest = &raw[prefix_end..];

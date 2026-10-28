@@ -672,7 +672,7 @@ impl Widget for WorktreeMenuWidget<'_> {
         let block = Block::default()
             .borders(Borders::ALL)
             .title(" Worktree ")
-            .border_style(Style::default().fg(self.theme.panel_focus_accent));
+            .border_style(Style::default().fg(self.theme.accent));
         let inner = block.inner(rect);
         block.render(rect, buf);
         Paragraph::new(lines)

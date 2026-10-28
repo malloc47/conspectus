@@ -241,7 +241,7 @@ pub(super) fn draw_status_bar(app: &App, frame: &mut Frame<'_>, area: Rect) {
     let mut spans = Vec::new();
     push_unseen_messages_chip(app, theme, &mut spans);
     push_in_flight_chips(app, theme, &mut spans);
-    spans.push(span!(theme.placeholder; "{scope} "));
+    spans.push(span!(theme.muted; "{scope} "));
     if stale {
         // Reserved up front so the stale mark is never the thing that
         // gets pushed off the end.
@@ -304,7 +304,7 @@ pub(super) fn push_in_flight_chips(app: &App, theme: &Theme, spans: &mut Vec<Spa
         return;
     }
     let style = Style::default()
-        .fg(theme.panel_focus_accent)
+        .fg(theme.accent)
         .add_modifier(Modifier::BOLD);
     for op in ops {
         spans.push(span!(style; "{} {}", spinner_glyph(op.started_at), op.label));
@@ -323,7 +323,7 @@ pub(super) fn push_provider_chips(app: &App, theme: &Theme, spans: &mut Vec<Span
     };
 
     if status.tmux_disabled {
-        push_chip("tmux:off", Style::default().add_modifier(theme.placeholder));
+        push_chip("tmux:off", Style::default().add_modifier(theme.muted));
     } else if let Some(false) = status.tmux_available {
         let reason = status.tmux_reason.as_deref().unwrap_or("unavailable");
         push_chip(
@@ -333,10 +333,7 @@ pub(super) fn push_provider_chips(app: &App, theme: &Theme, spans: &mut Vec<Span
     }
 
     if status.forge_disabled {
-        push_chip(
-            "forge:off",
-            Style::default().add_modifier(theme.placeholder),
-        );
+        push_chip("forge:off", Style::default().add_modifier(theme.muted));
     } else if let Some(false) = status.forge_available {
         let reason = status.forge_reason.as_deref().unwrap_or("error");
         // Reasons name `gh` themselves ("gh is not authenticated");
@@ -600,16 +597,16 @@ fn fit_status_segments(app: &App, theme: &Theme, room: usize) -> Vec<Span<'stati
     let mut spans: Vec<Span<'static>> = Vec::new();
     for (index, piece) in kept.iter().enumerate() {
         if index > 0 {
-            spans.push(span!(theme.placeholder; " · "));
+            spans.push(span!(theme.muted; " · "));
         }
         if piece.settings {
-            spans.push(span!(Style::default().fg(theme.cwd_mark); "{}", piece.text));
+            spans.push(span!(Style::default().fg(theme.cwd_mark()); "{}", piece.text));
         } else {
-            spans.push(span!(theme.placeholder; "{}", piece.text));
+            spans.push(span!(theme.muted; "{}", piece.text));
         }
     }
     if dropped {
-        spans.push(span!(theme.placeholder; " …"));
+        spans.push(span!(theme.muted; " …"));
     }
     spans
 }

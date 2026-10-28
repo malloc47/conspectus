@@ -688,7 +688,7 @@ fn granularity_segments(group: Grouping, theme: &Theme) -> Vec<Span<'static>> {
 
 fn choice_segments(choices: [(bool, &'static str); 2], theme: &Theme) -> Vec<Span<'static>> {
     let chosen = Style::default()
-        .fg(theme.panel_focus_accent)
+        .fg(theme.accent)
         .add_modifier(Modifier::BOLD | Modifier::REVERSED);
     let mut spans = Vec::new();
     for (i, (on, word)) in choices.into_iter().enumerate() {
@@ -819,7 +819,7 @@ impl Widget for SearchBody<'_> {
         // widget, since we want the query and the result list in a
         // single bordered modal.
         let query_line = line![
-            span!(Style::default().fg(self.theme.panel_focus_accent); "/"),
+            span!(Style::default().fg(self.theme.accent); "/"),
             self.state.query().to_string(),
         ];
         let query_area = Rect {
@@ -859,7 +859,7 @@ impl Widget for SearchBody<'_> {
             } else {
                 "(no matches)"
             };
-            Paragraph::new(line![span!(self.theme.placeholder; "{label}")]).render(list_area, buf);
+            Paragraph::new(line![span!(self.theme.muted; "{label}")]).render(list_area, buf);
             return;
         }
 
@@ -929,12 +929,12 @@ impl SearchBody<'_> {
         let plain = Style::default().add_modifier(mark);
         let dim = if is_cursor || entity.gone {
             plain.add_modifier(if entity.gone && !is_cursor {
-                self.theme.placeholder
+                self.theme.muted
             } else {
                 Modifier::empty()
             })
         } else {
-            Style::default().add_modifier(self.theme.placeholder)
+            Style::default().add_modifier(self.theme.muted)
         };
         let label = ellipsize(&entity.label, columns.label);
         let label_width = cells(&label);
@@ -1006,7 +1006,7 @@ impl SearchBody<'_> {
             width: area.width,
             height: 1,
         };
-        Paragraph::new(line![span!(self.theme.placeholder; "{status}")]).render(status_rect, buf);
+        Paragraph::new(line![span!(self.theme.muted; "{status}")]).render(status_rect, buf);
 
         let list_top = area.y.saturating_add(2);
         let list_height = hint_top.saturating_sub(list_top) as usize;
@@ -1035,7 +1035,7 @@ impl SearchBody<'_> {
                 "(searching…)"
             };
             let label = ellipsize(label, width);
-            Paragraph::new(line![span!(self.theme.placeholder; "{label}")]).render(list_area, buf);
+            Paragraph::new(line![span!(self.theme.muted; "{label}")]).render(list_area, buf);
             return;
         }
         let scroll = compute_scroll(self.state.cursor(), list_height, view.rows.len());
@@ -1097,7 +1097,7 @@ impl SearchBody<'_> {
                 width: area.width,
                 height: 1,
             };
-            Paragraph::new(line![span!(self.theme.placeholder; "{text}")]).render(rect, buf);
+            Paragraph::new(line![span!(self.theme.muted; "{text}")]).render(rect, buf);
         }
         rows
     }
@@ -1227,7 +1227,7 @@ fn content_row_line(
     let dim = if is_cursor {
         plain
     } else {
-        Style::default().add_modifier(theme.placeholder)
+        Style::default().add_modifier(theme.muted)
     };
     let pad = |text: &str, width: usize| {
         let text = ellipsize(text, width);
@@ -1307,7 +1307,7 @@ fn build_match_line(
         if is_cursor {
             style = style.add_modifier(Modifier::REVERSED);
         } else if dim_when_not_cursor {
-            style = style.add_modifier(theme.placeholder);
+            style = style.add_modifier(theme.muted);
         }
         style
     };
@@ -1395,9 +1395,9 @@ fn search_kind_glyph_span_for(kind: NodeKind, theme: &Theme, is_cursor: bool) ->
     let style = node_kind_style(kind, theme);
     // ForgePr's slate color is `Color::Reset`; mirror the dodge
     // `kind_chip_span` and the breadcrumb renderer use — fall back
-    // to `theme.pr_open` since search results don't carry PR state.
+    // to `theme.pr_open()` since search results don't carry PR state.
     let color = if matches!(kind, NodeKind::ForgePr) {
-        theme.pr_open
+        theme.pr_open()
     } else {
         style.color
     };

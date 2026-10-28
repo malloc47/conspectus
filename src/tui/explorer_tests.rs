@@ -1181,8 +1181,8 @@ fn render_breadcrumb_chain_uses_kind_color_per_glyph_span() {
         .iter()
         .find(|s| s.content == mux_glyph)
         .expect("mux glyph span");
-    assert_eq!(session_span.style.fg, Some(theme.node_agent_session));
-    assert_eq!(mux_span.style.fg, Some(theme.node_mux_session));
+    assert_eq!(session_span.style.fg, Some(theme.node_agent_session()));
+    assert_eq!(mux_span.style.fg, Some(theme.node_mux_session()));
 }
 
 #[test]

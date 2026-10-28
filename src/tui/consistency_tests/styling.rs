@@ -8,7 +8,7 @@ use crate::tui::Effect;
 use crate::tui::effect::StoreOp;
 
 /// Whether the first cell of `label` in the left half of the frame has
-/// the ghost look (the theme's ghost color, in italics).
+/// the ghost look (the theme's `inert` color, in italics).
 fn label_wears_ghost_style(app: &mut App, label: &str, width: u16) -> bool {
     let buffer = buffer_of(app, width, 40);
     let theme = crate::tui::Theme::default();
@@ -22,7 +22,7 @@ fn label_wears_ghost_style(app: &mut App, label: &str, width: u16) -> bool {
         };
         let x = u16::try_from(line[..byte].chars().count()).expect("column");
         let cell = &buffer[(x, y)];
-        return cell.fg == theme.ghost && cell.modifier.contains(Modifier::ITALIC);
+        return cell.fg == theme.inert && cell.modifier.contains(Modifier::ITALIC);
     }
     panic!("no row for {label} in:\n{}", buffer_to_string(&buffer));
 }
@@ -84,7 +84,7 @@ fn a_pin_that_is_not_running_wears_the_hollow_glyph_in_the_ghost_color() {
             }
             let glyph_x = (0..100u16).find(|x| buffer[(*x, y)].symbol() == "◎");
             let x = glyph_x.unwrap_or_else(|| panic!("no hollow glyph before {label}: {line}"));
-            assert_eq!(buffer[(x, y)].fg, theme.ghost, "{label}");
+            assert_eq!(buffer[(x, y)].fg, theme.inert, "{label}");
             found = true;
             break;
         }

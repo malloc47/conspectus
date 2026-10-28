@@ -216,7 +216,7 @@ impl KnownSize for PickerBody<'_> {
 impl Widget for PickerBody<'_> {
     fn render(self, area: Rect, buf: &mut Buffer) {
         let query = line![
-            span!(Style::default().fg(self.theme.panel_focus_accent); "/"),
+            span!(Style::default().fg(self.theme.accent); "/"),
             self.state.query().to_string(),
         ];
         Paragraph::new(query).render(Rect { height: 1, ..area }, buf);
@@ -233,7 +233,7 @@ impl Widget for PickerBody<'_> {
             } else {
                 "(no matches)"
             };
-            Paragraph::new(line![span!(self.theme.placeholder; "{note}")]).render(list, buf);
+            Paragraph::new(line![span!(self.theme.muted; "{note}")]).render(list, buf);
             return;
         }
         let rows = list.height as usize;
@@ -261,7 +261,7 @@ impl Widget for PickerBody<'_> {
                 ];
                 if !item.detail.is_empty() {
                     spans.push(span!(
-                        Style::default().add_modifier(emphasis | self.theme.placeholder);
+                        Style::default().add_modifier(emphasis | self.theme.muted);
                         "  · {}", item.detail
                     ));
                 }

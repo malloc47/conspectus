@@ -335,7 +335,7 @@ pub enum PinMarker {
     /// A pin on an entity that is running (`◉`).
     Running,
     /// A pin on an entity that is stopped, removed, missing, or not
-    /// started yet (`◎`, in the ghost color).
+    /// started yet (`◎`, in the ghost look).
     Stopped,
 }
 
