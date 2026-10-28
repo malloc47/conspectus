@@ -3632,6 +3632,65 @@ fn left_pane_scrollbar_column_carries_only_scrollbar_glyphs() {
 }
 
 #[test]
+fn an_explorer_that_shrinks_leaves_no_blank_rows_below_it() {
+    // The explorer scrolled to its end, then lost half its rows: the
+    // window comes back inside them instead of keeping its old offset
+    // and showing the last row alone with blank rows below it.
+    let mut app = workspace_app_with_repos(20);
+    app.update(Msg::CycleFocus);
+    if !app.edge_meta_visible() {
+        app.update(Msg::ToggleEdgeMeta);
+    }
+    app.update(Msg::ExplorerEnd);
+    let area = Rect::new(0, 0, 100, 20);
+    render_to_buffer(&mut app, area);
+    let tall = app.explorer_window();
+    assert!(
+        tall.offset() > 0,
+        "the explorer scrolled to its end: {tall:?}"
+    );
+
+    app.update(Msg::ToggleEdgeMeta);
+    render_to_buffer(&mut app, area);
+    let short = app.explorer_window();
+    assert!(
+        short.content() < tall.content(),
+        "hiding the meta lines shrank the explorer: {tall:?} -> {short:?}"
+    );
+    assert_eq!(
+        short.visible().len(),
+        short.viewport(),
+        "the zone is full: {short:?}"
+    );
+    assert_eq!(short.offset(), short.last_offset());
+}
+
+#[test]
+fn scrolling_a_preview_past_its_end_is_taken_back_at_once() {
+    // `K` far past a transcript's oldest turn: the frame keeps the
+    // offset at the oldest turn, so the first `J` moves the Preview.
+    let mut app = unmuxed_session_app(|_| {});
+    app.update(Msg::SetPreview {
+        source: codex_transcript(),
+        content: transcript_content(30),
+    });
+    let area = Rect::new(0, 0, 120, 30);
+    render_to_buffer(&mut app, area);
+    for _ in 0..500 {
+        app.update(Msg::ScrollPreviewBy(-1));
+    }
+    let oldest = buffer_to_string(&render_to_buffer(&mut app, area));
+    assert!(
+        app.preview_scroll() < 500,
+        "the frame took the offset back ({})",
+        app.preview_scroll()
+    );
+    app.update(Msg::ScrollPreviewBy(1));
+    let next = buffer_to_string(&render_to_buffer(&mut app, area));
+    assert_ne!(oldest, next, "J moved the Preview at once");
+}
+
+#[test]
 fn right_pane_explorer_hides_scrollbar_when_related_list_fits() {
     // A workspace with two repos has only two validated rows;
     // the explorer header comfortably fits in any non-tiny

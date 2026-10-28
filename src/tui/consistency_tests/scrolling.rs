@@ -455,11 +455,57 @@ fn a_tree_that_shrinks_leaves_no_blank_rows_below_it() {
     let rows = tree_rows(&collapsed);
     let expected_scroll = shown.saturating_sub(rows);
     assert!(
-        usize::from(app.left_scroll()) <= expected_scroll,
+        app.left_scroll() <= expected_scroll,
         "the tree scrolled past its end (offset {}, {shown} rows in {rows})\n{}",
         app.left_scroll(),
         buffer_to_string(&collapsed)
     );
+}
+
+/// The renderer reports what it measured by returning it: no part of the
+/// main screen's draw sends the App a message, so a drawn frame changes
+/// nothing but the windows its caller keeps.
+#[test]
+fn the_renderer_sends_no_messages() {
+    let renderer = [
+        ("ui.rs", include_str!("../ui.rs")),
+        ("ui/compact.rs", include_str!("../ui/compact.rs")),
+        ("ui/header.rs", include_str!("../ui/header.rs")),
+        ("ui/left_panel.rs", include_str!("../ui/left_panel.rs")),
+        ("ui/preview_pane.rs", include_str!("../ui/preview_pane.rs")),
+        ("ui/right_panel.rs", include_str!("../ui/right_panel.rs")),
+    ];
+    for (file, source) in renderer {
+        for needle in [".update(", "Msg::"] {
+            assert!(
+                !source.contains(needle),
+                "src/tui/{file} sends a message from the draw (`{needle}`); \
+                 return what it measured in the frame's ViewportReport instead"
+            );
+        }
+    }
+}
+
+#[test]
+fn a_frame_keeps_the_windows_it_drew() {
+    let world = world_with(60);
+    let size = (80, 24);
+    let mut app = app_over(View::Mux, &world);
+    press(&mut app, size, KeyCode::Char('G'));
+    let kept = app.left_window();
+    assert!(
+        kept.overflows(),
+        "the tree is taller than its pane: {kept:?}"
+    );
+    assert_eq!(kept.offset(), kept.last_offset(), "G scrolled to the end");
+    assert_eq!(
+        usize::from(app.left_viewport()),
+        kept.viewport(),
+        "page keys move by the kept window"
+    );
+    // Drawing again from the same state keeps the same window.
+    screen(&mut app, size);
+    assert_eq!(app.left_window(), kept);
 }
 
 // ---- menus and every modal on a short terminal -----------------------------

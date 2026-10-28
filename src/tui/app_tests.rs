@@ -517,103 +517,6 @@ fn scroll_preview_by_advances_by_arbitrary_delta() {
 }
 
 #[test]
-fn adjust_left_scroll_keeps_selection_above_top() {
-    let mut app = App::new(RunConfig::defaults());
-    // Selection at line 0 with viewport 5 over 20 lines: offset is 0.
-    assert_eq!(app.adjust_left_scroll(0, 20, 5), 0);
-    // Walk the selection down to line 10; offset advances so
-    // the selection is on the bottom edge of the viewport.
-    assert_eq!(app.adjust_left_scroll(10, 20, 5), 6);
-    // Walk back up to line 4 — selection moved above the top
-    // edge, so the offset retreats to it.
-    assert_eq!(app.adjust_left_scroll(4, 20, 5), 4);
-}
-
-#[test]
-fn adjust_left_scroll_holds_when_selection_inside_viewport() {
-    let mut app = App::new(RunConfig::defaults());
-    // Prime offset by scrolling to line 10 in a 5-tall viewport.
-    app.adjust_left_scroll(10, 20, 5);
-    assert_eq!(app.left_scroll(), 6);
-    // Move selection within [6, 10] — offset should not change.
-    assert_eq!(app.adjust_left_scroll(8, 20, 5), 6);
-    assert_eq!(app.adjust_left_scroll(7, 20, 5), 6);
-    assert_eq!(app.adjust_left_scroll(10, 20, 5), 6);
-}
-
-#[test]
-fn adjust_left_scroll_never_scrolls_past_the_last_line() {
-    let mut app = App::new(RunConfig::defaults());
-    // The end of a 20-line tree in a 5-tall viewport.
-    assert_eq!(app.adjust_left_scroll(19, 20, 5), 15);
-    // The tree shrank to 8 lines with the selection still inside the
-    // old window: the offset comes back so the last line is at the
-    // bottom.
-    assert_eq!(app.adjust_left_scroll(7, 8, 5), 3);
-    // A tree shorter than the viewport shows from its top.
-    assert_eq!(app.adjust_left_scroll(2, 3, 5), 0);
-}
-
-#[test]
-fn adjust_left_scroll_with_zero_viewport_does_nothing() {
-    let mut app = App::new(RunConfig::defaults());
-    app.adjust_left_scroll(10, 20, 5);
-    let before = app.left_scroll();
-    let returned = app.adjust_left_scroll(99, 100, 0);
-    assert_eq!(returned, before);
-    assert_eq!(app.left_scroll(), before);
-}
-
-#[test]
-fn adjust_explorer_scroll_keeps_cursor_in_viewport() {
-    let mut app = App::new(RunConfig::defaults());
-    assert_eq!(app.adjust_explorer_scroll(0, 0, 5), 0);
-    assert_eq!(app.adjust_explorer_scroll(10, 10, 5), 6);
-    assert_eq!(app.adjust_explorer_scroll(4, 4, 5), 4);
-}
-
-#[test]
-fn adjust_explorer_scroll_holds_when_cursor_inside_viewport() {
-    let mut app = App::new(RunConfig::defaults());
-    app.adjust_explorer_scroll(10, 10, 5);
-    assert_eq!(app.explorer_scroll(), 6);
-    assert_eq!(app.adjust_explorer_scroll(8, 8, 5), 6);
-    assert_eq!(app.adjust_explorer_scroll(7, 7, 5), 6);
-    assert_eq!(app.adjust_explorer_scroll(10, 10, 5), 6);
-}
-
-#[test]
-fn adjust_explorer_scroll_with_zero_viewport_does_nothing() {
-    let mut app = App::new(RunConfig::defaults());
-    app.adjust_explorer_scroll(10, 10, 5);
-    let before = app.explorer_scroll();
-    let returned = app.adjust_explorer_scroll(99, 99, 0);
-    assert_eq!(returned, before);
-    assert_eq!(app.explorer_scroll(), before);
-}
-
-#[test]
-fn adjust_explorer_scroll_keeps_wrapped_cursor_line_fully_visible() {
-    // Regression: when the cursor's logical line wraps to 2+
-    // rendered rows, only feeding the line's start row left
-    // the trailing wrap rows below the viewport bottom. The
-    // span-aware API uses the cursor's last row to drive the
-    // "scroll down" branch so a 2-row wrapped cursor line at
-    // the bottom of the content advances the offset enough
-    // for both rows to fit.
-    let mut app = App::new(RunConfig::defaults());
-    // Viewport 5 rows. Cursor's line starts at row 9 and
-    // wraps to 2 rows (occupies 9 and 10). The offset must
-    // advance to 6 so both 9 and 10 fit in [6, 10].
-    assert_eq!(app.adjust_explorer_scroll(9, 10, 5), 6);
-    assert_eq!(app.explorer_scroll(), 6);
-    // Single-row cursor at the same row keeps the older
-    // tighter behavior (offset = 5).
-    let mut app = App::new(RunConfig::defaults());
-    assert_eq!(app.adjust_explorer_scroll(9, 9, 5), 5);
-}
-
-#[test]
 fn scenario_ambiguous_mux_session_is_leaf_after_adr_0071() {
     // ADR 0071: ambiguous mux candidates no longer expand a
     // per-session subtree; the chip stays but the row is a
@@ -1285,14 +1188,13 @@ fn explorer_back_armed_state_clears_on_intervening_message() {
 }
 
 #[test]
-fn explorer_back_arm_survives_per_frame_viewport_reconciliation() {
-    // Regression: the draw path dispatches `LeftViewportChanged` /
-    // `ExplorerViewportChanged` every frame, and
-    // `draw_frame` runs before each key poll. Those layout-plumbing
-    // messages must not count as an "intervening action", otherwise the
-    // empty-stack Backspace arm is cleared before the operator can land
-    // the confirming second press and focus never leaves the right pane
-    // no matter how many times Backspace is pressed.
+fn explorer_back_arm_survives_the_frames_between_presses() {
+    // Regression: `draw_frame` runs before each key poll, so a frame is
+    // always drawn between the two Backspace presses. Drawing it must not
+    // count as an "intervening action", otherwise the empty-stack arm is
+    // cleared before the operator can land the confirming second press
+    // and focus never leaves the right pane however often Backspace is
+    // pressed.
     let mut app = app_for_explorer();
     app.update(Msg::CycleFocus);
     assert_eq!(app.focus(), Focus::Right);
@@ -1303,16 +1205,11 @@ fn explorer_back_arm_survives_per_frame_viewport_reconciliation() {
         app.status_message()
             .is_some_and(|s| s.contains("press Backspace again"))
     );
-    // A frame renders between presses, dispatching both reconciliation
-    // messages. These must leave the arm intact.
-    app.update(Msg::LeftViewportChanged {
-        viewport_height: 20,
-    });
-    app.update(Msg::ExplorerViewportChanged {
-        cursor_first_row: 0,
-        cursor_last_row: 0,
-        viewport_height: 20,
-    });
+    // Frames are drawn between the presses, and their windows kept.
+    // They must leave the arm intact.
+    let area = ratatui::layout::Rect::new(0, 0, 100, 30);
+    crate::tui::ui::render_to_buffer(&mut app, area);
+    crate::tui::ui::render_to_buffer(&mut app, area);
     // Second press now completes the focus shift.
     app.update(Msg::ExplorerBack);
     assert_eq!(app.focus(), Focus::Left);

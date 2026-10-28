@@ -4,7 +4,14 @@ use super::*;
 
 use crate::tui::icons::state;
 
-pub(super) fn draw_left_panel(app: &mut App, frame: &mut Frame<'_>, area: Rect) {
+/// Draw the left pane and return the window its tree drew, or `None`
+/// when the tree is empty, so the window it had is kept for when rows
+/// come back.
+pub(super) fn draw_left_panel(
+    app: &App,
+    frame: &mut Frame<'_>,
+    area: Rect,
+) -> Option<ScrollWindow> {
     // The corners take a cell each from the top border.
     let title_width = usize::from(area.width.saturating_sub(2));
     let block = Block::default()
@@ -61,7 +68,7 @@ pub(super) fn draw_left_panel(app: &mut App, frame: &mut Frame<'_>, area: Rect) 
         let widget =
             Paragraph::new(placeholder).style(Style::default().add_modifier(app.theme().muted));
         frame.render_widget(widget, inner);
-        return;
+        return None;
     }
 
     let now = current_unix_epoch_for_render();
@@ -74,32 +81,29 @@ pub(super) fn draw_left_panel(app: &mut App, frame: &mut Frame<'_>, area: Rect) 
     let row_width = usize::from(gutter.content().width);
 
     let mut lines: Vec<Line<'static>> = Vec::with_capacity(visible.len());
-    let mut selected_primary_line: Option<usize> = None;
+    let mut selected_line: Option<usize> = None;
     for row in &visible {
         let is_selected = app.selection() == Some(&row.id);
         let summary = summaries.get(&row.id).copied();
         let primary = render_left_row(row, app, is_selected, row_width, now, summary, align);
-        if is_selected {
-            selected_primary_line = Some(lines.len());
+        if is_selected && selected_line.is_none() {
+            selected_line = Some(lines.len());
         }
         lines.push(primary);
     }
 
-    // The reducer owns scroll reconciliation.
-    // Dispatch the post-layout viewport height and read the
-    // pre-computed offset as a pure getter. `selected_primary_line`
-    // stays computed above as an assertion anchor — the reducer
-    // arm derives the same index from
-    // `visible_rows().position(...)` internally.
-    let _ = selected_primary_line;
-    app.update(Msg::LeftViewportChanged {
-        viewport_height: inner.height,
-    });
-    let window = ScrollWindow::new(usize::from(inner.height), lines.len())
-        .at(usize::from(app.left_scroll()));
+    // Each visible row is one line. The window starts where the last
+    // frame left it, is measured again for this pane, and follows the
+    // selection (its first row, when a row is listed twice).
+    let mut window = app.left_window();
+    window.resize(usize::from(inner.height), lines.len());
+    if let Some(line) = selected_line {
+        window.follow(line..line + 1);
+    }
     let widget = Paragraph::new(lines).scroll(window.paragraph_scroll());
     frame.render_widget(widget, gutter.content());
     gutter.render(&window, frame.buffer_mut());
+    Some(window)
 }
 
 /// Render the left pane title as a lazydocker-style tab strip

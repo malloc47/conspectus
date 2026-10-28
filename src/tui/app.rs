@@ -12,6 +12,8 @@ use std::fmt;
 use std::rc::Rc;
 use std::time::Instant;
 
+use tuikit::scroll::ScrollWindow;
+
 use crate::model::{AgentSessionId, GraphSnapshot, MuxSessionId, NodeId, PinId};
 use crate::tui::explorer::{
     BreadcrumbHop, ExplorerInputs, ExplorerRow, ExplorerRowKey, NodeView, build_node_view,
@@ -28,6 +30,7 @@ mod msg;
 mod overlays;
 mod search_open;
 mod tree;
+mod viewport;
 
 #[cfg(test)]
 pub(crate) use content::MAX_DETAIL_SESSIONS;
@@ -37,6 +40,7 @@ pub use content::{
 pub use msg::Msg;
 #[cfg(test)]
 pub(crate) use search_open::OpenPlan;
+pub use viewport::ViewportReport;
 
 /// Cheap-to-clone, reference-counted handle to the App's resolved
 /// [`GraphSnapshot`]. Read consumers borrow it via [`Self::snapshot`].
@@ -228,25 +232,20 @@ pub struct App {
     /// transcripts (ADR 0112 §5). The renderer reads this for the
     /// right-panel Preview zone.
     preview_store: PreviewStore,
-    /// Left-panel vertical scroll offset, in rendered lines. The
-    /// renderer reconciles this each frame via
-    /// [`App::adjust_left_scroll`] so the selected row stays
-    /// visible: draw measures the viewport and dispatches
-    /// `Msg::LeftViewportChanged` (ADR 0085 contract 5).
-    left_scroll: u16,
-    /// Rows the tree drew in the last frame (from
-    /// `Msg::LeftViewportChanged`); `PageUp` / `PageDown` move the
-    /// selection by this many. Zero before the first frame.
-    left_viewport: u16,
-    /// Right-panel explorer scroll offset, in rendered lines. Used
-    /// to keep the explorer cursor visible inside the header section
-    /// when the Related list grows past the section's height (the
-    /// preview zone below reserves a minimum). Reconciled each
-    /// frame via [`App::adjust_explorer_scroll`], mirroring the
-    /// left pane's pattern. Does not affect
-    /// [`Self::preview_scroll`], which scrolls the preview body
-    /// independently.
-    explorer_scroll: u16,
+    /// The window the tree drew in the last frame: its offset in rows,
+    /// the rows it showed, and the visible rows there were. The next
+    /// frame starts from it and follows the selection by the minimal
+    /// motion rule; `PageUp` / `PageDown` move the selection by its
+    /// height. The frame reports it in a [`ViewportReport`], which
+    /// [`App::keep_viewports`] stores. Empty before the first frame.
+    left_window: ScrollWindow,
+    /// The window the explorer zone of the right pane drew in the last
+    /// frame, over its wrapped rows, kept the same way. It keeps the
+    /// explorer cursor visible when the Related list grows past the
+    /// zone's height (the Preview below reserves a minimum), and does
+    /// not move [`Self::preview_scroll`], which scrolls the Preview
+    /// body.
+    explorer_window: ScrollWindow,
     /// Last visible-row index the selection landed on, used as a
     /// tiebreaker when the same `RowId` appears in multiple visible
     /// positions (e.g. the mux view lists the same ambiguously-
@@ -339,7 +338,7 @@ pub(crate) struct ViewStateSlot {
     pub grouping: super::Grouping,
     pub expanded: BTreeSet<RowId>,
     pub selection: Option<RowId>,
-    pub left_scroll: u16,
+    pub left_window: ScrollWindow,
 }
 
 impl ViewStateSlot {
@@ -349,7 +348,7 @@ impl ViewStateSlot {
             grouping: super::Grouping::default_for(view),
             expanded: BTreeSet::new(),
             selection: None,
-            left_scroll: 0,
+            left_window: ScrollWindow::default(),
         }
     }
 }
@@ -592,9 +591,8 @@ impl App {
             pending_restore_focus: None,
             undo: crate::tui::undo::UndoStack::default(),
             preview_store: PreviewStore::new(),
-            left_scroll: 0,
-            left_viewport: 0,
-            explorer_scroll: 0,
+            left_window: ScrollWindow::default(),
+            explorer_window: ScrollWindow::default(),
             last_visible_index: None,
             modal_stack: Vec::new(),
             slot_prompt: None,
@@ -622,7 +620,7 @@ impl App {
             grouping: self.grouping,
             expanded: self.expanded.clone(),
             selection: self.selection.clone(),
-            left_scroll: self.left_scroll,
+            left_window: self.left_window,
         }
     }
 
@@ -632,7 +630,7 @@ impl App {
         self.grouping = slot.grouping;
         self.expanded = slot.expanded;
         self.selection = slot.selection;
-        self.left_scroll = slot.left_scroll;
+        self.left_window = slot.left_window;
     }
 
     /// Switch the active view to `target`, saving the previous
@@ -674,7 +672,7 @@ impl App {
         if let Some(first) = self.visible_rows().first().map(|row| row.id.clone()) {
             self.set_selection(first);
         }
-        self.left_scroll = 0;
+        self.left_window.to_top();
     }
 
     fn seed_first_visit(&mut self) {
@@ -909,7 +907,7 @@ impl App {
                     grouping,
                     expanded: BTreeSet::new(),
                     selection: None,
-                    left_scroll: 0,
+                    left_window: ScrollWindow::default(),
                 });
 
             // Apply to active fields for the current view.
@@ -1246,110 +1244,6 @@ impl App {
         )
     }
 
-    /// Adjust the left-panel scroll so `selected_line` is visible
-    /// inside a viewport of `viewport_height` lines, then return
-    /// the resulting offset. Pure with respect to selection — no
-    /// reducer state changes — but mutates the per-frame scroll
-    /// cell through interior mutability. Called by the renderer
-    /// each draw.
-    ///
-    /// Rules:
-    /// - If the selection is above the current top, the top edge
-    ///   moves up to bring it into view.
-    /// - If the selection is at or below the current bottom, the
-    ///   bottom edge moves down (and the offset advances).
-    /// - Otherwise the offset is left alone — incidental cursor
-    ///   movement inside the viewport doesn't reshuffle the view.
-    /// - The offset never passes `total_lines - viewport_height`, so a
-    ///   tree that shrank (a collapse, a filter) fills the pane rather
-    ///   than leaving blank rows below it with rows hidden above.
-    pub fn adjust_left_scroll(
-        &mut self,
-        selected_line: usize,
-        total_lines: usize,
-        viewport_height: u16,
-    ) -> u16 {
-        let vh = viewport_height as usize;
-        if vh == 0 {
-            return self.left_scroll;
-        }
-        let mut offset = self.left_scroll as usize;
-        if selected_line < offset {
-            offset = selected_line;
-        } else if selected_line >= offset + vh {
-            offset = selected_line + 1 - vh;
-        }
-        let offset = offset.min(total_lines.saturating_sub(vh));
-        let clamped = u16::try_from(offset).unwrap_or(u16::MAX);
-        self.left_scroll = clamped;
-        clamped
-    }
-
-    /// Pure getter for the current left-panel scroll offset. The
-    /// reducer owns updates (via
-    /// [`Msg::LeftViewportChanged`]); the
-    /// renderer reads this to size `Paragraph::scroll`.
-    pub fn left_scroll(&self) -> u16 {
-        self.left_scroll
-    }
-
-    /// Rows the tree drew in the last frame, which a page key moves the
-    /// selection by. Zero before the first frame.
-    pub fn left_viewport(&self) -> u16 {
-        self.left_viewport
-    }
-
-    /// Reconcile the explorer (right-pane) scroll offset against the
-    /// cursor's rendered (post-wrap) row span and the header
-    /// viewport height, returning the new offset to apply to
-    /// `Paragraph::scroll`. Mirrors [`Self::adjust_left_scroll`].
-    ///
-    /// `cursor_first_row` and `cursor_last_row` bracket the rendered
-    /// rows the cursor's logical line occupies. Equal values describe
-    /// a single-row line; when the line wraps, `cursor_last_row` is
-    /// the row index of its final terminal row. The right pane uses
-    /// `Paragraph::wrap`, so a long value (path, native_id) routinely
-    /// spans 2+ rows; without the span the offset only guaranteed
-    /// the cursor's *start* row was visible and the trailing wrapped
-    /// rows fell off the bottom by one.
-    ///
-    /// Triggered every frame so an out-of-date offset self-corrects
-    /// without explicit invalidation on focus changes or rebuilds.
-    pub fn adjust_explorer_scroll(
-        &mut self,
-        cursor_first_row: usize,
-        cursor_last_row: usize,
-        viewport_height: u16,
-    ) -> u16 {
-        let vh = viewport_height as usize;
-        if vh == 0 {
-            return self.explorer_scroll;
-        }
-        let mut offset = self.explorer_scroll as usize;
-        // Scroll up if the cursor's first row is above the top of
-        // the viewport.
-        if cursor_first_row < offset {
-            offset = cursor_first_row;
-        }
-        // Scroll down if the cursor's last row is at or past the
-        // bottom of the viewport. Using the cursor span's last row
-        // (not its first) keeps wrapped cursor lines fully visible.
-        if cursor_last_row >= offset + vh {
-            offset = cursor_last_row + 1 - vh;
-        }
-        let clamped = u16::try_from(offset).unwrap_or(u16::MAX);
-        self.explorer_scroll = clamped;
-        clamped
-    }
-
-    /// Pure getter for the current explorer scroll offset. The
-    /// reducer owns updates (via
-    /// [`Msg::ExplorerViewportChanged`]);
-    /// the renderer reads this to size `Paragraph::scroll`.
-    pub fn explorer_scroll(&self) -> u16 {
-        self.explorer_scroll
-    }
-
     /// Iterate the row tree, skipping rows whose ancestors are
     /// collapsed. Iteration order matches display order.
     pub fn visible_rows(&self) -> Vec<&Row> {
@@ -1392,24 +1286,9 @@ impl App {
         // confirmation can complete. An intervening operator action
         // (navigation, focus cycle, …) clears it so the next Backspace
         // re-surfaces the hint instead of jumping straight to the focus
-        // shift.
-        //
-        // The draw path dispatches `LeftViewportChanged` /
-        // `ExplorerViewportChanged` every frame for scroll
-        // reconciliation. Those are layout plumbing,
-        // not operator input — and because `draw_frame` runs at the top
-        // of every event-loop iteration, before the next key is polled,
-        // counting them as an "intervening action" would disarm the
-        // shift before the operator could ever land the second press
-        // (the observed regression: the hint reappears but focus never
-        // moves). Treat them as transparent so the arm survives to the
-        // confirming Backspace.
-        if !matches!(
-            msg,
-            Msg::ExplorerBack
-                | Msg::LeftViewportChanged { .. }
-                | Msg::ExplorerViewportChanged { .. }
-        ) {
+        // shift. A drawn frame is not a message, so the frames between
+        // the two presses leave the arm alone.
+        if !matches!(msg, Msg::ExplorerBack) {
             self.explorer_back_armed = false;
         }
         let mut effects: Vec<Effect> = Vec::new();
@@ -1449,40 +1328,6 @@ impl App {
             }
             Msg::PageUp(viewport) => {
                 self.move_selection(-i32::from(viewport.max(1)));
-            }
-            Msg::LeftViewportChanged { viewport_height } => {
-                // The draw path dispatches this
-                // before building the left panel's line list so
-                // scroll reconciliation lives in the reducer, not
-                // in `draw`. Each visible row contributes exactly
-                // one primary line, so the selected row's line
-                // index equals its position in the visible
-                // projection. No selection → no reconciliation
-                // (empty tree keeps scroll at 0). The height is kept
-                // for the page keys.
-                self.left_viewport = viewport_height;
-                let Some(selected) = self.selection.clone() else {
-                    return effects;
-                };
-                let visible = self.visible_rows();
-                let total = visible.len();
-                let Some(line_idx) = visible.iter().position(|r| r.id == selected) else {
-                    return effects;
-                };
-                self.adjust_left_scroll(line_idx, total, viewport_height);
-            }
-            Msg::ExplorerViewportChanged {
-                cursor_first_row,
-                cursor_last_row,
-                viewport_height,
-            } => {
-                // Draw computes the post-wrap
-                // cursor row span (Paragraph::wrap output isn't
-                // pure over App state — it depends on pane width
-                // and font metrics), and this Msg carries the
-                // measured span into the reducer's
-                // adjust_explorer_scroll math.
-                self.adjust_explorer_scroll(cursor_first_row, cursor_last_row, viewport_height);
             }
             Msg::Home => {
                 self.move_selection_to(0);

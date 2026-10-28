@@ -896,7 +896,8 @@ pub(super) fn draw_screen(app: &mut App, frame: &mut ratatui::Frame<'_>) {
             crate::tui::widgets::pane_viewer::draw(state, &theme, frame, area);
         }
     } else {
-        ui::draw(app, frame);
+        let report = ui::draw(app, frame);
+        app.keep_viewports(report);
     }
 }
 

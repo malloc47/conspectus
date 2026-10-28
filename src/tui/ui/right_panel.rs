@@ -8,7 +8,13 @@ use super::*;
 /// rows after the divider).
 const MIN_PREVIEW_HEIGHT: u16 = 6;
 
-pub(super) fn draw_right_panel(app: &mut App, frame: &mut Frame<'_>, area: Rect) {
+/// Draw the right pane and return the windows its explorer zone and its
+/// Preview drew, `None` for a zone the pane did not draw.
+pub(super) fn draw_right_panel(
+    app: &mut App,
+    frame: &mut Frame<'_>,
+    area: Rect,
+) -> (Option<ScrollWindow>, Option<ScrollWindow>) {
     let block = Block::default()
         .borders(Borders::ALL)
         .title(right_panel_title(app, area.width as usize));
@@ -21,16 +27,9 @@ pub(super) fn draw_right_panel(app: &mut App, frame: &mut Frame<'_>, area: Rect)
         let widget = Paragraph::new(empty_right_panel_text(app))
             .style(Style::default().add_modifier(app.theme().muted));
         frame.render_widget(widget, inner);
-        return;
+        return (None, None);
     }
 
-    // `app` is `&mut` here so scroll
-    // reconciliation lives on the App fields directly rather
-    // than in `Cell`s. We derive all state-dependent lines +
-    // wrap counts through an immutable borrow of the explorer
-    // state, drop that borrow, mutate the scroll offset, then
-    // re-borrow the state for the preview render below.
-    //
     // Render the chip dividers (`Related`, `Other`) at the
     // narrower content width the scrollbar gutter leaves the
     // paragraph once it reserves a column for the scrollbar.
@@ -74,32 +73,17 @@ pub(super) fn draw_right_panel(app: &mut App, frame: &mut Frame<'_>, area: Rect)
         usize::from(inner.width),
         usize::from(max_header_height),
     );
-    // The rows the cursor's line took, so a wrapped cursor line is
-    // shown whole; with no cursor, the first row.
-    let cursor_rows = cursor_line.map_or(0..1, |idx| rows.rows_of(idx));
-    let (cursor_first_row, cursor_last_row) = (
-        cursor_rows.start,
-        cursor_rows.end.max(cursor_rows.start + 1) - 1,
-    );
     let header_height = u16::try_from(rows.len())
         .unwrap_or(u16::MAX)
         .min(max_header_height)
         .max(3);
     let split = vertical![==header_height, ==1, >=0].split(inner);
-    // The reducer owns scroll reconciliation.
-    // Draw measures the post-wrap cursor row span (that math
-    // needs the widget-rendered lines) and dispatches the
-    // measurement as a Msg; the reducer runs the same offset
-    // math it used to run in the renderer and updates
-    // `explorer_scroll`. Draw then reads the pre-computed
-    // offset as a pure getter.
-    app.update(Msg::ExplorerViewportChanged {
-        cursor_first_row,
-        cursor_last_row,
-        viewport_height: split[0].height,
-    });
-    let window = ScrollWindow::new(usize::from(split[0].height), rows.len())
-        .at(usize::from(app.explorer_scroll()));
+    // The window starts where the last frame left it, is measured again
+    // for the zone, and follows every row the cursor's line took, so a
+    // wrapped cursor line is shown whole; with no cursor, the first row.
+    let mut window = app.explorer_window();
+    window.resize(usize::from(split[0].height), rows.len());
+    window.follow(cursor_line.map_or(0..1, |idx| rows.rows_of(idx)));
     let gutter = ScrollGutter::layout(split[0], rows.len());
     frame.render_widget(
         Paragraph::new(rows.into_rows()).scroll(window.paragraph_scroll()),
@@ -116,12 +100,9 @@ pub(super) fn draw_right_panel(app: &mut App, frame: &mut Frame<'_>, area: Rect)
     );
     // A transcript preview leaves a column for its scrollbar.
     app.prepare_preview(split[2].width.saturating_sub(1).max(1));
-    // Re-fetch the explorer state for the preview render — the
-    // adjust_explorer_scroll call above needed a mutable
-    // borrow of `app`, which required dropping the earlier
-    // immutable state borrow.
     let state = app.explorer().expect("checked above");
-    draw_explorer_preview(app, state, frame, split[2]);
+    let preview = draw_explorer_preview(app, state, frame, split[2]);
+    (Some(window), Some(preview))
 }
 
 /// Render the right pane title with the kind of node currently
@@ -701,24 +682,24 @@ pub(super) fn unresolved_evidence_summary(row: &crate::tui::explorer::Unresolved
 /// lines (ADR 0107), then the neighbor's own preview (ADR 0112 §3), or
 /// its core fields when it has none. Other rows show the focused
 /// node's preview through `draw_detail_preview`.
+/// Draw the Preview for the explorer cursor's row and return the window
+/// its body drew.
 pub(super) fn draw_explorer_preview(
     app: &App,
     state: &crate::tui::app::ExplorerState,
     frame: &mut Frame<'_>,
     area: Rect,
-) {
+) -> ScrollWindow {
     use crate::tui::explorer::RowPreview;
     let Some(row) = state.selected_row() else {
         // Rows that don't carry a neighbor (node fields land here)
         // show the focused node's own preview body.
-        draw_detail_preview(app, frame, area);
-        return;
+        return draw_detail_preview(app, frame, area);
     };
     let Some(preview) = state.view.row_preview(&row) else {
         // No neighbor for this row — show the focused node's own
         // preview body (live mux capture, message preview, etc.).
-        draw_detail_preview(app, frame, area);
-        return;
+        return draw_detail_preview(app, frame, area);
     };
     let theme = app.theme();
     let mut lines: Vec<Line<'static>> = Vec::new();
@@ -831,7 +812,7 @@ pub(super) fn draw_explorer_preview(
         }
         PreviewView::text(text)
     };
-    draw_preview_view(app, view, frame, area);
+    draw_preview_view(app, view, frame, area)
 }
 
 pub(super) fn empty_right_panel_text(app: &App) -> &'static str {

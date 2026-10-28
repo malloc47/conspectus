@@ -52,33 +52,6 @@ pub enum Msg {
     /// many rows constitute one page. Pass 1 if unknown.
     PageDown(u16),
     PageUp(u16),
-    /// Left panel: post-layout viewport dimensions.
-    /// The draw path dispatches this before
-    /// building the left panel's line list so the reducer can
-    /// reconcile `left_scroll` from the current selection and
-    /// viewport height instead of the renderer poking a `Cell`
-    /// mid-frame. Carries the tree pane's inner height (rows).
-    /// The reducer computes the selected row's line index from
-    /// the visible-row projection — each visible row contributes
-    /// exactly one primary line, so the visible-row position is
-    /// the line index.
-    LeftViewportChanged {
-        viewport_height: u16,
-    },
-    /// Explorer (right panel): post-layout cursor row span and
-    /// viewport dimensions. The draw path
-    /// dispatches this after computing the post-wrap row span of
-    /// the explorer cursor so the reducer can reconcile
-    /// `explorer_scroll`. Unlike the left panel, cursor row
-    /// positions depend on `Paragraph::wrap` output for the
-    /// widget-rendered lines, so the draw path measures and the
-    /// reducer records; the split keeps scroll reconciliation
-    /// itself out of the render pipeline.
-    ExplorerViewportChanged {
-        cursor_first_row: usize,
-        cursor_last_row: usize,
-        viewport_height: u16,
-    },
     /// Left panel: first/last visible row.
     Home,
     End,

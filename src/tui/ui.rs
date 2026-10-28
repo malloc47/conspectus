@@ -36,12 +36,11 @@ use tuikit::scroll::{ScrollGutter, ScrollWindow, WrappedRows};
 use tuikit::text;
 
 use crate::model::{MuxSessionId, NodeId};
-use crate::tui::Msg;
 use crate::tui::SessionsGrouping;
 use crate::tui::Theme;
 use crate::tui::View;
 use crate::tui::actions::{attach_disabled_reason, resolve_attach_target};
-use crate::tui::app::{App, Focus, SnapshotHandle};
+use crate::tui::app::{App, Focus, SnapshotHandle, ViewportReport};
 use crate::tui::icons::{NodeKind, node_kind_style};
 use crate::tui::preview::PreviewContent;
 use crate::tui::rows::{
@@ -61,35 +60,29 @@ use left_panel::*;
 use preview_pane::*;
 use right_panel::*;
 
-/// Render one frame.
+/// Render one frame and report the window each scrolled surface drew.
 ///
-/// Takes `&mut App` because the draw path dispatches
-/// [`Msg::LeftViewportChanged`] / [`Msg::ExplorerViewportChanged`]
-/// mid-frame so the reducer can reconcile scroll offsets. The
-/// reconciliation math itself lives in the
-/// reducer; draw only measures viewport height + the post-wrap
-/// explorer cursor row span and dispatches those measurements as
-/// Msgs. A strict `&App → buffer` shape would require restructuring
-/// draw into separate measure + render passes so the runtime can
-/// dispatch the Msgs upstream — that's an ADR 0085 contract-5
-/// optional cleanup, not a correctness need. The mutation surface
-/// today is bounded to those two Msg dispatches plus what the
-/// scrolling overlays (value modal, Messages, help) showed: each
-/// draws from `&App`, then writes back its rows and scroll limit so
-/// the next page key moves by what was drawn and an offset past the
-/// end is taken back. Every other draw helper (`draw_header` /
-/// `draw_status_bar` / the remaining overlays / toast) takes `&App`
-/// and is byte-identical over the same App state.
-pub fn draw(app: &mut App, frame: &mut Frame<'_>) {
+/// The tree, the explorer, the Preview, and the scrolling overlays (help,
+/// the value modal, Messages) each work their window out from the App
+/// (the window kept from the last frame and the cursor) and the area the
+/// layout gave them, draw it, and return it. The caller hands the
+/// [`ViewportReport`] to [`App::keep_viewports`] after the frame, so the
+/// next page key moves by the rows on screen and an offset past the end
+/// stays taken back. Nothing is dispatched from inside the draw.
+///
+/// `app` is borrowed mutably for one thing: the right pane warms the
+/// transcript preview's wrapped lines for the width it measured
+/// (`App::prepare_preview`). Every other draw helper takes `&App`.
+pub fn draw(app: &mut App, frame: &mut Frame<'_>) -> ViewportReport {
     let area = frame.area();
     let layout = vertical![==1, >=3, ==1].split(area);
 
     draw_header(app, frame, layout[0]);
-    draw_body(app, frame, layout[1]);
+    let mut report = draw_body(app, frame, layout[1]);
     draw_status_bar(app, frame, layout[2]);
     draw_controls_overlay(app, frame, area);
     draw_search_overlay(app, frame, area);
-    draw_help_overlay(app, frame, area);
+    report.help = draw_help_overlay(app, frame, area);
     draw_rename_overlay(app, frame, area);
     draw_worktree_menu(app, frame, area);
     draw_new_mux_form(app, frame, area);
@@ -99,9 +92,10 @@ pub fn draw(app: &mut App, frame: &mut Frame<'_>) {
     draw_picker(app, frame, area);
     draw_mux_launch_form(app, frame, area);
     draw_pin_edit_form(app, frame, area);
-    draw_value_modal(app, frame, area);
-    draw_messages_overlay(app, frame, area);
+    report.value = draw_value_modal(app, frame, area);
+    report.messages = draw_messages_overlay(app, frame, area);
     draw_toast(app, frame, area);
+    report
 }
 
 fn draw_mux_menu(app: &App, frame: &mut Frame<'_>, area: Rect) {
@@ -187,46 +181,31 @@ fn draw_toast(app: &App, frame: &mut Frame<'_>, area: Rect) {
     frame.render_widget(app.toast(), area);
 }
 
-fn draw_value_modal(app: &mut App, frame: &mut Frame<'_>, area: Rect) {
+fn draw_value_modal(app: &App, frame: &mut Frame<'_>, area: Rect) -> Option<ScrollWindow> {
     use crate::tui::widgets::value_modal::ValueModalWidget;
 
-    let Some(state) = app.value_modal() else {
-        return;
-    };
-    let fit = ValueModalWidget::new(state, app.theme()).draw(area, frame.buffer_mut());
-    if let Some(state) = app.value_modal_mut() {
-        state.fit(fit);
-    }
+    let state = app.value_modal()?;
+    Some(ValueModalWidget::new(state, app.theme()).draw(area, frame.buffer_mut()))
 }
 
-fn draw_messages_overlay(app: &mut App, frame: &mut Frame<'_>, area: Rect) {
+fn draw_messages_overlay(app: &App, frame: &mut Frame<'_>, area: Rect) -> Option<ScrollWindow> {
     use crate::tui::widgets::messages::MessagesWidget;
 
-    let Some(state) = app.messages_overlay() else {
-        return;
-    };
-    let fit = MessagesWidget::new(
+    let state = app.messages_overlay()?;
+    let widget = MessagesWidget::new(
         state,
         app.messages(),
         app.theme(),
         crate::discovery::current_epoch(),
-    )
-    .draw(area, frame.buffer_mut());
-    if let Some((state, _)) = app.messages_overlay_mut() {
-        state.fit(fit);
-    }
+    );
+    Some(widget.draw(area, frame.buffer_mut()))
 }
 
-fn draw_help_overlay(app: &mut App, frame: &mut Frame<'_>, area: Rect) {
+fn draw_help_overlay(app: &App, frame: &mut Frame<'_>, area: Rect) -> Option<ScrollWindow> {
     use crate::tui::widgets::help::HelpOverlayWidget;
 
-    let Some(state) = app.help_overlay() else {
-        return;
-    };
-    let fit = HelpOverlayWidget::new(state, app.theme()).draw(area, frame.buffer_mut());
-    if let Some(state) = app.help_overlay_mut() {
-        state.fit(fit);
-    }
+    let state = app.help_overlay()?;
+    Some(HelpOverlayWidget::new(state, app.theme()).draw(area, frame.buffer_mut()))
 }
 
 fn draw_search_overlay(app: &App, frame: &mut Frame<'_>, area: Rect) {
@@ -316,15 +295,21 @@ pub(crate) mod test_clock {
 // Body: left tree + right detail
 // -----------------------------------------------------------------------------
 
-fn draw_body(app: &mut App, frame: &mut Frame<'_>, area: Rect) {
+fn draw_body(app: &mut App, frame: &mut Frame<'_>, area: Rect) -> ViewportReport {
     let threshold = app.config().narrow_layout_threshold;
     let split = if area.width < threshold {
         vertical![==50%, ==50%].split(area)
     } else {
         horizontal![==50%, ==50%].split(area)
     };
-    draw_left_panel(app, frame, split[0]);
-    draw_right_panel(app, frame, split[1]);
+    let tree = draw_left_panel(app, frame, split[0]);
+    let (explorer, preview) = draw_right_panel(app, frame, split[1]);
+    ViewportReport {
+        tree,
+        explorer,
+        preview,
+        ..ViewportReport::default()
+    }
 }
 
 fn focus_marker_width(app: &App, focus: Focus) -> usize {
@@ -355,7 +340,10 @@ pub fn render_to_buffer(app: &mut App, area: Rect) -> ratatui::buffer::Buffer {
     let mut terminal =
         Terminal::new(TestBackend::new(area.width, area.height)).expect("test terminal");
     terminal
-        .draw(|frame| draw(app, frame))
+        .draw(|frame| {
+            let report = draw(app, frame);
+            app.keep_viewports(report);
+        })
         .expect("draw on test backend");
     terminal.backend().buffer().clone()
 }

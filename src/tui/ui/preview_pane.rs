@@ -33,14 +33,22 @@ impl PreviewView {
     }
 }
 
-pub(super) fn draw_detail_preview(app: &App, frame: &mut Frame<'_>, area: Rect) {
+/// Draw the selected row's Preview and return the window its body drew.
+pub(super) fn draw_detail_preview(app: &App, frame: &mut Frame<'_>, area: Rect) -> ScrollWindow {
     let view = preview_view_for_selection(app, area.width, area.height as usize);
-    draw_preview_view(app, view, frame, area);
+    draw_preview_view(app, view, frame, area)
 }
 
 /// Draw a Preview body: scrolled from the top by the Preview's offset,
 /// or, for a view that cut its own window, as is with a scrollbar.
-pub(super) fn draw_preview_view(app: &App, view: PreviewView, frame: &mut Frame<'_>, area: Rect) {
+/// Returns the window the body drew, over the rows the Preview's offset
+/// counts.
+pub(super) fn draw_preview_view(
+    app: &App,
+    view: PreviewView,
+    frame: &mut Frame<'_>,
+    area: Rect,
+) -> ScrollWindow {
     match view.window {
         None => {
             let rows = WrappedRows::fit(
@@ -59,6 +67,7 @@ pub(super) fn draw_preview_view(app: &App, view: PreviewView, frame: &mut Frame<
             let widget = Paragraph::new(text).scroll(window.paragraph_scroll());
             frame.render_widget(widget, gutter.content());
             gutter.render(&window, frame.buffer_mut());
+            window
         }
         Some(window) => {
             // The thumb tracks the transcript; a failure banner above
@@ -74,6 +83,7 @@ pub(super) fn draw_preview_view(app: &App, view: PreviewView, frame: &mut Frame<
                 gutter.content(),
             );
             gutter.render(&window, frame.buffer_mut());
+            window
         }
     }
 }
