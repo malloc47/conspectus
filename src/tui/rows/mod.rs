@@ -19,6 +19,8 @@
 
 use std::path::Path;
 
+use tuikit::age::Age;
+
 use crate::model::{AgentSessionId, MuxSessionId, NodeId};
 use crate::tui::View;
 
@@ -179,6 +181,8 @@ pub struct PaneRow {
     pub deduplicated: usize,
     /// How long ago the scrollback was read.
     pub age: String,
+    /// When the scrollback was read, which tints the age.
+    pub age_epoch: Option<i64>,
     /// The newest matching line's position in the scrollback, from 1.
     pub line: usize,
     /// The newest matching line, cropped around the match.
@@ -199,6 +203,8 @@ pub struct PaneHitRow {
     pub line: usize,
     /// How long ago the scrollback was read.
     pub age: String,
+    /// When the scrollback was read, which tints the age.
+    pub age_epoch: Option<i64>,
     pub snippet: String,
     pub highlight: std::ops::Range<usize>,
 }
@@ -228,6 +234,9 @@ pub struct HitRow {
     pub kind: &'static str,
     /// When it was said, as an age; a dash when the turn has no time.
     pub age: String,
+    /// When it was said, which tints the age; `None` when the turn has
+    /// no time.
+    pub age_epoch: Option<i64>,
     /// The window of text around the match.
     pub snippet: String,
     /// Byte range of the match inside `snippet`.
@@ -276,7 +285,8 @@ pub struct MixedRow {
     pub label: String,
     pub status: String,
     pub tone: MixedTone,
-    /// Age as `format_recency` renders it; `None` when unknown.
+    /// Age on the framework's default ladder (`tuikit::age`); `None`
+    /// when unknown.
     pub age: Option<String>,
     /// The instant behind [`Self::age`], which picks the age's recency
     /// color the way the other views do.
@@ -1087,56 +1097,6 @@ pub fn harness_label(harness_key: &str) -> String {
     crate::discovery::harness::display_label_for(harness_key)
 }
 
-/// Format an activity epoch as a human-readable recency string
-/// (`2m`, `17m`, `1h`, `2d`). `now` is passed explicitly so the
-/// function stays time-independent for tests. Returns `None` when
-/// either side is missing.
-///
-/// Rules:
-/// - 0..60 seconds → "Ns" (rare, but renders cleanly).
-/// - 60s..1h → "Nm".
-/// - 1h..24h → "Nh".
-/// - >= 24h → "Nd".
-/// - Future timestamps (clock skew) clamp to "0s".
-pub fn format_recency(now: Option<i64>, activity_epoch: Option<i64>) -> Option<String> {
-    let now = now?;
-    let then = activity_epoch?;
-    let delta = (now - then).max(0);
-    if delta < 60 {
-        return Some(format!("{delta}s"));
-    }
-    let minutes = delta / 60;
-    if minutes < 60 {
-        return Some(format!("{minutes}m"));
-    }
-    let hours = minutes / 60;
-    if hours < 24 {
-        return Some(format!("{hours}h"));
-    }
-    let days = hours / 24;
-    Some(format!("{days}d"))
-}
-
-/// Coarse activity buckets (Phase 3 of the styling overhaul). The
-/// renderer maps each bucket to a `Theme` style so the recency
-/// column carries a freshness signal in color in addition to the
-/// numeric label. Bucket boundaries:
-///
-/// - `< 5m`   → [`RecencyBucket::Fresh`]
-/// - `< 1h`   → [`RecencyBucket::Active`]
-/// - `< 1d`   → [`RecencyBucket::Recent`]
-/// - `≥ 1d`   → [`RecencyBucket::Cold`]
-///
-/// Returns `None` when either side of the delta is missing so the
-/// caller can fall back to placeholder styling.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum RecencyBucket {
-    Fresh,
-    Active,
-    Recent,
-    Cold,
-}
-
 // Shared row-assembly helpers (`agent_row`, `mux_indicator`,
 // `session_matches_filter`, …) used by the PRs view builder in
 // `rows/prs.rs`.
@@ -1181,7 +1141,7 @@ pub(crate) fn agent_row(
             harness_label: harness_label(&agent.id.harness_key),
             cwd_display: agent.node.cwd.as_deref().map(|cwd| shorten_home(cwd, home)),
             project_display: None,
-            recency: format_recency(now, agent.node.last_active_epoch),
+            recency: Age::of(agent.node.last_active_epoch, now).map(Age::label),
             activity_epoch: agent.node.last_active_epoch,
             mux_state: mux_indicator(candidate_count),
             preview: agent.node.last_message_preview.clone(),
@@ -1227,36 +1187,6 @@ pub(crate) fn session_matches_filter(
         last_active_epoch: agent.node.last_active_epoch,
         mux_state: MuxStateKey::from_candidate_count(candidate_count),
     })
-}
-
-pub fn recency_bucket(now: Option<i64>, activity_epoch: Option<i64>) -> Option<RecencyBucket> {
-    let now = now?;
-    let then = activity_epoch?;
-    let delta = (now - then).max(0);
-    Some(if delta < 5 * 60 {
-        RecencyBucket::Fresh
-    } else if delta < 60 * 60 {
-        RecencyBucket::Active
-    } else if delta < 24 * 60 * 60 {
-        RecencyBucket::Recent
-    } else {
-        RecencyBucket::Cold
-    })
-}
-
-impl RecencyBucket {
-    /// Build the [`ratatui::style::Style`] for this bucket from the
-    /// active `Theme`. The mapping pulls the per-bucket `StyleSpec`
-    /// directly so operators who override a single bucket through
-    /// `[tui.theme]` see the change immediately.
-    pub fn style(self, theme: &crate::tui::Theme) -> ratatui::style::Style {
-        match self {
-            Self::Fresh => theme.recency_fresh.into_style(),
-            Self::Active => theme.recency_active.into_style(),
-            Self::Recent => theme.recency_recent.into_style(),
-            Self::Cold => theme.recency_cold.into_style(),
-        }
-    }
 }
 
 /// Projection state consumed by [`build_tree_for_view`]. Read from

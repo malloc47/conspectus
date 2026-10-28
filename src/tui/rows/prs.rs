@@ -4,6 +4,8 @@
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::path::Path;
 
+use tuikit::age::Age;
+
 use crate::filter::RowFilter;
 use crate::model::{
     CheckoutId, ForgePrId, ForgePrNode, GraphNode, GraphSnapshot, LinkEndpoint, LinkState, NodeId,
@@ -12,8 +14,7 @@ use crate::model::{
 use crate::output::render::{node_short_id_from_display, strip_branch_prefix, unique_prefix_len};
 use crate::tui::PrsGrouping;
 use crate::tui::rows::{
-    GroupRow, PrRow, PrStatus, Row, RowId, RowKind, RowTree, ViewLabel, format_recency,
-    shorten_home,
+    GroupRow, PrRow, PrStatus, Row, RowId, RowKind, RowTree, ViewLabel, shorten_home,
 };
 
 pub struct PrsBuildInputs<'a> {
@@ -195,7 +196,7 @@ pub fn build_prs_tree(inputs: PrsBuildInputs<'_>) -> RowTree {
                     .map(str::to_string),
                 tracked: branch.is_some(),
                 title: pr.node.title.clone(),
-                updated_recency: format_recency(now, pr.node.updated_epoch),
+                updated_recency: Age::of(pr.node.updated_epoch, now).map(Age::label),
                 updated_epoch: pr.node.updated_epoch,
                 url: pr.node.url.clone(),
                 primary_node: node_id,

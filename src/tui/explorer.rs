@@ -27,6 +27,7 @@ use std::path::Path;
 
 use ratatui::style::{Color, Style};
 use ratatui::text::{Line, Span};
+use tuikit::age::Age;
 use tuikit::glyphs::marks;
 use tuikit::text;
 
@@ -248,7 +249,7 @@ impl CoreField {
 
     /// A field holding a timestamp, shown as its age.
     fn timestamp(label: &'static str, epoch: i64, now: Option<i64>) -> Self {
-        Self::plain(label, relative_epoch(epoch, now)).previewing(FieldValue::Timestamp(epoch))
+        Self::plain(label, ago(epoch, now)).previewing(FieldValue::Timestamp(epoch))
     }
 
     /// A field whose value is the path `raw`, shown `~`-shortened.
@@ -1834,14 +1835,15 @@ fn forge_pr_extras(pr: &ForgePrNode) -> Vec<CoreField> {
 
 fn session_status(s: &AgentSessionNode, now: Option<i64>) -> String {
     match s.last_active_epoch {
-        Some(epoch) => format!("active · last {}", relative_epoch(epoch, now)),
+        Some(epoch) => format!("active · last {}", ago(epoch, now)),
         None => marks::NO_VALUE.to_string(),
     }
 }
 
-fn relative_epoch(epoch: i64, now: Option<i64>) -> String {
-    crate::tui::rows::format_recency(now, Some(epoch))
-        .map_or_else(|| marks::NO_VALUE.to_string(), |age| format!("{age} ago"))
+/// How long ago `epoch` was at `now` (`4m ago`), or the no-value mark
+/// when the time is unknown.
+fn ago(epoch: i64, now: Option<i64>) -> String {
+    Age::of(Some(epoch), now).map_or_else(|| marks::NO_VALUE.to_string(), Age::ago)
 }
 
 use crate::tui::preview::split_command_line;

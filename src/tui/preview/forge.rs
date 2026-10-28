@@ -117,9 +117,9 @@ pub fn render_pr(
     }
     let updated = chrono::DateTime::parse_from_rfc3339(str_field(&pr, "updatedAt"))
         .ok()
-        .and_then(|at| crate::tui::rows::format_recency(now, Some(at.timestamp())));
+        .and_then(|at| tuikit::age::Age::of(Some(at.timestamp()), now));
     if let Some(age) = updated {
-        branches.push(format!("updated {age} ago"));
+        branches.push(format!("updated {}", age.ago()));
     }
     if !branches.is_empty() {
         lines.push(Line::from(dim(branches.join(" · "), muted)));

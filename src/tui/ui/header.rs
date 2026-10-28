@@ -215,10 +215,7 @@ pub(super) fn header_freshness(app: &App) -> String {
         return String::new();
     };
     let now = current_unix_epoch_for_render();
-    match format_recency(Some(now), Some(loaded_at)) {
-        Some(label) => format!("updated {label} ago · "),
-        None => String::new(),
-    }
+    format!("updated {} · ", Age::between(loaded_at, now).ago())
 }
 
 pub(super) fn draw_status_bar(app: &App, frame: &mut Frame<'_>, area: Rect) {

@@ -12,8 +12,8 @@
 //!   (green attached / dim not attached); mux ambiguity surfaces as
 //!   `▲` on group rows and the header.
 //! - Header reports `updated Ns ago · N agents · M mux`; the
-//!   freshness slot uses [`format_recency`] over
-//!   `App::loaded_at_epoch`.
+//!   freshness slot is the age of `App::loaded_at_epoch` on the
+//!   framework's ladder (`tuikit::age`).
 //! - Sessions use spare horizontal space after the mux indicator
 //!   for a dim one-line last-message preview.
 //! - Body switches from side-by-side to a vertical stack when the
@@ -31,6 +31,7 @@ use ratatui::macros::{horizontal, span, vertical};
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span, Text};
 use ratatui::widgets::{Block, Borders, Paragraph};
+use tuikit::age::Age;
 use tuikit::chip::{StatusChip, Tone};
 use tuikit::glyphs::marks;
 use tuikit::scroll::{ScrollGutter, ScrollWindow, WrappedRows};
@@ -46,7 +47,6 @@ use crate::tui::icons::{NodeKind, node_kind_style};
 use crate::tui::preview::PreviewContent;
 use crate::tui::rows::{
     AgentSessionRow, GroupRow, MuxIndicator, MuxSessionRow, PrRow, PrStatus, RowId, RowKind,
-    format_recency, recency_bucket,
 };
 
 mod compact;

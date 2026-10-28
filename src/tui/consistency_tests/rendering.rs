@@ -28,14 +28,6 @@ fn tokens(line: &str) -> Vec<(usize, usize, String)> {
     out
 }
 
-fn is_age(token: &str) -> bool {
-    let chars: Vec<char> = token.chars().collect();
-    token == "—"
-        || (chars.len() > 1
-            && chars[..chars.len() - 1].iter().all(char::is_ascii_digit)
-            && matches!(chars[chars.len() - 1], 's' | 'm' | 'h' | 'd' | 'w' | '…'))
-}
-
 /// Column where the label starts and where the age ends, for the left
 /// pane's row mentioning `label`.
 fn row_grid(lines: &[String], label: &str) -> (usize, Option<usize>) {

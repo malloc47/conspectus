@@ -20,6 +20,8 @@
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::path::{Path, PathBuf};
 
+use tuikit::age::Age;
+
 use crate::filter::{MuxStateKey, RowFilter, SessionMatchInputs};
 use crate::model::{
     AgentSessionNode, CheckoutId, GraphLink, GraphNode, GraphSnapshot, LinkState, NodeId,
@@ -28,7 +30,7 @@ use crate::model::{
 use crate::tui::SessionsGrouping;
 use crate::tui::rows::{
     AgentSessionRow, GroupRow, MuxIndicator, Row, RowId, RowKind, RowTree, ViewLabel,
-    format_recency, harness_label, shorten_home,
+    harness_label, shorten_home,
 };
 
 /// Inputs to the sessions builder. Tests construct these directly;
@@ -940,7 +942,7 @@ fn emit_session_row(
             harness_label: harness_label(&entry.node.harness_key),
             cwd_display,
             project_display: project_display_for_session(&entry, ctx.data, ctx.grouping),
-            recency: format_recency(ctx.now, entry.node.last_active_epoch),
+            recency: Age::of(entry.node.last_active_epoch, ctx.now).map(Age::label),
             activity_epoch: entry.node.last_active_epoch,
             mux_state,
             preview: entry.node.last_message_preview.clone(),

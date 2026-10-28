@@ -677,9 +677,6 @@ pub(super) struct MixedAlign {
     chip: usize,
 }
 
-/// Width of the age cell in every view: `—` or up to `999d`.
-const AGE_CELL_WIDTH: usize = 4;
-
 impl MixedAlign {
     pub(super) fn of_tree(tree: &crate::tui::rows::RowTree, theme: &Theme) -> Self {
         use crate::tui::rows::{MixedGrid, PinMarker};
@@ -750,22 +747,18 @@ fn mixed_chip_span(chip: &crate::tui::rows::MixedChip, theme: &Theme) -> Span<'s
     }
 }
 
-/// The age cell every view draws: right-aligned in four cells, `—` when
-/// the age is unknown, and colored by how recent it is so a fresh row
-/// reads fresh wherever it appears.
+/// The age cell every row draws: the framework's age cell, four cells
+/// right-aligned, `—` when the age is unknown, and tinted by how recent
+/// `epoch` is at `now`, so a fresh row reads fresh wherever it appears.
+/// The label was written when the row was built.
 pub(super) fn age_span(
     age: Option<&str>,
     epoch: Option<i64>,
     now: i64,
     theme: &Theme,
 ) -> Span<'static> {
-    let age = age.unwrap_or(marks::NO_VALUE);
-    let style = recency_bucket(Some(now), epoch).map_or_else(
-        || Style::default().add_modifier(theme.muted),
-        |bucket| bucket.style(theme),
-    );
-    let cell = text::pad_start(&text::truncate_end(age, AGE_CELL_WIDTH), AGE_CELL_WIDTH);
-    span!(style; "{cell}")
+    let recency = Age::of(epoch, Some(now)).map(Age::recency);
+    tuikit::age::cell(age, recency, tuikit::age::CELL_WIDTH, theme)
 }
 
 /// The body of a mixed-kind row after its kind glyph. The Columns grid
@@ -1031,15 +1024,15 @@ pub(super) fn render_left_row(
         }
         RowKind::Hit(hit) => {
             let budget = width.saturating_sub(text::spans_width(&spans));
-            spans.extend(render_hit_spans(hit, theme, budget));
+            spans.extend(render_hit_spans(hit, theme, budget, now));
         }
         RowKind::Pane(pane) => {
             let budget = width.saturating_sub(text::spans_width(&spans));
-            spans.extend(render_pane_spans(pane, theme, budget));
+            spans.extend(render_pane_spans(pane, theme, budget, now));
         }
         RowKind::PaneHit(hit) => {
             let budget = width.saturating_sub(text::spans_width(&spans));
-            spans.extend(render_pane_hit_spans(hit, theme, budget));
+            spans.extend(render_pane_hit_spans(hit, theme, budget, now));
         }
         RowKind::Mixed(mixed) => {
             let prefix_width = text::spans_width(&spans);
@@ -1372,6 +1365,7 @@ fn render_hit_spans(
     hit: &crate::tui::rows::HitRow,
     theme: &Theme,
     budget: usize,
+    now: i64,
 ) -> Vec<Span<'static>> {
     let secondary = Style::default().fg(theme.inert);
     let mut spans = Vec::new();
@@ -1389,7 +1383,8 @@ fn render_hit_spans(
         span!(secondary; "turn {:<4}", hit.turn_index + 1),
         span!(secondary; "  {:<6}", hit.role),
         span!(theme.muted; "  {:<11}", hit.kind),
-        span!(secondary; "  {:>4}", hit.age),
+        Span::raw("  "),
+        age_span(Some(&hit.age), hit.age_epoch, now, theme),
     ]);
     let used = text::spans_width(&spans);
     if budget > used + 8 {
@@ -1415,6 +1410,7 @@ fn render_pane_spans(
     pane: &crate::tui::rows::PaneRow,
     theme: &Theme,
     budget: usize,
+    now: i64,
 ) -> Vec<Span<'static>> {
     let secondary = Style::default().fg(theme.inert);
     let name = text::fit(&pane.mux_label, PANE_LABEL_WIDTH);
@@ -1423,7 +1419,8 @@ fn render_pane_spans(
         span!(Modifier::BOLD; "{name}"),
         span!(secondary; "  {:<5}", pane.location),
         span!(theme.muted; "  {command}"),
-        span!(secondary; "  {:>4}", pane.age),
+        Span::raw("  "),
+        age_span(Some(&pane.age), pane.age_epoch, now, theme),
     ];
     let cell = crate::tui::rows::ContentHitCell {
         count: u32::try_from(pane.count).unwrap_or(u32::MAX),
@@ -1442,6 +1439,7 @@ fn render_pane_hit_spans(
     hit: &crate::tui::rows::PaneHitRow,
     theme: &Theme,
     budget: usize,
+    now: i64,
 ) -> Vec<Span<'static>> {
     let secondary = Style::default().fg(theme.inert);
     let mut spans = Vec::new();
@@ -1451,7 +1449,8 @@ fn render_pane_hit_spans(
     }
     spans.extend([
         span!(secondary; "line {:<5}", hit.line),
-        span!(secondary; "  {:>4}", hit.age),
+        Span::raw("  "),
+        age_span(Some(&hit.age), hit.age_epoch, now, theme),
     ]);
     let used = text::spans_width(&spans);
     if budget > used + 8 {

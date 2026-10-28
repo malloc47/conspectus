@@ -1146,23 +1146,17 @@ pub fn truncate_to_width(s: &str, budget: usize) -> String {
 /// Format `then_epoch` relative to `now_epoch` as a compact recency
 /// string (`12s`, `5m`, `2h`, `3d`, `4w`). Future-dated values render
 /// as `now`.
+///
+/// This is the TUI's age ladder (`tuikit::age`) going on to weeks: the
+/// two agree on every age under a week and use the same thresholds, so
+/// a session reads `3h` in a table and in the tree. The TUI stops at
+/// days so its four-cell age column keeps day precision; a table has no
+/// such column and keeps the shorter week count for old records.
 pub fn format_relative_age(then_epoch: i64, now_epoch: i64) -> String {
-    let delta = now_epoch.saturating_sub(then_epoch);
-    if delta < 0 {
+    if then_epoch > now_epoch {
         return "now".to_string();
     }
-    let secs = delta as u64;
-    if secs < 60 {
-        format!("{secs}s")
-    } else if secs < 3600 {
-        format!("{}m", secs / 60)
-    } else if secs < 86_400 {
-        format!("{}h", secs / 3600)
-    } else if secs < 7 * 86_400 {
-        format!("{}d", secs / 86_400)
-    } else {
-        format!("{}w", secs / (7 * 86_400))
-    }
+    tuikit::age::Ladder::WEEKS.label(tuikit::age::Age::between(then_epoch, now_epoch))
 }
 
 // -----------------------------------------------------------------------------

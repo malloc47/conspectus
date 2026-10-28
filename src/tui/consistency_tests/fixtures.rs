@@ -132,6 +132,23 @@ pub(super) fn world_with(extra: usize) -> GraphSnapshot {
     resolve_snapshot(snapshot)
 }
 
+/// Whether `token` is an age as the TUI draws one: the no-value mark, or
+/// a count and a unit of the framework's default ladder, possibly cut
+/// with the ellipsis mark.
+pub(super) fn is_age(token: &str) -> bool {
+    use tuikit::glyphs::marks;
+    if token == marks::NO_VALUE {
+        return true;
+    }
+    let units = tuikit::age::Ladder::default().units();
+    let body = token.strip_suffix(marks::ELLIPSIS).or_else(|| {
+        units
+            .iter()
+            .find_map(|unit| token.strip_suffix(unit.suffix))
+    });
+    body.is_some_and(|digits| !digits.is_empty() && digits.chars().all(|c| c.is_ascii_digit()))
+}
+
 pub(super) fn world() -> GraphSnapshot {
     world_with(0)
 }

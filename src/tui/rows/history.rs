@@ -9,6 +9,8 @@
 use std::collections::BTreeMap;
 use std::path::Path;
 
+use tuikit::age::Age;
+
 use crate::model::{
     CheckoutId, ForgePrId, GraphSnapshot, HistoryKind, MuxSessionId, NodeId, NodeKind,
     NodePresence, RecordMeta, RepoId,
@@ -18,7 +20,7 @@ use crate::tui::HistoryGrouping;
 use super::pinned::{join_dot, project_for_path};
 use super::{
     GroupRow, MixedChip, MixedGrid, MixedRow, MixedTone, PinMarker, PrStatus, Row, RowId, RowKind,
-    RowTree, ViewLabel, format_recency, harness_label, shorten_home,
+    RowTree, ViewLabel, harness_label, shorten_home,
 };
 
 pub struct HistoryBuildInputs<'a> {
@@ -101,7 +103,7 @@ pub fn build_history_tree(inputs: HistoryBuildInputs<'_>) -> RowTree {
         entries.retain(|entry| pinned_by(snapshot, &entry.meta.id).is_empty());
     }
     for entry in &mut entries {
-        entry.row.age = format_recency(now, Some(entry.last_seen));
+        entry.row.age = Age::of(Some(entry.last_seen), now).map(Age::label);
         entry.row.age_epoch = Some(entry.last_seen);
     }
     let mut tree = RowTree {

@@ -266,8 +266,7 @@ impl Widget for MessagesBody<'_, '_> {
 }
 
 fn list_line(entry: &LogEntry, selected: bool, theme: &Theme, now: i64) -> Line<'static> {
-    let age = crate::tui::rows::format_recency(Some(now), Some(entry.at_epoch))
-        .unwrap_or_else(|| marks::NO_VALUE.to_string());
+    let age = tuikit::age::Age::between(entry.at_epoch, now).label();
     let mut spans = vec![
         Span::styled(
             format!("{} ", entry.level.glyph()),

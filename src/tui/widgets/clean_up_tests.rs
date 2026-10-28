@@ -31,7 +31,8 @@ fn state() -> CleanUpState {
 fn every_candidate_starts_selected_with_its_age() {
     let state = state();
     assert_eq!(state.selected(), [0, 1, 2]);
-    assert_eq!(state.labels()[0], "mux      alpha · last seen 2w ago");
+    // In days, as the History view's age column shows the same record.
+    assert_eq!(state.labels()[0], "mux      alpha · last seen 20d ago");
 }
 
 #[test]

@@ -8,6 +8,7 @@ use ratatui::layout::Rect;
 use ratatui::style::Style;
 use ratatui::text::Line;
 use ratatui::widgets::{Block, Borders, Clear, Paragraph, Widget};
+use tuikit::age::Age;
 
 use crate::history::reap::Candidate;
 use crate::tui::Msg;
@@ -30,10 +31,10 @@ impl CleanUpState {
             .iter()
             .map(|c| {
                 format!(
-                    "{:<8} {} · last seen {} ago",
+                    "{:<8} {} · last seen {}",
                     c.kind.as_str(),
                     c.label,
-                    crate::output::render::format_relative_age(c.last_seen, now)
+                    Age::between(c.last_seen, now).ago()
                 )
             })
             .collect();

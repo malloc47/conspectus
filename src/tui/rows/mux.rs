@@ -9,6 +9,8 @@
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::path::{Path, PathBuf};
 
+use tuikit::age::Age;
+
 use crate::filter::{MuxStateKey, RowFilter, SessionMatchInputs};
 use crate::model::workspace_paths::WorkspacePaths;
 use crate::model::{
@@ -19,8 +21,8 @@ use crate::model::{
 use crate::output::render::{node_short_id_from_display, unique_prefix_len};
 use crate::tui::rows::{
     AgentSessionRow, EntityState, GroupRow, MixedChip, MixedGrid, MixedRow, MixedTone,
-    MuxSessionRow, PinMarker, Row, RowId, RowKind, RowTree, ViewLabel, format_recency,
-    harness_label, mux_process_harnesses, mux_program, mux_program_harness, shorten_home,
+    MuxSessionRow, PinMarker, Row, RowId, RowKind, RowTree, ViewLabel, harness_label,
+    mux_process_harnesses, mux_program, mux_program_harness, shorten_home,
 };
 use crate::tui::{MuxGrouping, Sort};
 
@@ -154,7 +156,7 @@ pub fn build_mux_tree(inputs: MuxBuildInputs<'_>) -> RowTree {
             client_attached: mux.node.client_attached,
             cwd_display: cwd.as_deref().map(|cwd| shorten_home(cwd, inputs.home)),
             attached_count,
-            recency: format_recency(now, activity_epoch),
+            recency: Age::of(activity_epoch, now).map(Age::label),
             activity_epoch,
             created_epoch: mux.node.created_epoch,
             last_attached_epoch: mux.node.last_attached_epoch,
@@ -733,7 +735,7 @@ fn collect_ghosts(
                 label: mux.session_name().to_string(),
                 status: status.to_string(),
                 tone: MixedTone::Dim,
-                age: format_recency(now, Some(last_seen)),
+                age: Age::of(Some(last_seen), now).map(Age::label),
                 age_epoch: Some(last_seen),
                 state: Some(state),
                 chip,
@@ -878,7 +880,7 @@ fn agent_row(
             harness_label: harness_label(&agent.id.harness_key),
             cwd_display: agent.cwd.as_deref().map(|cwd| shorten_home(cwd, home)),
             project_display: None,
-            recency: format_recency(now, agent.last_active_epoch),
+            recency: Age::of(agent.last_active_epoch, now).map(Age::label),
             activity_epoch: agent.last_active_epoch,
             mux_state: super::mux_indicator(agent.candidate_count),
             preview: agent.preview.clone(),

@@ -8,6 +8,8 @@
 use std::collections::BTreeMap;
 use std::path::Path;
 
+use tuikit::age::Age;
+
 use crate::model::{
     GraphNode, GraphSnapshot, LinkState, NodeId, NodeKind, PinId, PinKind, PinNode, RelationKind,
     SlotStatus, path_is_ancestor_of,
@@ -16,7 +18,7 @@ use crate::tui::{PinnedGrouping, Sort};
 
 use super::{
     GroupRow, MixedChip, MixedGrid, MixedRow, MixedTone, PinMarker, PrStatus, Row, RowId, RowKind,
-    RowTree, ViewLabel, format_recency, harness_label, pin_nodes, repo_display_path, shorten_home,
+    RowTree, ViewLabel, harness_label, pin_nodes, repo_display_path, shorten_home,
 };
 
 pub struct PinnedBuildInputs<'a> {
@@ -369,7 +371,7 @@ fn push_slot(
             label: pin.id.id.clone(),
             status: described.status,
             tone: described.tone,
-            age: format_recency(now, described.epoch),
+            age: Age::of(described.epoch, now).map(Age::label),
             age_epoch: described.epoch,
             state: None,
             chip: described.chip,
@@ -468,7 +470,7 @@ fn session_row(
         }
         .to_string(),
         tone: MixedTone::Normal,
-        age: format_recency(now, session.last_active_epoch),
+        age: Age::of(session.last_active_epoch, now).map(Age::label),
         age_epoch: session.last_active_epoch,
         state: None,
         chip: Some(MixedChip::agent(harness_label(&session.harness_key))),
@@ -500,7 +502,7 @@ fn mux_row(
         label: mux.session_name().to_string(),
         status: super::words::LIVE.to_string(),
         tone: MixedTone::Normal,
-        age: format_recency(now, mux.activity_epoch),
+        age: Age::of(mux.activity_epoch, now).map(Age::label),
         age_epoch: mux.activity_epoch,
         state: None,
         chip: super::mux_program_harness(mux, None, None)

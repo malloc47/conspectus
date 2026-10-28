@@ -73,10 +73,10 @@ fn timestamp_lines(epoch: i64, now: Option<i64>, muted: Modifier) -> Vec<Line<'s
         dim("UTC    ", muted),
         Span::raw(utc.format("%Y-%m-%d %H:%M:%S").to_string()),
     ]));
-    if let Some(age) = crate::tui::rows::format_recency(now, Some(epoch)) {
+    if let Some(age) = tuikit::age::Age::of(Some(epoch), now) {
         lines.push(Line::from(vec![
             dim("age    ", muted),
-            Span::raw(format!("{age} ago")),
+            Span::raw(age.ago()),
         ]));
     }
     lines

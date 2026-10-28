@@ -277,9 +277,11 @@ fn the_status_note_tells_progress_skips_and_how_old_the_scan_is() {
             .unwrap()
             .status_note(finished + Duration::from_secs(secs))
     };
-    assert_eq!(note(1), "1 session · 1 skipped · scanned just now");
+    // The shared age ladder, as every other age the TUI writes as prose.
+    assert_eq!(note(1), "1 session · 1 skipped · scanned 1s ago");
     assert_eq!(note(125), "1 session · 1 skipped · scanned 2m ago");
     assert_eq!(note(7300), "1 session · 1 skipped · scanned 2h ago");
+    assert_eq!(note(90_000), "1 session · 1 skipped · scanned 1d ago");
 }
 
 #[test]

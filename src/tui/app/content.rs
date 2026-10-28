@@ -14,6 +14,8 @@ use std::collections::BTreeSet;
 use std::sync::Arc;
 use std::time::Instant;
 
+use tuikit::age::Age;
+
 use super::content_history::SearchHistory;
 use super::*;
 use crate::content_search::{PaneHits, Progress, SessionKey};
@@ -251,7 +253,7 @@ impl ContentSearch {
         }
         if let Some(finished) = self.finished_at {
             let age = now.saturating_duration_since(finished).as_secs();
-            note.push_str(&format!(" · scanned {}", age_label(age)));
+            note.push_str(&format!(" · scanned {}", Age::from_secs(age).ago()));
         }
         note
     }
@@ -288,16 +290,6 @@ impl ContentSearch {
             details: Arc::clone(&self.details),
             panes: Arc::clone(&self.panes),
         }
-    }
-}
-
-/// `just now`, or `2m ago`, `1h ago`.
-fn age_label(secs: u64) -> String {
-    match secs {
-        0..=4 => "just now".to_string(),
-        5..=59 => format!("{secs}s ago"),
-        60..=3599 => format!("{}m ago", secs / 60),
-        _ => format!("{}h ago", secs / 3600),
     }
 }
 
@@ -1563,8 +1555,8 @@ impl App {
         let snapshot = handle.snapshot();
         let now = Some(crate::tui::rows::tree_current_unix_epoch());
         let age = |time: Option<i64>| {
-            crate::tui::rows::format_recency(now, time)
-                .unwrap_or_else(|| tuikit::glyphs::marks::NO_VALUE.to_string())
+            Age::of(time, now)
+                .map_or_else(|| tuikit::glyphs::marks::NO_VALUE.to_string(), Age::label)
         };
         let turn_tag = |hit: &Hit| {
             format!(

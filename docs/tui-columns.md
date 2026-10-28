@@ -159,12 +159,16 @@ reads `closed` or `merged`.
 
 ## Age
 
-The age cell is four cells wide, right-aligned, in every view. It reads
+The age cell is four cells wide, right-aligned, in every view and every
+row kind, the Search view's match and pane rows included. It reads
 `Ns`, `Nm`, `Nh`, or `Nd` (days, with no larger unit), or `—` when no
-time applies. Where an age is shown, it is colored by how recent it is:
-under five minutes is bright green and bold, under an hour green, under
-a day yellow, and older dim. Rows drawn as ghosts keep the ghost style
-instead.
+time applies; an age too wide for the cell is cut with `…`. Where an age
+is shown, it is colored by how recent it is: under five minutes is bright
+green and bold, under an hour green, under a day yellow, and older dim.
+Rows drawn as ghosts keep the ghost style instead. The same ladder writes
+every age the TUI shows as prose (`5m ago` in the detail pane, Messages,
+the header, the search status, and Clean up); the CLI's tables go on to
+weeks (`3w`).
 
 What time the age counts from depends on the entity, and is the same in
 every view that shows that entity:
@@ -183,13 +187,14 @@ Sorting by recency uses these same times.
 
 ## Labels, chips, counts, and warnings
 
-- **Harness chip.** A filled pill, 10 cells wide, in the harness color:
-  claude magenta, codex cyan, opencode green, aider red, pi light blue,
-  anything else white. A longer name is cut with `…`. On a stopped row
-  the chip stays its color but is dimmed.
+- **Harness chip.** A filled pill, 10 cells wide (the theme's
+  `badge_width` of 8 and a cell of padding on each side), in the
+  harness color: claude magenta, codex cyan, opencode green, aider red,
+  pi light blue, anything else white. A longer name is cut with `…`. On
+  a stopped row the chip stays its color but is dimmed.
 - **Program chip.** For a mux whose pane runs something that isn't a
   known harness, a white-on-black pill of the same width shows the
-  program. A mux with neither shows a dim ` no agent `.
+  program. A mux with neither shows a dim ` no agent ` the same width.
 - **Session label.** The alias if there is one (bold); otherwise the
   title, but only when another session of the same harness in the same
   group would look the same; otherwise, for a session with no title,
@@ -634,7 +639,7 @@ session row above it, so the hit row is prefixed with an origin: the harness bad
 | 1 | Turn | `turn N`, counting from 1 | always | dim |
 | 2 | Role | `you`, `ai`, or `system`, as in the transcript viewer's gutter | always | dim, padded to 6 |
 | 3 | Kind | `message`, `summary`, `tool call`, `tool output`, or `thinking` | always | dim, padded to 11 so the age and snippet line up |
-| 4 | Age | time since the turn was written, or a dash | always | dim |
+| 4 | Age | time since the turn was written, or a dash | always | see [Age](#age) |
 | 5 | Snippet | the text around the match, cropped so the match stays on screen and cut on word boundaries; the match in the theme's match style (bold, underlined) | when room remains | dim italic |
 
 <!-- frame: keys="6sthe<BackTab><C-f>" width=130 height=20 -->
@@ -674,7 +679,7 @@ left out, so a pane that mirrors an agent does not repeat it.
 | 3 | Mux | the mux's name, padded to 16 | always | bold |
 | 4 | Place | `window.pane`, such as `0.1` | always | dim, padded to 5 |
 | 5 | Command | what the pane was running | when it is known | dim, padded to 8 |
-| 6 | Age | time since the scrollback was read | always | dim, right-aligned |
+| 6 | Age | time since the scrollback was read | always | see [Age](#age) |
 | 7 | Hits | `N hits` | always | dim |
 | 8 | Snippet | the newest matching line, cropped around the match | when room remains | dim italic, match in the match style |
 
@@ -694,7 +699,7 @@ prefixed with the mux's name and the pane's place, padded to 16.
 | # | Cell | Source | Condition | Style |
 |---|---|---|---|---|
 | 1 | Line | `line N`, counting from 1 in the scrollback, newest (lowest) first | always | dim, padded to 5 |
-| 2 | Age | time since the scrollback was read | always | dim, right-aligned |
+| 2 | Age | time since the scrollback was read | always | see [Age](#age) |
 | 3 | Snippet | the line, cropped around the match | when room remains | dim italic, match in the match style |
 
 <!-- frame: keys="2<C-/>feature<BackTab><C-s>" width=130 height=14 -->
