@@ -98,6 +98,19 @@ shell tool refuses inline `env -u` constructs.
 If the baseline had failures, they are listed in
 `/tmp/tuifw-baseline/BASELINE.md`; only failures beyond those are yours.
 
+### Disk Hygiene
+
+`/tmp` is a small tmpfs (7.8 GB) shared by every story. Keep comparison
+artifacts small and delete the big ones when you finish:
+
+- Before/after frames are tiny text files: keep them under
+  `/tmp/tuifw-baseline/frames-<story>-*`.
+- A built comparison binary is about 235 MB. Build it, capture frames, and
+  delete it in the same sitting. Never copy a `target/` directory or a source
+  tree into `/tmp`.
+- Before finishing, run `df -h /tmp`; if usage is above 60%, clear your own
+  leftovers (`/tmp/tuifw-baseline/conspectus-*` binaries) and mention it.
+
 ## TUI Changes And Verification
 
 - Visible output is validated with `conspectus tui --snapshot` (dev-only; build
