@@ -2023,6 +2023,21 @@ pub(super) fn run_pending_content_scans(
     content::run_blocking_with(app, rebase, panes.as_ref());
 }
 
+/// Open the pane viewer on a pane of the scenario world rooted at `root`,
+/// reading the scrollback it recorded instead of running tmux, as snapshot
+/// mode does for a pane search hit.
+#[cfg(feature = "snapshot")]
+pub(super) fn open_recorded_pane(
+    app: &mut App,
+    root: &std::path::Path,
+    pane: &crate::content_search::PaneRef,
+    line: usize,
+    text: &str,
+) {
+    let panes = crate::dev_scenarios::recorded_pane_backend(root);
+    open_pane_scrollback(app, &panes, pane, line, text);
+}
+
 /// Bridge helper: dispatch a `Msg` through the reducer and run any
 /// returned effects through the pure executor. Call sites that don't
 /// have a live terminal (tests, scenario TUI) use this; the live

@@ -279,3 +279,40 @@ fn key_prelude_o_and_enter_reach_a_truncated_field_past_the_core_rows() {
         "Enter copies the same field"
     );
 }
+
+#[test]
+fn a_pane_hit_opens_the_pane_viewer_on_the_recorded_scrollback() {
+    use crate::content_search::{MuxRef, PaneRef};
+    use crate::tui::effect::{Effect, ExecSpec};
+    let world = tempfile::tempdir().expect("world");
+    let panes = world.path().join(crate::dev_scenarios::PANE_CAPTURES_DIR);
+    fs::create_dir_all(&panes).expect("panes dir");
+    fs::write(
+        panes.join("shell.txt"),
+        "first line\nthe match\nlast line\n",
+    )
+    .expect("capture");
+    let pane = PaneRef {
+        mux: MuxRef {
+            backend: "tmux".into(),
+            socket: None,
+            session: "shell".into(),
+        },
+        // The recorded backend numbers the captures in name order.
+        pane_id: "%1".into(),
+        window_index: "0".into(),
+        pane_index: "0".into(),
+        command: Some("zsh".into()),
+    };
+    let effect = Effect::Exec(ExecSpec::PaneScrollback {
+        pane,
+        line: 2,
+        text: "the match".into(),
+    });
+    let mut app = App::new(RunConfig::defaults());
+    let rebase = Some((std::path::Path::new(FIXTURE_PATH_ROOT), world.path()));
+    run_effects_opening_viewers(&mut app, vec![effect], rebase);
+    let viewer = app.pane_viewer().expect("the pane viewer opens");
+    assert!(viewer.lines.iter().any(|line| line == "the match"));
+    assert_eq!(viewer.matches.len(), 1);
+}

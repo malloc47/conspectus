@@ -249,8 +249,9 @@ fn open_viewer(app: &mut App, rebase: Option<(&std::path::Path, &std::path::Path
 }
 
 /// Run effects the snapshot-safe way: a request to view a session opens
-/// the viewer from the scenario world; everything else goes through the
-/// pure executor.
+/// the viewer from the scenario world, and a request to read a pane's
+/// scrollback opens the pane viewer on the capture the world recorded;
+/// everything else goes through the pure executor.
 fn run_effects_opening_viewers(
     app: &mut App,
     effects: Vec<crate::tui::effect::Effect>,
@@ -261,6 +262,15 @@ fn run_effects_opening_viewers(
         // OSC 52 would land in the frame output.
         if matches!(effect, Effect::Copy { .. }) {
             eprintln!("conspectus: snapshot mode skipped a copy");
+            continue;
+        }
+        if let Effect::Exec(ExecSpec::PaneScrollback { pane, line, text }) = &effect {
+            match rebase {
+                Some((_, root)) => runtime::open_recorded_pane(app, root, pane, *line, text),
+                None => eprintln!(
+                    "conspectus: snapshot mode reads pane scrollback only from a fixture root"
+                ),
+            }
             continue;
         }
         let Effect::Exec(ExecSpec::ViewSession(mut id, open)) = effect else {
