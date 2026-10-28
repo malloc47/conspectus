@@ -102,6 +102,7 @@ mod scrolling;
 mod search_flat;
 mod search_quick;
 mod search_view;
+mod selection;
 mod state;
 mod styling;
 mod text;

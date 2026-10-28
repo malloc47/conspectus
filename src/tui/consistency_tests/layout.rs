@@ -146,7 +146,7 @@ fn key(code: KeyCode) -> KeyEvent {
 /// One key into the top modal's own handler. `false` when the modal
 /// needs live app context to handle keys (its layout is checked without
 /// moving).
-fn press(modal: &mut Modal, code: KeyCode) -> bool {
+pub(super) fn press(modal: &mut Modal, code: KeyCode) -> bool {
     let key = key(code);
     match modal {
         Modal::Help(state) => {
