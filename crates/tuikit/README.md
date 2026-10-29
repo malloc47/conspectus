@@ -37,7 +37,9 @@ The crate is populated one module at a time as controls move in from the
 host. Today it holds the `theme` module (design tokens, named styles, and
 the style-spec grammar), the `glyphs` module (shared marks, the vetted-glyph
 table, and the source scanner), the `text` module (measuring, cutting,
-wrapping, snippets, and match painting in terminal cells), the `scroll`
+wrapping, snippets, and match painting in terminal cells), the
+`text_edit` module (the line editor every text field edits with and the
+text field that draws it), the `scroll`
 module (cursor stepping, the follow rule, the clamping scroll window, the
 scrollbar gutter, and wrapped-row counts), the `chip` module (filled,
 toggle, segmented, position, and status chips), the `age` module (age

@@ -1449,13 +1449,22 @@ closed.
 Every text field (the rename and branch-name prompts, the max-age and
 contents editors in the controls, the search and picker queries, the
 fields of the new tmux session, launch, and pin edit forms, and the
-viewers' find prompts) moves a word back and forward with `Alt-B` and
-`Alt-F`, or `Ctrl-←` and `Ctrl-→`. Apart from the find prompts, the
-fields also take the usual line-editing keys: `Ctrl-A`/`Ctrl-E` for the
-start and end, `Ctrl-W` to delete the word before the cursor, `Ctrl-K`
-to delete to the end, `Ctrl-U` to clear the line, and `Ctrl-Y` to put
-back what one of those deleted. A dialog's own keys come first: on a
-form's option rows, `←`, `→`, and `Space` change the option.
+viewers' find prompts) edits the same way. `Alt-B` and `Alt-F`,
+`Ctrl-←` and `Ctrl-→`, or `Alt-←` and `Alt-→` move a word back and
+forward; `Ctrl-A`/`Ctrl-E` (or `Home`/`End`) go to the start and end and
+`Ctrl-B`/`Ctrl-F` move one character; `Ctrl-W` or `Alt-Backspace`
+deletes the word before the cursor and `Alt-D` or `Ctrl-Delete` the word
+after it; `Ctrl-K` deletes to the end, `Ctrl-U` clears the whole line,
+and `Ctrl-Y` puts back what one of those deleted. A dialog's own keys
+come first: on a form's option rows, `←`, `→`, and `Space` change the
+option, and the search's own chords (`Ctrl-F`, `Ctrl-R`, and the rest)
+keep their meanings there.
+
+A field shows its cursor as a highlighted cell (the `field_cursor` style
+of `[tui.theme]`) and scrolls sideways to keep it in view, counting the
+two cells a wide character such as a CJK character or an emoji takes, so
+the cursor stays on the character it is on and the field never runs past
+its edge.
 
 The TUI turns on bracketed paste while it runs, so the terminal delivers
 a paste as one piece, typed into the field that has the cursor. A field
@@ -1484,9 +1493,8 @@ nothing closes the prompt and says so.
 Inside the transcript viewer, `/` opens a find prompt in the footer.
 Type a query and press `Enter` to jump to the first match at or below the
 top of the screen; `Esc` leaves the prompt and keeps an earlier find, and
-the prompt supports `Backspace`, `Delete`, `←`/`→`, `Alt-B`/`Alt-F` and
-`Ctrl-←`/`Ctrl-→` (a word back and forward), `Home`/`End`, and `Ctrl-U`
-(delete to the start). `n` and `N` step to the next and previous
+the prompt edits like every text field (see Editing text in fields;
+`Ctrl-U` clears the whole query). `n` and `N` step to the next and previous
 match and wrap at either end, saying so in the footer. The footer shows
 `find "query" i/N` (or `no match`; the header's `find:"query"` chip uses the
 same wording), and each match is highlighted: the current one reversed, the

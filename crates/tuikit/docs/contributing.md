@@ -263,6 +263,9 @@ Work through this list in order. Each step names the rule it applies.
    fits (house rule 11; see [controls/feedback.md](controls/feedback.md)).
 6. **Measure in cells.** Truncation, padding, and wrapping go through the
    `text` module and measure terminal cells (house rule 14). A control
+   with a text field edits it with `text_edit::LineEdit` and draws it with
+   `text_edit::TextField`, never with an editor or a window of its own
+   (house rule 15); see [controls/text_edit.md](controls/text_edit.md). A control
    that needs its row count (a scroll range, a scrollbar, a height) wraps
    with `scroll::WrappedRows` (built on `text::wrap_line`) and draws those
    rows, rather than letting the paragraph widget wrap and estimating; see

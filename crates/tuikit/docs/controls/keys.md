@@ -115,7 +115,7 @@ assert!(line.spans.iter().all(|span| span.style != unavailable_style(&theme)));
 | Item | Does | Notes |
 | --- | --- | --- |
 | `KeyMatcher::{Char, Exact, AnyModExceptCtrl, AnyMod}` | which key events a row binds | `matches`, `matches_event`, `example` (the plainest event it fires on) |
-| `ch`, `key`, `ctrl`, `alt`, `ctrl_key` | `const` matcher builders | `key` refuses a character at compile time |
+| `ch`, `key`, `ctrl`, `alt`, `ctrl_key`, `alt_key` | `const` matcher builders | `key` refuses a character at compile time |
 | `key_label` | the one notation for a key | `↑` `↓` `←` `→`, `Space`, `S-Tab`, `PgUp`, `PgDn`, `Ctrl-R`, `Alt-b`, `Shift-Enter` |
 | `KeyRow::{Bind, Note, Include}`, `Hint::{Shown, Alias}` | a table's rows | a bound row carries `available` |
 | `shown`, `alias`, `include` | `const` row builders | every bound row starts available |
@@ -171,7 +171,8 @@ not shown in the footer.
 | `CONFIRM_KEYS` (`ConfirmKey`) | `Ctrl-C` and `q` abort; `Enter`/`y` yes; `Esc`/`n` no | `Enter/y confirm · Esc/n cancel` |
 | a choice dialog (`ChoiceKey<C>`) | `Ctrl-C` and `q` abort; one shown row per choice; `Esc` (shown as cancel) back | `m merge & close · d discard & close · Esc cancel` (the host's choices) |
 | `PAGER_KEYS` (`PagerKey`) | `Ctrl-C` abort; `j`/`↓` down; `k`/`↑` up; `PgDn`/`Space` page down; `PgUp` page up; `g`/`Home` top; `G`/`End` bottom; `Esc`/`q` close | `j/k/PgDn/PgUp scroll · Esc/q close` |
-| `TEXT_INPUT_KEYS` (`TextInputKey`) | `Ctrl-C` abort; `Enter` confirm; `Esc` cancel; `Tab` swallowed; `Alt-b`/`Alt-f` word left and right | `Enter confirm · Esc cancel` |
+| `TEXT_INPUT_KEYS` (`TextInputKey`) | `Ctrl-C` abort; `Enter` confirm; `Esc` cancel; `Tab` swallowed; every other key goes to the line editor | `Enter confirm · Esc cancel` |
+| `LINE_EDIT_KEYS` (`EditKey`) | the editing keys every text field shares, all aliases: arrows and `Home`/`End` with their readline chords, word motion on `Alt-b`/`Alt-f` and the Control and Alt arrows, the delete, kill, and yank keys (see [text_edit.md](text_edit.md)) | none |
 | `CHECKLIST_KEYS` (`ChecklistKey`) | `Ctrl-C` and `q` abort; `↑`/`k`/`Ctrl-P` up; `↓`/`j`/`Ctrl-N` down; `Space` toggle; `Enter` confirm; `Esc` cancel | `↑/↓ move · Space toggle · Enter confirm · Esc cancel` |
 | `FORM_KEYS` (`FormKey`) | `Ctrl-C` abort; `↑`/`Ctrl-P` previous field; `↓`/`Ctrl-N` next field; `Tab` complete or next; `S-Tab` back | `↑/↓ move · Tab complete/next · S-Tab back` |
 | `FORM_OPTION_KEYS` (`FormKey`) | `←` option back; `→`/`Space` option on | `←/→/Space change` |
@@ -207,7 +208,8 @@ the style the control draws its footer in.
 Not applicable: 1, 2, and 10 (the list's look and ends are `selection`'s),
 5 and 7 (feedback and errors are the control's), 9 (the focus cue is the
 pane frame's), 11 (feedback severity), 15 and 16 (editing and paths are
-the text-entry controls'), 17 (labels are the control's copy), and 18 (the
+the text-entry controls', though the editing keys' table is kept here with
+the others), 17 (labels are the control's copy), and 18 (the
 pager's stepping is the pager's; its keys come from here). Half-page
 `Ctrl-D`/`Ctrl-U` join `PAGER_KEYS` with the pager control.
 

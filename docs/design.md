@@ -1162,6 +1162,15 @@ The keymap help keeps its hand-written rows and legends as annotations until
 the program-wide keymap carries help text; every page pages by the rows it
 shows.
 
+Text entry starts with one line editor (ADR 0165). Every text field (the
+prompts, the forms' text rows, the search and picker queries, the viewers'
+find prompts) edits with the framework's `LineEdit`, which wraps `tui-input`
+and binds one table of readline keys with word motion on Alt and Control, and
+is drawn by its `TextField`, which windows the line in terminal cells around
+the cursor and draws the caret from `field_cursor`. An edit reports whether
+the text changed; what `Enter` and `Esc` mean stays with the prompt, form, or
+query around the field.
+
 ### Graph-to-View Slicing
 
 The producer pipeline discovers and resolves a typed

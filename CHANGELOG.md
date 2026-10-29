@@ -173,9 +173,23 @@ Targeted for 0.2.0, after 0.1.0 is tagged. History, rebuild, and pins
   `Ctrl-R recall search`, `Ctrl-O set options`, and `Ctrl-S open Search
   view`, and the forms read `←/→/Space change`. The value viewer's footer
   lists its keys in the help page's order and names `PgDn`/`PgUp`.
+- **Every text field edits the same way.** The transcript and scrollback
+  find prompts take the keys every other field takes (`Ctrl-A`/`Ctrl-E`,
+  `Ctrl-B`/`Ctrl-F`, `Ctrl-W`, `Ctrl-K`, `Ctrl-Y`), and `Ctrl-U` there
+  clears the whole query instead of only what precedes the cursor. Every
+  field also moves by word on `Alt-←`/`Alt-→` and deletes the next word on
+  `Alt-D`. The prompts' and find prompts' cursor cell takes the
+  `field_cursor` style of `[tui.theme]` (black on white), as the forms'
+  did, instead of reverse video.
 
 ### Fixed
 
+- **Text fields keep their cursor in view.** The quick select, content
+  search, and picker queries show a cursor and scroll to keep it on
+  screen (a long query used to be cut off at the frame with no cursor).
+  CJK and emoji text puts the cursor on the character it is on and stays
+  inside its field in the prompts and forms, so it no longer runs past
+  the frame or pushes a path's mark or the pin form's last column aside.
 - **The `?` help names the right key and keeps its headings whole.** The
   content search row said `Ctrl-L` switches between listing sessions and
   listing messages; inside the search that is `S-Tab`. A heading too long

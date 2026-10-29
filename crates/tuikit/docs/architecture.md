@@ -61,7 +61,8 @@ each names its module path.
 
 | Family | Controls | Status |
 | --- | --- | --- |
-| Text entry | `LineEdit` and `TextField`; `TextPrompt<M>`; `PathField`; `Form<M>` | planned |
+| Text entry | `LineEdit` and `TextField` (module `text_edit`): the one line editor, which wraps `tui-input` and binds the shared editing keys, and the one inline renderer, which windows a line in cells around its caret. Page: [controls/text_edit.md](controls/text_edit.md) | landed |
+| Text entry | `TextPrompt<M>`; `PathField`; `Form<M>` | planned |
 | Choice and command | `ActionMenu<M>`; `Dialog<M>`; `Checklist`; `Palette<R>` (filter picker, quick select, content search, and a command palette are instances); `SettingsPanel<M>` | planned |
 | Reading | `Pager` with `Find`; `LogList`; `richtext` (a cargo feature) | planned |
 | Reading | `HelpPage` (in the `help` convention module, below) | landed |
