@@ -5,24 +5,12 @@ use crate::model::{
     PinNode, RepoId, RepoNode, SlotStatus,
 };
 use crate::tui::search::items_from_rows;
-use ratatui::crossterm::event::{KeyCode, KeyEventKind, KeyEventState, KeyModifiers};
-
-fn press(code: KeyCode, modifiers: KeyModifiers) -> KeyEvent {
-    KeyEvent {
-        code,
-        modifiers,
-        kind: KeyEventKind::Press,
-        state: KeyEventState::NONE,
-    }
-}
-
-fn plain(code: KeyCode) -> KeyEvent {
-    press(code, KeyModifiers::NONE)
-}
+use ratatui::crossterm::event::{KeyCode, KeyModifiers};
+use tuikit::testkit::keys::{chord, press};
 
 fn type_text(state: &mut SearchOverlayState, text: &str) {
     for c in text.chars() {
-        state.handle_key(plain(KeyCode::Char(c)));
+        state.handle_key(press(KeyCode::Char(c)));
     }
 }
 
@@ -86,7 +74,7 @@ fn world() -> GraphSnapshot {
 fn wide_state(query: &str) -> SearchOverlayState {
     let mut state = SearchOverlayState::new();
     state.set_entities(EntityIndex::build(&world(), true));
-    state.handle_key(plain(KeyCode::Tab));
+    state.handle_key(press(KeyCode::Tab));
     type_text(&mut state, query);
     state.refresh_matches(&[]);
     state
@@ -178,13 +166,13 @@ fn quick_select_opens_on_the_current_reach() {
 #[test]
 fn tab_and_shift_tab_both_switch_the_reach() {
     let mut state = SearchOverlayState::new();
-    state.handle_key(plain(KeyCode::Tab));
+    state.handle_key(press(KeyCode::Tab));
     assert_eq!(state.reach(), Reach::All);
-    state.handle_key(plain(KeyCode::Tab));
+    state.handle_key(press(KeyCode::Tab));
     assert_eq!(state.reach(), Reach::Current);
-    state.handle_key(press(KeyCode::BackTab, KeyModifiers::SHIFT));
+    state.handle_key(chord(KeyModifiers::SHIFT, KeyCode::BackTab));
     assert_eq!(state.reach(), Reach::All);
-    state.handle_key(press(KeyCode::BackTab, KeyModifiers::SHIFT));
+    state.handle_key(chord(KeyModifiers::SHIFT, KeyCode::BackTab));
     assert_eq!(state.reach(), Reach::Current);
 }
 
@@ -193,7 +181,7 @@ fn widening_keeps_the_query_and_goes_back_to_the_top() {
     let mut state = SearchOverlayState::new();
     state.set_entities(EntityIndex::build(&world(), true));
     type_text(&mut state, "quokka");
-    state.handle_key(plain(KeyCode::Tab));
+    state.handle_key(press(KeyCode::Tab));
     state.refresh_matches(&[]);
     assert_eq!(state.query(), "quokka");
     assert_eq!(state.cursor(), 0);
@@ -207,11 +195,11 @@ fn widening_keeps_the_query_and_goes_back_to_the_top() {
 #[test]
 fn the_host_is_asked_for_the_index_only_on_the_first_widening() {
     let mut state = SearchOverlayState::new();
-    assert!(state.widens_with(plain(KeyCode::Tab)));
-    assert!(state.widens_with(press(KeyCode::BackTab, KeyModifiers::SHIFT)));
-    assert!(!state.widens_with(plain(KeyCode::Char('a'))));
+    assert!(state.widens_with(press(KeyCode::Tab)));
+    assert!(state.widens_with(chord(KeyModifiers::SHIFT, KeyCode::BackTab)));
+    assert!(!state.widens_with(press(KeyCode::Char('a'))));
     state.set_entities(EntityIndex::build(&world(), true));
-    assert!(!state.widens_with(plain(KeyCode::Tab)), "already built");
+    assert!(!state.widens_with(press(KeyCode::Tab)), "already built");
 
     let content = SearchOverlayState::configured(
         SearchMode::Content,
@@ -221,7 +209,7 @@ fn the_host_is_asked_for_the_index_only_on_the_first_widening() {
         "",
     );
     assert!(
-        !content.widens_with(plain(KeyCode::Tab)),
+        !content.widens_with(press(KeyCode::Tab)),
         "not in content mode"
     );
 }
@@ -229,7 +217,7 @@ fn the_host_is_asked_for_the_index_only_on_the_first_widening() {
 #[test]
 fn enter_on_a_wider_result_opens_that_entity() {
     let mut state = wide_state("quokka-dev");
-    let outcome = state.handle_key(plain(KeyCode::Enter));
+    let outcome = state.handle_key(press(KeyCode::Enter));
     let expected = NodeId::MuxSession(MuxSessionId::new("tmux:quokka-dev"));
     assert_eq!(outcome, SearchOutcome::OpenEntity(Box::new(expected)));
 }
@@ -238,7 +226,7 @@ fn enter_on_a_wider_result_opens_that_entity() {
 fn enter_with_no_wider_result_closes() {
     let mut state = wide_state("zzz-nothing");
     assert_eq!(
-        state.handle_key(plain(KeyCode::Enter)),
+        state.handle_key(press(KeyCode::Enter)),
         SearchOutcome::Cancel
     );
 }
@@ -248,10 +236,10 @@ fn the_cursor_moves_among_the_wider_results() {
     let mut state = wide_state("quokka");
     let n = state.entity_matches().len();
     assert!(n >= 3);
-    state.handle_key(plain(KeyCode::Down));
+    state.handle_key(press(KeyCode::Down));
     assert_eq!(state.cursor(), 1);
-    state.handle_key(plain(KeyCode::Up));
-    state.handle_key(plain(KeyCode::Up));
+    state.handle_key(press(KeyCode::Up));
+    state.handle_key(press(KeyCode::Up));
     assert_eq!(state.cursor(), n - 1, "wraps");
 }
 
@@ -265,7 +253,7 @@ fn the_overlay_commits_an_open_entity_message() {
             content: &[],
             entities: None,
         },
-        plain(KeyCode::Enter),
+        press(KeyCode::Enter),
     );
     let Outcome::Commit(msg) = outcome else {
         panic!("expected a commit, got {outcome:?}");
@@ -284,7 +272,7 @@ fn the_wider_reach_ranks_everything_while_the_current_one_ranks_rows() {
     assert_eq!(state.matches().len(), 2, "the two rows that say quokka");
     assert!(state.entity_matches().is_empty());
 
-    state.handle_key(plain(KeyCode::Tab));
+    state.handle_key(press(KeyCode::Tab));
     state.refresh_matches(&items);
     assert!(state.matches().is_empty());
     assert!(state.entity_matches().len() > 2);

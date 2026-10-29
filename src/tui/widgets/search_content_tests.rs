@@ -1,30 +1,14 @@
 use super::*;
 use crate::model::AgentSessionId;
 use crate::tui::Msg;
-use ratatui::crossterm::event::{KeyCode, KeyEventKind, KeyEventState, KeyModifiers};
+use ratatui::crossterm::event::{KeyCode, KeyModifiers};
 use std::time::Duration;
 use tuikit::overlay::Outcome;
-
-fn press(code: KeyCode, modifiers: KeyModifiers) -> KeyEvent {
-    KeyEvent {
-        code,
-        modifiers,
-        kind: KeyEventKind::Press,
-        state: KeyEventState::NONE,
-    }
-}
-
-fn plain(code: KeyCode) -> KeyEvent {
-    press(code, KeyModifiers::NONE)
-}
-
-fn ctrl(c: char) -> KeyEvent {
-    press(KeyCode::Char(c), KeyModifiers::CONTROL)
-}
+use tuikit::testkit::keys::{chord, ctrl, press};
 
 fn type_text(state: &mut SearchOverlayState, text: &str) {
     for c in text.chars() {
-        state.handle_key(plain(KeyCode::Char(c)));
+        state.handle_key(press(KeyCode::Char(c)));
     }
 }
 
@@ -100,7 +84,7 @@ fn tab_switches_between_current_and_all_and_asks_for_a_new_scan() {
         Reach::Current,
         "it opens on the current view"
     );
-    state.handle_key(plain(KeyCode::Tab));
+    state.handle_key(press(KeyCode::Tab));
     assert_eq!(state.reach(), Reach::All);
     assert_eq!(state.mode(), SearchMode::Content);
     assert_eq!(state.query(), "quokka", "Tab is not typed into the query");
@@ -115,9 +99,9 @@ fn tab_switches_between_current_and_all_and_asks_for_a_new_scan() {
         ),
         "{due:?}"
     );
-    state.handle_key(plain(KeyCode::Tab));
+    state.handle_key(press(KeyCode::Tab));
     assert_eq!(state.reach(), Reach::Current, "Tab flips back");
-    state.handle_key(press(KeyCode::BackTab, KeyModifiers::SHIFT));
+    state.handle_key(chord(KeyModifiers::SHIFT, KeyCode::BackTab));
     assert_eq!(state.reach(), Reach::Current, "Shift-Tab leaves the reach");
 }
 
@@ -182,7 +166,7 @@ fn forcing_skips_the_debounce() {
 #[test]
 fn an_empty_query_stops_the_preview() {
     let mut state = contents_overlay("a");
-    state.handle_key(plain(KeyCode::Backspace));
+    state.handle_key(press(KeyCode::Backspace));
     assert_eq!(
         state.take_due_search(Instant::now(), true),
         Some(DueSearch::Clear)
@@ -195,13 +179,13 @@ fn q_dismisses_from_the_options_pane_and_types_into_the_query() {
     let mut state = contents_overlay("quokka");
     state.handle_key(ctrl('o'));
     assert!(matches!(
-        state.handle_key(plain(KeyCode::Char('q'))),
+        state.handle_key(press(KeyCode::Char('q'))),
         SearchOutcome::Cancel
     ));
     // In the query, q is a letter.
     let mut state = contents_overlay("quokka");
     assert!(matches!(
-        state.handle_key(plain(KeyCode::Char('q'))),
+        state.handle_key(press(KeyCode::Char('q'))),
         SearchOutcome::Continue
     ));
     assert_eq!(state.content_text(), "quokkaq");
@@ -212,11 +196,11 @@ fn the_options_pane_changes_what_is_searched_and_restarts_the_scan() {
     let mut state = contents_overlay("quokka");
     state.handle_key(ctrl('o'));
     assert_eq!(state.options_cursor(), Some(0));
-    state.handle_key(plain(KeyCode::Char(' ')));
-    state.handle_key(plain(KeyCode::Down));
-    state.handle_key(plain(KeyCode::Enter));
-    state.handle_key(plain(KeyCode::Down));
-    state.handle_key(plain(KeyCode::Char(' ')));
+    state.handle_key(press(KeyCode::Char(' ')));
+    state.handle_key(press(KeyCode::Down));
+    state.handle_key(press(KeyCode::Enter));
+    state.handle_key(press(KeyCode::Down));
+    state.handle_key(press(KeyCode::Char(' ')));
     assert!(state.kinds().tools && state.kinds().thinking);
     assert!(!state.panes());
     let due = state.take_due_search(Instant::now(), true);
@@ -235,12 +219,12 @@ fn the_options_pane_changes_what_is_searched_and_restarts_the_scan() {
     );
     // Esc goes back to the results, not out of the modal.
     assert!(matches!(
-        state.handle_key(plain(KeyCode::Esc)),
+        state.handle_key(press(KeyCode::Esc)),
         SearchOutcome::Continue
     ));
     assert_eq!(state.options_cursor(), None);
     assert!(matches!(
-        state.handle_key(plain(KeyCode::Esc)),
+        state.handle_key(press(KeyCode::Esc)),
         SearchOutcome::Cancel
     ));
 }
@@ -249,7 +233,7 @@ fn the_options_pane_changes_what_is_searched_and_restarts_the_scan() {
 fn the_granularity_key_lists_the_same_matches_another_way_without_a_new_scan() {
     let mut state = contents_overlay("quokka");
     assert!(matches!(
-        state.handle_key(press(KeyCode::BackTab, KeyModifiers::SHIFT)),
+        state.handle_key(chord(KeyModifiers::SHIFT, KeyCode::BackTab)),
         SearchOutcome::Regroup(Grouping::Flat)
     ));
     assert_eq!(state.group(), Grouping::Flat);
@@ -259,7 +243,7 @@ fn the_granularity_key_lists_the_same_matches_another_way_without_a_new_scan() {
         "no scan is owed"
     );
     assert!(matches!(
-        state.handle_key(press(KeyCode::BackTab, KeyModifiers::SHIFT)),
+        state.handle_key(chord(KeyModifiers::SHIFT, KeyCode::BackTab)),
         SearchOutcome::Regroup(Grouping::Session)
     ));
 }
@@ -278,8 +262,8 @@ fn the_retired_result_and_kind_keys_edit_the_query_like_any_other() {
 fn enter_opens_the_result_under_the_cursor_at_its_turn() {
     let mut state = contents_overlay("quokka");
     let rows = [row("a", 3), row("b", 9)];
-    handle(&mut state, &rows, plain(KeyCode::Down));
-    let outcome = handle(&mut state, &rows, plain(KeyCode::Enter));
+    handle(&mut state, &rows, press(KeyCode::Down));
+    let outcome = handle(&mut state, &rows, press(KeyCode::Enter));
     let Outcome::Commit(msg) = outcome else {
         panic!("{outcome:?}");
     };
@@ -300,7 +284,7 @@ fn enter_opens_the_result_under_the_cursor_at_its_turn() {
 fn enter_with_no_results_closes() {
     let mut state = contents_overlay("quokka");
     assert!(matches!(
-        handle(&mut state, &[], plain(KeyCode::Enter)),
+        handle(&mut state, &[], press(KeyCode::Enter)),
         Outcome::Close
     ));
 }
@@ -309,9 +293,9 @@ fn enter_with_no_results_closes() {
 fn the_cursor_wraps_over_the_contents_results() {
     let mut state = contents_overlay("q");
     let rows = [row("a", 0), row("b", 0), row("c", 0)];
-    handle(&mut state, &rows, plain(KeyCode::Up));
+    handle(&mut state, &rows, press(KeyCode::Up));
     assert_eq!(state.cursor(), 2);
-    handle(&mut state, &rows, plain(KeyCode::Down));
+    handle(&mut state, &rows, press(KeyCode::Down));
     assert_eq!(state.cursor(), 0);
 }
 
@@ -358,8 +342,8 @@ fn ctrl_o_no_longer_opens_the_search_view() {
 fn enter_on_a_pane_row_opens_its_scrollback_after_revealing_the_mux() {
     let mut state = contents_overlay("quokka");
     let rows = [row("a", 3), pane_row(120)];
-    handle(&mut state, &rows, plain(KeyCode::Down));
-    let Outcome::Commit(msg) = handle(&mut state, &rows, plain(KeyCode::Enter)) else {
+    handle(&mut state, &rows, press(KeyCode::Down));
+    let Outcome::Commit(msg) = handle(&mut state, &rows, press(KeyCode::Enter)) else {
         panic!("Enter does not commit");
     };
     let Msg::OpenPaneHit {
@@ -395,7 +379,7 @@ fn escape_closes_in_either_scope() {
             "",
         );
         assert!(matches!(
-            handle(&mut state, &[], plain(KeyCode::Esc)),
+            handle(&mut state, &[], press(KeyCode::Esc)),
             Outcome::Close
         ));
     }
@@ -406,7 +390,7 @@ fn the_rows_scope_does_not_bind_the_contents_keys() {
     // Ctrl-F is a text-editing key in quick select; the contents keys
     // apply only in content mode.
     let mut state = SearchOverlayState::new();
-    state.handle_key(press(KeyCode::BackTab, KeyModifiers::SHIFT));
+    state.handle_key(chord(KeyModifiers::SHIFT, KeyCode::BackTab));
     state.handle_key(ctrl('o'));
     assert_eq!(state.group(), Grouping::Session);
     assert!(!state.kinds().tools);
@@ -486,7 +470,7 @@ fn the_contents_scope_shows_progress_results_and_the_generated_key_hints() {
 #[test]
 fn the_messages_granularity_names_the_session_of_every_message() {
     let mut state = contents_overlay("quokka");
-    state.handle_key(press(KeyCode::BackTab, KeyModifiers::SHIFT));
+    state.handle_key(chord(KeyModifiers::SHIFT, KeyCode::BackTab));
     let mut first = row("aaaa1111", 3);
     first.turn = Some("turn 4 · message".into());
     let mut second = row("bbbb2222", 1);
@@ -625,7 +609,7 @@ fn the_tab_identifier_shows_the_chosen_reach() {
     let mut state = contents_overlay("quokka");
     let text = render(&state, &view(vec![row("aaaa1111", 3)], true), 100, 20);
     assert!(text.contains("[ Current ] All"), "{text}");
-    state.handle_key(plain(KeyCode::Tab));
+    state.handle_key(press(KeyCode::Tab));
     let text = render(&state, &view(vec![row("aaaa1111", 3)], true), 100, 20);
     assert!(text.contains("Current [ All ]"), "{text}");
 }
@@ -706,7 +690,7 @@ fn the_header_shows_both_choices_at_every_width() {
 fn the_options_pane_lists_what_a_search_looks_in() {
     let mut state = contents_overlay("quokka");
     state.handle_key(ctrl('o'));
-    state.handle_key(plain(KeyCode::Char(' ')));
+    state.handle_key(press(KeyCode::Char(' ')));
     let text = render(&state, &view(vec![row("aaaa1111", 3)], true), 100, 14);
     assert!(text.contains("[x] Tool calls and output"), "{text}");
     assert!(text.contains("[ ] Thinking"), "{text}");

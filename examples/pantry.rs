@@ -39,12 +39,13 @@ use conspectus::tui::widgets::search::{SearchOverlayState, SearchOverlayWidget};
 use conspectus::tui::widgets::value_modal::{ValueModalState, ValueModalWidget};
 use conspectus::tui::{Grouping, SessionsGrouping, Sort, Theme, View};
 use ratatui::buffer::Buffer;
-use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyEventState, KeyModifiers};
+use ratatui::crossterm::event::KeyCode;
 use ratatui::layout::Rect;
 use ratatui::style::{Modifier, Style};
 use ratatui::text::Line;
 use ratatui::widgets::{Paragraph, Widget};
 use tui_pantry::Ingredient;
+use tuikit::testkit::keys::press;
 
 /// Configuration for one multi-select preview variant. The state is
 /// rebuilt per `render` so the ingredient struct stays `Send`-clean
@@ -64,12 +65,7 @@ struct MultiSelectVariant {
 impl MultiSelectVariant {
     fn build_state(&self) -> MultiSelectState {
         let mut state = MultiSelectState::new(self.title, self.items.len(), &self.initial_selected);
-        let down = KeyEvent {
-            code: KeyCode::Down,
-            modifiers: KeyModifiers::NONE,
-            kind: KeyEventKind::Press,
-            state: KeyEventState::NONE,
-        };
+        let down = press(KeyCode::Down);
         for _ in 0..self.cursor_advance {
             state.handle_key(down);
         }
@@ -143,12 +139,7 @@ struct ControlsVariant {
 
 impl ControlsVariant {
     fn handle_key(state: &mut ControlsOverlayState, ctx: &ControlsContext<'_>, code: KeyCode) {
-        let event = KeyEvent {
-            code,
-            modifiers: KeyModifiers::NONE,
-            kind: KeyEventKind::Press,
-            state: KeyEventState::NONE,
-        };
+        let event = press(code);
         // Outcome is discarded — the preview is render-only, and
         // outcomes describe what the reducer would apply.
         let _ = state.handle_key(ctx, event);
@@ -313,24 +304,14 @@ struct SearchVariant {
 impl SearchVariant {
     fn send_chars(state: &mut SearchOverlayState, text: &str) {
         for ch in text.chars() {
-            let event = KeyEvent {
-                code: KeyCode::Char(ch),
-                modifiers: KeyModifiers::NONE,
-                kind: KeyEventKind::Press,
-                state: KeyEventState::NONE,
-            };
+            let event = press(KeyCode::Char(ch));
             let _ = state.handle_key(event);
         }
     }
 
     fn advance_cursor(state: &mut SearchOverlayState, steps: usize) {
         for _ in 0..steps {
-            let event = KeyEvent {
-                code: KeyCode::Down,
-                modifiers: KeyModifiers::NONE,
-                kind: KeyEventKind::Press,
-                state: KeyEventState::NONE,
-            };
+            let event = press(KeyCode::Down);
             let _ = state.handle_key(event);
         }
     }
@@ -407,12 +388,7 @@ impl Ingredient for TextInputVariant {
         // appends naturally; the preview moves it left when a variant
         // wants to show the cursor mid-string.
         for _ in 0..self.cursor_left {
-            let event = KeyEvent {
-                code: KeyCode::Left,
-                modifiers: KeyModifiers::NONE,
-                kind: KeyEventKind::Press,
-                state: KeyEventState::NONE,
-            };
+            let event = press(KeyCode::Left);
             let _ = state.handle_key(event);
         }
         TextInputWidget::new(&state, &theme).render(area, buf);

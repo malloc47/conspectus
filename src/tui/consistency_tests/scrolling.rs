@@ -10,13 +10,14 @@
 use ratatui::Terminal;
 use ratatui::backend::TestBackend;
 use ratatui::buffer::Buffer;
-use ratatui::crossterm::event::{Event, KeyCode, KeyEvent, KeyModifiers};
+use ratatui::crossterm::event::{Event, KeyCode};
 
 use super::layout::{builders, framed_and_bare, modal_rect};
 use super::*;
 use crate::tui::keymap::Action;
 use crate::tui::messages::{LogEntry, LogEntryExt};
 use crate::tui::widgets::value_modal::ValueModalState;
+use tuikit::testkit::keys::typed_key;
 
 /// The sizes every check runs at: a common terminal and a small one.
 const SIZES: [(u16, u16); 2] = [(80, 24), (40, 10)];
@@ -30,19 +31,11 @@ fn screen(app: &mut App, (width, height): (u16, u16)) -> Buffer {
     terminal.backend().buffer().clone()
 }
 
-fn key_event(code: KeyCode) -> KeyEvent {
-    let modifiers = match code {
-        KeyCode::Char(c) if c.is_ascii_uppercase() => KeyModifiers::SHIFT,
-        _ => KeyModifiers::NONE,
-    };
-    KeyEvent::new(code, modifiers)
-}
-
 /// What the live loop does for one key: draw the screen, then give the
 /// key to whatever owns it. Returns the next frame.
 fn press(app: &mut App, size: (u16, u16), code: KeyCode) -> Buffer {
     screen(app, size);
-    let key = key_event(code);
+    let key = typed_key(code);
     match crate::tui::runtime::action_for_event(app, Event::Key(key)) {
         Some(Action::Msg(msg)) => {
             app.update(*msg);

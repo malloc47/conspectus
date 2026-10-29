@@ -8,15 +8,16 @@
 //! (`press_in_fixture_mode`), so the checks hold whichever control an
 //! overlay is built on.
 
-use ratatui::crossterm::event::{Event, KeyCode, KeyEvent, KeyModifiers};
+use ratatui::crossterm::event::{Event, KeyCode, KeyModifiers};
 
 use super::layout::{app_with, builders, name_of};
 use super::*;
 use crate::tui::runtime::press_in_fixture_mode;
 use crate::tui::widgets::row_menu::RowMenuState;
+use tuikit::testkit::keys::chord;
 
 fn press(app: &mut App, code: KeyCode, modifiers: KeyModifiers) {
-    press_in_fixture_mode(app, Event::Key(KeyEvent::new(code, modifiers)));
+    press_in_fixture_mode(app, Event::Key(chord(modifiers, code)));
 }
 
 fn key(app: &mut App, code: KeyCode) {

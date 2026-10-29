@@ -17,6 +17,7 @@ use crate::tui::effect::{Effect, ExecSpec, StoreOp};
 use crate::tui::keymap::Action;
 use crate::tui::widgets::controls::ControlsOverlayState;
 use crate::tui::widgets::mux_launch::MuxLaunchFormState;
+use tuikit::testkit::keys::{alt, chord, press};
 
 const SIZE: (u16, u16) = (120, 40);
 
@@ -30,18 +31,6 @@ fn screen(app: &mut App) -> String {
         .draw(|frame| crate::tui::runtime::draw_screen(app, frame))
         .expect("draw");
     buffer_to_string(terminal.backend().buffer())
-}
-
-fn plain(code: KeyCode) -> KeyEvent {
-    KeyEvent::new(code, KeyModifiers::NONE)
-}
-
-fn alt(c: char) -> KeyEvent {
-    KeyEvent::new(KeyCode::Char(c), KeyModifiers::ALT)
-}
-
-fn ctrl(code: KeyCode) -> KeyEvent {
-    KeyEvent::new(code, KeyModifiers::CONTROL)
 }
 
 /// Run `msg` through the reducer and the pure executor (which posts
@@ -76,14 +65,14 @@ fn send(app: &mut App, key: KeyEvent) -> Vec<Effect> {
 
 fn type_text(app: &mut App, text: &str) {
     for c in text.chars() {
-        send(app, plain(KeyCode::Char(c)));
+        send(app, press(KeyCode::Char(c)));
     }
 }
 
 /// Empty the focused field: `Ctrl-U` at the end of the text.
 fn clear(app: &mut App) {
-    send(app, plain(KeyCode::End));
-    send(app, ctrl(KeyCode::Char('u')));
+    send(app, press(KeyCode::End));
+    send(app, chord(KeyModifiers::CONTROL, KeyCode::Char('u')));
 }
 
 fn home() -> String {
@@ -112,17 +101,17 @@ fn open_branch_prompt(app: &mut App) {
         .expect("a worktree offers New worktree");
     app.open_worktree_menu(menu);
     // New worktree is the first action.
-    send(app, plain(KeyCode::Enter));
+    send(app, press(KeyCode::Enter));
 }
 
 fn open_controls_editor(app: &mut App, row: crate::tui::widgets::controls::ControlsCursor) {
     app.open_controls_overlay();
     for _ in 0..80 {
         if app.controls_overlay().map(ControlsOverlayState::cursor) == Some(row) {
-            send(app, plain(KeyCode::Char(' ')));
+            send(app, press(KeyCode::Char(' ')));
             return;
         }
-        send(app, plain(KeyCode::Down));
+        send(app, press(KeyCode::Down));
     }
     panic!("the controls have no {row:?} row");
 }
@@ -159,7 +148,7 @@ fn open_new_mux_name(app: &mut App) {
 
 fn open_new_mux_cwd(app: &mut App) {
     app.update(Msg::OpenNewMuxForm);
-    send(app, plain(KeyCode::Down));
+    send(app, press(KeyCode::Down));
 }
 
 fn open_mux_launch_name(app: &mut App) {
@@ -171,7 +160,7 @@ fn focus_launch_field(app: &mut App, field: crate::tui::widgets::mux_launch::Mux
         if app.mux_launch_form().map(MuxLaunchFormState::focus) == Some(field) {
             return;
         }
-        send(app, plain(KeyCode::Down));
+        send(app, press(KeyCode::Down));
     }
     panic!("the launch form has no {field:?} field");
 }
@@ -186,7 +175,7 @@ fn focus_pin_row(app: &mut App, label: &str) {
         if app.pin_edit_form().and_then(|f| f.focused_label()) == Some(label) {
             return;
         }
-        send(app, plain(KeyCode::Down));
+        send(app, press(KeyCode::Down));
     }
     panic!("the pin edit form has no {label} row");
 }
@@ -205,7 +194,7 @@ fn open_viewer_find(app: &mut App) {
     app.open_viewer_modal(crate::viewer::state::ViewerState::new(
         crate::viewer::model::TranscriptDocument::default(),
     ));
-    send(app, plain(KeyCode::Char('/')));
+    send(app, press(KeyCode::Char('/')));
 }
 
 fn open_pane_viewer_find(app: &mut App) {
@@ -224,7 +213,7 @@ fn open_pane_viewer_find(app: &mut App) {
     };
     let lines = (1..=10).map(|n| format!("output {n}")).collect();
     app.open_pane_viewer(PaneViewerState::open(pane, lines, 1, ""));
-    send(app, plain(KeyCode::Char('/')));
+    send(app, press(KeyCode::Char('/')));
 }
 
 /// Puts the cursor in a text field.
@@ -264,12 +253,16 @@ fn word_motion_works_in_every_text_field() {
     // forward lands there too.
     let motions: [(&str, Option<KeyEvent>, KeyEvent); 4] = [
         ("Alt-B", None, alt('b')),
-        ("Ctrl-Left", None, ctrl(KeyCode::Left)),
-        ("Alt-F", Some(plain(KeyCode::Home)), alt('f')),
+        (
+            "Ctrl-Left",
+            None,
+            chord(KeyModifiers::CONTROL, KeyCode::Left),
+        ),
+        ("Alt-F", Some(press(KeyCode::Home)), alt('f')),
         (
             "Ctrl-Right",
-            Some(plain(KeyCode::Home)),
-            ctrl(KeyCode::Right),
+            Some(press(KeyCode::Home)),
+            chord(KeyModifiers::CONTROL, KeyCode::Right),
         ),
     ];
     let mut failures = Vec::new();
@@ -301,10 +294,10 @@ fn word_motion_works_in_every_text_field() {
 fn the_new_mux_form_runs_the_command_in_the_expanded_directory() {
     let mut app = opened(open_new_mux_name);
     type_text(&mut app, "dev");
-    send(&mut app, plain(KeyCode::Enter));
+    send(&mut app, press(KeyCode::Enter));
     clear(&mut app);
     type_text(&mut app, "~/projects");
-    let effects = send(&mut app, plain(KeyCode::Enter));
+    let effects = send(&mut app, press(KeyCode::Enter));
     let cwd = effects.iter().find_map(|effect| match effect {
         Effect::Exec(ExecSpec::MuxNew { cwd, .. }) => Some(cwd.clone()),
         _ => None,
@@ -331,7 +324,7 @@ fn the_mux_launch_form_runs_the_command_in_the_expanded_directory() {
     focus_launch_field(&mut app, MuxLaunchField::Cwd);
     clear(&mut app);
     type_text(&mut app, "~/projects");
-    let effects = send(&mut app, plain(KeyCode::Enter));
+    let effects = send(&mut app, press(KeyCode::Enter));
     assert_eq!(launch_request(&effects).cwd, format!("{}/projects", home()));
 }
 
@@ -342,13 +335,13 @@ fn the_mux_launch_form_expands_the_worktree_repo() {
     clear(&mut app);
     type_text(&mut app, "fresh-mux");
     focus_launch_field(&mut app, MuxLaunchField::WorktreeToggle);
-    send(&mut app, plain(KeyCode::Char(' ')));
+    send(&mut app, press(KeyCode::Char(' ')));
     focus_launch_field(&mut app, MuxLaunchField::WorktreeBranch);
     type_text(&mut app, "feature");
     focus_launch_field(&mut app, MuxLaunchField::WorktreeRepo);
     clear(&mut app);
     type_text(&mut app, "~/projects");
-    let effects = send(&mut app, plain(KeyCode::Enter));
+    let effects = send(&mut app, press(KeyCode::Enter));
     assert_eq!(
         launch_request(&effects).worktree_repo,
         Some(format!("{}/projects", home()))
@@ -360,7 +353,7 @@ fn the_pin_edit_form_saves_the_expanded_directory() {
     let mut app = opened(open_pin_cwd);
     clear(&mut app);
     type_text(&mut app, "~/projects");
-    let effects = send(&mut app, plain(KeyCode::Enter));
+    let effects = send(&mut app, press(KeyCode::Enter));
     let saved = effects.iter().find_map(|effect| match effect {
         Effect::WriteStore(StoreOp::SavePin { request }) => request
             .set
@@ -392,7 +385,7 @@ fn acts(effects: &[Effect]) -> bool {
 fn an_invalid_max_age_says_why_and_keeps_the_editor_open() {
     let mut app = opened(open_max_age);
     type_text(&mut app, "15");
-    send(&mut app, plain(KeyCode::Enter));
+    send(&mut app, press(KeyCode::Enter));
     assert!(
         app.controls_overlay()
             .is_some_and(|controls| controls.sub_editor().is_some()),
@@ -409,7 +402,7 @@ fn an_invalid_max_age_says_why_and_keeps_the_editor_open() {
 #[test]
 fn an_empty_branch_name_says_why_and_keeps_the_prompt_open() {
     let mut app = opened(open_branch_prompt);
-    let effects = send(&mut app, plain(KeyCode::Enter));
+    let effects = send(&mut app, press(KeyCode::Enter));
     assert!(!acts(&effects), "nothing is created: {effects:?}");
     assert!(app.worktree_menu().is_some(), "the prompt stays open");
     let frame = screen(&mut app);
@@ -422,7 +415,7 @@ fn an_empty_branch_name_says_why_and_keeps_the_prompt_open() {
 #[test]
 fn the_new_mux_form_says_which_field_is_missing() {
     let mut app = opened(open_new_mux_name);
-    send(&mut app, plain(KeyCode::Enter));
+    send(&mut app, press(KeyCode::Enter));
     let frame = screen(&mut app);
     assert!(
         frame.contains("mux: name is required"),
@@ -430,9 +423,9 @@ fn the_new_mux_form_says_which_field_is_missing() {
     );
 
     type_text(&mut app, "dev");
-    send(&mut app, plain(KeyCode::Enter));
+    send(&mut app, press(KeyCode::Enter));
     clear(&mut app);
-    let effects = send(&mut app, plain(KeyCode::Enter));
+    let effects = send(&mut app, press(KeyCode::Enter));
     assert!(!acts(&effects), "nothing is launched: {effects:?}");
     assert!(app.new_mux_form().is_some(), "the form stays open");
     let frame = screen(&mut app);
@@ -446,7 +439,7 @@ fn the_new_mux_form_says_which_field_is_missing() {
 fn an_empty_pin_rename_says_nothing_was_entered() {
     let mut app = opened(open_rename);
     clear(&mut app);
-    let effects = send(&mut app, plain(KeyCode::Enter));
+    let effects = send(&mut app, press(KeyCode::Enter));
     assert!(!acts(&effects), "nothing is renamed: {effects:?}");
     let frame = screen(&mut app);
     assert!(
@@ -489,10 +482,10 @@ fn a_multi_line_paste_types_one_line_and_submits_nothing() {
 fn a_pasted_value_commits_like_a_typed_one() {
     let mut app = opened(open_new_mux_name);
     paste(&mut app, "dev\n");
-    send(&mut app, plain(KeyCode::Enter));
+    send(&mut app, press(KeyCode::Enter));
     clear(&mut app);
     paste(&mut app, "~/projects\n");
-    let effects = send(&mut app, plain(KeyCode::Enter));
+    let effects = send(&mut app, press(KeyCode::Enter));
     assert!(
         effects.contains(&Effect::Exec(ExecSpec::MuxNew {
             name: "dev".into(),

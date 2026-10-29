@@ -4,6 +4,7 @@ use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
 use super::*;
 use crate::content_search::MuxRef;
+use tuikit::testkit::keys;
 
 fn pane() -> PaneRef {
     PaneRef {
@@ -23,12 +24,8 @@ fn scrollback(count: usize) -> Vec<String> {
     (1..=count).map(|n| format!("line {n} of output")).collect()
 }
 
-fn key(c: char) -> KeyEvent {
-    KeyEvent::new(KeyCode::Char(c), KeyModifiers::NONE)
-}
-
 fn press(state: &mut PaneViewerState, code: KeyCode) -> PaneViewerOutcome {
-    state.handle_key(KeyEvent::new(code, KeyModifiers::NONE))
+    state.handle_key(keys::press(code))
 }
 
 fn render(state: &mut PaneViewerState, width: u16, height: u16) -> String {
@@ -103,7 +100,7 @@ fn find_steps_through_matches_and_wraps() {
     render(&mut state, 60, 12);
     press(&mut state, KeyCode::Char('/'));
     for c in "needle".chars() {
-        state.handle_key(key(c));
+        state.handle_key(keys::typed(c));
     }
     press(&mut state, KeyCode::Enter);
     assert_eq!(state.matches, vec![5, 20, 40]);
@@ -150,7 +147,7 @@ fn q_leaves_at_once_even_with_a_find_active() {
 #[test]
 fn q_and_ctrl_c_leave_from_the_help_and_ctrl_c_from_the_find_prompt() {
     let ctrl_c = KeyEvent::new(KeyCode::Char('c'), KeyModifiers::CONTROL);
-    for leave in [key('q'), ctrl_c] {
+    for leave in [keys::typed('q'), ctrl_c] {
         let mut state = PaneViewerState::open(pane(), scrollback(5), 1, "");
         press(&mut state, KeyCode::Char('?'));
         assert!(state.show_help);

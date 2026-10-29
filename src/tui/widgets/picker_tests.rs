@@ -1,9 +1,10 @@
 use ratatui::buffer::Buffer;
-use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+use ratatui::crossterm::event::KeyCode;
 use ratatui::layout::Rect;
 use ratatui::widgets::Widget;
 
 use super::*;
+use tuikit::testkit::keys;
 
 fn item(label: &str, detail: &str, value: &str) -> PickerItem {
     PickerItem {
@@ -26,7 +27,7 @@ fn state() -> PickerState {
 }
 
 fn press(state: &mut PickerState, code: KeyCode) -> Outcome<Msg> {
-    state.handle_key(KeyEvent::new(code, KeyModifiers::NONE))
+    state.handle_key(keys::press(code))
 }
 
 fn type_text(state: &mut PickerState, text: &str) {

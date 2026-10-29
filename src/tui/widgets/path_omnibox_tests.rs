@@ -1,15 +1,6 @@
 use super::*;
 use ratatui::crossterm::event::KeyCode;
-use ratatui::crossterm::event::{KeyEventKind, KeyEventState, KeyModifiers};
-
-fn key(code: KeyCode) -> KeyEvent {
-    KeyEvent {
-        code,
-        modifiers: KeyModifiers::NONE,
-        kind: KeyEventKind::Press,
-        state: KeyEventState::NONE,
-    }
-}
+use tuikit::testkit::keys::press;
 
 #[test]
 fn ranks_known_candidates_before_filesystem_matches() {
@@ -38,7 +29,7 @@ fn tab_completes_highest_ranked_candidate() {
     ]);
 
     assert_eq!(
-        state.handle_key(key(KeyCode::Tab)),
+        state.handle_key(press(KeyCode::Tab)),
         PathOmniboxOutcome::Completed
     );
     assert_eq!(state.value(), "/workspace/alpha");
@@ -99,7 +90,7 @@ fn tilde_query_matches_absolute_known_candidate_and_completes_tilde_path() {
 
     assert_eq!(state.suggestions()[0].path, "~/conspectus-tilde-candidate");
     assert_eq!(
-        state.handle_key(key(KeyCode::Tab)),
+        state.handle_key(press(KeyCode::Tab)),
         PathOmniboxOutcome::Completed
     );
     assert_eq!(state.value(), "~/conspectus-tilde-candidate");

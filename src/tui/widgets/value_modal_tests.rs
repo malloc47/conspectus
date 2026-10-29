@@ -1,10 +1,7 @@
 use super::*;
 use ratatui::crossterm::event::KeyEvent;
 use ratatui::crossterm::event::{KeyCode, KeyModifiers};
-
-fn press(code: KeyCode) -> KeyEvent {
-    KeyEvent::new(code, KeyModifiers::NONE)
-}
+use tuikit::testkit::keys::press;
 
 #[test]
 fn esc_closes_the_modal() {

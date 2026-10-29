@@ -2,17 +2,8 @@ use super::*;
 use crate::model::{AgentSessionId, NodeId};
 use crate::tui::rows::{AgentSessionRow, MuxIndicator, Row, RowKind};
 use crate::tui::search::items_from_rows;
-use ratatui::crossterm::event::{KeyCode, KeyModifiers};
-use ratatui::crossterm::event::{KeyEventKind, KeyEventState};
-
-fn key(code: KeyCode) -> KeyEvent {
-    KeyEvent {
-        code,
-        modifiers: KeyModifiers::NONE,
-        kind: KeyEventKind::Press,
-        state: KeyEventState::NONE,
-    }
-}
+use ratatui::crossterm::event::KeyCode;
+use tuikit::testkit::keys::{ctrl, press};
 
 fn agent_row(key: &str, alias: Option<&str>) -> Row {
     let session_id = AgentSessionId::new("claude-code", "/state", key);
@@ -52,7 +43,7 @@ fn typing_query_filters_matches() {
     let mut state = SearchOverlayState::new();
     // Type "puf".
     for c in "puf".chars() {
-        state.handle_key(key(KeyCode::Char(c)));
+        state.handle_key(press(KeyCode::Char(c)));
         state.refresh_matches(&items);
     }
     assert_eq!(state.matches().len(), 1);
@@ -65,11 +56,11 @@ fn enter_confirms_with_cursor_match() {
     let items = items_from_rows(&rows);
     let mut state = SearchOverlayState::new();
     for c in "puf".chars() {
-        state.handle_key(key(KeyCode::Char(c)));
+        state.handle_key(press(KeyCode::Char(c)));
         state.refresh_matches(&items);
     }
     // Cursor at 0; Enter confirms the first match.
-    let outcome = state.handle_key(key(KeyCode::Enter));
+    let outcome = state.handle_key(press(KeyCode::Enter));
     assert_eq!(
         outcome,
         SearchOutcome::Confirm(Box::new(rows[0].id.clone()))
@@ -82,13 +73,13 @@ fn arrow_down_moves_cursor_within_matches() {
     let items = items_from_rows(&rows);
     let mut state = SearchOverlayState::new();
     for c in "puf".chars() {
-        state.handle_key(key(KeyCode::Char(c)));
+        state.handle_key(press(KeyCode::Char(c)));
         state.refresh_matches(&items);
     }
-    state.handle_key(key(KeyCode::Down));
+    state.handle_key(press(KeyCode::Down));
     assert_eq!(state.cursor(), 1);
     // Wraps.
-    state.handle_key(key(KeyCode::Down));
+    state.handle_key(press(KeyCode::Down));
     assert_eq!(state.cursor(), 0);
 }
 
@@ -98,18 +89,18 @@ fn enter_on_empty_match_list_cancels() {
     let items = items_from_rows(&rows);
     let mut state = SearchOverlayState::new();
     for c in "no-such-match".chars() {
-        state.handle_key(key(KeyCode::Char(c)));
+        state.handle_key(press(KeyCode::Char(c)));
         state.refresh_matches(&items);
     }
     assert!(state.matches().is_empty());
-    let outcome = state.handle_key(key(KeyCode::Enter));
+    let outcome = state.handle_key(press(KeyCode::Enter));
     assert_eq!(outcome, SearchOutcome::Cancel);
 }
 
 #[test]
 fn esc_cancels() {
     let mut state = SearchOverlayState::new();
-    let outcome = state.handle_key(key(KeyCode::Esc));
+    let outcome = state.handle_key(press(KeyCode::Esc));
     assert_eq!(outcome, SearchOutcome::Cancel);
 }
 
@@ -119,23 +110,13 @@ fn ctrl_n_p_navigate_results() {
     let items = items_from_rows(&rows);
     let mut state = SearchOverlayState::new();
     for c in "puf".chars() {
-        state.handle_key(key(KeyCode::Char(c)));
+        state.handle_key(press(KeyCode::Char(c)));
         state.refresh_matches(&items);
     }
-    let ctrl_n = KeyEvent {
-        code: KeyCode::Char('n'),
-        modifiers: KeyModifiers::CONTROL,
-        kind: KeyEventKind::Press,
-        state: KeyEventState::NONE,
-    };
+    let ctrl_n = ctrl('n');
     state.handle_key(ctrl_n);
     assert_eq!(state.cursor(), 1);
-    let ctrl_p = KeyEvent {
-        code: KeyCode::Char('p'),
-        modifiers: KeyModifiers::CONTROL,
-        kind: KeyEventKind::Press,
-        state: KeyEventState::NONE,
-    };
+    let ctrl_p = ctrl('p');
     state.handle_key(ctrl_p);
     assert_eq!(state.cursor(), 0);
 }
@@ -153,7 +134,7 @@ fn match_line_includes_snippet_with_matched_bytes_highlighted() {
     let items = items_from_rows(std::slice::from_ref(&row_with_preview));
     let mut state = SearchOverlayState::new();
     for c in "puffin".chars() {
-        state.handle_key(key(KeyCode::Char(c)));
+        state.handle_key(press(KeyCode::Char(c)));
         state.refresh_matches(&items);
     }
     let m = &state.matches()[0];
@@ -211,7 +192,7 @@ fn match_line_skips_snippet_when_label_equals_haystack() {
     let items = items_from_rows(std::slice::from_ref(&row));
     let mut state = SearchOverlayState::new();
     for c in "puffin".chars() {
-        state.handle_key(key(KeyCode::Char(c)));
+        state.handle_key(press(KeyCode::Char(c)));
         state.refresh_matches(&items);
     }
     let m = &state.matches()[0];
@@ -286,7 +267,7 @@ fn match_line_includes_kind_glyph_before_label() {
     let items = items_from_rows(std::slice::from_ref(&row));
     let mut state = SearchOverlayState::new();
     for c in "puf".chars() {
-        state.handle_key(key(KeyCode::Char(c)));
+        state.handle_key(press(KeyCode::Char(c)));
         state.refresh_matches(&items);
     }
     let m = &state.matches()[0];
@@ -314,15 +295,15 @@ fn refresh_matches_resets_cursor_when_truncated() {
     let items = items_from_rows(&rows);
     let mut state = SearchOverlayState::new();
     for c in "puf".chars() {
-        state.handle_key(key(KeyCode::Char(c)));
+        state.handle_key(press(KeyCode::Char(c)));
         state.refresh_matches(&items);
     }
-    state.handle_key(key(KeyCode::Down));
+    state.handle_key(press(KeyCode::Down));
     assert_eq!(state.cursor(), 1);
     // Narrow the query so only one match survives — cursor
     // shouldn't dangle past the new end.
     for c in "fin".chars() {
-        state.handle_key(key(KeyCode::Char(c)));
+        state.handle_key(press(KeyCode::Char(c)));
         state.refresh_matches(&items);
     }
     assert_eq!(state.matches().len(), 1);

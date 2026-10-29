@@ -1,8 +1,8 @@
 use super::*;
-use ratatui::crossterm::event::{KeyCode, KeyModifiers};
-use ratatui::crossterm::event::{KeyEventKind, KeyEventState};
+use ratatui::crossterm::event::KeyCode;
 use ratatui::text::Line;
 use tuikit::help::HelpRow;
+use tuikit::testkit::keys::{ctrl, press};
 
 /// Where a description starts: the indent and the key column.
 const KEY_COLUMN_WIDTH: usize = 16;
@@ -20,15 +20,6 @@ fn body_lines_for_width(theme: &Theme, width: Option<usize>) -> Vec<Line<'static
 
 fn body_lines(theme: &Theme) -> Vec<Line<'static>> {
     body_lines_for_width(theme, None)
-}
-
-fn key(code: KeyCode) -> KeyEvent {
-    KeyEvent {
-        code,
-        modifiers: KeyModifiers::NONE,
-        kind: KeyEventKind::Press,
-        state: KeyEventState::NONE,
-    }
 }
 
 /// Every `KEYBINDINGS` entry's key label
@@ -167,18 +158,18 @@ fn help_body_includes_mux_state_legend() {
 #[test]
 fn esc_closes_help_overlay() {
     let mut state = HelpOverlayState::new();
-    assert_eq!(state.handle_key(key(KeyCode::Esc)), HelpOutcome::Close);
+    assert_eq!(state.handle_key(press(KeyCode::Esc)), HelpOutcome::Close);
 }
 
 #[test]
 fn q_and_question_mark_close_help_overlay() {
     let mut state = HelpOverlayState::new();
     assert_eq!(
-        state.handle_key(key(KeyCode::Char('q'))),
+        state.handle_key(press(KeyCode::Char('q'))),
         HelpOutcome::Close
     );
     assert_eq!(
-        state.handle_key(key(KeyCode::Char('?'))),
+        state.handle_key(press(KeyCode::Char('?'))),
         HelpOutcome::Close
     );
 }
@@ -186,12 +177,7 @@ fn q_and_question_mark_close_help_overlay() {
 #[test]
 fn ctrl_c_closes_help_overlay() {
     let mut state = HelpOverlayState::new();
-    let event = KeyEvent {
-        code: KeyCode::Char('c'),
-        modifiers: KeyModifiers::CONTROL,
-        kind: KeyEventKind::Press,
-        state: KeyEventState::NONE,
-    };
+    let event = ctrl('c');
     assert_eq!(state.handle_key(event), HelpOutcome::Close);
 }
 
@@ -199,10 +185,13 @@ fn ctrl_c_closes_help_overlay() {
 fn other_keys_are_swallowed_not_propagated() {
     let mut state = HelpOverlayState::new();
     assert_eq!(
-        state.handle_key(key(KeyCode::Char('j'))),
+        state.handle_key(press(KeyCode::Char('j'))),
         HelpOutcome::Continue
     );
-    assert_eq!(state.handle_key(key(KeyCode::Enter)), HelpOutcome::Continue);
+    assert_eq!(
+        state.handle_key(press(KeyCode::Enter)),
+        HelpOutcome::Continue
+    );
 }
 
 #[test]
@@ -324,7 +313,7 @@ fn narrow_width_wraps_descriptions_under_a_hanging_indent() {
 fn jumping_to_the_end_shows_the_last_lines_not_blank_space() {
     let theme = Theme::default();
     let mut state = HelpOverlayState::new();
-    state.handle_key(key(KeyCode::Char('G')));
+    state.handle_key(press(KeyCode::Char('G')));
     let area = Rect::new(0, 0, 80, 24);
     let mut buf = Buffer::empty(area);
     HelpOverlayWidget::new(&state, &theme).render(area, &mut buf);
@@ -416,7 +405,7 @@ fn the_rendered_help_modal_shows_every_word_as_you_scroll() {
                     .collect();
                 seen.extend(row.split_whitespace().map(str::to_string));
             }
-            state.handle_key(key(KeyCode::PageDown));
+            state.handle_key(press(KeyCode::PageDown));
         }
         let missing: Vec<&String> = source.iter().filter(|word| !seen.contains(*word)).collect();
         assert!(

@@ -356,10 +356,7 @@ fn cursor(app: &App) -> usize {
 }
 
 fn ctrl(app: &mut App, c: char) {
-    crate::tui::runtime::modal_key_pure(
-        app,
-        KeyEvent::new(KeyCode::Char(c), KeyModifiers::CONTROL),
-    );
+    crate::tui::runtime::modal_key_pure(app, tuikit::testkit::keys::ctrl(c));
 }
 
 /// Step the cursor down 8 and back up 8, with every key the table binds

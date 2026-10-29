@@ -137,16 +137,13 @@ impl Widget for MuxMenuWidget<'_> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use ratatui::crossterm::event::{KeyCode, KeyModifiers};
-
-    fn key(code: KeyCode) -> KeyEvent {
-        KeyEvent::new(code, KeyModifiers::NONE)
-    }
+    use ratatui::crossterm::event::KeyCode;
+    use tuikit::testkit::keys::press;
 
     #[test]
     fn enter_on_first_entry_opens_new_mux_form() {
         let mut state = MuxMenuState::new();
-        match state.handle_key(key(KeyCode::Enter)) {
+        match state.handle_key(press(KeyCode::Enter)) {
             Outcome::Commit(msg) => match msg {
                 Msg::OpenNewMuxForm => {}
                 other => panic!("expected OpenNewMuxForm, got {other:?}"),
@@ -158,8 +155,8 @@ mod tests {
     #[test]
     fn enter_on_second_entry_opens_launch_form() {
         let mut state = MuxMenuState::new();
-        state.handle_key(key(KeyCode::Down));
-        match state.handle_key(key(KeyCode::Enter)) {
+        state.handle_key(press(KeyCode::Down));
+        match state.handle_key(press(KeyCode::Enter)) {
             Outcome::Commit(msg) => match msg {
                 Msg::OpenMuxLaunchForm => {}
                 other => panic!("expected OpenMuxLaunchForm, got {other:?}"),
@@ -171,9 +168,9 @@ mod tests {
     #[test]
     fn the_cursor_wraps_at_both_ends() {
         let mut state = MuxMenuState::new();
-        state.handle_key(key(KeyCode::Up));
+        state.handle_key(press(KeyCode::Up));
         assert_eq!(state.cursor(), MENU_ENTRIES.len() - 1, "up from the first");
-        state.handle_key(key(KeyCode::Down));
+        state.handle_key(press(KeyCode::Down));
         assert_eq!(state.cursor(), 0, "down from the last");
     }
 
@@ -181,7 +178,7 @@ mod tests {
     fn the_cursor_entry_shows_the_marker_and_the_highlight() {
         let theme = Theme::default();
         let mut state = MuxMenuState::new();
-        state.handle_key(key(KeyCode::Down));
+        state.handle_key(press(KeyCode::Down));
         let area = Rect::new(0, 0, 80, 20);
         let mut buf = Buffer::empty(area);
         MuxMenuWidget::new(&state, &theme).render(area, &mut buf);

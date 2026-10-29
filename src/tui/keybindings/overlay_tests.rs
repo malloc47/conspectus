@@ -1,4 +1,4 @@
-use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+use ratatui::crossterm::event::{KeyCode, KeyModifiers};
 use tuikit::keys::{
     CHECKLIST_KEYS, CONFIRM_KEYS, ChecklistKey, ConfirmKey, FORM_KEYS, FORM_OPTION_KEYS,
     HINT_SEPARATOR, MENU_KEYS, MenuKey, PAGER_KEYS, TEXT_INPUT_KEYS, ctrl_c_first, footer,
@@ -6,10 +6,7 @@ use tuikit::keys::{
 };
 
 use super::*;
-
-fn press(modifiers: KeyModifiers, code: KeyCode) -> KeyEvent {
-    KeyEvent::new(code, modifiers)
-}
+use tuikit::testkit::keys::chord;
 
 /// What a table gets wrong, by rule.
 struct Problems {
@@ -253,7 +250,7 @@ fn a_character_never_fires_on_its_control_or_alt_chord() {
     let alt = KeyModifiers::ALT;
     // Pagers go to their ends on plain `g` and `G` only.
     for table in [HELP_KEYS, VALUE_MODAL_KEYS] {
-        let at = |modifiers, c| resolve(table, press(modifiers, KeyCode::Char(c)));
+        let at = |modifiers, c| resolve(table, chord(modifiers, KeyCode::Char(c)));
         assert_eq!(at(KeyModifiers::NONE, 'g'), Some(PagerKey::Top));
         assert_eq!(at(KeyModifiers::SHIFT, 'G'), Some(PagerKey::Bottom));
         assert_eq!(at(ctrl, 'g'), None);
@@ -263,40 +260,40 @@ fn a_character_never_fires_on_its_control_or_alt_chord() {
         assert_eq!(at(ctrl, ' '), None);
     }
     assert_eq!(
-        resolve(VALUE_MODAL_KEYS, press(ctrl, KeyCode::Char('y'))),
+        resolve(VALUE_MODAL_KEYS, chord(ctrl, KeyCode::Char('y'))),
         None
     );
-    assert_eq!(resolve(MESSAGES_KEYS, press(alt, KeyCode::Char('y'))), None);
+    assert_eq!(resolve(MESSAGES_KEYS, chord(alt, KeyCode::Char('y'))), None);
     assert_eq!(
-        resolve(MESSAGES_KEYS, press(ctrl, KeyCode::Char('g'))),
+        resolve(MESSAGES_KEYS, chord(ctrl, KeyCode::Char('g'))),
         None
     );
     // A destructive choice takes its plain letter only.
     assert_eq!(
-        resolve(CLOSE_DOWN_KEYS, press(ctrl, KeyCode::Char('d'))),
+        resolve(CLOSE_DOWN_KEYS, chord(ctrl, KeyCode::Char('d'))),
         None
     );
     assert_eq!(
         resolve(
             CLOSE_DOWN_KEYS,
-            press(KeyModifiers::NONE, KeyCode::Char('d'))
+            chord(KeyModifiers::NONE, KeyCode::Char('d'))
         ),
         Some(ChoiceKey::Choose(CloseDown::Discard))
     );
-    assert_eq!(resolve(CONFIRM_KEYS, press(ctrl, KeyCode::Char('y'))), None);
+    assert_eq!(resolve(CONFIRM_KEYS, chord(ctrl, KeyCode::Char('y'))), None);
     assert_eq!(
-        resolve(CONFIRM_KEYS, press(KeyModifiers::NONE, KeyCode::Char('y'))),
+        resolve(CONFIRM_KEYS, chord(KeyModifiers::NONE, KeyCode::Char('y'))),
         Some(ConfirmKey::Yes)
     );
     // Menus and settings move with plain `j` and `k`, not their chords.
-    assert_eq!(resolve(MENU_KEYS, press(ctrl, KeyCode::Char('j'))), None);
-    assert_eq!(resolve(CONTROLS_KEYS, press(alt, KeyCode::Char('k'))), None);
+    assert_eq!(resolve(MENU_KEYS, chord(ctrl, KeyCode::Char('j'))), None);
+    assert_eq!(resolve(CONTROLS_KEYS, chord(alt, KeyCode::Char('k'))), None);
 }
 
 #[test]
 fn every_list_moves_with_ctrl_n_and_ctrl_p() {
-    let ctrl_n = press(KeyModifiers::CONTROL, KeyCode::Char('n'));
-    let ctrl_p = press(KeyModifiers::CONTROL, KeyCode::Char('p'));
+    let ctrl_n = chord(KeyModifiers::CONTROL, KeyCode::Char('n'));
+    let ctrl_p = chord(KeyModifiers::CONTROL, KeyCode::Char('p'));
     assert_eq!(resolve(MENU_KEYS, ctrl_n), Some(MenuKey::Down));
     assert_eq!(resolve(MENU_KEYS, ctrl_p), Some(MenuKey::Up));
     assert_eq!(resolve(CONTROLS_KEYS, ctrl_n), Some(ControlsKey::Down));
@@ -368,7 +365,7 @@ fn viewer_keys_resolve_as_the_old_match_did() {
     ];
     for (modifiers, code, expected) in cases {
         assert_eq!(
-            resolve(VIEWER_KEYS, press(modifiers, code)),
+            resolve(VIEWER_KEYS, chord(modifiers, code)),
             expected,
             "{modifiers:?} {code:?}"
         );
@@ -401,7 +398,7 @@ fn find_prompt_keys_edit_confirm_and_leave() {
     ];
     for (modifiers, code, expected) in cases {
         assert_eq!(
-            resolve(VIEWER_FIND_KEYS, press(modifiers, code)),
+            resolve(VIEWER_FIND_KEYS, chord(modifiers, code)),
             expected,
             "{modifiers:?} {code:?}"
         );

@@ -1,27 +1,18 @@
 use super::*;
 use ratatui::crossterm::event::{KeyCode, KeyModifiers};
-use ratatui::crossterm::event::{KeyEventKind, KeyEventState};
-
-fn key(code: KeyCode) -> KeyEvent {
-    KeyEvent {
-        code,
-        modifiers: KeyModifiers::NONE,
-        kind: KeyEventKind::Press,
-        state: KeyEventState::NONE,
-    }
-}
+use tuikit::testkit::keys::{ctrl, press};
 
 #[test]
 fn enter_confirms_with_current_value() {
     let mut state = TextInputState::new(" rename ", "hello");
-    let outcome = state.handle_key(key(KeyCode::Enter));
+    let outcome = state.handle_key(press(KeyCode::Enter));
     assert_eq!(outcome, InputOutcome::Confirm("hello".to_string()));
 }
 
 #[test]
 fn esc_cancels_without_committing() {
     let mut state = TextInputState::new(" rename ", "hello");
-    let outcome = state.handle_key(key(KeyCode::Esc));
+    let outcome = state.handle_key(press(KeyCode::Esc));
     assert_eq!(outcome, InputOutcome::Cancel);
     // Cancel must not mutate the buffer.
     assert_eq!(state.value(), "hello");
@@ -30,7 +21,7 @@ fn esc_cancels_without_committing() {
 #[test]
 fn tab_is_swallowed_while_overlay_is_open() {
     let mut state = TextInputState::new(" rename ", "hello");
-    let outcome = state.handle_key(key(KeyCode::Tab));
+    let outcome = state.handle_key(press(KeyCode::Tab));
     assert_eq!(outcome, InputOutcome::Continue);
     assert_eq!(state.value(), "hello");
 }
@@ -38,21 +29,16 @@ fn tab_is_swallowed_while_overlay_is_open() {
 #[test]
 fn ctrl_c_aborts_and_esc_cancels() {
     let mut state = TextInputState::new(" rename ", "hello");
-    let event = KeyEvent {
-        code: KeyCode::Char('c'),
-        modifiers: KeyModifiers::CONTROL,
-        kind: KeyEventKind::Press,
-        state: KeyEventState::NONE,
-    };
+    let event = ctrl('c');
     let outcome = state.handle_key(event);
     assert_eq!(outcome, InputOutcome::Abort, "Ctrl-C dismisses the overlay");
-    assert_eq!(state.handle_key(key(KeyCode::Esc)), InputOutcome::Cancel);
+    assert_eq!(state.handle_key(press(KeyCode::Esc)), InputOutcome::Cancel);
 }
 
 #[test]
 fn typing_appends_to_buffer() {
     let mut state = TextInputState::new(" rename ", "abc");
-    let outcome = state.handle_key(key(KeyCode::Char('d')));
+    let outcome = state.handle_key(press(KeyCode::Char('d')));
     assert_eq!(outcome, InputOutcome::Continue);
     assert_eq!(state.value(), "abcd");
 }
@@ -60,7 +46,7 @@ fn typing_appends_to_buffer() {
 #[test]
 fn backspace_deletes_char_before_cursor() {
     let mut state = TextInputState::new(" rename ", "abc");
-    state.handle_key(key(KeyCode::Backspace));
+    state.handle_key(press(KeyCode::Backspace));
     assert_eq!(state.value(), "ab");
 }
 
@@ -94,7 +80,7 @@ fn enter_returns_trimmed_or_raw_value_per_caller_choice() {
     // treat whitespace. Round-trip an all-whitespace buffer to
     // prove the widget keeps it intact.
     let mut state = TextInputState::new(" rename ", "   ");
-    let outcome = state.handle_key(key(KeyCode::Enter));
+    let outcome = state.handle_key(press(KeyCode::Enter));
     assert_eq!(outcome, InputOutcome::Confirm("   ".to_string()));
 }
 

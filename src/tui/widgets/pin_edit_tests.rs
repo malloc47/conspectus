@@ -1,14 +1,7 @@
-use ratatui::crossterm::event::{KeyCode, KeyModifiers};
+use ratatui::crossterm::event::KeyCode;
 
 use super::*;
-
-fn key(code: KeyCode) -> KeyEvent {
-    KeyEvent::new(code, KeyModifiers::NONE)
-}
-
-fn ctrl(c: char) -> KeyEvent {
-    KeyEvent::new(KeyCode::Char(c), KeyModifiers::CONTROL)
-}
+use tuikit::testkit::keys::{ctrl, press};
 
 fn field(name: &str, value: FieldValue, source: FieldSource) -> RecipeField {
     RecipeField {
@@ -57,13 +50,13 @@ fn mux_init() -> PinEditInit {
 
 fn type_str(form: &mut PinEditFormState, s: &str) {
     for c in s.chars() {
-        form.handle_key(key(KeyCode::Char(c)));
+        form.handle_key(press(KeyCode::Char(c)));
     }
 }
 
 fn clear_text(form: &mut PinEditFormState, chars: usize) {
     for _ in 0..chars {
-        form.handle_key(key(KeyCode::Backspace));
+        form.handle_key(press(KeyCode::Backspace));
     }
 }
 
@@ -72,7 +65,7 @@ fn focus_row(form: &mut PinEditFormState, label: &str) {
         if form.focused_label() == Some(label) {
             return;
         }
-        form.handle_key(key(KeyCode::Down));
+        form.handle_key(press(KeyCode::Down));
     }
     panic!("no row `{label}`: {:?}", form.row_labels());
 }
@@ -128,10 +121,10 @@ fn each_row_says_where_its_value_comes_from() {
 fn up_and_down_move_between_rows_and_wrap() {
     let mut form = PinEditFormState::new(mux_init());
     assert_eq!(form.focused_label(), Some("pin name"));
-    form.handle_key(key(KeyCode::Down));
+    form.handle_key(press(KeyCode::Down));
     assert_eq!(form.focused_label(), Some("label"));
-    form.handle_key(key(KeyCode::Up));
-    form.handle_key(key(KeyCode::Up));
+    form.handle_key(press(KeyCode::Up));
+    form.handle_key(press(KeyCode::Up));
     assert_eq!(
         form.focused_label(),
         Some("worktree_branch"),
@@ -142,7 +135,7 @@ fn up_and_down_move_between_rows_and_wrap() {
 #[test]
 fn saving_without_a_change_just_closes() {
     let mut form = PinEditFormState::new(mux_init());
-    assert_eq!(form.handle_key(key(KeyCode::Enter)), Outcome::Close);
+    assert_eq!(form.handle_key(press(KeyCode::Enter)), Outcome::Close);
 }
 
 #[test]
@@ -150,7 +143,7 @@ fn editing_a_field_sets_an_override_and_leaves_the_rest_alone() {
     let mut form = PinEditFormState::new(mux_init());
     focus_row(&mut form, "socket");
     type_str(&mut form, "work-sock");
-    let Outcome::Commit(msg) = form.handle_key(key(KeyCode::Enter)) else {
+    let Outcome::Commit(msg) = form.handle_key(press(KeyCode::Enter)) else {
         panic!("expected a commit");
     };
     let Msg::CommitPinEdit(request) = msg else {
@@ -231,7 +224,7 @@ fn the_name_row_renames_and_refuses_taken_or_blank_names() {
     let err = form.request().unwrap_err();
     assert!(err.contains("already exists"), "{err}");
     assert!(matches!(
-        form.handle_key(key(KeyCode::Enter)),
+        form.handle_key(press(KeyCode::Enter)),
         Outcome::Consumed
     ));
     assert!(form.error().is_some());
@@ -244,7 +237,7 @@ fn the_name_row_renames_and_refuses_taken_or_blank_names() {
 fn the_skip_permissions_option_toggles_the_flag_in_the_argv_row() {
     let mut form = PinEditFormState::new(mux_init());
     focus_row(&mut form, "harness");
-    form.handle_key(key(KeyCode::Down));
+    form.handle_key(press(KeyCode::Down));
     assert_eq!(
         form.focused_label(),
         None,
@@ -256,7 +249,7 @@ fn the_skip_permissions_option_toggles_the_flag_in_the_argv_row() {
         render(&form)
     );
 
-    form.handle_key(key(KeyCode::Char(' ')));
+    form.handle_key(press(KeyCode::Char(' ')));
     assert_eq!(
         form.field_text("argv"),
         Some("claude --dangerously-skip-permissions")
@@ -270,7 +263,7 @@ fn the_skip_permissions_option_toggles_the_flag_in_the_argv_row() {
         )]
     );
 
-    form.handle_key(key(KeyCode::Char(' ')));
+    form.handle_key(press(KeyCode::Char(' ')));
     assert_eq!(form.field_text("argv"), Some("claude"));
     assert!(
         form.request().unwrap().set.is_empty(),
@@ -291,7 +284,7 @@ fn a_harness_without_options_has_no_options_row() {
 fn cycling_the_harness_swaps_a_default_argv_and_keeps_a_custom_one() {
     let mut form = PinEditFormState::new(mux_init());
     focus_row(&mut form, "harness");
-    form.handle_key(key(KeyCode::Right));
+    form.handle_key(press(KeyCode::Right));
     assert_eq!(form.field_text("harness"), Some("codex"));
     assert_eq!(
         form.field_text("argv"),
@@ -302,7 +295,7 @@ fn cycling_the_harness_swaps_a_default_argv_and_keeps_a_custom_one() {
     focus_row(&mut form, "argv");
     type_str(&mut form, " --model gpt");
     focus_row(&mut form, "harness");
-    form.handle_key(key(KeyCode::Right));
+    form.handle_key(press(KeyCode::Right));
     assert_eq!(form.field_text("harness"), Some("opencode"));
     assert_eq!(
         form.field_text("argv"),
@@ -320,7 +313,7 @@ fn tab_completes_a_directory_in_a_path_row_and_moves_on_elsewhere() {
     init.effective[2] = field("cwd", text(&typed), FieldSource::Override);
     let mut form = PinEditFormState::new(init);
     focus_row(&mut form, "cwd");
-    form.handle_key(key(KeyCode::Tab));
+    form.handle_key(press(KeyCode::Tab));
     assert_eq!(
         form.focused_label(),
         Some("cwd"),
@@ -332,7 +325,7 @@ fn tab_completes_a_directory_in_a_path_row_and_moves_on_elsewhere() {
     );
 
     focus_row(&mut form, "socket");
-    form.handle_key(key(KeyCode::Tab));
+    form.handle_key(press(KeyCode::Tab));
     assert_eq!(
         form.focused_label(),
         Some("cwd"),
@@ -368,7 +361,7 @@ fn only_a_mux_pin_gets_the_mux_fields() {
 fn escape_closes_without_saving() {
     let mut form = PinEditFormState::new(mux_init());
     type_str(&mut form, "x");
-    assert_eq!(form.handle_key(key(KeyCode::Esc)), Outcome::Close);
+    assert_eq!(form.handle_key(press(KeyCode::Esc)), Outcome::Close);
 }
 
 fn render_at(form: &PinEditFormState, width: u16, height: u16) -> Vec<String> {
@@ -411,7 +404,7 @@ fn the_source_word_sits_in_the_same_column_on_every_row_whatever_is_selected() {
             .map(|label| row_end(&lines, label).0)
             .collect();
         seen.push(ends);
-        form.handle_key(key(KeyCode::Down));
+        form.handle_key(press(KeyCode::Down));
     }
     assert!(
         seen.windows(2).all(|pair| pair[0] == pair[1]),

@@ -4,10 +4,7 @@ use ratatui::layout::Rect;
 use ratatui::widgets::Widget;
 
 use super::*;
-
-fn key(code: KeyCode) -> KeyEvent {
-    KeyEvent::new(code, KeyModifiers::NONE)
-}
+use tuikit::testkit::keys::press;
 
 fn menu() -> RowMenuState {
     RowMenuState::new(
@@ -27,17 +24,17 @@ fn menu() -> RowMenuState {
 #[test]
 fn picking_a_plain_entry_commits_its_message() {
     let mut state = menu();
-    let outcome = state.handle_key(key(KeyCode::Enter));
+    let outcome = state.handle_key(press(KeyCode::Enter));
     assert_eq!(outcome, Outcome::Commit(Msg::SetStatus(None)));
 }
 
 #[test]
 fn a_confirming_entry_needs_a_second_enter() {
     let mut state = menu();
-    state.handle_key(key(KeyCode::Down));
-    assert_eq!(state.handle_key(key(KeyCode::Enter)), Outcome::Consumed);
+    state.handle_key(press(KeyCode::Down));
+    assert_eq!(state.handle_key(press(KeyCode::Enter)), Outcome::Consumed);
     assert_eq!(state.armed(), Some(1));
-    let outcome = state.handle_key(key(KeyCode::Enter));
+    let outcome = state.handle_key(press(KeyCode::Enter));
     assert_eq!(
         outcome,
         Outcome::Commit(Msg::SetStatus(Some(tuikit::feedback::Feedback::info("x"))))
@@ -47,30 +44,30 @@ fn a_confirming_entry_needs_a_second_enter() {
 #[test]
 fn moving_disarms_a_pending_confirmation() {
     let mut state = menu();
-    state.handle_key(key(KeyCode::Down));
-    state.handle_key(key(KeyCode::Enter));
-    state.handle_key(key(KeyCode::Up));
-    state.handle_key(key(KeyCode::Down));
+    state.handle_key(press(KeyCode::Down));
+    state.handle_key(press(KeyCode::Enter));
+    state.handle_key(press(KeyCode::Up));
+    state.handle_key(press(KeyCode::Down));
     assert_eq!(state.armed(), None);
-    assert_eq!(state.handle_key(key(KeyCode::Enter)), Outcome::Consumed);
+    assert_eq!(state.handle_key(press(KeyCode::Enter)), Outcome::Consumed);
 }
 
 #[test]
 fn escape_closes() {
     let mut state = menu();
-    assert_eq!(state.handle_key(key(KeyCode::Esc)), Outcome::Close);
+    assert_eq!(state.handle_key(press(KeyCode::Esc)), Outcome::Close);
 }
 
 #[test]
 fn q_and_ctrl_c_dismiss_even_an_armed_entry() {
     // Nothing is typed in a menu, so q dismisses it like Ctrl-C.
     for dismiss in [
-        key(KeyCode::Char('q')),
+        press(KeyCode::Char('q')),
         KeyEvent::new(KeyCode::Char('c'), KeyModifiers::CONTROL),
     ] {
         let mut state = menu();
-        state.handle_key(key(KeyCode::Down));
-        state.handle_key(key(KeyCode::Enter));
+        state.handle_key(press(KeyCode::Down));
+        state.handle_key(press(KeyCode::Enter));
         assert_eq!(state.armed(), Some(1));
         assert_eq!(state.handle_key(dismiss), Outcome::Close);
     }
@@ -79,9 +76,9 @@ fn q_and_ctrl_c_dismiss_even_an_armed_entry() {
 #[test]
 fn the_cursor_wraps_at_both_ends() {
     let mut state = menu();
-    state.handle_key(key(KeyCode::Up));
+    state.handle_key(press(KeyCode::Up));
     assert_eq!(state.cursor(), 1, "up from the first entry is the last");
-    state.handle_key(key(KeyCode::Down));
+    state.handle_key(press(KeyCode::Down));
     assert_eq!(state.cursor(), 0, "down from the last entry is the first");
 }
 
@@ -106,7 +103,7 @@ fn marked(buf: &Buffer) -> Vec<(u16, u16)> {
 fn the_cursor_entry_shows_the_marker_and_the_highlight() {
     let theme = Theme::default();
     let mut state = menu();
-    state.handle_key(key(KeyCode::Down));
+    state.handle_key(press(KeyCode::Down));
     let buf = drawn(&state, &theme);
     let marks = marked(&buf);
     assert_eq!(marks.len(), 1, "one marked row");
@@ -128,8 +125,8 @@ fn the_cursor_entry_shows_the_marker_and_the_highlight() {
 fn an_armed_entry_keeps_the_highlight_in_the_error_color() {
     let theme = Theme::default();
     let mut state = menu();
-    state.handle_key(key(KeyCode::Down));
-    state.handle_key(key(KeyCode::Enter));
+    state.handle_key(press(KeyCode::Down));
+    state.handle_key(press(KeyCode::Enter));
     let buf = drawn(&state, &theme);
     let (x, y) = marked(&buf)[0];
     let cell = &buf[(x + 2, y)];

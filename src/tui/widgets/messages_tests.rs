@@ -1,11 +1,8 @@
 use super::*;
-use ratatui::crossterm::event::{KeyCode, KeyModifiers};
+use ratatui::crossterm::event::KeyCode;
 use tuikit::feedback::Severity;
 use tuikit::overlay::Outcome;
-
-fn press(code: KeyCode) -> KeyEvent {
-    KeyEvent::new(code, KeyModifiers::NONE)
-}
+use tuikit::testkit::keys::press;
 
 fn log_with(n: usize) -> MessageLog {
     let mut log = MessageLog::default();

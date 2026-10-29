@@ -1,11 +1,8 @@
-use ratatui::crossterm::event::{KeyCode, KeyModifiers};
+use ratatui::crossterm::event::KeyCode;
 
 use super::*;
 use crate::model::HistoryKind;
-
-fn key(code: KeyCode) -> KeyEvent {
-    KeyEvent::new(code, KeyModifiers::NONE)
-}
+use tuikit::testkit::keys::press;
 
 fn candidate(id: &str, label: &str) -> Candidate {
     Candidate {
@@ -39,10 +36,10 @@ fn every_candidate_starts_selected_with_its_age() {
 fn confirming_reaps_exactly_the_selected_records() {
     let mut state = state();
     // Deselect the middle one.
-    state.handle_key(key(KeyCode::Down));
-    state.handle_key(key(KeyCode::Char(' ')));
+    state.handle_key(press(KeyCode::Down));
+    state.handle_key(press(KeyCode::Char(' ')));
     assert_eq!(state.selected(), [0, 2]);
-    let outcome = state.handle_key(key(KeyCode::Enter));
+    let outcome = state.handle_key(press(KeyCode::Enter));
     assert_eq!(
         outcome,
         Outcome::Commit(Msg::ReapRecords(vec!["h_a".into(), "h_c".into()]))
@@ -52,31 +49,34 @@ fn confirming_reaps_exactly_the_selected_records() {
 #[test]
 fn deselecting_everything_closes_without_reaping() {
     let mut state = CleanUpState::new(vec![candidate("h_a", "alpha")], 100);
-    state.handle_key(key(KeyCode::Char(' ')));
+    state.handle_key(press(KeyCode::Char(' ')));
     assert!(state.selected().is_empty());
-    assert_eq!(state.handle_key(key(KeyCode::Enter)), Outcome::Close);
+    assert_eq!(state.handle_key(press(KeyCode::Enter)), Outcome::Close);
 }
 
 #[test]
 fn escape_cancels() {
     let mut state = state();
-    assert_eq!(state.handle_key(key(KeyCode::Esc)), Outcome::Close);
+    assert_eq!(state.handle_key(press(KeyCode::Esc)), Outcome::Close);
 }
 
 #[test]
 fn q_dismisses_the_checklist_and_its_empty_notice() {
     let mut state = state();
-    assert_eq!(state.handle_key(key(KeyCode::Char('q'))), Outcome::Close);
+    assert_eq!(state.handle_key(press(KeyCode::Char('q'))), Outcome::Close);
     let mut state = CleanUpState::new(Vec::new(), 100);
-    assert_eq!(state.handle_key(key(KeyCode::Char('q'))), Outcome::Close);
+    assert_eq!(state.handle_key(press(KeyCode::Char('q'))), Outcome::Close);
 }
 
 #[test]
 fn with_no_candidates_enter_and_escape_dismiss_the_notice() {
     let mut state = CleanUpState::new(Vec::new(), 100);
     assert!(state.is_empty());
-    assert_eq!(state.handle_key(key(KeyCode::Enter)), Outcome::Close);
+    assert_eq!(state.handle_key(press(KeyCode::Enter)), Outcome::Close);
     let mut state = CleanUpState::new(Vec::new(), 100);
-    assert_eq!(state.handle_key(key(KeyCode::Esc)), Outcome::Close);
-    assert_eq!(state.handle_key(key(KeyCode::Char('x'))), Outcome::Consumed);
+    assert_eq!(state.handle_key(press(KeyCode::Esc)), Outcome::Close);
+    assert_eq!(
+        state.handle_key(press(KeyCode::Char('x'))),
+        Outcome::Consumed
+    );
 }

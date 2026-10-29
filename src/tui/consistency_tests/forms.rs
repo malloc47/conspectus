@@ -4,17 +4,14 @@
 //! permissions), and a pin's editable fields are listed, not guessed.
 
 use ratatui::buffer::Buffer;
-use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+use ratatui::crossterm::event::KeyCode;
 use ratatui::widgets::Widget;
 
 use super::*;
 use crate::tui::Theme;
 use crate::tui::widgets::mux_launch::{MuxLaunchField, MuxLaunchFormState, MuxLaunchFormWidget};
 use crate::tui::widgets::new_mux::{NewMuxField, NewMuxFormState};
-
-fn press(code: KeyCode) -> KeyEvent {
-    KeyEvent::new(code, KeyModifiers::NONE)
-}
+use tuikit::testkit::keys::press;
 
 fn launch_form(cwd: &str) -> MuxLaunchFormState {
     MuxLaunchFormState::new(

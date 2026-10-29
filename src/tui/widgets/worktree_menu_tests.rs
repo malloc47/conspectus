@@ -4,14 +4,7 @@ use crate::model::{
     RepoId, WorktreeMeta,
 };
 use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
-
-fn key(code: KeyCode) -> KeyEvent {
-    KeyEvent::new(code, KeyModifiers::NONE)
-}
-
-fn char_key(c: char) -> KeyEvent {
-    KeyEvent::new(KeyCode::Char(c), KeyModifiers::NONE)
-}
+use tuikit::testkit::keys::press;
 
 fn worktree_ctx(guard: Vec<String>, can_mutate: bool) -> WorktreeMenuContext {
     WorktreeMenuContext {
@@ -43,12 +36,12 @@ fn close_down_choice_merges_or_discards() {
     // Navigate to CloseDownWorktree (index 3) and open the choice.
     let mut state = WorktreeMenuState::new(worktree_ctx(vec![], true)).expect("ok");
     for _ in 0..3 {
-        state.handle_key(key(KeyCode::Down));
+        state.handle_key(press(KeyCode::Down));
     }
-    assert_eq!(state.handle_key(key(KeyCode::Enter)), Outcome::Consumed);
+    assert_eq!(state.handle_key(press(KeyCode::Enter)), Outcome::Consumed);
     // `m` lands the branch (discard = false).
     assert_eq!(
-        state.handle_key(char_key('m')),
+        state.handle_key(press(KeyCode::Char('m'))),
         Outcome::Commit(Msg::CommitWorktreeCloseDown {
             repo_root: "/wt/feature".to_string(),
             branch: "feature".to_string(),
@@ -65,7 +58,7 @@ fn close_down_hotkey_opens_choice_and_discards() {
             .expect("close-down applicable");
     // `d` discards the branch (discard = true).
     assert_eq!(
-        state.handle_key(char_key('d')),
+        state.handle_key(press(KeyCode::Char('d'))),
         Outcome::Commit(Msg::CommitWorktreeCloseDown {
             repo_root: "/wt/feature".to_string(),
             branch: "feature".to_string(),
@@ -94,12 +87,12 @@ fn new_is_none_for_read_only_worktree() {
 fn create_flow_commits_worktree_create() {
     let mut state = WorktreeMenuState::new(worktree_ctx(vec![], true)).expect("actions");
     // Cursor starts on NewWorktree; Enter opens the branch input.
-    assert_eq!(state.handle_key(key(KeyCode::Enter)), Outcome::Consumed);
+    assert_eq!(state.handle_key(press(KeyCode::Enter)), Outcome::Consumed);
     // Type a branch name, then confirm.
     for c in "wip".chars() {
-        assert_eq!(state.handle_key(char_key(c)), Outcome::Consumed);
+        assert_eq!(state.handle_key(press(KeyCode::Char(c))), Outcome::Consumed);
     }
-    let outcome = state.handle_key(key(KeyCode::Enter));
+    let outcome = state.handle_key(press(KeyCode::Enter));
     assert_eq!(
         outcome,
         Outcome::Commit(Msg::CommitWorktreeCreate {
@@ -114,12 +107,12 @@ fn remove_flow_forces_when_guarded() {
     let mut state =
         WorktreeMenuState::new(worktree_ctx(vec!["codex (agent)".to_string()], true)).expect("ok");
     // Move past MergeWorktree to RemoveWorktree and open the confirm.
-    assert_eq!(state.handle_key(key(KeyCode::Down)), Outcome::Consumed);
-    assert_eq!(state.handle_key(key(KeyCode::Down)), Outcome::Consumed);
-    assert_eq!(state.handle_key(key(KeyCode::Enter)), Outcome::Consumed);
+    assert_eq!(state.handle_key(press(KeyCode::Down)), Outcome::Consumed);
+    assert_eq!(state.handle_key(press(KeyCode::Down)), Outcome::Consumed);
+    assert_eq!(state.handle_key(press(KeyCode::Enter)), Outcome::Consumed);
     // Confirm → force is set because a live session was surfaced.
     assert_eq!(
-        state.handle_key(char_key('y')),
+        state.handle_key(press(KeyCode::Char('y'))),
         Outcome::Commit(Msg::CommitWorktreeRemove {
             repo_root: "/wt/feature".to_string(),
             branch: "feature".to_string(),
@@ -131,11 +124,11 @@ fn remove_flow_forces_when_guarded() {
 #[test]
 fn remove_without_live_sessions_does_not_force() {
     let mut state = WorktreeMenuState::new(worktree_ctx(vec![], true)).expect("ok");
-    state.handle_key(key(KeyCode::Down));
-    state.handle_key(key(KeyCode::Down));
-    state.handle_key(key(KeyCode::Enter));
+    state.handle_key(press(KeyCode::Down));
+    state.handle_key(press(KeyCode::Down));
+    state.handle_key(press(KeyCode::Enter));
     assert_eq!(
-        state.handle_key(key(KeyCode::Enter)),
+        state.handle_key(press(KeyCode::Enter)),
         Outcome::Commit(Msg::CommitWorktreeRemove {
             repo_root: "/wt/feature".to_string(),
             branch: "feature".to_string(),
@@ -147,11 +140,11 @@ fn remove_without_live_sessions_does_not_force() {
 #[test]
 fn confirm_remove_can_be_cancelled_back_to_list() {
     let mut state = WorktreeMenuState::new(worktree_ctx(vec![], true)).expect("ok");
-    state.handle_key(key(KeyCode::Down));
-    state.handle_key(key(KeyCode::Enter)); // into ConfirmRemove
-    assert_eq!(state.handle_key(key(KeyCode::Esc)), Outcome::Consumed);
+    state.handle_key(press(KeyCode::Down));
+    state.handle_key(press(KeyCode::Enter)); // into ConfirmRemove
+    assert_eq!(state.handle_key(press(KeyCode::Esc)), Outcome::Consumed);
     // Back in list — Esc now closes.
-    assert_eq!(state.handle_key(key(KeyCode::Esc)), Outcome::Close);
+    assert_eq!(state.handle_key(press(KeyCode::Esc)), Outcome::Close);
 }
 
 #[test]
@@ -165,9 +158,9 @@ fn ctrl_c_and_q_dismiss_the_menu_from_every_screen() {
         let open = || {
             let mut state = WorktreeMenuState::new(worktree_ctx(vec![], true)).expect("ok");
             for _ in 0..downs {
-                state.handle_key(key(KeyCode::Down));
+                state.handle_key(press(KeyCode::Down));
             }
-            state.handle_key(key(KeyCode::Enter));
+            state.handle_key(press(KeyCode::Enter));
             state
         };
         assert_eq!(
@@ -180,14 +173,18 @@ fn ctrl_c_and_q_dismiss_the_menu_from_every_screen() {
         } else {
             Outcome::Close
         };
-        assert_eq!(open().handle_key(char_key('q')), q, "q on screen {downs}");
+        assert_eq!(
+            open().handle_key(press(KeyCode::Char('q'))),
+            q,
+            "q on screen {downs}"
+        );
         let mut state = open();
         assert_eq!(
-            state.handle_key(key(KeyCode::Esc)),
+            state.handle_key(press(KeyCode::Esc)),
             Outcome::Consumed,
             "Esc steps back from screen {downs}"
         );
-        assert_eq!(state.handle_key(char_key('q')), Outcome::Close);
+        assert_eq!(state.handle_key(press(KeyCode::Char('q'))), Outcome::Close);
     }
 }
 
@@ -288,10 +285,10 @@ fn repo_prune_flow_commits_prune() {
         vec![WorktreeAction::NewWorktree, WorktreeAction::PruneWorktrees],
     );
     // Navigate to prune, confirm.
-    state.handle_key(key(KeyCode::Down));
-    assert_eq!(state.handle_key(key(KeyCode::Enter)), Outcome::Consumed);
+    state.handle_key(press(KeyCode::Down));
+    assert_eq!(state.handle_key(press(KeyCode::Enter)), Outcome::Consumed);
     assert_eq!(
-        state.handle_key(char_key('y')),
+        state.handle_key(press(KeyCode::Char('y'))),
         Outcome::Commit(Msg::CommitWorktreePrune {
             repo_root: "/app".to_string(),
         }),
@@ -339,10 +336,10 @@ fn reveal_action_commits_a_selection_jump() {
     let mut state = WorktreeMenuState::new(ctx).expect("actions");
     // RevealSessions is the last offered action for a worktree.
     while state.selected() != WorktreeAction::RevealSessions {
-        state.handle_key(key(KeyCode::Down));
+        state.handle_key(press(KeyCode::Down));
     }
     assert_eq!(
-        state.handle_key(key(KeyCode::Enter)),
+        state.handle_key(press(KeyCode::Enter)),
         Outcome::Commit(Msg::SelectRow(Box::new(target))),
     );
 }
@@ -383,13 +380,13 @@ fn containing_checkout_is_the_innermost_worktree() {
 #[test]
 fn the_action_list_wraps_at_both_ends() {
     let mut state = WorktreeMenuState::new(worktree_ctx(vec![], true)).expect("actions");
-    state.handle_key(key(KeyCode::Up));
+    state.handle_key(press(KeyCode::Up));
     assert_eq!(
         state.selected(),
         WorktreeAction::CloseDownWorktree,
         "up from the first"
     );
-    state.handle_key(key(KeyCode::Down));
+    state.handle_key(press(KeyCode::Down));
     assert_eq!(
         state.selected(),
         WorktreeAction::NewWorktree,
@@ -405,7 +402,7 @@ fn the_cursor_action_shows_the_marker_and_the_highlight() {
 
     let theme = Theme::default();
     let mut state = WorktreeMenuState::new(worktree_ctx(vec![], true)).expect("actions");
-    state.handle_key(key(KeyCode::Down));
+    state.handle_key(press(KeyCode::Down));
     let area = Rect::new(0, 0, 80, 20);
     let mut buf = Buffer::empty(area);
     WorktreeMenuWidget::new(&state, &theme).render(area, &mut buf);
