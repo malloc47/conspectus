@@ -2,6 +2,7 @@ use ratatui::style::{Color, Modifier, Style};
 
 use super::*;
 use crate::tui::theme::OverrideValue::Text as OverrideText;
+use tuikit::form::{Tone, choice_row, one_of_row, path_row, read_only_row, text_row};
 use tuikit::glyphs::marks;
 use tuikit::text_edit::LineEdit;
 
@@ -67,19 +68,18 @@ fn wide_characters_fill_the_field_by_their_cells() {
 
 #[test]
 fn an_empty_value_shows_a_dash() {
-    let line = value_row("cwd", &edit("", 0), false, Cols::new(40), None, &theme());
+    let line = text_row("cwd", &edit("", 0), false, Cols::new(40), &theme());
     assert!(text(&line).contains('-'), "{}", text(&line));
 }
 
 #[test]
 fn the_label_column_widens_for_long_labels() {
-    let narrow = value_row("cwd", &edit("x", 0), false, Cols::new(60), None, &theme());
-    let wide = value_row(
+    let narrow = text_row("cwd", &edit("x", 0), false, Cols::new(60), &theme());
+    let wide = text_row(
         "worktree_branch",
         &edit("x", 0),
         false,
         Cols::new(60).with_label(15),
-        None,
         &theme(),
     );
     let at = |line: &Line<'_>| text(line).find('x').expect("value");
@@ -109,7 +109,7 @@ fn a_path_row_shows_the_tab_hint_only_while_focused_with_a_completion() {
 #[test]
 fn the_harness_row_marks_the_selected_chip_and_flags_a_custom_value() {
     let known: Vec<String> = ["claude-code", "codex"].map(String::from).to_vec();
-    let line = harness_row(
+    let line = choice_row(
         "harness",
         &LineEdit::new("codex"),
         &known,
@@ -132,7 +132,7 @@ fn the_harness_row_marks_the_selected_chip_and_flags_a_custom_value() {
         "selected chip is bold"
     );
 
-    let custom = harness_row(
+    let custom = choice_row(
         "harness",
         &LineEdit::new("my-agent"),
         &known,
@@ -185,13 +185,8 @@ fn the_footer_wraps_at_separators_without_breaking_a_hint() {
 
 #[test]
 fn a_one_of_n_row_draws_choices_not_checkboxes() {
-    let line = choice_row(
-        "pin",
-        &[("don't pin", false), ("launch, then pin", true)],
-        false,
-        Cols::new(70),
-        &theme(),
-    );
+    let options = ["don't pin", "launch, then pin"].map(String::from);
+    let line = one_of_row("pin", &options, 1, false, Cols::new(70), &theme());
     let rendered = text(&line);
     assert!(
         rendered.contains(&format!(
@@ -202,15 +197,6 @@ fn a_one_of_n_row_draws_choices_not_checkboxes() {
         "{rendered}"
     );
     assert!(!rendered.contains(marks::CHECKED) && !rendered.contains(marks::UNCHECKED));
-}
-
-#[test]
-fn display_argv_quotes_what_a_shell_would() {
-    assert_eq!(
-        display_argv(&["claude".into(), "--model".into(), "opus 4".into()]),
-        "claude --model 'opus 4'"
-    );
-    assert_eq!(display_argv(&["a".into(), String::new()]), "a ''");
 }
 
 /// The style of the first span whose text contains `needle`.
@@ -295,14 +281,14 @@ fn chips_notes_footers_and_warnings_follow_the_theme() {
         footer[0].style,
         Style::default().add_modifier(Modifier::ITALIC)
     );
-    let derived = derived_row("command", "nothing", true, Cols::new(40), &theme);
+    let derived = read_only_row("command", "nothing", Tone::Warning, Cols::new(40), &theme);
     assert_eq!(
         style_of(&derived.spans, "nothing"),
         Style::default()
             .fg(Color::LightRed)
             .add_modifier(Modifier::ITALIC)
     );
-    let custom_harness = harness_row(
+    let custom_harness = choice_row(
         "harness",
         &LineEdit::new("my-agent"),
         &known,
@@ -344,8 +330,8 @@ fn path_marks_follow_the_theme() {
 fn the_focused_row_carries_the_cursor_marker_and_highlight_and_its_value_keeps_its_fill() {
     let theme = theme();
     let cols = Cols::new(60);
-    let focused = value_row("name", &edit("xyz", 1), true, cols, None, &theme);
-    let idle = value_row("name", &edit("xyz", 1), false, cols, None, &theme);
+    let focused = text_row("name", &edit("xyz", 1), true, cols, &theme);
+    let idle = text_row("name", &edit("xyz", 1), false, cols, &theme);
     assert!(
         text(&focused).starts_with(&format!("{} name", marks::POINTER)),
         "{}",

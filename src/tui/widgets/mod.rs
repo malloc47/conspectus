@@ -6,7 +6,6 @@ pub mod controls;
 pub mod form;
 pub mod help;
 pub mod launch_argv;
-pub mod launch_spec_form;
 pub mod messages;
 pub mod multi_select;
 pub mod mux_launch;

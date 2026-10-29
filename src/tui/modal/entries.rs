@@ -22,7 +22,7 @@ use crate::tui::widgets::{
     controls::{ControlsOutcome, ControlsOverlayState, ControlsOverlayWidget},
     help::{HelpOutcome, HelpOverlayState, HelpOverlayWidget},
     messages::{MessagesOverlayState, MessagesWidget},
-    mux_launch::{MuxLaunchFormState, MuxLaunchFormWidget},
+    mux_launch::MuxLaunchForm,
     mux_menu::{MuxMenuState, MuxMenuWidget},
     pane_viewer::{PaneViewerOutcome, PaneViewerState},
     picker::{PickerState, PickerWidget},
@@ -258,17 +258,17 @@ impl Overlay<Msg, App> for MuxMenuState {
     }
 }
 
-impl Overlay<Msg, App> for MuxLaunchFormState {
+impl Overlay<Msg, App> for MuxLaunchForm {
     fn handle(&mut self, key: KeyEvent, _app: &App) -> Outcome<Msg> {
         self.handle_key(key)
     }
 
-    fn render(&mut self, area: Rect, buf: &mut Buffer, app: &App, _theme: &KitTheme) {
-        MuxLaunchFormWidget::new(self, app.theme()).render(area, buf);
+    fn render(&mut self, area: Rect, buf: &mut Buffer, _app: &App, theme: &KitTheme) {
+        self.draw(area, buf, theme);
     }
 
     fn takes_text(&self) -> bool {
-        self.focus().takes_text()
+        MuxLaunchForm::takes_text(self)
     }
 }
 

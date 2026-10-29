@@ -566,7 +566,7 @@ impl App {
     }
 
     /// Active mux-launch form, if on top of stack.
-    pub fn mux_launch_form(&self) -> Option<&crate::tui::widgets::mux_launch::MuxLaunchFormState> {
+    pub fn mux_launch_form(&self) -> Option<&crate::tui::widgets::mux_launch::MuxLaunchForm> {
         match self.modal_stack.top()? {
             crate::tui::Modal::MuxLaunch(state) => Some(state.as_ref()),
             _ => None,
@@ -575,17 +575,14 @@ impl App {
 
     pub fn mux_launch_form_mut(
         &mut self,
-    ) -> Option<&mut crate::tui::widgets::mux_launch::MuxLaunchFormState> {
+    ) -> Option<&mut crate::tui::widgets::mux_launch::MuxLaunchForm> {
         match self.modal_stack.top_mut()? {
             crate::tui::Modal::MuxLaunch(state) => Some(state.as_mut()),
             _ => None,
         }
     }
 
-    pub fn open_mux_launch_form(
-        &mut self,
-        state: crate::tui::widgets::mux_launch::MuxLaunchFormState,
-    ) {
+    pub fn open_mux_launch_form(&mut self, state: crate::tui::widgets::mux_launch::MuxLaunchForm) {
         self.modal_stack
             .push(crate::tui::Modal::MuxLaunch(Box::new(state)));
     }

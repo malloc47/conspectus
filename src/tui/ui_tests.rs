@@ -6266,20 +6266,21 @@ fn going_back_to_a_row_that_vanished_says_so() {
 
 #[test]
 fn the_mux_launch_form_opens_with_defaults_and_the_worktree_toggle_off() {
+    use crate::tui::widgets::mux_launch::{HARNESS, REPO, WORKTREE};
     let mut app = native_app(View::Mux, RowFilter::default());
     app.update(Msg::OpenMuxLaunchForm);
     let Some(crate::tui::Modal::MuxLaunch(form)) = app.modal_stack().top() else {
         panic!("the launch form is on top");
     };
     assert!(
-        !form.spec().worktree_enabled(),
+        !form.values().is_on(WORKTREE),
         "a worktree is something the operator opts into"
     );
     assert!(
-        !form.worktree_repo_value().is_empty(),
+        !form.values().text(REPO).is_empty(),
         "the repo is seeded so switching the toggle on starts from the launch directory"
     );
-    assert!(form.default_hint().is_some() || form.spec().harness().value().is_empty());
+    assert!(form.default_hint().is_some() || form.values().text(HARNESS).is_empty());
 }
 
 // ----- Gone nodes in previews, reveal, and hints --------------------

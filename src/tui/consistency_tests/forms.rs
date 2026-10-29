@@ -7,17 +7,16 @@
 
 use ratatui::buffer::Buffer;
 use ratatui::crossterm::event::KeyCode;
-use ratatui::widgets::Widget;
 
 use super::*;
 use crate::tui::Theme;
-use crate::tui::widgets::mux_launch::{MuxLaunchField, MuxLaunchFormState, MuxLaunchFormWidget};
+use crate::tui::widgets::mux_launch::{self, MuxLaunchForm};
 use crate::tui::widgets::new_mux::{self, CWD};
 use tuikit::overlay::Overlay;
 use tuikit::testkit::keys::press;
 
-fn launch_form(cwd: &str) -> MuxLaunchFormState {
-    MuxLaunchFormState::new(
+fn launch_form(cwd: &str) -> MuxLaunchForm {
+    MuxLaunchForm::new(
         "claude-code",
         cwd,
         "fresh",
@@ -26,31 +25,39 @@ fn launch_form(cwd: &str) -> MuxLaunchFormState {
     )
 }
 
-fn rendered(form: &MuxLaunchFormState) -> String {
+fn rendered(form: &MuxLaunchForm) -> String {
     let area = Rect::new(0, 0, 100, 30);
     let mut buffer = Buffer::empty(area);
-    MuxLaunchFormWidget::new(form, &Theme::default()).render(area, &mut buffer);
+    form.draw(area, &mut buffer, &Theme::default());
     buffer_to_string(&buffer)
 }
 
+/// The launch form's fields are one ring: `Down` visits every stop `Tab`
+/// does, the server checkbox included (house rule 6).
 #[test]
 fn arrow_keys_move_between_the_launch_forms_fields() {
     let mut form = launch_form("/tmp");
-    assert_eq!(form.focus(), MuxLaunchField::MuxName, "the name is first");
-    form.handle_key(press(KeyCode::Down));
-    assert_eq!(form.focus(), MuxLaunchField::Harness);
+    assert_eq!(form.focus(), Some(mux_launch::NAME), "the name is first");
     form.handle_key(press(KeyCode::Down));
     assert_eq!(
         form.focus(),
-        MuxLaunchField::LaunchOptions,
+        Some(mux_launch::SERVER),
+        "the server checkbox is a field of its own"
+    );
+    form.handle_key(press(KeyCode::Down));
+    assert_eq!(form.focus(), Some(mux_launch::HARNESS));
+    form.handle_key(press(KeyCode::Down));
+    assert_eq!(
+        form.focus(),
+        Some(mux_launch::OPTIONS),
         "Down moves to the next field: the harness's launch options"
     );
     form.handle_key(press(KeyCode::Down));
-    assert_eq!(form.focus(), MuxLaunchField::Cwd);
-    form.handle_key(press(KeyCode::Up));
-    form.handle_key(press(KeyCode::Up));
-    form.handle_key(press(KeyCode::Up));
-    assert_eq!(form.focus(), MuxLaunchField::MuxName, "Up moves back");
+    assert_eq!(form.focus(), Some(mux_launch::CWD));
+    for _ in 0..4 {
+        form.handle_key(press(KeyCode::Up));
+    }
+    assert_eq!(form.focus(), Some(mux_launch::NAME), "Up moves back");
 }
 
 #[test]
@@ -59,21 +66,21 @@ fn tab_completes_a_directory_in_the_launch_forms_cwd_field() {
     std::fs::create_dir(dir.path().join("alpha-dir")).expect("subdir");
     let typed = format!("{}/alp", dir.path().display());
     let mut form = launch_form(&typed);
-    form.handle_key(press(KeyCode::Down));
-    form.handle_key(press(KeyCode::Down));
-    form.handle_key(press(KeyCode::Down));
+    for _ in 0..4 {
+        form.handle_key(press(KeyCode::Down));
+    }
     assert_eq!(
         form.focus(),
-        MuxLaunchField::Cwd,
+        Some(mux_launch::CWD),
         "reach the cwd field first"
     );
     form.handle_key(press(KeyCode::Tab));
     assert_eq!(
-        form.spec().cwd().value(),
+        form.values().text(mux_launch::CWD),
         format!("{}/alpha-dir", dir.path().display()),
         "Tab completes the path while the cursor is in the cwd field"
     );
-    assert_eq!(form.focus(), MuxLaunchField::Cwd);
+    assert_eq!(form.focus(), Some(mux_launch::CWD));
 }
 
 #[test]
@@ -104,7 +111,7 @@ fn enter_submits_a_form_from_its_first_field() {
         "the new mux form creates from its name field"
     );
     let mut launch = launch_form("/tmp");
-    assert_eq!(launch.focus(), MuxLaunchField::MuxName);
+    assert_eq!(launch.focus(), Some(mux_launch::NAME));
     assert!(matches!(
         launch.handle_key(press(KeyCode::Enter)),
         tuikit::overlay::Outcome::Commit(Msg::CommitMuxLaunch(_))
@@ -120,7 +127,7 @@ fn a_forms_keys_stay_in_view_on_a_short_terminal() {
     launch.handle_key(press(KeyCode::Up));
     let area = Rect::new(0, 0, 60, 12);
     let mut buffer = Buffer::empty(area);
-    MuxLaunchFormWidget::new(&launch, &Theme::default()).render(area, &mut buffer);
+    launch.draw(area, &mut buffer, &Theme::default());
     let frame = buffer_to_string(&buffer);
     for segment in
         tuikit::keys::Footer::new(crate::tui::keybindings::overlay::MUX_LAUNCH_KEYS).segments()
@@ -183,10 +190,10 @@ fn retargeting_offers_the_other_entities_of_the_same_kind() {
     );
 }
 
-fn command_row_cells(form: &MuxLaunchFormState) -> Vec<(char, ratatui::style::Modifier)> {
+fn command_row_cells(form: &MuxLaunchForm) -> Vec<(char, ratatui::style::Modifier)> {
     let area = Rect::new(0, 0, 100, 30);
     let mut buffer = Buffer::empty(area);
-    MuxLaunchFormWidget::new(form, &Theme::default()).render(area, &mut buffer);
+    form.draw(area, &mut buffer, &Theme::default());
     for y in 0..area.height {
         let text: String = (0..area.width)
             .map(|x| buffer[(x, y)].symbol().to_string())

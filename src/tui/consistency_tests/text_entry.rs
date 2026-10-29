@@ -17,7 +17,7 @@ use super::*;
 use crate::tui::effect::{Effect, ExecSpec, StoreOp};
 use crate::tui::keymap::Action;
 use crate::tui::widgets::controls::ControlsOverlayState;
-use crate::tui::widgets::mux_launch::MuxLaunchFormState;
+use crate::tui::widgets::mux_launch::{self, MuxLaunchForm};
 use tuikit::testkit::keys::{alt, chord, press};
 
 const SIZE: (u16, u16) = (120, 40);
@@ -156,9 +156,9 @@ fn open_mux_launch_name(app: &mut App) {
     app.update(Msg::OpenMuxLaunchForm);
 }
 
-fn focus_launch_field(app: &mut App, field: crate::tui::widgets::mux_launch::MuxLaunchField) {
+fn focus_launch_field(app: &mut App, field: &'static str) {
     for _ in 0..20 {
-        if app.mux_launch_form().map(MuxLaunchFormState::focus) == Some(field) {
+        if app.mux_launch_form().and_then(MuxLaunchForm::focus) == Some(field) {
             return;
         }
         send(app, press(KeyCode::Down));
@@ -168,7 +168,7 @@ fn focus_launch_field(app: &mut App, field: crate::tui::widgets::mux_launch::Mux
 
 fn open_mux_launch_cwd(app: &mut App) {
     app.update(Msg::OpenMuxLaunchForm);
-    focus_launch_field(app, crate::tui::widgets::mux_launch::MuxLaunchField::Cwd);
+    focus_launch_field(app, mux_launch::CWD);
 }
 
 fn focus_pin_row(app: &mut App, label: &str) {
@@ -318,11 +318,10 @@ fn launch_request(effects: &[Effect]) -> crate::tui::widgets::mux_launch::MuxLau
 
 #[test]
 fn the_mux_launch_form_runs_the_command_in_the_expanded_directory() {
-    use crate::tui::widgets::mux_launch::MuxLaunchField;
     let mut app = opened(open_mux_launch_name);
     clear(&mut app);
     type_text(&mut app, "fresh-mux");
-    focus_launch_field(&mut app, MuxLaunchField::Cwd);
+    focus_launch_field(&mut app, mux_launch::CWD);
     clear(&mut app);
     type_text(&mut app, "~/projects");
     let effects = send(&mut app, press(KeyCode::Enter));
@@ -331,15 +330,14 @@ fn the_mux_launch_form_runs_the_command_in_the_expanded_directory() {
 
 #[test]
 fn the_mux_launch_form_expands_the_worktree_repo() {
-    use crate::tui::widgets::mux_launch::MuxLaunchField;
     let mut app = opened(open_mux_launch_name);
     clear(&mut app);
     type_text(&mut app, "fresh-mux");
-    focus_launch_field(&mut app, MuxLaunchField::WorktreeToggle);
+    focus_launch_field(&mut app, mux_launch::WORKTREE);
     send(&mut app, press(KeyCode::Char(' ')));
-    focus_launch_field(&mut app, MuxLaunchField::WorktreeBranch);
+    focus_launch_field(&mut app, mux_launch::BRANCH);
     type_text(&mut app, "feature");
-    focus_launch_field(&mut app, MuxLaunchField::WorktreeRepo);
+    focus_launch_field(&mut app, mux_launch::REPO);
     clear(&mut app);
     type_text(&mut app, "~/projects");
     let effects = send(&mut app, press(KeyCode::Enter));
@@ -518,10 +516,7 @@ fn a_paste_outside_a_text_field_does_nothing() {
 
     // A choice row of a form: Space would step the option.
     let mut app = opened(open_mux_launch_name);
-    focus_launch_field(
-        &mut app,
-        crate::tui::widgets::mux_launch::MuxLaunchField::Pin,
-    );
+    focus_launch_field(&mut app, mux_launch::PIN);
     let before = screen(&mut app);
     paste(&mut app, "  ");
     assert_eq!(screen(&mut app), before, "the launch form's pin row");

@@ -138,9 +138,10 @@ modals! {
     NewMux(tuikit::form::Form<Msg>),
     /// `m` mux action menu (ADR 0096).
     MuxMenu(crate::tui::widgets::mux_menu::MuxMenuState),
-    /// Mux launch form: a harness in a fresh mux (ADR 0096). Boxed to keep
-    /// [`Modal`] small.
-    MuxLaunch(Box<crate::tui::widgets::mux_launch::MuxLaunchFormState>),
+    /// Mux launch form: a harness in a fresh mux (ADR 0096), the
+    /// framework's form with the fields that follow others kept in step.
+    /// Boxed to keep [`Modal`] small.
+    MuxLaunch(Box<crate::tui::widgets::mux_launch::MuxLaunchForm>),
     /// The pin edit form: every field a pin can change, with the layer
     /// each value comes from.
     PinEdit(Box<crate::tui::widgets::pin_edit::PinEditFormState>),

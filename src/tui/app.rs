@@ -1913,7 +1913,7 @@ impl App {
                 let default_harness = known_harness_keys.first().cloned().unwrap_or_default();
                 let repo = seeded_cwd.clone();
                 let candidates = crate::tui::runtime::known_cwd_candidates(self, Some(&seeded_cwd));
-                let form = crate::tui::widgets::mux_launch::MuxLaunchFormState::new(
+                let form = crate::tui::widgets::mux_launch::MuxLaunchForm::new(
                     default_harness,
                     seeded_cwd,
                     seeded_mux_name,
