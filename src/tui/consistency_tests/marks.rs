@@ -57,18 +57,11 @@ struct Exception {
     reason: &'static str,
 }
 
-const EXCEPTIONS: &[Exception] = &[
-    Exception {
-        path: "src/tui/messages.rs",
-        glyph: marks::FAIL,
-        reason: "the multiplication sign in a repeat count, `(×3)`, not a failed check",
-    },
-    Exception {
-        path: "src/viewer/table.rs",
-        glyph: marks::RULE,
-        reason: "one of the border characters the table reader recognizes in rendered cells",
-    },
-];
+const EXCEPTIONS: &[Exception] = &[Exception {
+    path: "src/viewer/table.rs",
+    glyph: marks::RULE,
+    reason: "one of the border characters the table reader recognizes in rendered cells",
+}];
 
 /// Every use of a guarded character in drawing code, and every string that
 /// is exactly a bare mark, as `path:line: ...` findings. A reviewed

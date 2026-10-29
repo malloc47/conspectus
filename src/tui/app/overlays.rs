@@ -822,18 +822,17 @@ impl App {
         }
     }
 
-    /// Open the Messages overlay and mark its warnings and errors
-    /// seen.
+    /// Open the Messages overlay, which marks the log's warnings and
+    /// errors seen.
     pub fn open_messages_overlay(&mut self) {
-        self.messages.mark_seen();
-        self.modal_stack.push(crate::tui::Modal::Messages(
-            crate::tui::widgets::messages::MessagesOverlayState::new(),
-        ));
+        let list = crate::tui::widgets::messages::open().mark_seen(&mut self.messages);
+        self.modal_stack
+            .push(crate::tui::Modal::Messages(Box::new(list)));
     }
 
-    pub fn messages_overlay(&self) -> Option<&crate::tui::widgets::messages::MessagesOverlayState> {
+    pub fn messages_overlay(&self) -> Option<&crate::tui::widgets::messages::MessagesList> {
         match self.modal_stack.top()? {
-            crate::tui::Modal::Messages(state) => Some(state),
+            crate::tui::Modal::Messages(list) => Some(list),
             _ => None,
         }
     }
@@ -841,9 +840,9 @@ impl App {
     /// The open Messages overlay, when it is on top.
     pub fn messages_overlay_mut(
         &mut self,
-    ) -> Option<&mut crate::tui::widgets::messages::MessagesOverlayState> {
+    ) -> Option<&mut crate::tui::widgets::messages::MessagesList> {
         match self.modal_stack.top_mut()? {
-            crate::tui::Modal::Messages(state) => Some(state),
+            crate::tui::Modal::Messages(list) => Some(list),
             _ => None,
         }
     }

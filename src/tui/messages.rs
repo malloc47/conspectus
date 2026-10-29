@@ -10,7 +10,9 @@
 //! here is Conspectus's payload for each entry, a [`Report`]: which
 //! pin or mux the outcome concerns, the subprocess that ran, and any
 //! detail text, plus the [`LogEntryExt`] builders and the plain-text
-//! rendering the Messages overlay and the clipboard use.
+//! rendering the Messages overlay and the clipboard use. The repeat count
+//! after a summary (`Entry::summary_with_repeats`) and the overlay's rows
+//! are the framework's too (`tuikit::log_list`).
 
 use std::process::Output;
 
@@ -100,9 +102,6 @@ pub trait LogEntryExt: Sized {
     fn with_command(self, command: CommandRecord) -> Self;
     fn with_detail(self, detail: impl Into<String>) -> Self;
 
-    /// The summary, with a `(×N)` suffix once it repeated.
-    fn summary_with_repeats(&self) -> String;
-
     /// Full plain-text rendering for the overlay's detail pane and
     /// the clipboard.
     fn full_text(&self) -> String;
@@ -138,14 +137,6 @@ impl LogEntryExt for LogEntry {
             self.item.detail = Some(detail);
         }
         self
-    }
-
-    fn summary_with_repeats(&self) -> String {
-        if self.repeats > 1 {
-            format!("{} (×{})", self.summary, self.repeats)
-        } else {
-            self.summary.clone()
-        }
     }
 
     fn full_text(&self) -> String {

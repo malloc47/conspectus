@@ -135,8 +135,10 @@ modals! {
     /// a rebuild plan, whose `y` asks to copy with [`Msg::Copy`]. Boxed
     /// to keep [`Modal`] small.
     ValueModal(Box<crate::tui::widgets::value_modal::ValueModal>),
-    /// `!` Messages overlay (ADR 0105), over the App's message log.
-    Messages(crate::tui::widgets::messages::MessagesOverlayState),
+    /// `!` Messages overlay (ADR 0105): the framework's log list over the
+    /// App's message log, whose `y` asks to copy with [`Msg::Copy`]. Boxed
+    /// to keep [`Modal`] small.
+    Messages(Box<crate::tui::widgets::messages::MessagesList>),
     /// Full-screen transcript viewer (ADR 0052). A nested reducer: its
     /// keys become [`Msg::Viewer`] and [`Msg::ViewerFind`], whose reducer
     /// arms apply them to this entry, and close it when the viewer's own

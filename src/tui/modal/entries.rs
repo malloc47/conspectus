@@ -8,10 +8,10 @@
 //! which clears what it covers, or fills the screen. The rename and step
 //! prompts, the new mux form, the row, mux, and worktree menus, the
 //! dialogs, Clean up, the Controls panel and its editors, the picker, the
-//! keymap help, the value modal, and the pane viewer have no impl here:
-//! they are the framework's text prompt, form, action menu, dialog,
-//! checklist, settings panel, palette, and pager, which implement the
-//! trait for any context.
+//! keymap help, the value modal, the pane viewer, and Messages have no impl
+//! here: they are the framework's text prompt, form, action menu, dialog,
+//! checklist, settings panel, palette, pager, and log list, which implement
+//! the trait for their context.
 
 use ratatui::buffer::Buffer;
 use ratatui::crossterm::event::KeyEvent;
@@ -22,10 +22,7 @@ use tuikit::overlay::{Outcome, Overlay};
 use tuikit::theme::Theme as KitTheme;
 
 use crate::tui::widgets::{
-    messages::{MessagesOverlayState, MessagesWidget},
-    mux_launch::MuxLaunchForm,
-    pin_edit::PinEditForm,
-    search::SearchOverlayState,
+    mux_launch::MuxLaunchForm, pin_edit::PinEditForm, search::SearchOverlayState,
 };
 use crate::tui::{App, Msg};
 
@@ -93,20 +90,6 @@ impl Overlay<Msg, App> for SearchOverlayState {
 
     fn takes_text(&self) -> bool {
         self.options_cursor().is_none()
-    }
-}
-
-impl Overlay<Msg, App> for MessagesOverlayState {
-    fn handle(&mut self, key: KeyEvent, app: &App) -> Outcome<Msg> {
-        self.handle_key(app.messages(), key)
-    }
-
-    fn render(&mut self, area: Rect, buf: &mut Buffer, app: &App, _theme: &KitTheme) {
-        // Ages read against the clock the rows use, which snapshot mode
-        // freezes.
-        let now = crate::tui::ui::current_unix_epoch_for_render();
-        let window = MessagesWidget::new(self, app.messages(), app.theme(), now).draw(area, buf);
-        self.fit(window);
     }
 }
 

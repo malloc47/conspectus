@@ -41,6 +41,7 @@ fn registry() -> Vec<(&'static str, Problems)> {
         ("FIND_KEYS", problems(FIND_KEYS)),
         ("TEXT_INPUT_KEYS", problems(TEXT_INPUT_KEYS)),
         ("CHECKLIST_KEYS", problems(CHECKLIST_KEYS)),
+        ("LOG_LIST_KEYS", problems(LOG_LIST_KEYS)),
         ("SETTINGS_KEYS", problems(SETTINGS_KEYS)),
         ("PALETTE_KEYS", problems(PALETTE_KEYS)),
         ("PALETTE_OPTION_KEYS", problems(PALETTE_OPTION_KEYS)),
@@ -201,9 +202,11 @@ fn generated_footers_read_in_the_one_grammar() {
         footer(VALUE_MODAL_KEYS),
         joined(&["j/k/PgDn/PgUp scroll", "Esc/q/o close", "y copy"])
     );
+    // In table order the copy key comes after the standard log list's
+    // rows; the log list draws it before the keys that leave.
     assert_eq!(
         footer(MESSAGES_KEYS),
-        joined(&["j/k select", "J/K scroll detail", "y copy", "Esc close"])
+        joined(&["j/k select", "J/K scroll detail", "Esc close", "y copy"])
     );
     assert_eq!(
         footer(NEW_MUX_KEYS),
@@ -304,8 +307,8 @@ fn every_list_moves_with_ctrl_n_and_ctrl_p() {
     assert_eq!(resolve(SETTINGS_KEYS, ctrl_n), Some(SettingsKey::Down));
     assert_eq!(resolve(SETTINGS_KEYS, ctrl_p), Some(SettingsKey::Up));
     assert_eq!(resolve(CHECKLIST_KEYS, ctrl_n), Some(ChecklistKey::Down));
-    assert_eq!(resolve(MESSAGES_KEYS, ctrl_n), Some(MessagesKey::Next));
-    assert_eq!(resolve(MESSAGES_KEYS, ctrl_p), Some(MessagesKey::Prev));
+    assert_eq!(resolve(MESSAGES_KEYS, ctrl_n), Some(LogListKey::Down));
+    assert_eq!(resolve(MESSAGES_KEYS, ctrl_p), Some(LogListKey::Up));
     for form in [NEW_MUX_KEYS, MUX_LAUNCH_KEYS, PIN_EDIT_KEYS] {
         assert_eq!(resolve(form, ctrl_n), Some(FormKey::Down));
         assert_eq!(resolve(form, ctrl_p), Some(FormKey::Up));

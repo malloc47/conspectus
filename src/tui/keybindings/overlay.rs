@@ -7,10 +7,11 @@
 //! select and content search are palettes on tables of their own (their
 //! options pane takes the standard palette option keys). This module holds
 //! the tables of the overlays that are the TUI's own: search, the help
-//! page, the value modal, Messages, the three forms (built on the standard
-//! form rows), the transcript viewer and its find prompt, and the pane
-//! viewer's own keys (the framework's pager takes the rest); and the modal
-//! key convention every modal is checked against.
+//! page, the value modal, Messages (the standard log list table with its
+//! copy key), the three forms (built on the standard form rows), the
+//! transcript viewer and its find prompt, and the pane viewer's own keys
+//! (the framework's pager takes the rest); and the modal key convention
+//! every modal is checked against.
 //!
 //! Every overlay resolves its keys through one of these tables or a
 //! standard one and renders its footer from the same table, so the
@@ -23,7 +24,8 @@ use ratatui::crossterm::event::KeyCode;
 use tuikit::glyphs::marks;
 use tuikit::keys::{
     Convention, EnterMeans, FORM_KEYS, FORM_OPTION_KEYS, FormKey, KeyAction, KeyRole, KeyRow,
-    PAGER_KEYS, PagerKey, SpaceMeans, alias, ch, ctrl, include, key, shown,
+    LOG_LIST_KEYS, LogListKey, PAGER_KEYS, PagerKey, SpaceMeans, alias, ch, ctrl, include, key,
+    shown,
 };
 
 use crate::tui::widgets::pane_viewer::PaneKey;
@@ -152,60 +154,14 @@ pub const VALUE_MODAL_KEYS: &[KeyRow<PagerKey>] = &[
 ];
 
 // ---------------------------------------------------------------------
-// `!` messages log.
+// `!` messages log: the framework's log list on its standard table, `y`
+// copying the selected entry, and `!` closing as it opened.
 // ---------------------------------------------------------------------
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum MessagesKey {
-    Abort,
-    Close,
-    Next,
-    Prev,
-    First,
-    Last,
-    DetailDown,
-    DetailUp,
-    DetailPageDown,
-    DetailPageUp,
-    /// Copy the selected entry. The overlay asks for it with a message,
-    /// because the clipboard write is the executor's.
-    Copy,
-}
-
-impl KeyAction for MessagesKey {
-    fn role(self) -> KeyRole {
-        match self {
-            Self::Abort => KeyRole::Abort,
-            Self::Close => KeyRole::Leave,
-            Self::Next | Self::Prev | Self::First | Self::Last => KeyRole::Move,
-            Self::DetailDown | Self::DetailUp => KeyRole::Move,
-            Self::DetailPageDown | Self::DetailPageUp => KeyRole::Page,
-            Self::Copy => KeyRole::Other,
-        }
-    }
-}
-
-pub const MESSAGES_KEYS: &[KeyRow<MessagesKey>] = &[
-    alias(ctrl('c'), MessagesKey::Abort),
-    shown(ch('j'), MessagesKey::Next, "j", "select"),
-    alias(key(KeyCode::Down), MessagesKey::Next),
-    alias(ctrl('n'), MessagesKey::Next),
-    shown(ch('k'), MessagesKey::Prev, "k", "select"),
-    alias(key(KeyCode::Up), MessagesKey::Prev),
-    alias(ctrl('p'), MessagesKey::Prev),
-    alias(ch('g'), MessagesKey::First),
-    alias(key(KeyCode::Home), MessagesKey::First),
-    alias(ch('G'), MessagesKey::Last),
-    alias(key(KeyCode::End), MessagesKey::Last),
-    shown(ch('J'), MessagesKey::DetailDown, "J", "scroll detail"),
-    shown(ch('K'), MessagesKey::DetailUp, "K", "scroll detail"),
-    alias(key(KeyCode::PageDown), MessagesKey::DetailPageDown),
-    alias(ch(' '), MessagesKey::DetailPageDown),
-    alias(key(KeyCode::PageUp), MessagesKey::DetailPageUp),
-    shown(ch('y'), MessagesKey::Copy, "y", "copy"),
-    shown(key(KeyCode::Esc), MessagesKey::Close, "Esc", "close"),
-    alias(ch('q'), MessagesKey::Close),
-    alias(ch('!'), MessagesKey::Close),
+pub const MESSAGES_KEYS: &[KeyRow<LogListKey>] = &[
+    include(LOG_LIST_KEYS),
+    shown(ch('y'), LogListKey::Copy, "y", "copy"),
+    alias(ch('!'), LogListKey::Close),
 ];
 
 // ---------------------------------------------------------------------

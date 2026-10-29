@@ -1,265 +1,55 @@
-//! `!` Messages overlay (ADR 0105): the TUI's log of operation
-//! outcomes, newest first, with the selected entry's full record
-//! (argv, exit status, stderr, stdout) below the list.
+//! `!` Messages overlay (ADR 0105): the framework's log list
+//! (`tuikit::log_list`) over the App's log of operation outcomes, newest
+//! first, with the selected entry's full record (argv, exit status,
+//! stderr, stdout) under the list.
 //!
-//! Input:
-//! - `j` / `k` / `Down` / `Up` select an entry; `g` / `G` jump to the
-//!   newest / oldest.
-//! - `J` / `K` scroll the detail pane a row; `PageDown` / `PageUp` by the
-//!   rows it showed.
-//! - `y` copies the selected entry (handled by the runtime, which
-//!   owns the clipboard).
-//! - `Esc` / `q` / `!` close.
+//! The log list owns the reading: the rows (the severity's mark, the age,
+//! the summary and its repeat count), the selection that stops at the
+//! newest and the oldest entry, the detail's scrolling and paging by the
+//! rows it shows, the scrollbars, the footer, and the close keys. What is
+//! Conspectus's is here: the title, the record each entry's detail reads
+//! as (`full_text`), what the empty log says, and `y`, whose copy hook asks
+//! the runtime to copy the record; the runtime does the clipboard write
+//! and the toast. Keys are `MESSAGES_KEYS`: the standard log list table,
+//! `y` to copy, and `!` closing as it opened.
 
-use ratatui::buffer::Buffer;
-use ratatui::crossterm::event::KeyEvent;
-use ratatui::layout::Rect;
-use ratatui::macros::{line, span};
-use ratatui::style::Style;
-use ratatui::text::{Line, Span};
-use ratatui::widgets::{Paragraph, Widget};
-use tuikit::frame::{ModalBody, ModalFrame, ModalSize};
-use tuikit::glyphs::marks;
-use tuikit::scroll::ScrollWindow;
-use tuikit::selection::{self, Cursor, Ends};
+use tuikit::log_list::LogList;
 
-use crate::tui::Theme;
-use crate::tui::messages::{LogEntry, LogEntryExt, MessageLog};
+use crate::tui::keybindings::overlay::MESSAGES_KEYS;
+use crate::tui::messages::{LogEntry, LogEntryExt, MessageLog, Report};
+use crate::tui::{App, Msg};
 
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub struct MessagesOverlayState {
-    /// Index into the newest-first entry list.
-    pub selected: usize,
-    pub detail_scroll: u16,
-    /// Rows the detail pane showed at the last draw; a page key moves by
-    /// this many.
-    pub detail_rows: u16,
+/// The Messages overlay: the framework's log list over the App's log.
+pub type MessagesList = LogList<Report, Msg, App>;
+
+/// The overlay over the App's message log, aged against the clock the rows
+/// use (which snapshot mode freezes).
+pub fn open() -> MessagesList {
+    over(App::messages, |_app: &App| {
+        crate::tui::ui::current_unix_epoch_for_render()
+    })
 }
 
-impl MessagesOverlayState {
-    pub fn new() -> Self {
-        Self::default()
-    }
-
-    /// The selected entry, if the log has any.
-    pub fn selected_entry<'a>(&self, log: &'a MessageLog) -> Option<&'a LogEntry> {
-        log.newest_first().nth(self.selected)
-    }
-
-    fn select(&mut self, index: usize, len: usize) {
-        let index = index.min(len.saturating_sub(1));
-        if index != self.selected {
-            self.selected = index;
-            self.detail_scroll = 0;
-        }
-    }
-
-    fn scroll_detail(&mut self, delta: i32) {
-        let next = i32::from(self.detail_scroll).saturating_add(delta).max(0);
-        self.detail_scroll = u16::try_from(next).unwrap_or(u16::MAX);
-    }
-
-    /// Take in the window the last draw's detail pane showed: its offset
-    /// comes back inside the text and page keys move by the rows on
-    /// screen.
-    pub fn fit(&mut self, window: ScrollWindow) {
-        let last = u16::try_from(window.last_offset()).unwrap_or(u16::MAX);
-        self.detail_scroll = self.detail_scroll.min(last);
-        self.detail_rows = u16::try_from(window.viewport()).unwrap_or(u16::MAX);
-    }
-}
-
-impl MessagesOverlayState {
-    /// One key over `log`: move the selection, scroll the detail, copy
-    /// the selected entry, or close.
-    pub fn handle_key(
-        &mut self,
-        log: &MessageLog,
-        key: KeyEvent,
-    ) -> tuikit::overlay::Outcome<crate::tui::Msg> {
-        use crate::tui::keybindings::overlay::{MESSAGES_KEYS, MessagesKey};
-        use tuikit::keys::resolve;
-        use tuikit::overlay::Outcome;
-        let len = log.len();
-        match resolve(MESSAGES_KEYS, key) {
-            Some(MessagesKey::Abort | MessagesKey::Close) => return Outcome::Close,
-            // The clipboard write is the executor's.
-            Some(MessagesKey::Copy) => {
-                if let Some(entry) = self.selected_entry(log) {
-                    return Outcome::Stay(crate::tui::Msg::Copy {
-                        text: entry.full_text(),
-                        done: "copied message".to_string(),
-                    });
-                }
-            }
-            // A log: the selection stops at the newest and the oldest.
-            Some(MessagesKey::Next) => self.select(Ends::Clamp.step(self.selected, len, 1), len),
-            Some(MessagesKey::Prev) => self.select(Ends::Clamp.step(self.selected, len, -1), len),
-            Some(MessagesKey::First) => self.select(0, len),
-            Some(MessagesKey::Last) => self.select(len.saturating_sub(1), len),
-            Some(MessagesKey::DetailDown) => self.scroll_detail(1),
-            Some(MessagesKey::DetailUp) => self.scroll_detail(-1),
-            Some(MessagesKey::DetailPageDown) => {
-                self.scroll_detail(i32::from(self.detail_rows.max(1)));
-            }
-            Some(MessagesKey::DetailPageUp) => {
-                self.scroll_detail(-i32::from(self.detail_rows.max(1)));
-            }
-            None => {}
-        }
-        Outcome::Consumed
-    }
-}
-
-pub struct MessagesWidget<'a> {
-    state: &'a MessagesOverlayState,
-    log: &'a MessageLog,
-    theme: &'a Theme,
-    now: i64,
-}
-
-impl<'a> MessagesWidget<'a> {
-    pub fn new(
-        state: &'a MessagesOverlayState,
-        log: &'a MessageLog,
-        theme: &'a Theme,
-        now: i64,
-    ) -> Self {
-        Self {
-            state,
-            log,
-            theme,
-            now,
-        }
-    }
-}
-
-impl MessagesWidget<'_> {
-    /// Draw the overlay and report the window its detail pane showed, for
-    /// [`MessagesOverlayState::fit`].
-    pub fn draw(self, area: Rect, buf: &mut Buffer) -> ScrollWindow {
-        let title = format!("Messages · {}", self.log.len());
-        ModalFrame::new(self.theme, ModalSize::WIDE)
-            .title(title)
-            .render(area, buf, MessagesBody { widget: &self })
-    }
-}
-
-impl Widget for MessagesWidget<'_> {
-    fn render(self, area: Rect, buf: &mut Buffer) {
-        self.draw(area, buf);
-    }
-}
-
-/// The list over the selected entry's detail, which scrolls.
-struct MessagesBody<'a, 'w> {
-    widget: &'a MessagesWidget<'w>,
-}
-
-impl ModalBody for MessagesBody<'_, '_> {
-    /// The window the detail pane showed.
-    type Output = ScrollWindow;
-
-    /// The overlay fills its frame, so it is laid out in `render`.
-    fn measure(&mut self, _width: u16) -> u16 {
-        0
-    }
-
-    fn render(self, area: Rect, buf: &mut Buffer) -> ScrollWindow {
-        let MessagesWidget {
-            state,
-            log,
-            theme,
-            now,
-        } = *self.widget;
-        let footer = line![span!(
-            Style::default().add_modifier(theme.muted);
-            "{}",
-            tuikit::keys::footer(crate::tui::keybindings::overlay::MESSAGES_KEYS)
-        )];
-        if log.is_empty() {
-            Paragraph::new(vec![
-                Line::raw("No messages yet. Launches, attaches, renames and"),
-                Line::raw("failures from this session are listed here."),
-                Line::raw(""),
-                footer,
-            ])
-            .render(area, buf);
-            return ScrollWindow::default();
-        }
-
-        // List gets up to 40% of the height, the detail the rest.
-        let list_height = (log.len() as u16).min((area.height * 2 / 5).max(3));
-        let list_area = Rect {
-            height: list_height,
-            ..area
-        };
-        let rule_area = Rect {
-            y: area.y + list_height,
-            height: 1,
-            ..area
-        };
-        let detail_area = Rect {
-            y: rule_area.y + 1,
-            height: area.height.saturating_sub(list_height + 2),
-            ..area
-        };
-        let footer_area = Rect {
-            y: area.y + area.height.saturating_sub(1),
-            height: 1,
-            ..area
-        };
-
-        // Keep the selection inside the list window.
-        let list = ScrollWindow::new(usize::from(list_height), log.len())
-            .following(state.selected..state.selected + 1);
-        let lines: Vec<Line> = log
-            .newest_first()
-            .enumerate()
-            .skip(list.offset())
-            .take(list.viewport())
-            .map(|(idx, entry)| list_line(entry, idx == state.selected, theme, now))
-            .collect();
-        Paragraph::new(lines).render(list_area, buf);
-
-        Paragraph::new(Line::from(span!(
-            Style::default().add_modifier(theme.muted);
-            "{}", marks::RULE.repeat(usize::from(area.width))
-        )))
-        .render(rule_area, buf);
-
-        let mut detail = ScrollWindow::default();
-        if let Some(entry) = state.selected_entry(log) {
-            // Wrapped here so the offset can be kept inside the text: paging
-            // past the end shows the last rows.
-            let lines: Vec<Line> = entry
-                .full_text()
-                .lines()
-                .flat_map(|line| tuikit::text::wrap(line, usize::from(detail_area.width)))
-                .map(|row| Line::from(row.trim_end().to_string()))
-                .collect();
-            detail = ScrollWindow::new(usize::from(detail_area.height), lines.len())
-                .at(usize::from(state.detail_scroll));
-            Paragraph::new(lines)
-                .scroll(detail.paragraph_scroll())
-                .render(detail_area, buf);
-        }
-        Paragraph::new(footer).render(footer_area, buf);
-        detail
-    }
-}
-
-fn list_line(entry: &LogEntry, selected: bool, theme: &Theme, now: i64) -> Line<'static> {
-    let age = tuikit::age::Age::between(entry.at, now).label();
-    let spans = [
-        Span::styled(
-            format!("{} ", entry.severity.mark()),
-            entry.severity.style(theme),
-        ),
-        Span::styled(format!("{age:>4} ago  "), Style::default().fg(theme.inert)),
-        Span::raw(entry.summary_with_repeats()),
-    ];
-    selection::row(spans, Cursor::of(selected, true), theme)
+/// The Messages log list over the log `source` finds in a context, aged
+/// against `clock`: the overlay's keys, record, copy, and empty note.
+pub fn over<Cx: ?Sized>(
+    source: impl Fn(&Cx) -> &MessageLog + Send + Sync + 'static,
+    clock: impl Fn(&Cx) -> i64 + Send + Sync + 'static,
+) -> LogList<Report, Msg, Cx> {
+    LogList::new("Messages", source, clock)
+        .keys(MESSAGES_KEYS)
+        .detail(|entry: &LogEntry| entry.full_text())
+        // The clipboard write is the executor's.
+        .copy(|entry: &LogEntry| {
+            Some(Msg::Copy {
+                text: entry.full_text(),
+                done: "copied message".to_string(),
+            })
+        })
+        .empty(
+            "No messages yet. Launches, attaches, renames and\n\
+             failures from this session are listed here.",
+        )
 }
 
 #[cfg(test)]

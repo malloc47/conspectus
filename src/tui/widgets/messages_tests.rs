@@ -1,8 +1,19 @@
-use super::*;
+use ratatui::buffer::Buffer;
 use ratatui::crossterm::event::KeyCode;
+use ratatui::layout::Rect;
 use tuikit::feedback::Severity;
-use tuikit::overlay::Outcome;
-use tuikit::testkit::keys::press;
+use tuikit::glyphs::marks;
+use tuikit::overlay::{Outcome, Overlay};
+use tuikit::testkit::keys::{ctrl, press};
+
+use super::*;
+use crate::tui::Theme;
+
+/// The overlay over `log` itself, aged against the newest entry's time.
+fn list_over(log: &MessageLog) -> LogList<Report, Msg, MessageLog> {
+    let now = log.newest_first().next().map_or(0, |entry| entry.at);
+    over(|log: &MessageLog| log, move |_| now)
+}
 
 fn log_with(n: usize) -> MessageLog {
     let mut log = MessageLog::default();
@@ -12,41 +23,78 @@ fn log_with(n: usize) -> MessageLog {
     log
 }
 
+fn draw(list: &mut LogList<Report, Msg, MessageLog>, log: &MessageLog, theme: &Theme) -> Buffer {
+    let area = Rect::new(0, 0, 80, 24);
+    let mut buf = Buffer::empty(area);
+    list.draw(area, &mut buf, log, theme);
+    buf
+}
+
+fn text_of(buf: &Buffer) -> String {
+    tuikit::testkit::buffer::text(buf)
+}
+
 #[test]
 fn selection_moves_within_the_log_and_resets_detail_scroll() {
-    let log = log_with(3);
-    let mut state = MessagesOverlayState::new();
-    state.handle_key(&log, press(KeyCode::Char('J')));
-    assert_eq!(state.detail_scroll, 1);
+    let mut log = log_with(2);
+    let detail: Vec<String> = (1..=60).map(|n| format!("line {n}")).collect();
+    log.push(LogEntry::error("launch failed").with_detail(detail.join("\n")));
+    let theme = Theme::default();
+    let mut list = list_over(&log);
+    draw(&mut list, &log, &theme);
+    list.handle(press(KeyCode::Char('J')), &log);
+    draw(&mut list, &log, &theme);
+    assert_eq!(list.detail_window().offset(), 1);
 
-    state.handle_key(&log, press(KeyCode::Char('j')));
-    assert_eq!(state.selected, 1);
-    assert_eq!(state.detail_scroll, 0);
-    state.handle_key(&log, press(KeyCode::Char('G')));
-    assert_eq!(state.selected, 2);
-    state.handle_key(&log, press(KeyCode::Char('j')));
-    assert_eq!(state.selected, 2, "clamps at the oldest entry");
-    state.handle_key(&log, press(KeyCode::Char('g')));
-    assert_eq!(state.selected, 0);
-    state.handle_key(&log, press(KeyCode::Char('k')));
+    list.handle(press(KeyCode::Char('j')), &log);
+    draw(&mut list, &log, &theme);
+    assert_eq!(list.selected(), 1);
+    assert_eq!(list.detail_window().offset(), 0);
+    list.handle(press(KeyCode::Char('G')), &log);
+    assert_eq!(list.selected(), 2);
+    list.handle(press(KeyCode::Char('j')), &log);
+    assert_eq!(list.selected(), 2, "clamps at the oldest entry");
+    list.handle(press(KeyCode::Char('g')), &log);
+    assert_eq!(list.selected(), 0);
+    list.handle(press(KeyCode::Char('k')), &log);
     assert_eq!(
-        state.selected, 0,
+        list.selected(),
+        0,
         "clamps at the newest entry: a log does not wrap"
     );
     assert_eq!(
-        state.selected_entry(&log).map(|e| e.summary.as_str()),
-        Some("entry 2"),
+        list.selected_entry(&log).map(|e| e.summary.as_str()),
+        Some("launch failed"),
         "index 0 is the newest entry"
     );
 }
 
 #[test]
-fn close_keys_close() {
+fn esc_and_bang_close_and_q_and_ctrl_c_dismiss() {
     let log = log_with(1);
-    for code in [KeyCode::Esc, KeyCode::Char('q'), KeyCode::Char('!')] {
-        let mut state = MessagesOverlayState::new();
-        assert_eq!(state.handle_key(&log, press(code)), Outcome::Close);
+    for code in [KeyCode::Esc, KeyCode::Char('!')] {
+        assert_eq!(list_over(&log).handle(press(code), &log), Outcome::Close);
     }
+    assert_eq!(
+        list_over(&log).handle(press(KeyCode::Char('q')), &log),
+        Outcome::Dismiss
+    );
+    assert_eq!(list_over(&log).handle(ctrl('c'), &log), Outcome::Dismiss);
+}
+
+#[test]
+fn y_asks_the_runtime_to_copy_the_selected_record() {
+    let log = log_with(2);
+    let mut list = list_over(&log);
+    list.handle(press(KeyCode::Char('j')), &log);
+    let entry = list.selected_entry(&log).expect("an entry");
+    assert_eq!(
+        list.handle(press(KeyCode::Char('y')), &log),
+        Outcome::Stay(Msg::Copy {
+            text: entry.full_text(),
+            done: "copied message".into(),
+        })
+    );
 }
 
 #[test]
@@ -61,22 +109,8 @@ fn renders_list_and_selected_detail() {
             stderr: "No conversation found".into(),
         },
     ));
-    let state = MessagesOverlayState::new();
     let theme = Theme::default();
-    let area = Rect::new(0, 0, 80, 24);
-    let mut buf = Buffer::empty(area);
-
-    MessagesWidget::new(&state, &log, &theme, log.newest_first().next().unwrap().at)
-        .render(area, &mut buf);
-
-    let text: String = (0..area.height)
-        .map(|y| {
-            (0..area.width)
-                .map(|x| buf[(x, y)].symbol().to_string())
-                .collect::<String>()
-                + "\n"
-        })
-        .collect();
+    let text = text_of(&draw(&mut list_over(&log), &log, &theme));
     assert!(text.contains("Messages · 2"), "{text}");
     assert!(
         text.contains("×   0s ago  pin `w1` launch failed"),
@@ -85,6 +119,26 @@ fn renders_list_and_selected_detail() {
     assert!(text.contains("attached tmux:w2"), "{text}");
     assert!(text.contains("exit: 1"), "{text}");
     assert!(text.contains("No conversation found"), "{text}");
+    assert!(
+        text.contains("j/k select · J/K scroll detail · y copy · Esc close"),
+        "{text}"
+    );
+}
+
+#[test]
+fn an_empty_log_says_what_will_be_listed() {
+    let log = MessageLog::default();
+    let theme = Theme::default();
+    let text = text_of(&draw(&mut list_over(&log), &log, &theme));
+    assert!(text.contains("Messages · 0"), "{text}");
+    assert!(
+        text.contains("No messages yet. Launches, attaches, renames and"),
+        "{text}"
+    );
+    assert!(
+        text.contains("failures from this session are listed here."),
+        "{text}"
+    );
 }
 
 #[test]
@@ -97,11 +151,8 @@ fn each_severity_takes_its_own_theme_color() {
     for severity in Severity::ALL {
         log.push(LogEntry::of(severity, format!("{severity:?} entry")));
     }
-    let area = Rect::new(0, 0, 80, 24);
-    let mut buf = Buffer::empty(area);
-    let state = MessagesOverlayState::new();
-    let now = log.newest_first().next().unwrap().at;
-    MessagesWidget::new(&state, &log, &theme, now).render(area, &mut buf);
+    let buf = draw(&mut list_over(&log), &log, &theme);
+    let area = buf.area;
     for severity in Severity::ALL {
         let (x, y) = (0..area.height)
             .flat_map(|y| (0..area.width).map(move |x| (x, y)))
@@ -122,13 +173,11 @@ fn each_severity_takes_its_own_theme_color() {
 #[test]
 fn the_selected_entry_shows_the_marker_and_the_highlight() {
     let log = log_with(3);
-    let mut state = MessagesOverlayState::new();
-    state.handle_key(&log, press(KeyCode::Char('j')));
+    let mut list = list_over(&log);
+    list.handle(press(KeyCode::Char('j')), &log);
     let theme = Theme::default();
-    let area = Rect::new(0, 0, 80, 24);
-    let mut buf = Buffer::empty(area);
-    let now = log.newest_first().next().unwrap().at;
-    MessagesWidget::new(&state, &log, &theme, now).render(area, &mut buf);
+    let buf = draw(&mut list, &log, &theme);
+    let area = buf.area;
     let marked: Vec<(u16, u16)> = (0..area.height)
         .flat_map(|y| (0..area.width).map(move |x| (x, y)))
         .filter(|(x, y)| buf[(*x, *y)].symbol() == marks::POINTER)
