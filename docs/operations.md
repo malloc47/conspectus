@@ -266,10 +266,10 @@ muted              = "dim"             # hints, placeholders, notes, rules, foot
 inert              = "dark_gray"       # short ids, previews, gone or stopped rows (a color)
 selection_active   = "reversed,bold"   # the cursor row of the list that has focus: a pane, menu, form, or picker
 selection_inactive = "bold"            # the cursor row of a list without focus, such as the other pane
-success            = "green"
-warning            = "yellow"
-error              = "red"
-info               = "green"           # informational entries in Messages
+success            = "green"           # confirmations: toasts, the status line, Messages
+warning            = "yellow"          # refusals and fallbacks, in the same three places
+error              = "red"             # failures, in the same three places
+info               = "green"           # hints and notes, in the same three places
 link               = "blue"            # mux names and link rows
 match_highlight    = "yellow"          # text a search matched (bold, underlined)
 badge              = "reversed,bold"   # the chip look
@@ -1531,6 +1531,20 @@ A warning or error also:
 
 The log is never written to disk, because pane output and harness
 stderr can contain conversation content.
+
+Every message the TUI shows, on the status line, in a toast, or in the
+log, has one of four severities, and each draws in its `[tui.theme]`
+color:
+
+| Severity | Means | Color key | Mark | Toast stays |
+| --- | --- | --- | --- | --- |
+| info | a hint for the next key (`viewing …`, `rename: Enter confirm · Esc cancel`) | `info` | `•` | 1.5 s |
+| success | what you asked for happened (`copied: cwd`, `filters cleared`) | `success` | `√` | 1.5 s |
+| warning | the key did not do its job, and nothing failed (`nothing to undo`, a disabled action's reason) | `warning` | `▲` | 3 s |
+| error | something failed (`copy failed: …`) | `error` | `×` | 5 s |
+
+A toast's border takes its severity's color; its text is `toast_text`.
+A new toast replaces the one showing.
 
 ## TUI state
 

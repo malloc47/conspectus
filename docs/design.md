@@ -1379,7 +1379,10 @@ rebuild commands discover without the forges, which they never read (ADR
 0135); a PR slot takes its state from history.
 Operation outcomes the TUI produces go to an in-memory message log
 (`!`) with full subprocess output; unseen failures stay flagged in the
-status bar and lead the affected row's Preview (ADR 0105).
+status bar and lead the affected row's Preview (ADR 0105). Every report
+on the status line, in a toast, or in the log has a severity (info,
+success, warning, error) that each channel draws from the theme, and an
+error's toast stays longest (ADR 0163).
 `--no-cache` suppresses the `graph.bin` write at the end of
 (2).
 

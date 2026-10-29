@@ -142,7 +142,7 @@ Runtime architecture, controls, theming, detail pane, and visual language.
 | [0034](0034-repo-row-display-path-preference.md) | Repo Row Display Path Preference | Accepted (amended) |
 | [0045](0045-sessions-graph-lineage-and-repo-default.md) | Sessions Graph Lineage And Repo Default | Accepted |
 | [0055](0055-sessions-graph-default.md) | Sessions Graph Default | Accepted |
-| [0056](0056-tui-clipboard-backend-osc52.md) | TUI Clipboard Backend via OSC 52 | Accepted |
+| [0056](0056-tui-clipboard-backend-osc52.md) | TUI Clipboard Backend via OSC 52 | Accepted (amended by 0163) |
 | [0061](0061-drop-workspace-grouping-from-non-workspaces-views.md) | Drop Workspace Grouping From Non-Workspaces Views | Accepted (mux view refined by 0139) |
 | [0062](0062-workspaces-view-polish.md) | Workspaces View Polish — Inline Members, Drop Related | Superseded by 0065 |
 | [0063](0063-drop-workspace-cross-reference-chip.md) | Drop The Workspace Cross-Reference Chip | Accepted |
@@ -157,7 +157,7 @@ Runtime architecture, controls, theming, detail pane, and visual language.
 | [0076](0076-scrollbar-widget-choice.md) | Scrollbar Widget Choice For Scrolled Panes | Accepted (amended by 0155, 0156) |
 | [0078](0078-tui-surface-division-of-labor.md) | TUI Surface Division Of Labor | Accepted |
 | [0085](0085-tui-mvu-architecture.md) | TUI Elm/MVU Architecture | Accepted (amended by 0156, 0161) |
-| [0105](0105-tui-message-log.md) | TUI Message Log For Operation Outcomes | Accepted |
+| [0105](0105-tui-message-log.md) | TUI Message Log For Operation Outcomes | Accepted (amended by 0163) |
 | [0106](0106-preview-pane-wrap-modes.md) | Preview Pane Wrap Modes | Accepted (amended by 0155) |
 | [0107](0107-related-view-neighbor-granularity.md) | Related View At Neighbor Granularity | Accepted (amended) |
 | [0112](0112-node-specific-previews.md) | Node-Specific Previews | Accepted (see 0147) |
@@ -175,7 +175,7 @@ Runtime architecture, controls, theming, detail pane, and visual language.
 | [0150](0150-tui-framework-workspace-crate.md) | The TUI Framework Is A Workspace Member Crate | Accepted |
 | [0151](0151-tui-framework-control-set-and-house-rules.md) | The Framework Control Set And Its House Rules | Accepted |
 | [0152](0152-tui-framework-dependency-ownership.md) | Who Owns The Framework's Third-Party Crates | Accepted |
-| [0153](0153-tui-theme-roles-aliases-and-named-styles.md) | TUI Theme Roles, Alias Keys, And Named Styles | Accepted |
+| [0153](0153-tui-theme-roles-aliases-and-named-styles.md) | TUI Theme Roles, Alias Keys, And Named Styles | Accepted (amended by 0163) |
 | [0154](0154-tui-glyph-marks-vetted-table-and-scan.md) | Shared Glyph Marks, The Vetted Table, And The Source Scan | Accepted |
 | [0155](0155-tui-text-measured-cut-and-wrapped-in-cells.md) | Text Is Measured, Cut, And Wrapped In Terminal Cells By One Module | Accepted |
 | [0156](0156-tui-scroll-window-follow-rule-and-viewports-by-value.md) | One Scroll Window, One Follow Rule, And Viewports Returned By Value | Accepted (amended by 0161) |
@@ -185,6 +185,7 @@ Runtime architecture, controls, theming, detail pane, and visual language.
 | [0160](0160-tui-keys-one-model-one-character-rule-one-footer-grammar.md) | Overlay Keys Share One Model, One Character Rule, And One Footer Grammar | Accepted |
 | [0161](0161-tui-overlays-draw-themselves-on-one-host-owned-stack.md) | Overlays Draw Themselves On One Host-Owned Modal Stack | Accepted |
 | [0162](0162-tui-help-pages-one-page-generated-from-key-tables.md) | Help Pages Are One Page, Generated From The Key Tables | Accepted |
+| [0163](0163-tui-feedback-one-type-four-severities-in-tree-toasts.md) | Feedback Is One Type With Four Severities, And Toasts Are In-Tree | Accepted |
 
 ## Transcript viewer
 

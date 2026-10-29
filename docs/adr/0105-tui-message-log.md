@@ -2,7 +2,12 @@
 
 ## Status
 
-Accepted.
+Accepted. Amended by
+[ADR 0163](0163-tui-feedback-one-type-four-severities-in-tree-toasts.md):
+an entry's level is one of four severities (info, success, warning,
+error), successful outcomes are logged as successes, and the bounded,
+repeat-collapsing log is the framework's `tuikit::feedback::Log` over
+Conspectus's payload (target, command record, detail).
 
 ## Context
 

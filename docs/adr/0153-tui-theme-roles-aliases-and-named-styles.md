@@ -6,6 +6,10 @@ Accepted. Amends ADR 0032 (TUI theme configuration): the `Theme` value
 moves into the framework crate's `theme` module (ADR 0150) as typed role
 tokens plus a registry of named styles, five muted keys become two, and
 the older keys load as aliases. Applies house rule 13 of ADR 0151.
+Amended by
+[ADR 0163](0163-tui-feedback-one-type-four-severities-in-tree-toasts.md):
+the typed tokens gain `toast_text` (white, a toast's message), and the
+four status tokens now also color the status line and toasts.
 
 ## Context
 

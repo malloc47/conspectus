@@ -151,6 +151,20 @@ Targeted for 0.2.0, after 0.1.0 is tagged. History, rebuild, and pins
   top, so one opened over another shows the lower one around its frame
   (only the top one used to be drawn), and a toast now shows over the
   full-screen transcript and pane viewers, which used to hide it.
+- **Feedback says how much it matters.** Every status-line message,
+  toast, and Messages entry has a severity (info, success, warning,
+  error) and draws in its `[tui.theme]` color. A warning toast's border
+  is yellow and an error toast's red (every toast used to be green, so
+  `copy failed` looked like `copied`); warning toasts stay 3 seconds and
+  error toasts 5 (all used to leave after 1.5). The status line draws
+  hints and confirmations green and failures red (it painted everything
+  yellow; refusals stay yellow). On a screen narrower than 50 columns a
+  long toast wraps inside the screen instead of losing its end, and a
+  word longer than a toast's row, such as a long path, now breaks at the
+  row's edge rather than at a hyphen. A clipboard write that fails on
+  `Enter` or `i` says `copy failed: …` instead of `copied: …`.
+  `[tui.theme] toast_text` (white) sets a toast's text color. Successful
+  toasts and the default screens look as before.
 - **Dialog footers read one way.** Every footer pairs keys with a short
   verb: `to scroll`, `to close`, `to copy`, `to confirm`, and `to cancel`
   lose their "to" (the help page, the value viewer, the worktree
