@@ -18,6 +18,10 @@ Amended by
 `CONFIRM_KEYS` and `ChoiceKey<C>` (a choice's verbs are the dialog's own
 keys, so the host's `CLOSE_DOWN_KEYS` is gone), and a footer can keep some
 of a table's actions (`Footer::only`) or take a control's own segments.
+Amended by
+[ADR 0173](0173-tui-checklists-one-control-select-all-none-and-a-count.md):
+`CHECKLIST_KEYS` binds `a` (select all) and `n` (select none), shown in its
+footer, and `PgUp`/`PgDn`, `Home`/`g`, and `End`/`G` as aliases.
 
 ## Context
 

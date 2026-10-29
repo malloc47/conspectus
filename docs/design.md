@@ -1239,6 +1239,17 @@ branch prompt, confirmation, or close-down choice as a step over the menu:
 worktree facts captured when the menu opens, the action policy, every word,
 and the `Msg` each answer commits; the empty Clean up is a `Dialog` notice.
 
+Checklists are one control (ADR 0173). The Controls overlay's harness, mux
+state, and PR state editors and the History view's Clean up are the
+framework's `Checklist`: items that are data (a label, a detail, checked,
+and whether it can change), `Space` to check the cursor's item, `a` and `n`
+to check or uncheck every item that can change, a count of the checked items
+on the bottom border, page and ends keys, and the footer generated from the
+checklist key table kept in view while the items scroll. `Enter` hands the
+checked indices to the host's `on_confirm`; `conspectus` keeps the labels,
+the option values each index stands for, and the `Msg::ReapRecords` mapping.
+The `ratatui-cheese` shim and the dependency are gone.
+
 Every argv `conspectus` reads from text is split by one grammar (ADR 0169,
 `src/argv.rs`): a POSIX shell's word splitting with nothing expanded. An
 argv someone types (the forms, `pin edit --set`) is refused when it ends

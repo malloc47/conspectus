@@ -12,7 +12,11 @@ widens it to every entity. Amended by
 [ADR 0151](0151-tui-framework-control-set-and-house-rules.md): the
 `union` and `forks` views are retired, along with `UnionGrouping`,
 `ForksGrouping`, `--view union|forks`, and their `[tui.views.*]` tables;
-the `conspectus table union|forks` projections stay.
+the `conspectus table union|forks` projections stay. Amended by
+[ADR 0173](0173-tui-checklists-one-control-select-all-none-and-a-count.md):
+the harness, mux-state, and PR-state editors are the framework's
+`Checklist`, which also selects all or none and counts what is checked;
+the multi-select primitive named under the module layout below is gone.
 
 ## Context
 
