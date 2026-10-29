@@ -1,8 +1,9 @@
 //! Preview pane: transcripts, pane captures, and pin diagnostics.
 
 use super::*;
-use crate::tui::preview::{PreviewSource, PreviewSubject, node_source, preview_subject};
-use crate::viewer::state::ViewerState;
+use crate::tui::preview::{
+    PreviewSource, PreviewSubject, TranscriptPreview, node_source, preview_subject,
+};
 
 /// A Preview body, and where its window sits when it scrolls itself.
 pub(super) struct PreviewView {
@@ -317,8 +318,8 @@ fn transcript_view(app: &App, source: &PreviewSource, width: u16, height: usize)
     let Some(entry) = app.previews().get(source) else {
         return PreviewView::text("loading transcript…");
     };
-    let state = match &entry.content {
-        PreviewContent::Transcript(state) => state,
+    let preview = match &entry.content {
+        PreviewContent::Transcript(preview) => preview,
         PreviewContent::Unavailable(reason) => {
             return PreviewView::text(format!("transcript unavailable: {reason}"));
         }
@@ -332,17 +333,16 @@ fn transcript_view(app: &App, source: &PreviewSource, width: u16, height: usize)
     // Draw warms the cache first (`App::prepare_preview`); callers
     // that skip it, like tests, compose a copy.
     let composed;
-    let state: &ViewerState =
-        if crate::viewer::widget::cached_body_lines(state, content_width).is_some() {
-            state
-        } else {
-            let mut copy = state.as_ref().clone();
-            crate::tui::preview::search::apply(&mut copy, search.as_ref());
-            crate::viewer::widget::body_lines(&mut copy, app.theme(), content_width);
-            composed = copy;
-            &composed
-        };
-    let Some(cache) = state.rendered.as_ref() else {
+    let preview: &TranscriptPreview = if preview.transcript.cached_lines(content_width).is_some() {
+        preview
+    } else {
+        let mut copy = preview.as_ref().clone();
+        crate::tui::preview::search::apply(&mut copy, search.as_ref());
+        copy.transcript.lines(app.theme(), content_width);
+        composed = copy;
+        &composed
+    };
+    let Some(cache) = preview.transcript.rendered.as_ref() else {
         return PreviewView::text("no turns yet");
     };
     let lines = &cache.lines;
@@ -352,7 +352,7 @@ fn transcript_view(app: &App, source: &PreviewSource, width: u16, height: usize)
     let total = lines.len();
     let height = height.max(1);
     let bottom_top = total.saturating_sub(height);
-    let top = match crate::tui::preview::search::match_top(state) {
+    let top = match crate::tui::preview::search::match_top(preview) {
         // Opened on a search match: the offset counts rows down from it.
         Some(anchor) if search.as_ref().is_some_and(|s| s.turn.is_some()) => {
             let moved = (anchor as i64).saturating_add(i64::from(app.preview_match_offset()));
@@ -363,13 +363,7 @@ fn transcript_view(app: &App, source: &PreviewSource, width: u16, height: usize)
     let end = (top + height).min(total);
     let mut window = lines[top..end].to_vec();
     if search.is_some() {
-        crate::viewer::highlight::highlight_matches(
-            &mut window,
-            top,
-            cache,
-            &state.find,
-            app.theme(),
-        );
+        preview.marks.paint(&mut window, top, cache, app.theme());
     }
     PreviewView {
         text: Text::from(window),

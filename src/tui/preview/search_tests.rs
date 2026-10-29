@@ -2,10 +2,9 @@ use super::*;
 use crate::viewer::model::{
     TranscriptDocument, TranscriptMeta, TranscriptTurn, TurnKind, TurnRole,
 };
-use crate::viewer::widget::body_lines;
 use tuikit::theme::Theme;
 
-fn state() -> ViewerState {
+fn state() -> TranscriptPreview {
     let turns = (0..12)
         .map(|i| TranscriptTurn {
             role: TurnRole::User,
@@ -20,7 +19,7 @@ fn state() -> ViewerState {
             hidden: false,
         })
         .collect();
-    let mut state = ViewerState::new(TranscriptDocument {
+    let mut state = TranscriptPreview::new(TranscriptDocument {
         meta: TranscriptMeta {
             harness: "claude-code".into(),
             session_key: "s".into(),
@@ -28,7 +27,7 @@ fn state() -> ViewerState {
         },
         turns,
     });
-    body_lines(&mut state, &Theme::default(), 60);
+    state.transcript.lines(&Theme::default(), 60);
     state
 }
 
@@ -45,12 +44,8 @@ fn a_search_marks_its_matches_and_lands_on_the_hit_turn() {
 
     apply(&mut state, Some(&search(Some(9))));
 
-    assert_eq!(state.find.matches, [2, 9]);
-    assert_eq!(state.find.current_turn(), Some(9));
-    assert_eq!(
-        state.find.pending_scroll, None,
-        "the Preview scrolls itself"
-    );
+    assert_eq!(state.marks.matches, [2, 9]);
+    assert_eq!(state.marks.current, Some(9));
 }
 
 #[test]
@@ -59,8 +54,8 @@ fn a_search_without_a_hit_turn_marks_but_has_no_current_match() {
 
     apply(&mut state, Some(&search(None)));
 
-    assert_eq!(state.find.matches, [2, 9]);
-    assert_eq!(state.find.current_turn(), None);
+    assert_eq!(state.marks.matches, [2, 9]);
+    assert_eq!(state.marks.current, None);
     assert_eq!(match_top(&state), None);
 }
 
@@ -70,7 +65,7 @@ fn a_hit_turn_the_transcript_hides_is_not_current() {
 
     apply(&mut state, Some(&search(Some(4))));
 
-    assert_eq!(state.find.current_turn(), None);
+    assert_eq!(state.marks.current, None);
 }
 
 #[test]
@@ -80,7 +75,7 @@ fn the_next_hit_moves_the_current_match_without_recomputing() {
 
     apply(&mut state, Some(&search(Some(9))));
 
-    assert_eq!(state.find.current_turn(), Some(9));
+    assert_eq!(state.marks.current, Some(9));
 }
 
 #[test]
@@ -90,8 +85,8 @@ fn no_search_clears_the_marks() {
 
     apply(&mut state, None);
 
-    assert!(!state.find.is_active());
-    assert!(state.find.matches.is_empty());
+    assert!(!state.marks.is_active());
+    assert!(state.marks.matches.is_empty());
 }
 
 #[test]
@@ -99,7 +94,7 @@ fn the_window_starts_a_line_above_the_current_turn() {
     let mut state = state();
     apply(&mut state, Some(&search(Some(9))));
 
-    let cache = state.rendered.as_ref().unwrap();
+    let cache = state.transcript.rendered.as_ref().unwrap();
     let line = cache
         .turn_starts
         .iter()

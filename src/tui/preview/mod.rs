@@ -33,7 +33,9 @@ use crate::tui::app::App;
 use crate::tui::explorer::FieldValue;
 use crate::tui::rows::{MuxIndicator, RowId, RowKind};
 use crate::tui::viewer_bridge::{TranscriptMissing, load_transcript};
-use crate::viewer::state::ViewerState;
+use crate::viewer::highlight::Marks;
+use crate::viewer::model::TranscriptDocument;
+use crate::viewer::state::Transcript;
 
 /// What the Preview zone shows for a selection.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -157,9 +159,9 @@ pub enum PreviewContent {
     /// The pane's captured text (from `tmux capture-pane -p -J -e`)
     /// and the width tmux laid it out at.
     Text(PaneCapture),
-    /// A parsed transcript, in the viewer state the preview renders it
-    /// with, so its composed lines are cached alongside it.
-    Transcript(Box<ViewerState>),
+    /// A parsed transcript, as the viewer's content the preview renders
+    /// it from, so its composed lines are cached alongside it.
+    Transcript(Box<TranscriptPreview>),
     /// Lines a loader composed: a listing, a file's contents.
     Lines(Vec<Line<'static>>),
     /// The runner reported the target doesn't exist.
@@ -179,7 +181,9 @@ impl PartialEq for PreviewContent {
     fn eq(&self, other: &Self) -> bool {
         match (self, other) {
             (Self::Text(a), Self::Text(b)) => a == b,
-            (Self::Transcript(a), Self::Transcript(b)) => a.document == b.document,
+            (Self::Transcript(a), Self::Transcript(b)) => {
+                a.transcript.document == b.transcript.document
+            }
             (Self::Lines(a), Self::Lines(b)) => a == b,
             (Self::NoTarget, Self::NoTarget) | (Self::Unsupported, Self::Unsupported) => true,
             (Self::Unavailable(a), Self::Unavailable(b)) | (Self::Failed(a), Self::Failed(b)) => {
@@ -191,6 +195,25 @@ impl PartialEq for PreviewContent {
 }
 
 impl Eq for PreviewContent {}
+
+/// A transcript in the Preview: the viewer's content, drawn from the
+/// toggles' defaults, and the matches of the search on display marked on
+/// it (`search::apply`).
+#[derive(Debug, Clone)]
+pub struct TranscriptPreview {
+    pub transcript: Transcript,
+    pub marks: Marks,
+}
+
+impl TranscriptPreview {
+    /// `document` with nothing marked.
+    pub fn new(document: TranscriptDocument) -> Self {
+        Self {
+            transcript: Transcript::new(document),
+            marks: Marks::default(),
+        }
+    }
+}
 
 impl PreviewContent {
     /// Captured text with no reported pane width.
@@ -556,7 +579,7 @@ pub fn load_offline_preview(source: &PreviewSource, muted: Modifier) -> Option<P
 /// the live runtime calls it on a worker thread.
 pub fn load_transcript_preview(session: &AgentSessionId) -> PreviewContent {
     match load_transcript(session) {
-        Ok(document) => PreviewContent::Transcript(Box::new(ViewerState::new(document))),
+        Ok(document) => PreviewContent::Transcript(Box::new(TranscriptPreview::new(document))),
         Err(TranscriptMissing::Unavailable(reason)) => PreviewContent::Unavailable(reason),
         Err(TranscriptMissing::Failed(message)) => PreviewContent::Failed(message),
     }

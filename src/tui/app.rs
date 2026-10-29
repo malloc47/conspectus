@@ -1193,12 +1193,12 @@ impl App {
         let theme = self.theme().clone();
         let search = crate::tui::preview::search::preview_search(self);
         if let Some(PreviewEntry {
-            content: PreviewContent::Transcript(state),
+            content: PreviewContent::Transcript(preview),
             ..
         }) = self.preview_store.get_mut(&source)
         {
-            crate::tui::preview::search::apply(state, search.as_ref());
-            crate::viewer::widget::body_lines(state, &theme, width);
+            crate::tui::preview::search::apply(preview, search.as_ref());
+            preview.transcript.lines(&theme, width);
         }
     }
 

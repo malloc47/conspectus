@@ -44,7 +44,7 @@ use tuikit::keys::{KeyRow, PagerKey};
 use tuikit::pager::{Find, PagerContent, PagerEffect};
 use tuikit::theme::Theme;
 
-use crate::viewer::highlight::{highlight_matches, turn_at};
+use crate::viewer::highlight::{highlight_matches, paint_turns};
 use crate::viewer::keys::{TRANSCRIPT_KEYS, TranscriptKey};
 use crate::viewer::model::{TranscriptTurn, TurnKind};
 use crate::viewer::render::{
@@ -131,14 +131,17 @@ impl<M> PagerContent for Transcript<M> {
     /// one summary line is a count, not the turns' text, so it is not
     /// painted.
     fn paint(&self, rows: &mut [Line<'static>], first: usize, find: &Find, theme: &Theme) {
-        let Some(cache) = self.rendered.as_ref() else {
-            return;
-        };
-        for (row, at) in rows.iter_mut().zip(first..) {
-            if let Some(turn) = turn_at(cache, at).filter(|&turn| find.holds(turn)) {
-                let current = find.current_unit() == Some(turn);
-                *row = find.paint(row, cache.leader, current, theme);
-            }
+        if let Some(cache) = self.rendered.as_ref() {
+            let holds = |turn: usize| find.holds(turn);
+            paint_turns(
+                rows,
+                first,
+                cache,
+                find.query(),
+                holds,
+                find.current_unit(),
+                theme,
+            );
         }
     }
 
@@ -420,22 +423,6 @@ impl<M> Transcript<M> {
 
 fn is_tool_kind(k: TurnKind) -> bool {
     matches!(k, TurnKind::ToolUse | TurnKind::ToolResult)
-}
-
-/// Compose `transcript`'s body at `width` columns; see
-/// [`Transcript::lines`].
-pub fn body_lines<'s>(
-    transcript: &'s mut Transcript,
-    theme: &Theme,
-    width: u16,
-) -> &'s [Line<'static>] {
-    transcript.lines(theme, width)
-}
-
-/// The body lines last composed at `width`; see
-/// [`Transcript::cached_lines`].
-pub fn cached_body_lines(transcript: &Transcript, width: u16) -> Option<&[Line<'static>]> {
-    transcript.cached_lines(width)
 }
 
 /// `tools·sum (t)` / `tools·off (t)`: the current tool detail level and

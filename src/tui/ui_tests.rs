@@ -4087,7 +4087,7 @@ fn codex_transcript() -> PreviewSource {
 }
 
 fn transcript_content(turns: usize) -> PreviewContent {
-    PreviewContent::Transcript(Box::new(crate::viewer::state::ViewerState::new(
+    PreviewContent::Transcript(Box::new(crate::tui::preview::TranscriptPreview::new(
         transcript_document(turns),
     )))
 }

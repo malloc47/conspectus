@@ -11,9 +11,9 @@ use ratatui::text::{Line, Span, Text};
 use crate::model::NodeId;
 use crate::tui::View;
 use crate::tui::app::App;
-use crate::tui::preview::{PreviewSubject, preview_subject};
+use crate::tui::preview::{PreviewSubject, TranscriptPreview, preview_subject};
 use crate::tui::rows::RowId;
-use crate::viewer::state::ViewerState;
+use crate::viewer::highlight::Marks;
 
 /// What to mark in the Preview of the selected row.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -53,39 +53,37 @@ pub fn preview_search(app: &App) -> Option<PreviewSearch> {
     })
 }
 
-/// Point a Preview transcript's find at `search`, or clear it. The
-/// matches are recomputed only when the query changes.
-pub fn apply(state: &mut ViewerState, search: Option<&PreviewSearch>) {
+/// Mark `search` on a Preview transcript, or clear its marks. The
+/// matches are recomputed only when the query changes; the hit's turn is
+/// the current match when it is one of them.
+pub fn apply(preview: &mut TranscriptPreview, search: Option<&PreviewSearch>) {
     let Some(search) = search else {
-        if state.find.is_active() {
-            state.find.clear();
+        if preview.marks.is_active() {
+            preview.marks = Marks::default();
         }
         return;
     };
-    if state.find.query != search.query {
-        state.start_find(&search.query);
+    let query = search.query.trim();
+    if preview.marks.query != query {
+        preview.marks = Marks {
+            query: query.to_string(),
+            matches: preview.transcript.matching(query),
+            current: None,
+        };
     }
-    let current = search
+    let marks = &mut preview.marks;
+    marks.current = search
         .turn
-        .and_then(|turn| state.find.matches.binary_search(&turn).ok());
-    if state.find.current != current {
-        state.find.current = current;
-    }
-    // The Preview positions itself; the find's own scroll is unused.
-    state.find.pending_scroll = None;
+        .filter(|turn| marks.matches.binary_search(turn).is_ok());
 }
 
 /// The first line of the rows to show so the current match is in view
 /// with a line of context above it, `None` when there is no current
 /// match.
-pub fn match_top(state: &ViewerState) -> Option<usize> {
-    let turn = state.find.current_turn()?;
-    let cache = state.rendered.as_ref()?;
-    cache
-        .turn_starts
-        .iter()
-        .find(|start| start.turn_index == turn)
-        .map(|start| start.line.saturating_sub(1))
+pub fn match_top(preview: &TranscriptPreview) -> Option<usize> {
+    let turn = preview.marks.current?;
+    preview.transcript.rendered.as_ref()?;
+    Some(preview.transcript.rows_of(turn).start.saturating_sub(1))
 }
 
 /// Mark every occurrence of the query in a pane capture's rows, and the
