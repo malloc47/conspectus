@@ -1187,20 +1187,26 @@ Clearing filters in Controls clears it too.
 
 **Edit…** opens a form with one row per field the pin can change: its name
 first (renaming a live mux pin renames its tmux session), then the label and
-the fields its kind can change, the same names `pin edit --set` takes. A
-short note at the top explains the idea: a blank field follows the running
-target, then its last seen value, then what was saved with the pin; typing a
-value keeps one of your own with the pin. Each row has the same three
-columns: the field, its value, and a word on the right for where the value
-comes from (`running`, `last seen`, `saved`, `default`, or `kept` for a value
-you set), which changes to `will keep` or `will follow` while an edit is
-pending. The two lines under the rows describe the focused field: what it is
-following now, or what `Ctrl-R` would go back to. Nothing moves when the
-selection does. Paths complete with `Tab`, the harness row lists the known
-harnesses (`←`/`→` choose one), and a harness's launch options, such as
-skipping permissions, are checkboxes under it that add or remove their flags
-on the `argv` row. `↑`/`↓` move between rows, `Enter` saves, and `Esc`
-cancels.
+the fields its kind can change. The rows use the short names the other forms
+use: the field `pin edit --set` calls `worktree_branch` reads `branch`, and
+`resume_into` reads `resume in`. A short note at the top explains the idea: a
+blank field follows the running target, then its last seen value, then what
+was saved with the pin; typing a value keeps one of your own with the pin.
+Each row has the same three columns: the field, its value, and a word on the
+right for where the value comes from (`running`, `last seen`, `saved`,
+`default`, `unset`, or `kept` for a value you set), which changes to `will
+keep` or `will follow` while an edit is pending. The two lines under the rows
+describe the focused field: what it is following now, or what `Ctrl-R` would
+go back to. Nothing moves when the selection does. `Ctrl-R` acts on these
+field rows only: on a value you set it goes back to following (`will follow`
+until you save), and on a field you only edited it puts the value it had
+back. Paths complete with `Tab`, the harness row lists the known harnesses
+(`←`/`→` choose one), and a harness's launch options, such as skipping
+permissions, are checkboxes under it that add or remove their flags on the
+`argv` row. `↑`/`↓` move between rows, `Enter` saves from any row, and `Esc`
+cancels. A save the form refuses (a name another pin has, an `argv` that
+ends inside a quote) says why on the line just above the keys and moves the
+cursor to the field it is about.
 
 The launch and new mux forms work the same way: `↑`/`↓` move between fields,
 `Tab` and `S-Tab` visit the same fields, `Tab` completes a directory in a

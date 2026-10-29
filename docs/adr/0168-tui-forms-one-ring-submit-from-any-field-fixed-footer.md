@@ -16,7 +16,11 @@ derived-line corner `└`, and the framework names the option boxes built
 from vetted glyphs (`[x]`, `[ ]`, `(•)`, `( )`). Amends
 [ADR 0160](0160-tui-keys-one-model-one-character-rule-one-footer-grammar.md):
 `Space` in `FORM_OPTION_KEYS` is its own action, `FormKey::Toggle`, under
-the same `change` verb.
+the same `change` verb. Amended by
+[ADR 0170](0170-tui-pin-edit-form-is-a-form-with-override-rows.md): the
+form gains override rows with a reset key bound in the form's own table,
+an intro paragraph, and a band of detail lines, and the pin edit form is
+a `Form`.
 
 ## Context
 

@@ -234,6 +234,17 @@ Targeted for 0.2.0, after 0.1.0 is tagged. History, rebuild, and pins
   ends inside a quote or on a lone backslash (they closed the quote or
   dropped the backslash). The forms write an argv back quoted as the
   previews quote it, so `@`, `%`, and `,` stay bare.
+- **The pin edit form works like the other forms.** Its rows use their
+  short names (`branch` for `worktree_branch`, `resume in` for
+  `resume_into`), so values and the harness choices get more room. A
+  save it refuses says why on the line just above its keys and moves the
+  cursor to the field it is about, and on a very short terminal its keys
+  stay whole while the two lines explaining the focused row give way.
+  The line naming the pin sits under the explanation and scrolls with
+  the rows. `Ctrl-R` acts on the field rows only (on the pin name it no
+  longer puts back the old name), and on a field that had no value of
+  your own it puts back the value the field had and shows where that
+  comes from again (it said `will follow`).
 
 ### Fixed
 

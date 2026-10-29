@@ -1207,8 +1207,12 @@ The new mux and launch forms are `Form`s (ADR 0169): the launch form keeps
 the fields that follow others in step around it (the harness's launch
 options over the argv, the derived command row, and the default argv,
 decided when the harness or the cwd changes rather than while drawing). The
-pin edit form draws its rows through the same row kit and body until it
-moves onto it.
+pin edit form is a `Form` too (ADR 0170): its fields are override rows that
+follow the value a pin inherits (ADR 0141's layers) until the operator types
+one, show where the value in effect comes from in one column, and go back to
+following on `Ctrl-R`, a key only that form's table binds. `conspectus` keeps
+the fields by pin kind, their labels and layer words, the rename's checks,
+and the save to the pin store.
 
 Every argv `conspectus` reads from text is split by one grammar (ADR 0169,
 `src/argv.rs`): a POSIX shell's word splitting with nothing expanded. An
