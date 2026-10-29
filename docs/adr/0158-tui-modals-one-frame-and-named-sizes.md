@@ -7,7 +7,11 @@ framework's `ModalFrame`, which sizes once), applies house rules 8, 13,
 and 14 of ADR 0151, and extends ADR 0150 with the framework's `frame`
 module. Amends ADR 0149 item 25: the search modal's rect is the palette
 policy, with the same shares and bounds, whose minimums now beat the
-margin on a small terminal.
+margin on a small terminal. Amended by
+[ADR 0166](0166-tui-text-prompts-one-overlay-that-explains-its-refusals.md):
+a frame may carry a footer on its bottom border, in the title's form, for
+a modal whose body has no row to spare for its keys (the one-line
+prompt).
 
 ## Context
 

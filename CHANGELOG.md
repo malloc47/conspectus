@@ -181,6 +181,16 @@ Targeted for 0.2.0, after 0.1.0 is tagged. History, rebuild, and pins
   `Alt-D`. The prompts' and find prompts' cursor cell takes the
   `field_cursor` style of `[tui.theme]` (black on white), as the forms'
   did, instead of reverse video.
+- **Prompts explain a refusal inside themselves and show their keys.**
+  The rename, worktree branch, and controls max-age and contents prompts
+  show `Enter confirm · Esc cancel` on their bottom border (the branch,
+  max-age, and contents prompts showed no keys; the renames showed them
+  on the status line, which now stays as it was). Input a prompt refuses
+  is explained on an error line inside it, which grows the prompt by one
+  row until the next edit: an invalid max age and an empty branch name
+  used to post a toast, and renaming a pin or a tmux session to nothing
+  closed the prompt with a toast (`pin: nothing entered`, `mux rename:
+  name cannot be empty`) where it now stays open for a fix.
 
 ### Fixed
 
@@ -258,8 +268,9 @@ Targeted for 0.2.0, after 0.1.0 is tagged. History, rebuild, and pins
   `~/…` path the form had shown as valid.
 - **Refused input says why.** An invalid max age in the controls, an
   empty branch name for a new worktree, and an empty name or cwd in the
-  new tmux session form show a toast naming the problem, where they
-  used to do nothing; the field stays open for a fix.
+  new tmux session form say what is wrong (the prompts on their error
+  line, the form in a toast), where they used to do nothing; the field
+  stays open for a fix.
 - **The view tabs fit their pane.** At 100 to 104 columns, and below 53
   in the stacked layout, the pane's border cut the last view's name in
   half (`sea`, `his`), the active one included. Names that don't fit now

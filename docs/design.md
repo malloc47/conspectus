@@ -585,9 +585,9 @@ the gone one that last hosted it; ADR 0029 as amended). The harness-native title
 alias-only model works uniformly across every harness, including those with
 no writeable title field. Renaming a muxed agent session also renames the
 tmux session in lockstep by default. ADR 0029 captures the schema, mux
-node-id stability rule, and lockstep contract. ADR 0030 settles the shared
-TUI text-input primitive used by the rename overlay (and reused by the
-search overlay and inline mux-picker).
+node-id stability rule, and lockstep contract. ADR 0030 settled the shared
+TUI text-input primitive used by the rename overlay; it is now the
+framework's line editor (ADR 0165) and text prompt (ADR 0166).
 
 ## History And Presence
 
@@ -1170,6 +1170,16 @@ is drawn by its `TextField`, which windows the line in terminal cells around
 the cursor and draws the caret from `field_cursor`. An edit reports whether
 the text changed; what `Enter` and `Esc` mean stays with the prompt, form, or
 query around the field.
+
+Prompts are one overlay (ADR 0166). The rename, branch-name, max-age, and
+contents prompts are the framework's `TextPrompt`: `Enter` hands the text to
+a closure `conspectus` supplies, which commits a message, refuses with a
+reason, or keeps the prompt open; a refusal shows on one error line under the
+field until the next edit, and the prompt shows its keys on its bottom
+border, so it is three rows, four while an error shows. `Esc` and `Ctrl-C`
+close it silently; inside the worktree menu and Controls, `Esc` steps back to
+the menu or the panel and `Ctrl-C` closes them. The parsers (`parse_max_age`)
+and the mapping to `Msg` stay in `conspectus`.
 
 ### Graph-to-View Slicing
 

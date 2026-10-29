@@ -884,9 +884,11 @@ still writes the alias.
 prints existing alias entries grouped by store. The output columns are
 tab-separated: `<store>\t<path>\t<endpoint>\t<display_name>`.
 
-In the TUI, capital `R` opens an inline rename overlay on the selected
+In the TUI, capital `R` opens an inline rename prompt on the selected
 agent-session row. `Enter` confirms, `Esc` cancels; lower-case `r`
-continues to mean refresh. The status bar surfaces the result, and
+continues to mean refresh. Confirming an empty name clears a session's
+alias; a tmux session needs a name, so its prompt refuses an empty one
+and says so. The status bar surfaces the result, and
 when the target is a live session (mux indicator `Attached` or
 `Ambiguous`) appends an informational advisory that the alias
 overlays the harness title until the session ends.
@@ -1482,11 +1484,21 @@ form (its cwd and worktree repo), or a pin's `cwd`, `location`, or
 `path` field is expanded to your home directory when the form commits,
 so the command it runs gets the directory, and the pin stores it.
 
-Input a field refuses is explained in a toast. An invalid max age
-(`max age: missing unit (expected ms/s/m/h/d)`), an empty branch name
-for a new worktree, and an empty name or cwd in the new tmux session
-form keep the field open for a fix; renaming a pin or a tmux session to
-nothing closes the prompt and says so.
+Input a field refuses is explained, and the field stays open for a fix.
+A prompt (the rename, branch-name, max-age, and contents prompts) says
+why on an error line inside it, which grows the prompt by a row until
+your next edit: an invalid max age (`max age: missing unit (expected
+ms/s/m/h/d)`), an empty branch name for a new worktree (`worktree:
+branch name is required`), and renaming a pin or a tmux session to
+nothing (`pin: nothing entered`, `mux rename: name cannot be empty`).
+An empty name or cwd in the new tmux session form is explained in a
+toast.
+
+A prompt shows its keys on its bottom border (`Enter confirm · Esc
+cancel`). `Esc` leaves it without saying anything; from the worktree
+menu's branch prompt and the controls' max-age and contents editors it
+steps back to the menu or the controls, and `Ctrl-C` closes those too.
+`q` is typed like any letter.
 
 ### Finding text in a transcript
 
@@ -1546,7 +1558,7 @@ color:
 
 | Severity | Means | Color key | Mark | Toast stays |
 | --- | --- | --- | --- | --- |
-| info | a hint for the next key (`viewing …`, `rename: Enter confirm · Esc cancel`) | `info` | `•` | 1.5 s |
+| info | a hint for the next key (`viewing …`, `worktree: ↑/↓ move · Enter pick · Esc close`) | `info` | `•` | 1.5 s |
 | success | what you asked for happened (`copied: cwd`, `filters cleared`) | `success` | `√` | 1.5 s |
 | warning | the key did not do its job, and nothing failed (`nothing to undo`, a disabled action's reason) | `warning` | `▲` | 3 s |
 | error | something failed (`copy failed: …`) | `error` | `×` | 5 s |
