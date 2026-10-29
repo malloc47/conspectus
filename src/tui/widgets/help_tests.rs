@@ -1,7 +1,10 @@
 use super::*;
+use ratatui::buffer::Buffer;
 use ratatui::crossterm::event::KeyCode;
+use ratatui::layout::Rect;
 use ratatui::text::Line;
 use tuikit::help::HelpRow;
+use tuikit::overlay::Outcome;
 use tuikit::testkit::keys::{ctrl, press};
 
 /// Where a description starts: the indent and the key column.
@@ -10,12 +13,17 @@ const KEY_COLUMN_WIDTH: usize = 16;
 /// The page's lines laid out `width` cells wide (`None` wraps nothing),
 /// the footer last, as the modal draws them.
 fn body_lines_for_width(theme: &Theme, width: Option<usize>) -> Vec<Line<'static>> {
-    let sections = sections(theme);
-    let page = page(theme, &sections);
+    let help = open(theme);
     let width = width.unwrap_or(usize::MAX);
-    let mut lines = page.lines(width);
-    lines.extend(page.footer_lines(width));
+    let mut lines = help.content().lines(theme, width);
+    lines.extend(help.footer().lines(width, theme));
     lines
+}
+
+fn draw(help: &mut KeymapHelp, area: Rect, theme: &Theme) -> Buffer {
+    let mut buf = Buffer::empty(area);
+    help.draw(area, &mut buf, theme);
+    buf
 }
 
 fn body_lines(theme: &Theme) -> Vec<Line<'static>> {
@@ -157,41 +165,37 @@ fn help_body_includes_mux_state_legend() {
 
 #[test]
 fn esc_closes_help_overlay() {
-    let mut state = HelpOverlayState::new();
-    assert_eq!(state.handle_key(press(KeyCode::Esc)), HelpOutcome::Close);
+    let mut help = open(&Theme::default());
+    assert_eq!(help.handle_key(press(KeyCode::Esc)), Outcome::Close);
 }
 
 #[test]
 fn q_and_question_mark_close_help_overlay() {
-    let mut state = HelpOverlayState::new();
-    assert_eq!(
-        state.handle_key(press(KeyCode::Char('q'))),
-        HelpOutcome::Close
-    );
-    assert_eq!(
-        state.handle_key(press(KeyCode::Char('?'))),
-        HelpOutcome::Close
-    );
+    let mut help = open(&Theme::default());
+    assert_eq!(help.handle_key(press(KeyCode::Char('q'))), Outcome::Dismiss);
+    assert_eq!(help.handle_key(press(KeyCode::Char('?'))), Outcome::Close);
 }
 
 #[test]
 fn ctrl_c_closes_help_overlay() {
-    let mut state = HelpOverlayState::new();
-    let event = ctrl('c');
-    assert_eq!(state.handle_key(event), HelpOutcome::Close);
+    let mut help = open(&Theme::default());
+    assert_eq!(help.handle_key(ctrl('c')), Outcome::Dismiss);
 }
 
 #[test]
 fn other_keys_are_swallowed_not_propagated() {
-    let mut state = HelpOverlayState::new();
+    let mut help = open(&Theme::default());
     assert_eq!(
-        state.handle_key(press(KeyCode::Char('j'))),
-        HelpOutcome::Continue
+        help.handle_key(press(KeyCode::Char('j'))),
+        Outcome::Consumed
     );
+    assert_eq!(help.handle_key(press(KeyCode::Enter)), Outcome::Consumed);
     assert_eq!(
-        state.handle_key(press(KeyCode::Enter)),
-        HelpOutcome::Continue
+        help.handle_key(press(KeyCode::Char('/'))),
+        Outcome::Consumed,
+        "the keymap help has no find"
     );
+    assert!(!help.takes_text());
 }
 
 #[test]
@@ -312,11 +316,12 @@ fn narrow_width_wraps_descriptions_under_a_hanging_indent() {
 #[test]
 fn jumping_to_the_end_shows_the_last_lines_not_blank_space() {
     let theme = Theme::default();
-    let mut state = HelpOverlayState::new();
-    state.handle_key(press(KeyCode::Char('G')));
+    let mut help = open(&theme);
+    help.handle_key(press(KeyCode::Char('G')));
     let area = Rect::new(0, 0, 80, 24);
-    let mut buf = Buffer::empty(area);
-    HelpOverlayWidget::new(&state, &theme).render(area, &mut buf);
+    let buf = draw(&mut help, area, &theme);
+    let window = help.window();
+    assert_eq!(window.offset(), window.last_offset(), "the last page");
     let rendered: String = (0..area.height)
         .map(|y| {
             (0..area.width)
@@ -328,6 +333,10 @@ fn jumping_to_the_end_shows_the_last_lines_not_blank_space() {
     assert!(
         rendered.contains("Esc/q/? close"),
         "end of keymap should be visible after G:\n{rendered}"
+    );
+    assert!(
+        rendered.contains("Enter starts it"),
+        "the last legend row, not a blank body:\n{rendered}"
     );
 }
 
@@ -390,12 +399,10 @@ fn the_rendered_help_modal_shows_every_word_as_you_scroll() {
     for terminal in TERMINAL_WIDTHS {
         let area = Rect::new(0, 0, terminal, 24);
         let mut seen = std::collections::BTreeSet::new();
-        let mut state = HelpOverlayState::new();
+        let mut help = open(&theme);
         for _ in 0..80 {
-            let mut buf = Buffer::empty(area);
             // As the app draws it: what the frame showed sizes the next page.
-            let fit = HelpOverlayWidget::new(&state, &theme).draw(area, &mut buf);
-            state.fit(fit);
+            let buf = draw(&mut help, area, &theme);
             // The text columns only: inside the frame, left of the
             // scrollbar.
             let modal = HelpPage::SIZE.rect(area, 0);
@@ -405,7 +412,7 @@ fn the_rendered_help_modal_shows_every_word_as_you_scroll() {
                     .collect();
                 seen.extend(row.split_whitespace().map(str::to_string));
             }
-            state.handle_key(press(KeyCode::PageDown));
+            help.handle_key(press(KeyCode::PageDown));
         }
         let missing: Vec<&String> = source.iter().filter(|word| !seen.contains(*word)).collect();
         assert!(

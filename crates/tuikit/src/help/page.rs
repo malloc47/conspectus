@@ -1,16 +1,16 @@
-//! The help page: its layout in cells, the frame it draws in, and where
-//! it is scrolled.
+//! The help page: its sections laid out in cells, read in a pager.
 
-use ratatui::buffer::Buffer;
-use ratatui::layout::Rect;
+use std::fmt;
+use std::marker::PhantomData;
+use std::ops::Range;
+
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{Paragraph, Widget};
 
 use super::content::{HelpRow, HelpSection};
-use crate::frame::{ModalBody, ModalFrame, ModalSize};
-use crate::keys::{Footer, KeyRow, PagerKey, unavailable_style};
-use crate::scroll::{ScrollGutter, ScrollWindow};
+use crate::frame::ModalSize;
+use crate::keys::{KeyRow, PagerKey, unavailable_style};
+use crate::pager::{NoKeys, Pager, PagerContent, PagerEffect, PagerMode};
 use crate::text;
 use crate::theme::Theme;
 
@@ -26,14 +26,17 @@ const NAME_COLUMN_MIN: usize = 16;
 /// The fewest cells a description or blurb is wrapped to. A page too
 /// narrow for that many beside its column leaves the text on one row.
 const MIN_TEXT: usize = 8;
-/// Pages this narrow, or narrower, leave the footer on one row.
-const MIN_FOOTER: usize = 8;
 
-/// A help page: its sections laid out for the frame's width, scrolled,
-/// with a footer that stays on the frame's last rows.
+/// A help page: sections laid out for the width its pager gives, as the
+/// content of a [`Pager`].
 ///
-/// The page draws in a [`ModalFrame`] at [`HelpPage::SIZE`] titled
-/// `Help`. Its layout, at any width:
+/// The page is the rows; the pager is the reading. [`pager`](Self::pager)
+/// puts the page in a [`Pager`] framed at [`HelpPage::SIZE`], titled
+/// `Help`, which
+/// scrolls it (one window, viewport-sized pages, half pages, `g`/`G` with
+/// the end kept), draws the scrollbar when the page is taller than the
+/// frame, and generates the footer from the table that scrolls and closes
+/// the page. The layout, at any width:
 ///
 /// - **Headings** in bold, word-wrapped, then the section's rows, then a
 ///   blank line.
@@ -47,175 +50,117 @@ const MIN_FOOTER: usize = 8;
 ///   to the section's mark column, the name in bold padded to the
 ///   section's name column (16 cells, or the longest name and a space),
 ///   and the blurb beside them under a hanging indent.
-/// - **The footer** generated from the key table that scrolls and closes
-///   the page ([`footer`](Self::footer)), in the theme's `muted` look and
-///   wrapped only between its segments. It stays on the last rows whatever
-///   the scroll, leaving at least one row to the rest; footer rows that do
-///   not fit there scroll with the page.
-/// - **A scrollbar** in a 1-column gutter when the page is taller than the
-///   frame, the text laid out one cell narrower to make room for it.
 ///
-/// Drawing returns the window the scrolling part showed; keep it in a
-/// [`HelpScroll`] so the next page key moves by the rows on screen and an
-/// offset past the end comes back.
-#[derive(Clone, Debug)]
-pub struct HelpPage<'a> {
-    theme: &'a Theme,
-    sections: &'a [HelpSection],
-    title: Line<'a>,
-    footer: Footer,
-    offset: usize,
+/// `M` is the message type of the pager the page is read in, so the page
+/// can sit on a host's modal stack beside its other overlays; the page
+/// itself sends none.
+pub struct HelpPage<M = ()> {
+    sections: Vec<HelpSection>,
+    title: Line<'static>,
+    /// The last layout, and the width it was laid out at.
+    lines: Vec<Line<'static>>,
+    laid_out: Option<u16>,
+    message: PhantomData<fn() -> M>,
 }
 
-impl<'a> HelpPage<'a> {
-    /// How large a help page is: a reader's size, as wide as the screen
-    /// allows up to 100 columns and as tall as it allows.
+impl HelpPage {
+    /// The size every help page draws at: a reader's, as wide as the
+    /// screen allows up to 100 columns and as tall as it allows.
     pub const SIZE: ModalSize = ModalSize::WIDE;
+}
 
-    /// A page of `sections`, titled `Help`, at the top, with no footer.
-    pub fn new(theme: &'a Theme, sections: &'a [HelpSection]) -> Self {
+impl<M> HelpPage<M> {
+    /// A page of `sections`, titled `Help`.
+    pub fn new(sections: Vec<HelpSection>) -> Self {
         Self {
-            theme,
             sections,
             title: Line::from("Help"),
-            footer: Footer::default(),
-            offset: 0,
+            lines: Vec::new(),
+            laid_out: None,
+            message: PhantomData,
         }
     }
 
     /// Sets the title.
     #[must_use]
-    pub fn title(mut self, title: impl Into<Line<'a>>) -> Self {
+    pub fn title(mut self, title: impl Into<Line<'static>>) -> Self {
         self.title = title.into();
         self
     }
 
-    /// Generates the footer from `table`, the keys that scroll and close
-    /// the page.
-    #[must_use]
-    pub fn footer<A>(mut self, table: &[KeyRow<A>]) -> Self {
-        self.footer = Footer::new(table);
-        self
+    /// The page's sections.
+    pub fn sections(&self) -> &[HelpSection] {
+        &self.sections
     }
 
-    /// Scrolls the page to where `scroll` is.
-    #[must_use]
-    pub fn scrolled(mut self, scroll: &HelpScroll) -> Self {
-        self.offset = scroll.offset();
-        self
-    }
-
-    /// The sections laid out `width` cells wide, as the page draws them
-    /// above its footer. A width of `usize::MAX` wraps nothing.
-    pub fn lines(&self, width: usize) -> Vec<Line<'static>> {
+    /// The sections laid out `width` cells wide, as the page's rows. A
+    /// width of `usize::MAX` wraps nothing.
+    pub fn lines(&self, theme: &Theme, width: usize) -> Vec<Line<'static>> {
         let mut out = Vec::new();
-        for section in self.sections {
-            section_lines(section, self.theme, width, &mut out);
+        for section in &self.sections {
+            section_lines(section, theme, width, &mut out);
         }
         out
     }
 
-    /// The footer laid out `width` cells wide, in its `muted` look.
-    pub fn footer_lines(&self, width: usize) -> Vec<Line<'static>> {
-        if self.footer.is_empty() {
-            return Vec::new();
+    /// The page in a pager framed at [`HelpPage::SIZE`], resolving
+    /// `table`: the keys that scroll and close it, from which its footer
+    /// is generated. A page opened by a key adds that key to the table as
+    /// another close.
+    pub fn pager(self, table: &'static [KeyRow<PagerKey>]) -> Pager<Self> {
+        Pager::new(self)
+            .mode(PagerMode::Modal(HelpPage::SIZE))
+            .keys(table)
+    }
+}
+
+impl<M> Clone for HelpPage<M> {
+    fn clone(&self) -> Self {
+        Self {
+            sections: self.sections.clone(),
+            title: self.title.clone(),
+            lines: self.lines.clone(),
+            laid_out: self.laid_out,
+            message: PhantomData,
         }
-        let width = if width <= MIN_FOOTER {
-            usize::MAX
-        } else {
-            width
-        };
-        let muted = Style::default().add_modifier(self.theme.muted);
-        self.footer
-            .lines(width, self.theme)
-            .into_iter()
-            .map(|line| restyle(line, |style| muted.patch(style)))
-            .collect()
     }
+}
 
-    /// Draws the page in its frame over `area` and returns the window its
-    /// scrolling part showed, the offset brought inside the page.
-    pub fn render(self, area: Rect, buf: &mut Buffer) -> ScrollWindow {
-        let frame = ModalFrame::new(self.theme, Self::SIZE).title(self.title.clone());
-        frame.render(area, buf, Body { page: &self })
+impl<M> fmt::Debug for HelpPage<M> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("HelpPage")
+            .field("sections", &self.sections)
+            .field("title", &self.title)
+            .field("laid_out", &self.laid_out)
+            .finish_non_exhaustive()
     }
+}
 
-    /// The page split, at `width` by `height` cells, into what scrolls and
-    /// the footer rows that stay.
-    fn layout(&self, width: usize, height: usize) -> Layout {
-        let split = |text_width: usize| {
-            let mut body = self.lines(text_width);
-            let mut footer = self.footer_lines(text_width);
-            let stay = footer.len().min(height.saturating_sub(1));
-            let spill = footer.len() - stay;
-            body.extend(footer.drain(..spill));
-            Layout {
-                body_height: height - stay,
-                body,
-                footer,
-                text_width,
-            }
-        };
-        let page = split(width);
-        if page.body.len() <= page.body_height || width <= 1 {
-            return page;
+/// A help page is a pager's content: its rows are the laid-out sections,
+/// its header the title, and it has no keys of its own.
+impl<M> PagerContent for HelpPage<M> {
+    type Message = M;
+    type Action = NoKeys;
+    const KEYS: &'static [KeyRow<NoKeys>] = &[];
+
+    fn layout(&mut self, width: u16, theme: &Theme) -> usize {
+        if self.laid_out != Some(width) {
+            self.lines = self.lines(theme, usize::from(width));
+            self.laid_out = Some(width);
         }
-        // The scrollbar takes a column once the page overflows.
-        split(width - 1)
-    }
-}
-
-/// A page laid out for its frame.
-struct Layout {
-    /// The rows that scroll.
-    body: Vec<Line<'static>>,
-    /// The rows that stay at the bottom.
-    footer: Vec<Line<'static>>,
-    /// Rows the scrolling part has.
-    body_height: usize,
-    /// Columns the text has: one fewer than the frame's when a scrollbar
-    /// is drawn.
-    text_width: usize,
-}
-
-/// The page inside its frame.
-struct Body<'p, 'a> {
-    page: &'p HelpPage<'a>,
-}
-
-impl ModalBody for Body<'_, '_> {
-    type Output = ScrollWindow;
-
-    /// A help page fills its frame, so it is laid out in `render`, where
-    /// the height is known.
-    fn measure(&mut self, _width: u16) -> u16 {
-        0
+        self.lines.len()
     }
 
-    fn render(self, area: Rect, buf: &mut Buffer) -> ScrollWindow {
-        let layout = self
-            .page
-            .layout(usize::from(area.width), usize::from(area.height));
-        let body_height = u16::try_from(layout.body_height).unwrap_or(area.height);
-        let window = ScrollWindow::new(layout.body_height, layout.body.len()).at(self.page.offset);
-        let gutter = ScrollGutter::layout(
-            Rect {
-                height: body_height,
-                ..area
-            },
-            layout.body.len(),
-        );
-        let shown = layout.body[window.visible()].to_vec();
-        Paragraph::new(shown).render(gutter.content(), buf);
-        let footer_area = Rect {
-            y: area.y + body_height,
-            width: u16::try_from(layout.text_width).unwrap_or(area.width),
-            height: area.height - body_height,
-            ..area
-        };
-        Paragraph::new(layout.footer).render(footer_area, buf);
-        gutter.render(&window, buf);
-        window
+    fn rows(&self, range: Range<usize>, _theme: &Theme) -> Vec<Line<'static>> {
+        self.lines[range].to_vec()
+    }
+
+    fn header(&self, _width: usize, _theme: &Theme) -> Line<'static> {
+        self.title.clone()
+    }
+
+    fn apply(&mut self, action: NoKeys) -> PagerEffect<M> {
+        match action {}
     }
 }
 
@@ -346,143 +291,6 @@ fn restyle(mut line: Line<'static>, with: impl Fn(Style) -> Style) -> Line<'stat
         span.style = with(span.style);
     }
     line
-}
-
-/// Where a help page is scrolled, kept between draws.
-///
-/// A step moves the offset the page asks for; a step past the end is
-/// allowed, so the end key works before the page has been drawn. Each
-/// draw shows the page at that offset brought inside it and returns the
-/// window it showed; [`keep`](Self::keep) takes the window back, so the
-/// offset returns inside the page at once (one key up after the end
-/// scrolls up, however many keys went past it) and a page key moves by
-/// the rows the page showed (house rule 12).
-///
-/// ```
-/// use ratatui::buffer::Buffer;
-/// use ratatui::layout::Rect;
-/// use tuikit::help::{HelpPage, HelpScroll, HelpSection};
-/// use tuikit::theme::Theme;
-///
-/// let theme = Theme::default();
-/// let mut section = HelpSection::new("Rows");
-/// for n in 0..40 {
-///     section = section.keys(format!("{n}"), "a row");
-/// }
-/// let sections = [section];
-/// let area = Rect::new(0, 0, 60, 16);
-/// let mut scroll = HelpScroll::new();
-///
-/// scroll.to_bottom();
-/// let window = HelpPage::new(&theme, &sections)
-///     .scrolled(&scroll)
-///     .render(area, &mut Buffer::empty(area));
-/// scroll.keep(window);
-/// assert_eq!(scroll.offset(), window.last_offset(), "the end, not past it");
-/// assert_eq!(scroll.page(), window.viewport(), "a page is the rows shown");
-///
-/// scroll.up(1);
-/// assert_eq!(scroll.offset(), window.last_offset() - 1);
-/// ```
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
-pub struct HelpScroll {
-    offset: usize,
-    page: usize,
-}
-
-impl HelpScroll {
-    /// At the top, before any draw.
-    pub const fn new() -> Self {
-        Self { offset: 0, page: 0 }
-    }
-
-    /// Scrolled to `offset`, before any draw.
-    pub const fn at(offset: usize) -> Self {
-        Self { offset, page: 0 }
-    }
-
-    /// The first row the page asks to show. It may pass the end until the
-    /// next draw's window is kept.
-    pub const fn offset(&self) -> usize {
-        self.offset
-    }
-
-    /// How far a page key moves: the rows the last draw showed, at least
-    /// one.
-    pub const fn page(&self) -> usize {
-        if self.page == 0 { 1 } else { self.page }
-    }
-
-    /// Scrolls down `rows` rows.
-    pub fn down(&mut self, rows: usize) {
-        self.offset = self.offset.saturating_add(rows);
-    }
-
-    /// Scrolls up `rows` rows, stopping at the top.
-    pub fn up(&mut self, rows: usize) {
-        self.offset = self.offset.saturating_sub(rows);
-    }
-
-    /// Scrolls down a [`page`](Self::page).
-    pub fn page_down(&mut self) {
-        self.down(self.page());
-    }
-
-    /// Scrolls up a [`page`](Self::page).
-    pub fn page_up(&mut self) {
-        self.up(self.page());
-    }
-
-    /// Scrolls down half a [`page`](Self::page), at least one row.
-    pub fn half_page_down(&mut self) {
-        self.down((self.page() / 2).max(1));
-    }
-
-    /// Scrolls up half a [`page`](Self::page), at least one row.
-    pub fn half_page_up(&mut self) {
-        self.up((self.page() / 2).max(1));
-    }
-
-    /// Scrolls to the first row.
-    pub fn to_top(&mut self) {
-        self.offset = 0;
-    }
-
-    /// Scrolls to the end: the next draw shows the last page.
-    pub fn to_bottom(&mut self) {
-        self.offset = usize::MAX;
-    }
-
-    /// Does what a standard pager key asks: the scroll keys move the page
-    /// and return `true`; the keys that leave, find, open help, or copy
-    /// are the control's and return `false`.
-    pub fn apply(&mut self, key: PagerKey) -> bool {
-        match key {
-            PagerKey::Down => self.down(1),
-            PagerKey::Up => self.up(1),
-            PagerKey::PageDown => self.page_down(),
-            PagerKey::PageUp => self.page_up(),
-            PagerKey::HalfPageDown => self.half_page_down(),
-            PagerKey::HalfPageUp => self.half_page_up(),
-            PagerKey::Top => self.to_top(),
-            PagerKey::Bottom => self.to_bottom(),
-            PagerKey::Abort
-            | PagerKey::Close
-            | PagerKey::Find
-            | PagerKey::FindNext
-            | PagerKey::FindPrev
-            | PagerKey::Help
-            | PagerKey::Copy => return false,
-        }
-        true
-    }
-
-    /// Takes in the window a draw showed: the offset comes back inside the
-    /// page, and a page key moves by the rows on screen.
-    pub fn keep(&mut self, window: ScrollWindow) {
-        self.offset = window.offset();
-        self.page = window.viewport();
-    }
 }
 
 #[cfg(test)]

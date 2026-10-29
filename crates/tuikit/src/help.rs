@@ -1,13 +1,15 @@
 //! Help: the page that lists what keys do, and the generator that writes
 //! it from a key table.
 //!
-//! This is a layer 2 convention (house rules 8 and 12). A help page is a
-//! reader in a modal frame: section headings, a key column in the accent
-//! color with what each key does wrapped beside it, legends for the marks
-//! a screen draws, a scrollbar when the page is taller than its frame, and
-//! a footer generated from the key table that scrolls and closes it. Every
-//! help page of a program draws through [`HelpPage`], so the pages share
-//! one frame, one column grid, and one footer.
+//! This is a layer 2 convention (house rules 8 and 12). A help page is
+//! the content of a framed [`Pager`](crate::pager::Pager): section
+//! headings, a key column in the accent color with what each key does
+//! wrapped beside it, and legends for the marks a screen draws; the pager
+//! scrolls it, draws a scrollbar when the page is taller than its frame,
+//! and generates the footer from the key table that scrolls and closes
+//! it. Every help page of a program is a [`HelpPage`] in a pager, so the
+//! pages share one frame, one column grid, one footer, and one way of
+//! scrolling with every other reader.
 //!
 //! - **Content.** A page is a list of [`HelpSection`]s: a heading and its
 //!   [`HelpRow`]s, each a row of keys and what they do or a legend entry
@@ -24,21 +26,22 @@
 //!   [`undescribed`] finds a key the page would leave out, so a test fails
 //!   when a key has no description.
 //! - **The page.** [`HelpPage`] lays the sections out in cells for the
-//!   width its frame gives, through [`text`](crate::text), draws them in a
-//!   [`ModalFrame`](crate::frame::ModalFrame) at [`HelpPage::SIZE`] with a
-//!   [`ScrollGutter`](crate::scroll::ScrollGutter) when they overflow, and
-//!   keeps the footer on the frame's last rows.
-//! - **Scrolling.** [`HelpScroll`] is where the page is. A key moves it;
-//!   the draw brings it back inside the page and returns the window it
-//!   showed, which the scroll keeps, so a page key moves by the rows on
-//!   screen and no key presses pile up past the end.
+//!   width its pager gives, through [`text`](crate::text), and is a
+//!   [`PagerContent`](crate::pager::PagerContent);
+//!   [`HelpPage::pager`] reads it in a pager framed at
+//!   [`HelpPage::SIZE`] that resolves the table the page closes with.
+//! - **Scrolling.** The pager's: one window clamped on every draw, so a
+//!   page key moves by the rows on screen, no key presses pile up past
+//!   the end, and `G` shows the last page.
 //!
 //! ```
 //! use ratatui::buffer::Buffer;
 //! use ratatui::crossterm::event::KeyCode;
 //! use ratatui::layout::Rect;
-//! use tuikit::help::{HelpAction, HelpEntry, HelpPage, HelpScroll, sections_for, undescribed};
+//! use tuikit::help::{HelpAction, HelpEntry, HelpPage, sections_for, undescribed};
 //! use tuikit::keys::{KeyRow, PAGER_KEYS, alias, ch, ctrl, key};
+//! use tuikit::overlay::Outcome;
+//! use tuikit::testkit::keys::{press, typed};
 //! use tuikit::theme::Theme;
 //!
 //! /// What a document reader's keys do.
@@ -80,18 +83,16 @@
 //! // Every key the table binds is described.
 //! assert!(undescribed(READER_KEYS).is_empty());
 //!
-//! // Draw the page with a footer from the keys that scroll and close it,
-//! // and keep the window it showed.
+//! // Read the page in a pager whose table scrolls and closes it, which
+//! // also generates its footer.
 //! let theme = Theme::default();
 //! let area = Rect::new(0, 0, 80, 24);
 //! let mut buf = Buffer::empty(area);
-//! let mut scroll = HelpScroll::new();
-//! let window = HelpPage::new(&theme, &sections)
-//!     .footer(PAGER_KEYS)
-//!     .scrolled(&scroll)
-//!     .render(area, &mut buf);
-//! scroll.keep(window);
-//! assert!(!window.overflows(), "a short page needs no scrollbar");
+//! let mut page = HelpPage::<()>::new(sections).pager(PAGER_KEYS);
+//! page.draw(area, &mut buf, &theme);
+//! assert!(!page.window().overflows(), "a short page needs no scrollbar");
+//! assert_eq!(page.handle_key(typed('G')), Outcome::Consumed);
+//! assert_eq!(page.handle_key(press(KeyCode::Esc)), Outcome::Close);
 //! ```
 //!
 //! # What a host keeps
@@ -106,7 +107,7 @@ mod content;
 mod page;
 
 pub use content::{HelpAction, HelpEntry, HelpRow, HelpSection, sections_for, undescribed};
-pub use page::{HelpPage, HelpScroll};
+pub use page::HelpPage;
 
 #[cfg(test)]
 #[path = "help_tests.rs"]

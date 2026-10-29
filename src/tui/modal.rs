@@ -116,8 +116,9 @@ macro_rules! modals {
 }
 
 modals! {
-    /// `?` help page.
-    Help(crate::tui::widgets::help::HelpOverlayState),
+    /// `?` help page: the framework's pager over the keymap's help page,
+    /// closed by `?` too. Boxed to keep [`Modal`] small.
+    Help(Box<crate::tui::widgets::help::KeymapHelp>),
     /// Controls overlay (ADR 0031, ADR 0176): the framework's settings
     /// panel over view, grouping, filters, sort, and search settings,
     /// applied as they change. Its rows are built from the App on every

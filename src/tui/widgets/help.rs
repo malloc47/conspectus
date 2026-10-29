@@ -1,106 +1,34 @@
-//! `?` help overlay: the keymap's reference card.
+//! `?` help overlay: the keymap's reference card, the framework's help
+//! page (`tuikit::help::HelpPage`) read in its pager.
 //!
-//! This page draws through `page`, the framework's help page with the
-//! footer of the keys that scroll and close it. The viewers' pages are the
-//! same page generated from their key tables, with the footer of a
-//! viewer's help level (where `q` leaves the viewer), so the three share
-//! one frame, one column grid, and one heading style. This one's rows are hand-written prose, kept as annotation
-//! sections until the program-wide keymap carries help text the page can
-//! be generated from (backlog `CSP-760`), followed by legends of the
-//! marks the screens draw.
+//! The pager owns the reading: scrolling and viewport-sized paging, `g`
+//! and `G` (which keeps to the last page), the scrollbar, `Esc`, `q`, and
+//! `?` (the key that opened it) closing, and the footer generated from
+//! those keys. The viewers' pages are the same page generated from their
+//! key tables, with the footer of a viewer's help level (where `q` leaves
+//! the viewer), so the three share one frame, one column grid, and one
+//! heading style. This one's rows are hand-written prose, kept as
+//! annotation sections until the program-wide keymap carries help text the
+//! page can be generated from (backlog `CSP-760`), followed by legends of
+//! the marks the screens draw.
 
-use ratatui::buffer::Buffer;
-use ratatui::crossterm::event::KeyEvent;
-use ratatui::layout::Rect;
 use ratatui::style::{Modifier, Style};
 use ratatui::text::Span;
-use ratatui::widgets::Widget;
 use tuikit::glyphs::marks;
-use tuikit::help::{HelpPage, HelpScroll, HelpSection};
-use tuikit::keys::{PagerKey, resolve};
-use tuikit::scroll::ScrollWindow;
+use tuikit::help::{HelpPage, HelpSection};
+use tuikit::pager::Pager;
 
-use crate::tui::Theme;
 use crate::tui::icons::{NodeKind, node_kind_style};
 use crate::tui::keybindings::overlay::HELP_KEYS;
+use crate::tui::{Msg, Theme};
 
-/// Pure state for the help overlay: where the page is scrolled, so long
-/// keymaps stay reachable on short terminals.
-#[derive(Debug, Clone, Default)]
-pub struct HelpOverlayState {
-    pub scroll: HelpScroll,
-}
+/// The keymap help: the framework's pager over the keymap's page.
+pub type KeymapHelp = Pager<HelpPage<Msg>>;
 
-impl HelpOverlayState {
-    pub fn new() -> Self {
-        Self::default()
-    }
-
-    /// Dispatch a crossterm key event. Esc / Ctrl-C / `q` / `?` close
-    /// the overlay; j/k/PgDn/PgUp/g/G scroll the keymap if it overflows
-    /// the modal; everything else is swallowed so navigation keys
-    /// don't accidentally affect the row tree behind it.
-    pub fn handle_key(&mut self, event: KeyEvent) -> HelpOutcome {
-        match resolve(HELP_KEYS, event) {
-            Some(PagerKey::Abort | PagerKey::Close) => HelpOutcome::Close,
-            Some(key) => {
-                self.scroll.apply(key);
-                HelpOutcome::Continue
-            }
-            None => HelpOutcome::Continue,
-        }
-    }
-
-    /// Take in the window the last draw showed: the offset comes back
-    /// inside the page (so `G`, or `j` past the end, is undone by the next
-    /// key up) and page keys move by the rows on screen.
-    pub fn fit(&mut self, window: ScrollWindow) {
-        self.scroll.keep(window);
-    }
-}
-
-/// What the host should do after passing a key event through the
-/// help overlay.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum HelpOutcome {
-    Continue,
-    Close,
-}
-
-/// Centered modal that renders the keymap reference: the keymap's
-/// sections, then the legends, scrolled when they overflow the modal.
-pub struct HelpOverlayWidget<'a> {
-    state: &'a HelpOverlayState,
-    theme: &'a Theme,
-}
-
-impl<'a> HelpOverlayWidget<'a> {
-    pub fn new(state: &'a HelpOverlayState, theme: &'a Theme) -> Self {
-        Self { state, theme }
-    }
-}
-
-impl HelpOverlayWidget<'_> {
-    /// Draw the help and report the window the page showed, for
-    /// [`HelpOverlayState::fit`].
-    pub fn draw(self, area: Rect, buf: &mut Buffer) -> ScrollWindow {
-        let sections = sections(self.theme);
-        page(self.theme, &sections)
-            .scrolled(&self.state.scroll)
-            .render(area, buf)
-    }
-}
-
-impl Widget for HelpOverlayWidget<'_> {
-    fn render(self, area: Rect, buf: &mut Buffer) {
-        self.draw(area, buf);
-    }
-}
-
-/// A help page of `sections` as the TUI draws every help page: the
-/// framework's page, with the footer of the keys that scroll and close it.
-pub(crate) fn page<'a>(theme: &'a Theme, sections: &'a [HelpSection]) -> HelpPage<'a> {
-    HelpPage::new(theme, sections).footer(HELP_KEYS)
+/// The keymap help at the top, its marks in `theme`'s styles, resolving
+/// `HELP_KEYS` (the pager's keys and `?`, closing as it opened).
+pub fn open(theme: &Theme) -> KeymapHelp {
+    HelpPage::new(sections(theme)).pager(HELP_KEYS)
 }
 
 /// The keymap page: the keymap's sections, then the legends.

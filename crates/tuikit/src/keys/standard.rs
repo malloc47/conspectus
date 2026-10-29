@@ -191,15 +191,16 @@ pub const READER_KEYS: &[KeyRow<PagerKey>] = &[
     shown(ch('?'), PagerKey::Help, "?", "help"),
 ];
 
-/// A pager's help page, a level of the pager: the scrolling of
-/// [`PAGER_SCROLL_KEYS`] moves the page, `Esc` and `?` go back to the
-/// pager, and `q` and `Ctrl-C` leave the pager at once: `j/k/PgDn/PgUp
-/// scroll · Esc/? back · q close`.
+/// A pager's help page, a level of the pager read in a pager of its own:
+/// the scrolling of [`PAGER_SCROLL_KEYS`] moves the page, `Esc` and `?`
+/// (the key that opened it) close it, going back to the pager, and `q`
+/// and `Ctrl-C` leave the pager at once: `j/k/PgDn/PgUp scroll · Esc/?
+/// back · q close`.
 pub const PAGER_HELP_KEYS: &[KeyRow<PagerKey>] = &[
     alias(ctrl('c'), PagerKey::Abort),
     include(PAGER_SCROLL_KEYS),
     shown(key(KeyCode::Esc), PagerKey::Close, "Esc", "back"),
-    shown(ch('?'), PagerKey::Help, "?", "back"),
+    shown(ch('?'), PagerKey::Close, "?", "back"),
     shown(ch('q'), PagerKey::Abort, "q", "close"),
 ];
 

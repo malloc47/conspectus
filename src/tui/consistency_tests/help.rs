@@ -8,33 +8,39 @@
 use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
 use ratatui::style::{Color, Modifier};
-use ratatui::widgets::Widget;
-use tuikit::help::{HelpPage, HelpScroll};
+use tuikit::help::HelpPage;
 use tuikit::testkit::conformance::same_chrome;
 
 use crate::tui::Theme;
 use crate::tui::keybindings::overlay::VIEWER_KEYS;
-use crate::tui::widgets::help::{HelpOverlayState, HelpOverlayWidget};
-use crate::tui::widgets::{pane_viewer, viewer_help};
+use crate::tui::widgets::{help, pane_viewer, viewer_help};
 
 const SIZES: [(u16, u16); 4] = [(60, 20), (80, 24), (120, 40), (160, 50)];
 
 /// The three pages, by name.
 const PAGES: [&str; 3] = ["keymap", "viewer", "pane viewer"];
 
+/// The page drawn at its top, or at its end for a `scroll` past the top.
 fn page_at(page: &str, area: Rect, theme: &Theme, scroll: usize) -> Buffer {
     let mut buf = Buffer::empty(area);
-    let scroll = HelpScroll::at(scroll);
+    let at_end = scroll > 0;
     match page {
         "keymap" => {
-            let state = HelpOverlayState { scroll };
-            HelpOverlayWidget::new(&state, theme).render(area, &mut buf);
+            let mut help = help::open(theme);
+            if at_end {
+                help.to_end();
+            }
+            help.draw(area, &mut buf, theme);
         }
         "viewer" => {
-            viewer_help::render(VIEWER_KEYS, area, &mut buf, theme, &scroll);
+            let mut help = viewer_help::page(VIEWER_KEYS);
+            if at_end {
+                help.to_end();
+            }
+            help.draw(area, &mut buf, theme);
         }
         _ => {
-            pane_help(area, &mut buf, theme, scroll.offset() > 0);
+            pane_help(area, &mut buf, theme, at_end);
         }
     }
     buf
@@ -51,7 +57,7 @@ fn pane_help(area: Rect, buf: &mut Buffer, theme: &Theme, at_end: bool) -> usize
         viewer.handle_key(typed('G'));
     }
     viewer.draw(area, buf, theme);
-    viewer.help_scroll().map_or(0, HelpScroll::offset)
+    viewer.help_page().map_or(0, |help| help.window().offset())
 }
 
 fn page(page: &str, area: Rect, theme: &Theme) -> Buffer {
@@ -200,9 +206,10 @@ fn the_viewer_helps_scroll_where_the_keymap_help_does() {
     for table in [0, 1] {
         let max_scroll = |area: Rect| {
             let mut buf = Buffer::empty(area);
-            let scroll = HelpScroll::new();
             if table == 0 {
-                viewer_help::render(VIEWER_KEYS, area, &mut buf, &theme, &scroll).last_offset()
+                let mut help = viewer_help::page(VIEWER_KEYS);
+                help.draw(area, &mut buf, &theme);
+                help.window().last_offset()
             } else {
                 pane_help(area, &mut buf, &theme, true)
             }

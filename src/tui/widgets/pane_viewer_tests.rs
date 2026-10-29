@@ -214,7 +214,7 @@ fn the_help_page_is_drawn_over_the_viewer_and_scrolls_inside_itself() {
     // The page fits, so a key past its end is taken back by the draw.
     press(&mut viewer, KeyCode::Char('G'));
     render(&mut viewer, 90, 40);
-    let offset = viewer.help_scroll().map(tuikit::help::HelpScroll::offset);
+    let offset = viewer.help_page().map(|help| help.window().offset());
     assert_eq!(offset, Some(0));
 }
 

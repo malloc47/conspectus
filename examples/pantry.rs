@@ -28,7 +28,7 @@ use std::borrow::Cow;
 use conspectus::tui::rows::RowId;
 use conspectus::tui::search::SearchItem;
 use conspectus::tui::theme::{KeyOrigin, TokenValue};
-use conspectus::tui::widgets::help::{HelpOverlayState, HelpOverlayWidget};
+use conspectus::tui::widgets::help;
 use conspectus::tui::widgets::search::{SearchOverlayState, SearchOverlayWidget};
 use conspectus::tui::widgets::value_modal::{ValueModalState, ValueModalWidget};
 use conspectus::tui::{Grouping, SessionsGrouping, Sort, Theme, View};
@@ -260,10 +260,9 @@ impl Ingredient for HelpVariant {
 
     fn render(&self, area: Rect, buf: &mut Buffer) {
         let theme = Theme::default();
-        let state = HelpOverlayState {
-            scroll: tuikit::help::HelpScroll::at(self.scroll),
-        };
-        HelpOverlayWidget::new(&state, &theme).render(area, buf);
+        let mut help = help::open(&theme);
+        help.scroll_by(i32::try_from(self.scroll).unwrap_or(i32::MAX));
+        help.draw(area, buf, &theme);
     }
 }
 

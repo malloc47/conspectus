@@ -1,7 +1,7 @@
 use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
 use ratatui::text::Line;
-use tuikit::help::{HelpPage, HelpRow, HelpSection, undescribed};
+use tuikit::help::{HelpRow, HelpSection, undescribed};
 use tuikit::keys::{KeyRow, PAGER_HELP_KEYS, key_label, rows};
 use unicode_width::UnicodeWidthStr;
 
@@ -12,13 +12,12 @@ use crate::viewer::input::ViewerMsg;
 fn render_text(width: u16, height: u16, scroll: usize) -> String {
     let area = Rect::new(0, 0, width, height);
     let mut buf = Buffer::empty(area);
-    render(
-        VIEWER_KEYS,
-        area,
-        &mut buf,
-        &Theme::default(),
-        &HelpScroll::at(scroll),
-    );
+    let mut help = page(VIEWER_KEYS);
+    match i32::try_from(scroll) {
+        Ok(rows) => help.scroll_by(rows),
+        Err(_) => help.to_end(),
+    }
+    help.draw(area, &mut buf, &Theme::default());
     (0..height)
         .map(|y| {
             (0..width)
@@ -41,10 +40,9 @@ fn help_lines<A: HelpAction>(
     theme: &Theme,
     width: usize,
 ) -> Vec<Line<'static>> {
-    let sections = sections_for(table);
-    let page = HelpPage::new(theme, &sections).footer(PAGER_HELP_KEYS);
-    let mut lines = page.lines(width);
-    lines.extend(page.footer_lines(width));
+    let help = page(table);
+    let mut lines = help.content().lines(theme, width);
+    lines.extend(help.footer().lines(width, theme));
     lines
 }
 
@@ -198,11 +196,15 @@ fn the_keys_the_footer_names_do_what_it_says_in_the_viewer() {
             PagerKey::Bottom => ViewerMsg::JumpToEnd,
             // `?` closes the help as it opened it; Esc steps back to the
             // viewer; `q` and Ctrl-C leave it.
-            PagerKey::Help => ViewerMsg::ToggleHelp,
+            PagerKey::Close if key_label(key) == "?" => ViewerMsg::ToggleHelp,
             PagerKey::Close => ViewerMsg::Close,
             PagerKey::Abort => ViewerMsg::Quit,
-            PagerKey::Copy | PagerKey::Find | PagerKey::FindNext | PagerKey::FindPrev => {
-                unreachable!("the help level binds no copy and no find")
+            PagerKey::Help
+            | PagerKey::Copy
+            | PagerKey::Find
+            | PagerKey::FindNext
+            | PagerKey::FindPrev => {
+                unreachable!("the help level binds no help, copy, or find")
             }
         };
         expect(event, viewer);
@@ -247,16 +249,11 @@ fn a_key_that_cannot_act_now_is_dimmed_on_the_help_page() {
     );
 }
 
-/// How far the page can scroll in `area`, as its render reports it.
+/// How far the page can scroll in `area`, as its pager's draw reports it.
 fn max_scroll(area: Rect, theme: &Theme) -> usize {
-    render(
-        VIEWER_KEYS,
-        area,
-        &mut Buffer::empty(area),
-        theme,
-        &HelpScroll::new(),
-    )
-    .last_offset()
+    let mut help = page(VIEWER_KEYS);
+    help.draw(area, &mut Buffer::empty(area), theme);
+    help.window().last_offset()
 }
 
 #[test]
@@ -285,13 +282,13 @@ fn draw_clamps_the_viewers_scroll_position() {
     let mut state =
         crate::viewer::state::ViewerState::new(crate::viewer::model::TranscriptDocument::default());
     state.show_help = true;
-    state.help_scroll.to_bottom();
+    state.help.to_end();
     terminal
         .draw(|frame| {
             let area = frame.area();
             draw(
                 VIEWER_KEYS,
-                &mut state.help_scroll,
+                &mut state.help,
                 &Theme::default(),
                 frame.buffer_mut(),
                 area,
@@ -299,12 +296,12 @@ fn draw_clamps_the_viewers_scroll_position() {
         })
         .unwrap();
     assert_eq!(
-        state.help_scroll.offset(),
+        state.help.window().offset(),
         max_scroll(Rect::new(0, 0, 60, 12), &Theme::default())
     );
     // The page keys move by the help's own rows: the modal's 8 inner
     // rows less its one-row footer, not the transcript's viewport.
-    assert_eq!(state.help_scroll.page(), 7);
+    assert_eq!(state.help.window().page(), 7);
 }
 
 #[test]

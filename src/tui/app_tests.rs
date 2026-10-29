@@ -2048,24 +2048,28 @@ mod modal_stack {
 
     #[test]
     fn help_overlay_esc_key_returns_close_via_overlay_trait() {
-        use crate::tui::widgets::help::HelpOverlayState;
         use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
         use tuikit::overlay::{Outcome, Overlay};
         let app = App::new(RunConfig::defaults());
-        let mut state = HelpOverlayState::new();
+        let mut help = crate::tui::widgets::help::open(app.theme());
         let key = KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE);
-        assert_eq!(state.handle(key, &app), Outcome::Close);
+        assert_eq!(
+            Overlay::<Msg, App>::handle(&mut help, key, &app),
+            Outcome::Close
+        );
     }
 
     #[test]
     fn help_overlay_scroll_key_returns_consumed_via_overlay_trait() {
-        use crate::tui::widgets::help::HelpOverlayState;
         use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
         use tuikit::overlay::{Outcome, Overlay};
         let app = App::new(RunConfig::defaults());
-        let mut state = HelpOverlayState::new();
+        let mut help = crate::tui::widgets::help::open(app.theme());
         let key = KeyEvent::new(KeyCode::Char('j'), KeyModifiers::NONE);
-        assert_eq!(state.handle(key, &app), Outcome::Consumed);
+        assert_eq!(
+            Overlay::<Msg, App>::handle(&mut help, key, &app),
+            Outcome::Consumed
+        );
     }
 
     // Controls overlay lives on the same

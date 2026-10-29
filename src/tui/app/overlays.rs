@@ -806,16 +806,16 @@ impl App {
     /// Active `?` help overlay, if any. Lives on the modal
     /// stack (ADR 0085 contract 3); this accessor peeks the top
     /// entry.
-    pub fn help_overlay(&self) -> Option<&crate::tui::widgets::help::HelpOverlayState> {
+    pub fn help_overlay(&self) -> Option<&crate::tui::widgets::help::KeymapHelp> {
         match self.modal_stack.top()? {
-            crate::tui::Modal::Help(state) => Some(state),
+            crate::tui::Modal::Help(help) => Some(help),
             _ => None,
         }
     }
 
-    pub fn help_overlay_mut(&mut self) -> Option<&mut crate::tui::widgets::help::HelpOverlayState> {
+    pub fn help_overlay_mut(&mut self) -> Option<&mut crate::tui::widgets::help::KeymapHelp> {
         match self.modal_stack.top_mut()? {
-            crate::tui::Modal::Help(state) => Some(state),
+            crate::tui::Modal::Help(help) => Some(help),
             _ => None,
         }
     }
@@ -852,11 +852,12 @@ impl App {
         }
     }
 
-    /// Push a fresh help overlay onto the modal stack.
+    /// Push a fresh help overlay onto the modal stack, its legends' marks
+    /// in the theme's styles.
     pub fn open_help_overlay(&mut self) {
-        self.modal_stack.push(crate::tui::Modal::Help(
-            crate::tui::widgets::help::HelpOverlayState::new(),
-        ));
+        let help = crate::tui::widgets::help::open(self.theme());
+        self.modal_stack
+            .push(crate::tui::Modal::Help(Box::new(help)));
     }
 
     /// Pop the help overlay if it's on top; no-op otherwise.

@@ -63,28 +63,24 @@ const GAP_KEYS: &[KeyRow<Viewer>] = &[
     alias(ch('x'), Viewer::Unlisted),
 ];
 
-/// The page's text as drawn at `width` by `height`, scrolled through
-/// from the top to the end, one row per drawn line.
+/// The page's text as its pager draws it at `width` by `height`, paged
+/// through from the top to the end, one row per drawn line.
 fn drawn_page<A: HelpAction>(table: &[KeyRow<A>], width: u16, height: u16) -> Vec<String> {
     let theme = Theme::default();
-    let sections = sections_for(table);
     let area = Rect::new(0, 0, width, height);
-    let mut scroll = HelpScroll::new();
+    let mut page = HelpPage::<()>::new(sections_for(table)).pager(PAGER_KEYS);
     let mut seen = Vec::new();
     loop {
         let mut buf = Buffer::empty(area);
-        let window = HelpPage::new(&theme, &sections)
-            .footer(PAGER_KEYS)
-            .scrolled(&scroll)
-            .render(area, &mut buf);
-        scroll.keep(window);
+        page.draw(area, &mut buf, &theme);
         for y in 0..height {
             seen.push((0..width).map(|x| buf[(x, y)].symbol()).collect::<String>());
         }
+        let window = page.window();
         if window.offset() == window.last_offset() {
             return seen;
         }
-        scroll.page_down();
+        page.page_down();
     }
 }
 
@@ -130,10 +126,10 @@ fn a_key_with_no_description_is_missing_and_reported() {
 #[test]
 fn a_generated_page_groups_rows_and_ends_with_its_footer() {
     let theme = Theme::default();
-    let sections = sections_for(VIEWER_KEYS);
-    let page = HelpPage::new(&theme, &sections).footer(PAGER_KEYS);
+    let page = HelpPage::<()>::new(sections_for(VIEWER_KEYS)).pager(PAGER_KEYS);
     let text: Vec<String> = page
-        .lines(80)
+        .content()
+        .lines(&theme, 80)
         .iter()
         .map(|line: &Line<'_>| line.spans.iter().map(|s| s.content.as_ref()).collect())
         .collect();
@@ -152,10 +148,5 @@ fn a_generated_page_groups_rows_and_ends_with_its_footer() {
             "",
         ]
     );
-    let footer: String = page.footer_lines(80)[0]
-        .spans
-        .iter()
-        .map(|s| s.content.as_ref())
-        .collect();
-    assert_eq!(footer, crate::keys::footer(PAGER_KEYS));
+    assert_eq!(page.footer().text(), crate::keys::footer(PAGER_KEYS));
 }

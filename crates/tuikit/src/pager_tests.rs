@@ -695,15 +695,23 @@ fn the_help_page_scrolls_inside_itself_and_has_its_own_footer() {
         "{shown}"
     );
     pager.handle_key(shift('G'));
-    screen(&mut pager, 60, 14);
+    let end = screen(&mut pager, 60, 14);
+    let help = pager.help_page().expect("the help page is open");
+    assert!(help.window().offset() > 0);
+    assert_eq!(help.window().offset(), help.window().last_offset());
     assert!(
-        pager
-            .help_scroll()
-            .is_some_and(|scroll| scroll.offset() > 0)
+        end.contains("Leave the viewer at once"),
+        "`G` shows the page's last rows: {end}"
     );
     assert_eq!(pager.window().offset(), 0, "the body did not move");
     pager.handle_key(typed('?'));
     assert!(!pager.help_is_open(), "`?` closes it again");
+    // `Esc` goes back too, and `q` leaves the pager from the page.
+    pager.handle_key(typed('?'));
+    assert_eq!(pager.handle_key(press(KeyCode::Esc)), Outcome::Consumed);
+    assert!(!pager.help_is_open());
+    pager.handle_key(typed('?'));
+    assert_eq!(pager.handle_key(typed('q')), Outcome::Dismiss);
 }
 
 // ---- drawing --------------------------------------------------------------

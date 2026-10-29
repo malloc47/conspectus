@@ -7,10 +7,10 @@
 //! that were on screen. Every entry draws through the shared modal frame,
 //! which clears what it covers, or fills the screen. The rename and step
 //! prompts, the new mux form, the row, mux, and worktree menus, the
-//! dialogs, Clean up, the Controls panel and its editors, the picker, and
-//! the pane viewer have no impl here: they are the framework's text
-//! prompt, form, action menu, dialog, checklist, settings panel, palette,
-//! and pager, which implement the trait for any context.
+//! dialogs, Clean up, the Controls panel and its editors, the picker, the
+//! keymap help, and the pane viewer have no impl here: they are the
+//! framework's text prompt, form, action menu, dialog, checklist, settings
+//! panel, palette, and pager, which implement the trait for any context.
 
 use ratatui::buffer::Buffer;
 use ratatui::crossterm::event::KeyEvent;
@@ -21,7 +21,6 @@ use tuikit::overlay::{Outcome, Overlay};
 use tuikit::theme::Theme as KitTheme;
 
 use crate::tui::widgets::{
-    help::{HelpOutcome, HelpOverlayState, HelpOverlayWidget},
     messages::{MessagesOverlayState, MessagesWidget},
     mux_launch::MuxLaunchForm,
     pin_edit::PinEditForm,
@@ -29,20 +28,6 @@ use crate::tui::widgets::{
     value_modal::{ValueModalOutcome, ValueModalState, ValueModalWidget},
 };
 use crate::tui::{App, Msg};
-
-impl Overlay<Msg, App> for HelpOverlayState {
-    fn handle(&mut self, key: KeyEvent, _app: &App) -> Outcome<Msg> {
-        match self.handle_key(key) {
-            HelpOutcome::Continue => Outcome::Consumed,
-            HelpOutcome::Close => Outcome::Close,
-        }
-    }
-
-    fn render(&mut self, area: Rect, buf: &mut Buffer, app: &App, _theme: &KitTheme) {
-        let window = HelpOverlayWidget::new(self, app.theme()).draw(area, buf);
-        self.fit(window);
-    }
-}
 
 impl Overlay<Msg, App> for SearchOverlayState {
     /// The overlay reranks against the App's rows and content results on
@@ -171,7 +156,7 @@ impl Overlay<Msg, App> for crate::viewer::state::ViewerState {
         if self.show_help {
             crate::tui::widgets::viewer_help::draw(
                 crate::tui::keybindings::overlay::VIEWER_KEYS,
-                &mut self.help_scroll,
+                &mut self.help,
                 app.theme(),
                 buf,
                 area,

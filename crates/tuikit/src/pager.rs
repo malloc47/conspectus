@@ -28,8 +28,9 @@
 //!   then the active find, then the pager itself. `q` (where nothing is
 //!   typed) and `Ctrl-C` leave at once, whatever is open.
 //! - **Help.** `?` opens a [`HelpPage`] generated
-//!   from the pager's table and the content's, with the help level's own
-//!   footer.
+//!   from the pager's table and the content's, read in a pager of its own
+//!   over the help level's table ([`PAGER_HELP_KEYS`]), so the page
+//!   scrolls as every reader does and has the help level's footer.
 //! - **Footer.** Generated from the tables in the one grammar: what
 //!   scrolls, what else the pager does, the content's keys, then what
 //!   leaves. A full-screen footer too narrow drops the scroll keys first,
@@ -129,9 +130,7 @@ pub use find::Find;
 
 use crate::feedback::Feedback;
 use crate::frame::ModalSize;
-use crate::help::{
-    HelpAction, HelpEntry, HelpPage, HelpRow, HelpScroll, HelpSection, sections_for,
-};
+use crate::help::{HelpAction, HelpEntry, HelpPage, HelpRow, HelpSection, sections_for};
 use crate::keys::{
     FIND_KEYS, FindKey, Footer, KeyAction, KeyRole, KeyRow, PAGER_HELP_KEYS, PagerKey, READER_KEYS,
     key_label, resolve, rows,
@@ -176,7 +175,9 @@ pub struct Pager<C> {
     keys: &'static [KeyRow<PagerKey>],
     scroll: Scroll,
     find: Find,
-    help: Option<HelpScroll>,
+    /// The help level, while it is open: the help page in a pager of its
+    /// own.
+    help: Option<Box<Pager<HelpPage>>>,
     note: Option<Feedback>,
     /// The width the content was last laid out at, while that layout
     /// still holds.
@@ -393,9 +394,10 @@ impl<C: PagerContent> Pager<C> {
         self.help.is_some()
     }
 
-    /// Where the help page is scrolled, while it is open.
-    pub fn help_scroll(&self) -> Option<&HelpScroll> {
-        self.help.as_ref()
+    /// The help page's pager, while it is open: where the page is
+    /// scrolled, and what it shows.
+    pub fn help_page(&self) -> Option<&Pager<HelpPage>> {
+        self.help.as_deref()
     }
 
     /// Whether the find prompt has the keys, so a paste goes to it.
@@ -454,17 +456,17 @@ impl<C: PagerContent> Pager<C> {
             return self.prompt_key(key);
         }
         if let Some(help) = &mut self.help {
-            return match resolve(PAGER_HELP_KEYS, key) {
-                Some(PagerKey::Abort) => Outcome::Dismiss,
-                Some(PagerKey::Close | PagerKey::Help) => {
+            // The help level's own pager: its closes step back to this
+            // pager, and its dismissals leave it.
+            return match help.handle_key(key) {
+                Outcome::Close => {
                     self.help = None;
                     Outcome::Consumed
                 }
-                Some(other) => {
-                    help.apply(other);
+                Outcome::Dismiss => Outcome::Dismiss,
+                Outcome::Consumed | Outcome::Commit(()) | Outcome::Back(()) | Outcome::Stay(()) => {
                     Outcome::Consumed
                 }
-                None => Outcome::Consumed,
             };
         }
         if let Some(action) = resolve(self.keys, key) {
@@ -510,7 +512,10 @@ impl<C: PagerContent> Pager<C> {
             PagerKey::Find => self.find.open_prompt(),
             PagerKey::FindNext => self.step(true),
             PagerKey::FindPrev => self.step(false),
-            PagerKey::Help => self.help = Some(HelpScroll::new()),
+            PagerKey::Help => {
+                let page = HelpPage::new(self.help_sections()).pager(PAGER_HELP_KEYS);
+                self.help = Some(Box::new(page));
+            }
             PagerKey::Copy => {
                 if let Some(message) = self.content.copy() {
                     return Outcome::Stay(message);
@@ -642,13 +647,8 @@ impl<C: PagerContent> Pager<C> {
             PagerMode::Modal(size) => body::modal(self, size, area, buf, theme),
             PagerMode::Embedded => body::embedded(self, area, buf, theme),
         }
-        if self.help.is_some() {
-            let sections = self.help_sections();
-            let page = HelpPage::new(theme, &sections).footer(PAGER_HELP_KEYS);
-            if let Some(help) = &mut self.help {
-                let window = page.scrolled(help).render(area, buf);
-                help.keep(window);
-            }
+        if let Some(help) = &mut self.help {
+            help.draw(area, buf, theme);
         }
     }
 }

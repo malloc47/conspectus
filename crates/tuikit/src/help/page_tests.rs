@@ -1,5 +1,11 @@
+use ratatui::buffer::Buffer;
+use ratatui::crossterm::event::KeyCode;
+use ratatui::layout::Rect;
+
 use super::*;
-use crate::keys::{PAGER_KEYS, ch, include, shown, with_availability};
+use crate::keys::{PAGER_KEYS, ch, include, shown};
+use crate::overlay::Outcome;
+use crate::testkit::keys::{press, typed};
 
 /// A pager closed by `?` too, as a help page opened by `?` is.
 const CLOSE_KEYS: &[KeyRow<PagerKey>] = &[
@@ -22,6 +28,14 @@ fn sections() -> Vec<HelpSection> {
     ]
 }
 
+fn page(sections: &[HelpSection]) -> HelpPage {
+    HelpPage::new(sections.to_vec())
+}
+
+fn lines(sections: &[HelpSection], width: usize) -> Vec<Line<'static>> {
+    page(sections).lines(&Theme::default(), width)
+}
+
 fn text_of(line: &Line<'_>) -> String {
     line.spans
         .iter()
@@ -29,8 +43,8 @@ fn text_of(line: &Line<'_>) -> String {
         .collect()
 }
 
-fn page_text(page: &HelpPage<'_>, width: usize) -> Vec<String> {
-    page.lines(width).iter().map(text_of).collect()
+fn page_text(sections: &[HelpSection], width: usize) -> Vec<String> {
+    lines(sections, width).iter().map(text_of).collect()
 }
 
 /// A tall page: `rows` key rows in one section.
@@ -42,14 +56,15 @@ fn tall(rows: usize) -> Vec<HelpSection> {
     vec![section]
 }
 
-fn render(sections: &[HelpSection], area: Rect, scroll: &HelpScroll) -> (Buffer, ScrollWindow) {
-    let theme = Theme::default();
+/// The page of `sections` in its pager, closed by `?` too.
+fn reader(sections: &[HelpSection]) -> Pager<HelpPage> {
+    page(sections).pager(CLOSE_KEYS)
+}
+
+fn draw(pager: &mut Pager<HelpPage>, area: Rect) -> Buffer {
     let mut buf = Buffer::empty(area);
-    let window = HelpPage::new(&theme, sections)
-        .footer(CLOSE_KEYS)
-        .scrolled(scroll)
-        .render(area, &mut buf);
-    (buf, window)
+    pager.draw(area, &mut buf, &Theme::default());
+    buf
 }
 
 fn row_text(buf: &Buffer, y: u16, from: u16, to: u16) -> String {
@@ -59,8 +74,7 @@ fn row_text(buf: &Buffer, y: u16, from: u16, to: u16) -> String {
 #[test]
 fn a_key_row_puts_the_keys_in_the_accent_column_and_the_description_beside_them() {
     let theme = Theme::default();
-    let sections = sections();
-    let lines = HelpPage::new(&theme, &sections).lines(80);
+    let lines = lines(&sections(), 80);
     assert_eq!(text_of(&lines[0]), "Moving");
     assert!(
         lines[0].spans[0]
@@ -81,9 +95,7 @@ fn a_key_row_puts_the_keys_in_the_accent_column_and_the_description_beside_them(
 
 #[test]
 fn a_description_wraps_under_its_hanging_indent() {
-    let theme = Theme::default();
-    let sections = sections();
-    let text = page_text(&HelpPage::new(&theme, &sections), 60);
+    let text = page_text(&sections(), 60);
     let start = text
         .iter()
         .position(|t| t.starts_with("  k / ↑"))
@@ -94,11 +106,10 @@ fn a_description_wraps_under_its_hanging_indent() {
 
 #[test]
 fn keys_that_leave_no_space_before_the_description_take_a_line_of_their_own() {
-    let theme = Theme::default();
     let sections = [HelpSection::new("Edge")
         .keys("a".repeat(13), "fits")
         .keys("b".repeat(14), "below")];
-    let text = page_text(&HelpPage::new(&theme, &sections), 80);
+    let text = page_text(&sections, 80);
     assert_eq!(text[1], format!("  {} fits", "a".repeat(13)));
     assert_eq!(text[2], format!("  {}", "b".repeat(14)));
     assert_eq!(text[3], format!("{}below", " ".repeat(KEY_COLUMN)));
@@ -106,9 +117,8 @@ fn keys_that_leave_no_space_before_the_description_take_a_line_of_their_own() {
 
 #[test]
 fn a_heading_wraps_rather_than_running_past_the_edge() {
-    let theme = Theme::default();
     let sections = [HelpSection::new("A heading longer than the page is wide").keys("x", "y")];
-    let lines = HelpPage::new(&theme, &sections).lines(24);
+    let lines = lines(&sections, 24);
     assert_eq!(text_of(&lines[0]), "A heading longer than");
     assert_eq!(text_of(&lines[1]), "the page is wide");
     assert!(
@@ -121,9 +131,7 @@ fn a_heading_wraps_rather_than_running_past_the_edge() {
 
 #[test]
 fn legend_rows_share_a_mark_column_and_a_name_column() {
-    let theme = Theme::default();
-    let sections = sections();
-    let text = page_text(&HelpPage::new(&theme, &sections), 80);
+    let text = page_text(&sections(), 80);
     let marked = text
         .iter()
         .position(|t| t.contains("Marked"))
@@ -134,7 +142,7 @@ fn legend_rows_share_a_mark_column_and_a_name_column() {
     assert!(text[marked + 2].starts_with(&" ".repeat(INDENT + 2 + NAME_COLUMN_MIN)));
     // A longer name widens its section's column, and only that.
     let long = [HelpSection::new("Long").legend(Span::raw("*"), "A name of twenty one", "blurb")];
-    let text = page_text(&HelpPage::new(&theme, &long), 80);
+    let text = page_text(&long, 80);
     assert_eq!(text[1], "  * A name of twenty one blurb");
 }
 
@@ -143,7 +151,7 @@ fn a_legend_mark_keeps_its_style_and_the_name_is_bold() {
     let theme = Theme::default();
     let mark = Span::styled("*", Style::default().fg(theme.warning));
     let sections = [HelpSection::new("Marks").legend(mark, "Warned", "careful")];
-    let lines = HelpPage::new(&theme, &sections).lines(80);
+    let lines = lines(&sections, 80);
     assert_eq!(lines[1].spans[1].style.fg, Some(theme.warning));
     assert!(
         lines[1].spans[2]
@@ -155,18 +163,15 @@ fn a_legend_mark_keeps_its_style_and_the_name_is_bold() {
 
 #[test]
 fn no_line_is_wider_than_the_page_and_no_word_is_lost() {
-    let theme = Theme::default();
-    let sections = sections();
-    let page = HelpPage::new(&theme, &sections).footer(CLOSE_KEYS);
     let words = |lines: Vec<String>| -> Vec<String> {
         lines
             .iter()
             .flat_map(|l| l.split_whitespace().map(str::to_string))
             .collect()
     };
-    let source = words(page_text(&page, usize::MAX));
+    let source = words(page_text(&sections(), usize::MAX));
     for width in [30, 40, 55, 80, 120] {
-        let text = page_text(&page, width);
+        let text = page_text(&sections(), width);
         for line in &text {
             assert!(text::width(line) <= width, "{line:?} at {width}");
         }
@@ -180,7 +185,7 @@ fn an_unavailable_row_is_drawn_in_the_unavailable_style_throughout() {
     let sections = [HelpSection::new("Rows")
         .row(HelpRow::keys("x", LONG).available(false))
         .keys("y", "Still here")];
-    let lines = HelpPage::new(&theme, &sections).lines(50);
+    let lines = lines(&sections, 50);
     let dim = unavailable_style(&theme);
     let x_rows: Vec<&Line<'_>> = lines[1..]
         .iter()
@@ -198,41 +203,38 @@ fn an_unavailable_row_is_drawn_in_the_unavailable_style_throughout() {
 }
 
 #[test]
+fn the_page_lays_out_once_per_width() {
+    let theme = Theme::default();
+    let mut page = page(&tall(10));
+    let rows = page.layout(40, &theme);
+    assert_eq!(rows, 12, "a heading, ten rows, and a blank line");
+    assert_eq!(page.rows(1..2, &theme)[0], lines(&tall(10), 40)[1]);
+    assert_eq!(page.header(40, &theme), Line::from("Help"));
+    let titled = HelpPage::<()>::new(tall(1)).title("Keys");
+    assert_eq!(titled.header(40, &theme), Line::from("Keys"));
+}
+
+#[test]
 fn the_footer_is_generated_from_its_table_and_recedes() {
     let theme = Theme::default();
-    let sections = sections();
-    let page = HelpPage::new(&theme, &sections).footer(CLOSE_KEYS);
-    let lines = page.footer_lines(80);
-    assert_eq!(lines.len(), 1);
-    assert_eq!(text_of(&lines[0]), crate::keys::footer(CLOSE_KEYS));
+    let area = Rect::new(0, 0, 80, 24);
+    let mut pager = reader(&sections());
+    let buf = draw(&mut pager, area);
+    let rect = HelpPage::SIZE.rect(area, 0);
+    let footer_row = rect.y + rect.height - 2;
+    let footer = row_text(&buf, footer_row, rect.x + 1, rect.x + rect.width - 1);
     assert!(
-        lines[0]
-            .spans
-            .iter()
-            .all(|span| span.style.add_modifier.contains(theme.muted))
+        footer.starts_with(&crate::keys::footer(CLOSE_KEYS)),
+        "{footer:?}"
     );
-    // Wrapped only between segments, and unwrapped on a tiny page.
-    assert_eq!(page.footer_lines(20).len(), 2);
-    assert_eq!(page.footer_lines(8).len(), 1);
-    // No table, no footer.
-    assert!(HelpPage::new(&theme, &sections).footer_lines(80).is_empty());
-    // A key that cannot act now is dimmed in the footer as well.
-    let rows = with_availability(CLOSE_KEYS, |key| key != PagerKey::Up);
-    let dimmed = HelpPage::new(&theme, &sections).footer(&rows);
-    let unavailable = unavailable_style(&theme);
-    assert!(
-        dimmed.footer_lines(80)[0]
-            .spans
-            .iter()
-            .all(|span| span.style.fg != unavailable.fg),
-        "j still scrolls, so the segment stays available"
-    );
+    assert!((rect.x + 1..rect.x + 10).all(|x| buf[(x, footer_row)].modifier.contains(theme.muted)));
+    assert_eq!(pager.footer().text(), crate::keys::footer(CLOSE_KEYS));
 }
 
 #[test]
 fn the_page_draws_in_the_reader_frame_titled_help() {
     let area = Rect::new(0, 0, 80, 24);
-    let (buf, _) = render(&sections(), area, &HelpScroll::new());
+    let buf = draw(&mut reader(&sections()), area);
     let rect = HelpPage::SIZE.rect(area, 0);
     assert_eq!(buf[(rect.x, rect.y)].symbol(), "┌");
     assert_eq!(row_text(&buf, rect.y, rect.x + 1, rect.x + 7), " Help ");
@@ -247,18 +249,21 @@ fn the_page_draws_in_the_reader_frame_titled_help() {
 #[test]
 fn the_footer_stays_on_the_last_rows_whatever_the_scroll() {
     let area = Rect::new(0, 0, 60, 16);
-    let sections = tall(40);
     let rect = HelpPage::SIZE.rect(area, 0);
     let footer = crate::keys::footer(CLOSE_KEYS);
-    for offset in [0, 5, usize::MAX] {
-        let (buf, _) = render(&sections, area, &HelpScroll::at(offset));
+    let mut pager = reader(&tall(40));
+    for keys in ["", "jjjjj", "G"] {
+        for c in keys.chars() {
+            pager.handle_key(typed(c));
+        }
+        let buf = draw(&mut pager, area);
         let last = row_text(
             &buf,
             rect.y + rect.height - 2,
             rect.x + 1,
             rect.x + rect.width - 1,
         );
-        assert!(last.starts_with(&footer), "{last:?} at {offset}");
+        assert!(last.starts_with(&footer), "{last:?} after {keys:?}");
     }
 }
 
@@ -267,15 +272,17 @@ fn an_overflowing_page_gets_a_scrollbar_and_its_text_a_column_less() {
     let area = Rect::new(0, 0, 60, 16);
     let rect = HelpPage::SIZE.rect(area, 0);
     let bar = rect.x + rect.width - 2;
-    let (buf, window) = render(&tall(40), area, &HelpScroll::new());
-    assert!(window.overflows());
+    let mut pager = reader(&tall(40));
+    let buf = draw(&mut pager, area);
+    assert!(pager.window().overflows());
     let column: String = (rect.y + 1..rect.y + rect.height - 2)
         .map(|y| buf[(bar, y)].symbol().to_string())
         .collect();
     assert!(!column.trim().is_empty(), "the bar is drawn: {column:?}");
     // A page that fits keeps every column and draws no bar.
-    let (buf, window) = render(&tall(3), area, &HelpScroll::new());
-    assert!(!window.overflows());
+    let mut pager = reader(&tall(3));
+    let buf = draw(&mut pager, area);
+    assert!(!pager.window().overflows());
     let column: String = (rect.y + 1..rect.y + rect.height - 2)
         .map(|y| buf[(bar, y)].symbol().to_string())
         .collect();
@@ -283,14 +290,16 @@ fn an_overflowing_page_gets_a_scrollbar_and_its_text_a_column_less() {
 }
 
 #[test]
-fn scrolling_past_the_end_shows_the_last_page_not_blank_rows() {
+fn the_end_key_shows_the_last_page_not_blank_rows() {
     let area = Rect::new(0, 0, 60, 16);
-    let sections = tall(40);
     let rect = HelpPage::SIZE.rect(area, 0);
-    let (buf, window) = render(&sections, area, &HelpScroll::at(usize::MAX));
+    let mut pager = reader(&tall(40));
+    pager.handle_key(typed('G'));
+    let buf = draw(&mut pager, area);
+    let window = pager.window();
     assert_eq!(window.offset(), window.last_offset());
-    // The last row of the page sits right above the blank line and the
-    // footer: no blank tail.
+    // The last row of the page sits right above the footer: no blank
+    // tail.
     let footer_row = rect.y + rect.height - 2;
     let above: Vec<String> = (rect.y + 1..footer_row)
         .map(|y| {
@@ -309,90 +318,77 @@ fn scrolling_past_the_end_shows_the_last_page_not_blank_rows() {
 
 #[test]
 fn footer_rows_that_do_not_fit_scroll_with_the_page() {
-    let theme = Theme::default();
-    let sections = tall(2);
-    let page = HelpPage::new(&theme, &sections).footer(CLOSE_KEYS);
-    // Two rows high: the footer's last row stays, and the rows above it
-    // scroll with the page, which overflows and gives a column to the bar.
-    let layout = page.layout(20, 2);
-    let footer = page.footer_lines(19);
-    let spill = footer.len() - 1;
-    assert!(spill > 0);
-    assert_eq!(layout.text_width, 19);
-    assert_eq!(layout.body_height, 1);
-    assert_eq!(layout.footer, footer[spill..]);
-    assert_eq!(layout.body[layout.body.len() - spill..], footer[..spill]);
+    // A frame two rows inside: the footer's last row stays, and the rows
+    // above it scroll with the page, after its last row.
+    let area = Rect::new(0, 0, 24, 4);
+    let mut pager = reader(&tall(2));
+    let buf = draw(&mut pager, area);
+    let rect = HelpPage::SIZE.rect(area, 0);
+    assert_eq!(rect.height, 4, "{rect:?}");
+    let inside = |buf: &Buffer, y: u16| row_text(buf, y, rect.x + 1, rect.x + rect.width - 1);
+    assert!(
+        inside(&buf, rect.y + 2).starts_with("Esc/q/? close"),
+        "{buf:?}"
+    );
+    pager.handle_key(typed('G'));
+    let buf = draw(&mut pager, area);
+    assert!(inside(&buf, rect.y + 1).contains("scroll"), "{buf:?}");
+    assert!(
+        inside(&buf, rect.y + 2).starts_with("Esc/q/? close"),
+        "{buf:?}"
+    );
 }
 
 #[test]
 fn page_keys_move_by_the_rows_the_page_showed() {
     let area = Rect::new(0, 0, 60, 16);
-    let sections = tall(40);
-    let mut scroll = HelpScroll::new();
-    assert_eq!(scroll.page(), 1, "before any draw a page is a row");
-    let (_, window) = render(&sections, area, &scroll);
-    scroll.keep(window);
-    assert_eq!(scroll.page(), window.viewport());
-    scroll.page_down();
-    assert_eq!(scroll.offset(), window.viewport());
-    scroll.half_page_up();
-    assert_eq!(scroll.offset(), window.viewport() - window.viewport() / 2);
-    scroll.half_page_down();
-    scroll.page_up();
-    scroll.page_up();
-    assert_eq!(scroll.offset(), 0, "stops at the top");
+    let mut pager = reader(&tall(40));
+    draw(&mut pager, area);
+    let shown = pager.window().viewport();
+    pager.handle_key(press(KeyCode::PageDown));
+    draw(&mut pager, area);
+    assert_eq!(pager.window().offset(), shown);
+    pager.handle_key(crate::testkit::keys::ctrl('u'));
+    draw(&mut pager, area);
+    assert_eq!(pager.window().offset(), shown - shown / 2);
+    pager.handle_key(press(KeyCode::PageUp));
+    pager.handle_key(press(KeyCode::PageUp));
+    draw(&mut pager, area);
+    assert_eq!(pager.window().offset(), 0, "stops at the top");
 }
 
 #[test]
 fn keys_past_the_end_are_taken_back_by_the_next_draw() {
     let area = Rect::new(0, 0, 60, 16);
-    let sections = tall(40);
-    let mut scroll = HelpScroll::new();
-    scroll.to_bottom();
+    let mut pager = reader(&tall(40));
+    draw(&mut pager, area);
+    pager.handle_key(typed('G'));
+    draw(&mut pager, area);
+    let end = pager.window();
     for _ in 0..5 {
-        scroll.down(1);
+        pager.handle_key(typed('j'));
     }
-    let (_, window) = render(&sections, area, &scroll);
-    scroll.keep(window);
-    assert_eq!(scroll.offset(), window.last_offset());
-    scroll.up(1);
-    let (_, moved) = render(&sections, area, &scroll);
+    draw(&mut pager, area);
+    assert_eq!(pager.window().offset(), end.last_offset());
+    pager.handle_key(typed('k'));
+    draw(&mut pager, area);
     assert_eq!(
-        moved.offset(),
-        window.last_offset() - 1,
+        pager.window().offset(),
+        end.last_offset() - 1,
         "one key up moves up"
     );
 }
 
 #[test]
-fn the_standard_pager_keys_scroll_and_leave_the_rest_to_the_control() {
-    let mut scroll = HelpScroll::new();
-    scroll.keep(ScrollWindow::new(10, 100));
-    for (key, offset) in [
-        (PagerKey::Down, 1),
-        (PagerKey::PageDown, 11),
-        (PagerKey::Up, 10),
-        (PagerKey::HalfPageDown, 15),
-        (PagerKey::HalfPageUp, 10),
-        (PagerKey::PageUp, 0),
-        (PagerKey::Bottom, usize::MAX),
-        (PagerKey::Top, 0),
-    ] {
-        assert!(scroll.apply(key), "{key:?}");
-        assert_eq!(scroll.offset(), offset, "{key:?}");
+fn the_pages_table_scrolls_it_and_closes_it() {
+    let mut pager = reader(&tall(40));
+    for key in [typed('j'), press(KeyCode::PageDown), typed('/'), typed('x')] {
+        assert_eq!(pager.handle_key(key), Outcome::Consumed, "{key:?}");
     }
-    for key in [
-        PagerKey::Abort,
-        PagerKey::Close,
-        PagerKey::Find,
-        PagerKey::FindNext,
-        PagerKey::FindPrev,
-        PagerKey::Help,
-        PagerKey::Copy,
-    ] {
-        assert!(!scroll.apply(key), "{key:?}");
-        assert_eq!(scroll.offset(), 0);
-    }
+    assert!(!pager.takes_text(), "a page with no find has no prompt");
+    assert_eq!(pager.handle_key(typed('?')), Outcome::Close);
+    assert_eq!(pager.handle_key(press(KeyCode::Esc)), Outcome::Close);
+    assert_eq!(pager.handle_key(typed('q')), Outcome::Dismiss);
 }
 
 /// A fixed-seed xorshift, so a failure names its seed and reproduces.
@@ -409,29 +405,30 @@ impl Gen {
 
 #[test]
 fn after_any_keys_and_resizes_the_drawn_offset_is_inside_the_page() {
+    let keys = [
+        typed('j'),
+        typed('k'),
+        press(KeyCode::PageDown),
+        press(KeyCode::PageUp),
+        crate::testkit::keys::ctrl('d'),
+        crate::testkit::keys::ctrl('u'),
+        typed('G'),
+        typed('g'),
+    ];
     for seed in 1..=24u64 {
         let mut rng = Gen(seed.wrapping_mul(0x9E37_79B9_7F4A_7C15));
-        let sections = tall(5 + rng.below(60));
-        let mut scroll = HelpScroll::new();
+        let mut pager = reader(&tall(5 + rng.below(60)));
         for step in 0..60 {
-            match rng.below(8) {
-                0 => scroll.down(1 + rng.below(4)),
-                1 => scroll.up(1 + rng.below(4)),
-                2 => scroll.page_down(),
-                3 => scroll.page_up(),
-                4 => scroll.half_page_down(),
-                5 => scroll.half_page_up(),
-                6 => scroll.to_bottom(),
-                _ => scroll.to_top(),
+            for _ in 0..1 + rng.below(4) {
+                pager.handle_key(keys[rng.below(keys.len())]);
             }
             let area = Rect::new(0, 0, 30 + rng.below(90) as u16, 10 + rng.below(30) as u16);
-            let (buf, window) = render(&sections, area, &scroll);
-            scroll.keep(window);
+            let buf = draw(&mut pager, area);
+            let window = pager.window();
             assert!(
-                scroll.offset() <= window.last_offset(),
-                "seed {seed} step {step}: {scroll:?} past {window:?}"
+                window.offset() <= window.last_offset(),
+                "seed {seed} step {step}: {window:?}"
             );
-            assert_eq!(scroll.page(), window.viewport().max(1));
             // The window shows rows whenever the page has any.
             let rect = HelpPage::SIZE.rect(area, 0);
             let first = row_text(&buf, rect.y + 1, rect.x + 1, rect.x + rect.width - 2);

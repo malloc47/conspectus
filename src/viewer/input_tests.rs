@@ -162,30 +162,50 @@ fn close_dismisses_help_overlay_first_then_modal() {
     assert_eq!(eff, ViewerEffect::Close);
 }
 
+/// A help page of 32 rows in its pager, as whoever draws the viewer
+/// generates it.
+fn tall_help() -> tuikit::pager::Pager<tuikit::help::HelpPage> {
+    let mut section = tuikit::help::HelpSection::new("Rows");
+    for n in 0..30 {
+        section = section.keys(format!("{n}"), "a row");
+    }
+    tuikit::help::HelpPage::new(vec![section]).pager(tuikit::keys::PAGER_HELP_KEYS)
+}
+
+/// Draws the help page as the live loop does before the next key, on a
+/// screen where its body shows 7 rows, and says where it is scrolled.
+fn help_offset(state: &mut ViewerState) -> usize {
+    let area = ratatui::layout::Rect::new(0, 0, 60, 12);
+    let mut buf = ratatui::buffer::Buffer::empty(area);
+    let theme = tuikit::theme::Theme::default();
+    state.help.draw(area, &mut buf, &theme);
+    state.help.window().offset()
+}
+
 #[test]
 fn movement_keys_scroll_the_help_page_while_it_is_open() {
     let mut s = state_with(100, 24, 5);
     s.viewport_height = 10;
-    // The help's own body showed 7 rows; a page is those, not the
+    s.help = Box::new(tall_help());
+    let (mut s, _) = reduce(s, ViewerMsg::ToggleHelp);
+    assert_eq!(help_offset(&mut s), 0);
+    // The help's own body shows 7 rows; a page is those, not the
     // transcript's 10.
-    s.help_scroll.keep(tuikit::scroll::ScrollWindow::new(7, 30));
-    let (s, _) = reduce(s, ViewerMsg::ToggleHelp);
-    assert_eq!(s.help_scroll.offset(), 0);
+    assert_eq!(s.help.window().viewport(), 7);
     let before = s.scroll_offset;
-    let (s, _) = reduce(s, ViewerMsg::ScrollDown);
-    assert_eq!(s.help_scroll.offset(), 1);
-    let (s, _) = reduce(s, ViewerMsg::PageDown);
-    assert_eq!(s.help_scroll.offset(), 8);
-    let (s, _) = reduce(s, ViewerMsg::HalfPageUp);
-    assert_eq!(s.help_scroll.offset(), 5);
-    let (s, _) = reduce(s, ViewerMsg::JumpToEnd);
-    assert_eq!(
-        s.help_scroll.offset(),
-        usize::MAX,
-        "the next draw takes it back"
-    );
-    let (s, _) = reduce(s, ViewerMsg::JumpToStart);
-    assert_eq!(s.help_scroll.offset(), 0);
+    let (mut s, _) = reduce(s, ViewerMsg::ScrollDown);
+    assert_eq!(help_offset(&mut s), 1);
+    let (mut s, _) = reduce(s, ViewerMsg::PageDown);
+    assert_eq!(help_offset(&mut s), 8);
+    let (mut s, _) = reduce(s, ViewerMsg::HalfPageUp);
+    assert_eq!(help_offset(&mut s), 5);
+    let (mut s, _) = reduce(s, ViewerMsg::JumpToEnd);
+    let end = help_offset(&mut s);
+    assert_eq!(end, s.help.window().last_offset(), "the last page");
+    let (mut s, _) = reduce(s, ViewerMsg::ScrollUp);
+    assert_eq!(help_offset(&mut s), end - 1, "one key up moves up");
+    let (mut s, _) = reduce(s, ViewerMsg::JumpToStart);
+    assert_eq!(help_offset(&mut s), 0);
     assert_eq!(s.scroll_offset, before, "the transcript did not move");
 }
 
@@ -202,9 +222,11 @@ fn toggles_wait_while_the_help_page_is_open() {
 fn reopening_the_help_starts_at_the_top() {
     let mut s = state_with(100, 24, 0);
     s.show_help = true;
-    s.help_scroll = tuikit::help::HelpScroll::at(9);
+    s.help = Box::new(tall_help());
+    s.help.scroll_by(9);
+    assert_eq!(help_offset(&mut s), 9);
     let (s, _) = reduce(s, ViewerMsg::ToggleHelp);
-    let (s, _) = reduce(s, ViewerMsg::ToggleHelp);
+    let (mut s, _) = reduce(s, ViewerMsg::ToggleHelp);
     assert!(s.show_help);
-    assert_eq!(s.help_scroll.offset(), 0);
+    assert_eq!(help_offset(&mut s), 0);
 }

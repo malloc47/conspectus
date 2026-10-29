@@ -698,9 +698,10 @@ fn a_readers_esc_steps_back_and_q_dismisses() {
         resolve(READER_KEYS, press(KeyCode::Char('?'))),
         Some(PagerKey::Help)
     );
+    // On the help page `?` is the key that opened it, another close.
     assert_eq!(
         resolve(PAGER_HELP_KEYS, press(KeyCode::Char('?'))),
-        Some(PagerKey::Help)
+        Some(PagerKey::Close)
     );
     assert_eq!(
         resolve(READER_KEYS, press(KeyCode::Char('/'))),
