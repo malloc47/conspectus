@@ -193,9 +193,20 @@ conspectus tui --fixture world.json
 
 Snapshot output uses the same row builders and renderer as the
 interactive TUI, so what you see is byte-for-byte what an operator
-sees. Lift a dialed-in fixture into a regression test with
+sees. Every key an open overlay takes does what it does live: a menu
+pick, a prompt's or form's submit, a checklist's apply, and a viewer's
+attach all run through the reducer, so the frame shows what the key did.
+What would reach outside the snapshot (a copy, an attach, a resume, a
+launch, a rebuild, a mux command, a store write) is skipped with a
+`conspectus: snapshot mode skipped …` line on stderr naming it.
+
+Lift a dialed-in fixture into a regression test with
 `serde_json::from_str(include_str!(...))` plus the existing
-`render_to_buffer` / `buffer_to_string` helpers in `src/tui/ui.rs`.
+`render_to_buffer` / `buffer_to_string` helpers in `src/tui/ui.rs`. To
+keep colors in the comparison, check the frame with
+`tuikit::testkit::golden::assert_golden` (a golden file with a legend of
+every style) and accept a deliberate change by rerunning the test with
+`TUIKIT_ACCEPT_GOLDENS=1`.
 
 Relative ages ("4m", "2d") are computed against the wall clock, so a
 fixture rendered long after it was captured shows stale ages. For

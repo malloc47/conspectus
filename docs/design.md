@@ -1073,6 +1073,13 @@ preview sources stay in `conspectus` as adapters over the framework's
 controls. The framework starts no processes and writes no files, so it adds no
 entries to the capability manifest.
 
+The test kit sits behind a `testkit` feature that the host's tests, the preview
+example, and the dev-only `snapshot` feature turn on. Its conformance suite
+holds every registered modal to the shared conventions (contained in its frame
+at every size, a selection that moves no text, no word cut at the edge, keys by
+role, generated footers, the close keys), its goldens keep every color, and the
+snapshot driver built on it drives every overlay key (ADR 0164).
+
 The theme is the first piece in the framework (ADR 0153): typed role tokens
 (accent, `muted`, `inert`, selection, status colors, fields, and the rest) that
 every control reads, plus named styles `conspectus` registers for its own

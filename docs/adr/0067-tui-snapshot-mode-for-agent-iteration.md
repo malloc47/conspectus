@@ -2,7 +2,13 @@
 
 ## Status
 
-Accepted
+Accepted. Amended by [ADR 0164](0164-tui-test-kit-key-scripts-frame-driver-goldens-conformance.md):
+the key-script notation, the one-frame driver, and the ANSI writer are the
+framework's test kit (`tuikit::testkit`), the writer also encodes the blink,
+hidden, and crossed-out modifiers, and every key an open overlay takes reaches
+the reducer, with the effects that would reach outside the snapshot (a copy, an
+attach, a resume, a launch, a rebuild, a mux command, a store write) skipped
+with a stderr note naming them.
 
 ## Context
 
