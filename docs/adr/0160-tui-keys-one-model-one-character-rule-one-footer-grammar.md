@@ -12,6 +12,12 @@ framework's `keys` module. Amended by
 [ADR 0168](0168-tui-forms-one-ring-submit-from-any-field-fixed-footer.md):
 `Space` in `FORM_OPTION_KEYS` binds its own `FormKey::Toggle` under the same
 `change` verb, so a row of several checkboxes can tell moving from flipping.
+Amended by
+[ADR 0172](0172-tui-dialogs-one-control-and-follow-up-questions-are-steps.md):
+`DIALOG_KEYS` (`DialogKey`) is the one table of every dialog and replaces
+`CONFIRM_KEYS` and `ChoiceKey<C>` (a choice's verbs are the dialog's own
+keys, so the host's `CLOSE_DOWN_KEYS` is gone), and a footer can keep some
+of a table's actions (`Footer::only`) or take a control's own segments.
 
 ## Context
 

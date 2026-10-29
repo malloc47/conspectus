@@ -14,7 +14,12 @@ a scrolled modal keeps the window it drew as it draws, so the viewport
 report carries only the panes. Applies house rules 4 and 5 of
 [ADR 0151](0151-tui-framework-control-set-and-house-rules.md) and extends
 [ADR 0150](0150-tui-framework-workspace-crate.md) with the framework's
-`overlay` module.
+`overlay` module. Amended by
+[ADR 0172](0172-tui-dialogs-one-control-and-follow-up-questions-are-steps.md):
+`Outcome` gains `Dismiss` (what `Ctrl-C` and `q` answer), an overlay opens
+a follow-up question as a step of itself on the stack (`push_step`), a
+`Commit` or `Dismiss` from a step closes its whole flow while a `Close`
+steps back, and `Settled.closed` lists every entry a key closed.
 
 ## Context
 

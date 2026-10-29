@@ -1177,9 +1177,10 @@ a closure `conspectus` supplies, which commits a message, refuses with a
 reason, or keeps the prompt open; a refusal shows on one error line under the
 field until the next edit, and the prompt shows its keys on its bottom
 border, so it is three rows, four while an error shows. `Esc` and `Ctrl-C`
-close it silently; inside the worktree menu and Controls, `Esc` steps back to
-the menu or the panel and `Ctrl-C` closes them. The parsers (`parse_max_age`)
-and the mapping to `Msg` stay in `conspectus`.
+close it silently; inside Controls, `Esc` steps back to the panel and
+`Ctrl-C` closes it, and the worktree menu's branch prompt is a step over the
+menu (ADR 0172), so `Esc` returns to the menu and `Ctrl-C` closes both. The
+parsers (`parse_max_age`) and the mapping to `Msg` stay in `conspectus`.
 
 Path fields are one field (ADR 0167). The new mux and launch forms' cwd, the
 launch form's worktree repo, and the pin edit form's path rows are the
@@ -1225,6 +1226,18 @@ does the same thing on the list (`p` on Pin, `n` and `N` in the mux menu). The
 cursor wraps and steps over entries that cannot run, an armed entry says what
 `Enter` will do, and the footer generated from the menu key table stays at the
 bottom while the entries scroll.
+
+Dialogs are one control, and a menu's follow-up questions are steps on the
+modal stack (ADR 0172). A dialog is the framework's `Dialog`: a confirmation
+that commits a message, a choice of named verbs on their own keys, or a
+notice, with body lines and an optional list of what the action affects, on
+one key table (`Enter`/`y` confirm, `Esc`/`n` cancel, `Ctrl-C`/`q`
+dismiss). The worktree menu is an `ActionMenu` whose entries open their
+branch prompt, confirmation, or close-down choice as a step over the menu:
+`Esc` in a step pops it and the menu has its keys again, while a commit or
+`Ctrl-C` closes the step and the menu together. `conspectus` keeps the
+worktree facts captured when the menu opens, the action policy, every word,
+and the `Msg` each answer commits; the empty Clean up is a `Dialog` notice.
 
 Every argv `conspectus` reads from text is split by one grammar (ADR 0169,
 `src/argv.rs`): a POSIX shell's word splitting with nothing expanded. An

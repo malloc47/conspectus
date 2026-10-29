@@ -13,7 +13,12 @@ of its own inside its frame, and its entries show `n` and `N`, the keys
 that open the same forms from the list, which answers ADR 0096's held
 question about an accelerator for the harness-launch entry. Takes up the
 seam the CSP-724 review left: a menu keeps its scroll window between
-draws.
+draws. Amended by
+[ADR 0172](0172-tui-dialogs-one-control-and-follow-up-questions-are-steps.md):
+an entry can open a step (`Entry::opens_step`, picked with `Stay`), the
+menu answers `q` and `Ctrl-C` with `Dismiss`, and the worktree menu of
+decision 8 is now an `ActionMenu<Msg>` whose entries open its prompt and
+dialogs as steps.
 
 ## Context
 
