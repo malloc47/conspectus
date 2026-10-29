@@ -1,6 +1,6 @@
 //! The standard key tables and the action enums they bind: one table per
 //! standard control, so every menu, dialog, pager, prompt, checklist,
-//! palette, and form takes the same keys.
+//! palette, settings panel, and form takes the same keys.
 //!
 //! Each table starts with `Ctrl-C`, bound to its `Abort` action, and a
 //! table where nothing is typed binds `q` to it as well (house rule 4). Lists
@@ -397,6 +397,83 @@ impl KeyAction for ChecklistKey {
             Self::Toggle | Self::SelectAll | Self::SelectNone => KeyRole::Change,
             Self::Confirm => KeyRole::Apply,
             Self::Cancel => KeyRole::Leave,
+        }
+    }
+}
+
+/// What a settings panel's keys do.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum SettingsKey {
+    /// Dismiss the panel and every step of it (`Ctrl-C`, `q`).
+    Abort,
+    /// Move the cursor to the previous row.
+    Up,
+    /// Move the cursor to the next row.
+    Down,
+    /// Move the cursor up by the rows the panel shows.
+    PageUp,
+    /// Move the cursor down by the rows the panel shows.
+    PageDown,
+    /// Move the cursor to the first row.
+    Top,
+    /// Move the cursor to the last row.
+    Bottom,
+    /// Act on the row under the cursor: select a choice, toggle a
+    /// checkbox, step a cycle, open an editor, press a button.
+    Change,
+    /// Apply the choice under the cursor and close; open an editor or
+    /// press a button as `Change` does; close on any other row, whose
+    /// change is already applied.
+    Apply,
+    /// Close the panel, keeping every change already applied.
+    Close,
+}
+
+/// A settings panel: `↑/↓ move · Space select/toggle · Enter apply &
+/// close · Esc close · changes apply as you make them`. Nothing is typed
+/// in the panel, so `k`/`j` move and `q` dismisses it, as `Ctrl-C` does;
+/// `PgUp`/`PgDn` move by the rows shown, and `g`/`Home` and `G`/`End` go
+/// to the ends (aliases).
+pub const SETTINGS_KEYS: &[KeyRow<SettingsKey>] = &[
+    alias(ctrl('c'), SettingsKey::Abort),
+    alias(ch('q'), SettingsKey::Abort),
+    shown(key(KeyCode::Up), SettingsKey::Up, marks::ARROW_UP, "move"),
+    alias(ch('k'), SettingsKey::Up),
+    alias(ctrl('p'), SettingsKey::Up),
+    shown(
+        key(KeyCode::Down),
+        SettingsKey::Down,
+        marks::ARROW_DOWN,
+        "move",
+    ),
+    alias(ch('j'), SettingsKey::Down),
+    alias(ctrl('n'), SettingsKey::Down),
+    alias(key(KeyCode::PageUp), SettingsKey::PageUp),
+    alias(key(KeyCode::PageDown), SettingsKey::PageDown),
+    alias(ch('g'), SettingsKey::Top),
+    alias(key(KeyCode::Home), SettingsKey::Top),
+    alias(ch('G'), SettingsKey::Bottom),
+    alias(key(KeyCode::End), SettingsKey::Bottom),
+    shown(ch(' '), SettingsKey::Change, "Space", "select/toggle"),
+    shown(
+        key(KeyCode::Enter),
+        SettingsKey::Apply,
+        "Enter",
+        "apply & close",
+    ),
+    shown(key(KeyCode::Esc), SettingsKey::Close, "Esc", "close"),
+    KeyRow::Note("changes apply as you make them"),
+];
+
+impl KeyAction for SettingsKey {
+    fn role(self) -> KeyRole {
+        match self {
+            Self::Abort => KeyRole::Abort,
+            Self::Up | Self::Down | Self::Top | Self::Bottom => KeyRole::Move,
+            Self::PageUp | Self::PageDown => KeyRole::Page,
+            Self::Change => KeyRole::Change,
+            Self::Apply => KeyRole::Apply,
+            Self::Close => KeyRole::Leave,
         }
     }
 }

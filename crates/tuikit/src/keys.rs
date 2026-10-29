@@ -38,6 +38,7 @@
 //!   choice's verbs are the dialog's own keys), [`PAGER_KEYS`],
 //!   [`TEXT_INPUT_KEYS`], [`CHECKLIST_KEYS`], [`PALETTE_KEYS`] with
 //!   [`PALETTE_OPTION_KEYS`] for a palette's options pane,
+//!   [`SETTINGS_KEYS`] for a settings panel,
 //!   [`FORM_KEYS`] with [`FORM_OPTION_KEYS`], [`LINE_EDIT_KEYS`], the
 //!   editing keys every text field shares, and [`PATH_FIELD_KEYS`], a path
 //!   field's completion key.
@@ -90,8 +91,8 @@ pub use role::{Convention, EnterMeans, KeyAction, KeyRole, SpaceMeans, ctrl_c_fi
 pub use standard::{
     CHECKLIST_KEYS, ChecklistKey, DIALOG_KEYS, DialogKey, EditKey, FORM_KEYS, FORM_OPTION_KEYS,
     FormKey, LINE_EDIT_KEYS, MENU_KEYS, MenuKey, PAGER_KEYS, PALETTE_KEYS, PALETTE_OPTION_KEYS,
-    PATH_FIELD_KEYS, PagerKey, PaletteKey, PaletteOptionKey, PathKey, TEXT_INPUT_KEYS,
-    TextInputKey,
+    PATH_FIELD_KEYS, PagerKey, PaletteKey, PaletteOptionKey, PathKey, SETTINGS_KEYS, SettingsKey,
+    TEXT_INPUT_KEYS, TextInputKey,
 };
 pub use table::{
     Hint, KeyRow, Rows, alias, include, loose_characters, mislabeled, resolve, rows, shown,

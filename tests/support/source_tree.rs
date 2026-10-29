@@ -103,8 +103,8 @@ pub const HOST_SRC: Tree = Tree::new("src", 300);
 pub const HOST_TESTS: Tree = Tree::new("tests", 30);
 /// The host's examples (1 file today).
 pub const HOST_EXAMPLES: Tree = Tree::new("examples", 1);
-/// The framework's `src` (99 files today). Raise this as code moves in.
-pub const FRAMEWORK_SRC: Tree = Tree::new("crates/tuikit/src", 74);
+/// The framework's `src` (141 files today). Raise this as code moves in.
+pub const FRAMEWORK_SRC: Tree = Tree::new("crates/tuikit/src", 106);
 /// The framework's integration tests (6 files today, one of them shared
 /// scan plumbing under `support/`). The independence guard alone keeps the
 /// minimum of 1.

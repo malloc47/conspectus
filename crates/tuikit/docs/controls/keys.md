@@ -145,8 +145,8 @@ assert!(line.spans.iter().all(|span| span.style != unavailable_style(&theme)));
 - **`Ctrl-C` comes first** in every table an overlay resolves with, bound
   to an action that dismisses (`KeyRole::Abort`, or `Leave` for one level),
   so no later row can take it. `q` dismisses as well wherever nothing is
-  typed: the menu, dialog, checklist, pager, and palette option tables
-  bind it; the text, form, and palette tables leave it to type.
+  typed: the menu, dialog, checklist, settings, pager, and palette option
+  tables bind it; the text, form, and palette tables leave it to type.
 - **One footer grammar.** A segment is the keys, a space, and a short
   imperative verb with no "to" and no "=": `Esc close`, `Enter pick`,
   `Tab search current/all`. Labels that share a verb join with `/`; notes
@@ -173,6 +173,7 @@ not shown in the footer.
 | `LINE_EDIT_KEYS` (`EditKey`) | the editing keys every text field shares, all aliases: arrows and `Home`/`End` with their readline chords, word motion on `Alt-b`/`Alt-f` and the Control and Alt arrows, the delete, kill, and yank keys (see [text_edit.md](text_edit.md)) | none |
 | `PATH_FIELD_KEYS` (`PathKey`) | `Tab` completes the path, an alias (a path field's own key, consulted after its form's table; see [path_field.md](path_field.md)) | none |
 | `CHECKLIST_KEYS` (`ChecklistKey`) | `Ctrl-C` and `q` abort; `↑`/`k`/`Ctrl-P` up; `↓`/`j`/`Ctrl-N` down; `PgUp`/`PgDn` page; `g`/`Home` top and `G`/`End` bottom (aliases); `Space` toggle; `a` select all; `n` select none; `Enter` confirm; `Esc` cancel | `↑/↓ move · Space toggle · a select all · n select none · Enter confirm · Esc cancel` |
+| `SETTINGS_KEYS` (`SettingsKey`) | `Ctrl-C` and `q` abort; `↑`/`k`/`Ctrl-P` up; `↓`/`j`/`Ctrl-N` down; `PgUp`/`PgDn` page; `g`/`Home` top and `G`/`End` bottom (aliases); `Space` change; `Enter` apply; `Esc` close; a note that changes apply as they are made (the table of `SettingsPanel`; see [settings_panel.md](settings_panel.md)) | `↑/↓ move · Space select/toggle · Enter apply & close · Esc close · changes apply as you make them` |
 | `PALETTE_KEYS` (`PaletteKey`) | `Ctrl-C` abort; `↑`/`Ctrl-P` up; `↓`/`Ctrl-N` down; `PgUp`/`PgDn` page (aliases); `Enter` pick; `Esc` cancel; every other key edits the query, so `q`, `j`, and `k` type (the table of `Palette`; a palette with a scope or options includes it and binds `PaletteKey::Scope` and `PaletteKey::Options` with its own verbs, by convention on `Tab` and `Ctrl-O`; see [palette.md](palette.md)) | `↑/↓ move · Enter pick · Esc close` |
 | `PALETTE_OPTION_KEYS` (`PaletteOptionKey`) | `Ctrl-C` and `q` abort; `↑`/`k`/`Ctrl-P` up; `↓`/`j`/`Ctrl-N` down; `Space` and `Enter` toggle; `Esc` and `Ctrl-O` back (a palette's options pane) | `↑/↓ move · Space toggle · Esc back` |
 | `FORM_KEYS` (`FormKey`) | `Ctrl-C` abort; `↑`/`Ctrl-P` previous field; `↓`/`Ctrl-N` next field; `Tab` complete or next; `S-Tab` back | `↑/↓ move · Tab complete/next · S-Tab back` |
@@ -205,10 +206,10 @@ the style the control draws its footer in.
 | # | Rule | How this module follows it |
 | --- | --- | --- |
 | 3 | Confirmation | `DIALOG_KEYS` is the one dialog keymap: `y`/`Enter` confirm, `n`/`Esc` cancel, in a confirmation, a choice (beside its verbs), and a notice alike |
-| 4 | Close keys | `Esc` leaves one level in every standard table; `Ctrl-C` comes first and dismisses (`ctrl_c_first`); `q` dismisses too in every table where nothing is typed (menus, dialogs, checklists, pagers, a palette's options pane) and types in the text, form, and palette tables |
+| 4 | Close keys | `Esc` leaves one level in every standard table; `Ctrl-C` comes first and dismisses (`ctrl_c_first`); `q` dismisses too in every table where nothing is typed (menus, dialogs, checklists, settings panels, pagers, a palette's options pane) and types in the text, form, and palette tables |
 | 6 | Forms | `FORM_KEYS`: `Tab`/`↓`/`Ctrl-N` next and `S-Tab`/`↑`/`Ctrl-P` previous; `Enter` is the form's submit row |
 | 8 | Footers and hints | every footer is generated from its table in one grammar; `unresolved` fails a footer that names a key an earlier row takes |
-| 12 | Paging | `PAGER_KEYS` and `CHECKLIST_KEYS` bind `PgUp`/`PgDn`, `Home`/`End`, and `g`/`G` as typed, and `PALETTE_KEYS` binds `PgUp`/`PgDn` (its `Home`/`End` move the query's caret and `g`/`G` type); the control sizes the page |
+| 12 | Paging | `PAGER_KEYS`, `CHECKLIST_KEYS`, and `SETTINGS_KEYS` bind `PgUp`/`PgDn`, `Home`/`End`, and `g`/`G` as typed, and `PALETTE_KEYS` binds `PgUp`/`PgDn` (its `Home`/`End` move the query's caret and `g`/`G` type); the control sizes the page |
 | 13 | Theme | the one look it adds, for an unavailable action, comes from `inert` and `muted` |
 | 14 | Width | `Footer::lines` measures segments in cells and wraps only between them |
 

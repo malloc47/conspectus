@@ -114,7 +114,8 @@ A prompt that is a menu's follow-up question (the value a menu entry
 needs) opens as a step of the menu, with `ModalStack::push_step`: `Esc`
 gives the menu its keys back, and a commit or `Ctrl-C` closes the prompt
 and the menu together. A prompt that edits one value of an overlay that
-stays open (a settings panel's editor) opens as a step too, and its
+stays open (a settings panel's editor, see
+[settings_panel.md](settings_panel.md)) opens as a step too, and its
 `on_confirm` answers `PromptResult::Back`: the value applies, the prompt
 closes, and the panel under it has the keys again, while `Ctrl-C` still
 dismisses both. A host whose overlay holds the prompt as one of its own

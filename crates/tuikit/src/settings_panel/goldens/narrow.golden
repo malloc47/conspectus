@@ -1,0 +1,25 @@
+frame 40x10
+text  |                                        |
+style |                                        |
+text  |┌ Settings ────────────────────────────┐|
+style |aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa|
+text  |│                                      │|
+style |a                                      a|
+text  |│Actions                               │|
+style |abbbbbbb                               a|
+text  |│► Clear all                           │|
+style |accccccccccc                           a|
+text  |│↑/↓ move · Space select/toggle        │|
+style |a                                      a|
+text  |│Enter apply & close · Esc close       │|
+style |a                                      a|
+text  |│changes apply as you make them        │|
+style |a                                      a|
+text  |└──────────────────────────────────────┘|
+style |aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa|
+text  |                                        |
+style |                                        |
+legend
+  a  fg Cyan
+  b  bold
+  c  bold, reversed

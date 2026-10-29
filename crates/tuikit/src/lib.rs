@@ -31,6 +31,7 @@ pub mod palette;
 pub mod path_field;
 pub mod scroll;
 pub mod selection;
+pub mod settings_panel;
 pub mod text;
 pub mod text_edit;
 pub mod text_prompt;

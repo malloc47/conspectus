@@ -1,0 +1,65 @@
+frame 72x30
+text  |                                                                        |
+style |                                                                        |
+text  |                                                                        |
+style |                                                                        |
+text  |                                                                        |
+style |                                                                        |
+text  |                                                                        |
+style |                                                                        |
+text  |    ┌ Settings ────────────────────────────────────────────────────┐    |
+style |    aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa    |
+text  |    │View                                                          │    |
+style |    abbbb                                                          a    |
+text  |    │  Alpha [1]  active                                           │    |
+style |    a  bbbbbbbbbbbbbbbbb                                           a    |
+text  |    │  Beta [2]                                                    │    |
+style |    a                                                              a    |
+text  |    │  Gamma [3]                                                   │    |
+style |    a                                                              a    |
+text  |    │                                                              │    |
+style |    a                                                              a    |
+text  |    │Display                                                       │    |
+style |    abbbbbbb                                                       a    |
+text  |    │  [x] Wrap long lines                                         │    |
+style |    a  bbbbbbbbbbbbbbbbbbb                                         a    |
+text  |    │► mode fast  [ Cycle ]                                        │    |
+style |    acccccccccccccccccccccc                                        a    |
+text  |    │  name ada  [ Edit ]                                          │    |
+style |    a                                                              a    |
+text  |    │                                                              │    |
+style |    a                                                              a    |
+text  |    │Actions                                                       │    |
+style |    abbbbbbb                                                       a    |
+text  |    │  Clear all                                                   │    |
+style |    a                                                              a    |
+text  |    │  find Enter searches  [ Edit ]                               │    |
+style |    a                                                              a    |
+text  |    │                                                              │    |
+style |    a                                                              a    |
+text  |    │Sort                                                          │    |
+style |    abbbb                                                          a    |
+text  |    │  name  active                                                │    |
+style |    a  bbbbbbbbbbbb                                                a    |
+text  |    │  date                                                        │    |
+style |    a                                                              a    |
+text  |    │                                                              │    |
+style |    a                                                              a    |
+text  |    │↑/↓ move · Space select/toggle · Enter apply & close          │    |
+style |    a                                                              a    |
+text  |    │Esc close · changes apply as you make them                    │    |
+style |    a                                                              a    |
+text  |    └──────────────────────────────────────────────────────────────┘    |
+style |    aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa    |
+text  |                                                                        |
+style |                                                                        |
+text  |                                                                        |
+style |                                                                        |
+text  |                                                                        |
+style |                                                                        |
+text  |                                                                        |
+style |                                                                        |
+legend
+  a  fg Cyan
+  b  bold
+  c  bold, reversed
