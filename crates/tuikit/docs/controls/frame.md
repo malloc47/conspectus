@@ -24,7 +24,9 @@ It has one look and one sizing rule:
   `surface`, so nothing drawn under the modal shows through. The border
   is plain lines on all four sides in the `accent`. The title is plain
   text in the border's color and regular weight, left-aligned with one
-  space on each side; any spaces a caller put at its ends are dropped.
+  space on each side; any spaces a caller put at its ends are dropped. A
+  footer, when a modal gives one, sits on the bottom border in the same
+  form.
 - **Measured once.** A `ModalBody` is told the inner width its policy
   gives (`measure`), reports the rows it needs, and draws in the area the
   frame leaves (`render`). The frame places itself from those rows. No
@@ -110,6 +112,7 @@ assert_eq!(shown.viewport(), 20, "24 rows, less a row clear above and below and 
 | --- | --- | --- |
 | `ModalFrame::new(&theme, size)` | a frame sized by a policy | no title, no padding |
 | `title(line)`, `padding(padding)` | set the title and the padding | the title's spans keep their styles (chips); padding is ratatui's `Padding` |
+| `footer(line)` | set a line on the bottom border | the title's form; for a modal whose body has no row to spare for its keys (a one-line prompt); the modal lays it out for `inner_width` less 2 so it breaks between hints, and the frame cuts what still does not fit at the corner |
 | `inner_width(area)` | the columns a body gets | the policy's width less the border and padding |
 | `rect(area, rows)` | the frame's rect for a body of `rows` rows | centered; a fill policy ignores `rows` |
 | `render(area, buf, body)` | measures the body once, draws the frame, draws the body | returns the body's `Output` |
@@ -160,13 +163,14 @@ frame (see [scroll.md](scroll.md#the-window)).
 ## Key table
 
 None: the frame handles no keys. The modal inside it has its own key
-table, and its footer is part of its body.
+table, and its footer is part of its body or, for a body with no row to
+spare, the line the modal hands `footer`.
 
 ## Theme tokens
 
 | Token | Used for |
 | --- | --- |
-| `accent` | the border, and so the title, which takes the border's color |
+| `accent` | the border, and so the title and the footer, which take the border's color |
 | `surface` | the background painted over the cleared rect |
 
 A title's chips (a segmented choice) keep the look their own module gave
@@ -176,7 +180,7 @@ them, from `badge` and `accent`. The body styles itself.
 
 | # | Rule | How this control follows it |
 | --- | --- | --- |
-| 8 | Footers and hints | The frame draws no hint of its own; a modal's footer is its body's, generated from its key table |
+| 8 | Footers and hints | The frame draws no hint of its own; a modal's footer is its body's or the bottom-border line it hands the frame, either way generated from its key table |
 | 13 | Theme | The border and background come from `accent` and `surface`; the frame names no color |
 | 14 | Width | A body is laid out for the inner width the policy gives in cells, so nothing is laid out for one width and drawn at another |
 

@@ -296,6 +296,71 @@ fn a_frame_without_a_title_draws_an_unbroken_border() {
 }
 
 #[test]
+fn a_footer_sits_on_the_bottom_border_in_the_title_form() {
+    let theme = Theme::default();
+    let area = screen(60, 12);
+    let unavailable = Style::default().fg(Color::DarkGray);
+    let footer = Line::from(vec![
+        Span::raw("  Enter go · "),
+        Span::styled("Esc back", unavailable),
+        Span::raw(" "),
+    ]);
+    let (buf, inner, ..) = draw(
+        ModalFrame::new(&theme, ModalSize::COMPACT)
+            .title("Ask")
+            .footer(footer),
+        area,
+        1,
+    );
+    let (x, y) = (inner.x - 1, inner.bottom());
+    assert_eq!(row_text(&buf, y, x..x + 25), "└ Enter go · Esc back ───");
+    assert_eq!(
+        buf[(x + 2, y)].fg,
+        theme.accent,
+        "unstyled text takes the border's color"
+    );
+    assert!(buf[(x + 2, y)].modifier.is_empty(), "regular weight");
+    assert_eq!(
+        buf[(x + 14, y)].fg,
+        Color::DarkGray,
+        "a styled span keeps its style"
+    );
+    assert_eq!(buf[(inner.right(), y)].symbol(), "┘");
+}
+
+#[test]
+fn a_footer_wider_than_the_border_stops_at_its_corner() {
+    let theme = Theme::default();
+    let area = screen(24, 6);
+    let (buf, inner, ..) = draw(
+        ModalFrame::new(&theme, ModalSize::COMPACT).footer("a footer far too long for this frame"),
+        area,
+        1,
+    );
+    let y = inner.bottom();
+    assert_eq!(buf[(inner.x - 1, y)].symbol(), "└");
+    assert_eq!(buf[(inner.right(), y)].symbol(), "┘");
+    assert!(row_text(&buf, y, inner.x..inner.right()).starts_with(" a footer far"));
+}
+
+#[test]
+fn a_frame_without_a_footer_draws_an_unbroken_bottom_border() {
+    let theme = Theme::default();
+    let area = screen(40, 12);
+    for footer in [Line::default(), Line::from("   ")] {
+        let (buf, inner, ..) = draw(
+            ModalFrame::new(&theme, ModalSize::COMPACT).footer(footer),
+            area,
+            1,
+        );
+        assert_eq!(
+            row_text(&buf, inner.bottom(), inner.x..inner.right()),
+            "─".repeat(usize::from(inner.width))
+        );
+    }
+}
+
+#[test]
 fn padding_moves_the_body_in_and_the_rows_count_it() {
     let theme = Theme::default();
     let area = screen(100, 30);

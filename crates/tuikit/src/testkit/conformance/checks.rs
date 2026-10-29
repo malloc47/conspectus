@@ -323,7 +323,18 @@ pub(super) fn footer<R: Rig>(rig: &R, case: &Case<R::State>) -> Vec<String> {
     };
     let (with, without) = with_and_without(rig, case, FOOTER_SIZE);
     let rows = match (case.look, frame_rect(&with, &without)) {
-        (Look::Framed, Some(rect)) => inner_rows(&with, rect),
+        // A frame's footer is in its body or, for a body with no row to
+        // spare, on its bottom border.
+        (Look::Framed, Some(rect)) => {
+            let mut rows = inner_rows(&with, rect);
+            let bottom = rect.bottom() - 1;
+            rows.push(
+                (rect.x..rect.right())
+                    .map(|x| with[(x, bottom)].symbol())
+                    .collect(),
+            );
+            rows
+        }
         _ => buffer::rows(&with),
     };
     footer

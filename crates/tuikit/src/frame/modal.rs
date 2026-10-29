@@ -86,6 +86,10 @@ pub trait ModalBody {
 ///   caller put at its ends are dropped, so every title has the same
 ///   form. A title may carry chips (a segmented choice); they keep their
 ///   own look, and nothing else in a title is styled.
+/// - **Footer.** None by default. [`ModalFrame::footer`] writes a line on
+///   the bottom border in the title's form, for a modal whose body has no
+///   row to give its key hints (a one-line prompt); the line is the
+///   modal's own, generated from its key table, never the frame's.
 /// - **Padding.** None by default; [`ModalFrame::padding`] adds cells
 ///   between the border and the body, and the sizing counts them.
 #[derive(Clone, Debug)]
@@ -93,16 +97,18 @@ pub struct ModalFrame<'a> {
     theme: &'a Theme,
     size: ModalSize,
     title: Line<'a>,
+    footer: Line<'a>,
     padding: Padding,
 }
 
 impl<'a> ModalFrame<'a> {
-    /// A frame sized by `size`, with no title and no padding.
+    /// A frame sized by `size`, with no title, no footer, and no padding.
     pub fn new(theme: &'a Theme, size: ModalSize) -> Self {
         Self {
             theme,
             size,
             title: Line::default(),
+            footer: Line::default(),
             padding: Padding::ZERO,
         }
     }
@@ -112,6 +118,19 @@ impl<'a> ModalFrame<'a> {
     #[must_use]
     pub fn title(mut self, title: impl Into<Line<'a>>) -> Self {
         self.title = title.into();
+        self
+    }
+
+    /// Sets the footer, a line on the bottom border in the title's form:
+    /// left-aligned, one space on each side (spaces the caller added at
+    /// its ends are dropped), unstyled text in the border's color, spans
+    /// with a style of their own keeping it. The frame cuts a footer
+    /// wider than the border at its corner; a modal lays its footer out
+    /// for [`inner_width`](Self::inner_width) less those two spaces so
+    /// it breaks between hints instead.
+    #[must_use]
+    pub fn footer(mut self, footer: impl Into<Line<'a>>) -> Self {
+        self.footer = footer.into();
         self
     }
 
@@ -150,12 +169,15 @@ impl<'a> ModalFrame<'a> {
         let area = area.intersection(buf.area);
         let rows = body.measure(self.inner_width(area));
         let rect = self.rect(area, rows);
-        let block = bordered(
+        let mut block = bordered(
             self.theme,
             Style::default().fg(self.theme.accent),
             self.title,
         )
         .padding(self.padding);
+        if let Some(footer) = framed_title(self.footer) {
+            block = block.title_bottom(footer);
+        }
         let inner = block.inner(rect);
         Clear.render(rect, buf);
         block.render(rect, buf);
@@ -175,8 +197,9 @@ fn bordered<'a>(theme: &Theme, border: Style, title: Line<'a>) -> Block<'a> {
     }
 }
 
-/// `title` with one space on each side and the spaces it had at its ends
-/// dropped; `None` when it has no text.
+/// `title` (or a footer, which takes the same form) with one space on
+/// each side and the spaces it had at its ends dropped; `None` when it
+/// has no text.
 fn framed_title(title: Line<'_>) -> Option<Line<'_>> {
     let Line {
         style,

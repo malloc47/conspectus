@@ -22,6 +22,9 @@
 //!   `surface`), so nothing drawn under the modal shows through, draws
 //!   the border in the theme's `accent`, and writes the title in one
 //!   form: plain text in the border's color with one space on each side.
+//!   A modal whose body has no row to spare for its keys (a one-line
+//!   prompt) hands the frame a footer, which sits on the bottom border in
+//!   the same form.
 //! - **Measured once.** A [`ModalBody`] is told the width the policy
 //!   gives it, reports the rows it needs, and draws in the area the
 //!   frame leaves; the frame places itself from those rows, once.

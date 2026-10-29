@@ -178,7 +178,7 @@ every modal a host registers.
 | 1 | List cursor and highlight | `Selection`: moving the cursor repaints rows and moves no text outside the two-cell cursor gutter |
 | 4 | Close keys | `Close`: `Ctrl-C` and `Esc` close the modal at its first level, and `q` too unless the level types; `Keys`: `Ctrl-C` is bound first, to dismissing |
 | 5 | Close feedback | `Close`: closing leaves nothing on the status line and posts no toast |
-| 8 | Footers and hints | `Footer`: every segment the modal's table generates is drawn; `Keys`: the table checks (labels, unresolved keys) |
+| 8 | Footers and hints | `Footer`: every segment the modal's table generates is drawn, in the frame's body or on its bottom border; `Keys`: the table checks (labels, unresolved keys) |
 | 13 | Theme | `Title`: the frame and title take the theme's `accent`; the kit's own code reads no raw style except the ANSI writer, which encodes the colors it is given |
 | 14 | Width | `Words`: no row ends at the frame's edge in the start of a word the modal shows whole on a wide screen; `Contained`: nothing escapes the frame at any of ten sizes |
 

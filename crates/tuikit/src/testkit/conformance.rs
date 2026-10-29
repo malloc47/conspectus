@@ -15,7 +15,7 @@
 //! | `Selection` | Moving the selection (down four times, up once) neither moves nor resizes the frame, and moves no text above the last row it repaints, outside the two-cell cursor gutter. |
 //! | `Words` | No row inside the frame, at any of the ten sizes, ends at the frame's edge in the start of a longer word the same modal shows whole on a wide screen; a deliberate cut ends in the ellipsis mark. |
 //! | `Keys` | Each level's key tables keep the modal key convention by role (`Esc` leaves, `Enter` applies where the [`Convention`] says, `Space` changes), bind `Ctrl-C` first to dismissing, and pass the table checks (every footer label is its key's label, every key a footer names resolves to its row, characters bind as typed, `Ctrl-C` comes first). |
-//! | `Footer` | Every segment of the footer the modal's table generates appears in the modal, so the footer is the generated one and not hand-written. |
+//! | `Footer` | Every segment of the footer the modal's table generates appears in the modal (in its body or on its bottom border), so the footer is the generated one and not hand-written. |
 //! | `Close` | `Ctrl-C` closes the modal, `Esc` closes it at its first level, and `q` does too unless the level types (house rule 4); closing says nothing (house rule 5). |
 //!
 //! The host's side is a [`Rig`]: how to draw its whole screen, how to
