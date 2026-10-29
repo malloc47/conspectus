@@ -691,7 +691,10 @@ will do:
   where you were and a message says so.
 
 The keys are on the modal's last row: `Up`/`Down` (or `Ctrl-P`/`Ctrl-N`)
-move, `Enter` picks, `Tab` switches Current and All, `Esc` closes.
+move, `Enter` picks, `Tab` switches Current and All, `Esc` closes. Typing
+keeps the highlight on the same position while it is still a result. A
+list longer than the modal scrolls with a scrollbar beside it, moving only
+as far as the highlight needs.
 
 ### Searching contents with `Ctrl-/`
 
@@ -731,11 +734,12 @@ with the match picked out in the theme's `match_highlight` color. The keys:
   flips one, `Esc` goes back to the results). Changing one searches again.
   The tool and thinking options apply to sessions; the starting values
   come from `[search]`.
-- `Up`/`Down` (or `Ctrl-P`/`Ctrl-N`) move through the results. `Enter`
-  opens a session hit in the viewer at the match, with the query already
-  searched, or a pane hit in the full-screen pane viewer on a fresh capture,
-  at the line, with the match picked out (the pane's mux is selected in the
-  Mux view first). The pane viewer has the session viewer's keys (`j`/`k`,
+- `Up`/`Down` (or `Ctrl-P`/`Ctrl-N`) move through the results; a list
+  longer than the modal scrolls with a scrollbar beside it, and the
+  columns stay put as results arrive. `Enter` opens a session hit in the
+  viewer at the match, with the query already searched, or a pane hit in
+  the full-screen pane viewer on a fresh capture, at the line, with the
+  match picked out (the pane's mux is selected in the Mux view first). The pane viewer has the session viewer's keys (`j`/`k`,
   `PgUp`/`PgDn`, `g`/`G`, `Ctrl-D`/`Ctrl-U`, `/` with `n`/`N`, `?` for help,
   `Esc` stepping back from help and find, `q` leaving at once) and `a`,
   which attaches to the pane's mux. A stopped or gone mux refuses with a

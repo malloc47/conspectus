@@ -1260,7 +1260,13 @@ provider's host polls, and the footer generated from the palette key table
 kept in view while the results scroll, in the palette frame. `Enter` hands
 the row under the cursor to the host's `on_pick`; `conspectus` keeps the
 retarget candidates, the history items, the titles, and the `Msg` each pick
-commits. Quick select and content search move onto it next.
+commits. Quick select and content search are two palettes (ADR 0175): the
+adapter keeps the ranking, the outcome words, the content kinds, history
+paging, and the `Msg` mapping, and draws the rows itself; a content hit's
+cells are one column plan (`ColumnPlan`: ordered cells with their widths,
+gaps, and the order they give way in), which the Search view's hit rows can
+lay out too. Quick select keeps its cursor's position across an edit while
+it is still a result.
 
 Every argv `conspectus` reads from text is split by one grammar (ADR 0169,
 `src/argv.rs`): a POSIX shell's word splitting with nothing expanded. An
