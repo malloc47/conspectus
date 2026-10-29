@@ -5731,9 +5731,18 @@ fn clean_up_lists_what_has_aged_out_and_nothing_pinned() {
     let snapshot = crate::tui::rows::pinned::fixture_world();
     let mut app = history_app_over(&snapshot, crate::tui::HistoryGrouping::None, config);
     app.update(Msg::OpenCleanUp);
-    assert!(app.clean_up().expect("modal").is_empty());
+    assert!(
+        app.clean_up().is_none(),
+        "no checklist with nothing to list"
+    );
+    assert_eq!(
+        app.dialog().map(tuikit::dialog::Dialog::title),
+        Some("Clean up"),
+        "a notice says why"
+    );
     let frame = pinned_frame(&mut app, 100);
     assert!(frame.contains("Nothing to clean up"), "{frame}");
+    assert!(frame.contains("Enter/Esc close"), "{frame}");
 }
 
 // ----- Ghost muxes in the Mux view -----------------------------------

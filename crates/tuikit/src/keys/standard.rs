@@ -57,38 +57,6 @@ impl KeyAction for MenuKey {
     }
 }
 
-/// What a confirmation dialog's keys do.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub enum ConfirmKey {
-    /// Dismiss the dialog and the overlay it is in (`Ctrl-C`, `q`).
-    Abort,
-    /// Go ahead.
-    Yes,
-    /// Do not go ahead.
-    No,
-}
-
-/// A yes-or-no dialog: `Enter/y confirm · Esc/n cancel`. `q` dismisses
-/// it, as `Ctrl-C` does.
-pub const CONFIRM_KEYS: &[KeyRow<ConfirmKey>] = &[
-    alias(ctrl('c'), ConfirmKey::Abort),
-    alias(ch('q'), ConfirmKey::Abort),
-    shown(key(KeyCode::Enter), ConfirmKey::Yes, "Enter", "confirm"),
-    shown(ch('y'), ConfirmKey::Yes, "y", "confirm"),
-    shown(key(KeyCode::Esc), ConfirmKey::No, "Esc", "cancel"),
-    shown(ch('n'), ConfirmKey::No, "n", "cancel"),
-];
-
-impl KeyAction for ConfirmKey {
-    fn role(self) -> KeyRole {
-        match self {
-            Self::Abort => KeyRole::Abort,
-            Self::Yes => KeyRole::Apply,
-            Self::No => KeyRole::Leave,
-        }
-    }
-}
-
 /// What a dialog's keys do: the one table every
 /// [`Dialog`](crate::dialog::Dialog) resolves with, whatever its form.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -130,33 +98,6 @@ impl KeyAction for DialogKey {
             Self::Up | Self::Down => KeyRole::Move,
             Self::Confirm => KeyRole::Apply,
             Self::Cancel => KeyRole::Leave,
-        }
-    }
-}
-
-/// What a choice dialog's keys do: one of the host's choices `C`, or
-/// none.
-///
-/// A choice dialog's table is the host's, because its keys and verbs are
-/// the choices: `Ctrl-C` first and `q` to [`ChoiceKey::Abort`], a shown
-/// row per choice (`m merge & close`), then `Esc` shown as `cancel` to
-/// [`ChoiceKey::Back`].
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub enum ChoiceKey<C> {
-    /// Dismiss the dialog and the overlay it is in (`Ctrl-C`, `q`).
-    Abort,
-    /// Take this choice.
-    Choose(C),
-    /// Leave without choosing.
-    Back,
-}
-
-impl<C: Copy> KeyAction for ChoiceKey<C> {
-    fn role(self) -> KeyRole {
-        match self {
-            Self::Abort => KeyRole::Abort,
-            Self::Choose(_) => KeyRole::Apply,
-            Self::Back => KeyRole::Leave,
         }
     }
 }

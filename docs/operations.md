@@ -1494,6 +1494,16 @@ asks for a second `Enter` says so on its row once armed. A menu taller than
 the screen keeps its keys at the bottom and scrolls its entries, with a
 scrollbar beside them, moving only as far as the cursor needs.
 
+Every dialog takes the same keys. A confirmation (the worktree menu's
+merge, remove, and prune) goes ahead on `Enter` or `y` and goes back on
+`Esc` or `n`; a choice (close-down's `m` merge and `d` discard) takes its
+own keys and goes back on `Esc` or `n`; a notice (Clean up with nothing to
+clean up) closes on `Enter`, `y`, `Esc`, or `n`. `Ctrl-C` and `q` close a
+dialog too. A dialog or prompt a menu entry opens sits over the menu:
+`Esc` there returns to the menu, and `Ctrl-C` (or `q` where nothing is
+typed) closes both. On a short terminal a dialog keeps its keys at the
+bottom and its text scrolls with the arrow keys.
+
 Inside the transcript viewer, `?` opens a help page drawn like the main
 help: the same frame and size, section headings, an accent-colored key
 column, descriptions that wrap, a scrollbar, and a footer naming the keys

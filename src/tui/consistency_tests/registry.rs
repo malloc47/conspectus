@@ -13,7 +13,9 @@
 //!   over it.
 //! - **Closed by one rule inside it** (house rules 4 and 5). Inside a
 //!   modal, Esc steps back one level, Ctrl-C dismisses the whole modal,
-//!   and so does `q` where nothing is typed.
+//!   and so does `q` where nothing is typed. A step a modal opens over
+//!   itself on the stack (a menu's confirmation) is one of its levels:
+//!   Esc gives the modal back its keys, and Ctrl-C and `q` close both.
 //!
 //! That every modal is drawn and closes by the one rule at its first
 //! level, silently, is the framework's conformance suite's business
@@ -22,7 +24,7 @@
 use ratatui::crossterm::event::{Event, KeyCode, KeyEvent};
 use tuikit::testkit::keys::{ctrl, press, release};
 
-use super::layout::{Open, app_with, builders};
+use super::layout::{Open, app_with, builders, open_worktree_step};
 use super::*;
 use crate::tui::Modal;
 use crate::tui::keymap::Action;
@@ -203,19 +205,6 @@ fn controls_at_filters(app: &mut App) {
     app.open_modal(Modal::Controls(state));
 }
 
-fn worktree_menu(app: &mut App) {
-    use crate::tui::widgets::worktree_menu::{WorktreeMenuContext, WorktreeMenuState};
-    let context = WorktreeMenuContext {
-        context: crate::tui::worktree_actions::WorktreeContext::Worktree,
-        repo_root: Some("/wt/feature".into()),
-        branch: Some("feature".into()),
-        guard_sessions: Vec::new(),
-        can_mutate: true,
-        reveal_target: None,
-    };
-    app.open_worktree_menu(WorktreeMenuState::new(context).expect("a worktree menu"));
-}
-
 fn keys(app: &mut App, keys: &[KeyEvent]) {
     for key in keys {
         assert!(route(app, *key), "{key:?} was not the modal's");
@@ -240,34 +229,6 @@ fn levels() -> Vec<Level> {
             open: |app| {
                 controls_at_filters(app);
                 keys(app, &[press(KeyCode::Down), press(KeyCode::Enter)]);
-            },
-        },
-        Level {
-            name: "the worktree branch prompt",
-            modal: "WorktreeMenu",
-            typed: true,
-            open: |app| {
-                worktree_menu(app);
-                keys(app, &[press(KeyCode::Enter)]);
-            },
-        },
-        Level {
-            name: "the worktree merge confirmation",
-            modal: "WorktreeMenu",
-            typed: false,
-            open: |app| {
-                worktree_menu(app);
-                keys(app, &[press(KeyCode::Down), press(KeyCode::Enter)]);
-            },
-        },
-        Level {
-            name: "the worktree close-down choice",
-            modal: "WorktreeMenu",
-            typed: false,
-            open: |app| {
-                worktree_menu(app);
-                let down = press(KeyCode::Down);
-                keys(app, &[down, down, down, press(KeyCode::Enter)]);
             },
         },
         Level {
@@ -346,5 +307,90 @@ fn esc_steps_back_and_ctrl_c_and_q_dismiss_from_inside_a_modal() {
             q,
             "q in {name}"
         );
+    }
+}
+
+/// A step a modal opened over itself: its name, the modal it is and the
+/// one under it, whether its keys type, and how to reach it.
+struct Step {
+    name: &'static str,
+    modal: &'static str,
+    under: &'static str,
+    typed: bool,
+    open: fn(&mut App),
+}
+
+fn steps() -> Vec<Step> {
+    let step = |name, modal, typed, open| Step {
+        name,
+        modal,
+        under: "WorktreeMenu",
+        typed,
+        open,
+    };
+    vec![
+        step("the worktree branch prompt", "Prompt", true, |app| {
+            open_worktree_step(app, 0);
+        }),
+        step("the worktree merge confirmation", "Dialog", false, |app| {
+            open_worktree_step(app, 1);
+        }),
+        step("the worktree remove confirmation", "Dialog", false, |app| {
+            open_worktree_step(app, 2);
+        }),
+        step("the worktree close-down choice", "Dialog", false, |app| {
+            open_worktree_step(app, 3);
+        }),
+    ]
+}
+
+/// A step a modal opens over itself is a level of it kept on the stack
+/// (house rule 4): Esc closes the step and gives the modal under it its
+/// keys back; Ctrl-C, and q where nothing is typed, dismiss the step and
+/// the modal together, saying nothing.
+#[test]
+fn esc_steps_back_from_a_step_and_ctrl_c_and_q_dismiss_its_whole_flow() {
+    for step in steps() {
+        let name = step.name;
+        let opened = || {
+            let mut app = app_in(View::Pinned);
+            (step.open)(&mut app);
+            app
+        };
+        let app = opened();
+        assert_eq!(app.top_modal_name(), Some(step.modal), "{name}");
+        assert_eq!(
+            app.modal_stack().len(),
+            2,
+            "{name}: the menu stays under it"
+        );
+        assert!(app.modal_stack().top_is_step(), "{name}");
+
+        let mut app = opened();
+        assert!(route(&mut app, press(KeyCode::Esc)), "{name}");
+        assert_eq!(app.top_modal_name(), Some(step.under), "Esc in {name}");
+        assert!(route(&mut app, press(KeyCode::Esc)), "{name}");
+        assert!(!app.has_modal(), "{name}: the menu had the keys again");
+
+        for (key, label) in [(ctrl('c'), "Ctrl-C"), (press(KeyCode::Char('q')), "q")] {
+            let mut app = opened();
+            app.update(Msg::SetStatus(Some(Feedback::info("a hint"))));
+            assert!(route(&mut app, key), "{label} in {name}");
+            if label == "q" && step.typed {
+                assert_eq!(app.top_modal_name(), Some(step.modal), "q types in {name}");
+                continue;
+            }
+            assert!(
+                !app.has_modal(),
+                "{label} in {name} left {:?} open",
+                app.top_modal_name()
+            );
+            assert_eq!(
+                app.status_message(),
+                None,
+                "{label} in {name} said something"
+            );
+            assert!(app.toasts().is_empty(), "{label} in {name} posted a toast");
+        }
     }
 }

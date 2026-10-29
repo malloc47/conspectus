@@ -61,21 +61,6 @@ const FORM: &[KeyRow<FormKey>] = &[
     shown(key(KeyCode::Esc), FormKey::Cancel, "Esc", "cancel"),
 ];
 
-/// A choice dialog's choices.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum Choice {
-    Keep,
-    Drop,
-}
-/// A choice dialog's table over them.
-const CHOICE: &[KeyRow<ChoiceKey<Choice>>] = &[
-    alias(ctrl('c'), ChoiceKey::Abort),
-    shown(ch('k'), ChoiceKey::Choose(Choice::Keep), "k", "keep"),
-    shown(ch('d'), ChoiceKey::Choose(Choice::Drop), "d", "drop"),
-    shown(key(KeyCode::Esc), ChoiceKey::Back, "Esc", "cancel"),
-    alias(ch('q'), ChoiceKey::Back),
-];
-
 fn segments(footer: &Footer) -> Vec<(&str, bool)> {
     footer
         .segments()
@@ -468,11 +453,6 @@ fn the_standard_tables_keep_the_rules() {
         Convention::new("menu", Activates, Types, ""),
     );
     check(
-        "confirm",
-        CONFIRM_KEYS,
-        Convention::new("confirm", Submits, Types, ""),
-    );
-    check(
         "dialog",
         DIALOG_KEYS,
         Convention::new("dialog", Submits, Types, ""),
@@ -493,15 +473,6 @@ fn the_standard_tables_keep_the_rules() {
         Convention::new("checklist", Submits, Toggles, ""),
     );
     check("form", FORM, Convention::new("form", Submits, Toggles, ""));
-    check(
-        "choice",
-        CHOICE,
-        Convention::new("choice", Nothing, Types, ""),
-    );
-    assert_eq!(
-        footer(CHOICE),
-        ["k keep", "d drop", "Esc cancel"].join(HINT_SEPARATOR)
-    );
 }
 
 #[test]
@@ -510,7 +481,7 @@ fn q_dismisses_where_nothing_is_typed() {
     // and left to type in the ones that edit text.
     let q = press(KeyCode::Char('q'));
     assert_eq!(resolve(MENU_KEYS, q), Some(MenuKey::Abort));
-    assert_eq!(resolve(CONFIRM_KEYS, q), Some(ConfirmKey::Abort));
+    assert_eq!(resolve(DIALOG_KEYS, q), Some(DialogKey::Abort));
     assert_eq!(resolve(CHECKLIST_KEYS, q), Some(ChecklistKey::Abort));
     assert_eq!(resolve(PAGER_KEYS, q), Some(PagerKey::Close));
     assert_eq!(resolve(TEXT_INPUT_KEYS, q), None);
@@ -531,7 +502,7 @@ fn the_standard_footers_read_in_the_one_grammar() {
         ["↑/↓ move", "Enter pick", "Esc close"].join(sep)
     );
     assert_eq!(
-        footer(CONFIRM_KEYS),
+        footer(DIALOG_KEYS),
         ["Enter/y confirm", "Esc/n cancel"].join(sep)
     );
     assert_eq!(
@@ -553,7 +524,7 @@ fn the_standard_footers_read_in_the_one_grammar() {
     assert_eq!(footer(FORM_OPTION_KEYS), "←/→/Space change");
     for text in [
         footer(MENU_KEYS),
-        footer(CONFIRM_KEYS),
+        footer(DIALOG_KEYS),
         footer(PAGER_KEYS),
         footer(CHECKLIST_KEYS),
         footer(FORM_KEYS),
@@ -574,7 +545,7 @@ fn every_list_moves_with_ctrl_p_and_ctrl_n() {
     assert_eq!(resolve(FORM_KEYS, ctrl_p), Some(FormKey::Up));
     // A pager has no cursor, and a dialog no list.
     assert_eq!(resolve(PAGER_KEYS, ctrl_n), None);
-    assert_eq!(resolve(CONFIRM_KEYS, ctrl_n), None);
+    assert_eq!(resolve(DIALOG_KEYS, ctrl_n), None);
 }
 
 #[test]

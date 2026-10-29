@@ -61,22 +61,31 @@ fn escape_cancels() {
 }
 
 #[test]
-fn q_dismisses_the_checklist_and_its_empty_notice() {
+fn q_dismisses_the_checklist() {
     let mut state = state();
-    assert_eq!(state.handle_key(press(KeyCode::Char('q'))), Outcome::Close);
-    let mut state = CleanUpState::new(Vec::new(), 100);
     assert_eq!(state.handle_key(press(KeyCode::Char('q'))), Outcome::Close);
 }
 
 #[test]
-fn with_no_candidates_enter_and_escape_dismiss_the_notice() {
-    let mut state = CleanUpState::new(Vec::new(), 100);
-    assert!(state.is_empty());
-    assert_eq!(state.handle_key(press(KeyCode::Enter)), Outcome::Close);
-    let mut state = CleanUpState::new(Vec::new(), 100);
-    assert_eq!(state.handle_key(press(KeyCode::Esc)), Outcome::Close);
+fn the_empty_notice_is_a_dialog_any_dismiss_key_closes() {
+    use tuikit::overlay::Overlay;
+    let mut notice = empty_notice();
+    assert_eq!(notice.title(), "Clean up");
+    assert_eq!(notice.text()[0], "Nothing to clean up.");
+    assert_eq!(notice.footer().text(), "Enter/Esc close");
+    for close in [press(KeyCode::Enter), press(KeyCode::Esc)] {
+        assert_eq!(
+            notice.clone().handle(close, &()),
+            Outcome::Close,
+            "{close:?}"
+        );
+    }
     assert_eq!(
-        state.handle_key(press(KeyCode::Char('x'))),
+        notice.clone().handle(press(KeyCode::Char('q')), &()),
+        Outcome::Dismiss
+    );
+    assert_eq!(
+        notice.handle(press(KeyCode::Char('x')), &()),
         Outcome::Consumed
     );
 }

@@ -98,10 +98,10 @@ fn open_rename(app: &mut App) {
 }
 
 fn open_branch_prompt(app: &mut App) {
-    let menu = crate::tui::widgets::worktree_menu::WorktreeMenuState::new(worktree_context())
+    let menu = crate::tui::widgets::worktree_menu::worktree_menu(&worktree_context())
         .expect("a worktree offers New worktree");
     app.open_worktree_menu(menu);
-    // New worktree is the first action.
+    // New worktree is the first action; its prompt opens over the menu.
     send(app, press(KeyCode::Enter));
 }
 
@@ -417,7 +417,11 @@ fn an_empty_branch_name_says_why_and_keeps_the_prompt_open() {
     let mut app = opened(open_branch_prompt);
     let effects = send(&mut app, press(KeyCode::Enter));
     assert!(!acts(&effects), "nothing is created: {effects:?}");
-    assert!(app.worktree_menu().is_some(), "the prompt stays open");
+    assert_eq!(
+        app.top_modal_name(),
+        Some("Prompt"),
+        "the prompt stays open"
+    );
     says_in_the_prompt(&mut app, "worktree: branch name is required");
 }
 
@@ -505,10 +509,9 @@ fn a_paste_outside_a_text_field_does_nothing() {
 
     // A menu's letters are its keys: `d` would discard the worktree.
     let mut app = app_in(View::Sessions);
-    let menu =
-        crate::tui::widgets::worktree_menu::WorktreeMenuState::new_close_down(worktree_context())
-            .expect("a worktree can be closed down");
-    app.open_worktree_menu(menu);
+    let choice = crate::tui::widgets::worktree_menu::close_down_dialog(&worktree_context())
+        .expect("a worktree can be closed down");
+    app.open_modal(crate::tui::Modal::Dialog(Box::new(choice)));
     let before = screen(&mut app);
     let effects = paste(&mut app, "discard");
     assert!(effects.is_empty(), "{effects:?}");

@@ -19,8 +19,8 @@
 use ratatui::crossterm::event::KeyCode;
 use tuikit::glyphs::marks;
 use tuikit::keys::{
-    ChoiceKey, Convention, EnterMeans, FORM_KEYS, FORM_OPTION_KEYS, FormKey, KeyAction, KeyRole,
-    KeyRow, PAGER_KEYS, PagerKey, SpaceMeans, alias, ch, ctrl, include, key, shown,
+    Convention, EnterMeans, FORM_KEYS, FORM_OPTION_KEYS, FormKey, KeyAction, KeyRole, KeyRow,
+    PAGER_KEYS, PagerKey, SpaceMeans, alias, ch, ctrl, include, key, shown,
 };
 
 use crate::tui::widgets::pane_viewer::PaneViewerMsg;
@@ -325,35 +325,6 @@ pub const MESSAGES_KEYS: &[KeyRow<MessagesKey>] = &[
 ];
 
 // ---------------------------------------------------------------------
-// Worktree close-down choice: merge or discard, then tear down.
-// ---------------------------------------------------------------------
-
-/// The two ways to close down a stream.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum CloseDown {
-    Merge,
-    Discard,
-}
-
-pub const CLOSE_DOWN_KEYS: &[KeyRow<ChoiceKey<CloseDown>>] = &[
-    alias(ctrl('c'), ChoiceKey::Abort),
-    shown(
-        ch('m'),
-        ChoiceKey::Choose(CloseDown::Merge),
-        "m",
-        "merge & close",
-    ),
-    shown(
-        ch('d'),
-        ChoiceKey::Choose(CloseDown::Discard),
-        "d",
-        "discard & close",
-    ),
-    shown(key(KeyCode::Esc), ChoiceKey::Back, "Esc", "cancel"),
-    alias(ch('q'), ChoiceKey::Abort),
-];
-
-// ---------------------------------------------------------------------
 // Multi-field forms: the new bare mux form, the mux launch form, and the
 // pin edit form, on the standard form rows. Up and Down always move
 // between fields; Tab completes in a path field and moves on elsewhere;
@@ -537,6 +508,8 @@ pub const MODAL_CONVENTION: &[Convention] = &[
         "changes apply as they are made, so Esc keeps them",
     ),
     conv("Rename", EnterMeans::Submits, SpaceMeans::Types, ""),
+    conv("Prompt", EnterMeans::Submits, SpaceMeans::Types, ""),
+    conv("Dialog", EnterMeans::Submits, SpaceMeans::Types, ""),
     conv("Search", EnterMeans::Activates, SpaceMeans::Types, ""),
     conv(
         "ValueModal",

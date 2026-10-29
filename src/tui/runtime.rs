@@ -1438,7 +1438,7 @@ fn try_daemon_snapshot() -> Option<crate::model::GraphSnapshot> {
 /// `w`: build the worktree action menu for the current selection and
 /// open it, or post a status when there is nothing to offer.
 pub(super) fn open_worktree_menu_action(app: &mut App) {
-    use crate::tui::widgets::worktree_menu::{WorktreeMenuState, context_for_node};
+    use crate::tui::widgets::worktree_menu::{context_for_node, worktree_menu};
     let Some(node) = crate::tui::actions::action_subject(app).node else {
         app.update(Msg::SetStatus(Some(Feedback::warning(
             "worktree: nothing selected",
@@ -1454,8 +1454,8 @@ pub(super) fn open_worktree_menu_action(app: &mut App) {
         ))));
         return;
     };
-    if let Some(state) = WorktreeMenuState::new(ctx) {
-        app.open_worktree_menu(state);
+    if let Some(menu) = worktree_menu(&ctx) {
+        app.open_worktree_menu(menu);
         app.update(Msg::SetStatus(Some(Feedback::info(
             "worktree: ↑/↓ move · Enter pick · Esc close",
         ))));
@@ -1469,10 +1469,11 @@ pub(super) fn open_worktree_menu_action(app: &mut App) {
     }
 }
 
-/// The `X` hot key: open the worktree menu straight into the close-down
-/// merge/discard choice for the selected node.
+/// The `X` hot key: open the close-down merge/discard choice for the
+/// selected node on its own, without the worktree menu under it. The
+/// choice shows its keys, so nothing goes on the status line.
 pub(super) fn open_worktree_close_down_action(app: &mut App) {
-    use crate::tui::widgets::worktree_menu::{WorktreeMenuState, context_for_node};
+    use crate::tui::widgets::worktree_menu::{close_down_dialog, context_for_node};
     let Some(node) = crate::tui::actions::action_subject(app).node else {
         app.update(Msg::SetStatus(Some(Feedback::warning(
             "worktree: nothing selected",
@@ -1488,11 +1489,8 @@ pub(super) fn open_worktree_close_down_action(app: &mut App) {
         ))));
         return;
     };
-    if let Some(state) = WorktreeMenuState::new_close_down(ctx) {
-        app.open_worktree_menu(state);
-        app.update(Msg::SetStatus(Some(Feedback::info(
-            "close down: m merge · d discard · Esc cancel",
-        ))));
+    if let Some(dialog) = close_down_dialog(&ctx) {
+        app.open_modal(crate::tui::Modal::Dialog(Box::new(dialog)));
     } else {
         let hint = if can_mutate {
             "close down: select a worktree, mux, or checkout with a branch"

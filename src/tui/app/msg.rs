@@ -225,6 +225,14 @@ pub enum Msg {
     /// executor per lockstep. A pin's rename prompt commits
     /// [`Msg::CommitSlotRename`] instead.
     CommitRename(String),
+    /// Open the worktree menu's next step for `action` over the menu: the
+    /// branch prompt, a confirmation, or the close-down choice, built
+    /// from the worktree facts the menu captured when it opened. The
+    /// step's own commit is one of the `CommitWorktree*` messages.
+    OpenWorktreeStep {
+        action: crate::tui::worktree_actions::WorktreeAction,
+        context: Box<crate::tui::widgets::worktree_menu::WorktreeMenuContext>,
+    },
     /// Commit the worktree menu's "New worktree" branch input.
     /// Reducer emits
     /// `Effect::WriteStore(StoreOp::WorktreeCreate)`.

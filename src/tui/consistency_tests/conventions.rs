@@ -20,15 +20,15 @@
 use ratatui::buffer::Buffer;
 use ratatui::crossterm::event::KeyEvent;
 use ratatui::layout::Rect;
-use tuikit::keys::{CHECKLIST_KEYS, CONFIRM_KEYS, Convention, MENU_KEYS, TEXT_INPUT_KEYS};
+use tuikit::keys::{CHECKLIST_KEYS, Convention, DIALOG_KEYS, MENU_KEYS, TEXT_INPUT_KEYS};
 use tuikit::testkit::conformance::{self, Case, Check, KeyTable, Registry, Rig, table};
 
 use super::layout::{Open, app_with, builders};
 use super::registry::{open_pane_viewer, open_viewer};
 use super::*;
 use crate::tui::keybindings::overlay::{
-    CLOSE_DOWN_KEYS, CONTROLS_KEYS, HELP_KEYS, MESSAGES_KEYS, MODAL_CONVENTION, MUX_LAUNCH_KEYS,
-    NEW_MUX_KEYS, PANE_VIEWER_KEYS, PICKER_KEYS, PIN_EDIT_KEYS, SEARCH_CONTENT_KEYS, SEARCH_KEYS,
+    CONTROLS_KEYS, HELP_KEYS, MESSAGES_KEYS, MODAL_CONVENTION, MUX_LAUNCH_KEYS, NEW_MUX_KEYS,
+    PANE_VIEWER_KEYS, PICKER_KEYS, PIN_EDIT_KEYS, SEARCH_CONTENT_KEYS, SEARCH_KEYS,
     VALUE_MODAL_KEYS, VIEWER_FIND_KEYS, VIEWER_KEYS,
 };
 
@@ -78,6 +78,7 @@ impl Rig for Host {
 /// than a way out.
 pub(super) const TYPED: &[&str] = &[
     "Rename",
+    "Prompt",
     "Search",
     "Picker",
     "NewMux",
@@ -132,20 +133,16 @@ fn tables(modal: &str) -> Vec<KeyTable> {
         "Viewer" => vec![table("VIEWER_KEYS", VIEWER_KEYS)],
         "PaneViewer" => vec![table("PANE_VIEWER_KEYS", PANE_VIEWER_KEYS)],
         "ViewerFind" => vec![table("VIEWER_FIND_KEYS", VIEWER_FIND_KEYS)],
-        "WorktreeMenu" => vec![
-            table("MENU_KEYS", MENU_KEYS),
-            table("CONFIRM_KEYS", CONFIRM_KEYS),
-            table("CLOSE_DOWN_KEYS", CLOSE_DOWN_KEYS),
-            table("TEXT_INPUT_KEYS", TEXT_INPUT_KEYS),
-        ],
+        // The worktree menu's steps are modals of their own: a prompt and
+        // dialogs.
+        "WorktreeMenu" => vec![table("MENU_KEYS", MENU_KEYS)],
+        "Prompt" => vec![table("TEXT_INPUT_KEYS", TEXT_INPUT_KEYS)],
+        "Dialog" => vec![table("DIALOG_KEYS", DIALOG_KEYS)],
         "NewMux" => vec![table("NEW_MUX_KEYS", NEW_MUX_KEYS)],
         "MuxMenu" | "RowMenu" => vec![table("MENU_KEYS", MENU_KEYS)],
         "MuxLaunch" => vec![table("MUX_LAUNCH_KEYS", MUX_LAUNCH_KEYS)],
         "PinEdit" => vec![table("PIN_EDIT_KEYS", PIN_EDIT_KEYS)],
-        "CleanUp" => vec![
-            table("CHECKLIST_KEYS", CHECKLIST_KEYS),
-            table("MENU_KEYS", MENU_KEYS),
-        ],
+        "CleanUp" => vec![table("CHECKLIST_KEYS", CHECKLIST_KEYS)],
         other => panic!("{other}: add the key tables this modal consults to tables()"),
     }
 }
@@ -178,8 +175,17 @@ fn case(name: &'static str, variant: &'static str, view: View, open: Open) -> Ca
         ("MuxMenu" | "RowMenu" | "WorktreeMenu", _) => case.footer(MENU_KEYS),
         ("MuxLaunch", _) => case.footer(MUX_LAUNCH_KEYS),
         ("PinEdit", _) => case.footer(PIN_EDIT_KEYS),
-        // The prompt draws its keys on its bottom border.
-        ("Rename", _) => case.footer(TEXT_INPUT_KEYS),
+        // The prompts draw their keys on their bottom border.
+        ("Rename" | "Prompt", _) => case.footer(TEXT_INPUT_KEYS),
+        // A dialog's footer depends on its form: the one the dialog that
+        // opened composes from the dialog table and its verbs.
+        ("Dialog", _) => {
+            let app = app_with(view, open);
+            let Some(dialog) = app.dialog() else {
+                panic!("Dialog ({variant}) opened no dialog");
+            };
+            case.footer(dialog.footer())
+        }
         // Clean up and the picker draw no footer of their own.
         _ => case,
     }
@@ -190,13 +196,15 @@ pub(super) fn registry() -> Registry<Host> {
     let mut registry = Registry::new(Host {
         theme: crate::tui::Theme::default(),
     });
-    let variants = ["", "contents", "all"];
-    let mut searches = variants.iter();
+    // The variants of a modal built more than once, in the builders'
+    // order.
+    let mut searches = ["", "contents", "all"].into_iter();
+    let mut dialogs = ["remove", "close-down", "clean up notice"].into_iter();
     for (name, view, open) in builders() {
-        let variant = if name == "Search" {
-            searches.next().copied().unwrap_or("")
-        } else {
-            ""
+        let variant = match name {
+            "Search" => searches.next().unwrap_or(""),
+            "Dialog" => dialogs.next().unwrap_or(""),
+            _ => "",
         };
         registry.push(case(name, variant, view, open));
     }

@@ -1,6 +1,6 @@
 use ratatui::crossterm::event::{KeyCode, KeyModifiers};
 use tuikit::keys::{
-    CHECKLIST_KEYS, CONFIRM_KEYS, ChecklistKey, ConfirmKey, FORM_KEYS, FORM_OPTION_KEYS,
+    CHECKLIST_KEYS, ChecklistKey, DIALOG_KEYS, DialogKey, FORM_KEYS, FORM_OPTION_KEYS,
     HINT_SEPARATOR, LINE_EDIT_KEYS, MENU_KEYS, MenuKey, PAGER_KEYS, PATH_FIELD_KEYS,
     TEXT_INPUT_KEYS, ctrl_c_first, footer, loose_characters, mislabeled, resolve, unresolved,
 };
@@ -31,7 +31,7 @@ fn problems<A: KeyAction + PartialEq>(rows: &'static [KeyRow<A>]) -> Problems {
 fn registry() -> Vec<(&'static str, Problems)> {
     vec![
         ("MENU_KEYS", problems(MENU_KEYS)),
-        ("CONFIRM_KEYS", problems(CONFIRM_KEYS)),
+        ("DIALOG_KEYS", problems(DIALOG_KEYS)),
         ("PAGER_KEYS", problems(PAGER_KEYS)),
         ("TEXT_INPUT_KEYS", problems(TEXT_INPUT_KEYS)),
         ("CHECKLIST_KEYS", problems(CHECKLIST_KEYS)),
@@ -47,7 +47,6 @@ fn registry() -> Vec<(&'static str, Problems)> {
         ("HELP_KEYS", problems(HELP_KEYS)),
         ("VALUE_MODAL_KEYS", problems(VALUE_MODAL_KEYS)),
         ("MESSAGES_KEYS", problems(MESSAGES_KEYS)),
-        ("CLOSE_DOWN_KEYS", problems(CLOSE_DOWN_KEYS)),
         ("NEW_MUX_KEYS", problems(NEW_MUX_KEYS)),
         ("MUX_LAUNCH_KEYS", problems(MUX_LAUNCH_KEYS)),
         ("PIN_EDIT_KEYS", problems(PIN_EDIT_KEYS)),
@@ -188,10 +187,6 @@ fn generated_footers_read_in_the_one_grammar() {
         joined(&["j/k select", "J/K scroll detail", "y copy", "Esc close"])
     );
     assert_eq!(
-        footer(CLOSE_DOWN_KEYS),
-        joined(&["m merge & close", "d discard & close", "Esc cancel"])
-    );
-    assert_eq!(
         footer(NEW_MUX_KEYS),
         joined(&[
             "↑/↓ move",
@@ -237,9 +232,8 @@ fn generated_footers_read_in_the_one_grammar() {
         footer(HELP_KEYS),
         footer(VALUE_MODAL_KEYS),
         footer(MESSAGES_KEYS),
-        footer(CLOSE_DOWN_KEYS),
         footer(PIN_EDIT_KEYS),
-        footer(CONFIRM_KEYS),
+        footer(DIALOG_KEYS),
     ] {
         assert!(!text.contains(" to ") && !text.contains(" = "), "{text}");
     }
@@ -270,22 +264,12 @@ fn a_character_never_fires_on_its_control_or_alt_chord() {
         resolve(MESSAGES_KEYS, chord(ctrl, KeyCode::Char('g'))),
         None
     );
-    // A destructive choice takes its plain letter only.
+    // A dialog confirms on its plain letter only (a choice's verbs keep
+    // to the same rule; the dialog's own tests check them).
+    assert_eq!(resolve(DIALOG_KEYS, chord(ctrl, KeyCode::Char('y'))), None);
     assert_eq!(
-        resolve(CLOSE_DOWN_KEYS, chord(ctrl, KeyCode::Char('d'))),
-        None
-    );
-    assert_eq!(
-        resolve(
-            CLOSE_DOWN_KEYS,
-            chord(KeyModifiers::NONE, KeyCode::Char('d'))
-        ),
-        Some(ChoiceKey::Choose(CloseDown::Discard))
-    );
-    assert_eq!(resolve(CONFIRM_KEYS, chord(ctrl, KeyCode::Char('y'))), None);
-    assert_eq!(
-        resolve(CONFIRM_KEYS, chord(KeyModifiers::NONE, KeyCode::Char('y'))),
-        Some(ConfirmKey::Yes)
+        resolve(DIALOG_KEYS, chord(KeyModifiers::NONE, KeyCode::Char('y'))),
+        Some(DialogKey::Confirm)
     );
     // Menus and settings move with plain `j` and `k`, not their chords.
     assert_eq!(resolve(MENU_KEYS, chord(ctrl, KeyCode::Char('j'))), None);

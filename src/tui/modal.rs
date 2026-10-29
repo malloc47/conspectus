@@ -129,10 +129,21 @@ modals! {
     /// Full-screen viewer over a mux pane's scrollback, opened from a pane
     /// search result; `a` attaches. Boxed to keep [`Modal`] small.
     PaneViewer(Box<crate::tui::widgets::pane_viewer::PaneViewerState>),
-    /// `w` worktree action menu: a list, a branch prompt, confirmations,
-    /// and the close-down choice, with the worktree facts captured when
-    /// it opened.
-    WorktreeMenu(Box<crate::tui::widgets::worktree_menu::WorktreeMenuState>),
+    /// `w` worktree action menu: the framework's action menu over the
+    /// worktree verbs for the selection, whose question entries open
+    /// their branch prompt, confirmation, or choice as a step over it.
+    /// Boxed to keep [`Modal`] small.
+    WorktreeMenu(Box<tuikit::action_menu::ActionMenu<Msg>>),
+    /// A dialog: a confirmation, a choice, or a notice, whose answers
+    /// are messages. Opened as a step of the overlay that asked (a
+    /// worktree confirmation over its menu) or on its own (`X`'s
+    /// close-down choice, the empty Clean up notice). Boxed to keep
+    /// [`Modal`] small.
+    Dialog(Box<tuikit::dialog::Dialog<Msg>>),
+    /// A text prompt that is a step of another overlay (the worktree
+    /// menu's branch prompt), whose confirm its closure turns into the
+    /// message it means.
+    Prompt(tuikit::text_prompt::TextPrompt<Msg>),
     /// `n` bare tmux new-session form (ADR 0095): the framework's form,
     /// whose submit its closure turns into the new mux.
     NewMux(tuikit::form::Form<Msg>),
@@ -150,7 +161,9 @@ modals! {
     /// pins: the framework's action menu over the verbs for the selected
     /// row, each committing a [`Msg`].
     RowMenu(Box<tuikit::action_menu::ActionMenu<Msg>>),
-    /// The History view's Clean up checklist (ADR 0140).
+    /// The History view's Clean up checklist (ADR 0140), when there is
+    /// something to clean up; a [`Modal::Dialog`] notice says when there
+    /// is not.
     CleanUp(Box<crate::tui::widgets::clean_up::CleanUpState>),
     /// A pick-one list with type-to-filter: where a pin points next, or a
     /// remembered search.

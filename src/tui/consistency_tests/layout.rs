@@ -40,6 +40,44 @@ fn open_pinned(app: &mut App, message: Msg) {
     app.update(message);
 }
 
+/// The facts of a linked worktree with three live sessions in it. The
+/// checks find a modal's frame by the corners that differ from the screen
+/// under it, so the dialogs this opens over the menu are of other sizes
+/// than the menu: a dialog drawn exactly over its menu's frame would
+/// leave no corner to find.
+pub(super) fn worktree_context() -> crate::tui::widgets::worktree_menu::WorktreeMenuContext {
+    crate::tui::widgets::worktree_menu::WorktreeMenuContext {
+        context: crate::tui::worktree_actions::WorktreeContext::Worktree,
+        repo_root: Some("/wt/feature".into()),
+        branch: Some("feature".into()),
+        guard_sessions: vec![
+            "session-one".into(),
+            "session-two".into(),
+            "session-three".into(),
+        ],
+        can_mutate: true,
+        reveal_target: None,
+    }
+}
+
+/// The worktree menu for [`worktree_context`]: New worktree, Merge back,
+/// Remove, Close down.
+pub(super) fn open_worktree_menu(app: &mut App) {
+    let menu = crate::tui::widgets::worktree_menu::worktree_menu(&worktree_context())
+        .expect("a worktree menu");
+    app.open_worktree_menu(menu);
+}
+
+/// The worktree menu with the step of its entry `downs` rows down open
+/// over it, picked through the stack as the loops route keys.
+pub(super) fn open_worktree_step(app: &mut App, downs: usize) {
+    open_worktree_menu(app);
+    for _ in 0..downs {
+        crate::tui::runtime::modal_key_pure(app, keys::press(KeyCode::Down));
+    }
+    crate::tui::runtime::modal_key_pure(app, keys::press(KeyCode::Enter));
+}
+
 /// Every modal that can be built, by name.
 pub(super) fn builders() -> Vec<(&'static str, View, Open)> {
     vec![
@@ -70,18 +108,23 @@ pub(super) fn builders() -> Vec<(&'static str, View, Open)> {
             ));
         }),
         ("Messages", View::Pinned, |app| app.open_messages_overlay()),
-        ("WorktreeMenu", View::Pinned, |app| {
-            let ctx = crate::tui::widgets::worktree_menu::WorktreeMenuContext {
-                context: crate::tui::worktree_actions::WorktreeContext::Worktree,
-                repo_root: Some("/wt/feature".into()),
-                branch: Some("feature".into()),
-                guard_sessions: vec!["session-one".into()],
-                can_mutate: true,
-                reveal_target: None,
-            };
-            let state = crate::tui::widgets::worktree_menu::WorktreeMenuState::new(ctx)
-                .expect("a worktree menu");
-            app.open_worktree_menu(state);
+        ("WorktreeMenu", View::Pinned, open_worktree_menu),
+        // The worktree menu's steps, each open over the menu: the branch
+        // prompt with a name typed, the remove confirmation with its
+        // live-session list, and the close-down choice.
+        ("Prompt", View::Pinned, |app| {
+            open_worktree_step(app, 0);
+            for c in "feature/x".chars() {
+                crate::tui::runtime::modal_key_pure(app, keys::press(KeyCode::Char(c)));
+            }
+        }),
+        ("Dialog", View::Pinned, |app| open_worktree_step(app, 2)),
+        ("Dialog", View::Pinned, |app| open_worktree_step(app, 3)),
+        // Clean up with nothing to clean up is a notice. (The History
+        // world has records past their age, so Clean up lists them.)
+        ("Dialog", View::History, |app| {
+            let notice = crate::tui::widgets::clean_up::empty_notice();
+            app.open_modal(Modal::Dialog(Box::new(notice)));
         }),
         ("NewMux", View::Pinned, |app| {
             app.open_new_mux_form(crate::tui::widgets::new_mux::form(

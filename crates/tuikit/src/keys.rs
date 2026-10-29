@@ -34,8 +34,9 @@
 //!   and [`ctrl_c_first`] each return what a table gets wrong, so a host
 //!   runs them over every table it has.
 //! - **Standard tables** for the standard controls, with the action enums
-//!   they bind: [`MENU_KEYS`], [`CONFIRM_KEYS`] and [`ChoiceKey`] for
-//!   dialogs, [`PAGER_KEYS`], [`TEXT_INPUT_KEYS`], [`CHECKLIST_KEYS`],
+//!   they bind: [`MENU_KEYS`], [`DIALOG_KEYS`] for every dialog (a
+//!   choice's verbs are the dialog's own keys), [`PAGER_KEYS`],
+//!   [`TEXT_INPUT_KEYS`], [`CHECKLIST_KEYS`],
 //!   [`FORM_KEYS`] with [`FORM_OPTION_KEYS`], [`LINE_EDIT_KEYS`], the
 //!   editing keys every text field shares, and [`PATH_FIELD_KEYS`], a path
 //!   field's completion key.
@@ -86,9 +87,9 @@ pub use footer::{Footer, HINT_SEPARATOR, Segment, footer, unavailable_style};
 pub use matcher::{KeyMatcher, alt, alt_key, ch, ctrl, ctrl_key, key, key_label};
 pub use role::{Convention, EnterMeans, KeyAction, KeyRole, SpaceMeans, ctrl_c_first};
 pub use standard::{
-    CHECKLIST_KEYS, CONFIRM_KEYS, ChecklistKey, ChoiceKey, ConfirmKey, DIALOG_KEYS, DialogKey,
-    EditKey, FORM_KEYS, FORM_OPTION_KEYS, FormKey, LINE_EDIT_KEYS, MENU_KEYS, MenuKey, PAGER_KEYS,
-    PATH_FIELD_KEYS, PagerKey, PathKey, TEXT_INPUT_KEYS, TextInputKey,
+    CHECKLIST_KEYS, ChecklistKey, DIALOG_KEYS, DialogKey, EditKey, FORM_KEYS, FORM_OPTION_KEYS,
+    FormKey, LINE_EDIT_KEYS, MENU_KEYS, MenuKey, PAGER_KEYS, PATH_FIELD_KEYS, PagerKey, PathKey,
+    TEXT_INPUT_KEYS, TextInputKey,
 };
 pub use table::{
     Hint, KeyRow, Rows, alias, include, loose_characters, mislabeled, resolve, rows, shown,

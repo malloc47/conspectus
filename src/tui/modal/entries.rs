@@ -5,10 +5,10 @@
 //! for drawing; the impl here hands each the App data it reads. A scrolled
 //! entry keeps the window it drew, so its next page key moves by the rows
 //! that were on screen. Every entry draws through the shared modal frame,
-//! which clears what it covers, or fills the screen. The rename prompt, the
-//! new mux form, and the row and mux menus have no impl here: they are the
-//! framework's text prompt, form, and action menu, which implement the
-//! trait for any context.
+//! which clears what it covers, or fills the screen. The rename and step
+//! prompts, the new mux form, the row, mux, and worktree menus, and the
+//! dialogs have no impl here: they are the framework's text prompt, form,
+//! action menu, and dialog, which implement the trait for any context.
 
 use ratatui::buffer::Buffer;
 use ratatui::crossterm::event::KeyEvent;
@@ -29,7 +29,6 @@ use crate::tui::widgets::{
     pin_edit::PinEditForm,
     search::SearchOverlayState,
     value_modal::{ValueModalOutcome, ValueModalState, ValueModalWidget},
-    worktree_menu::{WorktreeMenuState, WorktreeMenuWidget},
 };
 use crate::tui::{App, Msg};
 
@@ -230,20 +229,6 @@ impl Overlay<Msg, App> for PaneViewerState {
 
     fn takes_text(&self) -> bool {
         self.prompt.is_some()
-    }
-}
-
-impl Overlay<Msg, App> for WorktreeMenuState {
-    fn handle(&mut self, key: KeyEvent, _app: &App) -> Outcome<Msg> {
-        self.handle_key(key)
-    }
-
-    fn render(&mut self, area: Rect, buf: &mut Buffer, app: &App, _theme: &KitTheme) {
-        WorktreeMenuWidget::new(self, app.theme()).render(area, buf);
-    }
-
-    fn takes_text(&self) -> bool {
-        self.editing_branch()
     }
 }
 

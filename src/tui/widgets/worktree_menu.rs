@@ -1,44 +1,32 @@
-//! Worktree action menu overlay.
+//! The worktree action menu (`w`) and the questions its entries ask.
 //!
-//! The `w` menu: a self-contained (`Ctx = ()`) modal that captures the
-//! selected node's worktree facts at open time and drives a small
-//! state machine — a list of [`WorktreeAction`]s (the framework's
-//! [`ActionMenu`], held as the menu's first level, whose pick is the
-//! action), then either a branch-name text input (create) or a confirm
-//! (remove). The branch
-//! prompt is the framework's [`TextPrompt`], held as a level of the menu:
-//! `Esc` there steps back to the list, `Ctrl-C` closes the menu, and a
-//! blank name is refused in the prompt. The menu emits a single committed
-//! [`Msg`] that the runtime turns into a mutation effect.
-//!
-//! The wired subset (create / merge / remove / close-down) is offered
-//! today; the rest of the [`worktree_actions`] policy (reveal, and the
-//! later lock / prune stories) is filtered out here until each is
-//! wired. Close-down (`X` or the menu entry) opens a merge/discard
-//! choice that commits a compound teardown (ADR 0093).
-
-use ratatui::buffer::Buffer;
-use ratatui::crossterm::event::KeyEvent;
-use ratatui::layout::Rect;
-use ratatui::style::{Modifier, Style};
-use ratatui::text::Line;
-use ratatui::widgets::Widget;
+//! The menu captures the selected node's worktree facts when it opens
+//! ([`context_for_node`]) and offers the [`worktree_actions`] policy's
+//! wired verbs as the framework's [`ActionMenu`]. A reveal entry commits
+//! its jump at once; every other entry asks a further question, which
+//! opens over the menu as a step of it ([`step`]): the branch prompt for a
+//! new worktree (a [`TextPrompt`] that refuses a blank name), the merge,
+//! remove, and prune confirmations, and the merge-or-discard choice of a
+//! close-down (each a [`Dialog`] whose body says what the action will do
+//! and which live sessions it affects). `Esc` in a step comes back to the
+//! menu; a commit or `Ctrl-C` closes both. The step commits one
+//! `Msg::CommitWorktree*` message, which the reducer turns into the
+//! mutation effect. `X` opens the close-down choice on its own
+//! ([`close_down_dialog`]), as a compound teardown (ADR 0093).
 
 use std::path::Path;
 use tuikit::action_menu::{ActionMenu, Entry};
-use tuikit::frame::{Lines, ModalFrame, ModalSize};
-use tuikit::glyphs::marks;
+use tuikit::dialog::{Dialog, Verb};
+use tuikit::keys::ch;
+use tuikit::text_prompt::{PromptResult, TextPrompt};
 
 use crate::model::{
     CheckoutNode, GraphNode, GraphSnapshot, NodeId, RepoId, SnapshotIndex, WorktreeKind,
     path_is_ancestor_of,
 };
-use crate::tui::Msg;
 use crate::tui::rows::RowId;
-use crate::tui::theme::Theme;
 use crate::tui::worktree_actions::{WorktreeAction, WorktreeContext, worktree_actions};
-use tuikit::overlay::{Outcome, Overlay};
-use tuikit::text_prompt::{PromptResult, TextPrompt};
+use crate::tui::{Modal, Msg};
 
 /// Actions the runtime knows how to dispatch today. `worktree_actions`
 /// may return more (reveal, future stories); the menu offers only
@@ -53,8 +41,14 @@ const WIRED: &[WorktreeAction] = &[
     WorktreeAction::RevealSessions,
 ];
 
-/// Worktree facts captured when the menu opens, so the overlay stays
-/// context-free (`Ctx = ()`) afterwards.
+/// The title of the menu and of the questions it asks.
+const TITLE: &str = "Worktree";
+
+/// What a confirmation names a worktree whose branch is not known.
+const UNKNOWN_BRANCH: &str = "(unknown)";
+
+/// Worktree facts captured when the menu opens, so the menu and its
+/// steps need no graph afterwards.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct WorktreeMenuContext {
     pub context: WorktreeContext,
@@ -278,6 +272,73 @@ fn is_reveal(action: WorktreeAction) -> bool {
     )
 }
 
+/// Whether `action` acts on the worktree's branch, so it cannot run on a
+/// worktree with none checked out.
+fn needs_branch(action: WorktreeAction) -> bool {
+    matches!(
+        action,
+        WorktreeAction::RemoveWorktree | WorktreeAction::CloseDownWorktree
+    )
+}
+
+/// The menu for a selection: the wired subset of the policy, without the
+/// mutations when there is no `repo_root` to target and without the
+/// reveals that have no jump target. `None` when nothing is offerable, so
+/// the runtime can post a status instead of opening an empty menu.
+pub fn worktree_menu(ctx: &WorktreeMenuContext) -> Option<ActionMenu<Msg>> {
+    let has_repo = ctx.repo_root.is_some();
+    let entries: Vec<Entry<Msg>> = worktree_actions(ctx.context, ctx.can_mutate)
+        .into_iter()
+        .filter(|a| WIRED.contains(a))
+        .filter(|a| !a.is_mutation() || has_repo)
+        .filter_map(|action| entry(action, ctx))
+        .collect();
+    (!entries.is_empty()).then(|| ActionMenu::new(TITLE, entries))
+}
+
+/// The menu's entry for `action`: a reveal commits its jump, and every
+/// other action opens its question as a step over the menu. A verb on
+/// the branch is shown but cannot run when no branch is checked out.
+fn entry(action: WorktreeAction, ctx: &WorktreeMenuContext) -> Option<Entry<Msg>> {
+    if is_reveal(action) {
+        let row = ctx.reveal_target.clone()?;
+        return Some(Entry::new(action.label(), Msg::SelectRow(Box::new(row))));
+    }
+    let open = Msg::OpenWorktreeStep {
+        action,
+        context: Box::new(ctx.clone()),
+    };
+    let entry = Entry::new(action.label(), open).opens_step();
+    Some(if needs_branch(action) && ctx.branch.is_none() {
+        entry
+            .detail("no branch is checked out in this worktree")
+            .disabled()
+    } else {
+        entry
+    })
+}
+
+/// The question `action` asks over the menu, built from the facts in
+/// `ctx`: the branch prompt for a new worktree, the merge, remove, and
+/// prune confirmations, and the close-down choice. `None` for a reveal,
+/// which asks nothing, and for an action whose facts are missing.
+pub fn step(action: WorktreeAction, ctx: &WorktreeMenuContext) -> Option<Modal> {
+    let dialog = match action {
+        WorktreeAction::NewWorktree => {
+            return ctx
+                .repo_root
+                .clone()
+                .map(|root| Modal::Prompt(branch_prompt(root)));
+        }
+        WorktreeAction::MergeWorktree => merge_dialog(ctx)?,
+        WorktreeAction::RemoveWorktree => remove_dialog(ctx)?,
+        WorktreeAction::CloseDownWorktree => close_down_dialog(ctx)?,
+        WorktreeAction::PruneWorktrees => prune_dialog(ctx)?,
+        WorktreeAction::RevealCheckout | WorktreeAction::RevealSessions => return None,
+    };
+    Some(Modal::Dialog(Box::new(dialog)))
+}
+
 /// The prompt that asks for a new worktree's branch in `repo_root`: a
 /// blank name is refused with the reason, and a name commits the create.
 fn branch_prompt(repo_root: String) -> TextPrompt<Msg> {
@@ -294,415 +355,96 @@ fn branch_prompt(repo_root: String) -> TextPrompt<Msg> {
     )
 }
 
-#[derive(Debug, Clone)]
-enum Mode {
-    List,
-    BranchInput(TextPrompt<Msg>),
-    ConfirmRemove,
-    ConfirmMerge,
-    /// Close-down: pick merge (land) vs discard, then commit.
-    CloseDownChoice,
-    ConfirmPrune,
+/// `dialog` with the live sessions in `ctx` listed under `heading`, which
+/// says what the action does to them; nothing is added when there are
+/// none.
+fn with_sessions(dialog: Dialog<Msg>, heading: String, ctx: &WorktreeMenuContext) -> Dialog<Msg> {
+    dialog.warning(heading, ctx.guard_sessions.iter().cloned())
 }
 
-/// Overlay state: the captured context, the list of offered actions,
-/// and the current sub-mode.
-#[derive(Debug, Clone)]
-pub struct WorktreeMenuState {
-    ctx: WorktreeMenuContext,
-    list: ActionMenu<WorktreeAction>,
-    mode: Mode,
+/// The remove confirmation. Confirming past live sessions it lists is
+/// the force `worktree rm` would otherwise ask for.
+fn remove_dialog(ctx: &WorktreeMenuContext) -> Option<Dialog<Msg>> {
+    let (repo_root, branch) = (ctx.repo_root.clone()?, ctx.branch.clone()?);
+    let body = format!("Remove worktree for `{branch}`?");
+    let remove = Msg::CommitWorktreeRemove {
+        repo_root,
+        branch,
+        force: !ctx.guard_sessions.is_empty(),
+    };
+    let count = ctx.guard_sessions.len();
+    let dialog = Dialog::confirm(TITLE, remove).body([body]);
+    Some(with_sessions(
+        dialog,
+        format!("hosts {count} live session(s):"),
+        ctx,
+    ))
 }
 
-/// The menu's first level: the offered actions, each picking itself.
-fn action_list(actions: &[WorktreeAction]) -> ActionMenu<WorktreeAction> {
-    ActionMenu::new(
-        "Worktree",
-        actions
-            .iter()
-            .map(|action| Entry::new(action.label(), *action))
-            .collect(),
+/// The merge-back confirmation. The menu merges into the repo's default
+/// branch; an explicit target is a CLI concern.
+fn merge_dialog(ctx: &WorktreeMenuContext) -> Option<Dialog<Msg>> {
+    let worktree_root = ctx.repo_root.clone()?;
+    let branch = ctx.branch.as_deref().unwrap_or(UNKNOWN_BRANCH);
+    let merge = Msg::CommitWorktreeMerge {
+        worktree_root,
+        target: None,
+    };
+    let count = ctx.guard_sessions.len();
+    let dialog = Dialog::confirm(TITLE, merge).body([
+        format!("Merge `{branch}` back and remove its worktree?"),
+        "(squash + rebase + fast-forward the default branch)".to_string(),
+    ]);
+    Some(with_sessions(
+        dialog,
+        format!("hosts {count} live session(s):"),
+        ctx,
+    ))
+}
+
+/// The close-down choice: `m` lands the branch, `d` discards it, and
+/// either then tears the stream down (ADR 0093). `None` when close-down
+/// does not apply to the selection: no mutation backend, nothing to
+/// target, or no branch to close.
+pub fn close_down_dialog(ctx: &WorktreeMenuContext) -> Option<Dialog<Msg>> {
+    if !ctx.can_mutate {
+        return None;
+    }
+    let (repo_root, branch) = (ctx.repo_root.clone()?, ctx.branch.clone()?);
+    let close_down = |discard| Msg::CommitWorktreeCloseDown {
+        repo_root: repo_root.clone(),
+        branch: branch.clone(),
+        discard,
+    };
+    let count = ctx.guard_sessions.len();
+    let dialog = Dialog::choice(
+        TITLE,
+        vec![
+            Verb::new(ch('m'), "merge & close", close_down(false)),
+            Verb::new(ch('d'), "discard & close", close_down(true)),
+        ],
     )
+    .body([
+        format!("Close down stream `{branch}`"),
+        "Ends its sessions, removes the worktree, forgets its history records.".to_string(),
+    ]);
+    Some(with_sessions(
+        dialog,
+        format!("ends {count} live session(s) (transcripts preserved):"),
+        ctx,
+    ))
 }
 
-impl WorktreeMenuState {
-    /// Build the menu for a selection. Offers the wired subset of the
-    /// policy, and drops mutation actions when there's no `repo_root`
-    /// to target. Returns `None` when nothing is offerable, so the
-    /// runtime can post a status instead of opening an empty modal.
-    pub fn new(ctx: WorktreeMenuContext) -> Option<Self> {
-        let has_repo = ctx.repo_root.is_some();
-        let has_reveal = ctx.reveal_target.is_some();
-        let actions: Vec<WorktreeAction> = worktree_actions(ctx.context, ctx.can_mutate)
-            .into_iter()
-            .filter(|a| WIRED.contains(a))
-            .filter(|a| !a.is_mutation() || has_repo)
-            // Drop reveal actions with no resolved jump target.
-            .filter(|a| !is_reveal(*a) || has_reveal)
-            .collect();
-        if actions.is_empty() {
-            return None;
-        }
-        Some(Self {
-            ctx,
-            list: action_list(&actions),
-            mode: Mode::List,
-        })
-    }
-
-    /// Open the menu straight into the close-down merge/discard choice
-    /// (the `X` hot key), skipping the action list. Returns `None` when
-    /// close-down isn't applicable to the selection (no worktree branch
-    /// to close, or no mutation backend).
-    pub fn new_close_down(ctx: WorktreeMenuContext) -> Option<Self> {
-        if !ctx.can_mutate || ctx.repo_root.is_none() || ctx.branch.is_none() {
-            return None;
-        }
-        Some(Self {
-            list: action_list(&[WorktreeAction::CloseDownWorktree]),
-            mode: Mode::CloseDownChoice,
-            ctx,
-        })
-    }
-
-    pub fn context(&self) -> &WorktreeMenuContext {
-        &self.ctx
-    }
-
-    /// Whether the branch-name prompt has the keys.
-    pub fn editing_branch(&self) -> bool {
-        matches!(self.mode, Mode::BranchInput(_))
-    }
-
-    /// The offered actions, in the list's order.
-    #[cfg(test)]
-    fn actions(&self) -> Vec<WorktreeAction> {
-        self.list
-            .entries()
-            .iter()
-            .map(|entry| entry.outcome)
-            .collect()
-    }
-
-    /// The action under the list's cursor.
-    #[cfg(test)]
-    fn selected(&self) -> WorktreeAction {
-        self.list.entries()[self.list.cursor()].outcome
-    }
-
-    fn activate(&mut self, action: WorktreeAction) -> Outcome<Msg> {
-        match action {
-            WorktreeAction::NewWorktree => {
-                let Some(repo_root) = self.ctx.repo_root.clone() else {
-                    return Outcome::Close;
-                };
-                self.mode = Mode::BranchInput(branch_prompt(repo_root));
-                Outcome::Consumed
-            }
-            WorktreeAction::MergeWorktree => {
-                self.mode = Mode::ConfirmMerge;
-                Outcome::Consumed
-            }
-            WorktreeAction::RemoveWorktree => {
-                self.mode = Mode::ConfirmRemove;
-                Outcome::Consumed
-            }
-            WorktreeAction::CloseDownWorktree => {
-                self.mode = Mode::CloseDownChoice;
-                Outcome::Consumed
-            }
-            WorktreeAction::PruneWorktrees => {
-                self.mode = Mode::ConfirmPrune;
-                Outcome::Consumed
-            }
-            WorktreeAction::RevealCheckout | WorktreeAction::RevealSessions => {
-                match self.ctx.reveal_target.clone() {
-                    Some(row) => Outcome::Commit(Msg::SelectRow(Box::new(row))),
-                    None => Outcome::Close,
-                }
-            }
-        }
-    }
-
-    /// One key for the list: the menu moves and closes as every menu
-    /// does, and its pick opens the action's next step here.
-    fn handle_list(&mut self, key: KeyEvent) -> Outcome<Msg> {
-        match self.list.handle(key, &()) {
-            Outcome::Commit(action) => self.activate(action),
-            Outcome::Close => Outcome::Close,
-            Outcome::Dismiss => Outcome::Dismiss,
-            Outcome::Consumed | Outcome::Stay(_) => Outcome::Consumed,
-        }
-    }
-
-    /// One key for the branch prompt, a level of the menu: `Ctrl-C`
-    /// dismisses the whole menu, `Esc` (the prompt closing) steps back to
-    /// the list, and a confirmed name commits the create.
-    fn handle_branch_input(&mut self, key: KeyEvent) -> Outcome<Msg> {
-        use tuikit::keys::{TEXT_INPUT_KEYS, TextInputKey, resolve};
-        let Mode::BranchInput(input) = &mut self.mode else {
-            return Outcome::Consumed;
-        };
-        if resolve(TEXT_INPUT_KEYS, key) == Some(TextInputKey::Abort) {
-            return Outcome::Close;
-        }
-        match input.handle(key, &()) {
-            Outcome::Close => {
-                self.mode = Mode::List;
-                Outcome::Consumed
-            }
-            outcome => outcome,
-        }
-    }
-
-    fn handle_confirm_remove(&mut self, key: KeyEvent) -> Outcome<Msg> {
-        use tuikit::keys::{CONFIRM_KEYS, ConfirmKey, resolve};
-        match resolve(CONFIRM_KEYS, key) {
-            Some(ConfirmKey::Yes) => {
-                let (Some(repo_root), Some(branch)) =
-                    (self.ctx.repo_root.clone(), self.ctx.branch.clone())
-                else {
-                    return Outcome::Close;
-                };
-                Outcome::Commit(Msg::CommitWorktreeRemove {
-                    repo_root,
-                    branch,
-                    // Confirming past the surfaced guard list is the force.
-                    force: !self.ctx.guard_sessions.is_empty(),
-                })
-            }
-            Some(ConfirmKey::Abort) => Outcome::Close,
-            Some(ConfirmKey::No) => {
-                self.mode = Mode::List;
-                Outcome::Consumed
-            }
-            None => Outcome::Consumed,
-        }
-    }
-
-    fn handle_confirm_merge(&mut self, key: KeyEvent) -> Outcome<Msg> {
-        use tuikit::keys::{CONFIRM_KEYS, ConfirmKey, resolve};
-        match resolve(CONFIRM_KEYS, key) {
-            Some(ConfirmKey::Yes) => {
-                let Some(worktree_root) = self.ctx.repo_root.clone() else {
-                    return Outcome::Close;
-                };
-                // Menu merges into the repo's default branch; explicit
-                // targets are a CLI concern.
-                Outcome::Commit(Msg::CommitWorktreeMerge {
-                    worktree_root,
-                    target: None,
-                })
-            }
-            Some(ConfirmKey::Abort) => Outcome::Close,
-            Some(ConfirmKey::No) => {
-                self.mode = Mode::List;
-                Outcome::Consumed
-            }
-            None => Outcome::Consumed,
-        }
-    }
-
-    fn handle_confirm_prune(&mut self, key: KeyEvent) -> Outcome<Msg> {
-        use tuikit::keys::{CONFIRM_KEYS, ConfirmKey, resolve};
-        match resolve(CONFIRM_KEYS, key) {
-            Some(ConfirmKey::Yes) => {
-                let Some(repo_root) = self.ctx.repo_root.clone() else {
-                    return Outcome::Close;
-                };
-                Outcome::Commit(Msg::CommitWorktreePrune { repo_root })
-            }
-            Some(ConfirmKey::Abort) => Outcome::Close,
-            Some(ConfirmKey::No) => {
-                self.mode = Mode::List;
-                Outcome::Consumed
-            }
-            None => Outcome::Consumed,
-        }
-    }
-
-    fn handle_close_down(&mut self, key: KeyEvent) -> Outcome<Msg> {
-        // `m` lands the branch, `d` discards it; both then tear the
-        // stream down (ADR 0093). Esc backs out to the list; Ctrl-C and
-        // q dismiss the menu.
-        use crate::tui::keybindings::overlay::{CLOSE_DOWN_KEYS, CloseDown};
-        use tuikit::keys::{ChoiceKey, resolve};
-        let discard = match resolve(CLOSE_DOWN_KEYS, key) {
-            Some(ChoiceKey::Choose(CloseDown::Merge)) => false,
-            Some(ChoiceKey::Choose(CloseDown::Discard)) => true,
-            Some(ChoiceKey::Abort) => return Outcome::Close,
-            Some(ChoiceKey::Back) => {
-                self.mode = Mode::List;
-                return Outcome::Consumed;
-            }
-            None => return Outcome::Consumed,
-        };
-        let (Some(repo_root), Some(branch)) = (self.ctx.repo_root.clone(), self.ctx.branch.clone())
-        else {
-            return Outcome::Close;
-        };
-        Outcome::Commit(Msg::CommitWorktreeCloseDown {
-            repo_root,
-            branch,
-            discard,
-        })
-    }
-}
-
-impl WorktreeMenuState {
-    /// One key for the screen the menu is on.
-    pub fn handle_key(&mut self, key: KeyEvent) -> Outcome<Msg> {
-        match self.mode {
-            Mode::List => self.handle_list(key),
-            Mode::BranchInput(_) => self.handle_branch_input(key),
-            Mode::ConfirmRemove => self.handle_confirm_remove(key),
-            Mode::ConfirmMerge => self.handle_confirm_merge(key),
-            Mode::CloseDownChoice => self.handle_close_down(key),
-            Mode::ConfirmPrune => self.handle_confirm_prune(key),
-        }
-    }
-}
-
-/// Renders the worktree menu (list / branch input / confirm) in a
-/// centered popup. It takes the state mutably because the list keeps the
-/// scroll window it drew.
-pub struct WorktreeMenuWidget<'a> {
-    state: &'a mut WorktreeMenuState,
-    theme: &'a Theme,
-}
-
-impl<'a> WorktreeMenuWidget<'a> {
-    pub fn new(state: &'a mut WorktreeMenuState, theme: &'a Theme) -> Self {
-        Self { state, theme }
-    }
-}
-
-impl Widget for WorktreeMenuWidget<'_> {
-    fn render(self, area: Rect, buf: &mut Buffer) {
-        match &self.state.mode {
-            // The branch prompt and the list draw themselves.
-            Mode::BranchInput(input) => {
-                input.draw(area, buf, self.theme);
-                return;
-            }
-            Mode::List => {
-                self.state.list.draw(area, buf, self.theme);
-                return;
-            }
-            _ => {}
-        }
-
-        // The key hints of a confirmation, wrapped apart from the body so
-        // they break only between hints.
-        let footer;
-        let lines: Vec<Line> = match &self.state.mode {
-            Mode::ConfirmRemove => {
-                let branch = self.state.ctx.branch.as_deref().unwrap_or("(unknown)");
-                let mut lines = vec![
-                    Line::from(format!("Remove worktree for `{branch}`?")),
-                    Line::from(""),
-                ];
-                if !self.state.ctx.guard_sessions.is_empty() {
-                    lines.push(Line::styled(
-                        format!(
-                            "{} hosts {} live session(s):",
-                            marks::WARNING,
-                            self.state.ctx.guard_sessions.len()
-                        ),
-                        Style::default().add_modifier(Modifier::BOLD),
-                    ));
-                    for s in &self.state.ctx.guard_sessions {
-                        lines.push(Line::from(format!("  - {s}")));
-                    }
-                    lines.push(Line::from(""));
-                }
-                footer = tuikit::keys::footer(tuikit::keys::CONFIRM_KEYS);
-                lines
-            }
-            Mode::ConfirmMerge => {
-                let branch = self.state.ctx.branch.as_deref().unwrap_or("(unknown)");
-                let mut lines = vec![
-                    Line::from(format!("Merge `{branch}` back and remove its worktree?")),
-                    Line::from("(squash + rebase + fast-forward the default branch)"),
-                    Line::from(""),
-                ];
-                if !self.state.ctx.guard_sessions.is_empty() {
-                    lines.push(Line::styled(
-                        format!(
-                            "{} hosts {} live session(s):",
-                            marks::WARNING,
-                            self.state.ctx.guard_sessions.len()
-                        ),
-                        Style::default().add_modifier(Modifier::BOLD),
-                    ));
-                    for s in &self.state.ctx.guard_sessions {
-                        lines.push(Line::from(format!("  - {s}")));
-                    }
-                    lines.push(Line::from(""));
-                }
-                footer = tuikit::keys::footer(tuikit::keys::CONFIRM_KEYS);
-                lines
-            }
-            Mode::CloseDownChoice => {
-                let branch = self.state.ctx.branch.as_deref().unwrap_or("(unknown)");
-                let mut lines = vec![
-                    Line::styled(
-                        format!("Close down stream `{branch}`"),
-                        Style::default().add_modifier(Modifier::BOLD),
-                    ),
-                    Line::from(
-                        "Ends its sessions, removes the worktree, forgets its history records.",
-                    ),
-                    Line::from(""),
-                ];
-                if !self.state.ctx.guard_sessions.is_empty() {
-                    lines.push(Line::styled(
-                        format!(
-                            "{} ends {} live session(s) (transcripts preserved):",
-                            marks::WARNING,
-                            self.state.ctx.guard_sessions.len()
-                        ),
-                        Style::default().add_modifier(Modifier::BOLD),
-                    ));
-                    for s in &self.state.ctx.guard_sessions {
-                        lines.push(Line::from(format!("  - {s}")));
-                    }
-                    lines.push(Line::from(""));
-                }
-                footer = tuikit::keys::footer(crate::tui::keybindings::overlay::CLOSE_DOWN_KEYS);
-                lines
-            }
-            Mode::ConfirmPrune => {
-                footer = tuikit::keys::footer(tuikit::keys::CONFIRM_KEYS);
-                vec![
-                    Line::styled(
-                        "Prune merged worktrees?",
-                        Style::default().add_modifier(Modifier::BOLD),
-                    ),
-                    Line::from("Removes every worktree already merged into the default"),
-                    Line::from("branch (worktrunk skips ones younger than its min-age)."),
-                    Line::from(""),
-                ]
-            }
-            Mode::BranchInput(_) | Mode::List => unreachable!("drawn above"),
-        };
-
-        // Wrapped to the frame's inner width, so the height counts the rows
-        // drawn and nothing is cut off at the bottom.
-        let frame = ModalFrame::new(self.theme, ModalSize::MENU).title("Worktree");
-        let inner_width = usize::from(frame.inner_width(area));
-        let mut rows: Vec<Line<'static>> = lines
-            .iter()
-            .flat_map(|line| tuikit::text::wrap_line(line, inner_width, 0))
-            .collect();
-        let separator = tuikit::keys::HINT_SEPARATOR;
-        rows.extend(
-            tuikit::text::wrap_at(&footer, separator, inner_width)
-                .into_iter()
-                .map(Line::from),
-        );
-        frame.render(area, buf, Lines::new(rows));
-    }
+/// The prune confirmation for the repo at `repo_root`.
+fn prune_dialog(ctx: &WorktreeMenuContext) -> Option<Dialog<Msg>> {
+    let repo_root = ctx.repo_root.clone()?;
+    Some(
+        Dialog::confirm(TITLE, Msg::CommitWorktreePrune { repo_root }).body([
+            "Prune merged worktrees?",
+            "Removes every worktree already merged into the default branch \
+             (worktrunk skips ones younger than its min-age).",
+        ]),
+    )
 }
 
 #[cfg(test)]

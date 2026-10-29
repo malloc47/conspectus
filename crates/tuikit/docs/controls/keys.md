@@ -4,7 +4,7 @@
 | --- | --- |
 | Module | `tuikit::keys` |
 | Layer | 2 (convention) |
-| Type parameters | `A`: the action enum of one table (the framework's standard enums, or the host's own); `C`: the host's choices in a choice dialog (`ChoiceKey<C>`) |
+| Type parameters | `A`: the action enum of one table (the framework's standard enums, or the host's own) |
 | Cargo feature | none |
 | Outcomes | none of its own: `resolve` returns the action a key is bound to, or `None` for a key no row binds, and the control turns that into its outcome |
 
@@ -122,7 +122,7 @@ assert!(line.spans.iter().all(|span| span.style != unavailable_style(&theme)));
 | `resolve` | the action of the first row a key fires | looks inside included tables; ignores availability |
 | `rows` | a table's rows with includes spliced in | what footers, help pages, and checks read |
 | `with_availability` | a copy of a table with each row's availability set | the seam for dimming, hiding, or explaining an action |
-| `Footer`, `Segment`, `footer` | the footer of a table: segments, text, wrapped lines | `Footer::lines` wraps only between segments and dims unavailable ones |
+| `Footer`, `Segment`, `footer` | the footer of a table: segments, text, wrapped lines | `Footer::lines` wraps only between segments and dims unavailable ones; `Footer::only` keeps the rows of some actions (a control shows the keys that apply in its state), and a control whose keys are partly its own data (a dialog's verbs) collects its `Segment`s into a `Footer`; `Footer::from(table)` is `Footer::new` |
 | `HINT_SEPARATOR` | what joins footer segments | ` · ` |
 | `unavailable_style` | how an action that cannot act now is drawn | `inert` color with the `muted` modifier |
 | `typed_char` | the character a key types into a text field | plain or shifted, no Control or Alt |
@@ -145,9 +145,8 @@ assert!(line.spans.iter().all(|span| span.style != unavailable_style(&theme)));
 - **`Ctrl-C` comes first** in every table an overlay resolves with, bound
   to an action that dismisses (`KeyRole::Abort`, or `Leave` for one level),
   so no later row can take it. `q` dismisses as well wherever nothing is
-  typed: the menu, confirmation, checklist, and pager tables bind it, and
-  a choice dialog binds it to its `Abort`; the text and form tables leave
-  it to type.
+  typed: the menu, dialog, checklist, and pager tables bind it; the text
+  and form tables leave it to type.
 - **One footer grammar.** A segment is the keys, a space, and a short
   imperative verb with no "to" and no "=": `Esc close`, `Enter pick`,
   `Tab search current/all`. Labels that share a verb join with `/`; notes
@@ -168,8 +167,7 @@ not shown in the footer.
 | Table (enum) | Keys | Footer |
 | --- | --- | --- |
 | `MENU_KEYS` (`MenuKey`) | `Ctrl-C` and `q` abort; `↑`/`k`/`Ctrl-P` up; `↓`/`j`/`Ctrl-N` down; `Enter` pick; `Esc` close (the table of `ActionMenu`, whose entries' shortcuts come after it) | `↑/↓ move · Enter pick · Esc close` |
-| `CONFIRM_KEYS` (`ConfirmKey`) | `Ctrl-C` and `q` abort; `Enter`/`y` yes; `Esc`/`n` no | `Enter/y confirm · Esc/n cancel` |
-| a choice dialog (`ChoiceKey<C>`) | `Ctrl-C` and `q` abort; one shown row per choice; `Esc` (shown as cancel) back | `m merge & close · d discard & close · Esc cancel` (the host's choices) |
+| `DIALOG_KEYS` (`DialogKey`) | `Ctrl-C` and `q` abort; `↑`/`k` and `↓`/`j` scroll an overflowing body (aliases); `Enter`/`y` confirm; `Esc`/`n` cancel (the one table of every `Dialog`, whose choice verbs come after it) | `Enter/y confirm · Esc/n cancel` in a confirmation; a choice shows its verbs then `Esc/n cancel` (`Footer::only`), a notice `Enter/Esc close` |
 | `PAGER_KEYS` (`PagerKey`) | `Ctrl-C` abort; `j`/`↓` down; `k`/`↑` up; `PgDn`/`Space` page down; `PgUp` page up; `g`/`Home` top; `G`/`End` bottom; `Esc`/`q` close | `j/k/PgDn/PgUp scroll · Esc/q close` |
 | `TEXT_INPUT_KEYS` (`TextInputKey`) | `Ctrl-C` abort; `Enter` confirm; `Esc` cancel; `Tab` swallowed; every other key goes to the line editor (the table of `TextPrompt`) | `Enter confirm · Esc cancel` |
 | `LINE_EDIT_KEYS` (`EditKey`) | the editing keys every text field shares, all aliases: arrows and `Home`/`End` with their readline chords, word motion on `Alt-b`/`Alt-f` and the Control and Alt arrows, the delete, kill, and yank keys (see [text_edit.md](text_edit.md)) | none |
@@ -204,8 +202,8 @@ the style the control draws its footer in.
 
 | # | Rule | How this module follows it |
 | --- | --- | --- |
-| 3 | Confirmation | `CONFIRM_KEYS` is the one confirm keymap: `y`/`Enter` confirm, `n`/`Esc` cancel; `ChoiceKey` gives a choice dialog the same leave keys |
-| 4 | Close keys | `Esc` leaves one level in every standard table; `Ctrl-C` comes first and dismisses (`ctrl_c_first`); `q` dismisses too in every table where nothing is typed (menus, confirmations, choices, checklists, pagers) and types in the text and form tables |
+| 3 | Confirmation | `DIALOG_KEYS` is the one dialog keymap: `y`/`Enter` confirm, `n`/`Esc` cancel, in a confirmation, a choice (beside its verbs), and a notice alike |
+| 4 | Close keys | `Esc` leaves one level in every standard table; `Ctrl-C` comes first and dismisses (`ctrl_c_first`); `q` dismisses too in every table where nothing is typed (menus, dialogs, checklists, pagers) and types in the text and form tables |
 | 6 | Forms | `FORM_KEYS`: `Tab`/`↓`/`Ctrl-N` next and `S-Tab`/`↑`/`Ctrl-P` previous; `Enter` is the form's submit row |
 | 8 | Footers and hints | every footer is generated from its table in one grammar; `unresolved` fails a footer that names a key an earlier row takes |
 | 12 | Paging | `PAGER_KEYS` binds `PgUp`/`PgDn`, `Home`/`End`, and `g`/`G` as typed; the control sizes the page |

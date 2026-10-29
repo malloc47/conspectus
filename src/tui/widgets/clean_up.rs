@@ -1,14 +1,14 @@
 //! The History view's Clean up modal: the records `history reap`
 //! would remove, all preselected, each of which the operator can
-//! deselect before confirming (ADR 0140).
+//! deselect before confirming (ADR 0140). With nothing to remove, Clean
+//! up is the framework's notice dialog instead ([`empty_notice`]).
 
 use ratatui::buffer::Buffer;
 use ratatui::crossterm::event::KeyEvent;
 use ratatui::layout::Rect;
-use ratatui::text::Line;
 use ratatui::widgets::Widget;
 use tuikit::age::Age;
-use tuikit::frame::{Lines, ModalFrame, ModalSize};
+use tuikit::dialog::Dialog;
 
 use crate::history::reap::Candidate;
 use crate::tui::Msg;
@@ -58,23 +58,11 @@ impl CleanUpState {
     pub fn selected(&self) -> Vec<usize> {
         self.select.selected_indices()
     }
-
-    pub fn is_empty(&self) -> bool {
-        self.candidates.is_empty()
-    }
 }
 
 impl CleanUpState {
     /// One key: move, toggle, confirm the reap, or close.
     pub fn handle_key(&mut self, key: KeyEvent) -> Outcome<Msg> {
-        if self.candidates.is_empty() {
-            // Nothing to choose: any menu key dismisses the notice.
-            use tuikit::keys::{MENU_KEYS, MenuKey, resolve};
-            return match resolve(MENU_KEYS, key) {
-                Some(MenuKey::Abort | MenuKey::Close | MenuKey::Pick) => Outcome::Close,
-                _ => Outcome::Consumed,
-            };
-        }
         match self.select.handle_key(key) {
             MultiSelectOutcome::Continue => Outcome::Consumed,
             MultiSelectOutcome::Cancel => Outcome::Close,
@@ -106,30 +94,19 @@ impl<'a> CleanUpWidget<'a> {
 
 impl Widget for CleanUpWidget<'_> {
     fn render(self, area: Rect, buf: &mut Buffer) {
-        if !self.state.is_empty() {
-            MultiSelectWidget::new(&self.state.select, &self.state.labels, self.theme)
-                .render(area, buf);
-            return;
-        }
-        let frame = ModalFrame::new(self.theme, ModalSize::MENU).title("Clean up");
-        let width = usize::from(frame.inner_width(area));
-        let lines = [
-            Line::from(""),
-            Line::from("Nothing to clean up."),
-            Line::from(
-                "Stopped and removed records are kept until they pass their \
-                 `[history.reap_after]` age, and records a pin targets are never listed.",
-            ),
-            Line::from(""),
-            Line::from("Esc/Enter close"),
-        ];
-        // Wrapped to the frame, so a long sentence breaks between words.
-        let rows: Vec<Line<'static>> = lines
-            .iter()
-            .flat_map(|line| tuikit::text::wrap_line(line, width, 0))
-            .collect();
-        frame.render(area, buf, Lines::new(rows));
+        MultiSelectWidget::new(&self.state.select, &self.state.labels, self.theme)
+            .render(area, buf);
     }
+}
+
+/// What Clean up shows when nothing is past its reap age: a notice that
+/// says why the list is empty, which any of the dialog keys dismisses.
+pub fn empty_notice() -> Dialog<Msg> {
+    Dialog::notice("Clean up").body([
+        "Nothing to clean up.",
+        "Stopped and removed records are kept until they pass their \
+         `[history.reap_after]` age, and records a pin targets are never listed.",
+    ])
 }
 
 #[cfg(test)]

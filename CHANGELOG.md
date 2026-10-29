@@ -259,6 +259,26 @@ Targeted for 0.2.0, after 0.1.0 is tagged. History, rebuild, and pins
   entries, which then wrap a column narrower, and scrolls only as far as
   the cursor needs instead of keeping the cursor on the last line. The
   armed **Forget** reads `Forget · press Enter again to confirm`.
+- **Dialogs work one way, and the worktree menu's questions sit over
+  it.** Every confirmation, choice, and notice takes the same keys:
+  `Enter` or `y` goes ahead, `Esc` or `n` goes back, `Ctrl-C` or `q`
+  closes; the close-down choice now goes back on `n` too and reads `m
+  merge & close · d discard & close · Esc/n cancel`. The worktree menu's
+  branch prompt, its merge, remove, and prune confirmations, and its
+  close-down choice open over the menu instead of replacing it, so the
+  menu shows around the prompt; `Esc` returns to the menu with its cursor
+  where it was, and `Ctrl-C` closes both, as before. On a short terminal
+  the confirmations, the close-down choice, and Clean up's
+  nothing-to-clean-up notice keep their keys in view (at 40x10 they cut
+  them off) and their text scrolls with the arrow keys. Dialogs gain a
+  blank row above their text; the heading over the live sessions a
+  worktree hosts takes the warning color as well as bold, while the
+  close-down and prune questions are no longer bold; and the notice's
+  keys read `Enter/Esc close`. `X` opens the close-down choice on its own:
+  `Esc` closes it (it showed a one-entry menu), and it no longer puts its
+  keys on the status line. On a worktree with no branch checked out,
+  **Remove worktree** and **Close down stream…** are shown but cannot be
+  picked, and say why.
 
 ### Fixed
 

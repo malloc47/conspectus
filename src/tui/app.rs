@@ -1668,6 +1668,13 @@ impl App {
                     crate::tui::effect::StoreOp::RenameSlot { slot, new_name },
                 ));
             }
+            Msg::OpenWorktreeStep { action, context } => {
+                // The step opens over the menu that asked, so Esc there
+                // comes back to it and a commit or Ctrl-C closes both.
+                if let Some(step) = crate::tui::widgets::worktree_menu::step(action, &context) {
+                    self.open_modal_step(step);
+                }
+            }
             Msg::CommitWorktreeCreate { repo_root, branch } => {
                 effects.push(Effect::WriteStore(
                     crate::tui::effect::StoreOp::WorktreeCreate { repo_root, branch },
@@ -1895,9 +1902,15 @@ impl App {
                         None,
                         None,
                     );
-                    self.open_clean_up(crate::tui::widgets::clean_up::CleanUpState::new(
-                        candidates, now,
-                    ));
+                    if candidates.is_empty() {
+                        // Nothing to choose from: a notice says why.
+                        let notice = crate::tui::widgets::clean_up::empty_notice();
+                        self.open_modal(crate::tui::Modal::Dialog(Box::new(notice)));
+                    } else {
+                        self.open_clean_up(crate::tui::widgets::clean_up::CleanUpState::new(
+                            candidates, now,
+                        ));
+                    }
                 }
             }
             Msg::OpenNewMuxForm => {

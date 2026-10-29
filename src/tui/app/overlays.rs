@@ -410,40 +410,34 @@ impl App {
         }
     }
 
-    /// Active worktree action menu, if on top of the stack.
-    pub fn worktree_menu(&self) -> Option<&crate::tui::widgets::worktree_menu::WorktreeMenuState> {
+    /// Active worktree action menu, if on top of the stack (not under one
+    /// of its steps).
+    pub fn worktree_menu(&self) -> Option<&tuikit::action_menu::ActionMenu<crate::tui::Msg>> {
         match self.modal_stack.top()? {
-            crate::tui::Modal::WorktreeMenu(state) => Some(state.as_ref()),
-            _ => None,
-        }
-    }
-
-    /// Mutable access for the runtime's per-key forwarding.
-    pub fn worktree_menu_mut(
-        &mut self,
-    ) -> Option<&mut crate::tui::widgets::worktree_menu::WorktreeMenuState> {
-        match self.modal_stack.top_mut()? {
-            crate::tui::Modal::WorktreeMenu(state) => Some(state.as_mut()),
+            crate::tui::Modal::WorktreeMenu(menu) => Some(menu.as_ref()),
             _ => None,
         }
     }
 
     /// Push a worktree action menu onto the modal stack.
-    pub fn open_worktree_menu(
-        &mut self,
-        state: crate::tui::widgets::worktree_menu::WorktreeMenuState,
-    ) {
+    pub fn open_worktree_menu(&mut self, menu: tuikit::action_menu::ActionMenu<crate::tui::Msg>) {
         self.modal_stack
-            .push(crate::tui::Modal::WorktreeMenu(Box::new(state)));
+            .push(crate::tui::Modal::WorktreeMenu(Box::new(menu)));
     }
 
-    /// Pop the worktree menu if it's on top; no-op otherwise.
-    pub fn close_worktree_menu(&mut self) {
-        if matches!(
-            self.modal_stack.top(),
-            Some(crate::tui::Modal::WorktreeMenu(_))
-        ) {
-            self.modal_stack.pop();
+    /// Open `modal` as the next step of the overlay on top: the question
+    /// one of its entries asks. `Esc` in it gives that overlay its keys
+    /// back; a commit or `Ctrl-C` closes both.
+    pub fn open_modal_step(&mut self, modal: Modal) {
+        self.modal_stack.push_step(modal);
+    }
+
+    /// The dialog on top of the stack, if one is: a worktree
+    /// confirmation or choice, or the empty Clean up notice.
+    pub fn dialog(&self) -> Option<&tuikit::dialog::Dialog<crate::tui::Msg>> {
+        match self.modal_stack.top()? {
+            crate::tui::Modal::Dialog(dialog) => Some(dialog.as_ref()),
+            _ => None,
         }
     }
 

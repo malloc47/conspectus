@@ -12,7 +12,7 @@ use ratatui::backend::TestBackend;
 use ratatui::buffer::Buffer;
 use ratatui::crossterm::event::{Event, KeyCode};
 
-use super::layout::{builders, framed_and_bare, modal_rect};
+use super::layout::{app_with, builders, framed_and_bare, modal_rect};
 use super::*;
 use crate::tui::keymap::Action;
 use crate::tui::messages::{LogEntry, LogEntryExt};
@@ -512,7 +512,15 @@ fn inner_text(buf: &Buffer, (x0, y0, x1, y1): (u16, u16, u16, u16)) -> String {
 #[test]
 fn every_modal_shows_its_body_at_40x10() {
     for (name, view, open) in builders() {
-        let (with, without) = framed_and_bare(view, open, 40, 10);
+        // Compared with the screen under the modal's whole flow: at 40x10
+        // a step (a dialog) and the menu under it both take the frame's
+        // full size, so the step's frame is the menu's.
+        let mut app = app_with(view, open);
+        let with = buffer_of(&mut app, 40, 10);
+        app.with_modals(|stack, _| {
+            stack.close_flow();
+        });
+        let without = buffer_of(&mut app, 40, 10);
         let label = describe(name, (40, 10));
         let Some(rect) = modal_rect(&with, &without) else {
             panic!("{label}: no frame\n{}", buffer_to_string(&with));
