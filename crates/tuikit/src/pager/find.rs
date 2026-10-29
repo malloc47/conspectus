@@ -118,19 +118,12 @@ impl Find {
         if self.query.is_empty() {
             return row.clone();
         }
-        let joined: String = row.spans.iter().map(|span| span.content.as_ref()).collect();
-        let from = text::clip(&joined, skip).len();
-        let ranges = text::find_all_ci(&joined[from..], &self.query)
-            .map(|range| from + range.start..from + range.end);
         let look = if current {
             Self::current_style(theme)
         } else {
             Self::match_style(theme)
         };
-        Line {
-            spans: text::paint(&row.spans, ranges, |base| base.patch(look)),
-            ..row.clone()
-        }
+        text::paint_matches(row, skip, &self.query, look)
     }
 
     /// The chip the footer shows while a find is active: the query and

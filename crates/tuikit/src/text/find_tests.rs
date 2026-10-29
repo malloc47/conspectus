@@ -1,4 +1,5 @@
 use ratatui::style::{Modifier, Style};
+use ratatui::text::Line;
 
 use super::*;
 
@@ -141,4 +142,35 @@ fn no_range_leaves_the_spans_as_they_were() {
         pieces(&paint(&spans, Some(9..12), |_| underline())),
         pieces(&spans)
     );
+}
+
+#[test]
+fn a_row_is_painted_after_its_gutter_in_the_spans_own_styles() {
+    let row = Line::from(vec![
+        Span::styled(" the │ ", italic()),
+        Span::raw("The cache and "),
+        Span::styled("the index", italic()),
+    ]);
+    let painted = paint_matches(&row, 7, "the", underline());
+    assert_eq!(
+        pieces(&painted.spans),
+        [
+            (" the │ ".to_string(), italic()),
+            ("The".to_string(), underline()),
+            (" cache and ".to_string(), Style::default()),
+            ("the".to_string(), italic().patch(underline())),
+            (" index".to_string(), italic()),
+        ],
+        "the gutter's `the` is not a match"
+    );
+}
+
+#[test]
+fn a_row_without_the_query_keeps_its_spans_and_line_style() {
+    let row = Line::from(vec![Span::raw("plain"), Span::styled(" row", italic())]).style(italic());
+    let painted = paint_matches(&row, 0, "zebra", underline());
+    assert_eq!(pieces(&painted.spans), pieces(&row.spans));
+    assert_eq!(painted.style, italic());
+    let empty = paint_matches(&row, 0, "", underline());
+    assert_eq!(pieces(&empty.spans), pieces(&row.spans));
 }

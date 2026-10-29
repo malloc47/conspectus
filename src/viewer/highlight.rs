@@ -44,24 +44,7 @@ pub fn highlight_matches(
         } else {
             theme.match_style()
         };
-        *line = paint_after(line, cache.leader, &find.query, style);
-    }
-}
-
-/// `line` with every case-insensitive occurrence of `needle` after the
-/// first `leader` columns patched with `style`.
-fn paint_after(line: &Line<'static>, leader: usize, needle: &str, style: Style) -> Line<'static> {
-    let joined: String = line
-        .spans
-        .iter()
-        .map(|span| span.content.as_ref())
-        .collect();
-    let from = text::clip(&joined, leader).len();
-    let ranges = text::find_all_ci(&joined[from..], needle)
-        .map(|range| from + range.start..from + range.end);
-    Line {
-        spans: text::paint(&line.spans, ranges, |base| base.patch(style)),
-        ..line.clone()
+        *line = text::paint_matches(line, cache.leader, &find.query, style);
     }
 }
 

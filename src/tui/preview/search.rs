@@ -115,14 +115,7 @@ pub fn mark_rows(
         .enumerate()
         .map(|(offset, row)| {
             if matching.binary_search(&(start + offset)).is_ok() {
-                Line {
-                    spans: tuikit::text::paint(
-                        &row.spans,
-                        tuikit::text::find_all_ci(&row_text(row), query),
-                        |base| base.patch(style),
-                    ),
-                    ..row.clone()
-                }
+                tuikit::text::paint_matches(row, 0, query, style)
             } else {
                 row.clone()
             }

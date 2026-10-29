@@ -4,7 +4,7 @@ use std::borrow::Cow;
 use std::ops::Range;
 
 use ratatui::style::Style;
-use ratatui::text::Span;
+use ratatui::text::{Line, Span};
 
 use super::measure::clusters;
 
@@ -165,6 +165,42 @@ pub fn paint(
         offset += len;
     }
     out
+}
+
+/// `line` with every occurrence of `query` after its first `skip` cells
+/// (a gutter of line numbers or labels) patched with `look`, compared as
+/// [`find_ci`] compares: the row painter readers share. A match a wrap
+/// splits across two rows is on neither, so neither is painted.
+///
+/// ```
+/// use ratatui::style::{Modifier, Style};
+/// use ratatui::text::Line;
+/// use tuikit::text::paint_matches;
+///
+/// let bold = Style::default().add_modifier(Modifier::BOLD);
+/// let row = paint_matches(&Line::raw("12 │ the index, the cache"), 5, "the", bold);
+/// let painted: Vec<&str> = row
+///     .spans
+///     .iter()
+///     .filter(|span| span.style == bold)
+///     .map(|span| span.content.as_ref())
+///     .collect();
+/// assert_eq!(painted, ["the", "the"]);
+/// ```
+pub fn paint_matches(line: &Line<'_>, skip: usize, query: &str, look: Style) -> Line<'static> {
+    let joined: String = line
+        .spans
+        .iter()
+        .map(|span| span.content.as_ref())
+        .collect();
+    let from = super::clip(&joined, skip).len();
+    let ranges =
+        find_all_ci(&joined[from..], query).map(|range| from + range.start..from + range.end);
+    Line {
+        spans: paint(&line.spans, ranges, |base| base.patch(look)),
+        style: line.style,
+        alignment: line.alignment,
+    }
 }
 
 #[cfg(test)]

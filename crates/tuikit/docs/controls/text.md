@@ -90,6 +90,7 @@ assert_eq!(painted.iter().filter(|span| span.style == bold).count(), 3);
 | `fit_snippet` | crop an excerpt around a match to a budget | favors the text after the match; drops the characters you name first |
 | `find_ci`, `find_all_ci` | find matches, ASCII letters without case | offsets stay valid for highlighting |
 | `paint` | restyle byte ranges of a span list | the one match painter |
+| `paint_matches` | patch every occurrence of a query in a row, after a gutter it skips | `find_all_ci` and `paint` together, for a reader's rows |
 
 ### Cutting rules
 
@@ -147,7 +148,11 @@ text laid end to end (an iterator, an `Option` of one range, or
 `find_all_ci`'s output) and gives each painted grapheme `restyle(base)`:
 `|base| base.patch(m)` layers the match style `m` on the surrounding look,
 `|_| m` replaces it. Range edges move outward to grapheme edges, so a
-highlight never strands an accent.
+highlight never strands an accent. `paint_matches(line, skip, query, look)`
+is the two together for a row a reader draws: every occurrence of the query
+after the row's first `skip` cells (a gutter of line numbers or labels) is
+patched with `look`; the pager's `Find::paint` and a host's own highlights
+outside a pager draw through it, so they find the same matches.
 
 ## Key table
 
