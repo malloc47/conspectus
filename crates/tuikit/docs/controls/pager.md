@@ -389,7 +389,13 @@ are sketches.
   the text when the selected entry's detail changes (`content_mut`,
   `refresh`). A footer too tall for the list's frame scrolls its first
   rows after the detail's last row, by the framed pager's rule.
-- **A preview region.** `Embedded` under the host's banner. A source whose
-  newest rows matter opens `at_end`; one showing a search's match calls
-  `land` with the query; a source that cuts its own window lays out lazily,
-  since `rows` asks only for the range drawn. Keys stay the host's.
+- **A preview region** (built, but not on the pager). A preview is drawn
+  from a shared borrow of its host's state every frame, over whatever the
+  selection points at (a source the host rebuilds as it changes), keeps
+  its place counted from the newest rows or from a match it opened on,
+  and paints the matches of a search the host derives; the pager owns its
+  content, draws through `&mut`, counts from the top with a sticky end,
+  and paints its own find. So it is a `scroll::ScrollRegion` (see
+  [scroll.md](scroll.md#the-region)): the host places it from the top, the
+  bottom, or the match, cuts and paints the rows it shows, draws them under
+  its banner, and keeps the region the frame drew. Keys stay the host's.

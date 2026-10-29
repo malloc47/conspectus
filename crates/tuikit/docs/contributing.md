@@ -432,5 +432,13 @@ RUSTDOCFLAGS='-D warnings' cargo doc --workspace --no-deps
 git diff --check
 ```
 
+A change to a module behind a feature (`richtext`) also builds the crate
+with its features off, so nothing outside the module comes to need it:
+
+```text
+cargo clippy -p tuikit --all-targets -- -D warnings
+cargo test -p tuikit --no-default-features
+```
+
 If a guard fails, fix the design. Add an allowlist entry only through the
 process above.

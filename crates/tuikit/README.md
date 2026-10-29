@@ -59,7 +59,10 @@ module (the palette: a query with its caret over results its host ranks
 or sends, with scope strips, a status row, an options pane, a debounce
 for a slow provider, and a footer that stays in view), the `scroll`
 module (cursor stepping, the follow rule, the clamping scroll window, the
-scrollbar gutter, and wrapped-row counts), the `chip` module (filled,
+scrollbar gutter, wrapped-row counts, and the scroll region whose offset
+counts from the top, the bottom, or a marked row), the `richtext` module
+behind its feature (ANSI text, captured terminal output fitted in a wrap
+mode, and Markdown with its tables and highlighted code), the `chip` module (filled,
 toggle, segmented, position, and status chips), the `age` module (age
 text, recency tint, and the age cell), the `frame` module (the modal
 frame, its footer on the bottom border, and its named sizes), the `selection` module (the list cursor's
@@ -92,9 +95,17 @@ same ratatui version the framework declares; a mismatch shows up as
 confusing "two different types with the same name" errors.
 
 Cargo features are off by default and add to the build only what a host asks
-for. The planned `richtext` feature turns ANSI text, Markdown, tables, and
-syntax highlighting into styled lines for content views; it is the only
-feature that pulls in the heavier parsing crates. The `testkit` feature turns
+for. The `richtext` feature turns ANSI text, captured terminal output,
+Markdown, tables, and syntax highlighting into styled lines for content
+views; it is the only feature that pulls in the heavier parsing crates, so a
+host that shows such content names it in its dependency:
+
+```toml
+[dependencies]
+tuikit = { path = "crates/tuikit", features = ["richtext"] }
+```
+
+The `testkit` feature turns
 on the test kit for a host's tests and dev tools; it adds no dependency, and a
 host enables it from its dev-dependencies so production builds leave it out:
 
@@ -128,6 +139,7 @@ process exists for the rare exception. The rules and the process are in
 
 ```text
 cargo test -p tuikit
+cargo test -p tuikit --features richtext
 cargo test -p tuikit --test independence
 RUSTDOCFLAGS='-D warnings' cargo doc -p tuikit --no-deps
 ```
