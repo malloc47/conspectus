@@ -323,6 +323,24 @@ Targeted for 0.2.0, after 0.1.0 is tagged. History, rebuild, and pins
   editor clears the status line, as leaving a worktree menu's question
   does. Every setting, its words, and what `Space`, `Enter`, `Esc`, `q`,
   and `Ctrl-C` do are unchanged.
+- **The pane scrollback viewer reads like the transcript viewer.** Long
+  lines wrap under their line number instead of being cut off at the
+  edge, and the new `w` cuts them at the edge again (ending in `…`); the
+  footer's `wrap·on (w)` chip says which. A find (confirmed, `n`, `N`, or
+  the match the viewer opens on) always puts its line one row below the
+  top, where it used to scroll only when the line was off screen and kept
+  two rows above it; the current match's text is drawn reversed, as in
+  the transcript viewer, and its line number stays in the accent color.
+  The footer names its keys in the one grammar
+  (`j/k/PgDn/PgUp scroll · / find · ? help · a attach · Esc/q close`) and
+  drops the scroll keys first when narrow, and the `[ n/m ]` chip counts
+  screen rows. `n` before any find says `nothing to find yet: press / to
+  search`; a find that matches nothing says so in its chip only; a wrap
+  note is green, not yellow.
+- **The viewers' help pages name what their keys do.** Their footer read
+  `Esc/q/? close`, though `q` leaves the viewer there; it now reads
+  `j/k/PgDn/PgUp scroll · Esc/? back · q close`. `Ctrl-D`/`Ctrl-U` page
+  by half in the `?` help and the full-value viewer too.
 
 ### Fixed
 

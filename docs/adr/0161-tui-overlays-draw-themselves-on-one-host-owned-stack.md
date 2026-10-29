@@ -23,7 +23,10 @@ steps back, and `Settled.closed` lists every entry a key closed.
 Amended by [ADR 0176](0176-tui-settings-panels-apply-as-they-change-and-editors-are-steps.md):
 `Outcome` gains `Back(M)` (close one level, then the host handles `M`),
 and the stack draws an entry with a step of its own open over it through
-the contract's new `render_under_step`.
+the contract's new `render_under_step`. Amended by
+[ADR 0177](0177-tui-readers-are-one-pager-over-content-the-host-lays-out.md):
+the pane viewer (decision 7) is the framework's pager, an overlay for any
+context, which still asks to attach with `Stay(Msg::AttachPane)`.
 
 ## Context
 

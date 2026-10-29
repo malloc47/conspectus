@@ -743,7 +743,13 @@ with the match picked out in the theme's `match_highlight` color. The keys:
   `PgUp`/`PgDn`, `g`/`G`, `Ctrl-D`/`Ctrl-U`, `/` with `n`/`N`, `?` for help,
   `Esc` stepping back from help and find, `q` leaving at once) and `a`,
   which attaches to the pane's mux. A stopped or gone mux refuses with a
-  note in the footer, and attaching closes the viewer.
+  note in the footer, and attaching closes the viewer. Long lines wrap
+  under their line number; `w` cuts them at the edge instead (ending in
+  `…`), and the footer's `wrap·on (w)` chip says which. A find, and the
+  match the viewer opens on, puts its line one row below the top, its
+  text in the current-match look and its number in the accent color.
+  The `[ n/m ]` chip counts screen rows, so a wrapped line counts once
+  per row it takes.
 - `Ctrl-S` keeps the search and opens the Search view on it (a scan still
   running goes on there). `Ctrl-F` keeps the query as the filter on the
   Sessions, Mux, and PRs lists and closes the modal; `F` clears it.
@@ -1491,8 +1497,9 @@ first and last row. A filter's editor opens over it: `Enter` there applies
 the filter and comes back to the panel, `Esc` comes back without it, and
 `Ctrl-C` (or `q`, except while typing an age or a search) closes both.
 Scrolling dialogs
-(help, the full-value viewer, messages, the transcript viewer) use
-`Space` to page down, as pagers do. A page is the rows the dialog shows,
+(help, the full-value viewer, messages, the transcript and pane viewers)
+use `Space` to page down, as pagers do, and `Ctrl-D`/`Ctrl-U` to move half
+a page (help, the full-value viewer, and the viewers). A page is the rows the dialog shows,
 as it is for `PgDn`/`PgUp` in the tree, and scrolling stops at the last
 line. Help and the other long dialogs wrap
 their text to the dialog's width, and menus cut a label that cannot fit
@@ -1536,11 +1543,13 @@ dialog too. A dialog or prompt a menu entry opens sits over the menu:
 typed) closes both. On a short terminal a dialog keeps its keys at the
 bottom and its text scrolls with the arrow keys.
 
-Inside the transcript viewer, `?` opens a help page drawn like the main
-help: the same frame and size, section headings, an accent-colored key
-column, descriptions that wrap, a scrollbar, and a footer naming the keys
-that scroll and close it. Its rows are generated from the viewer's key
-table, so a key added to the viewer is listed automatically. While the
+Inside the transcript viewer and the pane viewer, `?` opens a help page
+drawn like the main help: the same frame and size, section headings, an
+accent-colored key column, descriptions that wrap, a scrollbar, and a
+footer naming the keys that work there (`j/k/PgDn/PgUp scroll · Esc/?
+back · q close`: `Esc` and `?` go back to the viewer, `q` leaves it). Its
+rows are generated from the viewer's key table, so a key added to the
+viewer is listed automatically. While the
 page is open the movement keys (`j`/`k`, `PgDn`/`PgUp`, `g`/`G`, `Ctrl-D`/
 `Ctrl-U`) scroll it rather than the transcript, `?` or `Esc` close it
 (`q` and `Ctrl-C` leave the viewer), and the toggles wait until it is

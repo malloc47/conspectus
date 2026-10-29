@@ -1283,6 +1283,18 @@ cursor row recedes (`Overlay::render_under_step`). `conspectus` keeps
 `ControlsContext`, which rows each view shows, the filter mappings, every
 `Msg`, and the editors.
 
+Readers are one pager (ADR 0177). The framework's `Pager<C>` scrolls a
+`PagerContent` the host lays out for a width (rows, the units a find
+matches, a header, chips, its own keys, and requests such as attach or
+copy) and owns what readers share: full-screen, framed, and embedded
+modes, one window clamped at every draw with viewport paging, half pages,
+and a sticky end, a find on the one line editor that always scrolls to its
+match, `Esc` stepping back and `q` leaving, a help page generated from the
+pager's and the content's tables, and a generated footer. The pane
+scrollback viewer is a pager over numbered lines that wrap (`w` cuts them);
+the transcript viewer, the value modal, the help page's body, the Messages
+detail, and the preview move onto it later.
+
 Every argv `conspectus` reads from text is split by one grammar (ADR 0169,
 `src/argv.rs`): a POSIX shell's word splitting with nothing expanded. An
 argv someone types (the forms, `pin edit --set`) is refused when it ends

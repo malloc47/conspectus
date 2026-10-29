@@ -13,7 +13,10 @@ Carries out ADR 0150's answer that the hygiene tests' mechanisms become
 helpers of the test kit while their rule sets stay with the repository.
 Amended by [ADR 0176](0176-tui-settings-panels-apply-as-they-change-and-editors-are-steps.md):
 a `Case` can be a `step`, whose `Contained` check accepts a change of the
-selection look of the entry under it outside its frame.
+selection look of the entry under it outside its frame. Amended by
+[ADR 0177](0177-tui-readers-are-one-pager-over-content-the-host-lays-out.md):
+a level's table consulted after its first is a `conformance::part`, which
+need not start with `Ctrl-C`.
 
 ## Context
 

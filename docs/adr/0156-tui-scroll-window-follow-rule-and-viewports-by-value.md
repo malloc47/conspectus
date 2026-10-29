@@ -12,7 +12,10 @@ drawn windows come back to the App as a value, not as a `Msg`. Amended
 by [ADR 0161](0161-tui-overlays-draw-themselves-on-one-host-owned-stack.md):
 a scrolled modal (the help page, the value modal, Messages) keeps the
 window it drew as it draws, so the viewport report carries the panes'
-windows only.
+windows only. Amended by
+[ADR 0177](0177-tui-readers-are-one-pager-over-content-the-host-lays-out.md):
+the framework's pager keeps a window with a sticky end, and the pane
+viewer is one.
 
 ## Context
 

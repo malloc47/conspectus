@@ -29,7 +29,13 @@ former, so the host's `PICKER_KEYS` is gone. Amended by
 [ADR 0176](0176-tui-settings-panels-apply-as-they-change-and-editors-are-steps.md):
 `SETTINGS_KEYS` (`SettingsKey`) is the standard settings table, with
 `PgUp`/`PgDn`, `Home`/`g`, and `End`/`G` as aliases, and the host's
-`CONTROLS_KEYS` is gone.
+`CONTROLS_KEYS` is gone. Amended by
+[ADR 0177](0177-tui-readers-are-one-pager-over-content-the-host-lays-out.md):
+`PagerKey` gains half pages, find, next and previous match, and help;
+`PAGER_KEYS` binds `q` to `Abort` and `Ctrl-D`/`Ctrl-U` as aliases, with
+its scroll rows in the `PAGER_SCROLL_KEYS` fragment; `READER_KEYS`,
+`PAGER_HELP_KEYS`, and `FIND_KEYS` are standard tables, and the host's
+`PANE_VIEWER_KEYS` is gone.
 
 ## Context
 
