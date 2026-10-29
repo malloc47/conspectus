@@ -1,0 +1,60 @@
+frame 64x24
+text  |                                                                |
+style |                                                                |
+text  |                                                                |
+style |                                                                |
+text  |                                                                |
+style |                                                                |
+text  |                                                                |
+style |                                                                |
+text  |  ┌ Settings ────────────────────────────────────────────────┐  |
+style |  aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa  |
+text  |  │  A field follows its default until you change it.        │  |
+style |  abbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb        a  |
+text  |  │                                                          │  |
+style |  a                                                          a  |
+text  |  │  title          draft                                    │  |
+style |  a                 ccccccccccccccccccccccccccc   bbbbbbbbbbba  |
+text  |  │  color          blueish                         will keep│  |
+style |  a                 ccccccccccccccccccccccccccc   ddddddddddda  |
+text  |  │► size           medium                        will follow│  |
+style |  aeeeeeeeeeeeeeeeeeffffffgffffffffffffffffffffeeehhhhhhhhhhha  |
+text  |  │  place          ~/projects/alpha            √     default│  |
+style |  a                 ccccccccccccccccccccccccc   i bbbbbbbbbbba  |
+text  |  │  tool           saw              [saw] …          default│  |
+style |  a                 cccccccccccccc  jjjjjjbb      bbbbbbbbbbba  |
+text  |  │  lock           [ ] locked                               │  |
+style |  a                 cccccccccc                               a  |
+text  |  │                                                          │  |
+style |  a                                                          a  |
+text  |  │  the theme's size is medium                              │  |
+style |  abbbbbbbbbbbbbbbbbbbbbbbbbbbb                              a  |
+text  |  │                                                          │  |
+style |  a                                                          a  |
+text  |  │                                                          │  |
+style |  a                                                          a  |
+text  |  │↑/↓ move · Tab complete/next · S-Tab back                 │  |
+style |  abbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb                 a  |
+text  |  │←/→/Space change · Ctrl-R reset · Enter save · Esc cancel │  |
+style |  abbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb a  |
+text  |  └──────────────────────────────────────────────────────────┘  |
+style |  aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa  |
+text  |                                                                |
+style |                                                                |
+text  |                                                                |
+style |                                                                |
+text  |                                                                |
+style |                                                                |
+text  |                                                                |
+style |                                                                |
+legend
+  a  fg Cyan
+  b  dim
+  c  fg Gray
+  d  fg Yellow
+  e  bold, reversed
+  f  fg White, bg DarkGray
+  g  fg Black, bg White
+  h  fg Yellow, bold, reversed
+  i  fg Green
+  j  fg Cyan, bold

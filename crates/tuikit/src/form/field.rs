@@ -5,12 +5,14 @@ use std::fmt;
 use std::sync::Arc;
 
 use ratatui::crossterm::event::KeyEvent;
-use ratatui::text::Line;
+use ratatui::text::{Line, Span};
 
+use super::override_row::{OverrideRow, Standing};
 use super::row::{self, Cols, Tone};
 use crate::keys::FormKey;
 use crate::path_field::PathField;
 use crate::selection::Ends;
+use crate::text;
 use crate::text_edit::LineEdit;
 use crate::theme::Theme;
 
@@ -28,7 +30,10 @@ type Condition = Arc<dyn Fn(&Values<'_>) -> bool + Send + Sync>;
 /// run when the form is submitted, and a condition for being shown
 /// ([`visible_if`](Self::visible_if)), evaluated over the form's values
 /// each time they change. A hidden field has no row, is not a stop of the
-/// ring, and is not checked.
+/// ring, and is not checked. A text, path, or choice field may follow an
+/// inherited value ([`with_override`](Self::with_override)), and any
+/// field may explain itself in the form's detail lines while it has
+/// focus ([`hint`](Self::hint)).
 #[derive(Clone)]
 pub struct Field {
     id: &'static str,
@@ -36,6 +41,8 @@ pub struct Field {
     kind: FieldKind,
     validate: Option<Validator>,
     visible: Option<Condition>,
+    overrides: Option<OverrideRow>,
+    hints: Vec<String>,
 }
 
 /// What a field holds and how its row is drawn.
@@ -69,6 +76,8 @@ impl Field {
             kind,
             validate: None,
             visible: None,
+            overrides: None,
+            hints: Vec::new(),
         }
     }
 
@@ -134,6 +143,32 @@ impl Field {
         self
     }
 
+    /// Makes the field an override row: it follows `row`'s inherited
+    /// value until the user changes it, the form's reset key puts that
+    /// value back, and its row ends in a word for where the value stands.
+    /// The field's text now is the value the form opens with, so decorate
+    /// a field once its value is set. Only fields that hold text (text,
+    /// path, and choice fields) can follow a value; on another kind the
+    /// decorator has no effect.
+    #[must_use]
+    pub fn with_override(mut self, mut row: OverrideRow) -> Self {
+        if let Some(text) = self.text_value() {
+            row.open(text);
+            self.overrides = Some(row);
+        }
+        self
+    }
+
+    /// Adds a line the form's detail lines show while the field has focus
+    /// (what its keys do, what its value means), after the lines its
+    /// override row's hint gives. A form shows them only when it reserves
+    /// detail lines ([`Form::details`](super::Form::details)).
+    #[must_use]
+    pub fn hint(mut self, line: impl Into<String>) -> Self {
+        self.hints.push(line.into());
+        self
+    }
+
     /// The id the host reads the field back by.
     pub fn id(&self) -> &'static str {
         self.id
@@ -173,6 +208,29 @@ impl Field {
             | FieldKind::OneOf(_)
             | FieldKind::ReadOnly(_) => None,
         }
+    }
+
+    /// The override row the field is decorated with, if any.
+    pub fn override_row(&self) -> Option<&OverrideRow> {
+        self.overrides.as_ref()
+    }
+
+    /// Where an override row's value stands; `None` for a field that is
+    /// not one.
+    pub fn standing(&self) -> Option<Standing> {
+        let row = self.overrides.as_ref()?;
+        Some(row.standing(self.text_value().unwrap_or("")))
+    }
+
+    /// The lines the form's detail lines show while the field has focus:
+    /// what its override row's hint says, then its own hint lines.
+    pub fn hints(&self) -> Vec<String> {
+        let mut lines = self
+            .overrides
+            .as_ref()
+            .map_or_else(Vec::new, |row| row.hints(self.text_value().unwrap_or("")));
+        lines.extend(self.hints.iter().cloned());
+        lines
     }
 
     /// Whether the field is a stop of the form's ring: every kind but a
@@ -220,7 +278,7 @@ impl Field {
 
     /// Gives a key that edits to the field; whether the value changed.
     pub(super) fn edit(&mut self, key: KeyEvent) -> bool {
-        match &mut self.kind {
+        let changed = match &mut self.kind {
             FieldKind::Text(edit) => edit.handle(key).changed,
             FieldKind::Path(path) => path.handle(key).changed,
             FieldKind::Choice(choice) if choice.allows_custom() => choice.edit.handle(key).changed,
@@ -229,13 +287,14 @@ impl Field {
             | FieldKind::CheckGroup(_)
             | FieldKind::OneOf(_)
             | FieldKind::ReadOnly(_) => false,
-        }
+        };
+        self.touched(changed)
     }
 
     /// Acts on the field with an option key; whether the value changed.
     pub(super) fn change(&mut self, action: FormKey) -> bool {
         let delta = if action == FormKey::OptionPrev { -1 } else { 1 };
-        match &mut self.kind {
+        let changed = match &mut self.kind {
             FieldKind::Choice(choice) => choice.step(delta),
             FieldKind::Toggle(toggle) => {
                 toggle.flip();
@@ -244,20 +303,64 @@ impl Field {
             FieldKind::CheckGroup(group) => group.act(action),
             FieldKind::OneOf(one_of) => one_of.step(delta),
             FieldKind::Text(_) | FieldKind::Path(_) | FieldKind::ReadOnly(_) => false,
-        }
+        };
+        self.touched(changed)
     }
 
     /// Completes a path field; whether anything was completed.
     pub(super) fn complete(&mut self) -> bool {
-        match &mut self.kind {
+        let changed = match &mut self.kind {
             FieldKind::Path(path) => path.complete(),
             _ => false,
+        };
+        self.touched(changed)
+    }
+
+    /// Puts an override row's inherited value back; whether the value or
+    /// where it stands changed. A field that is not an override row
+    /// keeps its value.
+    pub(super) fn reset(&mut self) -> bool {
+        let Some(row) = &self.overrides else {
+            return false;
+        };
+        let inherited = row.inherited().to_string();
+        let before = (self.text_value().map(str::to_string), self.standing());
+        match &mut self.kind {
+            FieldKind::Text(edit) => {
+                edit.set_value(inherited);
+            }
+            FieldKind::Path(path) => {
+                path.set_value(inherited);
+            }
+            FieldKind::Choice(choice) => choice.set_value(inherited),
+            FieldKind::Toggle(_)
+            | FieldKind::CheckGroup(_)
+            | FieldKind::OneOf(_)
+            | FieldKind::ReadOnly(_) => return false,
         }
+        if let Some(row) = &mut self.overrides {
+            row.set_reset(true);
+        }
+        before != (self.text_value().map(str::to_string), self.standing())
+    }
+
+    /// After the user's key: a change to an override row's value makes it
+    /// the field's own, so a reset before it no longer stands.
+    fn touched(&mut self, changed: bool) -> bool {
+        if changed && let Some(row) = &mut self.overrides {
+            row.set_reset(false);
+        }
+        changed
     }
 
     /// The field's row in `cols`.
     pub(super) fn line(&self, cols: Cols, focused: bool, theme: &Theme) -> Line<'static> {
         let label = self.label.as_str();
+        if cols.source > 0
+            && let Some(cells) = self.value_cells(cols.value(), focused, theme)
+        {
+            return self.sourced_line(cells, cols, focused, theme);
+        }
         match &self.kind {
             FieldKind::Text(edit) => row::text_row(label, edit, focused, cols, theme),
             FieldKind::Path(path) => row::path_row(label, path, focused, cols, theme),
@@ -278,6 +381,56 @@ impl Field {
             }
         }
     }
+
+    /// The value of a text, path, or choice field in `width` cells; `None`
+    /// for the kinds whose row has no source column.
+    fn value_cells(
+        &self,
+        width: usize,
+        focused: bool,
+        theme: &Theme,
+    ) -> Option<Vec<Span<'static>>> {
+        match &self.kind {
+            FieldKind::Text(edit) => Some(row::text_cells(edit, width, focused, theme)),
+            FieldKind::Path(path) => Some(row::path_cells(path, width, focused, theme)),
+            FieldKind::Choice(choice) => Some(row::choice_cells(
+                &choice.edit,
+                &choice.options,
+                width,
+                focused,
+                theme,
+            )),
+            FieldKind::Toggle(_)
+            | FieldKind::CheckGroup(_)
+            | FieldKind::OneOf(_)
+            | FieldKind::ReadOnly(_) => None,
+        }
+    }
+
+    /// The row of a form with a source column: the label, the value
+    /// filling the value column, and the column, which holds the word for
+    /// where an override row's value stands and is blank on another row.
+    fn sourced_line(
+        &self,
+        cells: Vec<Span<'static>>,
+        cols: Cols,
+        focused: bool,
+        theme: &Theme,
+    ) -> Line<'static> {
+        let mut spans = vec![Span::raw(row::label(&self.label, cols.label))];
+        let cells = text::fit_spans(cells, cols.value());
+        let gap = cols.value().saturating_sub(text::spans_width(&cells));
+        spans.extend(cells);
+        if gap > 0 {
+            spans.push(Span::raw(" ".repeat(gap)));
+        }
+        let (word, pending) = match (&self.overrides, self.text_value()) {
+            (Some(row), Some(value)) => (row.word(value), row.standing(value).is_pending()),
+            _ => ("", false),
+        };
+        spans.extend(row::source_cells(word, cols.source, pending, theme));
+        row::row(spans, focused, theme)
+    }
 }
 
 impl fmt::Debug for Field {
@@ -288,6 +441,8 @@ impl fmt::Debug for Field {
             .field("kind", &self.kind)
             .field("validates", &self.validate.is_some())
             .field("conditional", &self.visible.is_some())
+            .field("overrides", &self.overrides)
+            .field("hints", &self.hints)
             .finish()
     }
 }
@@ -649,5 +804,11 @@ impl<'a> Values<'a> {
             Some(FieldKind::CheckGroup(group)) => Some(group),
             _ => None,
         }
+    }
+
+    /// Where an override row's value stands: what a submit should do
+    /// with it.
+    pub fn standing(&self, id: &str) -> Option<Standing> {
+        self.field(id).and_then(Field::standing)
     }
 }

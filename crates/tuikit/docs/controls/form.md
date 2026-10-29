@@ -37,6 +37,16 @@ drawn with the same `[x]`; and each form's own label column.
   | `OneOf(OneOf)` | a row of options, one chosen, drawn `(•)`/`( )` | step the choice, wrapping | nothing |
   | `ReadOnly(ReadOnly)` | a line only read, in a `Tone`: a note, derived output (led in by `└`), or a warning | not a stop | not a stop |
 
+- **Override rows.** `Field::with_override(OverrideRow)` makes a text,
+  path, or choice field follow an inherited value until the user gives it
+  one of their own; the reset key the host's table binds puts the
+  inherited value back. Its row ends in a source column that says where
+  the value stands. See [Override rows](#override-rows).
+- **Explanations.** `Form::intro` puts a paragraph above the rows, and
+  `Form::details(n)` reserves `n` lines under them for the focused
+  field's hints (`Field::hint`, after an override row's hint); both stay
+  in view while the rows scroll, and the band keeps its height as the
+  focus moves.
 - **Checks.** `Field::validate` checks a text, path, or choice field's
   text (as typed) when the form is submitted. Shown fields are checked top
   to bottom; the first that fails puts its reason on the error line and
@@ -77,8 +87,9 @@ that follow a choice) wraps the form, routes each key to it, and reads
 
 The row kit the form draws with (`text_row`, `path_row`, `choice_row`,
 `toggle_row`, `check_row`, `one_of_row`, `static_row`, `read_only_row`,
-`footer_lines`, `error_line`, `label`, `Cols`) and the body (`FormBody`)
-are public, for a host form that still lays out its own rows.
+`source_cells`, `detail_line`, `paragraph_lines`, `footer_lines`,
+`error_line`, `label`, `Cols`) and the body (`FormBody`) are public, for
+a host form that still lays out its own rows.
 
 ## Usage example
 
@@ -219,16 +230,123 @@ impl<M> Order<M> {
 }
 ```
 
+### Override rows
+
+Some forms edit a record whose fields have values of their own only where
+the user set one; elsewhere a field follows a value the record inherits
+(a default, a parent's setting, what was there last time). Such a field is
+an override row: `Field::with_override(OverrideRow::new(inherited,
+source))` decorates a text, path, or choice field (the field's text is the
+value the form opens with, so decorate it once its value is set), and
+`OverrideRow::overridden(true)` says the field holds a value of its own as
+the form opens. On a toggle, a check group, a one-of-N row, or a
+read-only line the decorator has no effect.
+
+- **Editing makes an override.** Typing, stepping a choice, or completing
+  a path changes the value, and a submit keeps it as the field's own.
+- **Reset follows again.** The reset key (`FormKey::Inherit`, which the
+  host binds in its form's key table, such as `Ctrl-R`) puts the
+  inherited value back. On a field that held a value of its own, a submit
+  then drops that value; on one that did not, the field just follows
+  again and nothing is pending. Typing after a reset makes the value the
+  field's own again. The key does nothing on a field that is not an
+  override row, and a form whose table does not bind it has no reset at
+  all: the binding is the form's, never global, so another overlay can
+  give the same chord another meaning.
+- **The row says where its value stands.** Every text, path, and choice
+  row of a form with override rows ends in one source column, right
+  aligned and as wide as the longest word any of its rows may show (blank
+  on a row that is not an override row), so the words sit in one column
+  and the values all end in one place. The word is:
+
+  | `Standing` | When | Word | Look |
+  | --- | --- | --- | --- |
+  | `Follows` | it follows the inherited value | the source word (`default`) | receding (`muted`) |
+  | `Kept` | it holds the value of its own it opened with | `kept` (`KEPT`) | receding (`muted`) |
+  | `Changed` | its value changed since the form opened | `will keep` (`WILL_KEEP`) | `warning` |
+  | `Reset` | it was reset and held a value of its own | `will follow` (`WILL_FOLLOW`) | `warning` |
+
+- **A hint explains it.** `OverrideRow::hint` takes a closure that gets
+  an `OverrideView` (the standing, the value, the inherited value, and the
+  source word) and gives the lines the form's detail band shows while the
+  row has focus, before the field's own `Field::hint` lines.
+- **The host decides what a submit does.** `on_submit` reads each row's
+  `Values::standing`: it keeps a `Changed` value, drops a `Reset` one, and
+  leaves `Follows` and `Kept` rows alone.
+
+```rust
+use ratatui::crossterm::event::KeyCode;
+use tuikit::form::{Field, Form, OverrideRow, Standing, Submit};
+use tuikit::keys::{FORM_KEYS, FormKey, KeyRow, ctrl, include, key, shown};
+
+#[derive(Debug, PartialEq)]
+enum Msg {
+    Save { color: Option<String> },
+}
+
+/// The form binds its own reset key; no other overlay gets it from here.
+const KEYS: &[KeyRow<FormKey>] = &[
+    include(FORM_KEYS),
+    shown(ctrl('r'), FormKey::Inherit, "Ctrl-R", "reset"),
+    shown(key(KeyCode::Enter), FormKey::Submit, "Enter", "save"),
+    shown(key(KeyCode::Esc), FormKey::Cancel, "Esc", "cancel"),
+];
+
+fn settings(color: &str, own: bool) -> Form<Msg> {
+    Form::new("Settings", KEYS, |values| match values.standing("color") {
+        Some(Standing::Changed) => Submit::Commit(Msg::Save {
+            color: Some(values.text("color").trim().to_string()),
+        }),
+        Some(Standing::Reset) => Submit::Commit(Msg::Save { color: None }),
+        _ => Submit::Close,
+    })
+    .intro("A field follows the theme until you change it.")
+    .details(1)
+    .field(
+        Field::text("color", "color", color).with_override(
+            OverrideRow::new("blue", "theme")
+                .overridden(own)
+                .hint(|view| vec![format!("the theme says {}", view.inherited)]),
+        ),
+    )
+}
+```
+
+The override form of the framework's tests at 64 by 24, with a changed
+row and a reset one (`src/form/goldens/override.golden`):
+
+```text
+┌ Settings ────────────────────────────────────────────────┐
+│  A field follows its default until you change it.        │
+│                                                          │
+│  title          draft                                    │
+│  color          blueish                         will keep│
+│► size           medium                        will follow│
+│  place          ~/projects/alpha            √     default│
+│  tool           saw              [saw] …          default│
+│  lock           [ ] locked                               │
+│                                                          │
+│  the theme's size is medium                              │
+│                                                          │
+│                                                          │
+│↑/↓ move · Tab complete/next · S-Tab back                 │
+│←/→/Space change · Ctrl-R reset · Enter save · Esc cancel │
+└──────────────────────────────────────────────────────────┘
+```
+
 ### Size
 
 The form is drawn in the form modal frame (`FORM_SIZE`, which is
 `ModalSize::FORM`: up to 80 columns, at least 44, two columns and one row
-clear on each side while the screen allows) and is as tall as its rows,
-a blank line, the error line while there is one, the footer, and the
-border. `Form::rect` is the rect it draws in. When the frame is shorter,
-the rows go first: the focused row, the error line, the footer (its first
-lines), the blank line, and then the other rows are kept in that order, so a
-refusal and the row it is about always show.
+clear on each side while the screen allows) and is as tall as its intro
+and a blank line (when it has one), its rows, a blank line, its detail
+lines and a blank line (when it reserves some), the error line while
+there is one, the footer, and the border. `Form::rect` is the rect it
+draws in. When the frame is shorter, the rows go first: the focused row,
+the error line, the footer (its first lines), the lines under the rows
+(the blank line, then the detail lines), the intro, and then the other
+rows are kept in that order, so a refusal and the row it is about always
+show.
 
 ## Key table
 
@@ -246,7 +364,7 @@ field's editing keys, [path_field.md](path_field.md) for completion).
 | `Tab` | Tab | completes the focused path field; the next stop when there is nothing to complete |
 | `←`, `→` | OptionPrev, OptionNext | step a choice or a one-of-N row, flip a toggle, move a check group's cursor; on a text or path field, move the text cursor |
 | `Space` | Toggle | flip a toggle or the item under a check group's cursor, step a choice or a one-of-N row on; on a text or path field, type a space |
-| `Ctrl-R` | Inherit | reaches no field yet (a host table may bind it; the override row is a seam) |
+| the host's reset key (`Ctrl-R` in the tables here) | Inherit | not in `FORM_KEYS`: a form with override rows binds it in its own table. Puts the focused override row's inherited value back; does nothing on another field, and never reaches a field's text |
 | `Enter` | Submit | checks the shown fields, then asks `on_submit`, from any field |
 | `Esc` | Cancel | closes the form, saying nothing |
 | any other key | (the focused field) | edits a text or path field, or a choice that allows a custom value; `q` is typed |
@@ -265,9 +383,9 @@ hints.
 | `field_active` | the fill of the focused field's value |
 | `field_cursor` | the caret, and the item under a check group's cursor |
 | `selection_active` | the highlight of the focused field's row (its fills keep their look) |
-| `muted` | the footer, a choice's other chips, and read-only lines (with italics) |
+| `muted` | the footer, a choice's other chips, read-only lines (with italics), the intro, the detail lines, and an override row's settled word (its source word or `kept`) |
 | `inert` | a path field's `?` mark (nothing typed) |
-| `success`, `warning` | a path field's marks; `warning` also for `[custom]` and a `Warning`-tone line |
+| `success`, `warning` | a path field's marks; `warning` also for `[custom]`, a `Warning`-tone line, and an override row's pending word (`will keep`, `will follow`) |
 | `error` | the error line |
 
 ## House rules followed
@@ -279,10 +397,10 @@ hints.
 | 4 | Close keys | `Esc` closes the form's one level, `Ctrl-C` dismisses it, and `q` is typed (a form is a typing level, option rows included) |
 | 5 | Close feedback | closing returns `Close` with no message |
 | 6 | Forms | `Enter` submits from any field; `Tab`/`↓` and `S-Tab`/`↑` move over one ring, one stop per field |
-| 7 | Validation errors | a refused submit sets one error line in the footer slot and moves the focus to the field it is about; the next edit clears it; nothing is refused silently |
-| 8 | Footers and hints | the footer is generated from the form's key table, in the one grammar, and stays in view |
+| 7 | Validation errors | a refused submit sets one error line in the footer slot and moves the focus to the field it is about; the next edit (a reset included) clears it; nothing is refused silently |
+| 8 | Footers and hints | the footer is generated from the form's key table, in the one grammar, and stays in view; a reset key is a row of the form's own table, so its footer names it and no other overlay inherits it |
 | 13 | Theme | every row takes theme tokens; no raw color, dim, or reversed cell |
-| 14 | Width | labels, values, chips, option rows, the error line, and the footer are measured and cut in cells |
+| 14 | Width | labels, values, chips, option rows, source words, the intro, the detail lines, the error line, and the footer are measured and cut in cells |
 | 15 | Text editing | text, path, and custom choice fields are `LineEdit`s with the shared keys and paste rule |
 | 16 | Path fields | path fields are `PathField`s; the form commits nothing itself, and a host reads `expanded_value()` |
 | 17 | Labels | one label column for every row; the labels are the host's, and the host's forms use the short forms |
@@ -295,9 +413,13 @@ feedback; its refusal is the error line), 12 (a form does not page), and 18
 
 ## Seams left open
 
-- **An override row.** A field that follows an inherited value until the
-  user types one of their own, shows where its value comes from, and goes
-  back on `Ctrl-R` (`FormKey::Inherit`, which reaches no field yet).
+- **The reset key's availability.** The footer names the reset key on
+  every field; a footer that drew it unavailable (`with_availability`)
+  while the focused field is not an override row would need the footer
+  built per focus instead of once per table.
+- **Override rows of other kinds.** A toggle, a check group, or a one-of-N
+  row cannot follow a value yet; it would need an inherited state of its
+  own kind rather than text.
 - **Two controls on one row.** A checkbox beside a text field (a field that
   is revealed by its own toggle) is one stop per control on one line; today
   each is a field of its own.

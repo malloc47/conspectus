@@ -476,8 +476,11 @@ fn a_choice_steps_through_its_options_and_takes_a_typed_value() {
     assert!(!plain.takes_text());
 }
 
+/// The reset key acts on override rows only (their tests are with
+/// `OverrideRow`); this form has none, so it changes nothing, and it
+/// never reaches the field's text.
 #[test]
-fn ctrl_r_reaches_no_field() {
+fn the_reset_key_leaves_a_field_without_an_override_alone() {
     let mut form = form();
     type_text(&mut form, "box");
     assert_eq!(key(&mut form, ctrl('r')), Outcome::Consumed);

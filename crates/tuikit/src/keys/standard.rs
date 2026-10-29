@@ -418,7 +418,8 @@ pub enum FormKey {
     /// [`OptionNext`](Self::OptionNext) does.
     Toggle,
     /// Drop the focused field's own value and take the inherited one
-    /// again.
+    /// again: an override row's reset. No standard table binds it; a form
+    /// with override rows binds its own key to it.
     Inherit,
 }
 

@@ -19,6 +19,16 @@
 //!   [`ReadOnly`] lines in a [`Tone`] (a note, derived output, or a
 //!   warning). A field can be shown only while a condition over the
 //!   form's [`Values`] holds.
+//! - **Override rows.** A text, path, or choice field can follow an
+//!   inherited value ([`OverrideRow`]): editing it gives it a value of
+//!   its own, the reset key the host's table binds ([`FormKey::Inherit`])
+//!   puts the inherited value back, and its row ends in a column saying
+//!   where the value stands (the source word of the inherited value, or
+//!   that it is kept, will be kept, or will follow again).
+//! - **Explanations.** An intro paragraph can sit above the rows
+//!   ([`Form::intro`]), and a band of detail lines under them
+//!   ([`Form::details`]) explains the focused field ([`Field::hint`] and
+//!   the override row's hint); both stay in view while the rows scroll.
 //! - **One ring.** `Tab` and `↓` go to the next field and `S-Tab` and `↑`
 //!   to the previous, wrapping, one stop per field; read-only lines and
 //!   hidden fields are not stops. `Tab` on a path field completes the
@@ -94,23 +104,27 @@
 //! The fields and their order, labels, and seeds; the key table, with the
 //! form's own `Enter` verb (`Enter save`); the checks' reasons; and what
 //! a submit means: `on_submit` reads the values (a path's expanded value,
-//! a toggle's state) and builds the host's message, or gives the reason
-//! the values are refused. A host that must change one field when another
+//! a toggle's state, where an override row stands) and builds the host's
+//! message, or gives the reason the values are refused. For an override
+//! row the host keeps the inherited value, its source word, and the words
+//! of its hint. A host that must change one field when another
 //! changes (a line derived from the others, the options that follow a
 //! choice) wraps the form, routes the key to it, and reads
 //! [`Form::edited`] to see which field the key changed.
 
 mod body;
 mod field;
+mod override_row;
 mod row;
 
 pub use body::FormBody;
 pub use field::{CheckGroup, Choice, Field, FieldKind, OneOf, ReadOnly, Toggle, Values};
+pub use override_row::{KEPT, OverrideRow, OverrideView, Standing, WILL_FOLLOW, WILL_KEEP};
 pub use row::{
-    CHOICE_SLOT, CUSTOM, Cols, EMPTY, LABEL_GAP, LABEL_MAX, LABEL_MIN, Tone, check_row, checkbox,
-    chips, choice_cells, choice_row, error_line, field_style, footer_lines, label, one_of_row,
-    option, path_cells, path_row, read_only_row, row, static_cells, static_row, text_cells,
-    text_row, toggle_row,
+    CHOICE_SLOT, CUSTOM, Cols, EMPTY, LABEL_GAP, LABEL_MAX, LABEL_MIN, SOURCE_GAP, Tone, check_row,
+    checkbox, chips, choice_cells, choice_row, detail_line, error_line, field_style, footer_lines,
+    label, one_of_row, option, paragraph_lines, path_cells, path_row, read_only_row, row,
+    source_cells, static_cells, static_row, text_cells, text_row, toggle_row,
 };
 
 use std::fmt;
@@ -159,10 +173,15 @@ type OnSubmit<M> = Arc<dyn Fn(&Values<'_>) -> Submit<M> + Send + Sync>;
 /// [`FORM_OPTION_KEYS`](crate::keys::FORM_OPTION_KEYS) when the form has
 /// option rows) and ending with its `Enter` verb and `Esc cancel`. Keys
 /// the table does not bind edit the focused field; on a text field the
-/// option keys (`←`, `→`, `Space`) edit too.
+/// option keys (`←`, `→`, `Space`) edit too. A form with override rows
+/// binds a reset key to [`FormKey::Inherit`] in its own table: that key
+/// puts the focused override row's inherited value back and does nothing
+/// on another field, and no other form or overlay gets it from here.
 pub struct Form<M> {
     title: String,
     keys: &'static [KeyRow<FormKey>],
+    intro: Option<String>,
+    details: usize,
     fields: Vec<Field>,
     focus: Option<usize>,
     error: Option<String>,
@@ -182,12 +201,35 @@ impl<M> Form<M> {
         Self {
             title: title.into(),
             keys,
+            intro: None,
+            details: 0,
             fields: Vec::new(),
             focus: None,
             error: None,
             edited: None,
             on_submit: Arc::new(on_submit),
         }
+    }
+
+    /// A paragraph above the fields that says what the form does or how
+    /// its fields behave, wrapped to the form's width, receding, and kept
+    /// in view while the rows scroll.
+    #[must_use]
+    pub fn intro(mut self, paragraph: impl Into<String>) -> Self {
+        self.intro = Some(paragraph.into());
+        self
+    }
+
+    /// Reserves `lines` lines under the rows for the focused field's
+    /// hints ([`Field::hints`]): what an override row stands on, what a
+    /// field's keys do. The band keeps its height whichever field has
+    /// focus, so the form does not grow or shrink as the focus moves; a
+    /// field with fewer lines leaves the rest blank, and one with more is
+    /// cut to the band.
+    #[must_use]
+    pub fn details(mut self, lines: usize) -> Self {
+        self.details = lines;
+        self
     }
 
     /// Adds `field` after the others. The focus starts on the first field
@@ -290,13 +332,21 @@ impl<M> Form<M> {
         ModalFrame::new(theme, FORM_SIZE).title(self.title.as_str())
     }
 
-    /// The body laid out `width` cells wide: a row per shown field, the
-    /// cursor on the focused one; a blank line; the error line; the
-    /// footer.
+    /// The body laid out `width` cells wide: the intro and a blank line,
+    /// fixed above the rows; a row per shown field, the cursor on the
+    /// focused one; a blank line; the detail lines and a blank line; the
+    /// error line; the footer.
     fn body(&self, width: usize, theme: &Theme) -> FormBody<'static> {
         let shown = self.shown();
         let focus = self.settled();
-        let cols = Cols::for_labels(width, shown.iter().map(|index| self.fields[*index].label()));
+        let source = shown
+            .iter()
+            .filter_map(|index| self.fields[*index].override_row())
+            .map(OverrideRow::column_width)
+            .max()
+            .unwrap_or(0);
+        let cols = Cols::for_labels(width, shown.iter().map(|index| self.fields[*index].label()))
+            .with_source(source);
         let mut cursor = 0;
         let rows = shown
             .iter()
@@ -309,8 +359,24 @@ impl<M> Form<M> {
                 self.fields[*index].line(cols, focused, theme)
             })
             .collect();
+        let top = self.intro.as_deref().map_or_else(Vec::new, |intro| {
+            let mut lines = paragraph_lines(intro, width, theme);
+            lines.push(Line::default());
+            lines
+        });
+        let mut notes = vec![Line::default()];
+        if self.details > 0 {
+            let hints = focus.map_or_else(Vec::new, |index| self.fields[index].hints());
+            notes.extend((0..self.details).map(|line| {
+                hints
+                    .get(line)
+                    .map_or_else(Line::default, |hint| detail_line(hint, width, theme))
+            }));
+            notes.push(Line::default());
+        }
         FormBody::new(rows, cursor)
-            .notes(vec![Line::default()])
+            .top(top)
+            .notes(notes)
             .error(
                 self.error
                     .as_deref()
@@ -424,9 +490,16 @@ impl<M> Form<M> {
                 }
             }
             Some(FormKey::Submit) => return self.submit(),
-            // No field takes an inherited value yet; the key is the
-            // form's, so it never reaches a field's text.
-            Some(FormKey::Inherit) => {}
+            // The reset key is the form's, bound only where the host's
+            // table binds it, so it never reaches a field's text; on a
+            // field that is not an override row it does nothing.
+            Some(FormKey::Inherit) => {
+                if let Some(index) = self.focus
+                    && self.fields[index].reset()
+                {
+                    self.changed(index);
+                }
+            }
             Some(option @ (FormKey::OptionPrev | FormKey::OptionNext | FormKey::Toggle)) => {
                 if let Some(index) = self.focus {
                     let field = &mut self.fields[index];
@@ -457,6 +530,8 @@ impl<M> Clone for Form<M> {
         Self {
             title: self.title.clone(),
             keys: self.keys,
+            intro: self.intro.clone(),
+            details: self.details,
             fields: self.fields.clone(),
             focus: self.focus,
             error: self.error.clone(),

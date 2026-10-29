@@ -5,6 +5,8 @@
 //! form has one look. A row is the cursor gutter, the label in the label
 //! column ([`Cols`]), the gap, and the value: a text field, a path field,
 //! a choice with its chips, a row of options, or a line that is only read.
+//! In a form with override rows, a text, path, or choice row ends in the
+//! source column ([`source_cells`]), blank on a row that is not one.
 
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
@@ -25,6 +27,8 @@ pub const LABEL_MIN: usize = 11;
 pub const LABEL_MAX: usize = 16;
 /// Cells between the label column and the value.
 pub const LABEL_GAP: usize = 2;
+/// Cells between a row's value and its source column.
+pub const SOURCE_GAP: usize = 1;
 /// What an empty text or path field shows.
 pub const EMPTY: &str = "-";
 /// What a choice shows after a typed value that is none of its options.
@@ -36,8 +40,9 @@ pub const CHOICE_SLOT: usize = 18;
 /// field's does, after the field's scroll-mark slot.
 const TEXT_INDENT: usize = 2;
 
-/// The widths a form's rows are laid out in: the frame's inner width and
-/// the label column.
+/// The widths a form's rows are laid out in: the frame's inner width, the
+/// label column, and the source column at the right edge that a form
+/// with override rows has.
 ///
 /// ```
 /// use tuikit::form::Cols;
@@ -46,6 +51,7 @@ const TEXT_INDENT: usize = 2;
 /// assert_eq!(cols.label, 11, "short labels take the narrowest column");
 /// assert_eq!(cols.lead(), 15, "the gutter, the label, and the gap");
 /// assert_eq!(cols.value(), 45);
+/// assert_eq!(cols.with_source(11).value(), 33, "the gap and the source column");
 /// ```
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Cols {
@@ -53,14 +59,19 @@ pub struct Cols {
     pub inner: usize,
     /// The width of the label column.
     pub label: usize,
+    /// The width of the source column after the value, where an override
+    /// row says where its value comes from; `0` for a form without one.
+    pub source: usize,
 }
 
 impl Cols {
-    /// Rows `inner` cells wide with the narrowest label column.
+    /// Rows `inner` cells wide with the narrowest label column and no
+    /// source column.
     pub fn new(inner: usize) -> Self {
         Self {
             inner,
             label: LABEL_MIN,
+            source: 0,
         }
     }
 
@@ -69,8 +80,8 @@ impl Cols {
     pub fn for_labels<'a>(inner: usize, labels: impl IntoIterator<Item = &'a str>) -> Self {
         let longest = labels.into_iter().map(text::width).max().unwrap_or(0);
         Self {
-            inner,
             label: longest.clamp(LABEL_MIN, LABEL_MAX),
+            ..Self::new(inner)
         }
     }
 
@@ -81,15 +92,37 @@ impl Cols {
         self
     }
 
+    /// The same rows with a source column `source` cells wide (none when
+    /// `0`).
+    #[must_use]
+    pub fn with_source(mut self, source: usize) -> Self {
+        self.source = source;
+        self
+    }
+
     /// The cells before a row's value: the cursor gutter, the label
     /// column, and the gap.
     pub fn lead(self) -> usize {
         selection::GUTTER_WIDTH + self.label + LABEL_GAP
     }
 
-    /// The cells a row's value gets: what the lead leaves, at least one.
+    /// The cells after a text, path, or choice row's value: the gap and
+    /// the source column, or nothing without one.
+    pub fn tail(self) -> usize {
+        if self.source == 0 {
+            0
+        } else {
+            SOURCE_GAP + self.source
+        }
+    }
+
+    /// The cells a text, path, or choice row's value gets: what the lead
+    /// and the tail leave, at least one.
     pub fn value(self) -> usize {
-        self.inner.saturating_sub(self.lead()).max(1)
+        self.inner
+            .saturating_sub(self.lead())
+            .saturating_sub(self.tail())
+            .max(1)
     }
 }
 
@@ -456,6 +489,50 @@ pub fn error_line(reason: &str, width: usize, theme: &Theme) -> Line<'static> {
         text::truncate_end(reason, width),
         Style::default().fg(theme.error),
     ))
+}
+
+/// A row's source column: the gap, then `word` right-aligned in `width`
+/// cells, in `warning` while a change is `pending` and receding
+/// (`muted`) otherwise. A row with no word to show gets a blank column,
+/// so every row of the form ends in one place.
+pub fn source_cells(word: &str, width: usize, pending: bool, theme: &Theme) -> Vec<Span<'static>> {
+    let style = if pending {
+        Style::default().fg(theme.warning)
+    } else {
+        Style::default().add_modifier(theme.muted)
+    };
+    vec![
+        Span::raw(" ".repeat(SOURCE_GAP)),
+        Span::styled(
+            text::pad_start(&text::truncate_end(word, width), width),
+            style,
+        ),
+    ]
+}
+
+/// A line that explains the form or its focused field, receding
+/// (`muted`): indented by the cursor gutter, so it starts under the
+/// labels, and cut with the ellipsis mark to `width` cells.
+pub fn detail_line(detail: &str, width: usize, theme: &Theme) -> Line<'static> {
+    let room = width.saturating_sub(selection::GUTTER_WIDTH);
+    Line::styled(
+        format!(
+            "{}{}",
+            " ".repeat(selection::GUTTER_WIDTH),
+            text::truncate_end(detail, room)
+        ),
+        Style::default().add_modifier(theme.muted),
+    )
+}
+
+/// A paragraph that explains the form, wrapped at word boundaries to
+/// `width` cells and drawn as [`detail_line`]s.
+pub fn paragraph_lines(paragraph: &str, width: usize, theme: &Theme) -> Vec<Line<'static>> {
+    let room = width.saturating_sub(selection::GUTTER_WIDTH).max(1);
+    text::wrap(paragraph, room)
+        .iter()
+        .map(|line| detail_line(line.trim_end(), width, theme))
+        .collect()
 }
 
 #[cfg(test)]
